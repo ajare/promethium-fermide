@@ -984,8 +984,9 @@ loop-specific coolant inventory (kg) with a declared hazard class
 (`normal` or `hazardous`) and is coupled heat-only to exactly one
 thermal reservoir: the loop's coolant never crosses into the reservoir,
 never touches a Resource store, and is never potable or nutrient water.
-Normal and hazardous coolant are segregated classes — no process pools
-them or moves coolant between loops, so segregation is structural.
+Coolant inventories are independent of hazard class (#752): each loop
+owns its finite inventory by construction. Only heat crosses its exchanger;
+no class-matching or segregation rule is needed.
 Each loop declares its coolant capacity and starting charge, coolant
 specific heat, starting temperature, a freeze-protection setpoint, a
 pump power draw at full circulation with a rated flow, a
@@ -1566,11 +1567,11 @@ constituents are the dissolved load. Live concentration uses the actual
 constituent ledger, including dilution, never the destination's declaration.
 Plain inflow into a compound water store adds water only; compound-to-plain
 transfers remain refused. Condensate collectors still produce pure water.
-The treatment consumable's draw books both unit and constituent loss. Water
-stores shared between a normal-class and a hazardous-class process are
-refused at configuration — segregation is enforced up front rather than
-policed at runtime — and a collector may only serve a compartment of its
-own class, since condensate inherits the hazard of the air it came from.
+The treatment consumable's draw books both unit and constituent loss.
+Water stores shared between processes of differing class are legal (#751),
+and a collector may serve a compartment of any class: condensate is just
+water, whatever air it condensed from, and the heat-only exchanger
+through which no coolant ever crossed is the containment (#752).
 
 Within the tick, treatments run after the chillers and collectors run
 after the treatments, both before the coolant loop's second pass, so the
@@ -1593,13 +1594,14 @@ power demanded versus supplied, the quality hold state and the cumulative
 recovery, retention and energy ledgers.
 
 Water recovery acceptance coverage: refused configurations (unknown
-compartment, loop or store; a hazard class that does not match the
-compartment; an undeclared hazard class; a humidity target outside [0, 1];
-a negative rate; a service class that mismatches the loop's host
-reservoir; an incompatible compound outlet; a store shared between normal and
-hazardous processes; a recovery ratio outside (0, 1]; a treatment sharing
-one store between two roles; over-budget contract counts) with no World
-mutation; nominal recovery where the collector runs at its configured
+compartment, loop or store; an undeclared hazard class; a humidity target
+outside [0, 1]; a negative rate; a service class that mismatches the loop's
+host reservoir; an incompatible compound outlet; a recovery ratio outside
+(0, 1]; a treatment sharing one store between two roles; over-budget
+contract counts) with no World
+mutation; cross-class collection where a collector of any class serves a
+compartment of any class, runs at its configured rate and closes every
+ledger (#752); nominal recovery where the collector runs at its configured
 rate, the routed latent heat matches the condensate exactly, the
 compartment's vapour falls by precisely what was collected while booking no
 latent heat of its own, the loop ledger closes with the collector term, and

@@ -776,37 +776,44 @@ namespace
 			require(approx(world.getStationSystemsSnapshot().thermal.totalFreezeHeatingKW, 0.0),
 				"freeze heating total should be zero after reaching the setpoint");
 		}
-		// Isolated inventories: normal and hazardous coolant never pool.
-		// A hazardous loop that lost its charge stays dry and inert while
-		// the normal loop on the same reservoir circulates; neither
-		// loop's inventory moves toward the other, and the reservoir
-		// sees only the circulating loop's exchange.
+		// Isolated inventories (#752): loops never pool because each loop
+		// owns its own coolant by construction - no class rule is needed.
+		// A dry loop stays dry and inert while the charged loop on the
+		// same reservoir circulates; neither loop's inventory moves
+		// toward the other, and the reservoir sees only the circulating
+		// loop's exchange through the heat-only exchanger. Exercise same-
+		// and different-class loops: neither arrangement pools inventories.
+		for (auto const* chargedClass : core::StationCoolantHazardClasses)
+		for (auto const* dryClass : core::StationCoolantHazardClasses)
 		{
 			core::World world("CoolantIsolated", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
 			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 10.0;
 			auto const [ok, diagnostic] = coolantConfigure(world,
 				{ reservoir("bus", 1000.0, 20.0) },
-				{ loop("normal-loop", "normal", "bus", 100, 100, 4, 20, 5, 1.0, 2.0, 5.0, 0.0),
-				  loop("haz-loop", "hazardous", "bus", 100, 0, 4, 20, 5, 1.0, 2.0, 5.0, 0.0) },
+				{ loop("charged-loop", chargedClass, "bus", 100, 100, 4, 20, 5, 1.0, 2.0, 5.0, 0.0),
+				  loop("dry-loop", dryClass, "bus", 100, 0, 4, 20, 5, 1.0, 2.0, 5.0, 0.0) },
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
 			require(world.advanceTicks(600), "isolated-inventory run failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
-			require(snapshot.coolantLoops[0].hazardClass == "normal"
-				&& snapshot.coolantLoops[1].hazardClass == "hazardous",
+			require(snapshot.coolantLoops[0].hazardClass == chargedClass
+				&& snapshot.coolantLoops[1].hazardClass == dryClass,
 				"hazard class not reported");
 			require(approx(snapshot.coolantLoops[0].coolantKg, 100.0)
 				&& snapshot.coolantLoops[0].flowKgPerS > 0.0
 				&& snapshot.coolantLoops[0].status == core::StationTransferStatus::Full,
-				"the charged normal loop did not keep circulating");
+				"the charged loop did not keep circulating");
 			require(snapshot.coolantLoops[1].coolantKg == 0.0
 				&& snapshot.coolantLoops[1].flowKgPerS == 0.0
 				&& snapshot.coolantLoops[1].disabled,
-				"the dry hazardous loop gained coolant or flow");
-			// The reservoir's loop term is only the normal loop's exchange:
-			// the hazardous loop contributed exactly nothing.
+				"the dry loop gained coolant or flow");
+			require(std::abs(snapshot.coolantLoops[0].residualKJ) < 1e-6
+				&& std::abs(snapshot.coolantLoops[1].residualKJ) < 1e-6,
+				"isolated coolant loop energy ledgers did not close");
+			// The reservoir's loop term is only the charged loop's exchange:
+			// the dry loop contributed exactly nothing.
 			require(std::abs(snapshot.thermal.reservoirs[0].loopEnergyKJ
 				+ snapshot.coolantLoops[0].exchangedEnergyKJ) < 1e-6,
 				"reservoir loop heat is not the negation of the circulating loop's exchange");

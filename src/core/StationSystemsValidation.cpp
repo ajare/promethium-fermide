@@ -324,10 +324,9 @@ using namespace station_detail;
 				{ return atmosphere.id == collector.atmosphereId; });
 			if (compartment == settings.atmospheres.end())
 				return missing(where + " condenses from unknown atmosphere compartment '" + collector.atmosphereId + "'");
-			if (compartment->hazardClass != collector.hazardClass)
-				return refuse(where + " hazard class '" + collector.hazardClass + "' does not match compartment '"
-					+ compartment->id + "' hazard class '" + compartment->hazardClass
-					+ "'; condensate inherits the hazard of the air it is condensed from");
+			// #752: no class match is required. Condensate is just water,
+			// whatever air it condensed from, so a collector may serve a
+			// compartment of any class.
 		}
 
 		if (!allowIncomplete || !collector.coolingLoopId.empty())
@@ -1678,10 +1677,12 @@ using namespace station_detail;
 		// Water recovery contracts (#402). A collector condenses vapour out
 		// of one compartment onto a coolant-loop cold surface; a treatment
 		// turns raw water into treated water plus retained concentrate. A
-		// collector may only serve a compartment of its own class, since
-		// condensate inherits the hazard of the air it came from; the
-		// stores it and the treatment touch are no longer class-bound (#751),
-		// so a process may be wired to any store whatever class it carries.
+		// collector may serve a compartment of any class (#752): condensate
+		// is just water, whatever air it condensed from, and the heat-only
+		// exchanger through which no coolant ever crossed is the containment.
+		// The stores the collector and the treatment touch are no longer
+		// class-bound (#751), so a process may be wired to any store
+		// whatever class it carries.
 		// Treatment streams may be compound (#740): dry load is
 		// retained in concentrate, while treated output is pure water. Other
 		// water processes retain their existing plain-store contracts.

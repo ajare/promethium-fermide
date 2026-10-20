@@ -1272,10 +1272,12 @@ namespace
 				require(std::abs(balance.residual) <= 1e-6,
 					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
 		}
-		// Heat-only interfaces: a hazardous coolant loop exchanges heat
-		// with its reservoir and its freeze heater runs, but the loop's
-		// coolant inventory never changes and no Resource store is ever
-		// touched - heat rides the interface, mass never does.
+		// Heat-only interfaces (#752): the heat-only exchanger, through
+		// which no coolant ever crossed, is the containment. A loop
+		// exchanges heat with its reservoir and its freeze heater runs,
+		// but the loop's coolant inventory never changes and no Resource
+		// store is ever touched - heat rides the interface, mass never
+		// does.
 		{
 			core::World world("HeatOnly", 2, 2);
 			world.pauseSimulation(); world.finishBuild();

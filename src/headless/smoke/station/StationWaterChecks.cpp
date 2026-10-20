@@ -922,7 +922,7 @@ namespace
 			std::vector<core::CoolantLoopSettings> loops,
 			std::vector<core::WaterCollectorSettings> collectors,
 			std::vector<core::WaterTreatmentSettings> treatments,
-			double solarKW)
+			double solarKW, std::string const& atmosphereClass = "normal")
 		{
 			std::string diagnostic;
 			core::StationSystemsSettings settings;
@@ -930,6 +930,7 @@ namespace
 			settings.observationIntervalSeconds = 1.0f;
 			settings.stores = std::move(stores);
 			settings.atmospheres = { compartment() };
+			settings.atmospheres[0].hazardClass = atmosphereClass;
 			settings.thermalReservoirs = { reservoir("sink", "moderate") };
 			settings.coolantLoops = std::move(loops);
 			settings.waterCollectors = std::move(collectors);
@@ -966,10 +967,12 @@ namespace
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("unknown coolant loop") != std::string::npos,
 				"a collector cold surface on an unknown loop was accepted");
+			// #752: a hazardous-class collector on a normal compartment is
+			// accepted - condensate is just water, whatever air it
+			// condensed from, and a collector may serve any compartment.
 			settings.waterCollectors = { collector("cond", "hazardous", 0.01, 0.5) };
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("condensate inherits the hazard") != std::string::npos,
-				"a hazardous collector on a normal compartment was accepted");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				("a collector serving across the class boundary was refused: " + diagnostic).c_str());
 			settings.waterCollectors = { collector("cond", "plasma", 0.01, 0.5) };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("unknown water hazard class") != std::string::npos,
@@ -1109,6 +1112,50 @@ namespace
 			require(snap.balances.size() == 1, "per-unit boundary ledger incomplete");
 			require(approx(snap.balances[0].collected, expectedKg),
 				"the boundary ledger is missing the collected-water inflow");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
+		}
+		// #752: all collector/compartment/loop class combinations have the
+		// same physical result. Configuration also constructs the bundled
+		// Lua mirror, so its constructor must accept these combinations.
+		for (auto const* atmosphereClass : core::StationAtmosphereHazardClasses)
+		for (auto const* collectorClass : core::StationWaterHazardClasses)
+		for (auto const* loopClass : core::StationCoolantHazardClasses)
+		{
+			core::World world("WaterCrossClass", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto chilled = coldLoop("chilled", 100.0, 5.0);
+			chilled.hazardClass = loopClass;
+			auto const [ok, diagnostic] = waterConfigure(world, waterStores(), { chilled },
+				{ collector("cond", collectorClass, 0.01, 0.5) },
+				{ treatment("plant", "normal") }, 10.0, atmosphereClass);
+			require(ok, ("a cross-class collector configuration was refused: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "cross-class collection run failed");
+			auto const elapsed = 60.0 * dt;
+			auto const expectedKg = 0.01 * elapsed;
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.waterCollectors[0].status == core::StationTransferStatus::Full
+				&& approx(snap.waterCollectors[0].collectedKg, expectedKg),
+				"the cross-class collector did not run at its configured rate");
+			require(approx(findStore(snap, "raw").currentQualified,
+				50.0 - 0.005 * elapsed + expectedKg),
+				"the cross-class condensate did not land in the destination store");
+			auto const latentKJ = expectedKg * 2257.0;
+			require(approx(snap.waterCollectors[0].latentHeatEnergyKJ, latentKJ)
+				&& approx(snap.coolantLoops[0].collectorHeatEnergyKJ, latentKJ),
+				"cross-class collection did not route its latent heat exactly once");
+			require(approx(snap.atmospheres[0].waterVapourKg, 2.0 - expectedKg)
+				&& approx(snap.atmospheres[0].collectedKg, expectedKg)
+				&& snap.atmospheres[0].latentHeatEnergyKJ == 0.0,
+				"cross-class collection did not close the compartment water and heat ledgers");
+			require(approx(snap.coolantLoops[0].coolantKg, 100.0),
+				"cross-class collection moved coolant through the heat-only interface");
+			require(std::abs(snap.coolantLoops[0].residualKJ) < 1e-6
+				&& std::abs(snap.thermal.reservoirs[0].residualKJ) < 1e-6
+				&& std::abs(snap.waterTreatments[0].residualKg) < 1e-6,
+				"a water or thermal ledger did not close on cross-class condensate");
 			for (auto const& balance : snap.balances)
 				require(std::abs(balance.residual) <= 1e-6,
 					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());

@@ -591,19 +591,20 @@ namespace core
 	};
 	inline constexpr size_t MaxStationRadiators{8};
 
-	// Declared coolant hazard classes (#396). Normal and hazardous coolant
-	// are physically segregated services: each loop owns its own finite
-	// inventory and no process in this design pools the two classes or
-	// moves coolant between loops. Coolant is a thermal service fluid —
-	// it is never potable water or nutrient solution, and a loop's
-	// inventory never touches a Resource store: the only exchange a loop
-	// has with station thermal state is heat through its exchanger.
+	// Declared coolant hazard classes (#396). The class no longer
+	// segregates loops from one another (#752): loops never pool coolant
+	// because each loop owns its own finite inventory by construction,
+	// and the only crossing with station thermal state is heat through
+	// the circulation-gated heat-only exchanger - through which no
+	// coolant ever crossed. Coolant is a thermal service fluid - it is
+	// never potable water or nutrient solution, and a loop's inventory
+	// never touches a Resource store.
 	inline constexpr std::array<char const*, 2> StationCoolantHazardClasses{
 		"normal", "hazardous"};
 	// A coolant loop (#396): a finite, loop-specific closed coolant
 	// circuit pumped through one thermal reservoir. The loop holds its own
-	// coolant inventory (kg) — finite, loop-specific and segregated by
-	// hazard class — and exchanges heat only with its coupled reservoir
+	// coolant inventory (kg) — finite and loop-specific regardless of
+	// hazard class (#752) — and exchanges heat only with its coupled reservoir
 	// through a circulation-gated exchanger: no coolant crosses into the
 	// reservoir, a Resource store, or any other loop. The pump circulates
 	// the coolant it actually holds; the freeze-protection heater is a
@@ -984,12 +985,11 @@ namespace core
 		return actual;
 	}
 
-	// Declared water hazard classes (#402). Normal and hazardous water are
-	// segregated services: a collector may only serve a compartment of its
-	// own class because condensate inherits the hazard of the air it was
-	// condensed from, and no store may be touched by both classes of water
-	// process. Segregation is enforced at configuration, not policed at
-	// runtime.
+	// Declared water hazard classes (#402). The class no longer
+	// segregates water pathways: a collector may serve a compartment of
+	// any class because condensate is just water, whatever air it was
+	// condensed from (#752), and any water process may touch any store
+	// (#751).
 	inline constexpr std::array<char const*, 2> StationWaterHazardClasses{
 		"normal", "hazardous"};
 	// A water collector (#402): condenses water vapour out of one
@@ -1003,7 +1003,7 @@ namespace core
 	struct WaterCollectorSettings
 	{
 		std::string id;
-		std::string hazardClass;             // normal or hazardous; must match the compartment
+		std::string hazardClass;             // normal or hazardous; condensate carries no class (#752)
 		std::string atmosphereId;            // compartment whose vapour is condensed
 		std::string coolingLoopId;           // loop serving the cold surface
 		std::string thermalClass;            // cold service class of the interface

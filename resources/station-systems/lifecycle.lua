@@ -1019,10 +1019,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         host.radiators[#host.radiators + 1] = object.radiators[index]
     end
     -- Coolant loops (#396): a finite, loop-specific closed coolant circuit
-    -- pumped through one thermal reservoir. Normal and hazardous coolant
-    -- are segregated classes and no process pools them: each loop owns its
-    -- own inventory and the only crossing with station thermal state is
-    -- heat through the circulation-gated exchanger. Coolant is not
+    -- pumped through one thermal reservoir. Each loop owns its inventory
+    -- independently of class (#752); no process pools coolant. The only
+    -- crossing with station thermal state is heat through the
+    -- circulation-gated exchanger. Coolant is not
     -- potable or nutrient water and never touches a Resource store. Zero
     -- starting coolant disables the loop: no flow, no pump draw, no
     -- heat — circulation is never invented from an empty inventory.
@@ -2223,7 +2223,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- nothing else, and every treated kilogram is either qualified or
     -- held. A descriptor that would create water is refused at
     -- construction like any other bad descriptor; the hazard class of
-    -- the stores a water process touches no longer binds it (#751).
+    -- the stores a water process touches no longer binds it (#751), and
+    -- a collector may serve a compartment of any class because
+    -- condensate carries no class of its own (#752).
     assert(#waterCollectors <= 8, 'station water collectors are limited to 8 entries')
     assert(#waterTreatments <= 8, 'station water treatments are limited to 8 entries')
     local function declareWaterStore(storeId, role, allowCompound)
@@ -2253,8 +2255,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             'water collector target relative humidity must be finite and from 0 to 1')
         local compartment = atmosphere_by_id[collector.atmosphere]
         assert(compartment ~= nil, 'water collector atmosphere compartment is unknown')
-        assert(compartment.hazardClass == collector.hazardClass,
-            'water collector hazard class must match the compartment it condenses from: condensate inherits the hazard of the air')
+        -- #752: no class match is required. Condensate is just water,
+        -- whatever air it condensed from, so a collector may serve a
+        -- compartment of any class.
         local loop = coolant_loop_by_id[collector.coolingLoop]
         assert(loop ~= nil, 'water collector cooling loop is unknown')
         assert(loop.reservoir.thermalClass == collector.thermalClass,

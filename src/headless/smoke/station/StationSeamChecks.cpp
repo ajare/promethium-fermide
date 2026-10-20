@@ -298,7 +298,13 @@ namespace
 		refused(compartment, oxygenCompartment, "does not match compartment");
 		auto incomplete = base();
 		incomplete.atmospheres[0].hazardClass = "hazardous";
-		refused(incomplete, legal[0], "does not match compartment");
+		// #752: condensate has no source class, including while wiring
+		// an incomplete draft in either drag direction.
+		allowed(incomplete, legal[0]);
+		allowed(incomplete, core::CandidateLink{legal[0].to, legal[0].from});
+		require(core::applyStationLink(incomplete, legal[0])
+			&& incomplete.waterCollectors[0].atmosphereId == "air",
+			"cross-class collector link did not write the atmosphere reference");
 		refused(incomplete, legal[11], "does not match compartment");
 		refused(base(), core::CandidateLink{pin("Atmosphere", "missing", "Gas out"), legal[0].to}, "unknown atmosphere compartment");
 		refused(base(), core::CandidateLink{pin("Coolant loop", "missing", "Cold surfaces"), legal[1].to}, "unknown coolant loop");
