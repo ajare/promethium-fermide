@@ -1012,9 +1012,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         host.radiators[#host.radiators + 1] = object.radiators[index]
     end
     -- Coolant loops (#396): a finite, loop-specific closed coolant circuit
-    -- pumped through one thermal reservoir. Each loop owns its inventory
-    -- independently of class (#752); no process pools coolant. The only
-    -- crossing with station thermal state is heat through the
+    -- pumped through one thermal reservoir. A loop carries no class
+    -- (#757): it owns its inventory, no process pools coolant, and the
+    -- only crossing with station thermal state is heat through the
     -- circulation-gated exchanger. Coolant is not
     -- potable or nutrient water and never touches a Resource store. Zero
     -- starting coolant disables the loop: no flow, no pump draw, no
@@ -1023,8 +1023,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local loop = coolantLoops[index]
         assert(type(loop) == 'table', 'coolant loop descriptor must be a table')
         assert(type(loop.id) == 'string' and #loop.id > 0, 'coolant loop needs an id')
-        assert(loop.hazardClass == 'normal' or loop.hazardClass == 'hazardous',
-            'coolant loop needs a declared hazard class (normal or hazardous)')
         local host = reservoir_by_id[loop.reservoir]
         assert(host ~= nil, 'coolant loop host thermal reservoir is unknown')
         assert(type(loop.coolantCapacityKg) == 'number'
@@ -1064,7 +1062,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             'heater capacity must be finite and non-negative')
         object.coolant_loops[index] = {
             id = loop.id,
-            hazardClass = loop.hazardClass,
             reservoir = host,
             capacity = loop.coolantCapacityKg,
             coolant = loop.startingCoolantKg,
@@ -1077,12 +1074,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             conductance = loop.exchangerConductanceKWPerK,
             heaterKW = loop.heaterCapacityKW,
             criticalService = loop.criticalService == true,
-            -- #416/#754: protected circulation is drawn from the
+            -- #416/#754/#757: protected circulation is drawn from the
             -- actual pool ahead of every discretionary external load,
             -- and it comes only from the author's `criticalService`
-            -- declaration. Nothing is inferred from the loop's hazard
-            -- class: a hazardous loop is protected exactly when its
-            -- author says so.
+            -- declaration. Nothing is inferred: a loop carries no class
+            -- at all, so protection is authored or absent.
             protectedService = loop.criticalService == true,
             temperature = loop.startingTemperatureC,
             pumpWorkKJ = 0,
@@ -5251,9 +5247,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- (#561).
         local availableGeneration = generation + startupFromGeneration
         -- #416 mirror: protected critical service admission. Authored
-        -- critical coolant-loop circulation (#754: the loop's
+        -- critical coolant-loop circulation (#754/#757: the loop's
         -- `criticalService` declaration is the only thing that protects
-        -- it - the hazard class infers nothing), biological
+        -- it - a loop carries no class to infer anything from), biological
         -- essential circulation (crop/algae circulation pumps) and
         -- authored critical-service chiller work are Critical station
         -- services: their electrical demand is drawn from the actual

@@ -675,7 +675,6 @@ namespace
 		// Hazardous treatment and non-kg consumables retain explicit identity and
 		// canonical rates. Oxygen may also go directly to atmosphere, not a store.
 		s = smoke::station::waterGasObservationFixture();
-		s.coolantLoops[0].hazardClass = "hazardous";
 		s.waterCollectors[0].hazardClass = "hazardous"; s.waterTreatments[0].hazardClass = "hazardous";
 		s.electrolyzers[0].hazardClass = "hazardous"; s.co2Captures[0].hazardClass = "hazardous";
 
@@ -799,7 +798,7 @@ namespace
 			r.heatCapacityKJPerK = 10000; r.startingTemperatureC = 20; r.minTemperatureC = -50; r.maxTemperatureC = 100;
 			r.absorbedHeatKW = 5; s.thermalReservoirs.push_back(r);
 			auto sink = r; sink.id += "-sink"; s.thermalReservoirs.push_back(sink);
-			core::CoolantLoopSettings l; l.id = cls; l.reservoirId = cls; l.hazardClass = "normal";
+			core::CoolantLoopSettings l; l.id = cls; l.reservoirId = cls;
 			l.coolantCapacityKg = 100; l.startingCoolantKg = 100; l.specificHeatKJPerKgK = 4;
 			l.startingTemperatureC = 20; l.freezeProtectionSetpointC = 30; l.heaterCapacityKW = 1;
 			l.pumpPowerKW = 1; l.ratedFlowKgPerS = 2; l.exchangerConductanceKWPerK = 1;
@@ -1138,7 +1137,7 @@ namespace
 		sink.startingTemperatureC = 10; sink.minTemperatureC = -50; sink.maxTemperatureC = 200;
 		s.thermalReservoirs = {sink};
 		core::CoolantLoopSettings loop;
-		loop.id = "shared-name"; loop.hazardClass = "normal"; loop.reservoirId = "sink";
+		loop.id = "shared-name"; loop.reservoirId = "sink";
 		loop.coolantCapacityKg = 100; loop.startingCoolantKg = 100; loop.specificHeatKJPerKgK = 4;
 		loop.startingTemperatureC = 5; loop.freezeProtectionSetpointC = 0;
 		loop.pumpPowerKW = 0.1; loop.ratedFlowKgPerS = 10;

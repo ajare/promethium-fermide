@@ -1657,7 +1657,6 @@ namespace
 		bus.maxTemperatureC = 100.0;
 		core::CoolantLoopSettings normalLoop;
 		normalLoop.id = "itcs";
-		normalLoop.hazardClass = "normal";
 		normalLoop.reservoirId = "bus";
 		normalLoop.coolantCapacityKg = 100.0;
 		normalLoop.startingCoolantKg = 100.0;
@@ -1670,7 +1669,6 @@ namespace
 		normalLoop.heaterCapacityKW = 2.0;
 		core::CoolantLoopSettings hazLoop;
 		hazLoop.id = "htcs";
-		hazLoop.hazardClass = "hazardous";
 		hazLoop.reservoirId = "bus";
 		hazLoop.coolantCapacityKg = 50.0;
 		hazLoop.startingCoolantKg = 25.0;
@@ -1701,8 +1699,6 @@ namespace
 		require(original.advanceTicks(3600), "Coolant original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.coolantLoops.size() == 2
-			&& expected.coolantLoops[0].hazardClass == "normal"
-			&& expected.coolantLoops[1].hazardClass == "hazardous"
 			&& expected.coolantLoops[0].flowKgPerS > 0.0
 			&& std::abs(expected.coolantLoops[0].residualKJ) < 1e-5
 			&& std::abs(expected.coolantLoops[1].residualKJ) < 1e-5
@@ -1714,7 +1710,7 @@ namespace
 			original.saveTo(path.string());
 			auto const document = readFile(path);
 			require(document.find("coolantLoops") != std::string::npos
-				&& document.find("hazardClass") != std::string::npos
+				&& document.find("hazardClass") == std::string::npos
 				&& document.find("reservoirId") != std::string::npos
 				&& document.find("coolantCapacityKg") != std::string::npos
 				&& document.find("startingCoolantKg") != std::string::npos
@@ -1768,15 +1764,27 @@ namespace
 			catch (std::exception const&) { refused = true; }
 			require(refused, "a zero coolant capacity was accepted from a file");
 		}
+		// The retired coolant-loop class field is refused with a named
+		// conversion diagnostic at any schema version (#757).
+		for (auto const* version : {"102", "90"})
 		{
-			auto malformed = withField;
-			replaceAll(malformed, "hazardClass: normal", "hazardClass: toxic");
-			auto const malformedPath = directory / "malformed-hazard.world.yaml";
-			writeFile(malformedPath, malformed);
+			auto retired = withField;
+			replaceAll(retired, "version: 102", std::string("version: ") + version);
+			auto const at = retired.find("reservoirId: bus");
+			require(at != std::string::npos, "coolant loop anchor missing from the document");
+			auto const lineStart = retired.rfind('\n', at) + 1;
+			retired.insert(lineStart, retired.substr(lineStart, at - lineStart)
+				+ "hazardClass: normal\n");
+			auto const retiredPath = directory / ("retired-coolant-class-" + std::string(version) + ".world.yaml");
+			writeFile(retiredPath, retired);
 			bool refused = false;
-			try { (void)core::loadWorldDocument(malformedPath); }
-			catch (std::exception const&) { refused = true; }
-			require(refused, "an unknown coolant hazard class was accepted from a file");
+			try { (void)core::loadWorldDocument(retiredPath); }
+			catch (std::exception const& error) {
+				auto const message = std::string(error.what());
+				refused = message.find("hazardClass") != std::string::npos
+					&& message.find("conversion required") != std::string::npos;
+			}
+			require(refused, std::string("the retired coolant-loop hazardClass was accepted at version ") + version);
 		}
 		{
 			auto malformed = withField;
@@ -1825,7 +1833,6 @@ namespace
 		sink.maxTemperatureC = 200.0;
 		core::CoolantLoopSettings chilled;
 		chilled.id = "chilled";
-		chilled.hazardClass = "normal";
 		chilled.reservoirId = "cold";
 		chilled.coolantCapacityKg = 100.0;
 		chilled.startingCoolantKg = 100.0;
@@ -2848,7 +2855,6 @@ void waterFiles(smoke::Context const& context)
 	sink.maxTemperatureC = 200.0;
 	core::CoolantLoopSettings loop;
 	loop.id = "chilled";
-	loop.hazardClass = "normal";
 	loop.reservoirId = "sink";
 	loop.coolantCapacityKg = 100.0;
 	loop.startingCoolantKg = 100.0;

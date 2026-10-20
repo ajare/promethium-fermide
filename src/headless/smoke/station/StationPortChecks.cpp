@@ -899,7 +899,7 @@ namespace
 		auto reservoir = [](char const* id) { core::ThermalReservoirSettings r; r.id = id;
 			r.thermalClass = "moderate"; r.heatCapacityKJPerK = 100.0; return r; };
 		auto loop = [](char const* id, char const* host) { core::CoolantLoopSettings l; l.id = id;
-			l.reservoirId = host; l.hazardClass = "normal"; l.coolantCapacityKg = 100.0;
+			l.reservoirId = host; l.coolantCapacityKg = 100.0;
 			l.startingCoolantKg = 100.0; l.specificHeatKJPerKgK = 4.0; l.ratedFlowKgPerS = 1.0; return l; };
 		auto pin = [](char const* type, char const* id, char const* port)
 			{ return core::StationPinRef{type, id, port}; };

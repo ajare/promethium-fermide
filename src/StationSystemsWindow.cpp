@@ -885,7 +885,7 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	// the Flow inspector renders the exact same fields against the same
 	// draft; the form keeps only the section heading.
 	station_editor::renderRadiatorList(mDraft);
-	ImGui::SeparatorText("Draft coolant loops (kg coolant; finite loop-specific inventory, normal/hazardous segregated, heat-only reservoir coupling; zero starting coolant disables the loop)");
+	ImGui::SeparatorText("Draft coolant loops (kg coolant; finite loop-specific classless inventory, heat-only reservoir coupling; zero starting coolant disables the loop)");
 	for (size_t index = 0; index < mDraft.coolantLoops.size(); )
 	{
 		auto& loop = mDraft.coolantLoops[index];
@@ -900,7 +900,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	if (mDraft.coolantLoops.size() < core::MaxStationCoolantLoops && ImGui::Button("Add coolant loop"))
 	{
 		core::CoolantLoopSettings loop;
-		loop.hazardClass = "normal";
 		loop.coolantCapacityKg = 100.0;
 		loop.startingCoolantKg = 100.0;
 		loop.specificHeatKJPerKgK = 4.0;
@@ -1645,7 +1644,7 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		snapshot.power.protectedUnmetKW,
 		snapshot.power.protectedUnmet ? "UNMET CRITICAL MINIMA" : "ok");
 	if (snapshot.power.protectedServices.empty())
-		ImGui::TextDisabled("No protected service demand this tick (no hazardous/critical loops, biology or critical chillers operating).");
+		ImGui::TextDisabled("No protected service demand this tick (no critical loops, biology or critical chillers operating).");
 	for (auto const& service : snapshot.power.protectedServices)
 	{
 		ImGui::Text("%s '%s': protected demand %.3f kW, supplied %.3f kW, unmet %.3f kW%s%s",
@@ -1821,8 +1820,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		case core::StationTransferStatus::Rejected: status = "service refused"; break;
 		case core::StationTransferStatus::Idle: break;
 		}
-		ImGui::Text("%s [%s] -> %s: %s | coolant %.3f of %.3f kg (%.0f%% full) | flow %.3f of %.3f kg/s (circulation %.1f%%) | pump %.3f of %.3f kW | heater %.3f of %.3f kW",
-			loop.id.c_str(), loop.hazardClass.c_str(), loop.reservoirId.c_str(), status,
+		ImGui::Text("%s -> %s: %s | coolant %.3f of %.3f kg (%.0f%% full) | flow %.3f of %.3f kg/s (circulation %.1f%%) | pump %.3f of %.3f kW | heater %.3f of %.3f kW",
+			loop.id.c_str(), loop.reservoirId.c_str(), status,
 			loop.coolantKg, loop.coolantCapacityKg, loop.fillFraction * 100.0,
 			loop.flowKgPerS, loop.ratedFlowKgPerS, loop.circulationFraction * 100.0,
 			loop.pumpSuppliedKW, loop.pumpDemandKW,

@@ -738,7 +738,6 @@ void protectedServices(smoke::Context const&)
 	{
 		core::CoolantLoopSettings settings;
 		settings.id = std::move(id);
-		settings.hazardClass = "hazardous";
 		settings.reservoirId = "sink";
 		settings.coolantCapacityKg = 100.0;
 		settings.startingCoolantKg = 100.0;
@@ -866,13 +865,10 @@ void protectedServices(smoke::Context const&)
 			"the discretionary load took power ahead of the protected circulation draw");
 	}
 
-	// Scenario 2b: protection is authored, not inferred (#754). A
-	// hazardous loop that its author did NOT declare critical sheds like
-	// any other discretionary load under a brownout, while an authored-
-	// critical loop keeps circulating. The unprotected hazardous loop is
-	// declared FIRST so the shed can only come from the missing
-	// `criticalService` declaration, never from declaration order: the
-	// hazard class alone buys the pump nothing.
+	// Scenario 2b: protection is authored, not inferred (#754/#757).
+	// A noncritical loop sheds under a brownout while an authored-critical
+	// loop keeps circulating. The unprotected loop is declared FIRST so
+	// protection cannot come from declaration order.
 	{
 		core::World world("ProtNotInferred", 2, 2);
 		world.pauseSimulation();
@@ -889,28 +885,25 @@ void protectedServices(smoke::Context const&)
 		world.resumeSimulation();
 		runOrDiagnose(world, 10, "authored-not-inferred brownout");
 		auto const& snap = world.getStationSystemsSnapshot();
-		require(snap.coolantLoops[0].hazardClass == "hazardous"
-			&& snap.coolantLoops[1].hazardClass == "hazardous",
-			"both rigs declare hazardous loops: the shed must not come from the class");
 		require(closeTo(snap.coolantLoops[1].pumpSuppliedKW, 1.0)
 			&& closeTo(snap.coolantLoops[1].circulationFraction, 1.0),
 			"the authored-critical loop did not keep circulating through the brownout");
 		require(closeTo(snap.coolantLoops[0].pumpSuppliedKW, 0.0)
 			&& closeTo(snap.coolantLoops[0].circulationFraction, 0.0)
 			&& closeTo(snap.coolantLoops[0].flowKgPerS, 0.0),
-			"the hazardous-but-not-critical loop was not shed like a discretionary load");
+			"the noncritical loop was not shed like a discretionary load");
 		require(closeTo(snap.power.protectedDemandKW, 1.0)
 			&& closeTo(snap.power.protectedSuppliedKW, 1.0)
 			&& !snap.power.protectedUnmet,
 			"the protected account is not exactly the one authored-critical loop");
 		require(snap.power.protectedServices.size() == 1
 			&& snap.power.protectedServices[0].id == "criticalLoop",
-			"the unprotected hazardous loop appeared in the protected-service accounts");
+			"the unprotected loop appeared in the protected-service accounts");
 		bool hazAnnounced = false;
 		for (auto const& event : world.getStationSystemsEvents())
 			if (event.message.find("hazPlain' unmet") != std::string::npos) hazAnnounced = true;
 		require(!hazAnnounced,
-			"the unprotected hazardous loop's shed was announced as unmet protected service");
+			"the unprotected loop's shed was announced as unmet protected service");
 	}
 
 	// Scenario 3: generator cooling shortfall and shutdown cooling.
@@ -1168,7 +1161,6 @@ void protectedServices(smoke::Context const&)
 	{
 		core::CoolantLoopSettings settings;
 		settings.id = std::move(id);
-		settings.hazardClass = "normal";
 		settings.reservoirId = "sink";
 		settings.coolantCapacityKg = 1.0;
 		settings.startingCoolantKg = 1.0;

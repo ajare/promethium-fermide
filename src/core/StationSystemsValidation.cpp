@@ -1166,10 +1166,6 @@ using namespace station_detail;
 				return refuse("Station coolant loop id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!loopIds.insert(loop.id).second) return refuse(where + " id is duplicated");
-			if (std::find(StationCoolantHazardClasses.begin(), StationCoolantHazardClasses.end(),
-				loop.hazardClass) == StationCoolantHazardClasses.end())
-				return refuse(where + " has unknown coolant hazard class '" + loop.hazardClass
-					+ "'; declared classes are: normal, hazardous");
 			// A loop couples heat-only to one declared thermal reservoir.
 			// Coolant never touches a Resource store: it is not potable or
 			// nutrient water, and the loop's inventory is its own.

@@ -1403,7 +1403,6 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		else if (mPlacingType == "Coolant loop" && draft.coolantLoops.size() < core::MaxStationCoolantLoops)
 		{
 			core::CoolantLoopSettings loop;
-			loop.hazardClass = "normal";
 			loop.coolantCapacityKg = 100.0;
 			loop.startingCoolantKg = 100.0;
 			loop.specificHeatKJPerKgK = 4.0;

@@ -15,7 +15,7 @@ inline core::StationSystemsSettings waterGasObservationFixture()
 	}
 	core::ThermalReservoirSettings r; r.id = "sink"; r.thermalClass = "moderate";
 	r.heatCapacityKJPerK = 100000; r.startingTemperatureC = 5; s.thermalReservoirs = {r};
-	core::CoolantLoopSettings l; l.id = "loop"; l.reservoirId = "sink"; l.hazardClass = "normal";
+	core::CoolantLoopSettings l; l.id = "loop"; l.reservoirId = "sink";
 	l.coolantCapacityKg = l.startingCoolantKg = 100; l.specificHeatKJPerKgK = 4;
 	l.startingTemperatureC = 5; l.ratedFlowKgPerS = 1; l.pumpPowerKW = 0.1;
 	l.exchangerConductanceKWPerK = 10; s.coolantLoops = {l};

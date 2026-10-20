@@ -271,7 +271,6 @@ namespace
 			settings.thermalReservoirs = {sink};
 			core::CoolantLoopSettings loop;
 			loop.id = "loop";
-			loop.hazardClass = "normal";
 			loop.reservoirId = "sink";
 			loop.coolantCapacityKg = 1.0;
 			loop.startingCoolantKg = 1.0;
@@ -645,7 +644,7 @@ namespace
 			sink.minTemperatureC = -100.0; sink.maxTemperatureC = 200.0;
 			settings.thermalReservoirs = {sink};
 			core::CoolantLoopSettings loopA;
-			loopA.id = "loop-a"; loopA.hazardClass = "normal"; loopA.reservoirId = "sink";
+			loopA.id = "loop-a"; loopA.reservoirId = "sink";
 			loopA.coolantCapacityKg = 1.0; loopA.startingCoolantKg = 1.0;
 			loopA.specificHeatKJPerKgK = 4.0; loopA.startingTemperatureC = 20.0;
 			loopA.pumpPowerKW = 1.0; loopA.ratedFlowKgPerS = 1e308;
@@ -691,7 +690,7 @@ namespace
 			sink.minTemperatureC = -100.0; sink.maxTemperatureC = 200.0;
 			settings.thermalReservoirs = {sink};
 			core::CoolantLoopSettings loopA;
-			loopA.id = "loop-a"; loopA.hazardClass = "normal"; loopA.reservoirId = "sink";
+			loopA.id = "loop-a"; loopA.reservoirId = "sink";
 			loopA.coolantCapacityKg = 1.0; loopA.startingCoolantKg = 1.0;
 			loopA.specificHeatKJPerKgK = 4.0; loopA.startingTemperatureC = 20.0;
 			loopA.pumpPowerKW = 1.0; loopA.ratedFlowKgPerS = 1e308;
@@ -735,7 +734,7 @@ namespace
 			hot.id = "hot";
 			settings.thermalReservoirs = {cold, hot};
 			core::CoolantLoopSettings loopA;
-			loopA.id = "loop-a"; loopA.hazardClass = "normal"; loopA.reservoirId = "cold";
+			loopA.id = "loop-a"; loopA.reservoirId = "cold";
 			loopA.coolantCapacityKg = 1.0; loopA.startingCoolantKg = 1.0;
 			loopA.specificHeatKJPerKgK = 4.0; loopA.startingTemperatureC = 5.0;
 			loopA.pumpPowerKW = 1.0; loopA.ratedFlowKgPerS = 1.0;
@@ -779,7 +778,7 @@ namespace
 			hot.id = "hot";
 			settings.thermalReservoirs = {cold, hot};
 			core::CoolantLoopSettings loopA;
-			loopA.id = "loop-a"; loopA.hazardClass = "normal"; loopA.reservoirId = "cold";
+			loopA.id = "loop-a"; loopA.reservoirId = "cold";
 			loopA.coolantCapacityKg = 1.0; loopA.startingCoolantKg = 1.0;
 			loopA.specificHeatKJPerKgK = 4.0; loopA.startingTemperatureC = 5.0;
 			loopA.pumpPowerKW = 1.0; loopA.ratedFlowKgPerS = 1.0;
@@ -1248,7 +1247,6 @@ namespace
 		{
 			core::CoolantLoopSettings loop;
 			loop.id = "loop";
-			loop.hazardClass = "normal";
 			loop.reservoirId = "hot";
 			loop.coolantCapacityKg = 10.0;
 			loop.startingCoolantKg = 10.0;
@@ -1289,7 +1287,6 @@ namespace
 		{
 			core::CoolantLoopSettings settings;
 			settings.id = std::move(id);
-			settings.hazardClass = "normal";
 			settings.reservoirId = std::move(reservoirId);
 			settings.coolantCapacityKg = 10.0;
 			settings.startingCoolantKg = 10.0;

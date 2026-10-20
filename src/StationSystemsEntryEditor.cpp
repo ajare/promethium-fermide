@@ -1601,9 +1601,6 @@ bool renderCoolantLoopEntry([[maybe_unused]] core::StationSystemsSettings& draft
 {
 	ImGui::PushItemWidth(220);
 	renderIdentity(label, loop.id);
-	char hazard[16]{};
-	std::strncpy(hazard, loop.hazardClass.c_str(), sizeof(hazard) - 1);
-	if (ImGui::InputText((label + " hazard class").c_str(), hazard, sizeof(hazard))) loop.hazardClass = hazard;
 	char host[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(host, loop.reservoirId.c_str(), sizeof(host) - 1);
 	if (ImGui::InputText((label + " reservoir").c_str(), host, sizeof(host))) loop.reservoirId = host;
@@ -1618,7 +1615,7 @@ bool renderCoolantLoopEntry([[maybe_unused]] core::StationSystemsSettings& draft
 	ImGui::InputDouble((label + " heater capacity kW").c_str(), &loop.heaterCapacityKW, 0.0, 0.0, "%.3f");
 	ImGui::Checkbox((label + " protected critical service"
 		+ " (circulation and freeze heat drawn ahead of discretionary loads; "
-		  "protection is authored here, never inferred from the hazard class)").c_str(),
+		  "protection is authored here, never inferred)").c_str(),
 		&loop.criticalService);
 	ImGui::SameLine();
 	bool const remove = !removeLabel.empty() && ImGui::Button(removeLabel.c_str());

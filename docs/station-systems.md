@@ -980,13 +980,13 @@ views.
 ### Coolant circulation and freeze-protection heating (#396)
 
 Authors configure coolant loops per World. A loop owns a finite,
-loop-specific coolant inventory (kg) with a declared hazard class
-(`normal` or `hazardous`) and is coupled heat-only to exactly one
+loop-specific coolant inventory (kg) and carries no class (#757):
+coolant is a thermal service fluid, never potable or nutrient water.
+The loop is coupled heat-only to exactly one
 thermal reservoir: the loop's coolant never crosses into the reservoir,
-never touches a Resource store, and is never potable or nutrient water.
-Coolant inventories are independent of hazard class (#752): each loop
+never touches a Resource store. Each loop
 owns its finite inventory by construction. Only heat crosses its exchanger;
-no class-matching or segregation rule is needed.
+no class-matching or segregation rule is needed or possible.
 Each loop declares its coolant capacity and starting charge, coolant
 specific heat, starting temperature, a freeze-protection setpoint, a
 pump power draw at full circulation with a rated flow, a
@@ -1033,11 +1033,14 @@ circulation and freeze heating beside the thermal totals.
 
 World schema 73 persists the authored loop contracts (units: kg,
 kJ/kg·K, °C, kW, kg/s, kW/K); a pre-73 document carrying
-`coolantLoops` is refused rather than silently dropped. Coolant
+`coolantLoops` is refused rather than silently dropped. The loop
+`hazardClass` field is retired (#757): documents carrying it at any
+version are refused with a named-field conversion-required diagnostic,
+never silently defaulted. Coolant
 inventory, circulation, freeze exposure and the loop energy ledger
 stay runtime-only: Load and Reset reconstruct them from the authored
 starting conditions. The separate Station Systems window drafts loops
-(hazard class, host reservoir, coolant capacity and charge, specific
+(host reservoir, coolant capacity and charge, specific
 heat, temperatures, pump, rated flow, conductance and heater) with
 full validation reporting, and shows the live inventories,
 circulation, freeze service and closing ledgers beside the existing
@@ -2144,8 +2147,8 @@ and respects their protected reserve, throughput and connection limits.
 **Heat-only interfaces never move mass.** A coolant loop exchanges heat
 with its coupled reservoir through the circulation-gated exchanger and
 nothing else: the loop's finite coolant inventory is unchanged by the
-exchange, no Resource store is touched, and a hazardous loop's coolant
-never crosses into normal inventory, a reservoir, or another loop. Heat
+exchange, no Resource store is touched, and a loop's coolant
+never crosses into another store, a reservoir, or another loop. Heat
 rides the interface; mass never does.
 
 **Disposal-ready hazardous waste stays segregated.** Each ejection
@@ -2174,8 +2177,8 @@ support services that protected loads depend on. A set of Critical
 station services is drawn from the actual generation-and-battery pool
 ahead of every discretionary external load: coolant-loop circulation
 (a loop's pump and freeze heater, protected only when its author
-authores `criticalService` - never inferred from the loop's hazard
-class (#754)), biological essential circulation
+authores `criticalService` - a loop carries no class to infer
+protection from (#754/#757)), biological essential circulation
 every crop and algae population declares, and authored critical-service
 chiller work (`criticalService` on coolant loops and chillers, the
 flag persisted with the World document at schema 92 and refused on
@@ -2549,7 +2552,7 @@ export), hot versus cold operating profiles, tick-by-tick and batched
 updates integrating identically, overheat and overcool limit crossings
 reported without clamping, and intact Lua thermal descriptor crossing
 with contained construction refusal; and coolant fixtures: refused
-loop configurations (unknown host reservoir, unknown hazard class,
+loop configurations (unknown host reservoir,
 non-positive capacity or specific heat, over-filled charge,
 sub-absolute-zero setpoint, over-budget loop count), full-service
 circulation with pump-work warming and exactly-once exchange whose

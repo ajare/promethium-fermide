@@ -368,10 +368,9 @@ namespace core
 	// #749: the single named home of the protected-service decision. A
 	// coolant loop's circulation and freeze protection is a protected
 	// Critical station service when - and only when - the author declares
-	// the loop a critical service (#754). Nothing here infers importance
-	// from a category: a hazardous loop's circulation is protected
-	// because its author authored `criticalService`, not because the loop
-	// is hazardous. Every protection and thermal pass calls this instead
+	// the loop a critical service (#754). The loop carries no class
+	// (#757); protection comes only from `criticalService`.
+	// Every protection and thermal pass calls this instead
 	// of re-deriving the rule inline, so the decision lives in one
 	// reviewable place.
 	bool StationSystemsRuntime::Impl::Tick::coolantServiceProtected(LoopState const& loop)

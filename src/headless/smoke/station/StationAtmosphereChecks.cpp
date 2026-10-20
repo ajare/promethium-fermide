@@ -695,7 +695,6 @@ namespace
 			settings.atmospheres = { compartment };
 			core::CoolantLoopSettings hotLoop;
 			hotLoop.id = "hot-loop";
-			hotLoop.hazardClass = "normal";
 			hotLoop.reservoirId = "bus";
 			hotLoop.coolantCapacityKg = 1.0;
 			hotLoop.startingCoolantKg = 1.0;
@@ -1276,7 +1275,6 @@ namespace
 			settings.thermalReservoirs = { sink };
 			core::CoolantLoopSettings loop;
 			loop.id = "hazLoop";
-			loop.hazardClass = "hazardous";
 			loop.reservoirId = "sink";
 			loop.coolantCapacityKg = 50.0;
 			loop.startingCoolantKg = 40.0;
@@ -1300,7 +1298,6 @@ namespace
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.coolantLoops.size() == 1, "loop missing from snapshot");
 			auto const& live = snap.coolantLoops[0];
-			require(live.hazardClass == "hazardous", "loop hazard class not exposed");
 			require(approx(live.coolantKg, 40.0),
 				"the heat-only interface changed the loop's coolant inventory");
 			require(live.heaterSuppliedKW > 0.0 && live.pumpSuppliedKW > 0.0,

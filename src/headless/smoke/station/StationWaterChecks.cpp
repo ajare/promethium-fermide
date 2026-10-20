@@ -835,7 +835,6 @@ namespace
 		{
 			core::CoolantLoopSettings settings;
 			settings.id = id;
-			settings.hazardClass = "normal";
 			settings.reservoirId = "sink";
 			settings.coolantCapacityKg = 100.0;
 			settings.startingCoolantKg = startingCoolantKg;
@@ -1093,16 +1092,15 @@ namespace
 				require(std::abs(balance.residual) <= 1e-6,
 					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
 		}
-		// Every collector/loop class combination has the same physical
-		// result. Configuration also constructs the bundled Lua mirror, so
-		// its constructor must accept these combinations.
+		// Every collector class has the same physical result against the
+		// classless coolant loop (#757). Configuration also constructs the
+		// bundled Lua mirror, so its constructor must accept these
+		// combinations.
 		for (auto const* collectorClass : core::StationWaterHazardClasses)
-		for (auto const* loopClass : core::StationCoolantHazardClasses)
 		{
 			core::World world("WaterCrossClass", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto chilled = coldLoop("chilled", 100.0, 5.0);
-			chilled.hazardClass = loopClass;
+			auto const chilled = coldLoop("chilled", 100.0, 5.0);
 			auto const [ok, diagnostic] = waterConfigure(world, waterStores(), { chilled },
 				{ collector("cond", collectorClass, 0.01, 0.5) },
 				{ treatment("plant", "normal") }, 10.0);

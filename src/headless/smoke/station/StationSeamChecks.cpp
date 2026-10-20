@@ -169,7 +169,7 @@ namespace
 			reservoir.id = "sink"; reservoir.thermalClass = "moderate"; reservoir.heatCapacityKJPerK = 100;
 			s.thermalReservoirs.push_back(reservoir);
 			core::CoolantLoopSettings loop;
-			loop.id = "loop"; loop.reservoirId = "sink"; loop.hazardClass = "normal";
+			loop.id = "loop"; loop.reservoirId = "sink";
 			loop.coolantCapacityKg = loop.startingCoolantKg = 100;
 			loop.specificHeatKJPerKgK = 4; loop.ratedFlowKgPerS = 1;
 			s.coolantLoops.push_back(loop);
@@ -467,7 +467,7 @@ namespace
 		auto reservoir = [](char const* id) { core::ThermalReservoirSettings r; r.id = id;
 			r.thermalClass = "moderate"; r.heatCapacityKJPerK = 100.0; return r; };
 		auto loop = [](char const* id, char const* host) { core::CoolantLoopSettings l; l.id = id;
-			l.reservoirId = host; l.hazardClass = "normal"; l.coolantCapacityKg = 100.0;
+			l.reservoirId = host; l.coolantCapacityKg = 100.0;
 			l.startingCoolantKg = 100.0; l.specificHeatKJPerKgK = 4.0; l.ratedFlowKgPerS = 1.0; return l; };
 		auto base = [&] { core::StationSystemsSettings s; s.enabled = true;
 			s.thermalReservoirs = {reservoir("host"), reservoir("other")};
@@ -519,10 +519,10 @@ namespace
 		base.thermalReservoirs = {host};
 		host.id = "other"; base.thermalReservoirs.push_back(host);
 		core::CoolantLoopSettings loop;
-		loop.id = "loop"; loop.hazardClass = "normal";
+		loop.id = "loop";
 		loop.coolantCapacityKg = 100.0; loop.specificHeatKJPerKgK = 4.0;
 		base.coolantLoops = {loop};
-		loop.id = "second"; loop.hazardClass = "hazardous";
+		loop.id = "second";
 		base.coolantLoops.push_back(loop);
 		core::ResourceStoreSettings store;
 		store.id = "water"; store.unit = "kg"; store.capacity = 100.0;
@@ -614,7 +614,7 @@ namespace
 		reservoir.id = "wrong"; reservoir.thermalClass = "warm";
 		base.thermalReservoirs.push_back(reservoir);
 		core::CoolantLoopSettings loop;
-		loop.id = "loop"; loop.reservoirId = "cold"; loop.hazardClass = "normal";
+		loop.id = "loop"; loop.reservoirId = "cold";
 		loop.coolantCapacityKg = 100.0; loop.specificHeatKJPerKgK = 4.0;
 		base.coolantLoops = {loop};
 		core::ChillerSettings chiller;

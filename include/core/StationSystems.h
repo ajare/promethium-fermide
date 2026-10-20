@@ -573,20 +573,15 @@ namespace core
 	};
 	inline constexpr size_t MaxStationRadiators{8};
 
-	// Declared coolant hazard classes (#396). The class no longer
-	// segregates loops from one another (#752): loops never pool coolant
-	// because each loop owns its own finite inventory by construction,
-	// and the only crossing with station thermal state is heat through
-	// the circulation-gated heat-only exchanger - through which no
-	// coolant ever crossed. Coolant is a thermal service fluid - it is
-	// never potable water or nutrient solution, and a loop's inventory
-	// never touches a Resource store.
-	inline constexpr std::array<char const*, 2> StationCoolantHazardClasses{
-		"normal", "hazardous"};
 	// A coolant loop (#396): a finite, loop-specific closed coolant
-	// circuit pumped through one thermal reservoir. The loop holds its own
-	// coolant inventory (kg) — finite and loop-specific regardless of
-	// hazard class (#752) — and exchanges heat only with its coupled reservoir
+	// circuit pumped through one thermal reservoir. The loop carries no
+	// class (#757): coolant is a thermal service fluid that is never
+	// potable water or nutrient solution, loops never pool coolant
+	// because each owns its own finite inventory by construction, and
+	// the only crossing with station thermal state is heat through the
+	// circulation-gated heat-only exchanger - through which no coolant
+	// ever crossed. The loop holds its own
+	// coolant inventory (kg) — finite and loop-specific — and exchanges heat only with its coupled reservoir
 	// through a circulation-gated exchanger: no coolant crosses into the
 	// reservoir, a Resource store, or any other loop. The pump circulates
 	// the coolant it actually holds; the freeze-protection heater is a
@@ -598,7 +593,6 @@ namespace core
 	struct CoolantLoopSettings
 	{
 		std::string id;
-		std::string hazardClass;      // "normal" or "hazardous"
 		std::string reservoirId;     // heat-only coupled thermal reservoir
 		double coolantCapacityKg{0.0};        // loop inventory capacity, > 0
 		double startingCoolantKg{0.0};        // initial charge, [0, capacity]; 0 disables
@@ -613,9 +607,9 @@ namespace core
 		// demand a protected Critical station service: it is admitted from
 		// the actual generation-and-battery pool ahead of every
 		// discretionary external load, so shedding experiments or lighting
-		// never cuts the circulation the service depends on. Hazardous
-		// loops are protected regardless of this flag: their hazard class
-		// already makes them a containment boundary (#412).
+		// never cuts the circulation the service depends on. Protection
+		// is authored here and only here (#754): nothing is inferred from
+		// any class, because a loop carries none (#757).
 		bool criticalService{false};
 		bool operator==(CoolantLoopSettings const&) const = default;
 	};
@@ -2887,7 +2881,6 @@ namespace core
 	struct StationCoolantLoopSnapshot
 	{
 		std::string id;
-		std::string hazardClass;
 		std::string reservoirId;
 		double coolantCapacityKg{0.0};
 		double coolantKg{0.0};

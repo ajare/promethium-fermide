@@ -710,7 +710,7 @@ namespace
 		generator.heatSinkId = "hot"; generator.thermalClass = "low";
 		generator.maxRampKWPerSecond = 1;
 		auto& loop = seed.coolantLoops.emplace_back();
-		loop.id = "loop"; loop.hazardClass = "normal"; loop.reservoirId = "cold";
+		loop.id = "loop"; loop.reservoirId = "cold";
 		loop.coolantCapacityKg = loop.startingCoolantKg = 100;
 		loop.specificHeatKJPerKgK = 4; loop.ratedFlowKgPerS = 1;
 		auto& chiller = seed.chillers.emplace_back();
@@ -2280,7 +2280,7 @@ namespace
 		// node on the canvas: the derived projection the authored
 		// reservoirs must not disturb.
 		core::CoolantLoopSettings loop;
-		loop.id = "loop1"; loop.hazardClass = "normal"; loop.reservoirId = "loopHost";
+		loop.id = "loop1"; loop.reservoirId = "loopHost";
 		loop.coolantCapacityKg = 100.0; loop.startingCoolantKg = 100.0;
 		loop.specificHeatKJPerKgK = 4.0; loop.ratedFlowKgPerS = 1.0;
 		seed.coolantLoops = {loop};
@@ -2644,7 +2644,7 @@ namespace
 		seed.thermalReservoirs = {reservoir};
 		reservoir.id = "sink"; seed.thermalReservoirs.push_back(reservoir);
 		core::CoolantLoopSettings loop;
-		loop.id = "loop"; loop.reservoirId = "host"; loop.hazardClass = "normal";
+		loop.id = "loop"; loop.reservoirId = "host";
 		loop.coolantCapacityKg = 100.0; loop.specificHeatKJPerKgK = 4.0;
 		seed.coolantLoops = {loop};
 		std::string diagnostic;
@@ -2761,7 +2761,7 @@ namespace
 		core::StationSystemsSettings seed; seed.enabled = true;
 		core::ThermalReservoirSettings host; host.id = "host"; host.thermalClass = "moderate"; host.heatCapacityKJPerK = 100;
 		seed.thermalReservoirs = {host}; host.id = "other"; seed.thermalReservoirs.push_back(host);
-		core::CoolantLoopSettings loop; loop.id = "loop"; loop.reservoirId = "host"; loop.hazardClass = "normal";
+		core::CoolantLoopSettings loop; loop.id = "loop"; loop.reservoirId = "host";
 		loop.coolantCapacityKg = loop.startingCoolantKg = 100; loop.specificHeatKJPerKgK = 4; loop.ratedFlowKgPerS = 1; seed.coolantLoops = {loop};
 		std::string diagnostic; require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str()); world->markSaved();
 		bool flow = true;
@@ -2830,7 +2830,6 @@ namespace
 				&& window.draft().coolantLoops[0].id == "coolantLoop1"
 				&& window.draft().coolantLoops[1].id == "coolantLoop2"
 				&& window.draft().coolantLoops[0].reservoirId.empty()
-				&& window.draft().coolantLoops[0].hazardClass == "normal"
 				&& window.draftHistory().undoCount() == 2, "placement defaults/identity/history incorrect");
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 			REQ(window.draft().coolantLoops.size() == 1, "undo placement failed");
@@ -4028,7 +4027,7 @@ namespace
 		seed.thermalReservoirs = {graphSink};
 		seed.radiators = {{"graph-radiator", "graph-sink", 1}};
 		core::CoolantLoopSettings graphLoop; graphLoop.id = "graph-loop"; graphLoop.reservoirId = "graph-sink";
-		graphLoop.hazardClass = "normal"; graphLoop.coolantCapacityKg = 100; graphLoop.startingCoolantKg = 100;
+		graphLoop.coolantCapacityKg = 100; graphLoop.startingCoolantKg = 100;
 		graphLoop.specificHeatKJPerKgK = 4; graphLoop.pumpPowerKW = 1; graphLoop.ratedFlowKgPerS = 2;
 		graphLoop.freezeProtectionSetpointC = 30; graphLoop.heaterCapacityKW = 1;
 		seed.coolantLoops = {graphLoop};
@@ -6166,7 +6165,6 @@ namespace
 		initial.thermalReservoirs.push_back(bus);
 		core::CoolantLoopSettings itcs;
 		itcs.id = "itcs";
-		itcs.hazardClass = "normal";
 		itcs.reservoirId = "bus";
 		itcs.coolantCapacityKg = 100.0;
 		itcs.startingCoolantKg = 100.0;
@@ -6203,7 +6201,7 @@ namespace
 			world->markSaved();
 			world->resumeSimulation(); REQ(world->advanceTicks(600), "Coolant editor run failed");
 			world->pauseSimulation(); ctx->Sleep(1);
-			REQ(driver.contains("itcs [normal] -> bus: full service")
+			REQ(driver.contains("itcs -> bus: full service")
 				&& driver.contains("flow 3.000 of 3.000 kg/s (circulation 100.0%)")
 				&& driver.contains("pump 1.200 of 1.200 kW"),
 				"Live coolant circulation service not displayed");
@@ -6228,33 +6226,21 @@ namespace
 			REQ(world->getStationSystemsSettings().coolantLoops.size() == 1
 				&& history.undoCount() == 0 && world->getSimulationTick() == 600,
 				"Invalid coolant draft mutated the authored settings");
-			// Repair the drafted charge and give the new loop the hazardous
-			// class; the confirmed reset applies the contract and the live
-			// view restarts from authored state.
+			// Repair the drafted charge; the confirmed reset applies the
+			// contract and the live view restarts from authored state.
 			driver.typeValue(ctx, "Coolant loop 1 starting coolant kg", "50");
-			driver.typeValue(ctx, "Coolant loop 1 hazard class", "hazardous");
 			ctx->ScrollToItemY("Confirm World reset");
 			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset");
 			REQ(world->getStationSystemsSettings().coolantLoops.size() == 2
 				&& world->getStationSystemsSettings().coolantLoops[1].startingCoolantKg == 50.0
-				&& world->getStationSystemsSettings().coolantLoops[1].hazardClass == "hazardous"
 				&& history.undoCount() == 1 && world->getSimulationTick() == 0,
 				"Repaired coolant draft did not apply through the reset-confirmed flow");
 			ctx->Sleep(1);
 			REQ(driver.contains("2 coolant loop(s)")
-				&& driver.contains("coolantLoop2 [hazardous] -> bus"),
+				&& driver.contains("coolantLoop2 -> bus"),
 				"Applied coolant loop not reflected in the window");
-			// An unknown hazard class is refused.
-			driver.typeValue(ctx, "Coolant loop 1 hazard class", "toxic");
-			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
-			REQ(driver.contains("unknown coolant hazard class 'toxic'"),
-				"Unknown hazard class diagnostic not shown");
-			REQ(world->getStationSystemsSettings().coolantLoops[1].hazardClass == "hazardous"
-				&& history.undoCount() == 1,
-				"Invalid hazard class draft mutated the authored settings");
 			// A loop coupled to an unknown reservoir is refused.
-			driver.typeValue(ctx, "Coolant loop 1 hazard class", "hazardous");
 			driver.typeValue(ctx, "Coolant loop 1 reservoir", "ghost");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
 			REQ(driver.contains("coupled to unknown thermal reservoir 'ghost'"),
@@ -6303,7 +6289,6 @@ namespace
 		initial.thermalReservoirs.push_back(sink);
 		core::CoolantLoopSettings chilled;
 		chilled.id = "chilled";
-		chilled.hazardClass = "normal";
 		chilled.reservoirId = "bus";
 		chilled.coolantCapacityKg = 100.0;
 		chilled.startingCoolantKg = 100.0;
@@ -6317,7 +6302,6 @@ namespace
 		initial.coolantLoops.push_back(chilled);
 		core::CoolantLoopSettings chilled2;
 		chilled2.id = "chilled2";
-		chilled2.hazardClass = "normal";
 		chilled2.reservoirId = "bus";
 		chilled2.coolantCapacityKg = 100.0;
 		chilled2.startingCoolantKg = 100.0;

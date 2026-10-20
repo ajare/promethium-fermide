@@ -1040,7 +1040,6 @@ void buffers(smoke::Context const&)
 	{
 		core::CoolantLoopSettings settings;
 		settings.id = id;
-		settings.hazardClass = "normal";
 		settings.reservoirId = reservoirId;
 		settings.coolantCapacityKg = 100.0;
 		settings.startingCoolantKg = startingKg;

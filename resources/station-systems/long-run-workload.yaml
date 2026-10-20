@@ -881,7 +881,6 @@ stationSystems:
 
   coolantLoops:
     - id: loopChill
-      hazardClass: normal
       reservoirId: chilledWater
       coolantCapacityKg: 500.0
       startingCoolantKg: 500.0
@@ -894,7 +893,6 @@ stationSystems:
       heaterCapacityKW: 0.5
       criticalService: true
     - id: loopHaz
-      hazardClass: hazardous
       reservoirId: hazSink
       coolantCapacityKg: 300.0
       startingCoolantKg: 300.0

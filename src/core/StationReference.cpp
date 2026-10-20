@@ -306,7 +306,6 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", loop.id);
-				serializer.writeString("hazardClass", loop.hazardClass);
 				serializer.writeString("reservoirId", loop.reservoirId);
 				serializer.writeDouble("coolantCapacityKg", loop.coolantCapacityKg);
 				serializer.writeDouble("startingCoolantKg", loop.startingCoolantKg);
@@ -1017,6 +1016,12 @@ namespace core
 			while (serializer.nextArrayItem())
 			{
 				serializer.beginMap("");
+				// Retired coolant classes must name the conversion even when
+				// another authored field predates this document's schema.
+				if (std::string_view(array) == "coolantLoops" && serializer.hasField("hazardClass"))
+					throw SerializationException(
+						"Station coolant loop '" + serializer.readString("id")
+						+ "' field 'hazardClass' was removed (#757); conversion required");
 				if (serializer.hasField("waterQuality"))
 					throw SerializationException(std::string(array) + " has no configurable water quality gate (electrolyzer purity is built in)");
 				serializer.endMap();
@@ -1342,7 +1347,6 @@ namespace core
 				serializer.beginMap("");
 				CoolantLoopSettings loop;
 				loop.id = serializer.readString("id");
-				loop.hazardClass = serializer.readString("hazardClass");
 				loop.reservoirId = serializer.readString("reservoirId");
 				loop.coolantCapacityKg = serializer.readDouble("coolantCapacityKg");
 				loop.startingCoolantKg = serializer.readDouble("startingCoolantKg");

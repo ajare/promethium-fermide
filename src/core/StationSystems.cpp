@@ -273,9 +273,8 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				for (size_t index = 0; index < coolantLoops->size(); ++index)
 				{
 					auto const& loop = (*coolantLoops)[index];
-					lua_createtable(state, 0, 13);
+					lua_createtable(state, 0, 12);
 					lua_pushstring(state, loop.id.c_str()); lua_setfield(state, -2, "id");
-					lua_pushstring(state, loop.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
 					lua_pushstring(state, loop.reservoirId.c_str()); lua_setfield(state, -2, "reservoir");
 					lua_pushnumber(state, loop.coolantCapacityKg); lua_setfield(state, -2, "coolantCapacityKg");
 					lua_pushnumber(state, loop.startingCoolantKg); lua_setfield(state, -2, "startingCoolantKg");
@@ -950,7 +949,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			for (auto material : {"oxygen", "nitrogen", "carbon-dioxide", "water"})
 				retained("atmosphere", "Atmosphere compartment", a.id, material, {});
 		for (auto const& loop : settings.coolantLoops)
-			retained("coolant-loop", "Coolant loop", loop.id, "coolant", loop.hazardClass);
+			retained("coolant-loop", "Coolant loop", loop.id, "coolant", {});
 		for (auto const& store : settings.stores) if (store.composition)
 			for (auto const* key : {StationMassConstituents[0], StationMassConstituents[1],
 				StationMassConstituents[2], StationMassConstituents[3], StationMassConstituents[4],

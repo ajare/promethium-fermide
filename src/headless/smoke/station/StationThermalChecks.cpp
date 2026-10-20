@@ -480,14 +480,13 @@ namespace
 			settings.maxTemperatureC = 100.0;
 			return settings;
 		};
-		auto loop = [](std::string const& id, std::string const& hazard,
+		auto loop = [](std::string const& id,
 			std::string const& reservoirId, double capacityKg, double startingKg,
 			double cp, double startingC, double setpointC, double pumpKW,
 			double ratedFlow, double conductance, double heaterKW)
 		{
 			core::CoolantLoopSettings settings;
 			settings.id = id;
-			settings.hazardClass = hazard;
 			settings.reservoirId = reservoirId;
 			settings.coolantCapacityKg = capacityKg;
 			settings.startingCoolantKg = startingKg;
@@ -526,34 +525,30 @@ namespace
 			settings.enabled = true;
 			settings.thermalReservoirs = { reservoir("bus", 1000.0, 20.0) };
 			std::string diagnostic;
-			settings.coolantLoops = { loop("l", "normal", "ghost", 100, 100, 4, 20, 5, 1, 1, 1, 1) };
+			settings.coolantLoops = { loop("l", "ghost", 100, 100, 4, 20, 5, 1, 1, 1, 1) };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("unknown thermal reservoir") != std::string::npos,
 				"loop coupled to an unknown reservoir was accepted");
-			settings.coolantLoops = { loop("l", "toxic", "bus", 100, 100, 4, 20, 5, 1, 1, 1, 1) };
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("hazard class") != std::string::npos,
-				"unknown coolant hazard class was accepted");
-			settings.coolantLoops = { loop("l", "normal", "bus", 0, 0, 4, 20, 5, 1, 1, 1, 1) };
+			settings.coolantLoops = { loop("l", "bus", 0, 0, 4, 20, 5, 1, 1, 1, 1) };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("capacity must be finite and positive") != std::string::npos,
 				"zero coolant capacity was accepted");
-			settings.coolantLoops = { loop("l", "normal", "bus", 100, 150, 4, 20, 5, 1, 1, 1, 1) };
+			settings.coolantLoops = { loop("l", "bus", 100, 150, 4, 20, 5, 1, 1, 1, 1) };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("exceeds the loop capacity") != std::string::npos,
 				"starting coolant above capacity was accepted");
-			settings.coolantLoops = { loop("l", "normal", "bus", 100, 100, 0, 20, 5, 1, 1, 1, 1) };
+			settings.coolantLoops = { loop("l", "bus", 100, 100, 0, 20, 5, 1, 1, 1, 1) };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("specific heat") != std::string::npos,
 				"zero specific heat was accepted");
-			settings.coolantLoops = { loop("l", "normal", "bus", 100, 100, 4, 20, -300, 1, 1, 1, 1) };
+			settings.coolantLoops = { loop("l", "bus", 100, 100, 4, 20, -300, 1, 1, 1, 1) };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("freeze-protection setpoint") != std::string::npos
 				&& diagnostic.find("above absolute zero") != std::string::npos,
 				"a sub-absolute-zero freeze setpoint was accepted");
 			std::vector<core::CoolantLoopSettings> tooMany;
 			for (size_t index = 0; index <= core::MaxStationCoolantLoops; ++index)
-				tooMany.push_back(loop("loop" + std::to_string(index), "normal", "bus",
+				tooMany.push_back(loop("loop" + std::to_string(index), "bus",
 					100, 100, 4, 20, 5, 1, 1, 1, 1));
 			settings.coolantLoops = tooMany;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
@@ -574,7 +569,7 @@ namespace
 			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 10.0;
 			auto const [ok, diagnostic] = coolantConfigure(world,
 				{ reservoir("bus", 1000.0, 20.0) },
-				{ loop("loop", "normal", "bus", 100, 100, 4, 20, 5, 1.2, 3.0, 6.0, 0.0) },
+				{ loop("loop", "bus", 100, 100, 4, 20, 5, 1.2, 3.0, 6.0, 0.0) },
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
@@ -619,7 +614,7 @@ namespace
 			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 0.6;
 			auto const [ok, diagnostic] = coolantConfigure(world,
 				{ reservoir("bus", 1000.0, 20.0) },
-				{ loop("loop", "normal", "bus", 100, 100, 4, 20, 5, 1.2, 3.0, 0.0, 0.0) },
+				{ loop("loop", "bus", 100, 100, 4, 20, 5, 1.2, 3.0, 0.0, 0.0) },
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
@@ -643,7 +638,7 @@ namespace
 			world.pauseSimulation(); world.finishBuild();
 			auto const [ok, diagnostic] = coolantConfigure(world,
 				{ reservoir("bus", 1000.0, 20.0) },
-				{ loop("loop", "normal", "bus", 10, 10, 4, 3.0, 5.0, 1.0, 2.0, 0.0, 4.0) });
+				{ loop("loop", "bus", 10, 10, 4, 3.0, 5.0, 1.0, 2.0, 0.0, 4.0) });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "blackout coolant run failed");
@@ -676,8 +671,8 @@ namespace
 			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 10.0;
 			auto const [ok, diagnostic] = coolantConfigure(world,
 				{ reservoir("bus", 1000.0, 20.0) },
-				{ loop("dry", "normal", "bus", 100, 0, 4, 3.0, 5.0, 1.0, 2.0, 5.0, 4.0),
-				  loop("half", "normal", "bus", 100, 50, 4, 20.0, 5.0, 1.0, 2.0, 0.0, 0.0) },
+				{ loop("dry", "bus", 100, 0, 4, 3.0, 5.0, 1.0, 2.0, 5.0, 4.0),
+				  loop("half", "bus", 100, 50, 4, 20.0, 5.0, 1.0, 2.0, 0.0, 0.0) },
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
@@ -713,7 +708,7 @@ namespace
 			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
 			auto const [ok, diagnostic] = coolantConfigure(world,
 				{ reservoir("bus", 1000.0, 30.0) },
-				{ loop("loop", "normal", "bus", 1.0, 1.0, 4.0, 20.0, 5.0, 1.0, 0.0, 1.0, 0.0) },
+				{ loop("loop", "bus", 1.0, 1.0, 4.0, 20.0, 5.0, 1.0, 0.0, 1.0, 0.0) },
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
@@ -751,7 +746,7 @@ namespace
 			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 10.0;
 			auto const [ok, diagnostic] = coolantConfigure(world,
 				{ reservoir("bus", 1000.0, 20.0) },
-				{ loop("loop", "hazardous", "bus", 10, 10, 4, 0.0, 5.0, 0.0, 0.0, 0.0, 4.0) },
+				{ loop("loop", "bus", 10, 10, 4, 0.0, 5.0, 0.0, 0.0, 0.0, 4.0) },
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
@@ -776,31 +771,26 @@ namespace
 			require(approx(world.getStationSystemsSnapshot().thermal.totalFreezeHeatingKW, 0.0),
 				"freeze heating total should be zero after reaching the setpoint");
 		}
-		// Isolated inventories (#752): loops never pool because each loop
-		// owns its own coolant by construction - no class rule is needed.
-		// A dry loop stays dry and inert while the charged loop on the
+		// Isolated inventories (#752/#757): loops never pool because each
+		// loop owns its own coolant by construction - no class rule is
+		// needed, and a loop carries no class at all. A dry loop stays dry
+		// and inert while the charged loop on the
 		// same reservoir circulates; neither loop's inventory moves
 		// toward the other, and the reservoir sees only the circulating
-		// loop's exchange through the heat-only exchanger. Exercise same-
-		// and different-class loops: neither arrangement pools inventories.
-		for (auto const* chargedClass : core::StationCoolantHazardClasses)
-		for (auto const* dryClass : core::StationCoolantHazardClasses)
+		// loop's exchange through the heat-only exchanger.
 		{
 			core::World world("CoolantIsolated", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
 			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 10.0;
 			auto const [ok, diagnostic] = coolantConfigure(world,
 				{ reservoir("bus", 1000.0, 20.0) },
-				{ loop("charged-loop", chargedClass, "bus", 100, 100, 4, 20, 5, 1.0, 2.0, 5.0, 0.0),
-				  loop("dry-loop", dryClass, "bus", 100, 0, 4, 20, 5, 1.0, 2.0, 5.0, 0.0) },
+				{ loop("charged-loop", "bus", 100, 100, 4, 20, 5, 1.0, 2.0, 5.0, 0.0),
+				  loop("dry-loop", "bus", 100, 0, 4, 20, 5, 1.0, 2.0, 5.0, 0.0) },
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
 			require(world.advanceTicks(600), "isolated-inventory run failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
-			require(snapshot.coolantLoops[0].hazardClass == chargedClass
-				&& snapshot.coolantLoops[1].hazardClass == dryClass,
-				"hazard class not reported");
 			require(approx(snapshot.coolantLoops[0].coolantKg, 100.0)
 				&& snapshot.coolantLoops[0].flowKgPerS > 0.0
 				&& snapshot.coolantLoops[0].status == core::StationTransferStatus::Full,
@@ -831,7 +821,7 @@ namespace
 			bank.startingStoredKWh = 8.0; bank.maxChargeKW = 5.0; bank.maxDischargeKW = 10.0;
 			auto const [ok, diagnostic] = coolantConfigure(world,
 				{ reservoir("bus", 1000.0, 20.0) },
-				{ loop("loop", "normal", "bus", 10, 10, 4, 0.0, 5.0, 0.0, 0.0, 0.0, 4.0) },
+				{ loop("loop", "bus", 10, 10, 4, 0.0, 5.0, 0.0, 0.0, 0.0, 4.0) },
 				{}, { bank });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
@@ -861,7 +851,7 @@ namespace
 			bank.startingStoredKWh = 4.0; bank.maxChargeKW = 5.0; bank.maxDischargeKW = 5.0;
 			auto const [ok, diagnostic] = coolantConfigure(world,
 				{ reservoir("bus", 1000.0, 20.0) },
-				{ loop("loop", "normal", "bus", 100, 100, 4, 20, 5, 1.0, 1.0, 0.0, 0.0) },
+				{ loop("loop", "bus", 100, 100, 4, 20, 5, 1.0, 1.0, 0.0, 0.0) },
 				{ field }, { bank });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
@@ -887,7 +877,7 @@ namespace
 			field.illumination = cycle;
 			auto const [ok, diagnostic] = coolantConfigure(world,
 				{ reservoir("bus", 1000.0, 20.0) },
-				{ loop("loop", "normal", "bus", 10, 10, 4, 3.0, 5.0, 1.0, 2.0, 0.0, 4.0) },
+				{ loop("loop", "bus", 10, 10, 4, 3.0, 5.0, 1.0, 2.0, 0.0, 4.0) },
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
@@ -912,7 +902,7 @@ namespace
 			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
 			auto const [ok, diagnostic] = coolantConfigure(world,
 				{ reservoir("bus", 1.0, 0.0) },
-				{ loop("stiff", "normal", "bus", 1.0, 1.0, 1.0, 20.0,
+				{ loop("stiff", "bus", 1.0, 1.0, 1.0, 20.0,
 					5.0, 1.0, 1.0, 1000.0, 0.0) },
 				{ field });
 			require(ok, diagnostic.c_str());
@@ -978,9 +968,9 @@ namespace
 			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
 			auto const [ok, diagnostic] = coolantConfigure(world,
 				{ reservoir("bus", 1.0, 0.0) },
-				{ loop("hot-a", "normal", "bus", 1.0, 1.0, 1.0, 20.0,
+				{ loop("hot-a", "bus", 1.0, 1.0, 1.0, 20.0,
 					5.0, 1.0, 1.0, 1000.0, 0.0),
-				  loop("hot-b", "hazardous", "bus", 1.0, 1.0, 1.0, 20.0,
+				  loop("hot-b", "bus", 1.0, 1.0, 1.0, 20.0,
 					5.0, 1.0, 1.0, 1000.0, 0.0) },
 				{ field });
 			require(ok, diagnostic.c_str());
@@ -1053,7 +1043,7 @@ namespace
 			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
 			auto const [ok, diagnostic] = coolantConfigure(sandboxStiff,
 				{ reservoir("bus", 1.0, 0.0) },
-				{ loop("stiff", "normal", "bus", 1.0, 1.0, 1.0, 20.0,
+				{ loop("stiff", "bus", 1.0, 1.0, 1.0, 20.0,
 					5.0, 1.0, 1.0, 1000.0, 0.0) },
 				{ field });
 			require(ok, diagnostic.c_str());
@@ -1074,8 +1064,8 @@ namespace
 			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 10.0;
 			auto const [ok, diagnostic] = coolantConfigure(world,
 				{ reservoir("bus", 1000.0, 20.0) },
-				{ loop("loop", "normal", "bus", 100, 100, 4, 20, 5, 1.2, 3.0, 6.0, 2.0),
-				  loop("dry", "hazardous", "bus", 100, 0, 4, 3.0, 5.0, 1.0, 2.0, 5.0, 4.0) },
+				{ loop("loop", "bus", 100, 100, 4, 20, 5, 1.2, 3.0, 6.0, 2.0),
+				  loop("dry", "bus", 100, 0, 4, 3.0, 5.0, 1.0, 2.0, 5.0, 4.0) },
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
@@ -1109,7 +1099,7 @@ namespace
 			corrupt.pauseSimulation(); corrupt.finishBuild();
 			auto const [ok, diagnostic] = coolantConfigure(corrupt,
 				{ reservoir("bus", 1000.0, 20.0) },
-				{ loop("loop", "normal", "bus", 100, 100, 4, 20, 5, 1.0, 1.0, 1.0, 1.0) });
+				{ loop("loop", "bus", 100, 100, 4, 20, 5, 1.0, 1.0, 1.0, 1.0) });
 			require(!ok && diagnostic.find("corrupt coolant descriptor crossing") != std::string::npos
 				&& !corrupt.getStationSystemsSnapshot().enabled,
 				"Corrupt coolant sandbox crossing not contained at construction");

@@ -400,7 +400,6 @@ namespace core
 		{
 			StationCoolantLoopSnapshot loopResult;
 			loopResult.id = loop.authored.id;
-			loopResult.hazardClass = loop.authored.hazardClass;
 			loopResult.reservoirId = loop.authored.reservoirId;
 			loopResult.coolantCapacityKg = loop.authored.coolantCapacityKg;
 			loopResult.coolantKg = loop.coolantKg;

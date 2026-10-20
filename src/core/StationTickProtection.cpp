@@ -54,14 +54,11 @@ namespace core
 		protectedDemandKW = double{0.0};
 		protectedSuppliedKW = double{0.0};
 
-		// Containment and authored-critical coolant loops: the pump and
-		// freeze-heater demand is computed exactly as the loop pass
-		// computes it, drawn ahead of the external loads, and credited
-		// to the loop so the loop pass consumes the credit rather than
-		// drawing twice. A hazardous loop is protected by its hazard
-		// class: its circulation is a containment boundary, so a
-		// shortage never stops the pumps that keep the hazardous coolant
-		// moving and freeze-protected.
+		// Authored-critical coolant loops: the pump and freeze-heater
+		// demand is computed exactly as the loop pass computes it, drawn
+		// ahead of external loads, and credited to the loop so the loop
+		// pass consumes the credit rather than drawing twice. A loop
+		// carries no class; only criticalService grants protection.
 		for (size_t loopIndex = 0; loopIndex < runtime.coolantLoops.size(); ++loopIndex)
 		{
 			auto const& loop = runtime.coolantLoops[loopIndex];
