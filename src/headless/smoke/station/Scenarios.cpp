@@ -423,25 +423,11 @@ namespace
 	{
 		core::World world("ScenarioWasteConstrained", 2, 2);
 		bringUpScenario(world, "waste-constrained");
-		// Act one: the hazardous retained stream blocks first. By 400 s
-		// the tiny hazardous concentrate buffer is full and the
-		// hazardous chain is destination-blocked, with the untreated
-		// feed accumulating visibly behind it.
-		runOrDiagnose(world, scenarioTicks(400.0), "waste leg to 400 s");
-		auto const& early = world.getStationSystemsSnapshot();
-		auto const& haz = findTreatment(early, "hazWtr");
-		require(haz.scale < 1e-9,
-			"the hazardous treatment was not fully stalled by its full concentrate store at 400 s");
-		require(haz.limiter.find("hazConcentrate") != std::string::npos,
-			("hazardous treatment limiter at 400 s is '" + haz.limiter
-				+ "', expected to name the hazConcentrate store").c_str());
-		require(storeSnap(early, "hazWaterRaw").currentQualified > 19.0,
-			"the backed-up hazardous feed is not accumulating visibly");
-		// Act two: the residue store backs up from routed harvest waste
+		// Act one: the residue store backs up from routed harvest waste
 		// and digester residue and stalls the microbial stage between
 		// 550 s and 750 s. The culture degrades honestly and stays
 		// bounded while stalled.
-		runOrDiagnose(world, scenarioTicks(750.0) - scenarioTicks(400.0), "waste leg to 750 s");
+		runOrDiagnose(world, scenarioTicks(750.0), "waste leg to 750 s");
 		auto const& stalled = world.getStationSystemsSnapshot();
 		auto const& dig = findMicrobial(stalled, "dig");
 		require(dig.scale < 1e-9,
@@ -452,17 +438,22 @@ namespace
 		require(dig.condition > 0.95 && dig.condition <= 1.0,
 			"the digester culture degraded faster than its documented bound while stalled");
 		auto const feedAtStall = dig.feedConsumedKg;
-		// Act three: the normal treatment concentrate store fills last.
-		runOrDiagnose(world, scenarioTicks(1000.0) - scenarioTicks(750.0), "waste leg to 1000 s");
+		// Act two: the normal treatment concentrate store fills. The
+		// tiny 0.005 kg buffer is destination-blocked by 900 s, fresh
+		// water production stops, and the untreated feed accumulates
+		// visibly upstream in the raw buffer.
+		runOrDiagnose(world, scenarioTicks(900.0) - scenarioTicks(750.0), "waste leg to 900 s");
 		auto const& mid = world.getStationSystemsSnapshot();
 		auto const& wtr = findTreatment(mid, "wtr");
 		require(wtr.scale < 1e-9,
-			"the normal water treatment was not stalled by its full concentrate store at 1000 s");
+			"the normal water treatment was not stalled by its full concentrate store at 900 s");
 		require(wtr.limiter.find("concentrate") != std::string::npos,
-			("normal treatment limiter at 1000 s is '" + wtr.limiter
+			("normal treatment limiter at 900 s is '" + wtr.limiter
 				+ "', expected to name the concentrate store").c_str());
+		require(storeSnap(mid, "rawWater").currentQualified > 10.0,
+			"the backed-up raw water feed is not accumulating visibly");
 		// The digester is still stalled just before the ejection restart.
-		runOrDiagnose(world, scenarioTicks(1490.0) - scenarioTicks(1000.0), "waste leg to 1490 s");
+		runOrDiagnose(world, scenarioTicks(1490.0) - scenarioTicks(900.0), "waste leg to 1490 s");
 		require(findMicrobial(world.getStationSystemsSnapshot(), "dig").scale < 1e-9,
 			"the digester was not still stalled just before the residue ejection restart");
 		// Recovery: the residue line restarts at 1500 s. Residue is
@@ -475,21 +466,18 @@ namespace
 			"the digester did not resume after the residue ejection restart opened headroom");
 		require(storeSnap(resumed, "residue").currentQualified < 0.6 - 1e-6,
 			"the residue ejection removed nothing from the store");
-		// The retained-stream contract: the concentrate blocks persist
+		// The retained-stream contract: the concentrate block persists
 		// to the end of the run. Concentrate lands unqualified and
-		// ejection never touches held material, so those services stay
+		// ejection never touches held material, so the treatment stays
 		// visibly stalled while the disposal-ready stream has recovered.
 		runOrDiagnose(world, scenarioTicks(1800.0) - scenarioTicks(1530.0), "waste leg to 1800 s");
 		auto const& end = world.getStationSystemsSnapshot();
 		require(end.healthy, "the waste-constrained run was not healthy");
-		require(findTreatment(end, "hazWtr").scale < 1e-9
-			&& findTreatment(end, "hazWtr").limiter.find("hazConcentrate") != std::string::npos,
-			"the hazardous retained-stream block cleared when it should persist");
 		require(findTreatment(end, "wtr").scale < 1e-9
 			&& findTreatment(end, "wtr").limiter.find("concentrate") != std::string::npos,
 			"the normal retained-stream block cleared when it should persist");
-		require(storeSnap(end, "hazConcentrate").currentUnqualified > 0.0,
-			"the retained hazardous concentrate is not accounted as held material");
+		require(storeSnap(end, "concentrate").currentUnqualified > 0.0,
+			"the retained concentrate is not accounted as held material");
 		requireLedgersClose(end, "waste-constrained");
 		printTimeline(world, "waste-constrained", { "waste-ejection", "microbial" });
 	}

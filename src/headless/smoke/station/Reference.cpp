@@ -109,8 +109,8 @@ namespace
 		require(!reference.provenance.empty(), "the bundled reference records no coefficient provenance");
 		require(!reference.qualification.empty(), "the bundled reference declares no qualification limits");
 		require(reference.scenarioSeconds > 0.0, "the bundled reference declares no scenario duration");
-		// The four explicitly required assumption topics are all documented.
-		for (auto const& topic : { "Water makeup and recovery", "Hazardous autonomy",
+		// The three explicitly required assumption topics are all documented.
+		for (auto const& topic : { "Water makeup and recovery",
 			"Hydrogen and carbon balance", "Microbial participation" })
 		{
 			auto const found = std::any_of(reference.assumptions.begin(), reference.assumptions.end(),
@@ -138,11 +138,14 @@ namespace
 			&& !reference.settings.sabatierReactors.empty()
 			&& !reference.settings.methaneProcessors.empty(),
 			"the bundled reference is missing the carbon/microbial loops");
-		// The register carries its own dedicated water-recovery chain.
+		// The register carries its own dedicated water-recovery chain:
+		// raw buffer, treated fresh, and a retained concentrate stream.
 		auto const dedicated = std::count_if(reference.settings.stores.begin(),
 			reference.settings.stores.end(),
-			[](core::ResourceStoreSettings const& store) { return store.id.rfind("haz", 0) == 0; });
-		require(dedicated >= 3, "the bundled reference has no dedicated recovery chain");
+			[](core::ResourceStoreSettings const& store)
+			{ return store.id == "rawWater" || store.id == "fresh"
+				|| store.id == "concentrate"; });
+		require(dedicated == 3, "the bundled reference has no dedicated recovery chain");
 		// The resource text round-trips: reparsing the packaged text
 		// reproduces the same settings.
 		core::StationReferenceDocument reparsed;
@@ -195,8 +198,7 @@ namespace
 			"the hab did not exchange with the oxygen makeup and CO2 capture services");
 
 		// Water makeup and recovery: the collector condenses cabin
-		// humidity, the treatment upgrades raw to fresh, and the
-		// hazardous treatment runs its own segregated chain.
+		// humidity, the treatment upgrades raw to fresh.
 		require(!snap.waterCollectors.empty() && firstOf(snap.waterCollectors).collectedKg > 0.0,
 			"the hab water collector condensed nothing in nominal operation");
 		auto const& wtr = std::find_if(snap.waterTreatments.begin(), snap.waterTreatments.end(),
@@ -207,20 +209,6 @@ namespace
 			: core::StationWaterTreatmentSnapshot{};
 		require(wtr.processedKg > 0.0 && wtr.treatedKg > 0.0,
 			"the normal water treatment processed nothing in nominal operation");
-		auto const& hazWtr = std::find_if(snap.waterTreatments.begin(), snap.waterTreatments.end(),
-			[](core::StationWaterTreatmentSnapshot const& t) { return t.id == "hazWtr"; })
-			!= snap.waterTreatments.end()
-			? *std::find_if(snap.waterTreatments.begin(), snap.waterTreatments.end(),
-				[](core::StationWaterTreatmentSnapshot const& t) { return t.id == "hazWtr"; })
-			: core::StationWaterTreatmentSnapshot{};
-		require(hazWtr.processedKg > 0.0 && hazWtr.acceptedKg > 0.0,
-			"the hazardous water treatment did not run and clear its releases");
-		auto const hazDisposal = std::find_if(snap.wasteEjections.begin(), snap.wasteEjections.end(),
-			[](auto const& e) { return e.id == "ejectHazConcentrate"; });
-		require(hazDisposal != snap.wasteEjections.end()
-			&& hazDisposal->eligibility == core::WasteEjectionEligibility::HeldOnly
-			&& hazDisposal->heldEjectedTotal > 0.0 && hazDisposal->qualifiedEjectedTotal == 0.0,
-			"reference hazardous concentrate ejection remained structurally dead");
 
 		// Hydrogen/carbon balance: electrolysis feeds the Sabatier stage,
 		// pyrolysis recycles hydrogen back, and the loop retains a net
@@ -312,11 +300,6 @@ namespace
 			require(std::abs(balance.residual) <= snap.balanceTolerance
 				* std::max(1.0, balance.starting),
 				("the " + balance.constituent + " constituent balance did not close").c_str());
-		// The hazardous boundary never touched the normal side: the
-		// hazardous treated store holds only hazardous-class material by
-		// construction, and the normal fresh store never received it.
-		require(storeSnap(snap, "hazWaterTreated").currentQualified > 0.0,
-			"the hazardous chain released nothing through its clearance contract");
 
 		// Determinism: reset replays the scenario tick-for-tick.
 		auto const snapshotAtEnd = snap;

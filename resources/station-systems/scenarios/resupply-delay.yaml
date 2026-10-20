@@ -127,16 +127,6 @@ assumptions:
     in the raw buffer rather than disappearing.
 
     '
-- topic: Hazardous autonomy
-  text: 'The hazardous processing bay is a self-contained segregated service. Hazardous water
-    (hazWaterRaw) is processed only by the hazardous-class treatment, which releases treated material
-    only on complete treatment energy evidence; a curtailed energy dose holds the material unqualified.
-    The hazardous coolant loop owns its own finite coolant inventory, is authored a critical service, so its containment circulation is drawn ahead of discretionary load, and never shares a store, a loop or a generic
-    transfer with the normal side. Hazardous concentrate leaves the station only through its own
-    scheduled ejection. No normal-class process touches a hazardous store anywhere in this configuration,
-    and the validator refuses any edit that would.
-
-    '
 - topic: Hydrogen and carbon balance
   text: 'Hydrogen is produced only by electrolysis and is spent on the Sabatier carbon loop; the
     methane processor returns recycled hydrogen to the same store. Because the Sabatier stage
@@ -389,24 +379,6 @@ stationSystems:
     startingQualified: 80.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-  - id: hazWaterRaw
-    unit: kg
-    capacity: 60.0
-    startingQualified: 20.0
-    startingUnqualified: 0.0
-    protectedReserve: 0.0
-  - id: hazWaterTreated
-    unit: kg
-    capacity: 60.0
-    startingQualified: 0.0
-    startingUnqualified: 0.0
-    protectedReserve: 0.0
-  - id: hazConcentrate
-    unit: kg
-    capacity: 60.0
-    startingQualified: 0.0
-    startingUnqualified: 0.0
-    protectedReserve: 0.0
   - id: toolKit
     unit: kg
     capacity: 10.0
@@ -525,16 +497,6 @@ stationSystems:
     specificEnergyKWhPerKg: 0.5
     consumablePerKg: 0.001
     priority: 1
-  - id: hazWtr
-    sourceStoreId: hazWaterRaw
-    treatedStoreId: hazWaterTreated
-    concentrateStoreId: hazConcentrate
-    consumableStoreId: treatmentMedia
-    throughputKgPerS: 2.0e-05
-    recoveryRatio: 0.85
-    specificEnergyKWhPerKg: 0.6
-    consumablePerKg: 0.002
-    priority: 2
   electrolyzers:
   - id: lyzerHab
     waterStoreId: fresh
@@ -751,13 +713,6 @@ stationSystems:
     minTemperatureC: -40.0
     maxTemperatureC: 120.0
     absorbedHeatKW: 0.0
-  - id: hazSink
-    thermalClass: warm
-    heatCapacityKJPerK: 10000.0
-    startingTemperatureC: 25.0
-    minTemperatureC: -40.0
-    maxTemperatureC: 80.0
-    absorbedHeatKW: 0.0
   radiators:
   - id: radProcess
     reservoirId: processSink
@@ -768,12 +723,6 @@ stationSystems:
   - id: radGen
     reservoirId: genSink
     areaM2: 500.0
-    emissivity: 0.9
-    viewFactor: 0.9
-    sinkTemperatureC: -30.0
-  - id: radHaz
-    reservoirId: hazSink
-    areaM2: 400.0
     emissivity: 0.9
     viewFactor: 0.9
     sinkTemperatureC: -30.0
@@ -789,18 +738,6 @@ stationSystems:
     ratedFlowKgPerS: 2.0
     exchangerConductanceKWPerK: 1.5
     heaterCapacityKW: 0.5
-    criticalService: true
-  - id: loopHaz
-    reservoirId: hazSink
-    coolantCapacityKg: 300.0
-    startingCoolantKg: 300.0
-    specificHeatKJPerKgK: 3.5
-    startingTemperatureC: 25.0
-    freezeProtectionSetpointC: 5.0
-    pumpPowerKW: 0.1
-    ratedFlowKgPerS: 1.5
-    exchangerConductanceKWPerK: 1.0
-    heaterCapacityKW: 0.4
     criticalService: true
   chillers:
   - id: chillerMain
@@ -923,13 +860,6 @@ stationSystems:
   wasteEjections:
   - id: ejectCarbon
     storeId: carbonWaste
-    unit: kg
-    quantity: 0.05
-    firstOccurrenceSeconds: 240.0
-    recurrenceSeconds: 240.0
-    priority: 1
-  - id: ejectHazConcentrate
-    storeId: hazConcentrate
     unit: kg
     quantity: 0.05
     firstOccurrenceSeconds: 240.0

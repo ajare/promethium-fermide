@@ -23,9 +23,8 @@ summary: >
   Sabatier/methane-processing carbon loop with a net hydrogen demand
   that never reads as self-sustaining, an aerobic digester that returns
   recovered nutrients and water from organic waste, crop and algae
-  biology with harvest, a segregated hazardous processing bay with a
-  treatment energy requirement and a protected hazardous coolant loop,
-  scheduled airlock cycles, a scheduled maintenance job and an
+  biology with harvest, thermal control with a protected chilled
+  service, scheduled airlock cycles, a scheduled maintenance job and an
   installation outage. Every store, budget and inventory below is one
   reconciled value; the numbers are provisional model assumptions with
   the recorded provenance, not flight-qualified engineering.
@@ -139,19 +138,6 @@ assumptions:
       and process recovery first, delivered potable top-ups second, and
       every kilogram that cannot be treated stays visible in the raw
       buffer rather than disappearing.
-  - topic: "Hazardous autonomy"
-    text: >
-      The hazardous processing bay is a self-contained segregated
-      service. Hazardous water (hazWaterRaw) is processed only by the
-      hazardous-class treatment, which releases treated material only
-      on complete treatment energy evidence; a curtailed energy dose
-      holds the material unqualified. The hazardous coolant loop owns its own finite
-      coolant inventory, is authored a critical service, so its containment circulation is drawn ahead of discretionary load, and never shares
-      a store, a loop or a generic transfer with the normal side.
-      Hazardous concentrate leaves the station only through its own
-      scheduled ejection. No normal-class process touches a hazardous
-      store anywhere in this configuration, and the validator refuses
-      any edit that would.
   - topic: "Hydrogen and carbon balance"
     text: >
       Hydrogen is produced only by electrolysis and is spent on the
@@ -425,24 +411,6 @@ stationSystems:
       startingQualified: 80.0
       startingUnqualified: 0.0
       protectedReserve: 0.0
-    - id: hazWaterRaw
-      unit: kg
-      capacity: 60.0
-      startingQualified: 20.0
-      startingUnqualified: 0.0
-      protectedReserve: 0.0
-    - id: hazWaterTreated
-      unit: kg
-      capacity: 60.0
-      startingQualified: 0.0
-      startingUnqualified: 0.0
-      protectedReserve: 0.0
-    - id: hazConcentrate
-      unit: kg
-      capacity: 60.0
-      startingQualified: 0.0
-      startingUnqualified: 0.0
-      protectedReserve: 0.0
     - id: toolKit
       unit: kg
       capacity: 10.0
@@ -565,17 +533,6 @@ stationSystems:
       specificEnergyKWhPerKg: 0.5
       consumablePerKg: 0.001
       priority: 1
-    - id: hazWtr
-      sourceStoreId: hazWaterRaw
-      treatedStoreId: hazWaterTreated
-      concentrateStoreId: hazConcentrate
-      consumableStoreId: treatmentMedia
-      throughputKgPerS: 2.0e-5
-      recoveryRatio: 0.85
-      specificEnergyKWhPerKg: 0.6
-      consumablePerKg: 0.002
-      priority: 2
-
   electrolyzers:
     - id: lyzerHab
       waterStoreId: fresh
@@ -803,14 +760,6 @@ stationSystems:
       minTemperatureC: -40.0
       maxTemperatureC: 120.0
       absorbedHeatKW: 0.0
-    - id: hazSink
-      thermalClass: warm
-      heatCapacityKJPerK: 10000.0
-      startingTemperatureC: 25.0
-      minTemperatureC: -40.0
-      maxTemperatureC: 80.0
-      absorbedHeatKW: 0.0
-
   radiators:
     - id: radProcess
       reservoirId: processSink
@@ -824,13 +773,6 @@ stationSystems:
       emissivity: 0.9
       viewFactor: 0.9
       sinkTemperatureC: -30.0
-    - id: radHaz
-      reservoirId: hazSink
-      areaM2: 400.0
-      emissivity: 0.9
-      viewFactor: 0.9
-      sinkTemperatureC: -30.0
-
   coolantLoops:
     - id: loopChill
       reservoirId: chilledWater
@@ -844,19 +786,6 @@ stationSystems:
       exchangerConductanceKWPerK: 1.5
       heaterCapacityKW: 0.5
       criticalService: true
-    - id: loopHaz
-      reservoirId: hazSink
-      coolantCapacityKg: 300.0
-      startingCoolantKg: 300.0
-      specificHeatKJPerKgK: 3.5
-      startingTemperatureC: 25.0
-      freezeProtectionSetpointC: 5.0
-      pumpPowerKW: 0.1
-      ratedFlowKgPerS: 1.5
-      exchangerConductanceKWPerK: 1.0
-      heaterCapacityKW: 0.4
-      criticalService: true
-
   chillers:
     - id: chillerMain
       thermalClass: low
@@ -998,14 +927,6 @@ stationSystems:
       priority: 1
     - id: ejectConcentrate
       storeId: concentrate
-      eligibility: heldOnly
-      unit: kg
-      quantity: 0.05
-      firstOccurrenceSeconds: 240.0
-      recurrenceSeconds: 240.0
-      priority: 1
-    - id: ejectHazConcentrate
-      storeId: hazConcentrate
       eligibility: heldOnly
       unit: kg
       quantity: 0.05

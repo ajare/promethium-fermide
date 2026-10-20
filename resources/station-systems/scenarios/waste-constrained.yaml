@@ -5,20 +5,17 @@
 # stalled services and the recovery all run through the implemented
 # mechanisms - finite stores, destination-full backpressure, scheduled
 # waste ejection with explicit loss booking - never an infinite sink.
-# Hazardous segregation is preserved throughout: the hazardous side never
-# borrows normal-class headroom.
 name: Meridian waste-storage constraint drill
 schemaVersion: 96
 summary: 'A four-crew Meridian configuration exercising constrained waste storage and stalled
-  ejection, sized down to hours of production. The hazardous concentrate buffer fills first and
-  the hazardous chain stops qualifying releases while hazWaterRaw backs up. The residue store
-  then backs up from routed harvest waste and digester residue and stalls the microbial stage,
-  whose culture begins to starve. The normal treatment concentrate store fills last and the normal
-  water treatment blocks with its destination full. The difference between the stalled services
+  ejection, sized down to hours of production. The normal treatment concentrate buffer fills
+  first and the normal water treatment blocks with its destination full while rawWater backs
+  up. The residue store then backs up from routed harvest waste and digester residue and stalls
+  the microbial stage, whose culture begins to starve. The difference between the stalled services
   is the disposal-readiness contract: residue is disposal-ready qualified terminal waste, so when
   the stalled residue ejection restarts at 1500 s it opens real headroom and the digester resumes.
-  The concentrate streams are retained, unqualified material - ejection never touches held waste
-  - so those blocks persist and stay visible for the rest of the run. No infinite sink and no
+  The concentrate stream is retained, unqualified material - ejection never touches held waste
+  - so that block persists and stays visible for the rest of the run. No infinite sink and no
   magic disposal: full storage constrains processing, held material stays accounted, and every
   ejected kilogram is booked as an explicit station loss.'
 provenance:
@@ -127,16 +124,6 @@ assumptions:
     in the raw buffer rather than disappearing.
 
     '
-- topic: Hazardous autonomy
-  text: 'The hazardous processing bay is a self-contained segregated service. Hazardous water
-    (hazWaterRaw) is processed only by the hazardous-class treatment, which releases treated material
-    only on complete treatment energy evidence; a curtailed energy dose holds the material unqualified.
-    The hazardous coolant loop owns its own finite coolant inventory, is authored a critical service, so its containment circulation is drawn ahead of discretionary load, and never shares a store, a loop or a generic
-    transfer with the normal side. Hazardous concentrate leaves the station only through its own
-    scheduled ejection. No normal-class process touches a hazardous store anywhere in this configuration,
-    and the validator refuses any edit that would.
-
-    '
 - topic: Hydrogen and carbon balance
   text: 'Hydrogen is produced only by electrolysis and is spent on the Sabatier carbon loop; the
     methane processor returns recycled hydrogen to the same store. Because the Sabatier stage
@@ -200,11 +187,10 @@ qualification: "Scope and qualification limits. This is a provisional, internall
 scenarioSeconds: 1800.0
 scenarioNotes: 'Reproducible waste-constraint scenario: enable the configuration, resume the World
   clock and run 1800 simulated seconds. Expected observable result at the tick/snapshot/event
-  seam: the hazardous water treatment is fully blocked with its hazConcentrate destination full
-  before 400 s; the microbial digester is blocked on its residue destination between 550 s and
-  750 s; the normal water treatment is destination-blocked on its concentrate store between 700
-  s and 1000 s; the residue ejection line restarts at 1500 s and the digester resumes feeding
-  within 30 s of that opening; the two concentrate blocks persist to the end of the run because
+  seam: the normal water treatment is destination-blocked on its concentrate store between 700
+  s and 1000 s; the microbial digester is blocked on its residue destination between 550 s and
+  750 s; the residue ejection line restarts at 1500 s and the digester resumes feeding
+  within 30 s of that opening; the concentrate block persists to the end of the run because
   retained unqualified material is not ejectable; the unit and constituent ledgers close with
   the ejected residue booked as loss.'
 stationSystems:
@@ -389,24 +375,6 @@ stationSystems:
     startingQualified: 80.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-  - id: hazWaterRaw
-    unit: kg
-    capacity: 60.0
-    startingQualified: 20.0
-    startingUnqualified: 0.0
-    protectedReserve: 0.0
-  - id: hazWaterTreated
-    unit: kg
-    capacity: 60.0
-    startingQualified: 0.0
-    startingUnqualified: 0.0
-    protectedReserve: 0.0
-  - id: hazConcentrate
-    unit: kg
-    capacity: 0.0009
-    startingQualified: 0.0
-    startingUnqualified: 0.0
-    protectedReserve: 0.0
   - id: toolKit
     unit: kg
     capacity: 10.0
@@ -525,16 +493,6 @@ stationSystems:
     specificEnergyKWhPerKg: 0.5
     consumablePerKg: 0.001
     priority: 1
-  - id: hazWtr
-    sourceStoreId: hazWaterRaw
-    treatedStoreId: hazWaterTreated
-    concentrateStoreId: hazConcentrate
-    consumableStoreId: treatmentMedia
-    throughputKgPerS: 2.0e-05
-    recoveryRatio: 0.85
-    specificEnergyKWhPerKg: 0.6
-    consumablePerKg: 0.002
-    priority: 2
   electrolyzers:
   - id: lyzerHab
     waterStoreId: fresh
@@ -751,13 +709,6 @@ stationSystems:
     minTemperatureC: -40.0
     maxTemperatureC: 120.0
     absorbedHeatKW: 0.0
-  - id: hazSink
-    thermalClass: warm
-    heatCapacityKJPerK: 10000.0
-    startingTemperatureC: 25.0
-    minTemperatureC: -40.0
-    maxTemperatureC: 80.0
-    absorbedHeatKW: 0.0
   radiators:
   - id: radProcess
     reservoirId: processSink
@@ -768,12 +719,6 @@ stationSystems:
   - id: radGen
     reservoirId: genSink
     areaM2: 500.0
-    emissivity: 0.9
-    viewFactor: 0.9
-    sinkTemperatureC: -30.0
-  - id: radHaz
-    reservoirId: hazSink
-    areaM2: 400.0
     emissivity: 0.9
     viewFactor: 0.9
     sinkTemperatureC: -30.0
@@ -789,18 +734,6 @@ stationSystems:
     ratedFlowKgPerS: 2.0
     exchangerConductanceKWPerK: 1.5
     heaterCapacityKW: 0.5
-    criticalService: true
-  - id: loopHaz
-    reservoirId: hazSink
-    coolantCapacityKg: 300.0
-    startingCoolantKg: 300.0
-    specificHeatKJPerKgK: 3.5
-    startingTemperatureC: 25.0
-    freezeProtectionSetpointC: 5.0
-    pumpPowerKW: 0.1
-    ratedFlowKgPerS: 1.5
-    exchangerConductanceKWPerK: 1.0
-    heaterCapacityKW: 0.4
     criticalService: true
   chillers:
   - id: chillerMain
@@ -936,13 +869,6 @@ stationSystems:
     firstOccurrenceSeconds: 240.0
     recurrenceSeconds: 240.0
     priority: 1
-  - id: ejectHazConcentrate
-    storeId: hazConcentrate
-    unit: kg
-    quantity: 0.05
-    firstOccurrenceSeconds: 900.0
-    recurrenceSeconds: 300.0
-    priority: 1
   - id: ejectResidue
     storeId: residue
     unit: kg
@@ -983,47 +909,37 @@ stationSystems:
       consumed: true
 scenarioKind: emergency
 limitingServices:
-- item: Hazardous water treatment (hazConcentrate store)
-  detail: The 0.0009 kg hazardous concentrate buffer fills near 300 s; the hazardous chain stops
-    qualifying releases while hazWaterRaw backs up. The hazardous side never borrows normal-class
-    storage - segregation holds the constraint. The retained concentrate is unqualified, so the
-    scheduled ejection finds nothing disposal-ready and the block persists.
-- item: Microbial digestion (residue store)
-  detail: The 0.6 kg residue store backs up from routed harvest waste and digester residue (roughly
-    5e-6 kg/s from the digestion alone) and fills between 550 s and 750 s; with the residue destination
-    full the digester blocks, feed goes undigested and the culture begins starving down at its
-    authored degradation rate.
 - item: Normal water treatment (concentrate store)
   detail: 'The 0.005 kg concentrate store fills at roughly 6e-6 kg/s near 830 s; with the destination
     full the treatment stage blocks and fresh-water production stops. Concentrate is retained,
     not usable: it lands unqualified and the ejection line never touches held material, so this
     block persists by design.'
+- item: Microbial digestion (residue store)
+  detail: The 0.6 kg residue store backs up from routed harvest waste and digester residue (roughly
+    5e-6 kg/s from the digestion alone) and fills between 550 s and 750 s; with the residue destination
+    full the digester blocks, feed goes undigested and the culture begins starving down at its
+    authored degradation rate.
 eventOrdering:
-- item: hazardous block before the digester stall
-  detail: The small hazardous concentrate buffer fills near 300 s, well before the residue store
-    backs up between 550 s and 750 s.
-- item: digester stall before the normal-treatment block
-  detail: The residue backup stalls the microbial stage before the normal treatment concentrate
-    store fills near 830 s.
+- item: normal-treatment block before the digester stall
+  detail: The small normal concentrate store fills near 830 s; the residue store backs up later,
+    between 550 s and 750 s, so the treatment block is the first retained-stream stall the run
+    reports.
 - item: residue ejection restart before digester recovery
   detail: The residue line restarts at 1500 s; only then does qualified residue leave the store,
     headroom opens, and the digester resumes feeding.
-- item: retained blocks outlast the recoverable one
-  detail: 'At the end of the run the two concentrate blocks are still in force: held unqualified
-    material is never ejected, so those services stay visibly stalled while the disposal-ready
-    stream has recovered.'
+- item: the retained block outlasts the recoverable one
+  detail: 'At the end of the run the concentrate block is still in force: held unqualified material
+    is never ejected, so the treatment stays visibly stalled while the disposal-ready stream has
+    recovered.'
 outcomeRanges:
-- item: Hazardous treatment block onset
-  detail: 'Between 250 s and 400 s (provisional: 0.0009 kg at 3e-6 kg/s). The block persists to
-    the end of the run: the retained concentrate is unqualified and not ejectable.'
+- item: Normal treatment block onset
+  detail: 'Between 700 s and 1000 s (provisional: 0.005 kg at 6e-6 kg/s). The block persists to
+    the end of the run for the same retained-material reason.'
 - item: Digester stall window
   detail: The digester is blocked on its residue destination between 550 s and 750 s and resumes
     feeding within 30 s after the 1500 s ejection restart. Culture condition stays inside [0,1]
     and degrades by no more than 0.05 over the run (provisional authored starvation degradation
     0.05/hour).
-- item: Normal treatment block onset
-  detail: 'Between 700 s and 1000 s (provisional: 0.005 kg at 6e-6 kg/s). The block persists to
-    the end of the run for the same retained-material reason.'
 - item: Conservation bound
   detail: Every stalled kilogram stays visible in its source store; the ejected residue lands
     in the ejection ledger as an explicit loss; no unit balance closes only by disappearance -

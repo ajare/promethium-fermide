@@ -244,7 +244,7 @@ namespace
 		require(std::any_of(workload.settings.deliveries.begin(), workload.settings.deliveries.end(),
 			[](core::ResourceDeliverySettings const& d) { return d.recurrenceSeconds > 0.0; }),
 			"no delivery in the workload recurs");
-		require(workload.settings.wasteEjections.size() >= 3
+		require(workload.settings.wasteEjections.size() >= 2
 			&& std::all_of(workload.settings.wasteEjections.begin(),
 				workload.settings.wasteEjections.end(),
 				[](core::WasteEjectionSettings const& e) { return e.recurrenceSeconds > 0.0; }),
