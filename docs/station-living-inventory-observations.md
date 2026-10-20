@@ -29,7 +29,7 @@ Growth, respiration, harvest and death use the existing simulation exclusively.
 Transferred constituents disappear from the living contribution and enter the
 receiving store's actual blend. Lost residue is outside retained inventory;
 loss, harvest and uptake counters are not extra owners. Metadata drives the
-same generic selectors, aggregate, instance, hazard and equipment-type queries.
+same generic selectors, aggregate, instance and equipment-type queries.
 Expected owners remain in the query when observations are unavailable, producing
 gaps rather than a smaller apparent total. Shared cadence, retention, limits,
 caching and applied-run lifecycle are unchanged.

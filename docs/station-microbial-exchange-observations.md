@@ -14,12 +14,11 @@ requested measurements. Replacement stock has no invented request.
 Material process accounts are kg/tick converted using the simulation timestep to
 kg/s, regardless of observation cadence. Culture medium and replacement stock
 are in their referenced store units and receive canonical unit conversion.
-Exchange views retain the generic hazard-segregated grouping; normal and
-hazardous chains never silently merge. Material identity comes from the existing
+Exchange views merge matching materials across legacy classes. Material identity comes from the existing
 explicit/relationship-resolved store
 metadata, never a label, unit or compound composition. Unknown compound feed,
 nutrient product or residue identity produces an incomplete view with gaps rather
-than an apparently complete total. Hazard and thermal classes remain explicit.
+than an apparently complete total. Thermal service classes remain explicit.
 
 Recovered nutrients are a compound material, not atmospheric nitrogen. The
 snapshot's cumulative N/P/K/mineral recovery totals are **not** instantaneous
@@ -41,7 +40,7 @@ Release CTest coverage:
 - `station-microbialExchangeObservations`: public World recording/query results,
   resource-limited processing, consumable exhaustion, cold degradation and benign
   recovery, mass/constituent balance, conversion of gram consumables, connection
-  loss and retained heat, inactivity, multiple instances, hazard separation, missing
+  loss and retained heat, inactivity, multiple instances, cross-class aggregation, missing
   contributors and unclassified compound feed.
 - `station-editor-microbial-observations`: real headless ImGui selector and
   breakdown controls, hidden-window history, process input/output rates,

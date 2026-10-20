@@ -4158,7 +4158,7 @@ namespace
 				REQ(world->getStationSystemsSnapshot() == observed && world->getStationSystemsObservationRevision() == revision
 					&& window.draftHistory().undoCount() == 0 && !world->isModified(), "electrical graph mutated applied run or document");
 			}
-			std::string const exchangeId = "exchange/Resource transfer/Output/Destination/exchange-test/kg/s/normal";
+			std::string const exchangeId = "exchange/Resource transfer/Output/Destination/exchange-test/kg/s";
 			ctx->ItemClick("##Station observation property"); ctx->Yield(2);
 			auto const catalogue = world->getStationSystemsObservationCatalogue();
 			auto const selected = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& c) { return c.id == exchangeId; });
@@ -4193,20 +4193,17 @@ namespace
 			ctx->ComboClick("Breakdown/Aggregate"); ctx->Yield(2);
 			REQ(window.selectedObservation() == "stored-material/water/kg/aggregate",
 				"Aggregate control did not select generic query");
-			ctx->ComboClick("Breakdown/Hazard class"); ctx->Yield(2);
-			REQ(window.selectedObservation() == "stored-material/water/kg/by-hazard"
-				&& driver.contains("hazardous") && driver.contains("normal"), "Hazard breakdown controls or legend missing");
-			auto const hazard = world->queryStationSystemsChart(window.selectedObservation());
-			REQ(hazard.series.back().upper[0] == water.series[0].values[0], "Hazard stack changed accounting population");
 			ctx->ComboClick("Breakdown/Instance"); ctx->Yield(2);
 			REQ(window.selectedObservation() == "stored-material/water/kg", "Instance control lost stable property identity");
-			ctx->ComboClick("##Station observation property/Usable stored material: water (kg; normal)"); ctx->Yield(2);
-			REQ(driver.contains("NOT discretionary drawability") && driver.contains("hazardous supply cannot meet normal demand")
-				&& world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] == 10,
-				"Usable graph included unqualified/hazardous material or hid reserve semantics");
-			ctx->ComboClick("##Station observation property/Usable stored material: water (kg; hazardous)"); ctx->Yield(2);
-			REQ(world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] == 2,
-				"Hazard-qualified inventory not separately visible");
+			ctx->ComboClick("##Station observation property/Usable stored material: water (kg)"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "stored-usable/water/kg"
+				&& driver.contains("NOT discretionary drawability")
+				&& world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] == 12,
+				"Usable graph did not merge qualified classes, included held material or hid reserves");
+			ctx->ComboClick("Breakdown/Aggregate"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "stored-usable/water/kg/aggregate"
+				&& world->queryStationSystemsChart(window.selectedObservation()).series.size() == 1,
+				"Merged usable aggregate unavailable");
 			ctx->ComboClick("##Station observation property/Stored material inventory: oxygen (kg)"); ctx->Yield(2);
 			REQ(world->queryStationSystemsChart("stored-material/oxygen/kg").series[0].values[0] == 4,
 				"Same-unit different materials merged through selector");
@@ -4226,7 +4223,7 @@ namespace
 				&& driver.contains("retained waste"), "Constituent selector omitted compound accounting boundary");
 			REQ(world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] == 2.25,
 				"Constituent selector added material owner mass or atmospheric water twice");
-			ctx->ComboClick("##Station observation property/Usable stored constituent: water (kg; normal)"); ctx->Yield(2);
+			ctx->ComboClick("##Station observation property/Usable stored constituent: water (kg)"); ctx->Yield(2);
 			REQ(driver.contains("NOT discretionary drawability")
 				&& world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] == 1.75,
 				"Usable constituent included unqualified moisture");

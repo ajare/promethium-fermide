@@ -3,8 +3,8 @@
 Water collectors, Water treatment, electrolyzers and CO2 capture register typed
 measurements once in `src/core/StationWaterGasMetrics.cpp`. The existing catalogue,
 World-owned bounded recorder, declarative queries and generic Station Flow renderer
-provide independently selectable roles, aggregate actual rates, instance stacks,
-and hazard grouping where multiple classes apply. Recording does not depend on
+provide independently selectable roles, aggregate actual rates and instance
+stacks, combining matching materials across legacy classes. Recording does not depend on
 selection or an open editor.
 
 ## Accounting boundaries

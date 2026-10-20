@@ -404,24 +404,20 @@ namespace core
 			for (auto d : members) chart.series.push_back({d->id, d->instanceId, StationMetricValue::Actual,
 				StationChartOperation::Value, {}, {}, true, d->hazardClass.value_or("unclassified")});
 			charts.push_back(std::move(chart));
-			// Qualified inventory is never summed across incompatible hazards.
-			std::map<std::string, std::vector<StationMetricDescriptor const*>> usable;
-			for (auto d : members) usable[d->hazardClass.value_or("unclassified")].push_back(d);
-			for (auto const& [hazard, contributions] : usable)
 			{
-				StationChartDefinition qualified{"stored-usable/" + material + "/" + stationUnitLabel(unit) + "/" + hazard,
-					"Material inventories", "Usable stored material: " + material + " (" + stationUnitLabel(unit) + "; " + hazard + ")",
-					"Qualified usable inventory: " + material + " — " + hazard + " (applied simulation)", quantity, unit, {}};
-				qualified.accountingNote = "Resource stores only; qualified contents only, excludes unqualified contents. Protected resource reserves remain included: usable is NOT discretionary drawability. Hazard classes are not interchangeable; hazardous supply cannot meet normal demand. "
+				StationChartDefinition qualified{"stored-usable/" + material + "/" + stationUnitLabel(unit),
+					"Material inventories", "Usable stored material: " + material + " (" + stationUnitLabel(unit) + ")",
+					"Qualified usable inventory: " + material + " (applied simulation)", quantity, unit, {}};
+				qualified.accountingNote = "Resource stores only; qualified contents only, excludes unqualified contents. Protected resource reserves remain included: usable is NOT discretionary drawability. "
 					+ std::to_string(unclassified) + " unclassified or non-canonical inventories excluded from material subtotals.";
 				qualified.partialAccounting = unclassified != 0;
 				StationChartSeriesDefinition subtotal;
-				subtotal.metricId = qualified.id + "/subtotal"; subtotal.label = "Classified qualified stores subtotal (" + hazard + ")";
+				subtotal.metricId = qualified.id + "/subtotal"; subtotal.label = "Classified qualified stores subtotal";
 				subtotal.operation = StationChartOperation::Sum;
-				for (auto d : contributions) subtotal.contributors.push_back(d->id + "/usable");
+				for (auto d : members) subtotal.contributors.push_back(d->id + "/usable");
 				qualified.series.push_back(std::move(subtotal));
-				for (auto d : contributions) qualified.series.push_back({d->id + "/usable", d->instanceId + " (" + hazard + ")",
-					StationMetricValue::Actual, StationChartOperation::Value, {}, {}, true, hazard});
+				for (auto d : members) qualified.series.push_back({d->id + "/usable", d->instanceId,
+					StationMetricValue::Actual, StationChartOperation::Value, {}, {}, true});
 				charts.push_back(std::move(qualified));
 			}
 		}
@@ -485,13 +481,12 @@ namespace core
 		{
 			auto const& [constituent, quantity, unit] = key;
 			std::sort(members.begin(), members.end(), [](auto a, auto b) { return a->id < b->id; });
-			auto make = [&](std::vector<StationMetricDescriptor const*> const& population, std::string hazard, bool accounted = false) {
+			auto make = [&](std::vector<StationMetricDescriptor const*> const& population, bool usable = false, bool accounted = false) {
 				if (population.empty()) return;
-				bool const usable = !hazard.empty();
 				std::string const prefix = accounted ? "accounted-constituent/" : usable ? "stored-usable-constituent/" : "stored-constituent/";
 				std::string const label = accounted ? "Accounted constituent inventory: " : usable ? "Usable stored constituent: " : "Stored constituent inventory: ";
-				StationChartDefinition chart{prefix + constituent + "/" + stationUnitLabel(unit) + (usable ? "/" + hazard : ""),
-					"Constituent inventories", label + constituent + " (" + stationUnitLabel(unit) + (usable ? "; " + hazard : "") + ")",
+				StationChartDefinition chart{prefix + constituent + "/" + stationUnitLabel(unit),
+					"Constituent inventories", label + constituent + " (" + stationUnitLabel(unit) + ")",
 					label + constituent + " (applied simulation)", quantity, unit, {}};
 				chart.partialAccounting = true;
 				chart.accountingNote = "Compound Resource stores only, including retained waste and material awaiting treatment already owned by stores; not a system total. "
@@ -503,8 +498,8 @@ namespace core
 					"Chemical energy is not mass. Bound nutrient nitrogen is distinct from atmospheric nitrogen. Material ownership and constituent decomposition are separate views. "
 					"Partial system accounting: excludes free gases/liquids, crew body mass, microbial biomass and uncharacterised stores (" + std::to_string(uncharacterised) + "). ";
 				chart.accountingNote += usable
-					? "Qualified blend only; excludes unqualified contents. Protected reserves remain included: NOT discretionary drawability. Hazard classes are not interchangeable."
-					: "Includes qualified and unqualified contents; hazard totals do not imply interchangeability or usable supply.";
+					? "Qualified blend only; excludes unqualified contents. Protected reserves remain included: NOT discretionary drawability."
+					: "Includes qualified and unqualified contents; totals do not imply usable supply.";
 				StationChartSeriesDefinition total;
 				total.metricId = chart.id + "/subtotal"; total.label = accounted ? "Accounted constituents subtotal" : "Characterised stores subtotal";
 				total.operation = StationChartOperation::Sum;
@@ -515,16 +510,14 @@ namespace core
 					d->hazardClass.value_or("unclassified"), d->equipmentType});
 				charts.push_back(std::move(chart));
 			};
-			make(members, {}, true);
+			make(members, false, true);
 			std::vector<StationMetricDescriptor const*> stores;
 			for (auto d : members) if (d->exchangeRole == "stored-constituent") stores.push_back(d);
-			make(stores, {});
-			std::map<std::string, std::vector<StationMetricDescriptor const*>> hazards;
-			for (auto d : stores) hazards[d->hazardClass.value_or("unclassified")].push_back(d);
-			for (auto const& [hazard, population] : hazards) make(population, hazard);
+			make(stores);
+			make(stores, true);
 		}
 		using ExchangeKey = std::tuple<std::string, StationMetricRole, std::string, std::string,
-			StationPhysicalQuantity, StationCanonicalUnit, std::string, std::string>;
+			StationPhysicalQuantity, StationCanonicalUnit, std::string>;
 		std::map<ExchangeKey, std::vector<StationMetricDescriptor const*>> exchanges;
 		for (auto const& d : descriptors)
 			if (!d.equipmentType.empty() && d.unit != StationCanonicalUnit::Unspecified
@@ -532,21 +525,21 @@ namespace core
 					|| d.role == StationMetricRole::Generation || d.role == StationMetricRole::Loss
 					|| (d.id.starts_with("exchange/") && (d.role == StationMetricRole::Inventory || d.role == StationMetricRole::InventoryChange))))
 				exchanges[{d.equipmentType, d.role, d.exchangeRole, d.materialId.value_or(d.constituentId ? "constituent/" + *d.constituentId : d.coverage == StationMetricCoverage::Unclassified ? "unclassified/" + d.instanceId : "energy"), d.quantity, d.unit,
-					d.hazardClass.value_or("unclassified"), d.thermalClass.value_or("")}].push_back(&d);
+					d.thermalClass.value_or("")}].push_back(&d);
 		for (auto const& [key, members] : exchanges)
 		{
-			auto const& [type, role, exchange, material, quantity, unit, hazard, service] = key;
+			auto const& [type, role, exchange, material, quantity, unit, service] = key;
 			bool const resource = type == "Resource transfer" || type == "Resource conversion";
 			std::string const direction = role == StationMetricRole::Loss ? (resource ? "Transport loss" : "Loss")
 				: role == StationMetricRole::Inventory ? "Inventory" : role == StationMetricRole::InventoryChange ? "Inventory change"
 				: role == StationMetricRole::Input ? "Input" : role == StationMetricRole::Generation ? "Generation" : "Output";
 			std::string const id = "exchange/" + type + "/" + direction + "/" + exchange + "/" + material
-				+ "/" + stationUnitLabel(unit) + "/" + hazard + (service.empty() ? "" : "/thermal-class/" + service);
+				+ "/" + stationUnitLabel(unit) + (service.empty() ? "" : "/thermal-class/" + service);
 			std::string const label = type + ": " + exchange + " " + direction + " — " + material
-				+ " (" + stationUnitLabel(unit) + "; " + hazard + (service.empty() ? "" : "; class " + service) + ")";
+				+ " (" + stationUnitLabel(unit) + (service.empty() ? "" : "; class " + service) + ")";
 			StationChartDefinition chart{id, resource ? "Resource exchanges" : direction == "Input" ? "Equipment inputs"
 				: direction == "Loss" ? "Equipment losses" : role == StationMetricRole::Inventory || role == StationMetricRole::InventoryChange ? "Equipment inventories" : "Equipment outputs", label, label + " (applied simulation)", quantity, unit, {}};
-			chart.accountingNote = "Authoritative exchange rate per simulation second. Generation/availability, pool delivery, supplied service, startup obligations, heat and losses are distinct properties, not additive outputs. Material identity, quantity and hazard class remain separate. Requests are optional overlays, never actual contributions.";
+			chart.accountingNote = "Authoritative exchange rate per simulation second. Generation/availability, pool delivery, supplied service, startup obligations, heat and losses are distinct properties, not additive outputs. Material identity and quantity remain separate. Requests are optional overlays, never actual contributions.";
 			if (role == StationMetricRole::Inventory) chart.accountingNote = "Authoritative retained inventory state in canonical units, not an output rate. ";
 			if (role == StationMetricRole::Inventory && unit == StationCanonicalUnit::KilowattHour)
 				chart.accountingNote += "Thermal energy uses the solver's zero-degrees-C reference; retained source heat is not useful output. ";
@@ -586,18 +579,6 @@ namespace core
 			auto aggregate = chart;
 			aggregate.id += "/aggregate"; aggregate.breakdown = "Aggregate";
 			std::erase_if(aggregate.series, [](auto const& s) { return s.stacked; });
-			auto hazard = aggregate;
-			hazard.id = chart.id + "/by-hazard"; hazard.breakdown = "Hazard class";
-			std::map<std::string, std::vector<std::string>> groups;
-			for (auto const& s : chart.series) if (s.stacked && !s.hazardClass.empty())
-			{
-				auto& ids = groups[s.hazardClass];
-				if (s.operation == StationChartOperation::Value) ids.push_back(s.metricId);
-				else ids.insert(ids.end(), s.contributors.begin(), s.contributors.end());
-			}
-			for (auto const& [key, ids] : groups)
-				hazard.series.push_back({chart.propertyId + "/hazard/" + key, key, StationMetricValue::Actual,
-					StationChartOperation::Sum, ids, {}, true, key});
 			auto equipment = aggregate;
 			equipment.id = chart.id + "/by-equipment"; equipment.breakdown = "Equipment type";
 			std::map<std::string, std::vector<std::string>> equipmentGroups;
@@ -613,7 +594,6 @@ namespace core
 				aggregate.id = chart.propertyId;
 			}
 			charts.push_back(std::move(aggregate));
-			if (groups.size() > 1) charts.push_back(std::move(hazard));
 			if (equipmentGroups.size() > 1) charts.push_back(std::move(equipment));
 		}
 	}

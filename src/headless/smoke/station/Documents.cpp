@@ -134,8 +134,8 @@ namespace
 			require(restored->getStationSystemsSettings() == explicitSettings, "Reset lost material identity");
 			restored->resumeSimulation(); require(restored->advanceTicks(60), "Restored inventory observation failed");
 			restored->pauseSimulation();
-			auto const usable = restored->queryStationSystemsChart("stored-usable/water/kg/normal/aggregate");
-			auto const hazardous = restored->queryStationSystemsChart("stored-usable/custom-feedstock-2/kg/hazardous/aggregate");
+			auto const usable = restored->queryStationSystemsChart("stored-usable/water/kg/aggregate");
+			auto const hazardous = restored->queryStationSystemsChart("stored-usable/custom-feedstock-2/kg/aggregate");
 			require(!usable.incomplete && usable.series[0].values[0] == 20
 				&& !hazardous.incomplete && hazardous.series[0].values[0] == 10,
 				"Restored qualified inventory lost identity/hazard/reserve semantics");

@@ -24,12 +24,12 @@ Bound nutrient nitrogen and atmospheric nitrogen remain separate selectors.
 Compound moisture is not silently added to free-water material stock, nor is
 bound nitrogen inferred to be freely available compartment nitrogen.
 
-`stored-usable-constituent/<constituent>/<unit>/<hazard>` reports the qualified
+`stored-usable-constituent/<constituent>/<unit>` reports the qualified
 share of the actual blend, matching the allocator's proportional-blend draw
 rule. Unqualified contents are excluded. Protected reserves remain included;
-qualified does not mean discretionary drawability. Normal and hazardous supply
-are never combined into a usable view. Total, instance, aggregate and hazard
-breakdowns reuse the generic query/stack machinery and expected membership.
+qualified does not mean discretionary drawability. Qualified contributions merge
+across legacy classes. Total, instance and aggregate breakdowns reuse the generic
+query/stack machinery and expected membership.
 
 ## Retention audit and coverage
 

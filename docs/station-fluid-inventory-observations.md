@@ -35,11 +35,11 @@ Thermal reservoirs and buffers retain energy, not separately identified fluids.
 ## Query boundaries
 
 - `stored-material/<material>/<unit>` preserves the Resource-store-only boundary.
-- `stored-usable/...` preserves qualified contents and hazard separation; it does
+- `stored-usable/...` combines qualified contents across legacy classes; it does
   not include compartment gas or coolant and does not imply drawable reserves.
 - `accounted-material/<material>/<unit>` sums registered store and non-store
   ownership contributions. Instance labels include owner type. Aggregate,
-  instance, hazard and equipment-type breakdowns use the same generic queries
+  instance, aggregate and equipment-type breakdowns use the same generic queries
   and renderer; grouping does not change the population.
 
 Broader views deliberately say **Accounted**, not complete system total. Their
@@ -60,7 +60,7 @@ bounded coarsening. Inventory has no invented requested value.
 
 `station-fluidInventoryObservations` exercises the public World observation and
 query seams: condensation, store/atmosphere conservation, all four atmosphere
-materials, wet/dry coolant, hazard and owner-type stacks, missing owners,
+materials, wet/dry coolant, cross-class and owner-type stacks, missing owners,
 non-double-counting, and deterministic Reset replay.
 `station-editor-material-observations` selects the broader water view and owner
 type breakdown through real headless ImGui controls, checks accounting text and

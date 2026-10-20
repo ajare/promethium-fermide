@@ -86,7 +86,7 @@ namespace
 		require(world.getStationSystemsQueryWork().queries == 0, "hidden exchanges performed chart queries");
 		auto const snap = world.getStationSystemsSnapshot();
 		auto const revision = world.getStationSystemsObservationRevision();
-		std::string const transferId = "exchange/Resource transfer/Output/Destination/water/kg/s/normal";
+		std::string const transferId = "exchange/Resource transfer/Output/Destination/water/kg/s";
 		auto const transfer = world.queryStationSystemsChart(transferId);
 		require(transfer.series.size() == 2 && transfer.series[0].values.size() == 10,
 			"exchange default is not aggregate actual with requested overlay and retained history");
@@ -96,16 +96,16 @@ namespace
 		require(instances.series.size() == 4 && !instances.series.back().stacked, "requests stacked into actual contributions");
 		for (size_t row = 0; row < instances.series[0].values.size(); ++row)
 		{ close(instances.series[1].values[row], 0); close(instances.series[2].values[row], 0.5); }
-		auto const loss = world.queryStationSystemsChart("exchange/Resource transfer/Transport loss/Source/water/kg/s/normal");
+		auto const loss = world.queryStationSystemsChart("exchange/Resource transfer/Transport loss/Source/water/kg/s");
 		require(loss.series.size() == 1, "transport loss manufactured a request");
 		close(loss.series[0].values[0], 0.5);
-		auto const input = world.queryStationSystemsChart("exchange/Resource transfer/Input/Source/water/kg/s/normal");
+		auto const input = world.queryStationSystemsChart("exchange/Resource transfer/Input/Source/water/kg/s");
 		require(input.series.size() == 1, "transfer input manufactured authoritative request");
 		close(input.series[0].values[0], 0.5);
 		for (size_t i = 0; i < 5; ++i)
 		{
 			auto const id = "exchange/Resource conversion/Output/Output " + std::to_string(i + 1)
-				+ "/" + (i == 4 ? "other-product" : "product") + "/kg/s/normal";
+				+ "/" + (i == 4 ? "other-product" : "product") + "/kg/s";
 			auto const data = world.queryStationSystemsChart(id);
 			require(data.series.size() == 2, "growable output lost request or canonical material grouping");
 			close(data.series[0].values[0], 0.25); close(data.series[1].values[0], 1);
@@ -142,7 +142,7 @@ namespace
 		for (size_t i = 0; i < 5; ++i) s.stores[2 * i].startingQualified = 0;
 		require(world.configureStationSystems(s, true), "inactive conversion configuration failed");
 		run(world, 6);
-		auto const inactive = world.queryStationSystemsChart("exchange/Resource conversion/Output/Output 5/other-product/kg/s/normal");
+		auto const inactive = world.queryStationSystemsChart("exchange/Resource conversion/Output/Output 5/other-product/kg/s");
 		close(inactive.series[0].values[0], 0); close(inactive.series[1].values[0], 1);
 		// Canonical rate scales are independent of names and observation cadence.
 		for (auto const& [unit, scale, canonical] : std::vector<std::tuple<std::string, double, core::StationCanonicalUnit>>{
@@ -192,11 +192,11 @@ namespace
 		}
 		require(count == 8, "missing scheduled metrics or reusable tools graphed as consumption");
 		auto get = [&](std::string id) { auto d = world.queryStationSystemsChart(id); require(!d.incomplete && !d.series.empty(), "event chart missing"); return d; };
-		std::string const accepted = "exchange/Resupply/Input/Accepted/water/kg/s/normal";
+		std::string const accepted = "exchange/Resupply/Input/Accepted/water/kg/s";
 		auto data = get(accepted); close(data.series[0].values[0], 0.005 / data.series[0].times[0]);
 		// First window includes time zero, two recurrences and the exact-boundary one-off.
-		close(get("exchange/Resupply/Input/Delivered/water/kg/s/normal").series[0].values[0], 0.007 / data.series[0].times[0]);
-		close(get("exchange/Resupply/Output/Rejected/water/kg/s/normal").series[0].values[0], 0.002 / data.series[0].times[0]);
+		close(get("exchange/Resupply/Input/Delivered/water/kg/s").series[0].values[0], 0.007 / data.series[0].times[0]);
+		close(get("exchange/Resupply/Output/Rejected/water/kg/s").series[0].values[0], 0.002 / data.series[0].times[0]);
 		auto stack = get(accepted + "/instances"); close(stack.series.back().upper[0], data.series[0].values[0]);
 		close(snap.stores[0].currentQualified, 5);
 		close(snap.stores[1].currentQualified, 0); close(snap.stores[1].currentUnqualified, 4);
@@ -225,7 +225,7 @@ namespace
 			if (!gated.configureStationSystems(treatment, true, &why)) throw std::runtime_error(why);
 			run(gated, 60);
 			auto observed = gated.getStationSystemsSnapshot();
-			auto ejected = gated.queryStationSystemsChart("exchange/Waste ejection/Loss/Ejected material/water/kg/s/hazardous");
+			auto ejected = gated.queryStationSystemsChart("exchange/Waste ejection/Loss/Ejected material/water/kg/s");
 			require(!ejected.incomplete && !ejected.series.empty(), "treatment-gated ejection not graphed");
 			double total = 0, previous = 0;
 			for (size_t i = 0; i < ejected.series[0].times.size(); ++i) {
@@ -482,7 +482,7 @@ namespace
 		apply(); run(world, 12); verify();
 		for (auto const& h : world.getStationSystemsMetricHistory()) if (h.descriptor.equipmentType == "Microbial processor")
 			require(h.descriptor.hazardClass == "hazardous", "microbial hazard metadata lost");
-		// Exchange queries preserve the generic hazard-segregated view boundary.
+		// Exchange queries combine matching materials across legacy classes.
 		s = smoke::station::microbialObservationFixture(); auto hazardous = s.microbialProcessors[0];
 		hazardous.id = "hazardous"; hazardous.hazardClass = "hazardous";
 		for (auto member : {&core::MicrobialProcessorSettings::feedStoreId, &core::MicrobialProcessorSettings::oxygenStoreId,
@@ -492,13 +492,12 @@ namespace
 			&core::MicrobialProcessorSettings::residueStoreId}) hazardous.*member += "-hazardous";
 		auto hazardousStores = s.stores;
 		for (auto& stock : hazardousStores) { stock.id += "-hazardous"; stock.hazardClass = "hazardous"; s.stores.push_back(stock); }
-		s.microbialProcessors.push_back(hazardous); apply(); run(world, 12); verify(); size_t hazards = 0;
+		s.microbialProcessors.push_back(hazardous); apply(); run(world, 12); verify(); size_t views = 0;
 		for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate"
 			&& def.id.starts_with("exchange/Microbial processor/") && def.id.find("/Organic feed/") != std::string::npos) {
-			// Each hazard has exactly its own processor, not the other chain.
-			require(def.series[0].contributors.size() == 1, "microbial hazards merged"); ++hazards;
+			require(def.series[0].contributors.size() == 2, "microbial class subtotals did not merge"); ++views;
 		}
-		require(hazards == 2, "microbial hazard-specific views missing");
+		require(views == 1, "microbial exchange was split by class");
 		// Unknown compound identity is an honest incomplete chart, not guessed
 		// from the feed's name, composition, or compatible kg unit.
 		s = smoke::station::microbialObservationFixture(); s.stores[0].materialId.clear();
@@ -593,8 +592,9 @@ namespace
 			}
 		}
 		require(world.getStationSystemsSnapshot() == before && world.getStationSystemsObservationRevision() == revision, "carbon query mutated World");
-		auto invalid = s; invalid.stores[0].hazardClass = "hazardous";
-		require(!world.configureStationSystems(invalid, true), "carbon observation bypassed hazard compatibility");
+		auto crossClass = s; crossClass.stores[0].hazardClass = "hazardous";
+		require(world.configureStationSystems(crossClass, true), "carbon observation refused legal cross-class wiring");
+		run(world, 12); verify();
 		s = smoke::station::carbonObservationFixture();
 		for (auto& stock : s.stores) stock.hazardClass = "hazardous";
 		s.sabatierReactors[0].hazardClass = s.methaneProcessors[0].hazardClass = s.fuelCells[0].hazardClass = "hazardous";
@@ -707,7 +707,7 @@ namespace
 		size_t consumableViews = 0;
 		for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate" && def.id.starts_with("exchange/CO2 capture/Input/Consumable/")) {
 			++consumableViews;
-			require(def.series[0].contributors.size() == 1 && def.id.ends_with("/hazardous"), "material/hazard identity pooled");
+			require(def.series[0].contributors.size() == 1 && def.id.ends_with("/kg/s"), "material identity pooled or legacy class id retained");
 		}
 		require(consumableViews == 2, "same-unit different consumables merged");
 		s.enabled = false; apply(); run(world, 12);
@@ -780,7 +780,7 @@ namespace
 		bool eventChart = false;
 		for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate" && def.id.starts_with("exchange/Atmosphere/") && def.id.find("/Leakage/") != std::string::npos)
 		{
-			require(def.series[0].contributors.size() == 1 && def.id.find("atmosphere-mixture") != std::string::npos, "hazards or species pooled in leakage");
+			require(def.series[0].contributors.size() == 2 && def.id.find("atmosphere-mixture") != std::string::npos, "matching compartment mixtures did not merge");
 		}
 		for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.id.starts_with("exchange/Crew/") || def.id.starts_with("exchange/Airlock cycle/"))
 		{
@@ -1062,21 +1062,26 @@ namespace
 			}
 			close(stack, water.series[0].values[row]);
 		}
-		auto const normal = world.queryStationSystemsChart("stored-usable/water/kg/normal");
-		auto const hazardous = world.queryStationSystemsChart("stored-usable/water/kg/hazardous");
-		auto const hazard = world.queryStationSystemsChart("stored-material/water/kg/by-hazard");
+		auto const usable = world.queryStationSystemsChart("stored-usable/water/kg");
+		auto const usableAggregate = world.queryStationSystemsChart("stored-usable/water/kg/aggregate");
 		auto const aggregate = world.queryStationSystemsChart("stored-material/water/kg/aggregate");
-		require(aggregate.series.size() == 1 && hazard.series.size() == 3,
-			"generic aggregate or hazard grouping membership incorrect");
-		for (size_t row = 0; row < normal.series[0].values.size(); ++row)
+		require(aggregate.series.size() == 1 && usableAggregate.series.size() == 1 && usable.series.size() == 5,
+			"generic aggregate or merged qualified membership incorrect");
+		for (auto const& definition : world.getStationSystemsObservationCatalogue())
+			require(definition.id.find("/by-hazard") == std::string::npos
+				&& definition.id.find("/normal") == std::string::npos
+				&& definition.id.find("/hazardous") == std::string::npos
+				&& definition.accountingNote.find("not interchangeable") == std::string::npos,
+				"catalogue retained a class partition or obsolete accounting note");
+		require(world.queryStationSystemsChart("stored-usable/water/kg/normal").series.empty(),
+			"retired class-keyed chart still resolves");
+		for (size_t row = 0; row < usable.series[0].values.size(); ++row)
 		{
-			close(normal.series[0].values[row], 11); // reserve remains qualified; unqualified never does
-			close(hazardous.series[0].values[row], 2); // never folded into normal supply
-			close(hazard.series[1].values[row], 3); close(hazard.series[2].values[row], 17);
-			close(hazard.series.back().upper[row], aggregate.series[0].values[row]);
-			close(normal.series.back().upper[row], normal.series[0].values[row]);
+			close(usable.series[0].values[row], 13); // all qualified contents, including reserves, excluding held stock
+			close(usableAggregate.series[0].values[row], 13);
+			close(usable.series.back().upper[row], usable.series[0].values[row]);
 		}
-		require(chart(world, "stored-usable/water/kg/normal").accountingNote.find("NOT discretionary drawability") != std::string::npos,
+		require(chart(world, "stored-usable/water/kg").accountingNote.find("NOT discretionary drawability") != std::string::npos,
 			"usable inventory implied protected reserves were drawable");
 		require(before.stores[0].currentQualified < 10 && before.stores[1].currentQualified > 0,
 			"fixture did not exercise internal transfer");
@@ -1094,7 +1099,7 @@ namespace
 		auto const missing = core::queryStationChart(waterDefinition, history);
 		require(missing.incomplete && std::isnan(missing.series[0].values[0])
 			&& std::isnan(missing.series[1].upper[0]), "missing inventory became zero or a complete stack");
-		for (auto const& id : {"stored-material/water/kg/by-hazard", "stored-usable/water/kg/normal"})
+		for (auto const& id : {"stored-material/water/kg", "stored-usable/water/kg"})
 		{
 			auto const gap = core::queryStationChart(chart(world, id), history);
 			require(gap.incomplete && std::isnan(gap.series[0].values[0]) && std::isnan(gap.series.back().upper[0]),
@@ -1104,15 +1109,12 @@ namespace
 		auto const coarse = world.queryStationSystemsChart("stored-material/water/kg");
 		require(coarse.truncated && coarse.series[0].values.size() <= 256, "material history did not remain bounded");
 		for (auto value : coarse.series[0].values) close(value, 20);
-		auto const coarseHazard = world.queryStationSystemsChart("stored-material/water/kg/by-hazard");
-		auto const coarseUsable = world.queryStationSystemsChart("stored-usable/water/kg/normal");
+		auto const coarseUsable = world.queryStationSystemsChart("stored-usable/water/kg");
 		for (size_t row = 0; row < coarse.series[0].values.size(); ++row)
 		{
-			require(coarseHazard.series[0].times[row] == coarse.series[0].times[row]
-				&& coarseUsable.series[0].times[row] == coarse.series[0].times[row], "coarsened inventories lost alignment");
-			close(coarseHazard.series.back().upper[row], coarse.series[0].values[row]);
+			require(coarseUsable.series[0].times[row] == coarse.series[0].times[row], "coarsened inventories lost alignment");
 			close(coarseUsable.series.back().upper[row], coarseUsable.series[0].values[row]);
-			close(coarseUsable.series[0].values[row], 11);
+			close(coarseUsable.series[0].values[row], 13);
 		}
 		auto const oldRun = world.getStationSystemsObservationRevision().run;
 		settings.stores[5].materialId = "oxygen";
@@ -1189,12 +1191,10 @@ namespace
 		close(world.queryStationSystemsChart("accounted-material/nitrogen/kg").series[0].values.back(), 160);
 		close(world.queryStationSystemsChart("accounted-material/carbon-dioxide/kg").series[0].values.back(), 1);
 		close(world.queryStationSystemsChart("accounted-material/coolant/kg").series[0].values.back(), 100);
-		auto const hazard = world.queryStationSystemsChart("accounted-material/water/kg/by-hazard");
-		close(hazard.series[1].values.back(), 1); close(hazard.series[2].values.back(), 8);
 		auto const equipment = world.queryStationSystemsChart("accounted-material/water/kg/by-equipment");
 		close(equipment.series.back().upper.back(), 9);
 		// Compartment stock is not qualified store supply, nor circulating flow.
-		close(world.queryStationSystemsChart("stored-usable/water/kg/normal").series[0].values.back(),
+		close(world.queryStationSystemsChart("stored-usable/water/kg").series[0].values.back(),
 			snap.stores[0].currentQualified);
 		auto histories = world.getStationSystemsMetricHistory();
 		require(std::count_if(histories.begin(), histories.end(), [](auto const& h) {
@@ -1203,8 +1203,7 @@ namespace
 		for (auto const& h : histories) if (h.descriptor.exchangeRole == "retained-inventory")
 			require(!h.descriptor.requestedSemantics && !h.samples[0].requested, "stock invented requested semantics");
 		std::erase_if(histories, [](auto const& h) { return h.descriptor.id == "atmosphere/shared-name/water/inventory"; });
-		for (auto id : {"accounted-material/water/kg", "accounted-material/water/kg/by-equipment",
-			"accounted-material/water/kg/by-hazard"})
+		for (auto id : {"accounted-material/water/kg", "accounted-material/water/kg/by-equipment"})
 		{
 			auto const missing = core::queryStationChart(chart(world, id), histories);
 			require(missing.incomplete && std::isnan(missing.series[0].values[0])
@@ -1250,18 +1249,17 @@ namespace
 			{
 				auto const& owner = snap.stores[i];
 				actual += owner.actualConstituents.at(key);
-				if (owner.hazardClass == "normal")
-					usable += owner.actualConstituents.at(key) * owner.currentQualified
-						/ (owner.currentQualified + owner.currentUnqualified);
+				usable += owner.actualConstituents.at(key) * owner.currentQualified
+					/ (owner.currentQualified + owner.currentUnqualified);
 			}
 			close(view.series[0].values.back(), actual);
 			close(view.series.back().upper.back(), actual);
 			partition += actual;
-			auto const qualified = world.queryStationSystemsChart(std::string("stored-usable-constituent/") + key + "/kg/normal");
+			auto const qualified = world.queryStationSystemsChart(std::string("stored-usable-constituent/") + key + "/kg");
 			close(qualified.series[0].values.back(), usable);
 			close(qualified.series.back().upper.back(), usable);
-			auto const hazard = world.queryStationSystemsChart(id + "/by-hazard");
-			close(hazard.series.back().upper.back(), actual);
+			auto const aggregate = world.queryStationSystemsChart(id + "/aggregate");
+			close(aggregate.series[0].values.back(), actual);
 		}
 		close(partition, 14); // 10 food + 2 remaining unqualified waste + 2 hazardous waste
 		close(world.queryStationSystemsChart("stored-constituent/water/kg").series[0].values.back(), 3.5);

@@ -82,17 +82,18 @@ Usable inventory **includes Protected resource reserves**; it is not a measure o
 discretionary drawability. No allocation rules change.
 
 Material properties retain the stored-only accounting boundary and explicit
-unclassified exclusions. Total properties may combine hazard classes. Usable
-properties are separate for each material/unit/hazard class: hazardous contents
-are never represented as qualified normal supply. These are qualified stores
-subtotals, not system-wide material totals.
+unclassified exclusions. Total and usable properties combine all stores with the
+same material and canonical unit, irrespective of legacy hazard class. Usable
+properties are qualified stores subtotals, not system-wide material totals.
 
 The generic `Breakdown` control selects Instance, Aggregate, or (where multiple
-classes apply) Hazard class. The catalogue compiles those presentations into the
-existing Value/Sum queries and stack preparation, also reused for battery energy.
-The property ID remains the base Instance view; `/aggregate` and `/by-hazard`
-identify its alternative read-only World queries. Usable properties are named
-`stored-usable/<material>/<canonical-unit>/<hazard>`. Stable metric/group IDs
+owner types apply) Equipment type. The catalogue compiles those presentations
+into the existing Value/Sum queries and stack preparation, also reused for battery
+energy. The property ID remains the base Instance view; `/aggregate` and
+`/by-equipment` identify alternative read-only World queries. Usable properties
+are named `stored-usable/<material>/<canonical-unit>`. Exchange chart IDs likewise
+omit the hazard segment; thermal-service class remains a distinct grouping key.
+Legacy class-keyed chart IDs and `/by-hazard` views no longer resolve. Stable metric/group IDs
 supply colour identity. All variants use the same expected ownership membership;
 a missing contribution produces an incomplete sum and stack gaps, not zero.
 
