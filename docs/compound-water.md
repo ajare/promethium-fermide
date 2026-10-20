@@ -2,9 +2,9 @@
 
 Water ports accept plain or compound mass stores, with live quality gates,
 per-constituent treatment removal and producer carry-over (#739–#744).
-Schema 101 adds opt-in selective crop irrigation and clearance-only release to
-normal class. Older documents retain their existing behavior and defaults;
-the reference station remains unchanged.
+Schema 101 adds opt-in selective crop irrigation. Treatment now qualifies output
+on complete energy evidence alone (#753); retired release-test fields require
+explicit document conversion.
 
 ## Full-removal treatment (#740)
 
@@ -30,7 +30,7 @@ same-composition routing and scheduled waste ejection. Qualified concentrate is
 not purified water: hazard segregation and the compound-to-plain boundary still
 apply. Plain scalar concentrate keeps its historical held state, so existing
 documents' treatment actuals remain unchanged. Hazardous treated output retains
-its existing energy-evidence and release-clearance gates.
+the energy-evidence gate: complete energy qualifies output; partial energy holds it.
 
 `StationSystemsStoreSnapshot::concentrations` and Lua `stores[i].concentrations`
 report kg of each existing mass constituent per kg stream (energy excluded).
@@ -111,35 +111,31 @@ Growth binds on `water quality: otherMinerals above crop tolerance` before
 biomass and purge, and water across stores, atmosphere and photosynthetic uptake
 at each one-second observation, in addition to the per-tick constituent audit.
 
-## Clearance-only hazard conversion (#744)
+## Energy-evidenced treatment (#753)
 
-`waterTreatments[].releaseToNormalClass: true` is an explicit opt-in. Only a
-hazardous treatment may select it: its treated outlet must be normal-class,
-while source, concentrate, treatment media and clearance kit remain hazardous.
-The process is constrained by available clearance and electrical supply before
-moving feed; only full-dose, cleared product crosses into the normal outlet.
-Uncleared feed stays in the hazardous source, **not** a normal-class unqualified
-inventory. The default false retains #412's same-class release/held-output
-behavior. This exception applies to treatment only: generic Transfers never
-cross hazard classes in either direction, even when their composition matches.
+Treatment may connect stores regardless of their class. A full rated energy dose
+qualifies treated output; a partial dose produces held, unqualified output.
+There is no separate release-test consumable or class-conversion opt-in.
+Process consumables, removal fractions, capacity limits and consumer quality
+tolerances still apply. Retired `clearanceStoreId`, `clearancePerKg` and
+`releaseToNormalClass` fields are refused with conversion-required diagnostics.
 
 Open `resources/station-systems/scenarios/water-contamination.yaml`, Apply and
 Run for **10 seconds**. Loaded hazardous ingress propagates into the hazardous
 loop. Its crew/crop acceptance probes have zero dissolved tolerance and name
 `water quality: total dissolved above crew/crop tolerance`; they consume no
-loaded water. Normal consumers cannot be wired directly to the hazardous loop
-(validation refuses the hazard mismatch), and use only the cleared normal
-outlet. Normal and hazardous atmospheres stay separate. These are acceptance
+loaded water. The authored normal consumers use the treated outlet. Wiring them directly to
+the loaded loop is legal, but their water-quality tolerances prevent uptake. Normal and hazardous atmospheres stay separate. These are acceptance
 probes, not a crew-exposure/health model.
 
 After one startup tick, treatment processes 0.499166692700 kg over 10 seconds,
 returning 0.395340020619 kg pure normal-class water and retaining
 0.103826672082 kg hazardous concentrate. Its organic load is retained wholly
-on the hazardous side; clearance is consumed and normal crew/crops receive
-water. Set the clearance Store's starting usable inventory to zero and
-Apply/Reset: processed and normal-output masses stay zero, with
-`release clearance unavailable: hazardous feed retained`. No-power operation
-also leaves normal output empty. No cross-hazard Transfer is present or allowed.
+in the concentrate; normal crew/crops receive water. Reduce solar capacity to
+1 kW and Apply/Reset: treatment still processes feed, but its incomplete energy
+evidence holds output unqualified with an `energy curtailed` reason. No-power
+operation leaves output empty. Generic cross-class transfers are legal; consumer
+quality tolerances remain independent requirements.
 
 Focused Release checks: `station-waterSelectiveIrrigation`,
 `station-waterHydroponics`, `station-waterContamination`, and

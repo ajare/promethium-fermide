@@ -72,7 +72,7 @@ namespace core
 	// A capacity-limited inventory of a declared material. Starting inventory
 	// is authored; current inventory is runtime state and never lives here.
 	// Qualified contents are usable; unqualified contents are held awaiting a
-	// treatment or clearance that later slices provide. The protected reserve
+	// treatment that later slices provide. The protected reserve
 	// is the portion of usable contents withheld from discretionary transfers
 	// (#390); it never restricts the authored starting inventory itself.
 	// The authored hazard class (#412) makes a hazardous store a protected
@@ -159,8 +159,8 @@ namespace core
 	// deliveries never overflow a store and never make material disappear.
 	// A recurrence of zero is a one-off delivery; a positive recurrence
 	// repeats the same quantity every recurrenceSeconds. Arriving material
-	// may be declared usable (qualified) or held awaiting the treatment or
-	// clearance a later slice provides; both occupy store capacity.
+	// may be declared usable (qualified) or held awaiting a treatment that
+	// qualifies it; both occupy store capacity.
 	struct ResourceDeliverySettings
 	{
 		std::string id;
@@ -169,7 +169,7 @@ namespace core
 		double quantity{0.0};           // store units per occurrence, > 0
 		double firstOccurrenceSeconds{0.0}; // first arrival, >= 0
 		double recurrenceSeconds{0.0};  // 0 = one-off, else >= one fixed tick
-		bool arrivesQualified{true};    // false: arrives held awaiting clearance
+		bool arrivesQualified{true};    // false: arrives held unqualified
 		int priority{0};                // higher allocates first among coincidents
 		bool operator==(ResourceDeliverySettings const&) const = default;
 	};
@@ -1022,25 +1022,15 @@ namespace core
 	// concentrate, and the concentrate stays accounted as retained material
 	// pending a disposal capability. Every water-process store is a plain
 	// mass store: this slice does not model compound water streams.
-	// A hazardous-class treatment additionally carries a release-clearance
-	// contract (#412): treated hazardous material is released only on a
-	// passed clearance test, drawn from a declared clearance consumable
-	// store at a declared quantity per kilogram treated. Filtration, the
-	// treatment energy evidence and the release clearance are three
-	// distinct gates: filtration runs with the process, the evidence is
-	// the full rated energy dose, and the clearance is the passed test.
-	// A curtailed dose (failed evidence) or an unavailable clearance
-	// consumable (unknown clearance) holds the treated output unqualified;
-	// only a full dose with a passed test releases it. A normal-class
-	// treatment cannot configure clearance testing - release clearance is
-	// the hazardous containment boundary, not a normal-water filter.
+	// The treated output qualifies on the treatment energy evidence
+	// alone: the full rated dose qualifies the output, a curtailed dose
+	// holds it unqualified for reprocessing or disposal. There is no
+	// separate release-clearance test - the treated material is what
+	// the process and its evidence say it is.
 	inline constexpr std::array<char const*, 6> StationWaterDryConstituents{
 		"dryOrganics", "nutrientNitrogen", "atmosphericNitrogen", "phosphorus", "potassium", "otherMinerals"};
 	struct WaterTreatmentSettings
 	{
-		// Explicit clearance-only hazard conversion; uncleared feed stays
-		// in the hazardous source, never in a normal-class held inventory.
-		bool releaseToNormalClass{false};
 		std::string id;
 		std::string hazardClass;             // normal or hazardous
 		std::string sourceStoreId;           // raw water drawn from here
@@ -1052,12 +1042,6 @@ namespace core
 		std::map<std::string, double> removalFractions; // dry species to concentrate; omitted keys = 1
 		double specificEnergyKWhPerKg{0.5}; // electricity per kg processed
 		double consumablePerKg{0.01};      // consumable units per kg processed
-		// Release-clearance consumable (#412): required for a hazardous-class
-		// treatment, forbidden for a normal-class one. Each treated kilogram
-		// consumes clearancePerKg units from this store to pass its release
-		// clearance test; without the test the material is not released.
-		std::string clearanceStoreId;
-		double clearancePerKg{0.0};        // clearance units per kg treated, > 0 for hazardous
 		int priority{0};
 		bool operator==(WaterTreatmentSettings const&) const = default;
 	};
@@ -2171,7 +2155,7 @@ namespace core
 		// follows the unmodelled net load, so the generator's fuel store
 		// is flagged here instead of projected. processConsumptionPossible
 		// covers process feeds and consumables (fuel-cell reactants,
-		// treatment source/consumables/clearance, electrolysis feed
+		// treatment source/consumables, electrolysis feed
 		// water, capture consumables, Sabatier and methane feeds, authored
 		// conversion inputs, consumed maintenance spares) plus Automatic-
 		// dispatch generator fuel; biologyConsumptionPossible covers
@@ -3369,7 +3353,6 @@ namespace core
 	// accounted as retained material pending a disposal capability.
 	struct StationWaterTreatmentSnapshot
 	{
-		bool releaseToNormalClass{false};
 		std::map<std::string, double> removalFractions; // authored overrides; omitted dry species = 1
 		// kg per constituent (water included); the energy slot is kJ.
 		std::map<std::string, double> lastRemovedConstituents, lastPassedConstituents;
@@ -3398,21 +3381,11 @@ namespace core
 		double lastConsumableUnmet{0.0};
 		bool qualityAccepted{false};
 		std::string holdReason; // why the output is held unqualified (empty: none)
-		// The three distinct quality gates (#412): filtration ran, the
-		// treatment energy evidence is complete, and the release clearance
-		// test passed. For a normal-class treatment the clearance gate is
-		// the evidence itself; for a hazardous-class treatment the output
-		// is released only when the full dose and a passed clearance test
-		// coincide. Unknown or failed clearance holds the material.
+		// The quality gates: filtration ran with the process, and the
+		// treatment energy evidence is complete. The output qualifies on
+		// the evidence alone; a curtailed dose holds it unqualified.
 		bool filtrationCompleted{false};
 		bool treatmentEvidenced{false};
-		bool releaseCleared{false};
-		std::string clearanceStoreId;      // release-clearance consumable store
-		double clearancePerKg{0.0};      // clearance units per kg treated
-		double lastClearanceRequested{0.0};
-		double lastClearanceUsed{0.0};
-		double lastClearanceUnmet{0.0};   // clearance the held output still needs
-		double clearanceUsedTotal{0.0};
 		bool disabled{false};   // zero throughput: no processing
 		double processedKg{0.0};
 		double treatedKg{0.0};

@@ -837,7 +837,6 @@ bool renderWaterTreatmentEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	if (ImGui::InputText((label + " hazard class").c_str(),
 		treatmentHazardBuffer, sizeof(treatmentHazardBuffer)))
 		treatment.hazardClass = treatmentHazardBuffer;
-	ImGui::Checkbox((label + " release to normal class").c_str(), &treatment.releaseToNormalClass);
 	char treatmentSourceBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(treatmentSourceBuffer, treatment.sourceStoreId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " raw water store").c_str(),
@@ -858,14 +857,7 @@ bool renderWaterTreatmentEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	if (ImGui::InputText((label + " consumable store").c_str(),
 		treatmentConsumableBuffer, sizeof(treatmentConsumableBuffer)))
 		treatment.consumableStoreId = treatmentConsumableBuffer;
-	char treatmentClearanceBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(treatmentClearanceBuffer, treatment.clearanceStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " release-clearance store").c_str(),
-		treatmentClearanceBuffer, sizeof(treatmentClearanceBuffer)))
-		treatment.clearanceStoreId = treatmentClearanceBuffer;
 	ImGui::PushItemWidth(140.0f);
-	ImGui::InputDouble((label + " clearance per kg").c_str(),
-		&treatment.clearancePerKg, 0.0, 0.0, "%.6f");
 	ImGui::InputDouble((label + " throughput kg/s").c_str(),
 		&treatment.throughputKgPerS, 0.0, 0.0, "%.6f");
 	ImGui::InputDouble((label + " recovery ratio").c_str(),

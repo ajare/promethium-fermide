@@ -456,7 +456,6 @@ namespace
 			allTypes.waterTreatments[0].treatedStoreId = "Store";
 			allTypes.waterTreatments[0].concentrateStoreId = "Store";
 			allTypes.waterTreatments[0].consumableStoreId = "Store";
-			allTypes.waterTreatments[0].clearanceStoreId = "Store";
 			allTypes.electrolyzers[0].atmosphereId = "Atmosphere";
 			allTypes.electrolyzers[0].heatSinkId = "Reservoir";
 			allTypes.electrolyzers[0].waterStoreId = "Store";

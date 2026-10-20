@@ -445,15 +445,13 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				for (size_t index = 0; index < waterTreatments->size(); ++index)
 				{
 					auto const& treatment = (*waterTreatments)[index];
-					lua_createtable(state, 0, 13);
+					lua_createtable(state, 0, 12);
 					lua_pushstring(state, treatment.id.c_str()); lua_setfield(state, -2, "id");
 					lua_pushstring(state, treatment.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
-					lua_pushboolean(state, treatment.releaseToNormalClass); lua_setfield(state, -2, "releaseToNormalClass");
 					lua_pushstring(state, treatment.sourceStoreId.c_str()); lua_setfield(state, -2, "sourceStore");
 					lua_pushstring(state, treatment.treatedStoreId.c_str()); lua_setfield(state, -2, "treatedStore");
 					lua_pushstring(state, treatment.concentrateStoreId.c_str()); lua_setfield(state, -2, "concentrateStore");
 					lua_pushstring(state, treatment.consumableStoreId.c_str()); lua_setfield(state, -2, "consumableStore");
-					lua_pushstring(state, treatment.clearanceStoreId.c_str()); lua_setfield(state, -2, "clearanceStore");
 					lua_pushnumber(state, treatment.throughputKgPerS); lua_setfield(state, -2, "throughputKgPerS");
 					lua_pushnumber(state, treatment.recoveryRatio); lua_setfield(state, -2, "recoveryRatio");
 					lua_createtable(state, 0, static_cast<int>(treatment.removalFractions.size()));
@@ -462,7 +460,6 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 					lua_setfield(state, -2, "removalFractions");
 					lua_pushnumber(state, treatment.specificEnergyKWhPerKg); lua_setfield(state, -2, "specificEnergyKWhPerKg");
 					lua_pushnumber(state, treatment.consumablePerKg); lua_setfield(state, -2, "consumablePerKg");
-					lua_pushnumber(state, treatment.clearancePerKg); lua_setfield(state, -2, "clearancePerKg");
 					lua_pushinteger(state, treatment.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
@@ -1231,10 +1228,6 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			state.treatedIndex = storeIndex[treatment.treatedStoreId];
 			state.concentrateIndex = storeIndex[treatment.concentrateStoreId];
 			state.consumableIndex = storeIndex[treatment.consumableStoreId];
-			// Only a hazardous-class treatment has a clearance store; the
-			// normal class never draws the unused index.
-			if (!treatment.clearanceStoreId.empty())
-				state.clearanceIndex = storeIndex[treatment.clearanceStoreId];
 			state.declarationIndex = mImpl->waterTreatments.size();
 			mImpl->waterTreatments.push_back(std::move(state));
 		}

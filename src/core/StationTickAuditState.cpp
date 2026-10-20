@@ -45,26 +45,12 @@ namespace core
 			if (!treatment.lastQualityAccepted && treatment.lastProcessedKg > 0.0
 				&& treatment.lastHoldReason.empty())
 				return violation = where + "held treated output without a stated hold reason", false;
-			// The three quality gates (#412) are ordered: release
-			// clearance implies treatment evidence, and treatment
-			// evidence implies filtration. The clearance test is
-			// all-or-nothing: nothing is ever partially cleared, and a
-			// released batch consumed exactly its declared test dose.
-			if (!requireFinite(treatment.lastClearanceRequested, where + "last clearance requested")) return false;
-			if (!requireFinite(treatment.lastClearanceUsed, where + "last clearance used")) return false;
-			if (!requireFinite(treatment.lastClearanceUnmet, where + "last clearance unmet")) return false;
-			if (!requireFinite(treatment.clearanceUsedTotal, where + "cumulative clearance used")) return false;
-			if (treatment.lastReleaseCleared && !treatment.lastTreatmentEvidenced)
-				return violation = where + "released material without treatment evidence", false;
+			// The quality gates are ordered: treatment evidence implies
+			// filtration, and the output qualifies on the evidence alone.
+			if (treatment.lastQualityAccepted != treatment.lastTreatmentEvidenced)
+				return violation = where + "qualification disagrees with treatment energy evidence", false;
 			if (treatment.lastTreatmentEvidenced && !treatment.lastFiltrationCompleted)
 				return violation = where + "claims treatment evidence without a completed filtration pass", false;
-			auto const clearanceBound = StationBalanceTolerance
-				* std::max(1.0, treatment.lastClearanceRequested);
-			if (treatment.lastClearanceUsed > treatment.lastClearanceRequested + clearanceBound)
-				return violation = where + "spent more clearance consumable than the treated output calls for", false;
-			if (treatment.authored.hazardClass == "hazardous" && treatment.lastReleaseCleared
-				&& treatment.lastClearanceUsed + clearanceBound < treatment.lastClearanceRequested)
-				return violation = where + "released hazardous material on an incomplete clearance test", false;
 		}
 		// The oxygen-production audit (#404): the split closes on mass -
 		// every kilogram split is oxygen plus hydrogen, never a third

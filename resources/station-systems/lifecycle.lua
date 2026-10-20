@@ -2330,42 +2330,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 end
             end
         end
-        assert(not treatment.releaseToNormalClass or treatment.hazardClass == 'hazardous',
-            'normal release requires hazardous clearance-gated treatment')
         local consumable = declareWaterStore(treatment.consumableStore, 'consumable', true)
-        -- Release clearance (#412): a hazardous-class treatment must
-        -- declare its clearance contract; a normal-class one must not.
-        -- The sandbox mirrors the host's refusal so a corrupt crossing
-        -- fails contained at construction like any other bad descriptor.
-        local clearance = nil
-        if treatment.hazardClass == 'hazardous' then
-            assert(type(treatment.clearanceStore) == 'string'
-                and #treatment.clearanceStore > 0,
-                'hazardous water treatment must declare a release-clearance consumable store: treated hazardous material is released only on a passed clearance test')
-            assert(type(treatment.clearancePerKg) == 'number'
-                and treatment.clearancePerKg == treatment.clearancePerKg
-                and treatment.clearancePerKg > 0 and treatment.clearancePerKg < math.huge,
-                'hazardous water treatment release clearance per kg must be finite and positive')
-            for stream = 1, 3 do
-                assert(streamIds[stream] ~= treatment.clearanceStore,
-                    'water treatment release-clearance store must be distinct from the source, treated and concentrate stores')
-            end
-            clearance = declareWaterStore(treatment.clearanceStore,
-                'release-clearance consumable', true)
-        else
-            assert(treatment.clearanceStore == nil or #treatment.clearanceStore == 0,
-                'normal-class water treatment cannot configure release-clearance testing')
-            assert((treatment.clearancePerKg or 0) == 0,
-                'normal-class water treatment cannot configure release clearance per kg')
-        end
         object.water_treatments[index] = {
             id = treatment.id,
             hazardClass = treatment.hazardClass,
-            releaseToNormalClass = treatment.releaseToNormalClass or false,
             source = streams[1], treated = streams[2], concentrate = streams[3],
             consumable = consumable,
-            clearance = clearance,
-            clearancePerKg = treatment.clearancePerKg or 0,
             throughputKgPerS = treatment.throughputKgPerS,
             recoveryRatio = treatment.recoveryRatio,
             removalFractions = removals,
@@ -2380,9 +2350,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             lastConsumableRequested = 0, lastConsumableUsed = 0,
             qualityAccepted = false, lastHoldReason = '',
             filtrationCompleted = false, treatmentEvidenced = false,
-            releaseCleared = false,
-            lastClearanceRequested = 0, lastClearanceUsed = 0,
-            lastClearanceUnmet = 0, clearanceUsedTotal = 0,
             processedTotal = 0, treatedTotal = 0, acceptedTotal = 0,
             heldTotal = 0, concentrateTotal = 0,
             energySuppliedKJ = 0, energyOwedKJ = 0, consumablesUsedTotal = 0,
@@ -6150,10 +6117,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             treatment.lastHoldReason = ''
             treatment.filtrationCompleted = false
             treatment.treatmentEvidenced = false
-            treatment.releaseCleared = false
-            treatment.lastClearanceRequested = 0
-            treatment.lastClearanceUsed = 0
-            treatment.lastClearanceUnmet = 0
             if treatment.throughputKgPerS > 0 then
                 local fullKg = treatment.throughputKgPerS * fixed_seconds
                 local waterFraction = source.composition and storeComposition(source).moisture or 1
@@ -6175,25 +6138,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     concentrate.capacity - (concentrate.qualified + concentrate.unqualified))
                 local drawableConsumable = math.max(0,
                     consumable.qualified - consumable.protected_reserve)
-                -- #574: the release-clearance kit may be the same store
-                -- as the treatment consumable. One kilogram of a shared
-                -- kit cannot pay both roles twice, so the tick reserves
-                -- the combined draw - the treatment dose plus the
-                -- clearance dose the treated output will demand at this
-                -- scale - and the clearance test below runs against the
-                -- inventory remaining after the treatment draw. A kit
-                -- that covers each role alone but not their sum
-                -- throttles the process to the scale it can pay for
-                -- whole; it is never overdrawn into a negative
-                -- inventory, and the protected reserve stays untouched
-                -- because the reservation is made above it.
-                local sharedKit = treatment.clearance ~= nil
-                    and treatment.clearance == treatment.consumable
                 local kitDemand = treatment.consumablePerKg * fullKg
-                if sharedKit then
-                    kitDemand = kitDemand
-                        + treatment.clearancePerKg * fullKg * treatedFraction
-                end
                 local scale = 1.0
                 local limiter = ''
                 local function constrain(available, required, reason)
@@ -6214,25 +6159,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     fromKg(concentrate.unit, fullKg * (1 - treatedFraction)),
                     "concentrate store '" .. concentrate.id
                         .. "' is full: the retained stream has nowhere to go")
-                if sharedKit then
-                    constrain(drawableConsumable, kitDemand,
-                        "shared treatment-consumable and release-clearance store '"
-                            .. consumable.id
-                            .. "' cannot cover the combined treatment and clearance draw")
-                else
-                    constrain(drawableConsumable, kitDemand,
-                        "treatment consumable store '" .. consumable.id .. "' is exhausted")
-                end
-                if treatment.releaseToNormalClass then
-                    constrain(generation + batteryDeliverableKW(self, fixed_hours),
-                        treatment.throughputKgPerS * treatment.specificEnergyKWhPerKg * 3600,
-                        'treatment energy unavailable: hazardous feed retained')
-                    if not sharedKit then
-                        constrain(math.max(0, treatment.clearance.qualified - treatment.clearance.protected_reserve),
-                            treatment.clearancePerKg * fullKg * treatedFraction,
-                            'release clearance unavailable: hazardous feed retained')
-                    end
-                end
+                constrain(drawableConsumable, kitDemand,
+                    "treatment consumable store '" .. consumable.id .. "' is exhausted")
                 if waterFraction <= 0 then scale = 0; limiter = 'stream carries no water' end
                 if scale < 0 then scale = 0 end
                 if scale > 1 then scale = 1 end
@@ -6292,12 +6220,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         if treated.composition then addLedger(self.constituent_loss, pure, -1) end
                         if concentrate.composition then addLedger(self.constituent_loss, drawn, -1) end
                         source.qualified = source.qualified - processedUnits
-                        -- The treatment consumable is drawn before the
-                        -- clearance test is evaluated (#574): when the
-                        -- kit is one store shared by both roles, the
-                        -- test must see the inventory that remains
-                        -- after treatment, never the stock the
-                        -- treatment draw is already spending.
                         treatment.lastConsumableRequested =
                             treatment.consumablePerKg * processedKg
                         local consumableUsed = math.min(treatment.lastConsumableRequested,
@@ -6310,35 +6232,17 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             toKg(consumable.unit, consumableUsed))
                         consumable.qualified = consumable.qualified - consumableUsed
                         treatment.lastConsumableUsed = consumableUsed
-                        -- Quality is three distinct gates (#412):
-                        -- filtration ran with the process, the full rated
-                        -- energy dose is the treatment evidence, and the
-                        -- release clearance test is what releases
-                        -- hazardous treated material. The test is all-or-
-                        -- nothing per tick; a held batch consumed nothing.
+                        -- The full rated energy dose qualifies the output.
+                        -- Curtailed energy leaves it held unqualified.
                         local curtailed = supplied + 1e-12 < powerDemand
-                        local clearanceDemand = treatment.clearance ~= nil
-                            and treatment.clearancePerKg * treatedKg or 0
-                        local drawableClearance = treatment.clearance ~= nil
-                            and math.max(0, treatment.clearance.qualified
-                                - treatment.clearance.protected_reserve) or 0
-                        local clearanceSatisfied = clearanceDemand <= 1e-12
-                            or drawableClearance + 1e-12 >= clearanceDemand
-                        local released = not curtailed and clearanceSatisfied
                         treatment.filtrationCompleted = treatedKg > 0 or concentrateKg > 0
                         treatment.treatmentEvidenced = not curtailed
                             and treatment.filtrationCompleted
-                        treatment.releaseCleared = released and treatment.filtrationCompleted
-                        treatment.qualityAccepted = released
+                        treatment.qualityAccepted = treatment.treatmentEvidenced
                         if curtailed then
                             treated.unqualified = treated.unqualified + treatedUnits
                             treatment.lastHoldReason = 'treatment energy curtailed: '
                                 .. 'the treated output is held unqualified'
-                        elseif not clearanceSatisfied then
-                            treated.unqualified = treated.unqualified + treatedUnits
-                            treatment.lastHoldReason = 'release clearance unavailable: '
-                                .. 'the clearance test consumable cannot cover the treated '
-                                .. 'output; the material is held until it can be cleared'
                         else
                             treated.qualified = treated.qualified + treatedUnits
                         end
@@ -6349,33 +6253,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             concentrate.qualified = concentrate.qualified + concentrateUnits
                         else
                             concentrate.unqualified = concentrate.unqualified + concentrateUnits
-                        end
-                        -- The clearance test is spent only when it runs
-                        -- and passes; a held batch consumed nothing, so
-                        -- the kit stays available for the next tick.
-                        if not curtailed then
-                            treatment.lastClearanceRequested = clearanceDemand
-                            if released and clearanceDemand > 0 then
-                                local clearanceKgBefore = toKg(treatment.clearance.unit,
-                                    treatment.clearance.qualified
-                                        + treatment.clearance.unqualified)
-                                treatment.clearance.qualified =
-                                    treatment.clearance.qualified - clearanceDemand
-                                treatment.lastClearanceUsed = clearanceDemand
-                                treatment.clearanceUsedTotal =
-                                    treatment.clearanceUsedTotal + clearanceDemand
-                                self.unit_loss[treatment.clearance.unit] =
-                                    (self.unit_loss[treatment.clearance.unit] or 0)
-                                        + clearanceDemand
-                                -- #601: the kit is spent as the
-                                -- material it actually is, drift
-                                -- included.
-                                addLedger(self.constituent_loss, drawStoreActual(
-                                    treatment.clearance, clearanceKgBefore,
-                                    toKg(treatment.clearance.unit, clearanceDemand)), 1)
-                            end
-                            treatment.lastClearanceUnmet = treatment.lastClearanceRequested
-                                - treatment.lastClearanceUsed
                         end
                         -- Unit and constituent boundaries: the source gave
                         -- the processed mass up, the treated and
@@ -6399,7 +6276,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         treatment.processedTotal = treatment.processedTotal + processedKg
                         treatment.treatedTotal = treatment.treatedTotal + treatedKg
                         treatment.concentrateTotal = treatment.concentrateTotal + concentrateKg
-                        if released then
+                        if not curtailed then
                             treatment.acceptedTotal = treatment.acceptedTotal + treatedKg
                         else
                             treatment.heldTotal = treatment.heldTotal + treatedKg
@@ -6418,10 +6295,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 and isFinite(treatment.lastPowerDemand) and isFinite(treatment.lastPowerSupplied)
                 and isFinite(treatment.lastConsumableRequested)
                 and isFinite(treatment.lastConsumableUsed)
-                and isFinite(treatment.lastClearanceRequested)
-                and isFinite(treatment.lastClearanceUsed)
-                and isFinite(treatment.lastClearanceUnmet)
-                and isFinite(treatment.clearanceUsedTotal)
                 and isFinite(treatment.processedTotal) and isFinite(treatment.treatedTotal)
                 and isFinite(treatment.acceptedTotal) and isFinite(treatment.heldTotal)
                 and isFinite(treatment.concentrateTotal)

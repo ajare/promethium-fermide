@@ -1707,7 +1707,7 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			delivery.lastOccurrenceSeconds, delivery.lastAccepted, delivery.lastScheduled,
 			delivery.lastRejected, delivery.acceptedTotal, delivery.rejectedTotal,
 			static_cast<unsigned long long>(delivery.occurrencesCompleted), delivery.priority,
-			delivery.arrivesQualified ? "arrives usable" : "arrives held awaiting clearance");
+			delivery.arrivesQualified ? "arrives usable" : "arrives held unqualified");
 		if (delivery.exhausted)
 			ImGui::Text("  one-off schedule spent: no further arrivals");
 		else
@@ -2141,20 +2141,13 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		ImGui::Text("  quality: %s%s",
 			treatment.qualityAccepted ? "treated output accepted" : "treated output HELD UNQUALIFIED",
 			treatment.holdReason.empty() ? "" : (std::string(" - ") + treatment.holdReason).c_str());
-		ImGui::Text("  gates (#412): filtration %s | treatment evidence %s | release clearance %s%s",
+		ImGui::Text("  gates: filtration %s | treatment evidence %s",
 			treatment.filtrationCompleted ? "ran" : "not run",
-			treatment.treatmentEvidenced ? "complete (full dose)" : "incomplete",
-			treatment.releaseCleared ? "CLEARED" : "not cleared",
-			treatment.clearanceStoreId.empty() ? " (no clearance contract: normal class)"
-				: (std::string(" | clearance ") + std::to_string(treatment.lastClearanceUsed)
-					+ "/" + std::to_string(treatment.lastClearanceRequested)
-					+ " from '" + treatment.clearanceStoreId + "'").c_str());
-		if (!treatment.clearanceStoreId.empty() && treatment.lastClearanceUnmet > 1e-12)
-			ImGui::Text("  unmet containment demand: %.6f clearance units short this tick", treatment.lastClearanceUnmet);
-		ImGui::Text("  cumulative: processed %.4f kg | treated %.4f kg (accepted %.4f, held %.4f) | concentrate retained %.4f kg | energy %.2f/%.2f kJ | consumables %.4f | clearance used %.4f",
+			treatment.treatmentEvidenced ? "complete (full dose)" : "incomplete");
+		ImGui::Text("  cumulative: processed %.4f kg | treated %.4f kg (accepted %.4f, held %.4f) | concentrate retained %.4f kg | energy %.2f/%.2f kJ | consumables %.4f",
 			treatment.processedKg, treatment.treatedKg, treatment.acceptedKg, treatment.heldKg,
 			treatment.concentrateKg, treatment.energySuppliedKJ, treatment.energyOwedKJ,
-			treatment.consumablesUsed, treatment.clearanceUsedTotal);
+			treatment.consumablesUsed);
 		if (treatment.disabled)
 			ImGui::Text("  zero throughput: no processing");
 	}
@@ -2562,7 +2555,7 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 				ImGui::Text("  next delivery: %.3f %s at t=%.1f s (%s)",
 					entry.nextDeliveryQuantity, entry.unit.c_str(),
 					entry.nextDeliverySeconds,
-					entry.nextDeliveryArrivesQualified ? "arrives usable" : "arrives held awaiting clearance");
+					entry.nextDeliveryArrivesQualified ? "arrives usable" : "arrives held unqualified");
 			else if (entry.kind == "store")
 				ImGui::Text("  no authored delivery pending for this store");
 		}
@@ -2636,7 +2629,7 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 						arrival.acceptedQuantity, arrival.rejectedQuantity,
 						arrival.projectedDrawableBefore, entry.unit.c_str(),
 						arrival.rescuesStore
-							? (arrival.arrivesQualified ? "lands before depletion, usable" : "lands before depletion, held awaiting clearance")
+							? (arrival.arrivesQualified ? "lands before depletion, usable" : "lands before depletion, held unqualified")
 							: "lands only after the projected shortfall");
 				if (entry.biologyRecoveryPossible)
 					ImGui::TextWrapped("  UNCERTAIN: crop/algae/microbial recovery could replenish this store; provisional biology is not counted as guaranteed recovery");

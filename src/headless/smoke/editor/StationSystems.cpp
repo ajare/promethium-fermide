@@ -1034,7 +1034,7 @@ namespace
 		struct Probe { char const* type; char const* id; char const* label; char const* port; };
 		for (auto const& probe : {
 			Probe{"Water collector", "collector1", "Collector 0 id", "Raw water out"},
-			Probe{"Water treatment", "treatment1", "Treatment 0 id", "Clearance in"},
+			Probe{"Water treatment", "treatment1", "Treatment 0 id", "Consumable in"},
 			Probe{"Electrolyzer", "electrolyzer1", "Electrolyzer 0 id", "Compartment oxygen"},
 			Probe{"CO2 capture", "capture1", "CO2 capture 0 id", "Consumable in"},
 			Probe{"Atmosphere", "atmosphere1", "Atmosphere 0 id", "Gas out"},
@@ -1078,7 +1078,7 @@ namespace
 				if (std::string(probe.type) == "CO2 capture")
 					REQ(driver.contains("Consumable in (input) - unused"), "optional consumable was drawn as required");
 				if (std::string(probe.type) == "Water treatment")
-					REQ(driver.contains("Clearance in (input) - unused"), "optional clearance was drawn as required");
+					REQ(!driver.contains("Clearance in"), "removed clearance port is still drawn");
 				driver.click(ctx, (std::string("**/") + probe.label).c_str()); ctx->Yield(2);
 				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyChars("renamed");
 				ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
@@ -1161,7 +1161,7 @@ namespace
 					REQ(driver.contains("Replacement stock (input) - unused"), "optional stock was drawn as required");
 				}
 				if (std::string(probe.type) == "Water treatment")
-					REQ(driver.contains("Clearance in (input) - unused"), "optional clearance was drawn as required");
+					REQ(!driver.contains("Clearance in"), "removed clearance port is still drawn");
 				driver.click(ctx, (std::string("**/") + probe.label).c_str()); ctx->Yield(2);
 				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyChars("renamed");
 				ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
@@ -4714,8 +4714,7 @@ namespace
 			store(entry.concentrateStoreId, "concentrate"); store(entry.consumableStoreId, "consumable");
 			if (alternative)
 			{
-				entry.hazardClass = "hazardous"; entry.clearancePerKg = 1;
-				store(entry.clearanceStoreId, "clearance");
+				entry.hazardClass = "hazardous";
 				for (auto& target : s.stores) target.hazardClass = "hazardous";
 			}
 		}
@@ -5925,10 +5924,8 @@ namespace
 		require(driver.passed(), "Waste ejection workflow failed on the Test Engine");
 	}
 
-	// #412: the store hazard class and the hazardous treatment's
-	// release-clearance contract are drafted, validated and applied
-	// through the real Station Systems window controls, and the live
-	// view reports the three quality gates and the clearance ledger.
+	// #753: treatment evidence is visible, process edits are transactional,
+	// and no release-test controls or telemetry remain.
 	void containmentWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -5958,8 +5955,7 @@ namespace
 			hazStore("hazRaw", 200.0, 100.0),
 			hazStore("hazTreated", 100.0, 0.0),
 			hazStore("hazConcentrate", 100.0, 0.0),
-			hazStore("hazConsumable", 100.0, 10.0),
-			hazStore("hazClearance", 100.0, 5.0) };
+			hazStore("hazConsumable", 100.0, 10.0) };
 		core::WaterTreatmentSettings plant;
 		plant.id = "plant";
 		plant.hazardClass = "hazardous";
@@ -5967,8 +5963,6 @@ namespace
 		plant.treatedStoreId = "hazTreated";
 		plant.concentrateStoreId = "hazConcentrate";
 		plant.consumableStoreId = "hazConsumable";
-		plant.clearanceStoreId = "hazClearance";
-		plant.clearancePerKg = 0.002;
 		plant.throughputKgPerS = 0.005;
 		plant.recoveryRatio = 0.8;
 		plant.specificEnergyKWhPerKg = 0.5;
@@ -5994,54 +5988,33 @@ namespace
 			// The store hazard class is shown in the live store table.
 			REQ(driver.contains("hazRaw (kg) [hazardous]"),
 				"Hazardous store class not shown in the live store table");
-			// Run the cleared scenario: the live treatment view reports the
-			// three gates cleared and the clearance ledger.
+			// Run the scenario and inspect the live treatment evidence.
 			world->markSaved();
 			world->resumeSimulation();
 			if (!world->advanceTicks(60))
 			{ REQ(false, "Containment editor run failed"); }
 			world->pauseSimulation();
 			ctx->Sleep(1);
-			REQ(driver.contains("release clearance CLEARED"),
-				"Cleared release state not shown in the live treatment view");
+			REQ(!driver.contains("release clearance"), "Removed release test is still shown");
 			REQ(driver.contains("treatment evidence complete"),
 				"Treatment evidence state not shown");
 			REQ(!world->isModified(), "Containment ticking dirtied the authored document");
-			// A hazardous treatment drafted with a clearance store that
-			// does not exist is refused with a visible diagnostic and no
-			// mutation.
-			driver.typeValue(ctx, "Treatment 0 release-clearance store", "nowhere");
-			ctx->ItemClick("Apply settings");
-			ctx->Sleep(1);
+			REQ(!driver.contains("Treatment 0 release-clearance store")
+				&& !driver.contains("Treatment 0 clearance per kg")
+				&& !driver.contains("Treatment 0 release to normal class"), "Removed treatment controls are still shown");
+			driver.typeValue(ctx, "Treatment 0 consumable store", "nowhere");
+			ctx->ItemClick("Apply settings"); ctx->Sleep(1);
+			ctx->ItemClick("Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("consumable store 'nowhere' does not exist"), "Unknown process consumable accepted");
+			REQ(history.undoCount() == 0 && world->getSimulationTick() == 60, "Invalid draft mutated World");
+			driver.typeValue(ctx, "Treatment 0 consumable store", "hazConsumable");
+			ctx->ItemInputValue("Treatment 0 consumable per kg", "0.003");
+			ctx->ItemClick("Apply settings"); ctx->Sleep(1);
+			REQ(driver.contains("Confirm?"), "Treatment edit bypassed reset confirmation");
 			ctx->ItemClick("Confirm World reset");
-			ctx->Sleep(1);
-			REQ(driver.contains("release-clearance consumable store 'nowhere' does not exist"),
-				"Unknown clearance store diagnostic not shown");
-			REQ(world->getStationSystemsSettings().waterTreatments[0].clearanceStoreId == "hazClearance"
-				&& history.undoCount() == 0 && world->getSimulationTick() == 60,
-				"Invalid clearance draft mutated the authored settings");
-			// Repair the draft; the confirmed reset applies it and the live
-			// view restarts the scenario from the authored beginning.
-			driver.typeValue(ctx, "Treatment 0 release-clearance store", "hazClearance");
-			ctx->ItemInputValue("Treatment 0 clearance per kg", "0.003");
-			ctx->ItemClick("Apply settings");
-			ctx->Sleep(1);
-			REQ(driver.contains("Confirm?"),
-				"Clearance edit bypassed the World reset confirmation");
-			ctx->ItemClick("Confirm World reset");
-			REQ(world->getStationSystemsSettings().waterTreatments[0].clearancePerKg == 0.003
-				&& history.undoCount() == 1 && world->getSimulationTick() == 0,
-				"Repaired clearance draft did not apply through the reset-confirmed flow");
-			// A hazardous treatment drafted with a zero clearance dose is
-			// refused.
-			ctx->ItemInputValue("Treatment 0 clearance per kg", "0");
-			ctx->ItemClick("Apply settings");
-			ctx->Sleep(1);
-			REQ(driver.contains("clearance per kg must be finite and positive"),
-				"Zero clearance dose was accepted");
-			ctx->ItemClick("Cancel edits");
-			REQ(world->getStationSystemsSettings().waterTreatments[0].clearancePerKg == 0.003,
-				"Cancelled clearance edit did not restore the authored contract");
+			REQ(world->getStationSystemsSettings().waterTreatments[0].consumablePerKg == 0.003
+				&& history.undoCount() == 1 && world->getSimulationTick() == 0, "Treatment edit did not apply");
+
 		});
 		#undef REQ
 		require(driver.passed(), "Containment workflow failed on the Test Engine");
@@ -6950,11 +6923,10 @@ void bufferWorkflow(smoke::Context const&)
 				}
 				else
 				{
-					FLAG_REQ(window.draft().waterTreatments[0].releaseToNormalClass, "Explicit normal release did not open");
-					driver.click(ctx, "Treatment 0 release to normal class"); ctx->Yield(3);
-					FLAG_REQ(!window.draft().waterTreatments[0].releaseToNormalClass, "Normal release checkbox did not edit");
+					driver.typeValue(ctx, "Treatment 0 consumable per kg", "0.003"); ctx->Yield(3);
+					FLAG_REQ(window.draft().waterTreatments[0].consumablePerKg == 0.003, "Process consumable did not edit");
 					driver.click(ctx, "Undo configuration"); ctx->Yield(3);
-					FLAG_REQ(window.draft().waterTreatments[0].releaseToNormalClass, "Normal release undo failed");
+					FLAG_REQ(window.draft().waterTreatments[0].consumablePerKg == 0.01, "Process consumable undo failed");
 				}
 				core::StationConfigurationDocument saved, restored; std::string error;
 				saved.settings = window.draft();
@@ -6970,16 +6942,16 @@ void bufferWorkflow(smoke::Context const&)
 						"Editor selective uptake did not run");
 				else
 				{
-					FLAG_REQ(snap.waterTreatments[0].releaseCleared && snap.crews[0].lastWaterActual > 0
+					FLAG_REQ(snap.waterTreatments[0].qualityAccepted && snap.crews[0].lastWaterActual > 0
 						&& snap.crews[1].limiter.find("water quality") != std::string::npos, "Editor contamination actuals disagree");
-					driver.typeValue(ctx, "Store 5 starting usable", "0");
+					driver.typeValue(ctx, "Solar 0 capacity kW", "1");
 					driver.click(ctx, "Apply settings"); ctx->Yield(3);
 					driver.click(ctx, "Confirm World reset"); ctx->Yield(3);
-					world->resumeSimulation(); FLAG_REQ(world->advanceTicks(60), "Editor clearance hold ticks failed"); world->pauseSimulation();
+					world->resumeSimulation(); FLAG_REQ(world->advanceTicks(60), "Editor partial-energy ticks failed"); world->pauseSimulation();
 					auto const held = world->getStationSystemsSnapshot();
-					FLAG_REQ(held.waterTreatments[0].processedKg == 0 && held.crews[0].lastWaterActual == 0
-						&& held.waterTreatments[0].limiter.find("release clearance unavailable") != std::string::npos,
-						"Editor disabled clearance did not hold hazardous feed");
+					FLAG_REQ(held.waterTreatments[0].heldKg > 0 && held.crews[0].lastWaterActual == 0
+						&& held.waterTreatments[0].holdReason.find("energy curtailed") != std::string::npos,
+						"Editor partial energy did not hold treated output");
 				}
 				#undef FLAG_REQ
 			});

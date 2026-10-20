@@ -358,7 +358,7 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		out.values.push_back(p->qualityAccepted ? "Output qualified" : "Output held unqualified");
 		warn(out, p->holdReason); warn(out, p->limiter);
 		port("Raw water in", p->lastProcessedKg); port("Treated water out", p->lastTreatedKg); port("Concentrate out", p->lastConcentrateKg);
-		storePort("Consumable in", p->lastConsumableUsed, p->consumableStoreId); storePort("Clearance in", p->lastClearanceUsed, p->clearanceStoreId);
+		storePort("Consumable in", p->lastConsumableUsed, p->consumableStoreId);
 	}
 	else if (node.type == "Electrolyzer")
 	{

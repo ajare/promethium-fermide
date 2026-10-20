@@ -240,9 +240,9 @@ namespace
 				("expected " + std::string(reason) + ", got " + verdict.reason).c_str());
 		};
 		// Every new connector participates in the matrix, including both optional
-		// oxygen destinations and hazardous release clearance. Every other pair
+		// oxygen destinations. Every other pair
 		// of these pins must refuse, in either drag direction.
-		auto all = legal; all.push_back(oxygenCompartment); all.push_back(clearance);
+		auto all = legal; all.push_back(oxygenCompartment);
 		std::vector<core::StationPinRef> pins;
 		for (auto const& link : all)
 			for (auto const& p : {link.from, link.to})
@@ -267,12 +267,6 @@ namespace
 				for (auto const& d : core::stationPortDescriptors())
 					if (d.nodeType == machine.nodeType && d.name == machine.portName)
 						expected = (store.portName == "Inventory out") == (d.direction == core::StationPortDirection::Input);
-			}
-			if (a.portName == "Clearance in" || b.portName == "Clearance in")
-			{
-				settings.waterTreatments[0].hazardClass = "hazardous";
-				settings.waterTreatments[0].clearancePerKg = .01;
-				for (auto& store : settings.stores) store.hazardClass = "hazardous";
 			}
 			auto verdict = core::evaluateStationLink(settings, {a,b});
 			require(verdict.allowed == expected, ("matrix: " + a.nodeType + "/" + a.portName + " -> " + b.nodeType + "/" + b.portName + ": " + verdict.reason).c_str());
@@ -308,7 +302,7 @@ namespace
 		refused(incomplete, legal[11], "does not match compartment");
 		refused(base(), core::CandidateLink{pin("Atmosphere", "missing", "Gas out"), legal[0].to}, "unknown atmosphere compartment");
 		refused(base(), core::CandidateLink{pin("Coolant loop", "missing", "Cold surfaces"), legal[1].to}, "unknown coolant loop");
-		refused(base(), clearance, "normal-class but configures release-clearance");
+		refused(base(), clearance, "Unknown connector");
 		// Every material role is validated, even while other required
 		// references on the same machine are still empty.
 		for (auto const& link : legal)

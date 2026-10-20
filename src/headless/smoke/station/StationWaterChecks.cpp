@@ -13,7 +13,7 @@ namespace
 	// recovered-versus-lost split, and heat-only thermal-reservoir
 	// coupling. All checks run through the World tick/snapshot/event/
 	// diagnostic seam and observable behaviour only.
-	// #401: crew supplies turn into balanced metabolic returns.	
+	// #401: crew supplies turn into balanced metabolic returns.
 	void crews(smoke::Context const&)
 	{
 		auto const dt = static_cast<double>(core::World::getFixedTimestep());
@@ -900,14 +900,6 @@ namespace
 			settings.recoveryRatio = 0.8;
 			settings.specificEnergyKWhPerKg = 0.5;
 			settings.consumablePerKg = 0.01;
-			// A hazardous-class treatment carries the release-clearance
-			// contract (#412): treated hazardous material is released only
-			// on a passed clearance test.
-			if (hazard == "hazardous")
-			{
-				settings.clearanceStoreId = "clearance";
-				settings.clearancePerKg = 0.002;
-			}
 			return settings;
 		};
 		auto waterStores = [&]()
@@ -917,7 +909,6 @@ namespace
 			stores.push_back(plainStore("treated", 100.0, 0.0));
 			stores.push_back(plainStore("concentrate", 100.0, 0.0));
 			stores.push_back(plainStore("consumable", 100.0, 10.0));
-			stores.push_back(plainStore("clearance", 100.0, 5.0));
 			return stores;
 		};
 		auto findStore = [](core::StationSystemsSnapshot const& snap, std::string const& id)

@@ -710,7 +710,6 @@ using namespace station_detail;
 			size_t treatedIndex{0};
 			size_t concentrateIndex{0};
 			size_t consumableIndex{0};
-			size_t clearanceIndex{0};
 			size_t declarationIndex{0};
 			double lastScale{0.0};
 			std::string lastLimiter;
@@ -723,17 +722,11 @@ using namespace station_detail;
 			double lastConsumableUsed{0.0};
 			bool lastQualityAccepted{false};
 			std::string lastHoldReason;
-			// The three quality gates (#412): filtration ran with the
-			// process, the full rated energy dose is the treatment evidence,
-			// and the release clearance test is what releases hazardous
-			// treated material. Unknown or failed clearance holds it.
+			// The quality gates: filtration ran with the process, and the
+			// full rated energy dose is the treatment evidence. The output
+			// qualifies on the evidence alone.
 			bool lastFiltrationCompleted{false};
 			bool lastTreatmentEvidenced{false};
-			bool lastReleaseCleared{false};
-			double lastClearanceRequested{0.0};
-			double lastClearanceUsed{0.0};
-			double lastClearanceUnmet{0.0};
-			double clearanceUsedTotal{0.0};
 			double processedTotalKg{0.0};
 			double treatedTotalKg{0.0};
 			double acceptedTotalKg{0.0};

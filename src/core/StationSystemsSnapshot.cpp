@@ -795,7 +795,6 @@ namespace core
 		for (auto const& treatment : mImpl->waterTreatments)
 		{
 			StationWaterTreatmentSnapshot treatmentResult;
-			treatmentResult.releaseToNormalClass = treatment.authored.releaseToNormalClass;
 			treatmentResult.removalFractions = treatment.authored.removalFractions;
 			treatmentResult.lastRemovedConstituents = treatment.lastRemovedConstituents;
 			treatmentResult.lastPassedConstituents = treatment.lastPassedConstituents;
@@ -829,13 +828,6 @@ namespace core
 			treatmentResult.holdReason = treatment.lastHoldReason;
 			treatmentResult.filtrationCompleted = treatment.lastFiltrationCompleted;
 			treatmentResult.treatmentEvidenced = treatment.lastTreatmentEvidenced;
-			treatmentResult.releaseCleared = treatment.lastReleaseCleared;
-			treatmentResult.clearanceStoreId = treatment.authored.clearanceStoreId;
-			treatmentResult.clearancePerKg = treatment.authored.clearancePerKg;
-			treatmentResult.lastClearanceRequested = treatment.lastClearanceRequested;
-			treatmentResult.lastClearanceUsed = treatment.lastClearanceUsed;
-			treatmentResult.lastClearanceUnmet = treatment.lastClearanceUnmet;
-			treatmentResult.clearanceUsedTotal = treatment.clearanceUsedTotal;
 			treatmentResult.disabled = treatment.authored.throughputKgPerS <= 0.0;
 			treatmentResult.processedKg = treatment.processedTotalKg;
 			treatmentResult.treatedKg = treatment.treatedTotalKg;

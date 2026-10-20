@@ -756,11 +756,6 @@ namespace core
 			fin(treatment.lastConsumableRequested, tag("lastConsumableRequested", treatment.id));
 			fin(treatment.lastConsumableUsed, tag("lastConsumableUsed", treatment.id));
 			fin(treatment.lastConsumableUnmet, tag("lastConsumableUnmet", treatment.id));
-			fin(treatment.clearancePerKg, tag("clearancePerKg", treatment.id));
-			fin(treatment.lastClearanceRequested, tag("lastClearanceRequested", treatment.id));
-			fin(treatment.lastClearanceUsed, tag("lastClearanceUsed", treatment.id));
-			fin(treatment.lastClearanceUnmet, tag("lastClearanceUnmet", treatment.id));
-			fin(treatment.clearanceUsedTotal, tag("clearanceUsedTotal", treatment.id));
 			fin(treatment.processedKg, tag("processedKg", treatment.id));
 			fin(treatment.treatedKg, tag("treatedKg", treatment.id));
 			fin(treatment.acceptedKg, tag("acceptedKg", treatment.id));

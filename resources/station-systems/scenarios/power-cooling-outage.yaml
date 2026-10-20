@@ -129,8 +129,7 @@ assumptions:
 - topic: Hazardous autonomy
   text: 'The hazardous processing bay is a self-contained segregated service. Hazardous water
     (hazWaterRaw) is processed only by the hazardous-class treatment, which releases treated material
-    only on a passed release-clearance test drawn from the hazardous clearance kit at 0.001 clearance
-    units per kg treated; a curtailed energy dose or an exhausted kit holds the material unqualified.
+    only on complete treatment energy evidence; a curtailed energy dose holds the material unqualified.
     The hazardous coolant loop owns its own finite coolant inventory, is protected as a containment-circulation
     service regardless of its criticalService flag, and never shares a store, a loop or a generic
     transfer with the normal side. Hazardous concentrate leaves the station only through its own
@@ -435,13 +434,6 @@ stationSystems:
     startingUnqualified: 0.0
     protectedReserve: 0.0
     hazardClass: hazardous
-  - id: hazClearance
-    unit: kg
-    capacity: 10.0
-    startingQualified: 4.0
-    startingUnqualified: 0.0
-    protectedReserve: 0.0
-    hazardClass: hazardous
   - id: toolKit
     unit: kg
     capacity: 10.0
@@ -573,9 +565,7 @@ stationSystems:
     sourceStoreId: hazWaterRaw
     treatedStoreId: hazWaterTreated
     concentrateStoreId: hazConcentrate
-    consumableStoreId: hazClearance
-    clearanceStoreId: hazClearance
-    clearancePerKg: 0.001
+    consumableStoreId: treatmentMedia
     throughputKgPerS: 2.0e-05
     recoveryRatio: 0.85
     specificEnergyKWhPerKg: 0.6

@@ -1157,8 +1157,6 @@ namespace core
 		{
 			processConsumptionStores.insert(treatment.sourceStoreId);
 			processConsumptionStores.insert(treatment.consumableStoreId);
-			if (!treatment.clearanceStoreId.empty())
-				processConsumptionStores.insert(treatment.clearanceStoreId);
 		}
 		for (auto const& cell : settings.electrolyzers)
 			processConsumptionStores.insert(cell.waterStoreId);

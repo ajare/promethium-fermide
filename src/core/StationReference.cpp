@@ -515,7 +515,6 @@ namespace core
 				serializer.beginMap("");
 				serializer.writeString("id", treatment.id);
 				serializer.writeString("hazardClass", treatment.hazardClass);
-				if (treatment.releaseToNormalClass) serializer.writeBool("releaseToNormalClass", true);
 				serializer.writeString("sourceStoreId", treatment.sourceStoreId);
 				serializer.writeString("treatedStoreId", treatment.treatedStoreId);
 				serializer.writeString("concentrateStoreId", treatment.concentrateStoreId);
@@ -531,8 +530,6 @@ namespace core
 				}
 				serializer.writeDouble("specificEnergyKWhPerKg", treatment.specificEnergyKWhPerKg);
 				serializer.writeDouble("consumablePerKg", treatment.consumablePerKg);
-				serializer.writeString("clearanceStoreId", treatment.clearanceStoreId);
-				serializer.writeDouble("clearancePerKg", treatment.clearancePerKg);
 				serializer.writeInt32("priority", treatment.priority);
 				serializer.endMap();
 			}
@@ -1581,10 +1578,8 @@ namespace core
 				treatment.id = serializer.readString("id");
 				treatment.hazardClass = serializer.readString("hazardClass");
 				if (serializer.hasField("releaseToNormalClass"))
-				{
-					if (version < 101) throw SerializationException("Normal-class treatment release requires schema 101");
-					treatment.releaseToNormalClass = serializer.readBool("releaseToNormalClass");
-				}
+					throw SerializationException(
+						"Station water treatment '" + treatment.id + "' field 'releaseToNormalClass' was removed (#753); conversion required");
 				treatment.sourceStoreId = serializer.readString("sourceStoreId");
 				treatment.treatedStoreId = serializer.readString("treatedStoreId");
 				treatment.concentrateStoreId = serializer.readString("concentrateStoreId");
@@ -1602,18 +1597,11 @@ namespace core
 				}
 				treatment.specificEnergyKWhPerKg = serializer.readDouble("specificEnergyKWhPerKg");
 				treatment.consumablePerKg = serializer.readDouble("consumablePerKg");
-				if (serializer.hasField("clearanceStoreId"))
-				{
-					if (version < 88) throw SerializationException(
-						"Station release-clearance contracts require World schema 88");
-					treatment.clearanceStoreId = serializer.readString("clearanceStoreId");
-				}
-				if (serializer.hasField("clearancePerKg"))
-				{
-					if (version < 88) throw SerializationException(
-						"Station release-clearance contracts require World schema 88");
-					treatment.clearancePerKg = serializer.readDouble("clearancePerKg");
-				}
+				if (serializer.hasField("clearanceStoreId") || serializer.hasField("clearancePerKg"))
+					throw SerializationException(
+						"Station water treatment '" + treatment.id + "' field '"
+						+ (serializer.hasField("clearanceStoreId") ? "clearanceStoreId" : "clearancePerKg")
+						+ "' was removed (#753); conversion required");
 				treatment.priority = serializer.readInt32("priority");
 				stationSettings.waterTreatments.push_back(std::move(treatment));
 				serializer.endMap();

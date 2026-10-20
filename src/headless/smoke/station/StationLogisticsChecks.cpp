@@ -731,7 +731,6 @@ namespace
 			treatment.id = "hazTreatment"; treatment.hazardClass = "hazardous";
 			treatment.sourceStoreId = "raw"; treatment.treatedStoreId = "treated";
 			treatment.concentrateStoreId = "concentrate"; treatment.consumableStoreId = "consumable";
-			treatment.clearanceStoreId = "consumable"; treatment.clearancePerKg = 0.001;
 			treatment.throughputKgPerS = 0.2; treatment.recoveryRatio = 0.8;
 			treatment.specificEnergyKWhPerKg = 0.0;
 			settings.waterTreatments = {treatment};
@@ -760,21 +759,21 @@ namespace
 			core::StationSystemsSettings settings;
 			settings.enabled = true; settings.observationIntervalSeconds = 1.0f;
 			settings.stores = {wasteStore("raw", 100.0, 10.0), wasteStore("held", 100.0, 0.0),
-				wasteStore("concentrate", 100.0, 0.0), wasteStore("kit", 100.0, 10.0),
-				wasteStore("clearance", 100.0, 0.0)};
+				wasteStore("concentrate", 100.0, 0.0), wasteStore("kit", 100.0, 10.0)};
 			for (auto& store : settings.stores) store.hazardClass = "hazardous";
 			core::ResourceCompositionSettings muddy;
 			muddy.moisture = 0.8; muddy.nutrientNitrogen = 0.1;
 			settings.stores[0].composition = muddy;
 			settings.stores[1].composition = core::ResourceCompositionSettings{};
 			core::WaterTreatmentSettings treatment;
-			treatment.id = "uncleared"; treatment.hazardClass = "hazardous";
+			treatment.id = "partial-dose"; treatment.hazardClass = "hazardous";
 			treatment.sourceStoreId = "raw"; treatment.treatedStoreId = "held";
 			treatment.concentrateStoreId = "concentrate"; treatment.consumableStoreId = "kit";
-			treatment.clearanceStoreId = "clearance"; treatment.clearancePerKg = 0.001;
 			treatment.throughputKgPerS = 0.2; treatment.recoveryRatio = 0.8;
-			treatment.specificEnergyKWhPerKg = 0.0;
+			treatment.specificEnergyKWhPerKg = 0.01;
 			for (auto const* name : core::StationWaterDryConstituents) treatment.removalFractions[name] = 0.0;
+			core::SolarArraySettings sun; sun.id = "sun"; sun.capacityKW = 1;
+			settings.solarArrays = {sun};
 			settings.waterTreatments = {treatment};
 			settings.wasteEjections = {ejection("dump", "held", 1.0, 1.0, 1.0)};
 			settings.wasteEjections[0].eligibility = mode;

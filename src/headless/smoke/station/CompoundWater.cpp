@@ -668,10 +668,10 @@ void hydroponics(smoke::Context const& context)
 void contamination(smoke::Context const& context)
 {
 	auto const base = scenario(context, "water-contamination.yaml");
-	for (bool clearance : {true, false})
+	for (bool powered : {true, false})
 	{
 		auto s = base;
-		if (!clearance) for (auto& entry : s.stores) if (entry.id == "clearance") entry.startingQualified = 0;
+		if (!powered) s.solarArrays[0].capacityKW = 0;
 		// Assert every authored transfer is class-matched; the crossing
 		// itself is exercised below, where it is now legal (#750).
 		for (auto const& transfer : s.transfers)
@@ -683,17 +683,17 @@ void contamination(smoke::Context const& context)
 		}
 		auto const snap = run(s, 600);
 		close(snap.crews[1].lastWaterActual, 0); close(snap.cropPopulations[1].growthKg, 0);
-		require(snap.crews[1].limiter.find("water quality: total dissolved") != std::string::npos
-			&& snap.cropPopulations[1].lastGrowthLimiter.find("water quality: total dissolved") != std::string::npos,
+		require(!powered || (snap.crews[1].limiter.find("water quality: total dissolved") != std::string::npos
+			&& snap.cropPopulations[1].lastGrowthLimiter.find("water quality: total dissolved") != std::string::npos),
 			"hazard-side loaded probes did not name quality refusal");
 		auto const& treatment = snap.waterTreatments[0];
 		close(mass(store(snap, "ingress"), "dryOrganics") + mass(store(snap, "loop"), "dryOrganics")
 			+ mass(store(snap, "concentrate"), "dryOrganics"), 0.1);
 		close(mass(store(snap, "cleared"), "dryOrganics"), 0);
 		close(store(snap, "cleared").currentUnqualified, 0);
-		if (clearance)
+		if (powered)
 		{
-			require(treatment.releaseCleared && treatment.clearanceUsedTotal > 0 && snap.crews[0].lastWaterActual > 0
+			require(treatment.treatmentEvidenced && treatment.qualityAccepted && snap.crews[0].lastWaterActual > 0
 				&& snap.cropPopulations[0].lastGrowthKg > 0, "cleared water did not reach normal consumers");
 			close(treatment.processedKg, 0.05 * core::World::getFixedTimestep() * 599); // first tick fills the loop
 		}
@@ -701,7 +701,7 @@ void contamination(smoke::Context const& context)
 		{
 			close(treatment.processedKg, 0); close(store(snap, "cleared").currentQualified, 0);
 			close(snap.crews[0].lastWaterActual, 0); close(snap.cropPopulations[0].growthKg, 0);
-			require(treatment.limiter.find("release clearance unavailable") != std::string::npos, "missing clearance hold reason");
+			require(treatment.lastPowerSuppliedKW == 0, "unpowered treatment received energy");
 		}
 	}
 	std::string error;
@@ -729,47 +729,39 @@ void contamination(smoke::Context const& context)
 		require(moved, reverse ? "the cleared-to-loop bypass did not move mass"
 			: "the loop-to-cleared bypass did not move mass");
 	}
-	core::World world("Refuse consumer bypass", 2, 2); world.pauseSimulation(); world.finishBuild();
-	require(world.configureStationSystems(base, false, &error), error.c_str());
+	// Consumer wiring is legal; actual dissolved load, not a class label, limits uptake.
 	for (bool crew : {true, false})
 	{
-		auto bad = base;
-		if (crew) bad.crews[0].waterStoreId = "loop";
-		else bad.cropPopulations[0].waterStoreId = "loop";
-		auto const accepted = world.configureStationSystems(bad, false, &error);
-		require(!accepted && error.find("hazard") != std::string::npos, "normal consumer accepted hazardous water");
-		require(world.getStationSystemsSettings() == base, "refused consumer bypass mutated World");
+		auto wired = base;
+		if (crew) wired.crews[0].waterStoreId = "loop";
+		else wired.cropPopulations[0].waterStoreId = "loop";
+		auto const snap = run(wired, 60);
+		if (crew) close(snap.crews[0].lastWaterActual, 0);
+		else close(snap.cropPopulations[0].growthKg, 0);
 	}
-	auto bad = base; bad.waterTreatments[0].releaseToNormalClass = false;
-	require(!core::validateStationSystemsSettings(bad, error), "implicit normal release accepted");
-	bad = base; bad.waterTreatments[0].clearanceStoreId.clear();
-	require(!core::validateStationSystemsSettings(bad, error), "normal release without clearance accepted");
-	bad = base; bad.solarArrays[0].capacityKW = 0;
+	auto bad = base; bad.solarArrays[0].capacityKW = 0;
 	auto const dark = run(bad, 3); close(store(dark, "cleared").currentQualified, 0); close(dark.waterTreatments[0].processedKg, 0);
-	// Dose and clearance feasibility must also respect physical port caps,
-	// transport losses, protected kit reserves and a kit shared by both roles.
+	// The process consumable still respects connection caps, transport losses and reserves.
 	for (auto const eta : {0.0, 0.5})
 	{
 		auto s = base; bool found = false;
 		for (auto const& link : core::station_connections::build(s).links)
-			if (link.designKey.ownerType == "Water treatment" && link.designKey.reference == "clearanceStoreId")
+			if (link.designKey.ownerType == "Water treatment" && link.designKey.reference == "consumableStoreId")
 			{ s.connections[link.designKey].efficiency = eta; found = true; }
-		require(found, "clearance connection absent");
+		require(found, "consumable connection absent");
 		auto const snap = run(s, 60);
-		close(store(snap, "cleared").currentUnqualified, 0);
 		if (eta == 0) close(snap.waterTreatments[0].processedKg, 0);
-		else require(snap.waterTreatments[0].releaseCleared, "lossy but stocked clearance did not release");
+		else require(snap.waterTreatments[0].qualityAccepted, "stocked process consumable did not permit treatment");
 	}
-	auto shared = base; shared.waterTreatments[0].clearanceStoreId = "media";
-	for (auto& entry : shared.stores) if (entry.id == "media") { entry.startingQualified = 0.001; entry.protectedReserve = 0.0005; }
-	auto const kit = run(shared, 60);
-	require(store(kit, "media").currentQualified >= 0.0005 - 1e-12, "shared kit overdrawn");
-	close(store(kit, "cleared").currentUnqualified, 0);
+	auto limited = base;
+	for (auto& entry : limited.stores) if (entry.id == "media") { entry.startingQualified = 0.001; entry.protectedReserve = 0.0005; }
+	auto const kit = run(limited, 60);
+	require(store(kit, "media").currentQualified >= 0.0005 - 1e-12, "process consumable reserve overdrawn");
 	auto reduced = base; reduced.solarArrays[0].capacityKW = 1;
 	auto const partial = run(reduced, 60);
-	require(partial.waterTreatments[0].processedKg > 0 && partial.waterTreatments[0].releaseCleared,
-		"duty-limited full-dose release failed");
-	close(store(partial, "cleared").currentUnqualified, 0);
+	require(partial.waterTreatments[0].processedKg > 0 && !partial.waterTreatments[0].qualityAccepted,
+		"partial energy evidence qualified output");
+	require(store(partial, "cleared").currentUnqualified > 0, "partial dose did not hold output");
 }
 void legacy(smoke::Context const& context)
 {

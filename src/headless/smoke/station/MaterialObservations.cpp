@@ -233,8 +233,8 @@ namespace
 			}
 			close(total, observed.wasteEjections[1].ejectedTotal);
 			if (mode == 1) {
-				close(total, 0); require(observed.stores[7].currentUnqualified > 0, "failed clearance did not hold treatment output");
-			} else require(total > 0, "passed treatment clearance never permitted ejection");
+				close(total, 0); require(observed.stores[7].currentUnqualified > 0, "incomplete energy evidence did not hold treatment output");
+			} else require(total > 0, "complete treatment evidence never permitted ejection");
 		}
 		// Schedules without physical spend do not fabricate material exchanges.
 		s.deliveries.clear(); s.wasteEjections.clear(); s.maintenanceJobs[0].requirements.pop_back(); s.maintenanceJobs[0].wasteStoreId.clear();
@@ -690,20 +690,19 @@ namespace
 		s.co2Captures[0].maxRateKgPerS = 0; apply(); run(world, 12); verify();
 		check("Electrolyzer", "Oxygen", 0); check("Water collector", "Condensate", 0);
 		check("Water treatment", "Treated water", 0); check("CO2 capture", "Captured CO2", 0);
-		// Hazardous clearance and non-kg consumables retain explicit identity and
+		// Hazardous treatment and non-kg consumables retain explicit identity and
 		// canonical rates. Oxygen may also go directly to atmosphere, not a store.
 		s = smoke::station::waterGasObservationFixture();
 		for (auto& stock : s.stores) stock.hazardClass = "hazardous";
 		s.atmospheres[0].hazardClass = "hazardous"; s.coolantLoops[0].hazardClass = "hazardous";
 		s.waterCollectors[0].hazardClass = "hazardous"; s.waterTreatments[0].hazardClass = "hazardous";
 		s.electrolyzers[0].hazardClass = "hazardous"; s.co2Captures[0].hazardClass = "hazardous";
-		s.waterTreatments[0].clearanceStoreId = "kit"; s.waterTreatments[0].clearancePerKg = 0.01;
+
 		s.stores[3].unit = "g"; s.stores[3].capacity = 100000; s.stores[3].startingQualified = 10000;
 		s.electrolyzers[0].oxygenStoreId.clear(); s.electrolyzers[0].atmosphereId = "air";
 		auto otherKit = s.stores[3]; otherKit.id = "other-kit"; otherKit.materialId = "other-sorbent"; s.stores.push_back(otherKit);
 		auto otherCapture = s.co2Captures[0]; otherCapture.id = "other-capture"; otherCapture.consumableStoreId = "other-kit"; s.co2Captures.push_back(otherCapture);
 		apply(); run(world, 12); verify(); snap = world.getStationSystemsSnapshot();
-		check("Water treatment", "Clearance consumable", snap.waterTreatments[0].lastClearanceUsed * 0.001 / dt);
 		check("Electrolyzer", "Oxygen", snap.electrolyzers[0].lastOxygenKg / dt);
 		size_t consumableViews = 0;
 		for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate" && def.id.starts_with("exchange/CO2 capture/Input/Consumable/")) {

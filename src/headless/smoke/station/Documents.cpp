@@ -1252,12 +1252,6 @@ namespace
 		hazConsumable.hazardClass = "hazardous";
 		hazConsumable.capacity = 100.0;
 		hazConsumable.startingQualified = 10.0;
-		core::ResourceStoreSettings hazClearance;
-		hazClearance.id = "hazClearance";
-		hazClearance.unit = "kg";
-		hazClearance.hazardClass = "hazardous";
-		hazClearance.capacity = 100.0;
-		hazClearance.startingQualified = 5.0;
 		core::ResourceStoreSettings potable;
 		potable.id = "potable";
 		potable.unit = "kg";
@@ -1270,8 +1264,6 @@ namespace
 		plant.treatedStoreId = "hazTreated";
 		plant.concentrateStoreId = "hazConcentrate";
 		plant.consumableStoreId = "hazConsumable";
-		plant.clearanceStoreId = "hazClearance";
-		plant.clearancePerKg = 0.002;
 		plant.throughputKgPerS = 0.005;
 		plant.recoveryRatio = 0.8;
 		plant.specificEnergyKWhPerKg = 0.5;
@@ -1282,8 +1274,7 @@ namespace
 		core::StationSystemsSettings settings;
 		settings.enabled = true;
 		settings.observationIntervalSeconds = 2.0f;
-		settings.stores = { hazRaw, hazTreated, hazConcentrate, hazConsumable,
-			hazClearance, potable };
+		settings.stores = { hazRaw, hazTreated, hazConcentrate, hazConsumable, potable };
 		settings.waterTreatments = { plant };
 		core::SolarArraySettings field;
 		field.id = "field";
@@ -1296,8 +1287,8 @@ namespace
 		require(original.advanceTicks(120), "Containment original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.waterTreatments.size() == 1
-			&& expected.waterTreatments[0].releaseCleared
-			&& expected.waterTreatments[0].clearanceUsedTotal > 0.0,
+			&& expected.waterTreatments[0].qualityAccepted
+			&& expected.waterTreatments[0].acceptedKg > 0.0,
 			"Containment scenario produced the wrong observable state");
 		for (auto const* suffix : {".world.yaml", ".world"})
 		{
@@ -1305,9 +1296,10 @@ namespace
 			original.saveTo(path.string());
 			auto const document = readFile(path);
 			require(document.find("hazardClass") != std::string::npos
-				&& document.find("clearanceStoreId") != std::string::npos
-				&& document.find("clearancePerKg") != std::string::npos,
-				"authored containment fields missing from the document");
+				&& document.find("clearanceStoreId") == std::string::npos
+				&& document.find("clearancePerKg") == std::string::npos
+				&& document.find("releaseToNormalClass") == std::string::npos,
+				"document is missing authored fields or contains retired treatment fields");
 			for (auto const* liveState : {"releaseCleared", "clearanceUsedTotal",
 				"lastClearanceRequested", "lastClearanceUsed", "lastClearanceUnmet",
 				"filtrationCompleted", "treatmentEvidenced", "heldKg", "acceptedKg"})
@@ -1318,8 +1310,8 @@ namespace
 				"containment settings did not survive the file round trip");
 			auto const fresh = reopened->getStationSystemsSnapshot();
 			require(fresh.waterTreatments.size() == 1
-				&& fresh.waterTreatments[0].clearanceUsedTotal == 0.0
-				&& !fresh.waterTreatments[0].releaseCleared
+				&& fresh.waterTreatments[0].acceptedKg == 0.0
+				&& !fresh.waterTreatments[0].qualityAccepted
 				&& fresh.stores[0].currentQualified == 100.0
 				&& fresh.stores[0].hazardClass == "hazardous",
 				"reopened World did not restart the authored containment scenario");
@@ -1351,15 +1343,39 @@ namespace
 			catch (std::exception const&) { refused = true; }
 			require(refused, "an unknown store hazard class was accepted from a file");
 		}
+		// Retired fields are refused, including inert/default values and older schemas.
+		for (auto const* field : {"clearanceStoreId: nowhere", "clearancePerKg: 0", "releaseToNormalClass: false"})
+		for (auto const* version : {"102", "101"})
 		{
 			auto malformed = withField;
-			replaceAll(malformed, "clearanceStoreId: hazClearance", "clearanceStoreId: nowhere");
-			auto const malformedPath = directory / "unknown-clearance-store.world.yaml";
-			writeFile(malformedPath, malformed);
+			replaceAll(malformed, "version: 102", std::string("version: ") + version);
+			auto const at = malformed.find("sourceStoreId: hazRaw");
+			auto const line = malformed.rfind('\n', at) + 1;
+			malformed.insert(line, malformed.substr(line, at - line) + field + "\n");
+			auto const path = directory / "retired-treatment-field.world.yaml";
+			writeFile(path, malformed);
 			bool refused = false;
-			try { (void)core::loadWorldDocument(malformedPath); }
-			catch (std::exception const&) { refused = true; }
-			require(refused, "a clearance contract naming an unknown store was accepted from a file");
+			try { (void)core::loadWorldDocument(path); }
+			catch (std::exception const& error) {
+				auto const message = std::string(error.what());
+				refused = message.find(std::string(field).substr(0, std::string(field).find(':'))) != std::string::npos
+					&& message.find("conversion required") != std::string::npos;
+			}
+			require(refused, std::string("retired treatment field did not produce a named conversion diagnostic: ") + field + " version " + version);
+		}
+		for (auto const* field : {"clearanceStoreId: nowhere", "clearancePerKg: 0", "releaseToNormalClass: false"})
+		{
+			core::StationConfigurationDocument document;
+			document.settings = settings;
+			auto text = core::serializeStationConfiguration(document);
+			auto const at = text.find("sourceStoreId: hazRaw");
+			auto const line = text.rfind('\n', at) + 1;
+			text.insert(line, text.substr(line, at - line) + field + "\n");
+			core::StationConfigurationDocument parsed;
+			require(!core::parseStationConfiguration(text, parsed, &diagnostic)
+				&& diagnostic.find(std::string(field).substr(0, std::string(field).find(':'))) != std::string::npos
+				&& diagnostic.find("conversion required") != std::string::npos,
+				"standalone configuration silently accepted a retired treatment field");
 		}
 	}
 	// #395: authored thermal reservoirs, radiators and load heat-sink

@@ -247,8 +247,6 @@ Graph build(core::StationSystemsSettings const& s)
 		powerIn(n); b.feed(n, p.sourceStoreId, "Raw water", Medium::Water);
 		b.input(n, p.consumableStoreId, "Treatment consumable", "Store", LinkKind::Material, true,
 			Medium::Consumables, "consumableStoreId");
-		b.input(n, p.clearanceStoreId, "Clearance consumable", "Store", LinkKind::Material, true,
-			Medium::Consumables, "clearanceStoreId");
 		b.product(n, p.treatedStoreId, "Treated water", Medium::Water); b.output(n, p.concentrateStoreId, "Concentrate"); });
 	b.connect(s.electrolyzers, "Electrolyzer", [&](size_t n, auto const& p) {
 		powerIn(n); b.feed(n, p.waterStoreId, "Feed water", Medium::Water); b.product(n, p.hydrogenStoreId, "Hydrogen", Medium::Hydrogen);

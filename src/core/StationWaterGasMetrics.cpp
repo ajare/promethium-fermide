@@ -64,7 +64,6 @@ void appendStationWaterGasObservations(StationSystemsSettings const& settings,
 		// Water/concentrate process ledgers are intrinsically kg, not store units.
 		concentrate.sourceToCanonicalScale = 1;
 		if (!t.consumableStoreId.empty()) storeIdentity(add("Treatment consumable", R::Input, "", &S::lastConsumableUsed, &S::lastConsumableRequested), t.consumableStoreId);
-		if (!t.clearanceStoreId.empty()) storeIdentity(add("Clearance consumable", R::Input, "", &S::lastClearanceUsed, &S::lastClearanceRequested), t.clearanceStoreId);
 		add("Electrical service", R::Input, "", &S::lastPowerSuppliedKW, &S::lastPowerDemandKW, true);
 	}
 	for (auto const& e : settings.electrolyzers) {

@@ -197,9 +197,9 @@ CO2 capture draws from an Atmosphere into a finite Store. Airlock cycles draw
 from an Atmosphere; Atmosphere heat coupling to a Reservoir is optional.
 
 Unused optional connectors are hollow rings, including capture consumables,
-treatment clearance, and the alternative oxygen destinations. They become real
-links when wired. Hazardous treatment requires release clearance; normal
-water treatment refuses it. Hazard, thermal-class, unknown-reference and
+and the alternative oxygen destinations. They become real links when wired.
+Treatment qualifies output on complete energy evidence alone (#753).
+Thermal-class, unknown-reference and
 exclusive-destination refusals use the configuration validator's reasons.
 Configuration documents preserve the resulting processing line and layout.
 
@@ -341,7 +341,7 @@ station demand is derived from Agents and no Agent behaviour semantics change.
 
 Authors declare finite starting supplies per World. Each store carries an
 identity, a declared unit, a capacity and a starting inventory split into
-qualified (usable) and unqualified (held awaiting treatment or clearance)
+qualified (usable) and unqualified (held awaiting treatment)
 quantities. The host validates every store before anything runs: ids must be
 non-empty, unique and at most 64 characters; units must come from the declared
 vocabulary (`g`, `kg`, `mL`, `L`, `m3`, `mol`, `kJ`, `MJ`, `Wh`, `kWh`);
@@ -1626,7 +1626,7 @@ of that drawn constituent routed to concentrate; omitted keys mean **all
 removed** (1). Unknown keys are refused with their name. Water recovery
 still applies only to the drawn water. Chemical energy follows the organic
 partition. Every drawn constituent ends in treated or concentrate exactly
-once; headroom and clearance demand use the complete resulting stream mass.
+once; headroom limits use the complete resulting stream mass.
 Any outlet receiving dry load must be compound, including the treated outlet
 when all removals are zero. Absent fractions preserve full removal from a
 compound source and the original exact scalar split from a plain source.
@@ -1743,9 +1743,8 @@ supply. Schema 101's explicit `irrigationUptakeFractions` opt-in does support
 selective dissolved N/P/K uptake with unabsorbed salt retention. See
 [the flagship water scenarios](compound-water.md#selective-crop-irrigation-744)
 for the equations, conserved ledgers and documented purge/failure actuals.
-Hazardous treatment may explicitly select `releaseToNormalClass` to return only
-full-dose, clearance-tested product to a normal-class outlet; uncleared feed
-stays hazardous and generic cross-hazard Transfers remain refused.
+Treatment qualifies output on complete energy evidence alone; partial doses
+leave output held unqualified. No separate release-test contract is required.
 The reference station is unchanged. Focused checks: `station-bioconversionCarryover`,
 `station-crews`, and `station-editor-water-carryover` (Open, edit/undo,
 save/load, Apply and public World ticks).
@@ -2132,30 +2131,13 @@ setpoint or a runtime policy never establishes containment: the declared
 class boundary does, and a compartment sitting exactly on its pressure
 setpoint is no less hazardous than one that has drifted.
 
-**Filtration, treatment evidence and release clearance are three distinct
-gates.** A hazardous-class water treatment must declare a release-
-clearance contract: a clearance consumable store and a positive test dose
-per kilogram treated. Filtration runs with the process; the treatment
-evidence is the full rated energy dose; and the release clearance is the
-passed test, drawn from the clearance store above its protected reserve.
-Only when the full dose and a passed test coincide is the treated output
-released as qualified. A curtailed dose fails the evidence gate before the
-test ever runs, and a full dose whose clearance consumable cannot cover the
-output is unknown clearance — both hold the material unqualified with a
-stated reason. The test is all-or-nothing per tick: a partial kit does not
-clear a partial batch, and a held batch consumes no clearance consumable,
-so the kit stays available rather than being burned on a test that never
-happened. Generic recovery transfers only ever pick up qualified (released)
-material, so the hold cannot be bypassed: when the clearance consumable is
-gone the treated store fills with held stock that no transfer can reach,
-while the released material ahead of it keeps flowing to the hazardous
-reserve. The unmet containment demand is exposed on the snapshot beside the
-cleared/held split and the cumulative clearance ledger.
-
-A normal-class treatment cannot configure clearance testing at all —
-release clearance is the hazardous containment boundary, not a normal-
-water filter — and a hazardous treatment with no clearance contract has no
-release authority and is refused at configuration.
+**Treatment output qualifies on complete energy evidence (#753).** Filtration
+runs with the process; the full rated energy dose supplies treatment evidence.
+A partial dose holds output unqualified with a stated energy-curtailment reason.
+Ordinary transfers draw only qualified inventory, so held material cannot bypass
+this gate. No release-test consumable, test dose, missing-test hold or explicit
+class-conversion flag remains. The process still requires its treatment media
+and respects their protected reserve, throughput and connection limits.
 
 **Heat-only interfaces never move mass.** A coolant loop exchanges heat
 with its coupled reservoir through the circulation-gated exchanger and
@@ -2169,42 +2151,19 @@ contract removes only its own store's declared eligible partitions
 (qualified-only by default); one class's ejection never
 touches the other class's store.
 
-World schema 88 persists the store hazard class and the treatment's
-release-clearance contract; a pre-88 document carrying `hazardClass` on a
-store or `clearanceStoreId`/`clearancePerKg` on a treatment is refused
-rather than silently defaulted. The clearance state, the cleared/held
-split, the clearance ledger and the quality gates stay runtime-only: Load
-and Reset reconstruct them from the authored starting conditions.
+Release-test fields formerly persisted by schema 88 and the class-conversion
+flag introduced in schema 101 are retired. Documents carrying
+`clearanceStoreId`, `clearancePerKg` or `releaseToNormalClass` are refused with a
+named-field conversion-required diagnostic, rather than silently defaulted.
+Treatment quality gates and accepted/held mass remain runtime-only; Load and
+Reset reconstruct them from authored starting conditions.
 
-Containment acceptance coverage: refused configurations (unknown store
-hazard class; cross-class transfer in either direction; cross-class
-conversion; a normal-class treatment drawing from a hazardous store; a
-hazardous treatment with no clearance contract or a zero clearance dose;
-a clearance store that is also a recovery stream; a normal-class treatment
-configuring clearance) with no World mutation; cleared recovery (a full-
-dose, cleared hazardous treatment releases qualified material, the
-clearance consumable tracks the released mass, the same-class recovery
-transfer moves it to the hazardous reserve, and the normal inventory is
-never touched); unknown clearance holds (once the kit is gone the output
-is held with a stated reason, the unmet containment demand is exposed, the
-generic transfer moves only the previously released material and the held
-stock stays behind unreachable, and the reserve carries nothing
-unqualified); failed evidence (a curtailed dose holds the whole output and
-burns no clearance consumable); heat-only interfaces (the loop's coolant
-inventory and every Resource store are unchanged while the heater and pump
-run and the loop-reservoir heat exchange happens); waste segregation (each
-default qualified-only ejection removes only its own store's qualified contents and the held
-stock stays behind); the bundled Lua sandbox mirroring the same clearance
-rule and agreeing with the host ledger for the same scenario; and
-deterministic replay after Reset. File coverage: schema-88 round trips
-through both document formats with only authored fields persisted, live
-containment state never leaking, the scenario reproducible from the
-document, and pre-88 documents carrying the new fields refused. Editor
-coverage: the real Station Systems window drafts the store hazard class and
-the treatment clearance contract, refuses invalid drafts with a visible
-diagnostic and no mutation, applies repaired drafts through the
-reset-confirmed flow, and the live view reports the three quality gates
-and the clearance ledger.
+Focused coverage checks complete-dose qualification without a release-test
+supply, partial-dose holds, treatment-media exhaustion and protected reserves,
+qualified recovery transfers, host/Lua agreement, conservation and deterministic
+Reset. YAML/binary World round trips persist only authored process settings.
+The editor shows filtration and energy evidence, exposes no release-test fields
+or ports, and applies process edits through the reset-confirmed history flow.
 
 ### Protected cross-system service dependencies (#416)
 
@@ -2410,7 +2369,7 @@ fare worse than the projection - the wrong safety direction - so
 every consuming pathway is either projected or flagged. Manually
 commanded generator fuel draw is projected (above). The pathways
 whose draw depends on state the forecast does not re-derive -
-fuel-cell reactants, treatment source/consumables/clearance,
+fuel-cell reactants, treatment source/consumables,
 electrolysis feed water, capture consumables, Sabatier and methane
 feeds, authored conversion inputs, consumed maintenance spares, and
 Automatic-dispatch generator fuel - are not projected, and every

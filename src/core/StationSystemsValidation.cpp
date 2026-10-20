@@ -406,8 +406,6 @@ using namespace station_detail;
 			treatment.hazardClass) == StationWaterHazardClasses.end())
 			return refuse(where + " has unknown water hazard class '" + treatment.hazardClass
 				+ "'; declared classes are: normal, hazardous");
-		if (treatment.releaseToNormalClass && treatment.hazardClass != "hazardous")
-			return refuse(where + " releaseToNormalClass requires hazardous-class clearance-gated treatment");
 		if (!std::isfinite(treatment.throughputKgPerS) || treatment.throughputKgPerS < 0.0)
 			return refuse(where + " throughput must be finite and non-negative");
 		if (!std::isfinite(treatment.recoveryRatio) || treatment.recoveryRatio <= 0.0
@@ -462,37 +460,6 @@ using namespace station_detail;
 		}
 		if (!declareWaterStore(treatment.consumableStoreId, "consumable", where, true))
 			return false;
-		// Release clearance (#412): a hazardous-class treatment must
-		// declare the clearance contract - treated hazardous material is
-		// released only on a passed clearance test, so a treatment with
-		// no clearance authority cannot release anything. A normal-class
-		// treatment cannot configure clearance testing: release
-		// clearance is the hazardous containment boundary, not a
-		// normal-water filter, and a normal store is not a containment
-		// boundary that anything needs clearing into.
-		if (treatment.hazardClass == "hazardous")
-		{
-			if (!allowIncomplete && !brokenReferences && treatment.clearanceStoreId.empty())
-				return refuse(where + " is hazardous-class but declares no release-clearance consumable store: hazardous treated material is released only on a passed clearance test");
-			if ((!allowIncomplete || !treatment.clearanceStoreId.empty())
-				&& (!std::isfinite(treatment.clearancePerKg) || treatment.clearancePerKg <= 0.0))
-				return refuse(where + " release clearance per kg must be finite and positive for a hazardous-class treatment");
-			for (auto const& streamId : streamIds)
-				if (!streamId.empty() && streamId == treatment.clearanceStoreId)
-					return refuse(where + " release-clearance store is the same store '" + streamId
-						+ "' as a recovery stream; the clearance test consumable is a supplied consumable, not part of the water stream it tests");
-			if (!declareWaterStore(treatment.clearanceStoreId, "release-clearance consumable", where, true))
-				return false;
-			// The clearance kit may be the same store as the treatment
-			// consumable (#574): one stocked kit that both runs and
-			// clears the process is a legitimate authoring. The runtime
-			// never spends one kilogram twice - the tick reserves the
-			// combined treatment-plus-clearance draw against the kit's
-			// drawable stock and tests clearance against what remains
-			// after treatment - so the alias needs no refusal here.
-		}
-		else if (!treatment.clearanceStoreId.empty() || treatment.clearancePerKg != 0.0)
-			return refuse(where + " is normal-class but configures release-clearance testing; release clearance is the hazardous-class containment boundary and does not apply to normal water treatment");
 		return true;
 	}
 

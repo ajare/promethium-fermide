@@ -176,12 +176,6 @@ namespace
 			mapping = {"Water treatment", link.to.nodeId, "consumableStoreId", link.from};
 			return true;
 		}
-		if (link.to.nodeType == "Water treatment" && link.to.portName == "Clearance in"
-			&& link.from.nodeType == "Store" && link.from.portName == "Inventory out")
-		{
-			mapping = {"Water treatment", link.to.nodeId, "clearanceStoreId", link.from};
-			return true;
-		}
 		if (link.to.nodeType == "Electrolyzer" && link.to.portName == "Water in"
 			&& link.from.nodeType == "Store" && link.from.portName == "Inventory out")
 		{
@@ -422,7 +416,6 @@ namespace
 			if (field == "treatedStoreId") return &found->treatedStoreId;
 			if (field == "concentrateStoreId") return &found->concentrateStoreId;
 			if (field == "consumableStoreId") return &found->consumableStoreId;
-			if (field == "clearanceStoreId") return &found->clearanceStoreId;
 			return nullptr;
 		}
 		if (ownerType == "Electrolyzer")
@@ -1229,9 +1222,6 @@ std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& set
 		if (!entry.consumableStoreId.empty())
 			links.push_back({linkIdentity("Water treatment", entry.id, "consumableStoreId"),
 				{"Store", entry.consumableStoreId, "Inventory out"}, {"Water treatment", entry.id, "Consumable in"}});
-		if (!entry.clearanceStoreId.empty())
-			links.push_back({linkIdentity("Water treatment", entry.id, "clearanceStoreId"),
-				{"Store", entry.clearanceStoreId, "Inventory out"}, {"Water treatment", entry.id, "Clearance in"}});
 	}
 	for (auto const& entry : settings.electrolyzers)
 	{

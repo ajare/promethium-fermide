@@ -437,7 +437,6 @@ namespace core
 			auto& treatment = runtime.waterTreatments[orderIndex];
 			auto ports = materialPorts("Water treatment", treatment.authored.id);
 			ports.used("consumableStoreId", [&] { return treatment.lastConsumableUsed; });
-			ports.used("clearanceStoreId", [&] { return treatment.lastClearanceUsed; });
 			auto& source = runtime.stores[treatment.sourceIndex];
 			auto& treated = runtime.stores[treatment.treatedIndex];
 			auto& concentrate = runtime.stores[treatment.concentrateIndex];
@@ -457,10 +456,6 @@ namespace core
 			treatment.lastHoldReason.clear();
 			treatment.lastFiltrationCompleted = false;
 			treatment.lastTreatmentEvidenced = false;
-			treatment.lastReleaseCleared = false;
-			treatment.lastClearanceRequested = 0.0;
-			treatment.lastClearanceUsed = 0.0;
-			treatment.lastClearanceUnmet = 0.0;
 			if (treatment.authored.throughputKgPerS <= 0.0)
 			{
 				treatment.status = StationTransferStatus::Idle;
@@ -491,22 +486,7 @@ namespace core
 					+ unqualified[treatment.concentrateIndex])));
 			auto const drawableConsumableUnits = std::max(0.0,
 				ports.input("consumableStoreId", qualified[treatment.consumableIndex] - consumable.authored.protectedReserve));
-			// #574: the release-clearance kit may be the same store as
-			// the treatment consumable. One kilogram of a shared kit
-			// cannot pay both roles twice, so the tick reserves the
-			// combined draw - the treatment dose plus the clearance dose
-			// the treated output will demand at this scale - and the
-			// clearance test below runs against the inventory remaining
-			// after the treatment draw. A kit that covers each role
-			// alone but not their sum throttles the process to the
-			// scale it can pay for whole; it is never overdrawn into a
-			// negative inventory, and the protected reserve stays
-			// untouched because the reservation is made above it.
-			auto const hazardous = treatment.authored.hazardClass == "hazardous";
-			auto const sharedKit = hazardous
-				&& treatment.clearanceIndex == treatment.consumableIndex;
 			auto const kitDemandUnits = treatment.authored.consumablePerKg * fullKg;
-			auto const clearanceFullUnits = treatment.authored.clearancePerKg * treatedFraction * fullKg;
 			double scale = 1.0;
 			std::string limiter;
 			auto const constrain = [&](auto available, double required,
@@ -529,32 +509,8 @@ namespace core
 				"concentrate store '" + concentrate.authored.id
 				+ "' is full: the retained stream has nowhere to go");
 			constrain(ports.request("consumableStoreId", drawableConsumableUnits, kitDemandUnits), kitDemandUnits,
-				sharedKit
-					? "shared treatment-consumable and release-clearance store '"
-						+ consumable.authored.id
-						+ "' cannot cover the combined treatment and clearance draw"
-					: "treatment consumable store '" + consumable.authored.id
-						+ "' is exhausted");
-			if (sharedKit)
-			{
-				auto const rawKit = std::max(0.0, qualified[treatment.consumableIndex] - consumable.authored.protectedReserve);
-				constrain(ports.request("clearanceStoreId", ports.input("clearanceStoreId", rawKit), clearanceFullUnits),
-					clearanceFullUnits, "shared release-clearance connection limits throughput");
-				auto const treatmentEta = connections.efficiency(connections.port("Water treatment", treatment.authored.id, "consumableStoreId"));
-				auto const clearanceEta = connections.efficiency(connections.port("Water treatment", treatment.authored.id, "clearanceStoreId"));
-				if (treatmentEta > 0.0 && clearanceEta > 0.0)
-					constrain(rawKit, kitDemandUnits / treatmentEta + clearanceFullUnits / clearanceEta,
-						"shared treatment-consumable and release-clearance store cannot cover the combined draw");
-			}
-			if (treatment.authored.releaseToNormalClass)
-				constrain(powerAvailable("Water treatment", treatment.authored.id),
-					treatment.authored.throughputKgPerS * treatment.authored.specificEnergyKWhPerKg * 3600.0,
-					"treatment energy unavailable: hazardous feed retained");
-			if (treatment.authored.releaseToNormalClass && !sharedKit)
-				constrain(ports.request("clearanceStoreId", ports.input("clearanceStoreId",
-					std::max(0.0, qualified[treatment.clearanceIndex]
-						- runtime.stores[treatment.clearanceIndex].authored.protectedReserve)), clearanceFullUnits),
-					clearanceFullUnits, "release clearance unavailable: hazardous feed retained");
+				"treatment consumable store '" + consumable.authored.id
+					+ "' is exhausted");
 			scale = std::max(0.0, std::min(1.0, scale));
 			ports.limitDemand(powerAvailable("Water treatment", treatment.authored.id),
 				treatment.authored.throughputKgPerS * treatment.authored.specificEnergyKWhPerKg * 3600.0);
@@ -579,14 +535,6 @@ namespace core
 				// moves and no consumable is drawn - a treatment with no
 				// power is not a treatment running for free.
 				treatment.lastHoldReason = "no electrical supply: the treatment cannot run";
-				treatment.status = StationTransferStatus::Rejected;
-				continue;
-			}
-			if (treatment.authored.releaseToNormalClass && suppliedKW + 1e-12 < treatment.lastPowerDemandKW)
-			{
-				treatment.energySuppliedKJ += suppliedKW * static_cast<double>(seconds);
-				totalWaterTreatmentPowerKW += suppliedKW;
-				treatment.lastHoldReason = "treatment energy curtailed: hazardous feed retained";
 				treatment.status = StationTransferStatus::Rejected;
 				continue;
 			}
@@ -632,11 +580,6 @@ namespace core
 			if (concentrate.authored.composition) addLedger(stagedLoss, drawnActual, -1.0);
 			qualified[treatment.sourceIndex] -= processedUnits;
 			flowOut[treatment.sourceIndex] += processedUnits;
-			// The treatment consumable is drawn before the clearance
-			// test is evaluated (#574): when the kit is one store
-			// shared by both roles, the test must see the inventory
-			// that remains after treatment, never the stock the
-			// treatment draw is already spending.
 			treatment.lastConsumableRequested = treatment.authored.consumablePerKg * processedKg;
 			auto const consumableUsed = std::min(treatment.lastConsumableRequested,
 				drawableConsumableUnits);
@@ -651,40 +594,18 @@ namespace core
 			qualified[treatment.consumableIndex] -= consumableUsed;
 			flowOut[treatment.consumableIndex] += consumableUsed;
 			treatment.lastConsumableUsed = consumableUsed;
-			// Quality is three distinct gates (#412), not one boolean:
-			// filtration ran with the process, the full rated energy dose
-			// is the treatment evidence, and for a hazardous-class
-			// treatment the release clearance test is what releases the
-			// treated material. The test is all-or-nothing per tick: a
-			// partial kit does not clear a partial batch. A curtailed
-			// dose fails the evidence gate before the test runs; a full
-			// dose whose clearance consumable cannot cover the output is
-			// unknown clearance and holds the material - generic recovery
-			// transfers only ever pick up qualified (released) material,
+			// Quality is the treatment energy evidence: the full rated
+			// dose qualifies the treated output, a curtailed dose holds it
+			// unqualified. Held output stays out of qualified inventory;
+			// generic recovery transfers only pick up qualified material,
 			// so the hold cannot be bypassed.
 			auto const curtailed = suppliedKW + 1e-12 < treatment.lastPowerDemandKW;
-			auto const clearanceDemandUnits = hazardous
-				? treatment.authored.clearancePerKg * treatedKg : 0.0;
-			auto const drawableClearanceUnits = hazardous
-				? std::max(0.0, ports.input("clearanceStoreId", qualified[treatment.clearanceIndex]
-					- runtime.stores[treatment.clearanceIndex].authored.protectedReserve))
-				: 0.0;
-			if (!curtailed && hazardous) ports.demand("clearanceStoreId", clearanceDemandUnits);
-			auto const clearanceSatisfied = clearanceDemandUnits <= 1e-12
-				|| drawableClearanceUnits + 1e-12 >= clearanceDemandUnits;
-			auto const released = !curtailed && clearanceSatisfied;
 			treatment.lastFiltrationCompleted = treatedKg > 0.0 || concentrateKg > 0.0;
 			treatment.lastTreatmentEvidenced = !curtailed && treatment.lastFiltrationCompleted;
-			treatment.lastReleaseCleared = released && treatment.lastFiltrationCompleted;
-			treatment.lastQualityAccepted = released;
+			treatment.lastQualityAccepted = treatment.lastTreatmentEvidenced;
 			if (curtailed)
 			{
 				treatment.lastHoldReason = "treatment energy curtailed: the treated output is held unqualified";
-				unqualified[treatment.treatedIndex] += treatedUnits;
-			}
-			else if (!clearanceSatisfied)
-			{
-				treatment.lastHoldReason = "release clearance unavailable: the clearance test consumable cannot cover the treated output; the material is held until it can be cleared";
 				unqualified[treatment.treatedIndex] += treatedUnits;
 			}
 			else qualified[treatment.treatedIndex] += treatedUnits;
@@ -695,33 +616,6 @@ namespace core
 			if (concentrate.authored.composition) qualified[treatment.concentrateIndex] += concentrateUnits;
 			else unqualified[treatment.concentrateIndex] += concentrateUnits;
 			flowIn[treatment.concentrateIndex] += concentrateUnits;
-			// The clearance test is spent only when it actually runs and
-			// passes: a held batch consumed nothing, so the kit stays
-			// available for the next tick rather than being burned on a
-			// test that never happened.
-			if (!curtailed)
-			{
-				treatment.lastClearanceRequested = clearanceDemandUnits;
-				if (released && clearanceDemandUnits > 0.0)
-				{
-					auto const& clearanceStore = runtime.stores[treatment.clearanceIndex].authored;
-					auto const clearanceKgBefore = massToKg(clearanceStore.unit,
-						qualified[treatment.clearanceIndex]
-							+ unqualified[treatment.clearanceIndex]);
-					qualified[treatment.clearanceIndex] -= clearanceDemandUnits;
-					flowOut[treatment.clearanceIndex] += clearanceDemandUnits;
-					stagedUnitLoss[clearanceStore.unit] += clearanceDemandUnits;
-					// The kit is spent as the material it actually is,
-					// drift included (#601).
-					addLedger(stagedLoss, drawStoreActual(treatment.clearanceIndex,
-						clearanceKgBefore,
-						massToKg(clearanceStore.unit, clearanceDemandUnits)), 1.0);
-					treatment.lastClearanceUsed = clearanceDemandUnits;
-					treatment.clearanceUsedTotal += clearanceDemandUnits;
-				}
-				treatment.lastClearanceUnmet = treatment.lastClearanceRequested
-					- treatment.lastClearanceUsed;
-			}
 			// Per-unit boundary: the source gave the processed mass up,
 			// the treated and concentrate stores took their shares on, and
 			// the consumable was used out of existence by the process.
@@ -738,14 +632,14 @@ namespace core
 			treatment.processedTotalKg += processedKg;
 			treatment.treatedTotalKg += treatedKg;
 			treatment.concentrateTotalKg += concentrateKg;
-			if (released) treatment.acceptedTotalKg += treatedKg;
+			if (!curtailed) treatment.acceptedTotalKg += treatedKg;
 			else treatment.heldTotalKg += treatedKg;
 			treatment.energySuppliedKJ += suppliedKW * tickSeconds;
 			treatment.energyOwedKJ += treatment.lastPowerDemandKW * tickSeconds;
 			treatment.consumablesUsedTotal += consumableUsed;
 			treatment.lastCurtailed = curtailed;
 			totalWaterTreatmentPowerKW += suppliedKW;
-			if (released) treatment.status = StationTransferStatus::Full;
+			if (!curtailed) treatment.status = StationTransferStatus::Full;
 			else treatment.status = StationTransferStatus::Partial;
 		}
 		// Water collectors (#402) run after the treatments and before

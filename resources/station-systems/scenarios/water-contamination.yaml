@@ -1,10 +1,10 @@
-# #744: loaded hazardous ingress -> hazardous loop -> clearance-only normal release.
+# #744: loaded hazardous ingress -> hazardous loop -> energy-evidenced treatment.
 # Load in Station systems, Apply, Run. 10-second public-World verification.
 # Hazard-side crew and crop are zero-tolerance acceptance probes (not exposure models).
 # They draw nothing and report water quality: total dissolved above ... tolerance.
 # Normal consumers use only the cleared outlet. The filter removes all dry load.
-# Set clearance.startingQualified to 0: feed remains hazardous; normal output stays empty.
-# Generic transfers across hazard classes are always refused, even after treatment.
+# Reduce solar capacity: incomplete energy evidence holds treated output unqualified.
+# Consumer quality tolerances constrain uptake independently of wiring or class labels.
 schemaVersion: 101
 stationSystems:
   enabled: true
@@ -44,7 +44,6 @@ stationSystems:
     hazardClass: hazardous
     composition: {moisture: 0.5, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}
   - {id: media, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, hazardClass: hazardous}
-  - {id: clearance, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, hazardClass: hazardous}
   - {id: N, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
   - {id: P, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
   - {id: K, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
@@ -68,13 +67,10 @@ stationSystems:
   waterTreatments:
   - id: barrier
     hazardClass: hazardous
-    releaseToNormalClass: true
     sourceStoreId: loop
     treatedStoreId: cleared
     concentrateStoreId: concentrate
     consumableStoreId: media
-    clearanceStoreId: clearance
-    clearancePerKg: 0.01
     throughputKgPerS: 0.05
     recoveryRatio: 0.8
     specificEnergyKWhPerKg: 0.01
