@@ -1,8 +1,15 @@
 #pragma once
 #include "core/StationHistory.h"
 
+#include <cstdint>
+#include <optional>
+
 namespace core
 {
+	// Test-runner-only override used to execute an existing Station scenario
+	// under one requested ratio without rewriting its authored fixture.
+	void setStationSystemsRuntimeStepRatioOverrideForTesting(std::optional<uint32_t> ratio);
+
 	// Station drive. The coordinator supplies target seconds in a World;
 	// standalone Station scenarios may drive the same boundary directly.
 	class StationSystemsRuntime

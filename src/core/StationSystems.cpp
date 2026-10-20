@@ -4,6 +4,7 @@ namespace core
 {
 namespace {
 StationSystemsSourceLoader sourceLoader;
+std::optional<uint32_t> stationSystemsRuntimeStepRatioOverride;
 void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 {
 	lua_createtable(state, 0, 2);
@@ -864,10 +865,16 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			baseIntervalSeconds, retentionSeconds,
 			tick, elapsedSeconds, requested, actual);
 	}
+	void setStationSystemsRuntimeStepRatioOverrideForTesting(std::optional<uint32_t> ratio)
+	{
+		stationSystemsRuntimeStepRatioOverride = ratio;
+	}
+
 	StationSystemsRuntime::StationSystemsRuntime(StationSystemsSettings settings, float baseStepSeconds)
 	{
 		static std::atomic<uint64_t> nextRun{0};
 		mRun = ++nextRun;
+		if (stationSystemsRuntimeStepRatioOverride) settings.systemsStepWorldTicks = *stationSystemsRuntimeStepRatioOverride;
 		std::string diagnostic;
 		if (!validateStationSystemsSettings(settings, diagnostic)) throw SerializationException(diagnostic);
 		mImpl = std::make_unique<Impl>(settings.systemsStepWorldTicks, baseStepSeconds);

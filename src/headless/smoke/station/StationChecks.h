@@ -29,3 +29,4 @@ void registerScheduledTransferChecks(std::vector<smoke::Check>& checks);
 #include "Stability.h"
 #include "StationTrendChecks.h"
 #include "StationForecastChecks.h"
+void registerStationInvarianceChecks(std::vector<smoke::Check>& checks);
