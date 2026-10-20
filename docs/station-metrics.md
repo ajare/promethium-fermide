@@ -37,7 +37,7 @@ Slice 1a (#695) presents Power through `core/StationMetrics.h`:
 - `World::getStationSystemsMetricHistory()` exposes typed, read-only observations.
 - Descriptors identify physical quantity/canonical unit, semantic role, optional
   requested semantics, equipment/instance/exchange, material or constituent,
-  hazard class, validity and accounting coverage. Missing is not zero.
+  validity and accounting coverage. Missing is not zero.
 - `stationCharts()` declares selector groups, stable view IDs and series queries.
   `queryStationChart()` validates quantity, unit and requested availability and
   prepares simulation timestamps and values. Invalid values become NaN gaps;
@@ -83,7 +83,7 @@ discretionary drawability. No allocation rules change.
 
 Material properties retain the stored-only accounting boundary and explicit
 unclassified exclusions. Total and usable properties combine all stores with the
-same material and canonical unit, irrespective of legacy hazard class. Usable
+same material and canonical unit. Usable
 properties are qualified stores subtotals, not system-wide material totals.
 
 The generic `Breakdown` control selects Instance, Aggregate, or (where multiple
@@ -92,13 +92,13 @@ into the existing Value/Sum queries and stack preparation, also reused for batte
 energy. The property ID remains the base Instance view; `/aggregate` and
 `/by-equipment` identify alternative read-only World queries. Usable properties
 are named `stored-usable/<material>/<canonical-unit>`. Exchange chart IDs likewise
-omit the hazard segment; thermal-service class remains a distinct grouping key.
-Legacy class-keyed chart IDs and `/by-hazard` views no longer resolve. Stable metric/group IDs
+omit the retired class segment; thermal-service class remains a distinct grouping key.
+Legacy class-keyed chart IDs no longer resolve (#755). Stable metric/group IDs
 supply colour identity. All variants use the same expected ownership membership;
 a missing contribution produces an incomplete sum and stack gaps, not zero.
 
 `station-materialObservations`, `station-materialCanonicalUnits`,
 `station-materialIdentity` and `station-editor-material-observations` cover
-qualified/unqualified/reserved/hazard mixtures, aggregate/stack equivalence,
+qualified/unqualified/reserved mixtures, aggregate/stack equivalence,
 missing contributors, aligned coarsening, persisted identities and real controls.
 Viewing and changing breakdowns do not mutate the Configuration draft or World.

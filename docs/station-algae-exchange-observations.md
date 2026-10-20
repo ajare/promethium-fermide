@@ -24,7 +24,7 @@ production. Unconfigured destination pathways are not registered. Food and recov
 surplus cascading into later destinations is measured at its actual destination,
 not double-counted as another product.
 
-Store material identities and compartment hazard class are retained; unresolved
+Store material identities are retained; unresolved
 store material is unclassified. Bound nutrient nitrogen is not atmospheric
 nitrogen. Snapshot mass is already kg regardless of authored store mass units.
 Living biomass inventory, culture volume and Growing capacity are not output
@@ -33,7 +33,7 @@ routed to waste is distinct from uncontained loss. Heat actually entering the
 compartment is the external output; respiration heat is not counted twice.
 
 Known inactive exchanges record zero; absent authority remains a gap. Generic
-instance and hazard/material separation, coverage and history lifecycle apply
+instance and material separation, coverage and history lifecycle apply
 unchanged. Viewing is read-only, including history recorded before selection or
 while the editor was hidden.
 

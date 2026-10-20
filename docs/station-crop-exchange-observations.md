@@ -22,7 +22,7 @@ phosphorus, potassium and mineral decomposition properties and carried chemical
 energy (kJ/s = kW). These are alternative representations, not additional mass
 production. Unconfigured destination pathways are not registered.
 
-Store material identities and compartment hazard class are retained; unresolved
+Store material identities are retained; unresolved
 store material is unclassified, never inferred from its name or unit. Bound
 nutrient nitrogen remains distinct from atmospheric nitrogen. Snapshot masses
 are already kg even if a destination is authored in another mass unit.
@@ -34,7 +34,7 @@ uncontained loss. Only heat actually entering the compartment is an external
 heat output; respiration heat is not counted again as separate production.
 
 Known inactive exchanges record zero; missing authority remains a gap. Generic
-instance breakdowns, material/hazard separation, requests, coverage and history
+instance breakdowns, material separation, requests, coverage and history
 lifecycle apply unchanged. Viewing remains read-only and reveals history recorded
 before selection or while the editor was hidden.
 

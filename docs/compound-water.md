@@ -25,11 +25,11 @@ continuous and scheduled transfers, not to arbitrary uncharacterised materials;
 material identity remains descriptive and never grants this permission.
 Compound-to-plain transfers remain refused at the compound-material boundary.
 
-Compound concentrate is a qualified product **of its own hazard class**, allowing
+Compound concentrate is a qualified product in its own right, allowing
 same-composition routing and scheduled waste ejection. Qualified concentrate is
-not purified water: hazard segregation and the compound-to-plain boundary still
-apply. Plain scalar concentrate keeps its historical held state, so existing
-documents' treatment actuals remain unchanged. Hazardous treated output retains
+not purified water: the compound-to-plain boundary still
+applies. Plain scalar concentrate keeps its historical held state, so existing
+documents' treatment actuals remain unchanged. Treated output retains
 the energy-evidence gate: complete energy qualifies output; partial energy holds it.
 
 `StationSystemsStoreSnapshot::concentrations` and Lua `stores[i].concentrations`
@@ -113,7 +113,7 @@ at each one-second observation, in addition to the per-tick constituent audit.
 
 ## Energy-evidenced treatment (#753)
 
-Treatment may connect stores regardless of their class. A full rated energy dose
+Treatment may connect any stores. A full rated energy dose
 qualifies treated output; a partial dose produces held, unqualified output.
 There is no separate release-test consumable or class-conversion opt-in.
 Process consumables, removal fractions, capacity limits and consumer quality
@@ -121,16 +121,16 @@ tolerances still apply. Retired `clearanceStoreId`, `clearancePerKg` and
 `releaseToNormalClass` fields are refused with conversion-required diagnostics.
 
 Open `resources/station-systems/scenarios/water-contamination.yaml`, Apply and
-Run for **10 seconds**. Loaded hazardous ingress propagates into the hazardous
-loop. Its crew/crop acceptance probes have zero dissolved tolerance and name
+Run for **10 seconds**. Loaded ingress propagates through the
+contaminated loop. Its crew/crop acceptance probes have zero dissolved tolerance and name
 `water quality: total dissolved above crew/crop tolerance`; they consume no
 loaded water. The authored normal consumers use the treated outlet. Wiring them directly to
-the loaded loop is legal, but their water-quality tolerances prevent uptake. Normal and hazardous atmospheres stay separate. These are acceptance
+the loaded loop is legal, but their water-quality tolerances prevent uptake. These are acceptance
 probes, not a crew-exposure/health model.
 
 After one startup tick, treatment processes 0.499166692700 kg over 10 seconds,
-returning 0.395340020619 kg pure normal-class water and retaining
-0.103826672082 kg hazardous concentrate. Its organic load is retained wholly
+returning 0.395340020619 kg pure treated water and retaining
+0.103826672082 kg concentrate. Its organic load is retained wholly
 in the concentrate; normal crew/crops receive water. Reduce solar capacity to
 1 kW and Apply/Reset: treatment still processes feed, but its incomplete energy
 evidence holds output unqualified with an `energy curtailed` reason. No-power

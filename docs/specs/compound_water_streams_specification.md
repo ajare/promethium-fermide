@@ -2,7 +2,14 @@
 
 **Status:** DRAFT
 **Prerequisite:** #734 (Generalized bioconversion stage — composition-derived rate core)
-**Related:** #724 (gap analysis, finding G2), #391 (compound stores), #412 (hazard classes), #601 (blend honesty)
+**Related:** #724 (gap analysis, finding G2), #391 (compound stores), #412 (hazard classes, since removed by #748 — see [ADR 0024](../adr/0024-containment-is-modelled-not-declared.md)), #601 (blend honesty)
+
+> **Migration note.** Where this spec references the #412 hazard class or its
+> release-clearance machinery, it describes the model **as it stood when the spec
+> was written**. #748 removed the class from stores, atmospheres, coolant loops and
+> every water/chemical process, and removed release clearance entirely. The
+> contamination-barrier semantics below are now carried by consumer quality
+> tolerances and energy-evidenced qualification, not by a declared class boundary.
 
 ## 1. Purpose
 
@@ -59,7 +66,7 @@ the existing constituent set is the species vocabulary:
 | Organic pollution (BOD) | `dryOrganics` |
 | Nutrient contamination (ammonia/nitrate) | `nutrientNitrogen` |
 | Salinity / TDS | `otherMinerals` |
-| Toxicity / pathogenicity | hazard class (#412), not a constituent |
+| Toxicity / pathogenicity | the retired #412 class, not a constituent (see the migration note above) |
 
 Plain water stores remain fully valid (no composition = pure water). The reference station's
 water chain is unchanged by this spec's defaults.
@@ -146,9 +153,10 @@ Two producer amendments make loads originate honestly:
 - **Crew metabolism:** optional greywater load declaration (dissolved organics/N per crew-day
   riding into the greywater store). Default absent = today's plain returns.
 
-Contamination events are expressed the same way: a loaded hazardous-class stream entering a loop
-is a hazardous-class store (#412); the barrier to normal class is clearance-gated treatment
-(§3.3 + #412 release clearance), never a transfer.
+Contamination events are expressed the same way: a loaded stream entering a loop
+is a loaded store; the barrier to a clean outlet was clearance-gated treatment
+(§3.3 + the retired #412 release clearance), never a transfer. Since #748 the
+barrier is the consumer's own quality tolerance and the treatment's energy evidence.
 
 ## 4. Preserved idealizations (declared)
 
@@ -157,7 +165,7 @@ is a hazardous-class store (#412); the barrier to normal class is clearance-gate
   dynamics (a follow-on if wanted).
 - No reaction kinetics; removal is an authored partition, not chemistry.
 - Concentration is a store-level uniform property; no per-litre volume accounting (mass-based).
-- Hazard class remains the binary toxicity/pathogen proxy; no pathogen species model.
+- The retired binary toxicity proxy is gone; there is still no pathogen species model.
 - Same tick clock, same uniform-scale throttling, same protected-reserve rules as all station units.
 
 ## 5. Degenerate cases (explicitly allowed)
@@ -186,7 +194,8 @@ is a hazardous-class store (#412); the barrier to normal class is clearance-gate
    G1 derived-residue check): for the declared blend, every drawn constituent lands exactly
    once across treated + concentrate.
 6. Compound→plain transfer boundary rule unchanged (§3.2).
-7. Hazard-class segregation (#412) unchanged on every newly compound-capable port.
+7. Store segregation by the retired #412 class no longer applies (#748); the
+   compound-capable port rules above stand on their own.
 
 ## 7. Snapshot and Lua surface
 
@@ -242,16 +251,20 @@ growth throttles on the named quality limiter within the scenario's documented d
 
 ### 9.4 Contamination barrier (`water-contamination.yaml`)
 
-Implemented by #744 with explicit `releaseToNormalClass` treatment authoring.
-The normal-class outlet receives only full-dose, cleared product; unavailable
-clearance or power retains feed on the hazardous side. Default #412 same-class
-release behavior and all generic Transfer segregation are unchanged. The
-[10-second reproduction](../compound-water.md#clearance-only-hazard-conversion-744)
+Implemented by #744 with explicit `releaseToNormalClass` treatment authoring,
+since removed by #748. The normal-class outlet received only full-dose, cleared
+product; unavailable clearance or power retained feed on the hazardous side. The
+#412 same-class release behavior and generic Transfer segregation named here have
+since been removed; consumer quality tolerances and energy-evidenced qualification
+carry the barrier today. The
+[10-second reproduction](../compound-water.md#energy-evidenced-treatment-753)
 includes hazardous-side quality probes and normal consumers of cleared water.
 
-A hazardous-class loaded stream enters the loop; only clearance-gated treatment (#412) can
-return it to normal class; gates refuse the loaded water for crew and crops until treated.
-Demonstrates contamination propagation + barrier without any cross-hazard transfer.
+A loaded stream enters the loop; under the original design only clearance-gated
+treatment (#412) could return it to normal class, and gates refused the loaded
+water for crew and crops until treated. Since #748 the refusal is the consumer's
+tolerance, not a class gate.
+Demonstrates contamination propagation and barrier without any class-crossing transfer.
 
 ### 9.5 Legacy equivalence anchor (`water-legacy-anchor.yaml`)
 

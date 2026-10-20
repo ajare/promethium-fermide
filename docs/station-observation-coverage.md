@@ -76,7 +76,7 @@ station boundary. Unmet requests likewise are not actual physical losses.
 
 | Owner | Accounting decision |
 | --- | --- |
-| Resource store, including terminal waste, treatment-held water, concentrate, recovered nutrients and deposited harvest | Qualified + unqualified contents counted **once**. Qualified views remain hazard-separated and include protected reserves. Waste/treatment/product ledgers are not extra owners. |
+| Resource store, including terminal waste, treatment-held water, concentrate, recovered nutrients and deposited harvest | Qualified + unqualified contents counted **once**. Qualified views remain per-owner and include protected reserves. Waste/treatment/product ledgers are not extra owners. |
 | Compound Resource store | Material mass and actual constituent decomposition are **alternative** views. Stored bound nitrogen is not free atmospheric nitrogen. Chemical energy is separate from mass. |
 | Atmosphere compartment | Four independently measured gas/vapour inventories, not also its derived pressure, humidity, cumulative flows or mixture sum. |
 | Coolant loop | Finite coolant charge, never inferred potable water. Circulation is a rate, not another stock. |

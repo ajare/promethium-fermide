@@ -42,7 +42,7 @@ conversion is applied to a rate, and no fuel substance is guessed from a store n
 or energy unit. Fuel-cell H2, O2 and water retain independent identities.
 
 Selectors group by equipment type, direction, individual exchange, material,
-canonical quantity/unit and hazard class. Unclassified material exchanges retain
+canonical quantity/unit. Unclassified material exchanges retain
 instance-specific partial views rather than becoming a guessed material total.
 Unsupported canonical units remain unclassified metadata, not mislabeled rates.
 Electrical inputs, outputs and losses have separate selector groups. Actual sums

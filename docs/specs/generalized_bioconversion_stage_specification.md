@@ -6,6 +6,12 @@ Origin: audit finding G1 in ticket #724 (Station systems gap analysis).
 Component: `MicrobialProcessorSettings` (`include/core/StationSystems.h`), validator
 and runtime in `src/core/StationSystems.cpp`.
 
+> **Migration note.** The `hazardClass` field and the class-matching rules this
+> spec carried were removed by #748 (see
+> [ADR 0024](../adr/0024-containment-is-modelled-not-declared.md)). The examples
+> below are shown without it; a document still carrying the field is refused with a
+> conversion-required diagnostic.
+
 ## 1. Purpose
 
 The microbial processor (#407) is architecturally feed-agnostic — its validator
@@ -64,7 +70,7 @@ enum class StationRateBasis { FixedPerFeedMass, CompositionDerived };
   omitted); process inputs are computed per tick from the feed's actual drawn
   composition using the model in §4 and the authored parameters in §3.1.
 
-The component keeps its name, id space, placement, connectors, hazard-class rules,
+The component keeps its name, id space, placement, connectors,
 thermal-class rules, store-distinctness rules, condition/recovery coefficients
 (#408) and uniform-scale throttling. Only the input-rate model changes.
 
@@ -205,8 +211,9 @@ features of the model's tick-level abstraction, not oversights:
    bioconversion stage recovers from a declared compound feedstock, not from an
    uncharacterised stream"). Degenerate-but-compound feeds (zero oxidizable
    content) pass; plain feeds still refuse.
-6. Hazard-class, thermal-class, store-distinctness, mass-unit and
-   store-existence rules are unchanged in both modes.
+6. Thermal-class, store-distinctness, mass-unit and
+   store-existence rules are unchanged in both modes. (The hazard-class rule
+   listed here originally was later removed by #748.)
 
 ## 8. Snapshot and Lua surface
 
@@ -252,7 +259,6 @@ nitrifies the recovered N and passes the water.
 ```yaml
 microbialProcessors:
   - id: urineNitrifier
-    hazardClass: normal
     rateBasis: CompositionDerived
     feedStoreId: urine            # N 30%, P 10%, K 35%, min 15%, moist 0.95
     oxygenStoreId: processOxygen
@@ -297,7 +303,6 @@ nutrient recovery.
 ```yaml
 microbialProcessors:
   - id: hotDigester
-    hazardClass: normal
     rateBasis: CompositionDerived
     feedStoreId: spoiledFood      # food composition: N 5%, moist 0.0, 17 MJ/kg dry
     # ... store wiring as above, destinations distinct ...
@@ -348,7 +353,6 @@ recovery to zero demonstrates the zero-throughput no-op.
 ```yaml
 microbialProcessors:
   - id: passThrough
-    hazardClass: normal
     rateBasis: CompositionDerived
     feedStoreId: nearlyWater      # compound; inert atmospheric N, not nutrient N
     # ... wiring as above ...

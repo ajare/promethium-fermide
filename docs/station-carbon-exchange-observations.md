@@ -21,7 +21,7 @@ No selection runs simulation or changes the Configuration draft.
 Materials remain separate properties even when they share kg/s units. Process
 material observations convert authoritative per-tick kg to kg/s. Electrical and
 thermal power remain separate role-labelled kW properties; heat accounts retain
-thermal service class, and process accounts retain hazard class. Fuel-cell
+thermal service class. Fuel-cell
 reactants come only from the configured dedicated stores, never from breathing
 oxygen or another life-support inventory.
 
@@ -48,7 +48,7 @@ Existing electrical-family endpoint views remain available.
 
 - `station-carbonExchangeObservations`: public World configuration, advancement
   and queries; stoichiometric products, dedicated reactant exhaustion, constrained
-  connections and losses, missing observations, hazard compatibility, inactive
+  connections and losses, missing observations, cross-class legality, inactive
   zeros, disabled history, aggregate/stack equivalence through real coarsening,
   and read-only viewing.
 - `station-editor-carbon-observations`: real CPU ImGui property selection and

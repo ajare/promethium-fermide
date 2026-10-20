@@ -567,10 +567,10 @@ The portion of a usable resource inventory withheld from discretionary use to pr
 Dedicated hydrogen and oxygen inventories available to fuel-cell generation, distinct from life-support inventories. They may receive controlled surplus transfers from life support, but fuel cells cannot automatically draw on protected breathing oxygen.
 
 **Resource store**:
-A capacity-limited inventory of a specified material held by the Station systems. Its usable contents change through deliveries, production, consumption, transfers, and losses; material awaiting treatment or quality clearance is not automatically usable.
+A capacity-limited inventory of a specified material held by the Station systems. Its usable contents change through deliveries, production, consumption, transfers, and losses; material awaiting treatment or qualification is not automatically usable.
 
 **Material identity**:
-The explicit identity of a material held or exchanged by Station systems, independent of an inventory's name, unit, or hazard class. Material identity is distinct from the constituent composition of a compound material.
+The explicit identity of a material held or exchanged by Station systems, independent of an inventory's name or unit. Material identity is descriptive: it says what a material is, never what may be wired to it. It is distinct from the constituent composition of a compound material.
 _Avoid_: Store ID, unit, inferred material name
 
 **Total material inventory**:
@@ -594,7 +594,7 @@ A station service whose declared minimum demand and necessary support services a
 The declared ordering used to allocate constrained station resources and curtail discretionary demand. It does not override physical capacity, safety limits, or protected minimums.
 
 **Atmosphere compartment**:
-A contained atmospheric inventory with a declared volume, gas composition, water vapour, and temperature. The initial station model distinguishes one normal and one hazardous compartment; their material inventories remain segregated, and exchanges or losses must be explicitly accounted for.
+A contained atmospheric inventory with a declared volume, gas composition, water vapour, and temperature. Compartments exchange or lose material only through explicitly accounted pathways; nothing moves between compartments automatically. Containment follows from which pathways are wired, never from a declared class label.
 
 **Thermal reservoir**:
 A body or aggregate of material whose stored thermal energy and thermal capacity determine its temperature over time. Its ability to absorb heat is finite and constrained by the temperature limits of the services it supports.
@@ -612,7 +612,7 @@ The quantities of nutrient elements held in stores or incorporated into food, li
 A named aggregate of station equipment outside the Station systems, with declared electrical, thermal, and material exchanges, an operating profile, and service priorities. It excludes equipment whose demands are already calculated within the Station systems; its initially authored inputs may later be supplied by World equipment.
 
 **Terminal waste**:
-Material designated for disposal after resource recovery, including unrecoverable residue and recovered material that cannot fit in its appropriate Resource store. Normal and hazardous waste remain segregated in finite storage; storage exhaustion constrains affected processing rather than deleting material.
+Material designated for disposal after resource recovery, including unrecoverable residue and recovered material that cannot fit in its appropriate Resource store. Each waste stream is held in its own finite storage; storage exhaustion constrains affected processing rather than deleting material.
 
 **Scheduled waste ejection**:
 The removal of Terminal waste to space at declared simulation times from explicitly selected Resource store partitions: qualified stock by default, held stock only when declared, or qualified stock first then held stock for an emergency drain. Ejected material leaves station inventories and is recorded as a material loss; held stock remains unavailable for use.
@@ -665,7 +665,7 @@ A Port a node may or may not declare, such as a treatment consumable or a buffer
 _Avoid_: Empty port
 
 **Port descriptor**:
-The structural declaration of a Port's kind, direction, cardinality, and which counterpart kinds it may join. Deliberately too coarse to restate hazard class, thermal service class, medium, or unit agreement — those belong to configuration validation alone.
+The structural declaration of a Port's kind, direction, cardinality, and which counterpart kinds it may join. Deliberately too coarse to restate thermal service class, medium, or unit agreement — those belong to configuration validation alone.
 _Avoid_: Port type, port schema
 
 **Connection constraint**:

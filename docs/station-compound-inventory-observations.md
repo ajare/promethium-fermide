@@ -59,7 +59,7 @@ and algae living constituents; the stored-only selectors above remain unchanged.
 
 - `station-compoundInventoryObservations`: public World numerical partition,
   moisture, chemical energy, nitrogen forms, gram conversion, qualified and
-  hazardous stock, transfers, retained unqualified waste, ejection, missing-owner
+  unqualified stock, transfers, retained unqualified waste, ejection, missing-owner
   gaps, no double counting and deterministic Reset.
 - `station-nutrientConservation`: deposited starvation residue's observed actual
   constituents match the authoritative non-nominal blend.

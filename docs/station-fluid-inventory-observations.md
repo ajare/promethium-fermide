@@ -17,7 +17,7 @@ recording. Reset/application reconstructs the catalogue and history.
 
 Each compartment/material and loop owns one observation slot. The coolant is a
 closed-loop thermal service fluid, not potable water or nutrient solution.
-Zero-charge loops report real zero stock. Hazard metadata belongs to each owner.
+Zero-charge loops report real zero stock. Ownership metadata belongs to each owner.
 Owner-prefixed metric identities distinguish equal compartment, loop and store
 names. Compartment mass is never added to qualified store supply.
 

@@ -22,7 +22,7 @@ Spaces, uppercase letters, leading/trailing or repeated hyphens are refused,
 not silently normalised. Custom materials need no separate registry.
 
 The same ID identifies the same material across stores. It is independent of
-the store ID, unit, hazard class and compound composition. A compound's material
+the store ID, unit and compound composition. A compound's material
 ID names the compound, not its constituent decomposition. No identity is guessed
 from any of those fields: even a legacy store named `oxygen` in `kg` remains
 unclassified without further evidence. The stored-material observation adapter
@@ -38,7 +38,7 @@ identity. Both standalone and World documents save optional
 `stationSystems.stores[].materialId` under schema 98; omission remains empty.
 Invalid identity refuses configuration application or loading atomically. Reading
 older documents does not dirty or rewrite them. Identity is observation metadata:
-it does not change allocation, transfer compatibility, hazard segregation or
+it does not change allocation, transfer compatibility or
 chemistry, nor claim a complete material accounting boundary.
 
 ## One-off Scheduled transfers

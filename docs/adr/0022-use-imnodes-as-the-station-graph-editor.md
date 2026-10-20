@@ -15,10 +15,12 @@ without imposing a data model of its own.
 The connection constraint layer is deliberately **ours, not the library's**.
 imnodes offers no per-pin filter callback: it cannot be told which pins are
 eligible. That is not a loss. The rules that decide whether two station nodes may
-join are hazard-class, thermal-service-class, medium and unit agreements plus
-cardinality and exclusivity, and no candidate library expresses them. They live in
-`core` beside the existing configuration validator, so the editor's live pin
-highlighting and the headless constraint matrix read one implementation.
+join are thermal-service-class, medium and unit agreements plus
+cardinality and exclusivity, and no candidate library expresses them. (A
+hazard-class rule also lived here until #748 removed the concept; see
+ADR 0024.) They live in `core` beside the existing configuration validator, so the
+editor's live pin highlighting and the headless constraint matrix read one
+implementation.
 
 ## Considered options
 

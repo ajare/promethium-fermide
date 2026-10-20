@@ -134,7 +134,7 @@ Protected reserves remain included; this is inventory, not usable supply or
 discretionary availability. Compound composition is not added a second time.
 
 Applied-run compilation resolves identity from explicit material IDs and
-unambiguous validated relationships, never from names, units, hazard classes or
+unambiguous validated relationships, never from names, units or
 constituent fractions. Material-preserving transfers connect identity evidence;
 water/gas processes and population input roles provide intrinsic material
 evidence. All evidence is collected before resolving a connected component.
@@ -148,8 +148,8 @@ The catalogue groups classified stores by material identity, physical quantity
 and canonical unit. Mass uses kg, volume m3, energy kWh and amount of substance
 mol. Applied units g, mL, L, kJ, MJ and Wh are converted before recording; no
 mass/volume, chemical or density conversion is inferred. Incompatible quantities
-of the same material receive separate properties. Hazard classes may contribute
-to this inventory sum without implying interchangeability or usable normal supply.
+of the same material receive separate properties. Every classified owner
+contributes to this inventory sum without implying interchangeability or usable supply.
 
 Material properties are labelled **Stored material inventory**, with a classified
 stores subtotal and identity-sorted instance stack using the generic query and
@@ -176,7 +176,7 @@ Resource transfers and conversions register each applied input/output role and
 its connection transport loss separately. Conversions support up to five inputs
 and five outputs; all declared roles receive independent selectable properties.
 Views group only equal equipment types, directions, exchange roles, resolved
-material identities, canonical quantities/units and hazard classes. Unclassified
+material identities and canonical quantities/units. Unclassified
 materials and unsupported units are not silently assigned to a material rate.
 
 The generic **Show requested** checkbox appears only for properties with

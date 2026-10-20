@@ -14,7 +14,7 @@ selection or an open editor.
   heat also have separate connection endpoint accounts. `lastCollectedKg` now
   records the committed condensate instead of remaining zero after collection.
 - Treatment distinguishes raw water, treated water, retained concentrate,
-  treatment consumable, clearance consumable and supplied/requested electricity.
+  treatment consumable and supplied/requested electricity.
   Concentrate is retained output, not external disposal or transport loss.
   Treated output includes held/unqualified water: it does not imply usability.
 - Electrolysis distinguishes feed water, oxygen, hydrogen, supplied/requested
@@ -46,7 +46,7 @@ Release CTest checks (run with `-j 16`):
 - `station-waterGasExchangeObservations`: public World history/query values versus
   committed snapshots and connection ledgers; normal and constrained operation,
   separate losses, inactive zeros, unavailable contributor gaps, instance stack
-  equality, hazardous clearance, gram-to-kg consumables, different-material
+  equality, energy-evidenced qualification, gram-to-kg consumables, different-material
   segregation, direct atmosphere oxygen delivery and disabled history.
 - `station-editor-water-gas-observations`: real ImGui property and breakdown
   controls; independently selected water, gas, concentrate, consumable and power

@@ -3,7 +3,7 @@
 The applied-run catalogue registers independent Crew food, water and oxygen
 inputs; urine, organic waste, carbon dioxide, moisture and metabolic heat
 outputs; and retained body mass as **inventory**, never useful output. Store
-flows retain resolved material identity, hazard and canonical mass conversion
+flows retain resolved material identity and canonical mass conversion
 (including g to kg). Unresolved identity remains explicitly unclassified.
 Requested overlays exist only for the committed requested metabolic pathways.
 
@@ -46,7 +46,7 @@ interval-summary semantics; it does not preserve exact event timestamps.
 
 Leakage and cycle ledgers expose total composition-proportional gas mass, not
 species-specific removed masses. Their material identity is `atmosphere-mixture`,
-retaining hazard class, distinct from pure oxygen, nitrogen, carbon dioxide and
+retaining its resolved identity, distinct from pure oxygen, nitrogen, carbon dioxide and
 water. No species allocation is reconstructed from the closing composition.
 Recovered gas remains retained and is not qualified supply. Removed = recovered
 + vented; those are alternative accounting boundaries, not additive production.

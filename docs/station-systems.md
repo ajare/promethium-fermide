@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, terminal-waste storage and scheduled ejection, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns, water recovery with qualification, oxygen production with finite CO2 capture, finite thermal buffers that ride through cooling deficits, and hazardous treatment and containment boundaries, protected cross-system service dependencies (#386–#391, #393–#404, #406, #412, #416) and bounded scenario forecasting of resource balance and resupply needs (#420)
+# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, terminal-waste storage and scheduled ejection, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns, water recovery with qualification, oxygen production with finite CO2 capture, finite thermal buffers that ride through cooling deficits, protected cross-system service dependencies (#386–#391, #393–#404, #406, #412, #416) and bounded scenario forecasting of resource balance and resupply needs (#420)
 
 Station systems are opt-in per World and disabled in existing documents. The
 main **View** window shows the **World** tab by default. Toggle
@@ -222,7 +222,7 @@ Microbial processors expose their material streams and Reservoir heat sink.
 **Culture medium** and **Replacement stock** draw as unused optional connectors
 until wired, and support ordinary link dragging and undo. Required process
 resources must still be supplied before Apply. Link refusals use the shared
-biology validator, including hazard boundaries, nutrient purity, distinct streams,
+biology validator, including material compatibility, nutrient purity, distinct streams,
 unknown stores or compartments, and unknown replacement biological stock.
 Station configuration documents preserve the authored biological loop and layout.
 
@@ -1034,7 +1034,7 @@ circulation and freeze heating beside the thermal totals.
 World schema 73 persists the authored loop contracts (units: kg,
 kJ/kg·K, °C, kW, kg/s, kW/K); a pre-73 document carrying
 `coolantLoops` is refused rather than silently dropped. The loop
-`hazardClass` field is retired (#757): documents carrying it at any
+class field is retired (#757): documents carrying it at any
 version are refused with a named-field conversion-required diagnostic,
 never silently defaulted. Coolant
 inventory, circulation, freeze exposure and the loop energy ledger
@@ -1290,10 +1290,7 @@ a volume in m³, starting masses of oxygen, nitrogen, carbon dioxide
 and water vapour in kg, a starting temperature in °C, an effective
 thermal capacity in kJ/K covering the air plus the bonded structure,
 and an optional heat-only coupling to a thermal reservoir through an
-authored exchanger conductance in kW/K. Hazard class is `normal` or
-`hazardous`; it is a declared label for authoring intent and
-reporting, not an enforcement mechanism — nothing in this slice
-opens, seals or interlocks a compartment on it.
+authored exchanger conductance in kW/K.
 
 Pressure is derived, never simulated as a control target: each
 gas's partial pressure follows the ideal-gas law, p = (m / M) · R · T /
@@ -1329,8 +1326,9 @@ recovered fraction: the recovered share is retained in the
 receiver, the remainder is lost through the outer hatch. Every gram
 leaving a compartment is booked as leaked, recovered or lost —
 there is no unexplained disposal, and no process moves gas between
-compartments automatically: normal and hazardous atmospheres are
-segregated by construction.
+compartments automatically: compartments are segregated by
+construction, and containment follows from which pathways are wired
+rather than from any declared label.
 
 Thermal state integrates the compartment's own heat sources —
 occupant sensible heat, condensation latent heat and the heat-only
@@ -1367,7 +1365,7 @@ observations, not alarms or interlocks. Completed tick counts are
 observability, not endurance estimates.
 
 Atmosphere acceptance coverage: refused configurations (unknown
-reservoir coupling, unknown hazard class, zero volume, negative
+reservoir coupling, unknown reference, zero volume, negative
 starting mass, sub-absolute-zero temperature, zero thermal
 capacity, inverted pressure limits, negative occupant count or
 leak rate, airlock cycles on unknown compartments with zero gas
@@ -1516,9 +1514,7 @@ metabolic scale stays within [0, 1] every tick.
 Water recovery is two authored contracts: a **collector** that condenses
 water vapour out of one compartment atmosphere onto a cold surface served
 by a coolant loop, and a **treatment** that turns raw water into treated
-water plus a retained concentrate. Both are hazard-classified (`normal` or
-`hazardous`) and the class is what keeps a potable stream from sharing
-equipment with a contaminated one.
+water plus a retained concentrate.
 
 A collector needs a real cold surface, not merely a loop that exists:
 collection requires coolant actually circulating across it (the loop's
@@ -1571,8 +1567,8 @@ constituent ledger, including dilution, never the destination's declaration.
 Plain inflow into a compound water store adds water only; compound-to-plain
 transfers remain refused. Condensate collectors still produce pure water.
 The treatment consumable's draw books both unit and constituent loss.
-Water stores shared between processes of differing class are legal (#751),
-and a collector may serve a compartment of any class: condensate is just
+Water stores may be shared by any processes (#751),
+and a collector may serve any compartment: condensate is just
 water, whatever air it condensed from, and the heat-only exchanger
 through which no coolant ever crossed is the containment (#752).
 
@@ -1582,9 +1578,9 @@ latent heat a collector adds is inside the same integration the loop's
 ledger closes over, and condensate delivered this tick is processed from
 the next tick on rather than in the same breath in which it appeared.
 
-World schema 78 persists the two contracts — the collector's hazard class,
+World schema 78 persists the two contracts — the collector's
 compartment, loop, service class, destination store, maximum rate and
-humidity target, and the treatment's hazard class, four store references,
+humidity target, and the treatment's four store references,
 throughput, recovery ratio, specific energy, consumable rate and priority.
 A pre-78 document carrying `waterCollectors` or `waterTreatments` is
 refused rather than silently dropped. Collected, processed, treated,
@@ -1597,14 +1593,13 @@ power demanded versus supplied, the quality hold state and the cumulative
 recovery, retention and energy ledgers.
 
 Water recovery acceptance coverage: refused configurations (unknown
-compartment, loop or store; an undeclared hazard class; a humidity target
+compartment, loop or store; an unknown consumable store; a humidity target
 outside [0, 1]; a negative rate; a service class that mismatches the loop's
 host reservoir; an incompatible compound outlet; a recovery ratio outside
 (0, 1]; a treatment sharing one store between two roles; over-budget
 contract counts) with no World
-mutation; cross-class collection where a collector of any class serves a
-compartment of any class, runs at its configured rate and closes every
-ledger (#752); nominal recovery where the collector runs at its configured
+mutation; collection where a collector serves any compartment, runs at
+its configured rate and closes every ledger (#752); nominal recovery where the collector runs at its configured
 rate, the routed latent heat matches the condensate exactly, the
 compartment's vapour falls by precisely what was collected while booking no
 latent heat of its own, the loop ledger closes with the collector term, and
@@ -1715,7 +1710,7 @@ composition, including pure-water deposits, replaces the destination's seed
 composition through the existing drift ledger.
 
 Optional crew greywater declarations use an independent, compound, mass-unit
-output store in the breathing compartment's hazard class:
+output store, no longer tied to any compartment class:
 
 ```yaml
 greywaterStoreId: greywater
@@ -1761,8 +1756,6 @@ that ride the same tick, the same power pool and the same store machinery
 as the rest of the station slice: an **electrolyzer** that splits
 qualified water into oxygen and hydrogen, and a **CO2 capture machine**
 that scrubs a compartment's carbon dioxide into a finite capture store.
-Both are hazard-classified, and the class keeps a breathable product
-stream from sharing equipment with a contaminated one.
 
 The electrolysis split is **stoichiometric**: from one kilogram of split
 water, `StationElectrolysisOxygenMassPerWaterKg` (the molar-mass ratio
@@ -1776,8 +1769,9 @@ a documented constant of the product fuel, not an authored coefficient).
 A dose below that floor is refused at configuration: no machine can create
 energy-rich products out of less energy than the products carry. The
 difference between the dose and the retained chemical energy is **process
-heat**, routed exactly once into the declared class-matched heat-sink
-reservoir and booked as its own ledger term there, alongside generator
+heat**, routed exactly once into the declared
+thermal-class-matched heat-sink reservoir and booked as its own ledger term
+there, alongside generator
 waste heat and compartment exchange.
 
 The cell is paid for before a kilogram splits, and it only splits water
@@ -1818,11 +1812,12 @@ Gas stores in both chains are **plain mass stores**: a compound store
 would create dry constituents out of pure gas. The capture machine's
 consumable store is the one exception, being a supplied consumable rather
 than a gas stream, and its draw books both the unit and constituent loss.
-Hazard class segregates the whole chain — the feed store, both product
-stores and the delivery compartment must all carry the cell's own class,
-and a capture machine must match the compartment it scrubs, so a
-hazardous atmosphere's carbon stays on the hazardous side — and stores
-shared across classes are refused at configuration.
+The chain no longer segregates by class (#750, #751): an electrolyzer may
+draw any qualified water store and deliver its products to any
+compatible stores, and a capture machine may scrub any compartment.
+Wiring that a declared class boundary once refused now runs — mass
+moves, the destination fills, and the consequence of an unwise
+connection shows up in the ledger rather than at authoring time.
 
 **Stream roles must name distinct stores (#585, #599).** The tick sizes
 each product against its own store's headroom *before either is added*,
@@ -1861,11 +1856,11 @@ ascending), and the single-pool audit carries their supplied service
 alongside every other load — oxygen production and carbon removal are
 services, never a second budget beside the loads and the thermal plant.
 
-World schema 79 persists both contracts — the electrolyzer's hazard
-class, feed water store, oxygen store or delivery compartment, hydrogen
+World schema 79 persists both contracts — the electrolyzer's
+feed water store, oxygen store or delivery compartment, hydrogen
 store, thermal service class, heat-sink reservoir, rated split, specific
 energy, maximum sink temperature and priority, and the capture machine's
-hazard class, compartment, capture store, consumable store, maximum rate,
+compartment, capture store, consumable store, maximum rate,
 specific energy, consumable rate and priority. A pre-79 document
 carrying `electrolyzers` or `co2Captures` is refused rather than
 silently dropped. The split, products, energy and heat ledgers, the
@@ -1880,10 +1875,8 @@ and unmet atmospheric service, and the closing mass and energy ledgers.
 Gas acceptance coverage: refused configurations (unknown feed, product,
 capture or consumable store; both or neither oxygen destination; a dose
 below the retained chemical energy; a sink-temperature bound below
-absolute zero; a hazard class that does not match the delivery
-compartment or the scrubbed compartment; a thermal class that mismatches
-the heat-sink reservoir; a consumable demand with no consumable store; a
-gas store shared between normal and hazardous processes; one store
+absolute zero; a thermal class that mismatches
+the heat-sink reservoir; a consumable demand with no consumable store; one store
 aliased across the cell's own stream roles — oxygen and hydrogen
 products, or feed water and either gas product (#585); over-budget
 contract counts) with no World mutation; the aliased-product case
@@ -1915,7 +1908,7 @@ electrolyzer descriptor crossings with contained construction refusal.
 A **fuel cell** generates backup electricity by recombining hydrogen
 and oxygen into water, drawing both reactants from **dedicated stores**
 so a life-support oxygen reserve is never consumed implicitly. The
-contract is authored as a hazard class, the hydrogen store, the oxygen
+contract is authored as the hydrogen store, the oxygen
 store, the product-water store, a thermal service class with its
 heat-sink reservoir, a rated electrical output, a conversion
 efficiency, a commanded output and a maximum sink temperature.
@@ -1967,13 +1960,12 @@ own electricity. The electrical output is bounded by the cell's own
 electrical rating and by the reactants actually drawn, so the pool
 never books energy the stores cannot pay for.
 
-World schema 80 persists the contract — the hazard class, the three
+World schema 80 persists the contract — the three
 store ids, the thermal service class, the heat-sink reservoir, the
 rated output, the efficiency, the commanded output and the maximum
 sink temperature. A pre-80 document carrying `fuelCells` is refused
 rather than silently dropped, and malformed values (an efficiency above
-one, a commanded output above the rating, an unknown heat sink, an
-undeclared hazard class) are refused from a file exactly as they are
+one, a commanded output above the rating, an unknown heat sink) are refused from a file exactly as they are
 refused through the live editor. The consumed reactants, produced
 water, generated energy, waste heat, endurance and limiter state stay
 runtime-only: Load and Reset reconstruct them from the authored
@@ -1982,8 +1974,7 @@ starting conditions.
 Fuel-cell acceptance coverage: refused configurations (an unknown
 hydrogen, oxygen, water or heat-sink store; an efficiency outside
 (0, 1]; a commanded output above the installed rating; a thermal
-class that mismatches the heat-sink reservoir; a gas store shared
-between normal and hazardous processes; one store aliased across the
+class that mismatches the heat-sink reservoir; one store aliased across the
 cell's two reactant roles (#585); an over-budget cell count)
 with no World mutation; nominal backup where the load is served from
 the cell's own output, the reactant mass ledger closes against the
@@ -2013,9 +2004,8 @@ ejection contract names one existing Resource store, the same unit as
 that store, a positive quantity, a first ejection time, and an
 optional recurrence interval — the same schedule discipline as
 resupply deliveries, including the one-off zero recurrence and the
-at-le-one-fixed-tick rule. Normal and hazardous terminal waste are
-kept separate the way every other material in the station is kept
-separate: in their own stores, each with its own ejection contract.
+at-le-one-fixed-tick rule. Each waste stream keeps its own store and its
+own ejection contract.
 
 Ejection `eligibility` explicitly selects the eligible stock:
 - `qualifiedOnly` (the default when omitted) removes only qualified stock.
@@ -2114,27 +2104,22 @@ applies ejection edits through the reset-confirmed flow, and the
 live view reports the ejected/unmet split and the retained held
 waste.
 
-### Hazardous treatment and containment boundaries (#412)
+### Treatment qualification and containment boundaries (#412)
 
-Hazardous material is kept separate from the normal inventory by an
-authored boundary that is enforced at configuration, not policed at
-runtime. Every Resource store now carries a hazard class — `normal` (the
-default) or `hazardous` — and that class is what makes a hazardous store a
-protected reserve of its own kind.
+Containment is no longer a declared label the model enforces on the
+author's behalf. The class that once sat on every store, compartment,
+loop and process — and the boundary rules built on it — is removed
+(#749–#758); what remains is containment as physical fact plus
+honest reporting. A store holds what its capacity allows; a transfer
+moves what it is wired to move; the consequence of an unwise
+connection is reported downstream in shortages, holds and tolerance
+throttles rather than refused upstream by a category.
 
-**The class boundary is refused, not filtered.** A generic transfer whose
-source and destination carry different classes is refused at validation:
-an accidentally-wired transfer can never siphon hazardous material into
-the potable inventory, and it can never dilute hazardous containment with
-normal material. The same rule binds conversions — every endpoint of one
-conversion shares a single class — and every process: a process may only
-touch stores of its own hazard class, so a normal-class treatment cannot
-draw from a hazardous store and a hazardous cell cannot deliver into a
-normal compartment. Recovery of hazardous material runs inside the
-hazardous class, between stores of that class only. A pressure target, a
-setpoint or a runtime policy never establishes containment: the declared
-class boundary does, and a compartment sitting exactly on its pressure
-setpoint is no less hazardous than one that has drifted.
+**Wiring is legal; the ledger keeps the score.** A transfer or
+conversion may join any two stores, and a process may touch any
+store. Mass moves, the destination fills within its capacity, and
+every gram stays accounted. Nothing is filtered, silently rerouted,
+or morally re-labelled on the way.
 
 **Treatment output qualifies on complete energy evidence (#753).** Filtration
 runs with the process; the full rated energy dose supplies treatment evidence.
@@ -2149,12 +2134,14 @@ with its coupled reservoir through the circulation-gated exchanger and
 nothing else: the loop's finite coolant inventory is unchanged by the
 exchange, no Resource store is touched, and a loop's coolant
 never crosses into another store, a reservoir, or another loop. Heat
-rides the interface; mass never does.
+rides the interface; mass never does. That interface — not a
+declared class — is what keeps a loop's coolant out of the station's
+material inventories.
 
-**Disposal-ready hazardous waste stays segregated.** Each ejection
+**Disposal-ready waste stays in its own store.** Each ejection
 contract removes only its own store's declared eligible partitions
-(qualified-only by default); one class's ejection never
-touches the other class's store.
+(qualified-only by default); one store's ejection never touches
+another's contents.
 
 Release-test fields formerly persisted by schema 88 and the class-conversion
 flag introduced in schema 101 are retired. With schema 103 the whole hazard-class
@@ -2241,8 +2228,8 @@ and it never starts partially. Reusable tools stay reserved for the
 whole job and are returned unchanged on completion or interruption -
 the store is held, not diminished. Consumed requirements are reserved
 up front and actually spent at completion: the material moves from the
-source store into the declared waste store with the same unit, declared
-composition and hazard class (the waste store must accept exactly what
+source store into the declared waste store with the same unit and declared
+composition (the waste store must accept exactly what
 was spent), so a spent part shows up as booked waste rather than vanishing.
 
 While a job is Active its target installation is isolated: its
@@ -2467,10 +2454,10 @@ workflows or ejection, no dynamic coolant leak, replenishment or
 loop-to-loop transfer (a loop's charge is its authored inventory and
 nothing in this slice changes it), no powered or passive thermal-buffer
 access beyond the authored reservoirs themselves, and no chilled
-service distribution beyond the class-matched rollup (no per-consumer
+service distribution beyond the thermal-service-class rollup (no per-consumer
 cold-side metering and no cascade or multi-stage refrigeration).
 It adds no concentrate disposal, no water distribution to consumers,
-no compound or contaminated-stream water chemistry (water-process stores
+no compound-stream water chemistry (water-process stores
 are plain mass stores and the model carries no species beyond mass), no
 biological or pathogen modelling, and no reprocessing path for held
 water: a held batch stays held for use (it is ejectable when explicitly
@@ -2567,7 +2554,7 @@ below-setpoint condition, coolant-loss fixtures (a dry loop disabled
 and inert under ample power, a half-filled loop capped by its
 inventory fraction), heater-capacity warming matching the closed form
 with the thermostat dropping demand at the setpoint and no heat
-crossing without circulation, isolated normal/hazardous inventories
+crossing without circulation, isolated loop inventories
 with no cross-subsidy and the reservoir loop term equal to only the
 circulating loop's negated exchange, battery ride-through freeze
 heating with both ledgers closed, loop-draw-before-charging ordering

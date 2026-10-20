@@ -37,7 +37,7 @@ renderer displays this distinction in each property's accounting note.
 Store unit conversion precedes presentation: mass uses kg/s, volume m3/s,
 amount of substance mol/s, and energy kW (including kWh-to-kJ conversion).
 Unsupported units do not acquire a fabricated physical measurement. Explicit or
-validated relationship-resolved material identity, hazard class, and source
+validated relationship-resolved material identity and source
 store canonical conversion are retained. Unclassified identities stay visibly
 unclassified and are not combined across instances. No requested overlays are
 invented. Missing authoritative schedules or requirements produce gaps.
@@ -54,10 +54,10 @@ exchange merely by having a schedule.
 - `station-scheduledExchangeObservations`: catalogue availability before samples,
   time-zero and sample-boundary deliveries, multiple recurrences per observation,
   canonical g-to-kg conversion, capacity-limited acceptance/rejection,
-  treatment/clearance-gated hazardous ejection, material-limited maintenance,
+  treatment-held ejection, material-limited maintenance,
   returned tools, zero versus unavailable, aggregate/stack equality, inventory
   ownership, pause, and deterministic Reset of quantities and rate history.
 - `station-editor-scheduled-observations`: real grouped selector and Instance
   controls, visible window semantics and canonical units, all scheduled families
-  including failed/passed hazardous clearance scenarios, hidden/preselection
+  including held/unqualified ejection scenarios, hidden/preselection
   history, and read-only World/document behavior.

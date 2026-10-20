@@ -5,7 +5,7 @@ independent owner. `crop-population/<id>/living-biomass/inventory` and
 `algae-culture/<id>/living-biomass/inventory` report current **dry** Living biomass
 in kg under material identity `living-biomass`. Growing area, culture volume and
 Growing capacity are installation limits, never additional material stock.
-Hazard classification comes from the owning Atmosphere compartment.
+Each owner is observed independently of where it sits.
 
 Each owner also registers `.../constituent/<key>` for `dryOrganics`,
 `nutrientNitrogen`, `phosphorus`, `potassium`, `otherMinerals` and `energy`.
