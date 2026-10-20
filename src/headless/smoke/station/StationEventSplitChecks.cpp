@@ -1,5 +1,6 @@
 #include "StationCoreChecks.h"
 #include "core/StationSystemsRuntime.h"
+#include "core/StationConnections.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -53,6 +54,82 @@ namespace
 			auto const drained = draining.snapshot();
 			near(drained.stores[1].currentQualified, 0.007, "Ejection shifted continuous draw time");
 			near(drained.wasteEjections[0].ejectedTotal, 0.993, "Ejection lost the pre-event draw");
+		}
+	}
+
+	void saturationCrossing(smoke::Context const&)
+	{
+		// All crossings lie strictly inside even the finest step, not on
+		// convenient tick boundaries. Read only committed public accounts.
+		for (bool draining : {false, true})
+		for (int constraint : {0, 1, 2, 3})
+		{
+			std::vector<std::string> reference;
+			for (uint32_t ratio : {1u, 6u, 30u})
+			{
+				core::StationSystemsSettings s;
+				s.enabled = true; s.systemsStepWorldTicks = ratio;
+				s.stores = {{"source", "kg", 10, 5, 0}, {"sink", "kg", 10, 0, 0}};
+				s.stores[0].protectedReserve = 0.7;
+				core::ResourceTransferSettings pump;
+				pump.id = "pump"; pump.sourceId = "source"; pump.destinationId = "sink";
+				pump.unit = "kg"; pump.ratePerSecond = 3;
+				s.transfers = {pump};
+				for (auto const& link : core::station_connections::build(s).links)
+					if (link.designKey.ownerType == "Transfer")
+					{
+						auto const source = link.designKey.relation == "Source";
+						s.connections[link.designKey] = {core::StationPhysicalConnection::Automatic,
+							source && constraint == 1 ? 2.0 : (!source && constraint == 2 ? 2.0 : 20.0),
+							source ? 0.5 : (constraint == 3 ? 0.0 : 0.8)};
+					}
+				auto const deliveredRate = constraint == 1 ? 0.8 : (constraint == 2 ? 1.6 : (constraint == 3 ? 0.0 : 3.0));
+				auto const drawnRate = constraint == 3 ? 6.0 : deliveredRate / 0.4;
+				auto const crossing = 0.137;
+				auto const delivered = deliveredRate * crossing;
+				if (constraint == 3 && !draining) continue; // all-loss flow cannot fill its receiver
+				if (draining) s.stores[0].startingQualified = 0.7 + drawnRate * crossing;
+				else
+				{
+					s.stores[1].startingUnqualified = 0.1;
+					s.stores[1].capacity = 0.1 + delivered;
+				}
+				core::StationSystemsRuntime runtime(s, quantum);
+				auto const step = ratio * static_cast<double>(quantum);
+				for (double seconds = step; seconds <= 1.0 + step; seconds += step)
+				{
+					require(runtime.advanceTo(seconds), "Saturation drive failed");
+					auto const snap = runtime.snapshot();
+					auto const activeSeconds = std::min(snap.elapsedSeconds, crossing);
+					near(snap.stores[1].currentQualified, deliveredRate * activeSeconds, "Capacity crossing delivered wrong amount");
+					near(snap.stores[0].currentQualified, s.stores[0].startingQualified - drawnRate * activeSeconds,
+						"Reserve crossing drew wrong amount");
+					double loss = 0;
+					for (auto const& connection : snap.connections)
+					{
+						near(connection.inputTotal, connection.deliveredTotal + connection.lostTotal,
+							"Crossing connection did not conserve material");
+						loss += connection.lostTotal;
+					}
+					near(snap.stores[0].currentQualified + snap.stores[1].currentQualified + loss,
+						s.stores[0].startingQualified, "Saturation material boundary did not close");
+					if (snap.elapsedSeconds > crossing)
+						require(snap.transfers[0].status == core::StationTransferStatus::Rejected,
+							"Saturated transfer did not stall");
+				}
+				std::vector<std::string> transitions;
+				for (auto const& event : runtime.events())
+					if (event.category == "transfer") transitions.push_back(event.message);
+				if (transitions.size() != (constraint == 3 ? 1u : 2u))
+				{
+					std::string message = "Saturation transition count: ratio=" + std::to_string(ratio)
+						+ " constraint=" + std::to_string(constraint) + " draining=" + std::to_string(draining);
+					for (auto const& transition : transitions) message += "\n" + transition;
+					throw std::runtime_error(message);
+				}
+				if (reference.empty()) reference = transitions;
+				else require(transitions == reference, "Saturation transition order changed with ratio");
+			}
 		}
 	}
 
@@ -171,6 +248,7 @@ namespace
 
 void registerStationEventSplitChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"saturationCrossing", saturationCrossing});
 	checks.push_back({"eventSplit", eventSplit});
 	checks.push_back({"eventOrder", eventOrder});
 	checks.push_back({"eventRollback", eventRollback});

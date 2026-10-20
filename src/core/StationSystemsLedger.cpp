@@ -168,7 +168,47 @@ namespace core
 			committed(scratch);
 			return true;
 		};
-		if (collected.arrivals.empty() && maintenanceJobs.empty())
+		auto const hasContinuousTransfers = std::any_of(transfers.begin(), transfers.end(),
+			[](auto const& transfer) { return transfer.authored.mode == ResourceTransferMode::Continuous; });
+		if (collected.arrivals.empty() && maintenanceJobs.empty() && !hasContinuousTransfers)
+			return integrate(end, seconds, [](Tick const&) {});
+		// Transfer rates are constant until an inventory boundary or an authored
+		// event changes admission. Predict crossings with the same input-side
+		// ratings and upstream efficiency compensation as the allocator, never
+		// by dividing a clamped end-of-step amount by the step duration.
+		auto transferCrossing = [&](double maximum)
+		{
+			auto const& preview = collected.connections;
+			auto limit = [&](double amount, double rate)
+			{
+				if (amount > 0.0 && rate > 0.0)
+				{
+					auto const crossing = amount / rate;
+					// Ignore only roundoff-sized tails; the allocator still books
+					// their exact remaining stock, including connection loss.
+					if (crossing > 1e-12) maximum = std::min(maximum, crossing);
+				}
+			};
+			for (auto index : transferOrder)
+			{
+				auto const& transfer = transfers[index];
+				if (transfer.authored.mode != ResourceTransferMode::Continuous) continue;
+				auto const& source = stores[transfer.sourceIndex];
+				auto const& destination = stores[transfer.destinationIndex];
+				if (source.currentQualified <= source.authored.protectedReserve
+					|| destination.currentQualified + destination.currentUnqualified >= destination.authored.capacity)
+					continue;
+				auto const input = preview.port("Transfer", transfer.authored.id, "Source");
+				auto const output = preview.port("Transfer", transfer.authored.id, "Destination");
+				auto const drawnRate = preview.required(input,
+					preview.required(output, transfer.authored.ratePerSecond));
+				auto const deliveredRate = preview.available(output, preview.available(input, drawnRate));
+				limit(source.currentQualified - source.authored.protectedReserve, drawnRate);
+				limit(destination.authored.capacity - destination.currentQualified - destination.currentUnqualified, deliveredRate);
+			}
+			return maximum;
+		};
+		if (collected.arrivals.empty() && maintenanceJobs.empty() && transferCrossing(seconds) >= seconds)
 			return integrate(end, seconds, [](Tick const&) {});
 		std::vector<double> boundaries;
 		for (auto const& arrival : collected.arrivals)
@@ -295,6 +335,8 @@ namespace core
 					auto const completion = job.lastStartSeconds + job.authored.durationSeconds;
 					if (completion > cursor && completion < next) next = completion;
 				}
+			auto const crossing = transferCrossing(next - cursor);
+			if (crossing < next - cursor && cursor + crossing > cursor) next = cursor + crossing;
 			auto const duration = next - cursor;
 			if (!integrate(next, duration, [&](Tick const& part)
 			{

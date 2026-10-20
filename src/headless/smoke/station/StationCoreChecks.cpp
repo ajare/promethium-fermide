@@ -456,8 +456,8 @@ namespace
 			require(sawProtected, "Protected-reserve rejection reason missing from the event log");
 			require(std::abs(snap.balances[0].residual) < 1e-12, "Protected run broke conservation");
 		}
-		// Scenario C: a destination that fills mid-request shows a partial
-		// transfer with the exact unmet remainder, never silent clamping.
+		// Scenario C: a destination that fills mid-request resolves the crossing
+		// and stalls immediately; amounts still cover the whole Station step.
 		core::World partialRun("Partial", 2, 2);
 		partialRun.pauseSimulation(); partialRun.finishBuild();
 		require(configure(partialRun, {store("src", "kg", 200, 200, 0), store("dst", "kg", 40, 0, 0)},
@@ -468,7 +468,7 @@ namespace
 			auto const snap = partialRun.getStationSystemsSnapshot();
 			require(approx(snap.stores[1].currentQualified, 40.0) && approx(snap.stores[0].currentQualified, 160.0),
 				"Partial transfer did not conserve material");
-			require(snap.transfers[0].status == core::StationTransferStatus::Partial
+			require(snap.transfers[0].status == core::StationTransferStatus::Rejected
 				&& approx(snap.transfers[0].lastRequested, 1.5) && approx(snap.transfers[0].lastCompleted, 1.0)
 				&& approx(snap.transfers[0].lastUnmet, 0.5),
 				"Partial transfer remainder not visible");
@@ -490,7 +490,7 @@ namespace
 			require(approx(snap.stores[1].currentQualified, 12.0) && approx(snap.stores[2].currentQualified, 13.0)
 				&& approx(snap.stores[0].currentQualified, 0.0),
 				"Competing allocation did not favour the declared priority");
-			require(snap.transfers[0].id == "high" && snap.transfers[0].status != core::StationTransferStatus::Rejected
+			require(snap.transfers[0].id == "high" && snap.transfers[0].status == core::StationTransferStatus::Rejected
 				&& snap.transfers[0].lastCompleted > 0.9
 				&& snap.transfers[1].id == "low" && snap.transfers[1].status == core::StationTransferStatus::Rejected
 				&& approx(snap.transfers[1].lastUnmet, 1.0),

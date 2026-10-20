@@ -319,8 +319,8 @@ construct a runtime with authored settings and a base quantum (seconds), call
 pipeline are needed. Non-finite, negative and unrepresentable targets return
 false without mutation; already-reached targets are successful no-ops.
 Ratio 1 retains the original physics durations and elapsed-time arithmetic.
-The clock seam (#763) and scheduled-event integration (#767) are implemented;
-saturation/protection changes, persistence of the ratio and certification remain
+The clock seam (#763), scheduled-event integration (#767) and continuous-transfer
+saturation crossings (#769) are implemented; protection changes, persistence of the ratio and certification remain
 follow-up slices of #762. Rendering never executes station scripts. Public World methods
 `getStationSystemsSnapshot`, `getStationSystemsEvents` and
 `getStationSystemsDiagnostics` return read-only value copies. Events retain at
@@ -361,6 +361,30 @@ recurrence, coincident ordering, conservation and later-sub-interval failure.
 Ratio-1 runs without newly due events keep the original integration path; the
 intentional timing corrections also apply at ratio 1 (no consumption before an
 arrival, and no missed maintenance solely because its window is sub-tick).
+
+### Continuous-transfer saturation crossings (#769)
+
+Continuous Resource transfers also split integration at predicted destination
+capacity and source protected-reserve crossings. Prediction uses the authoritative
+connection input caps and upstream loss compensation, including zero-efficiency
+connections, rather than extrapolating an already-clamped step amount. Held
+inventory consumes destination headroom but is never drawable source stock.
+The ledger runs to the crossing, then re-evaluates admission for the remaining
+interval. Authored events can interrupt or restart this process, and a failure
+still rolls back the entire Station step.
+
+Amounts accumulate across the full step; status describes the latest interval.
+Thus a transfer that supplies fully until its receiver fills and then stalls
+publishes Rejected, not an artificial Partial caused solely by the enclosing
+step width. Connection-limited operation may still be Partial. The unsaturated
+no-event path retains its original integration and accounting arithmetic.
+
+The standalone `saturationCrossing` check compares analytic delivered and drawn
+amounts and material conservation at every committed step boundary at ratios
+1, 6 and 30, for capacity and reserve crossings, input/output caps, efficiency,
+held receiver stock and all-loss flow. It also compares transition order across
+ratios. This is not certification of the other Station subsystems; the remaining
+#762 slices and invariance registry still govern that claim.
 
 ### Failure containment (#388)
 
