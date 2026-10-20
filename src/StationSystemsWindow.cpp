@@ -2,6 +2,7 @@
 #include "StationSystemsEntryEditor.h"
 #include "core/StationReference.h"
 #include "core/StationConfigurationDocument.h"
+#include "core/StationProtection.h"
 #include <filesystem>
 #include "core/World.h"
 #include "DocumentEdit.h"
@@ -738,6 +739,19 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::InputScalar("Station step ratio (World ticks)", ImGuiDataType_U32,
 		&mDraft.systemsStepWorldTicks);
+	auto const stepSeconds = static_cast<double>(mDraft.systemsStepWorldTicks)
+		* static_cast<double>(core::World::getFixedTimestep());
+	ImGui::Text("Configured Station step: %u World tick(s), %.6f s",
+		mDraft.systemsStepWorldTicks, stepSeconds);
+	ImGui::Text("Certified protection ratio: 1 to %u World tick(s)",
+		core::StationProtectionCertifiedStepRatio);
+	if (mDraft.systemsStepWorldTicks <= core::StationProtectionCertifiedStepRatio)
+		ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f),
+			"Within certified protection ratio.");
+	else
+		ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.25f, 1.0f),
+			"BEYOND CERTIFIED protection ratio: configured %u World tick(s) exceeds %u; results are not certified.",
+			mDraft.systemsStepWorldTicks, core::StationProtectionCertifiedStepRatio);
 	ImGui::TextDisabled("Whole World ticks per Station step (1 to %u).", core::CORE_MAX_SYSTEMS_STEP_WORLD_TICKS);
 	ImGui::InputFloat("Observation interval (seconds)", &mDraft.observationIntervalSeconds, 0.1f, 1.0f, "%.2f");
 	// #418: the authored trend retention. Trends are sampled on the same

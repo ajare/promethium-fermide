@@ -752,6 +752,8 @@ add_test(NAME station-editor-document COMMAND pf-smoke-editor --check station/co
 set_tests_properties(station-editor-document PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 add_test(NAME station-editor-window COMMAND pf-smoke-editor --check station/windowWorkflow)
 set_tests_properties(station-editor-window PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
+add_test(NAME station-editor-step-ratio COMMAND pf-smoke-editor --check station/stepRatioWorkflow)
+set_tests_properties(station-editor-step-ratio PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 add_test(NAME station-editor-stores COMMAND pf-smoke-editor --check station/storeWorkflow)
 set_tests_properties(station-editor-stores PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 # #640: dragging connectors on the Station Flow canvas and the shared draft

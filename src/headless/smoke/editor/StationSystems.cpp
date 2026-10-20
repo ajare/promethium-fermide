@@ -13,6 +13,7 @@ void registerMixedObservationEditorChecks(std::vector<smoke::Check>& checks);
 #include "../station/AlgaeObservationFixture.h"
 #include "../station/ScheduledObservationFixture.h"
 #include "core/StationReference.h"
+#include "core/StationProtection.h"
 #include "StationFlowDiagram.h"
 #include "core/StationConfigurationDocument.h"
 #include "core/StationPorts.h"
@@ -8793,11 +8794,65 @@ void cropWorkflow(smoke::Context const&)
 		require(driver.passed(), "stability workflow failed on the Test Engine");
 	}
 
+	void stationStepRatioWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200.0f, 1800.0f};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Station ratio editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.systemsStepWorldTicks = core::StationProtectionCertifiedStepRatio;
+		std::string diagnostic;
+		require(world->configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 1700});
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "stepRatioWorkflow", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("Configured Station step: 6 World tick(s), 0.100000 s"),
+				"Configured Station step duration is not displayed");
+			REQ(driver.contains("Certified protection ratio: 1 to 6 World tick(s)")
+				&& driver.contains("Within certified protection ratio."),
+				"Certified Station ratio status is not displayed");
+			driver.typeValue(ctx, "Station step ratio (World ticks)", "7"); ctx->Yield(2);
+			REQ(window.draft().systemsStepWorldTicks == 7
+				&& driver.contains("BEYOND CERTIFIED protection ratio: configured 7 World tick(s) exceeds 6; results are not certified."),
+				"Beyond-certified draft is not visibly labelled");
+			driver.click(ctx, "Apply settings"); ctx->Yield(2);
+			REQ(world->getStationSystemsSettings().systemsStepWorldTicks == 7 && history.undoCount() == 1,
+				"Paused Station step-ratio edit did not apply through document history");
+			auto restore = [&](DocumentSnapshot const& snapshot) {
+				world = deserializeDocumentSnapshot(snapshot, world, {});
+				world->pauseSimulation();
+				return true;
+			};
+			REQ(history.undo(captureDocumentSnapshot(world, history), restore)
+				&& world->getStationSystemsSettings().systemsStepWorldTicks == core::StationProtectionCertifiedStepRatio,
+				"Station step-ratio change was not undoable");
+			REQ(history.redo(captureDocumentSnapshot(world, history), restore)
+				&& world->getStationSystemsSettings().systemsStepWorldTicks == 7,
+				"Station step-ratio change was not redoable");
+		});
+		#undef REQ
+		require(driver.passed(), "Station step-ratio workflow failed on the Test Engine");
+	}
+
 	void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	editor_smoke::registerStationConnections(checks);
 	registerMixedObservationEditorChecks(checks);
 	checks.push_back({"station/windowWorkflow", workflow});
+	checks.push_back({"station/stepRatioWorkflow", stationStepRatioWorkflow});
 	checks.push_back({"station/materialIdentityWorkflow", materialIdentityWorkflow});
 	checks.push_back({"station/configurationDocument", configurationDocumentWorkflow});
 	checks.push_back({"station/removalWorkflow", removalWorkflow});
