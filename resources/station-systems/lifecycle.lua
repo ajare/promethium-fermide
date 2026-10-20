@@ -10037,10 +10037,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             end
         end
     end
-    function object:advance(world_tick, fixed_seconds)
-        assert(world_tick > 0 and fixed_seconds > 0)
+    function object:advance(station_step, fixed_seconds)
+        assert(station_step > 0 and fixed_seconds > 0)
         checkFiniteLimits(self)
-        local elapsed = world_tick * fixed_seconds
+        local elapsed = station_step * fixed_seconds
         -- Deliveries land first: what arrives this tick is available to
         -- this tick's equipment, transfers and conversions, matching the
         -- host ledger order.

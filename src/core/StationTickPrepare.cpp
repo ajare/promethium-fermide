@@ -198,7 +198,7 @@ namespace core
 		// resource ledger: the electrical service a load receives bounds
 		// its heat and material exchanges, and allocated power can never
 		// exceed the generation actually available this tick.
-		elapsed = static_cast<double>(tick) * World::getFixedTimestep();
+		elapsed = runtime.clock.secondsAt(tick);
 		// Resupply deliveries run ahead of everything else in the tick:
 		// material that lands this tick is available to this tick's
 		// equipment, transfers and conversions. Every occurrence due

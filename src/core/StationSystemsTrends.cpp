@@ -104,14 +104,14 @@ namespace core
 				auto v = o.read(snap, observationIndex);
 				if (o.cumulativeRate)
 				{
-					double const seconds = static_cast<double>(tick) * World::getFixedTimestep() - previousExchangeSeconds;
+					double const seconds = clock.secondsAt(tick) - previousExchangeSeconds;
 					auto total = v.actual;
 					if (total && previousExchangeTotals[i] && seconds > 0)
 						v.actual = (*total - *previousExchangeTotals[i]) / seconds;
 					else v.actual.reset();
 					previousExchangeTotals[i] = total;
 				}
-				double const scale = o.sourceToCanonicalScale / (o.perTick ? World::getFixedTimestep() : 1);
+				double const scale = o.sourceToCanonicalScale / (o.perTick ? clock.stepSeconds() : 1);
 				if (v.actual) *v.actual *= scale;
 				if (v.requested) *v.requested *= scale;
 				v.validity = !v.actual ? StationMetricValidity::Unavailable
@@ -132,8 +132,8 @@ namespace core
 					auto t = observationIndex.find(snap.transfers, o.connection.ownerId, &StationTransferSnapshot::id);
 					if (t == snap.transfers.end()) continue;
 					if (t->mode == ResourceTransferMode::Scheduled && t->lastFiredTick != snap.worldTick) continue;
-					actual = t->lastCompleted / World::getFixedTimestep();
-					requested = t->lastRequested / World::getFixedTimestep();
+					actual = t->lastCompleted / clock.stepSeconds();
+					requested = t->lastRequested / clock.stepSeconds();
 				}
 				else
 				{
@@ -141,13 +141,13 @@ namespace core
 					if (c == snap.conversions.end()) continue;
 					auto const& flows = o.metric.role == StationMetricRole::Input ? c->inputs : c->outputs;
 					if (o.flowIndex >= flows.size()) continue;
-					actual = flows[o.flowIndex].completed / World::getFixedTimestep();
-					requested = flows[o.flowIndex].requested / World::getFixedTimestep();
+					actual = flows[o.flowIndex].completed / clock.stepSeconds();
+					requested = flows[o.flowIndex].requested / clock.stepSeconds();
 				}
 			}
 			put(constituentSlot + i, actual * o.sourceToCanonicalScale, requested * o.sourceToCanonicalScale);
 		}
-		previousExchangeSeconds = static_cast<double>(tick) * World::getFixedTimestep();
+		previousExchangeSeconds = clock.secondsAt(tick);
 		history.observe(previousExchangeSeconds, recordingValues);
 	}
 	// #419: the endurance observation windows. One window per Resource
@@ -204,7 +204,7 @@ namespace core
 	}
 	void StationSystemsRuntime::Impl::updateEndurance(uint64_t tick)
 	{
-		auto const elapsed = static_cast<double>(tick) * World::getFixedTimestep();
+		auto const elapsed = clock.secondsAt(tick);
 		for (size_t index = 0; index < stores.size() && index < storeEndurance.size(); ++index)
 		{
 			auto const& store = stores[index];

@@ -291,7 +291,7 @@ control and Monitoring/supervision. Each executes the bundled
 `station-systems/lifecycle.lua` factory in a separate private Lua 5.4 state,
 with a 512 KiB allocation budget and 100,000 instructions per construction/step.
 It reuses the deterministic sandbox shared by existing script adapters. Lua
-receives only a system name, the next World tick and fixed-tick duration: no
+receives only a system name, the next Station step and step duration: no
 World, Agent, filesystem, process, wall-clock or mutable domain objects.
 
 The application loads `StationSystemsLifecycle` as a managed `LuaScript`
@@ -299,23 +299,42 @@ Resource from `Resources.yaml`. Headless use embeds that exact same asset,
 following the bundled Human source pattern. Only immutable source is shared;
 no executed Lua table, VM or upvalue is shared across objects or Worlds.
 
-SimulationCoordinator advances station objects at the World tick boundary.
-Existing time scale and update batching feed the same fixed ticks. The station
-snapshot derives elapsed seconds from the committed World tick, not cumulative
-wall time. Rendering never executes station scripts. Public World methods
+SimulationCoordinator calls `StationSystemsRuntime::advanceTo(seconds)` once
+at each World tick boundary, supplying the target World elapsed seconds. The
+runtime owns a count-derived Station clock: `systemsStepWorldTicks` (1–600,
+by default 1) multiplies the embedding clock's base quantum supplied at
+construction. No floating-point duration is accumulated. The runtime advances
+whole steps until its elapsed seconds reach or exceed the target; calls while
+already ahead perform no work. Consequently a non-boundary target can put the
+Station ahead of the World by less than one Station step, by contract.
+Existing time scale and update batching still feed the same fixed World ticks.
+The Station snapshot derives elapsed seconds from committed Station steps.
+Legacy `worldTick` and `completedTicks` fields count Station steps; at ratio 1
+they retain their previous values. The four sandbox counters must each equal
+the next Station step, independent of the number of drive calls.
+
+The public `core/StationSystemsRuntime.h` also supports standalone scenarios:
+construct a runtime with authored settings and a base quantum (seconds), call
+`advanceTo(durationSeconds)`, then read `snapshot()`. No World, Agents or tick
+pipeline are needed. Non-finite, negative and unrepresentable targets return
+false without mutation; already-reached targets are successful no-ops.
+Ratio 1 retains the original physics durations and elapsed-time arithmetic.
+This is the clock seam (#763), not the completed timestep-invariance feature:
+event splitting, saturation/protection changes, persistence of the ratio and
+certification remain follow-up slices of #762. Rendering never executes station scripts. Public World methods
 `getStationSystemsSnapshot`, `getStationSystemsEvents` and
 `getStationSystemsDiagnostics` return read-only value copies. Events retain at
 most 256 entries; a failure is terminal until Reset, so diagnostics are bounded.
 
 A failed script call, memory/instruction exhaustion, invalid return value or
-tick-accounting mismatch pauses the World before that tick advances. All four
+Station-step-accounting mismatch pauses the World before that tick advances. All four
 results are staged before publication; no partial station result or elapsed
 time is published. Mutated Lua objects are discarded, and resuming cannot
 retry the failed runtime. Reset reconstructs authored initial state.
 
 ### Failure containment (#388)
 
-Diagnostics identify the attempted World tick, failing system, bounded message
+Diagnostics identify the attempted Station step (the World tick at ratio 1), failing system, bounded message
 (up to 2048 bytes), and machine-readable `ScriptExecutionFailure`: Lua error,
 instruction budget exceeded, memory budget exceeded, or conversion error.
 Non-finite/non-integer/negative completed counts and tick-accounting mismatches

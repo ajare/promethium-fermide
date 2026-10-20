@@ -1,5 +1,5 @@
 #include "core/World.h"
-#include "StationSystemsRuntime.h"
+#include "core/StationSystemsRuntime.h"
 #include "core/AirlockTransit.h"
 #include "core/ChamberTransit.h"
 #include "core/RestorationTiming.h"
@@ -1873,7 +1873,7 @@ namespace core
 			readStationSystemsSettingsMap(serializer, version, stationSettings);
 		// Preflight scripts before replacing any existing World or live state.
 		auto stationRuntime = stationSettings.enabled
-			? std::make_unique<StationSystemsRuntime>(stationSettings) : nullptr;
+			? std::make_unique<StationSystemsRuntime>(stationSettings, getFixedTimestep()) : nullptr;
 		auto name = serializer.readString("name");
 		auto const randomSeed = version >= 14
 			? serializer.readUint64("randomSeed") : uint64_t{ 0 };

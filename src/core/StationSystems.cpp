@@ -824,7 +824,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		{
 			ScriptObject* object;
 			uint64_t tick;
-			float seconds;
+			double seconds;
 			uint64_t completed{};
 			bool invalidOutput{false};
 			int operator()(lua_State* state)
@@ -864,12 +864,13 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			baseIntervalSeconds, retentionSeconds,
 			tick, elapsedSeconds, requested, actual);
 	}
-	StationSystemsRuntime::StationSystemsRuntime(StationSystemsSettings settings) : mImpl(std::make_unique<Impl>())
+	StationSystemsRuntime::StationSystemsRuntime(StationSystemsSettings settings, float baseStepSeconds)
 	{
 		static std::atomic<uint64_t> nextRun{0};
 		mRun = ++nextRun;
 		std::string diagnostic;
 		if (!validateStationSystemsSettings(settings, diagnostic)) throw SerializationException(diagnostic);
+		mImpl = std::make_unique<Impl>(settings.systemsStepWorldTicks, baseStepSeconds);
 		mImpl->settings = settings; mImpl->snapshot.enabled = settings.enabled;
 		std::vector<StationRecordingSlot> slots;
 		auto addSlot = [&](std::string subsystem, std::string id, std::string unit, std::string metricId) {
@@ -993,8 +994,9 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			slots.push_back(std::move(slot));
 		}
 		auto const slotCount = slots.size();
-		auto const cadenceTicks = std::max(1.0f, std::ceil(settings.observationIntervalSeconds / World::getFixedTimestep()));
-		mImpl->history = StationHistory(std::move(slots), cadenceTicks * World::getFixedTimestep(), settings.trendRetentionSeconds);
+		auto const stepSeconds = static_cast<float>(mImpl->clock.stepSeconds());
+		auto const cadenceSteps = std::max(1.0f, std::ceil(settings.observationIntervalSeconds / stepSeconds));
+		mImpl->history = StationHistory(std::move(slots), cadenceSteps * stepSeconds, settings.trendRetentionSeconds);
 		if (!mImpl->history.status().limited) mImpl->recordingValues.resize(slotCount);
 		else
 		{
@@ -1729,15 +1731,26 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				: ", " + std::to_string(settings.wasteEjections.size()) + " terminal-waste ejection(s)"));
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
-	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
+	bool StationSystemsRuntime::advanceTo(double simulatedSeconds)
 	{
+		if (!std::isfinite(simulatedSeconds) || simulatedSeconds < 0) return false;
 		if (!mImpl->settings.enabled) return true;
 		if (!mImpl->snapshot.healthy) return false;
+		// Reject unrepresentable targets before any work or integer overflow.
+		if (simulatedSeconds / mImpl->clock.stepSeconds() >= static_cast<double>(std::numeric_limits<uint64_t>::max())) return false;
+		while (mImpl->clock.elapsedSeconds() < simulatedSeconds)
+			if (!advanceStep()) return false;
+		return true;
+	}
+	bool StationSystemsRuntime::advanceStep()
+	{
+		auto const tick = mImpl->clock.steps() + 1;
+		auto const seconds = mImpl->clock.stepSeconds();
 		auto next = mImpl->snapshot;
 		for (size_t i = 0; i < mImpl->objects.size(); ++i)
 		{
 			auto& object = *mImpl->objects[i];
-			Step step{&object, tick, seconds};
+			Step step{&object, tick, mImpl->clock.stepSeconds()};
 			try
 			{
 				script::beginInstructionBudget(object.state.get(), object.budget);
@@ -1748,10 +1761,15 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 					throw std::runtime_error(script::budgetExhausted(object.budget)
 						? std::string(script::budgetDiagnostic(object.budget)) : errorMessage(object.state.get(), "Station step failed"));
 				}
-				if (step.completed != next.completedTicks[i] + 1)
+				// Every sandbox must acknowledge this Station step exactly once,
+				// regardless of how often advanceTo was called by its driver.
+				if (step.completed != tick)
 				{
 					step.invalidOutput = true;
-					throw std::runtime_error("Station lifecycle tick accounting mismatch");
+					// Keep the ratio-1 diagnostic byte-identical for existing runs.
+					throw std::runtime_error(mImpl->settings.systemsStepWorldTicks == 1
+						? "Station lifecycle tick accounting mismatch"
+						: "Station lifecycle step accounting mismatch");
 				}
 				next.completedTicks[i] = step.completed;
 				lua_settop(object.state.get(), 0);
@@ -1800,9 +1818,10 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			}
 		}
 		next.worldTick = tick;
-		next.elapsedSeconds = static_cast<double>(tick) * World::getFixedTimestep();
+		mImpl->clock.commitStep();
+		next.elapsedSeconds = mImpl->clock.elapsedSeconds();
 		mImpl->snapshot = next;
-		auto interval = static_cast<uint64_t>(std::ceil(mImpl->settings.observationIntervalSeconds / World::getFixedTimestep()));
+		auto interval = std::max(uint64_t{1}, static_cast<uint64_t>(std::ceil(mImpl->settings.observationIntervalSeconds / static_cast<float>(seconds))));
 		if (tick % interval == 0)
 		{
 			appendBoundedEvent(mImpl->events, tick, "observation",

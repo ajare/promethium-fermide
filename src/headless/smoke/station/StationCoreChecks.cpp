@@ -1,10 +1,74 @@
 #include "StationCoreChecks.h"
 #include "StationRig.h"
 #include "core/BinarySerializer.h"
+#include "core/StationSystemsRuntime.h"
 
 namespace
 {
 	using namespace smoke::station;
+	void clockIntegration(smoke::Context const&)
+	{
+		for (uint32_t ratio : {1u, 6u, 30u, 600u})
+		{
+			core::World world("Clock", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true; settings.systemsStepWorldTicks = ratio;
+			std::string diagnostic;
+			require(world.configureStationSystems(settings, true, &diagnostic), diagnostic.c_str());
+			core::StationSystemsRuntime standalone(settings, world.getFixedTimestep());
+			world.resumeSimulation();
+			// Compare every call, including those for which Station is ahead
+			// of the World and must perform no work.
+			while (static_cast<double>(world.getSimulationTick()) * world.getFixedTimestep() < 12)
+			{
+				require(world.advanceTick(), "Coarse Station failed in World");
+				auto const target = static_cast<double>(world.getSimulationTick()) * world.getFixedTimestep();
+				require(standalone.advanceTo(target), "Standalone integration drive failed");
+				require(world.getStationSystemsSnapshot() == standalone.snapshot(),
+					"Coordinator and standalone Station clocks disagree");
+			}
+			world.pauseSimulation();
+			auto const saved = world.getStationSystemsSnapshot();
+			world.update(10);
+			require(world.getStationSystemsSnapshot() == saved, "Pause advanced coarse Station clock");
+		}
+		SourceScope sourceScope;
+		auto const bundled = core::bundledStationSystemsSource();
+		core::setStationSystemsSourceLoader([bundled] {
+			return "local factory = (function()\n" + bundled + "\nend)()\n"
+				"return function(...) local model = factory(...)\n"
+				"local original = model.advance\n"
+				"function model:advance(step, seconds)\n"
+				"if step == 2 then return 99 end\n"
+				"return original(self, step, seconds) end\n"
+				"return model end";
+		});
+		core::World failed("Coarse failure", 2, 2);
+		failed.pauseSimulation(); failed.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.enabled = true; settings.systemsStepWorldTicks = 6;
+		require(failed.configureStationSystems(settings, true), "Coarse failure fixture refused");
+		failed.resumeSimulation();
+		require(failed.advanceTick(), "Coarse failure prefix failed");
+		auto const committed = failed.getStationSystemsSnapshot();
+		while (!failed.isSimulationPaused())
+		{
+			if (!failed.advanceTick()) break;
+			require(failed.getSimulationTick() * failed.getFixedTimestep() < 1,
+				"Coarse accounting error never reached coordinator failure path");
+		}
+		require(failed.isSimulationPaused() && !failed.getStationSystemsSnapshot().healthy,
+			"Station accounting error did not pause World");
+		auto const after = failed.getStationSystemsSnapshot();
+		require(after.elapsedSeconds == committed.elapsedSeconds && after.completedTicks == committed.completedTicks,
+			"Failed Station step published partial clock/counters");
+		require(failed.getStationSystemsDiagnostics().size() == 1,
+			"Coarse failure diagnostic missing");
+		failed.resumeSimulation();
+		require(!failed.advanceTick() && failed.isSimulationPaused()
+			&& failed.getStationSystemsDiagnostics().size() == 1, "Failed Station runtime was retried");
+	}
 	void lifecycle(smoke::Context const&)
 	{
 		core::World a("A", 2, 2), b("B", 2, 2);
@@ -497,6 +561,7 @@ namespace
 
 void registerStationCoreChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"clockIntegration", clockIntegration});
 	checks.push_back({"lifecycle", lifecycle});
 	checks.push_back({"batching", batching});
 	checks.push_back({"eventBound", eventBound});

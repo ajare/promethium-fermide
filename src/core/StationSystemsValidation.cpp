@@ -767,6 +767,9 @@ using namespace station_detail;
 		std::vector<std::string>* brokenReferences)
 	{
 		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		if (settings.systemsStepWorldTicks < 1 || settings.systemsStepWorldTicks > CORE_MAX_SYSTEMS_STEP_WORLD_TICKS)
+			return refuse("Station systemsStepWorldTicks " + std::to_string(settings.systemsStepWorldTicks)
+				+ " is outside allowed range [1, " + std::to_string(CORE_MAX_SYSTEMS_STEP_WORLD_TICKS) + "]");
 		// Draft-tolerant mode (#642): with a brokenReferences list supplied,
 		// an unresolvable reference is recorded and the entry carrying it
 		// stops being validated, so the draft opens with the reference shown

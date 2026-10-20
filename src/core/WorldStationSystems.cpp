@@ -1,5 +1,5 @@
 #include "core/World.h"
-#include "StationSystemsRuntime.h"
+#include "core/StationSystemsRuntime.h"
 
 namespace core
 {
@@ -16,7 +16,7 @@ namespace core
 		try
 		{
 			// Construct before mutation, including for source/budget errors.
-			auto runtime = settings.enabled ? std::make_unique<StationSystemsRuntime>(settings) : nullptr;
+			auto runtime = settings.enabled ? std::make_unique<StationSystemsRuntime>(settings, getFixedTimestep()) : nullptr;
 			if (mSimulationTick) resetSimulation();
 			mStationSystemsSettings = settings;
 			mStationSystemsRuntime = std::move(runtime);

@@ -19,6 +19,7 @@ int main(int argc, char** argv)
 	registerStationBatteryChecks(checks);
 	registerStationLogisticsChecks(checks);
 	registerStationCoreChecks(checks);
+	registerStationClockChecks(checks);
 	registerStationPortChecks(checks);
 	registerStationSeamChecks(checks);
 	registerStationPowerChecks(checks);

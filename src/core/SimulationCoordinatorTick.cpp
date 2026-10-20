@@ -10,7 +10,7 @@
 #include "core/BulkheadDoor.h"
 #include "core/BulkheadDoorEdge.h"
 #include "core/World.h"
-#include "StationSystemsRuntime.h"
+#include "core/StationSystemsRuntime.h"
 #include "core/Coordination.h"
 #include "core/Defines.h"
 #include "core/Edge.h"
@@ -730,8 +730,8 @@ namespace core
 		// deterministic startup/outcome callbacks enqueue commands; those commands
 		// are applied here before this tick can collect traversal intent.
 		if (!mWorld.mAgentBehaviourRuntime->runBoundary(mWorld)) return false;
-		if (mWorld.mStationSystemsRuntime && !mWorld.mStationSystemsRuntime->advance(
-			mWorld.mSimulationTick + 1, World::getFixedTimestep()))
+		if (mWorld.mStationSystemsRuntime && !mWorld.mStationSystemsRuntime->advanceTo(
+			static_cast<double>(mWorld.mSimulationTick + 1) * World::getFixedTimestep()))
 		{
 			mWorld.pauseSimulation();
 			return false;

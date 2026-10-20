@@ -1736,6 +1736,7 @@ namespace core
 		bool operator==(StationConnectionProperties const&) const = default;
 	};
 
+	inline constexpr uint32_t CORE_MAX_SYSTEMS_STEP_WORLD_TICKS = 600;
 	struct StationSystemsSettings
 	{
 		bool enabled{false};
@@ -1789,6 +1790,7 @@ namespace core
 		float trendRetentionSeconds{3600.0f};
 		// Sparse overrides: every connection has independent default properties.
 		std::map<StationConnectionKey, StationConnectionProperties> connections;
+		uint32_t systemsStepWorldTicks{1};
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// The installations registered with the shared availability contract
@@ -4042,6 +4044,7 @@ namespace core
 	{
 		bool enabled{false};
 		bool healthy{true};
+		// Legacy tick-named fields count Station steps, not World ticks.
 		uint64_t worldTick{0};
 		double elapsedSeconds{0};
 		std::array<uint64_t, 4> completedTicks{};

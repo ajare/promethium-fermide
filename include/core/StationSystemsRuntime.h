@@ -3,15 +3,18 @@
 
 namespace core
 {
-	// Private continuous scripting adapter, driven only by the coordinator.
+	// Station drive. The coordinator supplies target seconds in a World;
+	// standalone Station scenarios may drive the same boundary directly.
 	class StationSystemsRuntime
 	{
 	public:
-		explicit StationSystemsRuntime(StationSystemsSettings settings);
+		StationSystemsRuntime(StationSystemsSettings settings, float baseStepSeconds);
 		~StationSystemsRuntime();
 		StationSystemsRuntime(StationSystemsRuntime const&) = delete;
 		StationSystemsRuntime& operator=(StationSystemsRuntime const&) = delete;
-		bool advance(uint64_t worldTick, float fixedSeconds);
+		// Catch up using whole Station steps until elapsed >= target. Targets
+		// already reached are no-ops; invalid targets are rejected without mutation.
+		bool advanceTo(double simulatedSeconds);
 		StationSystemsSnapshot snapshot() const;
 		std::vector<StationSystemsEvent> const& events() const;
 		std::vector<StationTrendSeries> trends() const;
@@ -23,6 +26,7 @@ namespace core
 		StationQueryWork queryWork() const;
 		std::vector<StationSystemsDiagnostic> const& diagnostics() const;
 	private:
+		bool advanceStep();
 		struct Impl;
 		std::unique_ptr<Impl> mImpl;
 		uint64_t mRun{0};

@@ -13,7 +13,7 @@ namespace core
 	// history through the public snapshot. The violated subsystem is
 	// reported through `system` so the structured diagnostic names
 	// what failed (#553, completed for outages and events by #602).
-	bool StationSystemsRuntime::Impl::applyLedger(uint64_t tick, float seconds, std::string& system, std::string& violation)
+	bool StationSystemsRuntime::Impl::applyLedger(uint64_t tick, double seconds, std::string& system, std::string& violation)
 	{
 		system = "Resource transfer";
 		auto const committedTransfers = transfers;
@@ -126,7 +126,7 @@ namespace core
 		return false;
 	}
 
-	bool StationSystemsRuntime::Impl::runLedger(uint64_t tick, float seconds, std::string& system, std::string& violation)
+	bool StationSystemsRuntime::Impl::runLedger(uint64_t tick, double seconds, std::string& system, std::string& violation)
 	{
 	Tick scratch(*this, tick, seconds, system, violation);
 	if (!scratch.prepare()) return false;

@@ -1,11 +1,14 @@
 #pragma once
 #include "StationSystemsPhysics.h"
+#include "StationClock.h"
 
 namespace core
 {
 using namespace station_detail;
 	struct StationSystemsRuntime::Impl
 	{
+		Impl(uint32_t ratio, float baseSeconds) : clock(ratio, baseSeconds) {}
+		StationClock clock;
 		station_connections::Graph connectionGraph;
 		std::vector<StationConnectionSnapshot> connectionFlows;
 		double lastPoolGenerationKW{}, lastConnectionPowerLossKW{}, lastPoolResidualKW{};
@@ -1474,8 +1477,8 @@ using namespace station_detail;
 			double drawableNow, double elapsedSeconds);
 		void updateEndurance(uint64_t tick);
 		StationForecastSnapshot computeForecast(double asOfSeconds) const;
-		bool applyLedger(uint64_t tick, float seconds, std::string& system, std::string& violation);
-		bool runLedger(uint64_t tick, float seconds, std::string& system, std::string& violation);
+		bool applyLedger(uint64_t tick, double seconds, std::string& system, std::string& violation);
+		bool runLedger(uint64_t tick, double seconds, std::string& system, std::string& violation);
 		struct Tick;
 	};
 
@@ -1485,10 +1488,10 @@ using namespace station_detail;
 	{
 		Impl& runtime;
 		uint64_t tick;
-		float seconds;
+		double seconds;
 		std::string& system;
 		std::string& violation;
-		Tick(Impl& owner, uint64_t tick, float seconds, std::string& system, std::string& violation)
+		Tick(Impl& owner, uint64_t tick, double seconds, std::string& system, std::string& violation)
 			: runtime(owner), tick(tick), seconds(seconds), system(system), violation(violation),
 			  connections(owner.settings, owner.connectionGraph, seconds, owner.connectionFlows) {}
 		struct DueArrival
