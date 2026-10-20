@@ -4,6 +4,12 @@ namespace core
 {
 	bool StationSystemsRuntime::Impl::Tick::prepare()
 	{
+		if (runtime.prediction.active)
+		{
+			for (auto const& body : runtime.reservoirs) protectionReservoirStart.push_back(body.temperatureC);
+			for (auto const& body : runtime.atmospheres) protectionAtmosphereStart.push_back(body.temperatureC);
+			for (auto const& body : runtime.coolantLoops) protectionLoopStart.push_back(body.temperatureC);
+		}
 		previousStatus.reserve(runtime.transfers.size());
 		for (auto const& transfer : runtime.transfers) previousStatus.push_back(transfer.status);
 

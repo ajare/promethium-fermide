@@ -1,6 +1,7 @@
 #pragma once
 #include "StationSystemsPhysics.h"
 #include "StationClock.h"
+#include "StationProtectionPrediction.h"
 
 namespace core
 {
@@ -9,6 +10,7 @@ using namespace station_detail;
 	{
 		Impl(uint32_t ratio, float baseSeconds) : clock(ratio, baseSeconds) {}
 		StationClock clock;
+		ProtectionPrediction prediction;
 		station_connections::Graph connectionGraph;
 		std::vector<StationConnectionSnapshot> connectionFlows;
 		double lastPoolGenerationKW{}, lastConnectionPowerLossKW{}, lastPoolResidualKW{};
@@ -1701,6 +1703,17 @@ using namespace station_detail;
 		bool auditLedger();
 		void commitInventory();
 		bool generation();
+		std::vector<double> protectionReservoirStart, protectionAtmosphereStart, protectionLoopStart;
+		bool sinkQualified(size_t index, double maximum,
+			double minimum = -ProtectionPrediction::unbounded);
+		bool atmosphereQualified(size_t index, double minimum, double maximum);
+		void captureProtection();
+		std::string temperatureRefusal(std::string sampled) const
+		{
+			return runtime.prediction.active
+				? "current or predicted pre-step temperature is outside the qualified operating window"
+				: sampled;
+		}
 		bool protection();
 		bool thermal();
 		bool processing();

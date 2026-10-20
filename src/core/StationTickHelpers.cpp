@@ -432,6 +432,63 @@ namespace core
 				"the cold loop could actually deliver: unused work was returned to the pool";
 	}
 
+	bool StationSystemsRuntime::Impl::Tick::sinkQualified(size_t index, double maximum, double minimum)
+	{
+		return runtime.prediction.qualifies(ProtectionPrediction::Body::Reservoir, index,
+			runtime.reservoirs[index].temperatureC, minimum, maximum);
+	}
+
+	bool StationSystemsRuntime::Impl::Tick::atmosphereQualified(size_t index, double minimum, double maximum)
+	{
+		return runtime.prediction.qualifies(ProtectionPrediction::Body::Atmosphere, index,
+			runtime.atmospheres[index].temperatureC, minimum, maximum);
+	}
+
+	void StationSystemsRuntime::Impl::Tick::captureProtection()
+	{
+		if (!runtime.prediction.active) return;
+		for (size_t i = 0; i < runtime.reservoirs.size(); ++i)
+		{
+			auto const& r = runtime.reservoirs[i];
+			std::vector<double> rates{r.authored.absorbedHeatKW, r.lastHeatRoutedKW,
+				r.lastCondenserHeatKW, r.lastGeneratorHeatKW, r.lastElectrolysisHeatKW,
+				r.lastFuelCellHeatKW, r.lastSabatierHeatKW, r.lastMethaneProcessingHeatKW,
+				r.lastMicrobialHeatKW, r.lastBufferDischargeKW, -r.lastBufferChargeKW};
+			for (auto const& radiator : runtime.radiators)
+				if (radiator.reservoirIndex == i) rates.push_back(-radiator.lastRejectedKW);
+			// A star's aggregate exchange can hide opposing leaves. Bound both
+			// signs separately; the hub net also accounts for transport loss
+			// (hub cooling can exceed the heat delivered to its leaves).
+			double exchangeMagnitudeKW = 0;
+			for (auto const& loop : runtime.coolantLoops)
+				if (loop.reservoirIndex == i) exchangeMagnitudeKW += std::abs(loop.lastExchangeIntoLoopKW);
+			for (auto const& atmosphere : runtime.atmospheres)
+				if (atmosphere.reservoirIndex == i) exchangeMagnitudeKW += std::abs(atmosphere.lastExchangeIntoCompartmentKW);
+			rates.push_back(exchangeMagnitudeKW);
+			rates.push_back(-exchangeMagnitudeKW);
+			rates.push_back(r.lastLoopHeatKW + r.lastAtmosphereHeatKW);
+			runtime.prediction.include(ProtectionPrediction::Body::Reservoir, i,
+				protectionReservoirStart[i], r.temperatureC, r.authored.heatCapacityKJPerK, seconds, rates);
+		}
+		for (size_t i = 0; i < runtime.coolantLoops.size(); ++i)
+		{
+			auto const& loop = runtime.coolantLoops[i];
+			runtime.prediction.include(ProtectionPrediction::Body::Loop, i,
+				protectionLoopStart[i], loop.temperatureC,
+				loop.coolantKg * loop.authored.specificHeatKJPerKgK, seconds,
+				{loop.lastPumpSuppliedKW, loop.lastHeaterSuppliedKW, loop.lastExchangeIntoLoopKW,
+				 loop.lastCollectorHeatKW, -loop.lastChillerExtractionKW});
+		}
+		for (size_t i = 0; i < runtime.atmospheres.size(); ++i)
+		{
+			auto const& a = runtime.atmospheres[i];
+			runtime.prediction.include(ProtectionPrediction::Body::Atmosphere, i,
+				protectionAtmosphereStart[i], a.temperatureC, a.authored.thermalCapacityKJPerK, seconds,
+				{a.lastOccupantHeatKW, a.lastCrewHeatKW, a.lastCropHeatKW, a.lastAlgaeHeatKW,
+				 a.lastLatentHeatKW, a.lastExchangeIntoCompartmentKW});
+		}
+	}
+
 	bool StationSystemsRuntime::Impl::Tick::requireFinite(double value, std::string const& what)
 	{
 		if (std::isfinite(value)) return true;

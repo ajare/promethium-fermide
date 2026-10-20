@@ -89,65 +89,92 @@ namespace core
 		auto const committedRecoveryPending = lastRecoveryPending;
 		auto const committedRecoveringCount = lastRecoveringCount;
 		auto const committedRecoverySurgeKW = lastRecoverySurgeKW;
-		if (runLedger(tick, seconds, system, violation)) return true;
-		stores = committedStores;
-		constituentLoss = committedConstituentLoss;
-		unitLoss = committedUnitLoss;
-		constituentDelivered = committedConstituentDelivered;
-		unitDelivered = committedUnitDelivered;
-		unitCollected = committedUnitCollected;
-		unitHarvested = committedUnitHarvested;
-		constituentHarvested = committedConstituentHarvested;
-		connectionFlows = committedConnectionFlows;
-		lastPoolGenerationKW = committedPoolGeneration;
-		lastConnectionPowerLossKW = committedConnectionLoss;
-		lastPoolResidualKW = committedPoolResidual;
-		transfers = committedTransfers;
-		conversions = committedConversions;
-		loads = committedLoads;
-		solarArrays = committedSolarArrays;
-		batteries = committedBatteries;
-		deliveries = committedDeliveries;
-		wasteEjections = committedWasteEjections;
-		maintenanceJobs = committedMaintenanceJobs;
-		outages = committedOutages;
-		events = committedEvents;
-		reservoirs = committedReservoirs;
-		radiators = committedRadiators;
-		coolantLoops = committedCoolantLoops;
-		chillers = committedChillers;
-		thermalBuffers = committedThermalBuffers;
-		generators = committedGenerators;
-		atmospheres = committedAtmospheres;
-		airlockCycles = committedAirlockCycles;
-		crews = committedCrews;
-		waterCollectors = committedWaterCollectors;
-		waterTreatments = committedWaterTreatments;
-		electrolyzers = committedElectrolyzers;
-		co2Captures = committedCo2Captures;
-		fuelCells = committedFuelCells;
-		sabatierReactors = committedSabatierReactors;
-		methaneProcessors = committedMethaneProcessors;
-		microbialProcessors = committedMicrobialProcessors;
-		cropPopulations = committedCropPopulations;
-		algaeCultures = committedAlgaeCultures;
-		lastAvailableGenerationKW = committedAvailableGenerationKW;
-		lastBatteryShortfallKW = committedBatteryShortfallKW;
-		lastDispatchDemandKW = committedDispatchDemandKW;
-		lastDispatchTargetKW = committedDispatchTargetKW;
-		lastDispatchCommittedKW = committedDispatchCommittedKW;
-		lastDispatchShortfallKW = committedDispatchShortfallKW;
-		lastBackupEngaged = committedBackupEngaged;
-		lastReserveExhausted = committedReserveExhausted;
-		lastProtectedDemandKW = committedProtectedDemandKW;
-		lastProtectedSuppliedKW = committedProtectedSuppliedKW;
-		lastProtectedUnmetTotalKW = committedProtectedUnmetTotalKW;
-		lastProtectedServiceUnmet = committedProtectedServiceUnmet;
-		lastProtectedServices = committedProtectedServices;
-		lastRecoveryPending = committedRecoveryPending;
-		lastRecoveringCount = committedRecoveringCount;
-		lastRecoverySurgeKW = committedRecoverySurgeKW;
-		return false;
+		auto restore = [&]()
+		{
+			stores = committedStores;
+			constituentLoss = committedConstituentLoss;
+			unitLoss = committedUnitLoss;
+			constituentDelivered = committedConstituentDelivered;
+			unitDelivered = committedUnitDelivered;
+			unitCollected = committedUnitCollected;
+			unitHarvested = committedUnitHarvested;
+			constituentHarvested = committedConstituentHarvested;
+			connectionFlows = committedConnectionFlows;
+			lastPoolGenerationKW = committedPoolGeneration;
+			lastConnectionPowerLossKW = committedConnectionLoss;
+			lastPoolResidualKW = committedPoolResidual;
+			transfers = committedTransfers;
+			conversions = committedConversions;
+			loads = committedLoads;
+			solarArrays = committedSolarArrays;
+			batteries = committedBatteries;
+			deliveries = committedDeliveries;
+			wasteEjections = committedWasteEjections;
+			maintenanceJobs = committedMaintenanceJobs;
+			outages = committedOutages;
+			events = committedEvents;
+			reservoirs = committedReservoirs;
+			radiators = committedRadiators;
+			coolantLoops = committedCoolantLoops;
+			chillers = committedChillers;
+			thermalBuffers = committedThermalBuffers;
+			generators = committedGenerators;
+			atmospheres = committedAtmospheres;
+			airlockCycles = committedAirlockCycles;
+			crews = committedCrews;
+			waterCollectors = committedWaterCollectors;
+			waterTreatments = committedWaterTreatments;
+			electrolyzers = committedElectrolyzers;
+			co2Captures = committedCo2Captures;
+			fuelCells = committedFuelCells;
+			sabatierReactors = committedSabatierReactors;
+			methaneProcessors = committedMethaneProcessors;
+			microbialProcessors = committedMicrobialProcessors;
+			cropPopulations = committedCropPopulations;
+			algaeCultures = committedAlgaeCultures;
+			lastAvailableGenerationKW = committedAvailableGenerationKW;
+			lastBatteryShortfallKW = committedBatteryShortfallKW;
+			lastDispatchDemandKW = committedDispatchDemandKW;
+			lastDispatchTargetKW = committedDispatchTargetKW;
+			lastDispatchCommittedKW = committedDispatchCommittedKW;
+			lastDispatchShortfallKW = committedDispatchShortfallKW;
+			lastBackupEngaged = committedBackupEngaged;
+			lastReserveExhausted = committedReserveExhausted;
+			lastProtectedDemandKW = committedProtectedDemandKW;
+			lastProtectedSuppliedKW = committedProtectedSuppliedKW;
+			lastProtectedUnmetTotalKW = committedProtectedUnmetTotalKW;
+			lastProtectedServiceUnmet = committedProtectedServiceUnmet;
+			lastProtectedServices = committedProtectedServices;
+			lastRecoveryPending = committedRecoveryPending;
+			lastRecoveringCount = committedRecoveringCount;
+			lastRecoverySurgeKW = committedRecoverySurgeKW;
+		};
+		// Coarse steps are probed transactionally. Refusals only accumulate:
+		// reallocating a refused machine's power can expose another machine,
+		// so one preview is not sufficient. No trial counters, events, flows or
+		// inventories are published. Ratio 1 retains its original single pass.
+		prediction = {};
+		prediction.active = settings.systemsStepWorldTicks > 1;
+		for (;;)
+		{
+			prediction.begin();
+			auto const valid = runLedger(tick, seconds, system, violation);
+			auto const refined = prediction.refine();
+			if (!valid && !refined)
+			{
+				restore();
+				prediction = {};
+				return false;
+			}
+			if (!refined)
+			{
+				prediction = {};
+				return true;
+			}
+			restore();
+			violation.clear();
+			system = "Resource transfer";
+		}
 	}
 
 	bool StationSystemsRuntime::Impl::runLedger(uint64_t tick, double seconds, std::string& system, std::string& violation)
@@ -163,8 +190,9 @@ namespace core
 			Tick scratch(*this, tick, duration, system, violation, instant, true);
 			if (!scratch.prepare() || !scratch.generation() || !scratch.protection()
 				|| !scratch.thermal() || !scratch.processing() || !scratch.biology()
-				|| !scratch.atmosphere() || !scratch.auditPower() || !scratch.auditState()
-				|| !scratch.commitAndEvents()) return false;
+				|| !scratch.atmosphere()) return false;
+			scratch.captureProtection();
+			if (!scratch.auditPower() || !scratch.auditState() || !scratch.commitAndEvents()) return false;
 			committed(scratch);
 			return true;
 		};

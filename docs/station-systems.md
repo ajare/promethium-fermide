@@ -386,6 +386,31 @@ held receiver stock and all-loss flow. It also compares transition order across
 ratios. This is not certification of the other Station subsystems; the remaining
 #762 slices and invariance registry still govern that claim.
 
+### Rate-aware coarse protection (#771)
+
+Before committing a coarse step, the authoritative ledger predicts gross heating
+and cooling excursions across every integration interval. Unsafe thermal
+qualification is latched refused, predicted freeze crossings request heating,
+and the trial allocation is restored and repeated until admission is stable.
+Repeating matters because released power can make a different machine unsafe.
+Only the stable audited allocation, schedules and event history are published;
+ratio 1 retains its original single-pass sampled protection.
+
+`core::StationProtectionBounds` declares the protected margins and their evidence.
+The measured coarse protection ratio is **6**, covering each integer ratio 2--6.
+Thermal qualification allows only the existing 1e-9 C association margin, and
+inventory protection keeps its existing drawable/headroom caps. This is an
+admitted-work guarantee, not a temperature/pressure clamp: environmental,
+respiration, decay and retained heat continue to be accounted for even when work
+is refused. Freeze setpoint protection requires sufficient real heater capacity
+and electricity; shortages remain explicit protected Unmet demand. Reservoir and
+atmosphere condition alarms retain their existing semantics. All-observable
+convergence certification and editor presentation remain separate slices.
+
+See [the measurement evidence and reproduction command](tickets/771-rate-aware-protection.md)
+for the margin-tight thermal/biological fixtures, reallocation, gross-versus-net
+excursion, freeze shortage and conservation checks.
+
 ### Failure containment (#388)
 
 Diagnostics identify the attempted Station step (the World tick at ratio 1), failing system, bounded message

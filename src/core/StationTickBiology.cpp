@@ -127,9 +127,8 @@ namespace core
 			// compartment temperature sits at or above the minimum and
 			// below the maximum; outside it growth stops whole, but
 			// respiration below continues regardless.
-			crop.lastTemperatureEligible = compartment.temperatureC + 1e-9
-				>= crop.authored.minGrowingTemperatureC
-				&& compartment.temperatureC + 1e-9 < crop.authored.maxGrowingTemperatureC;
+			crop.lastTemperatureEligible = atmosphereQualified(crop.atmosphereIndex,
+				crop.authored.minGrowingTemperatureC, crop.authored.maxGrowingTemperatureC);
 			// The dry-mass basis: the organic balance of the declared
 			// composition is what growth builds and respiration burns;
 			// the bound nutrient fractions are drawn per kilogram of
@@ -190,11 +189,11 @@ namespace core
 			if (!crop.lastTemperatureEligible)
 			{
 				scale = 0.0;
-				limiter = compartment.temperatureC + 1e-9 < crop.authored.minGrowingTemperatureC
+				limiter = temperatureRefusal(compartment.temperatureC + 1e-9 < crop.authored.minGrowingTemperatureC
 					? "compartment '" + compartment.authored.id
 						+ "' is below the minimum growing temperature: the canopy is dormant"
 					: "compartment '" + compartment.authored.id
-						+ "' is at or above the maximum growing temperature: growth is heat-stopped";
+						+ "' is at or above the maximum growing temperature: growth is heat-stopped");
 			}
 			else if (crop.lastGrowthPotentialKg <= 0.0)
 			{
@@ -764,9 +763,8 @@ namespace core
 			auto const lightEnergyKJ = culture.lastLightSuppliedKW * tickSeconds;
 			auto const circulationEnergyKJ = culture.lastCirculationSuppliedKW * tickSeconds;
 			culture.lastGrowthPotentialKg = lightEnergyKJ * culture.authored.growthYieldKgPerKWh / 3600.0;
-			culture.lastTemperatureEligible = compartment.temperatureC + 1e-9
-				>= culture.authored.minGrowingTemperatureC
-				&& compartment.temperatureC + 1e-9 < culture.authored.maxGrowingTemperatureC;
+			culture.lastTemperatureEligible = atmosphereQualified(culture.atmosphereIndex,
+				culture.authored.minGrowingTemperatureC, culture.authored.maxGrowingTemperatureC);
 			// The dry-mass basis is the same shared lifecycle rule as
 			// the crops': the organic balance of the declared
 			// composition is what growth builds and respiration burns;
@@ -809,11 +807,11 @@ namespace core
 			if (!culture.lastTemperatureEligible)
 			{
 				scale = 0.0;
-				limiter = compartment.temperatureC + 1e-9 < culture.authored.minGrowingTemperatureC
+				limiter = temperatureRefusal(compartment.temperatureC + 1e-9 < culture.authored.minGrowingTemperatureC
 					? "compartment '" + compartment.authored.id
 						+ "' is below the minimum growing temperature: the culture is dormant"
 					: "compartment '" + compartment.authored.id
-						+ "' is at or above the maximum growing temperature: growth is heat-stopped";
+						+ "' is at or above the maximum growing temperature: growth is heat-stopped");
 			}
 			else if (culture.lastGrowthPotentialKg <= 0.0)
 			{

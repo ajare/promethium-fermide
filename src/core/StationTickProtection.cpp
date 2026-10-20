@@ -74,7 +74,7 @@ namespace core
 				? 0.0
 				: loop.authored.pumpPowerKW * fillFraction * loop.availabilityFactor;
 			auto const heaterDemandKW = !disabled
-				&& loop.temperatureC < loop.authored.freezeProtectionSetpointC
+				&& runtime.prediction.heatRequired(loopIndex, loop.temperatureC, loop.authored.freezeProtectionSetpointC)
 				? loop.authored.heaterCapacityKW : 0.0;
 			auto const requestedKW = pumpDemandKW + heaterDemandKW;
 			if (requestedKW <= 0.0) continue;
@@ -119,7 +119,6 @@ namespace core
 			auto const& chiller = runtime.chillers[chillerIndex];
 			if (!chiller.authored.criticalService) continue;
 			auto const& loop = runtime.coolantLoops[chiller.loopIndex];
-			auto const& sink = runtime.reservoirs[chiller.sinkIndex];
 			auto const disabled = chiller.authored.ratedCoolingCapacityKW <= 0.0;
 			auto const effectiveCoolingCapacityKW =
 				chiller.authored.ratedCoolingCapacityKW * chiller.availabilityFactor;
@@ -127,7 +126,7 @@ namespace core
 			auto const atSetpoint = (not disabled and not capacityDisabled)
 				&& loop.temperatureC <= chiller.authored.chilledSetpointC + 1e-9;
 			auto const sinkOver = (not disabled and not capacityDisabled)
-				&& sink.temperatureC + 1e-9 >= chiller.authored.maxCondensingTemperatureC;
+				&& !sinkQualified(chiller.sinkIndex, chiller.authored.maxCondensingTemperatureC);
 			if (disabled || capacityDisabled || atSetpoint || sinkOver) continue;
 			auto const disabledLoop = loop.coolantKg <= 0.0;
 			auto const loopFlowCapacityKgPerS = loop.authored.ratedFlowKgPerS

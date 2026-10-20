@@ -48,12 +48,10 @@ namespace core
 			// Cooling is qualified while the sink sits below the maximum
 			// sink temperature: at or above it the interface cannot
 			// accept the cell's process heat, so the cell cannot run.
-			auto const& sink = runtime.reservoirs[cell.sinkIndex];
-			cell.lastCoolingAvailable = sink.temperatureC + 1e-9
-				< cell.authored.maxSinkTemperatureC;
+			cell.lastCoolingAvailable = sinkQualified(cell.sinkIndex, cell.authored.maxSinkTemperatureC);
 			if (!cell.lastCoolingAvailable)
 			{
-				cell.lastBlockReason = "cooling is not qualified: sink at or above the maximum sink temperature";
+				cell.lastBlockReason = temperatureRefusal("cooling is not qualified: sink at or above the maximum sink temperature");
 				cell.status = StationTransferStatus::Rejected;
 				continue;
 			}
@@ -402,12 +400,10 @@ namespace core
 			// Cooling is qualified while the sink sits below the maximum
 			// sink temperature: at or above it the interface cannot
 			// accept the reactor's dose and reaction heat.
-			auto const& sink = runtime.reservoirs[reactor.sinkIndex];
-			reactor.lastCoolingAvailable = sink.temperatureC + 1e-9
-				< reactor.authored.maxSinkTemperatureC;
+			reactor.lastCoolingAvailable = sinkQualified(reactor.sinkIndex, reactor.authored.maxSinkTemperatureC);
 			if (!reactor.lastCoolingAvailable)
 			{
-				reactor.lastBlockReason = "cooling is not qualified: sink at or above the maximum sink temperature";
+				reactor.lastBlockReason = temperatureRefusal("cooling is not qualified: sink at or above the maximum sink temperature");
 				reactor.status = StationTransferStatus::Rejected;
 				continue;
 			}
@@ -581,12 +577,10 @@ namespace core
 			}
 			auto const tickSeconds = static_cast<double>(seconds);
 			auto const fullKg = processor.authored.rateKgPerS * tickSeconds;
-			auto const& sink = runtime.reservoirs[processor.sinkIndex];
-			processor.lastCoolingAvailable = sink.temperatureC + 1e-9
-				< processor.authored.maxSinkTemperatureC;
+			processor.lastCoolingAvailable = sinkQualified(processor.sinkIndex, processor.authored.maxSinkTemperatureC);
 			if (!processor.lastCoolingAvailable)
 			{
-				processor.lastBlockReason = "cooling is not qualified: sink at or above the maximum sink temperature";
+				processor.lastBlockReason = temperatureRefusal("cooling is not qualified: sink at or above the maximum sink temperature");
 				processor.status = StationTransferStatus::Rejected;
 				continue;
 			}
@@ -867,15 +861,14 @@ namespace core
 			// temperature. Outside the window the stage is refused whole
 			// and spends nothing - the stress above already booked the
 			// condition cost of the excursion.
-			processor.lastTemperatureEligible = sink.temperatureC + 1e-9
-				>= processor.authored.minOperatingTemperatureC
-				&& sink.temperatureC + 1e-9 < processor.authored.maxSinkTemperatureC;
+			processor.lastTemperatureEligible = sinkQualified(processor.sinkIndex,
+				processor.authored.maxSinkTemperatureC, processor.authored.minOperatingTemperatureC);
 			if (!processor.lastTemperatureEligible)
 			{
-				processor.lastBlockReason = sink.temperatureC + 1e-9
+				processor.lastBlockReason = temperatureRefusal(sink.temperatureC + 1e-9
 					< processor.authored.minOperatingTemperatureC
 					? "below the minimum operating temperature: the culture is dormant"
-					: "cooling is not qualified: sink at or above the maximum sink temperature";
+					: "cooling is not qualified: sink at or above the maximum sink temperature");
 				processor.status = StationTransferStatus::Rejected;
 				continue;
 			}

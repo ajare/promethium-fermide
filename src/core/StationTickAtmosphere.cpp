@@ -876,8 +876,8 @@ namespace core
 			bool restartFeasible{true};
 			if (load.authored.heatOutputKW > 0.0 && load.hasHeatSink)
 			{
-				auto const& sink = runtime.reservoirs[load.heatSinkIndex];
-				if (sink.temperatureC + 1e-9 >= sink.authored.maxTemperatureC)
+				if (!sinkQualified(load.heatSinkIndex,
+					runtime.reservoirs[load.heatSinkIndex].authored.maxTemperatureC))
 					restartFeasible = false;
 			}
 			if (restartFeasible)
@@ -903,8 +903,8 @@ namespace core
 			{
 				if (load.hasHeatSink)
 				{
-					auto const& sink = runtime.reservoirs[load.heatSinkIndex];
-					if (sink.temperatureC + 1e-9 >= sink.authored.maxTemperatureC)
+					if (!sinkQualified(load.heatSinkIndex,
+						runtime.reservoirs[load.heatSinkIndex].authored.maxTemperatureC))
 					{
 						load.lastRecoveryHoldReason =
 							"restart held: heat sink at or above its maximum service temperature";

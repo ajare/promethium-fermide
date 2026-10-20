@@ -73,7 +73,8 @@ namespace core
 				pumpSuppliedKW += drawPower("Coolant loop", loop.authored.id, pumpDemandKW);
 			}
 			double heaterDemandKW = 0.0;
-			if (!disabled && loop.temperatureC < loop.authored.freezeProtectionSetpointC)
+			if (!disabled && runtime.prediction.heatRequired(loopIndex,
+				loop.temperatureC, loop.authored.freezeProtectionSetpointC))
 				heaterDemandKW = loop.authored.heaterCapacityKW;
 			double heaterSuppliedKW = 0.0;
 			if (protectedLoopHeaterKW[loopIndex] > 0.0 || coolantServiceProtected(loop))
@@ -262,11 +263,10 @@ namespace core
 				* chiller.availabilityFactor;
 			auto const capacityDisabled = effectiveCoolingCapacityKW <= 0.0;
 			auto const& loop = runtime.coolantLoops[chiller.loopIndex];
-			auto const& sink = runtime.reservoirs[chiller.sinkIndex];
 			chiller.lastAtSetpoint = !disabled && !capacityDisabled
 				&& loop.temperatureC <= chiller.authored.chilledSetpointC + 1e-9;
 			chiller.lastSinkOver = !disabled && !capacityDisabled
-				&& sink.temperatureC + 1e-9 >= chiller.authored.maxCondensingTemperatureC;
+				&& !sinkQualified(chiller.sinkIndex, chiller.authored.maxCondensingTemperatureC);
 			auto const coolingDemandKW = disabled || capacityDisabled || chiller.lastAtSetpoint
 				? 0.0 : effectiveCoolingCapacityKW;
 			chiller.lastCoolingDemandKW = coolingDemandKW;
@@ -302,8 +302,8 @@ namespace core
 				// power and books no heat, and its entire demand stays
 				// visible as unmet cold service.
 				chiller.lastAdmitted = false;
-				chiller.lastBlockReason = "condenser sink '" + chiller.authored.condenserReservoirId
-					+ "' is at or above the maximum condensing temperature";
+				chiller.lastBlockReason = temperatureRefusal("condenser sink '" + chiller.authored.condenserReservoirId
+					+ "' is at or above the maximum condensing temperature");
 				chiller.status = StationTransferStatus::Rejected;
 				// #580: the whole-machine refusal uses no work, so the
 				// whole reservation returns to the pool.

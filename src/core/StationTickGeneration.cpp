@@ -554,9 +554,7 @@ namespace core
 			auto const effectiveRatedKW = generator.authored.ratedOutputKW
 				* generator.availabilityFactor;
 			if (effectiveRatedKW <= 0.0) continue;
-			auto const sinkTemperatureC = runtime.reservoirs[generator.sinkIndex].temperatureC;
-			auto const coolingAvailable = sinkTemperatureC + 1e-9
-				< generator.authored.maxSinkTemperatureC;
+			auto const coolingAvailable = sinkQualified(generator.sinkIndex, generator.authored.maxSinkTemperatureC);
 			if (!coolingAvailable) continue;
 			auto const kwhPerUnit = energyUnitsToKWh(runtime.stores[generator.fuelStoreIndex].authored.unit);
 			auto const drawableKWh = std::max(0.0,
@@ -616,8 +614,7 @@ namespace core
 			auto ports = materialPorts("Fuel cell", cell.authored.id);
 			if (!dispatchAutomatic) continue;
 			if (cell.authored.ratedOutputKW <= 0.0) continue;
-			auto const sinkTemperatureC = runtime.reservoirs[cell.sinkIndex].temperatureC;
-			if (sinkTemperatureC + 1e-9 >= cell.authored.maxSinkTemperatureC) continue;
+			if (!sinkQualified(cell.sinkIndex, cell.authored.maxSinkTemperatureC)) continue;
 			auto const o2PerH2 = StationFuelCellOxygenMassPerHydrogenKg;
 			auto const elecKJPerKgH2 = cell.authored.efficiency
 				* StationElectrolysisChemicalEnergyHydrogenKJPerKg;
@@ -728,9 +725,8 @@ namespace core
 				cell.enduranceSeconds = referenceKW > 0.0
 					? usableH2Kg * elecKJPerKgH2 / referenceKW : 0.0;
 			};
-			auto const& sink = runtime.reservoirs[cell.sinkIndex];
 			cell.lastCoolingAvailable = !disabled
-				&& sink.temperatureC + 1e-9 < cell.authored.maxSinkTemperatureC;
+				&& sinkQualified(cell.sinkIndex, cell.authored.maxSinkTemperatureC);
 			if (disabled)
 			{
 				publishEndurance();
@@ -739,7 +735,7 @@ namespace core
 			}
 			if (!cell.lastCoolingAvailable)
 			{
-				cell.lastBlockReason = "cooling is not qualified: sink at or above the maximum sink temperature";
+				cell.lastBlockReason = temperatureRefusal("cooling is not qualified: sink at or above the maximum sink temperature");
 				cell.lastUnmetOutputKW = commanded;
 				publishEndurance();
 				cell.status = StationTransferStatus::Rejected;
@@ -888,12 +884,11 @@ namespace core
 					: generator.authored.commandedOutputKW);
 			generator.lastCommandedKW = commanded;
 			auto const dtSeconds = static_cast<double>(seconds);
-			auto const sinkTemperatureC = runtime.reservoirs[generator.sinkIndex].temperatureC;
 			// Cooling is qualified while the sink is below the maximum
 			// sink temperature: at or above it the interface cannot
 			// accept the generator's heat, so the generator cannot run.
 			auto const coolingAvailable = !disabled
-				&& sinkTemperatureC + 1e-9 < generator.authored.maxSinkTemperatureC;
+				&& sinkQualified(generator.sinkIndex, generator.authored.maxSinkTemperatureC);
 			auto const kwhPerUnit = energyUnitsToKWh(runtime.stores[generator.fuelStoreIndex].authored.unit);
 			if (coolingAvailable && commanded > 0.0)
 			{
@@ -936,7 +931,7 @@ namespace core
 					// generator produces nothing, so its own output
 					// can never appear in the pool that starts it.
 					if (!coolingAvailable)
-						generator.lastBlockReason = "cooling is not qualified: sink at or above the maximum sink temperature";
+						generator.lastBlockReason = temperatureRefusal("cooling is not qualified: sink at or above the maximum sink temperature");
 					else if (drawableKWh <= 0.0)
 						generator.lastBlockReason = "no fuel is drawable above the protected reserve";
 					else if (startupRequiredKJ > 0.0
