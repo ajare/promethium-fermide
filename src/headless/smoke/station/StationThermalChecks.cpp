@@ -164,7 +164,7 @@ namespace
 				{ reservoir("cabin", "moderate", 100.0, 20.0, 0.0, 100.0, 2.0) }, {});
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(3600), "Analytic heating run failed");
+			require(smoke::station::advanceSeconds(world, 60.0), "Analytic heating run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 
 			require(snap.thermal.reservoirs.size() == 1
@@ -191,7 +191,7 @@ namespace
 				{ radiator("panel", "panel-host", 1000.0, 0.9, 0.8, -270.0) });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTick(), "Single-tick thermal run failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "Single-tick thermal run failed");
 			auto const temperatureK = 20.0 + core::StationCelsiusOffset;
 			auto const sinkK = -270.0 + core::StationCelsiusOffset;
 			auto const expectedRejection = 0.9 * 0.8 * 1000.0
@@ -220,7 +220,7 @@ namespace
 			double previousRejection = std::numeric_limits<double>::max();
 			for (int chunk = 0; chunk < 12; ++chunk)
 			{
-				require(world.advanceTicks(300), "Cooling run failed");
+				require(smoke::station::advanceSeconds(world, 5.0), "Cooling run failed");
 				auto const snap = world.getStationSystemsSnapshot();
 				auto const temperature = snap.thermal.reservoirs[0].temperatureC;
 				auto const rejection = snap.thermal.reservoirs[0].lastRejectedKW;
@@ -264,7 +264,7 @@ namespace
 				{ field }, { routed, direct });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(3600), "Routing run failed");
+			require(smoke::station::advanceSeconds(world, 60.0), "Routing run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(approx(snap.power.loads[0].heatRoutedKW, 2.0)
 				&& approx(snap.power.loads[0].heatExportedKW, 0.0)
@@ -305,7 +305,7 @@ namespace
 				require(ok, diagnostic.c_str());
 			}
 			hot.resumeSimulation(); cold.resumeSimulation();
-			require(hot.advanceTicks(1800) && cold.advanceTicks(1800), "Profile run failed");
+			require(smoke::station::advanceSeconds(hot, 30.0) && smoke::station::advanceSeconds(cold, 30.0), "Profile run failed");
 			require(approx(hot.getStationSystemsSnapshot().thermal.reservoirs[0].temperatureC, 20.9, 1e-6),
 				"Hot profile did not warm the reservoir as declared");
 			require(cold.getStationSystemsSnapshot().thermal.reservoirs[0].temperatureC == 20.0
@@ -338,7 +338,7 @@ namespace
 				require(ok, diagnostic.c_str());
 			}
 			steady.resumeSimulation();
-			require(steady.advanceTicks(600), "Steady thermal run failed");
+			require(smoke::station::advanceSeconds(steady, 10.0), "Steady thermal run failed");
 			batched.resumeSimulation();
 			batched.setSimulationTimeScale(2.0f);
 			batched.update(5.0f);
@@ -356,7 +356,7 @@ namespace
 				{ reservoir("cabin", "moderate", 100.0, 20.0, 10.0, 21.0, 1.0) }, {});
 			require(ok, diagnostic.c_str());
 			hot.resumeSimulation();
-			require(hot.advanceTicks(9000), "Overheat run failed");
+			require(smoke::station::advanceSeconds(hot, 150.0), "Overheat run failed");
 			auto const snap = hot.getStationSystemsSnapshot();
 			require(snap.thermal.reservoirs[0].aboveLimit
 				&& !snap.thermal.reservoirs[0].belowLimit
@@ -371,7 +371,7 @@ namespace
 				{ radiator("big", "cabin", 20000.0, 1.0, 1.0, -270.0) });
 			require(coldOk, coldDiagnostic.c_str());
 			cold.resumeSimulation();
-			require(cold.advanceTicks(6000), "Overcool run failed");
+			require(smoke::station::advanceSeconds(cold, 100.0), "Overcool run failed");
 			auto const coldSnap = cold.getStationSystemsSnapshot();
 			require(coldSnap.thermal.reservoirs[0].belowLimit
 				&& !coldSnap.thermal.reservoirs[0].aboveLimit,
@@ -423,7 +423,7 @@ namespace
 				{ field }, { shop });
 			require(ok, diagnostic.c_str());
 			sandbox.resumeSimulation();
-			require(sandbox.advanceTicks(120),
+			require(smoke::station::advanceSeconds(sandbox, 2.0),
 				"Bundled Lua thermal mirror failed its in-sandbox assertions");
 			core::setStationSystemsSourceLoader({});
 		}
@@ -573,7 +573,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "nominal coolant run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "nominal coolant run failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
 			require(snapshot.coolantLoops.size() == 1, "loop snapshot missing");
 			auto const& loopSnap = snapshot.coolantLoops[0];
@@ -618,7 +618,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "power-limited coolant run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "power-limited coolant run failed");
 			auto const& loopSnap = world.getStationSystemsSnapshot().coolantLoops[0];
 			require(approx(loopSnap.pumpDemandKW, 1.2) && approx(loopSnap.pumpSuppliedKW, 0.6),
 				"pump draw did not follow the starved pool");
@@ -641,7 +641,7 @@ namespace
 				{ loop("loop", "bus", 10, 10, 4, 3.0, 5.0, 1.0, 2.0, 0.0, 4.0) });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "blackout coolant run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "blackout coolant run failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
 			auto const& loopSnap = snapshot.coolantLoops[0];
 			require(approx(loopSnap.pumpDemandKW, 1.0) && loopSnap.pumpSuppliedKW == 0.0
@@ -676,7 +676,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "coolant-loss run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "coolant-loss run failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
 			auto const& dry = snapshot.coolantLoops[0];
 			require(dry.disabled && dry.coolantKg == 0.0 && dry.fillFraction == 0.0
@@ -712,7 +712,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "zero-rated-flow coolant run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "zero-rated-flow coolant run failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
 			auto const& loopSnap = snapshot.coolantLoops[0];
 			require(approx(loopSnap.fillFraction, 1.0) && !loopSnap.disabled
@@ -754,7 +754,7 @@ namespace
 			// 50 simulated seconds lift it from 0 to the 5 C setpoint,
 			// plus a few ticks past the crossing to show the thermostat
 			// drops its demand to zero once the setpoint is held.
-			require(world.advanceTicks(static_cast<uint64_t>(50.0 / dt + 0.5) + 4),
+			require(smoke::station::advanceSeconds(world, 50.0666666666667),
 				"freeze-heating run failed");
 			auto const& loopSnap = world.getStationSystemsSnapshot().coolantLoops[0];
 			require(approx(loopSnap.loopTemperatureC, 5.0, 1e-3),
@@ -789,7 +789,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "isolated-inventory run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "isolated-inventory run failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
 			require(approx(snapshot.coolantLoops[0].coolantKg, 100.0)
 				&& snapshot.coolantLoops[0].flowKgPerS > 0.0
@@ -825,7 +825,7 @@ namespace
 				{}, { bank });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "battery freeze-heating run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "battery freeze-heating run failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
 			require(approx(snapshot.coolantLoops[0].heaterSuppliedKW, 4.0),
 				"freeze heater did not run off stored energy");
@@ -855,7 +855,7 @@ namespace
 				{ field }, { bank });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "surplus-ordering run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "surplus-ordering run failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
 			require(approx(snapshot.coolantLoops[0].pumpSuppliedKW, 1.0),
 				"pump did not take its full demand from generation");
@@ -881,7 +881,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(static_cast<uint64_t>(6.0 / dt + 0.5)), "eclipse coolant run failed");
+			require(smoke::station::advanceSeconds(world, 6.0), "eclipse coolant run failed");
 			require(sawEvent(world, "circulating") && sawEvent(world, "circulation lost"),
 				"circulation loss and recovery not announced across the eclipse boundary");
 			require(sawEvent(world, "freeze-protection setpoint"),
@@ -914,7 +914,7 @@ namespace
 			auto previousGapK = 20.0;
 			for (int tick = 0; tick < 120; ++tick)
 			{
-				require(world.advanceTicks(1), "stiff-exchange tick failed");
+				require(smoke::station::advanceSeconds(world, 0.0166666666667), "stiff-exchange tick failed");
 				auto const& snapshot = world.getStationSystemsSnapshot();
 				auto const& loopSnap = snapshot.coolantLoops[0];
 				auto const& bus = snapshot.thermal.reservoirs[0];
@@ -977,7 +977,7 @@ namespace
 			world.resumeSimulation();
 			for (int tick = 0; tick < 60; ++tick)
 			{
-				require(world.advanceTicks(1), "shared-reservoir tick failed");
+				require(smoke::station::advanceSeconds(world, 0.0166666666667), "shared-reservoir tick failed");
 				auto const& snapshot = world.getStationSystemsSnapshot();
 				auto const& bus = snapshot.thermal.reservoirs[0];
 				for (auto const& loopSnap : snapshot.coolantLoops)
@@ -1048,7 +1048,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			sandboxStiff.resumeSimulation();
-			require(sandboxStiff.advanceTicks(60),
+			require(smoke::station::advanceSeconds(sandboxStiff, 1.0),
 				"Bundled Lua implicit exchange failed its in-sandbox assertions");
 			require(std::abs(sandboxStiff.getStationSystemsSnapshot()
 					.coolantLoops[0].loopTemperatureC - 20.0) < 20.0
@@ -1069,7 +1069,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "replay original run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "replay original run failed");
 			auto const expected = world.getStationSystemsSnapshot();
 			auto const expectedEvents = world.getStationSystemsEvents();
 			require(expected.coolantLoops.size() == 2, "replay scenario snapshot incomplete");
@@ -1078,7 +1078,7 @@ namespace
 				|| world.getStationSystemsSnapshot().elapsedSeconds == 0.0,
 				"reset did not clear the coolant runtime");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "replay replay run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "replay replay run failed");
 			require(world.getStationSystemsSnapshot() == expected,
 				"coolant scenario is not deterministic across Reset");
 			require(world.getStationSystemsEvents() == expectedEvents,

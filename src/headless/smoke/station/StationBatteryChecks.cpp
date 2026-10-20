@@ -52,7 +52,7 @@ namespace
 			{battery("b", 1.0, 1.0, 1.0, 1.0, 1.0)}).first,
 			"One-hour discharge scenario refused");
 		oneHour.resumeSimulation();
-		require(oneHour.advanceTicks(hourTicks + 1), "One-hour discharge run failed");
+		require(smoke::station::advanceSeconds(oneHour, 3600.01666666667), "One-hour discharge run failed");
 		{
 			auto const snap = oneHour.getStationSystemsSnapshot();
 			auto const& b = snap.power.batteries[0];
@@ -78,7 +78,7 @@ namespace
 			{battery("b", 1.0, 1.0, 0.0, 1.0, 1.0)}).first,
 			"One-hour charge scenario refused");
 		oneHourCharge.resumeSimulation();
-		require(oneHourCharge.advanceTicks(hourTicks + 1), "One-hour charge run failed");
+		require(smoke::station::advanceSeconds(oneHourCharge, 3600.01666666667), "One-hour charge run failed");
 		{
 			auto const snap = oneHourCharge.getStationSystemsSnapshot();
 			auto const& b = snap.power.batteries[0];
@@ -104,7 +104,7 @@ namespace
 			{battery("b", 2.0, 2.0, 0.0, 1.0, 1.0, 0.5, 1.0)}).first,
 			"One-hour charge-loss scenario refused");
 		hourChargeLoss.resumeSimulation();
-		require(hourChargeLoss.advanceTicks(hourTicks), "One-hour charge-loss run failed");
+		require(smoke::station::advanceSeconds(hourChargeLoss, 3600.0), "One-hour charge-loss run failed");
 		{
 			auto const& b = hourChargeLoss.getStationSystemsSnapshot().power.batteries[0];
 			require(hourTight(b.storedKWh, 0.5)
@@ -126,7 +126,7 @@ namespace
 			{battery("b", 4.0, 4.0, 4.0, 1.0, 1.0, 1.0, 0.5)}).first,
 			"One-hour discharge-loss scenario refused");
 		hourDischargeLoss.resumeSimulation();
-		require(hourDischargeLoss.advanceTicks(hourTicks), "One-hour discharge-loss run failed");
+		require(smoke::station::advanceSeconds(hourDischargeLoss, 3600.0), "One-hour discharge-loss run failed");
 		{
 			auto const& b = hourDischargeLoss.getStationSystemsSnapshot().power.batteries[0];
 			require(hourTight(b.storedKWh, 2.0)
@@ -149,7 +149,7 @@ namespace
 			{battery("bank", 10.0, 8.0, 2.0, 2.0, 4.0)}).first, "Charging scenario refused");
 		charging.markSaved();
 		charging.resumeSimulation();
-		require(charging.advanceTicks(215999), "Charging run failed");
+		require(smoke::station::advanceSeconds(charging, 3599.98333333), "Charging run failed");
 		{
 			auto const snap = charging.getStationSystemsSnapshot();
 			require(snap.power.batteries.size() == 1
@@ -164,7 +164,7 @@ namespace
 				"Reserve policy not visible in the snapshot");
 			require(!charging.isModified(), "Battery charging dirtied the authored document");
 		}
-		require(charging.advanceTicks(648003), "Charging-to-full run failed");
+		require(smoke::station::advanceSeconds(charging, 10800.05), "Charging-to-full run failed");
 		{
 			auto const snap = charging.getStationSystemsSnapshot();
 			require(approx(snap.power.batteries[0].storedKWh, 10.0)
@@ -200,7 +200,7 @@ namespace
 				{battery("bank", 6.0, 4.0, 4.0, 2.0, 4.0)}).first, "Eclipse battery scenario refused");
 			eclipse.resumeSimulation();
 			// Half an hour of sun: the battery has taken exactly 1 kWh.
-			require(eclipse.advanceTicks(108000), "Eclipse sun leg failed");
+			require(smoke::station::advanceSeconds(eclipse, 1800.0), "Eclipse sun leg failed");
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(hourTight(snap.power.batteries[0].storedKWh, 5.0)
@@ -209,7 +209,7 @@ namespace
 					"Battery did not charge 1 kWh in half an hour of sun");
 			}
 			// A full hour of sun: the battery reaches nameplate exactly.
-			require(eclipse.advanceTicks(108002), "Sun top-up leg failed");
+			require(smoke::station::advanceSeconds(eclipse, 1800.03333333), "Sun top-up leg failed");
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(hourTight(snap.power.batteries[0].storedKWh, 6.0)
@@ -218,7 +218,7 @@ namespace
 			}
 			// One settled sun tick with no headroom: nothing is drawn and
 			// the whole surplus stays visible.
-			require(eclipse.advanceTick(), "Saturated sun tick failed");
+			require(smoke::station::advanceSeconds(eclipse, 0.0166666666667), "Saturated sun tick failed");
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(approx(snap.power.batteryChargeKW, 0.0)
@@ -227,7 +227,7 @@ namespace
 			}
 			// Half an hour into eclipse: the battery carries 4 kW of the
 			// 6 kW load through the shared pool and has given exactly 2 kWh.
-			require(eclipse.advanceTicks(215996), "Eclipse ride-through leg failed");
+			require(smoke::station::advanceSeconds(eclipse, 3599.93333333), "Eclipse ride-through leg failed");
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(approx(snap.power.availableGenerationKW, 0.0)
@@ -248,7 +248,7 @@ namespace
 			}
 			// One full hour into eclipse: the usable energy is gone; the
 			// reserve floor stops the discharge exactly at 2 kWh.
-			require(eclipse.advanceTicks(108011), "Eclipse exhaustion leg failed");
+			require(smoke::station::advanceSeconds(eclipse, 1800.18333333), "Eclipse exhaustion leg failed");
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(hourTight(snap.power.batteries[0].storedKWh, 2.0)
@@ -260,7 +260,7 @@ namespace
 			// The rest of the eclipse: the exhausted battery delivers
 			// nothing and the whole load stays unmet with the shortfall
 			// visible.
-			require(eclipse.advanceTicks(107989), "Post-exhaustion leg failed");
+			require(smoke::station::advanceSeconds(eclipse, 1799.81666667), "Post-exhaustion leg failed");
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(approx(snap.power.batteries[0].storedKWh, 2.0)
@@ -273,7 +273,7 @@ namespace
 			}
 			// Sunrise: charging resumes and the battery recovers above the
 			// reserve floor.
-			require(eclipse.advanceTick(), "Sunrise tick failed");
+			require(smoke::station::advanceSeconds(eclipse, 0.0166666666667), "Sunrise tick failed");
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(!snap.power.batteries[0].atReserve
@@ -284,7 +284,7 @@ namespace
 			}
 			// Half an hour of sun brings it back to 3 kWh, then replay
 			// the whole run identically after reset.
-			require(eclipse.advanceTicks(107999), "Cycle continuation failed");
+			require(smoke::station::advanceSeconds(eclipse, 1799.98333333), "Cycle continuation failed");
 			eclipse.pauseSimulation();
 			auto const expected = eclipse.getStationSystemsSnapshot();
 			auto const expectedEvents = eclipse.getStationSystemsEvents();
@@ -293,7 +293,7 @@ namespace
 				"Recovery leg did not store 1 kWh");
 			eclipse.resetSimulation();
 			eclipse.resumeSimulation();
-			require(eclipse.advanceTicks(755999), "Eclipse battery replay failed");
+			require(smoke::station::advanceSeconds(eclipse, 12599.9833333), "Eclipse battery replay failed");
 			require(eclipse.getStationSystemsSnapshot() == expected
 				&& eclipse.getStationSystemsEvents() == expectedEvents,
 				"Repeated eclipse battery cycles not deterministic after reset");
@@ -309,7 +309,7 @@ namespace
 			{load("lamp", 3.0, 0)},
 			{battery("cell", 10.0, 10.0, 10.0, 0.0, 1.0)}).first, "Power-limit scenario refused");
 		limited.resumeSimulation();
-		require(limited.advanceTicks(216000), "Power-limit run failed");
+		require(smoke::station::advanceSeconds(limited, 3600.0), "Power-limit run failed");
 		{
 			auto const snap = limited.getStationSystemsSnapshot();
 			require(approx(snap.power.batteryDischargeKW, 1.0)
@@ -335,7 +335,7 @@ namespace
 			{battery("bank", 10.0, 10.0, 2.0, 2.0, 4.0, 0.5, 0.5)}).first,
 			"Charge-loss scenario refused");
 		losses.resumeSimulation();
-		require(losses.advanceTicks(216000), "Charge-loss run failed");
+		require(smoke::station::advanceSeconds(losses, 3600.0), "Charge-loss run failed");
 		{
 			auto const snap = losses.getStationSystemsSnapshot();
 			require(approx(snap.power.batteries[0].chargedKWh, 1.0)
@@ -359,7 +359,7 @@ namespace
 			{battery("cell", 10.0, 10.0, 10.0, 0.0, 100.0, 1.0, 0.5)}).first,
 			"Discharge-loss scenario refused");
 		discharging.resumeSimulation();
-		require(discharging.advanceTicks(216000), "Discharge-loss run failed");
+		require(smoke::station::advanceSeconds(discharging, 3600.0), "Discharge-loss run failed");
 		{
 			auto const snap = discharging.getStationSystemsSnapshot();
 			require(approx(snap.power.batteries[0].dischargedKWh, 2.0)
@@ -384,7 +384,7 @@ namespace
 			{battery("b", 1.0, 1.0, 1.0, 1.0, 1.0)}).first,
 			"One-second discharge scenario refused");
 		oneSecond.resumeSimulation();
-		require(oneSecond.advanceTicks(60), "One-second discharge run failed");
+		require(smoke::station::advanceSeconds(oneSecond, 1.0), "One-second discharge run failed");
 		{
 			auto const snap = oneSecond.getStationSystemsSnapshot();
 			auto const& b = snap.power.batteries[0];
@@ -404,7 +404,7 @@ namespace
 			{battery("b", 2.0, 2.0, 0.0, 1.0, 1.0)}).first,
 			"One-second charge scenario refused");
 		oneSecondCharge.resumeSimulation();
-		require(oneSecondCharge.advanceTicks(60), "One-second charge run failed");
+		require(smoke::station::advanceSeconds(oneSecondCharge, 1.0), "One-second charge run failed");
 		{
 			auto const snap = oneSecondCharge.getStationSystemsSnapshot();
 			auto const& b = snap.power.batteries[0];
@@ -423,7 +423,7 @@ namespace
 			{load("lamp", 1.0, 0)},
 			{battery("dead", 10.0, 0.0, 5.0, 5.0, 5.0)}).first, "Zero-capacity scenario refused");
 		zeroed.resumeSimulation();
-		require(zeroed.advanceTicks(60), "Zero-capacity run failed");
+		require(smoke::station::advanceSeconds(zeroed, 1.0), "Zero-capacity run failed");
 		{
 			auto const snap = zeroed.getStationSystemsSnapshot();
 			require(snap.power.batteries[0].disabled
@@ -452,7 +452,7 @@ namespace
 			// 59 s of darkness: the 3 kW discharge cap is shared, the
 			// critical floor first. Energy moved is power x hours:
 			// 3 kW x 59/3600 h = 0.0491667 kWh (#547).
-			require(critical.advanceTicks(3540), "Critical-battery run failed");
+			require(smoke::station::advanceSeconds(critical, 59.0), "Critical-battery run failed");
 			{
 				auto const snap = critical.getStationSystemsSnapshot();
 				require(snap.power.loads[0].id == "workshop"
@@ -476,7 +476,7 @@ namespace
 			{battery("cell", 10.0, 10.0, 10.0, 0.0, 3.0)}).first,
 			"Rigid-load battery scenario refused");
 		rigid.resumeSimulation();
-		require(rigid.advanceTicks(60), "Rigid-load run failed");
+		require(smoke::station::advanceSeconds(rigid, 1.0), "Rigid-load run failed");
 		{
 			auto const snap = rigid.getStationSystemsSnapshot();
 			require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
@@ -497,7 +497,7 @@ namespace
 		// The 1 kWh drawable slice empties at 20 kW in 180 s:
 		// 20 kW x 180/3600 h = 1 kWh, landing exactly on the
 		// reserve floor (#547).
-		require(reserve.advanceTicks(10810), "Reserve-floor run failed");
+		require(smoke::station::advanceSeconds(reserve, 180.166666667), "Reserve-floor run failed");
 		{
 			auto const snap = reserve.getStationSystemsSnapshot();
 			require(approx(snap.power.batteries[0].storedKWh, 2.0)
@@ -525,7 +525,7 @@ namespace
 			{battery("bank", 10.0, 8.0, 8.0, 2.0, 4.0)}).first,
 			"Battery descriptors did not cross the Lua boundary intact");
 		boundary.resumeSimulation();
-		require(boundary.advanceTicks(60), "Battery boundary fixture run failed");
+		require(smoke::station::advanceSeconds(boundary, 1.0), "Battery boundary fixture run failed");
 		core::setStationSystemsSourceLoader([] {
 			return "return function(name, stores, transfers, conversions, solar, loads, batteries) "
 				"assert(#batteries == 99, 'expected 99 batteries') "

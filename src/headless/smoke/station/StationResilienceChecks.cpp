@@ -134,7 +134,7 @@ void dispatch(smoke::Context const&)
 		require(world.configureStationSystems(settings, false, &diagnostic),
 			("automatic dispatch rig refused: " + diagnostic).c_str());
 		world.resumeSimulation();
-		require(world.advanceTicks(ticks), "automatic dispatch run failed");
+		require(smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0), "automatic dispatch run failed");
 	};
 	auto fullRig = [&](core::StationDispatchMode mode, double diesel, double dieselReserve)
 	{
@@ -340,7 +340,7 @@ void dispatch(smoke::Context const&)
 		}
 		// Past startup and the ramp: the generator takes the load back
 		// and the backup stands down.
-		require(world.advanceTicks(600), "bootstrap run failed after startup");
+		require(smoke::station::advanceSeconds(world, 10.0), "bootstrap run failed after startup");
 		{
 			auto const& snap = world.getStationSystemsSnapshot();
 			auto const& power = snap.power;
@@ -501,7 +501,7 @@ void dispatch(smoke::Context const&)
 		bool sawMidCrankTrip = false;
 		for (int tick = 0; tick < 238; ++tick)
 		{
-			require(world.advanceTicks(1), "trip run failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "trip run failed");
 			auto const& p = world.getStationSystemsSnapshot().power;
 			if (p.generators[0].blockReason.find("cooling lost during startup")
 				!= std::string::npos)
@@ -622,7 +622,7 @@ void protectedServices(smoke::Context const&)
 	};
 	auto const runOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
 	{
-		if (world.advanceTicks(ticks)) return;
+		if (smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0)) return;
 		auto const diagnostics = world.getStationSystemsDiagnostics();
 		std::fprintf(stderr, "%s failed: %s\n", what,
 			diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());
@@ -1115,7 +1115,7 @@ void protectedServices(smoke::Context const&)
 		if (!world->configureStationSystems(settings, false, &diagnostic))
 			throw std::runtime_error("competing protected rig refused: " + diagnostic);
 		world->resumeSimulation();
-		if (!world->advanceTicks(10))
+		if (!smoke::station::advanceSeconds(world, 0.166666666667))
 			throw std::runtime_error("competing protected run failed");
 		return world;
 	};
@@ -1653,7 +1653,7 @@ void recovery(smoke::Context const& context)
 	};
 	auto const runOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
 	{
-		if (world.advanceTicks(ticks)) return;
+		if (smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0)) return;
 		auto const diagnostics = world.getStationSystemsDiagnostics();
 		std::fprintf(stderr, "%s failed: %s\n", what,
 			diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());
@@ -1917,7 +1917,7 @@ void recovery(smoke::Context const& context)
 		world.resumeSimulation();
 		for (uint64_t tick = 1; tick <= 1500; ++tick) // t = 25s, past the release point
 		{
-			if (!world.advanceTick())
+			if (!smoke::station::advanceSeconds(world, 0.0166666666667))
 			{
 				auto const diagnostics = world.getStationSystemsDiagnostics();
 				throw std::runtime_error(std::string("recovery G tick failed: ")

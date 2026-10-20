@@ -119,7 +119,7 @@ namespace
 			settings.deliveries = {delivery("drop", "tank", 25.0, 10.0)};
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(599), "pre-arrival run failed");
+			require(smoke::station::advanceSeconds(world, 9.98333333333), "pre-arrival run failed");
 			auto const before = world.getStationSystemsSnapshot();
 			require(before.deliveries.size() == 1 && before.deliveries[0].lastAccepted == 0.0
 				&& before.deliveries[0].occurrencesCompleted == 0
@@ -130,7 +130,7 @@ namespace
 				"the next arrival was not exposed before it fired");
 			require(before.hasNextDelivery && approx(before.nextDeliverySeconds, 10.0),
 				"the station-wide next delivery readout was wrong");
-			require(world.advanceTicks(1), "arrival tick failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "arrival tick failed");
 			auto const landed = world.getStationSystemsSnapshot();
 			require(landed.deliveries[0].occurrencesCompleted == 1
 				&& approx(landed.deliveries[0].lastAccepted, 25.0)
@@ -148,7 +148,7 @@ namespace
 			require(approx(balance.delivered, 25.0) && approx(balance.totalCurrent, 25.0)
 				&& balance.totalStarting == 0.0 && std::abs(balance.residual) < 1e-6,
 				"the per-unit boundary did not close over the delivered inflow");
-			require(world.advanceTicks(600), "post-arrival run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "post-arrival run failed");
 			auto const later = world.getStationSystemsSnapshot();
 			require(later.deliveries[0].occurrencesCompleted == 1
 				&& approx(later.stores[0].currentQualified, 25.0),
@@ -166,7 +166,7 @@ namespace
 				delivery("to-tight", "tight", 5.0, 1.0)};
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "capacity run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "capacity run failed");
 			auto const snapshot = world.getStationSystemsSnapshot();
 			require(approx(snapshot.stores[0].currentQualified, 10.0)
 				&& approx(snapshot.deliveries[0].lastAccepted, 0.0)
@@ -202,7 +202,7 @@ namespace
 			{
 				// The first arrival sits one whole period in; every later one
 				// is exactly one period (60 ticks) after the last.
-				require(world.advanceTicks(second == 1 ? 60 : 1), "recurrence tick failed");
+				require(smoke::station::advanceSeconds(world, second == 1 ? 1.0 : 0.0166666666667), "recurrence tick failed");
 				auto const snapshot = world.getStationSystemsSnapshot();
 				require(snapshot.deliveries[0].occurrencesCompleted == second
 					&& approx(snapshot.stores[0].currentQualified, static_cast<double>(second)),
@@ -211,7 +211,7 @@ namespace
 						static_cast<double>(second) + 1.0),
 					"the next recurrence was not exposed");
 				// Nothing fires between the occurrences.
-				require(world.advanceTicks(59), "between-tick run failed");
+				require(smoke::station::advanceSeconds(world, 0.983333333333), "between-tick run failed");
 				auto const between = world.getStationSystemsSnapshot();
 				require(between.deliveries[0].occurrencesCompleted == second
 					&& approx(between.stores[0].currentQualified, static_cast<double>(second)),
@@ -233,7 +233,7 @@ namespace
 				delivery("high", "tank", 4.0, 1.0, 0.0, 9)};
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "coincident run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "coincident run failed");
 			auto const snapshot = world.getStationSystemsSnapshot();
 			require(approx(snapshot.stores[0].currentQualified, 10.0), "the store overflowed");
 			// Results are published in declaration order; read them by id.
@@ -254,7 +254,7 @@ namespace
 			tieSettings.deliveries = {delivery("first", "tank", 2.0, 1.0), delivery("second", "tank", 2.0, 1.0)};
 			configure(tie, tieSettings);
 			tie.resumeSimulation();
-			require(tie.advanceTicks(60), "tie-break run failed");
+			require(smoke::station::advanceSeconds(tie, 1.0), "tie-break run failed");
 			auto const tied = tie.getStationSystemsSnapshot();
 			require(approx(tied.deliveries[0].lastAccepted, 2.0)
 				&& tied.deliveries[1].lastAccepted == 0.0
@@ -272,7 +272,7 @@ namespace
 			settings.deliveries = {delivery("held", "tank", 4.0, 1.0, 0.0, 0, false)};
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "held arrival run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "held arrival run failed");
 			auto const snapshot = world.getStationSystemsSnapshot();
 			require(snapshot.stores[0].currentQualified == 0.0
 				&& approx(snapshot.stores[0].currentUnqualified, 4.0),
@@ -299,7 +299,7 @@ namespace
 			settings.deliveries = {delivery("feed", "in", 10.0, 1.0)};
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "same-tick run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "same-tick run failed");
 			auto const snapshot = world.getStationSystemsSnapshot();
 			require(snapshot.stores[1].currentQualified > 0.0,
 				"material delivered this tick was not available to this tick's transfer");
@@ -325,7 +325,7 @@ namespace
 			settings.deliveries = {delivery("rations", "pantry", 20.0, 1.0)};
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "compound arrival run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "compound arrival run failed");
 			auto const snapshot = world.getStationSystemsSnapshot();
 			require(approx(snapshot.stores[0].currentQualified, 30.0),
 				"the compound delivery did not land in the store");
@@ -357,7 +357,7 @@ namespace
 			// inside the coordinator's per-update tick budget.
 			batched.update(2.5f);
 			stepped.resumeSimulation();
-			require(stepped.advanceTicks(600), "stepped reference run failed");
+			require(smoke::station::advanceSeconds(stepped, 10.0), "stepped reference run failed");
 			require(batched.getSimulationTick() == stepped.getSimulationTick(),
 				"batched and stepped runs advanced different tick counts");
 			require(batched.getStationSystemsSnapshot() == stepped.getStationSystemsSnapshot()
@@ -377,14 +377,14 @@ namespace
 			settings.deliveries = {delivery("pulse", "tank", 2.0, 1.0, 2.0)};
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(180), "first leg failed");			auto const firstLeg = world.getStationSystemsSnapshot();
+			require(smoke::station::advanceSeconds(world, 3.0), "first leg failed");			auto const firstLeg = world.getStationSystemsSnapshot();
 			world.pauseSimulation();
-			require(!world.advanceTick(), "a paused World ticked");
+			require(!smoke::station::advanceSeconds(world, 0.0166666666667), "a paused World ticked");
 			world.update(5.0f);
 			require(world.getStationSystemsSnapshot() == firstLeg,
 				"pause changed the delivery state");
 			world.resumeSimulation();
-			require(world.advanceTicks(180), "second leg failed");
+			require(smoke::station::advanceSeconds(world, 3.0), "second leg failed");
 			auto const twoLegs = world.getStationSystemsSnapshot();
 			auto const twoLegsEvents = world.getStationSystemsEvents();
 			require(twoLegs.deliveries[0].occurrencesCompleted == 3
@@ -396,7 +396,7 @@ namespace
 				&& fresh.stores[0].currentQualified == 0.0 && !fresh.deliveries[0].exhausted,
 				"reset did not restart the authored delivery schedule");
 			world.resumeSimulation();
-			require(world.advanceTicks(360), "replay failed");
+			require(smoke::station::advanceSeconds(world, 6.0), "replay failed");
 			require(world.getStationSystemsSnapshot() == twoLegs
 				&& world.getStationSystemsEvents() == twoLegsEvents,
 				"reset replay was not deterministic");
@@ -531,7 +531,7 @@ namespace
 			settings.wasteEjections = {ejection("haul", "tank", 4.0, 10.0)};
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(599), "pre-ejection run failed");
+			require(smoke::station::advanceSeconds(world, 9.98333333333), "pre-ejection run failed");
 			auto const before = world.getStationSystemsSnapshot();
 			require(before.wasteEjections.size() == 1
 				&& before.wasteEjections[0].lastEjected == 0.0
@@ -543,7 +543,7 @@ namespace
 				"the next ejection was not exposed before it fired");
 			require(before.hasNextWasteEjection && approx(before.nextWasteEjectionSeconds, 10.0),
 				"the station-wide next-ejection readout was wrong");
-			require(world.advanceTicks(1), "ejection tick failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "ejection tick failed");
 			auto const fired = world.getStationSystemsSnapshot();
 			require(fired.wasteEjections[0].occurrencesCompleted == 1
 				&& approx(fired.wasteEjections[0].lastEjected, 4.0)
@@ -561,7 +561,7 @@ namespace
 			require(approx(balance.totalCurrent, 6.0) && approx(balance.lost, 4.0)
 				&& balance.totalStarting == 10.0 && std::abs(balance.residual) < 1e-6,
 				"the per-unit boundary did not close over the ejected external loss");
-			require(world.advanceTicks(600), "post-ejection run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "post-ejection run failed");
 			auto const later = world.getStationSystemsSnapshot();
 			require(later.wasteEjections[0].occurrencesCompleted == 1
 				&& approx(later.stores[0].currentQualified, 6.0),
@@ -578,7 +578,7 @@ namespace
 			settings.wasteEjections = {ejection("haul", "tank", 5.0, 1.0)};
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "empty-store ejection run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "empty-store ejection run failed");
 			auto const snapshot = world.getStationSystemsSnapshot();
 			require(snapshot.wasteEjections[0].occurrencesCompleted == 1
 				&& snapshot.wasteEjections[0].lastEjected == 0.0
@@ -604,7 +604,7 @@ namespace
 			settings.wasteEjections = {ejection("haul", "tank", 5.0, 1.0)};
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "held-waste ejection run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "held-waste ejection run failed");
 			auto const snapshot = world.getStationSystemsSnapshot();
 			require(approx(snapshot.wasteEjections[0].lastEjected, 3.0)
 				&& approx(snapshot.wasteEjections[0].lastUnmet, 2.0)
@@ -632,10 +632,10 @@ namespace
 			settings.wasteEjections[0].eligibility = core::WasteEjectionEligibility::HeldOnly;
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(1), "held-only forecast seed failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "held-only forecast seed failed");
 			auto const forecast = world.getStationSystemsSnapshot().forecast.stores[0];
 			auto const removed = std::min(held, 5.0);
-			require(world.advanceTicks(59), "held-only disposal failed");
+			require(smoke::station::advanceSeconds(world, 0.983333333333), "held-only disposal failed");
 			auto const snapshot = world.getStationSystemsSnapshot();
 			auto const& result = snapshot.wasteEjections[0];
 			require(approx(snapshot.stores[0].currentQualified, 10.0)
@@ -675,12 +675,12 @@ namespace
 			settings.deliveries = {delivery("probe", "tank", 1.0, 2.0)};
 			core::World world("EmergencyDrain", 2, 2);
 			configure(world, settings); world.resumeSimulation();
-			require(world.advanceTicks(1), "emergency-drain forecast seed failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "emergency-drain forecast seed failed");
 			auto const forecast = world.getStationSystemsSnapshot().forecast.stores[0];
 			auto const qualifiedRemoved = std::min(3.0, requested);
 			auto const heldRemoved = std::min(held, requested - qualifiedRemoved);
 			auto const removed = qualifiedRemoved + heldRemoved;
-			require(world.advanceTicks(59), "emergency drain failed");
+			require(smoke::station::advanceSeconds(world, 0.983333333333), "emergency drain failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& result = snap.wasteEjections[0];
 			require(result.eligibility == core::WasteEjectionEligibility::QualifiedAndHeld
@@ -701,7 +701,7 @@ namespace
 				&& approx(forecast.unmetOutflowTotal, requested - removed)
 				&& std::abs(forecast.conservationResidual) < 1e-6,
 				"emergency-drain forecast physical trajectory differs from live removal");
-			require(world.advanceTicks(60), "emergency-drain probe arrival failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "emergency-drain probe arrival failed");
 			require(approx(forecast.projectedDrawableAtHorizon,
 				world.getStationSystemsSnapshot().stores[0].currentQualified),
 				"emergency-drain forecast qualified trajectory differs from live run");
@@ -710,7 +710,7 @@ namespace
 				settings.wasteEjections[0].eligibility = core::WasteEjectionEligibility::QualifiedOnly;
 				core::World baseline("EmergencyDrain", 2, 2);
 				configure(baseline, settings); baseline.resumeSimulation();
-				require(baseline.advanceTicks(120), "qualified-only baseline failed");
+				require(smoke::station::advanceSeconds(baseline, 2.0), "qualified-only baseline failed");
 				auto const actual = world.getStationSystemsSnapshot();
 				auto const expected = baseline.getStationSystemsSnapshot();
 				require(actual.stores == expected.stores && actual.balances == expected.balances
@@ -736,7 +736,7 @@ namespace
 			settings.wasteEjections[0].eligibility = mode;
 			core::World world("ConcentrateDisposal", 2, 2);
 			configure(world, settings); world.resumeSimulation();
-			require(world.advanceTicks(600), "hazardous concentrate disposal failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "hazardous concentrate disposal failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(mode == core::WasteEjectionEligibility::HeldOnly
 				? snap.waterTreatments[0].processedKg > 1.0 && snap.wasteEjections[0].heldEjectedTotal > 0.1
@@ -776,7 +776,7 @@ namespace
 			settings.stores[1].startingQualified = 0.5;
 			core::World world("HeldDriftDisposal", 2, 2);
 			configure(world, settings); world.resumeSimulation();
-			require(world.advanceTicks(600), "held drift disposal failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "held drift disposal failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			bool lostNutrient = false;
 			for (auto const& balance : snap.constituentBalances)
@@ -808,7 +808,7 @@ namespace
 			world.resumeSimulation();
 			for (uint64_t second = 1; second <= 8; ++second)
 			{
-				require(world.advanceTicks(second == 1 ? 60 : 1), "recurrence tick failed");
+				require(smoke::station::advanceSeconds(world, second == 1 ? 1.0 : 0.0166666666667), "recurrence tick failed");
 				auto const snapshot = world.getStationSystemsSnapshot();
 				require(snapshot.wasteEjections[0].occurrencesCompleted == second,
 					"a recurring ejection did not fire exactly once per period");
@@ -822,7 +822,7 @@ namespace
 					require(snapshot.wasteEjections[0].status
 						== core::StationTransferStatus::Rejected,
 						"a dry-store occurrence was not reported as nothing-ejectable");
-				require(world.advanceTicks(59), "between-tick run failed");
+				require(smoke::station::advanceSeconds(world, 0.983333333333), "between-tick run failed");
 				auto const between = world.getStationSystemsSnapshot();
 				require(between.wasteEjections[0].occurrencesCompleted == second,
 					"a recurring ejection fired between its periods");
@@ -844,7 +844,7 @@ namespace
 			settings.wasteEjections = {ejection("out", "tank", 4.0, 1.0)};
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "coincident equal-priority run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "coincident equal-priority run failed");
 			auto const snapshot = world.getStationSystemsSnapshot();
 			require(approx(snapshot.deliveries[0].lastAccepted, 10.0)
 				&& approx(snapshot.wasteEjections[0].lastEjected, 4.0)
@@ -869,7 +869,7 @@ namespace
 			settings.wasteEjections = {ejection("out", "tank", 4.0, 1.0, 0.0, 9)};
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "coincident priority run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "coincident priority run failed");
 			auto const snapshot = world.getStationSystemsSnapshot();
 			require(approx(snapshot.wasteEjections[0].lastEjected, 2.0)
 				&& approx(snapshot.wasteEjections[0].lastUnmet, 2.0),
@@ -895,7 +895,7 @@ namespace
 			settings.wasteEjections = {ejection("only-a-little", "drained", 2.0, 1.0)};
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "no-auto-waste run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "no-auto-waste run failed");
 			auto const snapshot = world.getStationSystemsSnapshot();
 			require(approx(snapshot.stores[0].currentQualified, 10.0),
 				"an unhooked store was drained without an authored ejection");
@@ -943,7 +943,7 @@ namespace
 			settings.wasteEjections[0].eligibility = mode;
 			configure(sandbox, settings);
 			sandbox.resumeSimulation();
-			require(sandbox.advanceTicks(120),
+			require(smoke::station::advanceSeconds(sandbox, 2.0),
 				"bundled Lua ejection mirror failed its in-sandbox assertions");
 			// The host ledger over the same scenario agrees with what the
 			// sandbox asserted: identical removal on both sides.
@@ -988,7 +988,7 @@ namespace
 			settings.wasteEjections = {ejection("haul", "tank", 4.0, 1.0)};
 			configure(world, settings);
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "pre-reset ejection run failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "pre-reset ejection run failed");
 			require(world.getStationSystemsSnapshot().wasteEjections[0].exhausted,
 				"the one-off ejection did not fire before the reset");
 			world.pauseSimulation(); world.resetSimulation();
@@ -1141,7 +1141,7 @@ void buffers(smoke::Context const&)
 			{ buffer("buf", "host", "passive", "", 1000.0, 0.0, 0.0, 100.0, 20.0, 20.0, 1e9) });
 		require(ok, diagnostic.c_str());
 		world.resumeSimulation();
-		require(world.advanceTick(), "buffer charge run failed");
+		require(smoke::station::advanceSeconds(world, 0.0166666666667), "buffer charge run failed");
 		auto const snap = world.getStationSystemsSnapshot();
 		require(snap.thermalBuffers.size() == 1, "buffer snapshot missing");
 		auto const& buf = snap.thermalBuffers[0];
@@ -1168,7 +1168,7 @@ void buffers(smoke::Context const&)
 			{ buffer("buf", "host", "passive", "", 10.0, 0.0, 0.0, 40.0, 20.0, 20.0, 1e9) });
 		require(ok, diagnostic.c_str());
 		world.resumeSimulation();
-		require(world.advanceTicks(120), "buffer fill run failed");
+		require(smoke::station::advanceSeconds(world, 2.0), "buffer fill run failed");
 		auto const snap = world.getStationSystemsSnapshot();
 		auto const& buf = snap.thermalBuffers[0];
 		require(buf.full && approx(buf.storedEnergyKJ, 10.0, 1e-6)
@@ -1193,7 +1193,7 @@ void buffers(smoke::Context const&)
 			{ radiator("big", "host", 50000.0, -270.0) });
 		require(ok, diagnostic.c_str());
 		world.resumeSimulation();
-		require(world.advanceTick(), "buffer recovery run failed");
+		require(smoke::station::advanceSeconds(world, 0.0166666666667), "buffer recovery run failed");
 		auto const snap = world.getStationSystemsSnapshot();
 		auto const& buf = snap.thermalBuffers[0];
 		auto const rejected = snap.thermal.reservoirs[0].lastRejectedKW;
@@ -1218,7 +1218,7 @@ void buffers(smoke::Context const&)
 			{ radiator("big", "host", 50000.0, -270.0) });
 		require(ok, diagnostic.c_str());
 		world.resumeSimulation();
-		require(world.advanceTicks(30), "buffer depletion run failed");
+		require(smoke::station::advanceSeconds(world, 0.5), "buffer depletion run failed");
 		auto const snap = world.getStationSystemsSnapshot();
 		auto const& buf = snap.thermalBuffers[0];
 		require(buf.depleted && approx(buf.storedEnergyKJ, 0.0, 1e-6),
@@ -1239,7 +1239,7 @@ void buffers(smoke::Context const&)
 			{}, { loop("loop", "host", 0.0) });
 		require(ok, diagnostic.c_str());
 		world.resumeSimulation();
-		require(world.advanceTick(), "buffer gating run failed");
+		require(smoke::station::advanceSeconds(world, 0.0166666666667), "buffer gating run failed");
 		auto const snap = world.getStationSystemsSnapshot();
 		auto const& buf = snap.thermalBuffers[0];
 		require(!buf.accessible && approx(buf.lastChargeKW, 0.0) && approx(buf.lastDischargeKW, 0.0),
@@ -1261,7 +1261,7 @@ void buffers(smoke::Context const&)
 			{ buffer("buf", "host", "passive", "", 1000.0, 0.0, 0.0, 100.0, 20.0, 20.0, 0.1) });
 		require(ok, diagnostic.c_str());
 		world.resumeSimulation();
-		require(world.advanceTick(), "buffer passive-cap run failed");
+		require(smoke::station::advanceSeconds(world, 0.0166666666667), "buffer passive-cap run failed");
 		auto const snap = world.getStationSystemsSnapshot();
 		auto const& buf = snap.thermalBuffers[0];
 		require(approx(buf.lastChargeKW, 5.0, 1e-9),
@@ -1279,7 +1279,7 @@ void buffers(smoke::Context const&)
 			{ buffer("buf", "host", "passive", "", 1000.0, 250.0, 0.0, 100.0, 20.0, 20.0, 1e9) });
 		require(ok, diagnostic.c_str());
 		world.resumeSimulation();
-		require(world.advanceTicks(60), "buffer reset warm-up run failed");
+		require(smoke::station::advanceSeconds(world, 1.0), "buffer reset warm-up run failed");
 		require(world.getStationSystemsSnapshot().thermalBuffers[0].chargedEnergyKJ > 0.0,
 			"warm-up produced no charge to reset away");
 		world.pauseSimulation(); world.resetSimulation();

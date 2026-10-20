@@ -1,3 +1,4 @@
+#include "StationRig.h"
 // #423: the packaged emergency and recovery scenario variants.
 //
 // These checks drive each authored scenario through the public World
@@ -42,7 +43,7 @@ namespace
 
 	auto runOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
 	{
-		if (world.advanceTicks(ticks)) return;
+		if (smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0)) return;
 		auto const diagnostics = world.getStationSystemsDiagnostics();
 		std::fprintf(stderr, "%s run failed: %s\n", what,
 			diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());

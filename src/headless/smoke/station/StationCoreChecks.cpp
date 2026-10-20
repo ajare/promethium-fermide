@@ -22,7 +22,7 @@ namespace
 			// of the World and must perform no work.
 			while (static_cast<double>(world.getSimulationTick()) * world.getFixedTimestep() < 12)
 			{
-				require(world.advanceTick(), "Coarse Station failed in World");
+				require(smoke::station::advanceSeconds(world, 0.0166666666667), "Coarse Station failed in World");
 				auto const target = static_cast<double>(world.getSimulationTick()) * world.getFixedTimestep();
 				require(standalone.advanceTo(target), "Standalone integration drive failed");
 				require(world.getStationSystemsSnapshot() == standalone.snapshot(),
@@ -50,11 +50,11 @@ namespace
 		settings.enabled = true; settings.systemsStepWorldTicks = 6;
 		require(failed.configureStationSystems(settings, true), "Coarse failure fixture refused");
 		failed.resumeSimulation();
-		require(failed.advanceTick(), "Coarse failure prefix failed");
+		require(smoke::station::advanceSeconds(failed, 0.0166666666667), "Coarse failure prefix failed");
 		auto const committed = failed.getStationSystemsSnapshot();
 		while (!failed.isSimulationPaused())
 		{
-			if (!failed.advanceTick()) break;
+			if (!smoke::station::advanceSeconds(failed, 0.0166666666667)) break;
 			require(failed.getSimulationTick() * failed.getFixedTimestep() < 1,
 				"Coarse accounting error never reached coordinator failure path");
 		}
@@ -66,7 +66,7 @@ namespace
 		require(failed.getStationSystemsDiagnostics().size() == 1,
 			"Coarse failure diagnostic missing");
 		failed.resumeSimulation();
-		require(!failed.advanceTick() && failed.isSimulationPaused()
+		require(!smoke::station::advanceSeconds(failed, 0.0166666666667) && failed.isSimulationPaused()
 			&& failed.getStationSystemsDiagnostics().size() == 1, "Failed Station runtime was retried");
 	}
 	void lifecycle(smoke::Context const&)
@@ -75,21 +75,21 @@ namespace
 		require(!a.getStationSystemsSnapshot().enabled && a.getStationSystemsEvents().empty(), "Station must default disabled");
 		enable(a); enable(b);
 		a.resumeSimulation(); b.resumeSimulation();
-		require(a.advanceTicks(120), "Station ticks failed");
-		require(b.advanceTicks(60), "Independent station ticks failed");
+		require(smoke::station::advanceSeconds(a, 2.0), "Station ticks failed");
+		require(smoke::station::advanceSeconds(b, 1.0), "Independent station ticks failed");
 		auto saved = a.getStationSystemsSnapshot();
 		require(saved.worldTick == a.getSimulationTick() && std::abs(saved.elapsedSeconds - 120.0 * a.getFixedTimestep()) < 1e-8,
 			"Station not synchronized to World clock");
 		for (auto count : saved.completedTicks) require(count == 120, "All four objects must advance independently");
 		require(b.getStationSystemsSnapshot().completedTicks[0] == 60, "Worlds leaked Lua state");
 		a.pauseSimulation(); auto events = a.getStationSystemsEvents();
-		require(!a.advanceTick(), "Paused World tick accepted"); a.update(20);
+		require(!smoke::station::advanceSeconds(a, 0.0166666666667), "Paused World tick accepted"); a.update(20);
 		require(a.getStationSystemsSnapshot() == saved && a.getStationSystemsEvents() == events, "Pause changed station");
 		a.resumeSimulation(); a.update(a.getFixedTimestep());
 		require(a.getStationSystemsSnapshot().worldTick == 121, "Resume lost runtime");
 		a.pauseSimulation(); a.resetSimulation();
 		require(a.getSimulationTick() == 0 && a.getStationSystemsSnapshot().completedTicks[0] == 0, "Reset did not recreate objects");
-		a.resumeSimulation(); require(a.advanceTicks(120), "Reset replay failed");
+		a.resumeSimulation(); require(smoke::station::advanceSeconds(a, 2.0), "Reset replay failed");
 		require(a.getStationSystemsSnapshot() == saved && a.getStationSystemsEvents() == events, "Reset was not deterministic");
 		require(a.getSimulationSnapshot().agents.empty(), "Station created fake Agents");
 	}
@@ -98,10 +98,10 @@ namespace
 		core::World a("A", 2, 2), b("B", 2, 2);
 		enable(a); enable(b); a.resumeSimulation(); b.resumeSimulation();
 		a.setSimulationTimeScale(2); a.update(0.5f);
-		require(b.advanceTicks(60), "Headless ticks failed");
+		require(smoke::station::advanceSeconds(b, 1.0), "Headless ticks failed");
 		require(a.getStationSystemsSnapshot() == b.getStationSystemsSnapshot()
 			&& a.getStationSystemsEvents() == b.getStationSystemsEvents(), "Time scale introduced separate station clock");
-		a.advanceTicks(60 * 400);
+		smoke::station::advanceSeconds(a, 400.0);
 		require(a.getStationSystemsEvents().size() == 256, "Station history unbounded");
 	}
 	void eventBound(smoke::Context const&)
@@ -129,7 +129,7 @@ namespace
 		settings.solarArrays = {{"solar", 1.0, flicker(0.0)}};
 		require(world.configureStationSystems(settings, true, &diagnostic), diagnostic.c_str());
 		world.resumeSimulation();
-		require(world.advanceTicks(1000), "Transition-only event run failed");
+		require(smoke::station::advanceSeconds(world, 16.6666666667), "Transition-only event run failed");
 		auto const& events = world.getStationSystemsEvents();
 		require(events.size() == 256, "Transition events bypassed the 256-entry history bound");
 		require(events.back().worldTick == 1000, "Event history lost the newest transition");
@@ -148,7 +148,7 @@ namespace
 		mixedSettings.solarArrays = {{"a", 1.0, flicker(0.0)}, {"b", 1.0, flicker(1.0)}};
 		require(mixed.configureStationSystems(mixedSettings, true, &diagnostic), diagnostic.c_str());
 		mixed.resumeSimulation();
-		require(mixed.advanceTicks(1000), "Interleaved transition/observation run failed");
+		require(smoke::station::advanceSeconds(mixed, 16.6666666667), "Interleaved transition/observation run failed");
 		auto const& window = mixed.getStationSystemsEvents();
 		require(window.size() == 256, "Interleaved producers bypassed the 256-entry history bound");
 		require(window.back().worldTick == 1000, "Interleaved history lost the newest tick");
@@ -167,7 +167,7 @@ namespace
 	void persistence(smoke::Context const&)
 	{
 		core::World world("Station", 2, 2); enable(world);
-		world.resumeSimulation(); world.advanceTicks(90); world.pauseSimulation();
+		world.resumeSimulation(); smoke::station::advanceSeconds(world, 1.5); world.pauseSimulation();
 		auto initial = world.getStationSystemsSnapshot(); auto initialYaml = yaml(world);
 		auto const originalRevision = world.getStationSystemsObservationRevision();
 		(void)world.queryStationSystemsChart("power");
@@ -199,7 +199,7 @@ namespace
 		text.replace(text.find("version: 104"), std::string("version: 104").size(), "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
-		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
+		enable(world); world.resumeSimulation(); smoke::station::advanceSeconds(world, 0.0833333333333); world.pauseSimulation();
 		auto malformed = yaml(world); auto offset = malformed.find("observationIntervalSeconds:");
 		auto end = malformed.find('\n', offset); malformed.replace(offset, end - offset, "observationIntervalSeconds: -1");
 		auto invalid = core::YamlSerializer::fromString(malformed); invalid->deserialize();
@@ -272,7 +272,7 @@ namespace
 		// Current inventory is runtime state: ticking never edits the authored
 		// document and no process drifts the quantities in this slice.
 		world.markSaved();
-		world.resumeSimulation(); require(world.advanceTicks(120), "Store run failed");
+		world.resumeSimulation(); require(smoke::station::advanceSeconds(world, 2.0), "Store run failed");
 		require(!world.isModified(), "Station ticking dirtied the authored document");
 		require(world.getStationSystemsSnapshot().stores == authored.stores,
 			"Store state drifted without any process");
@@ -286,7 +286,7 @@ namespace
 		// Reset reconstructs current inventory from the authored starting values.
 		world.resetSimulation();
 		require(world.getStationSystemsSnapshot().stores == authored.stores, "Reset changed stores");
-		world.resumeSimulation(); require(world.advanceTicks(60), "Post-reset store run failed");
+		world.resumeSimulation(); require(smoke::station::advanceSeconds(world, 1.0), "Post-reset store run failed");
 		require(world.getStationSystemsSnapshot().stores == authored.stores,
 			"Stores changed during the post-reset run");
 		// The bundled Lua model receives the descriptors: a fixture that
@@ -302,7 +302,7 @@ namespace
 		core::World boundary("Boundary", 2, 2); boundary.pauseSimulation(); boundary.finishBuild();
 		require(configure(boundary, {store("h2", "kg", 8, 8, 0)}).first,
 			"Store descriptors did not cross the Lua boundary intact");
-		boundary.resumeSimulation(); require(boundary.advanceTicks(10), "Boundary fixture run failed");
+		boundary.resumeSimulation(); require(smoke::station::advanceSeconds(boundary, 0.166666666667), "Boundary fixture run failed");
 		require(boundary.getStationSystemsSnapshot().stores.size() == 1
 			&& boundary.getStationSystemsSnapshot().stores[0].id == "h2",
 			"Boundary fixture store lost");
@@ -390,7 +390,7 @@ namespace
 		require(configure(backpressure, {store("src", "kg", 100, 100, 0), store("dst", "kg", 40, 0, 0)},
 			{transfer("pump", "src", "dst", "kg", 60.0, 0)}).first, "Scenario A refused");
 		backpressure.resumeSimulation();
-		require(backpressure.advanceTicks(30), "Scenario A run failed");
+		require(smoke::station::advanceSeconds(backpressure, 0.5), "Scenario A run failed");
 		{
 			auto const snap = backpressure.getStationSystemsSnapshot();
 			require(approx(snap.stores[0].currentQualified, 70.0) && approx(snap.stores[1].currentQualified, 30.0)
@@ -404,7 +404,7 @@ namespace
 				"Boundary balance not published with zero residual");
 			require(snap.balanceTolerance == core::StationBalanceTolerance, "Tolerance not published");
 		}
-		require(backpressure.advanceTicks(11), "Scenario A backpressure run failed");
+		require(smoke::station::advanceSeconds(backpressure, 0.183333333333), "Scenario A backpressure run failed");
 		{
 			auto const snap = backpressure.getStationSystemsSnapshot();
 			require(approx(snap.stores[1].currentQualified, 40.0) && approx(snap.stores[0].currentQualified, 60.0),
@@ -428,7 +428,7 @@ namespace
 			auto const expectedEvents = backpressure.getStationSystemsEvents();
 			backpressure.resetSimulation();
 			backpressure.resumeSimulation();
-			require(backpressure.advanceTicks(41), "Scenario A replay failed");
+			require(smoke::station::advanceSeconds(backpressure, 0.683333333333), "Scenario A replay failed");
 			require(backpressure.getStationSystemsSnapshot() == expected
 				&& backpressure.getStationSystemsEvents() == expectedEvents,
 				"Transfer outcome not reproducible after reset");
@@ -440,7 +440,7 @@ namespace
 		require(configure(protectedRun, {store("src", "kg", 100, 90, 10, 80), store("dst", "kg", 500, 0, 0)},
 			{transfer("pump", "src", "dst", "kg", 60.0, 0)}).first, "Scenario B refused");
 		protectedRun.resumeSimulation();
-		require(protectedRun.advanceTicks(30), "Scenario B run failed");
+		require(smoke::station::advanceSeconds(protectedRun, 0.5), "Scenario B run failed");
 		{
 			auto const snap = protectedRun.getStationSystemsSnapshot();
 			require(approx(snap.stores[0].currentQualified, 80.0) && snap.stores[0].currentUnqualified == 10.0
@@ -463,7 +463,7 @@ namespace
 		require(configure(partialRun, {store("src", "kg", 200, 200, 0), store("dst", "kg", 40, 0, 0)},
 			{transfer("pump", "src", "dst", "kg", 90.0, 0)}).first, "Scenario C refused");
 		partialRun.resumeSimulation();
-		require(partialRun.advanceTicks(27), "Scenario C run failed");
+		require(smoke::station::advanceSeconds(partialRun, 0.45), "Scenario C run failed");
 		{
 			auto const snap = partialRun.getStationSystemsSnapshot();
 			require(approx(snap.stores[1].currentQualified, 40.0) && approx(snap.stores[0].currentQualified, 160.0),
@@ -482,7 +482,7 @@ namespace
 			{transfer("low", "hub", "a", "kg", 60.0, 0), transfer("high", "hub", "b", "kg", 60.0, 5)}).first,
 			"Scenario D refused");
 		competing.resumeSimulation();
-		require(competing.advanceTicks(13), "Scenario D run failed");
+		require(smoke::station::advanceSeconds(competing, 0.216666666667), "Scenario D run failed");
 		{
 			auto const snap = competing.getStationSystemsSnapshot();
 			// 25 kg against 2 kg/s total demand: the higher-priority transfer
@@ -500,7 +500,7 @@ namespace
 			auto const expected = competing.getStationSystemsSnapshot();
 			auto const expectedEvents = competing.getStationSystemsEvents();
 			competing.resetSimulation(); competing.resumeSimulation();
-			require(competing.advanceTicks(13), "Scenario D replay failed");
+			require(smoke::station::advanceSeconds(competing, 0.216666666667), "Scenario D replay failed");
 			require(competing.getStationSystemsSnapshot() == expected
 				&& competing.getStationSystemsEvents() == expectedEvents,
 				"Competing allocation not reproducible after reset");
@@ -520,7 +520,7 @@ namespace
 		require(configure(boundary, {store("src", "kg", 100, 100, 0, 40), store("dst", "kg", 100, 0, 0)},
 			{transfer("pump", "src", "dst", "kg", 60.0, 3)}).first,
 			"Transfer descriptors did not cross the Lua boundary intact");
-		boundary.resumeSimulation(); require(boundary.advanceTicks(10), "Boundary fixture run failed");
+		boundary.resumeSimulation(); require(smoke::station::advanceSeconds(boundary, 0.166666666667), "Boundary fixture run failed");
 		// A model that violates the protected reserve fails through the
 		// integrated error mechanism: the tick is not committed, the World
 		// pauses with a structured diagnostic, and no material moved.
@@ -536,9 +536,9 @@ namespace
 		require(configure(violated, {store("src", "kg", 100, 50, 0, 5), store("dst", "kg", 100, 0, 0)},
 			{transfer("pump", "src", "dst", "kg", 60.0, 0)}).first, "Violation fixture refused");
 		violated.resumeSimulation();
-		require(violated.advanceTicks(4), "Violation fixture prefix failed");
+		require(smoke::station::advanceSeconds(violated, 0.0666666666667), "Violation fixture prefix failed");
 		auto const beforeViolation = violated.getStationSystemsSnapshot();
-		require(!violated.advanceTick() && violated.isSimulationPaused(),
+		require(!smoke::station::advanceSeconds(violated, 0.0166666666667) && violated.isSimulationPaused(),
 			"Conservation violation did not pause the World");
 		auto const afterViolation = violated.getStationSystemsSnapshot();
 		require(afterViolation.stores == beforeViolation.stores

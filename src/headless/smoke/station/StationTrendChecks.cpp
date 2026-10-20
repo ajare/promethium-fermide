@@ -140,7 +140,7 @@ namespace
 		};
 		auto const runOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
 		{
-			if (world.advanceTicks(ticks)) return;
+			if (smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0)) return;
 			auto const diagnostics = world.getStationSystemsDiagnostics();
 			std::fprintf(stderr, "%s failed: %s\n", what,
 				diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());
@@ -833,7 +833,7 @@ namespace
 		{ core::ProfileSettings p; p.constantLevel = level; return p; };
 		auto const runOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
 		{
-			if (world.advanceTicks(ticks)) return;
+			if (smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0)) return;
 			auto const diagnostics = world.getStationSystemsDiagnostics();
 			std::fprintf(stderr, "%s failed: %s\n", what,
 				diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());

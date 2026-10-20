@@ -13,6 +13,7 @@
 #include <limits>
 #include <stdexcept>
 
+#include "StationRig.h"
 namespace
 {
 void require(bool value, std::string const& message) { if (!value) throw std::runtime_error(message); }
@@ -36,7 +37,7 @@ void configure(core::World& w, core::StationSystemsSettings const& s)
 }
 void run(core::World& w, unsigned ticks)
 {
-    w.resumeSimulation(); require(w.advanceTicks(ticks), "World refused ticks");
+    w.resumeSimulation(); require(smoke::station::advanceSeconds(w, static_cast<double>(ticks) / 60.0), "World refused ticks");
     auto snapshot = w.getStationSystemsSnapshot();
     require(snapshot.healthy, "Station tick failed");
 }
@@ -293,7 +294,7 @@ void scheduledTransfers(smoke::Context const&)
     // A later ledger failure rolls back inventories AND occurrence accounting.
     s = fixture(); core::SolarArraySettings sun; sun.id = "sun"; sun.capacityKW = 1e308;
     s.solarArrays = {sun}; s.solarArrays.push_back(sun); s.solarArrays.back().id = "sun2";
-    core::World failed("Atomic", 2, 2); configure(failed, s); failed.resumeSimulation(); failed.advanceTick();
+    core::World failed("Atomic", 2, 2); configure(failed, s); failed.resumeSimulation(); smoke::station::advanceSeconds(failed, 0.0166666666667);
     auto failure = failed.getStationSystemsSnapshot();
     require(!failure.healthy && failure.transfers[0].occurrencesFired == 0
         && failure.transfers[0].cumulativeRequested == 0 && failure.transfers[0].cumulativeMoved == 0

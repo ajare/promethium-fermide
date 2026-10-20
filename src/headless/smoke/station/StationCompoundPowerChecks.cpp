@@ -79,7 +79,7 @@ namespace
 		auto const flowsMatchInventories = [](core::World& world, std::string const& where)
 		{
 			auto const before = world.getStationSystemsSnapshot();
-			require(world.advanceTick(), (where + ": flow-matching tick failed").c_str());
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), (where + ": flow-matching tick failed").c_str());
 			auto const after = world.getStationSystemsSnapshot();
 			for (size_t index = 0; index < after.stores.size(); ++index)
 			{
@@ -192,7 +192,7 @@ namespace
 				{produce("biomass", 0.08), produce("waste", 0.4)}, 0)}).first,
 			"Balanced harvest scenario refused");
 		growth.resumeSimulation();
-		require(growth.advanceTicks(30), "Balanced harvest run failed");
+		require(smoke::station::advanceSeconds(growth, 0.5), "Balanced harvest run failed");
 		{
 			auto const snap = growth.getStationSystemsSnapshot();
 			require(snap.conversions.size() == 1
@@ -243,7 +243,7 @@ namespace
 			auto const expectedEvents = growth.getStationSystemsEvents();
 			growth.resetSimulation();
 			growth.resumeSimulation();
-			require(growth.advanceTicks(30), "Compound replay failed");
+			require(smoke::station::advanceSeconds(growth, 0.5), "Compound replay failed");
 			require(growth.getStationSystemsSnapshot() == expected
 				&& growth.getStationSystemsEvents() == expectedEvents,
 				"Compound conversion outcome not reproducible after reset");
@@ -261,7 +261,7 @@ namespace
 				{produce("biomass", 0.08), produce("waste", 0.4)}, 0)}).first,
 			"Partial protected-reserve scenario refused");
 		partial.resumeSimulation();
-		require(partial.advanceTicks(1), "Partial scenario run failed");
+		require(smoke::station::advanceSeconds(partial, 0.0166666666667), "Partial scenario run failed");
 		{
 			auto const snap = partial.getStationSystemsSnapshot();
 			require(snap.conversions[0].status == core::StationTransferStatus::Partial
@@ -300,7 +300,7 @@ namespace
 			{}, {conversion("harvest", {consume("food", 1.0)}, {produce("waste", 0.5)}, 0)}).first,
 			"Blocked-output scenario refused");
 		blocked.resumeSimulation();
-		require(blocked.advanceTicks(5), "Blocked-output run failed");
+		require(smoke::station::advanceSeconds(blocked, 0.0833333333333), "Blocked-output run failed");
 		{
 			auto const snap = blocked.getStationSystemsSnapshot();
 			require(snap.conversions[0].status == core::StationTransferStatus::Rejected
@@ -331,7 +331,7 @@ namespace
 				conversion("high", {consume("food", 1.0)}, {produce("biomass", 0.1)}, 5)}).first,
 			"Competing conversions scenario refused");
 		competing.resumeSimulation();
-		require(competing.advanceTicks(1), "Competing conversions run failed");
+		require(smoke::station::advanceSeconds(competing, 0.0166666666667), "Competing conversions run failed");
 		{
 			auto const snap = competing.getStationSystemsSnapshot();
 			require(snap.conversions[0].id == "high"
@@ -390,7 +390,7 @@ namespace
 			{produce("b", roundoffRate)}, 0)}).first,
 			"Roundoff partial-conversion fixture refused");
 		roundoff.resumeSimulation();
-		require(roundoff.advanceTick(), "Roundoff partial conversion paused the World");
+		require(smoke::station::advanceSeconds(roundoff, 0.0166666666667), "Roundoff partial conversion paused the World");
 		{
 			auto const snap = roundoff.getStationSystemsSnapshot();
 			require(snap.healthy && roundoff.getStationSystemsDiagnostics().empty(),
@@ -418,7 +418,7 @@ namespace
 			{produce("b", roundoffRate)}, 0)}).first,
 			"Capacity roundoff fixture refused");
 		capRoundoff.resumeSimulation();
-		require(capRoundoff.advanceTick(), "Capacity roundoff conversion paused the World");
+		require(smoke::station::advanceSeconds(capRoundoff, 0.0166666666667), "Capacity roundoff conversion paused the World");
 		{
 			auto const snap = capRoundoff.getStationSystemsSnapshot();
 			require(snap.healthy && capRoundoff.getStationSystemsDiagnostics().empty(),
@@ -442,7 +442,7 @@ namespace
 			{produce("b", roundoffRate)}, 0)}).first,
 			"Protected-reserve roundoff fixture refused");
 		reserveRoundoff.resumeSimulation();
-		require(reserveRoundoff.advanceTick(), "Reserve roundoff conversion paused the World");
+		require(smoke::station::advanceSeconds(reserveRoundoff, 0.0166666666667), "Reserve roundoff conversion paused the World");
 		{
 			auto const snap = reserveRoundoff.getStationSystemsSnapshot();
 			require(snap.healthy && reserveRoundoff.getStationSystemsDiagnostics().empty(),
@@ -471,7 +471,7 @@ namespace
 			{produce("b", 200.0), produce("d", 150.0)}, 0)}).first,
 			"Mixed-rate multi-flow roundoff fixture refused");
 		multiRoundoff.resumeSimulation();
-		require(multiRoundoff.advanceTick(), "Mixed-rate multi-flow roundoff paused the World");
+		require(smoke::station::advanceSeconds(multiRoundoff, 0.0166666666667), "Mixed-rate multi-flow roundoff paused the World");
 		{
 			auto const snap = multiRoundoff.getStationSystemsSnapshot();
 			require(snap.healthy && multiRoundoff.getStationSystemsDiagnostics().empty(),
@@ -497,7 +497,7 @@ namespace
 			{transfer("pump", "bulk", "day", "kg", 60.0, 0)}, {}).first,
 			"Compound transfer scenario refused");
 		pumped.resumeSimulation();
-		require(pumped.advanceTicks(16), "Compound transfer run failed");
+		require(smoke::station::advanceSeconds(pumped, 0.266666666667), "Compound transfer run failed");
 		{
 			auto const snap = pumped.getStationSystemsSnapshot();
 			require(approx(snap.stores[1].currentQualified, 10.0)
@@ -560,7 +560,7 @@ namespace
 				diagnostic.c_str());
 		}
 		combined.resumeSimulation();
-		require(combined.advanceTicks(10), "Combined mechanisms run failed");
+		require(smoke::station::advanceSeconds(combined, 0.166666666667), "Combined mechanisms run failed");
 		{
 			auto const snap = combined.getStationSystemsSnapshot();
 			require(snap.healthy, "Combined mechanisms run left the Station unhealthy");
@@ -608,7 +608,7 @@ namespace
 			{}, {conversion("harvest", {consume("food", 1.0)},
 				{produce("biomass", 0.08), produce("waste", 0.4)}, 0)}).first,
 			"Compound descriptors did not cross the Lua boundary intact");
-		boundary.resumeSimulation(); require(boundary.advanceTicks(10), "Compound boundary fixture run failed");
+		boundary.resumeSimulation(); require(smoke::station::advanceSeconds(boundary, 0.166666666667), "Compound boundary fixture run failed");
 		core::setStationSystemsSourceLoader([] {
 			return "return function(name, stores, transfers, conversions) "
 				"assert(#conversions == 99, 'expected 99 conversions') "
@@ -788,7 +788,7 @@ namespace
 			"Full-sun scenario refused");
 		sunny.markSaved();
 		sunny.resumeSimulation();
-		require(sunny.advanceTicks(60), "Full-sun run failed");
+		require(smoke::station::advanceSeconds(sunny, 1.0), "Full-sun run failed");
 		{
 			auto const snap = sunny.getStationSystemsSnapshot();
 			require(snap.power.sources.size() == 1
@@ -821,7 +821,7 @@ namespace
 			{load("lamp", 1.0, "low", core::StationCoolingDisposition::Exported, 0.0, 0, 1.0)}).first,
 			"Zero-capacity scenario refused");
 		dark.resumeSimulation();
-		require(dark.advanceTicks(30), "Zero-capacity run failed");
+		require(smoke::station::advanceSeconds(dark, 0.5), "Zero-capacity run failed");
 		{
 			auto const snap = dark.getStationSystemsSnapshot();
 			require(snap.power.sources[0].disabled && approx(snap.power.sources[0].availableKW, 0.0),
@@ -847,10 +847,10 @@ namespace
 				{load("station", 10.0, "moderate", core::StationCoolingDisposition::Exported, 0.0, 0, 1.0)}).first,
 				"Eclipse scenario refused");
 			eclipse.resumeSimulation();
-			require(eclipse.advanceTicks(3599), "Sunlit leg failed");
+			require(smoke::station::advanceSeconds(eclipse, 59.9833333333), "Sunlit leg failed");
 			require(eclipse.getStationSystemsSnapshot().power.loads[0].status == core::StationTransferStatus::Full,
 				"Load not fully supplied during sunlight");
-			require(eclipse.advanceTick(), "Eclipse entry tick failed");
+			require(smoke::station::advanceSeconds(eclipse, 0.0166666666667), "Eclipse entry tick failed");
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(approx(snap.power.availableGenerationKW, 0.0)
@@ -862,10 +862,10 @@ namespace
 				require(sawEvent(eclipse, "Solar array 'orbital' entered eclipse"),
 					"Eclipse transition missing from the event log");
 			}
-			require(eclipse.advanceTicks(3599), "Eclipse leg failed");
+			require(smoke::station::advanceSeconds(eclipse, 59.9833333333), "Eclipse leg failed");
 			require(eclipse.getStationSystemsSnapshot().power.loads[0].status == core::StationTransferStatus::Rejected,
 				"Load recovered during eclipse");
-			require(eclipse.advanceTick(), "Sunrise tick failed");
+			require(smoke::station::advanceSeconds(eclipse, 0.0166666666667), "Sunrise tick failed");
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(snap.power.loads[0].status == core::StationTransferStatus::Full
@@ -878,7 +878,7 @@ namespace
 				auto const expectedEvents = eclipse.getStationSystemsEvents();
 				eclipse.resetSimulation();
 				eclipse.resumeSimulation();
-				require(eclipse.advanceTicks(7200), "Eclipse replay failed");
+				require(smoke::station::advanceSeconds(eclipse, 120.0), "Eclipse replay failed");
 				require(eclipse.getStationSystemsSnapshot() == expected
 					&& eclipse.getStationSystemsEvents() == expectedEvents,
 					"Eclipse transition sequence not reproducible after reset");
@@ -895,7 +895,7 @@ namespace
 				load("high", 8.0, "moderate", core::StationCoolingDisposition::Exported, 0.0, 5, 1.0)}).first,
 			"Priority scenario refused");
 		competing.resumeSimulation();
-		require(competing.advanceTicks(60), "Priority run failed");
+		require(smoke::station::advanceSeconds(competing, 1.0), "Priority run failed");
 		{
 			auto const snap = competing.getStationSystemsSnapshot();
 			require(snap.power.loads[0].id == "high" && snap.power.loads[1].id == "low",
@@ -925,7 +925,7 @@ namespace
 				load("discretionary", 8.0, "moderate", core::StationCoolingDisposition::Exported, 0.0, 9, 1.0)}).first,
 			"Critical-floor scenario refused");
 		critical.resumeSimulation();
-		require(critical.advanceTicks(60), "Critical-floor run failed");
+		require(smoke::station::advanceSeconds(critical, 1.0), "Critical-floor run failed");
 		{
 			auto const snap = critical.getStationSystemsSnapshot();
 			require(snap.power.loads[0].id == "discretionary"
@@ -948,7 +948,7 @@ namespace
 				load("discretionary", 8.0, "moderate", core::StationCoolingDisposition::Exported, 0.0, 9, 1.0)}).first,
 			"Starved-floor scenario refused");
 		critical.resumeSimulation();
-		require(critical.advanceTicks(60), "Starved-floor run failed");
+		require(smoke::station::advanceSeconds(critical, 1.0), "Starved-floor run failed");
 		{
 			auto const snap = critical.getStationSystemsSnapshot();
 			require(approx(snap.power.loads[1].suppliedKW, 3.0)
@@ -974,7 +974,7 @@ namespace
 				load("flexible", 10.0, "moderate", core::StationCoolingDisposition::Exported, 0.0, 0, 1.0)}).first,
 			"Curtailment scenario refused");
 		curtail.resumeSimulation();
-		require(curtail.advanceTicks(60), "Curtailment run failed");
+		require(smoke::station::advanceSeconds(curtail, 1.0), "Curtailment run failed");
 		{
 			auto const snap = curtail.getStationSystemsSnapshot();
 			require(snap.power.loads[0].id == "rigid"
@@ -1004,7 +1004,7 @@ namespace
 			}()).first,
 			"Cooling-infeasible scenario refused");
 		hot.resumeSimulation();
-		require(hot.advanceTicks(60), "Cooling-infeasible run failed");
+		require(smoke::station::advanceSeconds(hot, 1.0), "Cooling-infeasible run failed");
 		{
 			auto const snap = hot.getStationSystemsSnapshot();
 			require(!snap.power.loads[0].admitted
@@ -1037,7 +1037,7 @@ namespace
 				{array("field", 10.0, constantProfile(1.0))}, {cryo}).first,
 				"Cooling-blocked critical-floor scenario refused");
 			blocked.resumeSimulation();
-			require(blocked.advanceTick(), "Cooling-blocked critical-floor tick failed");
+			require(smoke::station::advanceSeconds(blocked, 0.0166666666667), "Cooling-blocked critical-floor tick failed");
 			auto const snap = blocked.getStationSystemsSnapshot();
 			require(snap.healthy && snap.power.loads.size() == 1,
 				"Cooling-blocked critical floor turned a physical shortage into a software failure");
@@ -1057,7 +1057,7 @@ namespace
 				"Unmet critical floor transition missing for the cooling-blocked load");
 			// The unmet-critical announcement is a transition, not a flood:
 			// a steady blocked load reports it once across many ticks.
-			require(blocked.advanceTicks(59), "Cooling-blocked continuation run failed");
+			require(smoke::station::advanceSeconds(blocked, 0.983333333333), "Cooling-blocked continuation run failed");
 			size_t unmetEvents = 0;
 			for (auto const& event : blocked.getStationSystemsEvents())
 				if (event.message.find("critical floor unmet") != std::string::npos)
@@ -1085,7 +1085,7 @@ namespace
 				return std::vector<core::EquipmentLoadSettings>{reactor};
 			}()).first, "Material exchange scenario refused");
 		exchanged.resumeSimulation();
-		require(exchanged.advanceTicks(10), "Material exchange run failed");
+		require(smoke::station::advanceSeconds(exchanged, 0.166666666667), "Material exchange run failed");
 		{
 			auto const snap = exchanged.getStationSystemsSnapshot();
 			// One sixth of a second at 6 kg/s drawn and 3 kg/s delivered.
@@ -1121,7 +1121,7 @@ namespace
 				return std::vector<core::EquipmentLoadSettings>{reactor};
 			}()).first, "Scaled exchange scenario refused");
 		exchanged.resumeSimulation();
-		require(exchanged.advanceTicks(10), "Scaled exchange run failed");
+		require(smoke::station::advanceSeconds(exchanged, 0.166666666667), "Scaled exchange run failed");
 		{
 			auto const snap = exchanged.getStationSystemsSnapshot();
 			require(approx(snap.power.loads[0].deliveredFraction, 0.5)
@@ -1151,7 +1151,7 @@ namespace
 				return std::vector<core::EquipmentLoadSettings>{reactor};
 			}()).first, "Duty-cycle reproduction scenario refused");
 		duty.resumeSimulation();
-		require(duty.advanceTick(), "Duty-cycle reproduction run failed");
+		require(smoke::station::advanceSeconds(duty, 0.0166666666667), "Duty-cycle reproduction run failed");
 		{
 			auto const snap = duty.getStationSystemsSnapshot();
 			require(snap.power.loads[0].status == core::StationTransferStatus::Full
@@ -1200,7 +1200,7 @@ namespace
 				{array("field", 5.0, constantProfile(1.0))},
 				{dutyLoad, curtailed, off}).first, "Mixed duty/curtailment scenario refused");
 			mixed.resumeSimulation();
-			require(mixed.advanceTick(), "Mixed duty/curtailment run failed");
+			require(smoke::station::advanceSeconds(mixed, 0.0166666666667), "Mixed duty/curtailment run failed");
 			auto const snap = mixed.getStationSystemsSnapshot();
 			require(snap.power.loads.size() == 3, "Mixed scenario loads missing");
 			// Duty load: full supply at level 0.25 -> heat 8*0.25*1.0 = 2.0,
@@ -1267,7 +1267,7 @@ namespace
 		// Seven ticks at ~0.05 kg/s leave headroom in the 0.4 kg brine
 		// store while the feed above the reserve is ample: the load runs
 		// full the whole time.
-		require(bounded.advanceTicks(7), "Bounded exchange run failed");
+		require(smoke::station::advanceSeconds(bounded, 0.116666666667), "Bounded exchange run failed");
 		{
 			auto const snap = bounded.getStationSystemsSnapshot();
 			require(snap.power.loads[0].status == core::StationTransferStatus::Full
@@ -1279,7 +1279,7 @@ namespace
 		// Once the destination is full the load is refused whole: it draws
 		// no feed, exports no heat, and the whole declared need stands as
 		// unmet material.
-		require(bounded.advanceTicks(53), "Bounded backpressure run failed");
+		require(smoke::station::advanceSeconds(bounded, 0.883333333333), "Bounded backpressure run failed");
 		{
 			auto const snap = bounded.getStationSystemsSnapshot();
 			require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
@@ -1323,7 +1323,7 @@ namespace
 				{array("field", 10.0, constantProfile(1.0))}, {rig}).first,
 				"Empty-feed reproduction scenario refused");
 			starved.resumeSimulation();
-			require(starved.advanceTick(), "Empty-feed reproduction tick failed");
+			require(smoke::station::advanceSeconds(starved, 0.0166666666667), "Empty-feed reproduction tick failed");
 			auto const snap = starved.getStationSystemsSnapshot();
 			require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
 				&& approx(snap.power.loads[0].suppliedKW, 0.0)
@@ -1360,7 +1360,7 @@ namespace
 				{array("field", 10.0, constantProfile(1.0))}, {rig}).first,
 				"Held-only feed scenario refused");
 			held.resumeSimulation();
-			require(held.advanceTick(), "Held-only feed tick failed");
+			require(smoke::station::advanceSeconds(held, 0.0166666666667), "Held-only feed tick failed");
 			auto const snap = held.getStationSystemsSnapshot();
 			require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
 				&& approx(snap.power.loads[0].suppliedKW, 0.0)
@@ -1374,7 +1374,7 @@ namespace
 				{array("field", 10.0, constantProfile(1.0))}, {rig}).first,
 				"Protected-reserve feed scenario refused");
 			held.resumeSimulation();
-			require(held.advanceTick(), "Protected-reserve feed tick failed");
+			require(smoke::station::advanceSeconds(held, 0.0166666666667), "Protected-reserve feed tick failed");
 			auto const reserveSnap = held.getStationSystemsSnapshot();
 			require(reserveSnap.power.loads[0].status == core::StationTransferStatus::Rejected
 				&& approx(reserveSnap.power.loads[0].suppliedKW, 0.0)
@@ -1402,7 +1402,7 @@ namespace
 				{array("field", 10.0, constantProfile(1.0))}, {rig}).first,
 				"Partial feed scenario refused");
 			partial.resumeSimulation();
-			require(partial.advanceTick(), "Partial feed tick failed");
+			require(smoke::station::advanceSeconds(partial, 0.0166666666667), "Partial feed tick failed");
 			auto const snap = partial.getStationSystemsSnapshot();
 			require(snap.power.loads[0].status == core::StationTransferStatus::Partial
 				&& approx(snap.power.loads[0].materialFeasibleFraction, 0.6)
@@ -1422,7 +1422,7 @@ namespace
 			require(std::abs(snap.balances[0].residual) < 1e-9,
 				"Partial feed run broke the boundary ledger");
 			// The feed is gone: the load stops rather than running un-fed.
-			require(partial.advanceTick(), "Post-exhaustion tick failed");
+			require(smoke::station::advanceSeconds(partial, 0.0166666666667), "Post-exhaustion tick failed");
 			auto const next = partial.getStationSystemsSnapshot();
 			require(next.power.loads[0].status == core::StationTransferStatus::Rejected
 				&& approx(next.power.loads[0].suppliedKW, 0.0)
@@ -1450,7 +1450,7 @@ namespace
 				{array("field", 20.0, constantProfile(1.0))}, {first, second}).first,
 				"Shared-feed scenario refused");
 			sharing.resumeSimulation();
-			require(sharing.advanceTick(), "Shared-feed tick failed");
+			require(smoke::station::advanceSeconds(sharing, 0.0166666666667), "Shared-feed tick failed");
 			auto const snap = sharing.getStationSystemsSnapshot();
 			require(snap.power.loads[0].id == "first"
 				&& snap.power.loads[0].status == core::StationTransferStatus::Partial
@@ -1487,7 +1487,7 @@ namespace
 					core::StationCoolingDisposition::Exported, 0.0, 0, 1.0)}).first,
 				"Starved-rigid scenario refused");
 			rigidStarved.resumeSimulation();
-			require(rigidStarved.advanceTick(), "Starved-rigid tick failed");
+			require(smoke::station::advanceSeconds(rigidStarved, 0.0166666666667), "Starved-rigid tick failed");
 			auto const snap = rigidStarved.getStationSystemsSnapshot();
 			require(snap.power.loads[0].id == "rigid"
 				&& snap.power.loads[0].status == core::StationTransferStatus::Rejected
@@ -1561,7 +1561,7 @@ namespace
 					{array("field", 2.0, constantProfile(1.0))},
 					{rigid, flexible}, {}).first, "Infeasible-floor reproduction refused");
 				impossible.resumeSimulation();
-				require(impossible.advanceTicks(60), "Infeasible-floor reproduction run failed");
+				require(smoke::station::advanceSeconds(impossible, 1.0), "Infeasible-floor reproduction run failed");
 				auto const snap = impossible.getStationSystemsSnapshot();
 				require(snap.power.loads[0].id == "rigid" && snap.power.loads[1].id == "flexible",
 					"Reproduction loads not in the declared allocation order");
@@ -1601,7 +1601,7 @@ namespace
 					core::StationCoolingDisposition::Exported, 1.0, 1, 0.5)}, {}).first,
 				"Minimum-reachable floor scenario refused");
 			reachable.resumeSimulation();
-			require(reachable.advanceTicks(60), "Minimum-reachable floor run failed");
+			require(smoke::station::advanceSeconds(reachable, 1.0), "Minimum-reachable floor run failed");
 			{
 				auto const snap = reachable.getStationSystemsSnapshot();
 				require(snap.power.loads[0].status == core::StationTransferStatus::Partial
@@ -1627,7 +1627,7 @@ namespace
 					{array("field", 4.0, constantProfile(1.0))},
 					{rigid, flexible}, {}).first, "Below-floor scenario refused");
 				shortfall.resumeSimulation();
-				require(shortfall.advanceTicks(60), "Below-floor run failed");
+				require(smoke::station::advanceSeconds(shortfall, 1.0), "Below-floor run failed");
 				auto const snap = shortfall.getStationSystemsSnapshot();
 				require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
 					&& approx(snap.power.loads[0].suppliedKW, 0.0)
@@ -1651,7 +1651,7 @@ namespace
 				{battery("cell", 10.0, 10.0, 10.0, 0.0, 3.0)}).first,
 				"Bank-funded floor scenario refused");
 			banked.resumeSimulation();
-			require(banked.advanceTicks(60), "Bank-funded floor run failed");
+			require(smoke::station::advanceSeconds(banked, 1.0), "Bank-funded floor run failed");
 			{
 				auto const snap = banked.getStationSystemsSnapshot();
 				// The 5 kW minimum is 2 kW of sun plus exactly the 3 kW
@@ -1678,7 +1678,7 @@ namespace
 				{battery("cell", 10.0, 10.0, 10.0, 0.0, 2.0)}).first,
 				"Starved-floor battery scenario refused");
 			starved.resumeSimulation();
-			require(starved.advanceTicks(60), "Starved-floor battery run failed");
+			require(smoke::station::advanceSeconds(starved, 1.0), "Starved-floor battery run failed");
 			{
 				auto const snap = starved.getStationSystemsSnapshot();
 				require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
@@ -1735,7 +1735,7 @@ namespace
 				{array("orbital", 10.0, illumination)}, {heavy, cold}).first,
 				"Power descriptors did not cross the Lua boundary intact");
 			boundary.resumeSimulation();
-			require(boundary.advanceTicks(120), "Power boundary fixture run failed");
+			require(smoke::station::advanceSeconds(boundary, 2.0), "Power boundary fixture run failed");
 		}
 		core::setStationSystemsSourceLoader([] {
 			return "return function(name, stores, transfers, conversions, solar, loads) "
@@ -1805,7 +1805,7 @@ namespace
 				{dutyLoad, curtailed, off}).first,
 								("Sandbox profile-scaling scenario refused: " + configure(sandboxScaled, {{"water", "kg", 100.0, 50.0, 0.0}}, {array("field", 5.0, constantProfile(1.0))}, {dutyLoad, curtailed, off}).second).c_str());
 			sandboxScaled.resumeSimulation();
-			require(sandboxScaled.advanceTicks(10),
+			require(smoke::station::advanceSeconds(sandboxScaled, 0.166666666667),
 				"Bundled Lua profile scaling failed its in-sandbox assertions");
 			// The host ledger over the same scenario agrees with what the
 			// sandbox asserted: identical scaling on both sides.
@@ -1855,7 +1855,7 @@ namespace
 				{array("field", 10.0, constantProfile(1.0))}, {rig}).first,
 				"Sandbox starved scenario refused");
 			sandboxStarved.resumeSimulation();
-			require(sandboxStarved.advanceTicks(5),
+			require(smoke::station::advanceSeconds(sandboxStarved, 0.0833333333333),
 				"Bundled Lua material-dependency failed its in-sandbox assertions");
 			auto const snap = sandboxStarved.getStationSystemsSnapshot();
 			require(snap.power.loads[0].status == core::StationTransferStatus::Rejected

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <limits>
 
+#include "StationRig.h"
 namespace
 {
 using smoke::require;
@@ -41,7 +42,7 @@ core::StationSystemsSnapshot run(core::StationSystemsSettings const& settings, i
 	auto const configured = world.configureStationSystems(settings, false, &error);
 	require(configured, error.c_str());
 	world.resumeSimulation();
-	if (!world.advanceTicks(ticks))
+	if (!smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0))
 	{
 		for (auto const& d : world.getStationSystemsDiagnostics()) error += d.message;
 		require(false, error.c_str());
@@ -143,7 +144,7 @@ void partialRemoval(smoke::Context const& context)
 		auto before = world.getStationSystemsSnapshot();
 		for (int tick = 0; tick < 60; ++tick)
 		{
-			require(world.advanceTicks(1), "partial treatment tick failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "partial treatment tick failed");
 			auto after = world.getStationSystemsSnapshot();
 			auto const& treatment = after.waterTreatments[0];
 			for (auto const& [name, initial] : store(before, "greywater").actualConstituents)
@@ -347,7 +348,7 @@ void documents(smoke::Context const& context)
 	original.pauseSimulation(); original.finishBuild();
 	auto const configured = original.configureStationSystems(settings, false, &error);
 	require(configured, error.c_str());
-	original.resumeSimulation(); require(original.advanceTicks(60), "compound save rig failed");
+	original.resumeSimulation(); require(smoke::station::advanceSeconds(original, 1.0), "compound save rig failed");
 	auto const expected = original.getStationSystemsSnapshot();
 	for (auto const* name : {"compound-water.world.yaml", "compound-water.world"})
 	{
@@ -355,7 +356,7 @@ void documents(smoke::Context const& context)
 		original.saveTo(path.string());
 		auto reopened = core::loadWorldDocument(path);
 		require(reopened->getStationSystemsSettings() == settings, "water World settings changed on reload");
-		reopened->resumeSimulation(); require(reopened->advanceTicks(60), "reloaded water World failed");
+		reopened->resumeSimulation(); require(smoke::station::advanceSeconds(reopened, 1.0), "reloaded water World failed");
 		auto const snapshot = reopened->getStationSystemsSnapshot();
 		require(snapshot.stores == expected.stores && snapshot.waterTreatments == expected.waterTreatments,
 			"reloaded water World did not reproduce exact tick actuals");
@@ -599,7 +600,7 @@ void selectiveIrrigation(smoke::Context const& context)
 			auto const path = context.temporaryRoot() / (std::string(file) + extension);
 			world.saveTo(path.string()); auto reopened = core::loadWorldDocument(path);
 			require(reopened->getStationSystemsSettings() == s, "flagship World lost settings");
-			reopened->resumeSimulation(); require(reopened->advanceTicks(3), "flagship World replay failed");
+			reopened->resumeSimulation(); require(smoke::station::advanceSeconds(reopened, 0.05), "flagship World replay failed");
 			auto const expected = run(s, 3), actual = reopened->getStationSystemsSnapshot();
 			require(actual.stores == expected.stores && actual.cropPopulations == expected.cropPopulations
 				&& actual.waterTreatments == expected.waterTreatments, "flagship replay actuals changed");
@@ -629,7 +630,7 @@ void hydroponics(smoke::Context const& context)
 		world.resumeSimulation(); int firstThrottle = 0; double at240 = 0;
 		for (int second = 1; second <= 300; ++second)
 		{
-			if (!world.advanceTicks(60))
+			if (!smoke::station::advanceSeconds(world, 1.0))
 			{
 				error = std::format("hydroponics purge={} second={}: ", purge, second);
 				for (auto const& d : world.getStationSystemsDiagnostics()) error += d.message;
@@ -711,7 +712,7 @@ void contamination(smoke::Context const& context)
 		require(world.configureStationSystems(wired, false, &error),
 			("cross-class transfer bypass was refused: " + error).c_str());
 		world.resumeSimulation();
-		require(world.advanceTicks(10), "cross-class bypass run failed");
+		require(smoke::station::advanceSeconds(world, 0.166666666667), "cross-class bypass run failed");
 		bool moved = false;
 		for (auto const& entry : world.getStationSystemsSnapshot().transfers)
 			if (entry.id == "bypass" && entry.lastCompleted > 0.0) moved = true;

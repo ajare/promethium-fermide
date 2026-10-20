@@ -36,7 +36,7 @@ namespace
 		};
 		auto advanceOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
 		{
-			if (world.advanceTicks(ticks)) return true;
+			if (smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0)) return true;
 			auto const diagnostics = world.getStationSystemsDiagnostics();
 			std::fprintf(stderr, "%s failed: %s\n", what,
 				diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());
@@ -823,7 +823,7 @@ namespace
 		};
 		auto advanceOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
 		{
-			if (world.advanceTicks(ticks)) return true;
+			if (smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0)) return true;
 			auto const diagnostics = world.getStationSystemsDiagnostics();
 			std::fprintf(stderr, "%s failed: %s\n", what,
 				diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());
@@ -1401,7 +1401,7 @@ namespace
 				"the determinism pair failed to configure");
 			first.resumeSimulation();
 			second.resumeSimulation();
-			require(first.advanceTicks(300) && second.advanceTicks(300),
+			require(smoke::station::advanceSeconds(first, 5.0) && smoke::station::advanceSeconds(second, 5.0),
 				"the determinism pair failed to advance");
 			first.pauseSimulation();
 			second.pauseSimulation();
@@ -1434,7 +1434,7 @@ namespace
 		};
 		auto advanceOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
 		{
-			if (world.advanceTicks(ticks)) return true;
+			if (smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0)) return true;
 			auto const diagnostics = world.getStationSystemsDiagnostics();
 			std::fprintf(stderr, "%s failed: %s\n", what,
 				diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());
@@ -1923,7 +1923,7 @@ namespace
 				"the harvest determinism pair failed to configure");
 			first.resumeSimulation();
 			second.resumeSimulation();
-			require(first.advanceTicks(1200) && second.advanceTicks(1200),
+			require(smoke::station::advanceSeconds(first, 20.0) && smoke::station::advanceSeconds(second, 20.0),
 				"the harvest determinism pair failed to advance");
 			first.pauseSimulation();
 			second.pauseSimulation();
@@ -1960,7 +1960,7 @@ namespace
 		};
 		auto advanceOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
 		{
-			if (world.advanceTicks(ticks)) return true;
+			if (smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0)) return true;
 			auto const diagnostics = world.getStationSystemsDiagnostics();
 			std::fprintf(stderr, "%s failed: %s\n", what,
 				diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());
@@ -2743,7 +2743,7 @@ namespace
 				"the algae determinism pair failed to configure");
 			first.resumeSimulation();
 			second.resumeSimulation();
-			require(first.advanceTicks(1200) && second.advanceTicks(1200),
+			require(smoke::station::advanceSeconds(first, 20.0) && smoke::station::advanceSeconds(second, 20.0),
 				"the algae determinism pair failed to advance");
 			first.pauseSimulation();
 			second.pauseSimulation();
@@ -2775,7 +2775,7 @@ namespace
 		};
 		auto advanceOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
 		{
-			if (world.advanceTicks(ticks)) return true;
+			if (smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0)) return true;
 			auto const diagnostics = world.getStationSystemsDiagnostics();
 			std::fprintf(stderr, "%s failed: %s\n", what,
 				diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());

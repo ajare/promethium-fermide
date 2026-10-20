@@ -7,6 +7,7 @@
 #include <cmath>
 #include <set>
 
+#include "StationRig.h"
 namespace
 {
 	using smoke::require;
@@ -22,7 +23,7 @@ namespace
 	}
 	void run(core::World& w, size_t ticks)
 	{
-		w.resumeSimulation(); require(w.advanceTicks(ticks), "mixed observation run failed"); w.pauseSimulation();
+		w.resumeSimulation(); require(smoke::station::advanceSeconds(w, static_cast<double>(ticks) / 60.0), "mixed observation run failed"); w.pauseSimulation();
 	}
 	void observationIntegration(smoke::Context const&)
 	{
@@ -105,7 +106,7 @@ namespace
 		close(w.queryStationSystemsChart("stored-material/audit-product/kg").series[0].values.back(), 0.01 * snapshot.elapsedSeconds);
 		require(w.getStationSystemsSnapshot() == snapshot && document(w) == text && !w.isModified()
 			&& w.getStationSystemsObservationRevision() == revision, "viewing mutated simulation/document");
-		require(!w.advanceTick(), "pause advanced mixed station");
+		require(!smoke::station::advanceSeconds(w, 0.0166666666667), "pause advanced mixed station");
 		auto bad = settings; bad.stores.front().capacity = -1;
 		require(!w.configureStationSystems(bad, true) && w.getStationSystemsObservationRevision() == revision,
 			"refused apply replaced mixed history");

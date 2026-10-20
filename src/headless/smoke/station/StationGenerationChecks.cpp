@@ -179,7 +179,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "nominal chiller run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "nominal chiller run failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
 			require(snapshot.chillers.size() == 1, "chiller snapshot missing");
 			auto const& chillerSnap = snapshot.chillers[0];
@@ -263,7 +263,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "power-limited chiller run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "power-limited chiller run failed");
 			auto const& chillerSnap = world.getStationSystemsSnapshot().chillers[0];
 			// The pump takes its 0.5 kW first; the chiller gets the 1.0 kW
 			// left of its 2.5 kW demand: fraction 0.4.
@@ -297,7 +297,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "sink-limited chiller run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "sink-limited chiller run failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
 			auto const& chillerSnap = snapshot.chillers[0];
 			require(!chillerSnap.admitted && chillerSnap.sinkOverMaxCondensing,
@@ -343,7 +343,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "chiller gates run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "chiller gates run failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
 			auto const& zero = snapshot.chillers[0];
 			require(zero.disabled && zero.status == core::StationTransferStatus::Idle
@@ -375,7 +375,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "dry-loop chiller run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "dry-loop chiller run failed");
 			auto const& chillerSnap = world.getStationSystemsSnapshot().chillers[0];
 			require(chillerSnap.status == core::StationTransferStatus::Rejected
 				&& chillerSnap.admitted && !chillerSnap.sinkOverMaxCondensing,
@@ -408,7 +408,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "zero-flow chiller run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "zero-flow chiller run failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
 			auto const& loopSnap = snapshot.coolantLoops[0];
 			require(loopSnap.flowKgPerS == 0.0 && loopSnap.exchangeIntoLoopKW == 0.0
@@ -472,7 +472,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(1), "finite-cold-store tick failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "finite-cold-store tick failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
 			auto const& loopSnap = snapshot.coolantLoops[0];
 			auto const& chillerSnap = snapshot.chillers[0];
@@ -531,7 +531,7 @@ namespace
 			bool sawCapped = false, sawGated = false;
 			for (int tick = 0; tick < 120; ++tick)
 			{
-				require(world.advanceTicks(1), "setpoint-crossing tick failed");
+				require(smoke::station::advanceSeconds(world, 0.0166666666667), "setpoint-crossing tick failed");
 				auto const& snap = world.getStationSystemsSnapshot();
 				auto const& loopSnap = snap.coolantLoops[0];
 				auto const& chillerSnap = snap.chillers[0];
@@ -585,7 +585,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(1), "no-extractable-heat tick failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "no-extractable-heat tick failed");
 			auto const& snapshot = world.getStationSystemsSnapshot();
 			auto const& chillerSnap = snapshot.chillers[0];
 			require(chillerSnap.status == core::StationTransferStatus::Rejected
@@ -632,14 +632,14 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "finite-cold-store replay original failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "finite-cold-store replay original failed");
 			auto const expected = world.getStationSystemsSnapshot();
 			auto const expectedEvents = world.getStationSystemsEvents();
 			require(expected.chillers[0].extractedEnergyKJ > 0.0,
 				"the replay scenario produced no bounded cooling at all");
 			world.pauseSimulation(); world.resetSimulation();
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "finite-cold-store replay rerun failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "finite-cold-store replay rerun failed");
 			require(world.getStationSystemsSnapshot() == expected,
 				"the bounded chiller run is not deterministic across Reset");
 			require(world.getStationSystemsEvents() == expectedEvents,
@@ -691,7 +691,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			sandbox.resumeSimulation();
-			require(sandbox.advanceTicks(120),
+			require(smoke::station::advanceSeconds(sandbox, 2.0),
 				"Bundled Lua finite cold-side bound failed its in-sandbox assertions");
 			require(sandbox.getStationSystemsSnapshot().coolantLoops[0].loopTemperatureC
 				>= 5.0 - 1e-6,
@@ -719,7 +719,7 @@ namespace
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
 			// Mid-sun: full service (pump 0.5 + chiller 2.5 = 3.0 kW).
-			require(world.advanceTicks(static_cast<uint64_t>(5.0 / dt)),
+			require(smoke::station::advanceSeconds(world, 5.0),
 				"eclipse chiller run (sunlit leg) failed");
 			auto const lit = world.getStationSystemsSnapshot().chillers[0];
 			require(lit.status == core::StationTransferStatus::Full
@@ -729,14 +729,14 @@ namespace
 			// Advance to 10.5 s: the profile switched at the 10 s period
 			// boundary, and the half-second keeps the assertion clear of the
 			// boundary tick itself.
-			require(world.advanceTicks(static_cast<uint64_t>(5.5 / dt)),
+			require(smoke::station::advanceSeconds(world, 5.5),
 				"eclipse chiller run (dark leg) failed");
 			auto const dark = world.getStationSystemsSnapshot().chillers[0];
 			require(dark.status == core::StationTransferStatus::Rejected
 				&& dark.coolingKW == 0.0 && approx(dark.coolingUnmetKW, 6.0),
 				"eclipse left cooling supplied or the unmet remainder hidden");
 			// Back in the sun: service returns.
-			require(world.advanceTicks(static_cast<uint64_t>(14.5 / dt)),
+			require(smoke::station::advanceSeconds(world, 14.5),
 				"eclipse chiller run (recovery leg) failed");
 			auto const back = world.getStationSystemsSnapshot().chillers[0];
 			require(back.status == core::StationTransferStatus::Full
@@ -766,7 +766,7 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "chiller replay original run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "chiller replay original run failed");
 			auto const expected = world.getStationSystemsSnapshot();
 			auto const expectedEvents = world.getStationSystemsEvents();
 			require(expected.chillers.size() == 1
@@ -776,7 +776,7 @@ namespace
 			require(world.getStationSystemsSnapshot().elapsedSeconds == 0.0,
 				"reset did not clear the chiller runtime");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "chiller replay replay run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "chiller replay replay run failed");
 			require(world.getStationSystemsSnapshot() == expected,
 				"chiller scenario is not deterministic across Reset");
 			require(world.getStationSystemsEvents() == expectedEvents,
@@ -952,7 +952,7 @@ namespace
 				{ core::SolarArraySettings{"field", 20.0, sun} });
 			require(ok, ("nominal generator scenario was rejected: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(1200), "nominal generator run failed");
+			require(smoke::station::advanceSeconds(world, 20.0), "nominal generator run failed");
 			auto const snapshot = world.getStationSystemsSnapshot();
 			require(snapshot.power.generators.size() == 1, "generator snapshot missing");
 			auto const& live = snapshot.power.generators[0];
@@ -1017,7 +1017,7 @@ namespace
 				{ generator });
 			require(ok, ("zero-capacity generator was rejected: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "disabled generator run failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "disabled generator run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& live = snap.power.generators[0];
 			require(live.phase == core::StationGeneratorPhase::Stopped && live.disabled
@@ -1038,7 +1038,7 @@ namespace
 				{ generatorSettings() });
 			require(ok, ("no-pool generator scenario was rejected: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "no-pool generator run failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "no-pool generator run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& live = snap.power.generators[0];
 			require(live.phase == core::StationGeneratorPhase::Stopped
@@ -1061,7 +1061,7 @@ namespace
 				{ core::SolarArraySettings{"field", 20.0, sun} });
 			require(ok, ("hot-sink generator scenario was rejected: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "hot-sink generator run failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "hot-sink generator run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& live = snap.power.generators[0];
 			require(live.phase == core::StationGeneratorPhase::Stopped
@@ -1085,7 +1085,7 @@ namespace
 				{ core::SolarArraySettings{"field", 20.0, sun} });
 			require(ok, ("crank-fail generator scenario was rejected: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "crank-fail generator run failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "crank-fail generator run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& live = snap.power.generators[0];
 			require(live.phase == core::StationGeneratorPhase::Stopped
@@ -1125,7 +1125,7 @@ namespace
 			// The 10 kW waste into a 10 kJ/K sink warms it ~1 K/s: the
 			// trip lands near t = 10 s. At t = 12 s the machine is in
 			// the decay period; at t = 16 s the decay has dissipated.
-			require(world.advanceTicks(720), "trip generator run to decay failed");
+			require(smoke::station::advanceSeconds(world, 12.0), "trip generator run to decay failed");
 			auto const mid = world.getStationSystemsSnapshot();
 			auto const& tripped = mid.power.generators[0];
 			require(tripped.phase == core::StationGeneratorPhase::Shutdown,
@@ -1138,7 +1138,7 @@ namespace
 			require(sawEvent(world, "shutting down:"), "the trip was not reported");
 			require(sawEvent(world, "tripped to shutdown"),
 				"the trip did not say why");
-			require(world.advanceTicks(240), "trip generator run past decay failed");
+			require(smoke::station::advanceSeconds(world, 4.0), "trip generator run past decay failed");
 			auto const late = world.getStationSystemsSnapshot();
 			auto const& done = late.power.generators[0];
 			require(done.phase == core::StationGeneratorPhase::Stopped
@@ -1179,7 +1179,7 @@ namespace
 				{ core::SolarArraySettings{"field", 20.0, sun} });
 			require(ok, ("depletion generator scenario was rejected: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "depletion generator run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "depletion generator run failed");
 			auto const snapshot = world.getStationSystemsSnapshot();
 			auto const& live = snapshot.power.generators[0];
 			require(live.phase == core::StationGeneratorPhase::Stopped,
@@ -1219,18 +1219,18 @@ namespace
 				{ core::SolarArraySettings{"field", 20.0, sun} });
 			require(ok, ("ramp generator scenario was rejected: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "ramp generator run to 2 s failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "ramp generator run to 2 s failed");
 			auto const atTwo = world.getStationSystemsSnapshot().power.generators[0];
 			// One tick of slack: the machine enters Running on the first
 			// tick and starts slewing on the next, so the checkpoint holds
 			// the slew rate, not an exact tick count.
 			require(approx(atTwo.outputKW, 2.0, 0.02) && atTwo.status == core::StationTransferStatus::Partial,
 				"the ramp did not hold output to 1 kW per second at t = 2 s");
-			require(world.advanceTicks(180), "ramp generator run to 5 s failed");
+			require(smoke::station::advanceSeconds(world, 3.0), "ramp generator run to 5 s failed");
 			auto const atFive = world.getStationSystemsSnapshot().power.generators[0];
 			require(approx(atFive.outputKW, 5.0, 0.02),
 				"the ramp did not hold output to 1 kW per second at t = 5 s");
-			require(world.advanceTicks(360), "ramp generator run to 11 s failed");
+			require(smoke::station::advanceSeconds(world, 6.0), "ramp generator run to 11 s failed");
 			auto const atTen = world.getStationSystemsSnapshot().power.generators[0];
 			require(approx(atTen.outputKW, 10.0, 1e-6) && atTen.status == core::StationTransferStatus::Full,
 				"the generator did not reach the commanded point after ramping");
@@ -1252,7 +1252,7 @@ namespace
 				{ core::SolarArraySettings{"field", 20.0, sun} });
 			require(ok, ("replay generator scenario was rejected: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(1200), "replay generator original run failed");
+			require(smoke::station::advanceSeconds(world, 20.0), "replay generator original run failed");
 			auto const expected = world.getStationSystemsSnapshot();
 			auto const expectedEvents = world.getStationSystemsEvents();
 			require(expected.power.generators.size() == 1
@@ -1262,7 +1262,7 @@ namespace
 			require(world.getStationSystemsSnapshot().elapsedSeconds == 0.0,
 				"reset did not clear the generator runtime");
 			world.resumeSimulation();
-			require(world.advanceTicks(1200), "replay generator replay run failed");
+			require(smoke::station::advanceSeconds(world, 20.0), "replay generator replay run failed");
 			require(world.getStationSystemsSnapshot() == expected,
 				"generator scenario is not deterministic across Reset");
 			require(world.getStationSystemsEvents() == expectedEvents,
@@ -1359,7 +1359,7 @@ namespace
 				{ core::SolarArraySettings{"field", 1.0, sun} });
 			require(ok, ("solar-only startup audit scenario rejected: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(2),
+			require(smoke::station::advanceSeconds(world, 0.0333333333333),
 				"a source-exact startup draw failed the allocation audit");
 			require(!world.isSimulationPaused() && world.getStationSystemsSnapshot().healthy,
 				"the source-exact startup tick was not healthy");
@@ -1389,7 +1389,7 @@ namespace
 				{}, { auditLoad("rig", 1.0) });
 			require(ok, ("surplus-load startup audit scenario rejected: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(2),
+			require(smoke::station::advanceSeconds(world, 0.0333333333333),
 				"crank-plus-load demand that exactly matches the pool failed the audit");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.power.loads[0].status == core::StationTransferStatus::Full
@@ -1415,7 +1415,7 @@ namespace
 				{ core::BatterySettings{"cell", 10.0, 10.0, 10.0, 5.0, 5.0} });
 			require(ok, ("mixed-pool startup audit scenario rejected: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(2),
+			require(smoke::station::advanceSeconds(world, 0.0333333333333),
 				"a solar-plus-battery funded crank failed the allocation audit");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& live = snap.power.generators[0];
@@ -1442,7 +1442,7 @@ namespace
 			// genA enters Running on tick 1 and starts slewing on tick 2;
 			// genB sees genA's output and starts on tick 2; the crank and
 			// the load together consume genA's full 2 kW on tick 3.
-			require(world.advanceTicks(3),
+			require(smoke::station::advanceSeconds(world, 0.05),
 				"a running-generator-funded crank sharing the pool with a load failed the audit");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.power.generators[0].phase == core::StationGeneratorPhase::Running
@@ -1489,9 +1489,9 @@ namespace
 				{ core::SolarArraySettings{"field", 1.0, sun} });
 			require(ok, ("over-allocation probe scenario rejected: " + diagnostic).c_str());
 			probe.resumeSimulation();
-			require(probe.advanceTick(),
+			require(smoke::station::advanceSeconds(probe, 0.0166666666667),
 				"the probe failed before the crank tick it exists to test");
-			require(!probe.advanceTick(),
+			require(!smoke::station::advanceSeconds(probe, 0.0166666666667),
 				"a startup draw above the funded pool passed the allocation audit");
 			require(probe.isSimulationPaused() && !probe.getStationSystemsSnapshot().healthy,
 				"the over-allocation failure was not fail-visible and contained");
@@ -1542,11 +1542,11 @@ namespace
 				{ shutdownGenerator(dt / 2.0) });
 			require(ok, ("fractional-shutdown scenario rejected: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTick(), "fractional-shutdown tick 1 failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "fractional-shutdown tick 1 failed");
 			require(world.getStationSystemsSnapshot().power.generators[0].phase
 				== core::StationGeneratorPhase::Running,
 				"the generator did not start running on tick 1");
-			require(world.advanceTick(), "fractional-shutdown tick 2 failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "fractional-shutdown tick 2 failed");
 			{
 				auto const snap = world.getStationSystemsSnapshot();
 				auto const& live = snap.power.generators[0];
@@ -1554,7 +1554,7 @@ namespace
 					&& approx(live.outputKW, 1.0, 1e-9),
 					"the generator did not deliver 1 kW on tick 2");
 			}
-			require(world.advanceTick(), "fractional-shutdown tick 3 failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "fractional-shutdown tick 3 failed");
 			{
 				auto const trip = world.getStationSystemsSnapshot().power.generators[0];
 				require(trip.phase == core::StationGeneratorPhase::Shutdown
@@ -1566,7 +1566,7 @@ namespace
 				require(trip.coolingRequired,
 					"the decay-producing transition tick hid the cooling obligation");
 			}
-			require(world.advanceTick(), "fractional-shutdown tick 4 failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "fractional-shutdown tick 4 failed");
 			{
 				auto const done = world.getStationSystemsSnapshot().power.generators[0];
 				require(done.phase == core::StationGeneratorPhase::Stopped
@@ -1593,7 +1593,7 @@ namespace
 			auto const expected = world.getStationSystemsSnapshot();
 			auto const expectedEvents = world.getStationSystemsEvents();
 			world.pauseSimulation(); world.resetSimulation(); world.resumeSimulation();
-			require(world.advanceTicks(4), "fractional-shutdown replay failed");
+			require(smoke::station::advanceSeconds(world, 0.0666666666667), "fractional-shutdown replay failed");
 			require(world.getStationSystemsSnapshot() == expected,
 				"the fractional-shutdown scenario is not deterministic across Reset");
 			require(world.getStationSystemsEvents() == expectedEvents,
@@ -1618,11 +1618,11 @@ namespace
 				world.resumeSimulation();
 				// Tick 1 starts, tick 2 burns the 2 x dt kJ at 1 kW,
 				// tick 3 is the depletion transition where decay begins.
-				require(world.advanceTicks(2), "shutdown-profile run-up failed");
+				require(smoke::station::advanceSeconds(world, 0.0333333333333), "shutdown-profile run-up failed");
 				double bookedTotal = 0.0;
 				for (size_t index = 0; index < expectedBookings.size(); ++index)
 				{
-					require(world.advanceTick(), "shutdown-profile decay tick failed");
+					require(smoke::station::advanceSeconds(world, 0.0166666666667), "shutdown-profile decay tick failed");
 					auto const snap = world.getStationSystemsSnapshot();
 					auto const& live = snap.power.generators[0];
 					bookedTotal += expectedBookings[index];
@@ -1635,7 +1635,7 @@ namespace
 				}
 				// The tick after the last booked interval stops with the
 				// exact contracted total and no further heat.
-				require(world.advanceTick(), "shutdown-profile stop tick failed");
+				require(smoke::station::advanceSeconds(world, 0.0166666666667), "shutdown-profile stop tick failed");
 				auto const snap = world.getStationSystemsSnapshot();
 				auto const& done = snap.power.generators[0];
 				require(done.phase == core::StationGeneratorPhase::Stopped
@@ -1693,7 +1693,7 @@ namespace
 				world.resumeSimulation();
 				// Tick 1 is the Stopped -> Starting transition; the
 				// crank draws on tick 2 and is owed only half a tick.
-				require(world.advanceTicks(2), "fractional-startup ticks failed");
+				require(smoke::station::advanceSeconds(world, 0.0333333333333), "fractional-startup ticks failed");
 				auto const snap = world.getStationSystemsSnapshot();
 				auto const& live = snap.power.generators[0];
 				require(live.phase == core::StationGeneratorPhase::Running,
@@ -1728,7 +1728,7 @@ namespace
 					{ core::SolarArraySettings{"field", 100.0, sun} });
 				require(ok, ("startup-profile scenario rejected: " + diagnostic).c_str());
 				world.resumeSimulation();
-				require(world.advanceTick(), "startup-profile transition tick failed");
+				require(smoke::station::advanceSeconds(world, 0.0166666666667), "startup-profile transition tick failed");
 				require(world.getStationSystemsSnapshot().power.generators[0].phase
 					== core::StationGeneratorPhase::Starting,
 					"the generator did not enter Starting on the transition tick");
@@ -1738,7 +1738,7 @@ namespace
 					{{1.0, dt}, {1.0, 2.0 * dt}, {0.5, 2.5 * dt}};
 				for (auto const& [drawKW, receivedKJ] : cranks)
 				{
-					require(world.advanceTick(), "startup-profile crank tick failed");
+					require(smoke::station::advanceSeconds(world, 0.0166666666667), "startup-profile crank tick failed");
 					auto const snap = world.getStationSystemsSnapshot();
 					auto const& live = snap.power.generators[0];
 					require(approx(live.startupDrawKW, drawKW, 1e-9)
@@ -1756,7 +1756,7 @@ namespace
 					"the startup dissipation is not exactly startupPowerKW x startupSeconds");
 				// One running tick later the crank is gone and the
 				// received total has not grown.
-				require(world.advanceTick(), "startup-profile running tick failed");
+				require(smoke::station::advanceSeconds(world, 0.0166666666667), "startup-profile running tick failed");
 				auto const running = world.getStationSystemsSnapshot().power.generators[0];
 				require(running.phase == core::StationGeneratorPhase::Running
 					&& running.startupDrawKW == 0.0
@@ -1773,7 +1773,7 @@ namespace
 				auto const expected = world.getStationSystemsSnapshot();
 				auto const expectedEvents = world.getStationSystemsEvents();
 				world.pauseSimulation(); world.resetSimulation(); world.resumeSimulation();
-				require(world.advanceTicks(5), "startup-profile replay failed");
+				require(smoke::station::advanceSeconds(world, 0.0833333333333), "startup-profile replay failed");
 				require(world.getStationSystemsSnapshot() == expected,
 					"the fractional-startup scenario is not deterministic across Reset");
 				require(world.getStationSystemsEvents() == expectedEvents,
@@ -1795,12 +1795,12 @@ namespace
 					{ core::BatterySettings{"cell", 10.0, 10.0, 10.0, 5.0, 5.0} });
 				require(ok, ("prorated-pool startup scenario rejected: " + diagnostic).c_str());
 				world.resumeSimulation();
-				require(world.advanceTicks(2), "prorated-pool first crank tick failed");
+				require(smoke::station::advanceSeconds(world, 0.0333333333333), "prorated-pool first crank tick failed");
 				auto const first = world.getStationSystemsSnapshot();
 				require(first.power.generators[0].phase == core::StationGeneratorPhase::Starting
 					&& approx(first.power.batteryDischargeKW, 0.25, 1e-9),
 					"the full-power crank did not top up exactly 0.25 kW from the battery");
-				require(world.advanceTick(), "prorated-pool final crank tick failed");
+				require(smoke::station::advanceSeconds(world, 0.0166666666667), "prorated-pool final crank tick failed");
 				auto const snap = world.getStationSystemsSnapshot();
 				auto const& live = snap.power.generators[0];
 				require(live.phase == core::StationGeneratorPhase::Running

@@ -169,7 +169,7 @@ namespace
 			require(atmosConfigure(world, { atmosphere("lab",
 				100.0, 23.2, 79.0, 1.0, 0.5, 20.0) }).first, "analytic atmosphere refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(1), "analytic run failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "analytic run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.atmospheres.size() == 1, "compartment missing from snapshot");
 			auto const& lab = snap.atmospheres[0];
@@ -206,7 +206,7 @@ namespace
 			compartment.leakRateKgPerS = 0.06;
 			require(atmosConfigure(world, { compartment }).first, "leaky atmosphere refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "leak run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "leak run failed");
 			auto const& hold = world.getStationSystemsSnapshot().atmospheres[0];
 			auto const leakedExpected = 0.06 * 600.0 * dt;
 			require(approx(hold.leakedKg, leakedExpected, 1e-9),
@@ -229,7 +229,7 @@ namespace
 			compartment.leakRateKgPerS = 1.0;
 			require(atmosConfigure(world, { compartment }).first, "draining atmosphere refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "drain run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "drain run failed");
 			auto const& tiny = world.getStationSystemsSnapshot().atmospheres[0];
 			require(std::abs(tiny.oxygenKg) < 1e-9 && std::abs(tiny.nitrogenKg) < 1e-9,
 				"the leak did not drain the compartment to empty");
@@ -251,7 +251,7 @@ namespace
 			compartment.sensibleHeatPerOccupantKW = 0.1;
 			require(atmosConfigure(world, { compartment }).first, "starved atmosphere refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "starved run failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "starved run failed");
 			auto const& small = world.getStationSystemsSnapshot().atmospheres[0];
 			require(std::abs(small.oxygenKg) < 1e-9, "oxygen draw went below zero inventory");
 			require(small.lastOxygenUnmetKg > 0.0,
@@ -277,7 +277,7 @@ namespace
 			require(atmosConfigure(world, { atmosphere("steam",
 				100.0, 20.0, 80.0, 0.0, 3.0, 20.0) }).first, "vapour compartment refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(1), "vapour run failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "vapour run failed");
 			auto const& steam = world.getStationSystemsSnapshot().atmospheres[0];
 			// #564: the constraint is the saturation at the published,
 			// coupled end-of-tick temperature - the latent heat warmed the
@@ -318,7 +318,7 @@ namespace
 			require(atmosConfigure(world, { compartment }, {},
 				{ reservoir("cold", 1000.0, 0.0) }).first, "saturated cooling setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(1), "saturated cooling tick failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "saturated cooling tick failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& air = snap.atmospheres[0];
 			auto const& cold = snap.thermal.reservoirs[0];
@@ -382,7 +382,7 @@ namespace
 				{ reservoir("cold-wet", 1000.0, 0.0), reservoir("cold-dry", 1000.0, 0.0) }).first,
 				"latent inertia setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(300), "latent inertia run failed");
+			require(smoke::station::advanceSeconds(world, 5.0), "latent inertia run failed");
 			auto const& wetAir = world.getStationSystemsSnapshot().atmospheres[0];
 			auto const& dryAir = world.getStationSystemsSnapshot().atmospheres[1];
 			require(wetAir.condensedKg > 0.0 && dryAir.condensedKg == 0.0,
@@ -415,7 +415,7 @@ namespace
 			require(atmosConfigure(world, { compartment }, {},
 				{ reservoir("hot", 1000.0, 40.0) }).first, "heating setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "heating run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "heating run failed");
 			auto const& air = world.getStationSystemsSnapshot().atmospheres[0];
 			require(air.temperatureC > 25.0, "the warm bus did not heat the air");
 			require(air.condensedKg == 0.0 && air.lastVapourCondensedKg == 0.0,
@@ -442,7 +442,7 @@ namespace
 			require(atmosConfigure(world, { compartment }, {},
 				{ reservoir("cold", 1000.0, 0.0) }).first, "cooling replay setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "cooling replay first pass failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "cooling replay first pass failed");
 			auto const expected = world.getStationSystemsSnapshot();
 			auto const expectedEvents = world.getStationSystemsEvents();
 			require(expected.atmospheres[0].condensedKg > 0.0,
@@ -450,7 +450,7 @@ namespace
 			world.pauseSimulation();
 			world.resetSimulation();
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "cooling replay second pass failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "cooling replay second pass failed");
 			require(world.getStationSystemsSnapshot() == expected,
 				"the saturated cooling scenario is not deterministic across reset replay");
 			require(world.getStationSystemsEvents() == expectedEvents,
@@ -477,7 +477,7 @@ namespace
 				{ reservoir("cold", 1000.0, 0.0) }).first,
 				"condensation isolation pair refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "condensation isolation run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "condensation isolation run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.atmospheres[0].condensedKg > 0.0,
 				"the isolation scenario's cooling side condensed nothing");
@@ -507,7 +507,7 @@ namespace
 				{ airlockCycle("vent", "normalSide", 1.0, 1.0, 0.0, 0.5) }).first,
 				"isolation pair refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "isolation run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "isolation run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.atmospheres.size() == 2, "isolation pair lost a compartment");
 			auto const& hazard = snap.atmospheres[1];
@@ -535,7 +535,7 @@ namespace
 				  airlockCycle("last", "stub", 10.0, 5.0, 0.0, 0.5) }).first,
 				"airlock scenario refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(1800), "airlock scenario run failed");
+			require(smoke::station::advanceSeconds(world, 30.0), "airlock scenario run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.airlockCycles.size() == 2, "airlock cycles missing from snapshot");
 			auto const& crew = snap.airlockCycles[0];
@@ -576,7 +576,7 @@ namespace
 				|| world.getStationSystemsSnapshot().atmospheres[0].leakedKg == 0.0,
 				"reset did not reconstruct the compartment starting state");
 			world.resumeSimulation();
-			require(world.advanceTicks(1800), "airlock replay run failed");
+			require(smoke::station::advanceSeconds(world, 30.0), "airlock replay run failed");
 			require(world.getStationSystemsSnapshot() == expected,
 				"the airlock scenario is not deterministic across reset replay");
 			require(world.getStationSystemsEvents() == expectedEvents,
@@ -595,7 +595,7 @@ namespace
 			require(atmosConfigure(world, { warm, adiabatic }, {},
 				{ reservoir("bus", 50000.0, 40.0) }).first, "thermal coupling refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "thermal coupling run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "thermal coupling run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& warmSide = snap.atmospheres[0];
 			auto const& sealed = snap.atmospheres[1];
@@ -641,7 +641,7 @@ namespace
 			auto previousGapK = 20.0;
 			for (int tick = 0; tick < 120; ++tick)
 			{
-				require(world.advanceTicks(1), "stiff air tick failed");
+				require(smoke::station::advanceSeconds(world, 0.0166666666667), "stiff air tick failed");
 				auto const& air = world.getStationSystemsSnapshot().atmospheres[0];
 				auto const& bus = world.getStationSystemsSnapshot().thermal.reservoirs[0];
 				// The air never leaves the range the exchange started in:
@@ -713,7 +713,7 @@ namespace
 			world.resumeSimulation();
 			for (int tick = 0; tick < 60; ++tick)
 			{
-				require(world.advanceTicks(1), "shared air/loop tick failed");
+				require(smoke::station::advanceSeconds(world, 0.0166666666667), "shared air/loop tick failed");
 				auto const& snapshot = world.getStationSystemsSnapshot();
 				auto const& bus = snapshot.thermal.reservoirs[0];
 				auto const& air = snapshot.atmospheres[0];
@@ -779,7 +779,7 @@ namespace
 			require(atmosConfigure(sandboxStiff, { compartment }, {},
 				{ reservoir("bus", 1.0, 0.0) }).first, "sandbox stiff air coupling refused");
 			sandboxStiff.resumeSimulation();
-			require(sandboxStiff.advanceTicks(60),
+			require(smoke::station::advanceSeconds(sandboxStiff, 1.0),
 				"Bundled Lua implicit air exchange failed its in-sandbox assertions");
 			require(sandboxStiff.getStationSystemsSnapshot().atmospheres[0].exchangedEnergyKJ < 0.0,
 				"host did not mirror the sandbox's heat-out-of-compartment exchange");
@@ -796,7 +796,7 @@ namespace
 			compartment.sensibleHeatPerOccupantKW = 0.1;
 			require(atmosConfigure(world, { compartment }).first, "occupancy heat refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "occupancy heat run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "occupancy heat run failed");
 			auto const& crew = world.getStationSystemsSnapshot().atmospheres[0];
 			// 4 x 0.1 kW for 10 s into 10000 kJ/K: +0.004 C.
 			require(approx(crew.temperatureC, 20.0 + 0.4 * 10.0 / 10000.0, 1e-9),
@@ -963,7 +963,7 @@ namespace
 				require(hazConfigure(crossWorld, hazStores(), { normalCrossClass }, {}, 20.0).first,
 					"a cross-class treatment was refused at configuration");
 				crossWorld.resumeSimulation();
-				require(crossWorld.advanceTicks(60), "cross-class treatment run failed");
+				require(smoke::station::advanceSeconds(crossWorld, 1.0), "cross-class treatment run failed");
 				auto const elapsed = 60.0 * dt;
 				auto const snap = crossWorld.getStationSystemsSnapshot();
 				require(snap.waterTreatments.size() == 1,
@@ -1004,7 +1004,7 @@ namespace
 			require(hazConfigure(world, hazStores(), {}, { down, up }, 20.0).first,
 				"a cross-class transfer pair was refused at configuration");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "cross-class transfer run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "cross-class transfer run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.transfers.size() == 2, "cross-class transfers missing from snapshot");
@@ -1056,7 +1056,7 @@ namespace
 			require(core::validateStationSystemsSettings(settings, diagnostic), diagnostic.c_str());
 			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "cross-class conversion run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "cross-class conversion run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.conversions.size() == 1, "cross-class conversion missing from snapshot");
@@ -1088,7 +1088,7 @@ namespace
 				{ hazTreatment("plant") },
 				{ recover }, 20.0).first, "cleared recovery setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "cleared recovery run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "cleared recovery run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.waterTreatments.size() == 1, "treatment missing from snapshot");
@@ -1123,7 +1123,7 @@ namespace
 			world.pauseSimulation(); world.finishBuild();
 			require(hazConfigure(world, hazStores(), {hazTreatment("plant")}, {}, 20.0).first,
 				"energy-only treatment refused");
-			world.resumeSimulation(); require(world.advanceTicks(120), "energy-only run failed");
+			world.resumeSimulation(); require(smoke::station::advanceSeconds(world, 2.0), "energy-only run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& plant = snap.waterTreatments[0];
 			require(plant.qualityAccepted && plant.treatmentEvidenced && plant.heldKg == 0
@@ -1139,7 +1139,7 @@ namespace
 				{ hazTreatment("plant") },
 				{ }, 1.0).first, "evidence-failed setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "evidence-failed run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "evidence-failed run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& plant = snap.waterTreatments[0];
 			require(plant.filtrationCompleted, "the process ran without a filtration pass");
@@ -1172,7 +1172,7 @@ namespace
 				{ }, 20.0).first,
 				"the process consumable was refused at configuration");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "process-kit-covered run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "process-kit-covered run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& plant = snap.waterTreatments[0];
@@ -1203,7 +1203,7 @@ namespace
 				{ treatment }, { }, 20.0).first,
 				"the throttled process-kit setup was refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "process-kit-throttled run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "process-kit-throttled run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& plant = snap.waterTreatments[0];
 			require(approx(plant.acceptedKg, 0.02) && approx(plant.heldKg, 0.0),
@@ -1236,7 +1236,7 @@ namespace
 				{ treatment }, { }, 20.0).first,
 				"the reserve-protected process-kit setup was refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "reserve-protected process-kit run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "reserve-protected process-kit run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& plant = snap.waterTreatments[0];
 			require(approx(plant.acceptedKg, 0.01) && approx(plant.heldKg, 0.0),
@@ -1292,7 +1292,7 @@ namespace
 			require(world.configureStationSystems(settings, false, &diagnostic),
 				("heat-only setup refused: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "heat-only run failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "heat-only run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.coolantLoops.size() == 1, "loop missing from snapshot");
 			auto const& live = snap.coolantLoops[0];
@@ -1340,7 +1340,7 @@ namespace
 			require(world.configureStationSystems(settings, false, &diagnostic),
 				("waste segregation setup refused: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "waste segregation run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "waste segregation run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.wasteEjections.size() == 2, "ejection contracts missing");
 			for (auto const& ejection : snap.wasteEjections)
@@ -1381,7 +1381,7 @@ namespace
 				{ hazTreatment("plant") },
 				{ }, 20.0).first, "sandbox containment setup refused");
 			sandbox.resumeSimulation();
-			require(sandbox.advanceTicks(120),
+			require(smoke::station::advanceSeconds(sandbox, 2.0),
 				"Bundled Lua treatment model failed its in-sandbox assertions");
 			auto const snap = sandbox.getStationSystemsSnapshot();
 			require(snap.healthy && snap.waterTreatments[0].heldKg == 0.0
@@ -1398,12 +1398,12 @@ namespace
 				{ hazTreatment("plant") },
 				{ }, 20.0).first, "replay containment setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(90), "replay containment run failed");
+			require(smoke::station::advanceSeconds(world, 1.5), "replay containment run failed");
 			auto const first = world.getStationSystemsSnapshot();
 			world.pauseSimulation();
 			world.resetSimulation();
 			world.resumeSimulation();
-			require(world.advanceTicks(90), "replay containment rerun failed");
+			require(smoke::station::advanceSeconds(world, 1.5), "replay containment rerun failed");
 			auto const second = world.getStationSystemsSnapshot();
 			require(first.waterTreatments == second.waterTreatments,
 				"the treatment ledgers did not replay identically after reset");
@@ -1674,7 +1674,7 @@ namespace
 			require(world.configureStationSystems(settings, false, &diagnostic),
 				("a compartment-delivering cell with a distinct hydrogen store was refused: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(5), "the compartment-delivering cell run failed");
+			require(smoke::station::advanceSeconds(world, 0.0833333333333), "the compartment-delivering cell run failed");
 			require(world.getStationSystemsDiagnostics().empty(),
 				"the compartment-delivering cell raised a runtime diagnostic");
 			require(approx(findStore(world.getStationSystemsSnapshot(), "gas").currentQualified,
@@ -1691,7 +1691,7 @@ namespace
 			require(gasConfigure(world, gasStores(), { electrolyzer("cell") }, {}, 100.0).first,
 				"nominal electrolysis setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "nominal electrolysis run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "nominal electrolysis run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const split = 0.001 * elapsed;
 			auto const o2 = split * o2Ratio;
@@ -1740,7 +1740,7 @@ namespace
 			require(gasConfigure(world, gasStores(), { electrolyzer("cell") }, {},
 				100.0, 70.0).first, "hot-sink electrolysis setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "hot-sink electrolysis run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "hot-sink electrolysis run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& cell = snap.electrolyzers[0];
 			require(cell.status == core::StationTransferStatus::Rejected
@@ -1764,7 +1764,7 @@ namespace
 			require(gasConfigure(world, gasStores(), { electrolyzer("cell") }, {}, 0.0).first,
 				"no-power electrolysis setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "no-power electrolysis run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "no-power electrolysis run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& cell = snap.electrolyzers[0];
 			require(cell.status == core::StationTransferStatus::Rejected
@@ -1783,7 +1783,7 @@ namespace
 			require(gasConfigure(world, gasStores(), { electrolyzer("cell") }, {}, 1.0).first,
 				"capped electrolysis setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "capped electrolysis run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "capped electrolysis run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& cell = snap.electrolyzers[0];
@@ -1811,7 +1811,7 @@ namespace
 			require(gasConfigure(world, stores, { electrolyzer("cell") }, {}, 100.0).first,
 				"full-h2 electrolysis setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "full-h2 electrolysis run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "full-h2 electrolysis run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& cell = snap.electrolyzers[0];
 			require(approx(findStore(snap, "h2").currentQualified, 0.00005)
@@ -1837,7 +1837,7 @@ namespace
 			require(gasConfigure(world, gasStores(), { cell }, {}, 100.0).first,
 				"compartment-delivery electrolysis setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "compartment-delivery electrolysis run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "compartment-delivery electrolysis run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const split = 0.001 * elapsed;
 			auto const o2 = split * o2Ratio;
@@ -1862,7 +1862,7 @@ namespace
 			require(gasConfigure(world, gasStores(), {}, { capture("scrub") }, 100.0).first,
 				"nominal capture setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "nominal capture run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "nominal capture run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const captured = 0.001 * elapsed;
 			auto const snap = world.getStationSystemsSnapshot();
@@ -1914,7 +1914,7 @@ namespace
 			require(world.configureStationSystems(settings, false, &diagnostic),
 				"clean-air capture setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "clean-air capture run failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "clean-air capture run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& scrub = snap.co2Captures[0];
 			require(approx(scrub.capturedKg, 0.0002)
@@ -1939,7 +1939,7 @@ namespace
 			require(gasConfigure(world, stores, {}, { capture("scrub") }, 100.0).first,
 				"no-media capture setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "no-media capture run failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "no-media capture run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& scrub = snap.co2Captures[0];
 			require(scrub.capturedKg <= 5e-4 + 1e-9,

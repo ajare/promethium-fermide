@@ -355,7 +355,7 @@ namespace
 					{ processor("pyrolysis") }, 100.0).first,
 					"two machines sharing the methane and hydrogen stores were refused");
 				world.resumeSimulation();
-				require(world.advanceTicks(60), "the shared-store machine run failed");
+				require(smoke::station::advanceSeconds(world, 1.0), "the shared-store machine run failed");
 				require(world.getStationSystemsDiagnostics().empty(),
 					"the shared-store machine raised a runtime diagnostic");
 				require(world.getStationSystemsSnapshot().sabatierReactors.size() == 1
@@ -373,7 +373,7 @@ namespace
 			require(carbonConfigure(world, carbonStores(), { reactor("sab") }, {}, 100.0).first,
 				"nominal Sabatier setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "nominal Sabatier run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "nominal Sabatier run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const converted = 0.001 * elapsed;
 			auto const h2 = converted * h2PerCo2;
@@ -423,7 +423,7 @@ namespace
 			require(carbonConfigure(world, stores, {}, { processor("pyrolysis") }, 100.0).first,
 				"nominal methane-processing setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "nominal methane-processing run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "nominal methane-processing run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const processed = 0.001 * elapsed;
 			auto const h2 = processed * h2PerCh4;
@@ -490,7 +490,7 @@ namespace
 			// hydrogen sustains about 1441 ticks of the chain at the
 			// 1/60 s fixed timestep; run well past the exhaustion into
 			// the asymptotic decay tail.
-			require(world.advanceTicks(1550), "integrated carbon-chain run failed");
+			require(smoke::station::advanceSeconds(world, 25.8333333333), "integrated carbon-chain run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& cell = snap.sabatierReactors[0];
 			auto const& unit = snap.methaneProcessors[0];
@@ -538,7 +538,7 @@ namespace
 			require(carbonConfigure(world, stores, { reactor("sab") }, {}, 100.0).first,
 				"full-methane setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "full-methane run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "full-methane run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.sabatierReactors[0].status == core::StationTransferStatus::Rejected
 				&& snap.sabatierReactors[0].co2ConsumedKg == 0.0
@@ -559,7 +559,7 @@ namespace
 			require(carbonConfigure(world, stores, {}, { processor("pyrolysis") }, 100.0).first,
 				"full-carbon setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "full-carbon run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "full-carbon run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.methaneProcessors[0].status == core::StationTransferStatus::Rejected
 				&& snap.methaneProcessors[0].methaneConsumedKg == 0.0
@@ -577,7 +577,7 @@ namespace
 			require(carbonConfigure(world, stores, { reactor("sab") }, {}, 100.0).first,
 				"filling-water setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "filling-water run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "filling-water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(approx(findStore(snap, "rawWater").currentQualified, 0.0002),
 				"the water store did not fill to capacity");
@@ -604,7 +604,7 @@ namespace
 				{ processor("pyrolysis") }, 100.0).first,
 				"blocked-destination setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "blocked-destination run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "blocked-destination run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.sabatierReactors[0].scale < 1.0
 				&& snap.sabatierReactors[0].limiter.find("methane store") != std::string::npos,
@@ -628,7 +628,7 @@ namespace
 			require(carbonConfigure(world, carbonStores(), { offReactor }, { offProcessor }, 100.0).first,
 				"disabled-stage setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "disabled-stage run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "disabled-stage run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.sabatierReactors[0].disabled
 				&& snap.sabatierReactors[0].status == core::StationTransferStatus::Idle
@@ -650,7 +650,7 @@ namespace
 				{ processor("pyrolysis") }, 100.0, 70.0).first,
 				"hot-sink carbon setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "hot-sink carbon run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "hot-sink carbon run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.sabatierReactors[0].status == core::StationTransferStatus::Rejected
 				&& !snap.sabatierReactors[0].coolingAvailable
@@ -677,7 +677,7 @@ namespace
 				{ processor("pyrolysis") }, 0.0).first,
 				"no-power carbon setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "no-power carbon run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "no-power carbon run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.sabatierReactors[0].status == core::StationTransferStatus::Rejected
 				&& snap.sabatierReactors[0].co2ConsumedKg == 0.0
@@ -709,7 +709,7 @@ namespace
 			// 0.02 kg of drawable hydrogen at 0.01 kg/s CO2 (0.001832 kg/s
 			// hydrogen) lasts about 655 ticks at the 1/60 s fixed
 			// timestep; run past the exhaustion.
-			require(world.advanceTicks(700), "protected-reserve carbon run failed");
+			require(smoke::station::advanceSeconds(world, 11.6666666667), "protected-reserve carbon run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(findStore(snap, "h2").currentQualified >= 9.98 - 1e-9,
 				"the reactor drew into the protected hydrogen reserve");
@@ -1067,7 +1067,7 @@ namespace
 			require(nutrientConfigure(world, stores, { probe }, 100.0).first,
 				"the media/stock configuration was refused through the public seam");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "the media/stock rig failed to tick");
+			require(smoke::station::advanceSeconds(world, 1.0), "the media/stock rig failed to tick");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.enabled && snap.microbialProcessors.size() == 1,
 				"the media/stock rig did not run");
@@ -1091,7 +1091,7 @@ namespace
 			require(nutrientConfigure(world, nutrientStores(), { processor("digester") },
 				100.0).first, "nominal nutrient-recovery setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "nominal nutrient-recovery run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "nominal nutrient-recovery run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const fed = 0.001 * elapsed;
 			auto const snap = world.getStationSystemsSnapshot();
@@ -1164,7 +1164,7 @@ namespace
 			require(nutrientConfigure(world, stores, { processor("digester") },
 				100.0).first, "atmospheric-feed setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "atmospheric-feed run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "atmospheric-feed run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const fed = 0.001 * elapsed;
 			auto const snap = world.getStationSystemsSnapshot();
@@ -1199,7 +1199,7 @@ namespace
 			require(nutrientConfigure(world, stores, { processor("digester") },
 				100.0).first, "absent-feedstock setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "absent-feedstock run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "absent-feedstock run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.microbialProcessors[0].status == core::StationTransferStatus::Rejected
 				&& snap.microbialProcessors[0].feedConsumedKg == 0.0
@@ -1219,7 +1219,7 @@ namespace
 			require(nutrientConfigure(world, nutrientStores(), { processor("digester") },
 				0.0).first, "no-power setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "no-power run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "no-power run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.microbialProcessors[0].status == core::StationTransferStatus::Rejected
 				&& snap.microbialProcessors[0].feedConsumedKg == 0.0
@@ -1239,7 +1239,7 @@ namespace
 			require(nutrientConfigure(cold, nutrientStores(), { processor("digester") },
 				100.0, 10.0).first, "cold-sink setup refused");
 			cold.resumeSimulation();
-			require(cold.advanceTicks(60), "cold-sink run failed");
+			require(smoke::station::advanceSeconds(cold, 1.0), "cold-sink run failed");
 			auto const snap = cold.getStationSystemsSnapshot();
 			require(snap.microbialProcessors[0].status == core::StationTransferStatus::Rejected
 				&& !snap.microbialProcessors[0].temperatureEligible
@@ -1252,7 +1252,7 @@ namespace
 			require(nutrientConfigure(hot, nutrientStores(), { processor("digester") },
 				100.0, 50.0).first, "hot-sink setup refused");
 			hot.resumeSimulation();
-			require(hot.advanceTicks(60), "hot-sink run failed");
+			require(smoke::station::advanceSeconds(hot, 1.0), "hot-sink run failed");
 			auto const hotSnap = hot.getStationSystemsSnapshot();
 			require(hotSnap.microbialProcessors[0].status == core::StationTransferStatus::Rejected
 				&& !hotSnap.microbialProcessors[0].temperatureEligible
@@ -1275,7 +1275,7 @@ namespace
 			require(nutrientConfigure(world, stores, { processor("digester") },
 				100.0).first, "full-nutrient-store setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "full-nutrient-store run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "full-nutrient-store run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.microbialProcessors[0].status == core::StationTransferStatus::Rejected
 				&& snap.microbialProcessors[0].feedConsumedKg == 0.0
@@ -1291,7 +1291,7 @@ namespace
 			require(nutrientConfigure(filling, fillingStores, { processor("digester") },
 				100.0).first, "filling-recovered-water setup refused");
 			filling.resumeSimulation();
-			require(filling.advanceTicks(180), "filling-recovered-water run failed");
+			require(smoke::station::advanceSeconds(filling, 3.0), "filling-recovered-water run failed");
 			auto const fillSnap = filling.getStationSystemsSnapshot();
 			require(approx(findStore(fillSnap, "recoveredWater").currentQualified, 0.0006),
 				"the recovered water store did not fill to capacity");
@@ -1317,7 +1317,7 @@ namespace
 			world.resumeSimulation();
 			// 0.01 kg of drawable feed at 0.001 kg/s lasts 10 s = 600
 			// ticks; run past the exhaustion.
-			require(world.advanceTicks(660), "protected-reserve run failed");
+			require(smoke::station::advanceSeconds(world, 11.0), "protected-reserve run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(findStore(snap, "waste").currentQualified >= 0.99 - 1e-9,
 				"the processor drew into the protected waste reserve");
@@ -1340,7 +1340,7 @@ namespace
 			require(nutrientConfigure(world, nutrientStores(), { offProcessor }, 100.0).first,
 				"disabled-stage setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "disabled-stage run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "disabled-stage run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.microbialProcessors[0].disabled
 				&& snap.microbialProcessors[0].status == core::StationTransferStatus::Idle
@@ -1492,7 +1492,7 @@ namespace
 			require(configure(world, conditionStores(), processor("digester")),
 				"benign-condition setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "benign-condition run failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "benign-condition run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& unit = snap.microbialProcessors[0];
 			require(approx(unit.condition, 1.0) && unit.lastStressors.empty()
@@ -1513,12 +1513,12 @@ namespace
 			require(configure(world, stores, processor("digester")),
 				"starvation setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(180), "starvation digest phase failed");
+			require(smoke::station::advanceSeconds(world, 3.0), "starvation digest phase failed");
 			auto const digestSnap = world.getStationSystemsSnapshot();
 			require(approx(digestSnap.microbialProcessors[0].condition, 1.0)
 				&& approx(digestSnap.microbialProcessors[0].feedConsumedKg, 0.003),
 				"the culture did not digest the available feed at full condition");
-			require(world.advanceTicks(120), "starvation degrade phase failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "starvation degrade phase failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& unit = snap.microbialProcessors[0];
 			// 2 s starved at 0.1 condition/s -> 0.8, within one tick of
@@ -1546,7 +1546,7 @@ namespace
 			unit.recoveryPerHour = 0.0; // pure throttle: no recovery in this world
 			require(configure(world, conditionStores(), unit), "throttle setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "throttle run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "throttle run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& live = snap.microbialProcessors[0];
@@ -1586,7 +1586,7 @@ namespace
 			require(configure(world, stores, unit), "stock-recovery setup refused");
 			world.resumeSimulation();
 			// 1 s of recovery: 0.02 points at 10 kg/point = 0.2 kg stock.
-			require(world.advanceTicks(60), "stock-recovery first phase failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "stock-recovery first phase failed");
 			auto const first = world.getStationSystemsSnapshot();
 			require(closeTo(first.microbialProcessors[0].condition, 0.52, 0.01)
 				&& first.microbialProcessors[0].recovering
@@ -1596,7 +1596,7 @@ namespace
 				"recovery restored capacity instantly instead of being rate-bounded");
 			// 1.0 kg of stock buys at most 0.1 condition points: the
 			// culture caps at 0.6 once the stock is gone.
-			require(world.advanceTicks(360), "stock-recovery second phase failed");
+			require(smoke::station::advanceSeconds(world, 6.0), "stock-recovery second phase failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(closeTo(snap.microbialProcessors[0].condition, 0.6, 0.01)
 				&& findStore(snap, "stock").currentQualified <= 1e-9
@@ -1615,7 +1615,7 @@ namespace
 			require(configure(cold, conditionStores(), processor("digester"), 10.0),
 				"cold-stress setup refused");
 			cold.resumeSimulation();
-			require(cold.advanceTicks(120), "cold-stress run failed");
+			require(smoke::station::advanceSeconds(cold, 2.0), "cold-stress run failed");
 			auto const coldSnap = cold.getStationSystemsSnapshot();
 			require(closeTo(coldSnap.microbialProcessors[0].condition, 0.9, 0.01)
 				&& coldSnap.microbialProcessors[0].lastStressors == "cold stress"
@@ -1627,7 +1627,7 @@ namespace
 			require(configure(hot, conditionStores(), processor("digester"), 50.0),
 				"heat-stress setup refused");
 			hot.resumeSimulation();
-			require(hot.advanceTicks(120), "heat-stress run failed");
+			require(smoke::station::advanceSeconds(hot, 2.0), "heat-stress run failed");
 			auto const hotSnap = hot.getStationSystemsSnapshot();
 			require(closeTo(hotSnap.microbialProcessors[0].condition, 0.2, 0.01)
 				&& hotSnap.microbialProcessors[0].lastStressors == "heat stress"
@@ -1645,7 +1645,7 @@ namespace
 			require(configure(world, stores, processor("digester")),
 				"media-exhaustion setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "media-exhaustion run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "media-exhaustion run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(closeTo(snap.microbialProcessors[0].condition, 0.8, 0.01)
 				&& snap.microbialProcessors[0].lastStressors == "consumable exhaustion"
@@ -1674,7 +1674,7 @@ namespace
 			// Through the starvation gap: 3 s digesting, then degrading
 			// at 0.1/s until the 6 s resupply. Sample mid-gap while the
 			// culture is definitely unfed.
-			require(world.advanceTicks(300), "adversity-cycle starve phase failed");
+			require(smoke::station::advanceSeconds(world, 5.0), "adversity-cycle starve phase failed");
 			auto const starved = world.getStationSystemsSnapshot();
 			require(closeTo(starved.microbialProcessors[0].condition, 0.8, 0.01)
 				&& starved.microbialProcessors[0].lastStressors == "starvation",
@@ -1683,7 +1683,7 @@ namespace
 			// After the resupply the culture is fed again: recovery
 			// advances at 0.02/s with no stock configured - time-bound
 			// recovery alone. 5 s of recovery adds at most 0.1.
-			require(world.advanceTicks(360), "adversity-cycle recovery phase failed");
+			require(smoke::station::advanceSeconds(world, 6.0), "adversity-cycle recovery phase failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(closeTo(snap.microbialProcessors[0].condition, 0.8, 0.01)
 				&& snap.microbialProcessors[0].lastStressors.empty()
@@ -1731,7 +1731,7 @@ namespace
 				require(configure(world, std::move(stores), std::move(unit), sinkStartingC),
 					(std::string(name) + " setup refused").c_str());
 				world.resumeSimulation();
-				require(world.advanceTicks(120), (std::string(name) + " run failed").c_str());
+				require(smoke::station::advanceSeconds(world, 2.0), (std::string(name) + " run failed").c_str());
 				auto const snap = world.getStationSystemsSnapshot();
 				auto const& unitSnap = snap.microbialProcessors[0];
 				require(unitSnap.lastStressors == expectedStressor
@@ -1788,7 +1788,7 @@ namespace
 				require(configure(world, conditionStores(), zeroRate()),
 					"all-zero benign control setup refused");
 				world.resumeSimulation();
-				require(world.advanceTicks(60), "all-zero benign control run failed");
+				require(smoke::station::advanceSeconds(world, 1.0), "all-zero benign control run failed");
 				auto const snap = world.getStationSystemsSnapshot();
 				auto const& unitSnap = snap.microbialProcessors[0];
 				// 1 s at 72/hour = 0.02 points on top of 0.5.
@@ -1810,7 +1810,7 @@ namespace
 				require(configure(world, std::move(stores), std::move(unit)),
 					"mixed zero/nonzero control setup refused");
 				world.resumeSimulation();
-				require(world.advanceTicks(60), "mixed zero/nonzero control run failed");
+				require(smoke::station::advanceSeconds(world, 1.0), "mixed zero/nonzero control run failed");
 				auto const snap = world.getStationSystemsSnapshot();
 				auto const& unitSnap = snap.microbialProcessors[0];
 				// 1 s at 720/hour = 0.2 points off 0.5.

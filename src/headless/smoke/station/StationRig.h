@@ -13,6 +13,23 @@
 namespace smoke::station
 {
 	inline void require(bool condition, char const* message) { if (!condition) throw std::runtime_error(message); }
+	// Station scenarios state durations in simulated seconds. The conversion stays
+	// at this fixture boundary so check bodies do not encode World tick counts.
+	inline bool advanceSeconds(core::World& world, double seconds)
+	{
+		if (!std::isfinite(seconds) || seconds < 0.0) return false;
+		auto const ticks = static_cast<uint64_t>(std::llround(seconds / world.getFixedTimestep()));
+		return std::abs(static_cast<double>(ticks) * world.getFixedTimestep() - seconds)
+			<= 0.5 * world.getFixedTimestep() && world.advanceTicks(ticks);
+	}
+
+	template<class WorldPointer>
+	inline bool advanceSeconds(WorldPointer const& world, double seconds)
+		requires requires { *world; }
+	{
+		return advanceSeconds(*world, seconds);
+	}
+
 	inline void enable(core::World& world)
 	{
 		world.pauseSimulation();

@@ -152,7 +152,7 @@ namespace
 			world.pauseSimulation(); world.finishBuild();
 			auto [ok, diagnostic] = crewConfigure(world, stores, compartment(), {c});
 			require(ok, diagnostic.c_str());
-			world.resumeSimulation(); require(world.advanceTicks(60), "greywater tick failed");
+			world.resumeSimulation(); require(smoke::station::advanceSeconds(world, 1.0), "greywater tick failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.healthy, "greywater became unhealthy");
 			require(!snap.forecast.available && snap.forecast.unavailableReason.find("greywater") != std::string::npos,
@@ -182,7 +182,7 @@ namespace
 			core::World full("GreywaterFull", 2, 2); full.pauseSimulation(); full.finishBuild();
 			auto [fullOk, fullDiagnostic] = crewConfigure(full, stores, compartment(), {c});
 			require(fullOk, fullDiagnostic.c_str());
-			full.resumeSimulation(); require(full.advanceTicks(1), "full greywater tick failed");
+			full.resumeSimulation(); require(smoke::station::advanceSeconds(full, 0.0166666666667), "full greywater tick failed");
 			auto const blocked = full.getStationSystemsSnapshot().crews.at(0);
 			require(blocked.metabolicScale == 0 && blocked.lastFoodActual == 0 && blocked.greywaterKg == 0
 				&& blocked.limiter.find("greywater") != std::string::npos, "greywater backpressure did not throttle whole crew");
@@ -416,7 +416,7 @@ namespace
 					{ first, second }).first,
 					"two crews sharing the food, water, urine and waste stores were refused");
 				world.resumeSimulation();
-				require(world.advanceTicks(120), "the shared-store crew run failed");
+				require(smoke::station::advanceSeconds(world, 2.0), "the shared-store crew run failed");
 				require(world.getStationSystemsDiagnostics().empty(),
 					"the shared-store crews raised a runtime diagnostic");
 				auto const elapsed = 120.0 * dt;
@@ -458,7 +458,7 @@ namespace
 			require(crewConfigure(world, fullStores(), compartment(), { crew(2, 1.0) }).first,
 				"nominal crew refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "nominal crew run failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "nominal crew run failed");
 			auto const elapsed = 120.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.crews.size() == 1, "crew missing from snapshot");
@@ -517,7 +517,7 @@ namespace
 			require(crewConfigure(world, stores, compartment(), { crew(2, 1.0) }).first,
 				"zero-food crew refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "zero-food run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "zero-food run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& live = snap.crews[0];
 			require(live.status == core::StationTransferStatus::Rejected
@@ -545,7 +545,7 @@ namespace
 			require(crewConfigure(world, stores, compartment(), { crew(2, 1.0) }).first,
 				"partial-water crew refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(1), "partial-water tick failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "partial-water tick failed");
 			auto const first = world.getStationSystemsSnapshot();
 			auto const& live = first.crews[0];
 			require(approx(live.metabolicScale, 0.5, 1e-9),
@@ -563,7 +563,7 @@ namespace
 			require(live.status == core::StationTransferStatus::Partial,
 				"partial metabolism does not report a partial status");
 			// The water is gone: the next tick runs at zero scale.
-			world.advanceTicks(1);
+			smoke::station::advanceSeconds(world, 0.0166666666667);
 			require(world.getStationSystemsSnapshot().crews[0].status
 				== core::StationTransferStatus::Rejected,
 				"an emptied water store did not starve the crew");
@@ -579,7 +579,7 @@ namespace
 			require(crewConfigure(world, fullStores(), habitat, { crew(2, 1.0) }).first,
 				"zero-oxygen crew refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "zero-oxygen run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "zero-oxygen run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& live = snap.crews[0];
 			require(live.status == core::StationTransferStatus::Rejected,
@@ -602,7 +602,7 @@ namespace
 			require(crewConfigure(world, stores, compartment(), { crew(2, 1.0) }).first,
 				"full-urine-tank crew refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "full-urine-tank run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "full-urine-tank run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& live = snap.crews[0];
 			require(live.status == core::StationTransferStatus::Rejected,
@@ -620,7 +620,7 @@ namespace
 			require(crewConfigure(world, fullStores(), compartment(), { crew(2, 0.5) }).first,
 				"half-activity crew refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "half-activity run failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "half-activity run failed");
 			auto const elapsed = 120.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& live = snap.crews[0];
@@ -659,7 +659,7 @@ namespace
 			withoutCrew.createAgent("Sleeper", controlRoom, 0u, 3.5f);
 			withCrew.resumeSimulation();
 			withoutCrew.resumeSimulation();
-			require(withCrew.advanceTicks(120) && withoutCrew.advanceTicks(120),
+			require(smoke::station::advanceSeconds(withCrew, 2.0) && smoke::station::advanceSeconds(withoutCrew, 2.0),
 				"Agent isolation run failed");
 			auto const& a = withCrew.getSimulationSnapshot().agents;
 			auto const& b = withoutCrew.getSimulationSnapshot().agents;
@@ -682,7 +682,7 @@ namespace
 			require(crewConfigure(world, fullStores(), compartment(), { crew(2, 1.0) }).first,
 				"reset-scenario crew refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "reset scenario run failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "reset scenario run failed");
 			auto const saved = world.getStationSystemsSnapshot();
 			auto const events = world.getStationSystemsEvents();
 			world.pauseSimulation();
@@ -691,7 +691,7 @@ namespace
 				&& world.getStationSystemsSnapshot().crews[0].retainedKg == 0.0,
 				"reset did not reconstruct the crew ledger from the authored start");
 			world.resumeSimulation();
-			require(world.advanceTicks(120), "reset replay failed");
+			require(smoke::station::advanceSeconds(world, 2.0), "reset replay failed");
 			require(world.getStationSystemsSnapshot() == saved
 				&& world.getStationSystemsEvents() == events,
 				"crew scenario is not deterministic under reset");
@@ -746,7 +746,7 @@ namespace
 			require(crewConfigure(sandbox, fullStores(), compartment(), { crew(2, 1.0) }).first,
 				"sandbox crew scenario refused");
 			sandbox.resumeSimulation();
-			require(sandbox.advanceTicks(60),
+			require(smoke::station::advanceSeconds(sandbox, 1.0),
 				"bundled Lua crew mirror failed its in-sandbox assertions");
 			core::setStationSystemsSourceLoader({});
 		}
@@ -1015,7 +1015,7 @@ namespace
 				{ collector("cond", 0.01, 0.5) },
 				{ treatment("plant") }, 10.0).first, "nominal water recovery refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "nominal water recovery run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "nominal water recovery run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const expectedKg = 0.01 * elapsed;
 			auto const latentKJ = expectedKg * 2257.0;
@@ -1098,7 +1098,7 @@ namespace
 				{ treatment("plant") }, 10.0);
 			require(ok, ("a cross-class collector configuration was refused: " + diagnostic).c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "cross-class collection run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "cross-class collection run failed");
 			auto const elapsed = 60.0 * dt;
 			auto const expectedKg = 0.01 * elapsed;
 			auto const snap = world.getStationSystemsSnapshot();
@@ -1137,7 +1137,7 @@ namespace
 				{ collector("cond", 0.01, 0.5) },
 				{ treatment("plant") }, 1.1).first, "curtailed water setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "curtailed water run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "curtailed water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& plant = snap.waterTreatments[0];
 			require(plant.status == core::StationTransferStatus::Partial,
@@ -1171,7 +1171,7 @@ namespace
 				{ collector("cond", 0.01, 0.5) },
 				{ treatment("plant") }, 0.1).first, "zero-power water setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "zero-power water run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "zero-power water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& plant = snap.waterTreatments[0];
 			require(plant.status == core::StationTransferStatus::Rejected,
@@ -1194,7 +1194,7 @@ namespace
 				{ collector("cond", 0.01, 0.5) },
 				{ treatment("plant") }, 1.0).first, "no-cooling water setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "no-cooling water run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "no-cooling water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& live = snap.waterCollectors[0];
 			require(live.status == core::StationTransferStatus::Rejected
@@ -1218,7 +1218,7 @@ namespace
 				{ collector("cond", 0.01, 0.5) },
 				{ treatment("plant") }, 1.0).first, "warm-surface water setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(60), "warm-surface water run failed");
+			require(smoke::station::advanceSeconds(world, 1.0), "warm-surface water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.waterCollectors[0].collectedKg == 0.0
 				&& snap.waterCollectors[0].blockReason.find("not colder") != std::string::npos,
@@ -1233,7 +1233,7 @@ namespace
 				{ collector("cond", 0.01, 0.8) },
 				{ treatment("plant") }, 1.0).first, "dry-air water setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(1200), "dry-air water run failed");
+			require(smoke::station::advanceSeconds(world, 20.0), "dry-air water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& live = snap.waterCollectors[0];
 			// 100 m3 at 25 C saturates near 2.298 kg of vapour, so a 2.0 kg
@@ -1259,7 +1259,7 @@ namespace
 				{ collector("cond", 0.01, 0.5) },
 				{ treatment("plant") }, 1.0).first, "full-treated water setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(1800), "full-treated water run failed");
+			require(smoke::station::advanceSeconds(world, 30.0), "full-treated water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const treatedStore = findStore(snap, "treated");
 			require(treatedStore.currentQualified <= 0.1 + 1e-9,
@@ -1282,7 +1282,7 @@ namespace
 				{ treatment("plant") }, 1.0).first,
 				"scarce-consumable water setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(300), "scarce-consumable water run failed");
+			require(smoke::station::advanceSeconds(world, 5.0), "scarce-consumable water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(approx(snap.waterTreatments[0].consumablesUsed, 0.0001),
 				"the treatment used consumables it did not have");
@@ -1301,10 +1301,10 @@ namespace
 				{ collector("cond", 0.01, 0.5) },
 				{ treatment("plant") }, 1.0).first, "replay water setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(90), "replay water run failed");
+			require(smoke::station::advanceSeconds(world, 1.5), "replay water run failed");
 			auto const first = world.getStationSystemsSnapshot();
 			world.pauseSimulation(); world.resetSimulation(); world.resumeSimulation();
-			require(world.advanceTicks(90), "replay water re-run failed");
+			require(smoke::station::advanceSeconds(world, 1.5), "replay water re-run failed");
 			auto const second = world.getStationSystemsSnapshot();
 			require(approx(second.waterCollectors[0].collectedKg,
 				first.waterCollectors[0].collectedKg),
@@ -1540,7 +1540,7 @@ namespace
 			settings.equipmentLoads = { load };
 			require(configure(world, settings), "nominal fuel-cell setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "nominal fuel-cell run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "nominal fuel-cell run failed");
 			auto const elapsed = 600.0 * dt;
 			auto const h2Kg = 6.0 * elapsed / (0.6 * lhv);
 			auto const o2Kg = h2Kg * o2PerH2;
@@ -1604,7 +1604,7 @@ namespace
 			settings.fuelCells = { fuelCell("cell") };
 			require(configure(world, settings), "dry hydrogen setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "dry hydrogen run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "dry hydrogen run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& cell = snap.fuelCells[0];
 			require(approx(cell.hydrogenConsumedKg, 5e-4)
@@ -1649,7 +1649,7 @@ namespace
 			settings.transfers = { surplus };
 			require(configure(world, settings), "reserve-transfer refusal setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "reserve-transfer refusal run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "reserve-transfer refusal run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(approx(findStore(snap, "eclssO2").currentQualified, 15.0),
 				"the protected breathing oxygen reserve was drawn down");
@@ -1695,7 +1695,7 @@ namespace
 			settings.transfers = { surplus };
 			require(configure(world, settings), "surplus-fill setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "surplus-fill run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "surplus-fill run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(findStore(snap, "eclssO2").currentQualified >= 15.0 - 1e-9,
 				"the surplus transfer ate into the protected breathing reserve");
@@ -1725,7 +1725,7 @@ namespace
 			settings.fuelCells = { fuelCell("cell") };
 			require(configure(world, settings), "blocked-water setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "blocked-water run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "blocked-water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& cell = snap.fuelCells[0];
 			require(findStore(snap, "productWater").currentQualified <= 0.005 + 1e-9,
@@ -1751,7 +1751,7 @@ namespace
 			settings.fuelCells = { fuelCell("cell") };
 			require(configure(world, settings), "hot-sink fuel-cell setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "hot-sink fuel-cell run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "hot-sink fuel-cell run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& cell = snap.fuelCells[0];
 			require(!cell.coolingAvailable
@@ -1777,7 +1777,7 @@ namespace
 			settings.fuelCells = { fuelCell("cell") };
 			require(configure(world, settings), "protected-reactant setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "protected-reactant run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "protected-reactant run failed");
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& cell = snap.fuelCells[0];
 			require(cell.status == core::StationTransferStatus::Rejected
@@ -1833,7 +1833,7 @@ namespace
 			settings.fuelCells = { backup };
 			require(configure(world, settings), "cycle setup refused");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "cycle run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "cycle run failed");
 			auto const elapsed = 600.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
 			auto const& backupSnap = snap.fuelCells[0];

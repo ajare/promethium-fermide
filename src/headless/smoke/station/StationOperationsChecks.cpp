@@ -33,11 +33,11 @@ namespace
 			std::string source = "return function(name) assert(os == nil and io == nil and debug == nil and package == nil and world == nil); return {advance=function(self,tick,seconds) self.attempted = tick; if tick <= 60 or name ~= 'Monitoring/supervision' then return tick end; " + std::string(fixture.body) + " end} end";
 			core::setStationSystemsSourceLoader([source] { return source; });
 			core::World failed("Failure", 2, 2); enable(failed);
-			failed.resumeSimulation(); require(failed.advanceTicks(60), "Successful prefix failed");
+			failed.resumeSimulation(); require(smoke::station::advanceSeconds(failed, 1.0), "Successful prefix failed");
 			auto before = failed.getStationSystemsSnapshot();
 			auto events = failed.getStationSystemsEvents();
 			auto settings = failed.getStationSystemsSettings();
-			require(!failed.advanceTick(), "Lua failure accepted");
+			require(!smoke::station::advanceSeconds(failed, 0.0166666666667), "Lua failure accepted");
 			auto result = failed.getStationSystemsSnapshot();
 			require(failed.isSimulationPaused() && failed.getSimulationTick() == 60 && !result.healthy,
 				"Station failure not fail-visible and synchronized");
@@ -49,18 +49,18 @@ namespace
 			require(diagnostics[0].worldTick == 61 && diagnostics[0].failure == fixture.failure, "Failure misclassified or misdated");
 			require(diagnostics[0].message.size() <= 2048 && diagnostics[0].message.find(fixture.message) != std::string::npos,
 				"Diagnostic missing context or unbounded");
-			failed.resumeSimulation(); require(!failed.advanceTicks(10), "Failed Lua objects retried");
+			failed.resumeSimulation(); require(!smoke::station::advanceSeconds(failed, 0.166666666667), "Failed Lua objects retried");
 			require(failed.getStationSystemsDiagnostics().size() == 1 && failed.getStationSystemsSnapshot() == result,
 				"Retry changed failed state or duplicated diagnostic");
-			unaffected.resumeSimulation(); require(unaffected.advanceTick(), "Failure leaked to another World");
+			unaffected.resumeSimulation(); require(smoke::station::advanceSeconds(unaffected, 0.0166666666667), "Failure leaked to another World");
 			failed.resetSimulation();
 			require(failed.getSimulationTick() == 0 && failed.getStationSystemsSnapshot().healthy
 				&& failed.getStationSystemsDiagnostics().empty(), "Reset did not clear failure");
-			failed.resumeSimulation(); require(failed.advanceTicks(60), "Reset prefix failed");
+			failed.resumeSimulation(); require(smoke::station::advanceSeconds(failed, 1.0), "Reset prefix failed");
 			before.healthy = true;
 			require(failed.getStationSystemsSnapshot() == before && failed.getStationSystemsEvents() == events,
 				"Successful replay after failure was not deterministic");
-			require(!failed.advanceTick() && failed.getStationSystemsSnapshot() == result, "Failed replay changed outcome");
+			require(!smoke::station::advanceSeconds(failed, 0.0166666666667) && failed.getStationSystemsSnapshot() == result, "Failed replay changed outcome");
 		}
 		for (auto const* source : {"error('constructor failed')", "while true do end",
 			"pcall(function() while true do end end); return function() return {} end",
@@ -80,7 +80,7 @@ namespace
 			return "return function(name) return {advance=function(self,tick) local ok = pcall(function() error('handled condition') end); assert(not ok); return tick end} end";
 		});
 		core::World handled("Handled", 2, 2); enable(handled); handled.resumeSimulation();
-		require(handled.advanceTicks(120) && handled.getStationSystemsDiagnostics().empty()
+		require(smoke::station::advanceSeconds(handled, 2.0) && handled.getStationSystemsDiagnostics().empty()
 			&& handled.getStationSystemsSnapshot().healthy, "Caught application error triggered software pause");
 		// A real host-only fault: each authored power demand is finite,
 		// but their sum overflows in the final host audit, after inventory,
@@ -144,7 +144,7 @@ namespace
 			conserved.pauseSimulation(); conserved.finishBuild();
 			auto const controlConfigured = conserved.configureStationSystems(control, false, &diagnostic);
 			require(controlConfigured, diagnostic.c_str()); conserved.resumeSimulation();
-			require(conserved.advanceTick() && conserved.getStationSystemsSnapshot().healthy
+			require(smoke::station::advanceSeconds(conserved, 0.0166666666667) && conserved.getStationSystemsSnapshot().healthy
 				&& conserved.getStationSystemsSnapshot().transfers[0].lastCompleted > 0.0,
 				"Near-equal-composition transport was mistaken for a host-ledger fault");
 			auto const configured = hostFailure.configureStationSystems(settings, false, &diagnostic);
@@ -154,7 +154,7 @@ namespace
 		auto const before = hostFailure.getStationSystemsSnapshot();
 		auto const beforeEvents = hostFailure.getStationSystemsEvents();
 		require(before.healthy && before.worldTick == 0, "Host-ledger fixture did not start healthy");
-		require(!hostFailure.advanceTick(), "Host ledger violation accepted");
+		require(!smoke::station::advanceSeconds(hostFailure, 0.0166666666667), "Host ledger violation accepted");
 		auto const after = hostFailure.getStationSystemsSnapshot();
 		require(!after.healthy && hostFailure.getSimulationTick() == 0
 			&& hostFailure.isSimulationPaused(),
@@ -189,7 +189,7 @@ namespace
 				? std::string("none") : hostDiagnostics[0].system + ": " + hostDiagnostics[0].message)).c_str());
 		// Terminal retry refusal: the failed runtime never runs again and
 		// never mutates further.
-		require(!hostFailure.advanceTicks(10), "Failed host ledger retried after failure");
+		require(!smoke::station::advanceSeconds(hostFailure, 0.166666666667), "Failed host ledger retried after failure");
 		require(hostFailure.getStationSystemsSnapshot() == after
 			&& hostFailure.getStationSystemsEvents() == beforeEvents
 			&& hostFailure.getStationSystemsDiagnostics().size() == 1,
@@ -202,7 +202,7 @@ namespace
 			&& hostFailure.getStationSystemsDiagnostics().empty(),
 			"Reset did not clear the host ledger failure");
 		hostFailure.resumeSimulation();
-		require(!hostFailure.advanceTick(), "Reset host ledger failure not reproduced");
+		require(!smoke::station::advanceSeconds(hostFailure, 0.0166666666667), "Reset host ledger failure not reproduced");
 		require(hostFailure.getStationSystemsSnapshot() == after
 			&& hostFailure.getStationSystemsEvents() == beforeEvents,
 			"Failed host-ledger replay was not identical");
@@ -349,7 +349,7 @@ namespace
 				diagnostic.c_str());
 		}
 		hostIncidents.resumeSimulation();
-		require(hostIncidents.advanceTicks(7199),
+		require(smoke::station::advanceSeconds(hostIncidents, 119.983333333),
 			"the incident fixture failed before its failing tick");
 		auto const incidentsBefore = hostIncidents.getStationSystemsSnapshot();
 		auto const incidentsBeforeEvents = hostIncidents.getStationSystemsEvents();
@@ -380,7 +380,7 @@ namespace
 			&& incidentsBefore.maintenanceJobs[2].phase == core::StationMaintenancePhase::Idle
 			&& incidentsBefore.maintenanceJobs[2].occurrencesStarted == 0,
 			"maintenance state not as authored at the boundary tick");
-		require(!hostIncidents.advanceTick(),
+		require(!smoke::station::advanceSeconds(hostIncidents, 0.0166666666667),
 			"incident-bearing host ledger violation accepted");
 		require(hostIncidents.isSimulationPaused() && hostIncidents.getSimulationTick() == 7199,
 			"incident host failure not fail-visible and synchronized");
@@ -427,7 +427,7 @@ namespace
 			&& incidentDiagnostics[0].message == "non-finite total requested power is not a publishable physical result",
 			"incident host failure diagnostic missing or wrong");
 		// Terminal retry refusal across the incident state.
-		require(!hostIncidents.advanceTicks(10),
+		require(!smoke::station::advanceSeconds(hostIncidents, 0.166666666667),
 			"failed incident host ledger retried after failure");
 		require(hostIncidents.getStationSystemsSnapshot() == incidentsAfter
 			&& hostIncidents.getStationSystemsEvents() == incidentsBeforeEvents
@@ -441,12 +441,12 @@ namespace
 			&& hostIncidents.getStationSystemsDiagnostics().empty(),
 			"reset did not clear the incident host ledger failure");
 		hostIncidents.resumeSimulation();
-		require(hostIncidents.advanceTicks(7199),
+		require(smoke::station::advanceSeconds(hostIncidents, 119.983333333),
 			"incident replay diverged before the failing tick");
 		require(hostIncidents.getStationSystemsSnapshot() == incidentsBefore
 			&& hostIncidents.getStationSystemsEvents() == incidentsBeforeEvents,
 			"incident replay of the successful boundary was not identical");
-		require(!hostIncidents.advanceTick(),
+		require(!smoke::station::advanceSeconds(hostIncidents, 0.0166666666667),
 			"incident host failure not reproduced after reset");
 		require(hostIncidents.getStationSystemsSnapshot() == incidentsAfter
 			&& hostIncidents.getStationSystemsEvents() == incidentsBeforeEvents,
@@ -484,7 +484,7 @@ namespace
 		auto const overflowEvents = overflow.getStationSystemsEvents();
 		require(overflowBefore.healthy && overflowBefore.worldTick == 0,
 			"Overflow fixture did not start healthy");
-		require(!overflow.advanceTick(), "Infinite generation sum published as healthy");
+		require(!smoke::station::advanceSeconds(overflow, 0.0166666666667), "Infinite generation sum published as healthy");
 		require(overflow.isSimulationPaused() && !overflow.getStationSystemsSnapshot().healthy
 			&& overflow.getSimulationTick() == 0,
 			"Non-finite output not fail-visible and synchronized");
@@ -516,7 +516,7 @@ namespace
 			require(hostOverflow.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
 		}
 		hostOverflow.resumeSimulation();
-		require(!hostOverflow.advanceTick(), "Host committed an infinite generation sum");
+		require(!smoke::station::advanceSeconds(hostOverflow, 0.0166666666667), "Host committed an infinite generation sum");
 		require(hostOverflow.isSimulationPaused() && !hostOverflow.getStationSystemsSnapshot().healthy
 			&& hostOverflow.getSimulationTick() == 0,
 			"Host non-finite failure not fail-visible and synchronized");
@@ -549,7 +549,7 @@ namespace
 			require(huge.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
 		}
 		huge.resumeSimulation();
-		require(huge.advanceTicks(10) && huge.getStationSystemsSnapshot().healthy
+		require(smoke::station::advanceSeconds(huge, 0.166666666667) && huge.getStationSystemsSnapshot().healthy
 			&& huge.getStationSystemsSnapshot().power.availableGenerationKW == 1e308
 			&& huge.getStationSystemsSnapshot().power.surplusKW == 1e308
 			&& huge.getStationSystemsSnapshot().power.totalSuppliedKW == 1.0,
@@ -619,7 +619,7 @@ namespace
 				"Initial snapshot published a non-finite saturation or pressure");
 		}
 		coldSat.resumeSimulation();
-		require(coldSat.advanceTicks(10) && coldSat.getStationSystemsSnapshot().healthy
+		require(smoke::station::advanceSeconds(coldSat, 0.166666666667) && coldSat.getStationSystemsSnapshot().healthy
 			&& coldSat.getStationSystemsDiagnostics().empty()
 			&& coldSat.getStationSystemsSnapshot().atmospheres[0].saturationVapourPressureKPa == 0.0
 			&& std::isfinite(coldSat.getStationSystemsSnapshot().atmospheres[0].relativeHumidity),
@@ -658,7 +658,7 @@ namespace
 		circulation.resumeSimulation();
 		auto const circulationBefore = circulation.getStationSystemsSnapshot();
 		auto const circulationEvents = circulation.getStationSystemsEvents();
-		require(!circulation.advanceTick(), "Infinite circulation rollup published as healthy");
+		require(!smoke::station::advanceSeconds(circulation, 0.0166666666667), "Infinite circulation rollup published as healthy");
 		require(circulation.isSimulationPaused()
 			&& !circulation.getStationSystemsSnapshot().healthy
 			&& circulation.getSimulationTick() == 0,
@@ -702,7 +702,7 @@ namespace
 				diagnostic.c_str());
 		}
 		hostCirculation.resumeSimulation();
-		require(!hostCirculation.advanceTick(), "Host committed an infinite circulation rollup");
+		require(!smoke::station::advanceSeconds(hostCirculation, 0.0166666666667), "Host committed an infinite circulation rollup");
 		auto const hostCirculationDiagnostics = hostCirculation.getStationSystemsDiagnostics();
 		require(hostCirculationDiagnostics.size() == 1
 			&& hostCirculationDiagnostics[0].system == "Coolant circulation"
@@ -800,7 +800,7 @@ namespace
 				diagnostic.c_str());
 		}
 		hostColdClass.resumeSimulation();
-		require(!hostColdClass.advanceTick(), "Host committed an infinite cold-class capacity");
+		require(!smoke::station::advanceSeconds(hostColdClass, 0.0166666666667), "Host committed an infinite cold-class capacity");
 		auto const hostColdClassDiagnostics = hostColdClass.getStationSystemsDiagnostics();
 		require(hostColdClassDiagnostics.size() == 1
 			&& hostColdClassDiagnostics[0].system == "Chilled thermal service"
@@ -809,7 +809,7 @@ namespace
 				.find("cold-service class 'moderate' total cooling capacity") != std::string::npos,
 			"Host cold-class rollup audit diagnostic missing or wrong");
 		unaffected.resumeSimulation();
-		require(unaffected.advanceTick() && unaffected.getStationSystemsSnapshot().healthy,
+		require(smoke::station::advanceSeconds(unaffected, 0.0166666666667) && unaffected.getStationSystemsSnapshot().healthy,
 			"Non-finite containment leaked between Worlds");
 	}
 	// #413: scheduled outages and capacity reductions. An outage is a
@@ -962,7 +962,7 @@ namespace
 				"one-off outage scenario was rejected");
 			world.resumeSimulation();
 			// t = 12s: generator at full rated output, no outage yet.
-			require(world.advanceTicks(12 * 60), "one-off run failed before the outage");
+			require(smoke::station::advanceSeconds(world, 12.0), "one-off run failed before the outage");
 			auto const& before = world.getStationSystemsSnapshot();
 			require(approx(before.power.generators[0].outputKW, 10.0, 1e-3)
 				&& approx(before.power.generators[0].availabilityFactor, 1.0),
@@ -971,7 +971,7 @@ namespace
 				&& before.outages[0].occurrencesStarted == 0,
 				"the one-off outage was already active before its window");
 			// t = 25s: window open, output capped to half the rating.
-			require(world.advanceTicks(13 * 60), "one-off run failed into the outage");
+			require(smoke::station::advanceSeconds(world, 13.0), "one-off run failed into the outage");
 			auto const& during = world.getStationSystemsSnapshot();
 			require(during.outages[0].active
 				&& during.outages[0].occurrencesStarted == 1
@@ -983,7 +983,7 @@ namespace
 			require(sawEvent(world, "began at"),
 				"the outage start was not announced");
 			// t = 35s: window closed, ceiling lifted, output restored.
-			require(world.advanceTicks(10 * 60), "one-off run failed past the outage");
+			require(smoke::station::advanceSeconds(world, 10.0), "one-off run failed past the outage");
 			auto const& after = world.getStationSystemsSnapshot();
 			require(!after.outages[0].active
 				&& after.outages[0].occurrencesCompleted == 1
@@ -1008,7 +1008,7 @@ namespace
 				outage("outB", "gen", 0.25, 22.0, 8.0)}),
 				"overlapping outage scenario was rejected");
 			world.resumeSimulation();
-			require(world.advanceTicks(25 * 60), "overlap run failed");
+			require(smoke::station::advanceSeconds(world, 25.0), "overlap run failed");
 			auto const& snap = world.getStationSystemsSnapshot();
 			require(approx(snap.power.generators[0].availabilityFactor, 0.25)
 				&& approx(snap.power.generators[0].outputKW, 2.5, 1e-2),
@@ -1030,7 +1030,7 @@ namespace
 				outage("high", "gen", 0.5, 0.0, 10.0, 0.0, 100)}),
 				"the coincident-priority outage scenario was rejected");
 			world.resumeSimulation();
-			require(world.advanceTicks(1), "coincident-priority run failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "coincident-priority run failed");
 			auto const messages = outageMessages(world);
 			require(messages.size() == 2
 				&& messages[0].find("'high'") != std::string::npos
@@ -1049,7 +1049,7 @@ namespace
 				outage("declSecond", "gen", 0.5, 0.0, 10.0, 0.0, 5)}),
 				"the equal-priority outage scenario was rejected");
 			world.resumeSimulation();
-			require(world.advanceTicks(1), "equal-priority run failed");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "equal-priority run failed");
 			auto const messages = outageMessages(world);
 			require(messages.size() == 2
 				&& messages[0].find("'declFirst'") != std::string::npos
@@ -1068,12 +1068,12 @@ namespace
 				"the sub-tick ordering outage scenario was rejected");
 			world.resumeSimulation();
 			// t = 10.0s: neither sub-tick occurrence is due yet.
-			require(world.advanceTicks(600), "sub-tick run failed before the events");
+			require(smoke::station::advanceSeconds(world, 10.0), "sub-tick run failed before the events");
 			require(outageMessages(world).empty(),
 				"a sub-tick outage event fired before its occurrence time");
 			// One more tick carries both 10.008s and 10.012s into the same
 			// sampled tick; the earlier time wins over the higher priority.
-			require(world.advanceTicks(1), "sub-tick run failed into the events");
+			require(smoke::station::advanceSeconds(world, 0.0166666666667), "sub-tick run failed into the events");
 			auto const messages = outageMessages(world);
 			require(messages.size() == 2
 				&& messages[0].find("'early_low'") != std::string::npos
@@ -1090,7 +1090,7 @@ namespace
 				outage("cont", "gen", 0.5, 10.0, 10.0, 10.0, 0)}),
 				"the contiguous-window outage scenario was rejected");
 			world.resumeSimulation();
-			require(world.advanceTicks(1200), "contiguous-window run failed");
+			require(smoke::station::advanceSeconds(world, 20.0), "contiguous-window run failed");
 			auto const messages = outageMessages(world);
 			require(messages.size() == 3
 				&& messages[0].find("began at 10.000000") != std::string::npos
@@ -1114,7 +1114,7 @@ namespace
 				outage("starter", "gen", 0.5, 10.0, 10.0, 0.0, 100)}),
 				"the cross-boundary priority outage scenario was rejected");
 			world.resumeSimulation();
-			require(world.advanceTicks(600), "cross-boundary priority run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "cross-boundary priority run failed");
 			auto const messages = outageMessages(world);
 			require(messages.size() == 3
 				&& messages[0].find("'restorer'") != std::string::npos
@@ -1145,14 +1145,14 @@ namespace
 			require(configure(batched, scenario()),
 				"the batched-order outage scenario was rejected");
 			batched.resumeSimulation();
-			require(batched.advanceTicks(35 * 60), "batched-order run failed");
+			require(smoke::station::advanceSeconds(batched, 35.0), "batched-order run failed");
 			core::World stepped("OutageSteppedOrder", 2, 2);
 			stepped.pauseSimulation(); stepped.finishBuild();
 			require(configure(stepped, scenario()),
 				"the stepped-order outage scenario was rejected");
 			stepped.resumeSimulation();
 			for (int tick = 0; tick < 35 * 60; ++tick)
-				require(stepped.advanceTicks(1), "stepped-order run failed");
+				require(smoke::station::advanceSeconds(stepped, 0.0166666666667), "stepped-order run failed");
 			auto const batchedMessages = outageMessages(batched);
 			auto const steppedMessages = outageMessages(stepped);
 			require(batchedMessages == steppedMessages,
@@ -1187,17 +1187,17 @@ namespace
 			require(configure(world, {outage("outR", "gen", 0.4, 10.0, 5.0, 20.0)}),
 				"recurring outage scenario was rejected");
 			world.resumeSimulation();
-			require(world.advanceTicks(12 * 60), "recurring run failed in window 1");
+			require(smoke::station::advanceSeconds(world, 12.0), "recurring run failed in window 1");
 			auto const& w1 = world.getStationSystemsSnapshot();
 			require(w1.outages[0].active && w1.outages[0].occurrencesStarted == 1
 				&& approx(w1.power.generators[0].outputKW, 4.0, 1e-2),
 				"the first recurring window did not bite as authored");
-			require(world.advanceTicks(13 * 60), "recurring run failed between windows");
+			require(smoke::station::advanceSeconds(world, 13.0), "recurring run failed between windows");
 			auto const& gap = world.getStationSystemsSnapshot();
 			require(!gap.outages[0].active && !gap.outages[0].exhausted
 				&& approx(gap.power.generators[0].outputKW, 10.0, 1e-2),
 				"the recurring outage did not release between windows");
-			require(world.advanceTicks(7 * 60), "recurring run failed in window 2");
+			require(smoke::station::advanceSeconds(world, 7.0), "recurring run failed in window 2");
 			auto const& w2 = world.getStationSystemsSnapshot();
 			require(w2.outages[0].active && w2.outages[0].occurrencesStarted == 2
 				&& approx(w2.power.generators[0].outputKW, 4.0, 1e-2),
@@ -1225,7 +1225,7 @@ namespace
 			require(world.configureStationSystems(settings, false, nullptr),
 				"full-outage scenario was rejected");
 			world.resumeSimulation();
-			require(world.advanceTicks(7 * 60), "full-outage run failed");
+			require(smoke::station::advanceSeconds(world, 7.0), "full-outage run failed");
 			auto const& snap = world.getStationSystemsSnapshot();
 			require(snap.outages[0].active
 				&& approx(snap.power.generators[0].availabilityFactor, 0.0)
@@ -1236,7 +1236,7 @@ namespace
 			require(snap.stores[0].currentQualified < 50.0,
 				"the generator never drew fuel before the outage");
 			auto const drained = snap.stores[0].currentQualified;
-			require(world.advanceTicks(8 * 60), "full-outage restore run failed");
+			require(smoke::station::advanceSeconds(world, 8.0), "full-outage restore run failed");
 			auto const& restored = world.getStationSystemsSnapshot();
 			require(!restored.outages[0].active
 				&& restored.stores[0].currentQualified <= drained,
@@ -1261,7 +1261,7 @@ namespace
 				{loop}),
 				"loop outage scenario was rejected");
 			world.resumeSimulation();
-			require(world.advanceTicks(10 * 60), "loop outage run failed");
+			require(smoke::station::advanceSeconds(world, 10.0), "loop outage run failed");
 			auto const& snap = world.getStationSystemsSnapshot();
 			require(snap.coolantLoops[0].availabilityFactor == 0.5
 				&& approx(snap.coolantLoops[0].flowKgPerS, 1.0, 1e-2),
@@ -1338,14 +1338,14 @@ namespace
 			require(configureChillers(world, {outage("second_off", "second", 0.0, 5.0, 10.0)}),
 				"the named-chiller full-outage scenario was rejected");
 			world.resumeSimulation();
-			require(world.advanceTicks(4 * 60), "named-chiller run failed before the outage");
+			require(smoke::station::advanceSeconds(world, 4.0), "named-chiller run failed before the outage");
 			auto const before = world.getStationSystemsSnapshot();
 			require(before.chillers[0].availabilityFactor == 1.0
 				&& before.chillers[1].availabilityFactor == 1.0
 				&& approx(before.chillers[0].coolingKW, 2.0, 1e-2)
 				&& approx(before.chillers[1].coolingKW, 2.0, 1e-2),
 				"both chillers were not at full service before the outage window");
-			require(world.advanceTicks(2 * 60), "named-chiller run failed into the outage");
+			require(smoke::station::advanceSeconds(world, 2.0), "named-chiller run failed into the outage");
 			auto const during = world.getStationSystemsSnapshot();
 			require(during.outages[0].active && during.outages[0].installationKind == "chiller"
 				&& during.outages[0].installationId == "second",
@@ -1358,7 +1358,7 @@ namespace
 				"the outage touched the non-target chiller instead of the named one");
 			require(sawEvent(world, "chiller 'second'"),
 				"the outage event did not name the targeted chiller");
-			require(world.advanceTicks(9 * 60), "named-chiller run failed past the outage");
+			require(smoke::station::advanceSeconds(world, 9.0), "named-chiller run failed past the outage");
 			auto const restored = world.getStationSystemsSnapshot();
 			require(!restored.outages[0].active && restored.outages[0].exhausted
 				&& restored.chillers[1].availabilityFactor == 1.0
@@ -1373,7 +1373,7 @@ namespace
 				&& fresh.chillers[1].availabilityFactor == 1.0,
 				"reset did not restore full declared availability on both chillers");
 			world.resumeSimulation();
-			require(world.advanceTicks(6 * 60), "named-chiller reset replay failed");
+			require(smoke::station::advanceSeconds(world, 6.0), "named-chiller reset replay failed");
 			require(world.getStationSystemsSnapshot().chillers == during.chillers
 				&& world.getStationSystemsSnapshot().outages == during.outages,
 				"the reset replay did not outage the same named chiller");
@@ -1386,7 +1386,7 @@ namespace
 			require(configureChillers(world, {outage("second_half", "second", 0.5, 5.0, 10.0)}),
 				"the named-chiller partial-outage scenario was rejected");
 			world.resumeSimulation();
-			require(world.advanceTicks(6 * 60), "partial named-chiller run failed into the outage");
+			require(smoke::station::advanceSeconds(world, 6.0), "partial named-chiller run failed into the outage");
 			auto const during = world.getStationSystemsSnapshot();
 			require(during.outages[0].active
 				&& during.outages[0].installationKind == "chiller"
@@ -1398,7 +1398,7 @@ namespace
 			require(during.chillers[0].availabilityFactor == 1.0
 				&& approx(during.chillers[0].coolingKW, 2.0, 1e-2),
 				"the partial outage disturbed the non-target chiller");
-			require(world.advanceTicks(9 * 60), "partial named-chiller run failed past the outage");
+			require(smoke::station::advanceSeconds(world, 9.0), "partial named-chiller run failed past the outage");
 			auto const restored = world.getStationSystemsSnapshot();
 			require(!restored.outages[0].active
 				&& restored.chillers[1].availabilityFactor == 1.0
@@ -1416,7 +1416,7 @@ namespace
 			require(configureChillers(original, {outage("second_off", "second", 0.0, 5.0, 10.0)}),
 				"the load-round-trip named-chiller scenario was rejected");
 			original.resumeSimulation();
-			require(original.advanceTicks(6 * 60), "load-round-trip original run failed");
+			require(smoke::station::advanceSeconds(original, 6.0), "load-round-trip original run failed");
 			auto const expected = original.getStationSystemsSnapshot();
 			require(expected.chillers[1].availabilityFactor == 0.0
 				&& expected.chillers[0].availabilityFactor == 1.0,
@@ -1426,7 +1426,7 @@ namespace
 			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
 				"the outage settings did not survive the document round trip");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(6 * 60), "reopened named-chiller run failed");
+			require(smoke::station::advanceSeconds(reopened, 6.0), "reopened named-chiller run failed");
 			require(reopened->getStationSystemsSnapshot().chillers == expected.chillers
 				&& reopened->getStationSystemsSnapshot().outages == expected.outages,
 				"the reopened World did not outage the same named chiller as the original");
@@ -1468,7 +1468,7 @@ namespace
 			require(configureChillers(world, {outage("second_off", "second", 0.0, 5.0, 10.0)}),
 				"the sandbox named-chiller outage scenario was rejected");
 			world.resumeSimulation();
-			require(world.advanceTicks(20 * 60),
+			require(smoke::station::advanceSeconds(world, 20.0),
 				"bundled Lua named-chiller outage mirror failed its in-sandbox assertions");
 			// The host ledger over the same ticks agrees with what the
 			// sandbox asserted for the same named chiller.
@@ -1485,12 +1485,12 @@ namespace
 			first.pauseSimulation(); first.finishBuild();
 			configure(first, {outage("out1", "gen", 0.5, 8.0, 6.0, 12.0)});
 			first.resumeSimulation();
-			first.advanceTicks(40 * 60);
+			smoke::station::advanceSeconds(first, 40.0);
 			core::World second("OutageDeterminism", 2, 2);
 			second.pauseSimulation(); second.finishBuild();
 			configure(second, {outage("out1", "gen", 0.5, 8.0, 6.0, 12.0)});
 			second.resumeSimulation();
-			second.advanceTicks(40 * 60);
+			smoke::station::advanceSeconds(second, 40.0);
 			require(first.getStationSystemsSnapshot().power.generators
 				== second.getStationSystemsSnapshot().power.generators,
 				"identically-authored outage worlds diverged in generator state");
@@ -1594,7 +1594,7 @@ namespace
 			require(world.getStationSystemsSettings() == authored,
 				"the refused collision draft mutated the authored Station settings");
 			world.resumeSimulation();
-			require(world.advanceTicks(60),
+			require(smoke::station::advanceSeconds(world, 1.0),
 				"the World did not keep running the authored scenario after the refused draft");
 		}
 		// Distinct ids across the three kinds register successfully and
@@ -1611,14 +1611,14 @@ namespace
 					outage("chill_off", "chill", 0.0, 5.0, 10.0)}), false, &diagnostic),
 				diagnostic.c_str());
 			world.resumeSimulation();
-			require(world.advanceTicks(4 * 60), "distinct-kinds run failed before the window");
+			require(smoke::station::advanceSeconds(world, 4.0), "distinct-kinds run failed before the window");
 			auto const before = world.getStationSystemsSnapshot();
 			require(approx(before.power.generators[0].availabilityFactor, 1.0)
 				&& approx(before.coolantLoops[0].availabilityFactor, 1.0)
 				&& approx(before.chillers[0].availabilityFactor, 1.0)
 				&& approx(before.power.generators[0].outputKW, 10.0, 1e-2),
 				"the distinct-id kinds were not all at full service before the window");
-			require(world.advanceTicks(2 * 60), "distinct-kinds run failed into the window");
+			require(smoke::station::advanceSeconds(world, 2.0), "distinct-kinds run failed into the window");
 			auto const during = world.getStationSystemsSnapshot();
 			require(during.outages.size() == 3, "the three outages were not all tracked");
 			require(during.outages[0].active
@@ -1641,7 +1641,7 @@ namespace
 			require(approx(during.chillers[0].availabilityFactor, 0.0)
 				&& during.chillers[0].coolingKW == 0.0,
 				"the chiller outage did not take the chiller out of service");
-			require(world.advanceTicks(14 * 60), "distinct-kinds run failed past the window");
+			require(smoke::station::advanceSeconds(world, 14.0), "distinct-kinds run failed past the window");
 			auto const restored = world.getStationSystemsSnapshot();
 			require(!restored.outages[0].active && !restored.outages[1].active
 				&& !restored.outages[2].active
@@ -1660,7 +1660,7 @@ namespace
 				&& approx(fresh.chillers[0].availabilityFactor, 1.0),
 				"reset did not restore full declared availability on all three kinds");
 			world.resumeSimulation();
-			require(world.advanceTicks(6 * 60), "distinct-kinds reset replay failed");
+			require(smoke::station::advanceSeconds(world, 6.0), "distinct-kinds reset replay failed");
 			auto const replay = world.getStationSystemsSnapshot();
 			require(replay.power.generators == during.power.generators
 				&& replay.coolantLoops == during.coolantLoops
@@ -1689,7 +1689,7 @@ namespace
 				kindsSettings("gen", "coolloop", "chill", "coolloop", {}), false, &diagnostic),
 				diagnostic.c_str());
 			original.resumeSimulation();
-			require(original.advanceTicks(60), "collision-file original run failed");
+			require(smoke::station::advanceSeconds(original, 1.0), "collision-file original run failed");
 			auto writer = core::YamlSerializer::toString();
 			core::SerializationWorkData data;
 			original.serialize(*writer, data);
@@ -1757,7 +1757,7 @@ namespace
 					outage("chill_off", "chill", 0.0, 5.0, 10.0)}), false, &diagnostic),
 				"the sandbox distinct-kinds outage scenario was rejected");
 			world.resumeSimulation();
-			require(world.advanceTicks(20 * 60),
+			require(smoke::station::advanceSeconds(world, 20.0),
 				"bundled Lua distinct-kinds outage mirror failed its in-sandbox assertions");
 			auto const snap = world.getStationSystemsSnapshot();
 			require(approx(snap.power.generators[0].availabilityFactor, 1.0)
@@ -1940,7 +1940,7 @@ void maintenance(smoke::Context const&)
 		world.pauseSimulation(); world.finishBuild();
 		require(configure(world, settings), "nominal maintenance scenario was rejected");
 		// t = 12s: idle, generator at full rated output.
-		require(world.advanceTicks(12 * 60), "nominal run failed before the job");
+		require(smoke::station::advanceSeconds(world, 12.0), "nominal run failed before the job");
 		auto const& before = world.getStationSystemsSnapshot();
 		require(before.maintenanceJobs.size() == 1
 			&& before.maintenanceJobs[0].phase == core::StationMaintenancePhase::Idle
@@ -1951,7 +1951,7 @@ void maintenance(smoke::Context const&)
 			"the generator was not at full output before maintenance");
 		// t = 25s: work in progress - the generator is isolated, the
 		// tool and part are reserved (still in their stores, but held).
-		if (!world.advanceTicks(13 * 60))
+		if (!smoke::station::advanceSeconds(world, 13.0))
 		{
 			auto const& diags = world.getStationSystemsDiagnostics();
 			std::string msg = diags.empty() ? std::string("no diagnostic") : diags.back().message;
@@ -1983,7 +1983,7 @@ void maintenance(smoke::Context const&)
 		// t = 31s: completed - the part is spent into the waste store,
 		// the tool is returned, the generator runs again, and nothing
 		// was replenished.
-		require(world.advanceTicks(11 * 60), "nominal run failed past completion");
+		require(smoke::station::advanceSeconds(world, 11.0), "nominal run failed past completion");
 		auto const& after = world.getStationSystemsSnapshot();
 		require(after.maintenanceJobs[0].phase == core::StationMaintenancePhase::Completed
 			&& !after.maintenanceJobs[0].isolated
@@ -2026,7 +2026,7 @@ void maintenance(smoke::Context const&)
 		core::World world("MaintenanceMissingParts", 2, 2);
 		world.pauseSimulation(); world.finishBuild();
 		require(configure(world, settings), "missing-parts scenario was rejected");
-		require(world.advanceTicks(12 * 60), "missing-parts run failed");
+		require(smoke::station::advanceSeconds(world, 12.0), "missing-parts run failed");
 		auto const& snap = world.getStationSystemsSnapshot();
 		require(snap.maintenanceJobs[0].phase == core::StationMaintenancePhase::Blocked
 			&& snap.maintenanceJobs[0].blockReason.find("parts") != std::string::npos
@@ -2039,7 +2039,7 @@ void maintenance(smoke::Context const&)
 			&& sawEvent(world, "part/consumable store 'parts' cannot cover"),
 			"the blocking reason was not announced");
 		// t = 16s: the window closed with the work never started.
-		require(world.advanceTicks(4 * 60), "missing-parts run failed past the window");
+		require(smoke::station::advanceSeconds(world, 4.0), "missing-parts run failed past the window");
 		auto const& missed = world.getStationSystemsSnapshot();
 		require(missed.maintenanceJobs[0].occurrencesMissed == 1
 			&& missed.maintenanceJobs[0].occurrencesCompleted == 0
@@ -2082,12 +2082,12 @@ void maintenance(smoke::Context const&)
 		require(configure(world, settings), "interruption scenario was rejected");
 		// t = 11s: the job started at 10s with 5 kg drawable; the
 		// drain has been pulling 0.5 kg/s since the run began.
-		require(world.advanceTicks(11 * 60), "interruption run failed into the job");
+		require(smoke::station::advanceSeconds(world, 11.0), "interruption run failed into the job");
 		require(world.getStationSystemsSnapshot().maintenanceJobs[0].phase
 			== core::StationMaintenancePhase::Active,
 			"the job did not start before the drain reached its reservation");
 		// t = 17s: parts = 10 - 8.5 = 1.5 < 2 reserved -> interrupted.
-		require(world.advanceTicks(6 * 60), "interruption run failed into the interrupt");
+		require(smoke::station::advanceSeconds(world, 6.0), "interruption run failed into the interrupt");
 		auto const& cut = world.getStationSystemsSnapshot();
 		require(cut.maintenanceJobs[0].phase == core::StationMaintenancePhase::Blocked,
 			"the lost reservation did not block the job");
@@ -2100,7 +2100,7 @@ void maintenance(smoke::Context const&)
 			"the interruption was not announced with its discarded progress");
 		// t = 20s: the refill landed at 19s; the job re-reserves and
 		// is running again inside its window.
-		require(world.advanceTicks(3 * 60), "interruption run failed into the restart");
+		require(smoke::station::advanceSeconds(world, 3.0), "interruption run failed into the restart");
 		auto const& restarted = world.getStationSystemsSnapshot();
 		require(restarted.maintenanceJobs[0].phase == core::StationMaintenancePhase::Active
 			&& restarted.maintenanceJobs[0].occurrencesStarted == 2,
@@ -2109,7 +2109,7 @@ void maintenance(smoke::Context const&)
 			"the restarted job did not begin the full duration afresh");
 		// t = 29s: the full duration ran from the restart; the spend
 		// lands once, into waste, and the tool comes back.
-		require(world.advanceTicks(10 * 60), "interruption run failed past completion");
+		require(smoke::station::advanceSeconds(world, 10.0), "interruption run failed past completion");
 		auto const& done = world.getStationSystemsSnapshot();
 		require(done.maintenanceJobs[0].phase == core::StationMaintenancePhase::Completed
 			&& done.maintenanceJobs[0].occurrencesCompleted == 1
@@ -2140,7 +2140,7 @@ void maintenance(smoke::Context const&)
 		require(configure(world, settings), "contention scenario was rejected");
 		// t = 12s: the higher-priority job holds the tools; the lower
 		// one is blocked naming the tool store, and gen2 keeps running.
-		require(world.advanceTicks(12 * 60), "contention run failed into contention");
+		require(smoke::station::advanceSeconds(world, 12.0), "contention run failed into contention");
 		auto const& snap = world.getStationSystemsSnapshot();
 		require(snap.maintenanceJobs[0].phase == core::StationMaintenancePhase::Active
 			&& snap.maintenanceJobs[1].phase == core::StationMaintenancePhase::Blocked,
@@ -2153,7 +2153,7 @@ void maintenance(smoke::Context const&)
 		// t = 24s: the high job completed at 20s and returned the
 		// tool; the low job holds it now and gen is back on line
 		// (given its restart crank and ramp room).
-		require(world.advanceTicks(12 * 60), "contention run failed past the handoff");
+		require(smoke::station::advanceSeconds(world, 12.0), "contention run failed past the handoff");
 		auto const& handed = world.getStationSystemsSnapshot();
 		require(handed.maintenanceJobs[0].occurrencesCompleted == 1
 			&& handed.maintenanceJobs[1].phase == core::StationMaintenancePhase::Active
@@ -2164,7 +2164,7 @@ void maintenance(smoke::Context const&)
 			"the isolation did not move with the work");
 		// t = 36s: the low job completes too; total spend is exactly
 		// the two authored kilograms, both in the waste store.
-		require(world.advanceTicks(12 * 60), "contention run failed past the second completion");
+		require(smoke::station::advanceSeconds(world, 12.0), "contention run failed past the second completion");
 		auto const& done = world.getStationSystemsSnapshot();
 		require(done.maintenanceJobs[1].occurrencesCompleted == 1
 			&& done.maintenanceJobs[1].phase == core::StationMaintenancePhase::Completed,
@@ -2210,7 +2210,7 @@ void maintenance(smoke::Context const&)
 		// t = 12s: 'high' holds the only 1 kg of waste headroom.
 		// 'low' is blocked at the start check naming the waste store,
 		// never isolated, and gen2 stays at full output.
-		require(world.advanceTicks(12 * 60), "waste headroom run failed into contention");
+		require(smoke::station::advanceSeconds(world, 12.0), "waste headroom run failed into contention");
 		auto const& snap = world.getStationSystemsSnapshot();
 		require(snap.maintenanceJobs[0].phase == core::StationMaintenancePhase::Active
 			&& snap.maintenanceJobs[0].isolated,
@@ -2226,7 +2226,7 @@ void maintenance(smoke::Context const&)
 		// t = 24s: 'high' completed at 20s and filled the waste
 		// store; 'low' never started, was never interrupted, and gen2
 		// never left service.
-		require(world.advanceTicks(12 * 60),
+		require(smoke::station::advanceSeconds(world, 12.0),
 			"waste headroom run failed past the first completion");
 		auto const& full = world.getStationSystemsSnapshot();
 		require(full.maintenanceJobs[0].occurrencesCompleted == 1
@@ -2243,7 +2243,7 @@ void maintenance(smoke::Context const&)
 		// t = 27s: the ejection at 25s cleared the waste store;
 		// 'low' is still inside its [10, 30] window, so it commits
 		// now and gen2 goes off service for the real work.
-		require(world.advanceTicks(3 * 60), "waste headroom run failed into the late start");
+		require(smoke::station::advanceSeconds(world, 3.0), "waste headroom run failed into the late start");
 		auto const& late = world.getStationSystemsSnapshot();
 		require(late.maintenanceJobs[1].phase == core::StationMaintenancePhase::Active
 			&& late.maintenanceJobs[1].isolated
@@ -2251,7 +2251,7 @@ void maintenance(smoke::Context const&)
 			"the waiting job did not commit once the waste headroom freed up");
 		// t = 48s: 'low' completes its full 20 s duration and books
 		// its kilogram back into the cleared waste store.
-		require(world.advanceTicks(21 * 60),
+		require(smoke::station::advanceSeconds(world, 21.0),
 			"waste headroom run failed past the late completion");
 		auto const& done = world.getStationSystemsSnapshot();
 		require(done.maintenanceJobs[1].phase == core::StationMaintenancePhase::Completed
@@ -2267,7 +2267,7 @@ void maintenance(smoke::Context const&)
 		replay.pauseSimulation(); replay.finishBuild();
 		require(configure(replay, wasteHeadroomSettings()),
 			"waste headroom replay scenario was rejected");
-		require(replay.advanceTicks(48 * 60), "waste headroom replay run failed");
+		require(smoke::station::advanceSeconds(replay, 48.0), "waste headroom replay run failed");
 		require(world.getStationSystemsSnapshot().maintenanceJobs
 			== replay.getStationSystemsSnapshot().maintenanceJobs,
 			"the waste headroom contention replay diverged");
@@ -2303,11 +2303,11 @@ void maintenance(smoke::Context const&)
 		core::World first("MaintenanceReplayA", 2, 2);
 		first.pauseSimulation(); first.finishBuild();
 		require(configure(first, settings), "replay scenario A was rejected");
-		require(first.advanceTicks(40 * 60), "replay run A failed");
+		require(smoke::station::advanceSeconds(first, 40.0), "replay run A failed");
 		core::World second("MaintenanceReplayB", 2, 2);
 		second.pauseSimulation(); second.finishBuild();
 		require(configure(second, settings), "replay scenario B was rejected");
-		require(second.advanceTicks(40 * 60), "replay run B failed");
+		require(smoke::station::advanceSeconds(second, 40.0), "replay run B failed");
 		require(first.getStationSystemsSnapshot().maintenanceJobs
 			== second.getStationSystemsSnapshot().maintenanceJobs,
 			"the recurring maintenance replay diverged");
@@ -2365,7 +2365,7 @@ void maintenance(smoke::Context const&)
 		core::World world("MaintenanceSandboxCrossing", 2, 2);
 		world.pauseSimulation(); world.finishBuild();
 		require(configure(world, settings), "sandbox crossing scenario was rejected");
-		require(world.advanceTicks(35 * 60),
+		require(smoke::station::advanceSeconds(world, 35.0),
 			"bundled Lua maintenance mirror failed its in-sandbox assertions");
 		auto const snap = world.getStationSystemsSnapshot();
 		require(snap.healthy
@@ -2393,7 +2393,7 @@ void maintenance(smoke::Context const&)
 		world.pauseSimulation(); world.finishBuild();
 		require(configure(world, expiredSettings()),
 			"expired-window scenario was rejected");
-		require(world.advanceTicks(1), "expired-window first tick failed");
+		require(smoke::station::advanceSeconds(world, 0.0166666666667), "expired-window first tick failed");
 		auto const& snap = world.getStationSystemsSnapshot();
 		require(snap.healthy, "the expired-window run was not healthy");
 		require(snap.maintenanceJobs[0].occurrencesStarted == 1
@@ -2411,7 +2411,7 @@ void maintenance(smoke::Context const&)
 		require(sawEvent(world, "completed at 0.002000"),
 			"the sub-tick completion was not announced");
 		// The completed one-off never wakes up again.
-		require(world.advanceTicks(60), "expired-window run failed past the first second");
+		require(smoke::station::advanceSeconds(world, 1.0), "expired-window run failed past the first second");
 		auto const& later = world.getStationSystemsSnapshot();
 		require(later.maintenanceJobs[0].occurrencesStarted == 1
 			&& later.maintenanceJobs[0].occurrencesCompleted == 1
@@ -2425,7 +2425,7 @@ void maintenance(smoke::Context const&)
 		replay.pauseSimulation(); replay.finishBuild();
 		require(configure(replay, expiredSettings()),
 			"expired-window replay scenario was rejected");
-		require(replay.advanceTicks(61), "expired-window replay run failed");
+		require(smoke::station::advanceSeconds(replay, 1.01666666667), "expired-window replay run failed");
 		require(replay.getStationSystemsSnapshot().maintenanceJobs
 			== world.getStationSystemsSnapshot().maintenanceJobs,
 			"the expired-window replay diverged from the original run");
@@ -2456,7 +2456,7 @@ void maintenance(smoke::Context const&)
 			"sub-tick-window scenario was rejected");
 		// t = ~5.0167 s: only the first window [0.001, 0.002] has
 		// completed; the next opens at 10.001.
-		require(world.advanceTicks(301), "sub-tick-window run failed into window 1");
+		require(smoke::station::advanceSeconds(world, 5.01666666667), "sub-tick-window run failed into window 1");
 		auto const& snap = world.getStationSystemsSnapshot();
 		require(snap.healthy, "the sub-tick-window run was not healthy");
 		require(snap.maintenanceJobs[0].occurrencesMissed == 0
@@ -2471,7 +2471,7 @@ void maintenance(smoke::Context const&)
 			"the recurring job did not conserve consumed material");
 		// t = ~10.0167 s: the second window [10.001, 10.002] has
 		// completed too - one completion per declared window.
-		require(world.advanceTicks(300), "sub-tick-window run failed into window 2");
+		require(smoke::station::advanceSeconds(world, 5.0), "sub-tick-window run failed into window 2");
 		auto const& next = world.getStationSystemsSnapshot();
 		require(next.maintenanceJobs[0].occurrencesMissed == 0
 			&& next.maintenanceJobs[0].occurrencesStarted == 2
@@ -2482,7 +2482,7 @@ void maintenance(smoke::Context const&)
 		replay.pauseSimulation(); replay.finishBuild();
 		require(configure(replay, tightSettings()),
 			"sub-tick-window replay scenario was rejected");
-		require(replay.advanceTicks(601), "sub-tick-window replay run failed");
+		require(smoke::station::advanceSeconds(replay, 10.0166666667), "sub-tick-window replay run failed");
 		require(replay.getStationSystemsSnapshot().maintenanceJobs
 			== world.getStationSystemsSnapshot().maintenanceJobs,
 			"the sub-tick-window replay diverged from the original run");
@@ -2498,7 +2498,7 @@ void maintenance(smoke::Context const&)
 		midWindow.pauseSimulation(); midWindow.finishBuild();
 		require(configure(midWindow, wideSettings),
 			"mid-window-start scenario was rejected");
-		require(midWindow.advanceTicks(1), "mid-window-start first tick failed");
+		require(smoke::station::advanceSeconds(midWindow, 0.0166666666667), "mid-window-start first tick failed");
 		auto const& started = midWindow.getStationSystemsSnapshot();
 		require(started.maintenanceJobs[0].phase == core::StationMaintenancePhase::Active
 			&& started.maintenanceJobs[0].occurrencesStarted == 1

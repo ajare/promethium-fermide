@@ -1,3 +1,4 @@
+#include "StationRig.h"
 // #424: long-duration stability and repeatability of the Station systems.
 //
 // These checks drive the packaged long-duration stability workload -
@@ -51,7 +52,7 @@ namespace
 
 	auto const runOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
 	{
-		if (world.advanceTicks(ticks)) return;
+		if (smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0)) return;
 		auto const diagnostics = world.getStationSystemsDiagnostics();
 		std::fprintf(stderr, "%s run failed: %s\n", what,
 			diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());

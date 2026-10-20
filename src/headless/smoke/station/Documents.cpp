@@ -1,3 +1,4 @@
+#include "StationRig.h"
 // #387: authored Station settings travel through the real World document
 // seams. A saved document carries only validated settings - never a tick
 // count, event history or Lua state - so a reopened World reconstructs a
@@ -193,7 +194,7 @@ namespace
 				"World identity did not round trip");
 			restored->resetSimulation();
 			require(restored->getStationSystemsSettings() == explicitSettings, "Reset lost material identity");
-			restored->resumeSimulation(); require(restored->advanceTicks(60), "Restored inventory observation failed");
+			restored->resumeSimulation(); require(smoke::station::advanceSeconds(restored, 1.0), "Restored inventory observation failed");
 			restored->pauseSimulation();
 			auto const usable = restored->queryStationSystemsChart("stored-usable/water/kg/aggregate");
 			auto const hazardous = restored->queryStationSystemsChart("stored-usable/custom-feedstock-2/kg/aggregate");
@@ -240,7 +241,7 @@ namespace
 		baseline.pauseSimulation(); baseline.finishBuild();
 		require(baseline.configureStationSystems(unclassified, false, &diagnostic), diagnostic);
 		world.resumeSimulation(); baseline.resumeSimulation();
-		require(world.advanceTicks(60) && baseline.advanceTicks(60)
+		require(smoke::station::advanceSeconds(world, 1.0) && smoke::station::advanceSeconds(baseline, 1.0)
 			&& world.getStationSystemsSnapshot() == baseline.getStationSystemsSnapshot(),
 			"Material labels changed simulation allocation");
 	}
@@ -499,7 +500,7 @@ namespace
 			{"tank", "kg", 100.0, 0.0, 0.0}},
 			{{"pump", "o2", "tank", "kg", 60.0, 1}});
 		original.resumeSimulation();
-		require(original.advanceTicks(120), "original scenario run failed");
+		require(smoke::station::advanceSeconds(original, 2.0), "original scenario run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		auto const expectedEvents = original.getStationSystemsEvents();
 		require(expected.worldTick == 120 && expectedEvents.size() == 5
@@ -528,7 +529,7 @@ namespace
 				&& fresh.completedTicks == std::array<uint64_t, 4>{},
 				"reopen did not reconstruct a fresh station runtime");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(120), "reopened scenario run failed");
+			require(smoke::station::advanceSeconds(reopened, 2.0), "reopened scenario run failed");
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"reopened scenario is not reproducible from the document");
 			require(reopened->getStationSystemsEvents() == expectedEvents,
@@ -555,7 +556,7 @@ namespace
 		require(!world.isModified(), "successful save did not clean the document");
 
 		world.resumeSimulation();
-		require(world.advanceTicks(60), "run before the failed save broke");
+		require(smoke::station::advanceSeconds(world, 1.0), "run before the failed save broke");
 		world.pauseSimulation();
 		require(world.configureStationSystems({true, 3.0f}, true), "confirmed settings edit failed");
 		require(world.getSimulationTick() == 0, "confirmed edit did not reset the World");
@@ -582,7 +583,7 @@ namespace
 			"a failed save corrupted the previously saved document");
 
 		world.resumeSimulation();
-		require(world.advanceTicks(60)
+		require(smoke::station::advanceSeconds(world, 1.0)
 			&& world.getStationSystemsSnapshot().completedTicks[0] == 60,
 			"the live run did not continue after the failed save");
 #endif
@@ -646,7 +647,7 @@ namespace
 		core::World loadedWorld("Loaded", 2, 2);
 		enable(loadedWorld, 2.0f);
 		loadedWorld.resumeSimulation();
-		require(loadedWorld.advanceTicks(30), "loaded World run failed");
+		require(smoke::station::advanceSeconds(loadedWorld, 0.5), "loaded World run failed");
 		loadedWorld.pauseSimulation();
 		auto const before = loadedWorld.getStationSystemsSnapshot();
 
@@ -684,7 +685,7 @@ namespace
 		world.finishBuild();
 		enable(world, 1.0f);
 		world.resumeSimulation();
-		require(world.advanceTicks(30), "initial run failed");
+		require(smoke::station::advanceSeconds(world, 0.5), "initial run failed");
 		auto const live = world.getStationSystemsSnapshot();
 		require(live.completedTicks[3] == 30, "station did not run before the edit");
 
@@ -697,7 +698,7 @@ namespace
 			"structural replay lost the authored settings");
 
 		world.resumeSimulation();
-		require(world.advanceTicks(30), "run after the rebuild failed");
+		require(smoke::station::advanceSeconds(world, 0.5), "run after the rebuild failed");
 		require(world.getStationSystemsSnapshot().completedTicks[0] == 60,
 			"station did not continue from its preserved state");
 
@@ -735,7 +736,7 @@ namespace
 			0});
 		require(original.configureStationSystems(settings, true), "Compound settings edit failed");
 		original.resumeSimulation();
-		require(original.advanceTicks(60), "Compound original run failed");
+		require(smoke::station::advanceSeconds(original, 1.0), "Compound original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.conversions.size() == 1
 			&& expected.constituentBalances.size() == 8,
@@ -763,7 +764,7 @@ namespace
 			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
 				"compound settings did not survive the file round trip");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(60), "Compound reopened run failed");
+			require(smoke::station::advanceSeconds(reopened, 1.0), "Compound reopened run failed");
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"compound scenario is not reproducible from the document");
 			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -840,7 +841,7 @@ namespace
 		// charged during the preceding minute of sun, so stored is above
 		// its starting value but well inside the nameplate, and the
 		// eclipse leg shows live discharge (#547: energy is kW x hours).
-		require(original.advanceTicks(3660), "Battery original run failed");
+		require(smoke::station::advanceSeconds(original, 61.0), "Battery original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.power.batteries.size() == 1
 			&& expected.power.batteries[0].storedKWh > 8.0
@@ -872,7 +873,7 @@ namespace
 				&& reopened->getStationSystemsSnapshot().power.batteries[0].storedKWh == 8.0,
 				"reopened World did not reconstruct stored energy from the authored starting value");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(3660), "Battery reopened run failed");
+			require(smoke::station::advanceSeconds(reopened, 61.0), "Battery reopened run failed");
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"battery scenario is not reproducible from the document");
 			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -963,7 +964,7 @@ namespace
 		require(original.configureStationSystems(settings, true), "Power settings edit failed");
 		original.resumeSimulation();
 		// 61 simulated seconds: the eclipse leg, where nothing generates.
-		require(original.advanceTicks(3660), "Power original run failed");
+		require(smoke::station::advanceSeconds(original, 61.0), "Power original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.power.sources.size() == 1
 			&& std::abs(expected.power.availableGenerationKW) < 1e-9
@@ -994,7 +995,7 @@ namespace
 			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
 				"power settings did not survive the file round trip");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(3660), "Power reopened run failed");
+			require(smoke::station::advanceSeconds(reopened, 61.0), "Power reopened run failed");
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"power scenario is not reproducible from the document");
 			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -1084,7 +1085,7 @@ namespace
 		// Ten simulated seconds: occurrences at 1, 3, 5, 7 and 9 seconds.
 		// The 60 kg destination fills partway, so later arrivals are
 		// refused and the refusal is what the reopened World must reproduce.
-		require(original.advanceTicks(600), "Delivery original run failed");
+		require(smoke::station::advanceSeconds(original, 10.0), "Delivery original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		// Occurrences at 1, 3, 5, 7 and 9 seconds bring 12 kg each into a
 		// 60 kg store that started with 10: the fourth fills it and the
@@ -1121,7 +1122,7 @@ namespace
 				&& !fresh.deliveries[0].exhausted,
 				"reopened World did not restart the authored delivery schedule");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(600), "Delivery reopened run failed");
+			require(smoke::station::advanceSeconds(reopened, 10.0), "Delivery reopened run failed");
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"delivery scenario is not reproducible from the document");
 			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -1202,7 +1203,7 @@ namespace
 		// The store starts with 12 kg disposal-ready, so the third
 		// occurrence only partly fills its quota and the last two find
 		// nothing eligible - held waste stays behind through all of it.
-		require(original.advanceTicks(600), "Ejection original run failed");
+		require(smoke::station::advanceSeconds(original, 10.0), "Ejection original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.wasteEjections.size() == 1
 			&& expected.wasteEjections[0].occurrencesCompleted == 5
@@ -1237,7 +1238,7 @@ namespace
 				&& !fresh.wasteEjections[0].exhausted,
 				"reopened World did not restart the authored ejection schedule");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(600), "Ejection reopened run failed");
+			require(smoke::station::advanceSeconds(reopened, 10.0), "Ejection reopened run failed");
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"ejection scenario is not reproducible from the document");
 			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -1270,7 +1271,7 @@ namespace
 				require(reopened->getStationSystemsSettings() == settings,
 					"ejection eligibility did not round-trip");
 				reopened->resumeSimulation();
-				require(reopened->advanceTicks(600), "eligibility reopened run failed");
+				require(smoke::station::advanceSeconds(reopened, 10.0), "eligibility reopened run failed");
 				auto const snap = reopened->getStationSystemsSnapshot();
 				require(mode == core::WasteEjectionEligibility::HeldOnly
 					? snap.stores[0].currentQualified == 12.0 && snap.stores[0].currentUnqualified == 0.0
@@ -1282,7 +1283,7 @@ namespace
 				rerun.pauseSimulation(); rerun.finishBuild();
 				require(rerun.configureStationSystems(settings, false, &diagnostic), diagnostic);
 				rerun.resumeSimulation();
-				require(rerun.advanceTicks(600), "eligibility original rerun failed");
+				require(smoke::station::advanceSeconds(rerun, 10.0), "eligibility original rerun failed");
 				require(rerun.getStationSystemsSnapshot() == snap,
 					"eligibility document changed the re-run snapshot");
 			}
@@ -1387,7 +1388,7 @@ namespace
 		require(original.configureStationSystems(settings, false, &diagnostic),
 			"Containment settings edit failed: " + diagnostic);
 		original.resumeSimulation();
-		require(original.advanceTicks(120), "Containment original run failed");
+		require(smoke::station::advanceSeconds(original, 2.0), "Containment original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.waterTreatments.size() == 1
 			&& expected.waterTreatments[0].qualityAccepted
@@ -1418,7 +1419,7 @@ namespace
 				&& fresh.stores[0].currentQualified == 100.0,
 				"reopened World did not restart the authored containment scenario");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(120), "Containment reopened run failed");
+			require(smoke::station::advanceSeconds(reopened, 2.0), "Containment reopened run failed");
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"containment scenario is not reproducible from the document");
 		}
@@ -1659,7 +1660,7 @@ namespace
 		require(original.configureStationSystems(settings, false, &diagnostic),
 			"Thermal settings edit failed: " + diagnostic);
 		original.resumeSimulation();
-		require(original.advanceTicks(3600), "Thermal original run failed");
+		require(smoke::station::advanceSeconds(original, 60.0), "Thermal original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.thermal.reservoirs.size() == 1
 			&& expected.thermal.reservoirs[0].temperatureC > 20.0
@@ -1699,7 +1700,7 @@ namespace
 				&& reopened->getStationSystemsSnapshot().thermal.reservoirs[0].absorbedEnergyKJ == 0.0,
 				"reopened World did not reconstruct the authored thermal starting state");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(3600), "Thermal reopened run failed");
+			require(smoke::station::advanceSeconds(reopened, 60.0), "Thermal reopened run failed");
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"thermal scenario is not reproducible from the document");
 			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -1800,7 +1801,7 @@ namespace
 		require(original.configureStationSystems(settings, false, &diagnostic),
 			"Buffer settings edit failed: " + diagnostic);
 		original.resumeSimulation();
-		require(original.advanceTicks(3600), "Buffer original run failed");
+		require(smoke::station::advanceSeconds(original, 60.0), "Buffer original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.thermalBuffers.size() == 1
 			&& expected.thermalBuffers[0].chargedEnergyKJ > 0.0
@@ -1837,7 +1838,7 @@ namespace
 				&& reopened->getStationSystemsSnapshot().thermalBuffers[0].dischargedEnergyKJ == 0.0,
 				"reopened World did not reconstruct the authored buffer starting energy");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(3600), "Buffer reopened run failed");
+			require(smoke::station::advanceSeconds(reopened, 60.0), "Buffer reopened run failed");
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"thermal buffer scenario is not reproducible from the document");
 			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -1935,7 +1936,7 @@ namespace
 		require(original.configureStationSystems(settings, false, &diagnostic),
 			"Coolant settings edit failed: " + diagnostic);
 		original.resumeSimulation();
-		require(original.advanceTicks(3600), "Coolant original run failed");
+		require(smoke::station::advanceSeconds(original, 60.0), "Coolant original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.coolantLoops.size() == 2
 			&& expected.coolantLoops[0].flowKgPerS > 0.0
@@ -1974,7 +1975,7 @@ namespace
 				&& reopened->getStationSystemsSnapshot().coolantLoops[1].loopTemperatureC == 10.0,
 				"reopened World did not reconstruct the authored coolant starting state");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(3600), "Coolant reopened run failed");
+			require(smoke::station::advanceSeconds(reopened, 60.0), "Coolant reopened run failed");
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"coolant scenario is not reproducible from the document");
 			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -2110,7 +2111,7 @@ namespace
 		require(original.configureStationSystems(settings, false, &diagnostic),
 			"Chiller settings edit failed: " + diagnostic);
 		original.resumeSimulation();
-		require(original.advanceTicks(3600), "Chiller original run failed");
+		require(smoke::station::advanceSeconds(original, 60.0), "Chiller original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.chillers.size() == 1
 			&& expected.chillers[0].coolingKW > 0.0
@@ -2148,7 +2149,7 @@ namespace
 				&& reopened->getStationSystemsSnapshot().thermal.reservoirs[1].condenserEnergyKJ == 0.0,
 				"reopened World did not reconstruct the authored chiller starting state");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(3600), "Chiller reopened run failed");
+			require(smoke::station::advanceSeconds(reopened, 60.0), "Chiller reopened run failed");
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"chiller scenario is not reproducible from the document");
 			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -2257,7 +2258,7 @@ namespace
 		require(original.configureStationSystems(settings, false, &diagnostic),
 			"Generator settings edit failed: " + diagnostic);
 		original.resumeSimulation();
-		require(original.advanceTicks(3600), "Generator original run failed");
+		require(smoke::station::advanceSeconds(original, 60.0), "Generator original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.power.generators.size() == 1
 			&& expected.power.generators[0].outputKW > 0.0
@@ -2296,7 +2297,7 @@ namespace
 				&& reopened->getStationSystemsSnapshot().thermal.reservoirs[0].generatorEnergyKJ == 0.0,
 				"reopened World did not reconstruct the authored generator starting state");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(3600), "Generator reopened run failed");
+			require(smoke::station::advanceSeconds(reopened, 60.0), "Generator reopened run failed");
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"generator scenario is not reproducible from the document");
 			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -2431,7 +2432,7 @@ namespace
 		require(original.configureStationSystems(settings, false, &diagnostic),
 			"Outage settings edit failed: " + diagnostic);
 		original.resumeSimulation();
-		require(original.advanceTicks(20 * 60), "Outage original run failed");
+		require(smoke::station::advanceSeconds(original, 20.0), "Outage original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.outages.size() == 2
 			&& expected.outages[0].occurrencesStarted >= 1,
@@ -2466,7 +2467,7 @@ namespace
 				&& reopened->getStationSystemsSnapshot().outages[0].active == false,
 				"reopened World did not reconstruct the authored outage starting state");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(20 * 60), "Outage reopened run failed");
+			require(smoke::station::advanceSeconds(reopened, 20.0), "Outage reopened run failed");
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"outage scenario is not reproducible from the document");
 			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -2615,7 +2616,7 @@ namespace
 		require(original.configureStationSystems(settings, false, &diagnostic),
 			"Maintenance settings edit failed: " + diagnostic);
 		original.resumeSimulation();
-		require(original.advanceTicks(25 * 60), "Maintenance original run failed");
+		require(smoke::station::advanceSeconds(original, 25.0), "Maintenance original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.maintenanceJobs.size() == 2
 			&& expected.maintenanceJobs[0].occurrencesStarted >= 1,
@@ -2652,7 +2653,7 @@ namespace
 					== core::StationMaintenancePhase::Idle,
 				"reopened World did not reconstruct the authored maintenance starting state");
 			reopened->resumeSimulation();
-			require(reopened->advanceTicks(25 * 60), "Maintenance reopened run failed");
+			require(smoke::station::advanceSeconds(reopened, 25.0), "Maintenance reopened run failed");
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"maintenance scenario is not reproducible from the document");
 			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -2772,7 +2773,7 @@ namespace
 		require(original.configureStationSystems(settings, false, &diagnostic),
 			"Atmosphere settings edit failed: " + diagnostic);
 		original.resumeSimulation();
-		require(original.advanceTicks(1800), "Atmosphere original run failed");
+		require(smoke::station::advanceSeconds(original, 30.0), "Atmosphere original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.atmospheres.size() == 2 && expected.airlockCycles.size() == 2,
 			"Atmosphere scenario did not produce the expected snapshot shape");
@@ -2794,7 +2795,7 @@ namespace
 			&& reopened->getStationSystemsSnapshot().airlockCycles[0].occurrencesCompleted == 0,
 			"reopened World did not reconstruct the authored atmosphere starting state");
 		reopened->resumeSimulation();
-		require(reopened->advanceTicks(1800), "Atmosphere reopened run failed");
+		require(smoke::station::advanceSeconds(reopened, 30.0), "Atmosphere reopened run failed");
 		require(reopened->getStationSystemsSnapshot() == expected,
 			"Atmosphere scenario is not reproducible from the document");
 		require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -2933,7 +2934,7 @@ namespace
 		require(original.configureStationSystems(settings, false, &diagnostic),
 			"Crew settings edit failed: " + diagnostic);
 		original.resumeSimulation();
-		require(original.advanceTicks(1800), "Crew original run failed");
+		require(smoke::station::advanceSeconds(original, 30.0), "Crew original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.crews.size() == 1
 			&& expected.crews[0].foodConsumed > 0.0
@@ -2955,7 +2956,7 @@ namespace
 			&& reopened->getStationSystemsSnapshot().stores[2].currentQualified == 0.0,
 			"reopened World did not reconstruct the crew starting state");
 		reopened->resumeSimulation();
-		require(reopened->advanceTicks(1800), "Crew reopened run failed");
+		require(smoke::station::advanceSeconds(reopened, 30.0), "Crew reopened run failed");
 		require(reopened->getStationSystemsSnapshot() == expected,
 			"Crew scenario is not reproducible from the document");
 		require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -3146,7 +3147,7 @@ void waterFiles(smoke::Context const& context)
 	require(original.configureStationSystems(settings, false, &diagnostic),
 		"Water recovery settings edit failed: " + diagnostic);
 	original.resumeSimulation();
-	require(original.advanceTicks(1800), "Water original run failed");
+	require(smoke::station::advanceSeconds(original, 30.0), "Water original run failed");
 	auto const expected = original.getStationSystemsSnapshot();
 	require(expected.waterCollectors.size() == 1
 		&& expected.waterTreatments.size() == 1
@@ -3173,7 +3174,7 @@ void waterFiles(smoke::Context const& context)
 		&& reopened->getStationSystemsSnapshot().stores[1].currentQualified == 0.0,
 		"reopened World did not reconstruct the water recovery starting state");
 	reopened->resumeSimulation();
-	require(reopened->advanceTicks(1800), "Water reopened run failed");
+	require(smoke::station::advanceSeconds(reopened, 30.0), "Water reopened run failed");
 	require(reopened->getStationSystemsSnapshot() == expected,
 		"Water scenario is not reproducible from the document");
 	require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -3306,7 +3307,7 @@ void gasFiles(smoke::Context const& context)
 	require(original.configureStationSystems(settings, false, &diagnostic),
 		"Gas production settings edit failed: " + diagnostic);
 	original.resumeSimulation();
-	require(original.advanceTicks(1800), "Gas original run failed");
+	require(smoke::station::advanceSeconds(original, 30.0), "Gas original run failed");
 	auto const expected = original.getStationSystemsSnapshot();
 	require(expected.electrolyzers.size() == 1 && expected.co2Captures.size() == 1
 		&& expected.electrolyzers[0].waterSplitKg > 0.0
@@ -3334,7 +3335,7 @@ void gasFiles(smoke::Context const& context)
 		&& reopened->getStationSystemsSnapshot().stores[1].currentQualified == 0.0,
 		"reopened World did not reconstruct the gas production starting state");
 	reopened->resumeSimulation();
-	require(reopened->advanceTicks(1800), "Gas reopened run failed");
+	require(smoke::station::advanceSeconds(reopened, 30.0), "Gas reopened run failed");
 	require(reopened->getStationSystemsSnapshot() == expected,
 		"Gas scenario is not reproducible from the document");
 	require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -3451,7 +3452,7 @@ void fuelCellFiles(smoke::Context const& context)
 	require(original.configureStationSystems(settings, false, &diagnostic),
 		"Fuel-cell backup settings edit failed: " + diagnostic);
 	original.resumeSimulation();
-	require(original.advanceTicks(1800), "FuelCell original run failed");
+	require(smoke::station::advanceSeconds(original, 30.0), "FuelCell original run failed");
 	auto const expected = original.getStationSystemsSnapshot();
 	require(expected.fuelCells.size() == 1
 		&& expected.fuelCells[0].electricalKJ > 0.0
@@ -3479,7 +3480,7 @@ void fuelCellFiles(smoke::Context const& context)
 		&& reopened->getStationSystemsSnapshot().stores[0].currentQualified == 10.0,
 		"reopened World did not reconstruct the fuel-cell starting state");
 	reopened->resumeSimulation();
-	require(reopened->advanceTicks(1800), "FuelCell reopened run failed");
+	require(smoke::station::advanceSeconds(reopened, 30.0), "FuelCell reopened run failed");
 	require(reopened->getStationSystemsSnapshot() == expected,
 		"Fuel-cell scenario is not reproducible from the document");
 	require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -3604,7 +3605,7 @@ void carbonRecoveryFiles(smoke::Context const& context)
 	require(original.configureStationSystems(settings, false, &diagnostic),
 		"Carbon recovery settings edit failed: " + diagnostic);
 	original.resumeSimulation();
-	require(original.advanceTicks(1800), "Carbon original run failed");
+	require(smoke::station::advanceSeconds(original, 30.0), "Carbon original run failed");
 	auto const expected = original.getStationSystemsSnapshot();
 	require(expected.sabatierReactors.size() == 1 && expected.methaneProcessors.size() == 1
 		&& expected.sabatierReactors[0].co2ConsumedKg > 0.0
@@ -3635,7 +3636,7 @@ void carbonRecoveryFiles(smoke::Context const& context)
 		&& reopened->getStationSystemsSnapshot().stores[2].currentQualified == 0.0,
 		"reopened World did not reconstruct the carbon-recovery starting state");
 	reopened->resumeSimulation();
-	require(reopened->advanceTicks(1800), "Carbon reopened run failed");
+	require(smoke::station::advanceSeconds(reopened, 30.0), "Carbon reopened run failed");
 	require(reopened->getStationSystemsSnapshot() == expected,
 		"Carbon scenario is not reproducible from the document");
 	require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -3842,7 +3843,7 @@ void nutrientRecoveryFiles(smoke::Context const& context)
 	require(original.configureStationSystems(settings, false, &diagnostic),
 		"Nutrient recovery settings edit failed: " + diagnostic);
 	original.resumeSimulation();
-	require(original.advanceTicks(1800), "Nutrient original run failed");
+	require(smoke::station::advanceSeconds(original, 30.0), "Nutrient original run failed");
 	auto const expected = original.getStationSystemsSnapshot();
 	require(expected.microbialProcessors.size() == 1
 		&& expected.microbialProcessors[0].feedConsumedKg > 0.0
@@ -3877,7 +3878,7 @@ void nutrientRecoveryFiles(smoke::Context const& context)
 		&& reopened->getStationSystemsSnapshot().microbialProcessors[0].nutrientProducedKg == 0.0,
 		"reopened World did not reconstruct the nutrient-recovery starting state");
 	reopened->resumeSimulation();
-	require(reopened->advanceTicks(1800), "Nutrient reopened run failed");
+	require(smoke::station::advanceSeconds(reopened, 30.0), "Nutrient reopened run failed");
 	require(reopened->getStationSystemsSnapshot() == expected,
 		"Nutrient scenario is not reproducible from the document");
 	require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
@@ -4067,7 +4068,7 @@ void bioHazardFiles(smoke::Context const& context)
 	require(original.configureStationSystems(settings, false, &diagnostic),
 		"BioHazard settings edit failed: " + diagnostic);
 	original.resumeSimulation();
-	require(original.advanceTicks(1200), "BioHazard original run failed");
+	require(smoke::station::advanceSeconds(original, 20.0), "BioHazard original run failed");
 	auto const expected = original.getStationSystemsSnapshot();
 	require(expected.cropPopulations.size() == 1
 		&& expected.cropPopulations[0].harvestedKg > 0.0
@@ -4085,7 +4086,7 @@ void bioHazardFiles(smoke::Context const& context)
 			&& fresh.cropPopulations[0].harvestedKg == 0.0,
 			"reopened World did not restart the hazardous biological scenario");
 		reopened->resumeSimulation();
-		require(reopened->advanceTicks(1200), "BioHazard reopened run failed");
+		require(smoke::station::advanceSeconds(reopened, 20.0), "BioHazard reopened run failed");
 		require(reopened->getStationSystemsSnapshot() == expected,
 			"the hazardous biological scenario is not reproducible from the document");
 	}
@@ -4262,7 +4263,7 @@ void biologicalCapacityFiles(smoke::Context const& context)
 			&& reopened->getStationSystemsSettings().algaeCultures[0].maxBiomassDensityKgPerL == 1e154,
 			"the large but finite biological capacity factors did not survive the file round trip");
 		reopened->resumeSimulation();
-		require(reopened->advanceTicks(120),
+		require(smoke::station::advanceSeconds(reopened, 2.0),
 			"the reopened huge-but-finite biological rig failed to run");
 		auto const snap = reopened->getStationSystemsSnapshot();
 		require(snap.healthy

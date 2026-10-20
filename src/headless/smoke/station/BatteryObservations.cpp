@@ -6,6 +6,7 @@
 #include <limits>
 #include <stdexcept>
 
+#include "StationRig.h"
 namespace
 {
 	void require(bool condition, char const* message) { if (!condition) throw std::runtime_error(message); }
@@ -47,7 +48,7 @@ namespace
 			auto const catalogue = world.getStationSystemsObservationCatalogue();
 			require(catalogue.size() >= 4 && catalogue[1].id == "battery-energy" && catalogue[2].id == "battery-charge",
 				"battery properties were not discovered before recording");
-			world.resumeSimulation(); require(world.advanceTicks(60), "battery observation run failed"); world.pauseSimulation();
+			world.resumeSimulation(); require(smoke::station::advanceSeconds(world, 1.0), "battery observation run failed"); world.pauseSimulation();
 			require(world.getStationSystemsQueryWork().queries == 0, "recording built unselected views");
 			auto const before = world.getStationSystemsSnapshot();
 			auto const beforeDocument = document(world);
@@ -101,7 +102,7 @@ namespace
 			auto const incompatible = core::queryStationChart(catalogue[2], history);
 			require(incompatible.incomplete && std::isnan(incompatible.series[0].values[1]),
 				"ratio accepted incompatible physical units");
-			world.resumeSimulation(); require(world.advanceTicks(1800), "battery coarsening run failed"); world.pauseSimulation();
+			world.resumeSimulation(); require(smoke::station::advanceSeconds(world, 30.0), "battery coarsening run failed"); world.pauseSimulation();
 			auto const coarseEnergy = world.queryStationSystemsChart("battery-energy");
 			auto const coarseCharge = world.queryStationSystemsChart("battery-charge");
 			require(coarseEnergy.truncated && coarseCharge.truncated && coarseEnergy.series[0].values.size() <= 256
@@ -118,7 +119,7 @@ namespace
 		core::World zero("Zero capacity", 2, 2); zero.pauseSimulation(); zero.finishBuild();
 		auto s = rig(true); s.batteries = {{"zero", 0, 0, 0}};
 		require(zero.configureStationSystems(s, false), "zero-capacity rig refused");
-		zero.resumeSimulation(); require(zero.advanceTicks(6), "zero-capacity run failed"); zero.pauseSimulation();
+		zero.resumeSimulation(); require(smoke::station::advanceSeconds(zero, 0.1), "zero-capacity run failed"); zero.pauseSimulation();
 		auto const energy = zero.queryStationSystemsChart("battery-energy");
 		auto const charge = zero.queryStationSystemsChart("battery-charge");
 		close(energy.series[0].values[0], 0);

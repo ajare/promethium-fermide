@@ -10,6 +10,7 @@
 #include <limits>
 #include <format>
 
+#include "StationRig.h"
 namespace
 {
 using namespace smoke::station;
@@ -37,7 +38,7 @@ core::StationSystemsSnapshot run(core::StationSystemsSettings settings, int tick
 	auto const configured = world.configureStationSystems(settings, false, &error);
 	require(configured, error.c_str());
 	world.resumeSimulation();
-	if (!world.advanceTicks(ticks))
+	if (!smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0))
 	{
 		for (auto const& diagnostic : world.getStationSystemsDiagnostics()) error += diagnostic.message;
 		require(false, error.c_str());
@@ -462,7 +463,7 @@ void documents(smoke::Context const& context)
 	core::World original("Derived files", 2, 2);
 	original.pauseSimulation(); original.finishBuild();
 	require(original.configureStationSystems(doc.settings, false, &error), error.c_str());
-	original.resumeSimulation(); require(original.advanceTicks(60), "derived save rig failed");
+	original.resumeSimulation(); require(smoke::station::advanceSeconds(original, 1.0), "derived save rig failed");
 	for (auto extension : {"derived.world.yaml", "derived.world"})
 	{
 		auto const path = context.temporaryRoot() / extension;
@@ -471,7 +472,7 @@ void documents(smoke::Context const& context)
 		reopened->pauseSimulation();
 		require(reopened->getStationSystemsSettings() == doc.settings, "World derived settings changed on reload");
 		close(reopened->getStationSystemsSnapshot().microbialProcessors[0].nitrifiedNitrogenKg, 0);
-		reopened->resumeSimulation(); require(reopened->advanceTicks(60), "reloaded derived World failed");
+		reopened->resumeSimulation(); require(smoke::station::advanceSeconds(reopened, 1.0), "reloaded derived World failed");
 		require(reopened->getStationSystemsSnapshot().microbialProcessors == original.getStationSystemsSnapshot().microbialProcessors,
 			"derived World reload did not reproduce tick actuals");
 	}
@@ -493,7 +494,7 @@ void documents(smoke::Context const& context)
 	a.resumeSimulation(); b.resumeSimulation();
 	for (int tick = 0; tick < 60; ++tick)
 	{
-		require(a.advanceTicks(1) && b.advanceTicks(1), "legacy anchor tick failed");
+		require(smoke::station::advanceSeconds(a, 0.0166666666667) && smoke::station::advanceSeconds(b, 0.0166666666667), "legacy anchor tick failed");
 		require(a.getStationSystemsSnapshot().microbialProcessors == b.getStationSystemsSnapshot().microbialProcessors,
 			"legacy anchor changed tick actuals");
 	}

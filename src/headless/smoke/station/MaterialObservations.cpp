@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <tuple>
 
+#include "StationRig.h"
 namespace
 {
 	void require(bool condition, char const* message) { if (!condition) throw std::runtime_error(message); }
@@ -50,7 +51,7 @@ namespace
 	}
 	void run(core::World& world, uint64_t ticks = 60)
 	{
-		world.resumeSimulation(); require(world.advanceTicks(ticks), "material observation run failed"); world.pauseSimulation();
+		world.resumeSimulation(); require(smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0), "material observation run failed"); world.pauseSimulation();
 	}
 	void exchangeObservations(smoke::Context const&)
 	{
@@ -202,7 +203,7 @@ namespace
 		close(get("stored-material/parts/kg/aggregate").series[0].values.back(), 2.5);
 		auto const revision = world.getStationSystemsObservationRevision();
 		require(world.getStationSystemsSnapshot() == snap, "event viewing changed simulation");
-		world.pauseSimulation(); require(!world.advanceTicks(12) && world.getStationSystemsObservationRevision() == revision, "pause recorded events");
+		world.pauseSimulation(); require(!smoke::station::advanceSeconds(world, 0.2) && world.getStationSystemsObservationRevision() == revision, "pause recorded events");
 		auto missing = histories;
 		for (auto& h : missing) if (h.descriptor.id == "exchange/Resupply/boundary/Accepted") h.samples[0].actual.reset();
 		auto gap = core::queryStationChart(chart(world, accepted), missing);

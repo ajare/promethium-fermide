@@ -8,6 +8,7 @@
 #include <memory>
 #include <stdexcept>
 
+#include "StationRig.h"
 namespace
 {
 using Settings = core::StationSystemsSettings;
@@ -47,7 +48,7 @@ std::unique_ptr<core::World> make(Settings settings)
 }
 void advance(core::World& world, unsigned ticks = 1)
 {
-	if (world.advanceTicks(ticks)) return;
+	if (smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0)) return;
 	std::string why = "Connection simulation failed";
 	for (auto const& diagnostic : world.getStationSystemsDiagnostics()) why += "; " + diagnostic.message;
 	throw std::runtime_error(why);
