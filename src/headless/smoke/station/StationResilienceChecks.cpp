@@ -801,13 +801,14 @@ void protectedServices(smoke::Context const&)
 			"the protected alarm raised with no unmet protected demand");
 	}
 
-	// Scenario 2: hazardous shortage. The hazardous containment loop's
-	// pump and freeze heater are protected by the loop's hazard class
-	// alone. With a pool that covers them the containment runs whole
-	// while the discretionary load is squeezed; with a pool below the
-	// protected minimum the shortfall stays explicit as unmet critical
-	// demand with the reason named and the event logged - never silently
-	// reclassified as permissible curtailment.
+	// Scenario 2: authored-critical shortage. The loop's pump and freeze
+	// heater are protected because the author declared `criticalService`
+	// (#754) - the hazard class alone protects nothing. With a pool that
+	// covers them the circulation runs whole while the discretionary load
+	// is squeezed; with a pool below the protected minimum the shortfall
+	// stays explicit as unmet critical demand with the reason named and
+	// the event logged - never silently reclassified as permissible
+	// curtailment.
 	{
 		core::World world("ProtHaz", 2, 2);
 		world.pauseSimulation();
@@ -815,23 +816,25 @@ void protectedServices(smoke::Context const&)
 		core::StationSystemsSettings settings;
 		settings.stores = { massStore("ballast", 10.0, 1.0) };
 		settings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
-		settings.coolantLoops = { hazardousLoop("hazLoop", 1.0, 0.5, 0.0) };
+		auto critical = hazardousLoop("hazLoop", 1.0, 0.5, 0.0);
+		critical.criticalService = true;
+		settings.coolantLoops = { critical };
 		settings.solarArrays = { solarArray(3.0) };
 		settings.equipmentLoads = { discretionaryLoad("experiment", 3.0, 0.5) };
-		configure(world, settings, "hazardous shortage rig");
+		configure(world, settings, "critical shortage rig");
 		world.resumeSimulation();
-		runOrDiagnose(world, 10, "hazardous shortage");
+		runOrDiagnose(world, 10, "critical shortage");
 		auto const& snap = world.getStationSystemsSnapshot();
 		auto const& loop = snap.coolantLoops[0];
 		require(closeTo(loop.pumpSuppliedKW, 1.0) && closeTo(loop.heaterSuppliedKW, 0.5),
-			"the hazardous containment circulation was not protected ahead of the experiment");
+			"the authored-critical circulation was not protected ahead of the experiment");
 		require(closeTo(loop.circulationFraction, 1.0),
-			"the protected hazardous loop did not circulate fully");
+			"the protected loop did not circulate fully");
 		require(closeTo(snap.power.protectedDemandKW, 1.5)
 			&& closeTo(snap.power.protectedSuppliedKW, 1.5),
-			"the containment protection totals are wrong");
+			"the protection totals are wrong");
 		require(!snap.power.protectedUnmet,
-			"the containment alarm raised while the pool covered the protected draw");
+			"the protection alarm raised while the pool covered the protected draw");
 	}
 	{
 		core::World world("ProtHazTight", 2, 2);
@@ -840,16 +843,18 @@ void protectedServices(smoke::Context const&)
 		core::StationSystemsSettings settings;
 		settings.stores = { massStore("ballast", 10.0, 1.0) };
 		settings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
-		settings.coolantLoops = { hazardousLoop("hazLoop", 1.0, 0.5, 0.0) };
+		auto critical = hazardousLoop("hazLoop", 1.0, 0.5, 0.0);
+		critical.criticalService = true;
+		settings.coolantLoops = { critical };
 		settings.solarArrays = { solarArray(1.0) };
 		settings.equipmentLoads = { discretionaryLoad("experiment", 3.0, 0.5) };
-		configure(world, settings, "tight hazardous rig");
+		configure(world, settings, "tight critical rig");
 		world.resumeSimulation();
-		runOrDiagnose(world, 10, "tight hazardous");
+		runOrDiagnose(world, 10, "tight critical");
 		auto const& snap = world.getStationSystemsSnapshot();
 		auto const& loop = snap.coolantLoops[0];
 		require(closeTo(loop.pumpSuppliedKW, 1.0),
-			"the containment pump lost supply even though the pool covered it first");
+			"the protected pump lost supply even though the pool covered it first");
 		require(closeTo(loop.heaterSuppliedKW, 0.0),
 			"the freeze heater drew beyond the pool the protected pass left");
 		require(snap.power.protectedUnmet,
@@ -857,11 +862,58 @@ void protectedServices(smoke::Context const&)
 		require(closeTo(snap.power.protectedUnmetKW, 0.5),
 			"the unmet protected critical minimum is not the freeze-heater remainder");
 		require(sawEvent(world, "Protected containment-circulation 'hazLoop' unmet"),
-			"the protected containment shortfall was not announced");
+			"the protected circulation shortfall was not announced");
 		require(snap.power.protectedServices[0].reason.find("pool") != std::string::npos,
 			"the unmet protected service does not name the binding pool reason");
 		require(closeTo(snap.power.loads[0].suppliedKW, 0.0),
-			"the discretionary load took power ahead of the protected containment draw");
+			"the discretionary load took power ahead of the protected circulation draw");
+	}
+
+	// Scenario 2b: protection is authored, not inferred (#754). A
+	// hazardous loop that its author did NOT declare critical sheds like
+	// any other discretionary load under a brownout, while an authored-
+	// critical loop keeps circulating. The unprotected hazardous loop is
+	// declared FIRST so the shed can only come from the missing
+	// `criticalService` declaration, never from declaration order: the
+	// hazard class alone buys the pump nothing.
+	{
+		core::World world("ProtNotInferred", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
+		auto hazNotCritical = hazardousLoop("hazPlain", 1.0, 0.0, 20.0);
+		auto critical = hazardousLoop("criticalLoop", 1.0, 0.0, 20.0);
+		critical.criticalService = true;
+		settings.coolantLoops = { hazNotCritical, critical };
+		settings.solarArrays = { solarArray(1.0) };
+		configure(world, settings, "authored-not-inferred rig");
+		world.resumeSimulation();
+		runOrDiagnose(world, 10, "authored-not-inferred brownout");
+		auto const& snap = world.getStationSystemsSnapshot();
+		require(snap.coolantLoops[0].hazardClass == "hazardous"
+			&& snap.coolantLoops[1].hazardClass == "hazardous",
+			"both rigs declare hazardous loops: the shed must not come from the class");
+		require(closeTo(snap.coolantLoops[1].pumpSuppliedKW, 1.0)
+			&& closeTo(snap.coolantLoops[1].circulationFraction, 1.0),
+			"the authored-critical loop did not keep circulating through the brownout");
+		require(closeTo(snap.coolantLoops[0].pumpSuppliedKW, 0.0)
+			&& closeTo(snap.coolantLoops[0].circulationFraction, 0.0)
+			&& closeTo(snap.coolantLoops[0].flowKgPerS, 0.0),
+			"the hazardous-but-not-critical loop was not shed like a discretionary load");
+		require(closeTo(snap.power.protectedDemandKW, 1.0)
+			&& closeTo(snap.power.protectedSuppliedKW, 1.0)
+			&& !snap.power.protectedUnmet,
+			"the protected account is not exactly the one authored-critical loop");
+		require(snap.power.protectedServices.size() == 1
+			&& snap.power.protectedServices[0].id == "criticalLoop",
+			"the unprotected hazardous loop appeared in the protected-service accounts");
+		bool hazAnnounced = false;
+		for (auto const& event : world.getStationSystemsEvents())
+			if (event.message.find("hazPlain' unmet") != std::string::npos) hazAnnounced = true;
+		require(!hazAnnounced,
+			"the unprotected hazardous loop's shed was announced as unmet protected service");
 	}
 
 	// Scenario 3: generator cooling shortfall and shutdown cooling.
@@ -1007,7 +1059,9 @@ void protectedServices(smoke::Context const&)
 			massStore("h_residue", 100.0, 0.0, "hazardous"),
 			massStore("ballast", 10.0, 1.0) };
 		settings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
-		settings.coolantLoops = { hazardousLoop("hazLoop", 1.0, 0.0, 20.0) };
+		auto critical = hazardousLoop("hazLoop", 1.0, 0.0, 20.0);
+		critical.criticalService = true;
+		settings.coolantLoops = { critical };
 		core::MicrobialProcessorSettings digester;
 		digester.id = "digester";
 		digester.hazardClass = "hazardous";
@@ -1042,7 +1096,7 @@ void protectedServices(smoke::Context const&)
 		runOrDiagnose(world, 10, "microbial coordination");
 		auto const& snap = world.getStationSystemsSnapshot();
 		require(closeTo(snap.coolantLoops[0].pumpSuppliedKW, 1.0),
-			"the containment circulation was not protected ahead of the digester");
+			"the authored-critical circulation was not protected ahead of the digester");
 		auto const& processor = snap.microbialProcessors[0];
 		require(processor.lastPowerDemandKW > 1.0,
 			"the digester declared no meaningful electrical demand to be curtailed");
@@ -1054,9 +1108,9 @@ void protectedServices(smoke::Context const&)
 
 	// Scenario 5: competing protected dependencies resolve
 	// deterministically by declaration order. The pool covers the first
-	// hazardous loop whole and part of the second; the second loop's
-	// remainder stays unmet critical demand and is announced, while the
-	// first loop's event log stays clean. Two identical runs agree.
+	// authored-critical loop whole and part of the second; the second
+	// loop's remainder stays unmet critical demand and is announced, while
+	// the first loop's event log stays clean. Two identical runs agree.
 	auto competingRun = [&]() -> std::unique_ptr<core::World>
 	{
 		auto world = std::make_unique<core::World>("ProtCompete", 2, 2);
@@ -1065,8 +1119,11 @@ void protectedServices(smoke::Context const&)
 		core::StationSystemsSettings settings;
 		settings.stores = { massStore("ballast", 10.0, 1.0) };
 		settings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
-		settings.coolantLoops = { hazardousLoop("loopA", 2.0, 0.0, 20.0),
-			hazardousLoop("loopB", 2.0, 0.0, 20.0) };
+		auto loopA = hazardousLoop("loopA", 2.0, 0.0, 20.0);
+		auto loopB = hazardousLoop("loopB", 2.0, 0.0, 20.0);
+		loopA.criticalService = true;
+		loopB.criticalService = true;
+		settings.coolantLoops = { loopA, loopB };
 		settings.solarArrays = { solarArray(3.0) };
 		std::string diagnostic;
 		settings.enabled = true;

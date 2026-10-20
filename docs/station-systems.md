@@ -2172,9 +2172,10 @@ or ports, and applies process edits through the reset-confirmed history flow.
 Operations are admitted or curtailed without cutting the essential
 support services that protected loads depend on. A set of Critical
 station services is drawn from the actual generation-and-battery pool
-ahead of every discretionary external load: containment circulation
-(every hazardous coolant loop's pump and freeze heater, protected by
-the loop's hazard class alone), biological essential circulation
+ahead of every discretionary external load: coolant-loop circulation
+(a loop's pump and freeze heater, protected only when its author
+authores `criticalService` - never inferred from the loop's hazard
+class (#754)), biological essential circulation
 every crop and algae population declares, and authored critical-service
 chiller work (`criticalService` on coolant loops and chillers, the
 flag persisted with the World document at schema 92 and refused on
@@ -2188,7 +2189,7 @@ circulation it could sustain). The credits taken ahead are what the
 later loop, chiller and biology passes consume, so no watt is drawn
 twice and no protected machine funds itself.
 
-Competing protected dependencies resolve deterministically: containment
+Competing protected dependencies resolve deterministically: protected
 loops by declaration, then critical chillers by declaration, then
 crops and algae by declaration; the first-declared service takes its
 draw from the actual pool and later services get only the remainder.

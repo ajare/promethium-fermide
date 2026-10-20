@@ -1084,13 +1084,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             conductance = loop.exchangerConductanceKWPerK,
             heaterKW = loop.heaterCapacityKW,
             criticalService = loop.criticalService == true,
-            -- #416: a hazardous loop is protected by its hazard class:
-            -- its circulation is a containment boundary. An authored
-            -- criticalService flag protects a normal loop's circulation
-            -- the same way. Protected circulation is drawn from the
-            -- actual pool ahead of every discretionary external load.
-            protectedService = (loop.criticalService == true)
-                or loop.hazardClass == 'hazardous',
+            -- #416/#754: protected circulation is drawn from the
+            -- actual pool ahead of every discretionary external load,
+            -- and it comes only from the author's `criticalService`
+            -- declaration. Nothing is inferred from the loop's hazard
+            -- class: a hazardous loop is protected exactly when its
+            -- author says so.
+            protectedService = loop.criticalService == true,
             temperature = loop.startingTemperatureC,
             pumpWorkKJ = 0,
             heaterKJ = 0,
@@ -5265,9 +5265,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- twice and make a source-funded startup fail its own audit
         -- (#561).
         local availableGeneration = generation + startupFromGeneration
-        -- #416 mirror: protected critical service admission. Containment
-        -- circulation (hazardous coolant loops, protected by their hazard
-        -- class alone), authored critical coolant loops, biological
+        -- #416 mirror: protected critical service admission. Authored
+        -- critical coolant-loop circulation (#754: the loop's
+        -- `criticalService` declaration is the only thing that protects
+        -- it - the hazard class infers nothing), biological
         -- essential circulation (crop/algae circulation pumps) and
         -- authored critical-service chiller work are Critical station
         -- services: their electrical demand is drawn from the actual
@@ -5277,7 +5278,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- is conservative: only what the pool actually holds this tick -
         -- never independent nameplate totals - and what the pool cannot
         -- deliver stays explicit unmet critical demand with the binding
-        -- reason named. Deterministic order: containment loops by
+        -- reason named. Deterministic order: protected loops by
         -- declaration, then critical chillers by declaration, then crops
         -- and algae by declaration; no protected machine funds itself,
         -- and the credits taken here are what the later loop, chiller and

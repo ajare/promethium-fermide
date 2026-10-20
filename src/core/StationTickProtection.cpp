@@ -15,9 +15,10 @@ namespace core
 		// books outputs there is no room to deliver. The shortfall stays
 		// explicit as unmet service and per-exchange unmet material.
 
-		// #416: protected critical service admission. Containment
-		// circulation (hazardous coolant loops, protected by their hazard
-		// class alone), authored critical coolant loops, biological
+		// #416: protected critical service admission. Authored
+		// critical coolant-loop circulation (#754: the loop's
+		// `criticalService` declaration is the only thing that protects
+		// it - the hazard class infers nothing), biological
 		// essential circulation (crop/algae circulation pumps) and
 		// authored critical-service chiller work are Critical station
 		// services: their electrical demand is drawn from the actual
@@ -27,7 +28,7 @@ namespace core
 		// is conservative: only what the pool actually holds this tick -
 		// never independent nameplate totals - and what the pool cannot
 		// deliver stays explicit unmet critical demand with the binding
-		// reason named. Deterministic order: containment loops by
+		// reason named. Deterministic order: protected loops by
 		// declaration, then critical chillers by declaration, then crops
 		// and algae by declaration; no protected machine funds itself,
 		// and the credits taken here are what the later loop, chiller and

@@ -1627,8 +1627,9 @@ bool renderCoolantLoopEntry([[maybe_unused]] core::StationSystemsSettings& draft
 	ImGui::InputDouble((label + " exchanger conductance kW/K").c_str(), &loop.exchangerConductanceKWPerK, 0.0, 0.0, "%.3f");
 	ImGui::InputDouble((label + " heater capacity kW").c_str(), &loop.heaterCapacityKW, 0.0, 0.0, "%.3f");
 	ImGui::Checkbox((label + " protected critical service"
-		+ (loop.hazardClass == "hazardous" ? " (hazardous loops are always protected)"
-			: " (circulation and freeze heat drawn ahead of discretionary loads)")).c_str(), &loop.criticalService);
+		+ " (circulation and freeze heat drawn ahead of discretionary loads; "
+		  "protection is authored here, never inferred from the hazard class)").c_str(),
+		&loop.criticalService);
 	ImGui::SameLine();
 	bool const remove = !removeLabel.empty() && ImGui::Button(removeLabel.c_str());
 	ImGui::PopItemWidth();

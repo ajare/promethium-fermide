@@ -178,8 +178,7 @@ assumptions:
       hazardous-class treatment, which releases treated material only
       on complete treatment energy evidence; a curtailed energy dose
       holds the material unqualified. The hazardous coolant loop owns its own finite
-      coolant inventory, is protected as a containment-circulation
-      service regardless of its criticalService flag, and never shares
+      coolant inventory, is authored a critical service, so its containment circulation is drawn ahead of discretionary load, and never shares
       a store, a loop or a generic transfer with the normal side.
       Hazardous concentrate leaves the station only through its own
       scheduled ejection. No normal-class process touches a hazardous
@@ -939,7 +938,7 @@ stationSystems:
       ratedFlowKgPerS: 1.5
       exchangerConductanceKWPerK: 1.0
       heaterCapacityKW: 0.4
-      criticalService: false
+      criticalService: true
 
   chillers:
     - id: chillerMain
