@@ -293,8 +293,6 @@ void validation(smoke::Context const& context)
 	require(!validate(bad), "unit target moisture accepted");
 	bad = settings; bad.stores[0].composition.reset();
 	require(!validate(bad), "plain derived feed accepted");
-	bad = settings; bad.stores[1].hazardClass = "hazardous";
-	require(!validate(bad), "derived mode bypassed hazard segregation");
 	bad = settings; bad.microbialProcessors[0].thermalClass = "warm";
 	require(!validate(bad), "derived mode bypassed thermal class agreement");
 	bad = settings; bad.microbialProcessors[0].waterStoreId = bad.microbialProcessors[0].oxygenStoreId;

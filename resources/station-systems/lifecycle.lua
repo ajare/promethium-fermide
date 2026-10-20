@@ -702,12 +702,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert(type(protected) == "number" and protected == protected and protected >= 0
             and protected <= store.qualified,
             "protected reserve must be finite, non-negative and within starting usable inventory")
-        -- The authored hazard class (#412): a corrupt crossing that names
-        -- an unknown class fails contained here, exactly like any other
-        -- bad descriptor.
-        local hazardClass = store.hazardClass or 'normal'
-        assert(hazardClass == 'normal' or hazardClass == 'hazardous',
-            "resource store hazard class must be 'normal' or 'hazardous'")
         local composition
         if store.composition ~= nil then
             assert(type(store.composition) == "table", "resource composition must be a table")
@@ -739,7 +733,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         object.stores[index] = {
             id = store.id,
             unit = store.unit,
-            hazardClass = hazardClass,
             capacity = store.capacity,
             qualified = store.qualified,
             unqualified = store.unqualified,
@@ -1802,9 +1795,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             if consumed then
                 anyConsumed = true
                 -- The consumed stream lands in the declared waste
-                -- store: same unit, same declared composition, same
-                -- hazard class - the same boundaries a generic
-                -- transfer must respect (#390, #412).
+                -- store: same unit and same declared composition - the
+                -- same boundaries a generic transfer must respect (#390).
                 local waste = job.wasteStore ~= nil and job.wasteStore ~= ''
                     and by_id[job.wasteStore] or nil
                 assert(waste ~= nil,
@@ -1907,8 +1899,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local atmosphere = atmospheres[index]
         assert(type(atmosphere) == 'table', 'atmosphere descriptor must be a table')
         assert(type(atmosphere.id) == 'string' and #atmosphere.id > 0, 'atmosphere needs an id')
-        assert(atmosphere.hazardClass == 'normal' or atmosphere.hazardClass == 'hazardous',
-            'atmosphere needs a declared hazard class (normal or hazardous)')
         local function checkAmount(field, value, positive)
             assert(type(value) == 'number' and value == value and value < math.huge
                 and (positive and value > 0 or value >= 0),
@@ -1972,7 +1962,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             'atmosphere starting inventory derives a non-finite pressure in its volume and temperature')
         object.atmospheres[index] = {
             id = atmosphere.id,
-            hazardClass = atmosphere.hazardClass,
             volumeM3 = atmosphere.volumeM3,
             oxygen = atmosphere.startingOxygenKg,
             nitrogen = atmosphere.startingNitrogenKg,
@@ -2432,8 +2421,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         if cell.atmosphere ~= nil and #cell.atmosphere > 0 then
             compartment = atmosphere_by_id[cell.atmosphere]
             assert(compartment ~= nil, 'electrolyzer oxygen delivery compartment is unknown')
-            assert(compartment.hazardClass == cell.hazardClass,
-                'electrolyzer hazard class must match the delivery compartment: oxygen may only be delivered to a compartment of the cell\'s own class')
         end
         local sink = reservoir_by_id[cell.heatSink]
         assert(sink ~= nil, 'electrolyzer heat sink reservoir is unknown')
@@ -2482,8 +2469,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             'CO2 capture priority must be a finite integer')
         local compartment = atmosphere_by_id[capture.atmosphere]
         assert(compartment ~= nil, 'CO2 capture atmosphere compartment is unknown')
-        assert(compartment.hazardClass == capture.hazardClass,
-            'CO2 capture hazard class must match the compartment it scrubs')
         local destination = declareGasStore(capture.captureStore, 'capture', false)
         local consumable = nil
         if capture.consumableStore ~= nil and #capture.consumableStore > 0 then

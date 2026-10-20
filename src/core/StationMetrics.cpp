@@ -62,7 +62,7 @@ namespace core
 			auto& d = observation.metric;
 			d.id = "store/" + store.id + "/inventory"; d.instanceId = store.id;
 			d.equipmentType = "Resource store"; d.exchangeRole = "stored-inventory";
-			d.role = StationMetricRole::Inventory; d.hazardClass = store.hazardClass;
+			d.role = StationMetricRole::Inventory;
 			d.quantity = StationPhysicalQuantity::Unspecified; d.unit = StationCanonicalUnit::Unspecified;
 			if (store.unit == "kg" || store.unit == "g")
 			{

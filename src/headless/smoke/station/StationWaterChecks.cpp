@@ -68,7 +68,6 @@ namespace
 		{
 			core::AtmosphereSettings settings;
 			settings.id = "habitat";
-			settings.hazardClass = "normal";
 			settings.volumeM3 = 100.0;
 			settings.startingOxygenKg = 20.0;
 			settings.startingNitrogenKg = 80.0;
@@ -178,10 +177,6 @@ namespace
 			}
 			bad.crews = {c}; bad.crews[0].greywaterStoreId = "water";
 			require(!core::validateStationSystemsSettings(bad, diagnostic), "aliased greywater accepted");
-			bad.crews = {c}; bad.stores.back().hazardClass = "hazardous";
-			// The greywater destination's hazard class no longer binds the
-			// crew (#751): the return lands wherever it is wired.
-			require(core::validateStationSystemsSettings(bad, diagnostic), diagnostic.c_str());
 			stores.back().capacity = 100;
 			stores.back().startingQualified = 100;
 			core::World full("GreywaterFull", 2, 2); full.pauseSimulation(); full.finishBuild();
@@ -267,22 +262,6 @@ namespace
 			// Cross-class crew wiring is accepted (#751): hazardous food
 			// metabolised by a normal-class crew into normal returns, a
 			// hazardous drinking store and a hazardous return store all
-			// validate; the class no longer reserves a store for a crew.
-			settings.crews = { crew(2, 1.0) };
-			settings.stores = fullStores();
-			settings.stores[0].hazardClass = "hazardous";
-			require(core::validateStationSystemsSettings(settings, diagnostic),
-				("a normal crew metabolising hazardous food was refused: " + diagnostic).c_str());
-			settings.crews = { crew(2, 1.0) };
-			settings.stores = fullStores();
-			settings.stores[1].hazardClass = "hazardous";
-			require(core::validateStationSystemsSettings(settings, diagnostic),
-				("a normal crew drinking hazardous water was refused: " + diagnostic).c_str());
-			settings.crews = { crew(2, 1.0) };
-			settings.stores = fullStores();
-			settings.stores[3].hazardClass = "hazardous";
-			require(core::validateStationSystemsSettings(settings, diagnostic),
-				("a normal crew returning into a hazardous organic-waste store was refused: " + diagnostic).c_str());
 			require(!bad.getStationSystemsSnapshot().enabled && bad.getSimulationTick() == 0,
 				"a refused crew configuration mutated the World");
 		}
@@ -831,7 +810,6 @@ namespace
 		{
 			core::AtmosphereSettings settings;
 			settings.id = "habitat";
-			settings.hazardClass = "normal";
 			settings.volumeM3 = 100.0;
 			settings.startingOxygenKg = 20.0;
 			settings.startingNitrogenKg = 80.0;
@@ -922,7 +900,7 @@ namespace
 			std::vector<core::CoolantLoopSettings> loops,
 			std::vector<core::WaterCollectorSettings> collectors,
 			std::vector<core::WaterTreatmentSettings> treatments,
-			double solarKW, std::string const& atmosphereClass = "normal")
+			double solarKW)
 		{
 			std::string diagnostic;
 			core::StationSystemsSettings settings;
@@ -930,7 +908,6 @@ namespace
 			settings.observationIntervalSeconds = 1.0f;
 			settings.stores = std::move(stores);
 			settings.atmospheres = { compartment() };
-			settings.atmospheres[0].hazardClass = atmosphereClass;
 			settings.thermalReservoirs = { reservoir("sink", "moderate") };
 			settings.coolantLoops = std::move(loops);
 			settings.waterCollectors = std::move(collectors);
@@ -1116,10 +1093,9 @@ namespace
 				require(std::abs(balance.residual) <= 1e-6,
 					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
 		}
-		// #752: all collector/compartment/loop class combinations have the
-		// same physical result. Configuration also constructs the bundled
-		// Lua mirror, so its constructor must accept these combinations.
-		for (auto const* atmosphereClass : core::StationAtmosphereHazardClasses)
+		// Every collector/loop class combination has the same physical
+		// result. Configuration also constructs the bundled Lua mirror, so
+		// its constructor must accept these combinations.
 		for (auto const* collectorClass : core::StationWaterHazardClasses)
 		for (auto const* loopClass : core::StationCoolantHazardClasses)
 		{
@@ -1129,7 +1105,7 @@ namespace
 			chilled.hazardClass = loopClass;
 			auto const [ok, diagnostic] = waterConfigure(world, waterStores(), { chilled },
 				{ collector("cond", collectorClass, 0.01, 0.5) },
-				{ treatment("plant", "normal") }, 10.0, atmosphereClass);
+				{ treatment("plant", "normal") }, 10.0);
 			require(ok, ("a cross-class collector configuration was refused: " + diagnostic).c_str());
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "cross-class collection run failed");

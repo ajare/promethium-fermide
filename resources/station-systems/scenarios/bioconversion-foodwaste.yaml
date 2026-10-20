@@ -22,7 +22,6 @@ stationSystems:
     startingQualified: 10.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
     composition:
       moisture: 0.0
       nutrientNitrogen: 0.05
@@ -37,56 +36,48 @@ stationSystems:
     startingQualified: 10.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: fresh
     unit: kg
     capacity: 100.0
     startingQualified: 10.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: digesterMedia
     unit: kg
     capacity: 100.0
     startingQualified: 10.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: nutrients
     unit: kg
     capacity: 100.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: rawWater
     unit: kg
     capacity: 100.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: co2
     unit: kg
     capacity: 100.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: residue
     unit: kg
     capacity: 100.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: bioStock
     unit: kg
     capacity: 100.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   microbialProcessors:
   - id: hotDigester
     hazardClass: normal

@@ -14,12 +14,11 @@ namespace
 	// boundary, unknown store reference) all answer through one seam.
 	void powerChainSeam(smoke::Context const&)
 	{
-		auto store = [](std::string const& id, std::string const& unit,
-			std::string const& hazard = "normal")
+		auto store = [](std::string const& id, std::string const& unit)
 		{
 			core::ResourceStoreSettings entry;
 			entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
-			entry.startingQualified = 500.0; entry.hazardClass = hazard;
+			entry.startingQualified = 500.0;
 			return entry;
 		};
 		auto reservoir = [](std::string const& id, std::string const& thermalClass)
@@ -45,7 +44,7 @@ namespace
 			core::StationSystemsSettings settings;
 			settings.enabled = true;
 			settings.stores = {
-				store("water", "kg"), store("brine", "kg", "hazardous"),
+				store("water", "kg"), store("brine", "kg"),
 				store("diesel", "kJ"), store("co2", "kg"), store("h2", "kg"),
 				store("ch4", "kg"), store("rawwater", "kg"), store("carbon", "kg")};
 			settings.thermalReservoirs = {reservoir("warmSink", "moderate"),
@@ -219,11 +218,6 @@ namespace
 			}
 			else if (chain)
 			{
-				auto hazardous = draft;
-				hazardous.stores.back().hazardClass = "hazardous";
-				// A cross-class process store is accepted (#751): the link
-				// is judged only on what the connector itself breaks.
-				requireAllowed(hazardous, candidate, "a cross-class process store");
 				auto nonMass = draft;
 				nonMass.stores.back().unit = "kJ";
 				requireRefused(nonMass, candidate, "mass unit", "a non-mass process store");
@@ -608,12 +602,11 @@ namespace
 	// reservoir instead.
 	void thermalReservoirSeam(smoke::Context const&)
 	{
-		auto store = [](std::string const& id, std::string const& unit,
-			std::string const& hazard = "normal")
+		auto store = [](std::string const& id, std::string const& unit)
 		{
 			core::ResourceStoreSettings entry;
 			entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
-			entry.startingQualified = 500.0; entry.hazardClass = hazard;
+			entry.startingQualified = 500.0;
 			return entry;
 		};
 		auto reservoir = [](std::string const& id, std::string const& thermalClass)
@@ -803,7 +796,7 @@ namespace
 		{
 			core::ResourceStoreSettings entry;
 			entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
-			entry.startingQualified = 500.0; entry.hazardClass = "normal";
+			entry.startingQualified = 500.0;
 			return entry;
 		};
 		auto reservoir = [](std::string const& id, std::string const& thermalClass)

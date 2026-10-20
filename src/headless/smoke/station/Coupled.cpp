@@ -437,20 +437,6 @@ namespace
 				"disabling carbon recovery did not reduce the product water reaching treatment");
 		}
 
-		// Scenario D: normal/hazardous segregation still holds when the
-		// coupled rig is wired across the class boundary.
-		{
-			auto rig = coupled_rig::nominal();
-			rig.microbialProcessors.front().hazardClass = "hazardous";
-			std::string diagnostic;
-			require(!core::validateStationSystemsSettings(rig, diagnostic),
-				"a hazardous digester sharing the normal coupled waste feed was accepted");
-			rig = coupled_rig::nominal();
-			rig.sabatierReactors.front().hazardClass = "hazardous";
-			require(!core::validateStationSystemsSettings(rig, diagnostic),
-				"a hazardous Sabatier chain sharing the normal coupled CO2 store was accepted");
-		}
-
 		// Scenario E: an eclipse cuts the power pool - the electrical
 		// shortfall propagates into the process stages and the biology,
 		// and the battery rides the transient.

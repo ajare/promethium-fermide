@@ -80,7 +80,6 @@ stationSystems:
     composition: {moisture: 0.5, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}
   atmospheres:
   - id: gate-habitat
-    hazardClass: normal
     volumeM3: 100
     startingOxygenKg: 20
     startingNitrogenKg: 80

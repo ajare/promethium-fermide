@@ -11,15 +11,13 @@ namespace
 	// between the two surfaces that enforce it.
 	void linkSeam(smoke::Context const&)
 	{
-		auto store = [](std::string const& id, std::string const& unit,
-			std::string const& hazard = "normal")
+		auto store = [](std::string const& id, std::string const& unit)
 		{
 			core::ResourceStoreSettings entry;
 			entry.id = id;
 			entry.unit = unit;
 			entry.capacity = 100.0;
 			entry.startingQualified = 50.0;
-			entry.hazardClass = hazard;
 			return entry;
 		};
 		auto compoundStore = [&store](std::string const& id)
@@ -55,7 +53,7 @@ namespace
 			core::StationSystemsSettings settings;
 			settings.enabled = true;
 			settings.stores = {store("water", "kg"), store("tank", "kg"),
-				store("brine", "kg", "hazardous"), store("litres", "L"),
+				store("brine", "kg"), store("litres", "L"),
 				store("drum", "kg"), compoundStore("silage")};
 			settings.transfers = {transfer("t1", "water", "tank", "kg")};
 			return settings;
@@ -560,11 +558,11 @@ namespace
 	void growablePorts(smoke::Context const&)
 	{
 		auto store = [](std::string const& id, std::string const& unit,
-			std::string const& hazard = "normal", bool compound = false)
+			bool compound = false)
 		{
 			core::ResourceStoreSettings entry;
 			entry.id = id; entry.unit = unit; entry.capacity = 100.0;
-			entry.startingQualified = 50.0; entry.hazardClass = hazard;
+			entry.startingQualified = 50.0;
 			if (compound)
 			{
 				entry.composition = core::ResourceCompositionSettings{};
@@ -584,10 +582,10 @@ namespace
 		{
 			core::StationSystemsSettings settings;
 			settings.enabled = true;
-			settings.stores = {store("silage", "kg", "normal", true),
-				store("grain", "kg", "normal", true),
-				store("meal", "kg", "normal", true),
-				store("brine", "kg", "hazardous", true),
+			settings.stores = {store("silage", "kg", true),
+				store("grain", "kg", true),
+				store("meal", "kg", true),
+				store("brine", "kg", true),
 				store("plain", "kg")};
 			core::ResourceConversionSettings conversion;
 			conversion.id = "c1";

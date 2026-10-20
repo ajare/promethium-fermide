@@ -279,7 +279,7 @@ void batteryTelemetry(smoke::Context const&)
 Settings thermalSettings(double hub, double air)
 {
 	Settings s; s.enabled = true; s.thermalReservoirs = {reservoir(hub)};
-	core::AtmosphereSettings a; a.id = "air"; a.hazardClass = "normal"; a.volumeM3 = 100;
+	core::AtmosphereSettings a; a.id = "air"; a.volumeM3 = 100;
 	a.startingOxygenKg = 1; a.startingNitrogenKg = 3; a.thermalCapacityKJPerK = 10;
 	a.startingTemperatureC = air; a.reservoirId = "r"; a.exchangerConductanceKWPerK = 1e12;
 	a.minPressureKPa = 0.01; a.maxPressureKPa = 1000; s.atmospheres = {a}; return s;

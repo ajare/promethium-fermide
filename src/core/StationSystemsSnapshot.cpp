@@ -30,7 +30,6 @@ namespace core
 				store.authored.startingUnqualified, store.authored.protectedReserve,
 				store.currentQualified, store.currentUnqualified,
 				store.lastTickIn, store.lastTickOut, store.authored.composition,
-				store.authored.hazardClass,
 				store.authored.composition ? actualConstituents
 					: std::map<std::string, double>{}, {}});
 			auto const totalKg = massToKg(store.authored.unit,
@@ -570,7 +569,6 @@ namespace core
 			StationAtmosphereSnapshot atmosphereResult;
 			auto const& authored = compartment.authored;
 			atmosphereResult.id = authored.id;
-			atmosphereResult.hazardClass = authored.hazardClass;
 			atmosphereResult.reservoirId = authored.reservoirId;
 			atmosphereResult.volumeM3 = authored.volumeM3;
 			atmosphereResult.thermalCapacityKJPerK = authored.thermalCapacityKJPerK;

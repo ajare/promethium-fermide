@@ -1244,7 +1244,6 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			else if (mPlacingType == "Atmosphere")
 			{
 				core::AtmosphereSettings entry;
-				entry.hazardClass = "normal";
 				entry.volumeM3 = entry.thermalCapacityKJPerK = 100.0;
 				entry.startingOxygenKg = 20.0;
 				entry.startingNitrogenKg = 80.0;

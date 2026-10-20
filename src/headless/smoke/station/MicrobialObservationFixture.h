@@ -9,7 +9,7 @@ inline core::StationSystemsSettings microbialObservationFixture()
 	core::SolarArraySettings solar; solar.id = "sun"; solar.capacityKW = 100; s.solarArrays = {solar};
 	for (auto id : {"waste", "oxygen", "water", "media", "nutrients", "recovered-water", "co2", "residue", "stock"}) {
 		core::ResourceStoreSettings stock; stock.id = id; stock.unit = "kg";
-		stock.hazardClass = "normal"; stock.capacity = 100; stock.startingQualified = 10;
+		stock.capacity = 100; stock.startingQualified = 10;
 		if (stock.id == "waste") stock.materialId = "organic-waste";
 		if (stock.id == "nutrients") stock.materialId = "recovered-nutrients";
 		if (stock.id == "residue") stock.materialId = "microbial-residue";

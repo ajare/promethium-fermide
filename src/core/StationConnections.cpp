@@ -151,7 +151,7 @@ Graph build(core::StationSystemsSettings const& s)
 	Builder b;
 	b.authored = core::stationAuthoredLinks(s);
 	for (auto const& store : s.stores)
-		b.node("Store", store.id, 0, store.unit + " | " + store.hazardClass
+		b.node("Store", store.id, 0, store.unit
 			+ (store.composition ? " | compound" : " | plain"));
 	b.add(s.transfers, "Transfer", 1); b.add(s.conversions, "Conversion", 1);
 	b.add(s.deliveries, "Delivery", 3); b.add(s.wasteEjections, "Waste ejection", 3);

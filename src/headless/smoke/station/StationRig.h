@@ -69,7 +69,7 @@ namespace smoke::station
 				for (auto& store : invalid.stores)
 					if ((candidate.from.nodeType == "Store" && store.id == candidate.from.nodeId)
 						|| (candidate.to.nodeType == "Store" && store.id == candidate.to.nodeId))
-						store.hazardClass = store.hazardClass == "normal" ? "hazardous" : "normal";
+						store.unit = store.unit == "kg" ? "g" : "kg";
 				for (auto& reservoir : invalid.thermalReservoirs)
 					if ((candidate.from.nodeType == "Reservoir" && reservoir.id == candidate.from.nodeId)
 						|| (candidate.to.nodeType == "Reservoir" && reservoir.id == candidate.to.nodeId))

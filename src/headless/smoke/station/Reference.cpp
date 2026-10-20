@@ -138,11 +138,11 @@ namespace
 			&& !reference.settings.sabatierReactors.empty()
 			&& !reference.settings.methaneProcessors.empty(),
 			"the bundled reference is missing the carbon/microbial loops");
-		// Hazardous autonomy: the register carries a hazardous-class chain.
-		auto const hazardous = std::count_if(reference.settings.stores.begin(),
+		// The register carries its own dedicated water-recovery chain.
+		auto const dedicated = std::count_if(reference.settings.stores.begin(),
 			reference.settings.stores.end(),
-			[](core::ResourceStoreSettings const& store) { return store.hazardClass == "hazardous"; });
-		require(hazardous >= 3, "the bundled reference has no hazardous-class chain");
+			[](core::ResourceStoreSettings const& store) { return store.id.rfind("haz", 0) == 0; });
+		require(dedicated >= 3, "the bundled reference has no dedicated recovery chain");
 		// The resource text round-trips: reparsing the packaged text
 		// reproduces the same settings.
 		core::StationReferenceDocument reparsed;

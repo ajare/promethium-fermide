@@ -321,9 +321,6 @@ void validation(smoke::Context const& context)
 			&& reason.find("compound-material boundary") != std::string::npos, "compound to plain laundering accepted");
 		else require(core::validateStationSystemsSettings(settings, reason), reason.c_str());
 	}
-	auto mismatch = base; mismatch.stores[2].hazardClass = "hazardous";
-	require(!core::validateStationSystemsSettings(mismatch, reason)
-		&& reason.find("hazard") != std::string::npos, "compound treatment crossed hazard classes");
 	auto dry = base; dry.stores[0].composition->moisture = 0;
 	auto const stopped = run(dry, 1);
 	close(stopped.waterTreatments[0].processedKg, 0);
@@ -673,14 +670,6 @@ void contamination(smoke::Context const& context)
 		auto s = base;
 		if (!powered) s.solarArrays[0].capacityKW = 0;
 		// Assert every authored transfer is class-matched; the crossing
-		// itself is exercised below, where it is now legal (#750).
-		for (auto const& transfer : s.transfers)
-		{
-			auto const source = std::find_if(s.stores.begin(), s.stores.end(), [&](auto const& x) { return x.id == transfer.sourceId; });
-			auto const dest = std::find_if(s.stores.begin(), s.stores.end(), [&](auto const& x) { return x.id == transfer.destinationId; });
-			require(source != s.stores.end() && dest != s.stores.end() && source->hazardClass == dest->hazardClass,
-				"scenario contains cross-hazard transfer");
-		}
 		auto const snap = run(s, 600);
 		close(snap.crews[1].lastWaterActual, 0); close(snap.cropPopulations[1].growthKg, 0);
 		require(!powered || (snap.crews[1].limiter.find("water quality: total dissolved") != std::string::npos

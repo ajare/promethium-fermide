@@ -570,7 +570,6 @@ namespace
 			settings.enabled = true;
 			core::AtmosphereSettings thin;
 			thin.id = "air";
-			thin.hazardClass = "normal";
 			thin.volumeM3 = 1e-310;
 			thin.startingOxygenKg = 0.2;
 			thin.startingNitrogenKg = 0.8;
@@ -601,7 +600,6 @@ namespace
 			settings.enabled = true;
 			core::AtmosphereSettings cold;
 			cold.id = "air";
-			cold.hazardClass = "normal";
 			cold.volumeM3 = 1.0;
 			cold.startingOxygenKg = 0.2;
 			cold.startingNitrogenKg = 0.8;

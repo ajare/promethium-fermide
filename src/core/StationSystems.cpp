@@ -83,10 +83,9 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				for (size_t index = 0; index < stores->size(); ++index)
 				{
 					auto const& store = (*stores)[index];
-					lua_createtable(state, 0, store.composition ? 8 : 7);
+					lua_createtable(state, 0, store.composition ? 7 : 6);
 					lua_pushstring(state, store.id.c_str()); lua_setfield(state, -2, "id");
 					lua_pushstring(state, store.unit.c_str()); lua_setfield(state, -2, "unit");
-					lua_pushstring(state, store.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
 					lua_pushnumber(state, store.capacity); lua_setfield(state, -2, "capacity");
 					lua_pushnumber(state, store.startingQualified); lua_setfield(state, -2, "qualified");
 					lua_pushnumber(state, store.startingUnqualified); lua_setfield(state, -2, "unqualified");
@@ -346,9 +345,8 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				for (size_t index = 0; index < atmospheres->size(); ++index)
 				{
 					auto const& atmosphere = (*atmospheres)[index];
-					lua_createtable(state, 0, 20);
+					lua_createtable(state, 0, 19);
 					lua_pushstring(state, atmosphere.id.c_str()); lua_setfield(state, -2, "id");
-					lua_pushstring(state, atmosphere.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
 					lua_pushnumber(state, atmosphere.volumeM3); lua_setfield(state, -2, "volumeM3");
 					lua_pushnumber(state, atmosphere.startingOxygenKg); lua_setfield(state, -2, "startingOxygenKg");
 					lua_pushnumber(state, atmosphere.startingNitrogenKg); lua_setfield(state, -2, "startingNitrogenKg");
@@ -950,7 +948,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		};
 		for (auto const& a : settings.atmospheres)
 			for (auto material : {"oxygen", "nitrogen", "carbon-dioxide", "water"})
-				retained("atmosphere", "Atmosphere compartment", a.id, material, a.hazardClass);
+				retained("atmosphere", "Atmosphere compartment", a.id, material, {});
 		for (auto const& loop : settings.coolantLoops)
 			retained("coolant-loop", "Coolant loop", loop.id, "coolant", loop.hazardClass);
 		for (auto const& store : settings.stores) if (store.composition)
@@ -962,7 +960,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				auto& d = slot.metric;
 				d.id = "store/" + store.id + "/constituent/" + key;
 				d.equipmentType = "Resource store"; d.instanceId = store.id;
-				d.constituentId = key; d.hazardClass = store.hazardClass;
+				d.constituentId = key;
 				d.exchangeRole = "stored-constituent"; d.role = StationMetricRole::Inventory;
 				bool const energy = key == StationEnergyConstituent;
 				d.quantity = energy ? StationPhysicalQuantity::Energy : StationPhysicalQuantity::Mass;
@@ -976,16 +974,14 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		auto living = [&](auto const& populations, std::string const& owner, std::string const& type) {
 			for (auto const& p : populations)
 			{
-				auto const atmosphere = std::ranges::find(settings.atmospheres, p.atmosphereId, &AtmosphereSettings::id);
-				auto const& hazard = atmosphere->hazardClass;
-				retained(owner, type, p.id, "living-biomass", hazard);
+				retained(owner, type, p.id, "living-biomass", {});
 				for (auto const* key : {"dryOrganics", "nutrientNitrogen", "phosphorus", "potassium", "otherMinerals", "energy"})
 				{
 					StationRecordingSlot slot;
 					auto& d = slot.metric;
 					d.id = owner + "/" + p.id + "/constituent/" + key;
 					d.equipmentType = type; d.instanceId = p.id;
-					d.constituentId = key; d.hazardClass = hazard;
+					d.constituentId = key;
 					d.exchangeRole = "retained-constituent"; d.role = StationMetricRole::Inventory;
 					bool const energy = std::string_view(key) == "energy";
 					d.quantity = energy ? StationPhysicalQuantity::Energy : StationPhysicalQuantity::Mass;

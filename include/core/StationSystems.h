@@ -59,26 +59,12 @@ namespace core
 		bool operator==(ResourceCompositionSettings const&) const = default;
 	};
 
-	// Declared resource hazard classes (#412). Normal and hazardous material
-	// are segregated services: a store carries its own authored class, and
-	// every process, transfer or conversion that touches the store must
-	// carry the store's own class. Crossing the class boundary is refused at
-	// configuration - an accidental cross-transfer between a hazardous and
-	// a normal store never reaches runtime, because containment is
-	// established by the declared class boundary, not by any runtime
-	// policing of the material itself.
-	inline constexpr std::array<char const*, 2> StationResourceHazardClasses{
-		"normal", "hazardous"};
 	// A capacity-limited inventory of a declared material. Starting inventory
 	// is authored; current inventory is runtime state and never lives here.
 	// Qualified contents are usable; unqualified contents are held awaiting a
 	// treatment that later slices provide. The protected reserve
 	// is the portion of usable contents withheld from discretionary transfers
 	// (#390); it never restricts the authored starting inventory itself.
-	// The authored hazard class (#412) makes a hazardous store a protected
-	// hazardous reserve: only same-class processes and same-class transfers
-	// may touch it, so hazardous material never shares a generic recovery
-	// path with the normal inventory.
 	struct ResourceStoreSettings
 	{
 		std::string id;
@@ -90,10 +76,6 @@ namespace core
 		// A declared constituent composition makes this a compound Resource
 		// store (#391); absent stores hold a plain single-quantity material.
 		std::optional<ResourceCompositionSettings> composition;
-		// The store's hazard class (#412): "normal" (default) or
-		// "hazardous". Every process, transfer and conversion endpoint that
-		// touches the store must carry the store's own class.
-		std::string hazardClass{"normal"};
 		// Observation metadata only: does not grant compatibility or alter
 		// allocation. Legacy omission remains empty in authored settings;
 		// observations may resolve it through unambiguous validated relationships.
@@ -741,13 +723,6 @@ namespace core
 	};
 	inline constexpr size_t MaxStationBatteries{8};
 
-	// Declared atmosphere hazard classes (#400). Normal and hazardous
-	// compartments are physically segregated services: every compartment
-	// owns its own gas inventory and no process in this design moves gas
-	// between compartments, so segregation is structural - a hazardous
-	// atmosphere never mixes into a normal one and vice versa.
-	inline constexpr std::array<char const*, 2> StationAtmosphereHazardClasses{
-		"normal", "hazardous"};
 	// Declared dry gas species of a compartment atmosphere (#400). Water
 	// vapour is carried as the separate humidity term rather than as a
 	// fourth dry species, because its phase is constrained by saturation.
@@ -837,7 +812,6 @@ namespace core
 	struct AtmosphereSettings
 	{
 		std::string id;
-		std::string hazardClass;      // "normal" or "hazardous"
 		double volumeM3{0.0};        // compartment volume, > 0
 		double startingOxygenKg{0.0};
 		double startingNitrogenKg{0.0};
@@ -1085,9 +1059,7 @@ namespace core
 	// atmosphere (exactly one destination is configured); a full product
 	// store caps production rather than venting or deleting the excess.
 	// Feed water is drawn only above its store's protected reserve, so a
-	// life-support water reserve is never electrolysed away. Hazard class
-	// segregates the whole chain: the feed store, both product stores and
-	// the delivery compartment must all carry the cell's own class.
+	// life-support water reserve is never electrolysed away.
 	struct ElectrolyzerSettings
 	{
 		std::string id;
@@ -1120,13 +1092,11 @@ namespace core
 	// above its protected reserve. A tick that demands power and receives
 	// none is refused whole: no CO2 is scrubbed and no consumable is
 	// drawn. The machine can only scrub what the compartment holds, so it
-	// never drives the CO2 inventory negative. Hazard class matches the
-	// compartment it serves: a hazardous atmosphere's carbon stays on the
-	// hazardous side of the capture chain.
+	// never drives the CO2 inventory negative.
 	struct Co2CaptureSettings
 	{
 		std::string id;
-		std::string hazardClass;         // must match the compartment it scrubs
+		std::string hazardClass;         // normal or hazardous
 		std::string atmosphereId;        // compartment whose CO2 is removed
 		std::string captureStoreId;      // captured CO2 lands here as inventory
 		std::string consumableStoreId;   // regeneration consumable; empty when the process uses none
@@ -1908,8 +1878,8 @@ namespace core
 		std::vector<std::string>* brokenReferences = nullptr);
 	// The endpoint half of the transfer entry check (#640): the rules a link
 	// between a store connector and a transfer connector can violate — the
-	// endpoints exist, differ, and agree on unit, declared composition and
-	// hazard class. validateStationSystemsSettings runs it for every transfer;
+	// endpoints exist, differ, and agree on unit and declared composition.
+	// validateStationSystemsSettings runs it for every transfer;
 	// the link-evaluation seam runs it for the single entry a candidate link
 	// writes, so the rule exists once and a refusal always carries this
 	// rule's own wording. Identity and rate rules stay with the whole entry.
@@ -1941,10 +1911,6 @@ namespace core
 		// The declared composition when the store holds a compound Resource
 		// material (#391); absent for plain single-quantity stores.
 		std::optional<ResourceCompositionSettings> composition;
-		// The store's authored hazard class (#412): its qualified contents
-		// are a protected reserve of that class, reachable only by
-		// same-class processes and same-class transfers.
-		std::string hazardClass;
 		// The store's actual constituent inventory in kg (and kJ for the
 		// energy term) (#601): the authored composition at the current
 		// mass plus the drift of every material that really entered the
@@ -3122,7 +3088,6 @@ namespace core
 	struct StationAtmosphereSnapshot
 	{
 		std::string id;
-		std::string hazardClass;
 		std::string reservoirId;      // empty: adiabatic, no thermal coupling
 		double volumeM3{0.0};
 		double thermalCapacityKJPerK{0.0};

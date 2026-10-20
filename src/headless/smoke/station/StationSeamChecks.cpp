@@ -20,7 +20,7 @@ namespace
 			core::MicrobialProcessorSettings microbial; microbial.id = "microbial";
 			microbial.hazardClass = "normal"; microbial.thermalClass = "moderate";
 			s.microbialProcessors.push_back(microbial);
-			core::AtmosphereSettings air; air.id = "air"; air.hazardClass = "normal";
+			core::AtmosphereSettings air; air.id = "air";
 			air.volumeM3 = air.thermalCapacityKJPerK = 100;
 			air.minPressureKPa = 80; air.maxPressureKPa = 120;
 			s.atmospheres.push_back(air);
@@ -30,7 +30,7 @@ namespace
 			for (auto id : {"plain", "compound"})
 			{
 				core::ResourceStoreSettings store;
-				store.id = id; store.unit = "kg"; store.capacity = 100; store.hazardClass = "normal";
+				store.id = id; store.unit = "kg"; store.capacity = 100;
 				if (store.id == "compound") store.composition = crop.composition;
 				s.stores.push_back(store);
 			}
@@ -110,7 +110,7 @@ namespace
 			if (std::string(peerType) == "Store")
 			{
 				core::ResourceStoreSettings store; store.id = "stream" + std::to_string(wired.stores.size());
-				store.unit = "kg"; store.capacity = 100; store.hazardClass = "normal";
+				store.unit = "kg"; store.capacity = 100;
 				if (std::string(type) == "Crew" || std::string(field) == "feedStoreId")
 					store.composition = seed.cropPopulations[0].composition;
 				peerId = store.id; wired.stores.push_back(store);
@@ -137,21 +137,6 @@ namespace
 			allowed(copy, core::CandidateLink{link.to,link.from});
 			require(core::applyStationLink(copy, {link.to,link.from}) && copy == wired, "biology reconnect changed another reference");
 		}
-		// The store's hazard class no longer breaks the wiring (#751):
-		// the same cross-class probe that once refused on every material
-		// role now evaluates as allowed.
-		for (auto const& link : links)
-		{
-			auto const& peer = link.from.nodeType == "Store" ? link.from : link.to;
-			if (peer.nodeType != "Store") continue;
-			auto s = wired;
-			auto authored = core::stationAuthoredLinks(wired);
-			auto found = std::find_if(authored.begin(), authored.end(), [&](auto const& e) { return e.from == link.from && e.to == link.to; });
-			require(found != authored.end() && core::clearStationLink(s, found->identity), "class probe disconnect failed");
-			auto store = std::find_if(s.stores.begin(), s.stores.end(), [&](auto const& e) { return e.id == peer.nodeId; });
-			store->hazardClass = "hazardous";
-			allowed(s, link);
-		}
 		core::CandidateLink stock{{"Store","absent","Inventory out"},{"Microbial processor","microbial","Replacement stock"}};
 		refused(seed, stock, "replacement biological stock store");
 		core::CandidateLink atmosphere{{"Atmosphere","absent","Biology out"},{"Crops","crop","Oxygen uptake"}};
@@ -177,7 +162,7 @@ namespace
 			for (auto id : {"raw", "treated", "concentrate", "kit", "oxygen", "hydrogen", "co2"})
 			{
 				core::ResourceStoreSettings store;
-				store.id = id; store.unit = "kg"; store.hazardClass = "normal"; store.capacity = 100;
+				store.id = id; store.unit = "kg"; store.capacity = 100;
 				s.stores.push_back(store);
 			}
 			core::ThermalReservoirSettings reservoir;
@@ -189,7 +174,7 @@ namespace
 			loop.specificHeatKJPerKgK = 4; loop.ratedFlowKgPerS = 1;
 			s.coolantLoops.push_back(loop);
 			core::AtmosphereSettings atmosphere;
-			atmosphere.id = "air"; atmosphere.hazardClass = "normal";
+			atmosphere.id = "air";
 			atmosphere.volumeM3 = atmosphere.thermalCapacityKJPerK = 100;
 			atmosphere.minPressureKPa = 80; atmosphere.maxPressureKPa = 120;
 			s.atmospheres.push_back(atmosphere);
@@ -294,18 +279,14 @@ namespace
 		auto compartment = wired;
 		compartment.electrolyzers[0].oxygenStoreId.clear();
 		allowed(compartment, oxygenCompartment);
-		compartment.atmospheres[0].hazardClass = "hazardous";
-		refused(compartment, oxygenCompartment, "does not match compartment");
 		auto incomplete = base();
-		incomplete.atmospheres[0].hazardClass = "hazardous";
-		// #752: condensate has no source class, including while wiring
-		// an incomplete draft in either drag direction.
+		// #752: condensate carries no class, so an incomplete draft wires
+		// the collector to its compartment in either drag direction.
 		allowed(incomplete, legal[0]);
 		allowed(incomplete, core::CandidateLink{legal[0].to, legal[0].from});
 		require(core::applyStationLink(incomplete, legal[0])
 			&& incomplete.waterCollectors[0].atmosphereId == "air",
-			"cross-class collector link did not write the atmosphere reference");
-		refused(incomplete, legal[11], "does not match compartment");
+			"collector link did not write the atmosphere reference");
 		refused(base(), core::CandidateLink{pin("Atmosphere", "missing", "Gas out"), legal[0].to}, "unknown atmosphere compartment");
 		refused(base(), core::CandidateLink{pin("Coolant loop", "missing", "Cold surfaces"), legal[1].to}, "unknown coolant loop");
 		refused(base(), clearance, "Unknown connector");
@@ -321,8 +302,7 @@ namespace
 				[&](auto const& entry) { return entry.id == storePin->nodeId; });
 			store->unit = "kWh";
 			refused(malformed, link, "must be a mass unit");
-			store->unit = "kg"; store->hazardClass = "hazardous";
-			// The store's hazard class no longer breaks the wiring (#751).
+			store->unit = "kg";
 			allowed(malformed, link);
 		}
 		auto alias = base(); alias.waterTreatments[0].sourceStoreId = "treated";
@@ -447,15 +427,14 @@ namespace
 		wire(base, {{"Maintenance", "job", "Target installation"}, {"Generator", "gen", "Supervision"}});
 		wire(base, {{"Store", "stock", "Inventory out"}, {"Maintenance", "job", "Requirement 1"}});
 		wire(base, {{"Maintenance", "job", "Waste out"}, {"Store", "waste", "Inventory in"}});
-		// The validator's unit / hazard / compound and self-source rules remain
+		// The validator's unit / compound and self-source rules remain
 		// authoritative even before the rest of the station is wired.
-		for (int defect = 0; defect < 4; ++defect)
+		for (int defect = 0; defect < 3; ++defect)
 		{
 			auto draft = floor; draft.maintenanceJobs[0].wasteStoreId = "waste";
 			if (defect == 0) draft.stores[1].unit = "g";
-			if (defect == 1) draft.stores[1].hazardClass = "hazardous";
-			if (defect == 2) draft.stores[1].composition = core::ResourceCompositionSettings{};
-			if (defect == 3) draft.maintenanceJobs[0].wasteStoreId = "stock";
+			if (defect == 1) draft.stores[1].composition = core::ResourceCompositionSettings{};
+			if (defect == 2) draft.maintenanceJobs[0].wasteStoreId = "stock";
 			auto verdict = core::evaluateStationLink(draft, {{"Store", "stock", "Inventory out"}, {"Maintenance", "job", "Requirement 1"}});
 			require(!verdict.allowed && !verdict.reason.empty(), "maintenance material boundary accepted");
 		}

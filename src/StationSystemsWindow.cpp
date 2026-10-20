@@ -1061,7 +1061,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	if (mDraft.atmospheres.size() < core::MaxStationAtmospheres && ImGui::Button("Add atmosphere"))
 	{
 		core::AtmosphereSettings atmosphere;
-		atmosphere.hazardClass = "normal";
 		atmosphere.volumeM3 = 100.0;
 		atmosphere.startingOxygenKg = 20.0;
 		atmosphere.startingNitrogenKg = 80.0;
@@ -1492,8 +1491,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	if (snapshot.stores.empty()) ImGui::TextDisabled("No Resource stores authored.");
 	for (auto const& store : snapshot.stores)
 	{
-		ImGui::Text("%s (%s) [%s]: usable %.3f, held %.3f of capacity %.3f | initial usable %.3f, initial held %.3f | protected %.3f | last tick in %.3f, out %.3f",
-			store.id.c_str(), store.unit.c_str(), store.hazardClass.c_str(),
+		ImGui::Text("%s (%s): usable %.3f, held %.3f of capacity %.3f | initial usable %.3f, initial held %.3f | protected %.3f | last tick in %.3f, out %.3f",
+			store.id.c_str(), store.unit.c_str(),
 			store.currentQualified, store.currentUnqualified,
 			store.capacity, store.startingQualified, store.startingUnqualified,
 			store.protectedReserve, store.lastTickIn, store.lastTickOut);
@@ -1987,8 +1986,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		case core::StationTransferStatus::Rejected: status = "O2 unavailable"; break;
 		case core::StationTransferStatus::Idle: break;
 		}
-		ImGui::Text("%s [%s] -> %s: %s | pressure %.3f kPa (start %.3f) | O2 %.3f, N2 %.3f, CO2 %.3f, H2O %.3f kg (start %.3f/%.3f/%.3f/%.3f) | temp %.3f C (start %.3f C)",
-			atmosphere.id.c_str(), atmosphere.hazardClass.c_str(),
+		ImGui::Text("%s -> %s: %s | pressure %.3f kPa (start %.3f) | O2 %.3f, N2 %.3f, CO2 %.3f, H2O %.3f kg (start %.3f/%.3f/%.3f/%.3f) | temp %.3f C (start %.3f C)",
+			atmosphere.id.c_str(),
 			atmosphere.thermallyCoupled ? atmosphere.reservoirId.c_str() : "adiabatic",
 			status, atmosphere.pressureKPa, atmosphere.startingPressureKPa,
 			atmosphere.oxygenKg, atmosphere.nitrogenKg, atmosphere.carbonDioxideKg,

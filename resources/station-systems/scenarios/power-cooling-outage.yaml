@@ -218,7 +218,6 @@ stationSystems:
     startingQualified: 40.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
     composition:
       moisture: 0.0
       nutrientNitrogen: 0.05
@@ -233,7 +232,6 @@ stationSystems:
     startingQualified: 100.0
     startingUnqualified: 0.0
     protectedReserve: 50.0
-    hazardClass: normal
     composition:
       moisture: 0.999
       nutrientNitrogen: 0.0
@@ -248,7 +246,6 @@ stationSystems:
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
     composition:
       moisture: 0.95
       nutrientNitrogen: 0.3
@@ -263,7 +260,6 @@ stationSystems:
     startingQualified: 5.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
     composition:
       moisture: 0.7
       nutrientNitrogen: 0.05
@@ -278,185 +274,158 @@ stationSystems:
     startingQualified: 5.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: hydrogen
     unit: kg
     capacity: 25.0
     startingQualified: 2.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: methane
     unit: kg
     capacity: 10.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: rawWater
     unit: kg
     capacity: 150.0
     startingQualified: 10.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: fresh
     unit: kg
     capacity: 200.0
     startingQualified: 80.0
     startingUnqualified: 0.0
     protectedReserve: 30.0
-    hazardClass: normal
   - id: concentrate
     unit: kg
     capacity: 120.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: treatmentMedia
     unit: kg
     capacity: 30.0
     startingQualified: 10.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: captureMedia
     unit: kg
     capacity: 30.0
     startingQualified: 10.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: digesterMedia
     unit: kg
     capacity: 30.0
     startingQualified: 10.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: processOxygen
     unit: kg
     capacity: 40.0
     startingQualified: 15.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: fertN
     unit: kg
     capacity: 10.0
     startingQualified: 2.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: fertP
     unit: kg
     capacity: 10.0
     startingQualified: 2.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: fertK
     unit: kg
     capacity: 10.0
     startingQualified: 2.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: fertMin
     unit: kg
     capacity: 10.0
     startingQualified: 2.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: nutrients
     unit: kg
     capacity: 15.0
     startingQualified: 1.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: carbonWaste
     unit: kg
     capacity: 20.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: residue
     unit: kg
     capacity: 80.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: fuel
     unit: kWh
     capacity: 2000.0
     startingQualified: 500.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: fuelcellH2
     unit: kg
     capacity: 25.0
     startingQualified: 20.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: fuelcellO2
     unit: kg
     capacity: 100.0
     startingQualified: 80.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: hazWaterRaw
     unit: kg
     capacity: 60.0
     startingQualified: 20.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: hazardous
   - id: hazWaterTreated
     unit: kg
     capacity: 60.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: hazardous
   - id: hazConcentrate
     unit: kg
     capacity: 60.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: hazardous
   - id: toolKit
     unit: kg
     capacity: 10.0
     startingQualified: 4.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: maintenanceWaste
     unit: kg
     capacity: 20.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: bioStock
     unit: kg
     capacity: 10.0
     startingQualified: 5.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   atmospheres:
   - id: hab
-    hazardClass: normal
     volumeM3: 200.0
     startingOxygenKg: 60.0
     startingNitrogenKg: 220.0
@@ -477,7 +446,6 @@ stationSystems:
     minOxygenPartialPressureKPa: 12.0
     maxCarbonDioxidePartialPressureKPa: 0.4
   - id: greenhouse
-    hazardClass: normal
     volumeM3: 400.0
     startingOxygenKg: 120.0
     startingNitrogenKg: 400.0
@@ -498,7 +466,6 @@ stationSystems:
     minOxygenPartialPressureKPa: 12.0
     maxCarbonDioxidePartialPressureKPa: 5.0
   - id: pond
-    hazardClass: normal
     volumeM3: 100.0
     startingOxygenKg: 30.0
     startingNitrogenKg: 100.0

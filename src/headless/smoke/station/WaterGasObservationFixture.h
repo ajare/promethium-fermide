@@ -9,7 +9,7 @@ inline core::StationSystemsSettings waterGasObservationFixture()
 	core::SolarArraySettings solar; solar.id = "sun"; solar.capacityKW = 100; s.solarArrays = {solar};
 	for (auto id : {"raw", "treated", "concentrate", "kit", "oxygen", "hydrogen", "co2"}) {
 		core::ResourceStoreSettings stock; stock.id = id; stock.unit = "kg";
-		stock.hazardClass = "normal"; stock.capacity = 100; stock.startingQualified = 10;
+		stock.capacity = 100; stock.startingQualified = 10;
 		stock.materialId = std::string(id) == "kit" ? "sorbent" : std::string(id) == "concentrate" ? "brine" : "";
 		s.stores.push_back(stock);
 	}
@@ -19,7 +19,7 @@ inline core::StationSystemsSettings waterGasObservationFixture()
 	l.coolantCapacityKg = l.startingCoolantKg = 100; l.specificHeatKJPerKgK = 4;
 	l.startingTemperatureC = 5; l.ratedFlowKgPerS = 1; l.pumpPowerKW = 0.1;
 	l.exchangerConductanceKWPerK = 10; s.coolantLoops = {l};
-	core::AtmosphereSettings a; a.id = "air"; a.hazardClass = "normal"; a.volumeM3 = 100;
+	core::AtmosphereSettings a; a.id = "air"; a.volumeM3 = 100;
 	a.startingOxygenKg = 20; a.startingNitrogenKg = 80; a.startingCarbonDioxideKg = 2; a.startingWaterVapourKg = 2;
 	a.startingTemperatureC = 25; a.thermalCapacityKJPerK = 10000;
 	a.minPressureKPa = 1; a.maxPressureKPa = 200; s.atmospheres = {a};

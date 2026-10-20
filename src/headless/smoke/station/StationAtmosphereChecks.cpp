@@ -16,13 +16,12 @@ namespace
 				if (event.message.find(needle) != std::string::npos) return true;
 			return false;
 		};
-		auto atmosphere = [](std::string const& id, std::string const& hazard,
+		auto atmosphere = [](std::string const& id,
 			double volumeM3, double oxygenKg, double nitrogenKg,
 			double carbonDioxideKg, double vapourKg, double temperatureC)
 		{
 			core::AtmosphereSettings settings;
 			settings.id = id;
-			settings.hazardClass = hazard;
 			settings.volumeM3 = volumeM3;
 			settings.startingOxygenKg = oxygenKg;
 			settings.startingNitrogenKg = nitrogenKg;
@@ -85,58 +84,53 @@ namespace
 			core::StationSystemsSettings settings;
 			settings.enabled = true;
 			std::string diagnostic;
-			auto compartment = atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			auto compartment = atmosphere("c", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
 			compartment.reservoirId = "ghost";
 			settings.atmospheres = { compartment };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("unknown thermal reservoir") != std::string::npos,
 				"compartment coupled to an unknown reservoir was accepted");
-			compartment = atmosphere("c", "toxic", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
-			settings.atmospheres = { compartment };
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("hazard class") != std::string::npos,
-				"unknown atmosphere hazard class was accepted");
-			compartment = atmosphere("c", "normal", 0.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			compartment = atmosphere("c", 0.0, 20.0, 80.0, 0.0, 0.0, 20.0);
 			settings.atmospheres = { compartment };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("volume must be finite and positive") != std::string::npos,
 				"zero compartment volume was accepted");
-			compartment = atmosphere("c", "normal", 100.0, -1.0, 80.0, 0.0, 0.0, 20.0);
+			compartment = atmosphere("c", 100.0, -1.0, 80.0, 0.0, 0.0, 20.0);
 			settings.atmospheres = { compartment };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("starting gas masses") != std::string::npos,
 				"negative starting gas mass was accepted");
-			compartment = atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, -300.0);
+			compartment = atmosphere("c", 100.0, 20.0, 80.0, 0.0, 0.0, -300.0);
 			settings.atmospheres = { compartment };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("above absolute zero") != std::string::npos,
 				"a sub-absolute-zero compartment temperature was accepted");
-			compartment = atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			compartment = atmosphere("c", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
 			compartment.thermalCapacityKJPerK = 0.0;
 			settings.atmospheres = { compartment };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("thermal capacity must be finite and positive") != std::string::npos,
 				"zero effective thermal capacity was accepted");
-			compartment = atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			compartment = atmosphere("c", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
 			compartment.minPressureKPa = 150.0;
 			compartment.maxPressureKPa = 100.0;
 			settings.atmospheres = { compartment };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("min below max") != std::string::npos,
 				"inverted pressure limits were accepted");
-			compartment = atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			compartment = atmosphere("c", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
 			compartment.occupants = -1;
 			settings.atmospheres = { compartment };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("occupant count") != std::string::npos,
 				"a negative occupant count was accepted");
-			compartment = atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			compartment = atmosphere("c", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
 			compartment.leakRateKgPerS = -0.1;
 			settings.atmospheres = { compartment };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("leak rate") != std::string::npos,
 				"a negative leak rate was accepted");
-			settings.atmospheres = { atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0) };
+			settings.atmospheres = { atmosphere("c", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0) };
 			settings.airlockCycles = { airlockCycle("x", "ghost", 1.0, 0.0, 60.0, 0.5) };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("unknown atmosphere compartment") != std::string::npos,
@@ -155,7 +149,7 @@ namespace
 				"an airlock recurrence faster than one fixed tick was accepted");
 			std::vector<core::AtmosphereSettings> tooMany;
 			for (size_t index = 0; index <= core::MaxStationAtmospheres; ++index)
-				tooMany.push_back(atmosphere("c" + std::to_string(index), "normal",
+				tooMany.push_back(atmosphere("c" + std::to_string(index),
 					100.0, 20.0, 80.0, 0.0, 0.0, 20.0));
 			settings.airlockCycles = {};
 			settings.atmospheres = tooMany;
@@ -172,7 +166,7 @@ namespace
 		{
 			core::World world("AtmosphereAnalytic", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			require(atmosConfigure(world, { atmosphere("lab", "normal",
+			require(atmosConfigure(world, { atmosphere("lab",
 				100.0, 23.2, 79.0, 1.0, 0.5, 20.0) }).first, "analytic atmosphere refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(1), "analytic run failed");
@@ -208,7 +202,7 @@ namespace
 		{
 			core::World world("AtmosphereLeak", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto compartment = atmosphere("hold", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			auto compartment = atmosphere("hold", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
 			compartment.leakRateKgPerS = 0.06;
 			require(atmosConfigure(world, { compartment }).first, "leaky atmosphere refused");
 			world.resumeSimulation();
@@ -231,7 +225,7 @@ namespace
 		{
 			core::World world("AtmosphereDrain", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto compartment = atmosphere("tiny", "normal", 10.0, 0.3, 0.2, 0.0, 0.0, 20.0);
+			auto compartment = atmosphere("tiny", 10.0, 0.3, 0.2, 0.0, 0.0, 20.0);
 			compartment.leakRateKgPerS = 1.0;
 			require(atmosConfigure(world, { compartment }).first, "draining atmosphere refused");
 			world.resumeSimulation();
@@ -250,7 +244,7 @@ namespace
 		{
 			core::World world("AtmosphereStarved", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto compartment = atmosphere("small", "normal", 100.0, 0.01, 80.0, 0.0, 0.0, 20.0);
+			auto compartment = atmosphere("small", 100.0, 0.01, 80.0, 0.0, 0.0, 20.0);
 			compartment.occupants = 10;
 			compartment.oxygenUsePerOccupantKgPerS = 0.001;
 			compartment.co2ProductionPerOccupantKgPerS = 0.001;
@@ -280,7 +274,7 @@ namespace
 			world.pauseSimulation(); world.finishBuild();
 			// 3 kg of vapour in 100 m3 at 20 C is far above the ~1.7 kg
 			// saturation mass.
-			require(atmosConfigure(world, { atmosphere("steam", "normal",
+			require(atmosConfigure(world, { atmosphere("steam",
 				100.0, 20.0, 80.0, 0.0, 3.0, 20.0) }).first, "vapour compartment refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(1), "vapour run failed");
@@ -314,7 +308,7 @@ namespace
 		{
 			core::World world("AtmosphereSaturatedCooling", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto compartment = atmosphere("air", "normal", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
+			auto compartment = atmosphere("air", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
 			compartment.thermalCapacityKJPerK = 1.0;
 			compartment.minOxygenPartialPressureKPa = 0.0;
 			compartment.startingWaterVapourKg = core::stationSaturatedVapourMassKg(
@@ -372,14 +366,14 @@ namespace
 		{
 			core::World world("AtmosphereLatentInertia", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto wet = atmosphere("wet", "normal", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
+			auto wet = atmosphere("wet", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
 			wet.thermalCapacityKJPerK = 1.0;
 			wet.minOxygenPartialPressureKPa = 0.0;
 			wet.startingWaterVapourKg = core::stationSaturatedVapourMassKg(
 				core::stationSaturationVapourPressureKPa(20.0), 1.0, 20.0);
 			wet.reservoirId = "cold-wet";
 			wet.exchangerConductanceKWPerK = 1.0;
-			auto dry = atmosphere("dry", "normal", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
+			auto dry = atmosphere("dry", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
 			dry.thermalCapacityKJPerK = 1.0;
 			dry.minOxygenPartialPressureKPa = 0.0;
 			dry.reservoirId = "cold-dry";
@@ -411,7 +405,7 @@ namespace
 		{
 			core::World world("AtmosphereHeating", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto compartment = atmosphere("air", "normal", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
+			auto compartment = atmosphere("air", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
 			compartment.thermalCapacityKJPerK = 1.0;
 			compartment.minOxygenPartialPressureKPa = 0.0;
 			compartment.startingWaterVapourKg = core::stationSaturatedVapourMassKg(
@@ -438,7 +432,7 @@ namespace
 		{
 			core::World world("AtmosphereCoolingReplay", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto compartment = atmosphere("air", "normal", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
+			auto compartment = atmosphere("air", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
 			compartment.thermalCapacityKJPerK = 1.0;
 			compartment.minOxygenPartialPressureKPa = 0.0;
 			compartment.startingWaterVapourKg = core::stationSaturatedVapourMassKg(
@@ -470,14 +464,14 @@ namespace
 		{
 			core::World world("AtmosphereCondensationIsolation", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto cooling = atmosphere("condensingSide", "normal", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
+			auto cooling = atmosphere("condensingSide", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
 			cooling.thermalCapacityKJPerK = 1.0;
 			cooling.minOxygenPartialPressureKPa = 0.0;
 			cooling.startingWaterVapourKg = core::stationSaturatedVapourMassKg(
 				core::stationSaturationVapourPressureKPa(20.0), 1.0, 20.0);
 			cooling.reservoirId = "cold";
 			cooling.exchangerConductanceKWPerK = 30.0;
-			auto const neighbour = atmosphere("hazardSide", "hazardous", 100.0,
+			auto const neighbour = atmosphere("hazardSide", 100.0,
 				15.0, 85.0, 0.0, 0.0, 20.0);
 			require(atmosConfigure(world, { cooling, neighbour }, {},
 				{ reservoir("cold", 1000.0, 0.0) }).first,
@@ -506,9 +500,9 @@ namespace
 		{
 			core::World world("AtmosphereIsolation", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto leaking = atmosphere("normalSide", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			auto leaking = atmosphere("normalSide", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
 			leaking.leakRateKgPerS = 0.06;
-			auto const neighbour = atmosphere("hazardSide", "hazardous", 100.0, 15.0, 85.0, 0.0, 0.0, 20.0);
+			auto const neighbour = atmosphere("hazardSide", 100.0, 15.0, 85.0, 0.0, 0.0, 20.0);
 			require(atmosConfigure(world, { leaking, neighbour },
 				{ airlockCycle("vent", "normalSide", 1.0, 1.0, 0.0, 0.5) }).first,
 				"isolation pair refused");
@@ -535,8 +529,8 @@ namespace
 			core::World world("AtmosphereAirlock", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
 			require(atmosConfigure(world,
-				{ atmosphere("dock", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0),
-				  atmosphere("stub", "hazardous", 10.0, 0.4, 0.1, 0.0, 0.0, 20.0) },
+				{ atmosphere("dock", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0),
+				  atmosphere("stub", 10.0, 0.4, 0.1, 0.0, 0.0, 20.0) },
 				{ airlockCycle("crew", "dock", 1.0, 10.0, 5.0, 0.9),
 				  airlockCycle("last", "stub", 10.0, 5.0, 0.0, 0.5) }).first,
 				"airlock scenario refused");
@@ -594,10 +588,10 @@ namespace
 		{
 			core::World world("AtmosphereThermal", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto warm = atmosphere("warmSide", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			auto warm = atmosphere("warmSide", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
 			warm.reservoirId = "bus";
 			warm.exchangerConductanceKWPerK = 2.0;
-			auto const adiabatic = atmosphere("sealed", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			auto const adiabatic = atmosphere("sealed", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
 			require(atmosConfigure(world, { warm, adiabatic }, {},
 				{ reservoir("bus", 50000.0, 40.0) }).first, "thermal coupling refused");
 			world.resumeSimulation();
@@ -634,7 +628,7 @@ namespace
 		{
 			core::World world("AtmosphereStiffExchange", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto compartment = atmosphere("stiffAir", "normal", 100.0, 30.0, 70.0, 0.0, 0.0, 20.0);
+			auto compartment = atmosphere("stiffAir", 100.0, 30.0, 70.0, 0.0, 0.0, 20.0);
 			compartment.reservoirId = "bus";
 			compartment.thermalCapacityKJPerK = 1.0;
 			compartment.exchangerConductanceKWPerK = 100.0;
@@ -694,7 +688,7 @@ namespace
 			settings.enabled = true;
 			settings.observationIntervalSeconds = 1.0f;
 			settings.thermalReservoirs = { reservoir("bus", 1.0, 0.0) };
-			auto compartment = atmosphere("air", "normal", 100.0, 30.0, 70.0, 0.0, 0.0, 20.0);
+			auto compartment = atmosphere("air", 100.0, 30.0, 70.0, 0.0, 0.0, 20.0);
 			compartment.reservoirId = "bus";
 			compartment.thermalCapacityKJPerK = 1.0;
 			compartment.exchangerConductanceKWPerK = 100.0;
@@ -779,7 +773,7 @@ namespace
 			});
 			core::World sandboxStiff("SandboxStiffAir", 2, 2);
 			sandboxStiff.pauseSimulation(); sandboxStiff.finishBuild();
-			auto compartment = atmosphere("stiffAir", "normal", 100.0, 30.0, 70.0, 0.0, 0.0, 20.0);
+			auto compartment = atmosphere("stiffAir", 100.0, 30.0, 70.0, 0.0, 0.0, 20.0);
 			compartment.reservoirId = "bus";
 			compartment.thermalCapacityKJPerK = 1.0;
 			compartment.exchangerConductanceKWPerK = 100.0;
@@ -798,7 +792,7 @@ namespace
 		{
 			core::World world("AtmosphereOccupancyHeat", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto compartment = atmosphere("crew", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			auto compartment = atmosphere("crew", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
 			compartment.occupants = 4;
 			compartment.sensibleHeatPerOccupantKW = 0.1;
 			require(atmosConfigure(world, { compartment }).first, "occupancy heat refused");
@@ -825,7 +819,7 @@ namespace
 			core::World corrupt("AtmosphereCorrupt", 2, 2);
 			corrupt.pauseSimulation(); corrupt.finishBuild();
 			auto const result = atmosConfigure(corrupt,
-				{ atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0) });
+				{ atmosphere("c", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0) });
 			require(!result.first && result.second.find("corrupt atmosphere descriptor crossing")
 				!= std::string::npos
 				&& !corrupt.getStationSystemsSnapshot().enabled,
@@ -843,7 +837,7 @@ namespace
 			core::World corrupt("AirlockCorrupt", 2, 2);
 			corrupt.pauseSimulation(); corrupt.finishBuild();
 			auto const result = atmosConfigure(corrupt,
-				{ atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0) },
+				{ atmosphere("c", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0) },
 				{ airlockCycle("x", "c", 1.0, 0.0, 60.0, 0.5) });
 			require(!result.first && result.second.find("corrupt airlock cycle descriptor crossing")
 				!= std::string::npos
@@ -864,14 +858,13 @@ namespace
 			auto const tolerance = 1e-6 * std::max(1.0, std::abs(expected));
 			return std::abs(actual - expected) <= tolerance;
 		};
-		auto storeWithClass = [](std::string const& id, std::string const& hazard,
+		auto store = [](std::string const& id,
 			double capacity, double qualified, double held = 0.0,
 			double protectedReserve = 0.0)
 		{
 			core::ResourceStoreSettings settings;
 			settings.id = id;
 			settings.unit = "kg";
-			settings.hazardClass = hazard;
 			settings.capacity = capacity;
 			settings.startingQualified = qualified;
 			settings.startingUnqualified = held;
@@ -902,15 +895,15 @@ namespace
 		auto hazStores = [&]()
 		{
 			std::vector<core::ResourceStoreSettings> stores;
-			stores.push_back(storeWithClass("potable", "normal", 100.0, 50.0));
-			stores.push_back(storeWithClass("normTreated", "normal", 100.0, 0.0));
-			stores.push_back(storeWithClass("normConcentrate", "normal", 100.0, 0.0));
-			stores.push_back(storeWithClass("normConsumable", "normal", 100.0, 10.0));
-			stores.push_back(storeWithClass("hazRaw", "hazardous", 200.0, 100.0));
-			stores.push_back(storeWithClass("hazTreated", "hazardous", 100.0, 0.0));
-			stores.push_back(storeWithClass("hazConcentrate", "hazardous", 100.0, 0.0));
-			stores.push_back(storeWithClass("hazConsumable", "hazardous", 100.0, 10.0));
-			stores.push_back(storeWithClass("hazReserve", "hazardous", 100.0, 0.0));
+			stores.push_back(store("potable", 100.0, 50.0));
+			stores.push_back(store("normTreated", 100.0, 0.0));
+			stores.push_back(store("normConcentrate", 100.0, 0.0));
+			stores.push_back(store("normConsumable", 100.0, 10.0));
+			stores.push_back(store("hazRaw", 200.0, 100.0));
+			stores.push_back(store("hazTreated", 100.0, 0.0));
+			stores.push_back(store("hazConcentrate", 100.0, 0.0));
+			stores.push_back(store("hazConsumable", 100.0, 10.0));
+			stores.push_back(store("hazReserve", 100.0, 0.0));
 			return stores;
 		};
 		auto hazConfigure = [&](core::World& world,
@@ -943,15 +936,6 @@ namespace
 			core::World world("ContainmentRefused", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
 			std::string diagnostic;
-			{
-				auto settings = core::StationSystemsSettings{};
-				settings.enabled = true;
-				settings.stores = hazStores();
-				settings.stores[0].hazardClass = "radioactive";
-				require(!core::validateStationSystemsSettings(settings, diagnostic)
-					&& diagnostic.find("unknown hazard class") != std::string::npos,
-					"a store with an undeclared hazard class was accepted");
-			}
 			{
 				// A normal-class treatment drawing from a hazardous store
 				// is accepted (#751): the class no longer binds the
@@ -1127,9 +1111,6 @@ namespace
 			require(approx(findStore(snap, "hazReserve").currentQualified,
 				0.002 * elapsed),
 				"the hazardous reserve did not receive the recovered material");
-			require(findStore(snap, "hazReserve").hazardClass == "hazardous"
-				&& findStore(snap, "potable").hazardClass == "normal",
-				"the store hazard classes are not exposed on the snapshot");
 			// The normal inventory never saw a gram of the hazardous stream.
 			auto const potable = findStore(snap, "potable");
 			require(approx(potable.currentQualified, 50.0)
@@ -1345,8 +1326,8 @@ namespace
 			settings.enabled = true;
 			settings.observationIntervalSeconds = 1.0f;
 			settings.stores = {
-				storeWithClass("normWaste", "normal", 100.0, 10.0, 5.0),
-				storeWithClass("hazWaste", "hazardous", 100.0, 10.0, 5.0) };
+				store("normWaste", 100.0, 10.0, 5.0),
+				store("hazWaste", 100.0, 10.0, 5.0) };
 			core::WasteEjectionSettings ejectNorm;
 			ejectNorm.id = "ejectNorm";
 			ejectNorm.storeId = "normWaste";
@@ -1377,8 +1358,6 @@ namespace
 			require(approx(hazardous.currentQualified, 6.0)
 				&& approx(hazardous.currentUnqualified, 5.0),
 				"the hazardous ejection touched the wrong pool or the wrong store");
-			require(hazardous.hazardClass == "hazardous",
-				"the hazardous waste store class is not exposed");
 		}
 		// The bundled Lua mirror checks the same energy-evidence and mass ledgers.
 		{
@@ -1471,7 +1450,6 @@ namespace
 		{
 			core::AtmosphereSettings settings;
 			settings.id = "habitat";
-			settings.hazardClass = "normal";
 			settings.volumeM3 = 100.0;
 			settings.startingOxygenKg = 20.0;
 			settings.startingNitrogenKg = 80.0;
@@ -1600,12 +1578,6 @@ namespace
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("below the chemical energy") != std::string::npos,
 				"a dose below the retained chemical energy was accepted");
-			settings.electrolyzers = { electrolyzer("cell", "hazardous") };
-			settings.electrolyzers[0].atmosphereId = "habitat";
-			settings.electrolyzers[0].oxygenStoreId = "";
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("does not match compartment") != std::string::npos,
-				"a hazardous electrolyzer delivering into a normal compartment was accepted");
 			settings.electrolyzers = { electrolyzer("cell", "normal") };
 			settings.electrolyzers[0].thermalClass = "moderate";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
@@ -1622,10 +1594,6 @@ namespace
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("unknown atmosphere compartment") != std::string::npos,
 				"a capture machine scrubbing an unknown compartment was accepted");
-			settings.co2Captures = { capture("scrub", "hazardous") };
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("does not match compartment") != std::string::npos,
-				"a hazardous capture machine on a normal compartment was accepted");
 			settings.co2Captures = { capture("scrub", "normal") };
 			settings.co2Captures[0].consumableStoreId = "";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)

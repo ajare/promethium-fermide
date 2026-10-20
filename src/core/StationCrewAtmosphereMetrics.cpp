@@ -9,18 +9,13 @@ void appendStationCrewAtmosphereObservations(StationSystemsSettings const& setti
 {
 	using R = StationMetricRole;
 	auto stores = stationStoreObservations(settings);
-	auto hazard = [&](std::string const& id) {
-		auto a = std::ranges::find(settings.atmospheres, id, &AtmosphereSettings::id);
-		return a == settings.atmospheres.end() ? std::string{} : a->hazardClass;
-	};
 	auto scalar = [&](std::string type, std::string const& id, std::string role, R direction,
-		std::string material, std::string cls, auto collection, auto member, auto request,
+		std::string material, auto collection, auto member, auto request,
 		bool power = false, bool cumulative = false) -> StationExchangeObservation& {
 		StationExchangeObservation o;
 		auto& d = o.metric;
 		d.id = "exchange/" + type + "/" + id + "/" + role;
 		d.equipmentType = std::move(type); d.instanceId = id; d.exchangeRole = std::move(role); d.role = direction;
-		d.hazardClass = std::move(cls);
 		if (!power) {
 			d.materialId = std::move(material);
 			d.quantity = StationPhysicalQuantity::MassRate; d.unit = StationCanonicalUnit::KilogramPerSecond;
@@ -44,7 +39,7 @@ void appendStationCrewAtmosphereObservations(StationSystemsSettings const& setti
 	{
 		using S = StationCrewSnapshot;
 		auto add = [&](std::string role, R dir, std::string material, double S::* m, double S::* req = nullptr, bool power = false) -> StationExchangeObservation& {
-			return scalar("Crew", c.id, std::move(role), dir, std::move(material), hazard(c.atmosphereId), crews, m, req, power);
+			return scalar("Crew", c.id, std::move(role), dir, std::move(material), crews, m, req, power);
 		};
 		auto storeFlow = [&](std::string role, R dir, std::string const& storeId, double S::* m, double S::* req) {
 			auto const found = std::ranges::find(settings.stores, storeId, &ResourceStoreSettings::id);
@@ -52,7 +47,7 @@ void appendStationCrewAtmosphereObservations(StationSystemsSettings const& setti
 			auto const& stock = stores[found - settings.stores.begin()];
 			auto& o = add(std::move(role), dir, stock.metric.materialId.value_or(""), m, req);
 			o.sourceToCanonicalScale = stock.sourceToCanonicalScale;
-			o.metric.materialId = stock.metric.materialId; o.metric.hazardClass = stock.metric.hazardClass;
+			o.metric.materialId = stock.metric.materialId;
 			if (!o.metric.materialId) o.metric.coverage = StationMetricCoverage::Unclassified;
 		};
 		storeFlow("Food", R::Input, c.foodStoreId, &S::lastFoodActual, &S::lastFoodRequested);
@@ -73,7 +68,7 @@ void appendStationCrewAtmosphereObservations(StationSystemsSettings const& setti
 	{
 		using S = StationAtmosphereSnapshot;
 		auto add = [&](std::string role, R dir, std::string material, double S::* m, double S::* req = nullptr, bool power = false) {
-			scalar("Atmosphere", a.id, std::move(role), dir, std::move(material), a.hazardClass, atmospheres, m, req, power);
+			scalar("Atmosphere", a.id, std::move(role), dir, std::move(material), atmospheres, m, req, power);
 		};
 		// These are compartment endpoint accounts, not additional Crew production.
 		add("Occupancy oxygen consumption", R::Output, "oxygen", &S::lastOxygenConsumedKg, &S::lastOxygenDemandKg);
@@ -101,12 +96,12 @@ void appendStationCrewAtmosphereObservations(StationSystemsSettings const& setti
 			std::tuple{"Recovered gas", R::Output, &S::recoveredTotal},
 			std::tuple{"Vented gas", R::Loss, &S::lostTotal}})
 		{
-			auto& o = scalar("Airlock cycle", c.id, role, dir, "atmosphere-mixture", hazard(c.atmosphereId), cycles,
+			auto& o = scalar("Airlock cycle", c.id, role, dir, "atmosphere-mixture", cycles,
 				member, static_cast<double S::*>(nullptr), false, true);
 			o.metric.observationNote += " Removed gas = recovered + vented; recovery is retained, not usable production. Mixture kg is not a pure-species quantity and is never combined with oxygen/nitrogen/carbon-dioxide/water inventories.";
 		}
 		auto& retained = scalar("Airlock cycle", c.id, "Retained recovered mixture", R::Inventory,
-			"atmosphere-mixture", hazard(c.atmosphereId), cycles, &S::recoveredTotal,
+			"atmosphere-mixture", cycles, &S::recoveredTotal,
 			static_cast<double S::*>(nullptr));
 		retained.perTick = false;
 		retained.metric.quantity = StationPhysicalQuantity::Mass;

@@ -116,7 +116,6 @@ namespace
 		explicitSettings.stores[0].materialId = "water"; // deliberately misleading store name
 		explicitSettings.stores[0].protectedReserve = 6;
 		explicitSettings.stores[1].materialId = "custom-feedstock-2";
-		explicitSettings.stores[1].hazardClass = "hazardous";
 		explicitSettings.stores[1].composition = core::ResourceCompositionSettings{};
 		require(world.configureStationSystems(explicitSettings, false, &diagnostic), diagnostic);
 		document.settings = explicitSettings;
@@ -1233,23 +1232,19 @@ namespace
 		core::ResourceStoreSettings hazRaw;
 		hazRaw.id = "hazRaw";
 		hazRaw.unit = "kg";
-		hazRaw.hazardClass = "hazardous";
 		hazRaw.capacity = 200.0;
 		hazRaw.startingQualified = 100.0;
 		core::ResourceStoreSettings hazTreated;
 		hazTreated.id = "hazTreated";
 		hazTreated.unit = "kg";
-		hazTreated.hazardClass = "hazardous";
 		hazTreated.capacity = 100.0;
 		core::ResourceStoreSettings hazConcentrate;
 		hazConcentrate.id = "hazConcentrate";
 		hazConcentrate.unit = "kg";
-		hazConcentrate.hazardClass = "hazardous";
 		hazConcentrate.capacity = 100.0;
 		core::ResourceStoreSettings hazConsumable;
 		hazConsumable.id = "hazConsumable";
 		hazConsumable.unit = "kg";
-		hazConsumable.hazardClass = "hazardous";
 		hazConsumable.capacity = 100.0;
 		hazConsumable.startingQualified = 10.0;
 		core::ResourceStoreSettings potable;
@@ -1312,8 +1307,7 @@ namespace
 			require(fresh.waterTreatments.size() == 1
 				&& fresh.waterTreatments[0].acceptedKg == 0.0
 				&& !fresh.waterTreatments[0].qualityAccepted
-				&& fresh.stores[0].currentQualified == 100.0
-				&& fresh.stores[0].hazardClass == "hazardous",
+				&& fresh.stores[0].currentQualified == 100.0,
 				"reopened World did not restart the authored containment scenario");
 			reopened->resumeSimulation();
 			require(reopened->advanceTicks(120), "Containment reopened run failed");
@@ -2482,7 +2476,6 @@ namespace
 		bus.maxTemperatureC = 200.0;
 		core::AtmosphereSettings dock;
 		dock.id = "dock";
-		dock.hazardClass = "normal";
 		dock.volumeM3 = 100.0;
 		dock.startingOxygenKg = 20.0;
 		dock.startingNitrogenKg = 80.0;
@@ -2496,7 +2489,6 @@ namespace
 		dock.maxPressureKPa = 200.0;
 		core::AtmosphereSettings plant;
 		plant.id = "plant";
-		plant.hazardClass = "hazardous";
 		plant.volumeM3 = 50.0;
 		plant.startingOxygenKg = 5.0;
 		plant.startingNitrogenKg = 45.0;
@@ -2594,16 +2586,6 @@ namespace
 		}
 		{
 			auto malformed = withField;
-			replaceAll(malformed, "hazardClass: hazardous", "hazardClass: plasma");
-			auto const malformedPath = directory / "malformed-atmosphere-hazard.world.yaml";
-			writeFile(malformedPath, malformed);
-			bool refused = false;
-			try { (void)core::loadWorldDocument(malformedPath); }
-			catch (std::exception const&) { refused = true; }
-			require(refused, "an unknown hazard class was accepted from a file");
-		}
-		{
-			auto malformed = withField;
 			replaceAll(malformed, "atmosphereId: dock", "atmosphereId: ghost");
 			auto const malformedPath = directory / "malformed-airlock-atmosphere.world.yaml";
 			writeFile(malformedPath, malformed);
@@ -2664,7 +2646,6 @@ namespace
 		};
 		core::AtmosphereSettings habitat;
 		habitat.id = "habitat";
-		habitat.hazardClass = "normal";
 		habitat.volumeM3 = 100.0;
 		habitat.startingOxygenKg = 20.0;
 		habitat.startingNitrogenKg = 80.0;
@@ -2850,7 +2831,6 @@ void waterFiles(smoke::Context const& context)
 	};
 	core::AtmosphereSettings habitat;
 	habitat.id = "habitat";
-	habitat.hazardClass = "normal";
 	habitat.volumeM3 = 100.0;
 	habitat.startingOxygenKg = 20.0;
 	habitat.startingNitrogenKg = 80.0;
@@ -3035,7 +3015,6 @@ void gasFiles(smoke::Context const& context)
 	};
 	core::AtmosphereSettings habitat;
 	habitat.id = "habitat";
-	habitat.hazardClass = "normal";
 	habitat.volumeM3 = 100.0;
 	habitat.startingOxygenKg = 20.0;
 	habitat.startingNitrogenKg = 80.0;
@@ -3794,76 +3773,30 @@ void nutrientRecoveryFiles(smoke::Context const& context)
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a zero stock units per condition point with a declared stock store was accepted from a file");
 	}
-	// #592: a document that flips the processor's consumable (media)
-	// store to hazardous-class while the processor stays normal is
-	// refused on load: the consumable is a consumed input and may not
-	// cross the hazard boundary into a normal biological pathway.
-	{
-		auto malformed = withField;
-		replaceOnceAfter(malformed, "id: media",
-			"hazardClass: normal", "hazardClass: hazardous");
-		auto const malformedPath = directory / "cross-class-media.world.yaml";
-		writeFile(malformedPath, malformed);
-		bool refused = false;
-		try { (void)core::loadWorldDocument(malformedPath); }
-		catch (std::exception const&) { refused = true; }
-		require(refused, "a hazardous media store drawn by a normal microbial processor was accepted from a file");
-	}
-	// #592: the same bypass through the replacement biological stock
-	// store - a hazardous-class stock store drawn by the normal
-	// processor - is refused on load.
-	{
-		auto malformed = withField;
-		replaceOnceAfter(malformed, "id: stock",
-			"hazardClass: normal", "hazardClass: hazardous");
-		auto const malformedPath = directory / "cross-class-stock.world.yaml";
-		writeFile(malformedPath, malformed);
-		bool refused = false;
-		try { (void)core::loadWorldDocument(malformedPath); }
-		catch (std::exception const&) { refused = true; }
-		require(refused, "a hazardous replacement stock store drawn by a normal microbial processor was accepted from a file");
-	}
 }
 
-// Hazard segregation on biological pathways (#573) through the document
-// seam: a whole-chain hazardous crop rig round-trips and replays from the
-// file with its classes intact, and a document whose authored hazard
-// classes cross the biological boundary - a normal compartment wrapped
-// around hazardous feed, or a hazardous destination inside a normal
-// chain - is refused on load rather than silently accepted.
+// A dedicated recovery chain runs through the document seam: the rig
+// round-trips to both file formats and replays to the same snapshot, so
+// the chain's stores, compartment and crop survive persistence intact.
 void bioHazardFiles(smoke::Context const& context)
 {
 	namespace filesystem = std::filesystem;
 	auto const directory = context.temporaryRoot() / "station-bio-hazard";
 	filesystem::create_directories(directory);
-	// Replace the first occurrence of `from` that appears after `anchor`
-	// - the blocks are serialised id-first, so anchoring on the id pins
-	// the edit to the intended entry.
-	auto replaceOnceAfter = [](std::string& text, std::string const& anchor,
-		std::string const& from, std::string const& to)
-	{
-		auto const at = text.find(anchor);
-		require(at != std::string::npos, ("missing anchor: " + anchor).c_str());
-		auto const hit = text.find(from, at);
-		require(hit != std::string::npos, ("missing field after anchor: " + from).c_str());
-		text.replace(hit, from.size(), to);
-	};
-	auto store = [](std::string const& id, std::string const& hazard,
+	auto store = [](std::string const& id,
 		double capacity, double starting)
 	{
 		core::ResourceStoreSettings settings;
 		settings.id = id;
 		settings.unit = "kg";
-		settings.hazardClass = hazard;
 		settings.capacity = capacity;
 		settings.startingQualified = starting;
 		return settings;
 	};
-	auto compartment = [](std::string const& id, std::string const& hazard)
+	auto compartment = [](std::string const& id)
 	{
 		core::AtmosphereSettings settings;
 		settings.id = id;
-		settings.hazardClass = hazard;
 		settings.volumeM3 = 100.0;
 		settings.startingOxygenKg = 40.0;
 		settings.startingNitrogenKg = 80.0;
@@ -3911,13 +3844,13 @@ void bioHazardFiles(smoke::Context const& context)
 	auto hazRig = [&]()
 	{
 		std::vector<core::ResourceStoreSettings> stores;
-		stores.push_back(store("hazIrrigation", "hazardous", 200.0, 150.0));
-		stores.push_back(store("hazFertN", "hazardous", 10.0, 5.0));
-		stores.push_back(store("hazFertP", "hazardous", 10.0, 5.0));
-		stores.push_back(store("hazFertK", "hazardous", 10.0, 5.0));
-		stores.push_back(store("hazFertMin", "hazardous", 10.0, 5.0));
-		stores.push_back(store("hazFood", "hazardous", 10.0, 0.0));
-		stores.push_back(store("hazWaste", "hazardous", 10.0, 0.0));
+		stores.push_back(store("hazIrrigation", 200.0, 150.0));
+		stores.push_back(store("hazFertN", 10.0, 5.0));
+		stores.push_back(store("hazFertP", 10.0, 5.0));
+		stores.push_back(store("hazFertK", 10.0, 5.0));
+		stores.push_back(store("hazFertMin", 10.0, 5.0));
+		stores.push_back(store("hazFood", 10.0, 0.0));
+		stores.push_back(store("hazWaste", 10.0, 0.0));
 		return stores;
 	};
 	core::World original("BioHazard Round Trip", 2, 2);
@@ -3927,7 +3860,7 @@ void bioHazardFiles(smoke::Context const& context)
 	settings.enabled = true;
 	settings.observationIntervalSeconds = 2.0f;
 	settings.stores = hazRig();
-	settings.atmospheres = { compartment("hazHabitat", "hazardous") };
+	settings.atmospheres = { compartment("hazHabitat") };
 	settings.cropPopulations = { crop };
 	core::SolarArraySettings field;
 	field.id = "field";
@@ -3943,9 +3876,6 @@ void bioHazardFiles(smoke::Context const& context)
 		&& expected.cropPopulations[0].harvestedKg > 0.0
 		&& expected.cropPopulations[0].foodProducedKg > 0.0,
 		"the hazardous crop scenario did not harvest before saving");
-	for (auto const& entry : expected.stores)
-		require(entry.hazardClass == "hazardous",
-			"the hazardous chain carried a non-hazardous store before saving");
 	for (auto const* suffix : {".world.yaml", ".world"})
 	{
 		auto const path = directory / (std::string("bio-hazard") + suffix);
@@ -3957,75 +3887,10 @@ void bioHazardFiles(smoke::Context const& context)
 		require(fresh.cropPopulations.size() == 1
 			&& fresh.cropPopulations[0].harvestedKg == 0.0,
 			"reopened World did not restart the hazardous biological scenario");
-		for (auto const& entry : fresh.stores)
-			require(entry.hazardClass == "hazardous",
-				"a hazardous store class was lost across the file round trip");
 		reopened->resumeSimulation();
 		require(reopened->advanceTicks(1200), "BioHazard reopened run failed");
 		require(reopened->getStationSystemsSnapshot() == expected,
 			"the hazardous biological scenario is not reproducible from the document");
-	}
-	auto const withField = serializeYaml(original);
-	// A document that rewrites the compartment to normal while the whole
-	// feed chain stays hazardous is refused on load: the compartment is
-	// the containment boundary and the chain may not hang off a class it
-	// does not match.
-	{
-		auto malformed = withField;
-		replaceOnceAfter(malformed, "id: hazHabitat",
-			"hazardClass: hazardous", "hazardClass: normal");
-		auto const malformedPath = directory / "cross-class-compartment.world.yaml";
-		writeFile(malformedPath, malformed);
-		bool refused = false;
-		try { (void)core::loadWorldDocument(malformedPath); }
-		catch (std::exception const&) { refused = true; }
-		require(refused, "a normal compartment wrapped around a hazardous crop chain was accepted from a file");
-	}
-	// A single hazardous store inside an otherwise normal chain - the
-	// reviewed irrigation bypass - is refused on load.
-	{
-		auto normalSettings = original.getStationSystemsSettings();
-		normalSettings.atmospheres[0].hazardClass = "normal";
-		for (auto& entry : normalSettings.stores)
-			entry.hazardClass = "normal";
-		core::World normalWorld("BioNormal Rig", 2, 2);
-		normalWorld.pauseSimulation();
-		normalWorld.finishBuild();
-		require(normalWorld.configureStationSystems(normalSettings, false, &diagnostic),
-			("the normal crop rig was refused: " + diagnostic).c_str());
-		auto const normalField = serializeYaml(normalWorld);
-		auto malformed = normalField;
-		replaceOnceAfter(malformed, "id: hazIrrigation",
-			"hazardClass: normal", "hazardClass: hazardous");
-		auto const malformedPath = directory / "cross-class-irrigation.world.yaml";
-		writeFile(malformedPath, malformed);
-		bool refused = false;
-		try { (void)core::loadWorldDocument(malformedPath); }
-		catch (std::exception const&) { refused = true; }
-		require(refused, "a hazardous irrigation store feeding a normal canopy was accepted from a file");
-	}
-	// A hazardous harvest destination inside a normal chain is refused
-	// on load: the harvest may not launder material into a foreign class.
-	{
-		auto normalSettings = original.getStationSystemsSettings();
-		normalSettings.atmospheres[0].hazardClass = "normal";
-		for (auto& entry : normalSettings.stores)
-			entry.hazardClass = "normal";
-		core::World normalWorld("BioNormal Rig 2", 2, 2);
-		normalWorld.pauseSimulation();
-		normalWorld.finishBuild();
-		require(normalWorld.configureStationSystems(normalSettings, false, &diagnostic),
-			("the second normal crop rig was refused: " + diagnostic).c_str());
-		auto const normalField = serializeYaml(normalWorld);
-		auto malformed = normalField;
-		replaceOnceAfter(malformed, "id: hazFood",
-			"hazardClass: normal", "hazardClass: hazardous");
-		auto const malformedPath = directory / "cross-class-food-destination.world.yaml";
-		writeFile(malformedPath, malformed);
-		bool refused = false;
-		try { (void)core::loadWorldDocument(malformedPath); }
-		catch (std::exception const&) { refused = true; }
-		require(refused, "a hazardous crop food destination in a normal chain was accepted from a file");
 	}
 }
 
@@ -4062,7 +3927,6 @@ void biologicalCapacityFiles(smoke::Context const& context)
 	};
 	core::AtmosphereSettings habitat;
 	habitat.id = "habitat";
-	habitat.hazardClass = "normal";
 	habitat.volumeM3 = 100.0;
 	habitat.startingOxygenKg = 40.0;
 	habitat.startingNitrogenKg = 80.0;
@@ -4222,12 +4086,11 @@ void powerChainFiles(smoke::Context const& context)
 	namespace filesystem = std::filesystem;
 	auto const directory = context.temporaryRoot() / "station-power-chain";
 	filesystem::create_directories(directory);
-	auto store = [](std::string const& id, std::string const& unit,
-		std::string const& hazard = "normal")
+	auto store = [](std::string const& id, std::string const& unit)
 	{
 		core::ResourceStoreSettings entry;
 		entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
-		entry.startingQualified = 500.0; entry.hazardClass = hazard;
+		entry.startingQualified = 500.0;
 		return entry;
 	};
 	auto reservoir = [](std::string const& id, std::string const& thermalClass)

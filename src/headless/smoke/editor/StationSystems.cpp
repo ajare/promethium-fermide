@@ -304,12 +304,11 @@ namespace
 		StationSystemsWindow window;
 		auto world = std::make_shared<core::World>("Flow linking", 2, 2);
 		world->pauseSimulation(); world->finishBuild();
-		auto store = [](std::string const& id, std::string const& unit,
-			std::string const& hazard = "normal")
+		auto store = [](std::string const& id, std::string const& unit)
 		{
 			core::ResourceStoreSettings entry;
 			entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
-			entry.startingQualified = 500.0; entry.hazardClass = hazard;
+			entry.startingQualified = 500.0;
 			return entry;
 		};
 		auto transfer = [](std::string const& id, std::string const& source,
@@ -324,7 +323,7 @@ namespace
 		seed.enabled = true;
 		seed.observationIntervalSeconds = 1.0f;
 		seed.stores = {store("a", "kg"), store("b", "kg"),
-			store("hazard", "kg", "hazardous"), store("litres", "L")};
+			store("hazard", "kg"), store("litres", "L")};
 		seed.transfers = {transfer("t1", "a", "b", "kg")};
 		std::string diagnostic;
 		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
@@ -792,11 +791,11 @@ namespace
 		StationSystemsWindow window;
 		auto world = std::make_shared<core::World>("Growable ports", 2, 2);
 		world->pauseSimulation(); world->finishBuild();
-		auto compoundStore = [](std::string const& id, std::string const& hazard = "normal")
+		auto compoundStore = [](std::string const& id)
 		{
 			core::ResourceStoreSettings entry;
 			entry.id = id; entry.unit = "kg"; entry.capacity = 1000.0;
-			entry.startingQualified = 500.0; entry.hazardClass = hazard;
+			entry.startingQualified = 500.0;
 			entry.composition = core::ResourceCompositionSettings{};
 			entry.composition->moisture = 0.5;
 			return entry;
@@ -804,7 +803,7 @@ namespace
 		core::StationSystemsSettings seed;
 		seed.enabled = true;
 		seed.stores = {compoundStore("silage"), compoundStore("grain"),
-			compoundStore("brine", "hazardous")};
+			compoundStore("brine")};
 		std::string diagnostic;
 		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
 		world->markSaved();
@@ -1050,7 +1049,7 @@ namespace
 			{
 				core::StationSystemsSettings seed; seed.enabled = true;
 				core::ResourceStoreSettings kit;
-				kit.id = "kit"; kit.unit = "kg"; kit.capacity = 100; kit.hazardClass = "normal";
+				kit.id = "kit"; kit.unit = "kg"; kit.capacity = 100;
 				seed.stores.push_back(kit);
 				smoke::require(world->configureStationSystems(seed, false), "capture consumable seed failed");
 			}
@@ -1130,7 +1129,7 @@ namespace
 			{
 				core::StationSystemsSettings seed; seed.enabled = true;
 				core::ResourceStoreSettings kit;
-				kit.id = "kit"; kit.unit = "kg"; kit.capacity = 100; kit.hazardClass = "normal";
+				kit.id = "kit"; kit.unit = "kg"; kit.capacity = 100;
 				seed.stores.push_back(kit);
 				smoke::require(world->configureStationSystems(seed, false), "capture consumable seed failed");
 			}
@@ -1462,7 +1461,7 @@ namespace
 		{
 			core::ResourceStoreSettings entry;
 			entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
-			entry.startingQualified = 500.0; entry.hazardClass = "normal";
+			entry.startingQualified = 500.0;
 			return entry;
 		};
 		core::StationSystemsSettings seed;
@@ -1894,12 +1893,11 @@ namespace
 		StationSystemsWindow window;
 		auto world = std::make_shared<core::World>("Power chain flow", 2, 2);
 		world->pauseSimulation(); world->finishBuild();
-		auto store = [](std::string const& id, std::string const& unit,
-			std::string const& hazard = "normal")
+		auto store = [](std::string const& id, std::string const& unit)
 		{
 			core::ResourceStoreSettings entry;
 			entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
-			entry.startingQualified = 500.0; entry.hazardClass = hazard;
+			entry.startingQualified = 500.0;
 			return entry;
 		};
 		auto reservoir = [](std::string const& id, std::string const& thermalClass)
@@ -1912,7 +1910,7 @@ namespace
 		core::StationSystemsSettings seed;
 		seed.enabled = true;
 		seed.observationIntervalSeconds = 1.0f;
-		seed.stores = {store("water", "kg"), store("brine", "kg", "hazardous"),
+		seed.stores = {store("water", "kg"), store("brine", "kg"),
 			store("diesel", "kJ"), store("co2", "kg"), store("h2", "kg"),
 			store("o2", "kg"), store("ch4", "kg"), store("rawwater", "kg"),
 			store("carbon", "kg")};
@@ -2252,7 +2250,7 @@ namespace
 		{
 			core::ResourceStoreSettings entry;
 			entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
-			entry.startingQualified = 500.0; entry.hazardClass = "normal";
+			entry.startingQualified = 500.0;
 			return entry;
 		};
 		auto reservoir = [](std::string const& id, std::string const& thermalClass)
@@ -2926,7 +2924,7 @@ namespace
 		{
 			core::ResourceStoreSettings entry;
 			entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
-			entry.startingQualified = 500.0; entry.hazardClass = "normal";
+			entry.startingQualified = 500.0;
 			return entry;
 		};
 		auto reservoir = [](std::string const& id, std::string const& thermalClass)
@@ -3211,9 +3209,9 @@ namespace
 			ctx->SetRef("Station Systems");
 			// The separate window shows units, usable versus held inventory,
 			// capacity and initial versus current state.
-			REQ(driver.contains("o2 (kg) [normal]: usable 800.000, held 100.000 of capacity 1000.000 | initial usable 800.000, initial held 100.000"),
+			REQ(driver.contains("o2 (kg): usable 800.000, held 100.000 of capacity 1000.000 | initial usable 800.000, initial held 100.000"),
 				"Store live display missing identity, units, usable/held or capacity");
-			REQ(driver.contains("water (L) [normal]: usable 0.000, held 250.000 of capacity 500.000 | initial usable 0.000, initial held 250.000"),
+			REQ(driver.contains("water (L): usable 0.000, held 250.000 of capacity 500.000 | initial usable 0.000, initial held 250.000"),
 				"Empty-usable store display wrong");
 			REQ(driver.contains("2 resource store(s)"), "Authored store count missing");
 			// Author one more store through the real controls, then edit it.
@@ -3241,33 +3239,17 @@ namespace
 			ctx->ItemClick("Apply settings");
 			REQ(world->getStationSystemsSettings().stores[2].capacity == 75.0
 				&& history.undoCount() == 3, "Recovery capacity edit did not apply");
-			// The authored hazard class (#412) is editable through the real
-			// controls and reaches the live store table.
-			driver.typeValue(ctx, "Store 2 hazard class", "hazardous");
-			ctx->ItemClick("Apply settings");
-			REQ(world->getStationSystemsSettings().stores[2].hazardClass == "hazardous",
-				"Store hazard class edit did not apply");
-			// An unknown hazard class is refused with a diagnostic and no
-			// mutation of the authored settings.
-			driver.typeValue(ctx, "Store 2 hazard class", "toxic");
-			ctx->ItemClick("Apply settings");
-			ctx->Sleep(1);
-			REQ(driver.contains("unknown hazard class 'toxic'"),
-				"Unknown store hazard class diagnostic not shown");
-			REQ(world->getStationSystemsSettings().stores[2].hazardClass == "hazardous"
-				&& history.undoCount() == 4,
-				"Invalid store hazard class draft mutated the authored settings");
 			driver.click(ctx, "Remove store 2");
 			driver.click(ctx, "Apply settings");
 			REQ(world->getStationSystemsSettings().stores.size() == 2
 				&& world->getStationSystemsSnapshot().stores.size() == 2
-				&& history.undoCount() == 5, "Removed store did not apply");
+				&& history.undoCount() == 4, "Removed store did not apply");
 			// Running keeps the live display and never edits the authored document.
 			world->markSaved();
 			world->resumeSimulation();
 			REQ(world->advanceTicks(60), "Store editor run failed");
 			ctx->Sleep(1);
-			REQ(driver.contains("o2 (kg) [normal]: usable 800.000")
+			REQ(driver.contains("o2 (kg): usable 800.000")
 				&& !world->isModified(), "Run changed the display source or dirtied the document");
 			// Undo restores the authored store set without resurrecting live state.
 			world->pauseSimulation();
@@ -4028,7 +4010,6 @@ namespace
 			{"water", "kg", 100, 3, 1}, {"unknown", "kg", 100, 7, 2}};
 		seed.stores[0].materialId = "water"; seed.stores[1].materialId = "water";
 		seed.stores[2].materialId = "oxygen";
-		seed.stores[1].hazardClass = "hazardous";
 		seed.stores[0].protectedReserve = 4;
 		core::ResourceStoreSettings flowFeed{"flow-feed", "kg", 100, 20, 0}; flowFeed.materialId = "exchange-test";
 		core::ResourceStoreSettings flowProduct{"flow-product", "kg", 100, 0, 0}; flowProduct.materialId = "exchange-test";
@@ -4069,7 +4050,7 @@ namespace
 		// Composition is authoritative even when material identity is unknown.
 		seed.stores[3].composition = core::ResourceCompositionSettings{0.25, 0.1, 0.2};
 		core::AtmosphereSettings air;
-		air.id = "cabin"; air.hazardClass = "normal"; air.volumeM3 = 100;
+		air.id = "cabin"; air.volumeM3 = 100;
 		air.startingOxygenKg = 20; air.startingNitrogenKg = 80; air.startingWaterVapourKg = 2;
 		air.startingTemperatureC = 25; air.thermalCapacityKJPerK = 10000;
 		air.minPressureKPa = 1; air.maxPressureKPa = 200;
@@ -4709,11 +4690,7 @@ namespace
 			auto& entry = s.waterTreatments[0];
 			store(entry.sourceStoreId, "source"); store(entry.treatedStoreId, "treated");
 			store(entry.concentrateStoreId, "concentrate"); store(entry.consumableStoreId, "consumable");
-			if (alternative)
-			{
-				entry.hazardClass = "hazardous";
-				for (auto& target : s.stores) target.hazardClass = "hazardous";
-			}
+			if (alternative) entry.hazardClass = "hazardous";
 		}
 		else if (type == "Electrolyzer")
 		{
@@ -4722,7 +4699,7 @@ namespace
 			if (alternative)
 			{
 				core::AtmosphereSettings atmosphere;
-				atmosphere.id = "atmosphere"; atmosphere.hazardClass = entry.hazardClass;
+				atmosphere.id = "atmosphere";
 				atmosphere.volumeM3 = 100; atmosphere.thermalCapacityKJPerK = 100;
 				atmosphere.minPressureKPa = 50; atmosphere.maxPressureKPa = 150;
 				s.atmospheres.push_back(atmosphere);
@@ -4782,19 +4759,18 @@ namespace
 		rejects(invalid);
 		if (type != "Outage")
 		{
-			for (int error = 0; error < 3; ++error)
+			for (int error = 0; error < 2; ++error)
 			{
 				// A declared composition on a treated water store is legal
 				// (#744): the recovery streams carry the source's dissolved
 				// load through the removal fractions, so the compound-store
 				// mutation is no longer a rejection case for this chain.
-				if (type == "Water treatment" && error == 2) continue;
+				if (type == "Water treatment" && error == 1) continue;
 				invalid = document;
 				// The last store is resolved even though the first connector is absent.
 				auto& target = type == "Water treatment" ? invalid.settings.stores[1] : invalid.settings.stores.back();
 				if (error == 0) target.unit = "L";
-				if (error == 1) target.hazardClass = target.hazardClass == "normal" ? "hazardous" : "normal";
-				if (error == 2) target.composition.emplace();
+				if (error == 1) target.composition.emplace();
 				rejects(invalid);
 			}
 		}
@@ -5146,7 +5122,7 @@ namespace
 			driver.run("station", "transferWorkflow", [&](ImGuiTestContext* ctx)
 			{
 				ctx->SetRef("Station Systems");
-			REQ(driver.contains("src (kg) [normal]: usable 100.000, held 0.000 of capacity 100.000 | initial usable 100.000, initial held 0.000 | protected 20.000"), "Protected reserve not shown in the live store table");
+			REQ(driver.contains("src (kg): usable 100.000, held 0.000 of capacity 100.000 | initial usable 100.000, initial held 0.000 | protected 20.000"), "Protected reserve not shown in the live store table");
 			REQ(driver.contains("pump: src -> dst (kg) idle | requested 0.000, completed 0.000, unmet 0.000 (rate 60.000/s, priority 0)"), "Authored transfer not shown in the live transfer table");
 			// Run until the destination fills: the window shows the rejection and
 			// the conserved boundary balance.
@@ -5248,7 +5224,7 @@ namespace
 			ctx->SetRef("Station Systems");
 			// The live view shows the declared composition on the dry-mass
 			// basis and the constituent balance ledger.
-			REQ(driver.contains("food (kg) [normal]: usable 50.000")
+			REQ(driver.contains("food (kg): usable 50.000")
 				&& driver.contains("compound (dry-mass basis): moisture 0.8000 | nutrient N 0.0500, atmospheric N 0.0000, P 0.0100, K 0.0200, other minerals 0.0200 | 17000.0 kJ/kg dry"),
 				"Compound store display missing composition terms");
 			REQ(driver.contains("Constituent balances")
@@ -5767,7 +5743,7 @@ namespace
 			ctx->Sleep(1);
 			REQ(driver.contains("pulse -> tank (kg): refused | last at 5.000 s: 0.000 of 12.000 accepted, 12.000 rejected | total accepted 20.000, rejected 16.000 | 3 occurrence(s)"),
 				"Live delivery accepted/refused accounting not displayed");
-			REQ(driver.contains("tank (kg) [normal]: usable 30.000, held 0.000 of capacity 30.000"),
+			REQ(driver.contains("tank (kg): usable 30.000, held 0.000 of capacity 30.000"),
 				"Live destination saturation not displayed");
 			REQ(driver.contains("next arrival at 7.000 s"),
 				"Next arrival not advanced past the fired occurrences");
@@ -5876,7 +5852,7 @@ namespace
 			ctx->Sleep(1);
 			REQ(driver.contains("haul <- dump (kg): nothing-ejectable | last at 5.000 s: 0.000 of 5.000 ejected, 5.000 not ejectable | total ejected 8.000, unmet 7.000 | 3 occurrence(s)"),
 				"Live ejection ejected/unmet accounting not displayed");
-			REQ(driver.contains("dump (kg) [normal]: usable 0.000, held 5.000 of capacity 60.000"),
+			REQ(driver.contains("dump (kg): usable 0.000, held 5.000 of capacity 60.000"),
 				"Held waste not displayed as retained in the store");
 			REQ(driver.contains("next ejection at 7.000 s"),
 				"Next ejection not advanced past the fired occurrences");
@@ -5940,7 +5916,6 @@ namespace
 			core::ResourceStoreSettings settings;
 			settings.id = id;
 			settings.unit = "kg";
-			settings.hazardClass = "hazardous";
 			settings.capacity = capacity;
 			settings.startingQualified = qualified;
 			return settings;
@@ -5983,7 +5958,7 @@ namespace
 		{
 			ctx->SetRef("Station Systems");
 			// The store hazard class is shown in the live store table.
-			REQ(driver.contains("hazRaw (kg) [hazardous]"),
+			REQ(driver.contains("hazRaw (kg)"),
 				"Hazardous store class not shown in the live store table");
 			// Run the scenario and inspect the live treatment evidence.
 			world->markSaved();
@@ -7469,7 +7444,7 @@ void crewAliasWorkflow(smoke::Context const&)
 			store("urine", 100.0, 0.0, urineComposition),
 			store("organicWaste", 100.0, 0.0, wasteComposition) };
 		core::AtmosphereSettings habitat;
-		habitat.id = "habitat"; habitat.hazardClass = "normal";
+		habitat.id = "habitat";
 		habitat.volumeM3 = 100.0;
 		habitat.startingOxygenKg = 20.0; habitat.startingNitrogenKg = 80.0;
 		habitat.startingTemperatureC = 20.0;
@@ -7895,7 +7870,6 @@ void cropWorkflow(smoke::Context const&)
 		initial.stores.push_back(plain("waste", 10.0, 0.0));
 		core::AtmosphereSettings habitat;
 		habitat.id = "habitat";
-		habitat.hazardClass = "normal";
 		habitat.volumeM3 = 100.0;
 		habitat.startingOxygenKg = 40.0;
 		habitat.startingNitrogenKg = 80.0;
@@ -8068,7 +8042,6 @@ void cropWorkflow(smoke::Context const&)
 		initial.stores.push_back(plain("awaste", 10.0, 0.0));
 		core::AtmosphereSettings habitat;
 		habitat.id = "habitat";
-		habitat.hazardClass = "normal";
 		habitat.volumeM3 = 100.0;
 		habitat.startingOxygenKg = 40.0;
 		habitat.startingNitrogenKg = 80.0;
@@ -8312,7 +8285,7 @@ void cropWorkflow(smoke::Context const&)
 				&& !driver.contains("maint1 on generator 'gen': active"),
 				"Completed maintenance not shown in the live view");
 			REQ(driver.contains("last spent 1.000000")
-				&& driver.contains("waste (kg) [normal]: usable 1.000"),
+				&& driver.contains("waste (kg): usable 1.000"),
 				"Completed spend into the waste store not displayed");
 			REQ(!world->isModified(), "Maintenance ticking dirtied the authored document");
 			// Removing the job applies through the same seam.

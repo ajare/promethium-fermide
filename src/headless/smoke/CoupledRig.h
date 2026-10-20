@@ -142,7 +142,6 @@ namespace coupled_rig
 		// --- Compartments -----------------------------------------------
 		core::AtmosphereSettings hab;
 		hab.id = "hab";
-		hab.hazardClass = "normal";
 		hab.volumeM3 = 200.0;
 		hab.startingOxygenKg = 60.0;
 		hab.startingNitrogenKg = 200.0;
@@ -156,7 +155,6 @@ namespace coupled_rig
 		hab.maxCarbonDioxidePartialPressureKPa = 0.4;
 		core::AtmosphereSettings greenhouse;
 		greenhouse.id = "greenhouse";
-		greenhouse.hazardClass = "normal";
 		greenhouse.volumeM3 = 400.0;
 		greenhouse.startingOxygenKg = 120.0;
 		greenhouse.startingNitrogenKg = 400.0;
@@ -168,7 +166,6 @@ namespace coupled_rig
 		greenhouse.maxPressureKPa = 200.0;
 		core::AtmosphereSettings pond;
 		pond.id = "pond";
-		pond.hazardClass = "normal";
 		pond.volumeM3 = 100.0;
 		pond.startingOxygenKg = 30.0;
 		pond.startingNitrogenKg = 100.0;

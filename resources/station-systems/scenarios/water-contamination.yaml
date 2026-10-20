@@ -17,7 +17,6 @@ stationSystems:
     capacity: 100
     startingQualified: 10
     startingUnqualified: 0
-    hazardClass: hazardous
     composition: {moisture: 0.99, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}
   - id: loop
     materialId: water
@@ -25,7 +24,6 @@ stationSystems:
     capacity: 100
     startingQualified: 0
     startingUnqualified: 0
-    hazardClass: hazardous
     composition: {moisture: 0.99, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}
   - id: cleared
     materialId: water
@@ -33,7 +31,6 @@ stationSystems:
     capacity: 100
     startingQualified: 0
     startingUnqualified: 0
-    hazardClass: normal
     composition: {moisture: 0.999, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}
   - id: concentrate
     materialId: water-concentrate
@@ -41,23 +38,22 @@ stationSystems:
     capacity: 100
     startingQualified: 0
     startingUnqualified: 0
-    hazardClass: hazardous
     composition: {moisture: 0.5, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}
-  - {id: media, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, hazardClass: hazardous}
-  - {id: N, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
-  - {id: P, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
-  - {id: K, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
-  - {id: minerals, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
-  - {id: food, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
-  - {id: urine, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
-  - {id: waste, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
-  - {id: hazN, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: hazardous}
-  - {id: hazP, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: hazardous}
-  - {id: hazK, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: hazardous}
-  - {id: hazMinerals, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: hazardous}
-  - {id: hazFood, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: hazardous, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
-  - {id: hazUrine, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: hazardous, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
-  - {id: hazWaste, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: hazardous, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
+  - {id: media, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0}
+  - {id: N, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0}
+  - {id: P, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0}
+  - {id: K, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0}
+  - {id: minerals, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0}
+  - {id: food, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
+  - {id: urine, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
+  - {id: waste, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
+  - {id: hazN, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0}
+  - {id: hazP, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0}
+  - {id: hazK, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0}
+  - {id: hazMinerals, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0}
+  - {id: hazFood, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
+  - {id: hazUrine, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
+  - {id: hazWaste, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
   transfers:
   - {id: ingress, sourceId: ingress, destinationId: loop, unit: kg, ratePerSecond: 0.1, priority: 1}
   solarArrays:
@@ -79,7 +75,6 @@ stationSystems:
   atmospheres:
   -
     id: normal
-    hazardClass: normal
     volumeM3: 100
     startingOxygenKg: 20
     startingNitrogenKg: 80
@@ -100,7 +95,6 @@ stationSystems:
     moistureAdditionPerOccupantKgPerS: 0
     leakRateKgPerS: 0
   - id: hazardous
-    hazardClass: hazardous
     volumeM3: 100
     startingOxygenKg: 20
     startingNitrogenKg: 80

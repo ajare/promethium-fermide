@@ -111,7 +111,6 @@ void appendStationWaterGasObservations(StationSystemsSettings const& settings,
 				d.quantity = StationPhysicalQuantity::MassRate; d.unit = StationCanonicalUnit::KilogramPerSecond;
 				d.materialId = k.relation == "CO2" || k.relation == "Captured CO2" ? "carbon-dioxide" : k.relation == "Hydrogen" ? "hydrogen" : k.relation == "Oxygen" ? "oxygen" : "water";
 				if (k.peerType == "Store") storeIdentity(o, k.peerId);
-				else { auto a = std::ranges::find(settings.atmospheres, k.peerId, &AtmosphereSettings::id); if (a != settings.atmospheres.end()) d.hazardClass = a->hazardClass; }
 			}
 			// Carbon equipment carries one validated hazard class throughout its
 			// process. Retain it on electrical/thermal endpoint accounts as well.

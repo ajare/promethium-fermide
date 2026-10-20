@@ -321,7 +321,7 @@ namespace
 				return settings;
 			};
 			core::AtmosphereSettings habitat;
-			habitat.id = "habitat"; habitat.hazardClass = "normal";
+			habitat.id = "habitat";
 			habitat.volumeM3 = 100.0;
 			habitat.startingOxygenKg = 20.0; habitat.startingNitrogenKg = 80.0;
 			habitat.startingTemperatureC = 20.0;
@@ -415,7 +415,7 @@ namespace
 				return settings;
 			};
 			core::AtmosphereSettings habitat;
-			habitat.id = "habitat"; habitat.hazardClass = "normal";
+			habitat.id = "habitat";
 			habitat.volumeM3 = 100.0;
 			habitat.startingOxygenKg = 40.0; habitat.startingNitrogenKg = 80.0;
 			habitat.startingCarbonDioxideKg = 5.0; habitat.startingWaterVapourKg = 1.0;
@@ -740,7 +740,7 @@ namespace
 				return store;
 			};
 			core::AtmosphereSettings habitat;
-			habitat.id = "habitat"; habitat.hazardClass = "normal";
+			habitat.id = "habitat";
 			habitat.volumeM3 = 100.0;
 			habitat.startingOxygenKg = 20.0; habitat.startingNitrogenKg = 80.0;
 			habitat.startingTemperatureC = 20.0;
@@ -909,7 +909,7 @@ namespace
 				return settings;
 			};
 			core::AtmosphereSettings habitat;
-			habitat.id = "habitat"; habitat.hazardClass = "normal";
+			habitat.id = "habitat";
 			habitat.volumeM3 = 100.0;
 			habitat.startingOxygenKg = 20.0; habitat.startingNitrogenKg = 80.0;
 			habitat.startingTemperatureC = 20.0;
@@ -1696,7 +1696,7 @@ namespace
 				return store;
 			};
 			core::AtmosphereSettings habitat;
-			habitat.id = "habitat"; habitat.hazardClass = "normal";
+			habitat.id = "habitat";
 			habitat.volumeM3 = 100.0;
 			habitat.startingOxygenKg = 20.0; habitat.startingNitrogenKg = 80.0;
 			habitat.startingTemperatureC = 20.0;

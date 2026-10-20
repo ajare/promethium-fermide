@@ -11,14 +11,12 @@ void appendStationCropObservations(StationSystemsSettings const& settings,
 	using S = StationCropPopulationSnapshot;
 	auto const stores = stationStoreObservations(settings);
 	for (auto const& e : settings.cropPopulations) {
-		auto air = std::ranges::find(settings.atmospheres, e.atmosphereId, &AtmosphereSettings::id);
 		auto add = [&](std::string role, R direction, std::string material, double S::* member,
 			double S::* request = nullptr, bool power = false, bool window = false) -> StationExchangeObservation& {
 			StationExchangeObservation o;
 			auto& d = o.metric;
 			d.id = "exchange/Crops/" + e.id + "/" + role;
 			d.equipmentType = "Crops"; d.instanceId = e.id; d.exchangeRole = std::move(role); d.role = direction;
-			if (air != settings.atmospheres.end()) d.hazardClass = air->hazardClass;
 			if (!material.empty()) d.materialId = std::move(material);
 			if (!power) { d.quantity = StationPhysicalQuantity::MassRate; d.unit = StationCanonicalUnit::KilogramPerSecond; }
 			if (request) d.requestedSemantics = StationRequestedSemantics::Demand;

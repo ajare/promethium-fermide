@@ -7,13 +7,13 @@ inline core::StationSystemsSettings scheduledObservationFixture(int treatmentMod
 {
 	core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 0.2f;
 	auto stock = [&](std::string id, std::string unit, double capacity, double qualified, double held,
-		std::string material, std::string hazard = "normal") {
+		std::string material) {
 		core::ResourceStoreSettings x; x.id = id; x.unit = unit; x.capacity = capacity;
-		x.startingQualified = qualified; x.startingUnqualified = held; x.materialId = material; x.hazardClass = hazard;
+		x.startingQualified = qualified; x.startingUnqualified = held; x.materialId = material;
 		s.stores.push_back(x);
 	};
 	stock("arrival", "g", 5, 0, 0, "water");
-	stock("hazard-waste", "kg", 100, 2, 4, "residue", "hazardous");
+	stock("hazard-waste", "kg", 100, 2, 4, "residue");
 	stock("parts", "kg", 100, 2.5, 0, "parts");
 	stock("tools", "kg", 100, 1, 0, "tool");
 	stock("spent", "kg", 100, 0, 0, "parts");
@@ -31,10 +31,10 @@ inline core::StationSystemsSettings scheduledObservationFixture(int treatmentMod
 	job.requirements = {{"tools", 1, false}, {"parts", 1, true}}; job.wasteStoreId = "spent";
 	s.maintenanceJobs = {job};
 	if (treatmentMode) {
-		stock("raw", "kg", 100, 10, 0, "water", "hazardous");
-		stock("treated", "kg", 100, 0, 0, "water", "hazardous");
-		stock("concentrate", "kg", 100, 0, 0, "brine", "hazardous");
-		stock("kit", "kg", 100, 10, 0, "kit", "hazardous");
+		stock("raw", "kg", 100, 10, 0, "water");
+		stock("treated", "kg", 100, 0, 0, "water");
+		stock("concentrate", "kg", 100, 0, 0, "brine");
+		stock("kit", "kg", 100, 10, 0, "kit");
 		core::SolarArraySettings sun; sun.id = "sun"; sun.capacityKW = treatmentMode == 2 ? 100 : 1; s.solarArrays = {sun};
 		core::WaterTreatmentSettings t; t.id = "treatment"; t.hazardClass = "hazardous";
 		t.sourceStoreId = "raw"; t.treatedStoreId = "treated"; t.concentrateStoreId = "concentrate";

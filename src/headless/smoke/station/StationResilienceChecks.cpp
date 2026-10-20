@@ -644,22 +644,19 @@ void protectedServices(smoke::Context const&)
 		composition.energyKJPerKgDry = 1700.0;
 		return composition;
 	};
-	auto massStore = [](std::string id, double capacity, double starting,
-		std::string hazard = "normal")
+	auto massStore = [](std::string id, double capacity, double starting)
 	{
 		core::ResourceStoreSettings settings;
 		settings.id = std::move(id);
 		settings.unit = "kg";
 		settings.capacity = capacity;
 		settings.startingQualified = starting;
-		settings.hazardClass = std::move(hazard);
 		return settings;
 	};
 	auto habitat = []()
 	{
 		core::AtmosphereSettings settings;
 		settings.id = "habitat";
-		settings.hazardClass = "normal";
 		settings.volumeM3 = 100.0;
 		settings.startingOxygenKg = 40.0;
 		settings.startingNitrogenKg = 80.0;
@@ -1046,17 +1043,16 @@ void protectedServices(smoke::Context const&)
 		feed.unit = "kg";
 		feed.capacity = 100.0;
 		feed.startingQualified = 50.0;
-		feed.hazardClass = "hazardous";
 		feed.composition = feedComposition;
 		core::StationSystemsSettings settings;
 		settings.stores = { feed,
-			massStore("h_oxygen", 100.0, 50.0, "hazardous"),
-			massStore("h_water", 100.0, 50.0, "hazardous"),
-			massStore("h_media", 100.0, 50.0, "hazardous"),
-			massStore("h_nutrients", 100.0, 0.0, "hazardous"),
-			massStore("h_recoveredWater", 100.0, 0.0, "hazardous"),
-			massStore("h_co2", 100.0, 0.0, "hazardous"),
-			massStore("h_residue", 100.0, 0.0, "hazardous"),
+			massStore("h_oxygen", 100.0, 50.0),
+			massStore("h_water", 100.0, 50.0),
+			massStore("h_media", 100.0, 50.0),
+			massStore("h_nutrients", 100.0, 0.0),
+			massStore("h_recoveredWater", 100.0, 0.0),
+			massStore("h_co2", 100.0, 0.0),
+			massStore("h_residue", 100.0, 0.0),
 			massStore("ballast", 10.0, 1.0) };
 		settings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
 		auto critical = hazardousLoop("hazLoop", 1.0, 0.0, 20.0);

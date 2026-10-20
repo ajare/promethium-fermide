@@ -19,7 +19,6 @@ stationSystems:
     startingQualified: 10.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
     composition:
       moisture: 0.95
       nutrientNitrogen: 0.3
@@ -34,28 +33,24 @@ stationSystems:
     startingQualified: 10.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: fresh
     unit: kg
     capacity: 100.0
     startingQualified: 10.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: digesterMedia
     unit: kg
     capacity: 100.0
     startingQualified: 10.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: nutrients
     unit: kg
     capacity: 100.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: rawWater
     materialId: water
     composition: {moisture: 0.999, nutrientNitrogen: 1.0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}
@@ -64,66 +59,56 @@ stationSystems:
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: co2
     unit: kg
     capacity: 100.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: residue
     unit: kg
     capacity: 100.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: bioStock
     unit: kg
     capacity: 100.0
     startingQualified: 0.0
     startingUnqualified: 0.0
     protectedReserve: 0.0
-    hazardClass: normal
   - id: N
     unit: kg
     capacity: 100
     startingQualified: 10
     startingUnqualified: 0
-    hazardClass: normal
     composition: {moisture: 0, nutrientNitrogen: 1, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}
   - id: P
     unit: kg
     capacity: 100
     startingQualified: 10
     startingUnqualified: 0
-    hazardClass: normal
     composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 1, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}
   - id: K
     unit: kg
     capacity: 100
     startingQualified: 10
     startingUnqualified: 0
-    hazardClass: normal
     composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 1, otherMinerals: 0, energyKJPerKgDry: 0}
   - id: minerals
     unit: kg
     capacity: 100
     startingQualified: 10
     startingUnqualified: 0
-    hazardClass: normal
     composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 1, energyKJPerKgDry: 0}
   - id: food
     unit: kg
     capacity: 100
     startingQualified: 0
     startingUnqualified: 0
-    hazardClass: normal
     composition: {moisture: 0, nutrientNitrogen: 0.5, atmosphericNitrogen: 0, phosphorus: 0.1, potassium: 0.1, otherMinerals: 0.1, energyKJPerKgDry: 3600}
   atmospheres:
   - id: greenhouse
-    hazardClass: normal
     volumeM3: 100
     startingOxygenKg: 40
     startingNitrogenKg: 80

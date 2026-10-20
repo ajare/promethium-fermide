@@ -97,7 +97,6 @@ namespace core
 				serializer.writeDouble("startingQualified", store.startingQualified);
 				serializer.writeDouble("startingUnqualified", store.startingUnqualified);
 				serializer.writeDouble("protectedReserve", store.protectedReserve);
-				serializer.writeString("hazardClass", store.hazardClass);
 				if (store.composition)
 				{
 					// Authored composition only; constituent ledgers and
@@ -391,7 +390,6 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", atmosphere.id);
-				serializer.writeString("hazardClass", atmosphere.hazardClass);
 				serializer.writeDouble("volumeM3", atmosphere.volumeM3);
 				serializer.writeDouble("startingOxygenKg", atmosphere.startingOxygenKg);
 				serializer.writeDouble("startingNitrogenKg", atmosphere.startingNitrogenKg);
@@ -1100,12 +1098,6 @@ namespace core
 						"Station protected reserves require World schema 67");
 					store.protectedReserve = serializer.readDouble("protectedReserve");
 				}
-				if (serializer.hasField("hazardClass"))
-				{
-					if (version < 88) throw SerializationException(
-						"Station store hazard classes require World schema 88");
-					store.hazardClass = serializer.readString("hazardClass");
-				}
 				if (serializer.hasField("composition"))
 				{
 					if (version < 68) throw SerializationException(
@@ -1444,7 +1436,6 @@ namespace core
 				serializer.beginMap("");
 				AtmosphereSettings atmosphere;
 				atmosphere.id = serializer.readString("id");
-				atmosphere.hazardClass = serializer.readString("hazardClass");
 				atmosphere.volumeM3 = serializer.readDouble("volumeM3");
 				atmosphere.startingOxygenKg = serializer.readDouble("startingOxygenKg");
 				atmosphere.startingNitrogenKg = serializer.readDouble("startingNitrogenKg");

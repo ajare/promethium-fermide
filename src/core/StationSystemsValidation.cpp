@@ -159,11 +159,6 @@ using namespace station_detail;
 		if (atmosphere.id.size() > MaxStationStoreIdLength)
 			return refuse("Station atmosphere id exceeds "
 				+ std::to_string(MaxStationStoreIdLength) + " characters");
-		if (std::find(StationAtmosphereHazardClasses.begin(),
-			StationAtmosphereHazardClasses.end(),
-			atmosphere.hazardClass) == StationAtmosphereHazardClasses.end())
-			return refuse(where + " has unknown atmosphere hazard class '" + atmosphere.hazardClass
-				+ "'; declared classes are: normal, hazardous");
 		if (!std::isfinite(atmosphere.volumeM3) || atmosphere.volumeM3 <= 0.0)
 			return refuse(where + " volume must be finite and positive");
 		auto const masses = {atmosphere.startingOxygenKg, atmosphere.startingNitrogenKg,
@@ -534,24 +529,13 @@ using namespace station_detail;
 			return refuse(oxygenDestinationError);
 		if (!allowIncomplete && electrolyzer.oxygenStoreId.empty() && electrolyzer.atmosphereId.empty()
 			&& !missing(oxygenDestinationError)) return false;
-		// The compartment boundary is checked before the stores so a
-		// hazardous cell pointed at a normal compartment names the
-		// compartment as the refusal reason (#412): the atmosphere it
-		// delivers into is the containment boundary, not the feed store.
 		if (!electrolyzer.atmosphereId.empty())
 		{
 			auto const compartment = std::find_if(settings.atmospheres.begin(),
 				settings.atmospheres.end(), [&](AtmosphereSettings const& atmosphere)
 				{ return atmosphere.id == electrolyzer.atmosphereId; });
 			if (compartment == settings.atmospheres.end())
-			{
-				if (!missing(where + " delivers oxygen to unknown atmosphere compartment '" + electrolyzer.atmosphereId + "'")) return false;
-			}
-			else if (compartment->hazardClass != electrolyzer.hazardClass)
-				return refuse(where + " hazard class '" + electrolyzer.hazardClass
-					+ "' does not match compartment '" + compartment->id
-					+ "' hazard class '" + compartment->hazardClass
-					+ "'; oxygen may only be delivered to a compartment of the cell's own class");
+				return missing(where + " delivers oxygen to unknown atmosphere compartment '" + electrolyzer.atmosphereId + "'");
 		}
 		// Aliased stream roles are refused (#585): the two products are
 		// chemically distinct, and the tick sizes each product against
@@ -641,11 +625,6 @@ using namespace station_detail;
 				{ return atmosphere.id == capture.atmosphereId; });
 			if (compartment == settings.atmospheres.end())
 				return missing(where + " scrubs unknown atmosphere compartment '" + capture.atmosphereId + "'");
-			if (compartment->hazardClass != capture.hazardClass)
-				return refuse(where + " hazard class '" + capture.hazardClass
-					+ "' does not match compartment '" + compartment->id
-					+ "' hazard class '" + compartment->hazardClass
-					+ "'; a hazardous atmosphere's carbon stays on the hazardous side of the capture chain");
 		}
 
 		if (!declareGasStore(capture.captureStoreId, "capture", where, false))
@@ -876,11 +855,6 @@ using namespace station_detail;
 				return refuse(where + " protected reserve must be finite and non-negative");
 			if (store.protectedReserve > store.startingQualified)
 				return refuse(where + " protected reserve exceeds starting usable inventory");
-			if (std::find(StationResourceHazardClasses.begin(),
-				StationResourceHazardClasses.end(),
-				store.hazardClass) == StationResourceHazardClasses.end())
-				return refuse(where + " has unknown hazard class '" + store.hazardClass
-					+ "'; declared classes are: normal, hazardous");
 			if (store.composition)
 			{
 				auto const& composition = *store.composition;
@@ -1592,10 +1566,8 @@ using namespace station_detail;
 		// requirement must name an existing store with a positive finite
 		// quantity, and the consumed stream must land in a declared waste
 		// store that can actually hold it: same unit (cross-unit movement
-		// is conversion, not maintenance), same declared composition (a
-		// compound boundary is never crossed silently) and the same hazard
-		// class (containment is enforced at configuration, never policed
-		// at runtime). A reusable tool may come from anywhere - it is
+		// is conversion, not maintenance) and same declared composition (a
+		// compound boundary is never crossed silently). A reusable tool may come from anywhere - it is
 		// returned, not moved - but a consumed requirement may not draw
 		// from the waste store itself, and a waste store with nothing to
 		// fill it is refused rather than carried as dead configuration.
@@ -1645,9 +1617,8 @@ using namespace station_detail;
 		// finite owned gas inventory, an authored effective thermal
 		// capacity, an optional heat-only reservoir coupling and an
 		// authored occupancy/load assignment. Compartments are isolated
-		// by construction - no process moves gas between them - so the
-		// hazard class is a segregation label and every pathway that can
-		// remove gas (leak, airlock cycle) must book its mass.
+		// by construction - no process moves gas between them - so every
+		// pathway that can remove gas (leak, airlock cycle) must book its mass.
 		if (settings.atmospheres.size() > MaxStationAtmospheres)
 			return refuse("Station atmospheres are limited to "
 				+ std::to_string(MaxStationAtmospheres) + " entries");
@@ -1739,13 +1710,11 @@ using namespace station_detail;
 		// one compartment atmosphere, never both and never neither. All gas
 		// and water stores in the chain are plain mass stores: a compound
 		// store would create dry constituents out of pure water or pure
-		// gas. The delivery compartment must still carry the cell's own
-		// class, and the heat sink must share the cell's thermal service
+		// gas. The heat sink must share the cell's thermal service
 		// class, because spare capacity in one class is
 		// never usable by another. The stores the cell touches are no
 		// longer bound to the cell's class (#751). A CO2 capture machine
-		// scrubs one compartment of its own hazard class into a finite
-		// capture store;
+		// scrubs one compartment into a finite capture store;
 		// if it declares a consumable demand it must name a consumable
 		// store, because a process cannot spend media it has no way to
 		// hold.

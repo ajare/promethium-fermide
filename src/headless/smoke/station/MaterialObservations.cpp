@@ -35,7 +35,6 @@ namespace
 			store("grams", "g", 10000, 1000, 1000, "water"), store("water", "kg", 100, 3, 1, "oxygen"),
 			store("hazard", "kg", 100, 2, 1, "water"), store("mystery", "kg", 100, 7, 2),
 			store("litres", "L", 10000, 1000, 500, "water")};
-		s.stores[4].hazardClass = "hazardous";
 		s.stores[2].composition = core::ResourceCompositionSettings{0.25, 0.1};
 		s.stores[5].composition = core::ResourceCompositionSettings{0.1, 1};
 		s.stores[0].protectedReserve = 2;
@@ -125,12 +124,6 @@ namespace
 		auto const requestGap = core::queryStationChart(chart(world, transferId), missingRequest);
 		require(std::isfinite(requestGap.series[0].values[0]) && std::isnan(requestGap.series[1].values[0]),
 			"missing request contaminated actual or became zero");
-		// Cross-class conversion endpoints are legal (#750): the crossing
-		// the class boundary once refused now configures with exchange
-		// views installed.
-		auto crossClass = s; crossClass.stores[0].hazardClass = "hazardous";
-		require(world.configureStationSystems(crossClass, true),
-			"cross-class conversion refused with exchange views installed");
 		// Catalogue grouping must not conflate equal role labels and units of different materials.
 		auto descriptors = std::vector<core::StationMetricDescriptor>{};
 		for (auto const& h : histories) if (h.descriptor.equipmentType == "Resource conversion") descriptors.push_back(h.descriptor);
@@ -244,7 +237,7 @@ namespace
 
 	void algaeExchangeObservations(smoke::Context const&)
 	{
-		for (int scenario = 0; scenario < 13; ++scenario) {
+		for (int scenario = 0; scenario < 12; ++scenario) {
 			auto s = smoke::station::algaeObservationFixture(scenario < 4 ? scenario : (scenario == 8 ? 1 : 0));
 			if (scenario == 4) s.stores[0].startingQualified = 0;
 			if (scenario == 5) s.algaeCultures[0].illuminationProfile.constantLevel = 0;
@@ -252,12 +245,8 @@ namespace
 			if (scenario == 7) s.solarArrays[0].capacityKW = 0;
 			if (scenario == 8) s.stores[5].capacity = 1e-6; // Food surplus cascades to recovery.
 			if (scenario == 9) s.algaeCultures.push_back(s.algaeCultures[0]), s.algaeCultures.back().id = "second";
-			if (scenario == 10) {
-				s.atmospheres[0].hazardClass = "hazardous";
-				for (auto& store : s.stores) store.hazardClass = "hazardous";
-			}
-			if (scenario == 11) s.solarArrays[0].capacityKW = 1.9; // Partial light, not a zero-growth case.
-			if (scenario == 12) s.stores[1].startingQualified = 0;
+			if (scenario == 10) s.solarArrays[0].capacityKW = 1.9; // Partial light, not a zero-growth case.
+			if (scenario == 11) s.stores[1].startingQualified = 0;
 			core::World world("Algae exchanges", 2, 2); world.pauseSimulation(); world.finishBuild();
 			std::string why; if (!world.configureStationSystems(s, true, &why)) throw std::runtime_error(why);
 			run(world, 300);
@@ -267,7 +256,6 @@ namespace
 			size_t measured = 0;
 			for (auto const& o : core::stationExchangeObservations(s)) if (o.metric.equipmentType == "Algae") {
 				++measured;
-				require(o.metric.hazardClass == s.atmospheres[0].hazardClass, "algae hazard grouping lost");
 				auto h = std::ranges::find(history, o.metric.id, [](auto const& h) { return h.descriptor.id; });
 				require(h != history.end() && !h->samples.empty(), "algae metric not recorded while hidden");
 				auto v = o.read(snap); require(v.actual.has_value(), "algae authority missing");
@@ -332,9 +320,8 @@ namespace
 			if (scenario == 2 || scenario == 3) require(p.dead && p.respirationKg > 0 && (scenario == 2 ? p.deadResidueToWasteKg : p.deadResidueLostKg) > 0, "algae mortality not exercised");
 			if (scenario >= 4 && scenario <= 7) close(p.growthKg, 0);
 			if (scenario == 8) require(p.foodSurplusToRecoveryKg > 0 && p.recoveryProducedKg > 0, "algae harvest cascade not exercised");
-			if (scenario == 10) require(p.growthKg > 0, "hazardous algae growth not exercised");
-			if (scenario == 11) require(p.growthKg > 0 && p.lastLightSuppliedKW < p.lastLightRequestedKW, "partial algae service not exercised");
-			if (scenario == 12) close(p.growthKg, 0);
+			if (scenario == 10) require(p.growthKg > 0 && p.lastLightSuppliedKW < p.lastLightRequestedKW, "partial algae service not exercised");
+			if (scenario == 11) close(p.growthKg, 0);
 			require(world.getStationSystemsSnapshot() == snap, "algae viewing changed World");
 			world.resetSimulation(); run(world, 300); require(world.getStationSystemsSnapshot() == snap, "algae observation replay drift");
 		}
@@ -477,7 +464,6 @@ namespace
 		s = smoke::station::microbialObservationFixture(); auto second = s.microbialProcessors[0]; second.id = "second"; s.microbialProcessors.push_back(second);
 		apply(); run(world, 12); verify(); snap = world.getStationSystemsSnapshot();
 		check("Organic feed", (snap.microbialProcessors[0].lastFeedConsumedKg + snap.microbialProcessors[1].lastFeedConsumedKg) / dt);
-		for (auto& stock : s.stores) stock.hazardClass = "hazardous";
 		for (auto& processor : s.microbialProcessors) processor.hazardClass = "hazardous";
 		apply(); run(world, 12); verify();
 		for (auto const& h : world.getStationSystemsMetricHistory()) if (h.descriptor.equipmentType == "Microbial processor")
@@ -491,7 +477,7 @@ namespace
 			&core::MicrobialProcessorSettings::recoveredWaterStoreId, &core::MicrobialProcessorSettings::co2StoreId,
 			&core::MicrobialProcessorSettings::residueStoreId}) hazardous.*member += "-hazardous";
 		auto hazardousStores = s.stores;
-		for (auto& stock : hazardousStores) { stock.id += "-hazardous"; stock.hazardClass = "hazardous"; s.stores.push_back(stock); }
+		for (auto& stock : hazardousStores) { stock.id += "-hazardous"; s.stores.push_back(stock); }
 		s.microbialProcessors.push_back(hazardous); apply(); run(world, 12); verify(); size_t views = 0;
 		for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate"
 			&& def.id.starts_with("exchange/Microbial processor/") && def.id.find("/Organic feed/") != std::string::npos) {
@@ -592,11 +578,7 @@ namespace
 			}
 		}
 		require(world.getStationSystemsSnapshot() == before && world.getStationSystemsObservationRevision() == revision, "carbon query mutated World");
-		auto crossClass = s; crossClass.stores[0].hazardClass = "hazardous";
-		require(world.configureStationSystems(crossClass, true), "carbon observation refused legal cross-class wiring");
-		run(world, 12); verify();
 		s = smoke::station::carbonObservationFixture();
-		for (auto& stock : s.stores) stock.hazardClass = "hazardous";
 		s.sabatierReactors[0].hazardClass = s.methaneProcessors[0].hazardClass = s.fuelCells[0].hazardClass = "hazardous";
 		apply(); run(world, 12); verify();
 		for (auto const& h : world.getStationSystemsMetricHistory()) {
@@ -693,8 +675,7 @@ namespace
 		// Hazardous treatment and non-kg consumables retain explicit identity and
 		// canonical rates. Oxygen may also go directly to atmosphere, not a store.
 		s = smoke::station::waterGasObservationFixture();
-		for (auto& stock : s.stores) stock.hazardClass = "hazardous";
-		s.atmospheres[0].hazardClass = "hazardous"; s.coolantLoops[0].hazardClass = "hazardous";
+		s.coolantLoops[0].hazardClass = "hazardous";
 		s.waterCollectors[0].hazardClass = "hazardous"; s.waterTreatments[0].hazardClass = "hazardous";
 		s.electrolyzers[0].hazardClass = "hazardous"; s.co2Captures[0].hazardClass = "hazardous";
 
@@ -729,12 +710,12 @@ namespace
 			store("urine", "kg", 100, 0, 0, "urine"), store("waste", "kg", 100, 0, 0, "organic-waste")};
 		s.stores[0].composition = food; s.stores[1].composition = water;
 		s.stores[2].composition = urine; s.stores[3].composition = waste;
-		core::AtmosphereSettings a; a.id = "habitat"; a.hazardClass = "normal"; a.volumeM3 = 100;
+		core::AtmosphereSettings a; a.id = "habitat"; a.volumeM3 = 100;
 		a.startingOxygenKg = 20; a.startingNitrogenKg = 80; a.thermalCapacityKJPerK = 10000;
 		a.minPressureKPa = 1; a.maxPressureKPa = 200; a.leakRateKgPerS = 0.01;
 		a.occupants = 1; a.oxygenUsePerOccupantKgPerS = 0.001; a.co2ProductionPerOccupantKgPerS = 0.001;
 		s.atmospheres = {a};
-		auto hazardous = a; hazardous.id = "hazard"; hazardous.hazardClass = "hazardous"; s.atmospheres.push_back(hazardous);
+		auto hazardous = a; hazardous.id = "hazard"; s.atmospheres.push_back(hazardous);
 		core::CrewSettings c; c.id = "crew"; c.atmosphereId = a.id; c.crewCount = 2; c.activityProfile.constantLevel = 1;
 		c.foodStoreId = "food"; c.waterStoreId = "water"; c.urineStoreId = "urine"; c.organicWasteStoreId = "waste";
 		c.foodPerCrewPerS = 1; c.waterPerCrewPerS = 0.002; c.oxygenPerCrewKgPerS = 0.001;
@@ -1144,13 +1125,13 @@ namespace
 		core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 0.1f;
 		s.stores = {store("raw", "kg", 100, 5, 1, "water")};
 		core::AtmosphereSettings air;
-		air.id = "shared-name"; air.hazardClass = "normal"; air.volumeM3 = 100;
+		air.id = "shared-name"; air.volumeM3 = 100;
 		air.startingOxygenKg = 20; air.startingNitrogenKg = 80;
 		air.startingCarbonDioxideKg = 0.5; air.startingWaterVapourKg = 2;
 		air.startingTemperatureC = 25; air.thermalCapacityKJPerK = 10000;
 		air.minPressureKPa = 1; air.maxPressureKPa = 200;
 		s.atmospheres = {air};
-		air.id = "hazard"; air.hazardClass = "hazardous"; air.startingWaterVapourKg = 1;
+		air.id = "hazard"; air.startingWaterVapourKg = 1;
 		s.atmospheres.push_back(air);
 		core::ThermalReservoirSettings sink;
 		sink.id = "sink"; sink.thermalClass = "moderate"; sink.heatCapacityKJPerK = 10000;
@@ -1226,7 +1207,7 @@ namespace
 			store("hazard", "kg", 100, 1, 1, "organic-waste"), store("unknown", "kg", 100, 3, 0)};
 		core::ResourceCompositionSettings composition{0.25, 0.1, 0.2, 0.1, 0.1, 0.1, 3600};
 		for (size_t i = 0; i < 4; ++i) s.stores[i].composition = composition;
-		s.stores[3].hazardClass = "hazardous"; s.stores[0].protectedReserve = 2;
+		s.stores[0].protectedReserve = 2;
 		s.transfers = {{"transfer", "food", "buffer", "kg", 1}};
 		// Unqualified waste is retained but not ejectable, so ejection can
 		// remove only the qualified half. The loss ledger is not extra stock.
@@ -1311,7 +1292,7 @@ namespace
 				s.stores[i].composition = pure;
 			}
 			core::AtmosphereSettings air;
-			air.id = "habitat"; air.hazardClass = "normal"; air.volumeM3 = 100;
+			air.id = "habitat"; air.volumeM3 = 100;
 			air.startingOxygenKg = 40; air.startingNitrogenKg = 80; air.startingCarbonDioxideKg = 5;
 			air.startingWaterVapourKg = 1; air.startingTemperatureC = 22;
 			air.thermalCapacityKJPerK = 20000; air.minPressureKPa = 1; air.maxPressureKPa = 200;

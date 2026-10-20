@@ -22,7 +22,6 @@ stationSystems:
     capacity: 1
     startingQualified: 1
     startingUnqualified: 0
-    hazardClass: normal
     composition: {moisture: 0.999, nutrientNitrogen: 0.2, atmosphericNitrogen: 0, phosphorus: 0.1, potassium: 0.1, otherMinerals: 0.6, energyKJPerKgDry: 0}
   - id: makeup
     materialId: water
@@ -30,7 +29,6 @@ stationSystems:
     capacity: 100
     startingQualified: 100
     startingUnqualified: 0
-    hazardClass: normal
     composition: {moisture: 0.999, nutrientNitrogen: 0.2, atmosphericNitrogen: 0, phosphorus: 0.1, potassium: 0.1, otherMinerals: 0.6, energyKJPerKgDry: 0}
   - id: purge
     materialId: water
@@ -38,14 +36,13 @@ stationSystems:
     capacity: 100
     startingQualified: 0
     startingUnqualified: 0
-    hazardClass: normal
     composition: {moisture: 0.999, nutrientNitrogen: 0.2, atmosphericNitrogen: 0, phosphorus: 0.1, potassium: 0.1, otherMinerals: 0.6, energyKJPerKgDry: 0}
-  - {id: N, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, hazardClass: normal, composition: {moisture: 0, nutrientNitrogen: 1, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}}
-  - {id: P, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, hazardClass: normal, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 1, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}}
-  - {id: K, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, hazardClass: normal, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 1, otherMinerals: 0, energyKJPerKgDry: 0}}
-  - {id: minerals, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, hazardClass: normal, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 1, energyKJPerKgDry: 0}}
-  - {id: food, unit: kg, capacity: 10, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
-  - {id: waste, unit: kg, capacity: 10, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
+  - {id: N, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, composition: {moisture: 0, nutrientNitrogen: 1, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}}
+  - {id: P, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 1, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}}
+  - {id: K, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 1, otherMinerals: 0, energyKJPerKgDry: 0}}
+  - {id: minerals, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 1, energyKJPerKgDry: 0}}
+  - {id: food, unit: kg, capacity: 10, startingQualified: 0, startingUnqualified: 0}
+  - {id: waste, unit: kg, capacity: 10, startingQualified: 0, startingUnqualified: 0}
   transfers:
   - {id: purge, sourceId: loop, destinationId: purge, unit: kg, ratePerSecond: 0.02, priority: 1}
   - {id: makeup, sourceId: makeup, destinationId: loop, unit: kg, ratePerSecond: 1, priority: 0}
@@ -55,7 +52,6 @@ stationSystems:
     illumination: {constantLevel: 1, periodSeconds: 0, segments: []}
   atmospheres:
   - id: greenhouse
-    hazardClass: normal
     volumeM3: 1000000
     startingOxygenKg: 200000
     startingNitrogenKg: 800000

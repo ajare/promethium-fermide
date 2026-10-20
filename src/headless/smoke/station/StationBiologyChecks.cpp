@@ -123,7 +123,6 @@ namespace
 		{
 			core::AtmosphereSettings settings;
 			settings.id = "habitat";
-			settings.hazardClass = "normal";
 			settings.volumeM3 = 100.0;
 			settings.startingOxygenKg = 40.0;
 			settings.startingNitrogenKg = 80.0;
@@ -856,7 +855,6 @@ namespace
 		{
 			core::AtmosphereSettings settings;
 			settings.id = "habitat";
-			settings.hazardClass = "normal";
 			settings.volumeM3 = 100.0;
 			settings.startingOxygenKg = 40.0;
 			settings.startingNitrogenKg = 80.0;
@@ -1076,29 +1074,6 @@ namespace
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("id is duplicated") != std::string::npos,
 				"duplicate crop population ids were accepted");
-			// Cross-class biology wiring is accepted (#751): the reviewed
-			// bypass - hazardous irrigation water feeding a normal-class
-			// canopy whose food and waste destinations are normal - and
-			// hazardous harvest destinations for a normal population all
-			// validate; the class no longer reserves a store for a process.
-			settings.cropPopulations = { crop() };
-			settings.stores = fullStores();
-			settings.stores[0].hazardClass = "hazardous";
-			require(core::validateStationSystemsSettings(settings, diagnostic),
-				("a normal canopy irrigated with hazardous water was refused: " + diagnostic).c_str());
-			settings.cropPopulations = { crop() };
-			settings.stores = fullStores();
-			settings.stores.push_back(cropStore("cropFood", 10.0, 0.0));
-			settings.stores.push_back(cropStore("cropWaste", 10.0, 0.0));
-			settings.stores[settings.stores.size() - 2].hazardClass = "hazardous";
-			settings.cropPopulations[0].harvestTriggerKg = 10.0;
-			settings.cropPopulations[0].foodStoreId = "cropFood";
-			settings.cropPopulations[0].wasteStoreId = "cropWaste";
-			require(core::validateStationSystemsSettings(settings, diagnostic),
-				("a normal canopy harvesting into a hazardous food store was refused: " + diagnostic).c_str());
-			settings.stores.back().hazardClass = "hazardous";
-			require(core::validateStationSystemsSettings(settings, diagnostic),
-				("a normal canopy harvesting into hazardous food and waste stores was refused: " + diagnostic).c_str());
 		}
 		// #581 World seam: an overflowed derived capacity is refused by
 		// configureStationSystems before any runtime is built, the World
@@ -1499,7 +1474,6 @@ namespace
 		{
 			core::AtmosphereSettings settings;
 			settings.id = "habitat";
-			settings.hazardClass = "normal";
 			settings.volumeM3 = 100.0;
 			settings.startingOxygenKg = 40.0;
 			settings.startingNitrogenKg = 80.0;
@@ -2026,7 +2000,6 @@ namespace
 		{
 			core::AtmosphereSettings settings;
 			settings.id = "habitat";
-			settings.hazardClass = "normal";
 			settings.volumeM3 = 100.0;
 			settings.startingOxygenKg = 40.0;
 			settings.startingNitrogenKg = 80.0;
@@ -2263,29 +2236,6 @@ namespace
 			settings.stores = fullStores();
 			require(core::validateStationSystemsSettings(settings, diagnostic),
 				"a harvest-disabled algae culture was refused");
-			// Cross-class biology wiring is accepted (#751): the culture
-			// water and every harvest partition destination may carry any
-			// hazard class; the class no longer reserves a store.
-			settings.algaeCultures = { culture() };
-			settings.stores = fullStores();
-			settings.stores[0].hazardClass = "hazardous";
-			require(core::validateStationSystemsSettings(settings, diagnostic),
-				("a normal culture running on hazardous makeup water was refused: " + diagnostic).c_str());
-			settings.algaeCultures = { culture() };
-			settings.stores = fullStores();
-			settings.stores[5].hazardClass = "hazardous";
-			require(core::validateStationSystemsSettings(settings, diagnostic),
-				("a normal culture harvesting into a hazardous food store was refused: " + diagnostic).c_str());
-			settings.algaeCultures = { culture() };
-			settings.stores = fullStores();
-			settings.stores[6].hazardClass = "hazardous";
-			require(core::validateStationSystemsSettings(settings, diagnostic),
-				("a normal culture harvesting into a hazardous recovery store was refused: " + diagnostic).c_str());
-			settings.algaeCultures = { culture() };
-			settings.stores = fullStores();
-			settings.stores[7].hazardClass = "hazardous";
-			require(core::validateStationSystemsSettings(settings, diagnostic),
-				("a normal culture harvesting into a hazardous waste store was refused: " + diagnostic).c_str());
 		}
 		// Basic three-way harvest: the culture crosses its trigger, real
 		// living material is removed, and the declared food/recovery/waste
@@ -2838,24 +2788,22 @@ namespace
 				if (entry.id == id) return entry;
 			return core::StationSystemsStoreSnapshot{};
 		};
-		auto store = [](std::string const& id, std::string const& hazard,
+		auto store = [](std::string const& id,
 			double capacity, double starting,
 			std::optional<core::ResourceCompositionSettings> composition = std::nullopt)
 		{
 			core::ResourceStoreSettings settings;
 			settings.id = id;
 			settings.unit = "kg";
-			settings.hazardClass = hazard;
 			settings.capacity = capacity;
 			settings.startingQualified = starting;
 			settings.composition = std::move(composition);
 			return settings;
 		};
-		auto compartment = [](std::string const& id, std::string const& hazard)
+		auto compartment = [](std::string const& id)
 		{
 			core::AtmosphereSettings settings;
 			settings.id = id;
-			settings.hazardClass = hazard;
 			settings.volumeM3 = 100.0;
 			settings.startingOxygenKg = 40.0;
 			settings.startingNitrogenKg = 80.0;
@@ -2915,13 +2863,13 @@ namespace
 		auto hazCropStores = [&]()
 		{
 			std::vector<core::ResourceStoreSettings> stores;
-			stores.push_back(store("hazIrrigation", "hazardous", 200.0, 150.0));
-			stores.push_back(store("hazFertN", "hazardous", 10.0, 5.0));
-			stores.push_back(store("hazFertP", "hazardous", 10.0, 5.0));
-			stores.push_back(store("hazFertK", "hazardous", 10.0, 5.0));
-			stores.push_back(store("hazFertMin", "hazardous", 10.0, 5.0));
-			stores.push_back(store("hazFood", "hazardous", 10.0, 0.0));
-			stores.push_back(store("hazWaste", "hazardous", 10.0, 0.0));
+			stores.push_back(store("hazIrrigation", 200.0, 150.0));
+			stores.push_back(store("hazFertN", 10.0, 5.0));
+			stores.push_back(store("hazFertP", 10.0, 5.0));
+			stores.push_back(store("hazFertK", 10.0, 5.0));
+			stores.push_back(store("hazFertMin", 10.0, 5.0));
+			stores.push_back(store("hazFood", 10.0, 0.0));
+			stores.push_back(store("hazWaste", 10.0, 0.0));
 			return stores;
 		};
 		// The crew check's closing compositions, carried on hazardous
@@ -2950,10 +2898,10 @@ namespace
 			wasteComposition.moisture = 0.5;
 			wasteComposition.energyKJPerKgDry = 10000.0;
 			std::vector<core::ResourceStoreSettings> stores;
-			stores.push_back(store("hazFood", "hazardous", 100.0, 50.0, foodComposition));
-			stores.push_back(store("hazWater", "hazardous", 100.0, 50.0, waterComposition));
-			stores.push_back(store("hazUrine", "hazardous", 100.0, 0.0, urineComposition));
-			stores.push_back(store("hazOrganicWaste", "hazardous", 100.0, 0.0, wasteComposition));
+			stores.push_back(store("hazFood", 100.0, 50.0, foodComposition));
+			stores.push_back(store("hazWater", 100.0, 50.0, waterComposition));
+			stores.push_back(store("hazUrine", 100.0, 0.0, urineComposition));
+			stores.push_back(store("hazOrganicWaste", 100.0, 0.0, wasteComposition));
 			return stores;
 		};
 		auto hazCrew = []()
@@ -2991,7 +2939,7 @@ namespace
 			settings.enabled = true;
 			settings.observationIntervalSeconds = 1.0f;
 			settings.stores = hazCropStores();
-			settings.atmospheres = { compartment("hazHabitat", "hazardous") };
+			settings.atmospheres = { compartment("hazHabitat") };
 			settings.cropPopulations = { hazCrop() };
 			core::SolarArraySettings field;
 			field.id = "field";
@@ -3007,17 +2955,12 @@ namespace
 			auto const& c = snap.cropPopulations[0];
 			require(c.growthKg > 0.0 && c.harvestedKg > 0.0,
 				"the hazardous canopy never grew or never harvested");
-			for (auto const& entry : snap.stores)
-				require(entry.hazardClass == "hazardous",
-					("a store left the hazardous chain class: " + entry.id).c_str());
 			require(findStore(snap, "hazFood").currentQualified > 0.0
 				&& findStore(snap, "hazWaste").currentQualified > 0.0,
 				"the hazardous harvest did not fill both hazardous destinations");
 			require(closeTo(findStore(snap, "hazFood").currentQualified
 				+ findStore(snap, "hazWaste").currentQualified, c.harvestedKg, 1e-9),
 				"the hazardous harvest split does not equal the harvested mass");
-			require(snap.atmospheres[0].hazardClass == "hazardous",
-				"the hazardous compartment lost its class");
 		}
 		// The hazardous crew chain through the World tick seam: metabolism
 		// runs on hazardous feed inside a hazardous compartment and every
@@ -3033,7 +2976,7 @@ namespace
 			settings.enabled = true;
 			settings.observationIntervalSeconds = 1.0f;
 			settings.stores = hazCrewStores();
-			settings.atmospheres = { compartment("hazHabitat", "hazardous") };
+			settings.atmospheres = { compartment("hazHabitat") };
 			settings.crews = { hazCrew() };
 			require(world.configureStationSystems(settings, false, &diagnostic),
 				("the whole-chain hazardous crew rig was refused: " + diagnostic).c_str());
@@ -3048,16 +2991,11 @@ namespace
 				"the hazardous crew did not run at full metabolism");
 			require(live.urineProduced > 0.0 && live.organicWasteProduced > 0.0,
 				"the hazardous crew returned nothing");
-			for (auto const& entry : snap.stores)
-				require(entry.hazardClass == "hazardous",
-					("a crew stream store left the hazardous class: " + entry.id).c_str());
 			require(closeTo(findStore(snap, "hazUrine").currentQualified,
 				live.urineProduced, 1e-9)
 				&& closeTo(findStore(snap, "hazOrganicWaste").currentQualified,
 					live.organicWasteProduced, 1e-9),
 				"the hazardous returns did not land in the hazardous return stores");
-			require(snap.atmospheres[0].hazardClass == "hazardous",
-				"the crew's hazardous compartment lost its class");
 		}
 		// Heat-only couplings stay allowed without material mixing: a
 		// hazardous compartment coupled to a thermal reservoir exchanges
@@ -3081,7 +3019,7 @@ namespace
 			sink.minTemperatureC = -50.0;
 			sink.maxTemperatureC = 200.0;
 			settings.thermalReservoirs = { sink };
-			auto habitat = compartment("hazHabitat", "hazardous");
+			auto habitat = compartment("hazHabitat");
 			habitat.reservoirId = "sink";
 			habitat.exchangerConductanceKWPerK = 5.0;
 			settings.atmospheres = { habitat };
@@ -3102,93 +3040,6 @@ namespace
 			// cooler reservoir: energy crossed, and only energy crossed.
 			require(snap.thermal.reservoirs[0].temperatureC > 10.0,
 				"the heat-only coupling did not warm the reservoir");
-			require(snap.atmospheres[0].hazardClass == "hazardous",
-				"the heat-only coupling disturbed the compartment's hazard class");
-			for (auto const& entry : snap.stores)
-				require(entry.hazardClass == "hazardous",
-					("a chain store left the hazardous class through a heat-only coupling: "
-						+ entry.id).c_str());
-		}
-		// The Lua sandbox mirror: with the authored settings coherent for
-		// the host, a crossing rewrite that flips the compartment's class
-		// under the hazardous chain must be refused by the bundled
-		// model's own assertion, contained through the integrated
-		// construction error path - the sandbox enforces the same
-		// boundary the host does, independently.
-		{
-			auto const bundled = core::bundledStationSystemsSource();
-			core::setStationSystemsSourceLoader([bundled] {
-				return std::string("local factory = (function()\n") + bundled
-					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
-					"for index = 1, #atmospheres do\n"
-					"if atmospheres[index].id == 'hazHabitat' then atmospheres[index].hazardClass = 'normal' end\n"
-					"end\n"
-					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
-					"end";
-			});
-			core::World sandboxCrop("BioSandboxCropMirror", 2, 2);
-			sandboxCrop.pauseSimulation();
-			sandboxCrop.finishBuild();
-			std::string diagnostic;
-			core::StationSystemsSettings settings;
-			settings.enabled = true;
-			settings.stores = hazCropStores();
-			settings.atmospheres = { compartment("hazHabitat", "hazardous") };
-			settings.cropPopulations = { hazCrop() };
-			core::SolarArraySettings field;
-			field.id = "field";
-			field.capacityKW = 100.0;
-			settings.solarArrays = { field };
-			require(!sandboxCrop.configureStationSystems(settings, false, &diagnostic)
-				&& diagnostic.find("authored hazardous-class") != std::string::npos
-				&& !sandboxCrop.getStationSystemsSnapshot().enabled,
-				("the Lua crop hazard mirror did not refuse the rewritten crossing: "
-					+ diagnostic).c_str());
-			core::World sandboxCrew("BioSandboxCrewMirror", 2, 2);
-			sandboxCrew.pauseSimulation();
-			sandboxCrew.finishBuild();
-			settings = core::StationSystemsSettings{};
-			settings.enabled = true;
-			settings.stores = hazCrewStores();
-			settings.atmospheres = { compartment("hazHabitat", "hazardous") };
-			settings.crews = { hazCrew() };
-			require(!sandboxCrew.configureStationSystems(settings, false, &diagnostic)
-				&& diagnostic.find("authored hazardous-class") != std::string::npos
-				&& !sandboxCrew.getStationSystemsSnapshot().enabled,
-				("the Lua crew hazard mirror did not refuse the rewritten crossing: "
-					+ diagnostic).c_str());
-			core::setStationSystemsSourceLoader({});
-		}
-		// The reviewed bypasses refused through the World configure seam:
-		// hazardous irrigation into a normal canopy and hazardous crew
-		// food in a normal habitat never reach a running World, and the
-		// refusal leaves the World untouched.
-		{
-			core::World world("BioCrossRefused", 2, 2);
-			world.pauseSimulation();
-			world.finishBuild();
-			std::string diagnostic;
-			core::StationSystemsSettings settings;
-			settings.enabled = true;
-			settings.stores = hazCropStores();
-			settings.atmospheres = { compartment("habitat", "normal") };
-			settings.cropPopulations = { hazCrop() };
-			settings.cropPopulations[0].atmosphereId = "habitat";
-			require(!world.configureStationSystems(settings, false, &diagnostic)
-				&& diagnostic.find("hazardous-class") != std::string::npos,
-				"cross-class crop wiring reached the World configure seam");
-			settings.stores = hazCrewStores();
-			settings.atmospheres = { compartment("habitat", "normal") };
-			settings.cropPopulations = {};
-			settings.crews = { hazCrew() };
-			settings.crews[0].atmosphereId = "habitat";
-			require(!world.configureStationSystems(settings, false, &diagnostic)
-				&& diagnostic.find("hazardous-class") != std::string::npos,
-				"cross-class crew wiring reached the World configure seam");
-			require(!world.getStationSystemsSnapshot().enabled
-				&& world.getSimulationTick() == 0,
-				"a refused biological hazard configuration mutated the World");
 		}
 	}
 }

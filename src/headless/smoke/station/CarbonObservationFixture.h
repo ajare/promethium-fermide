@@ -9,7 +9,7 @@ inline core::StationSystemsSettings carbonObservationFixture()
 	core::SolarArraySettings solar; solar.id = "sun"; solar.capacityKW = 100; s.solarArrays = {solar};
 	for (auto id : {"co2", "hydrogen", "methane", "water", "carbon", "cell-h2", "cell-o2", "cell-water", "breathing-oxygen"}) {
 		core::ResourceStoreSettings stock; stock.id = id; stock.unit = "kg";
-		stock.hazardClass = "normal"; stock.capacity = 100; stock.startingQualified = 10;
+		stock.capacity = 100; stock.startingQualified = 10;
 		if (stock.id == "breathing-oxygen") stock.materialId = "oxygen";
 		s.stores.push_back(stock);
 	}

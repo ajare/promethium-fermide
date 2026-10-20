@@ -726,7 +726,6 @@ namespace
 			settings.observationIntervalSeconds = 1.0f;
 			settings.stores = {wasteStore("raw", 100.0, 10.0), wasteStore("treated", 100.0, 0.0),
 				wasteStore("concentrate", 0.1, 0.0), wasteStore("consumable", 100.0, 10.0)};
-			for (auto& store : settings.stores) store.hazardClass = "hazardous";
 			core::WaterTreatmentSettings treatment;
 			treatment.id = "hazTreatment"; treatment.hazardClass = "hazardous";
 			treatment.sourceStoreId = "raw"; treatment.treatedStoreId = "treated";
@@ -760,7 +759,6 @@ namespace
 			settings.enabled = true; settings.observationIntervalSeconds = 1.0f;
 			settings.stores = {wasteStore("raw", 100.0, 10.0), wasteStore("held", 100.0, 0.0),
 				wasteStore("concentrate", 100.0, 0.0), wasteStore("kit", 100.0, 10.0)};
-			for (auto& store : settings.stores) store.hazardClass = "hazardous";
 			core::ResourceCompositionSettings muddy;
 			muddy.moisture = 0.8; muddy.nutrientNitrogen = 0.1;
 			settings.stores[0].composition = muddy;

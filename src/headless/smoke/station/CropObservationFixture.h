@@ -24,7 +24,7 @@ inline core::StationSystemsSettings cropObservationFixture(int scenario = 0)
 		if (i == 4) pure.otherMinerals = 1;
 		s.stores[i].composition = pure;
 	}
-	core::AtmosphereSettings air; air.id = "habitat"; air.hazardClass = "normal"; air.volumeM3 = 100;
+	core::AtmosphereSettings air; air.id = "habitat"; air.volumeM3 = 100;
 	air.startingOxygenKg = 40; air.startingNitrogenKg = 80; air.startingCarbonDioxideKg = 5;
 	air.startingWaterVapourKg = 1; air.startingTemperatureC = 22; air.thermalCapacityKJPerK = 20000;
 	air.minPressureKPa = 1; air.maxPressureKPa = 200; s.atmospheres = {air};

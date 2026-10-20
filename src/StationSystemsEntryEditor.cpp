@@ -747,16 +747,11 @@ bool renderStoreEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	else if (!core::isValidStationMaterialId(store.materialId))
 		ImGui::TextUnformatted("Invalid material identity: use lowercase words/digits separated by single hyphens.");
 	else ImGui::Text("Material: %s (explicit)", store.materialId.c_str());
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Material identity is independent of store name, unit, hazard and composition. Empty is unclassified; it never changes allocation.");
+	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Material identity is independent of store name, unit and composition. Empty is unclassified; it never changes allocation.");
 	char unitBuffer[8]{};
 	std::strncpy(unitBuffer, store.unit.c_str(), sizeof(unitBuffer) - 1);
 	if (ImGui::InputText((label + " unit").c_str(), unitBuffer, sizeof(unitBuffer)))
 		store.unit = unitBuffer;
-	char storeHazardBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(storeHazardBuffer, store.hazardClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " hazard class").c_str(),
-		storeHazardBuffer, sizeof(storeHazardBuffer)))
-		store.hazardClass = storeHazardBuffer;
 	ImGui::InputDouble((label + " capacity").c_str(), &store.capacity, 0.0, 0.0, "%.3f");
 	ImGui::InputDouble((label + " starting usable").c_str(), &store.startingQualified, 0.0, 0.0, "%.3f");
 	ImGui::InputDouble((label + " starting held").c_str(), &store.startingUnqualified, 0.0, 0.0, "%.3f");
@@ -1002,11 +997,6 @@ bool renderAtmosphereEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	bool removeAtmosphere = false;
 	ImGui::PushItemWidth(220);
 	renderIdentity(label, atmosphere.id);
-	char hazardBuffer[16]{};
-	std::strncpy(hazardBuffer, atmosphere.hazardClass.c_str(), sizeof(hazardBuffer) - 1);
-	if (ImGui::InputText((label + " hazard class").c_str(),
-		hazardBuffer, sizeof(hazardBuffer)))
-		atmosphere.hazardClass = hazardBuffer;
 	ImGui::InputDouble((label + " volume m3").c_str(),
 		&atmosphere.volumeM3, 0.0, 0.0, "%.3f");
 	ImGui::InputDouble((label + " starting oxygen kg").c_str(),
