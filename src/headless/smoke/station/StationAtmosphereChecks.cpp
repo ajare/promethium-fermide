@@ -880,7 +880,6 @@ namespace
 		{
 			core::WaterTreatmentSettings settings;
 			settings.id = id;
-			settings.hazardClass = "hazardous";
 			settings.sourceStoreId = "hazRaw";
 			settings.treatedStoreId = "hazTreated";
 			settings.concentrateStoreId = "hazConcentrate";
@@ -943,7 +942,6 @@ namespace
 				// block below.
 				core::WaterTreatmentSettings normalCrossClass;
 				normalCrossClass.id = "potablePlant";
-				normalCrossClass.hazardClass = "normal";
 				normalCrossClass.sourceStoreId = "hazRaw";
 				normalCrossClass.treatedStoreId = "potable";
 				normalCrossClass.concentrateStoreId = "hazConcentrate";
@@ -1473,11 +1471,10 @@ namespace
 		// declared stoichiometric share, hydrogen as the remainder, and the
 		// difference between the dose and the retained chemical energy is
 		// process heat into the sink.
-		auto electrolyzer = [](std::string const& id, std::string const& hazard)
+		auto electrolyzer = [](std::string const& id)
 		{
 			core::ElectrolyzerSettings settings;
 			settings.id = id;
-			settings.hazardClass = hazard;
 			settings.waterStoreId = "water";
 			settings.oxygenStoreId = "o2";
 			settings.hydrogenStoreId = "h2";
@@ -1488,11 +1485,10 @@ namespace
 			settings.maxSinkTemperatureC = 60.0;
 			return settings;
 		};
-		auto capture = [](std::string const& id, std::string const& hazard)
+		auto capture = [](std::string const& id)
 		{
 			core::Co2CaptureSettings settings;
 			settings.id = id;
-			settings.hazardClass = hazard;
 			settings.atmosphereId = "habitat";
 			settings.captureStoreId = "captured";
 			settings.consumableStoreId = "scrubberMedia";
@@ -1555,12 +1551,12 @@ namespace
 			settings.atmospheres = { compartment(1.0) };
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
 			std::string diagnostic;
-			settings.electrolyzers = { electrolyzer("cell", "normal") };
+			settings.electrolyzers = { electrolyzer("cell") };
 			settings.electrolyzers[0].waterStoreId = "ghost";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("feed water store 'ghost' does not exist") != std::string::npos,
 				"an electrolyzer fed by an unknown store was accepted");
-			settings.electrolyzers = { electrolyzer("cell", "normal") };
+			settings.electrolyzers = { electrolyzer("cell") };
 			settings.electrolyzers[0].atmosphereId = "habitat";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("exactly one oxygen destination") != std::string::npos,
@@ -1570,28 +1566,28 @@ namespace
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("exactly one oxygen destination") != std::string::npos,
 				"an electrolyzer with no oxygen destination was accepted");
-			settings.electrolyzers = { electrolyzer("cell", "normal") };
+			settings.electrolyzers = { electrolyzer("cell") };
 			settings.electrolyzers[0].specificEnergyKWhPerKgWater = 3.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("below the chemical energy") != std::string::npos,
 				"a dose below the retained chemical energy was accepted");
-			settings.electrolyzers = { electrolyzer("cell", "normal") };
+			settings.electrolyzers = { electrolyzer("cell") };
 			settings.electrolyzers[0].thermalClass = "moderate";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("does not match heat sink") != std::string::npos,
 				"a thermal class mismatch against the heat sink was accepted");
-			settings.electrolyzers = { electrolyzer("cell", "normal") };
+			settings.electrolyzers = { electrolyzer("cell") };
 			settings.electrolyzers[0].maxSinkTemperatureC = -300.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("above absolute zero") != std::string::npos,
 				"a maximum sink temperature below absolute zero was accepted");
 			settings.electrolyzers = {};
-			settings.co2Captures = { capture("scrub", "normal") };
+			settings.co2Captures = { capture("scrub") };
 			settings.co2Captures[0].atmosphereId = "ghost";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("unknown atmosphere compartment") != std::string::npos,
 				"a capture machine scrubbing an unknown compartment was accepted");
-			settings.co2Captures = { capture("scrub", "normal") };
+			settings.co2Captures = { capture("scrub") };
 			settings.co2Captures[0].consumableStoreId = "";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("names no consumable store") != std::string::npos,
@@ -1600,14 +1596,14 @@ namespace
 			// is accepted (#751): the class no longer reserves a store for
 			// one process, so both machines wire to it and the shared
 			// inventory is the consequence.
-			settings.co2Captures = { capture("scrub", "normal") };
-			settings.electrolyzers = { electrolyzer("hcell", "hazardous") };
+			settings.co2Captures = { capture("scrub") };
+			settings.electrolyzers = { electrolyzer("hcell") };
 			settings.electrolyzers[0].hydrogenStoreId = "captured";
 			require(core::validateStationSystemsSettings(settings, diagnostic),
 				"a shared gas store across hazard classes was refused");
 			std::vector<core::ElectrolyzerSettings> tooMany;
 			for (size_t index = 0; index <= core::MaxStationElectrolyzers; ++index)
-				tooMany.push_back(electrolyzer("cell" + std::to_string(index), "normal"));
+				tooMany.push_back(electrolyzer("cell" + std::to_string(index)));
 			settings = core::StationSystemsSettings{};
 			settings.enabled = true;
 			settings.stores = gasStores();
@@ -1640,7 +1636,7 @@ namespace
 			settings.stores = stores;
 			settings.atmospheres = { compartment(1.0) };
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
-			settings.electrolyzers = { electrolyzer("split", "normal") };
+			settings.electrolyzers = { electrolyzer("split") };
 			settings.electrolyzers[0].oxygenStoreId = "gas";
 			settings.electrolyzers[0].hydrogenStoreId = "gas";
 			settings.electrolyzers[0].rateKgPerS = 1.0;
@@ -1657,12 +1653,12 @@ namespace
 				"the refused aliased-product configuration mutated the World");
 			// The same alias through the feed side: one store named as both
 			// the water drawn and a gas produced is refused too.
-			settings.electrolyzers = { electrolyzer("split", "normal") };
+			settings.electrolyzers = { electrolyzer("split") };
 			settings.electrolyzers[0].waterStoreId = "h2";
 			require(!world.configureStationSystems(settings, false, &diagnostic)
 				&& diagnostic.find("feed water and a gas product") != std::string::npos,
 				"an electrolyzer aliasing its feed water store with its hydrogen product store was accepted");
-			settings.electrolyzers = { electrolyzer("split", "normal") };
+			settings.electrolyzers = { electrolyzer("split") };
 			settings.electrolyzers[0].waterStoreId = "o2";
 			require(!world.configureStationSystems(settings, false, &diagnostic)
 				&& diagnostic.find("feed water and a gas product") != std::string::npos,
@@ -1670,7 +1666,7 @@ namespace
 			// A cell that delivers oxygen straight into a compartment has no
 			// oxygen store to alias, so the distinct-store rule does not
 			// refuse it; the tick it then runs must stay clean.
-			settings.electrolyzers = { electrolyzer("split", "normal") };
+			settings.electrolyzers = { electrolyzer("split") };
 			settings.electrolyzers[0].oxygenStoreId = "";
 			settings.electrolyzers[0].atmosphereId = "habitat";
 			settings.electrolyzers[0].hydrogenStoreId = "gas";
@@ -1692,7 +1688,7 @@ namespace
 		{
 			core::World world("GasNominal", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			require(gasConfigure(world, gasStores(), { electrolyzer("cell", "normal") }, {}, 100.0).first,
+			require(gasConfigure(world, gasStores(), { electrolyzer("cell") }, {}, 100.0).first,
 				"nominal electrolysis setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "nominal electrolysis run failed");
@@ -1741,7 +1737,7 @@ namespace
 		{
 			core::World world("GasHotSink", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			require(gasConfigure(world, gasStores(), { electrolyzer("cell", "normal") }, {},
+			require(gasConfigure(world, gasStores(), { electrolyzer("cell") }, {},
 				100.0, 70.0).first, "hot-sink electrolysis setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "hot-sink electrolysis run failed");
@@ -1765,7 +1761,7 @@ namespace
 		{
 			core::World world("GasNoPower", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			require(gasConfigure(world, gasStores(), { electrolyzer("cell", "normal") }, {}, 0.0).first,
+			require(gasConfigure(world, gasStores(), { electrolyzer("cell") }, {}, 0.0).first,
 				"no-power electrolysis setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "no-power electrolysis run failed");
@@ -1784,7 +1780,7 @@ namespace
 			core::World world("GasCapped", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
 			// The array covers only 1 kW of the cell's 16.2 kW demand.
-			require(gasConfigure(world, gasStores(), { electrolyzer("cell", "normal") }, {}, 1.0).first,
+			require(gasConfigure(world, gasStores(), { electrolyzer("cell") }, {}, 1.0).first,
 				"capped electrolysis setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "capped electrolysis run failed");
@@ -1812,7 +1808,7 @@ namespace
 			auto stores = gasStores();
 			for (auto& store : stores)
 				if (store.id == "h2") store.capacity = 0.00005;
-			require(gasConfigure(world, stores, { electrolyzer("cell", "normal") }, {}, 100.0).first,
+			require(gasConfigure(world, stores, { electrolyzer("cell") }, {}, 100.0).first,
 				"full-h2 electrolysis setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "full-h2 electrolysis run failed");
@@ -1835,7 +1831,7 @@ namespace
 		{
 			core::World world("GasToAir", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto cell = electrolyzer("cell", "normal");
+			auto cell = electrolyzer("cell");
 			cell.oxygenStoreId = "";
 			cell.atmosphereId = "habitat";
 			require(gasConfigure(world, gasStores(), { cell }, {}, 100.0).first,
@@ -1863,7 +1859,7 @@ namespace
 		{
 			core::World world("GasCapture", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			require(gasConfigure(world, gasStores(), {}, { capture("scrub", "normal") }, 100.0).first,
+			require(gasConfigure(world, gasStores(), {}, { capture("scrub") }, 100.0).first,
 				"nominal capture setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "nominal capture run failed");
@@ -1911,7 +1907,7 @@ namespace
 			settings.stores = gasStores();
 			settings.atmospheres = { compartment(0.0002) };
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
-			settings.co2Captures = { capture("scrub", "normal") };
+			settings.co2Captures = { capture("scrub") };
 			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
 			settings.solarArrays = { field };
 			std::string diagnostic;
@@ -1940,7 +1936,7 @@ namespace
 			auto stores = gasStores();
 			for (auto& store : stores)
 				if (store.id == "scrubberMedia") store.startingQualified = 5e-6;
-			require(gasConfigure(world, stores, {}, { capture("scrub", "normal") }, 100.0).first,
+			require(gasConfigure(world, stores, {}, { capture("scrub") }, 100.0).first,
 				"no-media capture setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(120), "no-media capture run failed");
@@ -1973,7 +1969,7 @@ namespace
 			settings.stores = gasStores();
 			settings.atmospheres = { compartment(1.0) };
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
-			settings.electrolyzers = { electrolyzer("cell", "normal") };
+			settings.electrolyzers = { electrolyzer("cell") };
 			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
 			settings.solarArrays = { field };
 			auto const result = corrupt.configureStationSystems(settings, false, &diagnostic);

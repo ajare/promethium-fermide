@@ -1212,33 +1212,29 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			else if (mPlacingType == "Microbial processor")
 			{
 				core::MicrobialProcessorSettings entry;
-				entry.hazardClass = "normal"; entry.thermalClass = "moderate";
+entry.thermalClass = "moderate";
 				place(draft.microbialProcessors, entry, core::MaxStationMicrobialProcessors, "microbial");
 			}
 			else if (mPlacingType == "Water collector")
 			{
 				core::WaterCollectorSettings entry;
-				entry.hazardClass = "normal";
 				entry.thermalClass = "moderate";
 				place(draft.waterCollectors, entry, core::MaxStationWaterCollectors, "collector");
 			}
 			else if (mPlacingType == "Water treatment")
 			{
 				core::WaterTreatmentSettings entry;
-				entry.hazardClass = "normal";
 				place(draft.waterTreatments, entry, core::MaxStationWaterTreatments, "treatment");
 			}
 			else if (mPlacingType == "Electrolyzer")
 			{
 				core::ElectrolyzerSettings entry;
-				entry.hazardClass = "normal";
 				entry.thermalClass = "moderate";
 				place(draft.electrolyzers, entry, core::MaxStationElectrolyzers, "electrolyzer");
 			}
 			else if (mPlacingType == "CO2 capture")
 			{
 				core::Co2CaptureSettings entry;
-				entry.hazardClass = "normal";
 				place(draft.co2Captures, entry, core::MaxStationCo2Captures, "capture");
 			}
 			else if (mPlacingType == "Atmosphere")
@@ -1304,7 +1300,6 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		else if (mPlacingType == "Fuel cell" && draft.fuelCells.size() < core::MaxStationFuelCells)
 		{
 			core::FuelCellSettings cell;
-			cell.hazardClass = "normal";
 			cell.thermalClass = "low";
 			cell.ratedOutputKW = 10.0;
 			cell.efficiency = 0.6;
@@ -1322,7 +1317,6 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		else if (mPlacingType == "Sabatier" && draft.sabatierReactors.size() < core::MaxStationSabatierReactors)
 		{
 			core::SabatierReactorSettings reactor;
-			reactor.hazardClass = "normal";
 			reactor.thermalClass = "low";
 			reactor.rateKgPerS = 0.001;
 			reactor.specificEnergyKWhPerKgCO2 = 1.0;
@@ -1341,7 +1335,6 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			&& draft.methaneProcessors.size() < core::MaxStationMethaneProcessors)
 		{
 			core::MethaneProcessorSettings processor;
-			processor.hazardClass = "normal";
 			processor.thermalClass = "low";
 			processor.rateKgPerS = 0.001;
 			processor.specificEnergyKWhPerKgCH4 = 2.0;

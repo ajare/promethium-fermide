@@ -15,15 +15,12 @@ inline core::StationSystemsSettings carbonObservationFixture()
 	}
 	core::ThermalReservoirSettings sink; sink.id = "sink"; sink.thermalClass = "moderate";
 	sink.heatCapacityKJPerK = 100000; sink.startingTemperatureC = 20; s.thermalReservoirs = {sink};
-	core::SabatierReactorSettings r; r.id = "reactor"; r.hazardClass = "normal";
-	r.co2StoreId = "co2"; r.hydrogenStoreId = "hydrogen"; r.methaneStoreId = "methane";
+	core::SabatierReactorSettings r; r.id = "reactor";	r.co2StoreId = "co2"; r.hydrogenStoreId = "hydrogen"; r.methaneStoreId = "methane";
 	r.waterStoreId = "water"; r.heatSinkId = "sink"; r.thermalClass = "moderate"; r.rateKgPerS = 0.001;
 	s.sabatierReactors = {r};
-	core::MethaneProcessorSettings p; p.id = "processor"; p.hazardClass = "normal";
-	p.methaneStoreId = "methane"; p.hydrogenStoreId = "hydrogen"; p.carbonStoreId = "carbon";
+	core::MethaneProcessorSettings p; p.id = "processor";	p.methaneStoreId = "methane"; p.hydrogenStoreId = "hydrogen"; p.carbonStoreId = "carbon";
 	p.heatSinkId = "sink"; p.thermalClass = "moderate"; p.rateKgPerS = 0.001; s.methaneProcessors = {p};
-	core::FuelCellSettings c; c.id = "cell"; c.hazardClass = "normal";
-	c.hydrogenStoreId = "cell-h2"; c.oxygenStoreId = "cell-o2"; c.waterStoreId = "cell-water";
+	core::FuelCellSettings c; c.id = "cell";	c.hydrogenStoreId = "cell-h2"; c.oxygenStoreId = "cell-o2"; c.waterStoreId = "cell-water";
 	c.heatSinkId = "sink"; c.thermalClass = "moderate"; c.ratedOutputKW = 5; c.commandedOutputKW = 2;
 	s.fuelCells = {c};
 	return s;

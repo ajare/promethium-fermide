@@ -15,7 +15,7 @@ void appendStationCarbonObservations(StationSystemsSettings const& settings,
 			auto& d = o.metric;
 			d.id = "exchange/" + type + "/" + entry.id + "/" + role;
 			d.equipmentType = type; d.instanceId = entry.id; d.exchangeRole = std::move(role);
-			d.role = direction; d.hazardClass = entry.hazardClass;
+			d.role = direction;
 			if (!power) { d.materialId = std::move(material); d.quantity = StationPhysicalQuantity::MassRate; d.unit = StationCanonicalUnit::KilogramPerSecond; }
 			if (thermal) d.thermalClass = entry.thermalClass;
 			if (request) d.requestedSemantics = StationRequestedSemantics::Demand;

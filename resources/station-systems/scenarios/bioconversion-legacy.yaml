@@ -70,7 +70,6 @@ stationSystems:
     protectedReserve: 0.0
   microbialProcessors:
   - id: dig
-    hazardClass: normal
     feedStoreId: organicWaste
     oxygenStoreId: processOxygen
     waterStoreId: fresh

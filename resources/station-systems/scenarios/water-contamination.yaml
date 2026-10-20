@@ -62,7 +62,6 @@ stationSystems:
     illumination: {constantLevel: 1, periodSeconds: 0, segments: []}
   waterTreatments:
   - id: barrier
-    hazardClass: hazardous
     sourceStoreId: loop
     treatedStoreId: cleared
     concentrateStoreId: concentrate

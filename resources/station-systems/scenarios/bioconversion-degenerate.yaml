@@ -75,7 +75,6 @@ stationSystems:
     protectedReserve: 0.0
   microbialProcessors:
   - id: passThrough
-    hazardClass: normal
     feedStoreId: nearlyWater
     oxygenStoreId: processOxygen
     waterStoreId: fresh

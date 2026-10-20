@@ -2228,8 +2228,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local collector = waterCollectors[index]
         assert(type(collector) == 'table', 'water collector descriptor must be a table')
         assert(type(collector.id) == 'string' and #collector.id > 0, 'water collector needs an id')
-        assert(collector.hazardClass == 'normal' or collector.hazardClass == 'hazardous',
-            'water collector needs a declared hazard class (normal or hazardous)')
         assert(type(collector.maxRateKgPerS) == 'number'
             and collector.maxRateKgPerS == collector.maxRateKgPerS
             and collector.maxRateKgPerS >= 0 and collector.maxRateKgPerS < math.huge,
@@ -2250,7 +2248,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local destination = declareWaterStore(collector.destStore, 'raw water destination', false)
         object.water_collectors[index] = {
             id = collector.id,
-            hazardClass = collector.hazardClass,
             compartment = compartment,
             loop = loop,
             dest = destination,
@@ -2266,8 +2263,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local treatment = waterTreatments[index]
         assert(type(treatment) == 'table', 'water treatment descriptor must be a table')
         assert(type(treatment.id) == 'string' and #treatment.id > 0, 'water treatment needs an id')
-        assert(treatment.hazardClass == 'normal' or treatment.hazardClass == 'hazardous',
-            'water treatment needs a declared hazard class (normal or hazardous)')
         assert(type(treatment.throughputKgPerS) == 'number'
             and treatment.throughputKgPerS == treatment.throughputKgPerS
             and treatment.throughputKgPerS >= 0 and treatment.throughputKgPerS < math.huge,
@@ -2321,7 +2316,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local consumable = declareWaterStore(treatment.consumableStore, 'consumable', true)
         object.water_treatments[index] = {
             id = treatment.id,
-            hazardClass = treatment.hazardClass,
             source = streams[1], treated = streams[2], concentrate = streams[3],
             consumable = consumable,
             throughputKgPerS = treatment.throughputKgPerS,
@@ -2355,8 +2349,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- The oxygen production and CO2 capture contracts (#404). The
     -- sandbox mirrors the host's refusals: a cell whose electrical dose
     -- would not cover the chemical energy its products retain, a cell
-    -- without exactly one oxygen destination, a compound gas store, a
-    -- hazard-class mismatch anywhere in the chain, or a capture machine
+    -- without exactly one oxygen destination, a compound gas store,
+    -- or a capture machine
     -- that declares a consumable it cannot hold are all refused at
     -- construction like any other bad descriptor.
     assert(#electrolyzers <= 8, 'station electrolyzers are limited to 8 entries')
@@ -2376,8 +2370,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local cell = electrolyzers[index]
         assert(type(cell) == 'table', 'electrolyzer descriptor must be a table')
         assert(type(cell.id) == 'string' and #cell.id > 0, 'electrolyzer needs an id')
-        assert(cell.hazardClass == 'normal' or cell.hazardClass == 'hazardous',
-            'electrolyzer needs a declared hazard class (normal or hazardous)')
         assert(type(cell.thermalClass) == 'string'
             and (cell.thermalClass == 'low' or cell.thermalClass == 'moderate'
                 or cell.thermalClass == 'warm' or cell.thermalClass == 'generation'),
@@ -2424,7 +2416,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             'electrolyzer thermal class must match its heat sink reservoir class')
         object.electrolyzers[index] = {
             id = cell.id,
-            hazardClass = cell.hazardClass,
             feed = feed, oxygen = oxygen, hydrogen = hydrogen,
             compartment = compartment, sink = sink,
             rateKgPerS = cell.rateKgPerS,
@@ -2443,8 +2434,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local capture = co2Captures[index]
         assert(type(capture) == 'table', 'CO2 capture descriptor must be a table')
         assert(type(capture.id) == 'string' and #capture.id > 0, 'CO2 capture needs an id')
-        assert(capture.hazardClass == 'normal' or capture.hazardClass == 'hazardous',
-            'CO2 capture needs a declared hazard class (normal or hazardous)')
         assert(type(capture.maxRateKgPerS) == 'number'
             and capture.maxRateKgPerS == capture.maxRateKgPerS
             and capture.maxRateKgPerS >= 0 and capture.maxRateKgPerS < math.huge,
@@ -2472,7 +2461,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         end
         object.co2_captures[index] = {
             id = capture.id,
-            hazardClass = capture.hazardClass,
             compartment = compartment, destination = destination, consumable = consumable,
             maxRateKgPerS = capture.maxRateKgPerS,
             specificEnergyKWhPerKg = capture.specificEnergyKWhPerKg,
@@ -2494,8 +2482,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local cell = fuelCells[index]
         assert(type(cell) == 'table', 'fuel cell descriptor must be a table')
         assert(type(cell.id) == 'string' and #cell.id > 0, 'fuel cell needs an id')
-        assert(cell.hazardClass == 'normal' or cell.hazardClass == 'hazardous',
-            'fuel cell needs a declared hazard class (normal or hazardous)')
         assert(type(cell.thermalClass) == 'string'
             and (cell.thermalClass == 'low' or cell.thermalClass == 'moderate'
                 or cell.thermalClass == 'warm' or cell.thermalClass == 'generation'),
@@ -2532,7 +2518,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             'fuel cell thermal class must match its heat sink reservoir class')
         object.fuel_cells[index] = {
             id = cell.id,
-            hazardClass = cell.hazardClass,
             hydrogen = hydrogen, oxygen = oxygen, water = water, sink = sink,
             ratedOutputKW = cell.ratedOutputKW,
             efficiency = cell.efficiency,
@@ -2550,8 +2535,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         }
     end
     -- Carbon recovery contracts (#405). The sandbox mirrors the host's
-    -- refusals: a reactor or processor with an unknown or shared store, a
-    -- hazard-class mismatch, a compound store in the chain, or a methane
+    -- refusals: a reactor or processor with an unknown or shared store,
+    -- a compound store in the chain, or a methane
     -- processor whose electrical dose would not cover the endothermic
     -- reaction heat the split must absorb are all refused at
     -- construction like any other bad descriptor.
@@ -2561,8 +2546,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local reactor = sabatierReactors[index]
         assert(type(reactor) == 'table', 'Sabatier reactor descriptor must be a table')
         assert(type(reactor.id) == 'string' and #reactor.id > 0, 'Sabatier reactor needs an id')
-        assert(reactor.hazardClass == 'normal' or reactor.hazardClass == 'hazardous',
-            'Sabatier reactor needs a declared hazard class (normal or hazardous)')
         assert(type(reactor.thermalClass) == 'string'
             and (reactor.thermalClass == 'low' or reactor.thermalClass == 'moderate'
                 or reactor.thermalClass == 'warm' or reactor.thermalClass == 'generation'),
@@ -2608,7 +2591,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             'Sabatier reactor thermal class must match its heat sink reservoir class')
         object.sabatier_reactors[index] = {
             id = reactor.id,
-            hazardClass = reactor.hazardClass,
             co2 = co2, hydrogen = hydrogen, methane = methane, water = water, sink = sink,
             rateKgPerS = reactor.rateKgPerS,
             specificEnergyKWhPerKgCO2 = reactor.specificEnergyKWhPerKgCO2,
@@ -2629,8 +2611,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local processor = methaneProcessors[index]
         assert(type(processor) == 'table', 'methane processor descriptor must be a table')
         assert(type(processor.id) == 'string' and #processor.id > 0, 'methane processor needs an id')
-        assert(processor.hazardClass == 'normal' or processor.hazardClass == 'hazardous',
-            'methane processor needs a declared hazard class (normal or hazardous)')
         assert(type(processor.thermalClass) == 'string'
             and (processor.thermalClass == 'low' or processor.thermalClass == 'moderate'
                 or processor.thermalClass == 'warm' or processor.thermalClass == 'generation'),
@@ -2674,7 +2654,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             'methane processor thermal class must match its heat sink reservoir class')
         object.methane_processors[index] = {
             id = processor.id,
-            hazardClass = processor.hazardClass,
             methane = methane, hydrogen = hydrogen, carbon = carbon, sink = sink,
             rateKgPerS = processor.rateKgPerS,
             specificEnergyKWhPerKgCH4 = processor.specificEnergyKWhPerKgCH4,
@@ -2705,8 +2684,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- energy, and the operating window must be a real window. The
     -- recovered nutrients are funded by the feed's bound nutrient
     -- constituents only: atmospheric nitrogen is never a nutrient
-    -- source here. A descriptor that would create mass, mix hazard
-    -- classes in one store or release unfunded heat is refused at
+    -- source here. A descriptor that would create mass or release unfunded
+    -- heat is refused at
     -- construction like any other bad descriptor.
     assert(#microbialProcessors <= 8, 'station microbial processors are limited to 8 entries')
     local function declareMicrobialStore(storeId, role, requireCompound)
@@ -2738,8 +2717,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             end
         end
         assert(type(processor.id) == 'string' and #processor.id > 0, 'microbial processor needs an id')
-        assert(processor.hazardClass == 'normal' or processor.hazardClass == 'hazardous',
-            'microbial processor needs a declared hazard class (normal or hazardous)')
         assert(type(processor.thermalClass) == 'string'
             and (processor.thermalClass == 'low' or processor.thermalClass == 'moderate'
                 or processor.thermalClass == 'warm' or processor.thermalClass == 'generation'),
@@ -2892,7 +2869,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             lastCarriedConstituents = {}, carriedConstituents = {},
             lastNitrifiedNitrogenKg = 0, nitrifiedNitrogenKg = 0,
             id = processor.id,
-            hazardClass = processor.hazardClass,
             feed = feed, oxygen = oxygen, water = water, consumable = consumable,
             waterQualitySettings = processor.waterQuality,
             nutrient = nutrient, recoveredWater = recoveredWater, co2 = co2,

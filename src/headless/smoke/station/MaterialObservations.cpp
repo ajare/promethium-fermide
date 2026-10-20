@@ -464,14 +464,9 @@ namespace
 		s = smoke::station::microbialObservationFixture(); auto second = s.microbialProcessors[0]; second.id = "second"; s.microbialProcessors.push_back(second);
 		apply(); run(world, 12); verify(); snap = world.getStationSystemsSnapshot();
 		check("Organic feed", (snap.microbialProcessors[0].lastFeedConsumedKg + snap.microbialProcessors[1].lastFeedConsumedKg) / dt);
-		for (auto& processor : s.microbialProcessors) processor.hazardClass = "hazardous";
-		apply(); run(world, 12); verify();
-		for (auto const& h : world.getStationSystemsMetricHistory()) if (h.descriptor.equipmentType == "Microbial processor")
-			require(h.descriptor.hazardClass == "hazardous", "microbial hazard metadata lost");
-		// Exchange queries combine matching materials across legacy classes.
+		// Exchange queries combine matching materials across instances.
 		s = smoke::station::microbialObservationFixture(); auto hazardous = s.microbialProcessors[0];
-		hazardous.id = "hazardous"; hazardous.hazardClass = "hazardous";
-		for (auto member : {&core::MicrobialProcessorSettings::feedStoreId, &core::MicrobialProcessorSettings::oxygenStoreId,
+		hazardous.id = "hazardous";		for (auto member : {&core::MicrobialProcessorSettings::feedStoreId, &core::MicrobialProcessorSettings::oxygenStoreId,
 			&core::MicrobialProcessorSettings::waterStoreId, &core::MicrobialProcessorSettings::consumableStoreId,
 			&core::MicrobialProcessorSettings::stockStoreId, &core::MicrobialProcessorSettings::nutrientStoreId,
 			&core::MicrobialProcessorSettings::recoveredWaterStoreId, &core::MicrobialProcessorSettings::co2StoreId,
@@ -579,12 +574,10 @@ namespace
 		}
 		require(world.getStationSystemsSnapshot() == before && world.getStationSystemsObservationRevision() == revision, "carbon query mutated World");
 		s = smoke::station::carbonObservationFixture();
-		s.sabatierReactors[0].hazardClass = s.methaneProcessors[0].hazardClass = s.fuelCells[0].hazardClass = "hazardous";
 		apply(); run(world, 12); verify();
 		for (auto const& h : world.getStationSystemsMetricHistory()) {
 			auto const& d = h.descriptor;
 			if (d.equipmentType == "Sabatier" || d.equipmentType == "Methane processor") {
-				require(d.hazardClass == "hazardous", "carbon hazard identity lost");
 				if (d.exchangeRole == "Produced heat") require(d.thermalClass == "moderate", "carbon thermal class lost");
 				if (d.exchangeRole == "Methane") require(d.materialId == "methane" && !d.requestedSemantics, "methane identity or invented product request");
 				if (d.exchangeRole == "Solid carbon") require(d.materialId == "carbon" && !d.requestedSemantics, "carbon identity or invented product request");
@@ -675,9 +668,7 @@ namespace
 		// Hazardous treatment and non-kg consumables retain explicit identity and
 		// canonical rates. Oxygen may also go directly to atmosphere, not a store.
 		s = smoke::station::waterGasObservationFixture();
-		s.waterCollectors[0].hazardClass = "hazardous"; s.waterTreatments[0].hazardClass = "hazardous";
-		s.electrolyzers[0].hazardClass = "hazardous"; s.co2Captures[0].hazardClass = "hazardous";
-
+		
 		s.stores[3].unit = "g"; s.stores[3].capacity = 100000; s.stores[3].startingQualified = 10000;
 		s.electrolyzers[0].oxygenStoreId.clear(); s.electrolyzers[0].atmosphereId = "air";
 		auto otherKit = s.stores[3]; otherKit.id = "other-kit"; otherKit.materialId = "other-sorbent"; s.stores.push_back(otherKit);
@@ -980,7 +971,7 @@ namespace
 		// Fuel cells have distinct H2/O2 reactant properties, never one fuel sum.
 		s.connections.clear(); s.equipmentLoads.clear(); s.batteries.clear();
 		s.stores = {store("h", "kg", 100, 50, 0), store("o", "kg", 100, 50, 0), store("w", "kg", 100, 0, 0)};
-		core::FuelCellSettings cell; cell.id = "cell"; cell.hazardClass = "normal"; cell.hydrogenStoreId = "h"; cell.oxygenStoreId = "o"; cell.waterStoreId = "w";
+		core::FuelCellSettings cell; cell.id = "cell"; cell.hydrogenStoreId = "h"; cell.oxygenStoreId = "o"; cell.waterStoreId = "w";
 		cell.thermalClass = "warm"; cell.heatSinkId = "sink"; cell.ratedOutputKW = 10; cell.commandedOutputKW = 5;
 		s.fuelCells = {cell}; apply(); run(world, 6); snap = world.getStationSystemsSnapshot();
 		close(value("Fuel cell", "Hydrogen", "hydrogen"), snap.fuelCells[0].lastHydrogenKg / core::World::getFixedTimestep());
@@ -1145,7 +1136,7 @@ namespace
 		loop.id = "dry"; loop.startingCoolantKg = 0; s.coolantLoops.push_back(loop);
 		core::SolarArraySettings solar; solar.id = "solar"; solar.capacityKW = 10; s.solarArrays = {solar};
 		core::WaterCollectorSettings collector;
-		collector.id = "collector"; collector.hazardClass = "normal"; collector.atmosphereId = "shared-name";
+		collector.id = "collector"; collector.atmosphereId = "shared-name";
 		collector.coolingLoopId = "shared-name"; collector.thermalClass = "moderate";
 		collector.destStoreId = "raw"; collector.maxRateKgPerS = 0.01; collector.targetRelativeHumidity = 0.5;
 		s.waterCollectors = {collector};
@@ -1406,8 +1397,7 @@ namespace
 		sink.startingTemperatureC = 10; sink.minTemperatureC = -50; sink.maxTemperatureC = 200;
 		s.thermalReservoirs = {sink};
 		core::ElectrolyzerSettings e;
-		e.id = "splitter"; e.hazardClass = "normal";
-		e.waterStoreId = "not-water"; e.oxygenStoreId = "not-oxygen"; e.hydrogenStoreId = "not-hydrogen";
+		e.id = "splitter";		e.waterStoreId = "not-water"; e.oxygenStoreId = "not-oxygen"; e.hydrogenStoreId = "not-hydrogen";
 		e.thermalClass = "low"; e.heatSinkId = "sink"; e.specificEnergyKWhPerKgWater = 4.5;
 		e.maxSinkTemperatureC = 60;
 		s.electrolyzers = {e}; // known inactive process still supplies validated identity evidence

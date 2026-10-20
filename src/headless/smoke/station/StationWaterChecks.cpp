@@ -847,12 +847,10 @@ namespace
 			settings.heaterCapacityKW = 0.0;
 			return settings;
 		};
-		auto collector = [](std::string const& id, std::string const& hazard,
-			double rate, double targetRh)
+		auto collector = [](std::string const& id, double rate, double targetRh)
 		{
 			core::WaterCollectorSettings settings;
 			settings.id = id;
-			settings.hazardClass = hazard;
 			settings.atmosphereId = "habitat";
 			settings.coolingLoopId = "chilled";
 			settings.thermalClass = "moderate";
@@ -864,11 +862,10 @@ namespace
 		// 0.005 kg/s throughput at 80% recovery: 0.004 kg/s treated and
 		// 0.001 kg/s concentrate, costing 9 kW (0.005 kg/s x 0.5 kWh/kg
 		// x 3600 s/h) and 5e-5 consumable units per second.
-		auto treatment = [](std::string const& id, std::string const& hazard)
+		auto treatment = [](std::string const& id)
 		{
 			core::WaterTreatmentSettings settings;
 			settings.id = id;
-			settings.hazardClass = hazard;
 			settings.sourceStoreId = "raw";
 			settings.treatedStoreId = "treated";
 			settings.concentrateStoreId = "concentrate";
@@ -933,12 +930,12 @@ namespace
 			settings.thermalReservoirs = { reservoir("sink", "moderate") };
 			settings.coolantLoops = { coldLoop("chilled", 100.0, 5.0) };
 			std::string diagnostic;
-			settings.waterCollectors = { collector("cond", "normal", 0.01, 0.5) };
+			settings.waterCollectors = { collector("cond", 0.01, 0.5) };
 			settings.waterCollectors[0].atmosphereId = "ghost";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("unknown atmosphere compartment") != std::string::npos,
 				"a collector serving an unknown compartment was accepted");
-			settings.waterCollectors = { collector("cond", "normal", 0.01, 0.5) };
+			settings.waterCollectors = { collector("cond", 0.01, 0.5) };
 			settings.waterCollectors[0].coolingLoopId = "ghost";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("unknown coolant loop") != std::string::npos,
@@ -946,28 +943,24 @@ namespace
 			// #752: a hazardous-class collector on a normal compartment is
 			// accepted - condensate is just water, whatever air it
 			// condensed from, and a collector may serve any compartment.
-			settings.waterCollectors = { collector("cond", "hazardous", 0.01, 0.5) };
+			settings.waterCollectors = { collector("cond", 0.01, 0.5) };
 			require(core::validateStationSystemsSettings(settings, diagnostic),
 				("a collector serving across the class boundary was refused: " + diagnostic).c_str());
-			settings.waterCollectors = { collector("cond", "plasma", 0.01, 0.5) };
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("unknown water hazard class") != std::string::npos,
-				"an undeclared water hazard class was accepted");
-			settings.waterCollectors = { collector("cond", "normal", 0.01, 1.5) };
+			settings.waterCollectors = { collector("cond", 0.01, 1.5) };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("target relative humidity") != std::string::npos,
 				"a humidity target above one was accepted");
-			settings.waterCollectors = { collector("cond", "normal", -1.0, 0.5) };
+			settings.waterCollectors = { collector("cond", -1.0, 0.5) };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("maximum collection rate") != std::string::npos,
 				"a negative collection rate was accepted");
-			settings.waterCollectors = { collector("cond", "normal", 0.01, 0.5) };
+			settings.waterCollectors = { collector("cond", 0.01, 0.5) };
 			settings.waterCollectors[0].thermalClass = "warm";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("does not match coolant loop") != std::string::npos,
 				"a collector whose service class mismatches its loop was accepted");
 			// A compound destination would turn pure condensate into dry mass.
-			settings.waterCollectors = { collector("cond", "normal", 0.01, 0.5) };
+			settings.waterCollectors = { collector("cond", 0.01, 0.5) };
 			settings.stores = waterStores();
 			core::ResourceCompositionSettings muddy;
 			muddy.moisture = 0.5;
@@ -979,23 +972,23 @@ namespace
 			// treatment is accepted (#751): the class no longer reserves
 			// a store for one process, and the shared inventory is the
 			// consequence.
-			settings.waterCollectors = { collector("cond", "normal", 0.01, 0.5) };
+			settings.waterCollectors = { collector("cond", 0.01, 0.5) };
 			settings.stores = waterStores();
-			settings.waterTreatments = { treatment("plant", "hazardous") };
+			settings.waterTreatments = { treatment("plant") };
 			require(core::validateStationSystemsSettings(settings, diagnostic),
 				"a raw water store shared by normal and hazardous processes was refused");
-			settings.waterTreatments = { treatment("plant", "normal") };
+			settings.waterTreatments = { treatment("plant") };
 			settings.waterTreatments[0].recoveryRatio = 0.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("recovery ratio") != std::string::npos,
 				"a recovery ratio of zero was accepted");
-			settings.waterTreatments = { treatment("plant", "normal") };
+			settings.waterTreatments = { treatment("plant") };
 			settings.waterTreatments[0].treatedStoreId = "raw";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("distinct source, treated and concentrate")
 					!= std::string::npos,
 				"a treatment drawing and delivering to one store was accepted");
-			settings.waterTreatments = { treatment("plant", "normal") };
+			settings.waterTreatments = { treatment("plant") };
 			settings.waterTreatments[0].specificEnergyKWhPerKg = -1.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("specific energy") != std::string::npos,
@@ -1003,7 +996,7 @@ namespace
 			settings.waterTreatments = {};
 			std::vector<core::WaterCollectorSettings> tooMany;
 			for (size_t index = 0; index <= core::MaxStationWaterCollectors; ++index)
-				tooMany.push_back(collector("c" + std::to_string(index), "normal", 0.01, 0.5));
+				tooMany.push_back(collector("c" + std::to_string(index), 0.01, 0.5));
 			settings.waterCollectors = tooMany;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("limited to") != std::string::npos,
@@ -1019,8 +1012,8 @@ namespace
 			core::World world("WaterNominal", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
 			require(waterConfigure(world, waterStores(), { coldLoop("chilled", 100.0, 5.0) },
-				{ collector("cond", "normal", 0.01, 0.5) },
-				{ treatment("plant", "normal") }, 10.0).first, "nominal water recovery refused");
+				{ collector("cond", 0.01, 0.5) },
+				{ treatment("plant") }, 10.0).first, "nominal water recovery refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "nominal water recovery run failed");
 			auto const elapsed = 60.0 * dt;
@@ -1092,18 +1085,17 @@ namespace
 				require(std::abs(balance.residual) <= 1e-6,
 					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
 		}
-		// Every collector class has the same physical result against the
-		// classless coolant loop (#757). Configuration also constructs the
-		// bundled Lua mirror, so its constructor must accept these
-		// combinations.
-		for (auto const* collectorClass : core::StationWaterHazardClasses)
+		// A classless collector has the same physical result against the
+		// classless coolant loop (#757, #758). Configuration also
+		// constructs the bundled Lua mirror, so its constructor must
+		// accept the combination.
 		{
 			core::World world("WaterCrossClass", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
 			auto const chilled = coldLoop("chilled", 100.0, 5.0);
 			auto const [ok, diagnostic] = waterConfigure(world, waterStores(), { chilled },
-				{ collector("cond", collectorClass, 0.01, 0.5) },
-				{ treatment("plant", "normal") }, 10.0);
+				{ collector("cond", 0.01, 0.5) },
+				{ treatment("plant") }, 10.0);
 			require(ok, ("a cross-class collector configuration was refused: " + diagnostic).c_str());
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "cross-class collection run failed");
@@ -1142,8 +1134,8 @@ namespace
 			// The array covers the loop pump (0.1 kW) and only 1.0 kW of the
 			// treatment's 9 kW demand.
 			require(waterConfigure(world, waterStores(), { coldLoop("chilled", 100.0, 5.0) },
-				{ collector("cond", "normal", 0.01, 0.5) },
-				{ treatment("plant", "normal") }, 1.1).first, "curtailed water setup refused");
+				{ collector("cond", 0.01, 0.5) },
+				{ treatment("plant") }, 1.1).first, "curtailed water setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "curtailed water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
@@ -1176,8 +1168,8 @@ namespace
 			world.pauseSimulation(); world.finishBuild();
 			// The array exactly covers the loop pump: nothing is left over.
 			require(waterConfigure(world, waterStores(), { coldLoop("chilled", 100.0, 5.0) },
-				{ collector("cond", "normal", 0.01, 0.5) },
-				{ treatment("plant", "normal") }, 0.1).first, "zero-power water setup refused");
+				{ collector("cond", 0.01, 0.5) },
+				{ treatment("plant") }, 0.1).first, "zero-power water setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "zero-power water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
@@ -1199,8 +1191,8 @@ namespace
 			core::World world("WaterNoCooling", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
 			require(waterConfigure(world, waterStores(), { coldLoop("chilled", 0.0, 5.0) },
-				{ collector("cond", "normal", 0.01, 0.5) },
-				{ treatment("plant", "normal") }, 1.0).first, "no-cooling water setup refused");
+				{ collector("cond", 0.01, 0.5) },
+				{ treatment("plant") }, 1.0).first, "no-cooling water setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "no-cooling water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
@@ -1223,8 +1215,8 @@ namespace
 			core::World world("WaterWarmSurface", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
 			require(waterConfigure(world, waterStores(), { coldLoop("chilled", 100.0, 30.0) },
-				{ collector("cond", "normal", 0.01, 0.5) },
-				{ treatment("plant", "normal") }, 1.0).first, "warm-surface water setup refused");
+				{ collector("cond", 0.01, 0.5) },
+				{ treatment("plant") }, 1.0).first, "warm-surface water setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "warm-surface water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
@@ -1238,8 +1230,8 @@ namespace
 			core::World world("WaterDryAir", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
 			require(waterConfigure(world, waterStores(), { coldLoop("chilled", 100.0, 5.0) },
-				{ collector("cond", "normal", 0.01, 0.8) },
-				{ treatment("plant", "normal") }, 1.0).first, "dry-air water setup refused");
+				{ collector("cond", 0.01, 0.8) },
+				{ treatment("plant") }, 1.0).first, "dry-air water setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(1200), "dry-air water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
@@ -1264,8 +1256,8 @@ namespace
 			auto stores = waterStores();
 			stores[1].capacity = 0.1;
 			require(waterConfigure(world, stores, { coldLoop("chilled", 100.0, 5.0) },
-				{ collector("cond", "normal", 0.01, 0.5) },
-				{ treatment("plant", "normal") }, 1.0).first, "full-treated water setup refused");
+				{ collector("cond", 0.01, 0.5) },
+				{ treatment("plant") }, 1.0).first, "full-treated water setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(1800), "full-treated water run failed");
 			auto const snap = world.getStationSystemsSnapshot();
@@ -1286,8 +1278,8 @@ namespace
 			auto stores = waterStores();
 			stores[3].startingQualified = 0.0001;
 			require(waterConfigure(world, stores, { coldLoop("chilled", 100.0, 5.0) },
-				{ collector("cond", "normal", 0.01, 0.5) },
-				{ treatment("plant", "normal") }, 1.0).first,
+				{ collector("cond", 0.01, 0.5) },
+				{ treatment("plant") }, 1.0).first,
 				"scarce-consumable water setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(300), "scarce-consumable water run failed");
@@ -1306,8 +1298,8 @@ namespace
 			core::World world("WaterReplay", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
 			require(waterConfigure(world, waterStores(), { coldLoop("chilled", 100.0, 5.0) },
-				{ collector("cond", "normal", 0.01, 0.5) },
-				{ treatment("plant", "normal") }, 1.0).first, "replay water setup refused");
+				{ collector("cond", 0.01, 0.5) },
+				{ treatment("plant") }, 1.0).first, "replay water setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(90), "replay water run failed");
 			auto const first = world.getStationSystemsSnapshot();
@@ -1338,8 +1330,8 @@ namespace
 			corrupt.pauseSimulation(); corrupt.finishBuild();
 			auto const result = waterConfigure(corrupt, waterStores(),
 				{ coldLoop("chilled", 100.0, 5.0) },
-				{ collector("cond", "normal", 0.01, 0.5) },
-				{ treatment("plant", "normal") }, 1.0);
+				{ collector("cond", 0.01, 0.5) },
+				{ treatment("plant") }, 1.0);
 			require(!result.first && result.second.find("corrupt water collector descriptor crossing")
 				!= std::string::npos
 				&& !corrupt.getStationSystemsSnapshot().enabled,
@@ -1360,8 +1352,8 @@ namespace
 			corrupt.pauseSimulation(); corrupt.finishBuild();
 			auto const result = waterConfigure(corrupt, waterStores(),
 				{ coldLoop("chilled", 100.0, 5.0) },
-				{ collector("cond", "normal", 0.01, 0.5) },
-				{ treatment("plant", "normal") }, 1.0);
+				{ collector("cond", 0.01, 0.5) },
+				{ treatment("plant") }, 1.0);
 			require(!result.first && result.second.find("corrupt water treatment descriptor crossing")
 				!= std::string::npos
 				&& !corrupt.getStationSystemsSnapshot().enabled,
@@ -1413,11 +1405,10 @@ namespace
 		};
 		// 10 kW installed, 60% of the hydrogen's chemical energy to
 		// electricity, waste heat into the class-matched sink.
-		auto fuelCell = [](std::string const& id, std::string const& hazard)
+		auto fuelCell = [](std::string const& id)
 		{
 			core::FuelCellSettings settings;
 			settings.id = id;
-			settings.hazardClass = hazard;
 			settings.hydrogenStoreId = "h2";
 			settings.oxygenStoreId = "o2";
 			settings.waterStoreId = "productWater";
@@ -1462,37 +1453,37 @@ namespace
 			settings.stores = baseStores();
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
 			std::string diagnostic;
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			settings.fuelCells[0].hydrogenStoreId = "ghost";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("hydrogen reactant store 'ghost' does not exist") != std::string::npos,
 				"a fuel cell fed by an unknown hydrogen store was accepted");
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			settings.fuelCells[0].waterStoreId = "ghost";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("product water store 'ghost' does not exist") != std::string::npos,
 				"a fuel cell with an unknown product water store was accepted");
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			settings.fuelCells[0].efficiency = 0.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("efficiency must be greater than 0") != std::string::npos,
 				"a zero-efficiency fuel cell was accepted");
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			settings.fuelCells[0].efficiency = 1.5;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("efficiency must be greater than 0") != std::string::npos,
 				"an over-unity fuel cell was accepted");
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			settings.fuelCells[0].commandedOutputKW = 12.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("within the installed rating") != std::string::npos,
 				"a commanded output above the installed rating was accepted");
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			settings.fuelCells[0].maxSinkTemperatureC = -300.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("above absolute zero") != std::string::npos,
 				"a maximum sink temperature below absolute zero was accepted");
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			settings.fuelCells[0].thermalClass = "moderate";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("does not match heat sink") != std::string::npos,
@@ -1500,12 +1491,12 @@ namespace
 			// A gas store shared between a normal and a hazardous process
 			// is accepted (#751): both cells wire to it and the shared
 			// inventory is the consequence.
-			settings.fuelCells = { fuelCell("cell", "normal"), fuelCell("hcell", "hazardous") };
+			settings.fuelCells = { fuelCell("cell"), fuelCell("hcell") };
 			require(core::validateStationSystemsSettings(settings, diagnostic),
 				"a shared gas store across hazard classes was refused");
 			std::vector<core::FuelCellSettings> tooMany;
 			for (size_t index = 0; index <= core::MaxStationFuelCells; ++index)
-				tooMany.push_back(fuelCell("cell" + std::to_string(index), "normal"));
+				tooMany.push_back(fuelCell("cell" + std::to_string(index)));
 			settings = core::StationSystemsSettings{};
 			settings.enabled = true;
 			settings.stores = baseStores();
@@ -1522,7 +1513,7 @@ namespace
 			settings.enabled = true;
 			settings.stores = baseStores();
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			settings.fuelCells[0].oxygenStoreId = "h2";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("both the hydrogen and the oxygen reactant") != std::string::npos,
@@ -1540,7 +1531,7 @@ namespace
 			core::StationSystemsSettings settings;
 			settings.stores = baseStores();
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			core::EquipmentLoadSettings load;
 			load.id = "shop";
 			load.electricalDemandKW = 5.0;
@@ -1610,7 +1601,7 @@ namespace
 			core::StationSystemsSettings settings;
 			settings.stores = stores;
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			require(configure(world, settings), "dry hydrogen setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(600), "dry hydrogen run failed");
@@ -1647,7 +1638,7 @@ namespace
 			core::StationSystemsSettings settings;
 			settings.stores = stores;
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			settings.fuelCells[0].oxygenStoreId = "fcO2";
 			core::ResourceTransferSettings surplus;
 			surplus.id = "eclssSurplus";
@@ -1693,7 +1684,7 @@ namespace
 			core::StationSystemsSettings settings;
 			settings.stores = stores;
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			settings.fuelCells[0].oxygenStoreId = "fcO2";
 			core::ResourceTransferSettings surplus;
 			surplus.id = "eclssSurplus";
@@ -1731,7 +1722,7 @@ namespace
 			core::StationSystemsSettings settings;
 			settings.stores = stores;
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			require(configure(world, settings), "blocked-water setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(600), "blocked-water run failed");
@@ -1757,7 +1748,7 @@ namespace
 			core::StationSystemsSettings settings;
 			settings.stores = baseStores();
 			settings.thermalReservoirs = { reservoir("sink", "low", 90.0) };
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			require(configure(world, settings), "hot-sink fuel-cell setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(600), "hot-sink fuel-cell run failed");
@@ -1783,7 +1774,7 @@ namespace
 			core::StationSystemsSettings settings;
 			settings.stores = stores;
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			require(configure(world, settings), "protected-reactant setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(600), "protected-reactant run failed");
@@ -1816,7 +1807,6 @@ namespace
 			settings.solarArrays = { field };
 			core::ElectrolyzerSettings cell;
 			cell.id = "electro";
-			cell.hazardClass = "normal";
 			cell.waterStoreId = "water";
 			cell.oxygenStoreId = "o2";
 			cell.hydrogenStoreId = "h2";
@@ -1831,7 +1821,6 @@ namespace
 			// feeds from: the loop closes on mass, and only energy is lost.
 			core::FuelCellSettings backup;
 			backup.id = "backup";
-			backup.hazardClass = "normal";
 			backup.hydrogenStoreId = "h2";
 			backup.oxygenStoreId = "o2";
 			backup.waterStoreId = "water";
@@ -1908,7 +1897,7 @@ namespace
 			settings.observationIntervalSeconds = 1.0f;
 			settings.stores = baseStores();
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
-			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells = { fuelCell("cell") };
 			auto const result = corrupt.configureStationSystems(settings, false, &diagnostic);
 			require(!result && !corrupt.getStationSystemsSnapshot().enabled,
 				"corrupt fuel-cell sandbox crossing not contained at construction");

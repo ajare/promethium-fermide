@@ -200,7 +200,6 @@ namespace coupled_rig
 		// --- Carbon loop -------------------------------------------------
 		core::Co2CaptureSettings scrubHab;
 		scrubHab.id = "scrubHab";
-		scrubHab.hazardClass = "normal";
 		scrubHab.atmosphereId = "hab";
 		scrubHab.captureStoreId = "co2";
 		scrubHab.consumableStoreId = "captureMedia";
@@ -210,7 +209,6 @@ namespace coupled_rig
 		scrubHab.priority = 1;
 		core::Co2CaptureSettings scrubGreen;
 		scrubGreen.id = "scrubGreen";
-		scrubGreen.hazardClass = "normal";
 		scrubGreen.atmosphereId = "greenhouse";
 		scrubGreen.captureStoreId = "co2";
 		scrubGreen.maxRateKgPerS = 0.004;
@@ -219,7 +217,6 @@ namespace coupled_rig
 
 		core::SabatierReactorSettings sabatier;
 		sabatier.id = "sab";
-		sabatier.hazardClass = "normal";
 		sabatier.co2StoreId = "co2";
 		sabatier.hydrogenStoreId = "h2";
 		sabatier.methaneStoreId = "methane";
@@ -234,7 +231,6 @@ namespace coupled_rig
 
 		core::MethaneProcessorSettings pyrolysis;
 		pyrolysis.id = "pyro";
-		pyrolysis.hazardClass = "normal";
 		pyrolysis.methaneStoreId = "methane";
 		pyrolysis.hydrogenStoreId = "h2";
 		pyrolysis.carbonStoreId = "carbonWaste";
@@ -249,7 +245,6 @@ namespace coupled_rig
 		// --- Water chain -------------------------------------------------
 		core::WaterTreatmentSettings treatment;
 		treatment.id = "wtr";
-		treatment.hazardClass = "normal";
 		treatment.sourceStoreId = "rawWater";
 		treatment.treatedStoreId = "fresh";
 		treatment.concentrateStoreId = "concentrate";
@@ -262,7 +257,6 @@ namespace coupled_rig
 
 		core::ElectrolyzerSettings electrolyzer;
 		electrolyzer.id = "lyzer";
-		electrolyzer.hazardClass = "normal";
 		electrolyzer.waterStoreId = "fresh";
 		electrolyzer.oxygenStoreId = ""; // delivered to the hab compartment
 		electrolyzer.hydrogenStoreId = "h2";
@@ -277,7 +271,6 @@ namespace coupled_rig
 		// --- Microbial nutrient loop -------------------------------------
 		core::MicrobialProcessorSettings digester;
 		digester.id = "dig";
-		digester.hazardClass = "normal";
 		digester.feedStoreId = "organicWaste";
 		digester.oxygenStoreId = "oxygen";
 		digester.waterStoreId = "fresh";

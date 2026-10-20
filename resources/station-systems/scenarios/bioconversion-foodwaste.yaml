@@ -80,7 +80,6 @@ stationSystems:
     protectedReserve: 0.0
   microbialProcessors:
   - id: hotDigester
-    hazardClass: normal
     feedStoreId: spoiledFood
     oxygenStoreId: processOxygen
     waterStoreId: fresh

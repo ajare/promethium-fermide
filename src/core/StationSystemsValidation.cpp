@@ -299,10 +299,6 @@ using namespace station_detail;
 		if (collector.id.size() > MaxStationStoreIdLength)
 			return refuse("Station water collector id exceeds "
 				+ std::to_string(MaxStationStoreIdLength) + " characters");
-		if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
-			collector.hazardClass) == StationWaterHazardClasses.end())
-			return refuse(where + " has unknown water hazard class '" + collector.hazardClass
-				+ "'; declared classes are: normal, hazardous");
 		if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
 			collector.thermalClass) == StationThermalServiceClasses.end())
 			return refuse(where + " has unknown thermal service class '" + collector.thermalClass
@@ -396,10 +392,6 @@ using namespace station_detail;
 		if (treatment.id.size() > MaxStationStoreIdLength)
 			return refuse("Station water treatment id exceeds "
 				+ std::to_string(MaxStationStoreIdLength) + " characters");
-		if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
-			treatment.hazardClass) == StationWaterHazardClasses.end())
-			return refuse(where + " has unknown water hazard class '" + treatment.hazardClass
-				+ "'; declared classes are: normal, hazardous");
 		if (!std::isfinite(treatment.throughputKgPerS) || treatment.throughputKgPerS < 0.0)
 			return refuse(where + " throughput must be finite and non-negative");
 		if (!std::isfinite(treatment.recoveryRatio) || treatment.recoveryRatio <= 0.0
@@ -504,10 +496,6 @@ using namespace station_detail;
 		if (electrolyzer.id.size() > MaxStationStoreIdLength)
 			return refuse("Station electrolyzer id exceeds "
 				+ std::to_string(MaxStationStoreIdLength) + " characters");
-		if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
-			electrolyzer.hazardClass) == StationWaterHazardClasses.end())
-			return refuse(where + " has unknown hazard class '" + electrolyzer.hazardClass
-				+ "'; declared classes are: normal, hazardous");
 		if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
 			electrolyzer.thermalClass) == StationThermalServiceClasses.end())
 			return refuse(where + " has unknown thermal service class '" + electrolyzer.thermalClass
@@ -606,10 +594,6 @@ using namespace station_detail;
 		if (capture.id.size() > MaxStationStoreIdLength)
 			return refuse("Station CO2 capture machine id exceeds "
 				+ std::to_string(MaxStationStoreIdLength) + " characters");
-		if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
-			capture.hazardClass) == StationWaterHazardClasses.end())
-			return refuse(where + " has unknown hazard class '" + capture.hazardClass
-				+ "'; declared classes are: normal, hazardous");
 		if (!std::isfinite(capture.maxRateKgPerS) || capture.maxRateKgPerS < 0.0)
 			return refuse(where + " capture capacity must be finite and non-negative");
 		if (!std::isfinite(capture.specificEnergyKWhPerKg) || capture.specificEnergyKWhPerKg < 0.0)
@@ -1774,10 +1758,6 @@ using namespace station_detail;
 				return refuse("Station fuel cell id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!gasIds.insert(cell.id).second) return refuse(where + " id is duplicated");
-			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
-				cell.hazardClass) == StationWaterHazardClasses.end())
-				return refuse(where + " has unknown hazard class '" + cell.hazardClass
-					+ "'; declared classes are: normal, hazardous");
 			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
 				cell.thermalClass) == StationThermalServiceClasses.end())
 				return refuse(where + " has unknown thermal service class '" + cell.thermalClass
@@ -1845,10 +1825,6 @@ using namespace station_detail;
 				return refuse("Station Sabatier reactor id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!gasIds.insert(reactor.id).second) return refuse(where + " id is duplicated");
-			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
-				reactor.hazardClass) == StationWaterHazardClasses.end())
-				return refuse(where + " has unknown hazard class '" + reactor.hazardClass
-					+ "'; declared classes are: normal, hazardous");
 			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
 				reactor.thermalClass) == StationThermalServiceClasses.end())
 				return refuse(where + " has unknown thermal service class '" + reactor.thermalClass
@@ -1915,10 +1891,6 @@ using namespace station_detail;
 				return refuse("Station methane processor id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!gasIds.insert(processor.id).second) return refuse(where + " id is duplicated");
-			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
-				processor.hazardClass) == StationWaterHazardClasses.end())
-				return refuse(where + " has unknown hazard class '" + processor.hazardClass
-					+ "'; declared classes are: normal, hazardous");
 			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
 				processor.thermalClass) == StationThermalServiceClasses.end())
 				return refuse(where + " has unknown thermal service class '" + processor.thermalClass
@@ -2223,10 +2195,6 @@ using namespace station_detail;
 				return refuse("Station microbial processor id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!microbialIds.insert(processor.id).second) return refuse(where + " id is duplicated");
-			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
-				processor.hazardClass) == StationWaterHazardClasses.end())
-				return refuse(where + " has unknown hazard class '" + processor.hazardClass
-					+ "'; declared classes are: normal, hazardous");
 			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
 				processor.thermalClass) == StationThermalServiceClasses.end())
 				return refuse(where + " has unknown thermal service class '" + processor.thermalClass

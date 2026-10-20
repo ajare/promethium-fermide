@@ -23,8 +23,7 @@ inline core::StationSystemsSettings microbialObservationFixture()
 	s.stores[0].composition = feed;
 	core::ThermalReservoirSettings sink; sink.id = "sink"; sink.thermalClass = "low";
 	sink.heatCapacityKJPerK = 100000; sink.startingTemperatureC = 20; s.thermalReservoirs = {sink};
-	core::MicrobialProcessorSettings p; p.id = "digester"; p.hazardClass = "normal";
-	p.feedStoreId = "waste"; p.oxygenStoreId = "oxygen"; p.waterStoreId = "water";
+	core::MicrobialProcessorSettings p; p.id = "digester";	p.feedStoreId = "waste"; p.oxygenStoreId = "oxygen"; p.waterStoreId = "water";
 	p.consumableStoreId = "media"; p.stockStoreId = "stock"; p.nutrientStoreId = "nutrients";
 	p.recoveredWaterStoreId = "recovered-water"; p.co2StoreId = "co2"; p.residueStoreId = "residue";
 	p.heatSinkId = "sink"; p.thermalClass = "low"; p.rateKgPerS = 0.001;

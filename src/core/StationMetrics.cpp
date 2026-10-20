@@ -301,10 +301,8 @@ namespace core
 			scalar("Fuel cell", c.id, "Generation", StationMetricRole::Generation, cells,
 				CellRead{[](auto const& a) { return a.lastOutputKW; }},
 				CellRead{[](auto const& a) { return a.commandedOutputKW; }});
-			result.back().metric.hazardClass = c.hazardClass;
 			scalar("Fuel cell", c.id, "Production waste heat", StationMetricRole::Output, cells,
 				CellRead{[](auto const& a) { return a.lastWasteHeatKW; }}, CellRead{});
-			result.back().metric.hazardClass = c.hazardClass;
 			result.back().metric.thermalClass = c.thermalClass;
 			connection("Fuel cell", c.id, "Backup generation", "Pool delivery", StationMetricRole::Output, 1);
 			connection("Fuel cell", c.id, "Backup generation", "Generation cable loss", StationMetricRole::Loss, 2);

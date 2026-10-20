@@ -16,7 +16,7 @@ void appendStationMicrobialObservations(StationSystemsSettings const& settings,
 			auto& d = o.metric;
 			d.id = "exchange/Microbial processor/" + e.id + "/" + role;
 			d.equipmentType = "Microbial processor"; d.instanceId = e.id;
-			d.exchangeRole = std::move(role); d.role = direction; d.hazardClass = e.hazardClass;
+			d.exchangeRole = std::move(role); d.role = direction;
 			if (!power) { d.quantity = StationPhysicalQuantity::MassRate; d.unit = StationCanonicalUnit::KilogramPerSecond; }
 			else d.thermalClass = e.thermalClass;
 			if (request) d.requestedSemantics = StationRequestedSemantics::Demand;

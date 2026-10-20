@@ -308,7 +308,6 @@ namespace
 		draft.settings.cropPopulations.push_back(crop);
 		core::WaterTreatmentSettings plant;
 		plant.id = "plant";
-		plant.hazardClass = "normal";
 		plant.recoveryRatio = 0.8;
 		plant.sourceStoreId = "ghostSource";
 		plant.treatedStoreId = "ghostTreated";
@@ -1254,7 +1253,6 @@ namespace
 		potable.startingQualified = 50.0;
 		core::WaterTreatmentSettings plant;
 		plant.id = "plant";
-		plant.hazardClass = "hazardous";
 		plant.sourceStoreId = "hazRaw";
 		plant.treatedStoreId = "hazTreated";
 		plant.concentrateStoreId = "hazConcentrate";
@@ -1290,11 +1288,11 @@ namespace
 			auto const path = directory / (std::string("containment") + suffix);
 			original.saveTo(path.string());
 			auto const document = readFile(path);
-			require(document.find("hazardClass") != std::string::npos
+			require(document.find("hazardClass") == std::string::npos
 				&& document.find("clearanceStoreId") == std::string::npos
 				&& document.find("clearancePerKg") == std::string::npos
 				&& document.find("releaseToNormalClass") == std::string::npos,
-				"document is missing authored fields or contains retired treatment fields");
+				"document carries retired hazard-class or clearance fields");
 			for (auto const* liveState : {"releaseCleared", "clearanceUsedTotal",
 				"lastClearanceRequested", "lastClearanceUsed", "lastClearanceUnmet",
 				"filtrationCompleted", "treatmentEvidenced", "heldKg", "acceptedKg"})
@@ -1326,17 +1324,6 @@ namespace
 			catch (std::exception const&) { refused = true; }
 			require(refused, "a pre-88 document carrying containment fields was silently accepted");
 		}
-		// Malformed authored values in a file are rejected.
-		{
-			auto malformed = withField;
-			replaceAll(malformed, "hazardClass: hazardous", "hazardClass: radioactive");
-			auto const malformedPath = directory / "bad-hazard-class.world.yaml";
-			writeFile(malformedPath, malformed);
-			bool refused = false;
-			try { (void)core::loadWorldDocument(malformedPath); }
-			catch (std::exception const&) { refused = true; }
-			require(refused, "an unknown store hazard class was accepted from a file");
-		}
 		// Retired fields are refused, including inert/default values and older schemas.
 		for (auto const* field : {"clearanceStoreId: nowhere", "clearancePerKg: 0", "releaseToNormalClass: false"})
 		for (auto const* version : {"102", "101"})
@@ -1356,6 +1343,28 @@ namespace
 					&& message.find("conversion required") != std::string::npos;
 			}
 			require(refused, std::string("retired treatment field did not produce a named conversion diagnostic: ") + field + " version " + version);
+		}
+		// The retired process hazardClass is refused with a named
+		// conversion diagnostic at any schema version (#758).
+		for (auto const* version : {"102", "90"})
+		{
+			auto retired = withField;
+			replaceAll(retired, "version: 102", std::string("version: ") + version);
+			auto const at = retired.find("sourceStoreId: hazRaw");
+			require(at != std::string::npos, "water treatment anchor missing from the document");
+			auto const lineStart = retired.rfind('\n', at) + 1;
+			retired.insert(lineStart, retired.substr(lineStart, at - lineStart)
+				+ "hazardClass: normal\n");
+			auto const retiredPath = directory / ("retired-process-class-" + std::string(version) + ".world.yaml");
+			writeFile(retiredPath, retired);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(retiredPath); }
+			catch (std::exception const& error) {
+				auto const message = std::string(error.what());
+				refused = message.find("hazardClass") != std::string::npos
+					&& message.find("conversion required") != std::string::npos;
+			}
+			require(refused, std::string("the retired process hazardClass was accepted at version ") + version);
 		}
 		for (auto const* field : {"clearanceStoreId: nowhere", "clearancePerKg: 0", "releaseToNormalClass: false"})
 		{
@@ -2870,7 +2879,6 @@ void waterFiles(smoke::Context const& context)
 	field.capacityKW = 10.0;
 	core::WaterCollectorSettings collector;
 	collector.id = "cond";
-	collector.hazardClass = "normal";
 	collector.atmosphereId = "habitat";
 	collector.coolingLoopId = "chilled";
 	collector.thermalClass = "moderate";
@@ -2879,7 +2887,6 @@ void waterFiles(smoke::Context const& context)
 	collector.targetRelativeHumidity = 0.5;
 	core::WaterTreatmentSettings treatment;
 	treatment.id = "plant";
-	treatment.hazardClass = "normal";
 	treatment.sourceStoreId = "raw";
 	treatment.treatedStoreId = "treated";
 	treatment.concentrateStoreId = "concentrate";
@@ -2991,16 +2998,6 @@ void waterFiles(smoke::Context const& context)
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a collector on an unknown coolant loop was accepted from a file");
 	}
-	{
-		auto malformed = withField;
-		replaceAll(malformed, "hazardClass: normal", "hazardClass: plasma");
-		auto const malformedPath = directory / "malformed-water-hazard.world.yaml";
-		writeFile(malformedPath, malformed);
-		bool refused = false;
-		try { (void)core::loadWorldDocument(malformedPath); }
-		catch (std::exception const&) { refused = true; }
-		require(refused, "an undeclared water hazard class was accepted from a file");
-	}
 }
 
 void gasFiles(smoke::Context const& context)
@@ -3041,7 +3038,6 @@ void gasFiles(smoke::Context const& context)
 	field.capacityKW = 100.0;
 	core::ElectrolyzerSettings cell;
 	cell.id = "cell";
-	cell.hazardClass = "normal";
 	cell.waterStoreId = "water";
 	cell.oxygenStoreId = "o2";
 	cell.hydrogenStoreId = "h2";
@@ -3053,7 +3049,6 @@ void gasFiles(smoke::Context const& context)
 	cell.priority = 2;
 	core::Co2CaptureSettings capture;
 	capture.id = "scrub";
-	capture.hazardClass = "normal";
 	capture.atmosphereId = "habitat";
 	capture.captureStoreId = "captured";
 	capture.consumableStoreId = "scrubberMedia";
@@ -3175,16 +3170,6 @@ void gasFiles(smoke::Context const& context)
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a capture machine with an unknown capture store was accepted from a file");
 	}
-	{
-		auto malformed = withField;
-		replaceAll(malformed, "hazardClass: normal", "hazardClass: plasma");
-		auto const malformedPath = directory / "malformed-gas-hazard.world.yaml";
-		writeFile(malformedPath, malformed);
-		bool refused = false;
-		try { (void)core::loadWorldDocument(malformedPath); }
-		catch (std::exception const&) { refused = true; }
-		require(refused, "an undeclared gas hazard class was accepted from a file");
-	}
 }
 
 void fuelCellFiles(smoke::Context const& context)
@@ -3212,7 +3197,6 @@ void fuelCellFiles(smoke::Context const& context)
 	sink.maxTemperatureC = 200.0;
 	core::FuelCellSettings cell;
 	cell.id = "backup";
-	cell.hazardClass = "normal";
 	cell.hydrogenStoreId = "h2";
 	cell.oxygenStoreId = "o2";
 	cell.waterStoreId = "productWater";
@@ -3320,16 +3304,6 @@ void fuelCellFiles(smoke::Context const& context)
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a fuel cell on an unknown heat sink was accepted from a file");
 	}
-	{
-		auto malformed = withField;
-		replaceAll(malformed, "hazardClass: normal", "hazardClass: plasma");
-		auto const malformedPath = directory / "malformed-cell-hazard.world.yaml";
-		writeFile(malformedPath, malformed);
-		bool refused = false;
-		try { (void)core::loadWorldDocument(malformedPath); }
-		catch (std::exception const&) { refused = true; }
-		require(refused, "an undeclared fuel-cell hazard class was accepted from a file");
-	}
 }
 
 void carbonRecoveryFiles(smoke::Context const& context)
@@ -3360,7 +3334,6 @@ void carbonRecoveryFiles(smoke::Context const& context)
 	field.capacityKW = 100.0;
 	core::SabatierReactorSettings reactor;
 	reactor.id = "sabatier";
-	reactor.hazardClass = "normal";
 	reactor.co2StoreId = "co2";
 	reactor.hydrogenStoreId = "h2";
 	reactor.methaneStoreId = "methane";
@@ -3373,7 +3346,6 @@ void carbonRecoveryFiles(smoke::Context const& context)
 	reactor.priority = 2;
 	core::MethaneProcessorSettings processor;
 	processor.id = "pyrolysis";
-	processor.hazardClass = "normal";
 	processor.methaneStoreId = "methane";
 	processor.hydrogenStoreId = "h2";
 	processor.carbonStoreId = "carbon";
@@ -3500,16 +3472,6 @@ void carbonRecoveryFiles(smoke::Context const& context)
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a carbon-recovery sink temperature below absolute zero was accepted from a file");
 	}
-	{
-		auto malformed = withField;
-		replaceAll(malformed, "hazardClass: normal", "hazardClass: plasma");
-		auto const malformedPath = directory / "malformed-carbon-hazard.world.yaml";
-		writeFile(malformedPath, malformed);
-		bool refused = false;
-		try { (void)core::loadWorldDocument(malformedPath); }
-		catch (std::exception const&) { refused = true; }
-		require(refused, "an undeclared carbon-recovery hazard class was accepted from a file");
-	}
 	// An aliased stream role (#599) is refused from a file with the
 	// validation diagnostic: the reactor's product water pointed at the
 	// methane store would have spent one store's headroom twice on the
@@ -3592,7 +3554,6 @@ void nutrientRecoveryFiles(smoke::Context const& context)
 	field.capacityKW = 100.0;
 	core::MicrobialProcessorSettings processor;
 	processor.id = "digester";
-	processor.hazardClass = "normal";
 	processor.feedStoreId = "waste";
 	processor.oxygenStoreId = "oxygen";
 	processor.waterStoreId = "processWater";
@@ -4133,21 +4094,20 @@ void powerChainFiles(smoke::Context const& context)
 	generator.maxRampKWPerSecond = 2.0;
 	settings.generators = {generator};
 	core::FuelCellSettings cell;
-	cell.id = "cell1"; cell.hazardClass = "normal"; cell.thermalClass = "low";
+	cell.id = "cell1"; cell.thermalClass = "low";
 	cell.ratedOutputKW = 10.0; cell.efficiency = 0.6;
 	cell.hydrogenStoreId = "h2"; cell.oxygenStoreId = "o2";
 	cell.waterStoreId = "rawwater"; cell.heatSinkId = "coldSink";
 	settings.fuelCells = {cell};
 	core::SabatierReactorSettings reactor;
-	reactor.id = "sab1"; reactor.hazardClass = "normal"; reactor.thermalClass = "low";
+	reactor.id = "sab1"; reactor.thermalClass = "low";
 	reactor.rateKgPerS = 0.001;
 	reactor.co2StoreId = "co2"; reactor.hydrogenStoreId = "h2";
 	reactor.methaneStoreId = "ch4"; reactor.waterStoreId = "rawwater";
 	reactor.heatSinkId = "coldSink";
 	settings.sabatierReactors = {reactor};
 	core::MethaneProcessorSettings processor;
-	processor.id = "mp1"; processor.hazardClass = "normal";
-	processor.thermalClass = "low"; processor.rateKgPerS = 0.001;
+	processor.id = "mp1";	processor.thermalClass = "low"; processor.rateKgPerS = 0.001;
 	processor.specificEnergyKWhPerKgCH4 = 2.0;
 	processor.methaneStoreId = "ch4"; processor.hydrogenStoreId = "h2";
 	processor.carbonStoreId = "carbon"; processor.heatSinkId = "coldSink";

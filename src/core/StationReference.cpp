@@ -489,7 +489,6 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", collector.id);
-				serializer.writeString("hazardClass", collector.hazardClass);
 				serializer.writeString("atmosphereId", collector.atmosphereId);
 				serializer.writeString("coolingLoopId", collector.coolingLoopId);
 				serializer.writeString("thermalClass", collector.thermalClass);
@@ -511,7 +510,6 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", treatment.id);
-				serializer.writeString("hazardClass", treatment.hazardClass);
 				serializer.writeString("sourceStoreId", treatment.sourceStoreId);
 				serializer.writeString("treatedStoreId", treatment.treatedStoreId);
 				serializer.writeString("concentrateStoreId", treatment.concentrateStoreId);
@@ -543,7 +541,6 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", electrolyzer.id);
-				serializer.writeString("hazardClass", electrolyzer.hazardClass);
 				serializer.writeString("waterStoreId", electrolyzer.waterStoreId);
 				serializer.writeString("oxygenStoreId", electrolyzer.oxygenStoreId);
 				serializer.writeString("hydrogenStoreId", electrolyzer.hydrogenStoreId);
@@ -570,7 +567,6 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", capture.id);
-				serializer.writeString("hazardClass", capture.hazardClass);
 				serializer.writeString("atmosphereId", capture.atmosphereId);
 				serializer.writeString("captureStoreId", capture.captureStoreId);
 				serializer.writeString("consumableStoreId", capture.consumableStoreId);
@@ -593,7 +589,6 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", cell.id);
-				serializer.writeString("hazardClass", cell.hazardClass);
 				serializer.writeString("hydrogenStoreId", cell.hydrogenStoreId);
 				serializer.writeString("oxygenStoreId", cell.oxygenStoreId);
 				serializer.writeString("waterStoreId", cell.waterStoreId);
@@ -617,7 +612,6 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", reactor.id);
-				serializer.writeString("hazardClass", reactor.hazardClass);
 				serializer.writeString("co2StoreId", reactor.co2StoreId);
 				serializer.writeString("hydrogenStoreId", reactor.hydrogenStoreId);
 				serializer.writeString("methaneStoreId", reactor.methaneStoreId);
@@ -643,7 +637,6 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", processor.id);
-				serializer.writeString("hazardClass", processor.hazardClass);
 				serializer.writeString("methaneStoreId", processor.methaneStoreId);
 				serializer.writeString("hydrogenStoreId", processor.hydrogenStoreId);
 				serializer.writeString("carbonStoreId", processor.carbonStoreId);
@@ -669,7 +662,6 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", processor.id);
-				serializer.writeString("hazardClass", processor.hazardClass);
 				serializer.writeString("rateBasis", stationRateBasisName(processor.rateBasis));
 				serializer.writeDouble("organicOxidationFraction", processor.organicOxidationFraction);
 				serializer.writeDouble("o2PerKgOrganicOxidized", processor.o2PerKgOrganicOxidized);
@@ -1016,12 +1008,14 @@ namespace core
 			while (serializer.nextArrayItem())
 			{
 				serializer.beginMap("");
-				// Retired coolant classes must name the conversion even when
+				// Retired hazard classes must name the conversion even when
 				// another authored field predates this document's schema.
-				if (std::string_view(array) == "coolantLoops" && serializer.hasField("hazardClass"))
+				// Stores, atmospheres (#756) and coolant loops (#757) lost
+				// the field first; the process families join them here (#758).
+				if (serializer.hasField("hazardClass"))
 					throw SerializationException(
-						"Station coolant loop '" + serializer.readString("id")
-						+ "' field 'hazardClass' was removed (#757); conversion required");
+						"Station entry '" + serializer.readString("id")
+						+ "' field 'hazardClass' was removed (#757, #758); conversion required");
 				if (serializer.hasField("waterQuality"))
 					throw SerializationException(std::string(array) + " has no configurable water quality gate (electrolyzer purity is built in)");
 				serializer.endMap();
@@ -1549,7 +1543,6 @@ namespace core
 				serializer.beginMap("");
 				WaterCollectorSettings collector;
 				collector.id = serializer.readString("id");
-				collector.hazardClass = serializer.readString("hazardClass");
 				collector.atmosphereId = serializer.readString("atmosphereId");
 				collector.coolingLoopId = serializer.readString("coolingLoopId");
 				collector.thermalClass = serializer.readString("thermalClass");
@@ -1571,7 +1564,6 @@ namespace core
 				serializer.beginMap("");
 				WaterTreatmentSettings treatment;
 				treatment.id = serializer.readString("id");
-				treatment.hazardClass = serializer.readString("hazardClass");
 				if (serializer.hasField("releaseToNormalClass"))
 					throw SerializationException(
 						"Station water treatment '" + treatment.id + "' field 'releaseToNormalClass' was removed (#753); conversion required");
@@ -1613,7 +1605,6 @@ namespace core
 				serializer.beginMap("");
 				ElectrolyzerSettings electrolyzer;
 				electrolyzer.id = serializer.readString("id");
-				electrolyzer.hazardClass = serializer.readString("hazardClass");
 				electrolyzer.waterStoreId = serializer.readString("waterStoreId");
 				electrolyzer.oxygenStoreId = serializer.readString("oxygenStoreId");
 				electrolyzer.hydrogenStoreId = serializer.readString("hydrogenStoreId");
@@ -1640,7 +1631,6 @@ namespace core
 				serializer.beginMap("");
 				Co2CaptureSettings capture;
 				capture.id = serializer.readString("id");
-				capture.hazardClass = serializer.readString("hazardClass");
 				capture.atmosphereId = serializer.readString("atmosphereId");
 				capture.captureStoreId = serializer.readString("captureStoreId");
 				capture.consumableStoreId = serializer.readString("consumableStoreId");
@@ -1663,7 +1653,6 @@ namespace core
 				serializer.beginMap("");
 				FuelCellSettings cell;
 				cell.id = serializer.readString("id");
-				cell.hazardClass = serializer.readString("hazardClass");
 				cell.hydrogenStoreId = serializer.readString("hydrogenStoreId");
 				cell.oxygenStoreId = serializer.readString("oxygenStoreId");
 				cell.waterStoreId = serializer.readString("waterStoreId");
@@ -1713,7 +1702,6 @@ namespace core
 				serializer.beginMap("");
 				SabatierReactorSettings reactor;
 				reactor.id = serializer.readString("id");
-				reactor.hazardClass = serializer.readString("hazardClass");
 				reactor.co2StoreId = serializer.readString("co2StoreId");
 				reactor.hydrogenStoreId = serializer.readString("hydrogenStoreId");
 				reactor.methaneStoreId = serializer.readString("methaneStoreId");
@@ -1740,7 +1728,6 @@ namespace core
 				serializer.beginMap("");
 				MethaneProcessorSettings processor;
 				processor.id = serializer.readString("id");
-				processor.hazardClass = serializer.readString("hazardClass");
 				processor.methaneStoreId = serializer.readString("methaneStoreId");
 				processor.hydrogenStoreId = serializer.readString("hydrogenStoreId");
 				processor.carbonStoreId = serializer.readString("carbonStoreId");
@@ -1766,7 +1753,13 @@ namespace core
 				serializer.beginMap("");
 				MicrobialProcessorSettings processor;
 				processor.id = serializer.readString("id");
-				processor.hazardClass = serializer.readString("hazardClass");
+				// The microbial reader is outside the shared retired-field
+				// guard: it legitimately carries a consumer waterQuality
+				// gate (#758 D4), so the hazard refusal lives here.
+				if (serializer.hasField("hazardClass"))
+					throw SerializationException(
+						"Station microbial processor '" + processor.id
+						+ "' field 'hazardClass' was removed (#758); conversion required");
 				if (serializer.hasField("rateBasis"))
 				{
 					auto const basis = serializer.readString("rateBasis");

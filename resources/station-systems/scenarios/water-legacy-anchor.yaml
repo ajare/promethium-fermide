@@ -19,7 +19,6 @@ stationSystems:
       segments: []
   waterTreatments:
   - id: filter
-    hazardClass: normal
     sourceStoreId: greywater
     treatedStoreId: treated
     concentrateStoreId: concentrate

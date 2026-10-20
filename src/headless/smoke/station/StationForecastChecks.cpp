@@ -439,8 +439,7 @@ namespace
 			canopy.edibleFraction = 0.5; canopy.harvestTriggerKg = 5.0;
 			canopy.harvestFraction = 1.0;
 			core::WaterTreatmentSettings treatment;
-			treatment.id = "polish"; treatment.hazardClass = "normal";
-			treatment.sourceStoreId = "raw"; treatment.treatedStoreId = "treated";
+			treatment.id = "polish";			treatment.sourceStoreId = "raw"; treatment.treatedStoreId = "treated";
 			treatment.concentrateStoreId = "concentrate";
 			treatment.consumableStoreId = "consumable";
 			treatment.throughputKgPerS = 0.005; treatment.recoveryRatio = 0.8;
@@ -1274,14 +1273,12 @@ namespace
 			genSink.heatCapacityKJPerK = 10000.0; genSink.startingTemperatureC = 20.0;
 			genSink.minTemperatureC = 0.0; genSink.maxTemperatureC = 100.0;
 			core::ElectrolyzerSettings electrolyzer;
-			electrolyzer.id = "elektro"; electrolyzer.hazardClass = "normal";
-			electrolyzer.waterStoreId = "feedWater";
+			electrolyzer.id = "elektro";			electrolyzer.waterStoreId = "feedWater";
 			electrolyzer.oxygenStoreId = "o2"; electrolyzer.hydrogenStoreId = "h2";
 			electrolyzer.thermalClass = "moderate"; electrolyzer.heatSinkId = "sink";
 			electrolyzer.rateKgPerS = 0.001;
 			core::FuelCellSettings fuelCell;
-			fuelCell.id = "cell"; fuelCell.hazardClass = "normal";
-			fuelCell.hydrogenStoreId = "cellH2"; fuelCell.oxygenStoreId = "cellO2";
+			fuelCell.id = "cell";			fuelCell.hydrogenStoreId = "cellH2"; fuelCell.oxygenStoreId = "cellO2";
 			fuelCell.waterStoreId = "cellWater";
 			fuelCell.thermalClass = "moderate"; fuelCell.heatSinkId = "sink";
 			fuelCell.ratedOutputKW = 1.0; fuelCell.commandedOutputKW = 0.0;

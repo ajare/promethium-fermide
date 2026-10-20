@@ -768,7 +768,6 @@ namespace core
 		{
 			StationWaterCollectorSnapshot collectorResult;
 			collectorResult.id = collector.authored.id;
-			collectorResult.hazardClass = collector.authored.hazardClass;
 			collectorResult.atmosphereId = collector.authored.atmosphereId;
 			collectorResult.coolingLoopId = collector.authored.coolingLoopId;
 			collectorResult.thermalClass = collector.authored.thermalClass;
@@ -798,7 +797,6 @@ namespace core
 			treatmentResult.removedConstituents = treatment.removedConstituents;
 			treatmentResult.passedConstituents = treatment.passedConstituents;
 			treatmentResult.id = treatment.authored.id;
-			treatmentResult.hazardClass = treatment.authored.hazardClass;
 			treatmentResult.sourceStoreId = treatment.authored.sourceStoreId;
 			treatmentResult.treatedStoreId = treatment.authored.treatedStoreId;
 			treatmentResult.concentrateStoreId = treatment.authored.concentrateStoreId;
@@ -852,7 +850,6 @@ namespace core
 			StationElectrolyzerSnapshot cellResult;
 			cellResult.waterQuality = cell.waterQuality;
 			cellResult.id = cell.authored.id;
-			cellResult.hazardClass = cell.authored.hazardClass;
 			cellResult.waterStoreId = cell.authored.waterStoreId;
 			cellResult.oxygenStoreId = cell.authored.oxygenStoreId;
 			cellResult.hydrogenStoreId = cell.authored.hydrogenStoreId;
@@ -900,7 +897,6 @@ namespace core
 		{
 			StationCo2CaptureSnapshot captureResult;
 			captureResult.id = capture.authored.id;
-			captureResult.hazardClass = capture.authored.hazardClass;
 			captureResult.atmosphereId = capture.authored.atmosphereId;
 			captureResult.captureStoreId = capture.authored.captureStoreId;
 			captureResult.consumableStoreId = capture.authored.consumableStoreId;
@@ -941,7 +937,6 @@ namespace core
 		{
 			StationFuelCellSnapshot cellResult;
 			cellResult.id = cell.authored.id;
-			cellResult.hazardClass = cell.authored.hazardClass;
 			cellResult.hydrogenStoreId = cell.authored.hydrogenStoreId;
 			cellResult.oxygenStoreId = cell.authored.oxygenStoreId;
 			cellResult.waterStoreId = cell.authored.waterStoreId;
@@ -997,7 +992,6 @@ namespace core
 		{
 			StationSabatierReactorSnapshot reactorResult;
 			reactorResult.id = reactor.authored.id;
-			reactorResult.hazardClass = reactor.authored.hazardClass;
 			reactorResult.co2StoreId = reactor.authored.co2StoreId;
 			reactorResult.hydrogenStoreId = reactor.authored.hydrogenStoreId;
 			reactorResult.methaneStoreId = reactor.authored.methaneStoreId;
@@ -1049,7 +1043,6 @@ namespace core
 		{
 			StationMethaneProcessorSnapshot processorResult;
 			processorResult.id = processor.authored.id;
-			processorResult.hazardClass = processor.authored.hazardClass;
 			processorResult.methaneStoreId = processor.authored.methaneStoreId;
 			processorResult.hydrogenStoreId = processor.authored.hydrogenStoreId;
 			processorResult.carbonStoreId = processor.authored.carbonStoreId;
@@ -1119,7 +1112,6 @@ namespace core
 			processorResult.lastNitrifiedNitrogenKg = processor.lastNitrifiedNitrogenKg;
 			processorResult.nitrifiedNitrogenKg = processor.nitrifiedNitrogenKg;
 			processorResult.id = processor.authored.id;
-			processorResult.hazardClass = processor.authored.hazardClass;
 			processorResult.feedStoreId = processor.authored.feedStoreId;
 			processorResult.oxygenStoreId = processor.authored.oxygenStoreId;
 			processorResult.waterStoreId = processor.authored.waterStoreId;

@@ -36,8 +36,7 @@ inline core::StationSystemsSettings scheduledObservationFixture(int treatmentMod
 		stock("concentrate", "kg", 100, 0, 0, "brine");
 		stock("kit", "kg", 100, 10, 0, "kit");
 		core::SolarArraySettings sun; sun.id = "sun"; sun.capacityKW = treatmentMode == 2 ? 100 : 1; s.solarArrays = {sun};
-		core::WaterTreatmentSettings t; t.id = "treatment"; t.hazardClass = "hazardous";
-		t.sourceStoreId = "raw"; t.treatedStoreId = "treated"; t.concentrateStoreId = "concentrate";
+		core::WaterTreatmentSettings t; t.id = "treatment";		t.sourceStoreId = "raw"; t.treatedStoreId = "treated"; t.concentrateStoreId = "concentrate";
 		t.consumableStoreId = "kit";
 		t.throughputKgPerS = 1; t.recoveryRatio = 1; t.specificEnergyKWhPerKg = 0.001;
 		s.waterTreatments = {t};

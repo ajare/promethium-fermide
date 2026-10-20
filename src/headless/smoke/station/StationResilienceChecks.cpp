@@ -255,7 +255,6 @@ void dispatch(smoke::Context const&)
 		rig.loads = {criticalLoad(4.0)};
 		core::FuelCellSettings cell;
 		cell.id = "cell";
-		cell.hazardClass = "normal";
 		cell.hydrogenStoreId = "h2";
 		cell.oxygenStoreId = "o2";
 		cell.waterStoreId = "water";
@@ -302,7 +301,6 @@ void dispatch(smoke::Context const&)
 			rig.loads = {criticalLoad(6.0)};
 			core::FuelCellSettings cell;
 			cell.id = "cell";
-			cell.hazardClass = "normal";
 			cell.hydrogenStoreId = "h2";
 			cell.oxygenStoreId = "o2";
 			cell.waterStoreId = "water";
@@ -418,7 +416,6 @@ void dispatch(smoke::Context const&)
 		rig.loads = {criticalLoad(6.0)};
 		core::FuelCellSettings cell;
 		cell.id = "cell";
-		cell.hazardClass = "normal";
 		cell.hydrogenStoreId = "h2";
 		cell.oxygenStoreId = "o2";
 		cell.waterStoreId = "water";
@@ -484,7 +481,6 @@ void dispatch(smoke::Context const&)
 		rig.loads = {criticalLoad(6.0)};
 		core::FuelCellSettings cell;
 		cell.id = "cell";
-		cell.hazardClass = "normal";
 		cell.hydrogenStoreId = "h2";
 		cell.oxygenStoreId = "o2";
 		cell.waterStoreId = "water";
@@ -1053,7 +1049,6 @@ void protectedServices(smoke::Context const&)
 		settings.coolantLoops = { critical };
 		core::MicrobialProcessorSettings digester;
 		digester.id = "digester";
-		digester.hazardClass = "hazardous";
 		digester.feedStoreId = "h_waste";
 		digester.oxygenStoreId = "h_oxygen";
 		digester.waterStoreId = "h_water";

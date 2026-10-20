@@ -586,7 +586,6 @@ stationSystems:
 
   waterCollectors:
     - id: condHab
-      hazardClass: normal
       atmosphereId: hab
       coolingLoopId: loopChill
       thermalClass: low
@@ -596,7 +595,6 @@ stationSystems:
 
   waterTreatments:
     - id: wtr
-      hazardClass: normal
       sourceStoreId: rawWater
       treatedStoreId: fresh
       concentrateStoreId: concentrate
@@ -607,7 +605,6 @@ stationSystems:
       consumablePerKg: 0.001
       priority: 1
     - id: hazWtr
-      hazardClass: hazardous
       sourceStoreId: hazWaterRaw
       treatedStoreId: hazWaterTreated
       concentrateStoreId: hazConcentrate
@@ -620,7 +617,6 @@ stationSystems:
 
   electrolyzers:
     - id: lyzerHab
-      hazardClass: normal
       waterStoreId: fresh
       oxygenStoreId: ""
       hydrogenStoreId: hydrogen
@@ -634,7 +630,6 @@ stationSystems:
 
   co2Captures:
     - id: scrubHab
-      hazardClass: normal
       atmosphereId: hab
       captureStoreId: co2
       consumableStoreId: captureMedia
@@ -645,7 +640,6 @@ stationSystems:
 
   sabatierReactors:
     - id: sab
-      hazardClass: normal
       co2StoreId: co2
       hydrogenStoreId: hydrogen
       methaneStoreId: methane
@@ -659,7 +653,6 @@ stationSystems:
 
   methaneProcessors:
     - id: pyro
-      hazardClass: normal
       methaneStoreId: methane
       hydrogenStoreId: hydrogen
       carbonStoreId: carbonWaste
@@ -672,7 +665,6 @@ stationSystems:
 
   fuelCells:
     - id: fuelCellBackup
-      hazardClass: normal
       hydrogenStoreId: fuelcellH2
       oxygenStoreId: fuelcellO2
       waterStoreId: rawWater
@@ -685,7 +677,6 @@ stationSystems:
 
   microbialProcessors:
     - id: dig
-      hazardClass: normal
       feedStoreId: organicWaste
       oxygenStoreId: processOxygen
       waterStoreId: fresh

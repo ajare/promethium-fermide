@@ -158,7 +158,6 @@ stationSystems:
     priority: 1
   microbialProcessors:
   - id: urineNitrifier
-    hazardClass: normal
     feedStoreId: urine
     oxygenStoreId: processOxygen
     waterStoreId: fresh

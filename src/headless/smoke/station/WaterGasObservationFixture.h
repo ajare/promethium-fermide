@@ -23,18 +23,16 @@ inline core::StationSystemsSettings waterGasObservationFixture()
 	a.startingOxygenKg = 20; a.startingNitrogenKg = 80; a.startingCarbonDioxideKg = 2; a.startingWaterVapourKg = 2;
 	a.startingTemperatureC = 25; a.thermalCapacityKJPerK = 10000;
 	a.minPressureKPa = 1; a.maxPressureKPa = 200; s.atmospheres = {a};
-	core::WaterCollectorSettings c; c.id = "collector"; c.hazardClass = "normal"; c.atmosphereId = "air";
+	core::WaterCollectorSettings c; c.id = "collector"; c.atmosphereId = "air";
 	c.coolingLoopId = "loop"; c.thermalClass = "moderate"; c.destStoreId = "raw";
 	c.maxRateKgPerS = 0.01; c.targetRelativeHumidity = 0.1; s.waterCollectors = {c};
-	core::WaterTreatmentSettings t; t.id = "treatment"; t.hazardClass = "normal";
-	t.sourceStoreId = "raw"; t.treatedStoreId = "treated"; t.concentrateStoreId = "concentrate";
+	core::WaterTreatmentSettings t; t.id = "treatment";	t.sourceStoreId = "raw"; t.treatedStoreId = "treated"; t.concentrateStoreId = "concentrate";
 	t.consumableStoreId = "kit"; t.throughputKgPerS = 0.01; t.specificEnergyKWhPerKg = 0.1;
 	s.waterTreatments = {t};
-	core::ElectrolyzerSettings e; e.id = "cell"; e.hazardClass = "normal"; e.waterStoreId = "treated";
+	core::ElectrolyzerSettings e; e.id = "cell"; e.waterStoreId = "treated";
 	e.oxygenStoreId = "oxygen"; e.hydrogenStoreId = "hydrogen"; e.heatSinkId = "sink";
 	e.thermalClass = "moderate"; e.rateKgPerS = 0.001; s.electrolyzers = {e};
-	core::Co2CaptureSettings capture; capture.id = "capture"; capture.hazardClass = "normal";
-	capture.atmosphereId = "air"; capture.captureStoreId = "co2"; capture.consumableStoreId = "kit";
+	core::Co2CaptureSettings capture; capture.id = "capture";	capture.atmosphereId = "air"; capture.captureStoreId = "co2"; capture.consumableStoreId = "kit";
 	capture.consumablePerKg = 0.01; capture.maxRateKgPerS = 0.001; s.co2Captures = {capture};
 	return s;
 }

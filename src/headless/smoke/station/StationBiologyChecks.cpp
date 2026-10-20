@@ -616,8 +616,7 @@ namespace
 			solar.id = "solar"; solar.capacityKW = 100.0;
 			settings.solarArrays = {solar};
 			core::MicrobialProcessorSettings proc;
-			proc.id = "digester"; proc.hazardClass = "normal";
-			std::string const processorFeedId = harvest ? "buffer" : feedId;
+			proc.id = "digester";			std::string const processorFeedId = harvest ? "buffer" : feedId;
 			if (harvest)
 			{
 				auto buffer = store("buffer", 10.0, 0.0);

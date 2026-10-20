@@ -1935,21 +1935,20 @@ namespace
 		generator.maxRampKWPerSecond = 2.0;
 		seed.generators = {generator};
 		core::FuelCellSettings cell;
-		cell.id = "cell1"; cell.hazardClass = "normal"; cell.thermalClass = "low";
+		cell.id = "cell1"; cell.thermalClass = "low";
 		cell.ratedOutputKW = 10.0; cell.efficiency = 0.6;
 		cell.hydrogenStoreId = "h2"; cell.oxygenStoreId = "o2";
 		cell.waterStoreId = "rawwater"; cell.heatSinkId = "coldSink";
 		seed.fuelCells = {cell};
 		core::SabatierReactorSettings reactor;
-		reactor.id = "sab1"; reactor.hazardClass = "normal"; reactor.thermalClass = "low";
+		reactor.id = "sab1"; reactor.thermalClass = "low";
 		reactor.rateKgPerS = 0.001;
 		reactor.co2StoreId = "co2"; reactor.hydrogenStoreId = "h2";
 		reactor.methaneStoreId = "ch4"; reactor.waterStoreId = "rawwater";
 		reactor.heatSinkId = "coldSink";
 		seed.sabatierReactors = {reactor};
 		core::MethaneProcessorSettings processor;
-		processor.id = "mp1"; processor.hazardClass = "normal";
-		processor.thermalClass = "low"; processor.rateKgPerS = 0.001;
+		processor.id = "mp1";		processor.thermalClass = "low"; processor.rateKgPerS = 0.001;
 		processor.specificEnergyKWhPerKgCH4 = 2.0;
 		processor.methaneStoreId = "ch4"; processor.hydrogenStoreId = "h2";
 		processor.carbonStoreId = "carbon"; processor.heatSinkId = "coldSink";
@@ -4689,7 +4688,6 @@ namespace
 			auto& entry = s.waterTreatments[0];
 			store(entry.sourceStoreId, "source"); store(entry.treatedStoreId, "treated");
 			store(entry.concentrateStoreId, "concentrate"); store(entry.consumableStoreId, "consumable");
-			if (alternative) entry.hazardClass = "hazardous";
 		}
 		else if (type == "Electrolyzer")
 		{
@@ -5929,7 +5927,6 @@ namespace
 			hazStore("hazConsumable", 100.0, 10.0) };
 		core::WaterTreatmentSettings plant;
 		plant.id = "plant";
-		plant.hazardClass = "hazardous";
 		plant.sourceStoreId = "hazRaw";
 		plant.treatedStoreId = "hazTreated";
 		plant.concentrateStoreId = "hazConcentrate";
@@ -7161,7 +7158,6 @@ void bufferWorkflow(smoke::Context const&)
 		initial.solarArrays.push_back(field);
 		core::MicrobialProcessorSettings digester;
 		digester.id = "digester";
-		digester.hazardClass = "normal";
 		digester.feedStoreId = "waste";
 		digester.oxygenStoreId = "oxygen";
 		digester.waterStoreId = "processWater";
@@ -7309,16 +7305,14 @@ void carbonAliasWorkflow(smoke::Context const&)
 		field.id = "field"; field.capacityKW = 100.0;
 		settings.solarArrays = { field };
 		core::SabatierReactorSettings reactor;
-		reactor.id = "sab"; reactor.hazardClass = "normal";
-		reactor.co2StoreId = "co2"; reactor.hydrogenStoreId = "h2";
+		reactor.id = "sab";		reactor.co2StoreId = "co2"; reactor.hydrogenStoreId = "h2";
 		reactor.methaneStoreId = "methane"; reactor.waterStoreId = "rawWater";
 		reactor.thermalClass = "low"; reactor.heatSinkId = "sink";
 		reactor.rateKgPerS = 0.001; reactor.specificEnergyKWhPerKgCO2 = 1.0;
 		reactor.maxSinkTemperatureC = 60.0;
 		settings.sabatierReactors = { reactor };
 		core::MethaneProcessorSettings processor;
-		processor.id = "pyrolysis"; processor.hazardClass = "normal";
-		processor.methaneStoreId = "methane"; processor.hydrogenStoreId = "h2";
+		processor.id = "pyrolysis";		processor.methaneStoreId = "methane"; processor.hydrogenStoreId = "h2";
 		processor.carbonStoreId = "carbon";
 		processor.thermalClass = "low"; processor.heatSinkId = "sink";
 		processor.rateKgPerS = 0.0003; processor.specificEnergyKWhPerKgCH4 = 2.0;

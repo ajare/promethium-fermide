@@ -16,7 +16,7 @@ void appendStationWaterGasObservations(StationSystemsSettings const& settings,
 		auto& d = o.metric;
 		d.id = "exchange/" + type + "/" + entry.id + "/" + role;
 		d.equipmentType = std::move(type); d.instanceId = entry.id; d.exchangeRole = std::move(role);
-		d.role = direction; d.hazardClass = entry.hazardClass;
+		d.role = direction;
 		if (!power) { d.materialId = std::move(material); d.quantity = StationPhysicalQuantity::MassRate; d.unit = StationCanonicalUnit::KilogramPerSecond; }
 		if (request) d.requestedSemantics = StationRequestedSemantics::Demand;
 		o.perTick = !power;
@@ -34,7 +34,7 @@ void appendStationWaterGasObservations(StationSystemsSettings const& settings,
 		auto f = std::ranges::find(settings.stores, id, &ResourceStoreSettings::id);
 		if (f == settings.stores.end()) return;
 		auto const& stock = stores[f - settings.stores.begin()];
-		o.metric.materialId = stock.metric.materialId; o.metric.hazardClass = stock.metric.hazardClass;
+		o.metric.materialId = stock.metric.materialId;
 		o.metric.quantity = stock.metric.quantity; o.metric.unit = stock.metric.unit;
 		o.sourceToCanonicalScale = stock.sourceToCanonicalScale;
 		switch (o.metric.quantity) {
@@ -112,12 +112,11 @@ void appendStationWaterGasObservations(StationSystemsSettings const& settings,
 				d.materialId = k.relation == "CO2" || k.relation == "Captured CO2" ? "carbon-dioxide" : k.relation == "Hydrogen" ? "hydrogen" : k.relation == "Oxygen" ? "oxygen" : "water";
 				if (k.peerType == "Store") storeIdentity(o, k.peerId);
 			}
-			// Carbon equipment carries one validated hazard class throughout its
-			// process. Retain it on electrical/thermal endpoint accounts as well.
+			// Carbon equipment's thermal service class rides on its
+			// heat-link endpoint accounts; the hazard class is gone (#758).
 			auto carbonIdentity = [&](auto const& entries) {
 				auto owner = std::ranges::find(entries, k.ownerId, [](auto const& e) { return e.id; });
 				if (owner != entries.end()) {
-					d.hazardClass = owner->hazardClass;
 					if (link.kind == station_connections::LinkKind::Heat) d.thermalClass = owner->thermalClass;
 				}
 			};

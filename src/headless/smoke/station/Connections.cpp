@@ -383,7 +383,7 @@ void blockedZeroEfficiency(smoke::Context const&)
 			{
 				s.stores.push_back({"oxygen", "kg", 100});
 				auto sink = reservoir(); sink.id = "sink"; s.thermalReservoirs = {sink};
-				core::ElectrolyzerSettings e; e.id = "load"; e.hazardClass = "normal"; e.waterStoreId = "feed";
+				core::ElectrolyzerSettings e; e.id = "load"; e.waterStoreId = "feed";
 				e.hydrogenStoreId = "product"; e.oxygenStoreId = "oxygen"; e.heatSinkId = "sink";
 				e.thermalClass = "warm"; e.rateKgPerS = 0.001; s.electrolyzers = {e};
 				type = "Electrolyzer"; role = "Feed water"; requested = 0.001;
@@ -420,8 +420,7 @@ void blockedZeroEfficiency(smoke::Context const&)
 		s.stores = {{"hydrogen", "kg", 100, 50}, {"oxygen", "kg", 100, blocked == 2 ? 0.0 : 50.0},
 			{"water", "kg", 100, blocked == 0 ? 100.0 : 0.0}};
 		auto sink = reservoir(); s.thermalReservoirs = {sink};
-		core::FuelCellSettings cell; cell.id = "cell"; cell.hazardClass = "normal";
-		cell.hydrogenStoreId = "hydrogen"; cell.oxygenStoreId = "oxygen"; cell.waterStoreId = "water";
+		core::FuelCellSettings cell; cell.id = "cell";		cell.hydrogenStoreId = "hydrogen"; cell.oxygenStoreId = "oxygen"; cell.waterStoreId = "water";
 		cell.thermalClass = "warm"; cell.heatSinkId = "r"; cell.ratedOutputKW = 10; cell.commandedOutputKW = 10;
 		s.fuelCells = {cell}; property(s, "Fuel cell", "cell", "Hydrogen").efficiency = 0;
 		auto world = make(s); advance(*world); auto const snap = world->getStationSystemsSnapshot(); audit(snap, s);

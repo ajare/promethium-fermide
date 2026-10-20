@@ -66,11 +66,10 @@ namespace
 			settings.maxTemperatureC = 200.0;
 			return settings;
 		};
-		auto reactor = [](std::string const& id, std::string const& hazard)
+		auto reactor = [](std::string const& id)
 		{
 			core::SabatierReactorSettings settings;
 			settings.id = id;
-			settings.hazardClass = hazard;
 			settings.co2StoreId = "co2";
 			settings.hydrogenStoreId = "h2";
 			settings.methaneStoreId = "methane";
@@ -82,11 +81,10 @@ namespace
 			settings.maxSinkTemperatureC = 60.0;
 			return settings;
 		};
-		auto processor = [](std::string const& id, std::string const& hazard)
+		auto processor = [](std::string const& id)
 		{
 			core::MethaneProcessorSettings settings;
 			settings.id = id;
-			settings.hazardClass = hazard;
 			settings.methaneStoreId = "methane";
 			settings.hydrogenStoreId = "h2";
 			settings.carbonStoreId = "carbon";
@@ -149,51 +147,51 @@ namespace
 			settings.stores = carbonStores();
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
 			std::string diagnostic;
-			settings.sabatierReactors = { reactor("sab", "normal") };
+			settings.sabatierReactors = { reactor("sab") };
 			settings.sabatierReactors[0].co2StoreId = "ghost";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("CO2 feed store 'ghost' does not exist") != std::string::npos,
 				"a Sabatier reactor fed by an unknown CO2 store was accepted");
-			settings.sabatierReactors = { reactor("sab", "normal") };
+			settings.sabatierReactors = { reactor("sab") };
 			settings.sabatierReactors[0].heatSinkId = "ghost";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("unknown thermal reservoir") != std::string::npos,
 				"a Sabatier reactor on an unknown heat sink was accepted");
-			settings.sabatierReactors = { reactor("sab", "normal") };
+			settings.sabatierReactors = { reactor("sab") };
 			settings.sabatierReactors[0].thermalClass = "warm";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("does not match heat sink") != std::string::npos,
 				"a thermal class mismatch against the reactor's heat sink was accepted");
-			settings.sabatierReactors = { reactor("sab", "normal"), reactor("sab2", "hazardous") };
+			settings.sabatierReactors = { reactor("sab"), reactor("sab2") };
 			// A hazardous reactor sharing the normal-class CO2 store is
 			// accepted (#751): the class no longer reserves a store, and
 			// the shared inventory is the consequence.
 			require(core::validateStationSystemsSettings(settings, diagnostic),
 				"a hazardous reactor sharing the normal-class CO2 store was refused");
-			settings.sabatierReactors = { reactor("sab", "normal") };
+			settings.sabatierReactors = { reactor("sab") };
 			settings.sabatierReactors[0].maxSinkTemperatureC = -300.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("above absolute zero") != std::string::npos,
 				"a reactor sink temperature below absolute zero was accepted");
 			settings.sabatierReactors = {};
-			settings.methaneProcessors = { processor("pyrolysis", "normal") };
+			settings.methaneProcessors = { processor("pyrolysis") };
 			settings.methaneProcessors[0].specificEnergyKWhPerKgCH4 = 1.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("below the endothermic reaction heat") != std::string::npos,
 				"a methane dose below the declared reaction demand was accepted");
-			settings.methaneProcessors = { processor("pyrolysis", "normal") };
+			settings.methaneProcessors = { processor("pyrolysis") };
 			settings.methaneProcessors[0].carbonStoreId = "ghost";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("solid carbon store 'ghost' does not exist") != std::string::npos,
 				"a processor with an unknown carbon store was accepted");
-			settings.methaneProcessors = { processor("pyrolysis", "normal"), processor("pyrolysis2", "hazardous") };
+			settings.methaneProcessors = { processor("pyrolysis"), processor("pyrolysis2") };
 			// A hazardous processor sharing the normal-class methane store is
 			// accepted (#751): the shared inventory is the consequence.
 			require(core::validateStationSystemsSettings(settings, diagnostic),
 				"a hazardous processor sharing the normal-class methane store was refused");
 			std::vector<core::SabatierReactorSettings> tooMany;
 			for (size_t index = 0; index <= core::MaxStationSabatierReactors; ++index)
-				tooMany.push_back(reactor("sab" + std::to_string(index), "normal"));
+				tooMany.push_back(reactor("sab" + std::to_string(index)));
 			settings = core::StationSystemsSettings{};
 			settings.enabled = true;
 			settings.stores = carbonStores();
@@ -267,7 +265,7 @@ namespace
 				settings.enabled = true;
 				settings.stores = tightStores;
 				settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
-				settings.sabatierReactors = { reactor("sab", "normal") };
+				settings.sabatierReactors = { reactor("sab") };
 				setReactorRole(settings.sabatierReactors[0], pair.right, pair.left);
 				require(!core::validateStationSystemsSettings(settings, diagnostic)
 					&& diagnostic.find(alias) != std::string::npos,
@@ -284,7 +282,7 @@ namespace
 				settings.enabled = true;
 				settings.stores = tightStores;
 				settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
-				settings.methaneProcessors = { processor("pyrolysis", "normal") };
+				settings.methaneProcessors = { processor("pyrolysis") };
 				setProcessorRole(settings.methaneProcessors[0], pair.right, pair.left);
 				require(!core::validateStationSystemsSettings(settings, diagnostic)
 					&& diagnostic.find(alias) != std::string::npos,
@@ -313,7 +311,6 @@ namespace
 				repro.solarArrays = { field };
 				core::SabatierReactorSettings aliased;
 				aliased.id = "reactor";
-				aliased.hazardClass = "normal";
 				aliased.co2StoreId = "co2";
 				aliased.hydrogenStoreId = "h2";
 				aliased.methaneStoreId = "product";
@@ -332,7 +329,6 @@ namespace
 				repro.sabatierReactors = {};
 				core::MethaneProcessorSettings aliasedProcessor;
 				aliasedProcessor.id = "processor";
-				aliasedProcessor.hazardClass = "normal";
 				aliasedProcessor.methaneStoreId = "co2";
 				aliasedProcessor.hydrogenStoreId = "product";
 				aliasedProcessor.carbonStoreId = "product";
@@ -355,8 +351,8 @@ namespace
 			{
 				core::World world("CarbonSharedAcrossMachines", 2, 2);
 				world.pauseSimulation(); world.finishBuild();
-				require(carbonConfigure(world, carbonStores(), { reactor("sab", "normal") },
-					{ processor("pyrolysis", "normal") }, 100.0).first,
+				require(carbonConfigure(world, carbonStores(), { reactor("sab") },
+					{ processor("pyrolysis") }, 100.0).first,
 					"two machines sharing the methane and hydrogen stores were refused");
 				world.resumeSimulation();
 				require(world.advanceTicks(60), "the shared-store machine run failed");
@@ -374,7 +370,7 @@ namespace
 		{
 			core::World world("CarbonSabatier", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			require(carbonConfigure(world, carbonStores(), { reactor("sab", "normal") }, {}, 100.0).first,
+			require(carbonConfigure(world, carbonStores(), { reactor("sab") }, {}, 100.0).first,
 				"nominal Sabatier setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "nominal Sabatier run failed");
@@ -424,7 +420,7 @@ namespace
 			auto stores = carbonStores();
 			for (auto& store : stores)
 				if (store.id == "methane") store.startingQualified = 10.0;
-			require(carbonConfigure(world, stores, {}, { processor("pyrolysis", "normal") }, 100.0).first,
+			require(carbonConfigure(world, stores, {}, { processor("pyrolysis") }, 100.0).first,
 				"nominal methane-processing setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "nominal methane-processing run failed");
@@ -484,9 +480,9 @@ namespace
 			};
 			// The processor is rated at exactly the methane the reactor
 			// produces, so the chain runs at the reactor's pace.
-			auto chainProcessor = processor("pyrolysis", "normal");
+			auto chainProcessor = processor("pyrolysis");
 			chainProcessor.rateKgPerS = 0.001 * ch4PerCo2;
-			require(carbonConfigure(world, chain(), { reactor("sab", "normal") },
+			require(carbonConfigure(world, chain(), { reactor("sab") },
 				{ chainProcessor }, 100.0).first,
 				"integrated carbon-chain setup refused");
 			world.resumeSimulation();
@@ -539,7 +535,7 @@ namespace
 			auto stores = carbonStores();
 			for (auto& store : stores)
 				if (store.id == "methane") { store.capacity = 0.0005; store.startingQualified = 0.0005; }
-			require(carbonConfigure(world, stores, { reactor("sab", "normal") }, {}, 100.0).first,
+			require(carbonConfigure(world, stores, { reactor("sab") }, {}, 100.0).first,
 				"full-methane setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "full-methane run failed");
@@ -560,7 +556,7 @@ namespace
 				if (store.id == "carbon") { store.capacity = 0.0005; store.startingQualified = 0.0005; }
 				if (store.id == "methane") store.startingQualified = 10.0;
 			}
-			require(carbonConfigure(world, stores, {}, { processor("pyrolysis", "normal") }, 100.0).first,
+			require(carbonConfigure(world, stores, {}, { processor("pyrolysis") }, 100.0).first,
 				"full-carbon setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "full-carbon run failed");
@@ -578,7 +574,7 @@ namespace
 			auto stores = carbonStores();
 			for (auto& store : stores)
 				if (store.id == "rawWater") store.capacity = 0.0002;
-			require(carbonConfigure(world, stores, { reactor("sab", "normal") }, {}, 100.0).first,
+			require(carbonConfigure(world, stores, { reactor("sab") }, {}, 100.0).first,
 				"filling-water setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "filling-water run failed");
@@ -604,8 +600,8 @@ namespace
 				if (store.id == "methane") { store.capacity = 0.0005; store.startingQualified = 0.0005; }
 				if (store.id == "carbon") { store.capacity = 0.0005; store.startingQualified = 0.0005; }
 			}
-			require(carbonConfigure(world, stores, { reactor("sab", "normal") },
-				{ processor("pyrolysis", "normal") }, 100.0).first,
+			require(carbonConfigure(world, stores, { reactor("sab") },
+				{ processor("pyrolysis") }, 100.0).first,
 				"blocked-destination setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "blocked-destination run failed");
@@ -625,9 +621,9 @@ namespace
 		{
 			core::World world("CarbonDisabled", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto offReactor = reactor("sab", "normal");
+			auto offReactor = reactor("sab");
 			offReactor.rateKgPerS = 0.0;
-			auto offProcessor = processor("pyrolysis", "normal");
+			auto offProcessor = processor("pyrolysis");
 			offProcessor.rateKgPerS = 0.0;
 			require(carbonConfigure(world, carbonStores(), { offReactor }, { offProcessor }, 100.0).first,
 				"disabled-stage setup refused");
@@ -650,8 +646,8 @@ namespace
 		{
 			core::World world("CarbonHotSink", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			require(carbonConfigure(world, carbonStores(), { reactor("sab", "normal") },
-				{ processor("pyrolysis", "normal") }, 100.0, 70.0).first,
+			require(carbonConfigure(world, carbonStores(), { reactor("sab") },
+				{ processor("pyrolysis") }, 100.0, 70.0).first,
 				"hot-sink carbon setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "hot-sink carbon run failed");
@@ -677,8 +673,8 @@ namespace
 			auto noPowerStores = carbonStores();
 			for (auto& store : noPowerStores)
 				if (store.id == "methane") store.startingQualified = 10.0;
-			require(carbonConfigure(world, noPowerStores, { reactor("sab", "normal") },
-				{ processor("pyrolysis", "normal") }, 0.0).first,
+			require(carbonConfigure(world, noPowerStores, { reactor("sab") },
+				{ processor("pyrolysis") }, 0.0).first,
 				"no-power carbon setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "no-power carbon run failed");
@@ -705,7 +701,7 @@ namespace
 			auto stores = carbonStores();
 			for (auto& store : stores)
 				if (store.id == "h2") store.protectedReserve = 9.98;
-			auto bigReactor = reactor("sab", "normal");
+			auto bigReactor = reactor("sab");
 			bigReactor.rateKgPerS = 0.01;
 			require(carbonConfigure(world, stores, { bigReactor }, {}, 100.0).first,
 				"protected-reserve carbon setup refused");
@@ -782,11 +778,10 @@ namespace
 			settings.maxTemperatureC = 200.0;
 			return settings;
 		};
-		auto processor = [](std::string const& id, std::string const& hazard)
+		auto processor = [](std::string const& id)
 		{
 			core::MicrobialProcessorSettings settings;
 			settings.id = id;
-			settings.hazardClass = hazard;
 			settings.feedStoreId = "waste";
 			settings.oxygenStoreId = "oxygen";
 			settings.waterStoreId = "processWater";
@@ -876,111 +871,111 @@ namespace
 			settings.stores = nutrientStores();
 			settings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
 			std::string diagnostic;
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].feedStoreId = "ghost";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("feed store 'ghost' does not exist") != std::string::npos,
 				"a microbial processor fed by an unknown store was accepted");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].feedStoreId = "oxygen";
 			settings.microbialProcessors[0].oxygenStoreId = "oxygen2";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("no composition") != std::string::npos,
 				"a processor fed by a store with no declared composition was accepted");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].nutrientStoreId = "waste";
 			settings.microbialProcessors[0].feedStoreId = "nutrients";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("feed store 'nutrients' declares no composition") != std::string::npos,
 				"a swap of the compound feed onto a plain store was accepted");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.stores.push_back(compoundStore("sludge", 10.0, 1.0, feedComposition));
 			settings.microbialProcessors[0].residueStoreId = "sludge";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("residue store 'sludge' declares a composition") != std::string::npos,
 				"a compound residue destination was accepted");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].nitrogenRecovery = 1.5;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("nitrogen recovery must be finite and from 0 to 1") != std::string::npos,
 				"a recovery yield above 1 was accepted");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].co2PerKgFeedKg = 2.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("would create mass") != std::string::npos,
 				"yields whose outputs exceed their inputs were accepted");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].reactionHeatKJPerKgFeed = 900.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("exceeds the feedstock's declared chemical energy") != std::string::npos,
 				"a reaction heat above the feed's declared chemical energy was accepted");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].minOperatingTemperatureC = 50.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("empty operating window") != std::string::npos,
 				"an empty operating temperature window was accepted");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].oxygenStoreId = "processWater";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("same store") != std::string::npos,
 				"two chain roles sharing one store were accepted");
-			settings.microbialProcessors = { processor("digester", "normal"),
-				processor("digester2", "hazardous") };
+			settings.microbialProcessors = { processor("digester"),
+				processor("digester2") };
 			// A hazardous processor sharing the normal-class waste feed is
 			// accepted (#751): the shared inventory is the consequence.
 			require(core::validateStationSystemsSettings(settings, diagnostic),
 				"a hazardous processor sharing the normal-class waste feed was refused");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].heatSinkId = "ghost";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("unknown thermal reservoir") != std::string::npos,
 				"a processor on an unknown heat sink was accepted");
 			// #408 condition/recovery contract refusals.
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].initialCondition = 1.5;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("initial culture condition must be finite and from 0 to 1")
 					!= std::string::npos,
 				"an initial culture condition above 1 was accepted");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].starvationDegradePerHour = -0.1;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("starvation degradation per hour must be finite and non-negative")
 					!= std::string::npos,
 				"a negative starvation degradation rate was accepted");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].recoveryPerHour = -1.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("recovery per hour must be finite and non-negative")
 					!= std::string::npos,
 				"a negative recovery rate was accepted");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].stockStoreId = "ghost";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("replacement biological stock store 'ghost' does not exist")
 					!= std::string::npos,
 				"a processor on an unknown replacement stock store was accepted");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].stockStoreId = "waste";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("feed store and replacement stock store are the same store")
 					!= std::string::npos,
 				"a replacement stock store doubling as the feed store was accepted");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].stockStoreId = "media";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("consumable store and replacement stock store are the same store")
 					!= std::string::npos,
 				"a replacement stock store doubling as the consumable was accepted");
 			settings.stores.push_back(plainStore("stock", 10.0, 1.0));
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].stockStoreId = "stock";
 			settings.microbialProcessors[0].stockUnitsPerConditionPoint = 0.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("stock units per condition point must be positive when a replacement biological stock store is declared")
 					!= std::string::npos,
 				"a declared stock store with zero units per condition point was accepted");
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].stockStoreId = "stock";
 			settings.microbialProcessors[0].stockUnitsPerConditionPoint = -2.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
@@ -1004,9 +999,9 @@ namespace
 				hazardSettings.enabled = true;
 				hazardSettings.stores = hStores;
 				hazardSettings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
-				auto normal = processor("digester", "normal");
+				auto normal = processor("digester");
 				normal.stockStoreId = "stock";
-				auto hazardous = processor("digester2", "hazardous");
+				auto hazardous = processor("digester2");
 				hazardous.feedStoreId = "h_waste";
 				hazardous.oxygenStoreId = "h_oxygen";
 				hazardous.waterStoreId = "h_water";
@@ -1029,20 +1024,20 @@ namespace
 				probe.stores = nutrientStores();
 				probe.stores.push_back(plainStore("stock", 100.0, 10.0));
 				probe.thermalReservoirs = { reservoir("sink", "low", 20.0) };
-				probe.microbialProcessors = { processor("digester", "normal") };
+				probe.microbialProcessors = { processor("digester") };
 				probe.microbialProcessors[0].stockStoreId = "stock";
 				probe.microbialProcessors[0].stockUnitsPerConditionPoint = 1.0;
 				require(core::validateStationSystemsSettings(probe, diagnostic),
 					("the media/stock wiring was refused: " + diagnostic).c_str());
 			}
-			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors = { processor("digester") };
 			settings.microbialProcessors[0].thermalClass = "warm";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("does not match heat sink") != std::string::npos,
 				"a thermal class mismatch against the processor's heat sink was accepted");
 			std::vector<core::MicrobialProcessorSettings> tooMany;
 			for (size_t index = 0; index <= core::MaxStationMicrobialProcessors; ++index)
-				tooMany.push_back(processor("digester" + std::to_string(index), "normal"));
+				tooMany.push_back(processor("digester" + std::to_string(index)));
 			settings = core::StationSystemsSettings{};
 			settings.enabled = true;
 			settings.stores = nutrientStores();
@@ -1062,7 +1057,7 @@ namespace
 			world.pauseSimulation(); world.finishBuild();
 			auto stores = nutrientStores();
 			stores.push_back(plainStore("stock", 100.0, 10.0));
-			auto probe = processor("digester", "normal");
+			auto probe = processor("digester");
 			probe.stockStoreId = "stock";
 			probe.stockUnitsPerConditionPoint = 1.0;
 			// Start below full condition so recovery draws replacement
@@ -1093,7 +1088,7 @@ namespace
 		{
 			core::World world("NutrientNominal", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			require(nutrientConfigure(world, nutrientStores(), { processor("digester", "normal") },
+			require(nutrientConfigure(world, nutrientStores(), { processor("digester") },
 				100.0).first, "nominal nutrient-recovery setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "nominal nutrient-recovery run failed");
@@ -1166,7 +1161,7 @@ namespace
 			atmosphericFeed.atmosphericNitrogen = 0.07;
 			auto stores = nutrientStores();
 			stores[0] = compoundStore("waste", 100.0, 10.0, atmosphericFeed);
-			require(nutrientConfigure(world, stores, { processor("digester", "normal") },
+			require(nutrientConfigure(world, stores, { processor("digester") },
 				100.0).first, "atmospheric-feed setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "atmospheric-feed run failed");
@@ -1201,7 +1196,7 @@ namespace
 			world.pauseSimulation(); world.finishBuild();
 			auto stores = nutrientStores();
 			stores[0].startingQualified = 0.0;
-			require(nutrientConfigure(world, stores, { processor("digester", "normal") },
+			require(nutrientConfigure(world, stores, { processor("digester") },
 				100.0).first, "absent-feedstock setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "absent-feedstock run failed");
@@ -1221,7 +1216,7 @@ namespace
 		{
 			core::World world("NutrientNoPower", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			require(nutrientConfigure(world, nutrientStores(), { processor("digester", "normal") },
+			require(nutrientConfigure(world, nutrientStores(), { processor("digester") },
 				0.0).first, "no-power setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "no-power run failed");
@@ -1241,7 +1236,7 @@ namespace
 		{
 			core::World cold("NutrientColdSink", 2, 2);
 			cold.pauseSimulation(); cold.finishBuild();
-			require(nutrientConfigure(cold, nutrientStores(), { processor("digester", "normal") },
+			require(nutrientConfigure(cold, nutrientStores(), { processor("digester") },
 				100.0, 10.0).first, "cold-sink setup refused");
 			cold.resumeSimulation();
 			require(cold.advanceTicks(60), "cold-sink run failed");
@@ -1254,7 +1249,7 @@ namespace
 				"a below-window sink temperature did not refuse the processor whole");
 			core::World hot("NutrientHotSink", 2, 2);
 			hot.pauseSimulation(); hot.finishBuild();
-			require(nutrientConfigure(hot, nutrientStores(), { processor("digester", "normal") },
+			require(nutrientConfigure(hot, nutrientStores(), { processor("digester") },
 				100.0, 50.0).first, "hot-sink setup refused");
 			hot.resumeSimulation();
 			require(hot.advanceTicks(60), "hot-sink run failed");
@@ -1277,7 +1272,7 @@ namespace
 			auto stores = nutrientStores();
 			for (auto& store : stores)
 				if (store.id == "nutrients") { store.capacity = 0.0005; store.startingQualified = 0.0005; }
-			require(nutrientConfigure(world, stores, { processor("digester", "normal") },
+			require(nutrientConfigure(world, stores, { processor("digester") },
 				100.0).first, "full-nutrient-store setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "full-nutrient-store run failed");
@@ -1293,7 +1288,7 @@ namespace
 			auto fillingStores = nutrientStores();
 			for (auto& store : fillingStores)
 				if (store.id == "recoveredWater") store.capacity = 0.0006;
-			require(nutrientConfigure(filling, fillingStores, { processor("digester", "normal") },
+			require(nutrientConfigure(filling, fillingStores, { processor("digester") },
 				100.0).first, "filling-recovered-water setup refused");
 			filling.resumeSimulation();
 			require(filling.advanceTicks(180), "filling-recovered-water run failed");
@@ -1317,7 +1312,7 @@ namespace
 			auto stores = nutrientStores();
 			stores[0].startingQualified = 1.0;
 			stores[0].protectedReserve = 0.99;
-			require(nutrientConfigure(world, stores, { processor("digester", "normal") },
+			require(nutrientConfigure(world, stores, { processor("digester") },
 				100.0).first, "protected-reserve setup refused");
 			world.resumeSimulation();
 			// 0.01 kg of drawable feed at 0.001 kg/s lasts 10 s = 600
@@ -1340,7 +1335,7 @@ namespace
 		{
 			core::World world("NutrientDisabled", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			auto offProcessor = processor("digester", "normal");
+			auto offProcessor = processor("digester");
 			offProcessor.rateKgPerS = 0.0;
 			require(nutrientConfigure(world, nutrientStores(), { offProcessor }, 100.0).first,
 				"disabled-stage setup refused");
@@ -1407,7 +1402,6 @@ namespace
 		{
 			core::MicrobialProcessorSettings settings;
 			settings.id = id;
-			settings.hazardClass = "normal";
 			settings.feedStoreId = "waste";
 			settings.oxygenStoreId = "oxygen";
 			settings.waterStoreId = "processWater";

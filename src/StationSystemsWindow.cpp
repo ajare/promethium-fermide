@@ -1160,7 +1160,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	if (mDraft.waterCollectors.size() < core::MaxStationWaterCollectors && ImGui::Button("Add water collector"))
 	{
 		core::WaterCollectorSettings collector;
-		collector.hazardClass = "normal";
 		collector.thermalClass = "moderate";
 		collector.maxRateKgPerS = 0.001;
 		collector.targetRelativeHumidity = 0.5;
@@ -1191,7 +1190,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	if (mDraft.waterTreatments.size() < core::MaxStationWaterTreatments && ImGui::Button("Add water treatment"))
 	{
 		core::WaterTreatmentSettings treatment;
-		treatment.hazardClass = "normal";
 		treatment.throughputKgPerS = 0.002;
 		treatment.recoveryRatio = 0.85;
 		treatment.specificEnergyKWhPerKg = 0.5;
@@ -1224,7 +1222,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	if (mDraft.electrolyzers.size() < core::MaxStationElectrolyzers && ImGui::Button("Add electrolyzer"))
 	{
 		core::ElectrolyzerSettings cell;
-		cell.hazardClass = "normal";
 		cell.thermalClass = "low";
 		cell.rateKgPerS = 0.001;
 		cell.specificEnergyKWhPerKgWater = 4.5;
@@ -1258,7 +1255,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	if (mDraft.co2Captures.size() < core::MaxStationCo2Captures && ImGui::Button("Add CO2 capture machine"))
 	{
 		core::Co2CaptureSettings capture;
-		capture.hazardClass = "normal";
 		capture.maxRateKgPerS = 0.001;
 		capture.specificEnergyKWhPerKg = 0.5;
 		capture.consumablePerKg = 0.0;
@@ -1299,7 +1295,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	if (mDraft.microbialProcessors.size() < core::MaxStationMicrobialProcessors && ImGui::Button("Add microbial processor"))
 	{
 		core::MicrobialProcessorSettings processor;
-		processor.hazardClass = "normal";
 		processor.thermalClass = "low";
 		processor.rateKgPerS = 0.001;
 		if (!mDraft.stores.empty())
@@ -2099,8 +2094,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		case core::StationTransferStatus::Rejected: status = "blocked (nothing collected)"; break;
 		case core::StationTransferStatus::Idle: break;
 		}
-		ImGui::Text("%s [%s] (%s -> %s via loop '%s', class %s): %s | cold surface %s, circulation %.3f",
-			collector.id.c_str(), collector.hazardClass.c_str(), collector.atmosphereId.c_str(),
+		ImGui::Text("%s (%s -> %s via loop '%s', class %s): %s | cold surface %s, circulation %.3f",
+			collector.id.c_str(), collector.atmosphereId.c_str(),
 			collector.destStoreId.c_str(), collector.coolingLoopId.c_str(),
 			collector.thermalClass.c_str(), status,
 			collector.coldSurfaceAvailable ? "available" : "unavailable",
@@ -2126,8 +2121,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		case core::StationTransferStatus::Rejected: status = "refused (nothing processed)"; break;
 		case core::StationTransferStatus::Idle: break;
 		}
-		ImGui::Text("%s [%s] (%s -> %s + %s, consumables from %s): %s | scale %.3f%s%s",
-			treatment.id.c_str(), treatment.hazardClass.c_str(), treatment.sourceStoreId.c_str(),
+		ImGui::Text("%s (%s -> %s + %s, consumables from %s): %s | scale %.3f%s%s",
+			treatment.id.c_str(), treatment.sourceStoreId.c_str(),
 			treatment.treatedStoreId.c_str(), treatment.concentrateStoreId.c_str(),
 			treatment.consumableStoreId.c_str(), status, treatment.scale,
 			treatment.limiter.empty() ? "" : " | limited by: ",
@@ -2160,8 +2155,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		case core::StationTransferStatus::Rejected: status = "refused (nothing split)"; break;
 		case core::StationTransferStatus::Idle: break;
 		}
-		ImGui::Text("%s [%s] (%s -> %s + %s%s): %s | scale %.3f%s%s",
-			cell.id.c_str(), cell.hazardClass.c_str(), cell.waterStoreId.c_str(),
+		ImGui::Text("%s (%s -> %s + %s%s): %s | scale %.3f%s%s",
+			cell.id.c_str(), cell.waterStoreId.c_str(),
 			cell.oxygenStoreId.empty() ? cell.atmosphereId.c_str() : cell.oxygenStoreId.c_str(),
 			cell.hydrogenStoreId.c_str(),
 			cell.oxygenStoreId.empty() ? " (O2 to compartment)" : "",
@@ -2191,8 +2186,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		case core::StationTransferStatus::Rejected: status = "refused (nothing captured)"; break;
 		case core::StationTransferStatus::Idle: break;
 		}
-		ImGui::Text("%s [%s] (%s -> %s%s): %s | scale %.3f%s%s",
-			capture.id.c_str(), capture.hazardClass.c_str(), capture.atmosphereId.c_str(),
+		ImGui::Text("%s (%s -> %s%s): %s | scale %.3f%s%s",
+			capture.id.c_str(), capture.atmosphereId.c_str(),
 			capture.captureStoreId.c_str(),
 			capture.consumableStoreId.empty() ? "" : (std::string(", consumables from ") + capture.consumableStoreId).c_str(),
 			status, capture.scale,
@@ -2219,8 +2214,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		case core::StationTransferStatus::Rejected: status = "refused (nothing delivered)"; break;
 		case core::StationTransferStatus::Idle: break;
 		}
-		ImGui::Text("%s [%s] (%s + %s -> %s): %s | commanded %.3f kW%s%s",
-			cell.id.c_str(), cell.hazardClass.c_str(),
+		ImGui::Text("%s (%s + %s -> %s): %s | commanded %.3f kW%s%s",
+			cell.id.c_str(),
 			cell.hydrogenStoreId.c_str(), cell.oxygenStoreId.c_str(),
 			cell.waterStoreId.c_str(), status, cell.commandedOutputKW,
 			cell.limiter.empty() ? "" : " | limited by: ",
@@ -2248,8 +2243,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		case core::StationTransferStatus::Rejected: status = "refused (nothing converted)"; break;
 		case core::StationTransferStatus::Idle: break;
 		}
-		ImGui::Text("%s [%s] (%s + %s -> %s + %s): %s | scale %.3f%s%s",
-			reactor.id.c_str(), reactor.hazardClass.c_str(),
+		ImGui::Text("%s (%s + %s -> %s + %s): %s | scale %.3f%s%s",
+			reactor.id.c_str(),
 			reactor.co2StoreId.c_str(), reactor.hydrogenStoreId.c_str(),
 			reactor.methaneStoreId.c_str(), reactor.waterStoreId.c_str(),
 			status, reactor.scale,
@@ -2281,8 +2276,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		case core::StationTransferStatus::Rejected: status = "refused (nothing processed)"; break;
 		case core::StationTransferStatus::Idle: break;
 		}
-		ImGui::Text("%s [%s] (%s -> %s + %s): %s | scale %.3f%s%s",
-			processor.id.c_str(), processor.hazardClass.c_str(),
+		ImGui::Text("%s (%s -> %s + %s): %s | scale %.3f%s%s",
+			processor.id.c_str(),
 			processor.methaneStoreId.c_str(), processor.hydrogenStoreId.c_str(),
 			processor.carbonStoreId.c_str(),
 			status, processor.scale,
@@ -2314,8 +2309,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		case core::StationTransferStatus::Rejected: status = "refused (nothing digested)"; break;
 		case core::StationTransferStatus::Idle: break;
 		}
-		ImGui::Text("%s [%s] (%s -> %s + %s + %s + %s): %s | scale %.3f%s%s",
-			processor.id.c_str(), processor.hazardClass.c_str(),
+		ImGui::Text("%s (%s -> %s + %s + %s + %s): %s | scale %.3f%s%s",
+			processor.id.c_str(),
 			processor.feedStoreId.c_str(), processor.nutrientStoreId.c_str(),
 			processor.recoveredWaterStoreId.c_str(), processor.co2StoreId.c_str(),
 			processor.residueStoreId.c_str(),

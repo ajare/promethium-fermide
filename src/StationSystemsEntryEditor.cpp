@@ -284,11 +284,6 @@ bool renderMicrobialProcessorEntry(core::StationSystemsSettings& draft, core::Mi
 		if (enabled) ImGui::InputDouble((label + " " + name + " carry-over fraction").c_str(),
 			&processor.recoveredWaterCarryoverFractions.at(name), 0, 0, "%.6f");
 	}
-	char processorHazardBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(processorHazardBuffer, processor.hazardClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " hazard class").c_str(),
-		processorHazardBuffer, sizeof(processorHazardBuffer)))
-		processor.hazardClass = processorHazardBuffer;
 	char processorFeedBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorFeedBuffer, processor.feedStoreId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " organic waste feed store").c_str(),
@@ -785,11 +780,6 @@ bool renderWaterCollectorEntry([[maybe_unused]] core::StationSystemsSettings& dr
 {
 	bool removeCollector = false;
 	renderIdentity(label, collector.id);
-	char collectorHazardBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(collectorHazardBuffer, collector.hazardClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " hazard class").c_str(),
-		collectorHazardBuffer, sizeof(collectorHazardBuffer)))
-		collector.hazardClass = collectorHazardBuffer;
 	char collectorAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(collectorAtmosphereBuffer, collector.atmosphereId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " atmosphere").c_str(),
@@ -827,11 +817,6 @@ bool renderWaterTreatmentEntry([[maybe_unused]] core::StationSystemsSettings& dr
 {
 	bool removeTreatment = false;
 	renderIdentity(label, treatment.id);
-	char treatmentHazardBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(treatmentHazardBuffer, treatment.hazardClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " hazard class").c_str(),
-		treatmentHazardBuffer, sizeof(treatmentHazardBuffer)))
-		treatment.hazardClass = treatmentHazardBuffer;
 	char treatmentSourceBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(treatmentSourceBuffer, treatment.sourceStoreId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " raw water store").c_str(),
@@ -901,11 +886,6 @@ bool renderElectrolyzerEntry([[maybe_unused]] core::StationSystemsSettings& draf
 {
 	bool removeCell = false;
 	renderIdentity(label, cell.id);
-	char cellHazardBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(cellHazardBuffer, cell.hazardClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " hazard class").c_str(),
-		cellHazardBuffer, sizeof(cellHazardBuffer)))
-		cell.hazardClass = cellHazardBuffer;
 	char cellWaterBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellWaterBuffer, cell.waterStoreId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " feed water store").c_str(),
@@ -956,11 +936,6 @@ bool renderCo2CaptureEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 {
 	bool removeCapture = false;
 	renderIdentity(label, capture.id);
-	char captureHazardBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(captureHazardBuffer, capture.hazardClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " hazard class").c_str(),
-		captureHazardBuffer, sizeof(captureHazardBuffer)))
-		capture.hazardClass = captureHazardBuffer;
 	char captureAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(captureAtmosphereBuffer, capture.atmosphereId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " compartment").c_str(),
@@ -1386,11 +1361,6 @@ bool renderFuelCellEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 {
 	bool removeRequested = false;
 	renderIdentity(label, cell.id);
-	char cellHazardBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(cellHazardBuffer, cell.hazardClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " hazard class").c_str(),
-		cellHazardBuffer, sizeof(cellHazardBuffer)))
-		cell.hazardClass = cellHazardBuffer;
 	char cellHydrogenBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellHydrogenBuffer, cell.hydrogenStoreId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " hydrogen reactant store").c_str(),
@@ -1435,11 +1405,6 @@ bool renderSabatierReactorEntry([[maybe_unused]] core::StationSystemsSettings& d
 {
 	bool removeRequested = false;
 	renderIdentity(label, reactor.id);
-	char reactorHazardBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(reactorHazardBuffer, reactor.hazardClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " hazard class").c_str(),
-		reactorHazardBuffer, sizeof(reactorHazardBuffer)))
-		reactor.hazardClass = reactorHazardBuffer;
 	char reactorCo2Buffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(reactorCo2Buffer, reactor.co2StoreId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " CO2 feed store").c_str(),
@@ -1491,11 +1456,6 @@ bool renderMethaneProcessorEntry([[maybe_unused]] core::StationSystemsSettings& 
 {
 	bool removeRequested = false;
 	renderIdentity(label, processor.id);
-	char processorHazardBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(processorHazardBuffer, processor.hazardClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " hazard class").c_str(),
-		processorHazardBuffer, sizeof(processorHazardBuffer)))
-		processor.hazardClass = processorHazardBuffer;
 	char processorMethaneBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorMethaneBuffer, processor.methaneStoreId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " methane feed store").c_str(),
@@ -1824,7 +1784,6 @@ void renderFuelCellList(core::StationSystemsSettings& draft)
 	if (draft.fuelCells.size() < core::MaxStationFuelCells && ImGui::Button("Add fuel cell"))
 	{
 		core::FuelCellSettings cell;
-		cell.hazardClass = "normal";
 		cell.thermalClass = "low";
 		cell.ratedOutputKW = 10.0;
 		cell.efficiency = 0.6;
@@ -1864,7 +1823,6 @@ void renderSabatierList(core::StationSystemsSettings& draft)
 		&& ImGui::Button("Add Sabatier reactor"))
 	{
 		core::SabatierReactorSettings reactor;
-		reactor.hazardClass = "normal";
 		reactor.thermalClass = "low";
 		reactor.rateKgPerS = 0.001;
 		reactor.specificEnergyKWhPerKgCO2 = 1.0;
@@ -1907,7 +1865,6 @@ void renderMethaneProcessorList(core::StationSystemsSettings& draft)
 		&& ImGui::Button("Add methane processor"))
 	{
 		core::MethaneProcessorSettings processor;
-		processor.hazardClass = "normal";
 		processor.thermalClass = "low";
 		processor.rateKgPerS = 0.001;
 		processor.specificEnergyKWhPerKgCH4 = 2.0;

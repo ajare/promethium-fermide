@@ -953,13 +953,6 @@ namespace core
 		return actual;
 	}
 
-	// Declared water hazard classes (#402). The class no longer
-	// segregates water pathways: a collector may serve a compartment of
-	// any class because condensate is just water, whatever air it was
-	// condensed from (#752), and any water process may touch any store
-	// (#751).
-	inline constexpr std::array<char const*, 2> StationWaterHazardClasses{
-		"normal", "hazardous"};
 	// A water collector (#402): condenses water vapour out of one
 	// compartment atmosphere onto a cold surface served by a coolant loop,
 	// delivering the condensate to a raw water store. The latent heat the
@@ -971,7 +964,6 @@ namespace core
 	struct WaterCollectorSettings
 	{
 		std::string id;
-		std::string hazardClass;             // normal or hazardous; condensate carries no class (#752)
 		std::string atmosphereId;            // compartment whose vapour is condensed
 		std::string coolingLoopId;           // loop serving the cold surface
 		std::string thermalClass;            // cold service class of the interface
@@ -1000,7 +992,6 @@ namespace core
 	struct WaterTreatmentSettings
 	{
 		std::string id;
-		std::string hazardClass;             // normal or hazardous
 		std::string sourceStoreId;           // raw water drawn from here
 		std::string treatedStoreId;          // treated water destination
 		std::string concentrateStoreId;      // retained concentrate, pending disposal
@@ -1057,7 +1048,6 @@ namespace core
 	struct ElectrolyzerSettings
 	{
 		std::string id;
-		std::string hazardClass;      // normal or hazardous; products inherit the feed's class
 		std::string waterStoreId;    // qualified water above the protected reserve
 		std::string oxygenStoreId;   // O2 destination store; empty when delivering to a compartment
 		std::string hydrogenStoreId; // H2 destination store
@@ -1090,7 +1080,6 @@ namespace core
 	struct Co2CaptureSettings
 	{
 		std::string id;
-		std::string hazardClass;         // normal or hazardous
 		std::string atmosphereId;        // compartment whose CO2 is removed
 		std::string captureStoreId;      // captured CO2 lands here as inventory
 		std::string consumableStoreId;   // regeneration consumable; empty when the process uses none
@@ -1130,12 +1119,9 @@ namespace core
 	// Product water lands in the declared destination - the raw-water
 	// store a water treatment (#402) qualifies - so the backup's water
 	// goes through treatment rather than into drinking water directly.
-	// Hazard class segregates the whole chain: both reactant stores and
-	// the product water store must carry the cell's own class.
 	struct FuelCellSettings
 	{
 		std::string id;
-		std::string hazardClass;      // normal or hazardous; the whole chain carries it
 		std::string hydrogenStoreId;  // dedicated H2 reactant store
 		std::string oxygenStoreId;    // dedicated O2 reactant store, never the life-support reserve
 		std::string waterStoreId;     // product water destination (raw store for treatment)
@@ -1225,15 +1211,11 @@ namespace core
 	// store caps conversion rather than venting the excess: the water
 	// destination is the raw-water store a water treatment (#402)
 	// qualifies, and the methane destination is the processing stage's
-	// feed store. Hazard class segregates the whole chain: both feed
-	// stores and both product stores must carry the reactor's own
-	// class, and the heat sink must share the reactor's thermal service
-	// class, because spare capacity in one class is never usable by
-	// another.
+	// feed store. The heat sink must share the reactor's thermal service
+	// class: that is a service-class match, not a hazard partition (#758).
 	struct SabatierReactorSettings
 	{
 		std::string id;
-		std::string hazardClass;      // normal or hazardous; the whole chain carries it
 		std::string co2StoreId;     // captured CO2 feed inventory (#404)
 		std::string hydrogenStoreId;  // H2 feed above the protected reserve
 		std::string methaneStoreId;   // CH4 product destination
@@ -1266,11 +1248,9 @@ namespace core
 	// venting; the carbon destination is the configured useful store or
 	// the terminal-waste store surplus goes to (#403). Feed and return
 	// flows are qualified material above each store's protected reserve.
-	// Hazard class segregates the whole chain.
 	struct MethaneProcessorSettings
 	{
 		std::string id;
-		std::string hazardClass;      // normal or hazardous; the whole chain carries it
 		std::string methaneStoreId;   // CH4 feed
 		std::string hydrogenStoreId;  // recovered H2 destination (recycled feed)
 		std::string carbonStoreId;    // solid carbon: useful store or terminal waste
@@ -1352,7 +1332,6 @@ namespace core
 	struct MicrobialProcessorSettings
 	{
 		std::string id;
-		std::string hazardClass;            // normal or hazardous; the whole chain carries it
 		std::string feedStoreId;            // compound organic-waste feed
 		std::string oxygenStoreId;          // O2 drawn per kg of feed
 		WaterQualitySettings waterQuality;
@@ -3281,7 +3260,6 @@ namespace core
 	struct StationWaterCollectorSnapshot
 	{
 		std::string id;
-		std::string hazardClass;
 		std::string atmosphereId;
 		std::string coolingLoopId;
 		std::string thermalClass;
@@ -3316,7 +3294,6 @@ namespace core
 		std::map<std::string, double> lastRemovedConstituents, lastPassedConstituents;
 		std::map<std::string, double> removedConstituents, passedConstituents;
 		std::string id;
-		std::string hazardClass;
 		std::string sourceStoreId;
 		std::string treatedStoreId;
 		std::string concentrateStoreId;
@@ -3370,7 +3347,6 @@ namespace core
 	{
 		StationWaterQualitySnapshot waterQuality;
 		std::string id;
-		std::string hazardClass;
 		std::string waterStoreId;
 		std::string oxygenStoreId;
 		std::string hydrogenStoreId;
@@ -3414,7 +3390,6 @@ namespace core
 	struct StationCo2CaptureSnapshot
 	{
 		std::string id;
-		std::string hazardClass;
 		std::string atmosphereId;
 		std::string captureStoreId;
 		std::string consumableStoreId;
@@ -3458,7 +3433,6 @@ namespace core
 	struct StationFuelCellSnapshot
 	{
 		std::string id;
-		std::string hazardClass;
 		std::string hydrogenStoreId;
 		std::string oxygenStoreId;
 		std::string waterStoreId;
@@ -3510,7 +3484,6 @@ namespace core
 	struct StationSabatierReactorSnapshot
 	{
 		std::string id;
-		std::string hazardClass;
 		std::string co2StoreId;
 		std::string hydrogenStoreId;
 		std::string methaneStoreId;
@@ -3562,7 +3535,6 @@ namespace core
 	struct StationMethaneProcessorSnapshot
 	{
 		std::string id;
-		std::string hazardClass;
 		std::string methaneStoreId;
 		std::string hydrogenStoreId;
 		std::string carbonStoreId;
@@ -3633,7 +3605,6 @@ namespace core
 		double lastNitrifiedNitrogenKg{0.0};
 		double nitrifiedNitrogenKg{0.0};
 		std::string id;
-		std::string hazardClass;
 		std::string feedStoreId;
 		std::string oxygenStoreId;
 		std::string waterStoreId;
