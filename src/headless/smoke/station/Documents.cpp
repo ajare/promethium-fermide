@@ -143,6 +143,45 @@ namespace
 		auto reopened = core::loadWorldDocument(path);
 		require(reopened->getStationSystemsSettings() == settings,
 			"World document did not persist its Station step ratio");
+		reopened->saveTo(path.string());
+		auto resaved = core::loadWorldDocument(path);
+		require(resaved->getStationSystemsSettings() == settings,
+			"Re-saving a loaded World lost its adopted Station step ratio");
+
+		// Loading replaces the World settings with the document's timing rather
+		// than retaining the target's current configuration.  The same preflight
+		// must leave that target untouched if the saved ratio is invalid.
+		core::SerializationWorkData workData;
+		auto writer = core::YamlSerializer::toString();
+		world.serialize(*writer, workData); writer->serialize();
+		auto const savedWorld = writer->getSerializedString();
+		core::World target("Station ratio target", 2, 2);
+		target.pauseSimulation(); target.finishBuild();
+		auto targetSettings = settings; targetSettings.systemsStepWorldTicks = 4;
+		require(target.configureStationSystems(targetSettings, false, &diagnostic), diagnostic);
+		target.markSaved();
+		auto reader = core::YamlSerializer::fromString(savedWorld); reader->deserialize();
+		require(target.deserialize(*reader, workData)
+			&& target.getStationSystemsSettings() == settings,
+			"World load retained the target Station step ratio instead of adopting the saved ratio");
+
+		auto invalidWorld = savedWorld;
+		replaceAll(invalidWorld, "systemsStepWorldTicks: 6", "systemsStepWorldTicks: 0");
+		target.markSaved();
+		auto invalidReader = core::YamlSerializer::fromString(invalidWorld); invalidReader->deserialize();
+		bool refused = false;
+		try { refused = !target.deserialize(*invalidReader, workData); }
+		catch (std::exception const&) { refused = true; }
+		require(refused && target.getStationSystemsSettings() == settings && !target.isModified(),
+			"Out-of-range saved Station step ratio changed the target World");
+
+		auto legacyWorld = savedWorld;
+		replaceAll(legacyWorld, "version: 104", "version: 103");
+		replaceAll(legacyWorld, "  systemsStepWorldTicks: 6\n", "");
+		auto legacyReader = core::YamlSerializer::fromString(legacyWorld); legacyReader->deserialize();
+		require(target.deserialize(*legacyReader, workData)
+			&& target.getStationSystemsSettings().systemsStepWorldTicks == 1,
+			"Pre-change World document did not default its Station step ratio to 1");
 	}
 
 	// #699: identity is authored metadata, not a name/unit inference or an
