@@ -350,7 +350,7 @@ void scheduledTransferDocuments(smoke::Context const&)
     require(core::parseStationConfiguration(withoutRate, loaded, &why) && loaded.settings == defaultRate,
         "Scheduled load required an inactive continuous rate");
     loaded.settings = s;
-    auto stale = yaml; auto at = stale.find("schemaVersion: 102"); stale.replace(at, std::string("schemaVersion: 102").size(), "schemaVersion: 98");
+    auto stale = yaml; auto at = stale.find("schemaVersion: 103"); stale.replace(at, std::string("schemaVersion: 103").size(), "schemaVersion: 98");
     require(!core::parseStationConfiguration(stale, loaded, &why) && loaded.settings == s, "Old schema discarded Scheduled semantics");
     document.settings.transfers[0].sourceId.clear();
     require(core::parseStationConfiguration(core::serializeStationConfiguration(document), loaded, &why)
@@ -362,8 +362,8 @@ void scheduledTransferDocuments(smoke::Context const&)
     document.settings = fixture(); document.settings.transfers[0].mode = Mode::Continuous;
     document.settings.transfers[0].ratePerSecond = 1;
     document.settings.transfers[0].quantity = 1;
-    auto legacy = core::serializeStationConfiguration(document); at = legacy.find("schemaVersion: 102");
-    legacy.replace(at, std::string("schemaVersion: 102").size(), "schemaVersion: 98");
+    auto legacy = core::serializeStationConfiguration(document); at = legacy.find("schemaVersion: 103");
+    legacy.replace(at, std::string("schemaVersion: 103").size(), "schemaVersion: 98");
     require(core::parseStationConfiguration(legacy, loaded, &why) && loaded.settings == document.settings,
         "Legacy transfer did not default to Continuous");
 }

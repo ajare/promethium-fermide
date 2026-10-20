@@ -2157,9 +2157,12 @@ contract removes only its own store's declared eligible partitions
 touches the other class's store.
 
 Release-test fields formerly persisted by schema 88 and the class-conversion
-flag introduced in schema 101 are retired. Documents carrying
-`clearanceStoreId`, `clearancePerKg` or `releaseToNormalClass` are refused with a
-named-field conversion-required diagnostic, rather than silently defaulted.
+flag introduced in schema 101 are retired. With schema 103 the whole hazard-class
+chain is out of the wire format: documents carrying `hazardClass` on any store,
+atmosphere, coolant loop or process entry, or carrying
+`clearanceStoreId`, `clearancePerKg` or `releaseToNormalClass` on a water
+treatment, are refused at any version with a named-field conversion-required
+diagnostic, rather than silently defaulted.
 Treatment quality gates and accepted/held mass remain runtime-only; Load and
 Reset reconstruct them from authored starting conditions.
 

@@ -952,7 +952,17 @@ namespace core
 		// Schema 100 adds per-constituent water-treatment removal fractions.
 		// Schema 101 adds selective crop irrigation and clearance-only normal-class release.
 		// Schema 102 adds explicit waste-ejection partition eligibility.
-		serializer.writeUint32("version", 102);
+		// Schema 103 retires the hazard-class removal (#748): the
+		// `hazardClass` field on stores, atmospheres, coolant loops and
+		// every water/chemical process family, and the release-clearance
+		// fields `clearanceStoreId`, `clearancePerKg` and
+		// `releaseToNormalClass` on water treatments, are gone from the
+		// wire. Nothing is silently defaulted: a document carrying any
+		// removed field at any version is refused with a diagnostic
+		// naming the entry and the field, so a reader of an old document
+		// is told it needs converting. Containment is now modelled,
+		// not enforced by an authored class label.
+		serializer.writeUint32("version", 103);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
@@ -1854,7 +1864,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 102)
+		if (version < 1 || version > 103)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
