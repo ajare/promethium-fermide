@@ -13,7 +13,7 @@
 # provenance entries, with a single growth/auxiliary/reserve margin per
 # budget line (no duplicated margins).
 name: "Meridian reference station"
-schemaVersion: 103
+schemaVersion: 104
 summary: >
   A four-crew deep-space station configuration that demonstrates the
   whole implemented Station system in one internally consistent
@@ -230,6 +230,7 @@ scenarioNotes: >
 
 stationSystems:
   enabled: true
+  systemsStepWorldTicks: 1
   observationIntervalSeconds: 1.0
   trendRetentionSeconds: 3600.0
   dispatchMode: manual

@@ -2706,9 +2706,9 @@ namespace
 			// than silently dropping the cultures.
 			{
 				auto stale = text;
-				size_t const position = stale.find("version: 103");
+				size_t const position = stale.find("version: 104");
 				require(position != std::string::npos, "the fixture document carries no version line");
-				stale.replace(position, std::string("version: 103").size(), "version: 88");
+				stale.replace(position, std::string("version: 104").size(), "version: 88");
 				require(stale.find("algaeCultures") != std::string::npos,
 					"the fixture document carries no algae cultures to test the guard with");
 				bool refused = false;

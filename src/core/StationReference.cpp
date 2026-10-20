@@ -57,6 +57,7 @@ namespace core
 	{
 		serializer.beginMap("stationSystems");
 		serializer.writeBool("enabled", settings.enabled);
+		serializer.writeUint32("systemsStepWorldTicks", settings.systemsStepWorldTicks);
 		serializer.writeFloat("observationIntervalSeconds", settings.observationIntervalSeconds);
 		serializer.writeFloat("trendRetentionSeconds", settings.trendRetentionSeconds);
 		// #415: the dispatch controller mode is authored settings; the
@@ -2129,6 +2130,12 @@ namespace core
 				throw SerializationException(
 					"Station trend retention must be finite, from 1 to 86400 seconds");
 		}
+		if (serializer.hasField("systemsStepWorldTicks"))
+		{
+			if (version < 104)
+				throw SerializationException("Station systems step ratio requires World schema 104");
+			stationSettings.systemsStepWorldTicks = serializer.readUint32("systemsStepWorldTicks");
+		}
 		serializer.endMap();
 		std::string diagnostic;
 		if (validate && !validateStationSystemsSettings(stationSettings, diagnostic))
@@ -2167,8 +2174,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 103)
-				return refuse("Reference station schema version must be from 65 to 103");
+			if (document.schemaVersion < 65 || document.schemaVersion > 104)
+				return refuse("Reference station schema version must be from 65 to 104");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

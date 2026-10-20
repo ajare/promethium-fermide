@@ -404,7 +404,7 @@ namespace
 				"the saved document does not carry the authored retention");
 			// A pre-95 document carrying the field is refused, not silently
 			// dropped, and the refusal names the schema it needs.
-			auto stale = replaceAll(text, "version: 103", "version: 94");
+			auto stale = replaceAll(text, "version: 104", "version: 94");
 			bool refused = false;
 			std::string refusal;
 			try
@@ -423,6 +423,7 @@ namespace
 			// default retention - compatible with documents that predate
 			// the feature.
 			stale = replaceAll(stale, "trendRetentionSeconds: 7200", "");
+			stale = replaceAll(stale, "  systemsStepWorldTicks: 1\n", "");
 			bool loaded = false;
 			try
 			{

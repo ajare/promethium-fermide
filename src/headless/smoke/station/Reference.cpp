@@ -104,7 +104,7 @@ namespace
 	{
 		auto const& reference = core::bundledStationReference();
 		require(!reference.name.empty(), "the bundled reference station has no name");
-		require(reference.schemaVersion == 103, "the bundled reference is not on the current station schema");
+		require(reference.schemaVersion == 104, "the bundled reference is not on the current station schema");
 		require(!reference.summary.empty(), "the bundled reference has no summary");
 		require(!reference.provenance.empty(), "the bundled reference records no coefficient provenance");
 		require(!reference.qualification.empty(), "the bundled reference declares no qualification limits");
