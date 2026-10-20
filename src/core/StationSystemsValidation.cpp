@@ -522,8 +522,11 @@ using namespace station_detail;
 			auto const compartment = std::find_if(settings.atmospheres.begin(),
 				settings.atmospheres.end(), [&](AtmosphereSettings const& atmosphere)
 				{ return atmosphere.id == electrolyzer.atmosphereId; });
-			if (compartment == settings.atmospheres.end())
-				return missing(where + " delivers oxygen to unknown atmosphere compartment '" + electrolyzer.atmosphereId + "'");
+			// Draft loading tolerates this broken reference, but must still
+			// validate the surviving stores and heat sink below.
+			if (compartment == settings.atmospheres.end()
+				&& !missing(where + " delivers oxygen to unknown atmosphere compartment '" + electrolyzer.atmosphereId + "'"))
+				return false;
 		}
 		// Aliased stream roles are refused (#585): the two products are
 		// chemically distinct, and the tick sizes each product against

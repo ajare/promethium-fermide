@@ -238,6 +238,53 @@ namespace
 		require(!core::parseStationConfiguration(invalid, restored, &diagnostic)
 			&& restored.settings == before.settings && restored.positions == before.positions
 			&& !diagnostic.empty(), "Invalid document partially replaced draft");
+		// #775: an unresolved atmosphere must not hide invalid surviving
+		// electrolyzer wiring at the standalone serialization/parsing seam.
+		core::StationConfigurationDocument electrolysis;
+		electrolysis.settings.enabled = true;
+		electrolysis.settings.stores = {{"water", "kg", 100.0, 25.0},
+			{"hydrogen", "kg", 100.0, 0.0}};
+		core::ThermalReservoirSettings sink;
+		sink.id = "sink"; sink.thermalClass = "moderate";
+		sink.heatCapacityKJPerK = 1000.0;
+		electrolysis.settings.thermalReservoirs = {sink};
+		core::ElectrolyzerSettings cell;
+		cell.id = "cell"; cell.waterStoreId = "water";
+		cell.hydrogenStoreId = "hydrogen"; cell.atmosphereId = "missing";
+		cell.heatSinkId = "sink"; cell.thermalClass = "moderate";
+		electrolysis.settings.electrolyzers = {cell};
+		core::StationConfigurationDocument parsedElectrolysis;
+		require(core::parseStationConfiguration(core::serializeStationConfiguration(electrolysis),
+			parsedElectrolysis, &diagnostic)
+			&& parsedElectrolysis.settings == electrolysis.settings,
+			"An otherwise valid electrolyzer draft with a missing atmosphere was refused: " + diagnostic);
+		require(!core::validateStationSystemsSettings(electrolysis.settings, diagnostic),
+			"Strict validation accepted an unresolved electrolyzer atmosphere");
+		for (bool resolved : {false, true})
+		{
+			auto aliased = electrolysis;
+			if (resolved)
+			{
+				core::AtmosphereSettings air;
+				air.id = "missing"; air.volumeM3 = 100.0;
+				air.thermalCapacityKJPerK = 1000.0;
+				air.minPressureKPa = 1.0; air.maxPressureKPa = 200.0;
+				aliased.settings.atmospheres = {air};
+				auto const accepted = core::parseStationConfiguration(core::serializeStationConfiguration(aliased),
+					parsedElectrolysis, &diagnostic);
+				require(accepted, "Resolved electrolyzer control was refused: " + diagnostic);
+				require(core::validateStationSystemsSettings(aliased.settings, diagnostic), diagnostic);
+			}
+			aliased.settings.electrolyzers[0].hydrogenStoreId = "water";
+			auto const previous = parsedElectrolysis.settings;
+			require(!core::parseStationConfiguration(core::serializeStationConfiguration(aliased),
+				parsedElectrolysis, &diagnostic)
+				&& diagnostic.find("feed water and a gas product") != std::string::npos,
+				"Electrolyzer feed/product alias escaped draft validation (atmosphere resolved="
+					+ std::to_string(resolved) + "): " + diagnostic);
+			require(parsedElectrolysis.settings == previous,
+				"Refused electrolyzer draft replaced the previously loaded settings");
+		}
 		core::setTransactionalWriteFailureAfterBytesForTesting(12);
 		bool failed = false;
 		try { core::saveStationConfiguration(path.string(), original); }
