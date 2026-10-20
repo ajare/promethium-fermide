@@ -1,5 +1,6 @@
 #include "StationTrendChecks.h"
 #include "StationRig.h"
+#include "core/StationSystemsRuntime.h"
 #include "core/AgentTagRegistryDocument.h"
 #include <algorithm>
 #include <cstdio>
@@ -7,6 +8,116 @@
 namespace
 {
 	using namespace smoke::station;
+
+	// #766: drive the production Station seam without a World, comparing
+	// published telemetry and charts at matching systems seconds.
+	void reportingSystemsTime(smoke::Context const&)
+	{
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1;
+		core::ResourceStoreSettings source;
+		source.id = "source"; source.unit = "kg";
+		source.capacity = 10000; source.startingQualified = 8000;
+		source.composition = core::ResourceCompositionSettings{};
+		auto sink = source; sink.id = "sink"; sink.startingQualified = 0;
+		settings.stores = {source, sink};
+		core::ResourceTransferSettings pump;
+		pump.id = "pump"; pump.sourceId = "source"; pump.destinationId = "sink";
+		pump.unit = "kg"; pump.ratePerSecond = 2;
+		settings.transfers = {pump};
+		core::ResourceConversionSettings conversion;
+		conversion.id = "conversion";
+		conversion.inputs = {{"source", 1}}; conversion.outputs = {{"sink", 1}};
+		settings.conversions = {conversion};
+		core::SolarArraySettings sun;
+		sun.id = "sun"; sun.capacityKW = 10; sun.illumination.constantLevel = 1;
+		settings.solarArrays = {sun};
+		core::EquipmentLoadSettings load;
+		load.id = "shop"; load.electricalDemandKW = 6; load.thermalClass = "low";
+		load.operatingProfile.constantLevel = 1;
+		load.coolingDisposition = core::StationCoolingDisposition::Exported;
+		load.materialExchanges = {{"source", 0.5, true}, {"sink", 0.5, false}};
+		settings.equipmentLoads = {load};
+		constexpr float quantum = 1.0f / 60.0f;
+		core::StationSystemsRuntime fine(settings, quantum);
+		settings.systemsStepWorldTicks = 6;
+		core::StationSystemsRuntime coarse(settings, quantum);
+		require(fine.advanceTo(12) && coarse.advanceTo(12), "Reporting scenario failed");
+		auto close = [](double a, double b) {
+			return (std::isnan(a) && std::isnan(b)) || std::abs(a - b) <= 1e-8 * std::max({1.0, std::abs(a), std::abs(b)});
+		};
+		auto const a = fine.metrics(), b = coarse.metrics();
+		require(a.size() == b.size() && !a.empty(), "Reporting catalogue changed with ratio");
+		for (size_t i = 0; i < a.size(); ++i)
+		{
+			require(a[i].descriptor.id == b[i].descriptor.id, "Metric identities changed with ratio");
+			// Historical transfer quantities deliberately remain quantities per
+			// step; the typed exchange metrics below are the per-second rates.
+			if (a[i].descriptor.id == "transfer/pump") continue;
+			if (a[i].descriptor.quantity == core::StationPhysicalQuantity::MassRate
+				&& (a[i].descriptor.role == core::StationMetricRole::Input
+					|| a[i].descriptor.role == core::StationMetricRole::Output))
+			{
+				auto const& d = a[i].descriptor;
+				double const expected = d.equipmentType == "Resource transfer" ? 2
+					: d.equipmentType == "Resource conversion" ? 1 : 0.5;
+				require(!b[i].samples.empty() && b[i].samples.back().actual
+					&& close(*b[i].samples.back().actual, expected), "Rate is not expressed per systems second");
+			}
+			require(!a[i].samples.empty() && a[i].samples.size() == b[i].samples.size(), "Systems observation cadence differs");
+			for (size_t j = 0; j < a[i].samples.size(); ++j)
+			{
+				auto const& x = a[i].samples[j]; auto const& y = b[i].samples[j];
+				require(close(x.elapsedSeconds, y.elapsedSeconds) && x.validity == y.validity
+					&& x.actual.has_value() == y.actual.has_value() && x.requested.has_value() == y.requested.has_value()
+					&& (!x.actual || close(*x.actual, *y.actual))
+					&& (!x.requested || close(*x.requested, *y.requested)), "Telemetry changed with step ratio");
+			}
+		}
+		for (auto const& chart : fine.catalogue())
+		{
+			auto const x = fine.query(chart.id), y = coarse.query(chart.id);
+			require(x.series.size() == y.series.size() && x.incomplete == y.incomplete, "Chart coverage changed with ratio");
+			for (size_t i = 0; i < x.series.size(); ++i)
+			{
+				require(x.series[i].times.size() == y.series[i].times.size(), "Chart cadence changed with ratio");
+				for (size_t j = 0; j < x.series[i].times.size(); ++j)
+					require(close(x.series[i].times[j], y.series[i].times[j])
+						&& close(x.series[i].values[j], y.series[i].values[j]), "Chart values changed with ratio");
+			}
+		}
+		for (auto const& series : coarse.trends())
+			for (auto const& sample : series.samples)
+				require(close(sample.elapsedSeconds, sample.worldTick * (6.0 * quantum)),
+					"Legacy history stamp is not a Station step");
+		auto const revision = coarse.observationRevision();
+		require(coarse.advanceTo(12) && coarse.observationRevision() == revision,
+			"Read/repeated target created an observation clock");
+		// Compatibility sampler coarsening must not infer a World tick grid
+		// from legacy stamp names. Identical systems observations coarsen alike.
+		std::vector<core::StationTrendSeries> fineLegacy, coarseLegacy;
+		for (uint64_t second = 1; second <= 1024; ++second)
+		{
+			core::appendBoundedTrendSample(fineLegacy, "power", "", "kW", 1, 10000,
+				second * 60, second, 6, 6);
+			core::appendBoundedTrendSample(coarseLegacy, "power", "", "kW", 1, 10000,
+				second * 10, second, 6, 6);
+		}
+		require(fineLegacy.front().samples.size() == coarseLegacy.front().samples.size(),
+			"Compatibility sampler inferred a World tick grid");
+		for (size_t i = 0; i < fineLegacy.front().samples.size(); ++i)
+			require(fineLegacy.front().samples[i].elapsedSeconds == coarseLegacy.front().samples[i].elapsedSeconds,
+				"Compatibility sampler coarsening changed with ratio");
+		// A step longer than the requested observation interval emits one
+		// bounded sample at the step, never synthetic intermediate samples.
+		settings.systemsStepWorldTicks = 600;
+		core::StationSystemsRuntime sparse(settings, quantum);
+		require(sparse.advanceTo(12), "Sparse reporting scenario failed");
+		for (auto const& metric : sparse.metrics())
+			require(metric.samples.size() == 2 && metric.samples.front().elapsedSeconds >= 10,
+				"Observation cadence became a second clock");
+	}
 
 	// #418: bounded trends and incident history. Trend series are sampled
 	// from the committed ledger at the existing observation cadence - no
@@ -1161,5 +1272,5 @@ namespace
 
 void registerStationTrendChecks(std::vector<smoke::Check>& checks)
 {
-	checks.insert(checks.end(), { { "trends", trends }, { "endurance", endurance } });
+	checks.insert(checks.end(), { { "reportingSystemsTime", reportingSystemsTime }, { "trends", trends }, { "endurance", endurance } });
 }

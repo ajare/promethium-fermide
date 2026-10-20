@@ -306,6 +306,9 @@ namespace core
 	// tick and far larger than the accumulated rounding, so an occurrence
 	// that is due is never missed and never counted twice.
 	inline constexpr double StationScheduleTolerance{1e-9};
+	// Authored schedules retain this minimum resolution even when Station
+	// steps are coarser (events within a step are handled independently).
+	inline constexpr float StationScheduleQuantumSeconds{1.0f / 60.0f};
 	// Occurrences of an authored schedule that have come due at or before
 	// the given simulation time (#392). The count is monotonic in elapsed
 	// time, so a caller that fires `due - alreadyFired` occurrences each

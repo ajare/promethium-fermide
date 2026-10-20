@@ -2,7 +2,6 @@
 #include "core/StationSystemsRuntime.h"
 #include "core/StationConnectionLedger.h"
 #include "core/StationMaterialConnections.h"
-#include "core/World.h"
 #include "core/SerializationException.h"
 #include "ScriptSandbox.h"
 #include <algorithm>
@@ -80,12 +79,6 @@ namespace core::station_detail
 		double retentionSeconds,
 		uint64_t tick, double elapsedSeconds, double requested, double actual)
 	{
-		// The base cadence in whole ticks, matching the gate the
-		// runtime uses to call this at the observation boundary, so
-		// the decimation stride is exact on the tick grid instead of
-		// re-derived from the floating-point seconds.
-		auto const baseTicks = std::max<uint64_t>(1,
-			static_cast<uint64_t>(std::ceil(baseIntervalSeconds / World::getFixedTimestep())));
 		auto found = std::ranges::find(series, std::make_pair(subsystem, id),
 			[](StationTrendSeries const& entry)
 			{ return std::make_pair(entry.subsystem, entry.id); });
@@ -146,9 +139,12 @@ namespace core::station_detail
 		// rather than appended, so the uniform-spacing invariant and
 		// the equal-span averaging survive every coarsening.
 		auto const level = std::min(target.downsampleLevel, StationTrendDownsampleLevelCap);
-		auto const strideTicks = baseTicks << level;
+		auto const stride = uint64_t{1} << level;
+		// Compare whole observation spans, not World ticks. The caller supplies
+		// the effective cadence in systems seconds; round away float-grid noise.
 		if (!target.samples.empty()
-			&& tick - target.samples.back().worldTick < strideTicks)
+			&& std::round((elapsedSeconds - target.samples.back().elapsedSeconds) / baseIntervalSeconds)
+				< static_cast<double>(stride))
 			return;
 		target.samples.push_back({tick, elapsedSeconds, requested, actual});
 		while (target.samples.size() > 1

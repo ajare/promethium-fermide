@@ -36,7 +36,7 @@ namespace core
 	public:
 		StationHistory() = default;
 		StationHistory(std::vector<StationRecordingSlot> slots, double cadence, double retention,
-			StationRecordingLimits limits = {});
+			StationRecordingLimits limits = {}, double stepSeconds = StationScheduleQuantumSeconds);
 		void observe(double seconds, std::vector<StationMetricSample> const& values);
 		std::vector<StationMetricHistory> metrics() const;
 		std::vector<StationTrendSeries> trends() const;
@@ -52,7 +52,7 @@ namespace core
 		std::vector<double> mTimes;
 		std::vector<Cell> mCells, mPending;
 		StationRecordingStatus mStatus;
-		double mCadence{0}, mRetention{0};
+		double mCadence{0}, mRetention{0}, mStepSeconds{StationScheduleQuantumSeconds};
 		size_t mCount{0};
 		uint64_t mPendingCount{0}, mRevision{0};
 		StationMetricHistory metric(size_t col) const;

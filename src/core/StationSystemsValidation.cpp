@@ -69,7 +69,7 @@ using namespace station_detail;
 		if (transfer.quantity <= 0.0) return refuse("quantity must be positive");
 		if (transfer.firstOccurrenceSeconds < 0.0) return refuse("first occurrence must be non-negative");
 		if (transfer.recurrenceSeconds < 0.0 || (transfer.recurrenceSeconds > 0.0
-			&& transfer.recurrenceSeconds + StationScheduleTolerance < static_cast<double>(World::getFixedTimestep())))
+			&& transfer.recurrenceSeconds + StationScheduleTolerance < static_cast<double>(StationScheduleQuantumSeconds)))
 			return refuse("recurrence must be zero or at least one fixed tick");
 		return true;
 	}
@@ -259,9 +259,9 @@ using namespace station_detail;
 			return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
 		if (cycle.recurrenceSeconds > 0.0
 			&& cycle.recurrenceSeconds + StationScheduleTolerance
-				< static_cast<double>(World::getFixedTimestep()))
+				< static_cast<double>(StationScheduleQuantumSeconds))
 			return refuse(where + " recurrence must be zero or at least one World fixed tick ("
-				+ std::to_string(World::getFixedTimestep()) + " seconds)");
+				+ std::to_string(StationScheduleQuantumSeconds) + " seconds)");
 		if (!std::isfinite(cycle.recoveredFraction) || cycle.recoveredFraction < 0.0
 			|| cycle.recoveredFraction > 1.0)
 			return refuse(where + " recovered fraction must be finite and from 0 to 1");
@@ -1428,9 +1428,9 @@ using namespace station_detail;
 				return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
 			if (delivery.recurrenceSeconds > 0.0
 				&& delivery.recurrenceSeconds + StationScheduleTolerance
-					< static_cast<double>(World::getFixedTimestep()))
+					< static_cast<double>(StationScheduleQuantumSeconds))
 				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
-					+ std::to_string(World::getFixedTimestep()) + " seconds)");
+					+ std::to_string(StationScheduleQuantumSeconds) + " seconds)");
 		} catch (BrokenDraftEntry const&) {}
 		// Terminal-waste ejection schedules (#403): a scenario removal of
 		// disposal-ready (qualified) material from one waste store at
@@ -1472,9 +1472,9 @@ using namespace station_detail;
 				return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
 			if (ejection.recurrenceSeconds > 0.0
 				&& ejection.recurrenceSeconds + StationScheduleTolerance
-					< static_cast<double>(World::getFixedTimestep()))
+					< static_cast<double>(StationScheduleQuantumSeconds))
 				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
-					+ std::to_string(World::getFixedTimestep()) + " seconds)");
+					+ std::to_string(StationScheduleQuantumSeconds) + " seconds)");
 		} catch (BrokenDraftEntry const&) {}
 		// Installation outage and capacity-reduction schedules (#413): a
 		// scenario change to one registered installation's available rated
@@ -1539,9 +1539,9 @@ using namespace station_detail;
 				return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
 			if (outage.recurrenceSeconds > 0.0
 				&& outage.recurrenceSeconds + StationScheduleTolerance
-					< static_cast<double>(World::getFixedTimestep()))
+					< static_cast<double>(StationScheduleQuantumSeconds))
 				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
-					+ std::to_string(World::getFixedTimestep()) + " seconds)");
+					+ std::to_string(StationScheduleQuantumSeconds) + " seconds)");
 			if (outage.recurrenceSeconds > 0.0
 				&& outage.recurrenceSeconds + StationScheduleTolerance < outage.durationSeconds)
 				return refuse(where + " recurrence must be at least the outage duration so its windows never overlap");
@@ -1586,9 +1586,9 @@ using namespace station_detail;
 				return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
 			if (job.recurrenceSeconds > 0.0
 				&& job.recurrenceSeconds + StationScheduleTolerance
-					< static_cast<double>(World::getFixedTimestep()))
+					< static_cast<double>(StationScheduleQuantumSeconds))
 				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
-					+ std::to_string(World::getFixedTimestep()) + " seconds)");
+					+ std::to_string(StationScheduleQuantumSeconds) + " seconds)");
 			if (job.recurrenceSeconds > 0.0
 				&& job.recurrenceSeconds + StationScheduleTolerance < job.durationSeconds)
 				return refuse(where + " recurrence must be at least the maintenance duration so its windows never overlap");

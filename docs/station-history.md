@@ -34,7 +34,7 @@ Future rows accumulate *every* observation over the new doubled interval, rather
 than skipping observations or appending finer samples to a coarse tail. The level
 is capped at 48; after that the oldest row slides out. Authored retention evicts
 oldest rows together. Timestamps mark interval ends; resolution describes the
-actual simulation tick cadence. Coarsened points are interval summaries, not
+actual Station observation cadence. Coarsened points are interval summaries, not
 instantaneous values. A partial trailing interval is not published until complete.
 
 Each cell tracks expected and valid observations. Any missing or non-finite value
@@ -47,12 +47,35 @@ utility remains for compatibility tests but is not used by the runtime.
 
 Power demand is requested service; generation is available generation, never
 battery-assisted supplied service. Legacy transfer quantities retain their native
-per-tick units and do not pretend to be per-second exchanges. Non-canonical legacy
+per-Station-step units and do not pretend to be per-second exchanges. Non-canonical legacy
 units are explicitly unspecified in typed metadata, while the legacy trend keeps
 its original unit label.
 
 The Power header reports retained interval, resolution, coarsening/truncation,
 gaps, recording footprint, row limit and an explicit recording-limit condition.
+## Systems-time reporting (#766)
+
+Observation intervals, retention and sample timestamps use systems seconds.
+The requested cadence rounds upward to whole Station steps, with at least one
+step per observation. This is bounded event sampling, not another clock: a step
+longer than the observation interval produces one observation, never invented
+intermediate samples. Reading charts, or driving to an already-reached instant,
+creates no samples. The legacy trend sample's `worldTick` stamp counts Station
+steps, consistent with the snapshot's legacy tick-named fields.
+
+Typed exchange rates recovered from per-step quantities divide by the Station
+step duration; cumulative exchanges divide by the actual systems-time observation
+window. They remain per-second at any ratio. Legacy transfer quantities above
+remain intentionally step-sized, not rates.
+
+`station-reportingSystemsTime` compares constant-rate transfers, conversions,
+equipment material exchanges, power, inventories and charts at ratios 1 and 6,
+using the standalone production drive. It also checks sparse observation sampling.
+`station-clock-boundary` scans Station translation units and private headers for
+World-timestep references (and World includes). Authored schedules retain their
+independent minimum resolution of 1/60 second; coarsening the Station step does
+not redefine that resolution.
+
 ## Revisioned queries (#697)
 
 `World::getStationSystemsObservationRevision()` exposes an opaque applied-run

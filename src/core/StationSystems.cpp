@@ -996,7 +996,8 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		auto const slotCount = slots.size();
 		auto const stepSeconds = static_cast<float>(mImpl->clock.stepSeconds());
 		auto const cadenceSteps = std::max(1.0f, std::ceil(settings.observationIntervalSeconds / stepSeconds));
-		mImpl->history = StationHistory(std::move(slots), cadenceSteps * stepSeconds, settings.trendRetentionSeconds);
+		mImpl->history = StationHistory(std::move(slots), cadenceSteps * stepSeconds,
+			settings.trendRetentionSeconds, {}, mImpl->clock.stepSeconds());
 		if (!mImpl->history.status().limited) mImpl->recordingValues.resize(slotCount);
 		else
 		{

@@ -1,5 +1,4 @@
 #include "core/StationHistory.h"
-#include "core/World.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -7,7 +6,8 @@
 namespace core
 {
 	StationHistory::StationHistory(std::vector<StationRecordingSlot> slots, double cadence,
-		double retention, StationRecordingLimits limits) : mCadence(cadence), mRetention(retention)
+		double retention, StationRecordingLimits limits, double stepSeconds)
+		: mCadence(cadence), mRetention(retention), mStepSeconds(stepSeconds)
 	{
 		// Bound metadata before retaining it; refuse the entire catalogue, never a subset.
 		size_t metadata = (slots.capacity() - slots.size()) * sizeof(StationRecordingSlot);
@@ -21,7 +21,8 @@ namespace core
 				if (*text) metadata += (*text)->capacity();
 		}
 		if (slots.size() > limits.metrics || metadata > limits.metadataBytes || metadata > limits.memoryBytes
-			|| !std::isfinite(cadence) || cadence <= 0 || !std::isfinite(retention) || retention <= 0)
+			|| !std::isfinite(cadence) || cadence <= 0 || !std::isfinite(retention) || retention <= 0
+			|| !std::isfinite(stepSeconds) || stepSeconds <= 0)
 		{ mStatus.limited = true; return; }
 		std::vector<StationMetricDescriptor> descriptors;
 		for (auto const& slot : slots) descriptors.push_back(slot.metric);
@@ -211,7 +212,7 @@ namespace core
 			s.sampleIntervalSeconds = mStatus.resolutionSeconds;
 			s.downsampleLevel = mStatus.coarseningLevel; s.truncated = mStatus.truncated;
 			for (auto const& p : history[col].samples)
-				s.samples.push_back({static_cast<uint64_t>(std::llround(p.elapsedSeconds / World::getFixedTimestep())), p.elapsedSeconds,
+				s.samples.push_back({static_cast<uint64_t>(std::llround(p.elapsedSeconds / mStepSeconds)), p.elapsedSeconds,
 					p.requested.value_or(p.actual.value_or(std::numeric_limits<double>::quiet_NaN())),
 					p.actual.value_or(std::numeric_limits<double>::quiet_NaN())});
 			result.push_back(std::move(s));
