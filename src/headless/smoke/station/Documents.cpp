@@ -12,6 +12,7 @@
 #include "core/World.h"
 #include "core/StationConfigurationDocument.h"
 #include "core/StationPorts.h"
+#include "core/StationReference.h"
 #include "core/TransactionalFileWriter.h"
 #include <yaml-cpp/yaml.h>
 #include "core/AgentTagRegistryDocument.h"
@@ -1359,6 +1360,71 @@ namespace
 			require(reopened->getStationSystemsSnapshot() == expected,
 				"containment scenario is not reproducible from the document");
 		}
+		// #776: exercise the authoritative reader directly so unrelated World
+		// feature gates cannot mask retired-field diagnostics at older schemas.
+		std::string preflightFailures;
+		for (bool const microbial : {false, true})
+		{
+			core::StationSystemsSettings fixture;
+			if (microbial) {
+				core::MicrobialProcessorSettings processor;
+				processor.id = "example";
+				processor.waterQuality.maxTotalDissolved = 0.001;
+				fixture.microbialProcessors = {processor};
+			} else {
+				auto treatment = plant;
+				treatment.id = "example";
+				fixture.waterTreatments = {treatment};
+			}
+			auto writer = core::YamlSerializer::toString();
+			core::writeStationSystemsSettingsMap(*writer, fixture);
+			writer->serialize();
+			auto baseline = YAML::Load(writer->getSerializedString());
+			baseline.remove("dispatchMode");
+			baseline.remove("trendRetentionSeconds");
+			auto entry = baseline[microbial ? "microbialProcessors" : "waterTreatments"][0];
+			entry.remove("removalFractions");
+			auto read = [](YAML::Node const& document, std::uint32_t version) {
+				auto input = core::YamlSerializer::fromString(YAML::Dump(document));
+				input->deserialize();
+				core::StationSystemsSettings parsed;
+				core::readStationSystemsSettingsMap(*input, version, parsed, false);
+				return parsed;
+			};
+			for (auto const version : {64u, 65u, 77u, 78u, 84u, 85u, 102u, 103u})
+			{
+				// Classless legacy entries retain their feature-version behavior.
+				std::string baselineError;
+				core::StationSystemsSettings parsed;
+				try { parsed = read(baseline, version); }
+				catch (std::exception const& error) { baselineError = error.what(); }
+				auto const minimumVersion = microbial ? 85u : 78u;
+				auto const expectedError = version < 65 ? "Station systems require World schema 65"
+					: "require World schema " + std::to_string(minimumVersion);
+				require(version < minimumVersion
+					? baselineError.find(expectedError) != std::string::npos
+					: baselineError.empty(), "classless entry load behavior changed: " + baselineError);
+				if (microbial && version >= minimumVersion)
+					require(parsed.microbialProcessors.size() == 1
+						&& parsed.microbialProcessors[0].waterQuality == fixture.microbialProcessors[0].waterQuality,
+						"legitimate microbial waterQuality gate was lost");
+				for (auto const* field : {"hazardClass", "clearanceStoreId", "clearancePerKg", "releaseToNormalClass"})
+				{
+					if (microbial && std::string(field) != "hazardClass") continue;
+					auto malformed = YAML::Clone(baseline);
+					malformed[microbial ? "microbialProcessors" : "waterTreatments"][0][field] = "0";
+					std::string message;
+					try { read(malformed, version); }
+					catch (std::exception const& error) { message = error.what(); }
+					if (message.find("example") == std::string::npos
+						|| message.find(field) == std::string::npos
+						|| message.find("conversion required") == std::string::npos)
+						preflightFailures += std::string(microbial ? "microbial " : "treatment ")
+							+ field + " schema " + std::to_string(version) + ": " + message + "\n";
+				}
+			}
+		}
+		require(preflightFailures.empty(), "retired-field diagnostic precedence failures:\n" + preflightFailures);
 		// A pre-88 document carrying the new fields is refused.
 		auto const withField = serializeYaml(original);
 		{

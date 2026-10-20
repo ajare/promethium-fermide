@@ -18,6 +18,7 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 namespace core
@@ -994,8 +995,35 @@ namespace core
 	void readStationSystemsSettingsMap(Serializer& serializer,
 		std::uint32_t const version, StationSystemsSettings& stationSettings, bool validate)
 	{
-		if (version < 65) throw SerializationException("Station systems require World schema 65");
 		serializer.beginMap("stationSystems");
+		// Retired fields take precedence over all schema/feature diagnostics.
+		// This policy is independent of which entries support waterQuality.
+		for (auto const* array : {"stores", "transfers", "conversions", "solarArrays", "equipmentLoads",
+			"batteries", "thermalReservoirs", "radiators", "coolantLoops", "chillers", "generators",
+			"atmospheres", "airlockCycles", "waterCollectors", "waterTreatments", "electrolyzers",
+			"co2Captures", "fuelCells", "thermalBuffers", "sabatierReactors", "methaneProcessors",
+			"deliveries", "wasteEjections", "outages", "maintenanceJobs", "microbialProcessors"})
+		{
+			if (!serializer.hasField(array)) continue;
+			serializer.beginArray(array);
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				if (serializer.hasField("hazardClass"))
+					throw SerializationException(
+						"Station entry '" + serializer.readString("id")
+						+ "' field 'hazardClass' was removed (#757, #758); conversion required");
+				if (std::string_view(array) == "waterTreatments")
+					for (auto const* field : {"clearanceStoreId", "clearancePerKg", "releaseToNormalClass"})
+						if (serializer.hasField(field))
+							throw SerializationException(
+								"Station water treatment '" + serializer.readString("id")
+								+ "' field '" + field + "' was removed (#753); conversion required");
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
+		if (version < 65) throw SerializationException("Station systems require World schema 65");
 		// Reject misplaced gates instead of silently discarding authored intent.
 		for (auto const* array : {"stores", "transfers", "conversions", "solarArrays", "equipmentLoads",
 			"batteries", "thermalReservoirs", "radiators", "coolantLoops", "chillers", "generators",
@@ -1008,14 +1036,6 @@ namespace core
 			while (serializer.nextArrayItem())
 			{
 				serializer.beginMap("");
-				// Retired hazard classes must name the conversion even when
-				// another authored field predates this document's schema.
-				// Stores, atmospheres (#756) and coolant loops (#757) lost
-				// the field first; the process families join them here (#758).
-				if (serializer.hasField("hazardClass"))
-					throw SerializationException(
-						"Station entry '" + serializer.readString("id")
-						+ "' field 'hazardClass' was removed (#757, #758); conversion required");
 				if (serializer.hasField("waterQuality"))
 					throw SerializationException(std::string(array) + " has no configurable water quality gate (electrolyzer purity is built in)");
 				serializer.endMap();
@@ -1564,9 +1584,6 @@ namespace core
 				serializer.beginMap("");
 				WaterTreatmentSettings treatment;
 				treatment.id = serializer.readString("id");
-				if (serializer.hasField("releaseToNormalClass"))
-					throw SerializationException(
-						"Station water treatment '" + treatment.id + "' field 'releaseToNormalClass' was removed (#753); conversion required");
 				treatment.sourceStoreId = serializer.readString("sourceStoreId");
 				treatment.treatedStoreId = serializer.readString("treatedStoreId");
 				treatment.concentrateStoreId = serializer.readString("concentrateStoreId");
@@ -1584,11 +1601,6 @@ namespace core
 				}
 				treatment.specificEnergyKWhPerKg = serializer.readDouble("specificEnergyKWhPerKg");
 				treatment.consumablePerKg = serializer.readDouble("consumablePerKg");
-				if (serializer.hasField("clearanceStoreId") || serializer.hasField("clearancePerKg"))
-					throw SerializationException(
-						"Station water treatment '" + treatment.id + "' field '"
-						+ (serializer.hasField("clearanceStoreId") ? "clearanceStoreId" : "clearancePerKg")
-						+ "' was removed (#753); conversion required");
 				treatment.priority = serializer.readInt32("priority");
 				stationSettings.waterTreatments.push_back(std::move(treatment));
 				serializer.endMap();
@@ -1753,13 +1765,6 @@ namespace core
 				serializer.beginMap("");
 				MicrobialProcessorSettings processor;
 				processor.id = serializer.readString("id");
-				// The microbial reader is outside the shared retired-field
-				// guard: it legitimately carries a consumer waterQuality
-				// gate (#758 D4), so the hazard refusal lives here.
-				if (serializer.hasField("hazardClass"))
-					throw SerializationException(
-						"Station microbial processor '" + processor.id
-						+ "' field 'hazardClass' was removed (#758); conversion required");
 				if (serializer.hasField("rateBasis"))
 				{
 					auto const basis = serializer.readString("rateBasis");
