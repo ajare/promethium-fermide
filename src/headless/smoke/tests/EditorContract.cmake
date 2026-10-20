@@ -309,6 +309,12 @@ set(editor_names
     station/generatorWorkflow
     station/bufferWorkflow
     station/microbialConditionWorkflow
+    station/waterCarryoverWorkflow
+    station/bioconversionWorkflow
+    station/bioconversionDegenerateWorkflow
+    station/bioconversionFoodwasteWorkflow
+    station/waterFlagshipWorkflow
+    station/compoundWaterWorkflow
     station/cropWorkflow
     station/algaeWorkflow
     station/maintenanceWorkflow

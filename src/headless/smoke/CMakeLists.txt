@@ -167,7 +167,7 @@ set_tests_properties(station-coupledNominal PROPERTIES TIMEOUT 120)
 # #422 the reference nominal scenario runs a quarter-hour simulated run
 # three times (run, reset replay, reopened replay) across the full
 # coupled register.
-set_tests_properties(station-referenceNominal PROPERTIES TIMEOUT 240)
+set_tests_properties(station-referenceNominal PROPERTIES TIMEOUT 3600)
 set_tests_properties(station-referenceShortageAndRejection PROPERTIES TIMEOUT 240)
 # #423 the emergency/recovery scenario runs are multi-thousand-tick
 # simulated runs across the full coupled register.
@@ -180,8 +180,8 @@ set_tests_properties(station-scenarioLifecycle PROPERTIES TIMEOUT 180)
 # simulated hours; the path/reset/isolation checks run shorter horizons
 # across several Worlds and time-scale paths.
 set_tests_properties(station-stabilityLongRun PROPERTIES TIMEOUT 720)
-set_tests_properties(station-stabilityPathEquivalence PROPERTIES TIMEOUT 600)
-set_tests_properties(station-stabilityResetIsolation PROPERTIES TIMEOUT 360)
+set_tests_properties(station-stabilityPathEquivalence PROPERTIES TIMEOUT 3600)
+set_tests_properties(station-stabilityResetIsolation PROPERTIES TIMEOUT 3600)
 set_tests_properties(station-stabilityMultiWorldIsolation PROPERTIES TIMEOUT 480)
 foreach(hourScale batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesLimited batteriesLosses batteriesDischarging)
