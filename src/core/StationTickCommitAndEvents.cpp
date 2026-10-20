@@ -2,7 +2,7 @@
 
 namespace core
 {
-	bool StationSystemsRuntime::Impl::Tick::commitAndEvents()
+	void StationSystemsRuntime::Impl::Tick::commitInventory()
 	{
 		for (size_t index = 0; index < runtime.stores.size(); ++index)
 		{
@@ -12,10 +12,6 @@ namespace core
 			runtime.stores[index].lastTickOut = flowOut[index];
 			runtime.stores[index].constituentDrift = stagedDrift[index];
 		}
-		runtime.connectionFlows = connections.takeSnapshots();
-		runtime.lastPoolGenerationKW = poolGenerationKW;
-		runtime.lastConnectionPowerLossKW = connectionPowerLossKW;
-		runtime.lastPoolResidualKW = poolResidualKW;
 		runtime.constituentLoss = stagedLoss;
 		runtime.unitLoss = stagedUnitLoss;
 		runtime.unitDelivered = stagedUnitDelivered;
@@ -23,6 +19,15 @@ namespace core
 		runtime.constituentDelivered = stagedConstituentDelivered;
 		runtime.unitHarvested = stagedUnitHarvested;
 		runtime.constituentHarvested = stagedConstituentHarvested;
+	}
+
+	bool StationSystemsRuntime::Impl::Tick::commitAndEvents()
+	{
+		commitInventory();
+		runtime.connectionFlows = connections.takeSnapshots();
+		runtime.lastPoolGenerationKW = poolGenerationKW;
+		runtime.lastConnectionPowerLossKW = connectionPowerLossKW;
+		runtime.lastPoolResidualKW = poolResidualKW;
 		// Rejections and partial completions are visible: announce each
 		// status transition (after the commit) so the event log records
 		// where material stalled without flooding every tick.

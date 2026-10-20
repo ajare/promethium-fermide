@@ -198,10 +198,10 @@ namespace core
 		// resource ledger: the electrical service a load receives bounds
 		// its heat and material exchanges, and allocated power can never
 		// exceed the generation actually available this tick.
-		elapsed = runtime.clock.secondsAt(tick);
-		// Resupply deliveries run ahead of everything else in the tick:
-		// material that lands this tick is available to this tick's
-		// equipment, transfers and conversions. Every occurrence due
+		// elapsed is supplied by the ledger: the sampled endpoint for
+		// continuous phases, or the exact instant for a discrete boundary.
+		// Resupply deliveries apply at a boundary before the subsequent
+		// interval's equipment, transfers and conversions. Every occurrence due
 		// since the last committed tick is collected into one scenario
 		// event list and applied in the declared deterministic order —
 		// occurrence time ascending, then service priority descending,
@@ -210,13 +210,20 @@ namespace core
 		// occurrence fires exactly once however many ticks an
 		// accelerated update batches together (#392).
 
+		if (!applyArrivals()) return false;
+		if (!continuous) return true;
+		return preparePower();
+	}
+
+	void StationSystemsRuntime::Impl::Tick::collectArrivals(double until)
+	{
 		for (size_t index = 0; index < runtime.deliveries.size(); ++index)
 		{
 			auto const& delivery = runtime.deliveries[index];
 			if (delivery.exhausted) continue;
 			auto const due = stationScheduleOccurrencesDue(
 				delivery.authored.firstOccurrenceSeconds,
-				delivery.authored.recurrenceSeconds, elapsed);
+				delivery.authored.recurrenceSeconds, until);
 			for (uint64_t occurrence = delivery.occurrencesFired; occurrence < due; ++occurrence)
 			{
 				auto const when = delivery.authored.recurrenceSeconds > 0.0
@@ -238,7 +245,7 @@ namespace core
 			if (ejection.exhausted) continue;
 			auto const due = stationScheduleOccurrencesDue(
 				ejection.authored.firstOccurrenceSeconds,
-				ejection.authored.recurrenceSeconds, elapsed);
+				ejection.authored.recurrenceSeconds, until);
 			for (uint64_t occurrence = ejection.occurrencesFired; occurrence < due; ++occurrence)
 			{
 				auto const when = ejection.authored.recurrenceSeconds > 0.0
@@ -253,7 +260,7 @@ namespace core
 			auto const& transfer = runtime.transfers[index];
 			if (transfer.authored.mode != ResourceTransferMode::Scheduled) continue;
 			auto const due = stationScheduleOccurrencesDue(transfer.authored.firstOccurrenceSeconds,
-				transfer.authored.recurrenceSeconds, elapsed);
+				transfer.authored.recurrenceSeconds, until);
 			for (uint64_t occurrence = transfer.occurrencesFired; occurrence < due; ++occurrence)
 			{
 				auto const when = transfer.authored.firstOccurrenceSeconds
@@ -276,6 +283,10 @@ namespace core
 				if (kind(left) != kind(right)) return kind(left) < kind(right);
 				return left.key.declarationIndex < right.key.declarationIndex;
 			});
+	}
+
+	bool StationSystemsRuntime::Impl::Tick::applyArrivals()
+	{
 		for (auto const& arrival : arrivals)
 		{
 			if (arrival.isTransfer)
@@ -396,6 +407,11 @@ namespace core
 				: (rejected <= 0.0 ? StationTransferStatus::Full : StationTransferStatus::Partial);
 			if (delivery.authored.recurrenceSeconds <= 0.0) delivery.exhausted = true;
 		}
+		return true;
+	}
+
+	bool StationSystemsRuntime::Impl::Tick::preparePower()
+	{
 		// Power is kW and stored energy is kWh: every crossing between
 		// them is power x elapsed hours. A fixed tick is a fraction of a
 		// second, so its duration must be converted to hours before it
@@ -472,10 +488,6 @@ namespace core
 		// and restoration is announced exactly once however many ticks an
 		// accelerated update batches together, and a restoration only
 		// lifts the ceiling - it never touches any inventory.
-		for (auto& generator : runtime.generators) generator.availabilityFactor = 1.0;
-		for (auto& loop : runtime.coolantLoops) loop.availabilityFactor = 1.0;
-		for (auto& chiller : runtime.chillers) chiller.availabilityFactor = 1.0;
-
 		return true;
 	}
 }

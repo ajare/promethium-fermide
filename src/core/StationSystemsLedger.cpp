@@ -16,6 +16,18 @@ namespace core
 	bool StationSystemsRuntime::Impl::applyLedger(uint64_t tick, double seconds, std::string& system, std::string& violation)
 	{
 		system = "Resource transfer";
+		auto const committedStores = stores;
+		auto const committedConstituentLoss = constituentLoss;
+		auto const committedUnitLoss = unitLoss;
+		auto const committedConstituentDelivered = constituentDelivered;
+		auto const committedUnitDelivered = unitDelivered;
+		auto const committedUnitCollected = unitCollected;
+		auto const committedUnitHarvested = unitHarvested;
+		auto const committedConstituentHarvested = constituentHarvested;
+		auto const committedConnectionFlows = connectionFlows;
+		auto const committedPoolGeneration = lastPoolGenerationKW;
+		auto const committedConnectionLoss = lastConnectionPowerLossKW;
+		auto const committedPoolResidual = lastPoolResidualKW;
 		auto const committedTransfers = transfers;
 		auto const committedConversions = conversions;
 		auto const committedLoads = loads;
@@ -78,6 +90,18 @@ namespace core
 		auto const committedRecoveringCount = lastRecoveringCount;
 		auto const committedRecoverySurgeKW = lastRecoverySurgeKW;
 		if (runLedger(tick, seconds, system, violation)) return true;
+		stores = committedStores;
+		constituentLoss = committedConstituentLoss;
+		unitLoss = committedUnitLoss;
+		constituentDelivered = committedConstituentDelivered;
+		unitDelivered = committedUnitDelivered;
+		unitCollected = committedUnitCollected;
+		unitHarvested = committedUnitHarvested;
+		constituentHarvested = committedConstituentHarvested;
+		connectionFlows = committedConnectionFlows;
+		lastPoolGenerationKW = committedPoolGeneration;
+		lastConnectionPowerLossKW = committedConnectionLoss;
+		lastPoolResidualKW = committedPoolResidual;
 		transfers = committedTransfers;
 		conversions = committedConversions;
 		loads = committedLoads;
@@ -128,17 +152,170 @@ namespace core
 
 	bool StationSystemsRuntime::Impl::runLedger(uint64_t tick, double seconds, std::string& system, std::string& violation)
 	{
-	Tick scratch(*this, tick, seconds, system, violation);
-	if (!scratch.prepare()) return false;
-	if (!scratch.generation()) return false;
-	if (!scratch.protection()) return false;
-	if (!scratch.thermal()) return false;
-	if (!scratch.processing()) return false;
-	if (!scratch.biology()) return false;
-	if (!scratch.atmosphere()) return false;
-	if (!scratch.auditPower()) return false;
-	if (!scratch.auditState()) return false;
-	if (!scratch.commitAndEvents()) return false;
-	return true;
+		auto const end = clock.secondsAt(tick);
+		auto cursor = clock.elapsedSeconds();
+		Tick collected(*this, tick, seconds, system, violation, end, false);
+		// Reuse the due-since-last-commit collector and its total order. Only
+		// distinct times split integration; coincident occurrences stay together.
+		collected.collectArrivals(end);
+		auto integrate = [&](double instant, double duration, auto&& committed)
+		{
+			Tick scratch(*this, tick, duration, system, violation, instant, true);
+			if (!scratch.prepare() || !scratch.generation() || !scratch.protection()
+				|| !scratch.thermal() || !scratch.processing() || !scratch.biology()
+				|| !scratch.atmosphere() || !scratch.auditPower() || !scratch.auditState()
+				|| !scratch.commitAndEvents()) return false;
+			committed(scratch);
+			return true;
+		};
+		if (collected.arrivals.empty() && maintenanceJobs.empty())
+			return integrate(end, seconds, [](Tick const&) {});
+		std::vector<double> boundaries;
+		for (auto const& arrival : collected.arrivals)
+			if (arrival.key.occurrenceSeconds > cursor && arrival.key.occurrenceSeconds < end)
+				boundaries.push_back(arrival.key.occurrenceSeconds);
+		// Maintenance windows and active completions also change rates in force.
+		for (auto const& job : maintenanceJobs)
+		{
+			auto const& s = job.authored;
+			auto const due = stationScheduleOccurrencesDue(s.firstOccurrenceSeconds, s.recurrenceSeconds, end);
+			for (uint64_t occurrence = job.occurrence; occurrence < due; ++occurrence)
+			{
+				auto const when = s.firstOccurrenceSeconds + occurrence * s.recurrenceSeconds;
+				if (when > cursor && when < end) boundaries.push_back(when);
+				if (when + s.durationSeconds > cursor && when + s.durationSeconds < end)
+					boundaries.push_back(when + s.durationSeconds);
+			}
+		}
+		std::sort(boundaries.begin(), boundaries.end());
+		boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
+		// Per-step amounts must cover every positive sub-interval, not only
+		// the last one. Bind stable state fields; rates/status remain the latest
+		// sampled values, and discrete schedules retain their last-occurrence
+		// reporting contract. No aggregate is fed back into a later sub-interval.
+		std::vector<std::pair<double*, double>> amounts;
+		auto bind = [&](std::initializer_list<double*> fields)
+		{
+			for (auto field : fields) amounts.emplace_back(field, 0.0);
+		};
+		for (auto& t : transfers)
+			if (t.authored.mode == ResourceTransferMode::Continuous)
+				bind({&t.lastRequested, &t.lastCompleted, &t.lastUnmet});
+		for (auto& c : conversions)
+		{
+			for (auto& f : c.inputs) bind({&f.lastRequested, &f.lastCompleted});
+			for (auto& f : c.outputs) bind({&f.lastRequested, &f.lastCompleted});
+		}
+		for (auto& l : loads)
+			for (auto& e : l.exchanges) bind({&e.lastRequested, &e.lastCompleted, &e.lastUnmet});
+		for (auto& a : atmospheres)
+			bind({&a.lastCollectedKg, &a.lastElectrolysisOxygenKg, &a.lastCo2CapturedKg,
+				&a.lastOxygenDemandKg, &a.lastOxygenConsumedKg, &a.lastCo2ProducedKg,
+				&a.lastVapourAddedKg, &a.lastVapourCondensedKg, &a.lastLeakedKg,
+				&a.lastCycleRemovedKg, &a.lastCycleRecoveredKg, &a.lastCycleLostKg});
+		for (auto& c : crews)
+			bind({&c.lastGreywaterKg, &c.lastFoodRequested, &c.lastFoodActual,
+				&c.lastWaterRequested, &c.lastWaterActual, &c.lastOxygenRequestedKg,
+				&c.lastOxygenActualKg, &c.lastCo2ProducedKg, &c.lastMoistureProducedKg,
+				&c.lastUrineRequested, &c.lastUrineActual, &c.lastOrganicWasteRequested,
+				&c.lastOrganicWasteActual});
+		for (auto& w : waterCollectors)
+			bind({&w.lastRequestedKg, &w.lastCondensableKg, &w.lastCollectedKg});
+		for (auto& w : waterTreatments)
+			bind({&w.lastProcessedKg, &w.lastTreatedKg, &w.lastConcentrateKg,
+				&w.lastConsumableRequested, &w.lastConsumableUsed});
+		for (auto& e : electrolyzers)
+			bind({&e.lastRequestedKg, &e.lastSplitKg, &e.lastOxygenKg,
+				&e.lastHydrogenKg, &e.lastUnmetProductionKg});
+		for (auto& c : co2Captures)
+			bind({&c.lastRequestedKg, &c.lastCapturedKg, &c.lastConsumableRequested, &c.lastConsumableUsed});
+		for (auto& f : fuelCells) bind({&f.lastHydrogenKg, &f.lastOxygenKg, &f.lastWaterKg});
+		for (auto& s : sabatierReactors)
+			bind({&s.lastRequestedKg, &s.lastCo2ConsumedKg, &s.lastHydrogenConsumedKg,
+				&s.lastMethaneProducedKg, &s.lastWaterProducedKg, &s.lastUnmetConversionKg});
+		for (auto& m : methaneProcessors)
+			bind({&m.lastRequestedKg, &m.lastMethaneConsumedKg, &m.lastHydrogenReturnedKg,
+				&m.lastCarbonProducedKg, &m.lastUnmetProcessingKg});
+		for (auto& m : microbialProcessors)
+			bind({&m.lastNitrifiedNitrogenKg, &m.lastStockConsumedUnits, &m.lastRequestedKg,
+				&m.lastFeedConsumedKg, &m.lastOxygenConsumedKg, &m.lastWaterConsumedKg,
+				&m.lastConsumableRequested, &m.lastConsumableUsed, &m.lastConsumableUnmet,
+				&m.lastNutrientProducedKg, &m.lastRecoveredWaterKg, &m.lastCo2ProducedKg,
+				&m.lastResidueProducedKg, &m.lastUnmetProcessingKg});
+		for (auto& c : cropPopulations)
+			bind({&c.lastGrowthPotentialKg, &c.lastGrowthKg, &c.lastCo2DrawnKg,
+				&c.lastAssimilationWaterKg, &c.lastNitrogenDrawnKg, &c.lastPhosphorusDrawnKg,
+				&c.lastPotassiumDrawnKg, &c.lastMineralsDrawnKg, &c.lastOxygenReleasedKg,
+				&c.lastTranspiredKg, &c.lastRespirationRequestedKg, &c.lastRespirationKg,
+				&c.lastRespirationO2DrawnKg, &c.lastRespirationCo2ReturnedKg,
+				&c.lastRespirationWaterKg, &c.lastHarvestRequestedKg, &c.lastHarvestedKg,
+				&c.lastFoodAddedKg, &c.lastWasteAddedKg, &c.lastSurplusEdibleToWasteKg,
+				&c.lastHarvestConstrainedKg, &c.lastDeadResidueToWasteKg, &c.lastDeadResidueLostKg});
+		for (auto& a : algaeCultures)
+			bind({&a.lastGrowthPotentialKg, &a.lastGrowthKg, &a.lastCo2DrawnKg,
+				&a.lastAssimilationWaterKg, &a.lastNitrogenDrawnKg, &a.lastPhosphorusDrawnKg,
+				&a.lastPotassiumDrawnKg, &a.lastMineralsDrawnKg, &a.lastOxygenReleasedKg,
+				&a.lastEvaporatedKg, &a.lastRespirationRequestedKg, &a.lastRespirationKg,
+				&a.lastRespirationO2DrawnKg, &a.lastRespirationCo2ReturnedKg,
+				&a.lastRespirationWaterKg, &a.lastHarvestRequestedKg, &a.lastHarvestedKg,
+				&a.lastFoodAddedKg, &a.lastRecoveryAddedKg, &a.lastWasteAddedKg,
+				&a.lastFoodSurplusToRecoveryKg, &a.lastRecoverySurplusToWasteKg,
+				&a.lastHarvestConstrainedKg, &a.lastDeadResidueToWasteKg, &a.lastDeadResidueLostKg});
+		std::vector<double> totalIn(stores.size()), totalOut(stores.size());
+		auto accumulate = [&](Tick const& part)
+		{
+			for (size_t i = 0; i < stores.size(); ++i)
+			{
+				totalIn[i] += part.flowIn[i];
+				totalOut[i] += part.flowOut[i];
+			}
+		};
+		size_t arrivalIndex = 0;
+		auto boundary = [&](double instant, double duration)
+		{
+			Tick discrete(*this, tick, duration, system, violation, instant, false);
+			while (arrivalIndex < collected.arrivals.size()
+				&& collected.arrivals[arrivalIndex].key.occurrenceSeconds <= instant + StationScheduleTolerance)
+				discrete.arrivals.push_back(collected.arrivals[arrivalIndex++]);
+			if (!discrete.prepare() || !discrete.scheduledState()
+				|| !discrete.auditLedger() || !discrete.auditState()) return false;
+			discrete.commitInventory();
+			accumulate(discrete);
+			return true;
+		};
+		if (!boundary(cursor, 0.0)) return false;
+		while (cursor < end)
+		{
+			auto next = end;
+			auto const it = std::upper_bound(boundaries.begin(), boundaries.end(), cursor);
+			if (it != boundaries.end()) next = *it;
+			for (auto const& job : maintenanceJobs)
+				if (job.phase == StationMaintenancePhase::Active)
+				{
+					auto const completion = job.lastStartSeconds + job.authored.durationSeconds;
+					if (completion > cursor && completion < next) next = completion;
+				}
+			auto const duration = next - cursor;
+			if (!integrate(next, duration, [&](Tick const& part)
+			{
+				accumulate(part);
+				for (auto& [field, total] : amounts) total += *field;
+			})) return false;
+			if (!boundary(next, duration)) return false;
+			cursor = next;
+		}
+		for (auto const& [field, total] : amounts)
+		{
+			if (!std::isfinite(total)) return violation = "split-step amount sum is not finite", false;
+			*field = total;
+		}
+		for (size_t i = 0; i < stores.size(); ++i)
+		{
+			if (!std::isfinite(totalIn[i]) || !std::isfinite(totalOut[i]))
+				return violation = "split-step store flow sum is not finite", false;
+			stores[i].lastTickIn = totalIn[i];
+			stores[i].lastTickOut = totalOut[i];
+		}
+		return true;
 	}
 }

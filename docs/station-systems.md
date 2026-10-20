@@ -319,9 +319,9 @@ construct a runtime with authored settings and a base quantum (seconds), call
 pipeline are needed. Non-finite, negative and unrepresentable targets return
 false without mutation; already-reached targets are successful no-ops.
 Ratio 1 retains the original physics durations and elapsed-time arithmetic.
-This is the clock seam (#763), not the completed timestep-invariance feature:
-event splitting, saturation/protection changes, persistence of the ratio and
-certification remain follow-up slices of #762. Rendering never executes station scripts. Public World methods
+The clock seam (#763) and scheduled-event integration (#767) are implemented;
+saturation/protection changes, persistence of the ratio and certification remain
+follow-up slices of #762. Rendering never executes station scripts. Public World methods
 `getStationSystemsSnapshot`, `getStationSystemsEvents` and
 `getStationSystemsDiagnostics` return read-only value copies. Events retain at
 most 256 entries; a failure is terminal until Reset, so diagnostics are bounded.
@@ -331,6 +331,36 @@ Station-step-accounting mismatch pauses the World before that tick advances. All
 results are staged before publication; no partial station result or elapsed
 time is published. Mutated Lua objects are discarded, and resuming cannot
 retry the failed runtime. Reset reconstructs authored initial state.
+
+### Scheduled-event integration (#767)
+
+The authoritative ledger collects deliveries, Scheduled Resource transfers and
+Terminal waste ejections due since its last commit using the existing ordered
+occurrence list. Each distinct occurrence time splits the Station step. Material
+is integrated up to that instant before the event applies; it is available only
+to subsequent sub-intervals. Coincident events retain occurrence-time, descending
+priority and declaration ordering, including the existing delivery-before-transfer-
+before-ejection tie rule. Maintenance starts, window deadlines and active job
+completions also split integration; progress derives from the exact start instant.
+A sub-tick maintenance window with available prerequisites is serviced, not missed
+merely because no full Station step ends inside it.
+
+Continuous phases retain their existing order and sampled-profile endpoint
+convention, and execute only over positive durations. Discrete boundary passes
+never run rate-to-amount round trips, so coincident events cannot divide by zero.
+Store flows and continuous process amounts accumulate across the whole Station
+step; rates and statuses remain latest samples, while scheduled quantities retain
+their last-occurrence meaning. Only the completed full step advances the Station
+clock or samples history. Every sub-interval and boundary is audited, and any
+failure rolls back the entire step, including earlier sub-interval inventories,
+loss/inflow ledgers, allocations, connection accounts and event history.
+
+The standalone `eventSplit`, `eventOrder`, `maintenanceSplit` and `eventRollback`
+checks exercise exact-time integration at ratios 1, 6 and 30, faster-than-step
+recurrence, coincident ordering, conservation and later-sub-interval failure.
+Ratio-1 runs without newly due events keep the original integration path; the
+intentional timing corrections also apply at ratio 1 (no consumption before an
+arrival, and no missed maintenance solely because its window is sub-tick).
 
 ### Failure containment (#388)
 

@@ -1491,9 +1491,11 @@ using namespace station_detail;
 		double seconds;
 		std::string& system;
 		std::string& violation;
-		Tick(Impl& owner, uint64_t tick, double seconds, std::string& system, std::string& violation)
+		Tick(Impl& owner, uint64_t tick, double seconds, std::string& system, std::string& violation,
+			double instant, bool integrating)
 			: runtime(owner), tick(tick), seconds(seconds), system(system), violation(violation),
-			  connections(owner.settings, owner.connectionGraph, seconds, owner.connectionFlows) {}
+			  connections(owner.settings, owner.connectionGraph, seconds, owner.connectionFlows),
+			  elapsed(instant), continuous(integrating) {}
 		struct DueArrival
 		{
 			StationScenarioEventKey key;
@@ -1573,6 +1575,7 @@ using namespace station_detail;
 		std::vector<ConstituentLedger> stagedDrift{};
 		bool materialConnectionsValid{};
 		double elapsed{};
+		bool continuous{};
 		std::vector<DueArrival> arrivals{};
 		double hours{};
 		double availableGeneration{};
@@ -1691,6 +1694,12 @@ using namespace station_detail;
 		void reconcileChillerProtected(size_t chillerIndex);
 		bool requireFinite(double value, std::string const& what);
 		bool prepare();
+		void collectArrivals(double until);
+		bool applyArrivals();
+		bool preparePower();
+		bool scheduledState();
+		bool auditLedger();
+		void commitInventory();
 		bool generation();
 		bool protection();
 		bool thermal();

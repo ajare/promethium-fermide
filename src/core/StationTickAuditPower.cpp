@@ -292,7 +292,11 @@ namespace core
 		}
 		if (!materialConnectionsValid)
 			return violation = "process exceeded its physical connection allocation", false;
+		return auditLedger();
+	}
 
+	bool StationSystemsRuntime::Impl::Tick::auditLedger()
+	{
 		for (size_t index = 0; index < runtime.stores.size(); ++index)
 		{
 			if (!std::isfinite(qualified[index]) || !std::isfinite(unqualified[index]))

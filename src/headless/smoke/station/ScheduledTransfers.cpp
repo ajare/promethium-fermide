@@ -446,13 +446,17 @@ void scheduledPantry(smoke::Context const&)
     require(stock(w, pantryId).currentQualified == 0, "Pantry replenished before due time");
     run(w, 1);
     auto snap = w.getStationSystemsSnapshot();
+    require(snap.transfers[0].lastCompleted == t.quantity && stock(w, pantryId).currentQualified == t.quantity,
+        "Pantry batch was consumed before its boundary arrival");
+    run(w, 1);
+    snap = w.getStationSystemsSnapshot();
     require(snap.transfers[0].lastCompleted == t.quantity && stock(w, pantryId).currentQualified < t.quantity,
         "Crew did not consume the scheduled pantry batch continuously: moved=" + std::to_string(snap.transfers[0].lastCompleted)
             + " pantry=" + std::to_string(stock(w, pantryId).currentQualified) + " scale=" + std::to_string(snap.crews.front().metabolicScale));
-    run(w, 300); require(stock(w, pantryId).currentQualified < 1e-10 && stock(w, bulk.id).currentQualified == 10 - t.quantity,
+    run(w, 299); require(stock(w, pantryId).currentQualified < 1e-10 && stock(w, bulk.id).currentQualified == 10 - t.quantity,
         "Depleted pantry retried batch or created food");
     require(w.getStationSystemsSnapshot().crews.front().metabolicScale == 0, "Empty pantry did not remain ordinary Crew shortage");
-    run(w, 100);
+    run(w, 101); // The new batch can feed Crew only after its arrival instant.
     snap = w.getStationSystemsSnapshot();
     require(snap.transfers[0].occurrencesFired == 2 && snap.transfers[0].lastRequested == t.quantity
         && snap.crews.front().metabolicScale > 0 && stock(w, pantryId).currentQualified > 0,

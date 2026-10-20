@@ -2,8 +2,11 @@
 
 namespace core
 {
-	bool StationSystemsRuntime::Impl::Tick::generation()
+	bool StationSystemsRuntime::Impl::Tick::scheduledState()
 	{
+		for (auto& generator : runtime.generators) generator.availabilityFactor = 1.0;
+		for (auto& loop : runtime.coolantLoops) loop.availabilityFactor = 1.0;
+		for (auto& chiller : runtime.chillers) chiller.availabilityFactor = 1.0;
 		// Newly due outage starts and restorations are staged across all
 		// schedules and announced in the declared scenario event order
 		// (#577): occurrence simulation time ascending, then service
@@ -123,6 +126,10 @@ namespace core
 		//     binding prerequisite named, and nothing completes for
 		//     free. A window that closes before the job ever started
 		//     is a missed occurrence, reported and never back-filled.
+		// Maintenance is isolated over the interval following a boundary.
+		// Other sampled profiles retain their existing endpoint convention.
+		auto const sampledElapsed = elapsed;
+		if (continuous) elapsed -= seconds;
 		if (!runtime.maintenanceJobs.empty())
 		{
 			auto const occurrenceTime = [](MaintenanceState const& job, uint64_t occurrence)
@@ -232,10 +239,9 @@ namespace core
 			{
 				auto& job = runtime.maintenanceJobs[index];
 				if (job.phase != StationMaintenancePhase::Active) continue;
-				job.progressSeconds += static_cast<double>(seconds);
-				if (job.progressSeconds + StationBalanceTolerance
-					< job.authored.durationSeconds)
-					continue;
+				if (!continuous)
+					job.progressSeconds = std::max(0.0, elapsed - job.lastStartSeconds);
+				if (elapsed < job.lastStartSeconds + job.authored.durationSeconds) continue;
 				job.progressSeconds = job.authored.durationSeconds;
 				double consumedTotal = 0.0;
 				for (size_t requirementIndex = 0;
@@ -469,6 +475,13 @@ namespace core
 				factor = std::min(factor, 0.0);
 			}
 		}
+		elapsed = sampledElapsed;
+		return true;
+	}
+
+	bool StationSystemsRuntime::Impl::Tick::generation()
+	{
+		if (!scheduledState()) return false;
 		// Fuelled generators run ahead of the load allocation (#399):
 		// their electrical output joins the shared generation pool for
 		// this tick's loads, their startup cranking draws ride the same
