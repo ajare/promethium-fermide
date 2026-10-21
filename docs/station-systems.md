@@ -1476,6 +1476,17 @@ effective turbulent coefficient table is calibrated so a fully-open 1 m²
 opening between 100 m³ compartments at 20 °C relaxes about 95% of a gradient
 in 256 seconds. No gas moves between unconnected compartments.
 
+Thermal/phase regression checks (#788), `pathwayThermalNeutrality` and
+`pathwayCondensation`, run in `validation-fast` at the default cadence and
+step ratios 1, 7 and 60. Pure diffusion between different-temperature volumes
+preserves each temperature to 1e-12 °C. Initially unsaturated warm-to-cold
+vapour exchange genuinely crosses the receiver's saturation margin on the
+first step: condensate and latent heat appear locally in that same published
+state, while the donor stays unchanged thermally. Every subsequent publication
+is checked against saturation at its own temperature, with vapour/condensate
+and latent-energy ledgers closing, including reversed endpoint and compartment
+order. The existing pre-saturation diffusion pass needs no relocation.
+
 `StationSystemsSnapshot::atmospherePathways` publishes identity, geometry,
 live openness, `flowRateKgPerS`, `netTransferredKg`, and only `Idle`/`Active`
 status. Arrays follow `StationPathwayGases`: oxygen, nitrogen, carbon dioxide,

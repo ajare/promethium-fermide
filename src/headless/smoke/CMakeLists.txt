@@ -184,7 +184,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         observationIntegration observationBounds scheduledExchangeObservations algaeExchangeObservations cropExchangeObservations microbialExchangeObservations carbonExchangeObservations waterGasExchangeObservations crewAtmosphereExchangeObservations thermalExchangeObservations electricalExchangeObservations exchangeObservations materialObservations fluidInventoryObservations compoundInventoryObservations livingInventoryObservations materialRelationshipObservations materialCanonicalUnits batteryObservations batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
-        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres pathwayDiffusion pathwayValidation pathwayCounterFlow pathwayClosed pathwayOpenness pathwayCommands pathwayCommandOrdering pathwayCommandReset pathwayCommandValidation crews water waterQualityGates waterQualityValidation waterQualityConsumers waterSelectiveIrrigation waterHydroponics waterContamination compoundWaterPartial compoundWaterPartialValidation compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
+        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres pathwayDiffusion pathwayValidation pathwayCounterFlow pathwayClosed pathwayOpenness pathwayThermalNeutrality pathwayCondensation pathwayCommands pathwayCommandOrdering pathwayCommandReset pathwayCommandValidation crews water waterQualityGates waterQualityValidation waterQualityConsumers waterSelectiveIrrigation waterHydroponics waterContamination compoundWaterPartial compoundWaterPartialValidation compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
         compoundFiles powerFiles powerChainFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles maintenanceFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
         # #571: harvest, algae and the nutrient-conservation closure were
         # reachable through the binary but never registered here, so they
@@ -234,6 +234,15 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         stabilityMultiWorldIsolationFast stabilityAuditFaultInjection materialIdentity)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
+endforeach()
+# Thermal/phase guarantees protect every publication at fine and coarse cadences.
+foreach(ratio 1 7 60)
+    foreach(check pathwayThermalNeutrality pathwayCondensation)
+        add_test(NAME station-pathway-thermal-${check}-${ratio}
+            COMMAND pf-smoke-station --step-ratio ${ratio} --check ${check})
+        set_tests_properties(station-pathway-thermal-${check}-${ratio} PROPERTIES
+            LABELS "smoke;functional;core;station;station-timestep-invariance;validation-fast" TIMEOUT 30)
+    endforeach()
 endforeach()
 # Command landing is cheap and must be cadence-independent in the fast lane.
 foreach(ratio 1 7 60)

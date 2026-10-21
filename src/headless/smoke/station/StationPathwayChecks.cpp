@@ -229,6 +229,105 @@ void pathwayOpenness(smoke::Context const&)
 				"doubling openness did not double gas flow within 1e-5 relative tolerance");
 }
 
+// #788: different temperatures must survive actual gas exchange, not just
+// an Idle/equal-temperature fixture. Vapour stays well below saturation.
+void pathwayThermalNeutrality(smoke::Context const&)
+{
+	auto s = pathwaySettings();
+	s.atmospheres[0].startingTemperatureC = 40;
+	s.atmospheres[1].startingTemperatureC = 0;
+	core::World world("NeutralDiffusion", 2, 2);
+	world.pauseSimulation(); world.finishBuild();
+	std::string diagnostic;
+	require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+	auto const initial = world.getStationSystemsSnapshot();
+	world.resumeSimulation();
+	// Inspect every published step, including the very first one.
+	while (world.getStationSystemsSnapshot().elapsedSeconds < 60)
+	{
+		require(advanceStationSteps(world, 1), "neutral diffusion step failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "neutral diffusion failed its conservation audit");
+		for (size_t i = 0; i < 2; ++i)
+		{
+			auto const& air = snapshot.atmospheres[i];
+			require(std::abs(air.temperatureC - initial.atmospheres[i].temperatureC) < 1e-12,
+				"diffusion transported sensible heat between compartments");
+			require(air.condensedKg == 0 && air.latentHeatEnergyKJ == 0
+				&& air.exchangedEnergyKJ == 0,
+				"pure diffusion invented a thermal or phase exchange");
+		}
+	}
+	auto const final = world.getStationSystemsSnapshot();
+	for (double moved : final.atmospherePathways[0].netTransferredKg)
+		require(moved > 1e-3, "neutrality fixture did not actually exchange every gas");
+}
+
+void pathwayCondensation(smoke::Context const&)
+{
+	// Also reverse endpoint and compartment declaration order: latent heat
+	// belongs to the physical receiver, not the B slot or the last loop entry.
+	for (bool reverse : {false, true})
+	{
+		auto s = pathwaySettings();
+		s.atmospheres[0].startingTemperatureC = 40;
+		s.atmospheres[0].startingWaterVapourKg = 3;
+		s.atmospheres[1].startingWaterVapourKg = 0.48;
+		s.atmospherePathways[0].areaM2 = 100;
+		if (reverse)
+		{
+			std::swap(s.atmospheres[0], s.atmospheres[1]);
+			std::swap(s.atmospherePathways[0].aAtmosphereId, s.atmospherePathways[0].bAtmosphereId);
+		}
+		size_t const donor = reverse ? 1 : 0, receiver = reverse ? 0 : 1;
+		core::World world("ReceivingCondensation", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		std::string diagnostic;
+		require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+		auto const initial = world.getStationSystemsSnapshot();
+		for (auto const& air : initial.atmospheres)
+			require(air.relativeHumidity < 1, "condensation fixture starts supersaturated");
+		world.resumeSimulation();
+		while (world.getStationSystemsSnapshot().elapsedSeconds < 10)
+		{
+			require(advanceStationSteps(world, 1), "receiving condensation step failed");
+			auto const snapshot = world.getStationSystemsSnapshot();
+			auto const& warm = snapshot.atmospheres[donor];
+			auto const& cold = snapshot.atmospheres[receiver];
+			auto const moved = (reverse ? -1 : 1) * snapshot.atmospherePathways[0].netTransferredKg[3];
+			require(snapshot.healthy && moved > 0, "vapour did not diffuse into cold receiver");
+			// This must hold already at the first publication. Without the
+			// local solve, arriving vapour would exceed the initial cap.
+			auto const initialCap = core::stationSaturatedVapourMassKg(
+				core::stationSaturationVapourPressureKPa(initial.atmospheres[receiver].temperatureC),
+				100, initial.atmospheres[receiver].temperatureC);
+			require(initial.atmospheres[receiver].waterVapourKg + moved > initialCap + 1e-3,
+				"incoming vapour did not genuinely cross receiver saturation");
+			require(cold.condensedKg > 1e-3 && cold.temperatureC > initial.atmospheres[receiver].temperatureC,
+				"incoming vapour did not condense and warm receiver in the same tick");
+			for (auto const& air : snapshot.atmospheres)
+			{
+				auto const cap = core::stationSaturatedVapourMassKg(
+					core::stationSaturationVapourPressureKPa(air.temperatureC), 100, air.temperatureC);
+				require(air.waterVapourKg <= cap + 1e-9 && air.relativeHumidity <= 1 + 1e-9,
+					"pathway published supersaturated gas at its own temperature");
+			}
+			close(warm.temperatureC, initial.atmospheres[donor].temperatureC, "donor received condensation heat");
+			require(warm.condensedKg == 0 && warm.latentHeatEnergyKJ == 0,
+				"receiver condensation was booked in donor");
+			close(cold.latentHeatEnergyKJ, cold.condensedKg * core::StationLatentHeatVaporizationKJPerKg,
+				"receiver latent heat does not match condensate");
+			close((cold.temperatureC - initial.atmospheres[receiver].temperatureC)
+				* s.atmospheres[receiver].thermalCapacityKJPerK, cold.latentHeatEnergyKJ,
+				"receiver temperature does not account for local latent heat");
+			close(cold.waterVapourKg + cold.condensedKg,
+				initial.atmospheres[receiver].waterVapourKg + moved, "receiver vapour/condensate ledger failed");
+			close(warm.waterVapourKg, initial.atmospheres[donor].waterVapourKg - moved,
+				"donor vapour ledger failed");
+		}
+	}
+}
+
 void pathwayCommands(smoke::Context const&)
 {
 	auto s = pathwaySettings();
@@ -448,6 +547,8 @@ void registerStationPathwayChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"pathwayCounterFlow", pathwayCounterFlow});
 	checks.push_back({"pathwayClosed", pathwayClosed});
 	checks.push_back({"pathwayOpenness", pathwayOpenness});
+	checks.push_back({"pathwayThermalNeutrality", pathwayThermalNeutrality});
+	checks.push_back({"pathwayCondensation", pathwayCondensation});
 	checks.push_back({"pathwayCommands", pathwayCommands});
 	checks.push_back({"pathwayCommandOrdering", pathwayCommandOrdering});
 	checks.push_back({"pathwayCommandReset", pathwayCommandReset});
