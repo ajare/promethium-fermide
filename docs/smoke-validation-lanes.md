@@ -128,6 +128,14 @@ historical contracts and concurrent full workloads remain registered unchanged.
   project tests are unchanged and included in fast selection. Vendored dependency
   tests are intentionally final-only; they are not smoke module scenario owners.
 
+## Atmosphere pathway checks (#792)
+
+`station-pathwayLongHorizon` and `station-pathwayAbsurdGeometry` are stress-only;
+ordinary pathway behaviour, commands, thermal neutrality, condensation and
+persistence stay fast. Fine/coarse component sweeps retain their existing
+exhaustive ownership. The lane contract asserts this split. See
+[calibration, horizons and before/after fast-lane evidence](station-atmosphere-pathway-stress.md).
+
 ## Timing evidence
 
 See [#331 measurements](smoke-validation-lanes-timings.md). Timings are local

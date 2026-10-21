@@ -58,12 +58,27 @@ class Lanes(unittest.TestCase):
             self.assertEqual(fast['TIMEOUT'], 60)
         for check in ('pathwayDiffusion', 'pathwayValidation', 'pathwayCounterFlow',
                       'pathwayClosed', 'pathwayOpenness', 'pathwayParallelAdditivity',
-                      'pathwayChainTopology', 'pathwayCommands',
+                      'pathwayChainTopology', 'pathwayThermalNeutrality', 'pathwayCondensation',
+                      'pathwayPersistence', 'pathwayCommands',
                       'pathwayCommandOrdering', 'pathwayCommandReset', 'pathwayCommandValidation'):
             self.assertIn('validation-fast', props(f'station-{check}')['LABELS'])
             self.assertNotIn('validation-stress', props(f'station-{check}')['LABELS'])
+        for check in ('pathwayLongHorizon', 'pathwayAbsurdGeometry'):
+            properties = props(f'station-{check}')
+            self.assertIn('validation-stress', properties['LABELS'])
+            self.assertNotIn('validation-fast', properties['LABELS'])
+            self.assertEqual(properties['TIMEOUT'], 120)
+            self.assertNotIn(f'station-{check}', {t['name'] for t in selected})
         for ratio in (1, 7, 60):
             self.assertIn('validation-fast', props(f'station-pathway-command-cadence-{ratio}')['LABELS'])
+            for check in ('pathwayThermalNeutrality', 'pathwayCondensation'):
+                labels = props(f'station-pathway-thermal-{check}-{ratio}')['LABELS']
+                self.assertIn('validation-fast', labels)
+                self.assertNotIn('validation-stress', labels)
+            for check in ('pathwayDiffusion', 'pathwayCounterFlow', 'pathwayClosed', 'pathwayOpenness'):
+                labels = props(f'station-timestep-components-{check}-{ratio}')['LABELS']
+                self.assertIn('validation-exhaustive', labels)
+                self.assertNotIn('validation-fast', labels)
         for module in lane.REPRESENTATIVES:
             self.assertEqual(sum(t['name'] == f'smoke-{module}' for t in selected), 1)
         self.assertIn('headless-tools-cli-contract', {t['name'] for t in selected})

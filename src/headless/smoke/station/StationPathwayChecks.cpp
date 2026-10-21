@@ -1,6 +1,7 @@
 #include "StationRig.h"
 #include "Smoke.h"
 #include <array>
+#include <iostream>
 #include "core/StationConfigurationDocument.h"
 #include "core/YamlSerializer.h"
 #include "core/BinarySerializer.h"
@@ -525,6 +526,141 @@ void pathwayChainTopology(smoke::Context const&)
 	}
 }
 
+// #792: infer the effective coefficient from a real public-seam run before
+// choosing a long-chain horizon; no test-only solver access is involved.
+void pathwayLongHorizon(smoke::Context const&)
+{
+	auto s = pathwaySettings();
+	core::World calibration("PathwayCalibration", 2, 2);
+	calibration.pauseSimulation(); calibration.finishBuild();
+	std::string diagnostic;
+	require(calibration.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+	auto const initial = calibration.getStationSystemsSnapshot();
+	calibration.resumeSimulation();
+	require(advanceSeconds(calibration, 10), "diffusion calibration failed");
+	auto const measured = calibration.getStationSystemsSnapshot();
+	for (size_t gas = 0; gas < 4; ++gas)
+	{
+		auto const gap0 = masses(initial.atmospheres[0])[gas] - masses(initial.atmospheres[1])[gas];
+		auto const gap = masses(measured.atmospheres[0])[gas] - masses(measured.atmospheres[1])[gas];
+		auto const coefficient = -std::log(gap / gap0) / (measured.elapsedSeconds * 2 * 273.15 / 100);
+		std::cout << "CALIBRATION " << core::StationPathwayGases[gas] << " coefficient=" << coefficient << '\n';
+		require(std::abs(coefficient - 0.002) < 1e-12, "diffusion calibration changed; reconsider the long horizon");
+	}
+
+	// Observed k=0.002 for all four gases. A three-volume chain is slower
+	// than the calibration pair: allow 3600 s to settle, then inspect every
+	// publication for a further 1200 s, not merely the final snapshot.
+	s.atmospheres[1].volumeM3 = 150;
+	s.atmospheres[1].startingTemperatureC = 20;
+	auto c = s.atmospheres[1]; c.id = "c"; c.volumeM3 = 75; c.startingTemperatureC = 40;
+	c.startingOxygenKg = c.startingNitrogenKg = c.startingCarbonDioxideKg = c.startingWaterVapourKg = 0;
+	s.atmospheres.push_back(c);
+	s.atmospherePathways = {{"ab", "a", "b", 1, 1}, {"bc", "b", "c", 1, 1}};
+	core::World world("LongChain", 2, 2);
+	world.pauseSimulation(); world.finishBuild();
+	require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+	std::array<double, 4> total{};
+	double capacity = 0;
+	for (auto const& air : world.getStationSystemsSnapshot().atmospheres)
+	{
+		capacity += air.volumeM3 / (air.temperatureC + 273.15);
+		for (size_t gas = 0; gas < 4; ++gas) total[gas] += masses(air)[gas];
+	}
+	world.resumeSimulation();
+	size_t held = 0;
+	while (world.getStationSystemsSnapshot().elapsedSeconds < 4800)
+	{
+		require(advanceStationSteps(world, 1), "long-chain step failed");
+		auto const snap = world.getStationSystemsSnapshot();
+		require(snap.healthy, "long-chain conservation audit failed");
+		for (size_t gas = 0; gas < 4; ++gas)
+		{
+			double sum = 0;
+			for (size_t i = 0; i < snap.atmospheres.size(); ++i)
+			{
+				auto const& air = snap.atmospheres[i];
+				auto const mass = masses(air)[gas];
+				require(std::isfinite(mass) && mass >= 0, "long chain produced invalid inventory");
+				require(air.condensedKg == 0 && air.temperatureC == s.atmospheres[i].startingTemperatureC,
+					"long-chain fixture changed temperature or condensed");
+				sum += mass;
+				if (snap.elapsedSeconds >= 3600)
+				{
+					// m*T/V is partial pressure up to the same per-gas
+					// ideal-gas factor; unequal V/T forbids a false equal-mass attractor.
+					auto const density = mass * (air.temperatureC + 273.15) / air.volumeM3;
+					require(std::abs(density / (total[gas] / capacity) - 1) < 1e-6,
+						"chain did not reach and hold uniform partial pressures");
+				}
+			}
+			close(sum, total[gas], "long chain lost a gas");
+		}
+		if (snap.elapsedSeconds >= 3600) ++held;
+	}
+	require(held >= 1200, "long-chain equilibrium hold was not sampled sufficiently");
+}
+
+void pathwayAbsurdGeometry(smoke::Context const&)
+{
+	auto s = pathwaySettings();
+	s.atmospheres[0].volumeM3 = 1e-6;
+	s.atmospheres[1].volumeM3 = 2e-6;
+	s.atmospheres[1].startingTemperatureC = 40;
+	for (auto& air : s.atmospheres)
+	{
+		air.startingOxygenKg *= 1e-8; air.startingNitrogenKg *= 1e-8;
+		air.startingCarbonDioxideKg *= 1e-8; air.startingWaterVapourKg *= 1e-8;
+	}
+	// Both directions and an initially empty receiver, without saturation.
+	s.atmospheres[0].startingOxygenKg = 0;
+	s.atmospheres[1].startingCarbonDioxideKg = 0;
+	s.atmospherePathways[0].areaM2 = 1e12;
+	core::World world("AbsurdOpening", 2, 2);
+	world.pauseSimulation(); world.finishBuild();
+	std::string diagnostic;
+	require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+	auto const initial = world.getStationSystemsSnapshot();
+	auto const a0 = masses(initial.atmospheres[0]), b0 = masses(initial.atmospheres[1]);
+	auto const wa = 273.15 / 1e-6, wb = 313.15 / 2e-6;
+	std::array<double, 4> previousError{};
+	for (size_t gas = 0; gas < 4; ++gas)
+		previousError[gas] = std::abs(a0[gas] - (a0[gas] + b0[gas]) * wb / (wa + wb));
+	world.resumeSimulation();
+	size_t publications = 0;
+	while (world.getStationSystemsSnapshot().elapsedSeconds < 600)
+	{
+		require(advanceStationSteps(world, 1), "absurd-geometry step failed");
+		auto const snap = world.getStationSystemsSnapshot();
+		require(snap.healthy, "absurd geometry failed conservation audit");
+		for (auto const& air : snap.atmospheres)
+			require(air.condensedKg == 0, "absurd geometry fixture unexpectedly condensed");
+		for (size_t gas = 0; gas < 4; ++gas)
+		{
+			auto const a = masses(snap.atmospheres[0])[gas], b = masses(snap.atmospheres[1])[gas];
+			auto const total = a0[gas] + b0[gas];
+			auto const equilibrium = total * wb / (wa + wb);
+			auto const error = a - equilibrium;
+			auto const tolerance = total * 1e-12;
+			require(std::isfinite(a) && std::isfinite(b) && a >= 0 && b >= 0,
+				"absurd geometry produced negative or non-finite gas");
+			require(std::abs(a + b - total) <= tolerance, "absurd geometry lost gas");
+			require(std::abs(error) <= previousError[gas] + tolerance
+				&& (a0[gas] >= equilibrium ? error >= -tolerance : error <= tolerance),
+				"absurd geometry oscillated or moved away from equilibrium");
+			// This stiffness must reach the analytic interior equilibrium on
+			// the FIRST step. A donor clamp can conserve mass but cannot pass.
+			require(a > 0 && b > 0 && std::abs(error) <= tolerance,
+				"absurd geometry clamped to a boundary instead of equilibrium");
+			require(std::abs(snap.atmospherePathways[0].netTransferredKg[gas] - (a0[gas] - a)) <= tolerance,
+				"absurd geometry cumulative flux does not reconcile");
+			previousError[gas] = std::abs(error);
+		}
+		++publications;
+	}
+	require(publications >= 1000, "absurd geometry did not run thousands of steps");
+}
+
 void pathwayCommands(smoke::Context const&)
 {
 	auto s = pathwaySettings();
@@ -739,6 +875,8 @@ void pathwayValidation(smoke::Context const&)
 
 void registerStationPathwayChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"pathwayLongHorizon", pathwayLongHorizon});
+	checks.push_back({"pathwayAbsurdGeometry", pathwayAbsurdGeometry});
 	checks.push_back({"pathwayPersistence", pathwayPersistence});
 	checks.push_back({"pathwayDiffusion", pathwayDiffusion});
 	checks.push_back({"pathwayValidation", pathwayValidation});

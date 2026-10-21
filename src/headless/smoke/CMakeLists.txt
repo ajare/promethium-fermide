@@ -235,6 +235,12 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()
+# #792: long horizons are deliberately absent from validation-fast.
+foreach(check pathwayLongHorizon pathwayAbsurdGeometry)
+    add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
+    set_tests_properties(station-${check} PROPERTIES
+        LABELS "smoke;functional;validation-stress;core;station" TIMEOUT 120)
+endforeach()
 # Thermal/phase guarantees protect every publication at fine and coarse cadences.
 foreach(ratio 1 7 60)
     foreach(check pathwayThermalNeutrality pathwayCondensation)
