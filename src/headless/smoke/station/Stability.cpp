@@ -278,17 +278,17 @@ namespace
 
 	// The flagship long run: two simulated hours on the headless
 	// deterministic seam, audited every half simulated hour.
-	void stabilityLongRun(smoke::Context const&)
+	void stabilityLongRunAt(double seconds, char const* worldName)
 	{
 		auto const& workload = core::bundledStationLongRunWorkload();
 		auto const& rig = workload.settings;
-		core::World world("StabilityLongRun", 2, 2);
+		core::World world(worldName, 2, 2);
 		world.pauseSimulation();
 		world.finishBuild();
 		configureOrDiagnose(world, rig, "stability long run");
 		world.resumeSimulation();
-		auto const total = scenarioTicks(workload.scenarioSeconds);
-		auto const checkpoint = scenarioTicks(1800.0);
+		auto const total = scenarioTicks(seconds);
+		auto const checkpoint = total / 4;
 		size_t checkpointIndex = 0;
 		std::vector<size_t> storeSizes;
 		for (uint64_t done = 0; done < total; done += checkpoint)
@@ -333,7 +333,7 @@ namespace
 		require(checkpointIndex == 4, "the long run did not complete its four checkpoints");
 		// Scheduling correctness over the whole horizon: every recurring
 		// schedule fired exactly its authored occurrence count.
-		requireScheduleCounts(world, workload.scenarioSeconds, rig, "stability long run");
+		requireScheduleCounts(world, seconds, rig, "stability long run");
 		// The final audit is clean and the run produced no software
 		// failure diagnostics: no Lua memory or instruction budget was
 		// exhausted across the whole two-hour run.
@@ -352,14 +352,12 @@ namespace
 	// wall time must land on the identical station state and event
 	// history. The time scale changes how fast ticks arrive, never what
 	// a tick computes - no separate station clock.
-	void stabilityPathEquivalence(smoke::Context const&)
+	void stabilityPathEquivalenceAt(double seconds)
 	{
 		auto const& workload = core::bundledStationLongRunWorkload();
 		auto const& rig = workload.settings;
-		// Half an simulated hour per path keeps the check inside its
-		// budget; the equivalence property is about the paths, not the
-		// duration.
-		auto const total = scenarioTicks(1800.0);
+		// The equivalence property is about the update paths, not duration.
+		auto const total = scenarioTicks(seconds);
 		core::World reference("StabilityPathRef", 2, 2);
 		reference.pauseSimulation(); reference.finishBuild();
 		configureOrDiagnose(reference, rig, "stability path reference");
@@ -396,11 +394,11 @@ namespace
 	// from the authored start reproduces the uninterrupted outcome
 	// exactly - the audit state, the ledgers and the event history all
 	// restart clean and re-derive identically.
-	void stabilityResetIsolation(smoke::Context const&)
+	void stabilityResetIsolationAt(double seconds)
 	{
 		auto const& workload = core::bundledStationLongRunWorkload();
 		auto const& rig = workload.settings;
-		auto const total = scenarioTicks(1800.0);
+		auto const total = scenarioTicks(seconds);
 		core::World uninterrupted("StabilityResetRef", 2, 2);
 		uninterrupted.pauseSimulation(); uninterrupted.finishBuild();
 		configureOrDiagnose(uninterrupted, rig, "stability reset reference");
@@ -446,11 +444,11 @@ namespace
 	// third World running a different station configuration, must all
 	// stay independent - the twins land on identical state and the
 	// odd-config World never perturbs them through any shared runtime.
-	void stabilityMultiWorldIsolation(smoke::Context const&)
+	void stabilityMultiWorldIsolationAt(double seconds)
 	{
 		auto const& workload = core::bundledStationLongRunWorkload();
 		auto const& rig = workload.settings;
-		auto const total = scenarioTicks(900.0);
+		auto const total = scenarioTicks(seconds);
 		core::World a("StabilityTwinA", 2, 2);
 		a.pauseSimulation(); a.finishBuild();
 		configureOrDiagnose(a, rig, "stability twin A");
@@ -495,6 +493,47 @@ namespace
 		runOrDiagnose(solo, total, "stability solo run");
 		require(solo.getStationSystemsSnapshot() == a.getStationSystemsSnapshot(),
 			"the interleaved twins do not match the solo run");
+	}
+
+	void stabilityLongRun(smoke::Context const&)
+	{
+		stabilityLongRunAt(core::bundledStationLongRunWorkload().scenarioSeconds,
+			"StabilityLongRun");
+	}
+
+	void stabilityLongRunFast(smoke::Context const&)
+	{
+		stabilityLongRunAt(60.0, "StabilityLongRunFast");
+	}
+
+	void stabilityPathEquivalence(smoke::Context const&)
+	{
+		stabilityPathEquivalenceAt(1800.0);
+	}
+
+	void stabilityPathEquivalenceFast(smoke::Context const&)
+	{
+		stabilityPathEquivalenceAt(60.0);
+	}
+
+	void stabilityResetIsolation(smoke::Context const&)
+	{
+		stabilityResetIsolationAt(1800.0);
+	}
+
+	void stabilityResetIsolationFast(smoke::Context const&)
+	{
+		stabilityResetIsolationAt(60.0);
+	}
+
+	void stabilityMultiWorldIsolation(smoke::Context const&)
+	{
+		stabilityMultiWorldIsolationAt(900.0);
+	}
+
+	void stabilityMultiWorldIsolationFast(smoke::Context const&)
+	{
+		stabilityMultiWorldIsolationAt(60.0);
 	}
 }
 
@@ -762,5 +801,9 @@ void registerStabilityChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"stabilityPathEquivalence", stabilityPathEquivalence});
 	checks.push_back({"stabilityResetIsolation", stabilityResetIsolation});
 	checks.push_back({"stabilityMultiWorldIsolation", stabilityMultiWorldIsolation});
+	checks.push_back({"stabilityLongRunFast", stabilityLongRunFast});
+	checks.push_back({"stabilityPathEquivalenceFast", stabilityPathEquivalenceFast});
+	checks.push_back({"stabilityResetIsolationFast", stabilityResetIsolationFast});
+	checks.push_back({"stabilityMultiWorldIsolationFast", stabilityMultiWorldIsolationFast});
 	checks.push_back({"stabilityAuditFaultInjection", stabilityAuditFaultInjection});
 }

@@ -47,6 +47,15 @@ class Lanes(unittest.TestCase):
              '--show-only=json-v1'], text=True, timeout=30))['tests']
         self.assertTrue(selected)
         self.assertFalse(any('validation-stress' in props(t['name'])['LABELS'] for t in selected))
+        for check in ('stabilityLongRun', 'stabilityPathEquivalence',
+                      'stabilityResetIsolation', 'stabilityMultiWorldIsolation'):
+            full = props(f'station-{check}')
+            fast = props(f'station-{check}Fast')
+            self.assertIn('validation-stress', full['LABELS'])
+            self.assertNotIn('validation-fast', full['LABELS'])
+            self.assertIn('validation-fast', fast['LABELS'])
+            self.assertNotIn('validation-stress', fast['LABELS'])
+            self.assertEqual(fast['TIMEOUT'], 60)
         for module in lane.REPRESENTATIVES:
             self.assertEqual(sum(t['name'] == f'smoke-{module}' for t in selected), 1)
         self.assertIn('headless-tools-cli-contract', {t['name'] for t in selected})

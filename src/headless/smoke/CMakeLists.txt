@@ -229,7 +229,8 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         # reported, never audited clean.
         stabilityWorkloadBundled stabilityLongRun stabilityPathEquivalence
         stabilityResetIsolation stabilityMultiWorldIsolation
-        stabilityAuditFaultInjection materialIdentity)
+        stabilityLongRunFast stabilityPathEquivalenceFast stabilityResetIsolationFast
+        stabilityMultiWorldIsolationFast stabilityAuditFaultInjection materialIdentity)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()
@@ -279,13 +280,18 @@ set_tests_properties(station-scenarioPowerCoolingOutage PROPERTIES TIMEOUT 150)
 set_tests_properties(station-scenarioWasteConstrained PROPERTIES TIMEOUT 240)
 set_tests_properties(station-scenarioMaintenanceRecovery PROPERTIES TIMEOUT 240)
 set_tests_properties(station-scenarioLifecycle PROPERTIES TIMEOUT 180)
-# #424 the long-duration stability runs: the flagship check runs two
-# simulated hours; the path/reset/isolation checks run shorter horizons
-# across several Worlds and time-scale paths.
+# #424 full-duration stability checks retain their exhaustive horizons.
+# Their five-minute counterparts preserve the same properties in the fast lane.
+set_tests_properties(station-stabilityLongRun station-stabilityPathEquivalence
+    station-stabilityResetIsolation station-stabilityMultiWorldIsolation PROPERTIES
+    LABELS "smoke;functional;validation-stress;core;station")
 set_tests_properties(station-stabilityLongRun PROPERTIES TIMEOUT 720)
 set_tests_properties(station-stabilityPathEquivalence PROPERTIES TIMEOUT 3600)
 set_tests_properties(station-stabilityResetIsolation PROPERTIES TIMEOUT 3600)
 set_tests_properties(station-stabilityMultiWorldIsolation PROPERTIES TIMEOUT 480)
+set_tests_properties(station-stabilityLongRunFast station-stabilityPathEquivalenceFast
+    station-stabilityResetIsolationFast station-stabilityMultiWorldIsolationFast PROPERTIES
+    TIMEOUT 60)
 foreach(hourScale batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesLimited batteriesLosses batteriesDischarging)
     set_tests_properties(station-${hourScale} PROPERTIES TIMEOUT 90)
