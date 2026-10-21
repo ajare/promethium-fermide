@@ -1454,11 +1454,38 @@ occurrence, optional recurrence, priority) and remove an authored
 gas mass per occurrence from one compartment, split by an authored
 recovered fraction: the recovered share is retained in the
 receiver, the remainder is lost through the outer hatch. Every gram
-leaving a compartment is booked as leaked, recovered or lost —
-there is no unexplained disposal, and no process moves gas between
-compartments automatically: compartments are segregated by
-construction, and containment follows from which pathways are wired
-rather than from any declared label.
+leaving the station is booked as leaked, recovered or lost —
+there is no unexplained disposal. Compartments share gas only through
+explicitly authored Atmosphere pathways; containment follows from
+which pathways are wired rather than from any declared label.
+
+### Atmosphere pathways (#785)
+
+`StationSystemsSettings::atmospherePathways` configures undirected openings
+with `id`, `aAtmosphereId`, `bAtmosphereId`, `areaM2` and
+`initialOpenFraction`. Endpoints must be distinct existing compartments;
+area must be finite and strictly positive, openness finite in [0, 1].
+Parallel openings are legal; at most `MaxStationPathways` (64) may be authored.
+Invalid configurations are refused before the World changes.
+
+Each species diffuses down its own partial-pressure gradient in declaration
+order, using closed-form relaxation after crew metabolism and before the
+compartment saturation solve (ADRs 0026–0027). Absolute temperature is held
+constant during exchange; no heat is carried through an opening. The global
+effective turbulent coefficient table is calibrated so a fully-open 1 m²
+opening between 100 m³ compartments at 20 °C relaxes about 95% of a gradient
+in 256 seconds. No gas moves between unconnected compartments.
+
+`StationSystemsSnapshot::atmospherePathways` publishes identity, geometry,
+live openness, `flowRateKgPerS`, `netTransferredKg`, and only `Idle`/`Active`
+status. Arrays follow `StationPathwayGases`: oxygen, nitrogen, carbon dioxide,
+water vapour. Positive values mean A to B; rates average the last Station
+step, totals are signed net mass since configuration. There are deliberately
+no requested/actual/limiter fields. The observable registry classifies this
+aggregate as unverified for general cross-step guarantees.
+
+This initial configure-to-snapshot slice does not yet provide commands,
+persistence, or diagram authoring; those are follow-up tickets under #784.
 
 Thermal state integrates the compartment's own heat sources —
 occupant sensible heat, condensation latent heat and the heat-only

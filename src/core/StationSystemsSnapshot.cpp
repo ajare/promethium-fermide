@@ -564,6 +564,19 @@ namespace core
 		// tick's pathway flows and the closing per-component and thermal
 		// ledgers (#400). Containment is proven by the closing ledger and
 		// the exposed crossings, never by a pressure setpoint.
+		for (auto const& pathway : mImpl->atmospherePathways)
+		{
+			StationAtmospherePathwaySnapshot entry;
+			entry.id = pathway.authored.id;
+			entry.aAtmosphereId = pathway.authored.aAtmosphereId;
+			entry.bAtmosphereId = pathway.authored.bAtmosphereId;
+			entry.areaM2 = pathway.authored.areaM2;
+			entry.openFraction = pathway.openFraction;
+			entry.flowRateKgPerS = pathway.flowRateKgPerS;
+			entry.netTransferredKg = pathway.netTransferredKg;
+			entry.status = pathway.status;
+			result.atmospherePathways.push_back(std::move(entry));
+		}
 		for (auto const& compartment : mImpl->atmospheres)
 		{
 			StationAtmosphereSnapshot atmosphereResult;

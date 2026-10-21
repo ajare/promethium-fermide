@@ -96,6 +96,7 @@ pf_add_smoke_module(pf-smoke-station
         station/StationThermalChecks.cpp
         station/StationGenerationChecks.cpp
         station/StationAtmosphereChecks.cpp
+        station/StationPathwayChecks.cpp
         station/StationWaterChecks.cpp station/CompoundWater.cpp
         station/StationRecoveryChecks.cpp station/Bioconversion.cpp
         station/StationBiologyChecks.cpp
@@ -183,7 +184,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         observationIntegration observationBounds scheduledExchangeObservations algaeExchangeObservations cropExchangeObservations microbialExchangeObservations carbonExchangeObservations waterGasExchangeObservations crewAtmosphereExchangeObservations thermalExchangeObservations electricalExchangeObservations exchangeObservations materialObservations fluidInventoryObservations compoundInventoryObservations livingInventoryObservations materialRelationshipObservations materialCanonicalUnits batteryObservations batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
-        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres crews water waterQualityGates waterQualityValidation waterQualityConsumers waterSelectiveIrrigation waterHydroponics waterContamination compoundWaterPartial compoundWaterPartialValidation compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
+        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres pathwayDiffusion pathwayValidation crews water waterQualityGates waterQualityValidation waterQualityConsumers waterSelectiveIrrigation waterHydroponics waterContamination compoundWaterPartial compoundWaterPartialValidation compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
         compoundFiles powerFiles powerChainFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles maintenanceFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
         # #571: harvest, algae and the nutrient-conservation closure were
         # reachable through the binary but never registered here, so they
@@ -241,7 +242,7 @@ endforeach()
 foreach(ratio 1 7 60)
     foreach(check connectionTransfers connectionConversions connectionPower connectionThermal
             connectionProcesses connectionLifecycle connectionForecast connectionMaterialDiagnostics
-            connectionBlockedZeroEfficiency connectionBatteryTelemetry
+            connectionBlockedZeroEfficiency connectionBatteryTelemetry pathwayDiffusion
             scheduledTransfers recurringTransfers scheduledPantry lifecycle eventBound)
         add_test(NAME station-timestep-components-${check}-${ratio}
             COMMAND pf-smoke-station --step-ratio ${ratio} --check ${check})

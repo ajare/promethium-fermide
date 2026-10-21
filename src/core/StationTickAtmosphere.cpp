@@ -356,6 +356,37 @@ namespace core
 				else crew.status = StationTransferStatus::Partial;
 			}
 		}
+		// ADR-0026: sequential closed-form pair relaxation, after crew returns
+		// and before saturation. Temperature is held fixed and no heat crosses.
+		for (auto& pathway : runtime.atmospherePathways)
+		{
+			auto& a = runtime.atmospheres[pathway.aIndex];
+			auto& b = runtime.atmospheres[pathway.bIndex];
+			// Kelvin is mandatory: 0 C is not an empty compartment.
+			auto const wa = (static_cast<long double>(a.temperatureC) + StationCelsiusOffset) / a.authored.volumeM3;
+			auto const wb = (static_cast<long double>(b.temperatureC) + StationCelsiusOffset) / b.authored.volumeM3;
+			auto const sum = wa + wb;
+			std::array<double*, 4> const aMass{&a.oxygenKg, &a.nitrogenKg, &a.carbonDioxideKg, &a.waterVapourKg};
+			std::array<double*, 4> const bMass{&b.oxygenKg, &b.nitrogenKg, &b.carbonDioxideKg, &b.waterVapourKg};
+			pathway.status = StationAtmospherePathwayStatus::Idle;
+			for (size_t gas = 0; gas < aMass.size(); ++gas)
+			{
+				// Evaluate the equilibrium transfer first, independently of k,
+				// so even enormous conductance tends to equilibrium, not inf/inf.
+				auto const conductance = static_cast<long double>(StationPathwayDiffusionCoefficients[gas])
+					* pathway.authored.areaM2 * pathway.openFraction;
+				auto const relaxed = -std::expm1(-conductance * sum * seconds);
+				auto const moved = static_cast<double>((*aMass[gas] * (wa / sum)
+					- *bMass[gas] * (wb / sum)) * relaxed);
+				*aMass[gas] -= moved;
+				*bMass[gas] += moved;
+				a.diffusedKg[gas] -= moved;
+				b.diffusedKg[gas] += moved;
+				pathway.flowRateKgPerS[gas] = moved / seconds;
+				pathway.netTransferredKg[gas] += moved;
+				if (moved != 0.0) pathway.status = StationAtmospherePathwayStatus::Active;
+			}
+		}
 		// Then each compartment: occupancy draw, leakage, the
 		// coupled vapour-phase/thermal integration and the derived
 		// pressures, in that documented order.

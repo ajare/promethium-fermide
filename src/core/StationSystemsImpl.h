@@ -495,6 +495,14 @@ using namespace station_detail;
 		// the reservoir exchange against capacity x temperature. The
 		// compartment integrates explicitly on the fixed World tick, so
 		// the same tick sequence always integrates the same state.
+		struct AtmospherePathwayState
+		{
+			AtmospherePathwaySettings authored;
+			size_t aIndex{}, bIndex{};
+			double openFraction{};
+			std::array<double, 4> flowRateKgPerS{}, netTransferredKg{};
+			StationAtmospherePathwayStatus status{StationAtmospherePathwayStatus::Idle};
+		};
 		struct AtmosphereState
 		{
 			AtmosphereSettings authored;
@@ -505,6 +513,8 @@ using namespace station_detail;
 			double waterVapourKg{0.0};
 			double temperatureC{0.0};
 			double startingPressureKPa{0.0};
+			// Signed net diffusion additions, included in each species audit.
+			std::array<double, 4> diffusedKg{};
 			// Cumulative per-component removals by pathway, the closure
 			// terms of the per-component conservation audit.
 			double leakOxygenKg{0.0};
@@ -1310,6 +1320,7 @@ using namespace station_detail;
 		std::vector<BufferState> thermalBuffers;
 		std::vector<GeneratorState> generators;
 		std::vector<AtmosphereState> atmospheres;
+		std::vector<AtmospherePathwayState> atmospherePathways;
 		std::vector<AirlockCycleState> airlockCycles;
 		std::vector<CrewState> crews;
 		std::vector<WaterCollectorState> waterCollectors;

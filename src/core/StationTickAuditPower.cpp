@@ -873,24 +873,24 @@ namespace core
 			std::array<ComponentClosure, 4> const closures{{
 				{"oxygen", compartment.authored.startingOxygenKg,
 					compartment.electrolysisOxygenKg + compartment.cropOxygenAddedKg
-						+ compartment.algaeOxygenAddedKg,
+						+ compartment.algaeOxygenAddedKg + compartment.diffusedKg[0],
 					compartment.oxygenConsumedKg + compartment.leakOxygenKg
 						+ compartment.cycleOxygenKg + compartment.cropOxygenDrawnKg
 						+ compartment.algaeOxygenDrawnKg,
 					compartment.oxygenKg},
-				{"nitrogen", compartment.authored.startingNitrogenKg, 0.0,
+				{"nitrogen", compartment.authored.startingNitrogenKg, compartment.diffusedKg[1],
 					compartment.leakNitrogenKg + compartment.cycleNitrogenKg,
 					compartment.nitrogenKg},
 				{"carbonDioxide", compartment.authored.startingCarbonDioxideKg,
 					compartment.co2ProducedKg + compartment.cropCarbonDioxideAddedKg
-						+ compartment.algaeCarbonDioxideAddedKg,
+						+ compartment.algaeCarbonDioxideAddedKg + compartment.diffusedKg[2],
 					compartment.leakCarbonDioxideKg + compartment.cycleCarbonDioxideKg
 						+ compartment.capturedCarbonDioxideKg + compartment.cropCarbonDioxideDrawnKg
 						+ compartment.algaeCarbonDioxideDrawnKg + compartment.connectionCarbonDioxideLostKg,
 					compartment.carbonDioxideKg},
 				{"waterVapour", compartment.authored.startingWaterVapourKg,
 					compartment.vapourAddedKg + compartment.cropVapourAddedKg
-						+ compartment.algaeVapourAddedKg,
+						+ compartment.algaeVapourAddedKg + compartment.diffusedKg[3],
 					compartment.condensedKg + compartment.leakWaterVapourKg
 						+ compartment.cycleWaterVapourKg + compartment.collectedKg + compartment.connectionWaterVapourLostKg,
 					compartment.waterVapourKg}}};
@@ -930,6 +930,13 @@ namespace core
 					+ std::to_string(thermalResidual) + " exceeds tolerance "
 					+ std::to_string(StationBalanceTolerance), false;
 		}
+		for (auto const& pathway : runtime.atmospherePathways)
+			for (size_t gas = 0; gas < StationPathwayGases.size(); ++gas)
+			{
+				auto const where = "atmosphere pathway '" + pathway.authored.id + "' " + StationPathwayGases[gas];
+				if (!requireFinite(pathway.flowRateKgPerS[gas], where + " flow rate")
+					|| !requireFinite(pathway.netTransferredKg[gas], where + " net transferred mass")) return false;
+			}
 		for (auto const& cycle : runtime.airlockCycles)
 		{
 			auto const where = "airlock cycle '" + cycle.authored.id + "' ";

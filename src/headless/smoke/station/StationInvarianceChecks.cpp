@@ -126,7 +126,7 @@ namespace
 			if (entry.name.find("[]") != std::string_view::npos)
 				require(entry.certifiedRatio == 0 && entry.verifiedThroughRatio == 60,
 					"Fixture-scoped evidence was promoted to a global physics guarantee");
-		require(names.size() == 57 && names.contains("systemsStepWorldTicks")
+		require(names.size() == 58 && names.contains("atmospherePathways") && names.contains("systemsStepWorldTicks")
 			&& names.contains("systemsTimestepSeconds") && names.contains("stores[].currentQualified"),
 			"Observable coverage omitted a published clock or verified physical field");
 	}

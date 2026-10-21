@@ -848,6 +848,26 @@ namespace core
 		bool operator==(AtmosphereSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationAtmospheres{8};
+
+	// One undirected opening; A/B only define the sign of published flux.
+	struct AtmospherePathwaySettings
+	{
+		std::string id;
+		std::string aAtmosphereId;
+		std::string bAtmosphereId;
+		double areaM2{1.0};
+		double initialOpenFraction{1.0};
+		bool operator==(AtmospherePathwaySettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationPathways{64};
+	// Species order for pathway arrays: oxygen, nitrogen, carbon dioxide,
+	// water vapour (including vapour, unlike StationAtmosphereGases).
+	inline constexpr std::array<char const*, 4> StationPathwayGases{
+		"oxygen", "nitrogen", "carbonDioxide", "waterVapour"};
+	// Effective turbulent coefficients, not molecular diffusivities. At
+	// 293 K, 1 m2 between two 100 m3 volumes relaxes 95% in ~256 s.
+	inline constexpr std::array<double, 4> StationPathwayDiffusionCoefficients{
+		0.002, 0.002, 0.002, 0.002};
 	// A scheduled airlock cycle over one compartment (#400): a scenario
 	// event that removes a declared gas mass from the compartment at
 	// declared simulation times, reusing the same deterministic schedule
@@ -1765,6 +1785,7 @@ namespace core
 		std::vector<ChillerSettings> chillers;
 		std::vector<GeneratorSettings> generators;
 		std::vector<AtmosphereSettings> atmospheres;
+		std::vector<AtmospherePathwaySettings> atmospherePathways;
 		std::vector<AirlockCycleSettings> airlockCycles;
 		std::vector<CrewSettings> crews;
 		std::vector<WaterCollectorSettings> waterCollectors;
@@ -3067,6 +3088,22 @@ namespace core
 	// Every gram that left the compartment is visible as leaked,
 	// recovered or lost - containment is proven by the ledger, not by a
 	// pressure setpoint. Limits are reported, never clamped.
+	enum class StationAtmospherePathwayStatus { Idle, Active };
+	struct StationAtmospherePathwaySnapshot
+	{
+		std::string id;
+		std::string aAtmosphereId;
+		std::string bAtmosphereId;
+		double areaM2{0.0};
+		double openFraction{0.0};
+		// Positive means A to B. Rates are averages over the last step;
+		// totals are signed net mass since configuration, in StationPathwayGases order.
+		std::array<double, 4> flowRateKgPerS{};
+		std::array<double, 4> netTransferredKg{};
+		StationAtmospherePathwayStatus status{StationAtmospherePathwayStatus::Idle};
+		bool operator==(StationAtmospherePathwaySnapshot const&) const = default;
+	};
+
 	struct StationAtmosphereSnapshot
 	{
 		std::string id;
@@ -4112,6 +4149,7 @@ namespace core
 		// per-component and thermal ledgers, plus the scheduled airlock
 		// cycle history with the recovered-versus-lost split.
 		std::vector<StationAtmosphereSnapshot> atmospheres;
+		std::vector<StationAtmospherePathwaySnapshot> atmospherePathways;
 		std::vector<StationAirlockCycleSnapshot> airlockCycles;
 		// The crew picture (#401): per-crew requested-versus-actual
 		// exchange on every metabolic pathway, the uniform metabolic

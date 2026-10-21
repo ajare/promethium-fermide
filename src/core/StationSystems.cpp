@@ -1185,6 +1185,15 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			atmosphereIndex[atmosphere.id] = mImpl->atmospheres.size();
 			mImpl->atmospheres.push_back(std::move(state));
 		}
+		for (auto const& pathway : settings.atmospherePathways)
+		{
+			Impl::AtmospherePathwayState state;
+			state.authored = pathway;
+			state.aIndex = atmosphereIndex.at(pathway.aAtmosphereId);
+			state.bIndex = atmosphereIndex.at(pathway.bAtmosphereId);
+			state.openFraction = pathway.initialOpenFraction;
+			mImpl->atmospherePathways.push_back(std::move(state));
+		}
 		// Airlock cycle schedules start unfired: the authored first
 		// occurrence is the next cycle, and nothing is drawn before its
 		// time. Reset and load reconstruct this state, so a replay

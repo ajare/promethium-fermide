@@ -1602,9 +1602,8 @@ using namespace station_detail;
 		// Compartment atmosphere contracts (#400): a fixed volume with a
 		// finite owned gas inventory, an authored effective thermal
 		// capacity, an optional heat-only reservoir coupling and an
-		// authored occupancy/load assignment. Compartments are isolated
-		// by construction - no process moves gas between them - so every
-		// pathway that can remove gas (leak, airlock cycle) must book its mass.
+		// authored occupancy/load assignment. Only explicit pathways exchange
+		// gas between compartments; leaks and airlock cycles book external loss.
 		if (settings.atmospheres.size() > MaxStationAtmospheres)
 			return refuse("Station atmospheres are limited to "
 				+ std::to_string(MaxStationAtmospheres) + " entries");
@@ -1615,6 +1614,34 @@ using namespace station_detail;
 			std::string reason;
 			if (!validateStationWaterGasWiring(settings, atmosphere, reason, false, brokenReferences))
 				return refuse(reason);
+		} catch (BrokenDraftEntry const&) {}
+		if (settings.atmospherePathways.size() > MaxStationPathways)
+			return refuse("Station atmosphere pathways are limited to "
+				+ std::to_string(MaxStationPathways) + " entries");
+		std::set<std::string> pathwayIds;
+		for (auto const& pathway : settings.atmospherePathways) try
+		{
+			auto const where = "Station atmosphere pathway '" + pathway.id + "'";
+			if (pathway.id.empty() || pathway.id.size() > MaxStationStoreIdLength)
+				return refuse(where + " id must be non-empty and at most "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!pathwayIds.insert(pathway.id).second)
+				return refuse(where + " id is duplicated");
+			if (!std::isfinite(pathway.areaM2) || pathway.areaM2 <= 0.0)
+				return refuse(where + " areaM2 must be finite and positive");
+			if (!std::isfinite(pathway.initialOpenFraction)
+				|| pathway.initialOpenFraction < 0.0 || pathway.initialOpenFraction > 1.0)
+				return refuse(where + " initialOpenFraction must be finite and within [0, 1]");
+			if (pathway.aAtmosphereId == pathway.bAtmosphereId)
+				return refuse(where + " endpoints must be distinct (self-loop)");
+			for (auto const& endpoint : {pathway.aAtmosphereId, pathway.bAtmosphereId})
+				if (!atmosphereIds.contains(endpoint))
+				{
+					auto text = where + " references unknown atmosphere compartment '" + endpoint + "'";
+					if (!brokenReferences) return refuse(std::move(text));
+					brokenReferences->push_back(std::move(text));
+					throw BrokenDraftEntry{};
+				}
 		} catch (BrokenDraftEntry const&) {}
 		// Scheduled airlock cycle contracts (#400): each cycle draws from
 		// one declared compartment on the shared scenario schedule rule
