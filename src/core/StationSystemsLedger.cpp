@@ -185,6 +185,55 @@ namespace core
 		// Reuse the due-since-last-commit collector and its total order. Only
 		// distinct times split integration; coincident occurrences stay together.
 		collected.collectArrivals(end);
+		std::vector<double> boundaries;
+		// Piecewise-constant forcing must change at its authored instant,
+		// not at whichever Station endpoint happens to sample it. This is
+		// event-driven subdivision, not a hidden fixed-frequency clock.
+		auto profileBoundaries = [&](ProfileSettings const& profile)
+		{
+			if (profile.periodSeconds <= 0 || profile.segments.empty()) return true;
+			constexpr size_t limit = 65536;
+			for (size_t i = 0; i < profile.segments.size(); ++i)
+			{
+				auto const& segment = profile.segments[i];
+				auto const& previous = profile.segments[(i + profile.segments.size() - 1) % profile.segments.size()];
+				if (segment.level == previous.level) continue;
+				auto const first = std::max(0.0,
+					std::floor((cursor - segment.startSeconds) / profile.periodSeconds) + 1);
+				auto const last = std::floor((end - segment.startSeconds) / profile.periodSeconds);
+				if (last < first) continue;
+				if (last >= 9007199254740992.0 || last - first >= limit
+					|| boundaries.size() + static_cast<size_t>(last - first + 1) > limit) return false;
+				for (auto cycle = static_cast<uint64_t>(first); cycle <= static_cast<uint64_t>(last); ++cycle)
+				{
+					auto const instant = cycle * profile.periodSeconds + segment.startSeconds;
+					if (instant > cursor && instant < end) boundaries.push_back(instant);
+				}
+			}
+			return true;
+		};
+		bool profilesValid = true;
+		// Zero installed capacity disables the forcing too: an irrelevant
+		// fast profile must not create work or exhaust a transition budget.
+		for (auto const& a : settings.solarArrays)
+			if (a.capacityKW > 0) profilesValid &= profileBoundaries(a.illumination);
+		for (auto const& l : settings.equipmentLoads)
+			if (l.electricalDemandKW > 0 || l.heatOutputKW > 0
+				|| std::any_of(l.materialExchanges.begin(), l.materialExchanges.end(),
+					[](auto const& exchange) { return exchange.ratePerSecond > 0; }))
+				profilesValid &= profileBoundaries(l.operatingProfile);
+		for (auto const& c : settings.crews)
+			if (c.crewCount > 0) profilesValid &= profileBoundaries(c.activityProfile);
+		for (auto const& c : settings.cropPopulations)
+			if (c.growingAreaM2 > 0) profilesValid &= profileBoundaries(c.illuminationProfile);
+		for (auto const& a : settings.algaeCultures)
+			if (a.cultureVolumeL > 0) profilesValid &= profileBoundaries(a.illuminationProfile);
+		if (!profilesValid)
+		{
+			system = "Station profiles";
+			violation = "profile transition count exceeds 65536 per step or its occurrence index is not representable";
+			return false;
+		}
 		auto integrate = [&](double instant, double duration, auto&& committed)
 		{
 			Tick scratch(*this, tick, duration, system, violation, instant, true);
@@ -196,9 +245,100 @@ namespace core
 			committed(scratch);
 			return true;
 		};
+		std::vector<bool> blockedStarts(generators.size(), false);
+		bool generatorQualificationBoundary = false;
+		auto powerPhaseCrossing = [&](double maximum)
+		{
+			// A startup surge is full instantaneous power until completion,
+			// not an average budget that normal service can borrow from.
+			for (auto const& load : loads)
+				if (load.recoveryStage == StationLoadRecoveryStage::Restoring
+					&& load.authored.restartSurgePowerKW > 0.0
+					&& load.surgeRemainingSeconds > 0.0
+					&& cursor + load.surgeRemainingSeconds > cursor)
+					maximum = std::min(maximum, load.surgeRemainingSeconds);
+			generatorQualificationBoundary = false;
+			for (size_t i = 0; i < generators.size(); ++i)
+			{
+				auto const& g = generators[i];
+				auto const& a = g.authored;
+				if (a.ratedOutputKW <= 0) continue;
+				double crossing = 0;
+				if (g.phase == StationGeneratorPhase::Starting)
+					crossing = a.startupPowerKW > 0
+						? (a.startupPowerKW * a.startupSeconds - g.startupReceivedKJ) / a.startupPowerKW : 0;
+				else if (g.phase == StationGeneratorPhase::Stopped && !blockedStarts[i]
+					&& (a.commandedOutputKW > 0 || settings.dispatchMode == StationDispatchMode::Automatic)
+					&& a.startupPowerKW > 0)
+					crossing = a.startupSeconds;
+				else if (g.phase == StationGeneratorPhase::Running
+					|| (g.phase == StationGeneratorPhase::Stopped && !blockedStarts[i]
+						&& a.startupPowerKW * a.startupSeconds <= 0))
+				{
+					auto const command = settings.dispatchMode == StationDispatchMode::Automatic
+						? g.lastCommandedKW : a.commandedOutputKW;
+					auto const cap = collected.connections.remaining(collected.connections.port("Generator", a.id, "Generation"));
+					auto const target = std::min({command, a.ratedOutputKW * g.availabilityFactor, cap});
+					auto const start = g.phase == StationGeneratorPhase::Running ? g.outputKW : 0.0;
+					if (command > 0) crossing = std::abs(target - start) / a.maxRampKWPerSecond;
+				}
+				if (crossing > 0 && cursor + crossing > cursor) maximum = std::min(maximum, crossing);
+			}
+			// For a manual, generator/solar-only portfolio, source power is
+			// affine between the events above. Split at crank-qualification
+			// thresholds: an interval average must not start a later machine
+			// before (or after) its upstream source actually reaches that power.
+			if (settings.dispatchMode == StationDispatchMode::Manual && batteries.empty() && fuelCells.empty())
+			{
+				double available = 0, slope = 0;
+				for (auto const& a : solarArrays)
+					available += collected.connections.available(collected.connections.port("Solar", a.authored.id, "Solar generation"),
+						a.authored.capacityKW * evaluateStationProfile(a.authored.illumination, cursor + maximum * 0.5));
+				for (size_t i = 0; i < generators.size(); ++i)
+				{
+					auto const& g = generators[i]; auto const& a = g.authored;
+					if (a.commandedOutputKW <= 0 || a.ratedOutputKW * g.availabilityFactor <= 0
+						|| reservoirs[g.sinkIndex].temperatureC + 1e-9 >= a.maxSinkTemperatureC
+						|| stores[g.fuelStoreIndex].currentQualified <= stores[g.fuelStoreIndex].authored.protectedReserve)
+						continue;
+					auto const port = collected.connections.port("Generator", a.id, "Generation");
+					if (g.phase == StationGeneratorPhase::Running
+						|| (g.phase == StationGeneratorPhase::Stopped && !blockedStarts[i]
+							&& a.startupPowerKW * a.startupSeconds <= 0))
+					{
+						auto const cap = collected.connections.remaining(port);
+						auto const start = g.phase == StationGeneratorPhase::Running
+							? std::min({g.outputKW, a.ratedOutputKW * g.availabilityFactor, cap}) : 0.0;
+						auto const target = std::min({a.commandedOutputKW, a.ratedOutputKW * g.availabilityFactor, cap});
+						auto const end = integrateGeneratorRamp(start, target, a.maxRampKWPerSecond, maximum).endpointKW;
+						available += collected.connections.available(port, start);
+						slope += (collected.connections.available(port, end)
+							- collected.connections.available(port, start)) / maximum;
+					}
+					else if ((g.phase == StationGeneratorPhase::Stopped || g.phase == StationGeneratorPhase::Starting)
+						&& a.startupPowerKW * a.startupSeconds > 0)
+					{
+						auto const crankPort = collected.powerPort("Generator", a.id);
+						if (collected.connections.available(crankPort, std::numeric_limits<double>::max())
+							+ 1e-9 < a.startupPowerKW) continue;
+						auto const need = collected.connections.required(crankPort, a.startupPowerKW);
+						auto const crossing = slope != 0 ? (need - available) / slope : 0.0;
+						if (crossing > 0 && cursor + crossing > cursor && crossing <= maximum)
+						{
+							maximum = crossing;
+							generatorQualificationBoundary = true;
+						}
+						// Only an already funded crank reserves power now.
+						if (available + 1e-9 >= need) available -= need;
+					}
+				}
+			}
+			return maximum;
+		};
 		auto const hasContinuousTransfers = std::any_of(transfers.begin(), transfers.end(),
 			[](auto const& transfer) { return transfer.authored.mode == ResourceTransferMode::Continuous; });
-		if (collected.arrivals.empty() && maintenanceJobs.empty() && !hasContinuousTransfers)
+		if (boundaries.empty() && collected.arrivals.empty() && maintenanceJobs.empty()
+			&& !hasContinuousTransfers && powerPhaseCrossing(seconds) >= seconds)
 			return integrate(end, seconds, [](Tick const&) {});
 		// Transfer rates are constant until an inventory boundary or an authored
 		// event changes admission. Predict crossings with the same input-side
@@ -236,9 +376,9 @@ namespace core
 			}
 			return maximum;
 		};
-		if (collected.arrivals.empty() && maintenanceJobs.empty() && transferCrossing(seconds) >= seconds)
+		if (boundaries.empty() && collected.arrivals.empty() && maintenanceJobs.empty()
+			&& transferCrossing(seconds) >= seconds && powerPhaseCrossing(seconds) >= seconds)
 			return integrate(end, seconds, [](Tick const&) {});
-		std::vector<double> boundaries;
 		for (auto const& arrival : collected.arrivals)
 			if (arrival.key.occurrenceSeconds > cursor && arrival.key.occurrenceSeconds < end)
 				boundaries.push_back(arrival.key.occurrenceSeconds);
@@ -258,14 +398,31 @@ namespace core
 		std::sort(boundaries.begin(), boundaries.end());
 		boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
 		// Per-step amounts must cover every positive sub-interval, not only
-		// the last one. Bind stable state fields; rates/status remain the latest
-		// sampled values, and discrete schedules retain their last-occurrence
-		// reporting contract. No aggregate is fed back into a later sub-interval.
+		// the last one. Bind stable state fields; power/connection rates below
+		// are duration-weighted means, while endpoint state/status and other
+		// rates remain latest samples. Discrete schedules keep last-occurrence
+		// meaning. No aggregate is fed back into a later sub-interval.
 		std::vector<std::pair<double*, double>> amounts;
 		auto bind = [&](std::initializer_list<double*> fields)
 		{
 			for (auto field : fields) amounts.emplace_back(field, 0.0);
 		};
+		for (auto& g : generators) bind({&g.lastFuelDrawKWh});
+		std::vector<std::pair<double*, double>> meanRates;
+		auto mean = [&](std::initializer_list<double*> fields)
+		{
+			for (auto field : fields) meanRates.emplace_back(field, 0.0);
+		};
+		mean({&lastAvailableGenerationKW, &lastPoolGenerationKW, &lastConnectionPowerLossKW, &lastPoolResidualKW});
+		for (auto& a : solarArrays) mean({&a.lastAvailableKW});
+		for (auto& l : loads) mean({&l.lastRequestedKW, &l.lastSuppliedKW, &l.lastUnmetKW,
+			&l.lastUnmetCriticalKW, &l.lastHeatExportedKW, &l.lastSurgeKW});
+		for (auto& b : batteries) mean({&b.lastChargeKW, &b.lastDischargeKW,
+			&b.lastDischargeRequestedKW, &b.lastDischargeShortfallKW});
+		for (auto& g : generators) mean({&g.lastAverageOutputKW, &g.lastWasteHeatKW,
+			&g.lastStartupDrawKW, &g.lastStartupUnmetKW, &g.lastDecayHeatKW});
+		for (auto& f : fuelCells) mean({&f.lastOutputKW, &f.lastWasteHeatKW, &f.lastUnmetOutputKW});
+		std::vector<std::array<double, 3>> connectionRateTotals(connectionFlows.size());
 		for (auto& t : transfers)
 			if (t.authored.mode == ResourceTransferMode::Continuous)
 				bind({&t.lastRequested, &t.lastCompleted, &t.lastUnmet});
@@ -337,6 +494,21 @@ namespace core
 				totalIn[i] += part.flowIn[i];
 				totalOut[i] += part.flowOut[i];
 			}
+			if (part.continuous)
+			{
+				auto const weight = part.seconds / seconds;
+				for (auto& [field, total] : meanRates) total += *field * weight;
+				// Accounts are materialized by the first committed interval,
+				// so the pre-step vector can legitimately be empty.
+				connectionRateTotals.resize(connectionFlows.size());
+				for (size_t i = 0; i < connectionFlows.size(); ++i)
+				{
+					auto const& c = connectionFlows[i];
+					connectionRateTotals[i][0] += c.lastInputRate * weight;
+					connectionRateTotals[i][1] += c.lastDeliveredRate * weight;
+					connectionRateTotals[i][2] += c.lastLossRate * weight;
+				}
+			}
 		};
 		size_t arrivalIndex = 0;
 		auto boundary = [&](double instant, double duration)
@@ -363,6 +535,10 @@ namespace core
 					auto const completion = job.lastStartSeconds + job.authored.durationSeconds;
 					if (completion > cursor && completion < next) next = completion;
 				}
+			auto const generatorDuration = powerPhaseCrossing(next - cursor);
+			auto const qualificationInstant = generatorQualificationBoundary ? cursor + generatorDuration : -1.0;
+			if (generatorDuration < next - cursor && cursor + generatorDuration > cursor)
+				next = cursor + generatorDuration;
 			auto const crossing = transferCrossing(next - cursor);
 			if (crossing < next - cursor && cursor + crossing > cursor) next = cursor + crossing;
 			auto const duration = next - cursor;
@@ -371,13 +547,30 @@ namespace core
 				accumulate(part);
 				for (auto& [field, total] : amounts) total += *field;
 			})) return false;
+			for (size_t i = 0; i < generators.size(); ++i)
+				if (generators[i].phase == StationGeneratorPhase::Stopped) blockedStarts[i] = true;
 			if (!boundary(next, duration)) return false;
+			if (next == qualificationInstant || std::binary_search(boundaries.begin(), boundaries.end(), next))
+				std::fill(blockedStarts.begin(), blockedStarts.end(), false);
 			cursor = next;
 		}
 		for (auto const& [field, total] : amounts)
 		{
 			if (!std::isfinite(total)) return violation = "split-step amount sum is not finite", false;
 			*field = total;
+		}
+		for (auto const& [field, total] : meanRates)
+		{
+			if (!std::isfinite(total)) return violation = "split-step weighted mean is not finite", false;
+			*field = total;
+		}
+		for (size_t i = 0; i < connectionFlows.size(); ++i)
+		{
+			for (auto const rate : connectionRateTotals[i])
+				if (!std::isfinite(rate)) return violation = "split-step connection mean is not finite", false;
+			connectionFlows[i].lastInputRate = connectionRateTotals[i][0];
+			connectionFlows[i].lastDeliveredRate = connectionRateTotals[i][1];
+			connectionFlows[i].lastLossRate = connectionRateTotals[i][2];
 		}
 		for (size_t i = 0; i < stores.size(); ++i)
 		{

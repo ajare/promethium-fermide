@@ -10,6 +10,7 @@ using namespace station_detail;
 	{
 		Impl(uint32_t ratio, float baseSeconds) : clock(ratio, baseSeconds) {}
 		StationClock clock;
+		uint64_t observationIntervalSteps{1};
 		ProtectionPrediction prediction;
 		station_connections::Graph connectionGraph;
 		std::vector<StationConnectionSnapshot> connectionFlows;
@@ -448,7 +449,8 @@ using namespace station_detail;
 			size_t fuelStoreIndex{0};
 			size_t sinkIndex{0};
 			StationGeneratorPhase phase{StationGeneratorPhase::Stopped};
-			double outputKW{0.0};
+			double outputKW{0.0}; // instantaneous endpoint, retained for ramp continuity
+			double lastAverageOutputKW{0.0};
 			double lastFuelDrawKWh{0.0};
 			double lastWasteHeatKW{0.0};
 			double lastStartupDrawKW{0.0};
@@ -1497,7 +1499,7 @@ using namespace station_detail;
 			double instant, bool integrating)
 			: runtime(owner), tick(tick), seconds(seconds), system(system), violation(violation),
 			  connections(owner.settings, owner.connectionGraph, seconds, owner.connectionFlows),
-			  elapsed(instant), continuous(integrating) {}
+			  elapsed(instant), profileElapsed(instant - seconds * 0.5), continuous(integrating) {}
 		struct DueArrival
 		{
 			StationScenarioEventKey key;
@@ -1577,6 +1579,9 @@ using namespace station_detail;
 		std::vector<ConstituentLedger> stagedDrift{};
 		bool materialConnectionsValid{};
 		double elapsed{};
+		// A forcing profile is constant inside each event-split interval.
+		// Its midpoint avoids evaluating the next segment at the endpoint.
+		double profileElapsed{};
 		bool continuous{};
 		std::vector<DueArrival> arrivals{};
 		double hours{};
@@ -1711,7 +1716,7 @@ using namespace station_detail;
 		std::string temperatureRefusal(std::string sampled) const
 		{
 			return runtime.prediction.active
-				? "current or predicted pre-step temperature is outside the qualified operating window"
+				? sampled + "; current or predicted pre-step temperature is outside the qualified operating window"
 				: sampled;
 		}
 		bool protection();

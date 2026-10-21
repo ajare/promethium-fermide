@@ -230,7 +230,7 @@ scenarioNotes: >
 
 stationSystems:
   enabled: true
-  systemsStepWorldTicks: 1
+  systemsStepWorldTicks: 6
   observationIntervalSeconds: 1.0
   trendRetentionSeconds: 3600.0
   dispatchMode: manual

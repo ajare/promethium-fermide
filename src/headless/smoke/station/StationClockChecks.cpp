@@ -11,7 +11,8 @@ namespace
 	void clock(smoke::Context const&)
 	{
 		constexpr float quantum = 1.0f / 60.0f;
-		for (uint32_t ratio : {1u, 6u, 30u, 600u})
+		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
+		for (uint32_t ratio : {1u, 6u, 7u, 30u, 60u})
 		{
 			core::StationSystemsSettings settings;
 			settings.enabled = true;
@@ -23,7 +24,7 @@ namespace
 			transfer.ratePerSecond = 0.01;
 			settings.transfers = {transfer};
 			core::StationSystemsRuntime direct(settings, quantum), partitioned(settings, quantum);
-			auto const duration = 120.0 * static_cast<double>(quantum) * 60;
+			auto const duration = std::ceil(120.0 * 60 / ratio) * ratio * static_cast<double>(quantum);
 			require(direct.advanceTo(duration), "Standalone Station drive failed");
 			for (double target : {duration / 4, duration / 2, duration})
 				require(partitioned.advanceTo(target), "Partitioned Station drive failed");
@@ -52,14 +53,14 @@ namespace
 			require(direct.advanceTo(duration + stepSeconds * 0.75) && direct.snapshot() == overshot,
 				"Drive stepped again while already ahead of target");
 		}
-		for (uint32_t ratio : {0u, 601u, std::numeric_limits<uint32_t>::max()})
+		for (uint32_t ratio : {0u, 61u, std::numeric_limits<uint32_t>::max()})
 		{
 			core::StationSystemsSettings settings;
 			settings.systemsStepWorldTicks = ratio;
 			std::string diagnostic;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find(std::to_string(ratio)) != std::string::npos
-				&& diagnostic.find("[1, 600]") != std::string::npos, "Step ratio diagnostic missing range/value");
+				&& diagnostic.find("[1, 60]") != std::string::npos, "Step ratio diagnostic missing range/value");
 		}
 	}
 }

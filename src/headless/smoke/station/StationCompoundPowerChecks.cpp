@@ -7,6 +7,7 @@ namespace
 	using namespace smoke::station;
 	void compounds(smoke::Context const&)
 	{
+		auto const stepSeconds = requestedStepSeconds();
 		// #391: compound Resource stores carry declared constituent
 		// compositions on a documented dry-mass basis; conversions are
 		// validated to never create a tracked constituent, and the runtime
@@ -79,7 +80,7 @@ namespace
 		auto const flowsMatchInventories = [](core::World& world, std::string const& where)
 		{
 			auto const before = world.getStationSystemsSnapshot();
-			require(smoke::station::advanceSeconds(world, 0.0166666666667), (where + ": flow-matching tick failed").c_str());
+			require(advanceStationSteps(world, 1), (where + ": flow-matching step failed").c_str());
 			auto const after = world.getStationSystemsSnapshot();
 			for (size_t index = 0; index < after.stores.size(); ++index)
 			{
@@ -199,11 +200,11 @@ namespace
 				&& snap.conversions[0].id == "harvest"
 				&& snap.conversions[0].status == core::StationTransferStatus::Full
 				&& approx(snap.conversions[0].lastScale, 1.0)
-				&& approx(snap.conversions[0].inputs[0].completed, 1.0 / 60.0)
-				&& approx(snap.conversions[0].outputs[1].completed, 0.4 / 60.0),
+				&& approx(snap.conversions[0].inputs[0].completed, snap.systemsTimestepSeconds)
+				&& approx(snap.conversions[0].outputs[1].completed, 0.4 * snap.systemsTimestepSeconds),
 				"Harvest throughput not published as full");
-			require(approx(snap.stores[1].currentQualified, 1.0 + 0.04)
-				&& approx(snap.stores[2].currentQualified, 0.2),
+			require(approx(snap.stores[1].currentQualified, 1.0 + 0.08 * snap.elapsedSeconds)
+				&& approx(snap.stores[2].currentQualified, 0.4 * snap.elapsedSeconds),
 				"Harvest products not reflected in stores");
 			// Constituent residuals stay within tolerance; the 0.48 kg/s of
 			// water not carried into the products is an explicit loss.
@@ -213,7 +214,7 @@ namespace
 					"Constituent residual exceeded tolerance during a balanced run");
 			require(approx(balance(snap, "water").starting, 50.0 * 0.8),
 				"Water constituent starting total wrong");
-			require(approx(balance(snap, "water").lost, 0.5 * 0.48),
+			require(approx(balance(snap, "water").lost, snap.elapsedSeconds * 0.48),
 				"Conversion water loss not booked");
 			require(approx(balance(snap, "nutrientNitrogen").starting, 50.0 * 0.2 * 0.05
 				+ 1.0 * 0.04 + 0.0), "Nutrient nitrogen total wrong");
@@ -228,11 +229,11 @@ namespace
 			// tick moved through the store, conversions included: the
 			// harvest draw leaves the input store as outflow and the
 			// products enter the output stores as inflow.
-			require(flowApprox(snap.stores[0].lastTickOut, 1.0 / 60.0)
+			require(flowApprox(snap.stores[0].lastTickOut, snap.systemsTimestepSeconds)
 				&& snap.stores[0].lastTickIn == 0.0
-				&& flowApprox(snap.stores[1].lastTickIn, 0.08 / 60.0)
+				&& flowApprox(snap.stores[1].lastTickIn, 0.08 * snap.systemsTimestepSeconds)
 				&& snap.stores[1].lastTickOut == 0.0
-				&& flowApprox(snap.stores[2].lastTickIn, 0.4 / 60.0)
+				&& flowApprox(snap.stores[2].lastTickIn, 0.4 * snap.systemsTimestepSeconds)
 				&& snap.stores[2].lastTickOut == 0.0,
 				"Conversion flows missing from the per-store last-tick fields");
 			// Reset reproduces the whole compound outcome exactly; capture
@@ -254,7 +255,7 @@ namespace
 		core::World partial("Partial", 2, 2);
 		partial.pauseSimulation(); partial.finishBuild();
 		require(configure(partial,
-			{store("food", "kg", 100, 0.02, 0, 0.01, food),
+			{store("food", "kg", 100, 0.01 + 0.6 * stepSeconds, 0, 0.01, food),
 				store("biomass", "kg", 10, 1, 0, 0, biomass),
 				store("waste", "kg", 20, 0, 0, 0, waste)},
 			{}, {conversion("harvest", {consume("food", 1.0)},
@@ -276,14 +277,14 @@ namespace
 			// delivery into the per-store last-tick flows, and on this
 			// single-tick run the flows account exactly for the change of
 			// each store's inventory from its starting amount.
-			require(flowApprox(snap.stores[0].lastTickOut, 0.6 / 60.0)
+			require(flowApprox(snap.stores[0].lastTickOut, 0.6 * snap.systemsTimestepSeconds)
 				&& snap.stores[0].lastTickIn == 0.0
-				&& flowApprox(snap.stores[1].lastTickIn, 0.6 * 0.08 / 60.0)
+				&& flowApprox(snap.stores[1].lastTickIn, 0.6 * 0.08 * snap.systemsTimestepSeconds)
 				&& snap.stores[1].lastTickOut == 0.0
-				&& flowApprox(snap.stores[2].lastTickIn, 0.6 * 0.4 / 60.0)
+				&& flowApprox(snap.stores[2].lastTickIn, 0.6 * 0.4 * snap.systemsTimestepSeconds)
 				&& snap.stores[2].lastTickOut == 0.0,
 				"Partial conversion flows missing from the per-store last-tick fields");
-			require(std::abs((0.02 - snap.stores[0].currentQualified)
+			require(std::abs((0.01 + 0.6 * stepSeconds - snap.stores[0].currentQualified)
 				- snap.stores[0].lastTickOut) < 1e-9
 				&& std::abs((snap.stores[1].currentQualified - 1.0)
 					- snap.stores[1].lastTickIn) < 1e-9
@@ -324,7 +325,7 @@ namespace
 		core::World competing("Competing", 2, 2);
 		competing.pauseSimulation(); competing.finishBuild();
 		require(configure(competing,
-			{store("food", "kg", 100, 0.03, 0, 0, food),
+			{store("food", "kg", 100, 1.8 * stepSeconds, 0, 0, food),
 				store("biomass", "kg", 10, 0, 0, 0, biomass),
 				store("waste", "kg", 20, 0, 0, 0, waste)},
 			{}, {conversion("low", {consume("food", 1.0)}, {produce("waste", 0.5)}, 0),
@@ -347,11 +348,11 @@ namespace
 			// #552: both conversions draw the shared input store, so its
 			// last-tick outflow is the sum of both completed draws, and
 			// each product store's inflow is its own conversion's output.
-			require(flowApprox(snap.stores[0].lastTickOut, 1.8 / 60.0)
+			require(flowApprox(snap.stores[0].lastTickOut, 1.8 * snap.systemsTimestepSeconds)
 				&& snap.stores[0].lastTickIn == 0.0
-				&& flowApprox(snap.stores[1].lastTickIn, 0.1 / 60.0)
+				&& flowApprox(snap.stores[1].lastTickIn, 0.1 * snap.systemsTimestepSeconds)
 				&& snap.stores[1].lastTickOut == 0.0
-				&& flowApprox(snap.stores[2].lastTickIn, 0.5 * 0.8 / 60.0)
+				&& flowApprox(snap.stores[2].lastTickIn, 0.5 * 0.8 * snap.systemsTimestepSeconds)
 				&& snap.stores[2].lastTickOut == 0.0,
 				"Competing conversion flows not summed in the per-store last-tick fields");
 		}
@@ -402,6 +403,16 @@ namespace
 			require(approx(snap.stores[1].currentQualified, roundoffFeed)
 				&& snap.stores[1].currentQualified <= 10.0,
 				"Roundoff conversion product not reflected in the output store");
+			size_t conversionAccounts = 0;
+			for (auto const& account : snap.connections)
+				if (account.key.ownerType == "Conversion" && account.key.ownerId == "shift")
+				{
+					++conversionAccounts;
+					require(account.inputTotal == roundoffFeed
+						&& account.deliveredTotal == roundoffFeed && account.lostTotal == 0.0,
+						"Roundoff conversion connection accounts did not preserve the exact dose");
+				}
+			require(conversionAccounts == 2, "Roundoff conversion connection evidence missing");
 			closedBalances(snap, "Roundoff input-limited conversion");
 		}
 		// Capacity-limited variant: the output headroom ratio rounds above
@@ -560,26 +571,22 @@ namespace
 				diagnostic.c_str());
 		}
 		combined.resumeSimulation();
-		require(smoke::station::advanceSeconds(combined, 0.166666666667), "Combined mechanisms run failed");
+		require(advanceStationSteps(combined, 2), "Combined mechanisms run failed");
 		{
 			auto const snap = combined.getStationSystemsSnapshot();
 			require(snap.healthy, "Combined mechanisms run left the Station unhealthy");
-			// Per tick at the fixed timestep: the reactor draws 0.1 kg from
-			// feed and delivers 0.05 kg into biomass, the pump moves
-			// 0.1 kg feed -> mid, and the harvest conversion takes 1/60 kg
-			// from mid, delivering 0.08/60 kg to biomass and 0.4/60 kg to
-			// waste. Every store's last-tick fields show the sum of the
-			// mechanisms that touched it.
-			require(flowApprox(snap.stores[0].lastTickOut, 0.2)
+			// Each mechanism's rate times the actual Station duration
+			// contributes to the shared store's total step dose.
+			require(flowApprox(snap.stores[0].lastTickOut, 12.0 * snap.systemsTimestepSeconds)
 				&& snap.stores[0].lastTickIn == 0.0,
 				"Equipment draw and transfer out of the shared feed store not summed");
-			require(flowApprox(snap.stores[1].lastTickIn, 0.1)
-				&& flowApprox(snap.stores[1].lastTickOut, 1.0 / 60.0),
+			require(flowApprox(snap.stores[1].lastTickIn, 6.0 * snap.systemsTimestepSeconds)
+				&& flowApprox(snap.stores[1].lastTickOut, snap.systemsTimestepSeconds),
 				"Transfer-in and conversion-out of the intermediate store not published");
-			require(flowApprox(snap.stores[2].lastTickIn, 0.05 + 0.08 / 60.0)
+			require(flowApprox(snap.stores[2].lastTickIn, 3.08 * snap.systemsTimestepSeconds)
 				&& snap.stores[2].lastTickOut == 0.0,
 				"Equipment delivery and conversion production into biomass not summed");
-			require(flowApprox(snap.stores[3].lastTickIn, 0.4 / 60.0)
+			require(flowApprox(snap.stores[3].lastTickIn, 0.4 * snap.systemsTimestepSeconds)
 				&& snap.stores[3].lastTickOut == 0.0,
 				"Conversion production into waste not published as store inflow");
 			flowsMatchInventories(combined, "Combined mechanisms");
@@ -847,10 +854,12 @@ namespace
 				{load("station", 10.0, "moderate", core::StationCoolingDisposition::Exported, 0.0, 0, 1.0)}).first,
 				"Eclipse scenario refused");
 			eclipse.resumeSimulation();
-			require(smoke::station::advanceSeconds(eclipse, 59.9833333333), "Sunlit leg failed");
+			require(advanceToLastStepBefore(eclipse, 60.0), "Sunlit leg failed");
 			require(eclipse.getStationSystemsSnapshot().power.loads[0].status == core::StationTransferStatus::Full,
 				"Load not fully supplied during sunlight");
-			require(smoke::station::advanceSeconds(eclipse, 0.0166666666667), "Eclipse entry tick failed");
+			// Observe a complete dark interval, not the step that contains
+			// both sunlit work and the exact eclipse boundary.
+			require(advanceStationSteps(eclipse, 2), "Eclipse entry steps failed");
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(approx(snap.power.availableGenerationKW, 0.0)
@@ -862,10 +871,10 @@ namespace
 				require(sawEvent(eclipse, "Solar array 'orbital' entered eclipse"),
 					"Eclipse transition missing from the event log");
 			}
-			require(smoke::station::advanceSeconds(eclipse, 59.9833333333), "Eclipse leg failed");
+			require(advanceToLastStepBefore(eclipse, 120.0), "Eclipse leg failed");
 			require(eclipse.getStationSystemsSnapshot().power.loads[0].status == core::StationTransferStatus::Rejected,
 				"Load recovered during eclipse");
-			require(smoke::station::advanceSeconds(eclipse, 0.0166666666667), "Sunrise tick failed");
+			require(advanceStationSteps(eclipse, 2), "Sunrise steps failed");
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(snap.power.loads[0].status == core::StationTransferStatus::Full
@@ -876,9 +885,10 @@ namespace
 				eclipse.pauseSimulation();
 				auto const expected = eclipse.getStationSystemsSnapshot();
 				auto const expectedEvents = eclipse.getStationSystemsEvents();
+				auto const replaySeconds = eclipse.getSimulationTick() * static_cast<double>(core::World::getFixedTimestep());
 				eclipse.resetSimulation();
 				eclipse.resumeSimulation();
-				require(smoke::station::advanceSeconds(eclipse, 120.0), "Eclipse replay failed");
+				require(advanceSeconds(eclipse, replaySeconds), "Eclipse replay failed");
 				require(eclipse.getStationSystemsSnapshot() == expected
 					&& eclipse.getStationSystemsEvents() == expectedEvents,
 					"Eclipse transition sequence not reproducible after reset");
@@ -1088,19 +1098,20 @@ namespace
 		require(smoke::station::advanceSeconds(exchanged, 0.166666666667), "Material exchange run failed");
 		{
 			auto const snap = exchanged.getStationSystemsSnapshot();
-			// One sixth of a second at 6 kg/s drawn and 3 kg/s delivered.
-			require(approx(snap.stores[0].currentQualified, 49.0)
-				&& approx(snap.stores[1].currentQualified, 0.5),
+			// Compare at committed Station time, which may be ahead of
+			// the requested World time by less than one complete step.
+			require(approx(snap.stores[0].currentQualified, 50.0 - 6 * snap.elapsedSeconds)
+				&& approx(snap.stores[1].currentQualified, 3 * snap.elapsedSeconds),
 				"Material exchange amounts wrong");
 			require(snap.power.loads[0].materialExchanges.size() == 2
-				&& approx(snap.power.loads[0].materialExchanges[0].requested, 0.1)
-				&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.1)
-				&& approx(snap.power.loads[0].materialExchanges[1].completed, 0.05),
+				&& approx(snap.power.loads[0].materialExchanges[0].requested, 6 * snap.systemsTimestepSeconds)
+				&& approx(snap.power.loads[0].materialExchanges[0].completed, 6 * snap.systemsTimestepSeconds)
+				&& approx(snap.power.loads[0].materialExchanges[1].completed, 3 * snap.systemsTimestepSeconds),
 				"Exchange flows not published per store");
 			// The kg ledger closes over the external boundary exchange:
-			// 1 kg drawn leaves, 0.5 kg delivered enters.
+			// 6 kg/s leaves, 3 kg/s enters; the closing residual is unchanged.
 			require(std::abs(snap.balances[0].residual) < 1e-9
-				&& approx(snap.balances[0].lost, 0.5),
+				&& approx(snap.balances[0].lost, 3 * snap.elapsedSeconds),
 				"External material exchange broke the boundary ledger");
 			require(approx(snap.power.loads[0].heatExportedKW, 2.0)
 				&& approx(snap.power.exportedHeatKW, 2.0),
@@ -1125,8 +1136,8 @@ namespace
 		{
 			auto const snap = exchanged.getStationSystemsSnapshot();
 			require(approx(snap.power.loads[0].deliveredFraction, 0.5)
-				&& approx(snap.stores[0].currentQualified, 49.5)
-				&& approx(snap.stores[1].currentQualified, 0.25),
+				&& approx(snap.stores[0].currentQualified, 50.0 - 3.0 * snap.elapsedSeconds)
+				&& approx(snap.stores[1].currentQualified, 1.5 * snap.elapsedSeconds),
 				"Exchanges did not scale with the delivered power fraction");
 			require(std::abs(snap.balances[0].residual) < 1e-9,
 				"Scaled exchanges broke the boundary ledger");
@@ -1163,10 +1174,11 @@ namespace
 			require(approx(snap.power.loads[0].heatExportedKW, 2.0)
 				&& approx(snap.power.exportedHeatKW, 2.0),
 				"Exported heat did not scale with the operating-profile level");
-			// One tick (1/60 s) at the 4 kg/s full-operation rate, duty 0.25.
-			require(approx(snap.power.loads[0].materialExchanges[0].requested, 4.0 / 240.0)
-				&& approx(snap.power.loads[0].materialExchanges[0].completed, 4.0 / 240.0)
-				&& approx(snap.stores[0].currentQualified, 50.0 - 4.0 / 240.0),
+			// One Station step at 4 kg/s, duty 0.25.
+			auto const dose = 4.0 * 0.25 * snap.systemsTimestepSeconds;
+			require(approx(snap.power.loads[0].materialExchanges[0].requested, dose)
+				&& approx(snap.power.loads[0].materialExchanges[0].completed, dose)
+				&& approx(snap.stores[0].currentQualified, 50.0 - dose),
 				"Material consumption did not scale with the operating-profile level");
 			require(std::abs(snap.balances[0].residual) < 1e-9,
 				"Duty-cycle exchanges broke the boundary ledger");
@@ -1203,20 +1215,21 @@ namespace
 			require(smoke::station::advanceSeconds(mixed, 0.0166666666667), "Mixed duty/curtailment run failed");
 			auto const snap = mixed.getStationSystemsSnapshot();
 			require(snap.power.loads.size() == 3, "Mixed scenario loads missing");
-			// Duty load: full supply at level 0.25 -> heat 8*0.25*1.0 = 2.0,
-			// consumption 6 kg/s * (1/60) s * 0.25 * 1.0 = 0.025 kg.
+			// Physical doses use the committed Station interval.
+			auto const dutyDose = 6.0 * 0.25 * snap.systemsTimestepSeconds;
+			auto const curtailedNeed = 3.0 * 0.5 * snap.systemsTimestepSeconds;
 			require(snap.power.loads[0].id == "duty"
 				&& approx(snap.power.loads[0].requestedKW, 2.5)
 				&& approx(snap.power.loads[0].deliveredFraction, 1.0)
 				&& approx(snap.power.loads[0].heatExportedKW, 2.0)
-				&& approx(snap.power.loads[0].materialExchanges[0].requested, 0.025)
-				&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.025),
+				&& approx(snap.power.loads[0].materialExchanges[0].requested, dutyDose)
+				&& approx(snap.power.loads[0].materialExchanges[0].completed, dutyDose),
 				"Duty load heat/exchanges did not scale with profile and delivery");
 			// Curtailed under a fractional profile: level 0.5, delivered 0.5
 			// -> heat 8*0.5*0.5 = 2.0. The exchange's requested amount is
-			// the full-operation profile need 3*(1/60)*0.5 = 0.025 kg and
-			// what completed is that need at the delivered fraction,
-			// 0.0125 kg; the remainder stands as explicit unmet material
+			// the full-operation profile need 3*stepSeconds*0.5 kg and
+			// what completed is half that need at the delivered fraction;
+			// the remainder stands as explicit unmet material
 			// (#554).
 			require(snap.power.loads[1].id == "curtailed"
 				&& approx(snap.power.loads[1].profileLevel, 0.5)
@@ -1225,9 +1238,9 @@ namespace
 				&& approx(snap.power.loads[1].deliveredFraction, 0.5)
 				&& snap.power.loads[1].status == core::StationTransferStatus::Partial
 				&& approx(snap.power.loads[1].heatExportedKW, 2.0)
-				&& approx(snap.power.loads[1].materialExchanges[0].requested, 0.025)
-				&& approx(snap.power.loads[1].materialExchanges[0].completed, 0.0125)
-				&& approx(snap.power.loads[1].materialExchanges[0].unmet, 0.0125),
+				&& approx(snap.power.loads[1].materialExchanges[0].requested, curtailedNeed)
+				&& approx(snap.power.loads[1].materialExchanges[0].completed, 0.5 * curtailedNeed)
+				&& approx(snap.power.loads[1].materialExchanges[0].unmet, 0.5 * curtailedNeed),
 				"Curtailed fractional-profile heat/exchanges did not scale by level and delivery");
 			// Zero profile: nothing requested, nothing supplied, no heat,
 			// no material movement.
@@ -1240,7 +1253,7 @@ namespace
 				&& approx(snap.power.loads[2].materialExchanges[0].completed, 0.0),
 				"Zero-profile load still produced heat or material exchange");
 			require(approx(snap.power.exportedHeatKW, 4.0)
-				&& approx(snap.stores[0].currentQualified, 50.0 - 0.025 - 0.0125)
+				&& approx(snap.stores[0].currentQualified, 50.0 - dutyDose - 0.5 * curtailedNeed)
 				&& std::abs(snap.balances[0].residual) < 1e-9,
 				"Mixed duty/curtailment totals or boundary ledger wrong");
 		}
@@ -1249,10 +1262,12 @@ namespace
 		// refused rather than running on material it cannot deliver.
 		// The protected reserve is never drawn, and the shortfall stays
 		// explicit as unmet material on the exchange flows.
+		auto const operationStepSeconds = smoke::station::requestedStepSeconds();
 		core::World bounded("Bounded", 2, 2);
 		bounded.pauseSimulation(); bounded.finishBuild();
 		require(configure(bounded,
-			{{"water", "kg", 100.0, 11.0, 0.0, 10.0}, {"brine", "kg", 0.4, 0.0, 0.0}},
+			{{"water", "kg", 100.0, 10.0 + 12.0 * operationStepSeconds, 0.0, 10.0},
+			 {"brine", "kg", 3.0 * operationStepSeconds, 0.0, 0.0}},
 			{array("field", 10.0, constantProfile(1.0))},
 			[&]
 			{
@@ -1264,22 +1279,21 @@ namespace
 				return std::vector<core::EquipmentLoadSettings>{reactor};
 			}()).first, "Bounded exchange scenario refused");
 		bounded.resumeSimulation();
-		// Seven ticks at ~0.05 kg/s leave headroom in the 0.4 kg brine
-		// store while the feed above the reserve is ample: the load runs
-		// full the whole time.
-		require(smoke::station::advanceSeconds(bounded, 0.116666666667), "Bounded exchange run failed");
+		// Step-relative headroom admits exactly one full operation;
+		// another feed dose remains above the reserve for the refusal check.
+		require(smoke::station::advanceStationSteps(bounded, 1), "Bounded exchange run failed");
 		{
 			auto const snap = bounded.getStationSystemsSnapshot();
 			require(snap.power.loads[0].status == core::StationTransferStatus::Full
 				&& approx(snap.power.loads[0].materialFeasibleFraction, 1.0)
-				&& approx(snap.stores[0].currentQualified, 11.0 - 7 * 0.1)
-				&& approx(snap.stores[1].currentQualified, 7 * 0.05),
+				&& approx(snap.stores[0].currentQualified, 10.0 + 6.0 * operationStepSeconds)
+				&& approx(snap.stores[1].currentQualified, 3.0 * operationStepSeconds),
 				"Load did not run full while destination headroom lasted");
 		}
 		// Once the destination is full the load is refused whole: it draws
 		// no feed, exports no heat, and the whole declared need stands as
 		// unmet material.
-		require(smoke::station::advanceSeconds(bounded, 0.883333333333), "Bounded backpressure run failed");
+		require(smoke::station::advanceStationSteps(bounded, 1), "Bounded backpressure run failed");
 		{
 			auto const snap = bounded.getStationSystemsSnapshot();
 			require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
@@ -1288,18 +1302,18 @@ namespace
 				&& approx(snap.power.loads[0].heatExportedKW, 0.0)
 				&& approx(snap.power.loads[0].unmetKW, 10.0),
 				"Full destination did not constrain the load's operation");
-			require(approx(snap.power.loads[0].materialExchanges[0].requested, 0.1)
+			require(approx(snap.power.loads[0].materialExchanges[0].requested, 6.0 * operationStepSeconds)
 				&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.0)
-				&& approx(snap.power.loads[0].materialExchanges[0].unmet, 0.1)
-				&& approx(snap.power.loads[0].materialExchanges[1].requested, 0.05)
+				&& approx(snap.power.loads[0].materialExchanges[0].unmet, 6.0 * operationStepSeconds)
+				&& approx(snap.power.loads[0].materialExchanges[1].requested, 3.0 * operationStepSeconds)
 				&& approx(snap.power.loads[0].materialExchanges[1].completed, 0.0)
-				&& approx(snap.power.loads[0].materialExchanges[1].unmet, 0.05),
+				&& approx(snap.power.loads[0].materialExchanges[1].unmet, 3.0 * operationStepSeconds),
 				"Backpressured exchange shortfall not explicit as unmet material");
 			// The protected reserve is untouched and nothing overflowed.
-			require(approx(snap.stores[0].currentQualified, 10.2)
+			require(approx(snap.stores[0].currentQualified, 10.0 + 6.0 * operationStepSeconds)
 				&& snap.stores[0].currentQualified >= 10.0 - 1e-9
-				&& approx(snap.stores[1].currentQualified, 0.4)
-				&& snap.stores[1].currentQualified <= 0.4 + 1e-9,
+				&& approx(snap.stores[1].currentQualified, 3.0 * operationStepSeconds)
+				&& snap.stores[1].currentQualified <= 3.0 * operationStepSeconds + 1e-9,
 				"Backpressured run drew the reserve or overflowed the destination");
 			require(sawEvent(bounded, "Load 'reactor' rejected: destination store 'brine' is full"),
 				"Destination-full refusal reason missing from the event log");
@@ -1335,12 +1349,12 @@ namespace
 			require(approx(snap.stores[0].currentQualified, 0.0)
 				&& approx(snap.stores[1].currentQualified, 0.0),
 				"Empty feed produced phantom output");
-			require(approx(snap.power.loads[0].materialExchanges[0].requested, 1.0 / 60.0)
+			require(approx(snap.power.loads[0].materialExchanges[0].requested, snap.systemsTimestepSeconds)
 				&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.0)
-				&& approx(snap.power.loads[0].materialExchanges[0].unmet, 1.0 / 60.0)
-				&& approx(snap.power.loads[0].materialExchanges[1].requested, 1.0 / 60.0)
+				&& approx(snap.power.loads[0].materialExchanges[0].unmet, snap.systemsTimestepSeconds)
+				&& approx(snap.power.loads[0].materialExchanges[1].requested, snap.systemsTimestepSeconds)
 				&& approx(snap.power.loads[0].materialExchanges[1].completed, 0.0)
-				&& approx(snap.power.loads[0].materialExchanges[1].unmet, 1.0 / 60.0),
+				&& approx(snap.power.loads[0].materialExchanges[1].unmet, snap.systemsTimestepSeconds),
 				"Starved need not explicit as unmet material");
 			require(sawEvent(starved, "Load 'rig' rejected: feed store 'feed' is empty"),
 				"Empty-feed refusal reason missing from the event log");
@@ -1386,7 +1400,8 @@ namespace
 		// Partial feed caps the operating fraction: the load runs at the
 		// fraction of its full-operation need the feed can sustain, and
 		// power, heat, inputs, outputs and unmet all agree at that
-		// fraction. When the feed runs out the load stops the next tick.
+		// fraction. When the feed runs out the load stops the next step.
+		auto const partialFeed = 0.6 * operationStepSeconds;
 		core::World partial("Partial", 2, 2);
 		partial.pauseSimulation(); partial.finishBuild();
 		{
@@ -1395,10 +1410,9 @@ namespace
 			rig.heatOutputKW = 4.0;
 			rig.materialExchanges.push_back({"feed", 1.0, true});
 			rig.materialExchanges.push_back({"product", 1.0, false});
-			// 0.01 kg of feed against a 1 kg/s full-operation need of
-			// 1/60 kg per tick: the feed sustains 0.6 of full operation.
+			// A step-relative feed dose sustains 0.6 of full operation.
 			require(configure(partial,
-				{{"feed", "kg", 10.0, 0.01, 0.0}, {"product", "kg", 10.0, 0.0, 0.0}},
+				{{"feed", "kg", 10.0, partialFeed, 0.0}, {"product", "kg", 10.0, 0.0, 0.0}},
 				{array("field", 10.0, constantProfile(1.0))}, {rig}).first,
 				"Partial feed scenario refused");
 			partial.resumeSimulation();
@@ -1413,21 +1427,21 @@ namespace
 				"Partial feed did not cap the operating fraction consistently");
 			// Actual input, output and unmet all agree at the capped fraction.
 			require(approx(snap.stores[0].currentQualified, 0.0)
-				&& approx(snap.stores[1].currentQualified, 0.01)
-				&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.01)
-				&& approx(snap.power.loads[0].materialExchanges[0].unmet, 1.0 / 60.0 - 0.01)
-				&& approx(snap.power.loads[0].materialExchanges[1].completed, 0.01)
-				&& approx(snap.power.loads[0].materialExchanges[1].unmet, 1.0 / 60.0 - 0.01),
+				&& approx(snap.stores[1].currentQualified, partialFeed)
+				&& approx(snap.power.loads[0].materialExchanges[0].completed, partialFeed)
+				&& approx(snap.power.loads[0].materialExchanges[0].unmet, operationStepSeconds - partialFeed)
+				&& approx(snap.power.loads[0].materialExchanges[1].completed, partialFeed)
+				&& approx(snap.power.loads[0].materialExchanges[1].unmet, operationStepSeconds - partialFeed),
 				"Capped feed/input/output/unmet amounts disagree");
 			require(std::abs(snap.balances[0].residual) < 1e-9,
 				"Partial feed run broke the boundary ledger");
 			// The feed is gone: the load stops rather than running un-fed.
-			require(smoke::station::advanceSeconds(partial, 0.0166666666667), "Post-exhaustion tick failed");
+			require(smoke::station::advanceStationSteps(partial, 1), "Post-exhaustion step failed");
 			auto const next = partial.getStationSystemsSnapshot();
 			require(next.power.loads[0].status == core::StationTransferStatus::Rejected
 				&& approx(next.power.loads[0].suppliedKW, 0.0)
 				&& approx(next.power.loads[0].heatExportedKW, 0.0)
-				&& approx(next.stores[1].currentQualified, 0.01),
+				&& approx(next.stores[1].currentQualified, partialFeed),
 				"Load kept operating after its feed was exhausted");
 		}
 		// Competing loads sharing one feed: the higher-priority load's
@@ -1443,10 +1457,10 @@ namespace
 			auto second = load("second", 10.0, "low",
 				core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
 			second.materialExchanges.push_back({"feed", 1.0, true});
-			// 0.01 kg shared feed: sustains 0.6 of one load's full
+			// The shared dose sustains 0.6 of one load's full
 			// operation, nothing left for the other.
 			require(configure(sharing,
-				{{"feed", "kg", 10.0, 0.01, 0.0}},
+				{{"feed", "kg", 10.0, partialFeed, 0.0}},
 				{array("field", 20.0, constantProfile(1.0))}, {first, second}).first,
 				"Shared-feed scenario refused");
 			sharing.resumeSimulation();
@@ -1575,9 +1589,9 @@ namespace
 				require(approx(snap.power.loads[0].heatExportedKW, 0.0)
 					&& approx(snap.power.exportedHeatKW, 0.0),
 					"Infeasible load emitted operating heat");
-				require(approx(snap.power.loads[0].materialExchanges[0].requested, 0.1)
+				require(approx(snap.power.loads[0].materialExchanges[0].requested, 6.0 * snap.systemsTimestepSeconds)
 					&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.0)
-					&& approx(snap.power.loads[0].materialExchanges[0].unmet, 0.1)
+					&& approx(snap.power.loads[0].materialExchanges[0].unmet, 6.0 * snap.systemsTimestepSeconds)
 					&& approx(snap.stores[0].currentQualified, 50.0),
 					"Infeasible load moved material it never ran to move");
 				require(approx(snap.power.loads[1].suppliedKW, 2.0)
@@ -1772,10 +1786,10 @@ namespace
 				"local duty, curtailed, off = self.loads[1], self.loads[2], self.loads[3]\n"
 				"assert(math.abs(duty.lastLevel - 0.25) < 1e-12 and math.abs(duty.deliveredFraction - 1.0) < 1e-12)\n"
 				"assert(math.abs(duty.heatExported - 2.0) < 1e-6, 'sandbox heat did not scale with the operating profile')\n"
-				"assert(math.abs(duty.exchanges[1].lastCompleted - 6 * (1/60) * 0.25) < 1e-6, 'sandbox consumption did not scale with the operating profile')\n"
+				"assert(math.abs(duty.exchanges[1].lastCompleted - 6 * seconds * 0.25) < 1e-6, 'sandbox consumption did not scale with the operating profile')\n"
 				"assert(math.abs(curtailed.deliveredFraction - 0.5) < 1e-6)\n"
 				"assert(math.abs(curtailed.heatExported - 2.0) < 1e-6, 'sandbox heat did not scale with curtailment under a fractional profile')\n"
-				"assert(math.abs(curtailed.exchanges[1].lastCompleted - 3 * (1/60) * 0.5 * 0.5) < 1e-6, 'sandbox curtailed exchange did not scale by level and delivery')\n"
+				"assert(math.abs(curtailed.exchanges[1].lastCompleted - 3 * seconds * 0.5 * 0.5) < 1e-6, 'sandbox curtailed exchange did not scale by level and delivery')\n"
 				"assert(math.abs(off.heatExported) < 1e-12 and math.abs(off.exchanges[1].lastCompleted) < 1e-12, 'zero-profile load produced heat or exchange')\n"
 				"return result\n"
 				"end\n"
@@ -1813,8 +1827,8 @@ namespace
 			require(approx(snap.power.loads[0].heatExportedKW, 2.0)
 				&& approx(snap.power.loads[1].heatExportedKW, 2.0)
 				&& approx(snap.power.loads[2].heatExportedKW, 0.0)
-				&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.025)
-				&& approx(snap.power.loads[1].materialExchanges[0].completed, 0.0125)
+				&& approx(snap.power.loads[0].materialExchanges[0].completed, 6.0 * 0.25 * snap.systemsTimestepSeconds)
+				&& approx(snap.power.loads[1].materialExchanges[0].completed, 3.0 * 0.5 * 0.5 * snap.systemsTimestepSeconds)
 				&& approx(snap.power.loads[2].materialExchanges[0].completed, 0.0),
 				"Host and sandbox profile scaling disagree for the same scenario");
 		}
@@ -1834,9 +1848,9 @@ namespace
 				"assert(math.abs(rig.deliveredFraction) < 1e-12, 'sandbox delivered fraction not zero on empty feed')\n"
 				"assert(math.abs(rig.heatExported) < 1e-12, 'sandbox exported heat without feed')\n"
 				"assert(math.abs(rig.exchanges[1].lastCompleted) < 1e-12, 'sandbox drew on an empty feed')\n"
-				"assert(math.abs(rig.exchanges[1].lastUnmet - (1/60)) < 1e-9, 'sandbox unmet feed wrong')\n"
+				"assert(math.abs(rig.exchanges[1].lastUnmet - seconds) < 1e-9, 'sandbox unmet feed wrong')\n"
 				"assert(math.abs(rig.exchanges[2].lastCompleted) < 1e-12, 'sandbox produced output on an empty feed')\n"
-				"assert(math.abs(rig.exchanges[2].lastUnmet - (1/60)) < 1e-9, 'sandbox unmet output wrong')\n"
+				"assert(math.abs(rig.exchanges[2].lastUnmet - seconds) < 1e-9, 'sandbox unmet output wrong')\n"
 				"return result\n"
 				"end\n"
 				"return model\n"

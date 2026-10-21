@@ -2130,6 +2130,9 @@ namespace core
 				throw SerializationException(
 					"Station trend retention must be finite, from 1 to 86400 seconds");
 		}
+		// Missing timing fields belong to legacy 60 Hz documents, not the
+		// default cadence for newly authored settings.
+		stationSettings.systemsStepWorldTicks = 1;
 		if (serializer.hasField("systemsStepWorldTicks"))
 		{
 			if (version < 104)

@@ -1,4 +1,5 @@
 #include "core/StationObservableInvariance.h"
+#include "core/StationSystems.h"
 
 #include <array>
 
@@ -6,51 +7,73 @@ namespace core
 {
 	std::span<StationObservableInvariance const> stationObservableInvariances()
 	{
-		// Keep this list alongside StationSystemsSnapshot. A newly published
-		// snapshot field must be classified here before it can claim a timestep
-		// guarantee in a released build.
-		static constexpr std::array<StationObservableInvariance, 40> entries{{
-			{"enabled", StationObservableInvarianceClass::Exact, 0, 0, 0, 0, 600, "authored setting", "station/invariance"},
-			{"healthy", StationObservableInvarianceClass::Exact, 0, 0, 0, 0, 600, "transactional step commit", "station/invariance"},
-			{"worldTick", StationObservableInvarianceClass::Tolerance, 0, 0, 1, 0, 600, "counts Station steps rather than elapsed state", "station/invariance"},
-			{"elapsedSeconds", StationObservableInvarianceClass::Exact, 1e-12, 0, 0, 0, 600, "count-derived Station clock", "station/invariance"},
-			{"completedTicks", StationObservableInvarianceClass::Tolerance, 0, 0, 1, 0, 600, "per-step lifecycle counters", "station/invariance"},
-			{"stores", StationObservableInvarianceClass::Exact, 1e-10, 0, 0, 0, 600, "event splitting and crossing-time resolution", "station/invariance"},
-			{"transfers", StationObservableInvarianceClass::Exact, 1e-10, 0, 0, 0, 600, "rate integration and crossing-time resolution", "station/invariance"},
-			{"connections", StationObservableInvarianceClass::Exact, 1e-10, 0, 0, 0, 600, "rate integration and conservation ledger", "station/invariance"},
-			{"conversions", StationObservableInvarianceClass::Tolerance, 1e-8, 1e-8, 1, 0, 600, "coupled allocator", "station/invariance"},
-			{"balances", StationObservableInvarianceClass::Exact, 1e-10, 0, 0, 0, 600, "conservation ledger", "station/invariance"},
-			{"constituentBalances", StationObservableInvarianceClass::Exact, 1e-10, 0, 0, 0, 600, "conservation ledger", "station/invariance"},
-			{"deliveries", StationObservableInvarianceClass::Exact, 1e-10, 0, 0, 0, 600, "exact scheduled-event split", "station/invariance"},
-			{"wasteEjections", StationObservableInvarianceClass::Exact, 1e-10, 0, 0, 0, 600, "exact scheduled-event split", "station/invariance"},
-			{"outages", StationObservableInvarianceClass::Exact, 1e-10, 0, 0, 0, 600, "exact scheduled-event split", "station/invariance"},
-			{"maintenanceJobs", StationObservableInvarianceClass::Exact, 1e-10, 0, 0, 0, 600, "exact scheduled-event split", "station/invariance"},
-			{"power", StationObservableInvarianceClass::Tolerance, 1e-8, 1e-8, 1, 0, 600, "coupled electrical allocation", "station/invariance"},
-			{"thermal", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "explicit thermal integration", "station/invariance"},
-			{"coolantLoops", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "explicit thermal integration", "station/invariance"},
-			{"chillers", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "coupled thermal allocation", "station/invariance"},
-			{"thermalBuffers", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "coupled thermal allocation", "station/invariance"},
-			{"atmospheres", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "coupled atmosphere integration", "station/invariance"},
-			{"airlockCycles", StationObservableInvarianceClass::Exact, 1e-10, 0, 0, 0, 600, "exact scheduled-event split", "station/invariance"},
-			{"crews", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "coupled atmosphere allocation", "station/invariance"},
-			{"waterCollectors", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "coupled water integration", "station/invariance"},
-			{"waterTreatments", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "coupled water allocation", "station/invariance"},
-			{"electrolyzers", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "coupled atmosphere allocation", "station/invariance"},
-			{"co2Captures", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "coupled atmosphere allocation", "station/invariance"},
-			{"sabatierReactors", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "coupled process allocation", "station/invariance"},
-			{"methaneProcessors", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "coupled process allocation", "station/invariance"},
-			{"microbialProcessors", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "coupled process allocation", "station/invariance"},
-			{"cropPopulations", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "biological integration", "station/invariance"},
-			{"algaeCultures", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "biological integration", "station/invariance"},
-			{"fuelCells", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "coupled process allocation", "station/invariance"},
-			{"hasNextDelivery", StationObservableInvarianceClass::Exact, 0, 0, 0, 0, 600, "schedule ordering", "station/invariance"},
-			{"nextDeliverySeconds", StationObservableInvarianceClass::Exact, 1e-12, 0, 0, 0, 600, "schedule ordering", "station/invariance"},
-			{"hasNextWasteEjection", StationObservableInvarianceClass::Exact, 0, 0, 0, 0, 600, "schedule ordering", "station/invariance"},
-			{"nextWasteEjectionSeconds", StationObservableInvarianceClass::Exact, 1e-12, 0, 0, 0, 600, "schedule ordering", "station/invariance"},
-			{"endurance", StationObservableInvarianceClass::Tolerance, 1e-7, 1e-7, 1, 0, 600, "observation-window calculation", "station/invariance"},
-			{"forecast", StationObservableInvarianceClass::Exact, 1e-10, 0, 0, 0, 600, "declared-profile calculation", "station/invariance"},
-			{"balanceTolerance", StationObservableInvarianceClass::Exact, 0, 0, 0, 0, 600, "published constant", "station/invariance"},
-		}};
+		// An aggregate mixes physical state, last-step doses, rates and step
+		// stamps. Comparing a few inventories cannot certify the entire object.
+		static constexpr auto entries = []
+		{
+			constexpr std::array<std::string_view, 42> names{
+				"enabled", "healthy", "systemsStepWorldTicks", "systemsTimestepSeconds",
+				"worldTick", "elapsedSeconds", "completedTicks", "stores", "transfers",
+				"connections", "conversions", "balances", "constituentBalances", "deliveries",
+				"wasteEjections", "outages", "maintenanceJobs", "power", "thermal", "coolantLoops",
+				"chillers", "thermalBuffers", "atmospheres", "airlockCycles", "crews",
+				"waterCollectors", "waterTreatments", "electrolyzers", "co2Captures",
+				"sabatierReactors", "methaneProcessors", "microbialProcessors", "cropPopulations",
+				"algaeCultures", "fuelCells", "hasNextDelivery", "nextDeliverySeconds",
+				"hasNextWasteEjection", "nextWasteEjectionSeconds", "endurance", "forecast", "balanceTolerance"};
+			std::array<StationObservableInvariance, 51> result{};
+			for (size_t i = 0; i < names.size(); ++i)
+			{
+				auto& entry = result[i];
+				entry.name = names[i];
+				entry.classification = StationObservableInvarianceClass::Unverified;
+				entry.basis = "mixed aggregate or physical observable without complete cross-step evidence";
+				if (entry.name == "worldTick" || entry.name == "completedTicks"
+					|| entry.name == "systemsStepWorldTicks" || entry.name == "systemsTimestepSeconds"
+					|| entry.name == "elapsedSeconds")
+				{
+					entry.classification = StationObservableInvarianceClass::StepDependent;
+					entry.basis = "effective Station clock; compare physical states at matching elapsed instants, not equal counts or arbitrary targets";
+					entry.verifiedBy = "station/clock";
+					entry.verifiedThroughRatio = CORE_MAX_SYSTEMS_STEP_WORLD_TICKS;
+				}
+				if (entry.name == "enabled" || entry.name == "balanceTolerance")
+				{
+					entry.classification = StationObservableInvarianceClass::Exact;
+					entry.certifiedRatio = CORE_MAX_SYSTEMS_STEP_WORLD_TICKS;
+					entry.verifiedThroughRatio = CORE_MAX_SYSTEMS_STEP_WORLD_TICKS;
+					entry.basis = "authored setting or published constant";
+					entry.verifiedBy = "station/invarianceRepresentative";
+				}
+			}
+			constexpr std::array<std::string_view, 7> verified{
+				"stores[].currentQualified", "stores[].currentUnqualified", "connections[].inputTotal",
+				"connections[].deliveredTotal", "connections[].lostTotal", "deliveries[].acceptedTotal", "balances[].residual"};
+			for (size_t i = 0; i < verified.size(); ++i)
+			{
+				auto& entry = result[names.size() + i];
+				entry.name = verified[i];
+				entry.classification = StationObservableInvarianceClass::Exact;
+				entry.absoluteTolerance = 1e-12;
+				entry.relativeTolerance = 1e-12;
+				entry.verifiedThroughRatio = CORE_MAX_SYSTEMS_STEP_WORLD_TICKS;
+				entry.basis = "constant-rate transfer with delivery and finite-store saturation at sampled ratios 1,6,7,30,60; fixture-scoped, not a guarantee for arbitrary coupled configurations";
+				entry.verifiedBy = "station/invarianceRepresentative";
+			}
+			constexpr std::array<std::string_view, 2> generatorFields{
+				"power.generators[].electricalKJ", "power.generators[].startupReceivedKJ"};
+			for (size_t i = 0; i < generatorFields.size(); ++i)
+			{
+				auto& entry = result[names.size() + verified.size() + i];
+				entry.name = generatorFields[i];
+				entry.classification = StationObservableInvarianceClass::Exact;
+				entry.absoluteTolerance = 1e-8;
+				entry.verifiedThroughRatio = CORE_MAX_SYSTEMS_STEP_WORLD_TICKS;
+				entry.basis = "fixture-scoped manual affine ramps at sampled ratios 1,6,7,30,60 with ample fuel, qualified sinks and lossless connections; constant/delayed solar or generator-funded crank, not arbitrary coupled configurations";
+				entry.verifiedBy = "station/invarianceGeneratorTiming;station/invarianceGeneratorFunding";
+			}
+			return result;
+		}();
 		return entries;
 	}
 }

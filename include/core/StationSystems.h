@@ -1739,7 +1739,7 @@ namespace core
 		bool operator==(StationConnectionProperties const&) const = default;
 	};
 
-	inline constexpr uint32_t CORE_MAX_SYSTEMS_STEP_WORLD_TICKS = 600;
+	inline constexpr uint32_t CORE_MAX_SYSTEMS_STEP_WORLD_TICKS = 60;
 	struct StationSystemsSettings
 	{
 		bool enabled{false};
@@ -1793,7 +1793,8 @@ namespace core
 		float trendRetentionSeconds{3600.0f};
 		// Sparse overrides: every connection has independent default properties.
 		std::map<StationConnectionKey, StationConnectionProperties> connections;
-		uint32_t systemsStepWorldTicks{1};
+		// Default Station cadence: 10 Hz against the World's 60 Hz clock.
+		uint32_t systemsStepWorldTicks{6};
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// The installations registered with the shared availability contract
@@ -2580,7 +2581,8 @@ namespace core
 		double shutdownSeconds{0.0};
 		double maxSinkTemperatureC{0.0};
 		StationGeneratorPhase phase{StationGeneratorPhase::Stopped};
-		double outputKW{0.0};              // electrical output delivered this tick
+		double outputKW{0.0};              // instantaneous endpoint output (ramp state)
+		double averageOutputKW{0.0};       // mean electrical power actually generated over the Station step
 		double fuelDrawKWh{0.0};           // fuel energy drawn this tick
 		double wasteHeatKW{0.0};           // waste heat routed this tick
 		double startupDrawKW{0.0};         // cranking power actually taken this tick
@@ -2691,7 +2693,7 @@ namespace core
 		// added to the same allocation pool as solar, the startup draws
 		// the cranking machines took ahead of load allocation, and the
 		// waste and decay heat those generators routed to their sinks.
-		double generatorOutputKW{0.0};
+		double generatorOutputKW{0.0}; // sum of step-mean generator output, not ramp endpoints
 		double generatorStartupDrawKW{0.0};
 		double waterTreatmentPowerKW{0.0}; // treatment work drawn this tick (#402)
 		double electrolyzerPowerKW{0.0};   // electrolysis work drawn this tick (#404)
@@ -4047,6 +4049,9 @@ namespace core
 	{
 		bool enabled{false};
 		bool healthy{true};
+		// Effective runtime clock, including an explicit test-runner override.
+		uint32_t systemsStepWorldTicks{1};
+		double systemsTimestepSeconds{0};
 		// Legacy tick-named fields count Station steps, not World ticks.
 		uint64_t worldTick{0};
 		double elapsedSeconds{0};

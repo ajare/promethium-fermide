@@ -650,10 +650,14 @@ namespace
 			world.resumeSimulation();
 			for (int tick = 0; tick < 300; ++tick)
 			{
-				auto const before = find(world.getStationSystemsSnapshot(), processorFeedId);
+				auto const previous = world.getStationSystemsSnapshot();
+				auto const before = find(previous, processorFeedId);
 				require(advanceOrDiagnose(world, 1, "coupled biological boundary"),
 					"coupled biological boundary failed");
 				auto const snap = world.getStationSystemsSnapshot();
+				// World drive calls can re-read the same committed Station
+				// dose. Account each physical integration interval only once.
+				if (snap.worldTick == previous.worldTick) continue;
 				auto const& p = snap.microbialProcessors[0];
 				if (before.currentQualified > 0.0)
 					for (auto const& [key, value] : before.actualConstituents)

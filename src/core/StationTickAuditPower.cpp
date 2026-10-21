@@ -139,8 +139,10 @@ namespace core
 				return connections.port("Conversion", conversion.authored.id,
 					"Output " + std::to_string(&flow - conversion.outputs.data() + 1)); };
 			auto const inputAvailable = [&](ConversionFlowState const& flow) {
-				return connections.available(inputPort(flow), std::max(0.0, qualified[flow.storeIndex]
-					- runtime.stores[flow.storeIndex].authored.protectedReserve) / seconds) * seconds; };
+				auto const drawable = std::max(0.0, qualified[flow.storeIndex]
+					- runtime.stores[flow.storeIndex].authored.protectedReserve);
+				return std::min(drawable, connections.remaining(inputPort(flow)) * seconds)
+					* connections.efficiency(inputPort(flow)); };
 			auto const outputCapacity = [&](ConversionFlowState const& flow) {
 				auto const room = std::max(0.0, runtime.stores[flow.storeIndex].authored.capacity
 					- qualified[flow.storeIndex] - unqualified[flow.storeIndex]);
@@ -150,6 +152,7 @@ namespace core
 					eta > 0.0 ? room / eta : std::numeric_limits<double>::max()); };
 			double demandScale = 1.0;
 			double scale = 1.0;
+			double bindingRate = 0.0, bindingAmount = 0.0;
 			std::string limiter;
 			for (auto const& flow : conversion.inputs)
 			{
@@ -163,6 +166,8 @@ namespace core
 				if (ratio < scale)
 				{
 					scale = ratio;
+					bindingRate = flow.ratePerSecond;
+					bindingAmount = drawable;
 					limiter = runtime.stores[flow.storeIndex].authored.protectedReserve > 0.0
 						? "input store '" + runtime.stores[flow.storeIndex].authored.id
 							+ "' is at its protected reserve"
@@ -178,6 +183,8 @@ namespace core
 				if (ratio < scale)
 				{
 					scale = ratio;
+					bindingRate = flow.ratePerSecond;
+					bindingAmount = headroom;
 					limiter = "output store '" + runtime.stores[flow.storeIndex].authored.id
 						+ "' headroom limits throughput";
 				}
@@ -226,24 +233,24 @@ namespace core
 					? "no input available to run" : limiter;
 				continue;
 			}
-			// #556: the binding limit is applied per flow with a min
-			// against that flow's own drawable/headroom, because
-			// requested * (limit / requested) can round one ulp above the
-			// limit under the fixed float timestep. Clamping each flow to
-			// the limit it set keeps the common completed scale within one
-			// ulp of exact, never drives a store negative or over capacity
-			// from roundoff, and the residual lands in the declared loss
-			// inside the documented accounting tolerance — no material is
-			// invented or deleted.
+			// #556: preserve the binding quantity, not its rounded round-trip
+			// through scale or a connection rate. Equal-rate pathways carry
+			// the same exact amount; all other pathways retain the common
+			// scale and are bounded by their own drawable/headroom.
+			auto const completedRequest = [&](ConversionFlowState const& flow) {
+				return bindingRate > 0.0 && flow.ratePerSecond == bindingRate
+					? bindingAmount : flow.ratePerSecond * seconds * scale;
+			};
 			ConstituentLedger netChange;
 			for (auto& flow : conversion.inputs)
 			{
 				auto const requested = flow.ratePerSecond * static_cast<double>(seconds);
 				auto const drawable = std::max(0.0, qualified[flow.storeIndex]
 					- runtime.stores[flow.storeIndex].authored.protectedReserve);
-				auto const transported = connections.receive(inputPort(flow), flow.ratePerSecond * scale, drawable / seconds);
-				auto const drawn = std::min(drawable, transported.input * seconds);
-				auto const completed = transported.delivered * seconds;
+				auto const transported = connections.receiveAmount(inputPort(flow),
+					std::min(completedRequest(flow), inputAvailable(flow)), drawable);
+				auto const drawn = std::min(drawable, transported.input);
+				auto const completed = transported.delivered;
 				// #601: the conversion spends the input store's actual
 				// blend, measured before the draw; the drift it
 				// consumes is carried into the declared-loss side of
@@ -269,9 +276,9 @@ namespace core
 				auto const requested = flow.ratePerSecond * static_cast<double>(seconds);
 				auto const headroom = runtime.stores[flow.storeIndex].authored.capacity
 					- (qualified[flow.storeIndex] + unqualified[flow.storeIndex]);
-				auto const transported = connections.send(outputPort(flow), std::min(flow.ratePerSecond * scale,
-					outputCapacity(flow) / seconds));
-				auto const completed = std::min(std::max(0.0, headroom), transported.delivered * seconds);
+				auto const transported = connections.sendAmount(outputPort(flow),
+					std::min(completedRequest(flow), outputCapacity(flow)));
+				auto const completed = std::min(std::max(0.0, headroom), transported.delivered);
 				qualified[flow.storeIndex] += completed;
 				stagedUnitLoss[runtime.stores[flow.storeIndex].authored.unit] -= completed;
 				flowIn[flow.storeIndex] += completed;
@@ -419,7 +426,7 @@ namespace core
 			for (auto const& capture : runtime.co2Captures)
 				totalSupplied += capture.lastPowerSuppliedKW;
 			for (auto const& array : runtime.solarArrays) totalGeneration += array.lastAvailableKW;
-			for (auto const& generator : runtime.generators) totalGeneration += generator.outputKW;
+			for (auto const& generator : runtime.generators) totalGeneration += generator.lastAverageOutputKW;
 			// Fuel-cell backup output is generation inside the single pool
 			// (#406): earned with reactants, never a second budget.
 			for (auto const& cell : runtime.fuelCells) totalGeneration += cell.lastOutputKW;
@@ -735,7 +742,8 @@ namespace core
 		for (auto const& generator : runtime.generators)
 		{
 			auto const where = "generator '" + generator.authored.id + "' ";
-			if (!requireFinite(generator.outputKW, where + "electrical output")) return false;
+			if (!requireFinite(generator.outputKW, where + "endpoint electrical output")
+				|| !requireFinite(generator.lastAverageOutputKW, where + "mean electrical output")) return false;
 			if (!requireFinite(generator.lastFuelDrawKWh, where + "fuel draw")) return false;
 			if (!requireFinite(generator.lastWasteHeatKW, where + "waste heat")) return false;
 			if (!requireFinite(generator.lastStartupDrawKW, where + "startup draw")) return false;
@@ -753,14 +761,16 @@ namespace core
 				return violation = where + "fuel ledger residual "
 					+ std::to_string(residual) + " exceeds tolerance "
 					+ std::to_string(StationBalanceTolerance), false;
-			if (generator.outputKW > generator.authored.ratedOutputKW + StationBalanceTolerance)
+			if (generator.outputKW > generator.authored.ratedOutputKW + StationBalanceTolerance
+				|| generator.lastAverageOutputKW > generator.authored.ratedOutputKW + StationBalanceTolerance
+				|| generator.lastAverageOutputKW < -StationBalanceTolerance)
 				return violation = where + "delivered above its installed capacity", false;
 			if (generator.phase == StationGeneratorPhase::Running && !generator.lastCoolingAvailable)
 				return violation = where + "ran while its cooling interface was unqualified", false;
 			if (generator.phase == StationGeneratorPhase::Running
 				&& generator.lastFuelDrawKWh <= 0.0 && generator.outputKW > 1e-12)
 				return violation = where + "delivered electrical output without burning fuel", false;
-			totalGeneratorOutputKW += generator.outputKW;
+			totalGeneratorOutputKW += generator.lastAverageOutputKW;
 			totalGeneratorStartupKW += generator.lastStartupDrawKW;
 			totalGeneratorWasteKW += generator.lastWasteHeatKW;
 			totalGeneratorDecayKW += generator.lastDecayHeatKW;

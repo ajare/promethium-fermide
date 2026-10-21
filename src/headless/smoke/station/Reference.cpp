@@ -179,7 +179,7 @@ namespace
 		auto const& snap = world.getStationSystemsSnapshot();
 		require(snap.healthy, "the reference nominal run was not healthy");
 		for (auto const ticks : snap.completedTicks)
-			require(ticks == total, "a station system fell behind in the reference nominal run");
+			require(ticks == smoke::station::expectedStationSteps(world), "a station system fell behind in the reference nominal run");
 
 		// The crew runs at full scale: the human source of the whole chain.
 		auto const& crew = firstOf(snap.crews);

@@ -25,9 +25,17 @@ void registerMixedObservationEditorChecks(std::vector<smoke::Check>& checks);
 #include <limits>
 #include <set>
 #include <tuple>
+#include <iomanip>
+#include <sstream>
 
 namespace
 {
+	std::string fixed3(double value)
+	{
+		std::ostringstream text;
+		text << std::fixed << std::setprecision(3) << value;
+		return text.str();
+	}
 	// Child windows carry the parent in their name ("View/Flow canvas"), and
 	// the inspector column added by #653 is a sibling of the canvas, so
 	// "deepest last child" no longer identifies it. Find the canvas by the
@@ -3816,7 +3824,7 @@ namespace
 				if (mode == 4) { settings.microbialProcessors[0].rateKgPerS = 0; apply(); ctx->Yield(2); }
 				if (mode == 5) { settings = smoke::station::microbialObservationFixture(); settings.stores[0].materialId.clear(); apply(); ctx->Yield(2); }
 				auto const observed = world->getStationSystemsSnapshot(); auto const revision = world->getStationSystemsObservationRevision();
-				auto const& p = observed.microbialProcessors[0]; auto const dt = core::World::getFixedTimestep();
+				auto const& p = observed.microbialProcessors[0]; auto const dt = observed.systemsTimestepSeconds;
 				for (auto const& [role, expected] : std::vector<std::pair<std::string, double>>{
 					{"Organic feed", p.lastFeedConsumedKg / dt}, {"Culture medium", p.lastConsumableUsed / dt},
 					{"Replacement stock", p.lastStockConsumedUnits / dt}, {"Recovered nutrients", p.lastNutrientProducedKg / dt},
@@ -3888,7 +3896,7 @@ namespace
 					REQ(driver.contains("Simulation disabled; no live history."), "disabled carbon observation not explained"); break;
 				}
 				auto const observed = world->getStationSystemsSnapshot(); auto const revision = world->getStationSystemsObservationRevision();
-				auto const dt = core::World::getFixedTimestep();
+				auto const dt = observed.systemsTimestepSeconds;
 				for (auto const& [type, role, expected] : std::vector<std::tuple<std::string, std::string, double>>{
 					{"Sabatier", "CO2 feed", observed.sabatierReactors[0].lastCo2ConsumedKg / dt},
 					{"Sabatier", "Methane", observed.sabatierReactors[0].lastMethaneProducedKg / dt},
@@ -3964,15 +3972,15 @@ namespace
 				auto const observed = world->getStationSystemsSnapshot();
 				auto const revision = world->getStationSystemsObservationRevision();
 				for (auto const& [type, role, expected] : std::vector<std::tuple<std::string, std::string, double>>{
-					{"Water collector", "Condensate", observed.waterCollectors[0].lastCollectedKg / core::World::getFixedTimestep()},
-					{"Water treatment", "Treated water", observed.waterTreatments[0].lastTreatedKg / core::World::getFixedTimestep()},
-					{"Water treatment", "Concentrate", observed.waterTreatments[0].lastConcentrateKg / core::World::getFixedTimestep()},
-					{"Water treatment", "Treatment consumable", observed.waterTreatments[0].lastConsumableUsed / core::World::getFixedTimestep()},
-					{"Electrolyzer", "Oxygen", observed.electrolyzers[0].lastOxygenKg / core::World::getFixedTimestep()},
-					{"Electrolyzer", "Hydrogen", observed.electrolyzers[0].lastHydrogenKg / core::World::getFixedTimestep()},
+					{"Water collector", "Condensate", observed.waterCollectors[0].lastCollectedKg / observed.systemsTimestepSeconds},
+					{"Water treatment", "Treated water", observed.waterTreatments[0].lastTreatedKg / observed.systemsTimestepSeconds},
+					{"Water treatment", "Concentrate", observed.waterTreatments[0].lastConcentrateKg / observed.systemsTimestepSeconds},
+					{"Water treatment", "Treatment consumable", observed.waterTreatments[0].lastConsumableUsed / observed.systemsTimestepSeconds},
+					{"Electrolyzer", "Oxygen", observed.electrolyzers[0].lastOxygenKg / observed.systemsTimestepSeconds},
+					{"Electrolyzer", "Hydrogen", observed.electrolyzers[0].lastHydrogenKg / observed.systemsTimestepSeconds},
 					{"Electrolyzer", "Electrical service", observed.electrolyzers[0].lastPowerSuppliedKW},
-					{"CO2 capture", "Captured CO2", observed.co2Captures[0].lastCapturedKg / core::World::getFixedTimestep()},
-					{"CO2 capture", "Consumable", observed.co2Captures[0].lastConsumableUsed / core::World::getFixedTimestep()}}) {
+					{"CO2 capture", "Captured CO2", observed.co2Captures[0].lastCapturedKg / observed.systemsTimestepSeconds},
+					{"CO2 capture", "Consumable", observed.co2Captures[0].lastConsumableUsed / observed.systemsTimestepSeconds}}) {
 					auto const catalogue = world->getStationSystemsObservationCatalogue();
 					auto const selected = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& c) {
 						return c.breakdown == "Aggregate" && c.id.starts_with("exchange/" + type + "/") && c.id.find("/" + role + "/") != std::string::npos;
@@ -5016,7 +5024,7 @@ namespace
 			world->resumeSimulation();
 			REQ(world->advanceTicks(60), "Editor station did not tick");
 			ctx->Sleep(1);
-			REQ(driver.contains("Live station state: Enabled") && driver.contains("60 completed ticks"),
+			REQ(driver.contains("Live station state: Enabled") && driver.contains((std::to_string(world->getStationSystemsSnapshot().worldTick) + " completed ticks").c_str()),
 				"Station live results not observable");
 			auto const before = world->getStationSystemsSnapshot();
 			// Close via the real top-level ImGui close control, not disablement:
@@ -5125,9 +5133,15 @@ namespace
 			// Run until the destination fills: the window shows the rejection and
 			// the conserved boundary balance.
 			world->markSaved();
-			world->resumeSimulation(); REQ(world->advanceTicks(41), "Transfer editor run failed");
+			world->resumeSimulation();
+			auto const transferRunTicks = 41 + world->getStationSystemsSnapshot().systemsStepWorldTicks;
+			REQ(world->advanceTicks(transferRunTicks),
+				"Transfer editor run failed");
 			world->pauseSimulation(); ctx->Sleep(1);
-			REQ(driver.contains("pump: src -> dst (kg) rejected | requested 1.000, completed 0.000, unmet 1.000 (rate 60.000/s, priority 0)"), "Blocked transfer rejection not observable in the window");
+			auto const transferDose = fixed3(60 * world->getStationSystemsSnapshot().systemsTimestepSeconds);
+			REQ(driver.contains(("pump: src -> dst (kg) rejected | requested " + transferDose
+				+ ", completed 0.000, unmet " + transferDose + " (rate 60.000/s, priority 0)").c_str()),
+				"Blocked transfer rejection not observable in the window");
 			REQ(driver.contains("Balance kg: starting 100.000, current 100.000, lost 0.000, delivered 0.000, residual 0.000000000"), "Boundary balance not observable in the window");
 			REQ(!world->isModified(), "Transfer ticking dirtied the authored document");
 			// Draft a second transfer through the real controls; an unknown
@@ -5141,7 +5155,7 @@ namespace
 			REQ(driver.contains("references unknown source store 'nope'"),
 				"Invalid transfer source diagnostic not shown");
 			REQ(world->getStationSystemsSettings().transfers.size() == 1 && history.undoCount() == 0
-				&& world->getSimulationTick() == 41,
+				&& world->getSimulationTick() == transferRunTicks,
 				"Invalid transfer draft mutated the authored settings");
 			// Repair the drafted source (the invalid 'nope') to the aux store and
 			// confirm again: the valid transfer applies with the required reset.
@@ -5290,8 +5304,10 @@ namespace
 			REQ(world->advanceTicks(30), "Compound editor run failed");
 			ctx->Sleep(1);
 			REQ(driver.contains("conversion1: full (scale 1.000, priority 0)")
-				&& driver.contains("consumes food (kg): requested 1.000, completed 1.000")
-				&& driver.contains("produces waste (kg): requested 0.400, completed 0.400"),
+				&& driver.contains(("consumes food (kg): requested " + fixed3(60 * world->getStationSystemsSnapshot().systemsTimestepSeconds)
+					+ ", completed " + fixed3(60 * world->getStationSystemsSnapshot().systemsTimestepSeconds)).c_str())
+				&& driver.contains(("produces waste (kg): requested " + fixed3(24 * world->getStationSystemsSnapshot().systemsTimestepSeconds)
+					+ ", completed " + fixed3(24 * world->getStationSystemsSnapshot().systemsTimestepSeconds)).c_str()),
 				"Live conversion status not displayed");
 			REQ(!world->isModified(), "Compound ticking dirtied the authored document");
 			// Refusal is visible too: fill the biomass store and watch the
@@ -5305,7 +5321,8 @@ namespace
 			REQ(world->advanceTicks(5), "Blocked run failed");
 			ctx->Sleep(1);
 			REQ(driver.contains("conversion1: rejected (scale 0.000, priority 0)")
-				&& driver.contains("consumes food (kg): requested 1.000, completed 0.000"),
+				&& driver.contains(("consumes food (kg): requested "
+					+ fixed3(60 * world->getStationSystemsSnapshot().systemsTimestepSeconds) + ", completed 0.000").c_str()),
 				"Conversion refusal not displayed");
 			bool sawRefusalReason = false;
 			for (auto const& event : world->getStationSystemsEvents())

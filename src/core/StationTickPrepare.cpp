@@ -427,7 +427,7 @@ namespace core
 		availableGeneration = 0.0;
 		for (auto& array : runtime.solarArrays)
 		{
-			array.lastIllumination = evaluateStationProfile(array.authored.illumination, elapsed);
+			array.lastIllumination = evaluateStationProfile(array.authored.illumination, profileElapsed);
 			array.lastDisabled = array.authored.capacityKW <= 0.0;
 			array.lastAvailableKW = array.lastDisabled
 				? 0.0 : array.authored.capacityKW * array.lastIllumination;

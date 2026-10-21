@@ -44,11 +44,13 @@ std::unique_ptr<core::World> make(Settings settings)
 	auto const configured = world->configureStationSystems(settings, true, &diagnostic);
 	require(configured, diagnostic.c_str());
 	world->resumeSimulation();
+	require(world->getStationSystemsSnapshot().systemsTimestepSeconds == smoke::station::requestedStepSeconds(),
+		"Connection fixture did not execute its requested timestep");
 	return world;
 }
 void advance(core::World& world, unsigned ticks = 1)
 {
-	if (smoke::station::advanceSeconds(world, static_cast<double>(ticks) / 60.0)) return;
+	if (smoke::station::advanceStationSteps(world, ticks)) return;
 	std::string why = "Connection simulation failed";
 	for (auto const& diagnostic : world.getStationSystemsDiagnostics()) why += "; " + diagnostic.message;
 	throw std::runtime_error(why);
@@ -97,7 +99,7 @@ core::ThermalReservoirSettings reservoir(double temperature = 20)
 }
 void transfers(smoke::Context const&)
 {
-	auto const dt = core::World::getFixedTimestep();
+	auto const dt = smoke::station::requestedStepSeconds();
 	{
 		auto s = transferSettings();
 		property(s, "Transfer", "move", "Source") = {core::StationPhysicalConnection::Automatic, 10, 0.9};
@@ -139,7 +141,7 @@ void transfers(smoke::Context const&)
 }
 void conversions(smoke::Context const&)
 {
-	auto const dt = core::World::getFixedTimestep();
+	auto const dt = smoke::station::requestedStepSeconds();
 	auto s = transferSettings(); s.transfers.clear();
 	for (auto& store : s.stores) store.composition = core::ResourceCompositionSettings{};
 	core::ResourceConversionSettings c; c.id = "c"; c.inputs = {{"a", 10}}; c.outputs = {{"b", 10}}; s.conversions = {c};
@@ -172,7 +174,7 @@ void conversions(smoke::Context const&)
 }
 void power(smoke::Context const&)
 {
-	auto const dt = core::World::getFixedTimestep();
+	auto const dt = smoke::station::requestedStepSeconds();
 	{
 		auto s = powerSettings(); property(s, "Equipment", "load", "Electrical supply") = {core::StationPhysicalConnection::Automatic, 10, 0.9};
 		auto world = make(s); advance(*world); auto snap = world->getStationSystemsSnapshot(); audit(snap, s);
@@ -256,7 +258,7 @@ void batteryTelemetry(smoke::Context const&)
 				busCharge += charge.lastInputRate; busDischarge += discharge.lastDeliveredRate;
 				close(battery.lastChargeKW, charge.lastDeliveredRate, "Battery-side charging was changed to bus power");
 				close(battery.lastDischargeKW, discharge.lastInputRate, "Battery-side discharging was changed to bus power");
-				auto const hours = core::World::getFixedTimestep() / 3600.0;
+				auto const hours = snap.systemsTimestepSeconds / 3600.0;
 				close(battery.deliveredKWh, battery.lastDischargeKW * hours, "Battery-terminal output energy includes cable losses");
 				close(battery.chargeInputKWh, battery.lastChargeKW * hours, "Battery-terminal input energy includes cable losses");
 				close(battery.lossesKWh, hours * (battery.lastDischargeKW * (1 / battery.dischargeEfficiency - 1)
@@ -287,7 +289,7 @@ Settings thermalSettings(double hub, double air)
 }
 void thermal(smoke::Context const&)
 {
-	auto const dt = core::World::getFixedTimestep();
+	auto const dt = smoke::station::requestedStepSeconds();
 	for (bool reverse : {false, true}) for (double efficiency : {0.0, 0.5, 1.0})
 	{
 		auto s = thermalSettings(reverse ? 0 : 100, reverse ? 100 : 0);
@@ -320,10 +322,12 @@ void thermal(smoke::Context const&)
 		auto world = make(s); advance(*world); auto snap = world->getStationSystemsSnapshot(); audit(snap, s);
 		close(flow(snap, "Equipment", "load", "Heat").retainedHeatKJ, 15 * dt, "Blocked producer heat was deleted");
 		close(snap.thermal.reservoirs[0].temperatureC, 20 + 2.5 * dt / 10, "Heat efficiency did not apply after throughput");
-		advance(*world, 3); snap = world->getStationSystemsSnapshot(); audit(snap, s);
+		// The authored profile is active for two complete steps, so its
+		// physical heat is 40*dt. Eight capped transport steps drain it.
+		advance(*world, 7); snap = world->getStationSystemsSnapshot(); audit(snap, s);
 		close(flow(snap, "Equipment", "load", "Heat").retainedHeatKJ, 0, "Stopped producer did not drain retained heat");
-		close(flow(snap, "Equipment", "load", "Heat").producedHeatKJ, 20 * dt, "Stopped producer generated new heat");
-		close(flow(snap, "Equipment", "load", "Heat").lostTotal, 10 * dt, "Retained heat was lost twice");
+		close(flow(snap, "Equipment", "load", "Heat").producedHeatKJ, 40 * dt, "Stopped producer generated new heat");
+		close(flow(snap, "Equipment", "load", "Heat").lostTotal, 20 * dt, "Retained heat was lost twice");
 	}
 	{
 		Settings s; s.enabled = true; s.thermalReservoirs = {reservoir()}; s.thermalReservoirs[0].absorbedHeatKW = 10;
@@ -357,7 +361,7 @@ void processes(smoke::Context const&)
 }
 void blockedZeroEfficiency(smoke::Context const&)
 {
-	auto const dt = core::World::getFixedTimestep();
+	auto const dt = smoke::station::requestedStepSeconds();
 	for (unsigned actor = 0; actor < 3; ++actor)
 		for (unsigned blocked = 0; blocked < 4; ++blocked)
 		{

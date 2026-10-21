@@ -149,9 +149,10 @@ void connectionDesign(smoke::Context const&)
 		&& loaded.settings == expectedDefault, "Missing efficiency did not receive the lossless default");
 	auto legacy = document; legacy.settings.connections.clear();
 	auto legacyYaml = replace(core::serializeStationConfiguration(legacy), "schemaVersion: 104", "schemaVersion: 96");
-	auto const ratioAt = legacyYaml.find("  systemsStepWorldTicks: 1\n");
+	auto const ratioLine = "  systemsStepWorldTicks: " + std::to_string(legacy.settings.systemsStepWorldTicks) + "\n";
+	auto const ratioAt = legacyYaml.find(ratioLine);
 	require(ratioAt != std::string::npos, "Station step ratio was not serialized");
-	legacyYaml.erase(ratioAt, std::string("  systemsStepWorldTicks: 1\n").size());
+	legacyYaml.erase(ratioAt, ratioLine.size());
 	require(core::parseStationConfiguration(legacyYaml, loaded, &diagnostic) && loaded.settings.connections.empty(),
 		"Legacy Station configuration did not receive implicit defaults");
 	for (double invalid : {0.0, -1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
@@ -253,7 +254,7 @@ void connectionDesign(smoke::Context const&)
 		return *found;
 	};
 	auto const& pipe = account(constrained, source.designKey);
-	auto const dt = core::World::getFixedTimestep();
+	auto const dt = constrained.systemsTimestepSeconds;
 	require(close(account(ordinary, source.designKey).lastInputRate, 2)
 		&& close(pipe.lastInputRate, 0.001) && close(pipe.lastDeliveredRate, 0.0005)
 		&& close(pipe.lastLossRate, 0.0005)
@@ -261,7 +262,7 @@ void connectionDesign(smoke::Context const&)
 		&& close(constrained.stores[1].lastTickIn / dt, 0.0005)
 		&& close(constrained.transfers[0].lastCompleted / dt, 0.0005),
 		"Physical throughput was not capped on input before applying efficiency to delivered material");
-	require(close(pipe.lostTotal, 30 * dt * 0.0005)
+	require(close(pipe.lostTotal, constrained.elapsedSeconds * 0.0005)
 		&& close(pipe.inputTotal, pipe.deliveredTotal + pipe.lostTotal)
 		&& std::all_of(constrained.balances.begin(), constrained.balances.end(),
 			[&](auto const& balance) { return close(balance.residual, 0); }),

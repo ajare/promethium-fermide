@@ -1,4 +1,5 @@
 #include "StationSystemsImpl.h"
+#include <limits>
 
 namespace core
 {
@@ -779,16 +780,33 @@ namespace core
 			// can never spend replacement stock to heal.
 			auto const hours = tickSeconds / 3600.0;
 			auto const& sink = runtime.reservoirs[processor.sinkIndex];
-			auto const starving = std::max(0.0, ports.input(processor.feedStoreIndex, qualified[processor.feedStoreIndex]
-				- feed.authored.protectedReserve)) <= 0.0;
+			// Scaled draws can leave a positive one-ulp tail after depletion.
+			// Such a tail must not postpone starvation until it underflows.
+			// Scale the stress decision in native store units (including reserve
+			// subtraction precision), not by an absolute mass cutoff. This only
+			// classifies stress: the allocator still accounts for every draw and
+			// leaves undrawn residual stock intact.
+			auto const exhausted = [](double drawable, double stock, double reserve, double dose)
+			{
+				return drawable <= std::numeric_limits<double>::epsilon()
+					* std::max({stock, reserve, dose});
+			};
+			auto const starving = exhausted(std::max(0.0,
+				ports.input(processor.feedStoreIndex, qualified[processor.feedStoreIndex]
+					- feed.authored.protectedReserve)), qualified[processor.feedStoreIndex],
+				feed.authored.protectedReserve, kgToMass(feed.authored.unit, fullKg));
 			auto const stressComposition = effectiveCompositionOf(*feed.authored.composition,
 				massToKg(feed.authored.unit, qualified[processor.feedStoreIndex] + unqualified[processor.feedStoreIndex]),
 				stagedDrift[processor.feedStoreIndex]);
-			auto const mediaRequired = processor.authored.rateBasis == StationRateBasis::FixedPerFeedMass
-				|| stationMicrobialRates(processor.authored, stressComposition).consumable > 0.0;
-			auto const mediaExhausted = mediaRequired && std::max(0.0,
+			auto const stressRates = stationMicrobialRates(processor.authored, stressComposition);
+			auto const derivedStress = processor.authored.rateBasis == StationRateBasis::CompositionDerived;
+			auto const mediaRequired = !derivedStress || stressRates.consumable > 0.0;
+			auto const mediumDose = fullKg * (derivedStress
+				? kgToMass(consumable.authored.unit, stressRates.consumable) : stressRates.consumable);
+			auto const mediaExhausted = mediaRequired && exhausted(std::max(0.0,
 				ports.input(processor.consumableStoreIndex, qualified[processor.consumableStoreIndex]
-				- consumable.authored.protectedReserve)) <= 0.0;
+					- consumable.authored.protectedReserve)), qualified[processor.consumableStoreIndex],
+				consumable.authored.protectedReserve, mediumDose);
 			auto const coldStressed = sink.temperatureC + 1e-9
 				< processor.authored.minOperatingTemperatureC;
 			auto const heatStressed = sink.temperatureC + 1e-9

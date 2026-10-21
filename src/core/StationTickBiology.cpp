@@ -100,7 +100,7 @@ namespace core
 			}
 			auto const tickSeconds = static_cast<double>(seconds);
 			auto const hours = tickSeconds / 3600.0;
-			crop.lastIllumination = evaluateStationProfile(crop.authored.illuminationProfile, elapsed);
+			crop.lastIllumination = evaluateStationProfile(crop.authored.illuminationProfile, profileElapsed);
 			crop.lastLightRequestedKW = crop.authored.lampRatedKW * crop.lastIllumination;
 			crop.lastCirculationRequestedKW = crop.authored.circulationPowerKW;
 			// The essential circulation is paid for first: the pumps
@@ -747,7 +747,7 @@ namespace core
 			}
 			auto const tickSeconds = static_cast<double>(seconds);
 			auto const hours = tickSeconds / 3600.0;
-			culture.lastIllumination = evaluateStationProfile(culture.authored.illuminationProfile, elapsed);
+			culture.lastIllumination = evaluateStationProfile(culture.authored.illuminationProfile, profileElapsed);
 			culture.lastLightRequestedKW = culture.authored.lampRatedKW * culture.lastIllumination;
 			culture.lastCirculationRequestedKW = culture.authored.circulationPowerKW;
 			// #416: the essential culture circulation was already drawn

@@ -13,7 +13,9 @@ namespace
 	// published telemetry and charts at matching systems seconds.
 	void reportingSystemsTime(smoke::Context const&)
 	{
+		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
 		core::StationSystemsSettings settings;
+		settings.systemsStepWorldTicks = 1;
 		settings.enabled = true;
 		settings.observationIntervalSeconds = 1;
 		core::ResourceStoreSettings source;
@@ -111,11 +113,12 @@ namespace
 				"Compatibility sampler coarsening changed with ratio");
 		// A step longer than the requested observation interval emits one
 		// bounded sample at the step, never synthetic intermediate samples.
-		settings.systemsStepWorldTicks = 600;
+		settings.systemsStepWorldTicks = 60;
+		settings.observationIntervalSeconds = 0.1f;
 		core::StationSystemsRuntime sparse(settings, quantum);
-		require(sparse.advanceTo(12), "Sparse reporting scenario failed");
+		require(sparse.advanceTo(1.5), "Sparse reporting scenario failed");
 		for (auto const& metric : sparse.metrics())
-			require(metric.samples.size() == 2 && metric.samples.front().elapsedSeconds >= 10,
+			require(metric.samples.size() == 2 && metric.samples.front().elapsedSeconds >= 1,
 				"Observation cadence became a second clock");
 	}
 
@@ -318,15 +321,18 @@ namespace
 			auto const trends = world.getStationSystemsTrends();
 			require(trends.size() == 4,
 				"expected exactly the power, power-generation, equipment-load and transfer trend series");
+			auto const clock = world.getStationSystemsSnapshot();
+			auto const observationStep = static_cast<uint64_t>(std::ceil(60.0 / clock.systemsTimestepSeconds));
+			auto const observationTime = observationStep * clock.systemsTimestepSeconds;
 			for (auto const& series : trends)
 			{
 				require(series.samples.size() == 1,
 					"trend series sampled more than once within one observation window");
-				require(series.samples[0].worldTick == 3600,
+				require(series.samples[0].worldTick == observationStep,
 					"trend sample is not at the observation-boundary tick");
 				require(series.downsampleLevel == 0 && !series.truncated,
 					"a fresh series reports downsampling or truncation");
-				require(approx(series.sampleIntervalSeconds, 60.0, 1e-4),
+				require(approx(series.sampleIntervalSeconds, observationTime, 1e-4),
 					"series stride does not match the authored observation cadence");
 			}
 			auto const* power = findSeries(trends, "power", "");
@@ -343,7 +349,7 @@ namespace
 			auto const metrics = world.getStationSystemsMetricHistory();
 			auto const chart = core::queryStationChart(core::stationCharts().front(), metrics);
 			require(chart.series.size() == 2 && !chart.incomplete
-				&& chart.series[0].times.size() == 1 && approx(chart.series[0].times[0], 60.0, 1e-5)
+				&& chart.series[0].times.size() == 1 && approx(chart.series[0].times[0], observationTime, 1e-5)
 				&& chart.series[0].values.size() == 1 && approx(chart.series[0].values[0], 6.0)
 				&& chart.series[1].values.size() == 1 && approx(chart.series[1].values[0], 10.0),
 				"declarative Power query lost surplus generation, demand or simulation time");
@@ -356,7 +362,7 @@ namespace
 				"transfer trend identity or unit missing");
 			// The snapshot's transfer requested/completed are per-tick
 			// amounts (rate x fixed step); the trend mirrors that exactly.
-			auto const perTick = 1.0 * static_cast<double>(core::World::getFixedTimestep());
+			auto const perTick = clock.systemsTimestepSeconds;
 			require(approx(transfer->samples[0].requested, perTick)
 				&& approx(transfer->samples[0].actual, perTick),
 				"the transfer trend did not record requested versus completed flow");
@@ -388,17 +394,19 @@ namespace
 					"a 1300-sample run did not downsample under the storage bound");
 				require(series.truncated,
 					"a downsampled series does not report truncation");
-				require(approx(series.sampleIntervalSeconds,
-					std::pow(2.0, static_cast<double>(series.downsampleLevel))),
+				auto const final = world.getStationSystemsSnapshot();
+				auto const baseCadence = std::max(1.0,
+					std::ceil(settings.observationIntervalSeconds / final.systemsTimestepSeconds))
+					* final.systemsTimestepSeconds;
+				require(approx(series.sampleIntervalSeconds, baseCadence
+					* std::pow(2.0, static_cast<double>(series.downsampleLevel))),
 					"effective stride is not the base cadence times 2^level");
-				require(78000 - series.samples.back().worldTick < static_cast<uint64_t>(
-					60.0 * series.sampleIntervalSeconds + 0.5),
+				require(final.elapsedSeconds - series.samples.back().elapsedSeconds < series.sampleIntervalSeconds,
 					"the series lost the newest sample: the newest retained sample is not within one stride of the run end");
 				for (size_t index = 1; index < series.samples.size(); ++index)
 				{
-					auto const gap = series.samples[index].worldTick - series.samples[index - 1].worldTick;
-					require(gap >= 60 && gap <= static_cast<uint64_t>(
-						60.0 * series.sampleIntervalSeconds + 0.5),
+					auto const gap = series.samples[index].elapsedSeconds - series.samples[index - 1].elapsedSeconds;
+					require(gap >= baseCadence - 1e-9 && gap <= series.sampleIntervalSeconds + 1e-9,
 						"downsampled series has a gap outside the retained stride");
 				}
 				for (auto const& sample : series.samples)
@@ -481,13 +489,15 @@ namespace
 				"reset did not return the World to tick zero");
 			runOrDiagnose(world, 600, "trend post-reset run"); // t = 10 s
 			auto const trends = world.getStationSystemsTrends();
+			auto const clock = world.getStationSystemsSnapshot();
+			auto const stride = static_cast<uint64_t>(std::ceil(1.0 / clock.systemsTimestepSeconds));
 			for (auto const& series : trends)
 			{
-				require(series.samples.size() == 10,
+				require(series.samples.size() == clock.worldTick / stride,
 					"the post-reset series did not restart its sample window");
 				require(series.downsampleLevel == 0 && !series.truncated,
 					"the post-reset series carried downsampling or truncation across the reset");
-				require(series.samples.front().worldTick == 60,
+				require(series.samples.front().worldTick == stride,
 					"the post-reset series did not start from tick zero");
 			}
 		}
@@ -534,7 +544,9 @@ namespace
 			// default retention - compatible with documents that predate
 			// the feature.
 			stale = replaceAll(stale, "trendRetentionSeconds: 7200", "");
-			stale = replaceAll(stale, "  systemsStepWorldTicks: 1\n", "");
+			auto const ratioLine = "  systemsStepWorldTicks: "
+				+ std::to_string(settings.systemsStepWorldTicks) + "\n";
+			stale = replaceAll(stale, ratioLine, "");
 			bool loaded = false;
 			try
 			{
@@ -633,16 +645,20 @@ namespace
 					"a 4500-sample run did not coarsen at all");
 				require(series.downsampleLevel <= 6,
 					"cadence-aware decimation coarsened far past what the run length needs");
-				require(approx(series.sampleIntervalSeconds,
-					std::pow(2.0, static_cast<double>(series.downsampleLevel))),
+				auto const clock = world.getStationSystemsSnapshot();
+				auto const baseCadence = std::max(1.0,
+					std::ceil(settings.observationIntervalSeconds / clock.systemsTimestepSeconds))
+					* clock.systemsTimestepSeconds;
+				require(approx(series.sampleIntervalSeconds, baseCadence
+					* std::pow(2.0, static_cast<double>(series.downsampleLevel))),
 					"the declared stride is not the base cadence times 2^level");
-				auto const strideTicks = static_cast<uint64_t>(
-					60.0 * series.sampleIntervalSeconds + 0.5);
+				auto const strideTicks = static_cast<uint64_t>(std::llround(
+					series.sampleIntervalSeconds / clock.systemsTimestepSeconds));
 				for (size_t index = 1; index < series.samples.size(); ++index)
 					require(series.samples[index].worldTick - series.samples[index - 1].worldTick
 						== strideTicks,
 					"samples are not uniformly spaced at the declared stride");
-				require(270000 - series.samples.back().worldTick < strideTicks,
+				require(clock.worldTick - series.samples.back().worldTick < strideTicks,
 					"the newest retained sample is more than one stride behind the run end");
 				require(series.truncated, "a coarsened series does not report truncation");
 			}
@@ -707,8 +723,8 @@ namespace
 					"the retained window exceeds the authored retention");
 				require(window >= 900.0,
 					"the retention window did not actually fill the authored seconds");
-				auto const strideTicks = static_cast<uint64_t>(
-					60.0 * series.sampleIntervalSeconds + 0.5);
+				auto const strideTicks = static_cast<uint64_t>(std::llround(series.sampleIntervalSeconds
+					/ world.getStationSystemsSnapshot().systemsTimestepSeconds));
 				for (size_t index = 1; index < series.samples.size(); ++index)
 					require(series.samples[index].worldTick - series.samples[index - 1].worldTick
 						== strideTicks,

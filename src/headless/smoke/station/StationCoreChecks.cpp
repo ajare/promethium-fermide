@@ -6,9 +6,31 @@
 namespace
 {
 	using namespace smoke::station;
+	void defaultClockCadence(smoke::Context const&)
+	{
+		core::StationSystemsSettings settings;
+		require(settings.systemsStepWorldTicks == 6, "Default Station cadence is not 10 Hz");
+		// Exercise the production default without the runner's legacy-ratio override.
+		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
+		core::World world("Default clocks", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		settings.enabled = true;
+		require(world.configureStationSystems(settings, true), "Default Station configuration refused");
+		world.resumeSimulation();
+		require(advanceSeconds(world, 1.0), "Default Station drive failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		auto const worldSeconds = world.getSimulationTick() * static_cast<double>(world.getFixedTimestep());
+		require(std::abs(world.getFixedTimestep() - 1.0 / 60.0) < 1e-8,
+			"Default Station cadence changed World frequency");
+		require(std::abs(snapshot.elapsedSeconds - snapshot.worldTick * 6.0 * world.getFixedTimestep()) < 1e-10
+			&& snapshot.elapsedSeconds >= worldSeconds
+			&& snapshot.elapsedSeconds - worldSeconds < 6.0 * world.getFixedTimestep(),
+			"Default Station clock did not advance in six-World-tick steps");
+	}
 	void clockIntegration(smoke::Context const&)
 	{
-		for (uint32_t ratio : {1u, 6u, 30u, 600u})
+		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
+		for (uint32_t ratio : {1u, 6u, 30u, 60u})
 		{
 			core::World world("Clock", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
@@ -78,15 +100,16 @@ namespace
 		require(smoke::station::advanceSeconds(a, 2.0), "Station ticks failed");
 		require(smoke::station::advanceSeconds(b, 1.0), "Independent station ticks failed");
 		auto saved = a.getStationSystemsSnapshot();
-		require(saved.worldTick == a.getSimulationTick() && std::abs(saved.elapsedSeconds - 120.0 * a.getFixedTimestep()) < 1e-8,
+		require(saved.worldTick == expectedStationSteps(a)
+			&& saved.elapsedSeconds == saved.worldTick * saved.systemsTimestepSeconds,
 			"Station not synchronized to World clock");
-		for (auto count : saved.completedTicks) require(count == 120, "All four objects must advance independently");
-		require(b.getStationSystemsSnapshot().completedTicks[0] == 60, "Worlds leaked Lua state");
+		for (auto count : saved.completedTicks) require(count == saved.worldTick, "All four objects must advance independently");
+		require(b.getStationSystemsSnapshot().completedTicks[0] == expectedStationSteps(b), "Worlds leaked Lua state");
 		a.pauseSimulation(); auto events = a.getStationSystemsEvents();
 		require(!smoke::station::advanceSeconds(a, 0.0166666666667), "Paused World tick accepted"); a.update(20);
 		require(a.getStationSystemsSnapshot() == saved && a.getStationSystemsEvents() == events, "Pause changed station");
-		a.resumeSimulation(); a.update(a.getFixedTimestep());
-		require(a.getStationSystemsSnapshot().worldTick == 121, "Resume lost runtime");
+		a.resumeSimulation(); require(advanceSeconds(a, saved.systemsTimestepSeconds), "Resume did not advance");
+		require(a.getStationSystemsSnapshot().worldTick == saved.worldTick + 1, "Resume lost runtime");
 		a.pauseSimulation(); a.resetSimulation();
 		require(a.getSimulationTick() == 0 && a.getStationSystemsSnapshot().completedTicks[0] == 0, "Reset did not recreate objects");
 		a.resumeSimulation(); require(smoke::station::advanceSeconds(a, 2.0), "Reset replay failed");
@@ -132,7 +155,7 @@ namespace
 		require(smoke::station::advanceSeconds(world, 16.6666666667), "Transition-only event run failed");
 		auto const& events = world.getStationSystemsEvents();
 		require(events.size() == 256, "Transition events bypassed the 256-entry history bound");
-		require(events.back().worldTick == 1000, "Event history lost the newest transition");
+		require(events.back().worldTick == world.getStationSystemsSnapshot().worldTick, "Event history lost the newest transition");
 		for (size_t index = 1; index < events.size(); ++index)
 			require(events[index].worldTick >= events[index - 1].worldTick,
 				"Eviction broke retained tick ordering");
@@ -151,14 +174,15 @@ namespace
 		require(smoke::station::advanceSeconds(mixed, 16.6666666667), "Interleaved transition/observation run failed");
 		auto const& window = mixed.getStationSystemsEvents();
 		require(window.size() == 256, "Interleaved producers bypassed the 256-entry history bound");
-		require(window.back().worldTick == 1000, "Interleaved history lost the newest tick");
+		require(window.back().worldTick == mixed.getStationSystemsSnapshot().worldTick, "Interleaved history lost the newest tick");
 		for (size_t index = 1; index < window.size(); ++index)
 			require(window[index].worldTick >= window[index - 1].worldTick,
 				"Interleaved eviction broke retained tick ordering");
 		bool sawObservation = false, sawTransition = false;
 		for (auto const& event : window)
 		{
-			if (event.message.find("completed the World tick") != std::string::npos) sawObservation = true;
+			if (event.category == "observation"
+				&& event.message.find("completed the Station step") != std::string::npos) sawObservation = true;
 			if (event.message.find("Solar array") != std::string::npos) sawTransition = true;
 		}
 		require(sawObservation && sawTransition,
@@ -385,32 +409,36 @@ namespace
 		}
 		// Scenario A: destination capacity backpressure. The pump stalls at a
 		// full destination; material is conserved and the rejection is visible.
+		// Step-relative headroom tests admission/bookkeeping at any clock;
+		// these scaled fixtures are not physical convergence comparisons.
+		auto const stepSeconds = requestedStepSeconds();
+		auto const dose = 60.0 * stepSeconds;
 		core::World backpressure("Backpressure", 2, 2);
 		backpressure.pauseSimulation(); backpressure.finishBuild();
-		require(configure(backpressure, {store("src", "kg", 100, 100, 0), store("dst", "kg", 40, 0, 0)},
+		require(configure(backpressure, {store("src", "kg", 100, 100, 0), store("dst", "kg", 1.5 * dose, 0, 0)},
 			{transfer("pump", "src", "dst", "kg", 60.0, 0)}).first, "Scenario A refused");
 		backpressure.resumeSimulation();
-		require(smoke::station::advanceSeconds(backpressure, 0.5), "Scenario A run failed");
+		require(advanceStationSteps(backpressure, 1), "Scenario A run failed");
 		{
 			auto const snap = backpressure.getStationSystemsSnapshot();
-			require(approx(snap.stores[0].currentQualified, 70.0) && approx(snap.stores[1].currentQualified, 30.0)
+			require(approx(snap.stores[0].currentQualified, 100.0 - dose) && approx(snap.stores[1].currentQualified, dose)
 				&& snap.transfers.size() == 1 && snap.transfers[0].status == core::StationTransferStatus::Full
-				&& approx(snap.transfers[0].lastCompleted, 1.0) && snap.transfers[0].lastUnmet == 0.0,
+				&& approx(snap.transfers[0].lastCompleted, dose) && snap.transfers[0].lastUnmet == 0.0,
 				"Scenario A not flowing fully");
-			require(approx(snap.stores[0].lastTickOut, 1.0) && approx(snap.stores[1].lastTickIn, 1.0),
+			require(approx(snap.stores[0].lastTickOut, dose) && approx(snap.stores[1].lastTickIn, dose),
 				"Per-store flows not published");
 			require(snap.balances.size() == 1 && std::abs(snap.balances[0].residual) < 1e-12
 				&& snap.balances[0].totalStarting == 100.0 && snap.balances[0].totalCurrent == 100.0,
 				"Boundary balance not published with zero residual");
 			require(snap.balanceTolerance == core::StationBalanceTolerance, "Tolerance not published");
 		}
-		require(smoke::station::advanceSeconds(backpressure, 0.183333333333), "Scenario A backpressure run failed");
+		require(advanceStationSteps(backpressure, 2), "Scenario A backpressure run failed");
 		{
 			auto const snap = backpressure.getStationSystemsSnapshot();
-			require(approx(snap.stores[1].currentQualified, 40.0) && approx(snap.stores[0].currentQualified, 60.0),
+			require(approx(snap.stores[1].currentQualified, 1.5 * dose) && approx(snap.stores[0].currentQualified, 100.0 - 1.5 * dose),
 				"Backpressure deleted or created material");
 			require(snap.transfers[0].status == core::StationTransferStatus::Rejected
-				&& snap.transfers[0].lastCompleted == 0.0 && approx(snap.transfers[0].lastUnmet, 1.0),
+				&& snap.transfers[0].lastCompleted == 0.0 && approx(snap.transfers[0].lastUnmet, dose),
 				"Blocked destination not visible as a rejection with unmet request");
 			require(std::abs(snap.balances[0].residual) < 1e-12, "Backpressure broke conservation");
 			auto const events = backpressure.getStationSystemsEvents();
@@ -428,7 +456,7 @@ namespace
 			auto const expectedEvents = backpressure.getStationSystemsEvents();
 			backpressure.resetSimulation();
 			backpressure.resumeSimulation();
-			require(smoke::station::advanceSeconds(backpressure, 0.683333333333), "Scenario A replay failed");
+			require(advanceStationSteps(backpressure, 3), "Scenario A replay failed");
 			require(backpressure.getStationSystemsSnapshot() == expected
 				&& backpressure.getStationSystemsEvents() == expectedEvents,
 				"Transfer outcome not reproducible after reset");
@@ -440,14 +468,14 @@ namespace
 		require(configure(protectedRun, {store("src", "kg", 100, 90, 10, 80), store("dst", "kg", 500, 0, 0)},
 			{transfer("pump", "src", "dst", "kg", 60.0, 0)}).first, "Scenario B refused");
 		protectedRun.resumeSimulation();
-		require(smoke::station::advanceSeconds(protectedRun, 0.5), "Scenario B run failed");
+		require(advanceStationSteps(protectedRun, static_cast<uint64_t>(std::ceil(10.0 / dose)) + 1), "Scenario B run failed");
 		{
 			auto const snap = protectedRun.getStationSystemsSnapshot();
 			require(approx(snap.stores[0].currentQualified, 80.0) && snap.stores[0].currentUnqualified == 10.0
 				&& approx(snap.stores[1].currentQualified, 10.0),
 				"Transfer drew into the protected reserve or moved held material");
 			require(snap.transfers[0].status == core::StationTransferStatus::Rejected
-				&& approx(snap.transfers[0].lastUnmet, 1.0),
+				&& approx(snap.transfers[0].lastUnmet, dose),
 				"Protected-reserve block not visible as a rejection");
 			bool sawProtected = false;
 			for (auto const& event : protectedRun.getStationSystemsEvents())
@@ -458,49 +486,50 @@ namespace
 		}
 		// Scenario C: a destination that fills mid-request resolves the crossing
 		// and stalls immediately; amounts still cover the whole Station step.
+		auto const partialDose = 90.0 * stepSeconds;
 		core::World partialRun("Partial", 2, 2);
 		partialRun.pauseSimulation(); partialRun.finishBuild();
-		require(configure(partialRun, {store("src", "kg", 200, 200, 0), store("dst", "kg", 40, 0, 0)},
+		require(configure(partialRun, {store("src", "kg", 200, 200, 0), store("dst", "kg", 1.5 * partialDose, 0, 0)},
 			{transfer("pump", "src", "dst", "kg", 90.0, 0)}).first, "Scenario C refused");
 		partialRun.resumeSimulation();
-		require(smoke::station::advanceSeconds(partialRun, 0.45), "Scenario C run failed");
+		require(advanceStationSteps(partialRun, 2), "Scenario C run failed");
 		{
 			auto const snap = partialRun.getStationSystemsSnapshot();
-			require(approx(snap.stores[1].currentQualified, 40.0) && approx(snap.stores[0].currentQualified, 160.0),
+			require(approx(snap.stores[1].currentQualified, 1.5 * partialDose) && approx(snap.stores[0].currentQualified, 200.0 - 1.5 * partialDose),
 				"Partial transfer did not conserve material");
 			require(snap.transfers[0].status == core::StationTransferStatus::Rejected
-				&& approx(snap.transfers[0].lastRequested, 1.5) && approx(snap.transfers[0].lastCompleted, 1.0)
-				&& approx(snap.transfers[0].lastUnmet, 0.5),
+				&& approx(snap.transfers[0].lastRequested, partialDose) && approx(snap.transfers[0].lastCompleted, 0.5 * partialDose)
+				&& approx(snap.transfers[0].lastUnmet, 0.5 * partialDose),
 				"Partial transfer remainder not visible");
 		}
 		// Scenario D: simultaneous competing requests allocate by priority,
 		// then declaration order, and the loser's unmet request stays visible.
 		core::World competing("Competing", 2, 2);
 		competing.pauseSimulation(); competing.finishBuild();
-		require(configure(competing, {store("hub", "kg", 100, 25, 0),
-				store("a", "kg", 60, 0, 0), store("b", "kg", 60, 0, 0)},
+		require(configure(competing, {store("hub", "kg", 2.0 * dose, 1.5 * dose, 0),
+				store("a", "kg", 2.0 * dose, 0, 0), store("b", "kg", 2.0 * dose, 0, 0)},
 			{transfer("low", "hub", "a", "kg", 60.0, 0), transfer("high", "hub", "b", "kg", 60.0, 5)}).first,
 			"Scenario D refused");
 		competing.resumeSimulation();
-		require(smoke::station::advanceSeconds(competing, 0.216666666667), "Scenario D run failed");
+		require(advanceStationSteps(competing, 1), "Scenario D run failed");
 		{
 			auto const snap = competing.getStationSystemsSnapshot();
-			// 25 kg against 2 kg/s total demand: the higher-priority transfer
-			// takes the last kilogram and the lower-priority one is rejected.
-			require(approx(snap.stores[1].currentQualified, 12.0) && approx(snap.stores[2].currentQualified, 13.0)
+			// Supply covers one full grant plus half a second grant:
+			// priority wins a whole dose; the lower request gets the remainder.
+			require(approx(snap.stores[1].currentQualified, 0.5 * dose) && approx(snap.stores[2].currentQualified, dose)
 				&& approx(snap.stores[0].currentQualified, 0.0),
 				"Competing allocation did not favour the declared priority");
-			require(snap.transfers[0].id == "high" && snap.transfers[0].status == core::StationTransferStatus::Rejected
-				&& snap.transfers[0].lastCompleted > 0.9
-				&& snap.transfers[1].id == "low" && snap.transfers[1].status == core::StationTransferStatus::Rejected
-				&& approx(snap.transfers[1].lastUnmet, 1.0),
+			require(snap.transfers[0].id == "high" && snap.transfers[0].status == core::StationTransferStatus::Full
+				&& approx(snap.transfers[0].lastCompleted, dose)
+				&& snap.transfers[1].id == "low" && snap.transfers[1].status == core::StationTransferStatus::Partial
+				&& approx(snap.transfers[1].lastUnmet, 0.5 * dose),
 				"Competing request outcome not visible in priority order");
 			require(std::abs(snap.balances[0].residual) < 1e-12, "Competing run broke conservation");
 			competing.pauseSimulation();
 			auto const expected = competing.getStationSystemsSnapshot();
 			auto const expectedEvents = competing.getStationSystemsEvents();
 			competing.resetSimulation(); competing.resumeSimulation();
-			require(smoke::station::advanceSeconds(competing, 0.216666666667), "Scenario D replay failed");
+			require(advanceStationSteps(competing, 1), "Scenario D replay failed");
 			require(competing.getStationSystemsSnapshot() == expected
 				&& competing.getStationSystemsEvents() == expectedEvents,
 				"Competing allocation not reproducible after reset");
@@ -533,12 +562,13 @@ namespace
 		});
 		core::World violated("Violated", 2, 2);
 		violated.pauseSimulation(); violated.finishBuild();
-		require(configure(violated, {store("src", "kg", 100, 50, 0, 5), store("dst", "kg", 100, 0, 0)},
+		require(configure(violated, {store("src", "kg", 50.0 * dose + 5.0, 45.0 * dose + 5.0, 0, 5),
+				store("dst", "kg", 10.0 * dose, 0, 0)},
 			{transfer("pump", "src", "dst", "kg", 60.0, 0)}).first, "Violation fixture refused");
 		violated.resumeSimulation();
-		require(smoke::station::advanceSeconds(violated, 0.0666666666667), "Violation fixture prefix failed");
+		require(advanceStationSteps(violated, 4), "Violation fixture prefix failed");
 		auto const beforeViolation = violated.getStationSystemsSnapshot();
-		require(!smoke::station::advanceSeconds(violated, 0.0166666666667) && violated.isSimulationPaused(),
+		require(!advanceStationSteps(violated, 1) && violated.isSimulationPaused(),
 			"Conservation violation did not pause the World");
 		auto const afterViolation = violated.getStationSystemsSnapshot();
 		require(afterViolation.stores == beforeViolation.stores
@@ -552,7 +582,7 @@ namespace
 		// The host ledger never clamps: the World stays paused until reset
 		// reconstructs the authored starting state.
 		violated.resetSimulation();
-		require(violated.getStationSystemsSnapshot().stores[0].currentQualified == 50.0
+		require(violated.getStationSystemsSnapshot().stores[0].currentQualified == 45.0 * dose + 5.0
 			&& violated.getStationSystemsSnapshot().healthy,
 			"Reset did not reconstruct the violated store");
 		core::setStationSystemsSourceLoader({});
@@ -561,6 +591,7 @@ namespace
 
 void registerStationCoreChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"defaultClockCadence", defaultClockCadence});
 	checks.push_back({"clockIntegration", clockIntegration});
 	checks.push_back({"lifecycle", lifecycle});
 	checks.push_back({"batching", batching});

@@ -285,7 +285,7 @@ namespace core
 		{
 			auto& load = runtime.loads[index];
 			load.lastShortfallReason.clear();
-			load.lastProfileLevel = evaluateStationProfile(load.authored.operatingProfile, elapsed);
+			load.lastProfileLevel = evaluateStationProfile(load.authored.operatingProfile, profileElapsed);
 			load.lastRequestedKW = load.authored.electricalDemandKW * load.lastProfileLevel;
 			load.lastAdmitted = load.authored.coolingDisposition
 				== StationCoolingDisposition::Exported;

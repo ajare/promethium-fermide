@@ -253,7 +253,7 @@ namespace
 			run(world, 300);
 			auto const snap = world.getStationSystemsSnapshot(); auto const& p = snap.algaeCultures[0];
 			auto const history = world.getStationSystemsMetricHistory(); auto const catalogue = world.getStationSystemsObservationCatalogue();
-			auto const dt = core::World::getFixedTimestep();
+			auto const dt = snap.systemsTimestepSeconds;
 			size_t measured = 0;
 			for (auto const& o : core::stationExchangeObservations(s)) if (o.metric.equipmentType == "Algae") {
 				++measured;
@@ -341,7 +341,7 @@ namespace
 			run(world, 300);
 			auto const snap = world.getStationSystemsSnapshot(); auto const& p = snap.cropPopulations[0];
 			auto const history = world.getStationSystemsMetricHistory(); auto const catalogue = world.getStationSystemsObservationCatalogue();
-			auto const dt = core::World::getFixedTimestep();
+			auto const dt = snap.systemsTimestepSeconds;
 			for (auto const& o : core::stationExchangeObservations(s)) if (o.metric.equipmentType == "Crops") {
 				auto h = std::ranges::find(history, o.metric.id, [](auto const& h) { return h.descriptor.id; });
 				require(h != history.end() && !h->samples.empty(), "crop metric not recorded while hidden");
@@ -405,8 +405,8 @@ namespace
 				auto h = std::ranges::find(history, o.metric.id, [](auto const& h) { return h.descriptor.id; });
 				require(h != history.end() && !h->samples.empty(), "microbial metric absent");
 				auto v = o.read(snap); require(v.actual && h->samples.back().actual, "microbial exchange unavailable");
-				close(*h->samples.back().actual, *v.actual * o.sourceToCanonicalScale / (o.perTick ? core::World::getFixedTimestep() : 1));
-				if (v.requested) close(*h->samples.back().requested, *v.requested * o.sourceToCanonicalScale / (o.perTick ? core::World::getFixedTimestep() : 1));
+				close(*h->samples.back().actual, *v.actual * o.sourceToCanonicalScale / (o.perTick ? snap.systemsTimestepSeconds : 1));
+				if (v.requested) close(*h->samples.back().requested, *v.requested * o.sourceToCanonicalScale / (o.perTick ? snap.systemsTimestepSeconds : 1));
 				require(!o.read(missing).actual, "missing microbial authority became zero");
 				if (o.metric.exchangeRole == "Recovered nutrients") require(o.metric.materialId != "nitrogen" && !o.metric.requestedSemantics, "nutrient product confused with atmospheric nitrogen or requested output");
 			}
@@ -423,7 +423,7 @@ namespace
 			}
 		};
 		apply(); run(world, 12); verify();
-		auto snap = world.getStationSystemsSnapshot(); auto const dt = core::World::getFixedTimestep(); auto p = snap.microbialProcessors[0];
+		auto snap = world.getStationSystemsSnapshot(); auto const dt = snap.systemsTimestepSeconds; auto p = snap.microbialProcessors[0];
 		require(p.lastFeedConsumedKg > 0 && p.lastStockConsumedUnits > 0 && p.condition > s.microbialProcessors[0].initialCondition, "microbial recovery fixture inactive");
 		check("Organic feed", p.lastFeedConsumedKg / dt); check("Recovered nutrients", p.lastNutrientProducedKg / dt);
 		check("Produced heat", p.lastPowerSuppliedKW + p.lastReactionHeatKW);
@@ -521,8 +521,8 @@ namespace
 				require(h != history.end() && !h->samples.empty(), "carbon metric missing");
 				auto const v = o.read(snap);
 				require(v.actual.has_value() && h->samples.back().actual.has_value(), "committed carbon exchange unavailable");
-				close(*h->samples.back().actual, *v.actual * o.sourceToCanonicalScale / (o.perTick ? core::World::getFixedTimestep() : 1));
-				if (v.requested) close(*h->samples.back().requested, *v.requested * o.sourceToCanonicalScale / (o.perTick ? core::World::getFixedTimestep() : 1));
+				close(*h->samples.back().actual, *v.actual * o.sourceToCanonicalScale / (o.perTick ? snap.systemsTimestepSeconds : 1));
+				if (v.requested) close(*h->samples.back().requested, *v.requested * o.sourceToCanonicalScale / (o.perTick ? snap.systemsTimestepSeconds : 1));
 				require(!o.read(missing).actual, "missing carbon authority became zero");
 			}
 			for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate" && def.id.starts_with("exchange/")
@@ -536,7 +536,7 @@ namespace
 			}
 		};
 		apply(); run(world, 12); verify();
-		auto snap = world.getStationSystemsSnapshot(); auto dt = core::World::getFixedTimestep();
+		auto snap = world.getStationSystemsSnapshot(); auto dt = snap.systemsTimestepSeconds;
 		require(snap.sabatierReactors[0].lastCo2ConsumedKg > 0 && snap.methaneProcessors[0].lastMethaneConsumedKg > 0 && snap.fuelCells[0].lastOutputKW > 0, "carbon fixture inactive");
 		check("Sabatier", "CO2 feed", snap.sabatierReactors[0].lastCo2ConsumedKg / dt);
 		check("Sabatier", "Methane", snap.sabatierReactors[0].lastMethaneProducedKg / dt);
@@ -602,8 +602,8 @@ namespace
 				auto h = std::ranges::find(history, o.metric.id, [](auto const& h) { return h.descriptor.id; });
 				require(h != history.end() && !h->samples.empty() && h->samples.back().actual.has_value(), "water/gas metric absent");
 				auto v = o.read(snap);
-				close(*h->samples.back().actual, *v.actual * o.sourceToCanonicalScale / (o.perTick ? core::World::getFixedTimestep() : 1));
-				if (v.requested) close(*h->samples.back().requested, *v.requested * o.sourceToCanonicalScale / (o.perTick ? core::World::getFixedTimestep() : 1));
+				close(*h->samples.back().actual, *v.actual * o.sourceToCanonicalScale / (o.perTick ? snap.systemsTimestepSeconds : 1));
+				if (v.requested) close(*h->samples.back().requested, *v.requested * o.sourceToCanonicalScale / (o.perTick ? snap.systemsTimestepSeconds : 1));
 				require(!o.read(missing).actual, "missing water/gas authority became zero");
 			}
 			auto const before = world.getStationSystemsSnapshot();
@@ -643,7 +643,7 @@ namespace
 			}
 			throw std::runtime_error("missing water/gas role " + type + "/" + role);
 		};
-		auto dt = core::World::getFixedTimestep();
+		auto dt = snap.systemsTimestepSeconds;
 		check("Water collector", "Condensate", snap.waterCollectors[0].lastCollectedKg / dt);
 		check("Water treatment", "Concentrate", snap.waterTreatments[0].lastConcentrateKg / dt);
 		check("Electrolyzer", "Oxygen", snap.electrolyzers[0].lastOxygenKg / dt);
@@ -740,7 +740,7 @@ namespace
 		{
 			auto missing = snap; missing.crews.clear(); missing.atmospheres.clear(); missing.airlockCycles.clear();
 			require(!o.read(missing).actual, "missing exchange became zero");
-			if (!o.cumulativeRate) close(value(o.metric.id), *o.read(snap).actual * o.sourceToCanonicalScale / (o.perTick ? core::World::getFixedTimestep() : 1));
+			if (!o.cumulativeRate) close(value(o.metric.id), *o.read(snap).actual * o.sourceToCanonicalScale / (o.perTick ? snap.systemsTimestepSeconds : 1));
 			else {
 				auto h = std::ranges::find(history, o.metric.id, [](auto const& h) { return h.descriptor.id; });
 				double amount = 0, previous = 0;
@@ -939,14 +939,14 @@ namespace
 		close(value("Solar array", "Available generation"), snap.power.sources[0].availableKW);
 		close(value("Generator", "Generation"), snap.power.generators[0].outputKW);
 		require(snap.power.generators[0].outputKW > 0 && snap.power.generators[0].outputKW < 8, "fixture did not exercise ramp");
-		close(value("Generator", "Fuel", "primary-fuel"), snap.power.generators[0].fuelDrawKWh * 3600 / core::World::getFixedTimestep());
+		close(value("Generator", "Fuel", "primary-fuel"), snap.power.generators[0].fuelDrawKWh * 3600 / snap.systemsTimestepSeconds);
 		close(value("Generator", "Production waste heat"), snap.power.generators[0].wasteHeatKW);
 		close(value("Battery", "Charging electricity"), snap.power.batteries[0].lastChargeKW);
 		close(value("Battery", "Charge conversion loss"), snap.power.batteries[0].lastChargeKW * 0.2);
 		close(value("External equipment load group", "Electrical service"), snap.power.loads[0].suppliedKW);
 		close(value("External equipment load group", "Exported heat"), snap.power.loads[0].heatExportedKW);
-		close(value("External equipment load group", "Material in 1", "feed"), snap.power.loads[0].materialExchanges[0].completed * 0.001 / core::World::getFixedTimestep());
-		close(value("External equipment load group", "Material return 1", "product"), snap.power.loads[0].materialExchanges[1].completed * 0.001 / core::World::getFixedTimestep());
+		close(value("External equipment load group", "Material in 1", "feed"), snap.power.loads[0].materialExchanges[0].completed * 0.001 / snap.systemsTimestepSeconds);
+		close(value("External equipment load group", "Material return 1", "product"), snap.power.loads[0].materialExchanges[1].completed * 0.001 / snap.systemsTimestepSeconds);
 		require(value("Solar array", "Available generation") > value("External equipment load group", "Electrical service"), "surplus generation confused with service");
 		auto histories = world.getStationSystemsMetricHistory();
 		auto generationDefinition = definition("Generator", "Generation");
@@ -975,9 +975,9 @@ namespace
 		core::FuelCellSettings cell; cell.id = "cell"; cell.hydrogenStoreId = "h"; cell.oxygenStoreId = "o"; cell.waterStoreId = "w";
 		cell.thermalClass = "warm"; cell.heatSinkId = "sink"; cell.ratedOutputKW = 10; cell.commandedOutputKW = 5;
 		s.fuelCells = {cell}; apply(); run(world, 6); snap = world.getStationSystemsSnapshot();
-		close(value("Fuel cell", "Hydrogen", "hydrogen"), snap.fuelCells[0].lastHydrogenKg / core::World::getFixedTimestep());
-		close(value("Fuel cell", "Oxygen", "oxygen"), snap.fuelCells[0].lastOxygenKg / core::World::getFixedTimestep());
-		close(value("Fuel cell", "Product water", "water"), snap.fuelCells[0].lastWaterKg / core::World::getFixedTimestep());
+		close(value("Fuel cell", "Hydrogen", "hydrogen"), snap.fuelCells[0].lastHydrogenKg / snap.systemsTimestepSeconds);
+		close(value("Fuel cell", "Oxygen", "oxygen"), snap.fuelCells[0].lastOxygenKg / snap.systemsTimestepSeconds);
+		close(value("Fuel cell", "Product water", "water"), snap.fuelCells[0].lastWaterKg / snap.systemsTimestepSeconds);
 		close(value("Fuel cell", "Generation"), snap.fuelCells[0].lastOutputKW);
 		// Stopped equipment is a measured zero, not missing authority.
 		s.fuelCells[0].commandedOutputKW = 0; apply(); run(world, 6);

@@ -579,15 +579,16 @@ namespace core
 			auto const commandKW = std::min(capKW, connections.required(generationPort, dispatchRemainingKW));
 			if (commandKW <= 0.0) continue;
 			generator.dispatchCommandKW = commandKW;
-			if (generator.phase == StationGeneratorPhase::Running)
+			if (generator.phase == StationGeneratorPhase::Running
+				|| (generator.phase == StationGeneratorPhase::Stopped && startupRequiredKJ <= 0))
 			{
-				// Only a running machine serves load this tick, and only
-				// within the ramp step it can climb from its current
-				// output. What it cannot reach this tick is not booked
-				// against the target: it flows on to the backup.
-				auto const deliverableKW = std::min(commandKW,
-					generator.outputKW
-						+ generator.authored.maxRampKWPerSecond * dispatchDtSeconds);
+				// Book the same integrated mean that production can deliver,
+				// not its larger ramp endpoint. Backups cover the real gap.
+				auto const startKW = generator.phase == StationGeneratorPhase::Running
+					? std::min(generator.outputKW, effectiveRatedKW) : 0.0;
+				auto const ramp = integrateGeneratorRamp(startKW, commandKW,
+					generator.authored.maxRampKWPerSecond, dispatchDtSeconds);
+				auto const deliverableKW = std::min(fuelCapKW, ramp.meanKW);
 				dispatchRemainingKW -= connections.available(generationPort, std::max(0.0, deliverableKW));
 			}
 			else if (generator.phase == StationGeneratorPhase::Stopped)
@@ -905,6 +906,7 @@ namespace core
 				ports.input(generator.fuelStoreIndex, qualified[generator.fuelStoreIndex] - runtime.stores[generator.fuelStoreIndex].authored.protectedReserve))
 				* kwhPerUnit;
 			auto const startupRequiredKJ = generator.authored.startupPowerKW * generator.authored.startupSeconds;
+			generator.lastAverageOutputKW = 0.0;
 			generator.lastFuelDrawKWh = 0.0;
 			generator.lastWasteHeatKW = 0.0;
 			generator.lastStartupDrawKW = 0.0;
@@ -917,9 +919,10 @@ namespace core
 			// been in Shutdown since last tick from one that just
 			// entered it (#563).
 			auto const phaseBeforeSwitch = generator.phase;
-			switch (generator.phase)
+			// A zero-duration phase transition must not consume a whole
+			// integration interval before the crank can receive energy.
+			if (generator.phase == StationGeneratorPhase::Stopped)
 			{
-			case StationGeneratorPhase::Stopped:
 				generator.outputKW = 0.0;
 				if (commanded > 0.0)
 				{
@@ -945,6 +948,10 @@ namespace core
 							? StationGeneratorPhase::Starting : StationGeneratorPhase::Running;
 					}
 				}
+			}
+			switch (generator.phase)
+			{
+			case StationGeneratorPhase::Stopped:
 				break;
 			case StationGeneratorPhase::Starting:
 				generator.outputKW = 0.0;
@@ -1027,11 +1034,13 @@ namespace core
 					// move at most ramp x dt this tick, up or down, so
 					// no tick commands an instantaneous step the
 					// machine cannot physically make.
-					auto const maxStepKW = generator.authored.maxRampKWPerSecond * dtSeconds;
-					auto const targetKW = std::min({commanded, effectiveRatedKW,
-						connections.remaining(connections.port("Generator", generator.authored.id, "Generation"))});
-					generator.outputKW += std::max(-maxStepKW,
-						std::min(maxStepKW, targetKW - generator.outputKW));
+					auto const cableCapKW = connections.remaining(connections.port("Generator", generator.authored.id, "Generation"));
+					auto const startKW = std::min({generator.outputKW, effectiveRatedKW, cableCapKW});
+					auto const targetKW = std::min({commanded, effectiveRatedKW, cableCapKW});
+					auto const ramp = integrateGeneratorRamp(startKW, targetKW,
+						generator.authored.maxRampKWPerSecond, dtSeconds);
+					generator.outputKW = ramp.endpointKW;
+					generator.lastAverageOutputKW = ramp.meanKW;
 					// The outage ceiling is hard: a window that opens while
 					// the machine is above the reduced capacity clamps the
 					// output down at once, so no output continues through
@@ -1042,7 +1051,7 @@ namespace core
 					// Fuel feasibility: the fuel drawable above the
 					// protected reserve caps the output this tick. A
 					// generator with no fuel left cannot run at all.
-					auto const neededFuelKWh = generator.outputKW * hours / generator.authored.efficiency;
+					auto const neededFuelKWh = generator.lastAverageOutputKW * hours / generator.authored.efficiency;
 					if (neededFuelKWh > drawableKWh)
 					{
 						if (drawableKWh <= 1e-15)
@@ -1053,18 +1062,20 @@ namespace core
 							generator.shutdownElapsedSeconds = 0.0;
 							generator.outputKW = 0.0;
 							generator.lastBlockReason = "fuel depleted: generator shut down";
+							generator.lastAverageOutputKW = 0.0;
 							break;
 						}
-						generator.outputKW = drawableKWh * generator.authored.efficiency / hours;
+						generator.lastAverageOutputKW = drawableKWh * generator.authored.efficiency / hours;
+						generator.outputKW = std::min(generator.outputKW, generator.lastAverageOutputKW);
 					}
-					auto const drawnKWh = generator.outputKW * hours / generator.authored.efficiency;
+					auto const drawnKWh = generator.lastAverageOutputKW * hours / generator.authored.efficiency;
 					auto const drawnUnits = drawnKWh / kwhPerUnit;
 					qualified[generator.fuelStoreIndex] -= drawnUnits;
 					flowOut[generator.fuelStoreIndex] += drawnUnits;
 					stagedUnitLoss[runtime.stores[generator.fuelStoreIndex].authored.unit] += drawnUnits;
 					generator.lastFuelDrawKWh = drawnKWh;
 					auto const fuelKJ = drawnKWh * 3600.0;
-					auto const electricalKJ = generator.outputKW * dtSeconds;
+					auto const electricalKJ = generator.lastAverageOutputKW * dtSeconds;
 					// Waste heat is the fuel energy the conversion did
 					// not deliver as electricity: booked once into the
 					// sink, never also exported elsewhere.
@@ -1078,9 +1089,9 @@ namespace core
 					// The generator's output joins the shared pool the
 					// loads allocate against this tick - generation
 					// earned with fuel, not sunshine.
-					auto const toPoolKW = connections.send(connections.port("Generator", generator.authored.id, "Generation"), generator.outputKW).delivered;
+					auto const toPoolKW = connections.send(connections.port("Generator", generator.authored.id, "Generation"), generator.lastAverageOutputKW).delivered;
 					availableGeneration += toPoolKW; poolGenerationKW += toPoolKW;
-					totalGeneratorOutputKW += generator.outputKW;
+					totalGeneratorOutputKW += generator.lastAverageOutputKW;
 					totalGeneratorWasteKW += wasteKW;
 				}
 				break;

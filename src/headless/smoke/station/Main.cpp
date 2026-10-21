@@ -27,6 +27,7 @@ int main(int argc, char** argv)
 	registerStationLogisticsChecks(checks);
 	registerStationCoreChecks(checks);
 	registerStationClockChecks(checks);
+	registerStationRuntimeRegressionChecks(checks);
 	registerStationInvarianceChecks(checks);
 	registerStationProtectionChecks(checks);
 	registerStationEventSplitChecks(checks);
@@ -45,27 +46,31 @@ int main(int argc, char** argv)
 	registerStabilityChecks(checks);
 
 	std::vector<std::string_view> arguments;
-	uint32_t ratio = 1;
+	uint32_t ratio = core::StationSystemsSettings{}.systemsStepWorldTicks;
+	bool ratioRequested = false;
 	for (int index = 1; index < argc; ++index)
 	{
 		std::string_view argument(argv[index]);
 		if (argument != "--step-ratio") { arguments.push_back(argument); continue; }
 		if (++index == argc)
 		{
-			std::cerr << "ERROR station: usage: [--step-ratio <1..600>] [--list | --check <name>]\n";
+			std::cerr << "ERROR station: usage: [--step-ratio <1..60>] [--list | --check <name>]\n";
 			return 2;
 		}
+		ratioRequested = true;
 		auto const first = argv[index];
 		auto const last = first + std::char_traits<char>::length(first);
 		auto const parsed = std::from_chars(first, last, ratio);
 		if (parsed.ec != std::errc{} || parsed.ptr != last || ratio < 1
 			|| ratio > core::CORE_MAX_SYSTEMS_STEP_WORLD_TICKS)
 		{
-			std::cerr << "ERROR station: usage: [--step-ratio <1..600>] [--list | --check <name>]\n";
+			std::cerr << "ERROR station: usage: [--step-ratio <1..60>] [--list | --check <name>]\n";
 			return 2;
 		}
 	}
-	core::setStationSystemsRuntimeStepRatioOverrideForTesting(ratio);
-	std::cout << "RUN station step-ratio=" << ratio << '\n';
+	core::setStationSystemsRuntimeStepRatioOverrideForTesting(
+		ratioRequested ? std::optional<uint32_t>{ratio} : std::nullopt);
+	std::cout << "RUN station requested-step-ratio=" << (ratioRequested ? std::to_string(ratio) : "authored")
+		<< " (explicit-ratio comparisons own their clock)\n";
 	return smoke::run("station", checks, arguments, std::cout, std::cerr);
 }

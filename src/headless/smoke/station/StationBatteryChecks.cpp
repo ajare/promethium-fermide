@@ -218,7 +218,7 @@ namespace
 			}
 			// One settled sun tick with no headroom: nothing is drawn and
 			// the whole surplus stays visible.
-			require(smoke::station::advanceSeconds(eclipse, 0.0166666666667), "Saturated sun tick failed");
+			require(advanceStationSteps(eclipse, 1), "Saturated sun step failed");
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(approx(snap.power.batteryChargeKW, 0.0)
@@ -231,7 +231,8 @@ namespace
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(approx(snap.power.availableGenerationKW, 0.0)
-					&& hourTight(snap.power.batteries[0].storedKWh, 4.0)
+					&& hourTight(snap.power.batteries[0].storedKWh,
+						6.0 - 4.0 * (snap.elapsedSeconds - 5400.0) / 3600.0)
 					&& approx(snap.power.batteryDischargeKW, 4.0)
 					&& approx(snap.power.batteryShortfallKW, 2.0),
 					"Battery did not ride the eclipse deficit through the shared pool");
@@ -260,7 +261,7 @@ namespace
 			// The rest of the eclipse: the exhausted battery delivers
 			// nothing and the whole load stays unmet with the shortfall
 			// visible.
-			require(smoke::station::advanceSeconds(eclipse, 1799.81666667), "Post-exhaustion leg failed");
+			require(advanceToLastStepBefore(eclipse, 10800.0), "Post-exhaustion leg failed");
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(approx(snap.power.batteries[0].storedKWh, 2.0)
@@ -273,7 +274,7 @@ namespace
 			}
 			// Sunrise: charging resumes and the battery recovers above the
 			// reserve floor.
-			require(smoke::station::advanceSeconds(eclipse, 0.0166666666667), "Sunrise tick failed");
+			require(advanceStationSteps(eclipse, 1), "Sunrise step failed");
 			{
 				auto const snap = eclipse.getStationSystemsSnapshot();
 				require(!snap.power.batteries[0].atReserve
@@ -284,16 +285,21 @@ namespace
 			}
 			// Half an hour of sun brings it back to 3 kWh, then replay
 			// the whole run identically after reset.
-			require(smoke::station::advanceSeconds(eclipse, 1799.98333333), "Cycle continuation failed");
+			require(advanceSeconds(eclipse, 12600.0 - eclipse.getSimulationTick()
+				* static_cast<double>(core::World::getFixedTimestep())), "Cycle continuation failed");
 			eclipse.pauseSimulation();
 			auto const expected = eclipse.getStationSystemsSnapshot();
 			auto const expectedEvents = eclipse.getStationSystemsEvents();
-			require(expected.worldTick == 755999, "Cycle run did not reach the expected tick");
-			require(hourTight(expected.power.batteries[0].storedKWh, 3.0),
+			auto const replayTicks = eclipse.getSimulationTick();
+			require(expected.worldTick == (replayTicks + expected.systemsStepWorldTicks - 1)
+				/ expected.systemsStepWorldTicks, "Cycle run did not reach the expected Station step");
+			require(hourTight(expected.power.batteries[0].storedKWh,
+				2.0 + 2.0 * (expected.elapsedSeconds - 10800.0) / 3600.0),
 				"Recovery leg did not store 1 kWh");
 			eclipse.resetSimulation();
 			eclipse.resumeSimulation();
-			require(smoke::station::advanceSeconds(eclipse, 12599.9833333), "Eclipse battery replay failed");
+			require(advanceSeconds(eclipse, replayTicks * static_cast<double>(core::World::getFixedTimestep())),
+				"Eclipse battery replay failed");
 			require(eclipse.getStationSystemsSnapshot() == expected
 				&& eclipse.getStationSystemsEvents() == expectedEvents,
 				"Repeated eclipse battery cycles not deterministic after reset");

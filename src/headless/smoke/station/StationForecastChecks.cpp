@@ -92,6 +92,7 @@ namespace
 			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
 			world.resumeSimulation();
 			runOrDiagnose(world, 600, "forecast timely resupply"); // t = 10 s
+			auto const worldTickBeforeForecast = world.getSimulationTick();
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.forecast.available,
 				"the scenario forecast is not available for an enabled Station");
@@ -159,8 +160,11 @@ namespace
 				"computing the forecast mutated the live store inventory");
 			require(again.forecast == snap.forecast,
 				"the forecast is not a deterministic function of the committed state");
-			require(world.getSimulationTick() == snap.worldTick,
+			require(world.getSimulationTick() == worldTickBeforeForecast,
 				"computing the forecast advanced the World");
+			require(again.worldTick == snap.worldTick
+				&& again.elapsedSeconds == snap.elapsedSeconds,
+				"computing the forecast advanced the Station clock");
 			require(world.getStationSystemsDiagnostics().empty(),
 				"the forecast produced a Station diagnostic");
 			// Determinism across two identical worlds: the same scenario
@@ -1760,9 +1764,9 @@ namespace
 			world.resumeSimulation();
 			runOrDiagnose(world, 1200, "crew through-flow live run");
 			auto const live = world.getStationSystemsSnapshot();
-			require(approx(findStore(live.stores, "food")->currentQualified, 0.1 / 60.0, 1e-9)
+			require(approx(findStore(live.stores, "food")->currentQualified, 0.1 * live.systemsTimestepSeconds, 1e-9)
 				&& approx(findStore(live.stores, "urine")->currentQualified,
-					0.15 * (1199.0 / 60.0), 1e-2),
+					0.15 * (live.elapsedSeconds - live.systemsTimestepSeconds), 1e-2),
 				"the live crew did not run on the delivered through-flow");
 			require(!findForecast(live.forecast.stores, "food")->hasShortfall
 				&& approx(findForecast(live.forecast.stores, "food")->unmetOutflowTotal, 0.0),

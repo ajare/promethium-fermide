@@ -163,6 +163,16 @@ end
 -- amplifying their separation, and nothing driven below absolute zero by
 -- a stiff conductance. The heat a leaf gains is exactly the negation of
 -- what the reservoir gives up, so both ledgers close on the same number.
+local function integrateGeneratorRamp(startKW, targetKW, rampKWPerSecond, seconds)
+    local needed = math.abs(targetKW - startKW) / rampKWPerSecond
+    local rampSeconds = math.min(seconds, needed)
+    local direction = targetKW >= startKW and 1 or -1
+    local endpoint = seconds >= needed and targetKW or (startKW + direction * rampKWPerSecond * rampSeconds)
+    local mean = (startKW * 0.5 + endpoint * 0.5) * (rampSeconds / seconds)
+        + targetKW * ((seconds - rampSeconds) / seconds)
+    return endpoint, mean
+end
+
 local function solvePassiveExchange(leaves, reservoirCapacityKJPerK,
     reservoirTemperatureC, fixed_seconds)
     local weightedTemperatureKJ = 0
@@ -4045,7 +4055,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     local function applyCrews(self, elapsed, fixed_seconds)
         for _, crew in ipairs(self.crews) do
             local compartment = crew.compartment
-            local activity = evaluateProfile(crew.activity, elapsed)
+            local activity = evaluateProfile(crew.activity, profile_elapsed or elapsed)
             local crewSeconds = crew.crewCount * activity * fixed_seconds
             local foodRequested = crew.foodRate * crewSeconds
             local waterRequested = crew.waterRate * crewSeconds
@@ -4206,7 +4216,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             crew.lastUnmet = scale < 1 - 1e-12
         end
     end
-    local function applyAtmospheres(self, elapsed, fixed_seconds)
+    local function applyAtmospheres(self, elapsed, fixed_seconds, profile_elapsed)
         local cycles = {}
         for index = 1, #self.airlock_cycles do
             local cycle = self.airlock_cycles[index]
@@ -4425,16 +4435,23 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         for _, index in ipairs(self.conversion_order) do
             local conversion = self.conversions[index]
             local scale = 1.0
+            local bindingRate, bindingAmount = 0, 0
             for _, flow in ipairs(conversion.inputs) do
                 local requested = flow.rate * fixed_seconds
                 local drawable = math.max(0.0, flow.store.qualified - flow.store.protected_reserve)
-                scale = math.min(scale, drawable / requested)
+                local ratio = drawable / requested
+                if ratio < scale then
+                    scale, bindingRate, bindingAmount = ratio, flow.rate, drawable
+                end
             end
             for _, flow in ipairs(conversion.outputs) do
                 local produced = flow.rate * fixed_seconds
                 local headroom = flow.store.capacity
                     - (flow.store.qualified + flow.store.unqualified)
-                scale = math.min(scale, headroom / produced)
+                local ratio = headroom / produced
+                if ratio < scale then
+                    scale, bindingRate, bindingAmount = ratio, flow.rate, headroom
+                end
             end
             local funded, required = {}, {}
             for _, flow in ipairs(conversion.inputs) do
@@ -4445,16 +4462,17 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             end
             if unfundedConstituent(funded, required) ~= nil then scale = 0 end
             if scale > 0 then
+                local function completedRequest(flow)
+                    if bindingRate > 0 and flow.rate == bindingRate then return bindingAmount end
+                    return flow.rate * fixed_seconds * scale
+                end
                 local net = {}
                 for _, flow in ipairs(conversion.inputs) do
                     local requested = flow.rate * fixed_seconds
-                    -- #556: clamp each flow to its own drawable/headroom:
-                    -- requested * (limit / requested) can round one ulp
-                    -- above the limit under the fixed float timestep, so
-                    -- the binding flow completes exactly at its limit.
-                    -- Mirrors the host ledger.
+                    -- Preserve the exact binding dose and match equal-rate
+                    -- pathways without a rounded scale/rate round-trip.
                     local drawable = math.max(0.0, flow.store.qualified - flow.store.protected_reserve)
-                    local completed = math.min(requested * scale, drawable)
+                    local completed = math.min(completedRequest(flow), drawable)
                     -- #601: the conversion spends the input store's
                     -- actual blend, measured before the draw; the
                     -- drift it consumes is carried into the declared-
@@ -4470,7 +4488,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     local requested = flow.rate * fixed_seconds
                     local headroom = flow.store.capacity
                         - (flow.store.qualified + flow.store.unqualified)
-                    local completed = math.min(requested * scale, headroom)
+                    local completed = math.min(completedRequest(flow), headroom)
                     flow.store.qualified = flow.store.qualified + completed
                     flow.last_completed = completed
                     addConstituents(net, flow.store.composition,
@@ -4631,14 +4649,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         end
         load.materialReserved = true
     end
-    local function applyPower(self, elapsed, fixed_seconds)
+    local function applyPower(self, elapsed, fixed_seconds, profile_elapsed)
         -- Energy crossings use hours: a fixed tick is a fraction of a
         -- second, so its duration must be divided by 3600 before it
         -- multiplies or divides a kW value into kWh (#547).
         local fixed_hours = fixed_seconds / 3600
         local generation = 0
         for _, array in ipairs(self.solar) do
-            local illumination = evaluateProfile(array.illumination, elapsed)
+            local illumination = evaluateProfile(array.illumination, profile_elapsed or elapsed)
             local available = array.capacityKW > 0 and array.capacityKW * illumination or 0
             array.lastIllumination = illumination
             array.lastAvailable = available
@@ -4717,14 +4735,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         local command = math.min(cap, dispatch_remaining)
                         if command > 0 then
                             gen.dispatchCommand = command
-                            if gen.phase == 'running' then
-                                -- Only a running machine serves load
-                                -- this tick, and only within the ramp
-                                -- step it can climb from its current
-                                -- output. What it cannot reach is not
-                                -- booked: it flows on to the backup.
-                                local deliverable = math.min(command,
-                                    gen.outputKW + gen.rampKWPerSecond * fixed_seconds)
+                            if gen.phase == 'running' or (gen.phase == 'stopped' and startup_required <= 0) then
+                                -- Backups cover the actual interval-mean gap,
+                                -- not a fictitious ramp-endpoint delivery.
+                                local startKW = gen.phase == 'running' and math.min(gen.outputKW, effective_rated) or 0
+                                local _, meanKW = integrateGeneratorRamp(startKW, command, gen.rampKWPerSecond, fixed_seconds)
+                                local deliverable = math.min(fuel_cap, meanKW)
                                 if deliverable < 0 then deliverable = 0 end
                                 dispatch_remaining = dispatch_remaining - deliverable
                             elseif gen.phase == 'stopped' then
@@ -5002,6 +5018,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local startupRequiredKJ = gen.startupPowerKW * gen.startupSeconds
             gen.lastFuelDrawKWh = 0
             gen.lastWasteHeatKW = 0
+            gen.averageOutputKW = 0
             gen.lastStartupDrawKW = 0
             gen.lastStartupUnmetKW = 0
             gen.lastDecayHeatKW = 0
@@ -5039,7 +5056,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         end
                     end
                 end
-            elseif gen.phase == 'starting' then
+            end
+            if gen.phase == 'starting' then
                 gen.outputKW = 0
                 if not coolingAvailable then
                     -- Cooling lost mid-crank: the start fails. The
@@ -5115,10 +5133,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     -- move at most ramp x dt this tick, up or down, so
                     -- no tick commands an instantaneous step the machine
                     -- cannot physically make.
-                    local maxStepKW = gen.rampKWPerSecond * fixed_seconds
+                    local startKW = math.min(gen.outputKW, effectiveRatedKW)
                     local targetKW = math.min(commanded, effectiveRatedKW)
-                    gen.outputKW = gen.outputKW
-                        + math.max(-maxStepKW, math.min(maxStepKW, targetKW - gen.outputKW))
+                    gen.outputKW, gen.averageOutputKW = integrateGeneratorRamp(startKW, targetKW,
+                        gen.rampKWPerSecond, fixed_seconds)
                     -- The outage ceiling is hard: a window that opens
                     -- while the machine is above the reduced capacity
                     -- clamps the output down at once, so no output
@@ -5130,7 +5148,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     -- Fuel feasibility: the fuel drawable above the
                     -- protected reserve caps the output this tick. A
                     -- generator with no fuel left cannot run at all.
-                    local neededFuelKWh = gen.outputKW * fixed_hours / gen.efficiency
+                    local neededFuelKWh = gen.averageOutputKW * fixed_hours / gen.efficiency
                     if neededFuelKWh > drawableKWh then
                         if drawableKWh <= 1e-15 then
                             -- Fuel depletion stops electrical output
@@ -5139,19 +5157,21 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             gen.shutdownElapsed = 0
                             gen.outputKW = 0
                             gen.blockReason = 'fuel depleted: generator shut down'
+                            gen.averageOutputKW = 0
                         else
-                            gen.outputKW = drawableKWh * gen.efficiency / fixed_hours
+                            gen.averageOutputKW = drawableKWh * gen.efficiency / fixed_hours
+                            gen.outputKW = math.min(gen.outputKW, gen.averageOutputKW)
                         end
                     end
                     if gen.phase == 'running' then
-                        local drawnKWh = gen.outputKW * fixed_hours / gen.efficiency
+                        local drawnKWh = gen.averageOutputKW * fixed_hours / gen.efficiency
                         local drawnUnits = drawnKWh / kwhPerUnit
                         gen.fuelStore.qualified = gen.fuelStore.qualified - drawnUnits
                         self.unit_loss[gen.fuelStore.unit] =
                             (self.unit_loss[gen.fuelStore.unit] or 0) + drawnUnits
                         gen.lastFuelDrawKWh = drawnKWh
                         local fuelKJ = drawnKWh * 3600
-                        local electricalKJ = gen.outputKW * fixed_seconds
+                        local electricalKJ = gen.averageOutputKW * fixed_seconds
                         -- Waste heat is the fuel energy the conversion
                         -- did not deliver as electricity: booked once
                         -- into the sink, never also exported elsewhere.
@@ -5165,7 +5185,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         -- The generator's output joins the shared pool
                         -- the loads allocate against this tick -
                         -- generation earned with fuel, not sunshine.
-                        generation = generation + gen.outputKW
+                        generation = generation + gen.averageOutputKW
                     end
                 end
             else
@@ -5546,7 +5566,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local supplied = {}
         for _, index in ipairs(self.load_order) do
             local load = self.loads[index]
-            load.lastLevel = evaluateProfile(load.profile, elapsed)
+            load.lastLevel = evaluateProfile(load.profile, profile_elapsed or elapsed)
             load.requested = load.demandKW * load.lastLevel
             load.admitted = load.cooling == 'exported'
             -- #417: a load held in Shed draws nothing this tick - it is
@@ -7027,13 +7047,23 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 -- contribution, not the benign precondition - an
                 -- unfed, unsupplied or out-of-window culture never
                 -- spends replacement stock to heal.
-                local starving = math.max(0, feed.qualified - feed.protected_reserve) <= 0
+                -- Mirror the host's native-unit roundoff stress decision.
+                -- Do not clamp stock: even tiny residuals remain accounted.
+                local function exhausted(drawable, stock, reserve, dose)
+                    return drawable <= 2.220446049250313e-16 * math.max(stock, reserve, dose)
+                end
+                local starving = exhausted(math.max(0, feed.qualified - feed.protected_reserve),
+                    feed.qualified, feed.protected_reserve, fromKg(feed.unit, fullKg))
                 local stressComposition = effectiveCompositionOf(feed.composition,
                     toKg(feed.unit, feed.qualified + feed.unqualified), feed.drift)
-                local mediaRequired = proc.rateBasis ~= 'CompositionDerived'
-                    or microbialRates(proc, stressComposition).consumable > 0
-                local mediaExhausted = mediaRequired and math.max(0,
-                    consumable.qualified - consumable.protected_reserve) <= 0
+                local stressRates = microbialRates(proc, stressComposition)
+                local derivedStress = proc.rateBasis == 'CompositionDerived'
+                local mediaRequired = not derivedStress or stressRates.consumable > 0
+                local mediumDose = fullKg * (derivedStress
+                    and fromKg(consumable.unit, stressRates.consumable) or stressRates.consumable)
+                local mediaExhausted = mediaRequired and exhausted(math.max(0,
+                    consumable.qualified - consumable.protected_reserve),
+                    consumable.qualified, consumable.protected_reserve, mediumDose)
                 local coldStressed = proc.sink.temperature + 1e-9
                     < proc.minOperatingTemperatureC
                 local heatStressed = proc.sink.temperature + 1e-9
@@ -7526,7 +7556,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 -- model recreates living biomass for free (#410).
                 crop.lastBlockReason = 'population is dead: the living organic content was respired away under adverse conditions and nothing here recreates living biomass for free'
             elseif crop.growingAreaM2 > 0 then
-                crop.lastIllumination = evaluateProfile(crop.illumination, elapsed)
+                crop.lastIllumination = evaluateProfile(crop.illumination, profile_elapsed or elapsed)
                 crop.lastLightRequested = crop.lampRatedKW * crop.lastIllumination
                 crop.lastCirculationRequested = crop.circulationPowerKW
                 -- #416: the essential circulation was already drawn from
@@ -8109,7 +8139,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 -- model recreates living biomass for free (#411).
                 culture.lastBlockReason = 'culture is dead: the living organic content was respired away under adverse conditions and nothing here recreates living biomass for free'
             elseif culture.cultureVolumeL > 0 then
-                culture.lastIllumination = evaluateProfile(culture.illumination, elapsed)
+                culture.lastIllumination = evaluateProfile(culture.illumination, profile_elapsed or elapsed)
                 culture.lastLightRequested = culture.lampRatedKW * culture.lastIllumination
                 culture.lastCirculationRequested = culture.circulationPowerKW
                 -- #416: the essential culture circulation was already
@@ -9527,7 +9557,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             bufferDischargeTotal = bufferDischargeTotal + buffer.lastDischarge
         end
         for _, gen in ipairs(self.generators) do
-            generatorOutputTotal = generatorOutputTotal + gen.outputKW
+            generatorOutputTotal = generatorOutputTotal + (gen.averageOutputKW or 0)
             generatorStartupTotal = generatorStartupTotal + gen.lastStartupDrawKW
             generatorWasteTotal = generatorWasteTotal + gen.lastWasteHeatKW
             generatorDecayTotal = generatorDecayTotal + gen.lastDecayHeatKW
@@ -10053,14 +10083,124 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- isolation run right behind the outage pass, mirroring the
         -- host ledger order (#414).
         applyMaintenance(self, elapsed, fixed_seconds)
-        applyPower(self, elapsed, fixed_seconds)
-        -- Compartments run after the loops/chillers and before thermal
-        -- integration: the compartment exchange must land inside this
-        -- tick's reservoir integration, matching the host order (#400).
-        applyAtmospheres(self, elapsed, fixed_seconds)
-        applyThermal(self, fixed_seconds)
-        applyTransfers(self, fixed_seconds)
-        applyConversions(self, fixed_seconds)
+        -- Mirror the host's profile-event integration. All forcing profiles
+        -- share one timeline; averaging solar and demand independently would
+        -- invent power when their active windows do not overlap.
+        local cursor = (station_step - 1) * fixed_seconds
+        local boundaries = {elapsed}
+        local function collectProfile(profile)
+            if profile.periodSeconds <= 0 or #profile.segments == 0 then return end
+            for i, segment in ipairs(profile.segments) do
+                local previous = profile.segments[(i - 2) % #profile.segments + 1]
+                if segment.level ~= previous.level then
+                    local first = math.max(0, math.floor((cursor - segment.startSeconds) / profile.periodSeconds) + 1)
+                    local last = math.floor((elapsed - segment.startSeconds) / profile.periodSeconds)
+                    assert(last < first or (last < 9007199254740992 and last - first < 65536
+                        and #boundaries + last - first + 1 <= 65537), 'profile transition limit exceeded')
+                    for cycle = first, last do
+                        local instant = cycle * profile.periodSeconds + segment.startSeconds
+                        if instant > cursor and instant < elapsed then boundaries[#boundaries + 1] = instant end
+                    end
+                end
+            end
+        end
+        for _, array in ipairs(self.solar) do
+            if array.capacityKW > 0 then collectProfile(array.illumination) end
+        end
+        for _, load in ipairs(self.loads) do
+            local active = load.demandKW > 0 or load.heatKW > 0
+            for _, exchange in ipairs(load.exchanges) do active = active or exchange.rate > 0 end
+            if active then collectProfile(load.profile) end
+        end
+        for _, crew in ipairs(self.crews) do
+            if crew.crewCount > 0 then collectProfile(crew.activity) end
+        end
+        for _, crop in ipairs(self.crop_populations) do
+            if crop.growingAreaM2 > 0 then collectProfile(crop.illumination) end
+        end
+        for _, culture in ipairs(self.algae_cultures) do
+            if culture.cultureVolumeL > 0 then collectProfile(culture.illumination) end
+        end
+        table.sort(boundaries)
+        local blockedStarts = {}
+        for _, instant in ipairs(boundaries) do
+            while instant > cursor do
+                local nextInstant = instant
+                -- The surge occupies real time at full power. Do not smear
+                -- its final fraction over normal service after completion.
+                for _, load in ipairs(self.loads) do
+                    if load.recoveryStage == 'restoring' and load.restartSurgePowerKW > 0
+                        and load.surgeRemaining > 0 and cursor + load.surgeRemaining > cursor then
+                        nextInstant = math.min(nextInstant, cursor + load.surgeRemaining)
+                    end
+                end
+                for i, gen in ipairs(self.generators) do
+                    local crossing = 0
+                    if gen.ratedKW > 0 then
+                        if gen.phase == 'starting' and gen.startupPowerKW > 0 then
+                            crossing = (gen.startupPowerKW * gen.startupSeconds - gen.startupReceivedKJ) / gen.startupPowerKW
+                        elseif gen.phase == 'stopped' and not blockedStarts[i] and gen.startupPowerKW > 0
+                            and (gen.commandedKW > 0 or self.dispatch_automatic) then
+                            crossing = gen.startupSeconds
+                        elseif gen.phase == 'running' or (gen.phase == 'stopped' and not blockedStarts[i]
+                            and gen.startupPowerKW * gen.startupSeconds <= 0) then
+                            local command = self.dispatch_automatic and gen.dispatchCommand or gen.commandedKW
+                            local target = math.min(command, gen.ratedKW * installationAvailability(gen))
+                            local start = gen.phase == 'running' and gen.outputKW or 0
+                            if command > 0 then crossing = math.abs(target - start) / gen.rampKWPerSecond end
+                        end
+                    end
+                    if crossing > 0 and cursor + crossing > cursor then
+                        nextInstant = math.min(nextInstant, cursor + crossing)
+                    end
+                end
+                local qualificationBoundary = nil
+                if not self.dispatch_automatic and #self.batteries == 0 and #self.fuel_cells == 0 then
+                    local available, slope = 0, 0
+                    for _, array in ipairs(self.solar) do
+                        available = available + array.capacityKW * evaluateProfile(array.illumination,
+                            cursor + (nextInstant - cursor) * 0.5)
+                    end
+                    for i, gen in ipairs(self.generators) do
+                        if gen.commandedKW > 0 and gen.ratedKW * installationAvailability(gen) > 0
+                            and gen.heatSink.temperature + 1e-9 < gen.maxSinkTemperatureC
+                            and gen.fuelStore.qualified > gen.fuelStore.protected_reserve then
+                            if gen.phase == 'running' or (gen.phase == 'stopped' and not blockedStarts[i]
+                                and gen.startupPowerKW * gen.startupSeconds <= 0) then
+                                local cap = gen.ratedKW * installationAvailability(gen)
+                                local start = gen.phase == 'running' and math.min(gen.outputKW, cap) or 0
+                                local target = math.min(gen.commandedKW, cap)
+                                local endpoint = integrateGeneratorRamp(start, target, gen.rampKWPerSecond, nextInstant - cursor)
+                                available = available + start
+                                slope = slope + (endpoint - start) / (nextInstant - cursor)
+                            elseif (gen.phase == 'stopped' or gen.phase == 'starting')
+                                and gen.startupPowerKW * gen.startupSeconds > 0 then
+                                local crossing = slope ~= 0 and (gen.startupPowerKW - available) / slope or 0
+                                if crossing > 0 and cursor + crossing > cursor and cursor + crossing <= nextInstant then
+                                    nextInstant = cursor + crossing
+                                    qualificationBoundary = nextInstant
+                                end
+                                if available + 1e-9 >= gen.startupPowerKW then available = available - gen.startupPowerKW end
+                            end
+                        end
+                    end
+                end
+                local duration = nextInstant - cursor
+                local profile_elapsed = cursor + duration * 0.5
+                applyPower(self, nextInstant, duration, profile_elapsed)
+                -- Compartments exchange energy before thermal integration.
+                applyAtmospheres(self, nextInstant, duration, profile_elapsed)
+                applyThermal(self, duration)
+                applyTransfers(self, duration)
+                applyConversions(self, duration)
+                for i, gen in ipairs(self.generators) do
+                    if gen.phase == 'stopped' then blockedStarts[i] = true end
+                end
+                if nextInstant == qualificationBoundary then blockedStarts = {} end
+                cursor = nextInstant
+            end
+            blockedStarts = {}
+        end
         checkFiniteLimits(self)
         checkConservation(self)
         checkConstituentConservation(self)

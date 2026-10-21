@@ -439,7 +439,7 @@ void dispatch(smoke::Context const&)
 			"the slow-ramp generator never reached Running");
 		require(power.generators[0].outputKW > 1.5 && power.generators[0].outputKW < 2.5,
 			"the slow ramp did not hold to its ramp-limited output");
-		require(approx(power.generators[0].outputKW + snap.fuelCells[0].lastOutputKW, 6.0, 1e-6),
+		require(approx(power.generators[0].averageOutputKW + snap.fuelCells[0].lastOutputKW, 6.0, 1e-6),
 			"the backup did not carry exactly the ramp-limited difference");
 		require(approx(power.dispatchCommittedKW, 6.0, 1e-6),
 			"the committed account did not match what the sources deliver");
@@ -1412,7 +1412,12 @@ void protectedServices(smoke::Context const&)
 		runOrDiagnose(*world, 1, "chiller credit run");
 		return world;
 	};
-	auto const tickHours = static_cast<double>(core::World::getFixedTimestep()) / 3600.0;
+	auto const creditStepSeconds = smoke::station::requestedStepSeconds();
+	auto const tickHours = creditStepSeconds / 3600.0;
+	// Leave the loop at 5 C before the 1 kW pump heats it. For the
+	// implicit two-body solve, Q=15 kJ and G*dt = Q/(40-Q*(1/Cloop+1/Csink)).
+	// This is a step-relative accounting rig, not a convergence fixture.
+	auto const partialConductance = 15.0 / (creditStepSeconds * (40.0 - 15.0 * (1.0 + 1.0 / 10000.0)));
 	// The exchange leaves the cold loop no extractable heat: the whole
 	// 2 kW work reservation has no consumer, so it returns to the bus
 	// as surplus, the protected account reports only the pump as
@@ -1455,7 +1460,7 @@ void protectedServices(smoke::Context const&)
 	// duty that really moves, only the remainder returns, and every
 	// ledger agrees on that one number.
 	{
-		auto world = creditRun(3.0, 36.0, false, true);
+		auto world = creditRun(3.0, partialConductance, false, true);
 		auto const& snap = world->getStationSystemsSnapshot();
 		auto const work = snap.chillers[0].powerSuppliedKW;
 		require(work > 0.5 && work < 2.0,
@@ -1497,7 +1502,7 @@ void protectedServices(smoke::Context const&)
 	// battery discharges exactly the pump plus the work that moved, and
 	// the unused remainder of its draw is back in storage.
 	{
-		auto world = creditRun(0.0, 36.0, true, false);
+		auto world = creditRun(0.0, partialConductance, true, false);
 		auto const& snap = world->getStationSystemsSnapshot();
 		auto const work = snap.chillers[0].powerSuppliedKW;
 		require(work > 0.5 && work < 2.0,
@@ -2005,15 +2010,23 @@ void recovery(smoke::Context const& context)
 			auto const& l = loadSnap(world, "thwarted");
 			require(l.recoveryStage == core::StationLoadRecoveryStage::Shed,
 				"the restart ran although the supply collapsed before execution");
-			require(l.suppliedKW <= 1e-9,
-				"the collapsed restart consumed operating power");
-			require(l.recoverySurgeKW <= 1e-9,
-				"the collapsed restart drew surge power");
-			// The failed attempt re-armed the full five-second dwell.
-			require(l.recoverySecondsRemaining > 4.9,
+			// The full-supply window ends at 10.001 s. Interval means
+			// may include real service before that collapse, but no more
+			// than its 1 ms window at 1 kW operating + 1 kW surge.
+			auto const dt = world.getStationSystemsSnapshot().systemsTimestepSeconds;
+			require(l.suppliedKW * dt <= 0.001 + 1e-9,
+				"the collapsed restart consumed power outside the funded window");
+			require(l.recoverySurgeKW * dt <= 0.001 + 1e-9,
+				"the collapsed restart drew surge outside the funded window");
+			// A refused restart re-arms dwell; the rest of this interval ages it.
+			require(l.recoverySecondsRemaining >= 5.0 - dt - 1e-9,
 				"the failed restart did not restart the declared dwell");
 		}
-		runOrDiagnose(world, 600, "recovery I restored"); // t = 20s, sun restored, dwell elapsed
+		require(smoke::station::advanceStationSteps(world, 1), "recovery I dark interval failed");
+		require(loadSnap(world, "thwarted").suppliedKW <= 1e-9
+			&& loadSnap(world, "thwarted").recoverySurgeKW <= 1e-9,
+			"the collapsed restart consumed power during a wholly unfunded interval");
+		runOrDiagnose(world, 600, "recovery I restored"); // supply restored and dwell elapsed
 		require(loadSnap(world, "thwarted").recoveryStage == core::StationLoadRecoveryStage::Active,
 			"the load did not restart once the supply and the full dwell were behind it");
 	}
@@ -2052,8 +2065,11 @@ void recovery(smoke::Context const& context)
 			{
 				require(l.suppliedKW >= 2.0 - 1e-9,
 					"the funded restart curtailed normal service below its minimum operable level");
-				require(l.suppliedKW <= 3.0 + 1e-6,
-					"the funded restart took normal service the surge still needed");
+				// While the 2 kW surge is active, normal service is
+				// 3 kW; after it ends, normal service is 4 kW. The
+				// published interval means must reflect both portions.
+				require(closeTo(l.suppliedKW, 4.0 - 0.5 * l.recoverySurgeKW),
+					"the funded restart borrowed power across the surge completion boundary");
 				sawCurtailedSurge = true;
 			}
 			surgeEnergy += l.recoverySurgeKW * core::World::getFixedTimestep();
@@ -2105,12 +2121,16 @@ void recovery(smoke::Context const& context)
 		auto driveSurge = [&](core::World& world, int ticks)
 		{
 			SurgeRun run;
+			auto observedStep = world.getStationSystemsSnapshot().worldTick;
 			for (int tick = 1; tick <= ticks; ++tick)
 			{
 				runOrDiagnose(world, 1, "recovery K");
+				auto const snap = world.getStationSystemsSnapshot();
+				if (snap.worldTick == observedStep) continue;
+				observedStep = snap.worldTick;
 				auto const& l = loadSnap(world, "surger");
 				run.trace.push_back(l.recoverySurgeKW);
-				run.energy += l.recoverySurgeKW * core::World::getFixedTimestep();
+				run.energy += l.recoverySurgeKW * snap.systemsTimestepSeconds;
 				if (l.recoverySurgeKW > 1e-9) run.surgeTicks += 1;
 			}
 			return run;
@@ -2137,6 +2157,24 @@ void recovery(smoke::Context const& context)
 			require(closeTo(first.energy, replay.energy, 1e-12),
 				"the surge energy is not deterministic across a reset/replay");
 		};
+		auto checkSurgeSchedule = [&](SurgeRun const& run, double duration)
+		{
+			auto const dt = smoke::station::requestedStepSeconds();
+			auto remaining = duration;
+			size_t count = 0;
+			for (auto const kw : run.trace)
+				if (kw > 1e-9)
+				{
+					auto const window = std::min(dt, remaining);
+					require(closeTo(kw, window / dt, 1e-6),
+						"the surge's final interval was not prorated to its real duration");
+					remaining -= window;
+					++count;
+				}
+			require(count == static_cast<size_t>(std::ceil(duration / dt))
+				&& std::abs(remaining) < 1e-9,
+				"the surge occupied the wrong number of Station intervals");
+		};
 		// Sub-tick surge: a 0.01 s budget is shorter than one tick and
 		// is paid whole in a single prorated tick, never as a full-tick
 		// purchase.
@@ -2150,7 +2188,7 @@ void recovery(smoke::Context const& context)
 				"the sub-tick surge delivered a different energy than was authored");
 			for (auto const kw : first.trace)
 				if (kw > 1e-9)
-					require(closeTo(kw, 1.0 * 0.01 / core::World::getFixedTimestep(), 1e-6),
+					require(closeTo(kw, 1.0 * 0.01 / world.getStationSystemsSnapshot().systemsTimestepSeconds, 1e-6),
 						"the sub-tick surge was not prorated to the remaining window");
 			require(loadSnap(world, "surger").recoveryStage == core::StationLoadRecoveryStage::Active,
 				"the sub-tick surge did not settle the load to Active");
@@ -2167,17 +2205,9 @@ void recovery(smoke::Context const& context)
 			core::World world("RecK-ticket", 2, 2);
 			runSurgeRig(world, 0.02);
 			auto const first = driveSurge(world, 330);
-			require(first.surgeTicks == 2,
-				"a 0.02 s surge did not draw exactly one full tick and one partial tick");
+			checkSurgeSchedule(first, 0.02);
 			require(closeTo(first.energy, 1.0 * 0.02, 1e-6),
 				"the partial-tick surge delivered a different energy than was authored");
-			std::vector<double> drawn;
-			for (auto const kw : first.trace)
-				if (kw > 1e-9) drawn.push_back(kw);
-			require(drawn.size() == 2
-				&& closeTo(drawn[0], 1.0, 1e-6)
-				&& closeTo(drawn[1], 0.2, 1e-6),
-				"the partial final tick of the surge was not prorated to the remainder");
 			checkBattery(world, first.energy, "ticket-shaped surge");
 			world.resetSimulation(); world.resumeSimulation();
 			auto const replay = driveSurge(world, 330);
@@ -2190,19 +2220,9 @@ void recovery(smoke::Context const& context)
 			core::World world("RecK-partial", 2, 2);
 			runSurgeRig(world, 0.055);
 			auto const first = driveSurge(world, 330);
-			require(first.surgeTicks == 4,
-				"a 0.055 s surge did not draw three full ticks and one partial tick");
+			checkSurgeSchedule(first, 0.055);
 			require(closeTo(first.energy, 1.0 * 0.055, 1e-6),
 				"the partial-tick surge delivered a different energy than was authored");
-			std::vector<double> drawn;
-			for (auto const kw : first.trace)
-				if (kw > 1e-9) drawn.push_back(kw);
-			require(drawn.size() == 4
-				&& closeTo(drawn[0], 1.0, 1e-6)
-				&& closeTo(drawn[1], 1.0, 1e-6)
-				&& closeTo(drawn[2], 1.0, 1e-6)
-				&& closeTo(drawn[3], 0.3, 1e-6),
-				"the partial final tick of the surge was not prorated to the remainder");
 			checkBattery(world, first.energy, "multi-tick partial-tail surge");
 			world.resetSimulation(); world.resumeSimulation();
 			auto const replay = driveSurge(world, 330);
@@ -2459,26 +2479,17 @@ void recovery(smoke::Context const& context)
 			require(snap.power.totalSuppliedKW + 1e-9
 				>= l.suppliedKW + l.recoverySurgeKW,
 				"the supplied total did not count the split-funded surge");
-			if (l.recoverySurgeKW > 0.9)
+			if (l.recoverySurgeKW > 1e-9)
 			{
-				// Full-surge ticks: generation carries 0.5 kW of the surge
-				// and the battery the other half, exactly once. The last,
-				// prorated tick of the surge budget carries the same split
-				// against its shortened slice.
-				auto const expectedBatteryShare = std::max(0.0, l.recoverySurgeKW - 0.5);
+				// Generation and battery each supply half the instantaneous
+				// surge. That split also holds for the interval means when
+				// the surge occupies only part of this Station step.
+				auto const expectedBatteryShare = 0.5 * l.recoverySurgeKW;
 				require(std::abs(snap.power.batteryDischargeKW - expectedBatteryShare) <= 1e-6,
 					"the battery's half of the split surge was not booked exactly once");
 				require(std::abs(l.suppliedKW - 2.0) <= 1e-9,
 					"the split surge disturbed the load's normal service");
 				sawSplitSurge = true;
-			}
-			else if (l.recoverySurgeKW > 1e-9)
-			{
-				// The prorated tail fits inside generation's leftover, so
-				// the battery never delivers more than its half-share.
-				auto const expectedBatteryShare = std::max(0.0, l.recoverySurgeKW - 0.5);
-				require(std::abs(snap.power.batteryDischargeKW - expectedBatteryShare) <= 1e-6,
-					"the battery delivered beyond its share of the surge tail");
 			}
 		}
 		require(sawSplitSurge, "the surge never ran split between generation and battery");
@@ -2532,7 +2543,9 @@ void recovery(smoke::Context const& context)
 					"the station-wide discharge is not the sum of the banks' delivery");
 				// Declaration-order routing: the small bank takes the surge
 				// first, up to its power limit.
-				auto const expectedSmall = std::min(l.recoverySurgeKW, 0.4);
+				// The 0.4 kW bank supplies 40% of the active 1 kW
+				// surge, even when the burst is shorter than this step.
+				auto const expectedSmall = 0.4 * l.recoverySurgeKW;
 				require(std::abs(snap.power.batteries[0].lastDischargeKW - expectedSmall) <= 1e-9,
 					"the surge did not route through the banks in declaration order");
 				// Nothing went unserved, so the station-wide shortfall is

@@ -8,6 +8,7 @@ namespace
 	void atmospheres(smoke::Context const&)
 	{
 		auto const dt = static_cast<double>(core::World::getFixedTimestep());
+		auto const stationDt = requestedStepSeconds();
 		auto const approx = [](double actual, double expected, double tolerance = 1e-6)
 		{ return std::abs(actual - expected) <= tolerance; };
 		auto sawEvent = [](core::World& world, std::string const& needle)
@@ -207,8 +208,9 @@ namespace
 			require(atmosConfigure(world, { compartment }).first, "leaky atmosphere refused");
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 10.0), "leak run failed");
-			auto const& hold = world.getStationSystemsSnapshot().atmospheres[0];
-			auto const leakedExpected = 0.06 * 600.0 * dt;
+			auto const leakSnapshot = world.getStationSystemsSnapshot();
+			auto const& hold = leakSnapshot.atmospheres[0];
+			auto const leakedExpected = 0.06 * leakSnapshot.elapsedSeconds;
 			require(approx(hold.leakedKg, leakedExpected, 1e-9),
 				"leaked mass does not match the authored rate times elapsed time");
 			require(approx(hold.oxygenKg + hold.nitrogenKg, 100.0 - leakedExpected, 1e-9),
@@ -230,7 +232,7 @@ namespace
 			require(atmosConfigure(world, { compartment }).first, "draining atmosphere refused");
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 10.0), "drain run failed");
-			auto const& tiny = world.getStationSystemsSnapshot().atmospheres[0];
+			auto const tiny = world.getStationSystemsSnapshot().atmospheres[0];
 			require(std::abs(tiny.oxygenKg) < 1e-9 && std::abs(tiny.nitrogenKg) < 1e-9,
 				"the leak did not drain the compartment to empty");
 			require(approx(tiny.leakedKg, 0.5, 1e-9),
@@ -252,7 +254,7 @@ namespace
 			require(atmosConfigure(world, { compartment }).first, "starved atmosphere refused");
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 2.0), "starved run failed");
-			auto const& small = world.getStationSystemsSnapshot().atmospheres[0];
+			auto const small = world.getStationSystemsSnapshot().atmospheres[0];
 			require(std::abs(small.oxygenKg) < 1e-9, "oxygen draw went below zero inventory");
 			require(small.lastOxygenUnmetKg > 0.0,
 				"the oxygen shortfall is not visible as unmet demand");
@@ -278,7 +280,7 @@ namespace
 				100.0, 20.0, 80.0, 0.0, 3.0, 20.0) }).first, "vapour compartment refused");
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 0.0166666666667), "vapour run failed");
-			auto const& steam = world.getStationSystemsSnapshot().atmospheres[0];
+			auto const steam = world.getStationSystemsSnapshot().atmospheres[0];
 			// #564: the constraint is the saturation at the published,
 			// coupled end-of-tick temperature - the latent heat warmed the
 			// air, so the capacity it holds is larger than the tick-start
@@ -338,7 +340,7 @@ namespace
 			// free tick would leave it. The exchange is the implicit star
 			// solve against the cold bus, so the free end temperature is
 			// known in closed form.
-			auto const weightKJPerK = dt * 30.0 / (1.0 + dt * 30.0 / 1.0);
+			auto const weightKJPerK = stationDt * 30.0 / (1.0 + stationDt * 30.0 / 1.0);
 			auto const coupledBusC = (1000.0 * 0.0 + weightKJPerK * 20.0)
 				/ (1000.0 + weightKJPerK);
 			auto const freeTemperatureC = 20.0 + weightKJPerK * (coupledBusC - 20.0) / 1.0;
@@ -383,8 +385,9 @@ namespace
 				"latent inertia setup refused");
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 5.0), "latent inertia run failed");
-			auto const& wetAir = world.getStationSystemsSnapshot().atmospheres[0];
-			auto const& dryAir = world.getStationSystemsSnapshot().atmospheres[1];
+			auto const phaseSnapshot = world.getStationSystemsSnapshot();
+			auto const& wetAir = phaseSnapshot.atmospheres[0];
+			auto const& dryAir = phaseSnapshot.atmospheres[1];
 			require(wetAir.condensedKg > 0.0 && dryAir.condensedKg == 0.0,
 				"the latent inertia comparison did not condense only the wet air");
 			require(wetAir.temperatureC > dryAir.temperatureC + 0.5,
@@ -416,7 +419,7 @@ namespace
 				{ reservoir("hot", 1000.0, 40.0) }).first, "heating setup refused");
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 10.0), "heating run failed");
-			auto const& air = world.getStationSystemsSnapshot().atmospheres[0];
+			auto const air = world.getStationSystemsSnapshot().atmospheres[0];
 			require(air.temperatureC > 25.0, "the warm bus did not heat the air");
 			require(air.condensedKg == 0.0 && air.lastVapourCondensedKg == 0.0,
 				"warming air booked condensation it should not have");
@@ -639,11 +642,12 @@ namespace
 			// passive exchange may move however stiff the conductance.
 			auto const effectiveCapacityKJPerK = 0.5;
 			auto previousGapK = 20.0;
-			for (int tick = 0; tick < 120; ++tick)
+			for (uint64_t tick = 0; tick < static_cast<uint64_t>(std::ceil(2.0 / stationDt)); ++tick)
 			{
-				require(smoke::station::advanceSeconds(world, 0.0166666666667), "stiff air tick failed");
-				auto const& air = world.getStationSystemsSnapshot().atmospheres[0];
-				auto const& bus = world.getStationSystemsSnapshot().thermal.reservoirs[0];
+				require(advanceStationSteps(world, 1), "stiff air step failed");
+				auto const snapshot = world.getStationSystemsSnapshot();
+				auto const& air = snapshot.atmospheres[0];
+				auto const& bus = snapshot.thermal.reservoirs[0];
 				// The air never leaves the range the exchange started in:
 				// no plunge below the cold side, no overshoot past its own
 				// starting warmth, and nothing near absolute zero.
@@ -662,7 +666,7 @@ namespace
 				require(gapK >= -1e-9, "stiff exchange reversed warm air and cold bus");
 				require(gapK <= previousGapK + 1e-9,
 					"stiff exchange amplified the air/bus separation");
-				require(std::abs(air.lastExchangeIntoCompartmentKW) * dt
+				require(std::abs(air.lastExchangeIntoCompartmentKW) * stationDt
 					<= effectiveCapacityKJPerK * previousGapK + 1e-9,
 					"air exchange moved more heat than the pair's equilibrium allows");
 				require(approx(bus.atmosphereEnergyKJ, -air.exchangedEnergyKJ, 1e-6),
@@ -711,9 +715,9 @@ namespace
 			std::string diagnostic;
 			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
 			world.resumeSimulation();
-			for (int tick = 0; tick < 60; ++tick)
+			for (uint64_t tick = 0; tick < static_cast<uint64_t>(std::ceil(1.0 / stationDt)); ++tick)
 			{
-				require(smoke::station::advanceSeconds(world, 0.0166666666667), "shared air/loop tick failed");
+				require(advanceStationSteps(world, 1), "shared air/loop step failed");
 				auto const& snapshot = world.getStationSystemsSnapshot();
 				auto const& bus = snapshot.thermal.reservoirs[0];
 				auto const& air = snapshot.atmospheres[0];
@@ -737,11 +741,11 @@ namespace
 		// the starting range and never reverses, while the host reports
 		// the exact tick-one exchange the closed form predicts.
 		{
-			auto const coupling = dt * 100.0 / 1.0;
-			auto const weightKJPerK = dt * 100.0 / (1.0 + coupling);
+			auto const coupling = stationDt * 100.0 / 1.0;
+			auto const weightKJPerK = stationDt * 100.0 / (1.0 + coupling);
 			auto const coupledTemperatureC = (1.0 * 0.0 + weightKJPerK * 20.0)
 				/ (1.0 + weightKJPerK);
-			auto const expectedExchangeKW = weightKJPerK * (coupledTemperatureC - 20.0) / dt;
+			auto const expectedExchangeKW = weightKJPerK * (coupledTemperatureC - 20.0) / stationDt;
 			char literal[64];
 			std::snprintf(literal, sizeof(literal), "%.17g", expectedExchangeKW);
 			auto const expectedLiteral = std::string(literal);
@@ -797,9 +801,9 @@ namespace
 			require(atmosConfigure(world, { compartment }).first, "occupancy heat refused");
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 10.0), "occupancy heat run failed");
-			auto const& crew = world.getStationSystemsSnapshot().atmospheres[0];
-			// 4 x 0.1 kW for 10 s into 10000 kJ/K: +0.004 C.
-			require(approx(crew.temperatureC, 20.0 + 0.4 * 10.0 / 10000.0, 1e-9),
+			auto const occupancySnapshot = world.getStationSystemsSnapshot();
+			auto const& crew = occupancySnapshot.atmospheres[0];
+			require(approx(crew.temperatureC, 20.0 + 0.4 * occupancySnapshot.elapsedSeconds / 10000.0, 1e-9),
 				"occupant sensible heat did not integrate as authored");
 			require(crew.temperatureC > crew.startingTemperatureC,
 				"initial versus current temperature does not show the drift");
@@ -851,7 +855,6 @@ namespace
 	// Heat-only interfaces move heat, never mass.
 	void containment(smoke::Context const&)
 	{
-		auto const dt = static_cast<double>(core::World::getFixedTimestep());
 		auto approx = [](double actual, double expected)
 		{
 			auto const tolerance = 1e-6 * std::max(1.0, std::abs(expected));
@@ -964,8 +967,8 @@ namespace
 					"a cross-class treatment was refused at configuration");
 				crossWorld.resumeSimulation();
 				require(smoke::station::advanceSeconds(crossWorld, 1.0), "cross-class treatment run failed");
-				auto const elapsed = 60.0 * dt;
 				auto const snap = crossWorld.getStationSystemsSnapshot();
+				auto const elapsed = snap.elapsedSeconds;
 				require(snap.waterTreatments.size() == 1,
 					"cross-class treatment missing from snapshot");
 				auto const processed = 0.001 * elapsed;
@@ -1005,13 +1008,13 @@ namespace
 				"a cross-class transfer pair was refused at configuration");
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 1.0), "cross-class transfer run failed");
-			auto const elapsed = 60.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
+			auto const elapsed = snap.elapsedSeconds;
 			require(snap.transfers.size() == 2, "cross-class transfers missing from snapshot");
-			require(approx(snap.transfers[0].lastCompleted, 0.001 * dt)
+			require(approx(snap.transfers[0].lastCompleted, 0.001 * snap.systemsTimestepSeconds)
 				&& snap.transfers[0].status == core::StationTransferStatus::Full,
 				"the normal-to-hazardous transfer did not run at full rate");
-			require(approx(snap.transfers[1].lastCompleted, 0.002 * dt)
+			require(approx(snap.transfers[1].lastCompleted, 0.002 * snap.systemsTimestepSeconds)
 				&& snap.transfers[1].status == core::StationTransferStatus::Full,
 				"the hazardous-to-normal transfer did not run at full rate");
 			require(approx(findStore(snap, "hazReserve").currentQualified, 0.001 * elapsed),
@@ -1057,14 +1060,14 @@ namespace
 			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 1.0), "cross-class conversion run failed");
-			auto const elapsed = 60.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
+			auto const elapsed = snap.elapsedSeconds;
 			require(snap.conversions.size() == 1, "cross-class conversion missing from snapshot");
 			auto const& launder = snap.conversions[0];
 			require(launder.lastScale > 0.99 && launder.status == core::StationTransferStatus::Full,
 				"the cross-class conversion did not run at full declared throughput");
-			require(approx(launder.inputs[0].completed, 0.001 * dt)
-				&& approx(launder.outputs[0].completed, 0.0005 * dt),
+			require(approx(launder.inputs[0].completed, 0.001 * snap.systemsTimestepSeconds)
+				&& approx(launder.outputs[0].completed, 0.0005 * snap.systemsTimestepSeconds),
 				"the cross-class conversion did not produce its declared outputs");
 			require(approx(findStore(snap, "potable").currentQualified, 50.0 + 0.0005 * elapsed),
 				"the normal destination did not fill with converted hazardous mass");
@@ -1089,8 +1092,8 @@ namespace
 				{ recover }, 20.0).first, "cleared recovery setup refused");
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 1.0), "cleared recovery run failed");
-			auto const elapsed = 60.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
+			auto const elapsed = snap.elapsedSeconds;
 			require(snap.waterTreatments.size() == 1, "treatment missing from snapshot");
 			auto const& plant = snap.waterTreatments[0];
 			require(plant.filtrationCompleted && plant.treatmentEvidenced
@@ -1102,7 +1105,7 @@ namespace
 			// The same-class recovery transfer moved qualified material.
 			// The treatment runs before the transfer in the tick order, so
 			// the transfer moves its full rate from the first tick on.
-			require(approx(snap.transfers[0].lastCompleted, 0.002 * dt)
+			require(approx(snap.transfers[0].lastCompleted, 0.002 * snap.systemsTimestepSeconds)
 				&& snap.transfers[0].status == core::StationTransferStatus::Full,
 				"the hazardous-class recovery transfer did not run");
 			require(approx(findStore(snap, "hazReserve").currentQualified,
@@ -1173,8 +1176,8 @@ namespace
 				"the process consumable was refused at configuration");
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 1.0), "process-kit-covered run failed");
-			auto const elapsed = 60.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
+			auto const elapsed = snap.elapsedSeconds;
 			auto const& plant = snap.waterTreatments[0];
 			auto const processed = 0.005 * elapsed;
 			auto const treated = processed * 0.8;

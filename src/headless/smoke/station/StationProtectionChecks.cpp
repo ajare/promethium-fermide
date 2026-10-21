@@ -129,6 +129,7 @@ namespace
 
 	void reallocation(smoke::Context const&)
 	{
+		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
 		auto s = fixture(Electrolyzer, 6, true);
 		s.coolantLoops.clear();
 		auto second = s.electrolyzers.front();
@@ -157,6 +158,7 @@ namespace
 
 	void grossExcursion(smoke::Context const&)
 	{
+		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
 		auto s = fixture(Electrolyzer, 6, true);
 		s.coolantLoops.clear();
 		// The net endpoint cools. Protection must nevertheless consider the
@@ -173,6 +175,7 @@ namespace
 
 	void freeze(smoke::Context const&)
 	{
+		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
 		for (bool shortage : {false, true})
 		{
 			core::StationSystemsSettings s;
@@ -208,6 +211,7 @@ namespace
 
 	void rateAwareProtection(smoke::Context const&)
 	{
+		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
 		std::cout << "Protection certified ratio=" << core::StationProtectionCertifiedStepRatio
 			<< " thermalOvershootBoundC=" << core::StationProtectionTemperatureOvershootC << '\n';
 		for (auto const& bound : core::StationProtectionBounds)

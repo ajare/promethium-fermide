@@ -301,16 +301,17 @@ no executed Lua table, VM or upvalue is shared across objects or Worlds.
 
 SimulationCoordinator calls `StationSystemsRuntime::advanceTo(seconds)` once
 at each World tick boundary, supplying the target World elapsed seconds. The
-runtime owns a count-derived Station clock: `systemsStepWorldTicks` (1–600,
-by default 1) multiplies the embedding clock's base quantum supplied at
+runtime owns a count-derived Station clock: `systemsStepWorldTicks` (1–60,
+by default 6, nominally 10 Hz against the unchanged 60 Hz World) multiplies the embedding clock's base quantum supplied at
 construction. No floating-point duration is accumulated. The runtime advances
 whole steps until its elapsed seconds reach or exceed the target; calls while
 already ahead perform no work. Consequently a non-boundary target can put the
 Station ahead of the World by less than one Station step, by contract.
 Existing time scale and update batching still feed the same fixed World ticks.
 The Station snapshot derives elapsed seconds from committed Station steps.
-Legacy `worldTick` and `completedTicks` fields count Station steps; at ratio 1
-they retain their previous values. The four sandbox counters must each equal
+Snapshot `systemsStepWorldTicks` and `systemsTimestepSeconds` identify the effective
+runtime clock. Legacy `worldTick` and `completedTicks` fields count Station steps;
+at ratio 1 they retain their previous values. The four sandbox counters must each equal
 the next Station step, independent of the number of drive calls.
 
 The public `core/StationSystemsRuntime.h` also supports standalone scenarios:
@@ -322,10 +323,21 @@ Ratio 1 retains the original physics durations and elapsed-time arithmetic.
 The clock seam (#763), scheduled-event integration (#767), continuous-transfer
 saturation crossings (#769), rate-aware protection and ratio persistence are implemented.
 The certified protection ratio is **6**: above it the runtime remains deterministic,
-finite and conserving, but authors must not claim the certified admitted-work
-protection margin. The `station-timestep-invariance` CTest label owns the fast
-ratios 1 and 6 plus exhaustive ratios 30 and 600, the long-duration reference,
-and the measured coarse-step performance gate. See [ADR 0025](adr/0025-station-systems-clock-and-timestep-certification.md)
+subject to the same finite-state and conservation audits, but authors must not
+claim the certified admitted-work protection margin. The
+`station-timestep-invariance` CTest label owns fast comparisons at ratios 1 and 6,
+exhaustive comparisons at 30 and 60, representative-ratio transfer and analytical profile
+checks, the long-duration transfer fixture and an empty-runtime performance check.
+These checks do not establish full-station physical equivalence. Mixed observable
+aggregates in the coverage registry remain explicitly `Unverified` until backed
+by their own comparator and measured convergence evidence. Fixture-scoped
+`verifiedThroughRatio` is distinct from global `certifiedRatio`. Analytical
+generator gates verify physical-time startup/ramp work, delayed solar and manual
+generator-funded cranking at sampled ratios 1, 6, 7, 30 and 60. Generator `outputKW` is its endpoint
+ramp state; `averageOutputKW` is actual mean generation over the Station step.
+Dispatch budgets against integrated mean generation, not the ramp endpoint.
+These results remain fixture-scoped; see the
+[verification checkpoint](station-timestep-verification.md). See [ADR 0025](adr/0025-station-systems-clock-and-timestep-certification.md)
 and [the protection evidence](tickets/771-rate-aware-protection.md). Rendering never executes station scripts. Public World methods
 `getStationSystemsSnapshot`, `getStationSystemsEvents` and
 `getStationSystemsDiagnostics` return read-only value copies. Events retain at
@@ -350,12 +362,20 @@ completions also split integration; progress derives from the exact start instan
 A sub-tick maintenance window with available prerequisites is serviced, not missed
 merely because no full Station step ends inside it.
 
-Continuous phases retain their existing order and sampled-profile endpoint
-convention, and execute only over positive durations. Discrete boundary passes
+Continuous phases retain their existing order and execute only over positive
+durations. Solar, equipment, crew, crop and algae profile transitions (including
+period wrap) split integration on a shared timeline. Profiles are sampled inside
+each interval, avoiding right-endpoint aliasing and artificial overlap of supply
+and demand. The bundled Lua mirror also splits profile forcing. This is not a
+hidden fixed-frequency integration loop. Unrepresentable profile occurrence
+indices or more than 65536 profile transitions per Station step refuse the step
+transactionally. Discrete boundary passes
 never run rate-to-amount round trips, so coincident events cannot divide by zero.
 Store flows and continuous process amounts accumulate across the whole Station
-step; rates and statuses remain latest samples, while scheduled quantities retain
-their last-occurrence meaning. Only the completed full step advances the Station
+step. Connection rates and the pool, solar, external-load, battery and generator/
+fuel-cell power rates are duration-weighted step means, consistent with booked
+work. Endpoint state/status and other rates remain latest samples; scheduled
+quantities retain their last-occurrence meaning. Only the completed full step advances the Station
 clock or samples history. Every sub-interval and boundary is audited, and any
 failure rolls back the entire step, including earlier sub-interval inventories,
 loss/inflow ledgers, allocations, connection accounts and event history.

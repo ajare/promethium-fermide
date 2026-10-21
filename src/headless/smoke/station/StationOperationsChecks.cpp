@@ -14,6 +14,7 @@ namespace
 		SourceScope scope;
 		core::World unaffected("Unaffected", 2, 2); enable(unaffected);
 		using Failure = core::ScriptExecutionFailure;
+		auto const prefixSteps = static_cast<uint64_t>(std::ceil(1.0 / requestedStepSeconds()));
 		struct Fixture { char const* body; Failure failure; char const* message; };
 		for (auto const& fixture : {
 			Fixture{"error('failed')", Failure::LuaError, "failed"},
@@ -30,23 +31,25 @@ namespace
 		{
 			// Commit a successful prefix, then mutate every object before failing
 			// in the last system. Only public committed results may survive.
-			std::string source = "return function(name) assert(os == nil and io == nil and debug == nil and package == nil and world == nil); return {advance=function(self,tick,seconds) self.attempted = tick; if tick <= 60 or name ~= 'Monitoring/supervision' then return tick end; " + std::string(fixture.body) + " end} end";
+			std::string source = "return function(name) assert(os == nil and io == nil and debug == nil and package == nil and world == nil); return {advance=function(self,tick,seconds) self.attempted = tick; if tick <= " + std::to_string(prefixSteps) + " or name ~= 'Monitoring/supervision' then return tick end; " + std::string(fixture.body) + " end} end";
 			core::setStationSystemsSourceLoader([source] { return source; });
 			core::World failed("Failure", 2, 2); enable(failed);
-			failed.resumeSimulation(); require(smoke::station::advanceSeconds(failed, 1.0), "Successful prefix failed");
+			failed.resumeSimulation(); require(advanceStationSteps(failed, prefixSteps), "Successful prefix failed");
+			auto const worldTickBeforeFailure = failed.getSimulationTick();
 			auto before = failed.getStationSystemsSnapshot();
+			require(before.worldTick == prefixSteps, "Successful prefix used the wrong Station clock");
 			auto events = failed.getStationSystemsEvents();
 			auto settings = failed.getStationSystemsSettings();
-			require(!smoke::station::advanceSeconds(failed, 0.0166666666667), "Lua failure accepted");
+			require(!advanceStationSteps(failed, 1), "Lua failure accepted");
 			auto result = failed.getStationSystemsSnapshot();
-			require(failed.isSimulationPaused() && failed.getSimulationTick() == 60 && !result.healthy,
+			require(failed.isSimulationPaused() && failed.getSimulationTick() == worldTickBeforeFailure && !result.healthy,
 				"Station failure not fail-visible and synchronized");
 			before.healthy = false;
 			require(result == before && failed.getStationSystemsEvents() == events, "Partial Lua step or event published");
 			require(failed.getStationSystemsSettings() == settings, "Failure changed authored settings");
 			auto diagnostics = failed.getStationSystemsDiagnostics();
 			require(diagnostics.size() == 1 && diagnostics[0].system == "Monitoring/supervision" && !diagnostics[0].message.empty(), "Missing structured diagnostic");
-			require(diagnostics[0].worldTick == 61 && diagnostics[0].failure == fixture.failure, "Failure misclassified or misdated");
+			require(diagnostics[0].worldTick == before.worldTick + 1 && diagnostics[0].failure == fixture.failure, "Failure misclassified or misdated");
 			require(diagnostics[0].message.size() <= 2048 && diagnostics[0].message.find(fixture.message) != std::string::npos,
 				"Diagnostic missing context or unbounded");
 			failed.resumeSimulation(); require(!smoke::station::advanceSeconds(failed, 0.166666666667), "Failed Lua objects retried");
@@ -56,11 +59,11 @@ namespace
 			failed.resetSimulation();
 			require(failed.getSimulationTick() == 0 && failed.getStationSystemsSnapshot().healthy
 				&& failed.getStationSystemsDiagnostics().empty(), "Reset did not clear failure");
-			failed.resumeSimulation(); require(smoke::station::advanceSeconds(failed, 1.0), "Reset prefix failed");
+			failed.resumeSimulation(); require(advanceStationSteps(failed, prefixSteps), "Reset prefix failed");
 			before.healthy = true;
 			require(failed.getStationSystemsSnapshot() == before && failed.getStationSystemsEvents() == events,
 				"Successful replay after failure was not deterministic");
-			require(!smoke::station::advanceSeconds(failed, 0.0166666666667) && failed.getStationSystemsSnapshot() == result, "Failed replay changed outcome");
+			require(!advanceStationSteps(failed, 1) && failed.getStationSystemsSnapshot() == result, "Failed replay changed outcome");
 		}
 		for (auto const* source : {"error('constructor failed')", "while true do end",
 			"pcall(function() while true do end end); return function() return {} end",
@@ -229,6 +232,9 @@ namespace
 			return "return function() local n = 0 "
 				"return {advance=function() n = n + 1; return n end} end";
 		});
+		// Leave enough committed observations to fill history even at 1 Hz.
+		auto const incidentSeconds = std::max(120.0,
+			(core::StationEventHistoryLimit + 20.0) * requestedStepSeconds());
 		core::World hostIncidents("HostIncidents", 2, 2);
 		hostIncidents.pauseSimulation(); hostIncidents.finishBuild();
 		{
@@ -289,7 +295,7 @@ namespace
 			generator.startupSeconds = 1.0;
 			generator.maxSinkTemperatureC = 90.0;
 			settings.generators = {generator};
-			addHostOverflow(settings, "generation", 120.0);
+			addHostOverflow(settings, "generation", incidentSeconds);
 			// One outage window closes on the failing tick (its
 			// restoration would be announced there) and another opens on
 			// it (its start would be announced there).
@@ -297,13 +303,13 @@ namespace
 			restoring.id = "outage-restore";
 			restoring.installationId = "loop";
 			restoring.capacityFraction = 0.0;
-			restoring.firstOccurrenceSeconds = 110.0;
+			restoring.firstOccurrenceSeconds = incidentSeconds - 10.0;
 			restoring.durationSeconds = 10.0;
 			core::InstallationOutageSettings starting;
 			starting.id = "outage-start";
 			starting.installationId = "loop";
 			starting.capacityFraction = 0.0;
-			starting.firstOccurrenceSeconds = 120.0;
+			starting.firstOccurrenceSeconds = incidentSeconds;
 			starting.durationSeconds = 10.0;
 			settings.outages = {restoring, starting};
 			// The completing job wins the waste-headroom contest while its
@@ -313,7 +319,7 @@ namespace
 			core::MaintenanceJobSettings completer;
 			completer.id = "maint-complete";
 			completer.installationId = "gen";
-			completer.firstOccurrenceSeconds = 110.0;
+			completer.firstOccurrenceSeconds = incidentSeconds - 10.0;
 			completer.durationSeconds = 10.0;
 			completer.priority = 10;
 			completer.requirements = {{"tools", 5.0, false}, {"parts", 2.0, true}};
@@ -321,7 +327,7 @@ namespace
 			core::MaintenanceJobSettings interrupted;
 			interrupted.id = "maint-interrupt";
 			interrupted.installationId = "loop";
-			interrupted.firstOccurrenceSeconds = 115.0;
+			interrupted.firstOccurrenceSeconds = incidentSeconds - 5.0;
 			interrupted.durationSeconds = 20.0;
 			interrupted.priority = 5;
 			interrupted.requirements = {{"parts", 8.0, true}};
@@ -333,7 +339,7 @@ namespace
 			core::MaintenanceJobSettings starter;
 			starter.id = "maint-start";
 			starter.installationId = "loop";
-			starter.firstOccurrenceSeconds = 120.0;
+			starter.firstOccurrenceSeconds = incidentSeconds;
 			starter.durationSeconds = 10.0;
 			starter.priority = 1;
 			starter.requirements = {{"tools", 2.0, false}};
@@ -342,18 +348,20 @@ namespace
 			// the second eats the lower job's reserved waste headroom.
 			// Both must roll back when the scheduled aggregate overflows.
 			settings.deliveries = {
-				{"resupply-a", "a", "kg", 50.0, 120.0, 0.0, true, 0},
-				{"resupply-waste", "waste", "kg", 1.0, 120.0, 0.0, true, 0}};
+				{"resupply-a", "a", "kg", 50.0, incidentSeconds, 0.0, true, 0},
+				{"resupply-waste", "waste", "kg", 1.0, incidentSeconds, 0.0, true, 0}};
 			std::string diagnostic;
 			require(hostIncidents.configureStationSystems(settings, false, &diagnostic),
 				diagnostic.c_str());
 		}
 		hostIncidents.resumeSimulation();
-		require(smoke::station::advanceSeconds(hostIncidents, 119.983333333),
+		require(advanceToLastStepBefore(hostIncidents, incidentSeconds),
 			"the incident fixture failed before its failing tick");
+		auto const incidentWorldTick = hostIncidents.getSimulationTick();
 		auto const incidentsBefore = hostIncidents.getStationSystemsSnapshot();
 		auto const incidentsBeforeEvents = hostIncidents.getStationSystemsEvents();
-		require(incidentsBefore.healthy && incidentsBefore.worldTick == 7199,
+		require(incidentsBefore.healthy && incidentsBefore.worldTick == expectedStationSteps(hostIncidents)
+			&& incidentsBefore.elapsedSeconds < incidentSeconds,
 			"incident fixture not healthy at the boundary tick");
 		require(incidentsBeforeEvents.size() == core::StationEventHistoryLimit,
 			"incident fixture history not pinned at its bound before the failing tick");
@@ -380,9 +388,9 @@ namespace
 			&& incidentsBefore.maintenanceJobs[2].phase == core::StationMaintenancePhase::Idle
 			&& incidentsBefore.maintenanceJobs[2].occurrencesStarted == 0,
 			"maintenance state not as authored at the boundary tick");
-		require(!smoke::station::advanceSeconds(hostIncidents, 0.0166666666667),
+		require(!advanceStationSteps(hostIncidents, 1),
 			"incident-bearing host ledger violation accepted");
-		require(hostIncidents.isSimulationPaused() && hostIncidents.getSimulationTick() == 7199,
+		require(hostIncidents.isSimulationPaused() && hostIncidents.getSimulationTick() == incidentWorldTick,
 			"incident host failure not fail-visible and synchronized");
 		auto const incidentsAfter = hostIncidents.getStationSystemsSnapshot();
 		auto incidentsExpected = incidentsBefore;
@@ -423,7 +431,7 @@ namespace
 		require(incidentDiagnostics.size() == 1
 			&& incidentDiagnostics[0].system == "Power allocation"
 			&& incidentDiagnostics[0].failure == Failure::ConversionError
-			&& incidentDiagnostics[0].worldTick == 7200
+			&& incidentDiagnostics[0].worldTick == incidentsBefore.worldTick + 1
 			&& incidentDiagnostics[0].message == "non-finite total requested power is not a publishable physical result",
 			"incident host failure diagnostic missing or wrong");
 		// Terminal retry refusal across the incident state.
@@ -441,12 +449,12 @@ namespace
 			&& hostIncidents.getStationSystemsDiagnostics().empty(),
 			"reset did not clear the incident host ledger failure");
 		hostIncidents.resumeSimulation();
-		require(smoke::station::advanceSeconds(hostIncidents, 119.983333333),
+		require(advanceToLastStepBefore(hostIncidents, incidentSeconds),
 			"incident replay diverged before the failing tick");
 		require(hostIncidents.getStationSystemsSnapshot() == incidentsBefore
 			&& hostIncidents.getStationSystemsEvents() == incidentsBeforeEvents,
 			"incident replay of the successful boundary was not identical");
-		require(!smoke::station::advanceSeconds(hostIncidents, 0.0166666666667),
+		require(!advanceStationSteps(hostIncidents, 1),
 			"incident host failure not reproduced after reset");
 		require(hostIncidents.getStationSystemsSnapshot() == incidentsAfter
 			&& hostIncidents.getStationSystemsEvents() == incidentsBeforeEvents,
@@ -1449,7 +1457,8 @@ namespace
 					"function model.advance(self, world_tick, fixed_seconds)\n"
 					"local result = original(self, world_tick, fixed_seconds)\n"
 					"local first, second = self.chillers[1], self.chillers[2]\n"
-					"if world_tick >= 300 and world_tick < 900 then\n"
+					"local elapsed = world_tick * fixed_seconds\n"
+					"if elapsed >= 5.0 and elapsed < 15.0 then\n"
 					"assert(math.abs((second.availability or 1.0) - 0.0) < 1e-12, 'sandbox did not cap the named chiller')\n"
 					"assert(math.abs((first.availability or 1.0) - 1.0) < 1e-12, 'sandbox capped the wrong chiller')\n"
 					"assert(second.lastCooling == 0, 'sandbox named chiller still cooling during the outage')\n"
@@ -1733,7 +1742,8 @@ namespace
 					"function model.advance(self, world_tick, fixed_seconds)\n"
 					"local result = original(self, world_tick, fixed_seconds)\n"
 					"local gen, loop, chiller = self.generators[1], self.coolant_loops[1], self.chillers[1]\n"
-					"if world_tick >= 300 and world_tick < 900 then\n"
+					"local elapsed = world_tick * fixed_seconds\n"
+					"if elapsed >= 5.0 and elapsed < 15.0 then\n"
 					"assert(math.abs((gen.availability or 1.0) - 0.0) < 1e-12, 'sandbox did not cap the generator')\n"
 					"assert(math.abs((loop.availability or 1.0) - 0.5) < 1e-12, 'sandbox did not cap the loop to half')\n"
 					"assert(math.abs((chiller.availability or 1.0) - 0.0) < 1e-12, 'sandbox did not cap the chiller')\n"

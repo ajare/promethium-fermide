@@ -865,6 +865,11 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			baseIntervalSeconds, retentionSeconds,
 			tick, elapsedSeconds, requested, actual);
 	}
+	std::optional<uint32_t> stationSystemsRuntimeStepRatioOverrideForTesting()
+	{
+		return stationSystemsRuntimeStepRatioOverride;
+	}
+
 	void setStationSystemsRuntimeStepRatioOverrideForTesting(std::optional<uint32_t> ratio)
 	{
 		stationSystemsRuntimeStepRatioOverride = ratio;
@@ -879,6 +884,8 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		if (!validateStationSystemsSettings(settings, diagnostic)) throw SerializationException(diagnostic);
 		mImpl = std::make_unique<Impl>(settings.systemsStepWorldTicks, baseStepSeconds);
 		mImpl->settings = settings; mImpl->snapshot.enabled = settings.enabled;
+		mImpl->snapshot.systemsStepWorldTicks = settings.systemsStepWorldTicks;
+		mImpl->snapshot.systemsTimestepSeconds = mImpl->clock.stepSeconds();
 		std::vector<StationRecordingSlot> slots;
 		auto addSlot = [&](std::string subsystem, std::string id, std::string unit, std::string metricId) {
 			StationRecordingSlot slot;
@@ -1001,9 +1008,14 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			slots.push_back(std::move(slot));
 		}
 		auto const slotCount = slots.size();
-		auto const stepSeconds = static_cast<float>(mImpl->clock.stepSeconds());
-		auto const cadenceSteps = std::max(1.0f, std::ceil(settings.observationIntervalSeconds / stepSeconds));
-		mImpl->history = StationHistory(std::move(slots), cadenceSteps * stepSeconds,
+		auto const stepSeconds = mImpl->clock.stepSeconds();
+		// Share one integer observation stride between sampling and metadata.
+		// Float cadence products diverge from the count-derived timestamps and
+		// the discrepancy grows when the recorder coarsens its history.
+		mImpl->observationIntervalSteps = std::max(uint64_t{1},
+			static_cast<uint64_t>(std::ceil(settings.observationIntervalSeconds / stepSeconds)));
+		mImpl->history = StationHistory(std::move(slots),
+			static_cast<double>(mImpl->observationIntervalSteps) * stepSeconds,
 			settings.trendRetentionSeconds, {}, mImpl->clock.stepSeconds());
 		if (!mImpl->history.status().limited) mImpl->recordingValues.resize(slotCount);
 		else
@@ -1829,11 +1841,10 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		mImpl->clock.commitStep();
 		next.elapsedSeconds = mImpl->clock.elapsedSeconds();
 		mImpl->snapshot = next;
-		auto interval = std::max(uint64_t{1}, static_cast<uint64_t>(std::ceil(mImpl->settings.observationIntervalSeconds / static_cast<float>(seconds))));
-		if (tick % interval == 0)
+		if (tick % mImpl->observationIntervalSteps == 0)
 		{
 			appendBoundedEvent(mImpl->events, tick, "observation",
-				"All four Station systems completed the World tick");
+				"All four Station systems completed the Station step");
 			// #418: trends are sampled on the same existing observation
 			// cadence from the just-committed snapshot - no second clock,
 			// no per-tick history, and only successful ticks are sampled.

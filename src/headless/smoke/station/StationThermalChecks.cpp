@@ -6,7 +6,7 @@ namespace
 {
 	using namespace smoke::station;
 	// #395: thermal reservoirs accumulate heat and radiators reject it.
-	// Temperature is integrated on the fixed World tick from the authored
+	// Temperature is integrated over each Station step from the authored
 	// capacity, starting temperature and absorbed heat; radiator rejection
 	// follows the Stefan-Boltzmann law at the emitting temperature with
 	// the authored sink, emissivity and view factor. Equipment heat routes
@@ -15,7 +15,6 @@ namespace
 	// closes within the declared tolerance in host and sandbox alike.
 	void thermal(smoke::Context const&)
 	{
-		auto const dt = static_cast<double>(core::World::getFixedTimestep());
 		auto const approx = [](double actual, double expected, double tolerance = 1e-6)
 		{ return std::abs(actual - expected) <= tolerance; };
 		auto sawEvent = [](core::World& world, std::string const& needle)
@@ -168,9 +167,9 @@ namespace
 			auto const snap = world.getStationSystemsSnapshot();
 
 			require(snap.thermal.reservoirs.size() == 1
-				&& approx(snap.thermal.reservoirs[0].temperatureC, 21.2, 1e-6)
+				&& approx(snap.thermal.reservoirs[0].temperatureC, 20.0 + 2.0 * snap.elapsedSeconds / 100.0, 1e-6)
 				&& approx(snap.thermal.reservoirs[0].lastRejectedKW, 0.0)
-				&& approx(snap.thermal.reservoirs[0].absorbedEnergyKJ, 120.0, 1e-4)
+				&& approx(snap.thermal.reservoirs[0].absorbedEnergyKJ, 2.0 * snap.elapsedSeconds, 1e-4)
 				&& approx(snap.thermal.reservoirs[0].residualKJ, 0.0, 1e-6),
 				"Analytic linear heating or ledger closure failed");
 			// Reset reconstructs the authored starting temperature.
@@ -191,15 +190,15 @@ namespace
 				{ radiator("panel", "panel-host", 1000.0, 0.9, 0.8, -270.0) });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			require(smoke::station::advanceSeconds(world, 0.0166666666667), "Single-tick thermal run failed");
+			require(advanceStationSteps(world, 1), "Single-step thermal run failed");
 			auto const temperatureK = 20.0 + core::StationCelsiusOffset;
 			auto const sinkK = -270.0 + core::StationCelsiusOffset;
 			auto const expectedRejection = 0.9 * 0.8 * 1000.0
 				* core::StationStefanBoltzmannKWPerM2K4
 				* (temperatureK * temperatureK * temperatureK * temperatureK
 					- sinkK * sinkK * sinkK * sinkK);
-			auto const expectedTemperature = 20.0 - expectedRejection * dt / 50.0;
 			auto const snap = world.getStationSystemsSnapshot();
+			auto const expectedTemperature = 20.0 - expectedRejection * snap.systemsTimestepSeconds / 50.0;
 			require(approx(snap.thermal.radiators[0].lastRejectedKW, expectedRejection, 1e-12)
 				&& approx(snap.thermal.reservoirs[0].temperatureC, expectedTemperature, 1e-9)
 				&& approx(snap.thermal.reservoirs[0].residualKJ, 0.0, 1e-6),
@@ -274,8 +273,8 @@ namespace
 			require(approx(snap.power.exportedHeatKW, 1.0),
 				"Station direct-export total double-counted routed heat");
 			require(approx(snap.thermal.totalRoutedKW, 2.0)
-				&& approx(snap.thermal.reservoirs[0].temperatureC, 21.2, 1e-6)
-				&& approx(snap.thermal.reservoirs[0].routedEnergyKJ, 120.0, 1e-4)
+				&& approx(snap.thermal.reservoirs[0].temperatureC, 20.0 + 2.0 * snap.elapsedSeconds / 100.0, 1e-6)
+				&& approx(snap.thermal.reservoirs[0].routedEnergyKJ, 2.0 * snap.elapsedSeconds, 1e-4)
 				&& approx(snap.thermal.reservoirs[0].residualKJ, 0.0, 1e-6),
 				"Routed heat did not warm the reservoir by exactly its energy");
 		}
@@ -306,7 +305,8 @@ namespace
 			}
 			hot.resumeSimulation(); cold.resumeSimulation();
 			require(smoke::station::advanceSeconds(hot, 30.0) && smoke::station::advanceSeconds(cold, 30.0), "Profile run failed");
-			require(approx(hot.getStationSystemsSnapshot().thermal.reservoirs[0].temperatureC, 20.9, 1e-6),
+			auto const hotSnapshot = hot.getStationSystemsSnapshot();
+			require(approx(hotSnapshot.thermal.reservoirs[0].temperatureC, 20.0 + 3.0 * hotSnapshot.elapsedSeconds / 100.0, 1e-6),
 				"Hot profile did not warm the reservoir as declared");
 			require(cold.getStationSystemsSnapshot().thermal.reservoirs[0].temperatureC == 20.0
 				&& cold.getStationSystemsSnapshot().thermal.reservoirs[0].lastHeatInKW == 0.0,
@@ -341,8 +341,9 @@ namespace
 			require(smoke::station::advanceSeconds(steady, 10.0), "Steady thermal run failed");
 			batched.resumeSimulation();
 			batched.setSimulationTimeScale(2.0f);
-			batched.update(5.0f);
-			require(batched.getSimulationTick() == 600, "Batched update tick mismatch");
+			// Stay inside World's wall-frame clamp while exercising catch-up.
+			for (unsigned frame = 0; frame < 10; ++frame) batched.update(0.5f);
+			require(batched.getSimulationTick() == steady.getSimulationTick(), "Batched update tick mismatch");
 			require(steady.getStationSystemsSnapshot() == batched.getStationSystemsSnapshot(),
 				"Thermal integration differs between tick-by-tick and batched updates");
 		}
@@ -360,7 +361,7 @@ namespace
 			auto const snap = hot.getStationSystemsSnapshot();
 			require(snap.thermal.reservoirs[0].aboveLimit
 				&& !snap.thermal.reservoirs[0].belowLimit
-				&& approx(snap.thermal.reservoirs[0].temperatureC, 21.5, 1e-6),
+				&& approx(snap.thermal.reservoirs[0].temperatureC, 20.0 + snap.elapsedSeconds / 100.0, 1e-6),
 				"Overheat not reported or wrongly clamped to the limit");
 			require(sawEvent(hot, "Thermal reservoir 'cabin' above its declared maximum"),
 				"Overheat transition missing from the event log");
@@ -460,7 +461,7 @@ namespace
 	// never clamped, and every ledger closes.
 	void coolant(smoke::Context const&)
 	{
-		auto const dt = static_cast<double>(core::World::getFixedTimestep());
+		auto const dt = requestedStepSeconds();
 		auto const approx = [](double actual, double expected, double tolerance = 1e-6)
 		{ return std::abs(actual - expected) <= tolerance; };
 		auto sawEvent = [](core::World& world, std::string const& needle)
@@ -619,7 +620,7 @@ namespace
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 1.0), "power-limited coolant run failed");
-			auto const& loopSnap = world.getStationSystemsSnapshot().coolantLoops[0];
+			auto const loopSnap = world.getStationSystemsSnapshot().coolantLoops[0];
 			require(approx(loopSnap.pumpDemandKW, 1.2) && approx(loopSnap.pumpSuppliedKW, 0.6),
 				"pump draw did not follow the starved pool");
 			require(approx(loopSnap.circulationFraction, 0.5)
@@ -756,7 +757,7 @@ namespace
 			// drops its demand to zero once the setpoint is held.
 			require(smoke::station::advanceSeconds(world, 50.0666666666667),
 				"freeze-heating run failed");
-			auto const& loopSnap = world.getStationSystemsSnapshot().coolantLoops[0];
+			auto const loopSnap = world.getStationSystemsSnapshot().coolantLoops[0];
 			require(approx(loopSnap.loopTemperatureC, 5.0, 1e-3),
 				"heater capacity did not warm the loop by the closed form");
 			require(!loopSnap.belowFreezeSetpoint && loopSnap.heaterDemandKW == 0.0
@@ -912,9 +913,9 @@ namespace
 			// conductance: C_eff = C_loop x C_bus / (C_loop + C_bus).
 			auto const effectiveCapacityKJPerK = 0.5;
 			auto previousGapK = 20.0;
-			for (int tick = 0; tick < 120; ++tick)
+			for (uint64_t tick = 0; tick < static_cast<uint64_t>(std::ceil(2.0 / dt)); ++tick)
 			{
-				require(smoke::station::advanceSeconds(world, 0.0166666666667), "stiff-exchange tick failed");
+				require(advanceStationSteps(world, 1), "stiff-exchange step failed");
 				auto const& snapshot = world.getStationSystemsSnapshot();
 				auto const& loopSnap = snapshot.coolantLoops[0];
 				auto const& bus = snapshot.thermal.reservoirs[0];
@@ -946,14 +947,17 @@ namespace
 					"stiff-exchange loop or reservoir ledger did not close");
 				previousGapK = gapK;
 			}
-			// A stiff conductance settles the pair on its shared
-			// equilibrium rather than oscillating around it: the gap is
-			// essentially gone, with only the pump's own heat left in the
-			// loop's favour.
+			// For two 1 kJ/K bodies, implicit exchange contracts the
+			// gap by a=1/(1+2*G*dt). The 1 kW pump then adds dt K:
+			// gap[n] = a*gap[n-1] + dt, not a timestep-independent 0.05 K.
 			auto const& settled = world.getStationSystemsSnapshot();
-			require(settled.coolantLoops[0].loopTemperatureC
-				- settled.thermal.reservoirs[0].temperatureC < 0.05,
-				"stiff exchange never settled onto the shared equilibrium");
+			auto const contraction = 1.0 / (1.0 + 2.0 * 1000.0 * dt);
+			auto const steadyGap = dt / (1.0 - contraction);
+			auto const expectedGap = steadyGap + (20.0 - steadyGap)
+				* std::pow(contraction, std::ceil(2.0 / dt));
+			require(approx(settled.coolantLoops[0].loopTemperatureC
+				- settled.thermal.reservoirs[0].temperatureC, expectedGap, 1e-9),
+				"stiff exchange did not follow the analytical pump/exchange recurrence");
 		}
 		// Several loops sharing one reservoir must compete for the same
 		// finite heat, not each drain a temperature none of them ever sees
@@ -975,9 +979,9 @@ namespace
 				{ field });
 			require(ok, diagnostic.c_str());
 			world.resumeSimulation();
-			for (int tick = 0; tick < 60; ++tick)
+			for (uint64_t tick = 0; tick < static_cast<uint64_t>(std::ceil(1.0 / dt)); ++tick)
 			{
-				require(smoke::station::advanceSeconds(world, 0.0166666666667), "shared-reservoir tick failed");
+				require(advanceStationSteps(world, 1), "shared-reservoir step failed");
 				auto const& snapshot = world.getStationSystemsSnapshot();
 				auto const& bus = snapshot.thermal.reservoirs[0];
 				for (auto const& loopSnap : snapshot.coolantLoops)

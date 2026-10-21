@@ -2,6 +2,17 @@
 #include "StationSystemsDetail.h"
 namespace core
 {
+	struct GeneratorRampIntegral { double endpointKW{}, meanKW{}; };
+	inline GeneratorRampIntegral integrateGeneratorRamp(double startKW, double targetKW,
+		double rampKWPerSecond, double seconds)
+	{
+		auto const needed = std::abs(targetKW - startKW) / rampKWPerSecond;
+		auto const rampSeconds = std::min(seconds, needed);
+		auto const endpoint = seconds >= needed ? targetKW
+			: startKW + std::copysign(rampKWPerSecond * rampSeconds, targetKW - startKW);
+		return {endpoint, (startKW * 0.5 + endpoint * 0.5) * (rampSeconds / seconds)
+			+ targetKW * ((seconds - rampSeconds) / seconds)};
+	}
 uint64_t stationOutageOccurrencesStarted(double, double, double, double);
 uint64_t stationOutageOccurrencesCompleted(double, double, double, double);
 	struct PassiveExchangeLeaf

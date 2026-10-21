@@ -37,7 +37,7 @@ void configure(core::World& w, core::StationSystemsSettings const& s)
 }
 void run(core::World& w, unsigned ticks)
 {
-    w.resumeSimulation(); require(smoke::station::advanceSeconds(w, static_cast<double>(ticks) / 60.0), "World refused ticks");
+    w.resumeSimulation(); require(smoke::station::advanceStationSteps(w, ticks), "World refused Station steps");
     auto snapshot = w.getStationSystemsSnapshot();
     require(snapshot.healthy, "Station tick failed");
 }
@@ -48,7 +48,7 @@ auto stock(core::World const& w, std::string const& id)
 }
 void scheduledTransfers(smoke::Context const&)
 {
-    auto s = fixture(); double const dt = core::World::getFixedTimestep();
+    auto s = fixture(); double const dt = smoke::station::requestedStepSeconds();
     // Cumulative occurrence accounting is not reconstructed from the bounded log.
     auto historySettings = s;
     historySettings.transfers[0].recurrenceSeconds = dt;
@@ -109,7 +109,10 @@ void scheduledTransfers(smoke::Context const&)
     run(a, 2); require(stock(a, "b").currentQualified == 0, "Batch moved early");
     a.pauseSimulation(); auto paused = a.getStationSystemsSnapshot(); a.update(10);
     require(a.getStationSystemsSnapshot() == paused, "Pause advanced scheduled time");
-    run(a, 58); b.resumeSimulation(); b.setSimulationTimeScale(2); b.update(0.5f);
+    run(a, 58); b.resumeSimulation(); b.setSimulationTimeScale(2);
+    // Keep each update inside World's wall-frame clamp; a single large
+    // frame would discard time rather than exercise Station catch-up.
+    for (uint32_t frame = 0; frame < smoke::station::requestedStepRatio(); ++frame) b.update(0.5f);
     require(a.getStationSystemsSnapshot() == b.getStationSystemsSnapshot(), "Batching/time-scale changed schedule results");
 
     // Qualified, unreserved source above reserve; held material occupies capacity.
@@ -176,8 +179,8 @@ void scheduledTransfers(smoke::Context const&)
     switched.transfers[0].mode = Mode::Continuous;
     require(switched == continuousSettings, "Round trip lost inactive mode settings or properties");
     configure(roundTrip, switched); run(roundTrip, 2);
-    require(std::abs(stock(roundTrip, "a").currentQualified - (10 - 12 * dt)) < 1e-9
-        && std::abs(stock(roundTrip, "b").currentQualified - 3 * dt) < 1e-9
+    require(std::abs(stock(roundTrip, "a").currentQualified - (10 - std::min(10.0, 12 * dt))) < 1e-9
+        && std::abs(stock(roundTrip, "b").currentQualified - std::min(10.0, 12 * dt) * 0.25) < 1e-9
         && roundTrip.getStationSystemsSnapshot().transfers[0].occurrencesFired == 0,
         "Continuous mode did not restore each cap and efficiency, or also fired its schedule");
 
@@ -255,7 +258,7 @@ void scheduledTransfers(smoke::Context const&)
     s.transfers.push_back({"consume", "b", "c", "kg", 60, 0});
     s.stores[2].composition = mix;
     core::World phases("Continuous sees post-event", 2, 2); configure(phases, s); run(phases, 1);
-    require(std::abs(stock(phases, "c").currentQualified - 60 * dt) < 1e-9,
+    require(std::abs(stock(phases, "c").currentQualified - std::min(4.0, 60 * dt)) < 1e-9,
         "Continuous processing did not see the scheduled event inventory");
 
     // Every invalid Apply is a true no-op. Inactive finite fields do not execute.
@@ -268,7 +271,7 @@ void scheduledTransfers(smoke::Context const&)
         if (test == 1) transfer.quantity = std::numeric_limits<double>::quiet_NaN();
         if (test == 2) transfer.firstOccurrenceSeconds = -1;
         if (test == 3) transfer.firstOccurrenceSeconds = std::numeric_limits<double>::infinity();
-        if (test == 4) transfer.recurrenceSeconds = dt * 0.5;
+        if (test == 4) transfer.recurrenceSeconds = core::World::getFixedTimestep() * 0.5;
         if (test == 5) transfer.sourceId = transfer.destinationId;
         // Cross-class transfers are legal (#750), so the class mismatch
         // is no longer an invalid Apply case.
@@ -281,7 +284,8 @@ void scheduledTransfers(smoke::Context const&)
 
     // Existing maintenance reservations and future consumed-waste claims are senior.
     s = smoke::station::scheduledObservationFixture(); s.deliveries.clear(); s.wasteEjections.clear();
-    s.maintenanceJobs[0].durationSeconds = 2; s.maintenanceJobs[0].recurrenceSeconds = 0;
+    s.maintenanceJobs[0].durationSeconds = std::max(2.0, 4 * dt);
+    s.maintenanceJobs[0].recurrenceSeconds = 0;
     s.stores.push_back({"other", "kg", 100, 10});
     for (auto& store : s.stores) if (store.id == "spent") store.capacity = 1;
     s.transfers = {batch("parts", "parts", "other", 10, 2 * dt),
@@ -361,6 +365,7 @@ void scheduledTransferDocuments(smoke::Context const&)
     require(!core::parseStationConfiguration(core::serializeStationConfiguration(document), loaded, &why)
         && loaded.settings == previous.settings, "Incomplete draft accepted sub-tick recurrence or mutated on refusal");
     document.settings = fixture(); document.settings.transfers[0].mode = Mode::Continuous;
+    document.settings.systemsStepWorldTicks = 1; // Legacy documents retain the 60 Hz cadence.
     document.settings.transfers[0].ratePerSecond = 1;
     document.settings.transfers[0].quantity = 1;
     auto legacy = core::serializeStationConfiguration(document); at = legacy.find("schemaVersion: 104");
@@ -373,7 +378,7 @@ void scheduledTransferDocuments(smoke::Context const&)
 }
 void recurringTransfers(smoke::Context const&)
 {
-    double const dt = core::World::getFixedTimestep();
+    double const dt = smoke::station::requestedStepSeconds();
     auto s = fixture();
     s.transfers[0].recurrenceSeconds = dt;
     core::World minimum("Minimum recurrence", 2, 2); configure(minimum, s);
@@ -414,14 +419,15 @@ void recurringTransfers(smoke::Context const&)
     run(a, 1); require(a.getStationSystemsSnapshot().transfers[0].occurrencesFired == 1, "Boundary tolerance missed occurrence");
     a.pauseSimulation(); auto paused = a.getStationSystemsSnapshot(); a.update(10);
     require(a.getStationSystemsSnapshot() == paused, "Pause advanced recurring time");
-    run(a, 57); b.resumeSimulation(); b.setSimulationTimeScale(2); b.update(0.5f);
+    run(a, 57); b.resumeSimulation(); b.setSimulationTimeScale(2);
+    for (uint32_t frame = 0; frame < smoke::station::requestedStepRatio(); ++frame) b.update(0.5f);
     require(a.getStationSystemsSnapshot() == b.getStationSystemsSnapshot(), "Recurring batching/time-scale mismatch");
     require(a.getStationSystemsSnapshot().transfers[0].occurrencesFired == 23, "Recurring interval drifted");
 
     // Both Apply and standalone parsing refuse invalid intervals atomically.
     a.pauseSimulation(); auto settings = a.getStationSystemsSettings(); auto live = a.getStationSystemsSnapshot();
     core::StationConfigurationDocument doc, parsed; doc.settings = settings; parsed = doc;
-    for (double interval : {-1.0, dt * 0.5, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+    for (double interval : {-1.0, core::World::getFixedTimestep() * 0.5, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
     {
         auto bad = settings; bad.transfers[0].recurrenceSeconds = interval; std::string why;
         require(!a.configureStationSystems(bad, true, &why) && a.getStationSystemsSettings() == settings
@@ -440,8 +446,11 @@ void scheduledPantry(smoke::Context const&)
     auto bulk = *pantry; bulk.id = "bulk-food"; bulk.startingQualified = 10; bulk.protectedReserve = 0;
     pantry->startingQualified = 0; pantry->protectedReserve = 0;
     auto const pantryId = pantry->id; s.stores.push_back(bulk);
-    auto t = batch("replenish", bulk.id, pantryId, 0.0001, 3.0 * static_cast<double>(core::World::getFixedTimestep())); t.unit = bulk.unit;
-    t.recurrenceSeconds = 400 * static_cast<double>(core::World::getFixedTimestep());
+    auto const dt = smoke::station::requestedStepSeconds();
+    // Supply several complete metabolic steps even at the coarsest clock.
+    auto const quantity = std::max(0.0001, 5 * crew.crewCount * crew.foodPerCrewPerS * dt);
+    auto t = batch("replenish", bulk.id, pantryId, quantity, 3 * dt); t.unit = bulk.unit;
+    t.recurrenceSeconds = 400 * dt;
     s.transfers = {t};
     core::World w("Pantry", 2, 2); configure(w, s); run(w, 2);
     require(stock(w, pantryId).currentQualified == 0, "Pantry replenished before due time");

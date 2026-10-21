@@ -3,8 +3,10 @@
 #include "core/StationPorts.h"
 #include "core/StationReference.h"
 #include "core/StationSystems.h"
+#include "core/StationSystemsRuntime.h"
 #include "core/YamlSerializer.h"
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -13,6 +15,41 @@
 namespace smoke::station
 {
 	inline void require(bool condition, char const* message) { if (!condition) throw std::runtime_error(message); }
+	// For fixtures whose unit is one integration step. Physical-duration
+	// scenarios must continue to use advanceSeconds and compare elapsed time.
+	inline uint32_t requestedStepRatio()
+	{
+		return core::stationSystemsRuntimeStepRatioOverrideForTesting()
+			.value_or(core::StationSystemsSettings{}.systemsStepWorldTicks);
+	}
+	inline double requestedStepSeconds()
+	{
+		return requestedStepRatio() * static_cast<double>(core::World::getFixedTimestep());
+	}
+	inline uint64_t expectedStationSteps(core::World const& world)
+	{
+		auto const ratio = world.getStationSystemsSnapshot().systemsStepWorldTicks;
+		auto const ticks = world.getSimulationTick();
+		return ticks / ratio + (ticks % ratio != 0);
+	}
+	inline bool advanceStationSteps(core::World& world, uint64_t count)
+	{
+		auto const before = world.getStationSystemsSnapshot();
+		if (!before.enabled || count > std::numeric_limits<uint64_t>::max() / before.systemsStepWorldTicks)
+			return false;
+		return world.advanceTicks(count * before.systemsStepWorldTicks)
+			&& world.getStationSystemsSnapshot().worldTick == before.worldTick + count;
+	}
+	inline bool advanceToLastStepBefore(core::World& world, double eventSeconds)
+	{
+		auto const clock = world.getStationSystemsSnapshot();
+		if (!clock.enabled || !std::isfinite(eventSeconds) || eventSeconds <= 0) return false;
+		auto const steps = std::ceil(eventSeconds / clock.systemsTimestepSeconds) - 1;
+		if (steps < 0 || steps >= static_cast<double>(std::numeric_limits<uint64_t>::max()
+			/ clock.systemsStepWorldTicks)) return false;
+		auto const target = static_cast<uint64_t>(steps) * clock.systemsStepWorldTicks;
+		return target >= world.getSimulationTick() && world.advanceTicks(target - world.getSimulationTick());
+	}
 	// Station scenarios state durations in simulated seconds. The conversion stays
 	// at this fixture boundary so check bodies do not encode World tick counts.
 	inline bool advanceSeconds(core::World& world, double seconds)

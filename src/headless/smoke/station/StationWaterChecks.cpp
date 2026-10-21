@@ -16,7 +16,7 @@ namespace
 	// #401: crew supplies turn into balanced metabolic returns.
 	void crews(smoke::Context const&)
 	{
-		auto const dt = static_cast<double>(core::World::getFixedTimestep());
+		auto const dt = requestedStepSeconds();
 		auto const approx = [](double actual, double expected, double tolerance = 1e-9)
 		{ return std::abs(actual - expected) <= tolerance; };
 		auto sawEvent = [](core::World& world, std::string const& needle)
@@ -158,7 +158,7 @@ namespace
 			require(!snap.forecast.available && snap.forecast.unavailableReason.find("greywater") != std::string::npos,
 				"forecast silently ignored greywater backpressure");
 			auto const& actual = snap.crews.at(0);
-			require(approx(actual.greywaterKg, 2 * 60 * dt * 0.0001), "wrong greywater return");
+			require(approx(actual.greywaterKg, 2 * snap.elapsedSeconds * 0.0001), "wrong greywater return");
 			require(approx(actual.greywaterConstituents.at("dryOrganics"), actual.greywaterKg * 0.01), "greywater organic load missing");
 			require(approx(actual.greywaterConstituents.at("nutrientNitrogen"), actual.greywaterKg * 0.001), "greywater N load missing");
 			require(approx(snap.stores.back().actualConstituents.at("dryOrganics"), actual.greywaterKg * 0.01), "greywater load absent from store ledger");
@@ -419,8 +419,8 @@ namespace
 				require(smoke::station::advanceSeconds(world, 2.0), "the shared-store crew run failed");
 				require(world.getStationSystemsDiagnostics().empty(),
 					"the shared-store crews raised a runtime diagnostic");
-				auto const elapsed = 120.0 * dt;
 				auto const snap = world.getStationSystemsSnapshot();
+				auto const elapsed = snap.elapsedSeconds;
 				require(snap.healthy && snap.crews.size() == 2,
 					"the shared-store crews are missing or unhealthy in the snapshot");
 				auto const& a = snap.crews[0];
@@ -459,8 +459,8 @@ namespace
 				"nominal crew refused");
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 2.0), "nominal crew run failed");
-			auto const elapsed = 120.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
+			auto const elapsed = snap.elapsedSeconds;
 			require(snap.crews.size() == 1, "crew missing from snapshot");
 			auto const& live = snap.crews[0];
 			require(live.status == core::StationTransferStatus::Full
@@ -563,7 +563,7 @@ namespace
 			require(live.status == core::StationTransferStatus::Partial,
 				"partial metabolism does not report a partial status");
 			// The water is gone: the next tick runs at zero scale.
-			smoke::station::advanceSeconds(world, 0.0166666666667);
+			require(advanceStationSteps(world, 1), "post-exhaustion crew step failed");
 			require(world.getStationSystemsSnapshot().crews[0].status
 				== core::StationTransferStatus::Rejected,
 				"an emptied water store did not starve the crew");
@@ -621,8 +621,8 @@ namespace
 				"half-activity crew refused");
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 2.0), "half-activity run failed");
-			auto const elapsed = 120.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
+			auto const elapsed = snap.elapsedSeconds;
 			auto const& live = snap.crews[0];
 			require(approx(live.activityLevel, 0.5), "activity level not reported");
 			require(approx(live.foodConsumed, 0.5 * 0.001 * 2.0 * elapsed),
@@ -1372,7 +1372,6 @@ namespace
 	// implicitly - the cell can only ever see its own dedicated store.
 	void fuelCells(smoke::Context const&)
 	{
-		auto const dt = static_cast<double>(core::World::getFixedTimestep());
 		auto approx = [](double actual, double expected)
 		{
 			auto const tolerance = 1e-6 * std::max(1.0, std::abs(expected));
@@ -1541,14 +1540,14 @@ namespace
 			require(configure(world, settings), "nominal fuel-cell setup refused");
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 10.0), "nominal fuel-cell run failed");
-			auto const elapsed = 600.0 * dt;
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const elapsed = snap.elapsedSeconds;
 			auto const h2Kg = 6.0 * elapsed / (0.6 * lhv);
 			auto const o2Kg = h2Kg * o2PerH2;
 			auto const waterKg = h2Kg + o2Kg;
 			auto const chemicalKJ = h2Kg * lhv;
 			auto const electricalKJ = 6.0 * elapsed;
 			auto const wasteKJ = chemicalKJ - electricalKJ;
-			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.fuelCells.size() == 1, "fuel cell missing from the snapshot");
 			auto const& cell = snap.fuelCells[0];
 			require(cell.status == core::StationTransferStatus::Full
@@ -1834,8 +1833,9 @@ namespace
 			require(configure(world, settings), "cycle setup refused");
 			world.resumeSimulation();
 			require(smoke::station::advanceSeconds(world, 10.0), "cycle run failed");
-			auto const elapsed = 600.0 * dt;
 			auto const snap = world.getStationSystemsSnapshot();
+			auto const elapsed = snap.elapsedSeconds;
+			auto const cycleLagSeconds = snap.systemsTimestepSeconds;
 			auto const& backupSnap = snap.fuelCells[0];
 			// The cell is hydrogen-limited: it can only burn the hydrogen
 			// the split delivered on the preceding ticks (the backup runs
@@ -1854,14 +1854,14 @@ namespace
 			// oxygen the split took out.
 			auto const burnedH2 = backupSnap.hydrogenConsumedKg;
 			auto const returnedWater = backupSnap.waterProducedKg;
-			require(approx(burnedH2, h2Rate * (elapsed - dt)),
+			require(approx(burnedH2, h2Rate * (elapsed - cycleLagSeconds)),
 				"the cell did not burn the hydrogen the split delivered");
 			require(approx(returnedWater, burnedH2 * (1.0 + o2PerH2)),
 				"the returned water does not match the burned reactants");
-			require(approx(findStore(snap, "water").currentQualified, 10.0 - 0.001 * dt),
+			require(approx(findStore(snap, "water").currentQualified, 10.0 - 0.001 * cycleLagSeconds),
 				"the cycle did not return the split's water");
 			require(approx(findStore(snap, "o2").currentQualified,
-				20.0 + o2Ratio * 0.001 * dt),
+				20.0 + o2Ratio * 0.001 * cycleLagSeconds),
 				"the cycle did not return the split's oxygen");
 			// Energy: the round trip recovers only the cell's share of the
 			// chemical energy the dose paid for - the rest is heat at the
@@ -1869,7 +1869,7 @@ namespace
 			auto const splitKg = 0.001 * elapsed;
 			auto const doseKJ = 4.5 * 3600.0 * splitKg;
 			auto const recoveredKJ = backupSnap.electricalKJ;
-			require(approx(recoveredKJ, expectedOutput * (elapsed - dt)),
+			require(approx(recoveredKJ, expectedOutput * (elapsed - cycleLagSeconds)),
 				"the recovered electrical energy does not match the cell's yield");
 			auto const roundTrip = recoveredKJ / doseKJ;
 			require(roundTrip < 0.55 && roundTrip > 0.45,

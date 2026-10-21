@@ -85,7 +85,7 @@ for `k = 6`, not a stored value.
 
 ### 4.2 Constraints
 
-1. `systemsStepWorldTicks` shall be ≥ 1 and ≤ `CORE_MAX_SYSTEMS_STEP_WORLD_TICKS` (600, i.e. a 10 s ceiling).
+1. `systemsStepWorldTicks` shall be ≥ 1 and ≤ `CORE_MAX_SYSTEMS_STEP_WORLD_TICKS` (60, i.e. a nominal 1 s ceiling; revised from 600 to limit this effort to 60 Hz–1 Hz).
 2. Non-finite, zero, negative, and over-ceiling values shall be rejected before any systems object is
    constructed, with a diagnostic naming the offending value and the allowed range.
 3. The step shall be changeable only while the simulation is paused, through the same
@@ -103,7 +103,7 @@ for `k = 6`, not a stored value.
 | Current | 1 | 1/60 s | Default; bit-identical to today |
 | Coarse | 6 | ~1/10 s | Long-duration ECLSS runs at ~6× lower step cost |
 | Very coarse | 30 | ~1/2 s | Stress and convergence testing |
-| Ceiling | 600 | ~10 s | Config bound; not a fidelity claim |
+| Ceiling | 60 | ~1 s | Config bound; not a fidelity claim |
 
 ## 5. The systems clock
 
@@ -389,7 +389,7 @@ The invariance suite shall cover, at minimum:
 ### 12.6 Lanes and CTest
 
 - **Fast lane**: `k ∈ {1, 6}`. Runs in the existing fast budget and gates every PR.
-- **Exhaustive lane**: adds `k ∈ {30, 600}` and the long-duration reference scenario, plus the
+- **Exhaustive lane**: samples `k ∈ {7, 30, 60}` within the supported `[1,60]` range and adds the long-duration reference scenario, plus the
   convergence-order comparisons.
 - CTest label `station-timestep-invariance`, with per-check labelled ownership consistent with the existing
   smoke-module convention.

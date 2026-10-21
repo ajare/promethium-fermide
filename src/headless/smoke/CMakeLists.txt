@@ -79,6 +79,7 @@ pf_add_smoke_module(pf-smoke-station
         station/StationCoreChecks.cpp
         station/StationProtectionChecks.cpp
         station/StationClockChecks.cpp
+        station/StationRuntimeRegressionChecks.cpp
         station/StationInvarianceChecks.cpp
         station/StationEventSplitChecks.cpp
         station/StationPortChecks.cpp
@@ -110,21 +111,53 @@ set_tests_properties(station-clock-boundary PROPERTIES LABELS "smoke;functional;
 add_test(NAME station-seconds-lint COMMAND ${Python3_EXECUTABLE}
     "${PROJECT_SOURCE_DIR}/scripts/tests/station_seconds_lint.py")
 set_tests_properties(station-seconds-lint PROPERTIES LABELS "smoke;functional;validation-fast;station" TIMEOUT 10)
+add_test(NAME station-observable-registry-coverage COMMAND ${Python3_EXECUTABLE}
+    "${PROJECT_SOURCE_DIR}/scripts/tests/station_observable_registry.py")
+set_tests_properties(station-observable-registry-coverage PROPERTIES
+    LABELS "smoke;functional;validation-fast;station;station-timestep-invariance" TIMEOUT 10)
+# Runtime regressions own both cadences directly; these are deliberately
+# single-ratio checks so the CLI override cannot collapse a comparison matrix.
+foreach(ratio 1 6)
+    foreach(check microbialSupplyRoundoff historyCadencePrecision)
+        add_test(NAME station-${check}-${ratio}
+            COMMAND pf-smoke-station --step-ratio ${ratio} --check ${check})
+        set_tests_properties(station-${check}-${ratio} PROPERTIES
+            LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 120)
+    endforeach()
+endforeach()
 # #774: the default and certified coarse ratio gate every pull request. The
 # exhaustive extremes and long-reference run are intentionally separately
 # labelled so CI can schedule them outside the fast lane.
+add_test(NAME station-timestep-invariance-profile-rollback COMMAND pf-smoke-station --check invarianceProfileRollback)
+set_tests_properties(station-timestep-invariance-profile-rollback PROPERTIES
+    LABELS "smoke;functional;station;station-timestep-invariance;validation-fast" TIMEOUT 30)
+add_test(NAME station-timestep-invariance-registry COMMAND pf-smoke-station --check invarianceRegistry)
+set_tests_properties(station-timestep-invariance-registry PROPERTIES
+    LABELS "smoke;functional;station;station-timestep-invariance;validation-fast" TIMEOUT 30)
 foreach(ratio 1 6)
     add_test(NAME station-timestep-invariance-fast-${ratio}
         COMMAND pf-smoke-station --step-ratio ${ratio} --check invariance)
     set_tests_properties(station-timestep-invariance-fast-${ratio} PROPERTIES
         LABELS "smoke;functional;validation-fast;station;station-timestep-invariance" TIMEOUT 120)
 endforeach()
-foreach(ratio 30 600)
+foreach(ratio 30 60)
     add_test(NAME station-timestep-invariance-exhaustive-${ratio}
         COMMAND pf-smoke-station --step-ratio ${ratio} --check invariance)
     set_tests_properties(station-timestep-invariance-exhaustive-${ratio} PROPERTIES
         LABELS "smoke;functional;station;station-timestep-invariance;validation-exhaustive" TIMEOUT 120)
 endforeach()
+add_test(NAME station-timestep-invariance-generator-funding COMMAND pf-smoke-station --check invarianceGeneratorFunding)
+set_tests_properties(station-timestep-invariance-generator-funding PROPERTIES
+    LABELS "smoke;functional;station;station-timestep-invariance;validation-exhaustive" TIMEOUT 120)
+add_test(NAME station-timestep-invariance-generator-timing COMMAND pf-smoke-station --check invarianceGeneratorTiming)
+set_tests_properties(station-timestep-invariance-generator-timing PROPERTIES
+    LABELS "smoke;functional;station;station-timestep-invariance;validation-exhaustive" TIMEOUT 120)
+add_test(NAME station-timestep-invariance-profiles COMMAND pf-smoke-station --check invarianceProfiles)
+set_tests_properties(station-timestep-invariance-profiles PROPERTIES
+    LABELS "smoke;functional;station;station-timestep-invariance;validation-exhaustive" TIMEOUT 120)
+add_test(NAME station-timestep-invariance-representative-ratios COMMAND pf-smoke-station --check invarianceRepresentative)
+set_tests_properties(station-timestep-invariance-representative-ratios PROPERTIES
+    LABELS "smoke;functional;station;station-timestep-invariance;validation-exhaustive" TIMEOUT 120)
 add_test(NAME station-timestep-invariance-long-reference
     COMMAND pf-smoke-station --check invarianceLongRun)
 add_test(NAME station-timestep-invariance-performance
@@ -137,7 +170,7 @@ set_tests_properties(station-timestep-invariance-performance PROPERTIES
 add_test(NAME station-step-ratio-runner COMMAND pf-smoke-station --step-ratio 6 --check invariance)
 set_tests_properties(station-step-ratio-runner PROPERTIES LABELS "smoke;functional;validation-fast;station;station-timestep-invariance" TIMEOUT 120)
 
-foreach(check rateAwareProtection protectionReallocation protectionFreeze protectionGrossExcursion saturationCrossing eventSplit eventOrder eventRollback maintenanceSplit reportingSystemsTime scheduledTransfers recurringTransfers scheduledTransferDocuments scheduledPantry invariance invarianceLongRun invariancePerformance connectionTransfers connectionConversions connectionPower connectionThermal connectionProcesses connectionLifecycle connectionForecast connectionMaterialDiagnostics connectionBlockedZeroEfficiency connectionBatteryTelemetry clock clockIntegration lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain schedulesSeam biologySeam waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
+foreach(check rateAwareProtection protectionReallocation protectionFreeze protectionGrossExcursion saturationCrossing eventSplit eventOrder eventRollback maintenanceSplit reportingSystemsTime scheduledTransfers recurringTransfers scheduledTransferDocuments scheduledPantry invariance invarianceLongRun invariancePerformance connectionTransfers connectionConversions connectionPower connectionThermal connectionProcesses connectionLifecycle connectionForecast connectionMaterialDiagnostics connectionBlockedZeroEfficiency connectionBatteryTelemetry clock defaultClockCadence clockIntegration lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain schedulesSeam biologySeam waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
         observationIntegration observationBounds scheduledExchangeObservations algaeExchangeObservations cropExchangeObservations microbialExchangeObservations carbonExchangeObservations waterGasExchangeObservations crewAtmosphereExchangeObservations thermalExchangeObservations electricalExchangeObservations exchangeObservations materialObservations fluidInventoryObservations compoundInventoryObservations livingInventoryObservations materialRelationshipObservations materialCanonicalUnits batteryObservations batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
@@ -191,11 +224,29 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()
+# Step-relative component assertions use the effective Station duration,
+# never a World-tick divisor. Sample both bounds and a non-divisor;
+# ordinary component registrations already cover the production default.
+# The supported [1,60] range does not require an exhaustive sweep.
+foreach(ratio 1 7 60)
+    foreach(check connectionTransfers connectionConversions connectionPower connectionThermal
+            connectionProcesses connectionLifecycle connectionForecast connectionMaterialDiagnostics
+            connectionBlockedZeroEfficiency connectionBatteryTelemetry
+            scheduledTransfers recurringTransfers scheduledPantry lifecycle eventBound)
+        add_test(NAME station-timestep-components-${check}-${ratio}
+            COMMAND pf-smoke-station --step-ratio ${ratio} --check ${check})
+        set_tests_properties(station-timestep-components-${check}-${ratio} PROPERTIES
+            LABELS "smoke;functional;core;station;station-timestep-components;validation-exhaustive" TIMEOUT 60)
+    endforeach()
+endforeach()
 # #774's direct ratio-1 reference runs and timing measurement deliberately
 # cover long simulated durations; retain them outside the generic one-minute
 # station-check budget.
 set_tests_properties(station-invariance station-invarianceLongRun station-invariancePerformance
     PROPERTIES TIMEOUT 120)
+# Keep the compatibility long-run name out of the PR-fast lane too.
+set_tests_properties(station-invarianceLongRun PROPERTIES
+    LABELS "smoke;functional;validation-exhaustive;core;station;station-timestep-invariance")
 # The #547 analytical hour-scale crossings run multi-hour simulated runs.
 set_tests_properties(station-batteriesEclipse PROPERTIES TIMEOUT 180)
 set_tests_properties(station-batteriesCharging PROPERTIES TIMEOUT 120)
@@ -834,6 +885,8 @@ add_test(NAME station-editor-removals COMMAND pf-smoke-editor --check station/re
 set_tests_properties(station-editor-removals PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-compounds COMMAND pf-smoke-editor --check station/compoundWorkflow)
 set_tests_properties(station-editor-compounds PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+add_test(NAME station-editor-generators COMMAND pf-smoke-editor --check station/generatorWorkflow)
+set_tests_properties(station-editor-generators PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-power COMMAND pf-smoke-editor --check station/powerWorkflow)
 set_tests_properties(station-editor-power PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-mixed-observations COMMAND pf-smoke-editor --check station/mixedObservationWorkflow)

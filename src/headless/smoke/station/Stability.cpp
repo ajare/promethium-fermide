@@ -308,7 +308,7 @@ namespace
 			auto const snap = world.getStationSystemsSnapshot();
 			require(snap.healthy, "the long run was not healthy at a checkpoint");
 			for (auto const ticks : snap.completedTicks)
-				require(ticks == done + leg, "a station system fell behind in the long run");
+				require(ticks == smoke::station::expectedStationSteps(world), "a station system fell behind in the long run");
 			// Bounded retained history at every checkpoint: the event
 			// window and every trend series stay inside their published
 			// bounds no matter how long the run goes on.

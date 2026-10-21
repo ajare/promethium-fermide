@@ -125,6 +125,34 @@ public:
 	{
 		if (port != Missing) mEntries[port].snapshot.reversed = reversed;
 	}
+	// Material doses are already quantities. Preserve a binding amount
+	// exactly instead of rounding it through amount / seconds * seconds.
+	Flow sendAmount(Port port, double offeredAmount)
+	{
+		if (mSeconds <= 0.0) return {0.0, 0.0};
+		auto const input = std::min(remaining(port) * mSeconds, std::max(0.0, offeredAmount));
+		auto const delivered = input * efficiency(port);
+		if (port != Missing)
+		{
+			auto& value = mEntries[port].snapshot;
+			value.lastInputRate += input / mSeconds;
+			value.lastDeliveredRate += delivered / mSeconds;
+			value.lastLossRate += (input - delivered) / mSeconds;
+			value.inputTotal += input;
+			value.deliveredTotal += delivered;
+			value.lostTotal += input - delivered;
+		}
+		return {input, delivered};
+	}
+	Flow receiveAmount(Port port, double deliveredRequest, double availableInput)
+	{
+		auto const available = std::min(remaining(port) * mSeconds, std::max(0.0, availableInput));
+		auto const eta = efficiency(port);
+		auto const required = deliveredRequest <= 0.0 ? 0.0
+			: eta > 0.0 ? (deliveredRequest >= available * eta ? available : deliveredRequest / eta)
+			: deliveredRequest;
+		return sendAmount(port, std::min(available, required));
+	}
 	double routeHeat(Port port, double producedKW)
 	{
 		if (port == Missing) return producedKW;

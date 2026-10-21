@@ -148,7 +148,7 @@ namespace
 		auto const& snap = world.getStationSystemsSnapshot();
 		require(snap.healthy, "the coupled run was not healthy");
 		for (auto const ticks : snap.completedTicks)
-			require(ticks == 7200, "a station system fell behind in the coupled run");
+			require(ticks == smoke::station::expectedStationSteps(world), "a station system fell behind in the coupled run");
 
 		// The crew runs and produces: the human CO2 and waste source.
 		auto const& crew = crewSnap(snap);

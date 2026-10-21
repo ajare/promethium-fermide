@@ -74,6 +74,12 @@ namespace
 			text.replace(at, from.size(), to);
 	}
 
+	void removeStepRatio(std::string& text)
+	{
+		auto const at = text.find("  systemsStepWorldTicks:");
+		if (at != std::string::npos) text.erase(at, text.find('\n', at) - at + 1);
+	}
+
 	void enable(core::World& world, float intervalSeconds,
 		std::vector<core::ResourceStoreSettings> stores = {},
 		std::vector<core::ResourceTransferSettings> transfers = {})
@@ -121,7 +127,7 @@ namespace
 		auto invalid = yaml;
 		replaceAll(invalid, "systemsStepWorldTicks: 6", "systemsStepWorldTicks: 0");
 		require(!core::parseStationConfiguration(invalid, loaded, &diagnostic)
-			&& diagnostic.find("systemsStepWorldTicks 0 is outside allowed range [1, 600]") != std::string::npos
+			&& diagnostic.find("systemsStepWorldTicks 0 is outside allowed range [1, 60]") != std::string::npos
 			&& loaded.settings.systemsStepWorldTicks == 1,
 			"Invalid Station step ratio was accepted or replaced the loaded document");
 
@@ -135,7 +141,7 @@ namespace
 		world.pauseSimulation();
 		changed.systemsStepWorldTicks = 0;
 		require(!world.configureStationSystems(changed, false, &diagnostic)
-			&& diagnostic.find("systemsStepWorldTicks 0 is outside allowed range [1, 600]") != std::string::npos
+			&& diagnostic.find("systemsStepWorldTicks 0 is outside allowed range [1, 60]") != std::string::npos
 			&& world.getStationSystemsSettings() == settings && !world.isModified(),
 			"Invalid Station step-ratio change mutated the World");
 		auto const path = context.temporaryRoot() / "station-step-ratio.world.yaml";
@@ -191,6 +197,7 @@ namespace
 		core::World world("Materials", 2, 2);
 		enable(world, 1.0f, {{"oxygen", "kg", 100, 20, 5}, {"water", "kg", 100, 10}});
 		auto legacy = world.getStationSystemsSettings();
+		legacy.systemsStepWorldTicks = 1; // missing-field legacy contract
 		for (auto const& store : legacy.stores)
 			require(store.materialId.empty(), "Store name or unit inferred a material");
 		core::StationConfigurationDocument document;
@@ -201,14 +208,14 @@ namespace
 		{
 			auto yaml = core::serializeStationConfiguration(document);
 			replaceAll(yaml, "schemaVersion: 104", "schemaVersion: " + std::to_string(version));
-			replaceAll(yaml, "  systemsStepWorldTicks: 1\n", "");
+			removeStepRatio(yaml);
 			require(core::parseStationConfiguration(yaml, loaded, &diagnostic)
 				&& loaded.settings == legacy, "Legacy standalone material was not unclassified");
 		}
 		auto const path = context.temporaryRoot() / "material.world.yaml";
 		auto yaml = serializeYaml(world);
 		replaceAll(yaml, "version: 104", "version: 97");
-		replaceAll(yaml, "  systemsStepWorldTicks: 1\n", "");
+		removeStepRatio(yaml);
 		writeFile(path, yaml);
 		auto reopened = core::loadWorldDocument(path);
 		require(reopened->getStationSystemsSettings() == legacy && !reopened->isModified()
@@ -542,7 +549,7 @@ namespace
 		require(smoke::station::advanceSeconds(original, 2.0), "original scenario run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		auto const expectedEvents = original.getStationSystemsEvents();
-		require(expected.worldTick == 120 && expectedEvents.size() == 5
+		require(expected.worldTick == smoke::station::expectedStationSteps(original) && expectedEvents.size() == 5
 			&& expected.stores.size() == 4 && expected.transfers.size() == 1
 			&& expected.transfers[0].lastCompleted == 0.0
 			&& expected.transfers[0].status == core::StationTransferStatus::Rejected
@@ -623,7 +630,7 @@ namespace
 
 		world.resumeSimulation();
 		require(smoke::station::advanceSeconds(world, 1.0)
-			&& world.getStationSystemsSnapshot().completedTicks[0] == 60,
+			&& world.getStationSystemsSnapshot().completedTicks[0] == smoke::station::expectedStationSteps(world),
 			"the live run did not continue after the failed save");
 #endif
 	}
@@ -726,7 +733,7 @@ namespace
 		world.resumeSimulation();
 		require(smoke::station::advanceSeconds(world, 0.5), "initial run failed");
 		auto const live = world.getStationSystemsSnapshot();
-		require(live.completedTicks[3] == 30, "station did not run before the edit");
+		require(live.completedTicks[3] == smoke::station::expectedStationSteps(world), "station did not run before the edit");
 
 		world.pauseSimulation();
 		world.addRoom("Room B", 0, 0, 5, 4, 1);
@@ -738,7 +745,7 @@ namespace
 
 		world.resumeSimulation();
 		require(smoke::station::advanceSeconds(world, 0.5), "run after the rebuild failed");
-		require(world.getStationSystemsSnapshot().completedTicks[0] == 60,
+		require(world.getStationSystemsSnapshot().completedTicks[0] == smoke::station::expectedStationSteps(world),
 			"station did not continue from its preserved state");
 
 		world.pauseSimulation();
@@ -1290,10 +1297,11 @@ namespace
 		{
 			auto legacy = withField;
 			replaceAll(legacy, "version: 104", "version: 101");
-			replaceAll(legacy, "  systemsStepWorldTicks: 1\n", "");
+			removeStepRatio(legacy);
 			auto const path = directory / "pre-eligibility.world.yaml";
 			writeFile(path, legacy);
-			require(core::loadWorldDocument(path)->getStationSystemsSettings() == settings,
+			auto expectedLegacy = settings; expectedLegacy.systemsStepWorldTicks = 1;
+			require(core::loadWorldDocument(path)->getStationSystemsSettings() == expectedLegacy,
 				"old document did not retain default qualified-only semantics");
 		}
 		for (auto mode : {core::WasteEjectionEligibility::QualifiedAndHeld, core::WasteEjectionEligibility::HeldOnly})

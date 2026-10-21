@@ -293,6 +293,7 @@ namespace core
 			generatorResult.maxSinkTemperatureC = generator.authored.maxSinkTemperatureC;
 			generatorResult.phase = generator.phase;
 			generatorResult.outputKW = generator.outputKW;
+			generatorResult.averageOutputKW = generator.lastAverageOutputKW;
 			generatorResult.fuelDrawKWh = generator.lastFuelDrawKWh;
 			generatorResult.wasteHeatKW = generator.lastWasteHeatKW;
 			generatorResult.startupDrawKW = generator.lastStartupDrawKW;
@@ -315,7 +316,7 @@ namespace core
 			generatorResult.residualKJ = generator.fuelEnergyKJ
 				- generator.electricalKJ - generator.wasteHeatKJ;
 			generatorResult.status = generator.status;
-			totalGeneratorOutput += generator.outputKW;
+			totalGeneratorOutput += generator.lastAverageOutputKW;
 			totalGeneratorStartup += generator.lastStartupDrawKW;
 			totalGeneratorWaste += generator.lastWasteHeatKW;
 			totalGeneratorDecay += generator.lastDecayHeatKW;

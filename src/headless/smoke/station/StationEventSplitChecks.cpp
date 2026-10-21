@@ -15,6 +15,7 @@ namespace
 
 	void eventSplit(smoke::Context const&)
 	{
+		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
 		for (uint32_t ratio : {1u, 6u, 30u})
 		{
 			core::StationSystemsSettings s;
@@ -59,6 +60,7 @@ namespace
 
 	void saturationCrossing(smoke::Context const&)
 	{
+		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
 		// All crossings lie strictly inside even the finest step, not on
 		// convenient tick boundaries. Read only committed public accounts.
 		for (bool draining : {false, true})
@@ -135,6 +137,7 @@ namespace
 
 	void eventOrder(smoke::Context const&)
 	{
+		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
 		for (uint32_t ratio : {1u, 6u, 30u})
 		{
 			core::StationSystemsSettings s;
@@ -174,6 +177,7 @@ namespace
 
 	void eventRollback(smoke::Context const&)
 	{
+		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
 		core::StationSystemsSettings s;
 		s.enabled = true; s.systemsStepWorldTicks = 30;
 		s.stores = {{"tank", "kg", 1e308, 0, 0}, {"sink", "kg", 100, 0, 0}};
@@ -197,6 +201,7 @@ namespace
 
 	void maintenanceSplit(smoke::Context const&)
 	{
+		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
 		for (uint32_t ratio : {1u, 6u, 30u})
 		{
 			core::StationSystemsSettings s;

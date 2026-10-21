@@ -121,7 +121,7 @@ namespace core
 			{
 				auto ports = materialPorts("Crew", crew.authored.id);
 				auto& compartment = runtime.atmospheres[crew.atmosphereIndex];
-				auto const activity = evaluateStationProfile(crew.authored.activityProfile, elapsed);
+				auto const activity = evaluateStationProfile(crew.authored.activityProfile, profileElapsed);
 				auto const crewSeconds = static_cast<double>(crew.authored.crewCount) * activity * dt;
 				auto const foodRequested = crew.authored.foodPerCrewPerS * crewSeconds;
 				auto const waterRequested = crew.authored.waterPerCrewPerS * crewSeconds;
