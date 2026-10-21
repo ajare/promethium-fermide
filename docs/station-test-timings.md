@@ -6,7 +6,21 @@ maintained matrix now uses representative samples: five ratios for analytical
 checks and three for component repeats (45 registrations). Historical counts
 and timings are retained as records, not current coverage requirements.
 
-## Timestep-independence work — current validation, not a speedup baseline
+## Comparable Station workloads: 60 Hz versus 10 Hz
+
+Three alternating paired Release runs, identical fresh inputs and 4200 World
+quanta (~70 seconds), with startup excluded from the advance timer:
+
+| Workload | 60 Hz median | 10 Hz median | Speedup |
+|---|---:|---:|---:|
+| Biology | 1716.537 ms | 288.445 ms | **5.95×** |
+| Bundled reference | 6326.788 ms | 1085.675 ms | **5.83×** |
+
+The [physical-fidelity report](station-physical-fidelity.md) records hardware,
+ranges, startup timings, scope and reproduction. These are Station subsystem
+measurements, not whole-application FPS or suite-registration comparisons.
+
+## Earlier timestep validation — not a speedup baseline
 
 See [the verification checkpoint](station-timestep-verification.md) for scope and
 scoped evidence and remaining work. World is still nominally 60 Hz. The runner now

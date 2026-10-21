@@ -81,6 +81,7 @@ pf_add_smoke_module(pf-smoke-station
         station/StationClockChecks.cpp
         station/StationRuntimeRegressionChecks.cpp
         station/StationInvarianceChecks.cpp
+        station/StationPhysicalFidelityChecks.cpp
         station/StationEventSplitChecks.cpp
         station/StationPortChecks.cpp
         station/StationSeamChecks.cpp
@@ -158,6 +159,14 @@ set_tests_properties(station-timestep-invariance-profiles PROPERTIES
 add_test(NAME station-timestep-invariance-representative-ratios COMMAND pf-smoke-station --check invarianceRepresentative)
 set_tests_properties(station-timestep-invariance-representative-ratios PROPERTIES
     LABELS "smoke;functional;station;station-timestep-invariance;validation-exhaustive" TIMEOUT 120)
+foreach(check physicalCoupling generatorExhaustion generatorOutage generatorPortCapacity recoveryConvergence)
+    add_test(NAME station-fidelity-${check} COMMAND pf-smoke-station --check ${check})
+    set_tests_properties(station-fidelity-${check} PROPERTIES
+        LABELS "smoke;functional;station;station-physical-fidelity;validation-exhaustive" TIMEOUT 180)
+endforeach()
+add_test(NAME station-benchmark-workloads COMMAND pf-smoke-station --check benchmarkWorkloads)
+set_tests_properties(station-benchmark-workloads PROPERTIES
+    LABELS "station;station-performance;validation-exhaustive" TIMEOUT 300 RUN_SERIAL TRUE)
 add_test(NAME station-timestep-invariance-long-reference
     COMMAND pf-smoke-station --check invarianceLongRun)
 add_test(NAME station-timestep-invariance-performance

@@ -247,6 +247,15 @@ namespace core
 		};
 		std::vector<bool> blockedStarts(generators.size(), false);
 		bool generatorQualificationBoundary = false;
+		auto generatorCeiling = [&](GeneratorState const& g) {
+			auto cap = collected.connections.remaining(collected.connections.port("Generator", g.authored.id, "Generation"));
+			auto const factor = collected.energyUnitsToKWh(stores[g.fuelStoreIndex].authored.unit) * 3600 * g.authored.efficiency;
+			for (auto const& binding : collected.connections.storePorts("Generator", g.authored.id, settings))
+				if (binding.input && binding.store == g.fuelStoreIndex)
+					cap = std::min(cap, collected.connections.remaining(binding.port)
+						* collected.connections.efficiency(binding.port) * factor);
+			return cap;
+		};
 		auto powerPhaseCrossing = [&](double maximum)
 		{
 			// A startup surge is full instantaneous power until completion,
@@ -264,7 +273,9 @@ namespace core
 				auto const& a = g.authored;
 				if (a.ratedOutputKW <= 0) continue;
 				double crossing = 0;
-				if (g.phase == StationGeneratorPhase::Starting)
+				if (g.phase == StationGeneratorPhase::Shutdown)
+					crossing = a.shutdownSeconds - g.shutdownElapsedSeconds;
+				else if (g.phase == StationGeneratorPhase::Starting)
 					crossing = a.startupPowerKW > 0
 						? (a.startupPowerKW * a.startupSeconds - g.startupReceivedKJ) / a.startupPowerKW : 0;
 				else if (g.phase == StationGeneratorPhase::Stopped && !blockedStarts[i]
@@ -277,10 +288,30 @@ namespace core
 				{
 					auto const command = settings.dispatchMode == StationDispatchMode::Automatic
 						? g.lastCommandedKW : a.commandedOutputKW;
-					auto const cap = collected.connections.remaining(collected.connections.port("Generator", a.id, "Generation"));
+					auto const cap = generatorCeiling(g);
 					auto const target = std::min({command, a.ratedOutputKW * g.availabilityFactor, cap});
 					auto const start = g.phase == StationGeneratorPhase::Running ? g.outputKW : 0.0;
-					if (command > 0) crossing = std::abs(target - start) / a.maxRampKWPerSecond;
+					if (command > 0)
+					{
+						crossing = std::abs(target - start) / a.maxRampKWPerSecond;
+						auto const& fuel = stores[g.fuelStoreIndex];
+						auto fuelUnits = std::max(0.0, fuel.currentQualified - fuel.authored.protectedReserve);
+						for (auto const& binding : collected.connections.storePorts("Generator", a.id, settings))
+							if (binding.input && binding.store == g.fuelStoreIndex)
+								fuelUnits *= collected.connections.efficiency(binding.port);
+						auto const energy = fuelUnits * collected.energyUnitsToKWh(fuel.authored.unit) * 3600 * a.efficiency;
+						if (energy > 0 && integrateGeneratorRamp(start, target, a.maxRampKWPerSecond, maximum).meanKW * maximum >= energy)
+						{
+							double low = 0, high = maximum;
+							for (int iteration = 0; iteration < 64; ++iteration)
+							{
+								auto const middle = (low + high) / 2;
+								if (integrateGeneratorRamp(start, target, a.maxRampKWPerSecond, middle).meanKW * middle < energy) low = middle;
+								else high = middle;
+							}
+							crossing = crossing > 0 ? std::min(crossing, high) : high;
+						}
+					}
 				}
 				if (crossing > 0 && cursor + crossing > cursor) maximum = std::min(maximum, crossing);
 			}
@@ -306,7 +337,7 @@ namespace core
 						|| (g.phase == StationGeneratorPhase::Stopped && !blockedStarts[i]
 							&& a.startupPowerKW * a.startupSeconds <= 0))
 					{
-						auto const cap = collected.connections.remaining(port);
+						auto const cap = generatorCeiling(g);
 						auto const start = g.phase == StationGeneratorPhase::Running
 							? std::min({g.outputKW, a.ratedOutputKW * g.availabilityFactor, cap}) : 0.0;
 						auto const target = std::min({a.commandedOutputKW, a.ratedOutputKW * g.availabilityFactor, cap});
@@ -332,12 +363,41 @@ namespace core
 						if (available + 1e-9 >= need) available -= need;
 					}
 				}
+				// Unconstrained single-load admission is min(source, demand).
+				// Its corner must also be split while source power ramps.
+				if (loads.size() == 1 && loads[0].authored.materialExchanges.empty()
+					&& loads[0].authored.criticalFloorKW == 0 && slope != 0)
+				{
+					auto const& load = loads[0];
+					auto const request = load.authored.electricalDemandKW
+						* evaluateStationProfile(load.authored.operatingProfile, cursor + maximum * 0.5);
+					auto const need = collected.connections.required(collected.powerPort("Equipment", load.authored.id), request);
+					auto const crossing = (need - available) / slope;
+					if (crossing > 0 && cursor + crossing > cursor && crossing < maximum) maximum = crossing;
+				}
 			}
 			return maximum;
 		};
+		// Outage edges change the forcing just like illumination edges.
+		for (auto const& outage : outages)
+		{
+			auto const& s = outage.authored;
+			auto collect = [&](bool restore) {
+				auto const count = [&](double t) {
+					return restore ? stationOutageOccurrencesCompleted(s.firstOccurrenceSeconds, s.durationSeconds, s.recurrenceSeconds, t)
+						: stationOutageOccurrencesStarted(s.firstOccurrenceSeconds, s.durationSeconds, s.recurrenceSeconds, t);
+				};
+				for (auto occurrence = count(cursor), due = count(end); occurrence < due; ++occurrence)
+				{
+					auto const when = s.firstOccurrenceSeconds + occurrence * s.recurrenceSeconds + (restore ? s.durationSeconds : 0.0);
+					if (when > cursor && when < end) boundaries.push_back(when);
+				}
+			};
+			collect(false); collect(true);
+		}
 		auto const hasContinuousTransfers = std::any_of(transfers.begin(), transfers.end(),
 			[](auto const& transfer) { return transfer.authored.mode == ResourceTransferMode::Continuous; });
-		if (boundaries.empty() && collected.arrivals.empty() && maintenanceJobs.empty()
+		if (boundaries.empty() && collected.arrivals.empty() && maintenanceJobs.empty() && outages.empty()
 			&& !hasContinuousTransfers && powerPhaseCrossing(seconds) >= seconds)
 			return integrate(end, seconds, [](Tick const&) {});
 		// Transfer rates are constant until an inventory boundary or an authored
@@ -376,7 +436,7 @@ namespace core
 			}
 			return maximum;
 		};
-		if (boundaries.empty() && collected.arrivals.empty() && maintenanceJobs.empty()
+		if (boundaries.empty() && collected.arrivals.empty() && maintenanceJobs.empty() && outages.empty()
 			&& transferCrossing(seconds) >= seconds && powerPhaseCrossing(seconds) >= seconds)
 			return integrate(end, seconds, [](Tick const&) {});
 		for (auto const& arrival : collected.arrivals)
@@ -416,7 +476,13 @@ namespace core
 		mean({&lastAvailableGenerationKW, &lastPoolGenerationKW, &lastConnectionPowerLossKW, &lastPoolResidualKW});
 		for (auto& a : solarArrays) mean({&a.lastAvailableKW});
 		for (auto& l : loads) mean({&l.lastRequestedKW, &l.lastSuppliedKW, &l.lastUnmetKW,
-			&l.lastUnmetCriticalKW, &l.lastHeatExportedKW, &l.lastSurgeKW});
+			&l.lastUnmetCriticalKW, &l.lastHeatExportedKW, &l.lastHeatRoutedKW, &l.lastProfileLevel, &l.lastSurgeKW});
+		for (auto& r : reservoirs) mean({&r.lastHeatRoutedKW, &r.lastLoopHeatKW,
+			&r.lastCondenserHeatKW, &r.lastGeneratorHeatKW, &r.lastElectrolysisHeatKW,
+			&r.lastFuelCellHeatKW, &r.lastSabatierHeatKW, &r.lastMethaneProcessingHeatKW,
+			&r.lastMicrobialHeatKW, &r.lastAtmosphereHeatKW, &r.lastBufferChargeKW,
+			&r.lastBufferDischargeKW, &r.lastHeatInKW, &r.lastRejectedKW, &r.lastNetKW});
+		for (auto& r : radiators) mean({&r.lastRejectedKW});
 		for (auto& b : batteries) mean({&b.lastChargeKW, &b.lastDischargeKW,
 			&b.lastDischargeRequestedKW, &b.lastDischargeShortfallKW});
 		for (auto& g : generators) mean({&g.lastAverageOutputKW, &g.lastWasteHeatKW,
@@ -564,6 +630,12 @@ namespace core
 			if (!std::isfinite(total)) return violation = "split-step weighted mean is not finite", false;
 			*field = total;
 		}
+		for (auto& load : loads)
+			load.lastDeliveredFraction = load.lastRequestedKW > 0.0
+				? load.lastSuppliedKW / load.lastRequestedKW : 0.0;
+		for (auto& generator : generators)
+			generator.lastCoolingRequired = generator.lastCoolingRequired || generator.lastAverageOutputKW > 0
+				|| generator.lastStartupDrawKW > 0 || generator.lastDecayHeatKW > 0 || generator.lastWasteHeatKW > 0;
 		for (size_t i = 0; i < connectionFlows.size(); ++i)
 		{
 			for (auto const rate : connectionRateTotals[i])

@@ -21,7 +21,7 @@ namespace core
 				"sabatierReactors", "methaneProcessors", "microbialProcessors", "cropPopulations",
 				"algaeCultures", "fuelCells", "hasNextDelivery", "nextDeliverySeconds",
 				"hasNextWasteEjection", "nextWasteEjectionSeconds", "endurance", "forecast", "balanceTolerance"};
-			std::array<StationObservableInvariance, 51> result{};
+			std::array<StationObservableInvariance, 57> result{};
 			for (size_t i = 0; i < names.size(); ++i)
 			{
 				auto& entry = result[i];
@@ -72,6 +72,36 @@ namespace core
 				entry.basis = "fixture-scoped manual affine ramps at sampled ratios 1,6,7,30,60 with ample fuel, qualified sinks and lossless connections; constant/delayed solar or generator-funded crank, not arbitrary coupled configurations";
 				entry.verifiedBy = "station/invarianceGeneratorTiming;station/invarianceGeneratorFunding";
 			}
+			constexpr std::array<std::string_view, 4> boundedFields{
+				"thermal.reservoirs[].temperatureC", "atmospheres[].temperatureC",
+				"coolantLoops[].loopTemperatureC", "algaeCultures[].livingBiomassKg"};
+			constexpr std::array<double, 4> bounds{0.06, 0.036, 0.036, 0.00176};
+			for (size_t i = 0; i < boundedFields.size(); ++i)
+			{
+				auto& entry = result[names.size() + verified.size() + generatorFields.size() + i];
+				entry.name = boundedFields[i];
+				entry.classification = StationObservableInvarianceClass::Bound;
+				entry.convergenceOrder = 1;
+				entry.bound = bounds[i];
+				entry.verifiedThroughRatio = 60;
+				entry.basis = "70 s physicalCoupling fixtures only, ratios 1,6,7,30,60; analytical ODE truncation bounds for configured model coefficients, not physical parameter calibration or arbitrary configurations";
+				entry.verifiedBy = "station/physicalCoupling";
+			}
+			auto& cycle = result[result.size() - 2];
+			cycle.name = "fuelCells[].electricalKJ";
+			cycle.classification = StationObservableInvarianceClass::Bound;
+			cycle.convergenceOrder = 1;
+			cycle.bound = 8.1;
+			cycle.verifiedThroughRatio = 60;
+			cycle.basis = "70 s solar-funded 0.001 kg/s electrolysis/fuel-cell cycle only; error is one Station interval of reactant production; ratios 1,6,7,30,60, not a global guarantee";
+			cycle.verifiedBy = "station/physicalCoupling";
+			auto& decay = result.back();
+			decay.name = "power.generators[].decayHeatKJ";
+			decay.classification = StationObservableInvarianceClass::Exact;
+			decay.absoluteTolerance = 1e-8;
+			decay.verifiedThroughRatio = 60;
+			decay.basis = "manual single-generator finite-fuel/outage fixtures with qualified sink; ratios 1,6,7,30,60; no global guarantee";
+			decay.verifiedBy = "station/generatorExhaustion;station/generatorOutage;station/generatorPortCapacity";
 			return result;
 		}();
 		return entries;

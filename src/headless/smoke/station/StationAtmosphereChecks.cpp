@@ -177,7 +177,7 @@ namespace
 			auto const expectedOxygen = 23.2 / 0.0319988 * 8.314462618 * 293.15 / 100.0 / 1000.0;
 			auto const expectedNitrogen = 79.0 / 0.0280134 * 8.314462618 * 293.15 / 100.0 / 1000.0;
 			auto const expectedCo2 = 1.0 / 0.0440095 * 8.314462618 * 293.15 / 100.0 / 1000.0;
-			auto const expectedVapour = 0.5 / 0.0180153 * 8.314462618 * 293.15 / 100.0 / 1000.0;
+			auto const expectedVapour = 0.5 / 0.01801528 * 8.314462618 * 293.15 / 100.0 / 1000.0;
 			require(approx(lab.oxygenPartialPressureKPa, expectedOxygen, 1e-9),
 				"oxygen partial pressure does not match the ideal-gas law");
 			require(approx(lab.nitrogenPartialPressureKPa, expectedNitrogen, 1e-9),

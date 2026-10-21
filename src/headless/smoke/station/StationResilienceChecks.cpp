@@ -234,7 +234,7 @@ void dispatch(smoke::Context const&)
 			"reserve exhaustion left no unmet demand while the load still needed power");
 		require(sawEvent(world, "Electrical reserve exhausted"),
 			"reserve exhaustion was not recorded as an alarm");
-		auto const& diesel = world.getStationSystemsSnapshot().stores[0];
+		auto const diesel = world.getStationSystemsSnapshot().stores[0];
 		require(diesel.currentQualified + diesel.currentUnqualified >= 5.0 - 1e-9,
 			"automatic dispatch spent the protected fuel reserve");
 	}

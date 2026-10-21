@@ -106,7 +106,7 @@ namespace
 		hourChargeLoss.resumeSimulation();
 		require(smoke::station::advanceSeconds(hourChargeLoss, 3600.0), "One-hour charge-loss run failed");
 		{
-			auto const& b = hourChargeLoss.getStationSystemsSnapshot().power.batteries[0];
+			auto const b = hourChargeLoss.getStationSystemsSnapshot().power.batteries[0];
 			require(hourTight(b.storedKWh, 0.5)
 				&& hourTight(b.chargedKWh, 0.5)
 				&& hourTight(b.chargeInputKWh, 1.0)
@@ -128,7 +128,7 @@ namespace
 		hourDischargeLoss.resumeSimulation();
 		require(smoke::station::advanceSeconds(hourDischargeLoss, 3600.0), "One-hour discharge-loss run failed");
 		{
-			auto const& b = hourDischargeLoss.getStationSystemsSnapshot().power.batteries[0];
+			auto const b = hourDischargeLoss.getStationSystemsSnapshot().power.batteries[0];
 			require(hourTight(b.storedKWh, 2.0)
 				&& hourTight(b.dischargedKWh, 2.0)
 				&& hourTight(b.deliveredKWh, 1.0)

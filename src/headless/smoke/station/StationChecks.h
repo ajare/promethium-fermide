@@ -30,4 +30,5 @@ void registerScheduledTransferChecks(std::vector<smoke::Check>& checks);
 #include "StationTrendChecks.h"
 #include "StationForecastChecks.h"
 void registerStationInvarianceChecks(std::vector<smoke::Check>& checks);
+void registerStationPhysicalFidelityChecks(std::vector<smoke::Check>& checks);
 void registerStationRuntimeRegressionChecks(std::vector<smoke::Check>& checks);

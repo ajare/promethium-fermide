@@ -1418,7 +1418,7 @@ authored exchanger conductance in kW/K.
 Pressure is derived, never simulated as a control target: each
 gas's partial pressure follows the ideal-gas law, p = (m / M) · R · T /
 V in kPa, with molar masses oxygen 0.0319988, nitrogen 0.0280134,
-carbon dioxide 0.0440095 and water vapour 0.0180153 kg/mol, and
+carbon dioxide 0.0440095 and water vapour 0.01801528 kg/mol, and
 R = 8.314462618 J/(mol·K). Absolute pressure is the sum of the
 partial pressures (Dalton). Humidity follows the Magnus saturation
 curve, p_sat = 0.61094 · exp(17.625·t / (t + 243.04)) kPa; vapour

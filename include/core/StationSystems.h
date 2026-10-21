@@ -730,7 +730,9 @@ namespace core
 	inline constexpr double StationMolarMassOxygenKgPerMol{0.0319988};
 	inline constexpr double StationMolarMassNitrogenKgPerMol{0.0280134};
 	inline constexpr double StationMolarMassCarbonDioxideKgPerMol{0.0440095};
-	inline constexpr double StationMolarMassWaterKgPerMol{0.0180153};
+	// Keep 2 H2 + O2 -> 2 H2O consistent in both electrolysis and
+	// fuel-cell stoichiometry; coarser rounding creates a cycle drift.
+	inline constexpr double StationMolarMassWaterKgPerMol{0.01801528};
 	// Molar mass of diatomic hydrogen gas in kg/mol (#406): a constant of
 	// the declared species, used for the fuel cell's stoichiometric
 	// oxygen demand against the hydrogen it consumes.

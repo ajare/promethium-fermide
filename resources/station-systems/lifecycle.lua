@@ -36,7 +36,7 @@ local KELVIN_OFFSET = 273.15
 local MOLAR_MASS_OXYGEN = 0.0319988
 local MOLAR_MASS_NITROGEN = 0.0280134
 local MOLAR_MASS_CARBON_DIOXIDE = 0.0440095
-local MOLAR_MASS_WATER = 0.0180153
+local MOLAR_MASS_WATER = 0.01801528
 -- Molar mass of diatomic hydrogen gas in kg/mol (#406): a constant of
 -- the declared species, mirroring the host's StationMolarMassHydrogenKgPerMol.
 local MOLAR_MASS_HYDROGEN = 0.00201588
@@ -164,6 +164,7 @@ end
 -- a stiff conductance. The heat a leaf gains is exactly the negation of
 -- what the reservoir gives up, so both ledgers close on the same number.
 local function integrateGeneratorRamp(startKW, targetKW, rampKWPerSecond, seconds)
+    if seconds <= 0 then return startKW, startKW end
     local needed = math.abs(targetKW - startKW) / rampKWPerSecond
     local rampSeconds = math.min(seconds, needed)
     local direction = targetKW >= startKW and 1 or -1
@@ -3597,6 +3598,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- deliverable rated capacity. Restoration only lifts the ceiling: no
     -- inventory is touched, so a machine that ran dry stays dry.
     local function applyOutages(self, elapsed)
+        for _, job in ipairs(self.maintenance) do job.installation.availability = 1.0 end
         -- Reset every installation to full declared availability, then
         -- let the open outage windows cap the targets they aim at.
         for index = 1, #self.outages do
@@ -3732,7 +3734,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         for _, jobIndex in ipairs(self.maintenance_order) do
             local job = self.maintenance[jobIndex]
             if job.phase == 'active' then
-                job.progress = job.progress + dt
+                job.progress = math.max(0, elapsed - (job.startedAt or (elapsed - dt)))
                 if job.progress + BALANCE_TOLERANCE >= job.durationSeconds then
                     job.progress = job.durationSeconds
                     for _, requirement in ipairs(job.requirements) do
@@ -3861,6 +3863,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                                 (wasteClaimByStore[job.wasteStoreIndex] or 0) + consumedTotal
                         end
                         job.phase = 'active'
+                        job.startedAt = elapsed
                         job.progress = 0
                         job.started = job.started + 1
                     end
@@ -5013,8 +5016,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local coolingAvailable = not disabled
                 and sinkTemperature + 1e-9 < gen.maxSinkTemperatureC
             local kwhPerUnit = energyUnitsToKWh(gen.fuelStore.unit)
-            local drawableKWh = math.max(0, gen.fuelStore.qualified
-                - gen.fuelStore.protected_reserve) * kwhPerUnit
+            local drawableUnits = math.max(0, gen.fuelStore.qualified - gen.fuelStore.protected_reserve)
+            local drawableKWh = drawableUnits * kwhPerUnit
             local startupRequiredKJ = gen.startupPowerKW * gen.startupSeconds
             gen.lastFuelDrawKWh = 0
             gen.lastWasteHeatKW = 0
@@ -5024,11 +5027,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             gen.lastDecayHeatKW = 0
             gen.lastCoolingAvailable = coolingAvailable
             gen.blockReason = ''
-            -- The phase as it stood before this tick's transitions, so
-            -- the decay bookkeeping below can tell a generator that has
-            -- been in Shutdown since last tick from one that just
-            -- entered it (#563).
-            local phaseBefore = gen.phase
+            -- Empty phases do not consume a positive integration interval.
+            local exhaustedAtEnd = false
+            if gen.phase == 'shutdown' and gen.shutdownElapsed >= gen.shutdownSeconds then gen.phase = 'stopped' end
             if gen.phase == 'stopped' then
                 gen.outputKW = 0
                 if commanded > 0 then
@@ -5150,7 +5151,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     -- generator with no fuel left cannot run at all.
                     local neededFuelKWh = gen.averageOutputKW * fixed_hours / gen.efficiency
                     if neededFuelKWh > drawableKWh then
-                        if drawableKWh <= 1e-15 then
+                        if drawableKWh <= 0 then
                             -- Fuel depletion stops electrical output
                             -- immediately; the decay period follows.
                             gen.phase = 'shutdown'
@@ -5164,8 +5165,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         end
                     end
                     if gen.phase == 'running' then
-                        local drawnKWh = gen.averageOutputKW * fixed_hours / gen.efficiency
-                        local drawnUnits = drawnKWh / kwhPerUnit
+                        exhaustedAtEnd = neededFuelKWh >= drawableKWh
+                        local drawnUnits = exhaustedAtEnd and drawableUnits
+                            or math.min(drawableUnits, gen.averageOutputKW * fixed_hours / gen.efficiency / kwhPerUnit)
+                        local drawnKWh = drawnUnits * kwhPerUnit
+                        gen.averageOutputKW = drawnKWh * 3600 * gen.efficiency / fixed_seconds
                         gen.fuelStore.qualified = gen.fuelStore.qualified - drawnUnits
                         self.unit_loss[gen.fuelStore.unit] =
                             (self.unit_loss[gen.fuelStore.unit] or 0) + drawnUnits
@@ -5186,6 +5190,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         -- the loads allocate against this tick -
                         -- generation earned with fuel, not sunshine.
                         generation = generation + gen.averageOutputKW
+                        if exhaustedAtEnd then
+                            gen.phase = 'shutdown'; gen.shutdownElapsed = 0; gen.outputKW = 0
+                            gen.blockReason = 'fuel depleted: generator shut down'
+                        end
                     end
                 end
             else
@@ -5199,20 +5207,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             -- tick. The decay heat cannot be refused - it happens
             -- whether or not cooling is available - so it books
             -- regardless. A zero decay period books nothing. The
-            -- Shutdown phase persists until the tick after the last
-            -- decay interval so the phase transitions still bracket
-            -- the decay period.
+            -- Completion is a physical boundary, not an additional step.
+            -- Fuel exhausted at an interval endpoint starts decay afterward.
             local decayedThisTick = false
-            if gen.phase == 'shutdown' then
+            if gen.phase == 'shutdown' and not exhaustedAtEnd then
                 local remainingSeconds = gen.shutdownSeconds - gen.shutdownElapsed
-                if remainingSeconds <= 1e-9 then
-                    -- Nothing left to decay. A generator that entered
-                    -- Shutdown only this tick keeps the phase for it so
-                    -- the transition events still bracket even an
-                    -- empty decay period; one already in Shutdown stops.
-                    if phaseBefore == 'shutdown' then
-                        gen.phase = 'stopped'
-                    end
+                if remainingSeconds <= 0 then
+                    -- No positive-time wait for an empty decay phase.
+                    gen.phase = 'stopped'
                 else
                     local intervalSeconds = math.min(fixed_seconds, remainingSeconds)
                     local bookedKJ = gen.shutdownHeatKW * intervalSeconds
@@ -5225,6 +5227,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         (gen.heatSink.generatorHeat or 0) + gen.lastDecayHeatKW
                     gen.decayHeatKJ = gen.decayHeatKJ + bookedKJ
                     gen.shutdownElapsed = gen.shutdownElapsed + intervalSeconds
+                    if intervalSeconds >= remainingSeconds then
+                        gen.shutdownElapsed = gen.shutdownSeconds; gen.phase = 'stopped'
+                    end
                     decayedThisTick = bookedKJ > 0
                 end
             end
@@ -10074,15 +10079,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- Deliveries land first: what arrives this tick is available to
         -- this tick's equipment, transfers and conversions, matching the
         -- host ledger order.
-        applyDeliveries(self, elapsed)
+        applyDeliveries(self, (station_step - 1) * fixed_seconds)
         -- Installation outage availability is resolved before any
         -- installation reads its rated capacity, mirroring the host
         -- ledger order (#413).
-        applyOutages(self, elapsed)
+        applyOutages(self, (station_step - 1) * fixed_seconds)
         -- Maintenance reservations, completion spend and installation
         -- isolation run right behind the outage pass, mirroring the
         -- host ledger order (#414).
-        applyMaintenance(self, elapsed, fixed_seconds)
+        applyMaintenance(self, (station_step - 1) * fixed_seconds, 0)
         -- Mirror the host's profile-event integration. All forcing profiles
         -- share one timeline; averaging solar and demand independently would
         -- invent power when their active windows do not overlap.
@@ -10121,11 +10126,34 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         for _, culture in ipairs(self.algae_cultures) do
             if culture.cultureVolumeL > 0 then collectProfile(culture.illumination) end
         end
+        local function collectWindow(first, duration, recurrence)
+            for _, restore in ipairs(duration > 0 and {0, duration} or {0}) do
+                local offset = first + restore
+                local firstIndex = recurrence > 0 and math.max(0, math.floor((cursor - offset) / recurrence) + 1) or 0
+                local lastIndex = recurrence > 0 and math.floor((elapsed - offset) / recurrence) or 0
+                for occurrence = firstIndex, lastIndex do
+                    local when = offset + occurrence * recurrence
+                    if when > cursor and when < elapsed then table.insert(boundaries, when) end
+                end
+            end
+        end
+        for _, delivery in ipairs(self.deliveries) do collectWindow(delivery.firstSeconds, 0, delivery.recurrenceSeconds) end
+        for _, ejection in ipairs(self.waste_ejections) do collectWindow(ejection.firstSeconds, 0, ejection.recurrenceSeconds) end
+        for _, outage in ipairs(self.outages) do collectWindow(outage.firstSeconds, outage.durationSeconds, outage.recurrenceSeconds) end
+        for _, job in ipairs(self.maintenance) do collectWindow(job.firstSeconds, job.durationSeconds, job.recurrenceSeconds) end
         table.sort(boundaries)
         local blockedStarts = {}
         for _, instant in ipairs(boundaries) do
             while instant > cursor do
+                applyOutages(self, cursor)
+                applyMaintenance(self, cursor, 0)
                 local nextInstant = instant
+                for _, job in ipairs(self.maintenance) do
+                    if job.phase == 'active' and job.startedAt then
+                        local completion = job.startedAt + job.durationSeconds
+                        if completion > cursor then nextInstant = math.min(nextInstant, completion) end
+                    end
+                end
                 -- The surge occupies real time at full power. Do not smear
                 -- its final fraction over normal service after completion.
                 for _, load in ipairs(self.loads) do
@@ -10137,7 +10165,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 for i, gen in ipairs(self.generators) do
                     local crossing = 0
                     if gen.ratedKW > 0 then
-                        if gen.phase == 'starting' and gen.startupPowerKW > 0 then
+                        if gen.phase == 'shutdown' then
+                            crossing = gen.shutdownSeconds - gen.shutdownElapsed
+                        elseif gen.phase == 'starting' and gen.startupPowerKW > 0 then
                             crossing = (gen.startupPowerKW * gen.startupSeconds - gen.startupReceivedKJ) / gen.startupPowerKW
                         elseif gen.phase == 'stopped' and not blockedStarts[i] and gen.startupPowerKW > 0
                             and (gen.commandedKW > 0 or self.dispatch_automatic) then
@@ -10147,7 +10177,21 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             local command = self.dispatch_automatic and gen.dispatchCommand or gen.commandedKW
                             local target = math.min(command, gen.ratedKW * installationAvailability(gen))
                             local start = gen.phase == 'running' and gen.outputKW or 0
-                            if command > 0 then crossing = math.abs(target - start) / gen.rampKWPerSecond end
+                            if command > 0 then
+                                crossing = math.abs(target - start) / gen.rampKWPerSecond
+                                local energy = math.max(0, gen.fuelStore.qualified - gen.fuelStore.protected_reserve)
+                                    * energyUnitsToKWh(gen.fuelStore.unit) * 3600 * gen.efficiency
+                                local _, mean = integrateGeneratorRamp(start, target, gen.rampKWPerSecond, nextInstant - cursor)
+                                if energy > 0 and mean * (nextInstant - cursor) >= energy then
+                                    local low, high = 0, nextInstant - cursor
+                                    for iteration = 1, 64 do
+                                        local middle = (low + high) * 0.5
+                                        local _, power = integrateGeneratorRamp(start, target, gen.rampKWPerSecond, middle)
+                                        if power * middle < energy then low = middle else high = middle end
+                                    end
+                                    crossing = crossing > 0 and math.min(crossing, high) or high
+                                end
+                            end
                         end
                     end
                     if crossing > 0 and cursor + crossing > cursor then
@@ -10184,6 +10228,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             end
                         end
                     end
+                    if #self.loads == 1 and #self.loads[1].exchanges == 0
+                        and self.loads[1].criticalFloorKW == 0 and slope ~= 0 then
+                        local need = self.loads[1].demandKW * evaluateProfile(self.loads[1].profile, cursor + (nextInstant - cursor) * 0.5)
+                        local crossing = (need - available) / slope
+                        if crossing > 0 and cursor + crossing > cursor then nextInstant = math.min(nextInstant, cursor + crossing) end
+                    end
                 end
                 local duration = nextInstant - cursor
                 local profile_elapsed = cursor + duration * 0.5
@@ -10193,6 +10243,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 applyThermal(self, duration)
                 applyTransfers(self, duration)
                 applyConversions(self, duration)
+                applyDeliveries(self, nextInstant)
+                applyOutages(self, nextInstant)
+                applyMaintenance(self, nextInstant, duration)
                 for i, gen in ipairs(self.generators) do
                     if gen.phase == 'stopped' then blockedStarts[i] = true end
                 end

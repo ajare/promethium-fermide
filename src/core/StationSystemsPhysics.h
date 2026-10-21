@@ -6,6 +6,7 @@ namespace core
 	inline GeneratorRampIntegral integrateGeneratorRamp(double startKW, double targetKW,
 		double rampKWPerSecond, double seconds)
 	{
+		if (seconds <= 0.0) return {startKW, startKW};
 		auto const needed = std::abs(targetKW - startKW) / rampKWPerSecond;
 		auto const rampSeconds = std::min(seconds, needed);
 		auto const endpoint = seconds >= needed ? targetKW

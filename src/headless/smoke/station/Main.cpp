@@ -29,6 +29,7 @@ int main(int argc, char** argv)
 	registerStationClockChecks(checks);
 	registerStationRuntimeRegressionChecks(checks);
 	registerStationInvarianceChecks(checks);
+	registerStationPhysicalFidelityChecks(checks);
 	registerStationProtectionChecks(checks);
 	registerStationEventSplitChecks(checks);
 	registerStationPortChecks(checks);

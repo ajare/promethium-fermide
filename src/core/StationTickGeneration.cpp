@@ -4,6 +4,9 @@ namespace core
 {
 	bool StationSystemsRuntime::Impl::Tick::scheduledState()
 	{
+		// Positive integration uses forcing at its left boundary; the
+		// zero-time boundary pass publishes starts/restorations at the end.
+		auto const outageElapsed = continuous ? elapsed - seconds : elapsed;
 		for (auto& generator : runtime.generators) generator.availabilityFactor = 1.0;
 		for (auto& loop : runtime.coolantLoops) loop.availabilityFactor = 1.0;
 		for (auto& chiller : runtime.chillers) chiller.availabilityFactor = 1.0;
@@ -26,10 +29,10 @@ namespace core
 			auto const& schedule = outage.authored;
 			auto const startedDue = stationOutageOccurrencesStarted(
 				schedule.firstOccurrenceSeconds, schedule.durationSeconds,
-				schedule.recurrenceSeconds, elapsed);
+				schedule.recurrenceSeconds, outageElapsed);
 			auto const completedDue = stationOutageOccurrencesCompleted(
 				schedule.firstOccurrenceSeconds, schedule.durationSeconds,
-				schedule.recurrenceSeconds, elapsed);
+				schedule.recurrenceSeconds, outageElapsed);
 			// Stage each newly opened window and each newly closed
 			// (restored) window with its occurrence time, so the event
 			// log brackets every outage even when several start and end
@@ -902,9 +905,9 @@ namespace core
 						&& powerAvailable("Generator", generator.authored.id) + 1e-9 < generator.authored.startupPowerKW))
 					ports.limitDemand(0.0, 1.0);
 			}
-			auto const drawableKWh = std::max(0.0,
-				ports.input(generator.fuelStoreIndex, qualified[generator.fuelStoreIndex] - runtime.stores[generator.fuelStoreIndex].authored.protectedReserve))
-				* kwhPerUnit;
+			auto const drawableUnits = std::max(0.0,
+				ports.input(generator.fuelStoreIndex, qualified[generator.fuelStoreIndex] - runtime.stores[generator.fuelStoreIndex].authored.protectedReserve));
+			auto const drawableKWh = drawableUnits * kwhPerUnit;
 			auto const startupRequiredKJ = generator.authored.startupPowerKW * generator.authored.startupSeconds;
 			generator.lastAverageOutputKW = 0.0;
 			generator.lastFuelDrawKWh = 0.0;
@@ -914,11 +917,19 @@ namespace core
 			generator.lastDecayHeatKW = 0.0;
 			generator.lastCoolingAvailable = coolingAvailable;
 			generator.lastBlockReason.clear();
-			// The phase as it stood before this tick's transitions, so
-			// the decay bookkeeping below can tell a generator that has
-			// been in Shutdown since last tick from one that just
-			// entered it (#563).
-			auto const phaseBeforeSwitch = generator.phase;
+			// Resolve zero-duration phases without spending a positive interval.
+			// Preserve every phase event even when several occur in one step.
+			auto const generatorIndex = static_cast<size_t>(&generator - runtime.generators.data());
+			bool exhaustedAtEnd = false;
+			if (generator.phase == StationGeneratorPhase::Shutdown
+				&& generator.shutdownElapsedSeconds >= generator.authored.shutdownSeconds)
+			{
+				appendBoundedEvent(runtime.events, tick, "generator", "Generator '" + generator.authored.id
+					+ "' shutdown complete: decay heat dissipated after "
+					+ std::to_string(generator.authored.shutdownSeconds) + " s");
+				generator.phase = StationGeneratorPhase::Stopped;
+				previousGeneratorPhase[generatorIndex] = generator.phase;
+			}
 			// A zero-duration phase transition must not consume a whole
 			// integration interval before the crank can receive energy.
 			if (generator.phase == StationGeneratorPhase::Stopped)
@@ -946,6 +957,13 @@ namespace core
 						generator.startupReceivedKJ = 0.0;
 						generator.phase = startupRequiredKJ > 0.0
 							? StationGeneratorPhase::Starting : StationGeneratorPhase::Running;
+						if (generator.phase == StationGeneratorPhase::Starting)
+						{
+							appendBoundedEvent(runtime.events, tick, "generator", "Generator '" + generator.authored.id
+								+ "' starting: cranking at " + std::to_string(generator.authored.startupPowerKW)
+								+ " kW for " + std::to_string(generator.authored.startupSeconds) + " s");
+							previousGeneratorPhase[generatorIndex] = generator.phase;
+						}
 					}
 				}
 			}
@@ -1034,7 +1052,11 @@ namespace core
 					// move at most ramp x dt this tick, up or down, so
 					// no tick commands an instantaneous step the
 					// machine cannot physically make.
-					auto const cableCapKW = connections.remaining(connections.port("Generator", generator.authored.id, "Generation"));
+					auto cableCapKW = connections.remaining(connections.port("Generator", generator.authored.id, "Generation"));
+					for (auto const& binding : connections.storePorts("Generator", generator.authored.id, runtime.settings))
+						if (binding.input && binding.store == generator.fuelStoreIndex)
+							cableCapKW = std::min(cableCapKW, connections.remaining(binding.port)
+								* connections.efficiency(binding.port) * kwhPerUnit * 3600 * generator.authored.efficiency);
 					auto const startKW = std::min({generator.outputKW, effectiveRatedKW, cableCapKW});
 					auto const targetKW = std::min({commanded, effectiveRatedKW, cableCapKW});
 					auto const ramp = integrateGeneratorRamp(startKW, targetKW,
@@ -1054,7 +1076,7 @@ namespace core
 					auto const neededFuelKWh = generator.lastAverageOutputKW * hours / generator.authored.efficiency;
 					if (neededFuelKWh > drawableKWh)
 					{
-						if (drawableKWh <= 1e-15)
+						if (drawableKWh <= 0.0)
 						{
 							// Fuel depletion stops electrical output
 							// immediately; the decay period follows.
@@ -1068,8 +1090,18 @@ namespace core
 						generator.lastAverageOutputKW = drawableKWh * generator.authored.efficiency / hours;
 						generator.outputKW = std::min(generator.outputKW, generator.lastAverageOutputKW);
 					}
-					auto const drawnKWh = generator.lastAverageOutputKW * hours / generator.authored.efficiency;
-					auto const drawnUnits = drawnKWh / kwhPerUnit;
+					// A saturated inlet is not an empty inventory. Only the
+					// latter starts shutdown; both still book their exact dose.
+					auto inventoryUnits = std::max(0.0, qualified[generator.fuelStoreIndex]
+						- runtime.stores[generator.fuelStoreIndex].authored.protectedReserve);
+					for (auto const& binding : connections.storePorts("Generator", generator.authored.id, runtime.settings))
+						if (binding.input && binding.store == generator.fuelStoreIndex)
+							inventoryUnits *= connections.efficiency(binding.port);
+					exhaustedAtEnd = neededFuelKWh >= inventoryUnits * kwhPerUnit;
+					auto const drawnUnits = neededFuelKWh >= drawableKWh ? drawableUnits
+						: std::min(drawableUnits, generator.lastAverageOutputKW * hours / generator.authored.efficiency / kwhPerUnit);
+					auto const drawnKWh = drawnUnits * kwhPerUnit;
+					generator.lastAverageOutputKW = drawnKWh * 3600.0 * generator.authored.efficiency / dtSeconds;
 					qualified[generator.fuelStoreIndex] -= drawnUnits;
 					flowOut[generator.fuelStoreIndex] += drawnUnits;
 					stagedUnitLoss[runtime.stores[generator.fuelStoreIndex].authored.unit] += drawnUnits;
@@ -1093,6 +1125,13 @@ namespace core
 					availableGeneration += toPoolKW; poolGenerationKW += toPoolKW;
 					totalGeneratorOutputKW += generator.lastAverageOutputKW;
 					totalGeneratorWasteKW += wasteKW;
+					if (exhaustedAtEnd)
+					{
+						generator.phase = StationGeneratorPhase::Shutdown;
+						generator.shutdownElapsedSeconds = 0.0;
+						generator.outputKW = 0.0;
+						generator.lastBlockReason = "fuel depleted: generator shut down";
+					}
 				}
 				break;
 			case StationGeneratorPhase::Shutdown:
@@ -1107,22 +1146,28 @@ namespace core
 			// tick. The decay heat cannot be refused - it happens
 			// whether or not cooling is available - so it books
 			// regardless, and the sink warms under it. A zero decay
-			// period books nothing. The Shutdown phase persists until
-			// the tick after the last decay interval so the phase
-			// transition events still bracket the decay period.
+			// period books nothing. Completion is a physical boundary,
+			// not an extra whole-step wait. Fuel exhausted at this interval's
+			// endpoint starts decay in the following positive interval.
 			bool decayedThisTick = false;
-			if (generator.phase == StationGeneratorPhase::Shutdown)
+			if (generator.phase == StationGeneratorPhase::Shutdown
+				&& previousGeneratorPhase[generatorIndex] != StationGeneratorPhase::Shutdown)
+			{
+				appendBoundedEvent(runtime.events, tick, "generator", "Generator '" + generator.authored.id
+					+ "' shutting down: " + (generator.lastBlockReason.empty() ? std::string("commanded off") : generator.lastBlockReason)
+					+ "; shutdown heat " + std::to_string(generator.authored.shutdownHeatKW)
+					+ " kW for " + std::to_string(generator.authored.shutdownSeconds) + " s");
+				previousGeneratorPhase[generatorIndex] = generator.phase;
+			}
+			if (generator.phase == StationGeneratorPhase::Shutdown && !exhaustedAtEnd)
 			{
 				auto const remainingSeconds = generator.authored.shutdownSeconds
 					- generator.shutdownElapsedSeconds;
-				if (remainingSeconds <= 1e-9)
+				if (remainingSeconds <= 0.0)
 				{
-					// Nothing left to decay. A generator that entered
-					// Shutdown only this tick keeps the phase for it, so
-					// the transition events still bracket even an empty
-					// decay period; one already in Shutdown stops.
-					if (phaseBeforeSwitch == StationGeneratorPhase::Shutdown)
-						generator.phase = StationGeneratorPhase::Stopped;
+					// The shutdown event was already staged above; an empty
+					// decay phase completes without a positive-time wait.
+					generator.phase = StationGeneratorPhase::Stopped;
 				}
 				else
 				{
@@ -1137,6 +1182,11 @@ namespace core
 					generator.decayHeatKJ += bookedKJ;
 					totalGeneratorDecayKW += generator.lastDecayHeatKW;
 					generator.shutdownElapsedSeconds += intervalSeconds;
+					if (intervalSeconds >= remainingSeconds)
+					{
+						generator.shutdownElapsedSeconds = generator.authored.shutdownSeconds;
+						generator.phase = StationGeneratorPhase::Stopped;
+					}
 					decayedThisTick = bookedKJ > 0.0;
 				}
 			}
@@ -1148,7 +1198,7 @@ namespace core
 			generatorHeatBySink[generator.sinkIndex] += connections.routeHeat(heatPort, 0.0);
 			auto const* heat = connections.snapshot(heatPort);
 			generator.lastCoolingRequired = generator.phase == StationGeneratorPhase::Running
-				|| decayedThisTick || (heat && (heat->retainedHeatKJ > 0.0 || heat->lastInputRate > 0.0));
+				|| generator.lastAverageOutputKW > 0.0 || decayedThisTick || (heat && (heat->retainedHeatKJ > 0.0 || heat->lastInputRate > 0.0));
 			totalGeneratorStartupKW += generator.lastStartupDrawKW;
 			// Publish the per-generator service status against the
 			// commanded output: full at command, partial under ramp

@@ -1574,16 +1574,17 @@ namespace
 			{
 				auto const snap = world.getStationSystemsSnapshot();
 				auto const& live = snap.power.generators[0];
-				require(live.phase == core::StationGeneratorPhase::Running
-					&& approx(live.outputKW, 1.0, 1e-9),
-					"the generator did not deliver 1 kW on tick 2");
+				require(live.phase == core::StationGeneratorPhase::Shutdown
+					&& live.outputKW == 0.0
+					&& approx(live.electricalKJ, 2.0 * dt - 0.005, 1e-9),
+					"the generator did not exhaust its fuel at the end of the second step");
 			}
 			require(smoke::station::advanceStationSteps(world, 1), "fractional-shutdown step 3 failed");
 			{
 				auto const trip = world.getStationSystemsSnapshot().power.generators[0];
-				require(trip.phase == core::StationGeneratorPhase::Shutdown
+				require(trip.phase == core::StationGeneratorPhase::Stopped
 					&& trip.outputKW == 0.0,
-					"fuel depletion did not transition the generator to Shutdown on tick 3");
+					"the sub-step decay did not complete at its physical endpoint");
 				require(approx(trip.decayHeatKJ, 0.5 * dt, 1e-12)
 					&& approx(trip.decayHeatKW, 0.5, 1e-9),
 					"the transition tick omitted the prorated decay heat");
@@ -1650,7 +1651,8 @@ namespace
 					auto const snap = world.getStationSystemsSnapshot();
 					auto const& live = snap.power.generators[0];
 					bookedTotal += expectedBookings[index];
-					require(live.phase == core::StationGeneratorPhase::Shutdown
+					require(live.phase == (index + 1 == expectedBookings.size()
+						? core::StationGeneratorPhase::Stopped : core::StationGeneratorPhase::Shutdown)
 						&& approx(live.decayHeatKJ, bookedTotal, 1e-12),
 						"the decay booking schedule is wrong");
 					require(approx(live.decayHeatKW, expectedBookings[index] / dt, 1e-9)
@@ -1768,7 +1770,7 @@ namespace
 					require(approx(snap.power.generatorStartupDrawKW, drawKW, 1e-9),
 						"the published startup draw total does not match the crank");
 				}
-				auto const& done = world.getStationSystemsSnapshot().power.generators[0];
+				auto const done = world.getStationSystemsSnapshot().power.generators[0];
 				require(done.phase == core::StationGeneratorPhase::Running,
 					"the prorated final crank did not complete the startup");
 				require(approx(done.startupHeatKJ, 2.5 * dt, 1e-12),
@@ -1783,7 +1785,7 @@ namespace
 					"the startup ledger kept growing after completion");
 				// The sink integrated the prorated startup exactly once,
 				// alongside the running waste heat.
-				auto const& sinkLive = world.getStationSystemsSnapshot().thermal.reservoirs[0];
+				auto const sinkLive = world.getStationSystemsSnapshot().thermal.reservoirs[0];
 				require(approx(sinkLive.generatorEnergyKJ,
 					running.startupHeatKJ + running.wasteHeatKJ, 1e-9),
 					"the sink did not integrate the startup and waste heat exactly once");
