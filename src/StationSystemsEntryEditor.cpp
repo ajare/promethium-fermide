@@ -2827,6 +2827,7 @@ constexpr std::array<EntryCreator, 29> kEntryCreators{{
 
 void renderAddEntryCombo(core::StationSystemsSettings& draft)
 {
+	ImGui::SetNextItemWidth(256);
 	if (!ImGui::BeginCombo("Add entry", "Choose type...", ImGuiComboFlags_HeightLarge)) return;
 	std::string_view group;
 	for (auto const& type : core::stationPlaceableTypes())
