@@ -24,6 +24,15 @@ namespace station_flow
 	using core::station_connections::connectionProperties;
 	using core::station_connections::connectionType;
 	using core::station_connections::connectionThroughputUnit;
+	// Presentation-only, undirected links. Deliberately not Station connections:
+	// no design keys, ports, throughput, or efficiency can reach the solver.
+	struct PathwayLink
+	{
+		std::string id;
+		size_t a, b;
+	};
+	std::vector<PathwayLink> pathwayLinks(core::StationSystemsSettings const& draft, Graph const& graph);
+	inline constexpr ImU32 PathwayColor = IM_COL32(245, 155, 245, 255);
 	// Form edits can change references directly; discard annotations of vanished instances.
 	void pruneConnectionProperties(core::StationSystemsSettings& draft);
 	char const* connectionStyleName(core::StationPhysicalConnection type);
@@ -98,6 +107,7 @@ public:
 	std::optional<core::StationConnectionKey> selectedConnection() const { return mSelectedConnection; }
 	// A visible point on the rendered curve, for headless interaction checks.
 	bool connectionScreenPosition(core::StationConnectionKey const& key, ImVec2* out) const;
+	bool pathwayScreenPosition(std::string const& id, ImVec2* out) const;
 	void reset();
 	void exportLayout(core::StationConfigurationDocument& document) const;
 	void importLayout(core::StationConfigurationDocument const& document);
@@ -158,6 +168,8 @@ private:
 	std::map<std::string, ImVec2> mLayout;
 	int mNextNodeId{1};
 	bool mConnectedOnly{false};
+	bool mShowPathways{true};
+	std::map<std::string, ImVec2> mPathwayScreen;
 	char mSearch[128]{};
 	// Authored references presented as editable links, resolved to graph
 	// nodes once per rebuild: the link's identity is the configuration entry

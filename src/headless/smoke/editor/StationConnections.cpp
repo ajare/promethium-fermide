@@ -7,6 +7,7 @@
 #include "core/YamlSerializer.h"
 #include "core/BinarySerializer.h"
 #include "core/World.h"
+#include "../station/StationRig.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -42,6 +43,81 @@ station_flow::Link connection(station_flow::Graph const& graph, char const* owne
 	});
 	require(found != graph.links.end(), (std::string("Missing projected connection: ") + owner + " " + relation).c_str());
 	return *found;
+}
+
+void pathwayDisplayWorkflow(smoke::Context const&)
+{
+	headless::ScopedImGuiContext imgui;
+	auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1100};
+	io.Fonts->AddFontDefault(); io.Fonts->Build();
+	core::StationSystemsSettings settings; settings.enabled = true;
+	core::AtmosphereSettings a;
+	a.id = "a"; a.volumeM3 = 100; a.thermalCapacityKJPerK = 10000;
+	a.minPressureKPa = 1; a.maxPressureKPa = 200;
+	a.startingOxygenKg = 30; a.startingNitrogenKg = 80;
+	auto b = a; b.id = "b"; b.startingOxygenKg = 10;
+	settings.atmospheres = {a, b};
+	settings.atmospherePathways = {{"opening", "a", "b", 1, 1}, {"parallel", "b", "a", 0.5, 1}};
+	auto graph = station_flow::build(settings);
+	auto links = station_flow::pathwayLinks(settings, graph);
+	require(links.size() == 2 && links[0].a == links[1].b && links[0].b == links[1].a,
+		"Pathway projection lost endpoints or parallel/reversed openings");
+	require(graph.links.empty() && core::stationAuthoredLinks(settings).empty(),
+		"Pathway became an editable or solver Station connection");
+	core::World baseline("Baseline", 2, 2), displayed("Displayed", 2, 2);
+	for (auto* world : {&baseline, &displayed})
+	{
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		auto configured = world->configureStationSystems(settings, false, &diagnostic);
+		require(configured, diagnostic.c_str());
+		world->resumeSimulation();
+	}
+	StationFlowDiagram diagram;
+	core::StationConfigurationDocument layout; layout.settings = settings;
+	layout.zoom = 0.65f; layout.panX = 50; layout.panY = 100;
+	layout.positions = {{"Atmosphere:a:0", {0, 0}}, {"Atmosphere:b:0", {800, 0}}};
+	diagram.importLayout(layout);
+	headless::TestEngineDriver driver([&] {
+		ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1150, 1050});
+		ImGui::Begin("Pathway display"); diagram.render(settings); ImGui::End();
+	});
+	driver.frame(); driver.frame();
+	#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+	driver.run("station", "pathwayDisplay", [&](ImGuiTestContext* ctx) {
+		ctx->SetRef("Pathway display");
+		ImVec2 first, parallel;
+		REQ(diagram.pathwayScreenPosition("opening", &first)
+			&& diagram.pathwayScreenPosition("parallel", &parallel)
+			&& first.y != parallel.y, "Pathways were not drawn as separate display links");
+		REQ(driver.contains("undirected gas diffusion (display-only; not Station connections)"),
+			"Pathway visual legend is missing");
+		REQ(smoke::station::advanceSeconds(baseline, 10) && smoke::station::advanceSeconds(displayed, 10),
+			"Visible pathway run failed");
+		REQ(baseline.getStationSystemsSnapshot() == displayed.getStationSystemsSnapshot(),
+			"Rendering pathway links changed simulation");
+		ctx->ItemClick("Show atmosphere pathways"); ctx->Yield(3);
+		REQ(!diagram.pathwayScreenPosition("opening", &first), "Hidden pathway was still drawn");
+		// Alter persisted presentation layout while the display links are absent.
+		layout.positions["Atmosphere:a:0"].first = 300;
+		diagram.restoreLayout(layout); ctx->Yield(3);
+		REQ(smoke::station::advanceSeconds(baseline, 10) && smoke::station::advanceSeconds(displayed, 10),
+			"Hidden pathway run failed");
+		auto snapshot = displayed.getStationSystemsSnapshot();
+		REQ(snapshot == baseline.getStationSystemsSnapshot()
+			&& snapshot.atmospheres[0].oxygenKg < a.startingOxygenKg
+			&& snapshot.atmospherePathways[0].netTransferredKg[0] > 0,
+			"Removing/altering display links changed or disabled diffusion");
+		REQ(settings == layout.settings && !diagram.selectedConnection(),
+			"Display-only pathway controls mutated authored configuration or selected a connection");
+		ctx->ItemClick("Show atmosphere pathways"); ctx->Yield(3);
+		REQ(diagram.pathwayScreenPosition("opening", &first), "Pathway did not return after display toggle");
+		REQ(smoke::station::advanceSeconds(baseline, 10) && smoke::station::advanceSeconds(displayed, 10)
+			&& baseline.getStationSystemsSnapshot() == displayed.getStationSystemsSnapshot(),
+			"Redrawing the altered pathway layout changed simulation");
+	});
+	#undef REQ
+	require(driver.passed(), "Pathway display-only workflow failed");
 }
 
 void connectionDesign(smoke::Context const&)
@@ -670,6 +746,7 @@ void flowConnectionsWorkflow(smoke::Context const& context)
 
 void editor_smoke::registerStationConnections(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"station/pathwayDisplayWorkflow", pathwayDisplayWorkflow});
 	checks.push_back({"station/connectionDesign", connectionDesign});
 	checks.push_back({"station/connectionForecastWorkflow", connectionForecastWorkflow});
 	checks.push_back({"station/flowConnectionTelemetryWorkflow", flowConnectionTelemetryWorkflow});

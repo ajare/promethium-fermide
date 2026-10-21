@@ -11,6 +11,22 @@
 
 namespace station_flow
 {
+std::vector<PathwayLink> pathwayLinks(core::StationSystemsSettings const& draft, Graph const& graph)
+{
+	std::vector<PathwayLink> result;
+	for (auto const& pathway : draft.atmospherePathways)
+	{
+		auto locate = [&](std::string const& id) {
+			for (size_t i = 0; i < graph.nodes.size(); ++i)
+				if (graph.nodes[i].type == "Atmosphere" && graph.nodes[i].id == id) return i;
+			return SIZE_MAX;
+		};
+		auto a = locate(pathway.aAtmosphereId), b = locate(pathway.bAtmosphereId);
+		if (a != SIZE_MAX && b != SIZE_MAX && a != b) result.push_back({pathway.id, a, b});
+	}
+	return result;
+}
+
 std::optional<bool> connectorEligibility(core::StationSystemsSettings const& draft,
 	core::StationPinRef const& origin, core::StationPinRef const& target)
 {
@@ -521,6 +537,7 @@ void StationFlowDiagram::reset()
 	mZoom = 0.8f; mFitRequested = true; mSelected = -1; mConnectedOnly = false; mSearch[0] = 0;
 	mSelectedType.clear(); mSelectedId.clear();
 	mSelectedConnection.reset(); mConnectionScreen.clear();
+	mShowPathways = true; mPathwayScreen.clear();
 	mDragging = -1; mLastFrame = -1; mTemperature = 0;
 	mLinks.clear(); mPinIds.clear(); mPinRefs.clear(); mPinScreen.clear(); mNodeScreen.clear();
 	mActiveLinkPin.reset(); mPinEligibility.clear();
@@ -617,6 +634,18 @@ void StationFlowDiagram::updateBounds()
 		mMinimum.x = std::min(mMinimum.x, p.x); mMinimum.y = std::min(mMinimum.y, p.y);
 		maximum.x = std::max(maximum.x, p.x); maximum.y = std::max(maximum.y, p.y);
 	}
+	// Include the pathway arcs above the boxes so Fit all does not clip
+	// parallel openings. This affects presentation bounds only.
+	if (mCached && mShowPathways)
+	{
+		std::map<std::pair<size_t, size_t>, size_t> slots;
+		for (auto const& link : station_flow::pathwayLinks(*mCached, mGraph))
+		{
+			float lift = 50 + 30 * float(slots[std::minmax(link.a, link.b)]++);
+			mMinimum.y = std::min(mMinimum.y,
+				std::min(mPositions[link.a].y, mPositions[link.b].y) - lift);
+		}
+	}
 	mExtent = {maximum.x - mMinimum.x + nodeWidth, maximum.y - mMinimum.y + nodeHeight};
 }
 
@@ -654,6 +683,14 @@ std::optional<station_flow::NodeTelemetry> StationFlowDiagram::nodeTelemetry(
 {
 	auto const found = mTelemetry.find(type + keySeparator + id);
 	return found == mTelemetry.end() ? std::nullopt : std::optional{found->second};
+}
+
+bool StationFlowDiagram::pathwayScreenPosition(std::string const& id, ImVec2* out) const
+{
+	auto found = mPathwayScreen.find(id);
+	if (found == mPathwayScreen.end() || !out) return false;
+	*out = found->second;
+	return true;
 }
 
 void StationFlowDiagram::render(core::StationSystemsSettings& draft,
@@ -800,6 +837,12 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		mDragging = -1; mTemperature = 0;
 	}
 	ImGui::TextDisabled("Edges: colour = medium; pattern = connection type. Click a link to inspect. Red = unresolved reference.");
+	if (!draft.atmospherePathways.empty())
+	{
+		ImGui::Checkbox("Show atmosphere pathways", &mShowPathways);
+		ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(station_flow::PathwayColor),
+			"Atmosphere pathways: hollow diamonds + dashed line, undirected gas diffusion (display-only; not Station connections).");
+	}
 	if (ImGui::TreeNodeEx("Edge colours", ImGuiTreeNodeFlags_NoAutoOpenOnLog))
 	{
 		std::set<station_flow::Medium> media;
@@ -901,8 +944,12 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		if (mSearch[0]) visible[i] = (n.type + " " + n.id).find(mSearch) != std::string::npos;
 		if (mConnectedOnly && mSelected >= 0) visible[i] = i == size_t(mSelected);
 	}
+	auto const pathways = station_flow::pathwayLinks(draft, mGraph);
 	// Expand one hop only: do not turn a focused selection into the whole network.
 	auto matched = visible;
+	if (mShowPathways)
+		for (auto const& e : pathways)
+			if (matched[e.a] || matched[e.b]) visible[e.a] = visible[e.b] = true;
 	for (auto const& e : mGraph.links)
 		if (matched[e.from] || matched[e.to]) visible[e.from] = visible[e.to] = true;
 	// imnodes owns hit testing, selection and node dragging. Keep panning
@@ -1501,6 +1548,34 @@ entry.thermalClass = "moderate";
 	// The affordance rects are rebuilt every drawn frame; the selection
 	// handler earlier in this frame already read the previous frame's set.
 	mPortButtons.clear();
+	// Synthesized pathway links never enter mGraph.links/mLinks: no editable
+	// connection identity, selection, deletion, or flow allocation is attached.
+	mPathwayScreen.clear();
+	std::map<std::pair<size_t, size_t>, size_t> pathwaySlots;
+	if (mShowPathways) for (auto const& link : pathways)
+	{
+		if (!visible[link.a] || !visible[link.b]) continue;
+		auto a = point({mPositions[link.a].x + nodeWidth / 2, mPositions[link.a].y});
+		auto b = point({mPositions[link.b].x + nodeWidth / 2, mPositions[link.b].y});
+		auto pair = std::minmax(link.a, link.b);
+		float lift = (50 + 30 * float(pathwaySlots[pair]++)) * mZoom;
+		FlowCurve curve{a, {a.x, std::min(a.y, b.y) - lift},
+			{b.x, std::min(a.y, b.y) - lift}, b};
+		// Long dashes and hollow diamonds at BOTH ends, never an arrowhead.
+		for (int i = 0; i < 80; ++i)
+			if (i % 4 < 2) draw->AddLine(curvePoint(curve, float(i) / 80),
+				curvePoint(curve, float(i + 1) / 80), station_flow::PathwayColor, 2.0f);
+		for (auto p : {a, b})
+		{
+			ImVec2 diamond[] = {{p.x, p.y - 5}, {p.x + 5, p.y}, {p.x, p.y + 5}, {p.x - 5, p.y}};
+			draw->AddPolyline(diamond, 4, station_flow::PathwayColor, ImDrawFlags_Closed, 2.0f);
+		}
+		auto middle = curvePoint(curve, 0.5f);
+		mPathwayScreen[link.id] = middle;
+		draw->AddText(middle, station_flow::PathwayColor, link.id.c_str());
+		if (hovered && curveDistance(curve, io.MousePos) <= 8.0f)
+			ImGui::SetTooltip("Atmosphere pathway: %s\nUndirected gas diffusion; display-only.\nNot an editable Station connection.", link.id.c_str());
+	}
 	// Links the user can edit are drawn between their connectors, not box to
 	// box, so the curve on screen is the curve the drag and the delete hit.
 	std::set<size_t> authoredEdges;

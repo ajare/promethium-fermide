@@ -893,6 +893,8 @@ add_test(NAME station-editor-compound-water COMMAND pf-smoke-editor --check stat
 set_tests_properties(station-editor-compound-water PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-water-gas COMMAND pf-smoke-editor --check station/flowWaterGasWorkflow)
 set_tests_properties(station-editor-flow-water-gas PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+add_test(NAME station-editor-pathway-display COMMAND pf-smoke-editor --check station/pathwayDisplayWorkflow)
+set_tests_properties(station-editor-pathway-display PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-connection-design COMMAND pf-smoke-editor --check station/connectionDesign)
 set_tests_properties(station-editor-connection-design PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-connections COMMAND pf-smoke-editor --check station/flowConnectionsWorkflow)
