@@ -506,7 +506,7 @@ using namespace station_detail;
 			AtmospherePathwaySettings authored;
 			std::string lastCommandId;
 			double lastCommandSeconds{0.0};
-			size_t aIndex{}, bIndex{};
+			size_t aIndex{SIZE_MAX}, bIndex{SIZE_MAX}; // SIZE_MAX: exterior vacuum
 			double openFraction{};
 			std::array<double, 4> flowRateKgPerS{}, netTransferredKg{};
 			StationAtmospherePathwayStatus status{StationAtmospherePathwayStatus::Idle};
@@ -523,6 +523,8 @@ using namespace station_detail;
 			double startingPressureKPa{0.0};
 			// Signed net diffusion additions, included in each species audit.
 			std::array<double, 4> diffusedKg{};
+			// Exterior pathways remove material, never add an internal diffusion term.
+			std::array<double, 4> exteriorLostKg{};
 			// Cumulative per-component removals by pathway, the closure
 			// terms of the per-component conservation audit.
 			double leakOxygenKg{0.0};

@@ -360,6 +360,29 @@ namespace core
 		// and before saturation. Temperature is held fixed and no heat crosses.
 		for (auto& pathway : runtime.atmospherePathways)
 		{
+			if (pathway.aIndex == SIZE_MAX || pathway.bIndex == SIZE_MAX)
+			{
+				// Zero-pressure boundary limit of the same diffusion law:
+				// dm/dt = -D * area * openness * T_K/V * m. The exterior
+				// never fills; loss is explicit, not an internal transfer.
+				auto& air = runtime.atmospheres[pathway.aIndex == SIZE_MAX ? pathway.bIndex : pathway.aIndex];
+				auto const weight = (static_cast<long double>(air.temperatureC) + StationCelsiusOffset) / air.authored.volumeM3;
+				std::array<double*, 4> const mass{&air.oxygenKg, &air.nitrogenKg, &air.carbonDioxideKg, &air.waterVapourKg};
+				pathway.status = StationAtmospherePathwayStatus::Idle;
+				for (size_t gas = 0; gas < mass.size(); ++gas)
+				{
+					auto const conductance = static_cast<long double>(StationPathwayDiffusionCoefficients[gas])
+						* pathway.authored.areaM2 * pathway.openFraction;
+					auto const lost = static_cast<double>(*mass[gas] * -std::expm1(-conductance * weight * seconds));
+					*mass[gas] -= lost;
+					air.exteriorLostKg[gas] += lost;
+					auto const signedLoss = pathway.aIndex == SIZE_MAX ? -lost : lost;
+					pathway.flowRateKgPerS[gas] = signedLoss / seconds;
+					pathway.netTransferredKg[gas] += signedLoss;
+					if (lost != 0.0) pathway.status = StationAtmospherePathwayStatus::Active;
+				}
+				continue;
+			}
 			auto& a = runtime.atmospheres[pathway.aIndex];
 			auto& b = runtime.atmospheres[pathway.bIndex];
 			// Kelvin is mandatory: 0 C is not an empty compartment.

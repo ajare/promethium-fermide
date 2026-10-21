@@ -662,6 +662,8 @@ namespace core
 			fin(atmosphere.vapourAddedKg, tag("vapourAddedKg", atmosphere.id));
 			fin(atmosphere.condensedKg, tag("condensedKg", atmosphere.id));
 			fin(atmosphere.leakedKg, tag("leakedKg", atmosphere.id));
+			for (double lost : atmosphere.exteriorLostKg)
+				fin(lost, tag("exteriorLostKg", atmosphere.id));
 			fin(atmosphere.collectedKg, tag("collectedKg", atmosphere.id));
 			fin(atmosphere.electrolysisOxygenKg, tag("electrolysisOxygenKg", atmosphere.id));
 			fin(atmosphere.co2CapturedKg, tag("co2CapturedKg", atmosphere.id));

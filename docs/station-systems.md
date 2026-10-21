@@ -1463,8 +1463,10 @@ which pathways are wired rather than from any declared label.
 
 `StationSystemsSettings::atmospherePathways` configures undirected openings
 with `id`, `aAtmosphereId`, `bAtmosphereId`, `areaM2` and
-`initialOpenFraction`. Endpoints must be distinct existing compartments;
-area must be finite and strictly positive, openness finite in [0, 1].
+`initialOpenFraction`. Endpoints must be distinct existing compartments,
+except that exactly one may be the reserved Exterior vacuum endpoint
+`$exterior` (`core::StationExteriorAtmosphereId`). That id cannot name a real
+compartment. Area must be finite and strictly positive, openness finite in [0, 1].
 Parallel openings are legal; at most `MaxStationPathways` (64) may be authored.
 Invalid configurations are refused before the World changes.
 
@@ -1495,8 +1497,82 @@ step, totals are signed net mass since configuration. There are deliberately
 no requested/actual/limiter fields. The observable registry classifies this
 aggregate as unverified for general cross-step guarantees.
 
-This initial configure-to-snapshot slice does not yet provide commands,
-persistence, or diagram authoring; those are follow-up tickets under #784.
+Pathways and their scheduled commands persist through the existing Station
+configuration and World serialization seams. Diagram links are display-only;
+pathway authoring UI and live control remain separate work.
+
+#### Pathways to space
+
+Author an opening to space using the same fields and commands:
+
+```yaml
+atmospherePathways:
+  - id: exterior-opening
+    aAtmosphereId: habitat
+    bAtmosphereId: $exterior
+    areaM2: 1
+    initialOpenFraction: 0.5
+pathwayCommands:
+  - id: seal-opening
+    pathwayId: exterior-opening
+    openFraction: 0
+    occurrenceSeconds: 600
+    priority: 0
+```
+
+Exterior vacuum is a fixed zero-partial-pressure boundary, not an infinite
+compartment: it never fills and needs no volume, inventory or temperature.
+The same simplified, thermally neutral diffusion law gives each gas
+`m(t+dt) = m(t) * exp(-D_i * areaM2 * openFraction * T_K/V * dt)`.
+It does not model compressible/choked flow or expansion cooling. A closed
+opening loses nothing; a huge opening empties safely without negative masses.
+Commands split integration at their simulation-time stamps, as for internal
+pathways. The exterior appears as an inert derived diagram node.
+
+`StationAtmosphereSnapshot::exteriorLostKg` reports cumulative per-species
+external loss in `StationPathwayGases` order, separately from `leakedKg` and
+airlock `lostKg`. Pathway rates/totals retain the A-to-B sign convention:
+compartment-to-exterior is positive when space is B, negative when space is A.
+No gas returns from space, and internal pathways still conserve gas between
+compartments. Leaks, airlock cycles, and exterior pathways may coexist without
+double-counting. Reset restores authored inventories/openness and clears losses
+and command provenance. Endpoint strings round-trip in the existing schema;
+there are no new authored wire fields.
+
+`pathwayExteriorDiffusion` checks both endpoint orders, closed/partial/full
+openness, finite and enormous areas, exact depletion, signed flux, isolation,
+thermal neutrality and external-loss closure. `pathwayExteriorCommands` checks
+off-grid command timing, reset/replay and coexistence with internal exchange
+and constant leakage. Both run in `validation-fast` at the default cadence,
+with additional component checks at step ratios 1, 7 and 60. The persistence
+and display checks also cover exterior endpoints.
+
+#### Loadable pathway reference configurations
+
+Load these files in the **Station systems** window, then select **Apply settings**
+and run the World. They are standalone Station configuration documents, not
+World files or overrides of the Meridian reference. Diagram positions are
+included. All compartments stay at 20 °C; crew, constant leakage, thermal
+coupling and airlock cycles are disabled to isolate pathway behaviour.
+
+| Configuration (under `resources/station-systems/scenarios/`) | Run time | Expected behaviour |
+|---|---|---|
+| [`atmosphere-vacuum-equalization.yaml`](../resources/station-systems/scenarios/atmosphere-vacuum-equalization.yaml) | 900 s | Two 100 m³ compartments, one initially evacuated, approach half the initial mass of each gas per room and half the original habitat pressure. No external loss. |
+| [`atmosphere-exterior-partial.yaml`](../resources/station-systems/scenarios/atmosphere-exterior-partial.yaml) | 240 s | A 1 m² exterior pathway opens to 25% at 60 s and seals at 180 s. Each gas and total pressure retain **83.8710%** of their starting values; loss stops after sealing. |
+| [`atmosphere-exterior-isolation.yaml`](../resources/station-systems/scenarios/atmosphere-exterior-isolation.yaml) | 900 s | A 25 m³ chamber isolates from a 100 m³ habitat at 60 s, vents through a 50%-open 1 m² exterior pathway from 90–210 s, seals, then reconnects at 240 s. The habitat remains unchanged while isolated. |
+
+In the isolation example, the chamber retains **24.4847%** of its starting gas
+immediately before reconnection. The rooms then approach a common pressure of
+**84.8969%** of the initial pressure, with **15.1031%** of the original combined
+inventory explicitly lost to space. Internal redistribution does not increase
+`exteriorLostKg`. The finite-vacuum example instead retains every gas inside
+the two rooms; an evacuated room must not be confused with `$exterior`.
+The initially evacuated room reports below its declared 1 kPa minimum pressure;
+that condition is informational and does not prevent gas exchange.
+
+`station-pathwayReferenceConfigurations` loads the actual files, validates and
+round-trips them, advances their schedules, and checks those outcomes through
+the published World snapshots. It belongs to `validation-fast`.
 
 Thermal state integrates the compartment's own heat sources —
 occupant sensible heat, condensation latent heat and the heat-only

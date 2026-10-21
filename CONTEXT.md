@@ -597,8 +597,12 @@ The declared ordering used to allocate constrained station resources and curtail
 A contained atmospheric inventory with a declared volume, gas composition, water vapour, and temperature. Compartments exchange or lose material only through explicitly accounted pathways — an Atmosphere pathway, a leak, or an airlock cycle — and nothing moves between compartments implicitly. Containment follows from which pathways are wired, never from a declared class label.
 
 **Atmosphere pathway**:
-An explicitly authored, undirected link between two Atmosphere compartments through which gases diffuse down their own partial-pressure gradients. A pathway is the only way gas crosses between compartments: two compartments no pathway joins never share an atmosphere, however long they run. It is an exchange relationship, not a physical carrier.
+An explicitly authored, undirected link joining two Atmosphere compartments, or one compartment and Exterior vacuum, through which gases move down their own partial-pressure gradients. It is an exchange relationship, not a physical carrier; compartments without a joining pathway never share an atmosphere.
 _Avoid_: Door, Hatch, Vent, Air duct, Airlock — these name agent-traversal thresholds or physical carriers, not this exchange
+
+**Exterior vacuum**:
+Space outside the Station systems, with fixed zero gas partial pressures and no contained inventory. Gas crossing an Atmosphere pathway into Exterior vacuum is an accounted loss from the station, not material stored in another compartment.
+_Avoid_: Infinite compartment, empty compartment (a finite contained volume that can fill)
 
 **Pathway openness**:
 The fraction of an Atmosphere pathway currently available to diffusion, from zero to one. Zero means closed but still actuable, not absent. Openness may change during a run under command.

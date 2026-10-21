@@ -1,0 +1,92 @@
+# Load in Station systems, then Apply and run for 900 simulated seconds.
+# Two compartments start at the same pressure/composition (100 and 25 m3).
+# t=60 isolate chamber; t=90 open to space 50%; t=210 seal exterior;
+# t=240 reconnect to habitat. The habitat loses no gas while isolated.
+# Exterior loss remains accounted after the surviving gas redistributes.
+# These are gas pathways, not Agent-traversal Doors or an Airlock cycle.
+schemaVersion: 105
+stationSystems:
+  enabled: true
+  systemsStepWorldTicks: 6
+  observationIntervalSeconds: 1
+  atmospheres:
+    - id: habitat
+      volumeM3: 100
+      startingOxygenKg: 30
+      startingNitrogenKg: 80
+      startingCarbonDioxideKg: 0.6
+      startingWaterVapourKg: 0.1
+      startingTemperatureC: 20
+      thermalCapacityKJPerK: 10000
+      reservoirId: ""
+      exchangerConductanceKWPerK: 0
+      occupants: 0
+      oxygenUsePerOccupantKgPerS: 0
+      co2ProductionPerOccupantKgPerS: 0
+      sensibleHeatPerOccupantKW: 0
+      moistureAdditionPerOccupantKgPerS: 0
+      leakRateKgPerS: 0
+      minPressureKPa: 1
+      maxPressureKPa: 200
+      minOxygenPartialPressureKPa: 0
+      maxCarbonDioxidePartialPressureKPa: 0
+    - id: chamber
+      volumeM3: 25
+      startingOxygenKg: 7.5
+      startingNitrogenKg: 20
+      startingCarbonDioxideKg: 0.15
+      startingWaterVapourKg: 0.025
+      startingTemperatureC: 20
+      thermalCapacityKJPerK: 10000
+      reservoirId: ""
+      exchangerConductanceKWPerK: 0
+      occupants: 0
+      oxygenUsePerOccupantKgPerS: 0
+      co2ProductionPerOccupantKgPerS: 0
+      sensibleHeatPerOccupantKW: 0
+      moistureAdditionPerOccupantKgPerS: 0
+      leakRateKgPerS: 0
+      minPressureKPa: 1
+      maxPressureKPa: 200
+      minOxygenPartialPressureKPa: 0
+      maxCarbonDioxidePartialPressureKPa: 0
+  atmospherePathways:
+    - id: internal-opening
+      aAtmosphereId: habitat
+      bAtmosphereId: chamber
+      areaM2: 1
+      initialOpenFraction: 1
+    - id: exterior-opening
+      aAtmosphereId: chamber
+      bAtmosphereId: $exterior
+      areaM2: 1
+      initialOpenFraction: 0
+  pathwayCommands:
+    - id: isolate-chamber
+      pathwayId: internal-opening
+      openFraction: 0
+      occurrenceSeconds: 60
+      priority: 0
+    - id: vent-chamber
+      pathwayId: exterior-opening
+      openFraction: 0.5
+      occurrenceSeconds: 90
+      priority: 0
+    - id: seal-exterior
+      pathwayId: exterior-opening
+      openFraction: 0
+      occurrenceSeconds: 210
+      priority: 0
+    - id: reconnect-chamber
+      pathwayId: internal-opening
+      openFraction: 1
+      occurrenceSeconds: 240
+      priority: 0
+layout:
+  panX: 24
+  panY: 24
+  zoom: 0.6
+  nodes:
+    - {key: "Atmosphere:habitat:0", x: 0, y: 0}
+    - {key: "Atmosphere:chamber:0", x: 650, y: 0}
+    - {key: "Exterior:$exterior:0", x: 1300, y: 0}

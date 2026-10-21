@@ -1,0 +1,62 @@
+# Load in Station systems, then Apply and run for 900 simulated seconds.
+# A finite evacuated room fills; no mass is lost to space.
+# Equal volumes and temperatures approach half the initial gas mass each.
+schemaVersion: 105
+stationSystems:
+  enabled: true
+  systemsStepWorldTicks: 6
+  observationIntervalSeconds: 1
+  atmospheres:
+    - id: habitat
+      volumeM3: 100
+      startingOxygenKg: 30
+      startingNitrogenKg: 80
+      startingCarbonDioxideKg: 0.6
+      startingWaterVapourKg: 0.1
+      startingTemperatureC: 20
+      thermalCapacityKJPerK: 10000
+      reservoirId: ""
+      exchangerConductanceKWPerK: 0
+      occupants: 0
+      oxygenUsePerOccupantKgPerS: 0
+      co2ProductionPerOccupantKgPerS: 0
+      sensibleHeatPerOccupantKW: 0
+      moistureAdditionPerOccupantKgPerS: 0
+      leakRateKgPerS: 0
+      minPressureKPa: 1
+      maxPressureKPa: 200
+      minOxygenPartialPressureKPa: 0
+      maxCarbonDioxidePartialPressureKPa: 0
+    - id: evacuated-room
+      volumeM3: 100
+      startingOxygenKg: 0
+      startingNitrogenKg: 0
+      startingCarbonDioxideKg: 0
+      startingWaterVapourKg: 0
+      startingTemperatureC: 20
+      thermalCapacityKJPerK: 10000
+      reservoirId: ""
+      exchangerConductanceKWPerK: 0
+      occupants: 0
+      oxygenUsePerOccupantKgPerS: 0
+      co2ProductionPerOccupantKgPerS: 0
+      sensibleHeatPerOccupantKW: 0
+      moistureAdditionPerOccupantKgPerS: 0
+      leakRateKgPerS: 0
+      minPressureKPa: 1
+      maxPressureKPa: 200
+      minOxygenPartialPressureKPa: 0
+      maxCarbonDioxidePartialPressureKPa: 0
+  atmospherePathways:
+    - id: room-opening
+      aAtmosphereId: habitat
+      bAtmosphereId: evacuated-room
+      areaM2: 1
+      initialOpenFraction: 1
+layout:
+  panX: 24
+  panY: 24
+  zoom: 0.8
+  nodes:
+    - {key: "Atmosphere:habitat:0", x: 0, y: 0}
+    - {key: "Atmosphere:evacuated-room:0", x: 650, y: 0}

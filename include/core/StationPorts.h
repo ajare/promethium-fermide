@@ -477,13 +477,13 @@ namespace core
 		return placeable;
 	}
 
-	// Derived service nodes: aggregate services with no configuration entry
-	// of their own - the shared electrical pool and the per-class cooling
-	// services. They draw inert, own no authored connector, and a link
+	// Derived presentation nodes have no configuration entry of their own:
+	// the shared electrical pool, per-class cooling services and Exterior
+	// vacuum boundary. They draw inert, own no authored connector, and a link
 	// naming one is refused as derived rather than as unknown.
 	inline bool stationIsDerivedNodeType(std::string_view nodeType)
 	{
-		static constexpr std::array<std::string_view, 2> derived{"Power", "Cooling service"};
+		static constexpr std::array<std::string_view, 3> derived{"Power", "Cooling service", "Exterior"};
 		return std::find(derived.begin(), derived.end(), nodeType) != derived.end();
 	}
 

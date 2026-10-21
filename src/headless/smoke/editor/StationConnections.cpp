@@ -57,11 +57,15 @@ void pathwayDisplayWorkflow(smoke::Context const&)
 	a.startingOxygenKg = 30; a.startingNitrogenKg = 80;
 	auto b = a; b.id = "b"; b.startingOxygenKg = 10;
 	settings.atmospheres = {a, b};
-	settings.atmospherePathways = {{"opening", "a", "b", 1, 1}, {"parallel", "b", "a", 0.5, 1}};
+	settings.atmospherePathways = {{"opening", "a", "b", 1, 1}, {"parallel", "b", "a", 0.5, 1},
+		{"to-space", "b", core::StationExteriorAtmosphereId, 0.25, 0.5}};
 	auto graph = station_flow::build(settings);
 	auto links = station_flow::pathwayLinks(settings, graph);
-	require(links.size() == 2 && links[0].a == links[1].b && links[0].b == links[1].a,
+	require(links.size() == 3 && links[0].a == links[1].b && links[0].b == links[1].a,
 		"Pathway projection lost endpoints or parallel/reversed openings");
+	require(graph.nodes[links[2].b].type == "Exterior"
+		&& graph.nodes[links[2].b].id == core::StationExteriorAtmosphereId
+		&& core::stationIsDerivedNodeType("Exterior"), "exterior pathway lacks an inert space endpoint");
 	require(graph.links.empty() && core::stationAuthoredLinks(settings).empty(),
 		"Pathway became an editable or solver Station connection");
 	core::World baseline("Baseline", 2, 2), displayed("Displayed", 2, 2);
@@ -90,6 +94,8 @@ void pathwayDisplayWorkflow(smoke::Context const&)
 		REQ(diagram.pathwayScreenPosition("opening", &first)
 			&& diagram.pathwayScreenPosition("parallel", &parallel)
 			&& first.y != parallel.y, "Pathways were not drawn as separate display links");
+		ImVec2 exterior;
+		REQ(diagram.pathwayScreenPosition("to-space", &exterior), "Exterior pathway was not drawn");
 		REQ(driver.contains("undirected gas diffusion (display-only; not Station connections)"),
 			"Pathway visual legend is missing");
 		REQ(smoke::station::advanceSeconds(baseline, 10) && smoke::station::advanceSeconds(displayed, 10),

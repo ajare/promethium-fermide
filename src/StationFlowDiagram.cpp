@@ -18,7 +18,8 @@ std::vector<PathwayLink> pathwayLinks(core::StationSystemsSettings const& draft,
 	{
 		auto locate = [&](std::string const& id) {
 			for (size_t i = 0; i < graph.nodes.size(); ++i)
-				if (graph.nodes[i].type == "Atmosphere" && graph.nodes[i].id == id) return i;
+				if (graph.nodes[i].type == (id == core::StationExteriorAtmosphereId ? "Exterior" : "Atmosphere")
+					&& graph.nodes[i].id == id) return i;
 			return SIZE_MAX;
 		};
 		auto a = locate(pathway.aAtmosphereId), b = locate(pathway.bAtmosphereId);

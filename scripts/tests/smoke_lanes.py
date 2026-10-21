@@ -57,6 +57,8 @@ class Lanes(unittest.TestCase):
             self.assertNotIn('validation-stress', fast['LABELS'])
             self.assertEqual(fast['TIMEOUT'], 60)
         for check in ('pathwayDiffusion', 'pathwayValidation', 'pathwayCounterFlow',
+                      'pathwayVacuumEqualization', 'pathwayExteriorDiffusion', 'pathwayExteriorCommands',
+                      'pathwayReferenceConfigurations',
                       'pathwayClosed', 'pathwayOpenness', 'pathwayParallelAdditivity',
                       'pathwayChainTopology', 'pathwayThermalNeutrality', 'pathwayCondensation',
                       'pathwayPersistence', 'pathwayCommands',
@@ -75,7 +77,8 @@ class Lanes(unittest.TestCase):
                 labels = props(f'station-pathway-thermal-{check}-{ratio}')['LABELS']
                 self.assertIn('validation-fast', labels)
                 self.assertNotIn('validation-stress', labels)
-            for check in ('pathwayDiffusion', 'pathwayCounterFlow', 'pathwayClosed', 'pathwayOpenness'):
+            for check in ('pathwayDiffusion', 'pathwayCounterFlow', 'pathwayVacuumEqualization',
+                          'pathwayExteriorDiffusion', 'pathwayExteriorCommands', 'pathwayClosed', 'pathwayOpenness'):
                 labels = props(f'station-timestep-components-{check}-{ratio}')['LABELS']
                 self.assertIn('validation-exhaustive', labels)
                 self.assertNotIn('validation-fast', labels)

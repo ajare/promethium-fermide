@@ -662,6 +662,7 @@ namespace core
 			atmosphereResult.vapourAddedKg = compartment.vapourAddedKg;
 			atmosphereResult.condensedKg = compartment.condensedKg;
 			atmosphereResult.leakedKg = compartment.leakedKg;
+			atmosphereResult.exteriorLostKg = compartment.exteriorLostKg;
 			atmosphereResult.recoveredKg = compartment.recoveredKg;
 			atmosphereResult.lostKg = compartment.lostKg;
 			atmosphereResult.connectionCarbonDioxideLostKg = compartment.connectionCarbonDioxideLostKg;

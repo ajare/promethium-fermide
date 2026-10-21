@@ -876,24 +876,29 @@ namespace core
 						+ compartment.algaeOxygenAddedKg + compartment.diffusedKg[0],
 					compartment.oxygenConsumedKg + compartment.leakOxygenKg
 						+ compartment.cycleOxygenKg + compartment.cropOxygenDrawnKg
-						+ compartment.algaeOxygenDrawnKg,
+						+ compartment.algaeOxygenDrawnKg + compartment.exteriorLostKg[0],
 					compartment.oxygenKg},
 				{"nitrogen", compartment.authored.startingNitrogenKg, compartment.diffusedKg[1],
-					compartment.leakNitrogenKg + compartment.cycleNitrogenKg,
+					compartment.leakNitrogenKg + compartment.cycleNitrogenKg + compartment.exteriorLostKg[1],
 					compartment.nitrogenKg},
 				{"carbonDioxide", compartment.authored.startingCarbonDioxideKg,
 					compartment.co2ProducedKg + compartment.cropCarbonDioxideAddedKg
 						+ compartment.algaeCarbonDioxideAddedKg + compartment.diffusedKg[2],
 					compartment.leakCarbonDioxideKg + compartment.cycleCarbonDioxideKg
 						+ compartment.capturedCarbonDioxideKg + compartment.cropCarbonDioxideDrawnKg
-						+ compartment.algaeCarbonDioxideDrawnKg + compartment.connectionCarbonDioxideLostKg,
+						+ compartment.algaeCarbonDioxideDrawnKg + compartment.connectionCarbonDioxideLostKg
+						+ compartment.exteriorLostKg[2],
 					compartment.carbonDioxideKg},
 				{"waterVapour", compartment.authored.startingWaterVapourKg,
 					compartment.vapourAddedKg + compartment.cropVapourAddedKg
 						+ compartment.algaeVapourAddedKg + compartment.diffusedKg[3],
 					compartment.condensedKg + compartment.leakWaterVapourKg
-						+ compartment.cycleWaterVapourKg + compartment.collectedKg + compartment.connectionWaterVapourLostKg,
+						+ compartment.cycleWaterVapourKg + compartment.collectedKg + compartment.connectionWaterVapourLostKg
+						+ compartment.exteriorLostKg[3],
 					compartment.waterVapourKg}}};
+			for (auto const lost : compartment.exteriorLostKg)
+				if (!requireFinite(lost, where + "exterior pathway loss") || lost < 0)
+					return violation = where + "invalid exterior pathway loss", false;
 			for (auto const& closure : closures)
 			{
 				auto const residual = closure.starting + closure.added

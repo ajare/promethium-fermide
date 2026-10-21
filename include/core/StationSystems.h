@@ -849,7 +849,11 @@ namespace core
 	};
 	inline constexpr size_t MaxStationAtmospheres{8};
 
+	// Reserved pathway endpoint: fixed zero partial pressures, no inventory,
+	// volume or temperature. An Atmosphere compartment may not use this id.
+	inline constexpr char StationExteriorAtmosphereId[]{"$exterior"};
 	// One undirected opening; A/B only define the sign of published flux.
+	// Exactly one endpoint may be StationExteriorAtmosphereId.
 	struct AtmospherePathwaySettings
 	{
 		std::string id;
@@ -3205,6 +3209,9 @@ namespace core
 		double vapourAddedKg{0.0};
 		double condensedKg{0.0};
 		double leakedKg{0.0};
+		// Cumulative loss through exterior pathways, in StationPathwayGases order.
+		// Separate from constant leaks and airlock losses; never counted twice.
+		std::array<double, 4> exteriorLostKg{};
 		double collectedKg{0.0}; // cumulative vapour removed by water recovery
 		double electrolysisOxygenKg{0.0}; // cumulative O2 added by electrolysis (#404)
 		double co2CapturedKg{0.0}; // cumulative CO2 removed by capture (#404)

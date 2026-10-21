@@ -162,6 +162,9 @@ Graph build(core::StationSystemsSettings const& s)
 	b.add(s.methaneProcessors, "Methane processor", 1); b.add(s.microbialProcessors, "Microbial processor", 1);
 	b.add(s.cropPopulations, "Crops", 1); b.add(s.algaeCultures, "Algae", 1);
 	b.add(s.thermalReservoirs, "Reservoir", 2); b.add(s.atmospheres, "Atmosphere", 2);
+	if (std::any_of(s.atmospherePathways.begin(), s.atmospherePathways.end(), [](auto const& pathway) {
+		return pathway.aAtmosphereId == StationExteriorAtmosphereId || pathway.bAtmosphereId == StationExteriorAtmosphereId;
+	})) b.node("Exterior", StationExteriorAtmosphereId, 2, "Space: fixed zero pressure; no gas inventory");
 	b.add(s.coolantLoops, "Coolant loop", 2); b.add(s.chillers, "Chiller", 2);
 	b.add(s.radiators, "Radiator", 2); b.add(s.thermalBuffers, "Thermal buffer", 2);
 	b.add(s.solarArrays, "Solar", 3); b.add(s.batteries, "Battery", 3);

@@ -156,6 +156,8 @@ using namespace station_detail;
 		};
 		auto const where = "Station atmosphere '" + atmosphere.id + "'";
 		if (atmosphere.id.empty()) return refuse("Station atmosphere id must not be empty");
+		if (atmosphere.id == StationExteriorAtmosphereId)
+			return refuse(where + " id is reserved for exterior vacuum");
 		if (atmosphere.id.size() > MaxStationStoreIdLength)
 			return refuse("Station atmosphere id exceeds "
 				+ std::to_string(MaxStationStoreIdLength) + " characters");
@@ -1603,7 +1605,7 @@ using namespace station_detail;
 		// finite owned gas inventory, an authored effective thermal
 		// capacity, an optional heat-only reservoir coupling and an
 		// authored occupancy/load assignment. Only explicit pathways exchange
-		// gas between compartments; leaks and airlock cycles book external loss.
+		// gas between compartments; exterior pathways, leaks and airlock cycles book external loss.
 		if (settings.atmospheres.size() > MaxStationAtmospheres)
 			return refuse("Station atmospheres are limited to "
 				+ std::to_string(MaxStationAtmospheres) + " entries");
@@ -1635,7 +1637,7 @@ using namespace station_detail;
 			if (pathway.aAtmosphereId == pathway.bAtmosphereId)
 				return refuse(where + " endpoints must be distinct (self-loop)");
 			for (auto const& endpoint : {pathway.aAtmosphereId, pathway.bAtmosphereId})
-				if (!atmosphereIds.contains(endpoint))
+				if (endpoint != StationExteriorAtmosphereId && !atmosphereIds.contains(endpoint))
 				{
 					auto text = where + " references unknown atmosphere compartment '" + endpoint + "'";
 					if (!brokenReferences) return refuse(std::move(text));

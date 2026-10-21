@@ -40,6 +40,8 @@ void pathwayPersistence(smoke::Context const&)
 {
 	auto settings = pathwaySettings();
 	settings.atmospherePathways.push_back({"parallel", "b", "a", 0.125, 0});
+	settings.atmospherePathways.push_back({"to-space", "b", core::StationExteriorAtmosphereId, 0.25, 0.3});
+	settings.atmospherePathways.push_back({"from-space", core::StationExteriorAtmosphereId, "a", 0.1, 0.5});
 	// Non-chronological declarations and same-time ties must retain their order.
 	settings.pathwayCommands = {{"close", "opening", 0, 1.337, -2},
 		{"open", "opening", 0.8, 0.137, 3}, {"tie", "opening", 0.4, 0.137, 3},
@@ -236,6 +238,276 @@ void pathwayCounterFlow(smoke::Context const&)
 					"equal-partial-pressure gas moved alongside counter-flowing gases");
 			}
 		}
+	}
+}
+
+void pathwayVacuumEqualization(smoke::Context const&)
+{
+	// At equal, fixed temperature, equilibrium shares each gas in proportion
+	// to volume. Include unequal volumes to rule out a blind half-mass split.
+	for (double receiverVolume : {100.0, 200.0})
+	{
+		auto s = pathwaySettings();
+		auto& b = s.atmospheres[1];
+		b.volumeM3 = receiverVolume;
+		b.startingOxygenKg = b.startingNitrogenKg = b.startingCarbonDioxideKg = b.startingWaterVapourKg = 0;
+		// Reach equilibrium cheaply without asserting a particular coefficient.
+		s.atmospherePathways[0].areaM2 = 10;
+		core::World world("VacuumEqualization", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		std::string diagnostic;
+		require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+		auto const initial = world.getStationSystemsSnapshot();
+		auto const total = masses(initial.atmospheres[0]);
+		require(initial.atmospheres[0].pressureKPa > 0 && initial.atmospheres[1].pressureKPa == 0,
+			"vacuum fixture must start with one pressurized and one evacuated compartment");
+		for (double mass : masses(initial.atmospheres[1]))
+			require(mass == 0, "evacuated compartment contains gas before exchange");
+		double const donorFraction = s.atmospheres[0].volumeM3 / (s.atmospheres[0].volumeM3 + receiverVolume);
+		double const equilibriumPressure = initial.atmospheres[0].pressureKPa * donorFraction;
+		auto previous = initial;
+		world.resumeSimulation();
+		while (world.getStationSystemsSnapshot().elapsedSeconds < 240)
+		{
+			require(advanceStationSteps(world, 1), "vacuum equalization step failed");
+			auto const snapshot = world.getStationSystemsSnapshot();
+			require(snapshot.healthy, "vacuum equalization failed conservation audit");
+			auto const a = masses(snapshot.atmospheres[0]), received = masses(snapshot.atmospheres[1]);
+			for (size_t gas = 0; gas < total.size(); ++gas)
+			{
+				require(std::isfinite(a[gas]) && std::isfinite(received[gas])
+					&& a[gas] > 0 && received[gas] > 0, "vacuum exchange produced invalid gas inventory or no inflow");
+				close(a[gas] + received[gas], total[gas], "vacuum equalization did not conserve each gas");
+				close(snapshot.atmospherePathways[0].netTransferredKg[gas], received[gas],
+					"vacuum receiver inventory disagrees with cumulative transfer");
+				require(a[gas] <= masses(previous.atmospheres[0])[gas] + 1e-12
+					&& received[gas] >= masses(previous.atmospheres[1])[gas] - 1e-12,
+					"vacuum equalization reversed direction or oscillated");
+			}
+			for (size_t i = 0; i < 2; ++i)
+			{
+				close(snapshot.atmospheres[i].temperatureC, initial.atmospheres[i].temperatureC,
+					"vacuum equalization changed compartment temperature");
+				require(snapshot.atmospheres[i].condensedKg == 0, "vacuum fixture unexpectedly condensed vapour");
+			}
+			require(snapshot.atmospheres[0].pressureKPa >= equilibriumPressure - 1e-9
+				&& snapshot.atmospheres[1].pressureKPa <= equilibriumPressure + 1e-9,
+				"vacuum equalization overshot shared equilibrium pressure");
+			previous = snapshot;
+		}
+		for (size_t gas = 0; gas < total.size(); ++gas)
+		{
+			require(std::abs(masses(previous.atmospheres[0])[gas] / (total[gas] * donorFraction) - 1) < 1e-7
+				&& std::abs(masses(previous.atmospheres[1])[gas] / (total[gas] * (1 - donorFraction)) - 1) < 1e-7,
+				"air and vacuum did not reach the volume-weighted per-gas equilibrium");
+		}
+		for (auto const& air : previous.atmospheres)
+			require(std::abs(air.pressureKPa / equilibriumPressure - 1) < 1e-7,
+				"air and vacuum did not reach the expected common pressure");
+	}
+}
+
+void pathwayExteriorDiffusion(smoke::Context const&)
+{
+	for (bool reverse : {false, true})
+	for (double openness : {0.0, 0.25, 1.0})
+	for (double area : {1.0, 1e300})
+	{
+		auto s = pathwaySettings();
+		s.atmospherePathways = {{"space", "a", core::StationExteriorAtmosphereId, area, openness}};
+		if (reverse) std::swap(s.atmospherePathways[0].aAtmosphereId, s.atmospherePathways[0].bAtmosphereId);
+		core::World world("ExteriorDiffusion", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		std::string diagnostic;
+		require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+		auto const initial = world.getStationSystemsSnapshot();
+		auto const start = masses(initial.atmospheres[0]);
+		world.resumeSimulation();
+		require(advanceStationSteps(world, 1), "exterior first step failed");
+		auto const first = world.getStationSystemsSnapshot();
+		require(first.atmospherePathways[0].status == (openness == 0
+			? core::StationAtmospherePathwayStatus::Idle : core::StationAtmospherePathwayStatus::Active),
+			"exterior pathway first-step status does not match actual loss");
+		for (size_t gas = 0; gas < start.size(); ++gas)
+			close(first.atmospherePathways[0].flowRateKgPerS[gas] * first.systemsTimestepSeconds,
+				first.atmospherePathways[0].netTransferredKg[gas], "exterior interval rate disagrees with loss");
+		require(advanceSeconds(world, 10), "exterior depletion advance failed");
+		auto const final = world.getStationSystemsSnapshot();
+		require(final.healthy && final.atmospheres.size() == 2, "exterior created an inventory or broke the audit");
+		require(final.atmospheres[1] == initial.atmospheres[1], "exterior pathway changed an unconnected compartment");
+		for (size_t gas = 0; gas < start.size(); ++gas)
+		{
+			auto const remaining = masses(final.atmospheres[0])[gas];
+			auto const expected = start[gas] * std::exp(-core::StationPathwayDiffusionCoefficients[gas]
+				* area * openness * 273.15 / 100 * final.elapsedSeconds);
+			require(std::isfinite(remaining) && remaining >= 0, "exterior produced invalid inventory");
+			close(remaining, expected, "exterior did not follow exact area/openness-scaled exponential depletion");
+			auto const lost = final.atmospheres[0].exteriorLostKg[gas];
+			close(remaining + lost, start[gas], "exterior inventory plus external loss did not conserve each gas");
+			close((reverse ? -1 : 1) * final.atmospherePathways[0].netTransferredKg[gas], lost,
+				"exterior signed flux did not reconcile with compartment loss");
+		}
+		close(final.atmospheres[0].temperatureC, initial.atmospheres[0].temperatureC, "exterior diffusion moved heat");
+		require(final.atmospheres[0].leakedKg == 0 && final.atmospheres[0].lostKg == 0,
+			"exterior loss was double-counted as constant leakage or airlock loss");
+		if (area > 1e100 && openness > 0)
+			require(final.atmospheres[0].pressureKPa == 0
+				&& final.atmospherePathways[0].status == core::StationAtmospherePathwayStatus::Idle,
+				"enormous exterior opening did not empty safely and become Idle");
+	}
+}
+
+void pathwayExteriorCommands(smoke::Context const&)
+{
+	auto s = pathwaySettings();
+	s.atmospherePathways = {{"space", "a", core::StationExteriorAtmosphereId, 1, 0}};
+	s.pathwayCommands = {{"close", "space", 0, 1.337, 0}, {"open", "space", 0.5, 0.137, 0}};
+	core::World world("ExteriorCommands", 2, 2);
+	world.pauseSimulation(); world.finishBuild();
+	std::string diagnostic;
+	require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+	auto const initial = world.getStationSystemsSnapshot();
+	world.resumeSimulation();
+	require(advanceToLastStepBefore(world, 0.137), "exterior pre-command advance failed");
+	require(world.getStationSystemsSnapshot().atmospheres[0] == initial.atmospheres[0],
+		"closed exterior opening leaked before its command");
+	require(advanceSeconds(world, 3), "exterior command advance failed");
+	auto const final = world.getStationSystemsSnapshot();
+	require(final.healthy && final.atmospherePathways[0].lastCommandId == "close"
+		&& final.atmospherePathways[0].lastCommandSeconds == 1.337
+		&& final.atmospherePathways[0].openFraction == 0, "exterior close command/provenance failed");
+	for (size_t gas = 0; gas < 4; ++gas)
+	{
+		auto const start = masses(initial.atmospheres[0])[gas];
+		auto const expected = start * std::exp(-core::StationPathwayDiffusionCoefficients[gas] * 273.15 / 100 * 0.5 * 1.2);
+		close(masses(final.atmospheres[0])[gas], expected, "exterior command exposure depends on cadence");
+		close(final.atmospheres[0].exteriorLostKg[gas], start - expected, "exterior command loss ledger failed");
+	}
+	world.pauseSimulation(); world.resetSimulation();
+	require(world.getStationSystemsSnapshot() == initial, "reset inherited exterior losses or commands");
+	world.resumeSimulation();
+	require(advanceToLastStepBefore(world, 0.137) && advanceSeconds(world, 3), "exterior reset replay failed");
+	require(world.getStationSystemsSnapshot() == final, "exterior commands failed deterministic reset replay");
+
+	// Internal exchange, exterior loss, constant leakage and airlock cycles coexist.
+	world.pauseSimulation();
+	s.pathwayCommands.clear();
+	s.atmospherePathways = {{"internal", "a", "b", 1, 1}, {"space", "b", core::StationExteriorAtmosphereId, 1, 0.5}};
+	s.atmospheres[0].leakRateKgPerS = 0.1;
+	core::AirlockCycleSettings cycle;
+	cycle.id = "cycle"; cycle.atmosphereId = "a"; cycle.gasMassKg = 1;
+	cycle.firstOccurrenceSeconds = 0.5; cycle.recoveredFraction = 0.25;
+	s.airlockCycles = {cycle};
+	require(world.configureStationSystems(s, true, &diagnostic), diagnostic.c_str());
+	world.resumeSimulation();
+	require(advanceSeconds(world, 10), "mixed internal/exterior advance failed");
+	auto const mixed = world.getStationSystemsSnapshot();
+	require(mixed.healthy && mixed.atmospheres[0].leakedKg > 0, "mixed exterior/leak accounting failed");
+	double lostToSpace = 0;
+	for (size_t gas = 0; gas < 4; ++gas)
+	{
+		auto const lost = mixed.atmospheres[1].exteriorLostKg[gas];
+		close(lost, mixed.atmospherePathways[1].netTransferredKg[gas], "mixed exterior flux ledger failed");
+		lostToSpace += lost;
+	}
+	double before = 0, after = 0;
+	for (size_t i = 0; i < 2; ++i)
+		for (size_t gas = 0; gas < 4; ++gas)
+		{
+			before += masses(initial.atmospheres[i])[gas];
+			after += masses(mixed.atmospheres[i])[gas];
+		}
+	close(mixed.atmospheres[0].recoveredKg, 0.25, "mixed cycle recovery changed");
+	close(mixed.atmospheres[0].lostKg, 0.75, "exterior loss was mixed into airlock loss");
+	close(before, after + lostToSpace + mixed.atmospheres[0].leakedKg
+		+ mixed.atmospheres[0].recoveredKg + mixed.atmospheres[0].lostKg,
+		"mixed external losses counted incorrectly");
+}
+
+void pathwayReferenceConfigurations(smoke::Context const& context)
+{
+	for (auto const* file : {"atmosphere-vacuum-equalization.yaml",
+		"atmosphere-exterior-partial.yaml", "atmosphere-exterior-isolation.yaml"})
+	{
+		core::StationConfigurationDocument document, restored;
+		std::string diagnostic;
+		auto const loaded = core::loadStationConfiguration(context.fixture(std::string("resources/station-systems/scenarios/")
+			+ file).string(), document, &diagnostic);
+		require(loaded, diagnostic.c_str());
+		auto const valid = core::validateStationSystemsSettings(document.settings, diagnostic);
+		require(valid, diagnostic.c_str());
+		require(core::parseStationConfiguration(core::serializeStationConfiguration(document), restored, &diagnostic)
+			&& restored.settings == document.settings && restored.positions == document.positions,
+			"pathway reference configuration did not round-trip");
+		core::World world(file, 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		auto const configured = world.configureStationSystems(document.settings, false, &diagnostic);
+		require(configured, diagnostic.c_str());
+		auto const initial = world.getStationSystemsSnapshot();
+		world.resumeSimulation();
+		require(advanceSeconds(world, 30), "pathway reference initial advance failed");
+		auto const before = world.getStationSystemsSnapshot();
+		bool const vacuum = std::string_view(file) == "atmosphere-vacuum-equalization.yaml";
+		bool const partial = std::string_view(file) == "atmosphere-exterior-partial.yaml";
+		if (!vacuum)
+			for (size_t i = 0; i < initial.atmospheres.size(); ++i)
+				for (size_t gas = 0; gas < 4; ++gas)
+					close(masses(before.atmospheres[i])[gas], masses(initial.atmospheres[i])[gas],
+						"reference exterior vented before its authored opening");
+		// Inspect the sealed chamber before the reconnect command at 240 s;
+		// World stepping can already publish an interval starting at a boundary.
+		require(advanceSeconds(world, 200), "pathway reference schedule advance failed");
+		auto const scheduled = world.getStationSystemsSnapshot();
+		require(scheduled.healthy, "pathway reference schedule failed its audit");
+		if (!vacuum)
+		{
+			size_t const donor = partial ? 0 : 1;
+			auto const& opening = scheduled.atmospherePathways[partial ? 0 : 1];
+			require(opening.openFraction == 0 && opening.lastCommandId == "seal-exterior",
+				"reference exterior opening did not seal on schedule");
+			for (size_t gas = 0; gas < 4; ++gas)
+			{
+				auto const start = masses(initial.atmospheres[donor])[gas];
+				auto const remaining = start * std::exp(-core::StationPathwayDiffusionCoefficients[gas]
+					* 293.15 / initial.atmospheres[donor].volumeM3 * (partial ? 0.25 : 0.5) * 120);
+				close(masses(scheduled.atmospheres[donor])[gas], remaining,
+					"reference partial opening did not produce the documented depletion");
+				close(scheduled.atmospheres[donor].exteriorLostKg[gas], start - remaining,
+					"reference exterior loss did not close");
+				if (!partial)
+					close(masses(scheduled.atmospheres[0])[gas], masses(initial.atmospheres[0])[gas],
+						"isolated habitat lost gas while its chamber vented");
+			}
+		}
+		require(advanceSeconds(world, 670), "pathway reference equilibrium advance failed");
+		auto const final = world.getStationSystemsSnapshot();
+		require(final.healthy, "pathway reference equilibrium failed its audit");
+		for (size_t gas = 0; gas < 4; ++gas)
+		{
+			if (partial)
+			{
+				close(masses(final.atmospheres[0])[gas], masses(scheduled.atmospheres[0])[gas],
+					"sealed reference continued losing gas");
+				close(final.atmospheres[0].exteriorLostKg[gas], scheduled.atmospheres[0].exteriorLostKg[gas],
+					"sealed reference continued accumulating loss");
+				continue;
+			}
+			double total = 0, remaining = 0, lost = 0, volume = 0;
+			for (size_t i = 0; i < 2; ++i)
+			{
+				total += masses(initial.atmospheres[i])[gas];
+				remaining += masses(final.atmospheres[i])[gas];
+				lost += final.atmospheres[i].exteriorLostKg[gas];
+				volume += final.atmospheres[i].volumeM3;
+			}
+			close(total, remaining + lost, "reference inventories plus exterior losses did not conserve gas");
+			for (auto const& air : final.atmospheres)
+				require(std::abs(masses(air)[gas] / (remaining * air.volumeM3 / volume) - 1) < 1e-4,
+					"reference compartments did not approach their shared partial pressures");
+		}
+		for (auto const& air : final.atmospheres)
+			require(air.temperatureC == 20 && air.condensedKg == 0 && air.leakedKg == 0,
+				"pathway reference introduced unintended thermal, phase or leak effects");
 	}
 }
 
@@ -859,6 +1131,14 @@ void pathwayValidation(smoke::Context const&)
 	{ auto bad = s; bad.atmospherePathways.push_back(bad.atmospherePathways[0]); refuse(bad, "duplicated"); }
 	{ auto bad = s; bad.atmospherePathways[0].id.clear();
 		require(!core::validateStationSystemsSettings(bad, diagnostic), "empty pathway id accepted"); }
+	{ auto bad = s; bad.atmospherePathways[0].aAtmosphereId = core::StationExteriorAtmosphereId;
+		bad.atmospherePathways[0].bAtmosphereId = core::StationExteriorAtmosphereId; refuse(bad, "self-loop"); }
+	{ auto bad = s; bad.atmospheres[0].id = core::StationExteriorAtmosphereId;
+		require(!core::validateStationSystemsSettings(bad, diagnostic)
+			&& diagnostic.find("reserved") != std::string::npos, "exterior id was allowed as a real compartment");
+		require(!world.configureStationSystems(bad, false, &diagnostic)
+			&& world.getStationSystemsSnapshot() == baseline, "reserved exterior id refusal changed the World"); }
+	{ auto bad = s; bad.atmospherePathways[0].bAtmosphereId.clear(); refuse(bad, "unknown"); }
 	// Closed openings and parallel pairs are coherent; only the count is bounded.
 	auto many = s;
 	many.atmospherePathways.clear();
@@ -881,6 +1161,10 @@ void registerStationPathwayChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"pathwayDiffusion", pathwayDiffusion});
 	checks.push_back({"pathwayValidation", pathwayValidation});
 	checks.push_back({"pathwayCounterFlow", pathwayCounterFlow});
+	checks.push_back({"pathwayVacuumEqualization", pathwayVacuumEqualization});
+	checks.push_back({"pathwayExteriorDiffusion", pathwayExteriorDiffusion});
+	checks.push_back({"pathwayExteriorCommands", pathwayExteriorCommands});
+	checks.push_back({"pathwayReferenceConfigurations", pathwayReferenceConfigurations});
 	checks.push_back({"pathwayClosed", pathwayClosed});
 	checks.push_back({"pathwayOpenness", pathwayOpenness});
 	checks.push_back({"pathwayThermalNeutrality", pathwayThermalNeutrality});

@@ -1189,8 +1189,10 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		{
 			Impl::AtmospherePathwayState state;
 			state.authored = pathway;
-			state.aIndex = atmosphereIndex.at(pathway.aAtmosphereId);
-			state.bIndex = atmosphereIndex.at(pathway.bAtmosphereId);
+			if (pathway.aAtmosphereId != StationExteriorAtmosphereId)
+				state.aIndex = atmosphereIndex.at(pathway.aAtmosphereId);
+			if (pathway.bAtmosphereId != StationExteriorAtmosphereId)
+				state.bIndex = atmosphereIndex.at(pathway.bAtmosphereId);
 			state.openFraction = pathway.initialOpenFraction;
 			mImpl->atmospherePathways.push_back(std::move(state));
 		}

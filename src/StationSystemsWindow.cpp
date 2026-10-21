@@ -2027,6 +2027,9 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			atmosphere.oxygenConsumedKg, atmosphere.co2ProducedKg,
 			atmosphere.vapourAddedKg, atmosphere.condensedKg,
 			atmosphere.leakedKg, atmosphere.recoveredKg, atmosphere.lostKg);
+		ImGui::Text("  exterior pathway losses (kg): O2 %.6f, N2 %.6f, CO2 %.6f, vapour %.6f",
+			atmosphere.exteriorLostKg[0], atmosphere.exteriorLostKg[1],
+			atmosphere.exteriorLostKg[2], atmosphere.exteriorLostKg[3]);
 		if (atmosphere.abovePressureLimit)
 			ImGui::Text("  ABOVE the declared maximum pressure limit: %.3f kPa", atmosphere.maxPressureKPa);
 		if (atmosphere.belowPressureLimit)
