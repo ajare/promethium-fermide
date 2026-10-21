@@ -328,6 +328,121 @@ void pathwayCondensation(smoke::Context const&)
 	}
 }
 
+// #790: parallel pair relaxation composes exactly, including when one
+// opening spells the undirected endpoints in the opposite order.
+void pathwayParallelAdditivity(smoke::Context const&)
+{
+	for (bool reverse : {false, true})
+	{
+		auto single = pathwaySettings();
+		// Unequal volumes and temperatures exercise the fixed compartment
+		// conductance ratio, rather than just a symmetric half-mass split.
+		single.atmospheres[1].volumeM3 = 150;
+		single.atmospheres[1].startingTemperatureC = 20;
+		auto parallel = single;
+		parallel.atmospherePathways = {{"first", "a", "b", 0.5, 1},
+			{"second", reverse ? "b" : "a", reverse ? "a" : "b", 0.5, 1}};
+		std::string diagnostic;
+		require(core::validateStationSystemsSettings(parallel, diagnostic), diagnostic.c_str());
+		core::World one("SingleOpening", 2, 2), two("ParallelOpenings", 2, 2);
+		one.pauseSimulation(); one.finishBuild();
+		two.pauseSimulation(); two.finishBuild();
+		require(one.configureStationSystems(single, false, &diagnostic), diagnostic.c_str());
+		require(two.configureStationSystems(parallel, false, &diagnostic), diagnostic.c_str());
+		auto const initial = one.getStationSystemsSnapshot();
+		auto const authored = two.getStationSystemsSnapshot();
+		require(authored.atmospherePathways.size() == 2
+			&& authored.atmospherePathways[0].id == "first" && authored.atmospherePathways[1].id == "second",
+			"parallel endpoints were deduplicated rather than retaining both named pathways");
+		one.resumeSimulation(); two.resumeSimulation();
+		for (double duration : {initial.systemsTimestepSeconds, 10.0, 30.0})
+		{
+			require(advanceSeconds(one, duration) && advanceSeconds(two, duration), "parallel comparison advance failed");
+			auto const a = one.getStationSystemsSnapshot(), b = two.getStationSystemsSnapshot();
+			require(a.healthy && b.healthy, "parallel openings failed conservation audit");
+			for (size_t gas = 0; gas < 4; ++gas)
+			{
+				for (size_t i = 0; i < 2; ++i)
+					close(masses(a.atmospheres[i])[gas], masses(b.atmospheres[i])[gas],
+						"two half-area pathways differ from one full-area pathway by >= 1e-9 kg");
+				double const sign = reverse ? -1 : 1;
+				auto const net = b.atmospherePathways[0].netTransferredKg[gas]
+					+ sign * b.atmospherePathways[1].netTransferredKg[gas];
+				close(a.atmospherePathways[0].netTransferredKg[gas], net, "parallel cumulative flux is not additive");
+				close(a.atmospherePathways[0].flowRateKgPerS[gas], b.atmospherePathways[0].flowRateKgPerS[gas]
+					+ sign * b.atmospherePathways[1].flowRateKgPerS[gas], "parallel interval flux is not additive");
+				for (auto const& p : b.atmospherePathways)
+					require(p.status == core::StationAtmospherePathwayStatus::Active
+						&& std::abs(p.netTransferredKg[gas]) > 0, "parallel opening was accepted but never exchanged gas");
+				close(masses(b.atmospheres[0])[gas] + masses(b.atmospheres[1])[gas],
+					masses(initial.atmospheres[0])[gas] + masses(initial.atmospheres[1])[gas],
+					"parallel openings did not conserve a gas");
+			}
+		}
+	}
+}
+
+void pathwayChainTopology(smoke::Context const&)
+{
+	// Both declaration orders are legal, but operator splitting need not give
+	// identical results across orders. Each must replay its own result exactly.
+	for (bool reverseOrder : {false, true})
+	{
+		auto s = pathwaySettings();
+		auto& b = s.atmospheres[1];
+		b.startingOxygenKg = b.startingNitrogenKg = b.startingCarbonDioxideKg = b.startingWaterVapourKg = 0;
+		b.volumeM3 = 150;
+		auto c = b; c.id = "c"; c.volumeM3 = 75;
+		s.atmospheres.push_back(c);
+		// IDs intentionally oppose alphabetical order. With BC first, C must
+		// stay empty on the first step, then receive gas via B on later steps.
+		s.atmospherePathways = {{"z-bc", "b", "c", 1, 1}, {"a-ab", "a", "b", 1, 1}};
+		if (reverseOrder) std::swap(s.atmospherePathways[0], s.atmospherePathways[1]);
+		size_t const ab = reverseOrder ? 0 : 1, bc = reverseOrder ? 1 : 0;
+		core::World world("Chain", 2, 2), replay("ChainReplay", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		replay.pauseSimulation(); replay.finishBuild();
+		std::string diagnostic;
+		require(core::validateStationSystemsSettings(s, diagnostic), diagnostic.c_str());
+		require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+		require(replay.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+		auto const initial = world.getStationSystemsSnapshot();
+		require(initial == replay.getStationSystemsSnapshot(), "chain initial snapshots differ");
+		world.resumeSimulation(); replay.resumeSimulation();
+		bool first = true;
+		while (world.getStationSystemsSnapshot().elapsedSeconds < 60)
+		{
+			require(advanceStationSteps(world, 1) && advanceStationSteps(replay, 1), "chain step failed");
+			auto const snapshot = world.getStationSystemsSnapshot();
+			require(snapshot == replay.getStationSystemsSnapshot(), "same declaration-order chain did not replay exactly");
+			require(snapshot.healthy, "chain failed its conservation audit");
+			for (size_t gas = 0; gas < 4; ++gas)
+			{
+				auto const a = masses(snapshot.atmospheres[0])[gas];
+				auto const middle = masses(snapshot.atmospheres[1])[gas];
+				auto const end = masses(snapshot.atmospheres[2])[gas];
+				auto const start = masses(initial.atmospheres[0])[gas];
+				auto const in = snapshot.atmospherePathways[ab].netTransferredKg[gas];
+				auto const out = snapshot.atmospherePathways[bc].netTransferredKg[gas];
+				require(a >= 0 && middle >= 0 && end >= 0, "chain produced a negative gas inventory");
+				close(a + middle + end, start, "connected chain did not conserve each gas");
+				close(a, start - in, "chain A cumulative ledger failed");
+				close(middle, in - out, "shared intermediate compartment double-counted a pathway");
+				close(end, out, "chain C received gas outside its sole pathway");
+				if (first)
+				{
+					require(middle > 0, "A did not supply the intermediate compartment");
+					require(reverseOrder ? end > 0 : end == 0, "chain did not resolve in declaration order");
+				}
+			}
+			first = false;
+		}
+		auto const final = world.getStationSystemsSnapshot();
+		for (double mass : masses(final.atmospheres[2]))
+			require(mass > 1e-5, "gas introduced only at A never propagated through B to C");
+	}
+}
+
 void pathwayCommands(smoke::Context const&)
 {
 	auto s = pathwaySettings();
@@ -549,6 +664,8 @@ void registerStationPathwayChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"pathwayOpenness", pathwayOpenness});
 	checks.push_back({"pathwayThermalNeutrality", pathwayThermalNeutrality});
 	checks.push_back({"pathwayCondensation", pathwayCondensation});
+	checks.push_back({"pathwayParallelAdditivity", pathwayParallelAdditivity});
+	checks.push_back({"pathwayChainTopology", pathwayChainTopology});
 	checks.push_back({"pathwayCommands", pathwayCommands});
 	checks.push_back({"pathwayCommandOrdering", pathwayCommandOrdering});
 	checks.push_back({"pathwayCommandReset", pathwayCommandReset});
