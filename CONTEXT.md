@@ -594,7 +594,23 @@ A station service whose declared minimum demand and necessary support services a
 The declared ordering used to allocate constrained station resources and curtail discretionary demand. It does not override physical capacity, safety limits, or protected minimums.
 
 **Atmosphere compartment**:
-A contained atmospheric inventory with a declared volume, gas composition, water vapour, and temperature. Compartments exchange or lose material only through explicitly accounted pathways; nothing moves between compartments automatically. Containment follows from which pathways are wired, never from a declared class label.
+A contained atmospheric inventory with a declared volume, gas composition, water vapour, and temperature. Compartments exchange or lose material only through explicitly accounted pathways — an Atmosphere pathway, a leak, or an airlock cycle — and nothing moves between compartments implicitly. Containment follows from which pathways are wired, never from a declared class label.
+
+**Atmosphere pathway**:
+An explicitly authored, undirected link between two Atmosphere compartments through which gases diffuse down their own partial-pressure gradients. A pathway is the only way gas crosses between compartments: two compartments no pathway joins never share an atmosphere, however long they run. It is an exchange relationship, not a physical carrier.
+_Avoid_: Door, Hatch, Vent, Air duct, Airlock — these name agent-traversal thresholds or physical carriers, not this exchange
+
+**Pathway openness**:
+The fraction of an Atmosphere pathway currently available to diffusion, from zero to one. Zero means closed but still actuable, not absent. Openness may change during a run under command.
+_Avoid_: Open percentage (a presentation form only), valve state, gate
+
+**Pathway conductance**:
+An Atmosphere pathway's capacity to pass a given gas, set by that gas's diffusion coefficient together with the pathway's area and openness. Two pathways with the same area and openness always conduct identically for every gas; nothing else can make them differ.
+_Avoid_: Throughput (reserved for Station connections), permeability, diffusivity
+
+**Pathway command**:
+An instruction that sets an Atmosphere pathway's openness at a stated simulation time. A command takes effect at the time it names, never at the moment it was issued, so the same authored commands produce the same openness trajectory however the run is stepped.
+_Avoid_: Immediate write, door signal, valve toggle
 
 **Thermal reservoir**:
 A body or aggregate of material whose stored thermal energy and thermal capacity determine its temperature over time. Its ability to absorb heat is finite and constrained by the temperature limits of the services it supports.
