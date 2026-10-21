@@ -323,44 +323,6 @@ file(READ "${PF_STATION_SOURCE}" PF_STATION_SYSTEMS_LUA)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/core/BundledStationSystemsSource.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/generated/BundledStationSystemsSource.h" @ONLY)
 
-# #422: the packaged reference station. One reconciled, editable
-# configuration resource embedded for the editor and headless seams;
-# editing the resource triggers an incremental reconfigure.
-set(PF_REFERENCE_STATION_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/station-systems/reference-station.yaml")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PF_REFERENCE_STATION_SOURCE}")
-file(READ "${PF_REFERENCE_STATION_SOURCE}" PF_REFERENCE_STATION_YAML)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/core/BundledStationReferenceSource.h.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/generated/BundledStationReferenceSource.h" @ONLY)
-
-# #423: the packaged emergency/recovery scenario variants. Each authored
-# resource is embedded the same way as the base reference; editing any
-# scenario resource triggers an incremental reconfigure.
-set(PF_SCENARIO_RESUPPLY_DELAY_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/station-systems/scenarios/resupply-delay.yaml")
-set(PF_SCENARIO_POWER_COOLING_OUTAGE_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/station-systems/scenarios/power-cooling-outage.yaml")
-set(PF_SCENARIO_WASTE_CONSTRAINED_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/station-systems/scenarios/waste-constrained.yaml")
-set(PF_SCENARIO_MAINTENANCE_RECOVERY_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/station-systems/scenarios/maintenance-recovery.yaml")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${PF_SCENARIO_RESUPPLY_DELAY_SOURCE}"
-    "${PF_SCENARIO_POWER_COOLING_OUTAGE_SOURCE}"
-    "${PF_SCENARIO_WASTE_CONSTRAINED_SOURCE}"
-    "${PF_SCENARIO_MAINTENANCE_RECOVERY_SOURCE}")
-file(READ "${PF_SCENARIO_RESUPPLY_DELAY_SOURCE}" PF_SCENARIO_RESUPPLY_DELAY_YAML)
-file(READ "${PF_SCENARIO_POWER_COOLING_OUTAGE_SOURCE}" PF_SCENARIO_POWER_COOLING_OUTAGE_YAML)
-file(READ "${PF_SCENARIO_WASTE_CONSTRAINED_SOURCE}" PF_SCENARIO_WASTE_CONSTRAINED_YAML)
-file(READ "${PF_SCENARIO_MAINTENANCE_RECOVERY_SOURCE}" PF_SCENARIO_MAINTENANCE_RECOVERY_YAML)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/core/BundledStationScenariosSource.h.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/generated/BundledStationScenariosSource.h" @ONLY)
-
-# #424: the packaged long-duration stability workload. The same
-# reference-document format, authored for a three-simulated-hour
-# recurring-schedule run; editing the resource triggers an incremental
-# reconfigure.
-set(PF_LONG_RUN_WORKLOAD_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/station-systems/long-run-workload.yaml")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PF_LONG_RUN_WORKLOAD_SOURCE}")
-file(READ "${PF_LONG_RUN_WORKLOAD_SOURCE}" PF_LONG_RUN_WORKLOAD_YAML)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/core/BundledStationLongRunSource.h.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/generated/BundledStationLongRunSource.h" @ONLY)
-
 file(GLOB PF_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.cpp")
 file(GLOB PF_CORE_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/core/*.h")
 
@@ -525,6 +487,19 @@ foreach(target IN ITEMS pf-render pf-headless-render-support)
     pf_apply_high_analysis(${target})
 endforeach()
 
+# CPU-only managed Station configuration resources; no renderer or OpenGL needed.
+add_library(pf-station-resources STATIC src/StationConfigurationResource.cpp)
+target_link_libraries(pf-station-resources PUBLIC promethium-fermide-core Willpower.Application)
+target_compile_features(pf-station-resources PUBLIC cxx_std_20)
+set_target_properties(pf-station-resources PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_options(pf-station-resources PRIVATE
+        "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
+else()
+    target_compile_options(pf-station-resources PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+pf_apply_high_analysis(pf-station-resources)
+
 # Managed Agent resources have a CPU-only import seam shared with headless editor checks.
 add_library(pf-agent-resources STATIC src/ApplicationAgentTypes.cpp)
 set_target_properties(pf-agent-resources PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -565,7 +540,7 @@ add_library(pf-agent-editing STATIC
     src/LocationPlan.cpp
     src/PermissionsPanel.cpp
 )
-target_link_libraries(pf-agent-editing PUBLIC promethium-fermide-core pf-imgui-cpu pf-render)
+target_link_libraries(pf-agent-editing PUBLIC promethium-fermide-core pf-imgui-cpu pf-render pf-station-resources)
 target_compile_features(pf-agent-editing PUBLIC cxx_std_20)
 target_compile_definitions(pf-agent-editing PRIVATE
     $<$<CONFIG:Debug>:_DEBUG>

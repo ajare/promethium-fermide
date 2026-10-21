@@ -59,8 +59,12 @@ namespace station_editor
 		core::ResourceTransferSettings& transfer,
 		std::string const& label, std::string const& removeLabel);
 
-	// Full list sections: the deferred-removal loop over every entry plus
-	// the Add button. Section headings stay with the calling surface.
+	// Categorized top-level creation actions, shared with Flow's type grouping.
+	// Selection appends one entry using the form's defaults and capacity limits.
+	void renderAddEntryCombo(core::StationSystemsSettings& draft);
+
+	// Full list sections: the deferred-removal loop over every entry.
+	// Creation belongs to renderAddEntryCombo; headings stay with the caller.
 	void renderStoreList(core::StationSystemsSettings& draft);
 	void renderTransferList(core::StationSystemsSettings& draft);
 

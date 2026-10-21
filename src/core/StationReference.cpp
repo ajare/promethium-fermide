@@ -1,20 +1,12 @@
 // #422: the packaged reference station.
 //
-// This module owns two things. First, the authoritative reader for the
-// "stationSystems" document map, extracted from the World document reader
-// so the packaged reference station and persisted Worlds are read by the
-// exact same code - the reference configuration format and the World
-// persistence format can never diverge. Second, the reference station
-// document itself: one reconciled, editable configuration with its
-// coefficient provenance, provisional assumptions and qualification
-// limits, packaged as an application resource and parsed once on demand.
+// Shared stationSystems document reader/writer and reference metadata parser.
+// Managed YAML resources and persisted Worlds use this same settings format;
+// this module contains no bundled configuration data or resource inventory.
 #include "core/StationReference.h"
 
 #include "core/SerializationException.h"
 #include "core/YamlSerializer.h"
-#include "BundledStationReferenceSource.h"
-#include "BundledStationScenariosSource.h"
-#include "BundledStationLongRunSource.h"
 
 #include <cmath>
 #include <stdexcept>
@@ -2332,73 +2324,4 @@ namespace core
 		}
 	}
 
-	std::string const& bundledStationReferenceText()
-	{
-		static std::string const text{ kStationReferenceYaml };
-		return text;
-	}
-
-	std::vector<BundledStationScenario> const& bundledStationScenarios()
-	{
-		// #423: the packaged emergency/recovery variants are parsed once,
-		// each through the same authoritative reader and validation the
-		// base reference passes - a scenario resource that does not parse
-		// is a build defect, never a user error.
-		static std::vector<BundledStationScenario> const scenarios = []
-		{
-			std::vector<BundledStationScenario> parsed;
-			for (auto const& resource : kBundledStationScenarios)
-			{
-				BundledStationScenario scenario;
-				scenario.id = resource.id;
-				scenario.text = resource.text;
-				std::string diagnostic;
-				if (!parseStationReference(resource.text, scenario.document, &diagnostic))
-					throw std::runtime_error("Bundled station scenario '" + scenario.id
-						+ "' failed to parse: " + diagnostic);
-				parsed.push_back(std::move(scenario));
-			}
-			return parsed;
-		}();
-		return scenarios;
-	}
-
-	StationReferenceDocument const& bundledStationReference()
-	{
-		static StationReferenceDocument const document = []
-		{
-			StationReferenceDocument parsed;
-			std::string diagnostic;
-			if (!parseStationReference(bundledStationReferenceText(), parsed, &diagnostic))
-				throw std::runtime_error(
-					"Bundled reference station failed to parse: " + diagnostic);
-			return parsed;
-		}();
-		return document;
-	}
-
-	std::string const& bundledStationLongRunWorkloadText()
-	{
-		// #424: the packaged long-duration stability workload text.
-		static std::string const text{ kStationLongRunYaml };
-		return text;
-	}
-
-	StationReferenceDocument const& bundledStationLongRunWorkload()
-	{
-		// Parsed once through the same authoritative reader and full
-		// physical-consistency validation the base reference passes - a
-		// workload resource that does not parse is a build defect, never
-		// a user error.
-		static StationReferenceDocument const document = []
-		{
-			StationReferenceDocument parsed;
-			std::string diagnostic;
-			if (!parseStationReference(bundledStationLongRunWorkloadText(), parsed, &diagnostic))
-				throw std::runtime_error(
-					"Bundled long-run stability workload failed to parse: " + diagnostic);
-			return parsed;
-		}();
-		return document;
-	}
 }

@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include "core/AgentType.h"
+#include "StationConfigurationResource.h"
 
 #include <willpower/application/resourcesystem/Resource.h>
 #include <willpower/application/resourcesystem/ResourceFactory.h>

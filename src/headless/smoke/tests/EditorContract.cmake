@@ -268,6 +268,8 @@ set(editor_names
     station/flowConnectionTelemetryWorkflow
     station/flowConnectionsWorkflow
     station/mixedObservationWorkflow
+    station/addEntryWorkflow
+    station/configurationResources
     station/windowWorkflow
     station/stepRatioWorkflow
     station/materialIdentityWorkflow

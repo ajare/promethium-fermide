@@ -1,3 +1,4 @@
+#include "StationReferenceFixtures.h"
 #include "StationRig.h"
 // #423: the packaged emergency and recovery scenario variants.
 //

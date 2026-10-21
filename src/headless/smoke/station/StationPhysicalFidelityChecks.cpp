@@ -1,3 +1,4 @@
+#include "StationReferenceFixtures.h"
 #include "StationChecks.h"
 #include "AlgaeObservationFixture.h"
 #include "core/StationReference.h"

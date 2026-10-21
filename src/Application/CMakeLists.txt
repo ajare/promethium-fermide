@@ -15,7 +15,7 @@ add_library(PromethiumFermide SHARED
 target_include_directories(PromethiumFermide PUBLIC include PRIVATE render)
 target_compile_definitions(PromethiumFermide PRIVATE PF_APPLICATION_EXPORT)
 target_link_libraries(PromethiumFermide PUBLIC AppLib promethium-fermide-core
-    PRIVATE pf-agent-resources)
+    PRIVATE pf-agent-resources pf-station-resources)
 pf_apply_headless_verification_policy(PromethiumFermide)
 willpower_add_header_filter(PromethiumFermide)
 set_target_properties(PromethiumFermide PROPERTIES

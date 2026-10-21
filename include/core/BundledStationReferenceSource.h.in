@@ -1,7 +1,0 @@
-#pragma once
-
-// Generated from the authored reference-station resource, never a second
-// definition. Embedded as a char array (like BundledStationSystemsSource)
-// so the packaged reference configuration and the authored resource file
-// are the same bytes at runtime.
-namespace core { inline constexpr char kStationReferenceYaml[] = R"PF_REFSTATION(@PF_REFERENCE_STATION_YAML@)PF_REFSTATION"; }

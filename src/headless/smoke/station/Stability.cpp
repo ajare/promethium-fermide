@@ -1,3 +1,4 @@
+#include "StationReferenceFixtures.h"
 #include "StationRig.h"
 // #424: long-duration stability and repeatability of the Station systems.
 //

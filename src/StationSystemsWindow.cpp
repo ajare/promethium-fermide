@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstring>
 #include <optional>
+#include <string_view>
 
 namespace
 {
@@ -43,7 +44,9 @@ void StationSystemsWindow::commitDraftChanges(bool force)
 	if (before->settings != mDraft) station_flow::pruneConnectionProperties(mDraft);
 	core::StationConfigurationDocument layout;
 	mFlow.exportLayout(layout);
-	if (before->settings != mDraft || (mPendingLayoutEdit && before->layout.positions != layout.positions))
+	if (before->settings != mDraft || (mPendingLayoutEdit
+		&& (before->layout.positions != layout.positions || before->layout.panX != layout.panX
+			|| before->layout.panY != layout.panY || before->layout.zoom != layout.zoom)))
 		mDraftHistory.commit(std::move(mPendingDraftEdit));
 	mPendingDraftEdit.reset();
 	mPendingLayoutEdit = false;
@@ -172,6 +175,15 @@ void StationSystemsWindow::openDraft(std::string const& path)
 	mFilepath = path;
 	mSavedDocument = std::move(candidate); mHasSavedDocument = true; mSaveFailed = false;
 	try { mRecent.add(path); } catch (std::exception const& error) { mDiagnostic = error.what(); }
+}
+
+void StationSystemsWindow::loadConfigurationResource(StationConfigurationResource const& resource)
+{
+	// Copy into the draft, never mutate the shared resource or apply to World.
+	mDraft = resource.document().settings;
+	mFlow.importLayout(resource.document());
+	mPendingLayoutEdit = true;
+	mDiagnostic.clear();
 }
 
 void StationSystemsWindow::newDraft()
@@ -545,198 +557,111 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	// #418: the authored trend retention, in simulation seconds.
 	ImGui::Text("Trend retention: %.0f s (bounded per-series samples, downsampled on long runs)",
 		authored.trendRetentionSeconds);
-	// #422: the packaged reference station. The Meridian configuration
-	// ships as an application resource, parsed through the same
-	// authoritative reader a saved World uses, so the editor displays
-	// exactly what the bundle declares: the reconciled budgets, the
-	// coefficient provenance and units, the provisional assumptions and
-	// the qualification limits. Loading it into the draft is ordinary
-	// draft editing - no parallel configuration, no second clock.
-	ImGui::SeparatorText("Reference station (packaged resource)");
+	// Selection previews a managed document without editing the draft. Only the
+	// explicit load action copies its settings and layout into draft history.
+	ImGui::SeparatorText("Reference configurations");
+	StationConfigurationResource const* selectedConfiguration = nullptr;
+	for (auto const& resource : mConfigurationResources)
+		if (resource->getQualifiedName() == mSelectedConfiguration)
+			selectedConfiguration = resource.get();
+	ImGui::BeginDisabled(mConfigurationResources.empty());
+	if (ImGui::BeginCombo("Configuration resource",
+		selectedConfiguration ? mSelectedConfiguration.c_str() : "Select a configuration"))
 	{
-		static std::optional<core::StationReferenceDocument> sReference;
-		static std::string sReferenceError;
-		static bool sReferenceLoaded = false;
-		if (!sReferenceLoaded)
+		for (auto const& resource : mConfigurationResources)
 		{
-			sReferenceLoaded = true;
-			core::StationReferenceDocument candidate;
-			if (core::parseStationReference(core::bundledStationReferenceText(),
-				candidate, &sReferenceError))
-				sReference = std::move(candidate);
-			else
-				sReference.reset();
-		}
-		if (!sReference)
-		{
-			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
-				"Packaged reference station failed to parse: %s", sReferenceError.c_str());
-		}
-		else
-		{
-			ImGui::Text("%s - %zu store(s), %zu subsystem object(s) in the reconciled register",
-				sReference->name.c_str(), sReference->settings.stores.size(),
-				sReference->settings.waterTreatments.size()
-				+ sReference->settings.electrolyzers.size()
-				+ sReference->settings.co2Captures.size()
-				+ sReference->settings.sabatierReactors.size()
-				+ sReference->settings.methaneProcessors.size()
-				+ sReference->settings.microbialProcessors.size()
-				+ sReference->settings.cropPopulations.size()
-				+ sReference->settings.algaeCultures.size());
-			ImGui::TextWrapped("%s", sReference->summary.c_str());
-			ImGui::TextWrapped("Scenario: %.0f simulated s. %s",
-				sReference->scenarioSeconds, sReference->scenarioNotes.c_str());
-			if (ImGui::TreeNodeEx("Coefficient provenance",
-				ImGuiTreeNodeFlags_DefaultOpen))
+			auto const name = resource->getQualifiedName();
+			bool const selected = name == mSelectedConfiguration;
+			if (ImGui::Selectable(name.c_str(), selected))
 			{
-				for (auto const& entry : sReference->provenance)
+				mSelectedConfiguration = name;
+				selectedConfiguration = resource.get();
+			}
+			if (selected) ImGui::SetItemDefaultFocus();
+		}
+		ImGui::EndCombo();
+	}
+	ImGui::EndDisabled();
+	if (selectedConfiguration)
+	{
+		ImGui::PushID(mSelectedConfiguration.c_str());
+		if (auto const& reference = selectedConfiguration->reference())
+		{
+			auto const& doc = *reference;
+			ImGui::Text("%s - %.0f simulated s scenario", doc.name.c_str(), doc.scenarioSeconds);
+			ImGui::TextWrapped("%s", doc.summary.c_str());
+			ImGui::TextWrapped("Scenario notes: %s", doc.scenarioNotes.c_str());
+			if (!doc.provenance.empty() && ImGui::TreeNodeEx("Coefficient provenance",
+				ImGuiTreeNodeFlags_NoAutoOpenOnLog))
+			{
+				for (auto const& entry : doc.provenance)
 					ImGui::TextWrapped("%s = %s %s - %s", entry.coefficient.c_str(),
 						entry.value.c_str(), entry.units.c_str(), entry.source.c_str());
 				ImGui::TreePop();
 			}
-			if (ImGui::TreeNode("Provisional assumptions"))
+			if (!doc.assumptions.empty() && ImGui::TreeNodeEx("Provisional assumptions",
+				ImGuiTreeNodeFlags_NoAutoOpenOnLog))
 			{
-				for (auto const& [topic, text] : sReference->assumptions)
-				{
-					if (ImGui::TreeNode(topic.c_str()))
+				for (auto const& [topic, text] : doc.assumptions)
+					if (ImGui::TreeNodeEx(topic.c_str(), ImGuiTreeNodeFlags_NoAutoOpenOnLog))
 					{
 						ImGui::TextWrapped("%s", text.c_str());
 						ImGui::TreePop();
 					}
+				ImGui::TreePop();
+			}
+			auto expectations = [](char const* label, auto const& entries) {
+				if (!entries.empty() && ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_NoAutoOpenOnLog))
+				{
+					for (auto const& entry : entries)
+						ImGui::TextWrapped("%s: %s", entry.item.c_str(), entry.detail.c_str());
+					ImGui::TreePop();
 				}
-				ImGui::TreePop();
-			}
-			ImGui::TextWrapped("Qualification: %s", sReference->qualification.c_str());
-			ImGui::BeginDisabled(!world->isSimulationPaused());
-			if (ImGui::Button("Load reference station into draft"))
-			{
-				mDraft = sReference->settings;
-				mDiagnostic.clear();
-			}
-			ImGui::EndDisabled();
-			if (!world->isSimulationPaused())
-				ImGui::TextDisabled("Pause the World to load the reference into the draft.");
-		}
-	}
-	// #423: the packaged emergency and recovery scenario variants. Each
-	// is a complete authored reference document shipped as an
-	// application resource and read by the same authoritative reader;
-	// the window shows the documented limiting services, key event
-	// ordering and bounded outcome ranges alongside the provisional
-	// assumptions, and loading one into the draft is ordinary paused-only
-	// draft editing - the same seam as the base reference, never a
-	// parallel configuration or clock.
-	ImGui::SeparatorText("Emergency & recovery scenarios (packaged resources)");
-	{
-		for (auto const& scenario : core::bundledStationScenarios())
-		{
-			auto const& doc = scenario.document;
-			if (!ImGui::CollapsingHeader(scenario.id.c_str(),
-				ImGuiTreeNodeFlags_FramePadding))
-				continue;
-			// #596: a CollapsingHeader does not push an ID scope, so without
-			// this the three expectation-tree labels below hash to the same
-			// item ID in every scenario - opening one tree would open them
-			// all. Scope each expanded scenario by its stable scenario ID so
-			// every control inside is independently operable.
-			ImGui::PushID(scenario.id.c_str());
-			ImGui::Text("%s - %.0f simulated s scenario",
-				doc.name.c_str(), doc.scenarioSeconds);
-			ImGui::TextWrapped("%s", doc.summary.c_str());
-			ImGui::TextWrapped("Scenario notes: %s", doc.scenarioNotes.c_str());
-			// #596: NoAutoOpenOnLog keeps these trees' open/closed state the
-			// user's own - the headless harness captures every frame through
-			// the log, and ImGui's default log auto-expand would force them
-			// open and mask the per-scenario state the harness verifies.
-			if (ImGui::TreeNodeEx("Expected limiting services",
-				ImGuiTreeNodeFlags_NoAutoOpenOnLog))
-			{
-				for (auto const& expectation : doc.limitingServices)
-					ImGui::TextWrapped("%s: %s",
-						expectation.item.c_str(), expectation.detail.c_str());
-				ImGui::TreePop();
-			}
-			if (ImGui::TreeNodeEx("Expected key event ordering",
-				ImGuiTreeNodeFlags_NoAutoOpenOnLog))
-			{
-				for (auto const& expectation : doc.eventOrdering)
-					ImGui::TextWrapped("%s: %s",
-						expectation.item.c_str(), expectation.detail.c_str());
-				ImGui::TreePop();
-			}
-			if (ImGui::TreeNodeEx("Expected bounded outcome ranges",
-				ImGuiTreeNodeFlags_NoAutoOpenOnLog))
-			{
-				for (auto const& expectation : doc.outcomeRanges)
-					ImGui::TextWrapped("%s: %s",
-						expectation.item.c_str(), expectation.detail.c_str());
-				ImGui::TreePop();
-			}
+			};
+			expectations("Expected limiting services", doc.limitingServices);
+			expectations("Expected key event ordering", doc.eventOrdering);
+			expectations("Expected bounded outcome ranges", doc.outcomeRanges);
+			if (doc.scenarioKind == "stability")
+				ImGui::TextWrapped("Declared residual tolerance: %.0e relative per ledger scale (core::StationBalanceTolerance) - every closing conservation ledger must stay inside it at every point of the run; the audit reports any residual beyond it, never absorbs it.",
+					core::StationBalanceTolerance);
 			ImGui::TextWrapped("Qualification: %s", doc.qualification.c_str());
-			ImGui::BeginDisabled(!world->isSimulationPaused());
-			auto const loadLabel = "Load scenario '" + scenario.id + "' into draft";
-			if (ImGui::Button(loadLabel.c_str()))
-			{
-				mDraft = doc.settings;
-				mDiagnostic.clear();
-			}
-			ImGui::EndDisabled();
-			if (!world->isSimulationPaused())
-				ImGui::TextDisabled("Pause the World to load a scenario into the draft.");
-			ImGui::PopID();
-		}
-	}
-	// #424: the packaged long-duration stability workload. The same
-	// reference-document format and the same authoritative reader as the
-	// base reference, authored for a two-simulated-hour recurring-schedule
-	// run with declared residual tolerances. The window shows the
-	// workload's scenario declaration and tolerance contract, and
-	// loading it into the draft is ordinary paused-only draft editing -
-	// the same seam as the reference and the emergency scenarios, never a
-	// parallel configuration or clock.
-	ImGui::SeparatorText("Long-duration stability workload (packaged resource)");
-	{
-		static std::optional<core::StationReferenceDocument> sLongRun;
-		static std::string sLongRunError;
-		static bool sLongRunLoaded = false;
-		if (!sLongRunLoaded)
-		{
-			sLongRunLoaded = true;
-			core::StationReferenceDocument candidate;
-			if (core::parseStationReference(core::bundledStationLongRunWorkloadText(),
-				candidate, &sLongRunError))
-				sLongRun = std::move(candidate);
-			else
-				sLongRun.reset();
-		}
-		if (!sLongRun)
-		{
-			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
-				"Packaged long-run workload failed to parse: %s", sLongRunError.c_str());
 		}
 		else
 		{
-			ImGui::Text("%s - %.0f simulated s scenario", sLongRun->name.c_str(),
-				sLongRun->scenarioSeconds);
-			ImGui::TextWrapped("%s", sLongRun->summary.c_str());
-			ImGui::TextWrapped("Scenario notes: %s", sLongRun->scenarioNotes.c_str());
-			ImGui::TextWrapped("Declared residual tolerance: %.0e relative per ledger scale (core::StationBalanceTolerance) - every closing conservation ledger must stay inside it at every point of the run; the audit reports any residual beyond it, never absorbs it.",
-				core::StationBalanceTolerance);
-			ImGui::TextWrapped("Qualification: %s", sLongRun->qualification.c_str());
-			ImGui::BeginDisabled(!world->isSimulationPaused());
-			if (ImGui::Button("Load long-run workload into draft"))
+			// Plain configuration examples carry their descriptions in the leading
+			// YAML comments rather than the reference document metadata fields.
+			std::string description;
+			std::string_view text = selectedConfiguration->text();
+			while (!text.empty())
 			{
-				mDraft = sLongRun->settings;
-				mDiagnostic.clear();
+				auto const end = text.find('\n');
+				auto line = text.substr(0, end);
+				if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+				if (!line.empty() && line.front() != '#') break;
+				if (!line.empty())
+				{
+					line.remove_prefix(1);
+					if (!line.empty() && line.front() == ' ') line.remove_prefix(1);
+					description.append(line);
+					description += '\n';
+				}
+				if (end == std::string_view::npos) break;
+				text.remove_prefix(end + 1);
 			}
-			ImGui::EndDisabled();
-			if (!world->isSimulationPaused())
-				ImGui::TextDisabled("Pause the World to load the workload into the draft.");
+			if (description.empty()) ImGui::TextDisabled("No description provided.");
+			else ImGui::TextWrapped("%s", description.c_str());
 		}
+		ImGui::PopID();
 	}
+	else ImGui::TextDisabled("No reference configuration selected.");
+	ImGui::BeginDisabled(!selectedConfiguration || !world->isSimulationPaused());
+	if (ImGui::Button("Load into draft")) loadConfigurationResource(*selectedConfiguration);
+	ImGui::EndDisabled();
+	if (!world->isSimulationPaused())
+		ImGui::TextDisabled("Pause the World to load the selected configuration into the draft.");
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
+	station_editor::renderAddEntryCombo(mDraft);
 	ImGui::InputScalar("Station step ratio (World ticks)", ImGuiDataType_U32,
 		&mDraft.systemsStepWorldTicks);
 	auto const stepSeconds = static_cast<double>(mDraft.systemsStepWorldTicks)
@@ -787,23 +712,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		else
 			++index;
 	}
-	if (mDraft.conversions.size() < core::MaxStationResourceConversions)
-	{
-		if (ImGui::Button("Add conversion"))
-		{
-			core::ResourceConversionSettings conversion;
-			for (size_t candidate = mDraft.conversions.size() + 1;; ++candidate)
-			{
-				conversion.id = "conversion" + std::to_string(candidate);
-				auto const taken = std::any_of(mDraft.conversions.begin(), mDraft.conversions.end(),
-					[&](core::ResourceConversionSettings const& existing) { return existing.id == conversion.id; });
-				if (!taken) break;
-			}
-			conversion.inputs.push_back({});
-			conversion.outputs.push_back({});
-			mDraft.conversions.push_back(std::move(conversion));
-		}
-	}
 	ImGui::SeparatorText("Draft solar arrays (kW; illumination is a fraction of full sun, 0..1)");
 	for (size_t index = 0; index < mDraft.solarArrays.size(); )
 	{
@@ -814,19 +722,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			mDraft.solarArrays.erase(mDraft.solarArrays.begin() + static_cast<std::ptrdiff_t>(index));
 		else
 			++index;
-	}
-	if (mDraft.solarArrays.size() < core::MaxStationSolarArrays && ImGui::Button("Add solar array"))
-	{
-		core::SolarArraySettings array;
-		array.capacityKW = 10.0;
-		for (size_t candidate = mDraft.solarArrays.size() + 1;; ++candidate)
-		{
-			array.id = "solar" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.solarArrays.begin(), mDraft.solarArrays.end(),
-				[&](core::SolarArraySettings const& existing) { return existing.id == array.id; });
-			if (!taken) break;
-		}
-		mDraft.solarArrays.push_back(std::move(array));
 	}
 	ImGui::SeparatorText("Draft external equipment loads (kW; heat and material exchanges scale with delivered power)");
 	station_editor::renderEquipmentLoadList(mDraft);
@@ -844,24 +739,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		else
 			++index;
 	}
-	if (mDraft.deliveries.size() < core::MaxStationResourceDeliveries && ImGui::Button("Add delivery"))
-	{
-		core::ResourceDeliverySettings delivery;
-		delivery.quantity = 10.0;
-		if (!mDraft.stores.empty())
-		{
-			delivery.storeId = mDraft.stores.front().id;
-			delivery.unit = mDraft.stores.front().unit;
-		}
-		for (size_t candidate = mDraft.deliveries.size() + 1;; ++candidate)
-		{
-			delivery.id = "delivery" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.deliveries.begin(), mDraft.deliveries.end(),
-				[&](core::ResourceDeliverySettings const& existing) { return existing.id == delivery.id; });
-			if (!taken) break;
-		}
-		mDraft.deliveries.push_back(std::move(delivery));
-	}
 	ImGui::SeparatorText("Draft terminal-waste ejections (#403; scheduled removals of disposal-ready (qualified) material only; held/untreated waste stays behind; what is ejected is booked as external loss; recurrence 0 is a one-off)");
 	for (size_t index = 0; index < mDraft.wasteEjections.size(); )
 	{
@@ -873,24 +750,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			mDraft.wasteEjections.erase(mDraft.wasteEjections.begin() + static_cast<std::ptrdiff_t>(index));
 		else
 			++index;
-	}
-	if (mDraft.wasteEjections.size() < core::MaxStationWasteEjections && ImGui::Button("Add waste ejection"))
-	{
-		core::WasteEjectionSettings ejection;
-		ejection.quantity = 10.0;
-		if (!mDraft.stores.empty())
-		{
-			ejection.storeId = mDraft.stores.front().id;
-			ejection.unit = mDraft.stores.front().unit;
-		}
-		for (size_t candidate = mDraft.wasteEjections.size() + 1;; ++candidate)
-		{
-			ejection.id = "ejection" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.wasteEjections.begin(), mDraft.wasteEjections.end(),
-				[&](core::WasteEjectionSettings const& existing) { return existing.id == ejection.id; });
-			if (!taken) break;
-		}
-		mDraft.wasteEjections.push_back(std::move(ejection));
 	}
 	ImGui::SeparatorText("Draft thermal reservoirs (kJ/K, degrees C; limits are declared service limits, absorbed heat is environmental)");
 	// #656: the reservoir's settings live in the shared entry editor so
@@ -914,29 +773,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		else
 			++index;
 	}
-	if (mDraft.coolantLoops.size() < core::MaxStationCoolantLoops && ImGui::Button("Add coolant loop"))
-	{
-		core::CoolantLoopSettings loop;
-		loop.coolantCapacityKg = 100.0;
-		loop.startingCoolantKg = 100.0;
-		loop.specificHeatKJPerKgK = 4.0;
-		loop.startingTemperatureC = 20.0;
-		loop.freezeProtectionSetpointC = 5.0;
-		loop.pumpPowerKW = 1.0;
-		loop.ratedFlowKgPerS = 1.0;
-		loop.exchangerConductanceKWPerK = 2.0;
-		loop.heaterCapacityKW = 1.0;
-		if (!mDraft.thermalReservoirs.empty())
-			loop.reservoirId = mDraft.thermalReservoirs.front().id;
-		for (size_t candidate = mDraft.coolantLoops.size() + 1;; ++candidate)
-		{
-			loop.id = "coolantLoop" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.coolantLoops.begin(), mDraft.coolantLoops.end(),
-				[&](core::CoolantLoopSettings const& existing) { return existing.id == loop.id; });
-			if (!taken) break;
-		}
-		mDraft.coolantLoops.push_back(std::move(loop));
-	}
 	ImGui::SeparatorText("Draft chillers (kW cold service; class-matched loop evaporator and reservoir condenser, COP and auxiliaries; zero rated capacity disables the chiller)");
 	for (size_t index = 0; index < mDraft.chillers.size(); )
 	{
@@ -948,38 +784,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			mDraft.chillers.erase(mDraft.chillers.begin() + static_cast<std::ptrdiff_t>(index));
 		else
 			++index;
-	}
-	if (mDraft.chillers.size() < core::MaxStationChillers && ImGui::Button("Add chiller"))
-	{
-		core::ChillerSettings chiller;
-		chiller.thermalClass = "moderate";
-		chiller.ratedCoolingCapacityKW = 5.0;
-		chiller.cop = 3.0;
-		chiller.auxiliaryPowerKW = 0.2;
-		chiller.chilledSetpointC = 5.0;
-		chiller.maxCondensingTemperatureC = 45.0;
-		if (!mDraft.coolantLoops.empty())
-			chiller.coldLoopId = mDraft.coolantLoops.front().id;
-		// Prefer a condenser sink that is not the cold loop's own host:
-		// rejecting into the reservoir the cold side cools is a heater,
-		// so the default avoids that refusal when another reservoir exists.
-		if (!mDraft.thermalReservoirs.empty())
-		{
-			std::string coldHost;
-			for (auto const& loop : mDraft.coolantLoops)
-				if (loop.id == chiller.coldLoopId) coldHost = loop.reservoirId;
-			chiller.condenserReservoirId = mDraft.thermalReservoirs.back().id;
-			for (auto const& reservoir : mDraft.thermalReservoirs)
-				if (reservoir.id != coldHost) chiller.condenserReservoirId = reservoir.id;
-		}
-		for (size_t candidate = mDraft.chillers.size() + 1;; ++candidate)
-		{
-			chiller.id = "chiller" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.chillers.begin(), mDraft.chillers.end(),
-				[&](core::ChillerSettings const& existing) { return existing.id == chiller.id; });
-			if (!taken) break;
-		}
-		mDraft.chillers.push_back(std::move(chiller));
 	}
 	ImGui::SeparatorText("Draft generators (kW/kWh; fuel is an energy-unit Resource store; startup energy and a qualified cooling sink gate the start; zero installed capacity disables the source)");
 	station_editor::renderGeneratorList(mDraft);
@@ -995,30 +799,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		else
 			++index;
 	}
-	if (mDraft.outages.size() < core::MaxStationInstallationOutages && ImGui::Button("Add outage"))
-	{
-		core::InstallationOutageSettings outage;
-		outage.capacityFraction = 0.5;
-		outage.firstOccurrenceSeconds = 60.0;
-		outage.durationSeconds = 30.0;
-		outage.recurrenceSeconds = 0.0;
-		// Default the target to the last-registered wired installation so a
-		// freshly drafted outage points at something that exists.
-		if (!mDraft.generators.empty())
-			outage.installationId = mDraft.generators.back().id;
-		else if (!mDraft.coolantLoops.empty())
-			outage.installationId = mDraft.coolantLoops.back().id;
-		else if (!mDraft.chillers.empty())
-			outage.installationId = mDraft.chillers.back().id;
-		for (size_t candidate = mDraft.outages.size() + 1;; ++candidate)
-		{
-			outage.id = "outage" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.outages.begin(), mDraft.outages.end(),
-				[&](core::InstallationOutageSettings const& existing) { return existing.id == outage.id; });
-			if (!taken) break;
-		}
-		mDraft.outages.push_back(std::move(outage));
-	}
 	ImGui::SeparatorText("Draft maintenance jobs (#414; scheduled timed work on a registered installation - completion must be paid for with declared tools, spare parts and consumables; reusable tools are reserved and returned, consumed material lands in the declared waste store; the installation is isolated while the work is active; recurrence 0 is a one-off, a positive recurrence must be at least the duration; absent prerequisites never allow free completion)");
 	for (size_t index = 0; index < mDraft.maintenanceJobs.size(); )
 	{
@@ -1032,39 +812,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		else
 			++index;
 	}
-	if (mDraft.maintenanceJobs.size() < core::MaxStationMaintenanceJobs
-		&& ImGui::Button("Add maintenance job"))
-	{
-		core::MaintenanceJobSettings job;
-		job.firstOccurrenceSeconds = 60.0;
-		job.durationSeconds = 30.0;
-		// Point the freshly drafted job at an installation that exists.
-		if (!mDraft.generators.empty())
-			job.installationId = mDraft.generators.back().id;
-		else if (!mDraft.coolantLoops.empty())
-			job.installationId = mDraft.coolantLoops.back().id;
-		else if (!mDraft.chillers.empty())
-			job.installationId = mDraft.chillers.back().id;
-		// And at a store that exists, so a single click gives a valid
-		// reusable-tool requirement; consumed streams need a waste store.
-		if (!mDraft.stores.empty())
-		{
-			core::MaintenanceRequirementSettings requirement;
-			requirement.storeId = mDraft.stores.front().id;
-			requirement.quantity = 1.0;
-			requirement.consumed = false;
-			job.requirements.push_back(std::move(requirement));
-		}
-		for (size_t candidate = mDraft.maintenanceJobs.size() + 1;; ++candidate)
-		{
-			job.id = "maint" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.maintenanceJobs.begin(),
-				mDraft.maintenanceJobs.end(),
-				[&](core::MaintenanceJobSettings const& existing) { return existing.id == job.id; });
-			if (!taken) break;
-		}
-		mDraft.maintenanceJobs.push_back(std::move(job));
-	}
 	ImGui::SeparatorText("Draft atmospheres (m3/kg/C/kPa; ideal-gas partial pressures; occupancy is an authored load assignment; vapour caps at saturation and condenses with latent heat; leak is a constant total-mass rate; limits are reported, never clamped)");
 	for (size_t index = 0; index < mDraft.atmospheres.size(); )
 	{
@@ -1074,29 +821,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			mDraft.atmospheres.erase(mDraft.atmospheres.begin() + static_cast<std::ptrdiff_t>(index));
 		else ++index;
 	}
-	if (mDraft.atmospheres.size() < core::MaxStationAtmospheres && ImGui::Button("Add atmosphere"))
-	{
-		core::AtmosphereSettings atmosphere;
-		atmosphere.volumeM3 = 100.0;
-		atmosphere.startingOxygenKg = 20.0;
-		atmosphere.startingNitrogenKg = 80.0;
-		atmosphere.startingTemperatureC = 20.0;
-		atmosphere.thermalCapacityKJPerK = 100.0;
-		atmosphere.minPressureKPa = 80.0;
-		atmosphere.maxPressureKPa = 120.0;
-		// Prefer coupling to the last drafted reservoir so a freshly
-		// drafted atmosphere is thermally live by default.
-		if (!mDraft.thermalReservoirs.empty())
-			atmosphere.reservoirId = mDraft.thermalReservoirs.back().id;
-		for (size_t candidate = mDraft.atmospheres.size() + 1;; ++candidate)
-		{
-			atmosphere.id = "compartment" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.atmospheres.begin(), mDraft.atmospheres.end(),
-				[&](core::AtmosphereSettings const& existing) { return existing.id == atmosphere.id; });
-			if (!taken) break;
-		}
-		mDraft.atmospheres.push_back(std::move(atmosphere));
-	}
 	ImGui::SeparatorText("Draft airlock cycles (kg/seconds; scheduled removals on the shared scenario schedule order; the recovered fraction is retained in the receiver, the remainder is lost through the outer hatch)");
 	for (size_t index = 0; index < mDraft.airlockCycles.size(); )
 	{
@@ -1105,23 +829,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			"Airlock cycle " + row, "Remove airlock cycle " + row))
 			mDraft.airlockCycles.erase(mDraft.airlockCycles.begin() + static_cast<std::ptrdiff_t>(index));
 		else ++index;
-	}
-	if (mDraft.airlockCycles.size() < core::MaxStationAirlockCycles && ImGui::Button("Add airlock cycle"))
-	{
-		core::AirlockCycleSettings cycle;
-		cycle.gasMassKg = 1.0;
-		cycle.recurrenceSeconds = 60.0;
-		cycle.recoveredFraction = 0.95;
-		if (!mDraft.atmospheres.empty())
-			cycle.atmosphereId = mDraft.atmospheres.back().id;
-		for (size_t candidate = mDraft.airlockCycles.size() + 1;; ++candidate)
-		{
-			cycle.id = "airlockCycle" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.airlockCycles.begin(), mDraft.airlockCycles.end(),
-				[&](core::AirlockCycleSettings const& existing) { return existing.id == cycle.id; });
-			if (!taken) break;
-		}
-		mDraft.airlockCycles.push_back(std::move(cycle));
 	}
 	ImGui::SeparatorText("Draft crews (authored population; per-crew metabolic rates per second at full activity; food/water/urine/waste are the referenced compound store's units, gases kg/s, heat kW; crew are never derived from World Agents)");
 	for (size_t index = 0; index < mDraft.crews.size(); )
@@ -1135,36 +842,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		else
 			++index;
 	}
-	if (mDraft.crews.size() < core::MaxStationCrews && ImGui::Button("Add crew"))
-	{
-		core::CrewSettings crew;
-		crew.crewCount = 4;
-		crew.foodPerCrewPerS = 0.00006;
-		crew.waterPerCrewPerS = 0.00008;
-		crew.oxygenPerCrewKgPerS = 0.00009;
-		crew.co2PerCrewKgPerS = 0.00011;
-		crew.moisturePerCrewKgPerS = 0.00004;
-		crew.urinePerCrewPerS = 0.00004;
-		crew.organicWastePerCrewPerS = 0.00001;
-		crew.metabolicHeatPerCrewKW = 0.1;
-		if (!mDraft.atmospheres.empty())
-			crew.atmosphereId = mDraft.atmospheres.back().id;
-		if (!mDraft.stores.empty())
-		{
-			crew.foodStoreId = mDraft.stores.front().id;
-			crew.waterStoreId = mDraft.stores.front().id;
-			crew.urineStoreId = mDraft.stores.front().id;
-			crew.organicWasteStoreId = mDraft.stores.front().id;
-		}
-		for (size_t candidate = mDraft.crews.size() + 1;; ++candidate)
-		{
-			crew.id = "crew" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.crews.begin(), mDraft.crews.end(),
-				[&](core::CrewSettings const& existing) { return existing.id == crew.id; });
-			if (!taken) break;
-		}
-		mDraft.crews.push_back(std::move(crew));
-	}
 	ImGui::SeparatorText("Draft water collectors (#402; a collector may serve a compartment of any class - condensate is just water (#752); the cold surface needs coolant circulation and must be colder than the compartment air; latent heat routes into the coolant loop once; destination must be a plain mass store)");
 	for (size_t index = 0; index < mDraft.waterCollectors.size(); )
 	{
@@ -1173,27 +850,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			"Collector " + row, "Remove collector " + row))
 			mDraft.waterCollectors.erase(mDraft.waterCollectors.begin() + static_cast<std::ptrdiff_t>(index));
 		else ++index;
-	}
-	if (mDraft.waterCollectors.size() < core::MaxStationWaterCollectors && ImGui::Button("Add water collector"))
-	{
-		core::WaterCollectorSettings collector;
-		collector.thermalClass = "moderate";
-		collector.maxRateKgPerS = 0.001;
-		collector.targetRelativeHumidity = 0.5;
-		if (!mDraft.atmospheres.empty())
-			collector.atmosphereId = mDraft.atmospheres.back().id;
-		if (!mDraft.coolantLoops.empty())
-			collector.coolingLoopId = mDraft.coolantLoops.back().id;
-		if (!mDraft.stores.empty())
-			collector.destStoreId = mDraft.stores.front().id;
-		for (size_t candidate = mDraft.waterCollectors.size() + 1;; ++candidate)
-		{
-			collector.id = "collector" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.waterCollectors.begin(), mDraft.waterCollectors.end(),
-				[&](core::WaterCollectorSettings const& existing) { return existing.id == collector.id; });
-			if (!taken) break;
-		}
-		mDraft.waterCollectors.push_back(std::move(collector));
 	}
 	ImGui::SeparatorText("Draft water treatments (#402; raw water splits into treated water plus retained concentrate for declared electricity and consumables; full rated power qualifies the output, curtailed power holds it unqualified; water stores must be plain mass stores, the consumable store may be compound)");
 	for (size_t index = 0; index < mDraft.waterTreatments.size(); )
@@ -1204,29 +860,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			mDraft.waterTreatments.erase(mDraft.waterTreatments.begin() + static_cast<std::ptrdiff_t>(index));
 		else ++index;
 	}
-	if (mDraft.waterTreatments.size() < core::MaxStationWaterTreatments && ImGui::Button("Add water treatment"))
-	{
-		core::WaterTreatmentSettings treatment;
-		treatment.throughputKgPerS = 0.002;
-		treatment.recoveryRatio = 0.85;
-		treatment.specificEnergyKWhPerKg = 0.5;
-		treatment.consumablePerKg = 0.01;
-		if (!mDraft.stores.empty())
-		{
-			treatment.sourceStoreId = mDraft.stores.front().id;
-			treatment.treatedStoreId = mDraft.stores.front().id;
-			treatment.concentrateStoreId = mDraft.stores.front().id;
-			treatment.consumableStoreId = mDraft.stores.front().id;
-		}
-		for (size_t candidate = mDraft.waterTreatments.size() + 1;; ++candidate)
-		{
-			treatment.id = "treatment" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.waterTreatments.begin(), mDraft.waterTreatments.end(),
-				[&](core::WaterTreatmentSettings const& existing) { return existing.id == treatment.id; });
-			if (!taken) break;
-		}
-		mDraft.waterTreatments.push_back(std::move(treatment));
-	}
 	ImGui::SeparatorText("Draft electrolyzers (#404; qualified water splits into oxygen plus hydrogen at the declared stoichiometry; the electrical dose must cover the chemical energy the hydrogen retains, the difference is process heat into the class-matched sink; oxygen goes to a gas store OR a compartment, never both; product stores cap production instead of venting)");
 	for (size_t index = 0; index < mDraft.electrolyzers.size(); )
 	{
@@ -1236,30 +869,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			mDraft.electrolyzers.erase(mDraft.electrolyzers.begin() + static_cast<std::ptrdiff_t>(index));
 		else ++index;
 	}
-	if (mDraft.electrolyzers.size() < core::MaxStationElectrolyzers && ImGui::Button("Add electrolyzer"))
-	{
-		core::ElectrolyzerSettings cell;
-		cell.thermalClass = "low";
-		cell.rateKgPerS = 0.001;
-		cell.specificEnergyKWhPerKgWater = 4.5;
-		cell.maxSinkTemperatureC = 60.0;
-		if (!mDraft.stores.empty())
-		{
-			cell.waterStoreId = mDraft.stores.front().id;
-			cell.oxygenStoreId = mDraft.stores.front().id;
-			cell.hydrogenStoreId = mDraft.stores.front().id;
-		}
-		if (!mDraft.thermalReservoirs.empty())
-			cell.heatSinkId = mDraft.thermalReservoirs.front().id;
-		for (size_t candidate = mDraft.electrolyzers.size() + 1;; ++candidate)
-		{
-			cell.id = "electrolyzer" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.electrolyzers.begin(), mDraft.electrolyzers.end(),
-				[&](core::ElectrolyzerSettings const& existing) { return existing.id == cell.id; });
-			if (!taken) break;
-		}
-		mDraft.electrolyzers.push_back(std::move(cell));
-	}
 	ImGui::SeparatorText("Draft CO2 capture machines (#404; a compartment's carbon dioxide is scrubbed into a finite capture store as inventory; capture is finite on rate, available CO2, store headroom and consumable; the unmet atmospheric service stays visible; a tick with no power scrubs nothing)");
 	for (size_t index = 0; index < mDraft.co2Captures.size(); )
 	{
@@ -1268,28 +877,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			"CO2 capture " + row, "Remove CO2 capture " + row))
 			mDraft.co2Captures.erase(mDraft.co2Captures.begin() + static_cast<std::ptrdiff_t>(index));
 		else ++index;
-	}
-	if (mDraft.co2Captures.size() < core::MaxStationCo2Captures && ImGui::Button("Add CO2 capture machine"))
-	{
-		core::Co2CaptureSettings capture;
-		capture.maxRateKgPerS = 0.001;
-		capture.specificEnergyKWhPerKg = 0.5;
-		capture.consumablePerKg = 0.0;
-		if (!mDraft.stores.empty())
-		{
-			capture.captureStoreId = mDraft.stores.front().id;
-			capture.consumableStoreId = mDraft.stores.front().id;
-		}
-		if (!mDraft.atmospheres.empty())
-			capture.atmosphereId = mDraft.atmospheres.front().id;
-		for (size_t candidate = mDraft.co2Captures.size() + 1;; ++candidate)
-		{
-			capture.id = "co2capture" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.co2Captures.begin(), mDraft.co2Captures.end(),
-				[&](core::Co2CaptureSettings const& existing) { return existing.id == capture.id; });
-			if (!taken) break;
-		}
-		mDraft.co2Captures.push_back(std::move(capture));
 	}
 	ImGui::SeparatorText("Draft fuel-cell backup units (#406; dispatchable power from two dedicated, finite reactant stores; output is bounded by the installed rating, the setpoint, the reactants drawable above their protected reserves and the product water store's headroom; waste heat needs a class-matched qualified sink; product water lands in the treatment destination, never drinking water directly)");
 	station_editor::renderFuelCellList(mDraft);
@@ -1309,33 +896,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		else
 			++index;
 	}
-	if (mDraft.microbialProcessors.size() < core::MaxStationMicrobialProcessors && ImGui::Button("Add microbial processor"))
-	{
-		core::MicrobialProcessorSettings processor;
-		processor.thermalClass = "low";
-		processor.rateKgPerS = 0.001;
-		if (!mDraft.stores.empty())
-		{
-			processor.feedStoreId = mDraft.stores.front().id;
-			processor.oxygenStoreId = mDraft.stores.front().id;
-			processor.waterStoreId = mDraft.stores.front().id;
-			processor.consumableStoreId = mDraft.stores.front().id;
-			processor.nutrientStoreId = mDraft.stores.front().id;
-			processor.recoveredWaterStoreId = mDraft.stores.front().id;
-			processor.co2StoreId = mDraft.stores.front().id;
-			processor.residueStoreId = mDraft.stores.front().id;
-		}
-		if (!mDraft.thermalReservoirs.empty())
-			processor.heatSinkId = mDraft.thermalReservoirs.front().id;
-		for (size_t candidate = mDraft.microbialProcessors.size() + 1;; ++candidate)
-		{
-			processor.id = "microbialprocessor" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.microbialProcessors.begin(), mDraft.microbialProcessors.end(),
-				[&](core::MicrobialProcessorSettings const& existing) { return existing.id == processor.id; });
-			if (!taken) break;
-		}
-		mDraft.microbialProcessors.push_back(std::move(processor));
-	}
 	ImGui::SeparatorText("Draft crop populations (#409/#410; dry-mass living biomass on a declared composition with no moisture and no atmospheric nitrogen; growth is funded by delivered lamp light only after the essential circulation draw, plus CO2, irrigation water and each tracked nutrient, and only inside the declared growing window; respiration burns dry organic for oxygen and returns CO2, vapour and heat; the canopy stops at declared capacity and never photosynthesises for free in darkness or without power; the harvest contract (trigger, fraction, edible share, food and waste stores) removes real living material and preserves its declared constituents - destinations must be mass stores whose declared composition matches the crop's; 0 trigger disables the harvest - all biological coefficients are provisional assumptions)");
 	for (size_t index = 0; index < mDraft.cropPopulations.size(); )
 	{
@@ -1347,37 +907,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			mDraft.cropPopulations.erase(mDraft.cropPopulations.begin() + static_cast<std::ptrdiff_t>(index));
 		else
 			++index;
-	}
-	if (mDraft.cropPopulations.size() < core::MaxStationCropPopulations && ImGui::Button("Add crop population"))
-	{
-		core::CropPopulationSettings crop;
-		crop.growingAreaM2 = 10.0;
-		crop.maxBiomassDensityKgPerM2 = 2.0;
-		crop.initialBiomassKg = 1.0;
-		crop.lampRatedKW = 1.0;
-		crop.illuminationProfile.constantLevel = 1.0;
-		crop.circulationPowerKW = 0.1;
-		crop.growthYieldKgPerKWh = 0.01;
-		crop.respirationPerHour = 0.012;
-		crop.composition.energyKJPerKgDry = 1700.0;
-		if (!mDraft.atmospheres.empty())
-			crop.atmosphereId = mDraft.atmospheres.front().id;
-		if (!mDraft.stores.empty())
-		{
-			crop.waterStoreId = mDraft.stores.front().id;
-			crop.nitrogenStoreId = mDraft.stores.front().id;
-			crop.phosphorusStoreId = mDraft.stores.front().id;
-			crop.potassiumStoreId = mDraft.stores.front().id;
-			crop.mineralsStoreId = mDraft.stores.front().id;
-		}
-		for (size_t candidate = mDraft.cropPopulations.size() + 1;; ++candidate)
-		{
-			crop.id = "croppopulation" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.cropPopulations.begin(), mDraft.cropPopulations.end(),
-				[&](core::CropPopulationSettings const& existing) { return existing.id == crop.id; });
-			if (!taken) break;
-		}
-		mDraft.cropPopulations.push_back(std::move(crop));
 	}
 	ImGui::SeparatorText("Draft algae cultures (#411; a separate Biological population with its own living biomass, active culture volume and density-per-litre capacity, coefficients and condition - never shared with crops; growth is funded by delivered lamp light only after the essential culture circulation draw, plus CO2, culture water and each tracked nutrient, and only inside the declared growing window; respiration burns dry organic for oxygen and returns CO2, vapour and heat; the culture stops at capacity and never photosynthesises for free in darkness or without power; the harvest contract (trigger, fraction, food and recovery shares, food/recovery/waste stores) removes real living material and partitions it conservatively into the three declared destinations - each destination's surplus cascades to the next and what none can hold stays living; all three destinations must be mass stores whose declared composition matches the culture's; 0 trigger disables the harvest - all biological coefficients are provisional assumptions)");
 	for (size_t index = 0; index < mDraft.algaeCultures.size(); )
@@ -1391,37 +920,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		else
 			++index;
 	}
-	if (mDraft.algaeCultures.size() < core::MaxStationAlgaeCultures && ImGui::Button("Add algae culture"))
-	{
-		core::AlgaeCultureSettings algae;
-		algae.cultureVolumeL = 1000.0;
-		algae.maxBiomassDensityKgPerL = 0.002;
-		algae.initialBiomassKg = 0.5;
-		algae.lampRatedKW = 1.0;
-		algae.illuminationProfile.constantLevel = 1.0;
-		algae.circulationPowerKW = 0.1;
-		algae.growthYieldKgPerKWh = 0.01;
-		algae.respirationPerHour = 0.012;
-		algae.composition.energyKJPerKgDry = 1700.0;
-		if (!mDraft.atmospheres.empty())
-			algae.atmosphereId = mDraft.atmospheres.front().id;
-		if (!mDraft.stores.empty())
-		{
-			algae.waterStoreId = mDraft.stores.front().id;
-			algae.nitrogenStoreId = mDraft.stores.front().id;
-			algae.phosphorusStoreId = mDraft.stores.front().id;
-			algae.potassiumStoreId = mDraft.stores.front().id;
-			algae.mineralsStoreId = mDraft.stores.front().id;
-		}
-		for (size_t candidate = mDraft.algaeCultures.size() + 1;; ++candidate)
-		{
-			algae.id = "algaeculture" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.algaeCultures.begin(), mDraft.algaeCultures.end(),
-				[&](core::AlgaeCultureSettings const& existing) { return existing.id == algae.id; });
-			if (!taken) break;
-		}
-		mDraft.algaeCultures.push_back(std::move(algae));
-	}
 	ImGui::SeparatorText("Draft thermal buffers (kJ; finite phase-change store that rides through a cooling deficit)");
 	for (size_t index = 0; index < mDraft.thermalBuffers.size(); )
 	{
@@ -1430,30 +928,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			mDraft.thermalBuffers[index], "Buffer " + row, "Remove buffer " + row);
 		if (remove) mDraft.thermalBuffers.erase(mDraft.thermalBuffers.begin() + static_cast<std::ptrdiff_t>(index));
 		else ++index;
-	}
-	if (mDraft.thermalBuffers.size() < core::MaxStationThermalBuffers && ImGui::Button("Add thermal buffer"))
-	{
-		core::ThermalBufferSettings buffer;
-		buffer.accessMode = "circulation";
-		buffer.capacityKJ = 1000.0;
-		buffer.startingEnergyKJ = 0.0;
-		buffer.minUsableTemperatureC = 0.0;
-		buffer.maxUsableTemperatureC = 100.0;
-		buffer.maxChargeKW = 10.0;
-		buffer.maxDischargeKW = 10.0;
-		buffer.transferConductanceKWPerK = 1.0;
-		if (!mDraft.thermalReservoirs.empty())
-			buffer.reservoirId = mDraft.thermalReservoirs.front().id;
-		if (!mDraft.coolantLoops.empty())
-			buffer.circulationLoopId = mDraft.coolantLoops.front().id;
-		for (size_t candidate = mDraft.thermalBuffers.size() + 1;; ++candidate)
-		{
-			buffer.id = "buffer" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.thermalBuffers.begin(), mDraft.thermalBuffers.end(),
-				[&](core::ThermalBufferSettings const& existing) { return existing.id == buffer.id; });
-			if (!taken) break;
-		}
-		mDraft.thermalBuffers.push_back(std::move(buffer));
 	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged

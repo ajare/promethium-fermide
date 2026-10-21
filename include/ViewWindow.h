@@ -9,6 +9,8 @@ public:
 	enum class Tab { World, StationSystems, StationFlow };
 	Tab selectedTab() const { return mSelected; }
 	bool flowModified() const { return mStation.flowModified(); }
+	void setStationConfigurationResources(std::vector<std::shared_ptr<StationConfigurationResource>> resources)
+	{ mStation.setConfigurationResources(std::move(resources)); }
 	void initializeRecentStationFiles(std::filesystem::path path) { mStation.initializeRecentFiles(std::move(path)); }
 	void setStationFilePicker(std::function<std::optional<std::string>(bool)> picker)
 	{ mStation.setFilePicker(std::move(picker)); }

@@ -8,6 +8,7 @@
 #include "StationFlowDiagram.h"
 #include "DocumentHistory.h"
 #include "RecentFiles.h"
+#include "StationConfigurationResource.h"
 namespace core { class World; }
 struct ImPlotContext;
 
@@ -16,6 +17,8 @@ class StationSystemsWindow
 {
 public:
 	bool visible{false};
+	void setConfigurationResources(std::vector<std::shared_ptr<StationConfigurationResource>> resources)
+	{ mConfigurationResources = std::move(resources); }
 	void initializeRecentFiles(std::filesystem::path path) { mRecent.initialize(std::move(path)); }
 	void setFilePicker(std::function<std::optional<std::string>(bool)> picker) { mFilePicker = std::move(picker); }
 	bool flowModified() const { return draftDirty(); }
@@ -58,6 +61,9 @@ public:
 		std::string const& nodeId, std::string const& portName) const
 	{ return mFlow.pinEligibility(nodeType, nodeId, portName); }
 private:
+	std::vector<std::shared_ptr<StationConfigurationResource>> mConfigurationResources;
+	std::string mSelectedConfiguration{"reference-station"};
+	void loadConfigurationResource(StationConfigurationResource const& resource);
 	bool syncWorld(std::shared_ptr<core::World> const& world);
 	DocumentSnapshot captureDraft() const;
 	void renderDraftHistory();

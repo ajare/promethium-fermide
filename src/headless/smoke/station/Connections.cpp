@@ -1,3 +1,4 @@
+#include "StationReferenceFixtures.h"
 #include "Connections.h"
 #include "core/World.h"
 #include "core/StationConnections.h"

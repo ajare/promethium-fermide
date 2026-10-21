@@ -1,4 +1,5 @@
 #include "StationSystemsEntryEditor.h"
+#include "core/StationPorts.h"
 
 #include "imgui/imgui.h"
 
@@ -1109,21 +1110,6 @@ void renderStoreList(core::StationSystemsSettings& draft)
 		else
 			++index;
 	}
-	if (ImGui::Button("Add store"))
-	{
-		core::ResourceStoreSettings store;
-		store.unit = "kg";
-		store.capacity = 100.0;
-		store.startingQualified = 50.0;
-		for (size_t candidate = draft.stores.size() + 1;; ++candidate)
-		{
-			store.id = "store" + std::to_string(candidate);
-			auto const taken = std::any_of(draft.stores.begin(), draft.stores.end(),
-				[&](core::ResourceStoreSettings const& existing) { return existing.id == store.id; });
-			if (!taken) break;
-		}
-		draft.stores.push_back(std::move(store));
-	}
 }
 
 void renderTransferList(core::StationSystemsSettings& draft)
@@ -1137,28 +1123,6 @@ void renderTransferList(core::StationSystemsSettings& draft)
 			draft.transfers.erase(draft.transfers.begin() + static_cast<std::ptrdiff_t>(index));
 		else
 			++index;
-	}
-	if (ImGui::Button("Add transfer"))
-	{
-		core::ResourceTransferSettings transfer;
-		transfer.unit = "kg";
-		transfer.ratePerSecond = 1.0;
-		if (!draft.stores.empty())
-		{
-			transfer.sourceId = draft.stores.front().id;
-			transfer.unit = draft.stores.front().unit;
-			for (auto const& store : draft.stores)
-				if (store.id != transfer.sourceId && store.unit == transfer.unit)
-				{ transfer.destinationId = store.id; break; }
-		}
-		for (size_t candidate = draft.transfers.size() + 1;; ++candidate)
-		{
-			transfer.id = "transfer" + std::to_string(candidate);
-			auto const taken = std::any_of(draft.transfers.begin(), draft.transfers.end(),
-				[&](core::ResourceTransferSettings const& existing) { return existing.id == transfer.id; });
-			if (!taken) break;
-		}
-		draft.transfers.push_back(std::move(transfer));
 	}
 }
 
@@ -1669,20 +1633,6 @@ void renderEquipmentLoadList(core::StationSystemsSettings& draft)
 		else
 			++index;
 	}
-	if (draft.equipmentLoads.size() < core::MaxStationEquipmentLoads && ImGui::Button("Add load"))
-	{
-		core::EquipmentLoadSettings load;
-		load.electricalDemandKW = 5.0;
-		load.thermalClass = "moderate";
-		for (size_t candidate = draft.equipmentLoads.size() + 1;; ++candidate)
-		{
-			load.id = "load" + std::to_string(candidate);
-			auto const taken = std::any_of(draft.equipmentLoads.begin(), draft.equipmentLoads.end(),
-				[&](core::EquipmentLoadSettings const& existing) { return existing.id == load.id; });
-			if (!taken) break;
-		}
-		draft.equipmentLoads.push_back(std::move(load));
-	}
 }
 
 void renderBatteryList(core::StationSystemsSettings& draft)
@@ -1697,23 +1647,6 @@ void renderBatteryList(core::StationSystemsSettings& draft)
 		else
 			++index;
 	}
-	if (draft.batteries.size() < core::MaxStationBatteries && ImGui::Button("Add battery"))
-	{
-		core::BatterySettings battery;
-		battery.nameplateKWh = 10.0;
-		battery.usableKWh = 8.0;
-		battery.startingStoredKWh = 8.0;
-		battery.maxChargeKW = 2.0;
-		battery.maxDischargeKW = 4.0;
-		for (size_t candidate = draft.batteries.size() + 1;; ++candidate)
-		{
-			battery.id = "battery" + std::to_string(candidate);
-			auto const taken = std::any_of(draft.batteries.begin(), draft.batteries.end(),
-				[&](core::BatterySettings const& existing) { return existing.id == battery.id; });
-			if (!taken) break;
-		}
-		draft.batteries.push_back(std::move(battery));
-	}
 }
 
 void renderGeneratorList(core::StationSystemsSettings& draft)
@@ -1727,43 +1660,6 @@ void renderGeneratorList(core::StationSystemsSettings& draft)
 			draft.generators.erase(draft.generators.begin() + static_cast<std::ptrdiff_t>(index));
 		else
 			++index;
-	}
-	if (draft.generators.size() < core::MaxStationGenerators && ImGui::Button("Add generator"))
-	{
-		core::GeneratorSettings generator;
-		generator.thermalClass = "generation";
-		generator.ratedOutputKW = 10.0;
-		generator.efficiency = 0.4;
-		generator.maxRampKWPerSecond = 2.0;
-		generator.commandedOutputKW = 10.0;
-		generator.startupPowerKW = 1.0;
-		generator.startupSeconds = 5.0;
-		generator.shutdownHeatKW = 0.5;
-		generator.shutdownSeconds = 10.0;
-		generator.maxSinkTemperatureC = 90.0;
-		// Prefer an energy-unit store as the default fuel so a freshly
-		// drafted generator is valid against the declared fuel vocabulary.
-		for (auto const& store : draft.stores)
-			if (store.unit == "kJ" || store.unit == "MJ"
-				|| store.unit == "Wh" || store.unit == "kWh")
-			{ generator.fuelStoreId = store.id; break; }
-		// Prefer a generation-class sink when one exists; otherwise the
-		// first reservoir (validation will surface a class mismatch).
-		if (!draft.thermalReservoirs.empty())
-		{
-			generator.heatSinkId = draft.thermalReservoirs.back().id;
-			for (auto const& reservoir : draft.thermalReservoirs)
-				if (reservoir.thermalClass == generator.thermalClass)
-				{ generator.heatSinkId = reservoir.id; break; }
-		}
-		for (size_t candidate = draft.generators.size() + 1;; ++candidate)
-		{
-			generator.id = "generator" + std::to_string(candidate);
-			auto const taken = std::any_of(draft.generators.begin(), draft.generators.end(),
-				[&](core::GeneratorSettings const& existing) { return existing.id == generator.id; });
-			if (!taken) break;
-		}
-		draft.generators.push_back(std::move(generator));
 	}
 }
 
@@ -1781,30 +1677,6 @@ void renderFuelCellList(core::StationSystemsSettings& draft)
 		}
 		++index;
 	}
-	if (draft.fuelCells.size() < core::MaxStationFuelCells && ImGui::Button("Add fuel cell"))
-	{
-		core::FuelCellSettings cell;
-		cell.thermalClass = "low";
-		cell.ratedOutputKW = 10.0;
-		cell.efficiency = 0.6;
-		cell.maxSinkTemperatureC = 80.0;
-		if (!draft.stores.empty())
-		{
-			cell.hydrogenStoreId = draft.stores.front().id;
-			cell.oxygenStoreId = draft.stores.front().id;
-			cell.waterStoreId = draft.stores.front().id;
-		}
-		if (!draft.thermalReservoirs.empty())
-			cell.heatSinkId = draft.thermalReservoirs.front().id;
-		for (size_t candidate = draft.fuelCells.size() + 1;; ++candidate)
-		{
-			cell.id = "fuelcell" + std::to_string(candidate);
-			auto const taken = std::any_of(draft.fuelCells.begin(), draft.fuelCells.end(),
-				[&](core::FuelCellSettings const& existing) { return existing.id == cell.id; });
-			if (!taken) break;
-		}
-		draft.fuelCells.push_back(std::move(cell));
-	}
 }
 
 void renderSabatierList(core::StationSystemsSettings& draft)
@@ -1818,32 +1690,6 @@ void renderSabatierList(core::StationSystemsSettings& draft)
 			draft.sabatierReactors.erase(draft.sabatierReactors.begin() + static_cast<std::ptrdiff_t>(index));
 		else
 			++index;
-	}
-	if (draft.sabatierReactors.size() < core::MaxStationSabatierReactors
-		&& ImGui::Button("Add Sabatier reactor"))
-	{
-		core::SabatierReactorSettings reactor;
-		reactor.thermalClass = "low";
-		reactor.rateKgPerS = 0.001;
-		reactor.specificEnergyKWhPerKgCO2 = 1.0;
-		reactor.maxSinkTemperatureC = 60.0;
-		if (!draft.stores.empty())
-		{
-			reactor.co2StoreId = draft.stores.front().id;
-			reactor.hydrogenStoreId = draft.stores.front().id;
-			reactor.methaneStoreId = draft.stores.front().id;
-			reactor.waterStoreId = draft.stores.front().id;
-		}
-		if (!draft.thermalReservoirs.empty())
-			reactor.heatSinkId = draft.thermalReservoirs.front().id;
-		for (size_t candidate = draft.sabatierReactors.size() + 1;; ++candidate)
-		{
-			reactor.id = "sabatier" + std::to_string(candidate);
-			auto const taken = std::any_of(draft.sabatierReactors.begin(), draft.sabatierReactors.end(),
-				[&](core::SabatierReactorSettings const& existing) { return existing.id == reactor.id; });
-			if (!taken) break;
-		}
-		draft.sabatierReactors.push_back(std::move(reactor));
 	}
 }
 
@@ -1861,32 +1707,6 @@ void renderMethaneProcessorList(core::StationSystemsSettings& draft)
 		else
 			++index;
 	}
-	if (draft.methaneProcessors.size() < core::MaxStationMethaneProcessors
-		&& ImGui::Button("Add methane processor"))
-	{
-		core::MethaneProcessorSettings processor;
-		processor.thermalClass = "low";
-		processor.rateKgPerS = 0.001;
-		processor.specificEnergyKWhPerKgCH4 = 2.0;
-		processor.maxSinkTemperatureC = 60.0;
-		if (!draft.stores.empty())
-		{
-			processor.methaneStoreId = draft.stores.front().id;
-			processor.hydrogenStoreId = draft.stores.front().id;
-			processor.carbonStoreId = draft.stores.front().id;
-		}
-		if (!draft.thermalReservoirs.empty())
-			processor.heatSinkId = draft.thermalReservoirs.front().id;
-		for (size_t candidate = draft.methaneProcessors.size() + 1;; ++candidate)
-		{
-			processor.id = "methaneprocessor" + std::to_string(candidate);
-			auto const taken = std::any_of(draft.methaneProcessors.begin(),
-				draft.methaneProcessors.end(),
-				[&](core::MethaneProcessorSettings const& existing) { return existing.id == processor.id; });
-			if (!taken) break;
-		}
-		draft.methaneProcessors.push_back(std::move(processor));
-	}
 }
 
 void renderThermalReservoirList(core::StationSystemsSettings& draft)
@@ -1903,25 +1723,6 @@ void renderThermalReservoirList(core::StationSystemsSettings& draft)
 		else
 			++index;
 	}
-	if (draft.thermalReservoirs.size() < core::MaxStationThermalReservoirs
-		&& ImGui::Button("Add thermal reservoir"))
-	{
-		core::ThermalReservoirSettings reservoir;
-		reservoir.thermalClass = "moderate";
-		reservoir.heatCapacityKJPerK = 100.0;
-		reservoir.startingTemperatureC = 20.0;
-		reservoir.minTemperatureC = 0.0;
-		reservoir.maxTemperatureC = 40.0;
-		for (size_t candidate = draft.thermalReservoirs.size() + 1;; ++candidate)
-		{
-			reservoir.id = "reservoir" + std::to_string(candidate);
-			auto const taken = std::any_of(draft.thermalReservoirs.begin(),
-				draft.thermalReservoirs.end(),
-				[&](core::ThermalReservoirSettings const& existing) { return existing.id == reservoir.id; });
-			if (!taken) break;
-		}
-		draft.thermalReservoirs.push_back(std::move(reservoir));
-	}
 }
 
 void renderRadiatorList(core::StationSystemsSettings& draft)
@@ -1936,24 +1737,6 @@ void renderRadiatorList(core::StationSystemsSettings& draft)
 				draft.radiators.begin() + static_cast<std::ptrdiff_t>(index));
 		else
 			++index;
-	}
-	if (draft.radiators.size() < core::MaxStationRadiators && ImGui::Button("Add radiator"))
-	{
-		core::RadiatorSettings radiator;
-		radiator.areaM2 = 100.0;
-		radiator.emissivity = 0.9;
-		radiator.viewFactor = 1.0;
-		radiator.sinkTemperatureC = -270.0;
-		if (!draft.thermalReservoirs.empty())
-			radiator.reservoirId = draft.thermalReservoirs.front().id;
-		for (size_t candidate = draft.radiators.size() + 1;; ++candidate)
-		{
-			radiator.id = "radiator" + std::to_string(candidate);
-			auto const taken = std::any_of(draft.radiators.begin(), draft.radiators.end(),
-				[&](core::RadiatorSettings const& existing) { return existing.id == radiator.id; });
-			if (!taken) break;
-		}
-		draft.radiators.push_back(std::move(radiator));
 	}
 }
 
@@ -2335,4 +2118,735 @@ StationEntryEditor const* findStationEntryEditor(std::string_view nodeType)
 		if (editor.nodeType == nodeType) return &editor;
 	return nullptr;
 }
+namespace
+{
+struct EntryCreator
+{
+	std::string_view nodeType;
+	char const* label;
+	bool (*canAdd)(core::StationSystemsSettings const&);
+	void (*add)(core::StationSystemsSettings&);
+};
+
+// Existing form defaults and reference preferences, independent of list rendering.
+// Groups and ordering come from the same catalogue as Flow placement.
+constexpr std::array<EntryCreator, 29> kEntryCreators{{
+	{"Store", "Store",
+		[](core::StationSystemsSettings const& draft) { return draft.stores.size() < core::MaxStationResourceStores; },
+		[](core::StationSystemsSettings& draft) {
+			core::ResourceStoreSettings store;
+			store.unit = "kg";
+			store.capacity = 100.0;
+			store.startingQualified = 50.0;
+			for (size_t candidate = draft.stores.size() + 1;; ++candidate)
+			{
+				store.id = "store" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.stores.begin(), draft.stores.end(),
+					[&](core::ResourceStoreSettings const& existing) { return existing.id == store.id; });
+				if (!taken) break;
+			}
+			draft.stores.push_back(std::move(store));
+		}},
+	{"Transfer", "Transfer",
+		[](core::StationSystemsSettings const& draft) { return draft.transfers.size() < core::MaxStationResourceTransfers; },
+		[](core::StationSystemsSettings& draft) {
+			core::ResourceTransferSettings transfer;
+			transfer.unit = "kg";
+			transfer.ratePerSecond = 1.0;
+			if (!draft.stores.empty())
+			{
+				transfer.sourceId = draft.stores.front().id;
+				transfer.unit = draft.stores.front().unit;
+				for (auto const& store : draft.stores)
+					if (store.id != transfer.sourceId && store.unit == transfer.unit)
+					{ transfer.destinationId = store.id; break; }
+			}
+			for (size_t candidate = draft.transfers.size() + 1;; ++candidate)
+			{
+				transfer.id = "transfer" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.transfers.begin(), draft.transfers.end(),
+					[&](core::ResourceTransferSettings const& existing) { return existing.id == transfer.id; });
+				if (!taken) break;
+			}
+			draft.transfers.push_back(std::move(transfer));
+		}},
+	{"Conversion", "Conversion",
+		[](core::StationSystemsSettings const& draft) { return draft.conversions.size() < core::MaxStationResourceConversions; },
+		[](core::StationSystemsSettings& draft) {
+			core::ResourceConversionSettings conversion;
+			for (size_t candidate = draft.conversions.size() + 1;; ++candidate)
+			{
+				conversion.id = "conversion" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.conversions.begin(), draft.conversions.end(),
+					[&](core::ResourceConversionSettings const& existing) { return existing.id == conversion.id; });
+				if (!taken) break;
+			}
+			conversion.inputs.push_back({});
+			conversion.outputs.push_back({});
+			draft.conversions.push_back(std::move(conversion));
+		}},
+	{"Solar", "Solar array",
+		[](core::StationSystemsSettings const& draft) { return draft.solarArrays.size() < core::MaxStationSolarArrays; },
+		[](core::StationSystemsSettings& draft) {
+			core::SolarArraySettings array;
+			array.capacityKW = 10.0;
+			for (size_t candidate = draft.solarArrays.size() + 1;; ++candidate)
+			{
+				array.id = "solar" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.solarArrays.begin(), draft.solarArrays.end(),
+					[&](core::SolarArraySettings const& existing) { return existing.id == array.id; });
+				if (!taken) break;
+			}
+			draft.solarArrays.push_back(std::move(array));
+		}},
+	{"Equipment", "Equipment load",
+		[](core::StationSystemsSettings const& draft) { return draft.equipmentLoads.size() < core::MaxStationEquipmentLoads; },
+		[](core::StationSystemsSettings& draft) {
+			core::EquipmentLoadSettings load;
+			load.electricalDemandKW = 5.0;
+			load.thermalClass = "moderate";
+			for (size_t candidate = draft.equipmentLoads.size() + 1;; ++candidate)
+			{
+				load.id = "load" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.equipmentLoads.begin(), draft.equipmentLoads.end(),
+					[&](core::EquipmentLoadSettings const& existing) { return existing.id == load.id; });
+				if (!taken) break;
+			}
+			draft.equipmentLoads.push_back(std::move(load));
+		}},
+	{"Battery", "Battery",
+		[](core::StationSystemsSettings const& draft) { return draft.batteries.size() < core::MaxStationBatteries; },
+		[](core::StationSystemsSettings& draft) {
+			core::BatterySettings battery;
+			battery.nameplateKWh = 10.0;
+			battery.usableKWh = 8.0;
+			battery.startingStoredKWh = 8.0;
+			battery.maxChargeKW = 2.0;
+			battery.maxDischargeKW = 4.0;
+			for (size_t candidate = draft.batteries.size() + 1;; ++candidate)
+			{
+				battery.id = "battery" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.batteries.begin(), draft.batteries.end(),
+					[&](core::BatterySettings const& existing) { return existing.id == battery.id; });
+				if (!taken) break;
+			}
+			draft.batteries.push_back(std::move(battery));
+		}},
+	{"Generator", "Generator",
+		[](core::StationSystemsSettings const& draft) { return draft.generators.size() < core::MaxStationGenerators; },
+		[](core::StationSystemsSettings& draft) {
+			core::GeneratorSettings generator;
+			generator.thermalClass = "generation";
+			generator.ratedOutputKW = 10.0;
+			generator.efficiency = 0.4;
+			generator.maxRampKWPerSecond = 2.0;
+			generator.commandedOutputKW = 10.0;
+			generator.startupPowerKW = 1.0;
+			generator.startupSeconds = 5.0;
+			generator.shutdownHeatKW = 0.5;
+			generator.shutdownSeconds = 10.0;
+			generator.maxSinkTemperatureC = 90.0;
+			// Prefer an energy-unit store as the default fuel so a freshly
+			// drafted generator is valid against the declared fuel vocabulary.
+			for (auto const& store : draft.stores)
+				if (store.unit == "kJ" || store.unit == "MJ"
+					|| store.unit == "Wh" || store.unit == "kWh")
+				{ generator.fuelStoreId = store.id; break; }
+			// Prefer a generation-class sink when one exists; otherwise the
+			// first reservoir (validation will surface a class mismatch).
+			if (!draft.thermalReservoirs.empty())
+			{
+				generator.heatSinkId = draft.thermalReservoirs.back().id;
+				for (auto const& reservoir : draft.thermalReservoirs)
+					if (reservoir.thermalClass == generator.thermalClass)
+					{ generator.heatSinkId = reservoir.id; break; }
+			}
+			for (size_t candidate = draft.generators.size() + 1;; ++candidate)
+			{
+				generator.id = "generator" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.generators.begin(), draft.generators.end(),
+					[&](core::GeneratorSettings const& existing) { return existing.id == generator.id; });
+				if (!taken) break;
+			}
+			draft.generators.push_back(std::move(generator));
+		}},
+	{"Fuel cell", "Fuel cell",
+		[](core::StationSystemsSettings const& draft) { return draft.fuelCells.size() < core::MaxStationFuelCells; },
+		[](core::StationSystemsSettings& draft) {
+			core::FuelCellSettings cell;
+			cell.thermalClass = "low";
+			cell.ratedOutputKW = 10.0;
+			cell.efficiency = 0.6;
+			cell.maxSinkTemperatureC = 80.0;
+			if (!draft.stores.empty())
+			{
+				cell.hydrogenStoreId = draft.stores.front().id;
+				cell.oxygenStoreId = draft.stores.front().id;
+				cell.waterStoreId = draft.stores.front().id;
+			}
+			if (!draft.thermalReservoirs.empty())
+				cell.heatSinkId = draft.thermalReservoirs.front().id;
+			for (size_t candidate = draft.fuelCells.size() + 1;; ++candidate)
+			{
+				cell.id = "fuelcell" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.fuelCells.begin(), draft.fuelCells.end(),
+					[&](core::FuelCellSettings const& existing) { return existing.id == cell.id; });
+				if (!taken) break;
+			}
+			draft.fuelCells.push_back(std::move(cell));
+		}},
+	{"Sabatier", "Sabatier reactor",
+		[](core::StationSystemsSettings const& draft) { return draft.sabatierReactors.size() < core::MaxStationSabatierReactors; },
+		[](core::StationSystemsSettings& draft) {
+			core::SabatierReactorSettings reactor;
+			reactor.thermalClass = "low";
+			reactor.rateKgPerS = 0.001;
+			reactor.specificEnergyKWhPerKgCO2 = 1.0;
+			reactor.maxSinkTemperatureC = 60.0;
+			if (!draft.stores.empty())
+			{
+				reactor.co2StoreId = draft.stores.front().id;
+				reactor.hydrogenStoreId = draft.stores.front().id;
+				reactor.methaneStoreId = draft.stores.front().id;
+				reactor.waterStoreId = draft.stores.front().id;
+			}
+			if (!draft.thermalReservoirs.empty())
+				reactor.heatSinkId = draft.thermalReservoirs.front().id;
+			for (size_t candidate = draft.sabatierReactors.size() + 1;; ++candidate)
+			{
+				reactor.id = "sabatier" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.sabatierReactors.begin(), draft.sabatierReactors.end(),
+					[&](core::SabatierReactorSettings const& existing) { return existing.id == reactor.id; });
+				if (!taken) break;
+			}
+			draft.sabatierReactors.push_back(std::move(reactor));
+		}},
+	{"Methane processor", "Methane processor",
+		[](core::StationSystemsSettings const& draft) { return draft.methaneProcessors.size() < core::MaxStationMethaneProcessors; },
+		[](core::StationSystemsSettings& draft) {
+			core::MethaneProcessorSettings processor;
+			processor.thermalClass = "low";
+			processor.rateKgPerS = 0.001;
+			processor.specificEnergyKWhPerKgCH4 = 2.0;
+			processor.maxSinkTemperatureC = 60.0;
+			if (!draft.stores.empty())
+			{
+				processor.methaneStoreId = draft.stores.front().id;
+				processor.hydrogenStoreId = draft.stores.front().id;
+				processor.carbonStoreId = draft.stores.front().id;
+			}
+			if (!draft.thermalReservoirs.empty())
+				processor.heatSinkId = draft.thermalReservoirs.front().id;
+			for (size_t candidate = draft.methaneProcessors.size() + 1;; ++candidate)
+			{
+				processor.id = "methaneprocessor" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.methaneProcessors.begin(),
+					draft.methaneProcessors.end(),
+					[&](core::MethaneProcessorSettings const& existing) { return existing.id == processor.id; });
+				if (!taken) break;
+			}
+			draft.methaneProcessors.push_back(std::move(processor));
+		}},
+	{"Reservoir", "Thermal reservoir",
+		[](core::StationSystemsSettings const& draft) { return draft.thermalReservoirs.size() < core::MaxStationThermalReservoirs; },
+		[](core::StationSystemsSettings& draft) {
+			core::ThermalReservoirSettings reservoir;
+			reservoir.thermalClass = "moderate";
+			reservoir.heatCapacityKJPerK = 100.0;
+			reservoir.startingTemperatureC = 20.0;
+			reservoir.minTemperatureC = 0.0;
+			reservoir.maxTemperatureC = 40.0;
+			for (size_t candidate = draft.thermalReservoirs.size() + 1;; ++candidate)
+			{
+				reservoir.id = "reservoir" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.thermalReservoirs.begin(),
+					draft.thermalReservoirs.end(),
+					[&](core::ThermalReservoirSettings const& existing) { return existing.id == reservoir.id; });
+				if (!taken) break;
+			}
+			draft.thermalReservoirs.push_back(std::move(reservoir));
+		}},
+	{"Radiator", "Radiator",
+		[](core::StationSystemsSettings const& draft) { return draft.radiators.size() < core::MaxStationRadiators; },
+		[](core::StationSystemsSettings& draft) {
+			core::RadiatorSettings radiator;
+			radiator.areaM2 = 100.0;
+			radiator.emissivity = 0.9;
+			radiator.viewFactor = 1.0;
+			radiator.sinkTemperatureC = -270.0;
+			if (!draft.thermalReservoirs.empty())
+				radiator.reservoirId = draft.thermalReservoirs.front().id;
+			for (size_t candidate = draft.radiators.size() + 1;; ++candidate)
+			{
+				radiator.id = "radiator" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.radiators.begin(), draft.radiators.end(),
+					[&](core::RadiatorSettings const& existing) { return existing.id == radiator.id; });
+				if (!taken) break;
+			}
+			draft.radiators.push_back(std::move(radiator));
+		}},
+	{"Coolant loop", "Coolant loop",
+		[](core::StationSystemsSettings const& draft) { return draft.coolantLoops.size() < core::MaxStationCoolantLoops; },
+		[](core::StationSystemsSettings& draft) {
+			core::CoolantLoopSettings loop;
+			loop.coolantCapacityKg = 100.0;
+			loop.startingCoolantKg = 100.0;
+			loop.specificHeatKJPerKgK = 4.0;
+			loop.startingTemperatureC = 20.0;
+			loop.freezeProtectionSetpointC = 5.0;
+			loop.pumpPowerKW = 1.0;
+			loop.ratedFlowKgPerS = 1.0;
+			loop.exchangerConductanceKWPerK = 2.0;
+			loop.heaterCapacityKW = 1.0;
+			if (!draft.thermalReservoirs.empty())
+				loop.reservoirId = draft.thermalReservoirs.front().id;
+			for (size_t candidate = draft.coolantLoops.size() + 1;; ++candidate)
+			{
+				loop.id = "coolantLoop" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.coolantLoops.begin(), draft.coolantLoops.end(),
+					[&](core::CoolantLoopSettings const& existing) { return existing.id == loop.id; });
+				if (!taken) break;
+			}
+			draft.coolantLoops.push_back(std::move(loop));
+		}},
+	{"Chiller", "Chiller",
+		[](core::StationSystemsSettings const& draft) { return draft.chillers.size() < core::MaxStationChillers; },
+		[](core::StationSystemsSettings& draft) {
+			core::ChillerSettings chiller;
+			chiller.thermalClass = "moderate";
+			chiller.ratedCoolingCapacityKW = 5.0;
+			chiller.cop = 3.0;
+			chiller.auxiliaryPowerKW = 0.2;
+			chiller.chilledSetpointC = 5.0;
+			chiller.maxCondensingTemperatureC = 45.0;
+			if (!draft.coolantLoops.empty())
+				chiller.coldLoopId = draft.coolantLoops.front().id;
+			// Prefer a condenser sink that is not the cold loop's own host:
+			// rejecting into the reservoir the cold side cools is a heater,
+			// so the default avoids that refusal when another reservoir exists.
+			if (!draft.thermalReservoirs.empty())
+			{
+				std::string coldHost;
+				for (auto const& loop : draft.coolantLoops)
+					if (loop.id == chiller.coldLoopId) coldHost = loop.reservoirId;
+				chiller.condenserReservoirId = draft.thermalReservoirs.back().id;
+				for (auto const& reservoir : draft.thermalReservoirs)
+					if (reservoir.id != coldHost) chiller.condenserReservoirId = reservoir.id;
+			}
+			for (size_t candidate = draft.chillers.size() + 1;; ++candidate)
+			{
+				chiller.id = "chiller" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.chillers.begin(), draft.chillers.end(),
+					[&](core::ChillerSettings const& existing) { return existing.id == chiller.id; });
+				if (!taken) break;
+			}
+			draft.chillers.push_back(std::move(chiller));
+		}},
+	{"Thermal buffer", "Thermal buffer",
+		[](core::StationSystemsSettings const& draft) { return draft.thermalBuffers.size() < core::MaxStationThermalBuffers; },
+		[](core::StationSystemsSettings& draft) {
+			core::ThermalBufferSettings buffer;
+			buffer.accessMode = "circulation";
+			buffer.capacityKJ = 1000.0;
+			buffer.startingEnergyKJ = 0.0;
+			buffer.minUsableTemperatureC = 0.0;
+			buffer.maxUsableTemperatureC = 100.0;
+			buffer.maxChargeKW = 10.0;
+			buffer.maxDischargeKW = 10.0;
+			buffer.transferConductanceKWPerK = 1.0;
+			if (!draft.thermalReservoirs.empty())
+				buffer.reservoirId = draft.thermalReservoirs.front().id;
+			if (!draft.coolantLoops.empty())
+				buffer.circulationLoopId = draft.coolantLoops.front().id;
+			for (size_t candidate = draft.thermalBuffers.size() + 1;; ++candidate)
+			{
+				buffer.id = "buffer" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.thermalBuffers.begin(), draft.thermalBuffers.end(),
+					[&](core::ThermalBufferSettings const& existing) { return existing.id == buffer.id; });
+				if (!taken) break;
+			}
+			draft.thermalBuffers.push_back(std::move(buffer));
+		}},
+	{"Crew", "Crew",
+		[](core::StationSystemsSettings const& draft) { return draft.crews.size() < core::MaxStationCrews; },
+		[](core::StationSystemsSettings& draft) {
+			core::CrewSettings crew;
+			crew.crewCount = 4;
+			crew.foodPerCrewPerS = 0.00006;
+			crew.waterPerCrewPerS = 0.00008;
+			crew.oxygenPerCrewKgPerS = 0.00009;
+			crew.co2PerCrewKgPerS = 0.00011;
+			crew.moisturePerCrewKgPerS = 0.00004;
+			crew.urinePerCrewPerS = 0.00004;
+			crew.organicWastePerCrewPerS = 0.00001;
+			crew.metabolicHeatPerCrewKW = 0.1;
+			if (!draft.atmospheres.empty())
+				crew.atmosphereId = draft.atmospheres.back().id;
+			if (!draft.stores.empty())
+			{
+				crew.foodStoreId = draft.stores.front().id;
+				crew.waterStoreId = draft.stores.front().id;
+				crew.urineStoreId = draft.stores.front().id;
+				crew.organicWasteStoreId = draft.stores.front().id;
+			}
+			for (size_t candidate = draft.crews.size() + 1;; ++candidate)
+			{
+				crew.id = "crew" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.crews.begin(), draft.crews.end(),
+					[&](core::CrewSettings const& existing) { return existing.id == crew.id; });
+				if (!taken) break;
+			}
+			draft.crews.push_back(std::move(crew));
+		}},
+	{"Crops", "Crop population",
+		[](core::StationSystemsSettings const& draft) { return draft.cropPopulations.size() < core::MaxStationCropPopulations; },
+		[](core::StationSystemsSettings& draft) {
+			core::CropPopulationSettings crop;
+			crop.growingAreaM2 = 10.0;
+			crop.maxBiomassDensityKgPerM2 = 2.0;
+			crop.initialBiomassKg = 1.0;
+			crop.lampRatedKW = 1.0;
+			crop.illuminationProfile.constantLevel = 1.0;
+			crop.circulationPowerKW = 0.1;
+			crop.growthYieldKgPerKWh = 0.01;
+			crop.respirationPerHour = 0.012;
+			crop.composition.energyKJPerKgDry = 1700.0;
+			if (!draft.atmospheres.empty())
+				crop.atmosphereId = draft.atmospheres.front().id;
+			if (!draft.stores.empty())
+			{
+				crop.waterStoreId = draft.stores.front().id;
+				crop.nitrogenStoreId = draft.stores.front().id;
+				crop.phosphorusStoreId = draft.stores.front().id;
+				crop.potassiumStoreId = draft.stores.front().id;
+				crop.mineralsStoreId = draft.stores.front().id;
+			}
+			for (size_t candidate = draft.cropPopulations.size() + 1;; ++candidate)
+			{
+				crop.id = "croppopulation" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.cropPopulations.begin(), draft.cropPopulations.end(),
+					[&](core::CropPopulationSettings const& existing) { return existing.id == crop.id; });
+				if (!taken) break;
+			}
+			draft.cropPopulations.push_back(std::move(crop));
+		}},
+	{"Algae", "Algae culture",
+		[](core::StationSystemsSettings const& draft) { return draft.algaeCultures.size() < core::MaxStationAlgaeCultures; },
+		[](core::StationSystemsSettings& draft) {
+			core::AlgaeCultureSettings algae;
+			algae.cultureVolumeL = 1000.0;
+			algae.maxBiomassDensityKgPerL = 0.002;
+			algae.initialBiomassKg = 0.5;
+			algae.lampRatedKW = 1.0;
+			algae.illuminationProfile.constantLevel = 1.0;
+			algae.circulationPowerKW = 0.1;
+			algae.growthYieldKgPerKWh = 0.01;
+			algae.respirationPerHour = 0.012;
+			algae.composition.energyKJPerKgDry = 1700.0;
+			if (!draft.atmospheres.empty())
+				algae.atmosphereId = draft.atmospheres.front().id;
+			if (!draft.stores.empty())
+			{
+				algae.waterStoreId = draft.stores.front().id;
+				algae.nitrogenStoreId = draft.stores.front().id;
+				algae.phosphorusStoreId = draft.stores.front().id;
+				algae.potassiumStoreId = draft.stores.front().id;
+				algae.mineralsStoreId = draft.stores.front().id;
+			}
+			for (size_t candidate = draft.algaeCultures.size() + 1;; ++candidate)
+			{
+				algae.id = "algaeculture" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.algaeCultures.begin(), draft.algaeCultures.end(),
+					[&](core::AlgaeCultureSettings const& existing) { return existing.id == algae.id; });
+				if (!taken) break;
+			}
+			draft.algaeCultures.push_back(std::move(algae));
+		}},
+	{"Microbial processor", "Microbial processor",
+		[](core::StationSystemsSettings const& draft) { return draft.microbialProcessors.size() < core::MaxStationMicrobialProcessors; },
+		[](core::StationSystemsSettings& draft) {
+			core::MicrobialProcessorSettings processor;
+			processor.thermalClass = "low";
+			processor.rateKgPerS = 0.001;
+			if (!draft.stores.empty())
+			{
+				processor.feedStoreId = draft.stores.front().id;
+				processor.oxygenStoreId = draft.stores.front().id;
+				processor.waterStoreId = draft.stores.front().id;
+				processor.consumableStoreId = draft.stores.front().id;
+				processor.nutrientStoreId = draft.stores.front().id;
+				processor.recoveredWaterStoreId = draft.stores.front().id;
+				processor.co2StoreId = draft.stores.front().id;
+				processor.residueStoreId = draft.stores.front().id;
+			}
+			if (!draft.thermalReservoirs.empty())
+				processor.heatSinkId = draft.thermalReservoirs.front().id;
+			for (size_t candidate = draft.microbialProcessors.size() + 1;; ++candidate)
+			{
+				processor.id = "microbialprocessor" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.microbialProcessors.begin(), draft.microbialProcessors.end(),
+					[&](core::MicrobialProcessorSettings const& existing) { return existing.id == processor.id; });
+				if (!taken) break;
+			}
+			draft.microbialProcessors.push_back(std::move(processor));
+		}},
+	{"Water collector", "Water collector",
+		[](core::StationSystemsSettings const& draft) { return draft.waterCollectors.size() < core::MaxStationWaterCollectors; },
+		[](core::StationSystemsSettings& draft) {
+			core::WaterCollectorSettings collector;
+			collector.thermalClass = "moderate";
+			collector.maxRateKgPerS = 0.001;
+			collector.targetRelativeHumidity = 0.5;
+			if (!draft.atmospheres.empty())
+				collector.atmosphereId = draft.atmospheres.back().id;
+			if (!draft.coolantLoops.empty())
+				collector.coolingLoopId = draft.coolantLoops.back().id;
+			if (!draft.stores.empty())
+				collector.destStoreId = draft.stores.front().id;
+			for (size_t candidate = draft.waterCollectors.size() + 1;; ++candidate)
+			{
+				collector.id = "collector" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.waterCollectors.begin(), draft.waterCollectors.end(),
+					[&](core::WaterCollectorSettings const& existing) { return existing.id == collector.id; });
+				if (!taken) break;
+			}
+			draft.waterCollectors.push_back(std::move(collector));
+		}},
+	{"Water treatment", "Water treatment",
+		[](core::StationSystemsSettings const& draft) { return draft.waterTreatments.size() < core::MaxStationWaterTreatments; },
+		[](core::StationSystemsSettings& draft) {
+			core::WaterTreatmentSettings treatment;
+			treatment.throughputKgPerS = 0.002;
+			treatment.recoveryRatio = 0.85;
+			treatment.specificEnergyKWhPerKg = 0.5;
+			treatment.consumablePerKg = 0.01;
+			if (!draft.stores.empty())
+			{
+				treatment.sourceStoreId = draft.stores.front().id;
+				treatment.treatedStoreId = draft.stores.front().id;
+				treatment.concentrateStoreId = draft.stores.front().id;
+				treatment.consumableStoreId = draft.stores.front().id;
+			}
+			for (size_t candidate = draft.waterTreatments.size() + 1;; ++candidate)
+			{
+				treatment.id = "treatment" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.waterTreatments.begin(), draft.waterTreatments.end(),
+					[&](core::WaterTreatmentSettings const& existing) { return existing.id == treatment.id; });
+				if (!taken) break;
+			}
+			draft.waterTreatments.push_back(std::move(treatment));
+		}},
+	{"Electrolyzer", "Electrolyzer",
+		[](core::StationSystemsSettings const& draft) { return draft.electrolyzers.size() < core::MaxStationElectrolyzers; },
+		[](core::StationSystemsSettings& draft) {
+			core::ElectrolyzerSettings cell;
+			cell.thermalClass = "low";
+			cell.rateKgPerS = 0.001;
+			cell.specificEnergyKWhPerKgWater = 4.5;
+			cell.maxSinkTemperatureC = 60.0;
+			if (!draft.stores.empty())
+			{
+				cell.waterStoreId = draft.stores.front().id;
+				cell.oxygenStoreId = draft.stores.front().id;
+				cell.hydrogenStoreId = draft.stores.front().id;
+			}
+			if (!draft.thermalReservoirs.empty())
+				cell.heatSinkId = draft.thermalReservoirs.front().id;
+			for (size_t candidate = draft.electrolyzers.size() + 1;; ++candidate)
+			{
+				cell.id = "electrolyzer" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.electrolyzers.begin(), draft.electrolyzers.end(),
+					[&](core::ElectrolyzerSettings const& existing) { return existing.id == cell.id; });
+				if (!taken) break;
+			}
+			draft.electrolyzers.push_back(std::move(cell));
+		}},
+	{"CO2 capture", "CO2 capture machine",
+		[](core::StationSystemsSettings const& draft) { return draft.co2Captures.size() < core::MaxStationCo2Captures; },
+		[](core::StationSystemsSettings& draft) {
+			core::Co2CaptureSettings capture;
+			capture.maxRateKgPerS = 0.001;
+			capture.specificEnergyKWhPerKg = 0.5;
+			capture.consumablePerKg = 0.0;
+			if (!draft.stores.empty())
+			{
+				capture.captureStoreId = draft.stores.front().id;
+				capture.consumableStoreId = draft.stores.front().id;
+			}
+			if (!draft.atmospheres.empty())
+				capture.atmosphereId = draft.atmospheres.front().id;
+			for (size_t candidate = draft.co2Captures.size() + 1;; ++candidate)
+			{
+				capture.id = "co2capture" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.co2Captures.begin(), draft.co2Captures.end(),
+					[&](core::Co2CaptureSettings const& existing) { return existing.id == capture.id; });
+				if (!taken) break;
+			}
+			draft.co2Captures.push_back(std::move(capture));
+		}},
+	{"Atmosphere", "Atmosphere",
+		[](core::StationSystemsSettings const& draft) { return draft.atmospheres.size() < core::MaxStationAtmospheres; },
+		[](core::StationSystemsSettings& draft) {
+			core::AtmosphereSettings atmosphere;
+			atmosphere.volumeM3 = 100.0;
+			atmosphere.startingOxygenKg = 20.0;
+			atmosphere.startingNitrogenKg = 80.0;
+			atmosphere.startingTemperatureC = 20.0;
+			atmosphere.thermalCapacityKJPerK = 100.0;
+			atmosphere.minPressureKPa = 80.0;
+			atmosphere.maxPressureKPa = 120.0;
+			// Prefer coupling to the last drafted reservoir so a freshly
+			// drafted atmosphere is thermally live by default.
+			if (!draft.thermalReservoirs.empty())
+				atmosphere.reservoirId = draft.thermalReservoirs.back().id;
+			for (size_t candidate = draft.atmospheres.size() + 1;; ++candidate)
+			{
+				atmosphere.id = "compartment" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.atmospheres.begin(), draft.atmospheres.end(),
+					[&](core::AtmosphereSettings const& existing) { return existing.id == atmosphere.id; });
+				if (!taken) break;
+			}
+			draft.atmospheres.push_back(std::move(atmosphere));
+		}},
+	{"Airlock cycle", "Airlock cycle",
+		[](core::StationSystemsSettings const& draft) { return draft.airlockCycles.size() < core::MaxStationAirlockCycles; },
+		[](core::StationSystemsSettings& draft) {
+			core::AirlockCycleSettings cycle;
+			cycle.gasMassKg = 1.0;
+			cycle.recurrenceSeconds = 60.0;
+			cycle.recoveredFraction = 0.95;
+			if (!draft.atmospheres.empty())
+				cycle.atmosphereId = draft.atmospheres.back().id;
+			for (size_t candidate = draft.airlockCycles.size() + 1;; ++candidate)
+			{
+				cycle.id = "airlockCycle" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.airlockCycles.begin(), draft.airlockCycles.end(),
+					[&](core::AirlockCycleSettings const& existing) { return existing.id == cycle.id; });
+				if (!taken) break;
+			}
+			draft.airlockCycles.push_back(std::move(cycle));
+		}},
+	{"Delivery", "Delivery",
+		[](core::StationSystemsSettings const& draft) { return draft.deliveries.size() < core::MaxStationResourceDeliveries; },
+		[](core::StationSystemsSettings& draft) {
+			core::ResourceDeliverySettings delivery;
+			delivery.quantity = 10.0;
+			if (!draft.stores.empty())
+			{
+				delivery.storeId = draft.stores.front().id;
+				delivery.unit = draft.stores.front().unit;
+			}
+			for (size_t candidate = draft.deliveries.size() + 1;; ++candidate)
+			{
+				delivery.id = "delivery" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.deliveries.begin(), draft.deliveries.end(),
+					[&](core::ResourceDeliverySettings const& existing) { return existing.id == delivery.id; });
+				if (!taken) break;
+			}
+			draft.deliveries.push_back(std::move(delivery));
+		}},
+	{"Waste ejection", "Waste ejection",
+		[](core::StationSystemsSettings const& draft) { return draft.wasteEjections.size() < core::MaxStationWasteEjections; },
+		[](core::StationSystemsSettings& draft) {
+			core::WasteEjectionSettings ejection;
+			ejection.quantity = 10.0;
+			if (!draft.stores.empty())
+			{
+				ejection.storeId = draft.stores.front().id;
+				ejection.unit = draft.stores.front().unit;
+			}
+			for (size_t candidate = draft.wasteEjections.size() + 1;; ++candidate)
+			{
+				ejection.id = "ejection" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.wasteEjections.begin(), draft.wasteEjections.end(),
+					[&](core::WasteEjectionSettings const& existing) { return existing.id == ejection.id; });
+				if (!taken) break;
+			}
+			draft.wasteEjections.push_back(std::move(ejection));
+		}},
+	{"Outage", "Outage",
+		[](core::StationSystemsSettings const& draft) { return draft.outages.size() < core::MaxStationInstallationOutages; },
+		[](core::StationSystemsSettings& draft) {
+			core::InstallationOutageSettings outage;
+			outage.capacityFraction = 0.5;
+			outage.firstOccurrenceSeconds = 60.0;
+			outage.durationSeconds = 30.0;
+			outage.recurrenceSeconds = 0.0;
+			// Default the target to the last-registered wired installation so a
+			// freshly drafted outage points at something that exists.
+			if (!draft.generators.empty())
+				outage.installationId = draft.generators.back().id;
+			else if (!draft.coolantLoops.empty())
+				outage.installationId = draft.coolantLoops.back().id;
+			else if (!draft.chillers.empty())
+				outage.installationId = draft.chillers.back().id;
+			for (size_t candidate = draft.outages.size() + 1;; ++candidate)
+			{
+				outage.id = "outage" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.outages.begin(), draft.outages.end(),
+					[&](core::InstallationOutageSettings const& existing) { return existing.id == outage.id; });
+				if (!taken) break;
+			}
+			draft.outages.push_back(std::move(outage));
+		}},
+	{"Maintenance", "Maintenance job",
+		[](core::StationSystemsSettings const& draft) { return draft.maintenanceJobs.size() < core::MaxStationMaintenanceJobs; },
+		[](core::StationSystemsSettings& draft) {
+			core::MaintenanceJobSettings job;
+			job.firstOccurrenceSeconds = 60.0;
+			job.durationSeconds = 30.0;
+			// Point the freshly drafted job at an installation that exists.
+			if (!draft.generators.empty())
+				job.installationId = draft.generators.back().id;
+			else if (!draft.coolantLoops.empty())
+				job.installationId = draft.coolantLoops.back().id;
+			else if (!draft.chillers.empty())
+				job.installationId = draft.chillers.back().id;
+			// And at a store that exists, so a single click gives a valid
+			// reusable-tool requirement; consumed streams need a waste store.
+			if (!draft.stores.empty())
+			{
+				core::MaintenanceRequirementSettings requirement;
+				requirement.storeId = draft.stores.front().id;
+				requirement.quantity = 1.0;
+				requirement.consumed = false;
+				job.requirements.push_back(std::move(requirement));
+			}
+			for (size_t candidate = draft.maintenanceJobs.size() + 1;; ++candidate)
+			{
+				job.id = "maint" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.maintenanceJobs.begin(),
+					draft.maintenanceJobs.end(),
+					[&](core::MaintenanceJobSettings const& existing) { return existing.id == job.id; });
+				if (!taken) break;
+			}
+			draft.maintenanceJobs.push_back(std::move(job));
+		}},
+}};
+}
+
+void renderAddEntryCombo(core::StationSystemsSettings& draft)
+{
+	if (!ImGui::BeginCombo("Add entry", "Choose type...", ImGuiComboFlags_HeightLarge)) return;
+	std::string_view group;
+	for (auto const& type : core::stationPlaceableTypes())
+	{
+		auto creator = std::find_if(kEntryCreators.begin(), kEntryCreators.end(),
+			[&](auto const& entry) { return entry.nodeType == type.nodeType; });
+		if (creator == kEntryCreators.end()) continue;
+		if (group != type.group)
+		{
+			group = type.group;
+			ImGui::SeparatorText(type.group.data());
+		}
+		bool const available = creator->canAdd(draft);
+		ImGui::BeginDisabled(!available);
+		if (ImGui::Selectable(creator->label)) creator->add(draft);
+		ImGui::EndDisabled();
+		if (!available && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("Entry limit reached");
+	}
+	ImGui::EndCombo();
+}
+
 }

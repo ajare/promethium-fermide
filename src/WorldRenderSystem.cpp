@@ -509,6 +509,9 @@ namespace
 			return names;
 		}
 
+		std::vector<std::shared_ptr<StationConfigurationResource>> stationConfigurations()
+		{ return loadStationConfigurationResources(*mResources); }
+
 		std::vector<ApplicationAgentType> agentTypes() { return mAgentTypes->types(); }
 
 		bool importAgentType(std::filesystem::path const& path,
@@ -813,6 +816,12 @@ std::vector<std::string> applicationResourceNames(std::string const& type)
 {
 	if (!gSystem) return {};
 	return gSystem->resourceNames(type);
+}
+
+std::vector<std::shared_ptr<StationConfigurationResource>> applicationStationConfigurations()
+{
+	if (!gSystem) return {};
+	return gSystem->stationConfigurations();
 }
 
 std::vector<ApplicationAgentType> applicationAgentTypes()

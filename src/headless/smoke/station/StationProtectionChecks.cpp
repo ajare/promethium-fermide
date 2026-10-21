@@ -1,3 +1,4 @@
+#include "StationReferenceFixtures.h"
 #include "StationCoreChecks.h"
 #include "core/StationProtection.h"
 #include "core/StationReference.h"

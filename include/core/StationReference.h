@@ -95,40 +95,4 @@ namespace core
 	bool parseStationReference(std::string const& text,
 		StationReferenceDocument& document, std::string* diagnostic);
 
-	// The reference station packaged with the application resource,
-	// parsed once from the embedded resource text on first use. Throws
-	// std::runtime_error if the packaged resource is broken: the bundle
-	// itself failing to parse is a build defect, never a user error.
-	StationReferenceDocument const& bundledStationReference();
-	// The raw packaged resource text, for display and re-editing.
-	std::string const& bundledStationReferenceText();
-
-	// One packaged emergency/recovery scenario variant (#423): a
-	// complete, editable reference document authored against the same
-	// format and validation as the base reference, plus its stable
-	// scenario id and raw resource text.
-	struct BundledStationScenario
-	{
-		std::string id;
-		std::string text;
-		StationReferenceDocument document;
-	};
-
-	// The packaged emergency and recovery scenario variants (#423),
-	// parsed once from the embedded resource texts on first use, in
-	// authored order. Throws std::runtime_error if a packaged scenario
-	// resource is broken: a bundled scenario failing to parse is a build
-	// defect, never a user error.
-	std::vector<BundledStationScenario> const& bundledStationScenarios();
-
-	// The packaged long-duration stability workload (#424): a complete
-	// reference document authored with the same format and validation as
-	// the base reference, carrying a three-simulated-hour scenario with
-	// recurring schedules and declared residual tolerances. Parsed once
-	// from the embedded resource text on first use. Throws
-	// std::runtime_error if the packaged resource is broken: a bundled
-	// workload failing to parse is a build defect, never a user error.
-	StationReferenceDocument const& bundledStationLongRunWorkload();
-	// The raw packaged workload resource text, for display and re-editing.
-	std::string const& bundledStationLongRunWorkloadText();
 }

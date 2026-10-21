@@ -8,6 +8,7 @@
 
 #include "imgui/imgui.h"
 #include "ApplicationAgentTypes.h"
+#include "StationConfigurationResource.h"
 
 class WorldDrawList;
 
@@ -36,6 +37,7 @@ std::string selectWorldFurnitureImageSet(std::string const& name);
 // `type` is "FurnitureCatalogue", "AgentTagRegistry", or
 // "AgentBehaviourRegistry".
 std::vector<std::string> applicationResourceNames(std::string const& type);
+std::vector<std::shared_ptr<StationConfigurationResource>> applicationStationConfigurations();
 
 // Every valid manifest-registered or explicitly imported Agent type, ordered by
 // display name (then resource name). Invalid resources are excluded; the

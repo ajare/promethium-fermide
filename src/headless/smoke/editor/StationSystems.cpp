@@ -1,3 +1,5 @@
+#include "StationResourceFixture.h"
+#include "StationReferenceFixtures.h"
 #include "Checks.h"
 void registerMixedObservationEditorChecks(std::vector<smoke::Check>& checks);
 #include "TestEngine.h"
@@ -127,7 +129,7 @@ namespace
 				"Form did not share the Flow history");
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
 			REQ(window.draft().stores.size() == 1, "Form Ctrl+Y did not restore the Flow store");
-			ctx->ItemClick("Add store"); ctx->Yield(3);
+			ctx->ComboClick("Add entry/Store"); ctx->Yield(3);
 			REQ(window.draft().stores.size() == 2 && window.draftHistory().undoCount() == 2
 				&& window.draftHistory().redoCount() == 0, "Form edit did not commit shared history");
 			flow = true; ctx->Yield(3);
@@ -3222,7 +3224,7 @@ namespace
 				"Empty-usable store display wrong");
 			REQ(driver.contains("2 resource store(s)"), "Authored store count missing");
 			// Author one more store through the real controls, then edit it.
-			ctx->ItemClick("Add store");
+			ctx->ComboClick("Add entry/Store"); ctx->Yield(3);
 			REQ(driver.contains("Draft differs from the authored start conditions"),
 				"Added draft store not reported as a change");
 			ctx->ItemClick("Apply settings");
@@ -4460,7 +4462,7 @@ namespace
 		checkLayout(pair);
 	}
 
-	void viewWorkflow()
+	void viewWorkflow(smoke::Context const& fixtureContext)
 	{
 		flowProjectionChecks();
 		using smoke::require;
@@ -4469,6 +4471,9 @@ namespace
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
 		DocumentHistory history;
 		ViewWindow view;
+		headless::StationResourceFixture resources(fixtureContext.fixture("resources/Resources.yaml").parent_path(),
+			fixtureContext.temporaryRoot() / "station-resources");
+		view.setStationConfigurationResources(resources.configurations);
 		auto world = std::make_shared<core::World>("Tabbed station", 2, 2);
 		world->pauseSimulation(); world->finishBuild();
 		require(world->configureStationSystems({true, 1.0f}, false), "Could not enable tabbed station");
@@ -4493,7 +4498,7 @@ namespace
 			REQ(view.selectedTab() == ViewWindow::Tab::StationSystems
 				&& driver.contains("Active World: Tabbed station"), "Station tab did not open");
 			ctx->SetRef(ImGui::FindWindowByName("View")->DC.ChildWindows.back());
-			ctx->ItemClick("Add store");
+			ctx->ComboClick("Add entry/Store");
 			ctx->MouseTeleportToPos({40,40});
 			ctx->Sleep(1);
 			REQ(driver.contains("Draft differs from the authored start conditions"), "Draft edit missing");
@@ -4584,7 +4589,7 @@ namespace
 			REQ(driver.contains("No systems configured in the draft"), "Flow leaked the previous World's draft");
 			view.select(ViewWindow::Tab::StationSystems); ctx->Yield(3);
 			ctx->SetRef(ImGui::FindWindowByName("View")->DC.ChildWindows.back());
-			ctx->ItemClick("Load reference station into draft");
+			ctx->ItemClick("Load into draft");
 			ctx->SetRef("View");
 			ctx->ItemClick("Views/Station Flow"); ctx->Yield(3);
 			REQ(driver.contains("Draft configuration flow") && !driver.contains("No systems configured in the draft"),
@@ -4954,7 +4959,7 @@ namespace
 			REQ(driver.contains("1 nodes, 0 connections"), "Open did not restore the saved draft");
 			ctx->ItemClick("Views/Station Systems"); ctx->Yield(3);
 			ctx->SetRef(ImGui::FindWindowByName("View")->DC.ChildWindows.back());
-			ctx->ItemClick("Add store"); ctx->Yield(3);
+			ctx->ComboClick("Add entry/Store"); ctx->Yield(3);
 			ctx->SetRef("View");
 			ctx->ItemClick("Views/Station Flow"); ctx->Yield(3);
 			REQ(driver.contains("2 nodes, 0 connections"), "Draft edit was not visible in Flow");
@@ -4980,9 +4985,193 @@ namespace
 		require(driver.passed(), "Station configuration document workflow failed");
 	}
 
-	void workflow(smoke::Context const&)
+	void addEntryWorkflow(smoke::Context const&)
 	{
-		viewWorkflow();
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1600};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window; window.visible = true;
+		DocumentHistory history;
+		auto world = std::make_shared<core::World>("Categorized creation", 2, 2);
+		world->pauseSimulation(); world->finishBuild(); world->markSaved();
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1150, 1500});
+			window.render(world, history);
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "addEntryWorkflow", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Station Systems");
+			// All existing creation actions are available from one grouped control.
+			std::pair<char const*, char const*> const entries[] = {
+				{"Store", "Store"}, {"Transfer", "Transfer"}, {"Conversion", "Conversion"},
+				{"Solar", "Solar array"}, {"Equipment", "Equipment load"}, {"Battery", "Battery"},
+				{"Generator", "Generator"}, {"Fuel cell", "Fuel cell"}, {"Sabatier", "Sabatier reactor"},
+				{"Methane processor", "Methane processor"}, {"Reservoir", "Thermal reservoir"},
+				{"Radiator", "Radiator"}, {"Coolant loop", "Coolant loop"}, {"Chiller", "Chiller"},
+				{"Thermal buffer", "Thermal buffer"}, {"Crew", "Crew"}, {"Crops", "Crop population"},
+				{"Algae", "Algae culture"}, {"Microbial processor", "Microbial processor"},
+				{"Water collector", "Water collector"}, {"Water treatment", "Water treatment"},
+				{"Electrolyzer", "Electrolyzer"}, {"CO2 capture", "CO2 capture machine"},
+				{"Atmosphere", "Atmosphere"}, {"Airlock cycle", "Airlock cycle"},
+				{"Delivery", "Delivery"}, {"Waste ejection", "Waste ejection"},
+				{"Outage", "Outage"}, {"Maintenance", "Maintenance job"}
+			};
+			REQ(std::size(entries) == core::stationPlaceableTypes().size(), "Creation menu coverage differs from type catalogue");
+			ctx->ItemClick("Add entry"); ctx->Yield(3);
+			REQ(driver.contains("Resources") && driver.contains("Power"), "Creation menu has no category headings");
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(3);
+			REQ(window.draftHistory().undoCount() == 0, "Opening the creation menu edited the draft");
+			size_t count = 0;
+			for (auto const& [type, label] : entries)
+			{
+				ctx->ComboClick((std::string("Add entry/") + label).c_str()); ctx->Yield(3);
+				auto graph = station_flow::build(window.draft());
+				REQ(std::count_if(graph.nodes.begin(), graph.nodes.end(), [&](auto const& node) { return node.type == type; }) == 1,
+					"Creation menu did not append the selected type exactly once");
+				REQ(window.draftHistory().undoCount() == ++count, "Creation did not commit exactly one draft history entry");
+			}
+			REQ(window.draft().stores[0].capacity == 100.0 && window.draft().stores[0].startingQualified == 50.0
+				&& window.draft().batteries[0].startingStoredKWh == 8.0,
+				"Categorized creation changed the existing form defaults");
+			ctx->ComboClick("Add entry/Store"); ctx->Yield(3);
+			REQ(window.draft().stores.size() == 2 && window.draft().stores[0].id != window.draft().stores[1].id,
+				"Repeated creation reused an existing ID");
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			REQ(window.draft().stores.size() == 1, "Creation was not undoable");
+			ctx->ItemClick("Redo configuration"); ctx->Yield(3);
+			REQ(window.draft().stores.size() == 2, "Creation was not redoable");
+			REQ(world->getStationSystemsSettings() == core::StationSystemsSettings{}
+				&& history.undoCount() == 0 && !world->isModified(), "Creation implicitly applied to the World");
+			world->resumeSimulation(); ctx->Yield(3);
+			REQ(driver.clickDisabled(ctx, "Add entry", "Creation while running"), "Creation menu is not paused-only");
+
+			// A full vector keeps its menu entry visible but disabled.
+			world = std::make_shared<core::World>("Full store vector", 2, 2);
+			world->pauseSimulation(); world->finishBuild();
+			core::StationSystemsSettings full;
+			for (size_t i = 0; i < core::MaxStationResourceStores; ++i)
+			{
+				core::ResourceStoreSettings store;
+				store.id = "store" + std::to_string(i + 1); store.unit = "kg"; store.capacity = 100.0;
+				full.stores.push_back(store);
+			}
+			std::string diagnostic;
+			REQ(world->configureStationSystems(full, false, &diagnostic), "Could not configure capacity fixture");
+			world->markSaved(); ctx->Yield(3);
+			ctx->ItemClick("Add entry"); ctx->Yield(3);
+			ctx->SetRef("##Combo_00");
+			REQ(driver.clickDisabled(ctx, "Store", "Store capacity reached"), "Full Store vector still offers creation");
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(3);
+			REQ(window.draft().stores.size() == core::MaxStationResourceStores
+				&& window.draftHistory().undoCount() == 0, "Capacity refusal changed the draft");
+		});
+		#undef REQ
+		require(driver.passed(), "Categorized creation workflow failed");
+	}
+
+	void configurationResources(smoke::Context const& fixtureContext)
+	{
+		using smoke::require;
+		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
+		auto const root = fixtureContext.temporaryRoot() / "station-resources";
+		headless::StationResourceFixture resources(authored, root);
+		size_t files = 0;
+		for (auto const& entry : std::filesystem::recursive_directory_iterator(authored / "station-systems"))
+			if (entry.path().extension() == ".yaml") ++files;
+		require(resources.configurations.size() == files, "Every Station YAML must have a manifest Resource");
+		std::shared_ptr<StationConfigurationResource> atmosphere;
+		for (auto const& resource : resources.configurations)
+		{
+			core::StationConfigurationDocument expected;
+			std::string diagnostic;
+			require(core::loadStationConfiguration((authored / resource->getSource()).string(), expected, &diagnostic), diagnostic);
+			require(resource->document().settings == expected.settings
+				&& resource->document().positions == expected.positions
+				&& resource->document().panX == expected.panX && resource->document().panY == expected.panY
+				&& resource->document().zoom == expected.zoom, "Resource changed configuration or layout");
+			if (resource->getName() == "reference-station")
+				require(resource->reference() && !resource->reference()->provenance.empty(), "Lost reference provenance");
+			if (resource->getName() == "resupply-delay")
+				require(resource->reference() && !resource->reference()->outcomeRanges.empty(), "Lost scenario expectations");
+			if (resource->getName() == "atmosphere-exterior-isolation") atmosphere = resource;
+		}
+		require(atmosphere && !atmosphere->document().positions.empty(), "Missing atmosphere Resource or layout");
+		auto const original = atmosphere->text();
+		resources.manager.releaseResource(atmosphere);
+		resources.manager.destroyResources({atmosphere});
+		require(atmosphere->text().empty() && atmosphere->document().settings == core::StationSystemsSettings{}
+			&& !atmosphere->reference(), "Destroyed Resource retained configuration data");
+		{ std::ofstream out(root / atmosphere->getSource()); out << "schemaVersion: 105\nstationSystems: ["; }
+		bool refused = false;
+		try { resources.manager.createResource(atmosphere); }
+		catch (std::exception const&) { refused = true; }
+		require(refused && !resources.manager.isResourceCreated(atmosphere) && atmosphere->text().empty(),
+			"Malformed YAML was accepted or left partial Resource state");
+		{ std::ofstream out(root / atmosphere->getSource()); out << original << "\nname: Incomplete reference\n"; }
+		refused = false;
+		try { resources.manager.createResource(atmosphere); }
+		catch (std::exception const&) { refused = true; }
+		require(refused && !resources.manager.isResourceCreated(atmosphere) && atmosphere->text().empty(),
+			"Invalid reference metadata was accepted or partially published");
+		{ std::ofstream out(root / atmosphere->getSource()); out << original; }
+		resources.manager.createResource(atmosphere);
+		resources.manager.loadResource(atmosphere);
+		require(atmosphere->text() == original && !atmosphere->document().positions.empty(), "Resource failed to reload after repair");
+
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1600};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		window.setConfigurationResources(resources.configurations); window.visible = true;
+		auto world = std::make_shared<core::World>("Resource selection", 2, 2);
+		world->pauseSimulation(); world->finishBuild(); world->markSaved();
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1150, 1500});
+			window.render(world, history);
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "configurationResources", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Station Systems");
+			REQ(!driver.contains("Meridian long-duration stability workload"), "An unselected configuration description is visible");
+			ctx->ComboClick("Configuration resource/atmosphere-exterior-isolation"); ctx->Yield(3);
+			REQ(window.draft() == core::StationSystemsSettings{} && window.draftHistory().undoCount() == 0
+				&& !window.flowModified(), "Preview selection edited or dirtied the draft");
+			REQ(driver.contains("Two compartments start at the same pressure/composition")
+				&& !driver.contains("Meridian reference station"), "Selection did not replace the visible description");
+			ctx->ItemClick("Load into draft"); ctx->Yield(3);
+			REQ(window.draft() == atmosphere->document().settings, "Resource selector did not load the authored settings");
+			REQ(world->getStationSystemsSettings() == core::StationSystemsSettings{} && !world->isModified()
+				&& history.undoCount() == 0, "Resource selection changed the World");
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			REQ(window.draft() == core::StationSystemsSettings{}, "Resource selection was not undoable");
+			ctx->ItemClick("Redo configuration"); ctx->Yield(3);
+			REQ(window.draft() == atmosphere->document().settings, "Resource selection was not redoable");
+			world->resumeSimulation(); ctx->Yield(3);
+			REQ(driver.clickDisabled(ctx, "Load into draft", "Resource load while running"),
+				"Resource loading was not paused-only");
+			ctx->ComboClick("Configuration resource/long-run-workload"); ctx->Yield(3);
+			REQ(driver.contains("Meridian long-duration stability workload")
+				&& !driver.contains("Two compartments start at the same pressure/composition"),
+				"Running simulation prevented description preview");
+			REQ(window.draft() == atmosphere->document().settings
+				&& world->getStationSystemsSettings() == core::StationSystemsSettings{},
+				"Preview while running changed draft or World settings");
+			window.setConfigurationResources({}); ctx->Yield(3);
+			REQ(driver.contains("No reference configuration selected."), "Missing selection has no empty state");
+			REQ(driver.clickDisabled(ctx, "Load into draft", "No resource selected"),
+				"Load without a selected configuration was enabled");
+		});
+		#undef REQ
+		require(driver.passed(), "Configuration Resource workflow failed");
+	}
+
+	void workflow(smoke::Context const& fixtureContext)
+	{
+		viewWorkflow(fixtureContext);
 		using smoke::require;
 		editor_smoke::State state;
 		headless::ScopedImGuiContext context;
@@ -5146,7 +5335,7 @@ namespace
 			REQ(!world->isModified(), "Transfer ticking dirtied the authored document");
 			// Draft a second transfer through the real controls; an unknown
 			// source is refused with a visible diagnostic and no mutation.
-			driver.click(ctx, "Add transfer");
+			ctx->ComboClick("Add entry/Transfer");
 			driver.typeValue(ctx, "Transfer 1 source", "nope");
 			driver.click(ctx, "Apply settings");
 			ctx->ScrollToItemY("Confirm World reset");
@@ -5177,7 +5366,7 @@ namespace
 				"Transfer removal did not apply");
 			// Author a new Scheduled transfer through the form, then observe the
 			// same one-off outcome displayed by the live readout.
-			driver.click(ctx, "Add transfer");
+			ctx->ComboClick("Add entry/Transfer");
 			ctx->ComboClick("Transfer 1 mode/Scheduled"); ctx->Yield(2);
 			driver.typeValue(ctx, "Transfer 1 quantity", "3");
 			driver.click(ctx, "Apply settings"); ctx->Yield(2);
@@ -5243,7 +5432,7 @@ namespace
 				&& driver.contains("Constituent nutrientNitrogen (kg): starting 0.540000"),
 				"Constituent balance ledger missing from the window");
 			// Author a compound store through the real controls.
-			ctx->ItemClick("Add store");
+			ctx->ComboClick("Add entry/Store");
 			ctx->ItemClick("Store 3 declared composition");
 			ctx->ItemInputValue("Store 3 moisture fraction", "0.5");
 			ctx->ItemInputValue("Store 3 nutrient nitrogen fraction", "0.1");
@@ -5267,7 +5456,7 @@ namespace
 			REQ(world->getStationSystemsSettings().stores[3].composition->phosphorus == 0.05
 				&& history.undoCount() == 2, "Recovery composition edit did not apply");
 			// Author the harvest conversion through the real controls.
-			ctx->ItemClick("Add conversion");
+			ctx->ComboClick("Add entry/Conversion");
 			// #664: the generated identity is read-only on the form surface.
 			ctx->ItemInputValue("Conversion 0 id", "harvest");
 			ctx->ItemInputValue("Conversion 0 input 0 store", "food");
@@ -5394,7 +5583,7 @@ namespace
 			REQ(!world->isModified(), "Power ticking dirtied the authored document");
 			// Draft a second load through the real controls; an unknown thermal
 			// class is refused with a visible diagnostic and no mutation.
-			driver.click(ctx, "Add load");
+			ctx->ComboClick("Add entry/Equipment load");
 			driver.typeValue(ctx, "Load 1 thermal class", "cryogenic");
 			driver.click(ctx, "Apply settings");
 			ctx->ScrollToItemY("Confirm World reset");
@@ -5422,7 +5611,7 @@ namespace
 			// with its heat need visible as unmet cooling — and its protected
 			// critical floor reported whole as unmet critical demand, per load
 			// and in the station totals, despite never being allocated (#550).
-			driver.click(ctx, "Add load");
+			ctx->ComboClick("Add entry/Equipment load");
 			driver.click(ctx, "Load 2 requires cooling service");
 			driver.typeValue(ctx, "Load 2 electrical demand kW", "3");
 			driver.typeValue(ctx, "Load 2 thermal class", "low");
@@ -5546,7 +5735,7 @@ namespace
 			// Draft a second battery through the real controls; usable energy
 			// above the nameplate is refused with a visible diagnostic and no
 			// mutation of the authored settings or history.
-			driver.click(ctx, "Add battery");
+			ctx->ComboClick("Add entry/Battery");
 			driver.typeValue(ctx, "Battery 1 usable kWh", "15");
 			driver.click(ctx, "Apply settings");
 			ctx->ScrollToItemY("Confirm World reset");
@@ -6092,7 +6281,7 @@ namespace
 			REQ(!world->isModified(), "Thermal ticking dirtied the authored document");
 			// An invalid drafted reservoir is refused with a visible
 			// diagnostic and never reaches the authored settings.
-			driver.click(ctx, "Add thermal reservoir");
+			ctx->ComboClick("Add entry/Thermal reservoir");
 			driver.typeValue(ctx, "Reservoir 1 min temperature C", "50");
 			driver.typeValue(ctx, "Reservoir 1 max temperature C", "40");
 			driver.click(ctx, "Apply settings");
@@ -6124,7 +6313,7 @@ namespace
 			// A radiator with an emissivity above one is refused.
 			// The World is back at tick 0 after the confirmed reset, so
 			// these applies need no reset confirmation.
-			driver.click(ctx, "Add radiator");
+			ctx->ComboClick("Add entry/Radiator");
 			driver.typeValue(ctx, "Radiator 1 emissivity", "2");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
 			REQ(driver.contains("emissivity must be finite and greater than 0 up to 1"),
@@ -6232,7 +6421,7 @@ namespace
 			REQ(!world->isModified(), "Coolant ticking dirtied the authored document");
 			// An invalid drafted loop is refused with a visible diagnostic
 			// and never reaches the authored settings.
-			driver.click(ctx, "Add coolant loop");
+			ctx->ComboClick("Add entry/Coolant loop");
 			driver.typeValue(ctx, "Coolant loop 1 starting coolant kg", "150");
 			driver.click(ctx, "Apply settings");
 			ctx->ScrollToItemY("Confirm World reset");
@@ -6384,7 +6573,7 @@ namespace
 			REQ(!world->isModified(), "Chiller ticking dirtied the authored document");
 			// An invalid drafted chiller is refused with a visible
 			// diagnostic and never reaches the authored settings.
-			driver.click(ctx, "Add chiller");
+			ctx->ComboClick("Add entry/Chiller");
 			driver.typeValue(ctx, "Chiller 1 cold loop", "chilled2");
 			driver.typeValue(ctx, "Chiller 1 COP", "0");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
@@ -6449,7 +6638,7 @@ namespace
 				&& driver.contains("chiller2 (moderate) chilled2 -> condenser sink"),
 				"Applied chiller not reflected in the window");
 			// Two chillers cannot share one evaporator loop.
-			driver.click(ctx, "Add chiller");
+			ctx->ComboClick("Add entry/Chiller");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
 			REQ(driver.contains("shares cold loop 'chilled'"),
 				"Shared-evaporator diagnostic not shown");
@@ -6542,7 +6731,7 @@ namespace
 			REQ(!world->isModified(), "Generator ticking dirtied the authored document");
 			// An invalid drafted generator is refused with a visible
 			// diagnostic and never reaches the authored settings.
-			driver.click(ctx, "Add generator");
+			ctx->ComboClick("Add entry/Generator");
 			driver.typeValue(ctx, "Generator 1 efficiency", "0");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
 			ctx->ScrollToItemY("Confirm World reset");
@@ -6597,7 +6786,7 @@ namespace
 			REQ(driver.contains("2 generator(s)")
 				&& driver.contains("generator2 (generation) fuel diesel -> sink hot"),
 				"Applied generator not reflected in the window");
-			driver.click(ctx, "Add generator");
+			ctx->ComboClick("Add entry/Generator");
 			driver.click(ctx, "Cancel edits");
 			REQ(world->getStationSystemsSettings().generators.size() == 2,
 				"Cancelled generator edit did not restore the authored contracts");
@@ -6671,7 +6860,7 @@ void bufferWorkflow(smoke::Context const&)
 		// An invalid drafted buffer is refused with a visible diagnostic and
 		// never reaches the authored settings: a circulation buffer with no
 		// declared loop cannot be applied.
-		driver.click(ctx, "Add thermal buffer");
+		ctx->ComboClick("Add entry/Thermal buffer");
 		driver.click(ctx, "Apply settings"); ctx->Sleep(1);
 		driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 		REQ(driver.contains("circulation access references unknown coolant loop"),
@@ -6695,7 +6884,7 @@ void bufferWorkflow(smoke::Context const&)
 		// A starting energy above capacity is refused. The tick is back at
 		// zero after the applied reset, so Apply runs directly without the
 		// World-reset confirmation.
-		driver.click(ctx, "Add thermal buffer");
+		ctx->ComboClick("Add entry/Thermal buffer");
 		driver.typeValue(ctx, "Buffer 2 access mode (circulation|passive)", "passive");
 		driver.typeValue(ctx, "Buffer 2 starting energy kJ", "5000");
 		driver.click(ctx, "Apply settings"); ctx->Sleep(1);
@@ -8251,7 +8440,7 @@ void cropWorkflow(smoke::Context const&)
 				"Authored maintenance count missing from the window");
 			// Draft a job through the real controls. The freshly added
 			// job points at the existing generator and store.
-			driver.click(ctx, "Add maintenance job");
+			ctx->ComboClick("Add entry/Maintenance job"); ctx->Yield(3);
 			REQ(driver.contains("Draft differs from the authored start conditions"),
 				"Added maintenance draft not reported as a change");
 			driver.typeValue(ctx, "Maintenance job 0 first occurrence seconds", "5");
@@ -8506,7 +8695,7 @@ void cropWorkflow(smoke::Context const&)
 	// into the draft is paused-only draft editing through the ordinary
 	// apply/reset seam; and closing the results window never touches the
 	// running scenario - visibility and simulation stay independent.
-	void scenarioWorkflow(smoke::Context const&)
+	void scenarioWorkflow(smoke::Context const& fixtureContext)
 	{
 		using smoke::require;
 		headless::ScopedImGuiContext context;
@@ -8515,6 +8704,9 @@ void cropWorkflow(smoke::Context const&)
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
 		DocumentHistory history;
 		StationSystemsWindow window;
+		headless::StationResourceFixture resources(fixtureContext.fixture("resources/Resources.yaml").parent_path(),
+			fixtureContext.temporaryRoot() / "station-resources");
+		window.setConfigurationResources(resources.configurations);
 		auto world = std::make_shared<core::World>("Scenario editor", 2, 2);
 		world->pauseSimulation(); world->finishBuild();
 		headless::TestEngineDriver driver([&]
@@ -8530,13 +8722,13 @@ void cropWorkflow(smoke::Context const&)
 		driver.run("station", "scenarioWorkflow", [&](ImGuiTestContext* ctx)
 		{
 			ctx->SetRef("Station Systems");
-			REQ(driver.contains("Emergency & recovery scenarios (packaged resources)"),
+			REQ(driver.contains("Reference configurations"),
 				"the scenario section is missing from the station window");
 			// Open the resupply-delay scenario: the documented expectations
 			// render alongside the configuration they describe. The trees
 			// open on request - #596 made them no-auto-open-on-log, so the
 			// harness capture no longer silently expands them.
-			ctx->ItemClick("resupply-delay"); ctx->Sleep(1);
+			ctx->ComboClick("Configuration resource/resupply-delay"); ctx->Sleep(1);
 			REQ(driver.contains("Meridian resupply-delay drill"),
 				"the resupply-delay scenario name is missing");
 			ctx->ItemOpen("resupply-delay/Expected limiting services");
@@ -8555,7 +8747,7 @@ void cropWorkflow(smoke::Context const&)
 			// Load into the draft while paused: ordinary draft editing.
 			// #596: the scenario body is PushID-scoped by its scenario ID,
 			// so its controls are addressed through the scenario path.
-			driver.click(ctx, "resupply-delay/Load scenario 'resupply-delay' into draft");
+			driver.click(ctx, "Load into draft");
 			ctx->Sleep(1);
 			REQ(driver.contains("Draft differs from the authored start conditions"),
 				"the loaded scenario draft was not reported as a change");
@@ -8577,14 +8769,9 @@ void cropWorkflow(smoke::Context const&)
 				"the scenario live results are not observable");
 			// Scenario loading is paused-only: while the scenario runs the
 			// load control is really disabled and a real press changes nothing.
-			{
-				auto* hdr = ctx->ItemInfo("resupply-delay", ImGuiTestOpFlags_NoError);
-				if (!(hdr->StatusFlags & ImGuiItemStatusFlags_Opened))
-					ctx->ItemClick("resupply-delay");
-				ctx->Sleep(1);
-			}
+
 			REQ(driver.clickDisabled(ctx,
-				"resupply-delay/Load scenario 'resupply-delay' into draft",
+				"Load into draft",
 				"scenario load while running"),
 				"the scenario load control was not disabled while the World runs");
 			REQ(world->getStationSystemsSettings() == resupply[0].document.settings,
@@ -8609,109 +8796,71 @@ void cropWorkflow(smoke::Context const&)
 			// Pause, then switch scenarios through the same draft seam: the
 			// apply demands a World reset confirmation and honours it.
 			world->pauseSimulation(); ctx->Sleep(1);
-			ctx->ItemClick("maintenance-recovery"); ctx->Sleep(1);
+			ctx->ComboClick("Configuration resource/maintenance-recovery"); ctx->Sleep(1);
 			REQ(driver.contains("Meridian maintenance miss-and-recovery drill"),
 				"the maintenance scenario name is missing");
-			driver.click(ctx,
-				"maintenance-recovery/Load scenario 'maintenance-recovery' into draft");
+			driver.click(ctx, "Load into draft");
 			ctx->Sleep(1);
-			ctx->ScrollToItemY("Apply settings");
-			ctx->Sleep(1);
-			driver.click(ctx, "Apply settings");
-			ctx->Sleep(1);
+			REQ(window.draft() == resupply[3].document.settings,
+				"Selecting and loading the maintenance configuration did not replace the draft");
+			ctx->SetRef("Station Systems");
+			ctx->ScrollToItemY("Apply settings"); ctx->Yield(3);
+			// The shorter form changes its scroll geometry after loading. Resolve
+			// the current rect without the engine's stale item-aware MouseMove.
+			ImGuiID applyId = 0;
+			for (int attempt = 0; attempt < 4; ++attempt)
+			{
+				auto* info = ctx->ItemInfo("Apply settings");
+				applyId = info->ID;
+				ctx->MouseTeleportToPos(info->RectFull.GetCenter()); ctx->Yield(3);
+				if (ImGui::GetHoveredID() == applyId) break;
+			}
+			REQ(applyId && ImGui::GetHoveredID() == applyId, "Could not hover Apply settings after loading scenario");
+			ctx->MouseClick(); ctx->Yield(3);
 			REQ(driver.contains("Confirm?"), "the scenario switch bypassed reset confirmation");
-			ctx->ScrollToItemY("Confirm World reset");
-			ctx->Sleep(1);
+			REQ(world->getStationSystemsSettings() == resupply[0].document.settings
+				&& world->getSimulationTick() != 0, "Scenario settings applied before reset confirmation");
+			ctx->ScrollToItemY("Confirm World reset"); ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset");
 			REQ(world->getStationSystemsSettings() == resupply[3].document.settings
 				&& world->getSimulationTick() == 0,
 				"the confirmed scenario switch did not land the settings and reset the World");
 			REQ(history.undoCount() == 2, "the scenario switch did not commit history");
-			// #596: the expectation controls are per-scenario, not shared.
-			// Both scenario headers are open here (resupply-delay from the
-			// opening phase, maintenance-recovery from the switch). Each of
-			// the three expectation trees must resolve to a distinct widget
-			// ID per scenario - before the fix every scenario hashed the
-			// same literal label to one ID, so opening one tree opened them
-			// all.
-			ImGuiID treeIds[2][3] = { {} };
-			char const* trees[3] = { "Expected limiting services",
-				"Expected key event ordering", "Expected bounded outcome ranges" };
-			char const* scenarios[2] = { "resupply-delay", "maintenance-recovery" };
-			for (int s = 0; s < 2; ++s)
+			// Description trees retain independent IDs and state as selection changes.
+			ImGuiID treeIds[2][3] = {};
+			char const* trees[] = { "Expected limiting services", "Expected key event ordering",
+				"Expected bounded outcome ranges" };
+			char const* scenarios[] = { "resupply-delay", "maintenance-recovery" };
+			for (int i = 0; i < 2; ++i)
+			{
+				ctx->ComboClick((std::string("Configuration resource/") + scenarios[i]).c_str()); ctx->Yield(3);
 				for (int t = 0; t < 3; ++t)
 				{
-					auto* info = ctx->ItemInfo(
-						(std::string(scenarios[s]) + "/" + trees[t]).c_str(),
-						ImGuiTestOpFlags_NoError);
-					REQ(!info->IsEmpty(),
-						"a scenario expectation tree did not resolve under its scenario path");
-					treeIds[s][t] = info->ID;
+					auto path = std::string(scenarios[i]) + "/" + trees[t];
+					auto* info = ctx->ItemInfo(path.c_str());
+					REQ(!info->IsEmpty(), "Selected scenario expectation tree is missing");
+					treeIds[i][t] = info->ID;
+					ctx->ItemClose(path.c_str());
 				}
+			}
 			for (int t = 0; t < 3; ++t)
-				REQ(treeIds[0][t] != treeIds[1][t],
-					"two scenarios share one expectation-tree widget ID");
-			for (int s = 0; s < 2; ++s)
-				for (int o = 0; o < 3; ++o)
-					for (int t = o + 1; t < 3; ++t)
-						REQ(treeIds[s][o] != treeIds[s][t],
-							"the expectation trees of one scenario share a widget ID");
-			// Independent tree state. The trees opened in the opening phase
-			// are first driven closed through the engine's own Close action,
-			// then the open/close sequence is observed: opening one
-			// scenario's tree must not open the other scenario's
-			// same-labelled tree.
-			for (int s = 0; s < 2; ++s)
+				REQ(treeIds[0][t] != treeIds[1][t], "Two configurations share an expectation-tree ID");
+			for (int i = 0; i < 2; ++i)
 				for (int t = 0; t < 3; ++t)
-					ctx->ItemClose((std::string(scenarios[s]) + "/" + trees[t]).c_str());
-			ctx->Sleep(1);
-			{
-				auto* first = ctx->ItemInfo("maintenance-recovery/Expected limiting services");
-				auto* second = ctx->ItemInfo("resupply-delay/Expected limiting services");
-				REQ(!(first->StatusFlags & ImGuiItemStatusFlags_Opened)
-					&& !(second->StatusFlags & ImGuiItemStatusFlags_Opened),
-					"the expectation trees did not start from a closed state");
-			}
-			ctx->ItemClick("maintenance-recovery/Expected limiting services");
-			ctx->Sleep(1);
-			{
-				auto* opened = ctx->ItemInfo(
-					"maintenance-recovery/Expected limiting services");
-				auto* other = ctx->ItemInfo("resupply-delay/Expected limiting services");
-				REQ(opened->StatusFlags & ImGuiItemStatusFlags_Opened,
-					"the maintenance expectation tree did not open");
-				REQ(!(other->StatusFlags & ImGuiItemStatusFlags_Opened),
-					"opening one scenario's tree opened another's");
-			}
+					for (int u = t + 1; u < 3; ++u)
+						REQ(treeIds[i][t] != treeIds[i][u], "One configuration's trees share an ID");
+			ctx->ItemOpen("maintenance-recovery/Expected limiting services"); ctx->Yield(3);
 			REQ(driver.contains("Chiller maintenance (tool kit)")
-				&& !driver.contains("Crew food supply (food store)"),
-				"the independently opened tree did not render content exclusively");
-			// And the other scenario's tree opens on its own without
-			// disturbing the first: both stay open, each with its own state.
-			ctx->ItemClick("resupply-delay/Expected limiting services");
-			ctx->Sleep(1);
-			{
-				auto* first = ctx->ItemInfo("maintenance-recovery/Expected limiting services");
-				auto* second = ctx->ItemInfo("resupply-delay/Expected limiting services");
-				REQ(first->StatusFlags & ImGuiItemStatusFlags_Opened,
-					"opening another scenario's tree closed the first one");
-				REQ(second->StatusFlags & ImGuiItemStatusFlags_Opened,
-					"the second scenario's tree did not open on its own");
-			}
+				&& !driver.contains("Crew food supply (food store)"), "Unselected description leaked into view");
+			ctx->ComboClick("Configuration resource/resupply-delay"); ctx->Yield(3);
+			REQ(!(ctx->ItemInfo("resupply-delay/Expected limiting services")->StatusFlags & ImGuiItemStatusFlags_Opened),
+				"Opening another configuration's tree changed this one's state");
+			ctx->ItemOpen("resupply-delay/Expected limiting services"); ctx->Yield(3);
 			REQ(driver.contains("Crew food supply (food store)")
-				&& driver.contains("Chiller maintenance (tool kit)"),
-				"both scenarios' expectation trees must render their own content");
-			// Closing one leaves the other open: the states are per-scenario.
-			ctx->ItemClick("resupply-delay/Expected limiting services");
-			ctx->Sleep(1);
-			{
-				auto* first = ctx->ItemInfo("maintenance-recovery/Expected limiting services");
-				auto* second = ctx->ItemInfo("resupply-delay/Expected limiting services");
-				REQ(first->StatusFlags & ImGuiItemStatusFlags_Opened,
-					"closing one scenario's tree closed the other's");
-				REQ(!(second->StatusFlags & ImGuiItemStatusFlags_Opened),
-					"the toggled-close did not close the second scenario's tree");
-			}
+				&& !driver.contains("Chiller maintenance (tool kit)"), "Unselected description remained visible");
+			ctx->ComboClick("Configuration resource/maintenance-recovery"); ctx->Yield(3);
+			REQ(ctx->ItemInfo("maintenance-recovery/Expected limiting services")->StatusFlags & ImGuiItemStatusFlags_Opened,
+				"Switching configurations discarded the description tree state");
 		});
 		#undef REQ
 		require(driver.passed(), "scenario workflow failed on the Test Engine");
@@ -8725,7 +8874,7 @@ void cropWorkflow(smoke::Context const&)
 	// audit section reports the live run's finite-value, capacity-bound,
 	// conservation-ledger and bounded-history state - the same audit the
 	// acceptance tests assert on.
-	void stabilityWorkflow(smoke::Context const&)
+	void stabilityWorkflow(smoke::Context const& fixtureContext)
 	{
 		using smoke::require;
 		headless::ScopedImGuiContext context;
@@ -8734,6 +8883,9 @@ void cropWorkflow(smoke::Context const&)
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
 		DocumentHistory history;
 		StationSystemsWindow window;
+		headless::StationResourceFixture resources(fixtureContext.fixture("resources/Resources.yaml").parent_path(),
+			fixtureContext.temporaryRoot() / "station-resources");
+		window.setConfigurationResources(resources.configurations);
 		auto const& workload = core::bundledStationLongRunWorkload();
 		auto world = std::make_shared<core::World>("Stability editor", 2, 2);
 		world->pauseSimulation(); world->finishBuild();
@@ -8753,8 +8905,7 @@ void cropWorkflow(smoke::Context const&)
 			ctx->SetRef("Station Systems");
 			// The packaged workload section renders with its scenario
 			// declaration and the declared residual tolerance.
-			REQ(driver.contains("Long-duration stability workload (packaged resource)"),
-				"the long-run workload section is missing from the station window");
+			ctx->ComboClick("Configuration resource/long-run-workload"); ctx->Yield(3);
 			REQ(driver.contains("Meridian long-duration stability workload"),
 				"the long-run workload name is missing");
 			REQ(driver.contains("7200 simulated s scenario"),
@@ -8779,7 +8930,7 @@ void cropWorkflow(smoke::Context const&)
 			// Workload loading is paused-only: while the World runs the
 			// load control is really disabled and a real press changes
 			// nothing.
-			REQ(driver.clickDisabled(ctx, "Load long-run workload into draft",
+			REQ(driver.clickDisabled(ctx, "Load into draft",
 				"workload load while running"),
 				"the workload load control was not disabled while the World runs");
 			REQ(world->getStationSystemsSettings() == workload.settings,
@@ -8788,7 +8939,7 @@ void cropWorkflow(smoke::Context const&)
 			// demands a World reset confirmation and honours it, landing
 			// the workload settings and restarting the clock.
 			world->pauseSimulation(); ctx->Sleep(1);
-			driver.click(ctx, "Load long-run workload into draft");
+			driver.click(ctx, "Load into draft");
 			ctx->Sleep(1);
 			// The draft already equals the authored settings after the
 			// earlier apply, so re-loading is a no-op change: cancel and
@@ -8884,6 +9035,8 @@ void cropWorkflow(smoke::Context const&)
 {
 	editor_smoke::registerStationConnections(checks);
 	registerMixedObservationEditorChecks(checks);
+	checks.push_back({"station/addEntryWorkflow", addEntryWorkflow});
+	checks.push_back({"station/configurationResources", configurationResources});
 	checks.push_back({"station/windowWorkflow", workflow});
 	checks.push_back({"station/stepRatioWorkflow", stationStepRatioWorkflow});
 	checks.push_back({"station/materialIdentityWorkflow", materialIdentityWorkflow});

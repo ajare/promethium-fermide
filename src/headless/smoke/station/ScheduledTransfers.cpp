@@ -1,3 +1,4 @@
+#include "StationReferenceFixtures.h"
 #include "Smoke.h"
 #include "ScheduledObservationFixture.h"
 #include "core/World.h"

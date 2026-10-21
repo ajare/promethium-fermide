@@ -1,3 +1,4 @@
+#include "StationReferenceFixtures.h"
 #pragma once
 #include "core/StationReference.h"
 

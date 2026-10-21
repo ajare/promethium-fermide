@@ -1,3 +1,4 @@
+#include "StationReferenceFixtures.h"
 #include "StationRig.h"
 // #422: the packaged reference station.
 //

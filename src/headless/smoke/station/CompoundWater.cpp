@@ -1,3 +1,4 @@
+#include "StationReferenceFixtures.h"
 #include "StationWaterChecks.h"
 #include "core/World.h"
 #include "core/StationReference.h"

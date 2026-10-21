@@ -7,7 +7,7 @@ function(pf_smoke_target_policy target)
         FOLDER "Tests/Smoke")
 endfunction()
 
-add_library(pf-smoke-support STATIC support/Smoke.cpp)
+add_library(pf-smoke-support STATIC support/Smoke.cpp support/StationReferenceFixtures.cpp)
 target_include_directories(pf-smoke-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/support"
     PRIVATE "${PF_INCLUDE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../support")
 target_link_libraries(pf-smoke-support PUBLIC promethium-fermide-core)
@@ -870,6 +870,12 @@ pf_add_smoke_module(pf-smoke-editor
 
 add_test(NAME station-editor-material-identity COMMAND pf-smoke-editor --check station/materialIdentityWorkflow)
 set_tests_properties(station-editor-material-identity PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
+add_test(NAME station-editor-add-entry COMMAND pf-smoke-editor --check station/addEntryWorkflow)
+set_tests_properties(station-editor-add-entry PROPERTIES
+    LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+add_test(NAME station-editor-configuration-resources COMMAND pf-smoke-editor --check station/configurationResources)
+set_tests_properties(station-editor-configuration-resources PROPERTIES
+    LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-document COMMAND pf-smoke-editor --check station/configurationDocument)
 set_tests_properties(station-editor-document PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 add_test(NAME station-editor-window COMMAND pf-smoke-editor --check station/windowWorkflow)
