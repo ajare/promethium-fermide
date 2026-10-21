@@ -98,6 +98,137 @@ void pathwayDiffusion(smoke::Context const&)
 		require(idle.flowRateKgPerS[gas] == 0 && idle.netTransferredKg[gas] == 0, "equilibrium pathway invented flow");
 }
 
+// #786: equal total moles at equal volume/temperature, but different
+// composition. Swapping equal mole counts (not equal kilograms) balances
+// total pressure while leaving opposing O2 and CO2 partial-pressure gradients.
+void pathwayCounterFlow(smoke::Context const&)
+{
+	auto s = pathwaySettings();
+	auto& a = s.atmospheres[0];
+	auto& b = s.atmospheres[1];
+	a.startingOxygenKg = 600 * core::StationMolarMassOxygenKgPerMol;
+	b.startingOxygenKg = 200 * core::StationMolarMassOxygenKgPerMol;
+	a.startingCarbonDioxideKg = 200 * core::StationMolarMassCarbonDioxideKgPerMol;
+	b.startingCarbonDioxideKg = 600 * core::StationMolarMassCarbonDioxideKgPerMol;
+	b.startingNitrogenKg = a.startingNitrogenKg;
+	b.startingWaterVapourKg = a.startingWaterVapourKg;
+	core::World world("CounterFlow", 2, 2);
+	world.pauseSimulation(); world.finishBuild();
+	std::string diagnostic;
+	require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+	auto const initial = world.getStationSystemsSnapshot();
+	require(std::abs(initial.atmospheres[0].pressureKPa - initial.atmospheres[1].pressureKPa) < 1e-12,
+		"counter-flow fixture does not have equal total pressure to 1e-12 kPa");
+	require(initial.atmospheres[0].oxygenPartialPressureKPa > initial.atmospheres[1].oxygenPartialPressureKPa
+		&& initial.atmospheres[0].carbonDioxidePartialPressureKPa < initial.atmospheres[1].carbonDioxidePartialPressureKPa,
+		"counter-flow fixture lacks opposing partial-pressure gradients");
+	auto const a0 = masses(initial.atmospheres[0]), b0 = masses(initial.atmospheres[1]);
+	world.resumeSimulation();
+	// Check both the first published interval and a cumulative run, so a
+	// correct first transfer cannot hide a later ledger/sign error.
+	for (double duration : {initial.systemsTimestepSeconds, 30.0})
+	{
+		require(advanceSeconds(world, duration), "counter-flow advance failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		auto const& p = snapshot.atmospherePathways[0];
+		auto const af = masses(snapshot.atmospheres[0]), bf = masses(snapshot.atmospheres[1]);
+		require(snapshot.healthy && p.status == core::StationAtmospherePathwayStatus::Active,
+			"counter-flow did not publish healthy Active diffusion");
+		for (size_t gas = 0; gas < a0.size(); ++gas)
+		{
+			close(af[gas] + bf[gas], a0[gas] + b0[gas], "counter-flow per-gas inventory did not close");
+			close(a0[gas] - af[gas], p.netTransferredKg[gas], "counter-flow A ledger did not close");
+			close(bf[gas] - b0[gas], p.netTransferredKg[gas], "counter-flow B ledger did not close");
+			if (gas == 0 || gas == 2)
+			{
+				double const sign = gas == 0 ? 1.0 : -1.0;
+				require(sign * p.flowRateKgPerS[gas] > 1e-6 && sign * p.netTransferredKg[gas] > 1e-6
+					&& sign * (a0[gas] - af[gas]) > 1e-6 && sign * (bf[gas] - b0[gas]) > 1e-6,
+					"O2 and CO2 did not simultaneously flow in opposite directions");
+			}
+			else
+			{
+				require(p.flowRateKgPerS[gas] == 0 && p.netTransferredKg[gas] == 0
+					&& af[gas] == a0[gas] && bf[gas] == b0[gas],
+					"equal-partial-pressure gas moved alongside counter-flowing gases");
+			}
+		}
+	}
+}
+
+void pathwayClosed(smoke::Context const&)
+{
+	auto s = pathwaySettings();
+	s.atmospherePathways[0].initialOpenFraction = 0;
+	// A large pressure gradient and large area must not bypass closure.
+	s.atmospherePathways[0].areaM2 = 1e12;
+	auto& b = s.atmospheres[1];
+	b.startingOxygenKg = b.startingNitrogenKg = b.startingCarbonDioxideKg = b.startingWaterVapourKg = 0;
+	core::World world("ClosedPathway", 2, 2);
+	world.pauseSimulation(); world.finishBuild();
+	std::string diagnostic;
+	require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+	auto const initial = world.getStationSystemsSnapshot();
+	require(initial.atmospheres[0].pressureKPa - initial.atmospheres[1].pressureKPa > 50,
+		"closed-pathway fixture lacks a large pressure gradient");
+	world.resumeSimulation();
+	for (double duration : {initial.systemsTimestepSeconds, 30.0})
+	{
+		require(advanceSeconds(world, duration), "closed pathway advance failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		auto const& p = snapshot.atmospherePathways[0];
+		require(snapshot.healthy && p.openFraction == 0 && p.status == core::StationAtmospherePathwayStatus::Idle,
+			"closed pathway did not remain healthy and Idle");
+		for (size_t gas = 0; gas < p.flowRateKgPerS.size(); ++gas)
+			require(p.flowRateKgPerS[gas] == 0 && p.netTransferredKg[gas] == 0,
+				"closed pathway reported gas transfer");
+		for (size_t i = 0; i < initial.atmospheres.size(); ++i)
+			require(masses(snapshot.atmospheres[i]) == masses(initial.atmospheres[i]),
+				"closed pathway changed a gas inventory");
+	}
+}
+
+void pathwayOpenness(smoke::Context const&)
+{
+	std::array<std::array<double, 4>, 3> flows{};
+	size_t index = 0;
+	for (double openness : {0.25, 0.5, 1.0})
+	{
+		auto s = pathwaySettings();
+		s.atmospherePathways[0].initialOpenFraction = openness;
+		// Snapshot flux is interval-averaged, not instantaneous. A small
+		// area keeps gradient relaxation negligible even at step ratio 60;
+		// doubling openness should double each gas's flux within 1e-5 relative.
+		s.atmospherePathways[0].areaM2 = 1e-4;
+		core::World world("PathwayOpenness", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		std::string diagnostic;
+		require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+		auto const initial = world.getStationSystemsSnapshot();
+		world.resumeSimulation();
+		require(advanceStationSteps(world, 1), "openness step failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		auto const& p = snapshot.atmospherePathways[0];
+		require(snapshot.healthy && p.status == core::StationAtmospherePathwayStatus::Active && p.openFraction == openness,
+			"partly open pathway did not publish Active at authored openness");
+		flows[index++] = p.flowRateKgPerS;
+		for (size_t gas = 0; gas < p.flowRateKgPerS.size(); ++gas)
+		{
+			require(p.flowRateKgPerS[gas] > 1e-12, "openness fixture has no measurable gas flow");
+			close(p.flowRateKgPerS[gas] * snapshot.systemsTimestepSeconds, p.netTransferredKg[gas],
+				"openness flux disagrees with interval transfer");
+			close(masses(initial.atmospheres[0])[gas] - masses(snapshot.atmospheres[0])[gas], p.netTransferredKg[gas],
+				"openness transfer disagrees with donor inventory");
+			close(masses(snapshot.atmospheres[1])[gas] - masses(initial.atmospheres[1])[gas], p.netTransferredKg[gas],
+				"openness transfer disagrees with receiver inventory");
+		}
+	}
+	for (size_t i = 1; i < flows.size(); ++i)
+		for (size_t gas = 0; gas < flows[i].size(); ++gas)
+			require(std::abs(flows[i][gas] / (2 * flows[i - 1][gas]) - 1) < 1e-5,
+				"doubling openness did not double gas flow within 1e-5 relative tolerance");
+}
+
 void pathwayValidation(smoke::Context const&)
 {
 	core::World world("PathwayRefusal", 2, 2);
@@ -153,4 +284,7 @@ void registerStationPathwayChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"pathwayDiffusion", pathwayDiffusion});
 	checks.push_back({"pathwayValidation", pathwayValidation});
+	checks.push_back({"pathwayCounterFlow", pathwayCounterFlow});
+	checks.push_back({"pathwayClosed", pathwayClosed});
+	checks.push_back({"pathwayOpenness", pathwayOpenness});
 }

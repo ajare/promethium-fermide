@@ -56,7 +56,8 @@ class Lanes(unittest.TestCase):
             self.assertIn('validation-fast', fast['LABELS'])
             self.assertNotIn('validation-stress', fast['LABELS'])
             self.assertEqual(fast['TIMEOUT'], 60)
-        for check in ('pathwayDiffusion', 'pathwayValidation'):
+        for check in ('pathwayDiffusion', 'pathwayValidation', 'pathwayCounterFlow',
+                      'pathwayClosed', 'pathwayOpenness'):
             self.assertIn('validation-fast', props(f'station-{check}')['LABELS'])
             self.assertNotIn('validation-stress', props(f'station-{check}')['LABELS'])
         for module in lane.REPRESENTATIVES:
