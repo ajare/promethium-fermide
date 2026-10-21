@@ -192,7 +192,7 @@ namespace core
 	std::vector<std::string> BinarySerializer::mapKeys(std::string const& name) const
 	{
 		requireDeserializing("inspect map keys");
-		auto const& node = requireValue(name);
+		auto const& node = name.empty() ? (mContainers.empty() ? *mRoot : *mContainers.back()) : requireValue(name);
 		if (node.type != Map) throw SerializationException("Expected binary map: " + name);
 		std::vector<std::string> keys;
 		for (auto const& field : node.fields) keys.push_back(field.first);

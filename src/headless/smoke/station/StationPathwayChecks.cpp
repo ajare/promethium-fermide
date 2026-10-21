@@ -1,6 +1,9 @@
 #include "StationRig.h"
 #include "Smoke.h"
 #include <array>
+#include "core/StationConfigurationDocument.h"
+#include "core/YamlSerializer.h"
+#include "core/BinarySerializer.h"
 
 namespace
 {
@@ -32,6 +35,85 @@ void close(double a, double b, char const* message)
 {
 	require(std::abs(a - b) < 1e-9, message);
 }
+void pathwayPersistence(smoke::Context const&)
+{
+	auto settings = pathwaySettings();
+	settings.atmospherePathways.push_back({"parallel", "b", "a", 0.125, 0});
+	// Non-chronological declarations and same-time ties must retain their order.
+	settings.pathwayCommands = {{"close", "opening", 0, 1.337, -2},
+		{"open", "opening", 0.8, 0.137, 3}, {"tie", "opening", 0.4, 0.137, 3},
+		{"pending", "parallel", 1, 10, 0}};
+	core::StationConfigurationDocument document; document.settings = settings;
+	auto const yaml = core::serializeStationConfiguration(document);
+	core::StationConfigurationDocument loaded;
+	std::string diagnostic;
+	require(core::parseStationConfiguration(yaml, loaded, &diagnostic), diagnostic.c_str());
+	require(loaded.settings == settings, "pathway Station configuration changed on round trip");
+	for (auto const& [field, id] : {std::pair{"areaM2", "opening"}, std::pair{"priority", "close"}})
+	{
+		auto bad = yaml;
+		auto const at = bad.find(std::string(field) + ":");
+		require(at != std::string::npos, "missing pathway wire field");
+		bad.insert(at, "unknown_");
+		require(!core::parseStationConfiguration(bad, loaded, &diagnostic)
+			&& diagnostic.find(id) != std::string::npos
+			&& diagnostic.find(std::string("unknown_") + field) != std::string::npos
+			&& diagnostic.find("conversion required") != std::string::npos
+			&& loaded.settings == settings, "unknown pathway field was ignored or mutated document");
+	}
+	for (int version : {104, 106})
+	{
+		auto bad = yaml;
+		bad.replace(bad.find("schemaVersion: 105"), std::string("schemaVersion: 105").size(),
+			"schemaVersion: " + std::to_string(version));
+		require(!core::parseStationConfiguration(bad, loaded, &diagnostic)
+			&& loaded.settings == settings, "unsupported pathway schema was accepted");
+	}
+	for (bool binary : {false, true})
+	{
+		core::World original("Pathway persistence", 2, 2);
+		original.pauseSimulation(); original.finishBuild();
+		require(original.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+		auto writer = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+		core::SerializationWorkData work;
+		original.serialize(*writer, work); writer->serialize();
+		auto const text = binary ? static_cast<core::BinarySerializer&>(*writer).getSerializedString()
+			: static_cast<core::YamlSerializer&>(*writer).getSerializedString();
+		if (!binary)
+		{
+			for (auto const* field : {"areaM2", "priority"})
+			{
+				auto bad = text; bad.insert(bad.find(std::string(field) + ":"), "unknown_");
+				auto invalid = core::YamlSerializer::fromString(bad); invalid->deserialize();
+				auto const baseline = original.getStationSystemsSnapshot();
+				bool refused = false;
+				try { original.deserialize(*invalid, work); }
+				catch (std::exception const& error)
+				{
+					auto const message = std::string(error.what());
+					refused = message.find("conversion required") != std::string::npos
+						&& message.find(std::string("unknown_") + field) != std::string::npos
+						&& message.find(std::string(field) == "areaM2" ? "opening" : "close") != std::string::npos;
+				}
+				require(refused && original.getStationSystemsSnapshot() == baseline
+					&& original.getStationSystemsSettings() == settings,
+					"World ignored an unknown pathway field or changed on refusal");
+			}
+		}
+		auto reader = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(text))
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(text));
+		reader->deserialize();
+		core::World restored("Restored", 2, 2);
+		require(restored.deserialize(*reader, work), "pathway World could not reload");
+		require(restored.getStationSystemsSettings() == settings, "World pathway settings changed");
+		original.resumeSimulation(); restored.resumeSimulation();
+		require(advanceSeconds(original, 2) && advanceSeconds(restored, 2), "pathway replay failed");
+		require(original.getStationSystemsSnapshot() == restored.getStationSystemsSnapshot(),
+			"pathway round trip changed the run snapshot");
+	}
+}
+
 void pathwayDiffusion(smoke::Context const&)
 {
 	core::World world("Pathway", 2, 2);
@@ -657,6 +739,7 @@ void pathwayValidation(smoke::Context const&)
 
 void registerStationPathwayChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"pathwayPersistence", pathwayPersistence});
 	checks.push_back({"pathwayDiffusion", pathwayDiffusion});
 	checks.push_back({"pathwayValidation", pathwayValidation});
 	checks.push_back({"pathwayCounterFlow", pathwayCounterFlow});

@@ -262,6 +262,7 @@ set(editor_names
     scaled-doors/crossing-history
     roomHeightScale/history
     roomHeightScale/occupiedPoseHistory
+    station/pathwayDisplayWorkflow
     station/connectionDesign
     station/connectionForecastWorkflow
     station/flowConnectionTelemetryWorkflow

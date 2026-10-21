@@ -220,7 +220,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 104"), std::string("version: 104").size(), "version: 65");
+		text.replace(text.find("version: 105"), std::string("version: 105").size(), "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); smoke::station::advanceSeconds(world, 0.0833333333333); world.pauseSimulation();

@@ -22,6 +22,7 @@ namespace core
 			return true;
 		}
 
+		// An empty name inspects the current map rather than a child field.
 		virtual std::vector<std::string> mapKeys(std::string const& name) const = 0;
 
 		virtual bool fieldIsMap(std::string const&) const
