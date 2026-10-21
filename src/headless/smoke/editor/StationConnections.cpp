@@ -681,8 +681,8 @@ void flowConnectionsWorkflow(smoke::Context const& context)
 		REQ(window.flowNodeRect("Transfer", "move", &rect), "Transfer node missing");
 		ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
 		ctx->MouseClick(); ctx->Yield(3); ctx->MouseTeleportToPos({40, 40}); ctx->Yield(2);
-		auto* rate = ctx->ItemInfo("**/Transfer 0 rate per second");
-		ctx->ItemClick(ImHashStr("Transfer 0 mode", 0, rate->ParentID)); ctx->Yield(2);
+		auto* rate = ctx->ItemInfo("**/rate per second##Transfer 0");
+		ctx->ItemClick(ImHashStr("mode##Transfer 0", 0, rate->ParentID)); ctx->Yield(2);
 		auto* popup = ctx->GetWindowByRef("//$FOCUSED");
 		REQ(popup, "Transfer mode popup missing");
 		ctx->ItemClick(("//" + std::string(popup->Name) + "/**/Scheduled").c_str()); ctx->Yield(3);

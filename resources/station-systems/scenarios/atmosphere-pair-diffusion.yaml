@@ -1,0 +1,76 @@
+# Two Atmosphere compartments joined by one Atmosphere pathway.
+#
+# Load in Station systems, then Apply and run for 900 simulated seconds.
+#
+# Each species moves down its own partial-pressure gradient, so the hatch
+# is not a one-way wind: oxygen and water vapour leave the habitat while
+# carbon dioxide runs the other way. Equal volumes and equal starting
+# temperatures mean the compartments settle at half the station-wide mass
+# of each species: O2 17.5 kg, N2 60 kg, CO2 2.8 kg, H2O 0.075 kg.
+#
+# Diffusion is thermally neutral (ADR 0026) and both compartments are
+# adiabatic (empty reservoirId), so temperature holds at its starting
+# value throughout. At 1 m2 between two 100 m3 volumes the model relaxes
+# 95% in about 256 s, so 900 s lands well inside the settled regime.
+#
+# Declared pressure limits are set wide of the derived pressures so the
+# run reports no service-limit crossings.
+schemaVersion: 105
+stationSystems:
+  enabled: true
+  systemsStepWorldTicks: 6
+  observationIntervalSeconds: 1
+  atmospheres:
+    - id: habitat
+      volumeM3: 100
+      startingOxygenKg: 30
+      startingNitrogenKg: 80
+      startingCarbonDioxideKg: 0.6
+      startingWaterVapourKg: 0.1
+      startingTemperatureC: 20
+      thermalCapacityKJPerK: 10000
+      reservoirId: ""
+      exchangerConductanceKWPerK: 0
+      occupants: 0
+      oxygenUsePerOccupantKgPerS: 0
+      co2ProductionPerOccupantKgPerS: 0
+      sensibleHeatPerOccupantKW: 0
+      moistureAdditionPerOccupantKgPerS: 0
+      leakRateKgPerS: 0
+      minPressureKPa: 1
+      maxPressureKPa: 200
+      minOxygenPartialPressureKPa: 0
+      maxCarbonDioxidePartialPressureKPa: 0
+    - id: science-module
+      volumeM3: 100
+      startingOxygenKg: 5
+      startingNitrogenKg: 40
+      startingCarbonDioxideKg: 5
+      startingWaterVapourKg: 0.05
+      startingTemperatureC: 20
+      thermalCapacityKJPerK: 10000
+      reservoirId: ""
+      exchangerConductanceKWPerK: 0
+      occupants: 0
+      oxygenUsePerOccupantKgPerS: 0
+      co2ProductionPerOccupantKgPerS: 0
+      sensibleHeatPerOccupantKW: 0
+      moistureAdditionPerOccupantKgPerS: 0
+      leakRateKgPerS: 0
+      minPressureKPa: 1
+      maxPressureKPa: 200
+      minOxygenPartialPressureKPa: 0
+      maxCarbonDioxidePartialPressureKPa: 0
+  atmospherePathways:
+    - id: connecting-hatch
+      aAtmosphereId: habitat
+      bAtmosphereId: science-module
+      areaM2: 1
+      initialOpenFraction: 1
+layout:
+  panX: 24
+  panY: 24
+  zoom: 0.8
+  nodes:
+    - {key: "Atmosphere:habitat:0", x: 0, y: 0}
+    - {key: "Atmosphere:science-module:0", x: 650, y: 0}

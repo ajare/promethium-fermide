@@ -7,11 +7,24 @@
 #include <array>
 #include <cstring>
 #include <cmath>
+#include <string>
+#include <string_view>
 
 namespace station_editor
 {
 namespace
 {
+// The Flow inspector shows one node at a time, so a field's visible
+// description drops the redundant "<entry> " prefix. The '##' suffix keeps
+// that prefix in the label string rather than in the rendered text: ImGui
+// draws only what precedes '##' (RenderText hides the rest), while the
+// ImGui ID and the full name the headless Test Engine addresses still carry
+// the entry. That keeps a field unambiguous on the form surfaces, which
+// render every entry of a type at once, without showing the prefix twice.
+std::string describe(std::string_view field, std::string const& label)
+{
+	return std::string(field) + "##" + label;
+}
 // Identity changes must use Flow's preflight/confirmation/atomic cascade.
 // Shared by the inspector and forms so neither can write a dangling ID.
 void renderWaterQuality(core::WaterQualitySettings& gate, std::string const& label)
@@ -40,7 +53,7 @@ void renderIdentity(std::string const& label, std::string const& id)
 {
 	char buffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(buffer, id.c_str(), sizeof(buffer) - 1);
-	ImGui::InputText((label + " id").c_str(), buffer, sizeof(buffer), ImGuiInputTextFlags_ReadOnly);
+	ImGui::InputText(describe("id", label).c_str(), buffer, sizeof(buffer), ImGuiInputTextFlags_ReadOnly);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("To rename, select this node in Flow and use 'New node name' / 'Rename selected node'.");
 }
@@ -49,26 +62,27 @@ void renderIdentity(std::string const& label, std::string const& id)
 bool renderConversionEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::ResourceConversionSettings& conversion,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeConversion = false;
 	auto const row = label.substr(label.find_last_of(' ') + 1);
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, conversion.id);
-	ImGui::InputInt((label + " priority").c_str(), &conversion.priority);
+	ImGui::InputInt(describe("priority", label).c_str(), &conversion.priority);
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
 		removeConversion = true;
 	for (size_t flow = 0; flow < conversion.inputs.size(); )
 	{
 		auto& input = conversion.inputs[flow];
-		auto const flowRow = label + " input " + std::to_string(flow);
+		auto const flowRow = std::string("input ") + std::to_string(flow);
 		char storeBuffer[core::MaxStationStoreIdLength + 1]{};
 		std::strncpy(storeBuffer, input.storeId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText((flowRow + " store").c_str(), storeBuffer, sizeof(storeBuffer)))
+		if (ImGui::InputText(describe(flowRow + " store", label).c_str(), storeBuffer, sizeof(storeBuffer)))
 			input.storeId = storeBuffer;
 		ImGui::SameLine();
-		ImGui::InputDouble((flowRow + " rate").c_str(), &input.ratePerSecond, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(describe(flowRow + " rate", label).c_str(), &input.ratePerSecond, 0.0, 0.0, "%.3f");
 		ImGui::SameLine();
-		bool const removeInput = ImGui::Button(("Remove " + flowRow).c_str());
+		bool const removeInput = ImGui::Button(describe("Remove " + flowRow, label).c_str());
 		if (removeInput)
 			conversion.inputs.erase(conversion.inputs.begin() + static_cast<std::ptrdiff_t>(flow));
 		else
@@ -80,15 +94,15 @@ bool renderConversionEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	for (size_t flow = 0; flow < conversion.outputs.size(); )
 	{
 		auto& output = conversion.outputs[flow];
-		auto const flowRow = label + " output " + std::to_string(flow);
+		auto const flowRow = std::string("output ") + std::to_string(flow);
 		char storeBuffer[core::MaxStationStoreIdLength + 1]{};
 		std::strncpy(storeBuffer, output.storeId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText((flowRow + " store").c_str(), storeBuffer, sizeof(storeBuffer)))
+		if (ImGui::InputText(describe(flowRow + " store", label).c_str(), storeBuffer, sizeof(storeBuffer)))
 			output.storeId = storeBuffer;
 		ImGui::SameLine();
-		ImGui::InputDouble((flowRow + " yield").c_str(), &output.yieldPerSecond, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(describe(flowRow + " yield", label).c_str(), &output.yieldPerSecond, 0.0, 0.0, "%.3f");
 		ImGui::SameLine();
-		bool const removeOutput = ImGui::Button(("Remove " + flowRow).c_str());
+		bool const removeOutput = ImGui::Button(describe("Remove " + flowRow, label).c_str());
 		if (removeOutput)
 			conversion.outputs.erase(conversion.outputs.begin() + static_cast<std::ptrdiff_t>(flow));
 		else
@@ -98,19 +112,21 @@ bool renderConversionEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 		&& ImGui::Button(("Add output to conversion " + row).c_str()))
 		conversion.outputs.push_back({});
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeConversion;
 }
 
 bool renderSolarEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::SolarArraySettings& array,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeArray = false;
 	auto const row = label.substr(label.find_last_of(' ') + 1);
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, array.id);
-	ImGui::InputDouble((label + " capacity kW").c_str(), &array.capacityKW, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("capacity kW", label).c_str(), &array.capacityKW, 0.0, 0.0, "%.3f");
 	bool solarPeriodic = array.illumination.periodSeconds > 0.0;
-	if (ImGui::Checkbox((label + " periodic illumination").c_str(), &solarPeriodic))
+	if (ImGui::Checkbox(describe("periodic illumination", label).c_str(), &solarPeriodic))
 	{
 		if (solarPeriodic)
 		{
@@ -125,21 +141,21 @@ bool renderSolarEntry([[maybe_unused]] core::StationSystemsSettings& draft, core
 		}
 	}
 	if (!solarPeriodic)
-		ImGui::InputDouble((label + " constant illumination").c_str(),
+		ImGui::InputDouble(describe("constant illumination", label).c_str(),
 			&array.illumination.constantLevel, 0.0, 0.0, "%.3f");
 	else
 	{
-		ImGui::InputDouble((label + " period seconds").c_str(),
+		ImGui::InputDouble(describe("period seconds", label).c_str(),
 			&array.illumination.periodSeconds, 0.0, 0.0, "%.1f");
 		for (size_t segment = 0; segment < array.illumination.segments.size(); )
 		{
 			auto& stretch = array.illumination.segments[segment];
-			auto const segmentRow = label + " segment " + std::to_string(segment);
-			ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+			auto const segmentRow = std::string("segment ") + std::to_string(segment);
+			ImGui::InputDouble(describe(segmentRow + " start", label).c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
 			ImGui::SameLine();
-			ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+			ImGui::InputDouble(describe(segmentRow + " level", label).c_str(), &stretch.level, 0.0, 0.0, "%.3f");
 			ImGui::SameLine();
-			bool const removeSegment = ImGui::Button(("Remove " + segmentRow).c_str());
+			bool const removeSegment = ImGui::Button(describe("Remove " + segmentRow, label).c_str());
 			if (removeSegment)
 				array.illumination.segments.erase(
 					array.illumination.segments.begin() + static_cast<std::ptrdiff_t>(segment));
@@ -155,6 +171,7 @@ bool renderSolarEntry([[maybe_unused]] core::StationSystemsSettings& draft, core
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
 		removeArray = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeArray;
 }
 
@@ -166,31 +183,32 @@ bool renderSolarEntry([[maybe_unused]] core::StationSystemsSettings& draft, core
 bool renderCrewEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::CrewSettings& crew,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeCrew = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, crew.id);
 	renderWaterQuality(crew.waterQuality, label);
 	char greywaterBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(greywaterBuffer, crew.greywaterStoreId.c_str(), sizeof(greywaterBuffer) - 1);
-	if (ImGui::InputText((label + " greywater store").c_str(), greywaterBuffer, sizeof(greywaterBuffer)))
+	if (ImGui::InputText(describe("greywater store", label).c_str(), greywaterBuffer, sizeof(greywaterBuffer)))
 		crew.greywaterStoreId = greywaterBuffer;
-	ImGui::InputDouble((label + " greywater kg per crew-day").c_str(), &crew.greywaterKgPerCrewDay, 0, 0, "%.6f");
+	ImGui::InputDouble(describe("greywater kg per crew-day", label).c_str(), &crew.greywaterKgPerCrewDay, 0, 0, "%.6f");
 	for (auto const* name : {"dryOrganics", "nutrientNitrogen"})
 	{
 		bool enabled = crew.greywaterLoadKgPerCrewDay.contains(name);
-		if (ImGui::Checkbox((label + " greywater load " + name).c_str(), &enabled))
+		if (ImGui::Checkbox((std::string("greywater load ") + name).c_str(), &enabled))
 		{ if (enabled) crew.greywaterLoadKgPerCrewDay[name] = 0; else crew.greywaterLoadKgPerCrewDay.erase(name); }
-		if (enabled) ImGui::InputDouble((label + " " + name + " kg per crew-day").c_str(),
+		if (enabled) ImGui::InputDouble((std::string("") + name + " kg per crew-day").c_str(),
 			&crew.greywaterLoadKgPerCrewDay.at(name), 0, 0, "%.6f");
 	}
 	char crewAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(crewAtmosphereBuffer, crew.atmosphereId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " atmosphere").c_str(),
+	if (ImGui::InputText(describe("atmosphere", label).c_str(),
 		crewAtmosphereBuffer, sizeof(crewAtmosphereBuffer)))
 		crew.atmosphereId = crewAtmosphereBuffer;
-	ImGui::InputInt((label + " count").c_str(), &crew.crewCount, 1, 0);
+	ImGui::InputInt(describe("count", label).c_str(), &crew.crewCount, 1, 0);
 	bool crewPeriodic = crew.activityProfile.periodSeconds > 0.0;
-	if (ImGui::Checkbox((label + " periodic activity").c_str(), &crewPeriodic))
+	if (ImGui::Checkbox(describe("periodic activity", label).c_str(), &crewPeriodic))
 	{
 		if (crewPeriodic)
 		{
@@ -205,21 +223,21 @@ bool renderCrewEntry([[maybe_unused]] core::StationSystemsSettings& draft, core:
 		}
 	}
 	if (!crewPeriodic)
-		ImGui::InputDouble((label + " constant activity level").c_str(),
+		ImGui::InputDouble(describe("constant activity level", label).c_str(),
 			&crew.activityProfile.constantLevel, 0.0, 0.0, "%.3f");
 	else
 	{
-		ImGui::InputDouble((label + " activity period seconds").c_str(),
+		ImGui::InputDouble(describe("activity period seconds", label).c_str(),
 			&crew.activityProfile.periodSeconds, 0.0, 0.0, "%.1f");
 		for (size_t segment = 0; segment < crew.activityProfile.segments.size(); ++segment)
 		{
 			auto& stretch = crew.activityProfile.segments[segment];
-			auto const segmentRow = label + " activity segment " + std::to_string(segment);
-			ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+			auto const segmentRow = std::string("activity segment ") + std::to_string(segment);
+			ImGui::InputDouble(describe(segmentRow + " start", label).c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
 			ImGui::SameLine();
-			ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+			ImGui::InputDouble(describe(segmentRow + " level", label).c_str(), &stretch.level, 0.0, 0.0, "%.3f");
 			ImGui::SameLine();
-			if (ImGui::Button(("Remove " + segmentRow).c_str()))
+			if (ImGui::Button(describe("Remove " + segmentRow, label).c_str()))
 				crew.activityProfile.segments.erase(
 					crew.activityProfile.segments.begin() + static_cast<std::ptrdiff_t>(segment));
 			}
@@ -230,158 +248,160 @@ bool renderCrewEntry([[maybe_unused]] core::StationSystemsSettings& draft, core:
 	}
 	char crewFoodBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(crewFoodBuffer, crew.foodStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " food store").c_str(),
+	if (ImGui::InputText(describe("food store", label).c_str(),
 		crewFoodBuffer, sizeof(crewFoodBuffer)))
 		crew.foodStoreId = crewFoodBuffer;
 	char crewWaterBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(crewWaterBuffer, crew.waterStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " water store").c_str(),
+	if (ImGui::InputText(describe("water store", label).c_str(),
 		crewWaterBuffer, sizeof(crewWaterBuffer)))
 		crew.waterStoreId = crewWaterBuffer;
 	char crewUrineBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(crewUrineBuffer, crew.urineStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " urine store").c_str(),
+	if (ImGui::InputText(describe("urine store", label).c_str(),
 		crewUrineBuffer, sizeof(crewUrineBuffer)))
 		crew.urineStoreId = crewUrineBuffer;
 	char crewWasteBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(crewWasteBuffer, crew.organicWasteStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " organic waste store").c_str(),
+	if (ImGui::InputText(describe("organic waste store", label).c_str(),
 		crewWasteBuffer, sizeof(crewWasteBuffer)))
 		crew.organicWasteStoreId = crewWasteBuffer;
-	ImGui::InputDouble((label + " food per crew per s").c_str(),
+	ImGui::InputDouble(describe("food per crew per s", label).c_str(),
 		&crew.foodPerCrewPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " water per crew per s").c_str(),
+	ImGui::InputDouble(describe("water per crew per s", label).c_str(),
 		&crew.waterPerCrewPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " O2 per crew kg/s").c_str(),
+	ImGui::InputDouble(describe("O2 per crew kg/s", label).c_str(),
 		&crew.oxygenPerCrewKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " CO2 per crew kg/s").c_str(),
+	ImGui::InputDouble(describe("CO2 per crew kg/s", label).c_str(),
 		&crew.co2PerCrewKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " moisture per crew kg/s").c_str(),
+	ImGui::InputDouble(describe("moisture per crew kg/s", label).c_str(),
 		&crew.moisturePerCrewKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " urine per crew per s").c_str(),
+	ImGui::InputDouble(describe("urine per crew per s", label).c_str(),
 		&crew.urinePerCrewPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " organic waste per crew per s").c_str(),
+	ImGui::InputDouble(describe("organic waste per crew per s", label).c_str(),
 		&crew.organicWastePerCrewPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " metabolic heat per crew kW").c_str(),
+	ImGui::InputDouble(describe("metabolic heat per crew kW", label).c_str(),
 		&crew.metabolicHeatPerCrewKW, 0.0, 0.0, "%.4f");
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
 		removeCrew = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeCrew;
 }
 
 bool renderMicrobialProcessorEntry(core::StationSystemsSettings& draft, core::MicrobialProcessorSettings& processor,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeProcessor = false;
 	renderIdentity(label, processor.id);
 	renderWaterQuality(processor.waterQuality, label);
 	for (auto const* name : core::StationWaterDryConstituents)
 	{
 		bool enabled = processor.recoveredWaterCarryoverFractions.contains(name);
-		if (ImGui::Checkbox((label + " carry to recovered water: " + name).c_str(), &enabled))
+		if (ImGui::Checkbox((std::string("carry to recovered water: ") + name).c_str(), &enabled))
 		{ if (enabled) processor.recoveredWaterCarryoverFractions[name] = 0; else processor.recoveredWaterCarryoverFractions.erase(name); }
-		if (enabled) ImGui::InputDouble((label + " " + name + " carry-over fraction").c_str(),
+		if (enabled) ImGui::InputDouble((std::string("") + name + " carry-over fraction").c_str(),
 			&processor.recoveredWaterCarryoverFractions.at(name), 0, 0, "%.6f");
 	}
 	char processorFeedBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorFeedBuffer, processor.feedStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " organic waste feed store").c_str(),
+	if (ImGui::InputText(describe("organic waste feed store", label).c_str(),
 		processorFeedBuffer, sizeof(processorFeedBuffer)))
 		processor.feedStoreId = processorFeedBuffer;
 	char processorOxygenBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorOxygenBuffer, processor.oxygenStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " oxygen store").c_str(),
+	if (ImGui::InputText(describe("oxygen store", label).c_str(),
 		processorOxygenBuffer, sizeof(processorOxygenBuffer)))
 		processor.oxygenStoreId = processorOxygenBuffer;
 	char processorWaterBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorWaterBuffer, processor.waterStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " process water store").c_str(),
+	if (ImGui::InputText(describe("process water store", label).c_str(),
 		processorWaterBuffer, sizeof(processorWaterBuffer)))
 		processor.waterStoreId = processorWaterBuffer;
 	char processorMediaBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorMediaBuffer, processor.consumableStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " culture medium store").c_str(),
+	if (ImGui::InputText(describe("culture medium store", label).c_str(),
 		processorMediaBuffer, sizeof(processorMediaBuffer)))
 		processor.consumableStoreId = processorMediaBuffer;
 	char processorNutrientBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorNutrientBuffer, processor.nutrientStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " recovered nutrient store").c_str(),
+	if (ImGui::InputText(describe("recovered nutrient store", label).c_str(),
 		processorNutrientBuffer, sizeof(processorNutrientBuffer)))
 		processor.nutrientStoreId = processorNutrientBuffer;
 	char processorRecoveredWaterBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorRecoveredWaterBuffer, processor.recoveredWaterStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " recovered water store").c_str(),
+	if (ImGui::InputText(describe("recovered water store", label).c_str(),
 		processorRecoveredWaterBuffer, sizeof(processorRecoveredWaterBuffer)))
 		processor.recoveredWaterStoreId = processorRecoveredWaterBuffer;
 	char processorCo2Buffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorCo2Buffer, processor.co2StoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " CO2 store").c_str(),
+	if (ImGui::InputText(describe("CO2 store", label).c_str(),
 		processorCo2Buffer, sizeof(processorCo2Buffer)))
 		processor.co2StoreId = processorCo2Buffer;
 	char processorResidueBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorResidueBuffer, processor.residueStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " residue store").c_str(),
+	if (ImGui::InputText(describe("residue store", label).c_str(),
 		processorResidueBuffer, sizeof(processorResidueBuffer)))
 		processor.residueStoreId = processorResidueBuffer;
 	char processorStockBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorStockBuffer, processor.stockStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " replacement biological stock store").c_str(),
+	if (ImGui::InputText(describe("replacement biological stock store", label).c_str(),
 		processorStockBuffer, sizeof(processorStockBuffer)))
 		processor.stockStoreId = processorStockBuffer;
 	char processorThermalBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorThermalBuffer, processor.thermalClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " heat sink thermal class").c_str(),
+	if (ImGui::InputText(describe("heat sink thermal class", label).c_str(),
 		processorThermalBuffer, sizeof(processorThermalBuffer)))
 		processor.thermalClass = processorThermalBuffer;
 	char processorSinkBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorSinkBuffer, processor.heatSinkId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " heat sink reservoir").c_str(),
+	if (ImGui::InputText(describe("heat sink reservoir", label).c_str(),
 		processorSinkBuffer, sizeof(processorSinkBuffer)))
 		processor.heatSinkId = processorSinkBuffer;
-	ImGui::PushItemWidth(140.0f);
-	ImGui::InputDouble((label + " rated feed processing kg/s").c_str(),
+	ImGui::InputDouble(describe("rated feed processing kg/s", label).c_str(),
 		&processor.rateKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " specific energy kWh/kg feed").c_str(),
+	ImGui::InputDouble(describe("specific energy kWh/kg feed", label).c_str(),
 		&processor.specificEnergyKWhPerKgFeed, 0.0, 0.0, "%.4f");
 	int basis = static_cast<int>(processor.rateBasis);
-	if (ImGui::Combo((label + " rate basis").c_str(), &basis, "Fixed per feed mass\0Composition derived\0"))
+	if (ImGui::Combo(describe("rate basis", label).c_str(), &basis, "Fixed per feed mass\0Composition derived\0"))
 		processor.rateBasis = static_cast<core::StationRateBasis>(basis);
 	if (processor.rateBasis == core::StationRateBasis::FixedPerFeedMass)
 	{
-		ImGui::InputDouble((label + " oxygen per kg feed kg").c_str(),
+		ImGui::InputDouble(describe("oxygen per kg feed kg", label).c_str(),
 			&processor.oxygenPerKgFeedKg, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble((label + " process water per kg feed kg").c_str(),
+		ImGui::InputDouble(describe("process water per kg feed kg", label).c_str(),
 			&processor.processWaterPerKgFeedKg, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble((label + " medium units per kg feed").c_str(),
+		ImGui::InputDouble(describe("medium units per kg feed", label).c_str(),
 			&processor.consumablePerKgFeed, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble((label + " CO2 per kg feed kg").c_str(),
+		ImGui::InputDouble(describe("CO2 per kg feed kg", label).c_str(),
 			&processor.co2PerKgFeedKg, 0.0, 0.0, "%.4f");
 	}
 	else
 	{
-		ImGui::InputDouble((label + " organic oxidation fraction").c_str(), &processor.organicOxidationFraction);
-		ImGui::InputDouble((label + " O2 per kg organic oxidized").c_str(), &processor.o2PerKgOrganicOxidized);
-		ImGui::InputDouble((label + " nitrification fraction").c_str(), &processor.nitrificationFraction);
-		ImGui::InputDouble((label + " O2 per kg nitrified N").c_str(), &processor.o2PerKgNitrifiedN);
-		ImGui::InputDouble((label + " CO2 per kg organic oxidized").c_str(), &processor.co2PerKgOrganicOxidized);
-		ImGui::InputDouble((label + " process water target moisture").c_str(), &processor.processWaterTargetMoisture);
-		ImGui::InputDouble((label + " heat release fraction").c_str(), &processor.heatReleaseFraction);
-		ImGui::InputDouble((label + " medium kg per kg organic oxidized").c_str(), &processor.consumablePerKgOrganicOxidized);
+		ImGui::InputDouble(describe("organic oxidation fraction", label).c_str(), &processor.organicOxidationFraction);
+		ImGui::InputDouble(describe("O2 per kg organic oxidized", label).c_str(), &processor.o2PerKgOrganicOxidized);
+		ImGui::InputDouble(describe("nitrification fraction", label).c_str(), &processor.nitrificationFraction);
+		ImGui::InputDouble(describe("O2 per kg nitrified N", label).c_str(), &processor.o2PerKgNitrifiedN);
+		ImGui::InputDouble(describe("CO2 per kg organic oxidized", label).c_str(), &processor.co2PerKgOrganicOxidized);
+		ImGui::InputDouble(describe("process water target moisture", label).c_str(), &processor.processWaterTargetMoisture);
+		ImGui::InputDouble(describe("heat release fraction", label).c_str(), &processor.heatReleaseFraction);
+		ImGui::InputDouble(describe("medium kg per kg organic oxidized", label).c_str(), &processor.consumablePerKgOrganicOxidized);
 	}
-	ImGui::InputDouble((label + " nitrogen recovery").c_str(),
+	ImGui::InputDouble(describe("nitrogen recovery", label).c_str(),
 		&processor.nitrogenRecovery, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " phosphorus recovery").c_str(),
+	ImGui::InputDouble(describe("phosphorus recovery", label).c_str(),
 		&processor.phosphorusRecovery, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " potassium recovery").c_str(),
+	ImGui::InputDouble(describe("potassium recovery", label).c_str(),
 		&processor.potassiumRecovery, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " minerals recovery").c_str(),
+	ImGui::InputDouble(describe("minerals recovery", label).c_str(),
 		&processor.mineralsRecovery, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " water recovery").c_str(),
+	ImGui::InputDouble(describe("water recovery", label).c_str(),
 		&processor.waterRecovery, 0.0, 0.0, "%.4f");
 	if (processor.rateBasis == core::StationRateBasis::FixedPerFeedMass)
-		ImGui::InputDouble((label + " reaction heat kJ/kg feed").c_str(),
+		ImGui::InputDouble(describe("reaction heat kJ/kg feed", label).c_str(),
 			&processor.reactionHeatKJPerKgFeed, 0.0, 0.0, "%.2f");
 	// Re-evaluate from the draft every frame, after all rate/recovery edits.
 	// This deliberately never observes the World's live feed blend.
@@ -405,41 +425,43 @@ bool renderMicrobialProcessorEntry(core::StationSystemsSettings& draft, core::Mi
 				ImGui::SetTooltip("Estimate at rated feed throughput, before condition or resource throttling. Runtime uses the actual drawn blend, not this declaration.");
 		}
 	}
-	ImGui::InputDouble((label + " min operating temperature C").c_str(),
+	ImGui::InputDouble(describe("min operating temperature C", label).c_str(),
 		&processor.minOperatingTemperatureC, 0.0, 0.0, "%.2f");
-	ImGui::InputDouble((label + " max sink temperature C").c_str(),
+	ImGui::InputDouble(describe("max sink temperature C", label).c_str(),
 		&processor.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
-	ImGui::InputDouble((label + " initial condition").c_str(),
+	ImGui::InputDouble(describe("initial condition", label).c_str(),
 		&processor.initialCondition, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " starvation degrade per hour").c_str(),
+	ImGui::InputDouble(describe("starvation degrade per hour", label).c_str(),
 		&processor.starvationDegradePerHour, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " consumable exhaustion degrade per hour").c_str(),
+	ImGui::InputDouble(describe("consumable exhaustion degrade per hour", label).c_str(),
 		&processor.consumableExhaustionDegradePerHour, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " cold stress degrade per hour").c_str(),
+	ImGui::InputDouble(describe("cold stress degrade per hour", label).c_str(),
 		&processor.coldStressDegradePerHour, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " heat stress degrade per hour").c_str(),
+	ImGui::InputDouble(describe("heat stress degrade per hour", label).c_str(),
 		&processor.heatStressDegradePerHour, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " recovery per hour").c_str(),
+	ImGui::InputDouble(describe("recovery per hour", label).c_str(),
 		&processor.recoveryPerHour, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " stock units per condition point").c_str(),
+	ImGui::InputDouble(describe("stock units per condition point", label).c_str(),
 		&processor.stockUnitsPerConditionPoint, 0.0, 0.0, "%.4f");
-	ImGui::InputInt((label + " priority").c_str(), &processor.priority, 1, 0);
+	ImGui::InputInt(describe("priority", label).c_str(), &processor.priority, 1, 0);
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
 		removeProcessor = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeProcessor;
 }
 
 bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::CropPopulationSettings& crop,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeCrop = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, crop.id);
 	renderWaterQuality(crop.waterQuality, label);
 	bool selectiveIrrigation = !crop.irrigationUptakeFractions.empty();
-	if (ImGui::Checkbox((label + " selective irrigation").c_str(), &selectiveIrrigation))
+	if (ImGui::Checkbox(describe("selective irrigation", label).c_str(), &selectiveIrrigation))
 	{
 		if (selectiveIrrigation) crop.irrigationUptakeFractions = {{"nutrientNitrogen", 0}, {"phosphorus", 0}, {"potassium", 0}};
 		else crop.irrigationUptakeFractions.clear();
@@ -449,37 +471,37 @@ bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& dr
 		{
 			auto const found = crop.irrigationUptakeFractions.find(name);
 			double fraction = found == crop.irrigationUptakeFractions.end() ? 0 : found->second;
-			if (ImGui::InputDouble((label + " irrigation uptake " + name).c_str(), &fraction, 0, 0, "%.6f"))
+			if (ImGui::InputDouble((std::string("irrigation uptake ") + name).c_str(), &fraction, 0, 0, "%.6f"))
 				crop.irrigationUptakeFractions[name] = fraction;
 		}
 	char cropAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cropAtmosphereBuffer, crop.atmosphereId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " atmosphere").c_str(),
+	if (ImGui::InputText(describe("atmosphere", label).c_str(),
 		cropAtmosphereBuffer, sizeof(cropAtmosphereBuffer)))
 		crop.atmosphereId = cropAtmosphereBuffer;
 	char cropWaterBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cropWaterBuffer, crop.waterStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " irrigation water store").c_str(),
+	if (ImGui::InputText(describe("irrigation water store", label).c_str(),
 		cropWaterBuffer, sizeof(cropWaterBuffer)))
 		crop.waterStoreId = cropWaterBuffer;
 	char cropNitrogenBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cropNitrogenBuffer, crop.nitrogenStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " nitrogen store").c_str(),
+	if (ImGui::InputText(describe("nitrogen store", label).c_str(),
 		cropNitrogenBuffer, sizeof(cropNitrogenBuffer)))
 		crop.nitrogenStoreId = cropNitrogenBuffer;
 	char cropPhosphorusBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cropPhosphorusBuffer, crop.phosphorusStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " phosphorus store").c_str(),
+	if (ImGui::InputText(describe("phosphorus store", label).c_str(),
 		cropPhosphorusBuffer, sizeof(cropPhosphorusBuffer)))
 		crop.phosphorusStoreId = cropPhosphorusBuffer;
 	char cropPotassiumBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cropPotassiumBuffer, crop.potassiumStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " potassium store").c_str(),
+	if (ImGui::InputText(describe("potassium store", label).c_str(),
 		cropPotassiumBuffer, sizeof(cropPotassiumBuffer)))
 		crop.potassiumStoreId = cropPotassiumBuffer;
 	char cropMineralsBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cropMineralsBuffer, crop.mineralsStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " minerals store").c_str(),
+	if (ImGui::InputText(describe("minerals store", label).c_str(),
 		cropMineralsBuffer, sizeof(cropMineralsBuffer)))
 		crop.mineralsStoreId = cropMineralsBuffer;
 	// #581: the capacity-factor fields use %g so a large authored
@@ -488,44 +510,44 @@ bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	// re-committing it silently changed the number; %g keeps every
 	// magnitude - including the overflow candidates the capacity
 	// contract now refuses - displayable and editable exactly.
-	ImGui::InputDouble((label + " growing area m2").c_str(),
+	ImGui::InputDouble(describe("growing area m2", label).c_str(),
 		&crop.growingAreaM2, 0.0, 0.0, "%.15g");
-	ImGui::InputDouble((label + " max biomass density kg/m2").c_str(),
+	ImGui::InputDouble(describe("max biomass density kg/m2", label).c_str(),
 		&crop.maxBiomassDensityKgPerM2, 0.0, 0.0, "%.15g");
-	ImGui::InputDouble((label + " initial dry biomass kg").c_str(),
+	ImGui::InputDouble(describe("initial dry biomass kg", label).c_str(),
 		&crop.initialBiomassKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " lamp rated kW").c_str(),
+	ImGui::InputDouble(describe("lamp rated kW", label).c_str(),
 		&crop.lampRatedKW, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " circulation power kW (drawn before lamp)").c_str(),
+	ImGui::InputDouble(describe("circulation power kW (drawn before lamp)", label).c_str(),
 		&crop.circulationPowerKW, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " growth yield kg per kWh light").c_str(),
+	ImGui::InputDouble(describe("growth yield kg per kWh light", label).c_str(),
 		&crop.growthYieldKgPerKWh, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " respiration per hour").c_str(),
+	ImGui::InputDouble(describe("respiration per hour", label).c_str(),
 		&crop.respirationPerHour, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " transpiration kg per kg growth").c_str(),
+	ImGui::InputDouble(describe("transpiration kg per kg growth", label).c_str(),
 		&crop.transpirationKgPerKgGrowth, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " min growing temperature C").c_str(),
+	ImGui::InputDouble(describe("min growing temperature C", label).c_str(),
 		&crop.minGrowingTemperatureC, 0.0, 0.0, "%.2f");
-	ImGui::InputDouble((label + " max growing temperature C").c_str(),
+	ImGui::InputDouble(describe("max growing temperature C", label).c_str(),
 		&crop.maxGrowingTemperatureC, 0.0, 0.0, "%.2f");
 	char cropFoodBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cropFoodBuffer, crop.foodStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " food store").c_str(),
+	if (ImGui::InputText(describe("food store", label).c_str(),
 		cropFoodBuffer, sizeof(cropFoodBuffer)))
 		crop.foodStoreId = cropFoodBuffer;
 	char cropWasteBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cropWasteBuffer, crop.wasteStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " waste store").c_str(),
+	if (ImGui::InputText(describe("waste store", label).c_str(),
 		cropWasteBuffer, sizeof(cropWasteBuffer)))
 		crop.wasteStoreId = cropWasteBuffer;
-	ImGui::InputDouble((label + " harvest trigger kg (0 disables harvest)").c_str(),
+	ImGui::InputDouble(describe("harvest trigger kg (0 disables harvest)", label).c_str(),
 		&crop.harvestTriggerKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " harvest fraction of living biomass").c_str(),
+	ImGui::InputDouble(describe("harvest fraction of living biomass", label).c_str(),
 		&crop.harvestFraction, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " edible fraction of harvest").c_str(),
+	ImGui::InputDouble(describe("edible fraction of harvest", label).c_str(),
 		&crop.edibleFraction, 0.0, 0.0, "%.4f");
 	bool cropPeriodic = crop.illuminationProfile.periodSeconds > 0.0;
-	if (ImGui::Checkbox((label + " periodic illumination").c_str(), &cropPeriodic))
+	if (ImGui::Checkbox(describe("periodic illumination", label).c_str(), &cropPeriodic))
 	{
 		if (cropPeriodic)
 		{
@@ -540,21 +562,21 @@ bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& dr
 		}
 	}
 	if (!cropPeriodic)
-		ImGui::InputDouble((label + " constant illumination level").c_str(),
+		ImGui::InputDouble(describe("constant illumination level", label).c_str(),
 			&crop.illuminationProfile.constantLevel, 0.0, 0.0, "%.3f");
 	else
 	{
-		ImGui::InputDouble((label + " illumination period seconds").c_str(),
+		ImGui::InputDouble(describe("illumination period seconds", label).c_str(),
 			&crop.illuminationProfile.periodSeconds, 0.0, 0.0, "%.1f");
 		for (size_t segment = 0; segment < crop.illuminationProfile.segments.size(); ++segment)
 		{
 			auto& stretch = crop.illuminationProfile.segments[segment];
-			auto const segmentRow = label + " illumination segment " + std::to_string(segment);
-			ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+			auto const segmentRow = std::string("illumination segment ") + std::to_string(segment);
+			ImGui::InputDouble(describe(segmentRow + " start", label).c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
 			ImGui::SameLine();
-			ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+			ImGui::InputDouble(describe(segmentRow + " level", label).c_str(), &stretch.level, 0.0, 0.0, "%.3f");
 			ImGui::SameLine();
-			if (ImGui::Button(("Remove " + segmentRow).c_str()))
+			if (ImGui::Button(describe("Remove " + segmentRow, label).c_str()))
 				crop.illuminationProfile.segments.erase(
 					crop.illuminationProfile.segments.begin() + static_cast<std::ptrdiff_t>(segment));
 		}
@@ -564,110 +586,112 @@ bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& dr
 				{crop.illuminationProfile.periodSeconds * 0.5, 0.0});
 	}
 	ImGui::Text("  declared dry-mass composition (moisture and atmospheric nitrogen must be 0 for crops):");
-	ImGui::InputDouble((label + " composition moisture fraction").c_str(),
+	ImGui::InputDouble(describe("composition moisture fraction", label).c_str(),
 		&crop.composition.moisture, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " composition nutrient nitrogen fraction").c_str(),
+	ImGui::InputDouble(describe("composition nutrient nitrogen fraction", label).c_str(),
 		&crop.composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " composition atmospheric nitrogen fraction").c_str(),
+	ImGui::InputDouble(describe("composition atmospheric nitrogen fraction", label).c_str(),
 		&crop.composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " composition phosphorus fraction").c_str(),
+	ImGui::InputDouble(describe("composition phosphorus fraction", label).c_str(),
 		&crop.composition.phosphorus, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " composition potassium fraction").c_str(),
+	ImGui::InputDouble(describe("composition potassium fraction", label).c_str(),
 		&crop.composition.potassium, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " composition other minerals fraction").c_str(),
+	ImGui::InputDouble(describe("composition other minerals fraction", label).c_str(),
 		&crop.composition.otherMinerals, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " composition energy kJ per kg dry").c_str(),
+	ImGui::InputDouble(describe("composition energy kJ per kg dry", label).c_str(),
 		&crop.composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
-	ImGui::InputInt((label + " priority").c_str(), &crop.priority, 1, 0);
+	ImGui::InputInt(describe("priority", label).c_str(), &crop.priority, 1, 0);
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
 		removeCrop = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeCrop;
 }
 
 bool renderAlgaeCultureEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::AlgaeCultureSettings& algae,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeAlgae = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, algae.id);
 	renderWaterQuality(algae.waterQuality, label);
 	char algaeAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(algaeAtmosphereBuffer, algae.atmosphereId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " atmosphere").c_str(),
+	if (ImGui::InputText(describe("atmosphere", label).c_str(),
 		algaeAtmosphereBuffer, sizeof(algaeAtmosphereBuffer)))
 		algae.atmosphereId = algaeAtmosphereBuffer;
 	char algaeWaterBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(algaeWaterBuffer, algae.waterStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " culture water store").c_str(),
+	if (ImGui::InputText(describe("culture water store", label).c_str(),
 		algaeWaterBuffer, sizeof(algaeWaterBuffer)))
 		algae.waterStoreId = algaeWaterBuffer;
 	char algaeNitrogenBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(algaeNitrogenBuffer, algae.nitrogenStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " nitrogen store").c_str(),
+	if (ImGui::InputText(describe("nitrogen store", label).c_str(),
 		algaeNitrogenBuffer, sizeof(algaeNitrogenBuffer)))
 		algae.nitrogenStoreId = algaeNitrogenBuffer;
 	char algaePhosphorusBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(algaePhosphorusBuffer, algae.phosphorusStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " phosphorus store").c_str(),
+	if (ImGui::InputText(describe("phosphorus store", label).c_str(),
 		algaePhosphorusBuffer, sizeof(algaePhosphorusBuffer)))
 		algae.phosphorusStoreId = algaePhosphorusBuffer;
 	char algaePotassiumBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(algaePotassiumBuffer, algae.potassiumStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " potassium store").c_str(),
+	if (ImGui::InputText(describe("potassium store", label).c_str(),
 		algaePotassiumBuffer, sizeof(algaePotassiumBuffer)))
 		algae.potassiumStoreId = algaePotassiumBuffer;
 	char algaeMineralsBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(algaeMineralsBuffer, algae.mineralsStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " minerals store").c_str(),
+	if (ImGui::InputText(describe("minerals store", label).c_str(),
 		algaeMineralsBuffer, sizeof(algaeMineralsBuffer)))
 		algae.mineralsStoreId = algaeMineralsBuffer;
-	ImGui::InputDouble((label + " active culture volume L").c_str(),
+	ImGui::InputDouble(describe("active culture volume L", label).c_str(),
 		&algae.cultureVolumeL, 0.0, 0.0, "%.15g");
-	ImGui::InputDouble((label + " max biomass density kg/L").c_str(),
+	ImGui::InputDouble(describe("max biomass density kg/L", label).c_str(),
 		&algae.maxBiomassDensityKgPerL, 0.0, 0.0, "%.15g");
-	ImGui::InputDouble((label + " initial dry biomass kg").c_str(),
+	ImGui::InputDouble(describe("initial dry biomass kg", label).c_str(),
 		&algae.initialBiomassKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " lamp rated kW").c_str(),
+	ImGui::InputDouble(describe("lamp rated kW", label).c_str(),
 		&algae.lampRatedKW, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " circulation power kW (drawn before lamp)").c_str(),
+	ImGui::InputDouble(describe("circulation power kW (drawn before lamp)", label).c_str(),
 		&algae.circulationPowerKW, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " growth yield kg per kWh light").c_str(),
+	ImGui::InputDouble(describe("growth yield kg per kWh light", label).c_str(),
 		&algae.growthYieldKgPerKWh, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " respiration per hour").c_str(),
+	ImGui::InputDouble(describe("respiration per hour", label).c_str(),
 		&algae.respirationPerHour, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " evaporation kg per kg growth").c_str(),
+	ImGui::InputDouble(describe("evaporation kg per kg growth", label).c_str(),
 		&algae.evaporationKgPerKgGrowth, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " min growing temperature C").c_str(),
+	ImGui::InputDouble(describe("min growing temperature C", label).c_str(),
 		&algae.minGrowingTemperatureC, 0.0, 0.0, "%.2f");
-	ImGui::InputDouble((label + " max growing temperature C").c_str(),
+	ImGui::InputDouble(describe("max growing temperature C", label).c_str(),
 		&algae.maxGrowingTemperatureC, 0.0, 0.0, "%.2f");
 	char algaeFoodBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(algaeFoodBuffer, algae.foodStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " food store").c_str(),
+	if (ImGui::InputText(describe("food store", label).c_str(),
 		algaeFoodBuffer, sizeof(algaeFoodBuffer)))
 		algae.foodStoreId = algaeFoodBuffer;
 	char algaeRecoveryBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(algaeRecoveryBuffer, algae.recoveryStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " recovery store").c_str(),
+	if (ImGui::InputText(describe("recovery store", label).c_str(),
 		algaeRecoveryBuffer, sizeof(algaeRecoveryBuffer)))
 		algae.recoveryStoreId = algaeRecoveryBuffer;
 	char algaeWasteBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(algaeWasteBuffer, algae.wasteStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " waste store").c_str(),
+	if (ImGui::InputText(describe("waste store", label).c_str(),
 		algaeWasteBuffer, sizeof(algaeWasteBuffer)))
 		algae.wasteStoreId = algaeWasteBuffer;
-	ImGui::InputDouble((label + " harvest trigger kg (0 disables harvest)").c_str(),
+	ImGui::InputDouble(describe("harvest trigger kg (0 disables harvest)", label).c_str(),
 		&algae.harvestTriggerKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " harvest fraction of living biomass").c_str(),
+	ImGui::InputDouble(describe("harvest fraction of living biomass", label).c_str(),
 		&algae.harvestFraction, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " food fraction of harvest").c_str(),
+	ImGui::InputDouble(describe("food fraction of harvest", label).c_str(),
 		&algae.foodFraction, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " recovery fraction of harvest").c_str(),
+	ImGui::InputDouble(describe("recovery fraction of harvest", label).c_str(),
 		&algae.recoveryFraction, 0.0, 0.0, "%.4f");
 	bool algaePeriodic = algae.illuminationProfile.periodSeconds > 0.0;
-	if (ImGui::Checkbox((label + " periodic illumination").c_str(), &algaePeriodic))
+	if (ImGui::Checkbox(describe("periodic illumination", label).c_str(), &algaePeriodic))
 	{
 		if (algaePeriodic)
 		{
@@ -682,21 +706,21 @@ bool renderAlgaeCultureEntry([[maybe_unused]] core::StationSystemsSettings& draf
 		}
 	}
 	if (!algaePeriodic)
-		ImGui::InputDouble((label + " constant illumination level").c_str(),
+		ImGui::InputDouble(describe("constant illumination level", label).c_str(),
 			&algae.illuminationProfile.constantLevel, 0.0, 0.0, "%.3f");
 	else
 	{
-		ImGui::InputDouble((label + " illumination period seconds").c_str(),
+		ImGui::InputDouble(describe("illumination period seconds", label).c_str(),
 			&algae.illuminationProfile.periodSeconds, 0.0, 0.0, "%.1f");
 		for (size_t segment = 0; segment < algae.illuminationProfile.segments.size(); ++segment)
 		{
 			auto& stretch = algae.illuminationProfile.segments[segment];
-			auto const segmentRow = label + " illumination segment " + std::to_string(segment);
-			ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+			auto const segmentRow = std::string("illumination segment ") + std::to_string(segment);
+			ImGui::InputDouble(describe(segmentRow + " start", label).c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
 			ImGui::SameLine();
-			ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+			ImGui::InputDouble(describe(segmentRow + " level", label).c_str(), &stretch.level, 0.0, 0.0, "%.3f");
 			ImGui::SameLine();
-			if (ImGui::Button(("Remove " + segmentRow).c_str()))
+			if (ImGui::Button(describe("Remove " + segmentRow, label).c_str()))
 				algae.illuminationProfile.segments.erase(
 					algae.illuminationProfile.segments.begin() + static_cast<std::ptrdiff_t>(segment));
 		}
@@ -706,25 +730,26 @@ bool renderAlgaeCultureEntry([[maybe_unused]] core::StationSystemsSettings& draf
 				{algae.illuminationProfile.periodSeconds * 0.5, 0.0});
 	}
 	ImGui::Text("  declared dry-mass composition (moisture and atmospheric nitrogen must be 0 for cultures):");
-	ImGui::InputDouble((label + " composition moisture fraction").c_str(),
+	ImGui::InputDouble(describe("composition moisture fraction", label).c_str(),
 		&algae.composition.moisture, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " composition nutrient nitrogen fraction").c_str(),
+	ImGui::InputDouble(describe("composition nutrient nitrogen fraction", label).c_str(),
 		&algae.composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " composition atmospheric nitrogen fraction").c_str(),
+	ImGui::InputDouble(describe("composition atmospheric nitrogen fraction", label).c_str(),
 		&algae.composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " composition phosphorus fraction").c_str(),
+	ImGui::InputDouble(describe("composition phosphorus fraction", label).c_str(),
 		&algae.composition.phosphorus, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " composition potassium fraction").c_str(),
+	ImGui::InputDouble(describe("composition potassium fraction", label).c_str(),
 		&algae.composition.potassium, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " composition other minerals fraction").c_str(),
+	ImGui::InputDouble(describe("composition other minerals fraction", label).c_str(),
 		&algae.composition.otherMinerals, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " composition energy kJ per kg dry").c_str(),
+	ImGui::InputDouble(describe("composition energy kJ per kg dry", label).c_str(),
 		&algae.composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
-	ImGui::InputInt((label + " priority").c_str(), &algae.priority, 1, 0);
+	ImGui::InputInt(describe("priority", label).c_str(), &algae.priority, 1, 0);
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
 		removeAlgae = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeAlgae;
 }
 
@@ -732,12 +757,13 @@ bool renderStoreEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::ResourceStoreSettings& store,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, store.id);
 	char materialBuffer[core::MaxStationMaterialIdLength + 1]{};
 	std::strncpy(materialBuffer, store.materialId.c_str(), sizeof(materialBuffer) - 1);
-	if (ImGui::InputText((label + " material identity").c_str(), materialBuffer, sizeof(materialBuffer)))
+	if (ImGui::InputText(describe("material identity", label).c_str(), materialBuffer, sizeof(materialBuffer)))
 		store.materialId = materialBuffer;
 	if (store.materialId.empty()) ImGui::TextUnformatted("Material: Unclassified");
 	else if (!core::isValidStationMaterialId(store.materialId))
@@ -746,17 +772,17 @@ bool renderStoreEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Material identity is independent of store name, unit and composition. Empty is unclassified; it never changes allocation.");
 	char unitBuffer[8]{};
 	std::strncpy(unitBuffer, store.unit.c_str(), sizeof(unitBuffer) - 1);
-	if (ImGui::InputText((label + " unit").c_str(), unitBuffer, sizeof(unitBuffer)))
+	if (ImGui::InputText(describe("unit", label).c_str(), unitBuffer, sizeof(unitBuffer)))
 		store.unit = unitBuffer;
-	ImGui::InputDouble((label + " capacity").c_str(), &store.capacity, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " starting usable").c_str(), &store.startingQualified, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " starting held").c_str(), &store.startingUnqualified, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " protected reserve").c_str(), &store.protectedReserve, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("capacity", label).c_str(), &store.capacity, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("starting usable", label).c_str(), &store.startingQualified, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("starting held", label).c_str(), &store.startingUnqualified, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("protected reserve", label).c_str(), &store.protectedReserve, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
 	bool compound = store.composition.has_value();
-	if (ImGui::Checkbox((label + " declared composition").c_str(), &compound))
+	if (ImGui::Checkbox(describe("declared composition", label).c_str(), &compound))
 	{
 		if (compound && !store.composition) store.composition = core::ResourceCompositionSettings{};
 		else if (!compound) store.composition.reset();
@@ -764,101 +790,105 @@ bool renderStoreEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	if (store.composition)
 	{
 		auto& composition = *store.composition;
-		ImGui::InputDouble((label + " moisture fraction").c_str(), &composition.moisture, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble((label + " nutrient nitrogen fraction").c_str(), &composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble((label + " atmospheric nitrogen fraction").c_str(), &composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble((label + " phosphorus fraction").c_str(), &composition.phosphorus, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble((label + " potassium fraction").c_str(), &composition.potassium, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble((label + " other minerals fraction").c_str(), &composition.otherMinerals, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble((label + " energy kJ per kg dry").c_str(), &composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
+		ImGui::InputDouble(describe("moisture fraction", label).c_str(), &composition.moisture, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(describe("nutrient nitrogen fraction", label).c_str(), &composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(describe("atmospheric nitrogen fraction", label).c_str(), &composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(describe("phosphorus fraction", label).c_str(), &composition.phosphorus, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(describe("potassium fraction", label).c_str(), &composition.potassium, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(describe("other minerals fraction", label).c_str(), &composition.otherMinerals, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(describe("energy kJ per kg dry", label).c_str(), &composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
 	}
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeRequested;
 }
 
 bool renderWaterCollectorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::WaterCollectorSettings& collector, std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeCollector = false;
 	renderIdentity(label, collector.id);
 	char collectorAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(collectorAtmosphereBuffer, collector.atmosphereId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " atmosphere").c_str(),
+	if (ImGui::InputText(describe("atmosphere", label).c_str(),
 		collectorAtmosphereBuffer, sizeof(collectorAtmosphereBuffer)))
 		collector.atmosphereId = collectorAtmosphereBuffer;
 	char collectorLoopBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(collectorLoopBuffer, collector.coolingLoopId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " cooling loop").c_str(),
+	if (ImGui::InputText(describe("cooling loop", label).c_str(),
 		collectorLoopBuffer, sizeof(collectorLoopBuffer)))
 		collector.coolingLoopId = collectorLoopBuffer;
 	char collectorClassBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(collectorClassBuffer, collector.thermalClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " thermal class").c_str(),
+	if (ImGui::InputText(describe("thermal class", label).c_str(),
 		collectorClassBuffer, sizeof(collectorClassBuffer)))
 		collector.thermalClass = collectorClassBuffer;
 	char collectorDestBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(collectorDestBuffer, collector.destStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " raw water store").c_str(),
+	if (ImGui::InputText(describe("raw water store", label).c_str(),
 		collectorDestBuffer, sizeof(collectorDestBuffer)))
 		collector.destStoreId = collectorDestBuffer;
-	ImGui::PushItemWidth(140.0f);
-	ImGui::InputDouble((label + " max rate kg/s").c_str(),
+	ImGui::InputDouble(describe("max rate kg/s", label).c_str(),
 		&collector.maxRateKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " target RH").c_str(),
+	ImGui::InputDouble(describe("target RH", label).c_str(),
 		&collector.targetRelativeHumidity, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeCollector = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeCollector;
 }
 
 bool renderWaterTreatmentEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::WaterTreatmentSettings& treatment, std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeTreatment = false;
 	renderIdentity(label, treatment.id);
 	char treatmentSourceBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(treatmentSourceBuffer, treatment.sourceStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " raw water store").c_str(),
+	if (ImGui::InputText(describe("raw water store", label).c_str(),
 		treatmentSourceBuffer, sizeof(treatmentSourceBuffer)))
 		treatment.sourceStoreId = treatmentSourceBuffer;
 	char treatmentTreatedBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(treatmentTreatedBuffer, treatment.treatedStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " treated store").c_str(),
+	if (ImGui::InputText(describe("treated store", label).c_str(),
 		treatmentTreatedBuffer, sizeof(treatmentTreatedBuffer)))
 		treatment.treatedStoreId = treatmentTreatedBuffer;
 	char treatmentConcentrateBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(treatmentConcentrateBuffer, treatment.concentrateStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " concentrate store").c_str(),
+	if (ImGui::InputText(describe("concentrate store", label).c_str(),
 		treatmentConcentrateBuffer, sizeof(treatmentConcentrateBuffer)))
 		treatment.concentrateStoreId = treatmentConcentrateBuffer;
 	char treatmentConsumableBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(treatmentConsumableBuffer, treatment.consumableStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " consumable store").c_str(),
+	if (ImGui::InputText(describe("consumable store", label).c_str(),
 		treatmentConsumableBuffer, sizeof(treatmentConsumableBuffer)))
 		treatment.consumableStoreId = treatmentConsumableBuffer;
-	ImGui::PushItemWidth(140.0f);
-	ImGui::InputDouble((label + " throughput kg/s").c_str(),
+	ImGui::InputDouble(describe("throughput kg/s", label).c_str(),
 		&treatment.throughputKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " recovery ratio").c_str(),
+	ImGui::InputDouble(describe("recovery ratio", label).c_str(),
 		&treatment.recoveryRatio, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " specific energy kWh/kg").c_str(),
+	ImGui::InputDouble(describe("specific energy kWh/kg", label).c_str(),
 		&treatment.specificEnergyKWhPerKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " consumable per kg").c_str(),
+	ImGui::InputDouble(describe("consumable per kg", label).c_str(),
 		&treatment.consumablePerKg, 0.0, 0.0, "%.6f");
 	ImGui::TextUnformatted("Removal fractions (default: all removed)");
 	for (auto const* name : core::StationWaterDryConstituents)
 	{
 		auto found = treatment.removalFractions.find(name);
 		bool authored = found != treatment.removalFractions.end();
-		if (ImGui::Checkbox((label + " override " + name).c_str(), &authored))
+		if (ImGui::Checkbox((std::string("override ") + name).c_str(), &authored))
 		{
 			if (authored) treatment.removalFractions[name] = 1.0;
 			else treatment.removalFractions.erase(name);
 		}
 		if (authored)
-			ImGui::InputDouble((label + " removal " + name).c_str(),
+			ImGui::InputDouble((std::string("removal ") + name).c_str(),
 				&treatment.removalFractions.at(name), 0, 0, "%.6f");
 	}
 	auto const source = std::find_if(draft.stores.begin(), draft.stores.end(),
@@ -874,178 +904,187 @@ bool renderWaterTreatmentEntry([[maybe_unused]] core::StationSystemsSettings& dr
 		for (auto const* name : core::StationWaterDryConstituents)
 			ImGui::Text("  %s: %.8g", name, total > 0 ? effluent.at(name) / total : 0.0);
 	}
-	ImGui::InputInt((label + " priority").c_str(), &treatment.priority, 1, 0);
+	ImGui::InputInt(describe("priority", label).c_str(), &treatment.priority, 1, 0);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeTreatment = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeTreatment;
 }
 
 bool renderElectrolyzerEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::ElectrolyzerSettings& cell, std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeCell = false;
 	renderIdentity(label, cell.id);
 	char cellWaterBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellWaterBuffer, cell.waterStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " feed water store").c_str(),
+	if (ImGui::InputText(describe("feed water store", label).c_str(),
 		cellWaterBuffer, sizeof(cellWaterBuffer)))
 		cell.waterStoreId = cellWaterBuffer;
 	char cellOxygenBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellOxygenBuffer, cell.oxygenStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " oxygen store (or leave empty for the compartment)").c_str(),
+	if (ImGui::InputText(describe("oxygen store (or leave empty for the compartment)", label).c_str(),
 		cellOxygenBuffer, sizeof(cellOxygenBuffer)))
 		cell.oxygenStoreId = cellOxygenBuffer;
 	char cellHydrogenBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellHydrogenBuffer, cell.hydrogenStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " hydrogen store").c_str(),
+	if (ImGui::InputText(describe("hydrogen store", label).c_str(),
 		cellHydrogenBuffer, sizeof(cellHydrogenBuffer)))
 		cell.hydrogenStoreId = cellHydrogenBuffer;
 	char cellAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellAtmosphereBuffer, cell.atmosphereId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " delivery compartment (or leave empty for the store)").c_str(),
+	if (ImGui::InputText(describe("delivery compartment (or leave empty for the store)", label).c_str(),
 		cellAtmosphereBuffer, sizeof(cellAtmosphereBuffer)))
 		cell.atmosphereId = cellAtmosphereBuffer;
 	char cellThermalBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellThermalBuffer, cell.thermalClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " heat sink thermal class").c_str(),
+	if (ImGui::InputText(describe("heat sink thermal class", label).c_str(),
 		cellThermalBuffer, sizeof(cellThermalBuffer)))
 		cell.thermalClass = cellThermalBuffer;
 	char cellSinkBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellSinkBuffer, cell.heatSinkId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " heat sink reservoir").c_str(),
+	if (ImGui::InputText(describe("heat sink reservoir", label).c_str(),
 		cellSinkBuffer, sizeof(cellSinkBuffer)))
 		cell.heatSinkId = cellSinkBuffer;
-	ImGui::PushItemWidth(140.0f);
-	ImGui::InputDouble((label + " rated split kg/s").c_str(),
+	ImGui::InputDouble(describe("rated split kg/s", label).c_str(),
 		&cell.rateKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " specific energy kWh/kg water").c_str(),
+	ImGui::InputDouble(describe("specific energy kWh/kg water", label).c_str(),
 		&cell.specificEnergyKWhPerKgWater, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " max sink temperature C").c_str(),
+	ImGui::InputDouble(describe("max sink temperature C", label).c_str(),
 		&cell.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
-	ImGui::InputInt((label + " priority").c_str(), &cell.priority, 1, 0);
+	ImGui::InputInt(describe("priority", label).c_str(), &cell.priority, 1, 0);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeCell = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeCell;
 }
 
 bool renderCo2CaptureEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::Co2CaptureSettings& capture, std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeCapture = false;
 	renderIdentity(label, capture.id);
 	char captureAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(captureAtmosphereBuffer, capture.atmosphereId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " compartment").c_str(),
+	if (ImGui::InputText(describe("compartment", label).c_str(),
 		captureAtmosphereBuffer, sizeof(captureAtmosphereBuffer)))
 		capture.atmosphereId = captureAtmosphereBuffer;
 	char captureStoreBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(captureStoreBuffer, capture.captureStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " capture store").c_str(),
+	if (ImGui::InputText(describe("capture store", label).c_str(),
 		captureStoreBuffer, sizeof(captureStoreBuffer)))
 		capture.captureStoreId = captureStoreBuffer;
 	char captureConsumableBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(captureConsumableBuffer, capture.consumableStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " consumable store (empty: none)").c_str(),
+	if (ImGui::InputText(describe("consumable store (empty: none)", label).c_str(),
 		captureConsumableBuffer, sizeof(captureConsumableBuffer)))
 		capture.consumableStoreId = captureConsumableBuffer;
-	ImGui::PushItemWidth(140.0f);
-	ImGui::InputDouble((label + " max rate kg/s").c_str(),
+	ImGui::InputDouble(describe("max rate kg/s", label).c_str(),
 		&capture.maxRateKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " specific energy kWh/kg").c_str(),
+	ImGui::InputDouble(describe("specific energy kWh/kg", label).c_str(),
 		&capture.specificEnergyKWhPerKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " consumable per kg").c_str(),
+	ImGui::InputDouble(describe("consumable per kg", label).c_str(),
 		&capture.consumablePerKg, 0.0, 0.0, "%.6f");
-	ImGui::InputInt((label + " priority").c_str(), &capture.priority, 1, 0);
+	ImGui::InputInt(describe("priority", label).c_str(), &capture.priority, 1, 0);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeCapture = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeCapture;
 }
 
 bool renderAtmosphereEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::AtmosphereSettings& atmosphere, std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeAtmosphere = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, atmosphere.id);
-	ImGui::InputDouble((label + " volume m3").c_str(),
+	ImGui::InputDouble(describe("volume m3", label).c_str(),
 		&atmosphere.volumeM3, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " starting oxygen kg").c_str(),
+	ImGui::InputDouble(describe("starting oxygen kg", label).c_str(),
 		&atmosphere.startingOxygenKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " starting nitrogen kg").c_str(),
+	ImGui::InputDouble(describe("starting nitrogen kg", label).c_str(),
 		&atmosphere.startingNitrogenKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " starting CO2 kg").c_str(),
+	ImGui::InputDouble(describe("starting CO2 kg", label).c_str(),
 		&atmosphere.startingCarbonDioxideKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " starting water vapour kg").c_str(),
+	ImGui::InputDouble(describe("starting water vapour kg", label).c_str(),
 		&atmosphere.startingWaterVapourKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " starting temperature C").c_str(),
+	ImGui::InputDouble(describe("starting temperature C", label).c_str(),
 		&atmosphere.startingTemperatureC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " thermal capacity kJ/K").c_str(),
+	ImGui::InputDouble(describe("thermal capacity kJ/K", label).c_str(),
 		&atmosphere.thermalCapacityKJPerK, 0.0, 0.0, "%.3f");
 	char atmosphereReservoirBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(atmosphereReservoirBuffer, atmosphere.reservoirId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " reservoir (empty = adiabatic)").c_str(),
+	if (ImGui::InputText(describe("reservoir (empty = adiabatic)", label).c_str(),
 		atmosphereReservoirBuffer, sizeof(atmosphereReservoirBuffer)))
 		atmosphere.reservoirId = atmosphereReservoirBuffer;
-	ImGui::InputDouble((label + " exchanger conductance kW/K").c_str(),
+	ImGui::InputDouble(describe("exchanger conductance kW/K", label).c_str(),
 		&atmosphere.exchangerConductanceKWPerK, 0.0, 0.0, "%.4f");
-	ImGui::InputInt((label + " occupants").c_str(),
+	ImGui::InputInt(describe("occupants", label).c_str(),
 		&atmosphere.occupants, 1, 0);
-	ImGui::InputDouble((label + " O2 use per occupant kg/s").c_str(),
+	ImGui::InputDouble(describe("O2 use per occupant kg/s", label).c_str(),
 		&atmosphere.oxygenUsePerOccupantKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " CO2 produced per occupant kg/s").c_str(),
+	ImGui::InputDouble(describe("CO2 produced per occupant kg/s", label).c_str(),
 		&atmosphere.co2ProductionPerOccupantKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " sensible heat per occupant kW").c_str(),
+	ImGui::InputDouble(describe("sensible heat per occupant kW", label).c_str(),
 		&atmosphere.sensibleHeatPerOccupantKW, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " moisture added per occupant kg/s").c_str(),
+	ImGui::InputDouble(describe("moisture added per occupant kg/s", label).c_str(),
 		&atmosphere.moistureAdditionPerOccupantKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " leak rate kg/s").c_str(),
+	ImGui::InputDouble(describe("leak rate kg/s", label).c_str(),
 		&atmosphere.leakRateKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " min pressure kPa").c_str(),
+	ImGui::InputDouble(describe("min pressure kPa", label).c_str(),
 		&atmosphere.minPressureKPa, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " max pressure kPa").c_str(),
+	ImGui::InputDouble(describe("max pressure kPa", label).c_str(),
 		&atmosphere.maxPressureKPa, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " min O2 partial pressure kPa").c_str(),
+	ImGui::InputDouble(describe("min O2 partial pressure kPa", label).c_str(),
 		&atmosphere.minOxygenPartialPressureKPa, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " max CO2 partial pressure kPa").c_str(),
+	ImGui::InputDouble(describe("max CO2 partial pressure kPa", label).c_str(),
 		&atmosphere.maxCarbonDioxidePartialPressureKPa, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeAtmosphere = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeAtmosphere;
 }
 
 bool renderAirlockCycleEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::AirlockCycleSettings& cycle, std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeCycle = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, cycle.id);
 	char cycleAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cycleAtmosphereBuffer, cycle.atmosphereId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " atmosphere").c_str(),
+	if (ImGui::InputText(describe("atmosphere", label).c_str(),
 		cycleAtmosphereBuffer, sizeof(cycleAtmosphereBuffer)))
 		cycle.atmosphereId = cycleAtmosphereBuffer;
-	ImGui::InputDouble((label + " gas mass kg").c_str(),
+	ImGui::InputDouble(describe("gas mass kg", label).c_str(),
 		&cycle.gasMassKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " first occurrence s").c_str(),
+	ImGui::InputDouble(describe("first occurrence s", label).c_str(),
 		&cycle.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " recurrence s (0 = one-off)").c_str(),
+	ImGui::InputDouble(describe("recurrence s (0 = one-off)", label).c_str(),
 		&cycle.recurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " recovered fraction").c_str(),
+	ImGui::InputDouble(describe("recovered fraction", label).c_str(),
 		&cycle.recoveredFraction, 0.0, 0.0, "%.3f");
-	ImGui::InputInt((label + " priority").c_str(),
+	ImGui::InputInt(describe("priority", label).c_str(),
 		&cycle.priority, 1, 0);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeCycle = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeCycle;
 }
 
@@ -1053,43 +1092,45 @@ bool renderTransferEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::ResourceTransferSettings& transfer,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, transfer.id);
 	char sourceBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(sourceBuffer, transfer.sourceId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " source").c_str(), sourceBuffer, sizeof(sourceBuffer)))
+	if (ImGui::InputText(describe("source", label).c_str(), sourceBuffer, sizeof(sourceBuffer)))
 		transfer.sourceId = sourceBuffer;
 	char destinationBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(destinationBuffer, transfer.destinationId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " destination").c_str(), destinationBuffer, sizeof(destinationBuffer)))
+	if (ImGui::InputText(describe("destination", label).c_str(), destinationBuffer, sizeof(destinationBuffer)))
 		transfer.destinationId = destinationBuffer;
 	char transferUnitBuffer[8]{};
 	std::strncpy(transferUnitBuffer, transfer.unit.c_str(), sizeof(transferUnitBuffer) - 1);
-	if (ImGui::InputText((label + " unit").c_str(), transferUnitBuffer, sizeof(transferUnitBuffer)))
+	if (ImGui::InputText(describe("unit", label).c_str(), transferUnitBuffer, sizeof(transferUnitBuffer)))
 		transfer.unit = transferUnitBuffer;
 	int mode = static_cast<int>(transfer.mode);
-	if (ImGui::Combo((label + " mode").c_str(), &mode, "Continuous\0Scheduled\0"))
+	if (ImGui::Combo(describe("mode", label).c_str(), &mode, "Continuous\0Scheduled\0"))
 		transfer.mode = static_cast<core::ResourceTransferMode>(mode);
 	if (transfer.mode == core::ResourceTransferMode::Scheduled)
 	{
-		ImGui::InputDouble((label + " quantity").c_str(), &transfer.quantity, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble((label + " first occurrence seconds").c_str(), &transfer.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble((label + " recurrence seconds (0 = one-off)").c_str(), &transfer.recurrenceSeconds, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(describe("quantity", label).c_str(), &transfer.quantity, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(describe("first occurrence seconds", label).c_str(), &transfer.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(describe("recurrence seconds (0 = one-off)", label).c_str(), &transfer.recurrenceSeconds, 0.0, 0.0, "%.6f");
 		ImGui::TextWrapped("Recurrence is zero for one-off, otherwise at least one fixed tick. Each occurrence requests the original quantity; shortages never accumulate. Lossless Non-physical inventory event; connection ratings are informational.");
 	}
-	else ImGui::InputDouble((label + " rate per second").c_str(), &transfer.ratePerSecond, 0.0, 0.0, "%.3f");
+	else ImGui::InputDouble(describe("rate per second", label).c_str(), &transfer.ratePerSecond, 0.0, 0.0, "%.3f");
 	ImGui::TextWrapped("Switching mode retains inactive settings and connection design properties. Only the active mode executes after Apply.");
 	// Keep invalid drafts editable (including hidden settings after a switch),
 	// but use the same active-mode validation as Apply and document loading.
 	std::string diagnostic;
 	if (!core::validateStationTransferSettings(transfer, diagnostic))
 		ImGui::TextWrapped("%s", diagnostic.c_str());
-	ImGui::InputInt((label + " priority").c_str(), &transfer.priority);
+	ImGui::InputInt(describe("priority", label).c_str(), &transfer.priority);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeRequested;
 }
 
@@ -1137,13 +1178,14 @@ bool renderEquipmentLoadEntry([[maybe_unused]] core::StationSystemsSettings& dra
 	core::EquipmentLoadSettings& load,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, load.id);
-	ImGui::InputDouble((label + " electrical demand kW").c_str(),
+	ImGui::InputDouble(describe("electrical demand kW", label).c_str(),
 		&load.electricalDemandKW, 0.0, 0.0, "%.3f");
 	bool loadPeriodic = load.operatingProfile.periodSeconds > 0.0;
-	if (ImGui::Checkbox((label + " periodic duty").c_str(), &loadPeriodic))
+	if (ImGui::Checkbox(describe("periodic duty", label).c_str(), &loadPeriodic))
 	{
 		if (loadPeriodic)
 		{
@@ -1158,21 +1200,21 @@ bool renderEquipmentLoadEntry([[maybe_unused]] core::StationSystemsSettings& dra
 		}
 	}
 	if (!loadPeriodic)
-		ImGui::InputDouble((label + " constant duty").c_str(),
+		ImGui::InputDouble(describe("constant duty", label).c_str(),
 			&load.operatingProfile.constantLevel, 0.0, 0.0, "%.3f");
 	else
 	{
-		ImGui::InputDouble((label + " duty period seconds").c_str(),
+		ImGui::InputDouble(describe("duty period seconds", label).c_str(),
 			&load.operatingProfile.periodSeconds, 0.0, 0.0, "%.1f");
 		for (size_t segment = 0; segment < load.operatingProfile.segments.size(); ++segment)
 		{
 			auto& stretch = load.operatingProfile.segments[segment];
-			auto const segmentRow = label + " duty segment " + std::to_string(segment);
-			ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+			auto const segmentRow = std::string("duty segment ") + std::to_string(segment);
+			ImGui::InputDouble(describe(segmentRow + " start", label).c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
 			ImGui::SameLine();
-			ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+			ImGui::InputDouble(describe(segmentRow + " level", label).c_str(), &stretch.level, 0.0, 0.0, "%.3f");
 			ImGui::SameLine();
-			if (ImGui::Button(("Remove " + segmentRow).c_str()))
+			if (ImGui::Button(describe("Remove " + segmentRow, label).c_str()))
 				load.operatingProfile.segments.erase(
 					load.operatingProfile.segments.begin() + static_cast<std::ptrdiff_t>(segment));
 		}
@@ -1181,53 +1223,53 @@ bool renderEquipmentLoadEntry([[maybe_unused]] core::StationSystemsSettings& dra
 			load.operatingProfile.segments.push_back(
 				{load.operatingProfile.periodSeconds * 0.5, 0.0});
 	}
-	ImGui::InputDouble((label + " heat output kW").c_str(), &load.heatOutputKW, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("heat output kW", label).c_str(), &load.heatOutputKW, 0.0, 0.0, "%.3f");
 	char thermalClassBuffer[16]{};
 	std::strncpy(thermalClassBuffer, load.thermalClass.c_str(), sizeof(thermalClassBuffer) - 1);
-	if (ImGui::InputText((label + " thermal class").c_str(),
+	if (ImGui::InputText(describe("thermal class", label).c_str(),
 		thermalClassBuffer, sizeof(thermalClassBuffer)))
 		load.thermalClass = thermalClassBuffer;
 	bool requiresCooling = load.coolingDisposition == core::StationCoolingDisposition::CoolingService;
-	if (ImGui::Checkbox((label + " requires cooling service").c_str(), &requiresCooling))
+	if (ImGui::Checkbox(describe("requires cooling service", label).c_str(), &requiresCooling))
 		load.coolingDisposition = requiresCooling
 			? core::StationCoolingDisposition::CoolingService
 			: core::StationCoolingDisposition::Exported;
-	ImGui::InputDouble((label + " critical floor kW").c_str(),
+	ImGui::InputDouble(describe("critical floor kW", label).c_str(),
 		&load.criticalFloorKW, 0.0, 0.0, "%.3f");
-	ImGui::InputInt((label + " priority").c_str(), &load.priority);
-	ImGui::InputDouble((label + " max curtailment").c_str(),
+	ImGui::InputInt(describe("priority", label).c_str(), &load.priority);
+	ImGui::InputDouble(describe("max curtailment", label).c_str(),
 		&load.maxCurtailment, 0.0, 0.0, "%.3f");
 	// #417 recovery rules (purely discretionary loads only; a load
 	// with a protected floor is restored by the protected pass). All
 	// default to zero: no dwell/hysteresis, clean restart.
-	ImGui::InputDouble((label + " recovery dwell (s)").c_str(),
+	ImGui::InputDouble(describe("recovery dwell (s)", label).c_str(),
 		&load.recoveryDwellSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " recovery hysteresis fraction").c_str(),
+	ImGui::InputDouble(describe("recovery hysteresis fraction", label).c_str(),
 		&load.recoveryHysteresisFraction, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " restart surge power (kW)").c_str(),
+	ImGui::InputDouble(describe("restart surge power (kW)", label).c_str(),
 		&load.restartSurgePowerKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " restart surge seconds").c_str(),
+	ImGui::InputDouble(describe("restart surge seconds", label).c_str(),
 		&load.restartSurgeSeconds, 0.0, 0.0, "%.3f");
 	char heatSinkBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(heatSinkBuffer, load.heatSinkId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " heat sink").c_str(),
+	if (ImGui::InputText(describe("heat sink", label).c_str(),
 		heatSinkBuffer, sizeof(heatSinkBuffer)))
 		load.heatSinkId = heatSinkBuffer;
 	for (size_t exchange = 0; exchange < load.materialExchanges.size(); )
 	{
 		auto& flow = load.materialExchanges[exchange];
-		auto const exchangeRow = label + " exchange " + std::to_string(exchange);
+		auto const exchangeRow = std::string("exchange ") + std::to_string(exchange);
 		char exchangeStoreBuffer[core::MaxStationStoreIdLength + 1]{};
 		std::strncpy(exchangeStoreBuffer, flow.storeId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText((exchangeRow + " store").c_str(),
+		if (ImGui::InputText(describe(exchangeRow + " store", label).c_str(),
 			exchangeStoreBuffer, sizeof(exchangeStoreBuffer)))
 			flow.storeId = exchangeStoreBuffer;
 		ImGui::SameLine();
-		ImGui::InputDouble((exchangeRow + " rate").c_str(), &flow.ratePerSecond, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(describe(exchangeRow + " rate", label).c_str(), &flow.ratePerSecond, 0.0, 0.0, "%.3f");
 		ImGui::SameLine();
-		ImGui::Checkbox((exchangeRow + " consumes").c_str(), &flow.consumes);
+		ImGui::Checkbox(describe(exchangeRow + " consumes", label).c_str(), &flow.consumes);
 		ImGui::SameLine();
-		bool const removeExchange = ImGui::Button(("Remove " + exchangeRow).c_str());
+		bool const removeExchange = ImGui::Button(describe("Remove " + exchangeRow, label).c_str());
 		if (removeExchange)
 			load.materialExchanges.erase(
 				load.materialExchanges.begin() + static_cast<std::ptrdiff_t>(exchange));
@@ -1241,6 +1283,7 @@ bool renderEquipmentLoadEntry([[maybe_unused]] core::StationSystemsSettings& dra
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeRequested;
 }
 
@@ -1248,27 +1291,29 @@ bool renderBatteryEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::BatterySettings& battery,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, battery.id);
-	ImGui::InputDouble((label + " nameplate kWh").c_str(),
+	ImGui::InputDouble(describe("nameplate kWh", label).c_str(),
 		&battery.nameplateKWh, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " usable kWh").c_str(),
+	ImGui::InputDouble(describe("usable kWh", label).c_str(),
 		&battery.usableKWh, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " starting stored kWh").c_str(),
+	ImGui::InputDouble(describe("starting stored kWh", label).c_str(),
 		&battery.startingStoredKWh, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " max charge kW").c_str(),
+	ImGui::InputDouble(describe("max charge kW", label).c_str(),
 		&battery.maxChargeKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " max discharge kW").c_str(),
+	ImGui::InputDouble(describe("max discharge kW", label).c_str(),
 		&battery.maxDischargeKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " charge efficiency").c_str(),
+	ImGui::InputDouble(describe("charge efficiency", label).c_str(),
 		&battery.chargeEfficiency, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " discharge efficiency").c_str(),
+	ImGui::InputDouble(describe("discharge efficiency", label).c_str(),
 		&battery.dischargeEfficiency, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeRequested;
 }
 
@@ -1276,46 +1321,48 @@ bool renderGeneratorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::GeneratorSettings& generator,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, generator.id);
 	char fuelStoreBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(fuelStoreBuffer, generator.fuelStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " fuel store").c_str(),
+	if (ImGui::InputText(describe("fuel store", label).c_str(),
 		fuelStoreBuffer, sizeof(fuelStoreBuffer)))
 		generator.fuelStoreId = fuelStoreBuffer;
 	char generatorClassBuffer[16]{};
 	std::strncpy(generatorClassBuffer, generator.thermalClass.c_str(), sizeof(generatorClassBuffer) - 1);
-	if (ImGui::InputText((label + " thermal class").c_str(),
+	if (ImGui::InputText(describe("thermal class", label).c_str(),
 		generatorClassBuffer, sizeof(generatorClassBuffer)))
 		generator.thermalClass = generatorClassBuffer;
 	char generatorSinkBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(generatorSinkBuffer, generator.heatSinkId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " heat sink").c_str(),
+	if (ImGui::InputText(describe("heat sink", label).c_str(),
 		generatorSinkBuffer, sizeof(generatorSinkBuffer)))
 		generator.heatSinkId = generatorSinkBuffer;
-	ImGui::InputDouble((label + " rated output kW").c_str(),
+	ImGui::InputDouble(describe("rated output kW", label).c_str(),
 		&generator.ratedOutputKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " efficiency").c_str(),
+	ImGui::InputDouble(describe("efficiency", label).c_str(),
 		&generator.efficiency, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " ramp kW per second").c_str(),
+	ImGui::InputDouble(describe("ramp kW per second", label).c_str(),
 		&generator.maxRampKWPerSecond, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " commanded output kW").c_str(),
+	ImGui::InputDouble(describe("commanded output kW", label).c_str(),
 		&generator.commandedOutputKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " startup power kW").c_str(),
+	ImGui::InputDouble(describe("startup power kW", label).c_str(),
 		&generator.startupPowerKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " startup seconds").c_str(),
+	ImGui::InputDouble(describe("startup seconds", label).c_str(),
 		&generator.startupSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " shutdown heat kW").c_str(),
+	ImGui::InputDouble(describe("shutdown heat kW", label).c_str(),
 		&generator.shutdownHeatKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " shutdown seconds").c_str(),
+	ImGui::InputDouble(describe("shutdown seconds", label).c_str(),
 		&generator.shutdownSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " max sink temperature C").c_str(),
+	ImGui::InputDouble(describe("max sink temperature C", label).c_str(),
 		&generator.maxSinkTemperatureC, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeRequested;
 }
 
@@ -1323,40 +1370,42 @@ bool renderFuelCellEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::FuelCellSettings& cell,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
 	renderIdentity(label, cell.id);
 	char cellHydrogenBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellHydrogenBuffer, cell.hydrogenStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " hydrogen reactant store").c_str(),
+	if (ImGui::InputText(describe("hydrogen reactant store", label).c_str(),
 		cellHydrogenBuffer, sizeof(cellHydrogenBuffer)))
 		cell.hydrogenStoreId = cellHydrogenBuffer;
 	char cellOxygenBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellOxygenBuffer, cell.oxygenStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " oxygen reactant store").c_str(),
+	if (ImGui::InputText(describe("oxygen reactant store", label).c_str(),
 		cellOxygenBuffer, sizeof(cellOxygenBuffer)))
 		cell.oxygenStoreId = cellOxygenBuffer;
 	char cellWaterBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellWaterBuffer, cell.waterStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " product water store").c_str(),
+	if (ImGui::InputText(describe("product water store", label).c_str(),
 		cellWaterBuffer, sizeof(cellWaterBuffer)))
 		cell.waterStoreId = cellWaterBuffer;
 	char cellThermalBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellThermalBuffer, cell.thermalClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " heat sink thermal class").c_str(),
+	if (ImGui::InputText(describe("heat sink thermal class", label).c_str(),
 		cellThermalBuffer, sizeof(cellThermalBuffer)))
 		cell.thermalClass = cellThermalBuffer;
 	char cellSinkBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellSinkBuffer, cell.heatSinkId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " heat sink reservoir").c_str(),
+	if (ImGui::InputText(describe("heat sink reservoir", label).c_str(),
 		cellSinkBuffer, sizeof(cellSinkBuffer)))
 		cell.heatSinkId = cellSinkBuffer;
-	ImGui::InputDouble((label + " rated output kW").c_str(),
+	ImGui::InputDouble(describe("rated output kW", label).c_str(),
 		&cell.ratedOutputKW, 0.0, 10.0, "%.3f");
-	ImGui::InputDouble((label + " efficiency (0..1]").c_str(),
+	ImGui::InputDouble(describe("efficiency (0..1]", label).c_str(),
 		&cell.efficiency, 0.0, 0.05, "%.3f");
-	ImGui::InputDouble((label + " commanded output kW").c_str(),
+	ImGui::InputDouble(describe("commanded output kW", label).c_str(),
 		&cell.commandedOutputKW, 0.0, 1.0, "%.3f");
-	ImGui::InputDouble((label + " max sink temperature C").c_str(),
+	ImGui::InputDouble(describe("max sink temperature C", label).c_str(),
 		&cell.maxSinkTemperatureC, 0.0, 5.0, "%.1f");
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
@@ -1367,50 +1416,52 @@ bool renderSabatierReactorEntry([[maybe_unused]] core::StationSystemsSettings& d
 	core::SabatierReactorSettings& reactor,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
 	renderIdentity(label, reactor.id);
 	char reactorCo2Buffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(reactorCo2Buffer, reactor.co2StoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " CO2 feed store").c_str(),
+	if (ImGui::InputText(describe("CO2 feed store", label).c_str(),
 		reactorCo2Buffer, sizeof(reactorCo2Buffer)))
 		reactor.co2StoreId = reactorCo2Buffer;
 	char reactorHydrogenBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(reactorHydrogenBuffer, reactor.hydrogenStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " hydrogen feed store").c_str(),
+	if (ImGui::InputText(describe("hydrogen feed store", label).c_str(),
 		reactorHydrogenBuffer, sizeof(reactorHydrogenBuffer)))
 		reactor.hydrogenStoreId = reactorHydrogenBuffer;
 	char reactorMethaneBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(reactorMethaneBuffer, reactor.methaneStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " methane product store").c_str(),
+	if (ImGui::InputText(describe("methane product store", label).c_str(),
 		reactorMethaneBuffer, sizeof(reactorMethaneBuffer)))
 		reactor.methaneStoreId = reactorMethaneBuffer;
 	char reactorWaterBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(reactorWaterBuffer, reactor.waterStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " product water store").c_str(),
+	if (ImGui::InputText(describe("product water store", label).c_str(),
 		reactorWaterBuffer, sizeof(reactorWaterBuffer)))
 		reactor.waterStoreId = reactorWaterBuffer;
 	char reactorThermalBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(reactorThermalBuffer, reactor.thermalClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " heat sink thermal class").c_str(),
+	if (ImGui::InputText(describe("heat sink thermal class", label).c_str(),
 		reactorThermalBuffer, sizeof(reactorThermalBuffer)))
 		reactor.thermalClass = reactorThermalBuffer;
 	char reactorSinkBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(reactorSinkBuffer, reactor.heatSinkId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " heat sink reservoir").c_str(),
+	if (ImGui::InputText(describe("heat sink reservoir", label).c_str(),
 		reactorSinkBuffer, sizeof(reactorSinkBuffer)))
 		reactor.heatSinkId = reactorSinkBuffer;
-	ImGui::PushItemWidth(140.0f);
-	ImGui::InputDouble((label + " rated CO2 conversion kg/s").c_str(),
+	ImGui::InputDouble(describe("rated CO2 conversion kg/s", label).c_str(),
 		&reactor.rateKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " specific energy kWh/kg CO2").c_str(),
+	ImGui::InputDouble(describe("specific energy kWh/kg CO2", label).c_str(),
 		&reactor.specificEnergyKWhPerKgCO2, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " max sink temperature C").c_str(),
+	ImGui::InputDouble(describe("max sink temperature C", label).c_str(),
 		&reactor.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
-	ImGui::InputInt((label + " priority").c_str(), &reactor.priority, 1, 0);
+	ImGui::InputInt(describe("priority", label).c_str(), &reactor.priority, 1, 0);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeRequested;
 }
 
@@ -1418,45 +1469,47 @@ bool renderMethaneProcessorEntry([[maybe_unused]] core::StationSystemsSettings& 
 	core::MethaneProcessorSettings& processor,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
 	renderIdentity(label, processor.id);
 	char processorMethaneBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorMethaneBuffer, processor.methaneStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " methane feed store").c_str(),
+	if (ImGui::InputText(describe("methane feed store", label).c_str(),
 		processorMethaneBuffer, sizeof(processorMethaneBuffer)))
 		processor.methaneStoreId = processorMethaneBuffer;
 	char processorHydrogenBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorHydrogenBuffer, processor.hydrogenStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " recovered hydrogen store").c_str(),
+	if (ImGui::InputText(describe("recovered hydrogen store", label).c_str(),
 		processorHydrogenBuffer, sizeof(processorHydrogenBuffer)))
 		processor.hydrogenStoreId = processorHydrogenBuffer;
 	char processorCarbonBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorCarbonBuffer, processor.carbonStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " solid carbon store").c_str(),
+	if (ImGui::InputText(describe("solid carbon store", label).c_str(),
 		processorCarbonBuffer, sizeof(processorCarbonBuffer)))
 		processor.carbonStoreId = processorCarbonBuffer;
 	char processorThermalBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorThermalBuffer, processor.thermalClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " heat sink thermal class").c_str(),
+	if (ImGui::InputText(describe("heat sink thermal class", label).c_str(),
 		processorThermalBuffer, sizeof(processorThermalBuffer)))
 		processor.thermalClass = processorThermalBuffer;
 	char processorSinkBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorSinkBuffer, processor.heatSinkId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " heat sink reservoir").c_str(),
+	if (ImGui::InputText(describe("heat sink reservoir", label).c_str(),
 		processorSinkBuffer, sizeof(processorSinkBuffer)))
 		processor.heatSinkId = processorSinkBuffer;
-	ImGui::PushItemWidth(140.0f);
-	ImGui::InputDouble((label + " rated CH4 processing kg/s").c_str(),
+	ImGui::InputDouble(describe("rated CH4 processing kg/s", label).c_str(),
 		&processor.rateKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble((label + " specific energy kWh/kg CH4").c_str(),
+	ImGui::InputDouble(describe("specific energy kWh/kg CH4", label).c_str(),
 		&processor.specificEnergyKWhPerKgCH4, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " max sink temperature C").c_str(),
+	ImGui::InputDouble(describe("max sink temperature C", label).c_str(),
 		&processor.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
-	ImGui::InputInt((label + " priority").c_str(), &processor.priority, 1, 0);
+	ImGui::InputInt(describe("priority", label).c_str(), &processor.priority, 1, 0);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeRequested;
 }
 
@@ -1467,28 +1520,30 @@ bool renderThermalReservoirEntry([[maybe_unused]] core::StationSystemsSettings& 
 	core::ThermalReservoirSettings& reservoir,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, reservoir.id);
 	char reservoirClassBuffer[16]{};
 	std::strncpy(reservoirClassBuffer, reservoir.thermalClass.c_str(), sizeof(reservoirClassBuffer) - 1);
-	if (ImGui::InputText((label + " thermal class").c_str(),
+	if (ImGui::InputText(describe("thermal class", label).c_str(),
 		reservoirClassBuffer, sizeof(reservoirClassBuffer)))
 		reservoir.thermalClass = reservoirClassBuffer;
-	ImGui::InputDouble((label + " heat capacity kJ/K").c_str(),
+	ImGui::InputDouble(describe("heat capacity kJ/K", label).c_str(),
 		&reservoir.heatCapacityKJPerK, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " starting temperature C").c_str(),
+	ImGui::InputDouble(describe("starting temperature C", label).c_str(),
 		&reservoir.startingTemperatureC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " min temperature C").c_str(),
+	ImGui::InputDouble(describe("min temperature C", label).c_str(),
 		&reservoir.minTemperatureC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " max temperature C").c_str(),
+	ImGui::InputDouble(describe("max temperature C", label).c_str(),
 		&reservoir.maxTemperatureC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " absorbed heat kW").c_str(),
+	ImGui::InputDouble(describe("absorbed heat kW", label).c_str(),
 		&reservoir.absorbedHeatKW, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeRequested;
 }
 
@@ -1496,26 +1551,28 @@ bool renderRadiatorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::RadiatorSettings& radiator,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, radiator.id);
 	char radiatorHostBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(radiatorHostBuffer, radiator.reservoirId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " reservoir").c_str(),
+	if (ImGui::InputText(describe("reservoir", label).c_str(),
 		radiatorHostBuffer, sizeof(radiatorHostBuffer)))
 		radiator.reservoirId = radiatorHostBuffer;
-	ImGui::InputDouble((label + " area m2").c_str(),
+	ImGui::InputDouble(describe("area m2", label).c_str(),
 		&radiator.areaM2, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " emissivity").c_str(),
+	ImGui::InputDouble(describe("emissivity", label).c_str(),
 		&radiator.emissivity, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " view factor").c_str(),
+	ImGui::InputDouble(describe("view factor", label).c_str(),
 		&radiator.viewFactor, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " sink temperature C").c_str(),
+	ImGui::InputDouble(describe("sink temperature C", label).c_str(),
 		&radiator.sinkTemperatureC, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeRequested;
 }
 
@@ -1523,88 +1580,94 @@ bool renderCoolantLoopEntry([[maybe_unused]] core::StationSystemsSettings& draft
 	core::CoolantLoopSettings& loop,
 	std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	ImGui::PushItemWidth(220);
 	renderIdentity(label, loop.id);
 	char host[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(host, loop.reservoirId.c_str(), sizeof(host) - 1);
-	if (ImGui::InputText((label + " reservoir").c_str(), host, sizeof(host))) loop.reservoirId = host;
-	ImGui::InputDouble((label + " coolant capacity kg").c_str(), &loop.coolantCapacityKg, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " starting coolant kg").c_str(), &loop.startingCoolantKg, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " specific heat kJ/kg K").c_str(), &loop.specificHeatKJPerKgK, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " starting temperature C").c_str(), &loop.startingTemperatureC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " freeze setpoint C").c_str(), &loop.freezeProtectionSetpointC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " pump power kW").c_str(), &loop.pumpPowerKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " rated flow kg/s").c_str(), &loop.ratedFlowKgPerS, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " exchanger conductance kW/K").c_str(), &loop.exchangerConductanceKWPerK, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " heater capacity kW").c_str(), &loop.heaterCapacityKW, 0.0, 0.0, "%.3f");
-	ImGui::Checkbox((label + " protected critical service"
+	if (ImGui::InputText(describe("reservoir", label).c_str(), host, sizeof(host))) loop.reservoirId = host;
+	ImGui::InputDouble(describe("coolant capacity kg", label).c_str(), &loop.coolantCapacityKg, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("starting coolant kg", label).c_str(), &loop.startingCoolantKg, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("specific heat kJ/kg K", label).c_str(), &loop.specificHeatKJPerKgK, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble(describe("starting temperature C", label).c_str(), &loop.startingTemperatureC, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("freeze setpoint C", label).c_str(), &loop.freezeProtectionSetpointC, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("pump power kW", label).c_str(), &loop.pumpPowerKW, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("rated flow kg/s", label).c_str(), &loop.ratedFlowKgPerS, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("exchanger conductance kW/K", label).c_str(), &loop.exchangerConductanceKWPerK, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("heater capacity kW", label).c_str(), &loop.heaterCapacityKW, 0.0, 0.0, "%.3f");
+	ImGui::Checkbox((std::string("protected critical service")
 		+ " (circulation and freeze heat drawn ahead of discretionary loads; "
 		  "protection is authored here, never inferred)").c_str(),
 		&loop.criticalService);
 	ImGui::SameLine();
 	bool const remove = !removeLabel.empty() && ImGui::Button(removeLabel.c_str());
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return remove;
 }
 
 bool renderThermalBufferEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::ThermalBufferSettings& buffer, std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, buffer.id);
 	char host[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(host, buffer.reservoirId.c_str(), sizeof(host) - 1);
-	if (ImGui::InputText((label + " host reservoir id").c_str(), host, sizeof(host))) buffer.reservoirId = host;
+	if (ImGui::InputText(describe("host reservoir id", label).c_str(), host, sizeof(host))) buffer.reservoirId = host;
 	char access[16]{};
 	std::strncpy(access, buffer.accessMode.c_str(), sizeof(access) - 1);
-	if (ImGui::InputText((label + " access mode (circulation|passive)").c_str(), access, sizeof(access))) buffer.accessMode = access;
+	if (ImGui::InputText(describe("access mode (circulation|passive)", label).c_str(), access, sizeof(access))) buffer.accessMode = access;
 	char loop[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(loop, buffer.circulationLoopId.c_str(), sizeof(loop) - 1);
-	if (ImGui::InputText((label + " circulation loop id").c_str(), loop, sizeof(loop))) buffer.circulationLoopId = loop;
-	ImGui::InputDouble((label + " capacity kJ").c_str(), &buffer.capacityKJ, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " starting energy kJ").c_str(), &buffer.startingEnergyKJ, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " min usable temperature C").c_str(), &buffer.minUsableTemperatureC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " max usable temperature C").c_str(), &buffer.maxUsableTemperatureC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " max charge kW").c_str(), &buffer.maxChargeKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " max discharge kW").c_str(), &buffer.maxDischargeKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " transfer conductance kW/K").c_str(), &buffer.transferConductanceKWPerK, 0.0, 0.0, "%.3f");
+	if (ImGui::InputText(describe("circulation loop id", label).c_str(), loop, sizeof(loop))) buffer.circulationLoopId = loop;
+	ImGui::InputDouble(describe("capacity kJ", label).c_str(), &buffer.capacityKJ, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("starting energy kJ", label).c_str(), &buffer.startingEnergyKJ, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("min usable temperature C", label).c_str(), &buffer.minUsableTemperatureC, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("max usable temperature C", label).c_str(), &buffer.maxUsableTemperatureC, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("max charge kW", label).c_str(), &buffer.maxChargeKW, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("max discharge kW", label).c_str(), &buffer.maxDischargeKW, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("transfer conductance kW/K", label).c_str(), &buffer.transferConductanceKWPerK, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str())) removeRequested = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeRequested;
 }
 
 bool renderChillerEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::ChillerSettings& chiller, std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeChiller = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, chiller.id);
 	char chillerClassBuffer[16]{};
 	std::strncpy(chillerClassBuffer, chiller.thermalClass.c_str(), sizeof(chillerClassBuffer) - 1);
-	if (ImGui::InputText((label + " thermal class").c_str(),
+	if (ImGui::InputText(describe("thermal class", label).c_str(),
 		chillerClassBuffer, sizeof(chillerClassBuffer)))
 		chiller.thermalClass = chillerClassBuffer;
 	char coldLoopBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(coldLoopBuffer, chiller.coldLoopId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " cold loop").c_str(),
+	if (ImGui::InputText(describe("cold loop", label).c_str(),
 		coldLoopBuffer, sizeof(coldLoopBuffer)))
 		chiller.coldLoopId = coldLoopBuffer;
 	char condenserBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(condenserBuffer, chiller.condenserReservoirId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " condenser reservoir").c_str(),
+	if (ImGui::InputText(describe("condenser reservoir", label).c_str(),
 		condenserBuffer, sizeof(condenserBuffer)))
 		chiller.condenserReservoirId = condenserBuffer;
-	ImGui::InputDouble((label + " rated cooling capacity kW").c_str(),
+	ImGui::InputDouble(describe("rated cooling capacity kW", label).c_str(),
 		&chiller.ratedCoolingCapacityKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " COP").c_str(),
+	ImGui::InputDouble(describe("COP", label).c_str(),
 		&chiller.cop, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " auxiliary power kW").c_str(),
+	ImGui::InputDouble(describe("auxiliary power kW", label).c_str(),
 		&chiller.auxiliaryPowerKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " chilled setpoint C").c_str(),
+	ImGui::InputDouble(describe("chilled setpoint C", label).c_str(),
 		&chiller.chilledSetpointC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " max condensing temperature C").c_str(),
+	ImGui::InputDouble(describe("max condensing temperature C", label).c_str(),
 		&chiller.maxCondensingTemperatureC, 0.0, 0.0, "%.3f");
 	// #416: a protected critical-service chiller's work is credited
 	// from the actual pool ahead of every discretionary external load,
@@ -1618,6 +1681,7 @@ bool renderChillerEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeChiller = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeChiller;
 }
 
@@ -1743,114 +1807,121 @@ void renderRadiatorList(core::StationSystemsSettings& draft)
 bool renderDeliveryEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::ResourceDeliverySettings& delivery, std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeDelivery = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, delivery.id);
 	char deliveryStoreBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(deliveryStoreBuffer, delivery.storeId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " store").c_str(),
+	if (ImGui::InputText(describe("store", label).c_str(),
 		deliveryStoreBuffer, sizeof(deliveryStoreBuffer)))
 		delivery.storeId = deliveryStoreBuffer;
 	char deliveryUnitBuffer[8]{};
 	std::strncpy(deliveryUnitBuffer, delivery.unit.c_str(), sizeof(deliveryUnitBuffer) - 1);
-	if (ImGui::InputText((label + " unit").c_str(), deliveryUnitBuffer, sizeof(deliveryUnitBuffer)))
+	if (ImGui::InputText(describe("unit", label).c_str(), deliveryUnitBuffer, sizeof(deliveryUnitBuffer)))
 		delivery.unit = deliveryUnitBuffer;
-	ImGui::InputDouble((label + " quantity").c_str(), &delivery.quantity, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " first occurrence seconds").c_str(),
+	ImGui::InputDouble(describe("quantity", label).c_str(), &delivery.quantity, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("first occurrence seconds", label).c_str(),
 		&delivery.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " recurrence seconds").c_str(),
+	ImGui::InputDouble(describe("recurrence seconds", label).c_str(),
 		&delivery.recurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::Checkbox((label + " arrives usable").c_str(), &delivery.arrivesQualified);
+	ImGui::Checkbox(describe("arrives usable", label).c_str(), &delivery.arrivesQualified);
 	ImGui::SameLine();
-	ImGui::InputInt((label + " priority").c_str(), &delivery.priority);
+	ImGui::InputInt(describe("priority", label).c_str(), &delivery.priority);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeDelivery = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeDelivery;
 }
 
 bool renderWasteEjectionEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::WasteEjectionSettings& ejection, std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeEjection = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, ejection.id);
 	char ejectionStoreBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(ejectionStoreBuffer, ejection.storeId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " store").c_str(),
+	if (ImGui::InputText(describe("store", label).c_str(),
 		ejectionStoreBuffer, sizeof(ejectionStoreBuffer)))
 		ejection.storeId = ejectionStoreBuffer;
 	char ejectionUnitBuffer[8]{};
 	std::strncpy(ejectionUnitBuffer, ejection.unit.c_str(), sizeof(ejectionUnitBuffer) - 1);
-	if (ImGui::InputText((label + " unit").c_str(), ejectionUnitBuffer, sizeof(ejectionUnitBuffer)))
+	if (ImGui::InputText(describe("unit", label).c_str(), ejectionUnitBuffer, sizeof(ejectionUnitBuffer)))
 		ejection.unit = ejectionUnitBuffer;
 	int eligibility = static_cast<int>(ejection.eligibility);
-	if (ImGui::Combo((label + " eligibility").c_str(), &eligibility, "Qualified only\0Held only\0"))
+	if (ImGui::Combo(describe("eligibility", label).c_str(), &eligibility, "Qualified only\0Held only\0"))
 		ejection.eligibility = static_cast<core::WasteEjectionEligibility>(eligibility);
-	ImGui::InputDouble((label + " quantity").c_str(), &ejection.quantity, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " first occurrence seconds").c_str(),
+	ImGui::InputDouble(describe("quantity", label).c_str(), &ejection.quantity, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("first occurrence seconds", label).c_str(),
 		&ejection.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " recurrence seconds").c_str(),
+	ImGui::InputDouble(describe("recurrence seconds", label).c_str(),
 		&ejection.recurrenceSeconds, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
-	ImGui::InputInt((label + " priority").c_str(), &ejection.priority);
+	ImGui::InputInt(describe("priority", label).c_str(), &ejection.priority);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeEjection = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeEjection;
 }
 
 bool renderOutageEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::InstallationOutageSettings& outage, std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	bool removeOutage = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, outage.id);
 	char outageTargetBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(outageTargetBuffer, outage.installationId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " installation id").c_str(),
+	if (ImGui::InputText(describe("installation id", label).c_str(),
 		outageTargetBuffer, sizeof(outageTargetBuffer)))
 		outage.installationId = outageTargetBuffer;
-	ImGui::InputDouble((label + " capacity fraction (0..1)").c_str(),
+	ImGui::InputDouble(describe("capacity fraction (0..1)", label).c_str(),
 		&outage.capacityFraction, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " first occurrence seconds").c_str(),
+	ImGui::InputDouble(describe("first occurrence seconds", label).c_str(),
 		&outage.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " duration seconds").c_str(),
+	ImGui::InputDouble(describe("duration seconds", label).c_str(),
 		&outage.durationSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " recurrence seconds (0 = one-off)").c_str(),
+	ImGui::InputDouble(describe("recurrence seconds (0 = one-off)", label).c_str(),
 		&outage.recurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputInt((label + " priority").c_str(), &outage.priority);
+	ImGui::InputInt(describe("priority", label).c_str(), &outage.priority);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeOutage = true;
 	ImGui::PopItemWidth();
+	ImGui::PopID();
 	return removeOutage;
 }
 
 bool renderMaintenanceEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::MaintenanceJobSettings& job, std::string const& label, std::string const& removeLabel)
 {
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
 	auto const row = label.substr(label.find_last_of(' ') + 1);
 	bool removeJob = false;
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, job.id);
 	char jobTargetBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(jobTargetBuffer, job.installationId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " installation id").c_str(),
+	if (ImGui::InputText(describe("installation id", label).c_str(),
 		jobTargetBuffer, sizeof(jobTargetBuffer)))
 		job.installationId = jobTargetBuffer;
-	ImGui::InputDouble((label + " first occurrence seconds").c_str(),
+	ImGui::InputDouble(describe("first occurrence seconds", label).c_str(),
 		&job.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " duration seconds").c_str(),
+	ImGui::InputDouble(describe("duration seconds", label).c_str(),
 		&job.durationSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble((label + " recurrence seconds (0 = one-off)").c_str(),
+	ImGui::InputDouble(describe("recurrence seconds (0 = one-off)", label).c_str(),
 		&job.recurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputInt((label + " priority").c_str(), &job.priority);
+	ImGui::InputInt(describe("priority", label).c_str(), &job.priority);
 	char jobWasteBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(jobWasteBuffer, job.wasteStoreId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " waste store id").c_str(),
+	if (ImGui::InputText(describe("waste store id", label).c_str(),
 		jobWasteBuffer, sizeof(jobWasteBuffer)))
 		job.wasteStoreId = jobWasteBuffer;
 	for (size_t requirementIndex = 0; requirementIndex < job.requirements.size(); )
@@ -1861,14 +1932,14 @@ bool renderMaintenanceEntry([[maybe_unused]] core::StationSystemsSettings& draft
 		char requirementStoreBuffer[core::MaxStationStoreIdLength + 1]{};
 		std::strncpy(requirementStoreBuffer, requirement.storeId.c_str(),
 			core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Maintenance requirement " + requirementRow + " store id").c_str(),
+		if (ImGui::InputText(describe("Maintenance requirement " + requirementRow + " store id", label).c_str(),
 			requirementStoreBuffer, sizeof(requirementStoreBuffer)))
 			requirement.storeId = requirementStoreBuffer;
-		ImGui::InputDouble(("Maintenance requirement " + requirementRow + " quantity").c_str(),
+		ImGui::InputDouble(describe("Maintenance requirement " + requirementRow + " quantity", label).c_str(),
 			&requirement.quantity, 0.0, 0.0, "%.3f");
-		ImGui::Checkbox(("Maintenance requirement " + requirementRow
-			+ " consumed (unchecked = reusable tool)").c_str(), &requirement.consumed);
-		if (job.requirements.size() > 1 && ImGui::Button(("Remove requirement " + requirementRow).c_str()))
+		ImGui::Checkbox(describe("Maintenance requirement " + requirementRow
+			+ " consumed (unchecked = reusable tool)", label).c_str(), &requirement.consumed);
+		if (job.requirements.size() > 1 && ImGui::Button(describe("Remove requirement " + requirementRow, label).c_str()))
 			removeRequirement = true;
 		if (removeRequirement)
 			job.requirements.erase(
@@ -1882,6 +1953,7 @@ bool renderMaintenanceEntry([[maybe_unused]] core::StationSystemsSettings& draft
 	ImGui::PopItemWidth();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeJob = true;
+	ImGui::PopID();
 	return removeJob;
 }
 
