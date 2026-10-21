@@ -3,6 +3,7 @@
 #include "core/StationSystemsRuntime.h"
 
 #include <charconv>
+#include <cstdlib>
 #include <iostream>
 #include <string_view>
 #include <vector>
@@ -73,5 +74,11 @@ int main(int argc, char** argv)
 		ratioRequested ? std::optional<uint32_t>{ratio} : std::nullopt);
 	std::cout << "RUN station requested-step-ratio=" << (ratioRequested ? std::to_string(ratio) : "authored")
 		<< " (explicit-ratio comparisons own their clock)\n";
-	return smoke::run("station", checks, arguments, std::cout, std::cerr);
+	// The runner has completed Context cleanup before it prints SUMMARY. Do not
+	// enter static destruction afterwards: long Station runs previously printed
+	// a passing summary and then could stall during process teardown.
+	auto const status = smoke::run("station", checks, arguments, std::cout, std::cerr);
+	std::cout.flush();
+	std::cerr.flush();
+	std::_Exit(status);
 }

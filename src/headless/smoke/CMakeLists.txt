@@ -1003,6 +1003,11 @@ set_tests_properties(smoke-editor-contract PROPERTIES LABELS "harness;editor" TI
 # in unfiltered CTest. Lightweight lanes reuse their inventories and time budgets.
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME station-reset-isolation-exit
+        COMMAND ${Python3_EXECUTABLE} "${PROJECT_SOURCE_DIR}/scripts/tests/station_exit.py"
+            $<TARGET_FILE:pf-smoke-station>)
+    set_tests_properties(station-reset-isolation-exit PROPERTIES
+        LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 30)
     foreach(module IN ITEMS simulation permissions routing transports behaviours
             agent-tags agent world persistence render editor)
         set(stress smoke-${module}-contract)
