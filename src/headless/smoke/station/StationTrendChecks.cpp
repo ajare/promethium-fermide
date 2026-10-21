@@ -586,7 +586,7 @@ namespace
 						"the initialization event does not carry the station category");
 					sawStation = true;
 				}
-				if (event.message.find("completed the World tick") != std::string::npos)
+				if (event.message.find("completed the Station step") != std::string::npos)
 				{
 					require(event.category == "observation",
 						"the observation event does not carry the observation category");

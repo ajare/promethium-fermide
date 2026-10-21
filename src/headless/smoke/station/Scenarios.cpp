@@ -435,7 +435,7 @@ namespace
 			"the digester was not stalled by its full residue store at 750 s");
 		require(dig.limiter.find("residue") != std::string::npos,
 			("digester limiter at 750 s is '" + dig.limiter
-				+ "', expected to name the residue store").c_str());
+				+ "', expected to name the residue store; block reason: " + dig.blockReason).c_str());
 		require(dig.condition > 0.95 && dig.condition <= 1.0,
 			"the digester culture degraded faster than its documented bound while stalled");
 		auto const feedAtStall = dig.feedConsumedKg;

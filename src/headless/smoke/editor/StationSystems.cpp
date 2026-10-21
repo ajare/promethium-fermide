@@ -6037,7 +6037,9 @@ namespace
 		core::RadiatorSettings panel;
 		panel.id = "panel";
 		panel.reservoirId = "cabin";
-		panel.areaM2 = 5000.0;
+		// Preserve this warming fixture's intended thermal balance after
+		// the SI correction, rather than changing its service-limit assertions.
+		panel.areaM2 = 5.0;
 		panel.emissivity = 0.9;
 		panel.viewFactor = 1.0;
 		panel.sinkTemperatureC = -270.0;
@@ -6070,7 +6072,7 @@ namespace
 				"Authored thermal counts missing from the window");
 			REQ(driver.contains("cabin (moderate): 20.000 C | limits 10.000..60.000 C | capacity 100.000 kJ/K"),
 				"Authored reservoir display missing temperature, limits or capacity");
-			REQ(driver.contains("panel -> cabin: area 5000.000 m2, emissivity 0.900, view 1.000, sink -270.000 C"),
+			REQ(driver.contains("panel -> cabin: area 5.000 m2, emissivity 0.900, view 1.000, sink -270.000 C"),
 				"Authored radiator display missing");
 			// Run: the live view shows the warming reservoir, the routed
 			// heat on the load, the radiator rejection and the closing
@@ -6914,7 +6916,10 @@ void bufferWorkflow(smoke::Context const&)
 				else
 				{
 					FLAG_REQ(snap.waterTreatments[0].qualityAccepted && snap.crews[0].lastWaterActual > 0
-						&& snap.crews[1].limiter.find("water quality") != std::string::npos, "Editor contamination actuals disagree");
+						&& snap.crews[1].limiter.find("water quality") != std::string::npos,
+						("Editor contamination actuals disagree: quality=" + std::to_string(snap.waterTreatments[0].qualityAccepted)
+						+ ", normal water=" + std::to_string(snap.crews[0].lastWaterActual)
+						+ ", hazard limiter='" + snap.crews[1].limiter + "', elapsed=" + std::to_string(snap.elapsedSeconds)).c_str());
 					driver.typeValue(ctx, "Solar 0 capacity kW", "1");
 					driver.click(ctx, "Apply settings"); ctx->Yield(3);
 					driver.click(ctx, "Confirm World reset"); ctx->Yield(3);
@@ -7214,7 +7219,14 @@ void bufferWorkflow(smoke::Context const&)
 			world->markSaved();
 			world->resumeSimulation(); REQ(world->advanceTicks(60), "Editor run failed");
 			world->pauseSimulation(); ctx->Sleep(1);
-			REQ(driver.contains("condition 0.520 | benign, recovering | last change +0.000333 | replacement stock: drawn from 'stock', consumed 0.003333 units this tick (0.2000 total)"),
+			auto const clock = world->getStationSystemsSnapshot();
+			std::ostringstream evidence;
+			evidence << "condition " << fixed3(0.5 + 0.02 * clock.elapsedSeconds)
+				<< " | benign, recovering | last change +" << std::fixed << std::setprecision(6)
+				<< 0.02 * clock.systemsTimestepSeconds
+				<< " | replacement stock: drawn from 'stock', consumed " << 0.2 * clock.systemsTimestepSeconds
+				<< " units this tick (" << std::setprecision(4) << 0.2 * clock.elapsedSeconds << " total)";
+			REQ(driver.contains(evidence.str().c_str()),
 				"Live culture condition, recovery state or stock funding not displayed");
 			REQ(!world->isModified(), "Microbial condition ticking dirtied the authored document");
 			// An invalid drafted condition is refused with a visible
@@ -7252,31 +7264,35 @@ void bufferWorkflow(smoke::Context const&)
 			// both configured and absent replacement stock. Check the entire
 			// line so displaced printf arguments cannot pass on substrings.
 			auto checkReadout = [&](core::StationSystemsSettings const& settings,
-				char const* expected)
+				char const* description, double changePerSecond)
 			{
 				if (!driver.require(world->configureStationSystems(settings, true, &diagnostic),
 					diagnostic.c_str())) return false;
 				world->resumeSimulation();
 				if (!driver.require(world->advanceTicks(60), "Readout run failed")) return false;
 				world->pauseSimulation(); ctx->Sleep(1);
-				return driver.require(driver.contains(expected), "Complete microbial condition readout incorrect");
+				auto const clock = world->getStationSystemsSnapshot();
+				std::ostringstream expected;
+				expected << "condition " << fixed3(settings.microbialProcessors[0].initialCondition
+					+ changePerSecond * clock.elapsedSeconds) << " | " << description
+					<< " | last change " << std::fixed << std::showpos << std::setprecision(6)
+					<< changePerSecond * clock.systemsTimestepSeconds << std::noshowpos
+					<< " | replacement stock: none configured, consumed 0.000000 units this tick (0.0000 total)";
+				return driver.require(driver.contains(expected.str().c_str()), "Complete microbial condition readout incorrect");
 			};
 			auto benign = initial;
 			benign.microbialProcessors[0].initialCondition = 1.0;
 			benign.microbialProcessors[0].stockStoreId.clear();
-			REQ(checkReadout(benign,
-				"condition 1.000 | benign, at full condition | last change +0.000000 | replacement stock: none configured, consumed 0.000000 units this tick (0.0000 total)"),
+			REQ(checkReadout(benign, "benign, at full condition", 0.0),
 				"Benign readout failed");
 			auto recovering = initial;
 			recovering.microbialProcessors[0].stockStoreId.clear();
-			REQ(checkReadout(recovering,
-				"condition 0.520 | benign, recovering | last change +0.000333 | replacement stock: none configured, consumed 0.000000 units this tick (0.0000 total)"),
+			REQ(checkReadout(recovering, "benign, recovering", 0.02),
 				"Recovery without configured stock readout failed");
 			auto stressed = benign;
 			stressed.stores[0].startingQualified = 0.0;
 			stressed.microbialProcessors[0].starvationDegradePerHour = 72.0;
-			REQ(checkReadout(stressed,
-				"condition 0.980 | stressed by starvation | last change -0.000333 | replacement stock: none configured, consumed 0.000000 units this tick (0.0000 total)"),
+			REQ(checkReadout(stressed, "stressed by starvation", -0.02),
 				"Stressed readout failed");
 		});
 		#undef REQ

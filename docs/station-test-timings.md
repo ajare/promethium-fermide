@@ -6,6 +6,21 @@ maintained matrix now uses representative samples: five ratios for analytical
 checks and three for component repeats (45 registrations). Historical counts
 and timings are retained as records, not current coverage requirements.
 
+## Full project suite after #783
+
+At `fda7304f`, the full registered project suite ran in Release at `-j 16`:
+**510 project tests, 740.92 s wall time** (12 min 20.92 s), excluding an
+incremental full build of 67.25 s. Unchanged dependency/submodule tests were
+excluded. Results: **497 passed, 12 ordinary failures, one timeout**.
+`station-invarianceLongRun` hit its existing **120 s** limit; the longest passing
+check was `station-stabilityLongRun`, 712.19 s against a 720 s limit.
+
+Subsequent focused repairs resolved the 12 ordinary failures; that is not a
+fresh full-suite timing or green aggregate. The final editor aggregate/contract
+rerun passed 2/2 in 255.30 s. The original invariance timeout remains unchanged.
+Evidence: `/tmp/pf-full-suite.log`, `/tmp/pf-normal-final.log`,
+`/tmp/pf-normal-editor-parents.log`; see the verification checkpoint for fixes.
+
 ## Comparable Station workloads: 60 Hz versus 10 Hz
 
 Three alternating paired Release runs, identical fresh inputs and 4200 World

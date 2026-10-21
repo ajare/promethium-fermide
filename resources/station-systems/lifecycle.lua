@@ -441,10 +441,17 @@ local function waterQuality(store, gate, demandKg, dt, consumer, pureFeed)
     local result = { enabled = pureFeed or next(maxima) ~= nil or gate.maxTotalDissolved ~= nil,
         concentrations = {}, totalDissolved = 0, scale = 1, limiter = '',
         bindingConcentration = 0, bindingTolerance = 0, demandKgPerS = demandKg / dt }
-    local blend = store.composition and compositionLedgerOf(storeComposition(store), 1, 1) or {}
+    -- Tracked species, not 1-moisture reconstructed dry organics: the
+    -- latter can invent contamination and reject physically pure water.
+    local totalKg = toKg(store.unit, store.qualified + store.unqualified)
+    local basisKg = totalKg > 0 and totalKg or 1
+    local blend = store.composition and compositionLedgerOf(store.composition, basisKg, 1) or {}
+    if totalKg > 0 then
+        for key, value in pairs(store.drift or {}) do blend[key] = (blend[key] or 0) + value end
+    end
     for _, name in ipairs({'dryOrganics', 'nutrientNitrogen', 'atmosphericNitrogen',
         'phosphorus', 'potassium', 'otherMinerals'}) do
-        local value = math.max(0, blend[name] or 0)
+        local value = math.max(0, (blend[name] or 0) / basisKg)
         result.concentrations[name] = value
         result.totalDissolved = result.totalDissolved + value
     end

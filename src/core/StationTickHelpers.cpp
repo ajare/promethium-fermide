@@ -30,11 +30,17 @@ namespace core
 		auto const& store = runtime.stores[index];
 		if (store.authored.composition)
 		{
-			auto const blend = compositionLedgerOf(storeComposition(index), 1.0, 1.0);
+			// Read tracked species directly. Reconstructing dry organics as
+			// 1 - moisture can invent an ulp of contamination in pure water
+			// and incorrectly close a zero-tolerance acceptance gate.
+			auto const totalKg = massToKg(store.authored.unit, qualified[index] + unqualified[index]);
+			auto const basisKg = totalKg > 0.0 ? totalKg : 1.0;
+			auto blend = compositionLedgerOf(*store.authored.composition, basisKg, 1.0);
+			if (totalKg > 0.0) addLedger(blend, stagedDrift[index], 1.0);
 			for (auto const* name : StationWaterDryConstituents)
 			{
 				auto const found = blend.find(name);
-				auto const value = found == blend.end() ? 0.0 : std::max(0.0, found->second);
+				auto const value = found == blend.end() ? 0.0 : std::max(0.0, found->second / basisKg);
 				result.concentrations[name] = value;
 				result.totalDissolved += value;
 			}

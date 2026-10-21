@@ -407,6 +407,17 @@ void qualityGates(smoke::Context const& context)
 	settings.crews[0].waterQuality.maxTotalDissolved.reset();
 	settings.crews[0].waterQuality.maxConcentrations["dryOrganics"] = 0;
 	close(run(settings).crews[0].lastWaterActual, 0);
+	// Reading real species must not introduce an epsilon acceptance rule:
+	// an arbitrarily small but representable contaminant still fails zero.
+	auto trace = settings; trace.waterTreatments.clear();
+	trace.stores[0].composition->nutrientNitrogen = 1e-18;
+	trace.crews[0].waterQuality = {};
+	trace.crews[0].waterQuality.maxConcentrations["nutrientNitrogen"] = 0;
+	auto const traceResult = run(trace);
+	require(traceResult.crews[0].waterQuality.concentrations.at("nutrientNitrogen") > 0
+		&& traceResult.crews[0].lastWaterActual == 0
+		&& traceResult.crews[0].limiter.find("water quality: nutrientNitrogen") != std::string::npos,
+		"Zero tolerance accepted a real trace contaminant");
 	settings.crews[0].waterQuality = {};
 	close(run(settings).crews[0].metabolicScale, 1);
 	// Gate uses actual ledger dilution, not authored 0.2% organics.
@@ -666,6 +677,21 @@ void hydroponics(smoke::Context const& context)
 void contamination(smoke::Context const& context)
 {
 	auto const base = scenario(context, "water-contamination.yaml");
+	// Pure treated water must pass a zero-tolerance gate even during
+	// startup; checking only the ten-second endpoint missed roundoff.
+	{
+		core::ScopedStationStepRatioForTesting ownClock(std::nullopt);
+		for (uint32_t ratio : {1u, 6u})
+		{
+			auto earlySettings = base; earlySettings.systemsStepWorldTicks = ratio;
+			auto const early = run(earlySettings, 60);
+			auto const& crew = early.crews[0];
+			require(early.systemsStepWorldTicks == ratio, "Pure-water gate clock was overridden");
+			require(crew.lastWaterActual > 0,
+				std::format("Pure treated-water startup refused: ratio={}, limiter='{}', TDS={:.17g}, water={:.17g}",
+					ratio, crew.limiter, crew.waterQuality.totalDissolved, crew.lastWaterActual).c_str());
+		}
+	}
 	for (bool powered : {true, false})
 	{
 		auto s = base;

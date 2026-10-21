@@ -1,8 +1,24 @@
 # Station timestep verification checkpoint
 
-All previously identified failing checks now have recorded Release passes from
-focused runs. Already-passing checks were not rerun merely to obtain one green
-aggregate; this does not certify global physical timestep independence.
+All identified **non-timeout** failures now have recorded Release passes from
+focused runs. The full project run after #783 took **740.92 s at `-j 16`**:
+497 passed, 12 failed normally, and `station-invarianceLongRun` timed out at
+120 s. Subsequent focused repairs resolved all 12 normal failures; the timeout
+is unchanged and was not rerun. No new all-green full-suite aggregate is claimed.
+
+Repairs updated ownership/listing contracts, schema-relative fixtures, Station
+observation text and duration-aware microbial editor readouts. Thermal editor
+and waste-drill radiator areas were explicitly recalibrated to preserve their
+intended scenarios under the corrected SI coefficient. A production host/Lua
+quality bug was also repaired: acceptance now reads actual tracked constituent
+masses rather than reconstructing phantom dry organics from `1 - moisture`.
+New checks cover pure-water startup at ratios 1/6 and refusal of a real trace
+contaminant below machine epsilon in concentration, without relaxing zero
+quality tolerances or conservation audits. World/persistence/editor aggregate
+and contract checks pass; the final editor contract took 255.30 s.
+
+Already-passing checks were not rerun merely to obtain one green aggregate;
+this does not certify global physical timestep independence.
 
 ## Physical-fidelity and performance follow-up
 
@@ -13,7 +29,8 @@ benchmark measured **5.95× biology / 5.83× reference** Station advance speedup
 at 10 Hz versus 60 Hz; it is not a whole-application speedup claim.
 
 There are **39 distinct recorded latest focused passes** for this follow-up,
-not a full-suite aggregate. No failing checks remain. General coupled-state
+not a full-suite aggregate. Those targeted checks passed; the later full-suite
+timeout and normal-failure repairs are recorded above. General coupled-state
 certification is still not claimed. The pre-existing radiator coefficient
 error is now corrected under
 [#783](station-radiation-calibration.md), with independent host/Lua SI

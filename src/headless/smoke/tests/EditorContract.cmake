@@ -268,6 +268,7 @@ set(editor_names
     station/flowConnectionsWorkflow
     station/mixedObservationWorkflow
     station/windowWorkflow
+    station/stepRatioWorkflow
     station/materialIdentityWorkflow
     station/configurationDocument
     station/removalWorkflow

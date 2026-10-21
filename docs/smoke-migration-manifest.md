@@ -49,6 +49,12 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/editor/StationObservations.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/StationConnections.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/station/StationCoreChecks.cpp` | module-owned | `pf-smoke-station` |
+| `smoke/station/StationClockChecks.cpp` | module-owned | `pf-smoke-station` |
+| `smoke/station/StationEventSplitChecks.cpp` | module-owned | `pf-smoke-station` |
+| `smoke/station/StationInvarianceChecks.cpp` | module-owned | `pf-smoke-station` |
+| `smoke/station/StationPhysicalFidelityChecks.cpp` | module-owned | `pf-smoke-station` |
+| `smoke/station/StationProtectionChecks.cpp` | module-owned | `pf-smoke-station` |
+| `smoke/station/StationRuntimeRegressionChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationPortChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationSeamChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationPowerChecks.cpp` | module-owned | `pf-smoke-station` |

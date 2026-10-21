@@ -1167,7 +1167,8 @@ namespace persistence
 			"A legacy Shuttle-owned Door");
 
 		// The current reader still refuses anything above its own ceiling.
-		auto const futureYaml = std::string("version: 104")
+		auto const currentVersion = YAML::Load(defaultsYaml)["version"].as<uint32_t>();
+		auto const futureYaml = std::string("version: ") + std::to_string(currentVersion + 1)
 			+ defaultsYaml.substr(defaultsYaml.find("\n"));
 		bool refusedFuture{ false };
 		try

@@ -896,6 +896,8 @@ add_test(NAME station-editor-removals COMMAND pf-smoke-editor --check station/re
 set_tests_properties(station-editor-removals PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-compounds COMMAND pf-smoke-editor --check station/compoundWorkflow)
 set_tests_properties(station-editor-compounds PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+add_test(NAME station-editor-microbial-condition COMMAND pf-smoke-editor --check station/microbialConditionWorkflow)
+set_tests_properties(station-editor-microbial-condition PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-generators COMMAND pf-smoke-editor --check station/generatorWorkflow)
 set_tests_properties(station-editor-generators PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-power COMMAND pf-smoke-editor --check station/powerWorkflow)

@@ -5,6 +5,8 @@
 # stalled services and the recovery all run through the implemented
 # mechanisms - finite stores, destination-full backpressure, scheduled
 # waste ejection with explicit loss booking - never an infinite sink.
+# Radiator areas are explicitly recalibrated for the corrected SI coefficient
+# (#783), preserving this drill's warm operating window and waste-only limiter.
 name: Meridian waste-storage constraint drill
 schemaVersion: 96
 summary: 'A four-crew Meridian configuration exercising constrained waste storage and stalled
@@ -712,13 +714,13 @@ stationSystems:
   radiators:
   - id: radProcess
     reservoirId: processSink
-    areaM2: 6000.0
+    areaM2: 6.0
     emissivity: 0.9
     viewFactor: 0.9
     sinkTemperatureC: -30.0
   - id: radGen
     reservoirId: genSink
-    areaM2: 500.0
+    areaM2: 0.5
     emissivity: 0.9
     viewFactor: 0.9
     sinkTemperatureC: -30.0
