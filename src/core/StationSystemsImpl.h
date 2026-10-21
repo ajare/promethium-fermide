@@ -495,9 +495,17 @@ using namespace station_detail;
 		// the reservoir exchange against capacity x temperature. The
 		// compartment integrates explicitly on the fixed World tick, so
 		// the same tick sequence always integrates the same state.
+		struct PathwayCommandState
+		{
+			PathwayCommandSettings authored;
+			size_t pathwayIndex{};
+			bool fired{false};
+		};
 		struct AtmospherePathwayState
 		{
 			AtmospherePathwaySettings authored;
+			std::string lastCommandId;
+			double lastCommandSeconds{0.0};
 			size_t aIndex{}, bIndex{};
 			double openFraction{};
 			std::array<double, 4> flowRateKgPerS{}, netTransferredKg{};
@@ -1321,6 +1329,7 @@ using namespace station_detail;
 		std::vector<GeneratorState> generators;
 		std::vector<AtmosphereState> atmospheres;
 		std::vector<AtmospherePathwayState> atmospherePathways;
+		std::vector<PathwayCommandState> pathwayCommands;
 		std::vector<AirlockCycleState> airlockCycles;
 		std::vector<CrewState> crews;
 		std::vector<WaterCollectorState> waterCollectors;
@@ -1517,6 +1526,7 @@ using namespace station_detail;
 			uint64_t occurrence{0};
 			bool isEjection{false};
 			bool isTransfer{false};
+			bool isPathwayCommand{false};
 		};
 		struct DueOutageEvent
 		{

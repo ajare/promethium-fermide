@@ -3090,6 +3090,12 @@ namespace core
 	void World::resetSimulation()
 	{
 		RestorationTiming timing("reset-total");
+		// Reset is an in-memory run restart, not a document conversion. Keep
+		// the authored Station configuration, including fields whose document
+		// persistence is delivered separately (#791), and discard all live state.
+		auto const stationSettings = mStationSystemsSettings;
+		auto stationRuntime = stationSettings.enabled
+			? std::make_unique<StationSystemsRuntime>(stationSettings, getFixedTimestep()) : nullptr;
 		// Run every constructor before touching simulation, topology, authored
 		// state or the old runtime. A fresh runtime avoids double-counting live
 		// instances against the World's allocation budget. Keep these exact
@@ -3148,6 +3154,8 @@ namespace core
 			deserialize(*input, readData);
 		}
 		input.reset();
+		mStationSystemsSettings = stationSettings;
+		mStationSystemsRuntime = std::move(stationRuntime);
 		{
 			RestorationTiming phase("reset-registries");
 			if (agentTagRegistry && mAgentTagRegistryReference)

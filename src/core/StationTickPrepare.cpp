@@ -274,6 +274,13 @@ namespace core
 				arrivals.push_back({{when, transfer.authored.priority, index}, occurrence, false, true});
 			}
 		}
+		for (size_t index = 0; index < runtime.pathwayCommands.size(); ++index)
+		{
+			auto const& command = runtime.pathwayCommands[index];
+			if (!command.fired && stationScheduleOccurrencesDue(command.authored.occurrenceSeconds, 0, until))
+				arrivals.push_back({{command.authored.occurrenceSeconds, command.authored.priority, index},
+					0, false, false, true});
+		}
 		std::sort(arrivals.begin(), arrivals.end(),
 			[](DueArrival const& left, DueArrival const& right)
 			{
@@ -285,7 +292,7 @@ namespace core
 				// ejection runs, so material delivered this tick is
 				// disposal-ready for the ejection that follows it,
 				// whatever the two schedules' declaration order (#403).
-				auto kind = [](DueArrival const& event) { return event.isEjection ? 2 : event.isTransfer ? 1 : 0; };
+				auto kind = [](DueArrival const& event) { return event.isPathwayCommand ? 3 : event.isEjection ? 2 : event.isTransfer ? 1 : 0; };
 				if (kind(left) != kind(right)) return kind(left) < kind(right);
 				return left.key.declarationIndex < right.key.declarationIndex;
 			});
@@ -295,6 +302,16 @@ namespace core
 	{
 		for (auto const& arrival : arrivals)
 		{
+			if (arrival.isPathwayCommand)
+			{
+				auto& command = runtime.pathwayCommands[arrival.key.declarationIndex];
+				auto& pathway = runtime.atmospherePathways[command.pathwayIndex];
+				pathway.openFraction = command.authored.openFraction;
+				pathway.lastCommandId = command.authored.id;
+				pathway.lastCommandSeconds = arrival.key.occurrenceSeconds;
+				command.fired = true;
+				continue;
+			}
 			if (arrival.isTransfer)
 			{
 				auto& transfer = runtime.transfers[arrival.key.declarationIndex];

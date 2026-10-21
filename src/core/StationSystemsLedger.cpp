@@ -53,6 +53,8 @@ namespace core
 		auto const committedThermalBuffers = thermalBuffers;
 		auto const committedGenerators = generators;
 		auto const committedAtmospheres = atmospheres;
+		auto const committedPathways = atmospherePathways;
+		auto const committedPathwayCommands = pathwayCommands;
 		auto const committedAirlockCycles = airlockCycles;
 		auto const committedCrews = crews;
 		auto const committedWaterCollectors = waterCollectors;
@@ -120,6 +122,8 @@ namespace core
 			thermalBuffers = committedThermalBuffers;
 			generators = committedGenerators;
 			atmospheres = committedAtmospheres;
+			atmospherePathways = committedPathways;
+			pathwayCommands = committedPathwayCommands;
 			airlockCycles = committedAirlockCycles;
 			crews = committedCrews;
 			waterCollectors = committedWaterCollectors;
@@ -474,6 +478,8 @@ namespace core
 			for (auto field : fields) meanRates.emplace_back(field, 0.0);
 		};
 		mean({&lastAvailableGenerationKW, &lastPoolGenerationKW, &lastConnectionPowerLossKW, &lastPoolResidualKW});
+		for (auto& pathway : atmospherePathways)
+			for (auto& rate : pathway.flowRateKgPerS) mean({&rate});
 		for (auto& a : solarArrays) mean({&a.lastAvailableKW});
 		for (auto& l : loads) mean({&l.lastRequestedKW, &l.lastSuppliedKW, &l.lastUnmetKW,
 			&l.lastUnmetCriticalKW, &l.lastHeatExportedKW, &l.lastHeatRoutedKW, &l.lastProfileLevel, &l.lastSurgeKW});

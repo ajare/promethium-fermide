@@ -572,6 +572,8 @@ namespace core
 			entry.bAtmosphereId = pathway.authored.bAtmosphereId;
 			entry.areaM2 = pathway.authored.areaM2;
 			entry.openFraction = pathway.openFraction;
+			entry.lastCommandId = pathway.lastCommandId;
+			entry.lastCommandSeconds = pathway.lastCommandSeconds;
 			entry.flowRateKgPerS = pathway.flowRateKgPerS;
 			entry.netTransferredKg = pathway.netTransferredKg;
 			entry.status = pathway.status;

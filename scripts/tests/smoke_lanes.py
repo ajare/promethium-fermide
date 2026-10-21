@@ -57,9 +57,12 @@ class Lanes(unittest.TestCase):
             self.assertNotIn('validation-stress', fast['LABELS'])
             self.assertEqual(fast['TIMEOUT'], 60)
         for check in ('pathwayDiffusion', 'pathwayValidation', 'pathwayCounterFlow',
-                      'pathwayClosed', 'pathwayOpenness'):
+                      'pathwayClosed', 'pathwayOpenness', 'pathwayCommands',
+                      'pathwayCommandOrdering', 'pathwayCommandReset', 'pathwayCommandValidation'):
             self.assertIn('validation-fast', props(f'station-{check}')['LABELS'])
             self.assertNotIn('validation-stress', props(f'station-{check}')['LABELS'])
+        for ratio in (1, 7, 60):
+            self.assertIn('validation-fast', props(f'station-pathway-command-cadence-{ratio}')['LABELS'])
         for module in lane.REPRESENTATIVES:
             self.assertEqual(sum(t['name'] == f'smoke-{module}' for t in selected), 1)
         self.assertIn('headless-tools-cli-contract', {t['name'] for t in selected})

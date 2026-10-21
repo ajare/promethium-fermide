@@ -859,6 +859,18 @@ namespace core
 		double initialOpenFraction{1.0};
 		bool operator==(AtmospherePathwaySettings const&) const = default;
 	};
+	// One-off authored commands. Ties use priority descending, then declaration
+	// order; the last applied command wins. No live/tick-indexed command queue.
+	struct PathwayCommandSettings
+	{
+		std::string id;
+		std::string pathwayId;
+		double openFraction{0.0};
+		double occurrenceSeconds{0.0};
+		int priority{0};
+		bool operator==(PathwayCommandSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationPathwayCommands{256};
 	inline constexpr size_t MaxStationPathways{64};
 	// Species order for pathway arrays: oxygen, nitrogen, carbon dioxide,
 	// water vapour (including vapour, unlike StationAtmosphereGases).
@@ -1786,6 +1798,7 @@ namespace core
 		std::vector<GeneratorSettings> generators;
 		std::vector<AtmosphereSettings> atmospheres;
 		std::vector<AtmospherePathwaySettings> atmospherePathways;
+		std::vector<PathwayCommandSettings> pathwayCommands;
 		std::vector<AirlockCycleSettings> airlockCycles;
 		std::vector<CrewSettings> crews;
 		std::vector<WaterCollectorSettings> waterCollectors;
@@ -3101,6 +3114,9 @@ namespace core
 		std::array<double, 4> flowRateKgPerS{};
 		std::array<double, 4> netTransferredKg{};
 		StationAtmospherePathwayStatus status{StationAtmospherePathwayStatus::Idle};
+		// Empty until a command succeeds (including a command stamped at zero).
+		std::string lastCommandId;
+		double lastCommandSeconds{0.0};
 		bool operator==(StationAtmospherePathwaySnapshot const&) const = default;
 	};
 

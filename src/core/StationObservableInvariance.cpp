@@ -21,7 +21,7 @@ namespace core
 				"sabatierReactors", "methaneProcessors", "microbialProcessors", "cropPopulations",
 				"algaeCultures", "fuelCells", "hasNextDelivery", "nextDeliverySeconds",
 				"hasNextWasteEjection", "nextWasteEjectionSeconds", "endurance", "forecast", "balanceTolerance"};
-			std::array<StationObservableInvariance, 58> result{};
+			std::array<StationObservableInvariance, 61> result{};
 			for (size_t i = 0; i < names.size(); ++i)
 			{
 				auto& entry = result[i];
@@ -87,7 +87,7 @@ namespace core
 				entry.basis = "70 s physicalCoupling fixtures only, ratios 1,6,7,30,60; analytical ODE truncation bounds for configured model coefficients, not physical parameter calibration or arbitrary configurations";
 				entry.verifiedBy = "station/physicalCoupling";
 			}
-			auto& cycle = result[result.size() - 2];
+			auto& cycle = result[56];
 			cycle.name = "fuelCells[].electricalKJ";
 			cycle.classification = StationObservableInvarianceClass::Bound;
 			cycle.convergenceOrder = 1;
@@ -95,13 +95,25 @@ namespace core
 			cycle.verifiedThroughRatio = 60;
 			cycle.basis = "70 s solar-funded 0.001 kg/s electrolysis/fuel-cell cycle only; error is one Station interval of reactant production; ratios 1,6,7,30,60, not a global guarantee";
 			cycle.verifiedBy = "station/physicalCoupling";
-			auto& decay = result.back();
+			auto& decay = result[57];
 			decay.name = "power.generators[].decayHeatKJ";
 			decay.classification = StationObservableInvarianceClass::Exact;
 			decay.absoluteTolerance = 1e-8;
 			decay.verifiedThroughRatio = 60;
 			decay.basis = "manual single-generator finite-fuel/outage fixtures with qualified sink; ratios 1,6,7,30,60; no global guarantee";
 			decay.verifiedBy = "station/generatorExhaustion;station/generatorOutage;station/generatorPortCapacity";
+			constexpr std::array<std::string_view, 3> commandFields{
+				"atmospherePathways[].openFraction", "atmospherePathways[].lastCommandId",
+				"atmospherePathways[].lastCommandSeconds"};
+			for (size_t i = 0; i < commandFields.size(); ++i)
+			{
+				auto& entry = result[58 + i];
+				entry.name = commandFields[i];
+				entry.classification = StationObservableInvarianceClass::Exact;
+				entry.verifiedThroughRatio = 60;
+				entry.basis = "authored one-off command landing and provenance at ratios 1,7,60; compare matching elapsed instants, not tick counts";
+				entry.verifiedBy = "station/pathwayCommands";
+			}
 			return result;
 		}();
 		return entries;
