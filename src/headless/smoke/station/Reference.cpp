@@ -126,6 +126,10 @@ namespace
 		// The settings are ordinary StationSystemsSettings and pass the
 		// same validation any authored World configuration must pass.
 		require(reference.settings.enabled, "the bundled reference is not authored enabled");
+		require(reference.settings.radiators.size() == 2
+			&& reference.settings.radiators[0].id == "radProcess" && reference.settings.radiators[0].areaM2 == 6.0
+			&& reference.settings.radiators[1].id == "radGen" && reference.settings.radiators[1].areaM2 == 0.5,
+			"reference radiator areas did not retain their explicitly recalibrated SI balance (#783)");
 		std::string diagnostic;
 		require(core::validateStationSystemsSettings(reference.settings, diagnostic),
 			("the bundled reference configuration was refused: " + diagnostic).c_str());

@@ -1680,7 +1680,9 @@ namespace
 		core::RadiatorSettings panel;
 		panel.id = "panel";
 		panel.reservoirId = "cabin";
-		panel.areaM2 = 5000.0;
+		// Explicitly recalibrate this gently warming replay fixture for
+		// the corrected SI coefficient (#783); file areas are not migrated.
+		panel.areaM2 = 5.0;
 		panel.emissivity = 0.9;
 		panel.viewFactor = 1.0;
 		panel.sinkTemperatureC = -270.0;

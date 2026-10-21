@@ -104,6 +104,10 @@ provenance:
       emissivity and view factor; no fin efficiency or distribution
       modelling is promised. The -30 C effective sink represents a
       sun-lit orbit-averaged back-radiation environment, not deep space.
+      Areas were explicitly recalibrated in #783 to 6 m2 (process) and
+      0.5 m2 (generator) when the kW coefficient was corrected by 1000x,
+      preserving this reference's provisional heat-rejection balance.
+      User-authored areas are not automatically rescaled.
   - coefficient: "Crop growth yield and respiration"
     value: "0.1 kg dry biomass per kWh of delivered light; 0.012 per hour respiration"
     units: "kg/kWh and 1/hour"
@@ -764,13 +768,13 @@ stationSystems:
   radiators:
     - id: radProcess
       reservoirId: processSink
-      areaM2: 6000.0
+      areaM2: 6.0
       emissivity: 0.9
       viewFactor: 0.9
       sinkTemperatureC: -30.0
     - id: radGen
       reservoirId: genSink
-      areaM2: 500.0
+      areaM2: 0.5
       emissivity: 0.9
       viewFactor: 0.9
       sinkTemperatureC: -30.0

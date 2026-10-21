@@ -1060,13 +1060,20 @@ model's back and no declared service limit is silently enforced.
 A radiator rejects its host reservoir's heat by the Stefan-Boltzmann
 law: `emissivity x view factor x area x sigma x (T^4 - T_sink^4)`, at
 the reservoir's current emitting temperature against an authored
-effective sink temperature. Environmental back-radiation is explicit —
+effective sink temperature. Areas are m² and both temperatures are kelvin;
+`sigma = 5.670374419e-8 / 1000 = 5.670374419e-11 kW/(m² K⁴)`, so integrating
+kW over seconds produces kJ. Environmental back-radiation is explicit —
 a warmer sink rejects less — and the radiator/view assumption is the
 declared emissivity-times-view-factor product; no physical distribution
 modelling is promised beyond these declared factors. A body cannot
 radiatively cool below its coldest sink nor warm above its warmest one:
 the clamp is booked into the ledger, not hidden, and scaled across the
 radiators that produced the rejection.
+
+[#783's SI correction](station-radiation-calibration.md) removes the former
+1000× underestimate. User-authored areas are not silently rescaled; existing
+configurations now use the corrected physics. Only the bundled reference areas
+were explicitly recalibrated to preserve their provisional thermal balance.
 
 Emitted equipment heat is routed exactly once. An External equipment
 load may declare a heat-sink reservoir; its admitted heat (the authored

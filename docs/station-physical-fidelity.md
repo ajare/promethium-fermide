@@ -15,6 +15,10 @@ instead evaluate their independent analytical reference at each sample's exact
 committed endpoint, never at a mismatched nominal target. Conservation checks
 retain the existing ledger tolerances.
 
+- `station-fidelity-radiatorSI` (#783): independent SI heat-rate/energy and
+  temperature checks for both exchange directions, black/grey factors and all
+  five samples; includes independent Lua assertions and a bad-coefficient
+  mutation that must reject without committing a step.
 - `station-fidelity-physicalCoupling`: analytical two-body thermal exchange
   (coolant/pump/reservoir and atmosphere/reservoir), independently inverted
   nonlinear radiator ODE, biological respiration with gas/heat coupling, and
@@ -88,15 +92,18 @@ ratios 1/6/7/30/60 were respectively 0.016667/0.1/0.083333/0.5/0.5 kJ.
 - Generator, dispatch and battery-hour smoke fixtures retained references into
   temporary snapshot vectors. The affected elements are now copied.
 
-### Open physical-calibration finding
+### Radiation SI calibration follow-up (#783)
 
-**[#783](https://github.com/ajare/promethium-fermide/issues/783)** tracks the
-pre-existing radiator coefficient: host and Lua use `5.670374419e-14` under a
-kW/(m² K⁴) name, whereas the SI kW value is `5.670374419e-11` (1000× larger).
-The radiator convergence oracle uses the current model coefficient; passing
-it does not validate that calibration. This follow-up does not silently change
-existing radiator balances/authoring by 1000×. Recalibration and configuration
-compatibility require separate work.
+The [radiation calibration correction](station-radiation-calibration.md) now
+fixes the pre-existing 1000× underestimate in host and Lua. The nonlinear
+radiator oracle uses an independent SI coefficient. Its fixture area was
+explicitly recalibrated from 1,000,000 to 1000 m², preserving the thermal
+timescale and the measured errors/bounds above; these were revalidated.
+Bundled reference areas are now 6 and 0.5 m² to retain that demonstration's
+previous provisional balance. User-authored areas remain unchanged, using
+corrected physics rather than a hidden compatibility multiplier. The new SI
+regression and affected thermal/reference/editor checks pass, along with the
+file and metadata checks (24 distinct focused passes); see the linked report.
 
 Arbitrary nonlinear feedback, shared-fuel fleets, battery/fuel-cell startup
 portfolios and every observable/configuration are not certified by these
@@ -111,7 +118,8 @@ advance are timed separately; diagnostics and explicit final snapshot reads
 are outside the advance timer. Normal runtime publication remains included.
 No test-registration counts or mixed-frequency suite durations are compared.
 
-Release, GCC 15.2.0, AMD Ryzen AI MAX+ 395, 32 logical CPUs:
+Recorded before #783's explicit area recalibration (not a fresh #783 timing
+run): Release, GCC 15.2.0, AMD Ryzen AI MAX+ 395, 32 logical CPUs:
 
 | Workload | 60 Hz advance median | 10 Hz advance median | Speedup | Startup medians, 60/10 Hz |
 |---|---:|---:|---:|---:|
@@ -125,7 +133,7 @@ window includes startup and early normal operation, not its later scheduled
 maintenance/outage/logistics cycle. Timing is reported, not a flaky CI speed
 threshold.
 
-## Validation record
+## Validation record (#774, before #783)
 
 **39 distinct focused checks have recorded latest passes** across incremental
 Release runs; no failures from this follow-up remain. This is not a single

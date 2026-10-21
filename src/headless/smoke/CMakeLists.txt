@@ -159,7 +159,7 @@ set_tests_properties(station-timestep-invariance-profiles PROPERTIES
 add_test(NAME station-timestep-invariance-representative-ratios COMMAND pf-smoke-station --check invarianceRepresentative)
 set_tests_properties(station-timestep-invariance-representative-ratios PROPERTIES
     LABELS "smoke;functional;station;station-timestep-invariance;validation-exhaustive" TIMEOUT 120)
-foreach(check physicalCoupling generatorExhaustion generatorOutage generatorPortCapacity recoveryConvergence)
+foreach(check radiatorSI physicalCoupling generatorExhaustion generatorOutage generatorPortCapacity recoveryConvergence)
     add_test(NAME station-fidelity-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-fidelity-${check} PROPERTIES
         LABELS "smoke;functional;station;station-physical-fidelity;validation-exhaustive" TIMEOUT 180)
@@ -884,6 +884,8 @@ set_tests_properties(station-editor-flow-power-chain PROPERTIES LABELS "smoke;fu
 # service, driven through the real Flow controls.
 add_test(NAME station-editor-flow-thermal-reservoir COMMAND pf-smoke-editor --check station/flowThermalReservoirWorkflow)
 set_tests_properties(station-editor-flow-thermal-reservoir PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+add_test(NAME station-editor-flow-radiator COMMAND pf-smoke-editor --check station/flowRadiatorWorkflow)
+set_tests_properties(station-editor-flow-radiator PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-chiller COMMAND pf-smoke-editor --check station/flowChillerWorkflow)
 set_tests_properties(station-editor-flow-chiller PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-coolant-loop COMMAND pf-smoke-editor --check station/flowCoolantLoopWorkflow)

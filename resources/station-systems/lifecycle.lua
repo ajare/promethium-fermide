@@ -27,7 +27,8 @@ local BALANCE_TOLERANCE = 1e-9
 -- Stefan-Boltzmann constant in kW/(m^2 K^4) and the Celsius offset,
 -- mirroring core::StationStefanBoltzmannKWPerM2K4 and
 -- core::StationCelsiusOffset for the radiator rejection law.
-local STEFAN_BOLTZMANN = 5.670374419e-14
+-- SI W/(m^2 K^4) -> kW/(m^2 K^4), matching the host (#783).
+local STEFAN_BOLTZMANN = 5.670374419e-8 / 1000.0
 local KELVIN_OFFSET = 273.15
 -- Ideal-gas and humidity constants (#400): molar masses of the tracked
 -- species (kg/mol), the universal gas constant (J/(mol K)) and the

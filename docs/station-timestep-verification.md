@@ -14,9 +14,10 @@ at 10 Hz versus 60 Hz; it is not a whole-application speedup claim.
 
 There are **39 distinct recorded latest focused passes** for this follow-up,
 not a full-suite aggregate. No failing checks remain. General coupled-state
-certification is still not claimed. Pre-existing radiator coefficient
-calibration is tracked separately in
-[#783](https://github.com/ajare/promethium-fermide/issues/783).
+certification is still not claimed. The pre-existing radiator coefficient
+error is now corrected under
+[#783](station-radiation-calibration.md), with independent host/Lua SI
+regressions and explicit reference-area recalibration.
 
 ## Four-check repair status (before the physical-fidelity follow-up)
 

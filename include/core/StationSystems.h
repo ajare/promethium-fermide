@@ -537,7 +537,8 @@ namespace core
 	// explicit, and the radiator/view assumption is the authored
 	// emissivity x view factor product. No distribution modelling is
 	// promised beyond these declared factors.
-	inline constexpr double StationStefanBoltzmannKWPerM2K4{5.670374419e-14};
+	// SI sigma is W/(m^2 K^4); divide by 1000 once for kW (#783).
+	inline constexpr double StationStefanBoltzmannKWPerM2K4{5.670374419e-8 / 1000.0};
 	inline constexpr double StationCelsiusOffset{273.15};
 	// A thermal reservoir (CONTEXT.md): a body or aggregate of material
 	// whose stored thermal energy and effective thermal capacity determine

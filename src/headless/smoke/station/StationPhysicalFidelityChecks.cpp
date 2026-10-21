@@ -16,6 +16,10 @@ namespace
 {
 constexpr float quantum = 1.0f / 60.0f;
 constexpr std::array<uint32_t, 5> ratios{1, 6, 7, 30, 60};
+// Independent SI reference, not the production constant. Recalibrated area
+// preserves the nonlinear fixture's thermal timescale after #783.
+constexpr double radiatorSigmaKW = 5.670374419e-8 / 1000.0;
+constexpr double radiatorFidelityAreaM2 = 1000;
 void require(bool ok, std::string const& why) { if (!ok) throw std::runtime_error(why); }
 void close(double actual, double expected, double tolerance, std::string const& why)
 {
@@ -78,7 +82,7 @@ core::StationSystemsSettings radiatorScene()
     core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 1;
     s.thermalReservoirs = {reservoir(1000, 300 - core::StationCelsiusOffset)};
     core::RadiatorSettings r; r.id = "radiator"; r.reservoirId = "bus";
-    r.areaM2 = 1e6; r.emissivity = 0.9; r.viewFactor = 0.8;
+    r.areaM2 = radiatorFidelityAreaM2; r.emissivity = 0.9; r.viewFactor = 0.8;
     r.sinkTemperatureC = 100 - core::StationCelsiusOffset; s.radiators = {r}; return s;
 }
 core::StationSystemsSettings biologicalScene()
@@ -111,11 +115,74 @@ double radiatorExact(double time)
         return std::log((x - a) / (x + a)) / (4 * a * a * a)
             - std::atan(x / a) / (2 * a * a * a);
     };
-    auto const k = core::StationStefanBoltzmannKWPerM2K4 * 1e6 * 0.9 * 0.8 / 1000;
+    auto const k = radiatorSigmaKW * radiatorFidelityAreaM2 * 0.9 * 0.8 / 1000;
     auto const target = primitive(300) - k * time;
     double low = std::nextafter(a, 300.0), high = 300;
     for (int i = 0; i < 80; ++i) { auto mid = (low + high) / 2; if (primitive(mid) < target) low = mid; else high = mid; }
     return (low + high) / 2;
+}
+void radiatorSI(smoke::Context const&)
+{
+    core::ScopedStationStepRatioForTesting ownClock(std::nullopt);
+    auto verify = [] {
+        for (auto ratio : ratios) for (bool reverse : {false, true}) for (bool grey : {false, true})
+        {
+            auto s = radiatorScene();
+            s.thermalReservoirs[0].startingTemperatureC = (reverse ? 100 : 300) - core::StationCelsiusOffset;
+            auto& r = s.radiators[0]; r.areaM2 = 1;
+            r.emissivity = grey ? 0.9 : 1; r.viewFactor = grey ? 0.8 : 1;
+            r.sinkTemperatureC = (reverse ? 300 : 100) - core::StationCelsiusOffset;
+            auto const dt = ratio * static_cast<double>(quantum);
+            auto const result = simulate(s, ratio, dt).state;
+            // Independent SI oracle: 5.670374419e-8 W/(m² K⁴),
+            // (300^4 - 100^4) = 8e9 K⁴, then W / 1000 = kW.
+            auto const power = (reverse ? -1 : 1) * 0.45362995352 * r.emissivity * r.viewFactor;
+            require(result.thermal.radiators[0].areaM2 == 1, "Authored m² area was silently rescaled");
+            close(result.thermal.radiators[0].lastRejectedKW, power, 1e-10, "SI radiator kW conversion");
+            close(result.thermal.reservoirs[0].rejectedEnergyKJ, power * dt, 1e-10, "SI radiation kW seconds to kJ");
+            close(result.thermal.reservoirs[0].temperatureC,
+                s.thermalReservoirs[0].startingTemperatureC - power * dt / 1000, 1e-10, "SI radiation thermal integration");
+        }
+    };
+    verify();
+    struct RestoreSource { ~RestoreSource() { core::setStationSystemsSourceLoader({}); } } restoreSource;
+    auto const bundled = core::bundledStationSystemsSource();
+    auto wrapped = [](std::string const& source) {
+        return "local factory=(function()\n" + source + "\nend)()\n" + R"lua(
+return function(...)
+    local model=factory(...); local original=model.advance
+    function model.advance(self, step, dt)
+        local result=original(self,step,dt)
+        if step > 0 then
+            local host=self.reservoirs[1]; local r=host.radiators[1]
+            local power=(r.sinkTemperatureC > 0 and -1 or 1)*0.45362995352*r.emissivity*r.viewFactor
+            assert(math.abs(r.lastRejected-power)<1e-10,'Lua SI radiator kW conversion')
+            assert(math.abs(host.rejectedKJ-power*dt)<1e-10,'Lua SI radiation kJ integration')
+        end
+        return result
+    end
+    return model
+end
+)lua";
+    };
+    core::setStationSystemsSourceLoader([=] { return wrapped(bundled); });
+    verify();
+    // Prove the independent Lua oracle rejects the old unit error even
+    // with the host coefficient correct and the Lua energy ledger closed.
+    auto faulty = bundled;
+    auto const start = faulty.find("local STEFAN_BOLTZMANN =");
+    require(start != std::string::npos, "Lua coefficient mutation fixture lost its seam");
+    faulty.replace(start, faulty.find('\n', start) - start, "local STEFAN_BOLTZMANN = 5.670374419e-14");
+    core::setStationSystemsSourceLoader([=] { return wrapped(faulty); });
+    auto s = radiatorScene(); s.systemsStepWorldTicks = 6; s.radiators[0].areaM2 = 1;
+    s.radiators[0].emissivity = 1; s.radiators[0].viewFactor = 1;
+    core::StationSystemsRuntime runtime(s, quantum);
+    require(!runtime.advanceTo(6 * static_cast<double>(quantum)), "Bad Lua radiation calibration escaped its independent oracle");
+    require(runtime.snapshot().elapsedSeconds == 0, "Lua SI oracle failure committed physical state");
+    auto const diagnostics = runtime.diagnostics();
+    require(std::any_of(diagnostics.begin(), diagnostics.end(), [](auto const& d) {
+        return d.message.find("Lua SI radiator kW conversion") != std::string::npos;
+    }), "Bad Lua calibration failed for an unrelated reason");
 }
 void physicalCoupling(smoke::Context const&)
 {
@@ -146,7 +213,7 @@ void physicalCoupling(smoke::Context const&)
         auto const radiated = simulate(radiatorScene(), ratio, time).state;
         auto const actualK = radiated.thermal.reservoirs[0].temperatureC + core::StationCelsiusOffset;
         auto const exactK = radiatorExact(time);
-        auto const k = core::StationStefanBoltzmannKWPerM2K4 * 1000 * 0.9 * 0.8;
+        auto const k = radiatorSigmaKW * radiatorFidelityAreaM2 * 0.9 * 0.8 / 1000;
         auto const f0 = k * (std::pow(300.0, 4) - std::pow(100.0, 4));
         auto const lipschitz = 4 * k * std::pow(300.0, 3);
         auto const radiationBound = dt * f0 * std::expm1(lipschitz * time) / 2;
@@ -351,6 +418,7 @@ void benchmarkWorkloads(smoke::Context const&)
 }
 void registerStationPhysicalFidelityChecks(std::vector<smoke::Check>& checks)
 {
+    checks.push_back({"radiatorSI", radiatorSI});
     checks.push_back({"physicalCoupling", physicalCoupling});
     checks.push_back({"generatorExhaustion", generatorExhaustion});
     checks.push_back({"generatorOutage", generatorOutage});
