@@ -56,13 +56,16 @@ class Lanes(unittest.TestCase):
             self.assertIn('validation-fast', fast['LABELS'])
             self.assertNotIn('validation-stress', fast['LABELS'])
             self.assertEqual(fast['TIMEOUT'], 60)
+        # The scheduled pathway command queue was retired at schema 106 (daab06fa),
+        # so its checks - pathwayCommands, pathwayCommandOrdering/Reset/Validation
+        # and pathwayExteriorCommands - are no longer registered and are not
+        # inventoried here. Openness became a live parameter in its place.
         for check in ('pathwayDiffusion', 'pathwayValidation', 'pathwayCounterFlow',
-                      'pathwayVacuumEqualization', 'pathwayExteriorDiffusion', 'pathwayExteriorCommands',
+                      'pathwayVacuumEqualization', 'pathwayExteriorDiffusion',
                       'pathwayReferenceConfigurations',
                       'pathwayClosed', 'pathwayOpenness', 'pathwayParallelAdditivity',
                       'pathwayChainTopology', 'pathwayThermalNeutrality', 'pathwayCondensation',
-                      'pathwayPersistence', 'pathwayCommands',
-                      'pathwayCommandOrdering', 'pathwayCommandReset', 'pathwayCommandValidation'):
+                      'pathwayPersistence'):
             self.assertIn('validation-fast', props(f'station-{check}')['LABELS'])
             self.assertNotIn('validation-stress', props(f'station-{check}')['LABELS'])
         for check in ('pathwayLongHorizon', 'pathwayAbsurdGeometry'):
@@ -72,13 +75,12 @@ class Lanes(unittest.TestCase):
             self.assertEqual(properties['TIMEOUT'], 120)
             self.assertNotIn(f'station-{check}', {t['name'] for t in selected})
         for ratio in (1, 7, 60):
-            self.assertIn('validation-fast', props(f'station-pathway-command-cadence-{ratio}')['LABELS'])
             for check in ('pathwayThermalNeutrality', 'pathwayCondensation'):
                 labels = props(f'station-pathway-thermal-{check}-{ratio}')['LABELS']
                 self.assertIn('validation-fast', labels)
                 self.assertNotIn('validation-stress', labels)
             for check in ('pathwayDiffusion', 'pathwayCounterFlow', 'pathwayVacuumEqualization',
-                          'pathwayExteriorDiffusion', 'pathwayExteriorCommands', 'pathwayClosed', 'pathwayOpenness'):
+                          'pathwayExteriorDiffusion', 'pathwayClosed', 'pathwayOpenness'):
                 labels = props(f'station-timestep-components-{check}-{ratio}')['LABELS']
                 self.assertIn('validation-exhaustive', labels)
                 self.assertNotIn('validation-fast', labels)
