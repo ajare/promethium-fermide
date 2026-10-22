@@ -1774,6 +1774,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 	}
 	bool StationSystemsRuntime::advanceStep()
 	{
+		auto const stepStartedAt = SimulationStepTiming::Clock::now();
 		auto const tick = mImpl->clock.steps() + 1;
 		auto const seconds = mImpl->clock.stepSeconds();
 		auto next = mImpl->snapshot;
@@ -1863,9 +1864,18 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			// observation interval, from the same committed ledger.
 			mImpl->updateEndurance(tick);
 		}
+		// Recorded only on the success path, matching the World tick metric, which
+		// likewise never samples a tick that aborted. A failed Station step is
+		// reported through the diagnostics, not through the timing.
+		auto const stepCompletedAt = SimulationStepTiming::Clock::now();
+		mImpl->stepTiming.record(stepCompletedAt - stepStartedAt, stepCompletedAt);
 		return true;
 	}
 	std::vector<StationSystemsEvent> const& StationSystemsRuntime::events() const { return mImpl->events; }
+	double StationSystemsRuntime::averageStepMicroseconds() const
+	{
+		return mImpl->stepTiming.averageMicroseconds();
+	}
 	std::vector<StationTrendSeries> StationSystemsRuntime::trends() const { return mImpl->history.trends(); }
 	std::vector<StationMetricHistory> StationSystemsRuntime::metrics() const { return mImpl->history.metrics(); }
 	StationRecordingStatus StationSystemsRuntime::recordingStatus() const { return mImpl->history.status(); }

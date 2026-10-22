@@ -5337,6 +5337,18 @@ void renderToolbar(shared_ptr<core::World> world)
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Average completed core tick time over the last second; excludes rendering.");
 
+	// The Station systems run on their own, sparser clock, so the tick figure
+	// above spreads one Station step across the six ticks of its window. This
+	// is the same window sampled per Station step: the cost of one real step.
+	auto const averageStationStepMicroseconds = world->getAverageStationStepMicroseconds();
+	ImGui::Text("Station: %.1f us / step", averageStationStepMicroseconds);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip(
+			"Average completed Station systems step over the last second. Station steps are sparse"
+			" (default one per %u world ticks), so this is one whole step, not spread across the ticks."
+			" Zero means Station systems are off or no step completed.",
+			static_cast<unsigned>(world->getStationSystemsSettings().systemsStepWorldTicks));
+
 	ImGui::SetNextItemWidth(95.0f);
 	auto speed = std::format("{:g}x", world->getSimulationTimeScale());
 	if (ImGui::BeginCombo("##SimulationSpeed", speed.c_str()))

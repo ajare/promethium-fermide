@@ -443,6 +443,7 @@ set(PF_TEST_TIMEOUTS
     "station-stabilityResetIsolationFast=30"
     "station-stabilityWorkloadBundled=10"
     "station-step-ratio-runner=10"
+    "station-stepTiming=10"
     "station-stores=10"
     "station-structuralReplay=10"
     "station-thermal=10"

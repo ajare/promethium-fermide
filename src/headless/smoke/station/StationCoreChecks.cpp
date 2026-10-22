@@ -27,6 +27,48 @@ namespace
 			&& snapshot.elapsedSeconds - worldSeconds < 6.0 * world.getFixedTimestep(),
 			"Default Station clock did not advance in six-World-tick steps");
 	}
+	// The Station step average has to be sampled per Station step, not around
+	// the World's advanceTo() call. Sampled at the wrong seam it would absorb
+	// the five no-op catch-up calls between every real step and read as a
+	// sixth of the truth - the very dilution this figure exists to remove.
+	void stepTiming(smoke::Context const&)
+	{
+		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
+		core::StationSystemsSettings settings;
+		settings.enabled = true; settings.systemsStepWorldTicks = 6;
+		core::StationSystemsRuntime station(settings, 1.0 / 60.0);
+		require(station.averageStepMicroseconds() == 0.0,
+			"Station step timing reported a cost before any step ran");
+		require(station.advanceTo(6.0 * (1.0 / 60.0)), "first Station step failed");
+		auto const afterOne = station.averageStepMicroseconds();
+		require(afterOne > 0.0, "a completed Station step recorded no timing");
+		// Exactly what the five skipped World ticks do: ask for a target the
+		// Station clock has already reached. Each is a no-op and must add no
+		// sample, leaving the average exactly where the one real step put it.
+		for (int i = 0; i < 600; ++i)
+			require(station.advanceTo(6.0 * (1.0 / 60.0)), "no-op Station catch-up failed");
+		require(station.averageStepMicroseconds() == afterOne,
+			"no-op Station catch-up calls were sampled, diluting the step average");
+		// A second real step joins the window, so the figure stays live rather
+		// than frozen at the first sample.
+		require(station.advanceTo(12.0 * (1.0 / 60.0)), "second Station step failed");
+		require(station.snapshot().worldTick == 2, "second Station step did not commit");
+		require(station.averageStepMicroseconds() > 0.0,
+			"the Station step average went flat after a second step");
+		// The World seam the toolbar reads: zero with nothing running, and a
+		// real cost once Station steps are driven.
+		core::World world("Step timing", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		require(world.getAverageStationStepMicroseconds() == 0.0,
+			"a World with no Station steps reported a Station step cost");
+		settings.enabled = true; settings.systemsStepWorldTicks = 6;
+		std::string diagnostic;
+		require(world.configureStationSystems(settings, true, &diagnostic), diagnostic.c_str());
+		world.resumeSimulation();
+		require(advanceSeconds(world, 1.0), "Step timing World drive failed");
+		require(world.getAverageStationStepMicroseconds() > 0.0,
+			"a running Station reported no step cost through the World seam");
+	}
 	void clockIntegration(smoke::Context const&)
 	{
 		core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
@@ -593,6 +635,7 @@ void registerStationCoreChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"defaultClockCadence", defaultClockCadence});
 	checks.push_back({"clockIntegration", clockIntegration});
+	checks.push_back({"stepTiming", stepTiming});
 	checks.push_back({"lifecycle", lifecycle});
 	checks.push_back({"batching", batching});
 	checks.push_back({"eventBound", eventBound});

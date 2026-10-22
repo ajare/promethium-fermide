@@ -3665,6 +3665,15 @@ namespace core
 		{
 			return mSimulationStepTiming.averageMicroseconds();
 		}
+		// Mean completed Station step cost in the trailing wall-clock second, or
+		// zero when Station systems are disabled or no step completed. This is
+		// the Station cadence's own average: unlike the World tick figure, which
+		// spreads one Station step across the six ticks of its window, this
+		// reports what a single Station step actually cost.
+		double getAverageStationStepMicroseconds() const
+		{
+			return mStationSystemsRuntime ? mStationSystemsRuntime->averageStepMicroseconds() : 0.0;
+		}
 		static constexpr uint32_t getMaxTicksPerUpdate() { return 600; }
 
 		// Non-consuming view for presentation/diagnostic observers. Invalidated by mutation.

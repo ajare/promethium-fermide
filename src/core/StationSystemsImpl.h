@@ -2,6 +2,7 @@
 #include "StationSystemsPhysics.h"
 #include "StationClock.h"
 #include "StationProtectionPrediction.h"
+#include "core/SimulationStepTiming.h"
 
 namespace core
 {
@@ -10,6 +11,10 @@ using namespace station_detail;
 	{
 		Impl(uint32_t ratio, float baseSeconds) : clock(ratio, baseSeconds) {}
 		StationClock clock;
+		// Wall-clock cost of completed Station steps only. Recorded per step, so
+		// the sparse cadence cannot dilute it the way the World tick average
+		// does: the ticks that skip a Station step contribute no sample here.
+		SimulationStepTiming stepTiming;
 		uint64_t observationIntervalSteps{1};
 		ProtectionPrediction prediction;
 		station_connections::Graph connectionGraph;

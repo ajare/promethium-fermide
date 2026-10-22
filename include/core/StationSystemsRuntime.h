@@ -44,6 +44,12 @@ namespace core
 		// Catch up using whole Station steps until elapsed >= target. Targets
 		// already reached are no-ops; invalid targets are rejected without mutation.
 		bool advanceTo(double simulatedSeconds);
+		// Mean completed Station step cost in the trailing wall-clock second, or
+		// zero when no Station step completed. Sampled per Station step, so a
+		// sparse cadence (the default is one step per six World ticks) does not
+		// dilute it: the World ticks that skip a Station step add no sample.
+		// Diagnostic only; never affects simulation state or time.
+		double averageStepMicroseconds() const;
 		// Apply a changed configuration to a running or paused scenario
 		// without resetting the World. Topology is frozen and enforced: the
 		// entity id set of every collection, each atmosphere pathway's
