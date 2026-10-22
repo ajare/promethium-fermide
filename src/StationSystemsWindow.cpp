@@ -600,6 +600,7 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 	if (std::any_of(mFlowChart.series.begin(), mFlowChart.series.end(), [](auto const& s) { return s.optionalRequested; }))
 		ImGui::Checkbox("Show requested", &mShowRequested);
 	ImGui::TextUnformatted(selected->title.c_str());
+	if (!selected->accountingNote.empty()) ImGui::TextWrapped("Accounting coverage: %s", selected->accountingNote.c_str());
 	bool const empty = std::all_of(mFlowChart.series.begin(), mFlowChart.series.end(),
 		[](auto const& line) { return line.times.empty(); });
 	if (!mFlowSnapshot || !mFlowSnapshot->enabled)
