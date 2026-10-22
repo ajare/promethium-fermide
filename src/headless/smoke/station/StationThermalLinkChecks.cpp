@@ -592,6 +592,226 @@ void thermalLinkResetIsolation(smoke::Context const&)
 		"the rerun after reset is not identical to the first run");
 }
 
+// #796: the payoff of the conduction pass's tick placement. Conducted
+// heat is evaluated at tick-start temperatures and folded into each
+// endpoint's external heat rate sum before that compartment's coupled
+// vapour/thermal solve runs, so a warm near-saturated compartment that
+// loses heat through a link condenses in the very tick the heat leaves -
+// the phase change and the temperature it depends on resolve together.
+// These checks assert only published observables; the coupled solve is
+// untouched, and if a future change moves the conduction pass after the
+// per-compartment solve the same-tick assertion below fails instead of
+// silently lagging a tick behind.
+namespace
+{
+// The compartment's vapour capacity at its own temperature, in the
+// same Magnus/ideal-gas terms the runtime uses.
+double saturatedMassKg(double temperatureC, double volumeM3)
+{
+	return core::stationSaturatedVapourMassKg(
+		core::stationSaturationVapourPressureKPa(temperatureC), volumeM3, temperatureC);
+}
+
+// The first tick's conducted energy for a pair, from the same closed
+// form the runtime applies: this is what calibrates the fixture so the
+// vapour load sits strictly between the capacity the donor holds at
+// tick start and the lower capacity its own conduction leaves it with -
+// guaranteeing the first tick crosses the phase boundary whatever the
+// step cadence turns out to be.
+double firstTickConductedKJ(double capacityKJPerK, double deltaT,
+	double conductanceKWPerK, double dt)
+{
+	return 0.5 * capacityKJPerK * deltaT
+		* -std::expm1(-2.0 * conductanceKWPerK * dt / capacityKJPerK);
+}
+} // namespace
+
+void thermalLinkSameTickCondensation(smoke::Context const&)
+{
+	// A warm, near-saturated donor (a) linked to a cold, dry neighbour
+	// (b). The donor's vapour load is calibrated at runtime to sit
+	// between its capacity at 40 C and its capacity after the first
+	// tick's conduction has cooled it, so the first conducted tick is
+	// the first tick that crosses saturation - no pre-existing
+	// supersaturation, no lucky fixture constants.
+	auto const dt = requestedStepSeconds();
+	auto constexpr capacity = 10000.0;
+	auto constexpr conductance = 500.0;
+	// Both starting temperatures are non-zero: the audit's thermal
+	// closure bound scales with the starting energy, and a zero-Celsius
+	// datum would leave accumulated rounding no room at all (see the
+	// linkedPair note above).
+	auto constexpr donorC = 40.0;
+	auto constexpr neighbourC = 5.0;
+	auto const capStart = saturatedMassKg(donorC, 100.0);
+	auto const capAfterFirstTick = saturatedMassKg(
+		donorC - firstTickConductedKJ(capacity, donorC - neighbourC, conductance, dt) / capacity,
+		100.0);
+	require(capAfterFirstTick < capStart,
+		"the calibration itself found no capacity drop to cross");
+	auto const vapourKg = 0.5 * (capStart + capAfterFirstTick);
+	core::StationSystemsSettings s;
+	s.enabled = true;
+	auto a = linkCompartment("a", donorC, capacity);
+	a.startingWaterVapourKg = vapourKg;
+	auto b = linkCompartment("b", neighbourC, capacity);
+	b.startingWaterVapourKg = 0.05; // far below capacity at any temperature it reaches
+	s.atmospheres = {a, b};
+	s.thermalLinks = {{"wall", "a", "b", conductance}};
+	std::string diagnostic;
+	core::World world("ThermalLinkSameTickCondensation", 2, 2);
+	configure(world, s, diagnostic);
+	auto const initial = world.getStationSystemsSnapshot();
+	require(std::abs(initial.systemsTimestepSeconds - dt) < 1e-12,
+		"the fixture's step assumption does not match the configured cadence");
+	for (auto const& air : initial.atmospheres)
+		require(air.relativeHumidity < 1.0,
+			"the condensation fixture starts supersaturated");
+	require(vapourKg > capAfterFirstTick && vapourKg < capStart,
+		"the donor's vapour does not straddle the first tick's capacity drop");
+	world.resumeSimulation();
+	// The same tick, proved: one station step, and the tick that reports
+	// the heat leaving also reports the condensation that heat caused.
+	require(advanceStationSteps(world, 1), "same-tick step failed");
+	auto const first = world.getStationSystemsSnapshot();
+	require(first.healthy, "same-tick run failed its audit");
+	auto const& hot = first.atmospheres[0];
+	require(hot.lastConductedKW < 0.0,
+		"the donor's first tick did not report conducted heat leaving");
+	require(hot.lastVapourCondensedKg > 1e-3,
+		"the tick that conducted the heat away did not condense in the same tick");
+	require(hot.condensedKg == hot.lastVapourCondensedKg && hot.condensing,
+		"the first-tick condensation was not reported in the cumulative observable");
+	require(hot.lastLatentHeatKW > 0.0,
+		"same-tick condensation booked no latent heat");
+	// The latent feedback is visible: the condensate is smaller than
+	// the naive drop from the calibrated load to the post-conduction
+	// capacity, because condensing warmed the very air that sets the
+	// cap - the solve really coupled the two rather than sequencing
+	// them against stale temperatures.
+	auto const naiveDrop = vapourKg - capAfterFirstTick;
+	require(hot.lastVapourCondensedKg < naiveDrop
+		&& hot.lastVapourCondensedKg > 0.5 * naiveDrop,
+		"same-tick condensation did not sit inside its latent-feedback bracket");
+	require(first.atmospheres[1].lastVapourCondensedKg == 0.0,
+		"the receiving compartment condensed while warming");
+	// Then the whole relaxation: every published tick stays at or below
+	// its own end-of-tick capacity, the vapour ledger keeps every gram
+	// that left the gas phase accounted as condensate (it never comes
+	// back - no re-evaporation in this slice), and the donor's thermal
+	// ledger closes on conducted plus latent heat alone.
+	auto previousCondensed = hot.condensedKg;
+	auto previousVapour = hot.waterVapourKg;
+	while (world.getStationSystemsSnapshot().elapsedSeconds < 200.0)
+	{
+		require(advanceStationSteps(world, 1), "same-tick relaxation step failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "same-tick relaxation failed its audit");
+		for (auto const& air : snapshot.atmospheres)
+		{
+			auto const cap = saturatedMassKg(air.temperatureC, 100.0);
+			require(air.waterVapourKg <= cap + 1e-9
+				&& air.relativeHumidity <= 1.0 + 1e-9,
+				"conduction published a compartment supersaturated against its own end-of-tick temperature");
+		}
+		auto const& donor = snapshot.atmospheres[0];
+		require(std::abs(donor.waterVapourKg + donor.condensedKg - vapourKg) < 1e-6,
+			"condensate did not stay out of the gas phase: the vapour/condensate ledger drifted");
+		require(donor.condensedKg >= previousCondensed - 1e-12,
+			"cumulative condensate decreased - a phase change ran backwards");
+		require(donor.waterVapourKg <= previousVapour + 1e-12,
+			"the donor's vapour grew while it was still losing heat");
+		previousCondensed = donor.condensedKg;
+		previousVapour = donor.waterVapourKg;
+		auto const thermalDelta = capacity * (donor.temperatureC - donorC);
+		require(std::abs(thermalDelta - donor.conductedEnergyKJ - donor.latentHeatEnergyKJ)
+			<= 1e-6 * std::max(1.0, std::abs(thermalDelta)),
+			"the donor's temperature did not close on conducted plus latent heat alone");
+		require(snapshot.atmospheres[1].condensedKg == 0.0,
+			"the warming receiver condensed during the relaxation");
+	}
+	auto const settled = world.getStationSystemsSnapshot();
+	require(settled.atmospheres[0].condensedKg > 1.0,
+		"the relaxation condensed nothing worth reporting");
+	require(settled.atmospheres[0].temperatureC < 23.0,
+		"the donor did not cool toward the pair's equilibrium");
+	// Quiescence: past convergence the condensate stays condensed and
+	// the vapour stays put - nothing quietly re-evaporates once the
+	// conduction that drove it has stopped.
+	auto const frozenVapour = settled.atmospheres[0].waterVapourKg;
+	auto const frozenCondensed = settled.atmospheres[0].condensedKg;
+	require(advanceSeconds(world, 60.0), "post-settle run failed");
+	auto const after = world.getStationSystemsSnapshot();
+	require(after.healthy, "post-settle run failed its audit");
+	require(std::abs(after.atmospheres[0].waterVapourKg - frozenVapour) < 1e-5
+		&& std::abs(after.atmospheres[0].condensedKg - frozenCondensed) < 1e-5,
+		"the settled pair re-evaporated condensate after conduction stopped");
+}
+
+// The reverse case: heat conducted INTO a compartment raises its vapour
+// capacity with its temperature, so a near-saturated receiver warms
+// without condensing a gram - the conduction pass cannot manufacture a
+// phase change in the direction the physics says there isn't one.
+void thermalLinkReverseNoSpuriousCondensation(smoke::Context const&)
+{
+	auto constexpr capacity = 10000.0;
+	auto constexpr receiverVapourKg = 0.93; // RH ~0.99 at 10 C, below capacity everywhere above
+	require(receiverVapourKg < saturatedMassKg(10.0, 100.0)
+		&& receiverVapourKg > 0.9 * saturatedMassKg(10.0, 100.0),
+		"the receiver fixture is not near-saturated at its starting temperature");
+	core::StationSystemsSettings s;
+	s.enabled = true;
+	auto a = linkCompartment("a", 40.0, capacity);
+	a.startingWaterVapourKg = 0.001; // far below capacity: the donor never condenses either
+	auto b = linkCompartment("b", 10.0, capacity);
+	b.startingWaterVapourKg = receiverVapourKg;
+	s.atmospheres = {a, b};
+	s.thermalLinks = {{"wall", "a", "b", 100.0}};
+	std::string diagnostic;
+	core::World world("ThermalLinkReverseCase", 2, 2);
+	configure(world, s, diagnostic);
+	auto const initial = world.getStationSystemsSnapshot();
+	require(initial.atmospheres[1].relativeHumidity < 1.0,
+		"the reverse-case receiver starts supersaturated");
+	world.resumeSimulation();
+	auto previousTemperature = initial.atmospheres[1].temperatureC;
+	auto previousHumidity = initial.atmospheres[1].relativeHumidity;
+	auto previousCapacity = saturatedMassKg(previousTemperature, 100.0);
+	while (world.getStationSystemsSnapshot().elapsedSeconds < 300.0)
+	{
+		require(advanceStationSteps(world, 1), "reverse-case step failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "reverse-case run failed its audit");
+		auto const& receiver = snapshot.atmospheres[1];
+		require(receiver.conductedEnergyKJ > 0.0,
+			"the reverse-case receiver is not receiving conducted heat");
+		require(receiver.lastVapourCondensedKg == 0.0 && receiver.condensedKg == 0.0,
+			"heat conducted into a compartment condensed its vapour spuriously");
+		require(receiver.waterVapourKg == receiverVapourKg,
+			"the receiver's vapour changed with no phase process to account for it");
+		require(receiver.temperatureC >= previousTemperature,
+			"the receiver did not warm under incoming conduction");
+		auto const cap = saturatedMassKg(receiver.temperatureC, 100.0);
+		require(cap > previousCapacity,
+			"incoming conducted heat did not raise the receiver's vapour capacity");
+		require(receiver.relativeHumidity <= previousHumidity,
+			"the receiver's humidity rose while its capacity was growing");
+		require(receiver.waterVapourKg <= cap + 1e-9,
+			"the reverse case published supersaturated gas");
+		previousTemperature = receiver.temperatureC;
+		previousHumidity = receiver.relativeHumidity;
+		previousCapacity = cap;
+		require(snapshot.atmospheres[0].condensedKg == 0.0,
+			"the dry donor condensed while cooling");
+	}
+	auto const warmed = world.getStationSystemsSnapshot();
+	require(warmed.atmospheres[1].temperatureC > 20.0
+		&& warmed.atmospheres[1].relativeHumidity < 0.85,
+		"the reverse-case receiver did not genuinely warm and open its capacity");
+	require(warmed.atmospheres[1].condensedKg == 0.0,
+		"a whole warming run invented condensate in the receiver");
+}
+
 // Stress: a chain of linked compartments homogenizes to one common
 // temperature over a long run and stays there.
 void thermalLinkChainHomogenization(smoke::Context const&)
@@ -668,6 +888,9 @@ void registerStationThermalLinkChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"thermalLinkReservoirCoexistence", thermalLinkReservoirCoexistence});
 	checks.push_back({"thermalLinkValidation", thermalLinkValidation});
 	checks.push_back({"thermalLinkResetIsolation", thermalLinkResetIsolation});
+	checks.push_back({"thermalLinkSameTickCondensation", thermalLinkSameTickCondensation});
+	checks.push_back({"thermalLinkReverseNoSpuriousCondensation",
+		thermalLinkReverseNoSpuriousCondensation});
 	checks.push_back({"thermalLinkChainHomogenization", thermalLinkChainHomogenization});
 	checks.push_back({"thermalLinkAbsurdGeometry", thermalLinkAbsurdGeometry});
 }
