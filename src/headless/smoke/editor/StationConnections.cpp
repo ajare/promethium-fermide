@@ -158,7 +158,10 @@ void hatchInspectorWorkflow(smoke::Context const&)
 	// A carbon dioxide gradient running against the oxygen one, so the
 	// unsigned reading can be told apart from a signed net.
 	b.startingCarbonDioxideKg = 5;
-	settings.atmospheres = {a, b};
+	// A third compartment nothing is joined to, so the end combos have a
+	// free option to pick while both wired ends stay occupied.
+	auto c = a; c.id = "c";
+	settings.atmospheres = {a, b, c};
 	settings.atmospherePathways = {{"opening", "a", "b", 1, 1}};
 	auto world = std::make_shared<core::World>("Hatch inspector", 2, 2);
 	world->pauseSimulation(); world->finishBuild();
@@ -197,6 +200,71 @@ void hatchInspectorWorkflow(smoke::Context const&)
 			"the hatch's live control section did not render");
 		REQ(driver.contains("Open now"),
 			"the live openness slider did not render");
+		// The ends are picked from a ComboBox of the drafted compartments,
+		// never typed: a typed ID could name a compartment that does not
+		// exist. BeginCombo has no label hook in bundled ImGui, so resolve
+		// its ID from a sibling field in the same inspector, as the
+		// Transfer mode combo check does.
+		auto* area = ctx->ItemInfo("**/area m2##Atmosphere pathway 0");
+		REQ(area->Window != nullptr, "hatch inspector window not found");
+		ctx->ItemClick(ImHashStr("end A compartment##Atmosphere pathway 0", 0, area->ParentID));
+		ctx->Yield(2);
+		REQ(!ctx->IsError(), "Could not open the end A compartment combo");
+		{
+			auto* popup = ctx->GetWindowByRef("//$FOCUSED");
+			REQ(popup != nullptr, "end A combo popup has no focused window");
+			std::string const scope = "//" + std::string(popup->Name);
+			REQ(ctx->ItemInfo((scope + "/**/Unconnected").c_str(),
+				ImGuiTestOpFlags_NoError)->ID != 0,
+				"the end A combo popup did not offer the unconnected option");
+			REQ(ctx->ItemInfo((scope + "/**/c").c_str(),
+				ImGuiTestOpFlags_NoError)->ID != 0,
+				"the end A combo did not offer the free compartment 'c'");
+			// The end the other side already holds is not offered, so the
+			// same compartment can never be wired to itself through this
+			// end - the exclusion the typed field never had.
+			REQ(ctx->ItemInfo((scope + "/**/b##Atmosphere pathway 0").c_str(),
+				ImGuiTestOpFlags_NoError)->ID == 0,
+				"the end A combo offered the compartment end B already holds");
+			ctx->ItemClick((scope + "/**/c").c_str()); ctx->Yield(3);
+		}
+		REQ(!ctx->IsError(), "Could not select compartment 'c' for end A");
+		REQ(window.draft().atmospherePathways[0].aAtmosphereId == "c",
+			"picking 'c' in the end A combo did not update the draft");
+		REQ(world->getStationSystemsSettings().atmospherePathways[0].aAtmosphereId == "a",
+			"picking an end in the inspector bypassed draft isolation and hit the live scenario");
+		// The exclusion is symmetric: now that end A holds 'c', end B must
+		// not be able to take it, and its own end's compartment is offered.
+		ctx->ItemClick(ImHashStr("end B compartment##Atmosphere pathway 0", 0, area->ParentID));
+		ctx->Yield(2);
+		REQ(!ctx->IsError(), "Could not open the end B compartment combo");
+		{
+			auto* popup = ctx->GetWindowByRef("//$FOCUSED");
+			REQ(popup != nullptr, "end B combo popup has no focused window");
+			std::string const scope = "//" + std::string(popup->Name);
+			REQ(ctx->ItemInfo((scope + "/**/c##Atmosphere pathway 0").c_str(),
+				ImGuiTestOpFlags_NoError)->ID == 0,
+				"the end B combo offered the compartment end A now holds");
+			REQ(ctx->ItemInfo((scope + "/**/a").c_str(),
+				ImGuiTestOpFlags_NoError)->ID != 0,
+				"the end B combo did not offer the compartment end A left free");
+		}
+		ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+		// Restore the draft to the applied baseline. The later live-edit
+		// assertions need a draft with no pending edits: an unapplied
+		// draft hides the live readouts by design, which would fail them
+		// for the wrong reason.
+		ctx->ItemClick(ImHashStr("end A compartment##Atmosphere pathway 0", 0, area->ParentID));
+		ctx->Yield(2);
+		{
+			auto* popup = ctx->GetWindowByRef("//$FOCUSED");
+			REQ(popup != nullptr, "end A restore popup has no focused window");
+			ctx->ItemClick(("//" + std::string(popup->Name) + "/**/a").c_str());
+			ctx->Yield(3);
+		}
+		REQ(!ctx->IsError(), "Could not restore end A to 'a'");
+		REQ(window.draft().atmospherePathways[0].aAtmosphereId == "a",
+			"end A did not restore to the baseline compartment");
 	});
 	#undef REQ
 	// A live edit moves the running scenario away from the draft. The

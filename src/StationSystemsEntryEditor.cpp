@@ -1088,7 +1088,7 @@ bool renderAirlockCycleEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	return removeCycle;
 }
 
-bool renderAtmospherePathwayEntry([[maybe_unused]] core::StationSystemsSettings& draft,
+bool renderAtmospherePathwayEntry(core::StationSystemsSettings& draft,
 	core::AtmospherePathwaySettings& pathway, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
@@ -1100,16 +1100,25 @@ bool renderAtmospherePathwayEntry([[maybe_unused]] core::StationSystemsSettings&
 	// which compartments one opening joins. Openness is authored here and
 	// actuated at runtime by scheduled commands; this field is where the
 	// opening starts, not where it is held.
-	char endABuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(endABuffer, pathway.aAtmosphereId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText(describe("end A compartment", label).c_str(),
-		endABuffer, sizeof(endABuffer)))
-		pathway.aAtmosphereId = endABuffer;
-	char endBBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(endBBuffer, pathway.bAtmosphereId.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText(describe("end B compartment", label).c_str(),
-		endBBuffer, sizeof(endBBuffer)))
-		pathway.bAtmosphereId = endBBuffer;
+	auto renderEnd = [&](char const* field, std::string& end, std::string const& otherEnd) {
+		auto const* preview = end.empty() ? "Unconnected"
+			: end == core::StationExteriorAtmosphereId ? "Exterior vacuum" : end.c_str();
+		if (!ImGui::BeginCombo(describe(field, label).c_str(), preview)) return;
+		if (ImGui::Selectable("Unconnected", end.empty())) end.clear();
+		for (auto const& atmosphere : draft.atmospheres)
+		{
+			if (atmosphere.id.empty() || atmosphere.id == otherEnd
+				|| atmosphere.id == core::StationExteriorAtmosphereId) continue;
+			if (ImGui::Selectable(atmosphere.id.c_str(), end == atmosphere.id))
+				end = atmosphere.id;
+		}
+		if (otherEnd != core::StationExteriorAtmosphereId
+			&& ImGui::Selectable("Exterior vacuum", end == core::StationExteriorAtmosphereId))
+			end = core::StationExteriorAtmosphereId;
+		ImGui::EndCombo();
+	};
+	renderEnd("end A compartment", pathway.aAtmosphereId, pathway.bAtmosphereId);
+	renderEnd("end B compartment", pathway.bAtmosphereId, pathway.aAtmosphereId);
 	ImGui::InputDouble(describe("area m2", label).c_str(),
 		&pathway.areaM2, 0.0, 0.0, "%.4f");
 	ImGui::InputDouble(describe("open fraction", label).c_str(),
