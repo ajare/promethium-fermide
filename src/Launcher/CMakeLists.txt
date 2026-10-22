@@ -100,3 +100,8 @@ if(BUILD_TESTING)
         add_test(NAME launcher_zip_resource_location COMMAND launcher_zip_resource_location_tests)
     endif()
 endif()
+
+# Per-test CTest timeouts derived from measured Release timings (1.2x, rounded up
+# to the nearest 10s). Included last so it overrides the baseline timeouts set
+# wherever each test is registered.
+include("${CMAKE_SOURCE_DIR}/cmake/test-timeouts.cmake")

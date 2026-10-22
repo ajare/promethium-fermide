@@ -76,3 +76,8 @@ if(BUILD_TESTING)
         "${PROJECT_SOURCE_DIR}/resources")
     set_tests_properties(pf_application_render PROPERTIES LABELS "application;render" TIMEOUT 30)
 endif()
+
+# Per-test CTest timeouts derived from measured Release timings (1.2x, rounded up
+# to the nearest 10s). Included last so it overrides the baseline timeouts set
+# wherever each test is registered.
+include("${CMAKE_SOURCE_DIR}/cmake/test-timeouts.cmake")

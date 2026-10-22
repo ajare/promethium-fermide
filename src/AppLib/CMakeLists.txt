@@ -103,3 +103,8 @@ if(BUILD_TESTING)
     pf_apply_headless_verification_policy(applib_object_array_tests)
     add_test(NAME applib_object_array COMMAND applib_object_array_tests)
 endif()
+
+# Per-test CTest timeouts derived from measured Release timings (1.2x, rounded up
+# to the nearest 10s). Included last so it overrides the baseline timeouts set
+# wherever each test is registered.
+include("${CMAKE_SOURCE_DIR}/cmake/test-timeouts.cmake")

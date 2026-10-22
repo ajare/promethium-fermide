@@ -1071,3 +1071,8 @@ set_tests_properties(station-editor-flow-biology PROPERTIES LABELS "smoke;functi
 
 add_test(NAME station-editor-flow-schedules COMMAND pf-smoke-editor --check station/flowSchedulesWorkflow)
 set_tests_properties(station-editor-flow-schedules PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+
+# Per-test CTest timeouts derived from measured Release timings (1.2x, rounded up
+# to the nearest 10s). Included last so it overrides the baseline timeouts set
+# wherever each test is registered.
+include("${CMAKE_SOURCE_DIR}/cmake/test-timeouts.cmake")

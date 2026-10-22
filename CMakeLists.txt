@@ -992,3 +992,8 @@ foreach(dependency IN ITEMS yaml-cpp sol2 glew sdl2 spdlog nfd cpp_httplib)
 endforeach()
 set_target_properties(pf-lua pf-imgui-cpu vendor_poly2tri willpower_mpp_external
     PROPERTIES FOLDER "Third party")
+
+# Per-test CTest timeouts derived from measured Release timings (1.2x, rounded up
+# to the nearest 10s). Included last so it overrides the baseline timeouts set
+# wherever each test is registered.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/test-timeouts.cmake")

@@ -47,6 +47,9 @@ class Lanes(unittest.TestCase):
              '--show-only=json-v1'], text=True, timeout=30))['tests']
         self.assertTrue(selected)
         self.assertFalse(any('validation-stress' in props(t['name'])['LABELS'] for t in selected))
+        fast_timeouts = {'stabilityLongRun': 10, 'stabilityPathEquivalence': 40,
+                       'stabilityResetIsolation': 30,
+                       'stabilityMultiWorldIsolation': 40}
         for check in ('stabilityLongRun', 'stabilityPathEquivalence',
                       'stabilityResetIsolation', 'stabilityMultiWorldIsolation'):
             full = props(f'station-{check}')
@@ -55,7 +58,7 @@ class Lanes(unittest.TestCase):
             self.assertNotIn('validation-fast', full['LABELS'])
             self.assertIn('validation-fast', fast['LABELS'])
             self.assertNotIn('validation-stress', fast['LABELS'])
-            self.assertEqual(fast['TIMEOUT'], 60)
+            self.assertEqual(fast['TIMEOUT'], fast_timeouts[check])
         # The scheduled pathway command queue was retired at schema 106 (daab06fa),
         # so its checks - pathwayCommands, pathwayCommandOrdering/Reset/Validation
         # and pathwayExteriorCommands - are no longer registered and are not
@@ -68,11 +71,12 @@ class Lanes(unittest.TestCase):
                       'pathwayPersistence'):
             self.assertIn('validation-fast', props(f'station-{check}')['LABELS'])
             self.assertNotIn('validation-stress', props(f'station-{check}')['LABELS'])
+        stress_timeouts = {'pathwayLongHorizon': 20, 'pathwayAbsurdGeometry': 10}
         for check in ('pathwayLongHorizon', 'pathwayAbsurdGeometry'):
             properties = props(f'station-{check}')
             self.assertIn('validation-stress', properties['LABELS'])
             self.assertNotIn('validation-fast', properties['LABELS'])
-            self.assertEqual(properties['TIMEOUT'], 120)
+            self.assertEqual(properties['TIMEOUT'], stress_timeouts[check])
             self.assertNotIn(f'station-{check}', {t['name'] for t in selected})
         for ratio in (1, 7, 60):
             for check in ('pathwayThermalNeutrality', 'pathwayCondensation'):
