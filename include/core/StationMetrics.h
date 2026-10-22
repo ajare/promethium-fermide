@@ -63,6 +63,11 @@ namespace core
 		std::string hazardClass; // Optional grouping key of this contribution.
 		std::string equipmentType; // Optional owner-type breakdown, independent of instance names.
 		bool optionalRequested{false};
+		// This line reports one named object's own measurement, so it belongs to
+		// the population an observation picker may narrow to. Station-wide
+		// quantities (power demand, generation) are Value lines too but are not
+		// objects, so membership is stated rather than inferred.
+		bool perInstance{false};
 	};
 	struct StationChartDefinition
 	{

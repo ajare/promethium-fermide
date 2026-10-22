@@ -962,6 +962,8 @@ add_test(NAME station-editor-material-observations COMMAND pf-smoke-editor --che
 set_tests_properties(station-editor-material-observations PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-battery-observations COMMAND pf-smoke-editor --check station/batteryObservationWorkflow)
 set_tests_properties(station-editor-battery-observations PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+add_test(NAME station-editor-observation-instance-picker COMMAND pf-smoke-editor --check station/observationInstancePickerWorkflow)
+set_tests_properties(station-editor-observation-instance-picker PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-batteries COMMAND pf-smoke-editor --check station/batteryObservationWorkflow)
 set_tests_properties(station-editor-batteries PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-thermal COMMAND pf-smoke-editor --check station/flowThermalBufferWorkflow)

@@ -365,6 +365,7 @@ namespace core
 			{
 				StationChartSeriesDefinition contribution;
 				contribution.metricId = d->id; contribution.label = d->instanceId; contribution.stacked = true;
+				contribution.perInstance = true;
 				energy.series.push_back(std::move(contribution));
 			}
 			StationChartDefinition charge{"battery-charge", "Batteries", "Battery state of charge",
@@ -406,8 +407,12 @@ namespace core
 			total.operation = StationChartOperation::Sum;
 			for (auto d : members) total.contributors.push_back(d->id);
 			chart.series.push_back(std::move(total));
-			for (auto d : members) chart.series.push_back({d->id, d->instanceId, StationMetricValue::Actual,
-				StationChartOperation::Value, {}, {}, true, d->hazardClass.value_or("unclassified")});
+			for (auto d : members)
+			{
+				chart.series.push_back({d->id, d->instanceId, StationMetricValue::Actual,
+					StationChartOperation::Value, {}, {}, true, d->hazardClass.value_or("unclassified")});
+				chart.series.back().perInstance = true;
+			}
 			charts.push_back(std::move(chart));
 			{
 				StationChartDefinition qualified{"stored-usable/" + material + "/" + stationUnitLabel(unit),
@@ -421,8 +426,12 @@ namespace core
 				subtotal.operation = StationChartOperation::Sum;
 				for (auto d : members) subtotal.contributors.push_back(d->id + "/usable");
 				qualified.series.push_back(std::move(subtotal));
-				for (auto d : members) qualified.series.push_back({d->id + "/usable", d->instanceId,
-					StationMetricValue::Actual, StationChartOperation::Value, {}, {}, true});
+				for (auto d : members)
+				{
+					qualified.series.push_back({d->id + "/usable", d->instanceId,
+						StationMetricValue::Actual, StationChartOperation::Value, {}, {}, true});
+					qualified.series.back().perInstance = true;
+				}
 				charts.push_back(std::move(qualified));
 			}
 		}
@@ -462,9 +471,13 @@ namespace core
 			total.operation = StationChartOperation::Sum;
 			for (auto d : members) total.contributors.push_back(d->id);
 			chart.series.push_back(std::move(total));
-			for (auto d : members) chart.series.push_back({d->id, d->equipmentType + ": " + d->instanceId,
-				StationMetricValue::Actual, StationChartOperation::Value, {}, {}, true,
-				d->hazardClass.value_or("unclassified"), d->equipmentType});
+			for (auto d : members)
+			{
+				chart.series.push_back({d->id, d->equipmentType + ": " + d->instanceId,
+					StationMetricValue::Actual, StationChartOperation::Value, {}, {}, true,
+					d->hazardClass.value_or("unclassified"), d->equipmentType});
+				chart.series.back().perInstance = true;
+			}
 			charts.push_back(std::move(chart));
 		}
 		// Constituents describe chemical form on their own accounting boundary.
@@ -510,9 +523,13 @@ namespace core
 				total.operation = StationChartOperation::Sum;
 				for (auto d : population) total.contributors.push_back(d->id + (usable ? "/usable" : ""));
 				chart.series.push_back(std::move(total));
-				for (auto d : population) chart.series.push_back({d->id + (usable ? "/usable" : ""), d->instanceId,
-					StationMetricValue::Actual, StationChartOperation::Value, {}, {}, true,
-					d->hazardClass.value_or("unclassified"), d->equipmentType});
+				for (auto d : population)
+				{
+					chart.series.push_back({d->id + (usable ? "/usable" : ""), d->instanceId,
+						StationMetricValue::Actual, StationChartOperation::Value, {}, {}, true,
+						d->hazardClass.value_or("unclassified"), d->equipmentType});
+					chart.series.back().perInstance = true;
+				}
 				charts.push_back(std::move(chart));
 			};
 			make(members, false, true);
@@ -557,8 +574,12 @@ namespace core
 			total.metricId = id + "/total"; total.label = role == StationMetricRole::Inventory ? "Inventory state" : role == StationMetricRole::InventoryChange ? "Inventory change rate" : "Actual rate"; total.operation = StationChartOperation::Sum;
 			for (auto d : members) total.contributors.push_back(d->id);
 			chart.series.push_back(total);
-			for (auto d : members) chart.series.push_back({d->id, d->instanceId, StationMetricValue::Actual,
-				StationChartOperation::Value, {}, {}, true});
+			for (auto d : members)
+			{
+				chart.series.push_back({d->id, d->instanceId, StationMetricValue::Actual,
+					StationChartOperation::Value, {}, {}, true});
+				chart.series.back().perInstance = true;
+			}
 			std::vector<std::string> requests;
 			for (auto d : members) if (d->requestedSemantics) requests.push_back(d->id);
 			if (!requests.empty())
@@ -592,9 +613,12 @@ namespace core
 			chart.accountingNote = std::move(note);
 			chart.propertyId = chart.breakdown = std::move(breakdown);
 			for (auto const* d : members)
+			{
 				chart.series.push_back({d->id,
 					labelOf ? labelOf(*d) : d->instanceId, StationMetricValue::Actual,
 						StationChartOperation::Value});
+				chart.series.back().perInstance = true;
+			}
 			charts.push_back(std::move(chart));
 		};
 		// A series label must identify the line. In the all-gases view the

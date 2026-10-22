@@ -268,10 +268,21 @@ void StationSystemsWindow::prepareObservation(core::World const& world)
 		&& std::none_of(mObservationCatalogue.begin(), mObservationCatalogue.end(),
 			[&](auto const& chart) { return chart.id == mSelectedChart; }))
 	{ mSelectedChart = "power"; mObservationFallback = true; }
-	if (revision == mObservationRevision && mPreparedChart == mSelectedChart) return;
-	mFlowChart = world.queryStationSystemsChart(mSelectedChart);
+	if (revision == mObservationRevision && mPreparedChart == mSelectedChart
+		&& mPreparedSelection == observationInstanceSelectionKey()) return;
+	// Resolved on every real preparation, not only when the property changes: a
+	// property or applied-run switch can retire the objects that were picked, and
+	// the pickers must keep naming what the current property actually has.
+	resolveObservationInstances();
+	// The object-level chart is queried whenever the property has distinct
+	// objects, so both the aggregated line and the per-instance lines can be
+	// built from one source instead of depending on which breakdown was picked.
+	mFlowChart = world.queryStationSystemsChart(
+		observationObjectsAvailable() ? mObservationInstanceChart : mSelectedChart);
+	applyObservationAggregation();
 	mFlowRecording = world.getStationSystemsRecordingStatus();
 	mObservationRevision = revision; mPreparedChart = mSelectedChart;
+	mPreparedSelection = observationInstanceSelectionKey();
 	++mObservationPreparations;
 	auto const selected = std::find_if(mObservationCatalogue.begin(), mObservationCatalogue.end(),
 		[&](auto const& chart) { return chart.id == mSelectedChart; });
@@ -279,6 +290,208 @@ void StationSystemsWindow::prepareObservation(core::World const& world)
 	mObservationAxis = selected->label.ends_with(unitSuffix) ? selected->label : selected->label + unitSuffix;
 	mObservationLabels.clear();
 	for (auto const& line : mFlowChart.series) mObservationLabels.push_back(line.label + "###" + line.id);
+}
+
+bool StationSystemsWindow::observationInstancesSelected() const
+{
+	return std::any_of(mObservationInstances.begin(), mObservationInstances.end(),
+		[](auto const& name) { return !name.empty(); });
+}
+
+std::string StationSystemsWindow::observationInstanceSelectionKey() const
+{
+	std::string key;
+	// The aggregation mode is part of what was prepared: changing it must
+	// rebuild the plot even when no instance pick moved.
+	key += static_cast<char>('a' + static_cast<int>(mObservationAggregation));
+	for (auto const& name : mObservationInstances) { key += '|'; key += name; }
+	return key;
+}
+
+void StationSystemsWindow::setObservationAggregation(ObservationAggregation mode)
+{
+	mObservationAggregation = mode;
+}
+
+void StationSystemsWindow::clearObservationInstances()
+{
+	for (auto& name : mObservationInstances) name.clear();
+}
+
+void StationSystemsWindow::selectObservationInstance(size_t slot, std::string name)
+{
+	if (slot >= mObservationInstances.size()) return;
+	if (name.empty()) { mObservationInstances[slot].clear(); return; }
+	// A name is drawn once. Picking one another slot already holds moves it,
+	// rather than drawing the same object twice under one colour.
+	for (size_t other = 0; other < mObservationInstances.size(); ++other)
+		if (other != slot && mObservationInstances[other] == name) mObservationInstances[other].clear();
+	mObservationInstances[slot] = std::move(name);
+}
+
+void StationSystemsWindow::resolveObservationInstances()
+{
+	mObservationInstanceChart.clear();
+	mObservationAggregateChart.clear();
+	mObservationInstanceNames.clear();
+	auto const found = std::find_if(mObservationCatalogue.begin(), mObservationCatalogue.end(),
+		[&](auto const& chart) { return chart.id == mSelectedChart; });
+	if (found == mObservationCatalogue.end()) return;
+	// Under an owner-type breakdown the drawn lines are equipment kinds, not
+	// the objects behind the property. Aggregating or picking there would act
+	// on an axis the pickers never named, so the view is left exactly as the
+	// chart defines it.
+	if (found->breakdown == "Equipment type")
+	{
+		mObservationInstanceChart.clear();
+		mObservationAggregateChart.clear();
+		mObservationInstanceNames.clear();
+		clearObservationInstances();
+		return;
+	}
+	auto const& property = found->propertyId.empty() ? found->id : found->propertyId;
+	// A line names one object when it reports that object's own measurement.
+	// Pooled totals, subtotals, requested overlays and equipment-group lines
+	// are not objects, so they never enter the population the pickers offer.
+	auto const objectNames = [](core::StationChartDefinition const& chart) {
+		std::vector<std::string> names;
+		for (auto const& line : chart.series)
+			if (line.perInstance
+				&& std::find(names.begin(), names.end(), line.label) == names.end())
+				names.push_back(line.label);
+		return names;
+	};
+	// Where the objects live. The exchange family keeps them on a sibling
+	// "Instance" chart while the root shows the pooled aggregate; every other
+	// family (atmosphere state, pathway throughput, stores) draws them on the
+	// selected chart itself, so that chart is its own instance source.
+	std::string instanceChart;
+	for (auto const& chart : mObservationCatalogue)
+	{
+		auto const& other = chart.propertyId.empty() ? chart.id : chart.propertyId;
+		if (other != property) continue;
+		if (chart.breakdown == "Instance") instanceChart = chart.id;
+		else if (chart.breakdown == "Aggregate") mObservationAggregateChart = chart.id;
+	}
+	if (instanceChart.empty()) instanceChart = found->id;
+	auto const source = std::find_if(mObservationCatalogue.begin(), mObservationCatalogue.end(),
+		[&](auto const& chart) { return chart.id == instanceChart; });
+	if (source == mObservationCatalogue.end()) return;
+	mObservationInstanceNames = objectNames(*source);
+	// With fewer than two objects there is nothing to choose between: the
+	// aggregate already is that object, or the single line is all there is.
+	if (mObservationInstanceNames.size() < 2)
+	{
+		mObservationInstanceChart.clear();
+		mObservationInstanceNames.clear();
+		return;
+	}
+	mObservationInstanceChart = instanceChart;
+	// A new property re-picks a physically sensible default: intensive state
+	// (temperature, humidity, pressure) has no meaningful total across objects
+	// and averages, while extensive quantities (mass, energy, power, flow) add up.
+	if (mAggregationProperty != property)
+	{
+		mAggregationProperty = property;
+		switch (found->quantity)
+		{
+		case core::StationPhysicalQuantity::Temperature:
+		case core::StationPhysicalQuantity::Fraction:
+		case core::StationPhysicalQuantity::Pressure:
+			mObservationAggregation = ObservationAggregation::Average; break;
+		default:
+			mObservationAggregation = ObservationAggregation::Sum; break;
+		}
+		clearObservationInstances();
+	}
+	// A property or applied-run switch can retire the objects that were picked.
+	// A stale pick must not stay selected while naming something no longer drawn.
+	for (auto& name : mObservationInstances)
+		if (!name.empty() && std::find(mObservationInstanceNames.begin(),
+			mObservationInstanceNames.end(), name) == mObservationInstanceNames.end()) name.clear();
+}
+
+void StationSystemsWindow::applyObservationAggregation()
+{
+	if (!observationObjectsAvailable()) return;
+	auto const isObject = [&](std::string const& label) {
+		return std::find(mObservationInstanceNames.begin(),
+			mObservationInstanceNames.end(), label) != mObservationInstanceNames.end(); };
+	if (mObservationAggregation == ObservationAggregation::PerInstance)
+	{
+		// Only the named objects are drawn. Pooled totals belong to the
+		// aggregated view, so they are dropped here rather than lingering as an
+		// extra line the picker never offered.
+		std::erase_if(mFlowChart.series, [&](auto const& line) {
+			return !isObject(line.label)
+				|| std::find(mObservationInstances.begin(), mObservationInstances.end(),
+					line.label) == mObservationInstances.end(); });
+		// Stack bounds were cumulative over every object in the property; with
+		// only a subset drawn they would rest on a base no longer plotted.
+		for (auto& line : mFlowChart.series) if (line.stacked)
+		{ line.stacked = false; line.lower.clear(); line.upper.clear(); }
+		return;
+	}
+	bool const mean = mObservationAggregation == ObservationAggregation::Average;
+	// Sum prefers the property's own pooled total. The metrics layer computes
+	// it over expected membership compiled from the applied descriptors, not
+	// over the samples that happen to be present, so it stays authoritative
+	// where a sum of the drawn lines would quietly disagree. Its domain label
+	// ("Actual rate", "Inventory state") is kept: it distinguishes the line
+	// from a requested overlay, which "Sum" would not.
+	if (!mean)
+	{
+		for (auto const& line : mFlowChart.series)
+		{
+			if (isObject(line.label) || line.optionalRequested) continue;
+			auto const total = line;
+			// Requested overlays are kept alongside the total. They are drawn
+			// only when the viewer opts in via "Show requested", so the pooled
+			// view is still a single line by default, and the control that
+			// offers that choice stays truthful about what the property has.
+			std::vector<core::StationChartSeries> overlays;
+			for (auto const& other : mFlowChart.series)
+				if (other.optionalRequested && !isObject(other.label)) overlays.push_back(other);
+			mFlowChart.series.clear();
+			core::StationChartSeries kept = total;
+			kept.stacked = false; kept.lower.clear(); kept.upper.clear();
+			mFlowChart.series.push_back(std::move(kept));
+			for (auto& overlay : overlays)
+			{ overlay.stacked = false; overlay.lower.clear(); overlay.upper.clear();
+				mFlowChart.series.push_back(std::move(overlay)); }
+			return;
+		}
+	}
+	std::vector<core::StationChartSeries const*> objects;
+	for (auto const& line : mFlowChart.series) if (isObject(line.label)) objects.push_back(&line);
+	if (objects.empty()) return;
+	// Every object line shares the chart's time base, so the aggregate is
+	// computed pointwise. A gap in one object must not zero the reading or
+	// drag the mean down: only objects holding a valid sample at that instant
+	// contribute, and the instant is a gap itself when none do.
+	core::StationChartSeries aggregate;
+	aggregate.id = mObservationInstanceChart + (mean ? "/aggregate-mean" : "/aggregate-sum");
+	aggregate.label = mean ? "Average" : "Sum";
+	aggregate.times = objects.front()->times;
+	aggregate.values.reserve(aggregate.times.size());
+	aggregate.coverage.reserve(aggregate.times.size());
+	for (size_t row = 0; row < aggregate.times.size(); ++row)
+	{
+		long double total = 0.0L; size_t present = 0; double coverage = 1.0;
+		for (auto const* line : objects)
+		{
+			if (row >= line->values.size() || !std::isfinite(line->values[row])) continue;
+			total += static_cast<long double>(line->values[row]); ++present;
+			if (row < line->coverage.size() && std::isfinite(line->coverage[row]))
+				coverage = std::min(coverage, line->coverage[row]);
+		}
+		auto const value = present == 0 ? std::numeric_limits<double>::quiet_NaN()
+			: static_cast<double>(mean ? total / static_cast<long double>(present) : total);
+		aggregate.values.push_back(value);
+		aggregate.coverage.push_back(present == 0 ? 0.0 : coverage);
+	}
+	mFlowChart.series.clear();
+	mFlowChart.series.push_back(std::move(aggregate));
 }
 
 void StationSystemsWindow::renderObservationPlot(float height, core::World const& world)
@@ -308,6 +521,9 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 			ImGui::PushID(chart.id.c_str());
 			if (ImGui::Selectable(chart.label.c_str(), chart.id == mSelectedChart))
 			{
+				// A new property names a different population of objects; picks
+				// carried over would be meaningless or misleading.
+				clearObservationInstances();
 				mSelectedChart = chart.id;
 				selected = &chart;
 				mObservationFallback = false;
@@ -326,11 +542,63 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 			{
 				if (ImGui::Selectable(chart.breakdown.c_str(), chart.id == mSelectedChart))
 				{
+					clearObservationInstances();
 					mSelectedChart = chart.id; selected = &chart;
 					prepareObservation(world);
 				}
 			}
 			ImGui::EndCombo();
+		}
+	}
+	// Aggregation: every property that refers to distinct objects can be
+	// pooled into one line or opened up into named objects. The choice is
+	// offered only where there is more than one object to choose between.
+	if (observationObjectsAvailable())
+	{
+		char const* const modes[] = {"Average", "Sum", "Per-instance"};
+		int const modeIndex = static_cast<int>(mObservationAggregation);
+		ImGui::SetNextItemWidth(150.0f);
+		if (ImGui::BeginCombo("Aggregation", modes[modeIndex]))
+		{
+			for (int mode = 0; mode < 3; ++mode)
+				if (ImGui::Selectable(modes[mode], mode == modeIndex))
+					setObservationAggregation(static_cast<ObservationAggregation>(mode));
+			ImGui::EndCombo();
+		}
+		if (mObservationAggregation == ObservationAggregation::PerInstance)
+		{
+			ImGui::SameLine();
+			float const slotWidth = (ImGui::GetContentRegionAvail().x
+				- ImGui::GetStyle().ItemSpacing.x * 3.0f) / 4.0f;
+			for (size_t slot = 0; slot < mObservationInstances.size(); ++slot)
+			{
+				if (slot != 0) ImGui::SameLine(0.0f, 0.0f);
+				ImGui::SetNextItemWidth(slotWidth);
+				auto const& picked = mObservationInstances[slot];
+				auto const preview = picked.empty() ? "None" : picked.c_str();
+				// The visible label carries the slot number; the ### id must
+				// differ per slot or ImGui would merge the four into one.
+				auto const slotId = "Instance " + std::to_string(slot + 1)
+					+ "###station instance " + std::to_string(slot);
+				if (ImGui::BeginCombo(slotId.c_str(), preview))
+				{
+					if (ImGui::Selectable("None", picked.empty())) selectObservationInstance(slot, {});
+					for (auto const& name : mObservationInstanceNames)
+					{
+						// A name held by another slot is not offered twice.
+						bool const taken = std::find(mObservationInstances.begin(),
+							mObservationInstances.end(), name) != mObservationInstances.end()
+							&& picked != name;
+						ImGui::BeginDisabled(taken);
+						if (ImGui::Selectable(name.c_str(), picked == name) && !taken)
+							selectObservationInstance(slot, name);
+						ImGui::EndDisabled();
+					}
+					ImGui::EndCombo();
+				}
+			}
+			if (!observationInstancesSelected())
+				ImGui::TextDisabled("Per-instance view with no object named: nothing is plotted.");
 		}
 	}
 	if (std::any_of(mFlowChart.series.begin(), mFlowChart.series.end(), [](auto const& s) { return s.optionalRequested; }))
@@ -367,8 +635,12 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 		mPowerPlotContext = std::shared_ptr<ImPlotContext>(ImPlot::CreateContext(),
 			[](ImPlotContext* context) { ImPlot::DestroyContext(context); });
 	ImPlot::SetCurrentContext(mPowerPlotContext.get());
+	// The instance picker row takes a line of its own when it is shown.
+	float const pickerRow = mObservationInstanceNames.size() > 1
+		? ImGui::GetFrameHeightWithSpacing() : 0.0f;
 	if (ImPlot::BeginPlot("##Station power history", { -1, std::max(130.0f,
-		height - 3 * ImGui::GetTextLineHeightWithSpacing() - ImGui::GetFrameHeightWithSpacing()) }, ImPlotFlags_NoMenus))
+		height - 3 * ImGui::GetTextLineHeightWithSpacing() - ImGui::GetFrameHeightWithSpacing()
+			- pickerRow) }, ImPlotFlags_NoMenus))
 	{
 		ImPlot::SetupAxes("Simulation time (s)", mObservationAxis.c_str(),
 			ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);

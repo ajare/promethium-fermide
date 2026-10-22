@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <memory>
 #include <functional>
 #include <optional>
@@ -94,7 +95,32 @@ public:
 	std::string const& selectedObservation() const { return mSelectedChart; }
 	// Identity-based selection requests are resolved against the applied catalogue
 	// on the next render, including requests restored by a host presentation.
-	void selectObservation(std::string id) { mSelectedChart = std::move(id); }
+	void selectObservation(std::string id) { clearObservationInstances(); mSelectedChart = std::move(id); }
+	// The distinct objects the current property can reveal, in plot order.
+	std::vector<std::string> const& observationInstanceNames() const { return mObservationInstanceNames; }
+	// Per-slot instance picks; an empty slot shows nothing for that instance.
+	std::array<std::string, 4> const& observationInstances() const { return mObservationInstances; }
+	// The lines the plot is currently drawing, in draw order.
+	std::vector<std::string> observationSeriesLabels() const
+	{
+		std::vector<std::string> labels;
+		for (auto const& line : mFlowChart.series) labels.push_back(line.label);
+		return labels;
+	}
+	// Sample values behind a drawn line, for asserting aggregation arithmetic.
+	std::vector<double> const& observationSeriesValues(size_t index) const
+	{
+		static std::vector<double> const empty{};
+		return index < mFlowChart.series.size() ? mFlowChart.series[index].values : empty;
+	}
+	void selectObservationInstance(size_t slot, std::string name);
+	// How the distinct objects behind a property are combined into the plot.
+	enum class ObservationAggregation { Average, Sum, PerInstance };
+	ObservationAggregation observationAggregation() const { return mObservationAggregation; }
+	void setObservationAggregation(ObservationAggregation mode);
+	// True when the current property has two or more distinct objects, so the
+	// aggregation choice and the instance pickers are worth offering.
+	bool observationObjectsAvailable() const { return mObservationInstanceNames.size() > 1; }
 private:
 	std::shared_ptr<ImPlotContext> mPowerPlotContext;
 	std::string mSelectedChart{"power"};
@@ -103,6 +129,24 @@ private:
 	std::string mPreparedChart, mObservationAxis;
 	std::vector<std::string> mObservationLabels;
 	bool mObservationFallback{false}, mShowRequested{false};
+	// Instance reveal: a property whose metric refers to distinct objects (one
+	// microbial processor, one atmosphere compartment, one radiator) can be
+	// plotted as a single aggregated line or as up to four named objects,
+	// each on its own line.
+	std::array<std::string, 4> mObservationInstances{};
+	std::vector<std::string> mObservationInstanceNames;
+	std::string mObservationInstanceChart;
+	std::string mObservationAggregateChart;
+	ObservationAggregation mObservationAggregation{ObservationAggregation::Sum};
+	// The property the current aggregation was defaulted for, so switching
+	// properties re-picks a physically sensible mode.
+	std::string mAggregationProperty;
+	std::string mPreparedSelection;
+	void resolveObservationInstances();
+	void applyObservationAggregation();
+	bool observationInstancesSelected() const;
+	std::string observationInstanceSelectionKey() const;
+	void clearObservationInstances();
 	uint64_t mObservationPreparations{0};
 	core::StationRecordingStatus mFlowRecording;
 	core::StationChartData mFlowChart;

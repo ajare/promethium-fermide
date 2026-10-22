@@ -290,6 +290,7 @@ set(editor_names
     station/flowPowerChainWorkflow
     station/flowTelemetryWorkflow
     station/batteryObservationWorkflow
+    station/observationInstancePickerWorkflow
     station/materialObservationWorkflow
     station/waterGasObservationWorkflow
     station/carbonObservationWorkflow

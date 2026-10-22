@@ -3633,6 +3633,175 @@ namespace
 		require(driver.passed(), "Live Flow telemetry workflow failed");
 	}
 
+	void observationInstancePickerWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build(); io.DeltaTime = 1.0f / 60.0f;
+		auto world = std::make_shared<core::World>("Instance picker", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		// Three identical digesters sharing one role: the aggregate and the
+		// per-instance lines must agree exactly, so Sum == 3 x Average is an
+		// arithmetic check rather than a line count.
+		auto settings = smoke::station::microbialObservationFixture();
+		for (int extra = 1; extra <= 2; ++extra)
+		{
+			auto p = settings.microbialProcessors[0];
+			p.id = "digester-" + std::to_string(extra);
+			settings.microbialProcessors.push_back(p);
+		}
+		// Two compartments: same object-shaped property, but intensive, so the
+		// sensible default flips from Sum to Average.
+		core::AtmosphereSettings habitat;
+		habitat.id = "habitat"; habitat.volumeM3 = 200;
+		habitat.startingOxygenKg = 40; habitat.startingNitrogenKg = 160;
+		habitat.startingWaterVapourKg = 6; habitat.startingTemperatureC = 22;
+		habitat.thermalCapacityKJPerK = 20000;
+		habitat.minPressureKPa = 1; habitat.maxPressureKPa = 300;
+		auto vestibule = habitat;
+		vestibule.id = "vestibule"; vestibule.volumeM3 = 50;
+		vestibule.startingOxygenKg = 8; vestibule.startingNitrogenKg = 40;
+		vestibule.startingWaterVapourKg = 1; vestibule.startingTemperatureC = 18;
+		settings.atmospheres = {habitat, vestibule};
+		std::string why;
+		require(world->configureStationSystems(settings, true, &why), why.c_str());
+		world->markSaved(); world->resumeSimulation();
+		require(world->advanceTicks(12), "instance picker fixture failed to advance");
+		world->pauseSimulation();
+		StationSystemsWindow window;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Instance picker"); window.renderFlowContents(world); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		using Mode = StationSystemsWindow::ObservationAggregation;
+		// Ids are returned by value; an iterator into a catalogue copy would
+		// dangle the moment the lookup returned.
+		auto const aggregateId = [](std::vector<core::StationChartDefinition> const& catalogue,
+			std::string const& role) {
+			auto const found = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& c) {
+				return c.breakdown == "Aggregate"
+					&& c.id.starts_with("exchange/Microbial processor/")
+					&& c.id.find("/" + role + "/") != std::string::npos; });
+			return found == catalogue.end() ? std::string{} : found->id;
+		};
+		// The last finite sample of the single drawn line.
+		auto const lastValue = [&](double& out) {
+			auto const& v = window.observationSeriesValues(0);
+			for (size_t i = v.size(); i-- > 0;)
+				if (std::isfinite(v[i])) { out = v[i]; return true; }
+			return false;
+		};
+		driver.run("station", "observationInstancePicker", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Instance picker");
+			auto const& catalogue = world->getStationSystemsObservationCatalogue();
+			auto const heat = aggregateId(catalogue, "Produced heat");
+			REQ(!heat.empty(), "heat role absent");
+			// A property with no distinct objects offers no aggregation choice.
+			ctx->ComboClick("##Station observation property/power/Power"); ctx->Yield(2);
+			REQ(!driver.contains("Aggregation"), "power property offered the aggregation combo");
+			ctx->ItemClick("##Station observation property"); ctx->Yield(2);
+			auto const* popup = ctx->GetWindowByRef("//$FOCUSED"); REQ(popup != nullptr, "property popup absent");
+			auto const* heatChart = &*std::find_if(catalogue.begin(), catalogue.end(),
+				[&](auto const& c) { return c.id == heat; });
+			auto const item = ImHashStr(heatChart->label.c_str(), 0, ImHashStr(heat.c_str(), 0, popup->ID));
+			ctx->ScrollToItemY(item); ctx->ItemClick(item); ctx->Yield(2);
+			REQ(window.selectedObservation() == heat, "heat property not selected");
+			// Default for an extensive rate is Sum, drawn as one line.
+			REQ(driver.contains("Aggregation"), "multi-object property omitted the aggregation combo");
+			REQ(window.observationInstanceNames().size() == 3
+				&& window.observationInstanceNames()[0] == "digester"
+				&& window.observationInstanceNames()[2] == "digester-2",
+				"object names did not come from the property population");
+			REQ(window.observationAggregation() == Mode::Sum, "extensive property did not default to Sum");
+			// Sum reuses the property's own pooled total, so that line keeps
+			// its domain label rather than being relabelled "Sum".
+			REQ(window.observationSeriesLabels().size() == 1
+				&& window.observationSeriesLabels()[0] == "Actual rate",
+				"Sum mode did not draw exactly one pooled-total line");
+			double sum = 0.0;
+			REQ(lastValue(sum) && sum > 0.0, "Sum line carried no readable value");
+			// Average over the three identical objects is a third of the sum.
+			window.setObservationAggregation(Mode::Average); ctx->Yield(2);
+			REQ(window.observationSeriesLabels().size() == 1
+				&& window.observationSeriesLabels()[0] == "Average",
+				"Average mode did not draw exactly one Average line");
+			double mean = 0.0;
+			REQ(lastValue(mean), "Average line carried no readable value");
+			REQ(std::abs(sum - 3.0 * mean) <= 1e-9 * std::max(1.0, std::abs(sum)),
+				"Sum was not three times the Average over three identical objects");
+			// Per-instance opens the four pickers; nothing named draws nothing.
+			window.setObservationAggregation(Mode::PerInstance); ctx->Yield(2);
+			REQ(driver.contains("Instance 1"), "per-instance mode omitted the instance pickers");
+			REQ(window.observationSeriesLabels().empty(),
+				"per-instance with no object named still drew a line");
+			// Each named object gets its own line.
+			window.selectObservationInstance(0, "digester-1"); ctx->Yield(2);
+			REQ(window.observationSeriesLabels().size() == 1
+				&& window.observationSeriesLabels()[0] == "digester-1",
+				"one named object did not draw its own line");
+			double single = 0.0;
+			REQ(lastValue(single) && std::abs(single - mean) <= 1e-9 * std::max(1.0, std::abs(mean)),
+				"a single identical object did not match the average");
+			window.selectObservationInstance(1, "digester-2"); ctx->Yield(2);
+			REQ(window.observationSeriesLabels().size() == 2
+				&& window.observationSeriesLabels()[1] == "digester-2",
+				"second named object did not add its own line");
+			// A name is drawn once: picking it again moves it, never duplicates.
+			window.selectObservationInstance(2, "digester-1"); ctx->Yield(2);
+			REQ(window.observationInstances()[0].empty() && window.observationInstances()[2] == "digester-1",
+				"duplicate pick did not move the name out of the earlier slot");
+			REQ(window.observationSeriesLabels().size() == 2,
+				"moved pick changed the drawn line count instead of the slot holding it");
+			// Picking through the real combo, not only the API seam.
+			ctx->ComboClick("###station instance 0/digester"); ctx->Yield(2);
+			REQ(window.observationInstances()[0] == "digester"
+				&& window.observationSeriesLabels().size() == 3,
+				"instance combo click did not add the named object");
+			// None in the combo drops that line.
+			ctx->ComboClick("###station instance 0/None"); ctx->Yield(2);
+			REQ(window.observationInstances()[0].empty()
+				&& window.observationSeriesLabels().size() == 2,
+				"None in the instance combo did not drop the line");
+			// An intensive property defaults to Average, not Sum.
+			window.selectObservationInstance(1, {}); window.selectObservationInstance(2, {});
+			ctx->Yield(2);
+			ctx->ComboClick("##Station observation property/atmosphere-humidity/Relative humidity");
+			ctx->Yield(2);
+			REQ(window.selectedObservation() == "atmosphere-humidity", "humidity property not selected");
+			REQ(window.observationAggregation() == Mode::Average,
+				"intensive property did not default to Average");
+			REQ(window.observationSeriesLabels().size() == 1
+				&& window.observationSeriesLabels()[0] == "Average",
+				"humidity did not draw one Average line");
+			REQ(window.observationInstanceNames().size() == 2
+				&& window.observationInstanceNames()[0] == "habitat"
+				&& window.observationInstanceNames()[1] == "vestibule",
+				"humidity picker did not list the compartments");
+			// Humidity opened per-instance names compartments instead of a pool.
+			ctx->ComboClick("Aggregation/Per-instance"); ctx->Yield(2);
+			REQ(window.observationSeriesLabels().empty(),
+				"humidity per-instance with nothing named still drew a line");
+			ctx->ComboClick("###station instance 0/vestibule"); ctx->Yield(2);
+			REQ(window.observationSeriesLabels().size() == 1
+				&& window.observationSeriesLabels()[0] == "vestibule",
+				"humidity combo click did not narrow to the compartment");
+			// Switching the property re-defaults the mode and drops picks.
+			ctx->ComboClick("##Station observation property/power/Power"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "power"
+				&& std::all_of(window.observationInstances().begin(), window.observationInstances().end(),
+					[](auto const& name) { return name.empty(); }),
+				"property switch kept instance picks from another property");
+			// Reading instances never touched the World, the draft or history.
+			REQ(!world->isModified() && window.draftHistory().undoCount() == 0,
+				"instance picking mutated the World or document history");
+		});
+		#undef REQ
+		require(driver.passed(), "Observation instance picker workflow failed");
+	}
+
 	void batteryObservationWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -3664,9 +3833,18 @@ namespace
 			auto const observed = world->getStationSystemsSnapshot();
 			auto const draft = window.draft();
 			ctx->ComboClick("##Station observation property/battery-energy/Stored battery energy"); ctx->Yield(2);
+			// Default is the pooled total alone; the individual batteries are
+			// revealed by opening the view up per-instance and naming them.
 			REQ(window.selectedObservation() == "battery-energy" && driver.contains("Station total")
-				&& driver.contains("a-large") && driver.contains("z-small")
-				&& driver.contains("Stored battery energy (kWh)"), "Generic stack omitted its total, contributions or energy unit");
+				&& !driver.contains("a-large")
+				&& driver.contains("Stored battery energy (kWh)"),
+				"Aggregated stack did not show its total and energy unit");
+			ctx->ComboClick("Aggregation/Per-instance"); ctx->Yield(2);
+			ctx->ComboClick("###station instance 0/a-large"); ctx->Yield(2);
+			ctx->ComboClick("###station instance 1/z-small"); ctx->Yield(2);
+			REQ(driver.contains("a-large") && driver.contains("z-small"),
+				"Per-instance view did not reveal the named battery contributions");
+			ctx->ComboClick("Aggregation/Sum"); ctx->Yield(2);
 			auto const energy = world->queryStationSystemsChart("battery-energy");
 			REQ(energy.series.size() == 3 && energy.series[0].times.size() == 1
 				&& energy.series[1].stacked && energy.series[2].stacked
@@ -6383,6 +6561,7 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 	checks.push_back({"station/flowPowerChainWorkflow", flowPowerChainWorkflow});
 	checks.push_back({"station/flowTelemetryWorkflow", flowTelemetryWorkflow});
 	checks.push_back({"station/batteryObservationWorkflow", batteryObservationWorkflow});
+	checks.push_back({"station/observationInstancePickerWorkflow", observationInstancePickerWorkflow});
 	checks.push_back({"station/materialObservationWorkflow", materialObservationWorkflow});
 	checks.push_back({"station/waterGasObservationWorkflow", waterGasObservationWorkflow});
 	checks.push_back({"station/carbonObservationWorkflow", carbonObservationWorkflow});
