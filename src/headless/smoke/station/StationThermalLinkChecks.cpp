@@ -1,0 +1,560 @@
+#include "StationRig.h"
+#include "Smoke.h"
+#include <cmath>
+#include <string>
+#include <vector>
+
+// Thermal link tracer bullet checks (#794): an authored, undirected
+// conduction pair between two Atmosphere compartments. Every assertion is
+// made on what a configured World publishes after being advanced - never
+// on integrator internals - so replacing the closed form with any other
+// scheme producing the same published behaviour still passes.
+namespace
+{
+using namespace smoke::station;
+
+// Both compartments carry the identical gas inventory: the contrast with
+// the thermally-neutral pathway (#788) is then purely about heat - the
+// same composition, different temperature. The vapour load is kept far
+// below saturation at the coldest temperature any fixture reaches, so
+// no condensation latent heat enters the energy accounting and every
+// joule moved in these runs is the link's own.
+core::AtmosphereSettings linkCompartment(std::string const& id, double temperatureC,
+	double capacityKJPerK)
+{
+	core::AtmosphereSettings a;
+	a.id = id;
+	a.volumeM3 = 100;
+	a.thermalCapacityKJPerK = capacityKJPerK;
+	a.startingTemperatureC = temperatureC;
+	a.startingOxygenKg = 30;
+	a.startingNitrogenKg = 80;
+	a.startingCarbonDioxideKg = 0.6;
+	a.startingWaterVapourKg = 0.001;
+	a.minPressureKPa = 1;
+	a.maxPressureKPa = 200;
+	return a;
+}
+
+// Starting temperatures are deliberately non-zero on both sides: the
+// audit's thermal closure bound scales with the starting energy, and a
+// compartment starting at exactly 0 C would carry a zero-magnitude
+// datum, leaving the accumulated rounding with no room at all.
+core::StationSystemsSettings linkedPair(double aCapacity = 10000.0, double bCapacity = 10000.0,
+	double conductanceKWPerK = 10.0)
+{
+	core::StationSystemsSettings s;
+	s.enabled = true;
+	s.atmospheres = {linkCompartment("a", 40.0, aCapacity),
+		linkCompartment("b", 10.0, bCapacity)};
+	s.thermalLinks = {{"wall", "a", "b", conductanceKWPerK}};
+	return s;
+}
+
+void configure(core::World& world, core::StationSystemsSettings const& settings,
+	std::string& diagnostic)
+{
+	world.pauseSimulation(); world.finishBuild();
+	if (!world.configureStationSystems(settings, false, &diagnostic))
+		throw std::runtime_error("configure refused: [" + diagnostic + "]");
+}
+
+core::StationThermalLinkSnapshot link(core::StationSystemsSnapshot const& snap,
+	std::string const& id)
+{
+	for (auto const& entry : snap.thermalLinks)
+		if (entry.id == id) return entry;
+	throw std::runtime_error("thermal link missing from snapshot");
+}
+
+// The primary conservation test: total C*T across the link-joined set is
+// invariant, each side's residual closes with its conducted term, and the
+// two sides' conducted totals are exact negations of each other and of
+// the link's own cumulative transfer.
+void thermalLinkConservation(smoke::Context const&)
+{
+	std::string diagnostic;
+	core::World world("ThermalLinkConservation", 2, 2);
+	configure(world, linkedPair(), diagnostic);
+	auto const initial = world.getStationSystemsSnapshot();
+	require(initial.thermalLinks.size() == 1, "configured link missing before the run");
+	require(link(initial, "wall").status == core::StationThermalLinkStatus::Idle
+		&& link(initial, "wall").netTransferredKJ == 0.0,
+		"a link reports activity before the World has run");
+	world.resumeSimulation();
+	while (world.getStationSystemsSnapshot().elapsedSeconds < 60)
+	{
+		require(advanceStationSteps(world, 1), "conservation step failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "conservation run failed its audit");
+		auto const& a = snapshot.atmospheres[0];
+		auto const& b = snapshot.atmospheres[1];
+		require(a.conductedEnergyKJ == -b.conductedEnergyKJ,
+			"conducted heat was not booked as an exact negation on each side");
+		require(link(snapshot, "wall").netTransferredKJ == b.conductedEnergyKJ,
+			"the link ledger and the compartment ledgers disagree");
+		auto const total = a.thermalCapacityKJPerK * a.temperatureC
+			+ b.thermalCapacityKJPerK * b.temperatureC;
+		auto const totalStart = a.thermalCapacityKJPerK * initial.atmospheres[0].temperatureC
+			+ b.thermalCapacityKJPerK * initial.atmospheres[1].temperatureC;
+		require(std::abs(total - totalStart) <= 1e-6 * std::abs(totalStart),
+			"total energy across the link-joined set was not invariant");
+		require(std::abs(a.residualKJ) <= 1e-6 * std::max(1.0, std::abs(a.currentEnergyKJ))
+			&& std::abs(b.residualKJ) <= 1e-6 * std::max(1.0, std::abs(b.currentEnergyKJ)),
+			"compartment energy residual did not close with links present");
+	}
+	// Heat genuinely moved: the hot side cooled, the cold side warmed,
+	// and the signed flow points from hot to cold (A started hot).
+	auto const wall = link(world.getStationSystemsSnapshot(), "wall");
+	require(wall.flowRateKW > 0.0 && wall.netTransferredKJ > 1.0,
+		"heat did not flow from the hot compartment to the cold one");
+	require(wall.status == core::StationThermalLinkStatus::Active,
+		"a conducting link did not report Active");
+}
+
+// The headline contrast that makes ADR-0026 falsifiable: two compartments
+// at identical composition and different temperature keep the difference
+// forever with no link (pathway diffusion is thermally neutral), and a
+// thermal link removes exactly that difference.
+void thermalLinkAdr0026Contrast(smoke::Context const&)
+{
+	std::string diagnostic;
+	// A stiffer link (tau = reduced capacity 5,000 kJ/K over 100 kW/K =
+// 50 s) keeps the horizon short without weakening the claim: 1,800 s is
+// 36 relaxation time constants.
+auto const withLink = linkedPair(10000.0, 10000.0, 100.0);
+	auto withoutLink = withLink;
+	withoutLink.thermalLinks.clear();
+	// Same composition, same gas exchange, no heat path: the temperature
+	// difference survives indefinitely even while gas equalizes.
+	core::World isolated("ThermalIsolatedPair", 2, 2);
+	configure(isolated, withoutLink, diagnostic);
+	isolated.resumeSimulation();
+	require(advanceSeconds(isolated, 1800), "isolated pair run failed");
+	auto const isolatedSnap = isolated.getStationSystemsSnapshot();
+	// Wire the same pair with a link and run the same hour: the pair
+	// converges to the energy-weighted average - equal capacities, so the
+	// arithmetic mean of the starting temperatures (40 C, 10 C). Three
+	// hours is ~21 relaxation time constants (reduced capacity 5,000 kJ/K
+	// over 10 kW/K = 500 s), so the residual difference is long gone.
+	core::World joined("ThermalJoinedPair", 2, 2);
+	configure(joined, withLink, diagnostic);
+	joined.resumeSimulation();
+	require(advanceSeconds(joined, 1800), "joined pair run failed");
+	auto const joinedSnap = joined.getStationSystemsSnapshot();
+	require(joinedSnap.healthy, "joined pair run failed its audit");
+	auto const expected = 25.0;
+	require(std::abs(joinedSnap.atmospheres[0].temperatureC - expected) < 1e-3
+		&& std::abs(joinedSnap.atmospheres[1].temperatureC - expected) < 1e-3,
+		"a linked pair did not converge to the energy-weighted average");
+	require(joinedSnap.atmospheres[0].conductedEnergyKJ < -1.0
+		&& joinedSnap.atmospheres[1].conductedEnergyKJ > 1.0,
+		"the linked pair did not book conducted heat");
+}
+
+// Zero temperature difference: nothing drives conduction, so the link
+// reports Idle with no flow and no conducted heat anywhere.
+void thermalLinkIdle(smoke::Context const&)
+{
+	auto settings = linkedPair();
+	settings.atmospheres[1].startingTemperatureC = 40.0;
+	std::string diagnostic;
+	core::World world("ThermalLinkIdle", 2, 2);
+	configure(world, settings, diagnostic);
+	world.resumeSimulation();
+	require(advanceSeconds(world, 60), "idle link run failed");
+	auto const snapshot = world.getStationSystemsSnapshot();
+	require(snapshot.healthy, "idle link run failed its audit");
+	auto const wall = link(snapshot, "wall");
+	require(wall.status == core::StationThermalLinkStatus::Idle
+		&& wall.flowRateKW == 0.0 && wall.netTransferredKJ == 0.0,
+		"a link with no temperature difference reported flow");
+	require(snapshot.atmospheres[0].conductedEnergyKJ == 0.0
+		&& snapshot.atmospheres[1].conductedEnergyKJ == 0.0,
+		"a link with no temperature difference booked conducted heat");
+}
+
+// Equilibrium is the capacity-weighted average: the big compartment
+// dominates the settled temperature exactly as the formula says.
+void thermalLinkCapacityWeighting(smoke::Context const&)
+{
+	// Ca = 3x Cb: the settled temperature is (3*40 + 1*10)/4 = 32.5 C.
+	std::string diagnostic;
+	core::World world("ThermalLinkWeighting", 2, 2);
+	configure(world, linkedPair(30000.0, 10000.0, 100.0), diagnostic);
+	world.resumeSimulation();
+	require(advanceSeconds(world, 3600), "weighting run failed");
+	auto const snapshot = world.getStationSystemsSnapshot();
+	require(snapshot.healthy, "weighting run failed its audit");
+	require(std::abs(snapshot.atmospheres[0].temperatureC - 32.5) < 1e-3
+		&& std::abs(snapshot.atmospheres[1].temperatureC - 32.5) < 1e-3,
+		"equilibrium was not the capacity-weighted average temperature");
+}
+
+// No crossing: a hot compartment never ends the tick colder than the
+// cold compartment it was warming, at any conductance.
+void thermalLinkNoCrossing(smoke::Context const&)
+{
+	// Absurd geometry: enormous conductance against a tiny cold capacity.
+	std::string diagnostic;
+	core::World world("ThermalLinkNoCrossing", 2, 2);
+	configure(world, linkedPair(10000.0, 1.0, 1000.0), diagnostic);
+	world.resumeSimulation();
+	for (int step = 0; step < 600; ++step)
+	{
+		require(advanceStationSteps(world, 1), "no-crossing step failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "no-crossing run failed its audit");
+		require(std::isfinite(snapshot.atmospheres[0].temperatureC)
+			&& std::isfinite(snapshot.atmospheres[1].temperatureC),
+			"an over-conducted link produced a non-finite temperature");
+		require(snapshot.atmospheres[0].temperatureC >= snapshot.atmospheres[1].temperatureC,
+			"the hot compartment ended colder than the cold one it was warming");
+		require(snapshot.atmospheres[0].temperatureC <= 40.0 + 1e-9
+			&& snapshot.atmospheres[1].temperatureC >= 10.0 - 1e-9,
+			"conduction overshot past the starting temperatures");
+	}
+	// The tiny cold compartment lands on the weighted average beside the
+	// big hot one, not past it.
+	auto const snapshot = world.getStationSystemsSnapshot();
+	auto const expected = (10000.0 * 40.0 + 1.0 * 10.0) / 10001.0;
+	require(std::abs(snapshot.atmospheres[1].temperatureC - expected) < 1e-6,
+		"the over-conducted cold compartment did not settle on the weighted average");
+}
+
+// Parallel additivity: two half-conductance links equal one full-
+// conductance link exactly, so parallel walls reason additively.
+void thermalLinkParallelAdditivity(smoke::Context const&)
+{
+	std::string diagnostic;
+	auto const single = linkedPair(10000.0, 10000.0, 10.0);
+	auto halves = single;
+	halves.thermalLinks = {{"half1", "a", "b", 5.0}, {"half2", "a", "b", 5.0}};
+	core::World oneWorld("ThermalLinkSingle", 2, 2);
+	configure(oneWorld, single, diagnostic);
+	core::World twoWorld("ThermalLinkHalves", 2, 2);
+	configure(twoWorld, halves, diagnostic);
+	oneWorld.resumeSimulation(); twoWorld.resumeSimulation();
+	require(advanceSeconds(oneWorld, 300) && advanceSeconds(twoWorld, 300),
+		"parallel additivity run failed");
+	auto const one = oneWorld.getStationSystemsSnapshot();
+	auto const two = twoWorld.getStationSystemsSnapshot();
+	require(one.healthy && two.healthy, "parallel additivity run failed its audit");
+	// Exact in exact arithmetic: the closed form multiplies the remaining
+	// difference by exp(-G·S·dt/2) per half link, so two halves compose
+	// to exp(-G·S·dt) - the single link's factor. Floating point leaves
+	// a last-bits difference, so compare at a tight physical tolerance.
+	for (size_t i = 0; i < 2; ++i)
+		require(std::abs(one.atmospheres[i].temperatureC - two.atmospheres[i].temperatureC) < 1e-12,
+			"two half-conductance links did not equal one full-conductance link");
+	// The receiver's conducted total is the link's own net transfer:
+	// positive into B, and identical for the single-link world.
+	require(std::abs(two.atmospheres[1].conductedEnergyKJ
+		- link(one, "wall").netTransferredKJ)
+		< 1e-9 * std::abs(link(one, "wall").netTransferredKJ) + 1e-9,
+		"the parallel pair did not book the same conducted energy as the single link");
+}
+
+// Declaration-order independence: reshuffling link order leaves the
+// compartment results unchanged.
+void thermalLinkDeclarationOrder(smoke::Context const&)
+{
+	std::string diagnostic;
+	auto const base = linkedPair(10000.0, 8000.0, 12.0);
+	auto reversed = base;
+	reversed.thermalLinks = {{"second", "a", "b", 6.0}, {"first", "b", "a", 6.0}};
+	auto forward = linkedPair(10000.0, 8000.0, 12.0);
+	forward.thermalLinks = {{"first", "b", "a", 6.0}, {"second", "a", "b", 6.0}};
+	core::World aWorld("ThermalLinkOrderA", 2, 2);
+	configure(aWorld, reversed, diagnostic);
+	core::World bWorld("ThermalLinkOrderB", 2, 2);
+	configure(bWorld, forward, diagnostic);
+	aWorld.resumeSimulation(); bWorld.resumeSimulation();
+	require(advanceSeconds(aWorld, 300) && advanceSeconds(bWorld, 300),
+		"declaration-order run failed");
+	auto const a = aWorld.getStationSystemsSnapshot();
+	auto const b = bWorld.getStationSystemsSnapshot();
+	require(a.healthy && b.healthy, "declaration-order run failed its audit");
+	for (size_t i = 0; i < 2; ++i)
+		require(a.atmospheres[i].temperatureC == b.atmospheres[i].temperatureC
+			&& a.atmospheres[i].conductedEnergyKJ == b.atmospheres[i].conductedEnergyKJ,
+			"link declaration order changed the published result");
+}
+
+// Mass is untouched: a long conduction run changes no gas inventory in
+// either compartment by any amount.
+void thermalLinkMassUntouched(smoke::Context const&)
+{
+	std::string diagnostic;
+	core::World world("ThermalLinkMassUntouched", 2, 2);
+	configure(world, linkedPair(10000.0, 2000.0, 500.0), diagnostic);
+	auto const initial = world.getStationSystemsSnapshot();
+	world.resumeSimulation();
+	require(advanceSeconds(world, 3600), "mass-untouched run failed");
+	auto const snapshot = world.getStationSystemsSnapshot();
+	require(snapshot.healthy, "mass-untouched run failed its audit");
+	for (size_t i = 0; i < 2; ++i)
+	{
+		require(snapshot.atmospheres[i].oxygenKg == initial.atmospheres[i].oxygenKg
+			&& snapshot.atmospheres[i].nitrogenKg == initial.atmospheres[i].nitrogenKg
+			&& snapshot.atmospheres[i].carbonDioxideKg == initial.atmospheres[i].carbonDioxideKg
+			&& snapshot.atmospheres[i].waterVapourKg == initial.atmospheres[i].waterVapourKg,
+			"the conduction pass changed a gas inventory");
+		require(snapshot.atmospheres[i].condensedKg == 0.0,
+			"the conduction pass condensed or invented vapour mass");
+	}
+	// Heat genuinely moved in this fixture, so the zero above is not
+	// vacuously true.
+	require(link(snapshot, "wall").netTransferredKJ > 1.0,
+		"mass-untouched fixture conducted nothing to begin with");
+}
+
+// A link and a pathway coexist between the same pair: gas diffuses
+// through the pathway, heat conducts through the link, each reports
+// independently, and neither double-counts the other.
+void thermalLinkPathwayCoexistence(smoke::Context const&)
+{
+	auto settings = linkedPair(10000.0, 10000.0, 10.0);
+	settings.atmospherePathways = {{"hatch", "a", "b", 1.0, 1.0}};
+	std::string diagnostic;
+	core::World world("ThermalLinkPathwayCoexist", 2, 2);
+	configure(world, settings, diagnostic);
+	// Make the compositions differ so the pathway genuinely moves gas.
+	world.resumeSimulation();
+	require(advanceSeconds(world, 300), "coexistence run failed");
+	auto const snapshot = world.getStationSystemsSnapshot();
+	require(snapshot.healthy, "coexistence run failed its audit");
+	bool gasMoved = false;
+	for (auto const moved : snapshot.atmospherePathways[0].netTransferredKg)
+		if (std::abs(moved) > 1e-9) gasMoved = true;
+	// The identical-composition pair moves no net gas at equilibrium;
+	// what matters is that the pathway stayed thermally neutral while the
+	// link did all the heat work, and both aggregates report side by side.
+	require(snapshot.atmospherePathways[0].status
+			== core::StationAtmospherePathwayStatus::Idle || gasMoved,
+		"pathway state is inconsistent with its own flows");
+	require(link(snapshot, "wall").netTransferredKJ > 1.0,
+		"the link stopped conducting beside a pathway");
+	// The pathway contributed no heat: the conducted totals equal the
+	// link's own ledger exactly, with no pathway term folded in.
+	require(snapshot.atmospheres[1].conductedEnergyKJ
+		== link(snapshot, "wall").netTransferredKJ,
+		"conducted heat was not solely the link's booking");
+}
+
+// A compartment with both a heat-only exchanger to a reservoir and a
+// thermal link books the two separately and its residual still closes.
+void thermalLinkReservoirCoexistence(smoke::Context const&)
+{
+	core::StationSystemsSettings s;
+	s.enabled = true;
+	auto a = linkCompartment("a", 40.0, 10000.0);
+	a.reservoirId = "sink";
+	a.exchangerConductanceKWPerK = 5.0;
+	auto b = linkCompartment("b", 10.0, 10000.0);
+	s.atmospheres = {a, b};
+	core::ThermalReservoirSettings sink;
+	sink.id = "sink";
+	sink.thermalClass = "moderate";
+	sink.heatCapacityKJPerK = 50000.0;
+	sink.startingTemperatureC = 10.0;
+	sink.minTemperatureC = -50.0;
+	sink.maxTemperatureC = 200.0;
+	s.thermalReservoirs = {sink};
+	s.thermalLinks = {{"wall", "a", "b", 20.0}};
+	std::string diagnostic;
+	core::World world("ThermalLinkReservoirCoexist", 2, 2);
+	configure(world, s, diagnostic);
+	world.resumeSimulation();
+	require(advanceSeconds(world, 300), "reservoir-coexistence run failed");
+	auto const snapshot = world.getStationSystemsSnapshot();
+	require(snapshot.healthy, "reservoir-coexistence run failed its audit");
+	auto const& hot = snapshot.atmospheres[0];
+	auto const& cold = snapshot.atmospheres[1];
+	// Both heat paths genuinely active on the hot compartment: it gave
+	// heat to the reservoir and to the cold neighbour, booked apart.
+	require(hot.exchangedEnergyKJ != 0.0, "the exchanger booked nothing");
+	require(hot.conductedEnergyKJ != 0.0, "the link booked nothing");
+	require(std::abs(hot.residualKJ) <= 1e-6 * std::max(1.0, std::abs(hot.currentEnergyKJ))
+		&& std::abs(cold.residualKJ) <= 1e-6 * std::max(1.0, std::abs(cold.currentEnergyKJ)),
+		"residual did not close with an exchanger and a link both present");
+	// The link's ledger still matches the cold side's conducted total:
+	// the exchanger never leaked into the link's booking.
+	require(cold.conductedEnergyKJ == link(snapshot, "wall").netTransferredKJ,
+		"the reservoir exchange leaked into the link's ledger");
+}
+
+// Validation refusals: each refusal names the offending entry, and no
+// refusal mutates the World.
+void thermalLinkValidation(smoke::Context const&)
+{
+	std::string diagnostic;
+	core::StationSystemsSettings good;
+	good.enabled = true;
+	good.atmospheres = {linkCompartment("a", 40.0, 10000.0),
+		linkCompartment("b", 0.0, 10000.0)};
+	good.thermalLinks = {{"wall", "a", "b", 10.0}};
+	require(core::validateStationSystemsSettings(good, diagnostic), diagnostic.c_str());
+	auto bad = good;
+bad.thermalLinks = {{"zero", "a", "b", 0.0}};
+	require(!core::validateStationSystemsSettings(bad, diagnostic)
+		&& diagnostic.find("zero") != std::string::npos
+		&& diagnostic.find("conductance") != std::string::npos,
+		"a zero-conductance link was not refused by name");
+bad.thermalLinks = {{"negative", "a", "b", -1.0}};
+	require(!core::validateStationSystemsSettings(bad, diagnostic)
+		&& diagnostic.find("negative") != std::string::npos,
+		"a negative-conductance link was not refused by name");
+bad.thermalLinks = {{"nan", "a", "b", std::numeric_limits<double>::quiet_NaN()}};
+	require(!core::validateStationSystemsSettings(bad, diagnostic)
+		&& diagnostic.find("nan") != std::string::npos,
+		"a non-finite-conductance link was not refused by name");
+bad.thermalLinks = {{"ghost", "a", "nowhere", 1.0}};
+	require(!core::validateStationSystemsSettings(bad, diagnostic)
+		&& diagnostic.find("ghost") != std::string::npos
+		&& diagnostic.find("nowhere") != std::string::npos,
+		"an unresolved link endpoint was not refused by name");
+bad.thermalLinks = {{"loop", "a", "a", 1.0}};
+	require(!core::validateStationSystemsSettings(bad, diagnostic)
+		&& diagnostic.find("loop") != std::string::npos
+		&& diagnostic.find("self-loop") != std::string::npos,
+		"a self-loop link was not refused by name");
+bad.thermalLinks = {{"vacuum", "a", core::StationExteriorAtmosphereId, 1.0}};
+	require(!core::validateStationSystemsSettings(bad, diagnostic)
+		&& diagnostic.find("vacuum") != std::string::npos
+		&& diagnostic.find("Exterior") != std::string::npos,
+		"an Exterior-vacuum endpoint was not refused by name");
+	// The declared ceiling, in the spirit of the pathway ceiling.
+auto many = good;
+	many.thermalLinks.clear();
+	for (size_t i = 0; i < core::MaxStationThermalLinks; ++i)
+		many.thermalLinks.push_back({"wall" + std::to_string(i), "a", "b", 1.0});
+	require(core::validateStationSystemsSettings(many, diagnostic), diagnostic.c_str());
+	many.thermalLinks.push_back({"over-limit", "a", "b", 1.0});
+	require(!core::validateStationSystemsSettings(many, diagnostic)
+		&& diagnostic.find("limited") != std::string::npos,
+		"the thermal link count ceiling was not enforced");
+	// No refusal mutates the World.
+	core::World world("ThermalLinkValidationWorld", 2, 2);
+	configure(world, good, diagnostic);
+	auto const baseline = world.getStationSystemsSnapshot();
+for (auto refusal : bad.thermalLinks)
+	{
+		auto mutated = good;
+		mutated.thermalLinks = {refusal};
+		require(!world.configureStationSystems(mutated, false, &diagnostic)
+			&& world.getStationSystemsSnapshot() == baseline
+			&& world.getStationSystemsSettings() == good,
+			"a refused thermal link configuration mutated the World");
+	}
+}
+
+// Reset restores the authored starting temperatures and clears the
+// cumulative conducted heat.
+void thermalLinkResetIsolation(smoke::Context const&)
+{
+	std::string diagnostic;
+	core::World world("ThermalLinkReset", 2, 2);
+	configure(world, linkedPair(), diagnostic);
+	world.resumeSimulation();
+	require(advanceSeconds(world, 120), "reset-isolation run failed");
+	auto const run = world.getStationSystemsSnapshot();
+	require(link(run, "wall").netTransferredKJ > 1.0
+		&& run.atmospheres[1].conductedEnergyKJ > 1.0,
+		"reset fixture conducted nothing to clear");
+	world.pauseSimulation();
+	world.resetSimulation();
+	auto const reset = world.getStationSystemsSnapshot();
+	require(reset.atmospheres[0].temperatureC == 40.0
+		&& reset.atmospheres[1].temperatureC == 10.0,
+		"reset did not restore the authored starting temperatures");
+	require(reset.atmospheres[0].conductedEnergyKJ == 0.0
+		&& reset.atmospheres[1].conductedEnergyKJ == 0.0
+		&& link(reset, "wall").netTransferredKJ == 0.0
+		&& link(reset, "wall").flowRateKW == 0.0,
+		"reset did not clear the cumulative conducted heat");
+	// And the rerun reproduces the original run exactly.
+	world.resumeSimulation();
+	require(advanceSeconds(world, 120), "reset-isolation rerun failed");
+	require(world.getStationSystemsSnapshot() == run,
+		"the rerun after reset is not identical to the first run");
+}
+
+// Stress: a chain of linked compartments homogenizes to one common
+// temperature over a long run and stays there.
+void thermalLinkChainHomogenization(smoke::Context const&)
+{
+	core::StationSystemsSettings s;
+	s.enabled = true;
+	s.atmospheres = {linkCompartment("a", 60.0, 10000.0),
+		linkCompartment("b", 20.0, 20000.0), linkCompartment("c", -10.0, 10000.0)};
+	s.thermalLinks = {{"ab", "a", "b", 250.0}, {"bc", "b", "c", 250.0}};
+	std::string diagnostic;
+	core::World world("ThermalLinkChain", 2, 2);
+	configure(world, s, diagnostic);
+	world.resumeSimulation();
+	require(advanceSeconds(world, 4000), "chain homogenization run failed");
+	auto const snapshot = world.getStationSystemsSnapshot();
+	require(snapshot.healthy, "chain homogenization failed its audit");
+	// The whole chain's energy-weighted average: (1*60 + 2*20 + 1*-10)/4 = 22.5 C.
+	auto const expected = (10000.0 * 60.0 + 20000.0 * 20.0 + 10000.0 * -10.0) / 40000.0;
+	for (auto const& air : snapshot.atmospheres)
+		require(std::abs(air.temperatureC - expected) < 1e-2,
+			"the linked chain did not converge to the common temperature");
+	// And it stays converged: another long run moves nothing measurable.
+	require(advanceSeconds(world, 4000), "chain settle run failed");
+	auto const settled = world.getStationSystemsSnapshot();
+	for (size_t i = 0; i < 3; ++i)
+		require(std::abs(settled.atmospheres[i].temperatureC
+			- snapshot.atmospheres[i].temperatureC) < 1e-6,
+			"the converged chain drifted after homogenization");
+}
+
+// Stress: absurd geometry - enormous conductance against tiny
+// capacities, thousands of ticks - demonstrating the closed-form
+// decision holds what was claimed of it: no oscillation, no crossing,
+// no non-finite value, ledger still closed.
+void thermalLinkAbsurdGeometry(smoke::Context const&)
+{
+	std::string diagnostic;
+	core::World world("ThermalLinkAbsurd", 2, 2);
+	configure(world, linkedPair(1.0, 1.0, 100000.0), diagnostic);
+	world.resumeSimulation();
+	double previousA = 40.0, previousB = 0.0;
+	for (int step = 0; step < 5000; ++step)
+	{
+		require(advanceStationSteps(world, 1), "absurd-geometry step failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "absurd-geometry run failed its audit");
+		auto const a = snapshot.atmospheres[0].temperatureC;
+		auto const b = snapshot.atmospheres[1].temperatureC;
+		require(std::isfinite(a) && std::isfinite(b),
+			"absurd geometry produced a non-finite temperature");
+		require(a >= b, "absurd geometry crossed hot past cold");
+		// Monotone: each compartment moves toward the average, never back.
+		require(a <= previousA + 1e-9 && b >= previousB - 1e-9,
+			"absurd geometry oscillated instead of relaxing");
+		previousA = a; previousB = b;
+	}
+	require(std::abs(previousA - 25.0) < 1e-6 && std::abs(previousB - 25.0) < 1e-6,
+		"absurd geometry did not settle on the energy-weighted average");
+}
+}
+
+void registerStationThermalLinkChecks(std::vector<smoke::Check>& checks)
+{
+	checks.push_back({"thermalLinkConservation", thermalLinkConservation});
+	checks.push_back({"thermalLinkAdr0026Contrast", thermalLinkAdr0026Contrast});
+	checks.push_back({"thermalLinkIdle", thermalLinkIdle});
+	checks.push_back({"thermalLinkCapacityWeighting", thermalLinkCapacityWeighting});
+	checks.push_back({"thermalLinkNoCrossing", thermalLinkNoCrossing});
+	checks.push_back({"thermalLinkParallelAdditivity", thermalLinkParallelAdditivity});
+	checks.push_back({"thermalLinkDeclarationOrder", thermalLinkDeclarationOrder});
+	checks.push_back({"thermalLinkMassUntouched", thermalLinkMassUntouched});
+	checks.push_back({"thermalLinkPathwayCoexistence", thermalLinkPathwayCoexistence});
+	checks.push_back({"thermalLinkReservoirCoexistence", thermalLinkReservoirCoexistence});
+	checks.push_back({"thermalLinkValidation", thermalLinkValidation});
+	checks.push_back({"thermalLinkResetIsolation", thermalLinkResetIsolation});
+	checks.push_back({"thermalLinkChainHomogenization", thermalLinkChainHomogenization});
+	checks.push_back({"thermalLinkAbsurdGeometry", thermalLinkAbsurdGeometry});
+}

@@ -11,17 +11,18 @@ namespace core
 		// stamps. Comparing a few inventories cannot certify the entire object.
 		static constexpr auto entries = []
 		{
-			constexpr std::array<std::string_view, 43> names{
+			constexpr std::array<std::string_view, 44> names{
 				"enabled", "healthy", "systemsStepWorldTicks", "systemsTimestepSeconds",
 				"worldTick", "elapsedSeconds", "completedTicks", "stores", "transfers",
 				"connections", "conversions", "balances", "constituentBalances", "deliveries",
 				"wasteEjections", "outages", "maintenanceJobs", "power", "thermal", "coolantLoops",
-				"chillers", "thermalBuffers", "atmospheres", "atmospherePathways", "airlockCycles", "crews",
+				"chillers", "thermalBuffers", "atmospheres", "atmospherePathways", "thermalLinks",
+				"airlockCycles", "crews",
 				"waterCollectors", "waterTreatments", "electrolyzers", "co2Captures",
 				"sabatierReactors", "methaneProcessors", "microbialProcessors", "cropPopulations",
 				"algaeCultures", "fuelCells", "hasNextDelivery", "nextDeliverySeconds",
 				"hasNextWasteEjection", "nextWasteEjectionSeconds", "endurance", "forecast", "balanceTolerance"};
-			std::array<StationObservableInvariance, 61> result{};
+			std::array<StationObservableInvariance, 62> result{};
 			for (size_t i = 0; i < names.size(); ++i)
 			{
 				auto& entry = result[i];
@@ -87,7 +88,7 @@ namespace core
 				entry.basis = "70 s physicalCoupling fixtures only, ratios 1,6,7,30,60; analytical ODE truncation bounds for configured model coefficients, not physical parameter calibration or arbitrary configurations";
 				entry.verifiedBy = "station/physicalCoupling";
 			}
-			auto& cycle = result[56];
+			auto& cycle = result[57];
 			cycle.name = "fuelCells[].electricalKJ";
 			cycle.classification = StationObservableInvarianceClass::Bound;
 			cycle.convergenceOrder = 1;
@@ -95,7 +96,7 @@ namespace core
 			cycle.verifiedThroughRatio = 60;
 			cycle.basis = "70 s solar-funded 0.001 kg/s electrolysis/fuel-cell cycle only; error is one Station interval of reactant production; ratios 1,6,7,30,60, not a global guarantee";
 			cycle.verifiedBy = "station/physicalCoupling";
-			auto& decay = result[57];
+			auto& decay = result[58];
 			decay.name = "power.generators[].decayHeatKJ";
 			decay.classification = StationObservableInvarianceClass::Exact;
 			decay.absoluteTolerance = 1e-8;
@@ -107,7 +108,7 @@ namespace core
 				"atmospherePathways[].lastCommandSeconds"};
 			for (size_t i = 0; i < commandFields.size(); ++i)
 			{
-				auto& entry = result[58 + i];
+				auto& entry = result[59 + i];
 				entry.name = commandFields[i];
 				entry.classification = StationObservableInvarianceClass::Exact;
 				entry.verifiedThroughRatio = 60;

@@ -507,6 +507,19 @@ using namespace station_detail;
 			std::array<double, 4> flowRateKgPerS{}, netTransferredKg{};
 			StationAtmospherePathwayStatus status{StationAtmospherePathwayStatus::Idle};
 		};
+		// The runtime ledger of one authored Thermal link (#794): heat is
+		// conducted by closed-form relaxation per tick against tick-start
+		// temperatures; the signed transfer (A to B) is booked once on
+		// each side as an exact negation. Validation refuses Exterior
+		// endpoints, so both indices always resolve for a configured World.
+		struct ThermalLinkState
+		{
+			ThermalLinkSettings authored;
+			size_t aIndex{SIZE_MAX}, bIndex{SIZE_MAX};
+			double flowRateKW{0.0};
+			double netTransferredKJ{0.0};
+			StationThermalLinkStatus status{StationThermalLinkStatus::Idle};
+		};
 		struct AtmosphereState
 		{
 			AtmosphereSettings authored;
@@ -558,6 +571,13 @@ using namespace station_detail;
 			double occupantHeatKJ{0.0};
 			double latentHeatKJ{0.0};
 			double exchangedKJ{0.0};
+			// Conducted heat through this compartment's Thermal links
+			// (#794): signed into the compartment (+ gains, - loses),
+			// booked once per side as the exact negation of the far side
+			// of each link, and closed over by the compartment's energy
+			// residual.
+			double conductedKJ{0.0};
+			double lastConductedKW{0.0};
 			// Metabolic heat routed into this compartment by authored crews
 			// (#401): booked as its own thermal term, never folded into the
 			// compartment's own occupancy heat, and the thermal ledger
@@ -1327,6 +1347,7 @@ using namespace station_detail;
 		std::vector<GeneratorState> generators;
 		std::vector<AtmosphereState> atmospheres;
 		std::vector<AtmospherePathwayState> atmospherePathways;
+		std::vector<ThermalLinkState> thermalLinks;
 		std::vector<AirlockCycleState> airlockCycles;
 		std::vector<CrewState> crews;
 		std::vector<WaterCollectorState> waterCollectors;
@@ -1645,6 +1666,10 @@ using namespace station_detail;
 		double totalCoolantHeaterKW{};
 		std::vector<double> loopExchangeKJ{};
 		std::vector<double> atmosphereExchangeKJ{};
+		// Per-compartment heat (kJ) conducted this tick by the Thermal link
+		// pass, signed into the compartment; folded into the endpoint's
+		// external heat rate sum beside the reservoir exchange (#794).
+		std::vector<double> thermalLinkConductedKJ{};
 		double exchangeDt{};
 		double totalChillerPowerKW{};
 		double totalWaterTreatmentPowerKW{};

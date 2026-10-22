@@ -405,7 +405,7 @@ void connectionDesign(smoke::Context const&)
 		auto position = text.find(before); require(position != std::string::npos, "Fixture text not found");
 		text.replace(position, before.size(), after); return text;
 	};
-	for (auto const& bad : {replace(yaml, "schemaVersion: 106", "schemaVersion: 96"),
+	for (auto const& bad : {replace(yaml, "schemaVersion: 107", "schemaVersion: 96"),
 		replace(yaml, "Liquid pipe", "Unknown carrier"), replace(yaml, "maximumThroughput: 0.001", "maximumThroughput: -1")})
 	{
 		require(!core::parseStationConfiguration(bad, loaded, &diagnostic) && loaded.settings == settings,
@@ -427,7 +427,7 @@ void connectionDesign(smoke::Context const&)
 	require(core::parseStationConfiguration(withoutEfficiency, loaded, &diagnostic)
 		&& loaded.settings == expectedDefault, "Missing efficiency did not receive the lossless default");
 	auto legacy = document; legacy.settings.connections.clear();
-	auto legacyYaml = replace(core::serializeStationConfiguration(legacy), "schemaVersion: 106", "schemaVersion: 96");
+	auto legacyYaml = replace(core::serializeStationConfiguration(legacy), "schemaVersion: 107", "schemaVersion: 96");
 	auto const ratioLine = "  systemsStepWorldTicks: " + std::to_string(legacy.settings.systemsStepWorldTicks) + "\n";
 	auto const ratioAt = legacyYaml.find(ratioLine);
 	require(ratioAt != std::string::npos, "Station step ratio was not serialized");

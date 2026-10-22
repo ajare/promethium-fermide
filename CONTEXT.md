@@ -616,6 +616,10 @@ _Avoid_: Throughput (reserved for Station connections), permeability, diffusivit
 An instruction that sets an Atmosphere pathway's openness at a stated simulation time. A command takes effect at the time it names, never at the moment it was issued, so the same authored commands produce the same openness trajectory however the run is stepped.
 _Avoid_: Immediate write, door signal, valve toggle
 
+**Thermal link**:
+An explicitly authored, undirected conduction relationship between two Atmosphere compartments, carrying a declared conductance. A Thermal link moves heat down the compartments' own temperature difference and no gas at all; two compartments no link joins never share heat, however long they run. It is the heat mechanism the Atmosphere pathway deliberately excludes — a pathway carries mass and no heat, a link carries heat and no mass, and the two are independent, so a solid wall with no opening and an open hatch through a thin bulkhead are both expressible without faking one to obtain the other.
+_Avoid_: Heat pathway, thermal conduit, heat exchanger (that names a compartment's heat-only coupling to a Thermal reservoir), insulation
+
 **Thermal reservoir**:
 A body or aggregate of material whose stored thermal energy and thermal capacity determine its temperature over time. Its ability to absorb heat is finite and constrained by the temperature limits of the services it supports.
 

@@ -421,6 +421,23 @@ namespace core
 			}
 			serializer.endArray();
 		}
+		// Authored Thermal link contracts only (#794): the conducted flow,
+		// cumulative energy and status are runtime state reconstructed
+		// on load, like every other ledger.
+		if (!settings.thermalLinks.empty())
+		{
+			serializer.beginArray("thermalLinks");
+			for (auto const& link : settings.thermalLinks)
+			{
+				serializer.beginMap("");
+				serializer.writeString("id", link.id);
+				serializer.writeString("aAtmosphereId", link.aAtmosphereId);
+				serializer.writeString("bAtmosphereId", link.bAtmosphereId);
+				serializer.writeDouble("conductanceKWPerK", link.conductanceKWPerK);
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 		if (!settings.airlockCycles.empty())
 		{
 			// Authored airlock cycle contracts only; fired occurrences
@@ -1511,6 +1528,31 @@ namespace core
 			}
 			serializer.endArray();
 		}
+		if (serializer.hasField("thermalLinks"))
+		{
+			if (version < 107) throw SerializationException(
+				"Station thermal links require World schema 107; conversion required");
+			serializer.beginArray("thermalLinks");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				auto const id = serializer.readString("id");
+				std::vector<std::string> fields{"id", "aAtmosphereId", "bAtmosphereId",
+					"conductanceKWPerK"};
+				for (auto const& field : serializer.mapKeys(""))
+					if (std::find(fields.begin(), fields.end(), field) == fields.end())
+						throw SerializationException("Station entry '" + id + "' field '" + field
+							+ "' is unknown; conversion required");
+				ThermalLinkSettings link;
+				link.id = id;
+				link.aAtmosphereId = serializer.readString("aAtmosphereId");
+				link.bAtmosphereId = serializer.readString("bAtmosphereId");
+				link.conductanceKWPerK = serializer.readDouble("conductanceKWPerK");
+				stationSettings.thermalLinks.push_back(std::move(link));
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 		if (serializer.hasField("airlockCycles"))
 		{
 			if (version < 76) throw SerializationException(
@@ -2209,8 +2251,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 106)
-				return refuse("Reference station schema version must be from 65 to 106");
+			if (document.schemaVersion < 65 || document.schemaVersion > 107)
+				return refuse("Reference station schema version must be from 65 to 107");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

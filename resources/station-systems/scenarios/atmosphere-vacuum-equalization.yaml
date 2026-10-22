@@ -1,7 +1,7 @@
 # Load in Station systems, then Apply and run for 900 simulated seconds.
 # A finite evacuated room fills; no mass is lost to space.
 # Equal volumes and temperatures approach half the initial gas mass each.
-schemaVersion: 106
+schemaVersion: 107
 stationSystems:
   enabled: true
   systemsStepWorldTicks: 6

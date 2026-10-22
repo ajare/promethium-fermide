@@ -868,6 +868,30 @@ namespace core
 		bool operator==(AtmospherePathwaySettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationPathways{64};
+	// A Thermal link (#794): an explicitly authored, undirected conduction
+	// relationship between two Atmosphere compartments, carrying a declared
+	// conductance in kW/K. It is the heat mechanism the Atmosphere pathway
+	// deliberately excludes (ADR-0026): a pathway moves mass and no heat,
+	// a link moves heat and no mass, and the two aggregates are independent
+	// - a solid wall with no opening is a link with no pathway. Heat moves
+	// down the compartments' own temperature difference toward their
+	// energy-weighted average; nothing is conducted unless a link is
+	// authored, so the no-implicit-exchange rule keeps holding with a
+	// second named crossing alongside the pathway. A/B exist only to define
+	// the sign of published flux, exactly as they do for pathways.
+	// Celsius is valid for this law: conduction depends only on the
+	// temperature *difference*, which is identical in Celsius and Kelvin.
+	// This is the opposite of the radiative path, which requires absolute
+	// temperature - do not apply the wrong rule to the wrong law.
+	struct ThermalLinkSettings
+	{
+		std::string id;
+		std::string aAtmosphereId;
+		std::string bAtmosphereId;
+		double conductanceKWPerK{0.0}; // must be finite and strictly positive
+		bool operator==(ThermalLinkSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationThermalLinks{64};
 	// Species order for pathway arrays: oxygen, nitrogen, carbon dioxide,
 	// water vapour (including vapour, unlike StationAtmosphereGases).
 	inline constexpr std::array<char const*, 4> StationPathwayGases{
@@ -1801,6 +1825,7 @@ namespace core
 		std::vector<GeneratorSettings> generators;
 		std::vector<AtmosphereSettings> atmospheres;
 		std::vector<AtmospherePathwaySettings> atmospherePathways;
+		std::vector<ThermalLinkSettings> thermalLinks;
 		std::vector<AirlockCycleSettings> airlockCycles;
 		std::vector<CrewSettings> crews;
 		std::vector<WaterCollectorSettings> waterCollectors;
@@ -3119,6 +3144,27 @@ namespace core
 		bool operator==(StationAtmospherePathwaySnapshot const&) const = default;
 	};
 
+	// Reporting vocabulary for a Thermal link is flux, not service
+	// (#794): nothing asks for heat to move - the flow is wholly determined
+	// by the temperature difference - so there is deliberately no
+	// requested / actual / limiter field. Forcing the service shape would
+	// make every link report that it received everything it asked for on
+	// every tick, which reads as a healthy service and reports nothing.
+	enum class StationThermalLinkStatus { Idle, Active };
+	struct StationThermalLinkSnapshot
+	{
+		std::string id;
+		std::string aAtmosphereId;
+		std::string bAtmosphereId;
+		double conductanceKWPerK{0.0};
+		// Positive means A to B. The rate is the average over the last
+		// step; the total is the signed net energy since configuration.
+		double flowRateKW{0.0};
+		double netTransferredKJ{0.0};
+		StationThermalLinkStatus status{StationThermalLinkStatus::Idle};
+		bool operator==(StationThermalLinkSnapshot const&) const = default;
+	};
+
 	struct StationAtmosphereSnapshot
 	{
 		std::string id;
@@ -3219,7 +3265,13 @@ namespace core
 		double occupantHeatEnergyKJ{0.0};
 		double latentHeatEnergyKJ{0.0};
 		double exchangedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + occupant + latent + exchanged - current
+		// Heat conducted into (+) or out of (-) this compartment through
+		// its Thermal links (#794), last-tick rate and cumulative total.
+		// Booked once per side as the exact negation of the far side, so
+		// both compartments' ledgers close on one number.
+		double lastConductedKW{0.0};
+		double conductedEnergyKJ{0.0};
+		double residualKJ{0.0}; // starting + occupant + latent + exchanged + conducted - current
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationAtmosphereSnapshot const&) const = default;
 	};
@@ -4168,6 +4220,7 @@ namespace core
 		// cycle history with the recovered-versus-lost split.
 		std::vector<StationAtmosphereSnapshot> atmospheres;
 		std::vector<StationAtmospherePathwaySnapshot> atmospherePathways;
+		std::vector<StationThermalLinkSnapshot> thermalLinks;
 		std::vector<StationAirlockCycleSnapshot> airlockCycles;
 		// The crew picture (#401): per-crew requested-versus-actual
 		// exchange on every metabolic pathway, the uniform metabolic

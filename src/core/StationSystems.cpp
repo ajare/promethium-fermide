@@ -1195,6 +1195,18 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				state.bIndex = atmosphereIndex.at(pathway.bAtmosphereId);
 			mImpl->atmospherePathways.push_back(std::move(state));
 		}
+		// Thermal links resolve to their two compartments at construction,
+		// like every other reference: the tick pass never re-looks-up, and
+		// validation has already refused Exterior and unresolved endpoints,
+		// so both indices always resolve for a configured World (#794).
+		for (auto const& link : settings.thermalLinks)
+		{
+			Impl::ThermalLinkState state;
+			state.authored = link;
+			state.aIndex = atmosphereIndex.at(link.aAtmosphereId);
+			state.bIndex = atmosphereIndex.at(link.bAtmosphereId);
+			mImpl->thermalLinks.push_back(std::move(state));
+		}
 		// Airlock cycle schedules start unfired: the authored first
 		// occurrence is the next cycle, and nothing is drawn before its
 		// time. Reset and load reconstruct this state, so a replay

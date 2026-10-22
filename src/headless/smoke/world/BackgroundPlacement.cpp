@@ -312,7 +312,7 @@ namespace
 		world.finishBuild();
 
 		auto const yaml = serializeWorld(world);
-		require(yaml.find("version: 106") != std::string::npos,
+		require(yaml.find("version: 107") != std::string::npos,
 			"The World writer did not emit the current schema version");
 		require(yaml.find("type: background") != std::string::npos,
 			"The Background record was not written");

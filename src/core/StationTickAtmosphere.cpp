@@ -419,6 +419,66 @@ namespace core
 				if (moved != 0.0) pathway.status = StationAtmospherePathwayStatus::Active;
 			}
 		}
+		// Thermal link conduction (#794): heat conducted between linked
+		// compartments, evaluated against tick-start temperatures before
+		// the per-compartment loop and folded into each endpoint's external
+		// heat rate sum - the same contract the reservoir exchange already
+		// uses. This is the only placement where heat that just arrived
+		// meets the destination's coupled vapour/thermal solve in the same
+		// tick, so that solve needs no change. The exchange is closed-form
+		// per link: with capacities Ca, Cb and conductance G,
+		//   k = 1 - exp(-G (1/Ca + 1/Cb) dt)
+		//   Q = Ca Cb / (Ca + Cb) (Ta - Tb) k
+		// where Ca Cb/(Ca + Cb) is the reduced heat capacity, the exact
+		// analogue of the pathway's volume-weighted terms. At k = 1 both
+		// compartments land on the energy-weighted average; at k = 0
+		// nothing moves. The equilibrium transfer is evaluated first,
+		// independently of k, and expm1 is used rather than 1 - exp, so
+		// even enormous conductance tends to equilibrium rather than to
+		// an indeterminate form - the same guard the pathway pass carries.
+		// Sequential pairwise in declaration order (operator splitting):
+		// the no-crossing property survives the pass regardless of order
+		// and every joule stays attributable to one named link. Conduction
+		// depends only on the temperature difference, so Celsius is valid
+		// here (see ThermalLinkSettings); no gas inventory is touched.
+		thermalLinkConductedKJ = std::vector<double>(runtime.atmospheres.size(), 0.0);
+		// Sequential pairwise in fixed declaration order: each link relaxes
+		// the state its predecessors left, not the shared tick-start state.
+		// That is what makes parallel links additive - two half-conductance
+		// links compose to exp(-G.S.dt/2) x exp(-G.S.dt/2) = exp(-G.S.dt),
+		// exactly one full link - and what stops a second link re-moving
+		// heat the first already moved, which would overshoot the shared
+		// equilibrium. The running temperature lives here rather than on
+		// the compartment: the compartment still integrates once, in its
+		// own loop, from the summed external heat rate.
+		std::vector<long double> relaxationTemperatureC(runtime.atmospheres.size());
+		for (size_t index = 0; index < runtime.atmospheres.size(); ++index)
+			relaxationTemperatureC[index]
+				= static_cast<long double>(runtime.atmospheres[index].temperatureC);
+		for (auto& link : runtime.thermalLinks)
+		{
+			auto const ca = static_cast<long double>(
+				runtime.atmospheres[link.aIndex].authored.thermalCapacityKJPerK);
+			auto const cb = static_cast<long double>(
+				runtime.atmospheres[link.bIndex].authored.thermalCapacityKJPerK);
+			auto const conductance = static_cast<long double>(link.authored.conductanceKWPerK);
+			auto const relaxed = -std::expm1(-conductance * (1.0L / ca + 1.0L / cb)
+				* static_cast<long double>(seconds));
+			auto const moved = static_cast<double>(ca * cb / (ca + cb)
+				* (relaxationTemperatureC[link.aIndex] - relaxationTemperatureC[link.bIndex])
+				* relaxed);
+			relaxationTemperatureC[link.aIndex] -= moved / ca;
+			relaxationTemperatureC[link.bIndex] += moved / cb;
+			// Booked once per side as an exact negation: A gives what B
+			// receives, so both compartments' ledgers close on one number
+			// rather than two independently rounded ones.
+			thermalLinkConductedKJ[link.aIndex] -= moved;
+			thermalLinkConductedKJ[link.bIndex] += moved;
+			link.flowRateKW = moved / seconds;
+			link.netTransferredKJ += moved;
+			link.status = moved != 0.0 ? StationThermalLinkStatus::Active
+				: StationThermalLinkStatus::Idle;
+		}
 		// Then each compartment: occupancy draw, leakage, the
 		// coupled vapour-phase/thermal integration and the derived
 		// pressures, in that documented order.
@@ -502,9 +562,15 @@ namespace core
 			// pathway.
 			auto const algaeHeatKW = algaeHeatByAtmosphere[atmosphereIndex];
 			auto const exchangeKW = atmosphereExchangeKJ[atmosphereIndex] / dt;
+			// Conducted heat from this compartment's Thermal links (#794),
+			// solved above against tick-start temperatures and folded into
+			// the same external heat rate sum the reservoir exchange uses,
+			// so it meets the coupled vapour/thermal solve this tick.
+			auto const conductedKW = thermalLinkConductedKJ[atmosphereIndex] / dt;
 			auto const coupled = solveVapourThermalCoupling(
 				compartment.authored.thermalCapacityKJPerK, compartment.temperatureC,
-				occupantHeatKW + crewHeatKW + cropHeatKW + algaeHeatKW + exchangeKW, compartment.waterVapourKg,
+				occupantHeatKW + crewHeatKW + cropHeatKW + algaeHeatKW + exchangeKW + conductedKW,
+				compartment.waterVapourKg,
 				compartment.authored.volumeM3, dt);
 			auto const condensedKg = coupled.condensedKg;
 			auto const latentHeatKW = condensedKg
@@ -521,6 +587,8 @@ namespace core
 			compartment.lastAlgaeHeatKW = algaeHeatKW;
 			compartment.latentHeatKJ += latentHeatKW * dt;
 			compartment.exchangedKJ += exchangeKW * dt;
+			compartment.conductedKJ += thermalLinkConductedKJ[atmosphereIndex];
+			compartment.lastConductedKW = conductedKW;
 			// Publish last-tick observables.
 			compartment.lastOxygenDemandKg = oxygenDemandKg;
 			compartment.lastOxygenConsumedKg = oxygenConsumedKg;

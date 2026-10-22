@@ -965,7 +965,10 @@ namespace core
 		// authored Station step ratio.
 		// Schema 106 makes an Atmosphere pathway's openness a live parameter and
 		// retires the scheduled Pathway command queue.
-		serializer.writeUint32("version", 106);
+		// Schema 107 adds authored Thermal links between Atmosphere
+		// compartments (#794) - the heat mechanism ADR-0026 deliberately
+		// excluded from the pathway.
+		serializer.writeUint32("version", 107);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
@@ -1867,7 +1870,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 106)
+		if (version < 1 || version > 107)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}

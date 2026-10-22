@@ -15,7 +15,7 @@
 #
 # Declared pressure limits are set wide of the derived pressures so the
 # run reports no service-limit crossings.
-schemaVersion: 106
+schemaVersion: 107
 stationSystems:
   enabled: true
   systemsStepWorldTicks: 6

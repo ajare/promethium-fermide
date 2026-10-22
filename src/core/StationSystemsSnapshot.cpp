@@ -577,6 +577,22 @@ namespace core
 			entry.status = pathway.status;
 			result.atmospherePathways.push_back(std::move(entry));
 		}
+		// The Thermal link snapshot reports the authored conductance beside
+		// the signed last-step flow and the cumulative net energy (#794):
+		// flux vocabulary only, no requested/actual/limiter fields, because
+		// nothing requests conduction - the temperature difference decides.
+		for (auto const& link : mImpl->thermalLinks)
+		{
+			StationThermalLinkSnapshot entry;
+			entry.id = link.authored.id;
+			entry.aAtmosphereId = link.authored.aAtmosphereId;
+			entry.bAtmosphereId = link.authored.bAtmosphereId;
+			entry.conductanceKWPerK = link.authored.conductanceKWPerK;
+			entry.flowRateKW = link.flowRateKW;
+			entry.netTransferredKJ = link.netTransferredKJ;
+			entry.status = link.status;
+			result.thermalLinks.push_back(std::move(entry));
+		}
 		for (auto const& compartment : mImpl->atmospheres)
 		{
 			StationAtmosphereSnapshot atmosphereResult;
@@ -677,10 +693,13 @@ namespace core
 			atmosphereResult.algaeHeatEnergyKJ = compartment.algaeHeatKJ;
 			atmosphereResult.latentHeatEnergyKJ = compartment.latentHeatKJ;
 			atmosphereResult.exchangedEnergyKJ = compartment.exchangedKJ;
+			atmosphereResult.lastConductedKW = compartment.lastConductedKW;
+			atmosphereResult.conductedEnergyKJ = compartment.conductedKJ;
 			atmosphereResult.residualKJ = atmosphereResult.startingEnergyKJ
 				+ compartment.occupantHeatKJ + compartment.crewHeatKJ
 				+ compartment.cropHeatKJ + compartment.algaeHeatKJ
 				+ compartment.latentHeatKJ + compartment.exchangedKJ
+				+ compartment.conductedKJ
 				- atmosphereResult.currentEnergyKJ;
 			atmosphereResult.status = compartment.status;
 			result.atmospheres.push_back(std::move(atmosphereResult));

@@ -68,18 +68,26 @@ class Lanes(unittest.TestCase):
                       'pathwayReferenceConfigurations',
                       'pathwayClosed', 'pathwayOpenness', 'pathwayParallelAdditivity',
                       'pathwayChainTopology', 'pathwayThermalNeutrality', 'pathwayCondensation',
-                      'pathwayPersistence'):
+                      'pathwayPersistence',
+                      'thermalLinkConservation', 'thermalLinkAdr0026Contrast', 'thermalLinkIdle',
+                      'thermalLinkCapacityWeighting', 'thermalLinkNoCrossing',
+                      'thermalLinkParallelAdditivity', 'thermalLinkDeclarationOrder',
+                      'thermalLinkMassUntouched', 'thermalLinkPathwayCoexistence',
+                      'thermalLinkReservoirCoexistence', 'thermalLinkValidation',
+                      'thermalLinkResetIsolation'):
             self.assertIn('validation-fast', props(f'station-{check}')['LABELS'])
             self.assertNotIn('validation-stress', props(f'station-{check}')['LABELS'])
-        stress_timeouts = {'pathwayLongHorizon': 20, 'pathwayAbsurdGeometry': 10}
-        for check in ('pathwayLongHorizon', 'pathwayAbsurdGeometry'):
+        stress_timeouts = {'pathwayLongHorizon': 20, 'pathwayAbsurdGeometry': 10,
+                         'thermalLinkChainHomogenization': 30, 'thermalLinkAbsurdGeometry': 20}
+        for check in ('pathwayLongHorizon', 'pathwayAbsurdGeometry',
+                      'thermalLinkChainHomogenization', 'thermalLinkAbsurdGeometry'):
             properties = props(f'station-{check}')
             self.assertIn('validation-stress', properties['LABELS'])
             self.assertNotIn('validation-fast', properties['LABELS'])
             self.assertEqual(properties['TIMEOUT'], stress_timeouts[check])
             self.assertNotIn(f'station-{check}', {t['name'] for t in selected})
         for ratio in (1, 7, 60):
-            for check in ('pathwayThermalNeutrality', 'pathwayCondensation'):
+            for check in ('pathwayThermalNeutrality', 'pathwayCondensation', 'thermalLinkConservation'):
                 labels = props(f'station-pathway-thermal-{check}-{ratio}')['LABELS']
                 self.assertIn('validation-fast', labels)
                 self.assertNotIn('validation-stress', labels)

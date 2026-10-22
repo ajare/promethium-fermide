@@ -22,6 +22,7 @@ int main(int argc, char** argv)
 	registerStationGenerationChecks(checks);
 	registerStationAtmosphereChecks(checks);
 	registerStationPathwayChecks(checks);
+	registerStationThermalLinkChecks(checks);
 	registerStationWaterChecks(checks);
 	registerCompoundWaterChecks(checks);
 	registerStationCompoundPowerChecks(checks);

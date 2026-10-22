@@ -1650,6 +1650,45 @@ using namespace station_detail;
 					throw BrokenDraftEntry{};
 				}
 		} catch (BrokenDraftEntry const&) {}
+		// Thermal link contracts (#794): an undirected conduction pair with
+		// a declared conductance. Zero conductance can never pass anything,
+		// which is incoherent rather than merely imprudent - it matches the
+		// zero-area pathway refusal. Exterior vacuum is refused as an
+		// endpoint: it has no temperature to conduct against, and heat loss
+		// to space is a radiative T^4 law that already lives on the
+		// radiator, not a linear conduction boundary.
+		if (settings.thermalLinks.size() > MaxStationThermalLinks)
+			return refuse("Station thermal links are limited to "
+				+ std::to_string(MaxStationThermalLinks) + " entries");
+		std::set<std::string> thermalLinkIds;
+		for (auto const& link : settings.thermalLinks) try
+		{
+			auto const where = "Station thermal link '" + link.id + "'";
+			if (link.id.empty() || link.id.size() > MaxStationStoreIdLength)
+				return refuse(where + " id must be non-empty and at most "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!thermalLinkIds.insert(link.id).second)
+				return refuse(where + " id is duplicated");
+			if (!std::isfinite(link.conductanceKWPerK) || link.conductanceKWPerK <= 0.0)
+				return refuse(where + " conductanceKWPerK must be finite and positive");
+			// Two empty strings name nothing; each empty end is refused on
+			// its own below as an unresolved reference, as for pathways.
+			if (!link.aAtmosphereId.empty() && link.aAtmosphereId == link.bAtmosphereId)
+				return refuse(where + " endpoints must be distinct (self-loop)");
+			for (auto const& endpoint : {link.aAtmosphereId, link.bAtmosphereId})
+		{
+				if (endpoint == StationExteriorAtmosphereId)
+					return refuse(where + " may not use Exterior vacuum as an endpoint: "
+						"it has no temperature to conduct against");
+				if (!atmosphereIds.contains(endpoint))
+				{
+					auto text = where + " references unknown atmosphere compartment '" + endpoint + "'";
+					if (!brokenReferences) return refuse(std::move(text));
+					brokenReferences->push_back(std::move(text));
+					throw BrokenDraftEntry{};
+				}
+			}
+		} catch (BrokenDraftEntry const&) {}
 		// Scheduled airlock cycle contracts (#400): each cycle draws from
 		// one declared compartment on the shared scenario schedule rule
 		// and splits its removal into recovered and lost by the authored
