@@ -1,5 +1,7 @@
 #include "StationRig.h"
 #include "Smoke.h"
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -67,6 +69,13 @@ core::StationThermalLinkSnapshot link(core::StationSystemsSnapshot const& snap,
 	throw std::runtime_error("thermal link missing from snapshot");
 }
 
+// Gas inventory in pathway-transfer order: oxygen, nitrogen, carbon
+// dioxide, water vapour - the same slot order the pathway snapshots use.
+std::array<double, 4> masses(core::StationAtmosphereSnapshot const& air)
+{
+	return {air.oxygenKg, air.nitrogenKg, air.carbonDioxideKg, air.waterVapourKg};
+}
+
 // The primary conservation test: total C*T across the link-joined set is
 // invariant, each side's residual closes with its conducted term, and the
 // two sides' conducted totals are exact negations of each other and of
@@ -112,31 +121,59 @@ void thermalLinkConservation(smoke::Context const&)
 		"a conducting link did not report Active");
 }
 
-// The headline contrast that makes ADR-0026 falsifiable: two compartments
-// at identical composition and different temperature keep the difference
-// forever with no link (pathway diffusion is thermally neutral), and a
-// thermal link removes exactly that difference.
+// #795 headline contrast, making ADR-0026's thermal-neutrality claim a
+// checked one rather than a documented one: two compartments at identical
+// composition and different temperature, joined by an Atmosphere pathway
+// and otherwise thermally sealed. With no link the pathway equalises the
+// gas and keeps the temperature difference indefinitely - the result the
+// ADR promises. Adding a Thermal link is the only difference between the
+// two runs, and it removes exactly that difference. Same setup, opposite
+// outcome, one aggregate apart; anyone later making the pathway carry
+// heat as a shortcut breaks one side or the other.
 void thermalLinkAdr0026Contrast(smoke::Context const&)
 {
 	std::string diagnostic;
-	// A stiffer link (tau = reduced capacity 5,000 kJ/K over 100 kW/K =
-// 50 s) keeps the horizon short without weakening the claim: 1,800 s is
-// 36 relaxation time constants.
-auto const withLink = linkedPair(10000.0, 10000.0, 100.0);
+	auto withLink = linkedPair(10000.0, 10000.0, 100.0);
+	// The pathway is the only connection in the control run, so a
+	// preserved temperature difference is a property of the pathway and
+	// not of an empty gap. Vapour is raised to 0.05 kg per side - still
+	// far below saturation at 10 C, so no latent heat enters either
+	// ledger - which keeps every gas's control-run transfer comfortably
+	// above the measurable threshold rather than a rounding-scale trickle.
+	for (auto& air : withLink.atmospheres)
+		air.startingWaterVapourKg = 0.05;
+	withLink.atmospherePathways = {{"hatch", "a", "b", 1.0, 1.0}};
 	auto withoutLink = withLink;
 	withoutLink.thermalLinks.clear();
-	// Same composition, same gas exchange, no heat path: the temperature
-	// difference survives indefinitely even while gas equalizes.
+	// Control: same composition, real gas exchange, no heat path.
 	core::World isolated("ThermalIsolatedPair", 2, 2);
 	configure(isolated, withoutLink, diagnostic);
+	auto const isolatedStart = isolated.getStationSystemsSnapshot();
 	isolated.resumeSimulation();
 	require(advanceSeconds(isolated, 1800), "isolated pair run failed");
 	auto const isolatedSnap = isolated.getStationSystemsSnapshot();
-	// Wire the same pair with a link and run the same hour: the pair
-	// converges to the energy-weighted average - equal capacities, so the
-	// arithmetic mean of the starting temperatures (40 C, 10 C). Three
-	// hours is ~21 relaxation time constants (reduced capacity 5,000 kJ/K
-	// over 10 kW/K = 500 s), so the residual difference is long gone.
+	require(isolatedSnap.healthy, "isolated pair run failed its audit");
+	// The pathway genuinely worked: every gas crossed in a measurable
+	// amount (a is hot, so every partial pressure gradient points a->b),
+	// so the preserved difference below is not an idle fixture.
+	for (size_t gas = 0; gas < 4; ++gas)
+		require(isolatedSnap.atmospherePathways[0].netTransferredKg[gas] > 1e-3,
+			"the control pathway did not actually exchange every gas");
+	// And ADR-0026 holds to full precision: thirty minutes of continuous
+	// gas exchange moved no sensible heat at all.
+	require(std::abs(isolatedSnap.atmospheres[0].temperatureC
+			- isolatedStart.atmospheres[0].temperatureC) < 1e-12
+		&& std::abs(isolatedSnap.atmospheres[1].temperatureC
+			- isolatedStart.atmospheres[1].temperatureC) < 1e-12,
+		"the thermally-neutral pathway did not keep the authored temperatures");
+	require(isolatedSnap.atmospheres[0].temperatureC
+		- isolatedSnap.atmospheres[1].temperatureC > 29.999,
+		"the temperature difference decayed without a link");
+	// With the link added - the only change - the same pair converges to
+	// the energy-weighted average: equal capacities, so the arithmetic
+	// mean of 40 C and 10 C. The link's tau is the reduced capacity
+	// 5,000 kJ/K over 100 kW/K = 50 s, so 1,800 s is 36 relaxation
+	// time constants and the residual difference is long gone.
 	core::World joined("ThermalJoinedPair", 2, 2);
 	configure(joined, withLink, diagnostic);
 	joined.resumeSimulation();
@@ -340,6 +377,81 @@ void thermalLinkPathwayCoexistence(smoke::Context const&)
 	require(snapshot.atmospheres[1].conductedEnergyKJ
 		== link(snapshot, "wall").netTransferredKJ,
 		"conducted heat was not solely the link's booking");
+}
+
+// #795: a Thermal link and an Atmosphere pathway wired between the same
+// compartment pair report independently. The compartment mass ledger
+// closes on the pathway alone and the energy ledger closes on the link
+// alone, so neither aggregate double-counts, interferes with, or silently
+// substitutes for the other.
+void thermalLinkPathwayIndependence(smoke::Context const&)
+{
+	// Different compositions so the pathway genuinely works in both
+	// directions at once: oxygen, nitrogen and vapour diffuse a -> b
+	// while carbon dioxide, far richer in b, diffuses b -> a. The link
+	// conducts heat hot -> cold alongside, and the two never mix.
+	auto a = linkCompartment("a", 40.0, 10000.0);
+	a.startingWaterVapourKg = 0.01;
+	auto b = linkCompartment("b", 10.0, 10000.0);
+	b.startingOxygenKg = 10;
+	b.startingNitrogenKg = 40;
+	b.startingCarbonDioxideKg = 2.0;
+	b.startingWaterVapourKg = 0.0005;
+	core::StationSystemsSettings s;
+	s.enabled = true;
+	s.atmospheres = {a, b};
+	s.atmospherePathways = {{"hatch", "a", "b", 1.0, 1.0}};
+	s.thermalLinks = {{"wall", "a", "b", 10.0}};
+	std::string diagnostic;
+	core::World world("ThermalLinkPathwayIndependence", 2, 2);
+	configure(world, s, diagnostic);
+	auto const initial = world.getStationSystemsSnapshot();
+	world.resumeSimulation();
+	require(advanceSeconds(world, 300), "independence run failed");
+	auto const snapshot = world.getStationSystemsSnapshot();
+	require(snapshot.healthy, "independence run failed its audit");
+	auto const& pathway = snapshot.atmospherePathways[0];
+	auto const wall = link(snapshot, "wall");
+	// Both aggregates are live at once: the pathway carries gas both ways
+	// while the link carries heat one way.
+	require(pathway.status == core::StationAtmospherePathwayStatus::Active,
+		"the pathway went idle beside a link");
+	require(wall.status == core::StationThermalLinkStatus::Active
+		&& wall.netTransferredKJ > 1.0,
+		"the link went idle beside a pathway");
+	// Genuine counter-flow: O2/N2/vapour a -> b, CO2 b -> a.
+	require(pathway.netTransferredKg[0] > 1e-3 && pathway.netTransferredKg[1] > 1e-3
+		&& pathway.netTransferredKg[3] > 1e-3,
+		"the pathway did not move the lean-side gases into b");
+	require(pathway.netTransferredKg[2] < -1e-3,
+		"the pathway did not move carbon dioxide back into a");
+	// The mass ledger is the pathway's alone: every gram each compartment
+	// gained or lost is exactly the pathway's published transfer, with no
+	// link term in sight - the link moved heat and no mass.
+	for (size_t i = 0; i < 2; ++i)
+	{
+		auto const now = masses(snapshot.atmospheres[i]);
+		auto const start = masses(initial.atmospheres[i]);
+		for (size_t gas = 0; gas < 4; ++gas)
+		{
+			auto const delta = (i == 0 ? start[gas] - now[gas] : now[gas] - start[gas]);
+			require(std::abs(delta - pathway.netTransferredKg[gas]) < 1e-9,
+				"a compartment's gas inventory moved by something other than the pathway");
+		}
+		require(snapshot.atmospheres[i].condensedKg == 0.0,
+			"neither aggregate should have driven a phase change in this fixture");
+	}
+	// The energy ledger is the link's alone: each side's conducted total
+	// is the link's own signed ledger as an exact negation, with no
+	// pathway term folded in - the pathway moved mass and no heat.
+	require(snapshot.atmospheres[0].conductedEnergyKJ == -wall.netTransferredKJ
+		&& snapshot.atmospheres[1].conductedEnergyKJ == wall.netTransferredKJ,
+		"the energy ledger did not close on the link's own booking alone");
+	// And with both aggregates live the audit's residual still closes.
+	for (size_t i = 0; i < 2; ++i)
+		require(std::abs(snapshot.atmospheres[i].residualKJ)
+			<= 1e-6 * std::max(1.0, std::abs(snapshot.atmospheres[i].currentEnergyKJ)),
+			"residual did not close with a link and a pathway both present");
 }
 
 // A compartment with both a heat-only exchanger to a reservoir and a
@@ -552,6 +664,7 @@ void registerStationThermalLinkChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"thermalLinkDeclarationOrder", thermalLinkDeclarationOrder});
 	checks.push_back({"thermalLinkMassUntouched", thermalLinkMassUntouched});
 	checks.push_back({"thermalLinkPathwayCoexistence", thermalLinkPathwayCoexistence});
+	checks.push_back({"thermalLinkPathwayIndependence", thermalLinkPathwayIndependence});
 	checks.push_back({"thermalLinkReservoirCoexistence", thermalLinkReservoirCoexistence});
 	checks.push_back({"thermalLinkValidation", thermalLinkValidation});
 	checks.push_back({"thermalLinkResetIsolation", thermalLinkResetIsolation});

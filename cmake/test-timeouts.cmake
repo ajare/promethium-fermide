@@ -415,6 +415,7 @@ set(PF_TEST_TIMEOUTS
     "station-thermalLinkNoCrossing=10"
     "station-thermalLinkParallelAdditivity=10"
     "station-thermalLinkPathwayCoexistence=10"
+    "station-thermalLinkPathwayIndependence=10"
     "station-thermalLinkReservoirCoexistence=10"
     "station-thermalLinkResetIsolation=10"
     "station-thermalLinkValidation=10"

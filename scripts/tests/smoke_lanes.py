@@ -73,6 +73,7 @@ class Lanes(unittest.TestCase):
                       'thermalLinkCapacityWeighting', 'thermalLinkNoCrossing',
                       'thermalLinkParallelAdditivity', 'thermalLinkDeclarationOrder',
                       'thermalLinkMassUntouched', 'thermalLinkPathwayCoexistence',
+                      'thermalLinkPathwayIndependence',
                       'thermalLinkReservoirCoexistence', 'thermalLinkValidation',
                       'thermalLinkResetIsolation'):
             self.assertIn('validation-fast', props(f'station-{check}')['LABELS'])
