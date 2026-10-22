@@ -13,9 +13,16 @@ namespace station_flow
 {
 std::vector<PathwayLink> pathwayLinks(core::StationSystemsSettings const& draft, Graph const& graph)
 {
+	// An internal pathway is a hatch node wired through its End A / End B
+	// connectors, so it needs no synthesized arc. Only an opening to
+	// Exterior vacuum still draws one: the boundary is a derived node with
+	// no connector to wire, so its display-only link is the only way it
+	// reaches the canvas.
 	std::vector<PathwayLink> result;
 	for (auto const& pathway : draft.atmospherePathways)
 	{
+		if (pathway.aAtmosphereId != core::StationExteriorAtmosphereId
+			&& pathway.bAtmosphereId != core::StationExteriorAtmosphereId) continue;
 		auto locate = [&](std::string const& id) {
 			for (size_t i = 0; i < graph.nodes.size(); ++i)
 				if (graph.nodes[i].type == (id == core::StationExteriorAtmosphereId ? "Exterior" : "Atmosphere")
@@ -190,6 +197,15 @@ void relaxLayout(Graph const& graph, std::vector<ImVec2>& positions, float tempe
 ImU32 nodeColor(Node const& node, bool hovered)
 {
 	if (node.unresolved) return hovered ? IM_COL32(155, 52, 52, 255) : IM_COL32(110, 35, 35, 255);
+	// A hatch belongs to the same visual family as the pathway links it owns,
+	// so one opening reads as a single thing across the canvas rather than a
+	// machine with two unrelated cables on it.
+	if (node.type == "Atmosphere pathway")
+	{
+		float const shade = hovered ? 0.52f : 0.38f;
+		auto const base = ImGui::ColorConvertU32ToFloat4(PathwayColor);
+		return ImGui::ColorConvertFloat4ToU32({base.x * shade, base.y * shade, base.z * shade, 1.0f});
+	}
 	// Stable type hash: colours do not change when IDs, ordering or presets do.
 	std::uint32_t hash = 2166136261u;
 	for (unsigned char c : node.type) { hash ^= c; hash *= 16777619u; }
@@ -258,6 +274,43 @@ namespace
 {
 	constexpr float nodeWidth = station_flow::NodeWidth, nodeHeight = station_flow::NodeHeight;
 	constexpr char keySeparator = '\x1f';
+
+	// One ceiling check shared by the armed-placement overlay and the
+	// right-click create-node menu: a type at its cap is neither
+	// placeable nor offered.
+	bool placementAtLimit(std::string_view type, core::StationSystemsSettings const& draft)
+	{
+		return (type == "Store" && draft.stores.size() >= core::MaxStationResourceStores)
+			|| (type == "Transfer" && draft.transfers.size() >= core::MaxStationResourceTransfers)
+			|| (type == "Conversion" && draft.conversions.size() >= core::MaxStationResourceConversions)
+			|| (type == "Solar" && draft.solarArrays.size() >= core::MaxStationSolarArrays)
+			|| (type == "Equipment" && draft.equipmentLoads.size() >= core::MaxStationEquipmentLoads)
+			|| (type == "Battery" && draft.batteries.size() >= core::MaxStationBatteries)
+			|| (type == "Generator" && draft.generators.size() >= core::MaxStationGenerators)
+			|| (type == "Fuel cell" && draft.fuelCells.size() >= core::MaxStationFuelCells)
+			|| (type == "Sabatier" && draft.sabatierReactors.size() >= core::MaxStationSabatierReactors)
+			|| (type == "Methane processor" && draft.methaneProcessors.size() >= core::MaxStationMethaneProcessors)
+			|| (type == "Reservoir" && draft.thermalReservoirs.size() >= core::MaxStationThermalReservoirs)
+			|| (type == "Radiator" && draft.radiators.size() >= core::MaxStationRadiators)
+			|| (type == "Coolant loop" && draft.coolantLoops.size() >= core::MaxStationCoolantLoops)
+			|| (type == "Chiller" && draft.chillers.size() >= core::MaxStationChillers)
+			|| (type == "Thermal buffer" && draft.thermalBuffers.size() >= core::MaxStationThermalBuffers)
+			|| (type == "Crew" && draft.crews.size() >= core::MaxStationCrews)
+			|| (type == "Crops" && draft.cropPopulations.size() >= core::MaxStationCropPopulations)
+			|| (type == "Algae" && draft.algaeCultures.size() >= core::MaxStationAlgaeCultures)
+			|| (type == "Microbial processor" && draft.microbialProcessors.size() >= core::MaxStationMicrobialProcessors)
+			|| (type == "Water collector" && draft.waterCollectors.size() >= core::MaxStationWaterCollectors)
+			|| (type == "Water treatment" && draft.waterTreatments.size() >= core::MaxStationWaterTreatments)
+			|| (type == "Electrolyzer" && draft.electrolyzers.size() >= core::MaxStationElectrolyzers)
+			|| (type == "CO2 capture" && draft.co2Captures.size() >= core::MaxStationCo2Captures)
+			|| (type == "Atmosphere" && draft.atmospheres.size() >= core::MaxStationAtmospheres)
+			|| (type == "Atmosphere pathway" && draft.atmospherePathways.size() >= core::MaxStationPathways)
+			|| (type == "Airlock cycle" && draft.airlockCycles.size() >= core::MaxStationAirlockCycles)
+			|| (type == "Delivery" && draft.deliveries.size() >= core::MaxStationResourceDeliveries)
+			|| (type == "Waste ejection" && draft.wasteEjections.size() >= core::MaxStationWasteEjections)
+			|| (type == "Outage" && draft.outages.size() >= core::MaxStationInstallationOutages)
+			|| (type == "Maintenance" && draft.maintenanceJobs.size() >= core::MaxStationMaintenanceJobs);
+	}
 
 	// One connector of a node type, placed in graph space relative to the
 	// node's top-left: inputs on the left face, outputs on the right, spread
@@ -532,6 +585,8 @@ StationFlowDiagram::~StationFlowDiagram()
 void StationFlowDiagram::reset()
 {
 	mPlacingType.clear(); mLayout.clear(); mNodeIds.clear(); mNextNodeId = 1;
+	mMenuPressValid = false; mSuppressMenuPress = false;
+	mMenuPlacePending = false; mMenuPlacePos = {};
 	if (mNodeContext) { ImNodes::DestroyContext(mNodeContext); mNodeContext = nullptr; }
 	mCached.reset(); mGraph = {}; mPositions.clear(); mPan = {24, 24};
 	mTelemetry.clear(); mTelemetryTick = UINT64_MAX;
@@ -783,7 +838,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			!live->healthy ? "FAILED - last committed state" : paused ? "Paused" : "Running", live->elapsedSeconds);
 	else
 		ImGui::TextUnformatted("Draft configuration flow - simulation disabled; no live rates.");
-	ImGui::TextDisabled("Left-drag nodes; right/middle-drag to pan; wheel to zoom. Placement edits only the draft.");
+	ImGui::TextDisabled("Left-drag nodes; right/middle-drag to pan; wheel to zoom; right-click the canvas to create a node. Placement edits only the draft.");
 	ImGui::SetNextItemWidth(160);
 	if (ImGui::BeginCombo("Place node", mPlacingType.empty() ? "Choose type..." : mPlacingType.c_str()))
 	{
@@ -821,9 +876,15 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	else if (!mNotice.empty())
 		ImGui::TextDisabled("%s", mNotice.c_str());
 	ImGui::EndChild();
+	// A right-click that disarms placement must not also open the
+	// create-node menu when it releases: one gesture, one effect.
+	bool const rightCancel = !mPlacingType.empty()
+		&& ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
+		&& ImGui::IsMouseClicked(ImGuiMouseButton_Right);
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
 		&& (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)))
 		mPlacingType.clear();
+	mSuppressMenuPress = rightCancel;
 	ImGui::Text("Draft activation: %s | %zu nodes, %zu connections", draft.enabled ? "on" : "off",
 		mGraph.nodes.size(), mGraph.links.size());
 	ImGui::SetNextItemWidth(220);
@@ -842,7 +903,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	{
 		ImGui::Checkbox("Show atmosphere pathways", &mShowPathways);
 		ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(station_flow::PathwayColor),
-			"Atmosphere pathways: hollow diamonds + dashed line, undirected gas diffusion (display-only; not Station connections).");
+			"Atmosphere pathways: an opening is a hatch node wired End A / End B between compartments (undirected gas diffusion, never a Station connection). The hollow-diamond arc shows an opening to Exterior vacuum, which has no connector to wire.");
 	}
 	if (ImGui::TreeNodeEx("Edge colours", ImGuiTreeNodeFlags_NoAutoOpenOnLog))
 	{
@@ -878,6 +939,13 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	if (mGraph.nodes.empty())
 	{
 		ImGui::TextDisabled("No systems configured in the draft. Add stores/processes or load a reference station.");
+	}
+	else
+	{
+		// Height-constant chrome: the empty-draft hint keeps its line even
+		// once nodes exist, so the first placement cannot shove the canvas
+		// up a line and drop the new node above the spot the user clicked.
+		ImGui::Dummy({0, ImGui::GetTextLineHeight()});
 	}
 	// Height-constant chrome: exactly one line whether or not a node is
 	// selected, so selecting never pushes the canvas (and the reserved
@@ -1119,6 +1187,60 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			if (pos.x >= rect.x && pos.x <= rect.z && pos.y >= rect.y && pos.y <= rect.w) return true;
 		return false;
 	};
+	// A right-click held still on the canvas opens the create-node
+	// context menu at the pointer, mirroring the form tab's "Add entry"
+	// combobox: the chosen type is dropped exactly where the click
+	// landed. A pan drag, a connector, a grow/shrink affordance, or a
+	// right-click that just cancelled armed placement never opens it.
+	if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+	{
+		mMenuPressPos = io.MousePos;
+		mMenuPressValid = mPlacingType.empty() && !mSuppressMenuPress
+			&& canvasHovered && hoveredPin < 0 && !overPortButton(io.MousePos);
+	}
+	if (ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+	{
+		if (mMenuPressValid && canvasHovered
+			&& std::hypot(io.MousePos.x - mMenuPressPos.x,
+				io.MousePos.y - mMenuPressPos.y) <= 6.0f)
+		{
+			mMenuPlacePos = {(mMenuPressPos.x - origin.x - mPan.x) / mZoom,
+				(mMenuPressPos.y - origin.y - mPan.y) / mZoom};
+			ImGui::OpenPopup("Create node here");
+		}
+		mMenuPressValid = false;
+	}
+	if (ImGui::BeginPopup("Create node here"))
+	{
+		ImGui::TextDisabled("Create node at click");
+		// The same core placeable table and grouping as the "Place node"
+		// combobox; types at their cap are shown but disabled, since the
+		// placement pass could not honour them.
+		std::string_view shownGroup;
+		for (auto const& placeable : core::stationPlaceableTypes())
+		{
+			if (placeable.group != shownGroup)
+			{
+				shownGroup = placeable.group;
+				ImGui::TextDisabled("%s", std::string(shownGroup).c_str());
+			}
+			bool const atLimit = placementAtLimit(placeable.nodeType, draft);
+			if (atLimit) ImGui::BeginDisabled();
+			if (ImGui::Selectable(placeable.nodeType.data()))
+			{
+				mPlacingType = placeable.nodeType;
+				mMenuPlacePending = true;
+				ImGui::CloseCurrentPopup();
+			}
+			if (atLimit) ImGui::EndDisabled();
+		}
+		ImGui::EndPopup();
+	}
+	// A menu pick lands where the right-click happened; a combobox pick
+	// lands under each subsequent left-click. The menu is one-shot: the
+	// type is disarmed as the node lands, so the next click selects.
+	bool const placeFromMenu = mMenuPlacePending && !mPlacingType.empty();
+	mMenuPlacePending = false;
 	if (mPlacingType.empty() && canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hoveredPin < 0
 		&& !overPortButton(io.MousePos))
 	{
@@ -1144,11 +1266,12 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			mRenameBuffer[sizeof(mRenameBuffer) - 1] = '\0';
 		}
 	}
-	if (!mPlacingType.empty() && canvasHovered && hoveredPin < 0
-		&& ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+	if (placeFromMenu || (!mPlacingType.empty() && canvasHovered && hoveredPin < 0
+		&& ImGui::IsMouseClicked(ImGuiMouseButton_Left)))
 	{
-		auto const placeAt = ImVec2{(io.MousePos.x - origin.x - mPan.x) / mZoom,
-			(io.MousePos.y - origin.y - mPan.y) / mZoom};
+		auto const placeAt = placeFromMenu ? mMenuPlacePos
+			: ImVec2{(io.MousePos.x - origin.x - mPan.x) / mZoom,
+				(io.MousePos.y - origin.y - mPan.y) / mZoom};
 		if (mPlacingType == "Store" && draft.stores.size() < core::MaxStationResourceStores)
 		{
 			core::ResourceStoreSettings store;
@@ -1229,7 +1352,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			draft.equipmentLoads.push_back(std::move(load));
 			mFitRequested = false;
 		}
-		else if (mPlacingType == "Crew" || mPlacingType == "Crops" || mPlacingType == "Algae" || mPlacingType == "Microbial processor" || mPlacingType == "Water collector" || mPlacingType == "Water treatment" || mPlacingType == "Electrolyzer" || mPlacingType == "CO2 capture" || mPlacingType == "Atmosphere" || mPlacingType == "Airlock cycle")
+		else if (mPlacingType == "Crew" || mPlacingType == "Crops" || mPlacingType == "Algae" || mPlacingType == "Microbial processor" || mPlacingType == "Water collector" || mPlacingType == "Water treatment" || mPlacingType == "Electrolyzer" || mPlacingType == "CO2 capture" || mPlacingType == "Atmosphere" || mPlacingType == "Airlock cycle" || mPlacingType == "Atmosphere pathway")
 		{
 			auto place = [&](auto& entries, auto entry, size_t maximum, std::string const& prefix) {
 				if (entries.size() >= maximum) return;
@@ -1302,6 +1425,17 @@ entry.thermalClass = "moderate";
 				entry.recurrenceSeconds = 60.0;
 				entry.recoveredFraction = 0.95;
 				place(draft.airlockCycles, entry, core::MaxStationAirlockCycles, "cycle");
+			}
+			else if (mPlacingType == "Atmosphere pathway")
+			{
+				// A placed hatch arrives as an opening with both ends free:
+				// one square metre, wide open, waiting to be wired to two
+				// compartments. It is not Applicable until both ends land,
+				// exactly like a placed conversion with unwired flows.
+				core::AtmospherePathwaySettings entry;
+				entry.areaM2 = 1.0;
+				entry.initialOpenFraction = 1.0;
+				place(draft.atmospherePathways, entry, core::MaxStationPathways, "hatch");
 			}
 		}
 		else if (mPlacingType == "Battery" && draft.batteries.size() < core::MaxStationBatteries)
@@ -1541,6 +1675,7 @@ entry.thermalClass = "moderate";
 			draft.chillers.push_back(std::move(chiller));
 			mFitRequested = false;
 		}
+		if (placeFromMenu) mPlacingType.clear();
 	}
 	ImNodes::SetCurrentContext(previousContext);
 	updateBounds();
@@ -1903,39 +2038,7 @@ entry.thermalClass = "moderate";
 	if (!io.MouseDown[ImGuiMouseButton_Left]) mPressedPortButton.clear();
 	if (!mPlacingType.empty() && canvasHovered)
 	{
-		bool const atLimit = (mPlacingType == "Store" && draft.stores.size() >= core::MaxStationResourceStores)
-			|| (mPlacingType == "Transfer" && draft.transfers.size() >= core::MaxStationResourceTransfers)
-			|| (mPlacingType == "Conversion" && draft.conversions.size() >= core::MaxStationResourceConversions)
-			|| (mPlacingType == "Solar" && draft.solarArrays.size() >= core::MaxStationSolarArrays)
-			|| (mPlacingType == "Equipment" && draft.equipmentLoads.size() >= core::MaxStationEquipmentLoads)
-			|| (mPlacingType == "Battery" && draft.batteries.size() >= core::MaxStationBatteries)
-			|| (mPlacingType == "Generator" && draft.generators.size() >= core::MaxStationGenerators)
-			|| (mPlacingType == "Fuel cell" && draft.fuelCells.size() >= core::MaxStationFuelCells)
-			|| (mPlacingType == "Sabatier" && draft.sabatierReactors.size() >= core::MaxStationSabatierReactors)
-			|| (mPlacingType == "Methane processor"
-				&& draft.methaneProcessors.size() >= core::MaxStationMethaneProcessors)
-			|| (mPlacingType == "Reservoir"
-				&& draft.thermalReservoirs.size() >= core::MaxStationThermalReservoirs)
-			|| (mPlacingType == "Radiator"
-				&& draft.radiators.size() >= core::MaxStationRadiators)
-			|| (mPlacingType == "Coolant loop"
-				&& draft.coolantLoops.size() >= core::MaxStationCoolantLoops)
-			|| (mPlacingType == "Chiller" && draft.chillers.size() >= core::MaxStationChillers)
-			|| (mPlacingType == "Thermal buffer" && draft.thermalBuffers.size() >= core::MaxStationThermalBuffers)
-			|| (mPlacingType == "Crew" && draft.crews.size() >= core::MaxStationCrews)
-			|| (mPlacingType == "Crops" && draft.cropPopulations.size() >= core::MaxStationCropPopulations)
-			|| (mPlacingType == "Algae" && draft.algaeCultures.size() >= core::MaxStationAlgaeCultures)
-			|| (mPlacingType == "Microbial processor" && draft.microbialProcessors.size() >= core::MaxStationMicrobialProcessors)
-			|| (mPlacingType == "Water collector" && draft.waterCollectors.size() >= core::MaxStationWaterCollectors)
-			|| (mPlacingType == "Water treatment" && draft.waterTreatments.size() >= core::MaxStationWaterTreatments)
-			|| (mPlacingType == "Electrolyzer" && draft.electrolyzers.size() >= core::MaxStationElectrolyzers)
-			|| (mPlacingType == "CO2 capture" && draft.co2Captures.size() >= core::MaxStationCo2Captures)
-			|| (mPlacingType == "Atmosphere" && draft.atmospheres.size() >= core::MaxStationAtmospheres)
-			|| (mPlacingType == "Airlock cycle" && draft.airlockCycles.size() >= core::MaxStationAirlockCycles)
-			|| (mPlacingType == "Delivery" && draft.deliveries.size() >= core::MaxStationResourceDeliveries)
-			|| (mPlacingType == "Waste ejection" && draft.wasteEjections.size() >= core::MaxStationWasteEjections)
-			|| (mPlacingType == "Outage" && draft.outages.size() >= core::MaxStationInstallationOutages)
-			|| (mPlacingType == "Maintenance" && draft.maintenanceJobs.size() >= core::MaxStationMaintenanceJobs);
+		bool const atLimit = placementAtLimit(mPlacingType, draft);
 		auto a = io.MousePos;
 		ImVec2 b{a.x + nodeWidth * mZoom, a.y + nodeHeight * mZoom};
 		draw->AddRectFilled(a, b, IM_COL32(80, 130, 170, 100), 5);

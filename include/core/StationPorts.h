@@ -191,6 +191,20 @@ namespace core
 			PortDescriptor{"Microbial processor", "Heat out", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false},
 			PortDescriptor{"Atmosphere", "Biology out", StationPortDirection::Output, "biological-atmosphere", "biological-exchange", 0, {}},
 			PortDescriptor{"Atmosphere", "Biology in", StationPortDirection::Input, "biological-atmosphere", "biological-exchange", 0, {}},
+			// The atmosphere pathway hatch: one undirected opening with two
+			// ends. The hatch node owns both endpoint references on its input
+			// faces and each Atmosphere exposes one unbounded host face, the
+			// same shape a Reservoir uses to host radiators. The hatch presents
+			// the dedicated AtmospherePathwaySettings aggregate and is
+			// deliberately NOT a Station connection (ADR 0027): it carries no
+			// throughput, no efficiency and no direction. End A and End B are
+			// the two ends of one opening, not a source and a sink - each
+			// species moves down its own partial-pressure gradient. Both ends
+			// are optional until wired, so a freshly placed hatch reads as an
+			// opening being built rather than a broken reference.
+			PortDescriptor{"Atmosphere", "Hosted pathways", StationPortDirection::Output, "pathway-host", "atmosphere-endpoint", 0, {}},
+			PortDescriptor{"Atmosphere pathway", "End A", StationPortDirection::Input, "atmosphere-endpoint", "pathway-host", 1, {}, true},
+			PortDescriptor{"Atmosphere pathway", "End B", StationPortDirection::Input, "atmosphere-endpoint", "pathway-host", 1, {}, true},
 			PortDescriptor{"Delivery", "Destination", StationPortDirection::Output, "material", "inventory", 1, {}, false},
 			PortDescriptor{"Waste ejection", "Source", StationPortDirection::Input, "material", "inventory", 1, {}, false},
 			PortDescriptor{"Outage", "Target installation", StationPortDirection::Output, "supervision", "installation", 1, {}, false},
@@ -469,6 +483,11 @@ namespace core
 			StationPlaceableType{"Electrolyzer", "electrolyzer", "Gas"},
 			StationPlaceableType{"CO2 capture", "capture", "Gas"},
 			StationPlaceableType{"Atmosphere", "atmosphere", "Gas"},
+			// An opening between two compartments. Placed with both ends free
+			// and wired like any other node; each hatch is one entry in the
+			// dedicated undirected pathway aggregate, never a Station
+			// connection (ADR 0027).
+			StationPlaceableType{"Atmosphere pathway", "hatch", "Gas"},
 			StationPlaceableType{"Airlock cycle", "cycle", "Gas"},
 			StationPlaceableType{"Delivery", "delivery", "Schedules"},
 			StationPlaceableType{"Waste ejection", "ejection", "Schedules"},

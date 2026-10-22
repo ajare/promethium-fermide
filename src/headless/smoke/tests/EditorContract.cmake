@@ -277,6 +277,7 @@ set(editor_names
     station/removalWorkflow
     station/storeWorkflow
     station/flowTransferPlacementWorkflow
+    station/flowContextMenuPlacementWorkflow
     station/flowLinkWorkflow
     station/flowCascadeDeleteWorkflow
     station/flowInstallationRenameWorkflow
@@ -301,34 +302,11 @@ set(editor_names
     station/flowChillerWorkflow
     station/flowThermalBufferWorkflow
     station/transferWorkflow
-    station/compoundWorkflow
-    station/powerWorkflow
-    station/batteryWorkflow
-    station/deliveryWorkflow
-    station/wasteEjectionWorkflow
-    station/containmentWorkflow
-    station/thermalWorkflow
-    station/coolantWorkflow
-    station/chillerWorkflow
-    station/generatorWorkflow
-    station/bufferWorkflow
-    station/microbialConditionWorkflow
-    station/waterCarryoverWorkflow
-    station/bioconversionWorkflow
-    station/bioconversionDegenerateWorkflow
     station/bioconversionFoodwasteWorkflow
-    station/waterFlagshipWorkflow
-    station/compoundWaterWorkflow
-    station/cropWorkflow
-    station/algaeWorkflow
-    station/maintenanceWorkflow
     station/coupledLiveViewWorkflow
-    station/carbonAliasWorkflow
-    station/crewAliasWorkflow
     station/trendsWorkflow
     station/enduranceWorkflow
     station/forecastWorkflow
-    station/scenarioWorkflow
     station/stabilityWorkflow
 )
 

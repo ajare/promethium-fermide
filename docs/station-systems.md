@@ -1498,8 +1498,16 @@ no requested/actual/limiter fields. The observable registry classifies this
 aggregate as unverified for general cross-step guarantees.
 
 Pathways and their scheduled commands persist through the existing Station
-configuration and World serialization seams. Diagram links are display-only;
-pathway authoring UI and live control remain separate work.
+configuration and World serialization seams. An internal pathway is authored
+in Flow as an **Atmosphere pathway** node: place it, then drag from each
+compartment's `Hosted pathways` face onto the hatch's `End A` / `End B`.
+Each end writes one endpoint reference on the same undirected aggregate, so
+the hatch is a presentation of `atmospherePathways` and never a Station
+connection (ADR 0027). The hatch inspector edits `areaM2` and
+`initialOpenFraction`; live openness, per-species flow and the last actuating
+command are published per node. An opening to Exterior vacuum keeps its
+display-only arc: the boundary is a derived node with no connector to wire.
+Live control of openness remains separate work.
 
 #### Pathways to space
 

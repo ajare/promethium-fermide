@@ -1,6 +1,7 @@
 #include "core/StationConnections.h"
 #include "core/StationPorts.h"
 #include <algorithm>
+#include <cstdio>
 #include <map>
 #include <set>
 
@@ -165,6 +166,28 @@ Graph build(core::StationSystemsSettings const& s)
 	if (std::any_of(s.atmospherePathways.begin(), s.atmospherePathways.end(), [](auto const& pathway) {
 		return pathway.aAtmosphereId == StationExteriorAtmosphereId || pathway.bAtmosphereId == StationExteriorAtmosphereId;
 	})) b.node("Exterior", StationExteriorAtmosphereId, 2, "Space: fixed zero pressure; no gas inventory");
+	// A hatch node presents one atmosphere pathway, so the opening can be
+	// placed, wired and inspected in the diagram instead of floating as an
+	// uneditable arc. Openings that touch Exterior vacuum are excluded: the
+	// boundary is a derived, inert node with no connector to wire, so those
+	// keep their display-only rendering. A hatch with an unwired end still
+	// gets its node - that is the state a freshly placed opening lands in.
+	std::vector<core::AtmospherePathwaySettings> hatches;
+	for (auto const& pathway : s.atmospherePathways)
+		if (pathway.aAtmosphereId != StationExteriorAtmosphereId
+			&& pathway.bAtmosphereId != StationExteriorAtmosphereId)
+			hatches.push_back(pathway);
+	for (auto const& pathway : hatches)
+	{
+		char detail[96];
+		std::snprintf(detail, sizeof(detail), "area %.3f m2 - open %.0f%%",
+			pathway.areaM2, pathway.initialOpenFraction * 100.0);
+		b.owner = b.node("Atmosphere pathway", pathway.id, 2, detail);
+		b.input(b.owner, pathway.aAtmosphereId, "End A", "Atmosphere", LinkKind::Material,
+			true, Medium::Unspecified, "aAtmosphereId");
+		b.input(b.owner, pathway.bAtmosphereId, "End B", "Atmosphere", LinkKind::Material,
+			true, Medium::Unspecified, "bAtmosphereId");
+	}
 	b.add(s.coolantLoops, "Coolant loop", 2); b.add(s.chillers, "Chiller", 2);
 	b.add(s.radiators, "Radiator", 2); b.add(s.thermalBuffers, "Thermal buffer", 2);
 	b.add(s.solarArrays, "Solar", 3); b.add(s.batteries, "Battery", 3);

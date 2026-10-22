@@ -1634,7 +1634,12 @@ using namespace station_detail;
 			if (!std::isfinite(pathway.initialOpenFraction)
 				|| pathway.initialOpenFraction < 0.0 || pathway.initialOpenFraction > 1.0)
 				return refuse(where + " initialOpenFraction must be finite and within [0, 1]");
-			if (pathway.aAtmosphereId == pathway.bAtmosphereId)
+			// A hatch with both ends unwired is an opening being built, not a
+			// self-loop: the distinctness rule is about two named compartments,
+			// and two empty strings name nothing. Each empty end is refused on
+			// its own below as an unresolved reference, which the draft layer
+			// treats as an unconnected connector.
+			if (!pathway.aAtmosphereId.empty() && pathway.aAtmosphereId == pathway.bAtmosphereId)
 				return refuse(where + " endpoints must be distinct (self-loop)");
 			for (auto const& endpoint : {pathway.aAtmosphereId, pathway.bAtmosphereId})
 				if (endpoint != StationExteriorAtmosphereId && !atmosphereIds.contains(endpoint))

@@ -60,14 +60,30 @@ void pathwayDisplayWorkflow(smoke::Context const&)
 	settings.atmospherePathways = {{"opening", "a", "b", 1, 1}, {"parallel", "b", "a", 0.5, 1},
 		{"to-space", "b", core::StationExteriorAtmosphereId, 0.25, 0.5}};
 	auto graph = station_flow::build(settings);
+	// Each internal pathway is presented as one hatch node. The opening to
+	// Exterior vacuum is not: the boundary owns no connector to wire.
+	std::vector<std::string> hatchNodes;
+	for (auto const& node : graph.nodes)
+		if (node.type == "Atmosphere pathway") hatchNodes.push_back(node.id);
+	require(hatchNodes == std::vector<std::string>({"opening", "parallel"}),
+		"Internal pathways were not each projected as one hatch node");
+	// Only the exterior opening still synthesizes a display arc.
 	auto links = station_flow::pathwayLinks(settings, graph);
-	require(links.size() == 3 && links[0].a == links[1].b && links[0].b == links[1].a,
-		"Pathway projection lost endpoints or parallel/reversed openings");
-	require(graph.nodes[links[2].b].type == "Exterior"
-		&& graph.nodes[links[2].b].id == core::StationExteriorAtmosphereId
-		&& core::stationIsDerivedNodeType("Exterior"), "exterior pathway lacks an inert space endpoint");
-	require(graph.links.empty() && core::stationAuthoredLinks(settings).empty(),
-		"Pathway became an editable or solver Station connection");
+	require(links.size() == 1 && graph.nodes[links[0].b].type == "Exterior"
+		&& graph.nodes[links[0].b].id == core::StationExteriorAtmosphereId
+		&& core::stationIsDerivedNodeType("Exterior"),
+		"Exterior pathway lost its inert space endpoint, or an internal pathway still drew an arc");
+	// A wired hatch end is one authored reference owned by the pathway
+	// aggregate. It is still not a Station connection: nothing entered the
+	// connection catalogue, which is what ADR 0027 protects.
+	auto const authored = core::stationAuthoredLinks(settings);
+	require(authored.size() == 4,
+		"A hatch did not present exactly one authored link per wired end");
+	require(std::all_of(authored.begin(), authored.end(), [](auto const& link) {
+		return link.identity.rfind("Atmosphere pathway:", 0) == 0;
+	}), "Hatch links are not owned by the pathway aggregate");
+	require(settings.connections.empty(),
+		"Pathway became a Station connection instead of the dedicated undirected aggregate");
 	core::World baseline("Baseline", 2, 2), displayed("Displayed", 2, 2);
 	for (auto* world : {&baseline, &displayed})
 	{
@@ -90,20 +106,22 @@ void pathwayDisplayWorkflow(smoke::Context const&)
 	#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
 	driver.run("station", "pathwayDisplay", [&](ImGuiTestContext* ctx) {
 		ctx->SetRef("Pathway display");
-		ImVec2 first, parallel;
-		REQ(diagram.pathwayScreenPosition("opening", &first)
-			&& diagram.pathwayScreenPosition("parallel", &parallel)
-			&& first.y != parallel.y, "Pathways were not drawn as separate display links");
+		// The hatch is a real node with two real connectors, so an opening is
+		// addressable at each end rather than only as a floating arc.
+		ImVec2 endA, endB;
+		REQ(diagram.pinScreenPosition("Atmosphere pathway", "opening", "End A", &endA)
+			&& diagram.pinScreenPosition("Atmosphere pathway", "opening", "End B", &endB),
+			"Hatch connectors were not drawn");
 		ImVec2 exterior;
 		REQ(diagram.pathwayScreenPosition("to-space", &exterior), "Exterior pathway was not drawn");
-		REQ(driver.contains("undirected gas diffusion (display-only; not Station connections)"),
+		REQ(driver.contains("never a Station connection"),
 			"Pathway visual legend is missing");
 		REQ(smoke::station::advanceSeconds(baseline, 10) && smoke::station::advanceSeconds(displayed, 10),
 			"Visible pathway run failed");
 		REQ(baseline.getStationSystemsSnapshot() == displayed.getStationSystemsSnapshot(),
 			"Rendering pathway links changed simulation");
 		ctx->ItemClick("Show atmosphere pathways"); ctx->Yield(3);
-		REQ(!diagram.pathwayScreenPosition("opening", &first), "Hidden pathway was still drawn");
+		REQ(!diagram.pathwayScreenPosition("to-space", &exterior), "Hidden exterior opening was still drawn");
 		// Alter persisted presentation layout while the display links are absent.
 		layout.positions["Atmosphere:a:0"].first = 300;
 		diagram.restoreLayout(layout); ctx->Yield(3);
@@ -117,7 +135,7 @@ void pathwayDisplayWorkflow(smoke::Context const&)
 		REQ(settings == layout.settings && !diagram.selectedConnection(),
 			"Display-only pathway controls mutated authored configuration or selected a connection");
 		ctx->ItemClick("Show atmosphere pathways"); ctx->Yield(3);
-		REQ(diagram.pathwayScreenPosition("opening", &first), "Pathway did not return after display toggle");
+		REQ(diagram.pathwayScreenPosition("to-space", &exterior), "Exterior pathway did not return after display toggle");
 		REQ(smoke::station::advanceSeconds(baseline, 10) && smoke::station::advanceSeconds(displayed, 10)
 			&& baseline.getStationSystemsSnapshot() == displayed.getStationSystemsSnapshot(),
 			"Redrawing the altered pathway layout changed simulation");

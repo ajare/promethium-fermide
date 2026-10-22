@@ -1088,6 +1088,40 @@ bool renderAirlockCycleEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	return removeCycle;
 }
 
+bool renderAtmospherePathwayEntry([[maybe_unused]] core::StationSystemsSettings& draft,
+	core::AtmospherePathwaySettings& pathway, std::string const& label, std::string const& removeLabel)
+{
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
+	bool removePathway = false;
+	renderIdentity(label, pathway.id);
+	// The two ends are the same references the hatch node's End A / End B
+	// connectors write, so the form and the canvas cannot disagree about
+	// which compartments one opening joins. Openness is authored here and
+	// actuated at runtime by scheduled commands; this field is where the
+	// opening starts, not where it is held.
+	char endABuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(endABuffer, pathway.aAtmosphereId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText(describe("end A compartment", label).c_str(),
+		endABuffer, sizeof(endABuffer)))
+		pathway.aAtmosphereId = endABuffer;
+	char endBBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(endBBuffer, pathway.bAtmosphereId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText(describe("end B compartment", label).c_str(),
+		endBBuffer, sizeof(endBBuffer)))
+		pathway.bAtmosphereId = endBBuffer;
+	ImGui::InputDouble(describe("area m2", label).c_str(),
+		&pathway.areaM2, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble(describe("initial open fraction", label).c_str(),
+		&pathway.initialOpenFraction, 0.0, 0.0, "%.3f");
+	ImGui::SameLine();
+	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
+		removePathway = true;
+	ImGui::PopItemWidth();
+	ImGui::PopID();
+	return removePathway;
+}
+
 bool renderTransferEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::ResourceTransferSettings& transfer,
 	std::string const& label, std::string const& removeLabel)
@@ -2081,6 +2115,13 @@ bool renderAtmosphereEntryAt(core::StationSystemsSettings& draft, size_t index)
 	return renderAtmosphereEntry(draft, draft.atmospheres[index], "Atmosphere " + std::to_string(index), {});
 }
 
+bool renderAtmospherePathwayEntryAt(core::StationSystemsSettings& draft, size_t index)
+{
+	if (index >= draft.atmospherePathways.size()) return false;
+	return renderAtmospherePathwayEntry(draft, draft.atmospherePathways[index],
+		"Atmosphere pathway " + std::to_string(index), {});
+}
+
 bool renderAirlockCycleEntryAt(core::StationSystemsSettings& draft, size_t index)
 {
 	if (index >= draft.airlockCycles.size()) return false;
@@ -2145,7 +2186,7 @@ bool renderConversionEntryAt(core::StationSystemsSettings& draft, size_t index)
 }
 
 // Keyed by the Flow node type names in core::stationPortDescriptors().
-constexpr std::array<StationEntryEditor, 29> kEntryEditors{{
+constexpr std::array<StationEntryEditor, 30> kEntryEditors{{
 	{"Solar", &renderSolarEntryAt},
 	{"Conversion", &renderConversionEntryAt},
 	{"Delivery", &renderDeliveryEntryAt},
@@ -2162,6 +2203,7 @@ constexpr std::array<StationEntryEditor, 29> kEntryEditors{{
 	{"Electrolyzer", &renderElectrolyzerEntryAt},
 	{"CO2 capture", &renderCo2CaptureEntryAt},
 	{"Atmosphere", &renderAtmosphereEntryAt},
+	{"Atmosphere pathway", &renderAtmospherePathwayEntryAt},
 	{"Airlock cycle", &renderAirlockCycleEntryAt},
 
 	{"Transfer", &renderTransferEntryAt},
@@ -2202,7 +2244,7 @@ struct EntryCreator
 
 // Existing form defaults and reference preferences, independent of list rendering.
 // Groups and ordering come from the same catalogue as Flow placement.
-constexpr std::array<EntryCreator, 29> kEntryCreators{{
+constexpr std::array<EntryCreator, 30> kEntryCreators{{
 	{"Store", "Store",
 		[](core::StationSystemsSettings const& draft) { return draft.stores.size() < core::MaxStationResourceStores; },
 		[](core::StationSystemsSettings& draft) {
@@ -2779,6 +2821,24 @@ constexpr std::array<EntryCreator, 29> kEntryCreators{{
 				if (!taken) break;
 			}
 			draft.atmospheres.push_back(std::move(atmosphere));
+		}},
+	{"Atmosphere pathway", "Atmosphere pathway",
+		[](core::StationSystemsSettings const& draft) { return draft.atmospherePathways.size() < core::MaxStationPathways; },
+		[](core::StationSystemsSettings& draft) {
+			// A new opening starts with both ends free, one square metre and
+			// wide open. Wiring it is the drag; this is the thing the drag
+			// lands on.
+			core::AtmospherePathwaySettings pathway;
+			pathway.areaM2 = 1.0;
+			pathway.initialOpenFraction = 1.0;
+			for (size_t candidate = draft.atmospherePathways.size() + 1;; ++candidate)
+			{
+				pathway.id = "hatch" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.atmospherePathways.begin(), draft.atmospherePathways.end(),
+					[&](core::AtmospherePathwaySettings const& existing) { return existing.id == pathway.id; });
+				if (!taken) break;
+			}
+			draft.atmospherePathways.push_back(std::move(pathway));
 		}},
 	{"Airlock cycle", "Airlock cycle",
 		[](core::StationSystemsSettings const& draft) { return draft.airlockCycles.size() < core::MaxStationAirlockCycles; },

@@ -8,6 +8,125 @@ namespace
 	// #660: Thermal buffers are authored through one fixed host connector and
 	// one optional circulation gate.  The seam retains the validator's host
 	// and same-reservoir rules while incomplete drafts remain wireable.
+	// The atmosphere pathway hatch: one undirected opening presented as a
+	// node with two ends. Each end writes one endpoint reference on the
+	// dedicated pathway aggregate, and nothing about it is a Station
+	// connection (ADR 0027).
+	void hatchSeam(smoke::Context const&)
+	{
+		auto base = [] {
+			core::StationSystemsSettings s; s.enabled = true;
+			core::AtmosphereSettings a;
+			a.id = "habitat"; a.volumeM3 = a.thermalCapacityKJPerK = 100;
+			a.minPressureKPa = 1; a.maxPressureKPa = 200;
+			a.startingOxygenKg = 30; a.startingNitrogenKg = 80;
+			auto b = a; b.id = "medical"; b.startingOxygenKg = 5;
+			s.atmospheres = {a, b};
+			core::AtmospherePathwaySettings hatch;
+			hatch.id = "hatch"; hatch.areaM2 = 1; hatch.initialOpenFraction = 1;
+			s.atmospherePathways = {hatch};
+			return s;
+		};
+		auto allowed = [](core::StationSystemsSettings const& s, core::CandidateLink const& link) {
+			auto verdict = core::evaluateStationLink(s, link);
+			require(verdict.allowed, ("hatch link refused: " + verdict.reason).c_str());
+		};
+		auto refused = [](core::StationSystemsSettings const& s, core::CandidateLink const& link,
+			char const* reason) {
+			auto verdict = core::evaluateStationLink(s, link);
+			require(!verdict.allowed && verdict.reason.find(reason) != std::string::npos,
+				("expected " + std::string(reason) + ", got " + verdict.reason).c_str());
+		};
+		const core::StationPinRef hostA{"Atmosphere", "habitat", "Hosted pathways"};
+		const core::StationPinRef hostB{"Atmosphere", "medical", "Hosted pathways"};
+		const core::StationPinRef endA{"Atmosphere pathway", "hatch", "End A"};
+		const core::StationPinRef endB{"Atmosphere pathway", "hatch", "End B"};
+
+		// Both ends free is the state a freshly placed opening lands in, and
+		// it is wireable rather than broken.
+		require(base().atmospherePathways.front().aAtmosphereId.empty()
+			&& base().atmospherePathways.front().bAtmosphereId.empty(),
+			"hatch fixture should start unwired");
+		allowed(base(), {hostA, endA});
+		allowed(base(), {endB, hostB});
+
+		// Each end writes its own field, from either drag direction.
+		auto wired = base();
+		require(core::applyStationLink(wired, {hostA, endA}), "End A write failed");
+		require(wired.atmospherePathways.front().aAtmosphereId == "habitat",
+			"End A did not write aAtmosphereId");
+		require(core::applyStationLink(wired, {endB, hostB}), "End B write failed on a reversed drag");
+		require(wired.atmospherePathways.front().bAtmosphereId == "medical",
+			"End B did not write bAtmosphereId");
+
+		// One end takes exactly one compartment.
+		refused(wired, {hostB, endA}, "takes at most 1 link");
+		// Both ends naming one compartment is a self-loop, not an opening:
+		// judged on a draft where the second end is still free, since a busy
+		// end is refused for occupancy first.
+		auto selfLoop = base();
+		require(core::applyStationLink(selfLoop, {hostA, endA}), "End A pre-wire failed");
+		refused(selfLoop, {hostA, endB}, "self-loop");
+		// The host face is the only Atmosphere face a hatch end may join.
+		refused(wired, {{"Atmosphere", "habitat", "Gas out"}, endA}, "cannot join");
+
+		// Enumeration names the same two references the write made, so the
+		// canvas, the clear and the removal plan all resolve one connector to
+		// one field.
+		auto const authored = core::stationAuthoredLinks(wired);
+		require(std::any_of(authored.begin(), authored.end(), [&](auto const& link) {
+			return link.identity == "Atmosphere pathway:hatch:aAtmosphereId"
+				&& link.from == hostA && link.to == endA;
+		}), "End A did not enumerate as an authored link");
+		require(std::any_of(authored.begin(), authored.end(), [&](auto const& link) {
+			return link.identity == "Atmosphere pathway:hatch:bAtmosphereId"
+				&& link.from == hostB && link.to == endB;
+		}), "End B did not enumerate as an authored link");
+
+		// Disconnecting one end leaves the other and keeps the opening.
+		auto oneEnd = wired;
+		require(core::clearStationLink(oneEnd, "Atmosphere pathway:hatch:bAtmosphereId"),
+			"End B disconnect failed");
+		require(oneEnd.atmospherePathways.size() == 1
+			&& oneEnd.atmospherePathways.front().aAtmosphereId == "habitat"
+			&& oneEnd.atmospherePathways.front().bAtmosphereId.empty(),
+			"Clearing one end disturbed the other");
+
+		// Removing the hatch node removes the opening and nothing else.
+		core::StationNodeRemoval plan;
+		require(core::planStationNodeRemoval(wired, "Atmosphere pathway", "hatch", plan),
+			"hatch removal plan failed");
+		require(plan.linkIdentities.size() == 2, "hatch removal did not see both ends");
+		require(core::removeStationNode(wired, plan) && wired.atmospherePathways.empty(),
+			"hatch removal left the opening behind");
+		require(wired.atmospheres.size() == 2, "hatch removal disturbed the compartments");
+
+		// Two openings between the same pair coexist with their own openness:
+		// ADR 0027 proves parallel pathways compose additively, so the seam
+		// must not refuse the second one.
+		auto twin = base();
+		require(core::applyStationLink(twin, {hostA, endA})
+			&& core::applyStationLink(twin, {hostB, endB}),
+			"first opening pre-wire failed");
+		core::AtmospherePathwaySettings second;
+		second.id = "hatch2"; second.areaM2 = 0.5; second.initialOpenFraction = 0.25;
+		twin.atmospherePathways.push_back(second);
+		const core::StationPinRef endA2{"Atmosphere pathway", "hatch2", "End A"};
+		const core::StationPinRef endB2{"Atmosphere pathway", "hatch2", "End B"};
+		allowed(twin, {hostA, endA2});
+		require(core::applyStationLink(twin, {hostA, endA2}), "second opening End A write failed");
+		require(core::applyStationLink(twin, {hostB, endB2}), "second opening End B write failed");
+		require(twin.atmospherePathways.size() == 2
+			&& twin.atmospherePathways[1].aAtmosphereId == "habitat"
+			&& twin.atmospherePathways[1].bAtmosphereId == "medical",
+			"a second parallel opening could not be wired");
+
+		// An opening to Exterior vacuum is not wireable through a hatch: the
+		// boundary is a derived node with no authored connector.
+		refused(base(), {{"Exterior", core::StationExteriorAtmosphereId, "Hosted pathways"}, endA},
+			"derived service node");
+	}
+
 	void biologySeam(smoke::Context const& context)
 	{
 		auto base = [] {
@@ -749,6 +868,7 @@ namespace
 void registerStationSeamChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"biologySeam", biologySeam});
+	checks.push_back({"hatchSeam", hatchSeam});
 	checks.push_back({"waterGasSeam", waterGasSeam});
 	checks.push_back({"schedulesSeam", schedulesSeam});
 	checks.push_back({"thermalBufferSeam", thermalBufferSeam});

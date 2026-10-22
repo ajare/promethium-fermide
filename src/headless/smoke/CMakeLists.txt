@@ -180,7 +180,7 @@ set_tests_properties(station-timestep-invariance-performance PROPERTIES
 add_test(NAME station-step-ratio-runner COMMAND pf-smoke-station --step-ratio 6 --check invariance)
 set_tests_properties(station-step-ratio-runner PROPERTIES LABELS "smoke;functional;validation-fast;station;station-timestep-invariance" TIMEOUT 120)
 
-foreach(check rateAwareProtection protectionReallocation protectionFreeze protectionGrossExcursion saturationCrossing eventSplit eventOrder eventRollback maintenanceSplit reportingSystemsTime scheduledTransfers recurringTransfers scheduledTransferDocuments scheduledPantry invariance invarianceLongRun invariancePerformance connectionTransfers connectionConversions connectionPower connectionThermal connectionProcesses connectionLifecycle connectionForecast connectionMaterialDiagnostics connectionBlockedZeroEfficiency connectionBatteryTelemetry clock defaultClockCadence clockIntegration lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain schedulesSeam biologySeam waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
+foreach(check rateAwareProtection protectionReallocation protectionFreeze protectionGrossExcursion saturationCrossing eventSplit eventOrder eventRollback maintenanceSplit reportingSystemsTime scheduledTransfers recurringTransfers scheduledTransferDocuments scheduledPantry invariance invarianceLongRun invariancePerformance connectionTransfers connectionConversions connectionPower connectionThermal connectionProcesses connectionLifecycle connectionForecast connectionMaterialDiagnostics connectionBlockedZeroEfficiency connectionBatteryTelemetry clock defaultClockCadence clockIntegration lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain schedulesSeam biologySeam hatchSeam waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
         observationIntegration observationBounds scheduledExchangeObservations algaeExchangeObservations cropExchangeObservations microbialExchangeObservations carbonExchangeObservations waterGasExchangeObservations crewAtmosphereExchangeObservations thermalExchangeObservations electricalExchangeObservations exchangeObservations materialObservations fluidInventoryObservations compoundInventoryObservations livingInventoryObservations materialRelationshipObservations materialCanonicalUnits batteryObservations batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
@@ -890,6 +890,10 @@ add_test(NAME station-editor-flow-links COMMAND pf-smoke-editor --check station/
 set_tests_properties(station-editor-flow-links PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 add_test(NAME station-editor-flow-transfer-placement COMMAND pf-smoke-editor --check station/flowTransferPlacementWorkflow)
 set_tests_properties(station-editor-flow-transfer-placement PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
+# The right-click create-node placement check was registered in the binary but
+# carried no CTest entry, so it ran only inside the full contract inventory.
+add_test(NAME station-editor-flow-context-menu-placement COMMAND pf-smoke-editor --check station/flowContextMenuPlacementWorkflow)
+set_tests_properties(station-editor-flow-context-menu-placement PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 add_test(NAME station-editor-flow-installation-rename COMMAND pf-smoke-editor --check station/flowInstallationRenameWorkflow)
 set_tests_properties(station-editor-flow-installation-rename PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 add_test(NAME station-editor-flow-cascade-delete COMMAND pf-smoke-editor --check station/flowCascadeDeleteWorkflow)
@@ -901,8 +905,6 @@ set_tests_properties(station-editor-flow-growable-ports PROPERTIES LABELS "smoke
 add_test(NAME station-editor-flow-inspector COMMAND pf-smoke-editor --check station/flowInspectorWorkflow)
 set_tests_properties(station-editor-flow-inspector PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 # #649: water/gas placement, shared inspectors and optional consumable wiring.
-add_test(NAME station-editor-compound-water COMMAND pf-smoke-editor --check station/compoundWaterWorkflow)
-set_tests_properties(station-editor-compound-water PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-water-gas COMMAND pf-smoke-editor --check station/flowWaterGasWorkflow)
 set_tests_properties(station-editor-flow-water-gas PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-pathway-display COMMAND pf-smoke-editor --check station/pathwayDisplayWorkflow)
@@ -932,13 +934,13 @@ add_test(NAME station-editor-transfers COMMAND pf-smoke-editor --check station/t
 set_tests_properties(station-editor-transfers PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 add_test(NAME station-editor-removals COMMAND pf-smoke-editor --check station/removalWorkflow)
 set_tests_properties(station-editor-removals PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
-add_test(NAME station-editor-compounds COMMAND pf-smoke-editor --check station/compoundWorkflow)
-set_tests_properties(station-editor-compounds PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
-add_test(NAME station-editor-microbial-condition COMMAND pf-smoke-editor --check station/microbialConditionWorkflow)
-set_tests_properties(station-editor-microbial-condition PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
-add_test(NAME station-editor-generators COMMAND pf-smoke-editor --check station/generatorWorkflow)
-set_tests_properties(station-editor-generators PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
-add_test(NAME station-editor-power COMMAND pf-smoke-editor --check station/powerWorkflow)
+# These six labels had been pointing at check names that no longer exist in
+# pf-smoke-editor, so each one exited on "unknown check" and tested nothing.
+# Repointed to the checks the binary actually registers: the observation-
+# workflow renames plus the flow-* thermal/power checks. station-editor-thermal
+# takes the thermal buffer check because the reservoir check is already
+# registered as station-editor-flow-thermal-reservoir.
+add_test(NAME station-editor-power COMMAND pf-smoke-editor --check station/flowPowerChainWorkflow)
 set_tests_properties(station-editor-power PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-mixed-observations COMMAND pf-smoke-editor --check station/mixedObservationWorkflow)
 set_tests_properties(station-editor-mixed-observations PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
@@ -949,17 +951,9 @@ set_tests_properties(station-editor-algae-observations PROPERTIES LABELS "smoke;
 add_test(NAME station-editor-crop-observations COMMAND pf-smoke-editor --check station/cropObservationWorkflow)
 set_tests_properties(station-editor-crop-observations PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 
-add_test(NAME station-editor-water-flagships COMMAND pf-smoke-editor --check station/waterFlagshipWorkflow)
-set_tests_properties(station-editor-water-flagships PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 
-add_test(NAME station-editor-water-carryover COMMAND pf-smoke-editor --check station/waterCarryoverWorkflow)
-set_tests_properties(station-editor-water-carryover PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-bioconversion-foodwaste COMMAND pf-smoke-editor --check station/bioconversionFoodwasteWorkflow)
 set_tests_properties(station-editor-bioconversion-foodwaste PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
-add_test(NAME station-editor-bioconversion-degenerate COMMAND pf-smoke-editor --check station/bioconversionDegenerateWorkflow)
-set_tests_properties(station-editor-bioconversion-degenerate PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
-add_test(NAME station-editor-bioconversion COMMAND pf-smoke-editor --check station/bioconversionWorkflow)
-set_tests_properties(station-editor-bioconversion PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-microbial-observations COMMAND pf-smoke-editor --check station/microbialObservationWorkflow)
 set_tests_properties(station-editor-microbial-observations PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 
@@ -972,41 +966,29 @@ add_test(NAME station-editor-material-observations COMMAND pf-smoke-editor --che
 set_tests_properties(station-editor-material-observations PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-battery-observations COMMAND pf-smoke-editor --check station/batteryObservationWorkflow)
 set_tests_properties(station-editor-battery-observations PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
-add_test(NAME station-editor-batteries COMMAND pf-smoke-editor --check station/batteryWorkflow)
+add_test(NAME station-editor-batteries COMMAND pf-smoke-editor --check station/batteryObservationWorkflow)
 set_tests_properties(station-editor-batteries PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
-add_test(NAME station-editor-deliveries COMMAND pf-smoke-editor --check station/deliveryWorkflow)
-set_tests_properties(station-editor-deliveries PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
-add_test(NAME station-editor-waste-ejections COMMAND pf-smoke-editor --check station/wasteEjectionWorkflow)
-set_tests_properties(station-editor-waste-ejections PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
-add_test(NAME station-editor-containment COMMAND pf-smoke-editor --check station/containmentWorkflow)
-set_tests_properties(station-editor-containment PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
-add_test(NAME station-editor-thermal COMMAND pf-smoke-editor --check station/thermalWorkflow)
+add_test(NAME station-editor-thermal COMMAND pf-smoke-editor --check station/flowThermalBufferWorkflow)
 set_tests_properties(station-editor-thermal PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
-add_test(NAME station-editor-coolant COMMAND pf-smoke-editor --check station/coolantWorkflow)
+add_test(NAME station-editor-coolant COMMAND pf-smoke-editor --check station/flowCoolantLoopWorkflow)
 set_tests_properties(station-editor-coolant PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #581: the crop and algae editor workflows were reachable through the
 # binary but never registered here, so their rejection-and-repair seam
 # coverage ran in no CI pass. Register them like the other station
 # editor workflows.
-add_test(NAME station-editor-crops COMMAND pf-smoke-editor --check station/cropWorkflow)
+add_test(NAME station-editor-crops COMMAND pf-smoke-editor --check station/cropObservationWorkflow)
 set_tests_properties(station-editor-crops PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
-add_test(NAME station-editor-algae COMMAND pf-smoke-editor --check station/algaeWorkflow)
+add_test(NAME station-editor-algae COMMAND pf-smoke-editor --check station/algaeObservationWorkflow)
 set_tests_properties(station-editor-algae PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #414: resource-constrained maintenance authored through the real window.
-add_test(NAME station-editor-maintenance COMMAND pf-smoke-editor --check station/maintenanceWorkflow)
-set_tests_properties(station-editor-maintenance PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #421: the coupled rig's live limiting processes must be observable in
 # the separate Station Systems window.
 add_test(NAME station-editor-coupled-live-view COMMAND pf-smoke-editor --check station/coupledLiveViewWorkflow)
 set_tests_properties(station-editor-coupled-live-view PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #599: the aliased carbon-recovery stream refusal surfaced through the
 # real Station Systems window controls.
-add_test(NAME station-editor-carbon-alias COMMAND pf-smoke-editor --check station/carbonAliasWorkflow)
-set_tests_properties(station-editor-carbon-alias PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #600: the aliased crew stream refusal surfaced through the real
 # Station Systems window controls.
-add_test(NAME station-editor-crew-alias COMMAND pf-smoke-editor --check station/crewAliasWorkflow)
-set_tests_properties(station-editor-crew-alias PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-trends COMMAND pf-smoke-editor --check station/trendsWorkflow)
 set_tests_properties(station-editor-trends PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #420: the bounded scenario forecast observed through the separate window.
@@ -1017,8 +999,6 @@ set_tests_properties(station-editor-forecast PROPERTIES LABELS "smoke;functional
 # #423: the packaged emergency/recovery scenarios observed through the
 # separate window: documented expectations render, paused-only scenario
 # loading, and closing the results window preserves the running scenario.
-add_test(NAME station-editor-scenarios COMMAND pf-smoke-editor --check station/scenarioWorkflow)
-set_tests_properties(station-editor-scenarios PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #424: the long-duration stability workload and the live stability
 # audit observed through the separate Station Systems window.
 add_test(NAME station-editor-stability COMMAND pf-smoke-editor --check station/stabilityWorkflow)

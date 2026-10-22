@@ -156,6 +156,18 @@ private:
 	// combobox is built from the core placeable table, so derived service
 	// nodes are never offered.
 	std::string mPlacingType;
+	// Right-click create-node menu: the press spot is recorded so a
+	// release without a pan drag opens the menu at the pointer and the
+	// chosen type lands exactly where the click happened. A right-click
+	// that just cancelled armed placement suppresses the menu, so one
+	// gesture never both cancels and creates.
+	ImVec2 mMenuPressPos{};
+	bool mMenuPressValid{false};
+	bool mSuppressMenuPress{false};
+	// Set by the menu when a type was chosen; consumed by the placement
+	// pass to drop the node at the recorded spot instead of a click.
+	bool mMenuPlacePending{false};
+	ImVec2 mMenuPlacePos{};
 	// Grow/shrink affordances recorded by the last drawn frame, keyed by
 	// type\x1fid\x1fin|out\x1f+|-, and the press tracked between frames so
 	// a release only fires the affordance it started on.

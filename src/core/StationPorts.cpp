@@ -64,6 +64,22 @@ namespace
 		return nullptr;
 	}
 
+	// Which end of a hatch a connector names, as a pointer into the draft
+	// pathway. Returns nullptr when the hatch does not exist or the field is
+	// not an endpoint field, leaving the draft untouched. One resolver backs
+	// the write, the clear and the scoped rule so they cannot disagree.
+	std::string* pathwayEndpointField(StationSystemsSettings& settings,
+		std::string const& ownerId, std::string const& field)
+	{
+		auto const found = std::find_if(settings.atmospherePathways.begin(),
+			settings.atmospherePathways.end(),
+			[&](AtmospherePathwaySettings const& pathway) { return pathway.id == ownerId; });
+		if (found == settings.atmospherePathways.end()) return nullptr;
+		if (field == "aAtmosphereId") return &found->aAtmosphereId;
+		if (field == "bAtmosphereId") return &found->bAtmosphereId;
+		return nullptr;
+	}
+
 	// Which reference field a link writes. This is the one mapping between a
 	// connector and configuration: the editor draws the connector, the seam
 	// writes the field, and the enumeration below reads it back the same way.
@@ -235,6 +251,25 @@ namespace
 		{
 			mapping = {"Airlock cycle", link.to.nodeId, "atmosphereId", link.from};
 			return true;
+		}
+		// The hatch's two ends. The hatch owns both endpoint references on
+		// the input side of the oriented pair (atmosphere -> hatch end),
+		// exactly like the radiator's host mount, so it resolves through an
+		// explicit branch rather than the machine-output branch below.
+		if (link.to.nodeType == "Atmosphere pathway" && link.from.nodeType == "Atmosphere"
+			&& link.from.portName == "Hosted pathways")
+		{
+			if (link.to.portName == "End A")
+			{
+				mapping = {"Atmosphere pathway", link.to.nodeId, "aAtmosphereId", link.from};
+				return true;
+			}
+			if (link.to.portName == "End B")
+			{
+				mapping = {"Atmosphere pathway", link.to.nodeId, "bAtmosphereId", link.from};
+				return true;
+			}
+			return false;
 		}
 		if (link.to.nodeType == "Transfer" && link.to.portName == "Source" && link.from.nodeType == "Store")
 		{
@@ -850,6 +885,21 @@ namespace
 			validateStationWaterGasWiring(settings, *found, diagnostic, true);
 			return true;
 		}
+		if (mapping.ownerType == "Atmosphere pathway")
+		{
+			auto found = std::find_if(settings.atmospherePathways.begin(), settings.atmospherePathways.end(),
+				[&](AtmospherePathwaySettings const& entry) { return entry.id == mapping.ownerId; });
+			if (found == settings.atmospherePathways.end()) return false;
+			// An unwired end is an unconnected connector, not a defect of
+			// this drop. A hatch whose two ends name the same compartment is:
+			// one opening cannot exchange a compartment with itself, and the
+			// solver would be handed a permanent no-op that still reports as
+			// live. Mirrors the authoritative self-loop refusal.
+			if (!found->aAtmosphereId.empty() && found->aAtmosphereId == found->bAtmosphereId)
+				diagnostic = "Station atmosphere pathway '" + mapping.ownerId
+					+ "' endpoints must be distinct (self-loop)";
+			return true;
+		}
 		if (mapping.ownerType == "Water treatment")
 		{
 			auto found = std::find_if(settings.waterTreatments.begin(), settings.waterTreatments.end(),
@@ -1168,6 +1218,7 @@ namespace
 		if (type == "Chiller") return fn(settings.chillers);
 		if (type == "Generator") return fn(settings.generators);
 		if (type == "Atmosphere") return fn(settings.atmospheres);
+		if (type == "Atmosphere pathway") return fn(settings.atmospherePathways);
 		if (type == "Airlock cycle") return fn(settings.airlockCycles);
 		if (type == "Crew") return fn(settings.crews);
 		if (type == "Water collector") return fn(settings.waterCollectors);
@@ -1264,6 +1315,25 @@ std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& set
 		if (!entry.atmosphereId.empty())
 			links.push_back({linkIdentity("Airlock cycle", entry.id, "atmosphereId"),
 				{"Atmosphere", entry.atmosphereId, "Gas out"}, {"Airlock cycle", entry.id, "Atmosphere"}});
+	}
+	// Each wired hatch end is one authored link, the counterpart of what
+	// applyStationLink writes. An empty end is an unconnected connector, not
+	// a link to an empty compartment. A pathway with any Exterior end is
+	// skipped whole: the boundary is a derived, inert node with no connector
+	// to draw, so that opening keeps its display-only rendering and never
+	// appears as an editable link to a hatch node that is not on the canvas.
+	for (auto const& pathway : settings.atmospherePathways)
+	{
+		if (pathway.aAtmosphereId == StationExteriorAtmosphereId
+			|| pathway.bAtmosphereId == StationExteriorAtmosphereId) continue;
+		if (!pathway.aAtmosphereId.empty())
+			links.push_back({linkIdentity("Atmosphere pathway", pathway.id, "aAtmosphereId"),
+				{"Atmosphere", pathway.aAtmosphereId, "Hosted pathways"},
+				{"Atmosphere pathway", pathway.id, "End A"}});
+		if (!pathway.bAtmosphereId.empty())
+			links.push_back({linkIdentity("Atmosphere pathway", pathway.id, "bAtmosphereId"),
+				{"Atmosphere", pathway.bAtmosphereId, "Hosted pathways"},
+				{"Atmosphere pathway", pathway.id, "End B"}});
 	}
 	for (auto const& transfer : settings.transfers)
 	{
@@ -1473,6 +1543,11 @@ bool applyStationLink(StationSystemsSettings& settings, CandidateLink const& lin
 		auto* field = conversionFlowField(settings, mapping.ownerId, mapping.field);
 		return field && write(*field);
 	}
+	if (mapping.ownerType == "Atmosphere pathway")
+	{
+		auto* field = pathwayEndpointField(settings, mapping.ownerId, mapping.field);
+		return field && write(*field);
+	}
 	if (isMachineOwnerType(mapping.ownerType))
 	{
 		auto* field = machineField(settings, mapping.ownerType, mapping.ownerId, mapping.field);
@@ -1508,6 +1583,12 @@ bool clearStationLink(StationSystemsSettings& settings, std::string const& ident
 	if (isMachineOwnerType(ownerType))
 	{
 		auto* target = machineField(settings, ownerType, ownerId, field);
+		if (!target) return false;
+		return clear(*target);
+	}
+	if (ownerType == "Atmosphere pathway")
+	{
+		auto* target = pathwayEndpointField(settings, ownerId, field);
 		if (!target) return false;
 		return clear(*target);
 	}

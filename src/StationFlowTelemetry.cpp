@@ -326,6 +326,34 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		port("Oxygen in", p->lastElectrolysisOxygenKg);
 		out.ports["Heat out"] = quantity(-p->lastExchangeIntoCompartmentKW, "kW");
 	}
+	else if (node.type == "Atmosphere pathway")
+	{
+		auto p = find(s.atmospherePathways, id); if (!p) return {};
+		// A pathway reports as a flux, not as a service (ADR 0027): nothing
+		// asks for gas to move, so there is no request, no shortfall and no
+		// limiter to name. Rates are already per second (averaged over the
+		// last Station step), so they are not divided by dt again.
+		double netTotal = 0.0, flowTotal = 0.0;
+		for (size_t gas = 0; gas < p->netTransferredKg.size(); ++gas)
+		{
+			netTotal += p->netTransferredKg[gas];
+			flowTotal += p->flowRateKgPerS[gas];
+		}
+		out.values = {"Open " + percent(p->openFraction),
+			"Area " + quantity(p->areaM2, "m2"),
+			"Net flow " + quantity(flowTotal, "kg/s"),
+			"Net transferred " + quantity(netTotal, "kg")};
+		bool const active = p->status == core::StationAtmospherePathwayStatus::Active;
+		out.status = active ? "Diffusing" : "Idle";
+		out.state = active ? TelemetryState::Normal : TelemetryState::Idle;
+		out.values.push_back(p->lastCommandId.empty()
+			? "No actuation recorded"
+			: "Last set by " + p->lastCommandId + " at " + quantity(p->lastCommandSeconds, "s"));
+		// Signed A to B, the snapshot's own convention: positive leaves end A
+		// and arrives at end B.
+		out.ports["End A"] = quantity(flowTotal, "kg/s");
+		out.ports["End B"] = quantity(flowTotal, "kg/s");
+	}
 	else if (node.type == "Crew")
 	{
 		auto p = find(s.crews, id); if (!p) return {}; state(out, *p);
