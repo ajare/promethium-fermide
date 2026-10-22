@@ -9,9 +9,14 @@
 namespace core
 {
 	// Observation metadata is independent of diagram nodes and presentation.
-	enum class StationPhysicalQuantity { Power, Energy, Mass, Volume, Temperature, Fraction, MassRate, VolumeRate, Unspecified, AmountOfSubstance, AmountOfSubstanceRate };
-	enum class StationCanonicalUnit { Kilowatt, KilowattHour, Kilogram, CubicMetre, Kelvin, Fraction, KilogramPerSecond, CubicMetrePerSecond, Percent, Unspecified, Mole, MolePerSecond };
-	enum class StationMetricRole { Demand, Generation, Inventory, Input, Output, Loss, InventoryChange, StateOfCharge, Capacity };
+	enum class StationPhysicalQuantity { Power, Energy, Mass, Volume, Temperature, Fraction, MassRate, VolumeRate, Unspecified, AmountOfSubstance, AmountOfSubstanceRate, Pressure };
+	enum class StationCanonicalUnit { Kilowatt, KilowattHour, Kilogram, CubicMetre, Kelvin, Fraction, KilogramPerSecond, CubicMetrePerSecond, Percent, Unspecified, Mole, MolePerSecond, Celsius, Kilopascal };
+	// Condition: instantaneous compartment state (temperature, humidity,
+	// pressure). Not an exchange and not an owned inventory, so it must not
+	// pool into store or equipment subtotals.
+	// Throughput: rate across an undirected opening. Neither Input nor Output,
+	// because the opening has no source end for the sign to point at.
+	enum class StationMetricRole { Demand, Generation, Inventory, Input, Output, Loss, InventoryChange, StateOfCharge, Capacity, Condition, Throughput };
 	enum class StationRequestedSemantics { Demand };
 	enum class StationMetricValidity { Valid, Unavailable, Invalid };
 	enum class StationMetricCoverage { Complete, Partial, Unclassified };

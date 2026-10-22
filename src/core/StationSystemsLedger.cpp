@@ -54,7 +54,6 @@ namespace core
 		auto const committedGenerators = generators;
 		auto const committedAtmospheres = atmospheres;
 		auto const committedPathways = atmospherePathways;
-		auto const committedPathwayCommands = pathwayCommands;
 		auto const committedAirlockCycles = airlockCycles;
 		auto const committedCrews = crews;
 		auto const committedWaterCollectors = waterCollectors;
@@ -123,7 +122,6 @@ namespace core
 			generators = committedGenerators;
 			atmospheres = committedAtmospheres;
 			atmospherePathways = committedPathways;
-			pathwayCommands = committedPathwayCommands;
 			airlockCycles = committedAirlockCycles;
 			crews = committedCrews;
 			waterCollectors = committedWaterCollectors;

@@ -3,7 +3,9 @@
 #include "core/StationSystemsRuntime.h"
 #include "core/AgentTagRegistryDocument.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <limits>
 
 namespace
 {
@@ -525,7 +527,7 @@ namespace
 				"the saved document does not carry the authored retention");
 			// A pre-95 document carrying the field is refused, not silently
 			// dropped, and the refusal names the schema it needs.
-			auto stale = replaceAll(text, "version: 105", "version: 94");
+			auto stale = replaceAll(text, "version: 106", "version: 94");
 			bool refused = false;
 			std::string refusal;
 			try
@@ -1284,9 +1286,134 @@ namespace
 		}
 	}
 
+	// Atmosphere compartment state and pathway gas crossing must reach the
+	// chart catalogue carrying what the simulation actually produced.
+	void atmosphereStateCharts(smoke::Context const&)
+	{
+		auto const close = [](double x, double y) {
+			return std::abs(x - y) <= 1e-6 * std::max(1.0, std::abs(y)); };
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1;
+		core::AtmosphereSettings a;
+		a.id = "a";
+		a.volumeM3 = 100;
+		a.thermalCapacityKJPerK = 10000;
+		a.minPressureKPa = 1;
+		a.maxPressureKPa = 200;
+		a.startingOxygenKg = 30;
+		a.startingNitrogenKg = 80;
+		a.startingTemperatureC = 22;
+		// Vapour must actually be present: with none, relative humidity is
+		// zero and every humidity assertion below would pass vacuously.
+		a.startingWaterVapourKg = 1.5;
+		auto b = a;
+		b.id = "b";
+		b.startingOxygenKg = 10;
+		// A carbon dioxide gradient running against the oxygen one, so the
+		// unsigned crossing can be told apart from a signed net.
+		b.startingCarbonDioxideKg = 5;
+		settings.atmospheres = {a, b};
+		settings.atmospherePathways = {{"opening", "a", "b", 1, 1}};
+		core::StationSystemsRuntime runtime(settings, 1.0f / 60.0f);
+		require(runtime.advanceTo(5), "atmosphere chart scenario failed");
+
+		auto const findChart = [&](std::string const& id) -> core::StationChartDefinition const* {
+			auto const& c = runtime.catalogue();
+			auto const it = std::find_if(c.begin(), c.end(),
+				[&](auto const& x) { return x.id == id; });
+			return it == c.end() ? nullptr : &*it; };
+		auto const lastOf = [](core::StationChartData const& data, std::string const& label) {
+			for (auto const& s : data.series)
+				if (s.label == label && !s.values.empty()) return s.values.back();
+			return std::numeric_limits<double>::quiet_NaN(); };
+		// A legend where two lines share a label is unreadable, and the
+		// all-gases view is exactly where that bites: the compartment alone
+		// repeats once per gas.
+		auto const labelsDistinct = [&](core::StationChartData const& data) {
+			std::vector<std::string> labels;
+			for (auto const& s : data.series) labels.push_back(s.label);
+			std::sort(labels.begin(), labels.end());
+			return std::adjacent_find(labels.begin(), labels.end()) == labels.end(); };
+
+		for (auto const* id : {"atmosphere-temperature", "atmosphere-humidity",
+			"atmosphere-pressure"})
+		{
+			auto const* chart = findChart(id);
+			require(chart != nullptr, "an atmosphere state chart is missing from the catalogue");
+			require(chart->group == "Atmosphere", "atmosphere state charts are not in the Atmosphere group");
+			auto const data = runtime.query(chart->id);
+			require(data.series.size() == 2,
+				"an atmosphere state chart does not carry one line per compartment");
+			for (auto const& series : data.series)
+				require(!series.values.empty() && std::isfinite(series.values.back()),
+					"an atmosphere state series carries no value");
+		}
+		// The plotted numbers must be the snapshot's own, not something the
+		// chart layer derived differently.
+		auto const snap = runtime.snapshot();
+		require(snap.atmospheres[1].relativeHumidity > 0.01,
+			"the scenario carries no measurable humidity, so it cannot prove the percent scaling");
+		require(close(lastOf(runtime.query("atmosphere-temperature"), "a"),
+			snap.atmospheres[0].temperatureC), "the temperature chart does not match the snapshot");
+		require(close(lastOf(runtime.query("atmosphere-humidity"), "b") / 100.0,
+			snap.atmospheres[1].relativeHumidity),
+			"the humidity chart is not expressed in percent");
+		require(close(lastOf(runtime.query("atmosphere-pressure"), "a"),
+			snap.atmospheres[0].pressureKPa), "the pressure chart does not match the snapshot");
+
+		// Partial pressures: the root carries every gas, the Breakdown
+		// variants isolate one.
+		auto const* partialRoot = findChart("atmosphere-partial-pressure");
+		require(partialRoot != nullptr, "the partial pressure chart is missing");
+		require(partialRoot->propertyId == "atmosphere-partial-pressure"
+			&& partialRoot->breakdown == "All gases",
+			"the partial pressure root is not wired as a breakdown property");
+		require(runtime.query("atmosphere-partial-pressure").series.size() == 8,
+			"the all-gases view is not four gases across two compartments");
+		require(labelsDistinct(runtime.query("atmosphere-partial-pressure")),
+			"the all-gases view repeats a series label, so the legend cannot name the lines");
+		for (size_t gas = 0; gas < core::StationPathwayGasIds.size(); ++gas)
+		{
+			auto const variant = std::string("atmosphere-partial-pressure/")
+				+ core::StationPathwayGasIds[gas];
+			require(findChart(variant) != nullptr, "a partial pressure gas variant is missing");
+			require(findChart(variant)->propertyId == "atmosphere-partial-pressure",
+				"a partial pressure variant does not point at the root property");
+			require(runtime.query(variant).series.size() == 2,
+				"a gas-isolated partial pressure view is not one line per compartment");
+		}
+
+		// Pathway crossing must be unsigned throughput, not a signed net.
+		auto const& pathway = snap.atmospherePathways[0];
+		double signedNet = 0.0, crossing = 0.0;
+		for (auto const rate : pathway.flowRateKgPerS)
+		{
+			signedNet += rate;
+			crossing += std::abs(rate);
+		}
+		require(crossing > std::abs(signedNet) + 1e-9,
+			"the scenario has no opposing species flow, so it cannot prove the unsigned reading");
+		auto const* total = findChart("pathway-crossing");
+		require(total != nullptr, "the gas crossing chart is missing");
+		require(total->group == "Pathways" && total->breakdown == "Total crossing",
+			"the gas crossing root label changed");
+		require(close(lastOf(runtime.query("pathway-crossing"), "opening"), crossing),
+			"the gas crossing chart is not unsigned throughput");
+		for (size_t gas = 0; gas < core::StationPathwayGasIds.size(); ++gas)
+		{
+			auto const variant = std::string("pathway-crossing/") + core::StationPathwayGasIds[gas];
+			require(findChart(variant) != nullptr, "a gas crossing species variant is missing");
+			require(close(lastOf(runtime.query(variant), "opening"),
+				std::abs(pathway.flowRateKgPerS[gas])),
+				"a gas crossing species variant is not the unsigned per-species rate");
+		}
+	}
+
 }
 
 void registerStationTrendChecks(std::vector<smoke::Check>& checks)
 {
-	checks.insert(checks.end(), { { "reportingSystemsTime", reportingSystemsTime }, { "trends", trends }, { "endurance", endurance } });
+	checks.insert(checks.end(), { { "reportingSystemsTime", reportingSystemsTime }, { "trends", trends },
+		{ "endurance", endurance }, { "atmosphereStateCharts", atmosphereStateCharts } });
 }

@@ -1193,15 +1193,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				state.aIndex = atmosphereIndex.at(pathway.aAtmosphereId);
 			if (pathway.bAtmosphereId != StationExteriorAtmosphereId)
 				state.bIndex = atmosphereIndex.at(pathway.bAtmosphereId);
-			state.openFraction = pathway.initialOpenFraction;
 			mImpl->atmospherePathways.push_back(std::move(state));
-		}
-		for (auto const& command : settings.pathwayCommands)
-		{
-			auto const it = std::find_if(mImpl->atmospherePathways.begin(), mImpl->atmospherePathways.end(),
-				[&](auto const& pathway) { return pathway.authored.id == command.pathwayId; });
-			mImpl->pathwayCommands.push_back({command,
-				static_cast<size_t>(it - mImpl->atmospherePathways.begin()), false});
 		}
 		// Airlock cycle schedules start unfired: the authored first
 		// occurrence is the next cycle, and nothing is drawn before its

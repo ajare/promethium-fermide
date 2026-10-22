@@ -102,3 +102,64 @@ a missing contribution produces an incomplete sum and stack gaps, not zero.
 qualified/unqualified/reserved mixtures, aggregate/stack equivalence,
 missing contributors, aligned coarsening, persisted identities and real controls.
 Viewing and changing breakdowns do not mutate the Configuration draft or World.
+
+## Atmosphere state and pathway throughput
+
+Compartment state and pathway crossing ride the same observation seam as the
+metered exchanges, so they share the recorder, the cadence and the chart
+catalogue. They are read rather than metered: `perTick` and `cumulativeRate`
+are both off, and the read callback hands back the snapshot field directly.
+A compartment or pathway absent from the snapshot is a gap, never a zero.
+
+Group `Atmosphere`, one chart per metric with one line per compartment so
+compartments are directly comparable. There are no subtotals: summing
+temperatures, humidity or pressures yields no meaningful quantity.
+
+| Chart | Unit | Source |
+| --- | --- | --- |
+| `atmosphere-temperature` | °C | `temperatureC` |
+| `atmosphere-humidity` | % | `relativeHumidity`, scaled ×100 at the observation |
+| `atmosphere-pressure` | kPa | `pressureKPa` (absolute total) |
+| `atmosphere-partial-pressure` | kPa | per-gas partial pressures |
+
+Relative humidity is stored 0..1 and the ×100 scaling lives on the
+observation rather than in the chart layer, so a reader tracing the number
+finds the scale where the metric is declared.
+
+Partial pressures use the `Breakdown` control on the **gas** axis. The root
+shows every gas across every compartment; the variants
+`atmosphere-partial-pressure/<gas>` isolate one. Without that selector a
+four-compartment station would plot sixteen lines at once. In the all-gases
+view the series label carries both subject and gas (`a / Oxygen`) because the
+compartment alone would repeat once per gas and leave the legend unable to
+name a line.
+
+No atmosphere state chart carries an aggregate line, and this is deliberate
+rather than unfinished. Summing temperatures, humidity or pressures yields
+nothing meaningful, and averaging is worse than absent: the mean of two
+compartments at 0 °C and 40 °C reads as a comfortable 20 °C while both are
+wrong, and averaging relative humidity is a classic error because RH is
+temperature-dependent, so the mean of two RH values corresponds to no real
+physical state. `appendStationChartBreakdowns` only generates Aggregate and
+Equipment-type variants for charts with stacked series, so these charts are
+skipped rather than given a misleading total.
+
+Group `Pathways` charts gas crossing as **unsigned throughput** — the sum of
+each species' own movement, so opposing flows add rather than cancel. This
+matches the hatch node readout. A signed net would let oxygen leaving and
+carbon dioxide arriving cancel into a figure smaller than the gas actually
+crossing, and an explicitly undirected opening has no usable net direction
+anyway. The root `pathway-crossing` is the total; `pathway-crossing/<gas>`
+isolates one species for diagnosing which gas is actually moving.
+
+Two new canonical units (`Celsius`, `Kilopascal`), one physical quantity
+(`Pressure`) and two metric roles (`Condition` for compartment state,
+`Throughput` for crossing) were added. Roles matter because the
+descriptor-driven chart adapters select on `equipmentType`
+(`"Atmosphere compartment"`, `"Atmosphere pathway"`) and never pool these
+into store or equipment subtotals.
+
+`station-atmosphereStateCharts` covers catalogue presence, one-line-per-
+compartment shape, agreement with the snapshot for all three state metrics,
+percent scaling, the partial-pressure breakdown wiring, and that crossing is
+unsigned with per-species variants matching `|flowRateKgPerS|`.

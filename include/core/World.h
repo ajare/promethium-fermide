@@ -1,6 +1,7 @@
 #pragma once
 #include "core/StationSystems.h"
 #include "core/StationHistory.h"
+#include "core/StationSystemsRuntime.h"
 #include "core/ActionRegistry.h"
 
 #include <string>
@@ -3517,6 +3518,38 @@ namespace core
 		// Paused-only. After ticking, confirmation resets the complete World.
 		bool configureStationSystems(StationSystemsSettings settings, bool confirmWorldReset = false,
 			std::string* diagnostic = nullptr);
+		// Apply changed Station settings to the running scenario without a
+		// World reset. Unlike configureStationSystems this works while the
+		// simulation is running or paused, and requires no reset confirmation,
+		// because topology is frozen: the entity id sets, each atmosphere
+		// pathway's endpoints and the connection map keys must match what is
+		// already running. Parameters take effect from the next step; live
+		// accumulated state is preserved and initial-condition fields are
+		// ignored. On success the World's stored settings are replaced with
+		// the values the runtime is actually executing.
+		bool updateStationSystemsSettings(StationSystemsSettings const& offered,
+			std::string* diagnostic = nullptr);
+		// Change one Station node's parameters on the running scenario without
+		// the caller holding the configuration. See
+		// StationSystemsRuntime::updateNode for the contract: one collection
+		// scanned, one field written, preserved initial-condition fields refused
+		// whole. On success the World's stored settings follow the runtime.
+		template <class Settings, class Mutator>
+		bool updateStationSystemsNode(std::string_view nodeId, Mutator&& mutate,
+			std::string* diagnostic = nullptr)
+		{
+			if (!mStationSystemsRuntime)
+			{
+				if (diagnostic) *diagnostic = "Station systems are not running";
+				return false;
+			}
+			if (!mStationSystemsRuntime->updateNode<Settings>(nodeId,
+				std::forward<Mutator>(mutate), diagnostic)) return false;
+			mStationSystemsSettings = mStationSystemsRuntime->effectiveSettings();
+			markModified();
+			if (diagnostic) diagnostic->clear();
+			return true;
+		}
 		StationSystemsSnapshot getStationSystemsSnapshot() const;
 		std::vector<StationSystemsEvent> getStationSystemsEvents() const;
 		std::vector<StationTrendSeries> getStationSystemsTrends() const;

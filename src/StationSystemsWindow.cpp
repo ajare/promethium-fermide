@@ -10,6 +10,7 @@
 #include "imgui/imgui_internal.h"
 #include "implot.h"
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstring>
 #include <optional>
@@ -415,6 +416,13 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 	renderDraftHistory();
 	bool const paused = world->isSimulationPaused();
 	auto const& applied = world->getStationSystemsSettings();
+	// The settings as of the last moment the draft matched the running
+	// scenario. A live edit moves `applied` but not the draft, so the draft
+	// still equals this baseline and is not pending; only a real draft edit
+	// pulls it away. That is what separates "the user has unapplied work"
+	// from "the operator moved the running scenario".
+	if (mDraft == applied) mAppliedBaseline = applied;
+	bool const draftPending = mDraft != mAppliedBaseline;
 	double const now = ImGui::GetTime();
 	// Poll the authoritative snapshot at 4 Hz. Reset, configuration changes,
 	// and pausing bypass the throttle so old-run values cannot linger.
@@ -427,8 +435,8 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 		mFlowRefreshTime = now;
 		mFlowWasPaused = paused;
 	}
-	mFlow.render(mDraft, [this](core::StationSystemsSettings& draft) {
-		renderFlowInspectorContents(draft);
+	mFlow.render(mDraft, [this, world](core::StationSystemsSettings& draft) {
+		renderFlowInspectorContents(draft, *world);
 	}, [this] { commitDraftChanges(true); }, [this] {
 		commitDraftChanges(true);
 		mPendingDraftEdit = captureDraft();
@@ -437,7 +445,7 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 		commitDraftChanges(true);
 		mPendingDraftEdit = captureDraft();
 		mPendingLayoutEdit = true;
-	}, &*mFlowSnapshot, mDraft == applied, paused, [&] {
+	}, &*mFlowSnapshot, draftPending, paused, [&] {
 		float const height = std::max(180.0f, ImGui::GetCursorScreenPos().y - headerOrigin.y);
 		host->WorkRect.Max.x = workRight;
 		host->ContentRegionRect.Max.x = contentRight;
@@ -458,7 +466,8 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 	commitDraftChanges();
 }
 
-void StationSystemsWindow::renderFlowInspectorContents(core::StationSystemsSettings& draft)
+void StationSystemsWindow::renderFlowInspectorContents(
+	core::StationSystemsSettings& draft, core::World& world)
 {
 	auto const selected = mFlow.selectedNode();
 	if (!selected)
@@ -489,6 +498,102 @@ void StationSystemsWindow::renderFlowInspectorContents(core::StationSystemsSetti
 	editor->renderEntry(draft, size_t(selected->index));
 	ImGui::Separator();
 	ImGui::TextDisabled("Edits change the Configuration draft only. Nothing is applied to the World from here.");
+	// Live controls sit below the draft fields and are labelled, because they
+	// do the opposite of everything above them.
+	if (selected->type == "Atmosphere pathway")
+		renderLiveHatchControls(world, selected->id);
+}
+
+void StationSystemsWindow::renderLiveHatchControls(core::World& world, std::string const& pathwayId)
+{
+	ImGui::SeparatorText("Live control");
+	if (!mFlowSnapshot)
+	{
+		ImGui::TextDisabled("This opening is not in the running scenario.");
+		ImGui::TextDisabled("Start Station systems, or Apply the draft, to drive it live.");
+		return;
+	}
+	auto const& pathways = mFlowSnapshot->atmospherePathways;
+	auto const found = std::find_if(pathways.begin(), pathways.end(),
+		[&](core::StationAtmospherePathwaySnapshot const& entry) { return entry.id == pathwayId; });
+	if (found == pathways.end())
+	{
+		ImGui::TextDisabled("This opening is not in the running scenario.");
+		ImGui::TextDisabled("Start Station systems, or Apply the draft, to drive it live.");
+		return;
+	}
+	auto const& hatch = *found;
+	ImGui::PushID(("live-" + pathwayId).c_str());
+	// Re-seed the buffer only when a different node is selected; while the
+	// item is active ImGui owns the value and the 4 Hz poll must not touch it.
+	if (mLiveOpenFor != pathwayId)
+	{
+		mLiveOpenFor = pathwayId;
+		mLiveOpenPercent = static_cast<float>(hatch.openFraction) * 100.0f;
+	}
+	ImGui::SetNextItemWidth(180);
+	ImGui::SliderFloat("Open now", &mLiveOpenPercent, 0.0f, 100.0f, "%.0f%%");
+	bool const openActive = ImGui::IsItemActive();
+	if (ImGui::IsItemDeactivatedAfterEdit())
+		setHatchOpenNow(world, pathwayId, static_cast<double>(mLiveOpenPercent) / 100.0);
+	if (!openActive)
+		mLiveOpenPercent = static_cast<float>(hatch.openFraction) * 100.0f;
+	ImGui::SameLine();
+	ImGui::Text("live %.0f%%", hatch.openFraction * 100.0);
+
+	if (mLiveAreaFor != pathwayId)
+	{
+		mLiveAreaFor = pathwayId;
+		mLiveAreaM2 = static_cast<float>(hatch.areaM2);
+	}
+	ImGui::SetNextItemWidth(180);
+	// A negative opening would invert the diffusion law: conductance goes
+	// negative, -expm1() flips sign, and the compartment gains mass it never
+	// had while the loss ledger runs negative. ImGui only clamps when
+	// v_min < v_max, so the old (0, 0) range left this drag completely
+	// unbounded. Zero itself is safe - zero conductance moves nothing.
+	ImGui::DragFloat("Area m2", &mLiveAreaM2, 0.05f, 0.0f, FLT_MAX, "%.3f");
+	bool const areaActive = ImGui::IsItemActive();
+	if (ImGui::IsItemDeactivatedAfterEdit())
+		setHatchArea(world, pathwayId, static_cast<double>(mLiveAreaM2));
+	if (!areaActive)
+		mLiveAreaM2 = static_cast<float>(hatch.areaM2);
+	ImGui::SameLine();
+	ImGui::TextWrapped("Live edits change the running scenario only - the draft above does not carry them, "
+		"so applying the draft will overwrite them.");
+	if (!mDiagnostic.empty()) ImGui::TextWrapped("%s", mDiagnostic.c_str());
+	ImGui::PopID();
+}
+
+void StationSystemsWindow::setHatchOpenNow(
+	core::World& world, std::string const& pathwayId, double openFraction)
+{
+	// Openness is a plain settings parameter now, so the same fast targeted
+	// path that drives area drives it - one collection scanned, one field
+	// written, no command queue and no whole-document round trip.
+	std::string diagnostic;
+	if (world.updateStationSystemsNode<core::AtmospherePathwaySettings>(pathwayId,
+		[openFraction](core::AtmospherePathwaySettings& hatch) {
+			hatch.openFraction = std::clamp(openFraction, 0.0, 1.0);
+		},
+		&diagnostic)) mDiagnostic.clear();
+	else mDiagnostic = diagnostic;
+}
+
+void StationSystemsWindow::setHatchArea(
+	core::World& world, std::string const& pathwayId, double areaM2)
+{
+	// Clamped here as well as in the widget: the live path runs no
+	// validation pass, so a negative area would reach the tick and break
+	// conservation rather than being refused the way a draft Apply refuses
+	// it. Nothing below zero is a meaningful opening.
+	std::string diagnostic;
+	if (world.updateStationSystemsNode<core::AtmospherePathwaySettings>(pathwayId,
+		[areaM2](core::AtmospherePathwaySettings& hatch) {
+			hatch.areaM2 = std::max(0.0, areaM2);
+		},
+		&diagnostic)) mDiagnostic.clear();
+	else mDiagnostic = diagnostic;
 }
 
 void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& world, DocumentHistory& history)

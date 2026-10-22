@@ -1112,8 +1112,8 @@ bool renderAtmospherePathwayEntry([[maybe_unused]] core::StationSystemsSettings&
 		pathway.bAtmosphereId = endBBuffer;
 	ImGui::InputDouble(describe("area m2", label).c_str(),
 		&pathway.areaM2, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("initial open fraction", label).c_str(),
-		&pathway.initialOpenFraction, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble(describe("open fraction", label).c_str(),
+		&pathway.openFraction, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removePathway = true;
@@ -2830,7 +2830,7 @@ constexpr std::array<EntryCreator, 30> kEntryCreators{{
 			// lands on.
 			core::AtmospherePathwaySettings pathway;
 			pathway.areaM2 = 1.0;
-			pathway.initialOpenFraction = 1.0;
+			pathway.openFraction = 1.0;
 			for (size_t candidate = draft.atmospherePathways.size() + 1;; ++candidate)
 			{
 				pathway.id = "hatch" + std::to_string(candidate);

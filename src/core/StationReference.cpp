@@ -416,22 +416,7 @@ namespace core
 				serializer.writeString("aAtmosphereId", pathway.aAtmosphereId);
 				serializer.writeString("bAtmosphereId", pathway.bAtmosphereId);
 				serializer.writeDouble("areaM2", pathway.areaM2);
-				serializer.writeDouble("initialOpenFraction", pathway.initialOpenFraction);
-				serializer.endMap();
-			}
-			serializer.endArray();
-		}
-		if (!settings.pathwayCommands.empty())
-		{
-			serializer.beginArray("pathwayCommands");
-			for (auto const& command : settings.pathwayCommands)
-			{
-				serializer.beginMap("");
-				serializer.writeString("id", command.id);
-				serializer.writeString("pathwayId", command.pathwayId);
-				serializer.writeDouble("openFraction", command.openFraction);
-				serializer.writeDouble("occurrenceSeconds", command.occurrenceSeconds);
-				serializer.writeInt32("priority", command.priority);
+				serializer.writeDouble("openFraction", pathway.openFraction);
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -1501,30 +1486,27 @@ namespace core
 			}
 			serializer.endArray();
 		}
-		for (auto const* array : {"atmospherePathways", "pathwayCommands"})
+		if (serializer.hasField("atmospherePathways"))
 		{
-			if (!serializer.hasField(array)) continue;
-			if (version < 105) throw SerializationException(std::string(array) + " requires World schema 105; conversion required");
-			serializer.beginArray(array);
+			if (version < 105) throw SerializationException("atmospherePathways requires World schema 105; conversion required");
+			serializer.beginArray("atmospherePathways");
 			while (serializer.nextArrayItem())
 			{
 				serializer.beginMap("");
 				auto const id = serializer.readString("id");
-				bool const pathway = std::string_view(array) == "atmospherePathways";
-				std::vector<std::string> const fields = pathway
-					? std::vector<std::string>{"id", "aAtmosphereId", "bAtmosphereId", "areaM2", "initialOpenFraction"}
-					: std::vector<std::string>{"id", "pathwayId", "openFraction", "occurrenceSeconds", "priority"};
+				std::vector<std::string> fields{"id", "aAtmosphereId", "bAtmosphereId", "areaM2"};
+				// Openness became a live parameter at schema 106; an older
+				// document carried only the starting value, which is now the
+				// same field.
+				bool const hasOpen = version >= 106;
+				if (hasOpen) fields.push_back("openFraction");
 				for (auto const& field : serializer.mapKeys(""))
 					if (std::find(fields.begin(), fields.end(), field) == fields.end())
 						throw SerializationException("Station entry '" + id + "' field '" + field + "' is unknown; conversion required");
-				if (pathway)
-					stationSettings.atmospherePathways.push_back({id,
-						serializer.readString("aAtmosphereId"), serializer.readString("bAtmosphereId"),
-						serializer.readDouble("areaM2"), serializer.readDouble("initialOpenFraction")});
-				else
-					stationSettings.pathwayCommands.push_back({id, serializer.readString("pathwayId"),
-						serializer.readDouble("openFraction"), serializer.readDouble("occurrenceSeconds"),
-						serializer.readInt32("priority")});
+				stationSettings.atmospherePathways.push_back({id,
+					serializer.readString("aAtmosphereId"), serializer.readString("bAtmosphereId"),
+					serializer.readDouble("areaM2"),
+					hasOpen ? serializer.readDouble("openFraction") : 1.0});
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -2227,8 +2209,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 105)
-				return refuse("Reference station schema version must be from 65 to 105");
+			if (document.schemaVersion < 65 || document.schemaVersion > 106)
+				return refuse("Reference station schema version must be from 65 to 106");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

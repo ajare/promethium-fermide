@@ -26,6 +26,24 @@ namespace core
 		}
 		catch (std::exception const& error) { return refuse(error.what()); }
 	}
+	bool World::updateStationSystemsSettings(
+		StationSystemsSettings const& offered, std::string* diagnostic)
+	{
+		std::string message;
+		auto refuse = [&](std::string text) { if (diagnostic) *diagnostic = std::move(text); return false; };
+		// There is nothing to update live until a runtime exists; starting one
+		// is inherently a configure, and configure is the reset path.
+		if (!mStationSystemsRuntime) return refuse("Station systems are not running");
+		if (!validateStationSystemsSettings(offered, message)) return refuse(message);
+		if (!mStationSystemsRuntime->updateSettings(offered, &message)) return refuse(message);
+		// Store what the runtime is actually running, not what was sent: the
+		// runtime kept the initial-condition fields as the run began, and a
+		// saved document has to agree with the live scenario.
+		mStationSystemsSettings = mStationSystemsRuntime->effectiveSettings();
+		markModified();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
 	StationSystemsSnapshot World::getStationSystemsSnapshot() const
 	{
 		if (mStationSystemsRuntime) return mStationSystemsRuntime->snapshot();

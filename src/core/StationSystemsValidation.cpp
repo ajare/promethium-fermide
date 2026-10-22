@@ -1631,9 +1631,9 @@ using namespace station_detail;
 				return refuse(where + " id is duplicated");
 			if (!std::isfinite(pathway.areaM2) || pathway.areaM2 <= 0.0)
 				return refuse(where + " areaM2 must be finite and positive");
-			if (!std::isfinite(pathway.initialOpenFraction)
-				|| pathway.initialOpenFraction < 0.0 || pathway.initialOpenFraction > 1.0)
-				return refuse(where + " initialOpenFraction must be finite and within [0, 1]");
+			if (!std::isfinite(pathway.openFraction)
+				|| pathway.openFraction < 0.0 || pathway.openFraction > 1.0)
+				return refuse(where + " openFraction must be finite and within [0, 1]");
 			// A hatch with both ends unwired is an opening being built, not a
 			// self-loop: the distinctness rule is about two named compartments,
 			// and two empty strings name nothing. Each empty end is refused on
@@ -1650,28 +1650,6 @@ using namespace station_detail;
 					throw BrokenDraftEntry{};
 				}
 		} catch (BrokenDraftEntry const&) {}
-		if (settings.pathwayCommands.size() > MaxStationPathwayCommands)
-			return refuse("Station pathway commands are limited to "
-				+ std::to_string(MaxStationPathwayCommands) + " entries");
-		std::set<std::string> commandIds;
-		for (auto const& command : settings.pathwayCommands)
-		{
-			auto const where = "Station pathway command '" + command.id + "'";
-			if (command.id.empty() || command.id.size() > MaxStationStoreIdLength)
-				return refuse(where + " id must be non-empty and at most "
-					+ std::to_string(MaxStationStoreIdLength) + " characters");
-			if (!commandIds.insert(command.id).second) return refuse(where + " id is duplicated");
-			if (!std::isfinite(command.openFraction) || command.openFraction < 0 || command.openFraction > 1)
-				return refuse(where + " openFraction must be finite and within [0, 1]");
-			if (!std::isfinite(command.occurrenceSeconds) || command.occurrenceSeconds < 0)
-				return refuse(where + " occurrenceSeconds must be finite and non-negative");
-			if (!pathwayIds.contains(command.pathwayId))
-			{
-				auto text = where + " references unknown pathway '" + command.pathwayId + "'";
-				if (!brokenReferences) return refuse(std::move(text));
-				brokenReferences->push_back(std::move(text));
-			}
-		}
 		// Scheduled airlock cycle contracts (#400): each cycle draws from
 		// one declared compartment on the shared scenario schedule rule
 		// and splits its removal into recovered and lost by the authored

@@ -263,6 +263,7 @@ set(editor_names
     roomHeightScale/history
     roomHeightScale/occupiedPoseHistory
     station/pathwayDisplayWorkflow
+    station/hatchInspectorWorkflow
     station/connectionDesign
     station/connectionForecastWorkflow
     station/flowConnectionTelemetryWorkflow

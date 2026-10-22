@@ -181,7 +181,7 @@ Graph build(core::StationSystemsSettings const& s)
 	{
 		char detail[96];
 		std::snprintf(detail, sizeof(detail), "area %.3f m2 - open %.0f%%",
-			pathway.areaM2, pathway.initialOpenFraction * 100.0);
+			pathway.areaM2, pathway.openFraction * 100.0);
 		b.owner = b.node("Atmosphere pathway", pathway.id, 2, detail);
 		b.input(b.owner, pathway.aAtmosphereId, "End A", "Atmosphere", LinkKind::Material,
 			true, Medium::Unspecified, "aAtmosphereId");

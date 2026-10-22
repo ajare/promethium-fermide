@@ -42,17 +42,13 @@ void pathwayPersistence(smoke::Context const&)
 	settings.atmospherePathways.push_back({"parallel", "b", "a", 0.125, 0});
 	settings.atmospherePathways.push_back({"to-space", "b", core::StationExteriorAtmosphereId, 0.25, 0.3});
 	settings.atmospherePathways.push_back({"from-space", core::StationExteriorAtmosphereId, "a", 0.1, 0.5});
-	// Non-chronological declarations and same-time ties must retain their order.
-	settings.pathwayCommands = {{"close", "opening", 0, 1.337, -2},
-		{"open", "opening", 0.8, 0.137, 3}, {"tie", "opening", 0.4, 0.137, 3},
-		{"pending", "parallel", 1, 10, 0}};
 	core::StationConfigurationDocument document; document.settings = settings;
 	auto const yaml = core::serializeStationConfiguration(document);
 	core::StationConfigurationDocument loaded;
 	std::string diagnostic;
 	require(core::parseStationConfiguration(yaml, loaded, &diagnostic), diagnostic.c_str());
 	require(loaded.settings == settings, "pathway Station configuration changed on round trip");
-	for (auto const& [field, id] : {std::pair{"areaM2", "opening"}, std::pair{"priority", "close"}})
+	for (auto const& [field, id] : {std::pair{"areaM2", "opening"}, std::pair{"openFraction", "opening"}})
 	{
 		auto bad = yaml;
 		auto const at = bad.find(std::string(field) + ":");
@@ -64,11 +60,12 @@ void pathwayPersistence(smoke::Context const&)
 			&& diagnostic.find("conversion required") != std::string::npos
 			&& loaded.settings == settings, "unknown pathway field was ignored or mutated document");
 	}
-	for (int version : {104, 106})
+	for (int version : {105, 107})
 	{
 		auto bad = yaml;
-		bad.replace(bad.find("schemaVersion: 105"), std::string("schemaVersion: 105").size(),
-			"schemaVersion: " + std::to_string(version));
+		auto const at = bad.find("schemaVersion: ");
+		require(at != std::string::npos, "serialized pathway config carries no schema version");
+		bad.replace(at, bad.find('\n', at) - at, "schemaVersion: " + std::to_string(version));
 		require(!core::parseStationConfiguration(bad, loaded, &diagnostic)
 			&& loaded.settings == settings, "unsupported pathway schema was accepted");
 	}
@@ -85,9 +82,11 @@ void pathwayPersistence(smoke::Context const&)
 			: static_cast<core::YamlSerializer&>(*writer).getSerializedString();
 		if (!binary)
 		{
-			for (auto const* field : {"areaM2", "priority"})
+			for (auto const* field : {"areaM2", "openFraction"})
 			{
-				auto bad = text; bad.insert(bad.find(std::string(field) + ":"), "unknown_");
+				auto const at = text.find(std::string(field) + ":");
+				require(at != std::string::npos, "missing pathway field in serialized text");
+				auto bad = text; bad.insert(at, "unknown_");
 				auto invalid = core::YamlSerializer::fromString(bad); invalid->deserialize();
 				auto const baseline = original.getStationSystemsSnapshot();
 				bool refused = false;
@@ -97,7 +96,7 @@ void pathwayPersistence(smoke::Context const&)
 					auto const message = std::string(error.what());
 					refused = message.find("conversion required") != std::string::npos
 						&& message.find(std::string("unknown_") + field) != std::string::npos
-						&& message.find(std::string(field) == "areaM2" ? "opening" : "close") != std::string::npos;
+						&& message.find("opening") != std::string::npos;
 				}
 				require(refused && original.getStationSystemsSnapshot() == baseline
 					&& original.getStationSystemsSettings() == settings,
@@ -357,77 +356,13 @@ void pathwayExteriorDiffusion(smoke::Context const&)
 	}
 }
 
-void pathwayExteriorCommands(smoke::Context const&)
-{
-	auto s = pathwaySettings();
-	s.atmospherePathways = {{"space", "a", core::StationExteriorAtmosphereId, 1, 0}};
-	s.pathwayCommands = {{"close", "space", 0, 1.337, 0}, {"open", "space", 0.5, 0.137, 0}};
-	core::World world("ExteriorCommands", 2, 2);
-	world.pauseSimulation(); world.finishBuild();
-	std::string diagnostic;
-	require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
-	auto const initial = world.getStationSystemsSnapshot();
-	world.resumeSimulation();
-	require(advanceToLastStepBefore(world, 0.137), "exterior pre-command advance failed");
-	require(world.getStationSystemsSnapshot().atmospheres[0] == initial.atmospheres[0],
-		"closed exterior opening leaked before its command");
-	require(advanceSeconds(world, 3), "exterior command advance failed");
-	auto const final = world.getStationSystemsSnapshot();
-	require(final.healthy && final.atmospherePathways[0].lastCommandId == "close"
-		&& final.atmospherePathways[0].lastCommandSeconds == 1.337
-		&& final.atmospherePathways[0].openFraction == 0, "exterior close command/provenance failed");
-	for (size_t gas = 0; gas < 4; ++gas)
-	{
-		auto const start = masses(initial.atmospheres[0])[gas];
-		auto const expected = start * std::exp(-core::StationPathwayDiffusionCoefficients[gas] * 273.15 / 100 * 0.5 * 1.2);
-		close(masses(final.atmospheres[0])[gas], expected, "exterior command exposure depends on cadence");
-		close(final.atmospheres[0].exteriorLostKg[gas], start - expected, "exterior command loss ledger failed");
-	}
-	world.pauseSimulation(); world.resetSimulation();
-	require(world.getStationSystemsSnapshot() == initial, "reset inherited exterior losses or commands");
-	world.resumeSimulation();
-	require(advanceToLastStepBefore(world, 0.137) && advanceSeconds(world, 3), "exterior reset replay failed");
-	require(world.getStationSystemsSnapshot() == final, "exterior commands failed deterministic reset replay");
-
-	// Internal exchange, exterior loss, constant leakage and airlock cycles coexist.
-	world.pauseSimulation();
-	s.pathwayCommands.clear();
-	s.atmospherePathways = {{"internal", "a", "b", 1, 1}, {"space", "b", core::StationExteriorAtmosphereId, 1, 0.5}};
-	s.atmospheres[0].leakRateKgPerS = 0.1;
-	core::AirlockCycleSettings cycle;
-	cycle.id = "cycle"; cycle.atmosphereId = "a"; cycle.gasMassKg = 1;
-	cycle.firstOccurrenceSeconds = 0.5; cycle.recoveredFraction = 0.25;
-	s.airlockCycles = {cycle};
-	require(world.configureStationSystems(s, true, &diagnostic), diagnostic.c_str());
-	world.resumeSimulation();
-	require(advanceSeconds(world, 10), "mixed internal/exterior advance failed");
-	auto const mixed = world.getStationSystemsSnapshot();
-	require(mixed.healthy && mixed.atmospheres[0].leakedKg > 0, "mixed exterior/leak accounting failed");
-	double lostToSpace = 0;
-	for (size_t gas = 0; gas < 4; ++gas)
-	{
-		auto const lost = mixed.atmospheres[1].exteriorLostKg[gas];
-		close(lost, mixed.atmospherePathways[1].netTransferredKg[gas], "mixed exterior flux ledger failed");
-		lostToSpace += lost;
-	}
-	double before = 0, after = 0;
-	for (size_t i = 0; i < 2; ++i)
-		for (size_t gas = 0; gas < 4; ++gas)
-		{
-			before += masses(initial.atmospheres[i])[gas];
-			after += masses(mixed.atmospheres[i])[gas];
-		}
-	close(mixed.atmospheres[0].recoveredKg, 0.25, "mixed cycle recovery changed");
-	close(mixed.atmospheres[0].lostKg, 0.75, "exterior loss was mixed into airlock loss");
-	close(before, after + lostToSpace + mixed.atmospheres[0].leakedKg
-		+ mixed.atmospheres[0].recoveredKg + mixed.atmospheres[0].lostKg,
-		"mixed external losses counted incorrectly");
-}
-
 void pathwayReferenceConfigurations(smoke::Context const& context)
 {
-	for (auto const* file : {"atmosphere-vacuum-equalization.yaml",
-		"atmosphere-exterior-partial.yaml", "atmosphere-exterior-isolation.yaml"})
+	// The authored reference scenario that still runs from a document alone.
+	// The exterior isolation and partial-vent references were removed with
+	// the scheduled pathway command queue: their whole point was a schedule,
+	// and openness is now something a driver sets rather than a document.
+	for (auto const* file : {"atmosphere-vacuum-equalization.yaml"})
 	{
 		core::StationConfigurationDocument document, restored;
 		std::string diagnostic;
@@ -446,52 +381,13 @@ void pathwayReferenceConfigurations(smoke::Context const& context)
 		auto const initial = world.getStationSystemsSnapshot();
 		world.resumeSimulation();
 		require(advanceSeconds(world, 30), "pathway reference initial advance failed");
-		auto const before = world.getStationSystemsSnapshot();
-		bool const vacuum = std::string_view(file) == "atmosphere-vacuum-equalization.yaml";
-		bool const partial = std::string_view(file) == "atmosphere-exterior-partial.yaml";
-		if (!vacuum)
-			for (size_t i = 0; i < initial.atmospheres.size(); ++i)
-				for (size_t gas = 0; gas < 4; ++gas)
-					close(masses(before.atmospheres[i])[gas], masses(initial.atmospheres[i])[gas],
-						"reference exterior vented before its authored opening");
-		// Inspect the sealed chamber before the reconnect command at 240 s;
-		// World stepping can already publish an interval starting at a boundary.
-		require(advanceSeconds(world, 200), "pathway reference schedule advance failed");
-		auto const scheduled = world.getStationSystemsSnapshot();
-		require(scheduled.healthy, "pathway reference schedule failed its audit");
-		if (!vacuum)
-		{
-			size_t const donor = partial ? 0 : 1;
-			auto const& opening = scheduled.atmospherePathways[partial ? 0 : 1];
-			require(opening.openFraction == 0 && opening.lastCommandId == "seal-exterior",
-				"reference exterior opening did not seal on schedule");
-			for (size_t gas = 0; gas < 4; ++gas)
-			{
-				auto const start = masses(initial.atmospheres[donor])[gas];
-				auto const remaining = start * std::exp(-core::StationPathwayDiffusionCoefficients[gas]
-					* 293.15 / initial.atmospheres[donor].volumeM3 * (partial ? 0.25 : 0.5) * 120);
-				close(masses(scheduled.atmospheres[donor])[gas], remaining,
-					"reference partial opening did not produce the documented depletion");
-				close(scheduled.atmospheres[donor].exteriorLostKg[gas], start - remaining,
-					"reference exterior loss did not close");
-				if (!partial)
-					close(masses(scheduled.atmospheres[0])[gas], masses(initial.atmospheres[0])[gas],
-						"isolated habitat lost gas while its chamber vented");
-			}
-		}
+		require(advanceSeconds(world, 200), "pathway reference mid advance failed");
+		require(world.getStationSystemsSnapshot().healthy, "pathway reference mid-run audit failed");
 		require(advanceSeconds(world, 670), "pathway reference equilibrium advance failed");
 		auto const final = world.getStationSystemsSnapshot();
 		require(final.healthy, "pathway reference equilibrium failed its audit");
 		for (size_t gas = 0; gas < 4; ++gas)
 		{
-			if (partial)
-			{
-				close(masses(final.atmospheres[0])[gas], masses(scheduled.atmospheres[0])[gas],
-					"sealed reference continued losing gas");
-				close(final.atmospheres[0].exteriorLostKg[gas], scheduled.atmospheres[0].exteriorLostKg[gas],
-					"sealed reference continued accumulating loss");
-				continue;
-			}
 			double total = 0, remaining = 0, lost = 0, volume = 0;
 			for (size_t i = 0; i < 2; ++i)
 			{
@@ -514,7 +410,7 @@ void pathwayReferenceConfigurations(smoke::Context const& context)
 void pathwayClosed(smoke::Context const&)
 {
 	auto s = pathwaySettings();
-	s.atmospherePathways[0].initialOpenFraction = 0;
+	s.atmospherePathways[0].openFraction = 0;
 	// A large pressure gradient and large area must not bypass closure.
 	s.atmospherePathways[0].areaM2 = 1e12;
 	auto& b = s.atmospheres[1];
@@ -550,7 +446,7 @@ void pathwayOpenness(smoke::Context const&)
 	for (double openness : {0.25, 0.5, 1.0})
 	{
 		auto s = pathwaySettings();
-		s.atmospherePathways[0].initialOpenFraction = openness;
+		s.atmospherePathways[0].openFraction = openness;
 		// Snapshot flux is interval-averaged, not instantaneous. A small
 		// area keeps gradient relaxation negligible even at step ratio 60;
 		// doubling openness should double each gas's flux within 1e-5 relative.
@@ -933,167 +829,6 @@ void pathwayAbsurdGeometry(smoke::Context const&)
 	require(publications >= 1000, "absurd geometry did not run thousands of steps");
 }
 
-void pathwayCommands(smoke::Context const&)
-{
-	auto s = pathwaySettings();
-	s.atmospherePathways[0].initialOpenFraction = 0;
-	// Deliberately off-grid, reversed declaration time, and two events inside
-	// a coarse step: opening at an endpoint or tick count cannot pass this.
-	s.pathwayCommands = {{"close", "opening", 0, 1.337, 0},
-		{"open", "opening", 0.8, 0.137, 0}};
-	core::World world("CommandLanding", 2, 2);
-	world.pauseSimulation(); world.finishBuild();
-	std::string diagnostic;
-	require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
-	require(world.getStationSystemsSnapshot().atmospherePathways[0].lastCommandId.empty(),
-		"future command applied at configure time");
-	world.resumeSimulation();
-	require(advanceToLastStepBefore(world, 0.137), "pre-command advance failed");
-	auto before = world.getStationSystemsSnapshot();
-	require(before.atmospherePathways[0].openFraction == 0
-		&& before.atmospheres[0].oxygenKg == 30, "command landed before its stamp");
-	require(advanceStationSteps(world, 1), "landing step failed");
-	auto landed = world.getStationSystemsSnapshot();
-	require(landed.atmospherePathways[0].lastCommandId == "open"
-		&& landed.atmospherePathways[0].lastCommandSeconds == 0.137
-		&& landed.atmospherePathways[0].openFraction == 0.8, "open provenance or value wrong");
-	auto const exposure = (landed.elapsedSeconds - 0.137) * 0.8;
-	for (size_t gas = 0; gas < 4; ++gas)
-	{
-		auto const initialA = masses(before.atmospheres[0])[gas];
-		auto const initialB = masses(before.atmospheres[1])[gas];
-		auto const moved = (initialA - initialB) * 0.5 * (1 - std::exp(
-			-2 * core::StationPathwayDiffusionCoefficients[gas] * 273.15 / 100 * exposure));
-		close(masses(landed.atmospheres[0])[gas], initialA - moved, "gas responded at wrong command time");
-		close(landed.atmospherePathways[0].flowRateKgPerS[gas] * landed.systemsTimestepSeconds,
-			moved, "split command step did not publish whole-step flux");
-	}
-	require(advanceSeconds(world, 3), "post-close advance failed");
-	auto final = world.getStationSystemsSnapshot();
-	require(final.healthy && final.atmospherePathways[0].lastCommandId == "close"
-		&& final.atmospherePathways[0].lastCommandSeconds == 1.337
-		&& final.atmospherePathways[0].openFraction == 0, "close did not land once at authored time");
-	for (size_t gas = 0; gas < 4; ++gas)
-	{
-		auto const a = masses(before.atmospheres[0])[gas], b = masses(before.atmospheres[1])[gas];
-		auto const moved = (a - b) * 0.5 * (1 - std::exp(
-			-2 * core::StationPathwayDiffusionCoefficients[gas] * 273.15 / 100 * 0.8 * 1.2));
-		close(masses(final.atmospheres[0])[gas], a - moved, "command cadence changed integrated exchange");
-		close(final.atmospherePathways[0].netTransferredKg[gas], moved, "command flux ledger mismatch");
-	}
-}
-
-void pathwayCommandOrdering(smoke::Context const&)
-{
-	auto s = pathwaySettings();
-	s.pathwayCommands = {{"later", "opening", 0.1, 2, 100},
-		{"first", "opening", 0.2, 0, 10},
-		{"winner", "opening", 0.8, 0, -10},
-		{"middle", "opening", 0.4, 0, 10}};
-	core::World world("CommandOrder", 2, 2);
-	world.pauseSimulation(); world.finishBuild();
-	std::string diagnostic;
-	require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
-	world.resumeSimulation();
-	// Use a short run at the requested cadence; a zero-time command must
-	// affect the first positive interval, not its end.
-	require(advanceStationSteps(world, 1), "ordering step failed");
-	auto result = world.getStationSystemsSnapshot();
-	require(result.atmospherePathways[0].lastCommandId == "winner"
-		&& result.atmospherePathways[0].openFraction == 0.8, "priority did not sort descending");
-	close(result.atmospheres[0].oxygenKg, 20 + 10 * std::exp(
-		-2 * core::StationPathwayDiffusionCoefficients[0] * 273.15 / 100
-		* 0.8 * result.elapsedSeconds), "zero-time command missed the first interval");
-	require(advanceSeconds(world, 3), "later-command advance failed");
-	require(world.getStationSystemsSnapshot().atmospherePathways[0].lastCommandId == "later",
-		"priority overrode occurrence time");
-	// Same priority: declaration order, last-applied wins.
-	world.pauseSimulation();
-	s.pathwayCommands = {{"first", "opening", 0.2, 0, 10}, {"last", "opening", 0.7, 0, 10}};
-	require(world.configureStationSystems(s, true, &diagnostic), diagnostic.c_str());
-	world.resumeSimulation();
-	require(advanceStationSteps(world, 1), "tie step failed");
-	result = world.getStationSystemsSnapshot();
-	require(result.atmospherePathways[0].lastCommandId == "last"
-		&& result.atmospherePathways[0].lastCommandSeconds == 0
-		&& result.atmospherePathways[0].openFraction == 0.7, "declaration tie not last-applied");
-}
-
-void pathwayCommandReset(smoke::Context const&)
-{
-	auto s = pathwaySettings();
-	s.atmospherePathways[0].initialOpenFraction = 0.3;
-	s.pathwayCommands = {{"open", "opening", 0.8, 0.137, 0},
-		{"pending", "opening", 0, 5, 0}};
-	core::World world("CommandReset", 2, 2);
-	world.pauseSimulation(); world.finishBuild();
-	std::string diagnostic;
-	require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
-	auto initial = world.getStationSystemsSnapshot();
-	world.resumeSimulation();
-	require(advanceSeconds(world, 2), "reset fixture advance failed");
-	auto first = world.getStationSystemsSnapshot();
-	require(first.atmospherePathways[0].openFraction == 0.8, "reset fixture command did not fire");
-	world.pauseSimulation(); world.resetSimulation();
-	require(world.getStationSystemsSnapshot() == initial, "reset inherited openness, provenance or pending run state");
-	world.resumeSimulation();
-	require(advanceSeconds(world, 2), "reset replay advance failed");
-	require(world.getStationSystemsSnapshot() == first, "reset did not rebuild authored schedule deterministically");
-	require(advanceSeconds(world, 4), "pending command advance failed");
-	require(world.getStationSystemsSnapshot().atmospherePathways[0].lastCommandId == "pending",
-		"reset lost authored future command");
-}
-
-void pathwayCommandValidation(smoke::Context const&)
-{
-	auto s = pathwaySettings();
-	s.pathwayCommands = {{"bad-command", "opening", 0.8, 1, 0}};
-	core::World world("CommandRefusal", 2, 2);
-	world.pauseSimulation(); world.finishBuild();
-	std::string diagnostic;
-	require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
-	world.resumeSimulation();
-	require(advanceSeconds(world, 2), "refusal fixture advance failed");
-	world.pauseSimulation();
-	auto const initial = world.getStationSystemsSnapshot();
-	require(initial.atmospherePathways[0].openFraction == 0.8, "refusal fixture is not actuated");
-	auto refuse = [&](auto const& bad, char const* field)
-	{
-		require(!core::validateStationSystemsSettings(bad, diagnostic), "invalid command accepted");
-		require(diagnostic.find("bad-command") != std::string::npos
-			&& diagnostic.find(field) != std::string::npos, "command refusal lacks name/field");
-		require(!world.configureStationSystems(bad, false, &diagnostic), "invalid command configured");
-		require(world.getStationSystemsSnapshot() == initial, "invalid command changed pathway state");
-	};
-	for (auto v : {-0.1, 1.1, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
-	{
-		auto bad = s; bad.pathwayCommands[0].openFraction = v; refuse(bad, "openFraction");
-	}
-	for (auto v : {-1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
-	{
-		auto bad = s; bad.pathwayCommands[0].occurrenceSeconds = v; refuse(bad, "occurrenceSeconds");
-	}
-	{ auto bad = s; bad.pathwayCommands[0].pathwayId = "missing"; refuse(bad, "missing"); }
-	{ auto bad = s; bad.pathwayCommands.push_back(bad.pathwayCommands[0]); refuse(bad, "duplicated"); }
-	{ auto bad = s; bad.pathwayCommands[0].id.clear();
-		require(!core::validateStationSystemsSettings(bad, diagnostic), "empty command id accepted"); }
-	{ auto bad = s; bad.pathwayCommands[0].id.assign(core::MaxStationStoreIdLength + 1, 'x');
-		require(!core::validateStationSystemsSettings(bad, diagnostic), "oversized command id accepted"); }
-	{
-		auto many = s; many.pathwayCommands.clear();
-		for (size_t i = 0; i < core::MaxStationPathwayCommands; ++i)
-			many.pathwayCommands.push_back({"c" + std::to_string(i), "opening", 0, 0, 0});
-		require(core::validateStationSystemsSettings(many, diagnostic), "command ceiling refused");
-		many.pathwayCommands.push_back({"over-limit", "opening", 0, 0, 0});
-		require(!core::validateStationSystemsSettings(many, diagnostic), "command ceiling not enforced");
-	}
-	for (auto v : {0.0, 1.0})
-	{
-		auto valid = s; valid.pathwayCommands[0].openFraction = v;
-		require(core::validateStationSystemsSettings(valid, diagnostic), "boundary openness refused");
-	}
-}
-
 void pathwayValidation(smoke::Context const&)
 {
 	core::World world("PathwayRefusal", 2, 2);
@@ -1119,7 +854,7 @@ void pathwayValidation(smoke::Context const&)
 	}
 	for (double value : {-0.01, 1.01, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
 	{
-		auto bad = s; bad.atmospherePathways[0].initialOpenFraction = value; refuse(bad, "initialOpenFraction");
+		auto bad = s; bad.atmospherePathways[0].openFraction = value; refuse(bad, "openFraction");
 	}
 	for (bool first : {false, true})
 	{
@@ -1163,7 +898,6 @@ void registerStationPathwayChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"pathwayCounterFlow", pathwayCounterFlow});
 	checks.push_back({"pathwayVacuumEqualization", pathwayVacuumEqualization});
 	checks.push_back({"pathwayExteriorDiffusion", pathwayExteriorDiffusion});
-	checks.push_back({"pathwayExteriorCommands", pathwayExteriorCommands});
 	checks.push_back({"pathwayReferenceConfigurations", pathwayReferenceConfigurations});
 	checks.push_back({"pathwayClosed", pathwayClosed});
 	checks.push_back({"pathwayOpenness", pathwayOpenness});
@@ -1171,8 +905,4 @@ void registerStationPathwayChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"pathwayCondensation", pathwayCondensation});
 	checks.push_back({"pathwayParallelAdditivity", pathwayParallelAdditivity});
 	checks.push_back({"pathwayChainTopology", pathwayChainTopology});
-	checks.push_back({"pathwayCommands", pathwayCommands});
-	checks.push_back({"pathwayCommandOrdering", pathwayCommandOrdering});
-	checks.push_back({"pathwayCommandReset", pathwayCommandReset});
-	checks.push_back({"pathwayCommandValidation", pathwayCommandValidation});
 }

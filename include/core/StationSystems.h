@@ -860,26 +860,25 @@ namespace core
 		std::string aAtmosphereId;
 		std::string bAtmosphereId;
 		double areaM2{1.0};
-		double initialOpenFraction{1.0};
+		// How open the opening is. A plain parameter rather than accumulated
+		// state: nothing in the simulation writes it, so it can be changed
+		// live through updateNode with no mirror to keep in step, and what a
+		// run starts with is simply what the document says.
+		double openFraction{1.0};
 		bool operator==(AtmospherePathwaySettings const&) const = default;
 	};
-	// One-off authored commands. Ties use priority descending, then declaration
-	// order; the last applied command wins. No live/tick-indexed command queue.
-	struct PathwayCommandSettings
-	{
-		std::string id;
-		std::string pathwayId;
-		double openFraction{0.0};
-		double occurrenceSeconds{0.0};
-		int priority{0};
-		bool operator==(PathwayCommandSettings const&) const = default;
-	};
-	inline constexpr size_t MaxStationPathwayCommands{256};
 	inline constexpr size_t MaxStationPathways{64};
 	// Species order for pathway arrays: oxygen, nitrogen, carbon dioxide,
 	// water vapour (including vapour, unlike StationAtmosphereGases).
 	inline constexpr std::array<char const*, 4> StationPathwayGases{
 		"oxygen", "nitrogen", "carbonDioxide", "waterVapour"};
+	// Display labels for the same four gases, index-aligned with
+	// StationPathwayGases. The ids are kebab-case so they can appear in
+	// metric ids and chart variants without camelCase leaking into the wire.
+	inline constexpr std::array<char const*, 4> StationPathwayGasIds{
+		"oxygen", "nitrogen", "carbon-dioxide", "water-vapour"};
+	inline constexpr std::array<char const*, 4> StationPathwayGasLabels{
+		"Oxygen", "Nitrogen", "Carbon dioxide", "Water vapour"};
 	// Effective turbulent coefficients, not molecular diffusivities. At
 	// 293 K, 1 m2 between two 100 m3 volumes relaxes 95% in ~256 s.
 	inline constexpr std::array<double, 4> StationPathwayDiffusionCoefficients{
@@ -1802,7 +1801,6 @@ namespace core
 		std::vector<GeneratorSettings> generators;
 		std::vector<AtmosphereSettings> atmospheres;
 		std::vector<AtmospherePathwaySettings> atmospherePathways;
-		std::vector<PathwayCommandSettings> pathwayCommands;
 		std::vector<AirlockCycleSettings> airlockCycles;
 		std::vector<CrewSettings> crews;
 		std::vector<WaterCollectorSettings> waterCollectors;
@@ -3118,9 +3116,6 @@ namespace core
 		std::array<double, 4> flowRateKgPerS{};
 		std::array<double, 4> netTransferredKg{};
 		StationAtmospherePathwayStatus status{StationAtmospherePathwayStatus::Idle};
-		// Empty until a command succeeds (including a command stamped at zero).
-		std::string lastCommandId;
-		double lastCommandSeconds{0.0};
 		bool operator==(StationAtmospherePathwaySnapshot const&) const = default;
 	};
 

@@ -180,11 +180,11 @@ set_tests_properties(station-timestep-invariance-performance PROPERTIES
 add_test(NAME station-step-ratio-runner COMMAND pf-smoke-station --step-ratio 6 --check invariance)
 set_tests_properties(station-step-ratio-runner PROPERTIES LABELS "smoke;functional;validation-fast;station;station-timestep-invariance" TIMEOUT 120)
 
-foreach(check rateAwareProtection protectionReallocation protectionFreeze protectionGrossExcursion saturationCrossing eventSplit eventOrder eventRollback maintenanceSplit reportingSystemsTime scheduledTransfers recurringTransfers scheduledTransferDocuments scheduledPantry invariance invarianceLongRun invariancePerformance connectionTransfers connectionConversions connectionPower connectionThermal connectionProcesses connectionLifecycle connectionForecast connectionMaterialDiagnostics connectionBlockedZeroEfficiency connectionBatteryTelemetry clock defaultClockCadence clockIntegration lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain schedulesSeam biologySeam hatchSeam waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
+foreach(check rateAwareProtection protectionReallocation protectionFreeze protectionGrossExcursion saturationCrossing eventSplit eventOrder eventRollback maintenanceSplit reportingSystemsTime scheduledTransfers recurringTransfers scheduledTransferDocuments scheduledPantry invariance invarianceLongRun invariancePerformance connectionTransfers connectionConversions connectionPower connectionThermal connectionProcesses connectionLifecycle connectionForecast connectionMaterialDiagnostics connectionBlockedZeroEfficiency connectionBatteryTelemetry clock defaultClockCadence clockIntegration lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain schedulesSeam biologySeam hatchSeam liveSettingsSeam waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
         observationIntegration observationBounds scheduledExchangeObservations algaeExchangeObservations cropExchangeObservations microbialExchangeObservations carbonExchangeObservations waterGasExchangeObservations crewAtmosphereExchangeObservations thermalExchangeObservations electricalExchangeObservations exchangeObservations materialObservations fluidInventoryObservations compoundInventoryObservations livingInventoryObservations materialRelationshipObservations materialCanonicalUnits batteryObservations batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
-        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres pathwayPersistence pathwayDiffusion pathwayValidation pathwayCounterFlow pathwayVacuumEqualization pathwayExteriorDiffusion pathwayExteriorCommands pathwayReferenceConfigurations pathwayClosed pathwayOpenness pathwayThermalNeutrality pathwayCondensation pathwayParallelAdditivity pathwayChainTopology pathwayCommands pathwayCommandOrdering pathwayCommandReset pathwayCommandValidation crews water waterQualityGates waterQualityValidation waterQualityConsumers waterSelectiveIrrigation waterHydroponics waterContamination compoundWaterPartial compoundWaterPartialValidation compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
+        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres pathwayPersistence pathwayDiffusion pathwayValidation pathwayCounterFlow pathwayVacuumEqualization pathwayExteriorDiffusion pathwayReferenceConfigurations pathwayClosed pathwayOpenness pathwayThermalNeutrality pathwayCondensation pathwayParallelAdditivity pathwayChainTopology  crews water waterQualityGates waterQualityValidation waterQualityConsumers waterSelectiveIrrigation waterHydroponics waterContamination compoundWaterPartial compoundWaterPartialValidation compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance atmosphereStateCharts configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
         compoundFiles powerFiles powerChainFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles maintenanceFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
         # #571: harvest, algae and the nutrient-conservation closure were
         # reachable through the binary but never registered here, so they
@@ -250,13 +250,6 @@ foreach(ratio 1 7 60)
             LABELS "smoke;functional;core;station;station-timestep-invariance;validation-fast" TIMEOUT 30)
     endforeach()
 endforeach()
-# Command landing is cheap and must be cadence-independent in the fast lane.
-foreach(ratio 1 7 60)
-    add_test(NAME station-pathway-command-cadence-${ratio}
-        COMMAND pf-smoke-station --step-ratio ${ratio} --check pathwayCommands)
-    set_tests_properties(station-pathway-command-cadence-${ratio} PROPERTIES
-        LABELS "smoke;functional;core;station;station-timestep-invariance;validation-fast" TIMEOUT 30)
-endforeach()
 # Step-relative component assertions use the effective Station duration,
 # never a World-tick divisor. Sample both bounds and a non-divisor;
 # ordinary component registrations already cover the production default.
@@ -265,7 +258,7 @@ foreach(ratio 1 7 60)
     foreach(check connectionTransfers connectionConversions connectionPower connectionThermal
             connectionProcesses connectionLifecycle connectionForecast connectionMaterialDiagnostics
             connectionBlockedZeroEfficiency connectionBatteryTelemetry pathwayDiffusion
-            pathwayCounterFlow pathwayVacuumEqualization pathwayExteriorDiffusion pathwayExteriorCommands pathwayClosed pathwayOpenness
+            pathwayCounterFlow pathwayVacuumEqualization pathwayExteriorDiffusion pathwayClosed pathwayOpenness
             scheduledTransfers recurringTransfers scheduledPantry lifecycle eventBound)
         add_test(NAME station-timestep-components-${check}-${ratio}
             COMMAND pf-smoke-station --step-ratio ${ratio} --check ${check})
@@ -908,6 +901,9 @@ set_tests_properties(station-editor-flow-inspector PROPERTIES LABELS "smoke;func
 add_test(NAME station-editor-flow-water-gas COMMAND pf-smoke-editor --check station/flowWaterGasWorkflow)
 set_tests_properties(station-editor-flow-water-gas PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-pathway-display COMMAND pf-smoke-editor --check station/pathwayDisplayWorkflow)
+add_test(NAME station-editor-hatch-inspector COMMAND pf-smoke-editor --check station/hatchInspectorWorkflow)
+set_tests_properties(station-editor-hatch-inspector PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+
 set_tests_properties(station-editor-pathway-display PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-connection-design COMMAND pf-smoke-editor --check station/connectionDesign)
 set_tests_properties(station-editor-connection-design PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)

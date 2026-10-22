@@ -31,7 +31,11 @@ public:
 	// draft; a type without an extracted editor shows a placeholder naming
 	// the type. Field edits mutate the draft only - they never touch the
 	// World, advance the simulation, or implicitly apply the draft.
-	void renderFlowInspectorContents(core::StationSystemsSettings& draft);
+	void renderFlowInspectorContents(core::StationSystemsSettings& draft, core::World& world);
+	// Live controls drive the running scenario directly, bypassing the draft.
+	void renderLiveHatchControls(core::World& world, std::string const& pathwayId);
+	void setHatchOpenNow(core::World& world, std::string const& pathwayId, double openFraction);
+	void setHatchArea(core::World& world, std::string const& pathwayId, double areaM2);
 	core::StationSystemsSettings const& draft() const { return mDraft; }
 	DocumentHistory const& draftHistory() const { return mDraftHistory; }
 	// The Flow view's last-frame geometry, forwarded so a caller — a headless
@@ -106,10 +110,21 @@ private:
 	bool mPendingLayoutEdit{false};
 	StationFlowDiagram mFlow;
 	std::optional<core::StationSystemsSnapshot> mFlowSnapshot;
+	// Slider buffers for the live hatch controls. The snapshot polls at 4 Hz,
+	// so writing the live value straight into the widget would yank a drag in
+	// progress; the buffer holds the operator's value while the item is
+	// active and only tracks the live value when it is idle.
+	std::string mLiveOpenFor;
+	float mLiveOpenPercent{0.0f};
+	std::string mLiveAreaFor;
+	float mLiveAreaM2{0.0f};
 	double mFlowRefreshTime{-1.0};
 	bool mFlowWasPaused{true};
 	std::weak_ptr<void const> mWorld;
 	core::StationSystemsSettings mDraft;
+	// The settings as of the last frame where the draft matched the running
+	// scenario; drives whether the draft counts as having unapplied edits.
+	core::StationSystemsSettings mAppliedBaseline;
 	std::string mDiagnostic;
 	bool mConfirmReset{false};
 	std::optional<bool> mPendingActivation;

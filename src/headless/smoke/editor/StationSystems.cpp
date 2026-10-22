@@ -5172,7 +5172,7 @@ namespace
 				require(resource->reference() && !resource->reference()->provenance.empty(), "Lost reference provenance");
 			if (resource->getName() == "resupply-delay")
 				require(resource->reference() && !resource->reference()->outcomeRanges.empty(), "Lost scenario expectations");
-			if (resource->getName() == "atmosphere-exterior-isolation") atmosphere = resource;
+			if (resource->getName() == "atmosphere-pair-diffusion") atmosphere = resource;
 		}
 		require(atmosphere && !atmosphere->document().positions.empty(), "Missing atmosphere Resource or layout");
 		auto const original = atmosphere->text();
@@ -5180,7 +5180,7 @@ namespace
 		resources.manager.destroyResources({atmosphere});
 		require(atmosphere->text().empty() && atmosphere->document().settings == core::StationSystemsSettings{}
 			&& !atmosphere->reference(), "Destroyed Resource retained configuration data");
-		{ std::ofstream out(root / atmosphere->getSource()); out << "schemaVersion: 105\nstationSystems: ["; }
+		{ std::ofstream out(root / atmosphere->getSource()); out << "schemaVersion: 106\nstationSystems: ["; }
 		bool refused = false;
 		try { resources.manager.createResource(atmosphere); }
 		catch (std::exception const&) { refused = true; }
@@ -5214,10 +5214,10 @@ namespace
 		driver.run("station", "configurationResources", [&](ImGuiTestContext* ctx) {
 			ctx->SetRef("Station Systems");
 			REQ(!driver.contains("Meridian long-duration stability workload"), "An unselected configuration description is visible");
-			ctx->ComboClick("Configuration resource/atmosphere-exterior-isolation"); ctx->Yield(3);
+			ctx->ComboClick("Configuration resource/atmosphere-pair-diffusion"); ctx->Yield(3);
 			REQ(window.draft() == core::StationSystemsSettings{} && window.draftHistory().undoCount() == 0
 				&& !window.flowModified(), "Preview selection edited or dirtied the draft");
-			REQ(driver.contains("Two compartments start at the same pressure/composition")
+			REQ(driver.contains("Two Atmosphere compartments joined by one Atmosphere pathway")
 				&& !driver.contains("Meridian reference station"), "Selection did not replace the visible description");
 			ctx->ItemClick("Load into draft"); ctx->Yield(3);
 			REQ(window.draft() == atmosphere->document().settings, "Resource selector did not load the authored settings");
@@ -5232,7 +5232,7 @@ namespace
 				"Resource loading was not paused-only");
 			ctx->ComboClick("Configuration resource/long-run-workload"); ctx->Yield(3);
 			REQ(driver.contains("Meridian long-duration stability workload")
-				&& !driver.contains("Two compartments start at the same pressure/composition"),
+				&& !driver.contains("Two Atmosphere compartments joined by one Atmosphere pathway"),
 				"Running simulation prevented description preview");
 			REQ(window.draft() == atmosphere->document().settings
 				&& world->getStationSystemsSettings() == core::StationSystemsSettings{},

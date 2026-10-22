@@ -144,6 +144,117 @@ void pathwayDisplayWorkflow(smoke::Context const&)
 	require(driver.passed(), "Pathway display-only workflow failed");
 }
 
+void hatchInspectorWorkflow(smoke::Context const&)
+{
+	headless::ScopedImGuiContext imgui;
+	auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1100};
+	io.Fonts->AddFontDefault(); io.Fonts->Build();
+	core::StationSystemsSettings settings; settings.enabled = true;
+	core::AtmosphereSettings a;
+	a.id = "a"; a.volumeM3 = 100; a.thermalCapacityKJPerK = 10000;
+	a.minPressureKPa = 1; a.maxPressureKPa = 200;
+	a.startingOxygenKg = 30; a.startingNitrogenKg = 80;
+	auto b = a; b.id = "b"; b.startingOxygenKg = 10;
+	// A carbon dioxide gradient running against the oxygen one, so the
+	// unsigned reading can be told apart from a signed net.
+	b.startingCarbonDioxideKg = 5;
+	settings.atmospheres = {a, b};
+	settings.atmospherePathways = {{"opening", "a", "b", 1, 1}};
+	auto world = std::make_shared<core::World>("Hatch inspector", 2, 2);
+	world->pauseSimulation(); world->finishBuild();
+	std::string diagnostic;
+	require(world->configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+	world->resumeSimulation();
+	require(smoke::station::advanceSeconds(*world, 10), "hatch inspector run failed");
+	StationSystemsWindow window;
+	window.visible = true;
+	headless::TestEngineDriver driver([&] {
+		ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1150, 1050});
+		ImGui::Begin("Hatch inspector"); window.renderFlowContents(world); ImGui::End();
+	});
+	driver.frame(); driver.frame();
+	#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+	driver.run("station", "hatchInspector", [&](ImGuiTestContext* ctx) {
+		ctx->SetRef("Hatch inspector");
+		ImVec4 hatch{};
+		REQ(window.flowNodeRect("Atmosphere pathway", "opening", &hatch),
+			"the hatch node is not on screen");
+		ctx->MouseTeleportToPos({(hatch.x + hatch.z) * 0.5f, (hatch.y + hatch.w) * 0.5f});
+		ctx->MouseClick(); ctx->Yield(3);
+		// Move off the node so its hover tooltip cannot mask inspector text.
+		ctx->MouseTeleportToPos({24, 24}); ctx->Yield(2);
+		REQ(driver.contains("Node: Atmosphere pathway 'opening'"),
+			"selecting the hatch did not name it in the inspector");
+		// The regression this guards: "Atmosphere pathway" was left out of the
+		// diagram's node-type-to-index mapping, so a selected hatch addressed
+		// no editable entry and the inspector bailed out early - showing
+		// neither the draft fields nor the live controls, with no error.
+		REQ(!driver.contains("does not map to a single editable entry"),
+			"the hatch was refused as unaddressable instead of being editable");
+		REQ(driver.contains("open fraction"),
+			"the hatch's draft openness field did not render");
+		REQ(driver.contains("Live control"),
+			"the hatch's live control section did not render");
+		REQ(driver.contains("Open now"),
+			"the live openness slider did not render");
+	});
+	#undef REQ
+	// A live edit moves the running scenario away from the draft. The
+	// readouts describe the running scenario, so they have to survive it -
+	// they used to be hidden whenever draft != live, which blanked every
+	// node's text the moment the live slider was touched and left the live
+	// controls blind.
+	std::string liveDiag;
+	require(world->updateStationSystemsNode<core::AtmospherePathwaySettings>("opening",
+		[](core::AtmospherePathwaySettings& hatch) {
+			hatch.areaM2 = 3.0; hatch.openFraction = 0.4;
+		}, &liveDiag), ("live edit refused: " + liveDiag).c_str());
+	require(window.draft().atmospherePathways[0].areaM2 == 1.0
+		&& window.draft().atmospherePathways[0].openFraction == 1.0,
+		"the live edit wrongly moved the draft");
+	world->advanceTicks(8);
+	// Pause before the last frames so the snapshot read below is the same
+	// state the window polled; otherwise the two drift apart and the
+	// comparison is meaningless.
+	world->pauseSimulation();
+	driver.frame(); driver.frame();
+	require(window.flowTelemetry("Atmosphere pathway", "opening").has_value(),
+		"a live edit blanked the hatch readout");
+	require(window.flowTelemetry("Atmosphere", "a").has_value(),
+		"a live edit blanked the compartment readout");
+	// The point of the distinction: a live edit is not an unapplied draft
+	// edit, so the "hidden" branch must not fire for it.
+	require(!driver.contains("live readouts hidden"),
+		"a live edit was mistaken for unapplied draft work and hid the readouts");
+	// The hatch reports one flux on its body and no per-end rate. The two
+	// ends could never differ - the opening holds no volume, so what leaves
+	// one arrives at the other in the same step - and the connection ledger
+	// used to overwrite any end rate with its own zero anyway.
+	auto const hatchTel = window.flowTelemetry("Atmosphere pathway", "opening");
+	require(hatchTel.has_value(), "the hatch has no telemetry to check");
+	require(hatchTel->ports.empty(),
+		"the hatch still carries per-end port rates; the body owns the single flux");
+	// The body reports unsigned throughput: every species contributes its
+	// own movement, so the CO2 running against the oxygen adds instead of
+	// cancelling the way a signed net would.
+	auto const snap = world->getStationSystemsSnapshot();
+	auto const& pw = snap.atmospherePathways.at(0);
+	double signedNet = 0.0, crossing = 0.0;
+	for (auto const rate : pw.flowRateKgPerS)
+	{
+		signedNet += rate;
+		crossing += std::abs(rate);
+	}
+	require(crossing > std::abs(signedNet) + 1e-9,
+		"the fixture has no opposing species flow, so it cannot prove the unsigned reading");
+	std::string const expected = "Gas crossing "
+		+ station_flow::formatTelemetryNumber(crossing) + " kg/s";
+	require(std::find(hatchTel->values.begin(), hatchTel->values.end(), expected)
+		!= hatchTel->values.end(),
+		"the hatch body does not report unsigned throughput");
+	require(driver.passed(), "Hatch inspector workflow failed");
+}
+
 void connectionDesign(smoke::Context const&)
 {
 	auto settings = connectionFixture();
@@ -226,7 +337,7 @@ void connectionDesign(smoke::Context const&)
 		auto position = text.find(before); require(position != std::string::npos, "Fixture text not found");
 		text.replace(position, before.size(), after); return text;
 	};
-	for (auto const& bad : {replace(yaml, "schemaVersion: 105", "schemaVersion: 96"),
+	for (auto const& bad : {replace(yaml, "schemaVersion: 106", "schemaVersion: 96"),
 		replace(yaml, "Liquid pipe", "Unknown carrier"), replace(yaml, "maximumThroughput: 0.001", "maximumThroughput: -1")})
 	{
 		require(!core::parseStationConfiguration(bad, loaded, &diagnostic) && loaded.settings == settings,
@@ -248,7 +359,7 @@ void connectionDesign(smoke::Context const&)
 	require(core::parseStationConfiguration(withoutEfficiency, loaded, &diagnostic)
 		&& loaded.settings == expectedDefault, "Missing efficiency did not receive the lossless default");
 	auto legacy = document; legacy.settings.connections.clear();
-	auto legacyYaml = replace(core::serializeStationConfiguration(legacy), "schemaVersion: 105", "schemaVersion: 96");
+	auto legacyYaml = replace(core::serializeStationConfiguration(legacy), "schemaVersion: 106", "schemaVersion: 96");
 	auto const ratioLine = "  systemsStepWorldTicks: " + std::to_string(legacy.settings.systemsStepWorldTicks) + "\n";
 	auto const ratioAt = legacyYaml.find(ratioLine);
 	require(ratioAt != std::string::npos, "Station step ratio was not serialized");
@@ -771,6 +882,7 @@ void flowConnectionsWorkflow(smoke::Context const& context)
 void editor_smoke::registerStationConnections(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/pathwayDisplayWorkflow", pathwayDisplayWorkflow});
+	checks.push_back({"station/hatchInspectorWorkflow", hatchInspectorWorkflow});
 	checks.push_back({"station/connectionDesign", connectionDesign});
 	checks.push_back({"station/connectionForecastWorkflow", connectionForecastWorkflow});
 	checks.push_back({"station/flowConnectionTelemetryWorkflow", flowConnectionTelemetryWorkflow});

@@ -12,6 +12,8 @@ namespace core
 {
 	void appendStationThermalObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
 	void appendStationCrewAtmosphereObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
+	void appendStationAtmosphereStateObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
+	void appendStationPathwayCrossingObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
 	void appendStationWaterGasObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
 	void appendStationCarbonObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
 	void appendStationMicrobialObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
@@ -312,6 +314,11 @@ namespace core
 		}
 		appendStationThermalObservations(settings, result);
 		appendStationCrewAtmosphereObservations(settings, result);
+		// Compartment state and pathway throughput are read rather than metered,
+		// but ride the same observation seam so they share the recorder, the
+		// cadence and the chart catalogue.
+		appendStationAtmosphereStateObservations(settings, result);
+		appendStationPathwayCrossingObservations(settings, result);
 		appendStationWaterGasObservations(settings, result);
 		appendStationCarbonObservations(settings, result);
 		appendStationMicrobialObservations(settings, result);
@@ -562,6 +569,101 @@ namespace core
 			}
 			charts.push_back(std::move(chart));
 		}
+		// Atmosphere compartment state and pathway throughput: one chart per
+		// metric with one line per subject, so compartments and pathways are
+		// directly comparable. No subtotals anywhere - summing temperatures,
+		// humidity or pressures yields no meaningful quantity.
+		auto const stateNote = "Read from the applied simulation at the observation cadence. "
+			"Instantaneous state, not an interval average.";
+		auto subjectChart = [&](std::string id, std::string group, std::string label,
+			std::string type, std::function<bool(StationMetricDescriptor const&)> pick,
+			StationPhysicalQuantity quantity, StationCanonicalUnit unit, std::string note,
+			std::string breakdown = {},
+			std::function<std::string(StationMetricDescriptor const&)> labelOf = {})
+		{
+			std::vector<StationMetricDescriptor const*> members;
+			for (auto const& d : descriptors) if (d.equipmentType == type && pick(d)) members.push_back(&d);
+			if (members.empty()) return;
+			auto const title = label;
+			std::sort(members.begin(), members.end(), [](auto a, auto b) {
+				return std::make_tuple(a->instanceId, a->id) < std::make_tuple(b->instanceId, b->id); });
+			StationChartDefinition chart{std::move(id), std::move(group), std::move(label),
+				title + " (applied simulation)", quantity, unit, {}};
+			chart.accountingNote = std::move(note);
+			chart.propertyId = chart.breakdown = std::move(breakdown);
+			for (auto const* d : members)
+				chart.series.push_back({d->id,
+					labelOf ? labelOf(*d) : d->instanceId, StationMetricValue::Actual,
+						StationChartOperation::Value});
+			charts.push_back(std::move(chart));
+		};
+		// A series label must identify the line. In the all-gases view the
+		// compartment alone repeats four times over, so the gas joins it.
+		auto const gasSeriesLabel = [](StationMetricDescriptor const& d) {
+			auto const prefix = std::string("partial-pressure/");
+			if (!d.exchangeRole.starts_with(prefix)) return d.instanceId;
+			auto const gas = d.exchangeRole.substr(prefix.size());
+			for (size_t i = 0; i < StationPathwayGasIds.size(); ++i)
+				if (gas == StationPathwayGasIds[i])
+					return d.instanceId + " / " + StationPathwayGasLabels[i];
+			return d.instanceId;
+		};
+		subjectChart("atmosphere-temperature", "Atmosphere", "Atmosphere temperature",
+			"Atmosphere compartment",
+			[](auto const& d) { return d.exchangeRole == "temperature"; },
+			StationPhysicalQuantity::Temperature, StationCanonicalUnit::Celsius, stateNote);
+		subjectChart("atmosphere-humidity", "Atmosphere", "Relative humidity",
+			"Atmosphere compartment",
+			[](auto const& d) { return d.exchangeRole == "relative-humidity"; },
+			StationPhysicalQuantity::Fraction, StationCanonicalUnit::Percent, stateNote);
+		subjectChart("atmosphere-pressure", "Atmosphere", "Total pressure",
+			"Atmosphere compartment",
+			[](auto const& d) { return d.exchangeRole == "total-pressure"; },
+			StationPhysicalQuantity::Pressure, StationCanonicalUnit::Kilopascal, stateNote);
+		// Partial pressures: the gas is the useful selector, so the root
+		// carries every gas and the Breakdown combo narrows to one. Without
+		// it a four-compartment station would plot sixteen lines at once.
+		{
+			auto const root = std::string("atmosphere-partial-pressure");
+			subjectChart(root, "Atmosphere", "Partial pressures", "Atmosphere compartment",
+				[](auto const& d) { return d.exchangeRole.starts_with("partial-pressure/"); },
+				StationPhysicalQuantity::Pressure, StationCanonicalUnit::Kilopascal,
+				stateNote, "All gases", gasSeriesLabel);
+			for (size_t gas = 0; gas < StationPathwayGasIds.size(); ++gas)
+				subjectChart(root + "/" + StationPathwayGasIds[gas], "Atmosphere",
+					std::string("Partial pressures: ") + StationPathwayGasLabels[gas],
+					"Atmosphere compartment",
+					[&](auto const& d) {
+						return d.exchangeRole == std::string("partial-pressure/") + StationPathwayGasIds[gas];
+					},
+					StationPhysicalQuantity::Pressure, StationCanonicalUnit::Kilopascal,
+					stateNote, StationPathwayGasLabels[gas]);
+			// Point every variant at the root so the Breakdown combo finds them.
+			for (auto& chart : charts) if (chart.id.starts_with(root)) chart.propertyId = root;
+		}
+		// Pathway gas crossing: unsigned throughput, matching the hatch node.
+		// The root is the total; the Breakdown combo isolates one species for
+		// diagnosing which gas is actually moving.
+		{
+			auto const root = std::string("pathway-crossing");
+			auto const note = "Unsigned throughput across the opening: each species contributes "
+				"its own movement, so opposing flows add rather than cancel. Matches the hatch "
+				"node readout.";
+			subjectChart(root, "Pathways", "Gas crossing", "Atmosphere pathway",
+				[](auto const& d) { return d.exchangeRole == "crossing"; },
+				StationPhysicalQuantity::MassRate, StationCanonicalUnit::KilogramPerSecond,
+				note, "Total crossing");
+			for (size_t gas = 0; gas < StationPathwayGasIds.size(); ++gas)
+				subjectChart(root + "/" + StationPathwayGasIds[gas], "Pathways",
+					std::string("Gas crossing: ") + StationPathwayGasLabels[gas],
+					"Atmosphere pathway",
+					[&](auto const& d) {
+						return d.exchangeRole == std::string("crossing/") + StationPathwayGasIds[gas];
+					},
+					StationPhysicalQuantity::MassRate, StationCanonicalUnit::KilogramPerSecond,
+					note, StationPathwayGasLabels[gas]);
+			for (auto& chart : charts) if (chart.id.starts_with(root)) chart.propertyId = root;
+		}
 		appendStationChartBreakdowns(charts);
 		return charts;
 	}
@@ -627,10 +729,12 @@ namespace core
 		case StationCanonicalUnit::Kilogram: return "kg";
 		case StationCanonicalUnit::CubicMetre: return "m3";
 		case StationCanonicalUnit::Kelvin: return "K";
+		case StationCanonicalUnit::Celsius: return "\u00b0C";
 		case StationCanonicalUnit::Fraction: return "fraction";
 		case StationCanonicalUnit::KilogramPerSecond: return "kg/s";
 		case StationCanonicalUnit::CubicMetrePerSecond: return "m3/s";
 		case StationCanonicalUnit::Percent: return "%";
+		case StationCanonicalUnit::Kilopascal: return "kPa";
 		case StationCanonicalUnit::Unspecified: return "unspecified";
 		case StationCanonicalUnit::Mole: return "mol";
 		case StationCanonicalUnit::MolePerSecond: return "mol/s";

@@ -725,7 +725,10 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 		|| view.type == "Water collector" || view.type == "Water treatment" || view.type == "Electrolyzer"
 		|| view.type == "CO2 capture" || view.type == "Atmosphere" || view.type == "Airlock cycle"
 		|| view.type == "Coolant loop" || view.type == "Chiller" || view.type == "Thermal buffer"
-		|| view.type == "Delivery" || view.type == "Waste ejection" || view.type == "Outage" || view.type == "Maintenance")
+		|| view.type == "Delivery" || view.type == "Waste ejection" || view.type == "Outage" || view.type == "Maintenance"
+		// A hatch is a first-class entry-backed node like the rest: without it
+		// here the index stays -1 and the inspector refuses to edit it.
+		|| view.type == "Atmosphere pathway")
 	{
 		view.index = 0;
 		for (int i = 0; i < mSelected; ++i)
@@ -754,7 +757,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	std::function<void()> const& beforeSelectionChange,
 	std::function<void()> const& beforeNodeRemoval,
 	std::function<void()> const& beforeLayoutChange,
-	core::StationSystemsSnapshot const* live, bool draftMatchesLive, bool paused,
+	core::StationSystemsSnapshot const* live, bool draftPending, bool paused,
 	std::function<void()> const& finishHeader)
 {
 	if (mLastFrame != ImGui::GetFrameCount() - 1)
@@ -818,7 +821,13 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			mSelectedConnection.reset();
 		updateBounds();
 	}
-	bool const showLive = live && live->enabled && draftMatchesLive;
+	// `draftPending` means the DRAFT carries edits that were never applied.
+	// Live readouts are hidden only then: a live rate beside an unapplied
+	// cap reads as if the cap were in force. A live edit moves the running
+	// scenario away from a draft that has no pending edits, and hiding the
+	// readouts in that case blanks the canvas exactly when the user needs
+	// to see the effect - so it no longer does.
+	bool const showLive = live && live->enabled && !draftPending;
 	if (!showLive)
 	{
 		mTelemetry.clear(); mTelemetryTick = UINT64_MAX;
@@ -831,7 +840,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			if (auto values = station_flow::telemetry(node, *live, core::World::getFixedTimestep(), &draft, authored))
 				mTelemetry[node.type + keySeparator + node.id] = std::move(*values);
 	}
-	if (live && !draftMatchesLive)
+	if (live && live->enabled && draftPending)
 		ImGui::TextUnformatted("Draft configuration flow | unapplied changes - live readouts hidden (apply or revert draft).");
 	else if (showLive)
 		ImGui::Text("Draft configuration flow | applied simulation: %s | %.2f s | 4 Hz",
@@ -1434,7 +1443,7 @@ entry.thermalClass = "moderate";
 				// exactly like a placed conversion with unwired flows.
 				core::AtmospherePathwaySettings entry;
 				entry.areaM2 = 1.0;
-				entry.initialOpenFraction = 1.0;
+				entry.openFraction = 1.0;
 				place(draft.atmospherePathways, entry, core::MaxStationPathways, "hatch");
 			}
 		}

@@ -1,4 +1,5 @@
 #include "StationSystemsImpl.h"
+#include <algorithm>
 
 namespace core
 {
@@ -360,6 +361,14 @@ namespace core
 		// and before saturation. Temperature is held fixed and no heat crosses.
 		for (auto& pathway : runtime.atmospherePathways)
 		{
+			// A negative area or openness inverts the relaxation: the exponent
+			// flips sign, the compartment gains mass it never had, and the loss
+			// ledger runs negative. Neither is a meaningful opening, so the
+			// physical conductance is floored here independently of how the
+			// setting arrived - the live path runs no validation pass, and the
+			// draft gate only guards Apply.
+			auto const openArea = std::max(0.0, pathway.authored.areaM2)
+				* std::clamp(pathway.authored.openFraction, 0.0, 1.0);
 			if (pathway.aIndex == SIZE_MAX || pathway.bIndex == SIZE_MAX)
 			{
 				// Zero-pressure boundary limit of the same diffusion law:
@@ -372,7 +381,7 @@ namespace core
 				for (size_t gas = 0; gas < mass.size(); ++gas)
 				{
 					auto const conductance = static_cast<long double>(StationPathwayDiffusionCoefficients[gas])
-						* pathway.authored.areaM2 * pathway.openFraction;
+						* openArea;
 					auto const lost = static_cast<double>(*mass[gas] * -std::expm1(-conductance * weight * seconds));
 					*mass[gas] -= lost;
 					air.exteriorLostKg[gas] += lost;
@@ -397,7 +406,7 @@ namespace core
 				// Evaluate the equilibrium transfer first, independently of k,
 				// so even enormous conductance tends to equilibrium, not inf/inf.
 				auto const conductance = static_cast<long double>(StationPathwayDiffusionCoefficients[gas])
-					* pathway.authored.areaM2 * pathway.openFraction;
+					* openArea;
 				auto const relaxed = -std::expm1(-conductance * sum * seconds);
 				auto const moved = static_cast<double>((*aMass[gas] * (wa / sum)
 					- *bMass[gas] * (wb / sum)) * relaxed);

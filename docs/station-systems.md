@@ -1463,7 +1463,7 @@ which pathways are wired rather than from any declared label.
 
 `StationSystemsSettings::atmospherePathways` configures undirected openings
 with `id`, `aAtmosphereId`, `bAtmosphereId`, `areaM2` and
-`initialOpenFraction`. Endpoints must be distinct existing compartments,
+`openFraction`. Endpoints must be distinct existing compartments,
 except that exactly one may be the reserved Exterior vacuum endpoint
 `$exterior` (`core::StationExteriorAtmosphereId`). That id cannot name a real
 compartment. Area must be finite and strictly positive, openness finite in [0, 1].
@@ -1490,24 +1490,40 @@ and latent-energy ledgers closing, including reversed endpoint and compartment
 order. The existing pre-saturation diffusion pass needs no relocation.
 
 `StationSystemsSnapshot::atmospherePathways` publishes identity, geometry,
-live openness, `flowRateKgPerS`, `netTransferredKg`, and only `Idle`/`Active`
+openness, `flowRateKgPerS`, `netTransferredKg`, and only `Idle`/`Active`
 status. Arrays follow `StationPathwayGases`: oxygen, nitrogen, carbon dioxide,
 water vapour. Positive values mean A to B; rates average the last Station
 step, totals are signed net mass since configuration. There are deliberately
 no requested/actual/limiter fields. The observable registry classifies this
 aggregate as unverified for general cross-step guarantees.
 
-Pathways and their scheduled commands persist through the existing Station
-configuration and World serialization seams. An internal pathway is authored
-in Flow as an **Atmosphere pathway** node: place it, then drag from each
-compartment's `Hosted pathways` face onto the hatch's `End A` / `End B`.
+Pathways persist through the existing Station configuration and World
+serialization seams. An internal pathway is authored in Flow as an
+**Atmosphere pathway** node: place it, then drag from each compartment's
+`Hosted pathways` face onto the hatch's `End A` / `End B`.
 Each end writes one endpoint reference on the same undirected aggregate, so
 the hatch is a presentation of `atmospherePathways` and never a Station
-connection (ADR 0027). The hatch inspector edits `areaM2` and
-`initialOpenFraction`; live openness, per-species flow and the last actuating
-command are published per node. An opening to Exterior vacuum keeps its
-display-only arc: the boundary is a derived node with no connector to wire.
-Live control of openness remains separate work.
+connection (ADR 0027). The hatch inspector edits `areaM2` and openness.
+An opening to Exterior vacuum keeps its display-only arc: the boundary is a
+derived node with no connector to wire.
+
+The hatch node reports one flux on its body and carries no per-end rate. The
+opening holds no volume and no storage, so whatever leaves one end arrives at
+the other within the same step and the two ends could never differ; printing
+the same figure twice would only invite reading it as two separate flows.
+The figure is unsigned throughput — the sum of each species' own movement
+regardless of direction — so oxygen leaving and carbon dioxide arriving both
+count toward it instead of cancelling into a smaller number. `Net transferred
+A->B` stays the signed cumulative, because where the mass ended up is a
+different question from how much crossed.
+
+Openness is a plain settings parameter rather than accumulated state —
+nothing in the simulation writes it — so both fields can be changed on a
+running scenario through `World::updateStationSystemsNode<AtmospherePathwaySettings>`
+and the change takes effect on the next Station step. There is no scheduled
+command queue: an earlier `pathwayCommands` field was removed at schema 106
+because the mutating API covers it, and a schedule is a driver concern rather
+than a document one.
 
 #### Pathways to space
 
@@ -1519,13 +1535,7 @@ atmospherePathways:
     aAtmosphereId: habitat
     bAtmosphereId: $exterior
     areaM2: 1
-    initialOpenFraction: 0.5
-pathwayCommands:
-  - id: seal-opening
-    pathwayId: exterior-opening
-    openFraction: 0
-    occurrenceSeconds: 600
-    priority: 0
+    openFraction: 0.5
 ```
 
 Exterior vacuum is a fixed zero-partial-pressure boundary, not an infinite
@@ -1534,8 +1544,8 @@ The same simplified, thermally neutral diffusion law gives each gas
 `m(t+dt) = m(t) * exp(-D_i * areaM2 * openFraction * T_K/V * dt)`.
 It does not model compressible/choked flow or expansion cooling. A closed
 opening loses nothing; a huge opening empties safely without negative masses.
-Commands split integration at their simulation-time stamps, as for internal
-pathways. The exterior appears as an inert derived diagram node.
+Changing `openFraction` mid-run takes effect from the next step. The exterior
+appears as an inert derived diagram node.
 
 `StationAtmosphereSnapshot::exteriorLostKg` reports cumulative per-species
 external loss in `StationPathwayGases` order, separately from `leakedKg` and

@@ -333,26 +333,29 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		// asks for gas to move, so there is no request, no shortfall and no
 		// limiter to name. Rates are already per second (averaged over the
 		// last Station step), so they are not divided by dt again.
-		double netTotal = 0.0, flowTotal = 0.0;
+		double netTotal = 0.0, crossing = 0.0;
 		for (size_t gas = 0; gas < p->netTransferredKg.size(); ++gas)
 		{
 			netTotal += p->netTransferredKg[gas];
-			flowTotal += p->flowRateKgPerS[gas];
+			// Unsigned throughput: each species contributes its own movement
+			// whichever way it is going. A signed net would let oxygen leaving
+			// and carbon dioxide arriving cancel into a figure smaller than
+			// the gas actually crossing, and that net direction is not
+			// actionable for an explicitly undirected opening anyway.
+			crossing += std::abs(p->flowRateKgPerS[gas]);
 		}
+		// One value, on the node body only. The two ends are deliberately
+		// left without a rate: the opening has no volume and no storage, so
+		// whatever leaves one end arrives at the other in the same step and
+		// the two could never differ - printing the same number twice only
+		// invites reading it as two separate flows.
 		out.values = {"Open " + percent(p->openFraction),
 			"Area " + quantity(p->areaM2, "m2"),
-			"Net flow " + quantity(flowTotal, "kg/s"),
-			"Net transferred " + quantity(netTotal, "kg")};
+			"Gas crossing " + quantity(crossing, "kg/s"),
+			"Net transferred A->B " + quantity(netTotal, "kg")};
 		bool const active = p->status == core::StationAtmospherePathwayStatus::Active;
 		out.status = active ? "Diffusing" : "Idle";
 		out.state = active ? TelemetryState::Normal : TelemetryState::Idle;
-		out.values.push_back(p->lastCommandId.empty()
-			? "No actuation recorded"
-			: "Last set by " + p->lastCommandId + " at " + quantity(p->lastCommandSeconds, "s"));
-		// Signed A to B, the snapshot's own convention: positive leaves end A
-		// and arrives at end B.
-		out.ports["End A"] = quantity(flowTotal, "kg/s");
-		out.ports["End B"] = quantity(flowTotal, "kg/s");
 	}
 	else if (node.type == "Crew")
 	{
@@ -508,7 +511,11 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		if (p->blockReason.empty()) out.status = core::StationMaintenancePhaseNames[static_cast<size_t>(p->phase)];
 	}
 	else return {};
-	if (!s.connections.empty())
+	// A pathway's ends are authored links, not metered Station connections
+	// (ADR 0027): the connection ledger carries them with zero rates, so
+	// letting this pass write them would blank the diffusion flux the
+	// pathway branch just reported. The pathway owns its own end readouts.
+	if (!s.connections.empty() && node.type != "Atmosphere pathway")
 	{
 		std::vector<core::AuthoredLink> localAuthored;
 		if (applied && authored.empty()) { localAuthored = core::stationAuthoredLinks(*applied); authored = localAuthored; }

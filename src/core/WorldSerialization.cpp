@@ -963,8 +963,9 @@ namespace core
 		// is told it needs converting. Containment is now modelled,
 		// not enforced by an authored class label. Schema 104 adds the
 		// authored Station step ratio.
-		// Schema 105 adds Atmosphere pathways and scheduled Pathway commands.
-		serializer.writeUint32("version", 105);
+		// Schema 106 makes an Atmosphere pathway's openness a live parameter and
+		// retires the scheduled Pathway command queue.
+		serializer.writeUint32("version", 106);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
@@ -1866,7 +1867,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 105)
+		if (version < 1 || version > 106)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
