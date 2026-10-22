@@ -567,13 +567,9 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 		}
 		if (mObservationAggregation == ObservationAggregation::PerInstance)
 		{
-			ImGui::SameLine();
-			float const slotWidth = (ImGui::GetContentRegionAvail().x
-				- ImGui::GetStyle().ItemSpacing.x * 3.0f) / 4.0f;
 			for (size_t slot = 0; slot < mObservationInstances.size(); ++slot)
 			{
-				if (slot != 0) ImGui::SameLine(0.0f, 0.0f);
-				ImGui::SetNextItemWidth(slotWidth);
+				ImGui::SetNextItemWidth(128);
 				auto const& picked = mObservationInstances[slot];
 				auto const preview = picked.empty() ? "None" : picked.c_str();
 				// The visible label carries the slot number; the ### id must
@@ -604,7 +600,6 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 	if (std::any_of(mFlowChart.series.begin(), mFlowChart.series.end(), [](auto const& s) { return s.optionalRequested; }))
 		ImGui::Checkbox("Show requested", &mShowRequested);
 	ImGui::TextUnformatted(selected->title.c_str());
-	if (!selected->accountingNote.empty()) ImGui::TextWrapped("Accounting coverage: %s", selected->accountingNote.c_str());
 	bool const empty = std::all_of(mFlowChart.series.begin(), mFlowChart.series.end(),
 		[](auto const& line) { return line.times.empty(); });
 	if (!mFlowSnapshot || !mFlowSnapshot->enabled)
