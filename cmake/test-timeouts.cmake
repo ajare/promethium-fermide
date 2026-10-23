@@ -423,6 +423,7 @@ set(PF_TEST_TIMEOUTS
     "station-thermalLinkReservoirCoexistence=10"
     "station-thermalLinkSharedNeighbourIndependence=10"
     "station-thermalLinkResetIsolation=10"
+    "station-thermalLinkPersistence=10"
     "station-thermalLinkReverseNoSpuriousCondensation=10"
     "station-thermalLinkSameTickCondensation=10"
     "station-thermalLinkValidation=10"

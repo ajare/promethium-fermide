@@ -3,9 +3,14 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "core/BinarySerializer.h"
+#include "core/StationConfigurationDocument.h"
+#include "core/YamlSerializer.h"
 
 // Thermal link tracer bullet checks (#794): an authored, undirected
 // conduction pair between two Atmosphere compartments. Every assertion is
@@ -591,6 +596,139 @@ void thermalLinkResetIsolation(smoke::Context const&)
 	require(advanceSeconds(world, 120), "reset-isolation rerun failed");
 	require(world.getStationSystemsSnapshot() == run,
 		"the rerun after reset is not identical to the first run");
+}
+
+// #798: the persistence contract for authored Thermal links. A station
+// document carrying links saves and reloads to the identical
+// configuration, an unknown field is refused with a conversion-required
+// diagnostic naming the entry and the field rather than being silently
+// defaulted, a pre-107 reader refuses a document carrying links rather
+// than silently dropping them, and a round-tripped configuration
+// reproduces the original run exactly through both the YAML and the
+// binary World persistence paths.
+void thermalLinkPersistence(smoke::Context const&)
+{
+	// Three links over three compartments with distinct non-round values:
+	// the round trip must return the exact list, in declaration order,
+	// with no field defaulted or drifted.
+	core::StationSystemsSettings settings;
+	settings.enabled = true;
+	settings.atmospheres = {linkCompartment("a", 40.0, 12000.0),
+		linkCompartment("b", 10.0, 8000.0), linkCompartment("c", 22.5, 4000.0)};
+	settings.thermalLinks = {{"wall-ab", "a", "b", 2.5},
+		{"wall-bc", "b", "c", 0.75}, {"wall-ca", "c", "a", 1.25}};
+	core::StationConfigurationDocument document;
+	document.settings = settings;
+	auto const yaml = core::serializeStationConfiguration(document);
+	core::StationConfigurationDocument loaded;
+	std::string diagnostic;
+	require(core::parseStationConfiguration(yaml, loaded, &diagnostic), diagnostic.c_str());
+	require(loaded.settings == settings,
+		"thermal link Station configuration changed on round trip");
+	// Unknown-field discipline: a field the loader does not know is
+	// refused naming the entry and the field, and the previously loaded
+	// settings are left untouched.
+	for (auto const* field : {"conductanceKWPerK", "aAtmosphereId"})
+	{
+		auto bad = yaml;
+		auto const at = bad.find(std::string(field) + ":");
+		require(at != std::string::npos, "missing thermal link wire field");
+		bad.insert(at, "unknown_");
+		require(!core::parseStationConfiguration(bad, loaded, &diagnostic)
+			&& diagnostic.find("wall-ab") != std::string::npos
+			&& diagnostic.find(std::string("unknown_") + field) != std::string::npos
+			&& diagnostic.find("conversion required") != std::string::npos
+			&& loaded.settings == settings,
+			"unknown thermal link field was ignored or mutated the document");
+	}
+	// Version discipline: a pre-107 document carrying links is refused
+	// as conversion-required rather than dropping them, and a version
+	// beyond the accepted range is refused outright.
+	for (int version : {106, 108})
+	{
+		auto bad = yaml;
+		bad.replace(bad.find("schemaVersion: 107"), std::string("schemaVersion: 107").size(),
+			"schemaVersion: " + std::to_string(version));
+		require(!core::parseStationConfiguration(bad, loaded, &diagnostic)
+			&& loaded.settings == settings, "unsupported thermal link schema was accepted");
+	}
+	// Both World persistence paths: the reloaded World carries the exact
+	// authored links, and after the same number of ticks publishes the
+	// identical snapshot to the original run.
+	for (bool binary : {false, true})
+	{
+		core::World original("ThermalLinkPersistence", 2, 2);
+		std::string note;
+		configure(original, settings, note);
+		auto writer = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+		core::SerializationWorkData work;
+		original.serialize(*writer, work);
+		writer->serialize();
+		auto const text = binary
+			? static_cast<core::BinarySerializer&>(*writer).getSerializedString()
+			: static_cast<core::YamlSerializer&>(*writer).getSerializedString();
+		if (!binary)
+		{
+			// An unknown field inside a saved World is refused by name and
+			// leaves the already-loaded World exactly as it was.
+			auto bad = text;
+			bad.insert(bad.find("conductanceKWPerK:"), "unknown_");
+			auto invalid = core::YamlSerializer::fromString(bad);
+			invalid->deserialize();
+			auto const baseline = original.getStationSystemsSnapshot();
+			bool refused = false;
+			try { original.deserialize(*invalid, work); }
+			catch (std::exception const& error)
+			{
+				auto const message = std::string(error.what());
+				refused = message.find("conversion required") != std::string::npos
+					&& message.find("unknown_conductanceKWPerK") != std::string::npos
+					&& message.find("wall-ab") != std::string::npos;
+			}
+			require(refused && original.getStationSystemsSnapshot() == baseline
+				&& original.getStationSystemsSettings() == settings,
+				"World ignored an unknown thermal link field or changed on refusal");
+			// A pre-107 World reader refuses a document carrying links
+			// rather than silently dropping the station's walls.
+			auto older = text;
+			older.replace(older.find("version: 107"), std::string("version: 107").size(),
+				"version: 106");
+			auto olderReader = core::YamlSerializer::fromString(older);
+			olderReader->deserialize();
+			refused = false;
+			try
+			{
+				core::World stale("StaleReader", 2, 2);
+				stale.deserialize(*olderReader, work);
+			}
+			catch (std::exception const& error)
+			{
+				refused = std::string(error.what()).find(
+					"thermal links require World schema 107") != std::string::npos;
+			}
+			require(refused, "a pre-107 World reader silently accepted a document carrying links");
+		}
+		auto reader = binary
+			? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(text))
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(text));
+		reader->deserialize();
+		core::World restored("Restored", 2, 2);
+		require(restored.deserialize(*reader, work), "World carrying thermal links could not reload");
+		require(restored.getStationSystemsSettings() == settings,
+			"World thermal link settings changed across persistence");
+		// The round-tripped configuration reproduces the original run:
+		// the same number of ticks publishes the identical snapshot,
+		// conducted ledgers included.
+		original.resumeSimulation();
+		restored.resumeSimulation();
+		require(advanceSeconds(original, 120) && advanceSeconds(restored, 120),
+			"thermal link replay after round trip failed");
+		require(original.getStationSystemsSnapshot() == restored.getStationSystemsSnapshot(),
+			"thermal link round trip changed the run snapshot");
+		require(link(original.getStationSystemsSnapshot(), "wall-ab").netTransferredKJ > 1.0,
+			"persistence fixture conducted too little to prove the round trip");
+	}
 }
 
 // #796: the payoff of the conduction pass's tick placement. Conducted
@@ -1323,6 +1461,7 @@ void registerStationThermalLinkChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"thermalLinkReservoirCoexistence", thermalLinkReservoirCoexistence});
 	checks.push_back({"thermalLinkValidation", thermalLinkValidation});
 	checks.push_back({"thermalLinkResetIsolation", thermalLinkResetIsolation});
+	checks.push_back({"thermalLinkPersistence", thermalLinkPersistence});
 	checks.push_back({"thermalLinkSameTickCondensation", thermalLinkSameTickCondensation});
 	checks.push_back({"thermalLinkReverseNoSpuriousCondensation",
 		thermalLinkReverseNoSpuriousCondensation});
