@@ -685,6 +685,15 @@ namespace core
 		std::string rejectionReservoirId;   // cold sink node (heat-only interface)
 		std::string thermalClass;           // service class of the rejection heat
 		double ratedThermalInputKW{0.0};    // heat intake at rated, >= 0; 0 disables
+		// The intake dispatch command, in [0, rated]. The author throttles
+		// intake below rated to leave heat deliberately in the hot
+		// reservoir for a competing consumer (#805); the command is a cap,
+		// never a boost - intake above rated is never reachable. Absent on
+		// load it means full rated, so the field only travels when the
+		// engine is actually throttled. It is a ceiling on the request,
+		// not a grant: the acceptance-coupled throttle may still hold the
+		// intake below the command when the station cannot use the power.
+		double commandedInputKW{0.0};       // intake dispatch, [0, rated]; default = rated
 		double carnotFraction{0.4};         // actual / Carnot efficiency, (0, 1]
 		double auxiliaryPowerKW{0.0};       // running auxiliaries, >= 0
 		double minHotTemperatureC{20.0};    // below this the source is too cold to work with
@@ -3122,6 +3131,7 @@ namespace core
 		std::string hotReservoirId;
 		std::string rejectionReservoirId;
 		double ratedThermalInputKW{0.0};
+		double commandedInputKW{0.0};      // the intake dispatch in force, [0, rated]
 		double carnotFraction{0.0};
 		double auxiliaryPowerKW{0.0};
 		double minHotTemperatureC{0.0};
@@ -3130,7 +3140,7 @@ namespace core
 		double lastElectricalOutputKW{0.0};  // net power delivered to the bus this tick
 		double lastRejectionKW{0.0};        // heat booked into the rejection reservoir this tick
 		double lastAuxKW{0.0};             // auxiliaries carried by the conversion this tick
-		std::string lastLimiter;            // Disabled/NoGradient/TooCold/SinkOver/HotSideSupply/AuxiliaryPower
+		std::string lastLimiter;            // Disabled/NoGradient/TooCold/SinkOver/AuxiliaryPower/HotSideSupply/CommandedInput/DemandAcceptance/GenerationConnection
 		double efficiencyNow{0.0};        // actual eta used by the last conversion
 		double carnotEfficiencyNow{0.0};  // Carnot eta at the same interface temperatures
 		double hotTemperatureC{0.0};

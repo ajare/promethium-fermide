@@ -90,7 +90,10 @@ class Lanes(unittest.TestCase):
                       'heatEngineTracerBullet', 'heatEngineClosure', 'heatEngineCarnotBound',
                       'heatEngineIdle', 'heatEngineNoCrossing', 'heatEngineSinkTrip',
                       'heatEngineValidation', 'heatEnginePersistence',
-                      'heatEngineResetIsolation', 'heatEnginePlantCoexistence'):
+                      'heatEngineResetIsolation', 'heatEnginePlantCoexistence',
+                      'heatEngineDemandAcceptance', 'heatEngineThrottleCommandedInput',
+                      'heatEngineAuxiliaryIdle', 'heatEngineClosureUnderThrottle',
+                      'heatEngineProtectedService'):
             self.assertIn('validation-fast', props(f'station-{check}')['LABELS'])
             self.assertNotIn('validation-stress', props(f'station-{check}')['LABELS'])
         stress_timeouts = {'pathwayLongHorizon': 20, 'pathwayAbsurdGeometry': 10,

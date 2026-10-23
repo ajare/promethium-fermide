@@ -526,6 +526,7 @@ namespace core
 			engineResult.hotReservoirId = engine.authored.hotReservoirId;
 			engineResult.rejectionReservoirId = engine.authored.rejectionReservoirId;
 			engineResult.ratedThermalInputKW = engine.authored.ratedThermalInputKW;
+			engineResult.commandedInputKW = engine.authored.commandedInputKW;
 			engineResult.carnotFraction = engine.authored.carnotFraction;
 			engineResult.auxiliaryPowerKW = engine.authored.auxiliaryPowerKW;
 			engineResult.minHotTemperatureC = engine.authored.minHotTemperatureC;

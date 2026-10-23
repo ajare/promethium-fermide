@@ -646,6 +646,14 @@ _Avoid_: Motor (names rotation, not the thermodynamic crossing), turbine (a mech
 A Heat engine's declared share of the Carnot ceiling it is allowed to capture, in (0, 1]. The engine's actual efficiency is this fraction of the Carnot efficiency at its current interface temperatures, so over-unity conversion is refused at authoring rather than rediscovered at runtime. It is a declared ceiling on capture, not a part-load curve: the engine sits at its fraction whatever its intake, and it is not the engine's rated power, which is declared separately as rated thermal input.
 _Avoid_: Efficiency (the actual η is published beside it, not conflated with it), utilisation, capture rate, second-law margin
 
+**Commanded input**:
+A Heat engine's intake dispatch, in [0, rated thermal input]: the ceiling the author places on the engine's heat intake for this operating state. Throttling below rated leaves heat deliberately in the hot reservoir for a competing consumer. It is a cap on the request, never a grant: acceptance and supply can still hold the intake below the command, and a command above rated is refused at authoring. On the wire the field travels only when the engine is actually throttled; absent, it means full rated.
+_Avoid_: Setpoint (implies a control target the governor chases), throttle position (a mechanism), demand (the load's word)
+
+**Demand acceptance**:
+The power the station's generation-and-battery pool can actually take this tick — the demand it has presented plus the charge headroom the batteries can still absorb, less the generation already in the pool. A Heat engine converts only the heat whose power was demand-accepted: unadmitted power means unconverted heat, left in the hot reservoir. This is the exact mirror of the standing rule for energy-fed machines, where a reactor processes only what the actually supplied energy can drive. With zero demand and zero charge headroom the engine extracts nothing and its limiter reads DemandAcceptance.
+_Avoid_: Curtailment (the load-side word for reduced supply), dispatch shortfall (the dispatcher's unmet target), rejection (the engine's thermal term)
+
 **Thermal service class**:
 A cooling service distinguished by its permitted interface temperatures and compatible heat-transfer requirements. Spare cooling capacity in one class is not automatically usable by another class.
 

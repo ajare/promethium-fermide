@@ -1321,6 +1321,18 @@ using namespace station_detail;
 					+ "' of class '" + rejection->thermalClass + "'; heat routes only to the same service class");
 			if (!std::isfinite(engine.ratedThermalInputKW) || engine.ratedThermalInputKW < 0.0)
 				return refuse(where + " rated thermal input must be finite and non-negative");
+			// The intake dispatch is a cap in [0, rated] (#805): a command
+			// below zero is nonsense and a command above rated is a request
+			// for intake the machine was never built to draw. Both are
+			// authoring errors, refused by name with the World unmutated.
+			if (!std::isfinite(engine.commandedInputKW) || engine.commandedInputKW < 0.0)
+				return refuse(where + " commanded input must be finite and non-negative");
+			if (engine.commandedInputKW > engine.ratedThermalInputKW)
+				return refuse(where + " commanded input "
+					+ std::to_string(engine.commandedInputKW)
+					+ " kW exceeds rated thermal input "
+					+ std::to_string(engine.ratedThermalInputKW)
+					+ " kW; the command caps intake, it can never exceed the rating");
 			// The second law as a validation error: a fraction above 1 is
 			// an over-unity machine, and one at or below zero converts
 			// nothing however live the gradient. Both are authoring errors.

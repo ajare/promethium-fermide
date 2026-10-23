@@ -5358,7 +5358,7 @@ namespace
 		resources.manager.destroyResources({atmosphere});
 		require(atmosphere->text().empty() && atmosphere->document().settings == core::StationSystemsSettings{}
 			&& !atmosphere->reference(), "Destroyed Resource retained configuration data");
-		{ std::ofstream out(root / atmosphere->getSource()); out << "schemaVersion: 109\nstationSystems: ["; }
+		{ std::ofstream out(root / atmosphere->getSource()); out << "schemaVersion: 110\nstationSystems: ["; }
 		bool refused = false;
 		try { resources.manager.createResource(atmosphere); }
 		catch (std::exception const&) { refused = true; }

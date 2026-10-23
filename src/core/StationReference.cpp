@@ -360,6 +360,11 @@ namespace core
 				serializer.writeString("rejectionReservoirId", engine.rejectionReservoirId);
 				serializer.writeString("thermalClass", engine.thermalClass);
 				serializer.writeDouble("ratedThermalInputKW", engine.ratedThermalInputKW);
+				// #805: the intake dispatch travels only when the engine is
+				// actually throttled below rated; an absent field means full
+				// rated, so an unthrottled engine keeps the compact shape.
+				if (engine.commandedInputKW != engine.ratedThermalInputKW)
+					serializer.writeDouble("commandedInputKW", engine.commandedInputKW);
 				serializer.writeDouble("carnotFraction", engine.carnotFraction);
 				serializer.writeDouble("auxiliaryPowerKW", engine.auxiliaryPowerKW);
 				serializer.writeDouble("minHotTemperatureC", engine.minHotTemperatureC);
@@ -1478,8 +1483,8 @@ namespace core
 				auto const id = serializer.readString("id");
 				std::vector<std::string> fields{"id", "hotReservoirId",
 					"rejectionReservoirId", "thermalClass", "ratedThermalInputKW",
-					"carnotFraction", "auxiliaryPowerKW", "minHotTemperatureC",
-					"maxSinkTemperatureC"};
+					"commandedInputKW", "carnotFraction", "auxiliaryPowerKW",
+					"minHotTemperatureC", "maxSinkTemperatureC"};
 				for (auto const& field : serializer.mapKeys(""))
 					if (std::find(fields.begin(), fields.end(), field) == fields.end())
 						throw SerializationException("Station entry '" + id + "' field '" + field
@@ -1490,6 +1495,16 @@ namespace core
 				engine.rejectionReservoirId = serializer.readString("rejectionReservoirId");
 				engine.thermalClass = serializer.readString("thermalClass");
 				engine.ratedThermalInputKW = serializer.readDouble("ratedThermalInputKW");
+				// #805: the intake dispatch defaults to full rated; a
+				// pre-110 document carrying the field is refused rather than
+				// silently dropping the throttle the author commanded.
+				engine.commandedInputKW = engine.ratedThermalInputKW;
+				if (serializer.hasField("commandedInputKW"))
+				{
+					if (version < 110) throw SerializationException(
+						"Heat engine commanded input requires World schema 110; conversion required");
+					engine.commandedInputKW = serializer.readDouble("commandedInputKW");
+				}
 				engine.carnotFraction = serializer.readDouble("carnotFraction");
 				engine.auxiliaryPowerKW = serializer.readDouble("auxiliaryPowerKW");
 				engine.minHotTemperatureC = serializer.readDouble("minHotTemperatureC");
@@ -2314,8 +2329,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 109)
-				return refuse("Reference station schema version must be from 65 to 109");
+			if (document.schemaVersion < 65 || document.schemaVersion > 110)
+				return refuse("Reference station schema version must be from 65 to 110");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

@@ -510,6 +510,31 @@ namespace core
 		engineRejectionByReservoir = std::vector<double>(runtime.reservoirs.size(), 0.0);
 		totalHeatEngineOutputKW = double{0.0};
 		totalHeatEngineRejectionKW = double{0.0};
+		// The acceptance ceiling (#805): the power the station can actually
+		// take this tick - the demand the station last presented to the pool
+		// plus the charge headroom the batteries can still absorb. The
+		// engine converts only the heat whose power is admitted ahead of
+		// the discretionary demand it supplies: unadmitted power means
+		// unconverted heat, left in the hot reservoir for whatever else
+		// can use it. This is the exact mirror of the standing rule for
+		// energy-fed machines - a Sabatier reactor only converts the
+		// methane the actually supplied energy can drive. The demand
+		// signal is the last committed one, the same supply-independent
+		// signal automatic dispatch steers by (#415): protected service
+		// admission draws from the pool ahead of every discretionary load,
+		// so the watts an engine supplies here are never cut from a
+		// protected service, and the throttle only ever withholds supply
+		// the station had no acceptance for.
+		double chargeHeadroomKW = 0.0;
+		for (auto const& battery : runtime.batteries)
+		{
+			if (batteryDisabled(battery)) continue;
+			auto const headroom = battery.authored.nameplateKWh - battery.stored;
+			if (headroom <= 0.0) continue;
+			chargeHeadroomKW += std::min(battery.authored.maxChargeKW,
+				headroom / hours / battery.authored.chargeEfficiency);
+		}
+		auto const acceptanceCeilingKW = runtime.lastDispatchDemandKW + chargeHeadroomKW;
 		auto const dtSeconds = static_cast<double>(seconds);
 		for (auto& engine : runtime.heatEngines)
 		{
@@ -588,7 +613,11 @@ namespace core
 			// engine's own contribution cannot cross.
 			auto const supplyKW = hot.authored.heatCapacityKJPerK
 			* std::max(0.0, hotK - sinkK) / dtSeconds;
-			auto intakeKW = std::min(engine.authored.ratedThermalInputKW, supplyKW);
+			// The commanded input is the dispatch ceiling (#805): the
+			// author throttles below rated to leave heat deliberately in
+			// the hot reservoir for a competing consumer. It caps the
+			// request; it never raises it above rated.
+			auto intakeKW = std::min(engine.authored.commandedInputKW, supplyKW);
 			auto grossKW = eta * intakeKW;
 			if (grossKW <= auxKW + 1e-12)
 			{
@@ -601,6 +630,29 @@ namespace core
 				continue;
 			}
 			auto netKW = grossKW - auxKW;
+			// The acceptance-coupled throttle (#805): the engine requests
+			// its net output and the station admits what it can use - the
+			// demand it presented to the pool plus the charge headroom the
+			// batteries can still take, less the generation already in
+			// the pool ahead of this engine. What is not admitted is not
+			// converted: the heat stays in the hot reservoir and the
+			// limiter names DemandAcceptance as the binding constraint.
+			auto const acceptanceKW = std::max(0.0, acceptanceCeilingKW - availableGeneration);
+			if (netKW > acceptanceKW + 1e-12)
+			{
+				if (acceptanceKW <= 1e-12)
+				{
+					// No demand and no charge headroom: the engine extracts
+					// nothing. It does not spin against a closed bus.
+					engine.status = StationHeatEngineStatus::Idle;
+					engine.lastLimiter = "DemandAcceptance";
+					continue;
+				}
+				netKW = acceptanceKW;
+				grossKW = netKW + auxKW;
+				intakeKW = grossKW / eta;
+				engine.lastLimiter = "DemandAcceptance";
+			}
 			// The engine's net output enters the pool as actual
 			// generation through its generation connection; the power the
 			// connection actually delivers caps the whole conversion, so
@@ -618,10 +670,16 @@ namespace core
 				intakeKW = eta > 0.0 ? grossKW / eta : 0.0;
 				engine.lastLimiter = "GenerationConnection";
 			}
-			else if (intakeKW < engine.authored.ratedThermalInputKW - 1e-12)
+			else if (engine.lastLimiter != "DemandAcceptance")
 			{
-				// The hot side, not the rating, is what capped the intake.
-				engine.lastLimiter = "HotSideSupply";
+				// Name the binding ceiling on the intake: the hot side if
+				// it cut the request below the command, otherwise the
+				// author's own throttle if that sits below rated.
+				if (intakeKW < engine.authored.commandedInputKW - 1e-12)
+					engine.lastLimiter = "HotSideSupply";
+				else if (engine.authored.commandedInputKW
+						< engine.authored.ratedThermalInputKW - 1e-12)
+					engine.lastLimiter = "CommandedInput";
 			}
 			if (netKW <= 1e-12 || intakeKW <= 1e-12)
 			{

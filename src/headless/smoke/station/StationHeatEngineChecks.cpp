@@ -43,7 +43,12 @@ core::ThermalReservoirSettings engineReservoir(std::string const& id,
 // 20 C, and one engine between them. At carnotFraction 0.5 the reference
 // numbers from the spec apply: eta_C = 1 - 293.15/363.15 ~ 0.1926,
 // eta ~ 0.0963. Gates are set so the fixture gradient is live: min-hot
-// 30 C above max-sink 25 C.
+// 30 C above max-sink 25 C. The battery is the acceptance the engine
+// needs (#805): with no load and no charge headroom the acceptance-coupled
+// throttle holds the engine at zero, so the standing fixture carries a
+// bank with room to charge - the engine's power has somewhere to go.
+// The command defaults to full rated: the fixture engines are unthrottled
+// unless a test says otherwise.
 core::StationSystemsSettings enginePair(double hotCapacity = 20000.0,
 	double sinkCapacity = 20000.0, double ratedInputKW = 100.0,
 	double carnotFraction = 0.5, double auxKW = 1.0)
@@ -58,11 +63,20 @@ core::StationSystemsSettings enginePair(double hotCapacity = 20000.0,
 	engine.rejectionReservoirId = "reject";
 	engine.thermalClass = "warm";
 	engine.ratedThermalInputKW = ratedInputKW;
+	engine.commandedInputKW = ratedInputKW;
 	engine.carnotFraction = carnotFraction;
 	engine.auxiliaryPowerKW = auxKW;
 	engine.minHotTemperatureC = 30.0;
 	engine.maxSinkTemperatureC = 25.0;
 	s.heatEngines = {engine};
+	core::BatterySettings bank;
+	bank.id = "buffer";
+	bank.nameplateKWh = 1000.0;
+	bank.usableKWh = 900.0;
+	bank.startingStoredKWh = 100.0;
+	bank.maxChargeKW = 500.0;
+	bank.maxDischargeKW = 500.0;
+	s.batteries = {bank};
 	return s;
 }
 
@@ -88,6 +102,14 @@ core::StationThermalReservoirSnapshot const& reservoir(
 	for (auto const& entry : snap.thermal.reservoirs)
 		if (entry.id == id) return entry;
 	throw std::runtime_error("reservoir missing from snapshot");
+}
+
+core::StationEquipmentLoadSnapshot loadSnap(core::StationSystemsSnapshot const& snap,
+	std::string const& id)
+{
+	for (auto const& entry : snap.power.loads)
+		if (entry.id == id) return entry;
+	throw std::runtime_error("load missing from snapshot");
 }
 
 // The tracer headline (#804): two reservoirs at unequal temperature plus one
@@ -386,6 +408,7 @@ void heatEngineValidation(smoke::Context const&)
 	base.rejectionReservoirId = "reject";
 	base.thermalClass = "warm";
 	base.ratedThermalInputKW = 100.0;
+	base.commandedInputKW = 100.0;
 	base.carnotFraction = 0.5;
 	base.auxiliaryPowerKW = 1.0;
 	base.minHotTemperatureC = 30.0;
@@ -441,6 +464,18 @@ void heatEngineValidation(smoke::Context const&)
 	bad = base; bad.minHotTemperatureC = 10.0; // below maxSink
 	refuseNamed(bad, {"orc", "positive-gradient window"},
 		"a dead gradient window (min-hot below max-sink) was not refused by name");
+	// The commanded intake dispatch must sit in [0, rated] (#805): a
+	// negative command is nonsense and a command above rated asks for
+	// intake the machine was never built to draw. Both are refused by name.
+	bad = base; bad.commandedInputKW = -1.0;
+	refuseNamed(bad, {"orc", "commanded input"},
+		"a negative commanded input was not refused by name");
+	bad = base; bad.commandedInputKW = 100.0 + 1e-9; // above rated
+	refuseNamed(bad, {"orc", "commanded input"},
+		"a commanded input above rated was not refused by name");
+	bad = base; bad.commandedInputKW = std::numeric_limits<double>::quiet_NaN();
+	refuseNamed(bad, {"orc", "commanded input"},
+		"a non-finite commanded input was not refused by name");
 	// The declared ceiling, in the spirit of the existing component ceilings.
 	auto many = good;
 	many.heatEngines.clear();
@@ -466,6 +501,8 @@ void heatEngineValidation(smoke::Context const&)
 		e = base; e.thermalClass = "low"; refusals.push_back(e);
 		e = base; e.carnotFraction = 2.0; refusals.push_back(e);
 		e = base; e.minHotTemperatureC = 20.0; refusals.push_back(e);
+		e = base; e.commandedInputKW = 150.0; refusals.push_back(e);
+		e = base; e.commandedInputKW = -0.5; refusals.push_back(e);
 	}
 	for (auto const& refusal : refusals)
 	{
@@ -493,11 +530,26 @@ void heatEnginePersistence(smoke::Context const&)
 	engineSettings.rejectionReservoirId = "reject";
 	engineSettings.thermalClass = "warm";
 	engineSettings.ratedThermalInputKW = 137.5;
+	// A throttled dispatch (#805): the command below rated must survive
+	// the round trip, and the wire carries it precisely because it is not
+	// the default.
+	engineSettings.commandedInputKW = 100.0;
 	engineSettings.carnotFraction = 0.375;
 	engineSettings.auxiliaryPowerKW = 2.25;
 	engineSettings.minHotTemperatureC = 41.0;
 	engineSettings.maxSinkTemperatureC = 33.5;
 	settings.heatEngines = {engineSettings};
+	// The run needs acceptance: a charge-headroom battery keeps the
+	// acceptance-coupled throttle open so the persistence run actually
+	// converts (#805).
+	core::BatterySettings bank;
+	bank.id = "buffer";
+	bank.nameplateKWh = 500.0;
+	bank.usableKWh = 450.0;
+	bank.startingStoredKWh = 50.0;
+	bank.maxChargeKW = 300.0;
+	bank.maxDischargeKW = 300.0;
+	settings.batteries = {bank};
 	// The Station configuration document round-trips the exact settings.
 	core::StationConfigurationDocument document;
 	document.settings = settings;
@@ -509,7 +561,8 @@ void heatEnginePersistence(smoke::Context const&)
 		"heat engine Station configuration changed on round trip");
 	// Unknown-field discipline: a field the loader does not know is refused
 	// naming the entry and the field, and the loaded settings are untouched.
-	for (auto const* field : {"carnotFraction", "hotReservoirId", "maxSinkTemperatureC"})
+	for (auto const* field : {"carnotFraction", "hotReservoirId", "maxSinkTemperatureC",
+		"commandedInputKW"})
 	{
 		auto bad = yaml;
 		auto const at = bad.find(std::string(field) + ":");
@@ -523,15 +576,48 @@ void heatEnginePersistence(smoke::Context const&)
 			"unknown heat engine field was ignored or mutated the document");
 	}
 	// Version discipline: a pre-109 document carrying engines is refused as
-	// conversion-required rather than silently dropping them, and a version
-	// beyond the accepted range is refused outright.
-	for (int version : {108, 110})
+	// conversion-required rather than silently dropping them, a version
+	// beyond the accepted range is refused outright, and a pre-110 document
+	// carrying the commanded-input field is refused rather than silently
+	// dropping the throttle the author commanded (#805).
+	for (int version : {108, 111})
 	{
 		auto bad = yaml;
-		bad.replace(bad.find("schemaVersion: 109"), std::string("schemaVersion: 109").size(),
+		bad.replace(bad.find("schemaVersion: 110"), std::string("schemaVersion: 110").size(),
 			"schemaVersion: " + std::to_string(version));
 		require(!core::parseStationConfiguration(bad, loaded, &diagnostic)
 			&& loaded.settings == settings, "unsupported heat engine schema was accepted");
+	}
+	{
+		auto bad = yaml;
+		bad.replace(bad.find("schemaVersion: 110"), std::string("schemaVersion: 110").size(),
+			"schemaVersion: 109");
+		require(!core::parseStationConfiguration(bad, loaded, &diagnostic)
+			&& diagnostic.find("commanded input") != std::string::npos
+			&& diagnostic.find("conversion required") != std::string::npos
+			&& loaded.settings == settings,
+			"a pre-110 document carrying the commanded-input field was accepted");
+	}
+	// The default: a document without the commanded-input field loads the
+	// engine at full rated - the throttle is what travels, not the default.
+	{
+		auto stripped = yaml;
+		auto const at = stripped.find("commandedInputKW:");
+		require(at != std::string::npos, "throttled command missing from the wire");
+		// Erase the whole line, indentation included, so the next field
+		// keeps its own column rather than inheriting the deleted one.
+		auto const lineStart = stripped.rfind('\n', at);
+		auto const eraseFrom = lineStart == std::string::npos ? 0 : lineStart + 1;
+		auto const end = stripped.find('\n', at);
+		stripped.erase(eraseFrom, end == std::string::npos
+			? std::string::npos : end + 1 - eraseFrom);
+		core::StationConfigurationDocument defaulted;
+		require(core::parseStationConfiguration(stripped, defaulted, &diagnostic),
+			diagnostic.c_str());
+		require(defaulted.settings.heatEngines.size() == 1
+			&& defaulted.settings.heatEngines[0].commandedInputKW
+				== defaulted.settings.heatEngines[0].ratedThermalInputKW,
+			"an absent commanded-input field did not default to full rated");
 	}
 	// Both World persistence paths: the reloaded World carries the exact
 	// authored engines and reproduces the original run exactly.
@@ -651,7 +737,280 @@ void heatEnginePlantCoexistence(smoke::Context const&)
 		&& snapshot.power.generatorOutputKW > 1.0,
 		"both sources did not show up as pool generation");
 }
+
+// The acceptance-coupled throttle (#805): the engine converts only the
+// heat whose power the station actually accepts. With zero demand and zero
+// charge headroom the extraction is zero and the limiter reads
+// DemandAcceptance; as acceptance rises the intake rises with it, up to
+// the dispatch ceiling.
+void heatEngineDemandAcceptance(smoke::Context const&)
+{
+	std::string diagnostic;
+	// Zero acceptance: no loads, and the one battery is full, so there
+	// is neither demand nor charge headroom for the engine's power.
+	{
+		auto settings = enginePair();
+		auto& bank = settings.batteries[0];
+		bank.startingStoredKWh = bank.nameplateKWh; // no charge headroom
+		core::World world("HeatEngineNoAcceptance", 2, 2);
+		configure(world, settings, diagnostic);
+		world.resumeSimulation();
+		require(advanceSeconds(world, 30.0), "zero-acceptance run failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "zero-acceptance run failed its audit");
+		auto const orc = engine(snapshot, "orc");
+		require(orc.status == core::StationHeatEngineStatus::Idle
+			&& orc.lastLimiter == "DemandAcceptance",
+			"an engine with no demand and no charge headroom did not idle with the DemandAcceptance limiter");
+		require(orc.lastThermalInputKW == 0.0 && orc.lastElectricalOutputKW == 0.0
+			&& orc.lastRejectionKW == 0.0 && orc.thermalInputEnergyKJ == 0.0
+			&& orc.electricalEnergyKJ == 0.0 && orc.rejectionEnergyKJ == 0.0,
+			"an unaccepted engine booked extraction, output or rejection anyway");
+		require(reservoir(snapshot, "hot").temperatureC == 90.0,
+			"the hot reservoir drained for power nobody accepted");
+		require(snapshot.power.heatEngineOutputKW == 0.0,
+			"an unaccepted engine produced bus generation");
+	}
+	// Contrast: the same station with charge headroom admits the engine's
+	// power and the hot reservoir drains.
+	{
+		core::World world("HeatEngineChargeHeadroom", 2, 2);
+		configure(world, enginePair(), diagnostic);
+		world.resumeSimulation();
+		require(advanceSeconds(world, 30.0), "charge-headroom run failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "charge-headroom run failed its audit");
+		require(engine(snapshot, "orc").status == core::StationHeatEngineStatus::Active,
+			"charge headroom did not admit the engine's power");
+		require(reservoir(snapshot, "hot").temperatureC < 90.0 - 1e-6,
+			"the hot reservoir did not drain once acceptance existed");
+	}
+	// No battery and no load at all: the same zero acceptance, the same
+	// idle - the engine never over-extracts against an empty station.
+	{
+		auto settings = enginePair();
+		settings.batteries.clear();
+		core::World world("HeatEngineNoPool", 2, 2);
+		configure(world, settings, diagnostic);
+		world.resumeSimulation();
+		require(advanceSeconds(world, 30.0), "no-pool run failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "no-pool run failed its audit");
+		require(engine(snapshot, "orc").lastLimiter == "DemandAcceptance"
+			&& engine(snapshot, "orc").thermalInputEnergyKJ == 0.0,
+			"an engine with no pool at all over-extracted against zero acceptance");
+	}
 }
+
+// A commanded input below rated caps the intake accordingly: the same
+// station throttled to a quarter of rated draws a quarter of the heat and
+// leaves measurably more of it in the hot reservoir over the run, with
+// the throttle reason named in the snapshot.
+void heatEngineThrottleCommandedInput(smoke::Context const&)
+{
+	std::string diagnostic;
+	auto full = enginePair();
+	auto throttled = enginePair();
+	throttled.heatEngines[0].commandedInputKW = 25.0; // rated 100
+	core::World fullWorld("HeatEngineFullCommand", 2, 2);
+	core::World throttledWorld("HeatEngineThrottled", 2, 2);
+	configure(fullWorld, full, diagnostic);
+	configure(throttledWorld, throttled, diagnostic);
+	fullWorld.resumeSimulation();
+	throttledWorld.resumeSimulation();
+	require(advanceSeconds(fullWorld, 60.0) && advanceSeconds(throttledWorld, 60.0),
+		"throttle comparison run failed");
+	auto const fullSnap = fullWorld.getStationSystemsSnapshot();
+	auto const throttledSnap = throttledWorld.getStationSystemsSnapshot();
+	require(fullSnap.healthy && throttledSnap.healthy, "throttle run failed its audit");
+	auto const fullEngine = engine(fullSnap, "orc");
+	auto const throttledEngine = engine(throttledSnap, "orc");
+	require(fullEngine.status == core::StationHeatEngineStatus::Active
+		&& throttledEngine.status == core::StationHeatEngineStatus::Active,
+		"neither the full- nor the throttled-command engine ran");
+	require(std::abs(throttledEngine.lastThermalInputKW - 25.0) < 1e-9,
+		"the throttled engine did not cap its intake at the commanded input");
+	require(throttledEngine.lastLimiter == "CommandedInput",
+		"the throttled engine did not name the commanded-input throttle in the snapshot");
+	require(fullEngine.lastThermalInputKW > 90.0
+		&& fullEngine.lastLimiter != "CommandedInput",
+		"the full-command engine did not draw near its rated intake");
+	// Measurably more heat left in the throttled run's hot reservoir:
+	// the quarter-rated command drew a quarter of the intake, so three
+	// quarters of the drain the full command made stays behind.
+	auto const fullDrainK = 90.0 - reservoir(fullSnap, "hot").temperatureC;
+	auto const throttledDrainK = 90.0 - reservoir(throttledSnap, "hot").temperatureC;
+	require(throttledDrainK > 0.0 && fullDrainK > 3.0 * throttledDrainK,
+		"throttling down did not leave measurably more heat in the hot reservoir");
+	require(throttledEngine.thermalInputEnergyKJ * 3.0
+		< fullEngine.thermalInputEnergyKJ + 1e-9,
+		"the throttled engine drew the same cumulative heat as the full-command engine");
+	require(throttledEngine.electricalEnergyKJ
+		< fullEngine.electricalEnergyKJ - 1.0,
+		"the throttled engine delivered the same cumulative power as the full-command engine");
+}
+
+// Aux-gated running under the throttle: an engine whose gross output
+// cannot cover its own auxiliaries at the available gradient idles - it
+// never draws net power from the bus to feed a machine that cannot pay
+// for itself.
+void heatEngineAuxiliaryIdle(smoke::Context const&)
+{
+	std::string diagnostic;
+	// A thin gradient: at 24 C over 20 C with carnotFraction 0.5 the
+	// gross output is well under a tenth of the auxiliaries, so the
+	// engine must not run at all.
+	auto settings = enginePair(20000.0, 20000.0, 100.0, 0.5, 5.0);
+	settings.thermalReservoirs[0].startingTemperatureC = 24.0;
+	settings.thermalReservoirs[1].startingTemperatureC = 20.0;
+	settings.heatEngines[0].minHotTemperatureC = 24.0;
+	settings.heatEngines[0].maxSinkTemperatureC = 22.0;
+	core::World world("HeatEngineAuxIdle", 2, 2);
+	configure(world, settings, diagnostic);
+	world.resumeSimulation();
+	require(advanceSeconds(world, 30.0), "aux-idle run failed");
+	auto const snapshot = world.getStationSystemsSnapshot();
+	require(snapshot.healthy, "aux-idle run failed its audit");
+	auto const orc = engine(snapshot, "orc");
+	require(orc.status == core::StationHeatEngineStatus::Idle
+		&& orc.lastLimiter == "AuxiliaryPower",
+		"an engine whose gross cannot cover its auxiliaries did not idle with AuxiliaryPower");
+	require(orc.thermalInputEnergyKJ == 0.0 && orc.electricalEnergyKJ == 0.0
+		&& orc.rejectionEnergyKJ == 0.0,
+		"an aux-idle engine moved energy anyway");
+	require(snapshot.power.heatEngineOutputKW == 0.0,
+		"an aux-idle engine showed bus output");
+	// The bus and the bank are untouched: the engine never becomes a load.
+	require(snapshot.power.batteries[0].storedKWh == 100.0,
+		"the battery moved energy for an engine that cannot pay for itself");
+	require(reservoir(snapshot, "hot").temperatureC == 24.0,
+		"the hot reservoir changed for an aux-idle engine");
+}
+
+// Ledger closure stays exact under throttling: hot loss = bus net gain +
+// rejection gain, every tick, with the command holding the intake at a
+// fraction of rated.
+void heatEngineClosureUnderThrottle(smoke::Context const&)
+{
+	std::string diagnostic;
+	auto settings = enginePair(20000.0, 30000.0, 80.0, 0.4, 2.0);
+	settings.heatEngines[0].commandedInputKW = 40.0; // half of rated
+	core::World world("HeatEngineThrottleClosure", 2, 2);
+	configure(world, settings, diagnostic);
+	world.resumeSimulation();
+	double previousHotEnergy = 0.0, previousSinkEnergy = 0.0;
+	bool first = true, sawActive = false;
+	for (int step = 0; step < 40; ++step)
+	{
+		require(advanceStationSteps(world, 1), "throttle-closure step failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "throttle-closure run failed its audit");
+		auto const& hot = reservoir(snapshot, "hot");
+		auto const& sink = reservoir(snapshot, "reject");
+		auto const orc = engine(snapshot, "orc");
+		require(orc.lastThermalInputKW <= 40.0 + 1e-9,
+			"the throttled engine drew more than its commanded input");
+		if (!first)
+		{
+			auto const hotLossKJ = previousHotEnergy - hot.currentEnergyKJ;
+			auto const sinkGainKJ = sink.currentEnergyKJ - previousSinkEnergy;
+			auto const busGainKJ = orc.lastElectricalOutputKW
+				* snapshot.systemsTimestepSeconds;
+			auto const bound = 1e-9 * std::max({1.0, std::abs(hotLossKJ),
+				std::abs(sinkGainKJ), std::abs(busGainKJ)});
+			require(std::abs(hotLossKJ - (busGainKJ + sinkGainKJ)) <= bound,
+				"per-tick closure failed under throttling: hot loss != bus net gain + rejection gain");
+			require(std::abs(hot.lastEngineExtractionKW - orc.lastThermalInputKW) <= 1e-9,
+				"the reservoir extraction term disagrees with the throttled engine intake");
+			require(std::abs(sink.lastEngineRejectionKW - orc.lastRejectionKW) <= 1e-9,
+				"the reservoir rejection term disagrees with the throttled engine rejection");
+		}
+		previousHotEnergy = hot.currentEnergyKJ;
+		previousSinkEnergy = sink.currentEnergyKJ;
+		first = false;
+		require(std::abs(orc.residualKJ) <= 1e-6 * std::max(1.0, orc.thermalInputEnergyKJ),
+			"the throttled engine conversion ledger did not close over input = electrical + rejection");
+		if (orc.status == core::StationHeatEngineStatus::Active) sawActive = true;
+	}
+	require(sawActive, "the throttled closure fixture never ran the engine");
+}
+
+// Throttle interactions with protected-service admission (#805): the
+// protected floor is part of the acceptance signal, so a protected load
+// never starves because the engine's throttle exists - and the engine
+// never over-extracts beyond the acceptance it was given.
+void heatEngineProtectedService(smoke::Context const&)
+{
+	std::string diagnostic;
+	core::EquipmentLoadSettings lifeSupport;
+	lifeSupport.id = "life-support";
+	lifeSupport.electricalDemandKW = 20.0;
+	lifeSupport.criticalFloorKW = 5.0;
+	lifeSupport.thermalClass = "warm";
+	// The engine is the station's only source and there is no charge
+	// headroom: acceptance is pure demand. If the acceptance signal
+	// missed the protected floor, the engine would idle and the floor
+	// would starve; instead the engine runs for it.
+	{
+		auto settings = enginePair(40000.0, 40000.0, 100.0, 0.5, 1.0);
+		settings.batteries.clear();
+		settings.equipmentLoads = {lifeSupport};
+		core::World world("HeatEngineProtectedOnly", 2, 2);
+		configure(world, settings, diagnostic);
+		world.resumeSimulation();
+		require(advanceSeconds(world, 30.0), "protected-only run failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "protected-only run failed its audit");
+		auto const orc = engine(snapshot, "orc");
+		require(orc.status == core::StationHeatEngineStatus::Active,
+			"the engine idled while a protected floor needed its power");
+		// The protected floor is served from the engine's admitted power:
+		// protected admission draws from the pool ahead of every
+		// discretionary watt, and the acceptance signal carried the
+		// floor's demand so the engine ran for it.
+		auto const service = loadSnap(snapshot, "life-support");
+		require(service.unmetCriticalKW <= 1e-9 && service.admitted
+			&& service.suppliedKW >= 5.0 - 1e-9,
+			"a protected floor went unmet with the engine running for it");
+		require(snapshot.power.protectedUnmetKW <= 1e-9 && !snapshot.power.protectedUnmet,
+			"the station raised a protected-unmet alarm with the floor served");
+		// Never over-extract against unmet acceptance: the engine's net
+		// output cannot exceed the demand signal it was admitted against.
+		require(orc.lastElectricalOutputKW <= snapshot.power.dispatchDemandKW + 1e-9,
+			"the engine over-extracted beyond the acceptance it was given");
+	}
+	// Solar alone covers the protected floor and the engine is throttled
+	// fully closed: the protected service is admitted from the other
+	// source unchanged - the throttle cuts only what would have gone
+	// elsewhere, never the protected admission.
+	{
+		auto covered = enginePair(40000.0, 40000.0, 100.0, 0.5, 1.0);
+		covered.batteries.clear();
+		core::SolarArraySettings sun;
+		sun.id = "sun";
+		sun.capacityKW = 8.0; // constant full illumination by default
+		covered.solarArrays = {sun};
+		covered.equipmentLoads = {lifeSupport};
+		covered.heatEngines[0].commandedInputKW = 0.0; // throttle closed
+		core::World world("HeatEngineProtectedSolar", 2, 2);
+		configure(world, covered, diagnostic);
+		world.resumeSimulation();
+		require(advanceSeconds(world, 30.0), "protected-solar run failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "protected-solar run failed its audit");
+		require(snapshot.power.protectedUnmetKW <= 1e-9 && !snapshot.power.protectedUnmet
+			&& loadSnap(snapshot, "life-support").unmetCriticalKW <= 1e-9,
+			"the engine throttle starved a protected floor the other source could carry");
+		require(engine(snapshot, "orc").lastThermalInputKW == 0.0
+			&& engine(snapshot, "orc").thermalInputEnergyKJ == 0.0,
+			"a fully throttled engine still drew heat");
+		// The hot reservoir is untouched: every joule the closed engine
+		// could not be asked to convert stays exactly where it was.
+		require(reservoir(snapshot, "hot").temperatureC == 90.0,
+			"the closed engine still touched the hot reservoir");
+	}
+}
+}   // namespace
 
 void registerStationHeatEngineChecks(std::vector<smoke::Check>& checks)
 {
@@ -665,4 +1024,9 @@ void registerStationHeatEngineChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"heatEnginePersistence", heatEnginePersistence});
 	checks.push_back({"heatEngineResetIsolation", heatEngineResetIsolation});
 	checks.push_back({"heatEnginePlantCoexistence", heatEnginePlantCoexistence});
+	checks.push_back({"heatEngineDemandAcceptance", heatEngineDemandAcceptance});
+	checks.push_back({"heatEngineThrottleCommandedInput", heatEngineThrottleCommandedInput});
+	checks.push_back({"heatEngineAuxiliaryIdle", heatEngineAuxiliaryIdle});
+	checks.push_back({"heatEngineClosureUnderThrottle", heatEngineClosureUnderThrottle});
+	checks.push_back({"heatEngineProtectedService", heatEngineProtectedService});
 }

@@ -974,7 +974,10 @@ namespace core
 		// simplification.
 		// Schema 109 adds authored Heat engines (#804) - the Carnot-
 		// bounded heat-to-power crossing between two thermal reservoirs.
-		serializer.writeUint32("version", 109);
+		// Schema 110 adds the heat engine's intake dispatch (#805) - the
+		// commanded input in [0, rated] that lets the author throttle the
+		// engine and leave heat in the hot reservoir for a competitor.
+		serializer.writeUint32("version", 110);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
@@ -1876,7 +1879,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 109)
+		if (version < 1 || version > 110)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}

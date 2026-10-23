@@ -584,6 +584,7 @@ namespace core
 		for (auto const& engine : snapshot.heatEngines)
 		{
 			fin(engine.ratedThermalInputKW, tag("ratedThermalInputKW", engine.id));
+			fin(engine.commandedInputKW, tag("commandedInputKW", engine.id));
 			fin(engine.carnotFraction, tag("carnotFraction", engine.id));
 			fin(engine.auxiliaryPowerKW, tag("auxiliaryPowerKW", engine.id));
 			fin(engine.minHotTemperatureC, tag("minHotTemperatureC", engine.id));
