@@ -505,6 +505,14 @@ using namespace station_detail;
 			AtmospherePathwaySettings authored;
 			size_t aIndex{SIZE_MAX}, bIndex{SIZE_MAX}; // SIZE_MAX: exterior vacuum
 			std::array<double, 4> flowRateKgPerS{}, netTransferredKg{};
+			// Advected enthalpy carried with this pathway's moving gas
+			// (#802): signed net energy A to B since configuration, and
+			// the last-step average rate. For an Exterior pathway this is
+			// the energy carried away to vacuum - an explicit loss, never
+			// destroyed. Booked per side as the exact negation of the far
+			// side, mirroring the conductedKJ discipline of #794.
+			double advectedKJ{0.0};
+			double lastAdvectedKW{0.0};
 			StationAtmospherePathwayStatus status{StationAtmospherePathwayStatus::Idle};
 		};
 		// The runtime ledger of one authored Thermal link (#794): heat is
@@ -578,6 +586,15 @@ using namespace station_detail;
 			// residual.
 			double conductedKJ{0.0};
 			double lastConductedKW{0.0};
+			// Advected enthalpy through this compartment's Atmosphere
+			// pathways (#802): signed into the compartment (+ hot gas
+			// arriving, - heat riding out with escaping gas, including
+			// the explicit loss carried to Exterior vacuum), booked once
+			// per side as the exact negation of the far side of each
+			// inter-compartment transfer, and closed over by the
+			// compartment's energy residual.
+			double advectedKJ{0.0};
+			double lastAdvectedKW{0.0};
 			// Metabolic heat routed into this compartment by authored crews
 			// (#401): booked as its own thermal term, never folded into the
 			// compartment's own occupancy heat, and the thermal ledger

@@ -98,6 +98,7 @@ pf_add_smoke_module(pf-smoke-station
         station/StationAtmosphereChecks.cpp
         station/StationPathwayChecks.cpp
         station/StationThermalLinkChecks.cpp
+        station/StationAdvectionChecks.cpp
         station/StationWaterChecks.cpp station/CompoundWater.cpp
         station/StationRecoveryChecks.cpp station/Bioconversion.cpp
         station/StationBiologyChecks.cpp
@@ -185,7 +186,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         observationIntegration observationBounds scheduledExchangeObservations algaeExchangeObservations cropExchangeObservations microbialExchangeObservations carbonExchangeObservations waterGasExchangeObservations crewAtmosphereExchangeObservations thermalExchangeObservations electricalExchangeObservations exchangeObservations materialObservations fluidInventoryObservations compoundInventoryObservations livingInventoryObservations materialRelationshipObservations materialCanonicalUnits batteryObservations batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
-        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres pathwayPersistence pathwayDiffusion pathwayValidation pathwayCounterFlow pathwayVacuumEqualization pathwayExteriorDiffusion pathwayReferenceConfigurations pathwayClosed pathwayOpenness pathwayThermalNeutrality pathwayCondensation pathwayParallelAdditivity pathwayChainTopology thermalLinkConservation thermalLinkAdr0026Contrast thermalLinkIdle thermalLinkCapacityWeighting thermalLinkNoCrossing thermalLinkParallelAdditivity thermalLinkDeclarationOrder thermalLinkMassUntouched thermalLinkPathwayCoexistence thermalLinkPathwayIndependence thermalLinkReservoirCoexistence thermalLinkValidation thermalLinkResetIsolation thermalLinkPersistence thermalLinkSameTickCondensation thermalLinkReverseNoSpuriousCondensation thermalLinkParallelWallAdditivity thermalLinkChainConvergence thermalLinkChainLedgerAttribution thermalLinkDeclarationOrderIndependence thermalLinkSharedNeighbourIndependence crews water waterQualityGates waterQualityValidation waterQualityConsumers waterSelectiveIrrigation waterHydroponics waterContamination compoundWaterPartial compoundWaterPartialValidation compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance atmosphereStateCharts configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
+        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres pathwayPersistence pathwayDiffusion pathwayValidation pathwayCounterFlow pathwayVacuumEqualization pathwayExteriorDiffusion pathwayReferenceConfigurations pathwayClosed pathwayOpenness pathwayThermalNeutrality pathwayCondensation pathwayParallelAdditivity pathwayChainTopology advectedSignDirection advectedEqualTemperatureInert advectedVentClosedForm advectedFlimsyVersusVault advectedMassUntouched advectedLedgerCloses advectedConductedIndependence advectedVentLossBooked advectedValidation thermalLinkConservation thermalLinkAdr0026Contrast thermalLinkIdle thermalLinkCapacityWeighting thermalLinkNoCrossing thermalLinkParallelAdditivity thermalLinkDeclarationOrder thermalLinkMassUntouched thermalLinkPathwayCoexistence thermalLinkPathwayIndependence thermalLinkReservoirCoexistence thermalLinkValidation thermalLinkResetIsolation thermalLinkPersistence thermalLinkSameTickCondensation thermalLinkReverseNoSpuriousCondensation thermalLinkParallelWallAdditivity thermalLinkChainConvergence thermalLinkChainLedgerAttribution thermalLinkDeclarationOrderIndependence thermalLinkSharedNeighbourIndependence crews water waterQualityGates waterQualityValidation waterQualityConsumers waterSelectiveIrrigation waterHydroponics waterContamination compoundWaterPartial compoundWaterPartialValidation compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance atmosphereStateCharts configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
         compoundFiles powerFiles powerChainFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles maintenanceFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
         # #571: harvest, algae and the nutrient-conservation closure were
         # reachable through the binary but never registered here, so they
@@ -238,8 +239,11 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
 endforeach()
 # #792: long horizons are deliberately absent from validation-fast.
 # #794 adds the thermal-link long-horizon and absurd-geometry stress checks.
+# #802 adds the advected-enthalpy near-empty and absurd-specific-heat
+# stress checks.
 foreach(check pathwayLongHorizon pathwayAbsurdGeometry
-        thermalLinkChainHomogenization thermalLinkAbsurdGeometry)
+        thermalLinkChainHomogenization thermalLinkAbsurdGeometry
+        advectedVentNearEmpty advectedAbsurdSpecificHeat)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES
         LABELS "smoke;functional;validation-stress;core;station" TIMEOUT 120)
@@ -261,7 +265,8 @@ foreach(ratio 1 7 60)
 endforeach()
 # Thermal/phase guarantees protect every publication at fine and coarse cadences.
 foreach(ratio 1 7 60)
-    foreach(check pathwayThermalNeutrality pathwayCondensation thermalLinkConservation)
+    foreach(check pathwayThermalNeutrality pathwayCondensation thermalLinkConservation
+            advectedSignDirection advectedVentClosedForm advectedConductedIndependence)
         add_test(NAME station-pathway-thermal-${check}-${ratio}
             COMMAND pf-smoke-station --step-ratio ${ratio} --check ${check})
         set_tests_properties(station-pathway-thermal-${check}-${ratio} PROPERTIES

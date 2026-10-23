@@ -165,16 +165,28 @@ void thermalLinkAdr0026Contrast(smoke::Context const&)
 	for (size_t gas = 0; gas < 4; ++gas)
 		require(isolatedSnap.atmospherePathways[0].netTransferredKg[gas] > 1e-3,
 			"the control pathway did not actually exchange every gas");
-	// And ADR-0026 holds to full precision: thirty minutes of continuous
-	// gas exchange moved no sensible heat at all.
-	require(std::abs(isolatedSnap.atmospheres[0].temperatureC
-			- isolatedStart.atmospheres[0].temperatureC) < 1e-12
-		&& std::abs(isolatedSnap.atmospheres[1].temperatureC
-			- isolatedStart.atmospheres[1].temperatureC) < 1e-12,
-		"the thermally-neutral pathway did not keep the authored temperatures");
+	// And ADR-0026 as amended by #802 holds: the pathway is still not a
+	// conductor - neither compartment books a single joule of conducted
+	// heat across thirty minutes of continuous gas exchange. What the
+	// pathway does now is carry enthalpy with the mass it moves, so
+	// the temperature difference decays through the booked advected
+	// term instead of persisting. The contrast with the link below is
+	// the mechanism, not the existence of a temperature effect: the
+	// pathway's effect is enthalpy riding with mass, the link's is
+	// conduction with no mass at all.
+	require(isolatedSnap.atmospheres[0].conductedEnergyKJ == 0
+		&& isolatedSnap.atmospheres[1].conductedEnergyKJ == 0,
+		"the thermally-neutral pathway booked conducted heat");
+	require(isolatedSnap.atmospheres[0].advectedEnergyKJ < 0
+		&& isolatedSnap.atmospheres[1].advectedEnergyKJ > 0,
+		"the pathway did not carry enthalpy from the hot side to the cold side");
 	require(isolatedSnap.atmospheres[0].temperatureC
-		- isolatedSnap.atmospheres[1].temperatureC > 29.999,
-		"the temperature difference decayed without a link");
+		- isolatedSnap.atmospheres[1].temperatureC < 29.999,
+		"advected enthalpy did not begin decaying the temperature difference");
+	for (size_t side = 0; side < 2; ++side)
+		require(std::abs(isolatedSnap.atmospheres[side].temperatureC
+				- isolatedStart.atmospheres[side].temperatureC) > 1e-9,
+			"the pathway's enthalpy transport left the published temperatures untouched");
 	// With the link added - the only change - the same pair converges to
 	// the energy-weighted average: equal capacities, so the arithmetic
 	// mean of 40 C and 10 C. The link's tau is the reduced capacity
@@ -447,9 +459,11 @@ void thermalLinkPathwayIndependence(smoke::Context const&)
 		require(snapshot.atmospheres[i].condensedKg == 0.0,
 			"neither aggregate should have driven a phase change in this fixture");
 	}
-	// The energy ledger is the link's alone: each side's conducted total
-	// is the link's own signed ledger as an exact negation, with no
-	// pathway term folded in - the pathway moved mass and no heat.
+	// The conducted ledger is the link's alone: each side's conducted
+	// total is the link's own signed ledger as an exact negation, with
+	// no pathway term folded in. Since #802 this pathway does carry heat,
+	// but it books that separately as advected energy, so conduction
+	// remains a clean single-aggregate ledger either way.
 	require(snapshot.atmospheres[0].conductedEnergyKJ == -wall.netTransferredKJ
 		&& snapshot.atmospheres[1].conductedEnergyKJ == wall.netTransferredKJ,
 		"the energy ledger did not close on the link's own booking alone");
@@ -644,10 +658,10 @@ void thermalLinkPersistence(smoke::Context const&)
 	// Version discipline: a pre-107 document carrying links is refused
 	// as conversion-required rather than dropping them, and a version
 	// beyond the accepted range is refused outright.
-	for (int version : {106, 108})
+	for (int version : {106, 109})
 	{
 		auto bad = yaml;
-		bad.replace(bad.find("schemaVersion: 107"), std::string("schemaVersion: 107").size(),
+		bad.replace(bad.find("schemaVersion: 108"), std::string("schemaVersion: 108").size(),
 			"schemaVersion: " + std::to_string(version));
 		require(!core::parseStationConfiguration(bad, loaded, &diagnostic)
 			&& loaded.settings == settings, "unsupported thermal link schema was accepted");
@@ -692,7 +706,7 @@ void thermalLinkPersistence(smoke::Context const&)
 			// A pre-107 World reader refuses a document carrying links
 			// rather than silently dropping the station's walls.
 			auto older = text;
-			older.replace(older.find("version: 107"), std::string("version: 107").size(),
+			older.replace(older.find("version: 108"), std::string("version: 108").size(),
 				"version: 106");
 			auto olderReader = core::YamlSerializer::fromString(older);
 			olderReader->deserialize();

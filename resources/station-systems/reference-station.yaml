@@ -13,7 +13,7 @@
 # provenance entries, with a single growth/auxiliary/reserve margin per
 # budget line (no duplicated margins).
 name: "Meridian reference station"
-schemaVersion: 107
+schemaVersion: 108
 summary: >
   A four-crew deep-space station configuration that demonstrates the
   whole implemented Station system in one internally consistent
@@ -444,6 +444,7 @@ stationSystems:
       startingWaterVapourKg: 2.0
       startingTemperatureC: 22.0
       thermalCapacityKJPerK: 40000.0
+      advectedSpecificHeatKJPerKgK: 1.005
       reservoirId: ""
       exchangerConductanceKWPerK: 0.0
       occupants: 0
@@ -464,6 +465,7 @@ stationSystems:
       startingWaterVapourKg: 2.0
       startingTemperatureC: 24.0
       thermalCapacityKJPerK: 60000.0
+      advectedSpecificHeatKJPerKgK: 1.005
       reservoirId: ""
       exchangerConductanceKWPerK: 0.0
       occupants: 0
@@ -484,6 +486,7 @@ stationSystems:
       startingWaterVapourKg: 1.0
       startingTemperatureC: 25.0
       thermalCapacityKJPerK: 30000.0
+      advectedSpecificHeatKJPerKgK: 1.005
       reservoirId: ""
       exchangerConductanceKWPerK: 0.0
       occupants: 0

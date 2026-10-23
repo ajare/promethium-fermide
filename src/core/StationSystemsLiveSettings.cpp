@@ -220,6 +220,13 @@ namespace core
 		if (!rebindById(s.atmospheres, offered.atmospheres, "atmospheres",
 			[](AtmosphereSettings const& running, AtmosphereSettings& fresh)
 			{
+				// #802: advectedSpecificHeatKJPerKgK is a thermal
+				// parameter under this contract - a live change takes effect
+				// at the next step, like every non-starting field. The
+				// accumulated advectedKJ totals are net totals and are
+				// left alone: a live specific-heat edit re-decides what
+				// future venting and inflow carry, it never rewrites what
+				// already moved.
 				preserveInitial(running, fresh,
 					&AtmosphereSettings::startingCarbonDioxideKg,
 					&AtmosphereSettings::startingNitrogenKg,

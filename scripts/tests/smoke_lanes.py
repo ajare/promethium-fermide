@@ -69,6 +69,11 @@ class Lanes(unittest.TestCase):
                       'pathwayClosed', 'pathwayOpenness', 'pathwayParallelAdditivity',
                       'pathwayChainTopology', 'pathwayThermalNeutrality', 'pathwayCondensation',
                       'pathwayPersistence',
+                      'advectedSignDirection', 'advectedEqualTemperatureInert',
+                      'advectedVentClosedForm', 'advectedFlimsyVersusVault',
+                      'advectedMassUntouched', 'advectedLedgerCloses',
+                      'advectedConductedIndependence', 'advectedVentLossBooked',
+                      'advectedValidation',
                       'thermalLinkConservation', 'thermalLinkAdr0026Contrast', 'thermalLinkIdle',
                       'thermalLinkCapacityWeighting', 'thermalLinkNoCrossing',
                       'thermalLinkParallelAdditivity', 'thermalLinkDeclarationOrder',
@@ -85,9 +90,11 @@ class Lanes(unittest.TestCase):
             self.assertIn('validation-fast', props(f'station-{check}')['LABELS'])
             self.assertNotIn('validation-stress', props(f'station-{check}')['LABELS'])
         stress_timeouts = {'pathwayLongHorizon': 20, 'pathwayAbsurdGeometry': 10,
-                         'thermalLinkChainHomogenization': 30, 'thermalLinkAbsurdGeometry': 20}
+                         'thermalLinkChainHomogenization': 30, 'thermalLinkAbsurdGeometry': 20,
+                         'advectedVentNearEmpty': 10, 'advectedAbsurdSpecificHeat': 10}
         for check in ('pathwayLongHorizon', 'pathwayAbsurdGeometry',
-                      'thermalLinkChainHomogenization', 'thermalLinkAbsurdGeometry'):
+                      'thermalLinkChainHomogenization', 'thermalLinkAbsurdGeometry',
+                      'advectedVentNearEmpty', 'advectedAbsurdSpecificHeat'):
             properties = props(f'station-{check}')
             self.assertIn('validation-stress', properties['LABELS'])
             self.assertNotIn('validation-fast', properties['LABELS'])

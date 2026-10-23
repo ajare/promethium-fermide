@@ -173,6 +173,14 @@ using namespace station_detail;
 			return refuse(where + " starting temperature must be finite and above absolute zero (-273.15 C)");
 		if (!std::isfinite(atmosphere.thermalCapacityKJPerK) || atmosphere.thermalCapacityKJPerK <= 0.0)
 			return refuse(where + " effective thermal capacity must be finite and positive");
+		// #802: the bulk specific heat carried by this compartment's gas
+		// when it crosses a pathway must be finite and strictly positive -
+		// a zero or negative advected specific heat is refused rather
+		// than silently inert, same discipline as the Thermal link's
+		// conductance.
+		if (!std::isfinite(atmosphere.advectedSpecificHeatKJPerKgK)
+			|| atmosphere.advectedSpecificHeatKJPerKgK <= 0.0)
+			return refuse(where + " advected specific heat must be finite and positive");
 		if (!atmosphere.reservoirId.empty())
 		{
 			auto const host = std::find_if(settings.thermalReservoirs.begin(),

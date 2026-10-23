@@ -574,6 +574,10 @@ namespace core
 			entry.openFraction = pathway.authored.openFraction;
 			entry.flowRateKgPerS = pathway.flowRateKgPerS;
 			entry.netTransferredKg = pathway.netTransferredKg;
+			// Advected enthalpy reported separately from mass flux and
+			// from a Thermal link's conducted heat (#802).
+			entry.advectedKJ = pathway.advectedKJ;
+			entry.lastAdvectedKW = pathway.lastAdvectedKW;
 			entry.status = pathway.status;
 			result.atmospherePathways.push_back(std::move(entry));
 		}
@@ -695,11 +699,13 @@ namespace core
 			atmosphereResult.exchangedEnergyKJ = compartment.exchangedKJ;
 			atmosphereResult.lastConductedKW = compartment.lastConductedKW;
 			atmosphereResult.conductedEnergyKJ = compartment.conductedKJ;
+			atmosphereResult.lastAdvectedKW = compartment.lastAdvectedKW;
+			atmosphereResult.advectedEnergyKJ = compartment.advectedKJ;
 			atmosphereResult.residualKJ = atmosphereResult.startingEnergyKJ
 				+ compartment.occupantHeatKJ + compartment.crewHeatKJ
 				+ compartment.cropHeatKJ + compartment.algaeHeatKJ
 				+ compartment.latentHeatKJ + compartment.exchangedKJ
-				+ compartment.conductedKJ
+				+ compartment.conductedKJ + compartment.advectedKJ
 				- atmosphereResult.currentEnergyKJ;
 			atmosphereResult.status = compartment.status;
 			result.atmospheres.push_back(std::move(atmosphereResult));

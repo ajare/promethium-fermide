@@ -390,6 +390,9 @@ namespace core
 				serializer.writeDouble("startingWaterVapourKg", atmosphere.startingWaterVapourKg);
 				serializer.writeDouble("startingTemperatureC", atmosphere.startingTemperatureC);
 				serializer.writeDouble("thermalCapacityKJPerK", atmosphere.thermalCapacityKJPerK);
+				// Advected bulk specific heat (#802), new at schema 108.
+				serializer.writeDouble("advectedSpecificHeatKJPerKgK",
+					atmosphere.advectedSpecificHeatKJPerKgK);
 				serializer.writeString("reservoirId", atmosphere.reservoirId);
 				serializer.writeDouble("exchangerConductanceKWPerK", atmosphere.exchangerConductanceKWPerK);
 				serializer.writeInt32("occupants", atmosphere.occupants);
@@ -1486,6 +1489,12 @@ namespace core
 				atmosphere.startingWaterVapourKg = serializer.readDouble("startingWaterVapourKg");
 				atmosphere.startingTemperatureC = serializer.readDouble("startingTemperatureC");
 				atmosphere.thermalCapacityKJPerK = serializer.readDouble("thermalCapacityKJPerK");
+				// Advected bulk specific heat arrived at schema 108 (#802);
+				// an older document carries no field and the compartment
+				// keeps the dry-air default.
+				atmosphere.advectedSpecificHeatKJPerKgK = version >= 108
+					? serializer.readDouble("advectedSpecificHeatKJPerKgK")
+					: StationDefaultAdvectedSpecificHeatKJPerKgK;
 				atmosphere.reservoirId = serializer.readString("reservoirId");
 				atmosphere.exchangerConductanceKWPerK = serializer.readDouble("exchangerConductanceKWPerK");
 				atmosphere.occupants = serializer.readInt32("occupants");
@@ -2251,8 +2260,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 107)
-				return refuse("Reference station schema version must be from 65 to 107");
+			if (document.schemaVersion < 65 || document.schemaVersion > 108)
+				return refuse("Reference station schema version must be from 65 to 108");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

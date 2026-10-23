@@ -968,7 +968,11 @@ namespace core
 		// Schema 107 adds authored Thermal links between Atmosphere
 		// compartments (#794) - the heat mechanism ADR-0026 deliberately
 		// excluded from the pathway.
-		serializer.writeUint32("version", 107);
+		// Schema 108 adds the Atmosphere compartment's advected bulk
+		// specific heat (#802) - the enthalpy that rides with gas crossing
+		// a pathway, amending ADR-0026's unexamined thermal-neutrality
+		// simplification.
+		serializer.writeUint32("version", 108);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
@@ -1870,7 +1874,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 107)
+		if (version < 1 || version > 108)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}

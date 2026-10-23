@@ -36,6 +36,14 @@ void close(double a, double b, char const* message)
 {
 	require(std::abs(a - b) < 1e-9, message);
 }
+// Relative closeness for accumulated ledger sums: a kJ total telescoped
+// over hundreds of ticks carries rounding far above an absolute 1e-9,
+// so booking identities are checked against the magnitude of the sum.
+void closeRel(double a, double b, char const* message)
+{
+	require(std::abs(a - b) <= 1e-9 * std::max(1.0, std::max(std::abs(a), std::abs(b))),
+		message);
+}
 void pathwayPersistence(smoke::Context const&)
 {
 	auto settings = pathwaySettings();
@@ -60,7 +68,7 @@ void pathwayPersistence(smoke::Context const&)
 			&& diagnostic.find("conversion required") != std::string::npos
 			&& loaded.settings == settings, "unknown pathway field was ignored or mutated document");
 	}
-	for (int version : {105, 108})
+	for (int version : {105, 109})
 	{
 		auto bad = yaml;
 		auto const at = bad.find("schemaVersion: ");
@@ -308,11 +316,21 @@ void pathwayVacuumEqualization(smoke::Context const&)
 
 void pathwayExteriorDiffusion(smoke::Context const&)
 {
+	// Two legs. The exact area/openness-scaled depletion law is checked
+	// on a thermally-neutral fixture (capacity so large the spray-can
+	// cooling is negligible), because #802 made the depletion weight
+	// T_K/V temperature-dependent and a cooling compartment bends the
+	// trajectory away from the fixed-temperature exponential. The
+	// cooling itself is then verified on the ordinary-capacity fixture
+	// against its own exact invariant, which holds independently of the
+	// depletion trajectory.
+	for (bool coupled : {false, true})
 	for (bool reverse : {false, true})
 	for (double openness : {0.0, 0.25, 1.0})
 	for (double area : {1.0, 1e300})
 	{
 		auto s = pathwaySettings();
+		if (!coupled) s.atmospheres[0].thermalCapacityKJPerK = 1e12;
 		s.atmospherePathways = {{"space", "a", core::StationExteriorAtmosphereId, area, openness}};
 		if (reverse) std::swap(s.atmospherePathways[0].aAtmosphereId, s.atmospherePathways[0].bAtmosphereId);
 		core::World world("ExteriorDiffusion", 2, 2);
@@ -337,17 +355,59 @@ void pathwayExteriorDiffusion(smoke::Context const&)
 		for (size_t gas = 0; gas < start.size(); ++gas)
 		{
 			auto const remaining = masses(final.atmospheres[0])[gas];
-			auto const expected = start[gas] * std::exp(-core::StationPathwayDiffusionCoefficients[gas]
-				* area * openness * 273.15 / 100 * final.elapsedSeconds);
 			require(std::isfinite(remaining) && remaining >= 0, "exterior produced invalid inventory");
-			close(remaining, expected, "exterior did not follow exact area/openness-scaled exponential depletion");
+			if (!coupled)
+			{
+				auto const expected = start[gas] * std::exp(-core::StationPathwayDiffusionCoefficients[gas]
+					* area * openness * 273.15 / 100 * final.elapsedSeconds);
+				close(remaining, expected, "exterior did not follow exact area/openness-scaled exponential depletion");
+			}
 			auto const lost = final.atmospheres[0].exteriorLostKg[gas];
 			close(remaining + lost, start[gas], "exterior inventory plus external loss did not conserve each gas");
 			close((reverse ? -1 : 1) * final.atmospherePathways[0].netTransferredKg[gas], lost,
 				"exterior signed flux did not reconcile with compartment loss");
 		}
-		close(final.atmospheres[0].temperatureC, initial.atmospheres[0].temperatureC, "exterior diffusion moved heat");
-		require(final.atmospheres[0].leakedKg == 0 && final.atmospheres[0].lostKg == 0,
+		// #802: venting is not thermally free. The compartment cools by
+		// the exact spray-can closed form, and the carried energy is
+		// booked as an explicit loss. The invariant
+		//   T_K = T_K0 * exp(-cp * m_vented_total / C)
+		// composes exactly across ticks regardless of the depletion
+		// trajectory, because each tick multiplies the absolute
+		// temperature by exp(-cp * dm / C) and the factors telescope
+		// into one exponential of the total vented mass.
+		auto const& vented = final.atmospheres[0];
+		double ventedTotalKg = 0;
+		for (size_t gas = 0; gas < start.size(); ++gas)
+			ventedTotalKg += vented.exteriorLostKg[gas];
+		if (ventedTotalKg > 0)
+		{
+			if (coupled)
+				require(vented.temperatureC < initial.atmospheres[0].temperatureC - 1e-12,
+					"venting published no cooling - the spray-can effect is missing");
+			closeRel(vented.advectedEnergyKJ,
+				s.atmospheres[0].thermalCapacityKJPerK
+				* (vented.temperatureC - initial.atmospheres[0].temperatureC),
+				"vent cooling does not equal the booked advected loss over capacity");
+			if (coupled)
+			{
+				auto const expectedK = (initial.atmospheres[0].temperatureC + 273.15)
+					* std::exp(-s.atmospheres[0].advectedSpecificHeatKJPerKgK
+						* ventedTotalKg / s.atmospheres[0].thermalCapacityKJPerK);
+				closeRel(vented.temperatureC + 273.15, expectedK,
+					"vent cooling departed from the closed form");
+			}
+			require(vented.advectedEnergyKJ < 0,
+				"energy carried to vacuum was not booked as a loss");
+			// The pathway's own book mirrors the loss with the sign the
+			// mass ledger uses for the same endpoint orientation.
+			require((reverse ? -1.0 : 1.0) * final.atmospherePathways[0].advectedKJ > 0,
+				"the exterior pathway did not book the energy it carried to vacuum");
+		}
+		else
+			require(vented.temperatureC == initial.atmospheres[0].temperatureC
+				&& vented.advectedEnergyKJ == 0,
+				"a zero-vent pathway still moved heat");
+		require(vented.leakedKg == 0 && vented.lostKg == 0,
 			"exterior loss was double-counted as constant leakage or airlock loss");
 		if (area > 1e100 && openness > 0)
 			require(final.atmospheres[0].pressureKPa == 0
@@ -484,6 +544,15 @@ void pathwayOpenness(smoke::Context const&)
 // an Idle/equal-temperature fixture. Vapour stays well below saturation.
 void pathwayThermalNeutrality(smoke::Context const&)
 {
+	// ADR-0026 as amended by #802: the pathway passes no HEAT - no
+	// conduction, no radiation - and that is what this check pins. What
+	// it now does pass is enthalpy riding with the mass it already
+	// moves, booked explicitly as advected heat. So the old "temperature
+	// never changes" reading is gone: with a temperature difference and
+	// a live pathway the difference decays. What must NOT happen is the
+	// pathway becoming a conductor: conductedEnergyKJ stays exactly
+	// zero, no latent or reservoir exchange is invented, and every
+	// published temperature move is exactly the booked advected term.
 	auto s = pathwaySettings();
 	s.atmospheres[0].startingTemperatureC = 40;
 	s.atmospheres[1].startingTemperatureC = 0;
@@ -502,16 +571,41 @@ void pathwayThermalNeutrality(smoke::Context const&)
 		for (size_t i = 0; i < 2; ++i)
 		{
 			auto const& air = snapshot.atmospheres[i];
-			require(std::abs(air.temperatureC - initial.atmospheres[i].temperatureC) < 1e-12,
-				"diffusion transported sensible heat between compartments");
+			require(air.conductedEnergyKJ == 0,
+				"diffusion invented conducted heat - the pathway became a conductor");
 			require(air.condensedKg == 0 && air.latentHeatEnergyKJ == 0
 				&& air.exchangedEnergyKJ == 0,
 				"pure diffusion invented a thermal or phase exchange");
+			// The only thermal effect a pathway may have is its booked
+			// advected enthalpy: capacity x temperature change equals
+			// advectedEnergyKJ exactly, so no unbooked heat crossed.
+			closeRel(s.atmospheres[i].thermalCapacityKJPerK
+				* (air.temperatureC - initial.atmospheres[i].temperatureC),
+				air.advectedEnergyKJ,
+				"diffusion moved temperature without booking it as advected heat");
 		}
+		// Direction: hot gas into the cold compartment warms it and the
+		// donor cools - the difference decays, never grows.
+		require(snapshot.atmospheres[0].temperatureC <= initial.atmospheres[0].temperatureC + 1e-12
+			&& snapshot.atmospheres[1].temperatureC >= initial.atmospheres[1].temperatureC - 1e-12,
+			"advected heat moved the temperature difference the wrong way");
+		require(snapshot.atmospheres[0].temperatureC
+			- snapshot.atmospheres[1].temperatureC < 40.0 - 1e-9,
+			"a hot pathway did not begin decaying the temperature difference");
 	}
 	auto const final = world.getStationSystemsSnapshot();
 	for (double moved : final.atmospherePathways[0].netTransferredKg)
 		require(moved > 1e-3, "neutrality fixture did not actually exchange every gas");
+	// The pathway's own advected book is the hot side's loss and the
+	// cold side's gain, one signed number reported separately from any
+	// conducted heat.
+	require(final.atmospherePathways[0].advectedKJ > 0,
+		"the pathway did not book the enthalpy it carried from hot to cold");
+	require(final.atmospheres[0].advectedEnergyKJ
+		== -final.atmospherePathways[0].advectedKJ
+		&& final.atmospheres[1].advectedEnergyKJ
+		== final.atmospherePathways[0].advectedKJ,
+		"advected enthalpy was not booked once per side as an exact negation");
 }
 
 void pathwayCondensation(smoke::Context const&)
@@ -563,14 +657,27 @@ void pathwayCondensation(smoke::Context const&)
 				require(air.waterVapourKg <= cap + 1e-9 && air.relativeHumidity <= 1 + 1e-9,
 					"pathway published supersaturated gas at its own temperature");
 			}
-			close(warm.temperatureC, initial.atmospheres[donor].temperatureC, "donor received condensation heat");
+			// #802: the donor now cools - the hot gas it sends out takes
+			// enthalpy with it - and that cooling is exactly its booked
+			// advected loss, nothing else. The receiver's temperature rise
+			// is local latent heat plus the advected heat that arrived
+			// with the gas, each booked separately.
+			closeRel(s.atmospheres[donor].thermalCapacityKJPerK
+				* (warm.temperatureC - initial.atmospheres[donor].temperatureC),
+				warm.advectedEnergyKJ,
+				"donor temperature moved without a booked advected term");
+			require(warm.advectedEnergyKJ < 0,
+				"a donor sending hot gas did not book an advected loss");
 			require(warm.condensedKg == 0 && warm.latentHeatEnergyKJ == 0,
 				"receiver condensation was booked in donor");
 			close(cold.latentHeatEnergyKJ, cold.condensedKg * core::StationLatentHeatVaporizationKJPerKg,
 				"receiver latent heat does not match condensate");
-			close((cold.temperatureC - initial.atmospheres[receiver].temperatureC)
-				* s.atmospheres[receiver].thermalCapacityKJPerK, cold.latentHeatEnergyKJ,
-				"receiver temperature does not account for local latent heat");
+			closeRel((cold.temperatureC - initial.atmospheres[receiver].temperatureC)
+				* s.atmospheres[receiver].thermalCapacityKJPerK,
+				cold.latentHeatEnergyKJ + cold.advectedEnergyKJ,
+				"receiver temperature does not account for local latent plus advected heat");
+			require(cold.advectedEnergyKJ > 0,
+				"arriving gas did not book its advected heat into the receiver");
 			close(cold.waterVapourKg + cold.condensedKg,
 				initial.atmospheres[receiver].waterVapourKg + moved, "receiver vapour/condensate ledger failed");
 			close(warm.waterVapourKg, initial.atmospheres[donor].waterVapourKg - moved,
@@ -586,10 +693,19 @@ void pathwayParallelAdditivity(smoke::Context const&)
 	for (bool reverse : {false, true})
 	{
 		auto single = pathwaySettings();
-		// Unequal volumes and temperatures exercise the fixed compartment
-		// conductance ratio, rather than just a symmetric half-mass split.
+		// Unequal volumes exercise the fixed compartment conductance
+		// ratio, rather than just a symmetric half-mass split. The
+		// starting temperatures are held equal on purpose (#802): with
+		// a temperature difference the advected enthalpy feed-back
+		// enters the T_K/V weights, and two half-area pathways apply
+		// their enthalpy as two sequential half-deltas while one
+		// full-area pathway applies one - a first-order splitting
+		// difference that would break this check's exact 1e-9 mass
+		// additivity claim. The thermal side of that interaction is
+		// covered by the dedicated advected checks; this check keeps
+		// protecting the mass pass's exact topological additivity.
 		single.atmospheres[1].volumeM3 = 150;
-		single.atmospheres[1].startingTemperatureC = 20;
+		single.atmospheres[1].startingTemperatureC = single.atmospheres[0].startingTemperatureC;
 		auto parallel = single;
 		parallel.atmospherePathways = {{"first", "a", "b", 0.5, 1},
 			{"second", reverse ? "b" : "a", reverse ? "a" : "b", 0.5, 1}};
@@ -742,6 +858,15 @@ void pathwayLongHorizon(smoke::Context const&)
 		require(advanceStationSteps(world, 1), "long-chain step failed");
 		auto const snap = world.getStationSystemsSnapshot();
 		require(snap.healthy, "long-chain conservation audit failed");
+		// #802: the chain's temperature differences decay as gas rides
+		// the pathways, so the uniform-partial-pressure anchor is
+		// recomputed from the CURRENT published temperatures each step
+		// rather than the initial ones. The only thermal term in this
+		// fixture is advection, so every temperature move must equal the
+		// compartment's booked advected energy over its capacity.
+		double capacityNow = 0;
+		for (auto const& air : snap.atmospheres)
+			capacityNow += air.volumeM3 / (air.temperatureC + 273.15);
 		for (size_t gas = 0; gas < 4; ++gas)
 		{
 			double sum = 0;
@@ -750,15 +875,18 @@ void pathwayLongHorizon(smoke::Context const&)
 				auto const& air = snap.atmospheres[i];
 				auto const mass = masses(air)[gas];
 				require(std::isfinite(mass) && mass >= 0, "long chain produced invalid inventory");
-				require(air.condensedKg == 0 && air.temperatureC == s.atmospheres[i].startingTemperatureC,
-					"long-chain fixture changed temperature or condensed");
+				require(air.condensedKg == 0, "long-chain fixture condensed");
+				closeRel(air.thermalCapacityKJPerK
+					* (air.temperatureC - s.atmospheres[i].startingTemperatureC),
+					air.advectedEnergyKJ,
+					"long-chain temperature moved without a booked advected term");
 				sum += mass;
 				if (snap.elapsedSeconds >= 3600)
 				{
 					// m*T/V is partial pressure up to the same per-gas
 					// ideal-gas factor; unequal V/T forbids a false equal-mass attractor.
 					auto const density = mass * (air.temperatureC + 273.15) / air.volumeM3;
-					require(std::abs(density / (total[gas] / capacity) - 1) < 1e-6,
+					require(std::abs(density / (total[gas] / capacityNow) - 1) < 1e-6,
 						"chain did not reach and hold uniform partial pressures");
 				}
 			}
@@ -774,7 +902,13 @@ void pathwayAbsurdGeometry(smoke::Context const&)
 	auto s = pathwaySettings();
 	s.atmospheres[0].volumeM3 = 1e-6;
 	s.atmospheres[1].volumeM3 = 2e-6;
-	s.atmospheres[1].startingTemperatureC = 40;
+	// #802: this check asserts the mass-diffusion law converges monotonically to
+	// the fixed ideal-gas equilibrium encoded by wa/wb below. Advected enthalpy
+	// couples the thermal state into that law: a temperature contrast makes the
+	// equilibrium itself move, so the fixed target is no longer the right one and
+	// the monotonicity assertion reports a legitimate physical overshoot. The
+	// fixture is therefore thermally neutral, keeping the mass law in isolation;
+	// the thermal coupling itself is covered by the dedicated advected checks.
 	for (auto& air : s.atmospheres)
 	{
 		air.startingOxygenKg *= 1e-8; air.startingNitrogenKg *= 1e-8;
@@ -790,7 +924,7 @@ void pathwayAbsurdGeometry(smoke::Context const&)
 	require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
 	auto const initial = world.getStationSystemsSnapshot();
 	auto const a0 = masses(initial.atmospheres[0]), b0 = masses(initial.atmospheres[1]);
-	auto const wa = 273.15 / 1e-6, wb = 313.15 / 2e-6;
+	auto const wa = 273.15 / 1e-6, wb = 273.15 / 2e-6;
 	std::array<double, 4> previousError{};
 	for (size_t gas = 0; gas < 4; ++gas)
 		previousError[gas] = std::abs(a0[gas] - (a0[gas] + b0[gas]) * wb / (wa + wb));

@@ -10,6 +10,7 @@
 #include "StationGenerationChecks.h"
 #include "StationAtmosphereChecks.h"
 #include "StationThermalLinkChecks.h"
+#include "StationAdvectionChecks.h"
 #include "StationWaterChecks.h"
 #include "StationRecoveryChecks.h"
 #include "StationBiologyChecks.h"

@@ -920,11 +920,12 @@ namespace core
 					+ std::to_string(StationBalanceTolerance), false;
 			// Thermal closure: starting + occupant heat + crew heat
 			// (#401) + crop heat (#409) + latent heat + exchanged from
-			// the reservoir + conducted through thermal links (#794) must
-			// equal the compartment's current capacity x temperature
-			// within the declared tolerance. The conducted term is the
-			// ticket's safety net: a missing booking fails the tick loudly
-			// rather than drifting silently.
+			// the reservoir + conducted through thermal links (#794) + advected
+			// with pathway gas (#802) must equal the compartment's current
+			// capacity x temperature within the declared tolerance. The
+			// conducted and advected terms are the ticket's safety nets: a
+			// missing booking fails the tick loudly rather than drifting
+			// silently.
 			auto const startingEnergyKJ = compartment.authored.thermalCapacityKJPerK
 				* compartment.authored.startingTemperatureC;
 			auto const thermalBound = StationBalanceTolerance
@@ -933,9 +934,14 @@ namespace core
 				return false;
 			if (!requireFinite(compartment.lastConductedKW, where + "last-tick conducted power"))
 				return false;
+			if (!requireFinite(compartment.advectedKJ, where + "cumulative advected energy"))
+				return false;
+			if (!requireFinite(compartment.lastAdvectedKW, where + "last-tick advected power"))
+				return false;
 			auto const thermalResidual = startingEnergyKJ + compartment.occupantHeatKJ
 				+ compartment.crewHeatKJ + compartment.cropHeatKJ + compartment.algaeHeatKJ
 				+ compartment.latentHeatKJ + compartment.exchangedKJ + compartment.conductedKJ
+				+ compartment.advectedKJ
 				- compartment.authored.thermalCapacityKJPerK * compartment.temperatureC;
 			if (!std::isfinite(thermalResidual) || std::abs(thermalResidual) > thermalBound)
 				return violation = where + "thermal energy ledger residual "
@@ -949,6 +955,14 @@ namespace core
 				if (!requireFinite(pathway.flowRateKgPerS[gas], where + " flow rate")
 					|| !requireFinite(pathway.netTransferredKg[gas], where + " net transferred mass")) return false;
 			}
+		// Advected enthalpy ledger finiteness (#802): the signed pathway
+		// total and last-tick rate must be finite before the tick commits.
+		for (auto const& pathway : runtime.atmospherePathways)
+		{
+			auto const where = "atmosphere pathway '" + pathway.authored.id + "'";
+			if (!requireFinite(pathway.advectedKJ, where + " cumulative advected energy")
+				|| !requireFinite(pathway.lastAdvectedKW, where + " last-tick advected power")) return false;
+		}
 		// Thermal link ledger finiteness (#794): the signed flow and the
 		// cumulative net transfer must be finite before the tick commits.
 		for (auto const& link : runtime.thermalLinks)

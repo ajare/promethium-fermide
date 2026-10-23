@@ -787,6 +787,15 @@ namespace core
 	// inverse of the ideal-gas partial pressure at saturation.
 	double stationSaturatedVapourMassKg(double saturationKPa,
 		double volumeM3, double temperatureC);
+	// The bulk specific heat an Atmosphere compartment's gas carries when it
+	// crosses a pathway (#802), defaulting to dry air at room temperature.
+	// One authored number per compartment, never a per-species table: the
+	// mixture is modelled as one bulk, consistent with the pathway's "no
+	// hidden per-species or per-area decomposition" rule. The real
+	// per-species values differ (O2 1.005, N2 1.04, CO2 0.846, H2O 1.86
+	// kJ/kg/K) and a composition-weighted mix is deliberately not
+	// attempted - two identical setups always behave identically.
+	inline constexpr double StationDefaultAdvectedSpecificHeatKJPerKgK{1.005};
 	// A compartment atmosphere (#400): a finite, compartment-owned gas
 	// inventory in a fixed volume, thermally integrated on an authored
 	// effective heat capacity (the air plus its bonded structure, so a
@@ -819,6 +828,17 @@ namespace core
 		double startingWaterVapourKg{0.0};
 		double startingTemperatureC{20.0};
 		double thermalCapacityKJPerK{0.0}; // effective air + structure capacity, > 0
+		// The bulk specific heat this compartment's gas carries when it
+		// crosses an Atmosphere pathway (#802): the enthalpy that rides
+		// with the mass the pathway already moved. Must be finite and
+		// strictly positive. This is not the compartment's thermal
+		// capacity and never derived from it - capacity stays the authored
+		// "effective air + structure" number, which is exactly what keeps
+		// the advected closed forms exact. The value is the specific heat
+		// of the gas leaving this compartment: gas arriving from a hotter
+		// neighbour warms this compartment, and gas vented to Exterior
+		// vacuum cools its source as it escapes (the spray-can effect).
+		double advectedSpecificHeatKJPerKgK{StationDefaultAdvectedSpecificHeatKJPerKgK};
 		// Heat-only coupling to one thermal reservoir (#400): the
 		// compartment's air never touches the reservoir, only heat flows,
 		// through the authored conductance. An empty reservoir id leaves
@@ -3140,6 +3160,18 @@ namespace core
 		// totals are signed net mass since configuration, in StationPathwayGases order.
 		std::array<double, 4> flowRateKgPerS{};
 		std::array<double, 4> netTransferredKg{};
+		// Advected enthalpy (#802): the signed net thermal energy this
+		// pathway has carried with its moving gas since configuration,
+		// positive A to B, and the rate averaged over the last step. It is
+		// reported separately from a Thermal link's conducted heat so a
+		// hatch's contribution never blurs into a wall's. There is
+		// deliberately no requested/actual/limiter shape: nothing asks for
+		// the heat to move - it is wholly determined by the temperature
+		// difference and the mass flow, same reasoning as #793/#794.
+		// For an Exterior pathway this is the energy carried away to
+		// vacuum, booked as an explicit loss, never silently destroyed.
+		double advectedKJ{0.0};
+		double lastAdvectedKW{0.0};
 		StationAtmospherePathwayStatus status{StationAtmospherePathwayStatus::Idle};
 		bool operator==(StationAtmospherePathwaySnapshot const&) const = default;
 	};
@@ -3271,7 +3303,19 @@ namespace core
 		// both compartments' ledgers close on one number.
 		double lastConductedKW{0.0};
 		double conductedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + occupant + latent + exchanged + conducted - current
+		// Advected enthalpy (#802): the thermal energy this compartment's
+		// gas has carried into or away from it across its Atmosphere
+		// pathways since configuration, signed into the compartment
+		// (+ gains arriving heat, - loses heat riding out with its own
+		// escaping gas), booked once per side as the exact negation of
+		// the far side of each inter-compartment transfer. Venting to
+		// Exterior vacuum books the carried energy as an explicit loss
+		// beside exteriorLostKg, never a silent disappearance. Reported
+		// separately from conducted heat so what a hatch did stays
+		// distinct from what a wall did.
+		double lastAdvectedKW{0.0};
+		double advectedEnergyKJ{0.0};
+		double residualKJ{0.0}; // starting + occupant + latent + exchanged + conducted + advected - current
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationAtmosphereSnapshot const&) const = default;
 	};
