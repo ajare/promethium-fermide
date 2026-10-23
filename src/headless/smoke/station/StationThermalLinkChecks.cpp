@@ -968,13 +968,24 @@ void thermalLinkChainHomogenization(smoke::Context const&)
 	auto const snapshot = world.getStationSystemsSnapshot();
 	require(snapshot.healthy, "chain homogenization failed its audit");
 	// The whole chain's energy-weighted average: (1*60 + 2*20 + 1*-10)/4 = 22.5 C.
+	// The closed form conserves total C*T exactly per link, so the attractor
+	// is that average itself, not merely something near it: after 100 slowest
+	// time constants the assertion is against machine-precision landing, tight
+	// enough that any cadence-dependent drift would show.
 	auto const expected = (10000.0 * 60.0 + 20000.0 * 20.0 + 10000.0 * -10.0) / 40000.0;
 	for (auto const& air : snapshot.atmospheres)
-		require(std::abs(air.temperatureC - expected) < 1e-2,
+	{
+		require(std::isfinite(air.temperatureC)
+				&& air.temperatureC + core::StationCelsiusOffset > 0.0,
+			"the homogenized chain published a non-finite or sub-absolute-zero temperature");
+		require(std::abs(air.temperatureC - expected) < 1e-6,
 			"the linked chain did not converge to the common temperature");
-	// And it stays converged: another long run moves nothing measurable.
+	}
+	// And it stays converged: another long run moves nothing measurable -
+	// no accumulated-roundoff drift away from the equilibrium it reached.
 	require(advanceSeconds(world, 4000), "chain settle run failed");
 	auto const settled = world.getStationSystemsSnapshot();
+	require(settled.healthy, "chain settle run failed its audit");
 	for (size_t i = 0; i < 3; ++i)
 		require(std::abs(settled.atmospheres[i].temperatureC
 			- snapshot.atmospheres[i].temperatureC) < 1e-6,
@@ -982,33 +993,66 @@ void thermalLinkChainHomogenization(smoke::Context const&)
 }
 
 // Stress: absurd geometry - enormous conductance against tiny
-// capacities, thousands of ticks - demonstrating the closed-form
-// decision holds what was claimed of it: no oscillation, no crossing,
-// no non-finite value, ledger still closed.
+// capacities, thousands of ticks, swept across conductance decades so
+// the no-crossing claim is tested at every stiffness rather than at one
+// authored number. 1 kJ/K compartments against 10 kW/K to 1 TW/K
+// walls: the pair relaxation time constant, 1/(G(1/Ca+1/Cb)), spans
+// 50 ms down to 0.5 ns against the 100 ms step - from a boundary case
+// that still relaxes over several ticks to ones that land on equilibrium
+// inside the first. No sane author writes this and nothing refuses it.
+// The closed-form decision must hold what was claimed of it at every
+// one of them: no oscillation, no crossing, no negative absolute
+// temperature, no non-finite value, and the ledger still closed at the
+// end to the same tolerance a normal run holds itself to.
 void thermalLinkAbsurdGeometry(smoke::Context const&)
 {
-	std::string diagnostic;
-	core::World world("ThermalLinkAbsurd", 2, 2);
-	configure(world, linkedPair(1.0, 1.0, 100000.0), diagnostic);
-	world.resumeSimulation();
-	double previousA = 40.0, previousB = 0.0;
-	for (int step = 0; step < 5000; ++step)
+	for (double const conductance : {1.0e1, 1.0e3, 1.0e5, 1.0e7, 1.0e9})
 	{
-		require(advanceStationSteps(world, 1), "absurd-geometry step failed");
+		std::string diagnostic;
+		core::World world("ThermalLinkAbsurd", 2, 2);
+		configure(world, linkedPair(1.0, 1.0, conductance), diagnostic);
+		world.resumeSimulation();
+		double previousA = 40.0, previousB = 10.0;
+		for (int step = 0; step < 5000; ++step)
+		{
+			require(advanceStationSteps(world, 1), "absurd-geometry step failed");
+			auto const snapshot = world.getStationSystemsSnapshot();
+			require(snapshot.healthy, "absurd-geometry run failed its audit");
+			auto const a = snapshot.atmospheres[0].temperatureC;
+			auto const b = snapshot.atmospheres[1].temperatureC;
+			require(std::isfinite(a) && std::isfinite(b),
+				"absurd geometry produced a non-finite temperature");
+			require(a + core::StationCelsiusOffset > 0.0
+					&& b + core::StationCelsiusOffset > 0.0,
+				"absurd geometry published a negative absolute temperature");
+			require(a >= b, "absurd geometry crossed hot past cold");
+			// Monotone: each compartment moves toward the average, never back.
+			require(a <= previousA + 1e-9 && b >= previousB - 1e-9,
+				"absurd geometry oscillated instead of relaxing");
+			previousA = a; previousB = b;
+		}
+		require(std::abs(previousA - 25.0) < 1e-6 && std::abs(previousB - 25.0) < 1e-6,
+			"absurd geometry did not settle on the energy-weighted average");
+		// The ledger closes at the end of the absurd run to the same
+		// tolerance the ordinary conservation check holds itself to:
+		// each side's residual closes, total C*T across the joined pair
+		// is invariant, and the two sides' conducted totals are exact
+		// negations of each other and of the link's own cumulative book.
 		auto const snapshot = world.getStationSystemsSnapshot();
-		require(snapshot.healthy, "absurd-geometry run failed its audit");
-		auto const a = snapshot.atmospheres[0].temperatureC;
-		auto const b = snapshot.atmospheres[1].temperatureC;
-		require(std::isfinite(a) && std::isfinite(b),
-			"absurd geometry produced a non-finite temperature");
-		require(a >= b, "absurd geometry crossed hot past cold");
-		// Monotone: each compartment moves toward the average, never back.
-		require(a <= previousA + 1e-9 && b >= previousB - 1e-9,
-			"absurd geometry oscillated instead of relaxing");
-		previousA = a; previousB = b;
+		auto const& a = snapshot.atmospheres[0];
+		auto const& b = snapshot.atmospheres[1];
+		require(a.conductedEnergyKJ == -b.conductedEnergyKJ,
+			"absurd geometry did not book conducted heat as an exact negation");
+		require(link(snapshot, "wall").netTransferredKJ == b.conductedEnergyKJ,
+			"the absurd-geometry link ledger disagrees with the compartment ledgers");
+		auto const total = a.thermalCapacityKJPerK * a.temperatureC
+			+ b.thermalCapacityKJPerK * b.temperatureC;
+		require(std::abs(total - 50.0) <= 1e-6 * 50.0,
+			"absurd geometry did not conserve total energy across the link-joined pair");
+		require(std::abs(a.residualKJ) <= 1e-6 * std::max(1.0, std::abs(a.currentEnergyKJ))
+				&& std::abs(b.residualKJ) <= 1e-6 * std::max(1.0, std::abs(b.currentEnergyKJ)),
+			"the absurd-geometry ledger did not close to the normal-run tolerance");
 	}
-	require(std::abs(previousA - 25.0) < 1e-6 && std::abs(previousB - 25.0) < 1e-6,
-		"absurd geometry did not settle on the energy-weighted average");
 }
 
 // #797: links compose. Parallel walls add exactly, a chain converges to

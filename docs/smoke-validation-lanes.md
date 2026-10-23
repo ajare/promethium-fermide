@@ -136,6 +136,24 @@ persistence stay fast. Fine/coarse component sweeps retain their existing
 exhaustive ownership. The lane contract asserts this split. See
 [calibration, horizons and before/after fast-lane evidence](station-atmosphere-pathway-stress.md).
 
+## Thermal link stress (#801)
+
+`station-thermalLinkChainHomogenization` and `station-thermalLinkAbsurdGeometry`
+are stress-only; every ordinary thermal-link check stays fast. The homogenization
+check drives a three-compartment linked chain to the energy-weighted average and
+asserts it holds there across a second long horizon with no roundoff drift. The
+absurd-geometry check sweeps 1 kJ/K compartments against 10 kW/K to
+1 TW/K walls (pair relaxation time constants of 50 ms down to 0.5 ns
+against the 100 ms step) for 5,000 ticks each, asserting
+no oscillation, no crossing, no negative absolute temperature, no non-finite
+value, and end-of-run ledger closure to the same tolerance the ordinary
+conservation check holds itself to. Both extremes also re-run under the
+step-ratio runner at ratios 1, 7 and 60 as
+`station-thermalLink-stress-<check>-<ratio>`, labelled `validation-stress` and
+`station-timestep-invariance`, so the closed-form relaxation is held to the same
+cadence-invariant claims at every sampled cadence. The lane contract asserts this
+split.
+
 ## Timing evidence
 
 See [#331 measurements](smoke-validation-lanes-timings.md). Timings are local

@@ -244,6 +244,21 @@ foreach(check pathwayLongHorizon pathwayAbsurdGeometry
     set_tests_properties(station-${check} PROPERTIES
         LABELS "smoke;functional;validation-stress;core;station" TIMEOUT 120)
 endforeach()
+# #801: the thermal-link stress extremes must hold at every supported
+# cadence. Each extreme re-runs under the step-ratio runner at both
+# bounds and a non-divisor; the check bodies assert the cadence-invariant
+# claims (reach and hold the analytic average, no crossing, no
+# oscillation, ledger closure), so a ratio-dependent result at the
+# extremes fails at that ratio's entry.
+foreach(ratio 1 7 60)
+    foreach(check thermalLinkChainHomogenization thermalLinkAbsurdGeometry)
+        add_test(NAME station-thermalLink-stress-${check}-${ratio}
+            COMMAND pf-smoke-station --step-ratio ${ratio} --check ${check})
+        set_tests_properties(station-thermalLink-stress-${check}-${ratio} PROPERTIES
+            LABELS "smoke;functional;validation-stress;core;station;station-timestep-invariance"
+            TIMEOUT 120)
+    endforeach()
+endforeach()
 # Thermal/phase guarantees protect every publication at fine and coarse cadences.
 foreach(ratio 1 7 60)
     foreach(check pathwayThermalNeutrality pathwayCondensation thermalLinkConservation)

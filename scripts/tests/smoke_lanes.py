@@ -93,6 +93,25 @@ class Lanes(unittest.TestCase):
             self.assertNotIn('validation-fast', properties['LABELS'])
             self.assertEqual(properties['TIMEOUT'], stress_timeouts[check])
             self.assertNotIn(f'station-{check}', {t['name'] for t in selected})
+        # #801: both thermal-link stress extremes re-run under the step-ratio
+        # runner at both bounds and a non-divisor. Each ratio variant is
+        # stress-only, carries the timestep-invariance label, and must not
+        # leak into the fast selection.
+        stress_ratio_timeouts = {
+            'station-thermalLink-stress-thermalLinkAbsurdGeometry-1': 10,
+            'station-thermalLink-stress-thermalLinkAbsurdGeometry-7': 10,
+            'station-thermalLink-stress-thermalLinkAbsurdGeometry-60': 20,
+            'station-thermalLink-stress-thermalLinkChainHomogenization-1': 90,
+            'station-thermalLink-stress-thermalLinkChainHomogenization-7': 20,
+            'station-thermalLink-stress-thermalLinkChainHomogenization-60': 10,
+        }
+        for name, timeout in stress_ratio_timeouts.items():
+            properties = props(name)
+            self.assertIn('validation-stress', properties['LABELS'])
+            self.assertIn('station-timestep-invariance', properties['LABELS'])
+            self.assertNotIn('validation-fast', properties['LABELS'])
+            self.assertEqual(properties['TIMEOUT'], timeout)
+            self.assertNotIn(name, {t['name'] for t in selected})
         for ratio in (1, 7, 60):
             for check in ('pathwayThermalNeutrality', 'pathwayCondensation', 'thermalLinkConservation'):
                 labels = props(f'station-pathway-thermal-{check}-{ratio}')['LABELS']
