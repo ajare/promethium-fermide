@@ -40,6 +40,7 @@ int main(int argc, char** argv)
 	registerStationEventSplitChecks(checks);
 	registerStationPortChecks(checks);
 	registerStationSeamChecks(checks);
+	registerStationPrefabChecks(checks);
 	registerStationPowerChecks(checks);
 	registerStationDocumentChecks(checks);
 	registerScheduledTransferChecks(checks);

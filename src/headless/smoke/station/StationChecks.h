@@ -19,6 +19,7 @@
 #include "StationCoreChecks.h"
 #include "StationPortChecks.h"
 #include "StationSeamChecks.h"
+#include "StationPrefabChecks.h"
 #include "StationPowerChecks.h"
 #include "StationCompoundPowerChecks.h"
 #include "StationBatteryChecks.h"

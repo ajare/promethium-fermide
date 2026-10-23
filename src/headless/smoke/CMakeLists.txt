@@ -85,6 +85,7 @@ pf_add_smoke_module(pf-smoke-station
         station/StationEventSplitChecks.cpp
         station/StationPortChecks.cpp
         station/StationSeamChecks.cpp
+        station/StationPrefabChecks.cpp
         station/StationPowerChecks.cpp
         station/StationCompoundPowerChecks.cpp
         station/StationBatteryChecks.cpp
@@ -121,6 +122,14 @@ add_test(NAME station-observable-registry-coverage COMMAND ${Python3_EXECUTABLE}
     "${PROJECT_SOURCE_DIR}/scripts/tests/station_observable_registry.py")
 set_tests_properties(station-observable-registry-coverage PROPERTIES
     LABELS "smoke;functional;validation-fast;station;station-timestep-invariance" TIMEOUT 10)
+# #810: the prefab expander core slice. Pure headless checks - template
+# parsing and refusals, namespaced expansion, override application, cap
+# refusal and determinism - all cheap enough for the fast lane.
+foreach(check prefabTemplateParse prefabTemplateRefusals prefabExpansion prefabOverrides prefabCapRefusal prefabDeterminism)
+    add_test(NAME station-prefab-${check} COMMAND pf-smoke-station --check ${check})
+    set_tests_properties(station-prefab-${check} PROPERTIES
+        LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 30)
+endforeach()
 # Runtime regressions own both cadences directly; these are deliberately
 # single-ratio checks so the CLI override cannot collapse a comparison matrix.
 foreach(ratio 1 6)

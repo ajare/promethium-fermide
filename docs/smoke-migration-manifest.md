@@ -57,6 +57,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/station/StationRuntimeRegressionChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationPortChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationSeamChecks.cpp` | module-owned | `pf-smoke-station` |
+| `smoke/station/StationPrefabChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationPowerChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationCompoundPowerChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationBatteryChecks.cpp` | module-owned | `pf-smoke-station` |
