@@ -1,0 +1,98 @@
+# Two Atmosphere compartments joined by one Atmosphere pathway and one
+# Thermal link - the minimal pair where both aggregates run side by side
+# over the same compartments, each keeping its own ledger.
+#
+# Load in Station systems, then Apply and run for 1800 simulated seconds.
+#
+# The pathway moves gas down each species' own partial-pressure
+# gradient, and the moving gas carries its sensible heat with it
+# (advectedSpecificHeatKJPerKgK, ADR 0026 as amended by #802). Equal
+# volumes mean the compartments settle at half the station-wide mass of
+# each species: O2 17.5 kg, N2 60 kg, CO2 2.8 kg, H2O 0.075 kg. At
+# 1 m2 between two 100 m3 volumes the mass relaxes 95% in about 256 s.
+#
+# The link conducts heat through the wall with no mass transfer
+# (ADR 0028). Both compartments are adiabatic (empty reservoirId, zero
+# exchanger conductance), so the link and the pathway's advection are
+# the only thermal couplings, and the pair settles at the energy-
+# weighted average of the starting temperatures: equal capacities of
+# 10000 kJ/K over 30 C and 10 C land on 20 C. The link dominates -
+# its temperature difference decays as exp(-G (1/Ca + 1/Cb) t) =
+# exp(-t / 500 s), 95% of the way in about 1500 s - while the
+# pathway's advected term is a small rider on the gas flow, roughly
+# half a MJ over the whole run against the link's ~97 MJ.
+#
+# The two ledgers stay separate and close: each side's conductedEnergyKJ
+# is the exact negation of the other's and matches the link's own
+# transfer, and the pathway's advected heat is booked only as
+# advectedEnergyKJ. Latent heat rides neither (ADR 0026).
+#
+# Declared pressure limits are set wide of the derived pressures so the
+# run reports no service-limit crossings, and water vapour starts far
+# below saturation in both compartments so no condensation occurs.
+schemaVersion: 108
+stationSystems:
+  enabled: true
+  systemsStepWorldTicks: 6
+  observationIntervalSeconds: 1
+  atmospheres:
+    - id: warm-module
+      volumeM3: 100
+      startingOxygenKg: 30
+      startingNitrogenKg: 80
+      startingCarbonDioxideKg: 0.6
+      startingWaterVapourKg: 0.1
+      startingTemperatureC: 30
+      thermalCapacityKJPerK: 10000
+      advectedSpecificHeatKJPerKgK: 1.005
+      reservoirId: ""
+      exchangerConductanceKWPerK: 0
+      occupants: 0
+      oxygenUsePerOccupantKgPerS: 0
+      co2ProductionPerOccupantKgPerS: 0
+      sensibleHeatPerOccupantKW: 0
+      moistureAdditionPerOccupantKgPerS: 0
+      leakRateKgPerS: 0
+      minPressureKPa: 1
+      maxPressureKPa: 200
+      minOxygenPartialPressureKPa: 0
+      maxCarbonDioxidePartialPressureKPa: 0
+    - id: cold-module
+      volumeM3: 100
+      startingOxygenKg: 5
+      startingNitrogenKg: 40
+      startingCarbonDioxideKg: 5
+      startingWaterVapourKg: 0.05
+      startingTemperatureC: 10
+      thermalCapacityKJPerK: 10000
+      advectedSpecificHeatKJPerKgK: 1.005
+      reservoirId: ""
+      exchangerConductanceKWPerK: 0
+      occupants: 0
+      oxygenUsePerOccupantKgPerS: 0
+      co2ProductionPerOccupantKgPerS: 0
+      sensibleHeatPerOccupantKW: 0
+      moistureAdditionPerOccupantKgPerS: 0
+      leakRateKgPerS: 0
+      minPressureKPa: 1
+      maxPressureKPa: 200
+      minOxygenPartialPressureKPa: 0
+      maxCarbonDioxidePartialPressureKPa: 0
+  atmospherePathways:
+    - id: connecting-hatch
+      aAtmosphereId: warm-module
+      bAtmosphereId: cold-module
+      areaM2: 1
+      openFraction: 1
+  thermalLinks:
+    - id: connecting-wall
+      aAtmosphereId: warm-module
+      bAtmosphereId: cold-module
+      conductanceKWPerK: 10
+layout:
+  panX: 24
+  panY: 24
+  zoom: 0.8
+  nodes:
+    - {key: "Atmosphere:warm-module:0", x: 0, y: 0}
+    - {key: "Atmosphere:cold-module:0", x: 650, y: 0}
