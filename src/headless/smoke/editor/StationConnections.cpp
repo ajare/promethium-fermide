@@ -45,6 +45,25 @@ station_flow::Link connection(station_flow::Graph const& graph, char const* owne
 	return *found;
 }
 
+// Child window names are "Root/Flow canvas_<hash>"; match the leaf so a
+// check can address the diagram canvas without knowing its id suffix.
+ImGuiWindow* findFlowCanvasLeaf(ImGuiWindow* window)
+{
+	if (!window) return nullptr;
+	auto const isCanvas = [](ImGuiWindow* w) {
+		if (!w->Name) return false;
+		std::string leaf(w->Name);
+		auto const slash = leaf.find_last_of('/');
+		if (slash != std::string::npos) leaf = leaf.substr(slash + 1);
+		return leaf.rfind("Flow canvas", 0) == 0;
+	};
+	for (auto* child : window->DC.ChildWindows)
+		if (isCanvas(child)) return child;
+	for (auto* child : window->DC.ChildWindows)
+		if (auto* found = findFlowCanvasLeaf(child)) return found;
+	return nullptr;
+}
+
 void pathwayDisplayWorkflow(smoke::Context const&)
 {
 	headless::ScopedImGuiContext imgui;
@@ -144,15 +163,16 @@ void pathwayDisplayWorkflow(smoke::Context const&)
 	require(driver.passed(), "Pathway display-only workflow failed");
 }
 
-// #799: a Thermal link reaches the canvas as a synthesized display arc.
-// The arc is one-way, configuration to picture: the solver reads the
-// settings directly, so a world that never renders the diagram must
-// agree with one that does, tick for tick - and the arc beside a
-// co-existing pathway hatch must not collide with it or blur into it.
-void thermalLinkDisplayWorkflow(smoke::Context const&)
+// #818: a Thermal link is a first-class editable node, exactly like the
+// Atmosphere pathway hatch. The wall owns both compartment references on
+// its End A / End B connectors, each Atmosphere exposes a "Thermal links"
+// host face, and the whole thing is placeable, wireable, selectable and
+// editable through the same core seam. The #799 display-only arc is gone:
+// the node and its editable connector links replace it.
+void thermalLinkEditorWorkflow(smoke::Context const&)
 {
 	headless::ScopedImGuiContext imgui;
-	auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1100};
+	auto& io = ImGui::GetIO(); io.DisplaySize = {1600, 1100};
 	io.Fonts->AddFontDefault(); io.Fonts->Build();
 	core::StationSystemsSettings settings; settings.enabled = true;
 	core::AtmosphereSettings a;
@@ -162,100 +182,160 @@ void thermalLinkDisplayWorkflow(smoke::Context const&)
 	a.startingOxygenKg = 30; a.startingNitrogenKg = 80;
 	a.startingCarbonDioxideKg = 0.6; a.startingWaterVapourKg = 0.001;
 	auto b = a; b.id = "b"; b.startingTemperatureC = 10;
-	settings.atmospheres = {a, b};
+	// A third compartment nothing is joined to, so the end combos and the
+	// re-wire verdicts have a free option while both wired ends stay occupied.
+	auto c = a; c.id = "c"; c.startingTemperatureC = 20;
+	settings.atmospheres = {a, b, c};
 	// The same pair is joined by both a gas pathway (a hatch node) and a
-	// thermal link (a synthesized arc), so the two display kinds must
-	// coexist without collision or ambiguity.
+	// thermal wall: two distinct editable nodes over one pair.
 	settings.atmospherePathways = {{"hatch", "a", "b", 1, 1}};
 	settings.thermalLinks = {{"wall", "a", "b", 10.0}};
+
 	auto graph = station_flow::build(settings);
-	auto links = station_flow::thermalLinks(settings, graph);
-	require(links.size() == 1 && graph.nodes[links[0].a].type == "Atmosphere"
-		&& graph.nodes[links[0].a].id == "a"
-		&& graph.nodes[links[0].b].type == "Atmosphere"
-		&& graph.nodes[links[0].b].id == "b",
-		"Thermal link was not synthesized between its two compartments");
+	// Projection: one "Thermal link" node per authored wall, joined to
+	// both compartments by heat-kind connectors that name the field they
+	// write, the same shape the hatch uses for gas.
+	int const walls = static_cast<int>(std::count_if(graph.nodes.begin(), graph.nodes.end(),
+		[](auto const& node) { return node.type == "Thermal link"; }));
+	require(walls == 1, "A Thermal link was not projected as one wall node");
+	auto const endA = connection(graph, "Thermal link", "End A");
+	auto const endB = connection(graph, "Thermal link", "End B");
+	require(endA.kind == station_flow::LinkKind::Heat && endB.kind == station_flow::LinkKind::Heat,
+		"Wall connectors are not heat connectors");
+	require(graph.nodes[endA.from].type == "Atmosphere" && graph.nodes[endA.from].id == "a"
+		&& graph.nodes[endA.to].id == "wall" && graph.nodes[endB.from].id == "b",
+		"Wall connectors do not join the wall to its compartments");
+	require(endA.designKey.reference == "aAtmosphereId"
+		&& endB.designKey.reference == "bAtmosphereId",
+		"Wall connector identity does not name the field it writes");
+	// Enumeration: each wired end is one authored link owned by the wall,
+	// never a Station connection.
+	size_t wallLinks = 0;
+	for (auto const& link : core::stationAuthoredLinks(settings))
+		if (link.identity.rfind("Thermal link:", 0) == 0) ++wallLinks;
+	require(wallLinks == 2, "The two wired ends are not each one authored link");
 	require(settings.connections.empty(),
-		"Thermal diagram link became an editable Station connection");
-	// A draft reference that no longer resolves draws nothing rather
-	// than failing, consistent with existing display-only links.
-	auto broken = settings;
-	broken.thermalLinks = {{"wall", "a", "ghost", 10.0}};
-	require(station_flow::thermalLinks(broken, station_flow::build(broken)).empty(),
-		"Thermal link with a missing compartment failed instead of drawing nothing");
-	core::World baseline("Baseline", 2, 2), displayed("Displayed", 2, 2);
-	for (auto* world : {&baseline, &displayed})
-	{
-		world->pauseSimulation(); world->finishBuild();
-		std::string diagnostic;
-		auto configured = world->configureStationSystems(settings, false, &diagnostic);
-		require(configured, diagnostic.c_str());
-		world->resumeSimulation();
-	}
-	StationFlowDiagram diagram;
-	core::StationConfigurationDocument layout; layout.settings = settings;
-	layout.zoom = 0.65f; layout.panX = 50; layout.panY = 100;
-	layout.positions = {{"Atmosphere:a:0", {0, 0}}, {"Atmosphere:b:0", {800, 0}}};
-	diagram.importLayout(layout);
+		"The editable wall became a Station connection instead of the dedicated aggregate");
+
+	// Verdicts through the same core seam a canvas drop goes through.
+	auto unwired = settings;
+	unwired.thermalLinks = {{"wall", "a", "", 10.0}};
+	require(core::evaluateStationLink(unwired,
+		{{"Atmosphere", "c", "Thermal links"}, {"Thermal link", "wall", "End B"}}).allowed,
+		"Wiring a free End B to an unwired compartment was refused");
+	auto const selfLoop = core::evaluateStationLink(unwired,
+		{{"Atmosphere", "a", "Thermal links"}, {"Thermal link", "wall", "End B"}});
+	require(!selfLoop.allowed && selfLoop.reason.find("self-loop") != std::string::npos,
+		"A wall wiring both ends to one compartment was not refused by name");
+	auto const exterior = core::evaluateStationLink(unwired,
+		{{"Exterior", core::StationExteriorAtmosphereId, "Thermal links"},
+			{"Thermal link", "wall", "End B"}});
+	require(!exterior.allowed, "A wall end was allowed onto derived Exterior vacuum");
+	// A single-max end that is already joined refuses a second drag; the
+	// inspector end combo is the rewire path, exactly as for the hatch.
+	require(!core::evaluateStationLink(settings,
+		{{"Atmosphere", "c", "Thermal links"}, {"Thermal link", "wall", "End B"}}).allowed,
+		"An occupied wall end accepted a second link");
+	// Write and clear round-trip on the same mapping.
+	auto written = unwired;
+	require(core::applyStationLink(written,
+			{{"Atmosphere", "c", "Thermal links"}, {"Thermal link", "wall", "End B"}})
+		&& written.thermalLinks[0].bAtmosphereId == "c",
+		"Applying the wall end link did not write the draft field");
+	require(core::clearStationLink(written, "Thermal link:wall:bAtmosphereId")
+		&& written.thermalLinks[0].bAtmosphereId.empty(),
+		"Clearing the wall end link did not clear the draft field");
+
+	core::World baseline("Baseline", 2, 2);
+	baseline.pauseSimulation(); baseline.finishBuild();
+	std::string diagnostic;
+	require(baseline.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+	baseline.resumeSimulation();
+	auto world = std::make_shared<core::World>("Thermal link editor", 2, 2);
+	world->pauseSimulation(); world->finishBuild();
+	require(world->configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+	world->resumeSimulation();
+	StationSystemsWindow window;
+	window.visible = true;
 	headless::TestEngineDriver driver([&] {
-		ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1150, 1050});
-		ImGui::Begin("Thermal link display"); diagram.render(settings); ImGui::End();
+		ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1550, 1050});
+		ImGui::Begin("Thermal link editor"); window.renderFlowContents(world); ImGui::End();
 	});
 	driver.frame(); driver.frame();
 	#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
-	driver.run("station", "thermalLinkDisplay", [&](ImGuiTestContext* ctx) {
-		ctx->SetRef("Thermal link display");
-		ImVec2 arc;
-		REQ(diagram.thermalScreenPosition("wall", &arc), "Thermal link arc was not drawn");
-		// The co-existing pathway hatch is its own node with its own
-		// connectors: two distinct display elements over one pair.
-		ImVec2 endA, endB;
-		REQ(diagram.pinScreenPosition("Atmosphere pathway", "hatch", "End A", &endA)
-			&& diagram.pinScreenPosition("Atmosphere pathway", "hatch", "End B", &endB),
-			"Co-existing pathway hatch was not drawn beside the thermal arc");
-		// The arc lifts above both compartment boxes, so it cannot sit on
-		// either node or the hatch wiring between them.
-		ImVec4 boxA, boxB;
-		REQ(diagram.nodeScreenRect("Atmosphere", "a", &boxA)
-			&& diagram.nodeScreenRect("Atmosphere", "b", &boxB),
-			"Compartment boxes were not addressable");
-		REQ(arc.y < std::min(boxA.y, boxB.y), "Thermal arc was not lifted clear of the compartments");
-		REQ(driver.contains("never read by the solver from the diagram"),
-			"Thermal link visual legend is missing");
-		REQ(smoke::station::advanceSeconds(baseline, 10) && smoke::station::advanceSeconds(displayed, 10),
-			"Visible thermal link run failed");
-		REQ(baseline.getStationSystemsSnapshot() == displayed.getStationSystemsSnapshot(),
-			"Rendering thermal link arcs changed simulation");
-		ctx->ItemClick("Show thermal links"); ctx->Yield(3);
-		REQ(!diagram.thermalScreenPosition("wall", &arc), "Hidden thermal link was still drawn");
-		REQ(diagram.pinScreenPosition("Atmosphere pathway", "hatch", "End A", &endA),
-			"Hiding thermal links also hid the pathway hatch");
-		// Alter persisted presentation layout while the arc is absent.
-		layout.positions["Atmosphere:a:0"].first = 300;
-		diagram.restoreLayout(layout); ctx->Yield(3);
-		REQ(smoke::station::advanceSeconds(baseline, 10) && smoke::station::advanceSeconds(displayed, 10),
-			"Hidden thermal link run failed");
-		auto snapshot = displayed.getStationSystemsSnapshot();
+	driver.run("station", "thermalLinkEditor", [&](ImGuiTestContext* ctx) {
+		ctx->SetRef("Thermal link editor");
+		REQ(smoke::station::advanceSeconds(baseline, 10) && smoke::station::advanceSeconds(*world, 10),
+			"Thermal link run failed");
+		ctx->Yield(3);
+		// The wall and the co-existing hatch are two distinct nodes over
+		// one pair, and each compartment shows its host face.
+		ImVec4 wall{}, hatch{};
+		REQ(window.flowNodeRect("Thermal link", "wall", &wall), "the wall node is not on screen");
+		REQ(window.flowNodeRect("Atmosphere pathway", "hatch", &hatch),
+			"the co-existing hatch node vanished beside the wall");
+		ImVec2 hostPin{};
+		REQ(window.flowPinPosition("Atmosphere", "a", "Thermal links", &hostPin),
+			"the Atmosphere host face for Thermal links is not on screen");
+		REQ(driver.contains("a wall is a node wired End A / End B"),
+			"the Thermal link legend does not describe the editable node");
+		// The wall reports live like the hatch: conductance, signed rate, net.
+		if (auto tel = window.flowTelemetry("Thermal link", "wall"))
+		{
+			bool const hasFlow = std::any_of(tel->values.begin(), tel->values.end(),
+				[](auto const& line) { return line.find("Heat flow A->B") != std::string::npos; });
+			REQ(hasFlow, "the wall readout does not report its signed heat flow");
+		}
+		else REQ(false, "the wall has no live telemetry");
+		// Selecting the wall lands the inspector on its editable entry.
+		ctx->MouseTeleportToPos({(wall.x + wall.z) * 0.5f, (wall.y + wall.w) * 0.5f});
+		ctx->MouseClick(); ctx->Yield(3);
+		// Move off the node so its hover tooltip cannot mask inspector text.
+		ctx->MouseTeleportToPos({24, 24}); ctx->Yield(2);
+		REQ(driver.contains("Node: Thermal link 'wall'"),
+			"selecting the wall did not name it in the inspector");
+		REQ(!driver.contains("does not map to a single editable entry"),
+			"the wall was refused as unaddressable instead of being editable");
+		REQ(driver.contains("conductance kW/K"),
+			"the wall's draft conductance field did not render");
+		// The wall can be disconnected from the inspector, end by end.
+		ctx->ItemClick("**/Disconnect End A a"); ctx->Yield(3);
+		REQ(window.draft().thermalLinks[0].aAtmosphereId.empty()
+			&& window.draft().thermalLinks[0].bAtmosphereId == "b",
+			"Disconnecting End A did not clear only that end");
+		REQ(world->getStationSystemsSettings().thermalLinks[0].aAtmosphereId == "a",
+			"a draft disconnect bypassed draft isolation and hit the live scenario");
+		// Placement: the wall arrives unwired with a live conductance.
+		ctx->ComboClick("Place node/Thermal link"); ctx->Yield(2);
+		REQ(driver.contains("Thermal link placement armed"),
+			"Thermal link is missing from the placement menu");
+		if (auto* canvas = findFlowCanvasLeaf(ImGui::FindWindowByName("Thermal link editor")))
+		{
+			ctx->MouseTeleportToPos({canvas->Pos.x + 260.0f, canvas->Pos.y + 320.0f});
+			ctx->Yield(2); ctx->MouseClick(); ctx->Yield(3);
+		}
+		else REQ(false, "the flow canvas window was not found for placement");
+		REQ(window.draft().thermalLinks.size() == 2
+			&& window.draft().thermalLinks[1].id == "link1"
+			&& window.draft().thermalLinks[1].aAtmosphereId.empty()
+			&& window.draft().thermalLinks[1].bAtmosphereId.empty()
+			&& window.draft().thermalLinks[1].conductanceKWPerK == 1.0,
+			"wall placement did not create an unwired link with a live default conductance");
+		ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+		// Draft-only edits: the applied scenario still runs the original
+		// wall, identical to the never-rendered baseline.
+		REQ(smoke::station::advanceSeconds(baseline, 10) && smoke::station::advanceSeconds(*world, 10),
+			"run after editor edits failed");
+		auto const snapshot = world->getStationSystemsSnapshot();
 		REQ(snapshot == baseline.getStationSystemsSnapshot()
 			&& snapshot.thermalLinks[0].netTransferredKJ > 1.0
 			&& snapshot.atmospherePathways[0].netTransferredKg[0] > 0,
-			"Removing/altering display arcs changed or disabled the solver's own heat and gas transfer");
-		REQ(settings == layout.settings && !diagram.selectedConnection(),
-			"Display-only thermal controls mutated authored configuration or selected a connection");
-		ctx->ItemClick("Show thermal links"); ctx->Yield(3);
-		REQ(diagram.thermalScreenPosition("wall", &arc), "Thermal link did not return after display toggle");
-		REQ(smoke::station::advanceSeconds(baseline, 10) && smoke::station::advanceSeconds(displayed, 10)
-			&& baseline.getStationSystemsSnapshot() == displayed.getStationSystemsSnapshot(),
-			"Redrawing the altered thermal layout changed simulation");
-		// Missing layout data: with no stored positions at all the diagram
-		// generates the layout and still draws the arc rather than failing.
-		core::StationConfigurationDocument bare; bare.settings = settings; bare.zoom = 0.5f;
-		diagram.importLayout(bare); ctx->Yield(3);
-		REQ(diagram.thermalScreenPosition("wall", &arc),
-			"Missing layout data failed to generate a thermal link position");
+			"editing the wall in the diagram changed the applied simulation");
+		REQ(snapshot.thermalLinks[0].status == core::StationThermalLinkStatus::Active,
+			"the wall between 40C and 10C compartments is not reported Active");
 	});
 	#undef REQ
-	require(driver.passed(), "Thermal link display-only workflow failed");
+	require(driver.passed(), "Thermal link editable-node workflow failed");
 }
 
 void hatchInspectorWorkflow(smoke::Context const&)
@@ -1064,7 +1144,7 @@ void flowConnectionsWorkflow(smoke::Context const& context)
 void editor_smoke::registerStationConnections(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/pathwayDisplayWorkflow", pathwayDisplayWorkflow});
-	checks.push_back({"station/thermalLinkDisplayWorkflow", thermalLinkDisplayWorkflow});
+	checks.push_back({"station/thermalLinkEditorWorkflow", thermalLinkEditorWorkflow});
 	checks.push_back({"station/hatchInspectorWorkflow", hatchInspectorWorkflow});
 	checks.push_back({"station/connectionDesign", connectionDesign});
 	checks.push_back({"station/connectionForecastWorkflow", connectionForecastWorkflow});

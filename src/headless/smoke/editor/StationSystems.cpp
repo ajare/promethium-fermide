@@ -3361,7 +3361,7 @@ namespace
 		add(s.stores); add(s.transfers); add(s.conversions); add(s.power.loads);
 		add(s.power.sources); add(s.power.batteries); add(s.power.generators); add(s.fuelCells);
 		add(s.thermal.reservoirs); add(s.thermal.radiators); add(s.coolantLoops);
-		add(s.chillers); add(s.thermalBuffers); add(s.atmospheres); add(s.atmospherePathways); add(s.crews);
+		add(s.chillers); add(s.thermalBuffers); add(s.atmospheres); add(s.atmospherePathways); add(s.thermalLinks); add(s.crews);
 		add(s.waterCollectors); add(s.waterTreatments); add(s.electrolyzers); add(s.co2Captures);
 		add(s.sabatierReactors); add(s.methaneProcessors); add(s.microbialProcessors);
 		add(s.cropPopulations); add(s.algaeCultures); add(s.deliveries); add(s.wasteEjections);
@@ -5265,7 +5265,7 @@ namespace
 				{"Generator", "Generator"}, {"Fuel cell", "Fuel cell"}, {"Sabatier", "Sabatier reactor"},
 				{"Methane processor", "Methane processor"}, {"Reservoir", "Thermal reservoir"},
 				{"Radiator", "Radiator"}, {"Coolant loop", "Coolant loop"}, {"Chiller", "Chiller"},
-				{"Thermal buffer", "Thermal buffer"}, {"Crew", "Crew"}, {"Crops", "Crop population"},
+				{"Thermal buffer", "Thermal buffer"}, {"Thermal link", "Thermal link"}, {"Crew", "Crew"}, {"Crops", "Crop population"},
 				{"Algae", "Algae culture"}, {"Microbial processor", "Microbial processor"},
 				{"Water collector", "Water collector"}, {"Water treatment", "Water treatment"},
 				{"Electrolyzer", "Electrolyzer"}, {"CO2 capture", "CO2 capture machine"},

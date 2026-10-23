@@ -205,6 +205,17 @@ namespace core
 			PortDescriptor{"Atmosphere", "Hosted pathways", StationPortDirection::Output, "pathway-host", "atmosphere-endpoint", 0, {}},
 			PortDescriptor{"Atmosphere pathway", "End A", StationPortDirection::Input, "atmosphere-endpoint", "pathway-host", 1, {}, true},
 			PortDescriptor{"Atmosphere pathway", "End B", StationPortDirection::Input, "atmosphere-endpoint", "pathway-host", 1, {}, true},
+			// The Thermal link (#818): one undirected conduction wall with two
+			// ends, the heat counterpart of the hatch and the same shape - the
+			// wall owns both compartment references on its input faces and each
+			// Atmosphere exposes one unbounded host face. It is deliberately
+			// NOT a Station connection (ADR-0028): no throughput, no
+			// efficiency, no direction. Both ends are optional until wired, so
+			// a freshly placed wall reads as a link being built rather than a
+			// broken reference.
+			PortDescriptor{"Atmosphere", "Thermal links", StationPortDirection::Output, "thermal-link-host", "thermal-link-endpoint", 0, {}},
+			PortDescriptor{"Thermal link", "End A", StationPortDirection::Input, "thermal-link-endpoint", "thermal-link-host", 1, {}, true},
+			PortDescriptor{"Thermal link", "End B", StationPortDirection::Input, "thermal-link-endpoint", "thermal-link-host", 1, {}, true},
 			PortDescriptor{"Delivery", "Destination", StationPortDirection::Output, "material", "inventory", 1, {}, false},
 			PortDescriptor{"Waste ejection", "Source", StationPortDirection::Input, "material", "inventory", 1, {}, false},
 			PortDescriptor{"Outage", "Target installation", StationPortDirection::Output, "supervision", "installation", 1, {}, false},
@@ -474,6 +485,11 @@ namespace core
 			StationPlaceableType{"Coolant loop", "coolantLoop", "Thermal"},
 			StationPlaceableType{"Chiller", "chiller", "Thermal"},
 			StationPlaceableType{"Thermal buffer", "buffer", "Thermal"},
+			// #818: a conduction wall between two compartments. Placed with
+			// both ends free and wired like any other node; each wall is one
+			// entry in the dedicated undirected thermal-link aggregate, never
+			// a Station connection (ADR-0028).
+			StationPlaceableType{"Thermal link", "link", "Thermal"},
 			StationPlaceableType{"Crew", "crew", "Biology"},
 			StationPlaceableType{"Crops", "crop", "Biology"},
 			StationPlaceableType{"Algae", "algae", "Biology"},

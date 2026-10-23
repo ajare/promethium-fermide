@@ -188,6 +188,23 @@ Graph build(core::StationSystemsSettings const& s)
 		b.input(b.owner, pathway.bAtmosphereId, "End B", "Atmosphere", LinkKind::Material,
 			true, Medium::Unspecified, "bAtmosphereId");
 	}
+	// A Thermal link presents one authored conduction wall as its own node
+	// (#818), the same shape the hatch uses: the wall owns both compartment
+	// references on its input faces and each Atmosphere carries the
+	// matching unbounded host face. Heat-only: the connectors carry the
+	// Heat link kind, never a species, and the wall is deliberately not a
+	// Station connection (ADR-0028).
+	for (auto const& link : s.thermalLinks)
+	{
+		char detail[96];
+		std::snprintf(detail, sizeof(detail), "conductance %.3f kW/K",
+			link.conductanceKWPerK);
+		b.owner = b.node("Thermal link", link.id, 2, detail);
+		b.input(b.owner, link.aAtmosphereId, "End A", "Atmosphere", LinkKind::Heat,
+			true, Medium::Heat, "aAtmosphereId");
+		b.input(b.owner, link.bAtmosphereId, "End B", "Atmosphere", LinkKind::Heat,
+			true, Medium::Heat, "bAtmosphereId");
+	}
 	b.add(s.coolantLoops, "Coolant loop", 2); b.add(s.chillers, "Chiller", 2);
 	b.add(s.radiators, "Radiator", 2); b.add(s.thermalBuffers, "Thermal buffer", 2);
 	b.add(s.solarArrays, "Solar", 3); b.add(s.batteries, "Battery", 3);

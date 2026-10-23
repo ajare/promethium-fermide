@@ -80,6 +80,21 @@ namespace
 		return nullptr;
 	}
 
+	// Which end of a Thermal link a connector names, as a pointer into the
+	// draft wall. One resolver backs the write, the clear and the scoped
+	// rule so they cannot disagree, exactly like the hatch's ends.
+	std::string* thermalLinkEndpointField(StationSystemsSettings& settings,
+		std::string const& ownerId, std::string const& field)
+	{
+		auto const found = std::find_if(settings.thermalLinks.begin(),
+			settings.thermalLinks.end(),
+			[&](ThermalLinkSettings const& link) { return link.id == ownerId; });
+		if (found == settings.thermalLinks.end()) return nullptr;
+		if (field == "aAtmosphereId") return &found->aAtmosphereId;
+		if (field == "bAtmosphereId") return &found->bAtmosphereId;
+		return nullptr;
+	}
+
 	// Which reference field a link writes. This is the one mapping between a
 	// connector and configuration: the editor draws the connector, the seam
 	// writes the field, and the enumeration below reads it back the same way.
@@ -267,6 +282,24 @@ namespace
 			if (link.to.portName == "End B")
 			{
 				mapping = {"Atmosphere pathway", link.to.nodeId, "bAtmosphereId", link.from};
+				return true;
+			}
+			return false;
+		}
+		// The Thermal link's two ends (#818): the wall owns both compartment
+		// references on the input side of the oriented pair, the same shape
+		// as the hatch above, so it resolves through its own explicit branch.
+		if (link.to.nodeType == "Thermal link" && link.from.nodeType == "Atmosphere"
+			&& link.from.portName == "Thermal links")
+		{
+			if (link.to.portName == "End A")
+			{
+				mapping = {"Thermal link", link.to.nodeId, "aAtmosphereId", link.from};
+				return true;
+			}
+			if (link.to.portName == "End B")
+			{
+				mapping = {"Thermal link", link.to.nodeId, "bAtmosphereId", link.from};
 				return true;
 			}
 			return false;
@@ -900,6 +933,20 @@ namespace
 					+ "' endpoints must be distinct (self-loop)";
 			return true;
 		}
+		if (mapping.ownerType == "Thermal link")
+		{
+			auto found = std::find_if(settings.thermalLinks.begin(), settings.thermalLinks.end(),
+				[&](ThermalLinkSettings const& entry) { return entry.id == mapping.ownerId; });
+			if (found == settings.thermalLinks.end()) return false;
+			// Mirrors the authoritative validator's self-loop refusal: a wall
+			// cannot conduct a compartment into itself. The Exterior-endpoint
+			// refusal never reaches the canvas because the derived Exterior
+			// node exposes no host face to drag from.
+			if (!found->aAtmosphereId.empty() && found->aAtmosphereId == found->bAtmosphereId)
+				diagnostic = "Station thermal link '" + mapping.ownerId
+					+ "' endpoints must be distinct (self-loop)";
+			return true;
+		}
 		if (mapping.ownerType == "Water treatment")
 		{
 			auto found = std::find_if(settings.waterTreatments.begin(), settings.waterTreatments.end(),
@@ -1219,6 +1266,7 @@ namespace
 		if (type == "Generator") return fn(settings.generators);
 		if (type == "Atmosphere") return fn(settings.atmospheres);
 		if (type == "Atmosphere pathway") return fn(settings.atmospherePathways);
+		if (type == "Thermal link") return fn(settings.thermalLinks);
 		if (type == "Airlock cycle") return fn(settings.airlockCycles);
 		if (type == "Crew") return fn(settings.crews);
 		if (type == "Water collector") return fn(settings.waterCollectors);
@@ -1334,6 +1382,22 @@ std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& set
 			links.push_back({linkIdentity("Atmosphere pathway", pathway.id, "bAtmosphereId"),
 				{"Atmosphere", pathway.bAtmosphereId, "Hosted pathways"},
 				{"Atmosphere pathway", pathway.id, "End B"}});
+	}
+	// Each wired Thermal link end is one authored reference, the counterpart
+	// of what applyStationLink writes (#818). An empty end is an unconnected
+	// connector, not a link to an empty compartment. Exterior ends cannot
+	// exist: the validator refuses them outright, so no display-only
+	// exception is needed here.
+	for (auto const& link : settings.thermalLinks)
+	{
+		if (!link.aAtmosphereId.empty())
+			links.push_back({linkIdentity("Thermal link", link.id, "aAtmosphereId"),
+				{"Atmosphere", link.aAtmosphereId, "Thermal links"},
+				{"Thermal link", link.id, "End A"}});
+		if (!link.bAtmosphereId.empty())
+			links.push_back({linkIdentity("Thermal link", link.id, "bAtmosphereId"),
+				{"Atmosphere", link.bAtmosphereId, "Thermal links"},
+				{"Thermal link", link.id, "End B"}});
 	}
 	for (auto const& transfer : settings.transfers)
 	{
@@ -1548,6 +1612,11 @@ bool applyStationLink(StationSystemsSettings& settings, CandidateLink const& lin
 		auto* field = pathwayEndpointField(settings, mapping.ownerId, mapping.field);
 		return field && write(*field);
 	}
+	if (mapping.ownerType == "Thermal link")
+	{
+		auto* field = thermalLinkEndpointField(settings, mapping.ownerId, mapping.field);
+		return field && write(*field);
+	}
 	if (isMachineOwnerType(mapping.ownerType))
 	{
 		auto* field = machineField(settings, mapping.ownerType, mapping.ownerId, mapping.field);
@@ -1589,6 +1658,12 @@ bool clearStationLink(StationSystemsSettings& settings, std::string const& ident
 	if (ownerType == "Atmosphere pathway")
 	{
 		auto* target = pathwayEndpointField(settings, ownerId, field);
+		if (!target) return false;
+		return clear(*target);
+	}
+	if (ownerType == "Thermal link")
+	{
+		auto* target = thermalLinkEndpointField(settings, ownerId, field);
 		if (!target) return false;
 		return clear(*target);
 	}

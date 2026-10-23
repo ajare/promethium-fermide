@@ -357,6 +357,20 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		out.status = active ? "Diffusing" : "Idle";
 		out.state = active ? TelemetryState::Normal : TelemetryState::Idle;
 	}
+	else if (node.type == "Thermal link")
+	{
+		auto p = find(s.thermalLinks, id); if (!p) return {};
+		// A wall reports as a flux, not as a service (ADR-0028): nothing
+		// asks for heat to move, the temperature difference decides, so
+		// there is no request, no shortfall and no limiter. The rate is
+		// already averaged over the last Station step; positive is A->B.
+		out.values = {"Conductance " + quantity(p->conductanceKWPerK, "kW/K"),
+			"Heat flow A->B " + quantity(p->flowRateKW, "kW"),
+			"Net transferred A->B " + quantity(p->netTransferredKJ, "kJ")};
+		bool const active = p->status == core::StationThermalLinkStatus::Active;
+		out.status = active ? "Conducting" : "Idle";
+		out.state = active ? TelemetryState::Normal : TelemetryState::Idle;
+	}
 	else if (node.type == "Crew")
 	{
 		auto p = find(s.crews, id); if (!p) return {}; state(out, *p);

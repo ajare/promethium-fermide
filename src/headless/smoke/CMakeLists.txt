@@ -928,8 +928,8 @@ add_test(NAME station-editor-hatch-inspector COMMAND pf-smoke-editor --check sta
 set_tests_properties(station-editor-hatch-inspector PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 
 set_tests_properties(station-editor-pathway-display PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
-add_test(NAME station-editor-thermal-link-display COMMAND pf-smoke-editor --check station/thermalLinkDisplayWorkflow)
-set_tests_properties(station-editor-thermal-link-display PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+add_test(NAME station-editor-thermal-link-editor COMMAND pf-smoke-editor --check station/thermalLinkEditorWorkflow)
+set_tests_properties(station-editor-thermal-link-editor PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-connection-design COMMAND pf-smoke-editor --check station/connectionDesign)
 set_tests_properties(station-editor-connection-design PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-connections COMMAND pf-smoke-editor --check station/flowConnectionsWorkflow)

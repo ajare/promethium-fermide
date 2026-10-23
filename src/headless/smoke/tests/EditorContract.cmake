@@ -263,7 +263,7 @@ set(editor_names
     roomHeightScale/history
     roomHeightScale/occupiedPoseHistory
     station/pathwayDisplayWorkflow
-    station/thermalLinkDisplayWorkflow
+    station/thermalLinkEditorWorkflow
     station/hatchInspectorWorkflow
     station/connectionDesign
     station/connectionForecastWorkflow

@@ -1131,6 +1131,42 @@ bool renderAtmospherePathwayEntry(core::StationSystemsSettings& draft,
 	return removePathway;
 }
 
+bool renderThermalLinkEntry(core::StationSystemsSettings& draft,
+	core::ThermalLinkSettings& link, std::string const& label, std::string const& removeLabel)
+{
+	ImGui::PushID(label.c_str());
+	ImGui::PushItemWidth(128.0f);
+	bool removeLink = false;
+	renderIdentity(label, link.id);
+	// The two ends are the same references the wall node's End A / End B
+	// connectors write, so the form and the canvas cannot disagree about
+	// which compartments one wall joins. Exterior vacuum is never offered:
+	// it has no temperature to conduct against, and the validator refuses it.
+	auto renderEnd = [&](char const* field, std::string& end, std::string const& otherEnd) {
+		auto const* preview = end.empty() ? "Unconnected" : end.c_str();
+		if (!ImGui::BeginCombo(describe(field, label).c_str(), preview)) return;
+		if (ImGui::Selectable("Unconnected", end.empty())) end.clear();
+		for (auto const& atmosphere : draft.atmospheres)
+		{
+			if (atmosphere.id.empty() || atmosphere.id == otherEnd
+				|| atmosphere.id == core::StationExteriorAtmosphereId) continue;
+			if (ImGui::Selectable(atmosphere.id.c_str(), end == atmosphere.id))
+				end = atmosphere.id;
+		}
+		ImGui::EndCombo();
+	};
+	renderEnd("end A compartment", link.aAtmosphereId, link.bAtmosphereId);
+	renderEnd("end B compartment", link.bAtmosphereId, link.aAtmosphereId);
+	ImGui::InputDouble(describe("conductance kW/K", label).c_str(),
+		&link.conductanceKWPerK, 0.0, 0.0, "%.4f");
+	ImGui::SameLine();
+	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
+		removeLink = true;
+	ImGui::PopItemWidth();
+	ImGui::PopID();
+	return removeLink;
+}
+
 bool renderTransferEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::ResourceTransferSettings& transfer,
 	std::string const& label, std::string const& removeLabel)
@@ -2131,6 +2167,13 @@ bool renderAtmospherePathwayEntryAt(core::StationSystemsSettings& draft, size_t 
 		"Atmosphere pathway " + std::to_string(index), {});
 }
 
+bool renderThermalLinkEntryAt(core::StationSystemsSettings& draft, size_t index)
+{
+	if (index >= draft.thermalLinks.size()) return false;
+	return renderThermalLinkEntry(draft, draft.thermalLinks[index],
+		"Thermal link " + std::to_string(index), {});
+}
+
 bool renderAirlockCycleEntryAt(core::StationSystemsSettings& draft, size_t index)
 {
 	if (index >= draft.airlockCycles.size()) return false;
@@ -2195,7 +2238,7 @@ bool renderConversionEntryAt(core::StationSystemsSettings& draft, size_t index)
 }
 
 // Keyed by the Flow node type names in core::stationPortDescriptors().
-constexpr std::array<StationEntryEditor, 30> kEntryEditors{{
+constexpr std::array<StationEntryEditor, 31> kEntryEditors{{
 	{"Solar", &renderSolarEntryAt},
 	{"Conversion", &renderConversionEntryAt},
 	{"Delivery", &renderDeliveryEntryAt},
@@ -2213,6 +2256,7 @@ constexpr std::array<StationEntryEditor, 30> kEntryEditors{{
 	{"CO2 capture", &renderCo2CaptureEntryAt},
 	{"Atmosphere", &renderAtmosphereEntryAt},
 	{"Atmosphere pathway", &renderAtmospherePathwayEntryAt},
+	{"Thermal link", &renderThermalLinkEntryAt},
 	{"Airlock cycle", &renderAirlockCycleEntryAt},
 
 	{"Transfer", &renderTransferEntryAt},
@@ -2253,7 +2297,7 @@ struct EntryCreator
 
 // Existing form defaults and reference preferences, independent of list rendering.
 // Groups and ordering come from the same catalogue as Flow placement.
-constexpr std::array<EntryCreator, 30> kEntryCreators{{
+constexpr std::array<EntryCreator, 31> kEntryCreators{{
 	{"Store", "Store",
 		[](core::StationSystemsSettings const& draft) { return draft.stores.size() < core::MaxStationResourceStores; },
 		[](core::StationSystemsSettings& draft) {
@@ -2848,6 +2892,24 @@ constexpr std::array<EntryCreator, 30> kEntryCreators{{
 				if (!taken) break;
 			}
 			draft.atmospherePathways.push_back(std::move(pathway));
+		}},
+	{"Thermal link", "Thermal link",
+		[](core::StationSystemsSettings const& draft) { return draft.thermalLinks.size() < core::MaxStationThermalLinks; },
+		[](core::StationSystemsSettings& draft) {
+			// A new wall starts with both ends free and a live conductance:
+			// zero would be a dead wall the validator refuses, so the
+			// default is a number that actually conducts. Wiring it is the
+			// drag; this is the thing the drag lands on.
+			core::ThermalLinkSettings link;
+			link.conductanceKWPerK = 1.0;
+			for (size_t candidate = draft.thermalLinks.size() + 1;; ++candidate)
+			{
+				link.id = "link" + std::to_string(candidate);
+				auto const taken = std::any_of(draft.thermalLinks.begin(), draft.thermalLinks.end(),
+					[&](core::ThermalLinkSettings const& existing) { return existing.id == link.id; });
+				if (!taken) break;
+			}
+			draft.thermalLinks.push_back(std::move(link));
 		}},
 	{"Airlock cycle", "Airlock cycle",
 		[](core::StationSystemsSettings const& draft) { return draft.airlockCycles.size() < core::MaxStationAirlockCycles; },
