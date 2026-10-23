@@ -346,6 +346,28 @@ namespace core
 			}
 			serializer.endArray();
 		}
+		if (!settings.heatEngines.empty())
+		{
+			// Authored heat engine contracts only (#804): the intake, net
+			// output, rejection heat, status and the conversion ledger are
+			// runtime state reconstructed on load, like every other ledger.
+			serializer.beginArray("heatEngines");
+			for (auto const& engine : settings.heatEngines)
+			{
+				serializer.beginMap("");
+				serializer.writeString("id", engine.id);
+				serializer.writeString("hotReservoirId", engine.hotReservoirId);
+				serializer.writeString("rejectionReservoirId", engine.rejectionReservoirId);
+				serializer.writeString("thermalClass", engine.thermalClass);
+				serializer.writeDouble("ratedThermalInputKW", engine.ratedThermalInputKW);
+				serializer.writeDouble("carnotFraction", engine.carnotFraction);
+				serializer.writeDouble("auxiliaryPowerKW", engine.auxiliaryPowerKW);
+				serializer.writeDouble("minHotTemperatureC", engine.minHotTemperatureC);
+				serializer.writeDouble("maxSinkTemperatureC", engine.maxSinkTemperatureC);
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 		if (!settings.generators.empty())
 		{
 			// Authored generator contracts only; phase, output, fuel
@@ -1445,6 +1467,38 @@ namespace core
 			}
 			serializer.endArray();
 		}
+		if (serializer.hasField("heatEngines"))
+		{
+			if (version < 109) throw SerializationException(
+				"Station heat engines require World schema 109; conversion required");
+			serializer.beginArray("heatEngines");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				auto const id = serializer.readString("id");
+				std::vector<std::string> fields{"id", "hotReservoirId",
+					"rejectionReservoirId", "thermalClass", "ratedThermalInputKW",
+					"carnotFraction", "auxiliaryPowerKW", "minHotTemperatureC",
+					"maxSinkTemperatureC"};
+				for (auto const& field : serializer.mapKeys(""))
+					if (std::find(fields.begin(), fields.end(), field) == fields.end())
+						throw SerializationException("Station entry '" + id + "' field '" + field
+							+ "' is unknown; conversion required");
+				HeatEngineSettings engine;
+				engine.id = id;
+				engine.hotReservoirId = serializer.readString("hotReservoirId");
+				engine.rejectionReservoirId = serializer.readString("rejectionReservoirId");
+				engine.thermalClass = serializer.readString("thermalClass");
+				engine.ratedThermalInputKW = serializer.readDouble("ratedThermalInputKW");
+				engine.carnotFraction = serializer.readDouble("carnotFraction");
+				engine.auxiliaryPowerKW = serializer.readDouble("auxiliaryPowerKW");
+				engine.minHotTemperatureC = serializer.readDouble("minHotTemperatureC");
+				engine.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
+				stationSettings.heatEngines.push_back(std::move(engine));
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 		if (serializer.hasField("generators"))
 		{
 			if (version < 75) throw SerializationException(
@@ -2260,8 +2314,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 108)
-				return refuse("Reference station schema version must be from 65 to 108");
+			if (document.schemaVersion < 65 || document.schemaVersion > 109)
+				return refuse("Reference station schema version must be from 65 to 109");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

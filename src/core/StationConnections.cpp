@@ -206,13 +206,14 @@ Graph build(core::StationSystemsSettings const& s)
 			true, Medium::Heat, "bAtmosphereId");
 	}
 	b.add(s.coolantLoops, "Coolant loop", 2); b.add(s.chillers, "Chiller", 2);
+	b.add(s.heatEngines, "Heat engine", 3);
 	b.add(s.radiators, "Radiator", 2); b.add(s.thermalBuffers, "Thermal buffer", 2);
 	b.add(s.solarArrays, "Solar", 3); b.add(s.batteries, "Battery", 3);
 	b.add(s.generators, "Generator", 3); b.add(s.airlockCycles, "Airlock cycle", 3);
 	b.add(s.maintenanceJobs, "Maintenance", 3); b.add(s.outages, "Outage", 3);
 	bool const hasPower = !s.solarArrays.empty() || !s.batteries.empty() || !s.generators.empty()
 		|| !s.fuelCells.empty() || !s.equipmentLoads.empty() || !s.waterTreatments.empty()
-		|| !s.coolantLoops.empty() || !s.chillers.empty()
+		|| !s.coolantLoops.empty() || !s.chillers.empty() || !s.heatEngines.empty()
 		|| !s.waterCollectors.empty() || !s.electrolyzers.empty() || !s.co2Captures.empty()
 		|| !s.sabatierReactors.empty() || !s.methaneProcessors.empty()
 		|| !s.microbialProcessors.empty() || !s.cropPopulations.empty() || !s.algaeCultures.empty();
@@ -336,6 +337,15 @@ Graph build(core::StationSystemsSettings const& s)
 		b.output(n, p.condenserReservoirId, "Condenser heat", "Reservoir", LinkKind::Heat);
 		// A class is a shared service, not a physical pipe or assigned chiller.
 		b.output(n, p.thermalClass, "Cooling capacity", "Cooling service", LinkKind::Heat, false, Medium::Cooling);
+	});
+	// A heat engine (#804) draws its intake from the hot reservoir, rejects
+	// the remainder into the rejection reservoir, and delivers net power to
+	// the bus: the station's only thermal-to-electrical crossing, drawn as
+	// one heat in, one heat out and one power out at the machine boundary.
+	b.connect(s.heatEngines, "Heat engine", [&](size_t n, auto const& p) {
+		b.input(n, p.hotReservoirId, "Thermal intake", "Reservoir", LinkKind::Heat);
+		b.output(n, p.rejectionReservoirId, "Rejection heat", "Reservoir", LinkKind::Heat);
+		b.edge(n, bus, "Generation", LinkKind::Power);
 	});
 	b.connect(s.radiators, "Radiator", [&](size_t n, auto const& p) {
 		b.input(n, p.reservoirId, "Heat rejection to environment", "Reservoir", LinkKind::Heat); });

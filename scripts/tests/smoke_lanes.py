@@ -86,7 +86,11 @@ class Lanes(unittest.TestCase):
                       'thermalLinkParallelWallAdditivity', 'thermalLinkChainConvergence',
                       'thermalLinkChainLedgerAttribution',
                       'thermalLinkDeclarationOrderIndependence',
-                      'thermalLinkSharedNeighbourIndependence'):
+                      'thermalLinkSharedNeighbourIndependence',
+                      'heatEngineTracerBullet', 'heatEngineClosure', 'heatEngineCarnotBound',
+                      'heatEngineIdle', 'heatEngineNoCrossing', 'heatEngineSinkTrip',
+                      'heatEngineValidation', 'heatEnginePersistence',
+                      'heatEngineResetIsolation', 'heatEnginePlantCoexistence'):
             self.assertIn('validation-fast', props(f'station-{check}')['LABELS'])
             self.assertNotIn('validation-stress', props(f'station-{check}')['LABELS'])
         stress_timeouts = {'pathwayLongHorizon': 20, 'pathwayAbsurdGeometry': 10,

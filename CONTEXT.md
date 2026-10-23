@@ -638,6 +638,14 @@ _Avoid_: Heat flow (undirected and ambiguous with rate), transferred heat (reser
 **Thermal reservoir**:
 A body or aggregate of material whose stored thermal energy and thermal capacity determine its temperature over time. Its ability to absorb heat is finite and constrained by the temperature limits of the services it supports. A compartment exchanges heat with a reservoir only through its own heat-only exchanger; a Thermal link never touches a reservoir.
 
+**Heat engine**:
+The station's one crossing from a Thermal node to the electrical bus: a machine that draws heat from a hot Thermal reservoir, converts a declared fraction of it to bus generation, and rejects the remainder into a colder rejection reservoir. Its conversion is bounded at the conversion site by the Carnot efficiency of its two interface temperatures at tick start, evaluated in absolute (kelvin) temperature — the deliberate counterpart to a Thermal link's ΔT conduction, which is scale-free and tolerates Celsius. A Heat engine is the exact mirror of a chiller: where a chiller spends work to move heat against a gradient, an engine is paid work by a gradient it never creates. It is not a generator: it burns no fuel and its output is real bus supply, never a load with a refund. When the gradient is dead, the source is below its minimum hot gate, or its gross output cannot cover its own auxiliaries, the engine idles; rejection into a sink at or above its maximum sink gate trips it whole until the sink recovers. Its intake can never carry the hot reservoir below its sink's tick-start temperature, so an engine cannot manufacture the gradient it needs to keep running.
+_Avoid_: Motor (names rotation, not the thermodynamic crossing), turbine (a mechanism, not the modelled aggregate), waste-heat recycler (vague), generator (that burns fuel), heat pump (that spends work to move heat uphill — the mirror image)
+
+**Carnot fraction**:
+A Heat engine's declared share of the Carnot ceiling it is allowed to capture, in (0, 1]. The engine's actual efficiency is this fraction of the Carnot efficiency at its current interface temperatures, so over-unity conversion is refused at authoring rather than rediscovered at runtime. It is a declared ceiling on capture, not a part-load curve: the engine sits at its fraction whatever its intake, and it is not the engine's rated power, which is declared separately as rated thermal input.
+_Avoid_: Efficiency (the actual η is published beside it, not conflated with it), utilisation, capture rate, second-law margin
+
 **Thermal service class**:
 A cooling service distinguished by its permitted interface temperatures and compatible heat-transfer requirements. Spare cooling capacity in one class is not automatically usable by another class.
 

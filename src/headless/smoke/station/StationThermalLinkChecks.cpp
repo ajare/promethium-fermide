@@ -658,10 +658,10 @@ void thermalLinkPersistence(smoke::Context const&)
 	// Version discipline: a pre-107 document carrying links is refused
 	// as conversion-required rather than dropping them, and a version
 	// beyond the accepted range is refused outright.
-	for (int version : {106, 109})
+	for (int version : {106, 110})
 	{
 		auto bad = yaml;
-		bad.replace(bad.find("schemaVersion: 108"), std::string("schemaVersion: 108").size(),
+		bad.replace(bad.find("schemaVersion: 109"), std::string("schemaVersion: 109").size(),
 			"schemaVersion: " + std::to_string(version));
 		require(!core::parseStationConfiguration(bad, loaded, &diagnostic)
 			&& loaded.settings == settings, "unsupported thermal link schema was accepted");
@@ -706,7 +706,7 @@ void thermalLinkPersistence(smoke::Context const&)
 			// A pre-107 World reader refuses a document carrying links
 			// rather than silently dropping the station's walls.
 			auto older = text;
-			older.replace(older.find("version: 108"), std::string("version: 108").size(),
+			older.replace(older.find("version: 109"), std::string("version: 109").size(),
 				"version: 106");
 			auto olderReader = core::YamlSerializer::fromString(older);
 			olderReader->deserialize();

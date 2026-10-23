@@ -126,8 +126,8 @@ namespace
 			if (entry.name.find("[]") != std::string_view::npos)
 				require(entry.certifiedRatio == 0 && entry.verifiedThroughRatio == 60,
 					"Fixture-scoped evidence was promoted to a global physics guarantee");
-		require(names.size() == 62 && names.contains("atmospherePathways")
-			&& names.contains("thermalLinks")
+		require(names.size() == 63 && names.contains("atmospherePathways")
+			&& names.contains("thermalLinks") && names.contains("heatEngines")
 			&& names.contains("atmospherePathways[].lastCommandSeconds")
 			&& names.contains("atmospherePathways[].lastCommandId")
 			&& names.contains("atmospherePathways[].openFraction") && names.contains("systemsStepWorldTicks")

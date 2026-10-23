@@ -30,7 +30,7 @@
 # Declared pressure limits are set wide of the derived pressures so the
 # run reports no service-limit crossings, and water vapour starts far
 # below saturation in both compartments so no condensation occurs.
-schemaVersion: 108
+schemaVersion: 109
 stationSystems:
   enabled: true
   systemsStepWorldTicks: 6

@@ -228,6 +228,8 @@ namespace core
 		fin(snapshot.power.algaePowerKW, "power.algaePowerKW");
 		fin(snapshot.power.fuelCellOutputKW, "power.fuelCellOutputKW");
 		fin(snapshot.power.fuelCellWasteHeatKW, "power.fuelCellWasteHeatKW");
+		fin(snapshot.power.heatEngineOutputKW, "power.heatEngineOutputKW");
+		fin(snapshot.power.heatEngineRejectionKW, "power.heatEngineRejectionKW");
 		fin(snapshot.power.generatorWasteHeatKW, "power.generatorWasteHeatKW");
 		fin(snapshot.power.generatorDecayHeatKW, "power.generatorDecayHeatKW");
 		fin(snapshot.power.protectedDemandKW, "power.protectedDemandKW");
@@ -508,6 +510,10 @@ namespace core
 			fin(reservoir.methaneProcessingEnergyKJ, tag("methaneProcessingEnergyKJ", reservoir.id));
 			fin(reservoir.bufferChargeEnergyKJ, tag("bufferChargeEnergyKJ", reservoir.id));
 			fin(reservoir.bufferDischargeEnergyKJ, tag("bufferDischargeEnergyKJ", reservoir.id));
+			fin(reservoir.lastEngineExtractionKW, tag("lastEngineExtractionKW", reservoir.id));
+			fin(reservoir.lastEngineRejectionKW, tag("lastEngineRejectionKW", reservoir.id));
+			fin(reservoir.engineExtractionEnergyKJ, tag("engineExtractionEnergyKJ", reservoir.id));
+			fin(reservoir.engineRejectionEnergyKJ, tag("engineRejectionEnergyKJ", reservoir.id));
 			fin(reservoir.atmosphereEnergyKJ, tag("atmosphereEnergyKJ", reservoir.id));
 			fin(reservoir.rejectedEnergyKJ, tag("rejectedEnergyKJ", reservoir.id));
 			fin(reservoir.residualKJ, tag("residualKJ", reservoir.id));
@@ -572,6 +578,28 @@ namespace core
 			fin(chiller.workEnergyKJ, tag("workEnergyKJ", chiller.id));
 			fin(chiller.condenserEnergyKJ, tag("condenserEnergyKJ", chiller.id));
 			fin(chiller.residualKJ, tag("residualKJ", chiller.id));
+		}
+		// StationHeatEngineSnapshot (#804): every published rate, energy and
+		// efficiency must be finite before the snapshot is trusted.
+		for (auto const& engine : snapshot.heatEngines)
+		{
+			fin(engine.ratedThermalInputKW, tag("ratedThermalInputKW", engine.id));
+			fin(engine.carnotFraction, tag("carnotFraction", engine.id));
+			fin(engine.auxiliaryPowerKW, tag("auxiliaryPowerKW", engine.id));
+			fin(engine.minHotTemperatureC, tag("minHotTemperatureC", engine.id));
+			fin(engine.maxSinkTemperatureC, tag("maxSinkTemperatureC", engine.id));
+			fin(engine.lastThermalInputKW, tag("lastThermalInputKW", engine.id));
+			fin(engine.lastElectricalOutputKW, tag("lastElectricalOutputKW", engine.id));
+			fin(engine.lastRejectionKW, tag("lastRejectionKW", engine.id));
+			fin(engine.lastAuxKW, tag("lastAuxKW", engine.id));
+			fin(engine.efficiencyNow, tag("efficiencyNow", engine.id));
+			fin(engine.carnotEfficiencyNow, tag("carnotEfficiencyNow", engine.id));
+			fin(engine.hotTemperatureC, tag("hotTemperatureC", engine.id));
+			fin(engine.sinkTemperatureC, tag("sinkTemperatureC", engine.id));
+			fin(engine.thermalInputEnergyKJ, tag("thermalInputEnergyKJ", engine.id));
+			fin(engine.electricalEnergyKJ, tag("electricalEnergyKJ", engine.id));
+			fin(engine.rejectionEnergyKJ, tag("rejectionEnergyKJ", engine.id));
+			fin(engine.residualKJ, tag("residualKJ", engine.id));
 		}
 		// StationThermalBufferSnapshot
 		for (auto const& buffer : snapshot.thermalBuffers)
@@ -1264,6 +1292,14 @@ namespace core
 			ledger(chiller.residualKJ, std::abs(chiller.extractedEnergyKJ)
 				+ std::abs(chiller.workEnergyKJ) + std::abs(chiller.condenserEnergyKJ),
 				"chiller ledger for '" + chiller.id + "'");
+		// The heat engine ledger (#804) closes over input = electrical +
+		// rejection: the hot side's loss equals the bus gain plus the sink
+		// gain, so the residual must stay within tolerance of the terms it
+		// accounts for.
+		for (auto const& engine : snapshot.heatEngines)
+			ledger(engine.residualKJ, std::abs(engine.thermalInputEnergyKJ)
+				+ std::abs(engine.electricalEnergyKJ) + std::abs(engine.rejectionEnergyKJ),
+				"heat engine ledger for '" + engine.id + "'");
 		for (auto const& buffer : snapshot.thermalBuffers)
 			ledger(buffer.residualKJ, std::abs(buffer.startingEnergyKJ)
 				+ std::abs(buffer.chargedEnergyKJ) + std::abs(buffer.dischargedEnergyKJ)

@@ -430,6 +430,10 @@ namespace core
 			// Fuel-cell backup output is generation inside the single pool
 			// (#406): earned with reactants, never a second budget.
 			for (auto const& cell : runtime.fuelCells) totalGeneration += cell.lastOutputKW;
+			// Heat-engine output is generation inside the single pool (#804):
+			// earned from heat, booked once as the hot side's loss, and never
+			// a second budget beside the sources that came before it.
+			for (auto const& engine : runtime.heatEngines) totalGeneration += engine.lastElectricalOutputKW;
 			for (auto const& battery : runtime.batteries) totalDischarged += battery.lastDischargeKW;
 			auto const bound = StationBalanceTolerance * std::max(1.0, totalGeneration + totalDischarged);
 			if (totalSupplied > totalGeneration + totalDischarged + bound)
@@ -556,6 +560,10 @@ namespace core
 			if (!requireFinite(reservoir.lastBufferDischargeKW, where + "buffer discharge power")) return false;
 			if (!requireFinite(reservoir.bufferChargeKJ, where + "cumulative buffer charge energy")) return false;
 			if (!requireFinite(reservoir.bufferDischargeKJ, where + "cumulative buffer discharge energy")) return false;
+			if (!requireFinite(reservoir.lastEngineExtractionKW, where + "heat-engine extraction power")) return false;
+			if (!requireFinite(reservoir.lastEngineRejectionKW, where + "heat-engine rejection power")) return false;
+			if (!requireFinite(reservoir.engineExtractionKJ, where + "cumulative heat-engine extraction energy")) return false;
+			if (!requireFinite(reservoir.engineRejectionKJ, where + "cumulative heat-engine rejection energy")) return false;
 			totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
 			totalRoutedKW += reservoir.lastHeatRoutedKW;
 			totalRejectedKW += reservoir.lastRejectedKW;
@@ -970,6 +978,28 @@ namespace core
 			auto const where = "thermal link '" + link.authored.id + "'";
 			if (!requireFinite(link.flowRateKW, where + " flow rate")
 				|| !requireFinite(link.netTransferredKJ, where + " net transferred energy")) return false;
+		}
+		// Heat engine ledger finiteness and closure (#804): every rate and
+		// cumulative term must be finite, and the conversion ledger must
+		// close over input = electrical + rejection: the hot side's loss
+		// equals the bus gain plus the sink gain, exactly. A booking that
+		// went astray fails the tick loudly here rather than drifting.
+		for (auto const& engine : runtime.heatEngines)
+		{
+			auto const where = "heat engine '" + engine.authored.id + "' ";
+			if (!requireFinite(engine.lastThermalInputKW, where + "last-tick thermal intake")) return false;
+			if (!requireFinite(engine.lastElectricalOutputKW, where + "last-tick net output")) return false;
+			if (!requireFinite(engine.lastRejectionKW, where + "last-tick rejection heat")) return false;
+			if (!requireFinite(engine.thermalInputKJ, where + "cumulative thermal input energy")) return false;
+			if (!requireFinite(engine.electricalKJ, where + "cumulative electrical energy")) return false;
+			if (!requireFinite(engine.rejectionKJ, where + "cumulative rejection energy")) return false;
+			auto const closureBound = StationBalanceTolerance
+				* std::max(1.0, std::abs(engine.thermalInputKJ));
+			if (std::abs(engine.thermalInputKJ - engine.electricalKJ - engine.rejectionKJ)
+				> closureBound)
+				return violation = where + "conversion ledger residual "
+					+ std::to_string(engine.thermalInputKJ - engine.electricalKJ - engine.rejectionKJ)
+					+ " kJ exceeds tolerance " + std::to_string(closureBound), false;
 		}
 		for (auto const& cycle : runtime.airlockCycles)
 		{

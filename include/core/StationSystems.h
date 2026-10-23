@@ -664,6 +664,35 @@ namespace core
 	};
 	inline constexpr size_t MaxStationChillers{8};
 
+	// A Heat engine (#804): the mirror of the chiller and the station's only
+	// thermal-to-electrical crossing. It takes a heat flow from a declared hot
+	// reservoir, rejects the remainder into a declared rejection reservoir,
+	// and delivers the difference to the bus as actual generation, bounded
+	// by a declared fraction of the Carnot efficiency computed from the two
+	// reservoirs' tick-start ABSOLUTE temperatures. The bound lives at the
+	// conversion site because no composition can carry it: there is no other
+	// thermal->bus edge to gate (spec #803). Zero rated thermal input
+	// disables the engine entirely; every value must be finite.
+	// Temperatures here are gates in Celsius, but the conversion law itself
+	// divides absolute temperatures: the Carnot ratio is a quotient, not a
+	// difference, so unlike the Thermal link's dT conduction (#794, which
+	// tolerates Celsius because only the difference enters), the engine's
+	// efficiency is computed against kelvin at the conversion site.
+	struct HeatEngineSettings
+	{
+		std::string id;
+		std::string hotReservoirId;         // heat source node (heat-only interface)
+		std::string rejectionReservoirId;   // cold sink node (heat-only interface)
+		std::string thermalClass;           // service class of the rejection heat
+		double ratedThermalInputKW{0.0};    // heat intake at rated, >= 0; 0 disables
+		double carnotFraction{0.4};         // actual / Carnot efficiency, (0, 1]
+		double auxiliaryPowerKW{0.0};       // running auxiliaries, >= 0
+		double minHotTemperatureC{20.0};    // below this the source is too cold to work with
+		double maxSinkTemperatureC{60.0};   // rejection refused into a sink at or above this
+		bool operator==(HeatEngineSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationHeatEngines{8};
+
 	// A fuelled electrical generator (#399). It converts stored fuel energy
 	// into bus electrical output at a declared conversion efficiency; the
 	// difference is generator waste heat, routed exactly once into the
@@ -1842,6 +1871,9 @@ namespace core
 		std::vector<RadiatorSettings> radiators;
 		std::vector<CoolantLoopSettings> coolantLoops;
 		std::vector<ChillerSettings> chillers;
+		// Authored Heat engines (#804): the Carnot-bounded heat-to-power
+		// crossing, declared alongside the thermal plant it converts for.
+		std::vector<HeatEngineSettings> heatEngines;
 		std::vector<GeneratorSettings> generators;
 		std::vector<AtmosphereSettings> atmospheres;
 		std::vector<AtmospherePathwaySettings> atmospherePathways;
@@ -2792,6 +2824,12 @@ namespace core
 		// and the waste heat those cells routed to their sinks.
 		double fuelCellOutputKW{0.0};
 		double fuelCellWasteHeatKW{0.0};
+		// Heat engine service this tick (#804): net electrical output added
+		// to the same allocation pool as solar, generators and fuel cells -
+		// supply earned from heat, never a load with a refund - and the
+		// rejection heat those engines booked into their sinks.
+		double heatEngineOutputKW{0.0};
+		double heatEngineRejectionKW{0.0};
 		double generatorWasteHeatKW{0.0};
 		double generatorDecayHeatKW{0.0};
 		// #416: the protected critical service admission for this tick.
@@ -2915,6 +2953,14 @@ namespace core
 		// be carried by the rejection path.
 		double lastBufferChargeKW{0.0};
 		double lastBufferDischargeKW{0.0};
+		// Heat engine exchange this tick (#804): heat the engines using this
+		// reservoir as their hot source drew out of it, and heat the engines
+		// using it as their rejection sink booked into it. Both are booked
+		// once at the reservoir boundary so the ledger closes over exactly
+		// the terms that moved: the extraction is the engine's intake, the
+		// rejection is the intake's remainder after the conversion.
+		double lastEngineExtractionKW{0.0};
+		double lastEngineRejectionKW{0.0};
 		double lastHeatInKW{0.0};       // absorbed + routed + loop + condenser + generator + electrolysis + fuel cell this tick
 		double lastRejectedKW{0.0};     // radiator net rejection this tick
 		double lastNetKW{0.0};          // heat in minus rejected this tick
@@ -2933,9 +2979,11 @@ namespace core
 		double methaneProcessingEnergyKJ{0.0}; // cumulative methane-processing waste heat into the reservoir (#405)
 		double bufferChargeEnergyKJ{0.0}; // cumulative heat absorbed out of the reservoir by buffers
 		double bufferDischargeEnergyKJ{0.0}; // cumulative heat returned into the reservoir by buffers
+		double engineExtractionEnergyKJ{0.0}; // cumulative heat drawn out of the reservoir by heat engines (#804)
+		double engineRejectionEnergyKJ{0.0}; // cumulative heat booked into the reservoir by heat engines (#804)
 		double atmosphereEnergyKJ{0.0}; // cumulative net compartment exchange into the reservoir
 		double rejectedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator + electrolysis + fuel cell + Sabatier + methane processing + microbial + atmosphere + buffer discharge - buffer charge - rejected - current
+		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator + electrolysis + fuel cell + Sabatier + methane processing + microbial + atmosphere + buffer discharge + engine rejection - buffer charge - engine extraction - rejected - current
 		bool operator==(StationThermalReservoirSnapshot const&) const = default;
 	};
 	// One coolant loop as of the most recent tick (#396): the authored
@@ -3047,6 +3095,54 @@ namespace core
 		double residualKJ{0.0};         // extracted + work - condenser
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationChillerSnapshot const&) const = default;
+	};
+	// The heat engine's own status vocabulary (#804): Disabled is the
+	// authored zero rating, Idle is a live machine with nothing to convert
+	// (dead gradient, too-cold source, or gross output that cannot cover
+	// its own auxiliaries), Active is converting, and Tripped is the
+	// protective refusal while the rejection reservoir sits at or above
+	// the maximum sink temperature. The trip clears on its own when the
+	// sink falls back below the gate: the second law is a reported
+	// status, never a clamp on the integrated state.
+	enum class StationHeatEngineStatus { Disabled, Idle, Active, Tripped };
+	// One heat engine as of the most recent tick (#804): the authored
+	// contract beside the thermal intake actually drawn, the net bus
+	// power actually delivered, the rejection heat actually booked, and
+	// the closing conversion ledger. The engine's ledger closes over
+	// thermal input = net electrical + rejection exactly: the hot side
+	// loses what the bus and the sink together gain, and the residual
+	// proves it. Actual efficiency is published beside the Carnot
+	// efficiency at the same tick-start interface temperatures the
+	// conversion used, so the operator can see how much of the ideal
+	// the declared carnotFraction is really capturing.
+	struct StationHeatEngineSnapshot
+	{
+		std::string id;
+		std::string thermalClass;
+		std::string hotReservoirId;
+		std::string rejectionReservoirId;
+		double ratedThermalInputKW{0.0};
+		double carnotFraction{0.0};
+		double auxiliaryPowerKW{0.0};
+		double minHotTemperatureC{0.0};
+		double maxSinkTemperatureC{0.0};
+		double lastThermalInputKW{0.0};      // heat drawn from the hot reservoir this tick
+		double lastElectricalOutputKW{0.0};  // net power delivered to the bus this tick
+		double lastRejectionKW{0.0};        // heat booked into the rejection reservoir this tick
+		double lastAuxKW{0.0};             // auxiliaries carried by the conversion this tick
+		std::string lastLimiter;            // Disabled/NoGradient/TooCold/SinkOver/HotSideSupply/AuxiliaryPower
+		double efficiencyNow{0.0};        // actual eta used by the last conversion
+		double carnotEfficiencyNow{0.0};  // Carnot eta at the same interface temperatures
+		double hotTemperatureC{0.0};
+		double sinkTemperatureC{0.0};
+		bool disabled{false};              // zero rated thermal input: no conversion, ever
+		bool tripped{false};               // rejection reservoir at or above the max sink gate
+		double thermalInputEnergyKJ{0.0};  // cumulative heat drawn from the hot reservoir
+		double electricalEnergyKJ{0.0};    // cumulative net power delivered to the bus
+		double rejectionEnergyKJ{0.0};     // cumulative heat booked into the rejection reservoir
+		double residualKJ{0.0};            // input - (electrical + rejection): closes on zero
+		StationHeatEngineStatus status{StationHeatEngineStatus::Disabled};
+		bool operator==(StationHeatEngineSnapshot const&) const = default;
 	};
 	// One thermal buffer as of the most recent tick (#398): the authored
 	// contract beside the finite stored energy, the derived buffer
@@ -4251,6 +4347,10 @@ namespace core
 		// energy ledger, with the per-class rollup in the thermal
 		// snapshot's coolingByClass.
 		std::vector<StationChillerSnapshot> chillers;
+		// The heat engine picture (#804): per-engine intake, net bus output,
+		// rejection heat, status with its named limiter, and actual
+		// efficiency beside Carnot efficiency at the interface temperatures.
+		std::vector<StationHeatEngineSnapshot> heatEngines;
 		// The thermal buffer picture (#398): per-buffer finite stored
 		// energy distinct from temperature, configured access gating,
 		// deficit-driven charging and surplus-driven discharge, with

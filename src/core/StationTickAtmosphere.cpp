@@ -821,7 +821,11 @@ namespace core
 					+ fuelCellHeatByReservoir[index]
 					+ sabatierHeatByReservoir[index]
 					+ methaneHeatByReservoir[index]
-					+ microbialHeatByReservoir[index];
+					+ microbialHeatByReservoir[index]
+					// Heat engine rejection (#804): the intake the conversion
+					// did not deliver as electricity, plus the auxiliaries,
+					// booked once at this sink boundary.
+					+ engineRejectionByReservoir[index];
 				// Net radiative rejection at the current emitting
 				// temperature: emissivity x view factor x area x sigma
 				// x (T^4 - T_sink^4). The environmental back-radiation
@@ -903,7 +907,14 @@ namespace core
 				// two buffers on one host never absorb the same deficit
 				// twice. The arithmetic mirrors the sandbox expression
 				// for expression so host and Lua integrate identically.
-				auto remainingKW = heatInKW - rejectedKW;
+				auto remainingKW = heatInKW - rejectedKW
+					// Heat engine extraction (#804): the intake drawn out of
+					// this reservoir by engines using it as their hot source.
+					// Booked as its own outflow term, capped at the source by
+					// the heat the reservoir holds above its sink's tick-start
+					// temperature, so the engine's own contribution can never
+					// end the tick below that sink temperature.
+					- engineExtractionByReservoir[index];
 				auto bufferChargeKW = 0.0;
 				auto bufferDischargeKW = 0.0;
 				for (auto const bufferIndex : reservoir.bufferIndices)
@@ -1007,6 +1018,8 @@ namespace core
 				reservoir.lastMethaneProcessingHeatKW = methaneHeatByReservoir[index];
 				reservoir.lastMicrobialHeatKW = microbialHeatByReservoir[index];
 				reservoir.lastAtmosphereHeatKW = atmosphereHeatKW;
+				reservoir.lastEngineExtractionKW = engineExtractionByReservoir[index];
+				reservoir.lastEngineRejectionKW = engineRejectionByReservoir[index];
 				reservoir.lastHeatInKW = heatInKW;
 				reservoir.lastRejectedKW = rejectedKW;
 				reservoir.lastNetKW = netKW;
@@ -1021,6 +1034,8 @@ namespace core
 				reservoir.methaneProcessingKJ += methaneHeatByReservoir[index] * dt;
 				reservoir.microbialKJ += microbialHeatByReservoir[index] * dt;
 				reservoir.atmosphereKJ += atmosphereHeatKW * dt;
+				reservoir.engineExtractionKJ += engineExtractionByReservoir[index] * dt;
+				reservoir.engineRejectionKJ += engineRejectionByReservoir[index] * dt;
 				reservoir.bufferChargeKJ += bufferChargeKW * dt;
 				reservoir.bufferDischargeKJ += bufferDischargeKW * dt;
 				reservoir.rejectedKJ += rejectedKW * dt;

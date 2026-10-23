@@ -972,7 +972,9 @@ namespace core
 		// specific heat (#802) - the enthalpy that rides with gas crossing
 		// a pathway, amending ADR-0026's unexamined thermal-neutrality
 		// simplification.
-		serializer.writeUint32("version", 108);
+		// Schema 109 adds authored Heat engines (#804) - the Carnot-
+		// bounded heat-to-power crossing between two thermal reservoirs.
+		serializer.writeUint32("version", 109);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
@@ -1874,7 +1876,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 108)
+		if (version < 1 || version > 109)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}

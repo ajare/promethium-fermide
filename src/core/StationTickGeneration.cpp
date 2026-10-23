@@ -482,6 +482,177 @@ namespace core
 		return true;
 	}
 
+	bool StationSystemsRuntime::Impl::Tick::heatEngines()
+	{
+		// The heat engine conversion pass (#804): the station's only
+		// thermal-to-electrical crossing, Carnot-bounded at the
+		// conversion site. Runs in the generation phase against the two
+		// reservoirs' tick-start temperatures: the net output joins the
+		// shared pool as actual generation - supply earned from heat,
+		// never a load with a refund - and the extraction and rejection
+		// are booked once each at the reservoir boundaries in the
+		// reservoir integration below.
+		//
+		// The conversion, per the spec's decided shape:
+		//   eta        = carnotFraction * (1 - T_c/K / T_h/K)
+		//   P_gross   = eta * Q_in/dt
+		//   P_net     = P_gross - auxiliaryPower
+		//   Q_reject  = Q_in - P_gross + auxiliaryPower
+		// ABSOLUTE temperature is mandatory here: the Carnot efficiency
+		// is a quotient of kelvin temperatures, not a difference. This
+		// is the deliberate contrast with the Thermal link (#794), whose
+		// dT conduction law is identical in Celsius and kelvin because
+		// only the difference enters; applying either rule to the other
+		// law is the trap this comment exists to stop. Both temperatures
+		// are evaluated at tick start, before this tick's integration
+		// moves them.
+		engineExtractionByReservoir = std::vector<double>(runtime.reservoirs.size(), 0.0);
+		engineRejectionByReservoir = std::vector<double>(runtime.reservoirs.size(), 0.0);
+		totalHeatEngineOutputKW = double{0.0};
+		totalHeatEngineRejectionKW = double{0.0};
+		auto const dtSeconds = static_cast<double>(seconds);
+		for (auto& engine : runtime.heatEngines)
+		{
+			auto const& hot = runtime.reservoirs[engine.hotIndex];
+			auto const& sink = runtime.reservoirs[engine.sinkIndex];
+			engine.lastThermalInputKW = 0.0;
+			engine.lastElectricalOutputKW = 0.0;
+			engine.lastRejectionKW = 0.0;
+			auto const auxKW = engine.authored.auxiliaryPowerKW;
+			engine.lastAuxKW = auxKW;
+			engine.lastLimiter.clear();
+			engine.efficiencyNow = 0.0;
+			// The Carnot ceiling at the tick-start interface temperatures,
+			// published beside the actual efficiency whatever the engine
+			// ends up doing this tick. ABSOLUTE temperatures: kelvin over
+			// kelvin, never Celsius (see the note above).
+			auto const hotK = hot.temperatureC + StationCelsiusOffset;
+			auto const sinkK = sink.temperatureC + StationCelsiusOffset;
+			auto const carnotEfficiency = hotK > 0.0
+				? std::max(0.0, 1.0 - sinkK / hotK) : 0.0;
+			engine.carnotEfficiencyNow = carnotEfficiency;
+			if (engine.authored.ratedThermalInputKW <= 0.0)
+			{
+				// Zero rated thermal input disables the engine entirely:
+				// no intake, no output, no rejection, nothing drawn.
+				engine.status = StationHeatEngineStatus::Disabled;
+				engine.lastLimiter = "Disabled";
+				continue;
+			}
+			if (!sinkQualified(engine.sinkIndex, engine.authored.maxSinkTemperatureC))
+			{
+				// The rejection path is saturated: a sink at or above the
+				// maximum refuses the rejection heat, so the engine trips
+				// whole rather than forcing heat where it cannot go. The
+				// trip is re-evaluated every tick and clears on its own
+				// when the sink falls back below the gate.
+				engine.status = StationHeatEngineStatus::Tripped;
+				engine.lastTripped = true;
+				engine.lastLimiter = "SinkOver";
+				continue;
+			}
+			engine.lastTripped = false;
+			if (hotK <= sinkK)
+			{
+				// No gradient, no engine: at T_h <= T_c the Carnot
+				// efficiency is zero or negative and there is nothing to
+				// convert. The engine idles - it never produces negative
+				// power and never pumps heat from cold to hot.
+				engine.status = StationHeatEngineStatus::Idle;
+				engine.lastLimiter = "NoGradient";
+				continue;
+			}
+			if (hot.temperatureC + 1e-9 < engine.authored.minHotTemperatureC)
+			{
+				// The source is below the authored minimum: too cold to
+				// work with, whatever the sink is doing. Idle, not tripped:
+				// nothing is wrong with the machine, the gradient just is
+				// not worth the machine's while.
+				engine.status = StationHeatEngineStatus::Idle;
+				engine.lastLimiter = "TooCold";
+				continue;
+			}
+			// The eta the conversion may use: the declared fraction of
+			// the Carnot ceiling at these interface temperatures. The
+			// fraction is validated into (0, 1], so eta can never exceed
+			// the Carnot efficiency - the second law is enforced at
+			// authoring time, not rediscovered at runtime.
+			auto const eta = engine.authored.carnotFraction * carnotEfficiency;
+			// Hot-side supply cap: over the tick the engine can draw at
+			// most the heat its hot reservoir holds above the rejection
+			// reservoir's tick-start temperature - C_hot x (T_h - T_c).
+			// Extraction can never drive the hot node below its sink's
+			// temperature: the engine cannot create the ordering
+			// violation it would need to keep running, at any rated
+			// input. Other processes may still move the hot node; the
+			// engine's own contribution cannot cross.
+			auto const supplyKW = hot.authored.heatCapacityKJPerK
+			* std::max(0.0, hotK - sinkK) / dtSeconds;
+			auto intakeKW = std::min(engine.authored.ratedThermalInputKW, supplyKW);
+			auto grossKW = eta * intakeKW;
+			if (grossKW <= auxKW + 1e-12)
+			{
+				// Aux-gated running: an engine whose gross output cannot
+				// cover its own auxiliaries idles rather than becoming a
+				// load. Nothing is drawn, nothing is produced, nothing is
+				// rejected - the machine simply does not run.
+				engine.status = StationHeatEngineStatus::Idle;
+				engine.lastLimiter = "AuxiliaryPower";
+				continue;
+			}
+			auto netKW = grossKW - auxKW;
+			// The engine's net output enters the pool as actual
+			// generation through its generation connection; the power the
+			// connection actually delivers caps the whole conversion, so
+			// the engine converts only the heat whose power actually
+			// landed. A refusal at the cable leaves the unconverted heat
+			// in the hot reservoir rather than booking power that went
+			// nowhere.
+			auto const generationPort = connections.port("Heat engine",
+				engine.authored.id, "Generation");
+			auto const flow = connections.send(generationPort, netKW);
+			if (flow.delivered + 1e-12 < netKW)
+			{
+				netKW = flow.delivered;
+				grossKW = netKW + auxKW;
+				intakeKW = eta > 0.0 ? grossKW / eta : 0.0;
+				engine.lastLimiter = "GenerationConnection";
+			}
+			else if (intakeKW < engine.authored.ratedThermalInputKW - 1e-12)
+			{
+				// The hot side, not the rating, is what capped the intake.
+				engine.lastLimiter = "HotSideSupply";
+			}
+			if (netKW <= 1e-12 || intakeKW <= 1e-12)
+			{
+				// The admission left nothing to convert: the engine is
+				// idle with the binding constraint named, and nothing is
+				// booked anywhere.
+				engine.status = StationHeatEngineStatus::Idle;
+				continue;
+			}
+			// Rejection is the intake the conversion did not deliver as
+			// electricity, plus the auxiliaries the running machine
+			// dissipates into the sink: booked at one consistent
+			// boundary, exactly as the chiller books condenser heat.
+			auto const rejectKW = intakeKW - grossKW + auxKW;
+			engineExtractionByReservoir[engine.hotIndex] += intakeKW;
+			engineRejectionByReservoir[engine.sinkIndex] += rejectKW;
+			availableGeneration += netKW; poolGenerationKW += netKW;
+			engine.lastThermalInputKW = intakeKW;
+			engine.lastElectricalOutputKW = netKW;
+			engine.lastRejectionKW = rejectKW;
+			engine.efficiencyNow = intakeKW > 0.0 ? grossKW / intakeKW : 0.0;
+			engine.thermalInputKJ += intakeKW * dtSeconds;
+			engine.electricalKJ += netKW * dtSeconds;
+			engine.rejectionKJ += rejectKW * dtSeconds;
+			totalHeatEngineOutputKW += netKW;
+			totalHeatEngineRejectionKW += rejectKW;
+			engine.status = StationHeatEngineStatus::Active;
+		}
+		return true;
+	}
+
 	bool StationSystemsRuntime::Impl::Tick::generation()
 	{
 		if (!scheduledState()) return false;
@@ -1212,7 +1383,9 @@ namespace core
 				generator.status = StationTransferStatus::Partial;
 			else generator.status = StationTransferStatus::Rejected;
 		}
-
-		return true;
+		// Heat engines (#804) run last in the generation phase: their net
+		// output joins the pool the loads allocate against, and their
+		// extraction and rejection ride the reservoir integration below.
+		return heatEngines();
 	}
 }

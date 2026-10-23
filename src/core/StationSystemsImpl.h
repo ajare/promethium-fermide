@@ -307,6 +307,8 @@ using namespace station_detail;
 			double lastAtmosphereHeatKW{0.0}; // reservoir side of the compartment exchanger this tick
 			double lastBufferChargeKW{0.0}; // heat absorbed out of the reservoir by buffers this tick (#398)
 			double lastBufferDischargeKW{0.0}; // heat returned into the reservoir by buffers this tick (#398)
+			double lastEngineExtractionKW{0.0}; // heat drawn out by heat engines this tick (#804)
+			double lastEngineRejectionKW{0.0}; // heat booked in by heat engines this tick (#804)
 			double lastHeatInKW{0.0};
 			double lastRejectedKW{0.0};
 			double lastNetKW{0.0};
@@ -323,6 +325,8 @@ using namespace station_detail;
 			double atmosphereKJ{0.0}; // cumulative net compartment exchange into the reservoir
 			double bufferChargeKJ{0.0}; // cumulative heat absorbed out of the reservoir by buffers (#398)
 			double bufferDischargeKJ{0.0}; // cumulative heat returned into the reservoir by buffers (#398)
+			double engineExtractionKJ{0.0}; // cumulative heat drawn out of the reservoir by heat engines (#804)
+			double engineRejectionKJ{0.0}; // cumulative heat booked into the reservoir by heat engines (#804)
 			double rejectedKJ{0.0};
 			bool lastAboveLimit{false};
 			bool lastBelowLimit{false};
@@ -404,6 +408,38 @@ using namespace station_detail;
 			// this chiller this tick (#413).
 			double availabilityFactor{1.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
+		};
+		// The authoritative ledger of one authored heat engine (#804).
+		// Each tick the engine draws a heat flow from its hot reservoir,
+		// converts a Carnot-fraction-bounded share of it into bus power,
+		// and books the remainder plus its auxiliaries into the rejection
+		// reservoir. Every rate is evaluated against the two reservoirs'
+		// tick-start ABSOLUTE temperatures: the Carnot ratio divides
+		// kelvin by kelvin, so unlike the Thermal link's dT conduction
+		// (#794, Celsius-tolerant because only differences enter), the
+		// conversion must never see a Celsius quotient. The conversion
+		// ledger closes over input = electrical + rejection exactly: the
+		// hot side loses what the bus and the sink together gain.
+		struct HeatEngineState
+		{
+			HeatEngineSettings authored;
+			size_t hotIndex{SIZE_MAX};
+			size_t sinkIndex{SIZE_MAX};
+			double lastThermalInputKW{0.0};
+			double lastElectricalOutputKW{0.0};
+			double lastRejectionKW{0.0};
+			double lastAuxKW{0.0};
+			std::string lastLimiter;
+			double efficiencyNow{0.0};
+			double carnotEfficiencyNow{0.0};
+			bool lastTripped{false};
+			double thermalInputKJ{0.0};
+			double electricalKJ{0.0};
+			double rejectionKJ{0.0};
+			// Idle is the blank-slate state before the first evaluation; the
+			// tick sets Disabled for a zero-rated machine, so an enabled
+			// engine never misreports as disabled before the World has run.
+			StationHeatEngineStatus status{StationHeatEngineStatus::Idle};
 		};
 		// The authoritative ledger of one authored thermal buffer (#398).
 		// The store holds a finite amount of thermal energy, distinct from
@@ -1360,6 +1396,7 @@ using namespace station_detail;
 		std::vector<RadiatorState> radiators;
 		std::vector<LoopState> coolantLoops;
 		std::vector<ChillerState> chillers;
+		std::vector<HeatEngineState> heatEngines;
 		std::vector<BufferState> thermalBuffers;
 		std::vector<GeneratorState> generators;
 		std::vector<AtmosphereState> atmospheres;
@@ -1688,6 +1725,16 @@ using namespace station_detail;
 		std::vector<double> atmosphereHeatByReservoir{};
 		std::vector<double> chillerExtractionByLoop{};
 		std::vector<double> condenserHeatBySink{};
+		// Per-reservoir heat-engine terms this tick (#804): extraction is
+		// heat drawn out of a reservoir acting as a hot source, rejection
+		// is heat booked into a reservoir acting as a rejection sink.
+		// Both are booked once at the reservoir boundary in the reservoir
+		// integration, so the engine's intake, the bus's net gain and the
+		// sink's gain close on one number.
+		std::vector<double> engineExtractionByReservoir{};
+		std::vector<double> engineRejectionByReservoir{};
+		double totalHeatEngineOutputKW{};
+		double totalHeatEngineRejectionKW{};
 		std::vector<double> loopExchangeConductanceKWPerK{};
 		double totalCoolantPumpKW{};
 		double totalCoolantHeaterKW{};
@@ -1777,6 +1824,12 @@ using namespace station_detail;
 		bool auditLedger();
 		void commitInventory();
 		bool generation();
+		// The heat engine conversion pass (#804): runs inside the
+		// generation phase against tick-start reservoir temperatures, so
+		// the engine's net output joins the shared pool as actual
+		// generation ahead of the loads it supplies, and its extraction
+		// and rejection land in the reservoir integration below.
+		bool heatEngines();
 		std::vector<double> protectionReservoirStart, protectionAtmosphereStart, protectionLoopStart;
 		bool sinkQualified(size_t index, double maximum,
 			double minimum = -ProtectionPrediction::unbounded);

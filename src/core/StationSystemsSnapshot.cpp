@@ -259,6 +259,17 @@ namespace core
 		double totalChillerPower = 0.0;
 		for (auto const& chiller : mImpl->chillers) totalChillerPower += chiller.lastPowerSuppliedKW;
 		result.power.chillerPowerKW = totalChillerPower;
+		// Heat engine service (#804): net electrical output added to the
+		// same pool as every other source, and the rejection heat booked
+		// into the sinks. Published beside the other service totals.
+		double totalHeatEngineOutput = 0.0, totalHeatEngineRejection = 0.0;
+		for (auto const& engine : mImpl->heatEngines)
+		{
+			totalHeatEngineOutput += engine.lastElectricalOutputKW;
+			totalHeatEngineRejection += engine.lastRejectionKW;
+		}
+		result.power.heatEngineOutputKW = totalHeatEngineOutput;
+		result.power.heatEngineRejectionKW = totalHeatEngineRejection;
 		// The generator snapshot reports the authored contract beside the
 		// phase, the electrical output actually delivered, the fuel
 		// actually drawn, the heat actually routed, the startup progress
@@ -357,6 +368,8 @@ namespace core
 			reservoirResult.lastAtmosphereHeatKW = reservoir.lastAtmosphereHeatKW;
 			reservoirResult.lastBufferChargeKW = reservoir.lastBufferChargeKW;
 			reservoirResult.lastBufferDischargeKW = reservoir.lastBufferDischargeKW;
+			reservoirResult.lastEngineExtractionKW = reservoir.lastEngineExtractionKW;
+			reservoirResult.lastEngineRejectionKW = reservoir.lastEngineRejectionKW;
 			reservoirResult.lastHeatInKW = reservoir.lastHeatInKW;
 			reservoirResult.lastRejectedKW = reservoir.lastRejectedKW;
 			reservoirResult.lastNetKW = reservoir.lastNetKW;
@@ -374,6 +387,8 @@ namespace core
 			reservoirResult.atmosphereEnergyKJ = reservoir.atmosphereKJ;
 			reservoirResult.bufferChargeEnergyKJ = reservoir.bufferChargeKJ;
 			reservoirResult.bufferDischargeEnergyKJ = reservoir.bufferDischargeKJ;
+			reservoirResult.engineExtractionEnergyKJ = reservoir.engineExtractionKJ;
+			reservoirResult.engineRejectionEnergyKJ = reservoir.engineRejectionKJ;
 			reservoirResult.rejectedEnergyKJ = reservoir.rejectedKJ;
 			reservoirResult.residualKJ = reservoirResult.startingEnergyKJ
 				+ reservoir.absorbedKJ + reservoir.routedKJ + reservoir.loopKJ
@@ -381,7 +396,9 @@ namespace core
 				+ reservoir.fuelCellKJ + reservoir.sabatierKJ + reservoir.methaneProcessingKJ
 				+ reservoir.microbialKJ
 				+ reservoir.atmosphereKJ
+				+ reservoir.engineRejectionKJ
 				+ reservoir.bufferDischargeKJ - reservoir.bufferChargeKJ
+				- reservoir.engineExtractionKJ
 				- reservoir.rejectedKJ - reservoirResult.currentEnergyKJ;
 			result.thermal.totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
 			result.thermal.totalRoutedKW += reservoir.lastHeatRoutedKW;
@@ -493,6 +510,44 @@ namespace core
 			result.thermal.totalCoolingUnmetKW += chillerResult.coolingUnmetKW;
 			result.thermal.totalCondenserHeatKW += chiller.lastCondenserKW;
 			result.chillers.push_back(std::move(chillerResult));
+		}
+		// The heat engine snapshot reports the authored contract beside the
+		// intake, net bus output and rejection actually booked, the status
+		// with its named limiter, and the actual efficiency beside the
+		// Carnot efficiency at the interface temperatures the conversion
+		// used (#804). The engine's own ledger closes over
+		// input = electrical + rejection: the hot side loses exactly what
+		// the bus and the sink together gain, and the residual proves it.
+		for (auto const& engine : mImpl->heatEngines)
+		{
+			StationHeatEngineSnapshot engineResult;
+			engineResult.id = engine.authored.id;
+			engineResult.thermalClass = engine.authored.thermalClass;
+			engineResult.hotReservoirId = engine.authored.hotReservoirId;
+			engineResult.rejectionReservoirId = engine.authored.rejectionReservoirId;
+			engineResult.ratedThermalInputKW = engine.authored.ratedThermalInputKW;
+			engineResult.carnotFraction = engine.authored.carnotFraction;
+			engineResult.auxiliaryPowerKW = engine.authored.auxiliaryPowerKW;
+			engineResult.minHotTemperatureC = engine.authored.minHotTemperatureC;
+			engineResult.maxSinkTemperatureC = engine.authored.maxSinkTemperatureC;
+			engineResult.lastThermalInputKW = engine.lastThermalInputKW;
+			engineResult.lastElectricalOutputKW = engine.lastElectricalOutputKW;
+			engineResult.lastRejectionKW = engine.lastRejectionKW;
+			engineResult.lastAuxKW = engine.lastAuxKW;
+			engineResult.lastLimiter = engine.lastLimiter;
+			engineResult.efficiencyNow = engine.efficiencyNow;
+			engineResult.carnotEfficiencyNow = engine.carnotEfficiencyNow;
+			engineResult.hotTemperatureC = mImpl->reservoirs[engine.hotIndex].temperatureC;
+			engineResult.sinkTemperatureC = mImpl->reservoirs[engine.sinkIndex].temperatureC;
+			engineResult.disabled = engine.authored.ratedThermalInputKW <= 0.0;
+			engineResult.tripped = engine.lastTripped;
+			engineResult.thermalInputEnergyKJ = engine.thermalInputKJ;
+			engineResult.electricalEnergyKJ = engine.electricalKJ;
+			engineResult.rejectionEnergyKJ = engine.rejectionKJ;
+			engineResult.residualKJ = engine.thermalInputKJ
+				- engine.electricalKJ - engine.rejectionKJ;
+			engineResult.status = engine.status;
+			result.heatEngines.push_back(std::move(engineResult));
 		}
 		for (auto const& buffer : mImpl->thermalBuffers)
 		{

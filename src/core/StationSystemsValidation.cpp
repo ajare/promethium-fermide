@@ -1269,6 +1269,80 @@ using namespace station_detail;
 			if (chiller.chilledSetpointC >= chiller.maxCondensingTemperatureC)
 				return refuse(where + " chilled setpoint must be below the maximum condensing temperature");
 		} catch (BrokenDraftEntry const&) {}
+		// Heat engine contracts (#804): a Carnot-bounded heat-to-power
+		// crossing between two declared thermal reservoirs. The second law
+		// is enforced at authoring time, not rediscovered at runtime: a
+		// carnotFraction outside (0, 1] is an over-unity machine and is
+		// refused as the authoring error it is. The gates must admit a
+		// positive-gradient window: a config whose minimum hot gate sits at
+		// or below its maximum sink gate can never run legally, and is
+		// refused rather than shipped dead. Every refusal names the
+		// offending entry and leaves the World unmutated.
+		if (settings.heatEngines.size() > MaxStationHeatEngines)
+			return refuse("Station heat engines are limited to "
+				+ std::to_string(MaxStationHeatEngines) + " entries");
+		std::set<std::string> heatEngineIds;
+		for (auto const& engine : settings.heatEngines) try
+		{
+			auto const where = "Station heat engine '" + engine.id + "'";
+			if (engine.id.empty()) return refuse("Station heat engine id must not be empty");
+			if (engine.id.size() > MaxStationStoreIdLength)
+				return refuse("Station heat engine id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!heatEngineIds.insert(engine.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				engine.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + engine.thermalClass
+					+ "'; declared classes are: low, moderate, warm, generation");
+			// A single-temperature engine is a perpetual-motion machine:
+			// refuse the same-reservoir pair before anything else resolves.
+			if (!engine.hotReservoirId.empty() && engine.hotReservoirId == engine.rejectionReservoirId)
+				return refuse(where + " hot and rejection endpoints resolve to the same reservoir '"
+					+ engine.hotReservoirId + "'; a single-temperature engine is a perpetual-motion machine");
+			auto const hot = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& candidate) { return candidate.id == engine.hotReservoirId; });
+			if (hot == settings.thermalReservoirs.end())
+				return missing(where + " hot source references unknown thermal reservoir '"
+					+ engine.hotReservoirId + "'");
+			auto const rejection = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& candidate) { return candidate.id == engine.rejectionReservoirId; });
+			if (rejection == settings.thermalReservoirs.end())
+				return missing(where + " rejection sink references unknown thermal reservoir '"
+					+ engine.rejectionReservoirId + "'");
+			// The rejection heat carries the engine's service class, and the
+			// rejection reservoir must accept exactly that class: spare
+			// capacity in another class is never usable, as for every other
+			// machine's sink.
+			if (rejection->thermalClass != engine.thermalClass)
+				return refuse(where + " thermal class '" + engine.thermalClass
+					+ "' is incompatible with rejection reservoir '" + rejection->id
+					+ "' of class '" + rejection->thermalClass + "'; heat routes only to the same service class");
+			if (!std::isfinite(engine.ratedThermalInputKW) || engine.ratedThermalInputKW < 0.0)
+				return refuse(where + " rated thermal input must be finite and non-negative");
+			// The second law as a validation error: a fraction above 1 is
+			// an over-unity machine, and one at or below zero converts
+			// nothing however live the gradient. Both are authoring errors.
+			if (!std::isfinite(engine.carnotFraction) || engine.carnotFraction <= 0.0
+				|| engine.carnotFraction > 1.0)
+				return refuse(where + " carnotFraction must be finite and greater than 0 up to 1");
+			if (!std::isfinite(engine.auxiliaryPowerKW) || engine.auxiliaryPowerKW < 0.0)
+				return refuse(where + " auxiliary power must be finite and non-negative");
+			if (!std::isfinite(engine.minHotTemperatureC)
+				|| engine.minHotTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " minimum hot temperature must be finite and above absolute zero (-273.15 C)");
+			if (!std::isfinite(engine.maxSinkTemperatureC)
+				|| engine.maxSinkTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum sink temperature must be finite and above absolute zero (-273.15 C)");
+			// A dead gradient window: with the minimum hot gate at or below
+			// the maximum sink gate there is no state in which the gates
+			// alone guarantee a live gradient, so the config can never run
+			// legally and is refused rather than shipped dead.
+			if (engine.minHotTemperatureC <= engine.maxSinkTemperatureC)
+				return refuse(where + " minimum hot temperature must be above the maximum sink temperature:"
+					" the gates must admit a positive-gradient window");
+		} catch (BrokenDraftEntry const&) {}
 		// Thermal buffer contracts (#398): the buffer couples to a declared
 		// host reservoir; a circulation-access buffer additionally names a
 		// coolant loop coupled to that same host, because the buffer's

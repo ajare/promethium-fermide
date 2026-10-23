@@ -356,7 +356,7 @@ void scheduledTransferDocuments(smoke::Context const&)
     require(core::parseStationConfiguration(withoutRate, loaded, &why) && loaded.settings == defaultRate,
         "Scheduled load required an inactive continuous rate");
     loaded.settings = s;
-    auto stale = yaml; auto at = stale.find("schemaVersion: 108"); stale.replace(at, std::string("schemaVersion: 108").size(), "schemaVersion: 98");
+    auto stale = yaml; auto at = stale.find("schemaVersion: 109"); stale.replace(at, std::string("schemaVersion: 109").size(), "schemaVersion: 98");
     require(!core::parseStationConfiguration(stale, loaded, &why) && loaded.settings == s, "Old schema discarded Scheduled semantics");
     document.settings.transfers[0].sourceId.clear();
     require(core::parseStationConfiguration(core::serializeStationConfiguration(document), loaded, &why)
@@ -369,8 +369,8 @@ void scheduledTransferDocuments(smoke::Context const&)
     document.settings.systemsStepWorldTicks = 1; // Legacy documents retain the 60 Hz cadence.
     document.settings.transfers[0].ratePerSecond = 1;
     document.settings.transfers[0].quantity = 1;
-    auto legacy = core::serializeStationConfiguration(document); at = legacy.find("schemaVersion: 108");
-    legacy.replace(at, std::string("schemaVersion: 108").size(), "schemaVersion: 98");
+    auto legacy = core::serializeStationConfiguration(document); at = legacy.find("schemaVersion: 109");
+    legacy.replace(at, std::string("schemaVersion: 109").size(), "schemaVersion: 98");
     auto ratioAt = legacy.find("  systemsStepWorldTicks: 1\n");
     require(ratioAt != std::string::npos, "Station step ratio field missing");
     legacy.erase(ratioAt, std::string("  systemsStepWorldTicks: 1\n").size());

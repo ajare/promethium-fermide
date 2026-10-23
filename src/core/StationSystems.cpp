@@ -1123,6 +1123,20 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			chillerIndex[chiller.id] = mImpl->chillers.size();
 			mImpl->chillers.push_back(std::move(state));
 		}
+		// Heat engines start disabled with their contracts resolved to the
+		// hot source and rejection sink reservoirs they couple to; every
+		// rate, limiter and ledger is runtime state reconstructed from the
+		// authored values on load and Reset (#804). Validation has already
+		// refused unresolved endpoints and same-reservoir pairs, so both
+		// indices always resolve for a configured World.
+		for (auto const& engine : settings.heatEngines)
+		{
+			Impl::HeatEngineState state;
+			state.authored = engine;
+			state.hotIndex = reservoirIndex[engine.hotReservoirId];
+			state.sinkIndex = reservoirIndex[engine.rejectionReservoirId];
+			mImpl->heatEngines.push_back(std::move(state));
+		}
 		// Thermal buffers start holding their authored starting energy with
 		// their contracts resolved to the host reservoir and, in circulation
 		// mode, the gating coolant loop; the store, ledgers and exposure are

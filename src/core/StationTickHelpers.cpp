@@ -459,7 +459,11 @@ namespace core
 			std::vector<double> rates{r.authored.absorbedHeatKW, r.lastHeatRoutedKW,
 				r.lastCondenserHeatKW, r.lastGeneratorHeatKW, r.lastElectrolysisHeatKW,
 				r.lastFuelCellHeatKW, r.lastSabatierHeatKW, r.lastMethaneProcessingHeatKW,
-				r.lastMicrobialHeatKW, r.lastBufferDischargeKW, -r.lastBufferChargeKW};
+				r.lastMicrobialHeatKW, r.lastBufferDischargeKW, -r.lastBufferChargeKW,
+				// Heat engine terms (#804): extraction cools the hot source and
+				// rejection warms the sink, both real rate terms the next tick's
+				// qualification prediction must see.
+				-r.lastEngineExtractionKW, r.lastEngineRejectionKW};
 			for (auto const& radiator : runtime.radiators)
 				if (radiator.reservoirIndex == i) rates.push_back(-radiator.lastRejectedKW);
 			// A star's aggregate exchange can hide opposing leaves. Bound both
