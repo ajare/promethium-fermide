@@ -19,7 +19,8 @@ namespace
 		{
 			auto index = graph.nodes.size();
 			ids[{type, id}].push_back(index);
-			if (type == "Generator" || type == "Coolant loop" || type == "Chiller")
+			if (type == "Generator" || type == "Coolant loop" || type == "Chiller"
+				|| type == "Heat engine")
 				ids[{"Installation", id}].push_back(index);
 			graph.nodes.push_back({std::move(type), std::move(id), std::move(detail), lane, false});
 			return index;

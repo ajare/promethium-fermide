@@ -272,15 +272,16 @@ namespace core
 		return static_cast<uint64_t>(steps) + 1;
 	}
 	// The installations registered with the shared availability contract
-	// (#413). In this slice the generators, coolant loops and chillers
-	// register their stable ids; an outage may target only a registered
-	// identity, so the contract is what an installation opts into rather
-	// than a special-cased outage lookup. Later capacity-bearing
-	// installations join by adding their identity here. Because the
-	// outage contract carries only an installationId and no kind (#576),
-	// this namespace is required to be unambiguous: ids must be unique
-	// across all registered kinds, which validateStationSystemsSettings
-	// enforces, so every registered id names exactly one machine.
+	// (#413): the generators, coolant loops, chillers and - since #807 -
+	// the heat engines. They register their stable ids; an outage may
+	// target only a registered identity, so the contract is what an
+	// installation opts into rather than a special-cased outage lookup.
+	// Later capacity-bearing installations join by adding their identity
+	// here. Because the outage contract carries only an installationId and
+	// no kind (#576), this namespace is required to be unambiguous: ids
+	// must be unique across all registered kinds, which
+	// validateStationSystemsSettings enforces, so every registered id
+	// names exactly one machine.
 	std::vector<StationInstallationIdentity> stationInstallationIdentities(
 		StationSystemsSettings const& settings)
 	{
@@ -291,6 +292,12 @@ namespace core
 			identities.push_back({loop.id, "coolant loop"});
 		for (auto const& chiller : settings.chillers)
 			identities.push_back({chiller.id, "chiller"});
+		// The heat engine is a registered station installation from #807:
+		// this loop is what lets an outage or maintenance job name an
+		// individual engine, and what puts the engine's id into the one
+		// installation namespace the ambiguity rules are judged over.
+		for (auto const& engine : settings.heatEngines)
+			identities.push_back({engine.id, "heat engine"});
 		return identities;
 	}
 	// The endpoint half of the transfer entry check (#640): exactly the rules

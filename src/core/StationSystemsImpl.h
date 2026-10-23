@@ -261,8 +261,12 @@ using namespace station_detail;
 			InstallationOutageSettings authored;
 			std::string installationKind;
 			// The target installation, resolved at construction. Exactly one
-			// of these indices is set according to the target kind.
-			enum class Target : std::uint8_t { Generator, CoolantLoop, Chiller };
+			// of these indices is set according to the target kind. The heat
+			// engine joins the registered families in #807: the contract is
+			// what an installation opts into, so a new capacity-bearing kind
+			// registers through stationInstallationIdentities and needs no
+			// special case in the outage pass itself.
+			enum class Target : std::uint8_t { Generator, CoolantLoop, Chiller, HeatEngine };
 			Target target{Target::Generator};
 			size_t targetIndex{0};
 			uint64_t occurrencesStarted{0};
@@ -425,6 +429,12 @@ using namespace station_detail;
 			HeatEngineSettings authored;
 			size_t hotIndex{SIZE_MAX};
 			size_t sinkIndex{SIZE_MAX};
+			// The effective availability factor the outage and maintenance
+			// contracts leave this machine for this tick (#807). It caps the
+			// deliverable rated thermal intake, so generation, extraction
+			// and rejection all scale with the duty that actually moves and
+			// the conversion ledger still closes. 1.0 is full service.
+			double availabilityFactor{1.0};
 			double lastThermalInputKW{0.0};
 			double lastElectricalOutputKW{0.0};
 			double lastRejectionKW{0.0};
@@ -1356,8 +1366,9 @@ using namespace station_detail;
 			MaintenanceJobSettings authored;
 			std::string installationKind;
 			// The target installation, resolved at construction. Exactly
-			// one kind matches, as for outages (#576).
-			enum class Target : std::uint8_t { Generator, CoolantLoop, Chiller };
+			// one kind matches, as for outages (#576). The heat engine is a
+			// registered installation from #807, so a job can isolate it.
+			enum class Target : std::uint8_t { Generator, CoolantLoop, Chiller, HeatEngine };
 			Target target{Target::Generator};
 			size_t targetIndex{0};
 			// One entry per authored requirement: the resolved store index

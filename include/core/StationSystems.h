@@ -1923,11 +1923,11 @@ namespace core
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// The installations registered with the shared availability contract
-	// for a given authored configuration (#413): in this slice the
-	// generators, coolant loops and chillers. Outage validation resolves
-	// an outage's installationId against this set; an outage naming an
-	// installation that has not registered is refused with a diagnostic
-	// rather than accepted and ignored.
+	// for a given authored configuration (#413): the generators, coolant
+	// loops, chillers and - from #807 - the heat engines. Outage and
+	// maintenance validation resolve an installationId against this set;
+	// a job naming an installation that has not registered is refused
+	// with a diagnostic rather than accepted and ignored.
 	std::vector<StationInstallationIdentity> stationInstallationIdentities(
 		StationSystemsSettings const& settings);
 	// Profile shape validation and deterministic evaluation: the level of
@@ -3132,6 +3132,12 @@ namespace core
 		std::string rejectionReservoirId;
 		double ratedThermalInputKW{0.0};
 		double commandedInputKW{0.0};      // the intake dispatch in force, [0, rated]
+		// The availability the outage and maintenance contracts leave this
+		// engine for the current tick (#807): 1.0 in full service, less
+		// during a partial outage, 0.0 when an outage took the whole rating
+		// or a maintenance job holds the engine isolated. The deliverable
+		// intake is capped at ratedThermalInputKW x availabilityFactor.
+		double availabilityFactor{1.0};
 		double carnotFraction{0.0};
 		double auxiliaryPowerKW{0.0};
 		double minHotTemperatureC{0.0};
@@ -3140,7 +3146,7 @@ namespace core
 		double lastElectricalOutputKW{0.0};  // net power delivered to the bus this tick
 		double lastRejectionKW{0.0};        // heat booked into the rejection reservoir this tick
 		double lastAuxKW{0.0};             // auxiliaries carried by the conversion this tick
-		std::string lastLimiter;            // Disabled/NoGradient/TooCold/SinkOver/AuxiliaryPower/HotSideSupply/CommandedInput/DemandAcceptance/GenerationConnection
+		std::string lastLimiter;            // Disabled/OutOfService/CapacityReduction/NoGradient/TooCold/SinkOver/AuxiliaryPower/HotSideSupply/CommandedInput/DemandAcceptance/GenerationConnection
 		double efficiencyNow{0.0};        // actual eta used by the last conversion
 		double carnotEfficiencyNow{0.0};  // Carnot eta at the same interface temperatures
 		double hotTemperatureC{0.0};

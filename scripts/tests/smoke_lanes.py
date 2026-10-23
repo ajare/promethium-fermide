@@ -99,7 +99,14 @@ class Lanes(unittest.TestCase):
                       # the cadence agreement all run in the fast pass; the
                       # full gradient sweep is exhaustive.
                       'heatEngineExergyRunToEquilibrium', 'heatEngineExergySweepSmoke',
-                      'heatEngineInvertedGradientIdle', 'heatEngineCadenceInvariance'):
+                      'heatEngineInvertedGradientIdle', 'heatEngineCadenceInvariance',
+                      # #807: the heat engine registered as an outageable,
+                      # maintainable station installation.
+                      'heatEngineInstallationRegistration',
+                      'heatEngineOutageRemovesGeneration',
+                      'heatEngineOutagePartialCapacity',
+                      'heatEngineMaintenanceIsolation',
+                      'heatEngineOutageTransitionCoherence'):
             self.assertIn('validation-fast', props(f'station-{check}')['LABELS'])
             self.assertNotIn('validation-stress', props(f'station-{check}')['LABELS'])
         # #806: the full gradient sweep is exhaustive-only. Its smoke

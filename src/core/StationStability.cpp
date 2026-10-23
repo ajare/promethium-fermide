@@ -585,6 +585,10 @@ namespace core
 		{
 			fin(engine.ratedThermalInputKW, tag("ratedThermalInputKW", engine.id));
 			fin(engine.commandedInputKW, tag("commandedInputKW", engine.id));
+			// The outage/maintenance availability factor is a live runtime
+			// value on the engine from #807, so it is held to the same
+			// finiteness contract as every other installation's.
+			fin(engine.availabilityFactor, tag("availabilityFactor", engine.id));
 			fin(engine.carnotFraction, tag("carnotFraction", engine.id));
 			fin(engine.auxiliaryPowerKW, tag("auxiliaryPowerKW", engine.id));
 			fin(engine.minHotTemperatureC, tag("minHotTemperatureC", engine.id));

@@ -112,7 +112,12 @@ namespace
 	}
 	bool isInstallationType(std::string_view type)
 	{
-		return type == "Generator" || type == "Coolant loop" || type == "Chiller";
+		// The heat engine joins the installation types in #807: it shares the
+		// one installation identity namespace the outage and maintenance
+		// contracts resolve against, so a rename collision with an engine's
+		// id is the same collision the contract cannot tolerate.
+		return type == "Generator" || type == "Coolant loop" || type == "Chiller"
+			|| type == "Heat engine";
 	}
 	std::string installationNodeType(StationSystemsSettings const& settings, std::string const& id)
 	{

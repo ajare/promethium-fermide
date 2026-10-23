@@ -614,7 +614,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews,
     waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers,
     wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations,
-    algaeCultures, outages, dispatchMode, maintenance)
+    algaeCultures, outages, dispatchMode, maintenance, heatEngines)
     assert(type(name) == "string")
     -- #415: the dispatch controller mode crosses as a plain immutable
     -- string; the sandbox mirrors the same controller and refuses any
@@ -680,6 +680,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         algae_cultures = {}, algae_order = {},
         fuel_cells = {}, thermal_buffers = {},
         waste_ejections = {},
+        -- #807: the heat engines registered as installations. The sandbox
+        -- does not simulate the engine's conversion - that ledger lives in
+        -- the host - but the installation contract needs the engine's
+        -- identity present so an outage or maintenance job naming an
+        -- engine resolves here exactly as it does in the host, and the
+        -- availability the shared contract applies is tracked on the
+        -- mirror object like every other installation's.
+        heat_engines = {},
         outages = {}, installation_availability = {},
         maintenance = {}, maintenance_order = {},
         -- #415: the dispatch controller's own state. The demand signal is
@@ -1711,6 +1719,21 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     end
     for index = 1, #chillers do
         register_installation(chillers[index].id, object.chillers[index], 'chiller')
+    end
+    -- The heat engine registers as an installation in #807: the mirror
+    -- carries the identity and the availability the outage and
+    -- maintenance contracts write, so a job naming an engine resolves
+    -- against the same unambiguous namespace the host validates. A
+    -- missing list (an older wrapper factory that does not pass it)
+    -- simply registers nothing, as before.
+    heatEngines = heatEngines or {}
+    assert(type(heatEngines) == 'table', 'heat engine list must be a table')
+    for index = 1, #heatEngines do
+        local engine = heatEngines[index]
+        assert(type(engine) == 'table', 'heat engine descriptor must be a table')
+        assert(type(engine.id) == 'string' and #engine.id > 0, 'heat engine needs an id')
+        object.heat_engines[index] = { id = engine.id, availability = 1.0 }
+        register_installation(engine.id, object.heat_engines[index], 'heat engine')
     end
     for index = 1, #outages do
         local outage = outages[index]

@@ -1621,6 +1621,449 @@ void heatEngineCadenceInvariance(smoke::Context const&)
 	runCadenceRegime(90.0, 20.0, 0.5, 3.0, 100.0, 0.0,
 		false, {20.4, 20.5});
 }
+
+// ---------------------------------------------------------------------------
+// The heat engine as a station installation (#807)
+//
+// Outages (#413) and maintenance (#414) target an installation by its stable
+// id alone; the family only becomes targetable by registering in
+// stationInstallationIdentities. Every assertion here is made on what a
+// configured World publishes across the outage window - the outage and
+// maintenance snapshots, the engine's own rates and ledgers, and the two
+// reservoirs' energy books - so the contract is tested as an operator sees
+// it rather than as a lookup table.
+// ---------------------------------------------------------------------------
+
+core::InstallationOutageSettings makeOutage(std::string id, std::string target,
+	double capacityFraction, double firstSeconds, double durationSeconds,
+	double recurrenceSeconds = 0.0, int priority = 0)
+{
+	core::InstallationOutageSettings outage;
+	outage.id = std::move(id);
+	outage.installationId = std::move(target);
+	outage.capacityFraction = capacityFraction;
+	outage.firstOccurrenceSeconds = firstSeconds;
+	outage.durationSeconds = durationSeconds;
+	outage.recurrenceSeconds = recurrenceSeconds;
+	outage.priority = priority;
+	return outage;
+}
+
+// The #414 prerequisite set: one reusable tool and one consumed part, so
+// the job really runs, really isolates and really pays for its work.
+core::MaintenanceJobSettings makeMaintenance(std::string id, std::string target,
+	double firstSeconds, double durationSeconds)
+{
+	core::MaintenanceRequirementSettings tool;
+	tool.storeId = "tools"; tool.quantity = 2.0; tool.consumed = false;
+	core::MaintenanceRequirementSettings part;
+	part.storeId = "parts"; part.quantity = 1.0; part.consumed = true;
+	core::MaintenanceJobSettings job;
+	job.id = std::move(id);
+	job.installationId = std::move(target);
+	job.firstOccurrenceSeconds = firstSeconds;
+	job.durationSeconds = durationSeconds;
+	job.requirements = {tool, part};
+	job.wasteStoreId = "waste";
+	return job;
+}
+
+// The maintenance fixture: the standing engine pair plus the three stores a
+// job needs, all in kg, so the isolation - not a missing prerequisite - is
+// what moves the engine's output when the window opens.
+core::StationSystemsSettings engineMaintenancePair(double firstSeconds,
+	double durationSeconds)
+{
+	auto settings = enginePair();
+	core::ResourceStoreSettings tools;
+	tools.id = "tools"; tools.unit = "kg"; tools.capacity = 100.0; tools.startingQualified = 10.0;
+	core::ResourceStoreSettings parts;
+	parts.id = "parts"; parts.unit = "kg"; parts.capacity = 100.0; parts.startingQualified = 8.0;
+	core::ResourceStoreSettings waste;
+	waste.id = "waste"; waste.unit = "kg"; waste.capacity = 10.0; waste.startingQualified = 0.0;
+	settings.stores = {tools, parts, waste};
+	settings.maintenanceJobs = {makeMaintenance("overhaul", "orc", firstSeconds, durationSeconds)};
+	return settings;
+}
+
+core::StationOutageSnapshot outageSnap(core::StationSystemsSnapshot const& snap,
+	std::string const& id)
+{
+	for (auto const& entry : snap.outages)
+		if (entry.id == id) return entry;
+	throw std::runtime_error("outage missing from snapshot");
+}
+
+core::StationMaintenanceSnapshot maintenanceSnap(core::StationSystemsSnapshot const& snap,
+	std::string const& id)
+{
+	for (auto const& entry : snap.maintenanceJobs)
+		if (entry.id == id) return entry;
+	throw std::runtime_error("maintenance job missing from snapshot");
+}
+
+double storeQuantity(core::World& world, std::string const& id)
+{
+	for (auto const& entry : world.getStationSystemsSnapshot().stores)
+		if (entry.id == id) return entry.currentQualified;
+	throw std::runtime_error("store missing from snapshot");
+}
+
+// The engine registers as an installation: an outage or a maintenance job
+// may name it, the snapshots report it as a heat engine rather than an
+// unknown kind, and the target's effective availability is the number the
+// contract actually applied. An id shared with another installation kind is
+// still refused - the enlarged family set widens the namespace, it does not
+// loosen the rule that the namespace must be unambiguous.
+void heatEngineInstallationRegistration(smoke::Context const&)
+{
+	std::string diagnostic;
+	// Both schedules naming the engine are accepted, and both report the
+	// engine's kind before their windows even open.
+	{
+		auto settings = enginePair();
+		settings.outages = {makeOutage("down", "orc", 0.0, 100.0, 10.0)};
+		core::World world("HeatEngineInstallRegister", 2, 2);
+		configure(world, settings, diagnostic);
+		world.resumeSimulation();
+		require(advanceSeconds(world, 5.0), "registration warm-up failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "registration warm-up failed its audit");
+		auto const snap = outageSnap(snapshot, "down");
+		require(snap.installationKind == "heat engine",
+			"an outage on an engine did not report the heat engine installation kind");
+		require(!snap.active && snap.installationAvailability == 1.0,
+			"the engine was not at full availability ahead of its outage window");
+		require(engine(snapshot, "orc").availabilityFactor == 1.0,
+			"the engine snapshot did not publish full availability ahead of the outage");
+	}
+	{
+		auto settings = engineMaintenancePair(100.0, 10.0);
+		core::World world("HeatEngineInstallMaintain", 2, 2);
+		configure(world, settings, diagnostic);
+		world.resumeSimulation();
+		require(advanceSeconds(world, 5.0), "maintenance registration warm-up failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "maintenance registration warm-up failed its audit");
+		auto const job = maintenanceSnap(snapshot, "overhaul");
+		require(job.installationKind == "heat engine",
+			"a maintenance job on an engine did not report the heat engine installation kind");
+		require(job.phase == core::StationMaintenancePhase::Idle && !job.isolated,
+			"the maintenance job was busy before its window");
+	}
+	// An unknown installation is still refused: registering the engine does
+	// not turn the contract into a catch-all.
+	{
+		auto settings = enginePair();
+		settings.outages = {makeOutage("ghost", "reactor", 0.0, 10.0, 5.0)};
+		core::World world("HeatEngineInstallUnknown", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		require(!world.configureStationSystems(settings, false, &diagnostic),
+			"an outage naming an unregistered installation was accepted");
+	}
+	// The enlarged namespace is still unambiguous: a generator sharing the
+	// engine's id cannot both claim it, because the outage contract carries
+	// no kind and could not say which machine it caps.
+	{
+		auto settings = enginePair();
+		core::ResourceStoreSettings diesel;
+		diesel.id = "diesel"; diesel.unit = "kWh"; diesel.capacity = 100000.0;
+		diesel.startingQualified = 100000.0;
+		settings.stores = {diesel};
+		core::GeneratorSettings twin;
+		twin.id = "orc"; // collides with the engine's installation id
+		twin.fuelStoreId = "diesel";
+		twin.thermalClass = "warm"; // match the sink reservoir's service class
+		twin.heatSinkId = "hot";
+		twin.ratedOutputKW = 10.0;
+		twin.efficiency = 0.5;
+		twin.maxRampKWPerSecond = 100.0;
+		twin.commandedOutputKW = 10.0;
+		settings.generators = {twin};
+		settings.outages = {makeOutage("down", "orc", 0.0, 10.0, 5.0)};
+		core::World world("HeatEngineInstallAmbiguous", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		require(!world.configureStationSystems(settings, false, &diagnostic),
+			"a heat engine and a generator sharing an installation id were accepted");
+		require(diagnostic.find("heat engine") != std::string::npos,
+			("the installation ambiguity refusal did not name the heat engine family: [" + diagnostic + "]").c_str());
+	}
+}
+
+// A full outage takes the engine out of service: no intake, so no
+// generation on the bus and no extraction or rejection booked at either
+// reservoir. The control run beside it makes the difference visible where
+// an operator looks - the hot reservoir stops draining.
+void heatEngineOutageRemovesGeneration(smoke::Context const&)
+{
+	std::string diagnostic;
+	// Control: the engine runs the whole time and drains the hot side.
+	auto control = enginePair();
+	core::World controlWorld("HeatEngineOutageControl", 2, 2);
+	configure(controlWorld, control, diagnostic);
+	controlWorld.resumeSimulation();
+	require(advanceSeconds(controlWorld, 20.0), "outage control run failed");
+	auto const controlSnap = controlWorld.getStationSystemsSnapshot();
+	require(controlSnap.healthy, "outage control run failed its audit");
+	auto const controlEngine = engine(controlSnap, "orc");
+	require(controlEngine.status == core::StationHeatEngineStatus::Active
+		&& controlEngine.lastElectricalOutputKW > 0.0,
+		"the control engine was not generating before the outage");
+	auto const controlHotC = reservoir(controlSnap, "hot").temperatureC;
+	require(controlHotC < 90.0 - 1e-6,
+		"the control engine did not drain the hot reservoir");
+	// Outage from the first tick: the engine never gets to move anything.
+	// The window is sampled well inside itself, and only after it has closed
+	// is the restoration read.
+	auto settings = enginePair();
+	settings.outages = {makeOutage("down", "orc", 0.0, 0.0, 20.0)};
+	core::World world("HeatEngineOutageFull", 2, 2);
+	configure(world, settings, diagnostic);
+	world.resumeSimulation();
+	require(advanceSeconds(world, 10.0), "full-outage run failed");
+	auto const snapshot = world.getStationSystemsSnapshot();
+	require(snapshot.healthy, "full-outage run failed its audit");
+	auto const orc = engine(snapshot, "orc");
+	require(orc.status == core::StationHeatEngineStatus::Idle
+		&& orc.lastLimiter == "OutOfService",
+		"an outaged engine did not idle with the OutOfService limiter");
+	require(orc.availabilityFactor == 0.0,
+		"an outaged engine did not report zero availability");
+	require(orc.lastThermalInputKW == 0.0 && orc.lastElectricalOutputKW == 0.0
+		&& orc.lastRejectionKW == 0.0,
+		"an outaged engine still booked rates this tick");
+	require(orc.thermalInputEnergyKJ == 0.0 && orc.electricalEnergyKJ == 0.0
+		&& orc.rejectionEnergyKJ == 0.0,
+		"an outaged engine still accumulated ledger energy");
+	require(snapshot.power.heatEngineOutputKW == 0.0,
+		"an outaged engine still contributed bus generation");
+	// The hot reservoir's drain visibly changed: the same fixture for the
+	// same elapsed time, and the outaged hot side kept every joule.
+	require(reservoir(snapshot, "hot").temperatureC == 90.0,
+		"the outaged run still drained the hot reservoir");
+	require(reservoir(snapshot, "reject").temperatureC == 20.0,
+		"the outaged run still booked rejection into the sink");
+	require(reservoir(snapshot, "hot").engineExtractionEnergyKJ == 0.0
+		&& reservoir(snapshot, "reject").engineRejectionEnergyKJ == 0.0,
+		"the reservoir-side engine bookings were not removed by the outage");
+	require(outageSnap(snapshot, "down").active
+		&& outageSnap(snapshot, "down").installationAvailability == 0.0,
+		"the outage snapshot did not report the engine at zero availability");
+	// Restoration: the same world, the window closed, the engine returns to
+	// exactly the duty the control run had at the same elapsed time.
+	require(advanceSeconds(world, 15.0), "post-restoration run failed");
+	auto const after = world.getStationSystemsSnapshot();
+	require(after.healthy, "post-restoration run failed its audit");
+	require(!outageSnap(after, "down").active
+		&& outageSnap(after, "down").installationAvailability == 1.0,
+		"the outage did not restore the engine's full availability");
+	auto const restored = engine(after, "orc");
+	require(restored.status == core::StationHeatEngineStatus::Active
+		&& restored.availabilityFactor == 1.0
+		&& restored.lastElectricalOutputKW > 0.0,
+		"the engine did not return to service when the outage ended");
+	require(restored.thermalInputEnergyKJ > 0.0 && restored.rejectionEnergyKJ > 0.0,
+		"the restored engine resumed no extraction or rejection");
+}
+
+// A partial outage leaves part of the rating in service. The cap is applied
+// to the deliverable intake, so generation, extraction and rejection all
+// scale together by the same fraction and the conversion ledger still
+// closes - the engine runs smaller, it does not run wrong.
+void heatEngineOutagePartialCapacity(smoke::Context const&)
+{
+	std::string diagnostic;
+	constexpr double fraction = 0.4;
+	auto settings = enginePair(20000.0, 20000.0, 100.0, 0.5, 1.0);
+	settings.outages = {makeOutage("derate", "orc", fraction, 0.0, 30.0)};
+	core::World world("HeatEngineOutagePartial", 2, 2);
+	configure(world, settings, diagnostic);
+	world.resumeSimulation();
+	require(advanceSeconds(world, 10.0), "partial-outage run failed");
+	auto const snapshot = world.getStationSystemsSnapshot();
+	require(snapshot.healthy, "partial-outage run failed its audit");
+	auto const orc = engine(snapshot, "orc");
+	require(orc.availabilityFactor == fraction,
+		"the outage did not leave the declared fraction of the rating available");
+	require(orc.status == core::StationHeatEngineStatus::Active
+		&& orc.lastLimiter == "CapacityReduction",
+		"a partially outaged engine did not name CapacityReduction as its binding ceiling");
+	// The intake sits exactly at the remaining rating, not at the command.
+	require(std::abs(orc.lastThermalInputKW - 100.0 * fraction) < 1e-9,
+		"the partially outaged engine's intake was not capped at the remaining rating");
+	require(orc.lastThermalInputKW < orc.commandedInputKW - 1e-9,
+		"the capacity reduction did not cut below the engine's command");
+	// Everything scales with the intake: the conversion ratios are the
+	// running engine's own, unchanged by the outage.
+	require(std::abs(orc.efficiencyNow - orc.carnotEfficiencyNow * 0.5) < 1e-12,
+		"the partially outaged engine converted at anything but its declared efficiency");
+	require(std::abs(orc.lastRejectionKW
+		- (orc.lastThermalInputKW - orc.efficiencyNow * orc.lastThermalInputKW
+			+ orc.auxiliaryPowerKW)) < 1e-9,
+		"the partially outaged engine's rejection did not follow its own ledger");
+	require(std::abs(orc.residualKJ) < 1e-6 * std::max(1.0, orc.thermalInputEnergyKJ),
+		"the partially outaged engine's energy ledger did not close");
+	require(outageSnap(snapshot, "derate").installationAvailability == fraction,
+		"the outage snapshot did not report the partial availability");
+}
+
+// Maintenance on an engine behaves like maintenance on any other registered
+// family: the job waits, then runs and isolates the machine for its whole
+// duration, then completes by paying for its work and returning the tool.
+// The isolation removes the engine's recovery generation and its
+// reservoir-side bookings for exactly the window, and nothing else.
+void heatEngineMaintenanceIsolation(smoke::Context const&)
+{
+	std::string diagnostic;
+	auto settings = engineMaintenancePair(20.0, 10.0);
+	core::World world("HeatEngineMaintenance", 2, 2);
+	configure(world, settings, diagnostic);
+	world.resumeSimulation();
+	// Ahead of the window: the engine works at full service.
+	require(advanceSeconds(world, 15.0), "pre-window maintenance run failed");
+	auto const before = world.getStationSystemsSnapshot();
+	require(before.healthy, "pre-window maintenance run failed its audit");
+	require(maintenanceSnap(before, "overhaul").phase == core::StationMaintenancePhase::Idle
+		&& maintenanceSnap(before, "overhaul").occurrencesStarted == 0,
+		"the maintenance job was busy before its window");
+	require(engine(before, "orc").availabilityFactor == 1.0
+		&& engine(before, "orc").status == core::StationHeatEngineStatus::Active,
+		"the engine was not in full service before the maintenance window");
+	// Inside the window: the job is Active, the engine is isolated, and the
+	// recovery generation and both reservoir bookings are gone.
+	require(advanceSeconds(world, 8.0), "in-window maintenance run failed");
+	auto const during = world.getStationSystemsSnapshot();
+	require(during.healthy, "in-window maintenance run failed its audit");
+	auto const active = maintenanceSnap(during, "overhaul");
+	require(active.phase == core::StationMaintenancePhase::Active && active.isolated,
+		"the maintenance job did not isolate the engine while running");
+	require(active.progressSeconds > 0.0 && active.remainingSeconds > 0.0,
+		"the maintenance job made no progress while isolating the engine");
+	auto const isolated = engine(during, "orc");
+	require(isolated.availabilityFactor == 0.0
+		&& isolated.status == core::StationHeatEngineStatus::Idle
+		&& isolated.lastLimiter == "OutOfService",
+		"an isolated engine was not held out of service with the OutOfService limiter");
+	require(isolated.lastElectricalOutputKW == 0.0
+		&& isolated.lastThermalInputKW == 0.0 && isolated.lastRejectionKW == 0.0,
+		"an isolated engine still generated or booked heat");
+	require(during.power.heatEngineOutputKW == 0.0,
+		"an isolated engine still contributed bus generation");
+	// The prerequisites are reserved but not yet spent: the reservation is
+	// visible on the requirements while the material stays in its own store
+	// until the work actually completes.
+	require(active.requirements.size() == 2
+		&& active.requirements[0].reserved && active.requirements[1].reserved,
+		"the maintenance job did not reserve its prerequisites while running");
+	require(storeQuantity(world, "tools") == 10.0 && storeQuantity(world, "parts") == 8.0,
+		"reserved material left its store before the job completed");
+	require(storeQuantity(world, "waste") == 0.0,
+		"the maintenance job spent its waste before completing");
+	// After completion: the tool is returned, the part is waste, the engine
+	// is back in full service and the occurrence is recorded.
+	require(advanceSeconds(world, 8.0), "post-window maintenance run failed");
+	auto const after = world.getStationSystemsSnapshot();
+	require(after.healthy, "post-window maintenance run failed its audit");
+	auto const done = maintenanceSnap(after, "overhaul");
+	require(done.phase == core::StationMaintenancePhase::Completed && !done.isolated
+		&& done.occurrencesStarted == 1 && done.occurrencesCompleted == 1 && done.exhausted,
+		"the maintenance job did not complete its occurrence on the engine");
+	require(std::abs(storeQuantity(world, "tools") - 10.0) < 1e-9,
+		"the reusable tool was not returned after the job completed");
+	require(std::abs(storeQuantity(world, "parts") - 7.0) < 1e-9,
+		"the consumed part was not removed from its source by completion");
+	require(std::abs(storeQuantity(world, "waste") - 1.0) < 1e-9,
+		"the consumed part did not land in the waste store on completion");
+	require(engine(after, "orc").availabilityFactor == 1.0
+		&& engine(after, "orc").status == core::StationHeatEngineStatus::Active,
+		"the engine was not restored to full service after the job completed");
+}
+
+// Coherence across the outage transition: the engine's ledger and the two
+// reservoirs' engine bookings agree at every sampled tick, the cumulative
+// quantities never run backwards and never jump, and the outage window is
+// exactly flat - no leak through a closed window and no double booking when
+// the window opens or closes.
+void heatEngineOutageTransitionCoherence(smoke::Context const&)
+{
+	std::string diagnostic;
+	auto settings = enginePair();
+	// One window opening at 5 s and closing at 15 s, so the sample crosses
+	// the start transition, the whole closed window, and the restore.
+	settings.outages = {makeOutage("down", "orc", 0.0, 5.0, 10.0)};
+	core::World world("HeatEngineOutageCoherence", 2, 2);
+	configure(world, settings, diagnostic);
+	world.resumeSimulation();
+	auto previous = world.getStationSystemsSnapshot();
+	for (int step = 0; step < 400; ++step)
+	{
+		require(advanceStationSteps(world, 1), "coherence step failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "coherence run failed its audit");
+		auto const orc = engine(snapshot, "orc");
+		auto const& hot = reservoir(snapshot, "hot");
+		auto const& reject = reservoir(snapshot, "reject");
+		// The engine's own ledger and the reservoir-side bookings are the
+		// same money recorded at both ends of one crossing.
+		require(std::abs(orc.thermalInputEnergyKJ - hot.engineExtractionEnergyKJ) < 1e-6,
+				"the engine intake and the hot reservoir's extraction booking disagreed");
+		require(std::abs(orc.rejectionEnergyKJ - reject.engineRejectionEnergyKJ) < 1e-6,
+				"the engine rejection and the sink reservoir's booking disagreed");
+		// Nothing resets or double-counts across the transition: every
+		// cumulative quantity is monotone non-decreasing.
+		auto const previousOrc = engine(previous, "orc");
+		auto const wasActive = outageSnap(previous, "down").active;
+		auto const isActive = outageSnap(snapshot, "down").active;
+		require(orc.thermalInputEnergyKJ + 1e-9 >= previousOrc.thermalInputEnergyKJ
+			&& orc.electricalEnergyKJ + 1e-9 >= previousOrc.electricalEnergyKJ
+			&& orc.rejectionEnergyKJ + 1e-9 >= previousOrc.rejectionEnergyKJ,
+			"an engine ledger ran backwards across the outage transition");
+		require(hot.engineExtractionEnergyKJ + 1e-9
+				>= reservoir(previous, "hot").engineExtractionEnergyKJ,
+			"the hot reservoir's engine booking ran backwards");
+		require(reject.engineRejectionEnergyKJ + 1e-9
+				>= reservoir(previous, "reject").engineRejectionEnergyKJ,
+			"the sink reservoir's engine booking ran backwards");
+		// The engine's own conversion closes on itself every tick.
+		require(std::abs(orc.residualKJ) < 1e-6 * std::max(1.0, orc.thermalInputEnergyKJ),
+			"the engine ledger failed to close across the outage transition");
+		// Inside the window the ledgers are exactly flat: a closed window
+		// leaks nothing. The tick that opens the window is exempt - its left
+		// boundary still read full service, so the engine legitimately ran
+		// up to the instant the outage took hold.
+		if (isActive && wasActive)
+		{
+			require(orc.lastThermalInputKW == 0.0 && orc.lastElectricalOutputKW == 0.0
+				&& orc.lastRejectionKW == 0.0,
+				"an outaged engine moved energy inside its window");
+			require(orc.thermalInputEnergyKJ == previousOrc.thermalInputEnergyKJ
+				&& orc.electricalEnergyKJ == previousOrc.electricalEnergyKJ
+				&& orc.rejectionEnergyKJ == previousOrc.rejectionEnergyKJ,
+				"an engine ledger moved inside the outage window");
+			require(orc.availabilityFactor == 0.0
+				&& orc.status == core::StationHeatEngineStatus::Idle,
+				"the engine was not held out of service inside the outage window");
+		}
+		else if (!isActive)
+		{
+			require(orc.availabilityFactor == 1.0,
+				"the engine was not at full availability outside the outage window");
+		}
+		previous = snapshot;
+	}
+	// The whole run leaves the engine having generated only outside the
+	// window, and the hot reservoir only cooled by exactly that much.
+	auto const final = world.getStationSystemsSnapshot();
+	auto const finalOrc = engine(final, "orc");
+	require(finalOrc.thermalInputEnergyKJ > 0.0 && finalOrc.electricalEnergyKJ > 0.0,
+		"the engine never generated outside its outage window");
+	require(finalOrc.thermalInputEnergyKJ
+		< 100.0 * final.systemsTimestepSeconds * 400.0,
+		"the engine converted as though the outage window had never happened");
+	require(reservoir(final, "hot").engineExtractionEnergyKJ
+		== finalOrc.thermalInputEnergyKJ,
+		"the final hot reservoir booking does not match the engine ledger");
+}
 }   // namespace
 
 void registerStationHeatEngineChecks(std::vector<smoke::Check>& checks)
@@ -1645,4 +2088,11 @@ void registerStationHeatEngineChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"heatEngineExergySweep", heatEngineExergySweep});
 	checks.push_back({"heatEngineInvertedGradientIdle", heatEngineInvertedGradientIdle});
 	checks.push_back({"heatEngineCadenceInvariance", heatEngineCadenceInvariance});
+	// #807: the heat engine as a registered, outageable and maintainable
+	// station installation.
+	checks.push_back({"heatEngineInstallationRegistration", heatEngineInstallationRegistration});
+	checks.push_back({"heatEngineOutageRemovesGeneration", heatEngineOutageRemovesGeneration});
+	checks.push_back({"heatEngineOutagePartialCapacity", heatEngineOutagePartialCapacity});
+	checks.push_back({"heatEngineMaintenanceIsolation", heatEngineMaintenanceIsolation});
+	checks.push_back({"heatEngineOutageTransitionCoherence", heatEngineOutageTransitionCoherence});
 }

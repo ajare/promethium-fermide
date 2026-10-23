@@ -10,6 +10,11 @@ namespace core
 		for (auto& generator : runtime.generators) generator.availabilityFactor = 1.0;
 		for (auto& loop : runtime.coolantLoops) loop.availabilityFactor = 1.0;
 		for (auto& chiller : runtime.chillers) chiller.availabilityFactor = 1.0;
+		// The heat engine enters the shared availability contract here: the
+		// same reset, the same outage ceiling and the same maintenance
+		// isolation every registered family gets, so an engine's duty for
+		// the tick is decided in one place (#807).
+		for (auto& engine : runtime.heatEngines) engine.availabilityFactor = 1.0;
 		// Newly due outage starts and restorations are staged across all
 		// schedules and announced in the declared scenario event order
 		// (#577): occurrence simulation time ascending, then service
@@ -90,7 +95,9 @@ namespace core
 				? runtime.generators[outage.targetIndex].availabilityFactor
 				: outage.target == OutageState::Target::CoolantLoop
 					? runtime.coolantLoops[outage.targetIndex].availabilityFactor
-					: runtime.chillers[outage.targetIndex].availabilityFactor;
+					: outage.target == OutageState::Target::Chiller
+						? runtime.chillers[outage.targetIndex].availabilityFactor
+						: runtime.heatEngines[outage.targetIndex].availabilityFactor;
 			factor = std::min(factor, outage.authored.capacityFraction);
 		}
 		// Resource-constrained maintenance (#414) runs right behind
@@ -474,7 +481,9 @@ namespace core
 					? runtime.generators[job.targetIndex].availabilityFactor
 					: job.target == MaintenanceState::Target::CoolantLoop
 						? runtime.coolantLoops[job.targetIndex].availabilityFactor
-						: runtime.chillers[job.targetIndex].availabilityFactor;
+						: job.target == MaintenanceState::Target::Chiller
+							? runtime.chillers[job.targetIndex].availabilityFactor
+							: runtime.heatEngines[job.targetIndex].availabilityFactor;
 				factor = std::min(factor, 0.0);
 			}
 		}
@@ -547,6 +556,17 @@ namespace core
 			engine.lastAuxKW = auxKW;
 			engine.lastLimiter.clear();
 			engine.efficiencyNow = 0.0;
+			// The availability the outage (#413) and maintenance (#414)
+			// contracts leave this engine for this tick (#807), sized the
+			// way the chiller sizes its own: the rated capacity times the
+			// factor. Sizing the *intake* rather than the output is what
+			// makes the whole conversion withdraw together - a smaller
+			// intake means proportionally less heat drawn from the hot
+			// reservoir, less power on the bus and less rejection booked
+			// into the sink, so the ledger still closes and the hot
+			// reservoir visibly keeps the heat the engine is not taking.
+			auto const effectiveRatedInputKW =
+				engine.authored.ratedThermalInputKW * engine.availabilityFactor;
 			// The Carnot ceiling at the tick-start interface temperatures,
 			// published beside the actual efficiency whatever the engine
 			// ends up doing this tick. ABSOLUTE temperatures: kelvin over
@@ -562,6 +582,20 @@ namespace core
 				// no intake, no output, no rejection, nothing drawn.
 				engine.status = StationHeatEngineStatus::Disabled;
 				engine.lastLimiter = "Disabled";
+				continue;
+			}
+			if (effectiveRatedInputKW <= 0.0)
+			{
+				// A scheduled outage that took the whole rating, or an
+				// active maintenance isolation, holds the engine out of
+				// service: no intake, so no generation, no extraction and
+				// no rejection anywhere. Named ahead of the gradient and
+				// sink gates because the operator's own removal is the
+				// reason the machine is down this tick; it returns by
+				// itself when the window closes. This is the engine's
+				// equivalent of the chiller's capacityDisabled gate.
+				engine.status = StationHeatEngineStatus::Idle;
+				engine.lastLimiter = "OutOfService";
 				continue;
 			}
 			if (!sinkQualified(engine.sinkIndex, engine.authored.maxSinkTemperatureC))
@@ -618,6 +652,7 @@ namespace core
 			// the hot reservoir for a competing consumer. It caps the
 			// request; it never raises it above rated.
 			auto intakeKW = std::min(engine.authored.commandedInputKW, supplyKW);
+			intakeKW = std::min(intakeKW, effectiveRatedInputKW);
 			auto grossKW = eta * intakeKW;
 			if (grossKW <= auxKW + 1e-12)
 			{
@@ -672,11 +707,14 @@ namespace core
 			}
 			else if (engine.lastLimiter != "DemandAcceptance")
 			{
-				// Name the binding ceiling on the intake: the hot side if
-				// it cut the request below the command, otherwise the
-				// author's own throttle if that sits below rated.
+				// Name the binding ceiling on the intake: the scheduled
+				// capacity reduction first when the outage's remaining
+				// rating is what cut the request, then the hot side if it
+				// cut the request below the command, otherwise the author's
+				// own throttle if that sits below rated.
 				if (intakeKW < engine.authored.commandedInputKW - 1e-12)
-					engine.lastLimiter = "HotSideSupply";
+					engine.lastLimiter = effectiveRatedInputKW < supplyKW - 1e-12
+						? "CapacityReduction" : "HotSideSupply";
 				else if (engine.authored.commandedInputKW
 						< engine.authored.ratedThermalInputKW - 1e-12)
 					engine.lastLimiter = "CommandedInput";

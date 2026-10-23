@@ -201,6 +201,14 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         # agreement; the full sweeps are registered below as exhaustive.
         heatEngineExergyRunToEquilibrium heatEngineExergySweepSmoke
         heatEngineInvertedGradientIdle heatEngineCadenceInvariance
+        # #807: the heat engine registered as an outageable, maintainable
+        # station installation - the registration contract, the outage's
+        # removal of generation and reservoir-side bookings, the partial
+        # derate, the maintenance isolation and the ledger coherence
+        # across the outage transition.
+        heatEngineInstallationRegistration heatEngineOutageRemovesGeneration
+        heatEngineOutagePartialCapacity heatEngineMaintenanceIsolation
+        heatEngineOutageTransitionCoherence
         crews water waterQualityGates waterQualityValidation waterQualityConsumers waterSelectiveIrrigation waterHydroponics waterContamination compoundWaterPartial compoundWaterPartialValidation compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance atmosphereStateCharts configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
         compoundFiles powerFiles powerChainFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles maintenanceFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
         # #571: harvest, algae and the nutrient-conservation closure were

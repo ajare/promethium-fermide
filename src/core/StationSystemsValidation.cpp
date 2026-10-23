@@ -1603,7 +1603,7 @@ using namespace station_detail;
 				return refuse("Station installation id '" + installation.id
 					+ "' is ambiguous: registered as both a " + existing->second
 					+ " and a " + installation.kind
-					+ "; installation ids must be unique across generators, coolant loops and chillers");
+					+ "; installation ids must be unique across generators, coolant loops, chillers and heat engines");
 		}
 		std::set<std::string> outageIds;
 		for (auto const& outage : settings.outages) try

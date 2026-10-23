@@ -527,6 +527,11 @@ namespace core
 			engineResult.rejectionReservoirId = engine.authored.rejectionReservoirId;
 			engineResult.ratedThermalInputKW = engine.authored.ratedThermalInputKW;
 			engineResult.commandedInputKW = engine.authored.commandedInputKW;
+			// The availability the outage and maintenance contracts left
+			// the engine for the tick that produced this snapshot (#807),
+			// published beside the rates it capped so an outage start and
+			// end are both visible without cross-reading the outage list.
+			engineResult.availabilityFactor = engine.availabilityFactor;
 			engineResult.carnotFraction = engine.authored.carnotFraction;
 			engineResult.auxiliaryPowerKW = engine.authored.auxiliaryPowerKW;
 			engineResult.minHotTemperatureC = engine.authored.minHotTemperatureC;
@@ -1695,7 +1700,9 @@ namespace core
 				? mImpl->generators[outage.targetIndex].availabilityFactor
 				: outage.target == Impl::OutageState::Target::CoolantLoop
 					? mImpl->coolantLoops[outage.targetIndex].availabilityFactor
-					: mImpl->chillers[outage.targetIndex].availabilityFactor;
+					: outage.target == Impl::OutageState::Target::Chiller
+						? mImpl->chillers[outage.targetIndex].availabilityFactor
+						: mImpl->heatEngines[outage.targetIndex].availabilityFactor;
 			result.outages.push_back(std::move(outageResult));
 		}
 		// The maintenance snapshot reports the authored contract beside

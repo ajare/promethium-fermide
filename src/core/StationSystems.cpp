@@ -51,6 +51,14 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			std::vector<AlgaeCultureSettings> const* algaeCultures;
 			char const* dispatchMode{"manual"};
 			std::vector<MaintenanceJobSettings> const* maintenanceJobs{};
+			// Authored heat engines cross the boundary last (#807) so every
+			// earlier positional argument is unchanged for the existing
+			// wrapper factories. The sandbox does not simulate the engine's
+			// conversion, but the installation contract needs the engine's
+			// identity registered: an outage or maintenance job naming an
+			// engine must resolve in the mirror exactly as it does in the
+			// host, or the mirror would refuse a valid configuration.
+			std::vector<HeatEngineSettings> const* heatEngines{};
 			static char const* settingsDispatchModeName(StationDispatchMode mode)
 			{
 				return mode == StationDispatchMode::Automatic ? "automatic" : "manual";
@@ -815,7 +823,21 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 					lua_setfield(state, -2, "requirements");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 31, 1);
+				// The heat engine ids cross as a minimal identity list (#807):
+				// just enough for the sandbox to register each engine in its
+				// installation namespace and let an outage or maintenance
+				// job resolve the engine it names. The engine's own physics
+				// stays in the host ledger; the mirror tracks only the
+				// availability the shared contract applies.
+				lua_createtable(state, heatEngines ? static_cast<int>(heatEngines->size()) : 0, 0);
+				for (size_t index = 0; heatEngines && index < heatEngines->size(); ++index)
+				{
+					auto const& engine = (*heatEngines)[index];
+					lua_createtable(state, 0, 1);
+					lua_pushstring(state, engine.id.c_str()); lua_setfield(state, -2, "id");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 32, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -1128,13 +1150,18 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		// rate, limiter and ledger is runtime state reconstructed from the
 		// authored values on load and Reset (#804). Validation has already
 		// refused unresolved endpoints and same-reservoir pairs, so both
-		// indices always resolve for a configured World.
+		// indices always resolve for a configured World. The engine id-to-
+		// index lookup is filled as the authored engines register, so an
+		// outage or maintenance job resolves the engine it names rather
+		// than a default-inserted index (#807).
+		std::map<std::string, size_t> heatEngineIndex;
 		for (auto const& engine : settings.heatEngines)
 		{
 			Impl::HeatEngineState state;
 			state.authored = engine;
 			state.hotIndex = reservoirIndex[engine.hotReservoirId];
 			state.sinkIndex = reservoirIndex[engine.rejectionReservoirId];
+			heatEngineIndex[engine.id] = mImpl->heatEngines.size();
 			mImpl->heatEngines.push_back(std::move(state));
 		}
 		// Thermal buffers start holding their authored starting energy with
@@ -1619,27 +1646,34 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			auto const generatorHits = generatorIndex.count(outage.installationId);
 			auto const loopHits = loopIndex.count(outage.installationId);
 			auto const chillerHits = chillerIndex.count(outage.installationId);
-			if (generatorHits + loopHits + chillerHits > 1)
+			auto const engineHits = heatEngineIndex.count(outage.installationId);
+			if (generatorHits + loopHits + chillerHits + engineHits > 1)
 				throw SerializationException("Station installation outage '"
 					+ outage.id + "' targets installation id '" + outage.installationId
-					+ "' that is ambiguous across generator, coolant loop and chiller registrations");
+					+ "' that is ambiguous across generator, coolant loop, chiller and heat engine registrations");
 			if (generatorHits != 0)
 			{
 				state.target = Impl::OutageState::Target::Generator;
 				state.targetIndex = generatorIndex[outage.installationId];
 				state.installationKind = "generator";
 			}
-			else if (loopIndex.count(outage.installationId) != 0)
+			else if (loopHits != 0)
 			{
 				state.target = Impl::OutageState::Target::CoolantLoop;
 				state.targetIndex = loopIndex[outage.installationId];
 				state.installationKind = "coolant loop";
 			}
-			else if (chillerIndex.count(outage.installationId) != 0)
+			else if (chillerHits != 0)
 			{
 				state.target = Impl::OutageState::Target::Chiller;
 				state.targetIndex = chillerIndex[outage.installationId];
 				state.installationKind = "chiller";
+			}
+			else if (engineHits != 0)
+			{
+				state.target = Impl::OutageState::Target::HeatEngine;
+				state.targetIndex = heatEngineIndex[outage.installationId];
+				state.installationKind = "heat engine";
 			}
 			else
 				// Validation admits only registered installations, so an
@@ -1648,7 +1682,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				// machine through a default-inserted index (#575).
 				throw SerializationException("Station installation outage '"
 					+ outage.id + "' targets installation '" + outage.installationId
-					+ "' that resolved to no registered generator, coolant loop or chiller");
+					+ "' that resolved to no registered generator, coolant loop, chiller or heat engine");
 			mImpl->outages.push_back(std::move(state));
 		}
 		// Maintenance job schedules start idle with their first window
@@ -1666,10 +1700,11 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			auto const generatorHits = generatorIndex.count(job.installationId);
 			auto const loopHits = loopIndex.count(job.installationId);
 			auto const chillerHits = chillerIndex.count(job.installationId);
-			if (generatorHits + loopHits + chillerHits > 1)
+			auto const engineHits = heatEngineIndex.count(job.installationId);
+			if (generatorHits + loopHits + chillerHits + engineHits > 1)
 				throw SerializationException("Station maintenance job '"
 					+ job.id + "' targets installation id '" + job.installationId
-					+ "' that is ambiguous across generator, coolant loop and chiller registrations");
+					+ "' that is ambiguous across generator, coolant loop, chiller and heat engine registrations");
 			if (generatorHits != 0)
 			{
 				state.target = Impl::MaintenanceState::Target::Generator;
@@ -1688,10 +1723,16 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				state.targetIndex = chillerIndex[job.installationId];
 				state.installationKind = "chiller";
 			}
+			else if (engineHits != 0)
+			{
+				state.target = Impl::MaintenanceState::Target::HeatEngine;
+				state.targetIndex = heatEngineIndex[job.installationId];
+				state.installationKind = "heat engine";
+			}
 			else
 				throw SerializationException("Station maintenance job '"
 					+ job.id + "' targets installation '" + job.installationId
-					+ "' that resolved to no registered generator, coolant loop or chiller");
+					+ "' that resolved to no registered generator, coolant loop, chiller or heat engine");
 			for (auto const& requirement : job.requirements)
 			{
 				auto const it = storeIndex.find(requirement.storeId);
@@ -1762,7 +1803,8 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				&settings.microbialProcessors, &settings.cropPopulations,
 				&settings.algaeCultures,
 				Construction::settingsDispatchModeName(settings.dispatchMode),
-				&settings.maintenanceJobs};
+				&settings.maintenanceJobs,
+				&settings.heatEngines};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
