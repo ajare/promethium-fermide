@@ -93,9 +93,25 @@ class Lanes(unittest.TestCase):
                       'heatEngineResetIsolation', 'heatEnginePlantCoexistence',
                       'heatEngineDemandAcceptance', 'heatEngineThrottleCommandedInput',
                       'heatEngineAuxiliaryIdle', 'heatEngineClosureUnderThrottle',
-                      'heatEngineProtectedService'):
+                      'heatEngineProtectedService',
+                      # #806: the second-law hardening. The run-to-equilibrium
+                      # bound, the corner sweep, the inverted-gradient idle and
+                      # the cadence agreement all run in the fast pass; the
+                      # full gradient sweep is exhaustive.
+                      'heatEngineExergyRunToEquilibrium', 'heatEngineExergySweepSmoke',
+                      'heatEngineInvertedGradientIdle', 'heatEngineCadenceInvariance'):
             self.assertIn('validation-fast', props(f'station-{check}')['LABELS'])
             self.assertNotIn('validation-stress', props(f'station-{check}')['LABELS'])
+        # #806: the full gradient sweep is exhaustive-only. Its smoke
+        # counterpart covers the same properties at the three corners in
+        # the fast pass, so the fast lane keeps the signal while the wide
+        # sweep - every gradient across the Carnot-fraction range - runs
+        # where the time is available.
+        sweep = props('station-heatEngine-exergy-sweep')
+        self.assertIn('validation-exhaustive', sweep['LABELS'])
+        self.assertNotIn('validation-fast', sweep['LABELS'])
+        self.assertNotIn('station-heatEngine-exergy-sweep',
+                        {t['name'] for t in selected})
         stress_timeouts = {'pathwayLongHorizon': 20, 'pathwayAbsurdGeometry': 10,
                          'thermalLinkChainHomogenization': 30, 'thermalLinkAbsurdGeometry': 20,
                          'advectedVentNearEmpty': 10, 'advectedAbsurdSpecificHeat': 10}
