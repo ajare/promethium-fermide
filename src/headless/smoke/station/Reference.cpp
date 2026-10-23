@@ -127,10 +127,29 @@ namespace
 		// The settings are ordinary StationSystemsSettings and pass the
 		// same validation any authored World configuration must pass.
 		require(reference.settings.enabled, "the bundled reference is not authored enabled");
-		require(reference.settings.radiators.size() == 2
+		require(reference.settings.radiators.size() == 3
 			&& reference.settings.radiators[0].id == "radProcess" && reference.settings.radiators[0].areaM2 == 6.0
 			&& reference.settings.radiators[1].id == "radGen" && reference.settings.radiators[1].areaM2 == 0.5,
 			"reference radiator areas did not retain their explicitly recalibrated SI balance (#783)");
+		// #808: the bottoming cycle is part of the reconciled register. The
+		// engine's hot endpoint is the generator's own waste-heat reservoir
+		// and its rejection node carries the engine's service class with a
+		// radiator of its own, so the ORC is two components sharing plumbing
+		// rather than one fused compound machine.
+		require(reference.settings.heatEngines.size() == 1
+			&& reference.settings.heatEngines[0].id == "orcBottoming"
+			&& reference.settings.heatEngines[0].hotReservoirId == "genSink"
+			&& reference.settings.heatEngines[0].rejectionReservoirId == "engineReject",
+			"the bundled reference lost its generator-waste-heat bottoming cycle (#808)");
+		require(std::any_of(reference.settings.thermalReservoirs.begin(),
+			reference.settings.thermalReservoirs.end(),
+			[](core::ThermalReservoirSettings const& r)
+			{ return r.id == "engineReject" && r.thermalClass == "moderate"; })
+			&& std::any_of(reference.settings.radiators.begin(),
+			reference.settings.radiators.end(),
+			[](core::RadiatorSettings const& r)
+			{ return r.id == "radEngineReject" && r.reservoirId == "engineReject"; }),
+			"the bottoming cycle's rejection reservoir lost its own radiator (#808)");
 		std::string diagnostic;
 		require(core::validateStationSystemsSettings(reference.settings, diagnostic),
 			("the bundled reference configuration was refused: " + diagnostic).c_str());

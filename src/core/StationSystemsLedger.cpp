@@ -50,6 +50,16 @@ namespace core
 		auto const committedRadiators = radiators;
 		auto const committedCoolantLoops = coolantLoops;
 		auto const committedChillers = chillers;
+	// #808: the heat engine state carries cumulative ledgers (intake,
+	// electrical, rejection) and per-tick gate/status fields that the
+	// generation pass mutates in place. Without this backup, a discarded
+	// prediction/refinement pass keeps its engine bookings while the
+	// reservoirs it drew from are restored, so the engine ledger and the
+	// reservoir-side extraction/rejection part company whenever a coarse
+	// step is probed and re-run - exactly the short-cycling chatter a
+	// saturating rejection buffer produces. The engine's books must be
+	// transactional like every other machine's.
+	auto const committedHeatEngines = heatEngines;
 		auto const committedThermalBuffers = thermalBuffers;
 		auto const committedGenerators = generators;
 		auto const committedAtmospheres = atmospheres;
@@ -118,6 +128,7 @@ namespace core
 			radiators = committedRadiators;
 			coolantLoops = committedCoolantLoops;
 			chillers = committedChillers;
+			heatEngines = committedHeatEngines;
 			thermalBuffers = committedThermalBuffers;
 			generators = committedGenerators;
 			atmospheres = committedAtmospheres;

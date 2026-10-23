@@ -99,6 +99,7 @@ pf_add_smoke_module(pf-smoke-station
         station/StationPathwayChecks.cpp
         station/StationThermalLinkChecks.cpp
         station/StationHeatEngineChecks.cpp
+        station/StationBottomingCycleChecks.cpp
         station/StationAdvectionChecks.cpp
         station/StationWaterChecks.cpp station/CompoundWater.cpp
         station/StationRecoveryChecks.cpp station/Bioconversion.cpp
@@ -209,6 +210,14 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         heatEngineInstallationRegistration heatEngineOutageRemovesGeneration
         heatEngineOutagePartialCapacity heatEngineMaintenanceIsolation
         heatEngineOutageTransitionCoherence
+        # #808: the reference station's bottoming cycle - the generator's
+        # waste-heat reservoir driving a heat engine into a saturating
+        # rejection buffer. The idle case proves the cycle waits for waste
+        # heat instead of quietly producing from a cold sink; the demo run
+        # carries the recovery kilowatts, the throttle as the gradient
+        # closes, the sink-trip handoff into the generator's own cooling
+        # gate, and the energy closure across the joined set.
+        referenceBottomingCycleIdle referenceBottomingCycle
         crews water waterQualityGates waterQualityValidation waterQualityConsumers waterSelectiveIrrigation waterHydroponics waterContamination compoundWaterPartial compoundWaterPartialValidation compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance atmosphereStateCharts configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
         compoundFiles powerFiles powerChainFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles maintenanceFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
         # #571: harvest, algae and the nutrient-conservation closure were

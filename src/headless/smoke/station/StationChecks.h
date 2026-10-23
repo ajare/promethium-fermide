@@ -11,6 +11,7 @@
 #include "StationAtmosphereChecks.h"
 #include "StationThermalLinkChecks.h"
 #include "StationHeatEngineChecks.h"
+#include "StationBottomingCycleChecks.h"
 #include "StationAdvectionChecks.h"
 #include "StationWaterChecks.h"
 #include "StationRecoveryChecks.h"

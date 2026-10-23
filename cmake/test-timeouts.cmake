@@ -473,6 +473,8 @@ set(PF_TEST_TIMEOUTS
     "station-heatEngineOutagePartialCapacity=10"
     "station-heatEngineMaintenanceIsolation=10"
     "station-heatEngineOutageTransitionCoherence=15"
+    "station-referenceBottomingCycleIdle=10"
+    "station-referenceBottomingCycle=60"
     "station-thermalLinkPersistence=10"
     "station-thermalLinkReverseNoSpuriousCondensation=10"
     "station-thermalLinkSameTickCondensation=10"

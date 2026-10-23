@@ -24,10 +24,12 @@ summary: >
   that never reads as self-sustaining, an aerobic digester that returns
   recovered nutrients and water from organic waste, crop and algae
   biology with harvest, thermal control with a protected chilled
-  service, scheduled airlock cycles, a scheduled maintenance job and an
-  installation outage. Every store, budget and inventory below is one
-  reconciled value; the numbers are provisional model assumptions with
-  the recorded provenance, not flight-qualified engineering.
+  service, a bottoming cycle that recovers the generator's waste heat
+  back onto the bus through a saturating rejection buffer, scheduled
+  airlock cycles, a scheduled maintenance job and an installation
+  outage. Every store, budget and inventory below is one reconciled
+  value; the numbers are provisional model assumptions with the
+  recorded provenance, not flight-qualified engineering.
 
 provenance:
   - coefficient: "Crew oxygen uptake"
@@ -124,6 +126,28 @@ provenance:
       residue is the mass-balance remainder and the declared reaction
       heat (600 kJ/kg feed) is capped by the feedstock's own declared
       chemical energy (2400 kJ/kg feed).
+  - coefficient: "Bottoming-cycle recovery fraction"
+    value: "0.5 of the Carnot limit between genSink and engineReject"
+    units: "dimensionless carnotFraction"
+    source: >
+      Provisional machine assumption, not a vendor figure: a small
+      organic Rankine cycle carries a fraction of the ideal cycle rather
+      than approaching it, and the reference authors a deliberately
+      conservative half so the second-law bound at the conversion site
+      stays visible instead of asymptotic. The 35 kW rated intake is set
+      at the same order as the 15 kW generator's 27.9 kW of full-load
+      waste heat, so the cycle recovers a real share of the waste
+      instead of a token trickle.
+  - coefficient: "Bottoming-cycle rejection buffer"
+    value: "400 kJ/K with a 1.0 m2 radiator to a -30 C sink"
+    units: "kJ/K and m2"
+    source: >
+      Provisional and deliberately saturating. The buffer plus panel are
+      sized so a full-load conversion delivers rejection heat far faster
+      than the panel can radiate it, which is what makes the engine's
+      max-sink gate reachable inside a demo-length run. Steady-state
+      radiator sizing for continuous bottoming duty is explicitly not
+      qualified by this configuration.
 
 assumptions:
   - topic: "Water makeup and recovery"
@@ -229,8 +253,12 @@ scenarioNotes: >
   declared tolerance; the generator outage window opens at 180 s and
   closes at 300 s, the chiller maintenance job runs 300 s from 300 s
   and completes at 600 s, and the mid-scenario food resupply arrives
-  at 450 s, all without disturbing service; and the whole run replays
-  identically after a World reset or a document round trip.
+  at 450 s, all without disturbing service; the bottoming cycle idles
+  TooCold for the whole nominal run, because the generator never runs
+  and its waste-heat reservoir stays below the engine's 50 C min-hot
+  gate, so the engine draws nothing and adds nothing to the power
+  balance; and the whole run replays identically after a World reset or
+  a document round trip.
 
 stationSystems:
   enabled: true
@@ -768,6 +796,20 @@ stationSystems:
       minTemperatureC: -40.0
       maxTemperatureC: 120.0
       absorbedHeatKW: 0.0
+    # The bottoming cycle's rejection node (#808). It is a saturating
+    # buffer, not a steady-state radiator surface: its own radiator drains
+    # the engine's rejection heat far slower than a full-load conversion
+    # delivers it, so a long hot run drives this reservoir to the engine's
+    # max-sink gate and the engine trips whole rather than forcing heat
+    # where it cannot go. That saturation is the authored behaviour, not a
+    # sizing accident; see ADR-0029.
+    - id: engineReject
+      thermalClass: moderate
+      heatCapacityKJPerK: 400.0
+      startingTemperatureC: 5.0
+      minTemperatureC: -40.0
+      maxTemperatureC: 90.0
+      absorbedHeatKW: 0.0
   radiators:
     - id: radProcess
       reservoirId: processSink
@@ -778,6 +820,15 @@ stationSystems:
     - id: radGen
       reservoirId: genSink
       areaM2: 0.5
+      emissivity: 0.9
+      viewFactor: 0.9
+      sinkTemperatureC: -30.0
+    # Drains the bottoming cycle's rejection reservoir to space (#808).
+    # Deliberately small against a 35 kW intake: the buffer absorbs the
+    # recovery pulse and this panel carries only the long tail.
+    - id: radEngineReject
+      reservoirId: engineReject
+      areaM2: 1.0
       emissivity: 0.9
       viewFactor: 0.9
       sinkTemperatureC: -30.0
@@ -805,6 +856,26 @@ stationSystems:
       chilledSetpointC: 5.0
       maxCondensingTemperatureC: 45.0
       criticalService: true
+
+  # The bottoming cycle (#808): the generator's waste-heat reservoir is
+  # the hot source and engineReject is the rejection node, so the ORC is
+  # two components sharing plumbing rather than a fused compound machine.
+  # In the nominal scenario the generator never runs, genSink stays at
+  # 20 C below the 50 C min-hot gate, and the engine idles TooCold: the
+  # cycle waits for waste heat to exist. The gates are authored so the
+  # min-hot 50 C sits above the max-sink 45 C, leaving the positive-
+  # gradient window validation requires. carnotFraction 0.5 is the
+  # reference's own second-law allowance, not a vendor figure.
+  heatEngines:
+    - id: orcBottoming
+      hotReservoirId: genSink
+      rejectionReservoirId: engineReject
+      thermalClass: moderate
+      ratedThermalInputKW: 35.0
+      carnotFraction: 0.5
+      auxiliaryPowerKW: 0.4
+      minHotTemperatureC: 50.0
+      maxSinkTemperatureC: 45.0
 
   thermalBuffers:
     - id: bufferProcess

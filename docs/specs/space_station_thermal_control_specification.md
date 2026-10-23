@@ -157,6 +157,8 @@ Provide redundant hazardous critical cooling paths, leak detection in guard spac
 
 Recover appropriate heat for water preheating, greenhouse needs, or approved processes through isolated exchangers. Never make safe heat rejection depend on a consumer accepting recovered heat. The rejection system shall remain rated for zero heat-reuse credit unless the sink is explicitly guaranteed.
 
+Recovery to electricity shall be modelled as a conversion device with an explicit efficiency bounded by the Carnot limit at its hot-source and rejection-sink temperatures, not as a reduction in the declared rejection duty of the source. The recovered device shall carry its own rejection path — a distinct sink and radiator sized for the heat that remains after conversion — and that sink's service class shall be set by the temperature at which rejection heat actually arrives, not by the class of the heat it was fed from. A recovery credit with no conversion device and no rejection path between the hot node and the bus is an unaccounted loss. See ADR-0029.
+
 ## 6. Power-generation and distribution interfaces
 
 ### 6.1 Energy accounting
