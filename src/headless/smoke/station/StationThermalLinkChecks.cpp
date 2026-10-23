@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // Thermal link tracer bullet checks (#794): an authored, undirected
@@ -871,6 +872,440 @@ void thermalLinkAbsurdGeometry(smoke::Context const&)
 	require(std::abs(previousA - 25.0) < 1e-6 && std::abs(previousB - 25.0) < 1e-6,
 		"absurd geometry did not settle on the energy-weighted average");
 }
+
+// #797: links compose. Parallel walls add exactly, a chain converges to
+// one common temperature with every joule still booked to the link that
+// carried it, and the order the entries were declared in cannot move a
+// published number. As everywhere in this file, every assertion is on
+// what the configured World publishes, never on pass internals.
+namespace
+{
+// The closed form one link applies, evaluated here from published state:
+// the heat a link of this conductance moves between two compartments of
+// these capacities over dt, given the temperature difference it sees
+// when the pass reaches it.
+double linkTransferKJ(double capacityAKJPerK, double capacityBKJPerK, double deltaT,
+	double conductanceKWPerK, double dt)
+{
+	return capacityAKJPerK * capacityBKJPerK / (capacityAKJPerK + capacityBKJPerK) * deltaT
+		* -std::expm1(-conductanceKWPerK * (1.0 / capacityAKJPerK + 1.0 / capacityBKJPerK) * dt);
+}
+
+// How one link's signed total lands on one of its two compartments:
+// positive into the B side, negative out of the A side, zero anywhere
+// else. A compartment wired to two links gets two such shares and no
+// third term from anywhere.
+int endpointSign(core::StationThermalLinkSnapshot const& entry, std::string_view atmosphereId)
+{
+	if (entry.bAtmosphereId == atmosphereId) return 1;
+	if (entry.aAtmosphereId == atmosphereId) return -1;
+	return 0;
+}
+
+core::StationAtmosphereSnapshot const& compartment(
+	core::StationSystemsSnapshot const& snapshot, std::string_view atmosphereId)
+{
+	for (auto const& candidate : snapshot.atmospheres)
+		if (candidate.id == atmosphereId) return candidate;
+	throw std::runtime_error("compartment missing from snapshot");
+}
+
+// The compartment's own conducted total is exactly the signed sum of the
+// cumulative transfers of the links that touch it: nothing carried by a
+// link it is not an endpoint of, and nothing it carried itself lost.
+void requireAttributedToItsLinks(core::StationSystemsSnapshot const& snapshot,
+	std::string_view atmosphereId, char const* what)
+{
+	auto const& air = compartment(snapshot, atmosphereId);
+	auto attributed = 0.0;
+	for (auto const& entry : snapshot.thermalLinks)
+		attributed += static_cast<double>(endpointSign(entry, atmosphereId)) * entry.netTransferredKJ;
+	require(std::abs(air.conductedEnergyKJ - attributed)
+		<= 1e-9 * std::max(1.0, std::abs(air.conductedEnergyKJ)), what);
+}
+
+// Total C*T across every linked compartment: conduction moves heat, it
+// never makes or destroys any.
+double chainEnergyKJ(core::StationSystemsSnapshot const& snapshot)
+{
+	auto total = 0.0;
+	for (auto const& air : snapshot.atmospheres)
+		total += air.thermalCapacityKJPerK * air.temperatureC;
+	return total;
+}
+
+void requireResidualsClose(core::StationSystemsSnapshot const& snapshot, char const* what)
+{
+	for (auto const& air : snapshot.atmospheres)
+		require(std::abs(air.residualKJ) <= 1e-6 * std::max(1.0, std::abs(air.currentEnergyKJ)), what);
+}
+
+// A four-compartment chain, hot at one end and cold at the other, with
+// unequal capacities and unequal conductances so nothing can pass by
+// symmetry that would not pass by the arithmetic.
+core::StationSystemsSettings chainSettings(double aTemperatureC = 70.0, double bTemperatureC = 45.0)
+{
+	core::StationSystemsSettings s;
+	s.enabled = true;
+	s.atmospheres = {linkCompartment("a", aTemperatureC, 12000.0),
+		linkCompartment("b", bTemperatureC, 20000.0),
+		linkCompartment("c", 5.0, 8000.0), linkCompartment("d", -25.0, 16000.0)};
+	s.thermalLinks = {{"ab", "a", "b", 480.0}, {"bc", "b", "c", 300.0},
+		{"cd", "c", "d", 720.0}};
+	return s;
+}
+
+double chainAverageTemperatureC(core::StationSystemsSettings const& s)
+{
+	auto capacity = 0.0;
+	auto weighted = 0.0;
+	for (auto const& air : s.atmospheres)
+	{
+		capacity += air.thermalCapacityKJPerK;
+		weighted += air.thermalCapacityKJPerK * air.startingTemperatureC;
+	}
+	return weighted / capacity;
+}
+} // namespace
+
+// AC1: two half-conductance links between the same pair conduct exactly
+// what one full-conductance link conducts - in the compartments and in
+// the ledger, link by link, at every point of the run rather than only
+// once everything has settled.
+void thermalLinkParallelWallAdditivity(smoke::Context const&)
+{
+	std::string diagnostic;
+	auto const single = linkedPair(10000.0, 8000.0, 12.0);
+	// The second wall is authored the other way round on purpose: A and B
+	// only fix the sign of a published flow, so a reversed wall must add
+	// to the same total rather than subtract from it.
+	auto halves = single;
+	halves.thermalLinks = {{"half-1", "a", "b", 6.0}, {"half-2", "b", "a", 6.0}};
+	// Three thirds as well, so additivity is not a property of the number
+	// two and holds for any number of walls in parallel.
+	auto thirds = single;
+	thirds.thermalLinks = {{"third-1", "a", "b", 4.0}, {"third-2", "b", "a", 4.0},
+		{"third-3", "a", "b", 4.0}};
+	core::World one("ParallelSingle", 2, 2);
+	core::World two("ParallelHalves", 2, 2);
+	core::World three("ParallelThirds", 2, 2);
+	configure(one, single, diagnostic);
+	configure(two, halves, diagnostic);
+	configure(three, thirds, diagnostic);
+	one.resumeSimulation(); two.resumeSimulation(); three.resumeSimulation();
+	for (double const horizon : {requestedStepSeconds(), 60.0, 300.0})
+	{
+		require(advanceSeconds(one, horizon) && advanceSeconds(two, horizon)
+			&& advanceSeconds(three, horizon), "parallel wall additivity run failed");
+		auto const base = one.getStationSystemsSnapshot();
+		require(base.healthy, "parallel wall single-link run failed its audit");
+		std::vector<core::StationSystemsSnapshot> const others = {
+			two.getStationSystemsSnapshot(), three.getStationSystemsSnapshot()};
+		for (auto const& other : others)
+		{
+			require(other.healthy, "parallel wall multi-link run failed its audit");
+			for (size_t i = 0; i < 2; ++i)
+				require(std::abs(other.atmospheres[i].temperatureC - base.atmospheres[i].temperatureC)
+						< 1e-11
+						&& std::abs(other.atmospheres[i].conductedEnergyKJ
+							- base.atmospheres[i].conductedEnergyKJ)
+						<= 1e-9 * std::abs(base.atmospheres[i].conductedEnergyKJ) + 1e-9,
+					"parallel links did not reproduce the single-link result");
+			// The ledger adds up link by link: the shares of the parallel
+			// walls' own cumulative transfers are the single wall's
+			// cumulative transfer, and the same for the last tick's rate.
+			auto net = 0.0;
+			auto rate = 0.0;
+			for (auto const& entry : other.thermalLinks)
+			{
+				net += static_cast<double>(endpointSign(entry, "b")) * entry.netTransferredKJ;
+				rate += static_cast<double>(endpointSign(entry, "b")) * entry.flowRateKW;
+				require(entry.status == core::StationThermalLinkStatus::Active
+					&& entry.netTransferredKJ != 0.0,
+					"a parallel wall was configured but never conducted");
+			}
+			auto const wall = link(base, "wall");
+			require(std::abs(net - wall.netTransferredKJ)
+				<= 1e-9 * std::abs(wall.netTransferredKJ) + 1e-9,
+				"the parallel walls' cumulative transfers were not additive");
+			require(std::abs(rate - wall.flowRateKW) <= 1e-9 * std::abs(wall.flowRateKW) + 1e-9,
+				"the parallel walls' last-tick rates were not additive");
+			requireAttributedToItsLinks(other, "b", "a parallel wall's heat reached the wrong ledger");
+			requireResidualsClose(other, "parallel walls left a compartment residual open");
+		}
+	}
+}
+
+// AC2: a chain of linked compartments converges to one common
+// temperature across the whole chain - no compartment stranded away from
+// the energy-weighted average, nothing crossing it, and nothing drifting
+// once it has arrived.
+void thermalLinkChainConvergence(smoke::Context const&)
+{
+	std::string diagnostic;
+	auto const settings = chainSettings();
+	auto const expected = chainAverageTemperatureC(settings);
+	core::World world("ChainConvergence", 2, 2);
+	configure(world, settings, diagnostic);
+	auto const start = world.getStationSystemsSnapshot();
+	require(start.thermalLinks.size() == 3, "the chain lost a link on configure");
+	world.resumeSimulation();
+	require(advanceSeconds(world, 1500), "chain convergence run failed");
+	auto const settled = world.getStationSystemsSnapshot();
+	require(settled.healthy, "chain convergence failed its audit");
+	for (size_t i = 0; i < settled.atmospheres.size(); ++i)
+	{
+		// Every compartment arrives, and arrives genuinely: each one moved
+		// a long way, so "within tolerance" is not "barely moved".
+		require(std::abs(settled.atmospheres[i].temperatureC
+			- start.atmospheres[i].temperatureC) > 1.0,
+			"a compartment in the linked chain never moved toward the common temperature");
+		require(std::abs(settled.atmospheres[i].temperatureC - expected) < 1e-6,
+			"the linked chain left a compartment stranded away from the common temperature");
+		require(settled.atmospheres[i].temperatureC >= std::min(start.atmospheres[i].temperatureC, expected)
+			&& settled.atmospheres[i].temperatureC <= std::max(start.atmospheres[i].temperatureC, expected),
+			"a compartment crossed the common temperature it was relaxing toward");
+	}
+	// The chain is quiescent at the average: the conduction that drove it
+	// has nothing left to drive.
+	for (auto const& entry : settled.thermalLinks)
+		require(std::abs(entry.flowRateKW) < 1e-3,
+			"a converged chain link was still moving heat");
+	requireResidualsClose(settled, "the converged chain left a compartment residual open");
+	require(advanceSeconds(world, 1500), "chain settle run failed");
+	auto const held = world.getStationSystemsSnapshot();
+	require(held.healthy, "chain settle run failed its audit");
+	for (size_t i = 0; i < held.atmospheres.size(); ++i)
+		require(std::abs(held.atmospheres[i].temperatureC - settled.atmospheres[i].temperatureC) < 1e-6,
+			"the converged chain drifted after homogenizing");
+	require(std::abs(chainEnergyKJ(held) - chainEnergyKJ(start))
+		<= 1e-9 * std::abs(chainEnergyKJ(start)),
+		"the chain's total energy was not invariant across the whole run");
+}
+
+// AC3: every link in a chain reports its own signed flow and its own
+// cumulative transfer, and each is what its own position in the chain
+// says it should be - no heat credited to a link that did not carry it.
+void thermalLinkChainLedgerAttribution(smoke::Context const&)
+{
+	std::string diagnostic;
+	// a and b start at the same temperature, so the first link of the
+	// chain has nothing to conduct on the very first tick while the rest
+	// of the chain is already moving: a link reports flow exactly when
+	// its own pair has a difference, never because its neighbour did.
+	auto const settings = chainSettings(60.0, 60.0);
+	core::World world("ChainAttribution", 2, 2);
+	configure(world, settings, diagnostic);
+	world.resumeSimulation();
+	require(advanceStationSteps(world, 1), "chain attribution first step failed");
+	auto const first = world.getStationSystemsSnapshot();
+	require(first.healthy, "chain attribution first step failed its audit");
+	require(link(first, "ab").netTransferredKJ == 0.0
+		&& link(first, "ab").flowRateKW == 0.0
+		&& link(first, "ab").status == core::StationThermalLinkStatus::Idle,
+		"a link between two equal-temperature compartments reported flow");
+	require(link(first, "bc").netTransferredKJ > 0.0 && link(first, "cd").netTransferredKJ > 0.0,
+		"the chain did not start conducting where its own differences were");
+	requireAttributedToItsLinks(first, "a", "first tick: a's conducted total is not its link's");
+	requireAttributedToItsLinks(first, "b", "first tick: b's conducted total is not its links'");
+	requireAttributedToItsLinks(first, "c", "first tick: c's conducted total is not its links'");
+	requireAttributedToItsLinks(first, "d", "first tick: d's conducted total is not its link's");
+	// Now run the whole relaxation, checking the books every tick.
+	auto const startEnergy = chainEnergyKJ(first);
+	while (world.getStationSystemsSnapshot().elapsedSeconds < 1500.0)
+	{
+		require(advanceStationSteps(world, 1), "chain attribution step failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "chain attribution run failed its audit");
+		requireAttributedToItsLinks(snapshot, "a", "a's conducted heat was not its own link's");
+		requireAttributedToItsLinks(snapshot, "b",
+			"the shared compartment double-counted or dropped a link");
+		requireAttributedToItsLinks(snapshot, "c",
+			"the shared compartment double-counted or dropped a link");
+		requireAttributedToItsLinks(snapshot, "d", "d's conducted heat was not its own link's");
+		requireResidualsClose(snapshot, "the chain left a compartment residual open mid-run");
+		require(std::abs(chainEnergyKJ(snapshot) - startEnergy)
+			<= 1e-9 * std::abs(startEnergy),
+			"the chain's total energy drifted while it relaxed");
+		// The first link woke up: it had nothing to do on tick one and
+		// has been conducting ever since a and b separated.
+		if (snapshot.elapsedSeconds > first.elapsedSeconds + 1.0)
+			require(link(snapshot, "ab").flowRateKW > 0.0
+				&& link(snapshot, "ab").status == core::StationThermalLinkStatus::Active,
+				"the first link never started conducting once its own pair separated");
+	}
+	// And each link's whole-run total is exactly the heat that crosses
+	// the cut it sits on, computed from the end state: the link between
+	// two compartments carries what the compartment on its far side
+	// gained or lost, and nothing else.
+	auto const done = world.getStationSystemsSnapshot();
+	auto const average = chainAverageTemperatureC(settings);
+	auto const expectedAb = 12000.0 * (60.0 - average);
+	auto const expectedBc = (8000.0 + 16000.0) * average - (8000.0 * 5.0 + 16000.0 * -25.0);
+	auto const expectedCd = 16000.0 * (average - (-25.0));
+	for (auto const& [id, expected] : std::vector<std::pair<char const*, double>>
+		{{"ab", expectedAb}, {"bc", expectedBc}, {"cd", expectedCd}})
+		require(std::abs(link(done, id).netTransferredKJ - expected)
+			<= 1e-8 * std::abs(expected) + 1e-6,
+			"a chain link's cumulative transfer was not the heat crossing its own cut");
+}
+
+// AC4: reshuffling the thermalLinks list in the settings document
+// leaves every published temperature, rate and cumulative total
+// unchanged, so an author can reorder their document freely. The pass
+// is still sequential pairwise operator splitting; what #797 pins is
+// that the fixed order it splits in belongs to the wiring, not to the
+// order the entries were typed.
+void thermalLinkDeclarationOrderIndependence(smoke::Context const&)
+{
+	std::string diagnostic;
+	core::StationSystemsSettings base;
+	base.enabled = true;
+	base.atmospheres = {linkCompartment("a", 70.0, 10000.0),
+		linkCompartment("b", 50.0, 15000.0), linkCompartment("c", 20.0, 8000.0),
+		linkCompartment("d", -10.0, 12000.0), linkCompartment("e", 35.0, 9000.0)};
+	// A chain, a second wall in parallel on the chain's first link, and
+	// a pair off by itself: every shape an author can shuffle.
+	base.thermalLinks = {{"ab", "a", "b", 200.0}, {"bc", "b", "c", 150.0},
+		{"cd", "c", "d", 120.0}, {"ab-2", "a", "b", 100.0}, {"de", "d", "e", 90.0}};
+	auto shuffled = base;
+	shuffled.thermalLinks = {{"de", "d", "e", 90.0}, {"ab-2", "a", "b", 100.0},
+		{"cd", "c", "d", 120.0}, {"bc", "b", "c", 150.0}, {"ab", "a", "b", 200.0}};
+	core::World declared("DeclarationOrder", 2, 2);
+	core::World reordered("ReorderedDocument", 2, 2);
+	configure(declared, base, diagnostic);
+	configure(reordered, shuffled, diagnostic);
+	// The published list still follows the document, so telemetry keeps
+	// the author's ordering even though the pass does not.
+	auto const authored = reordered.getStationSystemsSnapshot();
+	require(authored.thermalLinks.size() == base.thermalLinks.size(),
+		"a reordered document lost a thermal link");
+	for (size_t i = 0; i < authored.thermalLinks.size(); ++i)
+		require(authored.thermalLinks[i].id == shuffled.thermalLinks[i].id,
+			"the published link list no longer follows the document's order");
+	declared.resumeSimulation(); reordered.resumeSimulation();
+	require(advanceSeconds(declared, 600) && advanceSeconds(reordered, 600),
+		"declaration-order independence run failed");
+	auto const a = declared.getStationSystemsSnapshot();
+	auto const b = reordered.getStationSystemsSnapshot();
+	require(a.healthy && b.healthy, "declaration-order independence run failed its audit");
+	for (size_t i = 0; i < a.atmospheres.size(); ++i)
+		require(a.atmospheres[i].temperatureC == b.atmospheres[i].temperatureC
+			&& a.atmospheres[i].conductedEnergyKJ == b.atmospheres[i].conductedEnergyKJ
+			&& a.atmospheres[i].lastConductedKW == b.atmospheres[i].lastConductedKW,
+			"reshuffling the link list changed a published temperature, rate or total");
+	for (auto const& entry : a.thermalLinks)
+	{
+		auto const& twin = link(b, entry.id);
+		require(entry.flowRateKW == twin.flowRateKW
+			&& entry.netTransferredKJ == twin.netTransferredKJ && entry.status == twin.status,
+			"reshuffling the link list changed a link's own published flow or total");
+	}
+	// A wall authored the other way round changes only the sign of its
+	// own report: the physics it performs is bit for bit the same.
+	auto reversed = base;
+	reversed.thermalLinks[1] = {"bc", "c", "b", 150.0};
+	core::World flipped("ReversedEndpoint", 2, 2);
+	configure(flipped, reversed, diagnostic);
+	flipped.resumeSimulation();
+	require(advanceSeconds(flipped, 600), "reversed-endpoint run failed");
+	auto const f = flipped.getStationSystemsSnapshot();
+	require(f.healthy, "reversed-endpoint run failed its audit");
+	for (size_t i = 0; i < a.atmospheres.size(); ++i)
+		require(f.atmospheres[i].temperatureC == a.atmospheres[i].temperatureC
+			&& f.atmospheres[i].conductedEnergyKJ == a.atmospheres[i].conductedEnergyKJ,
+			"authoring a wall the other way round changed the physics");
+	require(link(f, "bc").flowRateKW == -link(a, "bc").flowRateKW
+		&& link(f, "bc").netTransferredKJ == -link(a, "bc").netTransferredKJ,
+		"a reversed wall did not report the exact negation of its own flow");
+}
+
+// AC5: a compartment wired to two neighbours exchanges with each of
+// them on its own terms. Each link's transfer is the closed form applied
+// to its own pair's temperature difference, each is booked to itself,
+// and the shared compartment's residual still closes every tick.
+void thermalLinkSharedNeighbourIndependence(smoke::Context const&)
+{
+	auto const settings = []
+	{
+		core::StationSystemsSettings s;
+		s.enabled = true;
+		s.atmospheres = {linkCompartment("hot", 60.0, 10000.0),
+			linkCompartment("shared", 30.0, 12000.0), linkCompartment("cold", 0.0, 8000.0)};
+		s.thermalLinks = {{"in", "hot", "shared", 200.0}, {"out", "shared", "cold", 150.0}};
+		return s;
+	};
+	std::string diagnostic;
+	core::World world("SharedNeighbour", 2, 2);
+	core::World other("SharedNeighbourPerturbed", 2, 2);
+	configure(world, settings(), diagnostic);
+	auto perturbed = settings();
+	perturbed.atmospheres[2].startingTemperatureC = 40.0;
+	configure(other, perturbed, diagnostic);
+	auto const dt = world.getStationSystemsSnapshot().systemsTimestepSeconds;
+	require(dt > 0.0, "the shared-neighbour fixture has no systems step");
+	world.resumeSimulation(); other.resumeSimulation();
+	require(advanceStationSteps(world, 1) && advanceStationSteps(other, 1),
+		"shared-neighbour first step failed");
+	auto const stepOne = world.getStationSystemsSnapshot();
+	auto const stepOnePerturbed = other.getStationSystemsSnapshot();
+	require(stepOne.healthy && stepOnePerturbed.healthy,
+		"shared-neighbour first step failed its audit");
+	// The neighbour a link does not touch cannot reach into it: changing
+	// only the far compartment left this link's first tick untouched,
+	// while the link that does touch it answered differently.
+	require(link(stepOne, "in").flowRateKW == link(stepOnePerturbed, "in").flowRateKW
+		&& link(stepOne, "in").netTransferredKJ == link(stepOnePerturbed, "in").netTransferredKJ,
+		"a neighbour the link never touches changed that link's flow");
+	require(link(stepOne, "out").flowRateKW != link(stepOnePerturbed, "out").flowRateKW,
+		"the link facing the perturbed neighbour did not respond to it");
+	// Step one systems tick at a time so every published flow can be
+	// checked against the closed form applied to the state the previous
+	// publish left: the inbound link saw its pair as the last tick ended
+	// it, and the outbound link saw the shared compartment as the inbound
+	// link left it. Neither one is a share of some global flow.
+	auto previous = stepOne;
+	while (world.getStationSystemsSnapshot().elapsedSeconds < 600.0)
+	{
+		require(advanceStationSteps(world, 1), "shared-neighbour step failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "shared-neighbour run failed its audit");
+		requireAttributedToItsLinks(snapshot, "hot", "the donor's conducted heat was not its own link's");
+		requireAttributedToItsLinks(snapshot, "shared",
+			"the shared compartment's conducted total is not the sum of its two links");
+		requireAttributedToItsLinks(snapshot, "cold", "the receiver's conducted heat was not its own link's");
+		requireResidualsClose(snapshot, "a compartment with two links left its residual open");
+		require(std::abs(chainEnergyKJ(snapshot) - chainEnergyKJ(previous))
+			<= 1e-9 * std::max(1.0, std::abs(chainEnergyKJ(previous))),
+			"the three-compartment set did not conserve energy across a tick");
+		auto const inFlow = link(snapshot, "in").flowRateKW;
+		auto const outFlow = link(snapshot, "out").flowRateKW;
+		require(inFlow > 0.0 && outFlow > 0.0,
+			"the shared compartment did not exchange with both neighbours at once");
+		require(link(snapshot, "in").status == core::StationThermalLinkStatus::Active
+			&& link(snapshot, "out").status == core::StationThermalLinkStatus::Active,
+			"a live exchange reported itself idle");
+		auto const& hot = compartment(previous, "hot");
+		auto const& shared = compartment(previous, "shared");
+		auto const& cold = compartment(previous, "cold");
+		auto const expectedIn = linkTransferKJ(hot.thermalCapacityKJPerK,
+			shared.thermalCapacityKJPerK, hot.temperatureC - shared.temperatureC,
+			link(previous, "in").conductanceKWPerK, dt);
+		auto const sharedAfterIn = shared.temperatureC + expectedIn / shared.thermalCapacityKJPerK;
+		auto const expectedOut = linkTransferKJ(shared.thermalCapacityKJPerK, cold.thermalCapacityKJPerK,
+			sharedAfterIn - cold.temperatureC, link(previous, "out").conductanceKWPerK, dt);
+		require(std::abs(inFlow * dt - expectedIn) <= 1e-9 * std::abs(expectedIn) + 1e-9,
+			"the inbound link's flow was not its own pair's closed-form transfer");
+		require(std::abs(outFlow * dt - expectedOut) <= 1e-9 * std::abs(expectedOut) + 1e-9,
+			"the outbound link's flow was not its own pair's closed-form transfer");
+		// The shared compartment takes from the hot neighbour and gives to
+		// the cold one and stays between the two the whole way.
+		require(snapshot.atmospheres[1].temperatureC <= snapshot.atmospheres[0].temperatureC + 1e-9
+			&& snapshot.atmospheres[2].temperatureC <= snapshot.atmospheres[1].temperatureC + 1e-9,
+			"the shared compartment crossed one of its neighbours");
+		previous = snapshot;
+	}
+}
 }
 
 void registerStationThermalLinkChecks(std::vector<smoke::Check>& checks)
@@ -893,4 +1328,11 @@ void registerStationThermalLinkChecks(std::vector<smoke::Check>& checks)
 		thermalLinkReverseNoSpuriousCondensation});
 	checks.push_back({"thermalLinkChainHomogenization", thermalLinkChainHomogenization});
 	checks.push_back({"thermalLinkAbsurdGeometry", thermalLinkAbsurdGeometry});
+	checks.push_back({"thermalLinkParallelWallAdditivity", thermalLinkParallelWallAdditivity});
+	checks.push_back({"thermalLinkChainConvergence", thermalLinkChainConvergence});
+	checks.push_back({"thermalLinkChainLedgerAttribution", thermalLinkChainLedgerAttribution});
+	checks.push_back({"thermalLinkDeclarationOrderIndependence",
+		thermalLinkDeclarationOrderIndependence});
+	checks.push_back({"thermalLinkSharedNeighbourIndependence",
+		thermalLinkSharedNeighbourIndependence});
 }

@@ -1348,6 +1348,16 @@ using namespace station_detail;
 		std::vector<AtmosphereState> atmospheres;
 		std::vector<AtmospherePathwayState> atmospherePathways;
 		std::vector<ThermalLinkState> thermalLinks;
+		// The order the conduction pass visits thermalLinks in (#797).
+		// Canonical for the wiring rather than as-typed: compartment pair
+		// ascending, authored id last as the tie-break. Sequential pairwise
+		// operator splitting only cares about order where two links share a
+		// compartment - links across one compartment pair commute exactly -
+		// so pinning the visit order to the wiring rather than to the order
+		// the author typed the entries makes a reshuffled thermalLinks list
+		// publish exactly what the original list did. Published order stays
+		// the authored order; only the pass is canonical.
+		std::vector<size_t> thermalLinkPassOrder;
 		std::vector<AirlockCycleState> airlockCycles;
 		std::vector<CrewState> crews;
 		std::vector<WaterCollectorState> waterCollectors;

@@ -1207,6 +1207,30 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			state.bIndex = atmosphereIndex.at(link.bAtmosphereId);
 			mImpl->thermalLinks.push_back(std::move(state));
 		}
+		// The conduction pass visits the links in canonical wiring order so
+		// that reshuffling the document cannot change the simulation (#797).
+		// The pass itself is unchanged from #794: sequential pairwise
+		// operator splitting, one closed-form relaxation per link, each link
+		// relaxing the state its predecessors left. What is pinned here is
+		// the order it splits in. Two links across the same compartment pair
+		// commute exactly - their conductances compose to their sum however
+		// they are applied - so the only order that could ever move a result
+		// is between links sharing one compartment, and the canonical pair
+		// key fixes that too. The authored A/B are never reordered: the key
+		// orders the pass, never the sign of a published flow, and the
+		// snapshot still reports the links in the order they were declared.
+		mImpl->thermalLinkPassOrder.resize(mImpl->thermalLinks.size());
+		std::iota(mImpl->thermalLinkPassOrder.begin(), mImpl->thermalLinkPassOrder.end(), size_t{0});
+		std::stable_sort(mImpl->thermalLinkPassOrder.begin(), mImpl->thermalLinkPassOrder.end(),
+			[&](size_t left, size_t right)
+			{
+				auto const& source = mImpl->thermalLinks[left];
+				auto const& target = mImpl->thermalLinks[right];
+				auto const leftKey = std::minmax(source.aIndex, source.bIndex);
+				auto const rightKey = std::minmax(target.aIndex, target.bIndex);
+				if (leftKey != rightKey) return leftKey < rightKey;
+				return source.authored.id < target.authored.id;
+			});
 		// Airlock cycle schedules start unfired: the authored first
 		// occurrence is the next cycle, and nothing is drawn before its
 		// time. Reset and load reconstruct this state, so a replay

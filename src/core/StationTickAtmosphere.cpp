@@ -436,27 +436,34 @@ namespace core
 		// independently of k, and expm1 is used rather than 1 - exp, so
 		// even enormous conductance tends to equilibrium rather than to
 		// an indeterminate form - the same guard the pathway pass carries.
-		// Sequential pairwise in declaration order (operator splitting):
-		// the no-crossing property survives the pass regardless of order
-		// and every joule stays attributable to one named link. Conduction
-		// depends only on the temperature difference, so Celsius is valid
-		// here (see ThermalLinkSettings); no gas inventory is touched.
+		// Sequential pairwise in a fixed canonical order (operator
+		// splitting): the no-crossing property survives the pass regardless
+		// of order and every joule stays attributable to one named link.
+		// Conduction depends only on the temperature difference, so Celsius
+		// is valid here (see ThermalLinkSettings); no gas inventory is
+		// touched.
 		thermalLinkConductedKJ = std::vector<double>(runtime.atmospheres.size(), 0.0);
-		// Sequential pairwise in fixed declaration order: each link relaxes
-		// the state its predecessors left, not the shared tick-start state.
-		// That is what makes parallel links additive - two half-conductance
-		// links compose to exp(-G.S.dt/2) x exp(-G.S.dt/2) = exp(-G.S.dt),
-		// exactly one full link - and what stops a second link re-moving
-		// heat the first already moved, which would overshoot the shared
-		// equilibrium. The running temperature lives here rather than on
-		// the compartment: the compartment still integrates once, in its
-		// own loop, from the summed external heat rate.
+		// Sequential pairwise in the fixed canonical order built with the
+		// links (#797): each link relaxes the state its predecessors left,
+		// not the shared tick-start state. That is what makes parallel links
+		// additive - two half-conductance links compose to
+		// exp(-G.S.dt/2) x exp(-G.S.dt/2) = exp(-G.S.dt), exactly one
+		// full link - and what stops a second link re-moving heat the first
+		// already moved, which would overshoot the shared equilibrium. The
+		// order is canonical for the wiring rather than the order the author
+		// typed the entries, so the splitting error a reshuffled document
+		// would otherwise introduce is the same error every time, and the
+		// published result cannot move when the document is reshuffled. The
+		// running temperature lives here rather than on the compartment: the
+		// compartment still integrates once, in its own loop, from the
+		// summed external heat rate.
 		std::vector<long double> relaxationTemperatureC(runtime.atmospheres.size());
 		for (size_t index = 0; index < runtime.atmospheres.size(); ++index)
 			relaxationTemperatureC[index]
 				= static_cast<long double>(runtime.atmospheres[index].temperatureC);
-		for (auto& link : runtime.thermalLinks)
+		for (auto const linkIndex : runtime.thermalLinkPassOrder)
 		{
+			auto& link = runtime.thermalLinks[linkIndex];
 			auto const ca = static_cast<long double>(
 				runtime.atmospheres[link.aIndex].authored.thermalCapacityKJPerK);
 			auto const cb = static_cast<long double>(
