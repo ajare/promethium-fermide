@@ -35,6 +35,28 @@ std::vector<PathwayLink> pathwayLinks(core::StationSystemsSettings const& draft,
 	return result;
 }
 
+std::vector<ThermalDiagramLink> thermalLinks(core::StationSystemsSettings const& draft, Graph const& graph)
+{
+	// Every authored Thermal link becomes one display arc: unlike a
+	// pathway, a thermal join owns no hatch node, so the synthesized arc
+	// is the only way it reaches the canvas. Validation refuses Exterior
+	// and self-loop endpoints, so a well-formed link always joins two
+	// distinct Atmosphere nodes; a draft reference that no longer resolves
+	// (or a self-loop in an unsaved edit) simply draws nothing.
+	std::vector<ThermalDiagramLink> result;
+	for (auto const& link : draft.thermalLinks)
+	{
+		auto locate = [&](std::string const& id) {
+			for (size_t i = 0; i < graph.nodes.size(); ++i)
+				if (graph.nodes[i].type == "Atmosphere" && graph.nodes[i].id == id) return i;
+			return SIZE_MAX;
+		};
+		auto a = locate(link.aAtmosphereId), b = locate(link.bAtmosphereId);
+		if (a != SIZE_MAX && b != SIZE_MAX && a != b) result.push_back({link.id, a, b});
+	}
+	return result;
+}
+
 std::optional<bool> connectorEligibility(core::StationSystemsSettings const& draft,
 	core::StationPinRef const& origin, core::StationPinRef const& target)
 {
@@ -594,6 +616,7 @@ void StationFlowDiagram::reset()
 	mSelectedType.clear(); mSelectedId.clear();
 	mSelectedConnection.reset(); mConnectionScreen.clear();
 	mShowPathways = true; mPathwayScreen.clear();
+	mShowThermalLinks = true; mThermalScreen.clear();
 	mDragging = -1; mLastFrame = -1; mTemperature = 0;
 	mLinks.clear(); mPinIds.clear(); mPinRefs.clear(); mPinScreen.clear(); mNodeScreen.clear();
 	mActiveLinkPin.reset(); mPinEligibility.clear();
@@ -690,17 +713,27 @@ void StationFlowDiagram::updateBounds()
 		mMinimum.x = std::min(mMinimum.x, p.x); mMinimum.y = std::min(mMinimum.y, p.y);
 		maximum.x = std::max(maximum.x, p.x); maximum.y = std::max(maximum.y, p.y);
 	}
-	// Include the pathway arcs above the boxes so Fit all does not clip
-	// parallel openings. This affects presentation bounds only.
-	if (mCached && mShowPathways)
+	// Include the display arcs above the boxes so Fit all does not clip
+	// parallel openings or thermal joins. This affects presentation
+	// bounds only. The slot counter is shared across both arc kinds in
+	// draw order, matching the draw pass so stacked arcs never overlap.
+	if (mCached)
 	{
 		std::map<std::pair<size_t, size_t>, size_t> slots;
-		for (auto const& link : station_flow::pathwayLinks(*mCached, mGraph))
-		{
-			float lift = 50 + 30 * float(slots[std::minmax(link.a, link.b)]++);
-			mMinimum.y = std::min(mMinimum.y,
-				std::min(mPositions[link.a].y, mPositions[link.b].y) - lift);
-		}
+		if (mShowPathways)
+			for (auto const& link : station_flow::pathwayLinks(*mCached, mGraph))
+			{
+				float lift = 50 + 30 * float(slots[std::minmax(link.a, link.b)]++);
+				mMinimum.y = std::min(mMinimum.y,
+					std::min(mPositions[link.a].y, mPositions[link.b].y) - lift);
+			}
+		if (mShowThermalLinks)
+			for (auto const& link : station_flow::thermalLinks(*mCached, mGraph))
+			{
+				float lift = 50 + 30 * float(slots[std::minmax(link.a, link.b)]++);
+				mMinimum.y = std::min(mMinimum.y,
+					std::min(mPositions[link.a].y, mPositions[link.b].y) - lift);
+			}
 	}
 	mExtent = {maximum.x - mMinimum.x + nodeWidth, maximum.y - mMinimum.y + nodeHeight};
 }
@@ -748,6 +781,14 @@ bool StationFlowDiagram::pathwayScreenPosition(std::string const& id, ImVec2* ou
 {
 	auto found = mPathwayScreen.find(id);
 	if (found == mPathwayScreen.end() || !out) return false;
+	*out = found->second;
+	return true;
+}
+
+bool StationFlowDiagram::thermalScreenPosition(std::string const& id, ImVec2* out) const
+{
+	auto found = mThermalScreen.find(id);
+	if (found == mThermalScreen.end() || !out) return false;
 	*out = found->second;
 	return true;
 }
@@ -914,6 +955,12 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(station_flow::PathwayColor),
 			"Atmosphere pathways: an opening is a hatch node wired End A / End B between compartments (undirected gas diffusion, never a Station connection). The hollow-diamond arc shows an opening to Exterior vacuum, which has no connector to wire.");
 	}
+	if (!draft.thermalLinks.empty())
+	{
+		ImGui::Checkbox("Show thermal links", &mShowThermalLinks);
+		ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(station_flow::ThermalLinkColor),
+			"Thermal links: dotted amber arc with hollow squares, conducted heat and no mass (display-only; never read by the solver from the diagram).");
+	}
 	if (ImGui::TreeNodeEx("Edge colours", ImGuiTreeNodeFlags_NoAutoOpenOnLog))
 	{
 		std::set<station_flow::Medium> media;
@@ -1023,10 +1070,14 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		if (mConnectedOnly && mSelected >= 0) visible[i] = i == size_t(mSelected);
 	}
 	auto const pathways = station_flow::pathwayLinks(draft, mGraph);
+	auto const thermal = station_flow::thermalLinks(draft, mGraph);
 	// Expand one hop only: do not turn a focused selection into the whole network.
 	auto matched = visible;
 	if (mShowPathways)
 		for (auto const& e : pathways)
+			if (matched[e.a] || matched[e.b]) visible[e.a] = visible[e.b] = true;
+	if (mShowThermalLinks)
+		for (auto const& e : thermal)
 			if (matched[e.a] || matched[e.b]) visible[e.a] = visible[e.b] = true;
 	for (auto const& e : mGraph.links)
 		if (matched[e.from] || matched[e.to]) visible[e.from] = visible[e.to] = true;
@@ -1720,6 +1771,38 @@ entry.thermalClass = "moderate";
 		draw->AddText(middle, station_flow::PathwayColor, link.id.c_str());
 		if (hovered && curveDistance(curve, io.MousePos) <= 8.0f)
 			ImGui::SetTooltip("Atmosphere pathway: %s\nUndirected gas diffusion; display-only.\nNot an editable Station connection.", link.id.c_str());
+	}
+	// Synthesized thermal arcs never enter mGraph.links/mLinks either: no
+	// editable connection identity, selection, deletion, or flow
+	// allocation is attached, and the solver reads the settings directly,
+	// never this projection. They share the pathway slot counter so an
+	// arc over a pair never lands on that pair's pathway arc.
+	mThermalScreen.clear();
+	if (mShowThermalLinks) for (auto const& link : thermal)
+	{
+		if (!visible[link.a] || !visible[link.b]) continue;
+		auto a = point({mPositions[link.a].x + nodeWidth / 2, mPositions[link.a].y});
+		auto b = point({mPositions[link.b].x + nodeWidth / 2, mPositions[link.b].y});
+		auto pair = std::minmax(link.a, link.b);
+		float lift = (50 + 30 * float(pathwaySlots[pair]++)) * mZoom;
+		FlowCurve curve{a, {a.x, std::min(a.y, b.y) - lift},
+			{b.x, std::min(a.y, b.y) - lift}, b};
+		// Dense dots and hollow squares at BOTH ends, never an arrowhead:
+		// distinct from the pathway's long dashes and hollow diamonds.
+		for (int i = 0; i < 80; ++i)
+			if (i % 4 == 0) draw->AddLine(curvePoint(curve, float(i) / 80),
+				curvePoint(curve, float(i + 1) / 80), station_flow::ThermalLinkColor, 2.5f);
+		for (auto p : {a, b})
+		{
+			ImVec2 square[] = {{p.x - 5, p.y - 5}, {p.x + 5, p.y - 5},
+				{p.x + 5, p.y + 5}, {p.x - 5, p.y + 5}};
+			draw->AddPolyline(square, 4, station_flow::ThermalLinkColor, ImDrawFlags_Closed, 2.0f);
+		}
+		auto middle = curvePoint(curve, 0.5f);
+		mThermalScreen[link.id] = middle;
+		draw->AddText(middle, station_flow::ThermalLinkColor, link.id.c_str());
+		if (hovered && curveDistance(curve, io.MousePos) <= 8.0f)
+			ImGui::SetTooltip("Thermal link: %s\nConducted heat, no mass; display-only.\nNever read by the solver from the diagram.", link.id.c_str());
 	}
 	// Links the user can edit are drawn between their connectors, not box to
 	// box, so the curve on screen is the curve the drag and the delete hit.

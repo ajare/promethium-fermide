@@ -33,6 +33,17 @@ namespace station_flow
 	};
 	std::vector<PathwayLink> pathwayLinks(core::StationSystemsSettings const& draft, Graph const& graph);
 	inline constexpr ImU32 PathwayColor = IM_COL32(245, 155, 245, 255);
+	// Presentation-only arcs synthesized from the Thermal link collection
+	// (#799). The solver reads the settings, never this projection: the
+	// arc is display-only by construction, and deleting, moving or never
+	// rendering it changes nothing about the run.
+	struct ThermalDiagramLink
+	{
+		std::string id;
+		size_t a, b;
+	};
+	std::vector<ThermalDiagramLink> thermalLinks(core::StationSystemsSettings const& draft, Graph const& graph);
+	inline constexpr ImU32 ThermalLinkColor = IM_COL32(255, 165, 60, 255);
 	// Form edits can change references directly; discard annotations of vanished instances.
 	void pruneConnectionProperties(core::StationSystemsSettings& draft);
 	char const* connectionStyleName(core::StationPhysicalConnection type);
@@ -108,6 +119,7 @@ public:
 	// A visible point on the rendered curve, for headless interaction checks.
 	bool connectionScreenPosition(core::StationConnectionKey const& key, ImVec2* out) const;
 	bool pathwayScreenPosition(std::string const& id, ImVec2* out) const;
+	bool thermalScreenPosition(std::string const& id, ImVec2* out) const;
 	void reset();
 	void exportLayout(core::StationConfigurationDocument& document) const;
 	void importLayout(core::StationConfigurationDocument const& document);
@@ -182,6 +194,8 @@ private:
 	bool mConnectedOnly{false};
 	bool mShowPathways{true};
 	std::map<std::string, ImVec2> mPathwayScreen;
+	bool mShowThermalLinks{true};
+	std::map<std::string, ImVec2> mThermalScreen;
 	char mSearch[128]{};
 	// Authored references presented as editable links, resolved to graph
 	// nodes once per rebuild: the link's identity is the configuration entry

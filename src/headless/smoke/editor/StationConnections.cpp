@@ -144,6 +144,120 @@ void pathwayDisplayWorkflow(smoke::Context const&)
 	require(driver.passed(), "Pathway display-only workflow failed");
 }
 
+// #799: a Thermal link reaches the canvas as a synthesized display arc.
+// The arc is one-way, configuration to picture: the solver reads the
+// settings directly, so a world that never renders the diagram must
+// agree with one that does, tick for tick - and the arc beside a
+// co-existing pathway hatch must not collide with it or blur into it.
+void thermalLinkDisplayWorkflow(smoke::Context const&)
+{
+	headless::ScopedImGuiContext imgui;
+	auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1100};
+	io.Fonts->AddFontDefault(); io.Fonts->Build();
+	core::StationSystemsSettings settings; settings.enabled = true;
+	core::AtmosphereSettings a;
+	a.id = "a"; a.volumeM3 = 100; a.thermalCapacityKJPerK = 10000;
+	a.startingTemperatureC = 40;
+	a.minPressureKPa = 1; a.maxPressureKPa = 200;
+	a.startingOxygenKg = 30; a.startingNitrogenKg = 80;
+	a.startingCarbonDioxideKg = 0.6; a.startingWaterVapourKg = 0.001;
+	auto b = a; b.id = "b"; b.startingTemperatureC = 10;
+	settings.atmospheres = {a, b};
+	// The same pair is joined by both a gas pathway (a hatch node) and a
+	// thermal link (a synthesized arc), so the two display kinds must
+	// coexist without collision or ambiguity.
+	settings.atmospherePathways = {{"hatch", "a", "b", 1, 1}};
+	settings.thermalLinks = {{"wall", "a", "b", 10.0}};
+	auto graph = station_flow::build(settings);
+	auto links = station_flow::thermalLinks(settings, graph);
+	require(links.size() == 1 && graph.nodes[links[0].a].type == "Atmosphere"
+		&& graph.nodes[links[0].a].id == "a"
+		&& graph.nodes[links[0].b].type == "Atmosphere"
+		&& graph.nodes[links[0].b].id == "b",
+		"Thermal link was not synthesized between its two compartments");
+	require(settings.connections.empty(),
+		"Thermal diagram link became an editable Station connection");
+	// A draft reference that no longer resolves draws nothing rather
+	// than failing, consistent with existing display-only links.
+	auto broken = settings;
+	broken.thermalLinks = {{"wall", "a", "ghost", 10.0}};
+	require(station_flow::thermalLinks(broken, station_flow::build(broken)).empty(),
+		"Thermal link with a missing compartment failed instead of drawing nothing");
+	core::World baseline("Baseline", 2, 2), displayed("Displayed", 2, 2);
+	for (auto* world : {&baseline, &displayed})
+	{
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		auto configured = world->configureStationSystems(settings, false, &diagnostic);
+		require(configured, diagnostic.c_str());
+		world->resumeSimulation();
+	}
+	StationFlowDiagram diagram;
+	core::StationConfigurationDocument layout; layout.settings = settings;
+	layout.zoom = 0.65f; layout.panX = 50; layout.panY = 100;
+	layout.positions = {{"Atmosphere:a:0", {0, 0}}, {"Atmosphere:b:0", {800, 0}}};
+	diagram.importLayout(layout);
+	headless::TestEngineDriver driver([&] {
+		ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1150, 1050});
+		ImGui::Begin("Thermal link display"); diagram.render(settings); ImGui::End();
+	});
+	driver.frame(); driver.frame();
+	#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+	driver.run("station", "thermalLinkDisplay", [&](ImGuiTestContext* ctx) {
+		ctx->SetRef("Thermal link display");
+		ImVec2 arc;
+		REQ(diagram.thermalScreenPosition("wall", &arc), "Thermal link arc was not drawn");
+		// The co-existing pathway hatch is its own node with its own
+		// connectors: two distinct display elements over one pair.
+		ImVec2 endA, endB;
+		REQ(diagram.pinScreenPosition("Atmosphere pathway", "hatch", "End A", &endA)
+			&& diagram.pinScreenPosition("Atmosphere pathway", "hatch", "End B", &endB),
+			"Co-existing pathway hatch was not drawn beside the thermal arc");
+		// The arc lifts above both compartment boxes, so it cannot sit on
+		// either node or the hatch wiring between them.
+		ImVec4 boxA, boxB;
+		REQ(diagram.nodeScreenRect("Atmosphere", "a", &boxA)
+			&& diagram.nodeScreenRect("Atmosphere", "b", &boxB),
+			"Compartment boxes were not addressable");
+		REQ(arc.y < std::min(boxA.y, boxB.y), "Thermal arc was not lifted clear of the compartments");
+		REQ(driver.contains("never read by the solver from the diagram"),
+			"Thermal link visual legend is missing");
+		REQ(smoke::station::advanceSeconds(baseline, 10) && smoke::station::advanceSeconds(displayed, 10),
+			"Visible thermal link run failed");
+		REQ(baseline.getStationSystemsSnapshot() == displayed.getStationSystemsSnapshot(),
+			"Rendering thermal link arcs changed simulation");
+		ctx->ItemClick("Show thermal links"); ctx->Yield(3);
+		REQ(!diagram.thermalScreenPosition("wall", &arc), "Hidden thermal link was still drawn");
+		REQ(diagram.pinScreenPosition("Atmosphere pathway", "hatch", "End A", &endA),
+			"Hiding thermal links also hid the pathway hatch");
+		// Alter persisted presentation layout while the arc is absent.
+		layout.positions["Atmosphere:a:0"].first = 300;
+		diagram.restoreLayout(layout); ctx->Yield(3);
+		REQ(smoke::station::advanceSeconds(baseline, 10) && smoke::station::advanceSeconds(displayed, 10),
+			"Hidden thermal link run failed");
+		auto snapshot = displayed.getStationSystemsSnapshot();
+		REQ(snapshot == baseline.getStationSystemsSnapshot()
+			&& snapshot.thermalLinks[0].netTransferredKJ > 1.0
+			&& snapshot.atmospherePathways[0].netTransferredKg[0] > 0,
+			"Removing/altering display arcs changed or disabled the solver's own heat and gas transfer");
+		REQ(settings == layout.settings && !diagram.selectedConnection(),
+			"Display-only thermal controls mutated authored configuration or selected a connection");
+		ctx->ItemClick("Show thermal links"); ctx->Yield(3);
+		REQ(diagram.thermalScreenPosition("wall", &arc), "Thermal link did not return after display toggle");
+		REQ(smoke::station::advanceSeconds(baseline, 10) && smoke::station::advanceSeconds(displayed, 10)
+			&& baseline.getStationSystemsSnapshot() == displayed.getStationSystemsSnapshot(),
+			"Redrawing the altered thermal layout changed simulation");
+		// Missing layout data: with no stored positions at all the diagram
+		// generates the layout and still draws the arc rather than failing.
+		core::StationConfigurationDocument bare; bare.settings = settings; bare.zoom = 0.5f;
+		diagram.importLayout(bare); ctx->Yield(3);
+		REQ(diagram.thermalScreenPosition("wall", &arc),
+			"Missing layout data failed to generate a thermal link position");
+	});
+	#undef REQ
+	require(driver.passed(), "Thermal link display-only workflow failed");
+}
+
 void hatchInspectorWorkflow(smoke::Context const&)
 {
 	headless::ScopedImGuiContext imgui;
@@ -950,6 +1064,7 @@ void flowConnectionsWorkflow(smoke::Context const& context)
 void editor_smoke::registerStationConnections(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/pathwayDisplayWorkflow", pathwayDisplayWorkflow});
+	checks.push_back({"station/thermalLinkDisplayWorkflow", thermalLinkDisplayWorkflow});
 	checks.push_back({"station/hatchInspectorWorkflow", hatchInspectorWorkflow});
 	checks.push_back({"station/connectionDesign", connectionDesign});
 	checks.push_back({"station/connectionForecastWorkflow", connectionForecastWorkflow});
