@@ -704,6 +704,8 @@ namespace core
 				continue;
 			}
 			auto netKW = grossKW - auxKW;
+			auto const generationPort = connections.port("Heat engine",
+				engine.authored.id, "Generation");
 			// The acceptance-coupled throttle (#805): the engine requests
 			// its net output and the station admits what it can use - the
 			// demand it presented to the pool plus the charge headroom the
@@ -712,7 +714,8 @@ namespace core
 			// converted: the heat stays in the hot reservoir and the
 			// limiter names DemandAcceptance as the binding constraint.
 			auto const acceptanceKW = std::max(0.0, acceptanceCeilingKW - availableGeneration);
-			if (netKW > acceptanceKW + 1e-12)
+			if (connections.available(generationPort, netKW) > acceptanceKW + 1e-12
+				|| acceptanceKW <= 1e-12)
 			{
 				if (acceptanceKW <= 1e-12)
 				{
@@ -722,27 +725,20 @@ namespace core
 					engine.lastLimiter = "DemandAcceptance";
 					continue;
 				}
-				netKW = acceptanceKW;
-				grossKW = netKW + auxKW;
-				intakeKW = grossKW / eta;
+				netKW = connections.required(generationPort, acceptanceKW);
 				engine.lastLimiter = "DemandAcceptance";
 			}
-			// The engine's net output enters the pool as actual
-			// generation through its generation connection; the power the
-			// connection actually delivers caps the whole conversion, so
-			// the engine converts only the heat whose power actually
-			// landed. A refusal at the cable leaves the unconverted heat
-			// in the hot reservoir rather than booking power that went
-			// nowhere.
-			auto const generationPort = connections.port("Heat engine",
-				engine.authored.id, "Generation");
-			auto const flow = connections.send(generationPort, netKW);
-			if (flow.delivered + 1e-12 < netKW)
+			// Resolve the complete crossing before booking it. Conversion
+			// funds cable INPUT (including its external transport loss),
+			// whereas bus acceptance and published output are DELIVERED
+			// power. A cable that cannot deliver any power idles the whole
+			// machine, without leaving phantom cable-loss bookings.
+			auto const admittedInputKW = std::min(netKW, connections.remaining(generationPort));
+			auto const deliveredKW = connections.available(generationPort, admittedInputKW);
+			if (deliveredKW + 1e-12 < netKW)
 			{
-				netKW = flow.delivered;
-				grossKW = netKW + auxKW;
-				intakeKW = eta > 0.0 ? grossKW / eta : 0.0;
-				engine.lastLimiter = "GenerationConnection";
+				if (engine.lastLimiter != "DemandAcceptance")
+					engine.lastLimiter = "GenerationConnection";
 			}
 			else if (engine.lastLimiter != "DemandAcceptance"
 				&& engine.lastLimiter != "IntakeConnection")
@@ -759,7 +755,7 @@ namespace core
 						< engine.authored.ratedThermalInputKW - 1e-12)
 					engine.lastLimiter = "CommandedInput";
 			}
-			if (netKW <= 1e-12 || intakeKW <= 1e-12)
+			if (deliveredKW <= 1e-12 || intakeKW <= 1e-12)
 			{
 				// The admission left nothing to convert: the engine is
 				// idle with the binding constraint named, and nothing is
@@ -767,6 +763,9 @@ namespace core
 				engine.status = StationHeatEngineStatus::Idle;
 				continue;
 			}
+			grossKW = admittedInputKW + auxKW;
+			intakeKW = grossKW / eta;
+			netKW = connections.send(generationPort, admittedInputKW).delivered;
 			// Rejection is the intake the conversion did not deliver as
 			// electricity, plus the auxiliaries the running machine
 			// dissipates into the sink: booked at one consistent

@@ -516,8 +516,8 @@ namespace core
 		// with its named limiter, and the actual efficiency beside the
 		// Carnot efficiency at the interface temperatures the conversion
 		// used (#804). The engine's own ledger closes over
-		// input = electrical + rejection: the hot side loses exactly what
-		// the bus and the sink together gain, and the residual proves it.
+		// input = bus electrical + generation cable loss + rejection.
+		// The conversion funds transport loss as well as delivered work.
 		for (auto const& engine : mImpl->heatEngines)
 		{
 			StationHeatEngineSnapshot engineResult;
@@ -550,8 +550,12 @@ namespace core
 			engineResult.thermalInputEnergyKJ = engine.thermalInputKJ;
 			engineResult.electricalEnergyKJ = engine.electricalKJ;
 			engineResult.rejectionEnergyKJ = engine.rejectionKJ;
+			auto const cable = std::find_if(result.connections.begin(), result.connections.end(),
+				[&](auto const& flow) { return flow.key.ownerType == "Heat engine"
+					&& flow.key.ownerId == engine.authored.id && flow.key.relation == "Generation"; });
+			auto const cableLossKJ = cable != result.connections.end() ? cable->lostTotal : 0.0;
 			engineResult.residualKJ = engine.thermalInputKJ
-				- engine.electricalKJ - engine.rejectionKJ;
+				- engine.electricalKJ - cableLossKJ - engine.rejectionKJ;
 			engineResult.status = engine.status;
 			result.heatEngines.push_back(std::move(engineResult));
 		}

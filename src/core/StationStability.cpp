@@ -1297,10 +1297,9 @@ namespace core
 			ledger(chiller.residualKJ, std::abs(chiller.extractedEnergyKJ)
 				+ std::abs(chiller.workEnergyKJ) + std::abs(chiller.condenserEnergyKJ),
 				"chiller ledger for '" + chiller.id + "'");
-		// The heat engine ledger (#804) closes over input = electrical +
-		// rejection: the hot side's loss equals the bus gain plus the sink
-		// gain, so the residual must stay within tolerance of the terms it
-		// accounts for.
+		// The heat engine ledger closes over input = bus electrical +
+		// generation cable loss + rejection. The residual includes that
+		// transport loss; the intake still bounds the conversion's energy.
 		for (auto const& engine : snapshot.heatEngines)
 			ledger(engine.residualKJ, std::abs(engine.thermalInputEnergyKJ)
 				+ std::abs(engine.electricalEnergyKJ) + std::abs(engine.rejectionEnergyKJ),

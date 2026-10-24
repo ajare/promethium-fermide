@@ -1011,8 +1011,8 @@ namespace core
 		}
 		// Heat engine ledger finiteness and closure (#804): every rate and
 		// cumulative term must be finite, and the conversion ledger must
-		// close over input = electrical + rejection: the hot side's loss
-		// equals the bus gain plus the sink gain, exactly. A booking that
+		// close over input = bus electrical + cable loss + rejection.
+		// Transport loss is funded by conversion, not by the sink. A booking that
 		// went astray fails the tick loudly here rather than drifting.
 		for (auto const& engine : runtime.heatEngines)
 		{
@@ -1025,10 +1025,14 @@ namespace core
 			if (!requireFinite(engine.rejectionKJ, where + "cumulative rejection energy")) return false;
 			auto const closureBound = StationBalanceTolerance
 				* std::max(1.0, std::abs(engine.thermalInputKJ));
-			if (std::abs(engine.thermalInputKJ - engine.electricalKJ - engine.rejectionKJ)
-				> closureBound)
+			auto const cable = connections.snapshot(connections.port(
+				"Heat engine", engine.authored.id, "Generation"));
+			auto const cableLossKJ = cable ? cable->lostTotal : 0.0;
+			auto const residual = engine.thermalInputKJ - engine.electricalKJ
+				- cableLossKJ - engine.rejectionKJ;
+			if (std::abs(residual) > closureBound)
 				return violation = where + "conversion ledger residual "
-					+ std::to_string(engine.thermalInputKJ - engine.electricalKJ - engine.rejectionKJ)
+					+ std::to_string(residual)
 					+ " kJ exceeds tolerance " + std::to_string(closureBound), false;
 		}
 		for (auto const& cycle : runtime.airlockCycles)

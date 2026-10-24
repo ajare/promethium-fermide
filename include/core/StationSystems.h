@@ -3118,9 +3118,9 @@ namespace core
 	// contract beside the thermal intake actually drawn, the net bus
 	// power actually delivered, the rejection heat actually booked, and
 	// the closing conversion ledger. The engine's ledger closes over
-	// thermal input = net electrical + rejection exactly: the hot side
-	// loses what the bus and the sink together gain, and the residual
-	// proves it. Actual efficiency is published beside the Carnot
+	// thermal input = net bus electrical + generation cable loss + rejection:
+	// conversion funds both delivered work and external transport loss.
+	// Actual efficiency is published beside the Carnot
 	// efficiency at the same tick-start interface temperatures the
 	// conversion used, so the operator can see how much of the ideal
 	// the declared carnotFraction is really capturing.
@@ -3156,7 +3156,7 @@ namespace core
 		double thermalInputEnergyKJ{0.0};  // cumulative heat delivered to the machine
 		double electricalEnergyKJ{0.0};    // cumulative net power delivered to the bus
 		double rejectionEnergyKJ{0.0};     // cumulative rejection produced, including lost/retained heat
-		double residualKJ{0.0};            // input - (electrical + rejection): closes on zero
+		double residualKJ{0.0};            // input - (bus electrical + cable loss + rejection): closes on zero
 		StationHeatEngineStatus status{StationHeatEngineStatus::Disabled};
 		bool operator==(StationHeatEngineSnapshot const&) const = default;
 	};

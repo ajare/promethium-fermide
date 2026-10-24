@@ -2209,10 +2209,83 @@ void heatEngineOutageTransitionCoherence(smoke::Context const&)
 		== finalOrc.thermalInputEnergyKJ,
 		"the final hot reservoir booking does not match the engine ledger");
 }
+// #827: conversion and cable accounts must fund the same physical transfer.
+void heatEngineGenerationConnections()
+{
+	for (auto const efficiency : {0.5, 0.0, 1.0})
+	for (auto const cap : {1000.0, 1.0})
+	for (auto const aux : {0.0, 1.0})
+	for (auto const acceptance : {500.0, 2.0, 0.0})
+	{
+		auto settings = enginePair(20000, 20000, 100, 0.5, aux);
+		settings.systemsStepWorldTicks = 60;
+		settings.batteries[0].maxChargeKW = acceptance;
+		for (auto const& link : core::station_connections::build(settings).links)
+			if (link.designKey.ownerType == "Heat engine" && link.designKey.relation == "Generation") {
+				auto& p = settings.connections[link.designKey];
+				p.efficiency = efficiency;
+				p.maximumThroughput = cap;
+			}
+		std::string diagnostic;
+		require(core::validateStationSystemsSettings(settings, diagnostic),
+			("generation fixture refused: " + diagnostic).c_str());
+		auto const quantum = core::World::getFixedTimestep();
+		auto const seconds = 60.0 * static_cast<double>(quantum);
+		core::StationSystemsRuntime runtime(settings, quantum);
+		auto before = runtime.snapshot();
+		auto const close = [](double a, double b) {
+			require(std::abs(a - b) <= 2e-7 * std::max({1.0, std::abs(a), std::abs(b)}),
+				"heat engine generation cable energy is unfunded or misallocated");
+		};
+		for (int step = 1; step <= 3; ++step)
+		{
+			auto const eta = 0.5 * (1.0
+				- (reservoir(before, "reject").temperatureC + 273.15)
+				/ (reservoir(before, "hot").temperatureC + 273.15));
+			auto const expectedInput = efficiency > 0 && acceptance > 0
+				? std::min({eta * 100.0 - aux, cap, acceptance / efficiency}) : 0.0;
+			require(runtime.advanceTo(step * seconds), "generation connection step failed");
+			auto const snap = runtime.snapshot();
+			require(snap.healthy, "generation connection audit failed");
+			auto const e = engine(snap, "orc");
+			auto const cable = std::find_if(snap.connections.begin(), snap.connections.end(),
+				[](auto const& c) { return c.key.ownerType == "Heat engine"
+					&& c.key.relation == "Generation"; });
+			require(cable != snap.connections.end(), "generation cable missing");
+			// Reservoir extraction pays for sink rejection, bus work AND cable loss.
+			close(e.thermalInputEnergyKJ,
+				e.rejectionEnergyKJ + e.electricalEnergyKJ + cable->lostTotal);
+			close(cable->lastInputRate, expectedInput);
+			close(cable->lastDeliveredRate, expectedInput * efficiency);
+			close(cable->lastLossRate, expectedInput * (1.0 - efficiency));
+			close(e.residualKJ, 0.0);
+			close((snap.power.batteries[0].storedKWh - 100.0) * 3600.0,
+				e.electricalEnergyKJ);
+			close(cable->inputTotal, cable->deliveredTotal + cable->lostTotal);
+			close(cable->deliveredTotal, e.electricalEnergyKJ);
+			close(e.lastElectricalOutputKW, expectedInput * efficiency);
+			close(e.lastThermalInputKW, expectedInput > 0 ? (expectedInput + aux) / eta : 0);
+			close(e.lastRejectionKW, e.lastThermalInputKW - expectedInput);
+			close(reservoir(snap, "hot").temperatureC,
+				90.0 - e.thermalInputEnergyKJ / 20000.0);
+			close(reservoir(snap, "reject").temperatureC,
+				20.0 + e.rejectionEnergyKJ / 20000.0);
+			if (expectedInput == 0) {
+				require(e.status == core::StationHeatEngineStatus::Idle, "blocked cable engine did not idle");
+				for (auto const& c : snap.connections)
+					require(c.inputTotal == 0 && c.lostTotal == 0,
+						"idle engine left phantom connection input or loss");
+			}
+			before = snap;
+		}
+	}
+}
+
 // #828: exercise the allocator through committed World snapshots, including
 // the source-side inventory, both transport ledgers and retained producer heat.
 void heatEngineThermalConnections(smoke::Context const&)
 {
+	heatEngineGenerationConnections();
 	for (auto const intakeCap : {0.01, 1000.0})
 	for (auto const rejectionCap : {0.01, 1000.0})
 	for (auto const intakeEfficiency : {0.0, 0.5, 1.0})
