@@ -1628,6 +1628,86 @@ void thermalLinkSharedNeighbourIndependence(smoke::Context const&)
 }
 }
 
+// #834: use World::updateStationSystemsSettings rather than the runtime
+// directly. The saved settings, published runtime snapshot, and subsequent
+// evolution must all describe the same live Thermal link.
+void thermalLinkLiveSettings(smoke::Context const&)
+{
+	std::string diagnostic;
+	auto settings = linkedPair();
+	auto spare = linkCompartment("spare", 20.0, 10000.0);
+	settings.atmospheres.push_back(spare);
+	core::World world("ThermalLinkLiveSettings", 2, 2);
+	::configure(world, settings, diagnostic);
+	world.resumeSimulation();
+	require(advanceStationSteps(world, 1), "initial live-settings step failed");
+	auto const before = world.getStationSystemsSnapshot();
+	auto const conductedBefore = before.atmospheres[1].conductedEnergyKJ;
+	auto const temperatureBefore = before.atmospheres[1].temperatureC;
+	auto const trendCount = world.getStationSystemsTrends().size();
+
+	auto retuned = world.getStationSystemsSettings();
+	retuned.thermalLinks[0].conductanceKWPerK = 100.0;
+	require(world.updateStationSystemsSettings(retuned, &diagnostic),
+		("live conductance update refused: " + diagnostic).c_str());
+	auto const updated = world.getStationSystemsSnapshot();
+	require(world.getStationSystemsSettings().thermalLinks[0].conductanceKWPerK == 100.0
+		&& link(updated, "wall").conductanceKWPerK == 100.0,
+		"saved settings and live link snapshot disagree after a conductance update");
+	require(updated.atmospheres[1].conductedEnergyKJ == conductedBefore
+		&& updated.atmospheres[1].temperatureC == temperatureBefore
+		&& world.getStationSystemsTrends().size() == trendCount,
+		"a live conductance update disturbed accumulated state or history");
+	require(advanceStationSteps(world, 1), "retuned live-settings step failed");
+	auto const evolved = world.getStationSystemsSnapshot();
+	require(evolved.atmospheres[1].conductedEnergyKJ > conductedBefore
+		&& evolved.atmospheres[1].temperatureC > temperatureBefore
+		&& link(evolved, "wall").flowRateKW > link(before, "wall").flowRateKW,
+		"updated conductance did not affect the next live step");
+
+	// Every frozen-topology refusal is atomic even when accompanied by an
+	// otherwise valid conductance edit.
+	auto expectRefusalUnchanged = [&](core::StationSystemsSettings offered,
+		char const* description)
+	{
+		offered.thermalLinks[0].conductanceKWPerK = 55.0;
+		auto const state = world.getStationSystemsSnapshot();
+		require(!world.updateStationSystemsSettings(offered, &diagnostic), description);
+		require(diagnostic.find("thermal link") != std::string::npos,
+			"thermal-link topology refusal lacked a useful diagnostic");
+		auto const after = world.getStationSystemsSnapshot();
+		require(world.getStationSystemsSettings().thermalLinks.size() == 1
+			&& world.getStationSystemsSettings().thermalLinks[0].id == "wall"
+			&& world.getStationSystemsSettings().thermalLinks[0].conductanceKWPerK == 100.0
+			&& after.thermalLinks.size() == 1
+			&& link(after, "wall").conductanceKWPerK == 100.0
+			&& after.atmospheres[1].temperatureC == state.atmospheres[1].temperatureC
+			&& after.atmospheres[1].conductedEnergyKJ == state.atmospheres[1].conductedEnergyKJ,
+			"a refused thermal-link offer changed authored or runtime state");
+	};
+	auto removed = world.getStationSystemsSettings();
+	removed.thermalLinks.clear();
+	// Keep one entry for the mixed-parameter helper; this separate removal
+	// verifies the collection cardinality boundary.
+	require(!world.updateStationSystemsSettings(removed, &diagnostic),
+		"removing a thermal link was accepted");
+	require(world.getStationSystemsSettings().thermalLinks.size() == 1,
+		"removing a thermal link changed saved settings");
+	auto renamed = world.getStationSystemsSettings();
+	renamed.thermalLinks[0].id = "renamed";
+	expectRefusalUnchanged(renamed, "renaming a thermal link was accepted");
+	auto rewired = world.getStationSystemsSettings();
+	rewired.thermalLinks[0].bAtmosphereId = "spare";
+	expectRefusalUnchanged(rewired, "rewiring a thermal link was accepted");
+	auto added = world.getStationSystemsSettings();
+	added.thermalLinks.push_back({"second", "a", "b", 10.0});
+	require(!world.updateStationSystemsSettings(added, &diagnostic),
+		"adding a thermal link was accepted");
+	require(world.getStationSystemsSettings().thermalLinks.size() == 1
+		&& link(world.getStationSystemsSnapshot(), "wall").conductanceKWPerK == 100.0,
+		"adding a thermal link changed the running scenario");
+}
+
 void registerStationThermalLinkChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"thermalLinkConservation", thermalLinkConservation});
@@ -1656,4 +1736,5 @@ void registerStationThermalLinkChecks(std::vector<smoke::Check>& checks)
 		thermalLinkDeclarationOrderIndependence});
 	checks.push_back({"thermalLinkSharedNeighbourIndependence",
 		thermalLinkSharedNeighbourIndependence});
+	checks.push_back({"thermalLinkLiveSettings", thermalLinkLiveSettings});
 }

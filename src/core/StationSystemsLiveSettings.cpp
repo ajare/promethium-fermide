@@ -159,6 +159,40 @@ namespace core
 			}
 		}
 
+		// A Thermal link likewise resolves its endpoints once at construction.
+		// Its conductance is a live thermal parameter, but its identity and
+		// endpoints are frozen topology. Check the complete collection before
+		// mutating any other live authored state, so a mixed offer is atomic.
+		if (s.thermalLinks.size() != offered.thermalLinks.size())
+		{
+			if (diagnostic)
+				*diagnostic = "thermal links: a live update cannot add or remove entries ("
+					+ std::to_string(s.thermalLinks.size()) + " running, "
+					+ std::to_string(offered.thermalLinks.size()) + " offered)";
+			return false;
+		}
+		for (auto const& link : s.thermalLinks)
+		{
+			auto const found = std::find_if(offered.thermalLinks.begin(),
+				offered.thermalLinks.end(), [&](ThermalLinkSettings const& next)
+				{ return next.id == link.authored.id; });
+			if (found == offered.thermalLinks.end())
+			{
+				if (diagnostic)
+					*diagnostic = "thermal link: running entry '" + link.authored.id
+						+ "' is missing from the offered settings";
+				return false;
+			}
+			if (link.authored.aAtmosphereId != found->aAtmosphereId
+				|| link.authored.bAtmosphereId != found->bAtmosphereId)
+			{
+				if (diagnostic)
+					*diagnostic = "thermal link '" + link.authored.id
+						+ "' endpoints are topology and cannot be rewired live";
+				return false;
+			}
+		}
+
 		// The connection map keys are the wiring graph. Properties on a key
 		// are parameters and may change; the key set may not.
 		if (s.settings.connections.size() != offered.connections.size())
@@ -236,6 +270,8 @@ namespace core
 			}, diagnostic)) return false;
 		if (!rebindById(s.atmospherePathways, offered.atmospherePathways,
 			"atmosphere pathways", diagnostic)) return false;
+		if (!rebindById(s.thermalLinks, offered.thermalLinks,
+			"thermal links", diagnostic)) return false;
 		if (!rebindById(s.airlockCycles, offered.airlockCycles, "airlock cycles", diagnostic)) return false;
 		if (!rebindById(s.crews, offered.crews, "crews", diagnostic)) return false;
 		if (!rebindById(s.waterCollectors, offered.waterCollectors, "water collectors", diagnostic)) return false;
@@ -310,6 +346,7 @@ namespace core
 		syncAuthored(s.settings.generators, s.generators);
 		syncAuthored(s.settings.atmospheres, s.atmospheres);
 		syncAuthored(s.settings.atmospherePathways, s.atmospherePathways);
+		syncAuthored(s.settings.thermalLinks, s.thermalLinks);
 		syncAuthored(s.settings.airlockCycles, s.airlockCycles);
 		syncAuthored(s.settings.crews, s.crews);
 		syncAuthored(s.settings.waterCollectors, s.waterCollectors);
@@ -380,6 +417,7 @@ namespace core
 		PF_LIVE_ENTRY(ChillerSettings, chillers)
 		PF_LIVE_ENTRY(GeneratorSettings, generators)
 		PF_LIVE_ENTRY(AtmosphereSettings, atmospheres)
+		PF_LIVE_ENTRY(ThermalLinkSettings, thermalLinks)
 		PF_LIVE_ENTRY(AirlockCycleSettings, airlockCycles)
 		PF_LIVE_ENTRY(CrewSettings, crews)
 		PF_LIVE_ENTRY(WaterCollectorSettings, waterCollectors)
@@ -452,6 +490,7 @@ namespace core
 	PF_LIVE_INSTANTIATE(GeneratorSettings)
 	PF_LIVE_INSTANTIATE(AtmosphereSettings)
 	PF_LIVE_INSTANTIATE(AtmospherePathwaySettings)
+	PF_LIVE_INSTANTIATE(ThermalLinkSettings)
 	PF_LIVE_INSTANTIATE(AirlockCycleSettings)
 	PF_LIVE_INSTANTIATE(CrewSettings)
 	PF_LIVE_INSTANTIATE(WaterCollectorSettings)

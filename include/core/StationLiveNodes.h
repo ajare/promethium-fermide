@@ -91,6 +91,9 @@ namespace core
 	// Openness is a live parameter, not an initial condition: a pathway owns
 	// no field a live edit must be refused.
 	PF_STATION_LIVE_NODE(AtmospherePathwaySettings, atmospherePathways, "Atmosphere pathway")
+	// A Thermal link has no initial-condition fields: conductance is a live
+	// thermal parameter while its identity and endpoints stay frozen topology.
+	PF_STATION_LIVE_NODE(ThermalLinkSettings, thermalLinks, "Thermal link")
 	PF_STATION_LIVE_NODE(AirlockCycleSettings, airlockCycles, "Airlock cycle")
 	PF_STATION_LIVE_NODE(CrewSettings, crews, "Crew")
 	PF_STATION_LIVE_NODE(WaterCollectorSettings, waterCollectors, "Water collector")
