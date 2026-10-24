@@ -54,6 +54,22 @@ namespace station_flow
 	};
 	// Shared display formatting: exact zero, signed trace, and non-finite --.
 	std::string formatTelemetryNumber(double value);
+	// #816: the composite footer's aggregated telemetry for one collapsed
+	// prefab unit, given its internal (nodeType, namespaced entryId) pairs in
+	// the fixed prefab walk order. The footer sums the unit's electrical draw
+	// from the shared pool (every internal entry's delivered supply,
+	// startup and charge connection - the same input-side rule the power
+	// audit uses) and the cooling its chillers delivered this tick, and
+	// carries the worst internal status/limiting reason: Error over Warning
+	// over Normal over Idle, and at equal severity the later entry's reason
+	// replaces the earlier one, mirroring the per-entry warn() discipline,
+	// so the footer names exactly the reason the expanded entry shows.
+	// Null when no internal entry reports telemetry.
+	std::optional<NodeTelemetry> compositeTelemetry(
+		std::vector<std::pair<std::string, std::string>> const& entries,
+		core::StationSystemsSnapshot const& snapshot, double tickSeconds,
+		core::StationSystemsSettings const* applied = nullptr,
+		std::span<core::AuthoredLink const> authored = {});
 	std::vector<std::string> connectionTelemetry(core::StationConnectionSnapshot const& flow);
 	std::optional<NodeTelemetry> telemetry(Node const& node,
 		core::StationSystemsSnapshot const& snapshot, double tickSeconds,

@@ -1247,6 +1247,25 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		for (auto const& node : mGraph.nodes)
 			if (auto values = station_flow::telemetry(node, *live, core::World::getFixedTimestep(), &draft, authored))
 				mTelemetry[node.type + keySeparator + node.id] = std::move(*values);
+		// #816: a collapsed unit reads as one live node. Its footer sums
+		// the unit's electrical draw and delivered cooling and carries the
+		// worst internal status, so the unit can be watched without opening
+		// it. Only units the projection actually drew as composites get one;
+		// an expanded unit's internals already carry their own readouts.
+		auto const entryOrder = core::prefabEntryOrder(draft);
+		for (auto const& placed : mPlacedPrefabs)
+		{
+			auto const compositeKey = placed.prefabId + keySeparator + placed.instanceId;
+			if (mCompositeKeys.find(compositeKey) == mCompositeKeys.end()) continue;
+			std::vector<std::pair<std::string, std::string>> internals;
+			auto const prefix = placed.instanceId + core::PrefabIdSeparator;
+			for (auto const& [type, id] : entryOrder)
+				if (id.size() > prefix.size() && id.rfind(prefix, 0) == 0)
+					internals.push_back({type, id});
+			if (auto values = station_flow::compositeTelemetry(internals, *live,
+						core::World::getFixedTimestep(), &draft, authored))
+				mTelemetry[compositeKey] = std::move(*values);
+		}
 	}
 	if (live && live->enabled && draftPending)
 		ImGui::TextUnformatted("Draft configuration flow | unapplied changes - live readouts hidden (apply or revert draft).");

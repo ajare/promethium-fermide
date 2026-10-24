@@ -1020,6 +1020,11 @@ set_tests_properties(station-editor-prefab-persistence PROPERTIES LABELS "smoke;
 # #815: whole-unit rename and cascade delete through the real editor controls.
 add_test(NAME station-editor-prefab-unit-edit COMMAND pf-smoke-editor --check station/prefabUnitEditWorkflow)
 set_tests_properties(station-editor-prefab-unit-edit PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+# #816: aggregated telemetry on the composite footer - summed electrical
+# draw, delivered cooling, and the worst internal status - asserted against
+# a running expansion.
+add_test(NAME station-editor-prefab-composite-telemetry COMMAND pf-smoke-editor --check station/prefabCompositeTelemetryWorkflow)
+set_tests_properties(station-editor-prefab-composite-telemetry PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-coolant-loop COMMAND pf-smoke-editor --check station/flowCoolantLoopWorkflow)
 set_tests_properties(station-editor-flow-coolant-loop PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-transfers COMMAND pf-smoke-editor --check station/transferWorkflow)

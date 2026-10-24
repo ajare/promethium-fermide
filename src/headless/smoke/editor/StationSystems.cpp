@@ -23,6 +23,7 @@ void registerMixedObservationEditorChecks(std::vector<smoke::Check>& checks);
 #include "core/World.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <set>
@@ -7200,6 +7201,243 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		require(driver.passed(), "prefab unit edit workflow failed on the Test Engine");
 	}
 
+	// #816: aggregated telemetry on the composite footer. A collapsed
+	// unit of a running expansion reports its summed electrical draw and
+	// delivered cooling, and the worst internal status/limiting reason
+	// across the unit's entries, so the unit can be monitored without
+	// expanding it.
+	void prefabCompositeTelemetryWorkflow(smoke::Context const& fixtureContext)
+	{
+		using smoke::require;
+		// The aggregation contract itself, before the running unit: the
+		// worst state wins the footer, the first entry in walk order
+		// breaks a tie, and entries with no telemetry contribute nothing.
+		{
+			core::StationSystemsSnapshot s;
+			s.enabled = true; s.worldTick = 10;
+			s.chillers.push_back({}); s.chillers.back().id = "u1.machine";
+			s.chillers.back().blockReason = "the condenser is too hot";
+			s.coolantLoops.push_back({}); s.coolantLoops.back().id = "u1.loop";
+			s.coolantLoops.back().belowFreezeSetpoint = true;
+			auto const errorWins = station_flow::compositeTelemetry(
+				{{"Chiller", "u1.machine"}, {"Coolant loop", "u1.loop"}}, s, 0.25);
+			require(errorWins && errorWins->state == station_flow::TelemetryState::Error
+				&& errorWins->status == "Below freeze-protection setpoint",
+				"the composite footer did not let an internal error outrank an earlier warning");
+			s.coolantLoops.back().belowFreezeSetpoint = false;
+			s.coolantLoops.back().unmetFlowKgPerS = 0.5;
+			auto const tie = station_flow::compositeTelemetry(
+				{{"Chiller", "u1.machine"}, {"Coolant loop", "u1.loop"}}, s, 0.25);
+			require(tie && tie->state == station_flow::TelemetryState::Warning
+				&& tie->status == "Circulation limited",
+				"the composite footer tie did not give the later entry's reason");
+			require(!station_flow::compositeTelemetry({}, s, 0.25).has_value(),
+				"the composite footer fabricated telemetry for no entries");
+			require(!station_flow::compositeTelemetry({{"Chiller", "u1.gone"}}, s, 0.25).has_value(),
+				"the composite footer fabricated telemetry for an entry with no snapshot");
+		}
+
+		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
+		auto const root = fixtureContext.temporaryRoot() / "prefab-telemetry-resources";
+		headless::StationResourceFixture resources(authored, root);
+		require(resources.catalogues.size() == 1,
+			"the bundled prefab catalogue should load from the manifest");
+
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		io.DeltaTime = 1.0f / 60.0f;
+		StationSystemsWindow window;
+		window.setPrefabCatalogueResources(resources.catalogues);
+		auto world = std::make_shared<core::World>("Prefab telemetry", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		core::BatterySettings bank;
+		bank.id = "bank"; bank.nameplateKWh = 10; bank.usableKWh = 10;
+		bank.startingStoredKWh = 10; bank.maxDischargeKW = 5;
+		seed.batteries = {bank};
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration");
+			window.renderFlowContents(world);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "prefabCompositeTelemetry", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto* canvas = flowCanvasWindow("Configuration");
+			REQ(canvas != nullptr, "flow canvas is missing");
+			// Place the unit through the real controls, then apply the draft
+			// so the expansion runs live.
+			ctx->ComboClick("Place node/Aircon Unit"); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 300.0f, canvas->Pos.y + 220.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ImVec4 rect{};
+			REQ(window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"the placed unit is not a collapsed composite");
+			auto const applied = window.draft();
+			if (!world->configureStationSystems(applied, false, &diagnostic))
+				REQ(false, ("applying the placed unit failed: " + diagnostic).c_str());
+			world->markSaved();
+			world->resumeSimulation();
+			REQ(world->advanceTicks(24), "the telemetry fixture failed to advance");
+			ctx->Yield(20);
+			auto const snapshot = world->getStationSystemsSnapshot();
+			auto const findChiller = [](core::StationSystemsSnapshot const& s,
+				std::string const& id) -> core::StationChillerSnapshot const* {
+				for (auto const& c : s.chillers) if (c.id == id) return &c;
+				return nullptr; };
+			auto const findLoop = [](core::StationSystemsSnapshot const& s,
+				std::string const& id) -> core::StationCoolantLoopSnapshot const* {
+				for (auto const& l : s.coolantLoops) if (l.id == id) return &l;
+				return nullptr; };
+			auto const* machine = findChiller(snapshot, "ac1.machine");
+			auto const* loop = findLoop(snapshot, "ac1.loop");
+			REQ(machine && loop, "the running expansion has no chiller or coolant loop snapshot");
+			REQ(machine->coolingKW > 1e-9, "the unit's chiller delivered no cooling while running");
+			// The unit's internal entries, in the fixed prefab walk order.
+			std::vector<std::pair<std::string, std::string>> internals;
+			for (auto const& [type, id] : core::prefabEntryOrder(applied))
+				if (id.rfind("ac1.", 0) == 0) internals.push_back({type, id});
+			REQ(internals.size() >= 4, "the placed unit has no internal entries");
+			// The footer sits on the collapsed composite and stays inside
+			// the live-node readout budget.
+			auto const tel = window.flowTelemetry("aircon-unit", "ac1");
+			REQ(tel && tel->values.size() == 2,
+				"the composite footer is missing or over the line budget");
+			REQ(station_flow::TelemetryTop + (tel->values.size() + 1) * station_flow::TelemetryLineHeight
+				< station_flow::NodeHeight - 5,
+				"the composite footer does not fit inside the node");
+			// The summed electrical draw is the ledger's delivered rate from
+			// the shared pool across the unit's entries, and it agrees with
+			// the internal entries' own supplied figures.
+			double ledgerDraw = 0.0;
+			for (auto const& flow : snapshot.connections)
+			{
+				if (flow.key.peerType != "Power") continue;
+				if (flow.key.relation != "Electrical supply" && flow.key.relation != "Startup"
+					&& flow.key.relation != "Charge") continue;
+				if (std::find(internals.begin(), internals.end(),
+						std::pair{flow.key.ownerType, flow.key.ownerId}) == internals.end()) continue;
+				ledgerDraw += flow.lastDeliveredRate;
+			}
+			REQ(ledgerDraw > 1e-9, "the running unit drew nothing through the power ledger");
+			REQ(std::abs(ledgerDraw - (machine->powerSuppliedKW + loop->pumpSuppliedKW
+					+ loop->heaterSuppliedKW)) < 1e-9,
+				"the ledger draw sum disagrees with the internal entries' supplied power");
+			REQ(tel->values[0] == "Power draw " + station_flow::formatTelemetryNumber(ledgerDraw) + " kW",
+				("the composite footer did not sum the electrical draw: " + tel->values[0]).c_str());
+			REQ(tel->values[1] == "Cooling delivered "
+					+ station_flow::formatTelemetryNumber(machine->coolingKW) + " kW",
+				("the composite footer did not report the delivered cooling: " + tel->values[1]).c_str());
+			// The footer status is the worst internal status across the
+			// unit's entries, computed here from the same snapshot through
+			// the same per-entry telemetry the expanded view reads.
+			auto const authoredLinks = core::stationAuthoredLinks(applied);
+			auto const worstOf = [&](core::StationSystemsSnapshot const& s)
+				-> std::pair<std::string, station_flow::TelemetryState> {
+				auto const rankOf = [](station_flow::TelemetryState st) {
+					return st == station_flow::TelemetryState::Error ? 3
+						: st == station_flow::TelemetryState::Warning ? 2
+						: st == station_flow::TelemetryState::Normal ? 1 : 0; };
+				int rank = -1;
+				std::string status;
+				station_flow::TelemetryState state{};
+				for (auto const& [type, id] : internals)
+				{
+					auto const v = station_flow::telemetry({type, id}, s,
+						core::World::getFixedTimestep(), &applied, authoredLinks);
+					if (!v) continue;
+					if (rankOf(v->state) >= rank)
+					{
+						rank = rankOf(v->state); state = v->state; status = v->status;
+					}
+				}
+				return {status, state};
+			};
+			auto const expected = worstOf(snapshot);
+			REQ(tel->status == expected.first && tel->state == expected.second,
+				("the composite footer status is not the worst internal status: got '"
+					+ tel->status + "' want '" + expected.first + "'").c_str());
+			// The footer carries the unit's worst limiting reason, not a
+			// healthy label: the bundled unit's coolant loop runs at 80%
+			// fill so its flow is capped by the fluid present, and the
+			// chiller downstream of it cannot meet its rated duty. Both
+			// entries warn; the chiller is later in the walk order, so its
+			// reason owns the footer.
+			REQ(tel->state == station_flow::TelemetryState::Warning
+				&& tel->status == "Cooling demand unmet",
+				("the unit footer did not surface the worst internal limiter: '"
+					+ tel->status + "'").c_str());
+			auto const loopOwn = station_flow::telemetry({"Coolant loop", "ac1.loop"},
+				snapshot, core::World::getFixedTimestep(), &applied, authoredLinks);
+			REQ(loopOwn && loopOwn->status == "Circulation limited",
+				"the loop's own limiter is not what the equal-severity tie replaced");
+			// A running limiter inside the box surfaces on the footer: a
+			// full scheduled outage on the unit's chiller takes the cooling
+			// out of service and names itself as the unit's status.
+			world->pauseSimulation();
+			auto withOutage = applied;
+			core::InstallationOutageSettings outage;
+			outage.id = "outage1"; outage.installationId = "ac1.machine";
+			outage.capacityFraction = 0.0; outage.firstOccurrenceSeconds = 0.0;
+			outage.durationSeconds = 600.0;
+			withOutage.outages.push_back(outage);
+			if (!world->configureStationSystems(withOutage, true, &diagnostic))
+				REQ(false, ("applying the outage refused: " + diagnostic).c_str());
+			world->resumeSimulation();
+			// Let the window see the reset run (tick 0) before advancing, so
+			// the per-tick telemetry cache cannot carry the previous run's
+			// readouts across a reset that re-reaches the same tick count.
+			ctx->Yield(5);
+			REQ(world->advanceTicks(24), "the outage fixture failed to advance");
+			ctx->Yield(20);
+			auto const blockedSnap = world->getStationSystemsSnapshot();
+			auto const* blockedChiller = findChiller(blockedSnap, "ac1.machine");
+			auto const* blockedLoop = findLoop(blockedSnap, "ac1.loop");
+			REQ(blockedChiller && blockedLoop, "the outaged expansion lost its snapshots");
+			REQ(blockedChiller->coolingKW <= 1e-9,
+				"the chiller kept cooling through a full outage");
+			auto const blocked = window.flowTelemetry("aircon-unit", "ac1");
+			auto const blockedExpected = worstOf(blockedSnap);
+			REQ(blocked && blocked->status == blockedExpected.first
+				&& blocked->state == blockedExpected.second,
+				("the outaged unit's footer status is not the worst internal status: got '"
+					+ (blocked ? blocked->status : std::string("<none>")) + "'").c_str());
+			REQ(blocked && blocked->state == station_flow::TelemetryState::Warning
+				&& blocked->status.find("scheduled outage") != std::string::npos,
+				("the outage inside the unit did not surface on the composite footer: '"
+					+ (blocked ? blocked->status : std::string("<none>")) + "'").c_str());
+			REQ(blocked->values[1] == "Cooling delivered 0 kW",
+				"the composite footer still showed cooling through a full outage");
+			REQ(blocked->values[0] == "Power draw " + station_flow::formatTelemetryNumber(
+					blockedLoop->pumpSuppliedKW + blockedLoop->heaterSuppliedKW) + " kW",
+				"the composite footer draw did not drop with the outaged chiller");
+			// Expanding the unit drops the composite footer with the box,
+			// and the internal entries carry their own readouts - the same
+			// limiting reason the footer showed.
+			window.flowSetPrefabExpanded("ac1", true); ctx->Yield(5);
+			REQ(!window.flowTelemetry("aircon-unit", "ac1").has_value(),
+				"the composite footer survived the expansion");
+			auto const machineTel = window.flowTelemetry("Chiller", "ac1.machine");
+			REQ(machineTel && machineTel->status.find("scheduled outage") != std::string::npos,
+				"the expanded internal chiller did not carry the limiting reason");
+			// Collapsing brings the aggregated footer back, unchanged.
+			window.flowSetPrefabExpanded("ac1", false); ctx->Yield(5);
+			auto const back = window.flowTelemetry("aircon-unit", "ac1");
+			REQ(back && back->status == blocked->status && back->values == blocked->values,
+				"the composite footer did not come back unchanged after collapse");
+		});
+		#undef REQ
+		require(driver.passed(), "prefab composite telemetry workflow failed on the Test Engine");
+	}
+
 	void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	editor_smoke::registerStationConnections(checks);
@@ -7208,6 +7446,7 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 	checks.push_back({"station/prefabCompositeProjectionWorkflow", prefabCompositeProjectionWorkflow});
 	checks.push_back({"station/prefabPersistenceWorkflow", prefabPersistenceWorkflow});
 	checks.push_back({"station/prefabUnitEditWorkflow", prefabUnitEditWorkflow});
+	checks.push_back({"station/prefabCompositeTelemetryWorkflow", prefabCompositeTelemetryWorkflow});
 	checks.push_back({"station/addEntryWorkflow", addEntryWorkflow});
 	checks.push_back({"station/configurationResources", configurationResources});
 	checks.push_back({"station/windowWorkflow", workflow});

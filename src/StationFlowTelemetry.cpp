@@ -612,4 +612,65 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 	else if (s.worldTick == 0) { out.state = TelemetryState::Idle; out.status = "Ready - no completed tick"; out.ports.clear(); }
 	return out;
 }
+
+std::optional<NodeTelemetry> compositeTelemetry(
+	std::vector<std::pair<std::string, std::string>> const& entries,
+	core::StationSystemsSnapshot const& s, double tickSeconds,
+	core::StationSystemsSettings const* applied,
+	std::span<core::AuthoredLink const> authored)
+{
+	if (entries.empty()) return {};
+	// The worst internal status owns the footer. Ranking Error over Warning
+	// over Normal over Idle keeps the composite's colour honest: any entry
+	// on fire reddens the unit. At equal severity the later entry's reason
+	// replaces the earlier one, mirroring the per-entry warn() discipline
+	// where the latest equal-severity reason wins, and the status text is
+	// always an entry's own - the footer names the same limiting reason
+	// the expanded entry shows, never a summary of its own.
+	NodeTelemetry out;
+	bool any = false;
+	int worst = -1;
+	auto const rank = [](TelemetryState state) {
+		return state == TelemetryState::Error ? 3
+			: state == TelemetryState::Warning ? 2
+			: state == TelemetryState::Normal ? 1 : 0;
+	};
+	for (auto const& [type, id] : entries)
+	{
+		auto const values = telemetry(Node{type, id}, s, tickSeconds, applied, authored);
+		if (!values) continue;
+		if (!any || rank(values->state) >= worst)
+		{
+			any = true;
+			worst = rank(values->state);
+			out.state = values->state;
+			out.status = values->status;
+		}
+	}
+	if (!any) return {};
+	// Electrical draw is the ledger's delivered rate from the shared pool:
+	// every internal entry's supply, startup and charge connection, whatever
+	// the entry type - the same input-side rule the power audit applies, so
+	// the footer sums what the allocator actually served, not a per-type
+	// guess. Internal generation is not a draw and never enters this sum.
+	double draw = 0.0;
+	for (auto const& flow : s.connections)
+	{
+		if (flow.key.peerType != "Power") continue;
+		if (flow.key.relation != "Electrical supply" && flow.key.relation != "Startup"
+			&& flow.key.relation != "Charge") continue;
+		if (std::find(entries.begin(), entries.end(),
+				std::pair{flow.key.ownerType, flow.key.ownerId}) == entries.end()) continue;
+		draw += flow.lastDeliveredRate;
+	}
+	// Cooling delivered: the unit's chillers' actually extracted cold-side
+	// duty this tick, the same figure the chiller's own footer reports.
+	double cooling = 0.0;
+	for (auto const& [type, id] : entries)
+		if (type == "Chiller")
+			if (auto const* chiller = find(s.chillers, id)) cooling += chiller->coolingKW;
+	out.values = {"Power draw " + quantity(draw, "kW"),
+		"Cooling delivered " + quantity(cooling, "kW")};
+	return out;
+}
 } // namespace station_flow

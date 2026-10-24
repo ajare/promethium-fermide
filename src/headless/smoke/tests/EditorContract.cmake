@@ -274,6 +274,7 @@ set(editor_names
     station/prefabCompositeProjectionWorkflow
     station/prefabPersistenceWorkflow
     station/prefabUnitEditWorkflow
+    station/prefabCompositeTelemetryWorkflow
     station/addEntryWorkflow
     station/configurationResources
     station/windowWorkflow
