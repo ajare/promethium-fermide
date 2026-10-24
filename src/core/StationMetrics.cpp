@@ -332,8 +332,10 @@ namespace core
 	{
 		static std::vector<StationChartDefinition> const charts{{"power", "Power", "Power",
 			"Power demand and generation (applied simulation)", StationPhysicalQuantity::Power,
-			StationCanonicalUnit::Kilowatt, {{"station.power.service", "Demand", StationMetricValue::Requested},
-				{"station.power.generation", "Generation", StationMetricValue::Actual}}}};
+			StationCanonicalUnit::Kilowatt, {{"station.power.service", "Demand", StationMetricValue::Requested,
+					StationChartOperation::Value, {}, {}, false, {}, {}},
+				{"station.power.generation", "Generation", StationMetricValue::Actual,
+					StationChartOperation::Value, {}, {}, false, {}, {}}}, {}, false, {}, {}}};
 		return charts;
 	}
 
@@ -355,7 +357,7 @@ namespace core
 			std::sort(stored.begin(), stored.end(), [](auto a, auto b) { return a->instanceId < b->instanceId; });
 			StationChartDefinition energy{"battery-energy", "Batteries", "Stored battery energy",
 				"Stored battery energy (applied simulation)", StationPhysicalQuantity::Energy,
-				StationCanonicalUnit::KilowattHour, {}};
+				StationCanonicalUnit::KilowattHour, {}, {}, false, {}, {}};
 			StationChartSeriesDefinition total;
 			total.metricId = "battery.energy.total"; total.label = "Station total";
 			total.operation = StationChartOperation::Sum;
@@ -370,7 +372,7 @@ namespace core
 			}
 			StationChartDefinition charge{"battery-charge", "Batteries", "Battery state of charge",
 				"Capacity-weighted battery state of charge (applied simulation)", StationPhysicalQuantity::Fraction,
-				StationCanonicalUnit::Percent, {}};
+				StationCanonicalUnit::Percent, {}, {}, false, {}, {}};
 			total.metricId = "battery.charge.total"; total.label = "Capacity-weighted charge";
 			total.operation = StationChartOperation::Ratio;
 			for (auto const* d : stored)
@@ -400,7 +402,7 @@ namespace core
 			std::sort(members.begin(), members.end(), [](auto a, auto b) { return a->instanceId < b->instanceId; });
 			StationChartDefinition chart{"stored-material/" + material + "/" + stationUnitLabel(unit), "Material inventories",
 				"Stored material inventory: " + material + " (" + stationUnitLabel(unit) + ")",
-				"Stored material inventory: " + material + " (applied simulation)", quantity, unit, {}};
+				"Stored material inventory: " + material + " (applied simulation)", quantity, unit, {}, {}, false, {}, {}};
 			chart.accountingNote = note; chart.partialAccounting = unclassified != 0;
 			StationChartSeriesDefinition total;
 			total.metricId = chart.id + "/subtotal"; total.label = "Classified stores subtotal";
@@ -410,14 +412,14 @@ namespace core
 			for (auto d : members)
 			{
 				chart.series.push_back({d->id, d->instanceId, StationMetricValue::Actual,
-					StationChartOperation::Value, {}, {}, true, d->hazardClass.value_or("unclassified")});
+					StationChartOperation::Value, {}, {}, true, d->hazardClass.value_or("unclassified"), {}});
 				chart.series.back().perInstance = true;
 			}
 			charts.push_back(std::move(chart));
 			{
 				StationChartDefinition qualified{"stored-usable/" + material + "/" + stationUnitLabel(unit),
 					"Material inventories", "Usable stored material: " + material + " (" + stationUnitLabel(unit) + ")",
-					"Qualified usable inventory: " + material + " (applied simulation)", quantity, unit, {}};
+					"Qualified usable inventory: " + material + " (applied simulation)", quantity, unit, {}, {}, false, {}, {}};
 				qualified.accountingNote = "Resource stores only; qualified contents only, excludes unqualified contents. Protected resource reserves remain included: usable is NOT discretionary drawability. "
 					+ std::to_string(unclassified) + " unclassified or non-canonical inventories excluded from material subtotals.";
 				qualified.partialAccounting = unclassified != 0;
@@ -429,7 +431,7 @@ namespace core
 				for (auto d : members)
 				{
 					qualified.series.push_back({d->id + "/usable", d->instanceId,
-						StationMetricValue::Actual, StationChartOperation::Value, {}, {}, true});
+						StationMetricValue::Actual, StationChartOperation::Value, {}, {}, true, {}, {}});
 					qualified.series.back().perInstance = true;
 				}
 				charts.push_back(std::move(qualified));
@@ -440,7 +442,8 @@ namespace core
 		{
 			StationChartDefinition chart{"unclassified/" + d.instanceId, "Unclassified inventories",
 				"Unclassified inventory: " + d.instanceId, "Unclassified inventory (applied simulation)",
-				d.quantity, d.unit, {{d.id, d.instanceId}}};
+				d.quantity, d.unit, {{d.id, d.instanceId, StationMetricValue::Actual,
+					StationChartOperation::Value, {}, {}, false, {}, {}}}, {}, false, {}, {}};
 			chart.accountingNote = note + " Missing, contradictory material evidence or unsupported canonical unit; no material inferred.";
 			chart.partialAccounting = true; charts.push_back(std::move(chart));
 		}
@@ -459,7 +462,7 @@ namespace core
 			std::sort(members.begin(), members.end(), [](auto a, auto b) { return a->id < b->id; });
 			StationChartDefinition chart{"accounted-material/" + material + "/" + stationUnitLabel(unit), "Material inventories",
 				"Accounted material inventory: " + material + " (" + stationUnitLabel(unit) + ")",
-				"Accounted material inventory: " + material + " (applied simulation)", quantity, unit, {}};
+				"Accounted material inventory: " + material + " (applied simulation)", quantity, unit, {}, {}, false, {}, {}};
 			// Material ownership and constituent decomposition are independent
 			// populations. Never add compound constituents to this material sum.
 			chart.partialAccounting = true;
@@ -505,7 +508,7 @@ namespace core
 				std::string const label = accounted ? "Accounted constituent inventory: " : usable ? "Usable stored constituent: " : "Stored constituent inventory: ";
 				StationChartDefinition chart{prefix + constituent + "/" + stationUnitLabel(unit),
 					"Constituent inventories", label + constituent + " (" + stationUnitLabel(unit) + ")",
-					label + constituent + " (applied simulation)", quantity, unit, {}};
+					label + constituent + " (applied simulation)", quantity, unit, {}, {}, false, {}, {}};
 				chart.partialAccounting = true;
 				chart.accountingNote = "Compound Resource stores only, including retained waste and material awaiting treatment already owned by stores; not a system total. "
 					"Actual blended constituents: water is wet-mass moisture; other mass constituents partition dry mass; energy is chemical energy, not mass. "
@@ -560,7 +563,7 @@ namespace core
 			std::string const label = type + ": " + exchange + " " + direction + " — " + material
 				+ " (" + stationUnitLabel(unit) + (service.empty() ? "" : "; class " + service) + ")";
 			StationChartDefinition chart{id, resource ? "Resource exchanges" : direction == "Input" ? "Equipment inputs"
-				: direction == "Loss" ? "Equipment losses" : role == StationMetricRole::Inventory || role == StationMetricRole::InventoryChange ? "Equipment inventories" : "Equipment outputs", label, label + " (applied simulation)", quantity, unit, {}};
+				: direction == "Loss" ? "Equipment losses" : role == StationMetricRole::Inventory || role == StationMetricRole::InventoryChange ? "Equipment inventories" : "Equipment outputs", label, label + " (applied simulation)", quantity, unit, {}, {}, false, {}, {}};
 			chart.accountingNote = "Authoritative exchange rate per simulation second. Generation/availability, pool delivery, supplied service, startup obligations, heat and losses are distinct properties, not additive outputs. Material identity and quantity remain separate. Requests are optional overlays, never actual contributions.";
 			if (role == StationMetricRole::Inventory) chart.accountingNote = "Authoritative retained inventory state in canonical units, not an output rate. ";
 			if (role == StationMetricRole::Inventory && unit == StationCanonicalUnit::KilowattHour)
@@ -577,7 +580,7 @@ namespace core
 			for (auto d : members)
 			{
 				chart.series.push_back({d->id, d->instanceId, StationMetricValue::Actual,
-					StationChartOperation::Value, {}, {}, true});
+					StationChartOperation::Value, {}, {}, true, {}, {}});
 				chart.series.back().perInstance = true;
 			}
 			std::vector<std::string> requests;
@@ -585,7 +588,7 @@ namespace core
 			if (!requests.empty())
 			{
 				chart.series.push_back({id + "/requested", "Requested rate", StationMetricValue::Requested,
-					StationChartOperation::Sum, requests});
+					StationChartOperation::Sum, requests, {}, false, {}, {}});
 				chart.series.back().optionalRequested = true;
 			}
 			charts.push_back(std::move(chart));
@@ -609,14 +612,14 @@ namespace core
 			std::sort(members.begin(), members.end(), [](auto a, auto b) {
 				return std::make_tuple(a->instanceId, a->id) < std::make_tuple(b->instanceId, b->id); });
 			StationChartDefinition chart{std::move(id), std::move(group), std::move(label),
-				title + " (applied simulation)", quantity, unit, {}};
+				title + " (applied simulation)", quantity, unit, {}, {}, false, {}, {}};
 			chart.accountingNote = std::move(note);
 			chart.propertyId = chart.breakdown = std::move(breakdown);
 			for (auto const* d : members)
 			{
 				chart.series.push_back({d->id,
 					labelOf ? labelOf(*d) : d->instanceId, StationMetricValue::Actual,
-						StationChartOperation::Value});
+						StationChartOperation::Value, {}, {}, false, {}, {}});
 				chart.series.back().perInstance = true;
 			}
 			charts.push_back(std::move(chart));
@@ -710,7 +713,7 @@ namespace core
 				equipmentGroups[s.equipmentType].push_back(s.metricId);
 			for (auto const& [key, ids] : equipmentGroups)
 				equipment.series.push_back({chart.propertyId + "/equipment/" + key, key, StationMetricValue::Actual,
-					StationChartOperation::Sum, ids, {}, true});
+					StationChartOperation::Sum, ids, {}, true, {}, {}});
 			// Exchange selectors default to aggregate; keep legacy inventory defaults.
 			if (chart.id.starts_with("exchange/"))
 			{
