@@ -180,7 +180,12 @@ namespace core
 	// The per-type ceilings the validator enforces, as (type, cap) pairs.
 	// A fragment that consumes more slots than the draft leaves free must be
 	// refused before anything lands, so a half-expanded unit can never
-	// appear in the draft.
+	// appear in the draft. This table must cover EVERY entry type the
+	// configuration validator caps (#819): a type missing here is a type
+	// whose cap the prefab pre-check silently ignores, letting a placement
+	// push the draft past the validator's ceiling. The caps are the same
+	// MaxStation* constants the validator enforces, so only membership can
+	// drift - keep this in sync when a new capped type is added.
 	template<class F>
 	void forEachPrefabCap(F fn)
 	{
@@ -200,6 +205,22 @@ namespace core
 		fn("Chiller", MaxStationChillers);
 		fn("Heat engine", MaxStationHeatEngines);
 		fn("Generator", MaxStationGenerators);
+		fn("Thermal buffer", MaxStationThermalBuffers);
+		fn("Atmosphere", MaxStationAtmospheres);
+		fn("Atmosphere pathway", MaxStationPathways);
+		fn("Thermal link", MaxStationThermalLinks);
+		fn("Airlock cycle", MaxStationAirlockCycles);
+		fn("Crew", MaxStationCrews);
+		fn("Water collector", MaxStationWaterCollectors);
+		fn("Water treatment", MaxStationWaterTreatments);
+		fn("Electrolyzer", MaxStationElectrolyzers);
+		fn("CO2 capture", MaxStationCo2Captures);
+		fn("Fuel cell", MaxStationFuelCells);
+		fn("Sabatier", MaxStationSabatierReactors);
+		fn("Methane processor", MaxStationMethaneProcessors);
+		fn("Microbial processor", MaxStationMicrobialProcessors);
+		fn("Crops", MaxStationCropPopulations);
+		fn("Algae", MaxStationAlgaeCultures);
 	}
 
 	size_t countFragmentType(StationSystemsSettings const& fragment, std::string_view type)

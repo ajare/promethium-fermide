@@ -25,6 +25,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <type_traits>
 
 namespace
 {
@@ -638,6 +639,152 @@ parameters:
 		require(!core::applyPrefabExpansion(room, expansion, reason),
 			("duplicate instance ids must be refused: " + reason).c_str());
 		require(room == applied, "refused duplicate apply must leave the draft untouched");
+	}
+
+	// Push count default-constructed entries with prefixed ids into the
+	// settings vector for one capped type (#819). The cap pre-check counts
+	// slots only, so default entries exercise refusal without needing each
+	// type's full valid configuration.
+	void fillCappedType(core::StationSystemsSettings& settings,
+		std::string const& type, int count, std::string const& prefix)
+	{
+		auto const add = [](auto& entries, int n, std::string const& p)
+		{
+			for (int i = 0; i < n; ++i)
+			{
+				typename std::remove_reference_t<decltype(entries)>::value_type entry;
+				entry.id = p + std::to_string(i);
+				entries.push_back(entry);
+			}
+		};
+		if (type == "Store") add(settings.stores, count, prefix);
+		else if (type == "Transfer") add(settings.transfers, count, prefix);
+		else if (type == "Conversion") add(settings.conversions, count, prefix);
+		else if (type == "Solar") add(settings.solarArrays, count, prefix);
+		else if (type == "Equipment") add(settings.equipmentLoads, count, prefix);
+		else if (type == "Battery") add(settings.batteries, count, prefix);
+		else if (type == "Delivery") add(settings.deliveries, count, prefix);
+		else if (type == "Waste ejection") add(settings.wasteEjections, count, prefix);
+		else if (type == "Outage") add(settings.outages, count, prefix);
+		else if (type == "Maintenance") add(settings.maintenanceJobs, count, prefix);
+		else if (type == "Reservoir") add(settings.thermalReservoirs, count, prefix);
+		else if (type == "Radiator") add(settings.radiators, count, prefix);
+		else if (type == "Coolant loop") add(settings.coolantLoops, count, prefix);
+		else if (type == "Chiller") add(settings.chillers, count, prefix);
+		else if (type == "Heat engine") add(settings.heatEngines, count, prefix);
+		else if (type == "Generator") add(settings.generators, count, prefix);
+		else if (type == "Thermal buffer") add(settings.thermalBuffers, count, prefix);
+		else if (type == "Atmosphere") add(settings.atmospheres, count, prefix);
+		else if (type == "Atmosphere pathway") add(settings.atmospherePathways, count, prefix);
+		else if (type == "Thermal link") add(settings.thermalLinks, count, prefix);
+		else if (type == "Airlock cycle") add(settings.airlockCycles, count, prefix);
+		else if (type == "Crew") add(settings.crews, count, prefix);
+		else if (type == "Water collector") add(settings.waterCollectors, count, prefix);
+		else if (type == "Water treatment") add(settings.waterTreatments, count, prefix);
+		else if (type == "Electrolyzer") add(settings.electrolyzers, count, prefix);
+		else if (type == "CO2 capture") add(settings.co2Captures, count, prefix);
+		else if (type == "Fuel cell") add(settings.fuelCells, count, prefix);
+		else if (type == "Sabatier") add(settings.sabatierReactors, count, prefix);
+		else if (type == "Methane processor") add(settings.methaneProcessors, count, prefix);
+		else if (type == "Microbial processor") add(settings.microbialProcessors, count, prefix);
+		else if (type == "Crops") add(settings.cropPopulations, count, prefix);
+		else if (type == "Algae") add(settings.algaeCultures, count, prefix);
+		else require(false, ("unknown capped type in test table: " + type).c_str());
+	}
+
+	// #819: every entry type the validator caps must be enforced by the
+	// prefab cap pre-check, not just the types the bundled template uses.
+	// For each capped type: a template consuming one slot against a draft
+	// at the cap is refused with the type named; the apply refuses
+	// atomically and adds nothing; one slot of headroom applies cleanly.
+	// The type list mirrors every per-type ceiling the configuration
+	// validator enforces, so a type missing from the prefab cap table
+	// fails here rather than silently slipping a validator-invalid merge
+	// into the draft.
+	void prefabCapRefusalAllCappedTypes(smoke::Context const&)
+	{
+		struct CappedType { char const* type; size_t cap; };
+		CappedType const types[] = {
+			{"Store", core::MaxStationResourceStores},
+			{"Transfer", core::MaxStationResourceTransfers},
+			{"Conversion", core::MaxStationResourceConversions},
+			{"Solar", core::MaxStationSolarArrays},
+			{"Equipment", core::MaxStationEquipmentLoads},
+			{"Battery", core::MaxStationBatteries},
+			{"Delivery", core::MaxStationResourceDeliveries},
+			{"Waste ejection", core::MaxStationWasteEjections},
+			{"Outage", core::MaxStationInstallationOutages},
+			{"Maintenance", core::MaxStationMaintenanceJobs},
+			{"Reservoir", core::MaxStationThermalReservoirs},
+			{"Radiator", core::MaxStationRadiators},
+			{"Coolant loop", core::MaxStationCoolantLoops},
+			{"Chiller", core::MaxStationChillers},
+			{"Heat engine", core::MaxStationHeatEngines},
+			{"Generator", core::MaxStationGenerators},
+			{"Thermal buffer", core::MaxStationThermalBuffers},
+			{"Atmosphere", core::MaxStationAtmospheres},
+			{"Atmosphere pathway", core::MaxStationPathways},
+			{"Thermal link", core::MaxStationThermalLinks},
+			{"Airlock cycle", core::MaxStationAirlockCycles},
+			{"Crew", core::MaxStationCrews},
+			{"Water collector", core::MaxStationWaterCollectors},
+			{"Water treatment", core::MaxStationWaterTreatments},
+			{"Electrolyzer", core::MaxStationElectrolyzers},
+			{"CO2 capture", core::MaxStationCo2Captures},
+			{"Fuel cell", core::MaxStationFuelCells},
+			{"Sabatier", core::MaxStationSabatierReactors},
+			{"Methane processor", core::MaxStationMethaneProcessors},
+			{"Microbial processor", core::MaxStationMicrobialProcessors},
+			{"Crops", core::MaxStationCropPopulations},
+			{"Algae", core::MaxStationAlgaeCultures},
+		};
+		for (auto const& entry : types)
+		{
+			std::string const type{entry.type};
+			int const cap = static_cast<int>(entry.cap);
+			core::PrefabTemplate tmpl;
+			tmpl.id = "cap-unit";
+			fillCappedType(tmpl.entries, type, 1, "unit");
+			core::PrefabExpansion expansion;
+			fillCappedType(expansion.entries, type, 1, "u1.unit");
+			std::string reason;
+			// At the cap: the pre-check refuses, naming the type, and the
+			// apply refuses atomically without growing the draft.
+			core::StationSystemsSettings full;
+			full.enabled = true;
+			fillCappedType(full, type, cap, "full");
+			auto const fullSize = [](core::StationSystemsSettings const& s)
+			{
+				return s.stores.size() + s.transfers.size() + s.conversions.size()
+					+ s.solarArrays.size() + s.equipmentLoads.size() + s.batteries.size()
+					+ s.deliveries.size() + s.wasteEjections.size() + s.outages.size()
+					+ s.maintenanceJobs.size() + s.thermalReservoirs.size() + s.radiators.size()
+					+ s.coolantLoops.size() + s.chillers.size() + s.heatEngines.size()
+					+ s.generators.size() + s.thermalBuffers.size() + s.atmospheres.size()
+					+ s.atmospherePathways.size() + s.thermalLinks.size() + s.airlockCycles.size()
+					+ s.crews.size() + s.waterCollectors.size() + s.waterTreatments.size()
+					+ s.electrolyzers.size() + s.co2Captures.size() + s.fuelCells.size()
+					+ s.sabatierReactors.size() + s.methaneProcessors.size()
+					+ s.microbialProcessors.size() + s.cropPopulations.size() + s.algaeCultures.size();
+			};
+			require(!core::checkPrefabCaps(tmpl, full, reason)
+					&& reason.find(type) != std::string::npos,
+				("cap pre-check must refuse a '" + type + "'-consuming template at the "
+					+ "cap and name the type: " + reason).c_str());
+			auto const before = full;
+			require(!core::applyPrefabExpansion(full, expansion, reason),
+				("apply at the '" + type + "' cap must refuse: " + reason).c_str());
+			require(fullSize(full) == static_cast<size_t>(cap) && full == before,
+				("refused '" + type + "' apply must add nothing to the draft").c_str());
+			// One slot of headroom: the expansion lands.
+			core::StationSystemsSettings room;
+			room.enabled = true;
+			fillCappedType(room, type, cap - 1, "spare");
+			require(core::applyPrefabExpansion(room, expansion, reason),
+				("apply of a '" + type + "' slot with headroom must succeed: " + reason).c_str());
+			require(fullSize(room) == static_cast<size_t>(cap),
+				("the '" + type + "' slot with headroom must land exactly").c_str());
+		}
 	}
 
 	void prefabDeterminism(smoke::Context const&)
@@ -1370,6 +1517,7 @@ void registerStationPrefabChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"prefabOverrides", prefabOverrides});
 	checks.push_back({"prefabDialEdit", prefabDialEdit});
 	checks.push_back({"prefabCapRefusal", prefabCapRefusal});
+	checks.push_back({"prefabCapRefusalAllCappedTypes", prefabCapRefusalAllCappedTypes});
 	checks.push_back({"prefabDeterminism", prefabDeterminism});
 	checks.push_back({"prefabExposedPinResolution", prefabExposedPinResolution});
 	checks.push_back({"prefabLinkThroughComposite", prefabLinkThroughComposite});
