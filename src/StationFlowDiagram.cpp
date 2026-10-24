@@ -400,6 +400,30 @@ namespace
 		return all;
 	}
 
+	// #813: the composite node's synthesized connectors - one per exposed
+	// port, on the same face as the internal connector it aliases. The
+	// descriptors live in the diagram for as long as the projection that
+	// produced them, so the FlowPort pointers stay valid.
+	std::vector<FlowPort> compositeNodePorts(std::vector<core::PortDescriptor> const& descriptors)
+	{
+		std::vector<FlowPort> inputs, outputs;
+		for (auto const& descriptor : descriptors)
+			(descriptor.direction == core::StationPortDirection::Input ? inputs : outputs)
+				.push_back({&descriptor, {}});
+		auto spread = [](std::vector<FlowPort>& ports, float x)
+		{
+			for (size_t i = 0; i < ports.size(); ++i)
+				ports[i].offset = {x, 80.0f + 180.0f * float(i + 1) / float(ports.size() + 1)};
+		};
+		spread(inputs, 0.0f);
+		spread(outputs, nodeWidth);
+		std::vector<FlowPort> all;
+		all.reserve(inputs.size() + outputs.size());
+		all.insert(all.end(), inputs.begin(), inputs.end());
+		all.insert(all.end(), outputs.begin(), outputs.end());
+		return all;
+	}
+
 	// Electrical membership is implicit configuration, not a user-wirable
 	// reference. Show dedicated service ports without inventing editable pins
 	// or allowing connections to the derived electrical pool.
@@ -608,6 +632,9 @@ void StationFlowDiagram::reset()
 	mActiveLinkPin.reset(); mPinEligibility.clear();
 	mLinkRejection.clear(); mPendingRemoval.reset();
 	mPortButtons.clear(); mPressedPortButton.clear(); mNotice.clear();
+	mPlacedPrefabs.clear(); mExpandedPrefabs.clear(); mProjectionDirty = false;
+	mCompositeKeys.clear(); mCompositePortDescriptors.clear();
+	mPrefabToggles.clear(); mPressedPrefabToggle.clear();
 }
 
 bool StationFlowDiagram::portButtonScreenRect(std::string const& nodeType, std::string const& nodeId,
@@ -634,6 +661,23 @@ void StationFlowDiagram::exportLayout(core::StationConfigurationDocument& docume
 		auto base = node.type + ":" + node.id;
 		document.positions[base + ":" + std::to_string(occurrences[base]++)]
 			= {mPositions[i].x, mPositions[i].y};
+	}
+	// #813: while a unit is collapsed its internals are not in the
+	// projected graph; carry their recorded positions through the export
+	// so a history restore followed by an expand still shows them where
+	// the user left them. The draft itself is untouched by the projection;
+	// this keeps only the editor's own geometry honest across snapshots.
+	for (auto const& placed : mPlacedPrefabs)
+	{
+		auto const prefix = placed.instanceId + core::PrefabIdSeparator;
+		for (auto const& [key, position] : mLayout)
+		{
+			auto const colon = key.find(':');
+			if (colon == std::string::npos || key.size() <= colon + 1 + prefix.size()) continue;
+			if (key.compare(colon + 1, prefix.size(), prefix) != 0) continue;
+			if (!document.positions.contains(key))
+				document.positions.emplace(key, std::pair{position.x, position.y});
+		}
 	}
 	document.panX = mPan.x; document.panY = mPan.y; document.zoom = mZoom;
 }
@@ -816,10 +860,226 @@ void StationFlowDiagram::placePrefabAt(core::StationSystemsSettings& draft,
 			placeAt.y + float(slot / 2) * kUnitSlotY};
 		++slot;
 	}
+	// #813: record the placed unit so the projection can collapse it to
+	// one node. A re-placement that reuses an instance id replaces the
+	// record, so one namespace never maps to two units. The composite
+	// keeps its own layout slot at the click point; the internals keep
+	// theirs.
+	core::PlacedPrefab placed;
+	placed.prefabId = tmpl->id;
+	placed.instanceId = instanceId;
+	placed.exposedPins = expansion.exposedPins;
+	auto const reuse = std::find_if(mPlacedPrefabs.begin(), mPlacedPrefabs.end(),
+		[&](core::PlacedPrefab const& p) { return p.instanceId == instanceId; });
+	if (reuse != mPlacedPrefabs.end()) *reuse = std::move(placed);
+	else mPlacedPrefabs.push_back(std::move(placed));
+	mLayout[tmpl->id + ":" + instanceId + ":0"] = placeAt;
 	mFitRequested = false;
 	mNotice = "Placed " + label + " as instance '" + instanceId + "' (" + std::to_string(slot)
 		+ " internal nodes).";
 	if (fromMenu) disarmPlacement();
+}
+
+// #813: the composite projection.
+//
+// An editor-side view over the flattened draft: a placed unit collapses to
+// one node whose pins are the template's exposed ports. Internal↔internal
+// links are hidden; an outside link is drawn at the composite only where
+// the internal end's connector is exposed, at the aliasing exposed pin.
+// Everything the projection cannot show on the composite face - shared
+// power-pool membership, atmosphere exchange, or a connector the
+// template keeps private - stays hidden while collapsed. The draft keeps
+// every one of them untouched: this mutates only the diagram's own graph
+// and authored-link records, never the configuration.
+void StationFlowDiagram::projectComposites(core::StationSystemsSettings const& draft)
+{
+	mCompositeKeys.clear();
+	mCompositePortDescriptors.clear();
+	if (mPlacedPrefabs.empty()) return;
+	// A composite projects only while its namespace still owns entries:
+	// an undone placement leaves the record with nothing behind it, and a
+	// phantom box must not be drawn for a unit that no longer exists.
+	auto const present = [](core::StationSystemsSettings const& settings,
+		core::PlacedPrefab const& placed)
+	{
+		auto const prefix = placed.instanceId + core::PrefabIdSeparator;
+		for (auto const& [type, id] : core::prefabEntryOrder(settings))
+			if (id.size() > prefix.size() && id.compare(0, prefix.size(), prefix) == 0)
+				return true;
+		return false;
+	};
+	std::vector<core::PlacedPrefab const*> collapsed;
+	for (auto const& placed : mPlacedPrefabs)
+		if (!isPrefabInstanceExpanded(placed.instanceId) && present(draft, placed))
+			collapsed.push_back(&placed);
+	if (collapsed.empty()) return;
+	auto const ownerOf = [&collapsed](std::string const& nodeId) -> core::PlacedPrefab const*
+	{
+		for (auto const* placed : collapsed)
+		{
+			auto const prefix = placed->instanceId + core::PrefabIdSeparator;
+			if (nodeId.size() > prefix.size()
+				&& nodeId.compare(0, prefix.size(), prefix) == 0) return placed;
+		}
+		return nullptr;
+	};
+	// Nodes: the internals of collapsed units leave the projection; each
+	// unit enters as exactly one composite node.
+	std::vector<station_flow::Node> nodes;
+	std::vector<int> nodeMap(mGraph.nodes.size(), -1);
+	for (size_t i = 0; i < mGraph.nodes.size(); ++i)
+	{
+		if (ownerOf(mGraph.nodes[i].id)) continue;
+		nodeMap[i] = int(nodes.size());
+		nodes.push_back(mGraph.nodes[i]);
+	}
+	std::map<std::string, size_t> compositeIndex;
+	for (auto const* placed : collapsed)
+	{
+		auto const* tmpl = mPrefabCatalogue ? mPrefabCatalogue->find(placed->prefabId) : nullptr;
+		auto const display = tmpl && !tmpl->displayName.empty() ? tmpl->displayName : placed->prefabId;
+		station_flow::Node composite;
+		composite.type = placed->prefabId;
+		composite.id = placed->instanceId;
+		composite.lane = 2;
+		composite.detail = display + " prefab unit - collapsed; expand to inspect internals";
+		compositeIndex[placed->instanceId] = nodes.size();
+		nodes.push_back(std::move(composite));
+		mCompositeKeys.insert(placed->prefabId + keySeparator + placed->instanceId);
+		// Synthesize the exposed-port descriptors on the face of the
+		// internal connector each port aliases, so the composite's pin
+		// geometry matches the connector it stands for.
+		auto& descriptors = mCompositePortDescriptors[placed->prefabId];
+		if (tmpl)
+			for (auto const& port : tmpl->exposedPorts)
+			{
+				auto direction = core::StationPortDirection::Input;
+				for (auto const& descriptor : core::stationPortDescriptors())
+					if (descriptor.nodeType == port.nodeType && descriptor.name == port.portName)
+					{ direction = descriptor.direction; break; }
+				descriptors.push_back(core::PortDescriptor{placed->prefabId, port.name,
+					direction, "composite", "composite", 0, {}, false});
+			}
+	}
+	// Links: internal↔internal plumbing is hidden outright; a mixed link
+	// survives only when every internal end's connector is exposed. The
+	// authored record is the only thing that carries the internal
+	// connector's identity, so non-authored edges into the box (the
+	// shared electrical pool and other derived faces) stay hidden.
+	struct ProjectedEdge
+	{
+		int projected{-1};
+		bool fromRewritten{false};
+		bool toRewritten{false};
+	};
+	std::vector<ProjectedEdge> edgeMap(mGraph.links.size());
+	std::vector<station_flow::Link> links;
+	for (size_t e = 0; e < mGraph.links.size(); ++e)
+	{
+		auto const& edge = mGraph.links[e];
+		auto const* fromOwner = ownerOf(mGraph.nodes[edge.from].id);
+		auto const* toOwner = ownerOf(mGraph.nodes[edge.to].id);
+		if (!fromOwner && !toOwner)
+		{
+			auto projected = edge;
+			projected.from = size_t(nodeMap[edge.from]);
+			projected.to = size_t(nodeMap[edge.to]);
+			edgeMap[e].projected = int(links.size());
+			links.push_back(std::move(projected));
+			continue;
+		}
+		if (fromOwner && toOwner && fromOwner == toOwner) continue;
+		FlowLink const* authored = nullptr;
+		for (auto const& link : mLinks)
+			if (link.graphLink == e) { authored = &link; break; }
+		if (!authored) continue;
+		if (fromOwner && !exposedAliasFor(*fromOwner, authored->authored.from)) continue;
+		if (toOwner && !exposedAliasFor(*toOwner, authored->authored.to)) continue;
+		auto projected = edge;
+		projected.from = fromOwner ? compositeIndex[fromOwner->instanceId]
+			: size_t(nodeMap[edge.from]);
+		projected.to = toOwner ? compositeIndex[toOwner->instanceId]
+			: size_t(nodeMap[edge.to]);
+		edgeMap[e].projected = int(links.size());
+		edgeMap[e].fromRewritten = fromOwner != nullptr;
+		edgeMap[e].toRewritten = toOwner != nullptr;
+		links.push_back(std::move(projected));
+	}
+	mGraph.nodes = std::move(nodes);
+	mGraph.links = std::move(links);
+	// Rewrite the authored-link records to match the projection: a link
+	// whose internal end is exposed now names the composite pin it is
+	// drawn at, so the drawn curve, the port-connected check and the
+	// inspector's Disconnect all speak of the exposed port. A link the
+	// projection dropped stops being drawable.
+	for (auto& link : mLinks)
+	{
+		if (link.graphLink == SIZE_MAX)
+		{
+			if (ownerOf(link.authored.from.nodeId) || ownerOf(link.authored.to.nodeId))
+				link.drawable = false;
+			continue;
+		}
+		auto const& mapped = edgeMap[link.graphLink];
+		if (mapped.projected < 0)
+		{
+			link.drawable = false;
+			link.graphLink = SIZE_MAX;
+			continue;
+		}
+		auto const& edge = mGraph.links[size_t(mapped.projected)];
+		link.fromNode = edge.from;
+		link.toNode = edge.to;
+		if (mapped.fromRewritten)
+		{
+			auto const* owner = ownerOf(link.authored.from.nodeId);
+			auto const alias = exposedAliasFor(*owner, link.authored.from);
+			link.authored.from = {owner->prefabId, owner->instanceId, *alias};
+		}
+		if (mapped.toRewritten)
+		{
+			auto const* owner = ownerOf(link.authored.to.nodeId);
+			auto const alias = exposedAliasFor(*owner, link.authored.to);
+			link.authored.to = {owner->prefabId, owner->instanceId, *alias};
+		}
+		link.graphLink = size_t(mapped.projected);
+		link.drawable = link.fromNode != SIZE_MAX && link.toNode != SIZE_MAX;
+	}
+}
+
+std::optional<std::string> StationFlowDiagram::exposedAliasFor(
+	core::PlacedPrefab const& placed, core::StationPinRef const& internalPin) const
+{
+	for (auto const& [name, target] : placed.exposedPins)
+		if (target == internalPin) return name;
+	return std::nullopt;
+}
+
+void StationFlowDiagram::setPrefabInstanceExpanded(std::string const& instanceId, bool expanded)
+{
+	if (expanded) mExpandedPrefabs.insert(instanceId);
+	else mExpandedPrefabs.erase(instanceId);
+	// View state only: the draft is not written and no history step is
+	// taken. The next frame re-projects the graph.
+	mProjectionDirty = true;
+}
+
+std::string StationFlowDiagram::prefabInstanceFor(std::string const& nodeId) const
+{
+	auto const sep = nodeId.find(core::PrefabIdSeparator);
+	if (sep == std::string::npos) return {};
+	auto const prefix = nodeId.substr(0, sep);
+	for (auto const& placed : mPlacedPrefabs)
+		if (placed.instanceId == prefix) return prefix;
+	return {};
+}
+
+bool StationFlowDiagram::prefabToggleScreenRect(std::string const& instanceId, ImVec4* out) const
+{
+	auto const found = mPrefabToggles.find(instanceId);
+	if (found == mPrefabToggles.end()) return false;
+	if (out) *out = found->second;
+	return true;
 }
 
 void StationFlowDiagram::render(core::StationSystemsSettings& draft,
@@ -834,28 +1094,14 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	{ mDragging = -1; mTemperature = 0; mActiveLinkPin.reset(); }
 	mPinEligibility.clear();
 	mLastFrame = ImGui::GetFrameCount();
-	if (!mCached || *mCached != draft)
+	// #813: the projection is rebuilt together with the graph. Toggling a
+	// unit's expanded view dirties the projection without touching the
+	// draft, so the rebuild condition reads the view state too.
+	if (!mCached || *mCached != draft || mProjectionDirty)
 	{
+		mProjectionDirty = false;
 		mGraph = station_flow::build(draft); mCached = draft;
 		mTelemetryTick = UINT64_MAX;
-		// A rebuild must not silently drop the selection: re-resolve the
-		// remembered node by identity so editing a field in the inspector
-		// keeps the node it belongs to selected (until it disappears).
-		mSelected = mSelectedType.empty()
-			? -1 : findNodeByTypeAndId(mGraph, mSelectedType, mSelectedId);
-		// Once the entry is gone, its identity must not reselect a later redo
-		// (or another entry with the same name).
-		if (mSelected < 0) { mSelectedType.clear(); mSelectedId.clear(); }
-		mPositions = station_flow::forceLayout(mGraph);
-		std::map<std::string, size_t> occurrences;
-		for (size_t i = 0; i < mGraph.nodes.size(); ++i)
-		{
-			auto const& node = mGraph.nodes[i];
-			auto base = node.type + ":" + node.id;
-			auto key = base + ":" + std::to_string(occurrences[base]++);
-			if (auto found = mLayout.find(key); found != mLayout.end()) mPositions[i] = found->second;
-		}
-		mDragging = -1; mTemperature = 0; mActiveLinkPin.reset();
 		// The editable links are the draft's own references, resolved to the
 		// nodes that carry them. Identity comes from configuration, so adding
 		// or removing another entry cannot renumber what is already wired.
@@ -886,6 +1132,29 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			}
 			mLinks.push_back(std::move(link));
 		}
+		// #813: collapse placed units to single nodes before anything
+		// downstream reads the graph: drawing, selection, hit-testing and
+		// the inspector all see the projected view.
+		projectComposites(draft);
+		// A rebuild must not silently drop the selection: re-resolve the
+		// remembered node by identity against the projected graph, so a
+		// composite stays selected across draft edits and the composite of
+		// a unit that was just expanded drops out of the selection with it.
+		mSelected = mSelectedType.empty()
+			? -1 : findNodeByTypeAndId(mGraph, mSelectedType, mSelectedId);
+		// Once the entry is gone, its identity must not reselect a later redo
+		// (or another entry with the same name).
+		if (mSelected < 0) { mSelectedType.clear(); mSelectedId.clear(); }
+		mPositions = station_flow::forceLayout(mGraph);
+		std::map<std::string, size_t> occurrences;
+		for (size_t i = 0; i < mGraph.nodes.size(); ++i)
+		{
+			auto const& node = mGraph.nodes[i];
+			auto base = node.type + ":" + node.id;
+			auto key = base + ":" + std::to_string(occurrences[base]++);
+			if (auto found = mLayout.find(key); found != mLayout.end()) mPositions[i] = found->second;
+		}
+		mDragging = -1; mTemperature = 0; mActiveLinkPin.reset();
 		if (mSelectedConnection && std::none_of(mGraph.links.begin(), mGraph.links.end(),
 			[&](auto const& edge) { return edge.designKey == *mSelectedConnection; }))
 			mSelectedConnection.reset();
@@ -1100,6 +1369,19 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			}
 	auto const& io = ImGui::GetIO();
 	bool const hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
+	// #813: composite nodes show the synthesized exposed-port connectors;
+	// every other node keeps the descriptor-driven port set.
+	auto const portsFor = [this](std::string const& type, std::string const& id,
+		core::StationSystemsSettings const& settings) -> std::vector<FlowPort>
+	{
+		if (mCompositeKeys.find(type + keySeparator + id) != mCompositeKeys.end())
+		{
+			auto const found = mCompositePortDescriptors.find(type);
+			return compositeNodePorts(found == mCompositePortDescriptors.end()
+				? std::vector<core::PortDescriptor>{} : found->second);
+		}
+		return nodePorts(type, id, settings);
+	};
 	if (hovered && io.MouseWheel != 0)
 	{
 		auto old = mZoom; mZoom = std::clamp(mZoom * std::pow(1.15f, io.MouseWheel), 0.001f, 1.5f);
@@ -1169,7 +1451,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		// link on. They sit inside the node body so the node's own rect, which
 		// the library derives from this group, stays the size we draw.
 		auto const nodeScreen = point(mPositions[i]);
-		for (auto const& port : nodePorts(n.type, n.id, draft))
+		for (auto const& port : portsFor(n.type, n.id, draft))
 		{
 			auto const centre = point({mPositions[i].x + port.offset.x,
 				mPositions[i].y + port.offset.y});
@@ -1226,12 +1508,23 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		if (from != mPinRefs.end() && to != mPinRefs.end())
 		{
 			core::CandidateLink candidate{from->second, to->second};
-			auto const verdict = core::evaluateStationLink(draft, candidate);
+			// #813: a dropped link may name a composite exposed pin. The
+			// core resolver maps it to the aliased internal connector and
+			// the existing evaluator and writer run behind it unchanged,
+			// so the verdict, the refusal reason and the reference field
+			// written are exactly the direct ones.
+			auto const verdict = core::evaluatePrefabLink(draft, mPlacedPrefabs, candidate);
 			if (!verdict.allowed) mLinkRejection = verdict.reason;
-			else if (core::applyStationLink(draft, candidate)) mLinkRejection.clear();
-			// Allowed but unwritable means the draft moved between the verdict
-			// and the write. Say so rather than fail silently.
-			else mLinkRejection = "That link could not be recorded in the draft. Please try again.";
+			else
+			{
+				std::string reason;
+				if (core::applyPrefabLink(draft, mPlacedPrefabs, candidate, reason))
+					mLinkRejection.clear();
+				// Allowed but unwritable means the draft moved between the
+				// verdict and the write. Say so rather than fail silently.
+				else mLinkRejection = reason.empty()
+					? "That link could not be recorded in the draft. Please try again." : reason;
+			}
 		}
 	}
 	// End feedback on the release frame, whether the link was accepted,
@@ -1245,6 +1538,18 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		if (mActiveLinkPin) endedLinkPin = mActiveLinkPin;
 		mActiveLinkPin.reset();
 	}
+	// #813: eligibility through the composite boundary. A composite pin
+	// resolves to its aliased internal connector and the existing
+	// evaluator judges the resolved pair, so the highlight during a drag
+	// is exactly the verdict the drop would get - the boundary adds no
+	// rule of its own.
+	auto const eligibilityFor = [this](core::StationSystemsSettings const& settings,
+		core::StationPinRef const& origin,
+		core::StationPinRef const& target) -> std::optional<bool>
+	{
+		if (origin == target) return std::nullopt;
+		return core::evaluatePrefabLink(settings, mPlacedPrefabs, {origin, target}).allowed;
+	};
 	if (mActiveLinkPin)
 		for (auto const& [key, position] : framePins)
 		{
@@ -1253,7 +1558,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			if (found == mPinIds.end()) continue;
 			auto const ref = mPinRefs.find(found->second);
 			if (ref == mPinRefs.end()) continue;
-			if (auto eligible = station_flow::connectorEligibility(draft, *mActiveLinkPin, ref->second))
+			if (auto eligible = eligibilityFor(draft, *mActiveLinkPin, ref->second))
 				mPinEligibility.emplace(key, *eligible);
 		}
 	for (int c = 0; c < 4; ++c) ImNodes::PopColorStyle();
@@ -1288,6 +1593,10 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	auto const overPortButton = [this](ImVec2 const& pos)
 	{
 		for (auto const& [key, rect] : mPortButtons)
+			if (pos.x >= rect.x && pos.x <= rect.z && pos.y >= rect.y && pos.y <= rect.w) return true;
+		// #813: the composite expand affordance owns its own clicks too; a
+		// press on it never selects the node behind it.
+		for (auto const& [id, rect] : mPrefabToggles)
 			if (pos.x >= rect.x && pos.x <= rect.z && pos.y >= rect.y && pos.y <= rect.w) return true;
 		return false;
 	};
@@ -1824,6 +2133,7 @@ entry.thermalClass = "moderate";
 	// The affordance rects are rebuilt every drawn frame; the selection
 	// handler earlier in this frame already read the previous frame's set.
 	mPortButtons.clear();
+	mPrefabToggles.clear();
 	// Synthesized pathway links never enter mGraph.links/mLinks: no editable
 	// connection identity, selection, deletion, or flow allocation is attached.
 	mPathwayScreen.clear();
@@ -1996,7 +2306,19 @@ entry.thermalClass = "moderate";
 			draw->AddRect(a, d, border, 5, 0, i == size_t(mSelected) ? 2.5f : 1.0f);
 		// Long IDs/details must not wrap into the electrical or material rows.
 		ImVec4 clip{a.x + 3, a.y + 3, d.x - 3, a.y + 54.0f * mZoom};
-		auto label = n.type + "\n" + n.id + (n.detail.empty() ? "" : "\n" + n.detail)
+		bool const composite = mCompositeKeys.find(n.type + keySeparator + n.id)
+			!= mCompositeKeys.end();
+		std::string label;
+		if (composite)
+		{
+			// The composite reads as the object the designer named, not as
+			// its prefab id: title = the template's display name, second
+			// line = the instance namespace.
+			auto const* tmpl = mPrefabCatalogue ? mPrefabCatalogue->find(n.type) : nullptr;
+			auto const display = tmpl && !tmpl->displayName.empty() ? tmpl->displayName : n.type;
+			label = display + "\n" + n.id + " (prefab unit)";
+		}
+		else label = n.type + "\n" + n.id + (n.detail.empty() ? "" : "\n" + n.detail)
 			+ (derived ? " (derived)" : "");
 		draw->AddText(ImGui::GetFont(), ImGui::GetFontSize() * 1.1f * mZoom, {a.x + 8 * mZoom, a.y + 6 * mZoom},
 			IM_COL32(235, 240, 245, 255), label.c_str(), nullptr, (nodeWidth - 16) * mZoom, &clip);
@@ -2026,7 +2348,7 @@ entry.thermalClass = "moderate";
 				if (over && std::hypot(centre.x - io.MousePos.x, centre.y - io.MousePos.y) < 14.0f)
 					ImGui::SetTooltip("%s: shared electrical pool (automatic connection)", input ? "Power in" : "Power out");
 			}
-		for (auto const& port : nodePorts(n.type, n.id, draft))
+		for (auto const& port : portsFor(n.type, n.id, draft))
 		{
 			auto const key = pinKey(n.type, n.id, std::string(port.descriptor->name));
 			auto const pin = framePins.find(key);
@@ -2116,6 +2438,26 @@ entry.thermalClass = "moderate";
 				if (status.canGrow) drawAffordance(true, "+");
 				if (status.canShrink) drawAffordance(false, "-");
 			}
+		// #813: the composite's expand affordance sits just below the node
+		// body, like the grow/shrink buttons; pressing it flips the view
+		// only - the draft is never touched.
+		if (composite && mPlacingType.empty())
+		{
+			ImVec2 const ba{a.x, d.y + 3.0f};
+			ImVec2 const bb{ba.x + 96.0f, ba.y + 16.0f};
+			mPrefabToggles[n.id] = {ba.x, ba.y, bb.x, bb.y};
+			bool const hot = hovered && ImGui::IsMouseHoveringRect(ba, bb);
+			draw->AddRectFilled(ba, bb,
+				hot ? IM_COL32(78, 96, 120, 255) : IM_COL32(45, 50, 58, 235), 3);
+			draw->AddRect(ba, bb, IM_COL32(150, 170, 200, 220), 3);
+			auto* font = ImGui::GetFont();
+			char const* glyph = "Expand unit";
+			auto const size = font->CalcTextSizeA(ImGui::GetFontSize(),
+				std::numeric_limits<float>::max(), 0.0f, glyph);
+			draw->AddText(font, ImGui::GetFontSize(),
+				{ba.x + (96.0f - size.x) * 0.5f, ba.y + (16.0f - size.y) * 0.5f},
+				IM_COL32(235, 240, 245, 255), glyph);
+		}
 	}
 	// A link drag released over a derived service node's body is refused
 	// through the same core rule, naming it as derived. The library never
@@ -2176,6 +2518,29 @@ entry.thermalClass = "moderate";
 	// Releasing outside the canvas (or after arming placement) cancels
 	// the press too; it must not fire on a later, unrelated release.
 	if (!io.MouseDown[ImGuiMouseButton_Left]) mPressedPortButton.clear();
+	// #813: the composite expand affordance follows the same press and
+	// release discipline as the grow/shrink buttons: a release only fires
+	// the toggle the press started on. The toggle changes the view only -
+	// no draft write, no history step.
+	if (canvasHovered && mPlacingType.empty())
+	{
+		std::string hoveredToggle;
+		for (auto const& [id, rect] : mPrefabToggles)
+			if (ImGui::IsMouseHoveringRect({rect.x, rect.y}, {rect.z, rect.w}))
+			{ hoveredToggle = id; break; }
+		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !hoveredToggle.empty())
+		{ mPressedPrefabToggle = hoveredToggle; mPressedPrefabTogglePos = io.MousePos; }
+		if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && !mPressedPrefabToggle.empty())
+		{
+			if (hoveredToggle == mPressedPrefabToggle
+				&& std::hypot(io.MousePos.x - mPressedPrefabTogglePos.x,
+					io.MousePos.y - mPressedPrefabTogglePos.y) <= 6.0f)
+				setPrefabInstanceExpanded(mPressedPrefabToggle,
+					!isPrefabInstanceExpanded(mPressedPrefabToggle));
+			mPressedPrefabToggle.clear();
+		}
+	}
+	if (!io.MouseDown[ImGuiMouseButton_Left]) mPressedPrefabToggle.clear();
 	if (!mPlacingType.empty() && canvasHovered)
 	{
 		// A prefab's ghost reports the caps of everything it would consume, so
@@ -2353,7 +2718,7 @@ entry.thermalClass = "moderate";
 			if (ImGui::BeginChild("Connections", {0, 170}, true))
 			{
 				if (!n.detail.empty()) ImGui::TextUnformatted(n.detail.c_str());
-				auto const ports = nodePorts(n.type, n.id, draft);
+				auto const ports = portsFor(n.type, n.id, draft);
 				for (auto const& port : ports)
 				{
 					auto const self = pinKey(n.type, n.id, std::string(port.descriptor->name));
@@ -2411,6 +2776,30 @@ entry.thermalClass = "moderate";
 				ImGui::TextWrapped("Status: %s", values->status.c_str());
 				for (auto const& line : values->details) ImGui::TextWrapped("%s", line.c_str());
 				for (auto const& [name, value] : values->ports) ImGui::TextWrapped("%s: %s", name.c_str(), value.c_str());
+			}
+			// #813: which prefab unit this node belongs to, and the
+			// view-only expand/collapse control. The toggle never writes
+			// the draft and never enters the undo history; internals stay
+			// editable through the ordinary entry editors below while the
+			// unit is expanded.
+			std::string unitId = mCompositeKeys.find(mSelectedType + keySeparator + mSelectedId)
+				!= mCompositeKeys.end() ? mSelectedId : prefabInstanceFor(mSelectedId);
+			if (!unitId.empty())
+			{
+				core::PlacedPrefab const* unit = nullptr;
+				for (auto const& placed : mPlacedPrefabs)
+					if (placed.instanceId == unitId) { unit = &placed; break; }
+				auto const* tmpl = unit && mPrefabCatalogue
+					? mPrefabCatalogue->find(unit->prefabId) : nullptr;
+				auto const display = tmpl && !tmpl->displayName.empty()
+					? tmpl->displayName : (unit ? unit->prefabId : unitId);
+				ImGui::Text("Prefab unit '%s' (%s)", unitId.c_str(), display.c_str());
+				bool const expanded = isPrefabInstanceExpanded(unitId);
+				auto const toggleLabel =
+					(expanded ? "Collapse unit " : "Expand unit ") + unitId;
+				if (ImGui::Button(toggleLabel.c_str()))
+					setPrefabInstanceExpanded(unitId, !expanded);
+				ImGui::TextDisabled("Expand/collapse is a view state; the draft is unchanged.");
 			}
 			ImGui::Separator();
 			ImGui::InputText("New node name", mRenameBuffer, sizeof(mRenameBuffer));

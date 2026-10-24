@@ -1002,6 +1002,9 @@ set_tests_properties(station-editor-flow-chiller PROPERTIES LABELS "smoke;functi
 # #812: the prefab catalogue in the Place-node menu and atomic placement.
 add_test(NAME station-editor-prefab-placement COMMAND pf-smoke-editor --check station/prefabPlacementWorkflow)
 set_tests_properties(station-editor-prefab-placement PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+# #813: the composite single-node projection with the expand/collapse toggle.
+add_test(NAME station-editor-prefab-composite-projection COMMAND pf-smoke-editor --check station/prefabCompositeProjectionWorkflow)
+set_tests_properties(station-editor-prefab-composite-projection PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-coolant-loop COMMAND pf-smoke-editor --check station/flowCoolantLoopWorkflow)
 set_tests_properties(station-editor-flow-coolant-loop PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-transfers COMMAND pf-smoke-editor --check station/transferWorkflow)

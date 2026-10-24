@@ -71,6 +71,17 @@ public:
 	std::optional<bool> flowPinEligibility(std::string const& nodeType,
 		std::string const& nodeId, std::string const& portName) const
 	{ return mFlow.pinEligibility(nodeType, nodeId, portName); }
+	// #813: the composite view state, forwarded so a headless check can
+	// assert the projection and drive the toggle. Expansion is view-only:
+	// it never writes the draft.
+	std::vector<core::PlacedPrefab> const& flowPlacedPrefabs() const
+	{ return mFlow.placedPrefabs(); }
+	bool flowPrefabExpanded(std::string const& instanceId) const
+	{ return mFlow.isPrefabInstanceExpanded(instanceId); }
+	void flowSetPrefabExpanded(std::string const& instanceId, bool expanded)
+	{ mFlow.setPrefabInstanceExpanded(instanceId, expanded); }
+	bool flowPrefabToggleRect(std::string const& instanceId, ImVec4* out) const
+	{ return mFlow.prefabToggleScreenRect(instanceId, out); }
 private:
 	std::vector<std::shared_ptr<StationConfigurationResource>> mConfigurationResources;
 	std::shared_ptr<core::PrefabCatalogue const> mPrefabCatalogue;

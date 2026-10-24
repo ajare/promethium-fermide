@@ -6653,11 +6653,209 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		require(driver.passed(), "prefab placement workflow failed on the Test Engine");
 	}
 
+	// #813: the composite projection. A placed unit renders as one node
+	// showing only its exposed ports; internal↔internal links are hidden;
+	// an outside link touching an exposed connector is drawn at the
+	// aliasing exposed pin; and the expand/collapse toggle switches the
+	// view without ever writing the draft or entering the undo history.
+	void prefabCompositeProjectionWorkflow(smoke::Context const& fixtureContext)
+	{
+		using smoke::require;
+		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
+		auto const root = fixtureContext.temporaryRoot() / "prefab-projection-resources";
+		headless::StationResourceFixture resources(authored, root);
+		require(resources.catalogues.size() == 1,
+			"the bundled prefab catalogue should load from the manifest");
+
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window;
+		window.setPrefabCatalogueResources(resources.catalogues);
+		auto world = std::make_shared<core::World>("Prefab projection", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration");
+			window.renderFlowContents(world);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "prefabCompositeProjection", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto* canvas = flowCanvasWindow("Configuration");
+			REQ(canvas != nullptr, "flow canvas is missing");
+			// The tracer bullet: place an aircon and see one box.
+			ctx->ComboClick("Place node/Aircon Unit"); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 300.0f, canvas->Pos.y + 220.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ImVec4 rect{};
+			REQ(window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"the placed unit does not render as one composite node");
+			REQ(!window.flowNodeRect("Chiller", "ac1.machine", &rect),
+				"an internal node is drawn while the unit is collapsed");
+			REQ(!window.flowNodeRect("Coolant loop", "ac1.loop", &rect),
+				"the internal coolant loop is drawn while the unit is collapsed");
+			REQ(!window.flowNodeRect("Radiator", "ac1.radiator", &rect),
+				"the internal radiator is drawn while the unit is collapsed");
+			// Only the exposed ports are drawn; the internal connectors the
+			// ports alias are not on screen while collapsed.
+			ImVec2 pin{};
+			REQ(window.flowPinPosition("aircon-unit", "ac1", "Cold supply", &pin),
+				"the composite does not show its exposed Cold supply pin");
+			REQ(window.flowPinPosition("aircon-unit", "ac1", "Supervision", &pin),
+				"the composite does not show its exposed Supervision pin");
+			REQ(!window.flowPinPosition("Coolant loop", "ac1.loop", "Cold interface", &pin),
+				"the internal Cold interface connector is drawn while collapsed");
+			// The internal↔internal link (chiller -> coolant loop) is hidden
+			// while collapsed.
+			core::StationConnectionKey const internalLink{"Chiller", "ac1.machine",
+				"Cold loop", "Evaporator heat", "Coolant loop", "ac1.loop"};
+			ImVec2 linkPoint{};
+			REQ(!window.flowConnectionPosition(internalLink, &linkPoint),
+				"an internal link is drawn while the unit is collapsed");
+			// An outside link through the exposed Cold supply meets the
+			// ordinary rule verbatim: the unit's own chiller already owns
+			// that loop, so a second chiller is refused with the direct
+			// one-evaporator reason - the boundary hides no rule.
+			ctx->ComboClick("Place node/Chiller"); ctx->Yield(2);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 560.0f, canvas->Pos.y + 420.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			REQ(window.draft().chillers.size() == 2
+				&& window.draft().chillers[1].id == "chiller1"
+				&& window.draft().chillers[1].coldLoopId.empty(),
+				"the outside chiller did not land unwired");
+			ImVec2 a{}, b{};
+			REQ(window.flowPinPosition("aircon-unit", "ac1", "Cold supply", &a)
+				&& window.flowPinPosition("Chiller", "chiller1", "Cold loop", &b),
+				"the composite or chiller connector is missing before the drag");
+			ctx->MouseTeleportToPos(a); ctx->Yield(2);
+			ctx->MouseDown(); ctx->Yield(2);
+			ctx->MouseTeleportToPos({(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f}); ctx->Yield(2);
+			ctx->MouseTeleportToPos(b); ctx->Yield(2);
+			ImVec2 live{};
+			if (window.flowPinPosition("Chiller", "chiller1", "Cold loop", &live))
+			{ ctx->MouseTeleportToPos(live); ctx->Yield(2); }
+			ctx->MouseUp(); ctx->Yield(3);
+			REQ(window.flowLinkRejection().find("shares cold loop 'ac1.loop'")
+					!= std::string::npos,
+				("the boundary did not pass the direct evaporator rule through: "
+					+ window.flowLinkRejection()).c_str());
+			REQ(window.draft().chillers[1].coldLoopId.empty(),
+				"a refused link through the boundary wrote to the draft");
+			// A legal join through the boundary: wire an Outage's Target
+			// installation to the composite's exposed Supervision pin. The
+			// reference lands on the aliased internal chiller, and the link
+			// is drawn at the exposed pin while collapsed.
+			ctx->ComboClick("Place node/Outage"); ctx->Yield(2);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 40.0f, canvas->Pos.y + 40.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			REQ(window.draft().outages.size() == 1
+				&& window.draft().outages[0].id == "outage1"
+				&& window.draft().outages[0].installationId.empty(),
+				"the outage did not land unwired");
+			REQ(window.flowPinPosition("Outage", "outage1", "Target installation", &a)
+				&& window.flowPinPosition("aircon-unit", "ac1", "Supervision", &b),
+				"the outage or composite supervision connector is missing before the drag");
+			ctx->MouseTeleportToPos(a); ctx->Yield(2);
+			ctx->MouseDown(); ctx->Yield(2);
+			ctx->MouseTeleportToPos({(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f}); ctx->Yield(2);
+			ctx->MouseTeleportToPos(b); ctx->Yield(2);
+			if (window.flowPinPosition("aircon-unit", "ac1", "Supervision", &live))
+			{ ctx->MouseTeleportToPos(live); ctx->Yield(2); }
+			ctx->MouseUp(); ctx->Yield(3);
+			REQ(window.flowLinkRejection().empty(),
+				("wiring the exposed Supervision pin was refused: "
+					+ window.flowLinkRejection()).c_str());
+			REQ(window.draft().outages.size() == 1
+				&& window.draft().outages[0].installationId == "ac1.machine",
+				"the link through the exposed Supervision pin did not land the aliased internal chiller");
+			// The outside link is drawn while collapsed (at the exposed pin);
+			// the internal link stays hidden.
+			core::StationConnectionKey const outsideLink{"Outage", "outage1",
+				"installationId", "Scheduled capacity reduction", "Chiller", "ac1.machine"};
+			REQ(window.flowConnectionPosition(outsideLink, &linkPoint),
+				"the outside link to the exposed pin is not drawn while collapsed");
+			REQ(!window.flowConnectionPosition(internalLink, &linkPoint),
+				"an internal link is drawn while the unit is collapsed after wiring");
+			// The collapsed view is a view: toggling it never writes the
+			// draft and never enters the undo history.
+			auto const draftBefore = window.draft();
+			auto const undoBefore = window.draftHistory().undoCount();
+			ImVec4 toggle{};
+			REQ(window.flowPrefabToggleRect("ac1", &toggle),
+				"the collapsed composite offers no expand affordance");
+			ctx->MouseTeleportToPos({(toggle.x + toggle.z) * 0.5f, (toggle.y + toggle.w) * 0.5f});
+			ctx->Yield(2);
+			ctx->MouseClick(); ctx->Yield(3);
+			REQ(window.flowPrefabExpanded("ac1"),
+				"the canvas expand affordance did not expand the unit");
+			REQ(window.flowNodeRect("Chiller", "ac1.machine", &rect),
+				"the internal chiller is not drawn when expanded");
+			REQ(window.flowNodeRect("Coolant loop", "ac1.loop", &rect),
+				"the internal coolant loop is not drawn when expanded");
+			REQ(!window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"the composite box is still drawn while expanded");
+			// Bring the expanded internals into view before asserting the
+			// link and selecting a node: the unit's grid extends past the
+			// canvas at this zoom.
+			ctx->ItemClick("Fit all"); ctx->Yield(3);
+			REQ(window.flowConnectionPosition(internalLink, &linkPoint),
+				"the internal link is not drawn when expanded");
+			REQ(window.draft() == draftBefore, "expanding the unit wrote to the draft");
+			REQ(window.draftHistory().undoCount() == undoBefore,
+				"expanding the unit entered the undo history");
+			// While expanded, internals are editable through the ordinary
+			// entry editors: selecting the internal chiller opens its
+			// settings editor, not a placeholder.
+			REQ(window.flowNodeRect("Chiller", "ac1.machine", &rect),
+				"the internal chiller disappeared before selection");
+			ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+			ctx->Yield(2);
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 4.0f, canvas->Pos.y + 4.0f});
+			ctx->Yield(3);
+			REQ(driver.contains("Node: Chiller 'ac1.machine'"),
+				"the expanded internal chiller did not open its inspector entry");
+			REQ(!driver.contains("does not map to a single editable entry"),
+				"the internal chiller did not map to an editable entry");
+			// Collapse back through the inspector control; the composite is
+			// back and the draft is still untouched.
+			driver.click(ctx, "**/Collapse unit ac1"); ctx->Yield(3);
+			REQ(!window.flowPrefabExpanded("ac1"),
+				"the inspector collapse did not collapse the unit");
+			REQ(window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"the composite did not come back after collapse");
+			REQ(!window.flowNodeRect("Chiller", "ac1.machine", &rect),
+				"an internal node is drawn after collapsing back");
+			REQ(window.draft() == draftBefore, "collapsing the unit wrote to the draft");
+			REQ(window.draftHistory().undoCount() == undoBefore,
+				"collapsing the unit entered the undo history");
+			// The outside link survives the round trip and is still drawn at
+			// the exposed pin.
+			REQ(window.flowConnectionPosition(outsideLink, &linkPoint),
+				"the outside link vanished after the expand/collapse round trip");
+		});
+		#undef REQ
+		require(driver.passed(), "prefab composite projection workflow failed on the Test Engine");
+	}
+
 	void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	editor_smoke::registerStationConnections(checks);
 	registerMixedObservationEditorChecks(checks);
 	checks.push_back({"station/prefabPlacementWorkflow", prefabPlacementWorkflow});
+	checks.push_back({"station/prefabCompositeProjectionWorkflow", prefabCompositeProjectionWorkflow});
 	checks.push_back({"station/addEntryWorkflow", addEntryWorkflow});
 	checks.push_back({"station/configurationResources", configurationResources});
 	checks.push_back({"station/windowWorkflow", workflow});

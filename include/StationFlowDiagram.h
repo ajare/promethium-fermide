@@ -8,6 +8,7 @@
 #include <functional>
 #include <optional>
 #include <map>
+#include <set>
 struct ImNodesContext;
 #include <string>
 #include <vector>
@@ -145,8 +146,31 @@ public:
 	void setPrefabCatalogue(std::shared_ptr<core::PrefabCatalogue const> catalogue)
 	{
 		mPrefabCatalogue = std::move(catalogue);
+		// #813: the composite port descriptors borrow names from the
+		// catalogue; re-project on swap so no stale view of the previous
+		// catalogue's strings survives a frame.
+		mProjectionDirty = true;
 	}
 	std::shared_ptr<core::PrefabCatalogue const> prefabCatalogue() const { return mPrefabCatalogue; }
+	// #813: the composite projection. Every placement records its placed
+	// unit; while collapsed a unit renders as one node whose pins are the
+	// template's exposed ports, internal↔internal links are hidden, and a
+	// link touching an exposed internal connector is drawn at the aliasing
+	// exposed pin. Expansion is editor view state only: it never reaches
+	// the draft and never enters the undo history.
+	std::vector<core::PlacedPrefab> const& placedPrefabs() const { return mPlacedPrefabs; }
+	bool isPrefabInstanceExpanded(std::string const& instanceId) const
+	{
+		return mExpandedPrefabs.find(instanceId) != mExpandedPrefabs.end();
+	}
+	void setPrefabInstanceExpanded(std::string const& instanceId, bool expanded);
+	// The instance whose namespace owns `nodeId`, or empty when the id is
+	// not namespaced under a placed unit. Namespaced internal ids carry
+	// the unit namespace, so an internal entry always names its unit.
+	std::string prefabInstanceFor(std::string const& nodeId) const;
+	// Last frame's rect of the canvas expand affordance on a collapsed
+	// composite. False when the affordance is not drawn.
+	bool prefabToggleScreenRect(std::string const& instanceId, ImVec4* out) const;
 private:
 	// Clear both halves of the armed-placement state together: a prefab armed
 	// by display name must never leave a stale prefab id behind (or vice versa).
@@ -234,6 +258,28 @@ private:
 	std::map<std::string, bool> mPinEligibility;
 	std::map<std::string, ImVec4> mNodeScreen;
 	std::string mLinkRejection;
+	// #813: placed composite units and their view state. `mPlacedPrefabs`
+	// is recorded at placement; the expanded set names the instances whose
+	// internals are shown instead of the composite box. The projection
+	// itself (composite node keys, synthesized port descriptors) is
+	// rebuilt with the graph and never touches the draft.
+	std::vector<core::PlacedPrefab> mPlacedPrefabs;
+	std::set<std::string> mExpandedPrefabs;
+	bool mProjectionDirty{false};
+	std::set<std::string> mCompositeKeys;
+	std::map<std::string, std::vector<core::PortDescriptor>> mCompositePortDescriptors;
+	std::map<std::string, ImVec4> mPrefabToggles;
+	std::string mPressedPrefabToggle;
+	ImVec2 mPressedPrefabTogglePos{};
+	// Replace the built graph with its composite projection: collapsed
+	// units collapse to one node, their internal links disappear, and
+	// outside links touching an exposed connector are rewritten to the
+	// composite pin. Also rewrites the resolved authored-link records to
+	// match, so drawing, hit-testing and the inspector all speak of the
+	// exposed port while collapsed.
+	void projectComposites(core::StationSystemsSettings const& draft);
+	std::optional<std::string> exposedAliasFor(
+		core::PlacedPrefab const& placed, core::StationPinRef const& internalPin) const;
 	std::optional<core::StationNodeRemoval> mPendingRemoval;
 	std::optional<core::StationNodeRename> mPendingRename;
 	char mRenameBuffer[core::MaxStationStoreIdLength + 1]{};
