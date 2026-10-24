@@ -236,6 +236,14 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         heatEngineInstallationRegistration heatEngineOutageRemovesGeneration
         heatEngineOutagePartialCapacity heatEngineMaintenanceIsolation
         heatEngineOutageTransitionCoherence
+        # #832: the rates published for a step that an event split are the
+        # whole-step duration-weighted means, not the final sub-interval's
+        # sample - at the outage start, at the restoration, and across the
+        # non-outage edges (a load-profile opening and a maintenance
+        # isolation) that split a step just the same.
+        heatEngineSplitStepOutageStartRates
+        heatEngineSplitStepRestorationRates
+        heatEngineSplitStepNonOutageTriggers
         # #808: the reference station's bottoming cycle - the generator's
         # waste-heat reservoir driving a heat engine into a saturating
         # rejection buffer. The idle case proves the cycle waits for waste

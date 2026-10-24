@@ -106,7 +106,14 @@ class Lanes(unittest.TestCase):
                       'heatEngineOutageRemovesGeneration',
                       'heatEngineOutagePartialCapacity',
                       'heatEngineMaintenanceIsolation',
-                      'heatEngineOutageTransitionCoherence'):
+                      'heatEngineOutageTransitionCoherence',
+                      # #832: the rates published for an event-split step
+                      # are whole-step means, not the final sub-interval's
+                      # sample - outage start, restoration, and the
+                      # non-outage edges that split a step the same way.
+                      'heatEngineSplitStepOutageStartRates',
+                      'heatEngineSplitStepRestorationRates',
+                      'heatEngineSplitStepNonOutageTriggers'):
             self.assertIn('validation-fast', props(f'station-{check}')['LABELS'])
             self.assertNotIn('validation-stress', props(f'station-{check}')['LABELS'])
         # #806: the full gradient sweep is exhaustive-only. Its smoke

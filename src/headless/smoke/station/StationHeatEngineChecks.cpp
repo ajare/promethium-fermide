@@ -2300,6 +2300,276 @@ void heatEngineThermalConnections(smoke::Context const&)
 				"retained rejection drain erased heat or missed the reservoir");
 		}
 }
+
+// ---------------------------------------------------------------------------
+// Whole-step mean rates across an event-split step (#832)
+//
+// When a forcing edge falls inside a Station step the step is subdivided and
+// every sub-interval is integrated with the rates in force over it. Each
+// published step-mean rate must therefore describe the WHOLE committed step:
+// rate * stepSeconds has to reproduce the cumulative energy the step
+// actually booked. #832: the engine's intake / output / rejection rates and
+// both reservoirs' engine-exchange fields were left as the FINAL
+// sub-interval's sample while the connection telemetry beside them was
+// duration-weighted, so a step that began with an outage delivered 4.81895
+// kJ and then published zero for every one of those rates. Endpoint-only
+// quantities - status, availability, the limiter - keep their "as of the
+// step boundary" meaning; these checks pin the two apart so a whole-step
+// mean is never mistaken for an outage that never happened, and an
+// "OutOfService" endpoint is never read as a step that produced nothing.
+// ---------------------------------------------------------------------------
+
+// A published step-mean rate must integrate to the cumulative energy the
+// same committed step booked, at the conservation scale the rest of the
+// suite already uses.
+void expectStepMean(double meanKW, double deltaKJ, double stepSeconds,
+	std::string const& what)
+{
+	auto const impliedKJ = meanKW * stepSeconds;
+	require(std::abs(impliedKJ - deltaKJ)
+			<= 1e-6 * std::max({1.0, std::abs(impliedKJ), std::abs(deltaKJ)}),
+		("#832: " + what + " is not the whole-step mean (rate x step = "
+			+ std::to_string(impliedKJ) + " kJ, committed " + std::to_string(deltaKJ)
+			+ " kJ)").c_str());
+}
+
+core::StationConnectionSnapshot const* engineConnection(
+	core::StationSystemsSnapshot const& snap, std::string const& relation)
+{
+	for (auto const& c : snap.connections)
+		if (c.key.ownerType == "Heat engine" && c.key.relation == relation)
+			return &c;
+	// Connection accounts are materialised by the first committed interval,
+	// so the pre-step snapshot can legitimately carry none: nothing has
+	// flowed, which is the same money as no ledger at all.
+	return nullptr;
+}
+
+// Every rate the step publishes for one engine crossing - the machine's own
+// three, both reservoirs' engine-exchange fields, the power rollup and the
+// three connection legs - must be the whole-step mean of the same energy.
+void expectEngineStepMeans(core::StationSystemsSnapshot const& before,
+	core::StationSystemsSnapshot const& after, double stepSeconds,
+	std::string const& label)
+{
+	auto const orc = engine(after, "orc");
+	auto const was = engine(before, "orc");
+	auto const hotBefore = reservoir(before, "hot");
+	auto const hotAfter = reservoir(after, "hot");
+	auto const sinkBefore = reservoir(before, "reject");
+	auto const sinkAfter = reservoir(after, "reject");
+	auto const delta = [](double now, double then) { return now - then; };
+	expectStepMean(orc.lastThermalInputKW,
+		delta(orc.thermalInputEnergyKJ, was.thermalInputEnergyKJ),
+		stepSeconds, label + " engine thermal intake");
+	expectStepMean(orc.lastElectricalOutputKW,
+		delta(orc.electricalEnergyKJ, was.electricalEnergyKJ),
+		stepSeconds, label + " engine electrical output");
+	expectStepMean(orc.lastRejectionKW,
+		delta(orc.rejectionEnergyKJ, was.rejectionEnergyKJ),
+		stepSeconds, label + " engine rejection");
+	expectStepMean(hotAfter.lastEngineExtractionKW,
+		delta(hotAfter.engineExtractionEnergyKJ, hotBefore.engineExtractionEnergyKJ),
+		stepSeconds, label + " hot reservoir engine extraction");
+	expectStepMean(sinkAfter.lastEngineRejectionKW,
+		delta(sinkAfter.engineRejectionEnergyKJ, sinkBefore.engineRejectionEnergyKJ),
+		stepSeconds, label + " sink reservoir engine rejection");
+	expectStepMean(after.power.heatEngineOutputKW,
+		delta(orc.electricalEnergyKJ, was.electricalEnergyKJ),
+		stepSeconds, label + " power-rollup engine output");
+	expectStepMean(after.power.heatEngineRejectionKW,
+		delta(orc.rejectionEnergyKJ, was.rejectionEnergyKJ),
+		stepSeconds, label + " power-rollup engine rejection");
+	// The connection telemetry was already duration-weighted; the machine's
+	// own rates have to agree with it rather than with the last sub-interval.
+	for (auto const role : {"Thermal intake", "Rejection heat", "Generation"})
+	{
+		auto const now = engineConnection(after, role);
+		auto const then = engineConnection(before, role);
+		require(now != nullptr, (label + " connection " + role
+			+ " was never published").c_str());
+		auto const prior = [then](double core::StationConnectionSnapshot::* field)
+		{
+			return then != nullptr ? then->*field : 0.0;
+		};
+		expectStepMean(now->lastInputRate,
+			now->inputTotal - prior(&core::StationConnectionSnapshot::inputTotal),
+			stepSeconds, label + " connection " + role + " input");
+		expectStepMean(now->lastDeliveredRate,
+			now->deliveredTotal - prior(&core::StationConnectionSnapshot::deliveredTotal),
+			stepSeconds, label + " connection " + role + " delivered");
+		expectStepMean(now->lastLossRate,
+			now->lostTotal - prior(&core::StationConnectionSnapshot::lostTotal),
+			stepSeconds, label + " connection " + role + " loss");
+	}
+}
+
+// Run one split-step scenario for exactly one Station step from t = 0 and
+// check the published means against the committed energy.
+core::StationSystemsSnapshot runSplitStepScenario(std::string const& label,
+	core::StationSystemsSettings const& settings, double stepSeconds)
+{
+	core::StationSystemsRuntime runtime(settings, core::World::getFixedTimestep());
+	auto const before = runtime.snapshot();
+	require(before.healthy, (label + ": baseline snapshot failed its audit").c_str());
+	require(runtime.advanceTo(stepSeconds),
+		(label + ": step failed: "
+			+ (runtime.diagnostics().empty() ? "no diagnostic"
+				: runtime.diagnostics().back().message)).c_str());
+	auto const after = runtime.snapshot();
+	require(after.healthy, (label + ": step failed its audit").c_str());
+	require(after.systemsStepWorldTicks == settings.systemsStepWorldTicks
+		&& std::abs(after.systemsTimestepSeconds - stepSeconds) <= 1e-12,
+		(label + ": clock is not the fixture's one-second step").c_str());
+	expectEngineStepMeans(before, after, stepSeconds, label);
+	return after;
+}
+// A fixture magnitude the split step must actually produce, compared at the
+// same relative scale the step-mean check uses. The half of a one-second
+// step is 30 * (1.0f / 60) seconds, which is not exactly 0.5, so the
+// energies it books are not round numbers either.
+void expectEnergy(double actualKJ, double expectedKJ, std::string const& what)
+{
+	require(std::abs(actualKJ - expectedKJ)
+		<= 1e-6 * std::max(1.0, std::abs(expectedKJ)),
+		("#832: " + what + " booked " + std::to_string(actualKJ)
+			+ " kJ, the fixture declares " + std::to_string(expectedKJ) + " kJ").c_str());
+}
+
+// The ticket's reproduction: a zero-capacity outage opening halfway through
+// a one-second step. The engine ran for the first half and stood still for
+// the second, so the step means are half the running rates while the
+// endpoint - correctly - reports the machine out of service.
+void heatEngineSplitStepOutageStartRates(smoke::Context const&)
+{
+	auto const quantum = static_cast<double>(core::World::getFixedTimestep());
+	auto const half = 30.0 * quantum;
+	auto const full = 60.0 * quantum;
+	auto settings = enginePair(20000.0, 20000.0, 100.0, 0.5, 0.0);
+	settings.systemsStepWorldTicks = 60;
+	settings.outages = {makeOutage("down", "orc", 0.0, half, 10.0)};
+	auto const snap = runSplitStepScenario("outage-start", settings, full);
+	auto const orc = engine(snap, "orc");
+	// Half a second at full command: 50 kJ drawn, 4.81895 kJ delivered.
+	expectEnergy(orc.thermalInputEnergyKJ, 100.0 * half, "step intake");
+	expectEnergy(orc.electricalEnergyKJ, 4.81895, "step work");
+	// The published rates are the whole-step means, not the isolated tail:
+	// each one times the step reproduces the energy above it.
+	expectEnergy(orc.lastThermalInputKW * full, 100.0 * half, "published intake rate");
+	expectEnergy(orc.lastElectricalOutputKW * full, orc.electricalEnergyKJ,
+		"published output rate");
+	require(orc.lastRejectionKW > 0.0,
+		"the rejection rate vanished with the isolated tail of the step");
+	require(reservoir(snap, "hot").lastEngineExtractionKW > 0.0
+			&& reservoir(snap, "reject").lastEngineRejectionKW > 0.0,
+		"the reservoirs' engine-exchange rates describe only the final sub-interval");
+	require(snap.power.heatEngineOutputKW > 0.0,
+		"the power rollup lost the generation the first half of the step made");
+	// Endpoint semantics stay exactly as they were: the machine IS out of
+	// service at the step boundary, and that is not contradicted by the
+	// whole-step mean rates published beside it.
+	require(orc.status == core::StationHeatEngineStatus::Idle
+		&& orc.lastLimiter == "OutOfService" && orc.availabilityFactor == 0.0,
+		"the outage-start endpoint status/availability changed with the rates");
+	require(outageSnap(snap, "down").active
+		&& outageSnap(snap, "down").installationAvailability == 0.0,
+		"the outage snapshot does not agree with the engine's endpoint status");
+}
+
+// Restoration inside a step: the mirror case. The engine stood still for
+// the first half and ran for the second, so the step means are again half
+// the running rates while the endpoint reports full service.
+void heatEngineSplitStepRestorationRates(smoke::Context const&)
+{
+	auto const quantum = static_cast<double>(core::World::getFixedTimestep());
+	auto const half = 30.0 * quantum;
+	auto const full = 60.0 * quantum;
+	auto settings = enginePair(20000.0, 20000.0, 100.0, 0.5, 0.0);
+	settings.systemsStepWorldTicks = 60;
+	settings.outages = {makeOutage("down", "orc", 0.0, 0.0, half)};
+	auto const snap = runSplitStepScenario("restoration", settings, full);
+	auto const orc = engine(snap, "orc");
+	expectEnergy(orc.thermalInputEnergyKJ, 100.0 * half, "restored step intake");
+	expectEnergy(orc.lastThermalInputKW * full, orc.thermalInputEnergyKJ,
+		"restored published intake rate");
+	require(std::abs(orc.lastElectricalOutputKW * full - orc.electricalEnergyKJ) < 1e-6 * 5.0,
+		"the restored step's output rate does not integrate to its work");
+	require(reservoir(snap, "hot").lastEngineExtractionKW > 0.0
+			&& reservoir(snap, "reject").lastEngineRejectionKW > 0.0,
+		"the reservoirs' engine-exchange rates skipped the restored half-step");
+	require(orc.status == core::StationHeatEngineStatus::Active
+		&& orc.availabilityFactor == 1.0,
+		"the restoration endpoint status/availability did not return to service");
+	require(!outageSnap(snap, "down").active,
+		"the outage snapshot still claims its window is open after restoring");
+}
+
+// Non-outage split triggers: a load-profile edge and a maintenance
+// isolation edge both subdivide the step with no outage anywhere in the
+// configuration, and the engine rates must still be whole-step means. The
+// profile edge brings the engine up mid-step against pure demand acceptance
+// (no battery); the maintenance edge takes it back out mid-step.
+void heatEngineSplitStepNonOutageTriggers(smoke::Context const&)
+{
+	auto const quantum = static_cast<double>(core::World::getFixedTimestep());
+	auto const half = 30.0 * quantum;
+	auto const full = 60.0 * quantum;
+	// A demand edge mid-step, with no battery: acceptance is pure demand,
+	// so the engine's whole crossing starts when the profile opens.
+	{
+		auto settings = enginePair(20000.0, 20000.0, 100.0, 0.5, 0.0);
+		settings.systemsStepWorldTicks = 60;
+		settings.batteries.clear();
+		core::EquipmentLoadSettings pump;
+		pump.id = "pump";
+		pump.thermalClass = "warm";
+		pump.electricalDemandKW = pump.criticalFloorKW = 5.0;
+		pump.operatingProfile.periodSeconds = 4.0 * full;
+		pump.operatingProfile.segments = {{0.0, 0.0}, {half, 1.0}};
+		settings.equipmentLoads = {pump};
+		auto const snap = runSplitStepScenario("profile-edge", settings, full);
+		auto const orc = engine(snap, "orc");
+		// Half a second against a 5 kW demand: 2.5 kJ delivered, and the
+		// rate that served it averaged over the whole step is half the 5 kW
+		// the engine was drawing once the profile opened - so the published
+		// figure is provably the step mean and not the endpoint sample.
+		expectEnergy(orc.electricalEnergyKJ, 5.0 * half, "profile-edge step work");
+		expectEnergy(orc.lastElectricalOutputKW * full, orc.electricalEnergyKJ,
+			"profile-edge published output rate");
+		// The engine drew its intake for half the step and nothing before the
+		// profile opened, so the published mean sits near 2.5 kW where the
+		// endpoint sample would have read the full 5 kW it was serving.
+		require(orc.lastElectricalOutputKW > 1.0 && orc.lastElectricalOutputKW < 4.0,
+			"the profile-edge output rate is not distinguishable from an endpoint sample");
+		require(orc.lastThermalInputKW > 0.0,
+			"the profile-edge step published no intake at all");
+		require(reservoir(snap, "hot").lastEngineExtractionKW > 0.0
+				&& reservoir(snap, "reject").lastEngineRejectionKW > 0.0,
+			"the reservoirs' engine-exchange rates missed the profile-edge step");
+		require(orc.status == core::StationHeatEngineStatus::Active,
+			"the engine was not in service at the profile-edge endpoint");
+	}
+	// A maintenance isolation edge mid-step: full service, then isolated.
+	{
+		auto settings = engineMaintenancePair(half, 10.0);
+		settings.systemsStepWorldTicks = 60;
+		auto const snap = runSplitStepScenario("maintenance-edge", settings, full);
+		auto const orc = engine(snap, "orc");
+		expectEnergy(orc.thermalInputEnergyKJ, 100.0 * half, "maintenance-edge intake");
+		expectEnergy(orc.lastThermalInputKW * full, orc.thermalInputEnergyKJ,
+			"maintenance-edge published intake rate");
+		require(reservoir(snap, "hot").lastEngineExtractionKW > 0.0
+				&& reservoir(snap, "reject").lastEngineRejectionKW > 0.0,
+			"the reservoirs' engine-exchange rates were zeroed by the isolation tail");
+		require(maintenanceSnap(snap, "overhaul").phase
+			== core::StationMaintenancePhase::Active,
+			"the maintenance job was not isolating the engine at the endpoint");
+		require(orc.status == core::StationHeatEngineStatus::Idle
+			&& orc.lastLimiter == "OutOfService" && orc.availabilityFactor == 0.0,
+			"the isolation endpoint status/availability did not follow the job");
+	}
+}
+
 }   // namespace
 
 void registerStationHeatEngineChecks(std::vector<smoke::Check>& checks)
@@ -2333,4 +2603,8 @@ void registerStationHeatEngineChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"heatEngineOutagePartialCapacity", heatEngineOutagePartialCapacity});
 	checks.push_back({"heatEngineMaintenanceIsolation", heatEngineMaintenanceIsolation});
 	checks.push_back({"heatEngineOutageTransitionCoherence", heatEngineOutageTransitionCoherence});
+	// #832: step-mean rates across an event-split step.
+	checks.push_back({"heatEngineSplitStepOutageStartRates", heatEngineSplitStepOutageStartRates});
+	checks.push_back({"heatEngineSplitStepRestorationRates", heatEngineSplitStepRestorationRates});
+	checks.push_back({"heatEngineSplitStepNonOutageTriggers", heatEngineSplitStepNonOutageTriggers});
 }
