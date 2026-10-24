@@ -5068,6 +5068,7 @@ void initializeRecentFiles(filesystem::path const& filepath)
 	gRecentFiles.initialize(filepath);
 	gViewWindow.setStationConfigurationResources(applicationStationConfigurations());
 	gViewWindow.setPrefabCatalogueResources(applicationPrefabCatalogues());
+	gViewWindow.setComponentHelp(applicationStationComponentHelp());
 	gViewWindow.initializeRecentStationFiles(filepath.parent_path() / "recent-station-configurations.txt");
 	gViewWindow.setStationFilePicker([](bool save) -> std::optional<std::string>
 	{

@@ -11,6 +11,8 @@ public:
 	bool flowModified() const { return mStation.flowModified(); }
 	void setStationConfigurationResources(std::vector<std::shared_ptr<StationConfigurationResource>> resources)
 	{ mStation.setConfigurationResources(std::move(resources)); }
+	void setComponentHelp(std::shared_ptr<StationComponentHelpResource const> help)
+	{ mStation.setComponentHelp(std::move(help)); }
 	void setPrefabCatalogueResources(
 		std::vector<std::shared_ptr<PrefabCatalogueResource>> resources)
 	{ mStation.setPrefabCatalogueResources(std::move(resources)); }

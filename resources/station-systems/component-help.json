@@ -1,0 +1,2185 @@
+{
+  "version": 1,
+  "source": "docs/station-components.md",
+  "components": [
+    {
+      "nodeType": "Store",
+      "title": "Store",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "holds a finite resource inventory, split into qualified and held contents. A tank, pantry, fuel stock, nutrient bin or waste receiver can all be represented by a Store. It does not process, purify or move material."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Inventory in accepts outputs from Transfers and processes; Inventory out supplies their inputs. Both allow multiple connections. The connected machine determines the required unit and composition."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Unit",
+              "description": "One of g, kg, mL, L, m3, mol, kJ, MJ, Wh, kWh. All inventory/capacity numbers use this unit."
+            },
+            {
+              "name": "Capacity",
+              "description": "Positive upper bound on qualified plus held contents."
+            },
+            {
+              "name": "Starting usable / startingQualified",
+              "description": "Qualified contents at initialization."
+            },
+            {
+              "name": "Starting held / startingUnqualified",
+              "description": "Contents awaiting processing; together with usable stock must fit capacity."
+            },
+            {
+              "name": "Protected reserve",
+              "description": "Amount of qualified stock withheld from discretionary use; cannot exceed starting qualified inventory."
+            },
+            {
+              "name": "Material identity",
+              "description": "Optional lowercase hyphenated material ID for observations/grouping; empty means unclassified."
+            },
+            {
+              "name": "Declared composition",
+              "description": "Enables compound accounting; requires g or kg. Moisture, dry fractions and chemical energy describe the starting/declared material."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "a kg drinking-water Store holds 500 kg, starts with 300 kg usable and protects 100 kg. Crew consumes water; a surplus Transfer may refill a separate Electrolyzer feed tank without spending the protected portion. Use a compound declaration for the Crew water Store, as its port requires one."
+        }
+      ]
+    },
+    {
+      "nodeType": "Transfer",
+      "title": "Transfer",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "moves qualified material between two Stores without changing its material composition, either continuously or as scheduled batches."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Source joins one Store's Inventory out; Destination joins a different Store's Inventory in. Transfer unit must exactly match both Stores (g to kg is not automatic). Compound endpoints normally need matching declared compositions; compound-to-plain movement is refused. The supported plain-water dilution exception permits plain inflow into a compound treatment water port, adding water only rather than inventing the destination's dry load."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Mode",
+              "description": "Continuous rate or Scheduled inventory event."
+            },
+            {
+              "name": "Unit",
+              "description": "Shared native unit of source, destination and transfer."
+            },
+            {
+              "name": "Rate per second",
+              "description": "Positive continuous request in native units/s; inventory, reserve and headroom may limit it."
+            },
+            {
+              "name": "Quantity",
+              "description": "Positive Scheduled request per occurrence."
+            },
+            {
+              "name": "First occurrence / recurrence",
+              "description": "Scheduled timing; recurrence zero is one-off."
+            },
+            {
+              "name": "Priority",
+              "description": "Orders competing transfers/events."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "Continuous physical connections obey throughput and efficiency. Scheduled transfers are instantaneous, lossless, non-physical events: they respect inventory/reservations/headroom, but not physical cable/pipe ratings. A partial batch completes that occurrence; it is not retried or carried into the next."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "a recurring Scheduled Transfer moves food from a bulk Store to a small pantry every six hours. Crew consumes the pantry between restocks. If it empties early, Crew reports unmet food until a later restock."
+        }
+      ]
+    },
+    {
+      "nodeType": "Conversion",
+      "title": "Conversion",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "transforms compound inputs into compound outputs at declared full-throughput rates. Use it for a material-processing recipe not already represented by a dedicated machine."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "one to five Conversion input Stores and one to five Conversion output Stores. Every Store must be compound and mass-denominated; a Store may appear only once across the recipe. Different mass units are handled through mass accounting. Outputs may not create tracked constituents or chemical energy; deficits are explicitly accounted losses. Different compositions are allowed precisely because this is a conversion, not a Transfer."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Input rate per second",
+              "description": "Positive native wet-mass units/s consumed at full operation for each input."
+            },
+            {
+              "name": "Output yield per second",
+              "description": "Positive native wet-mass units/s produced for each output at that same full operation."
+            },
+            {
+              "name": "Input/output count",
+              "description": "Growable sets, maximum five on each side."
+            },
+            {
+              "name": "Priority",
+              "description": "Allocates competing conversion requests."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "The limiting input or output headroom scales the whole recipe. There is no automatic electricity input or thermal output: do not assume this generic component models the energetics of an arbitrary real chemical reactor."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "separate a compound harvest Store into food and fibrous waste Stores, with each recipe's constituent and chemical-energy outputs funded by the input. This models a conservative sorting/processing boundary rather than turning a waste label into food for free."
+        }
+      ]
+    },
+    {
+      "nodeType": "Solar",
+      "title": "Solar",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "offers electricity according to installed capacity and a sunlight/eclipse profile."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "automatic Power out to the shared electrical pool; no material input or manually wired power destination."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Capacity kW",
+              "description": "Full-sun installed electrical capacity; zero disables the array."
+            },
+            {
+              "name": "Illumination profile",
+              "description": "Fraction of full sun over simulation time; zero represents eclipse."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "an orbital Solar array supplies Equipment and charges a Battery in sunlight. During eclipse, the Battery and any dispatched Generator/Fuel cell must cover demand. Available solar capacity is not a guarantee of useful transmitted power through a constrained generation connection."
+        }
+      ]
+    },
+    {
+      "nodeType": "Equipment",
+      "title": "Equipment",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "represents an external equipment load group: a laboratory, workshop, communications rack or other load not already modelled internally. Power, heat and any declared material exchanges scale together with admitted operation. Do not duplicate a Chiller's or Electrolyzer's own demand here."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "automatic Power in. Up to two total material exchanges across Equipment input 1/2 and Equipment return 1/2, each naming a distinct Store; rates use that Store's native units. Material ports are optional, but once declared they constrain operation. Optional Heat out joins a Reservoir of the same thermal class only for Exported disposition. CoolingService instead uses the derived cooling service of its class; it cannot also name a passive heat sink."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Electrical demand kW",
+              "description": "Full-operation electrical requirement."
+            },
+            {
+              "name": "Operating profile",
+              "description": "Duty fraction applied over time."
+            },
+            {
+              "name": "Heat output kW",
+              "description": "Full-operation heat output; scales with actual operation."
+            },
+            {
+              "name": "Thermal class",
+              "description": "Required class of cooling service or declared heat sink."
+            },
+            {
+              "name": "Cooling disposition",
+              "description": "Exported: explicit external heat boundary, or route to a Reservoir if named. CoolingService: requires available chilled service of its class."
+            },
+            {
+              "name": "Critical floor kW",
+              "description": "Protected slice of this load's service, not an independent mini-load."
+            },
+            {
+              "name": "Maximum curtailment",
+              "description": "Largest removable fraction of demand. 0 requires full operation; 1 permits complete curtailment. Below the minimum operable level the load is refused whole."
+            },
+            {
+              "name": "Priority",
+              "description": "Ranks discretionary service allocation."
+            },
+            {
+              "name": "Material rate / consumes",
+              "description": "Native units/s at full operation; consumes draws qualified surplus, return requires destination headroom."
+            },
+            {
+              "name": "Recovery dwell seconds",
+              "description": "Minimum shed duration before a discretionary load may restart."
+            },
+            {
+              "name": "Recovery hysteresis fraction",
+              "description": "Extra spare-power headroom above demand required for restart."
+            },
+            {
+              "name": "Restart surge kW / seconds",
+              "description": "Extra startup demand and its duration. Recovery controls apply to purely discretionary loads, not loads with a critical floor."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "a workshop takes stock from one Store, returns waste to another, requests 5 kW and emits 4 kW into a matching Reservoir with a Radiator. A full waste Store throttles workshop operation, power and stock consumption together. It does not continue consuming electricity while silently deleting waste."
+        }
+      ]
+    },
+    {
+      "nodeType": "Battery",
+      "title": "Battery",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "stores electrical energy, charges from surplus generation and discharges into deficits within power and reserve limits."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "automatic Power in for charge and Power out for discharge; no authored material or heat-sink connector."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Nameplate kWh",
+              "description": "Total installed energy capacity."
+            },
+            {
+              "name": "Usable kWh",
+              "description": "Cyclable portion; reserve floor is nameplate − usable. Zero usable capacity disables the bank."
+            },
+            {
+              "name": "Starting stored kWh",
+              "description": "Initial total stored energy, within nameplate. Energy below the reserve floor is not dischargeable."
+            },
+            {
+              "name": "Maximum charge/discharge kW",
+              "description": "Separate limits on how quickly energy can enter or serve the bus."
+            },
+            {
+              "name": "Charge/discharge efficiency",
+              "description": "Stored energy per input bus energy, and delivered bus energy per stored energy drawn; each in (0,1]. Losses are accounted."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "a 20 kWh usable bank supplying a 5 kW eclipse load lasts at most four hours before conversion/cable losses. A 2 kW discharge limit cannot supply that load in full even when the bank contains plenty of energy."
+        }
+      ]
+    },
+    {
+      "nodeType": "Generator",
+      "title": "Generator",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "converts finite stored fuel energy into dispatchable electricity, with real startup draw, ramping, waste heat and shutdown heat. It is an energy contract, not a nuclear-reactor physics model."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Fuel in requires an energy Store (kJ, MJ, Wh or kWh). Heat out requires a same-class Reservoir. Automatic Power in funds startup and Power out supplies generation. Supervision accepts Outage and Maintenance references."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Rated output kW",
+              "description": "Installed electrical ceiling; zero disables."
+            },
+            {
+              "name": "Commanded output kW",
+              "description": "Manual dispatch request, between zero and rated. Automatic dispatch may replace the operating command."
+            },
+            {
+              "name": "Efficiency",
+              "description": "Electrical output / consumed fuel energy, (0,1]; the remainder becomes waste heat."
+            },
+            {
+              "name": "Maximum ramp kW/s",
+              "description": "Positive output slew limit, not an instantaneous step."
+            },
+            {
+              "name": "Startup power kW / seconds",
+              "description": "Cranking draw and time that must actually be powered before running."
+            },
+            {
+              "name": "Shutdown heat kW / seconds",
+              "description": "Continued heat after generation stops."
+            },
+            {
+              "name": "Thermal class / heat sink",
+              "description": "Waste, startup and shutdown heat destination."
+            },
+            {
+              "name": "Maximum sink temperature °C",
+              "description": "Cooling gate; the sink must be below it for qualified operation."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "a backup Generator draws from a finite kWh fuel Store and rejects heat to a Reservoir/Radiator plant. A Battery supplies cranking energy and bridges the ramp. Stopping the Generator does not remove its shutdown-cooling requirement, so protect the relevant Coolant loop/Chiller if needed."
+        }
+      ]
+    },
+    {
+      "nodeType": "Fuel cell",
+      "title": "Fuel cell",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "consumes hydrogen and oxygen to generate electricity and product water; waste heat goes to its declared sink."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Hydrogen in, Oxygen in and Water out use plain mass Stores; reactants must not alias one inventory. Heat out requires a same-class Reservoir. Electricity automatically joins Power out. Use dedicated reactant Stores if breathing oxygen must remain separate: no hidden draw from an Atmosphere or life-support reserve exists."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Rated output kW",
+              "description": "Installed electrical rating; zero disables."
+            },
+            {
+              "name": "Commanded output kW",
+              "description": "Dispatch request within rating; automatic dispatch can command backup output."
+            },
+            {
+              "name": "Efficiency",
+              "description": "Electricity / hydrogen chemical energy, (0,1]."
+            },
+            {
+              "name": "Thermal class / sink",
+              "description": "Waste-heat interface."
+            },
+            {
+              "name": "Maximum sink temperature °C",
+              "description": "Stops operation when cooling cannot accept the heat."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Solar-powered Electrolyzers fill separate H2 and O2 Stores. A Fuel cell uses them during eclipse and sends water to a raw-water Store for Water treatment. Full water storage or exhausted reactants limits output; this cycle is storage with losses, not a self-powering loop."
+        }
+      ]
+    },
+    {
+      "nodeType": "Sabatier",
+      "title": "Sabatier",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "performs CO2 + 4 H2 → CH4 + 2 H2O, recovering water from captured CO2 while retaining carbon in methane. Reaction heat and electrical process energy reach the heat sink."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "CO2 in, Hydrogen in, Methane out, Water out each require a different plain mass Store. Heat out joins a same-class Reservoir; Power in is automatic. The process needs actual feed, electrical energy and product headroom together."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Rate kg/s",
+              "description": "Rated CO2 feed conversion rate; zero disables."
+            },
+            {
+              "name": "Specific energy kWh/kg CO2",
+              "description": "Electrical processing dose for actual conversion."
+            },
+            {
+              "name": "Thermal class / sink",
+              "description": "Destination for reaction and process heat."
+            },
+            {
+              "name": "Maximum sink temperature °C",
+              "description": "Cooling eligibility gate."
+            },
+            {
+              "name": "Priority",
+              "description": "Processing power/service allocation order."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "CO2 capture fills a CO2 Store; an Electrolyzer supplies hydrogen. Sabatier returns water to the treatment chain and methane to a Methane processor. Account for heat rejection and net hydrogen demand rather than assuming all hydrogen recycles."
+        }
+      ]
+    },
+    {
+      "nodeType": "Methane processor",
+      "title": "Methane processor",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "performs CH4 → C + 2 H2, producing solid carbon and recovering part of the hydrogen used by Sabatier. Electricity must fund the endothermic reaction; remaining process heat goes to its sink."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Methane in, Hydrogen out, Carbon out require distinct plain mass Stores. Heat out needs a same-class Reservoir; Power in is automatic."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Rate kg/s",
+              "description": "Rated methane feed processing rate; zero disables."
+            },
+            {
+              "name": "Specific energy kWh/kg CH4",
+              "description": "Must at least fund the reaction's heat demand; not an arbitrary free yield."
+            },
+            {
+              "name": "Thermal class / sink",
+              "description": "Process-heat destination."
+            },
+            {
+              "name": "Maximum sink temperature °C",
+              "description": "Cooling gate."
+            },
+            {
+              "name": "Priority",
+              "description": "Processing allocation order."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "process Sabatier methane, return hydrogen to the shared H2 feed Store, and retain carbon in a finite Store with scheduled Waste ejection. A full carbon Store backpressures the chain. Recovered H2 is less than Sabatier consumed, so the combined loop still needs fresh hydrogen."
+        }
+      ]
+    },
+    {
+      "nodeType": "Reservoir",
+      "title": "Reservoir",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "holds thermal energy in an effective thermal mass. Heat inputs change its temperature; hosted Radiators reject heat, loops exchange heat, and buffers temporarily absorb deficits. It is not an infinite heat sink."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Heat in accepts multiple compatible machine outputs and heat-only exchangers. Hosted radiators and Hosted buffers mount those components. Diagram direction does not make passive exchangers one-way; actual heat exchange can reverse with temperature. Heat-engine references can also use Reservoirs, but are not currently editable Flow ports."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Thermal class",
+              "description": "Class of heat/service the reservoir supports."
+            },
+            {
+              "name": "Heat capacity kJ/K",
+              "description": "Positive energy required for a one-degree temperature rise."
+            },
+            {
+              "name": "Starting temperature °C",
+              "description": "Initial thermal state."
+            },
+            {
+              "name": "Minimum/maximum temperature °C",
+              "description": "Service limits reported as crossings, not clamps or automatic thermostats."
+            },
+            {
+              "name": "Absorbed heat kW",
+              "description": "Constant environmental heat input."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "a Generator emits heat into a generation Reservoir. A Radiator removes heat according to temperature and environment. Too little radiator area eventually heats the Reservoir above the Generator's cooling gate."
+        }
+      ]
+    },
+    {
+      "nodeType": "Radiator",
+      "title": "Radiator",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "exchanges radiative heat with an external environment using emissivity × view factor × area × σ × (T⁴ − T_sink⁴) in absolute temperature. It is a real temperature-dependent rejection path, not a fixed cooling credit."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Host reservoir joins one Reservoir's Hosted radiators face. Multiple Radiators may share a host. There is no gas or coolant-mass input."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Area m²",
+              "description": "Positive emitting area; more area increases exchange at the same temperatures."
+            },
+            {
+              "name": "Emissivity",
+              "description": "Surface emission effectiveness, (0,1]."
+            },
+            {
+              "name": "View factor",
+              "description": "Effective view of the declared environment, (0,1]."
+            },
+            {
+              "name": "Sink temperature °C",
+              "description": "Effective radiative background, including back-radiation; not necessarily deep space."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "mount a panel on an equipment-heat Reservoir. Reduce its view factor to represent obscuration, or raise sink temperature for a warmer radiative environment. The resulting loss of rejection can exhaust a Thermal buffer and ultimately stop heat-producing equipment."
+        }
+      ]
+    },
+    {
+      "nodeType": "Coolant loop",
+      "title": "Coolant loop",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "owns a finite, closed coolant inventory and pumps it through a heat-only exchanger with one Reservoir. It also models freeze-protection heating. Coolant never becomes drinking water or moves into another component."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Heat exchanger joins a Reservoir's Heat in. Cold interface serves a Chiller evaporator; at most one Chiller may claim a given loop. Cold surfaces serves Water collectors. Buffer gates can gate Thermal buffers. Power in is automatic; Supervision accepts Outage/Maintenance."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Coolant capacity / starting coolant kg",
+              "description": "Maximum and initial internal inventory. Zero starting coolant disables circulation and heating."
+            },
+            {
+              "name": "Specific heat kJ/kg·K",
+              "description": "Coolant thermal capacity per kg; combines with actual inventory to set temperature response."
+            },
+            {
+              "name": "Starting temperature °C",
+              "description": "Initial coolant state."
+            },
+            {
+              "name": "Pump power kW",
+              "description": "Electrical draw at full circulation."
+            },
+            {
+              "name": "Rated flow kg/s",
+              "description": "Circulation rating; not a transfer of inventory out of the loop."
+            },
+            {
+              "name": "Exchanger conductance kW/K",
+              "description": "Full-circulation heat coupling to the host Reservoir."
+            },
+            {
+              "name": "Freeze-protection setpoint °C",
+              "description": "Thermostat threshold below which the heater requests power."
+            },
+            {
+              "name": "Heater capacity kW",
+              "description": "Maximum freeze-protection electrical/heat input."
+            },
+            {
+              "name": "Critical service",
+              "description": "Explicitly protects circulation/heating ahead of discretionary external loads."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "a loop exchanges heat with a cabin-cooling Reservoir and supplies a collector's cold surface. A Chiller extracts heat from that loop into a separate rejection Reservoir. During a pump Outage, collection and circulation-gated buffer access cease even if the loop still contains coolant."
+        }
+      ]
+    },
+    {
+      "nodeType": "Chiller",
+      "title": "Chiller",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "spends electricity to extract heat from a circulating loop and rejects that heat plus electrical work/auxiliaries into a Reservoir. It also supplies the derived cooling service of its thermal class."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Cold loop joins one Coolant loop's Cold interface; Condenser heat joins a different Reservoir from the cold loop's host. The Chiller class must match both the cold host and condenser Reservoir. Power in is automatic; cooling-service output is derived. Supervision accepts Outage/Maintenance."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Rated cooling capacity kW",
+              "description": "Maximum extracted heat, not electrical consumption; zero disables."
+            },
+            {
+              "name": "COP",
+              "description": "Extracted heat per unit compressor work; work is cooling/COP. Positive authored assumption."
+            },
+            {
+              "name": "Auxiliary power kW",
+              "description": "Additional running draw that also reaches the condenser."
+            },
+            {
+              "name": "Chilled setpoint °C",
+              "description": "No extraction at/below this cold-loop temperature."
+            },
+            {
+              "name": "Maximum condensing temperature °C",
+              "description": "No operation if the rejection sink is at/above it."
+            },
+            {
+              "name": "Thermal class",
+              "description": "Required class of both interfaces and the cooling service supplied."
+            },
+            {
+              "name": "Critical service",
+              "description": "Protects its deliverable electrical work before discretionary loads."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "a 3 kW cold duty at COP 3 requires 1 kW compressor work, plus any auxiliaries; the rejection plant must handle at least 4 kW. Pair the condenser Reservoir with a Radiator rather than assuming the Chiller deletes heat."
+        }
+      ]
+    },
+    {
+      "nodeType": "Thermal buffer",
+      "title": "Thermal buffer",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "stores a finite amount of heat during its host Reservoir's cooling deficit and releases it when real rejection surplus returns. Its stored energy is separate from the host's thermal energy."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Host reservoir joins Hosted buffers. Circulation gate is required in circulation mode and must name a loop on that same Reservoir; passive mode needs no circulation gate."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Access mode",
+              "description": "passive heat contact or circulation powered-loop access."
+            },
+            {
+              "name": "Capacity kJ",
+              "description": "Total storable heat across the usable temperature band."
+            },
+            {
+              "name": "Starting energy kJ",
+              "description": "Initial fill; determines remaining absorption headroom."
+            },
+            {
+              "name": "Minimum/maximum usable temperature °C",
+              "description": "Band across which stored fraction maps to buffer temperature. A narrow band approximates phase-change storage."
+            },
+            {
+              "name": "Maximum charge/discharge kW",
+              "description": "Separate rate limits for absorption/recovery."
+            },
+            {
+              "name": "Transfer conductance kW/K",
+              "description": "Passive heat-transfer limit; positive in passive mode."
+            },
+            {
+              "name": "Circulation loop",
+              "description": "Access prerequisite in circulation mode, not a coolant feed."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "Heat must move down the temperature gradient. Empty storage alone does not permit absorption if the buffer is already hotter than its host."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "a passive thermal store absorbs an equipment plant's 2 kW deficit while a radiator is unavailable. A 7200 kJ empty buffer provides at most one hour at that deficit, subject to temperature and charge limits. Afterwards, recovering storage consumes actual spare radiator capacity; it is not instant."
+        }
+      ]
+    },
+    {
+      "nodeType": "Thermal link",
+      "title": "Thermal link",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "conducts heat between two Atmosphere compartments without moving gas. Use it for a solid wall, closed door or sealed window."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "End A and End B each join an Atmosphere's Thermal links face. Both endpoints must be distinct real compartments. Neither a Store, a Reservoir nor Exterior vacuum is a valid endpoint. The apparent input faces are endpoint references, not a heat-flow direction."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Conductance kW/K",
+              "description": "Positive overall heat coupling: instantaneous heat flow is G × (T_A − T_B). Includes area/material/thickness effects in one number."
+            },
+            {
+              "name": "End A / End B",
+              "description": "Fix the sign of reported flux, not who may receive heat."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "There is no separate area, openness, efficiency or throughput. Temperature difference drives passive exchange; the finite-capacity solve approaches thermal equilibrium rather than prescribing a constant heat rate."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "connect a warm laboratory and cool cabin with a Thermal link for their partition. Add a separate Atmosphere pathway for the doorway opening. Closing that pathway stops air-carried heat, but wall conduction continues. A link's conductance does not automatically follow door openness."
+        }
+      ]
+    },
+    {
+      "nodeType": "Heat engine",
+      "title": "Heat engine",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "converts some heat from a hot Reservoir into electricity and rejects the rest into a colder Reservoir. This is the explicit thermal-to-power component, not a negative Equipment load or a discount on radiator heat."
+        },
+        {
+          "kind": "heading",
+          "text": "Interfaces"
+        },
+        {
+          "kind": "paragraph",
+          "text": "hot Reservoir input, rejection Reservoir output, automatic net generation to the shared electrical pool. Reservoirs must be distinct; the rejection Reservoir must match the engine's thermal class, while the hot Reservoir need not share that class. Outage/Maintenance can target its installation identity. Current UI limitation: the core configuration and diagram support Heat engines, but the Flow placement menu/port descriptor and per-entry editor do not yet expose them. Configure these references/values in a configuration document, not by dragging nonexistent Flow ports."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Rated thermal input kW",
+              "description": "Maximum heat intake, not electrical rating; zero disables."
+            },
+            {
+              "name": "Commanded input kW",
+              "description": "Intake ceiling within rating; omission in a loaded document means full rated."
+            },
+            {
+              "name": "Carnot fraction",
+              "description": "Fraction (0,1] of 1 − T_cold/T_hot captured; temperatures in that ratio are kelvin. Actual efficiency changes with the gradient."
+            },
+            {
+              "name": "Auxiliary power kW",
+              "description": "Parasitic running draw deducted from gross electrical output."
+            },
+            {
+              "name": "Minimum hot temperature °C",
+              "description": "Source gate below which the engine idles; must be above the maximum sink-temperature gate."
+            },
+            {
+              "name": "Maximum sink temperature °C",
+              "description": "Rejection gate; at/above it the engine trips until the sink recovers."
+            },
+            {
+              "name": "Thermal class",
+              "description": "Class of rejection heat, not necessarily that of the hot source."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "No gradient, insufficient heat, auxiliaries exceeding gross output, a constrained generation connection or no demand/battery charge headroom can limit/stop conversion. Unconverted heat stays in the hot Reservoir."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "recover part of a Generator's hot waste-heat output in a bottoming cycle. Send rejection heat to a dedicated cooler Reservoir and Radiator. Retain a direct hot-side rejection path as needed; when the electrical pool cannot accept power, the engine is not a guaranteed cooling path."
+        }
+      ]
+    },
+    {
+      "nodeType": "Atmosphere",
+      "title": "Atmosphere",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "owns one compartment's volume, gas masses, water vapour and thermal state. Pressure/partial pressures follow the ideal-gas model. Sharing an ID, label or thermal class does not make compartments mix."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Gas out serves extraction processes/Airlock cycles; Oxygen in accepts direct Electrolyzer supply. Biology in/out bind Crew/Crops/Algae gas, moisture and heat exchanges. Hosted pathways and Thermal links host those two-ended aggregates. Optional Heat out names a Reservoir for a bidirectional heat-only exchanger, not a gas destination."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Volume m³",
+              "description": "Positive contained gas volume; mass and temperature determine pressure."
+            },
+            {
+              "name": "Starting O2 / N2 / CO2 / water vapour kg",
+              "description": "Independent initial inventories, not composition percentages. Supersaturated vapour condenses with accounted latent heat."
+            },
+            {
+              "name": "Starting temperature °C",
+              "description": "Initial compartment temperature, above absolute zero."
+            },
+            {
+              "name": "Thermal capacity kJ/K",
+              "description": "Effective air-plus-structure capacity; controls temperature response."
+            },
+            {
+              "name": "Advected specific heat kJ/kg·K",
+              "description": "Heat carried per kg of departing pathway gas; positive, separate from thermal capacity."
+            },
+            {
+              "name": "Reservoir / exchanger conductance kW/K",
+              "description": "Optional heat-only coupling. Without a Reservoir, no exchange occurs through this interface."
+            },
+            {
+              "name": "Occupants",
+              "description": "Optional simple configured load count; not World Agent count."
+            },
+            {
+              "name": "O2 use / CO2 production / moisture per occupant kg/s",
+              "description": "Simple occupancy loads, independent of the richer Crew component."
+            },
+            {
+              "name": "Sensible heat per occupant kW",
+              "description": "Simple occupancy heat. Do not double-count Crew metabolism with these values."
+            },
+            {
+              "name": "Leak rate kg/s",
+              "description": "Constant composition-proportional external gas loss, capped by inventory. Separate from exterior pathways and Airlock cycles."
+            },
+            {
+              "name": "Minimum/maximum pressure kPa",
+              "description": "Required positive ordered service limits; report crossings, do not regulate pressure."
+            },
+            {
+              "name": "Minimum O2 / maximum CO2 partial pressure kPa",
+              "description": "Optional quality limits; zero means unconfigured. Reporting limits do not add oxygen or scrub CO2."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "a cabin receives oxygen from an Electrolyzer, loses CO2 through a capture unit and vapour through a Water collector. Crew exchanges gas/heat with it. Couple it to a Reservoir for thermal control and to another Atmosphere through a pathway only if real mixing should occur."
+        }
+      ]
+    },
+    {
+      "nodeType": "Atmosphere pathway",
+      "title": "Atmosphere pathway",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "represents an undirected gas opening. Each tracked gas (O2, N2, CO2, water vapour) moves down its own partial-pressure gradient. Opposing species flows are possible even at equal total pressure. Moving gas also carries sensible heat (Advected enthalpy); this is not pure conduction."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "End A/B join Atmosphere Hosted pathways. Two distinct compartments are valid; alternatively exactly one endpoint can be the reserved $exterior vacuum boundary. Exterior is inert and has no draggable port: set that endpoint through configuration rather than treating it as a tank. Stores and Reservoirs are not valid gas endpoints."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Area m²",
+              "description": "Positive opening area; no separate throughput ceiling."
+            },
+            {
+              "name": "Open percentage / openFraction",
+              "description": "Effective openness, [0,1] internally; zero shuts exchange."
+            },
+            {
+              "name": "End A / End B",
+              "description": "Endpoint references and sign convention, not inlet/outlet direction."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "Greater area/openness increases exchange at the same state; equalization reduces the driving gradients. Changing openness therefore affects gas-carried heat, but does not modify a separate Thermal link. A closed pathway transfers neither gas nor pathway-carried heat. There is no transport-loss or efficiency setting. Openness can also be actuated by simulation-time-stamped runtime commands; this is not an additional placeable schedule node."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "use one pathway for an opening between cabin and greenhouse, and schedule its openness for ventilation. Use another to $exterior for a vent-to-space scenario: lost gas is accounted, and its source can cool as it vents. This is an exchange model, not full pressure-driven fluid dynamics."
+        }
+      ]
+    },
+    {
+      "nodeType": "Airlock cycle",
+      "title": "Airlock cycle",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "removes a specified mass of gas from a compartment at scheduled times, splitting it into recovered and externally lost gas. This is a Station scenario event, not a movement-system Airlock or its doors."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Atmosphere joins one compartment's Gas out. No recoverable-gas Store output is currently exposed: recovered mass is retained/accounted in the recovery receiver, not automatically usable breathing supply."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Gas mass kg",
+              "description": "Positive total requested removal per occurrence."
+            },
+            {
+              "name": "Recovered fraction",
+              "description": "Fraction [0,1] of actual removal recovered; remainder is lost."
+            },
+            {
+              "name": "First occurrence / recurrence",
+              "description": "Cycle timing, zero recurrence for one-off."
+            },
+            {
+              "name": "Priority",
+              "description": "Orders coincident events."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "model ten daily EVA depressurizations, each removing a declared mass with 80% recovery. Compare lost-gas endurance with an otherwise identical configuration at 95% recovery. Do not also count the same vent as pathway loss."
+        }
+      ]
+    },
+    {
+      "nodeType": "Electrolyzer",
+      "title": "Electrolyzer",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "splits water into stoichiometric O2 and H2 using electricity. Products retain chemical energy; the remaining electrical dose is process heat."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Water in uses a plain or compound mass Store, but an immutable zero-dissolved-load runtime gate stops splitting dirty feed. Hydrogen out requires a plain mass Store. Configure exactly one oxygen destination: Oxygen out to a plain mass Store, or Compartment oxygen to an Atmosphere's Oxygen in. Water and gas roles must use distinct Stores. Heat out needs a same-class Reservoir; Power in is automatic."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Rate kg/s",
+              "description": "Rated water split, not oxygen production; zero disables."
+            },
+            {
+              "name": "Specific energy kWh/kg water",
+              "description": "Electrical dose, at least the chemical energy retained by the products."
+            },
+            {
+              "name": "Thermal class / heat sink",
+              "description": "Process-heat interface."
+            },
+            {
+              "name": "Maximum sink temperature °C",
+              "description": "Stops operation at/above the gate."
+            },
+            {
+              "name": "Priority",
+              "description": "Allocation order."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "treat recovered water, feed an Electrolyzer, send oxygen directly to the cabin and hydrogen to Sabatier. To also stockpile oxygen, use a separate Electrolyzer configured for an O2 Store; one unit cannot use both oxygen outlets."
+        }
+      ]
+    },
+    {
+      "nodeType": "CO2 capture",
+      "title": "CO2 capture",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "extracts CO2 from an Atmosphere into finite storage, spending electricity and any configured regeneration consumable. It does not destroy carbon or implicitly discharge it to space."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Atmosphere joins Gas out; Captured CO2 out requires a plain mass Store. Optional Consumable in uses a mass Store (plain or compound), and must be wired if a positive consumable rate is declared. Power in is automatic. There is no authored heat-sink port on this component."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Maximum rate kg/s",
+              "description": "Capture ceiling; zero disables. Actual CO2 and destination headroom also limit operation."
+            },
+            {
+              "name": "Specific energy kWh/kg",
+              "description": "Electrical energy per captured kg."
+            },
+            {
+              "name": "Consumable per kg",
+              "description": "Native consumable units per captured kg."
+            },
+            {
+              "name": "Priority",
+              "description": "Allocation order."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "a cabin scrubber fills a CO2 Store that feeds Sabatier. If hydrogen runs out, captured-gas storage eventually fills and CO2 capture becomes backpressured even though the scrubber still has nameplate capacity."
+        }
+      ]
+    },
+    {
+      "nodeType": "Water collector",
+      "title": "Water collector",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "condenses compartment water vapour onto a circulating cold surface, depositing pure condensate into a raw-water Store. The condensation's latent heat goes into the coolant loop exactly once."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Atmosphere joins Gas out; Cooling loop joins Coolant loop Cold surfaces; Raw water out needs a plain mass Store. The collector's thermal class must match the loop's host Reservoir. The diagram includes an automatic power relationship, but this component has no independent electrical dose/pump-power dial; its real cold surface depends on the loop/thermal plant."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Maximum rate kg/s",
+              "description": "Condensation ceiling; zero disables."
+            },
+            {
+              "name": "Target relative humidity",
+              "description": "Fraction [0,1] at which collection stops; 0.5 means 50% RH."
+            },
+            {
+              "name": "Thermal class",
+              "description": "Cold-interface service class."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "Collection requires actual circulation, a surface colder than the air, vapour above the target and destination headroom. It cannot obtain water from coolant."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "collect Crew moisture using a Chiller-cooled loop, store condensate as raw water, then send it through Water treatment. Losing pump power blocks collection even if the raw-water tank is empty and cabin humidity is high."
+        }
+      ]
+    },
+    {
+      "nodeType": "Water treatment",
+      "title": "Water treatment",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "processes a water stream into treated output and retained concentrate, consuming electricity and treatment material. Full electrical evidence qualifies the treated product; partial power leaves it held."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Raw water in, Treated water out, Concentrate out require three distinct mass Stores. Plain or compound streams are supported. Any outlet receiving dry constituents must be compound; full removal permits a plain treated outlet. Consumable in also requires a mass Store. Power in is automatic. The current treatment draws qualified source stock above its reserve, not held stock. Merely feeding a held treated-water Store back into another treatment does not provide a requalification path."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Throughput kg/s",
+              "description": "Feed-processing ceiling; zero disables."
+            },
+            {
+              "name": "Recovery ratio",
+              "description": "Fraction (0,1] of input water constituent recovered, not of dissolved solids."
+            },
+            {
+              "name": "Removal fractions",
+              "description": "Per dry constituent, fraction sent to concentrate; omitted keys mean full removal (1). Zero passes all of that load into treated output."
+            },
+            {
+              "name": "Specific energy kWh/kg",
+              "description": "Electrical processing dose. Full dose qualifies output, partial dose produces held output, no supplied power prevents operation when power is required."
+            },
+            {
+              "name": "Consumable per kg",
+              "description": "Native consumable units spent per kg processed."
+            },
+            {
+              "name": "Priority",
+              "description": "Allocation order."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "Treatment does not automatically make water acceptable to every consumer: qualified output can still contain dissolved load when removal is partial. Compound concentrate is a qualified product retaining its constituents; legacy plain concentrate is held. Both consume finite storage. There is no separate release-test consumable or hazard-class release switch."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "treat 100 kg/day greywater containing 0.2 kg organics with 85% water recovery and full organic removal. Ideal outputs are 84.83 kg/day pure treated water and 15.17 kg/day concentrate. Retain/eject the concentrate; merely adding a treated-water tank does not provide waste capacity."
+        }
+      ]
+    },
+    {
+      "nodeType": "Crew",
+      "title": "Crew",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "consumes food, water and atmospheric oxygen and returns CO2, moisture, heat, urine, organic waste and optionally greywater. Missing input or full return storage scales metabolism and all returns together."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Food in, Water in, Urine out, Organic waste out require four distinct compound mass Stores. Optional Greywater out also needs a distinct compound mass Store if enabled. Oxygen uptake, CO2 return, Moisture return, Metabolic heat bind the same Atmosphere. No automatic Crew electricity input is declared."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Count",
+              "description": "Configured population; zero disables its demands."
+            },
+            {
+              "name": "Activity profile",
+              "description": "Scales metabolic rates/returns together."
+            },
+            {
+              "name": "Food/water per crew per second",
+              "description": "Rates in the respective Store's native units."
+            },
+            {
+              "name": "O2/CO2/moisture per crew kg/s",
+              "description": "Atmospheric gas and vapour rates."
+            },
+            {
+              "name": "Urine/organic waste per crew per second",
+              "description": "Native output Store rates."
+            },
+            {
+              "name": "Metabolic heat per crew kW",
+              "description": "Sensible heat returned to the compartment."
+            },
+            {
+              "name": "Greywater kg per crew-day",
+              "description": "Optional total liquid return, including its dissolved load."
+            },
+            {
+              "name": "Greywater load kg per crew-day",
+              "description": "Declared dryOrganics/nutrientNitrogen within that total, not extra mass."
+            },
+            {
+              "name": "Water quality tolerances",
+              "description": "Optional acceptance/load budget on drinking-water input."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "Coefficients must fund all returned mass, constituents and heat from consumed resources. Any unreturned mass is explicitly retained body mass, not silently lost. Configure simple Atmosphere occupancy loads separately or leave them zero to avoid double-counting this Crew."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "connect a pantry and potable-water Store to a six-person Crew. Route greywater to treatment and organic waste/urine to recovery installations; CO2 capture and water collection serve its Atmosphere. A full urine tank can limit supplied metabolism even with adequate food and oxygen."
+        },
+        {
+          "kind": "heading",
+          "text": "Shared biological requirements"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Crew, Crops and Algae use a single Atmosphere reference for their multiple gas/moisture/heat faces. Wiring one face binds the exchange bundle; you cannot send their CO2 to one compartment and their heat to another through those faces. Their populations are authored aggregates, not World Agents. Biological coefficients are tunable assumptions, not validated physiology, agronomy or phycology."
+        },
+        {
+          "kind": "paragraph",
+          "text": "Crew water, crop irrigation, algae makeup and microbial process water support optional water quality tolerances: per-dry-constituent and/or total-dissolved limits in kg constituent/kg stream. Omission means no gate. They read the actual current blend. Above tolerance, operation is scaled to fit the declared full-demand dissolved-load budget; a zero tolerance blocks nonzero load. This is throughput/load limiting, not purification or a health simulation."
+        }
+      ]
+    },
+    {
+      "nodeType": "Crops",
+      "title": "Crops",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "maintains dry living biomass, grows under light and resource supply, respires day and night, transpires water and can harvest food/waste. Living biomass, growing capacity and stored food are different inventories."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Water in accepts plain/compound mass irrigation. Nitrogen in, Phosphorus in, Potassium in, Minerals in each need their own mass Store; compound fertilizer Stores must be pure in that port's constituent. All five inputs must be distinct. Optional Food out/Waste out become required when harvesting is enabled; mass destinations must be distinct and, if compound, match the declared living composition. The six biological faces (including Photosynthesis CO2/oxygen) bind one Atmosphere. Power in is automatic for circulation and lamps."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Growing area m² / maximum biomass density kg/m²",
+              "description": "Product is installed dry-biomass growing capacity. Zero area disables the population."
+            },
+            {
+              "name": "Initial dry biomass kg",
+              "description": "Starting living stock, within growing capacity."
+            },
+            {
+              "name": "Composition",
+              "description": "Dry N/P/K/mineral fractions and positive chemical energy; moisture and atmospheric nitrogen must be zero."
+            },
+            {
+              "name": "Lamp rated kW / illumination profile",
+              "description": "Potential light, constrained by actual electrical supply; darkness produces no photosynthetic growth."
+            },
+            {
+              "name": "Circulation power kW",
+              "description": "Essential canopy service drawn before discretionary lighting; unsupplied circulation stops growth."
+            },
+            {
+              "name": "Growth yield kg/kWh light",
+              "description": "Dry biomass fixed per delivered lighting energy, bounded by its chemical-energy budget."
+            },
+            {
+              "name": "Respiration per hour",
+              "description": "Organic living material burned through respiration, including in darkness."
+            },
+            {
+              "name": "Transpiration kg/kg growth",
+              "description": "Irrigation water returned to the Atmosphere as vapour."
+            },
+            {
+              "name": "Minimum/maximum growing temperature °C",
+              "description": "Growth window, lower inclusive and upper exclusive; respiration still occurs outside it."
+            },
+            {
+              "name": "Harvest trigger kg",
+              "description": "Living mass threshold; zero disables harvest."
+            },
+            {
+              "name": "Harvest fraction",
+              "description": "Fraction (0,1] of living mass removed per harvest."
+            },
+            {
+              "name": "Edible fraction",
+              "description": "Fraction [0,1] of harvest sent to food; remainder/surplus goes to waste as headroom permits."
+            },
+            {
+              "name": "Water quality tolerances",
+              "description": "Optional irrigation load budget."
+            },
+            {
+              "name": "Selective irrigation / uptake fractions",
+              "description": "Nonempty N/P/K map enables selective uptake from dissolved irrigation, capped by growth demand. Unabsorbed salts remain; separate fertilizer inputs fund the deficit. Empty means legacy homogeneous draw."
+            },
+            {
+              "name": "Priority",
+              "description": "Resource/service ordering."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "Full destinations constrain harvest rather than deleting living mass. Starved organic biomass can be respired away; remaining dead residue goes to waste or is reported as explicit uncontained loss if it cannot be contained."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "build a hydroponic greenhouse with compound irrigation, separate fertilizer Stores, artificial lighting and an Atmosphere. Add a purge Transfer and treated makeup supply so salts left by selective uptake do not accumulate until water-quality tolerances throttle growth. Harvest into a compatible food Store, or use a Conversion before mixing a different food composition."
+        },
+        {
+          "kind": "heading",
+          "text": "Shared biological requirements"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Crew, Crops and Algae use a single Atmosphere reference for their multiple gas/moisture/heat faces. Wiring one face binds the exchange bundle; you cannot send their CO2 to one compartment and their heat to another through those faces. Their populations are authored aggregates, not World Agents. Biological coefficients are tunable assumptions, not validated physiology, agronomy or phycology."
+        },
+        {
+          "kind": "paragraph",
+          "text": "Crew water, crop irrigation, algae makeup and microbial process water support optional water quality tolerances: per-dry-constituent and/or total-dissolved limits in kg constituent/kg stream. Omission means no gate. They read the actual current blend. Above tolerance, operation is scaled to fit the declared full-demand dissolved-load budget; a zero tolerance blocks nonzero load. This is throughput/load limiting, not purification or a health simulation."
+        }
+      ]
+    },
+    {
+      "nodeType": "Algae",
+      "title": "Algae",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "a separate photosynthetic biological population, using active culture volume rather than crop area and splitting harvest three ways. It does not share living biomass or growing capacity with Crops."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "same water/four separate nutrient inputs, atmospheric exchange bundle and automatic electrical input as Crops. Optional Food out, Recovery out, Waste out must all be configured for harvest, with distinct mass Stores and composition-compatible compound destinations."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Culture volume L / maximum biomass density kg/L",
+              "description": "Product is installed dry-biomass capacity. Volume is a capacity parameter, not a transferable liquid inventory. Zero volume disables."
+            },
+            {
+              "name": "Initial biomass / composition",
+              "description": "Starting dry living stock and dry constituent/energy makeup, with zero moisture/atmospheric nitrogen."
+            },
+            {
+              "name": "Lamp rating / illumination profile / circulation power",
+              "description": "Lighting potential, duty cycle and essential circulation, as for Crops."
+            },
+            {
+              "name": "Growth yield / respiration / growing temperature bounds",
+              "description": "Light conversion, day/night organic consumption and temperature eligibility."
+            },
+            {
+              "name": "Evaporation kg/kg growth",
+              "description": "Makeup water lost to the compartment as vapour during growth."
+            },
+            {
+              "name": "Harvest trigger / harvest fraction",
+              "description": "When to harvest and how much living mass to remove; zero trigger disables."
+            },
+            {
+              "name": "Food fraction / recovery fraction",
+              "description": "Shares of harvested dry mass; sum at most one, with remainder to waste. Food overflow tries recovery, then waste; unplaceable material stays living."
+            },
+            {
+              "name": "Water quality tolerances",
+              "description": "Optional makeup-water load budget. No crop-style selective irrigation map is declared for Algae."
+            },
+            {
+              "name": "Priority",
+              "description": "Resource/service ordering."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "grow Algae on cabin CO2, send edible harvest to food and recovery harvest to a composition-compatible feed Store for a Microbial processor. Retain inedible residue separately. The processor's nutrients are recovery, not a replacement for the light and water needed to grow new biomass."
+        },
+        {
+          "kind": "heading",
+          "text": "Shared biological requirements"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Crew, Crops and Algae use a single Atmosphere reference for their multiple gas/moisture/heat faces. Wiring one face binds the exchange bundle; you cannot send their CO2 to one compartment and their heat to another through those faces. Their populations are authored aggregates, not World Agents. Biological coefficients are tunable assumptions, not validated physiology, agronomy or phycology."
+        },
+        {
+          "kind": "paragraph",
+          "text": "Crew water, crop irrigation, algae makeup and microbial process water support optional water quality tolerances: per-dry-constituent and/or total-dissolved limits in kg constituent/kg stream. Omission means no gate. They read the actual current blend. Above tolerance, operation is scaled to fit the declared full-demand dissolved-load budget; a zero tolerance blocks nonzero load. This is throughput/load limiting, not purification or a health simulation."
+        }
+      ]
+    },
+    {
+      "nodeType": "Microbial processor",
+      "title": "Microbial processor",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "an aerobic waste digester/nutrient-recovery stage with finite feed throughput and aggregate culture condition. It recovers bound nutrients, water and CO2, retains residue and releases funded heat."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Feed in requires a compound mass Store; Oxygen in a plain mass Store; Water in a plain/compound mass Store. Culture medium must resolve to a Store in a complete configuration (despite its optional Flow appearance); in CompositionDerived mode it must be mass-denominated. Optional Replacement stock may use a Store's native unit. Nutrients out and Residue out require plain mass Stores; CO2 out a plain mass Store; Water out permits compound mass, required for positive dissolved carry-over. All stream roles must use distinct Stores. Heat out joins a same-class Reservoir; Power in is automatic."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Rated feed processing kg/s",
+              "description": "Wet feed ceiling, further scaled by culture condition/resources; zero disables."
+            },
+            {
+              "name": "Rate basis",
+              "description": "FixedPerFeedMass coefficients or CompositionDerived rates from the actual feed blend."
+            },
+            {
+              "name": "Specific energy kWh/kg feed",
+              "description": "Electrical processing dose in either mode."
+            },
+            {
+              "name": "Fixed-mode oxygen / process water / CO2 per kg feed",
+              "description": "kg input/output per wet kg feed."
+            },
+            {
+              "name": "Fixed-mode medium per kg feed",
+              "description": "Native consumable units per wet kg feed."
+            },
+            {
+              "name": "Fixed-mode reaction heat kJ/kg feed",
+              "description": "Funded heat release, not exceeding available feed energy."
+            },
+            {
+              "name": "Organic oxidation fraction",
+              "description": "Derived mode: share of feed organics processed."
+            },
+            {
+              "name": "O2 / CO2 per kg organic oxidized",
+              "description": "Derived oxygen demand and CO2 yield coefficients."
+            },
+            {
+              "name": "Nitrification fraction / O2 per kg nitrified N",
+              "description": "Derived extra oxygen demand associated with recovered nutrient nitrogen. Does not turn atmospheric nitrogen into fertilizer."
+            },
+            {
+              "name": "Process-water target moisture",
+              "description": "Derived dilution target, below one; requests water only as needed to reach it."
+            },
+            {
+              "name": "Heat release fraction",
+              "description": "Derived fraction of oxidized organic chemical energy released."
+            },
+            {
+              "name": "Medium kg/kg organic oxidized",
+              "description": "Derived culture-medium demand, mass-based rather than arbitrary native units."
+            },
+            {
+              "name": "N/P/K/minerals recovery fractions",
+              "description": "Shares [0,1] of those bound feed constituents recovered; not interchangeable yields."
+            },
+            {
+              "name": "Water recovery",
+              "description": "Fraction of feed moisture recovered."
+            },
+            {
+              "name": "Recovered-water carry-over fractions",
+              "description": "Route a share of each unrecovered dry constituent into water instead of residue. Positive entries need compound water storage."
+            },
+            {
+              "name": "Minimum operating / maximum sink temperature °C",
+              "description": "Culture runs inside this sink-interface window."
+            },
+            {
+              "name": "Initial condition",
+              "description": "Culture health/capacity factor [0,1] at start."
+            },
+            {
+              "name": "Starvation / medium exhaustion / cold stress / heat stress degradation per hour",
+              "description": "Separate adverse-condition losses of condition points per hour."
+            },
+            {
+              "name": "Recovery per hour",
+              "description": "Maximum condition-point restoration under favourable conditions."
+            },
+            {
+              "name": "Stock units per condition point",
+              "description": "Replacement stock spent during recovery when a stock Store is configured."
+            },
+            {
+              "name": "Water quality tolerances",
+              "description": "Optional process-water load budget."
+            },
+            {
+              "name": "Priority",
+              "description": "Processing allocation order."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "Residue is the mass-balance remainder, not an independent yield knob. Outputs cannot exceed funded mass/constituents/energy. Atmospheric nitrogen in feed is not a nutrient resource. Condition coefficients are provisional biological assumptions, not a simulation of individual microbes."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "digest Crew organic waste with oxygen, process water, medium and power. Recover mixed nutrients and water, capture CO2 for Sabatier and send residue to Waste ejection storage. Mixed recovered nutrients cannot simply be wired into all four pure fertilizer ports: model the necessary constituent- balanced separation/processing and compatible storage explicitly."
+        },
+        {
+          "kind": "heading",
+          "text": "Shared biological requirements"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Crew, Crops and Algae use a single Atmosphere reference for their multiple gas/moisture/heat faces. Wiring one face binds the exchange bundle; you cannot send their CO2 to one compartment and their heat to another through those faces. Their populations are authored aggregates, not World Agents. Biological coefficients are tunable assumptions, not validated physiology, agronomy or phycology."
+        },
+        {
+          "kind": "paragraph",
+          "text": "Crew water, crop irrigation, algae makeup and microbial process water support optional water quality tolerances: per-dry-constituent and/or total-dissolved limits in kg constituent/kg stream. Omission means no gate. They read the actual current blend. Above tolerance, operation is scaled to fit the declared full-demand dissolved-load budget; a zero tolerance blocks nonzero load. This is throughput/load limiting, not purification or a health simulation."
+        }
+      ]
+    },
+    {
+      "nodeType": "Delivery",
+      "title": "Delivery",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "imports a resource from outside the station at scheduled times. Unlike Transfer, it does not consume another station Store."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Destination joins one Store's Inventory in; delivery unit must exactly match it. No external source node/port needs to be wired."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Unit / quantity",
+              "description": "Positive native-unit amount per occurrence."
+            },
+            {
+              "name": "Arrives qualified",
+              "description": "True deposits usable stock; false deposits held stock."
+            },
+            {
+              "name": "First occurrence / recurrence",
+              "description": "Arrival schedule."
+            },
+            {
+              "name": "Priority",
+              "description": "Order among coincident events."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "Only available capacity is accepted; the rest is explicitly rejected at the external boundary, not silently added later or overflowed."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "a cargo flight delivers 200 kg to a food Store every month. With only 50 kg headroom on arrival, only 50 kg is accepted. Schedule pantry Transfers after delivery if they should use the newly arrived inventory."
+        }
+      ]
+    },
+    {
+      "nodeType": "Waste ejection",
+      "title": "Waste ejection",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "removes eligible Store inventory across the external boundary at scheduled times, accounting it as loss. There is no waste recovery output."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Source joins Store Inventory out; exact native unit match. The eligibility selector, not a hazard or waste label, determines which partition may be removed."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Unit / quantity",
+              "description": "Requested positive native-unit amount per occurrence."
+            },
+            {
+              "name": "Eligibility",
+              "description": "QualifiedOnly (default), HeldOnly, or QualifiedAndHeld (qualified first, then held). Held stock is never made usable by disposal."
+            },
+            {
+              "name": "First occurrence / recurrence",
+              "description": "Disposal schedule."
+            },
+            {
+              "name": "Priority",
+              "description": "Coincident-event order."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "Insufficient eligible material produces a smaller/zero ejection, not a software failure. Removing held contents requires an explicit held-eligible setting."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "eject held plain treatment concentrate weekly using HeldOnly; eject qualified compound concentrate using QualifiedOnly. A default qualified selector will not clear a tank whose contents are all held."
+        }
+      ]
+    },
+    {
+      "nodeType": "Outage",
+      "title": "Outage",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "temporarily reduces the rated availability of a registered installation. It is a capacity constraint, not destruction or inventory reset."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Target installation names a Generator, Coolant loop, Chiller or Heat engine. Editable Flow Supervision ports currently exist on the first three; Heat engines use their configuration installation ID."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Capacity fraction",
+              "description": "Fraction [0,1) of rated capacity remaining, not fraction lost. Zero is a full outage."
+            },
+            {
+              "name": "First occurrence / duration / recurrence",
+              "description": "Window start, positive window length and repetition."
+            },
+            {
+              "name": "Priority",
+              "description": "Deterministic event announcement/order."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "Overlapping reductions take the minimum fraction. Restoration does not refill fuel, coolant, batteries, buffers or biomass."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "reduce a Chiller to 50% for ten minutes and watch its Thermal buffer absorb the deficit. Setting the fraction to 0.5 leaves half capacity; it is not a command to halve the sink temperature."
+        }
+      ]
+    },
+    {
+      "nodeType": "Maintenance",
+      "title": "Maintenance",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "reserves tools/parts, isolates a registered installation, runs timed work and books consumed supplies into waste on completion. Absent prerequisites delay/block work rather than allowing free maintenance."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Target installation has the same registered targets as Outage. One to eight Requirement inputs join distinct Stores. Waste out is required if any requirement is consumed; its Store must match consumed input units and compound composition and must not alias those sources. Reusable tools return to their original Stores; no extra return port needs authoring."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "First occurrence / duration / recurrence",
+              "description": "Start opportunity and required continuous work time; recurrence cannot overlap its own window."
+            },
+            {
+              "name": "Requirement quantity",
+              "description": "Positive native units reserved for the job."
+            },
+            {
+              "name": "Requirement consumed",
+              "description": "False reserves/returns a tool unchanged; true spends it at completion and deposits it as used material/waste."
+            },
+            {
+              "name": "Requirement count",
+              "description": "One to eight prerequisites."
+            },
+            {
+              "name": "Waste Store",
+              "description": "Finite headroom for the total consumed requirements."
+            },
+            {
+              "name": "Priority",
+              "description": "Orders competing reservations."
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "text": "Active work holds target availability at zero. If reservations/headroom can no longer be maintained, work is interrupted, released and must restart for its full duration. Completion restores availability, not consumables or fuel."
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "service a coolant pump using reusable tools plus a spare filter. The loop stops while work is active; the filter moves into compatible waste storage at completion and tools return. Provide another cooling path or enough thermal storage to cover the isolation interval."
+        }
+      ]
+    },
+    {
+      "nodeType": "Power",
+      "title": "Power (shared electrical pool)",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "Purpose/interfaces"
+        },
+        {
+          "kind": "paragraph",
+          "text": "derived aggregate connecting all automatic electrical supply/demand/charge/discharge relationships. It owns no authored inventory or manual ports and is not placeable. There is no independent bus-capacity dial."
+        },
+        {
+          "kind": "heading",
+          "text": "Controls/example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "station dispatch mode is Manual (Generator/Fuel cell commands) or Automatic (commands generators first, then fuel-cell backup to cover demand remaining after solar, subject to real availability). Batteries bridge remaining deficits within their limits. Use Solar + Battery + Equipment to model an eclipse power budget; drawing a bus edge does not grant power."
+        }
+      ]
+    },
+    {
+      "nodeType": "Cooling service",
+      "title": "Cooling service",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "Purpose/interfaces"
+        },
+        {
+          "kind": "paragraph",
+          "text": "derived per-thermal-class service supplied by Chillers and requested by CoolingService Equipment. Not a material Store, a cold Reservoir, or a manually assignable chiller-to-load pipe."
+        },
+        {
+          "kind": "heading",
+          "text": "Controls/example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "no independent dials; Chiller class/capacity and Equipment class/heat demand determine it. A low laboratory load cannot borrow spare warm service merely because the diagram has both nodes."
+        }
+      ]
+    },
+    {
+      "nodeType": "Exterior",
+      "title": "Exterior",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "Purpose/interfaces"
+        },
+        {
+          "kind": "paragraph",
+          "text": "derived vacuum boundary for an Atmosphere pathway with one $exterior endpoint. It has zero species partial pressures and no owned volume, mass or temperature. It is neither editable nor draggable as a peer."
+        },
+        {
+          "kind": "heading",
+          "text": "Controls/example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "no boundary dials; author pathway area/openness. A vent pathway loses gas to Exterior. A Radiator instead exchanges with its own configured radiative environment; a Thermal link cannot conduct to Exterior."
+        }
+      ]
+    },
+    {
+      "nodeType": "Prefab",
+      "title": "Prefabs",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "text": "A prefab packages ordinary components and internal wiring with exposed ports and dials; it does not add a new physical process or bypass any of the rules above. For example, package a Reservoir, Coolant loop and Radiator as a reusable cooling assembly. Check the constituent components when sizing it, and wire only its deliberately exposed interfaces."
+        }
+      ]
+    },
+    {
+      "nodeType": "Station settings",
+      "title": "Station settings and monitoring",
+      "blocks": [
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Enabled",
+              "description": "Opts this World into Station systems execution."
+            },
+            {
+              "name": "Systems step World ticks",
+              "description": "Station integration cadence, 1–60 World ticks; default 6 against the 60 Hz World clock (10 Hz). Not a device throughput knob."
+            },
+            {
+              "name": "Observation interval seconds",
+              "description": "Reporting/sample cadence, 0.1–60 s, not physics speed."
+            },
+            {
+              "name": "Trend retention seconds",
+              "description": "Retained simulation-time history window, 1–86400 s, with bounded storage."
+            },
+            {
+              "name": "Dispatch mode",
+              "description": "Manual or Automatic source dispatch as described above."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "retain one hour of one-second observations to compare battery endurance and thermal excursions across eclipse runs. Charts, forecasts, limiters and event logs observe the system; none supplies missing resources."
+        }
+      ]
+    }
+  ]
+}

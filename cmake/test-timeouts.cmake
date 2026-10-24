@@ -292,6 +292,8 @@ set(PF_TEST_TIMEOUTS
     "station-editor-battery-observations=10"
     "station-editor-bioconversion-foodwaste=10"
     "station-editor-carbon-observations=10"
+    "station-component-help-extraction=10"
+    "station-editor-component-help=10"
     "station-editor-configuration-resources=10"
     "station-editor-connection-design=10"
     "station-editor-connection-forecast=10"

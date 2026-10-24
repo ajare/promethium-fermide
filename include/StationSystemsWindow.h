@@ -24,6 +24,8 @@ public:
 	// The loaded prefab catalogues (#812), merged into the one catalogue the
 	// flow diagram offers. A catalogue that failed to load never reaches here,
 	// so its units are simply absent from the Place menu.
+	void setComponentHelp(std::shared_ptr<StationComponentHelpResource const> help)
+	{ mFlow.setComponentHelp(std::move(help)); }
 	void setPrefabCatalogueResources(
 		std::vector<std::shared_ptr<PrefabCatalogueResource>> resources);
 	std::shared_ptr<core::PrefabCatalogue const> prefabCatalogue() const { return mPrefabCatalogue; }

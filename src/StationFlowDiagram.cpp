@@ -9,6 +9,46 @@
 #include <cstring>
 #include <map>
 
+namespace
+{
+	// The component guide modal, opened from the inspector's Help button.
+	// The id is stable so headless checks can address the window directly.
+	constexpr char const* componentGuidePopup = "Component guide###ComponentGuideModal";
+
+	void renderComponentHelp(StationComponentHelp const& help)
+	{
+		ImGui::Separator();
+		ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_PlotHistogram), "Component guide: %s", help.title.c_str());
+		for (auto const& block : help.blocks)
+		{
+			switch (block.kind)
+			{
+			case StationHelpBlock::Kind::Heading:
+				ImGui::Spacing();
+				ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_PlotHistogram), "%s", block.text.c_str());
+				break;
+			case StationHelpBlock::Kind::Paragraph:
+				ImGui::TextWrapped("%s", block.text.c_str());
+				break;
+			case StationHelpBlock::Kind::List:
+				for (auto const& item : block.items) ImGui::BulletText("%s", item.c_str());
+				break;
+			case StationHelpBlock::Kind::Settings:
+				ImGui::Spacing();
+				ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_PlotHistogram), "Dials and values");
+				for (auto const& row : block.rows)
+				{
+					ImGui::TextWrapped("%s", row.name.c_str());
+					ImGui::Indent();
+					ImGui::TextWrapped("%s", row.description.c_str());
+					ImGui::Unindent();
+				}
+				break;
+			}
+		}
+	}
+}
+
 namespace station_flow
 {
 std::vector<PathwayLink> pathwayLinks(core::StationSystemsSettings const& draft, Graph const& graph)
@@ -2769,10 +2809,16 @@ entry.thermalClass = "moderate";
 		ImGui::TextUnformatted("Click to inspect connection properties");
 		ImGui::EndTooltip();
 	}
+	// The hover tooltip carries live node info only. The component
+	// documentation is opened on demand from the inspector's Help
+	// button, in its own modal window.
 	if (hoveredNode >= 0 && mPlacingType.empty())
 	{
 		auto const& n = mGraph.nodes[hoveredNode];
 		ImGui::BeginTooltip();
+		// Tooltips auto-size: wrapping at their current right edge can
+		// collapse the initial width to a single character.
+		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetFontSize() * 35.0f);
 		ImGui::Text("%s: %s", n.type.c_str(), n.id.c_str());
 		if (auto values = nodeTelemetry(n.type, n.id))
 		{
@@ -2790,12 +2836,14 @@ entry.thermalClass = "moderate";
 					"%s %s (%s; %s)", e.from == size_t(hoveredNode) ? "->" : "<-", other.id.c_str(),
 					e.label.c_str(), station_flow::mediumName(e.medium));
 			}
+		ImGui::PopTextWrapPos();
 		ImGui::EndTooltip();
 	}
 	ImGui::EndChild();
 	// The reserved inspector column (#653). It is always here, selected or
 	// not; what changes is only its contents, never the canvas geometry.
 	ImGui::SameLine();
+	bool openComponentGuide = false;
 	if (ImGui::BeginChild("Flow inspector", {station_flow::InspectorColumnWidth, rowHeight}, true))
 	{
 		if (mSelectedConnection)
@@ -2929,6 +2977,15 @@ entry.thermalClass = "moderate";
 		if (mSelected >= 0)
 		{
 			auto const& node = mGraph.nodes[mSelected];
+			// The component guide is opened from here rather than on hover.
+			// A collapsed composite has no help under its own type, so it
+			// falls back to the generic Prefab entry, as the old tooltip did.
+			auto const* selectedHelp = mComponentHelp ? mComponentHelp->find(mSelectedType) : nullptr;
+			if (!selectedHelp && mComponentHelp
+				&& mCompositeKeys.contains(mSelectedType + keySeparator + mSelectedId))
+				selectedHelp = mComponentHelp->find("Prefab");
+			if (selectedHelp && ImGui::Button("Help"))
+				openComponentGuide = true;
 			if (auto values = nodeTelemetry(node.type, node.id);
 				values && ImGui::CollapsingHeader("Applied simulation readout"))
 			{
@@ -3280,6 +3337,29 @@ entry.thermalClass = "moderate";
 			if (ImGui::Button("Cancel unit deletion"))
 			{ mPendingUnitRemoval.reset(); ImGui::CloseCurrentPopup(); }
 		}
+		ImGui::EndPopup();
+	}
+	// The component guide for the selected node: the documentation that
+	// used to hang off hover now opens on demand, in its own bounded,
+	// scrollable modal. The guide is re-resolved from the selection each
+	// frame; the modal blocks canvas input, so the selection cannot shift
+	// underneath it.
+	auto const* guideHelp = mComponentHelp ? mComponentHelp->find(mSelectedType) : nullptr;
+	if (!guideHelp && mComponentHelp
+		&& mCompositeKeys.contains(mSelectedType + keySeparator + mSelectedId))
+		guideHelp = mComponentHelp->find("Prefab");
+	// Open and render in the same parent scope, not inside the inspector child.
+	if (openComponentGuide) ImGui::OpenPopup(componentGuidePopup);
+	auto const guideWidth = std::max(320.0f, std::min(620.0f, io.DisplaySize.x - 32.0f));
+	ImGui::SetNextWindowSize({guideWidth, std::max(240.0f, io.DisplaySize.y * 0.7f)});
+	ImGui::SetNextWindowSizeConstraints({320.0f, 200.0f},
+		{guideWidth, std::max(240.0f, io.DisplaySize.y * 0.85f)});
+	if (ImGui::BeginPopupModal(componentGuidePopup))
+	{
+		if (guideHelp) renderComponentHelp(*guideHelp);
+		else ImGui::TextDisabled("No guide is available for this component.");
+		ImGui::Spacing();
+		if (ImGui::Button("Close component guide")) ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 	}
 }

@@ -11,6 +11,9 @@ or discard a Station Systems configuration draft. It reports the active World, p
 status, World and station elapsed simulation seconds, all four system objects'
 completed ticks, bounded events and structured software diagnostics.
 
+For a component-by-component guide to ports, settings and practical wiring
+examples, see the [Station systems component reference](station-components.md).
+
 ## Draft flow diagram
 
 The **Station Flow** tab beside **Station Systems** automatically generates a
@@ -43,7 +46,9 @@ World simulation, or document history.
   and cooling-class nodes represent aggregate services, not physical wiring or pipes.
 - Missing or ambiguous referenced IDs appear as red nodes, so an incomplete draft
   remains inspectable. This is not a substitute for Apply's configuration validation.
-- Click a node for its incoming/outgoing connections, or hover for a tooltip.
+- Click a node for its incoming/outgoing connections and a **Help** button in
+  the Flow inspector. Help opens the component guide in a scrollable modal;
+  hovering shows only node identity, live readings and connections.
   Left-drag it to rearrange the graph (also while the World is paused).
   **Connected only** focuses its immediate neighbours. **Find node** filters by
   type/ID (case-sensitive) and moves the view to the first match.

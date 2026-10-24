@@ -488,7 +488,7 @@ foreach(target IN ITEMS pf-render pf-headless-render-support)
 endforeach()
 
 # CPU-only managed Station configuration resources; no renderer or OpenGL needed.
-add_library(pf-station-resources STATIC src/StationConfigurationResource.cpp)
+add_library(pf-station-resources STATIC src/StationConfigurationResource.cpp src/StationComponentHelp.cpp)
 target_link_libraries(pf-station-resources PUBLIC promethium-fermide-core Willpower.Application)
 target_compile_features(pf-station-resources PUBLIC cxx_std_20)
 set_target_properties(pf-station-resources PROPERTIES POSITION_INDEPENDENT_CODE ON)

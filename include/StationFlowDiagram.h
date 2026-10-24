@@ -1,5 +1,6 @@
 #pragma once
 #include "core/StationSystems.h"
+#include "StationComponentHelp.h"
 #include "core/StationConnections.h"
 #include "core/StationConfigurationDocument.h"
 #include "core/StationPorts.h"
@@ -130,6 +131,8 @@ public:
 	// A visible point on the rendered curve, for headless interaction checks.
 	bool connectionScreenPosition(core::StationConnectionKey const& key, ImVec2* out) const;
 	bool pathwayScreenPosition(std::string const& id, ImVec2* out) const;
+	void setComponentHelp(std::shared_ptr<StationComponentHelpResource const> help)
+	{ mComponentHelp = std::move(help); }
 	void reset();
 	void exportLayout(core::StationConfigurationDocument& document) const;
 	void importLayout(core::StationConfigurationDocument const& document);
@@ -218,6 +221,7 @@ private:
 	void placePrefabAt(core::StationSystemsSettings& draft, ImVec2 const& placeAt,
 		bool fromMenu);
 
+	std::shared_ptr<StationComponentHelpResource const> mComponentHelp;
 	std::map<std::string, station_flow::NodeTelemetry> mTelemetry;
 	uint64_t mTelemetryTick{UINT64_MAX};
 	bool mTelemetryHealthy{true};

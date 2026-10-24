@@ -112,6 +112,9 @@ pf_add_smoke_module(pf-smoke-station
     DEFAULT_CHECK lifecycle
 )
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME station-component-help-extraction COMMAND ${Python3_EXECUTABLE}
+    "${PROJECT_SOURCE_DIR}/scripts/extract_station_component_help.py" --check)
+set_tests_properties(station-component-help-extraction PROPERTIES LABELS "smoke;functional;validation-fast;station" TIMEOUT 10)
 add_test(NAME station-clock-boundary COMMAND ${Python3_EXECUTABLE}
     "${PROJECT_SOURCE_DIR}/scripts/tests/station_clock_boundary.py")
 set_tests_properties(station-clock-boundary PROPERTIES LABELS "smoke;functional;validation-fast;station" TIMEOUT 10)
@@ -892,7 +895,7 @@ set_tests_properties(smoke-harness-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-editor
     NAME editor
     SOURCES
-        editor/StationSystems.cpp editor/StationObservations.cpp editor/StationConnections.cpp editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/TransportStopNames.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
+        editor/StationSystems.cpp editor/StationComponentHelp.cpp editor/StationObservations.cpp editor/StationConnections.cpp editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/TransportStopNames.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
         agent/ActivationEditor.cpp
         agent/GroupEditor.cpp
         agent/GroupAssignmentEditor.cpp
@@ -1002,6 +1005,8 @@ add_test(NAME station-editor-flow-connections COMMAND pf-smoke-editor --check st
 set_tests_properties(station-editor-flow-connections PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-connection-telemetry COMMAND pf-smoke-editor --check station/flowConnectionTelemetryWorkflow)
 set_tests_properties(station-editor-flow-connection-telemetry PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+add_test(NAME station-editor-component-help COMMAND pf-smoke-editor --check station/componentHelpWorkflow)
+set_tests_properties(station-editor-component-help PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-telemetry COMMAND pf-smoke-editor --check station/flowTelemetryWorkflow)
 set_tests_properties(station-editor-flow-telemetry PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-power-chain COMMAND pf-smoke-editor --check station/flowPowerChainWorkflow)

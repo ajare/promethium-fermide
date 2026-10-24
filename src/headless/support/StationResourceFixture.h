@@ -1,5 +1,6 @@
 #pragma once
 #include "StationConfigurationResource.h"
+#include "StationComponentHelp.h"
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -21,12 +22,13 @@ struct StationResourceFixture
 	// #812: the manifest-declared prefab catalogues, loaded through the same
 	// real manifest/Directory pipeline as the configurations.
 	std::vector<std::shared_ptr<PrefabCatalogueResource>> catalogues;
+	std::shared_ptr<StationComponentHelpResource const> componentHelp;
 	StationResourceFixture(std::filesystem::path const& resources, std::filesystem::path const& root)
 	{
 		namespace rs = wp::application::resourcesystem;
 		std::filesystem::create_directories(root);
 		auto manifest = YAML::LoadFile((resources / "Resources.yaml").string());
-		auto const wanted = std::set<std::string>{"StationConfiguration", "PrefabCatalogue"};
+		auto const wanted = std::set<std::string>{"StationConfiguration", "PrefabCatalogue", "StationComponentHelp"};
 		YAML::Node selected;
 		for (auto const& entry : manifest["Resources"]["Resource"])
 		{
@@ -40,6 +42,7 @@ struct StationResourceFixture
 		{ std::ofstream out(root / "Resources.yaml"); out << selected; }
 		registerStationConfigurationResourceType(manager);
 		registerPrefabCatalogueResourceType(manager);
+		registerStationComponentHelpResourceType(manager);
 		manager.addResourceLocationFactory("Directory", [this](auto const& path, auto const& definition) -> rs::ResourceLocation* {
 			return new rs::DirectoryResourceLocation(&logger, path, definition);
 		});
@@ -47,6 +50,7 @@ struct StationResourceFixture
 		manager.scanLocations();
 		configurations = loadStationConfigurationResources(manager);
 		catalogues = loadPrefabCatalogueResources(manager);
+		componentHelp = loadStationComponentHelpResource(manager);
 	}
 };
 }
