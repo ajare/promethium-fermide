@@ -19,11 +19,12 @@ using namespace station_detail;
 			// identity, cause and effective parameters; a Condition restore
 			// carries the installation and the target Condition it is
 			// healing toward (#840).
-			enum class Kind { Injection, SettingsUpdate, RestoreCondition } kind{Kind::Injection};
+			enum class Kind { Injection, SettingsUpdate, RestoreCondition, ResetTrip } kind{Kind::Injection};
 			uint64_t afterStep{0};
 			std::string installationId, modeId;
 			FaultCause cause;
 			CoolantLeakSettings parameters;
+			double heatSpikeKJ{0.0};
 			double restoreTarget{0.0};
 			std::optional<StationSystemsSettings> settingsUpdate;
 		};
@@ -342,6 +343,11 @@ using namespace station_detail;
 			double lastHeatInKW{0.0};
 			double lastRejectedKW{0.0};
 			double lastNetKW{0.0};
+			// Trip hazard energy (#841): the pending one-shot spike is booked
+			// through the tick's heat-in term so the ordinary audit closes on
+			// it, then retired into the cumulative total.
+			double pendingHazardKJ{0.0};
+			double hazardKJ{0.0};
 			double absorbedKJ{0.0};
 			double routedKJ{0.0};
 			double loopKJ{0.0};
@@ -1023,6 +1029,8 @@ using namespace station_detail;
 		// reactor whole and it spends nothing.
 		struct SabatierState
 		{
+			std::optional<StationFaultSnapshot> trip;
+			std::optional<double> pendingTripHeat;
 			SabatierReactorSettings authored;
 			size_t co2StoreIndex{0};
 			size_t hydrogenStoreIndex{0};
@@ -1066,6 +1074,8 @@ using namespace station_detail;
 		// temperature refuses the processor whole.
 		struct MethaneProcessorState
 		{
+			std::optional<StationFaultSnapshot> trip;
+			std::optional<double> pendingTripHeat;
 			MethaneProcessorSettings authored;
 			size_t methaneStoreIndex{0};
 			size_t hydrogenStoreIndex{0};

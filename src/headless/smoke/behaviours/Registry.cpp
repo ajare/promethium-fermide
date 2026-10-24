@@ -187,7 +187,7 @@ namespace
 		auto const futureVersion = future.find("version: 111");
 		// One above the current schema: the loader must refuse what it has
 		// not seen rather than guess at a newer format.
-		future.replace(futureVersion, std::string("version: 111").size(), "version: 114");
+		future.replace(futureVersion, std::string("version: 111").size(), "version: 115");
 		auto refused = std::make_shared<core::World>("Loading", 1, 1);
 		refused->pauseSimulation();
 		auto futureReader = core::YamlSerializer::fromString(future);

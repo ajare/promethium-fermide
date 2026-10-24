@@ -2035,6 +2035,20 @@ using namespace station_detail;
 		// Sabatier stage consumes twice as much hydrogen per methane as
 		// the processor returns, so the combined loop retains a net
 		// hydrogen demand and the return is never free continuing supply.
+		auto tripIdentities = stationInstallationIdentities(settings);
+		for (auto const& s : settings.sabatierReactors) tripIdentities.push_back({s.id, "Sabatier"});
+		for (auto const& s : settings.methaneProcessors) tripIdentities.push_back({s.id, "Methane processor"});
+		auto validTrip = [&](auto const& s) {
+			return !s.overtempRunaway || (std::count_if(tripIdentities.begin(), tripIdentities.end(),
+				[&](auto const& i) { return i.id == s.id; }) == 1
+				&& std::isfinite(s.overtempRunaway->triggerTemperatureC)
+				&& s.overtempRunaway->triggerTemperatureC > -273.15
+				&& std::isfinite(s.overtempRunaway->heatSpikeKJ) && s.overtempRunaway->heatSpikeKJ > 0.0);
+		};
+		for (auto const& s : settings.sabatierReactors)
+			if (!validTrip(s)) return refuse("Invalid Sabatier overtemp-runaway parameters");
+		for (auto const& s : settings.methaneProcessors)
+			if (!validTrip(s)) return refuse("Invalid methane processor overtemp-runaway parameters");
 		if (settings.sabatierReactors.size() > MaxStationSabatierReactors)
 			return refuse("Station Sabatier reactors are limited to "
 				+ std::to_string(MaxStationSabatierReactors) + " entries");

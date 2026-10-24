@@ -22,7 +22,11 @@ namespace core
 			[](auto const& loop) { return loop.coolantLeak.has_value(); });
 		bool const condition = std::any_of(document.settings.coolantLoops.begin(), document.settings.coolantLoops.end(),
 			[](auto const& loop) { return loop.condition.has_value(); });
-		output->writeUint32("schemaVersion", condition ? 113 : faults ? 112 : 111);
+		auto const trips = std::any_of(document.settings.sabatierReactors.begin(), document.settings.sabatierReactors.end(),
+			[](auto const& s) { return s.overtempRunaway.has_value(); })
+			|| std::any_of(document.settings.methaneProcessors.begin(), document.settings.methaneProcessors.end(),
+				[](auto const& s) { return s.overtempRunaway.has_value(); });
+		output->writeUint32("schemaVersion", trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		writeStationSystemsSettingsMap(*output, document.settings);
 		output->beginMap("layout");
 		output->writeFloat("panX", document.panX);
@@ -87,7 +91,7 @@ namespace core
 				throw SerializationException("Missing stationSystems map");
 			input->beginMap("stationConfiguration");
 			auto const version = input->readUint32("schemaVersion");
-			if (version < 96 || version > 113) throw SerializationException("Unsupported Station configuration schemaVersion");
+			if (version < 96 || version > 114) throw SerializationException("Unsupported Station configuration schemaVersion");
 			StationConfigurationDocument candidate;
 			readStationSystemsSettingsMap(*input, version, candidate.settings, false);
 			// Incomplete wiring is valid draft state, but all surviving entries

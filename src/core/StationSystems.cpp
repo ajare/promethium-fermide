@@ -907,7 +907,11 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		mImpl = std::make_unique<Impl>(settings.systemsStepWorldTicks, baseStepSeconds);
 		mImpl->settings = settings; mImpl->snapshot.enabled = settings.enabled;
 		if (std::any_of(settings.coolantLoops.begin(), settings.coolantLoops.end(),
-			[](auto const& loop) { return loop.coolantLeak.has_value() || loop.condition.has_value(); }))
+			[](auto const& loop) { return loop.coolantLeak.has_value() || loop.condition.has_value(); })
+			|| std::any_of(settings.sabatierReactors.begin(), settings.sabatierReactors.end(),
+				[](auto const& s) { return s.overtempRunaway.has_value(); })
+			|| std::any_of(settings.methaneProcessors.begin(), settings.methaneProcessors.end(),
+				[](auto const& s) { return s.overtempRunaway.has_value(); }))
 			mImpl->faultReplayInitialSettings = settings;
 		mImpl->snapshot.systemsStepWorldTicks = settings.systemsStepWorldTicks;
 		mImpl->snapshot.systemsTimestepSeconds = mImpl->clock.stepSeconds();

@@ -1168,7 +1168,7 @@ namespace persistence
 
 		// Fault-absent writers retain schema 111, but readers also accept the
 		// opt-in schema 113. A future map must exceed that reader ceiling.
-		auto const futureYaml = std::string("version: 114")
+		auto const futureYaml = std::string("version: 115")
 			+ defaultsYaml.substr(defaultsYaml.find("\n"));
 		bool refusedFuture{ false };
 		try

@@ -131,8 +131,22 @@ namespace core
 	PF_STATION_LIVE_NODE(ElectrolyzerSettings, electrolyzers, "Electrolyzer")
 	PF_STATION_LIVE_NODE(Co2CaptureSettings, co2Captures, "CO2 capture")
 	PF_STATION_LIVE_NODE(FuelCellSettings, fuelCells, "Fuel cell")
-	PF_STATION_LIVE_NODE(SabatierReactorSettings, sabatierReactors, "Sabatier")
-	PF_STATION_LIVE_NODE(MethaneProcessorSettings, methaneProcessors, "Methane processor")
+	template <> struct LiveNode<SabatierReactorSettings>
+	{
+		static constexpr std::string_view nodeType = "Sabatier";
+		static auto& of(auto& settings) { return settings.sabatierReactors; }
+		static bool restoreInitial(SabatierReactorSettings const&, SabatierReactorSettings&) { return false; }
+		static bool topologyChanged(SabatierReactorSettings const& a, SabatierReactorSettings const& b)
+		{ return a.overtempRunaway.has_value() != b.overtempRunaway.has_value(); }
+	};
+	template <> struct LiveNode<MethaneProcessorSettings>
+	{
+		static constexpr std::string_view nodeType = "Methane processor";
+		static auto& of(auto& settings) { return settings.methaneProcessors; }
+		static bool restoreInitial(MethaneProcessorSettings const&, MethaneProcessorSettings&) { return false; }
+		static bool topologyChanged(MethaneProcessorSettings const& a, MethaneProcessorSettings const& b)
+		{ return a.overtempRunaway.has_value() != b.overtempRunaway.has_value(); }
+	};
 	PF_STATION_LIVE_NODE_WITH(MicrobialProcessorSettings, microbialProcessors, "Microbial processor",
 		&MicrobialProcessorSettings::initialCondition)
 	PF_STATION_LIVE_NODE_WITH(ThermalBufferSettings, thermalBuffers, "Thermal buffer",

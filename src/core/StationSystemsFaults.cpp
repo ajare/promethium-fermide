@@ -9,9 +9,8 @@ namespace core
 {
 	namespace
 	{
-		// The client-injectable cause kinds. DegradationCrossing is absent
-		// on purpose: it names a Fault the simulation raised itself, so a
-		// client cannot claim one (#840).
+		// DegradationCrossing and ThermalGate name simulation-owned onsets;
+		// neither may be forged by a client.
 		bool isInjectableCause(FaultCause::Kind kind)
 		{
 			return kind == FaultCause::Kind::AgentAction || kind == FaultCause::Kind::ScenarioEvent
@@ -25,17 +24,44 @@ namespace core
 		auto refuse = [&](std::string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
 		if (!mImpl->settings.enabled || !mImpl->snapshot.healthy) return refuse("Station runtime is not running or healthy");
 		auto const identities = stationInstallationIdentities(mImpl->settings);
-		if (std::none_of(identities.begin(), identities.end(), [&](auto const& i) { return i.id == id; }))
+		if (std::none_of(identities.begin(), identities.end(), [&](auto const& i) { return i.id == id; })
+			&& std::none_of(mImpl->sabatierReactors.begin(), mImpl->sabatierReactors.end(), [&](auto const& s) { return s.authored.id == id; })
+			&& std::none_of(mImpl->methaneProcessors.begin(), mImpl->methaneProcessors.end(), [&](auto const& s) { return s.authored.id == id; }))
 			return refuse("Unknown installation '" + std::string(id) + "'");
+		if (!isInjectableCause(cause.kind))
+			return refuse("Fault cause kind is not injectable: it names a Fault the simulation raises itself");
+		if (cause.detail.size() > 1024) return refuse("Fault cause detail exceeds 1024 bytes");
+		if (mode == "overtemp-runaway")
+		{
+			auto inject = [&](auto& states) {
+				for (auto& state : states)
+				{
+					if (state.authored.id != id) continue;
+					if (!state.authored.overtempRunaway) return refuse("overtemp-runaway is not enabled");
+					if (state.trip) return refuse("Trip is already active or pending");
+					Impl::FaultCommand command;
+					command.afterStep = mImpl->clock.steps(); command.installationId = id;
+					command.modeId = mode; command.cause = cause;
+					command.heatSpikeKJ = state.authored.overtempRunaway->heatSpikeKJ;
+					mImpl->faultCommands.push_back(command);
+					state.trip = StationFaultSnapshot{std::string(id), std::string(mode),
+						mImpl->clock.steps() + 1, cause.kind, cause.detail, 1.0};
+					state.pendingTripHeat = command.heatSpikeKJ;
+					if (diagnostic) diagnostic->clear();
+					return true;
+				}
+				return refuse("Unknown overtemp-runaway installation");
+			};
+			if (std::any_of(mImpl->sabatierReactors.begin(), mImpl->sabatierReactors.end(),
+				[&](auto const& s) { return s.authored.id == id; })) return inject(mImpl->sabatierReactors);
+			return inject(mImpl->methaneProcessors);
+		}
 		auto loop = std::find_if(mImpl->coolantLoops.begin(), mImpl->coolantLoops.end(),
 			[&](auto const& l) { return l.authored.id == id; });
 		if (loop == mImpl->coolantLoops.end() || mode != "coolant-leak")
 			return refuse("Unknown fault mode '" + std::string(mode) + "' for '" + std::string(id) + "'");
 		if (!loop->authored.coolantLeak) return refuse("coolant-leak is not enabled for '" + std::string(id) + "'");
 		if (loop->fault) return refuse("Fault mode is already active or pending on '" + std::string(id) + "'");
-		if (!isInjectableCause(cause.kind))
-			return refuse("Fault cause kind is not injectable: it names a Fault the simulation raises itself");
-		if (cause.detail.size() > 1024) return refuse("Fault cause detail exceeds 1024 bytes");
 		auto const& parameters = *loop->authored.coolantLeak;
 		if (!std::isfinite(parameters.releasedKg) || parameters.releasedKg <= 0
 			|| std::none_of(mImpl->atmospheres.begin(), mImpl->atmospheres.end(),
@@ -103,6 +129,29 @@ namespace core
 		return true;
 	}
 
+	bool StationSystemsRuntime::resetTrip(std::string_view id, std::string* diagnostic)
+	{
+		auto reset = [&](auto& states) {
+			for (auto& state : states)
+			{
+				if (state.authored.id != id || !state.trip || state.pendingTripHeat) continue;
+				Impl::FaultCommand command;
+				command.kind = Impl::FaultCommand::Kind::ResetTrip;
+				command.afterStep = mImpl->clock.steps(); command.installationId = id;
+				mImpl->faultCommands.push_back(command);
+				state.trip.reset();
+				appendBoundedEvent(mImpl->events, mImpl->clock.steps(), "trip", "Trip reset on '" + std::string(id) + "'");
+				if (diagnostic) diagnostic->clear();
+				return true;
+			}
+			return false;
+		};
+		if (mImpl->settings.enabled && mImpl->snapshot.healthy
+			&& (reset(mImpl->sabatierReactors) || reset(mImpl->methaneProcessors))) return true;
+		if (diagnostic) *diagnostic = "resetTrip requires a latched Trip on '" + std::string(id) + "'";
+		return false;
+	}
+
 	bool StationSystemsRuntime::hasFaultCommands() const
 	{
 		return std::any_of(mImpl->faultCommands.begin(), mImpl->faultCommands.end(),
@@ -112,8 +161,12 @@ namespace core
 	bool StationSystemsRuntime::hasFaultReplayState() const
 	{
 		return hasFaultCommands() || (mImpl->settings.enabled
-			&& std::any_of(mImpl->coolantLoops.begin(), mImpl->coolantLoops.end(),
-				[](auto const& loop) { return loop.authored.condition.has_value(); }));
+			&& (std::any_of(mImpl->coolantLoops.begin(), mImpl->coolantLoops.end(),
+				[](auto const& loop) { return loop.authored.condition.has_value(); })
+			|| std::any_of(mImpl->sabatierReactors.begin(), mImpl->sabatierReactors.end(),
+				[](auto const& s) { return s.authored.overtempRunaway.has_value(); })
+			|| std::any_of(mImpl->methaneProcessors.begin(), mImpl->methaneProcessors.end(),
+				[](auto const& s) { return s.authored.overtempRunaway.has_value(); })));
 	}
 
 	void StationSystemsRuntime::writeFaultReplay(Serializer& s) const
@@ -128,6 +181,11 @@ namespace core
 			s.writeUint64("afterStep", command.afterStep);
 			if (command.kind == Impl::FaultCommand::Kind::SettingsUpdate)
 				writeStationSystemsSettingsMap(s, *command.settingsUpdate);
+			else if (command.kind == Impl::FaultCommand::Kind::ResetTrip)
+			{
+				s.writeUint32("commandKind", 2);
+				s.writeString("installationId", command.installationId);
+			}
 			else if (command.kind == Impl::FaultCommand::Kind::RestoreCondition)
 			{
 				s.writeUint32("commandKind", 1);
@@ -140,8 +198,12 @@ namespace core
 				s.writeString("modeId", command.modeId);
 				s.writeUint32("causeKind", static_cast<uint32_t>(command.cause.kind));
 				s.writeString("causeDetail", command.cause.detail);
-				s.writeString("compartmentId", command.parameters.compartmentId);
-				s.writeDouble("releasedKg", command.parameters.releasedKg);
+				if (command.modeId == "overtemp-runaway") s.writeDouble("heatSpikeKJ", command.heatSpikeKJ);
+				else
+				{
+					s.writeString("compartmentId", command.parameters.compartmentId);
+					s.writeDouble("releasedKg", command.parameters.releasedKg);
+				}
 			}
 			s.endMap();
 		}
@@ -155,7 +217,7 @@ namespace core
 		s.beginMap("stationFaultReplay");
 		auto const steps = s.readUint64("completedSteps");
 		StationSystemsSettings initial;
-		readStationSystemsSettingsMap(s, 113, initial);
+		readStationSystemsSettingsMap(s, 114, initial);
 		auto runtime = std::make_unique<StationSystemsRuntime>(initial, baseSeconds);
 		s.beginArray("commands");
 		uint64_t previous = 0;
@@ -171,18 +233,18 @@ namespace core
 			if (s.hasField("stationSystems"))
 			{
 				StationSystemsSettings update;
-				readStationSystemsSettingsMap(s, 113, update);
+				readStationSystemsSettingsMap(s, 114, update);
 				if (!runtime->updateSettings(update, &diagnostic))
 					throw SerializationException("Invalid fault replay settings: " + diagnostic);
 			}
 			else if (s.hasField("commandKind"))
 			{
-				if (s.readUint32("commandKind") != 1)
-					throw SerializationException("Unknown fault replay command kind");
+				auto const kind = s.readUint32("commandKind");
+				if (kind != 1 && kind != 2) throw SerializationException("Unknown fault replay command kind");
 				auto const id = s.readString("installationId");
-				auto const target = s.readDouble("targetCondition");
-				if (!runtime->restoreCondition(id, target, &diagnostic))
-					throw SerializationException("Invalid fault replay restore: " + diagnostic);
+				if (!(kind == 2 ? runtime->resetTrip(id, &diagnostic)
+					: runtime->restoreCondition(id, s.readDouble("targetCondition"), &diagnostic)))
+					throw SerializationException("Invalid fault replay recovery command: " + diagnostic);
 			}
 			else
 			{
@@ -190,11 +252,15 @@ namespace core
 				auto const mode = s.readString("modeId");
 				auto const kind = s.readUint32("causeKind");
 				auto const detail = s.readString("causeDetail");
-				CoolantLeakSettings const parameters{s.readString("compartmentId"), s.readDouble("releasedKg")};
+				CoolantLeakSettings parameters;
+				double heat = 0;
+				if (mode == "overtemp-runaway") heat = s.readDouble("heatSpikeKJ");
+				else parameters = {s.readString("compartmentId"), s.readDouble("releasedKg")};
 				if (!isInjectableCause(static_cast<FaultCause::Kind>(kind))
 					|| !runtime->injectFault(id, mode, {static_cast<FaultCause::Kind>(kind), detail}, &diagnostic))
 					throw SerializationException("Invalid fault replay: " + diagnostic);
-				if (runtime->mImpl->faultCommands.back().parameters != parameters)
+				if (runtime->mImpl->faultCommands.back().parameters != parameters
+					|| runtime->mImpl->faultCommands.back().heatSpikeKJ != heat)
 					throw SerializationException("Fault replay effective parameters disagree with the command");
 			}
 			s.endMap();

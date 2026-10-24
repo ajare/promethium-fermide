@@ -1,8 +1,9 @@
-# Station Faults and Condition (#839, #840)
+# Station Faults, Condition and Trips (#839–#841)
 
 Implemented slices of [the failure framework](specs/station_degradation_failure_specification.md)
-include coolant-leak injection and opt-in coolant-loop Condition with funded recovery.
-Wear, Trips, Fault-clearing Repair jobs and other component catalogues remain follow-ups. Propagation follows
+include coolant-leak injection, opt-in coolant-loop Condition with funded recovery,
+and latching Sabatier/methane processor Trips.
+Wear, Fault-clearing Repair jobs and other component catalogues remain follow-ups. Propagation follows
 [ADR-0030](adr/0030-faults-propagate-through-media-via-hazard-bookings-never-direct-damage-edges.md).
 
 ## Authoring and commands
@@ -124,7 +125,54 @@ Snapshots expose `condition`, `conditionCapability`, `lastConditionDelta`,
 with no recovery, stress or new wire fields. Failed audits roll back Condition,
 stock spending, spawned Faults and events together.
 
+## Latching Trips
+
+Sabatier reactors and methane processors opt into the code-owned
+`overtemp-runaway` mode with `std::optional<OvertempRunawaySettings>`:
+
+```yaml
+overtempRunaway:
+  triggerTemperatureC: 80
+  heatSpikeKJ: 100
+```
+
+The threshold must be finite and above absolute zero; the spike must be finite
+and positive. Opt-in presence is frozen topology, while both parameters can be
+retuned live. Opted-in Installation IDs must be unambiguous. A sink at or above
+this threshold at a Station boundary automatically latches a Trip, even if the
+ordinary cooling gate has already stopped processing. Clients may also call
+`injectFault(id, "overtemp-runaway", cause)`. An accepted injection freezes its
+spike and takes effect at the next successful Station boundary; pending Trips
+are not yet published as latched and cannot be reset.
+
+On latch the installation draws no process electricity or feed and stays isolated
+after the sink recovers. The one-shot spike is an **external hazard energy input**
+to the declared sink, not invented electrical supply or normal reaction heat.
+The reservoir ledger includes it exactly once as `hazardEnergyKJ`, including it
+in total heat input and the audited energy residual. Failed audits roll back the
+latch, heat and event together. There are no downstream damage edges.
+
+`runtime.resetTrip(id, &diagnostic)` (or `World::resetStationTrip`) clears a latched
+Trip immediately, without stock, power, or elapsed time. Normal service resumes
+on the next step if its ordinary gates permit it. Resetting while the threshold
+still holds is legal, but the next step latches again with a fresh spike. Reset
+is refused without mutation for pending/untripped installations and non-Trip
+Faults. It never clears a coolant leak or pump seizure. Bounded `trip` events
+record each latch and reset; `tripped` and `activeFaults` on both processor
+snapshots expose the latch, onset, cause and full isolation impact.
+`ThermalGate` is the simulation-only automatic cause, never client-injectable.
+
+Existing generator cooling and Heat engine sink gates remain auto-clearing;
+no opt-in means precisely the previous behavior. Autonomous threshold evaluation
+is boundary-sampled, not a claim of timestep invariance for thermal feedback.
+
 ## Persistence and replay
+
+Schema 114 carries Trip opt-ins; earlier documents carrying them are refused.
+Enabled Trip models retain replay state even before any client command, so
+save/load preserves automatic latches as well as injected ones and resets.
+The command journal freezes injected spike sizes and replays reset ordering.
+Trip-absent output retains its previous schema and encoding.
 
 Schema 113 carries Condition settings and restore commands; pre-113 documents
 carrying a Condition block are refused. Running Condition models retain the replay
@@ -165,3 +213,10 @@ protected circulation, independent/coexisting Fault modes, stock-bounded recover
 reserves, shared-stock contention, transactional rollback, supported step ratios,
 settings validation, pending/completed restore replay and autonomous Condition
 World save/load through both serializers.
+
+`station-tripLifecycle` and `station-tripTransactions` cover both processor types,
+automatic and injected onset, persistent isolation after sink recovery, coexistence
+with auto-clearing generator/Heat engine gates on the same sink, free instant reset,
+invalid and duplicate commands, conservative heat, rollback, parameter retuning,
+opt-in no-op behavior, supported step ratios, schema guards, exact YAML/binary
+replay and World save/load/reset.

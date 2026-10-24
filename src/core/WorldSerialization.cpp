@@ -994,7 +994,11 @@ namespace core
 		bool const faults = std::any_of(mStationSystemsSettings.coolantLoops.begin(), mStationSystemsSettings.coolantLoops.end(),
 			[](auto const& loop) { return loop.coolantLeak.has_value(); })
 			|| (mStationSystemsRuntime && mStationSystemsRuntime->hasFaultCommands());
-		serializer.writeUint32("version", condition ? 113 : faults ? 112 : 111);
+		bool const trips = std::any_of(mStationSystemsSettings.sabatierReactors.begin(), mStationSystemsSettings.sabatierReactors.end(),
+			[](auto const& s) { return s.overtempRunaway.has_value(); })
+			|| std::any_of(mStationSystemsSettings.methaneProcessors.begin(), mStationSystemsSettings.methaneProcessors.end(),
+				[](auto const& s) { return s.overtempRunaway.has_value(); });
+		serializer.writeUint32("version", trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
@@ -1901,7 +1905,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 113)
+		if (version < 1 || version > 114)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}

@@ -391,6 +391,12 @@ namespace core
 			reactor.lastReactionHeatKW = 0.0;
 			reactor.lastCoolingAvailable = false;
 			reactor.lastBlockReason.clear();
+			if (reactor.trip)
+			{
+				reactor.lastBlockReason = "overtemp-runaway Trip latched: resetTrip required";
+				reactor.status = StationTransferStatus::Rejected;
+				continue;
+			}
 			if (reactor.authored.rateKgPerS <= 0.0)
 			{
 				reactor.status = StationTransferStatus::Idle;
@@ -571,6 +577,12 @@ namespace core
 			processor.lastReactionHeatKW = 0.0;
 			processor.lastCoolingAvailable = false;
 			processor.lastBlockReason.clear();
+			if (processor.trip)
+			{
+				processor.lastBlockReason = "overtemp-runaway Trip latched: resetTrip required";
+				processor.status = StationTransferStatus::Rejected;
+				continue;
+			}
 			if (processor.authored.rateKgPerS <= 0.0)
 			{
 				processor.status = StationTransferStatus::Idle;

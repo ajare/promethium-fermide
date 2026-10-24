@@ -57,6 +57,17 @@ namespace core
 		markModified();
 		return true;
 	}
+	bool World::resetStationTrip(std::string_view installationId, std::string* diagnostic)
+	{
+		if (!mStationSystemsRuntime)
+		{
+			if (diagnostic) *diagnostic = "Station systems are not running";
+			return false;
+		}
+		if (!mStationSystemsRuntime->resetTrip(installationId, diagnostic)) return false;
+		markModified();
+		return true;
+	}
 	StationSystemsSnapshot World::getStationSystemsSnapshot() const
 	{
 		if (mStationSystemsRuntime) return mStationSystemsRuntime->snapshot();

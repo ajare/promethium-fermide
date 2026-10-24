@@ -3532,6 +3532,7 @@ namespace core
 		// the values the runtime is actually executing.
 		bool updateStationSystemsSettings(StationSystemsSettings const& offered,
 			std::string* diagnostic = nullptr);
+		bool resetStationTrip(std::string_view installationId, std::string* diagnostic = nullptr);
 		bool injectStationFault(std::string_view installationId, std::string_view modeId,
 			FaultCause const& cause, std::string* diagnostic = nullptr);
 		// Change one Station node's parameters on the running scenario without

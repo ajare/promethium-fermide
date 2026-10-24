@@ -1,4 +1,5 @@
 #include "StationRig.h"
+#include "CarbonObservationFixture.h"
 #include "Smoke.h"
 #include "core/StationSystemsRuntime.h"
 #include "core/StationReference.h"
@@ -186,6 +187,162 @@ void faultReplay(smoke::Context const&)
 		require(refused, "invalid persisted fault cause accepted");
 	}
 }
+void tripLifecycle(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	auto settings = carbonObservationFixture(); settings.systemsStepWorldTicks = 4;
+	settings.fuelCells.clear();
+	settings.thermalReservoirs[0].heatCapacityKJPerK = 100;
+	settings.thermalReservoirs[0].startingTemperatureC = 30;
+	settings.sabatierReactors[0].overtempRunaway = {25, 100};
+	settings.methaneProcessors[0].overtempRunaway = {25, 200};
+	core::RadiatorSettings radiator; radiator.id = "radiator"; radiator.reservoirId = "sink"; radiator.areaM2 = 100;
+	settings.radiators = {radiator};
+	// Legacy gates share the very same sink: both must clear without reset,
+	// while the two new Trips remain isolated after the sink cools.
+	auto hot = settings.thermalReservoirs[0]; hot.id = "hot"; hot.startingTemperatureC = 90;
+	hot.heatCapacityKJPerK = 100000; hot.maxTemperatureC = 100; settings.thermalReservoirs.push_back(hot);
+	core::HeatEngineSettings engine; engine.id = "engine"; engine.hotReservoirId = "hot";
+	engine.rejectionReservoirId = "sink"; engine.thermalClass = "moderate"; engine.ratedThermalInputKW = 1;
+	engine.carnotFraction = 0.5; engine.minHotTemperatureC = 50; engine.maxSinkTemperatureC = 25;
+	settings.heatEngines = {engine};
+	core::BatterySettings battery; battery.id = "battery"; battery.nameplateKWh = 100;
+	battery.usableKWh = 100; battery.maxChargeKW = 100; settings.batteries = {battery};
+	core::ResourceStoreSettings fuel; fuel.id = "fuel"; fuel.unit = "kWh"; fuel.capacity = 100; fuel.startingQualified = 100;
+	settings.stores.push_back(fuel);
+	core::GeneratorSettings generator; generator.id = "generator"; generator.fuelStoreId = "fuel";
+	generator.heatSinkId = "sink"; generator.thermalClass = "moderate"; generator.ratedOutputKW = 1;
+	generator.commandedOutputKW = 1; generator.maxRampKWPerSecond = 10; generator.maxSinkTemperatureC = 25;
+	settings.generators = {generator};
+	core::StationSystemsRuntime run(settings, 0.25f);
+	std::string diagnostic;
+	require(!run.resetTrip("reactor", &diagnostic) && !diagnostic.empty(), "unlatched reset accepted");
+	require(run.advanceTo(1), "automatic trip failed its audit");
+	auto s = run.snapshot();
+	require(s.sabatierReactors[0].tripped && s.methaneProcessors[0].tripped
+		&& s.sabatierReactors[0].energySuppliedKJ == 0 && s.methaneProcessors[0].energySuppliedKJ == 0,
+		"overtemp-runaway did not isolate both installations");
+	require(s.thermal.reservoirs[0].hazardEnergyKJ == 300
+		&& std::abs(s.thermal.reservoirs[0].residualKJ) < 1e-7, "trip heat was not booked conservatively");
+	require(s.heatEngines[0].tripped && s.power.generators[0].outputKW == 0, "legacy gates did not refuse hot sink");
+	auto tripEventCount = [&] {
+		auto const events = run.events();
+		return std::count_if(events.begin(), events.end(), [](auto const& e) { return e.category == "trip"; });
+	};
+	require(tripEventCount() == 2, "Trip latch events missing or duplicated");
+	roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+	require(run.advanceTo(60), "sink recovery drive failed"); s = run.snapshot();
+	require(s.thermal.reservoirs[0].temperatureC < 25 && s.sabatierReactors[0].tripped
+		&& s.methaneProcessors[0].tripped && s.thermal.reservoirs[0].hazardEnergyKJ == 300,
+		"Trip auto-cleared or repeated its heat spike");
+	require(!s.heatEngines[0].tripped && s.power.generators[0].outputKW > 0,
+		"new latches changed legacy gate auto-clear behavior");
+	auto const inventory = s.stores;
+	require(run.resetTrip("reactor") && run.resetTrip("processor") && !run.snapshot().sabatierReactors[0].tripped
+		&& !run.snapshot().methaneProcessors[0].tripped && run.snapshot().stores == inventory,
+		"reset was not free and instant");
+	require(!run.resetTrip("generator", &diagnostic) && !diagnostic.empty()
+		&& !run.resetTrip("engine", &diagnostic) && !run.resetTrip("missing", &diagnostic)
+		&& !run.resetTrip("reactor", &diagnostic), "non-Trip reset accepted");
+	require(tripEventCount() == 4, "Trip reset events missing or refusal emitted an event");
+	roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+	require(run.advanceTo(61) && run.snapshot().sabatierReactors[0].lastCo2ConsumedKg > 0
+		&& run.snapshot().methaneProcessors[0].lastMethaneConsumedKg > 0, "reset did not restore service");
+	require(run.injectFault("reactor", "overtemp-runaway", {})
+		&& !run.injectFault("reactor", "overtemp-runaway", {}) && !run.resetTrip("reactor", &diagnostic),
+		"pending trip legality failed");
+	roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+	require(run.advanceTo(62) && run.snapshot().thermal.reservoirs[0].hazardEnergyKJ == 400, "injected Trip booking failed");
+	roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+	auto puncture = punctureStation(); core::StationSystemsRuntime other(puncture, 0.25f);
+	require(other.injectFault("loop", "coolant-leak", {}) && other.advanceTo(1)
+		&& !other.resetTrip("loop", &diagnostic) && !diagnostic.empty(), "reset cleared a non-Trip fault");
+	core::StationConfigurationDocument document; document.settings = settings;
+	auto yaml = core::serializeStationConfiguration(document);
+	require(yaml.find("schemaVersion: 114") != std::string::npos, "Trip schema not bumped");
+	core::StationConfigurationDocument restored;
+	require(core::parseStationConfiguration(yaml, restored, &diagnostic) && restored.settings == settings, "Trip settings round trip failed");
+	yaml.replace(yaml.find("schemaVersion: 114"), 18, "schemaVersion: 113");
+	require(!core::parseStationConfiguration(yaml, restored, &diagnostic), "pre-114 Trip accepted");
+}
+
+void tripTransactions(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	auto settings = carbonObservationFixture(); settings.systemsStepWorldTicks = 4;
+	settings.sabatierReactors[0].overtempRunaway = {80, 100};
+	settings.methaneProcessors[0].overtempRunaway = {80, 200};
+	std::string diagnostic;
+	for (double invalid : {0., -1., std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+	{
+		auto bad = settings; bad.sabatierReactors[0].overtempRunaway->heatSpikeKJ = invalid;
+		require(!core::validateStationSystemsSettings(bad, diagnostic), "invalid Trip heat accepted");
+		bad = settings; bad.methaneProcessors[0].overtempRunaway->triggerTemperatureC = -273.15;
+		require(!core::validateStationSystemsSettings(bad, diagnostic), "nonphysical Trip threshold accepted");
+	}
+	auto bad = settings; bad.methaneProcessors[0].id = "reactor";
+	require(!core::validateStationSystemsSettings(bad, diagnostic), "ambiguous Trip identity accepted");
+	core::StationSystemsRuntime run(settings, 0.25f);
+	auto const before = run.snapshot(); auto const events = run.events();
+	for (auto const& request : {std::pair{"missing", "overtemp-runaway"}, {"sun", "overtemp-runaway"}, {"reactor", "coolant-leak"}})
+		require(!run.injectFault(request.first, request.second, {}, &diagnostic) && !diagnostic.empty(), "invalid Trip injection accepted");
+	require(!run.injectFault("reactor", "overtemp-runaway", {core::FaultCause::Kind::ThermalGate, "forged"}, &diagnostic)
+		&& run.snapshot() == before && run.events() == events && !run.hasFaultCommands(), "refusal mutated Trip state");
+	require(!run.updateNode<core::SabatierReactorSettings>("reactor", [](auto& r) { r.overtempRunaway.reset(); }, &diagnostic),
+		"Trip opt-in changed live");
+	require(run.injectFault("processor", "overtemp-runaway", {})
+		&& run.updateNode<core::MethaneProcessorSettings>("processor", [](auto& p) { p.overtempRunaway->heatSpikeKJ = 500; })
+		&& run.advanceTo(1) && run.snapshot().thermal.reservoirs[0].hazardEnergyKJ == 200,
+		"retuning changed an accepted booking");
+	roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+	// Invalid numeric results must roll back the latch, booking, and event
+	// together, not publish a Trip whose heat never entered the ledger.
+	auto poison = settings; poison.sabatierReactors[0].overtempRunaway->heatSpikeKJ = std::numeric_limits<double>::max();
+	poison.methaneProcessors[0].overtempRunaway->heatSpikeKJ = std::numeric_limits<double>::max();
+	core::StationSystemsRuntime failed(poison, 0.25f);
+	auto const originalEvents = failed.events();
+	require(failed.injectFault("reactor", "overtemp-runaway", {}) && failed.injectFault("processor", "overtemp-runaway", {})
+		&& !failed.advanceTo(1) && !failed.snapshot().healthy
+		&& failed.snapshot().thermal.reservoirs[0].hazardEnergyKJ == 0
+		&& !failed.snapshot().sabatierReactors[0].tripped && failed.events() == originalEvents,
+		"failed heat audit published a partial Trip");
+	// Both enabled-but-unused models must be observational no-ops.
+	auto absent = settings; absent.sabatierReactors[0].overtempRunaway.reset(); absent.methaneProcessors[0].overtempRunaway.reset();
+	core::StationSystemsRuntime opted(settings, 0.25f), legacy(absent, 0.25f);
+	require(opted.advanceTo(5) && legacy.advanceTo(5) && opted.snapshot() == legacy.snapshot() && opted.events() == legacy.events(),
+		"unused Trip opt-in changed legacy operation");
+	for (uint32_t ratio : {1u, 6u, 60u})
+	{
+		auto offered = settings; offered.systemsStepWorldTicks = ratio;
+		core::StationSystemsRuntime stepped(offered, 1.f / 60.f);
+		require(stepped.injectFault("processor", "overtemp-runaway", {}) && stepped.advanceTo(5)
+			&& stepped.snapshot().methaneProcessors[0].tripped && stepped.snapshot().thermal.reservoirs[0].hazardEnergyKJ == 200,
+			"Trip depended on Station step ratio");
+	}
+	auto hot = settings; hot.sabatierReactors[0].overtempRunaway->triggerTemperatureC = 20;
+	core::StationSystemsRuntime retrip(hot, 0.25f);
+	require(retrip.advanceTo(1) && retrip.resetTrip("reactor") && !retrip.snapshot().sabatierReactors[0].tripped
+		&& retrip.advanceTo(2) && retrip.snapshot().sabatierReactors[0].tripped
+		&& retrip.snapshot().thermal.reservoirs[0].hazardEnergyKJ == 200, "unresolved trigger did not relatch after reset");
+	core::World world("Trips", 2, 2); world.pauseSimulation(); world.finishBuild();
+	require(!world.resetStationTrip("reactor", &diagnostic) && world.configureStationSystems(settings, false, &diagnostic), "World Trip setup failed");
+	world.resumeSimulation(); require(advanceSeconds(world, 1), "World advance failed");
+	require(world.injectStationFault("reactor", "overtemp-runaway", {}) && advanceSeconds(world, 1), "World Trip failed");
+	for (bool binary : {false, true})
+	{
+		std::unique_ptr<core::Serializer> out = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+		core::SerializationWorkData work; world.serialize(*out, work); out->serialize();
+		auto bytes = binary ? static_cast<core::BinarySerializer&>(*out).getSerializedString() : static_cast<core::YamlSerializer&>(*out).getSerializedString();
+		std::unique_ptr<core::Serializer> in = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+		in->deserialize(); core::World loaded("Loaded", 2, 2);
+		require(loaded.deserialize(*in, work), "World Trip reload failed");
+		require(loaded.getStationSystemsSnapshot() == world.getStationSystemsSnapshot() && loaded.resetStationTrip("reactor")
+			&& !loaded.getStationSystemsSnapshot().sabatierReactors[0].tripped, "World Trip persistence/reset failed");
+	}
+}
+
 void faultTransactions(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
@@ -247,6 +404,8 @@ void faultOptIn(smoke::Context const&)
 }
 void registerStationFaultChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"tripLifecycle", tripLifecycle});
+	checks.push_back({"tripTransactions", tripTransactions});
 	checks.push_back({"faultInjection", faultInjection});
 	checks.push_back({"faultOutages", faultOutages});
 	checks.push_back({"faultReplay", faultReplay});

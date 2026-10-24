@@ -1,7 +1,8 @@
 # Station Degradation and Failure Specification
 
 Status: design agreed 2026-07-31; coolant-leak injection (#839) and coolant-loop
-Condition, degradation crossing and funded recovery (#840) implemented.
+Condition, degradation crossing and funded recovery (#840), and latching
+Sabatier/methane processor Trips with resetTrip (#841) implemented.
 See [the implemented slices](../station-faults.md); the remaining framework below is still design.
 
 Canonical vocabulary: `CONTEXT.md` § Station systems — **Installation**, **Condition**,
@@ -165,7 +166,7 @@ gates; new Trips latch.
 - Client commands (`injectFault`, `resetTrip`, `repairFault`, `restoreCondition`)
   enter the command log like other client commands; replay reproduces every onset,
   booking, interruption, and repair exactly.
-- Catalogue changes bump the station schema version (Condition opt-in: 113;
+- Catalogue changes bump the station schema version (Trip opt-in: 114; Condition opt-in: 113;
   coolant-leak-only: 112; feature-absent output remains 111).
 - Authored opt-in parameters travel in Settings; runtime fault state never does.
 

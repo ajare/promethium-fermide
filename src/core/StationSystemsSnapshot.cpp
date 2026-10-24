@@ -390,7 +390,8 @@ namespace core
 			reservoirResult.engineExtractionEnergyKJ = reservoir.engineExtractionKJ;
 			reservoirResult.engineRejectionEnergyKJ = reservoir.engineRejectionKJ;
 			reservoirResult.rejectedEnergyKJ = reservoir.rejectedKJ;
-			reservoirResult.residualKJ = reservoirResult.startingEnergyKJ
+			reservoirResult.hazardEnergyKJ = reservoir.hazardKJ;
+			reservoirResult.residualKJ = reservoirResult.startingEnergyKJ + reservoir.hazardKJ
 				+ reservoir.absorbedKJ + reservoir.routedKJ + reservoir.loopKJ
 				+ reservoir.condenserKJ + reservoir.generatorKJ + reservoir.electrolysisKJ
 				+ reservoir.fuelCellKJ + reservoir.sabatierKJ + reservoir.methaneProcessingKJ
@@ -1122,6 +1123,8 @@ namespace core
 		for (auto const& reactor : mImpl->sabatierReactors)
 		{
 			StationSabatierReactorSnapshot reactorResult;
+			reactorResult.tripped = reactor.trip.has_value() && !reactor.pendingTripHeat;
+			if (reactorResult.tripped) reactorResult.activeFaults.push_back(*reactor.trip);
 			reactorResult.id = reactor.authored.id;
 			reactorResult.co2StoreId = reactor.authored.co2StoreId;
 			reactorResult.hydrogenStoreId = reactor.authored.hydrogenStoreId;
@@ -1173,6 +1176,8 @@ namespace core
 		for (auto const& processor : mImpl->methaneProcessors)
 		{
 			StationMethaneProcessorSnapshot processorResult;
+			processorResult.tripped = processor.trip.has_value() && !processor.pendingTripHeat;
+			if (processorResult.tripped) processorResult.activeFaults.push_back(*processor.trip);
 			processorResult.id = processor.authored.id;
 			processorResult.methaneStoreId = processor.authored.methaneStoreId;
 			processorResult.hydrogenStoreId = processor.authored.hydrogenStoreId;

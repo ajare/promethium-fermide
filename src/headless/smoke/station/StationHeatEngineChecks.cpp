@@ -986,7 +986,7 @@ void heatEnginePersistence(smoke::Context const&)
 	// beyond the accepted range is refused outright, and a pre-110 document
 	// carrying the commanded-input field is refused rather than silently
 	// dropping the throttle the author commanded (#805).
-	for (int version : {108, 114})
+	for (int version : {108, 115})
 	{
 		auto bad = yaml;
 		bad.replace(bad.find("schemaVersion: 111"), std::string("schemaVersion: 111").size(),

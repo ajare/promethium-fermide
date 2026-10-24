@@ -609,12 +609,10 @@ namespace core
 	};
 	struct FaultCause
 	{
-		// The three client-supplied kinds name who struck the machine; the
-		// fourth is never injectable: the simulation raises it itself when
-		// an Installation's Condition falls through the threshold its
-		// catalogue mode declares (#840). A client cannot forge it, and
-		// the injected-command surface refuses it outright.
-		enum class Kind { AgentAction, ScenarioEvent, Editor, DegradationCrossing };
+		// The first three kinds are client-supplied. DegradationCrossing
+		// names an autonomous Condition crossing; ThermalGate names an
+		// automatic protective Trip. Clients cannot inject either.
+		enum class Kind { AgentAction, ScenarioEvent, Editor, DegradationCrossing, ThermalGate };
 		Kind kind{Kind::ScenarioEvent};
 		std::string detail;
 		bool operator==(FaultCause const&) const = default;
@@ -1389,6 +1387,22 @@ namespace core
 	// routed to the sink.
 	inline constexpr double StationMethaneProcessingReactionHeatKJPerKgMethane{
 		74.8 / StationMolarMassMethaneKgPerMol};
+	// The opt-in latching Trip (#841) shared by the Sabatier reactor and
+	// the methane processor. `triggerTemperatureC` is the sink temperature
+	// at or above which the machine protects itself; `heatSpikeKJ` is the
+	// one-shot hazard energy the latch books into that sink through the
+	// ordinary ledger. It is external hazard energy, not invented electrical
+	// supply, normal reaction heat, or a downstream damage edge: what the
+	// spike does to anything coupled to the sink is those components' own
+	// gates' business (ADR-0030). The spike is booked once per latch, so a
+	// reset against an unresolved trigger pays a fresh spike when it
+	// relatches.
+	struct OvertempRunawaySettings
+	{
+		double triggerTemperatureC{80.0};
+		double heatSpikeKJ{1.0};
+		bool operator==(OvertempRunawaySettings const&) const = default;
+	};
 	// A Sabatier reactor (#405): converts captured carbon dioxide and
 	// hydrogen into methane and water, CO2 + 4 H2 -> CH4 + 2 H2O. The
 	// conversion is stoichiometric under the declared molar masses -
@@ -1421,6 +1435,7 @@ namespace core
 		double specificEnergyKWhPerKgCO2{1.0}; // electrical dose per kg CO2 converted
 		double maxSinkTemperatureC{60.0}; // cooling qualified while the sink is below this
 		int priority{0};
+		std::optional<OvertempRunawaySettings> overtempRunaway;
 		bool operator==(SabatierReactorSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationSabatierReactors{8};
@@ -1455,6 +1470,7 @@ namespace core
 		double specificEnergyKWhPerKgCH4{2.0}; // electrical dose per kg CH4, must cover the reaction demand
 		double maxSinkTemperatureC{60.0}; // cooling qualified while the sink is below this
 		int priority{0};
+		std::optional<OvertempRunawaySettings> overtempRunaway;
 		bool operator==(MethaneProcessorSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationMethaneProcessors{8};
@@ -3091,7 +3107,8 @@ namespace core
 		double engineRejectionEnergyKJ{0.0}; // cumulative heat booked into the reservoir by heat engines (#804)
 		double atmosphereEnergyKJ{0.0}; // cumulative net compartment exchange into the reservoir
 		double rejectedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator + electrolysis + fuel cell + Sabatier + methane processing + microbial + atmosphere + buffer discharge + engine rejection - buffer charge - engine extraction - rejected - current
+		double residualKJ{0.0}; // starting + hazard + absorbed + routed + loop + condenser + generator + electrolysis + fuel cell + Sabatier + methane processing + microbial + atmosphere + buffer discharge + engine rejection - buffer charge - engine extraction - rejected - current
+		double hazardEnergyKJ{0.0}; // cumulative Trip hazard energy booked in (#841)
 		bool operator==(StationThermalReservoirSnapshot const&) const = default;
 	};
 	// One coolant loop as of the most recent tick (#396): the authored
@@ -3907,6 +3924,8 @@ namespace core
 		double residualKg{0.0};      // (co2 + hydrogen) - (methane + water)
 		double residualKJ{0.0};      // (supplied + released) - routed
 		StationTransferStatus status{StationTransferStatus::Idle};
+		bool tripped{false};
+		std::vector<StationFaultSnapshot> activeFaults;
 		bool operator==(StationSabatierReactorSnapshot const&) const = default;
 	};
 	// One methane processor as of the most recent tick (#405): the
@@ -3955,6 +3974,8 @@ namespace core
 		double residualKg{0.0};      // methane - hydrogen - carbon
 		double residualKJ{0.0};      // supplied - absorbed - routed
 		StationTransferStatus status{StationTransferStatus::Idle};
+		bool tripped{false};
+		std::vector<StationFaultSnapshot> activeFaults;
 		bool operator==(StationMethaneProcessorSnapshot const&) const = default;
 	};
 	// One microbial processor as of the most recent tick (#407): the

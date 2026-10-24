@@ -488,6 +488,7 @@ namespace core
 			fin(reservoir.lastGeneratorHeatKW, tag("lastGeneratorHeatKW", reservoir.id));
 			fin(reservoir.lastElectrolysisHeatKW, tag("lastElectrolysisHeatKW", reservoir.id));
 			fin(reservoir.lastFuelCellHeatKW, tag("lastFuelCellHeatKW", reservoir.id));
+			fin(reservoir.hazardEnergyKJ, tag("hazardEnergyKJ", reservoir.id));
 			fin(reservoir.lastSabatierHeatKW, tag("lastSabatierHeatKW", reservoir.id));
 			fin(reservoir.lastMethaneProcessingHeatKW, tag("lastMethaneProcessingHeatKW", reservoir.id));
 			fin(reservoir.lastMicrobialHeatKW, tag("lastMicrobialHeatKW", reservoir.id));
@@ -1280,6 +1281,7 @@ namespace core
 		for (auto const& reservoir : snapshot.thermal.reservoirs)
 			ledger(reservoir.residualKJ, std::abs(reservoir.startingEnergyKJ)
 				+ std::abs(reservoir.currentEnergyKJ) + std::abs(reservoir.absorbedEnergyKJ)
+				+ std::abs(reservoir.hazardEnergyKJ)
 				+ std::abs(reservoir.routedEnergyKJ) + std::abs(reservoir.loopEnergyKJ)
 				+ std::abs(reservoir.condenserEnergyKJ) + std::abs(reservoir.generatorEnergyKJ)
 				+ std::abs(reservoir.electrolysisEnergyKJ) + std::abs(reservoir.fuelCellEnergyKJ)

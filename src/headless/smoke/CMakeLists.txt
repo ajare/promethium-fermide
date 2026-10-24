@@ -305,7 +305,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         stabilityResetIsolation stabilityMultiWorldIsolation
         stabilityLongRunFast stabilityPathEquivalenceFast stabilityResetIsolationFast
         stabilityMultiWorldIsolationFast stabilityAuditFaultInjection materialIdentity
-        faultInjection faultOutages faultReplay faultOptIn faultTransactions
+        faultInjection faultOutages faultReplay faultOptIn faultTransactions tripLifecycle tripTransactions
         conditionStress conditionCrossing conditionRestore conditionReplay conditionValidation conditionTransactions)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)

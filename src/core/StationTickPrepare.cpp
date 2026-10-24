@@ -22,6 +22,23 @@ namespace core
 				+ loop.authored.id + "': " + loop.fault->causeDetail);
 			loop.pendingLeak.reset();
 		}
+		auto trips = [&](auto& states) {
+			for (auto& state : states)
+			{
+				auto const& model = state.authored.overtempRunaway;
+				if (!state.trip && model && runtime.reservoirs[state.sinkIndex].temperatureC >= model->triggerTemperatureC)
+				{
+					state.trip = StationFaultSnapshot{state.authored.id, "overtemp-runaway", tick,
+						FaultCause::Kind::ThermalGate, "sink overtemperature", 1.0};
+					state.pendingTripHeat = model->heatSpikeKJ;
+				}
+				if (!state.pendingTripHeat) continue;
+				runtime.reservoirs[state.sinkIndex].pendingHazardKJ += *state.pendingTripHeat;
+				state.pendingTripHeat.reset();
+				appendBoundedEvent(runtime.events, tick, "trip", "Trip 'overtemp-runaway' latched on '" + state.authored.id + "'");
+			}
+		};
+		trips(runtime.sabatierReactors); trips(runtime.methaneProcessors);
 		if (runtime.prediction.active)
 		{
 			for (auto const& body : runtime.reservoirs) protectionReservoirStart.push_back(body.temperatureC);

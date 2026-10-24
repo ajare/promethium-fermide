@@ -826,6 +826,7 @@ namespace core
 				// of what the compartment gained or gave up this tick.
 				auto const atmosphereHeatKW = atmosphereHeatByReservoir[index];
 				auto const heatInKW = reservoir.authored.absorbedHeatKW + routedIn[index]
+					+ reservoir.pendingHazardKJ / dt
 					+ loopHeatIntoReservoir[index] + condenserHeatBySink[index]
 					+ generatorHeatKW + atmosphereHeatKW
 					+ electrolysisHeatByReservoir[index]
@@ -1034,6 +1035,8 @@ namespace core
 				reservoir.lastHeatInKW = heatInKW;
 				reservoir.lastRejectedKW = rejectedKW;
 				reservoir.lastNetKW = netKW;
+				reservoir.hazardKJ += reservoir.pendingHazardKJ;
+				reservoir.pendingHazardKJ = 0.0;
 				reservoir.absorbedKJ += reservoir.authored.absorbedHeatKW * dt;
 				reservoir.routedKJ += routedIn[index] * dt;
 				reservoir.loopKJ += loopHeatIntoReservoir[index] * dt;

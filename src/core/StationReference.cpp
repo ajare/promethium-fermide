@@ -702,6 +702,13 @@ namespace core
 				serializer.writeDouble("specificEnergyKWhPerKgCO2",
 					reactor.specificEnergyKWhPerKgCO2);
 				serializer.writeDouble("maxSinkTemperatureC", reactor.maxSinkTemperatureC);
+				if (reactor.overtempRunaway)
+				{
+					serializer.beginMap("overtempRunaway");
+					serializer.writeDouble("triggerTemperatureC", reactor.overtempRunaway->triggerTemperatureC);
+					serializer.writeDouble("heatSpikeKJ", reactor.overtempRunaway->heatSpikeKJ);
+					serializer.endMap();
+				}
 				serializer.writeInt32("priority", reactor.priority);
 				serializer.endMap();
 			}
@@ -726,6 +733,13 @@ namespace core
 				serializer.writeDouble("specificEnergyKWhPerKgCH4",
 					processor.specificEnergyKWhPerKgCH4);
 				serializer.writeDouble("maxSinkTemperatureC", processor.maxSinkTemperatureC);
+				if (processor.overtempRunaway)
+				{
+					serializer.beginMap("overtempRunaway");
+					serializer.writeDouble("triggerTemperatureC", processor.overtempRunaway->triggerTemperatureC);
+					serializer.writeDouble("heatSpikeKJ", processor.overtempRunaway->heatSpikeKJ);
+					serializer.endMap();
+				}
 				serializer.writeInt32("priority", processor.priority);
 				serializer.endMap();
 			}
@@ -1928,6 +1942,13 @@ namespace core
 				reactor.specificEnergyKWhPerKgCO2 =
 					serializer.readDouble("specificEnergyKWhPerKgCO2");
 				reactor.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
+				if (serializer.hasField("overtempRunaway"))
+				{
+					if (version < 114) throw SerializationException("overtempRunaway requires schema 114");
+					serializer.beginMap("overtempRunaway");
+					reactor.overtempRunaway = OvertempRunawaySettings{serializer.readDouble("triggerTemperatureC"), serializer.readDouble("heatSpikeKJ")};
+					serializer.endMap();
+				}
 				reactor.priority = serializer.readInt32("priority");
 				stationSettings.sabatierReactors.push_back(std::move(reactor));
 				serializer.endMap();
@@ -1953,6 +1974,13 @@ namespace core
 				processor.specificEnergyKWhPerKgCH4 =
 					serializer.readDouble("specificEnergyKWhPerKgCH4");
 				processor.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
+				if (serializer.hasField("overtempRunaway"))
+				{
+					if (version < 114) throw SerializationException("overtempRunaway requires schema 114");
+					serializer.beginMap("overtempRunaway");
+					processor.overtempRunaway = OvertempRunawaySettings{serializer.readDouble("triggerTemperatureC"), serializer.readDouble("heatSpikeKJ")};
+					serializer.endMap();
+				}
 				processor.priority = serializer.readInt32("priority");
 				stationSettings.methaneProcessors.push_back(std::move(processor));
 				serializer.endMap();
@@ -2380,8 +2408,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 113)
-				return refuse("Reference station schema version must be from 65 to 113");
+			if (document.schemaVersion < 65 || document.schemaVersion > 114)
+				return refuse("Reference station schema version must be from 65 to 114");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");
