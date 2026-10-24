@@ -179,6 +179,31 @@ namespace core
 	bool reconstructPlacedPrefab(PrefabTemplate const& tmpl,
 		PrefabProvenance const& provenance, PlacedPrefab& out, std::string& reason);
 
+	// #817: live dial editing on a placed instance. The new value is
+	// validated against the exposed parameter's declared kind and range,
+	// then written atomically: the namespaced internal field in `draft` and
+	// `placed.overrides` move together, or neither does. The write happens
+	// on a candidate copy that runs through the existing configuration
+	// validator in the same before/after shape the link evaluator uses -
+	// the dial must not be the change that breaks an otherwise valid
+	// draft, and a draft already invalid in exactly the same way is not
+	// this edit's fault. Unknown dials, kind mismatches, non-finite or
+	// out-of-range values, and an instance that no longer owns the mapped
+	// internal entry are all refused with a diagnostic and no mutation.
+	bool applyPrefabParameterOverride(StationSystemsSettings& draft,
+		PrefabTemplate const& tmpl, PlacedPrefab& placed,
+		std::string const& parameterName, PrefabOverrideValue const& value,
+		std::string& reason);
+
+	// #817: the instance's current value for one exposed dial, read from
+	// the expanded internal entry itself - the truth the unit is running -
+	// so the inspector never shows a dial reading the unit does not hold.
+	// False when the parameter or its mapped entry/field is not in the
+	// draft; `out` is untouched then.
+	bool readPrefabParameterValue(StationSystemsSettings const& draft,
+		PrefabTemplate const& tmpl, std::string const& instanceId,
+		std::string const& parameterName, PrefabOverrideValue& out);
+
 	// Resolve one composite exposed-pin reference to the aliased internal
 	// pin. The pin must name this composite (its node type is the prefab id
 	// and its node id the instance id); a port the template did not expose

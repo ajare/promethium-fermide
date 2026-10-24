@@ -191,6 +191,14 @@ public:
 	// cascade delete. The composite node renames/deletes its whole unit;
 	// an internal entry of a placed unit refuses both while grouped.
 	bool selectedIsComposite() const;
+	// #817: one exposed-dial edit on a placed unit. The override record
+	// and the expanded internal entry move together through the core's
+	// atomic apply, or neither does; refusals carry the core diagnostic.
+	// The window's frame-start snapshot makes the accepted edit a single
+	// undo step that restores both halves.
+	bool applyPrefabDialEdit(core::StationSystemsSettings& draft,
+		std::string const& instanceId, std::string const& parameterName,
+		core::PrefabOverrideValue const& value, std::string& reason);
 	// The unit that owns the selected internal entry, empty when the
 	// selection is not a grouped internal.
 	std::string selectedUnitOwner() const;

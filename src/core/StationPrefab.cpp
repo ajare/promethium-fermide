@@ -737,6 +737,85 @@ namespace core
 		return true;
 	}
 
+	bool applyPrefabParameterOverride(StationSystemsSettings& draft,
+		PrefabTemplate const& tmpl, PlacedPrefab& placed,
+		std::string const& parameterName, PrefabOverrideValue const& value,
+		std::string& reason)
+	{
+		auto const refuse = [&reason](std::string message) { reason = std::move(message); return false; };
+		if (placed.prefabId != tmpl.id)
+			return refuse("unit '" + placed.instanceId + "' is not a placement of template '" + tmpl.id + "'");
+		auto const* parameter = findPrefabParameter(tmpl, parameterName);
+		if (!parameter)
+			return refuse("dial '" + parameterName + "' names no exposed parameter of prefab '"
+				+ tmpl.id + "'");
+		// The declared kind and range are the dial contract, checked before
+		// anything is written, exactly as at expansion time.
+		if (parameter->kind == PrefabParameterKind::Number)
+		{
+			auto const* number = std::get_if<double>(&value);
+			if (!number)
+				return refuse("dial '" + parameterName + "' must be set with a number");
+			if (!std::isfinite(*number) || *number < parameter->minValue || *number > parameter->maxValue)
+				return refuse("dial '" + parameterName + "' is outside its range ["
+					+ std::to_string(parameter->minValue) + ", "
+					+ std::to_string(parameter->maxValue) + "]");
+		}
+		else if (!std::get_if<bool>(&value))
+			return refuse("dial '" + parameterName + "' must be set with a boolean");
+		// Write on a candidate copy: the field write and the validator run
+		// happen there, so a refusal leaves the draft and the override
+		// record exactly as they were - this path can never leave the two
+		// diverged.
+		auto candidate = draft;
+		std::string const targetId = placed.instanceId + PrefabIdSeparator + parameter->entryId;
+		auto const target = resolvePrefabField(candidate, parameter->nodeType, targetId,
+			parameter->field);
+		if (!target.found())
+			return refuse("dial '" + parameterName + "' lost its target field '" + parameter->field
+				+ "' on unit '" + placed.instanceId + "'");
+		if (parameter->kind == PrefabParameterKind::Number)
+			*target.number = std::get<double>(value);
+		else
+			*target.flag = std::get<bool>(value);
+		// The whole-configuration validator is the outer net, in the same
+		// before/after shape the link evaluator uses: a dial that breaks an
+		// otherwise valid draft is refused, while a draft that was already
+		// invalid in exactly the same way is not this edit's doing and may
+		// proceed.
+		std::string afterDiag;
+		if (!validateStationSystemsSettings(candidate, afterDiag))
+		{
+			std::string beforeDiag;
+			if (validateStationSystemsSettings(draft, beforeDiag) || afterDiag != beforeDiag)
+				return refuse("dial '" + parameterName
+					+ "' would leave an invalid configuration: " + afterDiag);
+		}
+		draft = std::move(candidate);
+		placed.overrides[parameterName] = value;
+		return true;
+	}
+
+	bool readPrefabParameterValue(StationSystemsSettings const& draft,
+		PrefabTemplate const& tmpl, std::string const& instanceId,
+		std::string const& parameterName, PrefabOverrideValue& out)
+	{
+		auto const* parameter = findPrefabParameter(tmpl, parameterName);
+		if (!parameter) return false;
+		std::string const targetId = instanceId + PrefabIdSeparator + parameter->entryId;
+		// resolvePrefabField only locates the field; the value is copied out
+		// here, before any pointer could outlive the call, so the const view
+		// of the draft stays const.
+		auto& mutableDraft = const_cast<StationSystemsSettings&>(draft);
+		auto const target = resolvePrefabField(mutableDraft, parameter->nodeType, targetId,
+			parameter->field);
+		if (!target.found() || target.kind != parameter->kind) return false;
+		out = parameter->kind == PrefabParameterKind::Number
+			? PrefabOverrideValue{*target.number}
+			: PrefabOverrideValue{*target.flag};
+		return true;
+	}
+
 	bool checkPrefabCaps(PrefabTemplate const& tmpl,
 		StationSystemsSettings const& draft, std::string& reason)
 	{

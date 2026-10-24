@@ -936,6 +936,30 @@ void StationFlowDiagram::placePrefabAt(core::StationSystemsSettings& draft,
 	if (fromMenu) disarmPlacement();
 }
 
+// #817: the dial edit reaches the draft and the placed-unit record
+// through one core call, so the provenance override and the expanded
+// internal entry never move apart. A unit the catalogue no longer backs
+// has no dial contract to validate against and is refused.
+bool StationFlowDiagram::applyPrefabDialEdit(core::StationSystemsSettings& draft,
+	std::string const& instanceId, std::string const& parameterName,
+	core::PrefabOverrideValue const& value, std::string& reason)
+{
+	auto const found = std::find_if(mPlacedPrefabs.begin(), mPlacedPrefabs.end(),
+		[&](core::PlacedPrefab const& placed) { return placed.instanceId == instanceId; });
+	if (found == mPlacedPrefabs.end())
+	{
+		reason = "no placed prefab unit named '" + instanceId + "'";
+		return false;
+	}
+	auto const* tmpl = mPrefabCatalogue ? mPrefabCatalogue->find(found->prefabId) : nullptr;
+	if (!tmpl)
+	{
+		reason = "no loaded template backs unit '" + instanceId + "'";
+		return false;
+	}
+	return core::applyPrefabParameterOverride(draft, *tmpl, *found, parameterName, value, reason);
+}
+
 // #813: the composite projection.
 //
 // An editor-side view over the flattened draft: a placed unit collapses to

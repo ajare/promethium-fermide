@@ -7438,6 +7438,150 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		require(driver.passed(), "prefab composite telemetry workflow failed on the Test Engine");
 	}
 
+	// #817: the exposed-dials override UI. The composite inspector lists
+	// the template's exposed parameters with defaults and validated
+	// ranges; editing a dial moves the provenance override and the
+	// expanded internal entry in one undoable step; internal-only fields
+	// stay hidden while collapsed; out-of-range input is refused without
+	// mutation; and the dialed override persists through save/load.
+	void prefabDialOverrideWorkflow(smoke::Context const& fixtureContext)
+	{
+		using smoke::require;
+		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
+		auto const root = fixtureContext.temporaryRoot() / "prefab-dial-resources";
+		headless::StationResourceFixture resources(authored, root);
+		require(resources.catalogues.size() == 1,
+			"the bundled prefab catalogue should load from the manifest");
+
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1700};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window;
+		window.setPrefabCatalogueResources(resources.catalogues);
+		auto world = std::make_shared<core::World>("Prefab dial editing", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+		auto const path = fixtureContext.temporaryRoot() / "dials.station.yaml";
+		std::optional<std::string> pickPath = path.string();
+		window.setFilePicker([&](bool) -> std::optional<std::string> { return pickPath; });
+
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 1680});
+			ImGui::Begin("Configuration");
+			window.renderFlowContents(world);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "prefabDialOverride", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto* canvas = flowCanvasWindow("Configuration");
+			REQ(canvas != nullptr, "flow canvas is missing");
+			// Place the unit; it lands as a collapsed composite.
+			ctx->ComboClick("Place node/Aircon Unit"); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 300.0f, canvas->Pos.y + 220.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ImVec4 rect{};
+			REQ(window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"the placed unit is not a collapsed composite");
+			// Select the composite: the inspector lists the exposed dials
+			// with their defaults and validated ranges, and shows nothing
+			// of the internals behind them.
+			ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+			ctx->Yield(2);
+			ctx->MouseClick(); ctx->Yield(3);
+			// Park the pointer off the node: the node-hover tooltip's End()
+			// closes the frame's text capture, so the inspector text is only
+			// visible while no tooltip is open.
+			ctx->MouseTeleportToPos({canvas->Pos.x + 4.0f, canvas->Pos.y + 4.0f});
+			ctx->Yield(3);
+			REQ(driver.contains("Exposed parameters"),
+				"the composite inspector did not open the dial set");
+			REQ(driver.contains("range [0, 15], default 5"),
+				"the setpoint dial did not show its range and default");
+			REQ(driver.contains("range [0, 20], default 5"),
+				"the capacity dial did not show its range and default");
+			REQ(driver.contains("boolean, default off"),
+				"the criticalService dial did not show its default");
+			// Internal-only fields stay hidden while the unit is collapsed.
+			REQ(!driver.contains("COP") && !driver.contains("chilled setpoint C")
+				&& !driver.contains("pump power kW")
+				&& !driver.contains("freeze protection setpoint C"),
+				"internal-only fields leaked into the collapsed composite inspector");
+			// Edit the setpoint dial: the expanded entry and the
+			// provenance override move together in one undo step.
+			auto const undoBefore = window.draftHistory().undoCount();
+			ctx->ItemInputValue("**/setpoint", "8"); ctx->KeyPress(ImGuiKey_Tab); ctx->Yield(3);
+			REQ(window.draft().chillers.size() == 1
+				&& window.draft().chillers[0].chilledSetpointC == 8.0,
+				"the dial edit did not land on the expanded entry");
+			REQ(window.flowPlacedPrefabs().size() == 1
+				&& window.flowPlacedPrefabs()[0].overrides.count("setpoint") == 1
+				&& std::get<double>(window.flowPlacedPrefabs()[0].overrides.at("setpoint")) == 8.0,
+				"the dial edit did not update the provenance override");
+			REQ(window.draftHistory().undoCount() == undoBefore + 1,
+				"the dial edit was not a single undo step");
+			// One undo restores both halves; one redo re-applies both.
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			REQ(window.draft().chillers[0].chilledSetpointC == 5.0
+				&& std::get<double>(window.flowPlacedPrefabs()[0].overrides.at("setpoint")) == 5.0,
+				"one undo did not restore the entry and the override together");
+			driver.click(ctx, "Redo configuration"); ctx->Yield(3);
+			REQ(window.draft().chillers[0].chilledSetpointC == 8.0
+				&& std::get<double>(window.flowPlacedPrefabs()[0].overrides.at("setpoint")) == 8.0,
+				"one redo did not re-apply the entry and the override together");
+			// Out-of-range input is refused without mutation and says why.
+			auto const dialed = window.draft();
+			auto const dialedOverrides = window.flowPlacedPrefabs()[0].overrides;
+			auto const undoAtDial = window.draftHistory().undoCount();
+			ctx->ItemInputValue("**/setpoint", "99"); ctx->KeyPress(ImGuiKey_Tab); ctx->Yield(3);
+			REQ(window.draft() == dialed
+				&& window.flowPlacedPrefabs()[0].overrides == dialedOverrides
+				&& window.draftHistory().undoCount() == undoAtDial,
+				"out-of-range dial input mutated the draft, the override or the history");
+			REQ(driver.contains("Refused") && driver.contains("outside its range"),
+				"the out-of-range refusal was not shown in the inspector");
+			// The boolean dial flips the internal flag and the override.
+			ctx->ItemClick("**/criticalService"); ctx->Yield(3);
+			REQ(window.draft().chillers[0].criticalService
+				&& std::get<bool>(window.flowPlacedPrefabs()[0].overrides.at("criticalService")),
+				"the boolean dial edit did not move entry and override together");
+			// The dialed overrides persist: the saved document carries
+			// them, and a reopen re-groups the unit at the dialed values.
+			driver.click(ctx, "Save configuration"); ctx->Yield(3);
+			core::StationConfigurationDocument saved;
+			REQ(core::loadStationConfiguration(path.string(), saved)
+				&& saved.prefabs.size() == 1
+				&& saved.prefabs[0].overrides.count("setpoint") == 1
+				&& std::get<double>(saved.prefabs[0].overrides.at("setpoint")) == 8.0
+				&& saved.prefabs[0].overrides.count("criticalService") == 1
+				&& std::get<bool>(saved.prefabs[0].overrides.at("criticalService")),
+				"the saved document did not carry the dialed overrides");
+			ctx->ItemClick("New configuration"); ctx->Yield(3);
+			ctx->ItemClick("Open configuration"); ctx->Yield(4);
+			REQ(window.flowNodeRect("aircon-unit", "ac1", &rect)
+				&& window.draft().chillers.size() == 1
+				&& window.draft().chillers[0].chilledSetpointC == 8.0
+				&& window.draft().chillers[0].criticalService
+				&& window.flowPlacedPrefabs().size() == 1
+				&& std::get<double>(window.flowPlacedPrefabs()[0].overrides.at("setpoint")) == 8.0,
+				"the dialed override did not survive save/load");
+			// Expanding the unit finds the internal entry already carrying
+			// the dialed value: entry and override never diverged.
+			window.flowSetPrefabExpanded("ac1", true); ctx->Yield(3);
+			REQ(window.draft().chillers[0].chilledSetpointC == 8.0
+				&& window.draft().chillers[0].criticalService,
+				"the expanded internal entry did not carry the dialed value");
+		});
+		#undef REQ
+		require(driver.passed(), "prefab dial override workflow failed on the Test Engine");
+	}
+
 	void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	editor_smoke::registerStationConnections(checks);
@@ -7447,6 +7591,7 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 	checks.push_back({"station/prefabPersistenceWorkflow", prefabPersistenceWorkflow});
 	checks.push_back({"station/prefabUnitEditWorkflow", prefabUnitEditWorkflow});
 	checks.push_back({"station/prefabCompositeTelemetryWorkflow", prefabCompositeTelemetryWorkflow});
+	checks.push_back({"station/prefabDialOverrideWorkflow", prefabDialOverrideWorkflow});
 	checks.push_back({"station/addEntryWorkflow", addEntryWorkflow});
 	checks.push_back({"station/configurationResources", configurationResources});
 	checks.push_back({"station/windowWorkflow", workflow});

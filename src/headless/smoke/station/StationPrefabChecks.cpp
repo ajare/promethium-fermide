@@ -22,6 +22,7 @@
 
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -467,6 +468,125 @@ parameters:
 		require(!core::expandPrefab(tmpl, numberForBool, "ac2", bad, reason)
 			&& reason.find("must be boolean") != std::string::npos,
 			("number for a boolean dial must be refused: " + reason).c_str());
+	}
+
+	// #817: live dial editing on a placed instance. An accepted edit
+	// moves the expanded internal entry and the provenance override
+	// together in one call; out-of-range, non-finite, kind-mismatched,
+	// unknown and orphaned dials are refused with no mutation; the
+	// validator net catches an in-range value that would break the
+	// flattened unit; and the edited overrides survive the provenance
+	// round trip.
+	void prefabDialEdit(smoke::Context const&)
+	{
+		auto const tmpl = parseAircon();
+		auto fixture = placeAirconComposite();
+		auto& draft = fixture.draft;
+		auto& placed = fixture.placed;
+		std::string reason;
+		// A numeric dial lands on the expanded entry and the override in
+		// the same step - the two never diverge.
+		require(core::applyPrefabParameterOverride(draft, tmpl, placed, "setpoint", 8.0, reason),
+			("numeric dial edit must succeed: " + reason).c_str());
+		require(draft.chillers.front().chilledSetpointC == 8.0,
+			"the dial edit must land on the expanded entry");
+		require(placed.overrides.size() == 1 && std::get<double>(placed.overrides.at("setpoint")) == 8.0,
+			"the dial edit must record the override in the same step");
+		// The boolean dial likewise.
+		require(core::applyPrefabParameterOverride(draft, tmpl, placed, "criticalService", true, reason),
+			("boolean dial edit must succeed: " + reason).c_str());
+		require(draft.chillers.front().criticalService,
+			"the boolean dial edit must land on the expanded entry");
+		require(placed.overrides.size() == 2 && std::get<bool>(placed.overrides.at("criticalService")),
+			"the boolean dial edit must record the override");
+		// Out-of-range input is refused at both ends, and a non-finite
+		// value never reaches the field, with no mutation of either half.
+		auto const snapshot = draft;
+		auto const overrides = placed.overrides;
+		require(!core::applyPrefabParameterOverride(draft, tmpl, placed, "setpoint", 99.0, reason)
+			&& reason.find("outside its range") != std::string::npos,
+			("above-range dial edit must be refused: " + reason).c_str());
+		require(!core::applyPrefabParameterOverride(draft, tmpl, placed, "capacity", -1.0, reason)
+			&& reason.find("outside its range") != std::string::npos,
+			("below-range dial edit must be refused: " + reason).c_str());
+		require(!core::applyPrefabParameterOverride(draft, tmpl, placed, "capacity",
+			std::numeric_limits<double>::quiet_NaN(), reason),
+			"a non-finite dial edit must be refused");
+		require(draft == snapshot && placed.overrides == overrides,
+			"a refused dial edit must leave the draft and the overrides untouched");
+		// A kind mismatch is refused in both directions.
+		require(!core::applyPrefabParameterOverride(draft, tmpl, placed, "setpoint", true, reason)
+			&& reason.find("must be set with a number") != std::string::npos,
+			("boolean for a numeric dial must be refused: " + reason).c_str());
+		require(!core::applyPrefabParameterOverride(draft, tmpl, placed, "criticalService", 1.0, reason)
+			&& reason.find("must be set with a boolean") != std::string::npos,
+			("number for a boolean dial must be refused: " + reason).c_str());
+		// An unknown dial is refused.
+		require(!core::applyPrefabParameterOverride(draft, tmpl, placed, "cop", 2.0, reason)
+			&& reason.find("no exposed parameter") != std::string::npos,
+			("unknown dial edit must be refused: " + reason).c_str());
+		// A unit that no longer owns the mapped internal entry is refused.
+		core::StationSystemsSettings orphan;
+		orphan.enabled = true;
+		auto const orphanBefore = orphan;
+		require(!core::applyPrefabParameterOverride(orphan, tmpl, placed, "setpoint", 7.0, reason)
+			&& reason.find("lost its target field") != std::string::npos,
+			("a dial whose entry is gone must be refused: " + reason).c_str());
+		require(orphan == orphanBefore, "a refused orphan edit must leave the draft untouched");
+		// The dial reader reports the entry's own value, and refuses what
+		// the template does not expose or the unit does not own.
+		core::PrefabOverrideValue read{};
+		require(core::readPrefabParameterValue(draft, tmpl, "ac1", "setpoint", read)
+			&& std::get<double>(read) == 8.0,
+			"the dial reader must return the expanded entry's value");
+		require(core::readPrefabParameterValue(draft, tmpl, "ac1", "criticalService", read)
+			&& std::get<bool>(read),
+			"the dial reader must return the boolean entry's value");
+		require(!core::readPrefabParameterValue(draft, tmpl, "ac9", "setpoint", read),
+			"the dial reader must refuse a unit that is not there");
+		require(!core::readPrefabParameterValue(draft, tmpl, "ac1", "cop", read),
+			"the dial reader must refuse a field the template does not expose");
+		// The validator net: a value inside a dial's declared range that
+		// would leave the flattened unit invalid is refused without
+		// mutation, while a valid in-range value still lands.
+		std::string const wideYaml = std::string(airconPrefabYaml())
+			+ R"YAML(  - name: efficiency
+    nodeType: Chiller
+    entryId: machine
+    field: cop
+    default: 3
+    min: -5
+    max: 10
+)YAML";
+		core::PrefabTemplate wide;
+		std::string parseDiag;
+		require(core::parsePrefabTemplate(wideYaml, wide, &parseDiag),
+			("the wide-range template must parse: " + parseDiag).c_str());
+		auto const guarded = draft;
+		auto const guardedOverrides = placed.overrides;
+		require(!core::applyPrefabParameterOverride(draft, wide, placed, "efficiency", -1.0, reason),
+			("an in-range value the validator refuses must be refused: " + reason).c_str());
+		require(draft == guarded && placed.overrides == guardedOverrides,
+			"a validator-refused dial edit must leave both halves untouched");
+		require(core::applyPrefabParameterOverride(draft, wide, placed, "efficiency", 4.0, reason),
+			("a valid in-range dial edit must succeed: " + reason).c_str());
+		require(draft.chillers.front().cop == 4.0
+			&& std::get<double>(placed.overrides.at("efficiency")) == 4.0,
+			"the accepted dial edit must move entry and override together");
+		// The edited overrides survive the provenance round trip: a
+		// reconstruction from the saved block re-expands to the same
+		// dialed values.
+		core::PrefabProvenance provenance{"aircon-unit", "ac1", placed.overrides};
+		core::PlacedPrefab rebuilt;
+		require(core::reconstructPlacedPrefab(wide, provenance, rebuilt, reason),
+			("the edited provenance must reconstruct: " + reason).c_str());
+		core::PrefabExpansion reexpanded;
+		require(core::expandPrefab(wide, rebuilt.overrides, "ac1", reexpanded, reason),
+			("the reconstructed overrides must re-expand: " + reason).c_str());
+		require(reexpanded.entries.chillers.front().chilledSetpointC == 8.0
+			&& reexpanded.entries.chillers.front().criticalService
+			&& reexpanded.entries.chillers.front().cop == 4.0,
+			"the round-tripped overrides must carry the dialed values");
 	}
 
 	void prefabCapRefusal(smoke::Context const&)
@@ -1248,6 +1368,7 @@ void registerStationPrefabChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"prefabTemplateRefusals", prefabTemplateRefusals});
 	checks.push_back({"prefabExpansion", prefabExpansion});
 	checks.push_back({"prefabOverrides", prefabOverrides});
+	checks.push_back({"prefabDialEdit", prefabDialEdit});
 	checks.push_back({"prefabCapRefusal", prefabCapRefusal});
 	checks.push_back({"prefabDeterminism", prefabDeterminism});
 	checks.push_back({"prefabExposedPinResolution", prefabExposedPinResolution});

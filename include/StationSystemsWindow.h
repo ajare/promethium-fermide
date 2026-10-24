@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <map>
 #include <memory>
 #include <functional>
 #include <optional>
@@ -180,6 +181,19 @@ private:
 	float mLiveOpenPercent{0.0f};
 	std::string mLiveAreaFor;
 	float mLiveAreaM2{0.0f};
+	// #817: the composite's exposed-dial inspector. The collapsed unit's
+	// inspector is the template's dial set - defaults, ranges and current
+	// values - and internal-only fields stay hidden until the unit is
+	// expanded. The numeric buffers follow the live draft the same way the
+	// live-hatch sliders do: ImGui owns the value while the item is active,
+	// and the authoritative value reseeds it whenever it is idle, so an
+	// undo or a refused edit snaps the dial back to what the unit holds.
+	std::string mDialUnitFor;
+	std::map<std::string, float> mDialBuffers;
+	std::string mDialNotice;
+	void renderPrefabDialInspector(core::StationSystemsSettings& draft);
+	void applyPrefabDial(core::StationSystemsSettings& draft, std::string const& instanceId,
+		std::string const& parameterName, core::PrefabOverrideValue const& value);
 	double mFlowRefreshTime{-1.0};
 	bool mFlowWasPaused{true};
 	std::weak_ptr<void const> mWorld;

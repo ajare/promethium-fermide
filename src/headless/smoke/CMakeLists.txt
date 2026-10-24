@@ -136,7 +136,7 @@ set_tests_properties(station-observable-registry-coverage PROPERTIES
 # catalogue-absent load where the expansion stands on its own.
 foreach(check prefabCatalogueParse prefabCatalogueRefusals prefabInstanceAllocation
         prefabEntryOrderIsFixed
-        prefabTemplateParse prefabTemplateRefusals prefabExpansion prefabOverrides prefabCapRefusal prefabDeterminism
+        prefabTemplateParse prefabTemplateRefusals prefabExpansion prefabOverrides prefabDialEdit prefabCapRefusal prefabDeterminism
         prefabExposedPinResolution prefabLinkThroughComposite prefabTemplateLoadValidation
         prefabProvenanceRoundTrip prefabProvenanceBoundary prefabProvenanceMalformed
         prefabProvenanceCatalogueAbsent
@@ -1025,6 +1025,10 @@ set_tests_properties(station-editor-prefab-unit-edit PROPERTIES LABELS "smoke;fu
 # a running expansion.
 add_test(NAME station-editor-prefab-composite-telemetry COMMAND pf-smoke-editor --check station/prefabCompositeTelemetryWorkflow)
 set_tests_properties(station-editor-prefab-composite-telemetry PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+
+# #817: the exposed-dials override UI on the composite inspector.
+add_test(NAME station-editor-prefab-dial-override COMMAND pf-smoke-editor --check station/prefabDialOverrideWorkflow)
+set_tests_properties(station-editor-prefab-dial-override PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-coolant-loop COMMAND pf-smoke-editor --check station/flowCoolantLoopWorkflow)
 set_tests_properties(station-editor-flow-coolant-loop PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-transfers COMMAND pf-smoke-editor --check station/transferWorkflow)

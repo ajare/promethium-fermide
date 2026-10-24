@@ -768,6 +768,15 @@ void StationSystemsWindow::renderFlowInspectorContents(
 		return;
 	}
 	ImGui::Text("Node: %s '%s'", selected->type.c_str(), selected->id.c_str());
+	// #817: a collapsed composite's inspector is the template's exposed
+	// dial set - the unit's designed interface. The ordinary entry-editor
+	// seam never sees a composite: internal-only fields stay hidden while
+	// the unit is grouped, and expanding it selects internals directly.
+	if (mFlow.selectedIsComposite())
+	{
+		renderPrefabDialInspector(draft);
+		return;
+	}
 	auto const* editor = station_editor::findStationEntryEditor(selected->type);
 	if (!editor)
 	{
@@ -793,6 +802,86 @@ void StationSystemsWindow::renderFlowInspectorContents(
 	// do the opposite of everything above them.
 	if (selected->type == "Atmosphere pathway")
 		renderLiveHatchControls(world, selected->id);
+}
+
+void StationSystemsWindow::renderPrefabDialInspector(core::StationSystemsSettings& draft)
+{
+	// #817: the composite's exposed-dial inspector. Every dial the
+	// template declares is listed with its default and validated range;
+	// the value shown is the expanded internal entry's own, so the dial
+	// reads what the unit is actually running. An accepted edit moves the
+	// provenance override and the internal entry together through one
+	// core call - one undo step for both - and a refused edit changes
+	// neither and says why.
+	auto const selected = mFlow.selectedNode();
+	core::PlacedPrefab const* unit = nullptr;
+	for (auto const& placed : mFlow.placedPrefabs())
+		if (placed.instanceId == selected->id) { unit = &placed; break; }
+	auto const* tmpl = unit && mFlow.prefabCatalogue()
+		? mFlow.prefabCatalogue()->find(unit->prefabId) : nullptr;
+	ImGui::SeparatorText("Exposed parameters");
+	if (!unit || !tmpl)
+	{
+		ImGui::TextDisabled("No loaded template backs this unit, so its dials are unavailable.");
+		return;
+	}
+	if (tmpl->parameters.empty())
+		ImGui::TextDisabled("This template exposes no parameters.");
+	ImGui::PushID(("prefab-dials-" + unit->instanceId).c_str());
+	if (mDialUnitFor != unit->instanceId)
+	{
+		mDialUnitFor = unit->instanceId;
+		mDialBuffers.clear();
+		mDialNotice.clear();
+	}
+	for (auto const& parameter : tmpl->parameters)
+	{
+		core::PrefabOverrideValue current;
+		if (!core::readPrefabParameterValue(draft, *tmpl, unit->instanceId, parameter.name, current))
+			current = parameter.kind == core::PrefabParameterKind::Number
+				? core::PrefabOverrideValue{parameter.defaultValue}
+				: core::PrefabOverrideValue{parameter.boolDefault};
+		if (parameter.kind == core::PrefabParameterKind::Number)
+		{
+			float const authoritative = static_cast<float>(std::get<double>(current));
+			float& buffer = mDialBuffers.try_emplace(parameter.name, authoritative).first->second;
+			ImGui::SetNextItemWidth(150.0f);
+			ImGui::InputFloat(parameter.name.c_str(), &buffer, 0.0f, 0.0f, "%.2f");
+			bool const active = ImGui::IsItemActive();
+			if (ImGui::IsItemDeactivatedAfterEdit())
+				applyPrefabDial(draft, unit->instanceId, parameter.name, static_cast<double>(buffer));
+			// While idle the authoritative value reseeds the buffer, so an
+			// undo or a refused edit snaps the dial back to the unit.
+			if (!active) buffer = authoritative;
+			ImGui::SameLine();
+			ImGui::TextDisabled("range [%g, %g], default %g",
+				parameter.minValue, parameter.maxValue, parameter.defaultValue);
+		}
+		else
+		{
+			bool value = std::get<bool>(current);
+			ImGui::Checkbox(parameter.name.c_str(), &value);
+			if (ImGui::IsItemDeactivatedAfterEdit())
+				applyPrefabDial(draft, unit->instanceId, parameter.name, value);
+			ImGui::SameLine();
+			ImGui::TextDisabled("boolean, default %s", parameter.boolDefault ? "on" : "off");
+		}
+	}
+	ImGui::PopID();
+	if (!mDialNotice.empty())
+		ImGui::TextWrapped("Refused: %s", mDialNotice.c_str());
+	ImGui::TextDisabled("Internal-only fields stay hidden while the unit is collapsed; expand it to edit internals.");
+}
+
+void StationSystemsWindow::applyPrefabDial(core::StationSystemsSettings& draft,
+	std::string const& instanceId, std::string const& parameterName,
+	core::PrefabOverrideValue const& value)
+{
+	std::string reason;
+	if (mFlow.applyPrefabDialEdit(draft, instanceId, parameterName, value, reason))
+		mDialNotice.clear();
+	else
+		mDialNotice = reason;
 }
 
 void StationSystemsWindow::renderLiveHatchControls(core::World& world, std::string const& pathwayId)
