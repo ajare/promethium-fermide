@@ -1995,6 +1995,33 @@ namespace core
 	bool validateStationTransferWiring(StationSystemsSettings const& settings,
 		ResourceTransferSettings const& transfer, std::string& diagnostic,
 		bool ignoreUnconnected = false);
+	// Range for one authored numeric parameter, keyed by the widget's bare
+	// label (the field name without its '##entry' decoration).
+	//
+	// The default is non-negative. Rates, capacities, masses, volumes and
+	// powers are the overwhelming majority of authored numbers and a
+	// negative one is never meaningful, so the default is the fail-safe
+	// direction. The exceptions are listed explicitly rather than inferred
+	// from a name pattern: a guessed default silently refuses a value the
+	// author is entitled to set, which is worse than letting a merely
+	// over-large value through to the Apply-time validator. Anything not
+	// confidently in a narrower class therefore stays at the open
+	// non-negative default and is judged by the rules in this file, which
+	// remain the authority. The range here is what the editor refuses at
+	// the widget; it never widens what Apply accepts.
+	struct StationFieldRange
+	{
+		bool hasMinimum{true};
+		double minimum{0.0};
+		bool hasMaximum{false};
+		double maximum{0.0};
+	};
+	StationFieldRange stationFieldRange(std::string_view field);
+	// False with a human-readable reason when `value` is outside the field's
+	// range. Non-finite input is always refused: NaN and infinity pass every
+	// comparison they are not written for, and a NaN capacity silently
+	// poisons every downstream total that touches it.
+	bool stationFieldAccepts(std::string_view field, double value, std::string& reason);
 	inline constexpr std::array<char const*, 4> StationSystemNames{
 		"Power", "ECLSS", "Thermal control", "Monitoring/supervision"};
 	// Read-only view of one Resource store: the authored capacity, protected

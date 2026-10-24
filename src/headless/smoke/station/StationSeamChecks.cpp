@@ -1,3 +1,4 @@
+#include <limits>
 #include "StationSeamChecks.h"
 #include "StationRig.h"
 #include "core/StationConfigurationDocument.h"
@@ -1088,6 +1089,59 @@ void liveSettingsSeam(smoke::Context const& context)
 	(void)context;
 }
 
+// The numeric range contract the editor widgets ask of core. Keyed by field
+// name, so the widget and the validator cannot drift apart: what the editor
+// refuses at the keyboard and what Apply judges are the same numbers read
+// from the same table.
+void fieldRangeSeam(smoke::Context const& context)
+{
+	auto const accepts = [](char const* field, double value) {
+		std::string reason;
+		return core::stationFieldAccepts(field, value, reason);
+	};
+	auto const reasonFor = [](char const* field, double value) {
+		std::string reason;
+		core::stationFieldAccepts(field, value, reason);
+		return reason;
+	};
+
+	// The default: a rate, capacity or mass is never negative.
+	require(accepts("capacity kW", 0.0) && accepts("capacity kW", 1500.0),
+		"a valid non-negative value was refused");
+	require(!accepts("capacity kW", -0.001),
+		"a negative value slipped through the non-negative default");
+	require(reasonFor("capacity kW", -5.0).find("at least 0") != std::string::npos,
+		"the refusal did not name the bound it broke");
+
+	// Celsius readings and setpoints live below zero legitimately; a floor
+	// of zero there would refuse values the author plainly needs.
+	require(accepts("min temperature C", -12.0) && accepts("starting temperature C", -273.0),
+		"a Celsius field refused a negative temperature");
+
+	// A share of something is bounded above as well as below: an efficiency
+	// of 1.5 would hand a machine more out than in.
+	require(accepts("efficiency", 0.0) && accepts("efficiency", 1.0),
+		"a valid unit-interval bound was refused");
+	require(!accepts("efficiency", 1.0001),
+		"an over-unity efficiency was accepted");
+	require(reasonFor("charge efficiency", 2.0).find("at most 1") != std::string::npos,
+		"the upper-bound refusal did not name the bound");
+
+	// Non-finite input passes every comparison it is not written for, and a
+	// NaN capacity silently poisons every total that touches it.
+	require(!accepts("capacity kW", std::numeric_limits<double>::quiet_NaN())
+		&& !accepts("rated output kW", std::numeric_limits<double>::infinity()),
+		"a non-finite value was accepted into an authored field");
+
+	// An unrecognised field keeps the fail-safe default rather than being
+	// treated as unbounded, so a new parameter is constrained until
+	// deliberately declared otherwise.
+	require(!accepts("some brand new parameter", -1.0) && accepts("some brand new parameter", 1.0),
+		"an unlisted field was not held to the non-negative default");
+
+	(void)context;
+}
+
 void registerStationSeamChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"biologySeam", biologySeam});
@@ -1098,4 +1152,5 @@ void registerStationSeamChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"thermalBufferSeam", thermalBufferSeam});
 	checks.push_back({"coolantLoopSeam", coolantLoopSeam});
 	checks.push_back({"chillerSeam", chillerSeam});
+	checks.push_back({"fieldRangeSeam", fieldRangeSeam});
 }

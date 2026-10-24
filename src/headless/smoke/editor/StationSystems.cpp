@@ -5652,6 +5652,16 @@ namespace
 			REQ(window.draft().transfers.size() == 2 && window.draft().transfers[1].unit == "kg"
 				&& window.draft().transfers[1].sourceId == "aux",
 				"the repaired draft is not what the controls were set to");
+			// The same contract the core check asserts is enforced at the
+			// widget: a negative rate is refused, the reason is shown, and the
+			// draft keeps the value it had before the edit.
+			double const rateBefore = window.draft().transfers[1].ratePerSecond;
+			driver.typeValue(ctx, "**/rate per second##Transfer 1", "-5");
+			ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(driver.contains("Refused: rate per second must be at least 0"),
+				"the widget did not refuse an out-of-range rate");
+			REQ(window.draft().transfers[1].ratePerSecond == rateBefore,
+				"a refused edit still moved the draft");
 			ctx->ScrollToItemY("Confirm World reset");
 			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset");

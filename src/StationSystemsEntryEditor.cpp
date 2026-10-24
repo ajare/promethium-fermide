@@ -7,6 +7,7 @@
 #include <array>
 #include <cstring>
 #include <cmath>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -226,6 +227,101 @@ void renderRefCombo(std::string const& field, std::string& refId,
 		ImGui::EndCombo();
 	}
 }
+
+// A numeric field that refuses an out-of-range value instead of holding it.
+// Validation happens on the commit frame, not while the user is still
+// typing: an InputDouble reports a change on every keystroke, and snapping
+// a half-typed number back mid-word fights the editor. A refused edit
+// leaves the value exactly where it was and says why, which is the
+// exposed-dial precedent - inventing a clamped number the user never typed
+// is worse than refusing the one they did.
+// The notice has to outlive the frame that raised it, and the entry editors
+// are free functions with no window state to keep it in, so the last
+// refusal is held against the field that raised it and shown while that
+// field renders. Editing that field back into range clears it; a refusal on
+// another field replaces it.
+// The range is asked of core and never restated here, so the widget cannot
+// drift from the validator that judges the same value at Apply.
+// One remembered edit. An InputDouble writes into the bound value on every
+// keystroke that parses, so the value at the top of the frame is already the
+// number being typed - snapshotting it there would "restore" the rejected
+// value. What has to be remembered is the last value that was acceptable,
+// captured when the field took focus and carried forward while it is edited.
+struct RangedEdit
+{
+	std::string field;
+	bool active{false};
+	double lastGood{0.0};
+	std::string refusal;
+};
+// Per-field, not one shared slot: every ranged field in the UI renders every
+// frame, so a single static would see a different field each time and reset
+// its remembered value to whatever number was already in the widget -
+// including the rejected one. The map is keyed by the field's own label,
+// which already carries the '##entry' identity, so two entries' fields of
+// the same name never share a remembered value.
+inline std::map<std::string, RangedEdit>& rangedEdits()
+{
+	static std::map<std::string, RangedEdit> state{};
+	return state;
+}
+
+// The range is keyed by the field's own name; the '##entry' suffix is the
+// ImGui identity, not part of the parameter's name.
+std::string bareField(std::string const& field)
+{
+	auto const decorated = field.find("##");
+	return decorated == std::string::npos ? field : field.substr(0, decorated);
+}
+
+void renderRangedDouble(std::string const& field, double& value, double step, double stepFast,
+	char const* format)
+{
+	ImGui::InputDouble(field.c_str(), &value, step, stepFast, format);
+	auto& edit = rangedEdits()[field];
+	bool const active = ImGui::IsItemActive();
+	// A typed number lands in the bound value on the frame the field is
+	// released, by which point IsItemActive() is already false. Both frames
+	// have to be policed: the active ones catch a value steered out of range
+	// with the step buttons, the release frame catches what was typed.
+	bool const committed = ImGui::IsItemDeactivatedAfterEdit();
+	// A different field has the focus: what this state remembers is some
+	// other widget's number and must not be used to restore this one.
+	if (edit.field != field) edit = RangedEdit{field, active, value, {}};
+	else if (active && !edit.active) edit.lastGood = value;
+	edit.active = active;
+
+	if (!active && !committed)
+	{
+		// The refusal outlives the frame that raised it so the reason is
+		// still on screen when the user looks up from the keyboard. A value
+		// loaded out of range is left alone: this polices edits, not the
+		// document, and Apply is where a stored value gets judged.
+		if (!edit.refusal.empty())
+			ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "Refused: %s", edit.refusal.c_str());
+		return;
+	}
+	std::string reason;
+	if (core::stationFieldAccepts(bareField(field), value, reason))
+	{
+		edit.lastGood = value;
+		edit.refusal.clear();
+		return;
+	}
+	value = edit.lastGood;
+	edit.refusal = std::move(reason);
+	ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "Refused: %s", edit.refusal.c_str());
+}
+
+void renderRangedDouble(std::string const& field, double& value)
+{
+	renderRangedDouble(field, value, 0.0, 0.0, "%f");
+}
+
+void renderRangedDouble(std::string const& field, double& value, double step, double stepFast)
+{
+	renderRangedDouble(field, value, step, stepFast, "%f");
+}
 }
 
 bool renderConversionEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::ResourceConversionSettings& conversion,
@@ -246,7 +342,7 @@ bool renderConversionEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 		renderRefCombo(describe(flowRow + " store", label), input.storeId, storeIds(draft),
 			portIsOptional("Conversion", ("Conversion input " + std::to_string(flow + 1)).c_str()));
 		ImGui::SameLine();
-		ImGui::InputDouble(describe(flowRow + " rate", label).c_str(), &input.ratePerSecond, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe(flowRow + " rate", label), input.ratePerSecond, 0.0, 0.0, "%.3f");
 		ImGui::SameLine();
 		bool const removeInput = ImGui::Button(describe("Remove " + flowRow, label).c_str());
 		if (removeInput)
@@ -264,7 +360,7 @@ bool renderConversionEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 		renderRefCombo(describe(flowRow + " store", label), output.storeId, storeIds(draft),
 			portIsOptional("Conversion", ("Conversion output " + std::to_string(flow + 1)).c_str()));
 		ImGui::SameLine();
-		ImGui::InputDouble(describe(flowRow + " yield", label).c_str(), &output.yieldPerSecond, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe(flowRow + " yield", label), output.yieldPerSecond, 0.0, 0.0, "%.3f");
 		ImGui::SameLine();
 		bool const removeOutput = ImGui::Button(describe("Remove " + flowRow, label).c_str());
 		if (removeOutput)
@@ -286,7 +382,7 @@ bool renderSolarEntry([[maybe_unused]] core::StationSystemsSettings& draft, core
 	bool removeArray = false;
 	auto const row = label.substr(label.find_last_of(' ') + 1);
 	renderIdentity(label, array.id);
-	ImGui::InputDouble(describe("capacity kW", label).c_str(), &array.capacityKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("capacity kW", label), array.capacityKW, 0.0, 0.0, "%.3f");
 	bool solarPeriodic = array.illumination.periodSeconds > 0.0;
 	if (ImGui::Checkbox(describe("periodic illumination", label).c_str(), &solarPeriodic))
 	{
@@ -303,19 +399,17 @@ bool renderSolarEntry([[maybe_unused]] core::StationSystemsSettings& draft, core
 		}
 	}
 	if (!solarPeriodic)
-		ImGui::InputDouble(describe("constant illumination", label).c_str(),
-			&array.illumination.constantLevel, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("constant illumination", label), array.illumination.constantLevel, 0.0, 0.0, "%.3f");
 	else
 	{
-		ImGui::InputDouble(describe("period seconds", label).c_str(),
-			&array.illumination.periodSeconds, 0.0, 0.0, "%.1f");
+		renderRangedDouble(describe("period seconds", label), array.illumination.periodSeconds, 0.0, 0.0, "%.1f");
 		for (size_t segment = 0; segment < array.illumination.segments.size(); )
 		{
 			auto& stretch = array.illumination.segments[segment];
 			auto const segmentRow = std::string("segment ") + std::to_string(segment);
-			ImGui::InputDouble(describe(segmentRow + " start", label).c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+			renderRangedDouble(describe(segmentRow + " start", label), stretch.startSeconds, 0.0, 0.0, "%.1f");
 			ImGui::SameLine();
-			ImGui::InputDouble(describe(segmentRow + " level", label).c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+			renderRangedDouble(describe(segmentRow + " level", label), stretch.level, 0.0, 0.0, "%.3f");
 			ImGui::SameLine();
 			bool const removeSegment = ImGui::Button(describe("Remove " + segmentRow, label).c_str());
 			if (removeSegment)
@@ -349,14 +443,13 @@ bool renderCrewEntry([[maybe_unused]] core::StationSystemsSettings& draft, core:
 	renderIdentity(label, crew.id);
 	renderWaterQuality(crew.waterQuality, label);
 	renderRefCombo(describe("greywater store", label), crew.greywaterStoreId, storeIds(draft), portIsOptional("Crew", "Greywater out"));
-	ImGui::InputDouble(describe("greywater kg per crew-day", label).c_str(), &crew.greywaterKgPerCrewDay, 0, 0, "%.6f");
+	renderRangedDouble(describe("greywater kg per crew-day", label), crew.greywaterKgPerCrewDay, 0, 0, "%.6f");
 	for (auto const* name : {"dryOrganics", "nutrientNitrogen"})
 	{
 		bool enabled = crew.greywaterLoadKgPerCrewDay.contains(name);
 		if (ImGui::Checkbox((std::string("greywater load ") + name).c_str(), &enabled))
 		{ if (enabled) crew.greywaterLoadKgPerCrewDay[name] = 0; else crew.greywaterLoadKgPerCrewDay.erase(name); }
-		if (enabled) ImGui::InputDouble((std::string("") + name + " kg per crew-day").c_str(),
-			&crew.greywaterLoadKgPerCrewDay.at(name), 0, 0, "%.6f");
+		if (enabled) renderRangedDouble(std::string("") + name + " kg per crew-day", crew.greywaterLoadKgPerCrewDay.at(name), 0, 0, "%.6f");
 	}
 	renderRefCombo(describe("atmosphere", label), crew.atmosphereId, atmosphereIds(draft), portIsOptional("Crew", "Oxygen uptake"));
 	ImGui::InputInt(describe("count", label).c_str(), &crew.crewCount, 1, 0);
@@ -376,19 +469,17 @@ bool renderCrewEntry([[maybe_unused]] core::StationSystemsSettings& draft, core:
 		}
 	}
 	if (!crewPeriodic)
-		ImGui::InputDouble(describe("constant activity level", label).c_str(),
-			&crew.activityProfile.constantLevel, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("constant activity level", label), crew.activityProfile.constantLevel, 0.0, 0.0, "%.3f");
 	else
 	{
-		ImGui::InputDouble(describe("activity period seconds", label).c_str(),
-			&crew.activityProfile.periodSeconds, 0.0, 0.0, "%.1f");
+		renderRangedDouble(describe("activity period seconds", label), crew.activityProfile.periodSeconds, 0.0, 0.0, "%.1f");
 		for (size_t segment = 0; segment < crew.activityProfile.segments.size(); ++segment)
 		{
 			auto& stretch = crew.activityProfile.segments[segment];
 			auto const segmentRow = std::string("activity segment ") + std::to_string(segment);
-			ImGui::InputDouble(describe(segmentRow + " start", label).c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+			renderRangedDouble(describe(segmentRow + " start", label), stretch.startSeconds, 0.0, 0.0, "%.1f");
 			ImGui::SameLine();
-			ImGui::InputDouble(describe(segmentRow + " level", label).c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+			renderRangedDouble(describe(segmentRow + " level", label), stretch.level, 0.0, 0.0, "%.3f");
 			ImGui::SameLine();
 			if (ImGui::Button(describe("Remove " + segmentRow, label).c_str()))
 				crew.activityProfile.segments.erase(
@@ -403,22 +494,14 @@ bool renderCrewEntry([[maybe_unused]] core::StationSystemsSettings& draft, core:
 	renderRefCombo(describe("water store", label), crew.waterStoreId, storeIds(draft), portIsOptional("Crew", "Water in"));
 	renderRefCombo(describe("urine store", label), crew.urineStoreId, storeIds(draft), portIsOptional("Crew", "Urine out"));
 	renderRefCombo(describe("organic waste store", label), crew.organicWasteStoreId, storeIds(draft), portIsOptional("Crew", "Organic waste out"));
-	ImGui::InputDouble(describe("food per crew per s", label).c_str(),
-		&crew.foodPerCrewPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("water per crew per s", label).c_str(),
-		&crew.waterPerCrewPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("O2 per crew kg/s", label).c_str(),
-		&crew.oxygenPerCrewKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("CO2 per crew kg/s", label).c_str(),
-		&crew.co2PerCrewKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("moisture per crew kg/s", label).c_str(),
-		&crew.moisturePerCrewKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("urine per crew per s", label).c_str(),
-		&crew.urinePerCrewPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("organic waste per crew per s", label).c_str(),
-		&crew.organicWastePerCrewPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("metabolic heat per crew kW", label).c_str(),
-		&crew.metabolicHeatPerCrewKW, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("food per crew per s", label), crew.foodPerCrewPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("water per crew per s", label), crew.waterPerCrewPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("O2 per crew kg/s", label), crew.oxygenPerCrewKgPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("CO2 per crew kg/s", label), crew.co2PerCrewKgPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("moisture per crew kg/s", label), crew.moisturePerCrewKgPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("urine per crew per s", label), crew.urinePerCrewPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("organic waste per crew per s", label), crew.organicWastePerCrewPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("metabolic heat per crew kW", label), crew.metabolicHeatPerCrewKW, 0.0, 0.0, "%.4f");
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
 		removeCrew = true;
@@ -438,8 +521,7 @@ bool renderMicrobialProcessorEntry(core::StationSystemsSettings& draft, core::Mi
 		bool enabled = processor.recoveredWaterCarryoverFractions.contains(name);
 		if (ImGui::Checkbox((std::string("carry to recovered water: ") + name).c_str(), &enabled))
 		{ if (enabled) processor.recoveredWaterCarryoverFractions[name] = 0; else processor.recoveredWaterCarryoverFractions.erase(name); }
-		if (enabled) ImGui::InputDouble((std::string("") + name + " carry-over fraction").c_str(),
-			&processor.recoveredWaterCarryoverFractions.at(name), 0, 0, "%.6f");
+		if (enabled) renderRangedDouble(std::string("") + name + " carry-over fraction", processor.recoveredWaterCarryoverFractions.at(name), 0, 0, "%.6f");
 	}
 	renderRefCombo(describe("organic waste feed store", label), processor.feedStoreId, storeIds(draft), portIsOptional("Microbial processor", "Feed in"));
 	renderRefCombo(describe("oxygen store", label), processor.oxygenStoreId, storeIds(draft), portIsOptional("Microbial processor", "Oxygen in"));
@@ -452,48 +534,36 @@ bool renderMicrobialProcessorEntry(core::StationSystemsSettings& draft, core::Mi
 	renderRefCombo(describe("replacement biological stock store", label), processor.stockStoreId, storeIds(draft), portIsOptional("Microbial processor", "Replacement stock"));
 	renderThermalClassCombo(draft, describe("heat sink thermal class", label), processor.thermalClass, processor.heatSinkId);
 	renderRefCombo(describe("heat sink reservoir", label), processor.heatSinkId, reservoirIds(draft), portIsOptional("Microbial processor", "Heat out"));
-	ImGui::InputDouble(describe("rated feed processing kg/s", label).c_str(),
-		&processor.rateKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("specific energy kWh/kg feed", label).c_str(),
-		&processor.specificEnergyKWhPerKgFeed, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("rated feed processing kg/s", label), processor.rateKgPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("specific energy kWh/kg feed", label), processor.specificEnergyKWhPerKgFeed, 0.0, 0.0, "%.4f");
 	int basis = static_cast<int>(processor.rateBasis);
 	if (ImGui::Combo(describe("rate basis", label).c_str(), &basis, "Fixed per feed mass\0Composition derived\0"))
 		processor.rateBasis = static_cast<core::StationRateBasis>(basis);
 	if (processor.rateBasis == core::StationRateBasis::FixedPerFeedMass)
 	{
-		ImGui::InputDouble(describe("oxygen per kg feed kg", label).c_str(),
-			&processor.oxygenPerKgFeedKg, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(describe("process water per kg feed kg", label).c_str(),
-			&processor.processWaterPerKgFeedKg, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(describe("medium units per kg feed", label).c_str(),
-			&processor.consumablePerKgFeed, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(describe("CO2 per kg feed kg", label).c_str(),
-			&processor.co2PerKgFeedKg, 0.0, 0.0, "%.4f");
+		renderRangedDouble(describe("oxygen per kg feed kg", label), processor.oxygenPerKgFeedKg, 0.0, 0.0, "%.4f");
+		renderRangedDouble(describe("process water per kg feed kg", label), processor.processWaterPerKgFeedKg, 0.0, 0.0, "%.4f");
+		renderRangedDouble(describe("medium units per kg feed", label), processor.consumablePerKgFeed, 0.0, 0.0, "%.4f");
+		renderRangedDouble(describe("CO2 per kg feed kg", label), processor.co2PerKgFeedKg, 0.0, 0.0, "%.4f");
 	}
 	else
 	{
-		ImGui::InputDouble(describe("organic oxidation fraction", label).c_str(), &processor.organicOxidationFraction);
-		ImGui::InputDouble(describe("O2 per kg organic oxidized", label).c_str(), &processor.o2PerKgOrganicOxidized);
-		ImGui::InputDouble(describe("nitrification fraction", label).c_str(), &processor.nitrificationFraction);
-		ImGui::InputDouble(describe("O2 per kg nitrified N", label).c_str(), &processor.o2PerKgNitrifiedN);
-		ImGui::InputDouble(describe("CO2 per kg organic oxidized", label).c_str(), &processor.co2PerKgOrganicOxidized);
-		ImGui::InputDouble(describe("process water target moisture", label).c_str(), &processor.processWaterTargetMoisture);
-		ImGui::InputDouble(describe("heat release fraction", label).c_str(), &processor.heatReleaseFraction);
-		ImGui::InputDouble(describe("medium kg per kg organic oxidized", label).c_str(), &processor.consumablePerKgOrganicOxidized);
+		renderRangedDouble(describe("organic oxidation fraction", label), processor.organicOxidationFraction);
+		renderRangedDouble(describe("O2 per kg organic oxidized", label), processor.o2PerKgOrganicOxidized);
+		renderRangedDouble(describe("nitrification fraction", label), processor.nitrificationFraction);
+		renderRangedDouble(describe("O2 per kg nitrified N", label), processor.o2PerKgNitrifiedN);
+		renderRangedDouble(describe("CO2 per kg organic oxidized", label), processor.co2PerKgOrganicOxidized);
+		renderRangedDouble(describe("process water target moisture", label), processor.processWaterTargetMoisture);
+		renderRangedDouble(describe("heat release fraction", label), processor.heatReleaseFraction);
+		renderRangedDouble(describe("medium kg per kg organic oxidized", label), processor.consumablePerKgOrganicOxidized);
 	}
-	ImGui::InputDouble(describe("nitrogen recovery", label).c_str(),
-		&processor.nitrogenRecovery, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("phosphorus recovery", label).c_str(),
-		&processor.phosphorusRecovery, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("potassium recovery", label).c_str(),
-		&processor.potassiumRecovery, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("minerals recovery", label).c_str(),
-		&processor.mineralsRecovery, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("water recovery", label).c_str(),
-		&processor.waterRecovery, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("nitrogen recovery", label), processor.nitrogenRecovery, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("phosphorus recovery", label), processor.phosphorusRecovery, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("potassium recovery", label), processor.potassiumRecovery, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("minerals recovery", label), processor.mineralsRecovery, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("water recovery", label), processor.waterRecovery, 0.0, 0.0, "%.4f");
 	if (processor.rateBasis == core::StationRateBasis::FixedPerFeedMass)
-		ImGui::InputDouble(describe("reaction heat kJ/kg feed", label).c_str(),
-			&processor.reactionHeatKJPerKgFeed, 0.0, 0.0, "%.2f");
+		renderRangedDouble(describe("reaction heat kJ/kg feed", label), processor.reactionHeatKJPerKgFeed, 0.0, 0.0, "%.2f");
 	// Re-evaluate from the draft every frame, after all rate/recovery edits.
 	// This deliberately never observes the World's live feed blend.
 	if (processor.rateBasis == core::StationRateBasis::CompositionDerived && !processor.feedStoreId.empty())
@@ -516,24 +586,15 @@ bool renderMicrobialProcessorEntry(core::StationSystemsSettings& draft, core::Mi
 				ImGui::SetTooltip("Estimate at rated feed throughput, before condition or resource throttling. Runtime uses the actual drawn blend, not this declaration.");
 		}
 	}
-	ImGui::InputDouble(describe("min operating temperature C", label).c_str(),
-		&processor.minOperatingTemperatureC, 0.0, 0.0, "%.2f");
-	ImGui::InputDouble(describe("max sink temperature C", label).c_str(),
-		&processor.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
-	ImGui::InputDouble(describe("initial condition", label).c_str(),
-		&processor.initialCondition, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("starvation degrade per hour", label).c_str(),
-		&processor.starvationDegradePerHour, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("consumable exhaustion degrade per hour", label).c_str(),
-		&processor.consumableExhaustionDegradePerHour, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("cold stress degrade per hour", label).c_str(),
-		&processor.coldStressDegradePerHour, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("heat stress degrade per hour", label).c_str(),
-		&processor.heatStressDegradePerHour, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("recovery per hour", label).c_str(),
-		&processor.recoveryPerHour, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("stock units per condition point", label).c_str(),
-		&processor.stockUnitsPerConditionPoint, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("min operating temperature C", label), processor.minOperatingTemperatureC, 0.0, 0.0, "%.2f");
+	renderRangedDouble(describe("max sink temperature C", label), processor.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
+	renderRangedDouble(describe("initial condition", label), processor.initialCondition, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("starvation degrade per hour", label), processor.starvationDegradePerHour, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("consumable exhaustion degrade per hour", label), processor.consumableExhaustionDegradePerHour, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("cold stress degrade per hour", label), processor.coldStressDegradePerHour, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("heat stress degrade per hour", label), processor.heatStressDegradePerHour, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("recovery per hour", label), processor.recoveryPerHour, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("stock units per condition point", label), processor.stockUnitsPerConditionPoint, 0.0, 0.0, "%.4f");
 	ImGui::InputInt(describe("priority", label).c_str(), &processor.priority, 1, 0);
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
@@ -560,8 +621,8 @@ bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& dr
 		{
 			auto const found = crop.irrigationUptakeFractions.find(name);
 			double fraction = found == crop.irrigationUptakeFractions.end() ? 0 : found->second;
-			if (ImGui::InputDouble((std::string("irrigation uptake ") + name).c_str(), &fraction, 0, 0, "%.6f"))
-				crop.irrigationUptakeFractions[name] = fraction;
+			renderRangedDouble(std::string("irrigation uptake ") + name, fraction, 0, 0, "%.6f");
+			crop.irrigationUptakeFractions[name] = fraction;
 		}
 	renderRefCombo(describe("atmosphere", label), crop.atmosphereId, atmosphereIds(draft), portIsOptional("Crops", "Oxygen uptake"));
 	renderRefCombo(describe("irrigation water store", label), crop.waterStoreId, storeIds(draft), portIsOptional("Crops", "Water in"));
@@ -575,34 +636,21 @@ bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	// re-committing it silently changed the number; %g keeps every
 	// magnitude - including the overflow candidates the capacity
 	// contract now refuses - displayable and editable exactly.
-	ImGui::InputDouble(describe("growing area m2", label).c_str(),
-		&crop.growingAreaM2, 0.0, 0.0, "%.15g");
-	ImGui::InputDouble(describe("max biomass density kg/m2", label).c_str(),
-		&crop.maxBiomassDensityKgPerM2, 0.0, 0.0, "%.15g");
-	ImGui::InputDouble(describe("initial dry biomass kg", label).c_str(),
-		&crop.initialBiomassKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("lamp rated kW", label).c_str(),
-		&crop.lampRatedKW, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("circulation power kW (drawn before lamp)", label).c_str(),
-		&crop.circulationPowerKW, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("growth yield kg per kWh light", label).c_str(),
-		&crop.growthYieldKgPerKWh, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("respiration per hour", label).c_str(),
-		&crop.respirationPerHour, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("transpiration kg per kg growth", label).c_str(),
-		&crop.transpirationKgPerKgGrowth, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("min growing temperature C", label).c_str(),
-		&crop.minGrowingTemperatureC, 0.0, 0.0, "%.2f");
-	ImGui::InputDouble(describe("max growing temperature C", label).c_str(),
-		&crop.maxGrowingTemperatureC, 0.0, 0.0, "%.2f");
+	renderRangedDouble(describe("growing area m2", label), crop.growingAreaM2, 0.0, 0.0, "%.15g");
+	renderRangedDouble(describe("max biomass density kg/m2", label), crop.maxBiomassDensityKgPerM2, 0.0, 0.0, "%.15g");
+	renderRangedDouble(describe("initial dry biomass kg", label), crop.initialBiomassKg, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("lamp rated kW", label), crop.lampRatedKW, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("circulation power kW (drawn before lamp)", label), crop.circulationPowerKW, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("growth yield kg per kWh light", label), crop.growthYieldKgPerKWh, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("respiration per hour", label), crop.respirationPerHour, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("transpiration kg per kg growth", label), crop.transpirationKgPerKgGrowth, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("min growing temperature C", label), crop.minGrowingTemperatureC, 0.0, 0.0, "%.2f");
+	renderRangedDouble(describe("max growing temperature C", label), crop.maxGrowingTemperatureC, 0.0, 0.0, "%.2f");
 	renderRefCombo(describe("food store", label), crop.foodStoreId, storeIds(draft), portIsOptional("Crops", "Food out"));
 	renderRefCombo(describe("waste store", label), crop.wasteStoreId, storeIds(draft), portIsOptional("Crops", "Waste out"));
-	ImGui::InputDouble(describe("harvest trigger kg (0 disables harvest)", label).c_str(),
-		&crop.harvestTriggerKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("harvest fraction of living biomass", label).c_str(),
-		&crop.harvestFraction, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("edible fraction of harvest", label).c_str(),
-		&crop.edibleFraction, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("harvest trigger kg (0 disables harvest)", label), crop.harvestTriggerKg, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("harvest fraction of living biomass", label), crop.harvestFraction, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("edible fraction of harvest", label), crop.edibleFraction, 0.0, 0.0, "%.4f");
 	bool cropPeriodic = crop.illuminationProfile.periodSeconds > 0.0;
 	if (ImGui::Checkbox(describe("periodic illumination", label).c_str(), &cropPeriodic))
 	{
@@ -619,19 +667,17 @@ bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& dr
 		}
 	}
 	if (!cropPeriodic)
-		ImGui::InputDouble(describe("constant illumination level", label).c_str(),
-			&crop.illuminationProfile.constantLevel, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("constant illumination level", label), crop.illuminationProfile.constantLevel, 0.0, 0.0, "%.3f");
 	else
 	{
-		ImGui::InputDouble(describe("illumination period seconds", label).c_str(),
-			&crop.illuminationProfile.periodSeconds, 0.0, 0.0, "%.1f");
+		renderRangedDouble(describe("illumination period seconds", label), crop.illuminationProfile.periodSeconds, 0.0, 0.0, "%.1f");
 		for (size_t segment = 0; segment < crop.illuminationProfile.segments.size(); ++segment)
 		{
 			auto& stretch = crop.illuminationProfile.segments[segment];
 			auto const segmentRow = std::string("illumination segment ") + std::to_string(segment);
-			ImGui::InputDouble(describe(segmentRow + " start", label).c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+			renderRangedDouble(describe(segmentRow + " start", label), stretch.startSeconds, 0.0, 0.0, "%.1f");
 			ImGui::SameLine();
-			ImGui::InputDouble(describe(segmentRow + " level", label).c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+			renderRangedDouble(describe(segmentRow + " level", label), stretch.level, 0.0, 0.0, "%.3f");
 			ImGui::SameLine();
 			if (ImGui::Button(describe("Remove " + segmentRow, label).c_str()))
 				crop.illuminationProfile.segments.erase(
@@ -643,20 +689,13 @@ bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& dr
 				{crop.illuminationProfile.periodSeconds * 0.5, 0.0});
 	}
 	ImGui::Text("  declared dry-mass composition (moisture and atmospheric nitrogen must be 0 for crops):");
-	ImGui::InputDouble(describe("composition moisture fraction", label).c_str(),
-		&crop.composition.moisture, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("composition nutrient nitrogen fraction", label).c_str(),
-		&crop.composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("composition atmospheric nitrogen fraction", label).c_str(),
-		&crop.composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("composition phosphorus fraction", label).c_str(),
-		&crop.composition.phosphorus, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("composition potassium fraction", label).c_str(),
-		&crop.composition.potassium, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("composition other minerals fraction", label).c_str(),
-		&crop.composition.otherMinerals, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("composition energy kJ per kg dry", label).c_str(),
-		&crop.composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
+	renderRangedDouble(describe("composition moisture fraction", label), crop.composition.moisture, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("composition nutrient nitrogen fraction", label), crop.composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("composition atmospheric nitrogen fraction", label), crop.composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("composition phosphorus fraction", label), crop.composition.phosphorus, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("composition potassium fraction", label), crop.composition.potassium, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("composition other minerals fraction", label), crop.composition.otherMinerals, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("composition energy kJ per kg dry", label), crop.composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
 	ImGui::InputInt(describe("priority", label).c_str(), &crop.priority, 1, 0);
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
@@ -678,37 +717,23 @@ bool renderAlgaeCultureEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	renderRefCombo(describe("phosphorus store", label), algae.phosphorusStoreId, storeIds(draft), portIsOptional("Algae", "Phosphorus in"));
 	renderRefCombo(describe("potassium store", label), algae.potassiumStoreId, storeIds(draft), portIsOptional("Algae", "Potassium in"));
 	renderRefCombo(describe("minerals store", label), algae.mineralsStoreId, storeIds(draft), portIsOptional("Algae", "Minerals in"));
-	ImGui::InputDouble(describe("active culture volume L", label).c_str(),
-		&algae.cultureVolumeL, 0.0, 0.0, "%.15g");
-	ImGui::InputDouble(describe("max biomass density kg/L", label).c_str(),
-		&algae.maxBiomassDensityKgPerL, 0.0, 0.0, "%.15g");
-	ImGui::InputDouble(describe("initial dry biomass kg", label).c_str(),
-		&algae.initialBiomassKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("lamp rated kW", label).c_str(),
-		&algae.lampRatedKW, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("circulation power kW (drawn before lamp)", label).c_str(),
-		&algae.circulationPowerKW, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("growth yield kg per kWh light", label).c_str(),
-		&algae.growthYieldKgPerKWh, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("respiration per hour", label).c_str(),
-		&algae.respirationPerHour, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("evaporation kg per kg growth", label).c_str(),
-		&algae.evaporationKgPerKgGrowth, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("min growing temperature C", label).c_str(),
-		&algae.minGrowingTemperatureC, 0.0, 0.0, "%.2f");
-	ImGui::InputDouble(describe("max growing temperature C", label).c_str(),
-		&algae.maxGrowingTemperatureC, 0.0, 0.0, "%.2f");
+	renderRangedDouble(describe("active culture volume L", label), algae.cultureVolumeL, 0.0, 0.0, "%.15g");
+	renderRangedDouble(describe("max biomass density kg/L", label), algae.maxBiomassDensityKgPerL, 0.0, 0.0, "%.15g");
+	renderRangedDouble(describe("initial dry biomass kg", label), algae.initialBiomassKg, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("lamp rated kW", label), algae.lampRatedKW, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("circulation power kW (drawn before lamp)", label), algae.circulationPowerKW, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("growth yield kg per kWh light", label), algae.growthYieldKgPerKWh, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("respiration per hour", label), algae.respirationPerHour, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("evaporation kg per kg growth", label), algae.evaporationKgPerKgGrowth, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("min growing temperature C", label), algae.minGrowingTemperatureC, 0.0, 0.0, "%.2f");
+	renderRangedDouble(describe("max growing temperature C", label), algae.maxGrowingTemperatureC, 0.0, 0.0, "%.2f");
 	renderRefCombo(describe("food store", label), algae.foodStoreId, storeIds(draft), portIsOptional("Algae", "Food out"));
 	renderRefCombo(describe("recovery store", label), algae.recoveryStoreId, storeIds(draft), portIsOptional("Algae", "Recovery out"));
 	renderRefCombo(describe("waste store", label), algae.wasteStoreId, storeIds(draft), portIsOptional("Algae", "Waste out"));
-	ImGui::InputDouble(describe("harvest trigger kg (0 disables harvest)", label).c_str(),
-		&algae.harvestTriggerKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("harvest fraction of living biomass", label).c_str(),
-		&algae.harvestFraction, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("food fraction of harvest", label).c_str(),
-		&algae.foodFraction, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("recovery fraction of harvest", label).c_str(),
-		&algae.recoveryFraction, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("harvest trigger kg (0 disables harvest)", label), algae.harvestTriggerKg, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("harvest fraction of living biomass", label), algae.harvestFraction, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("food fraction of harvest", label), algae.foodFraction, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("recovery fraction of harvest", label), algae.recoveryFraction, 0.0, 0.0, "%.4f");
 	bool algaePeriodic = algae.illuminationProfile.periodSeconds > 0.0;
 	if (ImGui::Checkbox(describe("periodic illumination", label).c_str(), &algaePeriodic))
 	{
@@ -725,19 +750,17 @@ bool renderAlgaeCultureEntry([[maybe_unused]] core::StationSystemsSettings& draf
 		}
 	}
 	if (!algaePeriodic)
-		ImGui::InputDouble(describe("constant illumination level", label).c_str(),
-			&algae.illuminationProfile.constantLevel, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("constant illumination level", label), algae.illuminationProfile.constantLevel, 0.0, 0.0, "%.3f");
 	else
 	{
-		ImGui::InputDouble(describe("illumination period seconds", label).c_str(),
-			&algae.illuminationProfile.periodSeconds, 0.0, 0.0, "%.1f");
+		renderRangedDouble(describe("illumination period seconds", label), algae.illuminationProfile.periodSeconds, 0.0, 0.0, "%.1f");
 		for (size_t segment = 0; segment < algae.illuminationProfile.segments.size(); ++segment)
 		{
 			auto& stretch = algae.illuminationProfile.segments[segment];
 			auto const segmentRow = std::string("illumination segment ") + std::to_string(segment);
-			ImGui::InputDouble(describe(segmentRow + " start", label).c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+			renderRangedDouble(describe(segmentRow + " start", label), stretch.startSeconds, 0.0, 0.0, "%.1f");
 			ImGui::SameLine();
-			ImGui::InputDouble(describe(segmentRow + " level", label).c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+			renderRangedDouble(describe(segmentRow + " level", label), stretch.level, 0.0, 0.0, "%.3f");
 			ImGui::SameLine();
 			if (ImGui::Button(describe("Remove " + segmentRow, label).c_str()))
 				algae.illuminationProfile.segments.erase(
@@ -749,20 +772,13 @@ bool renderAlgaeCultureEntry([[maybe_unused]] core::StationSystemsSettings& draf
 				{algae.illuminationProfile.periodSeconds * 0.5, 0.0});
 	}
 	ImGui::Text("  declared dry-mass composition (moisture and atmospheric nitrogen must be 0 for cultures):");
-	ImGui::InputDouble(describe("composition moisture fraction", label).c_str(),
-		&algae.composition.moisture, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("composition nutrient nitrogen fraction", label).c_str(),
-		&algae.composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("composition atmospheric nitrogen fraction", label).c_str(),
-		&algae.composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("composition phosphorus fraction", label).c_str(),
-		&algae.composition.phosphorus, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("composition potassium fraction", label).c_str(),
-		&algae.composition.potassium, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("composition other minerals fraction", label).c_str(),
-		&algae.composition.otherMinerals, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("composition energy kJ per kg dry", label).c_str(),
-		&algae.composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
+	renderRangedDouble(describe("composition moisture fraction", label), algae.composition.moisture, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("composition nutrient nitrogen fraction", label), algae.composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("composition atmospheric nitrogen fraction", label), algae.composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("composition phosphorus fraction", label), algae.composition.phosphorus, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("composition potassium fraction", label), algae.composition.potassium, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("composition other minerals fraction", label), algae.composition.otherMinerals, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("composition energy kJ per kg dry", label), algae.composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
 	ImGui::InputInt(describe("priority", label).c_str(), &algae.priority, 1, 0);
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
@@ -788,10 +804,10 @@ bool renderStoreEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	else ImGui::Text("Material: %s (explicit)", store.materialId.c_str());
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Material identity is independent of store name, unit and composition. Empty is unclassified; it never changes allocation.");
 	renderUnitCombo(draft, describe("unit", label), store.unit);
-	ImGui::InputDouble(describe("capacity", label).c_str(), &store.capacity, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("starting usable", label).c_str(), &store.startingQualified, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("starting held", label).c_str(), &store.startingUnqualified, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("protected reserve", label).c_str(), &store.protectedReserve, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("capacity", label), store.capacity, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("starting usable", label), store.startingQualified, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("starting held", label), store.startingUnqualified, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("protected reserve", label), store.protectedReserve, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
@@ -804,13 +820,13 @@ bool renderStoreEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	if (store.composition)
 	{
 		auto& composition = *store.composition;
-		ImGui::InputDouble(describe("moisture fraction", label).c_str(), &composition.moisture, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(describe("nutrient nitrogen fraction", label).c_str(), &composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(describe("atmospheric nitrogen fraction", label).c_str(), &composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(describe("phosphorus fraction", label).c_str(), &composition.phosphorus, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(describe("potassium fraction", label).c_str(), &composition.potassium, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(describe("other minerals fraction", label).c_str(), &composition.otherMinerals, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(describe("energy kJ per kg dry", label).c_str(), &composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
+		renderRangedDouble(describe("moisture fraction", label), composition.moisture, 0.0, 0.0, "%.4f");
+		renderRangedDouble(describe("nutrient nitrogen fraction", label), composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
+		renderRangedDouble(describe("atmospheric nitrogen fraction", label), composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
+		renderRangedDouble(describe("phosphorus fraction", label), composition.phosphorus, 0.0, 0.0, "%.4f");
+		renderRangedDouble(describe("potassium fraction", label), composition.potassium, 0.0, 0.0, "%.4f");
+		renderRangedDouble(describe("other minerals fraction", label), composition.otherMinerals, 0.0, 0.0, "%.4f");
+		renderRangedDouble(describe("energy kJ per kg dry", label), composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
 	}
 	ImGui::PopID();
 	return removeRequested;
@@ -826,10 +842,8 @@ bool renderWaterCollectorEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	renderRefCombo(describe("cooling loop", label), collector.coolingLoopId, coolantLoopIds(draft), portIsOptional("Water collector", "Cooling loop"));
 	renderThermalClassCombo(draft, describe("thermal class", label), collector.thermalClass);
 	renderRefCombo(describe("raw water store", label), collector.destStoreId, storeIds(draft), portIsOptional("Water collector", "Raw water out"));
-	ImGui::InputDouble(describe("max rate kg/s", label).c_str(),
-		&collector.maxRateKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("target RH", label).c_str(),
-		&collector.targetRelativeHumidity, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("max rate kg/s", label), collector.maxRateKgPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("target RH", label), collector.targetRelativeHumidity, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeCollector = true;
@@ -847,14 +861,10 @@ bool renderWaterTreatmentEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	renderRefCombo(describe("treated store", label), treatment.treatedStoreId, storeIds(draft), portIsOptional("Water treatment", "Treated water out"));
 	renderRefCombo(describe("concentrate store", label), treatment.concentrateStoreId, storeIds(draft), portIsOptional("Water treatment", "Concentrate out"));
 	renderRefCombo(describe("consumable store", label), treatment.consumableStoreId, storeIds(draft), portIsOptional("Water treatment", "Consumable in"));
-	ImGui::InputDouble(describe("throughput kg/s", label).c_str(),
-		&treatment.throughputKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("recovery ratio", label).c_str(),
-		&treatment.recoveryRatio, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("specific energy kWh/kg", label).c_str(),
-		&treatment.specificEnergyKWhPerKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("consumable per kg", label).c_str(),
-		&treatment.consumablePerKg, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("throughput kg/s", label), treatment.throughputKgPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("recovery ratio", label), treatment.recoveryRatio, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("specific energy kWh/kg", label), treatment.specificEnergyKWhPerKg, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("consumable per kg", label), treatment.consumablePerKg, 0.0, 0.0, "%.6f");
 	ImGui::TextUnformatted("Removal fractions (default: all removed)");
 	for (auto const* name : core::StationWaterDryConstituents)
 	{
@@ -866,8 +876,8 @@ bool renderWaterTreatmentEntry([[maybe_unused]] core::StationSystemsSettings& dr
 			else treatment.removalFractions.erase(name);
 		}
 		if (authored)
-			ImGui::InputDouble((std::string("removal ") + name).c_str(),
-				&treatment.removalFractions.at(name), 0, 0, "%.6f");
+			renderRangedDouble(std::string("removal ") + name,
+				treatment.removalFractions.at(name), 0, 0, "%.6f");
 	}
 	auto const source = std::find_if(draft.stores.begin(), draft.stores.end(),
 		[&](auto const& store) { return store.id == treatment.sourceStoreId; });
@@ -902,12 +912,9 @@ bool renderElectrolyzerEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	renderRefCombo(describe("delivery compartment (or leave empty for the store)", label), cell.atmosphereId, atmosphereIds(draft), portIsOptional("Electrolyzer", "Compartment oxygen"));
 	renderThermalClassCombo(draft, describe("heat sink thermal class", label), cell.thermalClass, cell.heatSinkId);
 	renderRefCombo(describe("heat sink reservoir", label), cell.heatSinkId, reservoirIds(draft), portIsOptional("Electrolyzer", "Heat out"));
-	ImGui::InputDouble(describe("rated split kg/s", label).c_str(),
-		&cell.rateKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("specific energy kWh/kg water", label).c_str(),
-		&cell.specificEnergyKWhPerKgWater, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("max sink temperature C", label).c_str(),
-		&cell.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
+	renderRangedDouble(describe("rated split kg/s", label), cell.rateKgPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("specific energy kWh/kg water", label), cell.specificEnergyKWhPerKgWater, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("max sink temperature C", label), cell.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
 	ImGui::InputInt(describe("priority", label).c_str(), &cell.priority, 1, 0);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
@@ -925,12 +932,9 @@ bool renderCo2CaptureEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	renderRefCombo(describe("compartment", label), capture.atmosphereId, atmosphereIds(draft), portIsOptional("CO2 capture", "Atmosphere"));
 	renderRefCombo(describe("capture store", label), capture.captureStoreId, storeIds(draft), portIsOptional("CO2 capture", "Captured CO2 out"));
 	renderRefCombo(describe("consumable store (empty: none)", label), capture.consumableStoreId, storeIds(draft), portIsOptional("CO2 capture", "Consumable in"));
-	ImGui::InputDouble(describe("max rate kg/s", label).c_str(),
-		&capture.maxRateKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("specific energy kWh/kg", label).c_str(),
-		&capture.specificEnergyKWhPerKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("consumable per kg", label).c_str(),
-		&capture.consumablePerKg, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("max rate kg/s", label), capture.maxRateKgPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("specific energy kWh/kg", label), capture.specificEnergyKWhPerKg, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("consumable per kg", label), capture.consumablePerKg, 0.0, 0.0, "%.6f");
 	ImGui::InputInt(describe("priority", label).c_str(), &capture.priority, 1, 0);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
@@ -945,43 +949,26 @@ bool renderAtmosphereEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	ImGui::PushID(label.c_str());
 	bool removeAtmosphere = false;
 	renderIdentity(label, atmosphere.id);
-	ImGui::InputDouble(describe("volume m3", label).c_str(),
-		&atmosphere.volumeM3, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("starting oxygen kg", label).c_str(),
-		&atmosphere.startingOxygenKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("starting nitrogen kg", label).c_str(),
-		&atmosphere.startingNitrogenKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("starting CO2 kg", label).c_str(),
-		&atmosphere.startingCarbonDioxideKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("starting water vapour kg", label).c_str(),
-		&atmosphere.startingWaterVapourKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("starting temperature C", label).c_str(),
-		&atmosphere.startingTemperatureC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("thermal capacity kJ/K", label).c_str(),
-		&atmosphere.thermalCapacityKJPerK, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("volume m3", label), atmosphere.volumeM3, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("starting oxygen kg", label), atmosphere.startingOxygenKg, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("starting nitrogen kg", label), atmosphere.startingNitrogenKg, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("starting CO2 kg", label), atmosphere.startingCarbonDioxideKg, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("starting water vapour kg", label), atmosphere.startingWaterVapourKg, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("starting temperature C", label), atmosphere.startingTemperatureC, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("thermal capacity kJ/K", label), atmosphere.thermalCapacityKJPerK, 0.0, 0.0, "%.3f");
 	renderRefCombo(describe("reservoir (empty = adiabatic)", label), atmosphere.reservoirId, reservoirIds(draft), portIsOptional("Atmosphere", "Heat out"));
-	ImGui::InputDouble(describe("exchanger conductance kW/K", label).c_str(),
-		&atmosphere.exchangerConductanceKWPerK, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("exchanger conductance kW/K", label), atmosphere.exchangerConductanceKWPerK, 0.0, 0.0, "%.4f");
 	ImGui::InputInt(describe("occupants", label).c_str(),
 		&atmosphere.occupants, 1, 0);
-	ImGui::InputDouble(describe("O2 use per occupant kg/s", label).c_str(),
-		&atmosphere.oxygenUsePerOccupantKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("CO2 produced per occupant kg/s", label).c_str(),
-		&atmosphere.co2ProductionPerOccupantKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("sensible heat per occupant kW", label).c_str(),
-		&atmosphere.sensibleHeatPerOccupantKW, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("moisture added per occupant kg/s", label).c_str(),
-		&atmosphere.moistureAdditionPerOccupantKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("leak rate kg/s", label).c_str(),
-		&atmosphere.leakRateKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("min pressure kPa", label).c_str(),
-		&atmosphere.minPressureKPa, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("max pressure kPa", label).c_str(),
-		&atmosphere.maxPressureKPa, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("min O2 partial pressure kPa", label).c_str(),
-		&atmosphere.minOxygenPartialPressureKPa, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("max CO2 partial pressure kPa", label).c_str(),
-		&atmosphere.maxCarbonDioxidePartialPressureKPa, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("O2 use per occupant kg/s", label), atmosphere.oxygenUsePerOccupantKgPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("CO2 produced per occupant kg/s", label), atmosphere.co2ProductionPerOccupantKgPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("sensible heat per occupant kW", label), atmosphere.sensibleHeatPerOccupantKW, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("moisture added per occupant kg/s", label), atmosphere.moistureAdditionPerOccupantKgPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("leak rate kg/s", label), atmosphere.leakRateKgPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("min pressure kPa", label), atmosphere.minPressureKPa, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("max pressure kPa", label), atmosphere.maxPressureKPa, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("min O2 partial pressure kPa", label), atmosphere.minOxygenPartialPressureKPa, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("max CO2 partial pressure kPa", label), atmosphere.maxCarbonDioxidePartialPressureKPa, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeAtmosphere = true;
@@ -996,14 +983,10 @@ bool renderAirlockCycleEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	bool removeCycle = false;
 	renderIdentity(label, cycle.id);
 	renderRefCombo(describe("atmosphere", label), cycle.atmosphereId, atmosphereIds(draft), portIsOptional("Airlock cycle", "Atmosphere"));
-	ImGui::InputDouble(describe("gas mass kg", label).c_str(),
-		&cycle.gasMassKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("first occurrence s", label).c_str(),
-		&cycle.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("recurrence s (0 = one-off)", label).c_str(),
-		&cycle.recurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("recovered fraction", label).c_str(),
-		&cycle.recoveredFraction, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("gas mass kg", label), cycle.gasMassKg, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("first occurrence s", label), cycle.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("recurrence s (0 = one-off)", label), cycle.recurrenceSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("recovered fraction", label), cycle.recoveredFraction, 0.0, 0.0, "%.3f");
 	ImGui::InputInt(describe("priority", label).c_str(),
 		&cycle.priority, 1, 0);
 	ImGui::SameLine();
@@ -1043,10 +1026,8 @@ bool renderAtmospherePathwayEntry(core::StationSystemsSettings& draft,
 	};
 	renderEnd("end A compartment", pathway.aAtmosphereId, pathway.bAtmosphereId);
 	renderEnd("end B compartment", pathway.bAtmosphereId, pathway.aAtmosphereId);
-	ImGui::InputDouble(describe("area m2", label).c_str(),
-		&pathway.areaM2, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("open fraction", label).c_str(),
-		&pathway.openFraction, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("area m2", label), pathway.areaM2, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("open fraction", label), pathway.openFraction, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removePathway = true;
@@ -1079,8 +1060,7 @@ bool renderThermalLinkEntry(core::StationSystemsSettings& draft,
 	};
 	renderEnd("end A compartment", link.aAtmosphereId, link.bAtmosphereId);
 	renderEnd("end B compartment", link.bAtmosphereId, link.aAtmosphereId);
-	ImGui::InputDouble(describe("conductance kW/K", label).c_str(),
-		&link.conductanceKWPerK, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("conductance kW/K", label), link.conductanceKWPerK, 0.0, 0.0, "%.4f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeLink = true;
@@ -1104,12 +1084,12 @@ bool renderTransferEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 		transfer.mode = static_cast<core::ResourceTransferMode>(mode);
 	if (transfer.mode == core::ResourceTransferMode::Scheduled)
 	{
-		ImGui::InputDouble(describe("quantity", label).c_str(), &transfer.quantity, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(describe("first occurrence seconds", label).c_str(), &transfer.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(describe("recurrence seconds (0 = one-off)", label).c_str(), &transfer.recurrenceSeconds, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("quantity", label), transfer.quantity, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("first occurrence seconds", label), transfer.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("recurrence seconds (0 = one-off)", label), transfer.recurrenceSeconds, 0.0, 0.0, "%.6f");
 		ImGui::TextWrapped("Recurrence is zero for one-off, otherwise at least one fixed tick. Each occurrence requests the original quantity; shortages never accumulate. Lossless Non-physical inventory event; connection ratings are informational.");
 	}
-	else ImGui::InputDouble(describe("rate per second", label).c_str(), &transfer.ratePerSecond, 0.0, 0.0, "%.3f");
+	else renderRangedDouble(describe("rate per second", label), transfer.ratePerSecond, 0.0, 0.0, "%.3f");
 	ImGui::TextWrapped("Switching mode retains inactive settings and connection design properties. Only the active mode executes after Apply.");
 	// Keep invalid drafts editable (including hidden settings after a switch),
 	// but use the same active-mode validation as Apply and document loading.
@@ -1171,8 +1151,7 @@ bool renderEquipmentLoadEntry([[maybe_unused]] core::StationSystemsSettings& dra
 	ImGui::PushID(label.c_str());
 	bool removeRequested = false;
 	renderIdentity(label, load.id);
-	ImGui::InputDouble(describe("electrical demand kW", label).c_str(),
-		&load.electricalDemandKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("electrical demand kW", label), load.electricalDemandKW, 0.0, 0.0, "%.3f");
 	bool loadPeriodic = load.operatingProfile.periodSeconds > 0.0;
 	if (ImGui::Checkbox(describe("periodic duty", label).c_str(), &loadPeriodic))
 	{
@@ -1189,19 +1168,17 @@ bool renderEquipmentLoadEntry([[maybe_unused]] core::StationSystemsSettings& dra
 		}
 	}
 	if (!loadPeriodic)
-		ImGui::InputDouble(describe("constant duty", label).c_str(),
-			&load.operatingProfile.constantLevel, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("constant duty", label), load.operatingProfile.constantLevel, 0.0, 0.0, "%.3f");
 	else
 	{
-		ImGui::InputDouble(describe("duty period seconds", label).c_str(),
-			&load.operatingProfile.periodSeconds, 0.0, 0.0, "%.1f");
+		renderRangedDouble(describe("duty period seconds", label), load.operatingProfile.periodSeconds, 0.0, 0.0, "%.1f");
 		for (size_t segment = 0; segment < load.operatingProfile.segments.size(); ++segment)
 		{
 			auto& stretch = load.operatingProfile.segments[segment];
 			auto const segmentRow = std::string("duty segment ") + std::to_string(segment);
-			ImGui::InputDouble(describe(segmentRow + " start", label).c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+			renderRangedDouble(describe(segmentRow + " start", label), stretch.startSeconds, 0.0, 0.0, "%.1f");
 			ImGui::SameLine();
-			ImGui::InputDouble(describe(segmentRow + " level", label).c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+			renderRangedDouble(describe(segmentRow + " level", label), stretch.level, 0.0, 0.0, "%.3f");
 			ImGui::SameLine();
 			if (ImGui::Button(describe("Remove " + segmentRow, label).c_str()))
 				load.operatingProfile.segments.erase(
@@ -1212,29 +1189,23 @@ bool renderEquipmentLoadEntry([[maybe_unused]] core::StationSystemsSettings& dra
 			load.operatingProfile.segments.push_back(
 				{load.operatingProfile.periodSeconds * 0.5, 0.0});
 	}
-	ImGui::InputDouble(describe("heat output kW", label).c_str(), &load.heatOutputKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("heat output kW", label), load.heatOutputKW, 0.0, 0.0, "%.3f");
 	renderThermalClassCombo(draft, describe("thermal class", label), load.thermalClass, load.heatSinkId);
 	bool requiresCooling = load.coolingDisposition == core::StationCoolingDisposition::CoolingService;
 	if (ImGui::Checkbox(describe("requires cooling service", label).c_str(), &requiresCooling))
 		load.coolingDisposition = requiresCooling
 			? core::StationCoolingDisposition::CoolingService
 			: core::StationCoolingDisposition::Exported;
-	ImGui::InputDouble(describe("critical floor kW", label).c_str(),
-		&load.criticalFloorKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("critical floor kW", label), load.criticalFloorKW, 0.0, 0.0, "%.3f");
 	ImGui::InputInt(describe("priority", label).c_str(), &load.priority);
-	ImGui::InputDouble(describe("max curtailment", label).c_str(),
-		&load.maxCurtailment, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("max curtailment", label), load.maxCurtailment, 0.0, 0.0, "%.3f");
 	// #417 recovery rules (purely discretionary loads only; a load
 	// with a protected floor is restored by the protected pass). All
 	// default to zero: no dwell/hysteresis, clean restart.
-	ImGui::InputDouble(describe("recovery dwell (s)", label).c_str(),
-		&load.recoveryDwellSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("recovery hysteresis fraction", label).c_str(),
-		&load.recoveryHysteresisFraction, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("restart surge power (kW)", label).c_str(),
-		&load.restartSurgePowerKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("restart surge seconds", label).c_str(),
-		&load.restartSurgeSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("recovery dwell (s)", label), load.recoveryDwellSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("recovery hysteresis fraction", label), load.recoveryHysteresisFraction, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("restart surge power (kW)", label), load.restartSurgePowerKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("restart surge seconds", label), load.restartSurgeSeconds, 0.0, 0.0, "%.3f");
 	renderRefCombo(describe("heat sink", label), load.heatSinkId, reservoirIds(draft), portIsOptional("Equipment", "Heat out"));
 	for (size_t exchange = 0; exchange < load.materialExchanges.size(); )
 	{
@@ -1251,7 +1222,7 @@ bool renderEquipmentLoadEntry([[maybe_unused]] core::StationSystemsSettings& dra
 		renderRefCombo(describe(exchangeRow + " store", label), flow.storeId, storeIds(draft),
 			portIsOptional("Equipment", exchangePort));
 		ImGui::SameLine();
-		ImGui::InputDouble(describe(exchangeRow + " rate", label).c_str(), &flow.ratePerSecond, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe(exchangeRow + " rate", label), flow.ratePerSecond, 0.0, 0.0, "%.3f");
 		ImGui::SameLine();
 		ImGui::Checkbox(describe(exchangeRow + " consumes", label).c_str(), &flow.consumes);
 		ImGui::SameLine();
@@ -1279,20 +1250,13 @@ bool renderBatteryEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	ImGui::PushID(label.c_str());
 	bool removeRequested = false;
 	renderIdentity(label, battery.id);
-	ImGui::InputDouble(describe("nameplate kWh", label).c_str(),
-		&battery.nameplateKWh, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("usable kWh", label).c_str(),
-		&battery.usableKWh, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("starting stored kWh", label).c_str(),
-		&battery.startingStoredKWh, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("max charge kW", label).c_str(),
-		&battery.maxChargeKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("max discharge kW", label).c_str(),
-		&battery.maxDischargeKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("charge efficiency", label).c_str(),
-		&battery.chargeEfficiency, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("discharge efficiency", label).c_str(),
-		&battery.dischargeEfficiency, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("nameplate kWh", label), battery.nameplateKWh, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("usable kWh", label), battery.usableKWh, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("starting stored kWh", label), battery.startingStoredKWh, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("max charge kW", label), battery.maxChargeKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("max discharge kW", label), battery.maxDischargeKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("charge efficiency", label), battery.chargeEfficiency, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("discharge efficiency", label), battery.dischargeEfficiency, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
@@ -1310,24 +1274,15 @@ bool renderGeneratorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	renderRefCombo(describe("fuel store", label), generator.fuelStoreId, storeIds(draft), portIsOptional("Generator", "Fuel in"));
 	renderThermalClassCombo(draft, describe("thermal class", label), generator.thermalClass, generator.heatSinkId);
 	renderRefCombo(describe("heat sink", label), generator.heatSinkId, reservoirIds(draft), portIsOptional("Generator", "Heat out"));
-	ImGui::InputDouble(describe("rated output kW", label).c_str(),
-		&generator.ratedOutputKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("efficiency", label).c_str(),
-		&generator.efficiency, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("ramp kW per second", label).c_str(),
-		&generator.maxRampKWPerSecond, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("commanded output kW", label).c_str(),
-		&generator.commandedOutputKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("startup power kW", label).c_str(),
-		&generator.startupPowerKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("startup seconds", label).c_str(),
-		&generator.startupSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("shutdown heat kW", label).c_str(),
-		&generator.shutdownHeatKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("shutdown seconds", label).c_str(),
-		&generator.shutdownSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("max sink temperature C", label).c_str(),
-		&generator.maxSinkTemperatureC, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("rated output kW", label), generator.ratedOutputKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("efficiency", label), generator.efficiency, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("ramp kW per second", label), generator.maxRampKWPerSecond, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("commanded output kW", label), generator.commandedOutputKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("startup power kW", label), generator.startupPowerKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("startup seconds", label), generator.startupSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("shutdown heat kW", label), generator.shutdownHeatKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("shutdown seconds", label), generator.shutdownSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("max sink temperature C", label), generator.maxSinkTemperatureC, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
@@ -1347,14 +1302,11 @@ bool renderFuelCellEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	renderRefCombo(describe("product water store", label), cell.waterStoreId, storeIds(draft), portIsOptional("Fuel cell", "Water out"));
 	renderThermalClassCombo(draft, describe("heat sink thermal class", label), cell.thermalClass, cell.heatSinkId);
 	renderRefCombo(describe("heat sink reservoir", label), cell.heatSinkId, reservoirIds(draft), portIsOptional("Fuel cell", "Heat out"));
-	ImGui::InputDouble(describe("rated output kW", label).c_str(),
-		&cell.ratedOutputKW, 0.0, 10.0, "%.3f");
-	ImGui::InputDouble(describe("efficiency (0..1]", label).c_str(),
-		&cell.efficiency, 0.0, 0.05, "%.3f");
-	ImGui::InputDouble(describe("commanded output kW", label).c_str(),
-		&cell.commandedOutputKW, 0.0, 1.0, "%.3f");
-	ImGui::InputDouble(describe("max sink temperature C", label).c_str(),
-		&cell.maxSinkTemperatureC, 0.0, 5.0, "%.1f");
+	renderRangedDouble(describe("rated output kW", label), cell.ratedOutputKW, 0.0, 10.0, "%.3f");
+	renderRangedDouble(describe("efficiency (0..1]", label),
+		cell.efficiency, 0.0, 0.05, "%.3f");
+	renderRangedDouble(describe("commanded output kW", label), cell.commandedOutputKW, 0.0, 1.0, "%.3f");
+	renderRangedDouble(describe("max sink temperature C", label), cell.maxSinkTemperatureC, 0.0, 5.0, "%.1f");
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
 	return removeRequested;
@@ -1373,12 +1325,9 @@ bool renderSabatierReactorEntry([[maybe_unused]] core::StationSystemsSettings& d
 	renderRefCombo(describe("product water store", label), reactor.waterStoreId, storeIds(draft), portIsOptional("Sabatier", "Water out"));
 	renderThermalClassCombo(draft, describe("heat sink thermal class", label), reactor.thermalClass, reactor.heatSinkId);
 	renderRefCombo(describe("heat sink reservoir", label), reactor.heatSinkId, reservoirIds(draft), portIsOptional("Sabatier", "Heat out"));
-	ImGui::InputDouble(describe("rated CO2 conversion kg/s", label).c_str(),
-		&reactor.rateKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("specific energy kWh/kg CO2", label).c_str(),
-		&reactor.specificEnergyKWhPerKgCO2, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("max sink temperature C", label).c_str(),
-		&reactor.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
+	renderRangedDouble(describe("rated CO2 conversion kg/s", label), reactor.rateKgPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("specific energy kWh/kg CO2", label), reactor.specificEnergyKWhPerKgCO2, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("max sink temperature C", label), reactor.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
 	ImGui::InputInt(describe("priority", label).c_str(), &reactor.priority, 1, 0);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
@@ -1399,12 +1348,9 @@ bool renderMethaneProcessorEntry([[maybe_unused]] core::StationSystemsSettings& 
 	renderRefCombo(describe("solid carbon store", label), processor.carbonStoreId, storeIds(draft), portIsOptional("Methane processor", "Carbon out"));
 	renderThermalClassCombo(draft, describe("heat sink thermal class", label), processor.thermalClass, processor.heatSinkId);
 	renderRefCombo(describe("heat sink reservoir", label), processor.heatSinkId, reservoirIds(draft), portIsOptional("Methane processor", "Heat out"));
-	ImGui::InputDouble(describe("rated CH4 processing kg/s", label).c_str(),
-		&processor.rateKgPerS, 0.0, 0.0, "%.6f");
-	ImGui::InputDouble(describe("specific energy kWh/kg CH4", label).c_str(),
-		&processor.specificEnergyKWhPerKgCH4, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("max sink temperature C", label).c_str(),
-		&processor.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
+	renderRangedDouble(describe("rated CH4 processing kg/s", label), processor.rateKgPerS, 0.0, 0.0, "%.6f");
+	renderRangedDouble(describe("specific energy kWh/kg CH4", label), processor.specificEnergyKWhPerKgCH4, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("max sink temperature C", label), processor.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
 	ImGui::InputInt(describe("priority", label).c_str(), &processor.priority, 1, 0);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
@@ -1424,16 +1370,11 @@ bool renderThermalReservoirEntry([[maybe_unused]] core::StationSystemsSettings& 
 	bool removeRequested = false;
 	renderIdentity(label, reservoir.id);
 	renderThermalClassCombo(draft, describe("thermal class", label), reservoir.thermalClass);
-	ImGui::InputDouble(describe("heat capacity kJ/K", label).c_str(),
-		&reservoir.heatCapacityKJPerK, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("starting temperature C", label).c_str(),
-		&reservoir.startingTemperatureC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("min temperature C", label).c_str(),
-		&reservoir.minTemperatureC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("max temperature C", label).c_str(),
-		&reservoir.maxTemperatureC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("absorbed heat kW", label).c_str(),
-		&reservoir.absorbedHeatKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("heat capacity kJ/K", label), reservoir.heatCapacityKJPerK, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("starting temperature C", label), reservoir.startingTemperatureC, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("min temperature C", label), reservoir.minTemperatureC, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("max temperature C", label), reservoir.maxTemperatureC, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("absorbed heat kW", label), reservoir.absorbedHeatKW, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
@@ -1449,14 +1390,10 @@ bool renderRadiatorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	bool removeRequested = false;
 	renderIdentity(label, radiator.id);
 	renderRefCombo(describe("reservoir", label), radiator.reservoirId, reservoirIds(draft), portIsOptional("Radiator", "Host reservoir"));
-	ImGui::InputDouble(describe("area m2", label).c_str(),
-		&radiator.areaM2, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("emissivity", label).c_str(),
-		&radiator.emissivity, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("view factor", label).c_str(),
-		&radiator.viewFactor, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("sink temperature C", label).c_str(),
-		&radiator.sinkTemperatureC, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("area m2", label), radiator.areaM2, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("emissivity", label), radiator.emissivity, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("view factor", label), radiator.viewFactor, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("sink temperature C", label), radiator.sinkTemperatureC, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
@@ -1473,15 +1410,15 @@ bool renderCoolantLoopEntry([[maybe_unused]] core::StationSystemsSettings& draft
 	char host[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(host, loop.reservoirId.c_str(), sizeof(host) - 1);
 	if (ImGui::InputText(describe("reservoir", label).c_str(), host, sizeof(host))) loop.reservoirId = host;
-	ImGui::InputDouble(describe("coolant capacity kg", label).c_str(), &loop.coolantCapacityKg, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("starting coolant kg", label).c_str(), &loop.startingCoolantKg, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("specific heat kJ/kg K", label).c_str(), &loop.specificHeatKJPerKgK, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble(describe("starting temperature C", label).c_str(), &loop.startingTemperatureC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("freeze setpoint C", label).c_str(), &loop.freezeProtectionSetpointC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("pump power kW", label).c_str(), &loop.pumpPowerKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("rated flow kg/s", label).c_str(), &loop.ratedFlowKgPerS, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("exchanger conductance kW/K", label).c_str(), &loop.exchangerConductanceKWPerK, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("heater capacity kW", label).c_str(), &loop.heaterCapacityKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("coolant capacity kg", label), loop.coolantCapacityKg, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("starting coolant kg", label), loop.startingCoolantKg, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("specific heat kJ/kg K", label), loop.specificHeatKJPerKgK, 0.0, 0.0, "%.4f");
+	renderRangedDouble(describe("starting temperature C", label), loop.startingTemperatureC, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("freeze setpoint C", label), loop.freezeProtectionSetpointC, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("pump power kW", label), loop.pumpPowerKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("rated flow kg/s", label), loop.ratedFlowKgPerS, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("exchanger conductance kW/K", label), loop.exchangerConductanceKWPerK, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("heater capacity kW", label), loop.heaterCapacityKW, 0.0, 0.0, "%.3f");
 	ImGui::Checkbox((std::string("protected critical service")
 		+ " (circulation and freeze heat drawn ahead of discretionary loads; "
 		  "protection is authored here, never inferred)").c_str(),
@@ -1507,13 +1444,13 @@ bool renderThermalBufferEntry([[maybe_unused]] core::StationSystemsSettings& dra
 	char loop[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(loop, buffer.circulationLoopId.c_str(), sizeof(loop) - 1);
 	if (ImGui::InputText(describe("circulation loop id", label).c_str(), loop, sizeof(loop))) buffer.circulationLoopId = loop;
-	ImGui::InputDouble(describe("capacity kJ", label).c_str(), &buffer.capacityKJ, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("starting energy kJ", label).c_str(), &buffer.startingEnergyKJ, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("min usable temperature C", label).c_str(), &buffer.minUsableTemperatureC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("max usable temperature C", label).c_str(), &buffer.maxUsableTemperatureC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("max charge kW", label).c_str(), &buffer.maxChargeKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("max discharge kW", label).c_str(), &buffer.maxDischargeKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("transfer conductance kW/K", label).c_str(), &buffer.transferConductanceKWPerK, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("capacity kJ", label), buffer.capacityKJ, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("starting energy kJ", label), buffer.startingEnergyKJ, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("min usable temperature C", label), buffer.minUsableTemperatureC, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("max usable temperature C", label), buffer.maxUsableTemperatureC, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("max charge kW", label), buffer.maxChargeKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("max discharge kW", label), buffer.maxDischargeKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("transfer conductance kW/K", label), buffer.transferConductanceKWPerK, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str())) removeRequested = true;
 	ImGui::PopID();
@@ -1529,16 +1466,11 @@ bool renderChillerEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	renderThermalClassCombo(draft, describe("thermal class", label), chiller.thermalClass, chiller.condenserReservoirId);
 	renderRefCombo(describe("cold loop", label), chiller.coldLoopId, coolantLoopIds(draft), portIsOptional("Chiller", "Cold loop"));
 	renderRefCombo(describe("condenser reservoir", label), chiller.condenserReservoirId, reservoirIds(draft), portIsOptional("Chiller", "Condenser heat"));
-	ImGui::InputDouble(describe("rated cooling capacity kW", label).c_str(),
-		&chiller.ratedCoolingCapacityKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("COP", label).c_str(),
-		&chiller.cop, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("auxiliary power kW", label).c_str(),
-		&chiller.auxiliaryPowerKW, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("chilled setpoint C", label).c_str(),
-		&chiller.chilledSetpointC, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("max condensing temperature C", label).c_str(),
-		&chiller.maxCondensingTemperatureC, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("rated cooling capacity kW", label), chiller.ratedCoolingCapacityKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("COP", label), chiller.cop, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("auxiliary power kW", label), chiller.auxiliaryPowerKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("chilled setpoint C", label), chiller.chilledSetpointC, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("max condensing temperature C", label), chiller.maxCondensingTemperatureC, 0.0, 0.0, "%.3f");
 	// #416: a protected critical-service chiller's work is credited
 	// from the actual pool ahead of every discretionary external load,
 	// sized from its real tick-start state, so shutdown-cooling and
@@ -1682,11 +1614,9 @@ bool renderDeliveryEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	renderRefCombo(describe("store", label), delivery.storeId, storeIds(draft), portIsOptional("Delivery", "Destination"));
 	renderUnitCombo(draft, describe("unit", label), delivery.unit,
 		{{"destination", delivery.storeId}});
-	ImGui::InputDouble(describe("quantity", label).c_str(), &delivery.quantity, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("first occurrence seconds", label).c_str(),
-		&delivery.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("recurrence seconds", label).c_str(),
-		&delivery.recurrenceSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("quantity", label), delivery.quantity, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("first occurrence seconds", label), delivery.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("recurrence seconds", label), delivery.recurrenceSeconds, 0.0, 0.0, "%.3f");
 	ImGui::Checkbox(describe("arrives usable", label).c_str(), &delivery.arrivesQualified);
 	ImGui::SameLine();
 	ImGui::InputInt(describe("priority", label).c_str(), &delivery.priority);
@@ -1709,11 +1639,9 @@ bool renderWasteEjectionEntry([[maybe_unused]] core::StationSystemsSettings& dra
 	int eligibility = static_cast<int>(ejection.eligibility);
 	if (ImGui::Combo(describe("eligibility", label).c_str(), &eligibility, "Qualified only\0Held only\0"))
 		ejection.eligibility = static_cast<core::WasteEjectionEligibility>(eligibility);
-	ImGui::InputDouble(describe("quantity", label).c_str(), &ejection.quantity, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("first occurrence seconds", label).c_str(),
-		&ejection.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("recurrence seconds", label).c_str(),
-		&ejection.recurrenceSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("quantity", label), ejection.quantity, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("first occurrence seconds", label), ejection.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("recurrence seconds", label), ejection.recurrenceSeconds, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	ImGui::InputInt(describe("priority", label).c_str(), &ejection.priority);
 	ImGui::SameLine();
@@ -1730,14 +1658,10 @@ bool renderOutageEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	bool removeOutage = false;
 	renderIdentity(label, outage.id);
 	renderRefCombo(describe("installation id", label), outage.installationId, installationIds(draft), portIsOptional("Outage", "Target installation"));
-	ImGui::InputDouble(describe("capacity fraction (0..1)", label).c_str(),
-		&outage.capacityFraction, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("first occurrence seconds", label).c_str(),
-		&outage.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("duration seconds", label).c_str(),
-		&outage.durationSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("recurrence seconds (0 = one-off)", label).c_str(),
-		&outage.recurrenceSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("capacity fraction (0..1)", label), outage.capacityFraction, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("first occurrence seconds", label), outage.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("duration seconds", label), outage.durationSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("recurrence seconds (0 = one-off)", label), outage.recurrenceSeconds, 0.0, 0.0, "%.3f");
 	ImGui::InputInt(describe("priority", label).c_str(), &outage.priority);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
@@ -1754,12 +1678,9 @@ bool renderMaintenanceEntry([[maybe_unused]] core::StationSystemsSettings& draft
 	bool removeJob = false;
 	renderIdentity(label, job.id);
 	renderRefCombo(describe("installation id", label), job.installationId, installationIds(draft), portIsOptional("Maintenance", "Target installation"));
-	ImGui::InputDouble(describe("first occurrence seconds", label).c_str(),
-		&job.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("duration seconds", label).c_str(),
-		&job.durationSeconds, 0.0, 0.0, "%.3f");
-	ImGui::InputDouble(describe("recurrence seconds (0 = one-off)", label).c_str(),
-		&job.recurrenceSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("first occurrence seconds", label), job.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("duration seconds", label), job.durationSeconds, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("recurrence seconds (0 = one-off)", label), job.recurrenceSeconds, 0.0, 0.0, "%.3f");
 	ImGui::InputInt(describe("priority", label).c_str(), &job.priority);
 	renderRefCombo(describe("waste store id", label), job.wasteStoreId, storeIds(draft), portIsOptional("Maintenance", "Waste out"));
 	for (size_t requirementIndex = 0; requirementIndex < job.requirements.size(); )
@@ -1770,8 +1691,7 @@ bool renderMaintenanceEntry([[maybe_unused]] core::StationSystemsSettings& draft
 		renderRefCombo(describe("Maintenance requirement " + requirementRow + " store id", label),
 			requirement.storeId, storeIds(draft),
 			portIsOptional("Maintenance", ("Requirement " + std::to_string(requirementIndex + 1)).c_str()));
-		ImGui::InputDouble(describe("Maintenance requirement " + requirementRow + " quantity", label).c_str(),
-			&requirement.quantity, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("Maintenance requirement " + requirementRow + " quantity", label), requirement.quantity, 0.0, 0.0, "%.3f");
 		ImGui::Checkbox(describe("Maintenance requirement " + requirementRow
 			+ " consumed (unchecked = reusable tool)", label).c_str(), &requirement.consumed);
 		if (job.requirements.size() > 1 && ImGui::Button(describe("Remove requirement " + requirementRow, label).c_str()))

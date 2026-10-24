@@ -1,4 +1,9 @@
 #include "StationSystemsDetail.h"
+
+#include <array>
+#include <cmath>
+#include <cstdio>
+#include <string_view>
 namespace core
 {
 using namespace station_detail;
@@ -2898,6 +2903,83 @@ using namespace station_detail;
 			}
 		} catch (BrokenDraftEntry const&) {}
 		diagnostic.clear(); return true;
+	}
+
+	namespace
+	{
+		std::string rangeNumber(double value)
+		{
+			char buffer[32]{};
+			std::snprintf(buffer, sizeof(buffer), "%g", value);
+			return std::string(buffer);
+		}
+
+		template<size_t N>
+		bool fieldIsOneOf(std::string_view field, std::array<char const*, N> const& names)
+		{
+			for (auto const* name : names)
+				if (field == name) return true;
+			return false;
+		}
+	}
+
+	StationFieldRange stationFieldRange(std::string_view field)
+	{
+		// Celsius readings and setpoints. The cold of space, a chilled-water
+		// plant and a freeze-protection setpoint all live below zero, so a
+		// floor of zero would refuse values the author plainly needs. These
+		// are unbounded: what matters is that they are degrees, not that they
+		// are positive.
+		static constexpr std::array<char const*, 13> celsiusFields{
+			"chilled setpoint C", "freeze setpoint C", "max condensing temperature C",
+			"max growing temperature C", "max sink temperature C", "max temperature C",
+			"max usable temperature C", "min growing temperature C", "min operating temperature C",
+			"min temperature C", "min usable temperature C", "sink temperature C",
+			"starting temperature C"};
+		// Values that are a share of something: fractions, ratios,
+		// efficiencies, an emissivity, a view factor. They are declared
+		// explicitly rather than matched on the word "fraction", because
+		// "evaporation", "respiration" and "duration" all contain "ratio"
+		// without being one, and a substring rule would quietly clamp a rate
+		// to 1.0 per second.
+		static constexpr std::array<char const*, 32> unitIntervalFields{
+			"atmospheric nitrogen fraction", "charge efficiency",
+			"composition atmospheric nitrogen fraction", "composition moisture fraction",
+			"composition nutrient nitrogen fraction", "composition other minerals fraction",
+			"composition phosphorus fraction", "composition potassium fraction",
+			"discharge efficiency", "edible fraction of harvest", "efficiency",
+			"efficiency (0..1]", "emissivity",
+			"food fraction of harvest", "harvest fraction of living biomass", "heat release fraction",
+			"max curtailment", "moisture fraction", "nitrification fraction",
+			"nutrient nitrogen fraction", "open fraction", "organic oxidation fraction",
+			"other minerals fraction", "phosphorus fraction", "potassium fraction",
+			"process water target moisture", "recovered fraction",
+			"recovery fraction of harvest", "recovery hysteresis fraction", "recovery ratio",
+			"target RH", "view factor"};
+		if (fieldIsOneOf(field, celsiusFields)) return StationFieldRange{false, 0.0, false, 0.0};
+		if (fieldIsOneOf(field, unitIntervalFields)) return StationFieldRange{true, 0.0, true, 1.0};
+		return StationFieldRange{true, 0.0, false, 0.0};
+	}
+
+	bool stationFieldAccepts(std::string_view field, double value, std::string& reason)
+	{
+		if (!std::isfinite(value))
+		{
+			reason = std::string(field) + " must be a finite number";
+			return false;
+		}
+		auto const range = stationFieldRange(field);
+		if (range.hasMinimum && value < range.minimum)
+		{
+			reason = std::string(field) + " must be at least " + rangeNumber(range.minimum);
+			return false;
+		}
+		if (range.hasMaximum && value > range.maximum)
+		{
+			reason = std::string(field) + " must be at most " + rangeNumber(range.maximum);
+			return false;
+		}
+		return true;
 	}
 
 }
