@@ -548,6 +548,55 @@ void heatEngineIdle(smoke::Context const&)
 // the limiter.
 void heatEngineNoCrossing(smoke::Context const&)
 {
+	// #826: exercise shared-source allocation at the public runtime seam.
+	// The shared floor is the warmest eligible sink; declaration order keeps
+	// its existing priority, but cannot enlarge the aggregate heat budget.
+	for (double secondSinkC : {20.0, 24.0})
+	for (double firstCommandKW : {1000000.0, 35.0})
+	for (bool reversed : {false, true})
+	{
+		auto shared = enginePair(1.0, 20000.0, 1000000.0, 0.5, 0.0);
+		shared.systemsStepWorldTicks = 60;
+		shared.thermalReservoirs[0].minTemperatureC = -200.0;
+		shared.thermalReservoirs.push_back(
+			engineReservoir("secondSink", "warm", 20000.0, secondSinkC));
+		auto second = shared.heatEngines.front();
+		second.id = "second";
+		second.rejectionReservoirId = secondSinkC == 20.0 ? "reject" : "secondSink";
+		shared.heatEngines.front().commandedInputKW = firstCommandKW;
+		shared.heatEngines.push_back(second);
+		if (reversed) std::reverse(shared.heatEngines.begin(), shared.heatEngines.end());
+		std::string error;
+		require(core::validateStationSystemsSettings(shared, error), error.c_str());
+		auto const dt = 60.0 * static_cast<double>(core::World::getFixedTimestep());
+		core::StationSystemsRuntime runtime(shared, core::World::getFixedTimestep());
+		require(runtime.advanceTo(dt), "shared-source runtime step failed");
+		auto const snap = runtime.snapshot();
+		require(snap.healthy, "shared-source ledgers failed their unchanged audit");
+		auto const& hot = reservoir(snap, "hot");
+		auto const budgetKJ = 90.0 - secondSinkC;
+		auto const extractedKJ = hot.lastEngineExtractionKW * dt;
+		require(extractedKJ <= budgetKJ + 1e-6,
+			"shared engines double-spent the source heat budget");
+		require(std::abs(extractedKJ - budgetKJ) <= 1e-6
+			&& std::abs(hot.temperatureC - secondSinkC) <= 1e-6,
+			"shared allocation did not stop at the warmest sink");
+		double intakeKJ = 0.0, outputKJ = 0.0, rejectionKJ = 0.0;
+		for (auto const& e : snap.heatEngines)
+		{
+			intakeKJ += e.thermalInputEnergyKJ;
+			outputKJ += e.electricalEnergyKJ;
+			rejectionKJ += e.rejectionEnergyKJ;
+		}
+		require(std::abs(intakeKJ - extractedKJ) <= 1e-6
+			&& std::abs(intakeKJ - outputKJ - rejectionKJ) <= 1e-6,
+			"shared-source reservoir and engine ledgers disagree");
+		auto const firstId = reversed ? "second" : "orc";
+		auto const expectedFirstKJ = reversed ? budgetKJ
+			: std::min(firstCommandKW * dt, budgetKJ);
+		require(std::abs(engine(snap, firstId).thermalInputEnergyKJ
+			- expectedFirstKJ) <= 1e-6, "shared allocation lost declaration priority");
+	}
 	std::string diagnostic;
 	// A deliberately absurd rating against a thin gradient: the hot side may
 	// never be driven below the sink's tick-start temperature by the engine.

@@ -535,6 +535,29 @@ namespace core
 		}
 		auto const acceptanceCeilingKW = engineAcceptanceDemandKW + chargeHeadroomKW;
 		auto const dtSeconds = static_cast<double>(seconds);
+		// #826: engines sharing a source share one finite budget. Reserve the
+		// warmest tick-start sink of all requesting, in-service, temperature-
+		// qualified engines as the common floor. This conservative policy
+		// prevents a later colder-sink engine from crossing an earlier one's
+		// floor (or declaration order from changing the aggregate budget).
+		// Within that budget the existing declaration-order priority remains;
+		// only actual reservoir-side withdrawals, including cable losses,
+		// spend it. Rejection/incoming heat cannot replenish it this interval.
+		std::vector<double> engineSourceFloorC(runtime.reservoirs.size(),
+			-StationCelsiusOffset);
+		for (auto const& engine : runtime.heatEngines)
+		{
+			auto const& hot = runtime.reservoirs[engine.hotIndex];
+			auto const& sink = runtime.reservoirs[engine.sinkIndex];
+			if (engine.authored.ratedThermalInputKW * engine.availabilityFactor <= 0.0
+				|| engine.authored.commandedInputKW <= 0.0
+				|| !sinkQualified(engine.sinkIndex, engine.authored.maxSinkTemperatureC)
+				|| hot.temperatureC <= sink.temperatureC
+				|| hot.temperatureC + 1e-9 < engine.authored.minHotTemperatureC)
+				continue;
+			engineSourceFloorC[engine.hotIndex] = std::max(
+				engineSourceFloorC[engine.hotIndex], sink.temperatureC);
+		}
 		for (auto& engine : runtime.heatEngines)
 		{
 			auto const& hot = runtime.reservoirs[engine.hotIndex];
@@ -635,8 +658,10 @@ namespace core
 			// violation it would need to keep running, at any rated
 			// input. Other processes may still move the hot node; the
 			// engine's own contribution cannot cross.
-			auto const supplyKW = hot.authored.heatCapacityKJPerK
-			* std::max(0.0, hotK - sinkK) / dtSeconds;
+			auto const supplyKW = std::max(0.0,
+				hot.authored.heatCapacityKJPerK
+					* std::max(0.0, hot.temperatureC - engineSourceFloorC[engine.hotIndex])
+					/ dtSeconds - engineExtractionByReservoir[engine.hotIndex]);
 			// The commanded input is the dispatch ceiling (#805): the
 			// author throttles below rated to leave heat deliberately in
 			// the hot reservoir for a competing consumer. It caps the
