@@ -7810,6 +7810,189 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		require(driver.passed(), "prefab dial override workflow failed on the Test Engine");
 	}
 
+	// #824: dial edits at non-float-exact range boundaries. The dial
+	// buffers are doubles, so typing the exact declared max or min of a
+	// range like [-1.1, 4.9] parses to the same double the template's
+	// bound parses to and lands exactly on the boundary. A float buffer
+	// drifted the typed value upward - float(4.9) is 4.900000095367432 -
+	// so the exact max of such a range was refused by the core's range
+	// check. The bundled aircon dials (0-15, 0-20) are float-exact and
+	// never showed this; the check stages a template whose setpoint dial
+	// is not float-exact and asserts both boundary accepts and genuine
+	// out-of-range refuses.
+	void prefabDialBoundaryWorkflow(smoke::Context const& fixtureContext)
+	{
+		using smoke::require;
+		// The boundary template is not bundled: stage a resources tree whose
+		// manifest carries only the test PrefabCatalogue, so the fixture's
+		// real manifest/Directory pipeline loads it the same way it loads
+		// the bundled one.
+		auto const staged = fixtureContext.temporaryRoot() / "boundary-staged-resources";
+		std::filesystem::create_directories(staged / "prefabs");
+		YAML::Node manifest;
+		YAML::Node extra;
+		extra["type"] = "PrefabCatalogue";
+		extra["name"] = "boundary-test";
+		extra["location"] = "prefabs/boundary-unit.yaml";
+		manifest["Resources"]["Resource"].push_back(extra);
+		{ std::ofstream out(staged / "Resources.yaml"); out << manifest; }
+		{ std::ofstream out(staged / "prefabs" / "boundary-unit.yaml");
+			out << R"YAML(schemaVersion: 110
+prefabCatalogue:
+  prefabs:
+    - id: boundary-unit
+      displayName: Boundary Unit
+      instancePrefix: bu
+      stationSystems:
+        enabled: true
+        observationIntervalSeconds: 1.0
+        thermalReservoirs:
+          - id: coldside
+            thermalClass: warm
+            heatCapacityKJPerK: 500
+            startingTemperatureC: 24
+            minTemperatureC: 0
+            maxTemperatureC: 40
+            absorbedHeatKW: 2
+          - id: sink
+            thermalClass: warm
+            heatCapacityKJPerK: 200
+            startingTemperatureC: 20
+            minTemperatureC: 0
+            maxTemperatureC: 40
+            absorbedHeatKW: 0
+        coolantLoops:
+          - id: loop
+            reservoirId: coldside
+            coolantCapacityKg: 100
+            startingCoolantKg: 80
+            specificHeatKJPerKgK: 4.0
+            startingTemperatureC: 20
+            freezeProtectionSetpointC: 5
+            pumpPowerKW: 0.5
+            ratedFlowKgPerS: 1.0
+            exchangerConductanceKWPerK: 2.0
+            heaterCapacityKW: 1.0
+            criticalService: false
+        chillers:
+          - id: machine
+            thermalClass: warm
+            coldLoopId: loop
+            condenserReservoirId: sink
+            ratedCoolingCapacityKW: 5
+            cop: 3
+            auxiliaryPowerKW: 0.2
+            chilledSetpointC: 0.5
+            maxCondensingTemperatureC: 45
+            criticalService: false
+        radiators:
+          - id: radiator
+            reservoirId: sink
+            areaM2: 4
+            emissivity: 0.9
+            viewFactor: 1.0
+            sinkTemperatureC: -30
+      exposedPorts:
+        - name: Cold supply
+          nodeType: Coolant loop
+          entryId: loop
+          portName: Cold interface
+        - name: Supervision
+          nodeType: Chiller
+          entryId: machine
+          portName: Supervision
+      parameters:
+        - name: setpoint
+          nodeType: Chiller
+          entryId: machine
+          field: chilledSetpointC
+          default: 0.5
+          min: -1.1
+          max: 4.9
+)YAML"; }
+		auto const root = fixtureContext.temporaryRoot() / "boundary-dial-resources";
+		headless::StationResourceFixture resources(staged, root);
+		require(resources.catalogues.size() == 1,
+			"the staged boundary catalogue should load through the manifest pipeline");
+
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1700};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window;
+		window.setPrefabCatalogueResources(resources.catalogues);
+		auto world = std::make_shared<core::World>("Boundary dial editing", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 1680});
+			ImGui::Begin("Configuration");
+			window.renderFlowContents(world);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "prefabDialBoundary", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto* canvas = flowCanvasWindow("Configuration");
+			REQ(canvas != nullptr, "flow canvas is missing");
+			// Place the boundary unit; it lands as a collapsed composite.
+			ctx->ComboClick("Place node/Boundary Unit"); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 300.0f, canvas->Pos.y + 220.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ImVec4 rect{};
+			REQ(window.flowNodeRect("boundary-unit", "bu1", &rect),
+				"the placed boundary unit is not a collapsed composite");
+			// Select the composite and park the pointer off the node so the
+			// inspector text is visible (same tooltip caveat as #817).
+			ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+			ctx->Yield(2);
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 4.0f, canvas->Pos.y + 4.0f});
+			ctx->Yield(3);
+			REQ(driver.contains("range [-1.1, 4.9], default 0.5"),
+				"the boundary dial did not show its non-float-exact range");
+			// Typing the exact declared max lands exactly on 4.9 - with the
+			// old float buffer this drifted up and was refused as out of range.
+			ctx->ItemInputValue("**/setpoint", "4.9"); ctx->KeyPress(ImGuiKey_Tab); ctx->Yield(3);
+			REQ(window.draft().chillers.size() == 1
+				&& window.draft().chillers[0].chilledSetpointC == 4.9,
+				"typing the exact max did not land the declared boundary value");
+			REQ(window.flowPlacedPrefabs().size() == 1
+				&& std::get<double>(window.flowPlacedPrefabs()[0].overrides.at("setpoint")) == 4.9,
+				"the exact-max edit did not update the provenance override exactly");
+			// Typing the exact declared min lands exactly on -1.1; the float
+			// drift broke the lower boundary the same way.
+			ctx->ItemInputValue("**/setpoint", "-1.1"); ctx->KeyPress(ImGuiKey_Tab); ctx->Yield(3);
+			REQ(window.draft().chillers[0].chilledSetpointC == -1.1,
+				"typing the exact min did not land the declared boundary value");
+			// A value genuinely beyond max is still refused without mutation.
+			auto const atMin = window.draft();
+			auto const atMinOverrides = window.flowPlacedPrefabs()[0].overrides;
+			auto const undoAtMin = window.draftHistory().undoCount();
+			ctx->ItemInputValue("**/setpoint", "5"); ctx->KeyPress(ImGuiKey_Tab); ctx->Yield(3);
+			REQ(window.draft() == atMin
+				&& window.flowPlacedPrefabs()[0].overrides == atMinOverrides
+				&& window.draftHistory().undoCount() == undoAtMin,
+				"an over-max dial input mutated the draft, the override or the history");
+			REQ(driver.contains("Refused") && driver.contains("outside its range"),
+				"the over-max refusal was not shown in the inspector");
+			// And a value genuinely below min likewise.
+			ctx->ItemInputValue("**/setpoint", "-1.2"); ctx->KeyPress(ImGuiKey_Tab); ctx->Yield(3);
+			REQ(window.draft() == atMin
+				&& window.flowPlacedPrefabs()[0].overrides == atMinOverrides
+				&& window.draftHistory().undoCount() == undoAtMin,
+				"an under-min dial input mutated the draft, the override or the history");
+		});
+		#undef REQ
+		require(driver.passed(), "prefab dial boundary workflow failed on the Test Engine");
+	}
+
 	// #821: two collapsed instances of the same template share one
 	// synthesized exposed-pin set. The descriptor vector is a property of
 	// the template, not the instance, so it must be built once per unique
@@ -7962,6 +8145,7 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 	checks.push_back({"station/prefabUnitKeyboardDeleteWorkflow", prefabUnitKeyboardDeleteWorkflow});
 	checks.push_back({"station/prefabCompositeTelemetryWorkflow", prefabCompositeTelemetryWorkflow});
 	checks.push_back({"station/prefabDialOverrideWorkflow", prefabDialOverrideWorkflow});
+	checks.push_back({"station/prefabDialBoundaryWorkflow", prefabDialBoundaryWorkflow});
 	checks.push_back({"station/prefabDuplicateInstancePinsWorkflow", prefabDuplicateInstancePinsWorkflow});
 	checks.push_back({"station/addEntryWorkflow", addEntryWorkflow});
 	checks.push_back({"station/configurationResources", configurationResources});

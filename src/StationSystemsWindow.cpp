@@ -843,13 +843,21 @@ void StationSystemsWindow::renderPrefabDialInspector(core::StationSystemsSetting
 				: core::PrefabOverrideValue{parameter.boolDefault};
 		if (parameter.kind == core::PrefabParameterKind::Number)
 		{
-			float const authoritative = static_cast<float>(std::get<double>(current));
-			float& buffer = mDialBuffers.try_emplace(parameter.name, authoritative).first->second;
+			// #824: the buffer is a double, not a float. A float buffer
+			// drifts a non-float-exact boundary upward on the round trip -
+			// float(4.9) is 4.900000095367432 - so typing the exact
+			// declared max or min of a range like [0, 4.9] arrived at the
+			// core's range check out of range and was refused. InputDouble
+			// parses the typed text to the same double the template's
+			// declared bound parses to, so an exact boundary edit lands
+			// exactly on the declared value.
+			double const authoritative = std::get<double>(current);
+			double& buffer = mDialBuffers.try_emplace(parameter.name, authoritative).first->second;
 			ImGui::SetNextItemWidth(150.0f);
-			ImGui::InputFloat(parameter.name.c_str(), &buffer, 0.0f, 0.0f, "%.2f");
+			ImGui::InputDouble(parameter.name.c_str(), &buffer, 0.0, 0.0, "%.2f");
 			bool const active = ImGui::IsItemActive();
 			if (ImGui::IsItemDeactivatedAfterEdit())
-				applyPrefabDial(draft, unit->instanceId, parameter.name, static_cast<double>(buffer));
+				applyPrefabDial(draft, unit->instanceId, parameter.name, buffer);
 			// While idle the authoritative value reseeds the buffer, so an
 			// undo or a refused edit snaps the dial back to the unit.
 			if (!active) buffer = authoritative;

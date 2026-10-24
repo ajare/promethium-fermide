@@ -189,7 +189,10 @@ private:
 	// and the authoritative value reseeds it whenever it is idle, so an
 	// undo or a refused edit snaps the dial back to what the unit holds.
 	std::string mDialUnitFor;
-	std::map<std::string, float> mDialBuffers;
+	// #824: double, not float - a float buffer drifts non-float-exact
+	// boundary values (float(4.9) > 4.9) and the core's range check then
+	// refuses an edit of the exact declared max or min.
+	std::map<std::string, double> mDialBuffers;
 	std::string mDialNotice;
 	void renderPrefabDialInspector(core::StationSystemsSettings& draft);
 	void applyPrefabDial(core::StationSystemsSettings& draft, std::string const& instanceId,

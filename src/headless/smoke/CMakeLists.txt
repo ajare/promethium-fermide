@@ -1037,6 +1037,10 @@ set_tests_properties(station-editor-prefab-composite-telemetry PROPERTIES LABELS
 # #817: the exposed-dials override UI on the composite inspector.
 add_test(NAME station-editor-prefab-dial-override COMMAND pf-smoke-editor --check station/prefabDialOverrideWorkflow)
 set_tests_properties(station-editor-prefab-dial-override PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+# #824: dial edits at non-float-exact range boundaries - the exact
+# declared max/min land exactly, genuine out-of-range input is refused.
+add_test(NAME station-editor-prefab-dial-boundary COMMAND pf-smoke-editor --check station/prefabDialBoundaryWorkflow)
+set_tests_properties(station-editor-prefab-dial-boundary PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 # #821: two collapsed instances of the same template share one exposed-pin
 # set - each composite keeps exactly one pin per exposed port, and a link
 # dragged to the second unit's exposed pin aliases that unit's own entry.
