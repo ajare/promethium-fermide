@@ -20,6 +20,8 @@
 #include "core/StationPrefab.h"
 
 #include <cstring>
+#include <fstream>
+#include <sstream>
 #include <string>
 
 namespace
@@ -705,10 +707,198 @@ parameters:
 			&& diagnostic.find("reserved separator") != std::string::npos,
 			("a dotted prefab id must be refused: " + diagnostic).c_str());
 	}
+	// #812: the catalogue document. The same template shape, wrapped in a
+	// 'prefabCatalogue' root with a 'prefabs' array, loaded as a whole.
+	std::string catalogueYaml(std::string const& items)
+	{
+		return "schemaVersion: 110\nprefabCatalogue:\n  prefabs:\n" + items;
+	}
+
+	// Re-indent a standalone template document into one `- ` item of a
+	// catalogue's `prefabs` array. `dash` is the column of the dash, so the
+	// item's own fields land two columns further in.
+	std::string catalogueItem(std::string const& yaml, int dash)
+	{
+		std::string out;
+		std::istringstream stream(yaml);
+		std::string line;
+		bool first = true;
+		while (std::getline(stream, line))
+		{
+			if (line.empty()) continue;
+			out += std::string(first ? dash : dash + 2, ' ');
+			if (first)
+			{
+				out += "- ";
+				first = false;
+			}
+			out += line + "\n";
+		}
+		return out;
+	}
+
+	std::string renamedTemplate(std::string const& yaml, char const* newId)
+	{
+		std::string out = yaml;
+		auto const pos = out.find("id: aircon-unit");
+		require(pos != std::string::npos, "template should carry its own id line");
+		out.replace(pos, std::strlen("id: aircon-unit"), std::string("id: ") + newId);
+		return out;
+	}
+
+	void prefabCatalogueParse(smoke::Context const& ctx)
+	{
+		std::string diagnostic;
+		// The shipped catalogue is the real artifact the editor loads, so it
+		// is the one asserted here rather than a test-local copy.
+		std::ifstream in(ctx.fixture("resources/prefabs/aircon-unit.yaml"), std::ios::binary);
+		std::ostringstream text;
+		text << in.rdbuf();
+		core::PrefabCatalogue catalogue;
+		require(core::parsePrefabCatalogue(text.str(), catalogue, &diagnostic),
+			("bundled prefab catalogue must parse: " + diagnostic).c_str());
+		require(catalogue.templates.size() == 1,
+			"bundled catalogue should ship one template");
+		require(catalogue.find("nope") == nullptr, "an unknown id must not resolve");
+		auto const* tmpl = catalogue.find("aircon-unit");
+		require(tmpl != nullptr, "bundled catalogue should resolve aircon-unit");
+		if (!tmpl) return;
+		require(tmpl->displayName == "Aircon Unit",
+			"bundled template should keep its display name");
+		// The shipped prefix gives the spec's `ac1.machine` instance naming.
+		require(tmpl->instancePrefix == "ac",
+			"bundled template should declare the 'ac' instance prefix");
+		require(tmpl->entries.chillers.size() == 1
+				&& tmpl->entries.coolantLoops.size() == 1
+				&& tmpl->entries.thermalReservoirs.size() == 2
+				&& tmpl->entries.radiators.size() == 1,
+			"bundled template should carry its five internal entries");
+		require(tmpl->exposedPorts.size() == 2 && tmpl->parameters.size() == 3,
+			"bundled template should keep its two exposed ports and three dials");
+		// A template parsed from a catalogue behaves exactly like the same
+		// template parsed standalone: same expansion, same ids.
+		core::PrefabExpansion fromCatalogue, fromStandalone;
+		std::string reason;
+		require(core::expandPrefab(*tmpl, {}, "ac9", fromCatalogue, reason)
+				&& core::expandPrefab(parseAircon(), {}, "ac9", fromStandalone, reason)
+				&& fromCatalogue.entries == fromStandalone.entries,
+			("a catalogue template must expand like the standalone template: " + reason).c_str());
+		// Two good templates in one catalogue both load, in file order.
+		auto const pair = catalogueItem(airconPrefabYaml(), 4)
+			+ catalogueItem(renamedTemplate(airconPrefabYaml(), "heater-unit"), 4);
+		core::PrefabCatalogue two;
+		require(core::parsePrefabCatalogue(catalogueYaml(pair), two, &diagnostic)
+				&& two.templates.size() == 2
+				&& two.find("aircon-unit") != nullptr
+				&& two.find("heater-unit") != nullptr,
+			("two good templates should both load: " + diagnostic).c_str());
+	}
+
+	void prefabCatalogueRefusals(smoke::Context const&)
+	{
+		std::string diagnostic;
+		core::PrefabCatalogue catalogue;
+		// A document with no 'prefabs' array is not a catalogue.
+		require(!core::parsePrefabCatalogue("schemaVersion: 110\nprefabCatalogue:\n  other: 1\n",
+				catalogue, &diagnostic)
+			&& diagnostic.find("prefabs") != std::string::npos,
+			("a catalogue with no prefabs array must be refused: " + diagnostic).c_str());
+		// One malformed template among good ones refuses the WHOLE catalogue:
+		// the caller must never see the good templates alongside the bad one,
+		// which is what keeps a half-loaded unit out of the Place menu.
+		auto const good = catalogueItem(airconPrefabYaml(), 4);
+		auto const mixed = good
+			+ catalogueItem(renamedTemplate(airconPrefabYaml(), "broken.unit"), 4);
+		core::PrefabCatalogue refused;
+		require(!core::parsePrefabCatalogue(catalogueYaml(mixed), refused, &diagnostic),
+			("a catalogue holding a malformed template must be refused: " + diagnostic).c_str());
+		require(refused.templates.empty(),
+			"a refused catalogue must leave no templates behind, not even the good ones");
+		require(diagnostic.find("broken.unit") != std::string::npos,
+			("the diagnostic should name the template that broke: " + diagnostic).c_str());
+		// Duplicate template ids across one catalogue are refused the same way.
+		core::PrefabCatalogue dupes;
+		require(!core::parsePrefabCatalogue(catalogueYaml(good + good), dupes, &diagnostic)
+			&& diagnostic.find("duplicate template id") != std::string::npos,
+			("duplicate ids must refuse the catalogue: " + diagnostic).c_str());
+		require(dupes.templates.empty(), "a refused catalogue must be empty");
+	}
+
+	void prefabInstanceAllocation(smoke::Context const&)
+	{
+		auto const tmpl = parseAircon();
+		// The test template declares no prefix, so the prefab id is the prefix.
+		require(tmpl.instancePrefix == "aircon-unit",
+			"an absent instance prefix should default to the prefab id");
+		core::StationSystemsSettings draft;
+		draft.enabled = true;
+		require(core::allocatePrefabInstanceId(tmpl, draft) == "aircon-unit1",
+			"an empty draft should yield the first instance");
+		// Take the first instance's namespace with one ordinary entry of a
+		// type the template does not even use: the allocator claims the whole
+		// `<instance>.` namespace, not just the template's own types.
+		core::InstallationOutageSettings outage;
+		outage.id = "aircon-unit1.machine";
+		outage.firstOccurrenceSeconds = 0.0;
+		outage.durationSeconds = 1.0;
+		draft.outages.push_back(outage);
+		require(core::allocatePrefabInstanceId(tmpl, draft) == "aircon-unit2",
+			"a taken namespace must be skipped");
+		// Both namespaces taken: the allocator must step past both.
+		core::InstallationOutageSettings second;
+		second.id = "aircon-unit2.machine";
+		second.firstOccurrenceSeconds = 0.0;
+		second.durationSeconds = 1.0;
+		draft.outages.push_back(second);
+		require(core::allocatePrefabInstanceId(tmpl, draft) == "aircon-unit3",
+			"consecutive taken namespaces must both be skipped");
+		// A prefix carrying the namespacing separator would break the
+		// namespace rule, so it is refused at parse time.
+		std::string badYaml = airconPrefabYaml();
+		badYaml.insert(badYaml.find("displayName:"), "instancePrefix: a.c\n");
+		core::PrefabTemplate bad;
+		std::string diagnostic;
+		require(!core::parsePrefabTemplate(badYaml, bad, &diagnostic)
+			&& diagnostic.find("reserved separator") != std::string::npos,
+			("a dotted instance prefix must be refused: " + diagnostic).c_str());
+	}
+
+	void prefabEntryOrderIsFixed(smoke::Context const&)
+	{
+		auto const tmpl = parseAircon();
+		auto const order = core::prefabEntryOrder(tmpl.entries);
+		require(order.size() == 5, "the bundled template has five internal entries");
+		// The order is the core's fixed type order, not authoring order: the
+		// placement grid depends on it being reproducible.
+		require((order[0] == std::pair<std::string, std::string>{"Reservoir", "coldside"})
+			&& (order[1] == std::pair<std::string, std::string>{"Reservoir", "sink"})
+			&& (order[2] == std::pair<std::string, std::string>{"Radiator", "radiator"})
+			&& (order[3] == std::pair<std::string, std::string>{"Coolant loop", "loop"})
+			&& (order[4] == std::pair<std::string, std::string>{"Chiller", "machine"}),
+			"entry order should follow the fixed type order");
+		// The dial defaults come back as overrides, kinds matching declarations.
+		auto const overrides = core::defaultPrefabOverrides(tmpl);
+		require(overrides.size() == 3, "every declared dial should yield a default");
+		require(std::holds_alternative<double>(overrides.at("setpoint"))
+				&& std::get<double>(overrides.at("setpoint")) == 5.0,
+			"the numeric dial default should land as a double");
+		require(std::holds_alternative<bool>(overrides.at("criticalService"))
+				&& !std::get<bool>(overrides.at("criticalService")),
+			"the boolean dial default should land as a bool");
+		// Applying the defaults is a legal expansion (defaults are in range).
+		core::PrefabExpansion expansion;
+		std::string reason;
+		require(core::expandPrefab(tmpl, overrides, "ac1", expansion, reason),
+			("default overrides must be accepted: " + reason).c_str());
+	}
 }
 
 void registerStationPrefabChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"prefabCatalogueParse", prefabCatalogueParse});
+	checks.push_back({"prefabCatalogueRefusals", prefabCatalogueRefusals});
+	checks.push_back({"prefabInstanceAllocation", prefabInstanceAllocation});
+	checks.push_back({"prefabEntryOrderIsFixed", prefabEntryOrderIsFixed});
 	checks.push_back({"prefabTemplateParse", prefabTemplateParse});
 	checks.push_back({"prefabTemplateRefusals", prefabTemplateRefusals});
 	checks.push_back({"prefabExpansion", prefabExpansion});

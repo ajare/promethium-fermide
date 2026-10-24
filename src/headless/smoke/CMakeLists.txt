@@ -128,7 +128,12 @@ set_tests_properties(station-observable-registry-coverage PROPERTIES
 # #811 adds the composite-boundary checks: exposed-pin resolution, link
 # verdicts and reference writes through the composite, and catalogue-load
 # template validation with stub peers on the exposed ports.
-foreach(check prefabTemplateParse prefabTemplateRefusals prefabExpansion prefabOverrides prefabCapRefusal prefabDeterminism
+# #812 adds the catalogue itself: transactional whole-document loading, the
+# instance-id allocator the editor places with, and the fixed entry order the
+# placement grid depends on.
+foreach(check prefabCatalogueParse prefabCatalogueRefusals prefabInstanceAllocation
+        prefabEntryOrderIsFixed
+        prefabTemplateParse prefabTemplateRefusals prefabExpansion prefabOverrides prefabCapRefusal prefabDeterminism
         prefabExposedPinResolution prefabLinkThroughComposite prefabTemplateLoadValidation)
     add_test(NAME station-prefab-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-prefab-${check} PROPERTIES
@@ -994,6 +999,9 @@ add_test(NAME station-editor-flow-radiator COMMAND pf-smoke-editor --check stati
 set_tests_properties(station-editor-flow-radiator PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-chiller COMMAND pf-smoke-editor --check station/flowChillerWorkflow)
 set_tests_properties(station-editor-flow-chiller PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+# #812: the prefab catalogue in the Place-node menu and atomic placement.
+add_test(NAME station-editor-prefab-placement COMMAND pf-smoke-editor --check station/prefabPlacementWorkflow)
+set_tests_properties(station-editor-prefab-placement PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-coolant-loop COMMAND pf-smoke-editor --check station/flowCoolantLoopWorkflow)
 set_tests_properties(station-editor-flow-coolant-loop PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-transfers COMMAND pf-smoke-editor --check station/transferWorkflow)

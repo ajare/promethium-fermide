@@ -71,3 +71,60 @@ std::vector<std::shared_ptr<StationConfigurationResource>> loadStationConfigurat
 	});
 	return result;
 }
+
+PrefabCatalogueResource::PrefabCatalogueResource(std::string const& name,
+	std::string const& namesp, std::string const& source,
+	std::map<std::string, std::string> const& tags, resources::ResourceLocation* location)
+	: Resource(name, namesp, kTypeName, source, tags, location) {}
+
+void PrefabCatalogueResource::create(resources::DataStreamPtr data, resources::ResourceManager*)
+{
+	if (!data) throw resources::ResourceException(this, "has no prefab catalogue document");
+	std::string text(reinterpret_cast<char const*>(data->getData()), data->getSize());
+	// Transactional: the parser refuses the whole catalogue on the first
+	// malformed template, and the refusal surfaces here as a resource failure
+	// carrying the parser's diagnostic. Nothing partial is kept.
+	core::PrefabCatalogue catalogue;
+	std::string diagnostic;
+	if (!core::parsePrefabCatalogue(text, catalogue, &diagnostic))
+		throw resources::ResourceException(this, diagnostic);
+	mCatalogue = std::move(catalogue);
+	mText = std::move(text);
+}
+
+void PrefabCatalogueResource::destroy()
+{
+	mCatalogue = {}; mText.clear();
+}
+
+void registerPrefabCatalogueResourceType(resources::ResourceManager& manager)
+{
+	class Factory final : public resources::ResourceFactory
+	{
+	public:
+		Factory() : ResourceFactory(PrefabCatalogueResource::kTypeName) {}
+		resources::Resource* createResource(std::string const& name, std::string const& namesp,
+			std::string const& source, std::map<std::string, std::string> const& tags,
+			resources::ResourceLocation* location) override
+		{ return new PrefabCatalogueResource(name, namesp, source, tags, location); }
+	};
+	manager.addResourceFactory(new Factory);
+}
+
+std::vector<std::shared_ptr<PrefabCatalogueResource>> loadPrefabCatalogueResources(
+	resources::ResourceManager& manager)
+{
+	std::vector<std::shared_ptr<PrefabCatalogueResource>> result;
+	for (auto const& entry : manager.getResourcesByType(PrefabCatalogueResource::kTypeName))
+	{
+		auto resource = std::dynamic_pointer_cast<PrefabCatalogueResource>(entry);
+		if (!resource) throw resources::ResourceException(entry.get(), "is not a PrefabCatalogue");
+		manager.createResource(resource);
+		manager.loadResource(resource);
+		result.push_back(std::move(resource));
+	}
+	std::sort(result.begin(), result.end(), [](auto const& a, auto const& b) {
+		return a->getQualifiedName() < b->getQualifiedName();
+	});
+	return result;
+}

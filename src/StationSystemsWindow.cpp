@@ -178,6 +178,27 @@ void StationSystemsWindow::openDraft(std::string const& path)
 	try { mRecent.add(path); } catch (std::exception const& error) { mDiagnostic = error.what(); }
 }
 
+void StationSystemsWindow::setPrefabCatalogueResources(
+	std::vector<std::shared_ptr<PrefabCatalogueResource>> resources)
+{
+	// Merge the loaded catalogues into the single catalogue the flow diagram
+	// offers. Each catalogue already loaded transactionally; across files the
+	// first template of a given id wins (resources load in name order), so a
+	// later file can never silently replace an earlier unit.
+	auto catalogue = std::make_shared<core::PrefabCatalogue>();
+	for (auto const& resource : resources)
+	{
+		if (!resource) continue;
+		for (auto const& tmpl : resource->catalogue().templates)
+		{
+			if (catalogue->find(tmpl.id)) continue;
+			catalogue->templates.push_back(tmpl);
+		}
+	}
+	mPrefabCatalogue = std::move(catalogue);
+	mFlow.setPrefabCatalogue(mPrefabCatalogue);
+}
+
 void StationSystemsWindow::loadConfigurationResource(StationConfigurationResource const& resource)
 {
 	// Copy into the draft, never mutate the shared resource or apply to World.

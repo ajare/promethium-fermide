@@ -11,6 +11,9 @@ public:
 	bool flowModified() const { return mStation.flowModified(); }
 	void setStationConfigurationResources(std::vector<std::shared_ptr<StationConfigurationResource>> resources)
 	{ mStation.setConfigurationResources(std::move(resources)); }
+	void setPrefabCatalogueResources(
+		std::vector<std::shared_ptr<PrefabCatalogueResource>> resources)
+	{ mStation.setPrefabCatalogueResources(std::move(resources)); }
 	void initializeRecentStationFiles(std::filesystem::path path) { mStation.initializeRecentFiles(std::move(path)); }
 	void setStationFilePicker(std::function<std::optional<std::string>(bool)> picker)
 	{ mStation.setFilePicker(std::move(picker)); }

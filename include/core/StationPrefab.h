@@ -54,6 +54,10 @@ namespace core
 	{
 		std::string id;
 		std::string displayName;
+		// Prefix for auto-allocated instance ids: the first free instance of a
+		// template with prefix "ac" is "ac1", giving "ac1.machine". Optional in
+		// the template, where it defaults to the prefab id itself.
+		std::string instancePrefix;
 		StationSystemsSettings entries;
 		std::vector<PrefabExposedPort> exposedPorts;
 		std::vector<PrefabParameter> parameters;
@@ -82,6 +86,38 @@ namespace core
 	// port and parameter must resolve to a real internal entry and connector.
 	bool parsePrefabTemplate(std::string const& yaml, PrefabTemplate& out,
 		std::string* diagnostic = nullptr);
+
+	// A loaded set of templates. The catalogue is transactional as a whole: one
+	// malformed template refuses the entire document, so a half-loaded catalogue
+	// — where a station silently loses some of its units — cannot exist.
+	struct PrefabCatalogue
+	{
+		std::vector<PrefabTemplate> templates;
+
+		PrefabTemplate const* find(std::string const& id) const;
+	};
+
+	// Parse a catalogue document: a 'prefabCatalogue' root holding a 'prefabs'
+	// array of template maps. Refuses the whole catalogue on the first malformed
+	// template or a duplicate template id.
+	bool parsePrefabCatalogue(std::string const& yaml, PrefabCatalogue& out,
+		std::string* diagnostic = nullptr);
+
+	// The (nodeType, entryId) pairs of a settings object in the fixed order the
+	// prefab machinery walks them. Callers that must lay expansion entries out
+	// deterministically (the editor's placement offsets) use this rather than
+	// inventing their own order.
+	std::vector<std::pair<std::string, std::string>> prefabEntryOrder(
+		StationSystemsSettings const& settings);
+
+	// The template's declared dial defaults as an override map, so a freshly
+	// placed instance lands at the values its dials advertise.
+	PrefabOverrides defaultPrefabOverrides(PrefabTemplate const& tmpl);
+
+	// The next instance id for `tmpl` that claims no entry id already present
+	// in `draft`: `prefix` + 1, 2, 3, ...
+	std::string allocatePrefabInstanceId(PrefabTemplate const& tmpl,
+		StationSystemsSettings const& draft);
 
 	// Pure expansion: namespaced entries, internal links and exposed pins,
 	// with overrides applied to their mapped internal fields. Unknown

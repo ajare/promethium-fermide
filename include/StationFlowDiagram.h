@@ -3,6 +3,7 @@
 #include "core/StationConnections.h"
 #include "core/StationConfigurationDocument.h"
 #include "core/StationPorts.h"
+#include "core/StationPrefab.h"
 #include "imgui/imgui.h"
 #include <functional>
 #include <optional>
@@ -137,7 +138,29 @@ public:
 	// limit, the node is not visible, or placement is armed).
 	bool portButtonScreenRect(std::string const& nodeType, std::string const& nodeId,
 		core::StationPortSet set, bool grow, ImVec4* out) const;
+	// The loaded prefab catalogue (#812). Its templates appear as a "Prefabs"
+	// group in the Place-node combo and the canvas create menu; with no
+	// catalogue loaded those groups are absent entirely. Shared, immutable and
+	// swapped only between frames.
+	void setPrefabCatalogue(std::shared_ptr<core::PrefabCatalogue const> catalogue)
+	{
+		mPrefabCatalogue = std::move(catalogue);
+	}
+	std::shared_ptr<core::PrefabCatalogue const> prefabCatalogue() const { return mPrefabCatalogue; }
 private:
+	// Clear both halves of the armed-placement state together: a prefab armed
+	// by display name must never leave a stale prefab id behind (or vice versa).
+	void disarmPlacement()
+	{
+		mPlacingType.clear();
+		mPlacingPrefabId.clear();
+	}
+	// Expand the armed prefab at `placeAt` and land it in `draft` as one
+	// atomic edit. Refusals (caps, id collisions, template gone) leave the
+	// draft untouched and report through the status line.
+	void placePrefabAt(core::StationSystemsSettings& draft, ImVec2 const& placeAt,
+		bool fromMenu);
+
 	std::map<std::string, station_flow::NodeTelemetry> mTelemetry;
 	uint64_t mTelemetryTick{UINT64_MAX};
 	bool mTelemetryHealthy{true};
@@ -160,6 +183,11 @@ private:
 	// combobox is built from the core placeable table, so derived service
 	// nodes are never offered.
 	std::string mPlacingType;
+	// Non-empty when the armed placement is a prefab rather than a single
+	// authored type; `mPlacingType` then carries the template's display name
+	// for the armed message and the combo label.
+	std::string mPlacingPrefabId;
+	std::shared_ptr<core::PrefabCatalogue const> mPrefabCatalogue;
 	// Right-click create-node menu: the press spot is recorded so a
 	// release without a pan drag opens the menu at the pointer and the
 	// chosen type lands exactly where the click happened. A right-click

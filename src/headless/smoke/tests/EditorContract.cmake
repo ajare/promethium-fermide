@@ -270,6 +270,7 @@ set(editor_names
     station/flowConnectionTelemetryWorkflow
     station/flowConnectionsWorkflow
     station/mixedObservationWorkflow
+    station/prefabPlacementWorkflow
     station/addEntryWorkflow
     station/configurationResources
     station/windowWorkflow

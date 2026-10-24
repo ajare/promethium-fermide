@@ -6536,10 +6536,128 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		require(driver.passed(), "Station step-ratio workflow failed on the Test Engine");
 	}
 
+	// #812: the prefab catalogue reaches the Place-node menu, and an armed
+	// placement lands the whole unit as one undoable edit - or refuses with a
+	// reason and lands nothing.
+	void prefabPlacementWorkflow(smoke::Context const& fixtureContext)
+	{
+		using smoke::require;
+		// The catalogues come from the real manifest through the real resource
+		// pipeline, the same call path the application uses at startup.
+		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
+		auto const root = fixtureContext.temporaryRoot() / "prefab-resources";
+		headless::StationResourceFixture resources(authored, root);
+		require(resources.catalogues.size() == 1,
+			"the bundled prefab catalogue should load from the manifest");
+
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory worldHistory;
+		StationSystemsWindow window;
+		window.setPrefabCatalogueResources(resources.catalogues);
+		auto world = std::make_shared<core::World>("Prefab placement", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration");
+			window.renderFlowContents(world);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "prefabPlacement", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			// The catalogue's own group is in the Place-node combo.
+			ctx->ItemClick("Place node"); ctx->Yield(3);
+			REQ(driver.contains("Prefabs"), "Place-node combo has no Prefabs group");
+			REQ(driver.contains("Aircon Unit"), "Prefabs group does not list the bundled unit");
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ctx->ComboClick("Place node/Aircon Unit"); ctx->Yield(3);
+			REQ(driver.contains("Aircon Unit placement armed"), "prefab placement did not arm");
+			auto* canvas = flowCanvasWindow("Configuration");
+			REQ(canvas != nullptr, "flow canvas is missing");
+			ctx->MouseTeleportToPos({canvas->Pos.x + 300.0f, canvas->Pos.y + 180.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			auto const& draft = window.draft();
+			REQ(draft.thermalReservoirs.size() == 2 && draft.coolantLoops.size() == 1
+				&& draft.chillers.size() == 1 && draft.radiators.size() == 1,
+				"the unit's internal entries did not land");
+			if (draft.chillers.size() != 1) return;
+			// Every internal id carries the first instance namespace from the
+			// template's 'ac' prefix, and the internal wiring points at the
+			// namespaced peers rather than the template's bare ids.
+			REQ(draft.chillers[0].id == "ac1.machine",
+				"the chiller did not land namespaced as ac1.machine");
+			REQ(draft.chillers[0].coldLoopId == "ac1.loop"
+				&& draft.chillers[0].condenserReservoirId == "ac1.sink",
+				"the chiller's internal links were not pre-wired to the namespaced peers");
+			REQ(draft.coolantLoops[0].id == "ac1.loop"
+				&& draft.coolantLoops[0].reservoirId == "ac1.coldside",
+				"the coolant loop was not pre-wired to the namespaced reservoir");
+			REQ(draft.radiators[0].id == "ac1.radiator"
+				&& draft.radiators[0].reservoirId == "ac1.sink",
+				"the radiator was not pre-wired to the namespaced sink");
+			// The dial defaults landed with the unit.
+			REQ(draft.chillers[0].chilledSetpointC == 5.0
+				&& draft.chillers[0].ratedCoolingCapacityKW == 5.0,
+				"the template's dial defaults did not land");
+			// One undo step removes the whole unit, not one entry at a time.
+			REQ(window.draftHistory().undoCount() == 1,
+				"prefab placement was not a single history step");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().chillers.empty() && window.draft().coolantLoops.empty()
+				&& window.draft().radiators.empty() && window.draft().thermalReservoirs.empty(),
+				"one undo did not remove the whole placed unit");
+			// Fill the reservoir ceiling, then try the unit again: it consumes
+			// two reservoirs, so there is no room and nothing may land.
+			ctx->ComboClick("Place node/Reservoir"); ctx->Yield(2);
+			for (size_t i = 0; i < core::MaxStationThermalReservoirs; ++i)
+			{
+				ctx->MouseTeleportToPos({canvas->Pos.x + 80.0f + float(i) * 24.0f,
+					canvas->Pos.y + 60.0f});
+				ctx->MouseClick(); ctx->Yield(2);
+			}
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			REQ(window.draft().thermalReservoirs.size() == core::MaxStationThermalReservoirs,
+				"the reservoir fill did not reach the cap");
+			auto const historyBefore = window.draftHistory().undoCount();
+			ctx->ComboClick("Place node/Aircon Unit"); ctx->Yield(2);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 420.0f, canvas->Pos.y + 420.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			REQ(driver.contains("Placement refused"),
+				"a cap-exceeded prefab placement gave no reason");
+			REQ(window.draft().chillers.empty() && window.draft().coolantLoops.empty()
+				&& window.draft().radiators.empty()
+				&& window.draft().thermalReservoirs.size() == core::MaxStationThermalReservoirs,
+				"a refused placement landed something in the draft");
+			REQ(window.draftHistory().undoCount() == historyBefore,
+				"a refused placement entered the undo history");
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			// With no catalogue the group is absent entirely - which is what a
+			// catalogue refused at load amounts to upstream.
+			window.setPrefabCatalogueResources({});
+			ctx->Yield(2);
+			ctx->ItemClick("Place node"); ctx->Yield(3);
+			REQ(!driver.contains("Prefabs"), "the Prefabs group shows with no catalogue loaded");
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+		});
+		#undef REQ
+		require(driver.passed(), "prefab placement workflow failed on the Test Engine");
+	}
+
 	void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	editor_smoke::registerStationConnections(checks);
 	registerMixedObservationEditorChecks(checks);
+	checks.push_back({"station/prefabPlacementWorkflow", prefabPlacementWorkflow});
 	checks.push_back({"station/addEntryWorkflow", addEntryWorkflow});
 	checks.push_back({"station/configurationResources", configurationResources});
 	checks.push_back({"station/windowWorkflow", workflow});

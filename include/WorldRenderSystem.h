@@ -38,6 +38,8 @@ std::string selectWorldFurnitureImageSet(std::string const& name);
 // "AgentBehaviourRegistry".
 std::vector<std::string> applicationResourceNames(std::string const& type);
 std::vector<std::shared_ptr<StationConfigurationResource>> applicationStationConfigurations();
+// The manifest-declared prefab catalogues (#812), loaded transactionally.
+std::vector<std::shared_ptr<PrefabCatalogueResource>> applicationPrefabCatalogues();
 
 // Every valid manifest-registered or explicitly imported Agent type, ordered by
 // display name (then resource name). Invalid resources are excluded; the

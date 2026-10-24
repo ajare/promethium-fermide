@@ -1,0 +1,93 @@
+# Prefab catalogue (#812). A `prefabCatalogue` document holds one or more
+# templates under `prefabs`; each is written in the same shape a standalone
+# prefab template uses. The catalogue loads transactionally: one malformed
+# template refuses the whole file, so a station never ends up with half of
+# its authored units.
+#
+# Instance ids are allocated as `<instancePrefix><n>`, so the first placed
+# aircon unit is `ac1` and its chiller entry is `ac1.machine`.
+schemaVersion: 110
+prefabCatalogue:
+  prefabs:
+    - id: aircon-unit
+      displayName: Aircon Unit
+      instancePrefix: ac
+      stationSystems:
+        enabled: true
+        observationIntervalSeconds: 1.0
+        thermalReservoirs:
+          - id: coldside
+            thermalClass: warm
+            heatCapacityKJPerK: 500
+            startingTemperatureC: 24
+            minTemperatureC: 0
+            maxTemperatureC: 40
+            absorbedHeatKW: 2
+          - id: sink
+            thermalClass: warm
+            heatCapacityKJPerK: 200
+            startingTemperatureC: 20
+            minTemperatureC: 0
+            maxTemperatureC: 40
+            absorbedHeatKW: 0
+        coolantLoops:
+          - id: loop
+            reservoirId: coldside
+            coolantCapacityKg: 100
+            startingCoolantKg: 80
+            specificHeatKJPerKgK: 4.0
+            startingTemperatureC: 20
+            freezeProtectionSetpointC: 5
+            pumpPowerKW: 0.5
+            ratedFlowKgPerS: 1.0
+            exchangerConductanceKWPerK: 2.0
+            heaterCapacityKW: 1.0
+            criticalService: false
+        chillers:
+          - id: machine
+            thermalClass: warm
+            coldLoopId: loop
+            condenserReservoirId: sink
+            ratedCoolingCapacityKW: 5
+            cop: 3
+            auxiliaryPowerKW: 0.2
+            chilledSetpointC: 5
+            maxCondensingTemperatureC: 45
+            criticalService: false
+        radiators:
+          - id: radiator
+            reservoirId: sink
+            areaM2: 4
+            emissivity: 0.9
+            viewFactor: 1.0
+            sinkTemperatureC: -30
+      exposedPorts:
+        - name: Cold supply
+          nodeType: Coolant loop
+          entryId: loop
+          portName: Cold interface
+        - name: Supervision
+          nodeType: Chiller
+          entryId: machine
+          portName: Supervision
+      parameters:
+        - name: setpoint
+          nodeType: Chiller
+          entryId: machine
+          field: chilledSetpointC
+          default: 5
+          min: 0
+          max: 15
+        - name: capacity
+          nodeType: Chiller
+          entryId: machine
+          field: ratedCoolingCapacityKW
+          default: 5
+          min: 0
+          max: 20
+        - name: criticalService
+          nodeType: Chiller
+          entryId: machine
+          field: criticalService
+          kind: boolean
+          default: false

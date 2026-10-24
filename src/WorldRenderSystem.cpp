@@ -512,6 +512,9 @@ namespace
 		std::vector<std::shared_ptr<StationConfigurationResource>> stationConfigurations()
 		{ return loadStationConfigurationResources(*mResources); }
 
+		std::vector<std::shared_ptr<PrefabCatalogueResource>> prefabCatalogues()
+		{ return loadPrefabCatalogueResources(*mResources); }
+
 		std::vector<ApplicationAgentType> agentTypes() { return mAgentTypes->types(); }
 
 		bool importAgentType(std::filesystem::path const& path,
@@ -822,6 +825,12 @@ std::vector<std::shared_ptr<StationConfigurationResource>> applicationStationCon
 {
 	if (!gSystem) return {};
 	return gSystem->stationConfigurations();
+}
+
+std::vector<std::shared_ptr<PrefabCatalogueResource>> applicationPrefabCatalogues()
+{
+	if (!gSystem) return {};
+	return gSystem->prefabCatalogues();
 }
 
 std::vector<ApplicationAgentType> applicationAgentTypes()

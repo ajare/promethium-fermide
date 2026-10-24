@@ -593,7 +593,7 @@ StationFlowDiagram::~StationFlowDiagram()
 
 void StationFlowDiagram::reset()
 {
-	mPlacingType.clear(); mLayout.clear(); mNodeIds.clear(); mNextNodeId = 1;
+	mPlacingType.clear(); mPlacingPrefabId.clear(); mLayout.clear(); mNodeIds.clear(); mNextNodeId = 1;
 	mMenuPressValid = false; mSuppressMenuPress = false;
 	mMenuPlacePending = false; mMenuPlacePos = {};
 	if (mNodeContext) { ImNodes::DestroyContext(mNodeContext); mNodeContext = nullptr; }
@@ -764,6 +764,64 @@ bool StationFlowDiagram::pathwayScreenPosition(std::string const& id, ImVec2* ou
 	return true;
 }
 
+namespace
+{
+	// Internal nodes land in a fixed two-column grid stepping right and down
+	// from the click point, so a unit reads as one block instead of stacking
+	// every entry on the same pixel. The order is the core's fixed entry
+	// order, never container order, so two placements of the same template at
+	// the same point are identical.
+	inline constexpr float kUnitSlotX = station_flow::NodeWidth + 40.0f;
+	inline constexpr float kUnitSlotY = station_flow::NodeHeight + 40.0f;
+}
+
+void StationFlowDiagram::placePrefabAt(core::StationSystemsSettings& draft,
+	ImVec2 const& placeAt, bool fromMenu)
+{
+	auto const label = mPlacingType.empty() ? mPlacingPrefabId : mPlacingType;
+	auto const* tmpl = mPrefabCatalogue ? mPrefabCatalogue->find(mPlacingPrefabId) : nullptr;
+	if (!tmpl)
+	{
+		// The catalogue was swapped or dropped while the arm was live. Refuse
+		// rather than place something the loaded catalogue does not back.
+		mNotice = "Placement refused: prefab '" + mPlacingPrefabId
+			+ "' is no longer in the loaded catalogue.";
+		if (fromMenu) disarmPlacement();
+		return;
+	}
+	// The instance owns `<prefix><n>.<templateEntryId>`, so the core picks
+	// the first number that claims nothing already in the draft.
+	std::string const instanceId = core::allocatePrefabInstanceId(*tmpl, draft);
+	core::PrefabExpansion expansion;
+	std::string reason;
+	if (!core::expandPrefab(*tmpl, core::defaultPrefabOverrides(*tmpl), instanceId,
+		expansion, reason))
+	{
+		mNotice = "Placement refused: " + reason;
+		if (fromMenu) disarmPlacement();
+		return;
+	}
+	// Caps and id collisions are re-checked against a candidate copy inside
+	// the apply step: a refusal here means nothing landed in `draft`.
+	if (!core::applyPrefabExpansion(draft, expansion, reason))
+	{
+		mNotice = "Placement refused: " + reason;
+		if (fromMenu) disarmPlacement();
+		return;
+	}
+	size_t slot = 0;
+	for (auto const& [type, id] : core::prefabEntryOrder(expansion.entries))
+	{
+		mLayout[type + ":" + id + ":0"] = ImVec2{placeAt.x + float(slot % 2) * kUnitSlotX,
+			placeAt.y + float(slot / 2) * kUnitSlotY};
+		++slot;
+	}
+	mFitRequested = false;
+	mNotice = "Placed " + label + " as instance '" + instanceId + "' (" + std::to_string(slot)
+		+ " internal nodes).";
+	if (fromMenu) disarmPlacement();
+}
+
 void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	std::function<void(core::StationSystemsSettings&)> const& renderInspector,
 	std::function<void()> const& beforeSelectionChange,
@@ -875,8 +933,28 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 				shownGroup = placeable.group;
 				ImGui::TextDisabled("%s", std::string(shownGroup).c_str());
 			}
-			if (ImGui::Selectable(placeable.nodeType.data(), mPlacingType == placeable.nodeType))
+			if (ImGui::Selectable(placeable.nodeType.data(), mPlacingType == placeable.nodeType
+					&& mPlacingPrefabId.empty()))
+			{
 				mPlacingType = placeable.nodeType;
+				mPlacingPrefabId.clear();
+			}
+		}
+		// Prefabs (#812): the loaded catalogue's templates, offered after the
+		// authored types under their own heading. Arming one places the whole
+		// composite unit, not a single entry.
+		if (mPrefabCatalogue && !mPrefabCatalogue->templates.empty())
+		{
+			ImGui::TextDisabled("Prefabs");
+			for (auto const& tmpl : mPrefabCatalogue->templates)
+			{
+				auto const label = tmpl.displayName.empty() ? tmpl.id : tmpl.displayName;
+				if (ImGui::Selectable(label.c_str(), mPlacingPrefabId == tmpl.id))
+				{
+					mPlacingType = label;
+					mPlacingPrefabId = tmpl.id;
+				}
+			}
 		}
 		ImGui::EndCombo();
 	}
@@ -904,7 +982,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		&& ImGui::IsMouseClicked(ImGuiMouseButton_Right);
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
 		&& (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)))
-		mPlacingType.clear();
+		disarmPlacement();
 	mSuppressMenuPress = rightCancel;
 	ImGui::Text("Draft activation: %s | %zu nodes, %zu connections", draft.enabled ? "on" : "off",
 		mGraph.nodes.size(), mGraph.links.size());
@@ -1260,6 +1338,27 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			}
 			if (atLimit) ImGui::EndDisabled();
 		}
+		// Prefabs share the menu; a unit whose consumed types leave no room is
+		// disabled for the same reason a capped type is.
+		if (mPrefabCatalogue && !mPrefabCatalogue->templates.empty())
+		{
+			ImGui::TextDisabled("Prefabs");
+			for (auto const& tmpl : mPrefabCatalogue->templates)
+			{
+				std::string capReason;
+				bool const atCap = !core::checkPrefabCaps(tmpl, draft, capReason);
+				if (atCap) ImGui::BeginDisabled();
+				auto const label = tmpl.displayName.empty() ? tmpl.id : tmpl.displayName;
+				if (ImGui::Selectable(label.c_str()))
+				{
+					mPlacingType = label;
+					mPlacingPrefabId = tmpl.id;
+					mMenuPlacePending = true;
+					ImGui::CloseCurrentPopup();
+				}
+				if (atCap) ImGui::EndDisabled();
+			}
+		}
 		ImGui::EndPopup();
 	}
 	// A menu pick lands where the right-click happened; a combobox pick
@@ -1298,7 +1397,13 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		auto const placeAt = placeFromMenu ? mMenuPlacePos
 			: ImVec2{(io.MousePos.x - origin.x - mPan.x) / mZoom,
 				(io.MousePos.y - origin.y - mPan.y) / mZoom};
-		if (mPlacingType == "Store" && draft.stores.size() < core::MaxStationResourceStores)
+		if (!mPlacingPrefabId.empty())
+		{
+			// A prefab lands through the core expander, never by hand: the whole
+			// unit is one atomic edit or no edit at all.
+			placePrefabAt(draft, placeAt, placeFromMenu);
+		}
+		else if (mPlacingType == "Store" && draft.stores.size() < core::MaxStationResourceStores)
 		{
 			core::ResourceStoreSettings store;
 			store.unit = "kg"; store.capacity = 100;
@@ -1710,7 +1815,7 @@ entry.thermalClass = "moderate";
 			draft.chillers.push_back(std::move(chiller));
 			mFitRequested = false;
 		}
-		if (placeFromMenu) mPlacingType.clear();
+		if (placeFromMenu) disarmPlacement();
 	}
 	ImNodes::SetCurrentContext(previousContext);
 	updateBounds();
@@ -2073,7 +2178,15 @@ entry.thermalClass = "moderate";
 	if (!io.MouseDown[ImGuiMouseButton_Left]) mPressedPortButton.clear();
 	if (!mPlacingType.empty() && canvasHovered)
 	{
-		bool const atLimit = placementAtLimit(mPlacingType, draft);
+		// A prefab's ghost reports the caps of everything it would consume, so
+		// a unit that cannot land says so before the click rather than after.
+		bool atLimit = placementAtLimit(mPlacingType, draft);
+		if (!mPlacingPrefabId.empty())
+		{
+			std::string capReason;
+			auto const* tmpl = mPrefabCatalogue ? mPrefabCatalogue->find(mPlacingPrefabId) : nullptr;
+			atLimit = !tmpl || !core::checkPrefabCaps(*tmpl, draft, capReason);
+		}
 		auto a = io.MousePos;
 		ImVec2 b{a.x + nodeWidth * mZoom, a.y + nodeHeight * mZoom};
 		draw->AddRectFilled(a, b, IM_COL32(80, 130, 170, 100), 5);

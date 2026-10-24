@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -284,173 +285,339 @@ namespace core
 	}
 	}
 
+	// Shared body of the single-template and catalogue parsers: `serializer` is
+	// positioned inside the template map. Returns false with `diagnostic` set at
+	// the first malformed field; the caller owns the map scope, so a refusal
+	// never leaves a half-parsed template behind.
+	bool parsePrefabTemplateBody(Serializer& serializer, PrefabTemplate& out,
+		std::string& diagnostic)
+	{
+		auto const refuse = [&diagnostic](std::string message)
+		{
+			diagnostic = std::move(message);
+			return false;
+		};
+
+		PrefabTemplate tmpl;
+		tmpl.id = serializer.readString("id");
+		if (tmpl.id.empty()) return refuse("Prefab id must not be empty");
+		// The prefab id doubles as the isolation instance id for
+		// template validation, so the namespacing rule applies to it too.
+		if (tmpl.id.find(PrefabIdSeparator) != std::string::npos)
+			return refuse("Prefab id '" + tmpl.id + "' contains the reserved separator '"
+				+ PrefabIdSeparator + "'");
+		tmpl.displayName = serializer.readString("displayName", true);
+		// Instance ids are allocated as `<instancePrefix><n>`; the prefix is
+		// optional and defaults to the prefab id. It must itself be safe to
+		// namespace, so the reserved separator and the draft's id delimiter are
+		// both refused.
+		tmpl.instancePrefix = serializer.readString("instancePrefix", true);
+		if (tmpl.instancePrefix.empty())
+			tmpl.instancePrefix = tmpl.id;
+		if (tmpl.instancePrefix.find(PrefabIdSeparator) != std::string::npos)
+			return refuse("Prefab '" + tmpl.id + "' instance prefix '" + tmpl.instancePrefix
+				+ "' contains the reserved separator '" + PrefabIdSeparator + "'");
+		if (tmpl.instancePrefix.find(':') != std::string::npos)
+			return refuse("Prefab '" + tmpl.id + "' instance prefix '" + tmpl.instancePrefix
+				+ "' contains the reserved character ':'");
+		// The template's internal entries are read under a World schema
+		// version like any stationSystems map; the default is the newest
+		// schema this reader knows.
+		std::uint32_t version = 110;
+		if (serializer.hasField("schemaVersion"))
+		{
+			version = static_cast<std::uint32_t>(serializer.readInt64("schemaVersion"));
+			if (version < 65 || version > 110)
+				return refuse("Prefab '" + tmpl.id + "' schema version must be from 65 to 110");
+		}
+		// Internal entries: the existing stationSystems entry vocabulary,
+		// read through the authoritative reader. Full configuration
+		// validation of the internal entries runs last, after the
+		// template-level checks, so each refusal carries its own most
+		// specific reason; a broken template is still refused atomically
+		// here rather than at placement.
+		readStationSystemsSettingsMap(serializer, version, tmpl.entries, false);
+		// Namespacing rule: a template entry id carrying the separator
+		// would make a namespaced id ambiguous, so it is refused.
+		std::string separatorOffender;
+		forEachPrefabEntry(tmpl.entries, [&](std::string_view, std::string const& id)
+		{
+			if (separatorOffender.empty() && id.find(PrefabIdSeparator) != std::string::npos)
+				separatorOffender = id;
+		});
+		if (!separatorOffender.empty())
+			return refuse("Prefab '" + tmpl.id + "' entry id '" + separatorOffender
+				+ "' contains the reserved separator '" + PrefabIdSeparator + "'");
+		if (serializer.hasField("exposedPorts"))
+		{
+			serializer.beginArray("exposedPorts");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				PrefabExposedPort port;
+				port.name = serializer.readString("name");
+				port.nodeType = serializer.readString("nodeType");
+				port.entryId = serializer.readString("entryId");
+				port.portName = serializer.readString("portName");
+				serializer.endMap();
+				if (port.name.empty())
+					return refuse("Prefab '" + tmpl.id + "' exposed port name must not be empty");
+				if (std::any_of(tmpl.exposedPorts.begin(), tmpl.exposedPorts.end(),
+					[&](PrefabExposedPort const& existing) { return existing.name == port.name; }))
+					return refuse("Prefab '" + tmpl.id + "' exposed port '" + port.name + "' is duplicated");
+				if (!prefabEntryExists(tmpl.entries, port.nodeType, port.entryId))
+					return refuse("Prefab '" + tmpl.id + "' exposed port '" + port.name
+						+ "' aliases unknown entry '" + port.entryId + "' of type '" + port.nodeType + "'");
+				if (!prefabPortExists(port.nodeType, port.portName))
+					return refuse("Prefab '" + tmpl.id + "' exposed port '" + port.name
+						+ "' aliases unknown port '" + port.portName + "' on '" + port.nodeType + "'");
+				tmpl.exposedPorts.push_back(std::move(port));
+			}
+			serializer.endArray();
+		}
+		if (serializer.hasField("parameters"))
+		{
+			serializer.beginArray("parameters");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				PrefabParameter parameter;
+				parameter.name = serializer.readString("name");
+				parameter.nodeType = serializer.readString("nodeType");
+				parameter.entryId = serializer.readString("entryId");
+				parameter.field = serializer.readString("field");
+				auto const kind = serializer.readString("kind", true, "number");
+				if (kind == "boolean") parameter.kind = PrefabParameterKind::Boolean;
+				else if (kind == "number") parameter.kind = PrefabParameterKind::Number;
+				else
+				{
+					serializer.endMap();
+					return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name
+						+ "' has unknown kind '" + kind + "' (expected 'number' or 'boolean')");
+				}
+				if (parameter.kind == PrefabParameterKind::Number)
+				{
+					parameter.defaultValue = serializer.readDouble("default");
+					parameter.minValue = serializer.readDouble("min");
+					parameter.maxValue = serializer.readDouble("max");
+				}
+				else
+					parameter.boolDefault = serializer.readBool("default", false, false);
+				serializer.endMap();
+				if (parameter.name.empty())
+					return refuse("Prefab '" + tmpl.id + "' parameter name must not be empty");
+				if (findPrefabParameter(tmpl, parameter.name))
+					return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name + "' is duplicated");
+				if (!prefabEntryExists(tmpl.entries, parameter.nodeType, parameter.entryId))
+					return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name
+						+ "' maps unknown entry '" + parameter.entryId + "' of type '" + parameter.nodeType + "'");
+				auto const target = resolvePrefabField(tmpl.entries, parameter.nodeType,
+					parameter.entryId, parameter.field);
+				if (!target.found())
+					return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name
+						+ "' maps non-dial-addressable field '" + parameter.field + "' on '"
+						+ parameter.nodeType + "'");
+				if (target.kind != parameter.kind)
+					return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name
+						+ "' kind does not match field '" + parameter.field + "'");
+				if (parameter.kind == PrefabParameterKind::Number)
+				{
+					if (!std::isfinite(parameter.minValue) || !std::isfinite(parameter.maxValue)
+						|| parameter.minValue > parameter.maxValue)
+						return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name
+							+ "' range must be finite with min at or below max");
+					if (!std::isfinite(parameter.defaultValue)
+						|| parameter.defaultValue < parameter.minValue
+						|| parameter.defaultValue > parameter.maxValue)
+						return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name
+							+ "' default is outside its declared range");
+				}
+				tmpl.parameters.push_back(std::move(parameter));
+			}
+			serializer.endArray();
+		}
+		// The internal entries must stand on their own under the existing
+		// configuration validator: the template is the expansion in
+		// isolation, so the same rules that judge a draft judge the
+		// template, and a failing template never reaches placement.
+		std::string validationDiagnostic;
+		if (!validateStationSystemsSettings(tmpl.entries, validationDiagnostic))
+			return refuse("Prefab '" + tmpl.id + "' internal entries do not validate: "
+				+ validationDiagnostic);
+		// #811: the load-time boundary gate - with stub peers on the
+		// exposed ports and the isolated expansion run through the
+		// existing validator, a template whose exposed interface is
+		// dead or whose expansion does not validate is refused here,
+		// atomically, before it can reach the catalogue.
+		std::string boundaryReason;
+		if (!validatePrefabTemplate(tmpl, boundaryReason))
+			return refuse(boundaryReason);
+
+		out = std::move(tmpl);
+		diagnostic.clear();
+		return true;
+	}
+
 	bool parsePrefabTemplate(std::string const& yaml, PrefabTemplate& out,
 		std::string* diagnostic)
 	{
-		auto const refuse = [&](std::string message)
-		{
-			if (diagnostic) *diagnostic = std::move(message);
-			return false;
-		};
+		out = PrefabTemplate{};
+		std::string reason;
 		try
 		{
 			auto serializer = YamlSerializer::fromString(yaml);
-			serializer->deserialize();
-			// The document root is the prefab map, opened descriptively like
-			// the World and reference-station readers open their roots; the
-			// internal entries live in the root's 'stationSystems' child.
-			if (!serializer->hasField("stationSystems"))
-				return refuse("Prefab document has no internal 'stationSystems' entries");
-			serializer->beginMap("prefab");
-			PrefabTemplate tmpl;
-			tmpl.id = serializer->readString("id");
-			if (tmpl.id.empty()) return refuse("Prefab id must not be empty");
-			// The prefab id doubles as the isolation instance id for
-			// template validation, so the namespacing rule applies to it too.
-			if (tmpl.id.find(PrefabIdSeparator) != std::string::npos)
-				return refuse("Prefab id '" + tmpl.id + "' contains the reserved separator '"
-					+ PrefabIdSeparator + "'");
-			tmpl.displayName = serializer->readString("displayName", true);
-			// The template's internal entries are read under a World schema
-			// version like any stationSystems map; the default is the newest
-			// schema this reader knows.
-			std::uint32_t version = 110;
-			if (serializer->hasField("schemaVersion"))
+			if (!serializer)
+				reason = "Prefab YAML could not be created";
+			else
 			{
-				version = static_cast<std::uint32_t>(serializer->readInt64("schemaVersion"));
-				if (version < 65 || version > 110)
-					return refuse("Prefab '" + tmpl.id + "' schema version must be from 65 to 110");
-			}
-			// Internal entries: the existing stationSystems entry vocabulary,
-			// read through the authoritative reader. Full configuration
-			// validation of the internal entries runs last, after the
-			// template-level checks, so each refusal carries its own most
-			// specific reason; a broken template is still refused atomically
-			// here rather than at placement.
-			readStationSystemsSettingsMap(*serializer, version, tmpl.entries, false);
-			// Namespacing rule: a template entry id carrying the separator
-			// would make a namespaced id ambiguous, so it is refused.
-			std::string separatorOffender;
-			forEachPrefabEntry(tmpl.entries, [&](std::string_view, std::string const& id)
-			{
-				if (separatorOffender.empty() && id.find(PrefabIdSeparator) != std::string::npos)
-					separatorOffender = id;
-			});
-			if (!separatorOffender.empty())
-				return refuse("Prefab '" + tmpl.id + "' entry id '" + separatorOffender
-					+ "' contains the reserved separator '" + PrefabIdSeparator + "'");
-			if (serializer->hasField("exposedPorts"))
-			{
-				serializer->beginArray("exposedPorts");
-				while (serializer->nextArrayItem())
+				serializer->deserialize();
+				// The document root is the prefab map, opened descriptively like
+				// the World and reference-station readers open their roots; the
+				// internal entries live in the root's 'stationSystems' child.
+				if (!serializer->hasField("stationSystems"))
+					reason = "Prefab document has no internal 'stationSystems' entries";
+				else
 				{
-					serializer->beginMap("");
-					PrefabExposedPort port;
-					port.name = serializer->readString("name");
-					port.nodeType = serializer->readString("nodeType");
-					port.entryId = serializer->readString("entryId");
-					port.portName = serializer->readString("portName");
-					serializer->endMap();
-					if (port.name.empty())
-						return refuse("Prefab '" + tmpl.id + "' exposed port name must not be empty");
-					if (std::any_of(tmpl.exposedPorts.begin(), tmpl.exposedPorts.end(),
-						[&](PrefabExposedPort const& existing) { return existing.name == port.name; }))
-						return refuse("Prefab '" + tmpl.id + "' exposed port '" + port.name + "' is duplicated");
-					if (!prefabEntryExists(tmpl.entries, port.nodeType, port.entryId))
-						return refuse("Prefab '" + tmpl.id + "' exposed port '" + port.name
-							+ "' aliases unknown entry '" + port.entryId + "' of type '" + port.nodeType + "'");
-					if (!prefabPortExists(port.nodeType, port.portName))
-						return refuse("Prefab '" + tmpl.id + "' exposed port '" + port.name
-							+ "' aliases unknown port '" + port.portName + "' on '" + port.nodeType + "'");
-					tmpl.exposedPorts.push_back(std::move(port));
-				}
-				serializer->endArray();
-			}
-			if (serializer->hasField("parameters"))
-			{
-				serializer->beginArray("parameters");
-				while (serializer->nextArrayItem())
-				{
-					serializer->beginMap("");
-					PrefabParameter parameter;
-					parameter.name = serializer->readString("name");
-					parameter.nodeType = serializer->readString("nodeType");
-					parameter.entryId = serializer->readString("entryId");
-					parameter.field = serializer->readString("field");
-					auto const kind = serializer->readString("kind", true, "number");
-					if (kind == "boolean") parameter.kind = PrefabParameterKind::Boolean;
-					else if (kind == "number") parameter.kind = PrefabParameterKind::Number;
-					else
-					{
+					serializer->beginMap("prefab");
+					// A refusal can leave the serializer inside a nested scope the
+					// body abandoned, so the map is only closed on success; the
+					// serializer is discarded either way.
+					if (parsePrefabTemplateBody(*serializer, out, reason))
 						serializer->endMap();
-						return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name
-							+ "' has unknown kind '" + kind + "' (expected 'number' or 'boolean')");
-					}
-					if (parameter.kind == PrefabParameterKind::Number)
-					{
-						parameter.defaultValue = serializer->readDouble("default");
-						parameter.minValue = serializer->readDouble("min");
-						parameter.maxValue = serializer->readDouble("max");
-					}
 					else
-						parameter.boolDefault = serializer->readBool("default", false, false);
-					serializer->endMap();
-					if (parameter.name.empty())
-						return refuse("Prefab '" + tmpl.id + "' parameter name must not be empty");
-					if (findPrefabParameter(tmpl, parameter.name))
-						return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name + "' is duplicated");
-					if (!prefabEntryExists(tmpl.entries, parameter.nodeType, parameter.entryId))
-						return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name
-							+ "' maps unknown entry '" + parameter.entryId + "' of type '" + parameter.nodeType + "'");
-					auto const target = resolvePrefabField(tmpl.entries, parameter.nodeType,
-						parameter.entryId, parameter.field);
-					if (!target.found())
-						return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name
-							+ "' maps non-dial-addressable field '" + parameter.field + "' on '"
-							+ parameter.nodeType + "'");
-					if (target.kind != parameter.kind)
-						return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name
-							+ "' kind does not match field '" + parameter.field + "'");
-					if (parameter.kind == PrefabParameterKind::Number)
-					{
-						if (!std::isfinite(parameter.minValue) || !std::isfinite(parameter.maxValue)
-							|| parameter.minValue > parameter.maxValue)
-							return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name
-								+ "' range must be finite with min at or below max");
-						if (!std::isfinite(parameter.defaultValue)
-							|| parameter.defaultValue < parameter.minValue
-							|| parameter.defaultValue > parameter.maxValue)
-							return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name
-								+ "' default is outside its declared range");
-					}
-					tmpl.parameters.push_back(std::move(parameter));
+						out = PrefabTemplate{};
 				}
-				serializer->endArray();
 			}
-			// The internal entries must stand on their own under the existing
-			// configuration validator: the template is the expansion in
-			// isolation, so the same rules that judge a draft judge the
-			// template, and a failing template never reaches placement.
-			std::string validationDiagnostic;
-			if (!validateStationSystemsSettings(tmpl.entries, validationDiagnostic))
-				return refuse("Prefab '" + tmpl.id + "' internal entries do not validate: "
-					+ validationDiagnostic);
-			// #811: the load-time boundary gate - with stub peers on the
-			// exposed ports and the isolated expansion run through the
-			// existing validator, a template whose exposed interface is
-			// dead or whose expansion does not validate is refused here,
-			// atomically, before it can reach the catalogue.
-			std::string boundaryReason;
-			if (!validatePrefabTemplate(tmpl, boundaryReason))
-				return refuse(boundaryReason);
-			serializer->endMap();
-			out = std::move(tmpl);
-			if (diagnostic) diagnostic->clear();
-			return true;
 		}
 		catch (std::exception const& exception)
 		{
-			return refuse(exception.what());
+			reason = exception.what();
+			out = PrefabTemplate{};
+		}
+		if (!reason.empty() && diagnostic) *diagnostic = reason;
+		return reason.empty();
+	}
+
+	// A catalogue document opens as 'prefabCatalogue' -> 'prefabs' -> an array
+	// of template maps, each parsed by the same body a standalone template uses,
+	// so both shapes validate identically. Transactional: the first malformed
+	// template or duplicate id refuses the whole catalogue and leaves `out`
+	// empty, so a station can never end up with half of its units loaded.
+	bool parsePrefabCatalogue(std::string const& yaml, PrefabCatalogue& out,
+		std::string* diagnostic)
+	{
+		out = PrefabCatalogue{};
+		std::string reason;
+		try
+		{
+			auto serializer = YamlSerializer::fromString(yaml);
+			if (!serializer)
+				reason = "Prefab catalogue YAML could not be created";
+			else
+			{
+				serializer->deserialize();
+				if (!serializer->hasField("prefabCatalogue"))
+					reason = "Prefab catalogue document has no 'prefabCatalogue' root";
+				else
+				{
+					PrefabCatalogue catalogue;
+					std::set<std::string> ids;
+					serializer->beginMap("prefabCatalogueDocument");
+					// The root open is descriptive; the catalogue itself is the
+					// named child, opened from the now-non-empty stack.
+					serializer->beginMap("prefabCatalogue");
+					if (!serializer->hasField("prefabs"))
+					{
+						reason = "Prefab catalogue has no 'prefabs' array";
+					}
+					else
+					{
+					serializer->beginArray("prefabs");
+					while (reason.empty() && serializer->nextArrayItem())
+					{
+						PrefabTemplate tmpl;
+						serializer->beginMap("");
+						bool const parsed = parsePrefabTemplateBody(*serializer, tmpl, reason);
+						if (!parsed)
+						{
+							// The whole catalogue goes; stop rather than keep
+							// walking a stack the body left mid-scope.
+							reason = "Prefab catalogue template '" + tmpl.id + "': " + reason;
+							break;
+						}
+						serializer->endMap();
+						if (!ids.insert(tmpl.id).second)
+						{
+							reason = "Prefab catalogue has duplicate template id '" + tmpl.id + "'";
+							break;
+						}
+						catalogue.templates.push_back(std::move(tmpl));
+					}
+					if (reason.empty())
+					{
+						serializer->endArray();
+						serializer->endMap();
+						serializer->endMap();
+						out = std::move(catalogue);
+					}
+					}
+				}
+			}
+		}
+		catch (std::exception const& exception)
+		{
+			reason = exception.what();
+			out = PrefabCatalogue{};
+		}
+		if (!reason.empty() && diagnostic) *diagnostic = reason;
+		return reason.empty();
+	}
+
+	PrefabTemplate const* PrefabCatalogue::find(std::string const& id) const
+	{
+		auto const it = std::find_if(templates.begin(), templates.end(),
+			[&](PrefabTemplate const& tmpl) { return tmpl.id == id; });
+		return it == templates.end() ? nullptr : &*it;
+	}
+
+	std::vector<std::pair<std::string, std::string>> prefabEntryOrder(
+		StationSystemsSettings const& settings)
+	{
+		std::vector<std::pair<std::string, std::string>> order;
+		forEachPrefabEntry(settings,
+			[&](std::string_view type, std::string const& id)
+			{
+				order.emplace_back(std::string(type), id);
+			});
+		return order;
+	}
+
+	PrefabOverrides defaultPrefabOverrides(PrefabTemplate const& tmpl)
+	{
+		PrefabOverrides overrides;
+		for (auto const& parameter : tmpl.parameters)
+			overrides.emplace(parameter.name, parameter.kind == PrefabParameterKind::Number
+				? PrefabOverrideValue{parameter.defaultValue}
+				: PrefabOverrideValue{parameter.boolDefault});
+		return overrides;
+	}
+
+	std::string allocatePrefabInstanceId(PrefabTemplate const& tmpl,
+		StationSystemsSettings const& draft)
+	{
+		// An instance owns `<prefix><n>.<templateEntryId>` for every internal
+		// entry, so an id is taken as soon as any draft entry starts with that
+		// instance namespace - whatever the type of the entry that took it.
+		for (unsigned long long n = 1;; ++n)
+		{
+			auto const candidate = tmpl.instancePrefix + std::to_string(n);
+			auto const prefix = candidate + PrefabIdSeparator;
+			bool taken = false;
+			forEachPrefabEntry(draft, [&](std::string_view, std::string const& id)
+			{
+				if (id.rfind(prefix, 0) == 0) taken = true;
+			});
+			if (!taken) return candidate;
 		}
 	}
 

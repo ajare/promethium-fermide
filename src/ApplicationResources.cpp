@@ -203,6 +203,7 @@ void registerApplicationResourceTypes(resources::ResourceManager& manager)
 {
 	pf::application::registerMapResourceTypes(manager);
 	registerStationConfigurationResourceType(manager);
+	registerPrefabCatalogueResourceType(manager);
 	manager.addResourceFactory(new Factory<LuaScriptResource>("LuaScript"));
 	manager.addResourceFactory(new Factory<AgentTypeResource>("AgentType"));
 	manager.addResourceFactory(new Factory<AgentTagRegistryResource>(

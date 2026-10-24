@@ -20,6 +20,12 @@ public:
 	bool visible{false};
 	void setConfigurationResources(std::vector<std::shared_ptr<StationConfigurationResource>> resources)
 	{ mConfigurationResources = std::move(resources); }
+	// The loaded prefab catalogues (#812), merged into the one catalogue the
+	// flow diagram offers. A catalogue that failed to load never reaches here,
+	// so its units are simply absent from the Place menu.
+	void setPrefabCatalogueResources(
+		std::vector<std::shared_ptr<PrefabCatalogueResource>> resources);
+	std::shared_ptr<core::PrefabCatalogue const> prefabCatalogue() const { return mPrefabCatalogue; }
 	void initializeRecentFiles(std::filesystem::path path) { mRecent.initialize(std::move(path)); }
 	void setFilePicker(std::function<std::optional<std::string>(bool)> picker) { mFilePicker = std::move(picker); }
 	bool flowModified() const { return draftDirty(); }
@@ -67,6 +73,7 @@ public:
 	{ return mFlow.pinEligibility(nodeType, nodeId, portName); }
 private:
 	std::vector<std::shared_ptr<StationConfigurationResource>> mConfigurationResources;
+	std::shared_ptr<core::PrefabCatalogue const> mPrefabCatalogue;
 	std::string mSelectedConfiguration{"reference-station"};
 	void loadConfigurationResource(StationConfigurationResource const& resource);
 	bool syncWorld(std::shared_ptr<core::World> const& world);
