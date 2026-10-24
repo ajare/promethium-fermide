@@ -7201,6 +7201,129 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		require(driver.passed(), "prefab unit edit workflow failed on the Test Engine");
 	}
 
+	// #820: the keyboard Delete path honours the grouped-internal refusal.
+	// The inspector's Rename/Delete buttons refuse a grouped internal, but
+	// the Delete key branched only on the composite, so pressing it on an
+	// internal entry took the ordinary single-node removal - deleting the
+	// entry outright when it carried no links and leaving a broken unit
+	// behind a still-drawn composite box. The key now refuses with the
+	// same notice the disabled button shows, while the composite's own
+	// keyboard path still opens the whole-unit cascade.
+	void prefabUnitKeyboardDeleteWorkflow(smoke::Context const& fixtureContext)
+	{
+		using smoke::require;
+		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
+		auto const root = fixtureContext.temporaryRoot() / "prefab-keyboard-delete-resources";
+		headless::StationResourceFixture resources(authored, root);
+		require(resources.catalogues.size() == 1,
+			"the bundled prefab catalogue should load from the manifest");
+
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1700};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window;
+		window.setPrefabCatalogueResources(resources.catalogues);
+		auto world = std::make_shared<core::World>("Prefab keyboard delete", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 1680});
+			ImGui::Begin("Configuration");
+			window.renderFlowContents(world);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "prefabUnitKeyboardDelete", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto* canvas = flowCanvasWindow("Configuration");
+			REQ(canvas != nullptr, "flow canvas is missing");
+			// Place the unit and expand it: the internals are selectable on
+			// the canvas while the composite box is still drawn around them.
+			ctx->ComboClick("Place node/Aircon Unit"); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 300.0f, canvas->Pos.y + 220.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			window.flowSetPrefabExpanded("ac1", true); ctx->Yield(3);
+			ctx->ItemClick("Fit all"); ctx->Yield(3);
+			ImVec4 rect{};
+			REQ(window.flowNodeRect("Chiller", "ac1.machine", &rect),
+				"the internal chiller is not drawn when expanded");
+			// Select the internal with the pointer over the canvas - the
+			// exact state that used to fall through to single-node removal.
+			ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+			ctx->Yield(2);
+			ctx->MouseClick(); ctx->Yield(3);
+			auto const grouped = window.draft();
+			auto const undoGrouped = window.draftHistory().undoCount();
+			ctx->KeyPress(ImGuiKey_Delete); ctx->Yield(3);
+			// The refusal is the same one the disabled button states, and it
+			// reaches the status line the author can see.
+			REQ(window.flowNotice() == "Delete refused: 'ac1.machine' is internal to prefab unit 'ac1'; delete the whole unit instead.",
+				("keyboard Delete on a grouped internal did not surface the refusal: '"
+					+ window.flowNotice() + "'").c_str());
+			REQ(driver.contains("is internal to prefab unit 'ac1'"),
+				"the keyboard Delete refusal was not shown in the editor");
+			// Nothing was removed and no history was written.
+			REQ(window.draft() == grouped
+				&& window.draftHistory().undoCount() == undoGrouped,
+				"keyboard Delete mutated the draft or history it should have refused");
+			// The unit is intact: every internal entry survives, and both the
+			// internal and the composite box are still drawn.
+			REQ(window.draft().chillers.size() == 1
+				&& window.draft().chillers[0].id == "ac1.machine"
+				&& window.draft().coolantLoops.size() == 1
+				&& window.draft().coolantLoops[0].id == "ac1.loop"
+				&& window.draft().radiators.size() == 1
+				&& window.draft().radiators[0].id == "ac1.radiator"
+				&& window.draft().thermalReservoirs.size() == 2,
+				"keyboard Delete removed an internal entry from the grouped unit");
+			REQ(window.flowPlacedPrefabs().size() == 1
+				&& window.flowPlacedPrefabs()[0].instanceId == "ac1",
+				"the refused Delete damaged the placed-unit record");
+			REQ(window.flowNodeRect("Chiller", "ac1.machine", &rect),
+				"the refused internal is no longer drawn");
+			// Collapse the unit and press Delete on the composite: the
+			// keyboard path is unchanged there and still asks for the
+			// whole-unit cascade before touching anything.
+			window.flowSetPrefabExpanded("ac1", false); ctx->Yield(3);
+			REQ(window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"the composite did not come back after collapse");
+			ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+			ctx->Yield(2);
+			ctx->MouseClick(); ctx->Yield(3);
+			auto const beforeCascade = window.draft();
+			auto const undoBeforeCascade = window.draftHistory().undoCount();
+			ctx->KeyPress(ImGuiKey_Delete); ctx->Yield(3);
+			REQ(driver.contains("Delete prefab unit 'ac1'?"),
+				"keyboard Delete on the composite did not open the cascade confirmation");
+			REQ(window.draft() == beforeCascade
+				&& window.draftHistory().undoCount() == undoBeforeCascade,
+				"the composite cascade mutated before it was confirmed");
+			driver.click(ctx, "**/Confirm unit deletion"); ctx->Yield(3);
+			// The full cascade still works: entries, provenance and geometry
+			// all go together, and nothing of the unit is left on the canvas.
+			REQ(window.draft().chillers.empty() && window.draft().coolantLoops.empty()
+				&& window.draft().radiators.empty() && window.draft().thermalReservoirs.empty(),
+				"the composite cascade left an orphaned internal behind");
+			REQ(window.flowPlacedPrefabs().empty()
+				&& !window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"the composite survived the keyboard-initiated cascade");
+			REQ(window.draftHistory().undoCount() == undoBeforeCascade + 1,
+				"the keyboard-initiated cascade was not a single undo step");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft() == beforeCascade
+				&& window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"one undo did not restore the whole keyboard-initiated cascade");
+		});
+		#undef REQ
+		require(driver.passed(), "prefab unit keyboard delete workflow failed on the Test Engine");
+	}
+
 	// #816: aggregated telemetry on the composite footer. A collapsed
 	// unit of a running expansion reports its summed electrical draw and
 	// delivered cooling, and the worst internal status/limiting reason
@@ -7590,6 +7713,7 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 	checks.push_back({"station/prefabCompositeProjectionWorkflow", prefabCompositeProjectionWorkflow});
 	checks.push_back({"station/prefabPersistenceWorkflow", prefabPersistenceWorkflow});
 	checks.push_back({"station/prefabUnitEditWorkflow", prefabUnitEditWorkflow});
+	checks.push_back({"station/prefabUnitKeyboardDeleteWorkflow", prefabUnitKeyboardDeleteWorkflow});
 	checks.push_back({"station/prefabCompositeTelemetryWorkflow", prefabCompositeTelemetryWorkflow});
 	checks.push_back({"station/prefabDialOverrideWorkflow", prefabDialOverrideWorkflow});
 	checks.push_back({"station/addEntryWorkflow", addEntryWorkflow});

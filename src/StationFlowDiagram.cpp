@@ -3021,7 +3021,17 @@ entry.thermalClass = "moderate";
 	}
 	if (deleteSelected)
 	{
-		if (compositeSelected)
+		// #820: the keyboard Delete shares the inspector's refusal. A
+		// grouped internal is not deletable on its own - only the whole
+		// unit is - so the key reports the same refusal the disabled
+		// button shows instead of quietly single-deleting the entry and
+		// leaving a broken unit behind a still-drawn composite box.
+		if (!groupedOwner.empty())
+		{
+			mNotice = "Delete refused: '" + mSelectedId + "' is internal to prefab unit '"
+				+ groupedOwner + "'; delete the whole unit instead.";
+		}
+		else if (compositeSelected)
 		{
 			core::PrefabInstanceRemoval plan;
 			if (core::planPrefabInstanceRemoval(draft, mSelectedId, plan))

@@ -1020,6 +1020,10 @@ set_tests_properties(station-editor-prefab-persistence PROPERTIES LABELS "smoke;
 # #815: whole-unit rename and cascade delete through the real editor controls.
 add_test(NAME station-editor-prefab-unit-edit COMMAND pf-smoke-editor --check station/prefabUnitEditWorkflow)
 set_tests_properties(station-editor-prefab-unit-edit PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+# #820: the keyboard Delete path refuses a grouped internal the same way the
+# inspector's buttons do, and the composite's own cascade still runs.
+add_test(NAME station-editor-prefab-keyboard-delete COMMAND pf-smoke-editor --check station/prefabUnitKeyboardDeleteWorkflow)
+set_tests_properties(station-editor-prefab-keyboard-delete PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 # #816: aggregated telemetry on the composite footer - summed electrical
 # draw, delivered cooling, and the worst internal status - asserted against
 # a running expansion.
