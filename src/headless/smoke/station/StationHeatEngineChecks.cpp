@@ -1021,8 +1021,95 @@ void heatEnginePlantCoexistence(smoke::Context const&)
 // charge headroom the extraction is zero and the limiter reads
 // DemandAcceptance; as acceptance rises the intake rises with it, up to
 // the dispatch ceiling.
+// #829: battery acceptance is bus-side input through the actual Charge
+// connection, not unconstrained storage headroom. Exercise real allocation
+// through the public runtime, including lossy paths and saturation.
+void heatEngineChargingPathAcceptance()
+{
+	for (auto const efficiency : {1.0, 0.5, 0.0})
+	for (auto const bankCount : {1, 3})
+	for (bool full : {false, true})
+	{
+		auto settings = enginePair(20000, 20000, 100, 0.5, 0.0);
+		settings.systemsStepWorldTicks = 60;
+		auto const bank = settings.batteries.front();
+		for (int i = 1; i < bankCount; ++i)
+		{
+			auto extra = bank;
+			extra.id = "buffer-" + std::to_string(i);
+			// One nearly full bank and one full bank must not contribute
+			// their nameplate charge ratings to the acceptance budget.
+			extra.startingStoredKWh = extra.nameplateKWh - (i == 1 ? 1e-6 : 0.0);
+			extra.chargeEfficiency = 0.8;
+			settings.batteries.push_back(extra);
+		}
+		if (full)
+			for (auto& b : settings.batteries) b.startingStoredKWh = b.nameplateKWh;
+		for (auto const& link : core::station_connections::build(settings).links)
+			if (link.designKey.ownerType == "Battery" && link.designKey.relation == "Charge")
+			{
+				auto& p = settings.connections[link.designKey];
+				p.maximumThroughput = 0.01;
+				p.efficiency = efficiency;
+			}
+		std::string diagnostic;
+		require(core::validateStationSystemsSettings(settings, diagnostic), diagnostic.c_str());
+		auto const quantum = core::World::getFixedTimestep();
+		auto const seconds = 60.0 * static_cast<double>(quantum);
+		auto const hours = seconds / 3600.0;
+		core::StationSystemsRuntime runtime(settings, quantum);
+		auto before = runtime.snapshot();
+		auto const close = [](double a, double b) {
+			require(std::abs(a - b) <= 2e-7 * std::max({1.0, std::abs(a), std::abs(b)}),
+				"charging-path acceptance energy or rate mismatch");
+		};
+		for (int step = 1; step <= 3; ++step)
+		{
+			double expectedBusKW = 0.0;
+			for (size_t i = 0; i < settings.batteries.size(); ++i)
+			{
+				auto const& b = settings.batteries[i];
+				auto const wanted = std::min(b.maxChargeKW,
+					std::max(0.0, b.nameplateKWh - before.power.batteries[i].storedKWh)
+					/ hours / b.chargeEfficiency);
+				// Zero-efficiency active requests consume input as transport
+				// loss, exactly as for other physical Station connections.
+				expectedBusKW += std::min(0.01, efficiency > 0 ? wanted / efficiency : wanted);
+			}
+			require(runtime.advanceTo(step * seconds), "charging-path step failed");
+			auto const snap = runtime.snapshot();
+			require(snap.healthy, "charging-path allocation failed its conservation audit");
+			auto const e = engine(snap, "orc");
+			close(e.lastElectricalOutputKW, expectedBusKW);
+			require(e.lastLimiter == "DemandAcceptance", "charging path did not limit engine acceptance");
+			double cableInputKJ = 0.0;
+			for (auto const& c : snap.connections)
+				if (c.key.ownerType == "Battery" && c.key.relation == "Charge")
+				{
+					close(c.inputTotal, c.deliveredTotal + c.lostTotal);
+					close(c.lastDeliveredRate, c.lastInputRate * efficiency);
+					require(c.lastInputRate <= 0.01 + 1e-12, "battery bypassed charge cable rating");
+					cableInputKJ += c.inputTotal;
+				}
+			close(e.electricalEnergyKJ, cableInputKJ);
+			for (size_t i = 0; i < settings.batteries.size(); ++i)
+			{
+				auto const& b = settings.batteries[i];
+				close(snap.power.batteries[i].storedKWh - b.startingStoredKWh,
+					snap.power.batteries[i].chargeInputKWh * b.chargeEfficiency);
+			}
+			close(e.thermalInputEnergyKJ, e.rejectionEnergyKJ + e.electricalEnergyKJ);
+			close(reservoir(snap, "hot").temperatureC, 90.0 - e.thermalInputEnergyKJ / 20000.0);
+			close(reservoir(snap, "reject").temperatureC, 20.0 + e.rejectionEnergyKJ / 20000.0);
+			close(e.residualKJ, 0.0);
+			before = snap;
+		}
+	}
+}
+
 void heatEngineDemandAcceptance(smoke::Context const&)
 {
+	heatEngineChargingPathAcceptance();
 	std::string diagnostic;
 	// Zero acceptance: no loads, and the one battery is full, so there
 	// is neither demand nor charge headroom for the engine's power.

@@ -530,8 +530,13 @@ namespace core
 			if (batteryDisabled(battery)) continue;
 			auto const headroom = battery.authored.nameplateKWh - battery.stored;
 			if (headroom <= 0.0) continue;
-			chargeHeadroomKW += std::min(battery.authored.maxChargeKW,
+			auto const wantedKW = std::min(battery.authored.maxChargeKW,
 				headroom / hours / battery.authored.chargeEfficiency);
+			// Match the charging allocator's receive request: acceptance is
+			// bus-side input, capped by the Charge connection and grossed up
+			// for its transport losses, not unrestricted battery headroom.
+			chargeHeadroomKW += connections.required(
+				connections.port("Battery", battery.authored.id, "Charge"), wantedKW);
 		}
 		auto const acceptanceCeilingKW = engineAcceptanceDemandKW + chargeHeadroomKW;
 		auto const dtSeconds = static_cast<double>(seconds);
