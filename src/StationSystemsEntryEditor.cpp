@@ -9,6 +9,8 @@
 #include <cmath>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace station_editor
 {
@@ -57,13 +59,108 @@ void renderIdentity(std::string const& label, std::string const& id)
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("To rename, select this node in Flow and use 'New node name' / 'Rename selected node'.");
 }
+
+// The declared unit vocabulary (#389) as a closed combobox. Free text is gone:
+// a spelling core has never heard of can no longer be typed into the draft
+// through the editor, so the unit a store or a scheduled movement carries is
+// always one core can reason about. A value loaded from an older document that
+// sits outside the vocabulary stays visible as its own flagged entry rather
+// than being silently rewritten to a default nobody chose - the widget never
+// lies about what the draft holds.
+// `peers` names the entries this one must agree with (a transfer's source and
+// destination stores, a delivery's destination, an ejection's source). A
+// disagreement is warned about live rather than filtered out of the list:
+// hiding the unit the user is about to wire the other end to reads as the
+// editor being broken, not as the editor helping.
+std::string storeUnitOf(core::StationSystemsSettings const& draft, std::string const& storeId)
+{
+	for (auto const& store : draft.stores)
+		if (store.id == storeId) return store.unit;
+	return {};
+}
+
+void renderUnitCombo(core::StationSystemsSettings const& draft, std::string const& field,
+	std::string& unit, std::vector<std::pair<std::string, std::string>> const& peers = {})
+{
+	bool const declared = std::find(core::StationStoreUnits.begin(),
+		core::StationStoreUnits.end(), unit) != core::StationStoreUnits.end();
+	// EndCombo only on the frame the popup actually opened: ImGui pairs the two
+	// calls against a stack, and an unconditional EndCombo underflows it and
+	// takes the next unrelated Pop down with it.
+	if (ImGui::BeginCombo(field.c_str(), unit.empty() ? "Unset" : unit.c_str()))
+	{
+		if (!unit.empty() && !declared)
+			ImGui::Selectable((unit + "   (loaded: not a declared unit)").c_str(),
+				true, ImGuiSelectableFlags_Disabled);
+		for (auto const* candidate : core::StationStoreUnits)
+			if (ImGui::Selectable(candidate, unit == candidate)) unit = candidate;
+		ImGui::EndCombo();
+	}
+	if (!declared)
+	{
+		ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f),
+			"'%s' is not a declared unit; Apply will refuse it", unit.c_str());
+		return;
+	}
+	std::string conflict;
+	for (auto const& [role, storeId] : peers)
+	{
+		if (storeId.empty()) continue;
+		auto const peer = storeUnitOf(draft, storeId);
+		if (peer.empty() || peer == unit) continue;
+		if (!conflict.empty()) conflict += "; ";
+		conflict += role + " store '" + storeId + "' is '" + peer + "'";
+	}
+	if (!conflict.empty())
+		ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.2f, 1.0f), "Does not match: %s", conflict.c_str());
+}
+
+// The declared thermal service classes as a closed combobox. A thermal class is
+// never written by a Flow connector - the drag writes the sink's id, the class
+// stays a declaration on the machine - so this widget stays while the sink's
+// own reference field leaves. It is closed to the four declared classes for
+// the same reason the unit field is: an unknown class is a document core
+// cannot route heat through. `sinkId` is the reservoir the entry currently
+// names; heat routes only to the same service class, so a mismatch is warned
+// about live rather than waiting for Apply to refuse the whole draft.
+void renderThermalClassCombo(core::StationSystemsSettings const& draft, std::string const& field,
+	std::string& thermalClass, std::string const& sinkId = {})
+{
+	bool const declared = std::find(core::StationThermalServiceClasses.begin(),
+		core::StationThermalServiceClasses.end(), thermalClass)
+		!= core::StationThermalServiceClasses.end();
+	if (ImGui::BeginCombo(field.c_str(), thermalClass.empty() ? "Unset" : thermalClass.c_str()))
+	{
+		if (!thermalClass.empty() && !declared)
+			ImGui::Selectable((thermalClass + "   (loaded: not a declared class)").c_str(),
+				true, ImGuiSelectableFlags_Disabled);
+		for (auto const* candidate : core::StationThermalServiceClasses)
+			if (ImGui::Selectable(candidate, thermalClass == candidate)) thermalClass = candidate;
+		ImGui::EndCombo();
+	}
+	if (!declared)
+	{
+		ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f),
+			"'%s' is not a declared thermal service class; Apply will refuse it", thermalClass.c_str());
+		return;
+	}
+	if (sinkId.empty()) return;
+	for (auto const& reservoir : draft.thermalReservoirs)
+	{
+		if (reservoir.id != sinkId) continue;
+		if (reservoir.thermalClass == thermalClass) return;
+		ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.2f, 1.0f),
+			"Class '%s' does not match sink '%s' ('%s'); heat routes only to the same service class",
+			thermalClass.c_str(), sinkId.c_str(), reservoir.thermalClass.c_str());
+		return;
+	}
+}
 }
 
 bool renderConversionEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::ResourceConversionSettings& conversion,
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeConversion = false;
 	auto const row = label.substr(label.find_last_of(' ') + 1);
 	renderIdentity(label, conversion.id);
@@ -111,7 +208,6 @@ bool renderConversionEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	if (conversion.outputs.size() < core::MaxStationConversionFlows
 		&& ImGui::Button(("Add output to conversion " + row).c_str()))
 		conversion.outputs.push_back({});
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeConversion;
 }
@@ -120,7 +216,6 @@ bool renderSolarEntry([[maybe_unused]] core::StationSystemsSettings& draft, core
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeArray = false;
 	auto const row = label.substr(label.find_last_of(' ') + 1);
 	renderIdentity(label, array.id);
@@ -170,7 +265,6 @@ bool renderSolarEntry([[maybe_unused]] core::StationSystemsSettings& draft, core
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
 		removeArray = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeArray;
 }
@@ -184,7 +278,6 @@ bool renderCrewEntry([[maybe_unused]] core::StationSystemsSettings& draft, core:
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeCrew = false;
 	renderIdentity(label, crew.id);
 	renderWaterQuality(crew.waterQuality, label);
@@ -285,7 +378,6 @@ bool renderCrewEntry([[maybe_unused]] core::StationSystemsSettings& draft, core:
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
 		removeCrew = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeCrew;
 }
@@ -294,7 +386,6 @@ bool renderMicrobialProcessorEntry(core::StationSystemsSettings& draft, core::Mi
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeProcessor = false;
 	renderIdentity(label, processor.id);
 	renderWaterQuality(processor.waterQuality, label);
@@ -351,11 +442,7 @@ bool renderMicrobialProcessorEntry(core::StationSystemsSettings& draft, core::Mi
 	if (ImGui::InputText(describe("replacement biological stock store", label).c_str(),
 		processorStockBuffer, sizeof(processorStockBuffer)))
 		processor.stockStoreId = processorStockBuffer;
-	char processorThermalBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(processorThermalBuffer, processor.thermalClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText(describe("heat sink thermal class", label).c_str(),
-		processorThermalBuffer, sizeof(processorThermalBuffer)))
-		processor.thermalClass = processorThermalBuffer;
+	renderThermalClassCombo(draft, describe("heat sink thermal class", label), processor.thermalClass, processor.heatSinkId);
 	char processorSinkBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorSinkBuffer, processor.heatSinkId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText(describe("heat sink reservoir", label).c_str(),
@@ -447,7 +534,6 @@ bool renderMicrobialProcessorEntry(core::StationSystemsSettings& draft, core::Mi
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
 		removeProcessor = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeProcessor;
 }
@@ -456,7 +542,6 @@ bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeCrop = false;
 	renderIdentity(label, crop.id);
 	renderWaterQuality(crop.waterQuality, label);
@@ -604,7 +689,6 @@ bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
 		removeCrop = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeCrop;
 }
@@ -613,7 +697,6 @@ bool renderAlgaeCultureEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeAlgae = false;
 	renderIdentity(label, algae.id);
 	renderWaterQuality(algae.waterQuality, label);
@@ -748,7 +831,6 @@ bool renderAlgaeCultureEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
 		removeAlgae = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeAlgae;
 }
@@ -758,7 +840,6 @@ bool renderStoreEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
 	renderIdentity(label, store.id);
 	char materialBuffer[core::MaxStationMaterialIdLength + 1]{};
@@ -770,10 +851,7 @@ bool renderStoreEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 		ImGui::TextUnformatted("Invalid material identity: use lowercase words/digits separated by single hyphens.");
 	else ImGui::Text("Material: %s (explicit)", store.materialId.c_str());
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Material identity is independent of store name, unit and composition. Empty is unclassified; it never changes allocation.");
-	char unitBuffer[8]{};
-	std::strncpy(unitBuffer, store.unit.c_str(), sizeof(unitBuffer) - 1);
-	if (ImGui::InputText(describe("unit", label).c_str(), unitBuffer, sizeof(unitBuffer)))
-		store.unit = unitBuffer;
+	renderUnitCombo(draft, describe("unit", label), store.unit);
 	ImGui::InputDouble(describe("capacity", label).c_str(), &store.capacity, 0.0, 0.0, "%.3f");
 	ImGui::InputDouble(describe("starting usable", label).c_str(), &store.startingQualified, 0.0, 0.0, "%.3f");
 	ImGui::InputDouble(describe("starting held", label).c_str(), &store.startingUnqualified, 0.0, 0.0, "%.3f");
@@ -798,7 +876,6 @@ bool renderStoreEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 		ImGui::InputDouble(describe("other minerals fraction", label).c_str(), &composition.otherMinerals, 0.0, 0.0, "%.4f");
 		ImGui::InputDouble(describe("energy kJ per kg dry", label).c_str(), &composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
 	}
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeRequested;
 }
@@ -807,7 +884,6 @@ bool renderWaterCollectorEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	core::WaterCollectorSettings& collector, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeCollector = false;
 	renderIdentity(label, collector.id);
 	char collectorAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
@@ -820,11 +896,7 @@ bool renderWaterCollectorEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	if (ImGui::InputText(describe("cooling loop", label).c_str(),
 		collectorLoopBuffer, sizeof(collectorLoopBuffer)))
 		collector.coolingLoopId = collectorLoopBuffer;
-	char collectorClassBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(collectorClassBuffer, collector.thermalClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText(describe("thermal class", label).c_str(),
-		collectorClassBuffer, sizeof(collectorClassBuffer)))
-		collector.thermalClass = collectorClassBuffer;
+	renderThermalClassCombo(draft, describe("thermal class", label), collector.thermalClass);
 	char collectorDestBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(collectorDestBuffer, collector.destStoreId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText(describe("raw water store", label).c_str(),
@@ -837,7 +909,6 @@ bool renderWaterCollectorEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeCollector = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeCollector;
 }
@@ -846,7 +917,6 @@ bool renderWaterTreatmentEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	core::WaterTreatmentSettings& treatment, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeTreatment = false;
 	renderIdentity(label, treatment.id);
 	char treatmentSourceBuffer[core::MaxStationStoreIdLength + 1]{};
@@ -908,7 +978,6 @@ bool renderWaterTreatmentEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeTreatment = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeTreatment;
 }
@@ -917,7 +986,6 @@ bool renderElectrolyzerEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	core::ElectrolyzerSettings& cell, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeCell = false;
 	renderIdentity(label, cell.id);
 	char cellWaterBuffer[core::MaxStationStoreIdLength + 1]{};
@@ -940,11 +1008,7 @@ bool renderElectrolyzerEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	if (ImGui::InputText(describe("delivery compartment (or leave empty for the store)", label).c_str(),
 		cellAtmosphereBuffer, sizeof(cellAtmosphereBuffer)))
 		cell.atmosphereId = cellAtmosphereBuffer;
-	char cellThermalBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(cellThermalBuffer, cell.thermalClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText(describe("heat sink thermal class", label).c_str(),
-		cellThermalBuffer, sizeof(cellThermalBuffer)))
-		cell.thermalClass = cellThermalBuffer;
+	renderThermalClassCombo(draft, describe("heat sink thermal class", label), cell.thermalClass, cell.heatSinkId);
 	char cellSinkBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellSinkBuffer, cell.heatSinkId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText(describe("heat sink reservoir", label).c_str(),
@@ -960,7 +1024,6 @@ bool renderElectrolyzerEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeCell = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeCell;
 }
@@ -969,7 +1032,6 @@ bool renderCo2CaptureEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::Co2CaptureSettings& capture, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeCapture = false;
 	renderIdentity(label, capture.id);
 	char captureAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
@@ -997,7 +1059,6 @@ bool renderCo2CaptureEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeCapture = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeCapture;
 }
@@ -1006,7 +1067,6 @@ bool renderAtmosphereEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::AtmosphereSettings& atmosphere, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeAtmosphere = false;
 	renderIdentity(label, atmosphere.id);
 	ImGui::InputDouble(describe("volume m3", label).c_str(),
@@ -1053,7 +1113,6 @@ bool renderAtmosphereEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeAtmosphere = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeAtmosphere;
 }
@@ -1062,7 +1121,6 @@ bool renderAirlockCycleEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	core::AirlockCycleSettings& cycle, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeCycle = false;
 	renderIdentity(label, cycle.id);
 	char cycleAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
@@ -1083,7 +1141,6 @@ bool renderAirlockCycleEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeCycle = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeCycle;
 }
@@ -1092,7 +1149,6 @@ bool renderAtmospherePathwayEntry(core::StationSystemsSettings& draft,
 	core::AtmospherePathwaySettings& pathway, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removePathway = false;
 	renderIdentity(label, pathway.id);
 	// The two ends are the same references the hatch node's End A / End B
@@ -1126,7 +1182,6 @@ bool renderAtmospherePathwayEntry(core::StationSystemsSettings& draft,
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removePathway = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removePathway;
 }
@@ -1135,7 +1190,6 @@ bool renderThermalLinkEntry(core::StationSystemsSettings& draft,
 	core::ThermalLinkSettings& link, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeLink = false;
 	renderIdentity(label, link.id);
 	// The two ends are the same references the wall node's End A / End B
@@ -1162,7 +1216,6 @@ bool renderThermalLinkEntry(core::StationSystemsSettings& draft,
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeLink = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeLink;
 }
@@ -1172,7 +1225,6 @@ bool renderTransferEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
 	renderIdentity(label, transfer.id);
 	char sourceBuffer[core::MaxStationStoreIdLength + 1]{};
@@ -1183,10 +1235,8 @@ bool renderTransferEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	std::strncpy(destinationBuffer, transfer.destinationId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText(describe("destination", label).c_str(), destinationBuffer, sizeof(destinationBuffer)))
 		transfer.destinationId = destinationBuffer;
-	char transferUnitBuffer[8]{};
-	std::strncpy(transferUnitBuffer, transfer.unit.c_str(), sizeof(transferUnitBuffer) - 1);
-	if (ImGui::InputText(describe("unit", label).c_str(), transferUnitBuffer, sizeof(transferUnitBuffer)))
-		transfer.unit = transferUnitBuffer;
+	renderUnitCombo(draft, describe("unit", label), transfer.unit,
+		{{"source", transfer.sourceId}, {"destination", transfer.destinationId}});
 	int mode = static_cast<int>(transfer.mode);
 	if (ImGui::Combo(describe("mode", label).c_str(), &mode, "Continuous\0Scheduled\0"))
 		transfer.mode = static_cast<core::ResourceTransferMode>(mode);
@@ -1208,7 +1258,6 @@ bool renderTransferEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeRequested;
 }
@@ -1258,7 +1307,6 @@ bool renderEquipmentLoadEntry([[maybe_unused]] core::StationSystemsSettings& dra
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
 	renderIdentity(label, load.id);
 	ImGui::InputDouble(describe("electrical demand kW", label).c_str(),
@@ -1303,11 +1351,7 @@ bool renderEquipmentLoadEntry([[maybe_unused]] core::StationSystemsSettings& dra
 				{load.operatingProfile.periodSeconds * 0.5, 0.0});
 	}
 	ImGui::InputDouble(describe("heat output kW", label).c_str(), &load.heatOutputKW, 0.0, 0.0, "%.3f");
-	char thermalClassBuffer[16]{};
-	std::strncpy(thermalClassBuffer, load.thermalClass.c_str(), sizeof(thermalClassBuffer) - 1);
-	if (ImGui::InputText(describe("thermal class", label).c_str(),
-		thermalClassBuffer, sizeof(thermalClassBuffer)))
-		load.thermalClass = thermalClassBuffer;
+	renderThermalClassCombo(draft, describe("thermal class", label), load.thermalClass, load.heatSinkId);
 	bool requiresCooling = load.coolingDisposition == core::StationCoolingDisposition::CoolingService;
 	if (ImGui::Checkbox(describe("requires cooling service", label).c_str(), &requiresCooling))
 		load.coolingDisposition = requiresCooling
@@ -1361,7 +1405,6 @@ bool renderEquipmentLoadEntry([[maybe_unused]] core::StationSystemsSettings& dra
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeRequested;
 }
@@ -1371,7 +1414,6 @@ bool renderBatteryEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
 	renderIdentity(label, battery.id);
 	ImGui::InputDouble(describe("nameplate kWh", label).c_str(),
@@ -1391,7 +1433,6 @@ bool renderBatteryEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeRequested;
 }
@@ -1401,7 +1442,6 @@ bool renderGeneratorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
 	renderIdentity(label, generator.id);
 	char fuelStoreBuffer[core::MaxStationStoreIdLength + 1]{};
@@ -1409,11 +1449,7 @@ bool renderGeneratorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	if (ImGui::InputText(describe("fuel store", label).c_str(),
 		fuelStoreBuffer, sizeof(fuelStoreBuffer)))
 		generator.fuelStoreId = fuelStoreBuffer;
-	char generatorClassBuffer[16]{};
-	std::strncpy(generatorClassBuffer, generator.thermalClass.c_str(), sizeof(generatorClassBuffer) - 1);
-	if (ImGui::InputText(describe("thermal class", label).c_str(),
-		generatorClassBuffer, sizeof(generatorClassBuffer)))
-		generator.thermalClass = generatorClassBuffer;
+	renderThermalClassCombo(draft, describe("thermal class", label), generator.thermalClass, generator.heatSinkId);
 	char generatorSinkBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(generatorSinkBuffer, generator.heatSinkId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText(describe("heat sink", label).c_str(),
@@ -1440,7 +1476,6 @@ bool renderGeneratorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeRequested;
 }
@@ -1450,7 +1485,6 @@ bool renderFuelCellEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
 	renderIdentity(label, cell.id);
 	char cellHydrogenBuffer[core::MaxStationStoreIdLength + 1]{};
@@ -1468,11 +1502,7 @@ bool renderFuelCellEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	if (ImGui::InputText(describe("product water store", label).c_str(),
 		cellWaterBuffer, sizeof(cellWaterBuffer)))
 		cell.waterStoreId = cellWaterBuffer;
-	char cellThermalBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(cellThermalBuffer, cell.thermalClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText(describe("heat sink thermal class", label).c_str(),
-		cellThermalBuffer, sizeof(cellThermalBuffer)))
-		cell.thermalClass = cellThermalBuffer;
+	renderThermalClassCombo(draft, describe("heat sink thermal class", label), cell.thermalClass, cell.heatSinkId);
 	char cellSinkBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellSinkBuffer, cell.heatSinkId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText(describe("heat sink reservoir", label).c_str(),
@@ -1496,7 +1526,6 @@ bool renderSabatierReactorEntry([[maybe_unused]] core::StationSystemsSettings& d
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
 	renderIdentity(label, reactor.id);
 	char reactorCo2Buffer[core::MaxStationStoreIdLength + 1]{};
@@ -1519,11 +1548,7 @@ bool renderSabatierReactorEntry([[maybe_unused]] core::StationSystemsSettings& d
 	if (ImGui::InputText(describe("product water store", label).c_str(),
 		reactorWaterBuffer, sizeof(reactorWaterBuffer)))
 		reactor.waterStoreId = reactorWaterBuffer;
-	char reactorThermalBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(reactorThermalBuffer, reactor.thermalClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText(describe("heat sink thermal class", label).c_str(),
-		reactorThermalBuffer, sizeof(reactorThermalBuffer)))
-		reactor.thermalClass = reactorThermalBuffer;
+	renderThermalClassCombo(draft, describe("heat sink thermal class", label), reactor.thermalClass, reactor.heatSinkId);
 	char reactorSinkBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(reactorSinkBuffer, reactor.heatSinkId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText(describe("heat sink reservoir", label).c_str(),
@@ -1539,7 +1564,6 @@ bool renderSabatierReactorEntry([[maybe_unused]] core::StationSystemsSettings& d
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeRequested;
 }
@@ -1549,7 +1573,6 @@ bool renderMethaneProcessorEntry([[maybe_unused]] core::StationSystemsSettings& 
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
 	renderIdentity(label, processor.id);
 	char processorMethaneBuffer[core::MaxStationStoreIdLength + 1]{};
@@ -1567,11 +1590,7 @@ bool renderMethaneProcessorEntry([[maybe_unused]] core::StationSystemsSettings& 
 	if (ImGui::InputText(describe("solid carbon store", label).c_str(),
 		processorCarbonBuffer, sizeof(processorCarbonBuffer)))
 		processor.carbonStoreId = processorCarbonBuffer;
-	char processorThermalBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(processorThermalBuffer, processor.thermalClass.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText(describe("heat sink thermal class", label).c_str(),
-		processorThermalBuffer, sizeof(processorThermalBuffer)))
-		processor.thermalClass = processorThermalBuffer;
+	renderThermalClassCombo(draft, describe("heat sink thermal class", label), processor.thermalClass, processor.heatSinkId);
 	char processorSinkBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorSinkBuffer, processor.heatSinkId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText(describe("heat sink reservoir", label).c_str(),
@@ -1587,7 +1606,6 @@ bool renderMethaneProcessorEntry([[maybe_unused]] core::StationSystemsSettings& 
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeRequested;
 }
@@ -1600,14 +1618,9 @@ bool renderThermalReservoirEntry([[maybe_unused]] core::StationSystemsSettings& 
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
 	renderIdentity(label, reservoir.id);
-	char reservoirClassBuffer[16]{};
-	std::strncpy(reservoirClassBuffer, reservoir.thermalClass.c_str(), sizeof(reservoirClassBuffer) - 1);
-	if (ImGui::InputText(describe("thermal class", label).c_str(),
-		reservoirClassBuffer, sizeof(reservoirClassBuffer)))
-		reservoir.thermalClass = reservoirClassBuffer;
+	renderThermalClassCombo(draft, describe("thermal class", label), reservoir.thermalClass);
 	ImGui::InputDouble(describe("heat capacity kJ/K", label).c_str(),
 		&reservoir.heatCapacityKJPerK, 0.0, 0.0, "%.3f");
 	ImGui::InputDouble(describe("starting temperature C", label).c_str(),
@@ -1621,7 +1634,6 @@ bool renderThermalReservoirEntry([[maybe_unused]] core::StationSystemsSettings& 
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeRequested;
 }
@@ -1631,7 +1643,6 @@ bool renderRadiatorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
 	renderIdentity(label, radiator.id);
 	char radiatorHostBuffer[core::MaxStationStoreIdLength + 1]{};
@@ -1650,7 +1661,6 @@ bool renderRadiatorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeRequested;
 }
@@ -1660,8 +1670,6 @@ bool renderCoolantLoopEntry([[maybe_unused]] core::StationSystemsSettings& draft
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
-	ImGui::PushItemWidth(220);
 	renderIdentity(label, loop.id);
 	char host[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(host, loop.reservoirId.c_str(), sizeof(host) - 1);
@@ -1681,7 +1689,6 @@ bool renderCoolantLoopEntry([[maybe_unused]] core::StationSystemsSettings& draft
 		&loop.criticalService);
 	ImGui::SameLine();
 	bool const remove = !removeLabel.empty() && ImGui::Button(removeLabel.c_str());
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return remove;
 }
@@ -1690,7 +1697,6 @@ bool renderThermalBufferEntry([[maybe_unused]] core::StationSystemsSettings& dra
 	core::ThermalBufferSettings& buffer, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeRequested = false;
 	renderIdentity(label, buffer.id);
 	char host[core::MaxStationStoreIdLength + 1]{};
@@ -1711,7 +1717,6 @@ bool renderThermalBufferEntry([[maybe_unused]] core::StationSystemsSettings& dra
 	ImGui::InputDouble(describe("transfer conductance kW/K", label).c_str(), &buffer.transferConductanceKWPerK, 0.0, 0.0, "%.3f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str())) removeRequested = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeRequested;
 }
@@ -1720,14 +1725,9 @@ bool renderChillerEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::ChillerSettings& chiller, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeChiller = false;
 	renderIdentity(label, chiller.id);
-	char chillerClassBuffer[16]{};
-	std::strncpy(chillerClassBuffer, chiller.thermalClass.c_str(), sizeof(chillerClassBuffer) - 1);
-	if (ImGui::InputText(describe("thermal class", label).c_str(),
-		chillerClassBuffer, sizeof(chillerClassBuffer)))
-		chiller.thermalClass = chillerClassBuffer;
+	renderThermalClassCombo(draft, describe("thermal class", label), chiller.thermalClass, chiller.condenserReservoirId);
 	char coldLoopBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(coldLoopBuffer, chiller.coldLoopId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText(describe("cold loop", label).c_str(),
@@ -1759,7 +1759,6 @@ bool renderChillerEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeChiller = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeChiller;
 }
@@ -1887,7 +1886,6 @@ bool renderDeliveryEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::ResourceDeliverySettings& delivery, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeDelivery = false;
 	renderIdentity(label, delivery.id);
 	char deliveryStoreBuffer[core::MaxStationStoreIdLength + 1]{};
@@ -1895,10 +1893,8 @@ bool renderDeliveryEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	if (ImGui::InputText(describe("store", label).c_str(),
 		deliveryStoreBuffer, sizeof(deliveryStoreBuffer)))
 		delivery.storeId = deliveryStoreBuffer;
-	char deliveryUnitBuffer[8]{};
-	std::strncpy(deliveryUnitBuffer, delivery.unit.c_str(), sizeof(deliveryUnitBuffer) - 1);
-	if (ImGui::InputText(describe("unit", label).c_str(), deliveryUnitBuffer, sizeof(deliveryUnitBuffer)))
-		delivery.unit = deliveryUnitBuffer;
+	renderUnitCombo(draft, describe("unit", label), delivery.unit,
+		{{"destination", delivery.storeId}});
 	ImGui::InputDouble(describe("quantity", label).c_str(), &delivery.quantity, 0.0, 0.0, "%.3f");
 	ImGui::InputDouble(describe("first occurrence seconds", label).c_str(),
 		&delivery.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
@@ -1910,7 +1906,6 @@ bool renderDeliveryEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeDelivery = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeDelivery;
 }
@@ -1919,7 +1914,6 @@ bool renderWasteEjectionEntry([[maybe_unused]] core::StationSystemsSettings& dra
 	core::WasteEjectionSettings& ejection, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeEjection = false;
 	renderIdentity(label, ejection.id);
 	char ejectionStoreBuffer[core::MaxStationStoreIdLength + 1]{};
@@ -1927,10 +1921,8 @@ bool renderWasteEjectionEntry([[maybe_unused]] core::StationSystemsSettings& dra
 	if (ImGui::InputText(describe("store", label).c_str(),
 		ejectionStoreBuffer, sizeof(ejectionStoreBuffer)))
 		ejection.storeId = ejectionStoreBuffer;
-	char ejectionUnitBuffer[8]{};
-	std::strncpy(ejectionUnitBuffer, ejection.unit.c_str(), sizeof(ejectionUnitBuffer) - 1);
-	if (ImGui::InputText(describe("unit", label).c_str(), ejectionUnitBuffer, sizeof(ejectionUnitBuffer)))
-		ejection.unit = ejectionUnitBuffer;
+	renderUnitCombo(draft, describe("unit", label), ejection.unit,
+		{{"source", ejection.storeId}});
 	int eligibility = static_cast<int>(ejection.eligibility);
 	if (ImGui::Combo(describe("eligibility", label).c_str(), &eligibility, "Qualified only\0Held only\0"))
 		ejection.eligibility = static_cast<core::WasteEjectionEligibility>(eligibility);
@@ -1944,7 +1936,6 @@ bool renderWasteEjectionEntry([[maybe_unused]] core::StationSystemsSettings& dra
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeEjection = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeEjection;
 }
@@ -1953,7 +1944,6 @@ bool renderOutageEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::InstallationOutageSettings& outage, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	bool removeOutage = false;
 	renderIdentity(label, outage.id);
 	char outageTargetBuffer[core::MaxStationStoreIdLength + 1]{};
@@ -1973,7 +1963,6 @@ bool renderOutageEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeOutage = true;
-	ImGui::PopItemWidth();
 	ImGui::PopID();
 	return removeOutage;
 }
@@ -1982,7 +1971,6 @@ bool renderMaintenanceEntry([[maybe_unused]] core::StationSystemsSettings& draft
 	core::MaintenanceJobSettings& job, std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushID(label.c_str());
-	ImGui::PushItemWidth(128.0f);
 	auto const row = label.substr(label.find_last_of(' ') + 1);
 	bool removeJob = false;
 	renderIdentity(label, job.id);
@@ -2029,7 +2017,6 @@ bool renderMaintenanceEntry([[maybe_unused]] core::StationSystemsSettings& draft
 	if (job.requirements.size() < core::MaxStationMaintenanceRequirements
 		&& ImGui::Button(("Add requirement to maintenance job " + row).c_str()))
 		job.requirements.push_back({});
-	ImGui::PopItemWidth();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeJob = true;
 	ImGui::PopID();

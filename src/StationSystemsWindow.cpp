@@ -26,6 +26,19 @@ namespace
 		core::StationConfigurationDocument layout;
 		explicit StationDraftSnapshot(core::StationSystemsSettings const& value) : settings(value) {}
 	};
+	// A surface-level item width that survives early returns: the guard pops on
+	// every exit path, so a width pushed for a whole inspector column cannot
+	// leak past the function that pushed it. The per-editor pushes this
+	// replaces leaked exactly that way - renderFuelCellEntry and
+	// renderCoolantLoopEntry each pushed a width they never popped.
+	struct ItemWidthScope
+	{
+		explicit ItemWidthScope(float width) : mWidth(width) { ImGui::PushItemWidth(mWidth); }
+		~ItemWidthScope() { ImGui::PopItemWidth(); }
+		ItemWidthScope(ItemWidthScope const&) = delete;
+		ItemWidthScope& operator=(ItemWidthScope const&) = delete;
+		float mWidth;
+	};
 }
 
 DocumentSnapshot StationSystemsWindow::captureDraft() const
@@ -766,6 +779,10 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 void StationSystemsWindow::renderFlowInspectorContents(
 	core::StationSystemsSettings& draft, core::World& world)
 {
+	// Every widget this column renders is 128 units wide. The scope guard covers
+	// the early returns below, so the width cannot leak into the canvas or the
+	// plot beside it.
+	ItemWidthScope const inspectorWidth{128.0f};
 	auto const selected = mFlow.selectedNode();
 	if (!selected)
 	{
@@ -859,7 +876,7 @@ void StationSystemsWindow::renderPrefabDialInspector(core::StationSystemsSetting
 			// exactly on the declared value.
 			double const authoritative = std::get<double>(current);
 			double& buffer = mDialBuffers.try_emplace(parameter.name, authoritative).first->second;
-			ImGui::SetNextItemWidth(150.0f);
+			ImGui::SetNextItemWidth(128.0f);
 			ImGui::InputDouble(parameter.name.c_str(), &buffer, 0.0, 0.0, "%.2f");
 			bool const active = ImGui::IsItemActive();
 			if (ImGui::IsItemDeactivatedAfterEdit())
@@ -925,7 +942,7 @@ void StationSystemsWindow::renderLiveHatchControls(core::World& world, std::stri
 		mLiveOpenFor = pathwayId;
 		mLiveOpenPercent = static_cast<float>(hatch.openFraction) * 100.0f;
 	}
-	ImGui::SetNextItemWidth(180);
+	ImGui::SetNextItemWidth(128);
 	ImGui::SliderFloat("Open now", &mLiveOpenPercent, 0.0f, 100.0f, "%.0f%%");
 	bool const openActive = ImGui::IsItemActive();
 	if (ImGui::IsItemDeactivatedAfterEdit())
@@ -940,7 +957,7 @@ void StationSystemsWindow::renderLiveHatchControls(core::World& world, std::stri
 		mLiveAreaFor = pathwayId;
 		mLiveAreaM2 = static_cast<float>(hatch.areaM2);
 	}
-	ImGui::SetNextItemWidth(180);
+	ImGui::SetNextItemWidth(128);
 	// A negative opening would invert the diffusion law: conductance goes
 	// negative, -expm1() flips sign, and the compartment gains mass it never
 	// had while the loss ledger runs negative. ImGui only clamps when
@@ -1200,6 +1217,9 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	// #652: Store and Transfer editing renders through the shared entry
 	// editor seam so the Flow inspector reuses the exact same widgets,
 	// labels and deferred-removal behavior against this same draft.
+	// The width is a surface property, not a per-editor one: one push covers
+	// every entry list below, so a new editor cannot forget it or override it.
+	ImGui::PushItemWidth(128.0f);
 	station_editor::renderStoreList(mDraft);
 	ImGui::SeparatorText("Draft transfers (qualified material, same-unit stores)");
 	station_editor::renderTransferList(mDraft);
@@ -1431,6 +1451,7 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		if (remove) mDraft.thermalBuffers.erase(mDraft.thermalBuffers.begin() + static_cast<std::ptrdiff_t>(index));
 		else ++index;
 	}
+	ImGui::PopItemWidth();
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
 		? "Draft differs from the authored start conditions."

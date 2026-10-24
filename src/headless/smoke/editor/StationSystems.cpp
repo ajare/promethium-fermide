@@ -2,6 +2,7 @@
 #include "StationReferenceFixtures.h"
 #include "Checks.h"
 void registerMixedObservationEditorChecks(std::vector<smoke::Check>& checks);
+void registerStationComponentHelpChecks(std::vector<smoke::Check>& checks);
 #include "TestEngine.h"
 #include "State.h"
 #include "StationSystemsWindow.h"
@@ -1909,7 +1910,16 @@ namespace
 			// the slash-free fields instead and the capacity by text.
 			REQ(driver.contains("heat capacity kJ/K"),
 				"reservoir shared editor capacity label missing");
-			REQ(ctx->ItemInfo("**/thermal class##Reservoir 0", ImGuiTestOpFlags_NoError)->ID != 0,
+			// The thermal class is now a closed Combo over the declared service
+			// classes. ImGui's BeginCombo registers no user label with the test
+			// engine, so a **/ wildcard cannot see a combo at all; resolve it by
+			// ID through a sibling's parent scope, the way the transfer mode
+			// combo is addressed in StationConnections.
+			auto const* reservoirSibling = ctx->ItemInfo("**/max temperature C##Reservoir 0",
+				ImGuiTestOpFlags_NoError);
+			REQ(reservoirSibling->ID != 0, "reservoir shared editor sibling field missing");
+			REQ(ctx->ItemInfo(ImHashStr("thermal class##Reservoir 0", 0, reservoirSibling->ParentID),
+				ImGuiTestOpFlags_NoError)->ID != 0,
 				"reservoir shared editor field missing");
 			// The sole rename path confirms and updates installation references too.
 			auto const beforeRename = window.draft();
@@ -2589,16 +2599,24 @@ namespace
 			// find-node pan; the inspector edit needs no canvas geometry.
 			driver.click(ctx, "Fit all"); ctx->Yield(3);
 			ctx->MouseTeleportToPos({20, 20}); ctx->Yield(2);
-			driver.typeValue(ctx, "**/thermal class##Load 0", "plasma");
-			ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
-			REQ(window.draft().equipmentLoads[0].thermalClass == "plasma",
-				"the class edit did not reach the draft");
-			REQ(drag("Equipment", "load1", "Heat out", "Reservoir", "reservoir1", "Heat in"),
-				"the heat connectors were not drawn");
-			REQ(window.flowLinkRejection().find("unknown thermal service class") != std::string::npos
-				&& window.draft().equipmentLoads[0].heatSinkId.empty(),
-				("the unknown-class heat drag was not refused with the validator's reason: "
-					+ window.flowLinkRejection()).c_str());
+			// The class is a closed combobox over the declared service classes, so
+			// an undeclared class like the "plasma" this step used to type can no
+			// longer be produced through the editor at all. The validator's
+			// unknown-class reason stays covered by the core thermal and seam
+			// checks; what the UI owns now is that a declared class reaches the
+			// draft as one undoable edit. A combo registers no user label with the
+			// test engine, so it is addressed by ID through a sibling's scope.
+			auto const* loadSibling = ctx->ItemInfo("**/electrical demand kW##Load 0",
+				ImGuiTestOpFlags_NoError);
+			REQ(loadSibling->ID != 0, "the load editor sibling field is missing");
+			ctx->ItemClick(ImHashStr("thermal class##Load 0", 0, loadSibling->ParentID));
+			ctx->Yield(2);
+			ImGuiWindow* classPopup = ctx->GetWindowByRef("//$FOCUSED");
+			REQ(classPopup != nullptr, "the thermal class combo did not open a popup");
+			ctx->ItemClick((std::string("//") + classPopup->Name + "/**/warm").c_str());
+			ctx->Yield(3);
+			REQ(window.draft().equipmentLoads[0].thermalClass == "warm",
+				"the class selection did not reach the draft");
 			// Undo the class edit; the same drag is now legal and commits
 			// the reference through the shared seam.
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
@@ -8175,6 +8193,7 @@ prefabCatalogue:
 {
 	editor_smoke::registerStationConnections(checks);
 	registerMixedObservationEditorChecks(checks);
+	registerStationComponentHelpChecks(checks);
 	checks.push_back({"station/prefabPlacementWorkflow", prefabPlacementWorkflow});
 	checks.push_back({"station/prefabCompositeProjectionWorkflow", prefabCompositeProjectionWorkflow});
 	checks.push_back({"station/prefabPersistenceWorkflow", prefabPersistenceWorkflow});
