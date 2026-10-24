@@ -81,6 +81,19 @@ namespace core
 		&CoolantLoopSettings::startingCoolantKg,
 		&CoolantLoopSettings::startingTemperatureC)
 	PF_STATION_LIVE_NODE(ChillerSettings, chillers, "Chiller")
+	template <>
+	struct LiveNode<HeatEngineSettings>
+	{
+		static constexpr std::string_view nodeType = "Heat engine";
+		static auto& of(StationSystemsSettings& settings) { return settings.heatEngines; }
+		static auto const& of(StationSystemsSettings const& settings) { return settings.heatEngines; }
+		static bool restoreInitial(HeatEngineSettings const&, HeatEngineSettings&) { return false; }
+		static bool topologyChanged(HeatEngineSettings const& before, HeatEngineSettings const& after)
+		{
+			return before.id != after.id || before.hotReservoirId != after.hotReservoirId
+				|| before.rejectionReservoirId != after.rejectionReservoirId;
+		}
+	};
 	PF_STATION_LIVE_NODE(GeneratorSettings, generators, "Generator")
 	PF_STATION_LIVE_NODE_WITH(AtmosphereSettings, atmospheres, "Atmosphere",
 		&AtmosphereSettings::startingCarbonDioxideKg,

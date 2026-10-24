@@ -346,8 +346,136 @@ void heatEngineExergyRunToEquilibrium(smoke::Context const&)
 // reservoir, delivers net kilowatts to the pool, and the published snapshot
 // reports the intake, the net output, the rejection heat, the status with
 // its named limiter, and actual efficiency beside Carnot efficiency.
+void heatEngineLiveSettings()
+{
+	auto settings = enginePair(20000.0, 20000.0, 100.0, 0.5, 0.0);
+	settings.systemsStepWorldTicks = 60;
+	float const baseStep = 1.0f / 60.0f;
+	double const second = settings.systemsStepWorldTicks * static_cast<double>(baseStep);
+	core::StationSystemsRuntime runtime(settings, baseStep);
+	std::string diagnostic;
+	settings.heatEngines[0].commandedInputKW = 0.0;
+	require(runtime.updateSettings(settings, &diagnostic) && diagnostic.empty(),
+		"live zero command refused");
+	require(runtime.advanceTo(second), "live zero command step failed");
+	auto const stopped = runtime.snapshot();
+	require(stopped.healthy && engine(stopped, "orc").commandedInputKW == 0.0
+		&& engine(stopped, "orc").lastThermalInputKW == 0.0,
+		"accepted live zero command did not stop runtime conversion");
+
+	// Resume at a changed rating, then close each gate independently. None
+	// of these edits may reset the engine or its reservoir energy ledgers.
+	settings.heatEngines[0].ratedThermalInputKW = 40.0;
+	settings.heatEngines[0].commandedInputKW = 40.0;
+	require(runtime.updateSettings(settings, &diagnostic), "live rating edit refused");
+	require(runtime.advanceTo(2 * second), "live rating step failed");
+	auto const active = runtime.snapshot();
+	auto const running = engine(active, "orc");
+	require(active.healthy && running.ratedThermalInputKW == 40.0
+		&& running.commandedInputKW == 40.0
+		&& std::abs(running.lastThermalInputKW - 40.0) < 1e-9,
+		"live rating did not reach actual allocation");
+	auto setHotGate = [&](double gate) {
+		return runtime.updateNode<core::HeatEngineSettings>("Heat engine", "orc",
+			[&](auto& e) { e.minHotTemperatureC = gate; }, &diagnostic);
+	};
+	require(setHotGate(100.0), "targeted hot gate edit refused");
+	require(runtime.advanceTo(3 * second), "hot gate step failed");
+	auto const gated = runtime.snapshot();
+	require(gated.healthy && engine(gated, "orc").lastThermalInputKW == 0.0
+		&& engine(gated, "orc").minHotTemperatureC == 100.0
+		&& engine(gated, "orc").thermalInputEnergyKJ == running.thermalInputEnergyKJ
+		&& reservoir(gated, "hot").temperatureC == reservoir(active, "hot").temperatureC,
+		"live hot gate failed to stop conversion or preserved state changed");
+	require(setHotGate(30.0), "targeted hot gate restoration refused");
+	require(runtime.updateNode<core::HeatEngineSettings>("orc",
+		[](auto& e) { e.maxSinkTemperatureC = 19.0; }, &diagnostic),
+		"targeted sink gate edit refused");
+	require(runtime.advanceTo(4 * second), "sink gate step failed");
+	auto const tripped = runtime.snapshot();
+	require(tripped.healthy && engine(tripped, "orc").tripped
+		&& engine(tripped, "orc").lastThermalInputKW == 0.0,
+		"live sink gate did not trip conversion");
+	require(runtime.updateNode<core::HeatEngineSettings>("orc", [](auto& e) {
+		e.maxSinkTemperatureC = 25.0;
+		e.carnotFraction = 0.25;
+		e.auxiliaryPowerKW = 0.5;
+	}, &diagnostic), "targeted engine tuning refused");
+	require(runtime.advanceTo(5 * second), "restored engine step failed");
+	auto const restored = runtime.snapshot();
+	auto const resumed = engine(restored, "orc");
+	require(restored.healthy && resumed.lastThermalInputKW > 0.0
+		&& resumed.thermalInputEnergyKJ > running.thermalInputEnergyKJ
+		&& resumed.carnotFraction == 0.25 && resumed.auxiliaryPowerKW == 0.5
+		&& std::abs(resumed.efficiencyNow - 0.25 * resumed.carnotEfficiencyNow) < 1e-9,
+		"targeted tuning failed or accumulated state was reset");
+
+	auto const before = runtime.effectiveSettings();
+	for (int change = 0; change < 5; ++change)
+	{
+		auto bad = before;
+		// A mixed edit must be refused before unrelated parameters land.
+		bad.batteries[0].maxChargeKW = 1.0;
+		if (change == 0) bad.heatEngines.clear();
+		if (change == 1) { auto added = bad.heatEngines[0]; added.id = "extra"; bad.heatEngines.push_back(added); }
+		if (change == 2) bad.heatEngines[0].id = "renamed";
+		if (change == 3) bad.heatEngines[0].hotReservoirId = "reject";
+		if (change == 4) bad.heatEngines[0].rejectionReservoirId = "hot";
+		require(!runtime.updateSettings(bad, &diagnostic) && !diagnostic.empty(),
+			"engine topology change accepted");
+		require(runtime.effectiveSettings() == before && runtime.snapshot() == restored,
+			"refused engine topology edit changed runtime state");
+	}
+	for (int change = 0; change < 3; ++change)
+	{
+		require(!runtime.updateNode<core::HeatEngineSettings>("orc", [&](auto& e) {
+			e.commandedInputKW = 0.0;
+			if (change == 0) e.id = "renamed";
+			if (change == 1) e.hotReservoirId = "reject";
+			if (change == 2) e.rejectionReservoirId = "hot";
+		}, &diagnostic) && !diagnostic.empty(), "targeted engine rewiring accepted");
+		require(runtime.effectiveSettings() == before && runtime.snapshot() == restored,
+			"refused targeted engine edit changed runtime state");
+	}
+	require(runtime.updateNode<core::HeatEngineSettings>("orc",
+		[](auto& e) { e.commandedInputKW = 0.0; }, &diagnostic),
+		"targeted zero command refused");
+	require(runtime.advanceTo(6 * second), "targeted zero step failed");
+	auto const final = runtime.snapshot();
+	require(final.healthy && engine(final, "orc").lastThermalInputKW == 0.0
+		&& engine(final, "orc").commandedInputKW
+			== runtime.effectiveSettings().heatEngines[0].commandedInputKW
+		&& engine(final, "orc").thermalInputEnergyKJ == resumed.thermalInputEnergyKJ,
+		"targeted zero command diverged from effective settings or reset totals");
+
+	// Offered declaration order must not change the resolved runtime indices
+	// or make a later targeted write hit another engine's settings mirror.
+	auto pair = settings;
+	auto other = pair.heatEngines[0];
+	other.id = "other";
+	other.commandedInputKW = 0.0;
+	pair.heatEngines.push_back(other);
+	core::StationSystemsRuntime reordered(pair, baseStep);
+	std::reverse(pair.heatEngines.begin(), pair.heatEngines.end());
+	pair.heatEngines[1].commandedInputKW = 10.0;
+	require(reordered.updateSettings(pair, &diagnostic), "reordered engines refused");
+	require(reordered.updateNode<core::HeatEngineSettings>("other",
+		[](auto& e) { e.commandedInputKW = 5.0; }, &diagnostic),
+		"targeted edit after engine reorder refused");
+	require(reordered.advanceTo(second), "reordered engine step failed");
+	auto const ordered = reordered.snapshot();
+	require(ordered.healthy && engine(ordered, "orc").lastThermalInputKW == 10.0
+		&& engine(ordered, "other").lastThermalInputKW == 5.0
+		&& reordered.effectiveSettings().heatEngines[0].id == "orc"
+		&& reordered.effectiveSettings().heatEngines[0].commandedInputKW == 10.0
+		&& reordered.effectiveSettings().heatEngines[1].id == "other"
+		&& reordered.effectiveSettings().heatEngines[1].commandedInputKW == 5.0,
+		"engine reorder diverged from runtime indices or targeted mirror");
+}
+
 void heatEngineTracerBullet(smoke::Context const&)
 {
+	heatEngineLiveSettings();
 	std::string diagnostic;
 	core::World world("HeatEngineTracer", 2, 2);
 	configure(world, enginePair(), diagnostic);

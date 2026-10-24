@@ -52,8 +52,8 @@ namespace core
 		double averageStepMicroseconds() const;
 		// Apply a changed configuration to a running or paused scenario
 		// without resetting the World. Topology is frozen and enforced: the
-		// entity id set of every collection, each atmosphere pathway's
-		// endpoints and the connection map keys must match the running
+		// entity id set of every collection, atmosphere pathway, Thermal link
+		// and Heat engine endpoints, and connection map keys must match the running
 		// configuration exactly, or nothing is applied and a diagnostic
 		// explains the refusal. Parameters (areas, capacities, rates, limits,
 		// thermal properties, priorities) take effect from the next step.
@@ -105,6 +105,17 @@ namespace core
 			}
 			Settings const before = *entry;
 			std::forward<Mutator>(mutate)(*entry);
+			if constexpr (requires { LiveNode<Settings>::topologyChanged(before, *entry); })
+			{
+				if (LiveNode<Settings>::topologyChanged(before, *entry))
+				{
+					*entry = before;
+					if (diagnostic)
+						*diagnostic = std::string(LiveNode<Settings>::nodeType) + " '"
+							+ std::string(nodeId) + "': identity and endpoints cannot be changed live";
+					return false;
+				}
+			}
 			// Refuse BEFORE writing anything further, so a mutator that mixed a
 			// live field with a preserved one cannot have the live half land.
 			if (LiveNode<Settings>::restoreInitial(before, *entry))
