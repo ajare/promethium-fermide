@@ -7705,6 +7705,146 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		require(driver.passed(), "prefab dial override workflow failed on the Test Engine");
 	}
 
+	// #821: two collapsed instances of the same template share one
+	// synthesized exposed-pin set. The descriptor vector is a property of
+	// the template, not the instance, so it must be built once per unique
+	// prefab id. Building it per placed instance made the shared vector
+	// collect the template's exposed ports once per instance, so every
+	// composite of that template drew each exposed pin twice. This check
+	// places two aircon units and asserts each composite keeps exactly one
+	// pin per exposed port, and that a link dragged to the second unit's
+	// exposed pin still aliases that unit's own internal entry.
+	void prefabDuplicateInstancePinsWorkflow(smoke::Context const& fixtureContext)
+	{
+		using smoke::require;
+		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
+		auto const root = fixtureContext.temporaryRoot() / "prefab-duplicate-pin-resources";
+		headless::StationResourceFixture resources(authored, root);
+		require(resources.catalogues.size() == 1,
+			"the bundled prefab catalogue should load from the manifest");
+
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window;
+		window.setPrefabCatalogueResources(resources.catalogues);
+		auto world = std::make_shared<core::World>("Duplicate prefab pins", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration");
+			window.renderFlowContents(world);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		// The exposed pin's vertical offset within its own node body, as a
+		// fraction of the node height. Zoom- and layout-independent: the
+		// fraction is fixed by how many ports share that face, so a single
+		// exposed port sits at a different fraction than a doubled one.
+		auto const pinFaceFraction = [](ImVec4 const& node, ImVec2 const& pin) {
+			return (pin.y - node.y) / (node.w - node.y);
+		};
+		driver.run("station", "prefabDuplicateInstancePins", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto* canvas = flowCanvasWindow("Configuration");
+			REQ(canvas != nullptr, "flow canvas is missing");
+			// Place the first unit; it lands as a collapsed composite.
+			ctx->ComboClick("Place node/Aircon Unit"); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 260.0f, canvas->Pos.y + 220.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ImVec4 first{};
+			REQ(window.flowNodeRect("aircon-unit", "ac1", &first),
+				"the first unit is not a collapsed composite");
+			ImVec2 coldA{};
+			ImVec2 supA{};
+			REQ(window.flowPinPosition("aircon-unit", "ac1", "Cold supply", &coldA)
+				&& window.flowPinPosition("aircon-unit", "ac1", "Supervision", &supA),
+				"the first composite is missing its exposed pins");
+			// Baseline: with a single collapsed instance each face carries
+			// exactly one exposed pin.
+			double const coldBaseline = pinFaceFraction(first, coldA);
+			double const supBaseline = pinFaceFraction(first, supA);
+			// Place the second unit of the SAME template; it lands as a
+			// second collapsed composite.
+			ctx->ComboClick("Place node/Aircon Unit"); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 620.0f, canvas->Pos.y + 470.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ImVec4 second{};
+			REQ(window.flowNodeRect("aircon-unit", "ac2", &second),
+				"the second unit is not a collapsed composite");
+			REQ(window.flowPlacedPrefabs().size() == 2,
+				"the two placements did not record two placed units");
+			// The first composite's pin layout must be untouched by the
+			// sibling: a doubled descriptor set would spread its single
+			// exposed port across two slots and move the pin.
+			ImVec2 coldA2{};
+			ImVec2 supA2{};
+			REQ(window.flowPinPosition("aircon-unit", "ac1", "Cold supply", &coldA2)
+				&& window.flowPinPosition("aircon-unit", "ac1", "Supervision", &supA2),
+				"the first composite lost a pin after the second instance");
+			REQ(std::abs(pinFaceFraction(first, coldA2) - coldBaseline) < 0.02,
+				"the second instance changed the first composite's Cold supply pin layout");
+			REQ(std::abs(pinFaceFraction(first, supA2) - supBaseline) < 0.02,
+				"the second instance changed the first composite's Supervision pin layout");
+			// The second composite shows the same single-pin-per-port layout
+			// as the first: same template, same face fractions.
+			ImVec2 coldB{};
+			ImVec2 supB{};
+			REQ(window.flowPinPosition("aircon-unit", "ac2", "Cold supply", &coldB)
+				&& window.flowPinPosition("aircon-unit", "ac2", "Supervision", &supB),
+				"the second composite is missing its exposed pins");
+			REQ(std::abs(pinFaceFraction(second, coldB) - coldBaseline) < 0.02,
+				"the second composite's Cold supply pin is not laid out as a single exposed port");
+			REQ(std::abs(pinFaceFraction(second, supB) - supBaseline) < 0.02,
+				"the second composite's Supervision pin is not laid out as a single exposed port");
+			// A link dragged to the second unit's exposed Supervision pin
+			// resolves to that unit's own internal chiller, not the first
+			// unit's: the shared descriptor set still aliases per instance.
+			ctx->ComboClick("Place node/Outage"); ctx->Yield(2);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 40.0f, canvas->Pos.y + 40.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			REQ(window.draft().outages.size() == 1
+				&& window.draft().outages[0].id == "outage1"
+				&& window.draft().outages[0].installationId.empty(),
+				"the outage did not land unwired");
+			// Frame the whole graph so every exposed pin sits inside the
+			// canvas clip region before the drag: the force layout can put a
+			// node's pin past the visible edge at the default zoom.
+			ctx->ItemClick("Fit all"); ctx->Yield(3);
+			ImVec2 a{};
+			ImVec2 b{};
+			REQ(window.flowPinPosition("Outage", "outage1", "Target installation", &a)
+				&& window.flowPinPosition("aircon-unit", "ac2", "Supervision", &b),
+				"the outage or second composite supervision pin is missing before the drag");
+			ctx->MouseTeleportToPos(a); ctx->Yield(2);
+			ctx->MouseDown(); ctx->Yield(2);
+			ctx->MouseTeleportToPos({(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f}); ctx->Yield(2);
+			ctx->MouseTeleportToPos(b); ctx->Yield(2);
+			ImVec2 live{};
+			if (window.flowPinPosition("aircon-unit", "ac2", "Supervision", &live))
+			{ ctx->MouseTeleportToPos(live); ctx->Yield(2); }
+			ctx->MouseUp(); ctx->Yield(3);
+			REQ(window.flowLinkRejection().empty(),
+				("wiring the second unit's exposed Supervision pin was refused: "
+					+ window.flowLinkRejection()).c_str());
+			REQ(window.draft().outages.size() == 1
+				&& window.draft().outages[0].installationId == "ac2.machine",
+				"the link to the second unit's Supervision pin did not alias the second unit's own chiller");
+		});
+		#undef REQ
+		require(driver.passed(), "duplicate prefab instance pin workflow failed on the Test Engine");
+	}
+
 	void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	editor_smoke::registerStationConnections(checks);
@@ -7716,6 +7856,7 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 	checks.push_back({"station/prefabUnitKeyboardDeleteWorkflow", prefabUnitKeyboardDeleteWorkflow});
 	checks.push_back({"station/prefabCompositeTelemetryWorkflow", prefabCompositeTelemetryWorkflow});
 	checks.push_back({"station/prefabDialOverrideWorkflow", prefabDialOverrideWorkflow});
+	checks.push_back({"station/prefabDuplicateInstancePinsWorkflow", prefabDuplicateInstancePinsWorkflow});
 	checks.push_back({"station/addEntryWorkflow", addEntryWorkflow});
 	checks.push_back({"station/configurationResources", configurationResources});
 	checks.push_back({"station/windowWorkflow", workflow});

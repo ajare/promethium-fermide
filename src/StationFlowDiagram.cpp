@@ -1028,9 +1028,16 @@ void StationFlowDiagram::projectComposites(core::StationSystemsSettings const& d
 		mCompositeKeys.insert(placed->prefabId + keySeparator + placed->instanceId);
 		// Synthesize the exposed-port descriptors on the face of the
 		// internal connector each port aliases, so the composite's pin
-		// geometry matches the connector it stands for.
-		auto& descriptors = mCompositePortDescriptors[placed->prefabId];
-		if (tmpl)
+		// geometry matches the connector it stands for. The descriptor
+		// set is a property of the template, not the instance: two
+		// collapsed instances of the same prefab share one entry, so it
+		// must be populated once per unique prefab id. Populating per
+		// placed instance made the shared vector collect the template's
+		// exposed ports once per instance, so every composite of that
+		// template drew each exposed pin twice (#821).
+		if (tmpl && !mCompositePortDescriptors.contains(placed->prefabId))
+		{
+			auto& descriptors = mCompositePortDescriptors[placed->prefabId];
 			for (auto const& port : tmpl->exposedPorts)
 			{
 				auto direction = core::StationPortDirection::Input;
@@ -1040,6 +1047,7 @@ void StationFlowDiagram::projectComposites(core::StationSystemsSettings const& d
 				descriptors.push_back(core::PortDescriptor{placed->prefabId, port.name,
 					direction, "composite", "composite", 0, {}, false});
 			}
+		}
 	}
 	// Links: internal↔internal plumbing is hidden outright; a mixed link
 	// survives only when every internal end's connector is exposed. The
