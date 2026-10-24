@@ -175,6 +175,8 @@ public:
 	// exposed pin. Expansion is editor view state only: it never reaches
 	// the draft and never enters the undo history.
 	std::vector<core::PlacedPrefab> const& placedPrefabs() const { return mPlacedPrefabs; }
+	void syncPrefabOverrides(core::StationSystemsSettings const& before,
+		core::StationSystemsSettings const& draft);
 	bool isPrefabInstanceExpanded(std::string const& instanceId) const
 	{
 		return mExpandedPrefabs.find(instanceId) != mExpandedPrefabs.end();

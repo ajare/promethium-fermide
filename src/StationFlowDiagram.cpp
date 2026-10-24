@@ -972,6 +972,29 @@ bool StationFlowDiagram::applyPrefabDialEdit(core::StationSystemsSettings& draft
 	return core::applyPrefabParameterOverride(draft, *tmpl, *found, parameterName, value, reason);
 }
 
+// #825: ordinary entry editors bypass the dial setter. Mirror changed
+// mapped values without applying dial ranges: those restrict the designed
+// interface, not direct internal edits. Missing templates/targets are left
+// alone; provenance cannot be inferred without their mapping.
+void StationFlowDiagram::syncPrefabOverrides(core::StationSystemsSettings const& before,
+	core::StationSystemsSettings const& draft)
+{
+	if (!mPrefabCatalogue) return;
+	for (auto& placed : mPlacedPrefabs)
+	{
+		auto const* tmpl = mPrefabCatalogue->find(placed.prefabId);
+		if (!tmpl) continue;
+		for (auto const& parameter : tmpl->parameters)
+		{
+			core::PrefabOverrideValue previous, current;
+			if (core::readPrefabParameterValue(draft, *tmpl, placed.instanceId, parameter.name, current)
+				&& core::readPrefabParameterValue(before, *tmpl, placed.instanceId, parameter.name, previous)
+				&& previous != current)
+				placed.overrides[parameter.name] = current;
+		}
+	}
+}
+
 // #813: the composite projection.
 //
 // An editor-side view over the flattened draft: a placed unit collapses to

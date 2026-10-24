@@ -42,7 +42,13 @@ void StationSystemsWindow::commitDraftChanges(bool force)
 	if (!mPendingDraftEdit || (!force && (ImGui::IsAnyItemActive()
 		|| (mPendingLayoutEdit && ImGui::IsMouseDown(ImGuiMouseButton_Left))))) return;
 	auto const before = std::static_pointer_cast<StationDraftSnapshot>(mPendingDraftEdit->context);
-	if (before->settings != mDraft) station_flow::pruneConnectionProperties(mDraft);
+	if (before->settings != mDraft)
+	{
+		station_flow::pruneConnectionProperties(mDraft);
+		// Include provenance in the same history snapshot as internal edits,
+		// whether they came from the Flow inspector or the form surface.
+		mFlow.syncPrefabOverrides(before->settings, mDraft);
+	}
 	core::StationConfigurationDocument layout;
 	mFlow.exportLayout(layout);
 	if (before->settings != mDraft || (mPendingLayoutEdit

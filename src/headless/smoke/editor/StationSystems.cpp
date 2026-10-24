@@ -7805,6 +7805,44 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 			REQ(window.draft().chillers[0].chilledSetpointC == 8.0
 				&& window.draft().chillers[0].criticalService,
 				"the expanded internal entry did not carry the dialed value");
+			// #825: ordinary internal edits must update the live provenance,
+			// not only the entry that the collapsed dial reads.
+			REQ(window.flowNodeRect("Chiller", "ac1.machine", &rect),
+				"the expanded chiller is missing");
+			ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 4.0f, canvas->Pos.y + 4.0f});
+			ctx->Yield(3);
+			auto const undoBeforeInternal = window.draftHistory().undoCount();
+			ctx->ItemInputValue("**/chilled setpoint C##Chiller 0", "7");
+			ctx->KeyPress(ImGuiKey_Tab); ctx->Yield(3);
+			REQ(window.draft().chillers[0].chilledSetpointC == 7.0,
+				"the internal setpoint edit did not land");
+			REQ(std::get<double>(window.flowPlacedPrefabs()[0].overrides.at("setpoint")) == 7.0,
+				"the internal setpoint edit left provenance divergent");
+			REQ(window.draftHistory().undoCount() == undoBeforeInternal + 1,
+				"internal edit and provenance sync were not one undo step");
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			REQ(window.draft().chillers[0].chilledSetpointC == 8.0
+				&& std::get<double>(window.flowPlacedPrefabs()[0].overrides.at("setpoint")) == 8.0,
+				"internal edit undo did not restore entry and provenance together");
+			driver.click(ctx, "Redo configuration"); ctx->Yield(3);
+			REQ(window.draft().chillers[0].chilledSetpointC == 7.0
+				&& std::get<double>(window.flowPlacedPrefabs()[0].overrides.at("setpoint")) == 7.0,
+				"internal edit redo did not restore entry and provenance together");
+			ctx->ItemClick("**/Chiller 0 protected critical service (work credited ahead of discretionary loads)");
+			ctx->Yield(3);
+			REQ(!window.draft().chillers[0].criticalService
+				&& !std::get<bool>(window.flowPlacedPrefabs()[0].overrides.at("criticalService")),
+				"the internal boolean edit left provenance divergent");
+			window.flowSetPrefabExpanded("ac1", false); ctx->Yield(3);
+			driver.click(ctx, "Save configuration"); ctx->Yield(3);
+			REQ(core::loadStationConfiguration(path.string(), saved)
+				&& saved.settings.chillers[0].chilledSetpointC == 7.0
+				&& std::get<double>(saved.prefabs[0].overrides.at("setpoint")) == 7.0
+				&& !saved.settings.chillers[0].criticalService
+				&& !std::get<bool>(saved.prefabs[0].overrides.at("criticalService")),
+				"collapse/save persisted divergent internal value and provenance");
 		});
 		#undef REQ
 		require(driver.passed(), "prefab dial override workflow failed on the Test Engine");
