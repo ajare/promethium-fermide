@@ -127,6 +127,58 @@ void thermalLinkConservation(smoke::Context const&)
 		"a conducting link did not report Active");
 }
 
+// #835: Celsius zero is a valid starting state. The audit scale must follow
+// energy that is subsequently accumulated, not merely the arbitrary starting
+// Celsius datum; otherwise ordinary summation roundoff aborts a sound run.
+void thermalLinkZeroCelsiusAudit(smoke::Context const&)
+{
+	struct Scenario
+	{
+		double coldStartC;
+		uint32_t cadenceRatio;
+	};
+	// The default-cadence zero case is the reported failure. The nearby
+	// starts and the offset control make the invariant explicit rather than
+	// merely moving the singularity to a convenient fixture value.
+	for (auto const scenario : std::array<Scenario, 4>{{
+		{0.0, 1u}, {-0.001, 60u}, {0.001, 60u}, {200.0, 60u}}})
+	{
+		core::ScopedStationStepRatioForTesting cadence(scenario.cadenceRatio);
+		auto settings = linkedPair(40000.0, 40000.0, 10.0);
+		settings.atmospheres[0].startingTemperatureC = scenario.coldStartC + 40.0;
+		settings.atmospheres[1].startingTemperatureC = scenario.coldStartC;
+		std::string diagnostic;
+		core::World world("ThermalLinkZeroCelsiusAudit", 2, 2);
+		configure(world, settings, diagnostic);
+		world.resumeSimulation();
+		auto const completed = advanceSeconds(world, 10000.0);
+		auto const snapshot = world.getStationSystemsSnapshot();
+		auto const diagnostics = world.getStationSystemsDiagnostics();
+		require(completed && snapshot.healthy && snapshot.elapsedSeconds >= 10000.0,
+			(diagnostics.empty() ? "zero-Celsius full-duration run failed its audit at "
+					+ std::to_string(snapshot.elapsedSeconds) + " seconds"
+				: "zero-Celsius full-duration run failed its audit: "
+					+ diagnostics.back().message).c_str());
+		auto const& cold = snapshot.atmospheres[1];
+		auto scale = std::max({1.0, std::abs(cold.startingEnergyKJ),
+			std::abs(cold.currentEnergyKJ), std::abs(cold.occupantHeatEnergyKJ),
+			std::abs(cold.crewHeatEnergyKJ), std::abs(cold.cropHeatEnergyKJ),
+			std::abs(cold.algaeHeatEnergyKJ), std::abs(cold.latentHeatEnergyKJ),
+			std::abs(cold.exchangedEnergyKJ), std::abs(cold.conductedEnergyKJ),
+			std::abs(cold.advectedEnergyKJ)});
+		auto const bound = snapshot.balanceTolerance * scale;
+		require(std::abs(cold.residualKJ) <= bound,
+			"zero-Celsius thermal ledger did not close at its energy scale");
+		// The tolerance tracks accumulated energy only enough for arithmetic
+		// roundoff. Omitting or double-booking this wall's conducted heat
+		// still exceeds it by orders of magnitude, preserving the audit as
+		// a safety net for both bookkeeping mistakes.
+		require(std::abs(cold.residualKJ - cold.conductedEnergyKJ) > bound
+			&& std::abs(cold.residualKJ + cold.conductedEnergyKJ) > bound,
+			"the thermal audit scale would mask missing or double-booked conducted heat");
+	}
+}
+
 // #795 headline contrast, making ADR-0026's thermal-neutrality claim a
 // checked one rather than a documented one: two compartments at identical
 // composition and different temperature, joined by an Atmosphere pathway
@@ -1711,6 +1763,7 @@ void thermalLinkLiveSettings(smoke::Context const&)
 void registerStationThermalLinkChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"thermalLinkConservation", thermalLinkConservation});
+	checks.push_back({"thermalLinkZeroCelsiusAudit", thermalLinkZeroCelsiusAudit});
 	checks.push_back({"thermalLinkAdr0026Contrast", thermalLinkAdr0026Contrast});
 	checks.push_back({"thermalLinkIdle", thermalLinkIdle});
 	checks.push_back({"thermalLinkCapacityWeighting", thermalLinkCapacityWeighting});

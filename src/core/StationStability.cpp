@@ -1313,7 +1313,10 @@ namespace core
 		for (auto const& atmosphere : snapshot.atmospheres)
 			ledger(atmosphere.residualKJ, std::abs(atmosphere.startingEnergyKJ)
 				+ std::abs(atmosphere.currentEnergyKJ) + std::abs(atmosphere.occupantHeatEnergyKJ)
-				+ std::abs(atmosphere.latentHeatEnergyKJ) + std::abs(atmosphere.exchangedEnergyKJ),
+				+ std::abs(atmosphere.crewHeatEnergyKJ) + std::abs(atmosphere.cropHeatEnergyKJ)
+				+ std::abs(atmosphere.algaeHeatEnergyKJ) + std::abs(atmosphere.latentHeatEnergyKJ)
+				+ std::abs(atmosphere.exchangedEnergyKJ) + std::abs(atmosphere.conductedEnergyKJ)
+				+ std::abs(atmosphere.advectedEnergyKJ),
 				"compartment thermal ledger for '" + atmosphere.id + "'");
 		for (auto const& treatment : snapshot.waterTreatments)
 			ledger(treatment.residualKg, std::abs(treatment.processedKg)

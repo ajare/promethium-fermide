@@ -1,5 +1,9 @@
 #include "StationSystemsImpl.h"
 
+#include <iomanip>
+#include <limits>
+#include <sstream>
+
 namespace core
 {
 	bool StationSystemsRuntime::Impl::Tick::auditPower()
@@ -936,8 +940,27 @@ namespace core
 			// silently.
 			auto const startingEnergyKJ = compartment.authored.thermalCapacityKJPerK
 				* compartment.authored.startingTemperatureC;
-			auto const thermalBound = StationBalanceTolerance
-				* std::max(1.0, std::abs(startingEnergyKJ));
+			// Celsius is a valid temperature datum for this relative-energy
+			// ledger, but zero Celsius is not a useful roundoff scale. Bound
+			// closure against every accumulated energy magnitude (including
+			// the current state), so a compartment can gain heat from zero
+			// without a spurious audit failure. Each individual term remains
+			// far larger than the bound if it is omitted or double-booked.
+			auto thermalScale = std::max(1.0, std::abs(startingEnergyKJ));
+			auto includeThermalScale = [&](double value)
+			{
+				thermalScale = std::max(thermalScale, std::abs(value));
+			};
+			includeThermalScale(compartment.occupantHeatKJ);
+			includeThermalScale(compartment.crewHeatKJ);
+			includeThermalScale(compartment.cropHeatKJ);
+			includeThermalScale(compartment.algaeHeatKJ);
+			includeThermalScale(compartment.latentHeatKJ);
+			includeThermalScale(compartment.exchangedKJ);
+			includeThermalScale(compartment.conductedKJ);
+			includeThermalScale(compartment.advectedKJ);
+			includeThermalScale(compartment.authored.thermalCapacityKJPerK * compartment.temperatureC);
+			auto const thermalBound = StationBalanceTolerance * thermalScale;
 			if (!requireFinite(compartment.conductedKJ, where + "cumulative conducted energy"))
 				return false;
 			if (!requireFinite(compartment.lastConductedKW, where + "last-tick conducted power"))
@@ -952,9 +975,16 @@ namespace core
 				+ compartment.advectedKJ
 				- compartment.authored.thermalCapacityKJPerK * compartment.temperatureC;
 			if (!std::isfinite(thermalResidual) || std::abs(thermalResidual) > thermalBound)
+			{
+				auto format = [](double value)
+				{
+					std::ostringstream text;
+					text << std::setprecision(std::numeric_limits<double>::max_digits10) << value;
+					return text.str();
+				};
 				return violation = where + "thermal energy ledger residual "
-					+ std::to_string(thermalResidual) + " exceeds tolerance "
-					+ std::to_string(StationBalanceTolerance), false;
+					+ format(thermalResidual) + " exceeds tolerance " + format(thermalBound), false;
+			}
 		}
 		for (auto const& pathway : runtime.atmospherePathways)
 			for (size_t gas = 0; gas < StationPathwayGases.size(); ++gas)
