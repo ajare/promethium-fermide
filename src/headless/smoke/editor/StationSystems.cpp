@@ -29,6 +29,8 @@ void registerMixedObservationEditorChecks(std::vector<smoke::Check>& checks);
 #include <tuple>
 #include <iomanip>
 #include <sstream>
+#include <cstring>
+#include <fstream>
 
 namespace
 {
@@ -5358,7 +5360,7 @@ namespace
 		resources.manager.destroyResources({atmosphere});
 		require(atmosphere->text().empty() && atmosphere->document().settings == core::StationSystemsSettings{}
 			&& !atmosphere->reference(), "Destroyed Resource retained configuration data");
-		{ std::ofstream out(root / atmosphere->getSource()); out << "schemaVersion: 110\nstationSystems: ["; }
+		{ std::ofstream out(root / atmosphere->getSource()); out << "schemaVersion: 111\nstationSystems: ["; }
 		bool refused = false;
 		try { resources.manager.createResource(atmosphere); }
 		catch (std::exception const&) { refused = true; }
@@ -6850,12 +6852,134 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		require(driver.passed(), "prefab composite projection workflow failed on the Test Engine");
 	}
 
+	// #814: provenance persistence. A saved placement writes the
+	// provenance block into the document; reopening with the catalogue
+	// re-groups the composite as a single node again; reopening with the
+	// catalogue absent loads the expansion as ordinary nodes; and a
+	// document stamped before schema 111 that carries the block is
+	// refused at the persistence boundary with the diagnostic shown.
+	void prefabPersistenceWorkflow(smoke::Context const& fixtureContext)
+	{
+		using smoke::require;
+		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
+		auto const root = fixtureContext.temporaryRoot() / "prefab-persistence-resources";
+		headless::StationResourceFixture resources(authored, root);
+		require(resources.catalogues.size() == 1,
+			"the bundled prefab catalogue should load from the manifest");
+
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window;
+		window.setPrefabCatalogueResources(resources.catalogues);
+		auto world = std::make_shared<core::World>("Prefab persistence", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+
+		auto const path = fixtureContext.temporaryRoot() / "prefab-unit.station.yaml";
+		auto const stalePath = fixtureContext.temporaryRoot() / "stale-prefab.station.yaml";
+		std::optional<std::string> pickPath = path.string();
+		window.setFilePicker([&](bool) -> std::optional<std::string> { return pickPath; });
+
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration");
+			window.renderFlowContents(world);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "prefabPersistence", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto* canvas = flowCanvasWindow("Configuration");
+			REQ(canvas != nullptr, "flow canvas is missing");
+			// Place the unit and save: the file carries the provenance block.
+			ctx->ComboClick("Place node/Aircon Unit"); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 300.0f, canvas->Pos.y + 220.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ImVec4 rect{};
+			REQ(window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"the unit was not placed as a composite");
+			ctx->ItemClick("Save configuration"); ctx->Yield(3);
+			REQ(!window.flowModified(), "saving the placement did not clear dirty state");
+			std::ifstream savedFile(path, std::ios::binary);
+			std::ostringstream savedText;
+			savedText << savedFile.rdbuf();
+			auto const saved = savedText.str();
+			REQ(saved.find("schemaVersion: 111") != std::string::npos
+				&& saved.find("prefabId: aircon-unit") != std::string::npos
+				&& saved.find("instanceId: ac1") != std::string::npos
+				&& saved.find("name: setpoint") != std::string::npos,
+				("the saved document does not carry the provenance block: " + saved).c_str());
+			// Reopen with the catalogue: the composite re-groups from the
+			// provenance and renders as one node again, exposed pins and
+			// all, without a single placement call in this session.
+			ctx->ItemClick("New configuration"); ctx->Yield(3);
+			REQ(window.draft().chillers.empty(), "New did not clear the draft");
+			ctx->ItemClick("Open configuration"); ctx->Yield(4);
+			REQ(window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"the composite did not re-group from provenance on load");
+			REQ(!window.flowNodeRect("Chiller", "ac1.machine", &rect),
+				"an internal node is drawn while the reloaded unit is collapsed");
+			ImVec2 pin{};
+			REQ(window.flowPinPosition("aircon-unit", "ac1", "Cold supply", &pin)
+				&& window.flowPinPosition("aircon-unit", "ac1", "Supervision", &pin),
+				"the reloaded composite does not present its exposed pins");
+			REQ(window.flowPlacedPrefabs().size() == 1
+				&& window.flowPlacedPrefabs()[0].prefabId == "aircon-unit"
+				&& window.flowPlacedPrefabs()[0].instanceId == "ac1"
+				&& window.flowPlacedPrefabs()[0].exposedPins.size() == 2,
+				"the placed-unit record did not rebuild from provenance");
+			// Reopen with the catalogue absent: the document loads, the
+			// expansion stands on its own as ordinary nodes, and no
+			// composite is drawn for a template nothing can back.
+			window.setPrefabCatalogueResources({});
+			ctx->ItemClick("New configuration"); ctx->Yield(3);
+			ctx->ItemClick("Open configuration"); ctx->Yield(4);
+			REQ(window.draft().chillers.size() == 1
+				&& window.draft().chillers[0].id == "ac1.machine",
+				"the expansion did not load with the catalogue absent");
+			REQ(window.flowNodeRect("Chiller", "ac1.machine", &rect),
+				"the catalogue-less load did not draw the expansion as ordinary nodes");
+			REQ(!window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"a composite was drawn with no catalogue to back it");
+			REQ(window.flowPlacedPrefabs().empty(),
+				"a composite record exists with no catalogue to reconstruct it");
+			// Boundary refusal: the same document re-stamped to schema 110
+			// with the provenance block intact is refused at the open
+			// boundary, the diagnostic is shown, and the live draft is
+			// untouched.
+			auto stale = saved;
+			for (auto at = stale.find("schemaVersion: 111"); at != std::string::npos;
+				at = stale.find("schemaVersion: 111", at + 1))
+				stale.replace(at, std::strlen("schemaVersion: 111"), "schemaVersion: 110");
+			{ std::ofstream out(stalePath, std::ios::binary); out << stale; }
+			auto const draftBefore = window.draft();
+			pickPath = stalePath.string();
+			ctx->ItemClick("Open configuration"); ctx->Yield(4);
+			REQ(driver.contains("Prefab provenance requires World schema 111"),
+				"the old-reader boundary refusal was not surfaced in the editor");
+			REQ(window.draft() == draftBefore,
+				"a refused open changed the live draft");
+			REQ(window.flowPlacedPrefabs().empty(),
+				"a refused open touched the composite state");
+		});
+		#undef REQ
+		require(driver.passed(), "prefab persistence workflow failed on the Test Engine");
+	}
+
 	void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	editor_smoke::registerStationConnections(checks);
 	registerMixedObservationEditorChecks(checks);
 	checks.push_back({"station/prefabPlacementWorkflow", prefabPlacementWorkflow});
 	checks.push_back({"station/prefabCompositeProjectionWorkflow", prefabCompositeProjectionWorkflow});
+	checks.push_back({"station/prefabPersistenceWorkflow", prefabPersistenceWorkflow});
 	checks.push_back({"station/addEntryWorkflow", addEntryWorkflow});
 	checks.push_back({"station/configurationResources", configurationResources});
 	checks.push_back({"station/windowWorkflow", workflow});

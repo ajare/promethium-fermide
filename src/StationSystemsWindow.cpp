@@ -124,9 +124,11 @@ bool StationSystemsWindow::draftDirty() const
 	mFlow.exportLayout(document);
 	if (!mHasSavedDocument)
 		return mDraftHistory.isModified() || document.settings != core::StationSystemsSettings{}
-			|| !document.positions.empty() || document.panX != 24 || document.panY != 24
+			|| !document.positions.empty() || !document.prefabs.empty()
+			|| document.panX != 24 || document.panY != 24
 			|| document.zoom != 0.8f;
 	return document.settings != mSavedDocument.settings
+		|| document.prefabs != mSavedDocument.prefabs
 		|| document.positions != mSavedDocument.positions
 		|| document.panX != mSavedDocument.panX || document.panY != mSavedDocument.panY
 		|| document.zoom != mSavedDocument.zoom;

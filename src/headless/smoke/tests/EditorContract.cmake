@@ -272,6 +272,7 @@ set(editor_names
     station/mixedObservationWorkflow
     station/prefabPlacementWorkflow
     station/prefabCompositeProjectionWorkflow
+    station/prefabPersistenceWorkflow
     station/addEntryWorkflow
     station/configurationResources
     station/windowWorkflow

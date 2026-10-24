@@ -323,12 +323,12 @@ namespace core
 		// The template's internal entries are read under a World schema
 		// version like any stationSystems map; the default is the newest
 		// schema this reader knows.
-		std::uint32_t version = 110;
+		std::uint32_t version = 111;
 		if (serializer.hasField("schemaVersion"))
 		{
 			version = static_cast<std::uint32_t>(serializer.readInt64("schemaVersion"));
-			if (version < 65 || version > 110)
-				return refuse("Prefab '" + tmpl.id + "' schema version must be from 65 to 110");
+			if (version < 65 || version > 111)
+				return refuse("Prefab '" + tmpl.id + "' schema version must be from 65 to 111");
 		}
 		// Internal entries: the existing stationSystems entry vocabulary,
 		// read through the authoritative reader. Full configuration
@@ -715,6 +715,25 @@ namespace core
 			expansion.exposedPins[port.name] = StationPinRef{port.nodeType,
 				instanceId + PrefabIdSeparator + port.entryId, port.portName};
 		out = std::move(expansion);
+		return true;
+	}
+
+	bool reconstructPlacedPrefab(PrefabTemplate const& tmpl,
+		PrefabProvenance const& provenance, PlacedPrefab& out, std::string& reason)
+	{
+		// Re-expanding is the reconstruction: it re-derives the namespaced
+		// exposed-pin aliases for the saved instance id and refuses saved
+		// overrides the current template no longer accepts, so a stale
+		// provenance never presents a boundary the template does not back.
+		PrefabExpansion expansion;
+		if (!expandPrefab(tmpl, provenance.overrides, provenance.instanceId, expansion, reason))
+			return false;
+		PlacedPrefab placed;
+		placed.prefabId = provenance.prefabId;
+		placed.instanceId = provenance.instanceId;
+		placed.overrides = provenance.overrides;
+		placed.exposedPins = std::move(expansion.exposedPins);
+		out = std::move(placed);
 		return true;
 	}
 

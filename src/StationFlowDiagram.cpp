@@ -633,6 +633,7 @@ void StationFlowDiagram::reset()
 	mLinkRejection.clear(); mPendingRemoval.reset();
 	mPortButtons.clear(); mPressedPortButton.clear(); mNotice.clear();
 	mPlacedPrefabs.clear(); mExpandedPrefabs.clear(); mProjectionDirty = false;
+	mInertProvenance.clear();
 	mCompositeKeys.clear(); mCompositePortDescriptors.clear();
 	mPrefabToggles.clear(); mPressedPrefabToggle.clear();
 }
@@ -667,9 +668,9 @@ void StationFlowDiagram::exportLayout(core::StationConfigurationDocument& docume
 	// so a history restore followed by an expand still shows them where
 	// the user left them. The draft itself is untouched by the projection;
 	// this keeps only the editor's own geometry honest across snapshots.
-	for (auto const& placed : mPlacedPrefabs)
+	auto const carryInternals = [&](std::string const& instanceId)
 	{
-		auto const prefix = placed.instanceId + core::PrefabIdSeparator;
+		auto const prefix = instanceId + core::PrefabIdSeparator;
 		for (auto const& [key, position] : mLayout)
 		{
 			auto const colon = key.find(':');
@@ -678,7 +679,33 @@ void StationFlowDiagram::exportLayout(core::StationConfigurationDocument& docume
 			if (!document.positions.contains(key))
 				document.positions.emplace(key, std::pair{position.x, position.y});
 		}
+	};
+	for (auto const& placed : mPlacedPrefabs)
+		carryInternals(placed.instanceId);
+	// #814: an inert unit's internals are ordinary graph nodes while the
+	// catalogue is absent, but the composite's own layout slot is in no
+	// graph at all; carry it too so a catalogue-less load/save round trip
+	// returns the document byte-for-byte and the composite comes back
+	// where the author left it when a catalogue returns.
+	for (auto const& inert : mInertProvenance)
+	{
+		carryInternals(inert.instanceId);
+		auto const compositeKey = inert.prefabId + ":" + inert.instanceId + ":0";
+		auto const found = mLayout.find(compositeKey);
+		if (found != mLayout.end() && !document.positions.contains(compositeKey))
+			document.positions.emplace(compositeKey, std::pair{found->second.x, found->second.y});
 	}
+	// #814: the provenance block travels with the layout. Placement order
+	// is the record order, so a save/reload hands back the same list the
+	// session placed; provenance that no catalogue can back stays inert in
+	// the diagram and still travels out verbatim.
+	document.prefabs.clear();
+	for (auto const& placed : mPlacedPrefabs)
+		document.prefabs.push_back({placed.prefabId, placed.instanceId, placed.overrides});
+	for (auto const& inert : mInertProvenance)
+		if (std::none_of(mPlacedPrefabs.begin(), mPlacedPrefabs.end(),
+				[&](core::PlacedPrefab const& p) { return p.instanceId == inert.instanceId; }))
+			document.prefabs.push_back(inert);
 	document.panX = mPan.x; document.panY = mPan.y; document.zoom = mZoom;
 }
 
@@ -694,6 +721,31 @@ void StationFlowDiagram::restoreLayout(core::StationConfigurationDocument const&
 	mDragging = -1; mTemperature = 0; mActiveLinkPin.reset();
 	for (auto const& [key, position] : document.positions)
 		mLayout[key] = {position.first, position.second};
+	// #814: re-group the composites from the persisted provenance. A
+	// provenance whose template the loaded catalogue cannot back is skipped:
+	// the flattened entries stand on their own as ordinary nodes, which is
+	// exactly the catalogue-absent contract. A provenance the current
+	// template refuses (overrides it no longer accepts) is skipped the
+	// same way - the entries still load, the unit just does not group.
+	mPlacedPrefabs.clear();
+	mInertProvenance.clear();
+	for (auto const& provenance : document.prefabs)
+	{
+		auto const* tmpl = mPrefabCatalogue ? mPrefabCatalogue->find(provenance.prefabId) : nullptr;
+		if (!tmpl)
+		{
+			mInertProvenance.push_back(provenance);
+			continue;
+		}
+		core::PlacedPrefab placed;
+		std::string reason;
+		if (!core::reconstructPlacedPrefab(*tmpl, provenance, placed, reason))
+		{
+			mInertProvenance.push_back(provenance);
+			continue;
+		}
+		mPlacedPrefabs.push_back(std::move(placed));
+	}
 	mPan = {document.panX, document.panY}; mZoom = document.zoom;
 	mFitRequested = document.positions.empty();
 }
@@ -868,6 +920,9 @@ void StationFlowDiagram::placePrefabAt(core::StationSystemsSettings& draft,
 	core::PlacedPrefab placed;
 	placed.prefabId = tmpl->id;
 	placed.instanceId = instanceId;
+	// #814: carry the overrides the unit was expanded with so the
+	// document export can write the provenance block verbatim.
+	placed.overrides = core::defaultPrefabOverrides(*tmpl);
 	placed.exposedPins = expansion.exposedPins;
 	auto const reuse = std::find_if(mPlacedPrefabs.begin(), mPlacedPrefabs.end(),
 		[&](core::PlacedPrefab const& p) { return p.instanceId == instanceId; });

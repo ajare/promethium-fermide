@@ -808,17 +808,17 @@ void heatEnginePersistence(smoke::Context const&)
 	// beyond the accepted range is refused outright, and a pre-110 document
 	// carrying the commanded-input field is refused rather than silently
 	// dropping the throttle the author commanded (#805).
-	for (int version : {108, 111})
+	for (int version : {108, 112})
 	{
 		auto bad = yaml;
-		bad.replace(bad.find("schemaVersion: 110"), std::string("schemaVersion: 110").size(),
+		bad.replace(bad.find("schemaVersion: 111"), std::string("schemaVersion: 111").size(),
 			"schemaVersion: " + std::to_string(version));
 		require(!core::parseStationConfiguration(bad, loaded, &diagnostic)
 			&& loaded.settings == settings, "unsupported heat engine schema was accepted");
 	}
 	{
 		auto bad = yaml;
-		bad.replace(bad.find("schemaVersion: 110"), std::string("schemaVersion: 110").size(),
+		bad.replace(bad.find("schemaVersion: 111"), std::string("schemaVersion: 111").size(),
 			"schemaVersion: 109");
 		require(!core::parseStationConfiguration(bad, loaded, &diagnostic)
 			&& diagnostic.find("commanded input") != std::string::npos

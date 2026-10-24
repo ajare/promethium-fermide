@@ -18,6 +18,7 @@
 #include "StationRig.h"
 
 #include "core/StationPrefab.h"
+#include "core/StationConfigurationDocument.h"
 
 #include <cstring>
 #include <fstream>
@@ -711,7 +712,7 @@ parameters:
 	// 'prefabCatalogue' root with a 'prefabs' array, loaded as a whole.
 	std::string catalogueYaml(std::string const& items)
 	{
-		return "schemaVersion: 110\nprefabCatalogue:\n  prefabs:\n" + items;
+		return "schemaVersion: 111\nprefabCatalogue:\n  prefabs:\n" + items;
 	}
 
 	// Re-indent a standalone template document into one `- ` item of a
@@ -799,7 +800,7 @@ parameters:
 		std::string diagnostic;
 		core::PrefabCatalogue catalogue;
 		// A document with no 'prefabs' array is not a catalogue.
-		require(!core::parsePrefabCatalogue("schemaVersion: 110\nprefabCatalogue:\n  other: 1\n",
+		require(!core::parsePrefabCatalogue("schemaVersion: 111\nprefabCatalogue:\n  other: 1\n",
 				catalogue, &diagnostic)
 			&& diagnostic.find("prefabs") != std::string::npos,
 			("a catalogue with no prefabs array must be refused: " + diagnostic).c_str());
@@ -891,6 +892,200 @@ parameters:
 		require(core::expandPrefab(tmpl, overrides, "ac1", expansion, reason),
 			("default overrides must be accepted: " + reason).c_str());
 	}
+
+	// #814: the provenance block in the station configuration document.
+	// A placed unit's {prefab id, instance id, overrides} round-trips
+	// losslessly, the flattened expansion validates on its own without
+	// any catalogue, and the schema boundary refuses old readers rather
+	// than letting them silently drop the block.
+	std::string placedUnitYaml()
+	{
+		auto const tmpl = parseAircon();
+		std::string reason;
+		// Non-default overrides of both kinds: the values that travel must
+		// be exactly the ones the author placed with.
+		core::PrefabOverrides overrides{
+			{"setpoint", core::PrefabOverrideValue{8.5}},
+			{"capacity", core::PrefabOverrideValue{12.0}},
+			{"criticalService", core::PrefabOverrideValue{true}}};
+		core::PrefabExpansion expansion;
+		require(core::expandPrefab(tmpl, overrides, "ac1", expansion, reason), reason.c_str());
+		core::StationConfigurationDocument document;
+		document.settings = expansion.entries;
+		document.prefabs.push_back({"aircon-unit", "ac1", overrides});
+		return core::serializeStationConfiguration(document);
+	}
+
+	void replaceAllText(std::string& text, std::string const& from, std::string const& to)
+	{
+		for (auto at = text.find(from); at != std::string::npos; at = text.find(from, at + to.size()))
+			text.replace(at, from.size(), to);
+	}
+
+	// Drop the whole `key:` block (the key line at column 0 and every
+	// indented line after it) from the serialized document.
+	void replaceBlock(std::string& yaml, std::string const& key)
+	{
+		auto const at = yaml.find(key + ":");
+		require(at != std::string::npos && (at == 0 || yaml[at - 1] == '\n'),
+			("document should carry a " + key + " block at the root").c_str());
+		auto end = yaml.find('\n', at);
+		while (end != std::string::npos)
+		{
+			auto const next = yaml.find('\n', end + 1);
+			auto const chunk = yaml.substr(end + 1, next == std::string::npos
+				? std::string::npos : next - end - 1);
+			if (!chunk.empty() && chunk[0] == ' ')
+			{
+				end = next;
+				continue;
+			}
+			break;
+		}
+		yaml.erase(at, (end == std::string::npos ? yaml.size() : end + 1) - at);
+	}
+
+	std::string replaceOnce(std::string const& text, std::string const& from, std::string const& to)
+	{
+		auto out = text;
+		auto const at = out.find(from);
+		require(at != std::string::npos, ("fixture text missing: " + from).c_str());
+		out.replace(at, from.size(), to);
+		return out;
+	}
+
+	void prefabProvenanceRoundTrip(smoke::Context const&)
+	{
+		auto const yaml = placedUnitYaml();
+		require(yaml.find("schemaVersion: 111") != std::string::npos
+				&& yaml.find("prefabId: aircon-unit") != std::string::npos
+				&& yaml.find("instanceId: ac1") != std::string::npos
+				&& yaml.find("kind: number") != std::string::npos
+				&& yaml.find("kind: boolean") != std::string::npos,
+			"the provenance block did not reach the YAML");
+		core::StationConfigurationDocument loaded;
+		std::string diagnostic;
+		require(core::parseStationConfiguration(yaml, loaded, &diagnostic), diagnostic.c_str());
+		core::StationConfigurationDocument original;
+		require(core::parseStationConfiguration(yaml, original, &diagnostic), diagnostic.c_str());
+		require(loaded.settings == original.settings, "the expansion changed on round trip");
+		require(loaded.prefabs == original.prefabs, "the provenance block did not round trip");
+		require(loaded.prefabs.size() == 1
+				&& loaded.prefabs[0].prefabId == "aircon-unit"
+				&& loaded.prefabs[0].instanceId == "ac1"
+				&& loaded.prefabs[0].overrides.size() == 3
+				&& std::get<double>(loaded.prefabs[0].overrides.at("setpoint")) == 8.5
+				&& std::get<bool>(loaded.prefabs[0].overrides.at("criticalService")),
+			"the provenance values did not survive the round trip intact");
+		// Re-serializing what the reader produced writes the same bytes: the
+		// reader lands exactly the shape the writer wrote, so save/re-save
+		// never drifts.
+		require(core::serializeStationConfiguration(loaded) == yaml,
+			"the provenance block did not re-serialize identically");
+		// The composite boundary record rebuilds from provenance with the
+		// same exposed-pin aliases the original expansion produced.
+		core::PlacedPrefab placed;
+		std::string reason;
+		require(core::reconstructPlacedPrefab(parseAircon(), loaded.prefabs[0], placed, reason),
+			reason.c_str());
+		core::PrefabExpansion expansion;
+		require(core::expandPrefab(parseAircon(), loaded.prefabs[0].overrides, "ac1",
+				expansion, reason), reason.c_str());
+		require(placed.prefabId == "aircon-unit" && placed.instanceId == "ac1"
+				&& placed.overrides == loaded.prefabs[0].overrides
+				&& placed.exposedPins == expansion.exposedPins,
+			"reconstruction from provenance drifted from the original expansion");
+	}
+
+	void prefabProvenanceBoundary(smoke::Context const&)
+	{
+		auto const yaml = placedUnitYaml();
+		core::StationConfigurationDocument loaded;
+		std::string diagnostic;
+		// Old-reader discipline: a document stamped before schema 111 that
+		// carries the provenance block is refused as conversion-required
+		// rather than silently dropping the provenance the author placed.
+		auto stale = yaml;
+		replaceAllText(stale, "schemaVersion: 111", "schemaVersion: 110");
+		require(!core::parseStationConfiguration(stale, loaded, &diagnostic)
+				&& diagnostic.find("Prefab provenance requires World schema 111")
+					!= std::string::npos
+				&& diagnostic.find("conversion required") != std::string::npos,
+			("a pre-111 document carrying provenance was not refused as conversion-required: "
+				+ diagnostic).c_str());
+		require(loaded.prefabs.empty() && loaded.settings == core::StationSystemsSettings{},
+			"a refused document touched the caller's document");
+		// A version beyond what this reader knows is refused outright at the
+		// version boundary, the same refusal every newer-schema document
+		// meets.
+		auto future = yaml;
+		replaceAllText(future, "schemaVersion: 111", "schemaVersion: 112");
+		require(!core::parseStationConfiguration(future, loaded, &diagnostic)
+				&& diagnostic.find("Unsupported Station configuration schemaVersion")
+					!= std::string::npos,
+			("a future-schema document was not refused at the version boundary: "
+				+ diagnostic).c_str());
+		// A pre-111 document WITHOUT the block still loads: the bump gates
+		// the new fields, not the old format.
+		auto legacy = yaml;
+		replaceAllText(legacy, "schemaVersion: 111", "schemaVersion: 110");
+		replaceBlock(legacy, "prefabs");
+		require(core::parseStationConfiguration(legacy, loaded, &diagnostic)
+				&& loaded.prefabs.empty(),
+			("a pre-111 document without provenance must still load: " + diagnostic).c_str());
+	}
+
+	void prefabProvenanceMalformed(smoke::Context const&)
+	{
+		auto const yaml = placedUnitYaml();
+		core::StationConfigurationDocument loaded;
+		std::string diagnostic;
+		auto refuseWith = [&](std::string const& bad, std::string const& expect, char const* what)
+		{
+			require(!core::parseStationConfiguration(bad, loaded, &diagnostic)
+					&& diagnostic.find(expect) != std::string::npos,
+				(std::string(what) + ": " + diagnostic).c_str());
+			require(loaded.prefabs.empty() && loaded.settings == core::StationSystemsSettings{},
+				"a refused provenance document touched the caller's document");
+		};
+		refuseWith(replaceOnce(yaml, "instanceId: ac1", "instanceId: \"\""),
+			"prefab provenance", "an empty instance id must be refused");
+		refuseWith(replaceOnce(yaml, "prefabId: aircon-unit", "prefabId: \"\""),
+			"prefab provenance", "an empty prefab id must be refused");
+		refuseWith(replaceOnce(yaml, "kind: number", "kind: string"),
+			"Unknown prefab override kind", "an unknown override kind must be refused");
+		// Two overrides naming the same dial: the second is a duplicate the
+		// reader cannot resolve to one value.
+		refuseWith(replaceOnce(yaml, "name: capacity", "name: setpoint"),
+			"duplicate prefab override", "a duplicated override name must be refused");
+	}
+
+	void prefabProvenanceCatalogueAbsent(smoke::Context const&)
+	{
+		// The document path never consults a prefab catalogue: the flattened
+		// expansion carries every entry and reference the station needs, so
+		// a saved document loads with the catalogue absent and the
+		// settings stand on their own.
+		auto const yaml = placedUnitYaml();
+		core::StationConfigurationDocument loaded;
+		std::string diagnostic;
+		require(core::parseStationConfiguration(yaml, loaded, &diagnostic), diagnostic.c_str());
+		require(loaded.settings.chillers.size() == 1 && loaded.settings.coolantLoops.size() == 1
+				&& loaded.settings.radiators.size() == 1
+				&& loaded.settings.thermalReservoirs.size() == 2,
+			"the flattened expansion did not load whole");
+		// The loaded settings validate as a standalone configuration with
+		// no template, no catalogue and no instance machinery in sight.
+		std::string validationError;
+		require(core::validateStationSystemsSettings(loaded.settings, validationError),
+			("the expansion must validate on its own: " + validationError).c_str());
+		// The overrides landed inside the expansion: the document's own
+		// entries carry the tuned values, not the template defaults.
+		require(loaded.settings.chillers[0].chilledSetpointC == 8.5
+				&& loaded.settings.chillers[0].ratedCoolingCapacityKW == 12.0
+				&& loaded.settings.chillers[0].criticalService,
+			"the overrides did not land in the self-sufficient expansion");
+	}
 }
 
 void registerStationPrefabChecks(std::vector<smoke::Check>& checks)
@@ -908,4 +1103,8 @@ void registerStationPrefabChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"prefabExposedPinResolution", prefabExposedPinResolution});
 	checks.push_back({"prefabLinkThroughComposite", prefabLinkThroughComposite});
 	checks.push_back({"prefabTemplateLoadValidation", prefabTemplateLoadValidation});
+	checks.push_back({"prefabProvenanceRoundTrip", prefabProvenanceRoundTrip});
+	checks.push_back({"prefabProvenanceBoundary", prefabProvenanceBoundary});
+	checks.push_back({"prefabProvenanceMalformed", prefabProvenanceMalformed});
+	checks.push_back({"prefabProvenanceCatalogueAbsent", prefabProvenanceCatalogueAbsent});
 }

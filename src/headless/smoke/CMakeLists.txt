@@ -131,10 +131,15 @@ set_tests_properties(station-observable-registry-coverage PROPERTIES
 # #812 adds the catalogue itself: transactional whole-document loading, the
 # instance-id allocator the editor places with, and the fixed entry order the
 # placement grid depends on.
+# #814 adds the provenance block: lossless YAML round trip, the schema-111
+# boundary refusal for old readers, malformed-provenance refusals, and the
+# catalogue-absent load where the expansion stands on its own.
 foreach(check prefabCatalogueParse prefabCatalogueRefusals prefabInstanceAllocation
         prefabEntryOrderIsFixed
         prefabTemplateParse prefabTemplateRefusals prefabExpansion prefabOverrides prefabCapRefusal prefabDeterminism
-        prefabExposedPinResolution prefabLinkThroughComposite prefabTemplateLoadValidation)
+        prefabExposedPinResolution prefabLinkThroughComposite prefabTemplateLoadValidation
+        prefabProvenanceRoundTrip prefabProvenanceBoundary prefabProvenanceMalformed
+        prefabProvenanceCatalogueAbsent)
     add_test(NAME station-prefab-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-prefab-${check} PROPERTIES
         LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 30)
@@ -1005,6 +1010,11 @@ set_tests_properties(station-editor-prefab-placement PROPERTIES LABELS "smoke;fu
 # #813: the composite single-node projection with the expand/collapse toggle.
 add_test(NAME station-editor-prefab-composite-projection COMMAND pf-smoke-editor --check station/prefabCompositeProjectionWorkflow)
 set_tests_properties(station-editor-prefab-composite-projection PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+# #814: the provenance block - save carries it, reload re-groups the composite,
+# a catalogue-less load stands alone, and a pre-111 stamp is refused at the open
+# boundary.
+add_test(NAME station-editor-prefab-persistence COMMAND pf-smoke-editor --check station/prefabPersistenceWorkflow)
+set_tests_properties(station-editor-prefab-persistence PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-coolant-loop COMMAND pf-smoke-editor --check station/flowCoolantLoopWorkflow)
 set_tests_properties(station-editor-flow-coolant-loop PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-transfers COMMAND pf-smoke-editor --check station/transferWorkflow)

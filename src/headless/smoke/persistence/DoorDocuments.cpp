@@ -1082,7 +1082,7 @@ namespace persistence
 			("A Lift stop style override was refused: " + diagnostic).c_str());
 
 		auto const yaml = serialize(authored);
-		require(yaml.find("version: 110") != std::string::npos,
+		require(yaml.find("version: 111") != std::string::npos,
 			"A map with authored Door styles was not written at the current schema version");
 		require(yaml.find("version: 6\n") == std::string::npos,
 			"A map with authored Door styles still carries version 6");

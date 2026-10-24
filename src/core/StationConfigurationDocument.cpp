@@ -15,7 +15,7 @@ namespace core
 	{
 		auto output = YamlSerializer::toString();
 		output->beginMap("stationConfiguration");
-		output->writeUint32("schemaVersion", 110);
+		output->writeUint32("schemaVersion", 111);
 		writeStationSystemsSettingsMap(*output, document.settings);
 		output->beginMap("layout");
 		output->writeFloat("panX", document.panX);
@@ -32,6 +32,38 @@ namespace core
 		}
 		output->endArray();
 		output->endMap();
+		// #814: the provenance block. Written only when units were placed -
+		// a document without prefabs keeps the pre-814 shape verbatim.
+		if (!document.prefabs.empty())
+		{
+			output->beginArray("prefabs");
+			for (auto const& provenance : document.prefabs)
+			{
+				output->beginMap("");
+				output->writeString("prefabId", provenance.prefabId);
+				output->writeString("instanceId", provenance.instanceId);
+				output->beginArray("overrides");
+				for (auto const& [name, value] : provenance.overrides)
+				{
+					output->beginMap("");
+					output->writeString("name", name);
+					if (auto const* number = std::get_if<double>(&value))
+					{
+						output->writeString("kind", "number");
+						output->writeDouble("value", *number);
+					}
+					else
+					{
+						output->writeString("kind", "boolean");
+						output->writeBool("value", std::get<bool>(value));
+					}
+					output->endMap();
+				}
+				output->endArray();
+				output->endMap();
+			}
+			output->endArray();
+		}
 		output->endMap();
 		output->serialize();
 		return output->getSerializedString();
@@ -48,7 +80,7 @@ namespace core
 				throw SerializationException("Missing stationSystems map");
 			input->beginMap("stationConfiguration");
 			auto const version = input->readUint32("schemaVersion");
-			if (version < 96 || version > 110) throw SerializationException("Unsupported Station configuration schemaVersion");
+			if (version < 96 || version > 111) throw SerializationException("Unsupported Station configuration schemaVersion");
 			StationConfigurationDocument candidate;
 			readStationSystemsSettingsMap(*input, version, candidate.settings, false);
 			// Incomplete wiring is valid draft state, but all surviving entries
@@ -118,6 +150,62 @@ namespace core
 					input->endArray();
 				}
 				input->endMap();
+			}
+			// #814: the provenance block. Boundary discipline: a document
+			// stamped before schema 111 that carries the block is refused as
+			// conversion-required rather than silently dropping the
+			// provenance the author placed.
+			if (input->hasField("prefabs"))
+			{
+				if (version < 111)
+					throw SerializationException(
+						"Prefab provenance requires World schema 111; conversion required");
+				input->beginArray("prefabs");
+				std::set<std::string> provenanceInstances;
+				while (input->nextArrayItem())
+				{
+					input->beginMap("");
+					PrefabProvenance provenance;
+					provenance.prefabId = input->readString("prefabId");
+					provenance.instanceId = input->readString("instanceId");
+					if (provenance.prefabId.empty() || provenance.instanceId.empty()
+						|| !provenanceInstances.insert(provenance.instanceId).second)
+						throw SerializationException("Invalid or duplicate prefab provenance");
+					if (input->hasField("overrides"))
+					{
+						input->beginArray("overrides");
+						std::set<std::string> overrideNames;
+						while (input->nextArrayItem())
+						{
+							input->beginMap("");
+							auto const name = input->readString("name");
+							auto const kind = input->readString("kind");
+							if (name.empty() || !overrideNames.insert(name).second)
+								throw SerializationException(
+									"Invalid or duplicate prefab override in instance '"
+									+ provenance.instanceId + "'");
+							if (kind == "number")
+							{
+								auto const value = input->readDouble("value");
+								if (!std::isfinite(value))
+									throw SerializationException("Non-finite prefab override '"
+										+ name + "'");
+								provenance.overrides.emplace(name, PrefabOverrideValue{value});
+							}
+							else if (kind == "boolean")
+								provenance.overrides.emplace(name,
+									PrefabOverrideValue{input->readBool("value")});
+							else
+								throw SerializationException("Unknown prefab override kind '" + kind
+									+ "' for parameter '" + name + "'");
+							input->endMap();
+						}
+						input->endArray();
+					}
+					candidate.prefabs.push_back(std::move(provenance));
+					input->endMap();
+				}
+				input->endArray();
 			}
 			input->endMap();
 			document = std::move(candidate);

@@ -68,6 +68,19 @@ namespace core
 	using PrefabOverrideValue = std::variant<double, bool>;
 	using PrefabOverrides = std::map<std::string, PrefabOverrideValue>;
 
+	// #814: the provenance block placement writes into the station
+	// configuration document: which template, which instance and which
+	// overrides produced the flattened entries. The expansion is the truth
+	// and stands on its own; this block is editor metadata used to re-group
+	// the composite on load, and is inert wherever the template is absent.
+	struct PrefabProvenance
+	{
+		std::string prefabId;
+		std::string instanceId;
+		PrefabOverrides overrides;
+		bool operator==(PrefabProvenance const&) const = default;
+	};
+
 	// The result of expanding one template for one instance: namespaced draft
 	// entries with all internal links written, the internal links seen as
 	// authored-link records, and the exposed-port aliases resolved to
@@ -150,7 +163,21 @@ namespace core
 		std::string prefabId;
 		std::string instanceId;
 		std::map<std::string, StationPinRef> exposedPins;
+		// The overrides the instance was expanded with, carried so the
+		// editor can persist the provenance block (#814) without
+		// re-deriving it from the template.
+		PrefabOverrides overrides;
 	};
+
+	// #814: rebuild the composite boundary record from persisted
+	// provenance: the exposed-pin aliases are re-derived for the saved
+	// instance id, and the saved overrides are validated against the
+	// current template by re-expanding. A refusal (overrides the template
+	// no longer accepts, an instance id the template would reject) leaves
+	// `out` untouched: the flattened entries still load as ordinary
+	// nodes, the unit simply does not re-group.
+	bool reconstructPlacedPrefab(PrefabTemplate const& tmpl,
+		PrefabProvenance const& provenance, PlacedPrefab& out, std::string& reason);
 
 	// Resolve one composite exposed-pin reference to the aliased internal
 	// pin. The pin must name this composite (its node type is the prefab id

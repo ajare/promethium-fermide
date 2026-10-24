@@ -264,6 +264,12 @@ private:
 	// itself (composite node keys, synthesized port descriptors) is
 	// rebuilt with the graph and never touches the draft.
 	std::vector<core::PlacedPrefab> mPlacedPrefabs;
+	// #814: provenance read from a document whose catalogue is absent
+	// (or whose template the catalogue no longer backs). Nothing groups
+	// from it while it stays inert, but the export carries it back out so
+	// a catalogue-less load/save round trip never silently drops the
+	// provenance the author placed.
+	std::vector<core::PrefabProvenance> mInertProvenance;
 	std::set<std::string> mExpandedPrefabs;
 	bool mProjectionDirty{false};
 	std::set<std::string> mCompositeKeys;
