@@ -144,6 +144,17 @@ unavailable: it does not yet project transport constraints. Styling-only and
 non-physical properties do not disable forecasts. See
 [forecast scope](station-systems.md#scenario-forecast-420).
 
+Heat engines enforce both thermal interfaces independently. **Thermal intake**
+limits reservoir-side withdrawal; only delivered heat drives conversion, and
+intake losses leave the Station. Engine intake telemetry measures delivered heat,
+whereas the hot reservoir's extraction includes transport loss. **Rejection heat**
+routes the machine's produced rejection through its own input cap and efficiency.
+Heat blocked by that cap remains at the engine and drains in later ticks, even
+while conversion is idle or tripped; it is never silently added to a reservoir.
+The engine's rejection account measures produced heat, while the rejection
+reservoir books only delivered heat. Sink-temperature protection still trips the
+whole conversion, preventing new intake, generation, and rejection production.
+
 Carrier overrides and ratings are sparse entries in `stationSystems.connections`,
 not layout. For example, the input connection of a Transfer named `move` fed by
 Store `a` can carry:

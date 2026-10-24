@@ -3142,20 +3142,20 @@ namespace core
 		double auxiliaryPowerKW{0.0};
 		double minHotTemperatureC{0.0};
 		double maxSinkTemperatureC{0.0};
-		double lastThermalInputKW{0.0};      // heat drawn from the hot reservoir this tick
+		double lastThermalInputKW{0.0};      // heat delivered through the intake connection this tick
 		double lastElectricalOutputKW{0.0};  // net power delivered to the bus this tick
-		double lastRejectionKW{0.0};        // heat booked into the rejection reservoir this tick
+		double lastRejectionKW{0.0};        // rejection heat produced (before transport loss/retention)
 		double lastAuxKW{0.0};             // auxiliaries carried by the conversion this tick
-		std::string lastLimiter;            // Disabled/OutOfService/CapacityReduction/NoGradient/TooCold/SinkOver/AuxiliaryPower/HotSideSupply/CommandedInput/DemandAcceptance/GenerationConnection
+		std::string lastLimiter;            // Disabled/OutOfService/CapacityReduction/NoGradient/TooCold/SinkOver/AuxiliaryPower/HotSideSupply/IntakeConnection/CommandedInput/DemandAcceptance/GenerationConnection
 		double efficiencyNow{0.0};        // actual eta used by the last conversion
 		double carnotEfficiencyNow{0.0};  // Carnot eta at the same interface temperatures
 		double hotTemperatureC{0.0};
 		double sinkTemperatureC{0.0};
 		bool disabled{false};              // zero rated thermal input: no conversion, ever
 		bool tripped{false};               // rejection reservoir at or above the max sink gate
-		double thermalInputEnergyKJ{0.0};  // cumulative heat drawn from the hot reservoir
+		double thermalInputEnergyKJ{0.0};  // cumulative heat delivered to the machine
 		double electricalEnergyKJ{0.0};    // cumulative net power delivered to the bus
-		double rejectionEnergyKJ{0.0};     // cumulative heat booked into the rejection reservoir
+		double rejectionEnergyKJ{0.0};     // cumulative rejection produced, including lost/retained heat
 		double residualKJ{0.0};            // input - (electrical + rejection): closes on zero
 		StationHeatEngineStatus status{StationHeatEngineStatus::Disabled};
 		bool operator==(StationHeatEngineSnapshot const&) const = default;

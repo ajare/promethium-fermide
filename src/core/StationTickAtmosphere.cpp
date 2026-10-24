@@ -795,6 +795,7 @@ namespace core
 				else if (key.ownerType == "Methane processor") methaneHeatByReservoir[index] += delivered;
 				else if (key.ownerType == "Microbial processor") microbialHeatByReservoir[index] += delivered;
 				else if (key.ownerType == "Chiller") condenserHeatBySink[index] += delivered;
+				else if (key.ownerType == "Heat engine") engineRejectionByReservoir[index] += delivered;
 				else if (key.ownerType == "Equipment")
 					for (auto& load : runtime.loads) if (load.authored.id == key.ownerId) load.lastHeatRoutedKW += delivered;
 			}

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/BinarySerializer.h"
+#include "core/StationConnections.h"
 #include "core/StationConfigurationDocument.h"
 #include "core/YamlSerializer.h"
 
@@ -2064,10 +2065,151 @@ void heatEngineOutageTransitionCoherence(smoke::Context const&)
 		== finalOrc.thermalInputEnergyKJ,
 		"the final hot reservoir booking does not match the engine ledger");
 }
+// #828: exercise the allocator through committed World snapshots, including
+// the source-side inventory, both transport ledgers and retained producer heat.
+void heatEngineThermalConnections(smoke::Context const&)
+{
+	for (auto const intakeCap : {0.01, 1000.0})
+	for (auto const rejectionCap : {0.01, 1000.0})
+	for (auto const intakeEfficiency : {0.0, 0.5, 1.0})
+	for (auto const rejectionEfficiency : {0.0, 0.5, 1.0})
+	for (auto const aux : {0.0, 0.0001, 1.0})
+	{
+		auto settings = enginePair(20000, 20000, 100, 0.5, aux);
+		settings.systemsStepWorldTicks = 60;
+		for (auto const& link : core::station_connections::build(settings).links)
+		{
+			if (link.designKey.ownerType != "Heat engine") continue;
+			auto const& role = link.designKey.relation;
+			if (role != "Thermal intake" && role != "Rejection heat") continue;
+			auto& p = settings.connections[link.designKey];
+			p.maximumThroughput = role == "Thermal intake" ? intakeCap : rejectionCap;
+			p.efficiency = role == "Thermal intake" ? intakeEfficiency : rejectionEfficiency;
+		}
+		core::World world("EngineThermalConnections", 2, 2);
+		std::string diagnostic;
+		configure(world, settings, diagnostic);
+		world.resumeSimulation();
+		auto const close = [](double a, double b) {
+			require(std::abs(a - b) <= 2e-7 * std::max({1.0, std::abs(a), std::abs(b)}),
+				"heat engine thermal connection ledger mismatch");
+		};
+		for (int step = 0; step < 3; ++step)
+		{
+			require(advanceStationSteps(world, 1), "thermal connection step failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.healthy, "thermal connection audit failed");
+			auto const e = engine(snap, "orc");
+			auto const flow = [&](char const* role) -> core::StationConnectionSnapshot const& {
+				for (auto const& c : snap.connections)
+					if (c.key.ownerType == "Heat engine" && c.key.relation == role) return c;
+				throw std::runtime_error("missing engine thermal connection");
+			};
+			auto const& in = flow("Thermal intake");
+			auto const& out = flow("Rejection heat");
+			require(in.lastInputRate <= intakeCap + 1e-9, "engine bypassed intake throughput");
+			require(out.lastInputRate <= rejectionCap + 1e-9, "engine bypassed rejection throughput");
+			auto const feasible = 0.5 * e.carnotEfficiencyNow
+				* std::min(100.0, intakeCap * intakeEfficiency) > aux + 1e-12;
+			if (feasible || intakeEfficiency == 0)
+				require(in.lastInputRate > 0, "requested engine intake has no transport telemetry");
+			else close(in.lastInputRate, 0);
+			auto const expectedIntake = feasible ? std::min(100.0, intakeCap * intakeEfficiency) : 0.0;
+			close(e.lastThermalInputKW, expectedIntake);
+			close(e.lastElectricalOutputKW, feasible
+				? expectedIntake * 0.5 * e.carnotEfficiencyNow - aux : 0.0);
+			close(e.lastRejectionKW, expectedIntake - e.lastElectricalOutputKW);
+			if (intakeEfficiency == 0) close(in.lastInputRate, std::min(100.0, intakeCap));
+			close(in.lastDeliveredRate, in.lastInputRate * intakeEfficiency);
+			close(out.lastDeliveredRate, out.lastInputRate * rejectionEfficiency);
+			for (auto const* c : {&in, &out}) {
+				close(c->inputTotal, c->deliveredTotal + c->lostTotal);
+				close(c->lastInputRate, c->lastDeliveredRate + c->lastLossRate);
+			}
+			close(e.lastThermalInputKW, in.lastDeliveredRate);
+			close(e.thermalInputEnergyKJ, in.deliveredTotal);
+			close(reservoir(snap, "hot").engineExtractionEnergyKJ, in.inputTotal);
+			close(reservoir(snap, "reject").engineRejectionEnergyKJ, out.deliveredTotal);
+			close(reservoir(snap, "hot").temperatureC, 90.0 - in.inputTotal / 20000.0);
+			close(reservoir(snap, "reject").temperatureC, 20.0 + out.deliveredTotal / 20000.0);
+			close(e.rejectionEnergyKJ, out.producedHeatKJ);
+			close(out.producedHeatKJ, out.inputTotal + out.retainedHeatKJ);
+			close(in.inputTotal, e.electricalEnergyKJ + out.deliveredTotal
+				+ out.lostTotal + out.retainedHeatKJ + in.lostTotal);
+			if (feasible) require(e.lastElectricalOutputKW > 0,
+				"feasible constrained engine failed to convert heat");
+		}
+	}
+	// A dispatched engine against a closed bus has no active intake request,
+	// even if the intake connection would lose everything sent through it.
+	{
+		auto settings = enginePair();
+		settings.batteries.clear();
+		for (auto const& link : core::station_connections::build(settings).links)
+			if (link.designKey.ownerType == "Heat engine" && link.designKey.relation == "Thermal intake")
+				settings.connections[link.designKey].efficiency = 0;
+		core::World world("EngineZeroEfficiencyNoAcceptance", 2, 2);
+		std::string diagnostic;
+		configure(world, settings, diagnostic);
+		world.resumeSimulation();
+		require(advanceStationSteps(world, 1), "zero-acceptance lossy intake step failed");
+		auto const snap = world.getStationSystemsSnapshot();
+		require(snap.healthy && engine(snap, "orc").lastLimiter == "DemandAcceptance"
+			&& reservoir(snap, "hot").engineExtractionEnergyKJ == 0,
+			"zero-efficiency intake consumed heat without demand acceptance");
+		for (auto const& c : snap.connections)
+			require(c.inputTotal == 0, "idle closed-bus engine created transport flow");
+	}
+	// Independent sink heating eventually trips the whole conversion, but
+	// heat already produced remains real and continues draining through its
+	// constrained, lossy rejection interface even while the engine is off.
+	auto settings = enginePair(20000, 1.0, 100, 0.5, 1.0);
+	settings.systemsStepWorldTicks = 60;
+	settings.thermalReservoirs[1].absorbedHeatKW = 1.0;
+	for (auto const& link : core::station_connections::build(settings).links)
+		if (link.designKey.ownerType == "Heat engine" && link.designKey.relation == "Rejection heat") {
+			settings.connections[link.designKey].maximumThroughput = 0.02;
+			settings.connections[link.designKey].efficiency = 0.5;
+		}
+	core::World world("EngineRetainedRejectionTrip", 2, 2);
+	std::string diagnostic;
+	configure(world, settings, diagnostic);
+	world.resumeSimulation();
+	require(advanceStationSteps(world, 1), "retained rejection initial step failed");
+	auto before = world.getStationSystemsSnapshot();
+	require(before.healthy && engine(before, "orc").lastElectricalOutputKW > 0,
+		("retained rejection fixture did not run: " + engine(before, "orc").lastLimiter
+			+ " sink=" + std::to_string(reservoir(before, "reject").temperatureC)
+			+ " healthy=" + std::to_string(before.healthy)).c_str());
+	auto after = before;
+	for (int step = 0; step < 10; ++step) {
+		before = after;
+		require(advanceStationSteps(world, 1), "retained rejection trip step failed");
+		after = world.getStationSystemsSnapshot();
+		if (engine(after, "orc").status == core::StationHeatEngineStatus::Tripped) break;
+	}
+	auto const e = engine(after, "orc");
+	require(after.healthy && e.status == core::StationHeatEngineStatus::Tripped
+		&& e.lastLimiter == "SinkOver" && e.lastThermalInputKW == 0
+		&& e.lastElectricalOutputKW == 0 && e.lastRejectionKW == 0,
+		"constrained rejection did not preserve whole-machine sink trip");
+	require(e.thermalInputEnergyKJ == engine(before, "orc").thermalInputEnergyKJ
+		&& e.rejectionEnergyKJ == engine(before, "orc").rejectionEnergyKJ,
+		"tripped engine kept converting heat");
+	for (auto const& c : after.connections)
+		if (c.key.ownerType == "Heat engine" && c.key.relation == "Rejection heat") {
+			require(c.retainedHeatKJ > 0 && c.lastDeliveredRate > 0,
+				"retained engine heat did not drain while tripped");
+			require(std::abs(c.producedHeatKJ - c.inputTotal - c.retainedHeatKJ) < 1e-7
+				&& std::abs(c.deliveredTotal - reservoir(after, "reject").engineRejectionEnergyKJ) < 1e-7,
+				"retained rejection drain erased heat or missed the reservoir");
+		}
+}
 }   // namespace
 
 void registerStationHeatEngineChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"heatEngineThermalConnections", heatEngineThermalConnections});
 	checks.push_back({"heatEngineTracerBullet", heatEngineTracerBullet});
 	checks.push_back({"heatEngineClosure", heatEngineClosure});
 	checks.push_back({"heatEngineCarnotBound", heatEngineCarnotBound});

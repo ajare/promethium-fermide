@@ -651,8 +651,32 @@ namespace core
 			// author throttles below rated to leave heat deliberately in
 			// the hot reservoir for a competing consumer. It caps the
 			// request; it never raises it above rated.
-			auto intakeKW = std::min(engine.authored.commandedInputKW, supplyKW);
-			intakeKW = std::min(intakeKW, effectiveRatedInputKW);
+			auto const intakePort = connections.port("Heat engine",
+				engine.authored.id, "Thermal intake");
+			auto const requestedIntakeKW = std::min(engine.authored.commandedInputKW,
+				effectiveRatedInputKW);
+			// Preview delivery before admitting generation. Supply bounds the
+			// reservoir-side draw (including transport loss), whereas rating,
+			// auxiliaries and conversion apply to heat reaching the machine.
+			auto intakeKW = connections.available(intakePort,
+				std::min(connections.required(intakePort, requestedIntakeKW), supplyKW));
+			if (intakeKW < std::min(requestedIntakeKW, supplyKW) - 1e-12)
+				engine.lastLimiter = "IntakeConnection";
+			if (connections.efficiency(intakePort) == 0.0 && requestedIntakeKW > 0.0)
+			{
+				// As for other actively requested physical inputs, zero
+				// efficiency loses the accepted input; it delivers no heat
+				// and therefore drives no conversion or auxiliaries.
+				auto const acceptanceKW = std::max(0.0, acceptanceCeilingKW - availableGeneration);
+				if (acceptanceKW > 1e-12)
+				{
+					auto const intake = connections.receive(intakePort, requestedIntakeKW, supplyKW);
+					engineExtractionByReservoir[engine.hotIndex] += intake.input;
+				}
+				engine.status = StationHeatEngineStatus::Idle;
+				engine.lastLimiter = acceptanceKW > 1e-12 ? "IntakeConnection" : "DemandAcceptance";
+				continue;
+			}
 			auto grossKW = eta * intakeKW;
 			if (grossKW <= auxKW + 1e-12)
 			{
@@ -705,7 +729,8 @@ namespace core
 				intakeKW = eta > 0.0 ? grossKW / eta : 0.0;
 				engine.lastLimiter = "GenerationConnection";
 			}
-			else if (engine.lastLimiter != "DemandAcceptance")
+			else if (engine.lastLimiter != "DemandAcceptance"
+				&& engine.lastLimiter != "IntakeConnection")
 			{
 				// Name the binding ceiling on the intake: the scheduled
 				// capacity reduction first when the outage's remaining
@@ -732,8 +757,13 @@ namespace core
 			// dissipates into the sink: booked at one consistent
 			// boundary, exactly as the chiller books condenser heat.
 			auto const rejectKW = intakeKW - grossKW + auxKW;
-			engineExtractionByReservoir[engine.hotIndex] += intakeKW;
-			engineRejectionByReservoir[engine.sinkIndex] += rejectKW;
+			auto const intake = connections.receive(intakePort, intakeKW, supplyKW);
+			engineExtractionByReservoir[engine.hotIndex] += intake.input;
+			// Produced rejection that the interface cannot accept stays at
+			// the machine, not in either reservoir and not as external loss.
+			// The common retained-heat drain continues routing it while idle.
+			engineRejectionByReservoir[engine.sinkIndex] += connections.routeHeat(
+				connections.port("Heat engine", engine.authored.id, "Rejection heat"), rejectKW);
 			availableGeneration += netKW; poolGenerationKW += netKW;
 			engine.lastThermalInputKW = intakeKW;
 			engine.lastElectricalOutputKW = netKW;
