@@ -519,21 +519,11 @@ namespace core
 		engineRejectionByReservoir = std::vector<double>(runtime.reservoirs.size(), 0.0);
 		totalHeatEngineOutputKW = double{0.0};
 		totalHeatEngineRejectionKW = double{0.0};
-		// The acceptance ceiling (#805): the power the station can actually
-		// take this tick - the demand the station last presented to the pool
-		// plus the charge headroom the batteries can still absorb. The
-		// engine converts only the heat whose power is admitted ahead of
-		// the discretionary demand it supplies: unadmitted power means
-		// unconverted heat, left in the hot reservoir for whatever else
-		// can use it. This is the exact mirror of the standing rule for
-		// energy-fed machines - a Sabatier reactor only converts the
-		// methane the actually supplied energy can drive. The demand
-		// signal is the last committed one, the same supply-independent
-		// signal automatic dispatch steers by (#415): protected service
-		// admission draws from the pool ahead of every discretionary load,
-		// so the watts an engine supplies here are never cut from a
-		// protected service, and the throttle only ever withholds supply
-		// the station had no acceptance for.
+		// Acceptance uses this event-split interval's allocation requests
+		// (#830), not the previous commit's dispatch-controller feedback.
+		// runLedger previews the real allocation transactionally before this
+		// pass. Protected claims therefore have supply on their first active
+		// interval, and vanished demand cannot spend one more interval of heat.
 		double chargeHeadroomKW = 0.0;
 		for (auto const& battery : runtime.batteries)
 		{
@@ -543,7 +533,7 @@ namespace core
 			chargeHeadroomKW += std::min(battery.authored.maxChargeKW,
 				headroom / hours / battery.authored.chargeEfficiency);
 		}
-		auto const acceptanceCeilingKW = runtime.lastDispatchDemandKW + chargeHeadroomKW;
+		auto const acceptanceCeilingKW = engineAcceptanceDemandKW + chargeHeadroomKW;
 		auto const dtSeconds = static_cast<double>(seconds);
 		for (auto& engine : runtime.heatEngines)
 		{

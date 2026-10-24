@@ -225,6 +225,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         # counterparts of the heavy sweeps run here so the fast pass still
         # sees the exergy bound, the inverted-gradient idle and the cadence
         # agreement; the full sweeps are registered below as exhaustive.
+        heatEngineCurrentDemand
         heatEngineExergyRunToEquilibrium heatEngineExergySweepSmoke
         heatEngineInvertedGradientIdle heatEngineCadenceInvariance
         # #807: the heat engine registered as an outageable, maintainable

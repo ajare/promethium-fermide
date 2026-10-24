@@ -1,8 +1,9 @@
 #include "StationSystemsImpl.h"
 namespace core
 {
-	// Run the ledger for one tick and roll it back whole unless every
-	// audit passed (#555). The ledger mutates the live transfer,
+	// Capture the ledger's rollback state for a tick or allocation preview.
+	// Failed ticks restore this whole checkpoint (#555). The ledger mutates
+	// the live transfer,
 	// conversion, load, solar and battery state while it runs, so a
 	// failed audit restores every one of those objects, and the
 	// allocation scalars derived from them, to the last committed
@@ -13,9 +14,8 @@ namespace core
 	// history through the public snapshot. The violated subsystem is
 	// reported through `system` so the structured diagnostic names
 	// what failed (#553, completed for outages and events by #602).
-	bool StationSystemsRuntime::Impl::applyLedger(uint64_t tick, double seconds, std::string& system, std::string& violation)
+	std::function<void()> StationSystemsRuntime::Impl::ledgerCheckpoint()
 	{
-		system = "Resource transfer";
 		auto const committedStores = stores;
 		auto const committedConstituentLoss = constituentLoss;
 		auto const committedUnitLoss = unitLoss;
@@ -50,16 +50,10 @@ namespace core
 		auto const committedRadiators = radiators;
 		auto const committedCoolantLoops = coolantLoops;
 		auto const committedChillers = chillers;
-	// #808: the heat engine state carries cumulative ledgers (intake,
-	// electrical, rejection) and per-tick gate/status fields that the
-	// generation pass mutates in place. Without this backup, a discarded
-	// prediction/refinement pass keeps its engine bookings while the
-	// reservoirs it drew from are restored, so the engine ledger and the
-	// reservoir-side extraction/rejection part company whenever a coarse
-	// step is probed and re-run - exactly the short-cycling chatter a
-	// saturating rejection buffer produces. The engine's books must be
-	// transactional like every other machine's.
-	auto const committedHeatEngines = heatEngines;
+		// Engine cumulative ledgers and gates must roll back together with
+		// their reservoirs, both for protection refinement (#808) and for
+		// the current-interval demand preview (#830).
+		auto const committedHeatEngines = heatEngines;
 		auto const committedThermalBuffers = thermalBuffers;
 		auto const committedGenerators = generators;
 		auto const committedAtmospheres = atmospheres;
@@ -100,7 +94,7 @@ namespace core
 		auto const committedRecoveryPending = lastRecoveryPending;
 		auto const committedRecoveringCount = lastRecoveringCount;
 		auto const committedRecoverySurgeKW = lastRecoverySurgeKW;
-		auto restore = [&]()
+		return [=, this]()
 		{
 			stores = committedStores;
 			constituentLoss = committedConstituentLoss;
@@ -162,6 +156,12 @@ namespace core
 			lastRecoveringCount = committedRecoveringCount;
 			lastRecoverySurgeKW = committedRecoverySurgeKW;
 		};
+	}
+
+	bool StationSystemsRuntime::Impl::applyLedger(uint64_t tick, double seconds, std::string& system, std::string& violation)
+	{
+		system = "Resource transfer";
+		auto const restore = ledgerCheckpoint();
 		// Coarse steps are probed transactionally. Refusals only accumulate:
 		// reallocating a refused machine's power can expose another machine,
 		// so one preview is not sufficient. No trial counters, events, flows or
@@ -249,7 +249,27 @@ namespace core
 		}
 		auto integrate = [&](double instant, double duration, auto&& committed)
 		{
+			// #830: dispatch feedback is intentionally delayed, but engine
+			// acceptance is not. Discover THIS interval's requests through the
+			// real allocation path with all available engine capacity offered.
+			// Roll back every preview booking before converting accepted heat.
+			// Do this inside the event split so on/off windows never share power.
+			double engineDemandKW = 0.0;
+			if (!heatEngines.empty())
+			{
+				auto const restore = ledgerCheckpoint();
+				auto const savedPrediction = prediction;
+				Tick preview(*this, tick, duration, system, violation, instant, true);
+				auto const valid = preview.prepare() && preview.generation()
+					&& preview.protection() && preview.thermal() && preview.processing()
+					&& preview.biology() && preview.atmosphere() && preview.auditPower();
+				engineDemandKW = preview.dispatchDemandKW;
+				restore();
+				prediction = savedPrediction;
+				if (!valid) return false;
+			}
 			Tick scratch(*this, tick, duration, system, violation, instant, true);
+			scratch.engineAcceptanceDemandKW = engineDemandKW;
 			if (!scratch.prepare() || !scratch.generation() || !scratch.protection()
 				|| !scratch.thermal() || !scratch.processing() || !scratch.biology()
 				|| !scratch.atmosphere()) return false;
@@ -496,13 +516,16 @@ namespace core
 			&r.lastCondenserHeatKW, &r.lastGeneratorHeatKW, &r.lastElectrolysisHeatKW,
 			&r.lastFuelCellHeatKW, &r.lastSabatierHeatKW, &r.lastMethaneProcessingHeatKW,
 			&r.lastMicrobialHeatKW, &r.lastAtmosphereHeatKW, &r.lastBufferChargeKW,
-			&r.lastBufferDischargeKW, &r.lastHeatInKW, &r.lastRejectedKW, &r.lastNetKW});
+			&r.lastBufferDischargeKW, &r.lastHeatInKW, &r.lastRejectedKW, &r.lastNetKW,
+			&r.lastEngineExtractionKW, &r.lastEngineRejectionKW});
 		for (auto& r : radiators) mean({&r.lastRejectedKW});
 		for (auto& b : batteries) mean({&b.lastChargeKW, &b.lastDischargeKW,
 			&b.lastDischargeRequestedKW, &b.lastDischargeShortfallKW});
 		for (auto& g : generators) mean({&g.lastAverageOutputKW, &g.lastWasteHeatKW,
 			&g.lastStartupDrawKW, &g.lastStartupUnmetKW, &g.lastDecayHeatKW});
 		for (auto& f : fuelCells) mean({&f.lastOutputKW, &f.lastWasteHeatKW, &f.lastUnmetOutputKW});
+		for (auto& e : heatEngines) mean({&e.lastThermalInputKW,
+			&e.lastElectricalOutputKW, &e.lastRejectionKW});
 		std::vector<std::array<double, 3>> connectionRateTotals(connectionFlows.size());
 		for (auto& t : transfers)
 			if (t.authored.mode == ResourceTransferMode::Continuous)

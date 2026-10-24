@@ -1168,6 +1168,101 @@ void heatEngineClosureUnderThrottle(smoke::Context const&)
 // protected floor is part of the acceptance signal, so a protected load
 // never starves because the engine's throttle exists - and the engine
 // never over-extracts beyond the acceptance it was given.
+// #830: inspect every committed interval, not just a settled snapshot.
+void heatEngineCurrentDemand(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	auto settings = enginePair(20000.0, 20000.0, 100.0, 0.5, 0.0);
+	settings.systemsStepWorldTicks = 60;
+	settings.batteries.clear();
+	auto const second = 60 * static_cast<double>(core::World::getFixedTimestep());
+	core::EquipmentLoadSettings load;
+	load.id = "protected";
+	load.thermalClass = "warm";
+	load.electricalDemandKW = load.criticalFloorKW = 5.0;
+	load.operatingProfile.periodSeconds = 4 * second;
+	load.operatingProfile.segments = {{0.0, 1.0}, {2 * second, 0.0}};
+	settings.equipmentLoads = {load};
+	core::StationSystemsRuntime runtime(settings, core::World::getFixedTimestep());
+	for (int step = 1; step <= 8; ++step)
+	{
+		require(runtime.advanceTo(step * second), "current-demand step failed");
+		auto const snap = runtime.snapshot();
+		require(snap.healthy, "current-demand audit failed");
+		auto const expected = ((step - 1) % 4 < 2) ? 5.0 : 0.0;
+		require(std::abs(loadSnap(snap, "protected").suppliedKW - expected) < 1e-9,
+			"current protected demand starved on its first active interval");
+		require(std::abs(engine(snap, "orc").lastElectricalOutputKW - expected) < 1e-9,
+			"engine extracted heat after demand disappeared");
+	}
+
+	// Quarter-second forcing edges lie inside coarse steps; ratio 7 also
+	// straddles the whole-second edges. All cadences reach the same 7 s and
+	// 14 s committed endpoints. Check every interval against its analytical
+	// demand/generation overlap, not merely the final steady-state output.
+	for (bool competingSolar : {false, true})
+	for (uint32_t ratio : {1u, 6u, 7u, 30u, 60u})
+	{
+		auto scenario = settings;
+		scenario.systemsStepWorldTicks = ratio;
+		auto const quantum = static_cast<double>(core::World::getFixedTimestep());
+		auto& profile = scenario.equipmentLoads[0].operatingProfile;
+		profile.segments = {{0.0, 0.0}, {15 * quantum, 1.0},
+			{75 * quantum, 0.5}, {135 * quantum, 0.0}};
+		if (competingSolar)
+		{
+			core::SolarArraySettings solar;
+			solar.id = "sun";
+			solar.capacityKW = 8.0;
+			solar.illumination.periodSeconds = 240 * quantum;
+			solar.illumination.segments = {{0.0, 1.0}, {45 * quantum, 0.25},
+				{105 * quantum, 0.0}, {180 * quantum, 1.0}};
+			scenario.solarArrays = {solar};
+		}
+		core::StationSystemsRuntime run(scenario, core::World::getFixedTimestep());
+		double expectedCumulativeKJ = 0.0;
+		double previousWorkKJ = 0.0;
+		for (uint32_t tick = ratio; tick <= 840; tick += ratio)
+		{
+			double demandKJ = 0.0, workKJ = 0.0;
+			for (auto t = tick - ratio; t < tick; ++t)
+			{
+				auto const phase = t % 240;
+				auto const demand = phase < 15 ? 0.0 : phase < 75 ? 5.0 : phase < 135 ? 2.5 : 0.0;
+				auto const solar = !competingSolar ? 0.0
+					: phase < 45 ? 8.0 : phase < 105 ? 2.0 : phase < 180 ? 0.0 : 8.0;
+				demandKJ += demand * quantum;
+				workKJ += std::max(0.0, demand - solar) * quantum;
+			}
+			expectedCumulativeKJ += workKJ;
+			if (!run.advanceTo(tick * quantum))
+				throw std::runtime_error("profile-demand step failed at ratio " + std::to_string(ratio)
+					+ " tick " + std::to_string(tick) + ": "
+					+ (run.diagnostics().empty() ? "no diagnostic" : run.diagnostics().back().message));
+			auto const snap = run.snapshot();
+			auto const orc = engine(snap, "orc");
+			require(snap.healthy && snap.systemsStepWorldTicks == ratio,
+				"profile-demand cadence audit or clock failed");
+			require(snap.power.protectedUnmetKW <= 1e-9
+				&& loadSnap(snap, "protected").unmetCriticalKW <= 1e-9,
+				"profile transition left protected demand unmet");
+			require(std::abs(loadSnap(snap, "protected").suppliedKW
+				* ratio * quantum - demandKJ) < 1e-8,
+				"profile interval did not supply its integrated demand");
+			require(std::abs(orc.electricalEnergyKJ - previousWorkKJ - workKJ) < 1e-8,
+				"engine used stale demand or competing generation within an interval");
+			require(std::abs(orc.electricalEnergyKJ - expectedCumulativeKJ) < 1e-8,
+				"cadences disagree on cumulative demand-accepted work");
+			if (workKJ == 0.0)
+				require(orc.lastThermalInputKW == 0.0 && orc.lastRejectionKW == 0.0,
+					"engine moved heat without current demand acceptance");
+			require(std::abs(orc.residualKJ) <= 1e-6 * std::max(1.0, orc.thermalInputEnergyKJ),
+				"current-demand conversion ledger did not close");
+			previousWorkKJ = orc.electricalEnergyKJ;
+		}
+	}
+}
+
 void heatEngineProtectedService(smoke::Context const&)
 {
 	std::string diagnostic;
@@ -2225,6 +2320,7 @@ void registerStationHeatEngineChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"heatEngineAuxiliaryIdle", heatEngineAuxiliaryIdle});
 	checks.push_back({"heatEngineClosureUnderThrottle", heatEngineClosureUnderThrottle});
 	checks.push_back({"heatEngineProtectedService", heatEngineProtectedService});
+	checks.push_back({"heatEngineCurrentDemand", heatEngineCurrentDemand});
 	checks.push_back({"heatEngineExergyRunToEquilibrium", heatEngineExergyRunToEquilibrium});
 	checks.push_back({"heatEngineExergySweepSmoke", heatEngineExergySweepSmoke});
 	checks.push_back({"heatEngineExergySweep", heatEngineExergySweep});

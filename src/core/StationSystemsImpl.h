@@ -3,6 +3,7 @@
 #include "StationClock.h"
 #include "StationProtectionPrediction.h"
 #include "core/SimulationStepTiming.h"
+#include <functional>
 
 namespace core
 {
@@ -1594,6 +1595,7 @@ using namespace station_detail;
 			double drawableNow, double elapsedSeconds);
 		void updateEndurance(uint64_t tick);
 		StationForecastSnapshot computeForecast(double asOfSeconds) const;
+		std::function<void()> ledgerCheckpoint();
 		bool applyLedger(uint64_t tick, double seconds, std::string& system, std::string& violation);
 		bool runLedger(uint64_t tick, double seconds, std::string& system, std::string& violation);
 		struct Tick;
@@ -1744,6 +1746,8 @@ using namespace station_detail;
 		// sink's gain close on one number.
 		std::vector<double> engineExtractionByReservoir{};
 		std::vector<double> engineRejectionByReservoir{};
+		// Unbounded only for the rollback-only current-request preview.
+		double engineAcceptanceDemandKW{std::numeric_limits<double>::infinity()};
 		double totalHeatEngineOutputKW{};
 		double totalHeatEngineRejectionKW{};
 		std::vector<double> loopExchangeConductanceKWPerK{};

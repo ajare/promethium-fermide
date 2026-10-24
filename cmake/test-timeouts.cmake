@@ -464,6 +464,7 @@ set(PF_TEST_TIMEOUTS
     "station-heatEngineAuxiliaryIdle=10"
     "station-heatEngineClosureUnderThrottle=10"
     "station-heatEngineProtectedService=10"
+    "station-heatEngineCurrentDemand=10"
     "station-heatEngineExergyRunToEquilibrium=15"
     "station-heatEngineExergySweepSmoke=15"
     "station-heatEngineInvertedGradientIdle=10"
