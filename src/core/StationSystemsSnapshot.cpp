@@ -426,6 +426,12 @@ namespace core
 				fault.derivedImpact = 1.0 - loop.coolantKg / loop.authored.coolantCapacityKg;
 				loopResult.activeFaults.push_back(std::move(fault));
 			}
+			if (loop.seizure)
+			{
+				auto fault = *loop.seizure;
+				fault.derivedImpact = 1.0;
+				loopResult.activeFaults.push_back(std::move(fault));
+			}
 			loopResult.reservoirId = loop.authored.reservoirId;
 			loopResult.coolantCapacityKg = loop.authored.coolantCapacityKg;
 			loopResult.coolantKg = loop.coolantKg;
@@ -452,6 +458,16 @@ namespace core
 			loopResult.belowFreezeSetpoint = loop.lastBelowFreeze;
 			loopResult.disabled = loop.coolantKg <= 0.0;
 			loopResult.availabilityFactor = loop.availabilityFactor;
+			// The Condition layer (#840). Reported for every loop: one with
+			// no Condition model reports a full, un-stressed, not-restoring
+			// machine, which is exactly what it is.
+			loopResult.condition = loop.condition;
+			loopResult.lastConditionDelta = loop.lastConditionDelta;
+			loopResult.conditionStressors = loop.lastStressors;
+			loopResult.restoring = loop.lastRestoring;
+			loopResult.restoreTargetCondition = loop.restoreTarget;
+			loopResult.restoreStockConsumedUnits = loop.restoreStockUnits;
+			loopResult.conditionCapability = loop.conditionCapability();
 			loopResult.startingEnergyKJ = loop.authored.startingCoolantKg
 				* loop.authored.specificHeatKJPerKgK * loop.authored.startingTemperatureC;
 			loopResult.currentEnergyKJ = loop.coolantKg

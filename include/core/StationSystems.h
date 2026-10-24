@@ -341,6 +341,11 @@ namespace core
 	// residual may not exceed tolerance * max(1, |total starting|). Residuals
 	// beyond this are conservation violations, never silent clamping.
 	inline constexpr double StationBalanceTolerance{1e-9};
+	// The band inside which a Condition is treated as already reached: a
+	// restore command whose target sits within it of the current Condition
+	// would heal nothing, so it is refused rather than accepted to no-op
+	// (#840).
+	inline constexpr double StationConditionEpsilon{1e-12};
 
 	// #424: the published bounds on retained runtime history. The event
 	// history keeps at most the newest this-many entries and every trend
@@ -604,10 +609,47 @@ namespace core
 	};
 	struct FaultCause
 	{
-		enum class Kind { AgentAction, ScenarioEvent, Editor };
+		// The three client-supplied kinds name who struck the machine; the
+		// fourth is never injectable: the simulation raises it itself when
+		// an Installation's Condition falls through the threshold its
+		// catalogue mode declares (#840). A client cannot forge it, and
+		// the injected-command surface refuses it outright.
+		enum class Kind { AgentAction, ScenarioEvent, Editor, DegradationCrossing };
 		Kind kind{Kind::ScenarioEvent};
 		std::string detail;
 		bool operator==(FaultCause const&) const = default;
+	};
+	// The opt-in Condition model (#840), the microbial pattern of #408
+	// generalized from a living culture to a machine. An Installation
+	// that declares this block carries one aggregate Condition in [0, 1]
+	// - never per-part health - which is eroded by the declared stressor
+	// set only while each stressor actually acts, and is restored only
+	// by funded recovery. Absent, the Installation has no Condition and
+	// behaves exactly as it did before this feature: existing fixtures
+	// replay byte-identical.
+	//
+	// Every rate is a provisional engineering assumption in condition
+	// points per hour, tunable live; the thresholds are the authored
+	// points at which a stressor starts (or stops) acting. Stressors
+	// are named in the snapshot so a degraded machine always says what
+	// is degrading it. Recovery is never instant: it proceeds at most
+	// restorePerHour toward the commanded target, and each restored
+	// point spends stockUnitsPerConditionPoint from the named service
+	// stock store above that store's protected reserve - so a restore
+	// can stall with its target unmet when the stock runs out, and the
+	// reserve is never eaten to finish the job.
+	struct InstallationConditionSettings
+	{
+		double initialCondition{1.0};            // Condition at run start, [0, 1]
+		double overheatStressC{80.0};           // at or above this loop temperature the pump is heat-stressed
+		double overheatDegradePerHour{0.0};     // condition points lost per hour while heat-stressed
+		double cavitationFillFraction{0.25};    // at or below this fill, a running pump is cavitating
+		double cavitationDegradePerHour{0.0};   // condition points lost per hour while cavitating
+		double seizureThreshold{0.15};          // crossing below this spawns the catalogue 'pump-seizure' Fault
+		std::string restoreStoreId;             // service stock that funds Condition recovery
+		double restorePerHour{0.0};             // maximum condition points restored per hour
+		double stockUnitsPerConditionPoint{1.0};// stock units consumed per condition point restored
+		bool operator==(InstallationConditionSettings const&) const = default;
 	};
 	struct StationFaultSnapshot
 	{
@@ -640,6 +682,11 @@ namespace core
 		// any class, because a loop carries none (#757).
 		bool criticalService{false};
 		std::optional<CoolantLeakSettings> coolantLeak;
+		// #840: the loop's opt-in Condition model. Its presence is
+		// topology (the model is a run-shape decision, not a live knob)
+		// and so is which store funds recovery; the rates inside it are
+		// live-tunable parameters.
+		std::optional<InstallationConditionSettings> condition;
 		bool operator==(CoolantLoopSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationCoolantLoops{8};
@@ -3095,6 +3142,18 @@ namespace core
 		bool belowFreezeSetpoint{false};
 		bool disabled{false};              // zero coolant: no fluid, no service
 		double availabilityFactor{1.0};   // circulation capacity available under outages (#413)
+		// The Condition layer (#840): the aggregate intactness of the
+		// machine, the stressors actually eroding it this tick, and the
+		// funded recovery in flight. Reported for every loop; a loop with
+		// no Condition model reports a full-condition, un-stressed,
+		// not-restoring machine, which is exactly what it is.
+		double condition{1.0};            // [0, 1]; one is fully capable
+		double lastConditionDelta{0.0};   // signed change over the last tick
+		std::string conditionStressors;   // '+'-joined active stressors, empty when none
+		bool restoring{false};            // funded recovery advanced this tick
+		double restoreTargetCondition{0.0};// commanded target, 0 when none
+		double restoreStockConsumedUnits{0.0}; // cumulative service stock spent
+		double conditionCapability{1.0};  // delivered-capability fraction Condition leaves, [0, 1]
 		double startingEnergyKJ{0.0};
 		double currentEnergyKJ{0.0};
 		double pumpWorkEnergyKJ{0.0};

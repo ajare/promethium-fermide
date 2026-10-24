@@ -16,10 +16,13 @@ namespace core
 		auto output = YamlSerializer::toString();
 		output->beginMap("stationConfiguration");
 		// Keep feature-absent documents byte-identical; schema 112 is required
-		// only when the new opt-in contract actually travels on the wire.
+		// only when the new opt-in contract actually travels on the wire, and
+		// schema 113 only when a loop carries the Condition model (#840).
 		bool const faults = std::any_of(document.settings.coolantLoops.begin(), document.settings.coolantLoops.end(),
 			[](auto const& loop) { return loop.coolantLeak.has_value(); });
-		output->writeUint32("schemaVersion", faults ? 112 : 111);
+		bool const condition = std::any_of(document.settings.coolantLoops.begin(), document.settings.coolantLoops.end(),
+			[](auto const& loop) { return loop.condition.has_value(); });
+		output->writeUint32("schemaVersion", condition ? 113 : faults ? 112 : 111);
 		writeStationSystemsSettingsMap(*output, document.settings);
 		output->beginMap("layout");
 		output->writeFloat("panX", document.panX);
@@ -84,7 +87,7 @@ namespace core
 				throw SerializationException("Missing stationSystems map");
 			input->beginMap("stationConfiguration");
 			auto const version = input->readUint32("schemaVersion");
-			if (version < 96 || version > 112) throw SerializationException("Unsupported Station configuration schemaVersion");
+			if (version < 96 || version > 113) throw SerializationException("Unsupported Station configuration schemaVersion");
 			StationConfigurationDocument candidate;
 			readStationSystemsSettingsMap(*input, version, candidate.settings, false);
 			// Incomplete wiring is valid draft state, but all surviving entries

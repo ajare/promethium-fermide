@@ -983,16 +983,24 @@ namespace core
 		// document itself carries no new fields.
 		// Schema 112 adds opt-in coolant Fault settings and runtime replay.
 		// Fault-absent saves retain their exact previous wire representation.
+		// Schema 113 adds the opt-in Condition layer (#840): Condition is
+		// integrated over the run, so a save carrying a Condition-modelled
+		// machine must carry the replay block even when no client ever
+		// issued a Fault command - otherwise the machine would come back
+		// healthy and unworn. Condition-absent saves retain their exact
+		// previous wire representation.
+		bool const condition = std::any_of(mStationSystemsSettings.coolantLoops.begin(), mStationSystemsSettings.coolantLoops.end(),
+				[](auto const& loop) { return loop.condition.has_value(); });
 		bool const faults = std::any_of(mStationSystemsSettings.coolantLoops.begin(), mStationSystemsSettings.coolantLoops.end(),
 			[](auto const& loop) { return loop.coolantLeak.has_value(); })
 			|| (mStationSystemsRuntime && mStationSystemsRuntime->hasFaultCommands());
-		serializer.writeUint32("version", faults ? 112 : 111);
+		serializer.writeUint32("version", condition ? 113 : faults ? 112 : 111);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 			writeStationSystemsSettingsMap(serializer, mStationSystemsSettings);
-		if (mStationSystemsRuntime && mStationSystemsRuntime->hasFaultCommands())
+		if (mStationSystemsRuntime && mStationSystemsRuntime->hasFaultReplayState())
 		{
 			mStationSystemsRuntime->writeFaultReplay(serializer);
 			serializer.writeUint64("stationFaultDriveWorldTick", mStationSystemsWorldTickOffset + mSimulationTick);
@@ -1893,7 +1901,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 112)
+		if (version < 1 || version > 113)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}

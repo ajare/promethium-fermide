@@ -65,14 +65,19 @@ namespace core
 			auto const protectedLoop = coolantServiceProtected(loop);
 			if (!protectedLoop) continue;
 			auto const disabled = loop.coolantKg <= 0.0;
+			// #840: the protected credit must be sized against the same
+			// capability the loop pass will actually deliver, Condition
+			// included, or a worn critical pump would be credited watts it
+			// cannot turn into flow.
+			auto const capability = loop.conditionCapability();
 			auto const effectiveFlowCapacityKgPerS = loop.authored.ratedFlowKgPerS
-				* loop.availabilityFactor;
+				* loop.availabilityFactor * capability;
 			auto const flowCapacityDisabled = effectiveFlowCapacityKgPerS <= 0.0;
 			auto const fillFraction = disabled
 				? 0.0 : loop.flowFillMultiplier();
 			auto const pumpDemandKW = disabled || flowCapacityDisabled
 				? 0.0
-				: loop.authored.pumpPowerKW * fillFraction * loop.availabilityFactor;
+				: loop.authored.pumpPowerKW * fillFraction * loop.availabilityFactor * capability;
 			auto const heaterDemandKW = !disabled
 				&& runtime.prediction.heatRequired(loopIndex, loop.temperatureC, loop.authored.freezeProtectionSetpointC)
 				? loop.authored.heaterCapacityKW : 0.0;
@@ -129,8 +134,11 @@ namespace core
 				&& !sinkQualified(chiller.sinkIndex, chiller.authored.maxCondensingTemperatureC);
 			if (disabled || capacityDisabled || atSetpoint || sinkOver) continue;
 			auto const disabledLoop = loop.coolantKg <= 0.0;
+			// #840: same Condition-scaled capability as the loop pass and
+			// the protected-loop credit above; the three must agree exactly.
+			auto const capability = loop.conditionCapability();
 			auto const loopFlowCapacityKgPerS = loop.authored.ratedFlowKgPerS
-				* loop.availabilityFactor;
+				* loop.availabilityFactor * capability;
 			auto const loopFlowDisabled = loopFlowCapacityKgPerS <= 0.0;
 			auto const fillFraction = disabledLoop
 				? 0.0 : loop.flowFillMultiplier();
@@ -140,7 +148,7 @@ namespace core
 			// can move nothing.
 			auto const loopPumpDemandKW = disabledLoop || loopFlowDisabled
 				? 0.0
-				: loop.authored.pumpPowerKW * fillFraction * loop.availabilityFactor;
+				: loop.authored.pumpPowerKW * fillFraction * loop.availabilityFactor * capability;
 			// The loop's pump is funded once: a protected loop's draw was
 			// already taken by the containment pass above; a normal
 			// loop's draw is taken here as the chiller's support
@@ -176,7 +184,7 @@ namespace core
 				* std::max(0.0, loop.temperatureC - chiller.authored.chilledSetpointC))
 				/ static_cast<double>(seconds);
 			auto const potentialKW = std::min(effectiveCoolingCapacityKW
-				* fillFraction * loop.availabilityFactor, thermalTermKW);
+				* fillFraction * loop.availabilityFactor * capability, thermalTermKW);
 			auto const deliverableKW = std::min(potentialKW * circulationFraction,
 				connections.available(connections.port("Chiller", chiller.authored.id, "Evaporator heat"), thermalTermKW));
 			auto const requestedKW = potentialKW <= 1e-12 ? 0.0

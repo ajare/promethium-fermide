@@ -323,6 +323,23 @@ namespace core
 					serializer.writeDouble("releasedKg", loop.coolantLeak->releasedKg);
 					serializer.endMap();
 				}
+				// #840: the Condition model travels only when the loop has
+				// one, so a feature-absent loop carries no new field and
+				// existing fixtures stay byte-identical.
+				if (loop.condition)
+				{
+					serializer.beginMap("condition");
+					serializer.writeDouble("initialCondition", loop.condition->initialCondition);
+					serializer.writeDouble("overheatStressC", loop.condition->overheatStressC);
+					serializer.writeDouble("overheatDegradePerHour", loop.condition->overheatDegradePerHour);
+					serializer.writeDouble("cavitationFillFraction", loop.condition->cavitationFillFraction);
+					serializer.writeDouble("cavitationDegradePerHour", loop.condition->cavitationDegradePerHour);
+					serializer.writeDouble("seizureThreshold", loop.condition->seizureThreshold);
+					serializer.writeString("restoreStoreId", loop.condition->restoreStoreId);
+					serializer.writeDouble("restorePerHour", loop.condition->restorePerHour);
+					serializer.writeDouble("stockUnitsPerConditionPoint", loop.condition->stockUnitsPerConditionPoint);
+					serializer.endMap();
+				}
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -1450,6 +1467,25 @@ namespace core
 						serializer.readDouble("releasedKg")};
 					serializer.endMap();
 				}
+				// #840: a pre-113 document carrying a Condition model is
+				// refused rather than silently dropped.
+				if (serializer.hasField("condition"))
+				{
+					if (version < 113) throw SerializationException("Station Condition models require schema 113");
+					serializer.beginMap("condition");
+					InstallationConditionSettings model;
+					model.initialCondition = serializer.readDouble("initialCondition");
+					model.overheatStressC = serializer.readDouble("overheatStressC");
+					model.overheatDegradePerHour = serializer.readDouble("overheatDegradePerHour");
+					model.cavitationFillFraction = serializer.readDouble("cavitationFillFraction");
+					model.cavitationDegradePerHour = serializer.readDouble("cavitationDegradePerHour");
+					model.seizureThreshold = serializer.readDouble("seizureThreshold");
+					model.restoreStoreId = serializer.readString("restoreStoreId");
+					model.restorePerHour = serializer.readDouble("restorePerHour");
+					model.stockUnitsPerConditionPoint = serializer.readDouble("stockUnitsPerConditionPoint");
+					serializer.endMap();
+					loop.condition = model;
+				}
 				stationSettings.coolantLoops.push_back(std::move(loop));
 				serializer.endMap();
 			}
@@ -2344,8 +2380,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 112)
-				return refuse("Reference station schema version must be from 65 to 112");
+			if (document.schemaVersion < 65 || document.schemaVersion > 113)
+				return refuse("Reference station schema version must be from 65 to 113");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

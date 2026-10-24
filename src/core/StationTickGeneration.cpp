@@ -9,7 +9,7 @@ namespace core
 		auto const outageElapsed = continuous ? elapsed - seconds : elapsed;
 		for (auto& generator : runtime.generators) generator.availabilityFactor = 1.0;
 		for (auto& loop : runtime.coolantLoops)
-			loop.availabilityFactor = loop.fault
+			loop.availabilityFactor = loop.seizure ? 0.0 : loop.fault
 				? std::min(1.0, loop.coolantKg / loop.authored.coolantCapacityKg) : 1.0;
 		for (auto& chiller : runtime.chillers) chiller.availabilityFactor = 1.0;
 		// The heat engine enters the shared availability contract here: the
@@ -802,7 +802,7 @@ namespace core
 
 	bool StationSystemsRuntime::Impl::Tick::generation()
 	{
-		if (!scheduledState()) return false;
+		if (!scheduledState() || !condition()) return false;
 		// Fuelled generators run ahead of the load allocation (#399):
 		// their electrical output joins the shared generation pool for
 		// this tick's loads, their startup cranking draws ride the same

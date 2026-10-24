@@ -630,6 +630,11 @@ namespace core
 		for (auto const& loop : runtime.coolantLoops)
 		{
 			auto const where = "coolant loop '" + loop.authored.id + "' ";
+			if (!requireFinite(loop.condition, where + "Condition")
+				|| !requireFinite(loop.lastConditionDelta, where + "Condition delta")
+				|| !requireFinite(loop.restoreStockUnits, where + "restore stock spent")) return false;
+			if (loop.condition < 0.0 || loop.condition > 1.0)
+				return violation = where + "Condition outside [0,1]", false;
 			if (!requireFinite(loop.coolantKg, where + "coolant inventory")) return false;
 			if (!requireFinite(loop.temperatureC, where + "integrated temperature")) return false;
 			if (!requireFinite(loop.lastPumpSuppliedKW, where + "pump supplied power")) return false;

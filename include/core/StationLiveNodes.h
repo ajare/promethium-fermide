@@ -86,8 +86,15 @@ namespace core
 			&CoolantLoopSettings::startingTemperatureC); }
 		static bool topologyChanged(CoolantLoopSettings const& a, CoolantLoopSettings const& b)
 		{
+			// Whether the loop has a Condition model at all, and which
+			// service stock funds its recovery, are run-shape decisions
+			// resolved at construction (#840); the rates inside the model
+			// stay live-tunable parameters.
 			return a.coolantLeak.has_value() != b.coolantLeak.has_value()
-				|| (a.coolantLeak && b.coolantLeak && a.coolantLeak->compartmentId != b.coolantLeak->compartmentId);
+				|| (a.coolantLeak && b.coolantLeak && a.coolantLeak->compartmentId != b.coolantLeak->compartmentId)
+				|| a.condition.has_value() != b.condition.has_value()
+				|| (a.condition && b.condition
+					&& a.condition->restoreStoreId != b.condition->restoreStoreId);
 		}
 	};
 	PF_STATION_LIVE_NODE(ChillerSettings, chillers, "Chiller")

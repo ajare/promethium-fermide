@@ -14,10 +14,17 @@ using namespace station_detail;
 		StationClock clock;
 		struct FaultCommand
 		{
+			// One entry on the command journal. A settings update carries
+			// only its settings payload; an injection carries the fault
+			// identity, cause and effective parameters; a Condition restore
+			// carries the installation and the target Condition it is
+			// healing toward (#840).
+			enum class Kind { Injection, SettingsUpdate, RestoreCondition } kind{Kind::Injection};
 			uint64_t afterStep{0};
 			std::string installationId, modeId;
 			FaultCause cause;
 			CoolantLeakSettings parameters;
+			double restoreTarget{0.0};
 			std::optional<StationSystemsSettings> settingsUpdate;
 		};
 		std::optional<StationSystemsSettings> faultReplayInitialSettings;
@@ -26,6 +33,7 @@ using namespace station_detail;
 		{
 			if (!faultReplayInitialSettings) return;
 			FaultCommand update;
+			update.kind = FaultCommand::Kind::SettingsUpdate;
 			update.afterStep = clock.steps(); update.settingsUpdate = settings;
 			faultCommands.push_back(std::move(update));
 		}
@@ -370,12 +378,36 @@ using namespace station_detail;
 			CoolantLoopSettings authored;
 			std::optional<StationFaultSnapshot> fault;
 			std::optional<CoolantLeakSettings> pendingLeak;
+			std::optional<StationFaultSnapshot> seizure;
 			std::string leakCompartmentId;
 			double leakedKg{0.0}, leakedEnergyKJ{0.0};
+			// #840 Condition state. `condition` is the machine's aggregate
+			// intactness; `restoreTarget` is the Condition a funded
+			// restoreCondition command is healing toward (0 when no restore
+			// is in flight); the restore store index resolves the authored
+			// service-stock id once at construction. Recovery advances only
+			// while no stressor acts, so a stressed machine under a restore
+			// command simply waits, visibly, and spends nothing.
+			double condition{1.0};
+			double lastConditionDelta{0.0};
+			double restoreTarget{0.0};
+			std::optional<double> pendingRestoreTarget;
+			size_t restoreStoreIndex{0};
+			bool hasRestoreStock{false};
+			bool lastRestoring{false};
+			std::string lastStressors;
+			double lastRestoreStockUnits{0.0};
+			double restoreStockUnits{0.0};
 			// Fault inventory loss and Outage caps compose by minimum. The
 			// legacy fill multiplier remains unchanged on non-faulted loops.
 			double flowFillMultiplier() const
 			{ return fault ? 1.0 : std::min(1.0, coolantKg / authored.coolantCapacityKg); }
+			// The capability fraction the machine's Condition leaves it: a
+			// loop with no Condition model is a fully capable loop, so the
+			// feature-absent loop multiplies by exactly 1.0 and every
+			// existing fixture is untouched (#840).
+			double conditionCapability() const
+			{ return authored.condition ? condition : 1.0; }
 			size_t reservoirIndex{0};
 			double coolantKg{0.0};
 			double temperatureC{0.0};
@@ -1883,6 +1915,12 @@ using namespace station_detail;
 				: sampled;
 		}
 		bool protection();
+		// The Condition layer (#840): wear, funded recovery, and the
+		// degradation-crossing Fault spawn. Runs after scheduledState() so it
+		// reads current availability, and before protection() and
+		// thermal() so both size the loop against the capability the
+		// Condition actually leaves it.
+		bool condition();
 		bool thermal();
 		bool processing();
 		bool biology();

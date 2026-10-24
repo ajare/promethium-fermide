@@ -1192,6 +1192,43 @@ using namespace station_detail;
 					[&](auto const& air) { return air.id == leak.compartmentId; }))
 					return missing(where + " coolant leak references unknown compartment '" + leak.compartmentId + "'");
 			}
+			// #840: the Condition model is authored whole or not at all, and
+			// every rate, threshold and funding reference is checked here so
+			// the runtime never meets a model it cannot honour.
+			if (loop.condition)
+			{
+				auto const& model = *loop.condition;
+				if (!std::isfinite(model.initialCondition) || model.initialCondition < 0.0 || model.initialCondition > 1.0)
+					return refuse(where + " initial Condition must be finite and from 0 to 1");
+				if (!std::isfinite(model.overheatStressC) || model.overheatStressC <= -StationCelsiusOffset)
+					return refuse(where + " overheat stress temperature must be finite and above absolute zero (-273.15 C)");
+				if (!std::isfinite(model.overheatDegradePerHour) || model.overheatDegradePerHour < 0.0)
+					return refuse(where + " overheat degradation rate must be finite and non-negative");
+				if (!std::isfinite(model.cavitationFillFraction) || model.cavitationFillFraction < 0.0 || model.cavitationFillFraction > 1.0)
+					return refuse(where + " cavitation fill fraction must be finite and from 0 to 1");
+				if (!std::isfinite(model.cavitationDegradePerHour) || model.cavitationDegradePerHour < 0.0)
+					return refuse(where + " cavitation degradation rate must be finite and non-negative");
+				if (!std::isfinite(model.seizureThreshold) || model.seizureThreshold < 0.0 || model.seizureThreshold > 1.0)
+					return refuse(where + " seizure threshold must be finite and from 0 to 1");
+				if (!std::isfinite(model.restorePerHour) || model.restorePerHour < 0.0)
+					return refuse(where + " restore rate must be finite and non-negative");
+				if (!std::isfinite(model.stockUnitsPerConditionPoint) || model.stockUnitsPerConditionPoint < 0.0)
+					return refuse(where + " restore stock cost per Condition point must be finite and non-negative");
+				// A restore that can heal nothing is not a funded restore;
+				// refusing it here keeps a commanded restore from silently
+				// stalling forever at zero rate.
+				if (!model.restoreStoreId.empty()
+					&& (model.restorePerHour <= 0.0 || model.stockUnitsPerConditionPoint <= 0.0))
+					return refuse(where + " a funded restore needs a positive restore rate and stock cost per Condition point");
+				if (!model.restoreStoreId.empty() && std::none_of(settings.stores.begin(), settings.stores.end(),
+					[&](auto const& store) { return store.id == model.restoreStoreId; }))
+					return missing(where + " Condition restore references unknown service stock '" + model.restoreStoreId + "'");
+				// A model that can never spawn its Fault is dead weight, but a
+				// machine starting below the threshold would have spawned on
+				// a tick that already passed; refuse the incoherent start.
+				if (model.initialCondition < model.seizureThreshold)
+					return refuse(where + " initial Condition must not start below its seizure threshold");
+			}
 			if (loop.startingCoolantKg > loop.coolantCapacityKg)
 				return refuse(where + " starting coolant exceeds the loop capacity");
 			if (!std::isfinite(loop.specificHeatKJPerKgK) || loop.specificHeatKJPerKgK <= 0.0)

@@ -1,7 +1,8 @@
 # Station Degradation and Failure Specification
 
-Status: design agreed 2026-07-31; coolant-leak injection tracer bullet (#839) implemented.
-See [the implemented slice](../station-faults.md); the remaining framework below is still design.
+Status: design agreed 2026-07-31; coolant-leak injection (#839) and coolant-loop
+Condition, degradation crossing and funded recovery (#840) implemented.
+See [the implemented slices](../station-faults.md); the remaining framework below is still design.
 
 Canonical vocabulary: `CONTEXT.md` § Station systems — **Installation**, **Condition**,
 **Degradation**, **Fault**, **Failure**, **Trip**, **Repair**. This spec uses those terms
@@ -164,7 +165,8 @@ gates; new Trips latch.
 - Client commands (`injectFault`, `resetTrip`, `repairFault`, `restoreCondition`)
   enter the command log like other client commands; replay reproduces every onset,
   booking, interruption, and repair exactly.
-- Catalogue changes bump the station schema version (current: 111).
+- Catalogue changes bump the station schema version (Condition opt-in: 113;
+  coolant-leak-only: 112; feature-absent output remains 111).
 - Authored opt-in parameters travel in Settings; runtime fault state never does.
 
 ## 8. Observability

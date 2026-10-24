@@ -834,7 +834,7 @@ void thermalLinkPersistence(smoke::Context const&)
 	// Version discipline: a pre-107 document carrying links is refused
 	// as conversion-required rather than dropping them, and a version
 	// beyond the accepted range is refused outright.
-	for (int version : {106, 113})
+	for (int version : {106, 114})
 	{
 		auto bad = yaml;
 		bad.replace(bad.find("schemaVersion: 111"), std::string("schemaVersion: 111").size(),
@@ -1715,9 +1715,13 @@ void thermalLinkSharedNeighbourIndependence(smoke::Context const&)
 	{
 		core::StationSystemsSettings s;
 		s.enabled = true;
-		s.atmospheres = {linkCompartment("hot", 60.0, 10000.0),
-			linkCompartment("shared", 30.0, 12000.0), linkCompartment("cold", 0.0, 8000.0)};
-		s.thermalLinks = {{"in", "hot", "shared", 200.0}, {"out", "shared", "cold", 150.0}};
+		// The analytical assertions below require inbound-before-outbound.
+		// The solver orders undirected endpoint IDs lexically, not by
+		// declaration order or link ID (#836). Keep that order explicit:
+		// bare "cold" would sort before "hot" and reverse this fixture's pass.
+		s.atmospheres = {linkCompartment("a-hot", 60.0, 10000.0),
+			linkCompartment("b-shared", 30.0, 12000.0), linkCompartment("c-cold", 0.0, 8000.0)};
+		s.thermalLinks = {{"in", "a-hot", "b-shared", 200.0}, {"out", "b-shared", "c-cold", 150.0}};
 		return s;
 	};
 	std::string diagnostic;
@@ -1755,10 +1759,10 @@ void thermalLinkSharedNeighbourIndependence(smoke::Context const&)
 		require(advanceStationSteps(world, 1), "shared-neighbour step failed");
 		auto const snapshot = world.getStationSystemsSnapshot();
 		require(snapshot.healthy, "shared-neighbour run failed its audit");
-		requireAttributedToItsLinks(snapshot, "hot", "the donor's conducted heat was not its own link's");
-		requireAttributedToItsLinks(snapshot, "shared",
+		requireAttributedToItsLinks(snapshot, "a-hot", "the donor's conducted heat was not its own link's");
+		requireAttributedToItsLinks(snapshot, "b-shared",
 			"the shared compartment's conducted total is not the sum of its two links");
-		requireAttributedToItsLinks(snapshot, "cold", "the receiver's conducted heat was not its own link's");
+		requireAttributedToItsLinks(snapshot, "c-cold", "the receiver's conducted heat was not its own link's");
 		requireResidualsClose(snapshot, "a compartment with two links left its residual open");
 		require(std::abs(chainEnergyKJ(snapshot) - chainEnergyKJ(previous))
 			<= 1e-9 * std::max(1.0, std::abs(chainEnergyKJ(previous))),
@@ -1770,9 +1774,9 @@ void thermalLinkSharedNeighbourIndependence(smoke::Context const&)
 		require(link(snapshot, "in").status == core::StationThermalLinkStatus::Active
 			&& link(snapshot, "out").status == core::StationThermalLinkStatus::Active,
 			"a live exchange reported itself idle");
-		auto const& hot = compartment(previous, "hot");
-		auto const& shared = compartment(previous, "shared");
-		auto const& cold = compartment(previous, "cold");
+		auto const& hot = compartment(previous, "a-hot");
+		auto const& shared = compartment(previous, "b-shared");
+		auto const& cold = compartment(previous, "c-cold");
 		auto const expectedIn = linkTransferKJ(hot.thermalCapacityKJPerK,
 			shared.thermalCapacityKJPerK, hot.temperatureC - shared.temperatureC,
 			link(previous, "in").conductanceKWPerK, dt);

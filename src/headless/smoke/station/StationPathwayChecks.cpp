@@ -68,7 +68,7 @@ void pathwayPersistence(smoke::Context const&)
 			&& diagnostic.find("conversion required") != std::string::npos
 			&& loaded.settings == settings, "unknown pathway field was ignored or mutated document");
 	}
-	for (int version : {105, 113})
+	for (int version : {105, 114})
 	{
 		auto bad = yaml;
 		auto const at = bad.find("schemaVersion: ");

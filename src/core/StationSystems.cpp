@@ -907,7 +907,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		mImpl = std::make_unique<Impl>(settings.systemsStepWorldTicks, baseStepSeconds);
 		mImpl->settings = settings; mImpl->snapshot.enabled = settings.enabled;
 		if (std::any_of(settings.coolantLoops.begin(), settings.coolantLoops.end(),
-			[](auto const& loop) { return loop.coolantLeak.has_value(); }))
+			[](auto const& loop) { return loop.coolantLeak.has_value() || loop.condition.has_value(); }))
 			mImpl->faultReplayInitialSettings = settings;
 		mImpl->snapshot.systemsStepWorldTicks = settings.systemsStepWorldTicks;
 		mImpl->snapshot.systemsTimestepSeconds = mImpl->clock.stepSeconds();
@@ -1129,6 +1129,18 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			state.reservoirIndex = reservoirIndex[loop.reservoirId];
 			state.coolantKg = loop.startingCoolantKg;
 			state.temperatureC = loop.startingTemperatureC;
+			// #840: the Condition model's funding store resolves like any
+			// other consumed store reference, and the machine starts at its
+			// authored Condition. A loop with no model keeps a full
+			// Condition and never consults a store, so the feature-absent
+			// path is untouched.
+			if (loop.condition)
+			{
+				state.condition = loop.condition->initialCondition;
+				state.hasRestoreStock = !loop.condition->restoreStoreId.empty();
+				if (state.hasRestoreStock)
+					state.restoreStoreIndex = storeIndex[loop.condition->restoreStoreId];
+			}
 			mImpl->coolantLoops.push_back(std::move(state));
 		}
 		// Chillers start idle with their contracts resolved to the loop

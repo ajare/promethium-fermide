@@ -46,8 +46,18 @@ namespace core
 			// conductance and every circulation-gated exchange together;
 			// the loop's coolant inventory and temperature are untouched,
 			// so restoration returns circulation without inventing fluid.
+			// The Condition layer (#840) scales the capability this machine
+			// delivers on top of the outage: a worn pump moves a fraction of
+			// what a healthy one moves and draws that same fraction of the
+			// watts, exactly as a half-full loop already does. Condition is
+			// not another entry in the deepest-reduction-wins availability
+			// composition - it is a continuous scale on the service, so a
+			// machine at 0.6 Condition still circulates, just at 60%. A loop
+			// with no Condition model multiplies by exactly 1.0 and is
+			// bit-for-bit the machine it was before.
+			auto const capability = loop.conditionCapability();
 			auto const effectiveFlowCapacityKgPerS = loop.authored.ratedFlowKgPerS
-				* loop.availabilityFactor;
+				* loop.availabilityFactor * capability;
 			auto const flowCapacityDisabled = effectiveFlowCapacityKgPerS <= 0.0;
 			auto const fillFraction = disabled
 				? 0.0 : loop.flowFillMultiplier();
@@ -57,7 +67,7 @@ namespace core
 			// capacity the outage leaves.
 			auto const pumpDemandKW = disabled
 				? 0.0
-				: loop.authored.pumpPowerKW * fillFraction * loop.availabilityFactor;
+				: loop.authored.pumpPowerKW * fillFraction * loop.availabilityFactor * capability;
 			double pumpSuppliedKW = 0.0;
 			if (protectedLoopPumpKW[loopIndex] > 0.0 || coolantServiceProtected(loop)
 				|| chillerCirculationResolved[loopIndex])
@@ -99,7 +109,7 @@ namespace core
 				? pumpSuppliedKW / pumpDemandKW : 0.0;
 			auto const circulationFraction = disabled || flowCapacityDisabled
 				? 0.0
-				: fillFraction * pumpElectricalFraction * loop.availabilityFactor;
+				: fillFraction * pumpElectricalFraction * loop.availabilityFactor * capability;
 			loop.lastCirculationFraction = circulationFraction;
 			loop.lastFlowKgPerS = loop.authored.ratedFlowKgPerS * circulationFraction;
 			// Every watt the pump actually draws ends up as work

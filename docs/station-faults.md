@@ -1,7 +1,8 @@
-# Station Fault injection: coolant-loop puncture (#839)
+# Station Faults and Condition (#839, #840)
 
-This is the first implemented slice of [the failure framework](specs/station_degradation_failure_specification.md).
-Condition, Wear, Trips, Repair and other catalogue modes remain follow-ups. Propagation follows
+Implemented slices of [the failure framework](specs/station_degradation_failure_specification.md)
+include coolant-leak injection and opt-in coolant-loop Condition with funded recovery.
+Wear, Trips, Fault-clearing Repair jobs and other component catalogues remain follow-ups. Propagation follows
 [ADR-0030](adr/0030-faults-propagate-through-media-via-hazard-bookings-never-direct-damage-edges.md).
 
 ## Authoring and commands
@@ -34,7 +35,8 @@ Cause kinds are `AgentAction`, `ScenarioEvent` and `Editor`; client detail is li
 to 1024 bytes. Attribution grants no authority: gameplay permission checks belong to
 the client. Unknown installations, modes, disabled modes, invalid causes and active
 or pending duplicates are refused with a diagnostic and no mutation. This slice
-permits one Fault per loop; it has no clearing or Repair command yet.
+permits one active instance per mode per loop. A leak and a degradation-spawned
+pump seizure may coexist; neither has a clearing command yet.
 
 Acceptance queues the Fault. On the next successful Station step, the ordinary
 transactional ledger books the release and appends one bounded `fault` event. A
@@ -51,7 +53,7 @@ thermal equilibration. It invents no vapour or latent heat. Both sides of the ma
 and energy transfer are audited; spills also appear in retained coolant inventory
 history so system-wide material charts do not lose the released mass.
 
-A Faulted loop's inventory fraction caps availability. Scheduled Outages and
+A coolant-leak Fault's remaining inventory fraction caps availability. Scheduled Outages and
 maintenance isolation compose with that cap by minimum, **not multiplication**.
 Electrical supply can further constrain actual circulation. An Outage restoring
 availability never replenishes coolant or clears the Fault. Non-Faulted loops keep
@@ -64,7 +66,71 @@ never authored. The loop also publishes cumulative leaked mass and energy and it
 thermal residual. Service-criticality-weighted aggregation is not introduced by
 this slice.
 
+## Condition and funded recovery
+
+A coolant loop independently opts in with `condition` (`InstallationConditionSettings`):
+
+```yaml
+condition:
+  initialCondition: 1
+  overheatStressC: 80
+  overheatDegradePerHour: 0.02
+  cavitationFillFraction: 0.25
+  cavitationDegradePerHour: 0.05
+  seizureThreshold: 0.15
+  restoreStoreId: service-stock
+  restorePerHour: 0.04
+  stockUnitsPerConditionPoint: 10
+```
+
+Rates are provisional engineering assumptions in Condition points per hour. The
+initial Condition and fill/seizure thresholds lie in [0,1]; a starting Condition
+below the seizure threshold is refused. Rates are finite and non-negative; a
+funding store requires positive recovery rate and stock cost. The store must
+exist. Model presence and the funding-store identity are frozen topology; model
+parameters can be retuned live.
+
+Heat stress acts at or above the authored coolant temperature. Low-fill
+cavitation acts at or below the fill threshold on a non-empty, non-seized pump
+with non-zero available flow capacity. Active stressors add their authored
+loss rates; removing them stops further degradation on the next interval.
+As with microbial recovery, an active stressor bars recovery even when its
+loss-rate coefficient is zero. The current
+Condition continuously multiplies pump demand and circulation capability,
+including protected cooling credits. These are interval-sampled stressors, not a
+blanket timestep-invariance claim for coupled thermal feedback.
+
+Crossing strictly below `seizureThreshold` raises `pump-seizure` once, with cause
+`DegradationCrossing` and a bounded `fault` event. Its availability cap is zero,
+composed by minimum with Outages, maintenance and any leak cap. Clients cannot
+forge `DegradationCrossing` through `injectFault`.
+
+```cpp
+bool accepted = runtime.restoreCondition("cooling-loop", 0.9, &diagnostic);
+```
+
+This headless runtime command queues a target strictly above current Condition.
+It takes effect at the next successful Station boundary, never instantly. Only
+benign intervals recover: each restored point spends the declared stock cost,
+using qualified stock above the store's protected reserve. Recovery is bounded
+by its per-hour rate, target and available stock; competing loops cannot spend
+the same stock twice. Exhaustion leaves an unmet target pending; a new unfunded
+command is refused with a diagnostic. Start/completion use bounded `repair`
+events. Recovery does **not** clear an existing Fault or replenish coolant.
+
+Snapshots expose `condition`, `conditionCapability`, `lastConditionDelta`,
+`conditionStressors`, `restoring`, `restoreTargetCondition` and cumulative
+`restoreStockConsumedUnits`. A loop without the model remains at full Condition
+with no recovery, stress or new wire fields. Failed audits roll back Condition,
+stock spending, spawned Faults and events together.
+
 ## Persistence and replay
+
+Schema 113 carries Condition settings and restore commands; pre-113 documents
+carrying a Condition block are refused. Running Condition models retain the replay
+block even without a client command, preserving autonomous degradation on load.
+Disabled models remain authored-only. Condition-absent documents retain their
+previous schema and encoding (112 for coolant-leak opt-in, otherwise 111).
 
 Schema 112 accepts the opt-in settings and optional `stationFaultReplay` block.
 Feature-absent World and Station configuration writers retain schema 111 and their
@@ -93,3 +159,9 @@ atomic refusal, pending/active duplicates, attribution, conservative dry/partial
 releases, protected/discretionary circulation, Outage composition, rollback,
 multiple Station ratios, retained inventory history, live retuning and exact
 YAML/binary replay of scripted multi-loop injections.
+
+The six `station-condition*` checks cover stress removal, continuous capability,
+protected circulation, independent/coexisting Fault modes, stock-bounded recovery,
+reserves, shared-stock contention, transactional rollback, supported step ratios,
+settings validation, pending/completed restore replay and autonomous Condition
+World save/load through both serializers.

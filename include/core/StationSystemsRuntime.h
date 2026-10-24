@@ -159,12 +159,28 @@ namespace core
 		// attribution, never an authority or permission check.
 		bool injectFault(std::string_view installationId, std::string_view modeId,
 			FaultCause const& cause, std::string* diagnostic = nullptr);
+		// Funded Condition recovery (#840): heal an Installation toward
+		// targetCondition, paying for every restored point from the
+		// service-stock store its Condition model names, above that
+		// store's protected reserve, at the authored per-hour bound.
+		// Never instant and never free: refused whole when the
+		// Installation has no Condition model, the target is not above
+		// the current Condition, no funding store is declared, or the
+		// stock above the reserve is already gone.
+		bool restoreCondition(std::string_view installationId, double targetCondition,
+			std::string* diagnostic = nullptr);
 		// Command journal plus elapsed time reconstructs the fault ledger and
 		// all its bookings through the normal audited drive (YAML or binary).
 		void writeFaultReplay(Serializer& serializer) const;
 		static std::unique_ptr<StationSystemsRuntime> readFaultReplay(Serializer& serializer,
 			StationSystemsSettings const& settings, float baseStepSeconds);
 		bool hasFaultCommands() const;
+		// Whether a save must carry the fault/Condition replay block.
+		// Condition is integrated over the run (#840), so a save of a
+		// Condition-modelled machine needs the block even when no client
+		// ever issued a command: without it the machine would come back
+		// healthy and unworn.
+		bool hasFaultReplayState() const;
 		StationSystemsSnapshot snapshot() const;
 		std::vector<StationSystemsEvent> const& events() const;
 		std::vector<StationTrendSeries> trends() const;
