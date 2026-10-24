@@ -77,9 +77,19 @@ namespace core
 	PF_STATION_LIVE_NODE_WITH(ThermalReservoirSettings, thermalReservoirs, "Reservoir",
 		&ThermalReservoirSettings::startingTemperatureC)
 	PF_STATION_LIVE_NODE(RadiatorSettings, radiators, "Radiator")
-	PF_STATION_LIVE_NODE_WITH(CoolantLoopSettings, coolantLoops, "Coolant loop",
-		&CoolantLoopSettings::startingCoolantKg,
-		&CoolantLoopSettings::startingTemperatureC)
+	template <> struct LiveNode<CoolantLoopSettings>
+	{
+		static constexpr std::string_view nodeType = "Coolant loop";
+		static auto& of(auto& settings) { return settings.coolantLoops; }
+		static bool restoreInitial(CoolantLoopSettings const& running, CoolantLoopSettings& offered)
+		{ return restoreStationInitialFields(running, offered, &CoolantLoopSettings::startingCoolantKg,
+			&CoolantLoopSettings::startingTemperatureC); }
+		static bool topologyChanged(CoolantLoopSettings const& a, CoolantLoopSettings const& b)
+		{
+			return a.coolantLeak.has_value() != b.coolantLeak.has_value()
+				|| (a.coolantLeak && b.coolantLeak && a.coolantLeak->compartmentId != b.coolantLeak->compartmentId);
+		}
+	};
 	PF_STATION_LIVE_NODE(ChillerSettings, chillers, "Chiller")
 	template <>
 	struct LiveNode<HeatEngineSettings>

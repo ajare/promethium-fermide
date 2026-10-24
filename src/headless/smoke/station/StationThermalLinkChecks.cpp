@@ -834,7 +834,7 @@ void thermalLinkPersistence(smoke::Context const&)
 	// Version discipline: a pre-107 document carrying links is refused
 	// as conversion-required rather than dropping them, and a version
 	// beyond the accepted range is refused outright.
-	for (int version : {106, 112})
+	for (int version : {106, 113})
 	{
 		auto bad = yaml;
 		bad.replace(bad.find("schemaVersion: 111"), std::string("schemaVersion: 111").size(),

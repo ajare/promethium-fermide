@@ -11,6 +11,7 @@
 
 namespace core
 {
+	class Serializer;
 	// Test-runner-only override used to execute an existing Station scenario
 	// under one requested ratio without rewriting its authored fixture.
 	void setStationSystemsRuntimeStepRatioOverrideForTesting(std::optional<uint32_t> ratio);
@@ -154,6 +155,16 @@ namespace core
 			}
 			return updateNode<Settings>(nodeId, std::forward<Mutator>(mutate), diagnostic);
 		}
+		// Validated whole, queued for the next Station step. Cause is client
+		// attribution, never an authority or permission check.
+		bool injectFault(std::string_view installationId, std::string_view modeId,
+			FaultCause const& cause, std::string* diagnostic = nullptr);
+		// Command journal plus elapsed time reconstructs the fault ledger and
+		// all its bookings through the normal audited drive (YAML or binary).
+		void writeFaultReplay(Serializer& serializer) const;
+		static std::unique_ptr<StationSystemsRuntime> readFaultReplay(Serializer& serializer,
+			StationSystemsSettings const& settings, float baseStepSeconds);
+		bool hasFaultCommands() const;
 		StationSystemsSnapshot snapshot() const;
 		std::vector<StationSystemsEvent> const& events() const;
 		std::vector<StationTrendSeries> trends() const;

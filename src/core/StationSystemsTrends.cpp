@@ -53,6 +53,13 @@ namespace core
 		// Compound constituents are an alternative decomposition, not more
 		// material ownership. Read the committed blend (including deposit drift).
 		size_t constituentSlot = coolantStart + settings.coolantLoops.size();
+		for (size_t i = 0; i < settings.atmospheres.size(); ++i)
+			if (std::any_of(settings.coolantLoops.begin(), settings.coolantLoops.end(),
+				[&](auto const& loop) { return loop.coolantLeak && loop.coolantLeak->compartmentId == settings.atmospheres[i].id; }))
+			{
+				auto const mass = snap.atmospheres[i].spilledCoolantKg;
+				put(constituentSlot++, mass, mass);
+			}
 		for (size_t i = 0; i < settings.stores.size(); ++i) if (settings.stores[i].composition)
 		{
 			for (auto const* key : {StationMassConstituents[0], StationMassConstituents[1],

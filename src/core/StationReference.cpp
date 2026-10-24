@@ -316,6 +316,13 @@ namespace core
 				// that does carry it must be schema 92 or newer.
 				if (loop.criticalService)
 					serializer.writeBool("criticalService", true);
+				if (loop.coolantLeak)
+				{
+					serializer.beginMap("coolantLeak");
+					serializer.writeString("compartmentId", loop.coolantLeak->compartmentId);
+					serializer.writeDouble("releasedKg", loop.coolantLeak->releasedKg);
+					serializer.endMap();
+				}
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -1435,6 +1442,14 @@ namespace core
 						"Protected station service flags require World schema 92");
 					loop.criticalService = serializer.readBool("criticalService");
 				}
+				if (serializer.hasField("coolantLeak"))
+				{
+					if (version < 112) throw SerializationException("Coolant faults require schema 112");
+					serializer.beginMap("coolantLeak");
+					loop.coolantLeak = CoolantLeakSettings{serializer.readString("compartmentId"),
+						serializer.readDouble("releasedKg")};
+					serializer.endMap();
+				}
 				stationSettings.coolantLoops.push_back(std::move(loop));
 				serializer.endMap();
 			}
@@ -2329,8 +2344,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 111)
-				return refuse("Reference station schema version must be from 65 to 111");
+			if (document.schemaVersion < 65 || document.schemaVersion > 112)
+				return refuse("Reference station schema version must be from 65 to 112");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

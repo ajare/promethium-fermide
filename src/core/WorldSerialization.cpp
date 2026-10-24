@@ -980,14 +980,23 @@ namespace core
 		// Schema 111 adds the prefab provenance block to the Station
 		// configuration document (#814) - the editor metadata that re-groups
 		// a placed unit from its flattened expansion on load. The World
-		// document itself carries no new fields; the version travels with
-		// the shared schema so every writer stamps the same code version.
-		serializer.writeUint32("version", 111);
+		// document itself carries no new fields.
+		// Schema 112 adds opt-in coolant Fault settings and runtime replay.
+		// Fault-absent saves retain their exact previous wire representation.
+		bool const faults = std::any_of(mStationSystemsSettings.coolantLoops.begin(), mStationSystemsSettings.coolantLoops.end(),
+			[](auto const& loop) { return loop.coolantLeak.has_value(); })
+			|| (mStationSystemsRuntime && mStationSystemsRuntime->hasFaultCommands());
+		serializer.writeUint32("version", faults ? 112 : 111);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 			writeStationSystemsSettingsMap(serializer, mStationSystemsSettings);
+		if (mStationSystemsRuntime && mStationSystemsRuntime->hasFaultCommands())
+		{
+			mStationSystemsRuntime->writeFaultReplay(serializer);
+			serializer.writeUint64("stationFaultDriveWorldTick", mStationSystemsWorldTickOffset + mSimulationTick);
+		}
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -1884,16 +1893,31 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 111)
+		if (version < 1 || version > 112)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
 		StationSystemsSettings stationSettings;
 		if (serializer.hasField("stationSystems"))
 			readStationSystemsSettingsMap(serializer, version, stationSettings);
-		// Preflight scripts before replacing any existing World or live state.
-		auto stationRuntime = stationSettings.enabled
-			? std::make_unique<StationSystemsRuntime>(stationSettings, getFixedTimestep()) : nullptr;
+		// Preflight scripts and replay before replacing any World or live state.
+		std::unique_ptr<StationSystemsRuntime> stationRuntime;
+		uint64_t stationDriveWorldTick = 0;
+		if (serializer.hasField("stationFaultReplay"))
+		{
+			if (version < 112 || !stationSettings.enabled)
+				throw SerializationException("Fault replay requires enabled Station schema 112");
+			stationRuntime = StationSystemsRuntime::readFaultReplay(serializer, stationSettings, getFixedTimestep());
+			stationDriveWorldTick = serializer.readUint64("stationFaultDriveWorldTick");
+			auto const stationDriveSeconds = static_cast<double>(stationDriveWorldTick) * getFixedTimestep();
+			auto const restored = stationRuntime->snapshot();
+			if (!std::isfinite(stationDriveSeconds)
+				|| stationDriveSeconds > restored.elapsedSeconds
+				|| restored.elapsedSeconds - stationDriveSeconds > restored.systemsTimestepSeconds)
+				throw SerializationException("Fault replay drive time is outside the restored Station step");
+		}
+		else if (stationSettings.enabled)
+			stationRuntime = std::make_unique<StationSystemsRuntime>(stationSettings, getFixedTimestep());
 		auto name = serializer.readString("name");
 		auto const randomSeed = version >= 14
 			? serializer.readUint64("randomSeed") : uint64_t{ 0 };
@@ -2679,6 +2703,7 @@ namespace core
 		mLayerNames = std::move(layerNames);
 		resetForDeserialization(std::move(name), cellsWide, levelsHigh);
 		mStationSystemsSettings = stationSettings;
+		mStationSystemsWorldTickOffset = stationDriveWorldTick;
 		mStationSystemsRuntime = std::move(stationRuntime);
 		mRandomSeed = randomSeed;
 		mNextMarkerId = nextMarkerId;
@@ -3174,6 +3199,7 @@ namespace core
 		}
 		input.reset();
 		mStationSystemsSettings = stationSettings;
+		mStationSystemsWorldTickOffset = 0;
 		mStationSystemsRuntime = std::move(stationRuntime);
 		{
 			RestorationTiming phase("reset-registries");

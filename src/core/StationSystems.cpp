@@ -906,6 +906,9 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		if (!validateStationSystemsSettings(settings, diagnostic)) throw SerializationException(diagnostic);
 		mImpl = std::make_unique<Impl>(settings.systemsStepWorldTicks, baseStepSeconds);
 		mImpl->settings = settings; mImpl->snapshot.enabled = settings.enabled;
+		if (std::any_of(settings.coolantLoops.begin(), settings.coolantLoops.end(),
+			[](auto const& loop) { return loop.coolantLeak.has_value(); }))
+			mImpl->faultReplayInitialSettings = settings;
 		mImpl->snapshot.systemsStepWorldTicks = settings.systemsStepWorldTicks;
 		mImpl->snapshot.systemsTimestepSeconds = mImpl->clock.stepSeconds();
 		std::vector<StationRecordingSlot> slots;
@@ -979,6 +982,10 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				retained("atmosphere", "Atmosphere compartment", a.id, material);
 		for (auto const& loop : settings.coolantLoops)
 			retained("coolant-loop", "Coolant loop", loop.id, "coolant");
+		for (auto const& air : settings.atmospheres)
+			if (std::any_of(settings.coolantLoops.begin(), settings.coolantLoops.end(),
+				[&](auto const& loop) { return loop.coolantLeak && loop.coolantLeak->compartmentId == air.id; }))
+				retained("coolant-spill", "Atmosphere compartment", air.id, "coolant");
 		for (auto const& store : settings.stores) if (store.composition)
 			for (auto const* key : {StationMassConstituents[0], StationMassConstituents[1],
 				StationMassConstituents[2], StationMassConstituents[3], StationMassConstituents[4],

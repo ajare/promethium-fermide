@@ -731,7 +731,8 @@ namespace core
 		// are applied here before this tick can collect traversal intent.
 		if (!mWorld.mAgentBehaviourRuntime->runBoundary(mWorld)) return false;
 		if (mWorld.mStationSystemsRuntime && !mWorld.mStationSystemsRuntime->advanceTo(
-			static_cast<double>(mWorld.mSimulationTick + 1) * World::getFixedTimestep()))
+			static_cast<double>(mWorld.mStationSystemsWorldTickOffset + mWorld.mSimulationTick + 1)
+				* World::getFixedTimestep()))
 		{
 			mWorld.pauseSimulation();
 			return false;

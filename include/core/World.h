@@ -660,6 +660,9 @@ namespace core
 		SimulationCoordinator mSimulationCoordinator;
 		StationSystemsSettings mStationSystemsSettings;
 		std::unique_ptr<StationSystemsRuntime> mStationSystemsRuntime;
+		// A resumed Fault replay has its own elapsed Station time while the
+		// reconstructed movement World starts at zero.
+		uint64_t mStationSystemsWorldTickOffset{0};
 
 		// The read-only validation family lives in the placement validator
 		// (ADR 0022). World owns it and stays the facade (design pattern)
@@ -3529,6 +3532,8 @@ namespace core
 		// the values the runtime is actually executing.
 		bool updateStationSystemsSettings(StationSystemsSettings const& offered,
 			std::string* diagnostic = nullptr);
+		bool injectStationFault(std::string_view installationId, std::string_view modeId,
+			FaultCause const& cause, std::string* diagnostic = nullptr);
 		// Change one Station node's parameters on the running scenario without
 		// the caller holding the configuration. See
 		// StationSystemsRuntime::updateNode for the contract: one collection

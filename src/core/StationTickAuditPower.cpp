@@ -644,6 +644,11 @@ namespace core
 			if (!requireFinite(loop.extractedKJ, where + "cumulative chiller extracted energy")) return false;
 			if (!requireFinite(loop.lastCollectorHeatKW, where + "last water-recovery heat")) return false;
 			if (!requireFinite(loop.collectorHeatKJ, where + "cumulative water-recovery heat")) return false;
+			if (!requireFinite(loop.leakedKg, where + "leaked coolant")
+				|| !requireFinite(loop.leakedEnergyKJ, where + "leaked energy")) return false;
+			if (std::abs(loop.coolantKg + loop.leakedKg - loop.authored.startingCoolantKg)
+				> StationBalanceTolerance * std::max(1.0, loop.authored.startingCoolantKg))
+				return violation = where + "coolant mass ledger residual", false;
 			if (loop.coolantKg < 0.0)
 				return violation = where + "coolant inventory went negative", false;
 			if (loop.coolantKg > loop.authored.coolantCapacityKg + StationBalanceTolerance
@@ -656,7 +661,7 @@ namespace core
 				* loop.authored.specificHeatKJPerKgK * loop.authored.startingTemperatureC;
 			auto const bound = StationBalanceTolerance * std::max(1.0, std::abs(startingEnergyKJ));
 			auto const residual = startingEnergyKJ + loop.pumpWorkKJ + loop.heaterKJ
-				+ loop.exchangedKJ + loop.collectorHeatKJ - loop.extractedKJ
+				+ loop.exchangedKJ + loop.collectorHeatKJ - loop.extractedKJ - loop.leakedEnergyKJ
 				- loop.coolantKg * loop.authored.specificHeatKJPerKgK
 				* loop.temperatureC;
 			if (!std::isfinite(residual) || std::abs(residual) > bound)
@@ -811,6 +816,15 @@ namespace core
 		for (auto const& compartment : runtime.atmospheres)
 		{
 			auto const where = "atmosphere '" + compartment.authored.id + "' ";
+			double bookedMass = 0.0, bookedEnergy = 0.0;
+			for (auto const& loop : runtime.coolantLoops)
+				if (loop.leakCompartmentId == compartment.authored.id)
+				{ bookedMass += loop.leakedKg; bookedEnergy += loop.leakedEnergyKJ; }
+			if (!requireFinite(compartment.spilledCoolantKg, where + "spilled coolant")
+				|| !requireFinite(compartment.spilledCoolantEnergyKJ, where + "spilled energy")) return false;
+			if (std::abs(bookedMass - compartment.spilledCoolantKg) > StationBalanceTolerance * std::max(1.0, bookedMass)
+				|| std::abs(bookedEnergy - compartment.spilledCoolantEnergyKJ) > StationBalanceTolerance * std::max(1.0, std::abs(bookedEnergy)))
+				return violation = where + "hazard booking ledger residual", false;
 			if (!requireFinite(compartment.oxygenKg, where + "oxygen inventory")) return false;
 			if (!requireFinite(compartment.nitrogenKg, where + "nitrogen inventory")) return false;
 			if (!requireFinite(compartment.carbonDioxideKg, where + "carbon dioxide inventory")) return false;

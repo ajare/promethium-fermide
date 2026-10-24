@@ -77,6 +77,7 @@ pf_add_smoke_module(pf-smoke-station
     NAME station
     SOURCES station/Main.cpp
         station/StationCoreChecks.cpp
+        station/StationFaultChecks.cpp
         station/StationProtectionChecks.cpp
         station/StationClockChecks.cpp
         station/StationRuntimeRegressionChecks.cpp
@@ -302,7 +303,8 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         stabilityWorkloadBundled stabilityLongRun stabilityPathEquivalence
         stabilityResetIsolation stabilityMultiWorldIsolation
         stabilityLongRunFast stabilityPathEquivalenceFast stabilityResetIsolationFast
-        stabilityMultiWorldIsolationFast stabilityAuditFaultInjection materialIdentity)
+        stabilityMultiWorldIsolationFast stabilityAuditFaultInjection materialIdentity
+        faultInjection faultOutages faultReplay faultOptIn faultTransactions)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()

@@ -4,6 +4,24 @@ namespace core
 {
 	bool StationSystemsRuntime::Impl::Tick::prepare()
 	{
+		// One-shot hazard bookings run inside the transactional ledger, before
+		// any allocation preview or service gate reads the remaining charge.
+		for (auto& loop : runtime.coolantLoops)
+		{
+			if (!loop.pendingLeak) continue;
+			auto& air = *std::find_if(runtime.atmospheres.begin(), runtime.atmospheres.end(),
+				[&](auto const& a) { return a.authored.id == loop.pendingLeak->compartmentId; });
+			auto const mass = std::min(loop.coolantKg, loop.pendingLeak->releasedKg);
+			auto const energy = mass * loop.authored.specificHeatKJPerKgK * loop.temperatureC;
+			loop.coolantKg -= mass;
+			loop.leakedKg += mass;
+			loop.leakedEnergyKJ += energy;
+			air.spilledCoolantKg += mass;
+			air.spilledCoolantEnergyKJ += energy;
+			appendBoundedEvent(runtime.events, tick, "fault", "Fault 'coolant-leak' on '"
+				+ loop.authored.id + "': " + loop.fault->causeDetail);
+			loop.pendingLeak.reset();
+		}
 		if (runtime.prediction.active)
 		{
 			for (auto const& body : runtime.reservoirs) protectionReservoirStart.push_back(body.temperatureC);

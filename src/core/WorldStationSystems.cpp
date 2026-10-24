@@ -20,6 +20,7 @@ namespace core
 			if (mSimulationTick) resetSimulation();
 			mStationSystemsSettings = settings;
 			mStationSystemsRuntime = std::move(runtime);
+			mStationSystemsWorldTickOffset = 0;
 			markModified();
 			if (diagnostic) diagnostic->clear();
 			return true;
@@ -42,6 +43,18 @@ namespace core
 		mStationSystemsSettings = mStationSystemsRuntime->effectiveSettings();
 		markModified();
 		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+	bool World::injectStationFault(std::string_view installationId, std::string_view modeId,
+		FaultCause const& cause, std::string* diagnostic)
+	{
+		if (!mStationSystemsRuntime)
+		{
+			if (diagnostic) *diagnostic = "Station systems are not running";
+			return false;
+		}
+		if (!mStationSystemsRuntime->injectFault(installationId, modeId, cause, diagnostic)) return false;
+		markModified();
 		return true;
 	}
 	StationSystemsSnapshot World::getStationSystemsSnapshot() const

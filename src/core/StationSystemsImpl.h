@@ -12,6 +12,23 @@ using namespace station_detail;
 	{
 		Impl(uint32_t ratio, float baseSeconds) : clock(ratio, baseSeconds) {}
 		StationClock clock;
+		struct FaultCommand
+		{
+			uint64_t afterStep{0};
+			std::string installationId, modeId;
+			FaultCause cause;
+			CoolantLeakSettings parameters;
+			std::optional<StationSystemsSettings> settingsUpdate;
+		};
+		std::optional<StationSystemsSettings> faultReplayInitialSettings;
+		std::vector<FaultCommand> faultCommands;
+		void recordFaultSettings()
+		{
+			if (!faultReplayInitialSettings) return;
+			FaultCommand update;
+			update.afterStep = clock.steps(); update.settingsUpdate = settings;
+			faultCommands.push_back(std::move(update));
+		}
 		// Wall-clock cost of completed Station steps only. Recorded per step, so
 		// the sparse cadence cannot dilute it the way the World tick average
 		// does: the ticks that skip a Station step contribute no sample here.
@@ -351,6 +368,14 @@ using namespace station_detail;
 		struct LoopState
 		{
 			CoolantLoopSettings authored;
+			std::optional<StationFaultSnapshot> fault;
+			std::optional<CoolantLeakSettings> pendingLeak;
+			std::string leakCompartmentId;
+			double leakedKg{0.0}, leakedEnergyKJ{0.0};
+			// Fault inventory loss and Outage caps compose by minimum. The
+			// legacy fill multiplier remains unchanged on non-faulted loops.
+			double flowFillMultiplier() const
+			{ return fault ? 1.0 : std::min(1.0, coolantKg / authored.coolantCapacityKg); }
 			size_t reservoirIndex{0};
 			double coolantKg{0.0};
 			double temperatureC{0.0};
@@ -578,6 +603,7 @@ using namespace station_detail;
 		struct AtmosphereState
 		{
 			AtmosphereSettings authored;
+			double spilledCoolantKg{0.0}, spilledCoolantEnergyKJ{0.0};
 			size_t reservoirIndex{SIZE_MAX}; // SIZE_MAX: adiabatic, no coupling
 			double oxygenKg{0.0};
 			double nitrogenKg{0.0};

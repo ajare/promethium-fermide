@@ -348,8 +348,8 @@ namespace core
 		if (serializer.hasField("schemaVersion"))
 		{
 			version = static_cast<std::uint32_t>(serializer.readInt64("schemaVersion"));
-			if (version < 65 || version > 111)
-				return refuse("Prefab '" + tmpl.id + "' schema version must be from 65 to 111");
+			if (version < 65 || version > 112)
+				return refuse("Prefab '" + tmpl.id + "' schema version must be from 65 to 112");
 		}
 		// Internal entries: the existing stationSystems entry vocabulary,
 		// read through the authoritative reader. Full configuration

@@ -69,7 +69,7 @@ namespace core
 				* loop.availabilityFactor;
 			auto const flowCapacityDisabled = effectiveFlowCapacityKgPerS <= 0.0;
 			auto const fillFraction = disabled
-				? 0.0 : std::min(1.0, loop.coolantKg / loop.authored.coolantCapacityKg);
+				? 0.0 : loop.flowFillMultiplier();
 			auto const pumpDemandKW = disabled || flowCapacityDisabled
 				? 0.0
 				: loop.authored.pumpPowerKW * fillFraction * loop.availabilityFactor;
@@ -133,7 +133,7 @@ namespace core
 				* loop.availabilityFactor;
 			auto const loopFlowDisabled = loopFlowCapacityKgPerS <= 0.0;
 			auto const fillFraction = disabledLoop
-				? 0.0 : std::min(1.0, loop.coolantKg / loop.authored.coolantCapacityKg);
+				? 0.0 : loop.flowFillMultiplier();
 			// The circulation the chiller depends on, sized exactly as
 			// the containment pass sizes a protected loop's pump: a dry
 			// loop or a zero-rated-flow loop asks for nothing because it

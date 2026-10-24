@@ -1166,9 +1166,9 @@ namespace persistence
 		requireAllStyles(collectOwnedDoorStyles(*legacy, false), core::Door::OpenStyle::OpenUp, 4,
 			"A legacy Shuttle-owned Door");
 
-		// The current reader still refuses anything above its own ceiling.
-		auto const currentVersion = YAML::Load(defaultsYaml)["version"].as<uint32_t>();
-		auto const futureYaml = std::string("version: ") + std::to_string(currentVersion + 1)
+		// Fault-absent writers retain schema 111, but readers also accept the
+		// opt-in schema 112. A future map must exceed that reader ceiling.
+		auto const futureYaml = std::string("version: 113")
 			+ defaultsYaml.substr(defaultsYaml.find("\n"));
 		bool refusedFuture{ false };
 		try

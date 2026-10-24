@@ -50,7 +50,7 @@ namespace core
 				* loop.availabilityFactor;
 			auto const flowCapacityDisabled = effectiveFlowCapacityKgPerS <= 0.0;
 			auto const fillFraction = disabled
-				? 0.0 : std::min(1.0, loop.coolantKg / loop.authored.coolantCapacityKg);
+				? 0.0 : loop.flowFillMultiplier();
 			// A dry loop cannot run a pump: no fluid means no draw and
 			// no flow, never an invented one. An outaged loop cannot push
 			// its full rated flow either, so its draw scales with the

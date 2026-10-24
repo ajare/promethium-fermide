@@ -1183,6 +1183,15 @@ using namespace station_detail;
 				return refuse(where + " coolant capacity must be finite and positive");
 			if (!std::isfinite(loop.startingCoolantKg) || loop.startingCoolantKg < 0.0)
 				return refuse(where + " starting coolant must be finite and non-negative");
+			if (loop.coolantLeak)
+			{
+				auto const& leak = *loop.coolantLeak;
+				if (!std::isfinite(leak.releasedKg) || leak.releasedKg <= 0.0)
+					return refuse(where + " coolant leak releasedKg must be finite and positive");
+				if (std::none_of(settings.atmospheres.begin(), settings.atmospheres.end(),
+					[&](auto const& air) { return air.id == leak.compartmentId; }))
+					return missing(where + " coolant leak references unknown compartment '" + leak.compartmentId + "'");
+			}
 			if (loop.startingCoolantKg > loop.coolantCapacityKg)
 				return refuse(where + " starting coolant exceeds the loop capacity");
 			if (!std::isfinite(loop.specificHeatKJPerKgK) || loop.specificHeatKJPerKgK <= 0.0)

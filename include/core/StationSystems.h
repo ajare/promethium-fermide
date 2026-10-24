@@ -594,6 +594,30 @@ namespace core
 	// starting coolant disables the loop entirely: a dry loop pumps no
 	// flow, draws no pump power and heats nothing — circulation is never
 	// invented from an empty inventory.
+	// Opt-in one-shot puncture booking. Coolant remains liquid in the
+	// destination compartment; it is not invented breathing gas or vapour.
+	struct CoolantLeakSettings
+	{
+		std::string compartmentId;
+		double releasedKg{0.0};
+		bool operator==(CoolantLeakSettings const&) const = default;
+	};
+	struct FaultCause
+	{
+		enum class Kind { AgentAction, ScenarioEvent, Editor };
+		Kind kind{Kind::ScenarioEvent};
+		std::string detail;
+		bool operator==(FaultCause const&) const = default;
+	};
+	struct StationFaultSnapshot
+	{
+		std::string installationId, modeId;
+		uint64_t onsetTick{0};
+		FaultCause::Kind causeKind{FaultCause::Kind::ScenarioEvent};
+		std::string causeDetail;
+		double derivedImpact{0.0}; // lost fraction of rated circulation
+		bool operator==(StationFaultSnapshot const&) const = default;
+	};
 	struct CoolantLoopSettings
 	{
 		std::string id;
@@ -615,6 +639,7 @@ namespace core
 		// is authored here and only here (#754): nothing is inferred from
 		// any class, because a loop carries none (#757).
 		bool criticalService{false};
+		std::optional<CoolantLeakSettings> coolantLeak;
 		bool operator==(CoolantLoopSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationCoolantLoops{8};
@@ -3034,6 +3059,8 @@ namespace core
 	// the freeze condition; it never clamps the integrated state.
 	struct StationCoolantLoopSnapshot
 	{
+		std::vector<StationFaultSnapshot> activeFaults;
+		double leakedCoolantKg{0.0}, leakedCoolantEnergyKJ{0.0};
 		std::string id;
 		std::string reservoirId;
 		double coolantCapacityKg{0.0};
@@ -3338,6 +3365,8 @@ namespace core
 
 	struct StationAtmosphereSnapshot
 	{
+		// Liquid spill inventory, separate from the gas/condensation ledger.
+		double spilledCoolantKg{0.0}, spilledCoolantEnergyKJ{0.0};
 		std::string id;
 		std::string reservoirId;      // empty: adiabatic, no thermal coupling
 		double volumeM3{0.0};

@@ -1,6 +1,7 @@
 # Station Degradation and Failure Specification
 
-Status: design agreed 2026-07-31; not yet implemented.
+Status: design agreed 2026-07-31; coolant-leak injection tracer bullet (#839) implemented.
+See [the implemented slice](../station-faults.md); the remaining framework below is still design.
 
 Canonical vocabulary: `CONTEXT.md` § Station systems — **Installation**, **Condition**,
 **Degradation**, **Fault**, **Failure**, **Trip**, **Repair**. This spec uses those terms

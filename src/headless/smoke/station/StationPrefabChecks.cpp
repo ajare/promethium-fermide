@@ -1450,7 +1450,7 @@ parameters:
 		// version boundary, the same refusal every newer-schema document
 		// meets.
 		auto future = yaml;
-		replaceAllText(future, "schemaVersion: 111", "schemaVersion: 112");
+		replaceAllText(future, "schemaVersion: 111", "schemaVersion: 113");
 		require(!core::parseStationConfiguration(future, loaded, &diagnostic)
 				&& diagnostic.find("Unsupported Station configuration schemaVersion")
 					!= std::string::npos,

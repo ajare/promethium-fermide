@@ -8,7 +8,9 @@ namespace core
 		// zero-time boundary pass publishes starts/restorations at the end.
 		auto const outageElapsed = continuous ? elapsed - seconds : elapsed;
 		for (auto& generator : runtime.generators) generator.availabilityFactor = 1.0;
-		for (auto& loop : runtime.coolantLoops) loop.availabilityFactor = 1.0;
+		for (auto& loop : runtime.coolantLoops)
+			loop.availabilityFactor = loop.fault
+				? std::min(1.0, loop.coolantKg / loop.authored.coolantCapacityKg) : 1.0;
 		for (auto& chiller : runtime.chillers) chiller.availabilityFactor = 1.0;
 		// The heat engine enters the shared availability contract here: the
 		// same reset, the same outage ceiling and the same maintenance

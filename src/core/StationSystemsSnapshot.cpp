@@ -418,6 +418,14 @@ namespace core
 		{
 			StationCoolantLoopSnapshot loopResult;
 			loopResult.id = loop.authored.id;
+			loopResult.leakedCoolantKg = loop.leakedKg;
+			loopResult.leakedCoolantEnergyKJ = loop.leakedEnergyKJ;
+			if (loop.fault && !loop.pendingLeak)
+			{
+				auto fault = *loop.fault;
+				fault.derivedImpact = 1.0 - loop.coolantKg / loop.authored.coolantCapacityKg;
+				loopResult.activeFaults.push_back(std::move(fault));
+			}
 			loopResult.reservoirId = loop.authored.reservoirId;
 			loopResult.coolantCapacityKg = loop.authored.coolantCapacityKg;
 			loopResult.coolantKg = loop.coolantKg;
@@ -456,7 +464,7 @@ namespace core
 			loopResult.collectorHeatEnergyKJ = loop.collectorHeatKJ;
 			loopResult.residualKJ = loopResult.startingEnergyKJ + loop.pumpWorkKJ
 				+ loop.heaterKJ + loop.exchangedKJ + loop.collectorHeatKJ
-				- loop.extractedKJ - loopResult.currentEnergyKJ;
+				- loop.extractedKJ - loop.leakedEnergyKJ - loopResult.currentEnergyKJ;
 			loopResult.status = loop.status;
 			result.thermal.totalCirculationKgPerS += loop.lastFlowKgPerS;
 			result.thermal.totalFreezeHeatingKW += loop.lastHeaterSuppliedKW;
@@ -666,6 +674,8 @@ namespace core
 		{
 			StationAtmosphereSnapshot atmosphereResult;
 			auto const& authored = compartment.authored;
+			atmosphereResult.spilledCoolantKg = compartment.spilledCoolantKg;
+			atmosphereResult.spilledCoolantEnergyKJ = compartment.spilledCoolantEnergyKJ;
 			atmosphereResult.id = authored.id;
 			atmosphereResult.reservoirId = authored.reservoirId;
 			atmosphereResult.volumeM3 = authored.volumeM3;

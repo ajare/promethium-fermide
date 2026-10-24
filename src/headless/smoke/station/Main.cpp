@@ -32,6 +32,7 @@ int main(int argc, char** argv)
 	registerStationBatteryChecks(checks);
 	registerStationLogisticsChecks(checks);
 	registerStationCoreChecks(checks);
+	registerStationFaultChecks(checks);
 	registerStationClockChecks(checks);
 	registerStationRuntimeRegressionChecks(checks);
 	registerStationInvarianceChecks(checks);

@@ -139,6 +139,16 @@ namespace core
 		StationSystemsSettings const& offered, std::string* diagnostic)
 	{
 		auto& s = *mImpl;
+		for (auto const& next : offered.coolantLoops)
+		{
+			auto const old = std::find_if(s.coolantLoops.begin(), s.coolantLoops.end(),
+				[&](auto const& loop) { return loop.authored.id == next.id; });
+			if (old != s.coolantLoops.end() && LiveNode<CoolantLoopSettings>::topologyChanged(old->authored, next))
+			{
+				if (diagnostic) *diagnostic = "Coolant loop '" + next.id + "': fault opt-in and endpoints are frozen topology";
+				return false;
+			}
+		}
 
 		// An opening is topology: which two compartments it joins cannot move
 		// under a running simulation, because the live pressure state and the
@@ -383,6 +393,7 @@ namespace core
 		syncAuthored(s.settings.cropPopulations, s.cropPopulations);
 		syncAuthored(s.settings.algaeCultures, s.algaeCultures);
 		syncAuthored(s.settings.maintenanceJobs, s.maintenanceJobs);
+		s.recordFaultSettings();
 		return true;
 	}
 
@@ -470,6 +481,7 @@ namespace core
 		// is touched.
 		auto& mirror = LiveNode<Settings>::of(mImpl->settings);
 		if (index < mirror.size()) mirror[index] = value;
+		mImpl->recordFaultSettings();
 	}
 
 	template <class Settings>
