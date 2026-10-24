@@ -474,10 +474,134 @@ void thermalLinkPathwayIndependence(smoke::Context const&)
 			"residual did not close with a link and a pathway both present");
 }
 
+// #833: individually stable passive exchanges must share the state left
+// by their predecessors, not spend the same starting heat twice. Keep the
+// controls and the combined run at the World/snapshot seam.
+void strongReservoirCoexistence()
+{
+	for (uint32_t const ratio : {1u, 6u, 7u, 60u})
+	for (double const sinkTemperatureC : {10.0, -260.0, 80.0})
+	for (int const mode : {0, 1, 2, 3}) // exchanger, wall, both, linked network
+	{
+		core::ScopedStationStepRatioForTesting cadence(ratio);
+		auto s = linkedPair(1.0, 1.0, 1e8);
+		for (auto& air : s.atmospheres) air.startingWaterVapourKg = 0.0;
+		core::ThermalReservoirSettings sink;
+		sink.id = "sink";
+		sink.thermalClass = "moderate";
+		sink.heatCapacityKJPerK = 1e6;
+		sink.startingTemperatureC = sinkTemperatureC;
+		sink.minTemperatureC = -270.0;
+		sink.maxTemperatureC = 200.0;
+		s.thermalReservoirs = {sink};
+		if (mode != 1)
+		{
+			s.atmospheres[0].reservoirId = "sink";
+			s.atmospheres[0].exchangerConductanceKWPerK = 1e8;
+		}
+		if (mode == 0) s.thermalLinks.clear();
+		if (mode == 3)
+		{
+			auto c = linkCompartment("c", 60.0, 2.0);
+			c.startingWaterVapourKg = 0.0;
+			c.reservoirId = "sink";
+			c.exchangerConductanceKWPerK = 1e8;
+			s.atmospheres.push_back(c);
+			s.thermalLinks.push_back({"second-wall", "b", "c", 1e8});
+		}
+		std::string diagnostic;
+		core::World world("StrongReservoirCoexistence", 2, 2);
+		configure(world, s, diagnostic);
+		world.resumeSimulation();
+		for (int step = 0; step < 20; ++step)
+		{
+			require(advanceStationSteps(world, 1), "strong passive exchange step failed");
+			auto const snapshot = world.getStationSystemsSnapshot();
+			require(snapshot.healthy, "strong passive exchange failed its audit");
+			double conducted = 0.0, exchanged = 0.0;
+			for (size_t i = 0; i < s.atmospheres.size(); ++i)
+			{
+				auto const& air = snapshot.atmospheres[i];
+				require(std::isfinite(air.temperatureC)
+					&& air.temperatureC >= std::min(10.0, sinkTemperatureC) - 1e-8
+					&& air.temperatureC <= std::max(60.0, sinkTemperatureC) + 1e-8,
+					"passive exchanges overshot the available thermal state");
+				require(air.temperatureC + core::StationCelsiusOffset > 0.0,
+					"passive exchanges published negative kelvin");
+				require(std::abs(air.residualKJ) < 1e-6,
+					"strong passive compartment ledger did not close");
+				conducted += air.conductedEnergyKJ;
+				exchanged += air.exchangedEnergyKJ;
+			}
+			require(std::abs(conducted) < 1e-9, "network conducted heat was not conserved");
+			require(std::abs(exchanged + snapshot.thermal.reservoirs[0].currentEnergyKJ
+				- snapshot.thermal.reservoirs[0].startingEnergyKJ) < 1e-5,
+				"reservoir and compartment exchange ledgers disagree");
+			if (step == 0 && mode < 3)
+			{
+				auto const afterExchange = 40.0 + snapshot.atmospheres[0].exchangedEnergyKJ;
+				require(mode == 1 ? afterExchange == 40.0
+					: std::abs(afterExchange - sinkTemperatureC) < 1e-2,
+					"strong exchanger control did not approach the reservoir temperature");
+				auto const moved = mode == 0 ? 0.0 : (afterExchange - 10.0) / 2.0;
+				require(std::abs(snapshot.atmospheres[0].temperatureC - (afterExchange - moved)) < 1e-6
+					&& std::abs(snapshot.atmospheres[1].temperatureC - (10.0 + moved)) < 1e-6,
+					"wall did not relax the post-exchanger state");
+				require(std::abs(snapshot.atmospheres[0].conductedEnergyKJ + moved) < 1e-6,
+					"strong wall heat was not separately attributed");
+			}
+		}
+	}
+	// The provisional post-exchanger state must not bypass same-step
+	// condensation: both passive terms enter the one vapour/thermal solve.
+	for (uint32_t const ratio : {1u, 6u, 7u, 60u})
+	{
+		core::ScopedStationStepRatioForTesting cadence(ratio);
+		auto s = linkedPair(10000.0, 10000.0, 1e8);
+		s.atmospheres[0].startingWaterVapourKg = 0.99 * core::stationSaturatedVapourMassKg(
+			core::stationSaturationVapourPressureKPa(40.0), 100.0, 40.0);
+		s.atmospheres[0].reservoirId = "sink";
+		s.atmospheres[0].exchangerConductanceKWPerK = 1e8;
+		s.atmospheres[1].startingTemperatureC = 5.0;
+		core::ThermalReservoirSettings sink;
+		sink.id = "sink";
+		sink.thermalClass = "moderate";
+		sink.heatCapacityKJPerK = 1e6;
+		sink.startingTemperatureC = 10.0;
+		sink.minTemperatureC = -50.0;
+		sink.maxTemperatureC = 200.0;
+		s.thermalReservoirs = {sink};
+		std::string diagnostic;
+		core::World world("StrongReservoirCondensation", 2, 2);
+		configure(world, s, diagnostic);
+		world.resumeSimulation();
+		require(advanceStationSteps(world, 1), "strong wet passive exchange step failed");
+		auto const snapshot = world.getStationSystemsSnapshot();
+		require(snapshot.healthy, "strong wet passive exchange failed its audit");
+		auto const& hot = snapshot.atmospheres[0];
+		require(hot.exchangedEnergyKJ < 0.0 && hot.conductedEnergyKJ < 0.0
+			&& hot.lastVapourCondensedKg > 0.0 && hot.lastLatentHeatKW > 0.0,
+			"combined passive cooling did not condense in the same step");
+		for (size_t i = 0; i < s.atmospheres.size(); ++i)
+		{
+			auto const& air = snapshot.atmospheres[i];
+			require(air.relativeHumidity <= 1.0 + 1e-9,
+				"combined passive cooling published supersaturated air");
+			require(std::abs(air.waterVapourKg + air.condensedKg
+				- s.atmospheres[i].startingWaterVapourKg) < 1e-9,
+				"combined passive cooling lost vapour/condensate mass");
+			require(std::abs(air.currentEnergyKJ - air.startingEnergyKJ
+				- air.exchangedEnergyKJ - air.conductedEnergyKJ - air.latentHeatEnergyKJ) < 1e-6,
+				"combined passive and latent thermal ledgers disagree");
+		}
+	}
+}
+
 // A compartment with both a heat-only exchanger to a reservoir and a
 // thermal link books the two separately and its residual still closes.
 void thermalLinkReservoirCoexistence(smoke::Context const&)
 {
+	strongReservoirCoexistence();
 	core::StationSystemsSettings s;
 	s.enabled = true;
 	auto a = linkCompartment("a", 40.0, 10000.0);

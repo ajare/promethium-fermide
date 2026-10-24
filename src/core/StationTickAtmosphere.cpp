@@ -552,7 +552,7 @@ namespace core
 			pathway.lastAdvectedKW = carriedKJ / seconds;
 		}
 		// Thermal link conduction (#794): heat conducted between linked
-		// compartments, evaluated against tick-start temperatures before
+		// compartments, evaluated against the post-exchanger state before
 		// the per-compartment loop and folded into each endpoint's external
 		// heat rate sum - the same contract the reservoir exchange already
 		// uses. This is the only placement where heat that just arrived
@@ -591,8 +591,18 @@ namespace core
 		// summed external heat rate.
 		std::vector<long double> relaxationTemperatureC(runtime.atmospheres.size());
 		for (size_t index = 0; index < runtime.atmospheres.size(); ++index)
+		{
+			auto const& compartment = runtime.atmospheres[index];
+			// The reservoir star has already booked this step's exchanger
+			// transfer (#833). Relax walls from that updated thermal state,
+			// not from heat the exchanger has already spent. Keep this
+			// provisional: the compartment still integrates both separately
+			// attributed terms with vapour/latent heat once below.
 			relaxationTemperatureC[index]
-				= static_cast<long double>(runtime.atmospheres[index].temperatureC);
+				= static_cast<long double>(compartment.temperatureC)
+				+ static_cast<long double>(atmosphereExchangeKJ[index])
+					/ compartment.authored.thermalCapacityKJPerK;
+		}
 		for (auto const linkIndex : runtime.thermalLinkPassOrder)
 		{
 			auto& link = runtime.thermalLinks[linkIndex];
@@ -702,7 +712,7 @@ namespace core
 			auto const algaeHeatKW = algaeHeatByAtmosphere[atmosphereIndex];
 			auto const exchangeKW = atmosphereExchangeKJ[atmosphereIndex] / dt;
 			// Conducted heat from this compartment's Thermal links (#794),
-			// solved above against tick-start temperatures and folded into
+			// solved above against post-exchanger temperatures and folded into
 			// the same external heat rate sum the reservoir exchange uses,
 			// so it meets the coupled vapour/thermal solve this tick.
 			auto const conductedKW = thermalLinkConductedKJ[atmosphereIndex] / dt;
