@@ -1257,9 +1257,16 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		// commute exactly - their conductances compose to their sum however
 		// they are applied - so the only order that could ever move a result
 		// is between links sharing one compartment, and the canonical pair
-		// key fixes that too. The authored A/B are never reordered: the key
-		// orders the pass, never the sign of a published flow, and the
-		// snapshot still reports the links in the order they were declared.
+		// key fixes that too. The key is the pair of authored compartment
+		// names, not the declaration indices: the indices belong to the
+		// order the atmospheres array was typed, so keying on them made the
+		// "canonical" order move when only the compartment declarations
+		// were reshuffled (#836). Named identity is what the wiring is
+		// made of, so the same named network always splits in the same
+		// order regardless of how either list is arranged. The authored A/B
+		// are never reordered: the key orders the pass, never the sign of a
+		// published flow, and the snapshot still reports the links in the
+		// order they were declared.
 		mImpl->thermalLinkPassOrder.resize(mImpl->thermalLinks.size());
 		std::iota(mImpl->thermalLinkPassOrder.begin(), mImpl->thermalLinkPassOrder.end(), size_t{0});
 		std::stable_sort(mImpl->thermalLinkPassOrder.begin(), mImpl->thermalLinkPassOrder.end(),
@@ -1267,8 +1274,10 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			{
 				auto const& source = mImpl->thermalLinks[left];
 				auto const& target = mImpl->thermalLinks[right];
-				auto const leftKey = std::minmax(source.aIndex, source.bIndex);
-				auto const rightKey = std::minmax(target.aIndex, target.bIndex);
+				auto const leftKey = std::minmax(source.authored.aAtmosphereId,
+					source.authored.bAtmosphereId);
+				auto const rightKey = std::minmax(target.authored.aAtmosphereId,
+					target.authored.bAtmosphereId);
 				if (leftKey != rightKey) return leftKey < rightKey;
 				return source.authored.id < target.authored.id;
 			});

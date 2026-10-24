@@ -1592,6 +1592,119 @@ void thermalLinkDeclarationOrderIndependence(smoke::Context const&)
 		"a reversed wall did not report the exact negation of its own flow");
 }
 
+// #836: the canonical pass order belongs to the named wiring, not to the
+// order the atmospheres array was typed. The reported repro: a dry chain
+// A/B/C at 40/10/-10 C with 1 kJ/K capacities and two 10 kW/K links
+// published a several-kelvin different temperature for compartment a
+// when only the compartment declarations were reshuffled - the link list
+// and every named wire stayed identical. The pass key is now the pair of
+// authored compartment names, so the two documents must publish exactly
+// the same physics, compared by compartment and link identity and never
+// by snapshot array position: the snapshot still presents compartments
+// in the order the author declared them.
+void thermalLinkCompartmentOrderIndependence(smoke::Context const&)
+{
+	std::string diagnostic;
+	// The ticket's fixture plus an asymmetric variant: unequal capacities
+	// and unequal conductances, so no symmetry can mask an order that
+	// still secretly depends on declaration indices.
+	struct Scenario
+	{
+		char const* name;
+		std::array<double, 3> capacitiesKJPerK;
+		std::array<double, 2> conductancesKWPerK;
+	};
+	for (auto const& scenario : std::vector<Scenario>{
+		Scenario{"reported", {{1.0, 1.0, 1.0}}, {{10.0, 10.0}}},
+		Scenario{"asymmetric", {{1.0, 1.5, 0.8}}, {{10.0, 15.0}}}})
+	{
+		auto const chain = [&](std::vector<std::string> const& declarationOrder)
+		{
+			core::StationSystemsSettings s;
+			s.enabled = true;
+			std::vector<core::AtmosphereSettings> rooms = {
+				linkCompartment("a", 40.0, scenario.capacitiesKJPerK[0]),
+				linkCompartment("b", 10.0, scenario.capacitiesKJPerK[1]),
+				linkCompartment("c", -10.0, scenario.capacitiesKJPerK[2])};
+			for (auto const& id : declarationOrder)
+				for (auto const& room : rooms)
+					if (room.id == id) s.atmospheres.push_back(room);
+			// The link list is byte-identical in both documents: only the
+			// compartment declarations move.
+			s.thermalLinks = {{"ab", "a", "b", scenario.conductancesKWPerK[0]},
+				{"bc", "b", "c", scenario.conductancesKWPerK[1]}};
+			return s;
+		};
+		auto const forward = chain({"a", "b", "c"});
+		auto const reversed = chain({"c", "b", "a"});
+		core::World declared("CompartmentOrderForward", 2, 2);
+		core::World reshuffled("CompartmentOrderReversed", 2, 2);
+		::configure(declared, forward, diagnostic);
+		::configure(reshuffled, reversed, diagnostic);
+		// Presentation stays with the document: the snapshot lists
+		// compartments in the order they were declared, even though the
+		// pass no longer cares about that order.
+		auto const presented = reshuffled.getStationSystemsSnapshot();
+		require(presented.atmospheres.size() == 3
+			&& presented.atmospheres[0].id == "c" && presented.atmospheres[1].id == "b"
+			&& presented.atmospheres[2].id == "a",
+			"reshuffling compartment declarations changed the snapshot's presentation order");
+		declared.resumeSimulation(); reshuffled.resumeSimulation();
+		auto const requireSamePublishedState = [](core::StationSystemsSnapshot const& base,
+			core::StationSystemsSnapshot const& other, char const* what)
+		{
+			for (auto const& air : base.atmospheres)
+			{
+				auto const& twin = compartment(other, air.id);
+				require(air.temperatureC == twin.temperatureC
+					&& air.conductedEnergyKJ == twin.conductedEnergyKJ
+					&& air.lastConductedKW == twin.lastConductedKW,
+					("reshuffling compartment declarations changed a published "
+						"temperature or conducted total (" + std::string(what) + ")").c_str());
+			}
+			for (auto const& entry : base.thermalLinks)
+			{
+				auto const& twin = link(other, entry.id);
+				require(entry.flowRateKW == twin.flowRateKW
+					&& entry.netTransferredKJ == twin.netTransferredKJ
+					&& entry.status == twin.status,
+					("reshuffling compartment declarations changed a link's own published "
+						"flow, total or status (" + std::string(what) + ")").c_str());
+			}
+		};
+		// The reported comparison point: one default Station step, where
+		// the ticket's probe diverged by several kelvin.
+		require(advanceStationSteps(declared, 1) && advanceStationSteps(reshuffled, 1),
+			"compartment-order independence first step failed");
+		auto const first = declared.getStationSystemsSnapshot();
+		auto const firstReversed = reshuffled.getStationSystemsSnapshot();
+		require(first.healthy && firstReversed.healthy,
+			"compartment-order independence run failed its audit");
+		requireSamePublishedState(first, firstReversed, scenario.name);
+		// Non-vacuous: the chain genuinely conducted at the comparison
+		// point, so the equality above is equality of moving physics.
+		require(link(first, "ab").status == core::StationThermalLinkStatus::Active
+			&& link(first, "ab").netTransferredKJ != 0.0
+			&& link(first, "bc").status == core::StationThermalLinkStatus::Active
+			&& link(first, "bc").netTransferredKJ != 0.0,
+			"the compartment-order fixture never conducted");
+		require(compartment(first, "a").temperatureC != 40.0
+			&& compartment(first, "c").temperatureC != -10.0,
+			"the compartment-order fixture's endpoints never moved");
+		// And the whole relaxation, checked every step to the horizon.
+		while (declared.getStationSystemsSnapshot().elapsedSeconds < 60.0)
+		{
+			require(advanceStationSteps(declared, 1) && advanceStationSteps(reshuffled, 1),
+				"compartment-order independence step failed");
+			auto const base = declared.getStationSystemsSnapshot();
+			auto const other = reshuffled.getStationSystemsSnapshot();
+			require(base.healthy && other.healthy,
+				"compartment-order independence run failed its audit mid-run");
+			requireSamePublishedState(base, other, scenario.name);
+		}
+	}
+}
+
 // AC5: a compartment wired to two neighbours exchanges with each of
 // them on its own terms. Each link's transfer is the closed form applied
 // to its own pair's temperature difference, each is booked to itself,
@@ -1787,6 +1900,8 @@ void registerStationThermalLinkChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"thermalLinkChainLedgerAttribution", thermalLinkChainLedgerAttribution});
 	checks.push_back({"thermalLinkDeclarationOrderIndependence",
 		thermalLinkDeclarationOrderIndependence});
+	checks.push_back({"thermalLinkCompartmentOrderIndependence",
+		thermalLinkCompartmentOrderIndependence});
 	checks.push_back({"thermalLinkSharedNeighbourIndependence",
 		thermalLinkSharedNeighbourIndependence});
 	checks.push_back({"thermalLinkLiveSettings", thermalLinkLiveSettings});
