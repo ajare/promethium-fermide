@@ -207,6 +207,64 @@ namespace core
 		std::vector<PlacedPrefab> const& placed, CandidateLink const& link,
 		std::string& reason);
 
+	// #815: whole-unit rename. A placed instance is renamed as one unit:
+	// every namespaced internal id and every reference to it - from inside
+	// the box and from outside nodes - is rewritten together, or nothing is.
+	// The plan carries the instance's entries and the identities of every
+	// reference the rename touches, so a confirmation and the mutation use
+	// one core-owned view of the draft and a stale plan is refused.
+	struct PrefabInstanceRename
+	{
+		std::string oldInstanceId;
+		std::string newInstanceId;
+		// (nodeType, old namespaced id) of every entry under the namespace,
+		// in the fixed prefab walk order.
+		std::vector<std::pair<std::string, std::string>> entries;
+		// Every authored-link identity naming one of those entries at either
+		// end: the internal plumbing and the outside references alike.
+		std::vector<std::string> linkIdentities;
+		bool operator==(PrefabInstanceRename const&) const = default;
+	};
+
+	// Validate a whole-unit rename against the draft: the new instance id
+	// must be non-empty, must not contain the namespacing separator, must
+	// differ from the old one, must not already own any entry, and must
+	// keep every rewritten id inside the entry-id limit. The old instance
+	// must own at least one entry. Refusals carry a diagnostic.
+	bool planPrefabInstanceRename(StationSystemsSettings const& draft,
+		std::string const& oldInstanceId, std::string const& newInstanceId,
+		PrefabInstanceRename& plan, std::string* diagnostic = nullptr);
+
+	// Apply the rename atomically: the plan is re-checked against the live
+	// draft, then every internal entry is renamed through the same core
+	// rename machinery the editor uses, on a candidate copy. Any failure
+	// leaves the draft untouched.
+	bool renamePrefabInstance(StationSystemsSettings& draft,
+		PrefabInstanceRename const& plan, std::string& reason);
+
+	// #815: whole-unit cascade delete. The plan names every entry under
+	// the instance namespace and every authored link that touches the
+	// expansion, so one confirmation covers the whole removal and the
+	// apply cannot leave an orphaned internal or a dangling reference.
+	struct PrefabInstanceRemoval
+	{
+		std::string instanceId;
+		std::vector<std::pair<std::string, std::string>> entries;
+		std::vector<std::string> linkIdentities;
+		bool operator==(PrefabInstanceRemoval const&) const = default;
+	};
+
+	bool planPrefabInstanceRemoval(StationSystemsSettings const& draft,
+		std::string const& instanceId, PrefabInstanceRemoval& plan,
+		std::string* diagnostic = nullptr);
+
+	// Remove the whole expansion atomically on a candidate copy: every
+	// entry goes through the core node-removal machinery, which clears its
+	// references and its connection properties, so no orphan and no
+	// dangling reference survives. A refusal leaves the draft untouched.
+	bool removePrefabInstance(StationSystemsSettings& draft,
+		PrefabInstanceRemoval const& plan, std::string& reason);
+
 	// Catalogue-load template validation: expand the template in
 	// isolation - the template id standing in for the instance id - with
 	// stub peers on the exposed ports, and run the existing configuration

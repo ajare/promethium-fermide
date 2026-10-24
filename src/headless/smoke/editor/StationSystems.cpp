@@ -6973,6 +6973,233 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		require(driver.passed(), "prefab persistence workflow failed on the Test Engine");
 	}
 
+	// #815: whole-unit rename and cascade delete. Renaming the composite
+	// rewrites the whole namespace and every reference to it as one
+	// undoable unit; deleting it takes the whole expansion behind one
+	// cascade confirmation; and while the unit is grouped its internal
+	// entries refuse to be renamed or deleted on their own. Both
+	// operations survive save/load and undo/redo.
+	void prefabUnitEditWorkflow(smoke::Context const& fixtureContext)
+	{
+		using smoke::require;
+		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
+		auto const root = fixtureContext.temporaryRoot() / "prefab-unit-edit-resources";
+		headless::StationResourceFixture resources(authored, root);
+		require(resources.catalogues.size() == 1,
+			"the bundled prefab catalogue should load from the manifest");
+
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1700};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window;
+		window.setPrefabCatalogueResources(resources.catalogues);
+		auto world = std::make_shared<core::World>("Prefab unit editing", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+		auto const path = fixtureContext.temporaryRoot() / "unit-edit.station.yaml";
+		std::optional<std::string> pickPath = path.string();
+		window.setFilePicker([&](bool) -> std::optional<std::string> { return pickPath; });
+
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 1680});
+			ImGui::Begin("Configuration");
+			window.renderFlowContents(world);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "prefabUnitEdit", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto* canvas = flowCanvasWindow("Configuration");
+			REQ(canvas != nullptr, "flow canvas is missing");
+			// Place the unit, then wire an outside Outage through its
+			// exposed Supervision pin: a reference from outside the box
+			// that the rename must follow and the delete must clear.
+			ctx->ComboClick("Place node/Aircon Unit"); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 300.0f, canvas->Pos.y + 220.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ctx->ComboClick("Place node/Outage"); ctx->Yield(2);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 40.0f, canvas->Pos.y + 40.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ImVec2 a{}, b{};
+			REQ(window.flowPinPosition("Outage", "outage1", "Target installation", &a)
+				&& window.flowPinPosition("aircon-unit", "ac1", "Supervision", &b),
+				"the outage or composite supervision connector is missing before the drag");
+			ctx->MouseTeleportToPos(a); ctx->Yield(2);
+			ctx->MouseDown(); ctx->Yield(2);
+			ctx->MouseTeleportToPos({(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f}); ctx->Yield(2);
+			ctx->MouseTeleportToPos(b); ctx->Yield(2);
+			ImVec2 live{};
+			if (window.flowPinPosition("aircon-unit", "ac1", "Supervision", &live))
+			{ ctx->MouseTeleportToPos(live); ctx->Yield(2); }
+			ctx->MouseUp(); ctx->Yield(3);
+			REQ(window.draft().outages.size() == 1
+				&& window.draft().outages[0].installationId == "ac1.machine",
+				("the outside link did not land: " + window.flowLinkRejection()).c_str());
+			// Select the composite and rename the unit: the cascade asks
+			// first and changes nothing until it is confirmed.
+			auto const wired = window.draft();
+			auto const undoAfterWire = window.draftHistory().undoCount();
+			ImVec4 rect{};
+			REQ(window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"the composite is missing before the rename");
+			ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+			ctx->Yield(2);
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 4.0f, canvas->Pos.y + 4.0f});
+			ctx->Yield(3);
+			driver.click(ctx, "**/New node name"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+			ctx->KeyChars("ac2"); ctx->Yield(2);
+			driver.click(ctx, "**/Rename selected node"); ctx->Yield(3);
+			REQ(driver.contains("Rename prefab unit 'ac1' to 'ac2'?"),
+				"the unit rename did not open its cascade confirmation");
+			REQ(window.draft() == wired
+				&& window.draftHistory().undoCount() == undoAfterWire,
+				"the confirmation mutated the draft before it was confirmed");
+			driver.click(ctx, "**/Cancel unit rename"); ctx->Yield(3);
+			REQ(window.draft() == wired
+				&& window.draftHistory().undoCount() == undoAfterWire,
+				"cancelling the unit rename changed the draft or history");
+			driver.click(ctx, "**/Rename selected node"); ctx->Yield(2);
+			driver.click(ctx, "**/Confirm unit rename"); ctx->Yield(3);
+			// The whole namespace and every reference moved in one step.
+			REQ(window.draft().chillers.size() == 1
+				&& window.draft().chillers[0].id == "ac2.machine"
+				&& window.draft().chillers[0].coldLoopId == "ac2.loop"
+				&& window.draft().coolantLoops.size() == 1
+				&& window.draft().coolantLoops[0].id == "ac2.loop"
+				&& window.draft().radiators.size() == 1
+				&& window.draft().radiators[0].id == "ac2.radiator",
+				"the unit rename did not rewrite the internal ids and plumbing");
+			REQ(window.draft().outages[0].installationId == "ac2.machine",
+				"the unit rename did not follow the outside reference");
+			REQ(window.draftHistory().undoCount() == undoAfterWire + 1,
+				"the unit rename was not a single undo step");
+			REQ(window.flowNodeRect("aircon-unit", "ac2", &rect)
+				&& !window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"the composite did not follow the rename");
+			REQ(window.flowPlacedPrefabs().size() == 1
+				&& window.flowPlacedPrefabs()[0].instanceId == "ac2",
+				"the placed-unit record did not follow the rename");
+			ImVec2 pin{};
+			REQ(window.flowPinPosition("aircon-unit", "ac2", "Cold supply", &pin)
+				&& window.flowPinPosition("aircon-unit", "ac2", "Supervision", &pin),
+				"the renamed composite does not present its exposed pins");
+			REQ(!window.flowPinPosition("aircon-unit", "ac1", "Cold supply", &pin),
+				"the old composite identity still presents a pin");
+			// One undo restores the whole old namespace; one redo re-applies.
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().chillers[0].id == "ac1.machine"
+				&& window.draft().outages[0].installationId == "ac1.machine"
+				&& window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"one undo did not restore the whole old namespace");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().chillers[0].id == "ac2.machine"
+				&& window.draft().outages[0].installationId == "ac2.machine"
+				&& window.flowNodeRect("aircon-unit", "ac2", &rect),
+				"one redo did not re-apply the whole rename");
+			// While the unit is grouped, an internal entry refuses to be
+			// renamed or deleted on its own: the controls are disabled and
+			// say why, and pressing them changes nothing.
+			window.flowSetPrefabExpanded("ac2", true); ctx->Yield(3);
+			ctx->ItemClick("Fit all"); ctx->Yield(3);
+			REQ(window.flowNodeRect("Chiller", "ac2.machine", &rect),
+				"the internal chiller is not drawn when expanded");
+			ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+			ctx->Yield(2);
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 4.0f, canvas->Pos.y + 4.0f});
+			ctx->Yield(3);
+			auto const expanded = window.draft();
+			auto const undoAfterExpand = window.draftHistory().undoCount();
+			REQ(driver.contains("is internal to prefab unit 'ac2'"),
+				"the grouped internal entry gave no refusal reason");
+			REQ(driver.clickDisabled(ctx, "**/Rename selected node", "grouped internal rename"),
+				"the grouped internal rename was not disabled");
+			REQ(driver.clickDisabled(ctx, "**/Delete selected node", "grouped internal delete"),
+				"the grouped internal delete was not disabled");
+			ctx->Yield(2);
+			REQ(window.draft() == expanded
+				&& window.draftHistory().undoCount() == undoAfterExpand,
+				"pressing the refused controls changed the draft or history");
+			// Collapse and delete the unit: one cascade confirmation takes
+			// the whole expansion, and the outside reference is cleared.
+			window.flowSetPrefabExpanded("ac2", false); ctx->Yield(3);
+			REQ(window.flowNodeRect("aircon-unit", "ac2", &rect),
+				"the composite did not come back after collapse");
+			ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+			ctx->Yield(2);
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 4.0f, canvas->Pos.y + 4.0f});
+			ctx->Yield(3);
+			auto const beforeDelete = window.draft();
+			auto const undoBeforeDelete = window.draftHistory().undoCount();
+			driver.click(ctx, "**/Delete selected node"); ctx->Yield(3);
+			REQ(driver.contains("Delete prefab unit 'ac2'?"),
+				"the unit delete did not open its cascade confirmation");
+			REQ(window.draft() == beforeDelete
+				&& window.draftHistory().undoCount() == undoBeforeDelete,
+				"the delete confirmation mutated before it was confirmed");
+			driver.click(ctx, "**/Cancel unit deletion"); ctx->Yield(3);
+			REQ(window.draft() == beforeDelete
+				&& window.draftHistory().undoCount() == undoBeforeDelete,
+				"cancelling the unit delete changed the draft or history");
+			driver.click(ctx, "**/Delete selected node"); ctx->Yield(2);
+			driver.click(ctx, "**/Confirm unit deletion"); ctx->Yield(3);
+			REQ(window.draft().chillers.empty() && window.draft().coolantLoops.empty()
+				&& window.draft().radiators.empty() && window.draft().thermalReservoirs.empty(),
+				"the cascade left an orphaned internal behind");
+			REQ(window.draft().outages.size() == 1
+				&& window.draft().outages[0].installationId.empty(),
+				"the cascade left the outside reference dangling");
+			REQ(!window.flowNodeRect("aircon-unit", "ac2", &rect)
+				&& window.flowPlacedPrefabs().empty(),
+				"the composite survived the unit delete");
+			REQ(window.draftHistory().undoCount() == undoBeforeDelete + 1,
+				"the unit delete was not a single undo step");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft() == beforeDelete
+				&& window.flowNodeRect("aircon-unit", "ac2", &rect),
+				"one undo did not restore the whole expansion");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().chillers.empty() && window.flowPlacedPrefabs().empty(),
+				"one redo did not re-apply the cascade delete");
+			// The delete survives save/load as well: with the expansion
+			// gone, the saved document carries neither the provenance nor
+			// any of the internal entries.
+			driver.click(ctx, "Save configuration"); ctx->Yield(3);
+			core::StationConfigurationDocument deletedDoc;
+			REQ(core::loadStationConfiguration(path.string(), deletedDoc)
+				&& deletedDoc.prefabs.empty() && deletedDoc.settings.chillers.empty(),
+				"the saved document still carried the deleted unit");
+			// Save with the unit restored under its new name: the document
+			// carries the renamed provenance and re-groups on reopen.
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			driver.click(ctx, "Save configuration"); ctx->Yield(3);
+			core::StationConfigurationDocument saved;
+			REQ(core::loadStationConfiguration(path.string(), saved)
+				&& saved.prefabs.size() == 1 && saved.prefabs[0].instanceId == "ac2"
+				&& saved.settings.chillers.size() == 1
+				&& saved.settings.chillers[0].id == "ac2.machine",
+				"the saved document did not carry the renamed unit");
+			ctx->ItemClick("New configuration"); ctx->Yield(3);
+			ctx->ItemClick("Open configuration"); ctx->Yield(4);
+			REQ(window.flowNodeRect("aircon-unit", "ac2", &rect)
+				&& window.draft().chillers.size() == 1
+				&& window.draft().chillers[0].id == "ac2.machine"
+				&& window.draft().outages[0].installationId == "ac2.machine",
+				"the renamed unit did not re-group after save/load");
+		});
+		#undef REQ
+		require(driver.passed(), "prefab unit edit workflow failed on the Test Engine");
+	}
+
 	void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	editor_smoke::registerStationConnections(checks);
@@ -6980,6 +7207,7 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 	checks.push_back({"station/prefabPlacementWorkflow", prefabPlacementWorkflow});
 	checks.push_back({"station/prefabCompositeProjectionWorkflow", prefabCompositeProjectionWorkflow});
 	checks.push_back({"station/prefabPersistenceWorkflow", prefabPersistenceWorkflow});
+	checks.push_back({"station/prefabUnitEditWorkflow", prefabUnitEditWorkflow});
 	checks.push_back({"station/addEntryWorkflow", addEntryWorkflow});
 	checks.push_back({"station/configurationResources", configurationResources});
 	checks.push_back({"station/windowWorkflow", workflow});

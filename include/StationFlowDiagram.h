@@ -171,6 +171,13 @@ public:
 	// Last frame's rect of the canvas expand affordance on a collapsed
 	// composite. False when the affordance is not drawn.
 	bool prefabToggleScreenRect(std::string const& instanceId, ImVec4* out) const;
+	// #815: what the current selection is for the whole-unit rename and
+	// cascade delete. The composite node renames/deletes its whole unit;
+	// an internal entry of a placed unit refuses both while grouped.
+	bool selectedIsComposite() const;
+	// The unit that owns the selected internal entry, empty when the
+	// selection is not a grouped internal.
+	std::string selectedUnitOwner() const;
 private:
 	// Clear both halves of the armed-placement state together: a prefab armed
 	// by display name must never leave a stale prefab id behind (or vice versa).
@@ -288,5 +295,8 @@ private:
 		core::PlacedPrefab const& placed, core::StationPinRef const& internalPin) const;
 	std::optional<core::StationNodeRemoval> mPendingRemoval;
 	std::optional<core::StationNodeRename> mPendingRename;
+	// #815: the pending whole-unit rename / cascade-delete confirmation.
+	std::optional<core::PrefabInstanceRename> mPendingUnitRename;
+	std::optional<core::PrefabInstanceRemoval> mPendingUnitRemoval;
 	char mRenameBuffer[core::MaxStationStoreIdLength + 1]{};
 };

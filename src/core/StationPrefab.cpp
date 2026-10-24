@@ -879,6 +879,165 @@ namespace core
 		return true;
 	}
 
+	namespace
+	{
+	// The (type, id) pairs of every draft entry under one instance
+	// namespace, in the fixed prefab walk order.
+	std::vector<std::pair<std::string, std::string>> instanceEntries(
+		StationSystemsSettings const& draft, std::string const& instanceId)
+	{
+		std::vector<std::pair<std::string, std::string>> entries;
+		auto const prefix = instanceId + PrefabIdSeparator;
+		forEachPrefabEntry(draft, [&](std::string_view type, std::string const& id)
+		{
+			if (id.size() > prefix.size() && id.compare(0, prefix.size(), prefix) == 0)
+				entries.emplace_back(std::string(type), id);
+		});
+		return entries;
+	}
+
+	// Every authored link that names an entry of one instance at either
+	// end: the internal plumbing and the outside references alike.
+	std::vector<std::string> instanceLinkIdentities(
+		StationSystemsSettings const& draft, std::string const& instanceId)
+	{
+		std::vector<std::string> identities;
+		auto const prefix = instanceId + PrefabIdSeparator;
+		auto const inside = [&](StationPinRef const& pin)
+		{
+			return pin.nodeId.size() > prefix.size()
+				&& pin.nodeId.compare(0, prefix.size(), prefix) == 0;
+		};
+		for (auto const& link : stationAuthoredLinks(draft))
+			if (inside(link.from) || inside(link.to)) identities.push_back(link.identity);
+		return identities;
+	}
+	}
+
+	bool planPrefabInstanceRename(StationSystemsSettings const& draft,
+		std::string const& oldInstanceId, std::string const& newInstanceId,
+		PrefabInstanceRename& plan, std::string* diagnostic)
+	{
+		auto const refuse = [&](std::string message)
+		{
+			if (diagnostic) *diagnostic = std::move(message);
+			return false;
+		};
+		if (oldInstanceId.empty() || newInstanceId.empty())
+			return refuse("A prefab unit name cannot be empty.");
+		if (newInstanceId == oldInstanceId)
+			return refuse("Enter a different unit name.");
+		if (newInstanceId.find(PrefabIdSeparator) != std::string::npos)
+			return refuse(std::string("A prefab unit name cannot contain the reserved separator '")
+				+ PrefabIdSeparator + "'.");
+		auto const entries = instanceEntries(draft, oldInstanceId);
+		if (entries.empty())
+			return refuse("No placed prefab unit named '" + oldInstanceId + "' exists.");
+		if (!instanceEntries(draft, newInstanceId).empty())
+			return refuse("A prefab unit named '" + newInstanceId + "' already exists.");
+		auto const oldPrefix = oldInstanceId + PrefabIdSeparator;
+		auto const newPrefix = newInstanceId + PrefabIdSeparator;
+		for (auto const& [type, id] : entries)
+		{
+			auto const renamed = newPrefix + id.substr(oldPrefix.size());
+			if (renamed.size() > MaxStationStoreIdLength)
+				return refuse("Renaming the unit would push the id '" + renamed
+					+ "' past the " + std::to_string(MaxStationStoreIdLength)
+					+ "-character limit.");
+		}
+		plan = {oldInstanceId, newInstanceId, entries, instanceLinkIdentities(draft, oldInstanceId)};
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool renamePrefabInstance(StationSystemsSettings& draft,
+		PrefabInstanceRename const& plan, std::string& reason)
+	{
+		auto const refuse = [&](std::string message)
+		{
+			reason = std::move(message);
+			return false;
+		};
+		PrefabInstanceRename current;
+		std::string diagnostic;
+		if (!planPrefabInstanceRename(draft, plan.oldInstanceId, plan.newInstanceId,
+			current, &diagnostic))
+			return refuse(diagnostic);
+		if (current != plan)
+			return refuse("The unit changed before the rename could apply; nothing was renamed.");
+		auto const oldPrefix = plan.oldInstanceId + PrefabIdSeparator;
+		auto const newPrefix = plan.newInstanceId + PrefabIdSeparator;
+		// Every internal entry is renamed through the same core rename
+		// machinery the editor uses, on a candidate copy: each call carries
+		// the entry's own id, every mapped reference to it - from inside
+		// the box and from outside nodes - and its connection properties.
+		// A failure partway leaves the draft untouched, so a half-renamed
+		// unit can never exist.
+		auto candidate = draft;
+		for (auto const& [type, id] : current.entries)
+		{
+			auto const renamed = newPrefix + id.substr(oldPrefix.size());
+			StationNodeRename single;
+			if (!planStationNodeRename(candidate, type, id, renamed, single, &diagnostic)
+				|| !renameStationNode(candidate, single))
+				return refuse("Renaming the unit entry '" + type + "' '" + id + "' to '"
+					+ renamed + "' failed: " + diagnostic);
+		}
+		draft = std::move(candidate);
+		reason.clear();
+		return true;
+	}
+
+	bool planPrefabInstanceRemoval(StationSystemsSettings const& draft,
+		std::string const& instanceId, PrefabInstanceRemoval& plan,
+		std::string* diagnostic)
+	{
+		auto const refuse = [&](std::string message)
+		{
+			if (diagnostic) *diagnostic = std::move(message);
+			return false;
+		};
+		if (instanceId.empty()) return refuse("A prefab unit name cannot be empty.");
+		auto const entries = instanceEntries(draft, instanceId);
+		if (entries.empty())
+			return refuse("No placed prefab unit named '" + instanceId + "' exists.");
+		plan = {instanceId, entries, instanceLinkIdentities(draft, instanceId)};
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool removePrefabInstance(StationSystemsSettings& draft,
+		PrefabInstanceRemoval const& plan, std::string& reason)
+	{
+		auto const refuse = [&](std::string message)
+		{
+			reason = std::move(message);
+			return false;
+		};
+		PrefabInstanceRemoval current;
+		std::string diagnostic;
+		if (!planPrefabInstanceRemoval(draft, plan.instanceId, current, &diagnostic))
+			return refuse(diagnostic);
+		if (current != plan)
+			return refuse("The unit changed before the deletion could apply; nothing was removed.");
+		// Every entry goes through the core node-removal machinery on a
+		// candidate copy, in the fixed walk order: each removal clears the
+		// entry, every reference to it from any node, and its connection
+		// properties. Removing the whole namespace leaves no orphaned
+		// internal and no dangling reference behind.
+		auto candidate = draft;
+		for (auto const& [type, id] : current.entries)
+		{
+			StationNodeRemoval single;
+			if (!planStationNodeRemoval(candidate, type, id, single)
+				|| !removeStationNode(candidate, single))
+				return refuse("Removing the unit entry '" + type + "' '" + id + "' failed");
+		}
+		draft = std::move(candidate);
+		reason.clear();
+		return true;
+	}
+
 	bool validatePrefabTemplate(PrefabTemplate const& tmpl, std::string& reason)
 	{
 		auto const refuse = [&](std::string message)

@@ -668,6 +668,156 @@ parameters:
 			"the refused mismatch must not have changed the previously written field");
 	}
 
+	// #815: the whole-unit rename. Every namespaced internal id and every
+	// reference to it - the internal plumbing and the outside outage that
+	// targets the unit through its exposed Supervision port - is rewritten
+	// together, and nothing under the old namespace survives.
+	void prefabInstanceRenameCascade(smoke::Context const&)
+	{
+		auto fixture = placeAirconComposite();
+		std::string reason;
+		core::CandidateLink supervision{
+			{"Outage", "ac-outage", "Target installation"},
+			{"aircon-unit", "ac1", "Supervision"}};
+		require(core::applyPrefabLink(fixture.draft, {fixture.placed}, supervision, reason),
+			("wiring the outage to the unit must succeed: " + reason).c_str());
+		require(fixture.draft.outages.front().installationId == "ac1.machine",
+			"the outage should target the namespaced chiller before the rename");
+		core::PrefabInstanceRename plan;
+		std::string diagnostic;
+		require(core::planPrefabInstanceRename(fixture.draft, "ac1", "ac2", plan, &diagnostic),
+			("the whole-unit rename must plan cleanly: " + diagnostic).c_str());
+		require(plan.entries.size() == 5,
+			("the unit owns five internal entries, saw "
+				+ std::to_string(plan.entries.size())).c_str());
+		require(!plan.linkIdentities.empty(),
+			"the rename plan must name the references it rewrites");
+		require(core::renamePrefabInstance(fixture.draft, plan, reason),
+			("the whole-unit rename must apply: " + reason).c_str());
+		// Every internal entry carries the new namespace and every internal
+		// reference points at the renamed peers.
+		require(fixture.draft.chillers.size() == 1
+			&& fixture.draft.chillers[0].id == "ac2.machine"
+			&& fixture.draft.chillers[0].coldLoopId == "ac2.loop"
+			&& fixture.draft.chillers[0].condenserReservoirId == "ac2.sink",
+			"the chiller was not renamed with its internal references");
+		require(fixture.draft.coolantLoops.size() == 1
+			&& fixture.draft.coolantLoops[0].id == "ac2.loop"
+			&& fixture.draft.coolantLoops[0].reservoirId == "ac2.coldside",
+			"the coolant loop was not renamed with its internal references");
+		require(fixture.draft.radiators.size() == 1
+			&& fixture.draft.radiators[0].id == "ac2.radiator"
+			&& fixture.draft.radiators[0].reservoirId == "ac2.sink",
+			"the radiator was not renamed with its internal references");
+		require(fixture.draft.thermalReservoirs.size() == 2,
+			"the unit's reservoirs should still be there after the rename");
+		// The outside reference was rewritten too: the outage names the
+		// renamed chiller, not the id it was wired to.
+		require(fixture.draft.outages.front().installationId == "ac2.machine",
+			"the outside reference was not rewritten by the unit rename");
+		// Nothing under the old namespace remains, in the entries or in
+		// any authored reference.
+		for (auto const& [type, id] : core::prefabEntryOrder(fixture.draft))
+			require(id.rfind("ac1.", 0) != 0,
+				("an entry kept the old namespace: " + type + " '" + id + "'").c_str());
+		for (auto const& link : core::stationAuthoredLinks(fixture.draft))
+			require(link.from.nodeId.rfind("ac1.", 0) != 0
+					&& link.to.nodeId.rfind("ac1.", 0) != 0,
+				"an authored reference kept the old namespace");
+		// The renamed unit still stands on its own as a valid draft.
+		std::string validation;
+		require(core::validateStationSystemsSettings(fixture.draft, validation),
+			("the renamed expansion must still validate: " + validation).c_str());
+	}
+
+	// #815: the rename refusals. A bad target name, an unknown unit, a
+	// namespace already in use, and a stale plan are each refused with a
+	// reason and leave the draft exactly as it was.
+	void prefabInstanceRenameRefusals(smoke::Context const&)
+	{
+		auto fixture = placeAirconComposite();
+		core::PrefabInstanceRename plan;
+		std::string diagnostic;
+		require(!core::planPrefabInstanceRename(fixture.draft, "ac1", "", plan, &diagnostic)
+			&& !diagnostic.empty(), "an empty unit name must be refused with a reason");
+		require(!core::planPrefabInstanceRename(fixture.draft, "ac1", "ac1", plan, &diagnostic),
+			"renaming a unit to its own name must be refused");
+		require(!core::planPrefabInstanceRename(fixture.draft, "ac1", "a.c", plan, &diagnostic)
+			&& diagnostic.find("separator") != std::string::npos,
+			("the reserved separator must be refused: " + diagnostic).c_str());
+		require(!core::planPrefabInstanceRename(fixture.draft, "nosuch", "ac2", plan, &diagnostic),
+			"renaming a unit that is not placed must be refused");
+		// A target namespace already owned by another placed unit is
+		// refused: two units can never be merged into one namespace.
+		auto const tmpl = parseAircon();
+		core::PrefabExpansion second;
+		std::string reason;
+		require(core::expandPrefab(tmpl, {}, "ac2", second, reason)
+			&& core::applyPrefabExpansion(fixture.draft, second, reason),
+			("the second instance must place cleanly: " + reason).c_str());
+		require(!core::planPrefabInstanceRename(fixture.draft, "ac1", "ac2", plan, &diagnostic),
+			"renaming into a namespace another unit already owns must be refused");
+		// A stale plan is refused: the draft gained an entry under the
+		// namespace after the plan was made, so the recorded view no
+		// longer matches and nothing may be renamed from it.
+		core::StationSystemsSettings staleBase = fixture.draft;
+		require(core::planPrefabInstanceRename(staleBase, "ac1", "ac9", plan, &diagnostic),
+			("the pre-stale plan must succeed: " + diagnostic).c_str());
+		core::ResourceStoreSettings extra;
+		extra.id = "ac1.extra"; extra.unit = "kg"; extra.capacity = 10;
+		staleBase.stores.push_back(extra);
+		require(!core::renamePrefabInstance(staleBase, plan, reason) && !reason.empty(),
+			("a stale rename plan must be refused with a reason: " + reason).c_str());
+		require(staleBase.chillers.front().id == "ac1.machine",
+			"a refused rename must leave the draft untouched");
+	}
+
+	// #815: the whole-unit cascade delete. One removal takes the whole
+	// expansion: every internal entry, the internal plumbing, and the
+	// outside reference that targeted the unit - no orphaned internal and
+	// no dangling reference is left behind.
+	void prefabInstanceCascadeDelete(smoke::Context const&)
+	{
+		auto fixture = placeAirconComposite();
+		std::string reason;
+		core::CandidateLink supervision{
+			{"Outage", "ac-outage", "Target installation"},
+			{"aircon-unit", "ac1", "Supervision"}};
+		require(core::applyPrefabLink(fixture.draft, {fixture.placed}, supervision, reason),
+			("wiring the outage to the unit must succeed: " + reason).c_str());
+		core::PrefabInstanceRemoval plan;
+		std::string diagnostic;
+		require(core::planPrefabInstanceRemoval(fixture.draft, "ac1", plan, &diagnostic),
+			("the cascade delete must plan cleanly: " + diagnostic).c_str());
+		require(plan.entries.size() == 5,
+			("the cascade owns five internal entries, saw "
+				+ std::to_string(plan.entries.size())).c_str());
+		require(!plan.linkIdentities.empty(),
+			"the cascade plan must name the connections it removes");
+		require(core::removePrefabInstance(fixture.draft, plan, reason),
+			("the cascade delete must apply: " + reason).c_str());
+		require(fixture.draft.chillers.empty() && fixture.draft.coolantLoops.empty()
+			&& fixture.draft.radiators.empty() && fixture.draft.thermalReservoirs.empty(),
+			"the whole expansion must be gone");
+		require(fixture.draft.outages.size() == 1,
+			"the outside node must survive its target's removal");
+		require(fixture.draft.outages.front().installationId.empty(),
+			"the outside reference must be cleared, not left dangling");
+		for (auto const& [type, id] : core::prefabEntryOrder(fixture.draft))
+			require(id.rfind("ac1.", 0) != 0,
+				("an orphaned internal remains: " + type + " '" + id + "'").c_str());
+		for (auto const& link : core::stationAuthoredLinks(fixture.draft))
+			require(link.from.nodeId.rfind("ac1.", 0) != 0
+					&& link.to.nodeId.rfind("ac1.", 0) != 0,
+				"a dangling reference to the removed unit remains");
+		for (auto const& [key, properties] : fixture.draft.connections)
+			require(key.ownerId.rfind("ac1.", 0) != 0 && key.peerId.rfind("ac1.", 0) != 0,
+				"a connection property survived the unit it belonged to");
+		// A unit that is not there is refused rather than silently empty.
+		require(!core::planPrefabInstanceRemoval(fixture.draft, "ac1", plan, &diagnostic)
+			&& !diagnostic.empty(), "removing an absent unit must be refused with a reason");
+	}
+
 	void prefabTemplateLoadValidation(smoke::Context const&)
 	{
 		// The bundled template passes the load gate: its isolated
@@ -1103,6 +1253,9 @@ void registerStationPrefabChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"prefabExposedPinResolution", prefabExposedPinResolution});
 	checks.push_back({"prefabLinkThroughComposite", prefabLinkThroughComposite});
 	checks.push_back({"prefabTemplateLoadValidation", prefabTemplateLoadValidation});
+	checks.push_back({"prefabInstanceRenameCascade", prefabInstanceRenameCascade});
+	checks.push_back({"prefabInstanceRenameRefusals", prefabInstanceRenameRefusals});
+	checks.push_back({"prefabInstanceCascadeDelete", prefabInstanceCascadeDelete});
 	checks.push_back({"prefabProvenanceRoundTrip", prefabProvenanceRoundTrip});
 	checks.push_back({"prefabProvenanceBoundary", prefabProvenanceBoundary});
 	checks.push_back({"prefabProvenanceMalformed", prefabProvenanceMalformed});

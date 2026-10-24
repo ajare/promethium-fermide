@@ -631,6 +631,7 @@ void StationFlowDiagram::reset()
 	mLinks.clear(); mPinIds.clear(); mPinRefs.clear(); mPinScreen.clear(); mNodeScreen.clear();
 	mActiveLinkPin.reset(); mPinEligibility.clear();
 	mLinkRejection.clear(); mPendingRemoval.reset();
+	mPendingUnitRename.reset(); mPendingUnitRemoval.reset();
 	mPortButtons.clear(); mPressedPortButton.clear(); mNotice.clear();
 	mPlacedPrefabs.clear(); mExpandedPrefabs.clear(); mProjectionDirty = false;
 	mInertProvenance.clear();
@@ -1127,6 +1128,19 @@ std::string StationFlowDiagram::prefabInstanceFor(std::string const& nodeId) con
 	for (auto const& placed : mPlacedPrefabs)
 		if (placed.instanceId == prefix) return prefix;
 	return {};
+}
+
+bool StationFlowDiagram::selectedIsComposite() const
+{
+	return mSelected >= 0
+		&& mCompositeKeys.find(mSelectedType + keySeparator + mSelectedId)
+			!= mCompositeKeys.end();
+}
+
+std::string StationFlowDiagram::selectedUnitOwner() const
+{
+	if (mSelected < 0 || selectedIsComposite()) return {};
+	return prefabInstanceFor(mSelectedId);
 }
 
 bool StationFlowDiagram::prefabToggleScreenRect(std::string const& instanceId, ImVec4* out) const
@@ -2334,6 +2348,11 @@ entry.thermalClass = "moderate";
 	}
 	bool deleteSelected = deleteKey && hoveredLink < 0 && mSelected >= 0;
 	bool renameSelected = false;
+	// #815: what the selection is for the whole-unit rename and cascade
+	// delete, computed once so the inspector's controls and the handlers
+	// below cannot drift apart on the question of what is being edited.
+	bool const compositeSelected = selectedIsComposite();
+	std::string const groupedOwner = selectedUnitOwner();
 	for (size_t i = 0; i < mGraph.nodes.size(); ++i)
 	{
 		if (!visible[i]) continue;
@@ -2858,10 +2877,23 @@ entry.thermalClass = "moderate";
 			}
 			ImGui::Separator();
 			ImGui::InputText("New node name", mRenameBuffer, sizeof(mRenameBuffer));
+			// #815: the whole-unit paths. A composite renames and deletes
+			// its unit; a grouped internal refuses both. The refusal is
+			// stated where the ordinary control would be, so the author
+			// learns why the button is dead instead of hunting for it.
 			core::StationNodeRename renamePlan;
+			core::PrefabInstanceRename unitRenamePlan;
 			std::string renameDiagnostic;
-			bool const canRename = core::planStationNodeRename(draft, mSelectedType, mSelectedId,
-				mRenameBuffer, renamePlan, &renameDiagnostic);
+			bool canRename = false;
+			if (!groupedOwner.empty())
+				renameDiagnostic = "'" + mSelectedId + "' is internal to prefab unit '"
+					+ groupedOwner + "'; rename the whole unit instead.";
+			else if (compositeSelected)
+				canRename = core::planPrefabInstanceRename(draft, mSelectedId, mRenameBuffer,
+					unitRenamePlan, &renameDiagnostic);
+			else
+				canRename = core::planStationNodeRename(draft, mSelectedType, mSelectedId,
+					mRenameBuffer, renamePlan, &renameDiagnostic);
 			ImGui::BeginDisabled(!canRename);
 			if (ImGui::Button("Rename selected node")) renameSelected = true;
 			ImGui::EndDisabled();
@@ -2870,13 +2902,26 @@ entry.thermalClass = "moderate";
 			// deletable here. Other projected nodes may carry references the
 			// current connector seam cannot yet resolve safely.
 			core::StationNodeRemoval available;
-			bool const canRemove = core::planStationNodeRemoval(draft,
-				mSelectedType, mSelectedId, available);
+			core::PrefabInstanceRemoval unitRemovalPlan;
+			bool canRemove = false;
+			std::string removeDiagnostic;
+			if (!groupedOwner.empty())
+				removeDiagnostic = "'" + mSelectedId + "' is internal to prefab unit '"
+					+ groupedOwner + "'; delete the whole unit instead.";
+			else if (compositeSelected)
+				canRemove = core::planPrefabInstanceRemoval(draft, mSelectedId, unitRemovalPlan,
+					&removeDiagnostic);
+			else
+			{
+				canRemove = core::planStationNodeRemoval(draft, mSelectedType, mSelectedId, available);
+				if (!canRemove)
+					removeDiagnostic = "reference mapping is incomplete for this draft.";
+			}
 			ImGui::BeginDisabled(!canRemove);
 			if (ImGui::Button("Delete selected node")) deleteSelected = true;
 			ImGui::EndDisabled();
 			if (!canRemove)
-				ImGui::TextDisabled("Deletion unavailable: reference mapping is incomplete for this draft.");
+				ImGui::TextDisabled("Deletion unavailable: %s", removeDiagnostic.c_str());
 		}
 		if (!mSelectedConnection)
 		{
@@ -2905,35 +2950,59 @@ entry.thermalClass = "moderate";
 	};
 	if (renameSelected)
 	{
-		core::StationNodeRename plan;
-		if (core::planStationNodeRename(draft, mSelectedType, mSelectedId, mRenameBuffer, plan))
+		if (compositeSelected)
 		{
-			if (plan.linkIdentities.empty())
+			core::PrefabInstanceRename plan;
+			if (core::planPrefabInstanceRename(draft, mSelectedId, mRenameBuffer, plan))
 			{
-				renameNode(plan);
+				mPendingUnitRename = std::move(plan);
+				ImGui::OpenPopup("Rename prefab unit?");
 			}
-			else
+		}
+		else
+		{
+			core::StationNodeRename plan;
+			if (core::planStationNodeRename(draft, mSelectedType, mSelectedId, mRenameBuffer, plan))
 			{
-				mPendingRename = std::move(plan);
-				ImGui::OpenPopup("Rename Station node?");
+				if (plan.linkIdentities.empty())
+				{
+					renameNode(plan);
+				}
+				else
+				{
+					mPendingRename = std::move(plan);
+					ImGui::OpenPopup("Rename Station node?");
+				}
 			}
 		}
 	}
 	if (deleteSelected)
 	{
-		core::StationNodeRemoval plan;
-		if (core::planStationNodeRemoval(draft, mSelectedType, mSelectedId, plan))
+		if (compositeSelected)
 		{
-			if (plan.linkIdentities.empty())
+			core::PrefabInstanceRemoval plan;
+			if (core::planPrefabInstanceRemoval(draft, mSelectedId, plan))
 			{
-				if (beforeNodeRemoval) beforeNodeRemoval();
-				if (core::removeStationNode(draft, plan))
-				{ mSelected = -1; mSelectedType.clear(); mSelectedId.clear(); }
+				mPendingUnitRemoval = std::move(plan);
+				ImGui::OpenPopup("Delete prefab unit?");
 			}
-			else
+		}
+		else
+		{
+			core::StationNodeRemoval plan;
+			if (core::planStationNodeRemoval(draft, mSelectedType, mSelectedId, plan))
 			{
-				mPendingRemoval = std::move(plan);
-				ImGui::OpenPopup("Delete Station node?");
+				if (plan.linkIdentities.empty())
+				{
+					if (beforeNodeRemoval) beforeNodeRemoval();
+					if (core::removeStationNode(draft, plan))
+					{ mSelected = -1; mSelectedType.clear(); mSelectedId.clear(); }
+				}
+				else
+				{
+					mPendingRemoval = std::move(plan);
+					ImGui::OpenPopup("Delete Station node?");
+				}
 			}
 		}
 	}
@@ -2982,6 +3051,138 @@ entry.thermalClass = "moderate";
 			ImGui::SameLine();
 			if (ImGui::Button("Cancel node deletion"))
 			{ mPendingRemoval.reset(); ImGui::CloseCurrentPopup(); }
+		}
+		ImGui::EndPopup();
+	}
+	// #815: the whole-unit rename. The draft rewrite and the editor's own
+	// grouping state move together in one history action: the core rename
+	// carries every internal id and every reference to it, and the
+	// placed-unit record, the expanded-view set and the authored geometry
+	// follow the new namespace. The unit's own composite slot travels too,
+	// so the box keeps the place the author gave it.
+	auto renameUnit = [&](core::PrefabInstanceRename const& plan) {
+		if (beforeNodeRemoval) beforeNodeRemoval();
+		std::string reason;
+		if (!core::renamePrefabInstance(draft, plan, reason))
+		{
+			mNotice = "Rename refused: " + reason;
+			return;
+		}
+		std::string prefabId;
+		for (auto const& placed : mPlacedPrefabs)
+			if (placed.instanceId == plan.oldInstanceId) { prefabId = placed.prefabId; break; }
+		auto const oldPrefix = plan.oldInstanceId + core::PrefabIdSeparator;
+		auto const newPrefix = plan.newInstanceId + core::PrefabIdSeparator;
+		core::StationConfigurationDocument layout;
+		exportLayout(layout);
+		std::map<std::string, std::pair<float, float>> remapped;
+		for (auto const& [key, position] : layout.positions)
+		{
+			auto const first = key.find(':');
+			auto const last = key.rfind(':');
+			std::string next = key;
+			if (first != std::string::npos && last > first)
+			{
+				auto const type = key.substr(0, first);
+				auto const id = key.substr(first + 1, last - first - 1);
+				if (id.size() > oldPrefix.size()
+					&& id.compare(0, oldPrefix.size(), oldPrefix) == 0)
+					next = type + ":" + newPrefix + id.substr(oldPrefix.size()) + key.substr(last);
+				else if (id == plan.oldInstanceId && type == prefabId)
+					next = type + ":" + plan.newInstanceId + key.substr(last);
+			}
+			remapped[next] = position;
+		}
+		layout.positions = std::move(remapped);
+		for (auto& provenance : layout.prefabs)
+			if (provenance.instanceId == plan.oldInstanceId)
+				provenance.instanceId = plan.newInstanceId;
+		// Restoring the rewritten layout rebuilds the placed-unit record -
+		// new instance id, re-derived exposed-pin aliases - from the
+		// updated provenance, so the composite boundary speaks the new
+		// names without a second placement.
+		restoreLayout(layout);
+		if (mExpandedPrefabs.erase(plan.oldInstanceId) > 0)
+			mExpandedPrefabs.insert(plan.newInstanceId);
+		mSelectedId = plan.newInstanceId;
+		mNotice.clear();
+	};
+	// #815: the whole-unit cascade delete. One removal takes the whole
+	// expansion with it: the entries, the references to them, the
+	// provenance record and the authored geometry, so no orphaned
+	// internal is left behind.
+	auto deleteUnit = [&](core::PrefabInstanceRemoval const& plan) {
+		if (beforeNodeRemoval) beforeNodeRemoval();
+		std::string reason;
+		if (!core::removePrefabInstance(draft, plan, reason))
+		{
+			mNotice = "Delete refused: " + reason;
+			return;
+		}
+		std::string prefabId;
+		for (auto const& placed : mPlacedPrefabs)
+			if (placed.instanceId == plan.instanceId) { prefabId = placed.prefabId; break; }
+		auto const prefix = plan.instanceId + core::PrefabIdSeparator;
+		core::StationConfigurationDocument layout;
+		exportLayout(layout);
+		std::erase_if(layout.prefabs, [&](core::PrefabProvenance const& provenance)
+			{ return provenance.instanceId == plan.instanceId; });
+		std::erase_if(layout.positions, [&](auto const& entry)
+		{
+			auto const first = entry.first.find(':');
+			auto const last = entry.first.rfind(':');
+			if (first == std::string::npos || last <= first) return false;
+			auto const type = entry.first.substr(0, first);
+			auto const id = entry.first.substr(first + 1, last - first - 1);
+			return (id.size() > prefix.size()
+					&& id.compare(0, prefix.size(), prefix) == 0)
+				|| (id == plan.instanceId && type == prefabId);
+		});
+		restoreLayout(layout);
+		mExpandedPrefabs.erase(plan.instanceId);
+		mSelected = -1; mSelectedType.clear(); mSelectedId.clear();
+	};
+	if (ImGui::BeginPopupModal("Rename prefab unit?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		if (mPendingUnitRename)
+		{
+			ImGui::Text("Rename prefab unit '%s' to '%s'?",
+				mPendingUnitRename->oldInstanceId.c_str(), mPendingUnitRename->newInstanceId.c_str());
+			ImGui::Text("%zu internal entries and %zu links will be rewritten",
+				mPendingUnitRename->entries.size(), mPendingUnitRename->linkIdentities.size());
+			if (ImGui::Button("Confirm unit rename"))
+			{
+				core::PrefabInstanceRename current;
+				if (core::planPrefabInstanceRename(draft, mPendingUnitRename->oldInstanceId,
+						mPendingUnitRename->newInstanceId, current)
+					&& current == *mPendingUnitRename)
+					renameUnit(current);
+				mPendingUnitRename.reset(); ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel unit rename"))
+			{ mPendingUnitRename.reset(); ImGui::CloseCurrentPopup(); }
+		}
+		ImGui::EndPopup();
+	}
+	if (ImGui::BeginPopupModal("Delete prefab unit?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		if (mPendingUnitRemoval)
+		{
+			ImGui::Text("Delete prefab unit '%s'?", mPendingUnitRemoval->instanceId.c_str());
+			ImGui::Text("This removes %zu internal entries and %zu connections",
+				mPendingUnitRemoval->entries.size(), mPendingUnitRemoval->linkIdentities.size());
+			if (ImGui::Button("Confirm unit deletion"))
+			{
+				core::PrefabInstanceRemoval current;
+				if (core::planPrefabInstanceRemoval(draft, mPendingUnitRemoval->instanceId, current)
+					&& current == *mPendingUnitRemoval)
+					deleteUnit(current);
+				mPendingUnitRemoval.reset(); ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel unit deletion"))
+			{ mPendingUnitRemoval.reset(); ImGui::CloseCurrentPopup(); }
 		}
 		ImGui::EndPopup();
 	}
