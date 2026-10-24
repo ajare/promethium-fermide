@@ -17,6 +17,11 @@ namespace core
 	// namespaced ids; the simulation, the authoritative reader and the
 	// validator never learn that prefabs exist.
 	inline constexpr char const* PrefabIdSeparator{"."};
+	// The draft's id delimiter ':' is reserved: layout keys
+	// (`type:id:occurrence`), pin keys, and authored-link identities
+	// (`ownerType:ownerId:reference`) all split on ':', so a prefab
+	// instance id must never contain it (#822).
+	inline constexpr char PrefabReservedIdDelimiter{':'};
 
 	// One exposed port: a composite-facing name aliasing one connector of an
 	// internal template entry.

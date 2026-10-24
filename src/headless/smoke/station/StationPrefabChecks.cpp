@@ -416,6 +416,12 @@ parameters:
 		require(!core::expandPrefab(tmpl, {}, "a.b", dotted, reason)
 			&& reason.find("reserved separator") != std::string::npos,
 			("dotted instance id must be refused: " + reason).c_str());
+		// #822: an instance id carrying the draft's reserved ':' is
+		// refused too - it would poison the keys that split on ':'.
+		core::PrefabExpansion coloned;
+		require(!core::expandPrefab(tmpl, {}, "evil:name", coloned, reason)
+			&& reason.find("reserved character ':'") != std::string::npos,
+			("instance id with a colon must be refused: " + reason).c_str());
 	}
 
 	void prefabOverrides(smoke::Context const&)
@@ -1012,6 +1018,14 @@ parameters:
 		require(!core::planPrefabInstanceRename(fixture.draft, "ac1", "a.c", plan, &diagnostic)
 			&& diagnostic.find("separator") != std::string::npos,
 			("the reserved separator must be refused: " + diagnostic).c_str());
+		// #822: ':' is the draft's id delimiter, reserved by the
+		// template's allocation rule; a rename that could never be an
+		// allocated id must be refused.
+		require(!core::planPrefabInstanceRename(fixture.draft, "ac1", "evil:name", plan, &diagnostic)
+			&& diagnostic.find("reserved character ':'") != std::string::npos,
+			("a unit name with a colon must be refused: " + diagnostic).c_str());
+		require(fixture.draft.chillers.front().id == "ac1.machine",
+			"a refused colon rename must leave the draft untouched");
 		require(!core::planPrefabInstanceRename(fixture.draft, "nosuch", "ac2", plan, &diagnostic),
 			"renaming a unit that is not placed must be refused");
 		// A target namespace already owned by another placed unit is

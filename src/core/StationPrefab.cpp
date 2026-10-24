@@ -338,7 +338,7 @@ namespace core
 		if (tmpl.instancePrefix.find(PrefabIdSeparator) != std::string::npos)
 			return refuse("Prefab '" + tmpl.id + "' instance prefix '" + tmpl.instancePrefix
 				+ "' contains the reserved separator '" + PrefabIdSeparator + "'");
-		if (tmpl.instancePrefix.find(':') != std::string::npos)
+		if (tmpl.instancePrefix.find(PrefabReservedIdDelimiter) != std::string::npos)
 			return refuse("Prefab '" + tmpl.id + "' instance prefix '" + tmpl.instancePrefix
 				+ "' contains the reserved character ':'");
 		// The template's internal entries are read under a World schema
@@ -654,6 +654,12 @@ namespace core
 		if (instanceId.find(PrefabIdSeparator) != std::string::npos)
 			return refuse("Prefab instance id '" + instanceId + "' contains the reserved separator '"
 				+ PrefabIdSeparator + "'");
+		// The draft's id delimiter is reserved too: an instance id carrying
+		// ':' would poison the layout, pin, and authored-link keys that
+		// other code splits on ':' (#822).
+		if (instanceId.find(PrefabReservedIdDelimiter) != std::string::npos)
+			return refuse("Prefab instance id '" + instanceId
+				+ "' contains the reserved character ':'");
 		// Validate every override against the dial table before touching a
 		// partial expansion, so a refusal never leaves a half-overridden
 		// instance behind.
@@ -1030,6 +1036,11 @@ namespace core
 		if (newInstanceId.find(PrefabIdSeparator) != std::string::npos)
 			return refuse(std::string("A prefab unit name cannot contain the reserved separator '")
 				+ PrefabIdSeparator + "'.");
+		// ':' is the draft's id delimiter and is reserved by the template
+		// parser's allocation rule; a renamed unit must obey the same rule
+		// so its id stays one the template could have allocated (#822).
+		if (newInstanceId.find(PrefabReservedIdDelimiter) != std::string::npos)
+			return refuse("A prefab unit name cannot contain the reserved character ':'.");
 		auto const entries = instanceEntries(draft, oldInstanceId);
 		if (entries.empty())
 			return refuse("No placed prefab unit named '" + oldInstanceId + "' exists.");
