@@ -5609,22 +5609,49 @@ namespace
 				"Blocked transfer rejection not observable in the window");
 			REQ(driver.contains("Balance kg: starting 100.000, current 100.000, lost 0.000, delivered 0.000, residual 0.000000000"), "Boundary balance not observable in the window");
 			REQ(!world->isModified(), "Transfer ticking dirtied the authored document");
-			// Draft a second transfer through the real controls; an unknown
-			// source is refused with a visible diagnostic and no mutation.
+			// Draft a second transfer through the real controls. Its source and
+			// destination are closed comboboxes over the stores that actually
+			// exist, so the unknown source this step used to type can no longer
+			// be produced at all. A unit that the wired stores disagree with is
+			// still reachable, and that keeps the guarantee asserted through the
+			// UI: a bad draft is refused with a visible diagnostic and leaves the
+			// authored settings untouched.
 			ctx->ComboClick("Add entry/Transfer");
-			driver.typeValue(ctx, "**/source##Transfer 1", "nope");
+			// A combo registers no user label with the test engine, so it is
+			// addressed by ID through a sibling's parent scope.
+			auto const* transferSibling = ctx->ItemInfo("**/id##Transfer 1", ImGuiTestOpFlags_NoError);
+			REQ(transferSibling->ID != 0, "the drafted transfer's id field is missing");
+			auto const unitCombo = ImHashStr("unit##Transfer 1", 0, transferSibling->ParentID);
+			auto pickFrom = [&](ImGuiID combo, char const* wanted)
+			{
+				ctx->ItemClick(combo); ctx->Yield(2);
+				ImGuiWindow* popup = ctx->GetWindowByRef("//$FOCUSED");
+				REQ(popup != nullptr, "the combo did not open a popup");
+				ctx->ItemClick((std::string("//") + popup->Name + "/**/" + wanted).c_str());
+				ctx->Yield(2);
+			};
+			auto const pickUnit = [&](char const* wanted) { pickFrom(unitCombo, wanted); };
+			pickUnit("L");
+			REQ(window.draft().transfers.size() == 2 && window.draft().transfers[1].unit == "L",
+				"the unit selection did not reach the draft");
 			driver.click(ctx, "Apply settings");
 			ctx->ScrollToItemY("Confirm World reset");
 			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
-			REQ(driver.contains("references unknown source store 'nope'"),
-				"Invalid transfer source diagnostic not shown");
+			REQ(driver.contains("does not match both stores"),
+				"Mismatched transfer unit diagnostic not shown");
 			REQ(world->getStationSystemsSettings().transfers.size() == 1 && history.undoCount() == 0
 				&& world->getSimulationTick() == transferRunTicks,
 				"Invalid transfer draft mutated the authored settings");
-			// Repair the drafted source (the invalid 'nope') to the aux store and
-			// confirm again: the valid transfer applies with the required reset.
-			driver.typeValue(ctx, "**/source##Transfer 1", "aux");
+			// Put the unit back in agreement with the wired stores, and move the
+			// source onto the aux store so this transfer is distinct from the
+			// authored one, then confirm: the valid transfer applies with the
+			// required reset.
+			pickUnit("kg");
+			pickFrom(ImHashStr("source##Transfer 1", 0, transferSibling->ParentID), "aux");
+			REQ(window.draft().transfers.size() == 2 && window.draft().transfers[1].unit == "kg"
+				&& window.draft().transfers[1].sourceId == "aux",
+				"the repaired draft is not what the controls were set to");
 			ctx->ScrollToItemY("Confirm World reset");
 			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset");
