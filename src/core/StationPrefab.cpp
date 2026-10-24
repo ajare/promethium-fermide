@@ -87,6 +87,18 @@ namespace core
 			});
 	}
 
+	PortDescriptor const* findPortDescriptor(std::string_view nodeType, std::string_view portName)
+	{
+		for (auto const& descriptor : stationPortDescriptors())
+			if (descriptor.nodeType == nodeType && descriptor.name == portName) return &descriptor;
+		return nullptr;
+	}
+
+	std::string pinLabelOf(StationPinRef const& pin)
+	{
+		return pin.nodeType + " '" + pin.nodeId + "' " + pin.portName;
+	}
+
 	template<class T>
 	T* findPrefabEntryById(std::vector<T>& entries, std::string_view entryId)
 	{
@@ -293,6 +305,11 @@ namespace core
 			PrefabTemplate tmpl;
 			tmpl.id = serializer->readString("id");
 			if (tmpl.id.empty()) return refuse("Prefab id must not be empty");
+			// The prefab id doubles as the isolation instance id for
+			// template validation, so the namespacing rule applies to it too.
+			if (tmpl.id.find(PrefabIdSeparator) != std::string::npos)
+				return refuse("Prefab id '" + tmpl.id + "' contains the reserved separator '"
+					+ PrefabIdSeparator + "'");
 			tmpl.displayName = serializer->readString("displayName", true);
 			// The template's internal entries are read under a World schema
 			// version like any stationSystems map; the default is the newest
@@ -418,6 +435,14 @@ namespace core
 			if (!validateStationSystemsSettings(tmpl.entries, validationDiagnostic))
 				return refuse("Prefab '" + tmpl.id + "' internal entries do not validate: "
 					+ validationDiagnostic);
+			// #811: the load-time boundary gate - with stub peers on the
+			// exposed ports and the isolated expansion run through the
+			// existing validator, a template whose exposed interface is
+			// dead or whose expansion does not validate is refused here,
+			// atomically, before it can reach the catalogue.
+			std::string boundaryReason;
+			if (!validatePrefabTemplate(tmpl, boundaryReason))
+				return refuse(boundaryReason);
 			serializer->endMap();
 			out = std::move(tmpl);
 			if (diagnostic) diagnostic->clear();
@@ -574,6 +599,166 @@ namespace core
 		auto candidate = draft;
 		appendFragment(candidate, expansion.entries);
 		draft = std::move(candidate);
+		return true;
+	}
+
+	// #811: the composite boundary resolver.
+	//
+	// A placed composite is addressed like any authored node - its node
+	// type is the prefab id and its node id the instance id - but it owns
+	// no entry of its own: its pins are the template's exposed ports.
+	// Resolution maps a composite exposed-pin reference onto the aliased
+	// internal pin, and everything downstream - the evaluator, the writer,
+	// the validator behind them - is the existing machinery running on
+	// ordinary pins, untouched. The composite therefore never hides, fakes
+	// or weakens a rule: the verdict, the refusal reason and the reference
+	// field written through the boundary are exactly the direct ones.
+	bool resolveExposedPin(PlacedPrefab const& placed, StationPinRef const& compositePin,
+		StationPinRef& resolved, std::string& reason)
+	{
+		if (compositePin.nodeType != placed.prefabId || compositePin.nodeId != placed.instanceId)
+		{
+			resolved = compositePin;
+			reason = "Pin '" + pinLabelOf(compositePin) + "' does not name the composite instance '"
+				+ placed.instanceId + "' of prefab '" + placed.prefabId + "'";
+			return false;
+		}
+		auto const found = placed.exposedPins.find(compositePin.portName);
+		if (found == placed.exposedPins.end())
+		{
+			resolved = compositePin;
+			reason = "'" + compositePin.portName + "' is not an exposed port of prefab instance '"
+				+ placed.instanceId + "': the composite boundary reaches only the ports the "
+				"template exposes, not the internal connector behind it";
+			return false;
+		}
+		resolved = found->second;
+		reason.clear();
+		return true;
+	}
+
+	bool resolvePrefabLink(std::vector<PlacedPrefab> const& placed,
+		CandidateLink const& link, CandidateLink& resolved, std::string& reason)
+	{
+		// Each end is resolved against the placed composites: an end that
+		// names one resolves to its aliased internal pin (or refuses if
+		// the port is not exposed); an end that names none passes through
+		// unchanged, so composite and ordinary pins mix freely.
+		auto const resolveEnd = [&](StationPinRef const& pin, StationPinRef& out) -> bool
+		{
+			for (auto const& instance : placed)
+			{
+				if (pin.nodeType != instance.prefabId || pin.nodeId != instance.instanceId)
+					continue;
+				return resolveExposedPin(instance, pin, out, reason);
+			}
+			out = pin;
+			return true;
+		};
+		CandidateLink candidate{link.from, link.to};
+		if (!resolveEnd(link.from, candidate.from)) return false;
+		if (!resolveEnd(link.to, candidate.to)) return false;
+		resolved = std::move(candidate);
+		reason.clear();
+		return true;
+	}
+
+	LinkVerdict evaluatePrefabLink(StationSystemsSettings const& draft,
+		std::vector<PlacedPrefab> const& placed, CandidateLink const& link)
+	{
+		CandidateLink resolved{link.from, link.to};
+		std::string reason;
+		if (!resolvePrefabLink(placed, link, resolved, reason))
+			return LinkVerdict{false, std::move(reason)};
+		// The existing evaluator runs behind the resolver, unchanged: the
+		// composite boundary adds no rule of its own beyond resolution.
+		return evaluateStationLink(draft, resolved);
+	}
+
+	bool applyPrefabLink(StationSystemsSettings& draft,
+		std::vector<PlacedPrefab> const& placed, CandidateLink const& link,
+		std::string& reason)
+	{
+		CandidateLink resolved{link.from, link.to};
+		if (!resolvePrefabLink(placed, link, resolved, reason)) return false;
+		// The existing writer runs behind the resolver, unchanged: the
+		// same reference field lands as for the equivalent direct link.
+		if (!applyStationLink(draft, resolved))
+		{
+			reason = "Resolved link '" + pinLabelOf(resolved.from) + "' -> '"
+				+ pinLabelOf(resolved.to) + "' maps no reference field in the draft";
+			return false;
+		}
+		reason.clear();
+		return true;
+	}
+
+	bool validatePrefabTemplate(PrefabTemplate const& tmpl, std::string& reason)
+	{
+		auto const refuse = [&](std::string message)
+		{
+			reason = std::move(message);
+			return false;
+		};
+		// Expand the template in isolation: the template's own id stands
+		// in for the instance id, so the expansion is the template as it
+		// would land, with the existing validator as its judge.
+		PrefabExpansion expansion;
+		if (!expandPrefab(tmpl, {}, tmpl.id, expansion, reason))
+			return false;
+		// Stub peers on the exposed ports: for each exposed port the stub
+		// peer is the canonical outside connector from the port grammar -
+		// the pin an outside node would present to join it. An exposed
+		// port with no legal counterpart could never be wired from
+		// outside, and one whose aliased connector has no remaining
+		// capacity in the isolated expansion is already full inside the
+		// box; either way the exposed interface is dead and the template
+		// is refused before it can reach the Place menu.
+		for (auto const& port : tmpl.exposedPorts)
+		{
+			auto const* descriptor = findPortDescriptor(port.nodeType, port.portName);
+			if (!descriptor)
+				return refuse("Prefab '" + tmpl.id + "' exposed port '" + port.name
+					+ "' names no connector in the port grammar");
+			auto const opposite = descriptor->direction == StationPortDirection::Output
+				? StationPortDirection::Input : StationPortDirection::Output;
+			bool peerable = false;
+			for (auto const& other : stationPortDescriptors())
+			{
+				if (other.direction == opposite && other.kind == descriptor->counterpartKind
+					&& other.counterpartKind == descriptor->kind)
+				{
+					peerable = true;
+					break;
+				}
+			}
+			if (!peerable)
+				return refuse("Prefab '" + tmpl.id + "' exposed port '" + port.name
+					+ "' has no legal counterpart connector: no outside node could ever wire it");
+			if (descriptor->maximumLinks != 0)
+			{
+				auto const internal = expansion.exposedPins.at(port.name);
+				size_t used = 0;
+				for (auto const& link : expansion.links)
+					used += descriptor->direction == StationPortDirection::Input
+						? static_cast<size_t>(link.to == internal)
+						: static_cast<size_t>(link.from == internal);
+				if (used >= descriptor->maximumLinks)
+					return refuse("Prefab '" + tmpl.id + "' exposed port '" + port.name
+						+ "' aliases a connector the template already wires: its "
+						+ std::to_string(descriptor->maximumLinks)
+						+ "-link capacity is used inside the box, so nothing outside can join it");
+			}
+		}
+		// The isolated expansion runs the existing configuration
+		// validator: the same rules that judge a draft judge the template,
+		// and a failing template is refused atomically with its
+		// diagnostic.
+		std::string diagnostic;
+		if (!validateStationSystemsSettings(expansion.entries, diagnostic))
+			return refuse("Prefab '" + tmpl.id + "' isolated expansion with stub peers does "
+				"not validate: " + diagnostic);
+		reason.clear();
 		return true;
 	}
 }

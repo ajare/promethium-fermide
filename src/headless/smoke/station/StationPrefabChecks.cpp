@@ -7,11 +7,19 @@
 // namespaced expansion with internal links written, override application
 // and refusals, per-type cap refusal that leaves the draft untouched, and
 // determinism.
+//
+// #811 adds the composite-boundary checks: the exposed-pin resolver maps
+// a composite port reference to the aliased internal pin, a link through
+// the composite lands the same reference field, verdict and refusal
+// reason as the equivalent direct link, and catalogue-load template
+// validation runs the existing validator over the isolated expansion
+// with stub peers on the exposed ports.
 #include "StationPrefabChecks.h"
 #include "StationRig.h"
 
 #include "core/StationPrefab.h"
 
+#include <cstring>
 #include <string>
 
 namespace
@@ -116,6 +124,43 @@ parameters:
 		require(core::parsePrefabTemplate(airconPrefabYaml(), tmpl, &diagnostic),
 			("bundled aircon template must parse: " + diagnostic).c_str());
 		return tmpl;
+	}
+
+	// A draft holding the placed aircon unit as instance ac1 plus one
+	// outside Outage node that can target the unit's Supervision port.
+	struct CompositeFixture
+	{
+		core::StationSystemsSettings draft;
+		core::PlacedPrefab placed;
+	};
+
+	CompositeFixture placeAirconComposite()
+	{
+		auto const tmpl = parseAircon();
+		core::PrefabExpansion expansion;
+		std::string reason;
+		require(core::expandPrefab(tmpl, {}, "ac1", expansion, reason),
+			("expansion for the boundary checks must succeed: " + reason).c_str());
+		CompositeFixture fixture;
+		fixture.draft.enabled = true;
+		require(core::applyPrefabExpansion(fixture.draft, expansion, reason),
+			("applying the expansion must succeed: " + reason).c_str());
+		core::InstallationOutageSettings outage;
+		outage.id = "ac-outage";
+		outage.firstOccurrenceSeconds = 0.0;
+		outage.durationSeconds = 60.0;
+		fixture.draft.outages.push_back(outage);
+		fixture.placed = core::PlacedPrefab{"aircon-unit", "ac1", expansion.exposedPins};
+		return fixture;
+	}
+
+	// Splice an extra exposed-port entry into the bundled template YAML,
+	// just before its parameters section.
+	std::string withExtraExposedPort(std::string const& yaml, char const* extraPort)
+	{
+		auto const pos = yaml.find("parameters:");
+		require(pos != std::string::npos, "bundled template yaml should carry a parameters section");
+		return yaml.substr(0, pos) + std::string(extraPort) + yaml.substr(pos);
 	}
 
 	void prefabTemplateParse(smoke::Context const&)
@@ -492,6 +537,174 @@ parameters:
 		require(first.exposedPins == second.exposedPins,
 			"identical inputs must produce identical exposed pins");
 	}
+
+	void prefabExposedPinResolution(smoke::Context const&)
+	{
+		auto const fixture = placeAirconComposite();
+		// Each exposed composite pin resolves to the aliased internal pin.
+		core::StationPinRef resolved{};
+		std::string reason;
+		require(core::resolveExposedPin(fixture.placed,
+			{"aircon-unit", "ac1", "Cold supply"}, resolved, reason),
+			("Cold supply must resolve through the boundary: " + reason).c_str());
+		require(resolved == core::StationPinRef{"Coolant loop", "ac1.loop", "Cold interface"},
+			"Cold supply should resolve to the aliased namespaced loop pin");
+		require(core::resolveExposedPin(fixture.placed,
+			{"aircon-unit", "ac1", "Supervision"}, resolved, reason),
+			("Supervision must resolve through the boundary: " + reason).c_str());
+		require(resolved == core::StationPinRef{"Chiller", "ac1.machine", "Supervision"},
+			"Supervision should resolve to the aliased namespaced chiller pin");
+		// A connector the template keeps private is refused at the boundary.
+		require(!core::resolveExposedPin(fixture.placed,
+				{"aircon-unit", "ac1", "Condenser heat"}, resolved, reason)
+			&& reason.find("not an exposed port") != std::string::npos,
+			("a private internal connector must be refused: " + reason).c_str());
+		// A pin that does not name this composite is refused by the
+		// single-composite resolver rather than silently resolved.
+		require(!core::resolveExposedPin(fixture.placed,
+				{"Chiller", "ac1", "Supervision"}, resolved, reason)
+			&& reason.find("does not name the composite") != std::string::npos,
+			("a pin naming the wrong composite type must be refused: " + reason).c_str());
+		// Link resolution: a composite end resolves, an ordinary end
+		// passes through unchanged, so the two mix in one candidate link.
+		core::CandidateLink mixed{
+			{"Outage", "ac-outage", "Target installation"},
+			{"aircon-unit", "ac1", "Supervision"}};
+		core::CandidateLink resolvedLink;
+		require(core::resolvePrefabLink({fixture.placed}, mixed, resolvedLink, reason),
+			("the mixed link must resolve: " + reason).c_str());
+		require(resolvedLink.from == mixed.from,
+			"the ordinary end should pass through unchanged");
+		require(resolvedLink.to == core::StationPinRef{"Chiller", "ac1.machine", "Supervision"},
+			"the composite end should resolve to the aliased internal pin");
+		// A composite end naming an unexposed port refuses the whole link.
+		core::CandidateLink privateEnd{
+			{"Outage", "ac-outage", "Target installation"},
+			{"aircon-unit", "ac1", "Cold loop"}};
+		require(!core::resolvePrefabLink({fixture.placed}, privateEnd, resolvedLink, reason)
+			&& reason.find("not an exposed port") != std::string::npos,
+			("a link to an unexposed port must be refused: " + reason).c_str());
+		// A link with no composite end resolves to itself.
+		core::CandidateLink ordinary{
+			{"Outage", "ac-outage", "Target installation"},
+			{"Chiller", "ac1.machine", "Supervision"}};
+		require(core::resolvePrefabLink({fixture.placed}, ordinary, resolvedLink, reason)
+			&& resolvedLink == ordinary,
+			("an ordinary link should resolve to itself: " + reason).c_str());
+	}
+
+	void prefabLinkThroughComposite(smoke::Context const&)
+	{
+		auto const fixture = placeAirconComposite();
+		// Allowed direction: the Outage joining the composite's Supervision
+		// port returns the same verdict and reason as joining the aliased
+		// chiller pin directly.
+		core::CandidateLink throughComposite{
+			{"Outage", "ac-outage", "Target installation"},
+			{"aircon-unit", "ac1", "Supervision"}};
+		core::CandidateLink direct{
+			{"Outage", "ac-outage", "Target installation"},
+			{"Chiller", "ac1.machine", "Supervision"}};
+		auto const viaBoundary = core::evaluatePrefabLink(fixture.draft, {fixture.placed}, throughComposite);
+		auto const directVerdict = core::evaluateStationLink(fixture.draft, direct);
+		require(viaBoundary.allowed,
+			("joining the exposed Supervision port must be allowed: " + viaBoundary.reason).c_str());
+		require(viaBoundary.allowed == directVerdict.allowed
+			&& viaBoundary.reason == directVerdict.reason,
+			"the boundary verdict must be exactly the direct verdict");
+		// The link through the composite writes the same reference field
+		// as the equivalent direct link: two twin drafts, one written
+		// through the boundary and one directly, end up identical.
+		auto throughDraft = fixture.draft;
+		auto directDraft = fixture.draft;
+		std::string reason;
+		require(core::applyPrefabLink(throughDraft, {fixture.placed}, throughComposite, reason),
+			("applying through the boundary must succeed: " + reason).c_str());
+		require(core::applyStationLink(directDraft, direct),
+			"applying the direct link must succeed");
+		require(throughDraft == directDraft,
+			"the boundary write must land exactly the direct write");
+		require(throughDraft.outages.front().installationId == "ac1.machine",
+			"the outage installation field should carry the namespaced chiller id");
+		// Refused direction: an illegal pair through the composite returns
+		// the same refusal reason as the direct pair - the boundary adds
+		// nothing and hides nothing.
+		core::CandidateLink mismatchThrough{
+			{"Reservoir", "ac1.sink", "Hosted radiators"},
+			{"aircon-unit", "ac1", "Supervision"}};
+		core::CandidateLink mismatchDirect{
+			{"Reservoir", "ac1.sink", "Hosted radiators"},
+			{"Chiller", "ac1.machine", "Supervision"}};
+		auto const mismatchBoundary = core::evaluatePrefabLink(fixture.draft, {fixture.placed}, mismatchThrough);
+		auto const mismatchDirectVerdict = core::evaluateStationLink(fixture.draft, mismatchDirect);
+		require(!mismatchBoundary.allowed && !mismatchDirectVerdict.allowed,
+			"the mismatched pair must be refused both ways");
+		require(mismatchBoundary.reason == mismatchDirectVerdict.reason
+			&& !mismatchBoundary.reason.empty(),
+			"the boundary refusal must carry exactly the direct refusal reason");
+		// A connector the template does not expose is refused by the
+		// boundary itself, before the evaluator is ever reached: the
+		// reason names the boundary, not the connector rules.
+		core::CandidateLink privateThrough{
+			{"aircon-unit", "ac1", "Heat exchanger"},
+			{"Reservoir", "ac1.sink", "Heat in"}};
+		core::CandidateLink privateDirect{
+			{"Coolant loop", "ac1.loop", "Heat exchanger"},
+			{"Reservoir", "ac1.sink", "Heat in"}};
+		auto const privateVerdict = core::evaluatePrefabLink(fixture.draft, {fixture.placed}, privateThrough);
+		require(!privateVerdict.allowed
+			&& privateVerdict.reason.find("not an exposed port") != std::string::npos,
+			("an unexposed connector must be refused by the boundary: " + privateVerdict.reason).c_str());
+		auto const privateDirectVerdict = core::evaluateStationLink(fixture.draft, privateDirect);
+		require(privateDirectVerdict.reason != privateVerdict.reason,
+			"the boundary refusal must be the boundary's own, not the direct pair's verdict");
+		// A refused link leaves the previously written field untouched.
+		require(!core::applyPrefabLink(throughDraft, {fixture.placed}, mismatchThrough, reason),
+			("applying a refused pair must fail: " + reason).c_str());
+		require(throughDraft.outages.front().installationId == "ac1.machine",
+			"the refused mismatch must not have changed the previously written field");
+	}
+
+	void prefabTemplateLoadValidation(smoke::Context const&)
+	{
+		// The bundled template passes the load gate: its isolated
+		// expansion validates and every exposed port has a stub peer with
+		// room to join.
+		auto const tmpl = parseAircon();
+		std::string reason;
+		require(core::validatePrefabTemplate(tmpl, reason),
+			("the bundled template must pass load validation: " + reason).c_str());
+		// A template exposing a connector the template itself already
+		// wires is refused: the chiller's Cold loop input takes one link
+		// and the internal loop holds it, so the exposed port could never
+		// be joined from outside.
+		std::string const fullYaml = withExtraExposedPort(airconPrefabYaml(),
+			"  - name: Cold in\n"
+			"    nodeType: Chiller\n"
+			"    entryId: machine\n"
+			"    portName: Cold loop\n");
+		core::PrefabTemplate fullTmpl;
+		std::string diagnostic;
+		require(!core::parsePrefabTemplate(fullYaml, fullTmpl, &diagnostic)
+			&& diagnostic.find("capacity is used inside the box") != std::string::npos,
+			("an already-full exposed port must be refused at load: " + diagnostic).c_str());
+		// A template whose isolated expansion does not validate is
+		// refused atomically with the validator's diagnostic.
+		auto broken = parseAircon();
+		broken.entries.chillers.front().coldLoopId = "ghost";
+		require(!core::validatePrefabTemplate(broken, reason)
+			&& reason.find("does not validate") != std::string::npos,
+			("a non-validating isolated expansion must be refused: " + reason).c_str());
+		// A prefab id carrying the namespacing separator is refused at
+		// load: it would poison the isolation instance id.
+		std::string dottedYaml = airconPrefabYaml();
+		dottedYaml.replace(dottedYaml.find("id: aircon-unit"),
+			std::strlen("id: aircon-unit"), "id: air.con.unit");
+		core::PrefabTemplate dottedTmpl;
+		require(!core::parsePrefabTemplate(dottedYaml, dottedTmpl, &diagnostic)
+			&& diagnostic.find("reserved separator") != std::string::npos,
+			("a dotted prefab id must be refused: " + diagnostic).c_str());
+	}
 }
 
 void registerStationPrefabChecks(std::vector<smoke::Check>& checks)
@@ -502,4 +715,7 @@ void registerStationPrefabChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"prefabOverrides", prefabOverrides});
 	checks.push_back({"prefabCapRefusal", prefabCapRefusal});
 	checks.push_back({"prefabDeterminism", prefabDeterminism});
+	checks.push_back({"prefabExposedPinResolution", prefabExposedPinResolution});
+	checks.push_back({"prefabLinkThroughComposite", prefabLinkThroughComposite});
+	checks.push_back({"prefabTemplateLoadValidation", prefabTemplateLoadValidation});
 }

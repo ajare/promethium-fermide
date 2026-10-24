@@ -101,4 +101,56 @@ namespace core
 	// refusal leaves the draft untouched.
 	bool applyPrefabExpansion(StationSystemsSettings& draft,
 		PrefabExpansion const& expansion, std::string& reason);
+
+	// #811: the composite boundary. A placed instance presents its exposed
+	// ports as the pins of one composite node: the composite's node type is
+	// the prefab id, its node id is the instance id, and only the exposed
+	// port names resolve through it. A link naming a composite pin resolves
+	// to the aliased internal pin and then runs through the existing link
+	// evaluator and writer unchanged, so the verdict, the refusal reason
+	// and the reference field written are exactly the direct ones.
+	struct PlacedPrefab
+	{
+		std::string prefabId;
+		std::string instanceId;
+		std::map<std::string, StationPinRef> exposedPins;
+	};
+
+	// Resolve one composite exposed-pin reference to the aliased internal
+	// pin. The pin must name this composite (its node type is the prefab id
+	// and its node id the instance id); a port the template did not expose
+	// is refused, so the boundary never reaches an internal connector the
+	// template kept private.
+	bool resolveExposedPin(PlacedPrefab const& placed, StationPinRef const& compositePin,
+		StationPinRef& resolved, std::string& reason);
+
+	// Resolve both ends of a candidate link against the placed composites.
+	// An end that names no placed composite passes through unchanged, so
+	// composite and ordinary draft pins mix freely in one link.
+	bool resolvePrefabLink(std::vector<PlacedPrefab> const& placed,
+		CandidateLink const& link, CandidateLink& resolved, std::string& reason);
+
+	// Evaluate a link through the composite boundary: the ends are
+	// resolved first, then the existing evaluator runs behind the
+	// resolver untouched - the same verdict and the same refusal reason as
+	// the equivalent direct pair.
+	LinkVerdict evaluatePrefabLink(StationSystemsSettings const& draft,
+		std::vector<PlacedPrefab> const& placed, CandidateLink const& link);
+
+	// Write the reference a link through the composite boundary stands
+	// for: the ends are resolved first, then the existing writer runs
+	// untouched, so the same reference field lands as for the direct pair.
+	bool applyPrefabLink(StationSystemsSettings& draft,
+		std::vector<PlacedPrefab> const& placed, CandidateLink const& link,
+		std::string& reason);
+
+	// Catalogue-load template validation: expand the template in
+	// isolation - the template id standing in for the instance id - with
+	// stub peers on the exposed ports, and run the existing configuration
+	// validator. Every exposed port must have a legal counterpart
+	// connector in the port grammar for its stub peer to present, and
+	// must leave room on its aliased connector for the outside link; the
+	// isolated expansion must pass the existing validator. A failing
+	// template is refused as a whole with a diagnostic.
+	bool validatePrefabTemplate(PrefabTemplate const& tmpl, std::string& reason);
 }

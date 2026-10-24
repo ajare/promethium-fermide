@@ -125,7 +125,11 @@ set_tests_properties(station-observable-registry-coverage PROPERTIES
 # #810: the prefab expander core slice. Pure headless checks - template
 # parsing and refusals, namespaced expansion, override application, cap
 # refusal and determinism - all cheap enough for the fast lane.
-foreach(check prefabTemplateParse prefabTemplateRefusals prefabExpansion prefabOverrides prefabCapRefusal prefabDeterminism)
+# #811 adds the composite-boundary checks: exposed-pin resolution, link
+# verdicts and reference writes through the composite, and catalogue-load
+# template validation with stub peers on the exposed ports.
+foreach(check prefabTemplateParse prefabTemplateRefusals prefabExpansion prefabOverrides prefabCapRefusal prefabDeterminism
+        prefabExposedPinResolution prefabLinkThroughComposite prefabTemplateLoadValidation)
     add_test(NAME station-prefab-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-prefab-${check} PROPERTIES
         LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 30)
