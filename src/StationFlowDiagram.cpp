@@ -681,8 +681,23 @@ void StationFlowDiagram::exportLayout(core::StationConfigurationDocument& docume
 				document.positions.emplace(key, std::pair{position.x, position.y});
 		}
 	};
+	// #823: while a unit is expanded the composite itself is not in the
+	// projected graph, so its own layout slot is exported by neither the
+	// graph loop nor carryInternals; carry it the same way #814 does for
+	// inert units so an expanded save keeps the composite where the
+	// author placed it across a collapse after reload.
+	auto const carryComposite = [&](std::string const& prefabId, std::string const& instanceId)
+	{
+		auto const compositeKey = prefabId + ":" + instanceId + ":0";
+		auto const found = mLayout.find(compositeKey);
+		if (found != mLayout.end() && !document.positions.contains(compositeKey))
+			document.positions.emplace(compositeKey, std::pair{found->second.x, found->second.y});
+	};
 	for (auto const& placed : mPlacedPrefabs)
+	{
 		carryInternals(placed.instanceId);
+		carryComposite(placed.prefabId, placed.instanceId);
+	}
 	// #814: an inert unit's internals are ordinary graph nodes while the
 	// catalogue is absent, but the composite's own layout slot is in no
 	// graph at all; carry it too so a catalogue-less load/save round trip
@@ -691,10 +706,7 @@ void StationFlowDiagram::exportLayout(core::StationConfigurationDocument& docume
 	for (auto const& inert : mInertProvenance)
 	{
 		carryInternals(inert.instanceId);
-		auto const compositeKey = inert.prefabId + ":" + inert.instanceId + ":0";
-		auto const found = mLayout.find(compositeKey);
-		if (found != mLayout.end() && !document.positions.contains(compositeKey))
-			document.positions.emplace(compositeKey, std::pair{found->second.x, found->second.y});
+		carryComposite(inert.prefabId, inert.instanceId);
 	}
 	// #814: the provenance block travels with the layout. Placement order
 	// is the record order, so a save/reload hands back the same list the

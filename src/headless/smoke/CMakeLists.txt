@@ -1017,6 +1017,10 @@ set_tests_properties(station-editor-prefab-composite-projection PROPERTIES LABEL
 # boundary.
 add_test(NAME station-editor-prefab-persistence COMMAND pf-smoke-editor --check station/prefabPersistenceWorkflow)
 set_tests_properties(station-editor-prefab-persistence PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+# #823: an expanded save carries the composite's own layout slot, so a
+# reload collapses the unit back onto its authored position.
+add_test(NAME station-editor-prefab-expanded-save-position COMMAND pf-smoke-editor --check station/prefabExpandedSavePositionWorkflow)
+set_tests_properties(station-editor-prefab-expanded-save-position PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 # #815: whole-unit rename and cascade delete through the real editor controls.
 add_test(NAME station-editor-prefab-unit-edit COMMAND pf-smoke-editor --check station/prefabUnitEditWorkflow)
 set_tests_properties(station-editor-prefab-unit-edit PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)

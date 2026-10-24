@@ -6974,6 +6974,111 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		require(driver.passed(), "prefab persistence workflow failed on the Test Engine");
 	}
 
+	// #823: saving while a unit is expanded must not lose the composite's
+	// own layout slot. Place a unit, expand it, and save: the document
+	// carries the composite's own `aircon-unit:ac1:0` slot alongside the
+	// internals exported from the expanded graph. Reloaded collapsed, the
+	// composite lands where the author placed it instead of wherever a
+	// fresh force layout would drop it.
+	void prefabExpandedSavePositionWorkflow(smoke::Context const& fixtureContext)
+	{
+		using smoke::require;
+		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
+		auto const root = fixtureContext.temporaryRoot() / "prefab-expanded-save-resources";
+		headless::StationResourceFixture resources(authored, root);
+		require(resources.catalogues.size() == 1,
+			"the bundled prefab catalogue should load from the manifest");
+
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window;
+		window.setPrefabCatalogueResources(resources.catalogues);
+		auto world = std::make_shared<core::World>("Prefab expanded save", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+
+		auto const path = fixtureContext.temporaryRoot() / "expanded-prefab.station.yaml";
+		std::optional<std::string> pickPath = path.string();
+		window.setFilePicker([&](bool) -> std::optional<std::string> { return pickPath; });
+
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration");
+			window.renderFlowContents(world);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "prefabExpandedSavePosition", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto* canvas = flowCanvasWindow("Configuration");
+			REQ(canvas != nullptr, "flow canvas is missing");
+			// Place the unit and record where the collapsed composite sits.
+			ctx->ComboClick("Place node/Aircon Unit"); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 300.0f, canvas->Pos.y + 220.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ImVec4 placedRect{};
+			REQ(window.flowNodeRect("aircon-unit", "ac1", &placedRect),
+				"the unit was not placed as a composite");
+			// Compare against the live canvas origin, not raw screen pixels:
+			// the header above the canvas changes height as the placement arm
+			// and notice lines come and go, shifting the whole canvas between
+			// measurement points.
+			auto const placedFromCanvas = placedRect.y - canvas->Pos.y;
+			// Expand the unit: the composite box leaves the projected graph,
+			// so only the export carry can keep its layout slot.
+			window.flowSetPrefabExpanded("ac1", true); ctx->Yield(3);
+			ImVec4 rect{};
+			REQ(!window.flowNodeRect("aircon-unit", "ac1", &rect),
+				"the composite is still drawn while expanded");
+			REQ(window.flowNodeRect("Chiller", "ac1.machine", &rect),
+				"the internal chiller is not drawn when expanded");
+			// Save while expanded: the document must carry the composite's
+			// own slot alongside the internals.
+			ctx->ItemClick("Save configuration"); ctx->Yield(3);
+			REQ(!window.flowModified(), "saving while expanded did not clear dirty state");
+			std::ifstream savedFile(path, std::ios::binary);
+			std::ostringstream savedText;
+			savedText << savedFile.rdbuf();
+			auto const saved = savedText.str();
+			REQ(saved.find("aircon-unit:ac1:0") != std::string::npos,
+				("the expanded save dropped the composite's own layout slot: " + saved).c_str());
+			// Reload: the unit comes back collapsed, and the composite is
+			// drawn where the author left it, not where a force layout
+			// would place an unsaved node.
+			window.flowSetPrefabExpanded("ac1", false); ctx->Yield(3);
+			ImVec4 sameSessionRect{};
+			REQ(window.flowNodeRect("aircon-unit", "ac1", &sameSessionRect),
+				"the composite did not come back after collapsing in-session");
+			ctx->ItemClick("New configuration"); ctx->Yield(3);
+			REQ(window.draft().chillers.empty(), "New did not clear the draft");
+			ctx->ItemClick("Open configuration"); ctx->Yield(4);
+			ImVec4 reloadedRect{};
+			REQ(window.flowNodeRect("aircon-unit", "ac1", &reloadedRect),
+				"the composite did not come back on reload");
+			REQ(!window.flowPrefabExpanded("ac1"),
+				"the reloaded unit should open collapsed");
+			auto const drift = std::max(std::fabs(reloadedRect.x - placedRect.x),
+				std::fabs((reloadedRect.y - canvas->Pos.y) - placedFromCanvas));
+			REQ(drift < 0.5f,
+				("the composite drifted from its authored position across the "
+					"expanded save: " + std::to_string(drift) + "px placed="
+					+ std::to_string(placedRect.x) + "," + std::to_string(placedRect.y)
+					+ " same-session=" + std::to_string(sameSessionRect.x) + ","
+					+ std::to_string(sameSessionRect.y)
+					+ " reloaded=" + std::to_string(reloadedRect.x) + ","
+					+ std::to_string(reloadedRect.y)).c_str());
+		});
+		#undef REQ
+		require(driver.passed(), "prefab expanded-save position workflow failed on the Test Engine");
+	}
+
 	// #815: whole-unit rename and cascade delete. Renaming the composite
 	// rewrites the whole namespace and every reference to it as one
 	// undoable unit; deleting it takes the whole expansion behind one
@@ -7852,6 +7957,7 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 	checks.push_back({"station/prefabPlacementWorkflow", prefabPlacementWorkflow});
 	checks.push_back({"station/prefabCompositeProjectionWorkflow", prefabCompositeProjectionWorkflow});
 	checks.push_back({"station/prefabPersistenceWorkflow", prefabPersistenceWorkflow});
+	checks.push_back({"station/prefabExpandedSavePositionWorkflow", prefabExpandedSavePositionWorkflow});
 	checks.push_back({"station/prefabUnitEditWorkflow", prefabUnitEditWorkflow});
 	checks.push_back({"station/prefabUnitKeyboardDeleteWorkflow", prefabUnitKeyboardDeleteWorkflow});
 	checks.push_back({"station/prefabCompositeTelemetryWorkflow", prefabCompositeTelemetryWorkflow});
