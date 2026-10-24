@@ -660,6 +660,34 @@ A cooling service distinguished by its permitted interface temperatures and comp
 **Microbial processor**:
 An aggregate biological waste-treatment or nutrient-recovery process within life support, with finite processing capacity and a condition that affects its performance. Its material and heat exchanges, unrecoverable residues, and dependence on operating conditions are accounted for separately from crop and algae populations.
 
+**Installation**:
+A registered Station systems component with a stable identity — a generator, chiller, coolant loop, radiator, processor, or similar — that scenario reductions, maintenance work, and Faults target. It is the unit of Repair.
+_Avoid_: Unit, module, device (reserved for traversal equipment)
+
+**Condition**:
+A Station installation's continuous state of intactness from zero to one, where one is fully capable. Condition scales the capability the installation can deliver and is moved by Degradation and by funded recovery.
+_Avoid_: Health, integrity, quality (reserved for material qualification)
+
+**Degradation**:
+A gradual loss of a Station installation's Condition while adverse conditions act on it. Degradation is continuous and reversible only through funded recovery; it is distinct from the sudden onset of a Fault.
+_Avoid_: Wear (a Degradation driver, not the state), decay, erosion
+
+**Fault**:
+A discrete, identified adverse condition of one Station installation, with an onset time and a recorded cause. A Fault's consequence is Failure of the affected service; the Fault itself is the state, not the event that produced it.
+_Avoid_: Broken (reserved for traversal devices), breakdown, defect, damage (the external act that causes a Fault, not the Fault)
+
+**Failure**:
+The consequence of a Fault: an installation's inability to deliver its rated service. Failure is a Fault's effect, never a separate object from the Fault that causes it.
+_Avoid_: Fault (the state and its consequence are named separately), outage (an authored scenario reduction, not a Fault consequence)
+
+**Trip**:
+A protective automatic isolation of a Station installation taken by its own safety gate to prevent further harm, which latches until deliberately reset. A Trip is the machine protecting itself, distinct from a Fault-driven shutdown.
+_Avoid_: Shutdown (any stop, protective or not), breaker (a mechanism), fault (a Trip may precede or avert a Fault)
+
+**Repair**:
+A client-initiated action that clears a Fault from a Station installation and restores its service, at cost tiers from a free Trip reset to resource-reserved maintenance work. Repair clears Faults and restores Condition; it never reverses accumulated Wear.
+_Avoid_: Fix, restore (funded Condition recovery is one tier, not the whole), reset (the free Trip tier only)
+
 **Nutrient inventory**:
 The quantities of nutrient elements held in stores or incorporated into food, living biomass, and waste. Nitrogen, phosphorus, and potassium are accounted for separately, with other minerals grouped in the initial model; total elemental inventory is distinct from nutrients currently available for biological uptake.
 
