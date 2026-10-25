@@ -2257,6 +2257,34 @@ namespace core
 	};
 
 	inline constexpr uint32_t CORE_MAX_SYSTEMS_STEP_WORLD_TICKS = 60;
+	enum class AlertDirection { Above, Below };
+	enum class AlertSeverity { Advisory, Warning, Critical };
+	enum class AlertClearReason { AutoClear, MonitorDisabled, MonitorChanged };
+	struct AlertRule
+	{
+		double threshold{0};
+		AlertDirection direction{AlertDirection::Below};
+		double triggerOnSeconds{0}, triggerOffSeconds{0};
+		bool operator==(AlertRule const&) const = default;
+	};
+	struct StationMonitorSettings
+	{
+		std::string id, subjectType, subjectId, metric;
+		AlertRule rule;
+		AlertSeverity severity{AlertSeverity::Warning};
+		bool enabled{false};
+		bool operator==(StationMonitorSettings const&) const = default;
+	};
+	struct StationAlertSnapshot
+	{
+		std::string monitorId, subjectType, subjectId, metric;
+		double currentValue{0}, threshold{0};
+		AlertSeverity severity{AlertSeverity::Warning};
+		double firedAtSeconds{0};
+		std::optional<double> clearedAtSeconds;
+		std::optional<AlertClearReason> clearReason;
+		bool operator==(StationAlertSnapshot const&) const = default;
+	};
 	struct StationSystemsSettings
 	{
 		bool enabled{false};
@@ -2317,6 +2345,7 @@ namespace core
 		std::map<StationConnectionKey, StationConnectionProperties> connections;
 		// Default Station cadence: 10 Hz against the World's 60 Hz clock.
 		uint32_t systemsStepWorldTicks{6};
+		std::vector<StationMonitorSettings> monitors;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// The installations registered with the shared availability contract
@@ -2386,6 +2415,8 @@ namespace core
 	bool validateStationScheduleWiring(StationSystemsSettings const&, MaintenanceJobSettings const&,
 		std::string& diagnostic, bool allowIncomplete = false, std::vector<std::string>* brokenReferences = nullptr);
 
+	// Shared Monitor preflight for document authoring and direct runtime commands.
+	bool validateStationMonitors(StationSystemsSettings const&, std::string& diagnostic);
 	bool validateStationSystemsSettings(StationSystemsSettings const&, std::string& diagnostic,
 		std::vector<std::string>* brokenReferences = nullptr);
 	// The endpoint half of the transfer entry check (#640): the rules a link
@@ -4894,6 +4925,8 @@ namespace core
 	};
 	struct StationSystemsSnapshot
 	{
+		// Run-scoped observation results, never authored or serialized.
+		std::vector<StationAlertSnapshot> activeAlerts, closedAlerts;
 		bool enabled{false};
 		bool healthy{true};
 		// Effective runtime clock, including an explicit test-runner override.

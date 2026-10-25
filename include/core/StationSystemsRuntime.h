@@ -65,6 +65,9 @@ namespace core
 		// the conservation audit derives its baseline from them at snapshot
 		// time, so changing one mid-run would shift that baseline
 		// retroactively. Changing a starting value is a reset, not a live edit.
+		// Monitor rules are validated at this seam as well as at the World
+		// facade. Enable/disable and rule edits reset pending persistence;
+		// disabling closes active Alerts at current Station time.
 		bool updateSettings(StationSystemsSettings const& offered,
 			std::string* diagnostic = nullptr);
 		// The configuration the runtime is actually executing, including the

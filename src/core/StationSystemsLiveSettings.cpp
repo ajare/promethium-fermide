@@ -139,6 +139,12 @@ namespace core
 		StationSystemsSettings const& offered, std::string* diagnostic)
 	{
 		auto& s = *mImpl;
+		std::string validation;
+		if (!validateStationMonitors(offered, validation))
+		{
+			if (diagnostic) *diagnostic = validation;
+			return false;
+		}
 		auto faultTopology = [&](auto const& running, auto const& entries) {
 			for (auto const& next : entries)
 			{
@@ -445,6 +451,7 @@ namespace core
 
 		// Keep the runtime's own settings copy in step with the live authored
 		// state, so a later snapshot or audit reads what the tick is using.
+		s.reconcileMonitors(offered.monitors);
 		s.settings = offered;
 		syncAuthored(s.settings.stores, s.stores);
 		syncAuthored(s.settings.transfers, s.transfers);

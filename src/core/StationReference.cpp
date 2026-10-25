@@ -165,6 +165,29 @@ namespace core
 	{
 		serializer.beginMap("stationSystems");
 		serializer.writeBool("enabled", settings.enabled);
+		if (!settings.monitors.empty())
+		{
+			serializer.beginArray("monitors");
+			for (auto const& monitor : settings.monitors)
+			{
+				serializer.beginMap("");
+				serializer.writeString("id", monitor.id);
+				serializer.writeString("subjectType", monitor.subjectType);
+				serializer.writeString("subjectId", monitor.subjectId);
+				serializer.writeString("metric", monitor.metric);
+				serializer.beginMap("rule");
+				serializer.writeDouble("threshold", monitor.rule.threshold);
+				serializer.writeString("direction", monitor.rule.direction == AlertDirection::Above ? "Above" : "Below");
+				serializer.writeDouble("triggerOnSeconds", monitor.rule.triggerOnSeconds);
+				serializer.writeDouble("triggerOffSeconds", monitor.rule.triggerOffSeconds);
+				serializer.endMap();
+				serializer.writeString("severity", monitor.severity == AlertSeverity::Critical ? "Critical"
+					: monitor.severity == AlertSeverity::Warning ? "Warning" : "Advisory");
+				serializer.writeBool("enabled", monitor.enabled);
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 		serializer.writeUint32("systemsStepWorldTicks", settings.systemsStepWorldTicks);
 		serializer.writeFloat("observationIntervalSeconds", settings.observationIntervalSeconds);
 		serializer.writeFloat("trendRetentionSeconds", settings.trendRetentionSeconds);
@@ -1357,6 +1380,37 @@ namespace core
 			serializer.endArray();
 		}
 		if (version < 65) throw SerializationException("Station systems require World schema 65");
+		if (serializer.hasField("monitors"))
+		{
+			if (version < 122) throw SerializationException("Station Monitors require schema 122");
+			serializer.beginArray("monitors");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				StationMonitorSettings monitor;
+				monitor.id = serializer.readString("id");
+				monitor.subjectType = serializer.readString("subjectType");
+				monitor.subjectId = serializer.readString("subjectId");
+				monitor.metric = serializer.readString("metric");
+				serializer.beginMap("rule");
+				monitor.rule.threshold = serializer.readDouble("threshold");
+				auto const direction = serializer.readString("direction");
+				if (direction != "Above" && direction != "Below") throw SerializationException("Unknown Monitor direction");
+				monitor.rule.direction = direction == "Above" ? AlertDirection::Above : AlertDirection::Below;
+				monitor.rule.triggerOnSeconds = serializer.readDouble("triggerOnSeconds");
+				monitor.rule.triggerOffSeconds = serializer.readDouble("triggerOffSeconds");
+				serializer.endMap();
+				auto const severity = serializer.readString("severity");
+				if (severity != "Critical" && severity != "Warning" && severity != "Advisory")
+					throw SerializationException("Unknown Monitor severity");
+				monitor.severity = severity == "Critical" ? AlertSeverity::Critical
+					: severity == "Warning" ? AlertSeverity::Warning : AlertSeverity::Advisory;
+				if (serializer.hasField("enabled")) monitor.enabled = serializer.readBool("enabled");
+				serializer.endMap();
+				stationSettings.monitors.push_back(std::move(monitor));
+			}
+			serializer.endArray();
+		}
 		// Reject misplaced gates instead of silently discarding authored intent.
 		for (auto const* array : {"stores", "transfers", "conversions", "solarArrays", "equipmentLoads",
 			"batteries", "thermalReservoirs", "radiators", "coolantLoops", "chillers", "generators",

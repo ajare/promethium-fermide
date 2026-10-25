@@ -2044,6 +2044,8 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		mImpl->clock.commitStep();
 		next.elapsedSeconds = mImpl->clock.elapsedSeconds();
 		mImpl->snapshot = next;
+		if (std::any_of(mImpl->settings.monitors.begin(), mImpl->settings.monitors.end(),
+			[](auto const& monitor) { return monitor.enabled; })) mImpl->evaluateMonitors(snapshot());
 		if (tick % mImpl->observationIntervalSteps == 0)
 		{
 			appendBoundedEvent(mImpl->events, tick, "observation",

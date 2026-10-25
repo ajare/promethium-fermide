@@ -1,6 +1,8 @@
 # Station Monitoring and Alerts Specification
 
-Status: design agreed 2026-10-25 (grilling session; seams confirmed). Not yet implemented.
+Status: design agreed 2026-10-25 (grilling session; seams confirmed). Core atmosphere
+pO₂ Monitor tracer bullet (#866) implemented; see `docs/station-monitors.md`.
+The full Metric catalogue, default sets, editor authoring and dashboard remain later slices.
 
 Canonical vocabulary: `CONTEXT.md` § Station systems — **Monitor**, **Alert Rule**, **Alert**,
 plus **Metric**, **Installation**, **Fault**, **Trip**, **Alarm** (reserved for pre-existing

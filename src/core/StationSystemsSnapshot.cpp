@@ -4,6 +4,8 @@ namespace core
 	StationSystemsSnapshot StationSystemsRuntime::snapshot() const
 	{
 		auto result = mImpl->snapshot;
+		result.activeAlerts = mImpl->activeAlerts;
+		result.closedAlerts = mImpl->closedAlerts;
 		result.connections = mImpl->connectionFlows;
 		result.power.poolGenerationKW = mImpl->lastPoolGenerationKW;
 		result.power.connectionLossKW = mImpl->lastConnectionPowerLossKW;

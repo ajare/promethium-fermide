@@ -78,6 +78,7 @@ pf_add_smoke_module(pf-smoke-station
     SOURCES station/Main.cpp
         station/StationCoreChecks.cpp
         station/StationFaultChecks.cpp
+        station/StationMonitorChecks.cpp
         station/StationConditionChecks.cpp
         station/StationWearChecks.cpp
         station/StationWearCatalogueChecks.cpp
@@ -311,6 +312,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         stabilityLongRunFast stabilityPathEquivalenceFast stabilityResetIsolationFast
         stabilityMultiWorldIsolationFast stabilityAuditFaultInjection materialIdentity
         atmosphereFire airlockFaultBookings atmosphereFaultReplay atmosphereFaultTransactions atmosphereFaultWorld
+        monitorTiming monitorCommands monitorValidation monitorPersistence monitorDemo
         faultInjection faultOutages faultReplay faultOptIn faultTransactions tripLifecycle tripTransactions
         repairLifecycle repairInterruption repairTransactions repairSeizureClearing
         conditionStress conditionCrossing conditionRestore conditionReplay conditionValidation conditionTransactions

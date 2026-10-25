@@ -1,4 +1,5 @@
 #include "StationSystemsImpl.h"
+#include "core/WorldDocument.h"
 #include "core/Serializer.h"
 #include "core/StationReference.h"
 
@@ -829,7 +830,7 @@ namespace core
 		s.beginMap("stationFaultReplay");
 		auto const steps = s.readUint64("completedSteps");
 		StationSystemsSettings initial;
-		readStationSystemsSettingsMap(s, 121, initial);
+		readStationSystemsSettingsMap(s, kWorldSchemaVersion, initial);
 		auto runtime = std::make_unique<StationSystemsRuntime>(initial, baseSeconds);
 		s.beginArray("commands");
 		uint64_t previous = 0;
@@ -845,7 +846,7 @@ namespace core
 			if (s.hasField("stationSystems"))
 			{
 				StationSystemsSettings update;
-				readStationSystemsSettingsMap(s, 121, update);
+				readStationSystemsSettingsMap(s, kWorldSchemaVersion, update);
 				if (!runtime->updateSettings(update, &diagnostic))
 					throw SerializationException("Invalid fault replay settings: " + diagnostic);
 			}
@@ -928,6 +929,12 @@ namespace core
 			throw SerializationException("Fault replay final settings disagree with the document");
 		if (!runtime->advanceTo(steps * runtime->mImpl->clock.stepSeconds()))
 			throw SerializationException("Fault replay advance failed");
+		// Monitoring is run-scoped, not persisted fault history. Replay restores
+		// physical state, but observation starts fresh at the load boundary.
+		runtime->mImpl->monitorStates.clear();
+		runtime->mImpl->activeAlerts.clear();
+		runtime->mImpl->closedAlerts.clear();
+		std::erase_if(runtime->mImpl->events, [](auto const& event) { return event.category == "alert"; });
 		return runtime;
 	}
 }

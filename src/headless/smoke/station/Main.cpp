@@ -33,6 +33,7 @@ int main(int argc, char** argv)
 	registerStationLogisticsChecks(checks);
 	registerStationCoreChecks(checks);
 	registerStationFaultChecks(checks);
+	registerStationMonitorChecks(checks);
 	registerStationConditionChecks(checks);
 	registerStationWearChecks(checks);
 	registerStationWearCatalogueChecks(checks);

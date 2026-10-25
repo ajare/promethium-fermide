@@ -3,6 +3,7 @@
 // Registration interfaces for the station smoke runner.
 #include "Smoke.h"
 #include <vector>
+void registerStationMonitorChecks(std::vector<smoke::Check>& checks);
 void registerStationFaultChecks(std::vector<smoke::Check>& checks);
 void registerStationConditionChecks(std::vector<smoke::Check>& checks);
 void registerStationWearChecks(std::vector<smoke::Check>& checks);

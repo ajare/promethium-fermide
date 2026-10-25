@@ -912,10 +912,39 @@ namespace
 	}
 
 
+	bool validateStationMonitors(StationSystemsSettings const& settings, std::string& diagnostic)
+	{
+		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		std::set<std::string> monitorIds;
+		for (auto const& monitor : settings.monitors)
+		{
+			auto fail = [&](std::string reason) { return refuse("Monitor '" + monitor.id + "': " + reason); };
+			if (monitor.id.empty() || !monitorIds.insert(monitor.id).second)
+				return fail("id must be non-empty and unique");
+			// #866 deliberately registers only the tracer-bullet metric.
+			if (monitor.subjectType != "atmosphere" || monitor.metric != "oxygenPartialPressureKPa")
+				return fail("unknown metric for subject type");
+			if (std::none_of(settings.atmospheres.begin(), settings.atmospheres.end(),
+				[&](auto const& a) { return a.id == monitor.subjectId; }))
+				return fail("subject does not exist");
+			auto const& rule = monitor.rule;
+			if (!std::isfinite(rule.threshold)) return fail("threshold must be finite");
+			if (!std::isfinite(rule.triggerOnSeconds) || rule.triggerOnSeconds < 0
+				|| !std::isfinite(rule.triggerOffSeconds) || rule.triggerOffSeconds < 0)
+				return fail("trigger times must be finite and non-negative");
+			if (rule.direction != AlertDirection::Above && rule.direction != AlertDirection::Below)
+				return fail("unknown direction");
+			if (monitor.severity != AlertSeverity::Advisory && monitor.severity != AlertSeverity::Warning
+				&& monitor.severity != AlertSeverity::Critical) return fail("unknown severity");
+		}
+		diagnostic.clear();
+		return true;
+	}
 	bool validateStationSystemsSettings(StationSystemsSettings const& settings, std::string& diagnostic,
 		std::vector<std::string>* brokenReferences)
 	{
 		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		if (!validateStationMonitors(settings, diagnostic)) return false;
 		// #848: every catalogue machine validates its own named Wear
 		// opt-in against the same model rules. None of these modes counts
 		// cycles, so a cycle rate is refused; `mass` says whether the mode
