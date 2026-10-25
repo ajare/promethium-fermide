@@ -324,6 +324,7 @@ set(editor_names
     station/stabilityWorkflow
     station/faultBadgeWorkflow
     station/faultAuthoringWorkflow
+    station/heatEngineFaultAuthoringWorkflow
     station/faultTripResetWorkflow
 )
 

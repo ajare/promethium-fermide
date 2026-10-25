@@ -536,10 +536,11 @@ component, not a negative Equipment load or a discount on radiator heat.
 net generation to the shared electrical pool. Reservoirs must be distinct;
 the rejection Reservoir must match the engine's thermal class, while the hot
 Reservoir need not share that class. Outage/Maintenance can target its
-installation identity. **Current UI limitation:** the core configuration and
-diagram support Heat engines, but the Flow placement menu/port descriptor and
-per-entry editor do not yet expose them. Configure these references/values in
-a configuration document, not by dragging nonexistent Flow ports.
+installation identity. Select an existing Heat engine in Flow to edit its reservoir
+references, operating settings, mechanical-seizure opt-in, efficiency-drift Wear,
+and repair-parts plans in the Configuration draft. Apply uses the normal validated
+configuration path. Placement-menu entries and draggable Heat engine ports are not
+yet available; open a configuration containing a Heat engine to author it.
 
 | Dial/value | Purpose |
 | --- | --- |

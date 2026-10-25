@@ -885,6 +885,7 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 		|| view.type == "Water collector" || view.type == "Water treatment" || view.type == "Electrolyzer"
 		|| view.type == "CO2 capture" || view.type == "Atmosphere" || view.type == "Airlock cycle"
 		|| view.type == "Coolant loop" || view.type == "Chiller" || view.type == "Thermal buffer"
+		|| view.type == "Heat engine"
 		|| view.type == "Delivery" || view.type == "Waste ejection" || view.type == "Outage" || view.type == "Maintenance"
 		// A hatch is a first-class entry-backed node like the rest: without it
 		// here the index stays -1 and the inspector refuses to edit it.

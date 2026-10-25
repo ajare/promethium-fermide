@@ -3272,7 +3272,7 @@ namespace
 		// floor of zero would refuse values the author plainly needs. These
 		// are unbounded: what matters is that they are degrees, not that they
 		// are positive.
-		static constexpr std::array<char const*, 15> celsiusFields{
+		static constexpr std::array<char const*, 16> celsiusFields{
 			"chilled setpoint C", "freeze setpoint C", "max condensing temperature C",
 			"max growing temperature C", "max sink temperature C", "max temperature C",
 			"max usable temperature C", "min growing temperature C", "min operating temperature C",
@@ -3280,14 +3280,14 @@ namespace
 			// #849: a Condition stressor's onset and a runaway Trip's trigger
 			// are both degrees, so neither may be floored at zero.
 			"overheat stress C", "runaway trigger temperature C",
-			"sink temperature C", "starting temperature C"};
+			"sink temperature C", "starting temperature C", "min hot temperature C"};
 		// Values that are a share of something: fractions, ratios,
 		// efficiencies, an emissivity, a view factor. They are declared
 		// explicitly rather than matched on the word "fraction", because
 		// "evaporation", "respiration" and "duration" all contain "ratio"
 		// without being one, and a substring rule would quietly clamp a rate
 		// to 1.0 per second.
-		static constexpr std::array<char const*, 38> unitIntervalFields{
+		static constexpr std::array<char const*, 39> unitIntervalFields{
 			"atmospheric nitrogen fraction", "cavitation fill fraction", "charge efficiency",
 			"composition atmospheric nitrogen fraction", "composition moisture fraction",
 			"composition nutrient nitrogen fraction", "composition other minerals fraction",
@@ -3301,7 +3301,7 @@ namespace
 			"other minerals fraction", "phosphorus fraction", "potassium fraction",
 			"process water target moisture", "recovered fraction",
 			"recovery fraction of harvest", "recovery hysteresis fraction", "recovery ratio",
-			"seizure threshold", "string loss fraction", "target RH", "view factor"};
+			"seizure threshold", "string loss fraction", "target RH", "view factor", "Carnot fraction"};
 		if (fieldIsOneOf(field, celsiusFields)) return StationFieldRange{false, 0.0, false, 0.0};
 		if (fieldIsOneOf(field, unitIntervalFields)) return StationFieldRange{true, 0.0, true, 1.0};
 		return StationFieldRange{true, 0.0, false, 0.0};

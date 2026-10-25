@@ -415,13 +415,9 @@ void renderRepairPartsBlock(core::StationSystemsSettings& draft, std::string con
 			auto& entry = block.repairs[plan];
 			auto const row = std::string("repair plan ") + std::to_string(plan);
 			renderRefCombo(describe(row + " mode", label), entry.modeId, modes, false);
-			ImGui::SameLine();
 			renderRangedDouble(describe(row + " duration seconds", label), entry.durationSeconds, 0.0, 0.0, "%.1f");
-			ImGui::SameLine();
 			renderRangedDouble(describe(row + " parts quantity", label), entry.partsQuantity, 0.0, 0.0, "%.3f");
-			ImGui::SameLine();
 			renderRefCombo(describe(row + " waste store", label), entry.wasteStoreId, storeIds(draft), false);
-			ImGui::SameLine();
 			if (ImGui::Button(describe("Remove " + row, label).c_str()))
 				block.repairs.erase(block.repairs.begin() + static_cast<std::ptrdiff_t>(plan));
 			else
@@ -1727,6 +1723,27 @@ bool renderChillerEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	return removeChiller;
 }
 
+bool renderHeatEngineEntry(core::StationSystemsSettings& draft,
+	core::HeatEngineSettings& engine, std::string const& label)
+{
+	ImGui::PushID(label.c_str());
+	renderIdentity(label, engine.id);
+	renderRefCombo(describe("hot reservoir", label), engine.hotReservoirId, reservoirIds(draft), false);
+	renderRefCombo(describe("rejection reservoir", label), engine.rejectionReservoirId, reservoirIds(draft), false);
+	renderThermalClassCombo(draft, describe("thermal class", label), engine.thermalClass, engine.rejectionReservoirId);
+	renderRangedDouble(describe("rated thermal input kW", label), engine.ratedThermalInputKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("commanded input kW", label), engine.commandedInputKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("Carnot fraction", label), engine.carnotFraction, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("auxiliary power kW", label), engine.auxiliaryPowerKW, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("min hot temperature C", label), engine.minHotTemperatureC, 0.0, 0.0, "%.3f");
+	renderRangedDouble(describe("max sink temperature C", label), engine.maxSinkTemperatureC, 0.0, 0.0, "%.3f");
+	ImGui::Checkbox(describe("Fault: mechanical-seizure", label).c_str(), &engine.mechanicalSeizure);
+	renderWearBlock(label, describe("Wear: efficiency drift", label), engine.efficiencyDrift);
+	renderRepairPartsBlock(draft, label, engine.id, engine.repairParts);
+	ImGui::PopID();
+	return false;
+}
+
 void renderEquipmentLoadList(core::StationSystemsSettings& draft)
 {
 	for (size_t index = 0; index < draft.equipmentLoads.size(); )
@@ -2154,7 +2171,7 @@ bool renderConversionEntryAt(core::StationSystemsSettings& draft, size_t index)
 }
 
 // Keyed by the Flow node type names in core::stationPortDescriptors().
-constexpr std::array<StationEntryEditor, 31> kEntryEditors{{
+constexpr std::array<StationEntryEditor, 32> kEntryEditors{{
 	{"Solar", &renderSolarEntryAt},
 	{"Conversion", &renderConversionEntryAt},
 	{"Delivery", &renderDeliveryEntryAt},
@@ -2185,6 +2202,10 @@ constexpr std::array<StationEntryEditor, 31> kEntryEditors{{
 	{"Reservoir", &renderThermalReservoirEntryAt},
 	{"Radiator", &renderRadiatorEntryAt},
 	{"Coolant loop", &renderCoolantLoopEntryAt},
+	{"Heat engine", +[](core::StationSystemsSettings& draft, size_t index) {
+		if (index >= draft.heatEngines.size()) return false;
+		return renderHeatEngineEntry(draft, draft.heatEngines[index], "Heat engine " + std::to_string(index));
+	}},
 	{"Chiller", &renderChillerEntryAt},
 	{"Thermal buffer", &renderThermalBufferEntryAt},
 }};

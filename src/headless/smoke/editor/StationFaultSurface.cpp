@@ -5,6 +5,9 @@
 #include "StationFaultPanel.h"
 #include "StationFlowDiagram.h"
 #include "core/World.h"
+#include "core/Serializer.h"
+#include "core/YamlSerializer.h"
+#include "core/BinarySerializer.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
 
@@ -12,6 +15,8 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 // #849: the editor surface for the degradation-and-failure framework.
 // These checks drive the real Flow canvas, the real inspector and the real
@@ -387,6 +392,150 @@ namespace
 		require(driver.passed(), "the fault opt-in authoring workflow failed on the Test Engine");
 	}
 
+	// #863: an existing Heat engine is selectable even without placement ports.
+	// Exercise its real inspector, not a settings mutation masquerading as UI.
+	void heatEngineFaultAuthoringWorkflow(smoke::Context const& context)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext imgui;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1600, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window;
+		auto const path = context.temporaryRoot() / "heat-engine-faults.station.yaml";
+		window.setFilePicker([&](bool) -> std::optional<std::string> { return path.string(); });
+		auto world = std::make_shared<core::World>("Heat engine authoring", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		core::ThermalReservoirSettings hot;
+		hot.id = "hot"; hot.thermalClass = "moderate"; hot.heatCapacityKJPerK = 10000;
+		auto cold = hot; cold.id = "cold";
+		seed.thermalReservoirs = {hot, cold};
+		core::ResourceStoreSettings parts;
+		parts.id = "spares"; parts.unit = "kg"; parts.capacity = 100; parts.startingQualified = 50;
+		auto waste = parts; waste.id = "waste";
+		seed.stores = {parts, waste};
+		core::HeatEngineSettings engine;
+		engine.id = "engine"; engine.hotReservoirId = "hot";
+		engine.rejectionReservoirId = "cold"; engine.thermalClass = "moderate";
+		engine.ratedThermalInputKW = 10; engine.commandedInputKW = 10;
+		engine.minHotTemperatureC = 80; engine.maxSinkTemperatureC = 60;
+		seed.heatEngines = {engine};
+		std::string diagnostic;
+		auto const configured = world->configureStationSystems(seed, false, &diagnostic);
+		require(configured, diagnostic.c_str());
+		world->markSaved();
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1560, 960});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "heatEngineFaultAuthoring", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			ImVec4 rect{};
+			REQ(window.flowNodeRect("Heat engine", "engine", &rect), "Heat engine missing from Flow");
+			ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+			ctx->Yield(2); ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos({40, 40}); ctx->Yield(2);
+			auto const start = window.draft();
+			auto const undoStart = window.draftHistory().undoCount();
+			driver.click(ctx, "**/Fault: mechanical-seizure##Heat engine 0"); ctx->Yield(3);
+			driver.click(ctx, "**/Wear: efficiency drift##Heat engine 0"); ctx->Yield(3);
+			ctx->MouseTeleportToPos({40, 40}); ctx->Yield(2);
+			for (auto const& [field, value] : std::vector<std::pair<std::string, std::string>>{
+				{"fade per operating hour", "0.01"}, {"fade per calendar hour", "0.02"},
+				{"max wear fraction", "0.7"}})
+			{
+				driver.typeValue(ctx, ("**/" + field + "##Heat engine 0").c_str(), value.c_str());
+				ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			}
+			REQ(!ctx->IsError(), "Wear input interaction failed");
+			driver.click(ctx, "**/Repair-parts wiring##Heat engine 0"); ctx->Yield(3);
+			REQ(!ctx->IsError(), "Repair wiring interaction failed");
+			REQ(window.draft().heatEngines[0].repairParts.has_value(), "Repair wiring checkbox did not enable block");
+			ctx->MouseTeleportToPos({40, 40}); ctx->Yield(2);
+			// BeginCombo has no labelled Test Engine item: resolve its ID in
+			// the labelled sibling's scope, as the other reference workflows do.
+			auto const parent = ctx->ItemInfo("**/Repair-parts wiring##Heat engine 0")->ParentID;
+			ctx->ItemClick(ImHashStr("parts store##Heat engine 0", 0, parent)); ctx->Yield(2);
+			REQ(!ctx->IsError(), "Parts store opening failed");
+			auto* popup = ctx->GetWindowByRef("//$FOCUSED");
+			REQ(popup != nullptr, "Parts combo popup missing");
+			ctx->ItemClick((std::string("//") + popup->Name + "/**/spares").c_str()); ctx->Yield(3);
+			REQ(!ctx->IsError(), "Parts store combo interaction failed");
+			REQ(window.draft().heatEngines[0].repairParts
+				&& window.draft().heatEngines[0].repairParts->partsStoreId == "spares", "Parts store not selected");
+			ctx->SetRef("Configuration");
+			driver.click(ctx, "**/Add repair plan to Heat engine 0"); ctx->Yield(3);
+			REQ(window.draft().heatEngines[0].repairParts
+				&& window.draft().heatEngines[0].repairParts->repairs.size() == 1,
+				"Heat engine add repair plan failed");
+			ctx->ItemClick(ImHashStr("repair plan 0 mode##Heat engine 0", 0, parent)); ctx->Yield(2);
+			popup = ctx->GetWindowByRef("//$FOCUSED");
+			REQ(popup != nullptr, "Mode combo popup missing");
+			ctx->ItemClick((std::string("//") + popup->Name + "/**/mechanical-seizure").c_str()); ctx->Yield(3);
+			ctx->SetRef("Configuration");
+			driver.typeValue(ctx, "**/repair plan 0 duration seconds##Heat engine 0", "12");
+			ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			driver.typeValue(ctx, "**/repair plan 0 parts quantity##Heat engine 0", "2");
+			ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			ctx->ItemClick(ImHashStr("repair plan 0 waste store##Heat engine 0", 0, parent)); ctx->Yield(2);
+			popup = ctx->GetWindowByRef("//$FOCUSED");
+			REQ(popup != nullptr, "Waste combo popup missing");
+			ctx->ItemClick((std::string("//") + popup->Name + "/**/waste").c_str()); ctx->Yield(3);
+			ctx->SetRef("Configuration");
+			auto const authored = window.draft();
+			auto const& edited = authored.heatEngines.at(0);
+			REQ(edited.mechanicalSeizure && edited.efficiencyDrift && edited.repairParts,
+				"Heat engine opt-ins did not reach draft");
+			REQ(edited.efficiencyDrift->fadePerOperatingHour == 0.01
+				&& edited.efficiencyDrift->fadePerCalendarHour == 0.02
+				&& edited.efficiencyDrift->maxWearFraction == 0.7,
+				"Heat engine Wear rates/ceiling did not reach draft");
+			REQ(edited.repairParts->repairs.size() == 1, "Heat engine repair plan lost");
+			auto const& plan = edited.repairParts->repairs[0];
+			REQ(edited.repairParts->partsStoreId == "spares" && plan.modeId == "mechanical-seizure"
+				&& plan.durationSeconds == 12 && plan.partsQuantity == 2 && plan.wasteStoreId == "waste",
+				"Heat engine repair plan did not reach draft");
+			auto const valid = core::validateStationSystemsSettings(authored, diagnostic);
+			REQ(valid, diagnostic.c_str());
+			for (int i = 0; i < 40 && window.draft() != start; ++i)
+			{ driver.click(ctx, "**/Undo configuration"); ctx->Yield(2); }
+			REQ(window.draft() == start && window.draftHistory().undoCount() == undoStart,
+				"Heat engine undo lost seed/history");
+			for (int i = 0; i < 40 && window.draft() != authored; ++i)
+			{ driver.click(ctx, "**/Redo configuration"); ctx->Yield(2); }
+			REQ(window.draft() == authored, "Heat engine redo lost edits");
+			REQ(world->getStationSystemsSettings() == seed && !world->isModified(),
+				"Heat engine draft edits mutated World before Apply");
+			driver.click(ctx, "Save configuration"); ctx->Yield(3);
+			REQ(std::filesystem::exists(path) && !window.flowModified(), "Heat engine save failed");
+			driver.click(ctx, "New configuration"); ctx->Yield(3);
+			driver.click(ctx, "Open configuration"); ctx->Yield(3);
+			REQ(window.draft() == authored, "Standalone persistence lost Heat engine fields");
+			auto const applied = world->configureStationSystems(window.draft(), false, &diagnostic);
+			REQ(applied, diagnostic.c_str());
+			for (bool binary : {false, true})
+			{
+				core::SerializationWorkData work;
+				auto write = [&](auto writer) {
+					world->serialize(*writer, work); writer->serialize(); return writer->getSerializedString();
+				};
+				auto bytes = binary ? write(core::BinarySerializer::toString()) : write(core::YamlSerializer::toString());
+				std::unique_ptr<core::Serializer> reader = binary
+					? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+					: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+				reader->deserialize();
+				core::World loaded("Loaded", 2, 2);
+				REQ(loaded.deserialize(*reader, work) && loaded.getStationSystemsSettings() == authored,
+					"World persistence lost Heat engine fault/Wear/repair fields");
+			}
+		});
+		#undef REQ
+		require(driver.passed(), "Heat engine fault authoring workflow failed");
+	}
+
 	// --- A latching Trip reads differently from a plain Fault, and the
 	// free reset is offered on the Trip and on nothing else.
 	void faultTripResetWorkflow(smoke::Context const& context)
@@ -496,6 +645,7 @@ namespace editor_smoke
 	{
 		checks.push_back({"station/faultBadgeWorkflow", faultBadgeWorkflow});
 		checks.push_back({"station/faultAuthoringWorkflow", faultAuthoringWorkflow});
+		checks.push_back({"station/heatEngineFaultAuthoringWorkflow", heatEngineFaultAuthoringWorkflow});
 		checks.push_back({"station/faultTripResetWorkflow", faultTripResetWorkflow});
 	}
 }

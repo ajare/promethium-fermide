@@ -1230,6 +1230,8 @@ set_tests_properties(station-editor-flow-schedules PROPERTIES LABELS "smoke;func
 # the opt-in authoring controls, driven through the real widgets.
 add_test(NAME station-editor-fault-badge COMMAND pf-smoke-editor --check station/faultBadgeWorkflow)
 set_tests_properties(station-editor-fault-badge PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+add_test(NAME station-editor-heat-engine-fault-authoring COMMAND pf-smoke-editor --check station/heatEngineFaultAuthoringWorkflow)
+set_tests_properties(station-editor-heat-engine-fault-authoring PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-fault-authoring COMMAND pf-smoke-editor --check station/faultAuthoringWorkflow)
 set_tests_properties(station-editor-fault-authoring PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-fault-trip-reset COMMAND pf-smoke-editor --check station/faultTripResetWorkflow)
