@@ -1259,12 +1259,12 @@ namespace core
 	};
 	inline constexpr size_t MaxStationPathways{64};
 	// A Thermal link (#794): an explicitly authored, undirected conduction
-	// relationship between two Atmosphere compartments, carrying a declared
-	// conductance in kW/K. It is the heat mechanism the Atmosphere pathway
-	// deliberately excludes (ADR-0026): a pathway moves mass and no heat,
-	// a link moves heat and no mass, and the two aggregates are independent
+	// relationship between two Thermal nodes (Atmosphere or Reservoir),
+	// carrying a declared conductance in kW/K. Unlike the enthalpy carried
+	// by moving gas on an Atmosphere pathway, a link conducts heat and no
+	// mass. The two aggregates are independent (ADR-0028 / ADR-0032)
 	// - a solid wall with no opening is a link with no pathway. Heat moves
-	// down the compartments' own temperature difference toward their
+	// down the nodes' own temperature difference toward their
 	// energy-weighted average; nothing is conducted unless a link is
 	// authored, so the no-implicit-exchange rule keeps holding with a
 	// second named crossing alongside the pathway. A/B exist only to define
@@ -1273,12 +1273,19 @@ namespace core
 	// temperature *difference*, which is identical in Celsius and Kelvin.
 	// This is the opposite of the radiative path, which requires absolute
 	// temperature - do not apply the wrong rule to the wrong law.
+	// Typed endpoint identity is (kind, id). MachineBody is reserved and is
+	// refused until machine thermal bodies are implemented.
+	enum class ThermalNodeKind { Atmosphere, Reservoir, MachineBody };
 	struct ThermalLinkSettings
 	{
 		std::string id;
 		std::string aAtmosphereId;
 		std::string bAtmosphereId;
 		double conductanceKWPerK{0.0}; // must be finite and strictly positive
+		// The historical id field names are retained for document compatibility;
+		// they identify nodes of the corresponding kind, not necessarily air.
+		ThermalNodeKind aKind{ThermalNodeKind::Atmosphere};
+		ThermalNodeKind bKind{ThermalNodeKind::Atmosphere};
 		bool operator==(ThermalLinkSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationThermalLinks{64};
@@ -3477,6 +3484,8 @@ namespace core
 		// over exactly the terms that moved. Positive is the reservoir
 		// gaining from the compartment, negative is the reservoir giving
 		// heat to a colder compartment.
+		double lastConductedKW{0.0};
+		double conductedEnergyKJ{0.0};
 		double lastAtmosphereHeatKW{0.0};
 		// Generator heat this tick routed into this reservoir by the
 		// generators that use it as their heat sink (#399): waste heat
@@ -3901,6 +3910,8 @@ namespace core
 		double flowRateKW{0.0};
 		double netTransferredKJ{0.0};
 		StationThermalLinkStatus status{StationThermalLinkStatus::Idle};
+		ThermalNodeKind aKind{ThermalNodeKind::Atmosphere};
+		ThermalNodeKind bKind{ThermalNodeKind::Atmosphere};
 		bool operator==(StationThermalLinkSnapshot const&) const = default;
 	};
 

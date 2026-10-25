@@ -1506,7 +1506,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	if (!draft.thermalLinks.empty())
 	{
 		ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(station_flow::ThermalLinkColor),
-			"Thermal links: a wall is a node wired End A / End B between compartments (conducted heat, no mass; never a Station connection).");
+			"Thermal links: wire End A / End B to Atmosphere or Reservoir thermal nodes (conducted heat, no mass; never a Station connection).");
 	}
 	if (ImGui::TreeNodeEx("Edge colours", ImGuiTreeNodeFlags_NoAutoOpenOnLog))
 	{

@@ -285,7 +285,8 @@ namespace core
 				return false;
 			}
 			if (link.authored.aAtmosphereId != found->aAtmosphereId
-				|| link.authored.bAtmosphereId != found->bAtmosphereId)
+				|| link.authored.bAtmosphereId != found->bAtmosphereId
+				|| link.authored.aKind != found->aKind || link.authored.bKind != found->bKind)
 			{
 				if (diagnostic)
 					*diagnostic = "thermal link '" + link.authored.id

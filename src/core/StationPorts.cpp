@@ -304,7 +304,8 @@ namespace
 		// The Thermal link's two ends (#818): the wall owns both compartment
 		// references on the input side of the oriented pair, the same shape
 		// as the hatch above, so it resolves through its own explicit branch.
-		if (link.to.nodeType == "Thermal link" && link.from.nodeType == "Atmosphere"
+		if (link.to.nodeType == "Thermal link"
+			&& (link.from.nodeType == "Atmosphere" || link.from.nodeType == "Reservoir")
 			&& link.from.portName == "Thermal links")
 		{
 			if (link.to.portName == "End A")
@@ -1005,7 +1006,8 @@ namespace
 			// cannot conduct a compartment into itself. The Exterior-endpoint
 			// refusal never reaches the canvas because the derived Exterior
 			// node exposes no host face to drag from.
-			if (!found->aAtmosphereId.empty() && found->aAtmosphereId == found->bAtmosphereId)
+			if (!found->aAtmosphereId.empty() && found->aAtmosphereId == found->bAtmosphereId
+				&& found->aKind == found->bKind)
 				diagnostic = "Station thermal link '" + mapping.ownerId
 					+ "' endpoints must be distinct (self-loop)";
 			return true;
@@ -1515,11 +1517,11 @@ std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& set
 	{
 		if (!link.aAtmosphereId.empty())
 			links.push_back({linkIdentity("Thermal link", link.id, "aAtmosphereId"),
-				{"Atmosphere", link.aAtmosphereId, "Thermal links"},
+				{link.aKind == ThermalNodeKind::Reservoir ? "Reservoir" : "Atmosphere", link.aAtmosphereId, "Thermal links"},
 				{"Thermal link", link.id, "End A"}});
 		if (!link.bAtmosphereId.empty())
 			links.push_back({linkIdentity("Thermal link", link.id, "bAtmosphereId"),
-				{"Atmosphere", link.bAtmosphereId, "Thermal links"},
+				{link.bKind == ThermalNodeKind::Reservoir ? "Reservoir" : "Atmosphere", link.bAtmosphereId, "Thermal links"},
 				{"Thermal link", link.id, "End B"}});
 	}
 	for (auto const& transfer : settings.transfers)
@@ -1749,7 +1751,12 @@ bool applyStationLink(StationSystemsSettings& settings, CandidateLink const& lin
 	if (mapping.ownerType == "Thermal link")
 	{
 		auto* field = thermalLinkEndpointField(settings, mapping.ownerId, mapping.field);
-		return field && write(*field);
+		if (!field) return false;
+		for (auto& entry : settings.thermalLinks)
+			if (entry.id == mapping.ownerId)
+				(mapping.field == "aAtmosphereId" ? entry.aKind : entry.bKind)
+					= mapping.peer.nodeType == "Reservoir" ? ThermalNodeKind::Reservoir : ThermalNodeKind::Atmosphere;
+		return write(*field);
 	}
 	if (isMachineOwnerType(mapping.ownerType))
 	{

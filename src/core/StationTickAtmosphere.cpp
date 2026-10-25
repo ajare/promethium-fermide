@@ -618,24 +618,47 @@ namespace core
 				+ static_cast<long double>(atmosphereExchangeKJ[index])
 					/ compartment.authored.thermalCapacityKJPerK;
 		}
+		std::vector<long double> reservoirRelaxationC(runtime.reservoirs.size());
+		std::vector<double> reservoirConductedKJ(runtime.reservoirs.size(), 0.0);
+		for (size_t i = 0; i < runtime.reservoirs.size(); ++i)
+		{
+			auto const& reservoir = runtime.reservoirs[i];
+			// Both hub bookings from the star solve are already committed to
+			// this step. Do not spend tick-start heat a second time (#833).
+			reservoirRelaxationC[i] = static_cast<long double>(reservoir.temperatureC)
+				+ (static_cast<long double>(loopHeatIntoReservoir[i])
+					+ atmosphereHeatByReservoir[i]) * seconds / reservoir.authored.heatCapacityKJPerK;
+		}
+		auto capacity = [&](ThermalNodeKind kind, size_t i) -> long double {
+			return kind == ThermalNodeKind::Atmosphere
+				? runtime.atmospheres[i].authored.thermalCapacityKJPerK
+				: runtime.reservoirs[i].authored.heatCapacityKJPerK;
+		};
+		auto temperature = [&](ThermalNodeKind kind, size_t i) -> long double& {
+			return kind == ThermalNodeKind::Atmosphere
+				? relaxationTemperatureC[i] : reservoirRelaxationC[i];
+		};
+		auto book = [&](ThermalNodeKind kind, size_t i, double heat) {
+			(kind == ThermalNodeKind::Atmosphere
+				? thermalLinkConductedKJ[i] : reservoirConductedKJ[i]) += heat;
+		};
 		for (auto const linkIndex : runtime.thermalLinkPassOrder)
 		{
 			auto& link = runtime.thermalLinks[linkIndex];
-			auto const ca = static_cast<long double>(
-				runtime.atmospheres[link.aIndex].authored.thermalCapacityKJPerK);
-			auto const cb = static_cast<long double>(
-				runtime.atmospheres[link.bIndex].authored.thermalCapacityKJPerK);
+			auto const ca = capacity(link.authored.aKind, link.aIndex);
+			auto const cb = capacity(link.authored.bKind, link.bIndex);
+			auto& ta = temperature(link.authored.aKind, link.aIndex);
+			auto& tb = temperature(link.authored.bKind, link.bIndex);
 			auto const conductance = static_cast<long double>(link.authored.conductanceKWPerK);
 			auto const moved = twoBodyConductedHeatKJ(ca, cb,
-				relaxationTemperatureC[link.aIndex], relaxationTemperatureC[link.bIndex],
-				conductance, static_cast<long double>(seconds));
-			relaxationTemperatureC[link.aIndex] -= moved / ca;
-			relaxationTemperatureC[link.bIndex] += moved / cb;
+				ta, tb, conductance, static_cast<long double>(seconds));
+			ta -= moved / ca;
+			tb += moved / cb;
 			// Booked once per side as an exact negation: A gives what B
 			// receives, so both compartments' ledgers close on one number
 			// rather than two independently rounded ones.
-			thermalLinkConductedKJ[link.aIndex] -= moved;
-			thermalLinkConductedKJ[link.bIndex] += moved;
+			book(link.authored.aKind, link.aIndex, -moved);
+			book(link.authored.bKind, link.bIndex, moved);
 			link.flowRateKW = moved / seconds;
 			link.netTransferredKJ += moved;
 			link.status = moved != 0.0 ? StationThermalLinkStatus::Active
@@ -888,7 +911,10 @@ namespace core
 				// compartment's heat-only exchanger, the exact negation
 				// of what the compartment gained or gave up this tick.
 				auto const atmosphereHeatKW = atmosphereHeatByReservoir[index];
-				auto const heatInKW = reservoir.authored.absorbedHeatKW + routedIn[index]
+				auto const conductedKW = reservoirConductedKJ[index] / dt;
+				reservoir.lastConductedKW = conductedKW;
+				reservoir.conductedKJ += reservoirConductedKJ[index];
+				auto const heatInKW = conductedKW + reservoir.authored.absorbedHeatKW + routedIn[index]
 					+ reservoir.pendingHazardKJ / dt
 					+ loopHeatIntoReservoir[index] + condenserHeatBySink[index]
 					+ generatorHeatKW + atmosphereHeatKW

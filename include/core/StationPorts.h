@@ -217,6 +217,7 @@ namespace core
 			// efficiency, no direction. Both ends are optional until wired, so
 			// a freshly placed wall reads as a link being built rather than a
 			// broken reference.
+			PortDescriptor{"Reservoir", "Thermal links", StationPortDirection::Output, "thermal-link-host", "thermal-link-endpoint", 0, {}},
 			PortDescriptor{"Atmosphere", "Thermal links", StationPortDirection::Output, "thermal-link-host", "thermal-link-endpoint", 0, {}},
 			PortDescriptor{"Thermal link", "End A", StationPortDirection::Input, "thermal-link-endpoint", "thermal-link-host", 1, {}, true},
 			PortDescriptor{"Thermal link", "End B", StationPortDirection::Input, "thermal-link-endpoint", "thermal-link-host", 1, {}, true},

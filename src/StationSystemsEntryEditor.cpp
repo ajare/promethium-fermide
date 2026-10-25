@@ -1205,21 +1205,27 @@ bool renderThermalLinkEntry(core::StationSystemsSettings& draft,
 	// connectors write, so the form and the canvas cannot disagree about
 	// which compartments one wall joins. Exterior vacuum is never offered:
 	// it has no temperature to conduct against, and the validator refuses it.
-	auto renderEnd = [&](char const* field, std::string& end, std::string const& otherEnd) {
-		auto const* preview = end.empty() ? "Unconnected" : end.c_str();
-		if (!ImGui::BeginCombo(describe(field, label).c_str(), preview)) return;
+	auto renderEnd = [&](char const* field, std::string& end, core::ThermalNodeKind& kind,
+		std::string const& otherEnd, core::ThermalNodeKind otherKind) {
+		auto const preview = end.empty() ? std::string("Unconnected")
+			: std::string(kind == core::ThermalNodeKind::Reservoir ? "Reservoir: " : "Atmosphere: ") + end;
+		if (!ImGui::BeginCombo(describe(field, label).c_str(), preview.c_str())) return;
 		if (ImGui::Selectable("Unconnected", end.empty())) end.clear();
-		for (auto const& atmosphere : draft.atmospheres)
-		{
-			if (atmosphere.id.empty() || atmosphere.id == otherEnd
-				|| atmosphere.id == core::StationExteriorAtmosphereId) continue;
-			if (ImGui::Selectable(atmosphere.id.c_str(), end == atmosphere.id))
-				end = atmosphere.id;
-		}
+		auto offer = [&](auto const& nodes, core::ThermalNodeKind candidateKind, char const* prefix) {
+			for (auto const& node : nodes)
+			{
+				if (node.id.empty() || (node.id == otherEnd && candidateKind == otherKind)) continue;
+				auto const name = std::string(prefix) + node.id;
+				if (ImGui::Selectable(name.c_str(), end == node.id && kind == candidateKind))
+				{ end = node.id; kind = candidateKind; }
+			}
+		};
+		offer(draft.atmospheres, core::ThermalNodeKind::Atmosphere, "Atmosphere: ");
+		offer(draft.thermalReservoirs, core::ThermalNodeKind::Reservoir, "Reservoir: ");
 		ImGui::EndCombo();
 	};
-	renderEnd("end A compartment", link.aAtmosphereId, link.bAtmosphereId);
-	renderEnd("end B compartment", link.bAtmosphereId, link.aAtmosphereId);
+	renderEnd("end A node", link.aAtmosphereId, link.aKind, link.bAtmosphereId, link.bKind);
+	renderEnd("end B node", link.bAtmosphereId, link.bKind, link.aAtmosphereId, link.aKind);
 	renderRangedDouble(describe("conductance kW/K", label), link.conductanceKWPerK, 0.0, 0.0, "%.4f");
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))

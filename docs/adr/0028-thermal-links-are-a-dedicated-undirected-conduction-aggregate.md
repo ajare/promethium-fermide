@@ -1,6 +1,6 @@
 # Thermal links are a dedicated undirected conduction aggregate, integrated in closed form and mass-free
 
-Status: accepted (#793, #794–#798)
+Status: accepted (#793, #794–#798). Endpoint scope and duplicate-pair authoring policy amended by [ADR-0032](0032-thermal-links-join-typed-thermal-nodes.md) (#853); the conduction invariants below remain in force.
 
 A compartment could move heat to exactly one place: the heat-only exchanger on its own `reservoirId`. Everything else about its thermal boundary was sealed, so a shared bulkhead could not conduct, a greenhouse could not warm its neighbour through a common wall, and a cold surface could not draw moisture out of an adjacent warm compartment. ADR-0026 had made the Atmosphere pathway thermally neutral on purpose — the pathway's closed form holds temperature fixed across the step, and heat crossing the same opening would break that constant-coefficient premise — which left the hole deliberate but unfilled. Filling it required six decisions that are not visible in the conduction code and that a later contributor would otherwise be tempted to reverse.
 

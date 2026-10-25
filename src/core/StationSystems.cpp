@@ -1328,16 +1328,16 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				state.bIndex = atmosphereIndex.at(pathway.bAtmosphereId);
 			mImpl->atmospherePathways.push_back(std::move(state));
 		}
-		// Thermal links resolve to their two compartments at construction,
-		// like every other reference: the tick pass never re-looks-up, and
-		// validation has already refused Exterior and unresolved endpoints,
-		// so both indices always resolve for a configured World (#794).
+		// Resolve each typed node within its own namespace at construction.
+		// The tick pass uses the validated kind and index, never a lookup.
 		for (auto const& link : settings.thermalLinks)
 		{
 			Impl::ThermalLinkState state;
 			state.authored = link;
-			state.aIndex = atmosphereIndex.at(link.aAtmosphereId);
-			state.bIndex = atmosphereIndex.at(link.bAtmosphereId);
+			state.aIndex = link.aKind == ThermalNodeKind::Atmosphere
+				? atmosphereIndex.at(link.aAtmosphereId) : reservoirIndex.at(link.aAtmosphereId);
+			state.bIndex = link.bKind == ThermalNodeKind::Atmosphere
+				? atmosphereIndex.at(link.bAtmosphereId) : reservoirIndex.at(link.bAtmosphereId);
 			mImpl->thermalLinks.push_back(std::move(state));
 		}
 		// The conduction pass visits the links in canonical wiring order so
@@ -1349,7 +1349,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		// commute exactly - their conductances compose to their sum however
 		// they are applied - so the only order that could ever move a result
 		// is between links sharing one compartment, and the canonical pair
-		// key fixes that too. The key is the pair of authored compartment
+		// key fixes that too. The key is the pair of typed authored node
 		// names, not the declaration indices: the indices belong to the
 		// order the atmospheres array was typed, so keying on them made the
 		// "canonical" order move when only the compartment declarations
@@ -1366,10 +1366,14 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			{
 				auto const& source = mImpl->thermalLinks[left];
 				auto const& target = mImpl->thermalLinks[right];
-				auto const leftKey = std::minmax(source.authored.aAtmosphereId,
-					source.authored.bAtmosphereId);
-				auto const rightKey = std::minmax(target.authored.aAtmosphereId,
-					target.authored.bAtmosphereId);
+				auto key = [](ThermalLinkSettings const& link) {
+					auto a = std::pair{link.aKind, link.aAtmosphereId};
+					auto b = std::pair{link.bKind, link.bAtmosphereId};
+					if (b < a) std::swap(a, b);
+					return std::pair{a, b};
+				};
+				auto const leftKey = key(source.authored);
+				auto const rightKey = key(target.authored);
 				if (leftKey != rightKey) return leftKey < rightKey;
 				return source.authored.id < target.authored.id;
 			});

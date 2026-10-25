@@ -2128,6 +2128,8 @@ namespace
 			return refuse("Station thermal links are limited to "
 				+ std::to_string(MaxStationThermalLinks) + " entries");
 		std::set<std::string> thermalLinkIds;
+		using NodeKey = std::pair<ThermalNodeKind, std::string>;
+		std::set<std::pair<NodeKey, NodeKey>> thermalPairs;
 		for (auto const& link : settings.thermalLinks) try
 		{
 			auto const where = "Station thermal link '" + link.id + "'";
@@ -2138,23 +2140,40 @@ namespace
 				return refuse(where + " id is duplicated");
 			if (!std::isfinite(link.conductanceKWPerK) || link.conductanceKWPerK <= 0.0)
 				return refuse(where + " conductanceKWPerK must be finite and positive");
-			// Two empty strings name nothing; each empty end is refused on
-			// its own below as an unresolved reference, as for pathways.
-			if (!link.aAtmosphereId.empty() && link.aAtmosphereId == link.bAtmosphereId)
+			auto a = NodeKey{link.aKind, link.aAtmosphereId};
+			auto b = NodeKey{link.bKind, link.bAtmosphereId};
+			if (!a.second.empty() && a == b)
 				return refuse(where + " endpoints must be distinct (self-loop)");
-			for (auto const& endpoint : {link.aAtmosphereId, link.bAtmosphereId})
-		{
-				if (endpoint == StationExteriorAtmosphereId)
+			if (b < a) std::swap(a, b);
+			for (auto const& [kind, endpoint] : {a, b})
+			{
+				if (kind != ThermalNodeKind::Atmosphere && kind != ThermalNodeKind::Reservoir)
+					return refuse(where + " endpoint kind is unsupported (machineBody is reserved)");
+				if (kind == ThermalNodeKind::Atmosphere && endpoint == StationExteriorAtmosphereId)
 					return refuse(where + " may not use Exterior vacuum as an endpoint: "
 						"it has no temperature to conduct against");
-				if (!atmosphereIds.contains(endpoint))
+				double capacity = 0.0;
+				bool resolved = false;
+				if (kind == ThermalNodeKind::Atmosphere)
+					for (auto const& node : settings.atmospheres)
+						if (node.id == endpoint) { capacity = node.thermalCapacityKJPerK; resolved = true; break; }
+				if (kind == ThermalNodeKind::Reservoir)
+					for (auto const& node : settings.thermalReservoirs)
+						if (node.id == endpoint) { capacity = node.heatCapacityKJPerK; resolved = true; break; }
+				if (!resolved)
 				{
-					auto text = where + " references unknown atmosphere compartment '" + endpoint + "'";
+					auto text = where + " references unknown thermal node '" + endpoint + "'";
 					if (!brokenReferences) return refuse(std::move(text));
 					brokenReferences->push_back(std::move(text));
 					throw BrokenDraftEntry{};
 				}
+				if (!std::isfinite(capacity) || capacity <= 0.0)
+					return refuse(where + " endpoint must have finite positive thermal capacity");
 			}
+			// Unconnected draft ends are broken references, not duplicate
+			// physical pairs. Only resolved pairs participate in uniqueness.
+			if (!thermalPairs.insert({a, b}).second)
+				return refuse(where + " duplicates an undirected thermal node pair");
 		} catch (BrokenDraftEntry const&) {}
 		// Scheduled airlock cycle contracts (#400): each cycle draws from
 		// one declared compartment on the shared scenario schedule rule

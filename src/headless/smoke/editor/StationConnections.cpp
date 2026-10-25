@@ -246,6 +246,32 @@ void thermalLinkEditorWorkflow(smoke::Context const&)
 		&& written.thermalLinks[0].bAtmosphereId.empty(),
 		"Clearing the wall end link did not clear the draft field");
 
+	// #853: the same authoring seams accept typed reservoir endpoints;
+	// equal IDs in different namespaces must not look like a self-link.
+	auto typed = unwired;
+	typed.thermalReservoirs = {{"a", "warm", 100, 20, 0, 40, 0},
+		{"other", "low", 100, 10, 0, 40, 0}};
+	core::CandidateLink reservoirEnd{{"Reservoir", "a", "Thermal links"},
+		{"Thermal link", "wall", "End B"}};
+	require(core::evaluateStationLink(typed, reservoirEnd).allowed
+		&& core::applyStationLink(typed, reservoirEnd)
+		&& typed.thermalLinks[0].bKind == core::ThermalNodeKind::Reservoir,
+		"Reservoir wiring failed to write a typed endpoint");
+	auto typedGraph = station_flow::build(typed);
+	auto const typedEnd = connection(typedGraph, "Thermal link", "End B");
+	require(typedGraph.nodes[typedEnd.from].type == "Reservoir"
+		&& typedGraph.nodes[typedEnd.from].id == "a", "Typed link projected the wrong namespace");
+	require(core::clearStationLink(typed, "Thermal link:wall:aAtmosphereId")
+		&& core::applyStationLink(typed, {{"Reservoir", "other", "Thermal links"},
+			{"Thermal link", "wall", "End A"}})
+		&& typed.thermalLinks[0].aKind == core::ThermalNodeKind::Reservoir,
+		"Reservoir mesh could not be authored");
+	require(core::clearStationLink(typed, "Thermal link:wall:bAtmosphereId")
+		&& core::applyStationLink(typed, {{"Atmosphere", "c", "Thermal links"},
+			{"Thermal link", "wall", "End B"}})
+		&& typed.thermalLinks[0].bKind == core::ThermalNodeKind::Atmosphere,
+		"Rewiring to atmosphere retained a stale reservoir kind");
+
 	core::World baseline("Baseline", 2, 2);
 	baseline.pauseSimulation(); baseline.finishBuild();
 	std::string diagnostic;
@@ -277,7 +303,7 @@ void thermalLinkEditorWorkflow(smoke::Context const&)
 		ImVec2 hostPin{};
 		REQ(window.flowPinPosition("Atmosphere", "a", "Thermal links", &hostPin),
 			"the Atmosphere host face for Thermal links is not on screen");
-		REQ(driver.contains("a wall is a node wired End A / End B"),
+		REQ(driver.contains("wire End A / End B to Atmosphere or Reservoir thermal nodes"),
 			"the Thermal link legend does not describe the editable node");
 		// The wall reports live like the hatch: conductance, signed rate, net.
 		if (auto tel = window.flowTelemetry("Thermal link", "wall"))

@@ -418,6 +418,8 @@ namespace core
 			reservoirResult.methaneProcessingEnergyKJ = reservoir.methaneProcessingKJ;
 			reservoirResult.lastMicrobialHeatKW = reservoir.lastMicrobialHeatKW;
 			reservoirResult.microbialEnergyKJ = reservoir.microbialKJ;
+			reservoirResult.lastConductedKW = reservoir.lastConductedKW;
+			reservoirResult.conductedEnergyKJ = reservoir.conductedKJ;
 			reservoirResult.lastAtmosphereHeatKW = reservoir.lastAtmosphereHeatKW;
 			reservoirResult.lastBufferChargeKW = reservoir.lastBufferChargeKW;
 			reservoirResult.lastBufferDischargeKW = reservoir.lastBufferDischargeKW;
@@ -447,7 +449,7 @@ namespace core
 				+ reservoir.condenserKJ + reservoir.generatorKJ + reservoir.electrolysisKJ
 				+ reservoir.fuelCellKJ + reservoir.sabatierKJ + reservoir.methaneProcessingKJ
 				+ reservoir.microbialKJ
-				+ reservoir.atmosphereKJ
+				+ reservoir.atmosphereKJ + reservoir.conductedKJ
 				+ reservoir.engineRejectionKJ
 				+ reservoir.bufferDischargeKJ - reservoir.bufferChargeKJ
 				- reservoir.engineExtractionKJ
@@ -790,6 +792,8 @@ namespace core
 		{
 			StationThermalLinkSnapshot entry;
 			entry.id = link.authored.id;
+			entry.aKind = link.authored.aKind;
+			entry.bKind = link.authored.bKind;
 			entry.aAtmosphereId = link.authored.aAtmosphereId;
 			entry.bAtmosphereId = link.authored.bAtmosphereId;
 			entry.conductanceKWPerK = link.authored.conductanceKWPerK;

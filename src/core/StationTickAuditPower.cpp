@@ -558,6 +558,8 @@ namespace core
 			if (!requireFinite(reservoir.sabatierKJ, where + "cumulative Sabatier heat energy")) return false;
 			if (!requireFinite(reservoir.methaneProcessingKJ, where + "cumulative methane-processing heat energy")) return false;
 			if (!requireFinite(reservoir.microbialKJ, where + "cumulative microbial heat energy")) return false;
+			if (!requireFinite(reservoir.conductedKJ, where + "cumulative conducted energy")) return false;
+			if (!requireFinite(reservoir.lastConductedKW, where + "conducted power")) return false;
 			if (!requireFinite(reservoir.atmosphereKJ, where + "cumulative atmosphere exchange energy")) return false;
 			if (!requireFinite(reservoir.rejectedKJ, where + "cumulative rejected energy")) return false;
 			if (!requireFinite(reservoir.lastBufferChargeKW, where + "buffer charge power")) return false;
@@ -1105,6 +1107,18 @@ namespace core
 			if (!requireFinite(link.flowRateKW, where + " flow rate")
 				|| !requireFinite(link.netTransferredKJ, where + " net transferred energy")) return false;
 		}
+		// Every conducted joule must cancel across the complete typed node
+		// set, not just across compartments (#853). Keep this independent of
+		// the other reservoir service ledgers and their live capacity dials.
+		long double conductedResidual = 0.0L, conductedScale = 1.0L;
+		auto includeConduction = [&](double heat) {
+			conductedResidual += heat;
+			conductedScale = std::max(conductedScale, std::abs(static_cast<long double>(heat)));
+		};
+		for (auto const& air : runtime.atmospheres) includeConduction(air.conductedKJ);
+		for (auto const& reservoir : runtime.reservoirs) includeConduction(reservoir.conductedKJ);
+		if (std::abs(conductedResidual) > StationBalanceTolerance * conductedScale)
+			return violation = "thermal node conducted energy ledger residual", false;
 		// Heat engine ledger finiteness and closure (#804): every rate and
 		// cumulative term must be finite, and the conversion ledger must
 		// close over input = bus electrical + cable loss + rejection.

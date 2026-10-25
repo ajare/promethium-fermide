@@ -454,6 +454,8 @@ using namespace station_detail;
 			double sabatierKJ{0.0}; // cumulative Sabatier reaction + dose heat into the reservoir (#405)
 			double methaneProcessingKJ{0.0}; // cumulative methane-processing waste heat into the reservoir (#405)
 			double microbialKJ{0.0}; // cumulative microbial digestion reaction + process heat into the reservoir (#407)
+			double conductedKJ{0.0};
+			double lastConductedKW{0.0};
 			double atmosphereKJ{0.0}; // cumulative net compartment exchange into the reservoir
 			double bufferChargeKJ{0.0}; // cumulative heat absorbed out of the reservoir by buffers (#398)
 			double bufferDischargeKJ{0.0}; // cumulative heat returned into the reservoir by buffers (#398)

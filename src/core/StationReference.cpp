@@ -708,6 +708,12 @@ namespace core
 				serializer.writeString("id", link.id);
 				serializer.writeString("aAtmosphereId", link.aAtmosphereId);
 				serializer.writeString("bAtmosphereId", link.bAtmosphereId);
+				auto writeKind = [&](char const* field, ThermalNodeKind kind) {
+					if (kind != ThermalNodeKind::Atmosphere)
+						serializer.writeString(field, kind == ThermalNodeKind::Reservoir ? "reservoir" : "machineBody");
+				};
+				writeKind("aKind", link.aKind);
+				writeKind("bKind", link.bKind);
 				serializer.writeDouble("conductanceKWPerK", link.conductanceKWPerK);
 				serializer.endMap();
 			}
@@ -2113,7 +2119,7 @@ namespace core
 				serializer.beginMap("");
 				auto const id = serializer.readString("id");
 				std::vector<std::string> fields{"id", "aAtmosphereId", "bAtmosphereId",
-					"conductanceKWPerK"};
+					"conductanceKWPerK", "aKind", "bKind"};
 				for (auto const& field : serializer.mapKeys(""))
 					if (std::find(fields.begin(), fields.end(), field) == fields.end())
 						throw SerializationException("Station entry '" + id + "' field '" + field
@@ -2122,6 +2128,16 @@ namespace core
 				link.id = id;
 				link.aAtmosphereId = serializer.readString("aAtmosphereId");
 				link.bAtmosphereId = serializer.readString("bAtmosphereId");
+				auto readKind = [&](char const* field) {
+					if (!serializer.hasField(field)) return ThermalNodeKind::Atmosphere;
+					auto const kind = serializer.readString(field);
+					if (kind == "atmosphere") return ThermalNodeKind::Atmosphere;
+					if (kind == "reservoir") return ThermalNodeKind::Reservoir;
+					if (kind == "machineBody") return ThermalNodeKind::MachineBody;
+					throw SerializationException("Station thermal link '" + id + "' has unknown endpoint kind '" + kind + "'");
+				};
+				link.aKind = readKind("aKind");
+				link.bKind = readKind("bKind");
 				link.conductanceKWPerK = serializer.readDouble("conductanceKWPerK");
 				stationSettings.thermalLinks.push_back(std::move(link));
 				serializer.endMap();

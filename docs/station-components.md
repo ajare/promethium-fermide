@@ -504,13 +504,18 @@ recovering storage consumes actual spare radiator capacity; it is not instant.
 
 ### Thermal link
 
-**What it does:** conducts heat between two Atmosphere compartments without
-moving gas. Use it for a solid wall, closed door or sealed window.
+**What it does:** conducts heat between two Thermal nodes without moving
+mass: Atmosphere↔Atmosphere, Atmosphere↔Reservoir, or Reservoir↔Reservoir.
+Use it for a solid wall or shared structure, including reservoir meshes,
+without occupying a compartment's heat-only exchanger slot.
 
-**Ports:** **End A** and **End B** each join an Atmosphere's **Thermal links**
-face. Both endpoints must be distinct real compartments. Neither a Store,
-a Reservoir nor Exterior vacuum is a valid endpoint. The apparent input
-faces are endpoint references, not a heat-flow direction.
+**Ports:** **End A** and **End B** each join an Atmosphere's or Reservoir's
+**Thermal links** face. Endpoints must resolve to distinct nodes with positive
+thermal capacity. Duplicate undirected pairs are refused; combine parallel
+contacts by summing conductances on one link. Thermal service class is ignored.
+Stores and Exterior vacuum are not Thermal nodes; `machineBody` is reserved
+for a later slice and is currently refused. The apparent input faces are
+endpoint references, not a heat-flow direction.
 
 | Dial/value | Purpose |
 | --- | --- |
@@ -525,6 +530,13 @@ thermal equilibrium rather than prescribing a constant heat rate.
 their partition. Add a separate Atmosphere pathway for the doorway opening.
 Closing that pathway stops air-carried heat, but wall conduction continues.
 A link's conductance does not automatically follow door openness.
+
+Endpoint kinds are reported in the link snapshot beside signed flow, cumulative
+net transfer and Idle/Active status. YAML and binary records retain the historical
+`aAtmosphereId` / `bAtmosphereId` names for node IDs and add `aKind` / `bKind`
+(`atmosphere` or `reservoir`); omitted kinds default to atmosphere. Reservoirs
+publish conducted heat separately from exchanger heat, and both enter their
+energy residual. See [ADR-0032](adr/0032-thermal-links-join-typed-thermal-nodes.md).
 
 ### Heat engine
 

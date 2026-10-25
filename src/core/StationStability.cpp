@@ -484,6 +484,8 @@ namespace core
 			fin(reservoir.lastHeatRoutedKW, tag("lastHeatRoutedKW", reservoir.id));
 			fin(reservoir.lastLoopHeatKW, tag("lastLoopHeatKW", reservoir.id));
 			fin(reservoir.lastCondenserHeatKW, tag("lastCondenserHeatKW", reservoir.id));
+			fin(reservoir.lastConductedKW, tag("lastConductedKW", reservoir.id));
+			fin(reservoir.conductedEnergyKJ, tag("conductedEnergyKJ", reservoir.id));
 			fin(reservoir.lastAtmosphereHeatKW, tag("lastAtmosphereHeatKW", reservoir.id));
 			fin(reservoir.lastGeneratorHeatKW, tag("lastGeneratorHeatKW", reservoir.id));
 			fin(reservoir.lastElectrolysisHeatKW, tag("lastElectrolysisHeatKW", reservoir.id));

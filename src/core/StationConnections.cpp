@@ -201,9 +201,9 @@ Graph build(core::StationSystemsSettings const& s)
 		std::snprintf(detail, sizeof(detail), "conductance %.3f kW/K",
 			link.conductanceKWPerK);
 		b.owner = b.node("Thermal link", link.id, 2, detail);
-		b.input(b.owner, link.aAtmosphereId, "End A", "Atmosphere", LinkKind::Heat,
+		b.input(b.owner, link.aAtmosphereId, "End A", link.aKind == ThermalNodeKind::Reservoir ? "Reservoir" : "Atmosphere", LinkKind::Heat,
 			true, Medium::Heat, "aAtmosphereId");
-		b.input(b.owner, link.bAtmosphereId, "End B", "Atmosphere", LinkKind::Heat,
+		b.input(b.owner, link.bAtmosphereId, "End B", link.bKind == ThermalNodeKind::Reservoir ? "Reservoir" : "Atmosphere", LinkKind::Heat,
 			true, Medium::Heat, "bAtmosphereId");
 	}
 	b.add(s.coolantLoops, "Coolant loop", 2); b.add(s.chillers, "Chiller", 2);

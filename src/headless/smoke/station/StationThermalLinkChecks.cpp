@@ -330,8 +330,8 @@ void thermalLinkNoCrossing(smoke::Context const&)
 		"the over-conducted cold compartment did not settle on the weighted average");
 }
 
-// Parallel additivity: two half-conductance links equal one full-
-// conductance link exactly, so parallel walls reason additively.
+// The closed form's conductance-duration composition remains additive.
+// #853 refuses duplicate pairs, so compare G*t with (G/2)*(2t).
 void thermalLinkParallelAdditivity(smoke::Context const&)
 {
 	std::string diagnostic;
@@ -341,9 +341,14 @@ void thermalLinkParallelAdditivity(smoke::Context const&)
 	core::World oneWorld("ThermalLinkSingle", 2, 2);
 	configure(oneWorld, single, diagnostic);
 	core::World twoWorld("ThermalLinkHalves", 2, 2);
+	// #853 disallows duplicate undirected pairs. The preserved closed
+	// form still composes: half conductance for twice as long is equal.
+	require(!core::validateStationSystemsSettings(halves, diagnostic)
+		&& diagnostic.find("undirected") != std::string::npos, "duplicate pair accepted");
+	halves.thermalLinks.pop_back();
 	configure(twoWorld, halves, diagnostic);
 	oneWorld.resumeSimulation(); twoWorld.resumeSimulation();
-	require(advanceSeconds(oneWorld, 300) && advanceSeconds(twoWorld, 300),
+	require(advanceSeconds(oneWorld, 300) && advanceSeconds(twoWorld, 600),
 		"parallel additivity run failed");
 	auto const one = oneWorld.getStationSystemsSnapshot();
 	auto const two = twoWorld.getStationSystemsSnapshot();
@@ -354,7 +359,7 @@ void thermalLinkParallelAdditivity(smoke::Context const&)
 	// a last-bits difference, so compare at a tight physical tolerance.
 	for (size_t i = 0; i < 2; ++i)
 		require(std::abs(one.atmospheres[i].temperatureC - two.atmospheres[i].temperatureC) < 1e-12,
-			"two half-conductance links did not equal one full-conductance link");
+			"half conductance over twice the duration changed the relaxation");
 	// The receiver's conducted total is the link's own net transfer:
 	// positive into B, and identical for the single-link world.
 	require(std::abs(two.atmospheres[1].conductedEnergyKJ
@@ -370,9 +375,10 @@ void thermalLinkDeclarationOrder(smoke::Context const&)
 	std::string diagnostic;
 	auto const base = linkedPair(10000.0, 8000.0, 12.0);
 	auto reversed = base;
-	reversed.thermalLinks = {{"second", "a", "b", 6.0}, {"first", "b", "a", 6.0}};
-	auto forward = linkedPair(10000.0, 8000.0, 12.0);
-	forward.thermalLinks = {{"first", "b", "a", 6.0}, {"second", "a", "b", 6.0}};
+	reversed.atmospheres.push_back(linkCompartment("c", 25.0, 6000.0));
+	reversed.thermalLinks = {{"second", "a", "b", 6.0}, {"first", "b", "c", 6.0}};
+	auto forward = reversed;
+	std::reverse(forward.thermalLinks.begin(), forward.thermalLinks.end());
 	core::World aWorld("ThermalLinkOrderA", 2, 2);
 	configure(aWorld, reversed, diagnostic);
 	core::World bWorld("ThermalLinkOrderB", 2, 2);
@@ -736,8 +742,17 @@ bad.thermalLinks = {{"vacuum", "a", core::StationExteriorAtmosphereId, 1.0}};
 	// The declared ceiling, in the spirit of the pathway ceiling.
 auto many = good;
 	many.thermalLinks.clear();
-	for (size_t i = 0; i < core::MaxStationThermalLinks; ++i)
-		many.thermalLinks.push_back({"wall" + std::to_string(i), "a", "b", 1.0});
+	many.atmospheres.clear();
+	for (int i = 0; i < 8; ++i)
+	{
+		many.atmospheres.push_back(linkCompartment("node" + std::to_string(i), 20, 100));
+		many.thermalReservoirs.push_back({"sink" + std::to_string(i), "low", 100, 20, 0, 40, 0});
+	}
+	for (int i = 0; i < 8; ++i)
+		for (int j = 0; j < 8; ++j)
+			many.thermalLinks.push_back({"wall" + std::to_string(i) + "-" + std::to_string(j),
+				"node" + std::to_string(i), "sink" + std::to_string(j), 1.0,
+				core::ThermalNodeKind::Atmosphere, core::ThermalNodeKind::Reservoir});
 	require(core::validateStationSystemsSettings(many, diagnostic), diagnostic.c_str());
 	many.thermalLinks.push_back({"over-limit", "a", "b", 1.0});
 	require(!core::validateStationSystemsSettings(many, diagnostic)
@@ -1341,10 +1356,9 @@ double chainAverageTemperatureC(core::StationSystemsSettings const& s)
 }
 } // namespace
 
-// AC1: two half-conductance links between the same pair conduct exactly
-// what one full-conductance link conducts - in the compartments and in
-// the ledger, link by link, at every point of the run rather than only
-// once everything has settled.
+// #853: parallel duplicate pairs are refused. Preserve the mathematical
+// additivity check by composing equivalent conductance-duration products,
+// in both the temperatures and attributed energy at several horizons.
 void thermalLinkParallelWallAdditivity(smoke::Context const&)
 {
 	std::string diagnostic;
@@ -1354,8 +1368,8 @@ void thermalLinkParallelWallAdditivity(smoke::Context const&)
 	// to the same total rather than subtract from it.
 	auto halves = single;
 	halves.thermalLinks = {{"half-1", "a", "b", 6.0}, {"half-2", "b", "a", 6.0}};
-	// Three thirds as well, so additivity is not a property of the number
-	// two and holds for any number of walls in parallel.
+	// Three thirds exercise the same duplicate refusal and, after keeping
+	// one link, the G*t == (G/3)*(3t) composition.
 	auto thirds = single;
 	thirds.thermalLinks = {{"third-1", "a", "b", 4.0}, {"third-2", "b", "a", 4.0},
 		{"third-3", "a", "b", 4.0}};
@@ -1363,13 +1377,17 @@ void thermalLinkParallelWallAdditivity(smoke::Context const&)
 	core::World two("ParallelHalves", 2, 2);
 	core::World three("ParallelThirds", 2, 2);
 	configure(one, single, diagnostic);
+	require(!core::validateStationSystemsSettings(halves, diagnostic)
+		&& !core::validateStationSystemsSettings(thirds, diagnostic), "parallel duplicate pairs accepted");
+	halves.thermalLinks.resize(1);
+	thirds.thermalLinks.resize(1);
 	configure(two, halves, diagnostic);
 	configure(three, thirds, diagnostic);
 	one.resumeSimulation(); two.resumeSimulation(); three.resumeSimulation();
 	for (double const horizon : {requestedStepSeconds(), 60.0, 300.0})
 	{
-		require(advanceSeconds(one, horizon) && advanceSeconds(two, horizon)
-			&& advanceSeconds(three, horizon), "parallel wall additivity run failed");
+		require(advanceSeconds(one, horizon) && advanceSeconds(two, horizon * 2)
+			&& advanceSeconds(three, horizon * 3), "conduction composition run failed");
 		auto const base = one.getStationSystemsSnapshot();
 		require(base.healthy, "parallel wall single-link run failed its audit");
 		std::vector<core::StationSystemsSnapshot> const others = {
@@ -1384,9 +1402,8 @@ void thermalLinkParallelWallAdditivity(smoke::Context const&)
 							- base.atmospheres[i].conductedEnergyKJ)
 						<= 1e-9 * std::abs(base.atmospheres[i].conductedEnergyKJ) + 1e-9,
 					"parallel links did not reproduce the single-link result");
-			// The ledger adds up link by link: the shares of the parallel
-			// walls' own cumulative transfers are the single wall's
-			// cumulative transfer, and the same for the last tick's rate.
+			// Cumulative energy is identical at equal conductance-duration
+			// products. Rates differ, but still point in the same direction.
 			auto net = 0.0;
 			auto rate = 0.0;
 			for (auto const& entry : other.thermalLinks)
@@ -1401,8 +1418,7 @@ void thermalLinkParallelWallAdditivity(smoke::Context const&)
 			require(std::abs(net - wall.netTransferredKJ)
 				<= 1e-9 * std::abs(wall.netTransferredKJ) + 1e-9,
 				"the parallel walls' cumulative transfers were not additive");
-			require(std::abs(rate - wall.flowRateKW) <= 1e-9 * std::abs(wall.flowRateKW) + 1e-9,
-				"the parallel walls' last-tick rates were not additive");
+			require(rate > 0.0, "composed conduction lost its flow direction");
 			requireAttributedToItsLinks(other, "b", "a parallel wall's heat reached the wrong ledger");
 			requireResidualsClose(other, "parallel walls left a compartment residual open");
 		}
@@ -1537,12 +1553,11 @@ void thermalLinkDeclarationOrderIndependence(smoke::Context const&)
 	base.atmospheres = {linkCompartment("a", 70.0, 10000.0),
 		linkCompartment("b", 50.0, 15000.0), linkCompartment("c", 20.0, 8000.0),
 		linkCompartment("d", -10.0, 12000.0), linkCompartment("e", 35.0, 9000.0)};
-	// A chain, a second wall in parallel on the chain's first link, and
-	// a pair off by itself: every shape an author can shuffle.
+	// A chain with a cross-link: distinct pairs sharing nodes can shuffle.
 	base.thermalLinks = {{"ab", "a", "b", 200.0}, {"bc", "b", "c", 150.0},
-		{"cd", "c", "d", 120.0}, {"ab-2", "a", "b", 100.0}, {"de", "d", "e", 90.0}};
+		{"cd", "c", "d", 120.0}, {"ac", "a", "c", 100.0}, {"de", "d", "e", 90.0}};
 	auto shuffled = base;
-	shuffled.thermalLinks = {{"de", "d", "e", 90.0}, {"ab-2", "a", "b", 100.0},
+	shuffled.thermalLinks = {{"de", "d", "e", 90.0}, {"ac", "a", "c", 100.0},
 		{"cd", "c", "d", 120.0}, {"bc", "b", "c", 150.0}, {"ab", "a", "b", 200.0}};
 	core::World declared("DeclarationOrder", 2, 2);
 	core::World reordered("ReorderedDocument", 2, 2);
@@ -1878,8 +1893,215 @@ void thermalLinkLiveSettings(smoke::Context const&)
 		"adding a thermal link changed the running scenario");
 }
 
+namespace
+{
+using Kind = core::ThermalNodeKind;
+core::ThermalReservoirSettings linkReservoir(std::string id, double temperature, double capacity)
+{
+	return {std::move(id), "low", capacity, temperature, -250, 200, 0};
+}
+
+void thermalNodePair(smoke::Context const&)
+{
+	for (bool mixed : {false, true})
+		for (double conductance : {2.0, 1e12})
+		{
+			core::StationSystemsSettings s;
+			s.enabled = true;
+			if (mixed) s.atmospheres = {linkCompartment("a", 90, 100)};
+			else s.thermalReservoirs = {linkReservoir("a", 90, 100)};
+			s.thermalReservoirs.push_back(linkReservoir("b", 10, 300));
+			s.thermalReservoirs.back().thermalClass = "warm";
+			s.thermalLinks = {{"wall", "a", "b", conductance,
+				mixed ? Kind::Atmosphere : Kind::Reservoir, Kind::Reservoir}};
+			core::World world("ThermalNodePair", 2, 2);
+			std::string diagnostic;
+			configure(world, s, diagnostic);
+			world.resumeSimulation();
+			require(advanceSeconds(world, requestedStepSeconds()), "typed pair failed to advance");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& b = snap.thermal.reservoirs.back();
+			auto const ta = mixed ? snap.atmospheres[0].temperatureC : snap.thermal.reservoirs[0].temperatureC;
+			auto const qa = mixed ? snap.atmospheres[0].conductedEnergyKJ : snap.thermal.reservoirs[0].conductedEnergyKJ;
+			auto const wall = link(snap, "wall");
+			auto const expected = 30.0 + 60.0 * std::exp(-conductance * (1.0 / 100 + 1.0 / 300) * requestedStepSeconds());
+			require(snap.healthy && std::abs(ta - expected) < 1e-10, "typed endpoint changed the closed form");
+			require(ta >= 30 - 1e-10 && b.temperatureC <= 30 + 1e-10, "typed pair crossed equilibrium");
+			require(std::abs(100 * ta + 300 * b.temperatureC - 12000) < 1e-8, "typed pair lost energy");
+			require(qa == -wall.netTransferredKJ && b.conductedEnergyKJ == wall.netTransferredKJ,
+				"typed endpoints did not book exact negations");
+			require(wall.aKind == s.thermalLinks[0].aKind && wall.bKind == Kind::Reservoir
+				&& wall.status == core::StationThermalLinkStatus::Active && wall.flowRateKW > 0,
+				"typed endpoint snapshot lost identity or signed flux");
+			require(std::abs(b.residualKJ) < 1e-8, "reservoir conducted ledger did not close");
+			if (mixed) require(masses(snap.atmospheres[0]) == std::array<double, 4>{30, 80, 0.6, 0.001},
+				"typed conduction moved gas");
+		}
+}
+
+void thermalNodeMesh(smoke::Context const&)
+{
+	for (bool mixed : {false, true})
+	{
+		core::StationSystemsSettings s;
+		s.enabled = true;
+		if (mixed) s.atmospheres = {linkCompartment("a", 90, 100)};
+		else s.thermalReservoirs = {linkReservoir("a", 90, 100)};
+		s.thermalReservoirs.push_back(linkReservoir("b", 10, 300));
+		s.thermalReservoirs.push_back(linkReservoir("c", 30, 200));
+		auto const aKind = mixed ? Kind::Atmosphere : Kind::Reservoir;
+		s.thermalLinks = {{"ab", "a", "b", 30, aKind, Kind::Reservoir},
+			{"bc", "b", "c", 20, Kind::Reservoir, Kind::Reservoir},
+			{"ca", "c", "a", 40, Kind::Reservoir, aKind}};
+		auto reordered = s;
+		std::reverse(reordered.thermalLinks.begin(), reordered.thermalLinks.end());
+		std::reverse(reordered.thermalReservoirs.begin(), reordered.thermalReservoirs.end());
+		core::World original("Mesh", 2, 2), shuffled("ShuffledMesh", 2, 2);
+		std::string diagnostic;
+		configure(original, s, diagnostic); configure(shuffled, reordered, diagnostic);
+		original.resumeSimulation(); shuffled.resumeSimulation();
+		for (double horizon : {requestedStepSeconds(), 1.0, 120.0})
+		{
+			require(advanceSeconds(original, horizon) && advanceSeconds(shuffled, horizon), "mesh run failed");
+			auto const a = original.getStationSystemsSnapshot(), b = shuffled.getStationSystemsSnapshot();
+			require(a.healthy && b.healthy, "mesh audit failed");
+			double energy = 0;
+			for (auto const& node : a.thermal.reservoirs)
+			{
+				auto const twin = std::find_if(b.thermal.reservoirs.begin(), b.thermal.reservoirs.end(),
+					[&](auto const& n) { return n.id == node.id; });
+				require(twin != b.thermal.reservoirs.end() && node.temperatureC == twin->temperatureC
+					&& node.conductedEnergyKJ == twin->conductedEnergyKJ, "reservoir reshuffle changed conduction");
+				require(node.temperatureC >= 10 && node.temperatureC <= 90 && std::abs(node.residualKJ) < 1e-7,
+					"mesh exceeded initial extrema or left its ledger open");
+				energy += node.currentEnergyKJ;
+			}
+			if (mixed)
+			{
+				energy += a.atmospheres[0].temperatureC * 100;
+				require(a.atmospheres[0].temperatureC == b.atmospheres[0].temperatureC, "mixed mesh reshuffle changed air");
+			}
+			require(std::abs(energy - 18000) < 1e-7, "mesh lost total energy");
+			for (auto const& wall : a.thermalLinks)
+				require(wall == link(b, wall.id), "mesh reshuffle changed a published link");
+		}
+		auto const settled = original.getStationSystemsSnapshot();
+		for (auto const& node : settled.thermal.reservoirs)
+			require(std::abs(node.temperatureC - 30) < 1e-5, "mesh missed capacity-weighted equilibrium");
+		if (mixed) require(std::abs(settled.atmospheres[0].temperatureC - 30) < 1e-5, "air missed mesh equilibrium");
+	}
+}
+
+void thermalNodeStarSeed(smoke::Context const&)
+{
+	core::StationSystemsSettings s;
+	s.enabled = true;
+	s.atmospheres = {linkCompartment("a", 40, 1), linkCompartment("b", 40, 1)};
+	// Isolate sensible exchange: sub-zero air would otherwise condense
+	// the fixture's trace vapour and correctly release latent heat.
+	for (auto& air : s.atmospheres) air.startingWaterVapourKg = 0;
+	s.thermalReservoirs = {linkReservoir("r", -200, 1)};
+	s.atmospheres[0].reservoirId = "r";
+	s.atmospheres[0].exchangerConductanceKWPerK = 1e12;
+	s.thermalLinks = {{"wall", "r", "b", 1e12, Kind::Reservoir, Kind::Atmosphere}};
+	core::World world("StarThenMesh", 2, 2);
+	std::string diagnostic;
+	configure(world, s, diagnostic);
+	world.resumeSimulation();
+	require(advanceSeconds(world, requestedStepSeconds()), "star plus reservoir link failed");
+	auto const snap = world.getStationSystemsSnapshot();
+	require(snap.healthy && std::abs(snap.atmospheres[0].temperatureC + 80) < 1e-6
+		&& std::abs(snap.atmospheres[1].temperatureC + 20) < 1e-6
+		&& std::abs(snap.thermal.reservoirs[0].temperatureC + 20) < 1e-6,
+		"reservoir link spent heat already booked by the star solve");
+	require(std::abs(snap.thermal.reservoirs[0].residualKJ) < 1e-8, "star plus conduction ledger did not close");
+}
+
+void thermalNodeValidation(smoke::Context const&)
+{
+	auto s = linkedPair();
+	s.thermalReservoirs = {linkReservoir("a", 20, 100)};
+	s.thermalLinks = {{"typed", "a", "a", 1, Kind::Atmosphere, Kind::Reservoir}};
+	core::World world("NodeValidation", 2, 2);
+	std::string diagnostic;
+	configure(world, s, diagnostic); // same ID, different kinds is not a self-link
+	auto const baseline = world.getStationSystemsSnapshot();
+	for (int mode = 0; mode < 6; ++mode)
+	{
+		auto bad = s;
+		if (mode == 0) bad.thermalLinks[0].bAtmosphereId = "missing";
+		if (mode == 1) bad.thermalReservoirs[0].heatCapacityKJPerK = 0;
+		if (mode == 2) bad.thermalLinks[0].aKind = Kind::Reservoir;
+		if (mode == 3) bad.thermalLinks.push_back({"duplicate", "a", "a", 2, Kind::Reservoir, Kind::Atmosphere});
+		if (mode == 4) bad.thermalLinks[0].bKind = Kind::MachineBody;
+		if (mode == 5) bad.thermalLinks[0].bKind = static_cast<Kind>(999);
+		require(!world.configureStationSystems(bad, false, &diagnostic) && !diagnostic.empty()
+			&& world.getStationSystemsSettings() == s && world.getStationSystemsSnapshot() == baseline,
+			"invalid typed endpoint accepted or refusal mutated the World");
+	}
+}
+
+void thermalNodePersistence(smoke::Context const&)
+{
+	for (int endpointMode : {0, 1, 2})
+		for (bool binary : {false, true})
+		{
+			bool const typed = endpointMode != 0;
+			auto s = linkedPair();
+			if (typed)
+			{
+				s.thermalReservoirs = {linkReservoir("b", 10, 10000)};
+				s.thermalLinks[0].bKind = Kind::Reservoir;
+				if (endpointMode == 2)
+				{
+					s.thermalReservoirs.push_back(linkReservoir("a", 40, 10000));
+					s.thermalLinks[0].aKind = Kind::Reservoir;
+				}
+			}
+			core::World original("TypedPersistence", 2, 2), restored("Restored", 2, 2);
+			std::string diagnostic;
+			configure(original, s, diagnostic);
+			auto writer = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+			core::SerializationWorkData work;
+			original.serialize(*writer, work); writer->serialize();
+			auto const data = binary ? static_cast<core::BinarySerializer&>(*writer).getSerializedString()
+				: static_cast<core::YamlSerializer&>(*writer).getSerializedString();
+			auto reader = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+			reader->deserialize();
+			require(restored.deserialize(*reader, work) && restored.getStationSystemsSettings() == s,
+				"typed or legacy endpoints changed in World round trip");
+			original.resumeSimulation(); restored.resumeSimulation();
+			require(advanceSeconds(original, 1) && advanceSeconds(restored, 1)
+				&& original.getStationSystemsSnapshot() == restored.getStationSystemsSnapshot(),
+				"endpoint round trip changed conduction behaviour");
+			core::StationConfigurationDocument document, loaded;
+			document.settings = s;
+			auto yaml = core::serializeStationConfiguration(document);
+			require(core::parseStationConfiguration(yaml, loaded, &diagnostic) && loaded.settings == s,
+				"Station YAML changed typed endpoints");
+			if (typed)
+			{
+				auto const pos = yaml.find("bKind: reservoir");
+				require(pos != std::string::npos, "typed endpoint kind was not serialized");
+				yaml.replace(pos, std::string("bKind: reservoir").size(), "bKind: typo");
+				require(!core::parseStationConfiguration(yaml, loaded, &diagnostic) && loaded.settings == s,
+					"unknown endpoint kind accepted or changed loaded document");
+			}
+			else require(yaml.find("aKind:") == std::string::npos && yaml.find("bKind:") == std::string::npos,
+				"legacy atmosphere endpoint wire format changed");
+		}
+}
+} // namespace
+
 void registerStationThermalLinkChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"thermalNodePair", thermalNodePair});
+	checks.push_back({"thermalNodeMesh", thermalNodeMesh});
+	checks.push_back({"thermalNodeStarSeed", thermalNodeStarSeed});
+	checks.push_back({"thermalNodeValidation", thermalNodeValidation});
+	checks.push_back({"thermalNodePersistence", thermalNodePersistence});
 	checks.push_back({"thermalLinkConservation", thermalLinkConservation});
 	checks.push_back({"thermalLinkZeroCelsiusAudit", thermalLinkZeroCelsiusAudit});
 	checks.push_back({"thermalLinkAdr0026Contrast", thermalLinkAdr0026Contrast});
