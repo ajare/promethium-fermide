@@ -252,7 +252,15 @@ Alert dashboard reports monitored conditions.
   threshold finite and in the metric's unit; times >= 0; Monitor id unique. Invalid edits
   are refused with a diagnostic and leave no partial state.
 - Renaming a subject cascades monitor references exactly as it cascades links; deleting a
-  subject removes its Monitors in the same undoable action.
+  subject removes its Monitors in the same undoable action. The cascade rides the node
+  plan/apply contract in `StationPorts`: the plan names the Monitors it will touch
+  alongside the links, so the confirmation spells out the whole cascade and one core-owned
+  view drives both. A rename rewrites the Monitor's `subjectId` reference only — the
+  Monitor's own id is what the author called the Monitor, not a reference to the subject,
+  so it is never rewritten. Because the cascade is now a writer of Monitors it commits
+  nothing the runtime would itself reject: a Monitor set that will not validate stops the
+  whole action rather than landing half-written, and a plan that has gone stale against the
+  Monitor set is refused rather than applied.
 
 ## 8. Testing seams
 

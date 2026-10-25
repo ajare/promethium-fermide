@@ -586,14 +586,21 @@ namespace core
 	// Resolve and remove any Authored node and all its connector references
 	// through the same mapping used for links. Derived service nodes and
 	// missing nodes are refused without changing the draft.
+	//
+	// #869: a node may also be a Monitor subject. The plan names those
+	// Monitors alongside the links, so the confirmation spells out the whole
+	// cascade and the apply removes it as one action rather than leaving a
+	// Monitor watching a ghost.
 	struct StationNodeRemoval
 	{
 		std::string nodeType, nodeId;
 		std::vector<std::string> linkIdentities;
+		std::vector<std::string> monitorIds;
 	};
 	bool planStationNodeRemoval(StationSystemsSettings const& settings,
 		std::string const& nodeType, std::string const& nodeId, StationNodeRemoval& plan);
-	bool removeStationNode(StationSystemsSettings& settings, StationNodeRemoval const& plan);
+	bool removeStationNode(StationSystemsSettings& settings, StationNodeRemoval const& plan,
+		std::string* diagnostic = nullptr);
 
 	// Rename an authored node and every mapped reference to it. The plan carries
 	// the same referrer identities as removal, so confirmation and mutation use
@@ -602,9 +609,19 @@ namespace core
 	{
 		std::string nodeType, oldNodeId, newNodeId;
 		std::vector<std::string> linkIdentities;
+		std::vector<std::string> monitorIds;
 	};
 	bool planStationNodeRename(StationSystemsSettings const& settings,
 		std::string const& nodeType, std::string const& oldNodeId,
 		std::string const& newNodeId, StationNodeRename& plan, std::string* diagnostic = nullptr);
-	bool renameStationNode(StationSystemsSettings& settings, StationNodeRename const& plan);
+	bool renameStationNode(StationSystemsSettings& settings, StationNodeRename const& plan,
+		std::string* diagnostic = nullptr);
+
+	// #869: the Monitor subject type an Authored node type supervises, empty
+	// when that type has no Monitor subjects. The node-type spellings here are
+	// the cascade's, matching withNodeEntries; the subject spellings are the
+	// authored ones on StationMonitorSettings::subjectType. Only `atmosphere`
+	// is registered today - the other subjects arrive with their own
+	// default-table tickets, and the cascade follows them automatically.
+	std::string_view stationMonitorSubjectTypeForNodeType(std::string_view nodeType);
 }

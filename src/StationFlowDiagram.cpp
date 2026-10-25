@@ -3154,7 +3154,14 @@ entry.thermalClass = "moderate";
 	// renamed identity, not the graph from the preceding draw pass.
 	auto renameNode = [&](core::StationNodeRename const& plan) {
 		if (beforeNodeRemoval) beforeNodeRemoval();
-		if (!core::renameStationNode(draft, plan)) return;
+		std::string reason;
+		if (!core::renameStationNode(draft, plan, &reason))
+		{
+			// #869: the cascade can now refuse on a Monitor invariant. Say so
+			// rather than leave the author staring at an unchanged draft.
+			mNotice = reason;
+			return;
+		}
 		core::StationConfigurationDocument layout;
 		exportLayout(layout);
 		auto position = layout.positions.extract(plan.nodeType + ":" + plan.oldNodeId + ":0");
@@ -3221,7 +3228,10 @@ entry.thermalClass = "moderate";
 			core::StationNodeRemoval plan;
 			if (core::planStationNodeRemoval(draft, mSelectedType, mSelectedId, plan))
 			{
-				if (plan.linkIdentities.empty())
+				// #869: Monitors are removed by this cascade, not merely
+				// retargeted, so a node whose only referrers are Monitors asks
+				// first rather than silently unwatching its compartments.
+				if (plan.linkIdentities.empty() && plan.monitorIds.empty())
 				{
 					if (beforeNodeRemoval) beforeNodeRemoval();
 					if (core::removeStationNode(draft, plan))
@@ -3239,18 +3249,21 @@ entry.thermalClass = "moderate";
 	{
 		if (mPendingRename)
 		{
-			ImGui::Text("Rename this %s? %zu links will be updated",
+			ImGui::Text("Rename this %s? %zu links and %zu Monitors will be updated",
 				mPendingRename->nodeType == "Store" ? "store" : "node",
-				mPendingRename->linkIdentities.size());
+				mPendingRename->linkIdentities.size(), mPendingRename->monitorIds.size());
 			if (ImGui::Button("Confirm node rename"))
 			{
 				core::StationNodeRename current;
+				std::string reason;
 				if (core::planStationNodeRename(draft, mPendingRename->nodeType,
-					mPendingRename->oldNodeId, mPendingRename->newNodeId, current)
-					&& current.linkIdentities == mPendingRename->linkIdentities)
+					mPendingRename->oldNodeId, mPendingRename->newNodeId, current, &reason)
+					&& current.linkIdentities == mPendingRename->linkIdentities
+					&& current.monitorIds == mPendingRename->monitorIds)
 				{
 					renameNode(current);
 				}
+				else mNotice = reason.empty() ? "Rename refused: the draft changed under this plan." : reason;
 				mPendingRename.reset(); ImGui::CloseCurrentPopup();
 			}
 			ImGui::SameLine();
@@ -3263,18 +3276,23 @@ entry.thermalClass = "moderate";
 	{
 		if (mPendingRemoval)
 		{
-			ImGui::Text("This removes %zu connections", mPendingRemoval->linkIdentities.size());
+			ImGui::Text("This removes %zu connections and %zu Monitors",
+				mPendingRemoval->linkIdentities.size(), mPendingRemoval->monitorIds.size());
 			ImGui::Text("Delete %s '%s'?", mPendingRemoval->nodeType.c_str(), mPendingRemoval->nodeId.c_str());
 			if (ImGui::Button("Confirm node deletion"))
 			{
 				core::StationNodeRemoval current;
+				std::string reason;
 				if (core::planStationNodeRemoval(draft, mPendingRemoval->nodeType,
-					mPendingRemoval->nodeId, current) && current.linkIdentities == mPendingRemoval->linkIdentities)
+					mPendingRemoval->nodeId, current) && current.linkIdentities == mPendingRemoval->linkIdentities
+					&& current.monitorIds == mPendingRemoval->monitorIds)
 				{
 					if (beforeNodeRemoval) beforeNodeRemoval();
-					if (core::removeStationNode(draft, current))
+					if (core::removeStationNode(draft, current, &reason))
 					{ mSelected = -1; mSelectedType.clear(); mSelectedId.clear(); }
+					else mNotice = reason;
 				}
+				else mNotice = "Delete refused: the draft changed under this plan.";
 				mPendingRemoval.reset(); ImGui::CloseCurrentPopup();
 			}
 			ImGui::SameLine();

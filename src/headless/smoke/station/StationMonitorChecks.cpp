@@ -668,6 +668,174 @@ void monitorCallbackStream(smoke::Context const&)
 		"the Alert ledger and the event stream are not in lockstep");
 	require(snap.activeAlerts.empty() && snap.closedAlerts.size() == 2, "unexpected ledger shape at the end");
 }
+// #869 fixture: a second compartment and two more Monitors, so the cascade
+// has to pick one subject's Monitors out of several rather than move the only
+// one it happens to have.
+core::StationSystemsSettings cascadeStation()
+{
+	auto s = monitorStation();
+	core::AtmosphereSettings hub;
+	hub.id = "hub"; hub.volumeM3 = 60; hub.thermalCapacityKJPerK = 6000;
+	hub.startingOxygenKg = 12; hub.startingNitrogenKg = 48;
+	hub.minPressureKPa = 1; hub.maxPressureKPa = 200;
+	s.atmospheres.push_back(hub);
+	s.monitors.push_back({"hub-oxygen-low", "atmosphere", "hub", "oxygenPartialPressureKPa",
+		{17.5, core::AlertDirection::Below, 30, 60}, core::AlertSeverity::Critical, true});
+	s.monitors.push_back({"hub-heat", "atmosphere", "hub", "temperatureC",
+		{27.0, core::AlertDirection::Above, 600, 300}, core::AlertSeverity::Advisory, false});
+	return s;
+}
+
+// #869: renaming or deleting a monitored subject never leaves a Monitor
+// watching a ghost. The cascade rides the same plan/apply contract the links
+// already use, so it lands complete or not at all, and the document it leaves
+// behind is one whole transition a snapshot-based undo/redo restores exactly.
+void monitorCascade(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	auto const settings = cascadeStation();
+	auto named = [](core::StationSystemsSettings const& s, std::string_view id)
+		-> core::StationMonitorSettings const* {
+		auto const found = std::find_if(s.monitors.begin(), s.monitors.end(),
+			[&](auto const& m) { return m.id == id; });
+		return found == s.monitors.end() ? nullptr : &*found;
+	};
+	std::string diagnostic;
+
+	// The plan names the Monitors it will touch alongside the links, so one
+	// core-owned view drives both the confirmation and the mutation.
+	core::StationNodeRename rename;
+	require(core::planStationNodeRename(settings, "Atmosphere", "room", "quarter", rename, &diagnostic),
+		("rename plan refused: " + diagnostic).c_str());
+	require(rename.monitorIds == std::vector<std::string>{"oxygen-low"},
+		"the rename plan did not name the Monitor watching the renamed compartment");
+
+	// The reference follows the name. The Monitor's own id is what the author
+	// called the Monitor, not a reference to the subject, so it stays put.
+	auto renamed = settings;
+	require(core::renameStationNode(renamed, rename, &diagnostic),
+		("rename cascade refused: " + diagnostic).c_str());
+	require(renamed.monitors.size() == settings.monitors.size(), "the rename cascade dropped a Monitor");
+	require(named(settings, "oxygen-low")->subjectId == "room",
+		"the cascade mutated the settings it had only been given a plan for");
+	auto const* moved = named(renamed, "oxygen-low");
+	require(moved != nullptr, "the rename changed the Monitor's own id");
+	require(moved->subjectType == "atmosphere" && moved->subjectId == "quarter",
+		"the rename left the Monitor reference pointing at the old compartment");
+	require(moved->metric == "oxygenPartialPressureKPa" && moved->rule.threshold == 17.5
+		&& moved->rule.triggerOnSeconds == 30 && moved->rule.triggerOffSeconds == 60
+		&& moved->severity == core::AlertSeverity::Critical && moved->enabled,
+		"the rename cascade lost authored Monitor fields");
+	require(named(renamed, "hub-oxygen-low")->subjectId == "hub"
+		&& named(renamed, "hub-heat")->subjectId == "hub",
+		"the rename disturbed Monitors on a compartment it had no business with");
+
+	// The renamed Monitor really is still watching: it fires, and reports the
+	// subject under its new name.
+	{
+		core::StationSystemsRuntime run(renamed, 1);
+		require(run.advanceTo(40), "the renamed configuration would not run");
+		auto const& alerts = run.snapshot().activeAlerts;
+		auto const fired = std::find_if(alerts.begin(), alerts.end(),
+			[](auto const& a) { return a.monitorId == "oxygen-low"; });
+		require(fired != alerts.end(),
+			"the Monitor stopped watching after its subject was renamed");
+		require(fired->subjectType == "atmosphere" && fired->subjectId == "quarter",
+			"the fired Alert does not report the subject under its new name");
+	}
+
+	// Deleting the subject takes its Monitors in the same action. Left behind,
+	// one would watch a ghost: reading nothing, firing nothing, and looking
+	// exactly like a Monitor that never triggered.
+	core::StationNodeRemoval removal;
+	require(core::planStationNodeRemoval(settings, "Atmosphere", "hub", removal),
+		"delete plan refused");
+	require(removal.monitorIds == std::vector<std::string>({"hub-oxygen-low", "hub-heat"}),
+		"the delete plan did not name both Monitors on the removed compartment");
+	auto deleted = settings;
+	require(core::removeStationNode(deleted, removal, &diagnostic),
+		("delete cascade refused: " + diagnostic).c_str());
+	require(deleted.atmospheres.size() == 1 && deleted.atmospheres[0].id == "room",
+		"the delete did not remove the compartment");
+	require(deleted.monitors.size() == 1 && deleted.monitors[0].id == "oxygen-low",
+		"the delete left a Monitor watching a compartment that is gone");
+	require(core::validateStationMonitors(deleted, diagnostic),
+		("the delete cascade left an invalid Monitor set: " + diagnostic).c_str());
+	require(settings.monitors.size() == 3 && settings.atmospheres.size() == 2,
+		"the delete cascade mutated the settings it had only been given a plan for");
+
+	// A refused cascade leaves nothing behind, mirroring the link contract.
+	auto collided = settings;
+	core::StationNodeRename ontoExisting;
+	require(!core::planStationNodeRename(collided, "Atmosphere", "room", "hub", ontoExisting, &diagnostic)
+		&& !diagnostic.empty(), "renaming a compartment onto an existing one was accepted");
+	require(collided == settings, "a refused rename left partial state");
+
+	// The cascade is a writer of Monitors now, so it commits nothing the
+	// runtime would itself reject: a draft already carrying a duplicate Monitor
+	// id is refused whole rather than laundered into a committed document.
+	auto duplicated = cascadeStation();
+	duplicated.monitors.push_back(duplicated.monitors[0]);
+	auto const withDuplicate = duplicated;
+	core::StationNodeRename dupPlan;
+	bool const dupPlanned = core::planStationNodeRename(duplicated, "Atmosphere", "room",
+		"quarter", dupPlan, &diagnostic);
+	bool const dupApplied = dupPlanned && core::renameStationNode(duplicated, dupPlan, &diagnostic);
+	require(!dupApplied, "a duplicate Monitor id passed the cascade");
+	require(!diagnostic.empty(), "a duplicate Monitor id was refused without a diagnostic");
+	require(duplicated == withDuplicate, "a refused Monitor cascade left partial state");
+
+	// A plan made against one draft is stale the moment the Monitors watching
+	// the subject change: applying it would act on a cascade nobody confirmed.
+	auto drifted = cascadeStation();
+	drifted.monitors.push_back({"room-co2-high", "atmosphere", "room",
+		"carbonDioxidePartialPressureKPa", {0.7, core::AlertDirection::Above, 30, 60},
+		core::AlertSeverity::Warning, true});
+	drifted.monitors.push_back({"hub-co2-high", "atmosphere", "hub",
+		"carbonDioxidePartialPressureKPa", {0.7, core::AlertDirection::Above, 30, 60},
+		core::AlertSeverity::Warning, true});
+	auto const asDrifted = drifted;
+	core::StationNodeRename staleRename;
+	require(core::planStationNodeRename(settings, "Atmosphere", "room", "quarter", staleRename, &diagnostic)
+		&& staleRename.monitorIds.size() == 1, "stale rename plan setup failed");
+	require(!core::renameStationNode(drifted, staleRename, &diagnostic),
+		"a rename plan went stale against the Monitor set and was applied anyway");
+	require(drifted == asDrifted, "a refused stale rename left partial state");
+	core::StationNodeRemoval staleRemoval;
+	require(core::planStationNodeRemoval(settings, "Atmosphere", "hub", staleRemoval)
+		&& staleRemoval.monitorIds.size() == 2, "stale delete plan setup failed");
+	require(!core::removeStationNode(drifted, staleRemoval, &diagnostic),
+		"a delete plan went stale against the Monitor set and was applied anyway");
+	require(drifted == asDrifted, "a refused stale delete left partial state");
+
+	// Undo/redo: the cascade is one whole-document transition with no
+	// intermediate state observable, so restoring the captured side undoes it
+	// exactly and replaying the plan reproduces it exactly.
+	auto const before = settings;
+	auto forward = settings;
+	require(core::renameStationNode(forward, rename, &diagnostic),
+		("cascade replay refused: " + diagnostic).c_str());
+	auto const after = forward;
+	auto undone = after;
+	undone = before;
+	require(undone == before, "undo did not restore the pre-cascade document");
+	auto redone = undone;
+	core::StationNodeRename replay;
+	require(core::planStationNodeRename(redone, "Atmosphere", "room", "quarter", replay, &diagnostic)
+		&& core::renameStationNode(redone, replay, &diagnostic),
+		"redo refused to replay the cascade");
+	require(redone == after, "redo did not reproduce the exact cascade");
+
+	// Both sides survive the document round trip, so a save/load across the
+	// cascade carries the rewritten references and the removals unchanged.
+	for (auto const& document : {before, after})
+	{
+		core::StationConfigurationDocument doc, parsed;
+		doc.settings = document;
+		require(core::parseStationConfiguration(core::serializeStationConfiguration(doc), parsed)
+			&& parsed.settings == document, "the cascade did not survive the document round trip");
+	}
+}
 void registerStationMonitorChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"monitorTiming", monitorTiming});
@@ -678,4 +846,5 @@ void registerStationMonitorChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"monitorDefaultTable", monitorDefaultTable});
 	checks.push_back({"monitorDefaultBoundaries", monitorDefaultBoundaries});
 	checks.push_back({"monitorCallbackStream", monitorCallbackStream});
+	checks.push_back({"monitorCascade", monitorCascade});
 }

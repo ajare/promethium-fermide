@@ -313,7 +313,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         stabilityMultiWorldIsolationFast stabilityAuditFaultInjection materialIdentity
         atmosphereFire airlockFaultBookings atmosphereFaultReplay atmosphereFaultTransactions atmosphereFaultWorld
         monitorTiming monitorCommands monitorValidation monitorPersistence monitorDemo
-        monitorDefaultTable monitorDefaultBoundaries monitorCallbackStream
+        monitorDefaultTable monitorDefaultBoundaries monitorCallbackStream monitorCascade
         faultInjection faultOutages faultReplay faultOptIn faultTransactions tripLifecycle tripTransactions
         repairLifecycle repairInterruption repairTransactions repairSeizureClearing
         conditionStress conditionCrossing conditionRestore conditionReplay conditionValidation conditionTransactions

@@ -1288,6 +1288,49 @@ namespace
 		if (type == "Maintenance") return fn(settings.maintenanceJobs);
 		return false;
 	}
+
+	// #869: the Monitors watching one Authored node, named by the node type's
+	// cascade spelling. Nothing to collect for a node type with no subjects.
+	void collectMonitorsForNode(StationSystemsSettings const& settings, std::string_view nodeType,
+		std::string const& nodeId, std::vector<std::string>& ids)
+	{
+		auto const subject = stationMonitorSubjectTypeForNodeType(nodeType);
+		if (subject.empty()) return;
+		for (auto const& monitor : settings.monitors)
+			if (monitor.subjectType == subject && monitor.subjectId == nodeId)
+				ids.push_back(monitor.id);
+	}
+
+	void eraseMonitorsById(StationSystemsSettings& settings, std::vector<std::string> const& ids)
+	{
+		std::erase_if(settings.monitors, [&](auto const& monitor) {
+			return std::find(ids.begin(), ids.end(), monitor.id) != ids.end();
+		});
+	}
+
+	// Rewrite the subject reference the named Monitors hold. The Monitor's own
+	// id is the author's name for the Monitor rather than a reference to the
+	// subject, so renaming the subject never renames the Monitor.
+	void retargetMonitors(StationSystemsSettings& settings, std::vector<std::string> const& ids,
+		std::string const& newSubjectId)
+	{
+		for (auto& monitor : settings.monitors)
+			if (std::find(ids.begin(), ids.end(), monitor.id) != ids.end())
+				monitor.subjectId = newSubjectId;
+	}
+
+	// #869 makes the cascade a writer of Monitors, so it commits nothing the
+	// runtime would itself reject. A Monitor set that will not validate - a
+	// duplicate id, a subject that is not there - stops the whole action
+	// instead of landing half-written, which is the link cascade's contract
+	// applied to the one new reference the cascade now touches.
+	bool monitorsCommitValid(StationSystemsSettings const& settings, std::string* diagnostic)
+	{
+		std::string reason;
+		if (validateStationMonitors(settings, reason)) return true;
+		if (diagnostic) *diagnostic = "Monitor cascade refused: " + reason;
+		return false;
+	}
 }
 
 std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& settings)
@@ -1683,6 +1726,16 @@ bool clearStationLink(StationSystemsSettings& settings, std::string const& ident
 	return false;
 }
 
+std::string_view stationMonitorSubjectTypeForNodeType(std::string_view nodeType)
+{
+	// Only the atmosphere compartment is a Monitor subject today. Everything
+	// here keys off withNodeEntries' node-type spelling, so a later subject
+	// type joins the cascade by adding one line to each side rather than by
+	// touching the cascade itself.
+	if (nodeType == "Atmosphere") return "atmosphere";
+	return {};
+}
+
 bool planStationNodeRemoval(StationSystemsSettings const& settings,
 	std::string const& nodeType, std::string const& nodeId, StationNodeRemoval& plan)
 {
@@ -1692,20 +1745,25 @@ bool planStationNodeRemoval(StationSystemsSettings const& settings,
 			[&](auto const& entry) { return entry.id == nodeId; });
 	};
 	if (!withNodeEntries(settings, nodeType, exists)) return false;
-	StationNodeRemoval candidate{nodeType, nodeId, {}};
+	StationNodeRemoval candidate{nodeType, nodeId, {}, {}};
 	for (auto const& link : stationAuthoredLinks(settings))
 		if ((link.from.nodeType == nodeType && link.from.nodeId == nodeId)
 			|| (link.to.nodeType == nodeType && link.to.nodeId == nodeId))
 			candidate.linkIdentities.push_back(link.identity);
+	// #869: the Monitors watching this node are named alongside its links, so
+	// the confirmation spells out the whole cascade and one plan drives both.
+	collectMonitorsForNode(settings, nodeType, nodeId, candidate.monitorIds);
 	plan = std::move(candidate);
 	return true;
 }
 
-bool removeStationNode(StationSystemsSettings& settings, StationNodeRemoval const& plan)
+bool removeStationNode(StationSystemsSettings& settings, StationNodeRemoval const& plan,
+	std::string* diagnostic)
 {
 	StationNodeRemoval current;
 	if (!planStationNodeRemoval(settings, plan.nodeType, plan.nodeId, current)
-		|| current.linkIdentities != plan.linkIdentities) return false;
+		|| current.linkIdentities != plan.linkIdentities
+		|| current.monitorIds != plan.monitorIds) return false;
 	// Preflight and apply on a copy: even a stale or malformed reference must
 	// not leave a partially cleared configuration behind.
 	auto candidate = settings;
@@ -1720,6 +1778,11 @@ bool removeStationNode(StationSystemsSettings& settings, StationNodeRemoval cons
 		return (item.first.ownerType == plan.nodeType && item.first.ownerId == plan.nodeId)
 			|| (item.first.peerType == plan.nodeType && item.first.peerId == plan.nodeId);
 	});
+	// #869: the Monitors the plan named leave with the subject, in this same
+	// action. Left behind, one would watch a ghost - reading nothing, firing
+	// nothing, and looking exactly like a Monitor that never triggered.
+	eraseMonitorsById(candidate, current.monitorIds);
+	if (!monitorsCommitValid(candidate, diagnostic)) return false;
 	settings = std::move(candidate);
 	return true;
 }
@@ -1751,16 +1814,22 @@ bool planStationNodeRename(StationSystemsSettings const& settings,
 			if (identity.id == newNodeId)
 				return refuse("An installation named '" + newNodeId + "' already exists.");
 	if (used) return refuse("A " + nodeType + " named '" + newNodeId + "' already exists.");
-	plan = {nodeType, oldNodeId, newNodeId, std::move(removal.linkIdentities)};
+	// #869: the rename plan carries the removal plan's referrers whole - the
+	// links and the Monitors alike - so confirmation and mutation read one
+	// core-owned view of what the cascade touches.
+	plan = {nodeType, oldNodeId, newNodeId, std::move(removal.linkIdentities),
+		std::move(removal.monitorIds)};
 	if (diagnostic) diagnostic->clear();
 	return true;
 }
 
-bool renameStationNode(StationSystemsSettings& settings, StationNodeRename const& plan)
+bool renameStationNode(StationSystemsSettings& settings, StationNodeRename const& plan,
+	std::string* diagnostic)
 {
 	StationNodeRename current;
 	if (!planStationNodeRename(settings, plan.nodeType, plan.oldNodeId, plan.newNodeId, current)
-		|| current.linkIdentities != plan.linkIdentities) return false;
+		|| current.linkIdentities != plan.linkIdentities
+		|| current.monitorIds != plan.monitorIds) return false;
 	// Preserve the complete links before clearing their mapped fields. Reapplying
 	// them after changing the owner identity updates both incoming references and
 	// references owned by the renamed node in one atomic candidate.
@@ -1806,6 +1875,11 @@ bool renameStationNode(StationSystemsSettings& settings, StationNodeRename const
 			key.peerId = current.newNodeId;
 		candidate.connections.emplace(std::move(key), properties);
 	}
+	// #869: a Monitor watches its subject by id, so the reference follows the
+	// name in the same action rather than being left pointing at the old one.
+	// The Monitor's own id is untouched: that is what the author called it.
+	retargetMonitors(candidate, current.monitorIds, current.newNodeId);
+	if (!monitorsCommitValid(candidate, diagnostic)) return false;
 	settings = std::move(candidate);
 	return true;
 }
