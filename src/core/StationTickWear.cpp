@@ -25,8 +25,10 @@ namespace core
 	// live edit.
 	void StationSystemsRuntime::Impl::Tick::advanceWear(WearState& wear,
 		InstallationWearSettings const& model,
-		double cycles, double operatingHours, double throughputKg, double hours)
+		double cycles, double operatingHours, double throughputKg, double hours,
+		std::optional<double> committedFloor)
 	{
+		auto const floor = committedFloor.value_or(wear.fraction);
 		wear.cycles += cycles;
 		wear.operatingHours += operatingHours;
 		wear.throughputKg += throughputKg;
@@ -41,7 +43,11 @@ namespace core
 			+ operatingHours * model.fadePerOperatingHour
 			+ throughputKg * model.fadePerThroughputKg
 			+ hours * model.fadePerCalendarHour;
-		wear.fraction = std::min(model.maxWearFraction, std::max(0.0, wear.fade));
+		// Normal operation is permanent even if the ceiling was lowered.
+		// A refund may unwind provisional fade, but not the Wear committed
+		// before this interval's discharge was reserved.
+		wear.fraction = std::max(floor,
+			std::min(model.maxWearFraction, std::max(0.0, wear.fade)));
 	}
 
 	bool StationSystemsRuntime::Impl::Tick::poisonFeed(std::optional<StationFaultSnapshot>& fault,

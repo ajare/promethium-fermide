@@ -448,7 +448,8 @@ namespace core
 			// truly did not occur - it never heals fade from work that did.
 			if (battery.authored.capacityFade && battery.authored.usableKWh > 0.0)
 				advanceWear(battery.wear, *battery.authored.capacityFade,
-					-storedKWh / (2.0 * battery.authored.usableKWh), 0.0, 0.0, 0.0);
+					-storedKWh / (2.0 * battery.authored.usableKWh), 0.0, 0.0, 0.0,
+					previousBatteryWearFraction[it->first]);
 			batterySuppliedKW -= give;
 			it->second -= give;
 			refundKW -= give;

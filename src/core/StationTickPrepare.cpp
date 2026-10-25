@@ -190,6 +190,8 @@ namespace core
 
 		previousBatteryStatus.reserve(runtime.batteries.size());
 		for (auto const& battery : runtime.batteries) previousBatteryStatus.push_back(battery.status);
+		previousBatteryWearFraction.reserve(runtime.batteries.size());
+		for (auto const& battery : runtime.batteries) previousBatteryWearFraction.push_back(battery.wear.fraction);
 
 		previousBatteryReserve.reserve(runtime.batteries.size());
 		for (auto const& battery : runtime.batteries) previousBatteryReserve.push_back(battery.lastAtReserve);

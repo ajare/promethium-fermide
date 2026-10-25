@@ -236,9 +236,14 @@ void wearRepair(smoke::Context const&)
 		&& std::abs(worn.effectiveRatedFlowKgPerS - 9.0) < 1e-3
 		&& std::abs(worn.flowKgPerS - 9.0) < 1e-3,
 		"the worn pump did not flow at its faded rating");
+	// #859: even a ceiling lowered below accrued Wear cannot turn repair into replacement.
+	require(run.updateNode<core::CoolantLoopSettings>("loop",
+		[](auto& l) { l.wear->maxWearFraction = 0.01; }), "lower Wear ceiling refused");
 	require(run.injectFault("loop", "coolant-leak", {core::FaultCause::Kind::AgentAction, "agent:1"})
 		&& run.advanceTo(3610), "leak setup failed");
 	auto const leaked = run.snapshot().coolantLoops[0];
+	require(leaked.wearFraction >= worn.wearFraction,
+		"lowering the loop Wear ceiling before repair healed past Wear");
 	require(leaked.availabilityFactor == 0.6
 		&& leaked.flowKgPerS < 6.0 && leaked.flowKgPerS > 5.0,
 		"the leak cap did not compose against the faded rating");
@@ -270,6 +275,8 @@ void wearRepair(smoke::Context const&)
 		"the repair completion did not announce that Wear stands");
 	// And the fade keeps accruing after the repair: fixed is not new, and
 	// the loop flows at its faded rating, never the authored one.
+	require(run.updateNode<core::CoolantLoopSettings>("loop",
+		[](auto& l) { l.wear->maxWearFraction = 0.5; }), "higher Wear ceiling refused");
 	require(run.advanceTo(7200), "post-repair drive failed");
 	auto const after = run.snapshot().coolantLoops[0];
 	require(after.wearFraction > commanded,
@@ -310,8 +317,21 @@ void wearReplay(smoke::Context const&)
 		&& retunedBank.advanceTo(1800), "Wear-only battery retune failed");
 	require(std::abs(retunedBank.snapshot().power.batteries[0].wearFraction - 0.15) < 1e-9,
 		"battery retune repriced historical Wear");
+	// #859: lowering a live ceiling may arrest fade, never heal its history.
+	auto const bankWear = retunedBank.snapshot().power.batteries[0].wearFraction;
+	require(retunedBank.updateNode<core::BatterySettings>("bank", [](auto& b)
+		{ b.capacityFade->maxWearFraction = 0.01; b.capacityFade->fadePerCalendarHour = 0.001; })
+		&& retunedBank.advanceTo(1801), "battery ceiling reduction failed");
+	require(retunedBank.snapshot().power.batteries[0].wearFraction == bankWear
+		&& std::abs(retunedBank.snapshot().power.batteries[0].effectiveNameplateKWh
+			- 10.0 * (1.0 - bankWear)) < 1e-9,
+		"lowering the battery Wear ceiling healed accumulated fade");
 	retunedReplay<core::YamlSerializer>(retunedBank);
 	retunedReplay<core::BinarySerializer>(retunedBank);
+	require(retunedBank.updateNode<core::BatterySettings>("bank", [](auto& b)
+		{ b.capacityFade->maxWearFraction = 0.8; }) && retunedBank.advanceTo(1922)
+		&& retunedBank.snapshot().power.batteries[0].wearFraction >= bankWear,
+		"later battery ceiling/rate edits healed Wear");
 	auto loopOnly = wearLoopStation();
 	loopOnly.coolantLoops[0].coolantLeak.reset();
 	loopOnly.coolantLoops[0].repairParts.reset();
@@ -320,8 +340,37 @@ void wearReplay(smoke::Context const&)
 		&& retunedLoop.updateNode<core::CoolantLoopSettings>("loop",
 			[](auto& l) { l.wear->fadePerOperatingHour = 0.2; })
 		&& retunedLoop.advanceTo(60), "Wear-only loop retune failed");
+	auto const loopWear = retunedLoop.snapshot().coolantLoops[0].wearFraction;
+	require(retunedLoop.updateNode<core::CoolantLoopSettings>("loop", [](auto& l)
+		{ l.wear->maxWearFraction = 0.0001; l.wear->fadePerOperatingHour = 0.001; })
+		&& retunedLoop.advanceTo(61), "loop ceiling reduction failed");
+	require(retunedLoop.snapshot().coolantLoops[0].wearFraction == loopWear
+		&& std::abs(retunedLoop.snapshot().coolantLoops[0].effectiveRatedFlowKgPerS
+			- 10.0 * (1.0 - loopWear)) < 1e-9,
+		"lowering the coolant-loop Wear ceiling healed accumulated fade");
 	retunedReplay<core::YamlSerializer>(retunedLoop);
 	retunedReplay<core::BinarySerializer>(retunedLoop);
+	require(retunedLoop.updateNode<core::CoolantLoopSettings>("loop", [](auto& l)
+		{ l.wear->maxWearFraction = 0.5; }) && retunedLoop.advanceTo(182)
+		&& retunedLoop.snapshot().coolantLoops[0].wearFraction >= loopWear,
+		"later coolant-loop ceiling/rate edits healed Wear");
+	// Funded Condition restoration is not replacement either.
+	auto restorable = wearLoopStation();
+	auto& condition = restorable.coolantLoops[0].condition.emplace();
+	condition.initialCondition = 0.8; condition.restoreStoreId = "parts";
+	condition.restorePerHour = 360; condition.stockUnitsPerConditionPoint = 1;
+	core::StationSystemsRuntime restoredCondition(restorable, 0.25f);
+	require(restoredCondition.advanceTo(60), "Condition/Wear setup failed");
+	auto const permanent = restoredCondition.snapshot().coolantLoops[0].wearFraction;
+	require(restoredCondition.updateNode<core::CoolantLoopSettings>("loop", [](auto& l)
+		{ l.wear->maxWearFraction = 0.0001; })
+		&& restoredCondition.restoreCondition("loop", 1.0)
+		&& restoredCondition.advanceTo(65), "funded restoration after ceiling change failed");
+	require(restoredCondition.snapshot().coolantLoops[0].condition == 1.0
+		&& restoredCondition.snapshot().coolantLoops[0].wearFraction == permanent,
+		"restoreCondition healed permanent Wear after a ceiling change");
+	roundTrip<core::YamlSerializer>(restoredCondition);
+	roundTrip<core::BinarySerializer>(restoredCondition);
 	// A wear-only run needs the replay block with no client command at
 	// all: the fade integrated over the run must survive the save.
 	auto batteryOnly = fadeBatteryStation(0.2, 0.0005);

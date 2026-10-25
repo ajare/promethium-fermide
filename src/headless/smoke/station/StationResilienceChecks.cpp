@@ -1403,6 +1403,7 @@ void protectedServices(smoke::Context const&)
 			bank.maxChargeKW = 5.0;
 			bank.maxDischargeKW = 10.0;
 			bank.dischargeEfficiency = 0.9;
+			bank.capacityFade = core::InstallationWearSettings{0.2, 0, 0, 0, 1};
 			settings.batteries = { bank };
 		}
 		if (withCompetitor)
@@ -1494,6 +1495,9 @@ void protectedServices(smoke::Context const&)
 		require(closeTo(bank.dischargedKWh, 1.0 * tickHours / 0.9)
 			&& closeTo(bank.deliveredKWh, 1.0 * tickHours),
 			"the battery energy ledger does not close on the reconciled credit");
+		require(closeTo(bank.wearCycles, bank.dischargedKWh / (2.0 * bank.usableKWh))
+			&& closeTo(bank.wearFraction, 0.2 * bank.wearCycles),
+			"refunded chiller credit left Wear from battery operation that never happened");
 		require(closeTo(snap.power.protectedSuppliedKW, 1.0)
 			&& closeTo(snap.power.surplusKW, 0.0),
 			"the protected and surplus accounts disagree with the battery-funded reconciliation");

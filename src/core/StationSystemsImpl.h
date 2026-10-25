@@ -1956,6 +1956,8 @@ using namespace station_detail;
 		std::vector<bool> previousCriticalUnmet{};
 		std::vector<bool> previousEclipse{};
 		std::vector<StationTransferStatus> previousBatteryStatus{};
+		// Committed Wear at interval entry: refunds may unwind only this interval's work.
+		std::vector<double> previousBatteryWearFraction{};
 		std::vector<bool> previousBatteryReserve{};
 		std::vector<bool> previousBatterySaturated{};
 		std::vector<bool> previousAboveLimit{};
@@ -2185,14 +2187,15 @@ using namespace station_detail;
 		// Price one interval's operation into the accumulators and the
 		// permanent fade (#843). The fade delta is priced at the model's
 		// current rates, so a later live retune never reprices operation
-		// that already happened; the reported fraction is the fade clamped
-		// by maxWearFraction. Negative deltas only unwind operation that
-		// is being taken back (a refunded discharge), never heal wear.
+		// that already happened. A lower ceiling never heals prior Wear.
+		// Refunds explicitly supply the committed interval-entry floor so
+		// only provisional operation can unwind, never historical Wear.
 		bool poisonFeed(std::optional<StationFaultSnapshot>& fault, WearState& wear,
 			CatalystPoisoningSettings const& model, std::string const& id, size_t feed, bool exposed);
 		static void advanceWear(WearState& wear,
 			InstallationWearSettings const& model,
-			double cycles, double operatingHours, double throughputKg, double hours);
+			double cycles, double operatingHours, double throughputKg, double hours,
+			std::optional<double> committedFloor = std::nullopt);
 		bool thermal();
 		bool processing();
 		bool biology();
