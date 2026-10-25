@@ -53,8 +53,21 @@ namespace core
 			|| std::any_of(document.settings.heatEngines.begin(), document.settings.heatEngines.end(),
 				[](auto const& engine) { return engine.mechanicalSeizure
 					|| engine.repairParts.has_value(); });
-		output->writeUint32("schemaVersion", thermalPlant ? kWorldSchemaVersion
-			: wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
+		// #845: the power-source Fault catalogue is the newest tier; a
+		// document carrying a generator failed-start, a solar string-loss
+		// or tracking-failure, or a battery thermal-runaway opt-in stamps
+		// the current schema, and thermal-plant-only documents keep
+		// stamping 117 unchanged.
+		auto const powerSources = std::any_of(document.settings.generators.begin(),
+				document.settings.generators.end(),
+				[](auto const& generator) { return generator.failedStart; })
+			|| std::any_of(document.settings.solarArrays.begin(), document.settings.solarArrays.end(),
+				[](auto const& array) { return array.stringLoss.has_value()
+					|| array.trackingFailure.has_value(); })
+			|| std::any_of(document.settings.batteries.begin(), document.settings.batteries.end(),
+				[](auto const& battery) { return battery.thermalRunaway.has_value(); });
+		output->writeUint32("schemaVersion", powerSources ? kWorldSchemaVersion
+			: thermalPlant ? 117 : wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		writeStationSystemsSettingsMap(*output, document.settings);
 		output->beginMap("layout");
 		output->writeFloat("panX", document.panX);

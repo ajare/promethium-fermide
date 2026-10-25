@@ -36,6 +36,7 @@ int main(int argc, char** argv)
 	registerStationConditionChecks(checks);
 	registerStationWearChecks(checks);
 	registerStationThermalPlantFaultChecks(checks);
+	registerStationPowerSourceFaultChecks(checks);
 	registerStationClockChecks(checks);
 	registerStationRuntimeRegressionChecks(checks);
 	registerStationInvarianceChecks(checks);

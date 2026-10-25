@@ -30,6 +30,12 @@ using namespace station_detail;
 			// injection. Only the block matching the injected mode is set.
 			std::optional<RefrigerantLeakSettings> refrigerantLeak;
 			std::optional<PanelPunctureSettings> panelPuncture;
+			// #845: the effective parameters frozen by a power-source
+			// injection. Only the block matching the injected mode is set;
+			// `failed-start` carries no parameters beyond its identity.
+			std::optional<SolarStringLossSettings> stringLoss;
+			std::optional<SolarTrackingFailureSettings> trackingFailure;
+			std::optional<BatteryThermalRunawaySettings> thermalRunaway;
 			std::optional<StationSystemsSettings> settingsUpdate;
 		};
 		std::optional<StationSystemsSettings> faultReplayInitialSettings;
@@ -122,6 +128,20 @@ using namespace station_detail;
 			double lastAvailableKW{0.0};
 			bool lastDisabled{false};
 			bool lastEclipse{true};
+			// #845: the array's fault ledger. `string-loss` removes a
+			// frozen fraction of installed capacity; `tracking-failure`
+			// pins the array to a frozen fixed availability. The
+			// effective fractions are captured at injection so a live
+			// retune of the authored block cannot reach a Fault already
+			// running, and the composed factor is recomputed every tick
+			// from what the ledger leaves.
+			std::optional<StationFaultSnapshot> stringLoss;
+			bool stringLossPending{false};
+			double stringLossFraction{0.0};
+			std::optional<StationFaultSnapshot> trackingFailure;
+			bool trackingFailurePending{false};
+			double trackingAvailability{1.0};
+			double availabilityFactor{1.0};
 		};
 		// The authoritative ledger of one External equipment load group.
 		// Allocation runs in two passes: protected critical floors first,
@@ -258,6 +278,20 @@ using namespace station_detail;
 			double chargeInputKWh{0.0};
 			bool lastAtReserve{false};
 			bool lastSaturated{false};
+			// #845: the bank's thermal-runaway Fault entry. The one-shot
+			// heat and toxic-species booking lands in the declared
+			// compartment on onset (staged through the tick's hazard
+			// terms), and the bank is held out of service - no charge, no
+			// discharge - while the Fault is active. The effective booked
+			// amounts are frozen at injection; the cumulative totals are
+			// the closure terms the compartment audit checks against.
+			std::optional<StationFaultSnapshot> thermalRunaway;
+			bool thermalRunawayPending{false};
+			double runawayHeatKJ{0.0};
+			double runawayToxicKg{0.0};
+			std::string runawayCompartmentId;
+			double hazardBookedKJ{0.0};
+			double toxicBookedKg{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
 		// The authoritative ledger of one authored resupply delivery (#392).
@@ -670,6 +704,15 @@ using namespace station_detail;
 			double wasteHeatKJ{0.0};
 			double startupHeatKJ{0.0};
 			double decayHeatKJ{0.0};
+			// #845: the generator's `failed-start` Fault entry. While the
+			// Fault is active a start attempt cranks normally - the
+			// cranking energy is drawn and dissipated as heat exactly as a
+			// healthy start books it - and then fails back to Stopped at
+			// the end of the crank instead of reaching Running. The entry
+			// is not published as active until the first tick has logged
+			// its onset, as for every other pending Fault.
+			std::optional<StationFaultSnapshot> failedStart;
+			bool failedStartPending{false};
 			// The electrical capacity available under every outage aimed at
 			// this generator this tick (#413): 1.0 with no outage open, the
 			// deepest reduction fraction among the open windows otherwise.
@@ -731,6 +774,17 @@ using namespace station_detail;
 		{
 			AtmosphereSettings authored;
 			double spilledCoolantKg{0.0}, spilledCoolantEnergyKJ{0.0};
+			// #845: toxic-species contamination retained from battery
+			// thermal-runaway bookings, and the one-shot hazard heat those
+			// bookings made into this compartment's thermal state. The
+			// pending heat is staged by the fault pass and retired into
+			// `hazardHeatKJ` by the compartment's own thermal solve, so
+			// the energy ledger closes over it exactly as a reservoir
+			// closes over its trip-spike hazard energy.
+			double toxicContaminantKg{0.0};
+			double pendingHazardKJ{0.0};
+			double hazardHeatKJ{0.0};
+			double lastHazardHeatKW{0.0};
 			size_t reservoirIndex{SIZE_MAX}; // SIZE_MAX: adiabatic, no coupling
 			double oxygenKg{0.0};
 			double nitrogenKg{0.0};

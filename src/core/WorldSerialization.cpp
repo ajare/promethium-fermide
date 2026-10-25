@@ -1024,8 +1024,23 @@ namespace core
 			|| std::any_of(mStationSystemsSettings.heatEngines.begin(), mStationSystemsSettings.heatEngines.end(),
 				[](auto const& engine) { return engine.mechanicalSeizure
 					|| engine.repairParts.has_value(); });
-		serializer.writeUint32("version", thermalPlant ? kWorldSchemaVersion
-			: wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
+		// #845: the power-source Fault catalogue is the newest tier; a
+		// save carrying a generator failed-start, a solar string-loss or
+		// tracking-failure, or a battery thermal-runaway opt-in stamps
+		// the current schema, and thermal-plant-only saves keep stamping
+		// 117 unchanged.
+		bool const powerSources = std::any_of(mStationSystemsSettings.generators.begin(),
+				mStationSystemsSettings.generators.end(),
+				[](auto const& generator) { return generator.failedStart; })
+			|| std::any_of(mStationSystemsSettings.solarArrays.begin(),
+				mStationSystemsSettings.solarArrays.end(),
+				[](auto const& array) { return array.stringLoss.has_value()
+					|| array.trackingFailure.has_value(); })
+			|| std::any_of(mStationSystemsSettings.batteries.begin(),
+				mStationSystemsSettings.batteries.end(),
+				[](auto const& battery) { return battery.thermalRunaway.has_value(); });
+		serializer.writeUint32("version", powerSources ? kWorldSchemaVersion
+			: thermalPlant ? 117 : wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);

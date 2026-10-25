@@ -291,6 +291,20 @@ namespace core
 				}
 				serializer.endArray();
 				serializer.endMap();
+				// #845: the array's fault opt-ins travel only when set, so
+				// a feature-absent array keeps its pre-118 byte shape.
+				if (array.stringLoss)
+				{
+					serializer.beginMap("stringLoss");
+					serializer.writeDouble("lossFraction", array.stringLoss->lossFraction);
+					serializer.endMap();
+				}
+				if (array.trackingFailure)
+				{
+					serializer.beginMap("trackingFailure");
+					serializer.writeDouble("availability", array.trackingFailure->availability);
+					serializer.endMap();
+				}
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -573,6 +587,9 @@ namespace core
 				serializer.writeDouble("shutdownHeatKW", generator.shutdownHeatKW);
 				serializer.writeDouble("shutdownSeconds", generator.shutdownSeconds);
 				serializer.writeDouble("maxSinkTemperatureC", generator.maxSinkTemperatureC);
+				// #845: the failed-start opt-in travels only when set.
+				if (generator.failedStart)
+					serializer.writeBool("failedStart", true);
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -1142,6 +1159,15 @@ namespace core
 				// the bank has one.
 				if (battery.capacityFade)
 					writeWearBlock(serializer, "capacityFade", *battery.capacityFade);
+				// #845: the thermal-runaway opt-in travels only when set.
+				if (battery.thermalRunaway)
+				{
+					serializer.beginMap("thermalRunaway");
+					serializer.writeString("compartmentId", battery.thermalRunaway->compartmentId);
+					serializer.writeDouble("heatKJ", battery.thermalRunaway->heatKJ);
+					serializer.writeDouble("toxicKg", battery.thermalRunaway->toxicKg);
+					serializer.endMap();
+				}
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -1485,6 +1511,24 @@ namespace core
 				}
 				serializer.endArray();
 				serializer.endMap();
+				// #845: a pre-118 document carrying a solar fault opt-in is
+				// refused rather than silently dropped.
+				if (serializer.hasField("stringLoss"))
+				{
+					if (version < 118) throw SerializationException(
+						"Solar string-loss opt-in requires schema 118");
+					serializer.beginMap("stringLoss");
+					array.stringLoss = SolarStringLossSettings{serializer.readDouble("lossFraction")};
+					serializer.endMap();
+				}
+				if (serializer.hasField("trackingFailure"))
+				{
+					if (version < 118) throw SerializationException(
+						"Solar tracking-failure opt-in requires schema 118");
+					serializer.beginMap("trackingFailure");
+					array.trackingFailure = SolarTrackingFailureSettings{serializer.readDouble("availability")};
+					serializer.endMap();
+				}
 				stationSettings.solarArrays.push_back(std::move(array));
 				serializer.endMap();
 			}
@@ -1845,6 +1889,14 @@ namespace core
 				generator.shutdownHeatKW = serializer.readDouble("shutdownHeatKW");
 				generator.shutdownSeconds = serializer.readDouble("shutdownSeconds");
 				generator.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
+				// #845: a pre-118 document carrying the failed-start
+				// opt-in is refused rather than silently dropped.
+				if (serializer.hasField("failedStart"))
+				{
+					if (version < 118) throw SerializationException(
+						"Generator failed-start opt-in requires schema 118");
+					generator.failedStart = serializer.readBool("failedStart");
+				}
 				stationSettings.generators.push_back(std::move(generator));
 				serializer.endMap();
 			}
@@ -2483,6 +2535,17 @@ namespace core
 					if (readWearBlock(serializer, "capacityFade", version,
 						"Battery capacity-fade models", model))
 						battery.capacityFade = model;
+				}
+				// #845: a pre-118 document carrying a thermal-runaway
+				// opt-in is refused rather than silently dropped.
+				if (serializer.hasField("thermalRunaway"))
+				{
+					if (version < 118) throw SerializationException(
+						"Battery thermal-runaway opt-in requires schema 118");
+					serializer.beginMap("thermalRunaway");
+					battery.thermalRunaway = BatteryThermalRunawaySettings{serializer.readString("compartmentId"),
+						serializer.readDouble("heatKJ"), serializer.readDouble("toxicKg")};
+					serializer.endMap();
 				}
 				stationSettings.batteries.push_back(std::move(battery));
 				serializer.endMap();

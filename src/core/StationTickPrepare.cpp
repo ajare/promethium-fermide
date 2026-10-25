@@ -112,6 +112,55 @@ namespace core
 				+ engine.authored.id + "': " + engine.seizure->causeDetail);
 			engine.seizurePending = false;
 		}
+		// #845: the power-source catalogue onsets. The generator's
+		// failed-start and the solar array's string-loss and
+		// tracking-failure log their onset here; the battery's
+		// thermal-runaway logs its onset and lands its one-shot booking
+		// inside the transactional ledger: the declared heat is staged as
+		// the compartment's pending hazard energy (retired into its
+		// thermal solve below) and the toxic species is retained spill
+		// mass the closure audit checks against the bank's booking. The
+		// booking is an external hazard input, not drawn from the bank's
+		// stored electrical energy and not invented: it travels the same
+		// audited path as every other hazard, and a failed audit rolls it
+		// back with the tick.
+		for (auto& generator : runtime.generators)
+		{
+			if (!generator.failedStartPending) continue;
+			appendBoundedEvent(runtime.events, tick, "fault", "Fault 'failed-start' on '"
+				+ generator.authored.id + "': " + generator.failedStart->causeDetail);
+			generator.failedStartPending = false;
+		}
+		for (auto& array : runtime.solarArrays)
+		{
+			if (array.stringLossPending)
+			{
+				appendBoundedEvent(runtime.events, tick, "fault", "Fault 'string-loss' on '"
+					+ array.authored.id + "': " + array.stringLoss->causeDetail);
+				array.stringLossPending = false;
+			}
+			if (array.trackingFailurePending)
+			{
+				appendBoundedEvent(runtime.events, tick, "fault", "Fault 'tracking-failure' on '"
+					+ array.authored.id + "': " + array.trackingFailure->causeDetail);
+				array.trackingFailurePending = false;
+			}
+		}
+		for (auto& battery : runtime.batteries)
+		{
+			if (!battery.thermalRunawayPending) continue;
+			auto& air = *std::find_if(runtime.atmospheres.begin(), runtime.atmospheres.end(),
+				[&](auto const& a) { return a.authored.id == battery.runawayCompartmentId; });
+			air.pendingHazardKJ += battery.runawayHeatKJ;
+			air.toxicContaminantKg += battery.runawayToxicKg;
+			battery.hazardBookedKJ += battery.runawayHeatKJ;
+			battery.toxicBookedKg += battery.runawayToxicKg;
+			appendBoundedEvent(runtime.events, tick, "fault", "Fault 'thermal-runaway' on '"
+				+ battery.authored.id + "': " + battery.thermalRunaway->causeDetail
+				+ "; one-shot heat and toxic species booked into compartment '"
+				+ battery.runawayCompartmentId + "'");
+			battery.thermalRunawayPending = false;
+		}
 		if (runtime.prediction.active)
 		{
 			for (auto const& body : runtime.reservoirs) protectionReservoirStart.push_back(body.temperatureC);
@@ -537,8 +586,23 @@ namespace core
 		{
 			array.lastIllumination = evaluateStationProfile(array.authored.illumination, profileElapsed);
 			array.lastDisabled = array.authored.capacityKW <= 0.0;
+			// #845: the availability the array's fault ledger leaves it.
+			// A string loss takes a frozen fraction of the installed
+			// capacity; a tracking failure pins the array to its frozen
+			// fixed availability. The two compose by minimum - the
+			// deepest reduction wins, never multiplication - the same
+			// rule Outages and every other Fault cap follow. An array
+			// with no Fault active keeps the full factor of 1.0 and its
+			// previous output exactly.
+			array.availabilityFactor = 1.0;
+			if (array.stringLoss)
+				array.availabilityFactor = std::min(array.availabilityFactor,
+					1.0 - array.stringLossFraction);
+			if (array.trackingFailure)
+				array.availabilityFactor = std::min(array.availabilityFactor,
+					array.trackingAvailability);
 			array.lastAvailableKW = array.lastDisabled
-				? 0.0 : array.authored.capacityKW * array.lastIllumination;
+				? 0.0 : array.authored.capacityKW * array.lastIllumination * array.availabilityFactor;
 			array.lastEclipse = !array.lastDisabled && array.lastAvailableKW <= 0.0;
 			array.lastAvailableKW = connections.available(connections.port("Solar", array.authored.id, "Solar generation"), array.lastAvailableKW);
 			availableGeneration += array.lastAvailableKW;

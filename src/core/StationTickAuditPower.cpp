@@ -402,6 +402,13 @@ namespace core
 				return violation = "battery " + where + " delivered more energy than it drew from storage", false;
 			if (battery.chargedKWh > battery.chargeInputKWh + bound)
 				return violation = "battery " + where + " stored more energy than the bus supplied to it", false;
+			// #845: a bank with an active thermal-runaway Fault is held
+			// out of service: it must neither take charge nor deliver
+			// discharge while the Fault stands. Power routed through a
+			// bank that is coming apart is a gate failure, not a rounding.
+			if (battery.thermalRunaway && (battery.lastChargeKW > 0.0 || battery.lastDischargeKW > 0.0))
+				return violation = "battery " + where
+					+ " charged or discharged while its thermal-runaway Fault is active", false;
 		}
 		// The single-pool audit: total supplied service never exceeds
 		// generation plus what the batteries actually delivered. Coolant
@@ -877,6 +884,23 @@ namespace core
 			if (std::abs(bookedMass - compartment.spilledCoolantKg) > StationBalanceTolerance * std::max(1.0, bookedMass)
 				|| std::abs(bookedEnergy - compartment.spilledCoolantEnergyKJ) > StationBalanceTolerance * std::max(1.0, std::abs(bookedEnergy)))
 				return violation = where + "hazard booking ledger residual", false;
+			// #845: the battery thermal-runaway bookings land in their own
+			// retained ledgers beside the spill: the toxic species the
+			// compartment keeps must equal exactly the toxic mass the
+			// banks that declared this compartment booked, and the
+			// compartment's cumulative hazard heat must equal exactly the
+			// one-shot heat those bookings staged. A residual means hazard
+			// mass or heat appeared or vanished without its booking - the
+			// same unexplained disposal the spill closure exists to catch.
+			double bookedToxic = 0.0, bookedRunawayHeat = 0.0;
+			for (auto const& battery : runtime.batteries)
+				if (battery.runawayCompartmentId == compartment.authored.id)
+				{ bookedToxic += battery.toxicBookedKg; bookedRunawayHeat += battery.hazardBookedKJ; }
+			if (!requireFinite(compartment.toxicContaminantKg, where + "toxic contaminant")
+				|| !requireFinite(compartment.hazardHeatKJ, where + "cumulative hazard heat")) return false;
+			if (std::abs(bookedToxic - compartment.toxicContaminantKg) > StationBalanceTolerance * std::max(1.0, bookedToxic)
+				|| std::abs(bookedRunawayHeat - compartment.hazardHeatKJ) > StationBalanceTolerance * std::max(1.0, std::abs(bookedRunawayHeat)))
+				return violation = where + "thermal-runaway hazard booking ledger residual", false;
 			if (!requireFinite(compartment.oxygenKg, where + "oxygen inventory")) return false;
 			if (!requireFinite(compartment.nitrogenKg, where + "nitrogen inventory")) return false;
 			if (!requireFinite(compartment.carbonDioxideKg, where + "carbon dioxide inventory")) return false;
@@ -1025,6 +1049,7 @@ namespace core
 			includeThermalScale(compartment.exchangedKJ);
 			includeThermalScale(compartment.conductedKJ);
 			includeThermalScale(compartment.advectedKJ);
+			includeThermalScale(compartment.hazardHeatKJ);
 			includeThermalScale(compartment.authored.thermalCapacityKJPerK * compartment.temperatureC);
 			auto const thermalBound = StationBalanceTolerance * thermalScale;
 			if (!requireFinite(compartment.conductedKJ, where + "cumulative conducted energy"))
@@ -1038,7 +1063,7 @@ namespace core
 			auto const thermalResidual = startingEnergyKJ + compartment.occupantHeatKJ
 				+ compartment.crewHeatKJ + compartment.cropHeatKJ + compartment.algaeHeatKJ
 				+ compartment.latentHeatKJ + compartment.exchangedKJ + compartment.conductedKJ
-				+ compartment.advectedKJ
+				+ compartment.advectedKJ + compartment.hazardHeatKJ
 				- compartment.authored.thermalCapacityKJPerK * compartment.temperatureC;
 			if (!std::isfinite(thermalResidual) || std::abs(thermalResidual) > thermalBound)
 			{

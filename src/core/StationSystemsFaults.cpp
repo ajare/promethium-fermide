@@ -30,7 +30,13 @@ namespace core
 			// #844: radiators carry a puncture Fault even though they are
 			// not outage/maintenance-registered installations; the fault
 			// namespace reaches them directly.
-			&& std::none_of(mImpl->radiators.begin(), mImpl->radiators.end(), [&](auto const& r) { return r.authored.id == id; }))
+			&& std::none_of(mImpl->radiators.begin(), mImpl->radiators.end(), [&](auto const& r) { return r.authored.id == id; })
+			// #845: the power-source catalogue reaches solar arrays and
+			// battery banks directly, as the thermal-plant slice reached
+			// radiators: neither is an outage-registered installation, but
+			// both carry fault modes in the same injection namespace.
+			&& std::none_of(mImpl->solarArrays.begin(), mImpl->solarArrays.end(), [&](auto const& a) { return a.authored.id == id; })
+			&& std::none_of(mImpl->batteries.begin(), mImpl->batteries.end(), [&](auto const& b) { return b.authored.id == id; }))
 			return refuse("Unknown installation '" + std::string(id) + "'");
 		if (!isInjectableCause(cause.kind))
 			return refuse("Fault cause kind is not injectable: it names a Fault the simulation raises itself");
@@ -178,6 +184,118 @@ namespace core
 			engine->seizure = StationFaultSnapshot{std::string(id), std::string(mode),
 				mImpl->clock.steps() + 1, cause.kind, cause.detail, 1.0};
 			engine->seizurePending = true;
+			if (diagnostic) diagnostic->clear();
+			return true;
+		}
+		// #845: the power-source catalogue. Same discipline as every
+		// earlier batch: the mode names the machine kind that owns it, the
+		// machine must have opted in, an active or pending instance of the
+		// same mode is refused, and every refusal path precedes any
+		// mutation. The accepted command freezes the effective
+		// parameters; a later live retune cannot reach the Fault it
+		// started.
+		if (mode == "failed-start")
+		{
+			auto generator = std::find_if(mImpl->generators.begin(), mImpl->generators.end(),
+				[&](auto const& g) { return g.authored.id == id; });
+			if (generator == mImpl->generators.end())
+				return refuse("Unknown " + std::string(mode) + " installation");
+			if (!generator->authored.failedStart)
+				return refuse("failed-start is not enabled");
+			if (generator->failedStart)
+				return refuse("Fault mode is already active or pending on '" + std::string(id) + "'");
+			// The failed crank is the machine's own authored crank: the
+			// mode freezes no parameters because there are none to freeze.
+			Impl::FaultCommand command;
+			command.kind = Impl::FaultCommand::Kind::Injection;
+			command.afterStep = mImpl->clock.steps(); command.installationId = id;
+			command.modeId = mode; command.cause = cause;
+			mImpl->faultCommands.push_back(std::move(command));
+			generator->failedStart = StationFaultSnapshot{std::string(id), std::string(mode),
+				mImpl->clock.steps() + 1, cause.kind, cause.detail, 1.0};
+			generator->failedStartPending = true;
+			if (diagnostic) diagnostic->clear();
+			return true;
+		}
+		if (mode == "string-loss" || mode == "tracking-failure")
+		{
+			auto array = std::find_if(mImpl->solarArrays.begin(), mImpl->solarArrays.end(),
+				[&](auto const& a) { return a.authored.id == id; });
+			if (array == mImpl->solarArrays.end())
+				return refuse("Unknown " + std::string(mode) + " installation");
+			if (mode == "string-loss")
+			{
+				if (!array->authored.stringLoss)
+					return refuse("string-loss is not enabled");
+				if (array->stringLoss)
+					return refuse("Fault mode is already active or pending on '" + std::string(id) + "'");
+				auto const& parameters = *array->authored.stringLoss;
+				if (!std::isfinite(parameters.lossFraction) || parameters.lossFraction <= 0.0
+					|| parameters.lossFraction > 1.0)
+					return refuse("Invalid string-loss fraction");
+				Impl::FaultCommand command;
+				command.kind = Impl::FaultCommand::Kind::Injection;
+				command.afterStep = mImpl->clock.steps(); command.installationId = id;
+				command.modeId = mode; command.cause = cause; command.stringLoss = parameters;
+				mImpl->faultCommands.push_back(std::move(command));
+				array->stringLoss = StationFaultSnapshot{std::string(id), std::string(mode),
+					mImpl->clock.steps() + 1, cause.kind, cause.detail, parameters.lossFraction};
+				array->stringLossPending = true;
+				array->stringLossFraction = parameters.lossFraction;
+				if (diagnostic) diagnostic->clear();
+				return true;
+			}
+			if (!array->authored.trackingFailure)
+				return refuse("tracking-failure is not enabled");
+			if (array->trackingFailure)
+				return refuse("Fault mode is already active or pending on '" + std::string(id) + "'");
+			auto const& parameters = *array->authored.trackingFailure;
+			if (!std::isfinite(parameters.availability) || parameters.availability < 0.0
+				|| parameters.availability >= 1.0)
+				return refuse("Invalid tracking-failure availability");
+			Impl::FaultCommand command;
+			command.kind = Impl::FaultCommand::Kind::Injection;
+			command.afterStep = mImpl->clock.steps(); command.installationId = id;
+			command.modeId = mode; command.cause = cause; command.trackingFailure = parameters;
+			mImpl->faultCommands.push_back(std::move(command));
+			array->trackingFailure = StationFaultSnapshot{std::string(id), std::string(mode),
+				mImpl->clock.steps() + 1, cause.kind, cause.detail,
+				1.0 - parameters.availability};
+			array->trackingFailurePending = true;
+			array->trackingAvailability = parameters.availability;
+			if (diagnostic) diagnostic->clear();
+			return true;
+		}
+		if (mode == "thermal-runaway")
+		{
+			auto battery = std::find_if(mImpl->batteries.begin(), mImpl->batteries.end(),
+				[&](auto const& b) { return b.authored.id == id; });
+			if (battery == mImpl->batteries.end())
+				return refuse("Unknown " + std::string(mode) + " installation");
+			if (!battery->authored.thermalRunaway)
+				return refuse("thermal-runaway is not enabled");
+			if (battery->thermalRunaway)
+				return refuse("Fault mode is already active or pending on '" + std::string(id) + "'");
+			auto const& parameters = *battery->authored.thermalRunaway;
+			if (!std::isfinite(parameters.heatKJ) || parameters.heatKJ <= 0
+				|| !std::isfinite(parameters.toxicKg) || parameters.toxicKg <= 0
+				|| std::none_of(mImpl->atmospheres.begin(), mImpl->atmospheres.end(),
+					[&](auto const& a) { return a.authored.id == parameters.compartmentId; }))
+				return refuse("Invalid thermal-runaway parameters");
+			// The one-shot booking lands on the first audited boundary; the
+			// effective amounts are frozen here so a live retune of the
+			// authored block cannot change what this Fault books.
+			Impl::FaultCommand command;
+			command.kind = Impl::FaultCommand::Kind::Injection;
+			command.afterStep = mImpl->clock.steps(); command.installationId = id;
+			command.modeId = mode; command.cause = cause; command.thermalRunaway = parameters;
+			mImpl->faultCommands.push_back(std::move(command));
+			battery->thermalRunaway = StationFaultSnapshot{std::string(id), std::string(mode),
+				mImpl->clock.steps() + 1, cause.kind, cause.detail, 1.0};
+			battery->thermalRunawayPending = true;
+			battery->runawayHeatKJ = parameters.heatKJ;
+			battery->runawayToxicKg = parameters.toxicKg;
+			battery->runawayCompartmentId = parameters.compartmentId;
 			if (diagnostic) diagnostic->clear();
 			return true;
 		}
@@ -552,7 +670,22 @@ namespace core
 					s.writeDouble("leakRateKgPerS", command.panelPuncture->leakRateKgPerS);
 					s.writeDouble("specificHeatKJPerKgK", command.panelPuncture->specificHeatKJPerKgK);
 				}
-				else if (command.modeId != "compressor-failure" && command.modeId != "mechanical-seizure")
+				// #845: the power-source injections. `failed-start` is a
+				// parameterless mode like the AV=0 thermal-plant modes; the
+				// solar modes freeze their declared fraction/availability;
+				// the runaway freezes the one-shot booking it will make.
+				else if (command.modeId == "string-loss")
+					s.writeDouble("lossFraction", command.stringLoss->lossFraction);
+				else if (command.modeId == "tracking-failure")
+					s.writeDouble("availability", command.trackingFailure->availability);
+				else if (command.modeId == "thermal-runaway")
+				{
+					s.writeString("compartmentId", command.thermalRunaway->compartmentId);
+					s.writeDouble("heatKJ", command.thermalRunaway->heatKJ);
+					s.writeDouble("toxicKg", command.thermalRunaway->toxicKg);
+				}
+				else if (command.modeId != "compressor-failure" && command.modeId != "mechanical-seizure"
+					&& command.modeId != "failed-start")
 				{
 					s.writeString("compartmentId", command.parameters.compartmentId);
 					s.writeDouble("releasedKg", command.parameters.releasedKg);
@@ -570,7 +703,7 @@ namespace core
 		s.beginMap("stationFaultReplay");
 		auto const steps = s.readUint64("completedSteps");
 		StationSystemsSettings initial;
-		readStationSystemsSettingsMap(s, 117, initial);
+		readStationSystemsSettingsMap(s, 118, initial);
 		auto runtime = std::make_unique<StationSystemsRuntime>(initial, baseSeconds);
 		s.beginArray("commands");
 		uint64_t previous = 0;
@@ -586,7 +719,7 @@ namespace core
 			if (s.hasField("stationSystems"))
 			{
 				StationSystemsSettings update;
-				readStationSystemsSettingsMap(s, 117, update);
+				readStationSystemsSettingsMap(s, 118, update);
 				if (!runtime->updateSettings(update, &diagnostic))
 					throw SerializationException("Invalid fault replay settings: " + diagnostic);
 			}
@@ -611,6 +744,9 @@ namespace core
 				double heat = 0;
 				std::optional<RefrigerantLeakSettings> refrigerant;
 				std::optional<PanelPunctureSettings> puncture;
+				std::optional<SolarStringLossSettings> stringLoss;
+				std::optional<SolarTrackingFailureSettings> trackingFailure;
+				std::optional<BatteryThermalRunawaySettings> thermalRunaway;
 				if (mode == "overtemp-runaway") heat = s.readDouble("heatSpikeKJ");
 				else if (mode == "refrigerant-leak")
 					refrigerant = RefrigerantLeakSettings{s.readString("compartmentId"),
@@ -620,15 +756,30 @@ namespace core
 					puncture = PanelPunctureSettings{s.readString("compartmentId"),
 						s.readDouble("coolantKg"), s.readDouble("leakRateKgPerS"),
 						s.readDouble("specificHeatKJPerKgK")};
-				else if (mode != "compressor-failure" && mode != "mechanical-seizure")
+				else if (mode == "string-loss")
+					stringLoss = SolarStringLossSettings{s.readDouble("lossFraction")};
+				else if (mode == "tracking-failure")
+					trackingFailure = SolarTrackingFailureSettings{s.readDouble("availability")};
+				else if (mode == "thermal-runaway")
+					thermalRunaway = BatteryThermalRunawaySettings{s.readString("compartmentId"),
+						s.readDouble("heatKJ"), s.readDouble("toxicKg")};
+				else if (mode != "compressor-failure" && mode != "mechanical-seizure"
+					&& mode != "failed-start")
 					parameters = {s.readString("compartmentId"), s.readDouble("releasedKg")};
 				if (!isInjectableCause(static_cast<FaultCause::Kind>(kind))
 					|| !runtime->injectFault(id, mode, {static_cast<FaultCause::Kind>(kind), detail}, &diagnostic))
 					throw SerializationException("Invalid fault replay: " + diagnostic);
+				// Settings updates replay in command order, so injection must
+				// derive the same frozen parameters at this point in history.
+				// Never overwrite them with unvalidated stream values before
+				// comparing: that would turn this consistency check into a no-op.
 				if (runtime->mImpl->faultCommands.back().parameters != parameters
 					|| runtime->mImpl->faultCommands.back().heatSpikeKJ != heat
 					|| runtime->mImpl->faultCommands.back().refrigerantLeak != refrigerant
-					|| runtime->mImpl->faultCommands.back().panelPuncture != puncture)
+					|| runtime->mImpl->faultCommands.back().panelPuncture != puncture
+					|| runtime->mImpl->faultCommands.back().stringLoss != stringLoss
+					|| runtime->mImpl->faultCommands.back().trackingFailure != trackingFailure
+					|| runtime->mImpl->faultCommands.back().thermalRunaway != thermalRunaway)
 					throw SerializationException("Fault replay effective parameters disagree with the command: " + mode);
 			}
 			s.endMap();

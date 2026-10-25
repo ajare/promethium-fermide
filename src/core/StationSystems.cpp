@@ -924,7 +924,20 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 					|| radiator.repairParts.has_value(); })
 			|| std::any_of(settings.heatEngines.begin(), settings.heatEngines.end(),
 				[](auto const& engine) { return engine.mechanicalSeizure
-					|| engine.repairParts.has_value(); }))
+					|| engine.repairParts.has_value(); })
+			// #845: the power-source fault opt-ins pin the initial settings
+			// for the same reason. A replay rebuilds the machine from these
+			// settings before replaying its commands, so if the pin carried
+			// the *current* settings instead a generator whose start was
+			// commanded later would crank - and succeed - long before its
+			// `failed-start` Fault was ever injected.
+			|| std::any_of(settings.generators.begin(), settings.generators.end(),
+				[](auto const& generator) { return generator.failedStart; })
+			|| std::any_of(settings.solarArrays.begin(), settings.solarArrays.end(),
+				[](auto const& array) { return array.stringLoss.has_value()
+					|| array.trackingFailure.has_value(); })
+			|| std::any_of(settings.batteries.begin(), settings.batteries.end(),
+				[](auto const& battery) { return battery.thermalRunaway.has_value(); }))
 			mImpl->faultReplayInitialSettings = settings;
 		mImpl->snapshot.systemsStepWorldTicks = settings.systemsStepWorldTicks;
 		mImpl->snapshot.systemsTimestepSeconds = mImpl->clock.stepSeconds();
@@ -1111,7 +1124,14 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			[&](size_t left, size_t right)
 			{ return mImpl->conversions[left].authored.priority > mImpl->conversions[right].authored.priority; });
 		for (auto const& array : settings.solarArrays)
-			mImpl->solarArrays.push_back({array});
+		{
+			// #845: constructed explicitly so the fault-ledger members
+			// start at their declared defaults rather than leaning on a
+			// partial aggregate initializer.
+			Impl::SolarState state;
+			state.authored = array;
+			mImpl->solarArrays.push_back(std::move(state));
+		}
 		// Thermal reservoirs start at their authored starting temperature;
 		// the limit flags start consistent with it so the first tick
 		// reports transitions, not the initial condition (#395).

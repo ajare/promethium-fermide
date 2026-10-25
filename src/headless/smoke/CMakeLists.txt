@@ -81,6 +81,7 @@ pf_add_smoke_module(pf-smoke-station
         station/StationConditionChecks.cpp
         station/StationWearChecks.cpp
         station/StationThermalPlantFaultChecks.cpp
+        station/StationPowerSourceFaultChecks.cpp
         station/StationProtectionChecks.cpp
         station/StationClockChecks.cpp
         station/StationRuntimeRegressionChecks.cpp
@@ -312,7 +313,9 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         conditionStress conditionCrossing conditionRestore conditionReplay conditionValidation conditionTransactions
         wearLifecycle wearRepair wearReplay wearTransactions wearOptIn
         thermalPlantInjection thermalPlantRepairs thermalPlantOutages
-        thermalPlantReplay thermalPlantOptIn thermalPlantLiveTuning)
+        thermalPlantReplay thermalPlantOptIn thermalPlantLiveTuning
+        powerSourceInjection powerSourceRunaway powerSourceFailedStart
+        powerSourceReplay powerSourceOptIn powerSourceLiveTuning)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()

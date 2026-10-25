@@ -408,14 +408,43 @@ namespace core
 	};
 	inline constexpr size_t MaxStationProfileSegments{8};
 
+	// #845: the solar array's string-loss opt-in. While the Fault is
+	// active a declared fraction of the array's installed capacity is
+	// simply gone - the strings it names no longer contribute - so the
+	// array delivers what the surviving capacity sees: output scales by
+	// (1 - lossFraction). The opt-in presence is frozen topology and the
+	// fraction inside the block is a live-tunable parameter whose value
+	// is frozen into the Fault at injection, so a later retune cannot
+	// reach a Fault already running.
+	struct SolarStringLossSettings
+	{
+		double lossFraction{0.0}; // fraction of installed capacity lost, (0, 1]
+		bool operator==(SolarStringLossSettings const&) const = default;
+	};
+	// #845: the solar array's tracking-failure opt-in. The drive is
+	// stuck, so while the Fault is active the array holds a fixed low
+	// availability: the declared value is the availability the stuck
+	// array keeps, not a loss. Output is capacity x availability x
+	// illumination - the sun still rises and sets over a mispointed
+	// panel. The opt-in presence is frozen topology; the fixed
+	// availability is live-tunable until an injection freezes it.
+	struct SolarTrackingFailureSettings
+	{
+		double availability{0.0}; // fixed availability while failed, [0, 1)
+		bool operator==(SolarTrackingFailureSettings const&) const = default;
+	};
 	// A configured solar array: declared installed capacity in kW and an
 	// illumination/eclipse profile. Sunshine is not firm continuous
 	// capacity; zero installed capacity disables the array entirely.
+	// The #845 fault modes, when opted in, scale the array's delivered
+	// availability; the two compose by minimum when both are active.
 	struct SolarArraySettings
 	{
 		std::string id;
 		double capacityKW{0.0}; // installed capacity, >= 0; 0 disables
 		ProfileSettings illumination; // fraction of full sun, [0, 1]
+		std::optional<SolarStringLossSettings> stringLoss;
+		std::optional<SolarTrackingFailureSettings> trackingFailure;
 		bool operator==(SolarArraySettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationSolarArrays{4};
@@ -947,10 +976,37 @@ namespace core
 		double shutdownHeatKW{0.0};     // decay heat after output stops, >= 0
 		double shutdownSeconds{0.0};    // decay heat duration, >= 0
 		double maxSinkTemperatureC{90.0}; // cooling qualified while sink is below this
+		// #845: the generator's `failed-start` opt-in. While the Fault is
+		// active every start attempt cranks - drawing its cranking energy
+		// from the shared pool and dissipating it into the same sink a
+		// healthy start would - and then fails back to Stopped without
+		// ever reaching Running. The attempt is zeroed; the energy it cost
+		// is accounted heat, never a refund. The opt-in is frozen
+		// topology and the mode carries no parameters beyond it: the
+		// failed crank is the machine's own authored crank.
+		bool failedStart{false};
 		bool operator==(GeneratorSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationGenerators{8};
 
+	// #845: the battery's thermal-runaway opt-in. One-shot: on onset the
+	// cell books its declared heat and toxic-species mass into the named
+	// Atmosphere compartment through the hazard-booking ledger - the
+	// heat enters the compartment's own thermal solve and the
+	// contaminant is retained and audited - and the bank leaves service:
+	// no charge, no discharge, until repaired. The booked amounts are
+	// external hazard inputs, not drawn from the bank's stored electrical
+	// energy and not invented from nothing: they travel the same audited
+	// path as every other hazard booking. Crew health reaction is out of
+	// scope (deferred crew-health initiative): the contaminant closes
+	// through the atmosphere ledger, it models no one breathing it.
+	struct BatteryThermalRunawaySettings
+	{
+		std::string compartmentId;
+		double heatKJ{0.0};   // one-shot heat booked into the compartment, > 0
+		double toxicKg{0.0};  // one-shot toxic species mass booked, > 0
+		bool operator==(BatteryThermalRunawaySettings const&) const = default;
+	};
 	struct BatterySettings
 	{
 		std::string id;
@@ -971,6 +1027,11 @@ namespace core
 		// times (1 - wearFraction). Repair never reverses the fade; a
 		// repaired battery keeps its faded capacity.
 		std::optional<InstallationWearSettings> capacityFade;
+		// #845: the bank's thermal-runaway opt-in. The opt-in presence
+		// and the destination compartment are frozen topology; the booked
+		// heat and toxic mass are live-tunable until an accepted
+		// injection freezes them for the Fault it started.
+		std::optional<BatteryThermalRunawaySettings> thermalRunaway;
 		bool operator==(BatterySettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationBatteries{8};
@@ -2836,8 +2897,13 @@ namespace core
 		std::string id;
 		double capacityKW{0.0};
 		double illumination{0.0};   // evaluated profile level, [0, 1]
-		double availableKW{0.0};    // capacity * illumination
+		double availableKW{0.0};    // capacity * illumination * availabilityFactor
 		bool disabled{false};       // zero installed capacity
+		// #845: the availability the array's fault ledger leaves it - the
+		// string-loss remainder and the tracking-failure fixed value
+		// composed by minimum. 1.0 with no Fault active.
+		double availabilityFactor{1.0};
+		std::vector<StationFaultSnapshot> activeFaults;
 		bool operator==(StationSolarSourceSnapshot const&) const = default;
 	};
 	// One External equipment load group as of the most recent tick: what
@@ -2955,6 +3021,12 @@ namespace core
 		bool disabled{false};          // zero usable capacity
 		bool atReserve{false};         // stored is at the reserve floor
 		bool saturated{false};         // stored is at nameplate capacity
+		// #845: the bank's active Fault ledger. A thermal-runaway Fault
+		// holds the bank out of service (no charge, no discharge) while it
+		// is active; the one-shot heat and toxic-species booking it made
+		// into its declared compartment is reported on the compartment,
+		// not here.
+		std::vector<StationFaultSnapshot> activeFaults;
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationBatterySnapshot const&) const = default;
 	};
@@ -3022,6 +3094,11 @@ namespace core
 		double startupHeatKJ{0.0};         // cumulative cranking energy dissipated
 		double decayHeatKJ{0.0};           // cumulative decay heat routed
 		double residualKJ{0.0};            // fuel - electrical - waste
+		// #845: the generator's active Fault ledger. A `failed-start`
+		// Fault zeroes every start attempt: the crank runs and dissipates
+		// its energy as accounted heat, and the machine never reaches
+		// Running while the Fault is active.
+		std::vector<StationFaultSnapshot> activeFaults;
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationGeneratorSnapshot const&) const = default;
 	};
@@ -3650,6 +3727,21 @@ namespace core
 	{
 		// Liquid spill inventory, separate from the gas/condensation ledger.
 		double spilledCoolantKg{0.0}, spilledCoolantEnergyKJ{0.0};
+		// #845: toxic-species contamination retained from a battery
+		// thermal-runaway booking. The contaminant is a retained hazard
+		// ledger beside the spilled-coolant one: it is not a breathing
+		// gas, joins no partial pressure and moves through no pathway in
+		// this slice - it is booked mass that the compartment keeps, and
+		// the closure audit requires it to equal exactly what the banks
+		// that declared this compartment gave up. Crew health reaction is
+		// out of scope; the ledger closing is the point.
+		double toxicContaminantKg{0.0};
+		// One-shot hazard heat booked into this compartment's thermal
+		// state (#845): the cumulative total that enters the
+		// compartment's energy ledger, exactly as the reservoirs carry
+		// their trip-spike hazard energy.
+		double hazardHeatKJ{0.0};
+		double lastHazardHeatKW{0.0};
 		std::string id;
 		std::string reservoirId;      // empty: adiabatic, no thermal coupling
 		double volumeM3{0.0};

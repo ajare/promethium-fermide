@@ -183,7 +183,32 @@ namespace core
 				[&](auto const& battery) { return battery.authored.id == next.id; });
 			if (old != s.batteries.end() && LiveNode<BatterySettings>::topologyChanged(old->authored, next))
 			{
-				if (diagnostic) *diagnostic = "Battery '" + next.id + "': capacity-fade opt-in is frozen topology";
+				if (diagnostic) *diagnostic = "Battery '" + next.id + "': capacity-fade opt-in, thermal-runaway opt-in and destination are frozen topology";
+				return false;
+			}
+		}
+		// #845: the power-source fault opt-ins are run-shape decisions
+		// like every earlier batch: which modes a machine can suffer
+		// cannot move under a live run. The solar fractions inside the
+		// blocks stay live-tunable parameters that never reach a Fault
+		// already injected.
+		for (auto const& next : offered.generators)
+		{
+			auto const old = std::find_if(s.generators.begin(), s.generators.end(),
+				[&](auto const& generator) { return generator.authored.id == next.id; });
+			if (old != s.generators.end() && LiveNode<GeneratorSettings>::topologyChanged(old->authored, next))
+			{
+				if (diagnostic) *diagnostic = "Generator '" + next.id + "': failed-start opt-in is frozen topology";
+				return false;
+			}
+		}
+		for (auto const& next : offered.solarArrays)
+		{
+			auto const old = std::find_if(s.solarArrays.begin(), s.solarArrays.end(),
+				[&](auto const& array) { return array.authored.id == next.id; });
+			if (old != s.solarArrays.end() && LiveNode<SolarArraySettings>::topologyChanged(old->authored, next))
+			{
+				if (diagnostic) *diagnostic = "Solar '" + next.id + "': string-loss and tracking-failure opt-ins are frozen topology";
 				return false;
 			}
 		}

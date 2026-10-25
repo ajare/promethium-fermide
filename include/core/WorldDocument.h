@@ -14,11 +14,12 @@ namespace core
 	// The writer stamps a tier at or below this depending on which opt-in feature
 	// blocks a document actually carries (111 plain, 112 coolant-leak Faults,
 	// 113 Condition, 114 latching Trips, 115 repair-parts wiring, 116 Wear
-	// accumulators, 117 thermal-plant Fault catalogues), so a
+	// accumulators, 117 thermal-plant Fault catalogues, 118 power-source
+	// Fault catalogues), so a
 	// document's own version is no longer the reader boundary. Anything above
 	// this constant is future and must be refused; tests that probe the future
 	// boundary derive from here rather than from a written document's tier.
-	inline constexpr std::uint32_t kWorldSchemaVersion = 117;
+	inline constexpr std::uint32_t kWorldSchemaVersion = 118;
 	inline constexpr std::string_view YamlWorldDocumentFilenameSuffix{ ".world.yaml" };
 	inline constexpr auto WorldDocumentFilenameSuffix = BinaryWorldDocumentFilenameSuffix;
 

@@ -1091,6 +1091,16 @@ namespace
 				return refuse(where + " installed capacity must be finite and non-negative (0 disables the array)");
 			if (!validateStationProfile(array.illumination, where + " illumination profile", diagnostic))
 				return false;
+			// #845: the solar fault opt-ins. A string loss that takes no
+			// capacity is not a loss, and one that takes more than the
+			// array has is not a fraction; a tracking failure that pins
+			// the array at full availability is not a failure at all.
+			if (array.stringLoss && (!std::isfinite(array.stringLoss->lossFraction)
+				|| array.stringLoss->lossFraction <= 0.0 || array.stringLoss->lossFraction > 1.0))
+				return refuse(where + " string-loss fraction must be finite and greater than 0 up to 1");
+			if (array.trackingFailure && (!std::isfinite(array.trackingFailure->availability)
+				|| array.trackingFailure->availability < 0.0 || array.trackingFailure->availability >= 1.0))
+				return refuse(where + " tracking-failure availability must be finite and from 0 up to (but not including) 1");
 		}
 		if (settings.equipmentLoads.size() > MaxStationEquipmentLoads)
 			return refuse("Station external equipment loads are limited to "
@@ -1215,6 +1225,22 @@ namespace
 			if (battery.capacityFade)
 				if (auto const reason = wearModelViolation(*battery.capacityFade, true, false))
 					return refuse(where + reason);
+			// #845: the thermal-runaway opt-in names a one-shot heat and
+			// toxic-species booking that must land in an existing
+			// compartment; both amounts must be finite and positive, so
+			// the onset always books a real hazard and never a zero.
+			if (battery.thermalRunaway)
+			{
+				auto const& runaway = *battery.thermalRunaway;
+				if (!std::isfinite(runaway.heatKJ) || runaway.heatKJ <= 0.0)
+					return refuse(where + " thermal-runaway heat must be finite and positive");
+				if (!std::isfinite(runaway.toxicKg) || runaway.toxicKg <= 0.0)
+					return refuse(where + " thermal-runaway toxic species mass must be finite and positive");
+				if (std::none_of(settings.atmospheres.begin(), settings.atmospheres.end(),
+					[&](auto const& air) { return air.id == runaway.compartmentId; }))
+					return missing(where + " thermal-runaway references unknown compartment '"
+						+ runaway.compartmentId + "'");
+			}
 		}
 		if (settings.thermalReservoirs.size() > MaxStationThermalReservoirs)
 			return refuse("Station thermal reservoirs are limited to "

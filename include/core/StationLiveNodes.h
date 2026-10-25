@@ -89,7 +89,21 @@ namespace core
 		&ResourceStoreSettings::startingUnqualified)
 	PF_STATION_LIVE_NODE(ResourceTransferSettings, transfers, "Transfer")
 	PF_STATION_LIVE_NODE(ResourceConversionSettings, conversions, "Conversion")
-	PF_STATION_LIVE_NODE(SolarArraySettings, solarArrays, "Solar")
+	// #845: which fault modes a solar array can suffer is a run-shape
+	// decision frozen at construction; the loss fraction and the fixed
+	// availability inside each block stay live-tunable parameters whose
+	// value an accepted injection froze for the Fault it started.
+	template <> struct LiveNode<SolarArraySettings>
+	{
+		static constexpr std::string_view nodeType = "Solar";
+		static auto& of(auto& settings) { return settings.solarArrays; }
+		static bool restoreInitial(SolarArraySettings const&, SolarArraySettings&) { return false; }
+		static bool topologyChanged(SolarArraySettings const& a, SolarArraySettings const& b)
+		{
+			return a.stringLoss.has_value() != b.stringLoss.has_value()
+				|| a.trackingFailure.has_value() != b.trackingFailure.has_value();
+		}
+	};
 	PF_STATION_LIVE_NODE(EquipmentLoadSettings, equipmentLoads, "Equipment")
 	template <> struct LiveNode<BatterySettings>
 	{
@@ -102,8 +116,15 @@ namespace core
 			// #843: whether the bank has a capacity-fade model at all is a
 			// run-shape decision frozen at construction; the fade rates
 			// inside it stay live-tunable parameters that never reprice the
-			// fade already accumulated.
-			return a.capacityFade.has_value() != b.capacityFade.has_value();
+			// fade already accumulated. #845: the thermal-runaway opt-in
+			// and its destination compartment join the frozen shape - the
+			// compartment a hazard lands in is decided with the run, not
+			// moved under it; the booked heat and toxic mass stay
+			// live-tunable until an injection freezes them.
+			return a.capacityFade.has_value() != b.capacityFade.has_value()
+				|| a.thermalRunaway.has_value() != b.thermalRunaway.has_value()
+				|| (a.thermalRunaway && b.thermalRunaway
+					&& a.thermalRunaway->compartmentId != b.thermalRunaway->compartmentId);
 		}
 	};
 	PF_STATION_LIVE_NODE(ResourceDeliverySettings, deliveries, "Delivery")
@@ -224,7 +245,19 @@ namespace core
 				|| repairWiringTopologyChanged(before.repairParts, after.repairParts);
 		}
 	};
-	PF_STATION_LIVE_NODE(GeneratorSettings, generators, "Generator")
+	// #845: the generator's failed-start opt-in is a run-shape decision
+	// frozen at construction; the mode carries no parameters, so there
+	// is nothing live inside it to tune.
+	template <> struct LiveNode<GeneratorSettings>
+	{
+		static constexpr std::string_view nodeType = "Generator";
+		static auto& of(auto& settings) { return settings.generators; }
+		static bool restoreInitial(GeneratorSettings const&, GeneratorSettings&) { return false; }
+		static bool topologyChanged(GeneratorSettings const& a, GeneratorSettings const& b)
+		{
+			return a.failedStart != b.failedStart;
+		}
+	};
 	PF_STATION_LIVE_NODE_WITH(AtmosphereSettings, atmospheres, "Atmosphere",
 		&AtmosphereSettings::startingCarbonDioxideKg,
 		&AtmosphereSettings::startingNitrogenKg,

@@ -1,12 +1,13 @@
-# Station Faults, Condition, Trips, Repair and Wear (#839–#844)
+# Station Faults, Condition, Trips, Repair and Wear (#839–#845)
 
 Implemented slices of [the failure framework](specs/station_degradation_failure_specification.md)
 include coolant-leak injection, opt-in coolant-loop Condition with funded recovery,
 latching Sabatier/methane processor Trips, repairFault as a runtime-started
 maintenance job, permanent Wear accumulators with the battery capacity-fade
 pilot, and the thermal-plant Fault catalogue (chiller compressor-failure and
-refrigerant-leak, radiator panel-puncture, heat-engine mechanical-seizure).
-Other component catalogues remain follow-ups. Propagation follows
+refrigerant-leak, radiator panel-puncture, heat-engine mechanical-seizure), and
+power-source Faults (generator failed-start, solar string-loss/tracking-failure,
+battery thermal-runaway). Other component catalogues remain follow-ups. Propagation follows
 [ADR-0030](adr/0030-faults-propagate-through-media-via-hazard-bookings-never-direct-damage-edges.md).
 
 ## Authoring and commands
@@ -328,7 +329,87 @@ full service. All four modes are repairable when wired; a plan naming a mode the
 machine cannot suffer (or a loop-only mode like `coolant-leak` on a chiller) is
 refused at authoring validation.
 
+## Power-source Fault catalogue
+
+The #845 slice extends the catalogue to the electrical power sources with four
+code-owned modes, injected through the same `injectFault` seam with the same
+refusal discipline (unknown installation, cross-kind mode, absent opt-in,
+invalid cause, active or pending duplicate).
+
+Generators opt in with `failedStart: true`; solar arrays with a `stringLoss`
+and/or a `trackingFailure` block; battery banks with a `thermalRunaway` block.
+
+```yaml
+generators:
+  - id: main-gen
+    failedStart: true
+solarArrays:
+  - id: array-a
+    stringLoss: { lossFraction: 0.4 }        # fraction of installed capacity gone
+    trackingFailure: { availability: 0.25 }  # fixed low availability while stuck
+batteries:
+  - id: bank-1
+    thermalRunaway:
+      compartmentId: battery-room
+      heatKJ: 500        # one-shot heat booked into the compartment
+      toxicKg: 2         # one-shot toxic species booked into the compartment
+```
+
+`failed-start` is scoped to the start attempt, not to the machine. The
+Starting→Running transition is what fails: the crank runs normally, drawing its
+authored `startupPowerKW` and dissipating the cranking energy into the same sink
+a healthy start would book it into, as accounted heat. At the end of the crank
+the attempt is zeroed - the machine returns to Stopped with its crank reset, and
+never reaches Running or delivers a watt or burns a watt of fuel while the Fault
+stands. The Fault zeroes the attempt, never the attempt's cost: every attempt
+pays its full cranking heat. A generator already Running is not in an attempt,
+so the mode bites the next time the machine is started. Zero-duration or
+zero-power starts still fail, with zero cranking heat rather than an immediate
+transition to Running.
+
+`string-loss` and `tracking-failure` cap the array's availability rather than
+removing it: string loss sets the availability factor to `1 - lossFraction`, a
+tracking failure pins it at its authored `availability`. When both stand on the
+same array they compose by minimum - the deepest cap wins, they never multiply -
+so a 0.4 string loss beside a 0.25 tracking failure leaves the array at 0.25 of
+installed capacity. Illumination still multiplies on top as usual.
+
+`thermal-runaway` is a one-shot booking plus a shutdown. On onset the bank's
+declared heat and toxic mass enter its declared Atmosphere compartment exactly
+once: the heat joins the compartment's own thermal solve through the same
+pending-hazard path a reservoir trip spike uses, and the toxic species is kept
+as a retained ledger (`toxicContaminantKg`) alongside the cumulative
+`hazardHeatKJ`, in the same shape as spilled coolant. The contaminant is not a
+breathing gas and joins no partial pressure - crew health is out of scope here;
+what the ticket requires, and what the audit proves, is that the booking closes
+through the atmosphere ledger. The bank's availability goes to zero: it neither
+charges on surplus nor discharges into a deficit for as long as the Fault
+stands, and the booking never repeats.
+
+All four modes follow the pending/active doctrine: acceptance queues the Fault,
+the first successful Station step logs the onset `fault` event and publishes it
+as active; snapshots never publish a pending Fault. `derivedImpact` is the
+availability the Fault removes: 1.0 for `failed-start` and `thermal-runaway`,
+the lost fraction for `string-loss`, `1 - availability` for `tracking-failure`.
+
+Repair is not wired for these modes in this slice: `repairFault` refuses them for
+want of `repairParts` wiring on generators, solar arrays and batteries, and
+follow-up work decides what a repair costs.
+
 ## Persistence and replay
+
+Schema 118 carries the power-source Fault opt-ins; earlier documents carrying
+them are refused, and feature-absent output keeps its previous tier (117 for a
+thermal-plant run, 111 otherwise) and byte encoding. Power-source runs pin
+their initial settings for replay at construction for the same reason the
+thermal plant does: a replay rebuilds the machine from the pinned settings
+before replaying its commands, so a generator whose start is commanded later
+cannot crank - and succeed - long before its `failed-start` Fault is injected.
+The solar fraction, the tracking availability and the runaway's heat, toxic mass
+and destination are carried by the injection command itself, so a live retune
+after the injection cannot reprice a Fault that is already running. Replay
+checks those frozen values against the settings at the command's original
+position in history; inconsistent or invalid stream parameters are refused.
 
 Schema 117 carries the thermal-plant Fault opt-ins and repair wiring; earlier
 documents carrying them are refused. Thermal-plant runs pin their initial
@@ -419,3 +500,18 @@ rate retuning that cannot reach a frozen injection, frozen charge/destination
 opt-in topology, authoring validation of malformed blocks, the schema-117
 round-trip and guard, and exact YAML/binary replay of a scripted sequence
 across all four modes with repairs in flight.
+
+The six `station-powerSource*` checks cover the power-source catalogue: refusal
+of unknown/cross-kind/unopted injections with no mutation; the failed start
+cranking, dissipating its full authored heat into the sink and zeroing the
+attempt back to Stopped with no output and no fuel burned, then failing every
+later attempt the same way; string loss and tracking failure capping the array
+at their declared fractions and composing by minimum; the runaway's one-shot
+heat and toxic species landing in the compartment, warming it through its own
+thermal solve and closing the energy ledger, with the bank held out of service
+in both charge and discharge and the deficit left honestly unmet; live fraction
+retuning that cannot reach a frozen injection against frozen opt-in topology;
+authoring validation of malformed blocks; the schema-118 round-trip and
+pre-118 guard with feature-absent output still on the old tier; and exact
+YAML/binary replay of a scripted sequence across all four modes with a live
+retune and a crank in flight.

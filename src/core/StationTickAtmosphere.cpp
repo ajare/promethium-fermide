@@ -716,9 +716,19 @@ namespace core
 			// the same external heat rate sum the reservoir exchange uses,
 			// so it meets the coupled vapour/thermal solve this tick.
 			auto const conductedKW = thermalLinkConductedKJ[atmosphereIndex] / dt;
+			// #845: one-shot hazard heat booked into this compartment by
+			// a battery thermal-runaway, staged by the fault pass. It
+			// enters the same coupled vapour/thermal solve every other
+			// thermal term meets, and is retired into the compartment's
+			// cumulative hazard ledger so the energy residual closes
+			// over it exactly as a reservoir closes over its trip-spike
+			// heat. A compartment with no booking carries the term as a
+			// plain zero and its solve is unchanged.
+			auto const hazardHeatKW = compartment.pendingHazardKJ / dt;
 			auto const coupled = solveVapourThermalCoupling(
 				compartment.authored.thermalCapacityKJPerK, compartment.temperatureC,
-				occupantHeatKW + crewHeatKW + cropHeatKW + algaeHeatKW + exchangeKW + conductedKW,
+				occupantHeatKW + crewHeatKW + cropHeatKW + algaeHeatKW + exchangeKW + conductedKW
+					+ hazardHeatKW,
 				compartment.waterVapourKg,
 				compartment.authored.volumeM3, dt);
 			auto const condensedKg = coupled.condensedKg;
@@ -738,6 +748,9 @@ namespace core
 			compartment.exchangedKJ += exchangeKW * dt;
 			compartment.conductedKJ += thermalLinkConductedKJ[atmosphereIndex];
 			compartment.lastConductedKW = conductedKW;
+			compartment.hazardHeatKJ += compartment.pendingHazardKJ;
+			compartment.lastHazardHeatKW = hazardHeatKW;
+			compartment.pendingHazardKJ = 0.0;
 			// Publish last-tick observables.
 			compartment.lastOxygenDemandKg = oxygenDemandKg;
 			compartment.lastOxygenConsumedKg = oxygenConsumedKg;

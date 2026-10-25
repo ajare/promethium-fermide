@@ -117,8 +117,25 @@ namespace core
 		// The power snapshot reports the most recent tick's solar supply
 		// and external equipment allocation in the declared order.
 		for (auto const& array : mImpl->solarArrays)
-			result.power.sources.push_back({array.authored.id, array.authored.capacityKW,
-				array.lastIllumination, array.lastAvailableKW, array.lastDisabled});
+		{
+			StationSolarSourceSnapshot sourceResult;
+			sourceResult.id = array.authored.id;
+			sourceResult.capacityKW = array.authored.capacityKW;
+			sourceResult.illumination = array.lastIllumination;
+			sourceResult.availableKW = array.lastAvailableKW;
+			sourceResult.disabled = array.lastDisabled;
+			// #845: the availability the array's fault ledger leaves it,
+			// and the ledger itself. A pending Fault is not published as
+			// active; its derived impact is the capacity fraction the
+			// mode takes (string-loss) or the availability it pins away
+			// (tracking-failure).
+			sourceResult.availabilityFactor = array.availabilityFactor;
+			if (array.stringLoss && !array.stringLossPending)
+				sourceResult.activeFaults.push_back(*array.stringLoss);
+			if (array.trackingFailure && !array.trackingFailurePending)
+				sourceResult.activeFaults.push_back(*array.trackingFailure);
+			result.power.sources.push_back(std::move(sourceResult));
+		}
 		double totalRequested = 0.0, totalSupplied = 0.0, totalUnmet = 0.0,
 			totalUnmetCritical = 0.0, totalHeat = 0.0;
 		double totalAvailable = 0.0;
@@ -222,6 +239,12 @@ namespace core
 			batteryResult.disabled = battery.effectiveUsableKWh() <= 0.0;
 			batteryResult.atReserve = battery.lastAtReserve;
 			batteryResult.saturated = battery.lastSaturated;
+			// #845: the bank's active Fault ledger. A pending runaway is
+			// not published as active; the booked heat and toxic mass it
+			// landed are reported on the destination compartment, not on
+			// the bank.
+			if (battery.thermalRunaway && !battery.thermalRunawayPending)
+				batteryResult.activeFaults.push_back(*battery.thermalRunaway);
 			batteryResult.status = battery.status;
 			result.power.batteries.push_back(std::move(batteryResult));
 		}
@@ -338,6 +361,11 @@ namespace core
 			generatorResult.decayHeatKJ = generator.decayHeatKJ;
 			generatorResult.residualKJ = generator.fuelEnergyKJ
 				- generator.electricalKJ - generator.wasteHeatKJ;
+			// #845: the generator's active Fault ledger. A pending
+			// failed-start is not published as active; the mode's derived
+			// impact is the full zeroing of the start attempt.
+			if (generator.failedStart && !generator.failedStartPending)
+				generatorResult.activeFaults.push_back(*generator.failedStart);
 			generatorResult.status = generator.status;
 			totalGeneratorOutput += generator.lastAverageOutputKW;
 			totalGeneratorStartup += generator.lastStartupDrawKW;
@@ -762,6 +790,15 @@ namespace core
 			auto const& authored = compartment.authored;
 			atmosphereResult.spilledCoolantKg = compartment.spilledCoolantKg;
 			atmosphereResult.spilledCoolantEnergyKJ = compartment.spilledCoolantEnergyKJ;
+			// #845: the retained toxic-species contamination and the
+			// one-shot hazard heat a battery thermal-runaway booked into
+			// this compartment. Both are closure terms: they must equal
+			// exactly what the banks that declared this compartment
+			// booked, and the heat has already entered the compartment's
+			// own thermal solve.
+			atmosphereResult.toxicContaminantKg = compartment.toxicContaminantKg;
+			atmosphereResult.hazardHeatKJ = compartment.hazardHeatKJ;
+			atmosphereResult.lastHazardHeatKW = compartment.lastHazardHeatKW;
 			atmosphereResult.id = authored.id;
 			atmosphereResult.reservoirId = authored.reservoirId;
 			atmosphereResult.volumeM3 = authored.volumeM3;

@@ -149,7 +149,16 @@ namespace core
 	}
 
 	bool StationSystemsRuntime::Impl::Tick::batteryDisabled(BatteryState const& battery)
-	{ return battery.effectiveUsableKWh() <= 0.0; }
+	{
+		// #845: a bank in thermal runaway is held out of service for the
+		// whole Fault: it takes no charge and delivers no discharge, the
+		// same hard gate a zero-usable bank gets, so no allocation path
+		// can route power through a bank that is coming apart. Its stored
+		// energy stays fully accounted and stranded while the Fault
+		// stands; the hazard it booked landed in the compartment, not
+		// here.
+		return battery.effectiveUsableKWh() <= 0.0 || battery.thermalRunaway.has_value();
+	}
 
 	double StationSystemsRuntime::Impl::Tick::nativeDeliverableKW(BatteryState const& battery, double dtHours)
 	{

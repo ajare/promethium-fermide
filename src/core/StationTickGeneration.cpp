@@ -1404,7 +1404,7 @@ namespace core
 					else
 					{
 						generator.startupReceivedKJ = 0.0;
-						generator.phase = startupRequiredKJ > 0.0
+						generator.phase = startupRequiredKJ > 0.0 || generator.failedStart
 							? StationGeneratorPhase::Starting : StationGeneratorPhase::Running;
 						if (generator.phase == StationGeneratorPhase::Starting)
 						{
@@ -1474,7 +1474,32 @@ namespace core
 					generator.startupHeatKJ += suppliedKW * dtSeconds;
 					generator.startupReceivedKJ += suppliedKW * dtSeconds;
 					if (generator.startupReceivedKJ + 1e-9 >= startupRequiredKJ)
-						generator.phase = StationGeneratorPhase::Running;
+					{
+						// #845: with a `failed-start` Fault active the
+						// attempt is zeroed at the end of the crank: the
+						// machine never reaches Running and returns to
+						// Stopped with the crank reset. The cranking
+						// energy it actually received stays booked as
+						// accounted heat in the sink - the Fault zeroes
+						// the attempt, never the attempt's cost - and
+						// while the Fault is active every attempt ends
+						// here. A machine already Running is not in an
+						// attempt: the mode is scoped to starting, so it
+						// bites the next time the machine is started.
+						if (generator.failedStart)
+						{
+							auto const attemptKJ = generator.startupReceivedKJ;
+							generator.phase = StationGeneratorPhase::Stopped;
+							generator.startupReceivedKJ = 0.0;
+							generator.lastBlockReason = "start attempt failed under 'failed-start' Fault";
+							appendBoundedEvent(runtime.events, tick, "fault",
+								"Fault 'failed-start' on '" + generator.authored.id
+								+ "': start attempt failed - the crank received "
+								+ std::to_string(attemptKJ)
+								+ " kJ and dissipated it as accounted heat; zero output delivered");
+						}
+						else generator.phase = StationGeneratorPhase::Running;
+					}
 				}
 				break;
 			case StationGeneratorPhase::Running:
