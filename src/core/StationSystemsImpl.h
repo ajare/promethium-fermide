@@ -1113,6 +1113,7 @@ using namespace station_detail;
 			ElectrolyzerSettings authored;
 			double bodyTemperatureC{0.0};
 			double bodyChargeKJ{0.0};
+			double bodyParameterAdjustmentKJ{0.0}; // energy-reference shift from live scalar edits
 			double bodyConductedKJ{0.0}; // signed gain through Thermal links
 			double lastBodyConductedKW{0.0};
 			double sinkLegKJ{0.0};

@@ -489,6 +489,12 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 	else if (node.type == "Electrolyzer")
 	{
 		auto p = find(s.electrolyzers, id); if (!p) return {}; state(out, *p); processPower(out, *p);
+		if (p->hasThermalBody)
+		{
+			out.values.push_back("Thermal body " + quantity(p->bodyTemperatureC, "C"));
+			out.values.push_back("Body conducted heat " + quantity(p->lastBodyConductedKW, "kW"));
+			out.ports["Thermal body"] = quantity(p->bodyTemperatureC, "C") + " / " + quantity(p->lastBodyConductedKW, "kW");
+		}
 		out.values.push_back("Water split " + rate(p->lastSplitKg)); out.values.push_back("Hydrogen " + rate(p->lastHydrogenKg));
 		port("Water in", p->lastSplitKg); port("Hydrogen out", p->lastHydrogenKg);
 		port(p->oxygenStoreId.empty() ? "Compartment oxygen" : "Oxygen out", p->lastOxygenKg);

@@ -913,7 +913,7 @@
         },
         {
           "kind": "paragraph",
-          "text": "conducts heat between two Atmosphere compartments without moving gas. Use it for a solid wall, closed door or sealed window."
+          "text": "conducts heat between two Thermal nodes without moving mass between Atmospheres, Reservoirs, and Electrolyzers with an authored Thermal body. Use it for a solid wall or shared structure, including reservoir meshes, without occupying a compartment's heat-only exchanger slot."
         },
         {
           "kind": "heading",
@@ -921,7 +921,7 @@
         },
         {
           "kind": "paragraph",
-          "text": "End A and End B each join an Atmosphere's Thermal links face. Both endpoints must be distinct real compartments. Neither a Store, a Reservoir nor Exterior vacuum is a valid endpoint. The apparent input faces are endpoint references, not a heat-flow direction."
+          "text": "End A and End B each join an Atmosphere's or Reservoir's Thermal links face, or a bodied Electrolyzer's Thermal body face. Endpoints must resolve to distinct nodes with positive thermal capacity. Duplicate undirected pairs are refused; combine parallel contacts by summing conductances on one link. Thermal service class is ignored. Stores, bodyless machines and Exterior vacuum are not Thermal nodes. A body endpoint uses kind machineBody and the Electrolyzer ID. The apparent input faces are endpoint references, not a heat-flow direction."
         },
         {
           "kind": "settings",
@@ -947,6 +947,10 @@
         {
           "kind": "paragraph",
           "text": "connect a warm laboratory and cool cabin with a Thermal link for their partition. Add a separate Atmosphere pathway for the doorway opening. Closing that pathway stops air-carried heat, but wall conduction continues. A link's conductance does not automatically follow door openness."
+        },
+        {
+          "kind": "paragraph",
+          "text": "Endpoint kinds are reported in the link snapshot beside signed flow, cumulative net transfer and Idle/Active status. YAML and binary records retain the historical aAtmosphereId / bAtmosphereId names for node IDs and add aKind / bKind (atmosphere, reservoir or machineBody); omitted kinds default to atmosphere. Reservoirs publish conducted heat separately from exchanger heat, and both enter their energy residual. See ADR-0032."
         }
       ]
     },
@@ -968,7 +972,7 @@
         },
         {
           "kind": "paragraph",
-          "text": "hot Reservoir input, rejection Reservoir output, automatic net generation to the shared electrical pool. Reservoirs must be distinct; the rejection Reservoir must match the engine's thermal class, while the hot Reservoir need not share that class. Place a Heat engine from the Thermal group in Place node or the canvas context menu. Connect Reservoir Heat out to Thermal intake, and Rejection heat to a different Reservoir Heat in; Power out connects automatically. Outage/Maintenance can target its Supervision port. Select the engine to edit reservoir references, operating settings, mechanical-seizure opt-in, efficiency-drift Wear, and repair-parts plans in the Flow Inspector. Placement starts unwired; Apply validates both thermal interfaces. Wiring, inspector edits, rename and cascade deletion support draft undo/redo."
+          "text": "hot Reservoir input, rejection Reservoir output, automatic net generation to the shared electrical pool. Reservoirs must be distinct; the rejection Reservoir must match the engine's thermal class, while the hot Reservoir need not share that class. Outage/Maintenance can target its installation identity through its Supervision port. Place a Heat engine from the Thermal group in Flow's Place node menu (or the canvas context menu). Connect a Reservoir's Heat out to Thermal intake, and Rejection heat to a different Reservoir's Heat in. Power out connects automatically, like other generators. Select the engine to edit its reservoir references, operating settings, mechanical-seizure opt-in, efficiency-drift Wear, and repair-parts plans in the Flow Inspector. Placement starts unwired; Apply uses the normal validated configuration path once both thermal interfaces are connected. Wiring, inspector edits, rename and cascade deletion participate in draft undo/redo."
         },
         {
           "kind": "settings",
@@ -1254,6 +1258,30 @@
         {
           "kind": "paragraph",
           "text": "treat recovered water, feed an Electrolyzer, send oxygen directly to the cabin and hydrogen to Sabatier. To also stockpile oxygen, use a separate Electrolyzer configured for an O2 Store; one unit cannot use both oxygen outlets."
+        },
+        {
+          "kind": "paragraph",
+          "text": "#### Optional casing (thermalBody, #854)"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Author an optional shared settings block on the Electrolyzer:"
+        },
+        {
+          "kind": "paragraph",
+          "text": "yaml thermalBody: heatCapacityKJPerK: 100 startingTemperatureC: 20 sinkConductanceKWPerK: 0.5"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Capacity and sink conductance must be finite and strictly positive; starting temperature must be finite and above absolute zero. Waste heat charges this lumped casing rather than entering the Reservoir directly. Heat out now drains the casing through the shared closed-form two-body conduction law, limited by the wire's throughput and efficiency. Unaccepted heat stays in the casing; wire loss remains an explicitly booked loss. Sink class/qualification still apply to this drain leg. The maximum-temperature gate and coarse-step protection instead read the casing temperature. The casing continues cooling while production is idle or refused, allowing restart after cooling."
+        },
+        {
+          "kind": "paragraph",
+          "text": "A refused sink leg leaves the casing to warm until protection refuses production. With a body, the Heat-out sink is optional: Thermal links may cool the casing into an Atmosphere, Reservoir or another body. Without any heat path, the casing warms to its protection limit and configuration reports a warning. With no thermalBody, the historical direct heat-injection path and serialized representation are unchanged. Bodies are reconstructed from authored starting temperature on load/Reset. The inspector's Thermal body checkbox adds/removes the block in the draft. Capacity, starting temperature and sink conductance support live-node edits; adding/removing a body requires Apply. Live scalar edits preserve the current temperature and physical charge/conduction totals, rebasing the energy reference for the changed capacity or starting value rather than creating a spurious energy residual. Changing the starting value live does not reset the casing temperature."
+        },
+        {
+          "kind": "paragraph",
+          "text": "Published casing fields are hasThermalBody, bodyTemperatureC, lastBodyChargeKW, lastSinkLegKW, bodyChargeKJ, sinkLegKJ, and bodyResidualKJ. Charge plus net conducted heat minus sink outflow equals the casing's capacity times its temperature change (with an energy-reference adjustment after live capacity/starting-value edits). Body temperature and both rates are selectable Electrolyzer observations. Binary World and Station YAML persistence use schema 123 only when a body is present. Station Flow shows a Thermal body face only when that block exists, with live body temperature and signed conducted kW. The link inspector's endpoint picker offers Atmosphere, Reservoir and Thermal body entries; canvas wiring validates endpoints and reports refusals. Body conduction is reported separately from its sink leg."
         }
       ]
     },

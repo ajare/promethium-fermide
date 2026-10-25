@@ -8,6 +8,8 @@
 #include "core/BinarySerializer.h"
 #include "core/World.h"
 #include "../station/StationRig.h"
+#include "../station/WaterGasObservationFixture.h"
+#include "StationSystemsEntryEditor.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -169,6 +171,100 @@ void pathwayDisplayWorkflow(smoke::Context const&)
 // host face, and the whole thing is placeable, wireable, selectable and
 // editable through the same core seam. The #799 display-only arc is gone:
 // the node and its editable connector links replace it.
+void thermalBodyEditorWorkflow(smoke::Context const&)
+{
+	headless::ScopedImGuiContext imgui;
+	auto& io = ImGui::GetIO(); io.DisplaySize = {1800, 1200};
+	io.Fonts->AddFontDefault(); io.Fonts->Build();
+	auto settings = smoke::station::waterGasObservationFixture();
+	auto bodyless = settings.electrolyzers[0]; bodyless.id = "bodyless"; bodyless.rateKgPerS = 0;
+	settings.electrolyzers.push_back(bodyless);
+	auto& cell = settings.electrolyzers[0];
+	cell.heatSinkId.clear();
+	settings.thermalLinks = {{"wall", settings.atmospheres[0].id, "", 1}};
+	std::string diagnostic;
+	core::CandidateLink bodyEnd{{"Electrolyzer", cell.id, "Thermal body"}, {"Thermal link", "wall", "End B"}};
+	auto refused = core::evaluateStationLink(settings, bodyEnd);
+	require(!refused.allowed && refused.reason.find("no thermal body") != std::string::npos,
+		"Bodyless machine link was not refused with a diagnostic");
+	// Author the optional block through the actual inspector widget.
+	{
+	bool editLink = false;
+	headless::TestEngineDriver form([&] {
+		ImGui::SetNextWindowSize({1700, 1150}); ImGui::Begin("Body authoring");
+		if (editLink) station_editor::findStationEntryEditor("Thermal link")->renderEntry(settings, 0);
+		else station_editor::renderElectrolyzerEntry(settings, cell, "Cell", {});
+		ImGui::End();
+	});
+	form.frame(); form.frame();
+	form.run("station", "bodyAuthoring", [&](ImGuiTestContext* ctx) {
+		ctx->SetRef("Body authoring"); form.click(ctx, "**/Thermal body##Cell"); ctx->Yield(3);
+		if (!form.require(cell.thermalBody.has_value(), "Body checkbox did not enable its block")) return;
+		auto const parent = ctx->ItemInfo("**/body starting temperature C##Cell")->ParentID;
+		form.typeValue(ctx, ImHashStr("body capacity kJ/K##Cell", 0, parent), "100");
+		form.typeValue(ctx, "**/body starting temperature C##Cell", "40");
+		form.typeValue(ctx, ImHashStr("body sink conductance kW/K##Cell", 0, parent), "0.5");
+		editLink = true; ctx->Yield(3);
+		auto const linkParent = ctx->ItemInfo("**/id##Thermal link 0")->ParentID;
+		ctx->ItemClick(ImHashStr("end B node##Thermal link 0", 0, linkParent)); ctx->Yield(2);
+		ctx->ItemClick(("**/Thermal body: " + cell.id).c_str()); ctx->Yield(3);
+	});
+	require(form.passed() && cell.thermalBody.has_value(), "Inspector did not author a Thermal body");
+	}
+	require(cell.thermalBody == core::ThermalBodySettings{100, 40, 0.5}
+		&& settings.thermalLinks[0].bKind == core::ThermalNodeKind::MachineBody,
+		"Inspector did not author the body parameters and typed endpoint");
+	// The canvas drop uses the same typed mapping as the inspector picker.
+	require(core::clearStationLink(settings, "Thermal link:wall:bAtmosphereId")
+		&& core::applyStationLink(settings, bodyEnd), "Body canvas drop failed");
+	require(settings.thermalLinks[0].bKind == core::ThermalNodeKind::MachineBody,
+		"Body drop lost its endpoint kind");
+	auto duplicate = settings; duplicate.thermalLinks.push_back({"duplicate", settings.atmospheres[0].id, "", 1});
+	require(!core::evaluateStationLink(duplicate, {{"Electrolyzer", cell.id, "Thermal body"},
+		{"Thermal link", "duplicate", "End B"}}).allowed, "Duplicate body contact accepted");
+	auto links = core::stationAuthoredLinks(settings);
+	require(std::any_of(links.begin(), links.end(), [&](auto const& link) {
+		return link.from.nodeType == "Electrolyzer" && link.from.portName == "Thermal body";
+	}), "Body link did not enumerate its visible face");
+	auto world = std::make_shared<core::World>("Body editor", 2, 2);
+	world->pauseSimulation(); world->finishBuild();
+	require(world->configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+	world->resumeSimulation();
+	require(smoke::station::advanceSeconds(*world, 2), "Body room run failed");
+	auto before = world->getStationSystemsSnapshot().electrolyzers[0];
+	require(before.lastBodyConductedKW < 0 && std::abs(before.bodyResidualKJ) < 1e-6,
+		"Machine-to-cabin conduction did not appear in the live ledger");
+	require(world->updateStationSystemsNode<core::ElectrolyzerSettings>(cell.id, [](auto& e) {
+		e.thermalBody = core::ThermalBodySettings{200, 15, 0.75};
+	}, &diagnostic), diagnostic.c_str());
+	require(world->getStationSystemsSnapshot().electrolyzers[0].bodyTemperatureC == before.bodyTemperatureC,
+		"Live body parameter edit reset the temperature");
+	require(smoke::station::advanceSeconds(*world, 2), "Live body edit broke the energy audit");
+	auto offered = world->getStationSystemsSettings(); offered.electrolyzers[0].thermalBody->heatCapacityKJPerK = 300;
+	require(world->updateStationSystemsSettings(offered, &diagnostic)
+		&& smoke::station::advanceSeconds(*world, 1), "Bulk body edit broke the energy audit");
+	auto const preserved = world->getStationSystemsSettings();
+	require(!world->updateStationSystemsNode<core::ElectrolyzerSettings>(cell.id,
+		[](auto& e) { e.thermalBody->heatCapacityKJPerK = 0; }, &diagnostic)
+		&& world->getStationSystemsSettings() == preserved,
+		"Invalid body capacity was accepted live or mutated settings");
+	require(!world->updateStationSystemsNode<core::ElectrolyzerSettings>(cell.id,
+		[](auto& e) { e.thermalBody.reset(); }, &diagnostic), "Body topology changed live");
+	StationSystemsWindow window; window.visible = true;
+	headless::TestEngineDriver diagram([&] {
+		ImGui::SetNextWindowSize({1750, 1150}); ImGui::Begin("Body diagram");
+		window.renderFlowContents(world); ImGui::End();
+	});
+	diagram.frame(); diagram.frame();
+	ImVec2 pin{};
+	require(window.flowPinPosition("Electrolyzer", cell.id, "Thermal body", &pin),
+		"Bodied machine has no Thermal body face");
+	require(!window.flowPinPosition("Electrolyzer", "bodyless", "Thermal body", &pin),
+		"Bodyless machine exposes a Thermal body face");
+	auto telemetry = window.flowTelemetry("Electrolyzer", cell.id);
+	require(telemetry && telemetry->ports.contains("Thermal body"), "Body heat flow is absent from telemetry");
+}
+
 void thermalLinkEditorWorkflow(smoke::Context const&)
 {
 	headless::ScopedImGuiContext imgui;
@@ -303,7 +399,7 @@ void thermalLinkEditorWorkflow(smoke::Context const&)
 		ImVec2 hostPin{};
 		REQ(window.flowPinPosition("Atmosphere", "a", "Thermal links", &hostPin),
 			"the Atmosphere host face for Thermal links is not on screen");
-		REQ(driver.contains("wire End A / End B to Atmosphere or Reservoir thermal nodes"),
+		REQ(driver.contains("wire End A / End B to Atmosphere, Reservoir or Thermal body faces"),
 			"the Thermal link legend does not describe the editable node");
 		// The wall reports live like the hatch: conductance, signed rate, net.
 		if (auto tel = window.flowTelemetry("Thermal link", "wall"))
@@ -1171,6 +1267,7 @@ void editor_smoke::registerStationConnections(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/pathwayDisplayWorkflow", pathwayDisplayWorkflow});
 	checks.push_back({"station/thermalLinkEditorWorkflow", thermalLinkEditorWorkflow});
+	checks.push_back({"station/thermalBodyEditorWorkflow", thermalBodyEditorWorkflow});
 	checks.push_back({"station/hatchInspectorWorkflow", hatchInspectorWorkflow});
 	checks.push_back({"station/connectionDesign", connectionDesign});
 	checks.push_back({"station/connectionForecastWorkflow", connectionForecastWorkflow});

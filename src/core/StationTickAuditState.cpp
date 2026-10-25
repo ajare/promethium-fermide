@@ -88,7 +88,7 @@ namespace core
 			if (cell.authored.thermalBody)
 			{
 				auto const& body = *cell.authored.thermalBody;
-				auto const residual = cell.bodyChargeKJ + cell.bodyConductedKJ - cell.sinkLegKJ
+				auto const residual = cell.bodyChargeKJ + cell.bodyParameterAdjustmentKJ + cell.bodyConductedKJ - cell.sinkLegKJ
 					- body.heatCapacityKJPerK * (cell.bodyTemperatureC - body.startingTemperatureC);
 				if (!requireFinite(cell.bodyTemperatureC, where + "body temperature")
 					|| !requireFinite(cell.bodyConductedKJ, where + "body conducted heat")

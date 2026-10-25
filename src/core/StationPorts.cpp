@@ -305,8 +305,9 @@ namespace
 		// references on the input side of the oriented pair, the same shape
 		// as the hatch above, so it resolves through its own explicit branch.
 		if (link.to.nodeType == "Thermal link"
-			&& (link.from.nodeType == "Atmosphere" || link.from.nodeType == "Reservoir")
-			&& link.from.portName == "Thermal links")
+			&& (((link.from.nodeType == "Atmosphere" || link.from.nodeType == "Reservoir")
+				&& link.from.portName == "Thermal links")
+				|| (link.from.nodeType == "Electrolyzer" && link.from.portName == "Thermal body")))
 		{
 			if (link.to.portName == "End A")
 			{
@@ -1002,6 +1003,17 @@ namespace
 			auto found = std::find_if(settings.thermalLinks.begin(), settings.thermalLinks.end(),
 				[&](ThermalLinkSettings const& entry) { return entry.id == mapping.ownerId; });
 			if (found == settings.thermalLinks.end()) return false;
+			std::vector<std::string> brokenReferences;
+			validateStationSystemsSettings(settings, diagnostic, &brokenReferences);
+			if (mapping.peer.nodeType == "Electrolyzer"
+				&& ((found->aKind == ThermalNodeKind::MachineBody && found->aAtmosphereId == mapping.peer.nodeId)
+					|| (found->bKind == ThermalNodeKind::MachineBody && found->bAtmosphereId == mapping.peer.nodeId)))
+			{
+				auto cell = std::find_if(settings.electrolyzers.begin(), settings.electrolyzers.end(),
+					[&](auto const& e) { return e.id == mapping.peer.nodeId; });
+				if (cell == settings.electrolyzers.end() || !cell->thermalBody)
+					diagnostic = "Station thermal link machine endpoint has no thermal body";
+			}
 			// Mirrors the authoritative validator's self-loop refusal: a wall
 			// cannot conduct a compartment into itself. The Exterior-endpoint
 			// refusal never reaches the canvas because the derived Exterior
@@ -1517,11 +1529,11 @@ std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& set
 	{
 		if (!link.aAtmosphereId.empty())
 			links.push_back({linkIdentity("Thermal link", link.id, "aAtmosphereId"),
-				{link.aKind == ThermalNodeKind::Reservoir ? "Reservoir" : "Atmosphere", link.aAtmosphereId, "Thermal links"},
+				{link.aKind == ThermalNodeKind::MachineBody ? "Electrolyzer" : link.aKind == ThermalNodeKind::Reservoir ? "Reservoir" : "Atmosphere", link.aAtmosphereId, link.aKind == ThermalNodeKind::MachineBody ? "Thermal body" : "Thermal links"},
 				{"Thermal link", link.id, "End A"}});
 		if (!link.bAtmosphereId.empty())
 			links.push_back({linkIdentity("Thermal link", link.id, "bAtmosphereId"),
-				{link.bKind == ThermalNodeKind::Reservoir ? "Reservoir" : "Atmosphere", link.bAtmosphereId, "Thermal links"},
+				{link.bKind == ThermalNodeKind::MachineBody ? "Electrolyzer" : link.bKind == ThermalNodeKind::Reservoir ? "Reservoir" : "Atmosphere", link.bAtmosphereId, link.bKind == ThermalNodeKind::MachineBody ? "Thermal body" : "Thermal links"},
 				{"Thermal link", link.id, "End B"}});
 	}
 	for (auto const& transfer : settings.transfers)
@@ -1755,7 +1767,8 @@ bool applyStationLink(StationSystemsSettings& settings, CandidateLink const& lin
 		for (auto& entry : settings.thermalLinks)
 			if (entry.id == mapping.ownerId)
 				(mapping.field == "aAtmosphereId" ? entry.aKind : entry.bKind)
-					= mapping.peer.nodeType == "Reservoir" ? ThermalNodeKind::Reservoir : ThermalNodeKind::Atmosphere;
+					= mapping.peer.nodeType == "Electrolyzer" ? ThermalNodeKind::MachineBody
+					: mapping.peer.nodeType == "Reservoir" ? ThermalNodeKind::Reservoir : ThermalNodeKind::Atmosphere;
 		return write(*field);
 	}
 	if (isMachineOwnerType(mapping.ownerType))

@@ -399,6 +399,18 @@ namespace core
 		if (!rebindById(s.crews, offered.crews, "crews", diagnostic)) return false;
 		if (!rebindById(s.waterCollectors, offered.waterCollectors, "water collectors", diagnostic)) return false;
 		if (!rebindById(s.waterTreatments, offered.waterTreatments, "water treatments", diagnostic)) return false;
+		for (auto& cell : s.electrolyzers)
+		{
+			auto next = std::find_if(offered.electrolyzers.begin(), offered.electrolyzers.end(),
+				[&](auto const& e) { return e.id == cell.authored.id; });
+			if (next != offered.electrolyzers.end() && cell.authored.thermalBody && next->thermalBody)
+			{
+				auto const& old = *cell.authored.thermalBody;
+				auto const& fresh = *next->thermalBody;
+				cell.bodyParameterAdjustmentKJ += fresh.heatCapacityKJPerK * (cell.bodyTemperatureC - fresh.startingTemperatureC)
+					- old.heatCapacityKJPerK * (cell.bodyTemperatureC - old.startingTemperatureC);
+			}
+		}
 		if (!rebindById(s.electrolyzers, offered.electrolyzers, "electrolyzers", diagnostic)) return false;
 		if (!rebindById(s.co2Captures, offered.co2Captures, "CO2 captures", diagnostic)) return false;
 		if (!rebindById(s.fuelCells, offered.fuelCells, "fuel cells", diagnostic)) return false;
@@ -573,6 +585,17 @@ namespace core
 		// changed entry lands at the same position. Only this one collection
 		// is touched.
 		auto& mirror = LiveNode<Settings>::of(mImpl->settings);
+		if constexpr (std::is_same_v<Settings, ElectrolyzerSettings>)
+		{
+			if (index < mirror.size() && mirror[index].thermalBody && value.thermalBody)
+			{
+				auto& cell = mImpl->electrolyzers[index];
+				auto const& old = *mirror[index].thermalBody;
+				auto const& fresh = *value.thermalBody;
+				cell.bodyParameterAdjustmentKJ += fresh.heatCapacityKJPerK * (cell.bodyTemperatureC - fresh.startingTemperatureC)
+					- old.heatCapacityKJPerK * (cell.bodyTemperatureC - old.startingTemperatureC);
+			}
+		}
 		if (index < mirror.size()) mirror[index] = value;
 		mImpl->recordFaultSettings();
 	}

@@ -1051,6 +1051,12 @@ bool renderElectrolyzerEntry([[maybe_unused]] core::StationSystemsSettings& draf
 		renderRangedDouble(describe("poison wear per hour", label), block.wearPerHour, 0.0, 0.0, "%.6f");
 	});
 	renderWearBlock(label, describe("Wear: membrane degradation", label), cell.membraneDegradation);
+	renderFaultOptIn(describe("Thermal body", label), cell.thermalBody,
+		[&](core::ThermalBodySettings& body) {
+		renderRangedDouble(describe("body capacity kJ/K", label), body.heatCapacityKJPerK, 0.0, 0.0, "%.4f");
+		renderRangedDouble(describe("body starting temperature C", label), body.startingTemperatureC, -273.15, 0.0, "%.2f");
+		renderRangedDouble(describe("body sink conductance kW/K", label), body.sinkConductanceKWPerK, 0.0, 0.0, "%.4f");
+	});
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeCell = true;
@@ -1208,13 +1214,15 @@ bool renderThermalLinkEntry(core::StationSystemsSettings& draft,
 	auto renderEnd = [&](char const* field, std::string& end, core::ThermalNodeKind& kind,
 		std::string const& otherEnd, core::ThermalNodeKind otherKind) {
 		auto const preview = end.empty() ? std::string("Unconnected")
-			: std::string(kind == core::ThermalNodeKind::Reservoir ? "Reservoir: " : "Atmosphere: ") + end;
+			: std::string(kind == core::ThermalNodeKind::MachineBody ? "Thermal body: " : kind == core::ThermalNodeKind::Reservoir ? "Reservoir: " : "Atmosphere: ") + end;
 		if (!ImGui::BeginCombo(describe(field, label).c_str(), preview.c_str())) return;
 		if (ImGui::Selectable("Unconnected", end.empty())) end.clear();
 		auto offer = [&](auto const& nodes, core::ThermalNodeKind candidateKind, char const* prefix) {
 			for (auto const& node : nodes)
 			{
 				if (node.id.empty() || (node.id == otherEnd && candidateKind == otherKind)) continue;
+				if constexpr (requires { node.thermalBody; })
+					if (!node.thermalBody) continue;
 				auto const name = std::string(prefix) + node.id;
 				if (ImGui::Selectable(name.c_str(), end == node.id && kind == candidateKind))
 				{ end = node.id; kind = candidateKind; }
@@ -1222,6 +1230,7 @@ bool renderThermalLinkEntry(core::StationSystemsSettings& draft,
 		};
 		offer(draft.atmospheres, core::ThermalNodeKind::Atmosphere, "Atmosphere: ");
 		offer(draft.thermalReservoirs, core::ThermalNodeKind::Reservoir, "Reservoir: ");
+		offer(draft.electrolyzers, core::ThermalNodeKind::MachineBody, "Thermal body: ");
 		ImGui::EndCombo();
 	};
 	renderEnd("end A node", link.aAtmosphereId, link.aKind, link.bAtmosphereId, link.bKind);

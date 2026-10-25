@@ -1167,7 +1167,7 @@ namespace core
 			cellResult.lastBodyConductedKW = cell.lastBodyConductedKW;
 			cellResult.sinkLegKJ = cell.sinkLegKJ;
 			if (cell.authored.thermalBody)
-				cellResult.bodyResidualKJ = cell.bodyChargeKJ + cell.bodyConductedKJ - cell.sinkLegKJ
+				cellResult.bodyResidualKJ = cell.bodyChargeKJ + cell.bodyParameterAdjustmentKJ + cell.bodyConductedKJ - cell.sinkLegKJ
 					- cell.authored.thermalBody->heatCapacityKJPerK
 					* (cell.bodyTemperatureC - cell.authored.thermalBody->startingTemperatureC);
 			cellResult.residualKg = cell.waterSplitKg

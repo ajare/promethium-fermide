@@ -417,6 +417,12 @@ namespace
 		for (auto const& descriptor : core::stationPortDescriptors())
 		{
 			if (descriptor.nodeType != nodeType) continue;
+			if (descriptor.name == "Thermal body")
+			{
+				auto cell = std::find_if(draft.electrolyzers.begin(), draft.electrolyzers.end(),
+					[&](auto const& e) { return e.id == nodeId; });
+				if (cell == draft.electrolyzers.end() || !cell->thermalBody) continue;
+			}
 			// A machine's heat output is not part of any growable exchange
 			// set: it is always drawn, even on an equipment load whose
 			// producing face is empty.
@@ -1506,7 +1512,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	if (!draft.thermalLinks.empty())
 	{
 		ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(station_flow::ThermalLinkColor),
-			"Thermal links: wire End A / End B to Atmosphere or Reservoir thermal nodes (conducted heat, no mass; never a Station connection).");
+			"Thermal links: wire End A / End B to Atmosphere, Reservoir or Thermal body faces (conducted heat, no mass; never a Station connection).");
 	}
 	if (ImGui::TreeNodeEx("Edge colours", ImGuiTreeNodeFlags_NoAutoOpenOnLog))
 	{

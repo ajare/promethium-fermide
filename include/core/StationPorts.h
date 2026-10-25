@@ -137,6 +137,7 @@ namespace core
 			PortDescriptor{"Water treatment", "Treated water out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
 			PortDescriptor{"Water treatment", "Concentrate out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
 			PortDescriptor{"Water treatment", "Consumable in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Electrolyzer", "Thermal body", StationPortDirection::Output, "thermal-link-host", "thermal-link-endpoint", 0, {}},
 			PortDescriptor{"Electrolyzer", "Water in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
 			PortDescriptor{"Electrolyzer", "Oxygen out", StationPortDirection::Output, "material", "inventory", 1, {}, true},
 			PortDescriptor{"Electrolyzer", "Hydrogen out", StationPortDirection::Output, "material", "inventory", 1, {}, false},

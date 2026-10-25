@@ -14,6 +14,7 @@
 #include "core/StationSystems.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string_view>
 #include <vector>
 
@@ -309,9 +310,17 @@ namespace core
 	{
 		static constexpr std::string_view nodeType = "Electrolyzer";
 		static auto& of(auto& settings) { return settings.electrolyzers; }
+		static bool validateParameters(ElectrolyzerSettings const& entry)
+		{
+			if (!entry.thermalBody) return true;
+			auto const& b = *entry.thermalBody;
+			return std::isfinite(b.heatCapacityKJPerK) && b.heatCapacityKJPerK > 0
+				&& std::isfinite(b.sinkConductanceKWPerK) && b.sinkConductanceKWPerK > 0
+				&& std::isfinite(b.startingTemperatureC) && b.startingTemperatureC > -StationCelsiusOffset;
+		}
 		static bool restoreInitial(ElectrolyzerSettings const&, ElectrolyzerSettings&) { return false; }
 		static bool topologyChanged(ElectrolyzerSettings const& a, ElectrolyzerSettings const& b)
-		{ return a.thermalBody != b.thermalBody
+		{ return a.thermalBody.has_value() != b.thermalBody.has_value()
 			|| a.membraneDegradation.has_value() != b.membraneDegradation.has_value()
 			|| a.catalystPoisoning.has_value() != b.catalystPoisoning.has_value(); }
 	};

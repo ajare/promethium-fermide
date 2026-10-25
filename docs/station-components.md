@@ -505,16 +505,16 @@ recovering storage consumes actual spare radiator capacity; it is not instant.
 ### Thermal link
 
 **What it does:** conducts heat between two Thermal nodes without moving
-mass: Atmosphere↔Atmosphere, Atmosphere↔Reservoir, or Reservoir↔Reservoir.
+mass between Atmospheres, Reservoirs, and Electrolyzers with an authored Thermal body.
 Use it for a solid wall or shared structure, including reservoir meshes,
 without occupying a compartment's heat-only exchanger slot.
 
 **Ports:** **End A** and **End B** each join an Atmosphere's or Reservoir's
-**Thermal links** face. Endpoints must resolve to distinct nodes with positive
+**Thermal links** face, or a bodied Electrolyzer's **Thermal body** face. Endpoints must resolve to distinct nodes with positive
 thermal capacity. Duplicate undirected pairs are refused; combine parallel
 contacts by summing conductances on one link. Thermal service class is ignored.
-Stores and Exterior vacuum are not Thermal nodes; `machineBody` is reserved
-for a later slice and is currently refused. The apparent input faces are
+Stores, bodyless machines and Exterior vacuum are not Thermal nodes. A body
+endpoint uses kind `machineBody` and the Electrolyzer ID. The apparent input faces are
 endpoint references, not a heat-flow direction.
 
 | Dial/value | Purpose |
@@ -534,7 +534,7 @@ A link's conductance does not automatically follow door openness.
 Endpoint kinds are reported in the link snapshot beside signed flow, cumulative
 net transfer and Idle/Active status. YAML and binary records retain the historical
 `aAtmosphereId` / `bAtmosphereId` names for node IDs and add `aKind` / `bKind`
-(`atmosphere` or `reservoir`); omitted kinds default to atmosphere. Reservoirs
+(`atmosphere`, `reservoir` or `machineBody`); omitted kinds default to atmosphere. Reservoirs
 publish conducted heat separately from exchanger heat, and both enter their
 energy residual. See [ADR-0032](adr/0032-thermal-links-join-typed-thermal-nodes.md).
 
@@ -709,19 +709,30 @@ protection instead read the casing temperature. The casing continues cooling
 while production is idle or refused, allowing restart after cooling.
 
 A refused sink leg leaves the casing to warm until protection refuses
-production. The Heat-out sink remains the existing required service contract.
+production. With a body, the Heat-out sink is optional: Thermal links may cool
+the casing into an Atmosphere, Reservoir or another body. Without any heat path,
+the casing warms to its protection limit and configuration reports a warning.
 With no `thermalBody`, the historical direct
 heat-injection path and serialized representation are unchanged. Bodies are
-reconstructed from authored starting temperature on load/Reset; changing body
-parameters requires reapplication rather than repricing accumulated energy.
+reconstructed from authored starting temperature on load/Reset. The inspector's
+**Thermal body** checkbox adds/removes the block in the draft. Capacity, starting
+temperature and sink conductance support live-node edits; adding/removing a body
+requires Apply. Live scalar edits preserve the current temperature and physical
+charge/conduction totals, rebasing the energy reference for the changed capacity
+or starting value rather than creating a spurious energy residual. Changing the
+starting value live does not reset the casing temperature.
 
 Published casing fields are `hasThermalBody`, `bodyTemperatureC`,
 `lastBodyChargeKW`, `lastSinkLegKW`, `bodyChargeKJ`, `sinkLegKJ`, and
-`bodyResidualKJ`. Charge minus sink outflow equals the casing's capacity times
-its temperature change. Body temperature and both rates are selectable
+`bodyResidualKJ`. Charge plus net conducted heat minus sink outflow equals the
+casing's capacity times its temperature change (with an energy-reference
+adjustment after live capacity/starting-value edits). Body temperature and both rates are selectable
 Electrolyzer observations. Binary World and Station YAML persistence use schema
-123 only when a body is present. Machine-body Thermal link endpoints and editor
-body controls remain follow-on work.
+123 only when a body is present. Station Flow shows a **Thermal body** face only
+when that block exists, with live body temperature and signed conducted kW.
+The link inspector's endpoint picker offers Atmosphere, Reservoir and Thermal
+body entries; canvas wiring validates endpoints and reports refusals. Body
+conduction is reported separately from its sink leg.
 
 ### CO2 capture
 

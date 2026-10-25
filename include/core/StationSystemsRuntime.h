@@ -109,6 +109,15 @@ namespace core
 			}
 			Settings const before = *entry;
 			std::forward<Mutator>(mutate)(*entry);
+			if constexpr (requires { LiveNode<Settings>::validateParameters(*entry); })
+			{
+				if (!LiveNode<Settings>::validateParameters(*entry))
+				{
+					*entry = before;
+					if (diagnostic) *diagnostic = "Thermal body requires positive finite capacity/conductance and temperature above absolute zero";
+					return false;
+				}
+			}
 			if constexpr (requires { LiveNode<Settings>::topologyChanged(before, *entry); })
 			{
 				if (LiveNode<Settings>::topologyChanged(before, *entry))
