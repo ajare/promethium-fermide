@@ -39,6 +39,20 @@ namespace core
 		if (temperatureC <= -243.04) return 0.0;
 		return 0.61094 * std::exp(17.625 * temperatureC / (temperatureC + 243.04));
 	}
+	double twoBodyConductedHeatKJ(long double ca, long double cb,
+		long double temperatureAC, long double temperatureBC,
+		long double conductance, long double seconds)
+	{
+		// Q = Ca Cb/(Ca + Cb) (Ta - Tb) (1 - exp(-G (1/Ca + 1/Cb) dt)).
+		// Evaluate the reduced-capacity equilibrium transfer independently
+		// of the relaxation factor: even enormous conductance tends to
+		// equilibrium, not an indeterminate form. expm1 preserves tiny steps.
+		// Keep extended precision until the one shared ledger booking value.
+		auto const relaxed = -std::expm1(-conductance * (1.0L / ca + 1.0L / cb)
+			* seconds);
+		return static_cast<double>(ca * cb / (ca + cb)
+			* (temperatureAC - temperatureBC) * relaxed);
+	}
 	// One body exchanging heat with a shared reservoir through a passive
 	// conductance. The weight is the implicit step's coupling coefficient:
 	// the heat this body gains is its weight times the gap between its own

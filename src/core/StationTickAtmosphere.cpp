@@ -580,17 +580,9 @@ namespace core
 		// heat rate sum - the same contract the reservoir exchange already
 		// uses. This is the only placement where heat that just arrived
 		// meets the destination's coupled vapour/thermal solve in the same
-		// tick, so that solve needs no change. The exchange is closed-form
-		// per link: with capacities Ca, Cb and conductance G,
-		//   k = 1 - exp(-G (1/Ca + 1/Cb) dt)
-		//   Q = Ca Cb / (Ca + Cb) (Ta - Tb) k
-		// where Ca Cb/(Ca + Cb) is the reduced heat capacity, the exact
-		// analogue of the pathway's volume-weighted terms. At k = 1 both
-		// compartments land on the energy-weighted average; at k = 0
-		// nothing moves. The equilibrium transfer is evaluated first,
-		// independently of k, and expm1 is used rather than 1 - exp, so
-		// even enormous conductance tends to equilibrium rather than to
-		// an indeterminate form - the same guard the pathway pass carries.
+		// tick, so that solve needs no change. The shared
+		// twoBodyConductedHeatKJ law relaxes each pair in closed form
+		// toward its energy-weighted equilibrium without crossing it.
 		// Sequential pairwise in a fixed canonical order (operator
 		// splitting): the no-crossing property survives the pass regardless
 		// of order and every joule stays attributable to one named link.
@@ -634,11 +626,9 @@ namespace core
 			auto const cb = static_cast<long double>(
 				runtime.atmospheres[link.bIndex].authored.thermalCapacityKJPerK);
 			auto const conductance = static_cast<long double>(link.authored.conductanceKWPerK);
-			auto const relaxed = -std::expm1(-conductance * (1.0L / ca + 1.0L / cb)
-				* static_cast<long double>(seconds));
-			auto const moved = static_cast<double>(ca * cb / (ca + cb)
-				* (relaxationTemperatureC[link.aIndex] - relaxationTemperatureC[link.bIndex])
-				* relaxed);
+			auto const moved = twoBodyConductedHeatKJ(ca, cb,
+				relaxationTemperatureC[link.aIndex], relaxationTemperatureC[link.bIndex],
+				conductance, static_cast<long double>(seconds));
 			relaxationTemperatureC[link.aIndex] -= moved / ca;
 			relaxationTemperatureC[link.bIndex] += moved / cb;
 			// Booked once per side as an exact negation: A gives what B

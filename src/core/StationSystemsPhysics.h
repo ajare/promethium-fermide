@@ -16,6 +16,15 @@ namespace core
 	}
 uint64_t stationOutageOccurrencesStarted(double, double, double, double);
 uint64_t stationOutageOccurrencesCompleted(double, double, double, double);
+	// Exact two-body conduction over one step. Capacities must be finite
+	// and strictly positive; conductance and seconds finite and non-negative.
+	// Temperatures may be Celsius: only their difference enters the law.
+	// Returns signed heat A -> B in kJ, rounded once for exact-negation
+	// booking by the caller. Does not mutate temperatures or ledgers.
+	double twoBodyConductedHeatKJ(long double capacityAKJPerK,
+		long double capacityBKJPerK, long double temperatureAC,
+		long double temperatureBC, long double conductanceKWPerK,
+		long double seconds);
 	struct PassiveExchangeLeaf
 	{
 		double capacityKJPerK{0.0};
