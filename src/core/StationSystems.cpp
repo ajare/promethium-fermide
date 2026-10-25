@@ -907,16 +907,19 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		if (!validateStationSystemsSettings(settings, diagnostic)) throw SerializationException(diagnostic);
 		mImpl = std::make_unique<Impl>(settings.systemsStepWorldTicks, baseStepSeconds);
 		mImpl->settings = settings; mImpl->snapshot.enabled = settings.enabled;
+		// Wear-only runs also need their original rates pinned: accepted live
+		// settings changes must be journaled, never applied retroactively on replay.
 		if (std::any_of(settings.atmospheres.begin(), settings.atmospheres.end(),
 			[](auto const& a) { return a.fire.has_value(); })
 			|| std::any_of(settings.airlockCycles.begin(), settings.airlockCycles.end(),
 				[](auto const& c) { return c.interruptedCycle || c.interlockFailure.has_value(); })
 			|| std::any_of(settings.coolantLoops.begin(), settings.coolantLoops.end(),
-			[](auto const& loop) { return loop.coolantLeak.has_value() || loop.condition.has_value(); })
+			[](auto const& loop) { return loop.coolantLeak.has_value() || loop.condition.has_value()
+				|| loop.wear.has_value(); })
 			|| std::any_of(settings.sabatierReactors.begin(), settings.sabatierReactors.end(),
-				[](auto const& s) { return s.overtempRunaway.has_value(); })
+				[](auto const& s) { return s.overtempRunaway.has_value() || s.catalystDeactivation.has_value(); })
 			|| std::any_of(settings.methaneProcessors.begin(), settings.methaneProcessors.end(),
-				[](auto const& s) { return s.overtempRunaway.has_value(); })
+				[](auto const& s) { return s.overtempRunaway.has_value() || s.catalystDeactivation.has_value(); })
 			// #844: a thermal-plant fault opt-in pins the initial settings
 			// too, so a later live retune of a leak rate cannot make the
 			// replay block disagree with the parameters its frozen
@@ -929,7 +932,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 					|| radiator.repairParts.has_value(); })
 			|| std::any_of(settings.heatEngines.begin(), settings.heatEngines.end(),
 				[](auto const& engine) { return engine.mechanicalSeizure
-					|| engine.repairParts.has_value(); })
+					|| engine.repairParts.has_value() || engine.efficiencyDrift.has_value(); })
 			// #845: the power-source fault opt-ins pin the initial settings
 			// for the same reason. A replay rebuilds the machine from these
 			// settings before replaying its commands, so if the pin carried
@@ -937,18 +940,20 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			// commanded later would crank - and succeed - long before its
 			// `failed-start` Fault was ever injected.
 			|| std::any_of(settings.generators.begin(), settings.generators.end(),
-				[](auto const& generator) { return generator.failedStart; })
+				[](auto const& generator) { return generator.failedStart || generator.fouledInjector.has_value(); })
 			|| std::any_of(settings.solarArrays.begin(), settings.solarArrays.end(),
 				[](auto const& array) { return array.stringLoss.has_value()
-					|| array.trackingFailure.has_value(); })
+					|| array.trackingFailure.has_value() || array.cellDegradation.has_value(); })
 			|| std::any_of(settings.batteries.begin(), settings.batteries.end(),
-				[](auto const& battery) { return battery.thermalRunaway.has_value(); })
+				[](auto const& battery) { return battery.thermalRunaway.has_value() || battery.capacityFade.has_value(); })
 			|| std::any_of(settings.waterTreatments.begin(), settings.waterTreatments.end(),
-				[](auto const& t) { return t.breakthrough; })
+				[](auto const& t) { return t.breakthrough || t.membraneFouling.has_value(); })
 			|| std::any_of(settings.electrolyzers.begin(), settings.electrolyzers.end(),
-				[](auto const& c) { return c.catalystPoisoning.has_value(); })
+				[](auto const& c) { return c.catalystPoisoning.has_value() || c.membraneDegradation.has_value(); })
+			|| std::any_of(settings.co2Captures.begin(), settings.co2Captures.end(),
+				[](auto const& c) { return c.absorbentDegradation.has_value(); })
 			|| std::any_of(settings.fuelCells.begin(), settings.fuelCells.end(),
-				[](auto const& c) { return c.catalystPoisoning.has_value(); }))
+				[](auto const& c) { return c.catalystPoisoning.has_value() || c.stackDegradation.has_value(); }))
 			mImpl->faultReplayInitialSettings = settings;
 		mImpl->snapshot.systemsStepWorldTicks = settings.systemsStepWorldTicks;
 		mImpl->snapshot.systemsTimestepSeconds = mImpl->clock.stepSeconds();

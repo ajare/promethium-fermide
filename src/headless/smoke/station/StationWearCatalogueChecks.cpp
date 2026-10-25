@@ -402,9 +402,55 @@ void wearCataloguePermanence(smoke::Context const&)
 		"lowering the wear ceiling healed fade that had already accumulated");
 }
 
+template<class Serializer>
+void retunedReplay(core::StationSystemsRuntime& run)
+{
+	auto const bytes = replayBytes<Serializer>(run);
+	auto in = Serializer::fromString(bytes); in->deserialize(); in->beginMap("root");
+	auto restored = core::StationSystemsRuntime::readFaultReplay(*in, run.effectiveSettings(), 0.25f);
+	in->endMap();
+	require(restored->snapshot() == run.snapshot() && restored->events() == run.events(),
+		"retuned catalogue Wear-only replay lost historical rates");
+	require(replayBytes<Serializer>(*restored) == bytes, "retuned catalogue journal changed on reload");
+	auto const next = run.snapshot().worldTick * 0.25 + 60;
+	require(run.advanceTo(next) && restored->advanceTo(next)
+		&& restored->snapshot() == run.snapshot() && restored->events() == run.events(),
+		"retuned catalogue Wear-only continuation diverged");
+}
+
 void wearCatalogueReplay(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	// #857: exercise each opt-in in isolation, so another machine's Wear
+	// cannot accidentally pin the initial settings on its behalf.
+	auto checkRetune = [](auto settings, auto selectModel)
+	{
+		for (auto& a : settings.solarArrays) a.cellDegradation.reset();
+		for (auto& g : settings.generators) g.fouledInjector.reset();
+		for (auto& e : settings.heatEngines) e.efficiencyDrift.reset();
+		for (auto& t : settings.waterTreatments) t.membraneFouling.reset();
+		for (auto& e : settings.electrolyzers) e.membraneDegradation.reset();
+		for (auto& c : settings.co2Captures) c.absorbentDegradation.reset();
+		for (auto& f : settings.fuelCells) f.stackDegradation.reset();
+		for (auto& s : settings.sabatierReactors) s.catalystDeactivation.reset();
+		for (auto& m : settings.methaneProcessors) m.catalystDeactivation.reset();
+		selectModel(settings) = catalogueModel(0.0, 0.2);
+		core::StationSystemsRuntime run(settings, 0.25f);
+		require(run.advanceTo(30), "isolated catalogue Wear setup failed");
+		selectModel(settings)->fadePerCalendarHour = 0.4;
+		require(run.updateSettings(settings) && run.advanceTo(60), "catalogue Wear retune failed");
+		retunedReplay<core::YamlSerializer>(run);
+		retunedReplay<core::BinarySerializer>(run);
+	};
+	checkRetune(processStation(), [](auto& s) -> auto& { return s.solarArrays[0].cellDegradation; });
+	checkRetune(processStation(), [](auto& s) -> auto& { return s.waterTreatments[0].membraneFouling; });
+	checkRetune(processStation(), [](auto& s) -> auto& { return s.electrolyzers[0].membraneDegradation; });
+	checkRetune(processStation(), [](auto& s) -> auto& { return s.co2Captures[0].absorbentDegradation; });
+	checkRetune(processStation(), [](auto& s) -> auto& { return s.sabatierReactors[0].catalystDeactivation; });
+	checkRetune(processStation(), [](auto& s) -> auto& { return s.methaneProcessors[0].catalystDeactivation; });
+	checkRetune(dispatchStation(), [](auto& s) -> auto& { return s.generators[0].fouledInjector; });
+	checkRetune(dispatchStation(), [](auto& s) -> auto& { return s.heatEngines[0].efficiencyDrift; });
+	checkRetune(dispatchStation(), [](auto& s) -> auto& { return s.fuelCells[0].stackDegradation; });
 	// Catalogue wear integrates over the run with no client command at
 	// all, so a save of a worn station needs the replay block and must
 	// come back with the fade exactly where it was left.

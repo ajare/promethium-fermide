@@ -281,9 +281,47 @@ void wearRepair(smoke::Context const&)
 	require(after.activeFaults.empty(), "the cleared fault came back without a fresh injection");
 }
 
+template<class Serializer>
+void retunedReplay(core::StationSystemsRuntime& run)
+{
+	auto const bytes = replayBytes<Serializer>(run);
+	auto in = Serializer::fromString(bytes); in->deserialize(); in->beginMap("root");
+	auto restored = core::StationSystemsRuntime::readFaultReplay(*in, run.effectiveSettings(), 0.25f);
+	in->endMap();
+	require(restored->snapshot() == run.snapshot() && restored->events() == run.events(),
+		"retuned Wear-only replay lost historical rates");
+	require(replayBytes<Serializer>(*restored) == bytes, "retuned Wear-only journal changed on reload");
+	auto const next = run.snapshot().worldTick * 0.25 + 60;
+	require(run.advanceTo(next) && restored->advanceTo(next)
+		&& restored->snapshot() == run.snapshot() && restored->events() == run.events(),
+		"retuned Wear-only continuation diverged");
+}
+
 void wearReplay(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	// #857: no injectable Fault, Condition or command may mask the missing
+	// initial-settings pin. Historical rates must survive a live retune.
+	auto calendar = fadeBatteryStation(0.0, 0.2);
+	core::StationSystemsRuntime retunedBank(calendar, 0.25f);
+	require(retunedBank.advanceTo(900)
+		&& retunedBank.updateNode<core::BatterySettings>("bank",
+			[](auto& b) { b.capacityFade->fadePerCalendarHour = 0.4; })
+		&& retunedBank.advanceTo(1800), "Wear-only battery retune failed");
+	require(std::abs(retunedBank.snapshot().power.batteries[0].wearFraction - 0.15) < 1e-9,
+		"battery retune repriced historical Wear");
+	retunedReplay<core::YamlSerializer>(retunedBank);
+	retunedReplay<core::BinarySerializer>(retunedBank);
+	auto loopOnly = wearLoopStation();
+	loopOnly.coolantLoops[0].coolantLeak.reset();
+	loopOnly.coolantLoops[0].repairParts.reset();
+	core::StationSystemsRuntime retunedLoop(loopOnly, 0.25f);
+	require(retunedLoop.advanceTo(30)
+		&& retunedLoop.updateNode<core::CoolantLoopSettings>("loop",
+			[](auto& l) { l.wear->fadePerOperatingHour = 0.2; })
+		&& retunedLoop.advanceTo(60), "Wear-only loop retune failed");
+	retunedReplay<core::YamlSerializer>(retunedLoop);
+	retunedReplay<core::BinarySerializer>(retunedLoop);
 	// A wear-only run needs the replay block with no client command at
 	// all: the fade integrated over the run must survive the save.
 	auto batteryOnly = fadeBatteryStation(0.2, 0.0005);
@@ -482,6 +520,10 @@ void wearOptIn(smoke::Context const&)
 	require(yaml.find("fadePerCycle") == std::string::npos
 		&& yaml.find("capacityFade") == std::string::npos,
 		"a wear-absent battery carried wear fields on the wire");
+	require(!unworn.hasFaultReplayState(), "feature-absent run acquired replay state");
+	require(unworn.updateNode<core::BatterySettings>("bank",
+		[](auto& b) { b.maxChargeKW = 9; }) && !unworn.hasFaultCommands()
+		&& !unworn.hasFaultReplayState(), "feature-absent retune acquired a replay journal");
 	// Repair-only documents keep stamping 115 exactly as before #843.
 	auto repairOnly = wearLoopStation();
 	repairOnly.coolantLoops[0].wear.reset();
