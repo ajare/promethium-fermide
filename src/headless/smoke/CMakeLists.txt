@@ -322,7 +322,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         wearLifecycle wearRepair wearReplay wearTransactions wearOptIn
         wearCatalogueFade wearCataloguePermanence wearCatalogueReplay
         wearCatalogueTransactions wearCatalogueOptIn
-        thermalPlantInjection thermalPlantRepairs thermalPlantOutages
+        thermalPlantMonitors thermalPlantInjection thermalPlantRepairs thermalPlantOutages
         thermalPlantReplay thermalPlantOptIn thermalPlantLiveTuning
         powerSourceInjection powerSourceRunaway powerSourceFailedStart
         powerSourceReplay powerSourceOptIn powerSourceLiveTuning

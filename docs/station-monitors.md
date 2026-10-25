@@ -1,6 +1,6 @@
-# Station Monitors: atmosphere, store and connection defaults (#867, #871)
+# Station Monitors: atmosphere, store, connection and thermal-plant defaults (#867, #871, #873)
 
-`atmosphere` is the registered Monitor subject type, and it publishes the full
+`atmosphere` is a registered Monitor subject type, and it publishes the full
 spec §3.1 Metric set: `oxygenPartialPressureKPa`, `carbonDioxidePartialPressureKPa`,
 `pressureKPa`, `temperatureC`, `relativeHumidity`, `toxicConcentration` (derived:
 retained toxic mass per cubic metre), `oxygenUnmetKg` and `leakRateKgPerS`.
@@ -215,4 +215,49 @@ Focused Release proofs:
 ```sh
 ctest --test-dir build-linux -C Release -j 16 --output-on-failure \
   -R '^station-monitor(StoreConnectionTable|StoreBoundaries|ConnectionBoundaries|WaterStream)$'
+```
+
+
+## Thermal plant (#873)
+
+`stationThermalPlantMonitorTemplates(subjectType)` registers four coolant-loop,
+three chiller, two heat-engine, and two radiator rules. Expansion via
+`stationThermalPlantDefaultMonitors(settings)` resolves authored temperature
+bounds, and `applyStationThermalPlantDefaultMonitors(settings)` appends missing
+IDs without replacing authored rules. Every rule starts disabled. Thermal node
+inspectors list these defaults without modifying the draft; an accepted edit
+materializes them through the validated command. Rename/delete uses the same
+subject mapping as the inspector and cascades Monitor references.
+
+| Subject | Metric | Unit | Source |
+|---|---|---|---|
+| `coolant-loop` | `fillFraction`, `circulationFraction`, `condition` | fraction | same-named coolant-loop snapshot fields |
+| `coolant-loop` | `loopTemperatureC` | °C | same-named snapshot field |
+| `chiller` | `coolingUnmetFraction` | fraction | snapshot `coolingUnmetKW / coolingDemandKW`; zero with no demand |
+| `chiller` | `sinkOverMaxCondensing` | boolean | snapshot flag mapped to 1/0 |
+| `chiller` | `refrigerantFraction` | fraction | snapshot `refrigerantKg / refrigerantChargeKg`; 1 with no finite-charge opt-in |
+| `heat-engine` | `tripped` | boolean | snapshot `status == StationHeatEngineStatus::Tripped`; mechanical seizure alone is not a Trip |
+| `heat-engine` | `hotHeadroomC` | °C | snapshot `hotTemperatureC - minHotTemperatureC`, using the machine's published interface temperature |
+| `radiator` | `remainingAreaFraction` | fraction | same-named radiator snapshot field; surviving coolant-bearing panel area |
+| `radiator` | `reservoirTemperatureC` | °C | temperature of the radiator's supplying reservoir in the same snapshot |
+
+Coolant, chiller and engine rules match specification §4.5. Freeze risk expands
+to the authored freeze-protection setpoint + 2 °C. Radiator duty capability is
+watched by an area-low Advisory below 0.9 (on 120 s, off 60 s, **[rated]**),
+which catches panel-puncture coolant loss. Its temperature Advisory watches above
+the supplying reservoir's authored maximum minus 5 °C (on/off 120 s,
+**[prov]**). These are capability and temperature symptoms, not a guess at
+unpublished demanded radiator duty. Resolved thresholds remain authored values;
+reapplying defaults never silently retunes an existing Monitor.
+
+Headless coverage uses coolant-leak, refrigerant-leak and panel-puncture Faults
+and physical temperature gates, asserting each default's fire boundary at both
+0.25 s and 1 s timesteps and protection/gradient auto-clear boundaries. A
+compressor failure removes cooling demand as well as capacity, so it does not
+fabricate unmet-demand telemetry. The cooling-unmet case instead injects a
+coolant leak that restricts circulation while cooling demand remains present.
+
+```sh
+ctest --test-dir build-linux -C Release -j 16 --output-on-failure \
+  -R '^station-(thermalPlantMonitors|editor-monitor-inspector)$'
 ```

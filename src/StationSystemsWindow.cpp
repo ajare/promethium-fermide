@@ -870,7 +870,9 @@ void StationSystemsWindow::renderFlowInspectorContents(
 	// The same seam the form tab uses (#652), fields only: removal stays a
 	// list-surface operation, and the inspector owns no list.
 	editor->renderEntry(draft, size_t(selected->index));
-	if (selected->type == "Atmosphere") renderMonitorInspector(draft, selected->id);
+	if (selected->type == "Atmosphere" || selected->type == "Coolant loop"
+		|| selected->type == "Chiller" || selected->type == "Heat engine" || selected->type == "Radiator")
+		renderMonitorInspector(draft, selected->id);
 	ImGui::Separator();
 	ImGui::TextDisabled("Edits change the Configuration draft only. Nothing is applied to the World from here.");
 	// Live controls sit below the draft fields and are labelled, because they
@@ -890,10 +892,13 @@ void StationSystemsWindow::renderMonitorInspector(core::StationSystemsSettings& 
 	// by selecting it. The first accepted command materializes the default set.
 	auto effective = draft;
 	core::applyStationAtmosphereDefaultMonitors(effective);
+	core::applyStationThermalPlantDefaultMonitors(effective);
+	auto const subjectType = core::stationMonitorSubjectTypeForNodeType(mFlow.selectedNode()->type);
 	for (auto monitor : effective.monitors)
 	{
-		if (monitor.subjectType != "atmosphere" || monitor.subjectId != subjectId) continue;
-		auto const* metric = core::findStationAtmosphereMetric(monitor.metric);
+		if (monitor.subjectType != subjectType || monitor.subjectId != subjectId) continue;
+		auto const& catalogue = core::stationMonitorMetricCatalogue(subjectType);
+		auto metric = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& entry) { return entry.name == monitor.metric; });
 		ImGui::PushID(monitor.id.c_str());
 		bool changed = ImGui::Checkbox(("Enabled##" + monitor.id).c_str(), &monitor.enabled);
 		ImGui::SameLine();
@@ -901,7 +906,7 @@ void StationSystemsWindow::renderMonitorInspector(core::StationSystemsSettings& 
 			core::stationMonitorProvenanceTag(monitor.provenance).data());
 		ImGui::TextWrapped("%s: %s %g %s; on %gs, off %gs; %s", monitor.metric.c_str(),
 			monitor.rule.direction == core::AlertDirection::Above ? "above" : "below",
-			monitor.rule.threshold, metric ? metric->unit.data() : "",
+			monitor.rule.threshold, metric != catalogue.end() ? metric->unit.data() : "",
 			monitor.rule.triggerOnSeconds, monitor.rule.triggerOffSeconds,
 			monitor.severity == core::AlertSeverity::Critical ? "Critical" :
 			monitor.severity == core::AlertSeverity::Warning ? "Warning" : "Advisory");

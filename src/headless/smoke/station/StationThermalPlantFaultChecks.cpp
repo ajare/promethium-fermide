@@ -119,6 +119,129 @@ core::StationSystemsSettings thermalPlantStation()
 	return s;
 }
 
+void thermalPlantMonitors(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	auto base = thermalPlantStation();
+	base.coolantLoops[0].coolantLeak = core::CoolantLeakSettings{"room", 60};
+	core::applyStationThermalPlantDefaultMonitors(base);
+	require(base.monitors.size() == 11, "thermal default coverage incomplete");
+	std::string diagnostic;
+	require(core::validateStationMonitors(base, diagnostic), diagnostic.c_str());
+	auto const original = base.monitors;
+	core::applyStationThermalPlantDefaultMonitors(base);
+	require(base.monitors == original, "thermal defaults not idempotent");
+	for (auto const& m : original)
+	{
+		require(!m.enabled && m.provenance != core::MonitorProvenance::Custom, "default enabled or lacks provenance");
+		require(core::stationMonitorSubjectExists(base, m.subjectType, m.subjectId), "default subject unresolved");
+	}
+	// Test the complete table, including dynamically resolved authored bounds.
+	std::vector<core::AlertRule> const rules{
+		{0.8, core::AlertDirection::Below, 120, 60}, {0.5, core::AlertDirection::Below, 60, 60},
+		{0.9, core::AlertDirection::Below, 60, 30}, {7, core::AlertDirection::Below, 60, 120},
+		{0.1, core::AlertDirection::Above, 120, 60}, {0, core::AlertDirection::Above, 10, 30},
+		{0.8, core::AlertDirection::Below, 300, 120}, {0, core::AlertDirection::Above, 0, 0},
+		{5, core::AlertDirection::Below, 120, 120}, {0.9, core::AlertDirection::Below, 120, 60},
+		{295, core::AlertDirection::Above, 120, 120}};
+	std::vector<core::AlertSeverity> const severities{
+		core::AlertSeverity::Warning, core::AlertSeverity::Critical, core::AlertSeverity::Warning,
+		core::AlertSeverity::Critical, core::AlertSeverity::Warning, core::AlertSeverity::Critical,
+		core::AlertSeverity::Warning, core::AlertSeverity::Critical, core::AlertSeverity::Advisory,
+		core::AlertSeverity::Advisory, core::AlertSeverity::Advisory};
+	for (size_t i = 0; i < rules.size(); ++i)
+	{
+		require(original[i].rule == rules[i] && original[i].severity == severities[i], "thermal default rule differs");
+		require(original[i].provenance == (i == 8 || i == 10 ? core::MonitorProvenance::Provisional
+			: core::MonitorProvenance::Rated), "thermal provenance differs");
+	}
+	base.monitors[0].rule.threshold = 0.7;
+	core::applyStationThermalPlantDefaultMonitors(base);
+	require(base.monitors[0].rule.threshold == 0.7, "thermal reapplication overwrote tuning");
+	base.monitors = original;
+	core::StationConfigurationDocument document; document.settings = base;
+	core::StationConfigurationDocument loaded;
+	require(core::parseStationConfiguration(core::serializeStationConfiguration(document), loaded, &diagnostic)
+		&& loaded.settings == base, "thermal Monitors did not round-trip");
+	core::StationSystemsRuntime disabled(base, 1);
+	require(disabled.injectFault("loop", "coolant-leak", {}) && disabled.advanceTo(400)
+		&& disabled.snapshot().activeAlerts.empty() && disabled.snapshot().closedAlerts.empty(),
+		"disabled thermal defaults emitted Alerts");
+	// A separate real runtime per symptom prevents unrelated Alerts from
+	// masking the boundary. Faults are applied through the production queue.
+	for (auto dt : {0.25f, 1.0f})
+	for (size_t index = 0; index < original.size(); ++index)
+	{
+		auto s = base;
+		auto m = original[index]; m.enabled = true; s.monitors = {m};
+		std::string faultTarget, faultMode;
+		if (index <= 2) { faultTarget = "loop"; faultMode = "coolant-leak"; }
+		if (index == 3) { s.coolantLoops[0].startingTemperatureC = 0; s.coolantLoops[0].exchangerConductanceKWPerK = 0; }
+		if (index == 4) { faultTarget = "loop"; faultMode = "coolant-leak"; }
+		if (index == 5) s.chillers[0].maxCondensingTemperatureC = 24;
+		if (index == 6) { faultTarget = "chiller"; faultMode = "refrigerant-leak"; }
+		if (index == 7) s.heatEngines[0].maxSinkTemperatureC = 19;
+		if (index == 8) s.heatEngines[0].minHotTemperatureC = 89;
+		if (index == 9) { faultTarget = "rad"; faultMode = "panel-puncture"; }
+		if (index == 10)
+		{
+			s.thermalReservoirs[0].startingTemperatureC = 299;
+			s.thermalReservoirs[0].heatCapacityKJPerK = 1e9;
+		}
+		core::StationSystemsRuntime run(s, dt);
+		if (!faultMode.empty()) require(run.injectFault(faultTarget, faultMode, {}), "symptom fault refused");
+		double firstOutside = 0;
+		bool fired = false;
+		for (double t = dt; t <= 400; t += dt)
+		{
+			require(run.advanceTo(t), "thermal Monitor drive failed");
+			auto snap = run.snapshot();
+			auto value = core::readStationMonitorMetric(s, snap, m.subjectType, m.subjectId, m.metric);
+			require(value.has_value(), "thermal metric unavailable");
+			bool outside = m.rule.direction == core::AlertDirection::Above ? *value > m.rule.threshold : *value < m.rule.threshold;
+			if (outside && !firstOutside) firstOutside = t;
+			if (!outside) firstOutside = 0;
+			bool due = firstOutside && t - firstOutside + dt >= m.rule.triggerOnSeconds;
+			require((!snap.activeAlerts.empty()) == due, ("thermal Alert fired off boundary: " + m.id).c_str());
+			if (due)
+			{
+				auto const& a = snap.activeAlerts[0];
+				require(a.firedAtSeconds == t && a.severity == m.severity && a.provenance == m.provenance
+					&& a.currentValue == *value, "thermal Alert metadata wrong");
+				fired = true; break;
+			}
+		}
+		require(fired, ("thermal symptom never fired: " + m.id + " value=" + std::to_string(
+			core::readStationMonitorMetric(s, run.snapshot(), m.subjectType, m.subjectId, m.metric).value_or(-999))
+			+ " threshold=" + std::to_string(m.rule.threshold)).c_str());
+		// Recover protection/gradient symptoms by changing the physical gate,
+		// leaving the Monitor and its persistence state untouched.
+		if (index == 5 || index == 7 || index == 8)
+		{
+			double const fireTime = run.snapshot().elapsedSeconds;
+			if (index == 5) s.chillers[0].maxCondensingTemperatureC = 1000;
+			if (index == 7) s.heatEngines[0].maxSinkTemperatureC = 1000;
+			if (index == 8) s.heatEngines[0].minHotTemperatureC = 0;
+			require(run.updateSettings(s), "physical recovery refused");
+			double const clearTime = fireTime + std::max<double>(dt, m.rule.triggerOffSeconds);
+			if (clearTime - dt > fireTime)
+				require(run.advanceTo(clearTime - dt) && run.snapshot().activeAlerts.size() == 1,
+					"thermal Alert cleared early");
+			require(run.advanceTo(clearTime), "thermal recovery drive failed");
+			auto recovered = run.snapshot();
+			require(recovered.activeAlerts.empty() && recovered.closedAlerts.size() == 1
+				&& recovered.closedAlerts[0].clearedAtSeconds == clearTime
+				&& recovered.closedAlerts[0].clearReason == core::AlertClearReason::AutoClear,
+				"thermal Alert did not auto-clear at boundary");
+		}
+	}
+	// No finite charge model must not look like an empty refrigerant tank.
+	base.chillers[0].refrigerantLeak.reset(); base.monitors.clear();
+	core::StationSystemsRuntime uncharged(base, 1);
+	require(uncharged.advanceTo(1) && core::readStationMonitorMetric(base, uncharged.snapshot(),
+		"chiller", "chiller", "refrigerantFraction") == 1.0, "unmodelled charge reported empty");
+}
+
 int countCategory(core::StationSystemsRuntime const& run, std::string const& category)
 {
 	auto const events = run.events();
@@ -712,6 +835,7 @@ void thermalPlantLiveTuning(smoke::Context const&)
 }
 void registerStationThermalPlantFaultChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"thermalPlantMonitors", thermalPlantMonitors});
 	checks.push_back({"thermalPlantInjection", thermalPlantInjection});
 	checks.push_back({"thermalPlantRepairs", thermalPlantRepairs});
 	checks.push_back({"thermalPlantOutages", thermalPlantOutages});

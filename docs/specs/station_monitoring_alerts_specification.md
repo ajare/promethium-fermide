@@ -95,9 +95,11 @@ ordinary derived Metrics, not special rule types — one rule shape everywhere.
 | Coolant loop | `condition` | fraction | snapshot |
 | Chiller | `coolingUnmetFraction` | fraction of demand | derived: coolingUnmetKW / max(coolingDemandKW, ε) |
 | Chiller | `sinkOverMaxCondensing` | boolean→1/0 | snapshot flag |
-| Chiller | `refrigerantFraction` | fraction | derived: refrigerantKg / refrigerantChargeKg |
+| Chiller | `refrigerantFraction` | fraction | derived: refrigerantKg / refrigerantChargeKg; 1 with no finite-charge opt-in |
 | Heat engine | `tripped` | boolean→1/0 | status == Tripped |
-| Heat engine | `hotHeadroomC` | °C | derived: hot reservoir temp − minHotTemperatureC |
+| Heat engine | `hotHeadroomC` | °C | derived: snapshot hotTemperatureC − minHotTemperatureC (published machine interface) |
+| Radiator | `remainingAreaFraction` | fraction | snapshot: surviving coolant-bearing panel area |
+| Radiator | `reservoirTemperatureC` | °C | supplying reservoir temperature in the same snapshot |
 | ECLSS machines | `unmetFraction` | fraction of demand | derived per machine: unmet / max(demanded, ε) |
 | ECLSS machines | `condition` | fraction | snapshot where present |
 | Resource store | `usableFraction` | fraction of capacity | derived: currentQualified / capacity |
@@ -185,6 +187,8 @@ human/environmental baselines start human-realistic and must be consciously move
 | Refrigerant charge low | refrigerantFraction below 0.8, on 300 s, off 120 s | Warning | [rated] leak symptom |
 | Engine tripped | tripped = 1, on 0 s, off 0 s | Critical | [rated] |
 | Engine gradient thin | hotHeadroomC below 5, on 120 s, off 120 s | Advisory | [prov] |
+| Radiator area low | remainingAreaFraction below 0.9, on 120 s, off 60 s | Advisory | [rated] surviving duty capability; panel-puncture symptom |
+| Radiator temperature high | reservoirTemperatureC above supplying reservoir maxTemperatureC − 5, on 120 s, off 120 s | Advisory | [prov] near service limit |
 
 ### 4.6 ECLSS machines (water treatment, electrolyzer, CO2 capture, Sabatier, methane processor, fuel cell, microbial processor)
 

@@ -122,11 +122,23 @@ std::vector<StationMonitorMetric> const& stationMonitorMetricCatalogue(std::stri
 		for (auto const& metric : stationAtmosphereMetricCatalogue()) result.push_back({metric.name, metric.unit});
 		return result;
 	}();
+	static std::vector<StationMonitorMetric> const loops{{"fillFraction", "fraction"}, {"circulationFraction", "fraction"}, {"loopTemperatureC", "°C"}, {"condition", "fraction"}};
+	static std::vector<StationMonitorMetric> const chillers{{"coolingUnmetFraction", "fraction"}, {"sinkOverMaxCondensing", "boolean"}, {"refrigerantFraction", "fraction"}};
+	static std::vector<StationMonitorMetric> const engines{{"tripped", "boolean"}, {"hotHeadroomC", "°C"}};
+	static std::vector<StationMonitorMetric> const radiators{{"remainingAreaFraction", "fraction"}, {"reservoirTemperatureC", "°C"}};
+	if (type == "coolant-loop") return loops;
+	if (type == "chiller") return chillers;
+	if (type == "heat-engine") return engines;
+	if (type == "radiator") return radiators;
 	static std::vector<StationMonitorMetric> const empty;
 	return type == "store" ? stores : type == "connection" ? connections : type == "atmosphere" ? atmosphere : empty;
 }
 bool stationMonitorSubjectExists(StationSystemsSettings const& settings, std::string_view type, std::string_view id)
 {
+	if (type == "coolant-loop") return findId(settings.coolantLoops, id) != settings.coolantLoops.end();
+	if (type == "chiller") return findId(settings.chillers, id) != settings.chillers.end();
+	if (type == "heat-engine") return findId(settings.heatEngines, id) != settings.heatEngines.end();
+	if (type == "radiator") return findId(settings.radiators, id) != settings.radiators.end();
 	if (type == "atmosphere") return findId(settings.atmospheres, id) != settings.atmospheres.end();
 	if (type == "store") return findId(settings.stores, id) != settings.stores.end();
 	if (type == "connection")
@@ -144,6 +156,40 @@ std::optional<double> readStationMonitorMetric(StationSystemsSettings const& set
 		auto subject = findId(snapshot.atmospheres, id);
 		auto entry = findStationAtmosphereMetric(metric);
 		if (subject != snapshot.atmospheres.end() && entry) return entry->read(*subject);
+	}
+	if (type == "coolant-loop")
+	{
+		auto s = findId(snapshot.coolantLoops, id);
+		if (s == snapshot.coolantLoops.end()) return {};
+		if (metric == "fillFraction") return s->fillFraction;
+		if (metric == "circulationFraction") return s->circulationFraction;
+		if (metric == "loopTemperatureC") return s->loopTemperatureC;
+		return s->condition;
+	}
+	if (type == "chiller")
+	{
+		auto s = findId(snapshot.chillers, id);
+		if (s == snapshot.chillers.end()) return {};
+		if (metric == "coolingUnmetFraction") return s->coolingDemandKW > 0 ? s->coolingUnmetKW / s->coolingDemandKW : 0;
+		if (metric == "sinkOverMaxCondensing") return s->sinkOverMaxCondensing ? 1.0 : 0.0;
+		// No finite-charge opt-in means no charge-loss symptom, not an empty machine.
+		return s->refrigerantChargeKg > 0 ? s->refrigerantKg / s->refrigerantChargeKg : 1.0;
+	}
+	if (type == "heat-engine")
+	{
+		auto s = findId(snapshot.heatEngines, id);
+		if (s == snapshot.heatEngines.end()) return {};
+		if (metric == "tripped") return s->status == StationHeatEngineStatus::Tripped ? 1.0 : 0.0;
+		return s->hotTemperatureC - s->minHotTemperatureC;
+	}
+	if (type == "radiator")
+	{
+		auto s = findId(snapshot.thermal.radiators, id);
+		if (s == snapshot.thermal.radiators.end()) return {};
+		if (metric == "remainingAreaFraction") return s->remainingAreaFraction;
+		auto r = findId(snapshot.thermal.reservoirs, s->reservoirId);
+		if (r != snapshot.thermal.reservoirs.end()) return r->temperatureC;
+		return {};
 	}
 	if (type == "store")
 	{
@@ -210,6 +256,59 @@ std::vector<StationMonitorSettings> stationStoreConnectionDefaultMonitors(Statio
 				if (row.metric != "usableFraction") add("connection", id, row);
 	}
 	return result;
+}
+std::vector<StationMonitorTemplate> const& stationThermalPlantMonitorTemplates(std::string_view type)
+{
+	using enum AlertDirection; using enum AlertSeverity; using enum MonitorProvenance;
+	static std::vector<StationMonitorTemplate> const loops{
+		{"fill-low", "fillFraction", {0.8, Below, 120, 60}, Warning, Rated},
+		{"fill-critical", "fillFraction", {0.5, Below, 60, 60}, Critical, Rated},
+		{"circulation-low", "circulationFraction", {0.9, Below, 60, 30}, Warning, Rated},
+		// Expansion adds the loop's authored freeze-protection setpoint.
+		{"freeze-risk", "loopTemperatureC", {2, Below, 60, 120}, Critical, Rated}};
+	static std::vector<StationMonitorTemplate> const chillers{
+		{"cooling-unmet", "coolingUnmetFraction", {0.1, Above, 120, 60}, Warning, Rated},
+		{"sink-over-max", "sinkOverMaxCondensing", {0, Above, 10, 30}, Critical, Rated},
+		{"refrigerant-low", "refrigerantFraction", {0.8, Below, 300, 120}, Warning, Rated}};
+	static std::vector<StationMonitorTemplate> const engines{
+		{"tripped", "tripped", {0, Above, 0, 0}, Critical, Rated},
+		{"gradient-thin", "hotHeadroomC", {5, Below, 120, 120}, Advisory, Provisional}};
+	static std::vector<StationMonitorTemplate> const radiators{
+		{"area-low", "remainingAreaFraction", {0.9, Below, 120, 60}, Advisory, Rated},
+		// Expansion uses the supplying reservoir's authored service ceiling.
+		{"temperature-high", "reservoirTemperatureC", {0, Above, 120, 120}, Advisory, Provisional}};
+	static std::vector<StationMonitorTemplate> const empty;
+	return type == "coolant-loop" ? loops : type == "chiller" ? chillers
+		: type == "heat-engine" ? engines : type == "radiator" ? radiators : empty;
+}
+std::vector<StationMonitorSettings> stationThermalPlantDefaultMonitors(StationSystemsSettings const& settings)
+{
+	std::vector<StationMonitorSettings> result;
+	auto add = [&](std::string const& type, auto const& entries) {
+		for (auto const& item : entries)
+			for (auto const& row : stationThermalPlantMonitorTemplates(type))
+				result.push_back({type + "-" + item.id + "-" + std::string(row.key), type, item.id,
+					std::string(row.metric), row.rule, row.severity, false, row.provenance});
+	};
+	add("coolant-loop", settings.coolantLoops); add("chiller", settings.chillers);
+	add("heat-engine", settings.heatEngines); add("radiator", settings.radiators);
+	for (auto& monitor : result)
+	{
+		if (monitor.subjectType == "coolant-loop" && monitor.metric == "loopTemperatureC")
+			monitor.rule.threshold += findId(settings.coolantLoops, monitor.subjectId)->freezeProtectionSetpointC;
+		if (monitor.subjectType == "radiator" && monitor.metric == "reservoirTemperatureC")
+		{
+			auto panel = findId(settings.radiators, monitor.subjectId);
+			auto reservoir = findId(settings.thermalReservoirs, panel->reservoirId);
+			if (reservoir != settings.thermalReservoirs.end()) monitor.rule.threshold = reservoir->maxTemperatureC - 5;
+		}
+	}
+	return result;
+}
+void applyStationThermalPlantDefaultMonitors(StationSystemsSettings& settings)
+{
+	for (auto const& candidate : stationThermalPlantDefaultMonitors(settings))
+		if (findId(settings.monitors, candidate.id) == settings.monitors.end()) settings.monitors.push_back(candidate);
 }
 void applyStationStoreConnectionDefaultMonitors(StationSystemsSettings& settings)
 {

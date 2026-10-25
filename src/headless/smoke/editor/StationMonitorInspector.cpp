@@ -25,6 +25,17 @@ void monitorInspector(smoke::Context const& context)
 	room.volumeM3 = 100; room.thermalCapacityKJPerK = 10000;
 	room.minPressureKPa = 90; room.maxPressureKPa = 110;
 	seed.atmospheres = {room};
+	core::ThermalReservoirSettings reservoir;
+	reservoir.id = "sink"; reservoir.thermalClass = "moderate";
+	reservoir.heatCapacityKJPerK = 10000; reservoir.startingTemperatureC = 20;
+	reservoir.minTemperatureC = -50; reservoir.maxTemperatureC = 100;
+	seed.thermalReservoirs = {reservoir};
+	core::CoolantLoopSettings loop;
+	loop.id = "loop"; loop.reservoirId = "sink";
+	loop.coolantCapacityKg = loop.startingCoolantKg = 100;
+	loop.ratedFlowKgPerS = 10; loop.pumpPowerKW = 1;
+	loop.specificHeatKJPerKgK = 4; loop.startingTemperatureC = 20;
+	seed.coolantLoops = {loop};
 	std::string diagnostic;
 	bool const configured = world->configureStationSystems(seed, false, &diagnostic);
 	smoke::require(configured, ("configure seed: " + diagnostic).c_str());
@@ -53,7 +64,7 @@ void monitorInspector(smoke::Context const& context)
 		}
 		auto start = window.draft();
 		driver.click(ctx, "**/Enabled##room-po2-low"); ctx->Yield(3);
-		REQ(window.draft().monitors.size() == 12 && window.draft().monitors[0].enabled,
+		REQ(window.draft().monitors.size() == 16 && window.draft().monitors[0].enabled,
 			"enable did not materialize the disabled default set");
 		REQ(std::count_if(window.draft().monitors.begin(), window.draft().monitors.end(),
 			[](auto const& m) { return m.enabled; }) == 1, "other Monitors enabled unexpectedly");
@@ -107,6 +118,20 @@ void monitorInspector(smoke::Context const& context)
 		driver.click(ctx, "Open configuration"); ctx->Yield(3);
 		REQ(window.draft() == authored, "save/load lost Monitor section");
 		REQ(world->getStationSystemsSettings() == seed && !world->isModified(), "draft edit changed World");
+		REQ(window.flowNodeRect("Coolant loop", "loop", &rect), "loop missing from canvas");
+		ctx->MouseTeleportToPos({(rect.x + rect.z) / 2, (rect.y + rect.w) / 2});
+		ctx->Yield(2); ctx->MouseClick(); ctx->Yield(3);
+		for (auto const& row : core::stationThermalPlantMonitorTemplates("coolant-loop"))
+		{
+			auto ref = "**/Enabled##coolant-loop-loop-" + std::string(row.key);
+			REQ(ctx->ItemInfo(ref.c_str(), ImGuiTestOpFlags_NoError)->ID != 0,
+				"thermal default missing from inspector");
+		}
+		driver.click(ctx, "**/Enabled##coolant-loop-loop-fill-low"); ctx->Yield(3);
+		auto const& monitors = window.draft().monitors;
+		REQ(std::any_of(monitors.begin(), monitors.end(), [](auto const& m) {
+			return m.id == "coolant-loop-loop-fill-low" && m.enabled;
+		}), "thermal enable did not commit through draft command");
 	});
 #undef REQ
 	smoke::require(driver.passed(), "Monitor inspector Test Engine workflow failed");
