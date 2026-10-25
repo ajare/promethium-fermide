@@ -930,6 +930,14 @@ namespace
 				return fail("subject does not exist");
 			auto const& rule = monitor.rule;
 			if (!std::isfinite(rule.threshold)) return fail("threshold must be finite");
+			if (monitor.subjectType == "atmosphere")
+			{
+				if (monitor.metric == "relativeHumidity"
+					&& (rule.threshold < 0 || rule.threshold > 1))
+					return fail("threshold must be in fraction range [0, 1]");
+				if (monitor.metric == "temperatureC" ? rule.threshold < -273.15 : rule.threshold < 0)
+					return fail("threshold is outside the metric's physical unit range");
+			}
 			if (!std::isfinite(rule.triggerOnSeconds) || rule.triggerOnSeconds < 0
 				|| !std::isfinite(rule.triggerOffSeconds) || rule.triggerOffSeconds < 0)
 				return fail("trigger times must be finite and non-negative");

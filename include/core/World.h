@@ -3518,6 +3518,10 @@ namespace core
 		void resetSimulation();
 
 		StationSystemsSettings getStationSystemsSettings() const { return mStationSystemsSettings; }
+		// Validated authoring command for a Configuration draft; never applies it
+		// to the running World. History is owned by the calling document.
+		static bool editStationMonitor(StationSystemsSettings& draft,
+			StationMonitorSettings monitor, std::string& diagnostic);
 		// Paused-only. After ticking, confirmation resets the complete World.
 		bool configureStationSystems(StationSystemsSettings settings, bool confirmWorldReset = false,
 			std::string* diagnostic = nullptr);

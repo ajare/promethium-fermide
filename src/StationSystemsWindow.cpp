@@ -870,6 +870,7 @@ void StationSystemsWindow::renderFlowInspectorContents(
 	// The same seam the form tab uses (#652), fields only: removal stays a
 	// list-surface operation, and the inspector owns no list.
 	editor->renderEntry(draft, size_t(selected->index));
+	if (selected->type == "Atmosphere") renderMonitorInspector(draft, selected->id);
 	ImGui::Separator();
 	ImGui::TextDisabled("Edits change the Configuration draft only. Nothing is applied to the World from here.");
 	// Live controls sit below the draft fields and are labelled, because they
@@ -879,6 +880,55 @@ void StationSystemsWindow::renderFlowInspectorContents(
 	// #849: the fault surface sits under the draft fields too, and for the
 	// same reason: it drives the running scenario, not the draft.
 	renderFaultControls(world, selected->type, selected->id);
+}
+
+void StationSystemsWindow::renderMonitorInspector(core::StationSystemsSettings& draft,
+	std::string const& subjectId)
+{
+	ImGui::SeparatorText("Monitors");
+	// Omitted defaults are presented without dirtying a legacy document merely
+	// by selecting it. The first accepted command materializes the default set.
+	auto effective = draft;
+	core::applyStationAtmosphereDefaultMonitors(effective);
+	for (auto monitor : effective.monitors)
+	{
+		if (monitor.subjectType != "atmosphere" || monitor.subjectId != subjectId) continue;
+		auto const* metric = core::findStationAtmosphereMetric(monitor.metric);
+		ImGui::PushID(monitor.id.c_str());
+		bool changed = ImGui::Checkbox(("Enabled##" + monitor.id).c_str(), &monitor.enabled);
+		ImGui::SameLine();
+		bool const expanded = ImGui::TreeNode(("Details##" + monitor.id).c_str(), "%s [%s]", monitor.id.c_str(),
+			core::stationMonitorProvenanceTag(monitor.provenance).data());
+		ImGui::TextWrapped("%s: %s %g %s; on %gs, off %gs; %s", monitor.metric.c_str(),
+			monitor.rule.direction == core::AlertDirection::Above ? "above" : "below",
+			monitor.rule.threshold, metric ? metric->unit.data() : "",
+			monitor.rule.triggerOnSeconds, monitor.rule.triggerOffSeconds,
+			monitor.severity == core::AlertSeverity::Critical ? "Critical" :
+			monitor.severity == core::AlertSeverity::Warning ? "Warning" : "Advisory");
+		if (expanded)
+		{
+			auto number = [&](char const* label, double& value) {
+				auto const key = monitor.id + "/" + label;
+				double& buffer = mMonitorBuffers.try_emplace(key, value).first->second;
+				ImGui::InputDouble((std::string(label) + "##" + monitor.id).c_str(), &buffer, 0, 0, "%.6g");
+				if (ImGui::IsItemDeactivatedAfterEdit()) { value = buffer; changed = true; }
+				if (!ImGui::IsItemActive()) buffer = value;
+			};
+			number("Threshold", monitor.rule.threshold);
+			int direction = monitor.rule.direction == core::AlertDirection::Above ? 0 : 1;
+			if (ImGui::Combo(("Direction##" + monitor.id).c_str(), &direction, "Above\0Below\0"))
+			{ monitor.rule.direction = direction == 0 ? core::AlertDirection::Above : core::AlertDirection::Below; changed = true; }
+			number("Trigger-on seconds", monitor.rule.triggerOnSeconds);
+			number("Trigger-off seconds", monitor.rule.triggerOffSeconds);
+			int severity = static_cast<int>(monitor.severity);
+			if (ImGui::Combo(("Severity##" + monitor.id).c_str(), &severity, "Advisory\0Warning\0Critical\0"))
+			{ monitor.severity = static_cast<core::AlertSeverity>(severity); changed = true; }
+			ImGui::TreePop();
+		}
+		if (changed) core::World::editStationMonitor(draft, monitor, mMonitorNotice);
+		ImGui::PopID();
+	}
+	if (!mMonitorNotice.empty()) ImGui::TextWrapped("Refused: %s", mMonitorNotice.c_str());
 }
 
 void StationSystemsWindow::renderPrefabDialInspector(core::StationSystemsSettings& draft)

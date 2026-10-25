@@ -329,6 +329,7 @@ set(editor_names
     # #870: the Alert dashboard, driven as the operator drives it.
     station/alertDashboardWorkflow
     station/alertDashboardNoScenario
+    station/monitorInspector
 )
 
 if(DEFINED LANE)

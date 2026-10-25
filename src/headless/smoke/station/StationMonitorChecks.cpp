@@ -138,6 +138,9 @@ void monitorValidation(smoke::Context const&)
 	add([](auto& s) { s.monitors[0].subjectType = "pathway"; });
 	add([](auto& s) { s.monitors[0].subjectId = "missing"; });
 	add([](auto& s) { s.monitors[0].metric = "unknown"; });
+	add([](auto& s) { s.monitors[0].rule.threshold = -1; });
+	add([](auto& s) { s.monitors[0].metric = "relativeHumidity"; s.monitors[0].rule.threshold = 1.1; });
+	add([](auto& s) { s.monitors[0].metric = "temperatureC"; s.monitors[0].rule.threshold = -274; });
 	add([](auto& s) { s.monitors[0].rule.triggerOnSeconds = -1; });
 	add([](auto& s) { s.monitors[0].rule.triggerOffSeconds = -1; });
 	add([](auto& s) { s.monitors[0].rule.direction = static_cast<core::AlertDirection>(99); });
@@ -173,6 +176,16 @@ void monitorValidation(smoke::Context const&)
 		require(!core::parseStationConfiguration(yaml, target, &diagnostic) && target.settings == settings
 			&& !diagnostic.empty(), "malformed Monitor wire value accepted");
 	}
+	// The inspector and headless authors share the transactional draft command.
+	auto draft = settings;
+	auto monitor = settings.monitors[0];
+	monitor.rule.threshold = -1;
+	std::string diagnostic;
+	require(!core::World::editStationMonitor(draft, monitor, diagnostic)
+		&& !diagnostic.empty() && draft == settings, "draft command refusal changed authored state");
+	monitor.metric = "temperatureC"; monitor.rule.threshold = -20;
+	require(core::World::editStationMonitor(draft, monitor, diagnostic) && diagnostic.empty(),
+		"valid negative Celsius threshold was refused by the draft command");
 	require(run.advanceTo(30) && run.snapshot().activeAlerts.size() == 1, "refused edits reset pending persistence");
 }
 void monitorPersistence(smoke::Context const&)

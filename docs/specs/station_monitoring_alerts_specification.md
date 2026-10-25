@@ -264,6 +264,15 @@ Implementation contracts:
 
 ## 7. Authoring
 
+Atmosphere inspector (#872): selecting a compartment lists its twelve habitability
+Monitors with metric units, rule summary, severity, and provenance. Expand a row to
+edit its rule; the enable toggle is always visible. Legacy documents with omitted
+defaults display the disabled table without becoming dirty on selection. The first
+accepted `World::editStationMonitor` draft command materializes those defaults;
+refused commands leave both draft and history untouched. Numeric edits commit on
+field deactivation. All accepted fields share Configuration undo/redo and save/load;
+editing the draft never implicitly applies it to the running World.
+
 - Monitors are authored in the **Monitors section of each component/connection's editor
   panel** on the station diagram: the default set pre-listed disabled, with per-Monitor
   enable toggle, threshold, direction, trigger-on/off times, and severity; bulk-enable

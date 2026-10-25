@@ -3,6 +3,20 @@
 
 namespace core
 {
+	bool World::editStationMonitor(StationSystemsSettings& draft,
+		StationMonitorSettings monitor, std::string& diagnostic)
+	{
+		auto candidate = draft;
+		applyStationAtmosphereDefaultMonitors(candidate);
+		auto found = std::find_if(candidate.monitors.begin(), candidate.monitors.end(),
+			[&](auto const& entry) { return entry.id == monitor.id; });
+		if (found == candidate.monitors.end()) candidate.monitors.push_back(std::move(monitor));
+		else *found = std::move(monitor);
+		if (!validateStationMonitors(candidate, diagnostic)) return false;
+		draft = std::move(candidate);
+		return true;
+	}
+
 	bool World::configureStationSystems(StationSystemsSettings settings, bool confirmWorldReset,
 		std::string* diagnostic)
 	{
