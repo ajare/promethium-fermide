@@ -75,6 +75,7 @@ void appendStationWaterGasObservations(StationSystemsSettings const& settings,
 		if (e.thermalBody)
 		{
 			add("Body charge", R::Input, "", &S::lastBodyChargeKW, nullptr, true);
+			add("Body conducted heat", R::Input, "", &S::lastBodyConductedKW, nullptr, true);
 			add("Sink leg", R::Output, "", &S::lastSinkLegKW, nullptr, true);
 			auto& temperature = add("Body temperature", R::Condition, "", &S::bodyTemperatureC, nullptr, true);
 			temperature.metric.quantity = StationPhysicalQuantity::Temperature;

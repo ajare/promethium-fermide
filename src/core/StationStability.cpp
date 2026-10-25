@@ -816,6 +816,8 @@ namespace core
 			fin(electrolyzer.bodyChargeKJ, tag("bodyChargeKJ", electrolyzer.id));
 			fin(electrolyzer.sinkLegKJ, tag("sinkLegKJ", electrolyzer.id));
 			fin(electrolyzer.bodyResidualKJ, tag("bodyResidualKJ", electrolyzer.id));
+			fin(electrolyzer.bodyConductedKJ, tag("bodyConductedKJ", electrolyzer.id));
+			fin(electrolyzer.lastBodyConductedKW, tag("lastBodyConductedKW", electrolyzer.id));
 			fin(electrolyzer.scale, tag("scale", electrolyzer.id));
 			fin(electrolyzer.lastRequestedKg, tag("lastRequestedKg", electrolyzer.id));
 			fin(electrolyzer.lastSplitKg, tag("lastSplitKg", electrolyzer.id));

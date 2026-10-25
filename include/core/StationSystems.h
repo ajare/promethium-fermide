@@ -1273,8 +1273,8 @@ namespace core
 	// temperature *difference*, which is identical in Celsius and Kelvin.
 	// This is the opposite of the radiative path, which requires absolute
 	// temperature - do not apply the wrong rule to the wrong law.
-	// Typed endpoint identity is (kind, id). MachineBody is reserved and is
-	// refused until machine thermal bodies are implemented.
+	// Typed endpoint identity is (kind, id). MachineBody identifies an
+	// Electrolyzer with an authored Thermal body.
 	enum class ThermalNodeKind { Atmosphere, Reservoir, MachineBody };
 	struct ThermalLinkSettings
 	{
@@ -4370,7 +4370,9 @@ namespace core
 		double lastSinkLegKW{0.0}; // energy leaving casing, before connection loss
 		double bodyChargeKJ{0.0};
 		double sinkLegKJ{0.0};
-		double bodyResidualKJ{0.0}; // charge - outflow - stored energy change
+		double bodyConductedKJ{0.0}; // signed gain through Thermal links
+		double lastBodyConductedKW{0.0};
+		double bodyResidualKJ{0.0}; // charge + conduction - sink outflow - stored energy change
 		bool operator==(StationElectrolyzerSnapshot const&) const = default;
 	};
 	// One CO2 capture machine as of the most recent tick (#404): the

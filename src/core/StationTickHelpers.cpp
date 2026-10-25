@@ -494,7 +494,7 @@ namespace core
 			runtime.prediction.include(ProtectionPrediction::Body::Machine, i,
 				protectionMachineBodyStart[i], cell.bodyTemperatureC,
 				cell.authored.thermalBody->heatCapacityKJPerK, seconds,
-				{cell.lastBodyChargeKW, -cell.lastSinkLegKW});
+				{cell.lastBodyChargeKW, -cell.lastSinkLegKW, cell.lastBodyConductedKW});
 		}
 		for (size_t i = 0; i < runtime.reservoirs.size(); ++i)
 		{

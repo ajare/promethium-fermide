@@ -2213,11 +2213,200 @@ void thermalBodyValidation(smoke::Context const&)
 	}
 }
 
+core::StationSystemsSettings bodyRoom(double roomC = 5)
+{
+	auto s = bodiedCell();
+	s.electrolyzers[0].heatSinkId.clear();
+	s.atmospheres = {linkCompartment("cabin", roomC, 10000)};
+	s.atmospheres[0].startingWaterVapourKg = 0;
+	s.thermalLinks = {{"casing-wall", "cell", "cabin", 1000, Kind::MachineBody, Kind::Atmosphere}};
+	return s;
+}
+
+void thermalBodyRoom(smoke::Context const&)
+{
+	// Equal initial temperatures isolate this tick's newly booked waste heat:
+	// stale tick-start seeding would publish zero conduction on the first step.
+	auto s = bodyRoom();
+	core::World world("BodyRoom", 2, 2); std::string diagnostic;
+	configure(world, s, diagnostic);
+	auto const initial = world.getStationSystemsSnapshot().atmospheres[0];
+	world.resumeSimulation();
+	auto const stepped = advanceStationSteps(world, 1);
+	auto const errors = world.getStationSystemsDiagnostics();
+	require(stepped, ("body room step failed: " + (errors.empty() ? std::string("no diagnostic") : errors.back().message)).c_str());
+	auto snap = world.getStationSystemsSnapshot();
+	require(snap.healthy && snap.atmospheres[0].temperatureC > 5
+		&& snap.thermalLinks[0].flowRateKW > 0 && snap.electrolyzers[0].lastBodyChargeKW > 0,
+		"room did not see this tick's casing charge");
+	require(advanceSeconds(world, 10), "body room heating failed");
+	snap = world.getStationSystemsSnapshot();
+	auto const& air = snap.atmospheres[0]; auto const& cell = snap.electrolyzers[0];
+	require(snap.healthy && air.temperatureC > initial.temperatureC
+		&& cell.bodyConductedKJ == -air.conductedEnergyKJ
+		&& air.conductedEnergyKJ == snap.thermalLinks[0].netTransferredKJ
+		&& std::abs(cell.bodyResidualKJ) < 1e-7 && std::abs(air.residualKJ) < 1e-7,
+		"body/room crossing did not book equal opposite ledgers");
+	require(air.oxygenKg == initial.oxygenKg && air.nitrogenKg == initial.nitrogenKg
+		&& air.carbonDioxideKg == initial.carbonDioxideKg && air.waterVapourKg == initial.waterVapourKg,
+		"body conduction moved gas inventory");
+	auto observations = core::stationExchangeObservations(s);
+	require(std::any_of(observations.begin(), observations.end(), [](auto const& o) {
+		return o.metric.equipmentType == "Electrolyzer" && o.metric.exchangeRole == "Body conducted heat";
+	}), "body conduction observable missing");
+	// A strong sink leg has already spent almost all the initial casing
+	// heat. The link must not spend that tick-start heat a second time.
+	auto seeded = s;
+	seeded.electrolyzers[0].rateKgPerS = 0;
+	seeded.electrolyzers[0].heatSinkId = "sink";
+	seeded.electrolyzers[0].thermalBody = core::ThermalBodySettings{100, 40, 1e12};
+	seeded.thermalLinks[0].conductanceKWPerK = 1e12;
+	core::World seedWorld("BodyLegSeed", 2, 2);
+	configure(seedWorld, seeded, diagnostic); seedWorld.resumeSimulation();
+	require(advanceStationSteps(seedWorld, 1), "body leg seed advance failed");
+	auto const seed = seedWorld.getStationSystemsSnapshot();
+	require(seed.healthy && seed.electrolyzers[0].bodyTemperatureC >= 5
+		&& seed.atmospheres[0].temperatureC > 5 && seed.atmospheres[0].temperatureC < 5.001
+		&& std::abs(seed.electrolyzers[0].bodyResidualKJ) < 1e-7,
+		"body link reused heat already spent on the sink leg");
+}
+
+void thermalBodyRoomGate(smoke::Context const&)
+{
+	for (auto ratio : {1u, 6u, 60u})
+	{
+		auto run = [&](double roomC, bool linked) {
+			auto s = bodyRoom(roomC); s.systemsStepWorldTicks = ratio;
+			auto& cell = s.electrolyzers[0]; cell.maxSinkTemperatureC = 26;
+			cell.heatSinkId = "sink";
+			cell.thermalBody = core::ThermalBodySettings{1, 20, 0.001};
+			s.thermalLinks[0].conductanceKWPerK = 10;
+			if (!linked) s.thermalLinks.clear();
+			core::World world("RoomGate", 2, 2); std::string diagnostic;
+			configure(world, s, diagnostic); world.resumeSimulation();
+			require(advanceSeconds(world, 20), "room gate advance failed");
+			auto snap = world.getStationSystemsSnapshot();
+			require(snap.healthy && std::abs(snap.electrolyzers[0].bodyResidualKJ) < 1e-6,
+				"room gate ledger failed");
+			return snap;
+		};
+		auto const cold = run(5, true), isolated = run(5, false), hot = run(40, true);
+		require(cold.electrolyzers[0].bodyTemperatureC < isolated.electrolyzers[0].bodyTemperatureC
+			&& cold.electrolyzers[0].waterSplitKg > isolated.electrolyzers[0].waterSplitKg,
+			"cold room did not cool casing and widen production window");
+		require(hot.thermal.reservoirs[0].temperatureC < 6
+			&& hot.electrolyzers[0].waterSplitKg < cold.electrolyzers[0].waterSplitKg
+			&& hot.electrolyzers[0].lastSplitKg == 0 && !hot.electrolyzers[0].coolingAvailable,
+			"hot room did not throttle casing despite cold sink");
+	}
+}
+
+void thermalBodyContact(smoke::Context const&)
+{
+	auto s = bodiedCell(); auto& first = s.electrolyzers[0];
+	first.rateKgPerS = 0; first.heatSinkId.clear();
+	first.thermalBody = core::ThermalBodySettings{100, 40, 1};
+	auto second = first; second.id = "second"; second.thermalBody->startingTemperatureC = 5;
+	s.electrolyzers.push_back(second);
+	s.thermalLinks = {{"contact", "cell", "second", 1e12, Kind::MachineBody, Kind::MachineBody}};
+	core::World world("BodyContact", 2, 2); std::string diagnostic;
+	configure(world, s, diagnostic); world.resumeSimulation();
+	require(advanceStationSteps(world, 1), "body contact step failed");
+	auto const snap = world.getStationSystemsSnapshot();
+	require(snap.healthy && std::abs(snap.electrolyzers[0].bodyTemperatureC - 22.5) < 1e-8
+		&& std::abs(snap.electrolyzers[1].bodyTemperatureC - 22.5) < 1e-8
+		&& snap.electrolyzers[0].bodyConductedKJ == -snap.electrolyzers[1].bodyConductedKJ
+		&& std::abs(snap.electrolyzers[0].bodyResidualKJ) < 1e-7
+		&& std::abs(snap.electrolyzers[1].bodyResidualKJ) < 1e-7,
+		"body contact did not equilibrate with exact opposite energy");
+	// The third pairing is also physical: body-to-reservoir conduction
+	// ignores service class and permits the same id in different namespaces.
+	s.electrolyzers.resize(1);
+	auto reservoir = linkReservoir("cell", 5, 100); reservoir.thermalClass = "warm";
+	s.thermalReservoirs = {reservoir};
+	s.thermalLinks = {{"contact", "cell", "cell", 1e12, Kind::MachineBody, Kind::Reservoir}};
+	core::World mixed("BodyReservoir", 2, 2);
+	configure(mixed, s, diagnostic); mixed.resumeSimulation();
+	require(advanceStationSteps(mixed, 1), "body reservoir step failed");
+	auto const result = mixed.getStationSystemsSnapshot();
+	require(result.healthy && std::abs(result.electrolyzers[0].bodyTemperatureC - 22.5) < 1e-8
+		&& std::abs(result.thermal.reservoirs[0].temperatureC - 22.5) < 1e-8
+		&& result.electrolyzers[0].bodyConductedKJ == -result.thermal.reservoirs[0].conductedEnergyKJ,
+		"body reservoir link did not close independently of service class");
+}
+
+void thermalBodyLinkValidation(smoke::Context const&)
+{
+	for (int mode = 0; mode < 5; ++mode)
+	{
+		auto s = bodyRoom();
+		if (mode == 0) { s.electrolyzers[0].thermalBody.reset(); s.electrolyzers[0].heatSinkId = "sink"; }
+		if (mode == 1) s.thermalLinks[0].aAtmosphereId = "missing";
+		if (mode == 2) { s.thermalLinks[0].bKind = Kind::MachineBody; s.thermalLinks[0].bAtmosphereId = "cell"; }
+		if (mode == 3) s.thermalLinks.push_back({"duplicate", "cabin", "cell", 1, Kind::Atmosphere, Kind::MachineBody});
+		if (mode == 4) s.electrolyzers[0].thermalBody->heatCapacityKJPerK = 0;
+		core::World world("BadBodyLink", 2, 2); world.pauseSimulation(); world.finishBuild();
+		auto const before = world.getStationSystemsSettings(); std::string diagnostic;
+		require(!world.configureStationSystems(s, false, &diagnostic) && !diagnostic.empty()
+			&& world.getStationSystemsSettings() == before, "invalid body endpoint accepted or mutated World");
+	}
+	for (int path = 0; path < 3; ++path)
+	{
+		auto s = bodyRoom();
+		if (path != 1) s.thermalLinks.clear();
+		if (path == 2) s.electrolyzers[0].heatSinkId = "sink";
+		if (path == 0)
+		{
+			s.electrolyzers[0].thermalBody = core::ThermalBodySettings{1, 20, 1};
+			s.electrolyzers[0].maxSinkTemperatureC = 26;
+		}
+		core::World world("BodyWarning", 2, 2); std::string diagnostic;
+		configure(world, s, diagnostic);
+		auto const events = world.getStationSystemsEvents();
+		auto const warned = std::any_of(events.begin(), events.end(), [](auto const& e) {
+			return e.message.find("no heat path") != std::string::npos;
+		});
+		require(warned == (path == 0), "configure no-heat-path warning missing or spurious");
+		if (path == 0)
+		{
+			world.resumeSimulation(); auto const advanced = advanceSeconds(world, 60);
+			auto const errors = world.getStationSystemsDiagnostics();
+			require(advanced, ("isolated casing advance failed: " + (errors.empty() ? std::string("no diagnostic") : errors.back().message)).c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.healthy && snap.electrolyzers[0].bodyTemperatureC > 20
+				&& snap.electrolyzers[0].waterSplitKg > 0 && snap.electrolyzers[0].lastSplitKg == 0
+				&& snap.electrolyzers[0].sinkLegKJ == 0 && !snap.electrolyzers[0].coolingAvailable,
+				"sinkless casing did not retain waste heat and self-limit");
+		}
+	}
+}
+
+void thermalBodyCondensation(smoke::Context const&)
+{
+	// A cold casing draws sensible heat from a nearly saturated cabin.
+	// The casing owns no vapour; condensation must be the cabin's own solve.
+	auto s = bodyRoom(40); auto& cell = s.electrolyzers[0];
+	cell.rateKgPerS = 0; cell.thermalBody = core::ThermalBodySettings{10000, 5, 1};
+	s.thermalLinks[0].conductanceKWPerK = 500;
+	auto const capStart = saturatedMassKg(40, 100);
+	auto const capAfter = saturatedMassKg(40 - firstTickConductedKJ(10000, 35, 500, requestedStepSeconds()) / 10000, 100);
+	s.atmospheres[0].startingWaterVapourKg = (capStart + capAfter) / 2;
+	core::World world("BodyCondensation", 2, 2); std::string diagnostic;
+	configure(world, s, diagnostic); world.resumeSimulation();
+	require(advanceStationSteps(world, 1), "body condensation step failed");
+	auto const snap = world.getStationSystemsSnapshot(); auto const& air = snap.atmospheres[0];
+	require(snap.healthy && air.lastConductedKW < 0 && air.lastVapourCondensedKg > 0
+		&& air.lastLatentHeatKW > 0 && air.relativeHumidity <= 1 + 1e-9
+		&& std::abs(air.residualKJ) < 1e-7
+		&& air.conductedEnergyKJ == -snap.electrolyzers[0].bodyConductedKJ,
+		"body-sourced thermal crossing did not condense locally in the same tick");
+}
+
 void thermalBodyPersistence(smoke::Context const&)
 {
 	for (bool body : {false, true}) for (bool binary : {false, true})
 	{
-		auto s = bodiedCell(); if (!body) s.electrolyzers[0].thermalBody.reset();
+		auto s = body ? bodyRoom() : bodiedCell(); if (!body) s.electrolyzers[0].thermalBody.reset();
 		core::World original("BodyPersistence", 2, 2), restored("Restored", 2, 2);
 		std::string diagnostic; configure(original, s, diagnostic);
 		auto writer = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
@@ -2246,6 +2435,11 @@ void thermalBodyPersistence(smoke::Context const&)
 
 void registerStationThermalLinkChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"thermalBodyRoom", thermalBodyRoom});
+	checks.push_back({"thermalBodyRoomGate", thermalBodyRoomGate});
+	checks.push_back({"thermalBodyContact", thermalBodyContact});
+	checks.push_back({"thermalBodyLinkValidation", thermalBodyLinkValidation});
+	checks.push_back({"thermalBodyCondensation", thermalBodyCondensation});
 	checks.push_back({"thermalBodyCharge", thermalBodyCharge});
 	checks.push_back({"thermalBodyGate", thermalBodyGate});
 	checks.push_back({"thermalBodyValidation", thermalBodyValidation});

@@ -524,7 +524,7 @@ namespace core
 			&b.lastDischargeRequestedKW, &b.lastDischargeShortfallKW});
 		for (auto& g : generators) mean({&g.lastAverageOutputKW, &g.lastWasteHeatKW,
 			&g.lastStartupDrawKW, &g.lastStartupUnmetKW, &g.lastDecayHeatKW});
-		for (auto& e : electrolyzers) mean({&e.lastBodyChargeKW, &e.lastSinkLegKW});
+		for (auto& e : electrolyzers) mean({&e.lastBodyChargeKW, &e.lastSinkLegKW, &e.lastBodyConductedKW});
 		for (auto& f : fuelCells) mean({&f.lastOutputKW, &f.lastWasteHeatKW, &f.lastUnmetOutputKW});
 		for (auto& e : heatEngines) mean({&e.lastThermalInputKW,
 			&e.lastElectricalOutputKW, &e.lastRejectionKW});

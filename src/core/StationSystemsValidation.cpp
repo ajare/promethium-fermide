@@ -707,7 +707,7 @@ namespace
 			return false;
 		if (!declareGasStore(electrolyzer.hydrogenStoreId, "hydrogen", where, false))
 			return false;
-		if (!allowIncomplete || !electrolyzer.heatSinkId.empty())
+		if ((!allowIncomplete && !electrolyzer.thermalBody) || !electrolyzer.heatSinkId.empty())
 		{
 			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
 				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
@@ -2157,8 +2157,9 @@ namespace
 			if (b < a) std::swap(a, b);
 			for (auto const& [kind, endpoint] : {a, b})
 			{
-				if (kind != ThermalNodeKind::Atmosphere && kind != ThermalNodeKind::Reservoir)
-					return refuse(where + " endpoint kind is unsupported (machineBody is reserved)");
+				if (kind != ThermalNodeKind::Atmosphere && kind != ThermalNodeKind::Reservoir
+					&& kind != ThermalNodeKind::MachineBody)
+					return refuse(where + " endpoint kind is unsupported");
 				if (kind == ThermalNodeKind::Atmosphere && endpoint == StationExteriorAtmosphereId)
 					return refuse(where + " may not use Exterior vacuum as an endpoint: "
 						"it has no temperature to conduct against");
@@ -2170,6 +2171,13 @@ namespace
 				if (kind == ThermalNodeKind::Reservoir)
 					for (auto const& node : settings.thermalReservoirs)
 						if (node.id == endpoint) { capacity = node.heatCapacityKJPerK; resolved = true; break; }
+				if (kind == ThermalNodeKind::MachineBody)
+					for (auto const& node : settings.electrolyzers)
+						if (node.id == endpoint)
+						{
+							if (!node.thermalBody) return refuse(where + " machine endpoint '" + endpoint + "' has no thermal body");
+							capacity = node.thermalBody->heatCapacityKJPerK; resolved = true; break;
+						}
 				if (!resolved)
 				{
 					auto text = where + " references unknown thermal node '" + endpoint + "'";

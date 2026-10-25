@@ -1117,6 +1117,7 @@ namespace core
 		};
 		for (auto const& air : runtime.atmospheres) includeConduction(air.conductedKJ);
 		for (auto const& reservoir : runtime.reservoirs) includeConduction(reservoir.conductedKJ);
+		for (auto const& cell : runtime.electrolyzers) includeConduction(cell.bodyConductedKJ);
 		if (std::abs(conductedResidual) > StationBalanceTolerance * conductedScale)
 			return violation = "thermal node conducted energy ledger residual", false;
 		// Heat engine ledger finiteness and closure (#804): every rate and

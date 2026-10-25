@@ -2453,9 +2453,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(compartment ~= nil, 'electrolyzer oxygen delivery compartment is unknown')
         end
         local sink = reservoir_by_id[cell.heatSink]
-        assert(sink ~= nil, 'electrolyzer heat sink reservoir is unknown')
-        assert(sink.thermalClass == cell.thermalClass,
-            'electrolyzer thermal class must match its heat sink reservoir class')
+        -- Native casing integration permits a body to cool only through its
+        -- Thermal links (or honestly self-limit with no heat path at all).
+        if not cell.hasThermalBody or cell.heatSink ~= '' then
+            assert(sink ~= nil, 'electrolyzer heat sink reservoir is unknown')
+            assert(sink.thermalClass == cell.thermalClass,
+                'electrolyzer thermal class must match its heat sink reservoir class')
+        end
         object.electrolyzers[index] = {
             id = cell.id,
             feed = feed, oxygen = oxygen, hydrogen = hydrogen,
@@ -6420,8 +6424,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 -- Cooling is qualified while the sink sits below the
                 -- maximum sink temperature: at or above it the interface
                 -- cannot accept the cell's process heat.
-                cell.coolingAvailable = cell.sink.temperature + 1e-9
-                    < cell.maxSinkTemperatureC
+                -- This legacy sandbox service pass has no casing state.
+                -- A sinkless casing is integrated by the authoritative native
+                -- ledger; it must not dereference a nonexistent service sink.
+                cell.coolingAvailable = cell.sink ~= nil
+                    and cell.sink.temperature + 1e-9 < cell.maxSinkTemperatureC
                 if not cell.coolingAvailable then
                     cell.lastBlockReason =
                         'cooling is not qualified: sink at or above the maximum sink temperature'

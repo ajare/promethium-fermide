@@ -484,6 +484,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 					lua_pushstring(state, electrolyzer.atmosphereId.c_str()); lua_setfield(state, -2, "atmosphere");
 					lua_pushstring(state, electrolyzer.thermalClass.c_str()); lua_setfield(state, -2, "thermalClass");
 					lua_pushstring(state, electrolyzer.heatSinkId.c_str()); lua_setfield(state, -2, "heatSink");
+					lua_pushboolean(state, electrolyzer.thermalBody.has_value()); lua_setfield(state, -2, "hasThermalBody");
 					lua_pushnumber(state, electrolyzer.rateKgPerS); lua_setfield(state, -2, "rateKgPerS");
 					lua_pushnumber(state, electrolyzer.specificEnergyKWhPerKgWater); lua_setfield(state, -2, "specificEnergyKWhPerKgWater");
 					lua_pushnumber(state, electrolyzer.maxSinkTemperatureC); lua_setfield(state, -2, "maxSinkTemperatureC");
@@ -1330,14 +1331,26 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		}
 		// Resolve each typed node within its own namespace at construction.
 		// The tick pass uses the validated kind and index, never a lookup.
+		auto nodeIndex = [&](ThermalNodeKind kind, std::string const& id) -> size_t {
+			if (kind == ThermalNodeKind::Atmosphere) return atmosphereIndex.at(id);
+			if (kind == ThermalNodeKind::Reservoir) return reservoirIndex.at(id);
+			return static_cast<size_t>(std::find_if(settings.electrolyzers.begin(), settings.electrolyzers.end(),
+				[&](auto const& cell) { return cell.id == id; }) - settings.electrolyzers.begin());
+		};
+		for (auto const& cell : settings.electrolyzers)
+			if (cell.thermalBody && cell.heatSinkId.empty()
+				&& std::none_of(settings.thermalLinks.begin(), settings.thermalLinks.end(), [&](auto const& link) {
+					return (link.aKind == ThermalNodeKind::MachineBody && link.aAtmosphereId == cell.id)
+						|| (link.bKind == ThermalNodeKind::MachineBody && link.bAtmosphereId == cell.id);
+				}))
+				appendBoundedEvent(mImpl->events, 0, "configuration-warning",
+					"Electrolyzer '" + cell.id + "' thermal body has no heat path (no sink leg or Thermal links)");
 		for (auto const& link : settings.thermalLinks)
 		{
 			Impl::ThermalLinkState state;
 			state.authored = link;
-			state.aIndex = link.aKind == ThermalNodeKind::Atmosphere
-				? atmosphereIndex.at(link.aAtmosphereId) : reservoirIndex.at(link.aAtmosphereId);
-			state.bIndex = link.bKind == ThermalNodeKind::Atmosphere
-				? atmosphereIndex.at(link.bAtmosphereId) : reservoirIndex.at(link.bAtmosphereId);
+			state.aIndex = nodeIndex(link.aKind, link.aAtmosphereId);
+			state.bIndex = nodeIndex(link.bKind, link.bAtmosphereId);
 			mImpl->thermalLinks.push_back(std::move(state));
 		}
 		// The conduction pass visits the links in canonical wiring order so
@@ -1457,7 +1470,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			state.hydrogenStoreIndex = storeIndex[electrolyzer.hydrogenStoreId];
 			if (!electrolyzer.atmosphereId.empty())
 				state.atmosphereIndex = atmosphereIndex[electrolyzer.atmosphereId];
-			state.sinkIndex = reservoirIndex[electrolyzer.heatSinkId];
+			state.sinkIndex = electrolyzer.heatSinkId.empty() ? SIZE_MAX : reservoirIndex.at(electrolyzer.heatSinkId);
 			state.declarationIndex = mImpl->electrolyzers.size();
 			mImpl->electrolyzers.push_back(std::move(state));
 		}

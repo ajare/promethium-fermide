@@ -636,16 +636,24 @@ namespace core
 				+ (static_cast<long double>(loopHeatIntoReservoir[i])
 					+ atmosphereHeatByReservoir[i] + bodySinkKW[i]) * seconds / reservoir.authored.heatCapacityKJPerK;
 		}
+		// Waste charge and the sink leg have already integrated the casing.
+		// Seed from that live state, never its tick-start temperature (#833).
+		std::vector<long double> bodyRelaxationC;
+		std::vector<double> bodyConductedKJ(runtime.electrolyzers.size(), 0.0);
+		for (auto const& cell : runtime.electrolyzers) bodyRelaxationC.push_back(cell.bodyTemperatureC);
 		auto capacity = [&](ThermalNodeKind kind, size_t i) -> long double {
+			if (kind == ThermalNodeKind::MachineBody) return runtime.electrolyzers[i].authored.thermalBody->heatCapacityKJPerK;
 			return kind == ThermalNodeKind::Atmosphere
 				? runtime.atmospheres[i].authored.thermalCapacityKJPerK
 				: runtime.reservoirs[i].authored.heatCapacityKJPerK;
 		};
 		auto temperature = [&](ThermalNodeKind kind, size_t i) -> long double& {
+			if (kind == ThermalNodeKind::MachineBody) return bodyRelaxationC[i];
 			return kind == ThermalNodeKind::Atmosphere
 				? relaxationTemperatureC[i] : reservoirRelaxationC[i];
 		};
 		auto book = [&](ThermalNodeKind kind, size_t i, double heat) {
+			if (kind == ThermalNodeKind::MachineBody) { bodyConductedKJ[i] += heat; return; }
 			(kind == ThermalNodeKind::Atmosphere
 				? thermalLinkConductedKJ[i] : reservoirConductedKJ[i]) += heat;
 		};
@@ -670,6 +678,13 @@ namespace core
 			link.netTransferredKJ += moved;
 			link.status = moved != 0.0 ? StationThermalLinkStatus::Active
 				: StationThermalLinkStatus::Idle;
+		}
+		for (size_t i = 0; i < runtime.electrolyzers.size(); ++i)
+		{
+			auto& cell = runtime.electrolyzers[i];
+			if (cell.authored.thermalBody) cell.bodyTemperatureC = static_cast<double>(bodyRelaxationC[i]);
+			cell.lastBodyConductedKW = bodyConductedKJ[i] / seconds;
+			cell.bodyConductedKJ += bodyConductedKJ[i];
 		}
 		// Then each compartment: occupancy draw, leakage, the
 		// coupled vapour-phase/thermal integration and the derived

@@ -88,14 +88,16 @@ namespace core
 			if (cell.authored.thermalBody)
 			{
 				auto const& body = *cell.authored.thermalBody;
-				auto const residual = cell.bodyChargeKJ - cell.sinkLegKJ
+				auto const residual = cell.bodyChargeKJ + cell.bodyConductedKJ - cell.sinkLegKJ
 					- body.heatCapacityKJPerK * (cell.bodyTemperatureC - body.startingTemperatureC);
 				if (!requireFinite(cell.bodyTemperatureC, where + "body temperature")
+					|| !requireFinite(cell.bodyConductedKJ, where + "body conducted heat")
+					|| !requireFinite(cell.lastBodyConductedKW, where + "body conduction rate")
 					|| !requireFinite(cell.lastBodyChargeKW, where + "body charge rate")
 					|| !requireFinite(cell.lastSinkLegKW, where + "sink leg rate")
 					|| !requireFinite(residual, where + "body residual")) return false;
 				if (std::abs(residual) > StationBalanceTolerance * std::max({1.0,
-					std::abs(body.heatCapacityKJPerK * body.startingTemperatureC), cell.bodyChargeKJ, cell.sinkLegKJ}))
+					std::abs(body.heatCapacityKJPerK * body.startingTemperatureC), cell.bodyChargeKJ, cell.sinkLegKJ, std::abs(cell.bodyConductedKJ)}))
 					return violation = where + "thermal body energy ledger does not close", false;
 			}
 			auto const energyResidual = cell.energySuppliedKJ
