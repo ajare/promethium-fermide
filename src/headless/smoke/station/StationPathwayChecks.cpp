@@ -5,6 +5,7 @@
 #include "core/StationConfigurationDocument.h"
 #include "core/YamlSerializer.h"
 #include "core/BinarySerializer.h"
+#include "core/WorldDocument.h"
 
 namespace
 {
@@ -68,7 +69,7 @@ void pathwayPersistence(smoke::Context const&)
 			&& diagnostic.find("conversion required") != std::string::npos
 			&& loaded.settings == settings, "unknown pathway field was ignored or mutated document");
 	}
-	for (int version : {105, 115})
+	for (int version : {105, static_cast<int>(core::kWorldSchemaVersion) + 1})
 	{
 		auto bad = yaml;
 		auto const at = bad.find("schemaVersion: ");

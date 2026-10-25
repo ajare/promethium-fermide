@@ -5,6 +5,7 @@
 #include <limits>
 #include <yaml-cpp/yaml.h>
 #include "core/BinarySerializer.h"
+#include "core/WorldDocument.h"
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -1167,8 +1168,11 @@ namespace persistence
 			"A legacy Shuttle-owned Door");
 
 		// Fault-absent writers retain schema 111, but readers also accept the
-		// opt-in schema 113. A future map must exceed that reader ceiling.
-		auto const futureYaml = std::string("version: 115")
+		// opt-in tiers up to the reader ceiling. A future map must exceed
+		// that ceiling, so derive it from the reader maximum rather than a
+		// literal that goes stale when a new opt-in tier lands (#842).
+		auto const futureYaml = std::string("version: ")
+			+ std::to_string(core::kWorldSchemaVersion + 1)
 			+ defaultsYaml.substr(defaultsYaml.find("\n"));
 		bool refusedFuture{ false };
 		try

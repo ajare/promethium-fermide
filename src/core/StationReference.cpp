@@ -341,6 +341,25 @@ namespace core
 					serializer.writeDouble("stockUnitsPerConditionPoint", loop.condition->stockUnitsPerConditionPoint);
 					serializer.endMap();
 				}
+				// #842: the repair-parts wiring travels only when the loop
+				// has one, so a feature-absent loop carries no new field.
+				if (loop.repairParts)
+				{
+					serializer.beginMap("repairParts");
+					serializer.writeString("partsStoreId", loop.repairParts->partsStoreId);
+					serializer.beginArray("repairs");
+					for (auto const& plan : loop.repairParts->repairs)
+					{
+						serializer.beginMap("");
+						serializer.writeString("modeId", plan.modeId);
+						serializer.writeDouble("durationSeconds", plan.durationSeconds);
+						serializer.writeDouble("partsQuantity", plan.partsQuantity);
+						serializer.writeString("wasteStoreId", plan.wasteStoreId);
+						serializer.endMap();
+					}
+					serializer.endArray();
+					serializer.endMap();
+				}
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -1500,6 +1519,30 @@ namespace core
 					model.stockUnitsPerConditionPoint = serializer.readDouble("stockUnitsPerConditionPoint");
 					serializer.endMap();
 					loop.condition = model;
+				}
+				// #842: a pre-115 document carrying repair-parts wiring is
+				// refused rather than silently dropped.
+				if (serializer.hasField("repairParts"))
+				{
+					if (version < 115) throw SerializationException("Repair-parts wiring requires schema 115");
+					serializer.beginMap("repairParts");
+					RepairPartsSettings wiring;
+					wiring.partsStoreId = serializer.readString("partsStoreId");
+					serializer.beginArray("repairs");
+					while (serializer.nextArrayItem())
+					{
+						serializer.beginMap("");
+						FaultRepairSettings plan;
+						plan.modeId = serializer.readString("modeId");
+						plan.durationSeconds = serializer.readDouble("durationSeconds");
+						plan.partsQuantity = serializer.readDouble("partsQuantity");
+						plan.wasteStoreId = serializer.readString("wasteStoreId");
+						serializer.endMap();
+						wiring.repairs.push_back(std::move(plan));
+					}
+					serializer.endArray();
+					serializer.endMap();
+					loop.repairParts = std::move(wiring);
 				}
 				stationSettings.coolantLoops.push_back(std::move(loop));
 				serializer.endMap();

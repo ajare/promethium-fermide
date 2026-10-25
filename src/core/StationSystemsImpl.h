@@ -19,7 +19,7 @@ using namespace station_detail;
 			// identity, cause and effective parameters; a Condition restore
 			// carries the installation and the target Condition it is
 			// healing toward (#840).
-			enum class Kind { Injection, SettingsUpdate, RestoreCondition, ResetTrip } kind{Kind::Injection};
+			enum class Kind { Injection, SettingsUpdate, RestoreCondition, ResetTrip, RepairFault } kind{Kind::Injection};
 			uint64_t afterStep{0};
 			std::string installationId, modeId;
 			FaultCause cause;
@@ -1454,6 +1454,14 @@ using namespace station_detail;
 			// The waste store index, or SIZE_MAX when the job consumes
 			// nothing (reusable-only job).
 			size_t wasteStoreIndex{SIZE_MAX};
+			// #842: true for a runtime-started repair job. Repairs share
+			// every phase of the maintenance pass - reservation, progress,
+			// completion, interruption, isolation - but carry the fault
+			// they clear, never miss a window (their window opens with the
+			// command and stays open until the work runs), and announce
+			// under the "repair" event category.
+			bool isRepair{false};
+			std::string repairModeId;
 			StationMaintenancePhase phase{StationMaintenancePhase::Idle};
 			double progressSeconds{0.0};
 			std::string blockReason;
@@ -1468,6 +1476,15 @@ using namespace station_detail;
 			bool lastIsolated{false};
 		};
 		std::vector<MaintenanceState> maintenanceJobs;
+		// Runtime-started repair jobs (#842). Kept beside - not inside -
+		// the authored jobs so the live-settings machinery (rebind by id,
+		// settings mirror sync) never sees a job the document did not
+		// author; the tick pass, ledger boundaries, snapshot and replay
+		// treat both lists with the same maintenance semantics.
+		std::vector<MaintenanceState> repairJobs;
+		// Deterministic job-id counter: replay re-issues repair commands
+		// in journal order, so the same run mints the same ids.
+		uint64_t repairJobCounter{0};
 		// Maintenance jobs compete for the same stores and tools, so the
 		// reservation pass runs them in the declared deterministic order:
 		// priority descending, declaration order ascending.

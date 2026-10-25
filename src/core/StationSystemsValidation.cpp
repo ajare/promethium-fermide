@@ -1229,6 +1229,65 @@ using namespace station_detail;
 				if (model.initialCondition < model.seizureThreshold)
 					return refuse(where + " initial Condition must not start below its seizure threshold");
 			}
+			// #842: repair-parts wiring names the store holding this loop's
+			// spare parts and the per-mode repair plans that draw from it.
+			// A plan is legal only for a repairable coolant-loop fault mode,
+			// and its consumed-parts stream must land in a declared waste
+			// store that can actually receive it: same unit and same
+			// declared composition, as for scheduled maintenance (#414).
+			if (loop.repairParts)
+			{
+				auto const& wiring = *loop.repairParts;
+				auto const findRepairStore = [&](std::string const& id) -> ResourceStoreSettings const*
+				{
+					auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+						[&](ResourceStoreSettings const& store) { return store.id == id; });
+					return it == settings.stores.end() ? nullptr : &*it;
+				};
+				if (wiring.partsStoreId.empty())
+					return refuse(where + " repair-parts store id must not be empty");
+				auto const* parts = findRepairStore(wiring.partsStoreId);
+				if (!parts)
+					return missing(where + " repair-parts wiring references unknown store '"
+						+ wiring.partsStoreId + "'");
+				if (wiring.repairs.size() > MaxStationFaultRepairs)
+					return refuse(where + " repair plans are limited to "
+						+ std::to_string(MaxStationFaultRepairs) + " entries");
+				std::set<std::string> planModes;
+				for (auto const& plan : wiring.repairs)
+				{
+					auto const item = where + " repair plan '" + plan.modeId + "'";
+					if (plan.modeId != "coolant-leak" && plan.modeId != "pump-seizure")
+						return refuse(item + " names no repairable fault mode on a coolant loop");
+					if (!planModes.insert(plan.modeId).second)
+						return refuse(where + " declares a repair plan for mode '"
+							+ plan.modeId + "' more than once");
+					if (!std::isfinite(plan.durationSeconds) || plan.durationSeconds <= 0.0)
+						return refuse(item + " duration must be finite and positive");
+					if (!std::isfinite(plan.partsQuantity) || plan.partsQuantity <= 0.0)
+						return refuse(item + " parts quantity must be finite and positive");
+					if (plan.wasteStoreId.empty())
+						return refuse(item + " must name the waste store its consumed parts land in");
+					if (plan.wasteStoreId == wiring.partsStoreId)
+						return refuse(item + " consumes the parts store into itself;"
+							" the waste store may not also be the parts source");
+					auto const* waste = findRepairStore(plan.wasteStoreId);
+					if (!waste)
+						return missing(item + " references unknown waste store '"
+							+ plan.wasteStoreId + "'");
+					if (parts->unit != waste->unit)
+						return refuse(item + " parts store unit '" + parts->unit
+							+ "' does not match the waste store unit '" + waste->unit + "'");
+					if (parts->composition || waste->composition)
+					{
+						if (!parts->composition || !waste->composition
+							|| !compositionsClose(*parts->composition, *waste->composition))
+							return refuse(item + " crosses a compound-material boundary into the"
+								" waste store; consumed parts may only land in a store with the"
+								" same declared composition");
+					}
+				}
+			}
 			if (loop.startingCoolantKg > loop.coolantCapacityKg)
 				return refuse(where + " starting coolant exceeds the loop capacity");
 			if (!std::isfinite(loop.specificHeatKJPerKgK) || loop.specificHeatKJPerKgK <= 0.0)

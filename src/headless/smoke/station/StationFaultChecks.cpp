@@ -380,6 +380,379 @@ void faultTransactions(smoke::Context const&)
 			&& snap.coolantLoops[0].availabilityFactor == 0.6, "fault booking depended on step ratio");
 	}
 }
+// #842: a repair station is the puncture station plus the repair-parts
+// wiring: a per-Installation parts store and per-mode repair plans.
+core::StationSystemsSettings repairStation()
+{
+	auto s = punctureStation();
+	core::ResourceStoreSettings parts;
+	parts.id = "parts"; parts.unit = "kg"; parts.capacity = 100; parts.startingQualified = 10;
+	core::ResourceStoreSettings waste;
+	waste.id = "waste"; waste.unit = "kg"; waste.capacity = 100; waste.startingQualified = 0;
+	s.stores = {parts, waste};
+	core::RepairPartsSettings wiring;
+	wiring.partsStoreId = "parts";
+	wiring.repairs = {
+		core::FaultRepairSettings{"coolant-leak", 10.0, 2.0, "waste"},
+		core::FaultRepairSettings{"pump-seizure", 20.0, 4.0, "waste"}};
+	s.coolantLoops[0].repairParts = wiring;
+	return s;
+}
+int countCategory(core::StationSystemsRuntime const& run, std::string const& category)
+{
+	auto const events = run.events();
+	return static_cast<int>(std::count_if(events.begin(), events.end(),
+		[&](auto const& e) { return e.category == category; }));
+}
+bool sawMessage(core::StationSystemsRuntime const& run, std::string const& needle)
+{
+	auto const events = run.events();
+	return std::any_of(events.begin(), events.end(), [&](auto const& e)
+	{
+		return e.message.find(needle) != std::string::npos;
+	});
+}
+const core::StationMaintenanceSnapshot* findJob(core::StationSystemsSnapshot const& snap, std::string const& id)
+{
+	auto const it = std::find_if(snap.maintenanceJobs.begin(), snap.maintenanceJobs.end(),
+		[&](auto const& job) { return job.id == id; });
+	return it == snap.maintenanceJobs.end() ? nullptr : &*it;
+}
+const core::StationSystemsStoreSnapshot* findStoreSnap(core::StationSystemsSnapshot const& snap, std::string const& id)
+{
+	auto const it = std::find_if(snap.stores.begin(), snap.stores.end(),
+		[&](auto const& store) { return store.id == id; });
+	return it == snap.stores.end() ? nullptr : &*it;
+}
+void repairLifecycle(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	auto s = repairStation();
+	core::StationSystemsRuntime run(s, 0.25f);
+	require(run.injectFault("loop", "coolant-leak", {core::FaultCause::Kind::AgentAction, "agent:1"})
+		&& run.advanceTo(1), "leak setup failed");
+	require(run.snapshot().coolantLoops[0].availabilityFactor == 0.6, "leak cap missing before repair");
+	std::string jobId;
+	require(run.repairFault("loop", "coolant-leak", &jobId), "valid repair refused");
+	require(jobId == "repair-1", "repair job id not as expected");
+	auto const pending = run.snapshot();
+	auto const* job = findJob(pending, "repair-1");
+	require(job && job->kind == core::StationMaintenanceKind::Repair
+		&& job->faultModeId == "coolant-leak" && job->installationId == "loop"
+		&& job->phase == core::StationMaintenancePhase::Blocked
+		&& job->requirements.size() == 1 && job->requirements[0].storeId == "parts"
+		&& job->requirements[0].quantity == 2 && job->requirements[0].consumed
+		&& !job->requirements[0].reserved,
+		"pending repair missing from the maintenance picture with its requirement detail");
+	require(run.advanceTo(3), "repair start failed audit");
+	auto const mid = run.snapshot();
+	job = findJob(mid, "repair-1");
+	require(job && job->phase == core::StationMaintenancePhase::Active && job->isolated
+		&& job->requirements[0].reserved && job->progressSeconds > 1.5 && job->remainingSeconds > 6.5,
+		"repair did not start, reserve and progress");
+	require(mid.coolantLoops[0].availabilityFactor == 0 && mid.coolantLoops[0].flowKgPerS == 0,
+		"repair did not isolate the installation at zero availability");
+	require(findStoreSnap(mid, "parts")->currentQualified == 10,
+		"reserved parts left the store before completion");
+	// The repair started at the command boundary (t=1.0) and owes its
+	// full 10 s: still isolated just before the completion instant.
+	require(run.advanceTo(10.5), "mid-repair drive failed");
+	require(run.snapshot().coolantLoops[0].availabilityFactor == 0
+		&& findJob(run.snapshot(), "repair-1")->phase == core::StationMaintenancePhase::Active,
+		"repair stopped isolating before its full duration");
+	require(run.advanceTo(11.5), "repair completion failed audit");
+	auto const done = run.snapshot();
+	job = findJob(done, "repair-1");
+	require(job && job->phase == core::StationMaintenancePhase::Completed && job->exhausted
+		&& job->occurrencesCompleted == 1 && !job->isolated
+		&& job->requirements[0].lastConsumed == 2 && job->requirements[0].consumedTotal == 2,
+		"repair did not complete as a full one-off");
+	require(done.coolantLoops[0].activeFaults.empty()
+		&& done.coolantLoops[0].availabilityFactor == 1
+		&& done.coolantLoops[0].coolantKg == 60,
+		"completion did not clear the fault cap, or it replenished coolant");
+	require(findStoreSnap(done, "parts")->currentQualified == 8
+		&& findStoreSnap(done, "waste")->currentQualified == 2
+		&& findStoreSnap(done, "waste")->currentUnqualified == 0,
+		"consumed parts did not land in waste as qualified material");
+	require(countCategory(run, "repair") == 2 && sawMessage(run, "'repair-1'")
+		&& sawMessage(run, "installation isolated") && sawMessage(run, "booked into waste store 'waste'"),
+		"repair start/complete events missing");
+	require(countCategory(run, "fault") == 2 && sawMessage(run, "cleared by repair 'repair-1'"),
+		"fault clear event missing");
+	std::string diagnostic;
+	require(!run.repairFault("loop", "coolant-leak", nullptr, &diagnostic) && !diagnostic.empty(),
+		"repair of a cleared fault accepted");
+	// Re-damage after repair is a fresh instance with a fresh repair.
+	require(run.injectFault("loop", "coolant-leak", {core::FaultCause::Kind::ScenarioEvent, "strike"})
+		&& run.advanceTo(12), "re-injection failed");
+	require(run.repairFault("loop", "coolant-leak", &jobId, &diagnostic) && jobId == "repair-2",
+		"second repair after re-damage refused or misnumbered");
+	require(run.advanceTo(22.5), "second repair failed its drive");
+	auto const second = run.snapshot();
+	require(second.coolantLoops[0].activeFaults.empty()
+		&& findJob(second, "repair-2")->phase == core::StationMaintenancePhase::Completed
+		&& findStoreSnap(second, "waste")->currentQualified == 4,
+		"second repair did not clear and spend again");
+}
+void repairInterruption(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	// A continuous drain from the parts store breaks the repair's
+	// reservation mid-job: progress is discarded, nothing is spent, and
+	// after a refill the job reruns the full duration from the restart -
+	// the #414 interruption contract on the repair starter.
+	auto s = repairStation();
+	core::ResourceStoreSettings bilge;
+	bilge.id = "bilge"; bilge.unit = "kg"; bilge.capacity = 1000; bilge.startingQualified = 0;
+	s.stores.push_back(bilge);
+	core::ResourceTransferSettings drain;
+	drain.id = "drain"; drain.sourceId = "parts"; drain.destinationId = "bilge";
+	drain.unit = "kg"; drain.ratePerSecond = 1; drain.priority = 0;
+	s.transfers = {drain};
+	core::ResourceDeliverySettings refill;
+	refill.id = "refill"; refill.storeId = "parts"; refill.unit = "kg";
+	refill.quantity = 20; refill.firstOccurrenceSeconds = 9; refill.recurrenceSeconds = 0;
+	s.deliveries = {refill};
+	core::StationSystemsRuntime run(s, 0.25f);
+	require(run.injectFault("loop", "coolant-leak", {}) && run.advanceTo(1), "setup failed");
+	require(run.repairFault("loop", "coolant-leak"), "repair with drawable parts refused");
+	require(run.advanceTo(3) && findJob(run.snapshot(), "repair-1")->phase
+		== core::StationMaintenancePhase::Active, "repair did not start");
+	require(run.advanceTo(8.5), "drain drive failed");
+	auto const cut = run.snapshot();
+	auto const* job = findJob(cut, "repair-1");
+	require(job && job->phase == core::StationMaintenancePhase::Blocked && job->progressSeconds == 0,
+		"the lost reservation did not interrupt and discard progress");
+	require(findStoreSnap(cut, "waste")->currentQualified == 0
+		&& !cut.coolantLoops[0].activeFaults.empty(),
+		"the interrupted repair spent material or cleared the fault anyway");
+	require(sawMessage(run, "interrupted at") && sawMessage(run, "progress discarded"),
+		"the interruption was not announced with its discarded progress");
+	require(run.advanceTo(10), "refill drive failed");
+	job = findJob(run.snapshot(), "repair-1");
+	require(job && job->phase == core::StationMaintenancePhase::Active
+		&& job->occurrencesStarted == 2 && job->progressSeconds < 2,
+		"the repair did not rerun afresh after the refill");
+	require(run.advanceTo(19.5), "rerun completion failed");
+	auto const done = run.snapshot();
+	job = findJob(done, "repair-1");
+	require(job && job->phase == core::StationMaintenancePhase::Completed
+		&& job->occurrencesCompleted == 1 && job->occurrencesMissed == 0,
+		"the rerun did not complete exactly once");
+	require(done.coolantLoops[0].activeFaults.empty() && findStoreSnap(done, "waste")->currentQualified == 2,
+		"the rerun's spend or fault clear failed");
+}
+void repairTransactions(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	std::string diagnostic;
+	// Refusals whole: unknown installation, unknown mode, Trip mode, and
+	// no fault to repair - each with no mutation, no event, no command.
+	auto s = repairStation();
+	core::StationSystemsRuntime run(s, 0.25f);
+	auto const before = run.snapshot(); auto const events = run.events();
+	require(!run.repairFault("ghost", "coolant-leak", nullptr, &diagnostic) && !diagnostic.empty(),
+		"unknown installation accepted");
+	require(!run.repairFault("loop", "missing-mode", nullptr, &diagnostic) && !diagnostic.empty(),
+		"unknown fault mode accepted");
+	require(!run.repairFault("loop", "overtemp-runaway", nullptr, &diagnostic) && !diagnostic.empty(),
+		"Trip mode accepted for repair");
+	require(!run.repairFault("loop", "coolant-leak", nullptr, &diagnostic) && !diagnostic.empty(),
+		"repair with no fault present accepted");
+	require(run.snapshot() == before && run.events() == events && !run.hasFaultCommands(),
+		"a refused repair mutated state, events or the command journal");
+	require(run.injectFault("loop", "coolant-leak", {}) && run.advanceTo(1), "fault setup failed");
+	// Installation without wiring, and wiring without a plan for the mode.
+	auto noWiring = punctureStation();
+	core::StationSystemsRuntime plain(noWiring, 0.25f);
+	require(plain.injectFault("loop", "coolant-leak", {}) && plain.advanceTo(1)
+		&& !plain.repairFault("loop", "coolant-leak", nullptr, &diagnostic) && !diagnostic.empty(),
+		"repair without repair-parts wiring accepted");
+	auto otherPlan = repairStation();
+	otherPlan.coolantLoops[0].repairParts->repairs = {core::FaultRepairSettings{"pump-seizure", 20, 4, "waste"}};
+	core::StationSystemsRuntime unplanned(otherPlan, 0.25f);
+	require(unplanned.injectFault("loop", "coolant-leak", {}) && unplanned.advanceTo(1)
+		&& !unplanned.repairFault("loop", "coolant-leak", nullptr, &diagnostic) && !diagnostic.empty(),
+		"repair without a plan for the mode accepted");
+	// Unreservable parts: too little stock, and no waste headroom.
+	auto shortParts = repairStation();
+	shortParts.stores[0].startingQualified = 1;
+	core::StationSystemsRuntime starved(shortParts, 0.25f);
+	require(starved.injectFault("loop", "coolant-leak", {}) && starved.advanceTo(1)
+		&& !starved.repairFault("loop", "coolant-leak", nullptr, &diagnostic)
+		&& diagnostic.find("cannot cover") != std::string::npos,
+		"repair with unreservable parts accepted");
+	auto tightWaste = repairStation();
+	tightWaste.stores[1].capacity = 1;
+	core::StationSystemsRuntime clogged(tightWaste, 0.25f);
+	require(clogged.injectFault("loop", "coolant-leak", {}) && clogged.advanceTo(1)
+		&& !clogged.repairFault("loop", "coolant-leak", nullptr, &diagnostic)
+		&& diagnostic.find("headroom") != std::string::npos,
+		"repair with no waste headroom accepted");
+	// Duplicate: one repair per fault instance.
+	require(run.repairFault("loop", "coolant-leak"), "first repair refused");
+	auto const started = run.snapshot(); auto const startedEvents = run.events();
+	require(!run.repairFault("loop", "coolant-leak", nullptr, &diagnostic) && !diagnostic.empty(),
+		"duplicate repair accepted");
+	require(run.snapshot() == started && run.events() == startedEvents,
+		"the refused duplicate mutated state or events");
+	// A pending fault may be repaired immediately after injection.
+	auto pendingRun = repairStation();
+	core::StationSystemsRuntime pending(pendingRun, 0.25f);
+	require(pending.injectFault("loop", "coolant-leak", {}) && pending.repairFault("loop", "coolant-leak", nullptr, &diagnostic),
+		"repair of a pending fault refused");
+	require(pending.advanceTo(11.5) && pending.snapshot().coolantLoops[0].activeFaults.empty(),
+		"pending-fault repair did not clear at completion");
+	// Settings validation of the wiring itself.
+	for (auto mutation : {"unknown-parts-store", "unknown-waste-store", "zero-duration",
+		"zero-parts", "bad-mode", "duplicate-mode", "waste-is-parts", "unit-mismatch"})
+	{
+		auto bad = repairStation();
+		if (std::string_view(mutation) == "unknown-parts-store")
+			bad.coolantLoops[0].repairParts->partsStoreId = "nope";
+		else if (std::string_view(mutation) == "unknown-waste-store")
+			bad.coolantLoops[0].repairParts->repairs[0].wasteStoreId = "nope";
+		else if (std::string_view(mutation) == "zero-duration")
+			bad.coolantLoops[0].repairParts->repairs[0].durationSeconds = 0;
+		else if (std::string_view(mutation) == "zero-parts")
+			bad.coolantLoops[0].repairParts->repairs[0].partsQuantity = 0;
+		else if (std::string_view(mutation) == "bad-mode")
+			bad.coolantLoops[0].repairParts->repairs[0].modeId = "fire";
+		else if (std::string_view(mutation) == "duplicate-mode")
+			bad.coolantLoops[0].repairParts->repairs.push_back(
+				core::FaultRepairSettings{"coolant-leak", 5, 1, "waste"});
+		else if (std::string_view(mutation) == "waste-is-parts")
+			bad.coolantLoops[0].repairParts->repairs[0].wasteStoreId = "parts";
+		else if (std::string_view(mutation) == "unit-mismatch")
+			bad.stores[1].unit = "L";
+		require(!core::validateStationSystemsSettings(bad, diagnostic),
+			std::string("an invalid repair wiring (").append(mutation).append(") was accepted").c_str());
+	}
+	// Live topology: store identities and the plan set are frozen; the
+	// duration and parts quantity of a plan are live-tunable but never
+	// reach a repair that already started.
+	require(!run.updateNode<core::CoolantLoopSettings>("loop", [](auto& l)
+		{ l.repairParts->partsStoreId = "other"; }, &diagnostic), "repair parts store rewired live");
+	require(!run.updateNode<core::CoolantLoopSettings>("loop", [](auto& l)
+		{ l.repairParts->repairs[0].modeId = "pump-seizure"; }, &diagnostic), "repair plan mode changed live");
+	require(run.updateNode<core::CoolantLoopSettings>("loop", [](auto& l)
+		{ l.repairParts->repairs[0].durationSeconds = 30; }), "repair duration retune refused");
+	require(run.advanceTo(11.5) && findJob(run.snapshot(), "repair-1")->phase
+		== core::StationMaintenancePhase::Completed,
+		"the live duration retune reached the already-started repair");
+	// Replay: the repair command and its job state cross both serializers.
+	roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+	// Schema: repair wiring needs 115; a pre-115 document carrying it is refused.
+	for (uint32_t version : {114u, 115u})
+	{
+		auto out = core::YamlSerializer::toString();
+		out->beginMap("root"); core::writeStationSystemsSettingsMap(*out, s); out->endMap(); out->serialize();
+		auto in = core::YamlSerializer::fromString(out->getSerializedString());
+		in->deserialize(); in->beginMap("root");
+		core::StationSystemsSettings restored;
+		bool refused = false;
+		try { core::readStationSystemsSettingsMap(*in, version, restored); }
+		catch (core::SerializationException const&) { refused = true; }
+		require(refused == (version < 115), "repair wiring schema guard failed");
+		if (version >= 115) require(restored == s, "repair wiring did not round-trip");
+	}
+	core::StationConfigurationDocument document; document.settings = s;
+	auto yaml = core::serializeStationConfiguration(document);
+	require(yaml.find("schemaVersion: 115") != std::string::npos, "repair wiring did not bump the wire schema");
+	yaml.replace(yaml.find("schemaVersion: 115"), std::string("schemaVersion: 115").size(), "schemaVersion: 114");
+	core::StationConfigurationDocument restoredDoc;
+	require(!core::parseStationConfiguration(yaml, restoredDoc, &diagnostic),
+		"pre-115 document silently accepted repair wiring");
+	// Opt-in no-op: wiring alone changes nothing until a repair is commanded.
+	auto absent = repairStation();
+	absent.coolantLoops[0].repairParts.reset();
+	core::StationSystemsRuntime wired(repairStation(), 0.25f), unwired(absent, 0.25f);
+	for (double seconds : {1., 2., 5., 10.})
+	{
+		require(wired.advanceTo(seconds) && unwired.advanceTo(seconds), "opt-in baseline drive failed");
+		require(wired.snapshot() == unwired.snapshot() && wired.events() == unwired.events(),
+			"unused repair wiring changed legacy behavior");
+	}
+	// Step-ratio independence.
+	for (uint32_t ratio : {1u, 6u, 60u})
+	{
+		auto offered = repairStation(); offered.systemsStepWorldTicks = ratio;
+		core::StationSystemsRuntime stepped(offered, 1.f / 60.f);
+		require(stepped.injectFault("loop", "coolant-leak", {}) && stepped.advanceTo(1)
+			&& stepped.repairFault("loop", "coolant-leak") && stepped.advanceTo(12),
+			"repair failed under a supported Station ratio");
+		auto const snap = stepped.snapshot();
+		require(snap.coolantLoops[0].activeFaults.empty()
+			&& findStoreSnap(snap, "waste")->currentQualified == 2
+			&& findJob(snap, "repair-1")->phase == core::StationMaintenancePhase::Completed,
+			"repair depended on the Station step ratio");
+	}
+	// World surface: command forwarding, save/load with a repair in flight.
+	core::World world("Repairs", 2, 2); world.pauseSimulation(); world.finishBuild();
+	require(!world.repairStationFault("loop", "coolant-leak", nullptr, &diagnostic)
+		&& world.configureStationSystems(repairStation(), false, &diagnostic), "World repair setup failed");
+	world.resumeSimulation();
+	require(advanceSeconds(world, 1) && world.injectStationFault("loop", "coolant-leak", {})
+		&& advanceSeconds(world, 1), "World fault injection failed");
+	std::string worldJob;
+	require(world.repairStationFault("loop", "coolant-leak", &worldJob, &diagnostic) && worldJob == "repair-1",
+		"World repair command failed");
+	require(advanceSeconds(world, 5), "World mid-repair drive failed");
+	for (bool binary : {false, true})
+	{
+		std::unique_ptr<core::Serializer> out = binary
+			? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+		core::SerializationWorkData work; world.serialize(*out, work); out->serialize();
+		auto bytes = binary ? static_cast<core::BinarySerializer&>(*out).getSerializedString()
+			: static_cast<core::YamlSerializer&>(*out).getSerializedString();
+		std::unique_ptr<core::Serializer> in = binary
+			? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+		in->deserialize(); core::World loaded("Loaded", 2, 2);
+		require(loaded.deserialize(*in, work), "World repair reload failed");
+		require(loaded.getStationSystemsSnapshot() == world.getStationSystemsSnapshot()
+			&& loaded.getStationSystemsEvents() == world.getStationSystemsEvents(),
+			"World save/load lost the in-flight repair");
+	}
+	require(advanceSeconds(world, 6), "World repair completion drive failed");
+	require(world.getStationSystemsSnapshot().coolantLoops[0].activeFaults.empty()
+		&& findJob(world.getStationSystemsSnapshot(), "repair-1")->phase
+			== core::StationMaintenancePhase::Completed,
+		"World repair did not complete");
+}
+void repairSeizureClearing(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	// A degradation-spawned pump-seizure is repairable like any other
+	// Fault: the crossing raises it, the repair clears it, and the edge-
+	// triggered crossing does not instantly re-raise while Condition
+	// stays below the threshold.
+	auto s = repairStation();
+	s.coolantLoops[0].coolantLeak.reset();
+	s.coolantLoops[0].condition = core::InstallationConditionSettings{};
+	s.coolantLoops[0].condition->initialCondition = 0.2;
+	s.coolantLoops[0].condition->seizureThreshold = 0.15;
+	s.coolantLoops[0].condition->overheatStressC = 10;
+	s.coolantLoops[0].condition->overheatDegradePerHour = 360;
+	core::StationSystemsRuntime run(s, 0.25f);
+	require(run.advanceTo(1) && run.snapshot().coolantLoops[0].availabilityFactor == 0,
+		"seizure crossing did not stop the loop");
+	require(run.repairFault("loop", "pump-seizure"), "seizure repair refused");
+	require(run.advanceTo(5) && findJob(run.snapshot(), "repair-1")->phase
+		== core::StationMaintenancePhase::Active,
+		"seizure repair did not start");
+	require(run.advanceTo(21.5), "seizure repair completion failed");
+	auto const done = run.snapshot();
+	require(done.coolantLoops[0].activeFaults.empty()
+		&& done.coolantLoops[0].availabilityFactor == 1,
+		"the repair did not clear the seizure and lift the zero cap");
+	require(sawMessage(run, "Fault 'pump-seizure' on coolant loop 'loop' cleared by repair 'repair-1'"),
+		"the seizure clear was not announced");
+	require(run.advanceTo(23) && run.snapshot().coolantLoops[0].activeFaults.empty(),
+		"the cleared seizure re-raised without a fresh crossing");
+}
 void faultOptIn(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
@@ -411,4 +784,8 @@ void registerStationFaultChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"faultReplay", faultReplay});
 	checks.push_back({"faultOptIn", faultOptIn});
 	checks.push_back({"faultTransactions", faultTransactions});
+	checks.push_back({"repairLifecycle", repairLifecycle});
+	checks.push_back({"repairInterruption", repairInterruption});
+	checks.push_back({"repairTransactions", repairTransactions});
+	checks.push_back({"repairSeizureClearing", repairSeizureClearing});
 }

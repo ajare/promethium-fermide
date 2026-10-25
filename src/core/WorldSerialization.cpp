@@ -998,7 +998,13 @@ namespace core
 			[](auto const& s) { return s.overtempRunaway.has_value(); })
 			|| std::any_of(mStationSystemsSettings.methaneProcessors.begin(), mStationSystemsSettings.methaneProcessors.end(),
 				[](auto const& s) { return s.overtempRunaway.has_value(); });
-		serializer.writeUint32("version", trips ? kWorldSchemaVersion : condition ? 113 : faults ? 112 : 111);
+		// #842: repair-parts wiring is the newest opt-in tier; a save
+		// carrying it stamps the current schema, trip-only saves keep
+		// stamping 114 exactly as before.
+		bool const repairs = std::any_of(mStationSystemsSettings.coolantLoops.begin(), mStationSystemsSettings.coolantLoops.end(),
+			[](auto const& loop) { return loop.repairParts.has_value(); });
+		serializer.writeUint32("version", repairs ? kWorldSchemaVersion
+			: trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);

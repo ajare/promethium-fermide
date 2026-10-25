@@ -3535,6 +3535,11 @@ namespace core
 		bool resetStationTrip(std::string_view installationId, std::string* diagnostic = nullptr);
 		bool injectStationFault(std::string_view installationId, std::string_view modeId,
 			FaultCause const& cause, std::string* diagnostic = nullptr);
+		// #842: start a repair as a runtime-instantiated maintenance
+		// job; see StationSystemsRuntime::repairFault for the contract.
+		// On success jobIdOut names the created repair job.
+		bool repairStationFault(std::string_view installationId, std::string_view faultModeId,
+			std::string* jobIdOut = nullptr, std::string* diagnostic = nullptr);
 		// Change one Station node's parameters on the running scenario without
 		// the caller holding the configuration. See
 		// StationSystemsRuntime::updateNode for the contract: one collection

@@ -166,6 +166,47 @@ Existing generator cooling and Heat engine sink gates remain auto-clearing;
 no opt-in means precisely the previous behavior. Autonomous threshold evaluation
 is boundary-sampled, not a claim of timestep invariance for thermal feedback.
 
+## Repair jobs
+
+A coolant loop opts into repair with a `repairParts` block: a per-Installation
+parts store and a per-mode repair plan (duration, parts quantity, waste store).
+Only `coolant-leak` and `pump-seizure` are repairable; a latching Trip is
+cleared with `resetTrip`, not repair.
+
+```yaml
+repairParts:
+  partsStoreId: repair-parts
+  repairs:
+    - modeId: coolant-leak
+      durationSeconds: 600
+      partsQuantity: 2
+      wasteStoreId: maintenance-waste
+```
+
+`runtime.repairFault(id, mode, &jobId, &diagnostic)` (or
+`World::repairStationFault`) starts the repair as a runtime-instantiated #414
+maintenance job and returns its job id. The repair reuses the established
+maintenance semantics exactly: the Installation is isolated at zero availability
+for the full duration, the authored parts are exclusively reserved from the parts
+store, completion requires the full duration to have run with the reservation
+held, and a reservation drawn away by a competing process interrupts the job,
+discards its progress and forces a full rerun. A repair's window opens with the
+command and never closes, so an interrupted repair keeps its occurrence until it
+can run in full. Completion clears the target Fault (lifting its availability cap)
+and books the consumed parts into the plan's waste store as qualified,
+disposal-ready material. Repair never reverses Wear and never replenishes
+coolant.
+
+The command is refused whole, with a diagnostic and no mutation, on an unknown
+installation or fault mode, a mode with no repair plan, a target Fault that is not
+present, a repair already running for that Fault, or parts/waste headroom that
+cannot currently be reserved. The store identities and the plan set are frozen
+topology; plan durations and parts quantities are live-tunable but never reach a
+repair that already started. Snapshots expose the repair in the maintenance
+picture with kind `repair`, the target `faultModeId`, phase, progress and the
+per-requirement reservation/spend. Bounded `repair` events record start,
+interruption and completion; a `fault` event records the clear.
+
 ## Persistence and replay
 
 Schema 114 carries Trip opt-ins; earlier documents carrying them are refused.
@@ -220,3 +261,15 @@ with auto-clearing generator/Heat engine gates on the same sink, free instant re
 invalid and duplicate commands, conservative heat, rollback, parameter retuning,
 opt-in no-op behavior, supported step ratios, schema guards, exact YAML/binary
 replay and World save/load/reset.
+
+`station-repairLifecycle`, `station-repairInterruption`, `station-repairTransactions`
+and `station-repairSeizureClearing` cover the repair starter: whole-command refusal
+(unknown installation/mode, Trip mode, no plan, no fault, duplicate, unreservable
+parts, no waste headroom), zero-availability isolation for the full duration,
+exclusive parts reservation with a competing drain that interrupts and forces a
+full rerun, completion that clears the Fault and books consumed parts as qualified
+waste, the `repair` snapshot kind with requirement detail, `repair`/`fault` events,
+live-topology freeze with parameter retuning that cannot reach a started repair,
+repair of a degradation-spawned pump-seizure without re-raising, opt-in no-op,
+supported step ratios, the schema-115 guard, exact YAML/binary replay and World
+save/load with a repair in flight.

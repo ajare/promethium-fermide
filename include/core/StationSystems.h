@@ -607,6 +607,38 @@ namespace core
 		double releasedKg{0.0};
 		bool operator==(CoolantLeakSettings const&) const = default;
 	};
+	// One repair plan for one fault mode on this Installation (#842).
+	// A repairFault command instantiates the plan as a #414 maintenance
+	// job at runtime: the plan supplies what the authored starter cannot
+	// know - how long the work takes and how many authored spare parts
+	// it consumes from the Installation's repair-parts store. The parts
+	// are consumed requirements: reserved exclusively while the work
+	// runs and booked into the declared waste store as qualified,
+	// disposal-ready material at completion, under the same unit and
+	// composition contract as scheduled maintenance.
+	struct FaultRepairSettings
+	{
+		std::string modeId;           // the fault mode this plan repairs
+		double durationSeconds{0.0};  // full-duration work per repair, > 0
+		double partsQuantity{0.0};    // parts-store units consumed per repair, > 0
+		std::string wasteStoreId;     // where consumed parts land as qualified waste
+		bool operator==(FaultRepairSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationFaultRepairs{8};
+	// Per-Installation repair-parts wiring (#842): the store holding
+	// this Installation's spare parts and the per-mode repair plans
+	// that draw from it. An Installation is repairable only for the
+	// modes with a plan here; absent wiring, repairFault refuses. The
+	// store identities and the plan set are frozen topology; each
+	// plan's duration and parts quantity are live-tunable parameters
+	// that never reach a job already started - an accepted repair
+	// froze its effective parameters at command time.
+	struct RepairPartsSettings
+	{
+		std::string partsStoreId;
+		std::vector<FaultRepairSettings> repairs;
+		bool operator==(RepairPartsSettings const&) const = default;
+	};
 	struct FaultCause
 	{
 		// The first three kinds are client-supplied. DegradationCrossing
@@ -685,6 +717,10 @@ namespace core
 		// and so is which store funds recovery; the rates inside it are
 		// live-tunable parameters.
 		std::optional<InstallationConditionSettings> condition;
+		// #842: the loop's repair-parts wiring. Presence, the parts store
+		// identity and the per-mode plan identities are topology; plan
+		// durations and parts quantities are live-tunable.
+		std::optional<RepairPartsSettings> repairParts;
 		bool operator==(CoolantLoopSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationCoolantLoops{8};
@@ -2616,6 +2652,17 @@ namespace core
 	};
 	inline constexpr std::array<char const*, 4> StationMaintenancePhaseNames{
 		"idle", "blocked", "active", "completed"};
+	// What started a maintenance job (#842): an authored schedule or a
+	// runtime repairFault command. One job type, two starters - the kind
+	// distinguishes only the snapshot and event surface, never the work
+	// semantics, which are identical for both.
+	enum class StationMaintenanceKind : std::uint8_t
+	{
+		Scheduled,
+		Repair,
+	};
+	inline constexpr std::array<char const*, 2> StationMaintenanceKindNames{
+		"scheduled", "repair"};
 	// One maintenance requirement as of the most recent tick (#414):
 	// what the job needs from which store, whether it is a reusable tool
 	// or a consumed part/consumable, whether the reservation currently
@@ -2643,6 +2690,11 @@ namespace core
 		std::string id;
 		std::string installationId;
 		std::string installationKind;
+		// #842: "scheduled" for authored jobs, "repair" for a
+		// runtime-started repair; faultModeId names the Fault a repair
+		// job targets and is empty for scheduled work.
+		StationMaintenanceKind kind{StationMaintenanceKind::Scheduled};
+		std::string faultModeId;
 		double firstOccurrenceSeconds{0.0};
 		double durationSeconds{0.0};
 		double recurrenceSeconds{0.0}; // 0 = one-off

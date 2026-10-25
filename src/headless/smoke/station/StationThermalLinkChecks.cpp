@@ -1,5 +1,6 @@
 #include "StationRig.h"
 #include "Smoke.h"
+#include "core/WorldDocument.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -834,7 +835,7 @@ void thermalLinkPersistence(smoke::Context const&)
 	// Version discipline: a pre-107 document carrying links is refused
 	// as conversion-required rather than dropping them, and a version
 	// beyond the accepted range is refused outright.
-	for (int version : {106, 115})
+	for (int version : {106, static_cast<int>(core::kWorldSchemaVersion) + 1})
 	{
 		auto bad = yaml;
 		bad.replace(bad.find("schemaVersion: 111"), std::string("schemaVersion: 111").size(),

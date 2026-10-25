@@ -19,6 +19,7 @@
 
 #include "core/StationPrefab.h"
 #include "core/StationConfigurationDocument.h"
+#include "core/WorldDocument.h"
 
 #include <cstring>
 #include <fstream>
@@ -1450,7 +1451,8 @@ parameters:
 		// version boundary, the same refusal every newer-schema document
 		// meets.
 		auto future = yaml;
-		replaceAllText(future, "schemaVersion: 111", "schemaVersion: 115");
+		replaceAllText(future, "schemaVersion: 111",
+			"schemaVersion: " + std::to_string(core::kWorldSchemaVersion + 1));
 		require(!core::parseStationConfiguration(future, loaded, &diagnostic)
 				&& diagnostic.find("Unsupported Station configuration schemaVersion")
 					!= std::string::npos,

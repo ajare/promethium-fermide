@@ -27,7 +27,13 @@ namespace core
 			[](auto const& s) { return s.overtempRunaway.has_value(); })
 			|| std::any_of(document.settings.methaneProcessors.begin(), document.settings.methaneProcessors.end(),
 				[](auto const& s) { return s.overtempRunaway.has_value(); });
-		output->writeUint32("schemaVersion", trips ? kWorldSchemaVersion : condition ? 113 : faults ? 112 : 111);
+		// #842: repair-parts wiring is the newest opt-in tier; a document
+		// carrying it stamps the current schema, trip-only documents keep
+		// stamping 114 exactly as before.
+		auto const repairs = std::any_of(document.settings.coolantLoops.begin(), document.settings.coolantLoops.end(),
+			[](auto const& loop) { return loop.repairParts.has_value(); });
+		output->writeUint32("schemaVersion", repairs ? kWorldSchemaVersion
+			: trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		writeStationSystemsSettingsMap(*output, document.settings);
 		output->beginMap("layout");
 		output->writeFloat("panX", document.panX);

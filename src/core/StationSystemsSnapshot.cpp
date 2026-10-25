@@ -1746,9 +1746,15 @@ namespace core
 		// history (#414). The target's effective availability is read
 		// from the installation the job isolates, so an operator sees
 		// the isolation bite the same number the outage contract uses.
-		for (auto const& job : mImpl->maintenanceJobs)
+		// #842: one snapshot builder for both starters - the authored
+		// scheduled jobs and the runtime-started repairs share the shape;
+		// the repair adds its kind and the Fault it targets.
+		auto const snapshotMaintenanceJob = [&](Impl::MaintenanceState const& job)
 		{
 			StationMaintenanceSnapshot jobResult;
+			jobResult.kind = job.isRepair
+				? StationMaintenanceKind::Repair : StationMaintenanceKind::Scheduled;
+			jobResult.faultModeId = job.repairModeId;
 			jobResult.id = job.authored.id;
 			jobResult.installationId = job.authored.installationId;
 			jobResult.installationKind = job.installationKind;
@@ -1802,8 +1808,14 @@ namespace core
 					: job.phase == StationMaintenancePhase::Blocked
 						? StationTransferStatus::Rejected
 						: StationTransferStatus::Idle;
-			result.maintenanceJobs.push_back(std::move(jobResult));
-		}
+			return jobResult;
+		};
+		for (auto const& job : mImpl->maintenanceJobs)
+			result.maintenanceJobs.push_back(snapshotMaintenanceJob(job));
+		// The maintenance picture grows the `repair` kind beside the
+		// authored scheduled jobs (#842), in command order.
+		for (auto const& job : mImpl->repairJobs)
+			result.maintenanceJobs.push_back(snapshotMaintenanceJob(job));
 		// #419: the per-resource endurance explanation. The inventory split
 		// is the live committed state; the rate, stability and bounds come
 		// from the windows observed at the declared observation cadence.

@@ -36,6 +36,9 @@ namespace core
 		auto const committedDeliveries = deliveries;
 		auto const committedWasteEjections = wasteEjections;
 		auto const committedMaintenanceJobs = maintenanceJobs;
+		// #842: runtime-started repair jobs mutate in the same pass as
+		// the authored jobs, so a failed tick restores them together.
+		auto const committedRepairJobs = repairJobs;
 		// #602: the outage pass mutates outage state and appends the
 		// window's start/restoration events, and maintenance appends its
 		// start/completion/interruption events, all before the audits
@@ -116,6 +119,7 @@ namespace core
 			deliveries = committedDeliveries;
 			wasteEjections = committedWasteEjections;
 			maintenanceJobs = committedMaintenanceJobs;
+			repairJobs = committedRepairJobs;
 			outages = committedOutages;
 			events = committedEvents;
 			reservoirs = committedReservoirs;
@@ -430,7 +434,8 @@ namespace core
 		}
 		auto const hasContinuousTransfers = std::any_of(transfers.begin(), transfers.end(),
 			[](auto const& transfer) { return transfer.authored.mode == ResourceTransferMode::Continuous; });
-		if (boundaries.empty() && collected.arrivals.empty() && maintenanceJobs.empty() && outages.empty()
+		if (boundaries.empty() && collected.arrivals.empty() && maintenanceJobs.empty()
+			&& repairJobs.empty() && outages.empty()
 			&& !hasContinuousTransfers && powerPhaseCrossing(seconds) >= seconds)
 			return integrate(end, seconds, [](Tick const&) {});
 		// Transfer rates are constant until an inventory boundary or an authored
@@ -469,7 +474,8 @@ namespace core
 			}
 			return maximum;
 		};
-		if (boundaries.empty() && collected.arrivals.empty() && maintenanceJobs.empty() && outages.empty()
+		if (boundaries.empty() && collected.arrivals.empty() && maintenanceJobs.empty()
+			&& repairJobs.empty() && outages.empty()
 			&& transferCrossing(seconds) >= seconds && powerPhaseCrossing(seconds) >= seconds)
 			return integrate(end, seconds, [](Tick const&) {});
 		for (auto const& arrival : collected.arrivals)
@@ -634,6 +640,15 @@ namespace core
 			auto const it = std::upper_bound(boundaries.begin(), boundaries.end(), cursor);
 			if (it != boundaries.end()) next = *it;
 			for (auto const& job : maintenanceJobs)
+				if (job.phase == StationMaintenancePhase::Active)
+				{
+					auto const completion = job.lastStartSeconds + job.authored.durationSeconds;
+					if (completion > cursor && completion < next) next = completion;
+				}
+			// A running repair's completion is the same kind of rate-
+			// changing boundary as a scheduled job's (#842): the fault
+			// clear and the waste booking must land exactly on it.
+			for (auto const& job : repairJobs)
 				if (job.phase == StationMaintenancePhase::Active)
 				{
 					auto const completion = job.lastStartSeconds + job.authored.durationSeconds;

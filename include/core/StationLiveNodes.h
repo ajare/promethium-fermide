@@ -13,6 +13,7 @@
 
 #include "core/StationSystems.h"
 
+#include <algorithm>
 #include <string_view>
 #include <vector>
 
@@ -94,7 +95,24 @@ namespace core
 				|| (a.coolantLeak && b.coolantLeak && a.coolantLeak->compartmentId != b.coolantLeak->compartmentId)
 				|| a.condition.has_value() != b.condition.has_value()
 				|| (a.condition && b.condition
-					&& a.condition->restoreStoreId != b.condition->restoreStoreId);
+					&& a.condition->restoreStoreId != b.condition->restoreStoreId)
+				// #842: the repair-parts store identity and the per-mode
+				// plan identities are topology - which faults are repairable
+				// and which stores they draw from cannot move under a live
+				// run. Each plan's duration and parts quantity stay
+				// live-tunable parameters; a repair already started keeps the
+				// parameters it froze at command time.
+				|| a.repairParts.has_value() != b.repairParts.has_value()
+				|| (a.repairParts && b.repairParts
+					&& (a.repairParts->partsStoreId != b.repairParts->partsStoreId
+						|| a.repairParts->repairs.size() != b.repairParts->repairs.size()
+						|| !std::equal(a.repairParts->repairs.begin(), a.repairParts->repairs.end(),
+							b.repairParts->repairs.begin(),
+							[](FaultRepairSettings const& x, FaultRepairSettings const& y)
+							{
+								return x.modeId == y.modeId && x.wasteStoreId == y.wasteStoreId;
+							}))
+				);
 		}
 	};
 	PF_STATION_LIVE_NODE(ChillerSettings, chillers, "Chiller")

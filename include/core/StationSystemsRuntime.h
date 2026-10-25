@@ -172,6 +172,21 @@ namespace core
 		// stock above the reserve is already gone.
 		bool restoreCondition(std::string_view installationId, double targetCondition,
 			std::string* diagnostic = nullptr);
+		// #842: start a repair as a runtime-instantiated #414 maintenance
+		// job. Same isolation-at-zero while running, same exclusive
+		// reservation of authored parts (drawn from the Installation's
+		// repair-parts store per the fault mode's repair plan), same
+		// full-duration completion and interruption-discards-progress
+		// semantics as scheduled maintenance. Completion clears the
+		// target Fault and books the consumed parts into the plan's waste
+		// store as qualified, disposal-ready material; Repair never
+		// reverses Wear. The accepted command returns the job id. It is
+		// refused whole, with a diagnostic and no mutation, on an unknown
+		// installation or fault mode, a mode with no repair plan, a target
+		// Fault that is not present, a repair already running for that
+		// Fault, or parts that cannot currently be reserved.
+		bool repairFault(std::string_view installationId, std::string_view faultModeId,
+			std::string* jobIdOut = nullptr, std::string* diagnostic = nullptr);
 		// Command journal plus elapsed time reconstructs the fault ledger and
 		// all its bookings through the normal audited drive (YAML or binary).
 		void writeFaultReplay(Serializer& serializer) const;

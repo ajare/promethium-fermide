@@ -129,6 +129,142 @@ namespace core
 		return true;
 	}
 
+	// Repair as a runtime-started maintenance job (#842). Validated whole
+	// before any mutation, then the job is instantiated immediately in its
+	// pre-start state so the snapshot shows the repair pending, and the
+	// ordinary audited maintenance pass reserves its parts, isolates the
+	// installation and runs the full duration at the next boundary. The
+	// command journal freezes the repair identity; the plan's effective
+	// duration and parts are frozen into the job here, so a later live
+	// retune of the plan cannot reach a repair already started.
+	bool StationSystemsRuntime::repairFault(std::string_view id, std::string_view mode,
+		std::string* jobIdOut, std::string* diagnostic)
+	{
+		auto refuse = [&](std::string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
+		if (!mImpl->settings.enabled || !mImpl->snapshot.healthy) return refuse("Station runtime is not running or healthy");
+		if (mode == "overtemp-runaway")
+			return refuse("A latching Trip is not a repairable Fault: clear it with resetTrip");
+		if (mode != "coolant-leak" && mode != "pump-seizure")
+			return refuse("Unknown fault mode '" + std::string(mode) + "' for repair on '" + std::string(id) + "'");
+		auto const loop = std::find_if(mImpl->coolantLoops.begin(), mImpl->coolantLoops.end(),
+			[&](auto const& l) { return l.authored.id == id; });
+		if (loop == mImpl->coolantLoops.end())
+		{
+			auto const identities = stationInstallationIdentities(mImpl->settings);
+			if (std::none_of(identities.begin(), identities.end(), [&](auto const& i) { return i.id == id; })
+				&& std::none_of(mImpl->sabatierReactors.begin(), mImpl->sabatierReactors.end(),
+					[&](auto const& s) { return s.authored.id == id; })
+				&& std::none_of(mImpl->methaneProcessors.begin(), mImpl->methaneProcessors.end(),
+					[&](auto const& s) { return s.authored.id == id; }))
+				return refuse("Unknown installation '" + std::string(id) + "'");
+			return refuse("Installation '" + std::string(id) + "' declares no repair-parts wiring");
+		}
+		if (!loop->authored.repairParts)
+			return refuse("Installation '" + std::string(id) + "' declares no repair-parts wiring");
+		auto const& wiring = *loop->authored.repairParts;
+		auto const plan = std::find_if(wiring.repairs.begin(), wiring.repairs.end(),
+			[&](auto const& p) { return p.modeId == mode; });
+		if (plan == wiring.repairs.end())
+			return refuse("Installation '" + std::string(id) + "' declares no repair plan for fault mode '" + std::string(mode) + "'");
+		if (mode == "coolant-leak" ? !loop->fault : !loop->seizure)
+			return refuse("No active or pending '" + std::string(mode) + "' Fault on '" + std::string(id) + "' to repair");
+		if (std::any_of(mImpl->repairJobs.begin(), mImpl->repairJobs.end(), [&](auto const& job)
+			{
+				return !job.exhausted && job.authored.installationId == id && job.repairModeId == mode;
+			}))
+			return refuse("A repair of '" + std::string(mode) + "' on '" + std::string(id) + "' is already running or pending");
+		if (!std::isfinite(plan->durationSeconds) || plan->durationSeconds <= 0.0
+			|| !std::isfinite(plan->partsQuantity) || plan->partsQuantity <= 0.0)
+			return refuse("Repair plan for '" + std::string(mode) + "' on '" + std::string(id)
+				+ "' has a non-positive duration or parts quantity");
+		size_t partsStoreIndex{SIZE_MAX};
+		size_t wasteStoreIndex{SIZE_MAX};
+		for (size_t index = 0; index < mImpl->stores.size(); ++index)
+		{
+			if (mImpl->stores[index].authored.id == wiring.partsStoreId) partsStoreIndex = index;
+			if (mImpl->stores[index].authored.id == plan->wasteStoreId) wasteStoreIndex = index;
+		}
+		if (partsStoreIndex == SIZE_MAX)
+			return refuse("Repair parts store '" + wiring.partsStoreId + "' resolved to no configured store");
+		if (wasteStoreIndex == SIZE_MAX)
+			return refuse("Repair waste store '" + plan->wasteStoreId + "' resolved to no configured store");
+		// Reservable now: the parts the live reservations of running work
+		// have not already taken, and the waste headroom the pending
+		// consumed claims have not already committed. A repair whose parts
+		// are not there to be reserved is refused here, not queued to
+		// block forever.
+		auto const covers = [](double available, double needed)
+		{
+			return available + StationBalanceTolerance * std::max(1.0, needed) >= needed;
+		};
+		double reservedParts{0.0};
+		double pendingWaste{0.0};
+		auto const sumClaims = [&](auto const& jobs)
+		{
+			for (auto const& job : jobs)
+			{
+				if (job.phase != StationMaintenancePhase::Active) continue;
+				for (size_t requirementIndex = 0;
+					requirementIndex < job.requirements.size(); ++requirementIndex)
+				{
+					auto const& requirement = job.requirements[requirementIndex];
+					if (requirement.storeIndex == partsStoreIndex) reservedParts += requirement.reserved;
+					if (job.wasteStoreIndex == wasteStoreIndex
+						&& job.authored.requirements[requirementIndex].consumed)
+						pendingWaste += requirement.reserved;
+				}
+			}
+		};
+		sumClaims(mImpl->maintenanceJobs);
+		sumClaims(mImpl->repairJobs);
+		auto const& parts = mImpl->stores[partsStoreIndex];
+		auto const drawable = parts.currentQualified - reservedParts;
+		if (!covers(drawable, plan->partsQuantity))
+			return refuse("Repair parts store '" + wiring.partsStoreId + "' cannot cover "
+				+ std::to_string(plan->partsQuantity) + " " + parts.authored.unit
+				+ " for the repair (drawable " + std::to_string(std::max(0.0, drawable)) + ")");
+		auto const& waste = mImpl->stores[wasteStoreIndex];
+		auto const headroom = waste.authored.capacity - waste.currentQualified
+			- waste.currentUnqualified - pendingWaste;
+		if (!covers(headroom, plan->partsQuantity))
+			return refuse("Repair waste store '" + plan->wasteStoreId
+				+ "' lacks headroom for the consumed parts ("
+				+ std::to_string(plan->partsQuantity) + " " + waste.authored.unit
+				+ " needed, " + std::to_string(std::max(0.0, headroom)) + " free)");
+		// Accepted: journal the command, then mint the job in its
+		// pre-start state. The maintenance pass reserves and isolates at
+		// the next boundary exactly as it would for an authored job whose
+		// window just opened.
+		Impl::FaultCommand command;
+		command.kind = Impl::FaultCommand::Kind::RepairFault;
+		command.afterStep = mImpl->clock.steps(); command.installationId = id; command.modeId = mode;
+		mImpl->faultCommands.push_back(std::move(command));
+		Impl::MaintenanceState job;
+		job.authored.id = "repair-" + std::to_string(++mImpl->repairJobCounter);
+		job.authored.installationId = std::string(id);
+		job.authored.firstOccurrenceSeconds = mImpl->clock.elapsedSeconds();
+		job.authored.durationSeconds = plan->durationSeconds;
+		job.authored.recurrenceSeconds = 0.0;
+		job.authored.priority = 0;
+		job.authored.requirements = {MaintenanceRequirementSettings{wiring.partsStoreId, plan->partsQuantity, true}};
+		job.authored.wasteStoreId = plan->wasteStoreId;
+		job.installationKind = "coolant loop";
+		job.target = Impl::MaintenanceState::Target::CoolantLoop;
+		job.targetIndex = static_cast<size_t>(std::distance(mImpl->coolantLoops.begin(), loop));
+		Impl::MaintenanceState::RequirementState requirementState;
+		requirementState.storeIndex = partsStoreIndex;
+		job.requirements.push_back(requirementState);
+		job.wasteStoreIndex = wasteStoreIndex;
+		job.isRepair = true;
+		job.repairModeId = std::string(mode);
+		job.phase = StationMaintenancePhase::Blocked;
+		job.blockReason = "repair commanded; awaiting reservation";
+		mImpl->repairJobs.push_back(std::move(job));
+		if (jobIdOut) *jobIdOut = mImpl->repairJobs.back().authored.id;
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool StationSystemsRuntime::resetTrip(std::string_view id, std::string* diagnostic)
 	{
 		auto reset = [&](auto& states) {
@@ -186,6 +322,12 @@ namespace core
 				s.writeUint32("commandKind", 2);
 				s.writeString("installationId", command.installationId);
 			}
+			else if (command.kind == Impl::FaultCommand::Kind::RepairFault)
+			{
+				s.writeUint32("commandKind", 3);
+				s.writeString("installationId", command.installationId);
+				s.writeString("modeId", command.modeId);
+			}
 			else if (command.kind == Impl::FaultCommand::Kind::RestoreCondition)
 			{
 				s.writeUint32("commandKind", 1);
@@ -217,7 +359,7 @@ namespace core
 		s.beginMap("stationFaultReplay");
 		auto const steps = s.readUint64("completedSteps");
 		StationSystemsSettings initial;
-		readStationSystemsSettingsMap(s, 114, initial);
+		readStationSystemsSettingsMap(s, 115, initial);
 		auto runtime = std::make_unique<StationSystemsRuntime>(initial, baseSeconds);
 		s.beginArray("commands");
 		uint64_t previous = 0;
@@ -233,17 +375,19 @@ namespace core
 			if (s.hasField("stationSystems"))
 			{
 				StationSystemsSettings update;
-				readStationSystemsSettingsMap(s, 114, update);
+				readStationSystemsSettingsMap(s, 115, update);
 				if (!runtime->updateSettings(update, &diagnostic))
 					throw SerializationException("Invalid fault replay settings: " + diagnostic);
 			}
 			else if (s.hasField("commandKind"))
 			{
 				auto const kind = s.readUint32("commandKind");
-				if (kind != 1 && kind != 2) throw SerializationException("Unknown fault replay command kind");
+				if (kind != 1 && kind != 2 && kind != 3) throw SerializationException("Unknown fault replay command kind");
 				auto const id = s.readString("installationId");
-				if (!(kind == 2 ? runtime->resetTrip(id, &diagnostic)
-					: runtime->restoreCondition(id, s.readDouble("targetCondition"), &diagnostic)))
+				bool const accepted = kind == 2 ? runtime->resetTrip(id, &diagnostic)
+					: kind == 1 ? runtime->restoreCondition(id, s.readDouble("targetCondition"), &diagnostic)
+					: runtime->repairFault(id, s.readString("modeId"), nullptr, &diagnostic);
+				if (!accepted)
 					throw SerializationException("Invalid fault replay recovery command: " + diagnostic);
 			}
 			else

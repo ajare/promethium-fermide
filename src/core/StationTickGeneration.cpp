@@ -142,8 +142,40 @@ namespace core
 		// Other sampled profiles retain their existing endpoint convention.
 		auto const sampledElapsed = elapsed;
 		if (continuous) elapsed -= seconds;
-		if (!runtime.maintenanceJobs.empty())
+		if (!runtime.maintenanceJobs.empty() || !runtime.repairJobs.empty())
 		{
+			// Combined work list (#842): the authored scheduled jobs in
+			// their declared priority order, then the runtime-started
+			// repair jobs in command order. One job type, two starters:
+			// every phase below runs both lists with identical
+			// maintenance semantics; the kind changes only the event
+			// label, the window policy (a repair's window opened with the
+			// command and never closes - it must be able to rerun in full
+			// after an interruption regardless of elapsed time) and the
+			// completion hook that clears the repaired Fault.
+			auto const authoredCount = runtime.maintenanceJobs.size();
+			auto const totalJobs = authoredCount + runtime.repairJobs.size();
+			auto jobAt = [&](size_t index) -> MaintenanceState*
+			{
+				return index < authoredCount ? &runtime.maintenanceJobs[index]
+					: &runtime.repairJobs[index - authoredCount];
+			};
+			std::vector<size_t> allJobIndices;
+			allJobIndices.reserve(totalJobs);
+			for (size_t index = 0; index < totalJobs; ++index) allJobIndices.push_back(index);
+			std::vector<size_t> workOrder;
+			workOrder.reserve(totalJobs);
+			for (auto const index : runtime.maintenanceOrder) workOrder.push_back(index);
+			for (size_t index = 0; index < runtime.repairJobs.size(); ++index)
+				workOrder.push_back(authoredCount + index);
+			auto const kindLabel = [](MaintenanceState const& job)
+			{
+				return job.isRepair ? "Repair '" : "Maintenance '";
+			};
+			auto const kindCategory = [](MaintenanceState const& job)
+			{
+				return job.isRepair ? "repair" : "maintenance";
+			};
 			auto const occurrenceTime = [](MaintenanceState const& job, uint64_t occurrence)
 			{
 				return job.authored.recurrenceSeconds > 0.0
@@ -169,8 +201,8 @@ namespace core
 				job.phase = StationMaintenancePhase::Blocked;
 				job.progressSeconds = 0.0;
 				job.blockReason = "interrupted: " + reason;
-				appendBoundedEvent(runtime.events, tick, "maintenance",
-					"Maintenance '" + job.authored.id + "' on " + job.installationKind
+				appendBoundedEvent(runtime.events, tick, kindCategory(job),
+					std::string(kindLabel(job)) + job.authored.id + "' on " + job.installationKind
 					+ " '" + job.authored.installationId + "' interrupted at "
 					+ std::to_string(elapsed) + " s: " + reason
 					+ "; progress discarded, reservation released");
@@ -183,8 +215,9 @@ namespace core
 			{
 				std::map<size_t, double> totalReserved;
 				std::map<size_t, double> totalWasteClaim;
-				for (auto const& job : runtime.maintenanceJobs)
+				for (auto const index : allJobIndices)
 				{
+					auto const& job = *jobAt(index);
 					if (job.phase != StationMaintenancePhase::Active) continue;
 					for (auto const& requirement : job.requirements)
 						totalReserved[requirement.storeIndex] += requirement.reserved;
@@ -223,10 +256,10 @@ namespace core
 				// violated store, so the most important work keeps
 				// its reservation as long as the inventory lasts.
 				bool released = false;
-				for (auto orderIt = runtime.maintenanceOrder.rbegin();
-					orderIt != runtime.maintenanceOrder.rend() && !released; ++orderIt)
+				for (auto orderIt = workOrder.rbegin();
+					orderIt != workOrder.rend() && !released; ++orderIt)
 				{
-					auto& job = runtime.maintenanceJobs[*orderIt];
+					auto& job = *jobAt(*orderIt);
 					if (job.phase != StationMaintenancePhase::Active) continue;
 					bool holds = violatedWaste
 						? job.wasteStoreIndex == violatedStoreIndex
@@ -247,9 +280,9 @@ namespace core
 			// Phase 2: progress and completion. Completions release
 			// their reservations before start attempts run, so a
 			// returned tool is available to waiting work this tick.
-			for (auto const index : runtime.maintenanceOrder)
+			for (auto const index : workOrder)
 			{
-				auto& job = runtime.maintenanceJobs[index];
+				auto& job = *jobAt(index);
 				if (job.phase != StationMaintenancePhase::Active) continue;
 				if (!continuous)
 					job.progressSeconds = std::max(0.0, elapsed - job.lastStartSeconds);
@@ -294,8 +327,8 @@ namespace core
 				++job.occurrencesCompleted;
 				job.lastCompleteSeconds = elapsed;
 				job.blockReason.clear();
-				appendBoundedEvent(runtime.events, tick, "maintenance",
-					"Maintenance '" + job.authored.id + "' on " + job.installationKind
+				appendBoundedEvent(runtime.events, tick, kindCategory(job),
+					std::string(kindLabel(job)) + job.authored.id + "' on " + job.installationKind
 					+ " '" + job.authored.installationId + "' completed at "
 					+ std::to_string(elapsed)
 					+ " s: " + std::to_string(consumedTotal)
@@ -303,6 +336,34 @@ namespace core
 					+ (job.wasteStoreIndex == SIZE_MAX ? std::string("none")
 						: runtime.stores[job.wasteStoreIndex].authored.id)
 					+ "', reusable tools returned, installation restored (no supplies replenished)");
+				if (job.isRepair && job.target == MaintenanceState::Target::CoolantLoop)
+				{
+					// The repair's payoff: the target Fault leaves the
+					// ledger so its availability cap lifts with the
+					// isolation, and the clear is logged as a fault event
+					// beside the repair completion. Wear is untouched -
+					// only replacement reverses wear, and replacement is a
+					// reset, not a repair (#842).
+					auto& target = runtime.coolantLoops[job.targetIndex];
+					if (job.repairModeId == "pump-seizure" && target.seizure)
+					{
+						target.seizure.reset();
+						appendBoundedEvent(runtime.events, tick, "fault",
+							"Fault 'pump-seizure' on " + job.installationKind + " '"
+							+ job.authored.installationId + "' cleared by repair '"
+							+ job.authored.id + "' at " + std::to_string(elapsed)
+							+ " s: pump restored to service (no Wear reversed, no coolant replenished)");
+					}
+					else if (job.repairModeId == "coolant-leak" && target.fault)
+					{
+						target.fault.reset();
+						appendBoundedEvent(runtime.events, tick, "fault",
+							"Fault 'coolant-leak' on " + job.installationKind + " '"
+							+ job.authored.installationId + "' cleared by repair '"
+							+ job.authored.id + "' at " + std::to_string(elapsed)
+							+ " s: leak sealed (no Wear reversed, no coolant replenished)");
+					}
+				}
 				// Advance past this occurrence; any occurrence whose
 				// window opened while this one was still running is
 				// missed - a late job never back-fills the schedule.
@@ -336,8 +397,9 @@ namespace core
 			// get, cycling its installation off service for nothing.
 			std::map<size_t, double> reservedByStore;
 			std::map<size_t, double> wasteClaimByStore;
-			for (auto const& job : runtime.maintenanceJobs)
+			for (auto const index : allJobIndices)
 			{
+				auto const& job = *jobAt(index);
 				if (job.phase != StationMaintenancePhase::Active) continue;
 				for (auto const& requirement : job.requirements)
 					reservedByStore[requirement.storeIndex] += requirement.reserved;
@@ -348,9 +410,9 @@ namespace core
 						wasteClaimByStore[job.wasteStoreIndex]
 							+= job.requirements[requirementIndex].reserved;
 			}
-			for (auto const index : runtime.maintenanceOrder)
+			for (auto const index : workOrder)
 			{
-				auto& job = runtime.maintenanceJobs[index];
+				auto& job = *jobAt(index);
 				if (job.exhausted) continue;
 				// Jobs that are Active were advanced in phase 2; only
 				// idle, completed and blocked jobs attempt a start.
@@ -365,9 +427,13 @@ namespace core
 				// the same way, and every window already closed at this
 				// tick's time is skipped in this pass so a late pass never
 				// replays an old window as startable. Only a window that
-				// is still open admits a start attempt.
+				// is still open admits a start attempt. A repair job is
+				// exempt (#842): its window opened with the command and
+				// never closes, so an interrupted or part-waited repair
+				// keeps its occurrence and must run the full duration
+				// whenever its parts become reservable.
 				std::string missedReason = job.blockReason;
-				while (hasOccurrence(job, job.occurrence)
+				while (!job.isRepair && hasOccurrence(job, job.occurrence)
 					&& elapsed >= occurrenceTime(job, job.occurrence)
 						+ job.authored.durationSeconds)
 				{
@@ -438,8 +504,8 @@ namespace core
 				if (!blockReason.empty())
 				{
 					if (job.phase != StationMaintenancePhase::Blocked)
-						appendBoundedEvent(runtime.events, tick, "maintenance",
-							"Maintenance '" + job.authored.id + "' on " + job.installationKind
+						appendBoundedEvent(runtime.events, tick, kindCategory(job),
+							std::string(kindLabel(job)) + job.authored.id + "' on " + job.installationKind
 							+ " '" + job.authored.installationId + "' blocked at "
 							+ std::to_string(elapsed) + " s: " + blockReason);
 					job.phase = StationMaintenancePhase::Blocked;
@@ -464,8 +530,8 @@ namespace core
 				job.blockReason.clear();
 				++job.occurrencesStarted;
 				job.lastStartSeconds = elapsed;
-				appendBoundedEvent(runtime.events, tick, "maintenance",
-					"Maintenance '" + job.authored.id + "' on " + job.installationKind
+				appendBoundedEvent(runtime.events, tick, kindCategory(job),
+					std::string(kindLabel(job)) + job.authored.id + "' on " + job.installationKind
 					+ " '" + job.authored.installationId + "' started at "
 					+ std::to_string(elapsed)
 					+ " s: prerequisites reserved, installation isolated for "
@@ -475,8 +541,9 @@ namespace core
 			// installation at zero availability on top of any
 			// outage ceiling - work and rated service never happen
 			// at the same time on the same machine.
-			for (auto& job : runtime.maintenanceJobs)
+			for (auto const index : allJobIndices)
 			{
+				auto& job = *jobAt(index);
 				job.lastIsolated = job.phase == StationMaintenancePhase::Active;
 				if (!job.lastIsolated) continue;
 				auto& factor = job.target == MaintenanceState::Target::Generator
