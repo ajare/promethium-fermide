@@ -116,6 +116,7 @@ void monitorFamilies(smoke::Context const& context)
 			auto effective = before;
 			core::applyStationAtmosphereDefaultMonitors(effective);
 			core::applyStationThermalPlantDefaultMonitors(effective);
+			core::applyStationEclssBiologyDefaultMonitors(effective);
 			core::applyStationPowerSourceDefaultMonitors(effective);
 			core::applyStationStoreConnectionDefaultMonitors(effective);
 			std::vector<core::StationMonitorSettings> rows;

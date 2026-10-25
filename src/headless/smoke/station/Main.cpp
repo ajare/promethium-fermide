@@ -35,6 +35,7 @@ int main(int argc, char** argv)
 	registerStationFaultChecks(checks);
 	registerStationMonitorChecks(checks);
 	registerStationStoreConnectionMonitorChecks(checks);
+	registerStationEclssBiologyMonitorChecks(checks);
 	registerStationConditionChecks(checks);
 	registerStationWearChecks(checks);
 	registerStationWearCatalogueChecks(checks);

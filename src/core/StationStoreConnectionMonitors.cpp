@@ -129,6 +129,13 @@ std::vector<StationMonitorMetric> const& stationMonitorMetricCatalogue(std::stri
 	static std::vector<StationMonitorMetric> const batteries{{"stateOfCharge", "fraction"}, {"dischargeShortfallFraction", "fraction"}, {"wearFraction", "fraction"}};
 	static std::vector<StationMonitorMetric> const generators{{"outputDeviationFraction", "fraction"}, {"sinkTemperatureC", "°C"}, {"startupUnmetKW", "kW"}};
 	static std::vector<StationMonitorMetric> const solar{{"availableFraction", "fraction"}};
+	static std::vector<StationMonitorMetric> const machines{{"unmetFraction", "fraction"}};
+	static std::vector<StationMonitorMetric> const microbial{{"unmetFraction", "fraction"}, {"condition", "fraction"}};
+	static std::vector<StationMonitorMetric> const biology{{"biomassFraction", "fraction"}, {"unmetResourceFraction", "fraction"}};
+	if (type == "microbial-processor") return microbial;
+	if (type == "water-treatment" || type == "electrolyzer" || type == "co2-capture"
+		|| type == "sabatier" || type == "methane-processor" || type == "fuel-cell") return machines;
+	if (type == "crop" || type == "algae") return biology;
 	if (type == "battery") return batteries;
 	if (type == "generator") return generators;
 	if (type == "solar-array") return solar;
@@ -141,6 +148,15 @@ std::vector<StationMonitorMetric> const& stationMonitorMetricCatalogue(std::stri
 }
 bool stationMonitorSubjectExists(StationSystemsSettings const& settings, std::string_view type, std::string_view id)
 {
+	if (type == "water-treatment") return findId(settings.waterTreatments, id) != settings.waterTreatments.end();
+	if (type == "electrolyzer") return findId(settings.electrolyzers, id) != settings.electrolyzers.end();
+	if (type == "co2-capture") return findId(settings.co2Captures, id) != settings.co2Captures.end();
+	if (type == "sabatier") return findId(settings.sabatierReactors, id) != settings.sabatierReactors.end();
+	if (type == "methane-processor") return findId(settings.methaneProcessors, id) != settings.methaneProcessors.end();
+	if (type == "fuel-cell") return findId(settings.fuelCells, id) != settings.fuelCells.end();
+	if (type == "microbial-processor") return findId(settings.microbialProcessors, id) != settings.microbialProcessors.end();
+	if (type == "crop") return findId(settings.cropPopulations, id) != settings.cropPopulations.end();
+	if (type == "algae") return findId(settings.algaeCultures, id) != settings.algaeCultures.end();
 	if (type == "battery") return findId(settings.batteries, id) != settings.batteries.end();
 	if (type == "generator") return findId(settings.generators, id) != settings.generators.end();
 	if (type == "solar-array") return findId(settings.solarArrays, id) != settings.solarArrays.end();
@@ -160,6 +176,49 @@ std::optional<double> readStationMonitorMetric(StationSystemsSettings const& set
 {
 	auto const& catalogue = stationMonitorMetricCatalogue(type);
 	if (std::none_of(catalogue.begin(), catalogue.end(), [&](auto const& entry) { return entry.name == metric; })) return {};
+	// Demand-normalised service, not the power-only unmet counters: missing
+	// feed and destination headroom are failures to deliver service too.
+	auto shortfall = [](double demand, double supplied) {
+		return demand > 0 ? std::clamp((demand - supplied) / demand, 0.0, 1.0) : 0.0;
+	};
+	auto processing = [&](auto const& entries, auto delivered) -> std::optional<double> {
+		auto s = findId(entries, id);
+		if (s == entries.end()) return {};
+		return shortfall(s->lastRequestedKg, (*s).*delivered);
+	};
+	if (type == "electrolyzer") return processing(snapshot.electrolyzers, &StationElectrolyzerSnapshot::lastSplitKg);
+	if (type == "co2-capture") return processing(snapshot.co2Captures, &StationCo2CaptureSnapshot::lastCapturedKg);
+	if (type == "sabatier") return processing(snapshot.sabatierReactors, &StationSabatierReactorSnapshot::lastCo2ConsumedKg);
+	if (type == "methane-processor") return processing(snapshot.methaneProcessors, &StationMethaneProcessorSnapshot::lastMethaneConsumedKg);
+	if (type == "microbial-processor")
+	{
+		auto s = findId(snapshot.microbialProcessors, id);
+		if (s == snapshot.microbialProcessors.end()) return {};
+		return metric == "condition" ? s->condition : shortfall(s->lastRequestedKg, s->lastFeedConsumedKg);
+	}
+	if (type == "water-treatment")
+	{
+		auto s = findId(snapshot.waterTreatments, id);
+		if (s == snapshot.waterTreatments.end()) return {};
+		return shortfall(s->throughputKgPerS * snapshot.systemsTimestepSeconds, s->lastProcessedKg);
+	}
+	if (type == "fuel-cell")
+	{
+		auto s = findId(snapshot.fuelCells, id);
+		if (s == snapshot.fuelCells.end()) return {};
+		return shortfall(s->lastOutputKW + s->lastUnmetOutputKW, s->lastOutputKW);
+	}
+	auto population = [&](auto const& entries) -> std::optional<double> {
+		auto s = findId(entries, id);
+		if (s == entries.end()) return {};
+		return metric == "biomassFraction" ? (s->capacityKg > 0 ? s->livingBiomassKg / s->capacityKg : 0.0)
+			: std::max({s->lastResourceUnmetFraction,
+				shortfall(s->lastLightRequestedKW, s->lastLightSuppliedKW),
+				shortfall(s->lastCirculationRequestedKW, s->lastCirculationSuppliedKW),
+				shortfall(s->lastRespirationRequestedKg, s->lastRespirationKg)});
+	};
+	if (type == "crop") return population(snapshot.cropPopulations);
+	if (type == "algae") return population(snapshot.algaeCultures);
 	if (type == "atmosphere")
 	{
 		auto subject = findId(snapshot.atmospheres, id);
@@ -377,6 +436,45 @@ std::vector<StationMonitorSettings> stationThermalPlantDefaultMonitors(StationSy
 void applyStationThermalPlantDefaultMonitors(StationSystemsSettings& settings)
 {
 	for (auto const& candidate : stationThermalPlantDefaultMonitors(settings))
+		if (findId(settings.monitors, candidate.id) == settings.monitors.end()) settings.monitors.push_back(candidate);
+}
+std::vector<StationMonitorTemplate> const& stationEclssBiologyMonitorTemplates(std::string_view type)
+{
+	using enum AlertDirection; using enum AlertSeverity; using enum MonitorProvenance;
+	static std::vector<StationMonitorTemplate> const machines{
+		{"service-unmet", "unmetFraction", {0.1, Above, 120, 60}, Warning, Rated}};
+	// Only the microbial processor publishes Condition among these machines.
+	static std::vector<StationMonitorTemplate> const microbial{
+		machines.front(), {"condition-low", "condition", {0.5, Below, 300, 120}, Advisory, Rated}};
+	static std::vector<StationMonitorTemplate> const biology{
+		{"biomass-low", "biomassFraction", {0.2, Below, 3600, 600}, Warning, Rated},
+		{"resource-starvation", "unmetResourceFraction", {0.1, Above, 600, 300}, Warning, Rated}};
+	static std::vector<StationMonitorTemplate> const empty;
+	if (type == "crop" || type == "algae") return biology;
+	if (type == "microbial-processor") return microbial;
+	if (type == "water-treatment" || type == "electrolyzer" || type == "co2-capture"
+		|| type == "sabatier" || type == "methane-processor" || type == "fuel-cell") return machines;
+	return empty;
+}
+std::vector<StationMonitorSettings> stationEclssBiologyDefaultMonitors(StationSystemsSettings const& settings)
+{
+	std::vector<StationMonitorSettings> result;
+	auto add = [&](std::string const& type, auto const& entries) {
+		for (auto const& item : entries)
+			for (auto const& row : stationEclssBiologyMonitorTemplates(type))
+				result.push_back({type + "-" + item.id + "-" + std::string(row.key), type, item.id,
+					std::string(row.metric), row.rule, row.severity, false, row.provenance});
+	};
+	add("water-treatment", settings.waterTreatments); add("electrolyzer", settings.electrolyzers);
+	add("co2-capture", settings.co2Captures); add("sabatier", settings.sabatierReactors);
+	add("methane-processor", settings.methaneProcessors); add("fuel-cell", settings.fuelCells);
+	add("microbial-processor", settings.microbialProcessors);
+	add("crop", settings.cropPopulations); add("algae", settings.algaeCultures);
+	return result;
+}
+void applyStationEclssBiologyDefaultMonitors(StationSystemsSettings& settings)
+{
+	for (auto const& candidate : stationEclssBiologyDefaultMonitors(settings))
 		if (findId(settings.monitors, candidate.id) == settings.monitors.end()) settings.monitors.push_back(candidate);
 }
 void applyStationStoreConnectionDefaultMonitors(StationSystemsSettings& settings)

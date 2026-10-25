@@ -5,6 +5,7 @@
 #include <vector>
 void registerStationMonitorChecks(std::vector<smoke::Check>& checks);
 void registerStationStoreConnectionMonitorChecks(std::vector<smoke::Check>& checks);
+void registerStationEclssBiologyMonitorChecks(std::vector<smoke::Check>& checks);
 void registerStationFaultChecks(std::vector<smoke::Check>& checks);
 void registerStationConditionChecks(std::vector<smoke::Check>& checks);
 void registerStationWearChecks(std::vector<smoke::Check>& checks);

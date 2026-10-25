@@ -898,6 +898,7 @@ void StationSystemsWindow::renderMonitorInspector(core::StationSystemsSettings& 
 	auto effective = draft;
 	core::applyStationAtmosphereDefaultMonitors(effective);
 	core::applyStationThermalPlantDefaultMonitors(effective);
+	core::applyStationEclssBiologyDefaultMonitors(effective);
 	core::applyStationPowerSourceDefaultMonitors(effective);
 	core::applyStationStoreConnectionDefaultMonitors(effective);
 	bool listed = false;

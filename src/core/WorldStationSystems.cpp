@@ -9,6 +9,7 @@ namespace core
 		auto candidate = draft;
 		applyStationAtmosphereDefaultMonitors(candidate);
 		applyStationThermalPlantDefaultMonitors(candidate);
+		applyStationEclssBiologyDefaultMonitors(candidate);
 		applyStationPowerSourceDefaultMonitors(candidate);
 		applyStationStoreConnectionDefaultMonitors(candidate);
 		auto found = std::find_if(candidate.monitors.begin(), candidate.monitors.end(),

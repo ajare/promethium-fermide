@@ -4110,6 +4110,9 @@ namespace core
 	std::vector<StationMonitorTemplate> const& stationThermalPlantMonitorTemplates(std::string_view subjectType);
 	std::vector<StationMonitorSettings> stationThermalPlantDefaultMonitors(StationSystemsSettings const&);
 	void applyStationThermalPlantDefaultMonitors(StationSystemsSettings&);
+	std::vector<StationMonitorTemplate> const& stationEclssBiologyMonitorTemplates(std::string_view subjectType);
+	std::vector<StationMonitorSettings> stationEclssBiologyDefaultMonitors(StationSystemsSettings const&);
+	void applyStationEclssBiologyDefaultMonitors(StationSystemsSettings&);
 	// One scheduled airlock cycle as of the most recent tick (#400): the
 	// authored schedule beside the runtime's cycle history - what each
 	// occurrence removed from its compartment, how much was recovered
@@ -4757,6 +4760,7 @@ namespace core
 		// actually consumed and everything it returned.
 		double lastGrowthPotentialKg{0.0}; // light-driven potential before limits
 		double lastGrowthScale{0.0};       // uniform growth scale after limits, [0, 1]
+		double lastResourceUnmetFraction{0.0}; // growth-resource shortage, excluding temperature/capacity
 		std::string lastGrowthLimiter;     // what bound the growth scale (empty: none)
 		double lastGrowthKg{0.0};
 		double lastCo2DrawnKg{0.0};
@@ -4916,6 +4920,7 @@ namespace core
 		// The growth the delivered resources funded this tick.
 		double lastGrowthPotentialKg{0.0};
 		double lastGrowthScale{0.0};
+		double lastResourceUnmetFraction{0.0}; // growth-resource shortage, excluding temperature/capacity
 		std::string lastGrowthLimiter;
 		double lastGrowthKg{0.0};
 		double lastCo2DrawnKg{0.0};

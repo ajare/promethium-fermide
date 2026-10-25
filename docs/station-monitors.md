@@ -1,4 +1,4 @@
-# Station Monitors: defaults and subject inspectors (#867, #871–#875)
+# Station Monitors: defaults and subject inspectors (#867, #871–#876)
 
 `atmosphere` is a registered Monitor subject type, and it publishes the full
 spec §3.1 Metric set: `oxygenPartialPressureKPa`, `carbonDioxidePartialPressureKPa`,
@@ -323,8 +323,7 @@ algae cultures, and selected Station connections. Connection subjects use the
 full design-key identity, not the displayed link label.
 
 Rendering expands the currently available default tables on a temporary copy;
-selecting a subject alone changes neither the draft nor its history. Subjects
-awaiting ECLSS/biology tables (#876) explicitly show an empty set. Atmosphere
+selecting a subject alone changes neither the draft nor its history. ECLSS/biology subjects include their §4.6/§4.7 defaults (#876). Atmosphere
 pathways, Thermal links, and schedules remain outside this surface.
 
 All sections use the same provenance tags, enabled toggle, threshold, direction,
@@ -337,3 +336,57 @@ ImGui Test Engine, checking default listing/provenance or the empty state,
 toggle and timing edits where defaults exist, undo/redo, and save/load.
 `station-editor-monitor-inspector` retains the full atmosphere control and
 validation workflow. Both are focused Release tests; no stability run is needed.
+
+## ECLSS machines and biology (#876)
+
+`stationEclssBiologyMonitorTemplates(subjectType)` and
+`stationEclssBiologyDefaultMonitors(settings)` provide the §4.6/§4.7 tables.
+`applyStationEclssBiologyDefaultMonitors(settings)` appends missing IDs only,
+using `<type>-<id>-<key>`. Inspector preview and accepted Monitor commands use
+this same expansion. All defaults start disabled and carry **rated** provenance.
+
+| Subjects | Key / metric | Rule | Severity |
+|---|---|---|---|
+| `water-treatment`, `electrolyzer`, `co2-capture`, `sabatier`, `methane-processor`, `fuel-cell`, `microbial-processor` | service-unmet / unmetFraction | Above 0.1, 120 s / 60 s | Warning |
+| `microbial-processor` | condition-low / condition | Below 0.5, 300 s / 120 s | Advisory |
+| `crop`, `algae` | biomass-low / biomassFraction | Below 0.2, 3600 s / 600 s | Warning |
+| `crop`, `algae` | resource-starvation / unmetResourceFraction | Above 0.1, 600 s / 300 s | Warning |
+
+Only microbial processors publish Condition among these seven machine types;
+no Condition is invented for the others. Wear is not Condition.
+
+All new metrics are dimensionless fractions derived from published telemetry:
+
+* Machine `unmetFraction` is `(demanded - delivered) / demanded`, clamped to
+  [0, 1], with zero for zero demand. Electrolyzer, CO2 capture, Sabatier,
+  methane and microbial processing use `lastRequestedKg` against respectively
+  `lastSplitKg`, `lastCapturedKg`, `lastCo2ConsumedKg`,
+  `lastMethaneConsumedKg`, and `lastFeedConsumedKg`. These include material
+  and output-headroom shortages, not just power-only unmet counters. A gate
+  that publishes no requested service supplies zero demand.
+* Water treatment uses `throughputKgPerS * systemsTimestepSeconds` against
+  `lastProcessedKg`. Fuel cells use `lastOutputKW + lastUnmetOutputKW` as
+  demanded service and `lastOutputKW` as delivered service.
+* Microbial `condition` reads the processor's published `condition` directly.
+* `biomassFraction` is `livingBiomassKg / capacityKg` (zero at zero capacity).
+* `unmetResourceFraction` is the maximum of growth-resource shortage,
+  requested lamp-power shortage, requested circulation-power shortage, and
+  requested respiration shortage. Each power/respiration fraction is
+  `(requested - supplied) / requested`, clamped to [0, 1], zero with no demand.
+  The growth-resource term is published as `lastResourceUnmetFraction`: one
+  minus the minimum supplied fraction across CO2, irrigation, nutrients,
+  water quality and circulation, captured **before** growing-capacity limiting.
+  Temperature dormancy and full growing capacity are not resource starvation.
+  A deliberately dark illumination profile requests no light or growth
+  resources; lamps requesting but receiving no power do report starvation.
+  The term is read-only tick-derived telemetry, never authored or persisted.
+
+Focused Release proofs cover exact tables, metric mappings, idempotence and
+preserved tuning; real machine fire/clear timing; crop and algae light/CO2
+starvation at 0.25 s and 1 s steps; disabled silence, biomass timing and
+configuration persistence; and the existing real inspector/history workflow:
+
+```sh
+ctest --test-dir build-linux -C Release -j 16 --output-on-failure \\
+  -R '^station-(eclssBiologyMonitor(Table|Boundaries)|editor-monitor-families)$'
+```

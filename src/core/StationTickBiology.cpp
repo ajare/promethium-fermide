@@ -53,6 +53,7 @@ namespace core
 			crop.lastCirculationSuppliedKW = 0.0;
 			crop.lastGrowthPotentialKg = 0.0;
 			crop.lastGrowthScale = 0.0;
+			crop.lastResourceUnmetFraction = 0.0;
 			crop.lastGrowthLimiter.clear();
 			crop.lastIrrigationUptake.clear();
 			crop.lastGrowthKg = 0.0;
@@ -248,6 +249,8 @@ namespace core
 						* composition.otherMinerals),
 					"minerals store '" + minerals.authored.id
 						+ "' has nothing drawable above its protected reserve");
+				// Observe resource shortage before the non-resource capacity gate.
+				crop.lastResourceUnmetFraction = 1.0 - std::clamp(scale, 0.0, 1.0);
 				constrain(capacityHeadroomKg, crop.lastGrowthPotentialKg,
 					"growing capacity of '" + crop.authored.id
 						+ "' is full: the canopy has no room to grow");
@@ -699,6 +702,7 @@ namespace core
 			culture.lastCirculationSuppliedKW = 0.0;
 			culture.lastGrowthPotentialKg = 0.0;
 			culture.lastGrowthScale = 0.0;
+			culture.lastResourceUnmetFraction = 0.0;
 			culture.lastGrowthLimiter.clear();
 			culture.lastGrowthKg = 0.0;
 			culture.lastCo2DrawnKg = 0.0;
@@ -866,6 +870,7 @@ namespace core
 						* composition.otherMinerals),
 					"minerals store '" + minerals.authored.id
 						+ "' has nothing drawable above its protected reserve");
+				culture.lastResourceUnmetFraction = 1.0 - std::clamp(scale, 0.0, 1.0);
 				constrain(capacityHeadroomKg, culture.lastGrowthPotentialKg,
 					"culture capacity of '" + culture.authored.id
 						+ "' is full: the culture has no room to grow");

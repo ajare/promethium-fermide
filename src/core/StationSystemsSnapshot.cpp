@@ -1580,6 +1580,7 @@ namespace core
 			cropResult.lastCirculationSuppliedKW = crop.lastCirculationSuppliedKW;
 			cropResult.lastGrowthPotentialKg = crop.lastGrowthPotentialKg;
 			cropResult.lastGrowthScale = crop.lastGrowthScale;
+			cropResult.lastResourceUnmetFraction = crop.lastResourceUnmetFraction;
 			cropResult.lastGrowthLimiter = crop.lastGrowthLimiter;
 			cropResult.lastGrowthKg = crop.lastGrowthKg;
 			cropResult.lastCo2DrawnKg = crop.lastCo2DrawnKg;
@@ -1711,6 +1712,7 @@ namespace core
 			algaeResult.lastCirculationSuppliedKW = culture.lastCirculationSuppliedKW;
 			algaeResult.lastGrowthPotentialKg = culture.lastGrowthPotentialKg;
 			algaeResult.lastGrowthScale = culture.lastGrowthScale;
+			algaeResult.lastResourceUnmetFraction = culture.lastResourceUnmetFraction;
 			algaeResult.lastGrowthLimiter = culture.lastGrowthLimiter;
 			algaeResult.lastGrowthKg = culture.lastGrowthKg;
 			algaeResult.lastCo2DrawnKg = culture.lastCo2DrawnKg;
