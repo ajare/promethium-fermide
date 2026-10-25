@@ -271,6 +271,77 @@ void powerSourceMonitors(smoke::Context const&)
 	}
 }
 
+// #887: direct snapshot Metrics are independently authorable; solar
+// availability excludes illumination, unlike the existing availableFraction.
+void powerSourceSnapshotMonitors(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	for (bool solar : {false, true})
+	for (auto dt : {0.25f, 1.0f})
+	{
+		auto s = powerSourceStation();
+		core::StationMonitorSettings m;
+		m.id = "direct";
+		m.subjectType = solar ? "solar-array" : "generator";
+		m.subjectId = solar ? "array" : "gen";
+		m.metric = solar ? "availabilityFactor" : "outputKW";
+		m.rule = {solar ? 0.8 : 5.0, core::AlertDirection::Above, 2, 2};
+		require(!m.enabled, "new direct Monitor enabled by default");
+		m.enabled = true;
+		smoke::station::isolateMonitor(s, m);
+		std::string diagnostic;
+		auto const valid = core::validateStationMonitors(s, diagnostic);
+		require(valid, diagnostic.c_str());
+		auto const& catalogue = core::stationMonitorMetricCatalogue(m.subjectType);
+		auto entry = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& e) { return e.name == m.metric; });
+		require(entry != catalogue.end() && entry->unit == (solar ? "fraction" : "kW"), "direct Metric unit missing");
+		for (auto const& id : {std::string("missing"), solar ? std::string("gen") : std::string("array")})
+		{
+			auto bad = s; bad.monitors[0].subjectId = id;
+			require(!core::validateStationMonitors(bad, diagnostic), "direct Metric accepted unknown or wrong-kind subject");
+		}
+		auto bad = s;
+		bad.monitors[0].subjectType = solar ? "generator" : "solar-array";
+		bad.monitors[0].subjectId = solar ? "gen" : "array";
+		require(!core::validateStationMonitors(bad, diagnostic), "direct Metric accepted wrong subject type");
+		core::StationConfigurationDocument doc; doc.settings = s;
+		core::StationConfigurationDocument loaded;
+		require(core::parseStationConfiguration(core::serializeStationConfiguration(doc), loaded, &diagnostic)
+			&& loaded.settings == s, "direct Metrics did not persist");
+		// A dim array still has full installation availability. The two
+		// fractions must remain distinct even before a capacity reduction.
+		s.solarArrays[0].illumination.constantLevel = 0.5;
+		s.generators[0].startupSeconds = 0;
+		s.generators[0].commandedOutputKW = solar ? 0 : 10;
+		core::StationSystemsRuntime run(s, dt);
+		for (double t = dt; t <= 2; t += dt)
+		{
+			require(run.advanceTo(t), "direct Metric drive failed");
+			auto snap = run.snapshot();
+			auto value = core::readStationMonitorMetric(s, snap, m.subjectType, m.subjectId, m.metric);
+			require(value && std::abs(*value - (solar ? 1.0 : 10)) < 1e-9, "direct Metric read wrong snapshot value");
+			require(!core::readStationMonitorMetric(s, snap, m.subjectType, "missing", m.metric), "missing subject supplied telemetry");
+			if (solar) require(std::abs(core::readStationMonitorMetric(s, snap, "solar-array", "array", "availableFraction").value() - 0.5) < 1e-9,
+				"availabilityFactor aliased illumination-derived fraction");
+			require(snap.activeAlerts.size() == (t == 2 ? 1u : 0u), "direct Metric fire timing differs");
+			if (t == 2) require(snap.activeAlerts[0].firedAtSeconds == 2 && snap.activeAlerts[0].currentValue == *value,
+				"direct Alert fire metadata differs");
+		}
+		if (solar) require(run.injectFault("array", "string-loss", {}), "solar reduction refused");
+		else require(run.updateNode<core::GeneratorSettings>("gen", [](auto& g) { g.commandedOutputKW = 0; }), "generator stop refused");
+		for (double t = 2 + dt; t <= 4; t += dt)
+		{
+			require(run.advanceTo(t), "direct Metric recovery failed");
+			auto snap = run.snapshot();
+			auto value = core::readStationMonitorMetric(s, snap, m.subjectType, m.subjectId, m.metric).value();
+			require(std::abs(value - (solar ? 0.6 : 0)) < 1e-9, "direct Metric did not return inside through physical change");
+			require(snap.activeAlerts.empty() == (t == 4), "direct Metric clear timing differs");
+			if (t == 4) require(snap.closedAlerts.size() == 1 && snap.closedAlerts[0].clearedAtSeconds == 4
+				&& snap.closedAlerts[0].clearReason == core::AlertClearReason::AutoClear, "direct Alert clear metadata differs");
+		}
+	}
+}
+
 void powerSourceInjection(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
@@ -746,6 +817,7 @@ void powerSourceLiveTuning(smoke::Context const&)
 void registerStationPowerSourceFaultChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"powerSourceMonitors", powerSourceMonitors});
+	checks.push_back({"powerSourceSnapshotMonitors", powerSourceSnapshotMonitors});
 	checks.push_back({"powerSourceInjection", powerSourceInjection});
 	checks.push_back({"powerSourceRunaway", powerSourceRunaway});
 	checks.push_back({"powerSourceFailedStart", powerSourceFailedStart});

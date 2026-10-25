@@ -341,6 +341,14 @@ Metric sources are the subject's published power snapshot:
   specified fixed SOC bound, not a dynamically inferred reserve floor.
 * `dischargeShortfallFraction`: `lastDischargeShortfallKW / maxDischargeKW`,
   using the unit's rated terminal discharge limit, not its wear-reduced capacity.
+* `outputKW` (kW): the same-named generator snapshot field, instantaneous
+  endpoint output rather than interval-average generation. Available for custom
+  rules; it adds no default Monitor.
+* `availabilityFactor` (fraction): the same-named solar snapshot field, the
+  installation availability after Fault effects (the minimum of the string-loss
+  remainder and tracking-failure availability), independent of illumination and
+  Wear-reduced capacity. It is not `availableFraction`: a healthy dimly lit array still
+  has availability 1. Available for custom rules; it adds no default Monitor.
 * `outputDeviationFraction`: `abs(outputKW - commandedOutputKW) / ratedOutputKW`.
   Output is instantaneous endpoint output, not interval-average generation; the
   published command includes dispatch when dispatch owns it.
@@ -360,7 +368,7 @@ Focused Release proof (all defaults at 0.25 s and 1 s steps):
 
 ```sh
 ctest --test-dir build-linux -C Release -j 16 --output-on-failure \
-  -R '^station-(powerSourceMonitors|editor-monitor-inspector)$'
+  -R '^station-(powerSourceMonitors|powerSourceSnapshotMonitors|editor-monitor-inspector)$'
 ```
 
 ## All-subject inspectors (#875)

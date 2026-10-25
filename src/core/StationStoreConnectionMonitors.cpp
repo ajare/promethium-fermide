@@ -134,8 +134,8 @@ std::vector<StationMonitorMetric> const& stationMonitorMetricCatalogue(std::stri
 	static std::vector<StationMonitorMetric> const engines{{"tripped", "boolean"}, {"hotHeadroomC", "°C"}};
 	static std::vector<StationMonitorMetric> const radiators{{"remainingAreaFraction", "fraction"}, {"reservoirTemperatureC", "°C"}};
 	static std::vector<StationMonitorMetric> const batteries{{"stateOfCharge", "fraction"}, {"dischargeShortfallFraction", "fraction"}, {"wearFraction", "fraction"}};
-	static std::vector<StationMonitorMetric> const generators{{"outputDeviationFraction", "fraction"}, {"sinkTemperatureC", "°C"}, {"startupUnmetKW", "kW"}};
-	static std::vector<StationMonitorMetric> const solar{{"availableFraction", "fraction"}};
+	static std::vector<StationMonitorMetric> const generators{{"outputKW", "kW"}, {"outputDeviationFraction", "fraction"}, {"sinkTemperatureC", "°C"}, {"startupUnmetKW", "kW"}};
+	static std::vector<StationMonitorMetric> const solar{{"availabilityFactor", "fraction"}, {"availableFraction", "fraction"}};
 	static std::vector<StationMonitorMetric> const machines{{"unmetFraction", "fraction"}};
 	static std::vector<StationMonitorMetric> const microbial{{"unmetFraction", "fraction"}, {"condition", "fraction"}};
 	static std::vector<StationMonitorMetric> const biology{{"biomassFraction", "fraction"}, {"unmetResourceFraction", "fraction"}};
@@ -266,6 +266,7 @@ std::optional<double> readStationMonitorMetric(StationSystemsSettings const& set
 	{
 		auto s = findId(snapshot.power.generators, id);
 		if (s == snapshot.power.generators.end()) return {};
+		if (metric == "outputKW") return s->outputKW;
 		if (metric == "sinkTemperatureC") return s->sinkTemperatureC;
 		if (metric == "startupUnmetKW") return s->startupUnmetKW;
 		return s->ratedOutputKW > 0 ? std::abs(s->outputKW - s->commandedOutputKW) / s->ratedOutputKW : 0;
@@ -274,6 +275,7 @@ std::optional<double> readStationMonitorMetric(StationSystemsSettings const& set
 	{
 		auto s = findId(snapshot.power.sources, id);
 		if (s == snapshot.power.sources.end()) return {};
+		if (metric == "availabilityFactor") return s->availabilityFactor;
 		return s->capacityKW > 0 ? s->availableKW / s->capacityKW : 0;
 	}
 	if (type == "coolant-loop")
