@@ -1631,12 +1631,26 @@ using namespace station_detail;
 			double deadResidueLostKg{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
-		struct MonitorState { uint64_t onSamples{0}, offSamples{0}; };
+		struct MonitorState
+		{
+			uint64_t onSamples{0}, offSamples{0};
+			// The value the Monitor last read. The Alert ledger is written only
+			// by the registered callback (#868), so the live reading the
+			// surfaces publish lives here, not in the ledger entry.
+			double lastValue{0.0};
+		};
 		std::map<std::string, MonitorState> monitorStates;
 		std::vector<StationAlertSnapshot> activeAlerts, closedAlerts;
+		// Read-only for the evaluation loop: whether a Monitor already holds
+		// an Alert. Every ledger mutation goes through the callback.
+		bool hasActiveAlert(std::string_view monitorId) const
+		{
+			return std::any_of(activeAlerts.begin(), activeAlerts.end(),
+				[&](auto const& entry) { return entry.monitorId == monitorId; });
+		}
 		void evaluateMonitors(StationSystemsSnapshot const& published);
 		void reconcileMonitors(std::vector<StationMonitorSettings> const& offered);
-		void clearAlert(size_t index, AlertClearReason reason);
+		void clearAlert(std::string_view monitorId, AlertClearReason reason);
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;

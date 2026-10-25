@@ -5,6 +5,14 @@ namespace core
 	{
 		auto result = mImpl->snapshot;
 		result.activeAlerts = mImpl->activeAlerts;
+		// #868: the ledger holds the Alert exactly as its callback recorded it,
+		// so the value it carries is the one that fired. What a surface shows
+		// for a live Alert is the value the Monitor is reading *now*, which the
+		// Monitor keeps in its own state - published here rather than written
+		// back into the ledger, which only the callback ever writes.
+		for (auto& alert : result.activeAlerts)
+			if (auto const state = mImpl->monitorStates.find(alert.monitorId); state != mImpl->monitorStates.end())
+				alert.currentValue = state->second.lastValue;
 		result.closedAlerts = mImpl->closedAlerts;
 		result.connections = mImpl->connectionFlows;
 		result.power.poolGenerationKW = mImpl->lastPoolGenerationKW;

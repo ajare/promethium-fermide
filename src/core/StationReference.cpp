@@ -177,12 +177,11 @@ namespace core
 				serializer.writeString("metric", monitor.metric);
 				serializer.beginMap("rule");
 				serializer.writeDouble("threshold", monitor.rule.threshold);
-				serializer.writeString("direction", monitor.rule.direction == AlertDirection::Above ? "Above" : "Below");
+				serializer.writeString("direction", std::string(stationAlertDirectionTag(monitor.rule.direction)));
 				serializer.writeDouble("triggerOnSeconds", monitor.rule.triggerOnSeconds);
 				serializer.writeDouble("triggerOffSeconds", monitor.rule.triggerOffSeconds);
 				serializer.endMap();
-				serializer.writeString("severity", monitor.severity == AlertSeverity::Critical ? "Critical"
-					: monitor.severity == AlertSeverity::Warning ? "Warning" : "Advisory");
+				serializer.writeString("severity", std::string(stationAlertSeverityTag(monitor.severity)));
 				serializer.writeBool("enabled", monitor.enabled);
 				serializer.writeString("provenance", std::string(stationMonitorProvenanceTag(monitor.provenance)));
 				serializer.endMap();

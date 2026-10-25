@@ -1,35 +1,50 @@
 #include "StationSystemsImpl.h"
 
+#include <format>
+
 namespace core
 {
 namespace
 {
-	// Code-bound handlers, not authored actions. The metric is the alert type
-	// for this first catalogue slice; later types register their own bindings.
-	struct AlertCallbacks
+	// The v1 Alert handler: record the Alert in the run-scoped ledger and
+	// announce the transition on the event stream. What an Alert *does* is
+	// code, never authored data (ADR-0031), so a later behaviour - a HUD pin,
+	// an audio cue, an agent reaction - attaches its own pair for a type
+	// without anything in the authored schema moving.
+	void recordLedgerAndAnnounceFire(AlertSink& sink, StationAlertSnapshot const& alert)
 	{
-		void (*onFire)(std::vector<StationAlertSnapshot>&, std::vector<StationSystemsEvent>&, uint64_t, StationAlertSnapshot const&);
-		void (*onClear)(std::vector<StationAlertSnapshot>&, std::vector<StationSystemsEvent>&, uint64_t, StationAlertSnapshot const&);
-	};
-	AlertCallbacks const& callbacks(std::string const& metric)
+		sink.recordFired(alert);
+		sink.announce("fired", alert);
+	}
+	void recordLedgerAndAnnounceClear(AlertSink& sink, StationAlertSnapshot const& alert)
 	{
-		// Every Metric records the Alert and announces the transition the
-		// same way today. A Metric with no binding of its own falls back to
-		// this one, so widening the catalogue can never drop an Alert on the
-		// floor; #868 generalizes the registry itself.
-		static AlertCallbacks const generic{
-			[](auto& ledger, auto& events, uint64_t step, auto const& alert) {
-				ledger.push_back(alert);
-				appendBoundedEvent(events, step, "alert", "Alert fired: " + alert.monitorId);
-			},
-			[](auto& ledger, auto& events, uint64_t step, auto const& alert) {
-				ledger.push_back(alert);
-				appendBoundedEvent(events, step, "alert", "Alert cleared: " + alert.monitorId);
-			}};
-		static std::map<std::string, AlertCallbacks> const registry{
-			{"oxygenPartialPressureKPa", generic}};
-		auto const bound = registry.find(metric);
-		return bound != registry.end() ? bound->second : generic;
+		sink.recordCleared(alert);
+		sink.announce("cleared", alert);
+	}
+	AlertCallbacks const v1LedgerAndStream{recordLedgerAndAnnounceFire, recordLedgerAndAnnounceClear};
+
+	// Per-type bindings that differ from v1. The alert type is the Monitor
+	// Metric that raised the Alert, the same identity #866 introduced; a type
+	// bound here replaces the v1 behaviour for that Metric alone.
+	std::map<std::string, AlertCallbacks> const typeBindings{
+		{"oxygenPartialPressureKPa", v1LedgerAndStream}};
+
+	// The whole Alert, readable straight off the stream: who watched what, on
+	// whom, the number that decided it and the bound it crossed, at what sim
+	// time. The same information the ledger publishes, so a scenario author
+	// never has to query the ledger to see an oversight event.
+	std::string alertAnnouncement(std::string_view transition, StationAlertSnapshot const& alert)
+	{
+		auto const simSeconds = alert.clearReason
+			? alert.clearedAtSeconds.value_or(alert.firedAtSeconds) : alert.firedAtSeconds;
+		auto message = std::format(
+			"Alert {} '{}' on '{}/{}': {} value {} threshold {} severity {} provenance {} sim time {:.3f}s",
+			transition, alert.monitorId, alert.subjectType, alert.subjectId, alert.metric,
+			alert.currentValue, alert.threshold, stationAlertSeverityTag(alert.severity),
+			stationMonitorProvenanceTag(alert.provenance), simSeconds);
+		if (alert.clearReason)
+			message += std::format(" reason {}", stationAlertClearReasonTag(*alert.clearReason));
+		return message;
 	}
 
 	// Derived Metric (spec §3.1): the §4.1 toxic-contaminant bound is a
@@ -54,6 +69,53 @@ namespace
 		case MonitorProvenance::Custom: break;
 		}
 		return "custom";
+	}
+
+	std::string_view stationAlertSeverityTag(AlertSeverity severity)
+	{
+		switch (severity)
+		{
+		case AlertSeverity::Advisory: return "Advisory";
+		case AlertSeverity::Warning: return "Warning";
+		case AlertSeverity::Critical: return "Critical";
+		}
+		return "Warning";
+	}
+	std::string_view stationAlertDirectionTag(AlertDirection direction)
+	{
+		return direction == AlertDirection::Above ? "Above" : "Below";
+	}
+	std::string_view stationAlertClearReasonTag(AlertClearReason reason)
+	{
+		switch (reason)
+		{
+		case AlertClearReason::AutoClear: return "AutoClear";
+		case AlertClearReason::MonitorDisabled: return "MonitorDisabled";
+		case AlertClearReason::MonitorChanged: return "MonitorChanged";
+		}
+		return "AutoClear";
+	}
+
+	AlertCallbacks const& stationAlertCallbacksFor(std::string_view alertType)
+	{
+		auto const bound = typeBindings.find(std::string(alertType));
+		// An unbound type still lands on the v1 handler: widening the Metric
+		// catalogue must never drop an Alert on the floor.
+		return bound != typeBindings.end() ? bound->second : v1LedgerAndStream;
+	}
+
+	void AlertSink::recordFired(StationAlertSnapshot const& alert) const
+	{
+		active.push_back(alert);
+	}
+	void AlertSink::recordCleared(StationAlertSnapshot const& alert) const
+	{
+		closed.push_back(alert);
+		std::erase_if(active, [&](auto const& entry) { return entry.monitorId == alert.monitorId; });
+	}
+	void AlertSink::announce(std::string_view transition, StationAlertSnapshot const& alert) const
+	{
+		appendBoundedEvent(events, step, "alert", alertAnnouncement(transition, alert));
 	}
 
 	std::vector<StationAtmosphereMetric> const& stationAtmosphereMetricCatalogue()
@@ -135,13 +197,21 @@ namespace
 		}
 	}
 
-	void StationSystemsRuntime::Impl::clearAlert(size_t index, AlertClearReason reason)
+	void StationSystemsRuntime::Impl::clearAlert(std::string_view monitorId, AlertClearReason reason)
 	{
-		auto alert = activeAlerts.at(index);
+		auto const active = std::find_if(activeAlerts.begin(), activeAlerts.end(),
+			[&](auto const& entry) { return entry.monitorId == monitorId; });
+		if (active == activeAlerts.end()) return;
+		auto alert = *active;
+		// The value the Monitor last saw rides out with the closed-out record.
+		// It comes from the Monitor's own state because the ledger is written
+		// only by the registered handler, never by this loop.
+		if (auto const state = monitorStates.find(alert.monitorId); state != monitorStates.end())
+			alert.currentValue = state->second.lastValue;
 		alert.clearedAtSeconds = clock.elapsedSeconds();
 		alert.clearReason = reason;
-		callbacks(alert.metric).onClear(closedAlerts, events, clock.steps(), alert);
-		activeAlerts.erase(activeAlerts.begin() + index);
+		AlertSink sink{activeAlerts, closedAlerts, events, clock.steps()};
+		stationAlertCallbacksFor(alert.metric).onClear(sink, alert);
 	}
 
 	void StationSystemsRuntime::Impl::reconcileMonitors(std::vector<StationMonitorSettings> const& offered)
@@ -150,17 +220,19 @@ namespace
 		{
 			auto next = std::find_if(offered.begin(), offered.end(), [&](auto const& m) { return m.id == before.id; });
 			if (next != offered.end() && *next == before) continue;
+			// Close the Alert before dropping the state: the closed-out record
+			// reports the value the Monitor last saw, and that lives in the
+			// state being discarded next.
+			clearAlert(before.id,
+				next == offered.end() || !next->enabled
+					? AlertClearReason::MonitorDisabled : AlertClearReason::MonitorChanged);
 			monitorStates.erase(before.id);
-			auto active = std::find_if(activeAlerts.begin(), activeAlerts.end(),
-				[&](auto const& a) { return a.monitorId == before.id; });
-			if (active != activeAlerts.end())
-				clearAlert(static_cast<size_t>(active - activeAlerts.begin()),
-					next == offered.end() || !next->enabled ? AlertClearReason::MonitorDisabled : AlertClearReason::MonitorChanged);
 		}
 	}
 
 	void StationSystemsRuntime::Impl::evaluateMonitors(StationSystemsSnapshot const& published)
 	{
+		AlertSink sink{activeAlerts, closedAlerts, events, clock.steps()};
 		for (auto const& monitor : settings.monitors)
 		{
 			if (!monitor.enabled) continue; // no lookup, evaluation, or state for disabled rules
@@ -172,14 +244,14 @@ namespace
 			if (subject == published.atmospheres.end() || metric == nullptr) continue;
 			double const value = metric->read(*subject);
 			auto& state = monitorStates[monitor.id];
-			auto active = std::find_if(activeAlerts.begin(), activeAlerts.end(),
-				[&](auto const& a) { return a.monitorId == monitor.id; });
+			state.lastValue = value;
 			auto const& rule = monitor.rule;
 			bool const outside = rule.direction == AlertDirection::Above ? value > rule.threshold : value < rule.threshold;
 			// Each successful Station sample represents one completed step.
 			// A contrary sample resets persistence; equality is back inside.
 			// Count-derived duration, like StationClock, avoids accumulated drift.
-			if (active == activeAlerts.end())
+			bool const raised = hasActiveAlert(monitor.id);
+			if (!raised)
 			{
 				state.offSamples = 0;
 				state.onSamples = outside ? state.onSamples + 1 : 0;
@@ -187,18 +259,17 @@ namespace
 				{
 					StationAlertSnapshot alert{monitor.id, monitor.subjectType, monitor.subjectId, monitor.metric,
 						value, rule.threshold, monitor.severity, monitor.provenance, published.elapsedSeconds, {}, {}};
-					callbacks(monitor.metric).onFire(activeAlerts, events, clock.steps(), alert);
+					stationAlertCallbacksFor(monitor.metric).onFire(sink, alert);
 					state.onSamples = 0;
 				}
 			}
 			else
 			{
-				active->currentValue = value;
 				state.onSamples = 0;
 				state.offSamples = outside ? 0 : state.offSamples + 1;
 				if (!outside && state.offSamples * published.systemsTimestepSeconds >= rule.triggerOffSeconds)
 				{
-					clearAlert(static_cast<size_t>(active - activeAlerts.begin()), AlertClearReason::AutoClear);
+					clearAlert(monitor.id, AlertClearReason::AutoClear);
 					state.offSamples = 0;
 				}
 			}

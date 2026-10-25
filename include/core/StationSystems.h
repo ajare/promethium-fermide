@@ -2267,6 +2267,31 @@ namespace core
 	enum class MonitorProvenance { Custom, Iss, Who, Rated, Provisional };
 	// The one spelling of each tag, shared by the wire format and by surfaces.
 	std::string_view stationMonitorProvenanceTag(MonitorProvenance provenance);
+	// The one spelling of each Alert vocabulary word, same contract: the wire
+	// format, the announcement and the dashboard all resolve here (#868).
+	std::string_view stationAlertSeverityTag(AlertSeverity severity);
+	std::string_view stationAlertDirectionTag(AlertDirection direction);
+	std::string_view stationAlertClearReasonTag(AlertClearReason reason);
+	// #868: the Alert ledger and the bounded event stream are reachable from a
+	// handler only through this sink, so the callback path is the ledger's only
+	// writer. The evaluation loop holds no ledger handle of its own.
+	struct AlertSink;
+	struct StationAlertSnapshot;
+	// ADR-0031: what an Alert *does* is code, never authored data. Each alert
+	// type binds this pair; the handler receives the Alert instance and the
+	// sink it may write.
+	struct AlertCallbacks
+	{
+		void (*onFire)(AlertSink&, StationAlertSnapshot const&) = nullptr;
+		void (*onClear)(AlertSink&, StationAlertSnapshot const&) = nullptr;
+	};
+	// #868: the alert-callback registry. The alert type is the Monitor Metric
+	// that raised the Alert, the same identity #866 introduced. Every fire and
+	// clear resolves through here, so a developer adds an Alert behaviour by
+	// binding a pair for a type and never touches the authored schema. An
+	// unbound type still resolves to the v1 ledger-and-stream handler, so
+	// widening the Metric catalogue can never drop an Alert on the floor.
+	AlertCallbacks const& stationAlertCallbacksFor(std::string_view alertType);
 	struct AlertRule
 	{
 		double threshold{0};
@@ -2285,6 +2310,7 @@ namespace core
 		MonitorProvenance provenance{MonitorProvenance::Custom};
 		bool operator==(StationMonitorSettings const&) const = default;
 	};
+	struct StationSystemsEvent;
 	struct StationAlertSnapshot
 	{
 		std::string monitorId, subjectType, subjectId, metric;
@@ -5132,6 +5158,29 @@ namespace core
 		// never parses the message to decide how to show an incident.
 		std::string category;
 		bool operator==(StationSystemsEvent const&) const = default;
+	};
+	// #868 (ADR-0031): the only write surface a bound Alert handler gets. The
+	// run-scoped Alert ledger and the bounded event stream are reachable here
+	// and nowhere else, so the callback path is the ledger's only writer: the
+	// Monitor evaluation loop holds no ledger handle of its own.
+	struct AlertSink
+	{
+		std::vector<StationAlertSnapshot>& active;
+		std::vector<StationAlertSnapshot>& closed;
+		std::vector<StationSystemsEvent>& events;
+		// The Station step the transition landed on, stamped on the event.
+		uint64_t step{0};
+
+		// Record the Alert as active.
+		void recordFired(StationAlertSnapshot const& alert) const;
+		// Record the closed-out Alert and retire its active entry.
+		void recordCleared(StationAlertSnapshot const& alert) const;
+		// Announce one transition on the event stream in the shape every
+		// other subsystem event uses: the stable "alert" category, and a
+		// message carrying the whole payload (monitor id, subject, metric,
+		// value, threshold, severity, sim time) so a scenario author reads
+		// the Alert off the stream without querying the ledger.
+		void announce(std::string_view transition, StationAlertSnapshot const& alert) const;
 	};
 	// One bounded trend sample (#418): the requested and actual value of
 	// one subsystem metric at one simulation instant. The unit comes from

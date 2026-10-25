@@ -291,6 +291,18 @@ what the dashboard shows — never callback internals or tick-order artifacts.
   unavailable evidence stay visibly distinct. Provenance is recorded per default and shown
   in the inspector.
 - The alert-callback registry is the extension point: future integrations (audio, HUD pins,
-  agent reactions) attach as new callbacks without touching the authored schema.
+  agent reactions) attach as new callbacks without touching the authored schema. The alert
+  type is the Monitor Metric that raised the Alert; a type with no binding of its own falls
+  back to the v1 ledger-and-stream handler, so widening the Metric catalogue can never drop
+  an Alert on the floor.
+- The callback path is the Alert ledger's only writer. A handler reaches the ledger and the
+  event stream through an `AlertSink` and nowhere else; the Monitor evaluation loop holds no
+  ledger handle of its own. A live Alert's displayed value is the Monitor's current reading,
+  published from Monitor state rather than written back into the ledger entry, so refreshing
+  a value is not a transition and announces nothing.
+- Every fire and clear is announced on the event stream under the stable `alert` category
+  carrying the full payload — monitor id, subject, metric, value, threshold, severity,
+  provenance and sim time, plus the clear reason on a clear — so a scenario author reads an
+  oversight event off the stream without querying the ledger.
 - Determinism: evaluation is a pure function of snapshot values and authored rules at the
   Station step; the same authored config and the same perturbations replay identically.

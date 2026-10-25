@@ -4,6 +4,8 @@
 #include "core/WorldDocument.h"
 #include "core/BinarySerializer.h"
 
+#include <format>
+
 namespace
 {
 using namespace smoke::station;
@@ -570,6 +572,102 @@ void monitorDefaultBoundaries(smoke::Context const&)
 }
 
 }
+
+// The Alert announcements, in the order the run produced them.
+std::vector<core::StationSystemsEvent> alertEvents(core::StationSystemsRuntime& run)
+{
+	std::vector<core::StationSystemsEvent> announced;
+	for (auto const& event : run.events())
+		if (event.category == "alert") announced.push_back(event);
+	return announced;
+}
+int countAnnouncements(std::vector<core::StationSystemsEvent> const& events, std::string_view transition)
+{
+	return static_cast<int>(std::count_if(events.begin(), events.end(), [&](auto const& event) {
+		return event.message.find("Alert " + std::string(transition)) == 0;
+	}));
+}
+void monitorCallbackStream(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	// The registry resolves every alert type to a bound pair. The alert type is
+	// the Metric that raised the Alert, and an unbound type still lands on the
+	// v1 handler rather than dropping the Alert on the floor.
+	auto const& oxygen = core::stationAlertCallbacksFor("oxygenPartialPressureKPa");
+	require(oxygen.onFire != nullptr && oxygen.onClear != nullptr,
+		"the oxygen Metric has no bound Alert handler pair");
+	require(core::stationAlertCallbacksFor("noSuchAlertType").onFire == oxygen.onFire
+		&& core::stationAlertCallbacksFor("noSuchAlertType").onClear == oxygen.onClear,
+		"an unbound alert type does not fall back to the v1 handler");
+
+	auto settings = monitorStation();
+	core::StationSystemsRuntime run(settings, 1);
+	require(run.advanceTo(29) && run.snapshot().activeAlerts.empty(), "Alert fired before its on time");
+	require(run.advanceTo(30) && run.snapshot().activeAlerts.size() == 1, "Alert did not fire on boundary");
+
+	// The fire is announced on the stream carrying the whole payload, so a
+	// scenario author reads the oversight event without querying the ledger.
+	auto const fired = run.snapshot().activeAlerts[0];
+	auto const events = alertEvents(run);
+	require(events.size() == 1 && countAnnouncements(events, "fired") == 1,
+		"the fire was not announced on the event stream exactly once");
+	auto const& fire = events[0].message;
+	for (auto const* field : {"Alert fired 'oxygen-low'", "on 'atmosphere/room'", "oxygenPartialPressureKPa",
+		"threshold 17.5", "severity Critical", "provenance custom", "sim time 30.000s"})
+		require(fire.find(field) != std::string::npos,
+			(std::string("the fire announcement omits a payload field: ") + field).c_str());
+	require(fire.find("value " + std::format("{}", fired.currentValue)) != std::string::npos,
+		"the fire announcement's value disagrees with the ledger entry it came from");
+
+	// A live reading refreshes the published Alert but is not a transition: the
+	// ledger is written only when the callback fires, so no extra announcement
+	// appears, and the value published is the Monitor's current one.
+	settings.atmospheres[0].volumeM3 = 50;
+	require(run.updateSettings(settings) && run.advanceTo(31), "live refresh drive failed");
+	auto const live = run.snapshot();
+	require(live.activeAlerts.size() == 1, "a live refresh dropped the active Alert");
+	require(live.activeAlerts[0].currentValue == live.atmospheres[0].oxygenPartialPressureKPa
+		&& live.activeAlerts[0].currentValue != fired.currentValue,
+		"the published active Alert does not carry the Monitor's live reading");
+	require(alertEvents(run).size() == 1, "a live value refresh announced an extra Alert event");
+
+	// Auto-clear announces with its reason, and its payload matches the
+	// closed-out ledger entry the same callback wrote.
+	require(run.advanceTo(90) && run.snapshot().activeAlerts.empty(), "Alert did not auto-clear");
+	auto const cleared = run.snapshot().closedAlerts[0];
+	auto const afterClear = alertEvents(run);
+	require(afterClear.size() == 2 && countAnnouncements(afterClear, "cleared") == 1,
+		"the clear was not announced on the event stream exactly once");
+	auto const& clear = afterClear[1].message;
+	for (auto const* field : {"Alert cleared 'oxygen-low'", "on 'atmosphere/room'", "oxygenPartialPressureKPa",
+		"threshold 17.5", "severity Critical", "sim time 90.000s", "reason AutoClear"})
+		require(clear.find(field) != std::string::npos,
+			(std::string("the clear announcement omits a payload field: ") + field).c_str());
+	require(clear.find("value " + std::format("{}", cleared.currentValue)) != std::string::npos,
+		"the clear announcement's value disagrees with the closed-out ledger entry");
+
+	// Fire again, then close out by disabling: the reason on the stream is the
+	// reason in the ledger, for a close the Monitor did not earn by recovering.
+	settings.atmospheres[0].volumeM3 = 100;
+	require(run.updateSettings(settings) && run.advanceTo(120) && run.snapshot().activeAlerts.size() == 1,
+		"the Monitor did not re-fire after recovery");
+	settings.monitors[0].enabled = false;
+	require(run.updateSettings(settings) && run.snapshot().activeAlerts.empty(),
+		"disabling did not close the active Alert");
+	auto const final = alertEvents(run);
+	require(final.size() == 4 && final[3].message.find("Alert cleared 'oxygen-low'") != std::string::npos
+		&& final[3].message.find("reason MonitorDisabled") != std::string::npos,
+		"a disabled Monitor's close-out is not explained on the event stream");
+
+	// Lockstep: every Alert the ledger holds was announced, and nothing was
+	// recorded without a matching announcement. A direct-write bypass would
+	// leave a ledger entry the stream never saw.
+	auto const snap = run.snapshot();
+	require(countAnnouncements(final, "fired")
+		== static_cast<int>(snap.activeAlerts.size() + snap.closedAlerts.size()),
+		"the Alert ledger and the event stream are not in lockstep");
+	require(snap.activeAlerts.empty() && snap.closedAlerts.size() == 2, "unexpected ledger shape at the end");
+}
 void registerStationMonitorChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"monitorTiming", monitorTiming});
@@ -579,4 +677,5 @@ void registerStationMonitorChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"monitorDemo", monitorDemo});
 	checks.push_back({"monitorDefaultTable", monitorDefaultTable});
 	checks.push_back({"monitorDefaultBoundaries", monitorDefaultBoundaries});
+	checks.push_back({"monitorCallbackStream", monitorCallbackStream});
 }
