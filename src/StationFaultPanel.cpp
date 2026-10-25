@@ -12,7 +12,8 @@ namespace
 	// transition it announced - the category already says (#418).
 	bool isFaultTransition(std::string const& category)
 	{
-		return category == "fault" || category == "trip" || category == "repair";
+		return category == "fault" || category == "fault-extinguished"
+			|| category == "trip" || category == "repair";
 	}
 	// Presentation only. The number on screen is always the derived impact;
 	// this only decides how hot to draw it.

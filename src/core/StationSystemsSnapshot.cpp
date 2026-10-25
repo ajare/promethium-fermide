@@ -796,7 +796,7 @@ namespace core
 		for (auto const& compartment : mImpl->atmospheres)
 		{
 			StationAtmosphereSnapshot atmosphereResult;
-			if (compartment.fire && !compartment.firePending && !compartment.fireExtinguished)
+			if (compartment.fire && !compartment.firePending)
 				atmosphereResult.activeFaults.push_back(*compartment.fire);
 			atmosphereResult.fireOxygenConsumedKg = compartment.fireOxygenConsumedKg;
 			atmosphereResult.fireCarbonDioxideKg = compartment.fireCarbonDioxideKg;

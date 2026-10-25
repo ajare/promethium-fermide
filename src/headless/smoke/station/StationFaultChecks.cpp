@@ -799,6 +799,55 @@ void atmosphereFire(smoke::Context const&)
 		require(countCategory(run, "fault") == 1 && countCategory(run, "fault-extinguished") == 1,
 			"fire onset or extinction event missing or repeated");
 	}
+	// Extinction retires an instance, not its cumulative material/heat ledger.
+	{
+		auto s = atmosphereFaultStation(); s.airlockCycles.clear();
+		s.atmospheres[0].startingOxygenKg = 1;
+		s.atmospheres[0].fire = core::AtmosphereFireSettings{1, 0.1, 1, 20, 0.9};
+		auto donor = s.atmospheres[0]; donor.id = "donor"; donor.fire.reset();
+		donor.startingOxygenKg = 10;
+		s.atmospheres.push_back(donor);
+		s.atmospherePathways = {{"refill", "donor", "room", 10000, 0}};
+		core::StationSystemsRuntime run(s, 0.25f);
+		require(run.injectFault("room", "fire", {core::FaultCause::Kind::Editor, "first"})
+			&& run.advanceTo(0.25) && run.snapshot().healthy
+			&& run.snapshot().atmospheres[0].activeFaults.empty(), "first fire did not extinguish");
+		roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+		require(run.updateNode<core::AtmospherePathwaySettings>("refill", [](auto& p) { p.openFraction = 1; })
+			&& run.advanceTo(0.5)
+			&& run.updateNode<core::AtmospherePathwaySettings>("refill", [](auto& p) { p.openFraction = 0; }),
+			"oxygen replenishment failed");
+		auto const refilled = run.snapshot().atmospheres[0];
+		require(refilled.oxygenKg > 1 && refilled.activeFaults.empty()
+			&& approx(refilled.fireOxygenConsumedKg, 0.1) && approx(refilled.fireHeatKJ, 2)
+			&& run.advanceTo(0.75) && run.snapshot().atmospheres[0].activeFaults.empty()
+			&& run.snapshot().atmospheres[0].oxygenKg == refilled.oxygenKg
+			&& run.snapshot().atmospheres[0].fireHeatKJ == refilled.fireHeatKJ,
+			"oxygen replenishment automatically reignited fire");
+		roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+		require(run.injectFault("room", "fire", {core::FaultCause::Kind::AgentAction, "second"}),
+			"extinguished fire blocked fresh explicit injection");
+		require(!run.injectFault("room", "fire", {}), "pending duplicate fire accepted");
+		roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+		require(run.advanceTo(1), "reinjected fire failed audit");
+		auto const burning = run.snapshot().atmospheres[0];
+		require(burning.activeFaults.size() == 1 && burning.activeFaults[0].onsetTick == 4
+			&& burning.activeFaults[0].causeKind == core::FaultCause::Kind::AgentAction
+			&& burning.activeFaults[0].causeDetail == "second"
+			&& approx(burning.fireOxygenConsumedKg, 0.35), "reinjection lost fresh onset/cause or prior ledger");
+		roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+		require(run.advanceTo(12), "repeated fire failed cumulative audit");
+		auto const done = run.snapshot().atmospheres[0];
+		auto const consumed = 0.1 + refilled.oxygenKg - 0.9;
+		require(done.activeFaults.empty() && approx(done.oxygenKg, 0.9)
+			&& approx(done.fireOxygenConsumedKg, consumed)
+			&& approx(done.carbonMonoxideKg, consumed * 0.1)
+			&& approx(done.fireCarbonDioxideKg, consumed)
+			&& approx(done.fireHeatKJ, consumed * 20) && approx(done.hazardHeatKJ, consumed * 20)
+			&& countCategory(run, "fault") == 2 && countCategory(run, "fault-extinguished") == 2,
+			"repeated fires reset or double-counted cumulative bookings or transitions");
+		roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+	}
 	// Already below the threshold: emit no part of the compound dose.
 	auto s = atmosphereFaultStation(); s.airlockCycles.clear(); s.atmospheres[0].startingOxygenKg = 1;
 	core::StationSystemsRuntime cold(s, 0.25f);

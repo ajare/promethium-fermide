@@ -664,7 +664,7 @@ namespace core
 					+ compartment.authored.id + "': " + compartment.fire->causeDetail);
 				compartment.firePending = false;
 			}
-			if (compartment.fire && !compartment.fireExtinguished)
+			if (compartment.fire)
 			{
 				auto const& f = *compartment.fireParameters;
 				// Stop exactly at the oxygen boundary, scaling the compound
@@ -687,8 +687,10 @@ namespace core
 				compartment.fire->derivedImpact = burningSeconds / dt;
 				if (burningSeconds < dt || compartment.oxygenKg <= f.oxygenThresholdKg)
 				{
-					compartment.fireExtinguished = true;
-					compartment.fire->derivedImpact = 0.0;
+					// Retire only the instance. Cumulative bookings belong to the
+					// compartment and must survive a later explicit injection.
+					compartment.fire.reset();
+					compartment.fireParameters.reset();
 					appendBoundedEvent(runtime.events, tick, "fault-extinguished", "fire on '"
 						+ compartment.authored.id + "' extinguished at oxygen threshold");
 				}

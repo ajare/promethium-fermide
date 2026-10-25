@@ -798,7 +798,7 @@ using namespace station_detail;
 			AtmosphereSettings authored;
 			std::optional<StationFaultSnapshot> fire;
 			std::optional<AtmosphereFireSettings> fireParameters;
-			bool firePending{false}, fireExtinguished{false};
+			bool firePending{false};
 			double fireOxygenConsumedKg{0.0}, fireCarbonDioxideKg{0.0};
 			double carbonMonoxideKg{0.0}, fireHeatKJ{0.0};
 			double spilledCoolantKg{0.0}, spilledCoolantEnergyKJ{0.0};

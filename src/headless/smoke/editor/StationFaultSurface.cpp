@@ -108,7 +108,9 @@ namespace
 		auto world = std::make_shared<core::World>("Fault badge", 2, 2);
 		world->pauseSimulation(); world->finishBuild();
 		std::string diagnostic;
-		require(world->configureStationSystems(faultLoopRig(), false, &diagnostic),
+		auto settings = faultLoopRig();
+		settings.atmospheres[0].fire = core::AtmosphereFireSettings{1, 0.1, 1, 20, 99.9};
+		require(world->configureStationSystems(settings, false, &diagnostic),
 			("configure fault rig: " + diagnostic).c_str());
 		world->resumeSimulation();
 		require(world->advanceTicks(120), "the fault fixture did not tick");
@@ -215,6 +217,17 @@ namespace
 			REQ(std::any_of(transitions.begin(), transitions.end(),
 				[](std::string const& line) { return line.find("[repair]") != std::string::npos; }),
 				"the panel listed no repair transition after the repair");
+			REQ(world->injectStationFault("comp", "fire", {}), "fire injection refused");
+			for (int i = 0; i < 40; ++i)
+			{
+				world->advanceTicks(6);
+				ctx->Yield(1);
+			}
+			REQ(alarmRow(window, "comp", "fire") == nullptr,
+				"the alarm panel retained an extinguished fire");
+			REQ(std::any_of(window.faultPanelTransitions().begin(), window.faultPanelTransitions().end(),
+				[](std::string const& line) { return line.find("[fault-extinguished]") != std::string::npos; }),
+				"the panel hid the fire extinction transition");
 		});
 		#undef REQ
 		require(driver.passed(), "the fault badge and repair workflow failed on the Test Engine");
