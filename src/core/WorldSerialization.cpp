@@ -10,6 +10,7 @@
 #include "core/AgentTagRegistry.h"
 #include "core/SerializationException.h"
 #include "core/StationReference.h"
+#include "core/StationPowerBuses.h"
 #include "core/Exceptions.h"
 #include "core/Transit.h"
 #include "core/LiftTransit.h"
@@ -1074,7 +1075,7 @@ namespace core
 				[](auto const& c) { return c.interruptedCycle || c.interlockFailure.has_value(); });
 		auto const bodies = std::any_of(mStationSystemsSettings.electrolyzers.begin(), mStationSystemsSettings.electrolyzers.end(),
 			[](auto const& cell) { return cell.thermalBody.has_value(); });
-		serializer.writeUint32("version", bodies ? kWorldSchemaVersion : !mStationSystemsSettings.monitors.empty() ? 122 : machineWear ? 121 : atmosphereFaults ? 120 : contamination ? 119 : powerSources ? 118
+		serializer.writeUint32("version", stationHasPowerBusAuthoring(mStationSystemsSettings) ? 124 : bodies ? 123 : !mStationSystemsSettings.monitors.empty() ? 122 : machineWear ? 121 : atmosphereFaults ? 120 : contamination ? 119 : powerSources ? 118
 			: thermalPlant ? 117 : wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);

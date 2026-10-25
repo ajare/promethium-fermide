@@ -1,8 +1,10 @@
 #include "StationSystemsDetail.h"
+#include "core/StationPowerBuses.h"
 
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <set>
 #include <string_view>
 namespace core
 {
@@ -966,6 +968,26 @@ namespace
 	{
 		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
 		if (!validateStationMonitors(settings, diagnostic)) return false;
+		std::set<std::string> busIds;
+		if (settings.powerBuses.empty()) return refuse("Station requires at least one Power Bus");
+		for (auto const& bus : settings.powerBuses)
+		{
+			if (bus.id.empty() || bus.id.size() > MaxStationStoreIdLength || !busIds.insert(bus.id).second)
+				return refuse("Power Bus id '" + bus.id + "' must be non-empty, bounded and unique");
+			if (!std::isfinite(bus.ratedCapacityKW) || bus.ratedCapacityKW < 0.0)
+				return refuse("Power Bus '" + bus.id + "' rated capacity must be finite and non-negative");
+			if (!std::isfinite(bus.tripPersistenceSeconds) || bus.tripPersistenceSeconds < 0.0)
+				return refuse("Power Bus '" + bus.id + "' trip persistence must be finite and non-negative");
+		}
+		bool powerValuesValid = true;
+		forEachStationPowerMember(settings, [&](auto const& entry) {
+			if constexpr (requires { entry.supplyBusIds; })
+				if (powerValuesValid && (!std::isfinite(entry.transferReturnDwellSeconds)
+					|| entry.transferReturnDwellSeconds < 0.0
+					|| static_cast<unsigned>(entry.supplyMode) > static_cast<unsigned>(StationSupplyMode::Shared)))
+					powerValuesValid = refuse("Station '" + entry.id + "' supply mode and return dwell must be valid, finite and non-negative");
+		});
+		if (!powerValuesValid) return false;
 		// #848: every catalogue machine validates its own named Wear
 		// opt-in against the same model rules. None of these modes counts
 		// cycles, so a cycle rate is refused; `mass` says whether the mode

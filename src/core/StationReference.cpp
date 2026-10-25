@@ -4,6 +4,7 @@
 // Managed YAML resources and persisted Worlds use this same settings format;
 // this module contains no bundled configuration data or resource inventory.
 #include "core/StationReference.h"
+#include "core/StationPowerBuses.h"
 
 #include "core/SerializationException.h"
 #include "core/WorldDocument.h"
@@ -161,10 +162,78 @@ namespace core
 		return true;
 	}
 	}
+	namespace
+	{
+		void writeBusIds(Serializer& s, char const* field, std::vector<std::string> const& ids)
+		{
+			s.beginArray(field);
+			for (auto const& id : ids) s.writeString("", id);
+			s.endArray();
+		}
+		void readBusIds(Serializer& s, char const* field, std::vector<std::string>& ids)
+		{
+			ids.clear();
+			s.beginArray(field);
+			while (s.nextArrayItem()) ids.push_back(s.readString(""));
+			s.endArray();
+		}
+		template<class Entry>
+		void writePowerMembership(Serializer& s, Entry const& entry, bool explicitBuses)
+		{
+			if (!explicitBuses) return;
+			if constexpr (requires { entry.busIds; }) writeBusIds(s, "busIds", entry.busIds);
+			if constexpr (requires { entry.supplyBusIds; })
+			{
+				writeBusIds(s, "supplyBusIds", entry.supplyBusIds);
+				s.writeString("supplyMode", entry.supplyMode == StationSupplyMode::Single ? "Single"
+					: entry.supplyMode == StationSupplyMode::Transfer ? "Transfer" : "Shared");
+				s.writeDouble("transferReturnDwellSeconds", entry.transferReturnDwellSeconds);
+			}
+		}
+		template<class Entry>
+		void readPowerMembership(Serializer& s, Entry& entry, uint32_t version)
+		{
+			for (auto const* field : {"busIds", "supplyBusIds", "supplyMode", "transferReturnDwellSeconds"})
+				if (version < 124 && s.hasField(field))
+					throw SerializationException("Station power bus membership requires schema 124");
+			if constexpr (requires { entry.busIds; })
+				if (s.hasField("busIds")) readBusIds(s, "busIds", entry.busIds);
+			if constexpr (requires { entry.supplyBusIds; })
+			{
+				if (s.hasField("supplyBusIds")) readBusIds(s, "supplyBusIds", entry.supplyBusIds);
+				if (s.hasField("supplyMode"))
+				{
+					auto const mode = s.readString("supplyMode");
+					if (mode != "Single" && mode != "Transfer" && mode != "Shared")
+						throw SerializationException("Unknown Station supply mode: " + mode);
+					entry.supplyMode = mode == "Single" ? StationSupplyMode::Single
+						: mode == "Transfer" ? StationSupplyMode::Transfer : StationSupplyMode::Shared;
+				}
+				if (s.hasField("transferReturnDwellSeconds"))
+					entry.transferReturnDwellSeconds = s.readDouble("transferReturnDwellSeconds");
+			}
+		}
+	}
+
 	void writeStationSystemsSettingsMap(Serializer& serializer, StationSystemsSettings const& settings)
 	{
 		serializer.beginMap("stationSystems");
 		serializer.writeBool("enabled", settings.enabled);
+		auto const explicitBuses = stationHasPowerBusAuthoring(settings);
+		if (explicitBuses)
+		{
+			serializer.beginArray("powerBuses");
+			for (auto const& bus : settings.powerBuses)
+			{
+				serializer.beginMap("");
+				serializer.writeString("id", bus.id);
+				serializer.writeString("name", bus.name);
+				serializer.writeDouble("ratedCapacityKW", bus.ratedCapacityKW);
+				serializer.writeDouble("tripPersistenceSeconds", bus.tripPersistenceSeconds);
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 		if (!settings.monitors.empty())
 		{
 			serializer.beginArray("monitors");
@@ -313,6 +382,7 @@ namespace core
 			for (auto const& array : settings.solarArrays)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, array, explicitBuses);
 				serializer.writeString("id", array.id);
 				if (array.cellDegradation) writeWearBlock(serializer, "cellDegradation", *array.cellDegradation);
 				serializer.writeDouble("capacityKW", array.capacityKW);
@@ -355,6 +425,7 @@ namespace core
 			for (auto const& load : settings.equipmentLoads)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, load, explicitBuses);
 				serializer.writeString("id", load.id);
 				serializer.writeDouble("electricalDemandKW", load.electricalDemandKW);
 				serializer.beginMap("operatingProfile");
@@ -464,6 +535,7 @@ namespace core
 			for (auto const& loop : settings.coolantLoops)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, loop, explicitBuses);
 				serializer.writeString("id", loop.id);
 				serializer.writeString("reservoirId", loop.reservoirId);
 				serializer.writeDouble("coolantCapacityKg", loop.coolantCapacityKg);
@@ -540,6 +612,7 @@ namespace core
 			for (auto const& chiller : settings.chillers)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, chiller, explicitBuses);
 				serializer.writeString("id", chiller.id);
 				serializer.writeString("thermalClass", chiller.thermalClass);
 				serializer.writeString("coldLoopId", chiller.coldLoopId);
@@ -578,6 +651,7 @@ namespace core
 			for (auto const& engine : settings.heatEngines)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, engine, explicitBuses);
 				serializer.writeString("id", engine.id);
 				if (engine.efficiencyDrift) writeWearBlock(serializer, "efficiencyDrift", *engine.efficiencyDrift);
 				serializer.writeString("hotReservoirId", engine.hotReservoirId);
@@ -613,6 +687,7 @@ namespace core
 			for (auto const& generator : settings.generators)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, generator, explicitBuses);
 				serializer.writeString("id", generator.id);
 				if (generator.fouledInjector) writeWearBlock(serializer, "fouledInjector", *generator.fouledInjector);
 				serializer.writeString("fuelStoreId", generator.fuelStoreId);
@@ -824,6 +899,7 @@ namespace core
 			for (auto const& treatment : settings.waterTreatments)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, treatment, explicitBuses);
 				serializer.writeString("id", treatment.id);
 				if (treatment.membraneFouling) writeWearBlock(serializer, "membraneFouling", *treatment.membraneFouling);
 				serializer.writeString("sourceStoreId", treatment.sourceStoreId);
@@ -857,6 +933,7 @@ namespace core
 			for (auto const& electrolyzer : settings.electrolyzers)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, electrolyzer, explicitBuses);
 				serializer.writeString("id", electrolyzer.id);
 				if (electrolyzer.membraneDegradation) writeWearBlock(serializer, "membraneDegradation", *electrolyzer.membraneDegradation);
 				if (electrolyzer.thermalBody)
@@ -899,6 +976,7 @@ namespace core
 			for (auto const& capture : settings.co2Captures)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, capture, explicitBuses);
 				serializer.writeString("id", capture.id);
 				if (capture.absorbentDegradation) writeWearBlock(serializer, "absorbentDegradation", *capture.absorbentDegradation);
 				serializer.writeString("atmosphereId", capture.atmosphereId);
@@ -922,6 +1000,7 @@ namespace core
 			for (auto const& cell : settings.fuelCells)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, cell, explicitBuses);
 				serializer.writeString("id", cell.id);
 				if (cell.stackDegradation) writeWearBlock(serializer, "stackDegradation", *cell.stackDegradation);
 				serializer.writeString("hydrogenStoreId", cell.hydrogenStoreId);
@@ -953,6 +1032,7 @@ namespace core
 			for (auto const& reactor : settings.sabatierReactors)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, reactor, explicitBuses);
 				serializer.writeString("id", reactor.id);
 				if (reactor.catalystDeactivation) writeWearBlock(serializer, "catalystDeactivation", *reactor.catalystDeactivation);
 				serializer.writeString("co2StoreId", reactor.co2StoreId);
@@ -986,6 +1066,7 @@ namespace core
 			for (auto const& processor : settings.methaneProcessors)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, processor, explicitBuses);
 				serializer.writeString("id", processor.id);
 				if (processor.catalystDeactivation) writeWearBlock(serializer, "catalystDeactivation", *processor.catalystDeactivation);
 				serializer.writeString("methaneStoreId", processor.methaneStoreId);
@@ -1019,6 +1100,7 @@ namespace core
 			for (auto const& processor : settings.microbialProcessors)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, processor, explicitBuses);
 				serializer.writeString("id", processor.id);
 				serializer.writeString("rateBasis", stationRateBasisName(processor.rateBasis));
 				serializer.writeDouble("organicOxidationFraction", processor.organicOxidationFraction);
@@ -1089,6 +1171,7 @@ namespace core
 			for (auto const& crop : settings.cropPopulations)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, crop, explicitBuses);
 				serializer.writeString("id", crop.id);
 				serializer.writeString("atmosphereId", crop.atmosphereId);
 				serializer.writeString("waterStoreId", crop.waterStoreId);
@@ -1156,6 +1239,7 @@ namespace core
 			for (auto const& algae : settings.algaeCultures)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, algae, explicitBuses);
 				serializer.writeString("id", algae.id);
 				serializer.writeString("atmosphereId", algae.atmosphereId);
 				serializer.writeString("waterStoreId", algae.waterStoreId);
@@ -1240,6 +1324,7 @@ namespace core
 			for (auto const& battery : settings.batteries)
 			{
 				serializer.beginMap("");
+				writePowerMembership(serializer, battery, explicitBuses);
 				serializer.writeString("id", battery.id);
 				serializer.writeDouble("nameplateKWh", battery.nameplateKWh);
 				serializer.writeDouble("usableKWh", battery.usableKWh);
@@ -1363,8 +1448,10 @@ namespace core
 	}
 
 	void readStationSystemsSettingsMap(Serializer& serializer,
-		std::uint32_t const version, StationSystemsSettings& stationSettings, bool validate)
+		std::uint32_t const version, StationSystemsSettings& destination, bool validate)
 	{
+		// Stage all reads, including migration, before publishing any settings.
+		StationSystemsSettings stationSettings;
 		serializer.beginMap("stationSystems");
 		// Retired fields take precedence over all schema/feature diagnostics.
 		// This policy is independent of which entries support waterQuality.
@@ -1394,6 +1481,24 @@ namespace core
 			serializer.endArray();
 		}
 		if (version < 65) throw SerializationException("Station systems require World schema 65");
+		if (serializer.hasField("powerBuses"))
+		{
+			if (version < 124) throw SerializationException("Station power buses require schema 124");
+			stationSettings.powerBuses.clear();
+			serializer.beginArray("powerBuses");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				PowerBusSettings bus;
+				bus.id = serializer.readString("id");
+				bus.name = serializer.readString("name");
+				bus.ratedCapacityKW = serializer.readDouble("ratedCapacityKW");
+				bus.tripPersistenceSeconds = serializer.readDouble("tripPersistenceSeconds");
+				stationSettings.powerBuses.push_back(std::move(bus));
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 		if (serializer.hasField("monitors"))
 		{
 			if (version < 122) throw SerializationException("Station Monitors require schema 122");
@@ -1668,6 +1773,7 @@ namespace core
 					array.trackingFailure = SolarTrackingFailureSettings{serializer.readDouble("availability")};
 					serializer.endMap();
 				}
+				readPowerMembership(serializer, array, version);
 				stationSettings.solarArrays.push_back(std::move(array));
 				serializer.endMap();
 			}
@@ -1739,6 +1845,7 @@ namespace core
 						"Station load heat sinks require World schema 72");
 					load.heatSinkId = serializer.readString("heatSinkId");
 				}
+				readPowerMembership(serializer, load, version);
 				stationSettings.equipmentLoads.push_back(std::move(load));
 				serializer.endMap();
 			}
@@ -1888,6 +1995,7 @@ namespace core
 					if (readWearBlock(serializer, "wear", version, "Coolant loop wear models", model))
 						loop.wear = model;
 				}
+				readPowerMembership(serializer, loop, version);
 				stationSettings.coolantLoops.push_back(std::move(loop));
 				serializer.endMap();
 			}
@@ -1943,6 +2051,7 @@ namespace core
 					if (readRepairPartsBlock(serializer, version, wiring))
 						chiller.repairParts = std::move(wiring);
 				}
+				readPowerMembership(serializer, chiller, version);
 				stationSettings.chillers.push_back(std::move(chiller));
 				serializer.endMap();
 			}
@@ -1963,7 +2072,7 @@ namespace core
 					"minHotTemperatureC", "maxSinkTemperatureC",
 					// #844: the seizure opt-in and repair wiring join the
 					// known-field set; #848 adds the Wear opt-in.
-					"mechanicalSeizure", "repairParts", "efficiencyDrift"};
+					"mechanicalSeizure", "repairParts", "efficiencyDrift", "busIds"};
 				for (auto const& field : serializer.mapKeys(""))
 					if (std::find(fields.begin(), fields.end(), field) == fields.end())
 						throw SerializationException("Station entry '" + id + "' field '" + field
@@ -2002,6 +2111,7 @@ namespace core
 					if (readRepairPartsBlock(serializer, version, wiring))
 						engine.repairParts = std::move(wiring);
 				}
+				readPowerMembership(serializer, engine, version);
 				stationSettings.heatEngines.push_back(std::move(engine));
 				serializer.endMap();
 			}
@@ -2038,6 +2148,7 @@ namespace core
 						"Generator failed-start opt-in requires schema 118");
 					generator.failedStart = serializer.readBool("failedStart");
 				}
+				readPowerMembership(serializer, generator, version);
 				stationSettings.generators.push_back(std::move(generator));
 				serializer.endMap();
 			}
@@ -2295,6 +2406,7 @@ namespace core
 					if (version < 119) throw SerializationException("breakthrough requires schema 119");
 					treatment.breakthrough = serializer.readBool("breakthrough");
 				}
+				readPowerMembership(serializer, treatment, version);
 				stationSettings.waterTreatments.push_back(std::move(treatment));
 				serializer.endMap();
 			}
@@ -2337,6 +2449,7 @@ namespace core
 					electrolyzer.catalystPoisoning = CatalystPoisoningSettings{serializer.readDouble("triggerConcentration"), serializer.readDouble("wearPerHour")};
 					serializer.endMap();
 				}
+				readPowerMembership(serializer, electrolyzer, version);
 				stationSettings.electrolyzers.push_back(std::move(electrolyzer));
 				serializer.endMap();
 			}
@@ -2360,6 +2473,7 @@ namespace core
 				capture.specificEnergyKWhPerKg = serializer.readDouble("specificEnergyKWhPerKg");
 				capture.consumablePerKg = serializer.readDouble("consumablePerKg");
 				capture.priority = serializer.readInt32("priority");
+				readPowerMembership(serializer, capture, version);
 				stationSettings.co2Captures.push_back(std::move(capture));
 				serializer.endMap();
 			}
@@ -2392,6 +2506,7 @@ namespace core
 					cell.catalystPoisoning = CatalystPoisoningSettings{serializer.readDouble("triggerConcentration"), serializer.readDouble("wearPerHour")};
 					serializer.endMap();
 				}
+				readPowerMembership(serializer, cell, version);
 				stationSettings.fuelCells.push_back(std::move(cell));
 				serializer.endMap();
 			}
@@ -2451,6 +2566,7 @@ namespace core
 					serializer.endMap();
 				}
 				reactor.priority = serializer.readInt32("priority");
+				readPowerMembership(serializer, reactor, version);
 				stationSettings.sabatierReactors.push_back(std::move(reactor));
 				serializer.endMap();
 			}
@@ -2484,6 +2600,7 @@ namespace core
 					serializer.endMap();
 				}
 				processor.priority = serializer.readInt32("priority");
+				readPowerMembership(serializer, processor, version);
 				stationSettings.methaneProcessors.push_back(std::move(processor));
 				serializer.endMap();
 			}
@@ -2568,6 +2685,7 @@ namespace core
 				processor.stockUnitsPerConditionPoint =
 					serializer.readDouble("stockUnitsPerConditionPoint");
 				processor.priority = serializer.readInt32("priority");
+				readPowerMembership(serializer, processor, version);
 				stationSettings.microbialProcessors.push_back(std::move(processor));
 				serializer.endMap();
 			}
@@ -2647,6 +2765,7 @@ namespace core
 				if (version >= 87 && serializer.hasField("harvestFraction"))
 					crop.harvestFraction = serializer.readDouble("harvestFraction");
 				crop.priority = serializer.readInt32("priority");
+				readPowerMembership(serializer, crop, version);
 				stationSettings.cropPopulations.push_back(std::move(crop));
 				serializer.endMap();
 			}
@@ -2712,6 +2831,7 @@ namespace core
 				algae.harvestTriggerKg = serializer.readDouble("harvestTriggerKg");
 				algae.harvestFraction = serializer.readDouble("harvestFraction");
 				algae.priority = serializer.readInt32("priority");
+				readPowerMembership(serializer, algae, version);
 				stationSettings.algaeCultures.push_back(std::move(algae));
 				serializer.endMap();
 			}
@@ -2753,6 +2873,7 @@ namespace core
 						serializer.readDouble("heatKJ"), serializer.readDouble("toxicKg")};
 					serializer.endMap();
 				}
+				readPowerMembership(serializer, battery, version);
 				stationSettings.batteries.push_back(std::move(battery));
 				serializer.endMap();
 			}
@@ -2895,6 +3016,7 @@ namespace core
 		std::string diagnostic;
 		if (validate && !validateStationSystemsSettings(stationSettings, diagnostic))
 			throw SerializationException(diagnostic);
+		destination = std::move(stationSettings);
 	}
 
 	bool parseStationReference(std::string const& text,

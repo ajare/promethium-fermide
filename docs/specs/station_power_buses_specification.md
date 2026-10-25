@@ -2,7 +2,8 @@
 
 Status: design agreed 2026-10-25 (grilling session; model, trip semantics, and migration
 settled). Initiative captured in Hindsight as
-`kp-7afd12541ed34229a83784104e72e38c`. Not yet implemented.
+`kp-7afd12541ed34229a83784104e72e38c`. #879 implements the data-model
+expand step only; dispatch and editor/protection behaviour remain in #880–#885.
 
 Canonical vocabulary: `CONTEXT.md` § Station systems. This spec introduces **Power Bus**,
 **Supply Mode**, and **Bus Trip**, and uses the existing **Trip** / **Alert** / **Fault** /
@@ -10,7 +11,8 @@ Canonical vocabulary: `CONTEXT.md` § Station systems. This spec introduces **Po
 (`docs/adr/0031-monitors-observe-only-alerts-are-code-bound-callbacks.md`). It supersedes
 the "automatic electrical pool membership" clause of ADR-0023
 (`docs/adr/0023-separate-station-connection-design-from-flow-allocation.md`) with an
-explicit authored bus topology; a new ADR-0032 records that supersession.
+explicit authored bus topology; ADR-0033 records that supersession (ADR-0032
+is the independent typed Thermal-node decision).
 
 ## 1. Problem statement
 
@@ -335,7 +337,10 @@ Warnings (§7.4) are non-fatal.
 
 ## 11. Migration
 
-- `kWorldSchemaVersion` bumps 122 → 123.
+- `kWorldSchemaVersion` bumps 123 → 124. Schema 123 is already occupied;
+  non-default Power Bus authoring requires 124. Default-only configurations keep
+  their historical feature floor and omit the new fields, matching the existing
+  sparse Station feature convention.
 - On load of a pre-bump document:
   - one default bus is created: `id = "main"`, `name = "Main Bus"`,
     `ratedCapacityKW = 0` (unrated — preserves today's exactly-unbounded behaviour),
@@ -440,7 +445,7 @@ Warnings (§7.4) are non-fatal.
 ## 15. Implementation phasing
 
 1. **Data model & migration** — settings structs, `StationSupplyMode`, schema bump
-   122→123, load-time default-bus migration, `CONTEXT.md` vocabulary, ADR-0032.
+   123→124, load-time default-bus migration, `CONTEXT.md` vocabulary, ADR-0033.
 2. **Ports & validation** — Power bus placeable type, source/load/battery power
    connectors, derived-`Power` retirement, validator rules and warnings.
 3. **Per-bus dispatch** — tick-stage rework (Prepare/Generation/Protection/Processing),

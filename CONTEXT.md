@@ -545,6 +545,18 @@ _Avoid_: Tile set
 **Station systems**:
 A World's coupled electrical power, environmental control and life support, thermal control, and monitoring services. Their resource inventories, processing capacities, demands, and exchanges determine available service and resource endurance.
 
+**Power Bus**:
+An authored electrical distribution circuit joining its declared power sources, batteries, and consumers, with a rated capacity or an explicit unrated choice. Membership describes a supply path, not an inventory or a separate generator.
+_Avoid_: Electrical pool, derived service node
+
+**Supply Mode**:
+A consumer's declared relationship to its supply buses: Single uses one bus, Transfer selects a primary or backup without combining them, and Shared combines available supply from multiple buses.
+_Avoid_: Dispatch mode, which governs source commands
+
+**Bus Trip**:
+A Power Bus's latched protective isolation after its through-power exceeds its rating for the declared persistence time. It requires an explicit breaker reset and is distinct from the Alert that announces it.
+_Avoid_: Fault, Monitor, load shedding
+
 **Biological population**:
 An aggregate of living crops or algae within the environmental control and life support system, with its own living biomass and resource exchanges. Crop and algae populations are distinct; their growth, respiration, harvest, and losses depend on available resources and environmental conditions.
 

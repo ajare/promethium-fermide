@@ -4,6 +4,7 @@
 #include "Smoke.h"
 #include <vector>
 void registerStationMonitorChecks(std::vector<smoke::Check>& checks);
+void registerStationPowerBusChecks(std::vector<smoke::Check>& checks);
 void registerStationStoreConnectionMonitorChecks(std::vector<smoke::Check>& checks);
 void registerStationEclssBiologyMonitorChecks(std::vector<smoke::Check>& checks);
 void registerStationFaultChecks(std::vector<smoke::Check>& checks);

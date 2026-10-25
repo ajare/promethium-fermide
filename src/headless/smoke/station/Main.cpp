@@ -52,6 +52,7 @@ int main(int argc, char** argv)
 	registerStationSeamChecks(checks);
 	registerStationPrefabChecks(checks);
 	registerStationPowerChecks(checks);
+	registerStationPowerBusChecks(checks);
 	registerStationDocumentChecks(checks);
 	registerScheduledTransferChecks(checks);
 	registerStationConnectionChecks(checks);

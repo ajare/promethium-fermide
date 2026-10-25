@@ -36,6 +36,18 @@ namespace core
 		"potassium", "otherMinerals", "dryOrganics"};
 	inline constexpr char const* StationEnergyConstituent{"energy"};
 
+	// Power distribution roles (#879). Fields on existing aggregates are
+	// appended so positional initialization remains source compatible.
+	enum class StationSupplyMode : std::uint8_t { Single, Transfer, Shared };
+	struct PowerBusSettings
+	{
+		std::string id{"main"};
+		std::string name{"Main Bus"};
+		double ratedCapacityKW{0.0}; // zero = deliberately unrated
+		double tripPersistenceSeconds{0.0};
+		bool operator==(PowerBusSettings const&) const = default;
+	};
+
 	// Declared constituent composition of a compound Resource material such
 	// as food, living biomass or waste (#391). Moisture is a fraction of wet
 	// mass; every other fraction is a fraction of DRY mass. This is the
@@ -477,6 +489,7 @@ namespace core
 		// the rates inside stay live-tunable and never reprice the fade
 		// already banked.
 		std::optional<InstallationWearSettings> cellDegradation;
+		std::vector<std::string> busIds{"main"};
 		bool operator==(SolarArraySettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationSolarArrays{4};
@@ -579,6 +592,9 @@ namespace core
 		// sink; a cooling-service load needs a cooling service, not a
 		// passive heat sink, and stays refused until such a service exists.
 		std::string heatSinkId;
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
 		bool operator==(EquipmentLoadSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationEquipmentLoads{16};
@@ -858,6 +874,9 @@ namespace core
 		// fadePerCycle must be zero. The permanent wearFraction it drives
 		// scales the loop's effective rated flow; repair never reverses it.
 		std::optional<InstallationWearSettings> wear;
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
 		bool operator==(CoolantLoopSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationCoolantLoops{8};
@@ -916,6 +935,9 @@ namespace core
 		// parts quantities are live-tunable and never reach a repair that
 		// already started.
 		std::optional<RepairPartsSettings> repairParts;
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
 		bool operator==(ChillerSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationChillers{8};
@@ -965,6 +987,7 @@ namespace core
 		// topology; the rates inside stay live-tunable and never reprice
 		// the fade already banked.
 		std::optional<InstallationWearSettings> efficiencyDrift;
+		std::vector<std::string> busIds{"main"};
 		bool operator==(HeatEngineSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationHeatEngines{8};
@@ -1023,6 +1046,10 @@ namespace core
 		// topology; the rates inside stay live-tunable and never reprice
 		// the fade already banked.
 		std::optional<InstallationWearSettings> fouledInjector;
+		std::vector<std::string> busIds{"main"};
+		std::vector<std::string> supplyBusIds{"main"}; // startup cranking
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
 		bool operator==(GeneratorSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationGenerators{8};
@@ -1070,6 +1097,7 @@ namespace core
 		// heat and toxic mass are live-tunable until an accepted
 		// injection freezes them for the Fault it started.
 		std::optional<BatteryThermalRunawaySettings> thermalRunaway;
+		std::vector<std::string> busIds{"main"};
 		bool operator==(BatterySettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationBatteries{8};
@@ -1480,6 +1508,9 @@ namespace core
 		// processed. Presence is frozen topology; the rates inside stay
 		// live-tunable and never reprice the fade already banked.
 		std::optional<InstallationWearSettings> membraneFouling;
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
 		bool operator==(WaterTreatmentSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationWaterTreatments{8};
@@ -1552,6 +1583,9 @@ namespace core
 		// reprice the fade already banked.
 		std::optional<InstallationWearSettings> membraneDegradation;
 		std::optional<ThermalBodySettings> thermalBody;
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
 		bool operator==(ElectrolyzerSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationElectrolyzers{8};
@@ -1586,6 +1620,9 @@ namespace core
 		// mass captured. Presence is frozen topology; the rates inside
 		// stay live-tunable and never reprice the fade already banked.
 		std::optional<InstallationWearSettings> absorbentDegradation;
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
 		bool operator==(Co2CaptureSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationCo2Captures{8};
@@ -1637,6 +1674,7 @@ namespace core
 		// rates inside stay live-tunable and never reprice the fade
 		// already banked.
 		std::optional<InstallationWearSettings> stackDegradation;
+		std::vector<std::string> busIds{"main"};
 		bool operator==(FuelCellSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationFuelCells{8};
@@ -1755,6 +1793,9 @@ namespace core
 		// inside stay live-tunable and never reprice the fade already
 		// banked.
 		std::optional<InstallationWearSettings> catalystDeactivation;
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
 		bool operator==(SabatierReactorSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationSabatierReactors{8};
@@ -1796,6 +1837,9 @@ namespace core
 		// inside stay live-tunable and never reprice the fade already
 		// banked.
 		std::optional<InstallationWearSettings> catalystDeactivation;
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
 		bool operator==(MethaneProcessorSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationMethaneProcessors{8};
@@ -1915,6 +1959,9 @@ namespace core
 		std::string stockStoreId;                // optional replacement biological stock consumed by recovery
 		double stockUnitsPerConditionPoint{1.0}; // stock units consumed per condition point restored
 		int priority{0};
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
 		bool operator==(MicrobialProcessorSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationMicrobialProcessors{8};
@@ -2096,6 +2143,9 @@ namespace core
 		double harvestTriggerKg{0.0}; // harvest when living biomass reaches this; 0 disables harvest
 		double harvestFraction{1.0};  // (0, 1] fraction of living biomass removed per harvest
 		int priority{0};
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
 		bool operator==(CropPopulationSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationCropPopulations{8};
@@ -2177,6 +2227,9 @@ namespace core
 		double harvestTriggerKg{0.0}; // harvest when living biomass reaches this; 0 disables harvest
 		double harvestFraction{1.0};  // (0, 1] fraction of living biomass removed per harvest
 		int priority{0};
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
 		bool operator==(AlgaeCultureSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationAlgaeCultures{8};
@@ -2401,6 +2454,7 @@ namespace core
 		// Default Station cadence: 10 Hz against the World's 60 Hz clock.
 		uint32_t systemsStepWorldTicks{6};
 		std::vector<StationMonitorSettings> monitors;
+		std::vector<PowerBusSettings> powerBuses{PowerBusSettings{}};
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// The installations registered with the shared availability contract
@@ -3334,6 +3388,23 @@ namespace core
 		bool operator==(StationProtectedServiceSnapshot const&) const = default;
 	};
 
+	struct StationBusPowerSnapshot
+	{
+		std::string busId;
+		double ratedCapacityKW{0.0};
+		double loadFraction{0.0};
+		double generationKW{0.0};
+		double batteryChargeKW{0.0}, batteryDischargeKW{0.0};
+		double demandKW{0.0};
+		double protectedDemandKW{0.0}, protectedSuppliedKW{0.0}, protectedUnmetKW{0.0};
+		double suppliedKW{0.0}, unmetKW{0.0}, surplusKW{0.0};
+		bool tripped{false};
+		double trippedAtSimSeconds{0.0};
+		double throughPowerKW{0.0};
+		std::vector<StationProtectedServiceSnapshot> protectedServices;
+		bool operator==(StationBusPowerSnapshot const&) const = default;
+	};
+
 	struct StationPowerSnapshot
 	{
 		// Network-side availability and actual physical connection losses.
@@ -3433,6 +3504,9 @@ namespace core
 		std::vector<StationEquipmentLoadSnapshot> loads;
 		std::vector<StationBatterySnapshot> batteries;
 		std::vector<StationGeneratorSnapshot> generators;
+		// #879 expand step: the single bus wraps the unchanged pool account.
+		// Multi-bus allocation is implemented separately in #880.
+		std::vector<StationBusPowerSnapshot> buses;
 		bool operator==(StationPowerSnapshot const&) const = default;
 	};
 	// One radiator as of the most recent tick: the authored rejection
