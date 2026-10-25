@@ -753,6 +753,221 @@ void repairSeizureClearing(smoke::Context const&)
 	require(run.advanceTo(23) && run.snapshot().coolantLoops[0].activeFaults.empty(),
 		"the cleared seizure re-raised without a fresh crossing");
 }
+core::StationSystemsSettings atmosphereFaultStation()
+{
+	auto s = punctureStation();
+	s.atmospheres[0].startingOxygenKg = 10;
+	s.atmospheres[0].startingNitrogenKg = 30;
+	s.atmospheres[0].fire = core::AtmosphereFireSettings{2, 0.1, 1, 20, 2};
+	core::AtmospherePathwaySettings path;
+	path.id = "breach"; path.aAtmosphereId = "room";
+	path.bAtmosphereId = core::StationExteriorAtmosphereId;
+	path.areaM2 = 1; path.openFraction = 0;
+	s.atmospherePathways = {path};
+	core::AirlockCycleSettings cycle;
+	cycle.id = "lock"; cycle.atmosphereId = "room";
+	cycle.gasMassKg = 4; cycle.firstOccurrenceSeconds = 1;
+	cycle.recurrenceSeconds = 1; cycle.recoveredFraction = 0.75;
+	cycle.interruptedCycle = true;
+	cycle.interlockFailure = core::AirlockInterlockFailureSettings{"breach", 100};
+	s.airlockCycles = {cycle};
+	return s;
+}
+void atmosphereFire(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	for (uint32_t ratio : {1u, 6u, 60u})
+	{
+		auto s = atmosphereFaultStation(); s.airlockCycles.clear();
+		s.systemsStepWorldTicks = ratio;
+		core::StationSystemsRuntime run(s, 1.f / 60.f);
+		require(run.injectFault("room", "fire", {}) && run.advanceTo(1), "fire failed its audit");
+		auto const burning = run.snapshot().atmospheres[0];
+		require(burning.activeFaults.size() == 1 && burning.activeFaults[0].derivedImpact == 1
+			&& approx(burning.fireOxygenConsumedKg, 2) && approx(burning.fireCarbonDioxideKg, 1)
+			&& approx(burning.carbonMonoxideKg, 0.1) && approx(burning.fireHeatKJ, 20),
+			"fire rates or derived impact were not booked together");
+		require(run.advanceTo(10), "fire extinction failed its audit");
+		auto const done = run.snapshot().atmospheres[0];
+		require(done.activeFaults.empty() && approx(done.oxygenKg, 2)
+			&& approx(done.fireOxygenConsumedKg, 8) && approx(done.fireCarbonDioxideKg, 4)
+			&& approx(done.carbonMonoxideKg, 0.4) && approx(done.fireHeatKJ, 80)
+			&& approx(done.hazardHeatKJ, 80) && approx(done.temperatureC, 20.008),
+			"fire did not self-extinguish conservatively at its oxygen boundary");
+		require(run.advanceTo(12) && run.snapshot().atmospheres[0] == done,
+			"extinguished fire continued emitting");
+		require(countCategory(run, "fault") == 1 && countCategory(run, "fault-extinguished") == 1,
+			"fire onset or extinction event missing or repeated");
+	}
+	// Already below the threshold: emit no part of the compound dose.
+	auto s = atmosphereFaultStation(); s.airlockCycles.clear(); s.atmospheres[0].startingOxygenKg = 1;
+	core::StationSystemsRuntime cold(s, 0.25f);
+	require(cold.injectFault("room", "fire", {}) && cold.advanceTo(1)
+		&& cold.snapshot().atmospheres[0].fireHeatKJ == 0
+		&& cold.snapshot().atmospheres[0].activeFaults.empty(), "oxygen-starved fire emitted material or heat");
+}
+void airlockFaultBookings(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	auto s = atmosphereFaultStation();
+	core::StationSystemsRuntime interrupted(s, 0.25f), normal(s, 0.25f);
+	require(interrupted.injectFault("lock", "interrupted-cycle", {}) && interrupted.advanceTo(2)
+		&& normal.advanceTo(2), "interrupted cycle failed audit");
+	auto const broken = interrupted.snapshot(); auto const nominal = normal.snapshot();
+	require(broken.airlockCycles[0].occurrencesCompleted == 2
+		&& broken.airlockCycles[0].removedTotal == 8 && broken.airlockCycles[0].lostTotal == 8
+		&& broken.airlockCycles[0].faultLostKg == 8 && broken.airlockCycles[0].recoveredTotal == 0
+		&& nominal.airlockCycles[0].removedTotal == 8 && nominal.airlockCycles[0].lostTotal == 2
+		&& broken.atmospheres[0].oxygenKg == nominal.atmospheres[0].oxygenKg
+		&& broken.airlockCycles[0].activeFaults[0].derivedImpact == 1,
+		"interrupted cycle double-counted a scheduled removal or recovered vented gas");
+	// A breach uses exactly the same exterior solve as an authored open pathway.
+	s.airlockCycles[0].firstOccurrenceSeconds = 100;
+	auto opened = s; opened.atmospherePathways[0].areaM2 = 100;
+	opened.atmospherePathways[0].openFraction = 1;
+	core::StationSystemsRuntime breach(s, 0.25f), equivalent(opened, 0.25f);
+	require(breach.injectFault("lock", "interlock-failure", {}) && breach.advanceTo(2)
+		&& equivalent.advanceTo(2), "breach failed audit");
+	auto const snap = breach.snapshot();
+	require(snap.atmospherePathways[0].netTransferredKg == equivalent.snapshot().atmospherePathways[0].netTransferredKg
+		&& snap.atmospheres == equivalent.snapshot().atmospheres
+		&& snap.atmospheres[0].exteriorLostKg[0] > 0
+		&& snap.airlockCycles[0].lostTotal == 0 && snap.airlockCycles[0].faultLostKg == 0
+		&& snap.airlockCycles[0].activeFaults[0].derivedImpact == 1,
+		"breach bypassed or duplicated the exterior pathway ledger");
+}
+void atmosphereFaultReplay(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	for (auto const& command : std::vector<std::pair<std::string, std::string>>{
+		{"room", "fire"}, {"lock", "interrupted-cycle"}, {"lock", "interlock-failure"}})
+	{
+		auto s = atmosphereFaultStation(); core::StationSystemsRuntime run(s, 0.25f);
+		auto const before = run.snapshot(); auto const events = run.events();
+		require(run.injectFault(command.first, command.second, {})
+			&& !run.injectFault(command.first, command.second, {})
+			&& run.snapshot() == before && run.events() == events, "injection boundary or duplicate refusal failed");
+		roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+		// Accepted parameters must not change under later live retuning.
+		require(run.updateNode<core::AtmosphereSettings>("room", [](auto& a) { a.fire->heatKW = 50; })
+			&& run.updateNode<core::AirlockCycleSettings>("lock", [](auto& c) { c.interlockFailure->breachAreaM2 = 5; }),
+			"fault rate retune refused");
+		require(run.advanceTo(2), "atmosphere drive failed");
+		roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+		require(run.advanceTo(10), "atmosphere continuation failed");
+		roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+		if (command.second == "fire") require(approx(run.snapshot().atmospheres[0].fireHeatKJ,
+			run.snapshot().atmospheres[0].fireOxygenConsumedKg * 10), "live edit rewrote accepted fire parameters");
+	}
+	core::StationConfigurationDocument document; document.settings = atmosphereFaultStation();
+	auto const yaml = core::serializeStationConfiguration(document);
+	core::StationConfigurationDocument parsed; std::string diagnostic;
+	require(yaml.find("schemaVersion: 120") != std::string::npos
+		&& core::parseStationConfiguration(yaml, parsed, &diagnostic)
+		&& parsed.settings == document.settings, "atmosphere configuration schema or round trip failed");
+	for (bool binary : {false, true})
+	{
+		auto s = atmosphereFaultStation();
+		std::unique_ptr<core::Serializer> out = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+		out->beginMap("root"); core::writeStationSystemsSettingsMap(*out, s); out->endMap(); out->serialize();
+		auto bytes = binary ? static_cast<core::BinarySerializer&>(*out).getSerializedString()
+			: static_cast<core::YamlSerializer&>(*out).getSerializedString();
+		for (uint32_t version : {119u, 120u})
+		{
+			std::unique_ptr<core::Serializer> in = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+			in->deserialize(); in->beginMap("root"); core::StationSystemsSettings loaded; bool threw = false;
+			try { core::readStationSystemsSettingsMap(*in, version, loaded); }
+			catch (core::SerializationException const&) { threw = true; }
+			require(version == 119 ? threw : !threw && loaded == s, "atmosphere schema boundary or round trip failed");
+		}
+	}
+}
+void atmosphereFaultWorld(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	core::World world("Atmosphere faults", 2, 2); world.pauseSimulation(); world.finishBuild();
+	require(world.configureStationSystems(atmosphereFaultStation(), false), "World atmosphere setup failed");
+	world.resumeSimulation();
+	require(advanceSeconds(world, 1) && world.injectStationFault("room", "fire", {})
+		&& world.injectStationFault("lock", "interrupted-cycle", {})
+		&& world.injectStationFault("lock", "interlock-failure", {}), "World fault forwarding failed");
+	for (bool pending : {true, false})
+	{
+		if (!pending) require(advanceSeconds(world, 2), "World fault drive failed");
+		for (bool binary : {false, true})
+		{
+			std::unique_ptr<core::Serializer> out = binary
+				? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+			core::SerializationWorkData work; world.serialize(*out, work); out->serialize();
+			auto bytes = binary ? static_cast<core::BinarySerializer&>(*out).getSerializedString()
+				: static_cast<core::YamlSerializer&>(*out).getSerializedString();
+			std::unique_ptr<core::Serializer> in = binary
+				? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+			in->deserialize(); core::World loaded("Loaded", 2, 2);
+			require(loaded.deserialize(*in, work), "World atmosphere reload failed");
+			require(loaded.getStationSystemsSnapshot() == world.getStationSystemsSnapshot()
+				&& loaded.getStationSystemsEvents() == world.getStationSystemsEvents(),
+				"World save/load lost pending or applied atmosphere faults");
+		}
+	}
+}
+void atmosphereFaultTransactions(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	auto s = atmosphereFaultStation(); core::StationSystemsRuntime run(s, 0.25f);
+	auto const before = run.snapshot(); auto const events = run.events();
+	std::string diagnostic;
+	for (auto const& command : std::vector<std::pair<std::string, std::string>>{
+		{"room", "interrupted-cycle"}, {"lock", "fire"}, {"room", "interlock-failure"}})
+		require(!run.injectFault(command.first, command.second, {}, &diagnostic) && !diagnostic.empty()
+			&& run.snapshot() == before && run.events() == events && !run.hasFaultCommands(),
+			"invalid atmosphere fault mutated runtime");
+	require(!run.updateNode<core::AtmosphereSettings>("room", [](auto& a) { a.fire.reset(); })
+		&& !run.updateNode<core::AirlockCycleSettings>("lock", [](auto& c) { c.interruptedCycle = false; })
+		&& run.snapshot() == before, "fault topology changed during a run");
+	for (double bad : {-1., 0., std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+	{
+		auto invalid = s; invalid.atmospheres[0].fire->oxygenKgPerS = bad;
+		require(!core::validateStationSystemsSettings(invalid, diagnostic), "invalid fire rate accepted");
+		invalid = s; invalid.airlockCycles[0].interlockFailure->breachAreaM2 = bad;
+		require(!core::validateStationSystemsSettings(invalid, diagnostic), "invalid breach area accepted");
+	}
+	core::StationSystemsRuntime retuned(s, 0.25f);
+	require(retuned.updateNode<core::AtmosphereSettings>("room", [](auto& a) { a.fire->oxygenKgPerS = -1; })
+		&& retuned.updateNode<core::AirlockCycleSettings>("lock", [](auto& c) { c.interlockFailure->breachAreaM2 = 0; })
+		&& !retuned.injectFault("room", "fire", {}, &diagnostic)
+		&& !retuned.injectFault("lock", "interlock-failure", {}, &diagnostic)
+		&& !retuned.hasFaultCommands(), "invalid live parameters entered the fault ledger");
+	auto removed = s; removed.airlockCycles[0].interlockFailure.reset();
+	require(!run.updateSettings(removed, &diagnostic), "bulk update changed fault topology");
+	auto collision = s; collision.atmospheres[0].id = "solar";
+	require(!core::validateStationSystemsSettings(collision, diagnostic), "ambiguous fire identity accepted");
+	collision = s; collision.airlockCycles[0].id = "room";
+	require(!core::validateStationSystemsSettings(collision, diagnostic), "ambiguous airlock identity accepted");
+	auto invalid = s; invalid.airlockCycles[0].interlockFailure->pathwayId = "missing";
+	require(!core::validateStationSystemsSettings(invalid, diagnostic), "missing breach pathway accepted");
+	auto absent = s; absent.atmospheres[0].fire.reset(); absent.airlockCycles[0].interruptedCycle = false;
+	absent.airlockCycles[0].interlockFailure.reset();
+	// A failed audit must roll back all four fire bookings and its onset event.
+	auto overflow = s; overflow.airlockCycles.clear();
+	overflow.atmospheres[0].fire->heatKW = 1e308;
+	overflow.atmospheres[0].thermalCapacityKJPerK = 1e-300;
+	core::StationSystemsRuntime failing(overflow, 0.25f);
+	auto const unchanged = failing.snapshot(); auto const oldEvents = failing.events();
+	require(failing.injectFault("room", "fire", {}) && !failing.advanceTo(0.25)
+		&& !failing.snapshot().healthy && failing.snapshot().atmospheres == unchanged.atmospheres
+		&& failing.snapshot().worldTick == unchanged.worldTick && failing.events() == oldEvents,
+		"failed fire audit published a partial compound booking");
+	core::StationSystemsRuntime baseline(absent, 0.25f);
+	require(!baseline.injectFault("room", "fire", {}) && !baseline.injectFault("lock", "interrupted-cycle", {})
+		&& !baseline.injectFault("lock", "interlock-failure", {}), "absent opt-in accepted a fault");
+	require(run.advanceTo(10) && baseline.advanceTo(10) && run.snapshot() == baseline.snapshot()
+		&& run.events() == baseline.events(), "unused atmosphere opt-ins changed baseline behavior");
+}
 void faultOptIn(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
@@ -779,6 +994,11 @@ void registerStationFaultChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"tripLifecycle", tripLifecycle});
 	checks.push_back({"tripTransactions", tripTransactions});
+	checks.push_back({"atmosphereFaultWorld", atmosphereFaultWorld});
+	checks.push_back({"atmosphereFire", atmosphereFire});
+	checks.push_back({"airlockFaultBookings", airlockFaultBookings});
+	checks.push_back({"atmosphereFaultReplay", atmosphereFaultReplay});
+	checks.push_back({"atmosphereFaultTransactions", atmosphereFaultTransactions});
 	checks.push_back({"faultInjection", faultInjection});
 	checks.push_back({"faultOutages", faultOutages});
 	checks.push_back({"faultReplay", faultReplay});

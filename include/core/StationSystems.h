@@ -1134,6 +1134,22 @@ namespace core
 	// mixing. Declared pressure and gas-quality limits are reported as
 	// crossings, never enforced by clamping the integrated state; a
 	// pressure setpoint alone never proves containment.
+	// External combustion source; all rates scale together at oxygen exhaustion.
+	struct AtmosphereFireSettings
+	{
+		double oxygenKgPerS{0.0};
+		double carbonMonoxideKgPerS{0.0};
+		double carbonDioxideKgPerS{0.0};
+		double heatKW{0.0};
+		double oxygenThresholdKg{0.0};
+		bool operator==(AtmosphereFireSettings const&) const = default;
+	};
+	struct AirlockInterlockFailureSettings
+	{
+		std::string pathwayId; // existing pathway from the cycle's compartment to $exterior
+		double breachAreaM2{0.0}; // minimum fully-open area while failed
+		bool operator==(AirlockInterlockFailureSettings const&) const = default;
+	};
 	struct AtmosphereSettings
 	{
 		std::string id;
@@ -1181,6 +1197,7 @@ namespace core
 		double maxPressureKPa{0.0};
 		double minOxygenPartialPressureKPa{0.0}; // 0 = not configured
 		double maxCarbonDioxidePartialPressureKPa{0.0}; // 0 = not configured
+		std::optional<AtmosphereFireSettings> fire;
 		bool operator==(AtmosphereSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationAtmospheres{8};
@@ -1264,6 +1281,8 @@ namespace core
 		double recurrenceSeconds{0.0}; // 0 = one-off, else >= one fixed tick
 		double recoveredFraction{0.0}; // [0, 1] of the removed mass recovered
 		int priority{0};               // higher allocates first among coincidents
+		bool interruptedCycle{false}; // failed cycles lose their whole dose, with no recovery
+		std::optional<AirlockInterlockFailureSettings> interlockFailure;
 		bool operator==(AirlockCycleSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationAirlockCycles{16};
@@ -3737,6 +3756,10 @@ namespace core
 
 	struct StationAtmosphereSnapshot
 	{
+		std::vector<StationFaultSnapshot> activeFaults;
+		double fireOxygenConsumedKg{0.0}, fireCarbonDioxideKg{0.0};
+		// Retained CO hazard inventory, distinct from the four pathway gases.
+		double carbonMonoxideKg{0.0}, fireHeatKJ{0.0};
 		// Liquid spill inventory, separate from the gas/condensation ledger.
 		double spilledCoolantKg{0.0}, spilledCoolantEnergyKJ{0.0};
 		// #845: toxic-species contamination retained from a battery
@@ -3883,6 +3906,8 @@ namespace core
 	// never silently disappears.
 	struct StationAirlockCycleSnapshot
 	{
+		std::vector<StationFaultSnapshot> activeFaults;
+		double faultLostKg{0.0}; // subset of lostTotal, never an additional removal
 		std::string id;
 		std::string atmosphereId;
 		double gasMassKg{0.0};

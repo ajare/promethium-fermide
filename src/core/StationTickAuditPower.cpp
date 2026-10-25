@@ -899,7 +899,7 @@ namespace core
 			if (!requireFinite(compartment.toxicContaminantKg, where + "toxic contaminant")
 				|| !requireFinite(compartment.hazardHeatKJ, where + "cumulative hazard heat")) return false;
 			if (std::abs(bookedToxic - compartment.toxicContaminantKg) > StationBalanceTolerance * std::max(1.0, bookedToxic)
-				|| std::abs(bookedRunawayHeat - compartment.hazardHeatKJ) > StationBalanceTolerance * std::max(1.0, std::abs(bookedRunawayHeat)))
+				|| std::abs(bookedRunawayHeat + compartment.fireHeatKJ - compartment.hazardHeatKJ) > StationBalanceTolerance * std::max(1.0, std::abs(bookedRunawayHeat) + compartment.fireHeatKJ))
 				return violation = where + "thermal-runaway hazard booking ledger residual", false;
 			if (!requireFinite(compartment.oxygenKg, where + "oxygen inventory")) return false;
 			if (!requireFinite(compartment.nitrogenKg, where + "nitrogen inventory")) return false;
@@ -956,6 +956,18 @@ namespace core
 				where + "derived absolute pressure")) return false;
 			if (!requireFinite(stationSaturationVapourPressureKPa(compartment.temperatureC),
 				where + "derived saturation vapour pressure")) return false;
+			if (compartment.fireParameters)
+			{
+				auto const& f = *compartment.fireParameters;
+				auto const duration = compartment.fireOxygenConsumedKg / f.oxygenKgPerS;
+				for (auto const& [actual, expected] : {
+					std::pair{compartment.carbonMonoxideKg, duration * f.carbonMonoxideKgPerS},
+					std::pair{compartment.fireCarbonDioxideKg, duration * f.carbonDioxideKgPerS},
+					std::pair{compartment.fireHeatKJ, duration * f.heatKW}})
+					if (!std::isfinite(actual) || !std::isfinite(expected)
+						|| std::abs(actual - expected) > StationBalanceTolerance * std::max(1.0, std::abs(expected)))
+						return violation = where + "fire compound booking residual", false;
+			}
 			auto const startingTotalKg = compartment.authored.startingOxygenKg
 				+ compartment.authored.startingNitrogenKg
 				+ compartment.authored.startingCarbonDioxideKg
@@ -976,7 +988,7 @@ namespace core
 				{"oxygen", compartment.authored.startingOxygenKg,
 					compartment.electrolysisOxygenKg + compartment.cropOxygenAddedKg
 						+ compartment.algaeOxygenAddedKg + compartment.diffusedKg[0],
-					compartment.oxygenConsumedKg + compartment.leakOxygenKg
+					compartment.fireOxygenConsumedKg + compartment.oxygenConsumedKg + compartment.leakOxygenKg
 						+ compartment.cycleOxygenKg + compartment.cropOxygenDrawnKg
 						+ compartment.algaeOxygenDrawnKg + compartment.exteriorLostKg[0],
 					compartment.oxygenKg},
@@ -984,7 +996,7 @@ namespace core
 					compartment.leakNitrogenKg + compartment.cycleNitrogenKg + compartment.exteriorLostKg[1],
 					compartment.nitrogenKg},
 				{"carbonDioxide", compartment.authored.startingCarbonDioxideKg,
-					compartment.co2ProducedKg + compartment.cropCarbonDioxideAddedKg
+					compartment.fireCarbonDioxideKg + compartment.co2ProducedKg + compartment.cropCarbonDioxideAddedKg
 						+ compartment.algaeCarbonDioxideAddedKg + compartment.diffusedKg[2],
 					compartment.leakCarbonDioxideKg + compartment.cycleCarbonDioxideKg
 						+ compartment.capturedCarbonDioxideKg + compartment.cropCarbonDioxideDrawnKg
@@ -1132,7 +1144,10 @@ namespace core
 			if (!requireFinite(cycle.lastRemovedKg, where + "last removed mass")) return false;
 			if (!requireFinite(cycle.removedTotal, where + "cumulative removed mass")) return false;
 			if (!requireFinite(cycle.recoveredTotal, where + "cumulative recovered mass")) return false;
-			if (!requireFinite(cycle.lostTotal, where + "cumulative lost mass")) return false;
+			if (!requireFinite(cycle.lostTotal, where + "cumulative lost mass")
+				|| !requireFinite(cycle.faultLostKg, where + "cumulative fault loss")) return false;
+			if (cycle.faultLostKg < 0.0 || cycle.faultLostKg > cycle.lostTotal + StationBalanceTolerance)
+				return violation = where + "fault loss is not a subset of cycle loss", false;
 			auto const bound = StationBalanceTolerance
 				* std::max(1.0, std::abs(cycle.removedTotal));
 			if (std::abs(cycle.recoveredTotal + cycle.lostTotal - cycle.removedTotal) > bound)

@@ -19,8 +19,8 @@ namespace core
 	// document's own version is no longer the reader boundary. Anything above
 	// this constant is future and must be refused; tests that probe the future
 	// boundary derive from here rather than from a written document's tier.
-	// 119 adds opt-in contamination-chain Faults.
-	inline constexpr std::uint32_t kWorldSchemaVersion = 119;
+	// 119 adds opt-in contamination-chain Faults; 120 adds atmosphere/airlock Faults.
+	inline constexpr std::uint32_t kWorldSchemaVersion = 120;
 	inline constexpr std::string_view YamlWorldDocumentFilenameSuffix{ ".world.yaml" };
 	inline constexpr auto WorldDocumentFilenameSuffix = BinaryWorldDocumentFilenameSuffix;
 

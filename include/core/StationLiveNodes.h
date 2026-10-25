@@ -258,19 +258,41 @@ namespace core
 			return a.failedStart != b.failedStart;
 		}
 	};
-	PF_STATION_LIVE_NODE_WITH(AtmosphereSettings, atmospheres, "Atmosphere",
-		&AtmosphereSettings::startingCarbonDioxideKg,
-		&AtmosphereSettings::startingNitrogenKg,
-		&AtmosphereSettings::startingOxygenKg,
-		&AtmosphereSettings::startingTemperatureC,
-		&AtmosphereSettings::startingWaterVapourKg)
+	template <> struct LiveNode<AtmosphereSettings>
+	{
+		static constexpr std::string_view nodeType = "Atmosphere";
+		static auto& of(auto& settings) { return settings.atmospheres; }
+		static bool restoreInitial(AtmosphereSettings const& a, AtmosphereSettings& b)
+		{
+			return restoreStationInitialFields(a, b,
+				&AtmosphereSettings::startingCarbonDioxideKg,
+				&AtmosphereSettings::startingNitrogenKg,
+				&AtmosphereSettings::startingOxygenKg,
+				&AtmosphereSettings::startingTemperatureC,
+				&AtmosphereSettings::startingWaterVapourKg);
+		}
+		static bool topologyChanged(AtmosphereSettings const& a, AtmosphereSettings const& b)
+		{ return a.fire.has_value() != b.fire.has_value(); }
+	};
 	// Openness is a live parameter, not an initial condition: a pathway owns
 	// no field a live edit must be refused.
 	PF_STATION_LIVE_NODE(AtmospherePathwaySettings, atmospherePathways, "Atmosphere pathway")
 	// A Thermal link has no initial-condition fields: conductance is a live
 	// thermal parameter while its identity and endpoints stay frozen topology.
 	PF_STATION_LIVE_NODE(ThermalLinkSettings, thermalLinks, "Thermal link")
-	PF_STATION_LIVE_NODE(AirlockCycleSettings, airlockCycles, "Airlock cycle")
+	template <> struct LiveNode<AirlockCycleSettings>
+	{
+		static constexpr std::string_view nodeType = "Airlock cycle";
+		static auto& of(auto& settings) { return settings.airlockCycles; }
+		static bool restoreInitial(AirlockCycleSettings const&, AirlockCycleSettings&) { return false; }
+		static bool topologyChanged(AirlockCycleSettings const& a, AirlockCycleSettings const& b)
+		{
+			return a.interruptedCycle != b.interruptedCycle
+				|| a.interlockFailure.has_value() != b.interlockFailure.has_value()
+				|| (a.interlockFailure && b.interlockFailure
+					&& a.interlockFailure->pathwayId != b.interlockFailure->pathwayId);
+		}
+	};
 	PF_STATION_LIVE_NODE(CrewSettings, crews, "Crew")
 	PF_STATION_LIVE_NODE(WaterCollectorSettings, waterCollectors, "Water collector")
 	template <> struct LiveNode<WaterTreatmentSettings>

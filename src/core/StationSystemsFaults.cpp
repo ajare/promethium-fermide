@@ -37,11 +37,62 @@ namespace core
 			// both carry fault modes in the same injection namespace.
 			&& std::none_of(mImpl->solarArrays.begin(), mImpl->solarArrays.end(), [&](auto const& a) { return a.authored.id == id; })
 			&& std::none_of(mImpl->batteries.begin(), mImpl->batteries.end(), [&](auto const& b) { return b.authored.id == id; })
-			&& std::none_of(mImpl->waterTreatments.begin(), mImpl->waterTreatments.end(), [&](auto const& t) { return t.authored.id == id; }))
+			&& std::none_of(mImpl->waterTreatments.begin(), mImpl->waterTreatments.end(), [&](auto const& t) { return t.authored.id == id; })
+			&& std::none_of(mImpl->atmospheres.begin(), mImpl->atmospheres.end(), [&](auto const& a) { return a.authored.id == id; })
+			&& std::none_of(mImpl->airlockCycles.begin(), mImpl->airlockCycles.end(), [&](auto const& c) { return c.authored.id == id; }))
 			return refuse("Unknown installation '" + std::string(id) + "'");
 		if (!isInjectableCause(cause.kind))
 			return refuse("Fault cause kind is not injectable: it names a Fault the simulation raises itself");
 		if (cause.detail.size() > 1024) return refuse("Fault cause detail exceeds 1024 bytes");
+		if (mode == "fire" || mode == "interrupted-cycle" || mode == "interlock-failure")
+		{
+			Impl::FaultCommand command;
+			command.afterStep = mImpl->clock.steps(); command.installationId = id;
+			command.modeId = mode; command.cause = cause;
+			auto const fault = StationFaultSnapshot{std::string(id), std::string(mode),
+				mImpl->clock.steps() + 1, cause.kind, cause.detail, 0.0};
+			if (mode == "fire")
+			{
+				auto air = std::find_if(mImpl->atmospheres.begin(), mImpl->atmospheres.end(),
+					[&](auto const& a) { return a.authored.id == id; });
+				if (air == mImpl->atmospheres.end() || !air->authored.fire)
+					return refuse("fire is not enabled on this compartment");
+				if (air->fire) return refuse("fire is already active or pending");
+				auto const& f = *air->authored.fire;
+				for (double rate : {f.oxygenKgPerS, f.carbonMonoxideKgPerS, f.carbonDioxideKgPerS, f.heatKW})
+					if (!std::isfinite(rate) || rate <= 0.0) return refuse("fire rates must be finite and positive");
+				if (!std::isfinite(f.oxygenThresholdKg) || f.oxygenThresholdKg < 0.0)
+					return refuse("fire oxygen threshold must be finite and non-negative");
+				command.fire = air->authored.fire;
+				air->fireParameters = command.fire; air->fire = fault; air->firePending = true;
+			}
+			else
+			{
+				auto cycle = std::find_if(mImpl->airlockCycles.begin(), mImpl->airlockCycles.end(),
+					[&](auto const& c) { return c.authored.id == id; });
+				if (cycle == mImpl->airlockCycles.end()) return refuse("Unknown airlock installation");
+				if (mode == "interrupted-cycle")
+				{
+					if (!cycle->authored.interruptedCycle || cycle->interruptedCycle)
+						return refuse("interrupted-cycle is disabled or already active");
+					cycle->interruptedCycle = fault; cycle->interruptedPending = true;
+				}
+				else
+				{
+					if (!cycle->authored.interlockFailure || cycle->interlockFailure)
+						return refuse("interlock-failure is disabled or already active");
+					if (!std::isfinite(cycle->authored.interlockFailure->breachAreaM2)
+						|| cycle->authored.interlockFailure->breachAreaM2 <= 0.0)
+						return refuse("breach area must be finite and positive");
+					command.interlockFailure = cycle->authored.interlockFailure;
+					cycle->breachParameters = command.interlockFailure;
+					cycle->interlockFailure = fault; cycle->interlockPending = true;
+				}
+			}
+			mImpl->faultCommands.push_back(std::move(command));
+			if (diagnostic) diagnostic->clear();
+			return true;
+		}
 		if (mode == "breakthrough")
 		{
 			auto found = std::find_if(mImpl->waterTreatments.begin(), mImpl->waterTreatments.end(),
@@ -679,7 +730,20 @@ namespace core
 				s.writeString("modeId", command.modeId);
 				s.writeUint32("causeKind", static_cast<uint32_t>(command.cause.kind));
 				s.writeString("causeDetail", command.cause.detail);
-				if (command.modeId == "overtemp-runaway") s.writeDouble("heatSpikeKJ", command.heatSpikeKJ);
+				if (command.modeId == "fire")
+				{
+					s.writeDouble("oxygenKgPerS", command.fire->oxygenKgPerS);
+					s.writeDouble("carbonMonoxideKgPerS", command.fire->carbonMonoxideKgPerS);
+					s.writeDouble("carbonDioxideKgPerS", command.fire->carbonDioxideKgPerS);
+					s.writeDouble("heatKW", command.fire->heatKW);
+					s.writeDouble("oxygenThresholdKg", command.fire->oxygenThresholdKg);
+				}
+				else if (command.modeId == "interlock-failure")
+				{
+					s.writeString("pathwayId", command.interlockFailure->pathwayId);
+					s.writeDouble("breachAreaM2", command.interlockFailure->breachAreaM2);
+				}
+				else if (command.modeId == "overtemp-runaway") s.writeDouble("heatSpikeKJ", command.heatSpikeKJ);
 				else if (command.modeId == "refrigerant-leak")
 				{
 					s.writeString("compartmentId", command.refrigerantLeak->compartmentId);
@@ -709,7 +773,8 @@ namespace core
 					s.writeDouble("toxicKg", command.thermalRunaway->toxicKg);
 				}
 				else if (command.modeId != "compressor-failure" && command.modeId != "mechanical-seizure"
-					&& command.modeId != "failed-start" && command.modeId != "breakthrough")
+					&& command.modeId != "failed-start" && command.modeId != "breakthrough"
+					&& command.modeId != "interrupted-cycle")
 				{
 					s.writeString("compartmentId", command.parameters.compartmentId);
 					s.writeDouble("releasedKg", command.parameters.releasedKg);
@@ -727,7 +792,7 @@ namespace core
 		s.beginMap("stationFaultReplay");
 		auto const steps = s.readUint64("completedSteps");
 		StationSystemsSettings initial;
-		readStationSystemsSettingsMap(s, 119, initial);
+		readStationSystemsSettingsMap(s, 120, initial);
 		auto runtime = std::make_unique<StationSystemsRuntime>(initial, baseSeconds);
 		s.beginArray("commands");
 		uint64_t previous = 0;
@@ -743,7 +808,7 @@ namespace core
 			if (s.hasField("stationSystems"))
 			{
 				StationSystemsSettings update;
-				readStationSystemsSettingsMap(s, 119, update);
+				readStationSystemsSettingsMap(s, 120, update);
 				if (!runtime->updateSettings(update, &diagnostic))
 					throw SerializationException("Invalid fault replay settings: " + diagnostic);
 			}
@@ -771,7 +836,15 @@ namespace core
 				std::optional<SolarStringLossSettings> stringLoss;
 				std::optional<SolarTrackingFailureSettings> trackingFailure;
 				std::optional<BatteryThermalRunawaySettings> thermalRunaway;
-				if (mode == "overtemp-runaway") heat = s.readDouble("heatSpikeKJ");
+				std::optional<AtmosphereFireSettings> fire;
+				std::optional<AirlockInterlockFailureSettings> breach;
+				if (mode == "fire")
+					fire = AtmosphereFireSettings{s.readDouble("oxygenKgPerS"),
+						s.readDouble("carbonMonoxideKgPerS"), s.readDouble("carbonDioxideKgPerS"),
+						s.readDouble("heatKW"), s.readDouble("oxygenThresholdKg")};
+				else if (mode == "interlock-failure")
+					breach = AirlockInterlockFailureSettings{s.readString("pathwayId"), s.readDouble("breachAreaM2")};
+				else if (mode == "overtemp-runaway") heat = s.readDouble("heatSpikeKJ");
 				else if (mode == "refrigerant-leak")
 					refrigerant = RefrigerantLeakSettings{s.readString("compartmentId"),
 						s.readDouble("chargeKg"), s.readDouble("leakRateKgPerS"),
@@ -788,7 +861,7 @@ namespace core
 					thermalRunaway = BatteryThermalRunawaySettings{s.readString("compartmentId"),
 						s.readDouble("heatKJ"), s.readDouble("toxicKg")};
 				else if (mode != "compressor-failure" && mode != "mechanical-seizure"
-					&& mode != "failed-start" && mode != "breakthrough")
+					&& mode != "failed-start" && mode != "breakthrough" && mode != "interrupted-cycle")
 					parameters = {s.readString("compartmentId"), s.readDouble("releasedKg")};
 				if (!isInjectableCause(static_cast<FaultCause::Kind>(kind))
 					|| !runtime->injectFault(id, mode, {static_cast<FaultCause::Kind>(kind), detail}, &diagnostic))
@@ -803,7 +876,9 @@ namespace core
 					|| runtime->mImpl->faultCommands.back().panelPuncture != puncture
 					|| runtime->mImpl->faultCommands.back().stringLoss != stringLoss
 					|| runtime->mImpl->faultCommands.back().trackingFailure != trackingFailure
-					|| runtime->mImpl->faultCommands.back().thermalRunaway != thermalRunaway)
+					|| runtime->mImpl->faultCommands.back().thermalRunaway != thermalRunaway
+					|| runtime->mImpl->faultCommands.back().fire != fire
+					|| runtime->mImpl->faultCommands.back().interlockFailure != breach)
 					throw SerializationException("Fault replay effective parameters disagree with the command: " + mode);
 			}
 			s.endMap();

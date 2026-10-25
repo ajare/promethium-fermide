@@ -907,7 +907,11 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		if (!validateStationSystemsSettings(settings, diagnostic)) throw SerializationException(diagnostic);
 		mImpl = std::make_unique<Impl>(settings.systemsStepWorldTicks, baseStepSeconds);
 		mImpl->settings = settings; mImpl->snapshot.enabled = settings.enabled;
-		if (std::any_of(settings.coolantLoops.begin(), settings.coolantLoops.end(),
+		if (std::any_of(settings.atmospheres.begin(), settings.atmospheres.end(),
+			[](auto const& a) { return a.fire.has_value(); })
+			|| std::any_of(settings.airlockCycles.begin(), settings.airlockCycles.end(),
+				[](auto const& c) { return c.interruptedCycle || c.interlockFailure.has_value(); })
+			|| std::any_of(settings.coolantLoops.begin(), settings.coolantLoops.end(),
 			[](auto const& loop) { return loop.coolantLeak.has_value() || loop.condition.has_value(); })
 			|| std::any_of(settings.sabatierReactors.begin(), settings.sabatierReactors.end(),
 				[](auto const& s) { return s.overtempRunaway.has_value(); })

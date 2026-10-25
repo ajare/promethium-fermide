@@ -318,6 +318,14 @@ namespace
 		for (auto const rate : rates)
 			if (!std::isfinite(rate) || rate < 0.0)
 				return refuse(where + " per-occupant load rates must all be finite and non-negative");
+		if (atmosphere.fire)
+		{
+			auto const& f = *atmosphere.fire;
+			for (auto const value : {f.oxygenKgPerS, f.carbonMonoxideKgPerS, f.carbonDioxideKgPerS, f.heatKW})
+				if (!std::isfinite(value) || value <= 0.0) return refuse(where + " fire rates must be finite and positive");
+			if (!std::isfinite(f.oxygenThresholdKg) || f.oxygenThresholdKg < 0.0)
+				return refuse(where + " fire oxygen threshold must be finite and non-negative");
+		}
 		if (!std::isfinite(atmosphere.leakRateKgPerS) || atmosphere.leakRateKgPerS < 0.0)
 			return refuse(where + " leak rate must be finite and non-negative");
 		if (!std::isfinite(atmosphere.minPressureKPa) || !std::isfinite(atmosphere.maxPressureKPa)
@@ -380,6 +388,18 @@ namespace
 				return missing(where + " draws from unknown atmosphere compartment '" + cycle.atmosphereId + "'");
 		}
 
+		if (cycle.interlockFailure)
+		{
+			auto const& f = *cycle.interlockFailure;
+			if (!std::isfinite(f.breachAreaM2) || f.breachAreaM2 <= 0.0)
+				return refuse(where + " breach area must be finite and positive");
+			auto const p = std::find_if(settings.atmospherePathways.begin(), settings.atmospherePathways.end(),
+				[&](auto const& path) { return path.id == f.pathwayId; });
+			if (p == settings.atmospherePathways.end()) return missing(where + " interlock-failure references unknown pathway");
+			if (!((p->aAtmosphereId == cycle.atmosphereId && p->bAtmosphereId == StationExteriorAtmosphereId)
+				|| (p->bAtmosphereId == cycle.atmosphereId && p->aAtmosphereId == StationExteriorAtmosphereId)))
+				return refuse(where + " breach pathway must join its compartment to Exterior vacuum");
+		}
 		if (!std::isfinite(cycle.gasMassKg) || cycle.gasMassKg <= 0.0)
 			return refuse(where + " cycled gas mass must be finite and positive");
 		if (!std::isfinite(cycle.firstOccurrenceSeconds) || cycle.firstOccurrenceSeconds < 0.0)
@@ -1081,9 +1101,16 @@ namespace
 		gatherIds(settings.heatEngines); gatherIds(settings.radiators); gatherIds(settings.solarArrays);
 		gatherIds(settings.batteries); gatherIds(settings.waterTreatments); gatherIds(settings.electrolyzers);
 		gatherIds(settings.fuelCells); gatherIds(settings.sabatierReactors); gatherIds(settings.methaneProcessors);
+		gatherIds(settings.atmospheres); gatherIds(settings.airlockCycles);
 		auto uniqueContaminationId = [&](std::string const& id) {
 			return std::count(contaminationIds.begin(), contaminationIds.end(), id) == 1;
 		};
+		for (auto const& air : settings.atmospheres)
+			if (air.fire && !uniqueContaminationId(air.id))
+				return refuse("Ambiguous fire installation id '" + air.id + "'");
+		for (auto const& cycle : settings.airlockCycles)
+			if ((cycle.interruptedCycle || cycle.interlockFailure) && !uniqueContaminationId(cycle.id))
+				return refuse("Ambiguous airlock fault installation id '" + cycle.id + "'");
 		auto validatePoisoning = [&](auto const& cells) {
 			for (auto const& cell : cells) if (cell.catalystPoisoning)
 			{

@@ -23,6 +23,17 @@ namespace core
 		// accident and each occurrence fires exactly once however many
 		// ticks an accelerated update batches together.
 
+		for (auto& cycle : runtime.airlockCycles)
+		{
+			auto onset = [&](auto& fault, bool& pending) {
+				if (!pending) return;
+				appendBoundedEvent(runtime.events, tick, "fault", "Fault '" + fault->modeId
+					+ "' on '" + cycle.authored.id + "': " + fault->causeDetail);
+				pending = false;
+			};
+			onset(cycle.interruptedCycle, cycle.interruptedPending);
+			onset(cycle.interlockFailure, cycle.interlockPending);
+		}
 		for (size_t index = 0; index < runtime.airlockCycles.size(); ++index)
 		{
 			auto const& cycle = runtime.airlockCycles[index];
@@ -64,7 +75,7 @@ namespace core
 				? removedKg * compartment.carbonDioxideKg / totalMassKg : 0.0;
 			auto const removedWaterVapourKg = totalMassKg > 0.0
 				? removedKg * compartment.waterVapourKg / totalMassKg : 0.0;
-			auto const recoveredKg = removedKg * cycle.authored.recoveredFraction;
+			auto const recoveredKg = cycle.interruptedCycle ? 0.0 : removedKg * cycle.authored.recoveredFraction;
 			auto const lostKg = removedKg - recoveredKg;
 			compartment.oxygenKg -= removedOxygenKg;
 			compartment.nitrogenKg -= removedNitrogenKg;
@@ -88,6 +99,13 @@ namespace core
 			cycle.removedTotal += removedKg;
 			cycle.recoveredTotal += recoveredKg;
 			cycle.lostTotal += lostKg;
+			if (cycle.interruptedCycle)
+			{
+				cycle.faultLostKg += lostKg;
+				cycle.interruptedCycle->derivedImpact = removedKg / cycle.authored.gasMassKg;
+				appendBoundedEvent(runtime.events, tick, "fault-loss", "interrupted-cycle '"
+					+ cycle.authored.id + "' vented " + std::to_string(lostKg) + " kg; scheduled dose replaced");
+			}
 			cycle.status = removedKg <= 0.0 ? StationTransferStatus::Rejected
 				: (removedKg + StationBalanceTolerance >= cycle.authored.gasMassKg
 					? StationTransferStatus::Full : StationTransferStatus::Partial);
@@ -372,8 +390,13 @@ namespace core
 			// physical conductance is floored here independently of how the
 			// setting arrived - the live path runs no validation pass, and the
 			// draft gate only guards Apply.
-			auto const openArea = std::max(0.0, pathway.authored.areaM2)
+			auto openArea = std::max(0.0, pathway.authored.areaM2)
 				* std::clamp(pathway.authored.openFraction, 0.0, 1.0);
+			// A failed interlock opens one existing exterior pathway. Parallel
+			// faults on that opening combine by max, never duplicate its solve.
+			for (auto const& cycle : runtime.airlockCycles)
+				if (cycle.interlockFailure && cycle.breachParameters->pathwayId == pathway.authored.id)
+					openArea = std::max(openArea, cycle.breachParameters->breachAreaM2);
 			if (pathway.aIndex == SIZE_MAX || pathway.bIndex == SIZE_MAX)
 			{
 				// Zero-pressure boundary limit of the same diffusion law:
@@ -635,6 +658,41 @@ namespace core
 		{
 			auto& compartment = runtime.atmospheres[atmosphereIndex];
 			auto const dt = static_cast<double>(seconds);
+			if (compartment.firePending)
+			{
+				appendBoundedEvent(runtime.events, tick, "fault", "Fault 'fire' on '"
+					+ compartment.authored.id + "': " + compartment.fire->causeDetail);
+				compartment.firePending = false;
+			}
+			if (compartment.fire && !compartment.fireExtinguished)
+			{
+				auto const& f = *compartment.fireParameters;
+				// Stop exactly at the oxygen boundary, scaling the compound
+				// dose as one booking set. Replenishment cannot re-ignite it.
+				auto const burningSeconds = std::min(dt,
+					std::max(0.0, compartment.oxygenKg - f.oxygenThresholdKg) / f.oxygenKgPerS);
+				auto const oxygen = burningSeconds * f.oxygenKgPerS;
+				auto const co = burningSeconds * f.carbonMonoxideKgPerS;
+				auto const co2 = burningSeconds * f.carbonDioxideKgPerS;
+				auto const heat = burningSeconds * f.heatKW;
+				if (!std::isfinite(oxygen) || !std::isfinite(co) || !std::isfinite(co2) || !std::isfinite(heat))
+					return violation = "fire booking overflow", false;
+				compartment.oxygenKg -= oxygen;
+				compartment.fireOxygenConsumedKg += oxygen;
+				compartment.carbonMonoxideKg += co;
+				compartment.carbonDioxideKg += co2;
+				compartment.fireCarbonDioxideKg += co2;
+				compartment.pendingHazardKJ += heat;
+				compartment.fireHeatKJ += heat;
+				compartment.fire->derivedImpact = burningSeconds / dt;
+				if (burningSeconds < dt || compartment.oxygenKg <= f.oxygenThresholdKg)
+				{
+					compartment.fireExtinguished = true;
+					compartment.fire->derivedImpact = 0.0;
+					appendBoundedEvent(runtime.events, tick, "fault-extinguished", "fire on '"
+						+ compartment.authored.id + "' extinguished at oxygen threshold");
+				}
+			}
 			auto const occupants = static_cast<double>(compartment.authored.occupants);
 			// Occupancy is an authored load assignment, never derived
 			// from World entities in this feature. The oxygen draw is

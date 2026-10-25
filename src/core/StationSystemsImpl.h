@@ -36,6 +36,8 @@ using namespace station_detail;
 			std::optional<SolarStringLossSettings> stringLoss;
 			std::optional<SolarTrackingFailureSettings> trackingFailure;
 			std::optional<BatteryThermalRunawaySettings> thermalRunaway;
+			std::optional<AtmosphereFireSettings> fire;
+			std::optional<AirlockInterlockFailureSettings> interlockFailure;
 			std::optional<StationSystemsSettings> settingsUpdate;
 		};
 		std::optional<StationSystemsSettings> faultReplayInitialSettings;
@@ -773,6 +775,11 @@ using namespace station_detail;
 		struct AtmosphereState
 		{
 			AtmosphereSettings authored;
+			std::optional<StationFaultSnapshot> fire;
+			std::optional<AtmosphereFireSettings> fireParameters;
+			bool firePending{false}, fireExtinguished{false};
+			double fireOxygenConsumedKg{0.0}, fireCarbonDioxideKg{0.0};
+			double carbonMonoxideKg{0.0}, fireHeatKJ{0.0};
 			double spilledCoolantKg{0.0}, spilledCoolantEnergyKJ{0.0};
 			// #845: toxic-species contamination retained from battery
 			// thermal-runaway bookings, and the one-shot hazard heat those
@@ -912,6 +919,10 @@ using namespace station_detail;
 		struct AirlockCycleState
 		{
 			AirlockCycleSettings authored;
+			std::optional<StationFaultSnapshot> interruptedCycle, interlockFailure;
+			std::optional<AirlockInterlockFailureSettings> breachParameters;
+			bool interruptedPending{false}, interlockPending{false};
+			double faultLostKg{0.0};
 			size_t atmosphereIndex{0};
 			size_t declarationIndex{0};
 			uint64_t occurrencesFired{0};

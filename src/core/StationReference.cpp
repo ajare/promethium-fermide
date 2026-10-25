@@ -627,6 +627,16 @@ namespace core
 				serializer.writeDouble("maxPressureKPa", atmosphere.maxPressureKPa);
 				serializer.writeDouble("minOxygenPartialPressureKPa", atmosphere.minOxygenPartialPressureKPa);
 				serializer.writeDouble("maxCarbonDioxidePartialPressureKPa", atmosphere.maxCarbonDioxidePartialPressureKPa);
+				if (atmosphere.fire)
+				{
+					serializer.beginMap("fire");
+					serializer.writeDouble("oxygenKgPerS", atmosphere.fire->oxygenKgPerS);
+					serializer.writeDouble("carbonMonoxideKgPerS", atmosphere.fire->carbonMonoxideKgPerS);
+					serializer.writeDouble("carbonDioxideKgPerS", atmosphere.fire->carbonDioxideKgPerS);
+					serializer.writeDouble("heatKW", atmosphere.fire->heatKW);
+					serializer.writeDouble("oxygenThresholdKg", atmosphere.fire->oxygenThresholdKg);
+					serializer.endMap();
+				}
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -679,6 +689,14 @@ namespace core
 				serializer.writeDouble("recurrenceSeconds", cycle.recurrenceSeconds);
 				serializer.writeDouble("recoveredFraction", cycle.recoveredFraction);
 				serializer.writeInt32("priority", cycle.priority);
+				if (cycle.interruptedCycle) serializer.writeBool("interruptedCycle", true);
+				if (cycle.interlockFailure)
+				{
+					serializer.beginMap("interlockFailure");
+					serializer.writeString("pathwayId", cycle.interlockFailure->pathwayId);
+					serializer.writeDouble("breachAreaM2", cycle.interlockFailure->breachAreaM2);
+					serializer.endMap();
+				}
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -1952,6 +1970,15 @@ namespace core
 				atmosphere.maxPressureKPa = serializer.readDouble("maxPressureKPa");
 				atmosphere.minOxygenPartialPressureKPa = serializer.readDouble("minOxygenPartialPressureKPa");
 				atmosphere.maxCarbonDioxidePartialPressureKPa = serializer.readDouble("maxCarbonDioxidePartialPressureKPa");
+				if (serializer.hasField("fire"))
+				{
+					if (version < 120) throw SerializationException("fire requires schema 120");
+					serializer.beginMap("fire");
+					atmosphere.fire = AtmosphereFireSettings{serializer.readDouble("oxygenKgPerS"),
+						serializer.readDouble("carbonMonoxideKgPerS"), serializer.readDouble("carbonDioxideKgPerS"),
+						serializer.readDouble("heatKW"), serializer.readDouble("oxygenThresholdKg")};
+					serializer.endMap();
+				}
 				stationSettings.atmospheres.push_back(std::move(atmosphere));
 				serializer.endMap();
 			}
@@ -2023,6 +2050,19 @@ namespace core
 				cycle.recurrenceSeconds = serializer.readDouble("recurrenceSeconds");
 				cycle.recoveredFraction = serializer.readDouble("recoveredFraction");
 				cycle.priority = serializer.readInt32("priority");
+				if (serializer.hasField("interruptedCycle"))
+				{
+					if (version < 120) throw SerializationException("interruptedCycle requires schema 120");
+					cycle.interruptedCycle = serializer.readBool("interruptedCycle");
+				}
+				if (serializer.hasField("interlockFailure"))
+				{
+					if (version < 120) throw SerializationException("interlockFailure requires schema 120");
+					serializer.beginMap("interlockFailure");
+					cycle.interlockFailure = AirlockInterlockFailureSettings{
+						serializer.readString("pathwayId"), serializer.readDouble("breachAreaM2")};
+					serializer.endMap();
+				}
 				stationSettings.airlockCycles.push_back(std::move(cycle));
 				serializer.endMap();
 			}

@@ -309,6 +309,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         stabilityResetIsolation stabilityMultiWorldIsolation
         stabilityLongRunFast stabilityPathEquivalenceFast stabilityResetIsolationFast
         stabilityMultiWorldIsolationFast stabilityAuditFaultInjection materialIdentity
+        atmosphereFire airlockFaultBookings atmosphereFaultReplay atmosphereFaultTransactions atmosphereFaultWorld
         faultInjection faultOutages faultReplay faultOptIn faultTransactions tripLifecycle tripTransactions
         repairLifecycle repairInterruption repairTransactions repairSeizureClearing
         conditionStress conditionCrossing conditionRestore conditionReplay conditionValidation conditionTransactions

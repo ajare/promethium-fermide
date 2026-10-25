@@ -787,6 +787,12 @@ namespace core
 		for (auto const& compartment : mImpl->atmospheres)
 		{
 			StationAtmosphereSnapshot atmosphereResult;
+			if (compartment.fire && !compartment.firePending && !compartment.fireExtinguished)
+				atmosphereResult.activeFaults.push_back(*compartment.fire);
+			atmosphereResult.fireOxygenConsumedKg = compartment.fireOxygenConsumedKg;
+			atmosphereResult.fireCarbonDioxideKg = compartment.fireCarbonDioxideKg;
+			atmosphereResult.carbonMonoxideKg = compartment.carbonMonoxideKg;
+			atmosphereResult.fireHeatKJ = compartment.fireHeatKJ;
 			auto const& authored = compartment.authored;
 			atmosphereResult.spilledCoolantKg = compartment.spilledCoolantKg;
 			atmosphereResult.spilledCoolantEnergyKJ = compartment.spilledCoolantEnergyKJ;
@@ -914,6 +920,15 @@ namespace core
 		for (auto const& cycle : mImpl->airlockCycles)
 		{
 			StationAirlockCycleSnapshot cycleResult;
+			if (cycle.interruptedCycle && !cycle.interruptedPending)
+				cycleResult.activeFaults.push_back(*cycle.interruptedCycle);
+			if (cycle.interlockFailure && !cycle.interlockPending)
+			{
+				auto fault = *cycle.interlockFailure;
+				fault.derivedImpact = 1.0; // interlock safety is wholly unavailable
+				cycleResult.activeFaults.push_back(std::move(fault));
+			}
+			cycleResult.faultLostKg = cycle.faultLostKg;
 			cycleResult.id = cycle.authored.id;
 			cycleResult.atmosphereId = cycle.authored.atmosphereId;
 			cycleResult.gasMassKg = cycle.authored.gasMassKg;

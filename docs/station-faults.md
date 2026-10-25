@@ -448,7 +448,52 @@ monotonic Wear and faded throughput after purge/refill, supported step ratios,
 validation and frozen topology, pending/autonomous Fault replay, exact YAML and
 binary replay/continuation, and unchanged behavior/wire tier without opt-ins.
 
+## Atmosphere and airlock Faults (#847)
+
+An Atmosphere compartment opts into `fire` with a block containing
+`oxygenKgPerS`, `carbonMonoxideKgPerS`, `carbonDioxideKgPerS`, `heatKW`
+(all finite and positive), and `oxygenThresholdKg` (finite and non-negative).
+Injection starts combustion at the next Station boundary. Oxygen draw, CO/CO2
+production and heat scale together to the available oxygen above the threshold;
+the fire then self-extinguishes, emits one `fault-extinguished` event, and never
+re-ignites on replenishment. This is an external combustion source, not a fuel
+store conversion. CO2 joins the ordinary gas inventory; CO is an explicitly
+retained hazard inventory (`carbonMonoxideKg`), separate from the four diffusing
+pathway gases. Heat enters the compartment's existing hazard/thermal ledger.
+Snapshots expose cumulative `fireOxygenConsumedKg`, `fireCarbonDioxideKg`,
+`fireHeatKJ`, CO inventory, and active Faults; a burning Fault's derived impact
+is its last-step burning fraction. Extinguished Faults leave the active list.
+
+An airlock cycle opts into `interrupted-cycle` with `interruptedCycle: true`.
+While faulted, each scheduled dose is removed once, with zero recovery: its
+whole removed mass becomes loss. `faultLostKg` identifies the faulted subset of
+`lostTotal`, never a second removal. Snapshot impact is the last occurrence's
+removed fraction of its declared dose; `fault-loss` events identify vented doses.
+
+For `interlock-failure`, an airlock cycle declares an `interlockFailure` block
+with `pathwayId` and finite positive `breachAreaM2`. The pathway must already
+join that cycle's compartment to `$exterior`. Failure sets a minimum effective
+open area, independent of authored openness and later close commands. Multiple
+failures on one pathway use the maximum area, not duplicate solves. Mass and
+advected heat leave through the existing exterior pathway ledger; they are not
+also booked as cycle or constant-leak losses. Impact is one (interlock safety
+unavailable). Ordinary scheduled cycles remain independent.
+
+Opt-ins and the breach pathway identity are frozen topology; numeric settings
+remain live-tunable, but an accepted fire or breach retains its injection-time
+parameters. All modes log onset events and support exact pending/applied replay
+through YAML, binary, and World save/load. The five `station-atmosphereFire`,
+`station-airlockFaultBookings`, `station-atmosphereFaultReplay`,
+`station-atmosphereFaultTransactions`, and `station-atmosphereFaultWorld` checks
+cover bookings, extinction, conservation, rejected commands/edits, replay,
+supported fire step ratios, and unused opt-in neutrality.
+
 ## Persistence and replay
+
+Schema 120 carries atmosphere/airlock Fault opt-ins. Older schemas carrying
+these fields are refused; absent fields retain the prior schema tier and wire
+encoding. Opted-in runs pin their initial settings for replay, including before
+any injection.
 
 Schema 119 carries the contamination-chain opt-ins; older documents carrying
 these fields are refused. Opted-in runs pin initial settings and retain runtime

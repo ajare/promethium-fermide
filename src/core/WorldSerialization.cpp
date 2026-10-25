@@ -1045,7 +1045,11 @@ namespace core
 				[](auto const& c) { return c.catalystPoisoning.has_value(); })
 			|| std::any_of(mStationSystemsSettings.fuelCells.begin(), mStationSystemsSettings.fuelCells.end(),
 				[](auto const& c) { return c.catalystPoisoning.has_value(); });
-		serializer.writeUint32("version", contamination ? kWorldSchemaVersion : powerSources ? 118
+		auto const atmosphereFaults = std::any_of(mStationSystemsSettings.atmospheres.begin(), mStationSystemsSettings.atmospheres.end(),
+			[](auto const& a) { return a.fire.has_value(); })
+			|| std::any_of(mStationSystemsSettings.airlockCycles.begin(), mStationSystemsSettings.airlockCycles.end(),
+				[](auto const& c) { return c.interruptedCycle || c.interlockFailure.has_value(); });
+		serializer.writeUint32("version", atmosphereFaults ? kWorldSchemaVersion : contamination ? 119 : powerSources ? 118
 			: thermalPlant ? 117 : wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
