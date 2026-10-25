@@ -242,6 +242,333 @@ void monitorDemo(smoke::Context const&)
 	}
 	throw std::runtime_error("demo did not recover and clear");
 }
+
+// ---------------------------------------------------------------------------
+// #867: the spec §4.1 atmosphere habitability default table.
+// ---------------------------------------------------------------------------
+
+struct ExpectedDefault
+{
+	char const* key, *metric, *tag;
+	double threshold;
+	core::AlertDirection direction;
+	double onSeconds, offSeconds;
+	core::AlertSeverity severity;
+};
+
+// The spec §4.1 table transcribed independently of the implementation, so the
+// check fails if the shipped defaults drift from the documented numbers.
+std::vector<ExpectedDefault> specHabitabilityTable()
+{
+	using enum core::AlertDirection;
+	using enum core::AlertSeverity;
+	return {
+		{"po2-low", "oxygenPartialPressureKPa", "iss", 17.5, Below, 30.0, 60.0, Critical},
+		{"po2-high", "oxygenPartialPressureKPa", "iss", 24.0, Above, 60.0, 60.0, Warning},
+		{"pco2-high", "carbonDioxidePartialPressureKPa", "iss", 0.7, Above, 300.0, 120.0, Warning},
+		{"pco2-critical", "carbonDioxidePartialPressureKPa", "iss", 1.0, Above, 60.0, 120.0, Critical},
+		{"pressure-low", "pressureKPa", "iss", 90.0, Below, 10.0, 60.0, Critical},
+		{"pressure-high", "pressureKPa", "prov", 110.0, Above, 60.0, 60.0, Warning},
+		{"temperature-high", "temperatureC", "iss", 27.0, Above, 600.0, 300.0, Advisory},
+		{"temperature-low", "temperatureC", "iss", 18.0, Below, 600.0, 300.0, Advisory},
+		{"humidity-high", "relativeHumidity", "prov", 0.75, Above, 600.0, 300.0, Advisory},
+		{"toxic-contaminant", "toxicConcentration", "prov", 0.1, Above, 60.0, 120.0, Critical},
+		{"oxygen-supply-unmet", "oxygenUnmetKg", "rated", 0.0, Above, 10.0, 30.0, Critical},
+		{"compartment-leak", "leakRateKgPerS", "prov", 0.01, Above, 60.0, 120.0, Warning},
+	};
+}
+
+core::StationSystemsSettings habitabilityStation(std::vector<std::string> const& compartments)
+{
+	core::StationSystemsSettings s;
+	s.enabled = true; s.systemsStepWorldTicks = 1;
+	for (auto const& id : compartments)
+	{
+		core::AtmosphereSettings room;
+		room.id = id; room.volumeM3 = 100; room.thermalCapacityKJPerK = 10000;
+		room.startingOxygenKg = 20; room.startingNitrogenKg = 80;
+		room.minPressureKPa = 1; room.maxPressureKPa = 500;
+		s.atmospheres.push_back(room);
+	}
+	return s;
+}
+
+core::StationMonitorSettings const* findMonitor(core::StationSystemsSettings const& s, std::string_view id)
+{
+	auto const found = std::find_if(s.monitors.begin(), s.monitors.end(),
+		[&](auto const& m) { return m.id == id; });
+	return found == s.monitors.end() ? nullptr : &*found;
+}
+
+void monitorDefaultTable(smoke::Context const&)
+{
+	auto const table = specHabitabilityTable();
+	require(core::stationAtmosphereHabitabilityTemplates().size() == table.size(),
+		"the shipped table is not the twelve spec 4.1 habitability defaults");
+	// Every row watches a Metric the atmosphere subject actually publishes.
+	for (auto const& row : table)
+		require(core::findStationAtmosphereMetric(row.metric) != nullptr,
+			"a spec 4.1 default names a Metric outside the atmosphere catalogue");
+
+	auto settings = habitabilityStation({"room", "hub", "lab"});
+	core::applyStationAtmosphereDefaultMonitors(settings);
+	require(settings.monitors.size() == table.size() * 3,
+		"the default set did not land on every atmosphere compartment");
+	for (auto const* subject : {"room", "hub", "lab"})
+		for (auto const& expected : table)
+		{
+			auto const* monitor = findMonitor(settings, std::string(subject) + "-" + expected.key);
+			require(monitor != nullptr, "default Monitor id is not <subject>-<key>");
+			require(monitor->subjectType == "atmosphere" && monitor->subjectId == subject,
+				"default Monitor does not watch the compartment it was expanded for");
+			require(monitor->metric == expected.metric
+				&& monitor->rule.threshold == expected.threshold
+				&& monitor->rule.direction == expected.direction
+				&& monitor->rule.triggerOnSeconds == expected.onSeconds
+				&& monitor->rule.triggerOffSeconds == expected.offSeconds
+				&& monitor->severity == expected.severity,
+				"default Monitor values drifted from the spec 4.1 table");
+			require(!monitor->enabled, "a habitability default shipped enabled");
+			require(core::stationMonitorProvenanceTag(monitor->provenance) == std::string(expected.tag),
+				"default Monitor provenance tag is wrong");
+		}
+	// Re-applying the table is a no-op on authored data: a designer's own
+	// threshold and enable survive, and nothing is duplicated.
+	auto tuned = settings;
+	tuned.monitors[0].enabled = true;
+	tuned.monitors[0].rule.threshold = 19.0;
+	core::applyStationAtmosphereDefaultMonitors(tuned);
+	require(tuned.monitors.size() == settings.monitors.size(), "re-applying the table duplicated Monitors");
+	require(tuned.monitors[0].enabled && tuned.monitors[0].rule.threshold == 19.0,
+		"a per-Monitor adjustment did not survive re-application");
+	require(tuned.monitors[1] == settings.monitors[1], "re-applying the table rewrote an untouched Monitor");
+	// A configuration with no compartments expands to nothing: the table
+	// never invents a subject.
+	core::StationSystemsSettings empty;
+	core::applyStationAtmosphereDefaultMonitors(empty);
+	require(empty.monitors.empty(), "defaults invented a subject with no compartment");
+	// The expanded set is ordinary authored configuration: it validates and
+	// round-trips through both wire formats unchanged.
+	{
+		core::ScopedStationStepRatioForTesting clock(std::nullopt);
+		core::StationSystemsRuntime run(settings, 1);
+		require(run.effectiveSettings() == settings, "expanded defaults were refused or rewritten");
+	}
+	for (bool binary : {false, true})
+	{
+		std::unique_ptr<core::Serializer> out = binary
+			? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+		out->beginMap("root"); core::writeStationSystemsSettingsMap(*out, settings); out->endMap(); out->serialize();
+		auto const bytes = binary ? static_cast<core::BinarySerializer&>(*out).getSerializedString()
+			: static_cast<core::YamlSerializer&>(*out).getSerializedString();
+		std::unique_ptr<core::Serializer> in = binary
+			? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+		in->deserialize(); in->beginMap("root"); core::StationSystemsSettings restored;
+		core::readStationSystemsSettingsMap(*in, core::kWorldSchemaVersion, restored); in->endMap();
+		require(restored == settings, "expanded habitability defaults did not round-trip");
+	}
+	core::StationConfigurationDocument document, parsed;
+	document.settings = settings;
+	require(core::parseStationConfiguration(core::serializeStationConfiguration(document), parsed)
+		&& parsed.settings == settings, "Station configuration lost the habitability default set");
+}
+
+// A large sink the compartment can be coupled to later. It is authored from
+// the start: adding a reservoir mid-run is a topology change the live
+// settings contract refuses, while the exchanger conductance is an ordinary
+// live parameter. Stiff enough that the compartment crosses the bound on the
+// first coupled sample, so the trigger-off clock is driven by the Monitor
+// rather than by how fast the physics happens to move.
+void addSink(core::StationSystemsSettings& s, double sinkC)
+{
+	core::ThermalReservoirSettings sink;
+	sink.id = "sink"; sink.thermalClass = "warm";
+	sink.heatCapacityKJPerK = 1e6; sink.startingTemperatureC = sinkC;
+	sink.minTemperatureC = 0; sink.maxTemperatureC = 60;
+	s.thermalReservoirs = {sink};
+	s.atmospheres[0].reservoirId = "sink";
+}
+
+// Each probe authors the watched Metric outside its bound at construction -
+// starting conditions are never pushed live - and brings it back inside with
+// a live authored lever, so both the fire and the clear are driven by values
+// the Station actually published rather than by poking the snapshot.
+struct DefaultProbe
+{
+	char const* key;
+	void (*outside)(core::StationSystemsSettings&);
+	void (*inside)(core::StationSystemsSettings&);
+	void (*inject)(core::StationSystemsRuntime&) = nullptr;
+};
+
+std::vector<DefaultProbe> habitabilityProbes()
+{
+	return {
+		// 15.2 kPa out, 30.5 kPa back inside.
+		{"po2-low",
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].startingOxygenKg = 20; },
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].volumeM3 = 50; }},
+		// 26.7 kPa out, 13.3 kPa inside.
+		{"po2-high",
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].startingOxygenKg = 35; },
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].volumeM3 = 200; }},
+		// 1.11 kPa out, 0.28 kPa inside.
+		{"pco2-high",
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].startingCarbonDioxideKg = 2; },
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].volumeM3 = 400; }},
+		// Same excursion, the tighter Critical bound.
+		{"pco2-critical",
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].startingCarbonDioxideKg = 2; },
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].volumeM3 = 400; }},
+		// 59.8 kPa out, 119.6 kPa inside.
+		{"pressure-low",
+			[](core::StationSystemsSettings& s) {
+				s.atmospheres[0].startingNitrogenKg = 60; s.atmospheres[0].startingOxygenKg = 10;
+			},
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].volumeM3 = 50; }},
+		// 118.6 kPa out, 59.3 kPa inside.
+		{"pressure-high",
+			[](core::StationSystemsSettings& s) {
+				s.atmospheres[0].startingNitrogenKg = 110; s.atmospheres[0].startingOxygenKg = 30;
+			},
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].volumeM3 = 200; }},
+		// Uncoupled at 30 C; closing the exchanger to a 20 C sink pulls it
+		// under the 27 C bound.
+		{"temperature-high",
+			[](core::StationSystemsSettings& s) {
+				addSink(s, 20);
+				s.atmospheres[0].startingTemperatureC = 30;
+			},
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].exchangerConductanceKWPerK = 20000; }},
+		// Uncoupled at 15 C; a 25 C sink lifts it over the 18 C bound.
+		{"temperature-low",
+			[](core::StationSystemsSettings& s) {
+				addSink(s, 25);
+				s.atmospheres[0].startingTemperatureC = 15;
+			},
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].exchangerConductanceKWPerK = 20000; }},
+		// 1.4 kg of vapour is RH 0.81; four times the volume is 0.20.
+		{"humidity-high",
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].startingWaterVapourKg = 1.4; },
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].volumeM3 = 400; }},
+		// The toxic species has no authored lever: a real battery
+		// thermal-runaway Fault books 20 g into the 100 m3 compartment
+		// (0.2 g/m3), and the compartment volume dilutes it to 0.05.
+		{"toxic-contaminant",
+			[](core::StationSystemsSettings& s) {
+				core::BatterySettings bank;
+				bank.id = "bank";
+				bank.nameplateKWh = 100; bank.usableKWh = 90; bank.startingStoredKWh = 50;
+				bank.maxChargeKW = 50; bank.maxDischargeKW = 50;
+				bank.thermalRunaway = core::BatteryThermalRunawaySettings{"room", 500.0, 0.02};
+				s.batteries = {bank};
+			},
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].volumeM3 = 400; },
+			[](core::StationSystemsRuntime& run) {
+				require(run.injectFault("bank", "thermal-runaway",
+					{core::FaultCause::Kind::ScenarioEvent, "cell failure"}), "toxic booking setup failed");
+			}},
+		// Two occupants wanting 1 kg/s against 0.5 kg present leaves the
+		// supply short from the first tick; emptying the compartment ends it.
+		{"oxygen-supply-unmet",
+			[](core::StationSystemsSettings& s) {
+				s.atmospheres[0].startingOxygenKg = 0.5;
+				s.atmospheres[0].occupants = 2;
+				s.atmospheres[0].oxygenUsePerOccupantKgPerS = 1.0;
+			},
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].occupants = 0; }},
+		// An authored 0.02 kg/s constant leak, then sealed.
+		{"compartment-leak",
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].leakRateKgPerS = 0.02; },
+			[](core::StationSystemsSettings& s) { s.atmospheres[0].leakRateKgPerS = 0.0; }},
+	};
+}
+
+double observedMetric(core::StationSystemsSnapshot const& snap, std::string_view metric)
+{
+	auto const* entry = core::findStationAtmosphereMetric(metric);
+	require(entry != nullptr, "atmosphere Metric vanished from the catalogue");
+	return entry->read(snap.atmospheres[0]);
+}
+
+bool beyond(core::AlertRule const& rule, double value)
+{
+	return rule.direction == core::AlertDirection::Above ? value > rule.threshold : value < rule.threshold;
+}
+
+void monitorDefaultBoundaries(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	auto const table = specHabitabilityTable();
+	for (auto const& probe : habitabilityProbes())
+	{
+		auto const expected = std::find_if(table.begin(), table.end(),
+			[&](auto const& row) { return std::string(row.key) == probe.key; });
+		require(expected != table.end(), "probe has no spec 4.1 row to check against");
+		auto settings = habitabilityStation({"room"});
+		probe.outside(settings);
+		core::applyStationAtmosphereDefaultMonitors(settings);
+		require(settings.monitors.size() == table.size(), "single-compartment expansion is wrong");
+		// One default at a time, so no neighbouring Monitor confuses the ledger.
+		std::vector<core::StationMonitorSettings> solo;
+		for (auto const& monitor : settings.monitors)
+			if (monitor.id == std::string("room-") + probe.key) solo.push_back(monitor);
+		require(solo.size() == 1, "the default under test is not uniquely addressable");
+		solo[0].enabled = true;
+		settings.monitors = solo;
+		core::StationSystemsRuntime run(settings, 1);
+		if (probe.inject) probe.inject(run);
+		auto const& rule = solo[0].rule;
+		// Let the first audited boundary land: an injected one-shot is not
+		// in the compartment before it, and that sample is the first one the
+		// Monitor can count toward trigger-on persistence.
+		require(run.advanceTo(1), (std::string(probe.key) + " first sample failed").c_str());
+		require(beyond(rule, observedMetric(run.snapshot(), solo[0].metric)),
+			(std::string(probe.key) + " probe did not start beyond its bound").c_str());
+		// Fire only after the full trigger-on persistence.
+		require(run.advanceTo(rule.triggerOnSeconds - 1) && run.snapshot().activeAlerts.empty(),
+			(std::string(probe.key) + " fired before full trigger-on persistence").c_str());
+		require(run.advanceTo(rule.triggerOnSeconds) && run.snapshot().activeAlerts.size() == 1,
+			(std::string(probe.key) + " did not fire at the trigger-on boundary").c_str());
+		auto const fired = run.snapshot();
+		auto const& alert = fired.activeAlerts[0];
+		require(alert.monitorId == solo[0].id && alert.metric == solo[0].metric
+			&& alert.severity == expected->severity
+			&& alert.provenance == solo[0].provenance
+			&& core::stationMonitorProvenanceTag(alert.provenance) == std::string(expected->tag),
+			(std::string(probe.key) + " Alert did not publish its severity and provenance to surfaces").c_str());
+		// Bring it back inside, then require the full trigger-off persistence
+		// counted from the first sample that is actually inside.
+		probe.inside(settings);
+		require(run.updateSettings(settings), (std::string(probe.key) + " recovery edit refused").c_str());
+		double firstInside = 0;
+		bool cleared = false;
+		for (double time = rule.triggerOnSeconds + 1; time <= rule.triggerOnSeconds + rule.triggerOffSeconds + 600; ++time)
+		{
+			require(run.advanceTo(time), (std::string(probe.key) + " recovery drive failed").c_str());
+			if (!firstInside && !beyond(rule, observedMetric(run.snapshot(), solo[0].metric))) firstInside = time;
+			if (!firstInside) continue;
+			if (time < firstInside + rule.triggerOffSeconds - 1)
+			{
+				require(run.snapshot().activeAlerts.size() == 1,
+					(std::string(probe.key) + " cleared before full trigger-off persistence").c_str());
+				continue;
+			}
+			auto const snap = run.snapshot();
+			require(snap.activeAlerts.empty() && snap.closedAlerts.size() == 1
+				&& snap.closedAlerts[0].clearReason == core::AlertClearReason::AutoClear
+				&& snap.closedAlerts[0].firedAtSeconds == rule.triggerOnSeconds
+				&& snap.closedAlerts[0].clearedAtSeconds == time,
+				(std::string(probe.key) + " did not auto-clear at the trigger-off boundary").c_str());
+			cleared = true;
+			break;
+		}
+		require(cleared, (std::string(probe.key) + " never came back inside its bound and cleared").c_str());
+	}
+}
+
 }
 void registerStationMonitorChecks(std::vector<smoke::Check>& checks)
 {
@@ -250,4 +577,6 @@ void registerStationMonitorChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"monitorValidation", monitorValidation});
 	checks.push_back({"monitorPersistence", monitorPersistence});
 	checks.push_back({"monitorDemo", monitorDemo});
+	checks.push_back({"monitorDefaultTable", monitorDefaultTable});
+	checks.push_back({"monitorDefaultBoundaries", monitorDefaultBoundaries});
 }

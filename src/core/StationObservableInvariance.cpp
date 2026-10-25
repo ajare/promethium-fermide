@@ -11,7 +11,7 @@ namespace core
 		// stamps. Comparing a few inventories cannot certify the entire object.
 		static constexpr auto entries = []
 		{
-			constexpr std::array<std::string_view, 45> names{
+			constexpr std::array<std::string_view, 47> names{
 				"enabled", "healthy", "systemsStepWorldTicks", "systemsTimestepSeconds",
 				"worldTick", "elapsedSeconds", "completedTicks", "stores", "transfers",
 				"connections", "conversions", "balances", "constituentBalances", "deliveries",
@@ -21,8 +21,9 @@ namespace core
 				"waterCollectors", "waterTreatments", "electrolyzers", "co2Captures",
 				"sabatierReactors", "methaneProcessors", "microbialProcessors", "cropPopulations",
 				"algaeCultures", "fuelCells", "hasNextDelivery", "nextDeliverySeconds",
-				"hasNextWasteEjection", "nextWasteEjectionSeconds", "endurance", "forecast", "balanceTolerance"};
-			std::array<StationObservableInvariance, 63> result{};
+				"hasNextWasteEjection", "nextWasteEjectionSeconds", "endurance", "forecast",
+				"balanceTolerance", "activeAlerts", "closedAlerts"};
+			std::array<StationObservableInvariance, 65> result{};
 			for (size_t i = 0; i < names.size(); ++i)
 			{
 				auto& entry = result[i];
@@ -46,6 +47,12 @@ namespace core
 					entry.basis = "authored setting or published constant";
 					entry.verifiedBy = "station/invarianceRepresentative";
 				}
+				// #866's Monitor ledger: run-scoped derived state, never
+				// persisted, and no cross-step-ratio evidence covers it. Left
+				// Unverified on purpose - the Alert timing contract is proven at
+				// the runtime seam (station/monitor*), not here.
+				if (entry.name == "activeAlerts" || entry.name == "closedAlerts")
+					entry.basis = "run-scoped Monitor Alert ledger; derived per step from authored rules, never persisted, and not compared across step ratios by these fixtures";
 			}
 			constexpr std::array<std::string_view, 7> verified{
 				"stores[].currentQualified", "stores[].currentUnqualified", "connections[].inputTotal",
@@ -88,7 +95,7 @@ namespace core
 				entry.basis = "70 s physicalCoupling fixtures only, ratios 1,6,7,30,60; analytical ODE truncation bounds for configured model coefficients, not physical parameter calibration or arbitrary configurations";
 				entry.verifiedBy = "station/physicalCoupling";
 			}
-			auto& cycle = result[58];
+			auto& cycle = result[60];
 			cycle.name = "fuelCells[].electricalKJ";
 			cycle.classification = StationObservableInvarianceClass::Bound;
 			cycle.convergenceOrder = 1;
@@ -96,7 +103,7 @@ namespace core
 			cycle.verifiedThroughRatio = 60;
 			cycle.basis = "70 s solar-funded 0.001 kg/s electrolysis/fuel-cell cycle only; error is one Station interval of reactant production; ratios 1,6,7,30,60, not a global guarantee";
 			cycle.verifiedBy = "station/physicalCoupling";
-			auto& decay = result[59];
+			auto& decay = result[61];
 			decay.name = "power.generators[].decayHeatKJ";
 			decay.classification = StationObservableInvarianceClass::Exact;
 			decay.absoluteTolerance = 1e-8;
@@ -108,7 +115,7 @@ namespace core
 				"atmospherePathways[].lastCommandSeconds"};
 			for (size_t i = 0; i < commandFields.size(); ++i)
 			{
-				auto& entry = result[60 + i];
+				auto& entry = result[62 + i];
 				entry.name = commandFields[i];
 				entry.classification = StationObservableInvarianceClass::Exact;
 				entry.verifiedThroughRatio = 60;

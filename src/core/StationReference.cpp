@@ -184,6 +184,7 @@ namespace core
 				serializer.writeString("severity", monitor.severity == AlertSeverity::Critical ? "Critical"
 					: monitor.severity == AlertSeverity::Warning ? "Warning" : "Advisory");
 				serializer.writeBool("enabled", monitor.enabled);
+				serializer.writeString("provenance", std::string(stationMonitorProvenanceTag(monitor.provenance)));
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -1406,6 +1407,20 @@ namespace core
 				monitor.severity = severity == "Critical" ? AlertSeverity::Critical
 					: severity == "Warning" ? AlertSeverity::Warning : AlertSeverity::Advisory;
 				if (serializer.hasField("enabled")) monitor.enabled = serializer.readBool("enabled");
+				// Documents written before #867 carry no tag: the value is then
+				// exactly what it always was, a hand-authored number making no
+				// provenance claim.
+				if (serializer.hasField("provenance"))
+				{
+					auto const tag = serializer.readString("provenance");
+					if (tag != "iss" && tag != "who" && tag != "rated" && tag != "prov" && tag != "custom")
+						throw SerializationException("Unknown Monitor provenance");
+					monitor.provenance = tag == "iss" ? MonitorProvenance::Iss
+						: tag == "who" ? MonitorProvenance::Who
+						: tag == "rated" ? MonitorProvenance::Rated
+						: tag == "prov" ? MonitorProvenance::Provisional
+						: MonitorProvenance::Custom;
+				}
 				serializer.endMap();
 				stationSettings.monitors.push_back(std::move(monitor));
 			}

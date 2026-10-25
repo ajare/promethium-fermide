@@ -2260,6 +2260,13 @@ namespace core
 	enum class AlertDirection { Above, Below };
 	enum class AlertSeverity { Advisory, Warning, Critical };
 	enum class AlertClearReason { AutoClear, MonitorDisabled, MonitorChanged };
+	// #867: where a Monitor's authored value came from, so a surface can tell
+	// a grounded limit from an estimate. `Custom` is a hand-authored value
+	// making no provenance claim; the four tagged kinds are the spec's
+	// [ISS] / [WHO] / [rated] / [prov] provenance tags.
+	enum class MonitorProvenance { Custom, Iss, Who, Rated, Provisional };
+	// The one spelling of each tag, shared by the wire format and by surfaces.
+	std::string_view stationMonitorProvenanceTag(MonitorProvenance provenance);
 	struct AlertRule
 	{
 		double threshold{0};
@@ -2273,6 +2280,9 @@ namespace core
 		AlertRule rule;
 		AlertSeverity severity{AlertSeverity::Warning};
 		bool enabled{false};
+		// Declared last so the positional initialization of every earlier
+		// field in existing callers and fixtures is unchanged.
+		MonitorProvenance provenance{MonitorProvenance::Custom};
 		bool operator==(StationMonitorSettings const&) const = default;
 	};
 	struct StationAlertSnapshot
@@ -2280,6 +2290,9 @@ namespace core
 		std::string monitorId, subjectType, subjectId, metric;
 		double currentValue{0}, threshold{0};
 		AlertSeverity severity{AlertSeverity::Warning};
+		// #867: the watched value's provenance travels with the Alert, so the
+		// dashboard can show whether a limit is grounded or provisional.
+		MonitorProvenance provenance{MonitorProvenance::Custom};
 		double firedAtSeconds{0};
 		std::optional<double> clearedAtSeconds;
 		std::optional<AlertClearReason> clearReason;
@@ -4016,6 +4029,42 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationAtmosphereSnapshot const&) const = default;
 	};
+	// #867 (spec §3.1): the Metrics an `atmosphere` Monitor subject publishes.
+	// `read` resolves the value from the compartment the Station step already
+	// published; the derived Metrics compute at read time and store nothing.
+	// This is the single source of truth for which Metric names are valid for
+	// the subject type: validation, evaluation and surfaces all resolve here.
+	struct StationAtmosphereMetric
+	{
+		std::string_view name;
+		std::string_view unit;
+		double (*read)(StationAtmosphereSnapshot const&) noexcept;
+	};
+	std::vector<StationAtmosphereMetric> const& stationAtmosphereMetricCatalogue();
+	StationAtmosphereMetric const* findStationAtmosphereMetric(std::string_view metric);
+	// #867 (spec §4.1): one row of the atmosphere habitability default table.
+	// `key` is the stable identity suffix, so the pO2-low default for the
+	// compartment `room` is authored as the Monitor `room-po2-low`.
+	struct StationMonitorTemplate
+	{
+		std::string_view key;
+		std::string_view metric;
+		AlertRule rule;
+		AlertSeverity severity;
+		MonitorProvenance provenance;
+	};
+	// The twelve §4.1 rows, in table order.
+	std::vector<StationMonitorTemplate> const& stationAtmosphereHabitabilityTemplates();
+	// The §4.1 table expanded over every atmosphere compartment in
+	// `settings`: twelve disabled, provenance-tagged Monitors per compartment,
+	// with deterministic `<subjectId>-<key>` ids. The expansion is pure: it
+	// reads the configuration and authors settings, and never touches runtime.
+	std::vector<StationMonitorSettings> stationAtmosphereDefaultMonitors(
+		StationSystemsSettings const& settings);
+	// Append the defaults this configuration is missing. Idempotent and
+	// non-destructive: a Monitor already present keeps its authored values,
+	// so a designer's per-Monitor tuning survives a re-apply.
+	void applyStationAtmosphereDefaultMonitors(StationSystemsSettings& settings);
 	// One scheduled airlock cycle as of the most recent tick (#400): the
 	// authored schedule beside the runtime's cycle history - what each
 	// occurrence removed from its compartment, how much was recovered

@@ -921,8 +921,13 @@ namespace
 			auto fail = [&](std::string reason) { return refuse("Monitor '" + monitor.id + "': " + reason); };
 			if (monitor.id.empty() || !monitorIds.insert(monitor.id).second)
 				return fail("id must be non-empty and unique");
-			// #866 deliberately registers only the tracer-bullet metric.
-			if (monitor.subjectType != "atmosphere" || monitor.metric != "oxygenPartialPressureKPa")
+			// #866 deliberately registered only the tracer-bullet Metric.
+			// #867 opens the whole atmosphere catalogue, but `atmosphere` is
+			// still the only registered subject type: the other subjects land
+			// with their own default-table tickets.
+			if (monitor.subjectType != "atmosphere")
+				return fail("unknown subject type");
+			if (findStationAtmosphereMetric(monitor.metric) == nullptr)
 				return fail("unknown metric for subject type");
 			if (std::none_of(settings.atmospheres.begin(), settings.atmospheres.end(),
 				[&](auto const& a) { return a.id == monitor.subjectId; }))
@@ -936,6 +941,8 @@ namespace
 				return fail("unknown direction");
 			if (monitor.severity != AlertSeverity::Advisory && monitor.severity != AlertSeverity::Warning
 				&& monitor.severity != AlertSeverity::Critical) return fail("unknown severity");
+			if (monitor.provenance < MonitorProvenance::Custom || monitor.provenance > MonitorProvenance::Provisional)
+				return fail("unknown provenance");
 		}
 		diagnostic.clear();
 		return true;

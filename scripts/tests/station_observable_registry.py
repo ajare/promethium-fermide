@@ -21,10 +21,16 @@ for declaration in header[start:end - 1].split(";"):
     declaration = declaration.strip()
     if not declaration or "operator==" in declaration:
         continue
-    match = re.fullmatch(r"[\w:]+(?:<.*>)?\s+(\w+)\s*(?:\{.*\})?", declaration, re.DOTALL)
+    # A single type may declare several members: `std::vector<X> active, closed`.
+    # Split the declarators off the type, then the initializer off each one.
+    match = re.fullmatch(r"([\w:]+(?:<.*>)?)\s+(.+)", declaration, re.DOTALL)
     if not match:
         raise SystemExit(f"Unrecognized snapshot declaration; update the coverage check: {declaration}")
-    members.add(match.group(1))
+    for declarator in match.group(2).split("{")[0].split(","):
+        declarator = declarator.strip()
+        if not re.fullmatch(r"\w+", declarator):
+            raise SystemExit(f"Unrecognized snapshot declaration; update the coverage check: {declaration}")
+        members.add(declarator)
 
 source = (ROOT / "src/core/StationObservableInvariance.cpp").read_text(encoding="utf-8")
 match = re.search(r"std::array<std::string_view,\s*\d+>\s+names\s*\{(.*?)\};", source, re.DOTALL)
