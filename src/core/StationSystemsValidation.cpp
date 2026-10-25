@@ -1073,6 +1073,37 @@ namespace
 						+ " exceeds declared input " + std::to_string(supplied));
 			}
 		} catch (BrokenDraftEntry const&) {}
+		std::vector<std::string> contaminationIds;
+		auto gatherIds = [&](auto const& entries) {
+			for (auto const& entry : entries) contaminationIds.push_back(entry.id);
+		};
+		gatherIds(settings.generators); gatherIds(settings.coolantLoops); gatherIds(settings.chillers);
+		gatherIds(settings.heatEngines); gatherIds(settings.radiators); gatherIds(settings.solarArrays);
+		gatherIds(settings.batteries); gatherIds(settings.waterTreatments); gatherIds(settings.electrolyzers);
+		gatherIds(settings.fuelCells); gatherIds(settings.sabatierReactors); gatherIds(settings.methaneProcessors);
+		auto uniqueContaminationId = [&](std::string const& id) {
+			return std::count(contaminationIds.begin(), contaminationIds.end(), id) == 1;
+		};
+		auto validatePoisoning = [&](auto const& cells) {
+			for (auto const& cell : cells) if (cell.catalystPoisoning)
+			{
+				auto const& model = *cell.catalystPoisoning;
+				if (!uniqueContaminationId(cell.id) || !std::isfinite(model.triggerConcentration) || model.triggerConcentration < 0.0
+					|| model.triggerConcentration >= 1.0 || !std::isfinite(model.wearPerHour)
+					|| model.wearPerHour <= 0.0)
+					return refuse("Invalid catalyst-poisoning parameters for '" + cell.id + "'");
+			}
+			return true;
+		};
+		if (!validatePoisoning(settings.electrolyzers) || !validatePoisoning(settings.fuelCells)) return false;
+		for (auto const& treatment : settings.waterTreatments) if (treatment.breakthrough)
+		{
+			if (!uniqueContaminationId(treatment.id)) return refuse("Ambiguous breakthrough installation id");
+			auto const outlet = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](auto const& store) { return store.id == treatment.treatedStoreId; });
+			if (outlet != settings.stores.end() && !outlet->composition)
+				return refuse("breakthrough requires a compound treated store to retain species");
+		}
 		if (settings.solarArrays.size() > MaxStationSolarArrays)
 			return refuse("Station solar arrays are limited to "
 				+ std::to_string(MaxStationSolarArrays) + " entries");
@@ -2203,7 +2234,7 @@ namespace
 			if (!cell.hydrogenStoreId.empty() && cell.hydrogenStoreId == cell.oxygenStoreId)
 				return refuse(where + " names the same store '" + cell.hydrogenStoreId
 					+ "' for both the hydrogen and the oxygen reactant: the cell draws both reactants independently and may not spend one store's stock as both");
-			if (!declareGasStore(cell.hydrogenStoreId, "hydrogen reactant", where, false))
+			if (!declareGasStore(cell.hydrogenStoreId, "hydrogen reactant", where, cell.catalystPoisoning.has_value()))
 				return false;
 			if (!declareGasStore(cell.oxygenStoreId, "oxygen reactant", where, false))
 				return false;

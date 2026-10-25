@@ -1039,7 +1039,13 @@ namespace core
 			|| std::any_of(mStationSystemsSettings.batteries.begin(),
 				mStationSystemsSettings.batteries.end(),
 				[](auto const& battery) { return battery.thermalRunaway.has_value(); });
-		serializer.writeUint32("version", powerSources ? kWorldSchemaVersion
+		auto const contamination = std::any_of(mStationSystemsSettings.waterTreatments.begin(), mStationSystemsSettings.waterTreatments.end(),
+				[](auto const& t) { return t.breakthrough; })
+			|| std::any_of(mStationSystemsSettings.electrolyzers.begin(), mStationSystemsSettings.electrolyzers.end(),
+				[](auto const& c) { return c.catalystPoisoning.has_value(); })
+			|| std::any_of(mStationSystemsSettings.fuelCells.begin(), mStationSystemsSettings.fuelCells.end(),
+				[](auto const& c) { return c.catalystPoisoning.has_value(); });
+		serializer.writeUint32("version", contamination ? kWorldSchemaVersion : powerSources ? 118
 			: thermalPlant ? 117 : wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);

@@ -273,10 +273,31 @@ namespace core
 	PF_STATION_LIVE_NODE(AirlockCycleSettings, airlockCycles, "Airlock cycle")
 	PF_STATION_LIVE_NODE(CrewSettings, crews, "Crew")
 	PF_STATION_LIVE_NODE(WaterCollectorSettings, waterCollectors, "Water collector")
-	PF_STATION_LIVE_NODE(WaterTreatmentSettings, waterTreatments, "Water treatment")
-	PF_STATION_LIVE_NODE(ElectrolyzerSettings, electrolyzers, "Electrolyzer")
+	template <> struct LiveNode<WaterTreatmentSettings>
+	{
+		static constexpr std::string_view nodeType = "Water treatment";
+		static auto& of(auto& settings) { return settings.waterTreatments; }
+		static bool restoreInitial(WaterTreatmentSettings const&, WaterTreatmentSettings&) { return false; }
+		static bool topologyChanged(WaterTreatmentSettings const& a, WaterTreatmentSettings const& b)
+		{ return a.breakthrough != b.breakthrough; }
+	};
+	template <> struct LiveNode<ElectrolyzerSettings>
+	{
+		static constexpr std::string_view nodeType = "Electrolyzer";
+		static auto& of(auto& settings) { return settings.electrolyzers; }
+		static bool restoreInitial(ElectrolyzerSettings const&, ElectrolyzerSettings&) { return false; }
+		static bool topologyChanged(ElectrolyzerSettings const& a, ElectrolyzerSettings const& b)
+		{ return a.catalystPoisoning.has_value() != b.catalystPoisoning.has_value(); }
+	};
 	PF_STATION_LIVE_NODE(Co2CaptureSettings, co2Captures, "CO2 capture")
-	PF_STATION_LIVE_NODE(FuelCellSettings, fuelCells, "Fuel cell")
+	template <> struct LiveNode<FuelCellSettings>
+	{
+		static constexpr std::string_view nodeType = "Fuel cell";
+		static auto& of(auto& settings) { return settings.fuelCells; }
+		static bool restoreInitial(FuelCellSettings const&, FuelCellSettings&) { return false; }
+		static bool topologyChanged(FuelCellSettings const& a, FuelCellSettings const& b)
+		{ return a.catalystPoisoning.has_value() != b.catalystPoisoning.has_value(); }
+	};
 	template <> struct LiveNode<SabatierReactorSettings>
 	{
 		static constexpr std::string_view nodeType = "Sabatier";

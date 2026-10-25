@@ -777,6 +777,7 @@ namespace core
 				serializer.writeDouble("specificEnergyKWhPerKg", treatment.specificEnergyKWhPerKg);
 				serializer.writeDouble("consumablePerKg", treatment.consumablePerKg);
 				serializer.writeInt32("priority", treatment.priority);
+				if (treatment.breakthrough) serializer.writeBool("breakthrough", true);
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -803,6 +804,13 @@ namespace core
 					electrolyzer.specificEnergyKWhPerKgWater);
 				serializer.writeDouble("maxSinkTemperatureC", electrolyzer.maxSinkTemperatureC);
 				serializer.writeInt32("priority", electrolyzer.priority);
+				if (electrolyzer.catalystPoisoning)
+				{
+					serializer.beginMap("catalystPoisoning");
+					serializer.writeDouble("triggerConcentration", electrolyzer.catalystPoisoning->triggerConcentration);
+					serializer.writeDouble("wearPerHour", electrolyzer.catalystPoisoning->wearPerHour);
+					serializer.endMap();
+				}
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -849,6 +857,13 @@ namespace core
 				serializer.writeDouble("efficiency", cell.efficiency);
 				serializer.writeDouble("commandedOutputKW", cell.commandedOutputKW);
 				serializer.writeDouble("maxSinkTemperatureC", cell.maxSinkTemperatureC);
+				if (cell.catalystPoisoning)
+				{
+					serializer.beginMap("catalystPoisoning");
+					serializer.writeDouble("triggerConcentration", cell.catalystPoisoning->triggerConcentration);
+					serializer.writeDouble("wearPerHour", cell.catalystPoisoning->wearPerHour);
+					serializer.endMap();
+				}
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -2116,6 +2131,11 @@ namespace core
 				treatment.specificEnergyKWhPerKg = serializer.readDouble("specificEnergyKWhPerKg");
 				treatment.consumablePerKg = serializer.readDouble("consumablePerKg");
 				treatment.priority = serializer.readInt32("priority");
+				if (serializer.hasField("breakthrough"))
+				{
+					if (version < 119) throw SerializationException("breakthrough requires schema 119");
+					treatment.breakthrough = serializer.readBool("breakthrough");
+				}
 				stationSettings.waterTreatments.push_back(std::move(treatment));
 				serializer.endMap();
 			}
@@ -2142,6 +2162,13 @@ namespace core
 					serializer.readDouble("specificEnergyKWhPerKgWater");
 				electrolyzer.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
 				electrolyzer.priority = serializer.readInt32("priority");
+				if (serializer.hasField("catalystPoisoning"))
+				{
+					if (version < 119) throw SerializationException("catalyst-poisoning requires schema 119");
+					serializer.beginMap("catalystPoisoning");
+					electrolyzer.catalystPoisoning = CatalystPoisoningSettings{serializer.readDouble("triggerConcentration"), serializer.readDouble("wearPerHour")};
+					serializer.endMap();
+				}
 				stationSettings.electrolyzers.push_back(std::move(electrolyzer));
 				serializer.endMap();
 			}
@@ -2188,6 +2215,13 @@ namespace core
 				cell.efficiency = serializer.readDouble("efficiency");
 				cell.commandedOutputKW = serializer.readDouble("commandedOutputKW");
 				cell.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
+				if (serializer.hasField("catalystPoisoning"))
+				{
+					if (version < 119) throw SerializationException("catalyst-poisoning requires schema 119");
+					serializer.beginMap("catalystPoisoning");
+					cell.catalystPoisoning = CatalystPoisoningSettings{serializer.readDouble("triggerConcentration"), serializer.readDouble("wearPerHour")};
+					serializer.endMap();
+				}
 				stationSettings.fuelCells.push_back(std::move(cell));
 				serializer.endMap();
 			}

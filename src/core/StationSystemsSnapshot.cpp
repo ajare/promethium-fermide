@@ -1074,6 +1074,8 @@ namespace core
 				- treatment.treatedTotalKg - treatment.concentrateTotalKg;
 			treatmentResult.status = treatment.status;
 			totalWaterTreatmentPower += treatment.lastPowerSuppliedKW;
+			if (treatment.breakthrough && !treatment.breakthroughPending)
+				treatmentResult.activeFaults.push_back(*treatment.breakthrough);
 			result.waterTreatments.push_back(std::move(treatmentResult));
 		}
 		result.power.waterTreatmentPowerKW = totalWaterTreatmentPower;
@@ -1123,6 +1125,15 @@ namespace core
 				- cell.chemicalEnergyKJ - cell.heatRoutedKJ;
 			cellResult.status = cell.status;
 			totalElectrolyzerPower += cell.lastPowerSuppliedKW;
+			cellResult.wearFraction = cell.wear.fraction;
+			cellResult.wearOperatingHours = cell.wear.operatingHours;
+			if (cell.poisoning)
+			{
+				auto fault = *cell.poisoning;
+				fault.derivedImpact = cell.wear.fraction;
+				cellResult.activeFaults.push_back(std::move(fault));
+			}
+			cellResult.effectiveRateKgPerS = cell.authored.rateKgPerS * (1.0 - cell.wear.fraction);
 			result.electrolyzers.push_back(std::move(cellResult));
 		}
 		result.power.electrolyzerPowerKW = totalElectrolyzerPower;
@@ -1215,6 +1226,15 @@ namespace core
 			cellResult.status = cell.status;
 			totalFuelCellOutput += cell.lastOutputKW;
 			totalFuelCellWasteHeat += cell.lastWasteHeatKW;
+			cellResult.wearFraction = cell.wear.fraction;
+			cellResult.wearOperatingHours = cell.wear.operatingHours;
+			if (cell.poisoning)
+			{
+				auto fault = *cell.poisoning;
+				fault.derivedImpact = cell.wear.fraction;
+				cellResult.activeFaults.push_back(std::move(fault));
+			}
+			cellResult.effectiveRatedOutputKW = cell.authored.ratedOutputKW * (1.0 - cell.wear.fraction);
 			result.fuelCells.push_back(std::move(cellResult));
 		}
 		result.power.fuelCellOutputKW = totalFuelCellOutput;

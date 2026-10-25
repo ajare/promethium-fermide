@@ -2545,7 +2545,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             and cell.maxSinkTemperatureC == cell.maxSinkTemperatureC
             and cell.maxSinkTemperatureC > -KELVIN_OFFSET,
             'fuel cell maximum sink temperature must be finite and above absolute zero')
-        local hydrogen = declareGasStore(cell.hydrogenStore, 'hydrogen reactant', false)
+        local hydrogen = declareGasStore(cell.hydrogenStore, 'hydrogen reactant', cell.catalystPoisoning == true)
         local oxygen = declareGasStore(cell.oxygenStore, 'oxygen reactant', false)
         -- The same aliased-role rule the electrolyzer carries (#585):
         -- the cell draws each reactant from its own store's drawable
@@ -3579,7 +3579,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 - (self.constituent_harvested[constituent] or 0) - starting
             local bound = BALANCE_TOLERANCE * math.max(1.0, math.abs(starting))
             assert(residual == residual and math.abs(residual) <= bound,
-                "constituent conservation residual for '" .. constituent .. "' exceeds tolerance")
+                "constituent conservation residual for '" .. constituent .. "' exceeds tolerance: " .. tostring(residual))
         end
     end
     -- Occurrences of a schedule due at or before `elapsed`. Monotonic in
@@ -4928,6 +4928,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     if capKW >= scale * commanded then return end
                     scale = capKW / commanded
                     limiter = reason
+                end
+                if hydrogen.composition then
+                    constrain(0, 'hydrogen feed contains compound impurities')
                 end
                 constrain(by_h2_kw, "hydrogen store '" .. hydrogen.id
                     .. "' has nothing drawable above its protected reserve")
@@ -6525,6 +6528,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             local hydrogenUnits = math.min(
                                 fromKg(hydrogen.unit, hydrogenKg), hydrogenHeadroom)
                             local hydrogenActualKg = toKg(hydrogen.unit, hydrogenUnits)
+                            addLedger(self.constituent_loss, drawStoreActual(water,
+                                toKg(water.unit, water.qualified + water.unqualified), splitKg), 1)
                             water.qualified = water.qualified - waterUnits
                             hydrogen.qualified = hydrogen.qualified + hydrogenUnits
                             self.unit_loss[water.unit] =

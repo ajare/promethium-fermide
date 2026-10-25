@@ -1,4 +1,4 @@
-# Station Faults, Condition, Trips, Repair and Wear (#839–#845)
+# Station Faults, Condition, Trips, Repair and Wear (#839–#846)
 
 Implemented slices of [the failure framework](specs/station_degradation_failure_specification.md)
 include coolant-leak injection, opt-in coolant-loop Condition with funded recovery,
@@ -396,7 +396,65 @@ Repair is not wired for these modes in this slice: `repairFault` refuses them fo
 want of `repairParts` wiring on generators, solar arrays and batteries, and
 follow-up work decides what a repair costs.
 
+## Contamination-chain Fault catalogue
+
+Water treatments opt into `breakthrough: true`. Injection through `injectFault`
+queues one Fault, publishes it on the next successful boundary and logs its
+attributed onset. While active the breached separator sends the entire would-be
+concentrate stream, including its species and carried chemical energy, into the
+treated outlet alongside the normal effluent. All output is held unqualified.
+The treated outlet must be compound so its actual constituent ledger can retain
+those species; its headroom caps the combined stream. The nominal concentrate
+outlet receives nothing. No material is created: processed mass equals treated
+plus concentrate, and per-unit and constituent audits close normally. Impact is
+1: the separator has lost all qualified output. No repair is wired in this slice.
+
+Electrolyzers and fuel cells opt in with:
+
+```yaml
+catalystPoisoning:
+  triggerConcentration: 0.001 # dry contaminant kg / bulk feed kg, strictly exceeded
+  wearPerHour: 0.01          # fraction of rated capability lost per exposed hour
+```
+
+The concentration threshold must be finite in `[0,1)`; the Wear rate must be
+finite and positive. Opt-in presence is frozen topology; parameters can be
+retuned live. The models observe the actual feed-store constituent blend,
+including drift from treatment and transfers (ignoring cancellation dust up to
+32 double-precision epsilons in mass fraction), not a declaration about another
+machine's Fault. An enabled/commanded machine in contact with nonempty feed above
+the threshold raises `catalyst-poisoning` with cause `FeedContamination` naming the
+feed store, and one `fault` event. This simulation-owned onset cannot be forged
+by injection. Feed contact still acts when a quality gate prevents conversion.
+
+Each exposed interval adds permanent Wear, clamped at one. Removing exposure
+(cleaning the feed, stopping the command, or raising the threshold) stops further
+fade but never heals it or clears the recorded Fault. Electrolyzer throughput and
+fuel-cell rated output scale by `(1 - wearFraction)`; electrical/material/thermal
+feasibility still applies. Snapshots publish `activeFaults`, `wearFraction`,
+`wearOperatingHours`, `effectiveRateKgPerS` / `effectiveRatedOutputKW`; poisoning's
+impact is the accumulated lost-capacity fraction, never an authored severity.
+The electrolyzer's zero-contaminant feed gate remains unchanged. A fuel cell may
+opt into observing a compound hydrogen-impurity feed, but such a stream is held
+rather than converted as pure hydrogen: this slice does not invent a hydrogen
+constituent or silently burn foreign species. Plain hydrogen retains its existing
+conversion behavior. Both the host and Lua lifecycle preserve the compound
+boundary when purified water is split into plain gases.
+
+`station-contaminationChain`, `station-contaminationContracts`,
+`station-contaminationWearPerformance` and `station-contaminationOptIn` cover
+conservative breakthrough, independent feed-triggered onsets, derived impacts,
+monotonic Wear and faded throughput after purge/refill, supported step ratios,
+validation and frozen topology, pending/autonomous Fault replay, exact YAML and
+binary replay/continuation, and unchanged behavior/wire tier without opt-ins.
+
 ## Persistence and replay
+
+Schema 119 carries the contamination-chain opt-ins; older documents carrying
+these fields are refused. Opted-in runs pin initial settings and retain runtime
+replay even without commands, preserving autonomous poisoning and live retunes.
+Feature-absent documents retain their previous tier and omit the new fields.
+
 
 Schema 118 carries the power-source Fault opt-ins; earlier documents carrying
 them are refused, and feature-absent output keeps its previous tier (117 for a

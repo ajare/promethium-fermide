@@ -450,6 +450,13 @@ namespace core
 		for (size_t orderIndex : runtime.waterTreatmentOrder)
 		{
 			auto& treatment = runtime.waterTreatments[orderIndex];
+			if (treatment.breakthroughPending)
+			{
+				appendBoundedEvent(runtime.events, tick, "fault", "Fault 'breakthrough' on '"
+					+ treatment.authored.id + "': " + treatment.breakthrough->causeDetail);
+				treatment.breakthroughPending = false;
+			}
+			auto const breakthrough = treatment.breakthrough.has_value();
 			auto ports = materialPorts("Water treatment", treatment.authored.id);
 			ports.used("consumableStoreId", [&] { return treatment.lastConsumableUsed; });
 			auto& source = runtime.stores[treatment.sourceIndex];
@@ -486,6 +493,10 @@ namespace core
 				: ConstituentLedger{{"water", treatment.authored.recoveryRatio}};
 			double treatedFraction = 0.0;
 			for (auto const& [name, mass] : effluent) if (name != "energy") treatedFraction += mass;
+			// A breached separator sends the entire would-be concentrate
+			// stream to the treated outlet. Size against that outlet's real
+			// headroom; the nominal concentrate store receives nothing.
+			if (breakthrough) treatedFraction = 1.0;
 			if (waterFraction <= 0.0)
 			{
 				treatment.lastLimiter = "stream carries no water";
@@ -580,7 +591,7 @@ namespace core
 			{
 				auto const fraction = treatment.authored.removalFractions.find(name == "energy" ? "dryOrganics" : name);
 				auto const removal = fraction == treatment.authored.removalFractions.end() ? 1.0 : fraction->second;
-				auto const passed = name == "water" ? processedKg * waterFraction * treatment.authored.recoveryRatio
+				auto const passed = breakthrough ? mass : name == "water" ? processedKg * waterFraction * treatment.authored.recoveryRatio
 					: mass - mass * removal;
 				treatedActual[name] = passed;
 				mass -= passed;
@@ -614,13 +625,14 @@ namespace core
 			// unqualified. Held output stays out of qualified inventory;
 			// generic recovery transfers only pick up qualified material,
 			// so the hold cannot be bypassed.
-			auto const curtailed = suppliedKW + 1e-12 < treatment.lastPowerDemandKW;
+			auto const curtailed = suppliedKW + 1e-12 < treatment.lastPowerDemandKW || breakthrough;
 			treatment.lastFiltrationCompleted = treatedKg > 0.0 || concentrateKg > 0.0;
 			treatment.lastTreatmentEvidenced = !curtailed && treatment.lastFiltrationCompleted;
 			treatment.lastQualityAccepted = treatment.lastTreatmentEvidenced;
 			if (curtailed)
 			{
-				treatment.lastHoldReason = "treatment energy curtailed: the treated output is held unqualified";
+				treatment.lastHoldReason = breakthrough ? "breakthrough: concentrate carried into treated output, held unqualified"
+					: "treatment energy curtailed: the treated output is held unqualified";
 				unqualified[treatment.treatedIndex] += treatedUnits;
 			}
 			else qualified[treatment.treatedIndex] += treatedUnits;

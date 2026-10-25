@@ -24,6 +24,9 @@ namespace core
 		for (size_t orderIndex : runtime.electrolyzerOrder)
 		{
 			auto& cell = runtime.electrolyzers[orderIndex];
+			if (cell.authored.catalystPoisoning && !poisonFeed(cell.poisoning, cell.wear,
+				*cell.authored.catalystPoisoning, cell.authored.id, cell.waterStoreIndex,
+				cell.authored.rateKgPerS > 0.0)) return false;
 			auto ports = materialPorts("Electrolyzer", cell.authored.id);
 			auto& water = runtime.stores[cell.waterStoreIndex];
 			auto& hydrogen = runtime.stores[cell.hydrogenStoreIndex];
@@ -64,8 +67,8 @@ namespace core
 			if (cell.oxygenStoreIndex != SIZE_MAX)
 				oxygenHeadroomUnits = std::max(0.0, ports.output(cell.oxygenStoreIndex, runtime.stores[cell.oxygenStoreIndex].authored.capacity
 					- (qualified[cell.oxygenStoreIndex] + unqualified[cell.oxygenStoreIndex])));
-			double scale = 1.0;
-			std::string limiter;
+			double scale = 1.0 - cell.wear.fraction;
+			std::string limiter = cell.wear.fraction > 0.0 ? "catalyst Wear" : "";
 			auto const constrain = [&](auto available, double required,
 				std::string const& reason)
 			{
@@ -172,6 +175,12 @@ namespace core
 			auto const hydrogenUnits = std::min(
 				kgToMass(hydrogen.authored.unit, hydrogenKg), hydrogenHeadroomUnits);
 			auto const hydrogenActualKg = massToKg(hydrogen.authored.unit, hydrogenUnits);
+			// The pure-water quality gate admits compound carrier stores too.
+			// Remove their actual water and drift before splitting it into
+			// plain gas products, or the old dry baseline survives the draw.
+			addLedger(stagedLoss, drawStoreActual(cell.waterStoreIndex,
+				massToKg(water.authored.unit, qualified[cell.waterStoreIndex]
+					+ unqualified[cell.waterStoreIndex]), splitKg), 1.0);
 			qualified[cell.waterStoreIndex] -= waterUnits;
 			flowOut[cell.waterStoreIndex] += waterUnits;
 			qualified[cell.hydrogenStoreIndex] += hydrogenUnits;

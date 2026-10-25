@@ -519,6 +519,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 					lua_pushstring(state, cell.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
 					lua_pushstring(state, cell.thermalClass.c_str()); lua_setfield(state, -2, "thermalClass");
 					lua_pushstring(state, cell.heatSinkId.c_str()); lua_setfield(state, -2, "heatSink");
+					lua_pushboolean(state, cell.catalystPoisoning.has_value()); lua_setfield(state, -2, "catalystPoisoning");
 					lua_pushnumber(state, cell.ratedOutputKW); lua_setfield(state, -2, "ratedOutputKW");
 					lua_pushnumber(state, cell.efficiency); lua_setfield(state, -2, "efficiency");
 					lua_pushnumber(state, cell.commandedOutputKW); lua_setfield(state, -2, "commandedOutputKW");
@@ -937,7 +938,13 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				[](auto const& array) { return array.stringLoss.has_value()
 					|| array.trackingFailure.has_value(); })
 			|| std::any_of(settings.batteries.begin(), settings.batteries.end(),
-				[](auto const& battery) { return battery.thermalRunaway.has_value(); }))
+				[](auto const& battery) { return battery.thermalRunaway.has_value(); })
+			|| std::any_of(settings.waterTreatments.begin(), settings.waterTreatments.end(),
+				[](auto const& t) { return t.breakthrough; })
+			|| std::any_of(settings.electrolyzers.begin(), settings.electrolyzers.end(),
+				[](auto const& c) { return c.catalystPoisoning.has_value(); })
+			|| std::any_of(settings.fuelCells.begin(), settings.fuelCells.end(),
+				[](auto const& c) { return c.catalystPoisoning.has_value(); }))
 			mImpl->faultReplayInitialSettings = settings;
 		mImpl->snapshot.systemsStepWorldTicks = settings.systemsStepWorldTicks;
 		mImpl->snapshot.systemsTimestepSeconds = mImpl->clock.stepSeconds();

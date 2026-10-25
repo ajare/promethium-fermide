@@ -722,8 +722,9 @@ namespace core
 	{
 		// The first three kinds are client-supplied. DegradationCrossing
 		// names an autonomous Condition crossing; ThermalGate names an
-		// automatic protective Trip. Clients cannot inject either.
-		enum class Kind { AgentAction, ScenarioEvent, Editor, DegradationCrossing, ThermalGate };
+		// automatic protective Trip; FeedContamination names an onset from
+		// actual feed composition. Clients cannot inject these causes.
+		enum class Kind { AgentAction, ScenarioEvent, Editor, DegradationCrossing, ThermalGate, FeedContamination };
 		Kind kind{Kind::ScenarioEvent};
 		std::string detail;
 		bool operator==(FaultCause const&) const = default;
@@ -1389,6 +1390,14 @@ namespace core
 	// the process and its evidence say it is.
 	inline constexpr std::array<char const*, 6> StationWaterDryConstituents{
 		"dryOrganics", "nutrientNitrogen", "atmosphericNitrogen", "phosphorus", "potassium", "otherMinerals"};
+	// Feed-contact poisoning: dry contaminant mass fraction above the threshold
+	// raises a Fault and permanently fades capacity per exposed hour.
+	struct CatalystPoisoningSettings
+	{
+		double triggerConcentration{0.0};
+		double wearPerHour{0.01};
+		bool operator==(CatalystPoisoningSettings const&) const = default;
+	};
 	struct WaterTreatmentSettings
 	{
 		std::string id;
@@ -1402,6 +1411,7 @@ namespace core
 		double specificEnergyKWhPerKg{0.5}; // electricity per kg processed
 		double consumablePerKg{0.01};      // consumable units per kg processed
 		int priority{0};
+		bool breakthrough{false};
 		bool operator==(WaterTreatmentSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationWaterTreatments{8};
@@ -1458,6 +1468,7 @@ namespace core
 		double specificEnergyKWhPerKgWater{4.5}; // electrical dose per kg split
 		double maxSinkTemperatureC{60.0}; // cooling qualified while the sink is below this
 		int priority{0};
+		std::optional<CatalystPoisoningSettings> catalystPoisoning;
 		bool operator==(ElectrolyzerSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationElectrolyzers{8};
@@ -1531,6 +1542,7 @@ namespace core
 		double efficiency{0.6};      // electrical out per chemical energy in, (0, 1]
 		double commandedOutputKW{0.0}; // dispatch setpoint, [0, rated]
 		double maxSinkTemperatureC{80.0}; // cooling qualified while the sink is below this
+		std::optional<CatalystPoisoningSettings> catalystPoisoning;
 		bool operator==(FuelCellSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationFuelCells{8};
@@ -4036,6 +4048,7 @@ namespace core
 		double consumablesUsed{0.0};
 		double residualKg{0.0}; // processed - treated - concentrate
 		StationTransferStatus status{StationTransferStatus::Idle};
+		std::vector<StationFaultSnapshot> activeFaults;
 		bool operator==(StationWaterTreatmentSnapshot const&) const = default;
 	};
 	// One electrolysis cell as of the most recent tick (#404): the authored
@@ -4083,6 +4096,10 @@ namespace core
 		double residualKg{0.0};        // split - oxygen - hydrogen
 		double residualKJ{0.0};        // supplied - chemical - heat
 		StationTransferStatus status{StationTransferStatus::Idle};
+		std::vector<StationFaultSnapshot> activeFaults;
+		double wearFraction{0.0};
+		double wearOperatingHours{0.0};
+		double effectiveRateKgPerS{0.0};
 		bool operator==(StationElectrolyzerSnapshot const&) const = default;
 	};
 	// One CO2 capture machine as of the most recent tick (#404): the
@@ -4173,6 +4190,10 @@ namespace core
 		double residualKJ{0.0};       // chemical - electrical - waste
 		double enduranceSeconds{0.0}; // usable reactants at the reference output
 		StationTransferStatus status{StationTransferStatus::Idle};
+		std::vector<StationFaultSnapshot> activeFaults;
+		double wearFraction{0.0};
+		double wearOperatingHours{0.0};
+		double effectiveRatedOutputKW{0.0};
 		bool operator==(StationFuelCellSnapshot const&) const = default;
 	};
 	// One Sabatier reactor as of the most recent tick (#405): the

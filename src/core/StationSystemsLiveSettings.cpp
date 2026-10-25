@@ -139,6 +139,23 @@ namespace core
 		StationSystemsSettings const& offered, std::string* diagnostic)
 	{
 		auto& s = *mImpl;
+		auto contaminationTopology = [&](auto const& running, auto const& entries) {
+			for (auto const& next : entries)
+			{
+				auto const old = std::find_if(running.begin(), running.end(),
+					[&](auto const& state) { return state.authored.id == next.id; });
+				using Settings = std::decay_t<decltype(next)>;
+				if (old != running.end() && LiveNode<Settings>::topologyChanged(old->authored, next))
+				{
+					if (diagnostic) *diagnostic = "Contamination Fault opt-ins are frozen topology";
+					return false;
+				}
+			}
+			return true;
+		};
+		if (!contaminationTopology(s.waterTreatments, offered.waterTreatments)
+			|| !contaminationTopology(s.electrolyzers, offered.electrolyzers)
+			|| !contaminationTopology(s.fuelCells, offered.fuelCells)) return false;
 		for (auto const& next : offered.coolantLoops)
 		{
 			auto const old = std::find_if(s.coolantLoops.begin(), s.coolantLoops.end(),

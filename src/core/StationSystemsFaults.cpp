@@ -36,11 +36,29 @@ namespace core
 			// radiators: neither is an outage-registered installation, but
 			// both carry fault modes in the same injection namespace.
 			&& std::none_of(mImpl->solarArrays.begin(), mImpl->solarArrays.end(), [&](auto const& a) { return a.authored.id == id; })
-			&& std::none_of(mImpl->batteries.begin(), mImpl->batteries.end(), [&](auto const& b) { return b.authored.id == id; }))
+			&& std::none_of(mImpl->batteries.begin(), mImpl->batteries.end(), [&](auto const& b) { return b.authored.id == id; })
+			&& std::none_of(mImpl->waterTreatments.begin(), mImpl->waterTreatments.end(), [&](auto const& t) { return t.authored.id == id; }))
 			return refuse("Unknown installation '" + std::string(id) + "'");
 		if (!isInjectableCause(cause.kind))
 			return refuse("Fault cause kind is not injectable: it names a Fault the simulation raises itself");
 		if (cause.detail.size() > 1024) return refuse("Fault cause detail exceeds 1024 bytes");
+		if (mode == "breakthrough")
+		{
+			auto found = std::find_if(mImpl->waterTreatments.begin(), mImpl->waterTreatments.end(),
+				[&](auto const& t) { return t.authored.id == id; });
+			if (found == mImpl->waterTreatments.end() || !found->authored.breakthrough)
+				return refuse("breakthrough is not enabled on this installation");
+			if (found->breakthrough) return refuse("breakthrough is already active or pending");
+			Impl::FaultCommand command;
+			command.afterStep = mImpl->clock.steps(); command.installationId = id;
+			command.modeId = mode; command.cause = cause;
+			mImpl->faultCommands.push_back(std::move(command));
+			found->breakthrough = StationFaultSnapshot{std::string(id), std::string(mode),
+				mImpl->clock.steps() + 1, cause.kind, cause.detail, 1.0};
+			found->breakthroughPending = true;
+			if (diagnostic) diagnostic->clear();
+			return true;
+		}
 		if (mode == "overtemp-runaway")
 		{
 			auto inject = [&](auto& states) {
@@ -605,6 +623,12 @@ namespace core
 	bool StationSystemsRuntime::hasFaultReplayState() const
 	{
 		return hasFaultCommands() || (mImpl->settings.enabled
+			&& (std::any_of(mImpl->settings.waterTreatments.begin(), mImpl->settings.waterTreatments.end(),
+				[](auto const& t) { return t.breakthrough; })
+			|| std::any_of(mImpl->settings.electrolyzers.begin(), mImpl->settings.electrolyzers.end(),
+				[](auto const& c) { return c.catalystPoisoning.has_value(); })
+			|| std::any_of(mImpl->settings.fuelCells.begin(), mImpl->settings.fuelCells.end(),
+				[](auto const& c) { return c.catalystPoisoning.has_value(); }))) || (mImpl->settings.enabled
 			&& (std::any_of(mImpl->coolantLoops.begin(), mImpl->coolantLoops.end(),
 				[](auto const& loop) { return loop.authored.condition.has_value()
 					// #843: Wear integrates over the run, so a save of a
@@ -685,7 +709,7 @@ namespace core
 					s.writeDouble("toxicKg", command.thermalRunaway->toxicKg);
 				}
 				else if (command.modeId != "compressor-failure" && command.modeId != "mechanical-seizure"
-					&& command.modeId != "failed-start")
+					&& command.modeId != "failed-start" && command.modeId != "breakthrough")
 				{
 					s.writeString("compartmentId", command.parameters.compartmentId);
 					s.writeDouble("releasedKg", command.parameters.releasedKg);
@@ -703,7 +727,7 @@ namespace core
 		s.beginMap("stationFaultReplay");
 		auto const steps = s.readUint64("completedSteps");
 		StationSystemsSettings initial;
-		readStationSystemsSettingsMap(s, 118, initial);
+		readStationSystemsSettingsMap(s, 119, initial);
 		auto runtime = std::make_unique<StationSystemsRuntime>(initial, baseSeconds);
 		s.beginArray("commands");
 		uint64_t previous = 0;
@@ -719,7 +743,7 @@ namespace core
 			if (s.hasField("stationSystems"))
 			{
 				StationSystemsSettings update;
-				readStationSystemsSettingsMap(s, 118, update);
+				readStationSystemsSettingsMap(s, 119, update);
 				if (!runtime->updateSettings(update, &diagnostic))
 					throw SerializationException("Invalid fault replay settings: " + diagnostic);
 			}
@@ -764,7 +788,7 @@ namespace core
 					thermalRunaway = BatteryThermalRunawaySettings{s.readString("compartmentId"),
 						s.readDouble("heatKJ"), s.readDouble("toxicKg")};
 				else if (mode != "compressor-failure" && mode != "mechanical-seizure"
-					&& mode != "failed-start")
+					&& mode != "failed-start" && mode != "breakthrough")
 					parameters = {s.readString("compartmentId"), s.readDouble("releasedKg")};
 				if (!isInjectableCause(static_cast<FaultCause::Kind>(kind))
 					|| !runtime->injectFault(id, mode, {static_cast<FaultCause::Kind>(kind), detail}, &diagnostic))

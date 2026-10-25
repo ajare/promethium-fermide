@@ -1020,6 +1020,8 @@ using namespace station_detail;
 			station_detail::ConstituentLedger lastRemovedConstituents, lastPassedConstituents;
 			station_detail::ConstituentLedger removedConstituents, passedConstituents;
 			WaterTreatmentSettings authored;
+			std::optional<StationFaultSnapshot> breakthrough;
+			bool breakthroughPending{false};
 			size_t sourceIndex{0};
 			size_t treatedIndex{0};
 			size_t concentrateIndex{0};
@@ -1069,6 +1071,8 @@ using namespace station_detail;
 		{
 			StationWaterQualitySnapshot waterQuality;
 			ElectrolyzerSettings authored;
+			std::optional<StationFaultSnapshot> poisoning;
+			WearState wear;
 			size_t waterStoreIndex{0};
 			size_t oxygenStoreIndex{SIZE_MAX}; // SIZE_MAX: delivering to the compartment
 			size_t hydrogenStoreIndex{0};
@@ -1130,6 +1134,8 @@ using namespace station_detail;
 		struct FuelCellState
 		{
 			FuelCellSettings authored;
+			std::optional<StationFaultSnapshot> poisoning;
+			WearState wear;
 			size_t hydrogenStoreIndex{0};
 			size_t oxygenStoreIndex{0};
 			size_t waterStoreIndex{0};
@@ -2107,6 +2113,8 @@ using namespace station_detail;
 		// that already happened; the reported fraction is the fade clamped
 		// by maxWearFraction. Negative deltas only unwind operation that
 		// is being taken back (a refunded discharge), never heal wear.
+		bool poisonFeed(std::optional<StationFaultSnapshot>& fault, WearState& wear,
+			CatalystPoisoningSettings const& model, std::string const& id, size_t feed, bool exposed);
 		static void advanceWear(WearState& wear,
 			InstallationWearSettings const& model,
 			double cycles, double operatingHours, double throughputKg, double hours);

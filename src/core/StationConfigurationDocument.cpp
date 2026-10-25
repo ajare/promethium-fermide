@@ -66,7 +66,13 @@ namespace core
 					|| array.trackingFailure.has_value(); })
 			|| std::any_of(document.settings.batteries.begin(), document.settings.batteries.end(),
 				[](auto const& battery) { return battery.thermalRunaway.has_value(); });
-		output->writeUint32("schemaVersion", powerSources ? kWorldSchemaVersion
+		auto const contamination = std::any_of(document.settings.waterTreatments.begin(), document.settings.waterTreatments.end(),
+				[](auto const& t) { return t.breakthrough; })
+			|| std::any_of(document.settings.electrolyzers.begin(), document.settings.electrolyzers.end(),
+				[](auto const& c) { return c.catalystPoisoning.has_value(); })
+			|| std::any_of(document.settings.fuelCells.begin(), document.settings.fuelCells.end(),
+				[](auto const& c) { return c.catalystPoisoning.has_value(); });
+		output->writeUint32("schemaVersion", contamination ? kWorldSchemaVersion : powerSources ? 118
 			: thermalPlant ? 117 : wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		writeStationSystemsSettingsMap(*output, document.settings);
 		output->beginMap("layout");

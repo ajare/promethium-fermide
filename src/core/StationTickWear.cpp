@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace core
 {
@@ -41,6 +42,38 @@ namespace core
 			+ throughputKg * model.fadePerThroughputKg
 			+ hours * model.fadePerCalendarHour;
 		wear.fraction = std::min(model.maxWearFraction, std::max(0.0, wear.fade));
+	}
+
+	bool StationSystemsRuntime::Impl::Tick::poisonFeed(std::optional<StationFaultSnapshot>& fault,
+		WearState& wear, CatalystPoisoningSettings const& model, std::string const& id,
+		size_t feed, bool exposed)
+	{
+		// Targeted live edits deliberately defer validation to the audited
+		// boundary. Refuse malformed rates before they can unwind permanent
+		// fade, including an edit made while the feed is clean or idle.
+		if (!requireFinite(model.triggerConcentration, "catalyst contaminant threshold for '" + id + "'")
+			|| !requireFinite(model.wearPerHour, "catalyst Wear rate for '" + id + "'")) return false;
+		if (model.triggerConcentration < 0.0 || model.triggerConcentration >= 1.0 || model.wearPerHour <= 0.0)
+			return violation = "Invalid catalyst-poisoning parameters for '" + id + "'", false;
+		if (!exposed || qualified[feed] + unqualified[feed] <= 0.0) return true;
+		auto const quality = waterQuality(feed, {}, 0.0, "catalyst", true);
+		// Proportional drift draws can leave an ulp-scale cancellation
+		// remainder after a pure-water refill. It is not a contaminant
+		// exposure: do not latch a permanent Fault on numerical dust.
+		if (quality.totalDissolved <= std::max(model.triggerConcentration,
+			32.0 * std::numeric_limits<double>::epsilon())) return true;
+		if (!fault)
+		{
+			fault = StationFaultSnapshot{id, "catalyst-poisoning", tick,
+				FaultCause::Kind::FeedContamination, runtime.stores[feed].authored.id, 0.0};
+			appendBoundedEvent(runtime.events, tick, "fault", "Fault 'catalyst-poisoning' on '"
+				+ id + "': contaminated feed '" + runtime.stores[feed].authored.id + "'");
+		}
+		InstallationWearSettings fade;
+		fade.fadePerOperatingHour = model.wearPerHour;
+		advanceWear(wear, fade, 0.0, hours, 0.0, 0.0);
+		return requireFinite(wear.fade, "catalyst poisoning Wear for '" + id + "'")
+			&& requireFinite(wear.operatingHours, "catalyst exposure hours for '" + id + "'");
 	}
 
 	bool StationSystemsRuntime::Impl::Tick::wear()

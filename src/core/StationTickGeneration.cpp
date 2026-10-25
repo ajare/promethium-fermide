@@ -1132,6 +1132,10 @@ namespace core
 		totalFuelCellWasteKW = double{0.0};
 		for (auto& cell : runtime.fuelCells)
 		{
+			if (cell.authored.catalystPoisoning && !poisonFeed(cell.poisoning, cell.wear,
+				*cell.authored.catalystPoisoning, cell.authored.id, cell.hydrogenStoreIndex,
+				cell.authored.ratedOutputKW > 0.0
+					&& (dispatchAutomatic ? cell.dispatchCommandKW : cell.authored.commandedOutputKW) > 0.0)) return false;
 			auto ports = materialPorts("Fuel cell", cell.authored.id);
 			auto const disabled = cell.authored.ratedOutputKW <= 0.0;
 			// #415: under automatic dispatch the dispatcher's command for
@@ -1229,6 +1233,10 @@ namespace core
 				scale = capKW / commanded;
 				limiter = reason;
 			};
+			constrain(cell.authored.ratedOutputKW * (1.0 - cell.wear.fraction), "catalyst Wear");
+			// A compound impurity stream cannot be burned as pure hydrogen.
+			// Hold it for routing/disposal rather than destroy its species.
+			if (hydrogen.composition) constrain(0.0, "hydrogen feed contains compound impurities");
 			constrain(connections.remaining(connections.port("Fuel cell", cell.authored.id, "Backup generation")),
 				"electrical generation connection throughput");
 			constrain(byH2KW, "hydrogen store '" + hydrogen.id
