@@ -7,6 +7,39 @@
 namespace core
 {
 using namespace station_detail;
+
+namespace
+{
+	// #843: the shared Wear model contract. Fade rates are fractions of
+	// rated capacity per accumulator unit: finite and non-negative, with a
+	// ceiling in (0, 1], and at least one rate must actually fade - an
+	// all-zero model is a pointless opt-in. A rate for an accumulator the
+	// machine cannot physically wire must be zero, so no author can pay
+	// for wear that can never be counted: a battery flows no counted mass,
+	// a coolant loop is not cycle-counted.
+	char const* wearModelViolation(InstallationWearSettings const& model,
+		bool allowsCycles, bool allowsThroughput)
+	{
+		auto const fin = [](double v) { return std::isfinite(v); };
+		if (!fin(model.fadePerCycle) || !fin(model.fadePerOperatingHour)
+			|| !fin(model.fadePerThroughputKg) || !fin(model.fadePerCalendarHour)
+			|| !fin(model.maxWearFraction))
+			return " wear rates must all be finite";
+		if (model.fadePerCycle < 0.0 || model.fadePerOperatingHour < 0.0
+			|| model.fadePerThroughputKg < 0.0 || model.fadePerCalendarHour < 0.0)
+			return " wear rates must be non-negative";
+		if (model.maxWearFraction <= 0.0 || model.maxWearFraction > 1.0)
+			return " wear ceiling must be greater than 0 and at most 1";
+		if (!allowsCycles && model.fadePerCycle != 0.0)
+			return " is not cycle-counted: fadePerCycle must be zero";
+		if (!allowsThroughput && model.fadePerThroughputKg != 0.0)
+			return " flows no counted mass: fadePerThroughputKg must be zero";
+		if (model.fadePerCycle == 0.0 && model.fadePerOperatingHour == 0.0
+			&& model.fadePerThroughputKg == 0.0 && model.fadePerCalendarHour == 0.0)
+			return " wear model declares no fade rate";
+		return nullptr;
+	}
+}
 	bool isValidStationMaterialId(std::string const& id)
 	{
 		if (id.empty()) return true;
@@ -1096,6 +1129,11 @@ using namespace station_detail;
 			if (!std::isfinite(battery.dischargeEfficiency)
 				|| battery.dischargeEfficiency <= 0.0 || battery.dischargeEfficiency > 1.0)
 				return refuse(where + " discharge efficiency must be finite and greater than 0 up to 1");
+			// #843: the opt-in capacity-fade model. A battery cycles and
+			// ages but flows no counted mass.
+			if (battery.capacityFade)
+				if (auto const reason = wearModelViolation(*battery.capacityFade, true, false))
+					return refuse(where + reason);
 		}
 		if (settings.thermalReservoirs.size() > MaxStationThermalReservoirs)
 			return refuse("Station thermal reservoirs are limited to "
@@ -1306,6 +1344,11 @@ using namespace station_detail;
 				return refuse(where + " exchanger conductance must be finite and non-negative");
 			if (!std::isfinite(loop.heaterCapacityKW) || loop.heaterCapacityKW < 0.0)
 				return refuse(where + " heater capacity must be finite and non-negative");
+			// #843: the opt-in Wear model. A loop operates and moves mass
+			// but is not cycle-counted.
+			if (loop.wear)
+				if (auto const reason = wearModelViolation(*loop.wear, false, true))
+					return refuse(where + reason);
 		} catch (BrokenDraftEntry const&) {}
 		// Chiller contracts (#397): the cold-side interface is a declared
 		// coolant loop and the hot-side sink a declared thermal reservoir,

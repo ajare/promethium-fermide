@@ -2,8 +2,9 @@
 
 Status: design agreed 2026-07-31; coolant-leak injection (#839) and coolant-loop
 Condition, degradation crossing and funded recovery (#840), latching
-Sabatier/methane processor Trips with resetTrip (#841), and repairFault as a
-runtime-started maintenance job (#842) implemented.
+Sabatier/methane processor Trips with resetTrip (#841), repairFault as a
+runtime-started maintenance job (#842), and permanent Wear accumulators with
+the battery capacity-fade pilot (#843) implemented.
 See [the implemented slices](../station-faults.md); the remaining framework below is still design.
 
 Canonical vocabulary: `CONTEXT.md` § Station systems — **Installation**, **Condition**,

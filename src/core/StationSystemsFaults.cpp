@@ -298,7 +298,14 @@ namespace core
 	{
 		return hasFaultCommands() || (mImpl->settings.enabled
 			&& (std::any_of(mImpl->coolantLoops.begin(), mImpl->coolantLoops.end(),
-				[](auto const& loop) { return loop.authored.condition.has_value(); })
+				[](auto const& loop) { return loop.authored.condition.has_value()
+					// #843: Wear integrates over the run, so a save of a
+					// worn machine needs the replay block even when no client
+					// ever issued a command: without it the machine would
+					// come back unworn, which is a lie about its capacity.
+					|| loop.authored.wear.has_value(); })
+			|| std::any_of(mImpl->batteries.begin(), mImpl->batteries.end(),
+				[](auto const& battery) { return battery.authored.capacityFade.has_value(); })
 			|| std::any_of(mImpl->sabatierReactors.begin(), mImpl->sabatierReactors.end(),
 				[](auto const& s) { return s.authored.overtempRunaway.has_value(); })
 			|| std::any_of(mImpl->methaneProcessors.begin(), mImpl->methaneProcessors.end(),
@@ -359,7 +366,7 @@ namespace core
 		s.beginMap("stationFaultReplay");
 		auto const steps = s.readUint64("completedSteps");
 		StationSystemsSettings initial;
-		readStationSystemsSettingsMap(s, 115, initial);
+		readStationSystemsSettingsMap(s, 116, initial);
 		auto runtime = std::make_unique<StationSystemsRuntime>(initial, baseSeconds);
 		s.beginArray("commands");
 		uint64_t previous = 0;
@@ -375,7 +382,7 @@ namespace core
 			if (s.hasField("stationSystems"))
 			{
 				StationSystemsSettings update;
-				readStationSystemsSettingsMap(s, 115, update);
+				readStationSystemsSettingsMap(s, 116, update);
 				if (!runtime->updateSettings(update, &diagnostic))
 					throw SerializationException("Invalid fault replay settings: " + diagnostic);
 			}

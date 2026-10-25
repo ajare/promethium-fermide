@@ -149,6 +149,19 @@ namespace core
 				return false;
 			}
 		}
+		// #843: whether a battery bank has a capacity-fade model is a
+		// run-shape decision, not a live knob: preflight the whole
+		// collection before anything can land, so a mixed offer is atomic.
+		for (auto const& next : offered.batteries)
+		{
+			auto const old = std::find_if(s.batteries.begin(), s.batteries.end(),
+				[&](auto const& battery) { return battery.authored.id == next.id; });
+			if (old != s.batteries.end() && LiveNode<BatterySettings>::topologyChanged(old->authored, next))
+			{
+				if (diagnostic) *diagnostic = "Battery '" + next.id + "': capacity-fade opt-in is frozen topology";
+				return false;
+			}
+		}
 
 		// An opening is topology: which two compartments it joins cannot move
 		// under a running simulation, because the live pressure state and the

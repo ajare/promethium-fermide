@@ -81,7 +81,7 @@ namespace core
 			// loop: with the pump seized (Fault active) there is no running
 			// pump to cavitate, and the Fault already speaks for itself.
 			stress(loop.coolantKg > 0.0 && !loop.seizure && loop.availabilityFactor > 0.0
-					&& loop.condition > 0.0 && loop.authored.ratedFlowKgPerS > 0.0
+					&& loop.condition > 0.0 && loop.effectiveRatedFlowKgPerS() > 0.0
 					&& loop.coolantKg / loop.authored.coolantCapacityKg
 						<= model.cavitationFillFraction + 1e-12,
 				model.cavitationDegradePerHour, "cavitation");

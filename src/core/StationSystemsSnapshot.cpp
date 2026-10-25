@@ -207,7 +207,19 @@ namespace core
 				+ (battery.chargeInputKWh - battery.chargedKWh);
 			batteryResult.residualKWh = battery.authored.startingStoredKWh - battery.dischargedKWh
 				+ battery.chargedKWh - battery.stored;
-			batteryResult.disabled = battery.authored.usableKWh <= 0.0;
+			// The permanent capacity fade (#843). Reported for every bank:
+			// one with no fade model reports zero wear and effective
+			// ratings equal to the authored ones, which is exactly what it
+			// is. Repair never reverses the fade: a repaired battery keeps
+			// its faded capacity.
+			batteryResult.wearFraction = battery.wear.fraction;
+			batteryResult.wearCycles = battery.wear.cycles;
+			batteryResult.wearOperatingHours = battery.wear.operatingHours;
+			batteryResult.wearCalendarHours = battery.wear.calendarHours;
+			batteryResult.effectiveNameplateKWh = battery.effectiveNameplateKWh();
+			batteryResult.effectiveUsableKWh = battery.effectiveUsableKWh();
+			batteryResult.effectiveReserveKWh = battery.effectiveReserveKWh();
+			batteryResult.disabled = battery.effectiveUsableKWh() <= 0.0;
 			batteryResult.atReserve = battery.lastAtReserve;
 			batteryResult.saturated = battery.lastSaturated;
 			batteryResult.status = battery.status;
@@ -445,7 +457,7 @@ namespace core
 			loopResult.pumpUnmetKW = loop.lastPumpDemandKW - loop.lastPumpSuppliedKW;
 			loopResult.circulationFraction = loop.lastCirculationFraction;
 			loopResult.flowKgPerS = loop.lastFlowKgPerS;
-			loopResult.unmetFlowKgPerS = loop.authored.ratedFlowKgPerS - loop.lastFlowKgPerS;
+			loopResult.unmetFlowKgPerS = loop.effectiveRatedFlowKgPerS() - loop.lastFlowKgPerS;
 			loopResult.heaterCapacityKW = loop.authored.heaterCapacityKW;
 			loopResult.heaterDemandKW = loop.lastHeaterDemandKW;
 			loopResult.heaterSuppliedKW = loop.lastHeaterSuppliedKW;
@@ -469,6 +481,16 @@ namespace core
 			loopResult.restoreTargetCondition = loop.restoreTarget;
 			loopResult.restoreStockConsumedUnits = loop.restoreStockUnits;
 			loopResult.conditionCapability = loop.conditionCapability();
+			// The permanent Wear layer (#843). Reported for every loop: one
+			// with no Wear model reports an unworn machine whose effective
+			// rated flow equals the authored rating, which is exactly what
+			// it is. The fade survives repair - a repaired loop keeps its
+			// faded rating.
+			loopResult.wearFraction = loop.wear.fraction;
+			loopResult.wearOperatingHours = loop.wear.operatingHours;
+			loopResult.wearThroughputKg = loop.wear.throughputKg;
+			loopResult.wearCalendarHours = loop.wear.calendarHours;
+			loopResult.effectiveRatedFlowKgPerS = loop.effectiveRatedFlowKgPerS();
 			loopResult.startingEnergyKJ = loop.authored.startingCoolantKg
 				* loop.authored.specificHeatKJPerKgK * loop.authored.startingTemperatureC;
 			loopResult.currentEnergyKJ = loop.coolantKg

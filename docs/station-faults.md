@@ -1,9 +1,11 @@
-# Station Faults, Condition and Trips (#839–#841)
+# Station Faults, Condition, Trips, Repair and Wear (#839–#843)
 
 Implemented slices of [the failure framework](specs/station_degradation_failure_specification.md)
 include coolant-leak injection, opt-in coolant-loop Condition with funded recovery,
-and latching Sabatier/methane processor Trips.
-Wear, Fault-clearing Repair jobs and other component catalogues remain follow-ups. Propagation follows
+latching Sabatier/methane processor Trips, repairFault as a runtime-started
+maintenance job, and permanent Wear accumulators with the battery capacity-fade
+pilot.
+Other component catalogues remain follow-ups. Propagation follows
 [ADR-0030](adr/0030-faults-propagate-through-media-via-hazard-bookings-never-direct-damage-edges.md).
 
 ## Authoring and commands
@@ -207,7 +209,66 @@ picture with kind `repair`, the target `faultModeId`, phase, progress and the
 per-requirement reservation/spend. Bounded `repair` events record start,
 interruption and completion; a `fault` event records the clear.
 
+## Wear
+
+An Installation opts into permanent Wear with an `InstallationWearSettings`
+block. Fade rates are fractions of rated capacity per accumulator unit and
+must be finite and non-negative with the ceiling in `(0, 1]`; at least one
+rate must fade, and a rate for an accumulator the machine cannot physically
+wire is refused: a battery flows no counted mass, a coolant loop is not
+cycle-counted.
+
+```yaml
+batteries:
+  - id: bank
+    capacityFade:
+      fadePerCycle: 0.0005        # fraction of rated capacity per equivalent full cycle
+      fadePerCalendarHour: 0.00002 # fraction per simulated hour, working or resting
+      maxWearFraction: 0.6        # permanent clamp on total fade
+```
+
+The battery is the capacity-fade pilot: equivalent full cycles are counted
+on real charge and real discharge - a full charge plus a full discharge of
+the authored cyclable energy is one cycle, so each side of the round trip
+banks half of what it moves - plus calendar ageing that acts while the bank
+sits idle. The permanent `wearFraction` scales the whole rating:
+effective nameplate, usable and reserve are the authored values times
+`(1 - wearFraction)`. A faded bank fills only to its faded ceiling,
+delivers from no more than it, and its protected floor keeps its authored
+ratio. Energy stored above a ceiling the fade overtook stays fully accounted
+but stranded until discharge brings the bank back under it.
+
+A coolant loop opts in the same way with `wear`: it accrues operating hours
+while coolant actually circulates and throughput of the mass actually
+moved, plus calendar time, and its `wearFraction` scales the effective
+rated flow. The fade rides the same continuous capability scale as
+Condition - flow, pump demand and every protected credit size against the
+faded rating - and composes with Outages and Fault caps unchanged.
+
+Each interval's fade is priced at the rates current when the operation
+happened, so a live rate retune never reprices fade already accumulated;
+presence of the model is frozen topology while the rates stay live-tunable.
+The fade is monotonic: nothing heals it. Repair clears Faults and restores
+Condition but leaves `wearFraction` exactly where it found it - a repaired
+battery keeps its faded rating, a repaired loop keeps its faded flow - and
+only replacement, a topology change (a reset), starts a machine unworn.
+Wear is not a Fault: it cannot be injected, repaired or reset, and
+`injectFault` refuses `capacity-fade` with a diagnostic.
+
+Snapshots report the accumulators, the fade and the effective ratings for
+every battery and loop; a machine without the model reports zero wear and
+effective ratings equal to the authored ones. Wear state is replay state:
+a save of a worn machine carries the fault-replay block even with no client
+ever issuing a command, and the fade reconstructs exactly through YAML and
+binary replay and World save/load.
+
 ## Persistence and replay
+
+Schema 116 carries Wear opt-ins; earlier documents carrying a
+`capacityFade` or loop `wear` block are refused. Worn machines retain the
+replay state even before any client command, so save/load preserves the
+accumulated fade exactly. Wear-absent output keeps its previous schema and
+encoding.
 
 Schema 114 carries Trip opt-ins; earlier documents carrying them are refused.
 Enabled Trip models retain replay state even before any client command, so

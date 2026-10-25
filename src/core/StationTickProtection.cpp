@@ -68,8 +68,9 @@ namespace core
 			// #840: the protected credit must be sized against the same
 			// capability the loop pass will actually deliver, Condition
 			// included, or a worn critical pump would be credited watts it
-			// cannot turn into flow.
-			auto const capability = loop.conditionCapability();
+			// cannot turn into flow. #843: permanent Wear folds into the
+			// same scale so the credit matches the faded rating exactly.
+			auto const capability = loop.conditionCapability() * loop.wearCapability();
 			auto const effectiveFlowCapacityKgPerS = loop.authored.ratedFlowKgPerS
 				* loop.availabilityFactor * capability;
 			auto const flowCapacityDisabled = effectiveFlowCapacityKgPerS <= 0.0;
@@ -136,7 +137,10 @@ namespace core
 			auto const disabledLoop = loop.coolantKg <= 0.0;
 			// #840: same Condition-scaled capability as the loop pass and
 			// the protected-loop credit above; the three must agree exactly.
-			auto const capability = loop.conditionCapability();
+			// #843: with the permanent wear scale folded in at all three,
+			// a worn loop's chiller support sizes against the flow the worn
+			// pump can actually deliver.
+			auto const capability = loop.conditionCapability() * loop.wearCapability();
 			auto const loopFlowCapacityKgPerS = loop.authored.ratedFlowKgPerS
 				* loop.availabilityFactor * capability;
 			auto const loopFlowDisabled = loopFlowCapacityKgPerS <= 0.0;

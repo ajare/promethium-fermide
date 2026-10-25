@@ -45,6 +45,35 @@ namespace core
 		}
 		s.endMap();
 	}
+	// #843: the shared Wear settings block. Written only when the machine
+	// opts in, so a feature-absent entry carries no new field and existing
+	// fixtures stay byte-identical.
+	void writeWearBlock(Serializer& s, std::string const& name,
+		InstallationWearSettings const& model)
+	{
+		s.beginMap(name);
+		s.writeDouble("fadePerCycle", model.fadePerCycle);
+		s.writeDouble("fadePerOperatingHour", model.fadePerOperatingHour);
+		s.writeDouble("fadePerThroughputKg", model.fadePerThroughputKg);
+		s.writeDouble("fadePerCalendarHour", model.fadePerCalendarHour);
+		s.writeDouble("maxWearFraction", model.maxWearFraction);
+		s.endMap();
+	}
+	bool readWearBlock(Serializer& s, std::string const& name, uint32_t version,
+		char const* feature, InstallationWearSettings& model)
+	{
+		if (!s.hasField(name)) return false;
+		if (version < 116)
+			throw SerializationException(std::string(feature) + " requires schema 116");
+		s.beginMap(name);
+		model.fadePerCycle = s.readDouble("fadePerCycle");
+		model.fadePerOperatingHour = s.readDouble("fadePerOperatingHour");
+		model.fadePerThroughputKg = s.readDouble("fadePerThroughputKg");
+		model.fadePerCalendarHour = s.readDouble("fadePerCalendarHour");
+		model.maxWearFraction = s.readDouble("maxWearFraction");
+		s.endMap();
+		return true;
+	}
 	}
 	void writeStationSystemsSettingsMap(Serializer& serializer, StationSystemsSettings const& settings)
 	{
@@ -360,6 +389,9 @@ namespace core
 					serializer.endArray();
 					serializer.endMap();
 				}
+				// #843: the Wear opt-in travels only when the loop has one.
+				if (loop.wear)
+					writeWearBlock(serializer, "wear", *loop.wear);
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -1004,6 +1036,10 @@ namespace core
 				serializer.writeDouble("maxDischargeKW", battery.maxDischargeKW);
 				serializer.writeDouble("chargeEfficiency", battery.chargeEfficiency);
 				serializer.writeDouble("dischargeEfficiency", battery.dischargeEfficiency);
+				// #843 pilot: the capacity-fade opt-in travels only when
+				// the bank has one.
+				if (battery.capacityFade)
+					writeWearBlock(serializer, "capacityFade", *battery.capacityFade);
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -1543,6 +1579,13 @@ namespace core
 					serializer.endArray();
 					serializer.endMap();
 					loop.repairParts = std::move(wiring);
+				}
+				// #843: a pre-116 document carrying a Wear model is
+				// refused rather than silently dropped.
+				{
+					InstallationWearSettings model;
+					if (readWearBlock(serializer, "wear", version, "Coolant loop wear models", model))
+						loop.wear = model;
 				}
 				stationSettings.coolantLoops.push_back(std::move(loop));
 				serializer.endMap();
@@ -2276,6 +2319,14 @@ namespace core
 				battery.maxDischargeKW = serializer.readDouble("maxDischargeKW");
 				battery.chargeEfficiency = serializer.readDouble("chargeEfficiency");
 				battery.dischargeEfficiency = serializer.readDouble("dischargeEfficiency");
+				// #843: a pre-116 document carrying a capacity-fade model
+				// is refused rather than silently dropped.
+				{
+					InstallationWearSettings model;
+					if (readWearBlock(serializer, "capacityFade", version,
+						"Battery capacity-fade models", model))
+						battery.capacityFade = model;
+				}
 				stationSettings.batteries.push_back(std::move(battery));
 				serializer.endMap();
 			}

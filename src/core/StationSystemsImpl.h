@@ -201,6 +201,24 @@ using namespace station_detail;
 			double lastSurgeKW{0.0};
 			std::string lastRecoveryHoldReason;
 		};
+		// #843: one opt-in Installation's wear accumulators and the
+		// permanent fade they drive. Accumulators grow only with actual
+		// operation and calendar time (the refund of a discharge that
+		// never actually happened is the only unwinding, because that
+		// operation truly did not occur). `fade` is the raw accumulated
+		// fade priced at each interval's then-current rates; `fraction`
+		// is the reported fade, `fade` clamped by the model's
+		// maxWearFraction. Repair never touches this state: only
+		// replacement, a topology reset, starts a machine unworn.
+		struct WearState
+		{
+			double cycles{0.0};
+			double operatingHours{0.0};
+			double throughputKg{0.0};
+			double calendarHours{0.0};
+			double fade{0.0};
+			double fraction{0.0};
+		};
 		// The authoritative ledger of one configured battery bank (#394).
 		// Discharge covers the load demand generation could not reach, on
 		// the same allocation pool — never a second budget — and charging
@@ -210,6 +228,21 @@ using namespace station_detail;
 		struct BatteryState
 		{
 			BatterySettings authored;
+			// #843: the permanent Wear accumulators and the capacity fade
+			// they drive. Accumulators count only actual operation (and
+			// calendar time); `fade` is the raw accumulated fade and
+			// `fraction` the fade as reported, clamped by the model's
+			// maxWearFraction. Repair never touches this state: a repaired
+			// battery keeps its faded rating, and only replacement - a
+			// topology reset - starts unworn.
+			WearState wear;
+			double wearCapability() const { return 1.0 - wear.fraction; }
+			double effectiveNameplateKWh() const
+			{ return authored.nameplateKWh * (1.0 - wear.fraction); }
+			double effectiveUsableKWh() const
+			{ return authored.usableKWh * (1.0 - wear.fraction); }
+			double effectiveReserveKWh() const
+			{ return (authored.nameplateKWh - authored.usableKWh) * (1.0 - wear.fraction); }
 			double stored{0.0};
 			double lastChargeKW{0.0};
 			double lastDischargeKW{0.0};
@@ -404,6 +437,11 @@ using namespace station_detail;
 			std::string lastStressors;
 			double lastRestoreStockUnits{0.0};
 			double restoreStockUnits{0.0};
+			// #843: the permanent Wear accumulators. A loop wears on the
+			// hours its pump actually circulates and the coolant mass it
+			// actually moves, plus calendar time. Permanent: repair
+			// clears Faults but never reverses Wear.
+			WearState wear;
 			// Fault inventory loss and Outage caps compose by minimum. The
 			// legacy fill multiplier remains unchanged on non-faulted loops.
 			double flowFillMultiplier() const
@@ -414,6 +452,14 @@ using namespace station_detail;
 			// existing fixture is untouched (#840).
 			double conditionCapability() const
 			{ return authored.condition ? condition : 1.0; }
+			// #843: the capability fraction permanent Wear leaves the
+			// pump. A loop with no Wear model is unworn and multiplies by
+			// exactly 1.0; a worn loop moves and pumps only the fraction
+			// of its rating the fade has not taken. Wear is permanent: no
+			// repair, restore or Trip reset touches it.
+			double wearCapability() const { return 1.0 - wear.fraction; }
+			double effectiveRatedFlowKgPerS() const
+			{ return authored.ratedFlowKgPerS * wearCapability(); }
 			size_t reservoirIndex{0};
 			double coolantKg{0.0};
 			double temperatureC{0.0};
@@ -1948,6 +1994,23 @@ using namespace station_detail;
 		// thermal() so both size the loop against the capability the
 		// Condition actually leaves it.
 		bool condition();
+		// The permanent Wear layer (#843): calendar, operating-hour and
+		// throughput accumulation for opt-in Installations. Runs after
+		// atmosphere() so the interval's real charge, discharge and
+		// circulation are all known, and before the audits so a poisoned
+		// fade fails the tick and rolls back with everything else. Cycle
+		// accumulation itself happens at the charge/discharge sites, where
+		// the real energy moved is known.
+		bool wear();
+		// Price one interval's operation into the accumulators and the
+		// permanent fade (#843). The fade delta is priced at the model's
+		// current rates, so a later live retune never reprices operation
+		// that already happened; the reported fraction is the fade clamped
+		// by maxWearFraction. Negative deltas only unwind operation that
+		// is being taken back (a refunded discharge), never heal wear.
+		static void advanceWear(WearState& wear,
+			InstallationWearSettings const& model,
+			double cycles, double operatingHours, double throughputKg, double hours);
 		bool thermal();
 		bool processing();
 		bool biology();

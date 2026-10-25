@@ -5,6 +5,7 @@
 #include <vector>
 void registerStationFaultChecks(std::vector<smoke::Check>& checks);
 void registerStationConditionChecks(std::vector<smoke::Check>& checks);
+void registerStationWearChecks(std::vector<smoke::Check>& checks);
 #include "Documents.h"
 #include "Connections.h"
 #include "BatteryObservations.h"

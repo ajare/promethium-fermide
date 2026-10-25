@@ -266,7 +266,8 @@ namespace core
 				Tick preview(*this, tick, duration, system, violation, instant, true);
 				auto const valid = preview.prepare() && preview.generation()
 					&& preview.protection() && preview.thermal() && preview.processing()
-					&& preview.biology() && preview.atmosphere() && preview.auditPower();
+					&& preview.biology() && preview.atmosphere() && preview.wear()
+					&& preview.auditPower();
 				engineDemandKW = preview.dispatchDemandKW;
 				restore();
 				prediction = savedPrediction;
@@ -276,7 +277,7 @@ namespace core
 			scratch.engineAcceptanceDemandKW = engineDemandKW;
 			if (!scratch.prepare() || !scratch.generation() || !scratch.protection()
 				|| !scratch.thermal() || !scratch.processing() || !scratch.biology()
-				|| !scratch.atmosphere()) return false;
+				|| !scratch.atmosphere() || !scratch.wear()) return false;
 			scratch.captureProtection();
 			if (!scratch.auditPower() || !scratch.auditState() || !scratch.commitAndEvents()) return false;
 			committed(scratch);

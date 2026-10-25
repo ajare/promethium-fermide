@@ -55,7 +55,12 @@ namespace core
 			// machine at 0.6 Condition still circulates, just at 60%. A loop
 			// with no Condition model multiplies by exactly 1.0 and is
 			// bit-for-bit the machine it was before.
-			auto const capability = loop.conditionCapability();
+			// #843: permanent Wear rides the same continuous scale: a worn
+			// pump moves and pumps only the fraction of its rating the
+			// fade has not taken, and an unworn loop multiplies by exactly
+			// 1.0. Repair lifts the Fault and the Condition, never the
+			// fade - the loop keeps flowing at its faded rating.
+			auto const capability = loop.conditionCapability() * loop.wearCapability();
 			auto const effectiveFlowCapacityKgPerS = loop.authored.ratedFlowKgPerS
 				* loop.availabilityFactor * capability;
 			auto const flowCapacityDisabled = effectiveFlowCapacityKgPerS <= 0.0;

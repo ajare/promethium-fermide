@@ -32,8 +32,15 @@ namespace core
 		// stamping 114 exactly as before.
 		auto const repairs = std::any_of(document.settings.coolantLoops.begin(), document.settings.coolantLoops.end(),
 			[](auto const& loop) { return loop.repairParts.has_value(); });
-		output->writeUint32("schemaVersion", repairs ? kWorldSchemaVersion
-			: trips ? 114 : condition ? 113 : faults ? 112 : 111);
+		// #843: Wear opt-ins are the newest tier; a document carrying a
+		// battery capacity-fade or a loop Wear model stamps the current
+		// schema, and repair-only documents keep stamping 115 unchanged.
+		auto const wear = std::any_of(document.settings.batteries.begin(), document.settings.batteries.end(),
+			[](auto const& battery) { return battery.capacityFade.has_value(); })
+			|| std::any_of(document.settings.coolantLoops.begin(), document.settings.coolantLoops.end(),
+				[](auto const& loop) { return loop.wear.has_value(); });
+		output->writeUint32("schemaVersion", wear ? kWorldSchemaVersion
+			: repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		writeStationSystemsSettingsMap(*output, document.settings);
 		output->beginMap("layout");
 		output->writeFloat("panX", document.panX);

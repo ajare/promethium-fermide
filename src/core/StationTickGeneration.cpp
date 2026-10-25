@@ -597,7 +597,7 @@ namespace core
 		for (auto const& battery : runtime.batteries)
 		{
 			if (batteryDisabled(battery)) continue;
-			auto const headroom = battery.authored.nameplateKWh - battery.stored;
+			auto const headroom = battery.effectiveNameplateKWh() - battery.stored;
 			if (headroom <= 0.0) continue;
 			auto const wantedKW = std::min(battery.authored.maxChargeKW,
 				headroom / hours / battery.authored.chargeEfficiency);

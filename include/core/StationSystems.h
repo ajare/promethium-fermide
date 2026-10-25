@@ -681,6 +681,32 @@ namespace core
 		double stockUnitsPerConditionPoint{1.0};// stock units consumed per condition point restored
 		bool operator==(InstallationConditionSettings const&) const = default;
 	};
+	// #843: the permanent Wear layer. Wear accumulators count actual
+	// operation - equivalent full cycles on real charge/discharge,
+	// operating hours while the machine really works, throughput of real
+	// flowed mass - plus calendar time, and the authored fade rates convert
+	// them into a permanent wearFraction of rated capacity lost within a
+	// run. Unlike Condition, Wear is never healed: Repair clears Faults and
+	// restores Condition but never reverses Wear; a repaired machine keeps
+	// its faded rating. Only replacement - a topology change, a reset -
+	// starts a fresh, unworn machine. Which accumulators a machine wires
+	// depends on what the machine physically is: a battery fades on cycles
+	// and calendar time, a coolant loop on operating hours and circulated
+	// mass. Rates are fractions of rated capacity per accumulator unit;
+	// unwired rates must be zero so no author can pay for fade the machine
+	// cannot accumulate. Presence of the model is frozen topology; the
+	// rates inside it are live-tunable parameters that never rewrite the
+	// fade already accumulated - each interval's fade is priced at the
+	// rates current when the operation happened.
+	struct InstallationWearSettings
+	{
+		double fadePerCycle{0.0};           // fraction of rated capacity per equivalent full cycle
+		double fadePerOperatingHour{0.0};   // fraction per hour of actual operation
+		double fadePerThroughputKg{0.0};    // fraction per kg actually flowed
+		double fadePerCalendarHour{0.0};    // fraction per simulated hour, operating or not
+		double maxWearFraction{1.0};        // permanent clamp on total fade, (0, 1]
+		bool operator==(InstallationWearSettings const&) const = default;
+	};
 	struct StationFaultSnapshot
 	{
 		std::string installationId, modeId;
@@ -721,6 +747,12 @@ namespace core
 		// identity and the per-mode plan identities are topology; plan
 		// durations and parts quantities are live-tunable.
 		std::optional<RepairPartsSettings> repairParts;
+		// #843: the loop's opt-in Wear model. A loop wears on the hours
+		// its pump actually circulates and the coolant mass it actually
+		// moves, plus calendar time; it is not cycle-counted, so
+		// fadePerCycle must be zero. The permanent wearFraction it drives
+		// scales the loop's effective rated flow; repair never reverses it.
+		std::optional<InstallationWearSettings> wear;
 		bool operator==(CoolantLoopSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationCoolantLoops{8};
@@ -861,6 +893,16 @@ namespace core
 		double maxDischargeKW{0.0};      // discharge power limit, >= 0
 		double chargeEfficiency{1.0};    // stored kWh per bus kWh, (0, 1]
 		double dischargeEfficiency{1.0}; // delivered kWh per stored kWh drawn, (0, 1]
+		// #843 pilot: the battery's opt-in capacity-fade. The bank fades
+		// on equivalent full cycles - counted on real charge and real
+		// discharge, a full charge plus a full discharge of the authored
+		// cyclable energy being one cycle - and on calendar time whether
+		// it works or not. It flows no mass, so fadePerThroughputKg must
+		// be zero. The permanent wearFraction scales the whole rating:
+		// effective nameplate, usable and reserve are the authored values
+		// times (1 - wearFraction). Repair never reverses the fade; a
+		// repaired battery keeps its faded capacity.
+		std::optional<InstallationWearSettings> capacityFade;
 		bool operator==(BatterySettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationBatteries{8};
@@ -2830,6 +2872,18 @@ namespace core
 		double chargeInputKWh{0.0};    // cumulative battery-terminal charging input energy
 		double lossesKWh{0.0};         // intrinsic charge/discharge losses, excluding cables
 		double residualKWh{0.0};       // starting - discharged + charged - stored
+		// #843: the permanent capacity fade and the accumulators that
+		// drive it. The effective ratings are the authored values scaled
+		// by (1 - wearFraction): what the bank can actually hold, cycle
+		// and keep protected now. A battery with no fade model reports
+		// zero wear and effective ratings equal to the authored ones.
+		double wearFraction{0.0};
+		double wearCycles{0.0};
+		double wearOperatingHours{0.0};
+		double wearCalendarHours{0.0};
+		double effectiveNameplateKWh{0.0};
+		double effectiveUsableKWh{0.0};
+		double effectiveReserveKWh{0.0};
 		bool disabled{false};          // zero usable capacity
 		bool atReserve{false};         // stored is at the reserve floor
 		bool saturated{false};         // stored is at nameplate capacity
@@ -3223,6 +3277,16 @@ namespace core
 		double restoreTargetCondition{0.0};// commanded target, 0 when none
 		double restoreStockConsumedUnits{0.0}; // cumulative service stock spent
 		double conditionCapability{1.0};  // delivered-capability fraction Condition leaves, [0, 1]
+		// #843: the permanent wear fade and the accumulators that drive
+		// it. The effective rated flow is the authored rating scaled by
+		// (1 - wearFraction): the circulation the worn pump can actually
+		// deliver now. A loop with no Wear model reports zero wear and an
+		// effective rating equal to the authored one.
+		double wearFraction{0.0};
+		double wearOperatingHours{0.0};
+		double wearThroughputKg{0.0};
+		double wearCalendarHours{0.0};
+		double effectiveRatedFlowKgPerS{0.0};
 		double startingEnergyKJ{0.0};
 		double currentEnergyKJ{0.0};
 		double pumpWorkEnergyKJ{0.0};

@@ -1003,8 +1003,15 @@ namespace core
 		// stamping 114 exactly as before.
 		bool const repairs = std::any_of(mStationSystemsSettings.coolantLoops.begin(), mStationSystemsSettings.coolantLoops.end(),
 			[](auto const& loop) { return loop.repairParts.has_value(); });
-		serializer.writeUint32("version", repairs ? kWorldSchemaVersion
-			: trips ? 114 : condition ? 113 : faults ? 112 : 111);
+		// #843: Wear opt-ins are the newest tier; a save carrying a
+		// battery capacity-fade or a loop Wear model stamps the current
+		// schema, and repair-only saves keep stamping 115 unchanged.
+		bool const wear = std::any_of(mStationSystemsSettings.batteries.begin(), mStationSystemsSettings.batteries.end(),
+				[](auto const& battery) { return battery.capacityFade.has_value(); })
+			|| std::any_of(mStationSystemsSettings.coolantLoops.begin(), mStationSystemsSettings.coolantLoops.end(),
+				[](auto const& loop) { return loop.wear.has_value(); });
+		serializer.writeUint32("version", wear ? kWorldSchemaVersion
+			: repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);

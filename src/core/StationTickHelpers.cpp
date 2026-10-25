@@ -140,15 +140,25 @@ namespace core
 	}
 
 	double StationSystemsRuntime::Impl::Tick::batteryReserve(BatteryState const& battery)
-	{ return battery.authored.nameplateKWh - battery.authored.usableKWh; }
+	{
+		// #843: the reserve is part of the rating, so permanent Wear
+		// scales it with everything else: the protected floor and the
+		// cyclable slice fade together and keep their authored ratio.
+		return (battery.authored.nameplateKWh - battery.authored.usableKWh)
+			* battery.wearCapability();
+	}
 
 	bool StationSystemsRuntime::Impl::Tick::batteryDisabled(BatteryState const& battery)
-	{ return battery.authored.usableKWh <= 0.0; }
+	{ return battery.effectiveUsableKWh() <= 0.0; }
 
 	double StationSystemsRuntime::Impl::Tick::nativeDeliverableKW(BatteryState const& battery, double dtHours)
 	{
 		if (batteryDisabled(battery)) return 0.0;
-		auto const drawable = std::max(0.0, battery.stored - batteryReserve(battery));
+		// #843: a faded bank delivers from no more than its faded ceiling:
+		// energy stored above the effective nameplate is stranded by the
+		// fade, still fully accounted in `stored`, never deliverable.
+		auto const drawable = std::max(0.0,
+			std::min(battery.stored, battery.effectiveNameplateKWh()) - batteryReserve(battery));
 		auto const byEnergy = drawable * battery.authored.dischargeEfficiency / dtHours;
 		// The discharge power limit is per tick: whatever this battery
 		// already delivered this tick counts against it, so the two
@@ -191,6 +201,13 @@ namespace core
 				battery.dischargedKWh += drawn;
 				battery.deliveredKWh += transport.input * hours;
 				battery.lastDischargeKW += transport.input;
+				// #843: cycles are counted on real discharge. A full
+				// charge plus a full discharge of the authored cyclable
+				// energy is one equivalent cycle, so each side of the
+				// round trip banks half of what it moves.
+				if (battery.authored.capacityFade && battery.authored.usableKWh > 0.0)
+					advanceWear(battery.wear, *battery.authored.capacityFade,
+						drawn / (2.0 * battery.authored.usableKWh), 0.0, 0.0, 0.0);
 				if (contributions != nullptr)
 					contributions->push_back({batteryIndex, give});
 			}
@@ -416,6 +433,13 @@ namespace core
 			battery.dischargedKWh -= storedKWh;
 			battery.deliveredKWh -= nativeGive * hours;
 			battery.lastDischargeKW -= nativeGive;
+			// #843: the refunded discharge never actually happened, so the
+			// cycle it was counted toward is unwound with it. This is the
+			// only unwinding Wear ever sees, and it removes operation that
+			// truly did not occur - it never heals fade from work that did.
+			if (battery.authored.capacityFade && battery.authored.usableKWh > 0.0)
+				advanceWear(battery.wear, *battery.authored.capacityFade,
+					-storedKWh / (2.0 * battery.authored.usableKWh), 0.0, 0.0, 0.0);
 			batterySuppliedKW -= give;
 			it->second -= give;
 			refundKW -= give;

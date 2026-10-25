@@ -70,8 +70,21 @@ namespace core
 	PF_STATION_LIVE_NODE(ResourceConversionSettings, conversions, "Conversion")
 	PF_STATION_LIVE_NODE(SolarArraySettings, solarArrays, "Solar")
 	PF_STATION_LIVE_NODE(EquipmentLoadSettings, equipmentLoads, "Equipment")
-	PF_STATION_LIVE_NODE_WITH(BatterySettings, batteries, "Battery",
-		&BatterySettings::startingStoredKWh)
+	template <> struct LiveNode<BatterySettings>
+	{
+		static constexpr std::string_view nodeType = "Battery";
+		static auto& of(auto& settings) { return settings.batteries; }
+		static bool restoreInitial(BatterySettings const& running, BatterySettings& offered)
+		{ return restoreStationInitialFields(running, offered, &BatterySettings::startingStoredKWh); }
+		static bool topologyChanged(BatterySettings const& a, BatterySettings const& b)
+		{
+			// #843: whether the bank has a capacity-fade model at all is a
+			// run-shape decision frozen at construction; the fade rates
+			// inside it stay live-tunable parameters that never reprice the
+			// fade already accumulated.
+			return a.capacityFade.has_value() != b.capacityFade.has_value();
+		}
+	};
 	PF_STATION_LIVE_NODE(ResourceDeliverySettings, deliveries, "Delivery")
 	PF_STATION_LIVE_NODE(WasteEjectionSettings, wasteEjections, "Waste ejection")
 	PF_STATION_LIVE_NODE(InstallationOutageSettings, outages, "Outage")
@@ -96,6 +109,10 @@ namespace core
 				|| a.condition.has_value() != b.condition.has_value()
 				|| (a.condition && b.condition
 					&& a.condition->restoreStoreId != b.condition->restoreStoreId)
+				// #843: whether the loop has a Wear model at all is frozen
+				// topology; the fade rates inside it stay live-tunable
+				// parameters that never reprice the fade already accumulated.
+				|| a.wear.has_value() != b.wear.has_value()
 				// #842: the repair-parts store identity and the per-mode
 				// plan identities are topology - which faults are repairable
 				// and which stores they draw from cannot move under a live

@@ -1260,7 +1260,11 @@ namespace core
 		{
 			if (batteryDisabled(battery) || availableGeneration <= 0.0) continue;
 			if (battery.lastDischargeKW > 0.0) continue;
-			auto const headroom = battery.authored.nameplateKWh - battery.stored;
+			// #843: a faded bank fills only to its faded ceiling: the
+			// effective nameplate, not the authored one, bounds the
+			// headroom, so the wearFraction permanently caps how much the
+			// bank can ever hold again within the run.
+			auto const headroom = battery.effectiveNameplateKWh() - battery.stored;
 			if (headroom <= 0.0) continue;
 			// #417: during a recovery stage the pending restart headroom
 			// is held out of the charge pool, so charging never consumes
@@ -1275,6 +1279,11 @@ namespace core
 			battery.chargedKWh += storedGain;
 			battery.chargeInputKWh += busUsed;
 			battery.lastChargeKW = busUsed / hours;
+			// #843: cycles are counted on real charge, half a round trip
+			// per side of the authored cyclable energy.
+			if (battery.authored.capacityFade && battery.authored.usableKWh > 0.0)
+				advanceWear(battery.wear, *battery.authored.capacityFade,
+					storedGain / (2.0 * battery.authored.usableKWh), 0.0, 0.0, 0.0);
 			// The pool is in power units: subtract the bus power the
 			// battery actually took, not the tick's energy.
 			availableGeneration -= transport.input;
@@ -1292,7 +1301,7 @@ namespace core
 			}
 			auto const reserve = batteryReserve(battery);
 			battery.lastAtReserve = battery.stored <= reserve + 1e-12;
-			auto const nameplate = battery.authored.nameplateKWh;
+			auto const nameplate = battery.effectiveNameplateKWh();
 			battery.lastSaturated = battery.stored >= nameplate - 1e-12;
 			if (battery.lastDischargeKW > 1e-12)
 				battery.status = battery.lastDischargeShortfallKW <= 1e-12

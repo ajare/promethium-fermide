@@ -222,8 +222,12 @@ namespace core
 		for (size_t index = 0; index < batteries.size() && index < batteryEndurance.size(); ++index)
 		{
 			auto const& battery = batteries[index];
-			auto const reserve = battery.authored.nameplateKWh - battery.authored.usableKWh;
-			auto const drawable = std::max(0.0, battery.stored - reserve);
+			// #843: endurance tracks the drawable slice of the faded
+			// rating, not the authored one: a worn bank has genuinely less
+			// to give. Unworn, the effective values are the authored ones.
+			auto const drawable = std::max(0.0,
+				std::min(battery.stored, battery.effectiveNameplateKWh())
+					- battery.effectiveReserveKWh());
 			advanceEnduranceWindow(batteryEndurance[index], drawable, elapsed);
 		}
 	}
