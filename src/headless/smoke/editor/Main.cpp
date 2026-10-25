@@ -69,5 +69,6 @@ int main(int argc, char** argv)
 	editor_smoke::registerRoomHeightScale(checks);
 	editor_smoke::registerStationSystems(checks);
 	editor_smoke::registerStationFaultSurface(checks);
+	editor_smoke::registerStationAlertDashboard(checks);
 	return smoke::main("editor", checks, argc, argv);
 }

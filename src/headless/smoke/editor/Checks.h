@@ -10,6 +10,7 @@ namespace editor_smoke
 	// #849: the fault framework's editor surface - badges, alarm panel,
 	// opt-in authoring.
 	void registerStationFaultSurface(std::vector<smoke::Check>& checks);
+	void registerStationAlertDashboard(std::vector<smoke::Check>& checks);
 	void registerAccessPanels(std::vector<smoke::Check>& checks);
 	void registerBoothWindows(std::vector<smoke::Check>& checks);
 	void registerTransportStopNames(std::vector<smoke::Check>& checks);

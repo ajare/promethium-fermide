@@ -239,6 +239,29 @@ The existing #849 alarm panel (fault-derived impact) is unchanged; the dashboard
 separate surface. The two are complementary: the fault panel explains broken machines; the
 Alert dashboard reports monitored conditions.
 
+Implementation contracts:
+
+- The dashboard is a reader. It owns no Alert state and issues no commands: every row is
+  re-read from the authoritative snapshot each frame, so an Alert that fired while the
+  window was closed appears on the next frame and one that auto-cleared leaves without the
+  dashboard being told. There is no path from a dashboard widget to the ledger.
+- **Active** ordering is severity descending, then longest-standing first, then Monitor id.
+  Within one severity the operator's next question is how long they have already been
+  living with it; the Monitor id settles a same-step tie so the order is always defined.
+- **Closed-out** ordering is newest close-out first, matching the fault panel's transitions:
+  the thing that just happened is the thing worth reading, and the list only grows from the
+  other end. A closed-out row keeps the severity it fired at — the record says how bad it
+  was, not how calm things are now.
+- The time window narrows by **fire** time, not clear time. An Alert that started inside the
+  window stays listed for as long as it runs, even past the edge: dropping it mid-crisis
+  would hide the one thing the window was narrowed to find.
+- The subject-type filter is offered from the ledger rather than from a static list, so the
+  control never offers a type the operator cannot filter to, and a pick that points at a type
+  this run does not have is dropped rather than showing an empty dashboard that reads like a
+  quiet station.
+- Run-scoped is structural, not a clearing step: the ledger is run state that is already
+  discarded at reset and load boundaries, and the dashboard holds no copy of it.
+
 ## 7. Authoring
 
 - Monitors are authored in the **Monitors section of each component/connection's editor
@@ -252,7 +275,9 @@ Alert dashboard reports monitored conditions.
   threshold finite and in the metric's unit; times >= 0; Monitor id unique. Invalid edits
   are refused with a diagnostic and leave no partial state.
 - Renaming a subject cascades monitor references exactly as it cascades links; deleting a
-  subject removes its Monitors in the same undoable action. The cascade rides the node
+  subject removes its Monitors in the same undoable action. The confirmation names the
+  Monitors it will touch, and only when there are some: "and 0 Monitors" is noise on the
+  common path, so the clause appears exactly when there is something to weigh. The cascade rides the node
   plan/apply contract in `StationPorts`: the plan names the Monitors it will touch
   alongside the links, so the confirmation spells out the whole cascade and one core-owned
   view drives both. A rename rewrites the Monitor's `subjectId` reference only — the

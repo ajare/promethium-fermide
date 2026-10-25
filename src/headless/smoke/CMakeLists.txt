@@ -917,7 +917,7 @@ set_tests_properties(smoke-harness-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-editor
     NAME editor
     SOURCES
-        editor/StationSystems.cpp editor/StationComponentHelp.cpp editor/StationObservations.cpp editor/StationConnections.cpp editor/StationFaultSurface.cpp editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/TransportStopNames.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
+        editor/StationSystems.cpp editor/StationComponentHelp.cpp editor/StationObservations.cpp editor/StationConnections.cpp editor/StationFaultSurface.cpp editor/StationAlertDashboard.cpp editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/TransportStopNames.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
         agent/ActivationEditor.cpp
         agent/GroupEditor.cpp
         agent/GroupAssignmentEditor.cpp
@@ -1239,6 +1239,13 @@ add_test(NAME station-editor-fault-authoring COMMAND pf-smoke-editor --check sta
 set_tests_properties(station-editor-fault-authoring PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-fault-trip-reset COMMAND pf-smoke-editor --check station/faultTripResetWorkflow)
 set_tests_properties(station-editor-fault-trip-reset PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+# #870: the Alert dashboard. The real toolbar button, the real window and the
+# real filter widgets, driven against a run with real fired and closed-out
+# Alerts.
+add_test(NAME station-editor-alert-dashboard COMMAND pf-smoke-editor --check station/alertDashboardWorkflow)
+set_tests_properties(station-editor-alert-dashboard PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+add_test(NAME station-editor-alert-dashboard-empty COMMAND pf-smoke-editor --check station/alertDashboardNoScenario)
+set_tests_properties(station-editor-alert-dashboard-empty PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 
 # Per-test CTest timeouts derived from measured Release timings (1.2x, rounded up
 # to the nearest 10s). Included last so it overrides the baseline timeouts set

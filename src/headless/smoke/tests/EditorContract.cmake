@@ -326,6 +326,9 @@ set(editor_names
     station/faultAuthoringWorkflow
     station/heatEngineFaultAuthoringWorkflow
     station/faultTripResetWorkflow
+    # #870: the Alert dashboard, driven as the operator drives it.
+    station/alertDashboardWorkflow
+    station/alertDashboardNoScenario
 )
 
 if(DEFINED LANE)

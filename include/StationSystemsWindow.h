@@ -8,6 +8,7 @@
 #include "core/StationSystems.h"
 #include "core/StationHistory.h"
 #include "StationFaultPanel.h"
+#include "StationAlertDashboard.h"
 #include "StationFlowDiagram.h"
 #include "DocumentHistory.h"
 #include "RecentFiles.h"
@@ -105,6 +106,24 @@ public:
 	std::vector<std::string> const& faultPanelTransitions() const
 	{ return mFaultPanel.transitions(); }
 	std::string const& faultPanelNotice() const { return mFaultPanel.notice(); }
+	// #870: the Alert dashboard's state, forwarded so a headless check
+	// driving the real window can open it and assert on the rows it listed.
+	// The dashboard is read-only: there is nothing here that can write to the
+	// ledger, only filters over what is displayed.
+	bool alertDashboardVisible() const { return mAlertDashboardVisible; }
+	void setAlertDashboardVisible(bool visible) { mAlertDashboardVisible = visible; }
+	std::vector<StationAlertDashboard::ActiveRow> const& alertDashboardActiveRows() const
+	{ return mAlertDashboard.activeRows(); }
+	std::vector<StationAlertDashboard::ClosedRow> const& alertDashboardClosedRows() const
+	{ return mAlertDashboard.closedRows(); }
+	bool alertSeverityVisible(core::AlertSeverity severity) const
+	{ return mAlertDashboard.severityVisible(severity); }
+	std::string const& alertSubjectTypeFilter() const
+	{ return mAlertDashboard.subjectTypeFilter(); }
+	bool alertWindowEnabled() const { return mAlertDashboard.windowEnabled(); }
+	double alertWindowMinutes() const { return mAlertDashboard.windowMinutes(); }
+	std::vector<std::string> const& alertSubjectTypes() const
+	{ return mAlertDashboard.subjectTypes(); }
 	// The mode selected in the inspector's injection control, kept between
 	// frames so the combobox does not reset on every redraw.
 	std::string const& faultInjectMode() const { return mInjectMode; }
@@ -204,6 +223,12 @@ private:
 	// frame - so this is visibility and a selection buffer, nothing more.
 	StationFaultPanel mFaultPanel;
 	bool mFaultPanelVisible{false};
+	// #870: the Alert dashboard. Held by the session like the alarm panel, so
+	// its filters survive a redraw, but it caches no Alert data of its own -
+	// the ledger it lists is re-read from the polled snapshot every frame, so
+	// a reset clears it as a side effect of having nothing to read.
+	StationAlertDashboard mAlertDashboard;
+	bool mAlertDashboardVisible{false};
 	std::string mInjectMode;
 	// Slider buffers for the live hatch controls. The snapshot polls at 4 Hz,
 	// so writing the live value straight into the widget would yank a drag in

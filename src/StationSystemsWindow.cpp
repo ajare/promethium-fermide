@@ -759,6 +759,20 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 		? "Fault alarms (" + std::to_string(activeFaultCount) + ")" : "Fault alarms";
 	if (ImGui::Button(alarmLabel.c_str())) mFaultPanelVisible = !mFaultPanelVisible;
 	ImGui::PopStyleColor();
+	// #870: the Alert dashboard's entry point, beside the fault alarms but a
+	// separate surface. Monitored conditions and broken machines are different
+	// claims, so they get different buttons and different windows; counting on
+	// the button keeps a live Alert visible with the window closed.
+	size_t const activeAlertCount = mFlowSnapshot ? mFlowSnapshot->activeAlerts.size() : 0;
+	ImGui::SameLine();
+	ImGui::PushStyleColor(ImGuiCol_Button, mAlertDashboardVisible
+		? ImVec4{0.30f, 0.42f, 0.60f, 1.0f}
+		: activeAlertCount ? ImVec4{0.48f, 0.30f, 0.18f, 1.0f}
+		: ImVec4{0.20f, 0.22f, 0.26f, 1.0f});
+	std::string const alertLabel = activeAlertCount
+		? "Alerts (" + std::to_string(activeAlertCount) + ")" : "Alerts";
+	if (ImGui::Button(alertLabel.c_str())) mAlertDashboardVisible = !mAlertDashboardVisible;
+	ImGui::PopStyleColor();
 	mFlow.render(mDraft, [this, world](core::StationSystemsSettings& draft) {
 		renderFlowInspectorContents(draft, *world);
 	}, [this] { commitDraftChanges(true); }, [this] {
@@ -797,6 +811,18 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 		ImGui::SetNextWindowSize({640.0f, 420.0f}, ImGuiCond_Appearing);
 		if (ImGui::Begin("Station faults", &mFaultPanelVisible))
 			mFaultPanel.render(*world, mFlowSnapshot ? &*mFlowSnapshot : nullptr);
+		ImGui::End();
+	}
+	// #870: the Alert dashboard reads the same polled snapshot the ledger is
+	// published from, so it can never disagree with what the runtime recorded.
+	// It is a separate window for the same reason the alarm panel is one: it
+	// should not steal space from the canvas or the plot.
+	if (mAlertDashboardVisible)
+	{
+		ImGui::SetNextWindowPos({48.0f, 48.0f}, ImGuiCond_Appearing);
+		ImGui::SetNextWindowSize({720.0f, 480.0f}, ImGuiCond_Appearing);
+		if (ImGui::Begin("Alert dashboard", &mAlertDashboardVisible))
+			mAlertDashboard.render(mFlowSnapshot ? &*mFlowSnapshot : nullptr);
 		ImGui::End();
 	}
 }
