@@ -50,6 +50,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/editor/StationConnections.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/StationComponentHelp.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/StationMonitorInspector.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/editor/StationMonitorFamilies.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/StationFaultSurface.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/StationAlertDashboard.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/station/StationCoreChecks.cpp` | module-owned | `pf-smoke-station` |

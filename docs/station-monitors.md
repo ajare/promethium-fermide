@@ -1,4 +1,4 @@
-# Station Monitors: atmosphere, store, connection, thermal-plant and power-source defaults (#867, #871, #873, #874)
+# Station Monitors: defaults and subject inspectors (#867, #871–#875)
 
 `atmosphere` is a registered Monitor subject type, and it publishes the full
 spec §3.1 Metric set: `oxygenPartialPressureKPa`, `carbonDioxidePartialPressureKPa`,
@@ -312,3 +312,28 @@ Focused Release proof (all defaults at 0.25 s and 1 s steps):
 ctest --test-dir build-linux -C Release -j 16 --output-on-failure \
   -R '^station-(powerSourceMonitors|editor-monitor-inspector)$'
 ```
+
+## All-subject inspectors (#875)
+
+The Flow inspector shares the atmosphere Monitor controls across generators,
+solar arrays, batteries, coolant loops, chillers, heat engines, radiators,
+water treatments, electrolyzers, CO2 capture, Sabatier reactors, methane
+processors, fuel cells, microbial processors, Resource stores, crop populations,
+algae cultures, and selected Station connections. Connection subjects use the
+full design-key identity, not the displayed link label.
+
+Rendering expands the currently available default tables on a temporary copy;
+selecting a subject alone changes neither the draft nor its history. Subjects
+awaiting ECLSS/biology tables (#876) explicitly show an empty set. Atmosphere
+pathways, Thermal links, and schedules remain outside this surface.
+
+All sections use the same provenance tags, enabled toggle, threshold, direction,
+trigger times, and severity controls. Accepted edits pass through
+`World::editStationMonitor`, materialize missing defaults, and participate in the
+existing draft history and configuration save/load. No running World is changed.
+
+`station-editor-monitor-families` drives every additional panel family through
+ImGui Test Engine, checking default listing/provenance or the empty state,
+toggle and timing edits where defaults exist, undo/redo, and save/load.
+`station-editor-monitor-inspector` retains the full atmosphere control and
+validation workflow. Both are focused Release tests; no stability run is needed.

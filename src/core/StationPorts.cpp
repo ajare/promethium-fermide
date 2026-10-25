@@ -1755,6 +1755,15 @@ std::string_view stationMonitorSubjectTypeForNodeType(std::string_view nodeType)
 	if (nodeType == "Chiller") return "chiller";
 	if (nodeType == "Heat engine") return "heat-engine";
 	if (nodeType == "Radiator") return "radiator";
+	if (nodeType == "Water treatment") return "water-treatment";
+	if (nodeType == "Electrolyzer") return "electrolyzer";
+	if (nodeType == "CO2 capture") return "co2-capture";
+	if (nodeType == "Sabatier") return "sabatier";
+	if (nodeType == "Methane processor") return "methane-processor";
+	if (nodeType == "Fuel cell") return "fuel-cell";
+	if (nodeType == "Microbial processor") return "microbial-processor";
+	if (nodeType == "Crops") return "crop";
+	if (nodeType == "Algae") return "algae";
 	return {};
 }
 

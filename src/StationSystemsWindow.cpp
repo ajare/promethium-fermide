@@ -834,6 +834,11 @@ void StationSystemsWindow::renderFlowInspectorContents(
 	// the early returns below, so the width cannot leak into the canvas or the
 	// plot beside it.
 	ItemWidthScope const inspectorWidth{128.0f};
+	if (auto const connection = mFlow.selectedConnection())
+	{
+		renderMonitorInspector(draft, "connection", core::stationConnectionMonitorSubjectId(*connection));
+		return;
+	}
 	auto const selected = mFlow.selectedNode();
 	if (!selected)
 	{
@@ -870,10 +875,9 @@ void StationSystemsWindow::renderFlowInspectorContents(
 	// The same seam the form tab uses (#652), fields only: removal stays a
 	// list-surface operation, and the inspector owns no list.
 	editor->renderEntry(draft, size_t(selected->index));
-	if (selected->type == "Atmosphere" || selected->type == "Coolant loop"
-		|| selected->type == "Chiller" || selected->type == "Heat engine" || selected->type == "Radiator"
-		|| selected->type == "Battery" || selected->type == "Generator" || selected->type == "Solar")
-		renderMonitorInspector(draft, selected->id);
+	auto const subjectType = core::stationMonitorSubjectTypeForNodeType(selected->type);
+	if (!subjectType.empty())
+		renderMonitorInspector(draft, subjectType, selected->id);
 	ImGui::Separator();
 	ImGui::TextDisabled("Edits change the Configuration draft only. Nothing is applied to the World from here.");
 	// Live controls sit below the draft fields and are labelled, because they
@@ -886,7 +890,7 @@ void StationSystemsWindow::renderFlowInspectorContents(
 }
 
 void StationSystemsWindow::renderMonitorInspector(core::StationSystemsSettings& draft,
-	std::string const& subjectId)
+	std::string_view subjectType, std::string const& subjectId)
 {
 	ImGui::SeparatorText("Monitors");
 	// Omitted defaults are presented without dirtying a legacy document merely
@@ -895,10 +899,12 @@ void StationSystemsWindow::renderMonitorInspector(core::StationSystemsSettings& 
 	core::applyStationAtmosphereDefaultMonitors(effective);
 	core::applyStationThermalPlantDefaultMonitors(effective);
 	core::applyStationPowerSourceDefaultMonitors(effective);
-	auto const subjectType = core::stationMonitorSubjectTypeForNodeType(mFlow.selectedNode()->type);
+	core::applyStationStoreConnectionDefaultMonitors(effective);
+	bool listed = false;
 	for (auto monitor : effective.monitors)
 	{
 		if (monitor.subjectType != subjectType || monitor.subjectId != subjectId) continue;
+		listed = true;
 		auto const& catalogue = core::stationMonitorMetricCatalogue(subjectType);
 		auto metric = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& entry) { return entry.name == monitor.metric; });
 		ImGui::PushID(monitor.id.c_str());
@@ -935,6 +941,7 @@ void StationSystemsWindow::renderMonitorInspector(core::StationSystemsSettings& 
 		if (changed) core::World::editStationMonitor(draft, monitor, mMonitorNotice);
 		ImGui::PopID();
 	}
+	if (!listed) ImGui::TextDisabled("No Monitors defined for this subject.");
 	if (!mMonitorNotice.empty()) ImGui::TextWrapped("Refused: %s", mMonitorNotice.c_str());
 }
 

@@ -80,7 +80,12 @@ void monitorInspector(smoke::Context const& context)
 		}
 		auto start = window.draft();
 		driver.click(ctx, "**/Enabled##room-po2-low"); ctx->Yield(3);
-		REQ(window.draft().monitors.size() == 25 && window.draft().monitors[0].enabled,
+		auto effective = start;
+		core::applyStationAtmosphereDefaultMonitors(effective);
+		core::applyStationThermalPlantDefaultMonitors(effective);
+		core::applyStationPowerSourceDefaultMonitors(effective);
+		core::applyStationStoreConnectionDefaultMonitors(effective);
+		REQ(window.draft().monitors.size() == effective.monitors.size() && window.draft().monitors[0].enabled,
 			"enable did not materialize the disabled default set");
 		REQ(std::count_if(window.draft().monitors.begin(), window.draft().monitors.end(),
 			[](auto const& m) { return m.enabled; }) == 1, "other Monitors enabled unexpectedly");

@@ -251,7 +251,7 @@ private:
 	// refuses an edit of the exact declared max or min.
 	std::map<std::string, double> mDialBuffers;
 	std::string mDialNotice;
-	void renderMonitorInspector(core::StationSystemsSettings& draft, std::string const& subjectId);
+	void renderMonitorInspector(core::StationSystemsSettings& draft, std::string_view subjectType, std::string const& subjectId);
 	std::map<std::string, double> mMonitorBuffers;
 	std::string mMonitorNotice;
 	void renderPrefabDialInspector(core::StationSystemsSettings& draft);

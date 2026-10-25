@@ -11,6 +11,7 @@ namespace editor_smoke
 	// opt-in authoring.
 	void registerStationFaultSurface(std::vector<smoke::Check>& checks);
 	void registerStationMonitorInspector(std::vector<smoke::Check>& checks);
+	void registerStationMonitorFamilies(std::vector<smoke::Check>& checks);
 	void registerStationAlertDashboard(std::vector<smoke::Check>& checks);
 	void registerAccessPanels(std::vector<smoke::Check>& checks);
 	void registerBoothWindows(std::vector<smoke::Check>& checks);

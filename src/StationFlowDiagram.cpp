@@ -3142,11 +3142,8 @@ entry.thermalClass = "moderate";
 			if (!canRemove)
 				ImGui::TextDisabled("Deletion unavailable: %s", removeDiagnostic.c_str());
 		}
-		if (!mSelectedConnection)
-		{
-			if (renderInspector) renderInspector(draft);
-			else ImGui::TextDisabled("No inspector for this surface.");
-		}
+		if (renderInspector) renderInspector(draft);
+		else if (!mSelectedConnection) ImGui::TextDisabled("No inspector for this surface.");
 	}
 	ImGui::EndChild();
 	// Settings and authored geometry belong to the same history action. Clear

@@ -919,7 +919,7 @@ set_tests_properties(smoke-harness-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-editor
     NAME editor
     SOURCES
-        editor/StationSystems.cpp editor/StationComponentHelp.cpp editor/StationObservations.cpp editor/StationConnections.cpp editor/StationFaultSurface.cpp editor/StationAlertDashboard.cpp editor/StationMonitorInspector.cpp editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/TransportStopNames.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
+        editor/StationSystems.cpp editor/StationComponentHelp.cpp editor/StationObservations.cpp editor/StationConnections.cpp editor/StationFaultSurface.cpp editor/StationAlertDashboard.cpp editor/StationMonitorInspector.cpp editor/StationMonitorFamilies.cpp editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/TransportStopNames.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
         agent/ActivationEditor.cpp
         agent/GroupEditor.cpp
         agent/GroupAssignmentEditor.cpp
@@ -1242,6 +1242,8 @@ set_tests_properties(station-editor-fault-authoring PROPERTIES LABELS "smoke;fun
 add_test(NAME station-editor-fault-trip-reset COMMAND pf-smoke-editor --check station/faultTripResetWorkflow)
 set_tests_properties(station-editor-fault-trip-reset PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #872: atmosphere Monitor authoring through the real inspector.
+add_test(NAME station-editor-monitor-families COMMAND pf-smoke-editor --check station/monitorFamilies)
+set_tests_properties(station-editor-monitor-families PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-monitor-inspector COMMAND pf-smoke-editor --check station/monitorInspector)
 set_tests_properties(station-editor-monitor-inspector PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #870: the Alert dashboard. The real toolbar button, the real window and the

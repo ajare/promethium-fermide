@@ -71,5 +71,6 @@ int main(int argc, char** argv)
 	editor_smoke::registerStationFaultSurface(checks);
 	editor_smoke::registerStationAlertDashboard(checks);
 	editor_smoke::registerStationMonitorInspector(checks);
+	editor_smoke::registerStationMonitorFamilies(checks);
 	return smoke::main("editor", checks, argc, argv);
 }
