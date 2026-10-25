@@ -26,6 +26,8 @@ namespace core
 		auto const committedConstituentHarvested = constituentHarvested;
 		auto const committedConnectionFlows = connectionFlows;
 		auto const committedPoolGeneration = lastPoolGenerationKW;
+		auto const committedBusPower = lastBusPower;
+		auto const committedBusDemand = lastBusDispatchDemand;
 		auto const committedConnectionLoss = lastConnectionPowerLossKW;
 		auto const committedPoolResidual = lastPoolResidualKW;
 		auto const committedTransfers = transfers;
@@ -106,6 +108,8 @@ namespace core
 			constituentHarvested = committedConstituentHarvested;
 			connectionFlows = committedConnectionFlows;
 			lastPoolGenerationKW = committedPoolGeneration;
+			lastBusPower = committedBusPower;
+			lastBusDispatchDemand = committedBusDemand;
 			lastConnectionPowerLossKW = committedConnectionLoss;
 			lastPoolResidualKW = committedPoolResidual;
 			transfers = committedTransfers;
@@ -253,6 +257,7 @@ namespace core
 			// Roll back every preview booking before converting accepted heat.
 			// Do this inside the event split so on/off windows never share power.
 			double engineDemandKW = 0.0;
+			std::map<std::string, double> engineBusDemand;
 			if (!heatEngines.empty())
 			{
 				auto const restore = ledgerCheckpoint();
@@ -263,12 +268,14 @@ namespace core
 					&& preview.biology() && preview.atmosphere() && preview.wear()
 					&& preview.auditPower();
 				engineDemandKW = preview.dispatchDemandKW;
+				engineBusDemand = lastBusDispatchDemand;
 				restore();
 				prediction = savedPrediction;
 				if (!valid) return false;
 			}
 			Tick scratch(*this, tick, duration, system, violation, instant, true);
 			scratch.engineAcceptanceDemandKW = engineDemandKW;
+			scratch.engineAcceptanceBusDemand = std::move(engineBusDemand);
 			if (!scratch.prepare() || !scratch.generation() || !scratch.protection()
 				|| !scratch.thermal() || !scratch.processing() || !scratch.biology()
 				|| !scratch.atmosphere() || !scratch.wear()) return false;
@@ -352,10 +359,12 @@ namespace core
 			// thresholds: an interval average must not start a later machine
 			// before (or after) its upstream source actually reaches that power.
 			if (settings.dispatchMode == StationDispatchMode::Manual && batteries.empty() && fuelCells.empty())
+			for (auto const& bus : settings.powerBuses)
 			{
+				auto onBus = [&](auto const& ids) { return std::find(ids.begin(), ids.end(), bus.id) != ids.end(); };
 				double available = 0, slope = 0;
 				for (auto const& a : solarArrays)
-					available += collected.connections.available(collected.connections.port("Solar", a.authored.id, "Solar generation"),
+					if (onBus(a.authored.busIds)) available += collected.connections.available(collected.connections.port("Solar", a.authored.id, "Solar generation"),
 						a.effectiveWearCapability() * evaluateStationProfile(a.authored.illumination, cursor + maximum * 0.5));
 				for (size_t i = 0; i < generators.size(); ++i)
 				{
@@ -374,12 +383,15 @@ namespace core
 							? std::min({g.outputKW, a.ratedOutputKW * g.availabilityFactor, cap}) : 0.0;
 						auto const target = std::min({a.commandedOutputKW, a.ratedOutputKW * g.availabilityFactor, cap});
 						auto const end = integrateGeneratorRamp(start, target, a.maxRampKWPerSecond, maximum).endpointKW;
-						available += collected.connections.available(port, start);
-						slope += (collected.connections.available(port, end)
-							- collected.connections.available(port, start)) / maximum;
+						if (onBus(a.busIds))
+						{
+							available += collected.connections.available(port, start);
+							slope += (collected.connections.available(port, end)
+								- collected.connections.available(port, start)) / maximum;
+						}
 					}
 					else if ((g.phase == StationGeneratorPhase::Stopped || g.phase == StationGeneratorPhase::Starting)
-						&& a.startupPowerKW * a.startupSeconds > 0)
+						&& a.startupPowerKW * a.startupSeconds > 0 && a.supplyBusIds.front() == bus.id)
 					{
 						auto const crankPort = collected.powerPort("Generator", a.id);
 						if (collected.connections.available(crankPort, std::numeric_limits<double>::max())
@@ -397,10 +409,11 @@ namespace core
 				}
 				// Unconstrained single-load admission is min(source, demand).
 				// Its corner must also be split while source power ramps.
-				if (loads.size() == 1 && loads[0].authored.materialExchanges.empty()
-					&& loads[0].authored.criticalFloorKW == 0 && slope != 0)
+				auto const localLoad = std::find_if(loads.begin(), loads.end(), [&](auto const& load) { return load.authored.supplyBusIds.front() == bus.id; });
+				if (localLoad != loads.end() && std::count_if(loads.begin(), loads.end(), [&](auto const& load) { return load.authored.supplyBusIds.front() == bus.id; }) == 1
+					&& localLoad->authored.materialExchanges.empty() && localLoad->authored.criticalFloorKW == 0 && slope != 0)
 				{
-					auto const& load = loads[0];
+					auto const& load = *localLoad;
 					auto const request = load.authored.electricalDemandKW
 						* evaluateStationProfile(load.authored.operatingProfile, cursor + maximum * 0.5);
 					auto const need = collected.connections.required(collected.powerPort("Equipment", load.authored.id), request);
@@ -592,6 +605,7 @@ namespace core
 				&a.lastFoodAddedKg, &a.lastRecoveryAddedKg, &a.lastWasteAddedKg,
 				&a.lastFoodSurplusToRecoveryKg, &a.lastRecoverySurplusToWasteKg,
 				&a.lastHarvestConstrainedKg, &a.lastDeadResidueToWasteKg, &a.lastDeadResidueLostKg});
+		std::map<std::string, StationBusPowerSnapshot> meanBusPower;
 		std::vector<double> totalIn(stores.size()), totalOut(stores.size());
 		auto accumulate = [&](Tick const& part)
 		{
@@ -603,6 +617,31 @@ namespace core
 			if (part.continuous)
 			{
 				auto const weight = part.seconds / seconds;
+				for (auto const& [id, source] : lastBusPower)
+				{
+					auto& target = meanBusPower[id];
+					target.busId = id; target.ratedCapacityKW = source.ratedCapacityKW;
+					for (auto field : {&StationBusPowerSnapshot::generationKW, &StationBusPowerSnapshot::batteryChargeKW,
+						&StationBusPowerSnapshot::batteryDischargeKW, &StationBusPowerSnapshot::demandKW,
+						&StationBusPowerSnapshot::suppliedKW, &StationBusPowerSnapshot::unmetKW,
+						&StationBusPowerSnapshot::protectedDemandKW, &StationBusPowerSnapshot::protectedSuppliedKW,
+						&StationBusPowerSnapshot::protectedUnmetKW, &StationBusPowerSnapshot::unmetCriticalKW,
+						&StationBusPowerSnapshot::surplusKW, &StationBusPowerSnapshot::throughPowerKW,
+						&StationBusPowerSnapshot::loadFraction, &StationBusPowerSnapshot::residualKW})
+						target.*field += source.*field * weight;
+					for (auto const& service : source.protectedServices)
+					{
+						auto found = std::find_if(target.protectedServices.begin(), target.protectedServices.end(), [&](auto const& value) { return value.id == service.id && value.kind == service.kind; });
+						if (found == target.protectedServices.end())
+						{
+							target.protectedServices.push_back({service.id, service.kind, 0, 0, 0, service.reason});
+							found = std::prev(target.protectedServices.end());
+						}
+						found->requestedKW += service.requestedKW * weight;
+						found->suppliedKW += service.suppliedKW * weight;
+						found->unmetKW += service.unmetKW * weight;
+					}
+				}
 				for (auto& [field, total] : meanRates) total += *field * weight;
 				// Accounts are materialized by the first committed interval,
 				// so the pre-step vector can legitimately be empty.
@@ -679,6 +718,7 @@ namespace core
 			if (!std::isfinite(total)) return violation = "split-step weighted mean is not finite", false;
 			*field = total;
 		}
+		lastBusPower = std::move(meanBusPower);
 		for (auto& load : loads)
 			load.lastDeliveredFraction = load.lastRequestedKW > 0.0
 				? load.lastSuppliedKW / load.lastRequestedKW : 0.0;

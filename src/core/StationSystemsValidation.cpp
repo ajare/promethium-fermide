@@ -981,6 +981,20 @@ namespace
 		}
 		bool powerValuesValid = true;
 		forEachStationPowerMember(settings, [&](auto const& entry) {
+			auto membership = [&](auto const& ids) {
+				if (!powerValuesValid) return;
+				if (ids.empty()) { powerValuesValid = refuse("Station '" + entry.id + "' requires Power Bus membership"); return; }
+				std::set<std::string> unique;
+				for (auto const& id : ids)
+					if (!busIds.count(id) || !unique.insert(id).second)
+					{
+						auto const text = "Station '" + entry.id + "' has unknown or duplicate Power Bus '" + id + "'";
+						if (brokenReferences) brokenReferences->push_back(text);
+						else powerValuesValid = refuse(text);
+					}
+			};
+			if constexpr (requires { entry.busIds; }) membership(entry.busIds);
+			if constexpr (requires { entry.supplyBusIds; }) membership(entry.supplyBusIds);
 			if constexpr (requires { entry.supplyBusIds; })
 				if (powerValuesValid && (!std::isfinite(entry.transferReturnDwellSeconds)
 					|| entry.transferReturnDwellSeconds < 0.0

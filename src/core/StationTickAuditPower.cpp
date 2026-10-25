@@ -42,8 +42,13 @@ namespace core
 		for (auto const& item : runtime.microbialProcessors) dispatchRequests[{"Microbial processor", item.authored.id}] += item.lastPowerDemandKW;
 		for (auto const& item : runtime.cropPopulations) dispatchRequests[{"Crops", item.authored.id}] += item.lastLightRequestedKW + item.lastCirculationRequestedKW;
 		for (auto const& item : runtime.algaeCultures) dispatchRequests[{"Algae", item.authored.id}] += item.lastLightRequestedKW + item.lastCirculationRequestedKW;
+		runtime.lastBusDispatchDemand.clear();
 		for (auto const& [owner, request] : dispatchRequests)
-			dispatchDemandKW += connections.inputDemand(powerPort(owner.first, owner.second), request);
+		{
+			auto const input = connections.inputDemand(powerPort(owner.first, owner.second), request);
+			dispatchDemandKW += input;
+			runtime.lastBusDispatchDemand[consumerBus(owner.first, owner.second)] += input;
+		}
 		if (!std::isfinite(dispatchDemandKW))
 		{
 			system = "Power allocation";
@@ -53,12 +58,21 @@ namespace core
 		// Solar is availability, not compulsory generation: only requested
 		// input is transmitted (and lost) on its cable. Commanded fuelled
 		// generation was already transmitted when it entered the pool.
+		settleGeneration();
 		solarUsedKW = std::max(0.0, poolGenerationKW - availableGeneration);
+		std::map<std::string, double> solarUsedByBus;
+		for (auto const& [id, bus] : busBudgets) solarUsedByBus[id] = std::max(0.0, bus.generated - bus.available);
 		for (auto const& array : runtime.solarArrays)
 		{
 			auto const port = connections.port("Solar", array.authored.id, "Solar generation");
-			auto const need = connections.efficiency(port) == 0.0 ? dispatchDemandKW
-				: std::min(solarUsedKW, array.lastAvailableKW);
+			double busNeed = 0, busDemand = 0;
+			for (auto const& id : array.authored.busIds)
+			{
+				auto const take = std::min(solarUsedByBus[id], std::max(0.0, array.lastAvailableKW - busNeed));
+				busNeed += take; solarUsedByBus[id] -= take;
+				busDemand += runtime.lastBusDispatchDemand[id];
+			}
+			auto const need = connections.efficiency(port) == 0.0 ? busDemand : busNeed;
 			auto const flow = connections.receive(port, need, array.effectiveWearCapability() * array.lastIllumination);
 			solarUsedKW = std::max(0.0, solarUsedKW - flow.delivered);
 		}
@@ -74,6 +88,56 @@ namespace core
 		if (!std::isfinite(poolResidualKW) || std::abs(poolResidualKW) > StationBalanceTolerance
 			* std::max(1.0, poolGenerationKW + batterySuppliedKW))
 			return violation = "electrical connection pool residual exceeds tolerance", false;
+		// Each circuit closes independently. The global account is only a
+		// rollup, never an allocator or a way to conceal another bus's deficit.
+		runtime.lastBusPower.clear();
+		for (auto const& authored : runtime.settings.powerBuses)
+		{
+			auto const& budget = busBudgets.at(authored.id);
+			auto& bus = runtime.lastBusPower[authored.id];
+			bus.busId = authored.id; bus.ratedCapacityKW = authored.ratedCapacityKW;
+			bus.generationKW = budget.generated;
+			bus.batteryDischargeKW = budget.discharged;
+			bus.batteryChargeKW = budget.charge;
+			bus.surplusKW = budget.available;
+			bus.throughPowerKW = budget.input;
+			bus.residualKW = budget.generated + budget.discharged - budget.input - budget.available;
+			if (!std::isfinite(bus.residualKW) || std::abs(bus.residualKW) > StationBalanceTolerance * std::max(1.0, budget.generated + budget.discharged))
+				return violation = "Power Bus '" + authored.id + "' ledger residual exceeds tolerance", false;
+			bus.loadFraction = authored.ratedCapacityKW > 0 ? bus.throughPowerKW / authored.ratedCapacityKW : 0;
+		}
+		auto demand = [&](std::string const& type, std::string const& id, double requested) {
+			auto& bus = runtime.lastBusPower.at(consumerBus(type, id));
+			bus.demandKW += requested;
+			bus.suppliedKW += consumerSupplied[{type, id}];
+		};
+		for (auto const& load : runtime.loads)
+		{
+			demand("Equipment", load.authored.id, load.lastRequestedKW + load.lastSurgeKW);
+			runtime.lastBusPower.at(consumerBus("Equipment", load.authored.id)).unmetCriticalKW += load.lastUnmetCriticalKW;
+		}
+		for (auto const& loop : runtime.coolantLoops) demand("Coolant loop", loop.authored.id, loop.lastPumpDemandKW + loop.lastHeaterDemandKW);
+		auto work = [&](char const* type, auto const& entries) {
+			for (auto const& entry : entries) demand(type, entry.authored.id, entry.lastPowerDemandKW);
+		};
+		work("Chiller", runtime.chillers); work("Water treatment", runtime.waterTreatments);
+		work("Electrolyzer", runtime.electrolyzers); work("CO2 capture", runtime.co2Captures);
+		work("Sabatier", runtime.sabatierReactors); work("Methane processor", runtime.methaneProcessors);
+		work("Microbial processor", runtime.microbialProcessors);
+		for (auto const& crop : runtime.cropPopulations) demand("Crops", crop.authored.id, crop.lastLightRequestedKW + crop.lastCirculationRequestedKW);
+		for (auto const& algae : runtime.algaeCultures) demand("Algae", algae.authored.id, algae.lastLightRequestedKW + algae.lastCirculationRequestedKW);
+		for (size_t i = 0; i < protectedServices.size(); ++i)
+		{
+			auto& bus = runtime.lastBusPower.at(protectedServiceBuses.at(i));
+			auto const& service = protectedServices[i];
+			bus.protectedServices.push_back(service);
+			if (service.kind == "shutdown-cooling") continue; // Thermal obligation, not electrical demand.
+			bus.protectedDemandKW += service.requestedKW;
+			bus.protectedSuppliedKW += service.suppliedKW;
+			bus.protectedUnmetKW += service.unmetKW;
+			bus.unmetCriticalKW += service.unmetKW;
+		}
+		for (auto& [id, bus] : runtime.lastBusPower) bus.unmetKW = std::max(0.0, bus.demandKW - bus.suppliedKW);
 		for (auto const index : runtime.transferOrder)
 		{
 			auto& transfer = runtime.transfers[index];

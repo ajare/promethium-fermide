@@ -2111,53 +2111,15 @@ namespace core
 		// live inventory, advances no clock, consumes no deterministic
 		// stream, and is capped in horizon and segments.
 		result.forecast = mImpl->computeForecast(result.elapsedSeconds);
-		// #879: expose bus identity without introducing a second allocator.
-		// Until #880, only a single-bus configuration has an attributable
-		// pool account. Multi-bus rows carry metadata, not invented splits.
+		// Authored order is stable; allocation accounts are committed atomically
+		// and duration-weighted over event-split intervals.
 		for (auto const& authored : mImpl->settings.powerBuses)
 		{
 			StationBusPowerSnapshot bus;
 			bus.busId = authored.id;
 			bus.ratedCapacityKW = authored.ratedCapacityKW;
-			if (mImpl->settings.powerBuses.size() == 1)
-			{
-				auto const& power = result.power;
-				bus.generationKW = power.poolGenerationKW;
-				bus.batteryChargeKW = power.batteryChargeKW;
-				bus.batteryDischargeKW = power.batteryDischargeKW;
-				// Dispatch demand is a source-control signal: it excludes
-				// refused/Shed loads. The rollup retains their unmet demand.
-				bus.demandKW = power.totalRequestedKW + power.recoverySurgeKW;
-				for (auto const& loop : mImpl->coolantLoops)
-					bus.demandKW += loop.lastPumpDemandKW + loop.lastHeaterDemandKW;
-				auto workDemand = [&](auto const& entries) {
-					for (auto const& entry : entries) bus.demandKW += entry.lastPowerDemandKW;
-				};
-				workDemand(mImpl->chillers);
-				workDemand(mImpl->waterTreatments);
-				workDemand(mImpl->electrolyzers);
-				workDemand(mImpl->co2Captures);
-				workDemand(mImpl->sabatierReactors);
-				workDemand(mImpl->methaneProcessors);
-				workDemand(mImpl->microbialProcessors);
-				for (auto const& crop : mImpl->cropPopulations)
-					bus.demandKW += crop.lastLightRequestedKW + crop.lastCirculationRequestedKW;
-				for (auto const& culture : mImpl->algaeCultures)
-					bus.demandKW += culture.lastLightRequestedKW + culture.lastCirculationRequestedKW;
-				bus.suppliedKW = power.totalSuppliedKW + power.coolantPumpKW + power.coolantHeaterKW
-					+ power.chillerPowerKW + power.waterTreatmentPowerKW + power.electrolyzerPowerKW
-					+ power.co2CapturePowerKW + power.sabatierPowerKW + power.methaneProcessingPowerKW
-					+ power.microbialProcessingPowerKW + power.cropPowerKW + power.algaePowerKW
-					+ power.recoverySurgeKW;
-				bus.unmetKW = std::max(0.0, bus.demandKW - bus.suppliedKW);
-				bus.protectedDemandKW = power.protectedDemandKW;
-				bus.protectedSuppliedKW = power.protectedSuppliedKW;
-				bus.protectedUnmetKW = power.protectedUnmetKW;
-				bus.protectedServices = power.protectedServices;
-				bus.surplusKW = power.surplusKW;
-				bus.throughPowerKW = bus.suppliedKW + bus.batteryChargeKW + power.generatorStartupDrawKW;
-				bus.loadFraction = bus.ratedCapacityKW > 0.0 ? bus.throughPowerKW / bus.ratedCapacityKW : 0.0;
-			}
+			if (auto const found = mImpl->lastBusPower.find(authored.id); found != mImpl->lastBusPower.end())
+				bus = found->second;
 			result.power.buses.push_back(std::move(bus));
 		}
 		return result;

@@ -2,6 +2,95 @@
 
 namespace core
 {
+	void StationSystemsRuntime::Impl::Tick::initializeBuses()
+	{
+		for (auto const& bus : runtime.settings.powerBuses) busBudgets.try_emplace(bus.id);
+		auto bind = [&](char const* type, auto const& entries) {
+			for (auto const& entry : entries)
+				consumerBuses[{type, entry.authored.id}] = entry.authored.supplyBusIds.front();
+		};
+		bind("Equipment", runtime.loads); bind("Generator", runtime.generators);
+		bind("Coolant loop", runtime.coolantLoops); bind("Chiller", runtime.chillers);
+		bind("Water treatment", runtime.waterTreatments); bind("Electrolyzer", runtime.electrolyzers);
+		bind("CO2 capture", runtime.co2Captures); bind("Sabatier", runtime.sabatierReactors);
+		bind("Methane processor", runtime.methaneProcessors); bind("Microbial processor", runtime.microbialProcessors);
+		bind("Crops", runtime.cropPopulations); bind("Algae", runtime.algaeCultures);
+	}
+
+	std::string const& StationSystemsRuntime::Impl::Tick::consumerBus(std::string const& type, std::string const& id)
+	{
+		return consumerBuses.at({type, id});
+	}
+
+	void StationSystemsRuntime::Impl::Tick::addGeneration(std::vector<std::string> const& ids, double power)
+	{
+		// Multiple landings expose ONE finite source to the member buses.
+		// Actual allocation decides which landing carries each watt.
+		if (ids.size() > 1) { sharedGeneration.push_back({ids, power}); return; }
+		auto& bus = busBudgets.at(ids.front());
+		bus.generated += power;
+		bus.available += power;
+	}
+
+	double StationSystemsRuntime::Impl::Tick::generationAvailable(std::string const& id)
+	{
+		double total = busBudgets.at(id).available;
+		for (auto const& source : sharedGeneration)
+			if (std::find(source.ids.begin(), source.ids.end(), id) != source.ids.end()) total += source.available;
+		return total;
+	}
+
+	double StationSystemsRuntime::Impl::Tick::takeGeneration(std::string const& id, double need)
+	{
+		auto& bus = busBudgets.at(id);
+		auto const local = std::min(need, bus.available);
+		bus.available -= local;
+		double remaining = need - local;
+		double delivered = local;
+		for (auto& source : sharedGeneration)
+		{
+			if (std::find(source.ids.begin(), source.ids.end(), id) == source.ids.end()) continue;
+			auto const take = std::min(remaining, source.available);
+			source.available -= take; remaining -= take; bus.generated += take; delivered += take;
+		}
+		return delivered;
+	}
+
+	void StationSystemsRuntime::Impl::Tick::settleGeneration()
+	{
+		// Unused availability is not service. Attribute only that remaining
+		// capacity equally for the surplus rollup, after all real draws.
+		for (auto& source : sharedGeneration)
+		{
+			for (auto const& id : source.ids)
+			{
+				auto& bus = busBudgets.at(id);
+				bus.generated += source.available / source.ids.size();
+				bus.available += source.available / source.ids.size();
+			}
+			source.available = 0;
+		}
+	}
+
+	double StationSystemsRuntime::Impl::Tick::sourceDemand(std::vector<std::string> const& ids)
+	{
+		if (runtime.settings.powerBuses.size() == 1) return busBudgets.at(ids.front()).dispatch;
+		double result = 0;
+		for (auto const& id : ids) result += std::max(0.0, busBudgets.at(id).dispatch);
+		return result;
+	}
+
+	void StationSystemsRuntime::Impl::Tick::commitSource(std::vector<std::string> const& ids, double power)
+	{
+		if (runtime.settings.powerBuses.size() == 1) { busBudgets.at(ids.front()).dispatch -= power; return; }
+		for (auto const& id : ids)
+		{
+			auto& bus = busBudgets.at(id);
+			auto const committed = std::min(power, bus.dispatch);
+			bus.dispatch -= committed; power -= committed;
+		}
+	}
+
 	ConstituentLedger StationSystemsRuntime::Impl::Tick::drawStoreActual(size_t storeIndex, double totalKgBefore, double drawnKg)
 	{
 		auto const& store = runtime.stores[storeIndex].authored;
@@ -182,14 +271,16 @@ namespace core
 			nativeDeliverableKW(battery, dtHours));
 	}
 
-	double StationSystemsRuntime::Impl::Tick::batteryDeliverableKW()
+	double StationSystemsRuntime::Impl::Tick::batteryDeliverableKW(std::string const& busId)
 	{
 		double total{0.0};
-		for (auto const& battery : runtime.batteries) total += deliverableKW(battery, hours);
+		for (auto const& battery : runtime.batteries)
+			if (std::find(battery.authored.busIds.begin(), battery.authored.busIds.end(), busId) != battery.authored.busIds.end())
+				total += deliverableKW(battery, hours);
 		return total;
 	}
 
-	double StationSystemsRuntime::Impl::Tick::drawBatteries(double needKW, std::vector<std::pair<size_t, double>>* contributions)
+	double StationSystemsRuntime::Impl::Tick::drawBatteries(std::string const& busId, double needKW, std::vector<std::pair<size_t, double>>* contributions)
 	{
 		if (needKW <= 0.0) return 0.0;
 		auto remaining = needKW;
@@ -198,6 +289,7 @@ namespace core
 			auto& battery = runtime.batteries[batteryIndex];
 			if (remaining <= 1e-15) break;
 			if (batteryDisabled(battery)) continue;
+			if (std::find(battery.authored.busIds.begin(), battery.authored.busIds.end(), busId) == battery.authored.busIds.end()) continue;
 			auto const port = connections.port("Battery", battery.authored.id, "Discharge");
 			auto const request = connections.required(port, remaining);
 			auto const transport = connections.receive(port, remaining, nativeDeliverableKW(battery, hours));
@@ -233,19 +325,27 @@ namespace core
 
 	double StationSystemsRuntime::Impl::Tick::powerAvailable(std::string const& type, std::string const& id)
 	{
-		return connections.available(powerPort(type, id), availableGeneration + batteryDeliverableKW()); }
+		auto const& busId = consumerBus(type, id);
+		return connections.available(powerPort(type, id), generationAvailable(busId) + batteryDeliverableKW(busId));
+	}
 
 	double StationSystemsRuntime::Impl::Tick::drawPower(std::string const& type, std::string const& id, double needKW, std::vector<std::pair<size_t, double>>* contributions, double* generation)
 	{
 		auto const port = powerPort(type, id);
 		auto const grossNeed = connections.required(port, needKW);
-		auto const fromGeneration = std::min(grossNeed, availableGeneration);
+		auto const& busId = consumerBus(type, id);
+		auto& bus = busBudgets.at(busId);
+		auto const fromGeneration = takeGeneration(busId, grossNeed);
 		availableGeneration -= fromGeneration;
-		auto const fromBattery = drawBatteries(grossNeed - fromGeneration, contributions);
+		auto const fromBattery = drawBatteries(busId, grossNeed - fromGeneration, contributions);
+		bus.discharged += fromBattery;
+		bus.input += fromGeneration + fromBattery;
 		batterySuppliedKW += fromBattery;
 		batteryShortfallKW += grossNeed - fromGeneration - fromBattery;
 		if (generation) *generation = fromGeneration;
-		return connections.send(port, fromGeneration + fromBattery).delivered;
+		auto const delivered = connections.send(port, fromGeneration + fromBattery).delivered;
+		consumerSupplied[{type, id}] += delivered;
+		return delivered;
 	}
 
 	double StationSystemsRuntime::Impl::Tick::energyUnitsToKWh(std::string const& unit)
@@ -410,9 +510,10 @@ namespace core
 		return loop.authored.criticalService;
 	}
 
-	void StationSystemsRuntime::Impl::Tick::recordProtected(std::string id, std::string kind, double requestedKW, double suppliedKW, std::string reason)
+	void StationSystemsRuntime::Impl::Tick::recordProtected(std::string type, std::string id, std::string kind, double requestedKW, double suppliedKW, std::string reason)
 	{
 		if (requestedKW <= 0.0) return;
+		protectedServiceBuses.push_back(consumerBus(type, id));
 		protectedServices.push_back({std::move(id), std::move(kind), requestedKW,
 			suppliedKW, std::max(0.0, requestedKW - suppliedKW), std::move(reason)});
 		protectedDemandKW += requestedKW;
@@ -427,6 +528,10 @@ namespace core
 		if (eta <= 0.0) return;
 		refundKW /= eta;
 		connections.refund(port, refundKW);
+		auto const& id = runtime.chillers[chillerIndex].authored.id;
+		auto& bus = busBudgets.at(consumerBus("Chiller", id));
+		bus.input -= refundKW;
+		consumerSupplied[{"Chiller", id}] -= refundKW * eta;
 		auto& draw = protectedChillerDraws[chillerIndex];
 		for (auto it = draw.fromBatteryKW.rbegin();
 			it != draw.fromBatteryKW.rend() && refundKW > 1e-15; ++it)
@@ -451,10 +556,12 @@ namespace core
 					-storedKWh / (2.0 * battery.authored.usableKWh), 0.0, 0.0, 0.0,
 					previousBatteryWearFraction[it->first]);
 			batterySuppliedKW -= give;
+			bus.discharged -= give;
 			it->second -= give;
 			refundKW -= give;
 		}
 		availableGeneration += refundKW;
+		bus.available += refundKW;
 	}
 
 	void StationSystemsRuntime::Impl::Tick::reconcileChillerProtected(size_t chillerIndex)

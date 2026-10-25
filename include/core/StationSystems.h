@@ -3401,6 +3401,8 @@ namespace core
 		bool tripped{false};
 		double trippedAtSimSeconds{0.0};
 		double throughPowerKW{0.0};
+		double unmetCriticalKW{0.0};
+		double residualKW{0.0};
 		std::vector<StationProtectedServiceSnapshot> protectedServices;
 		bool operator==(StationBusPowerSnapshot const&) const = default;
 	};

@@ -661,6 +661,7 @@ namespace core
 		// runLedger previews the real allocation transactionally before this
 		// pass. Protected claims therefore have supply on their first active
 		// interval, and vanished demand cannot spend one more interval of heat.
+		std::vector<std::pair<std::vector<std::string>, double>> chargeHeadrooms;
 		double chargeHeadroomKW = 0.0;
 		for (auto const& battery : runtime.batteries)
 		{
@@ -672,10 +673,48 @@ namespace core
 			// Match the charging allocator's receive request: acceptance is
 			// bus-side input, capped by the Charge connection and grossed up
 			// for its transport losses, not unrestricted battery headroom.
-			chargeHeadroomKW += connections.required(
+			auto const input = connections.required(
 				connections.port("Battery", battery.authored.id, "Charge"), wantedKW);
+			chargeHeadroomKW += input;
+			chargeHeadrooms.push_back({battery.authored.busIds, input});
 		}
 		auto const acceptanceCeilingKW = engineAcceptanceDemandKW + chargeHeadroomKW;
+		auto engineAcceptance = [&](auto const& ids) {
+			if (runtime.settings.powerBuses.size() == 1)
+				return std::max(0.0, acceptanceCeilingKW - availableGeneration);
+			std::map<std::string, double> targets;
+			for (auto const& id : ids)
+				targets[id] = engineAcceptanceBusDemand.empty() ? std::numeric_limits<double>::infinity() : engineAcceptanceBusDemand[id];
+			for (auto const& [members, input] : chargeHeadrooms)
+			{
+				auto remaining = input;
+				auto first = targets.end();
+				for (auto const& id : members)
+				{
+					auto target = targets.find(id);
+					if (target == targets.end()) continue;
+					if (first == targets.end()) first = target;
+					auto const covered = std::min(remaining, std::max(0.0, busBudgets.at(id).available - target->second));
+					target->second += covered; remaining -= covered;
+				}
+				if (first != targets.end()) first->second += remaining;
+			}
+			for (auto& [id, target] : targets) target = std::max(0.0, target - busBudgets.at(id).available);
+			for (auto const& source : sharedGeneration)
+			{
+				auto remaining = source.available;
+				for (auto const& id : source.ids)
+				{
+					auto target = targets.find(id);
+					if (target == targets.end()) continue;
+					auto const covered = std::min(remaining, target->second);
+					target->second -= covered; remaining -= covered;
+				}
+			}
+			double acceptance = 0;
+			for (auto const& [id, target] : targets) acceptance += target;
+			return acceptance;
+		};
 		auto const dtSeconds = static_cast<double>(seconds);
 		// #826: engines sharing a source share one finite budget. Reserve the
 		// warmest tick-start sink of all requesting, in-service, temperature-
@@ -824,7 +863,7 @@ namespace core
 				// As for other actively requested physical inputs, zero
 				// efficiency loses the accepted input; it delivers no heat
 				// and therefore drives no conversion or auxiliaries.
-				auto const acceptanceKW = std::max(0.0, acceptanceCeilingKW - availableGeneration);
+				auto const acceptanceKW = engineAcceptance(engine.authored.busIds);
 				if (acceptanceKW > 1e-12)
 				{
 					auto const intake = connections.receive(intakePort, requestedIntakeKW, supplyKW);
@@ -855,7 +894,7 @@ namespace core
 			// the pool ahead of this engine. What is not admitted is not
 			// converted: the heat stays in the hot reservoir and the
 			// limiter names DemandAcceptance as the binding constraint.
-			auto const acceptanceKW = std::max(0.0, acceptanceCeilingKW - availableGeneration);
+			auto const acceptanceKW = engineAcceptance(engine.authored.busIds);
 			if (connections.available(generationPort, netKW) > acceptanceKW + 1e-12
 				|| acceptanceKW <= 1e-12)
 			{
@@ -921,6 +960,7 @@ namespace core
 			engineRejectionByReservoir[engine.sinkIndex] += connections.routeHeat(
 				connections.port("Heat engine", engine.authored.id, "Rejection heat"), rejectKW);
 			availableGeneration += netKW; poolGenerationKW += netKW;
+			addGeneration(engine.authored.busIds, netKW);
 			engine.lastThermalInputKW = intakeKW;
 			engine.lastElectricalOutputKW = netKW;
 			engine.lastRejectionKW = rejectKW;
@@ -991,9 +1031,6 @@ namespace core
 		// A start is still never self-funded: the stopped machine's own
 		// output is not in the pool that starts it.
 		dispatchAutomatic = runtime.settings.dispatchMode == StationDispatchMode::Automatic;
-		dispatchLoadTargetKW = dispatchAutomatic
-			? std::max(0.0, runtime.lastDispatchDemandKW - availableGeneration)
-			: 0.0;
 		dispatchDtSeconds = static_cast<double>(seconds);
 		// The cranking draw a machine owes the pool this tick: the same
 		// prorated purchase the phase machine makes - never more than
@@ -1001,7 +1038,11 @@ namespace core
 		// still owed (#562).
 
 		dispatchStartupSupportKW = double{0.0};
-		dispatchRemainingKW = dispatchLoadTargetKW;
+		for (auto& [id, bus] : busBudgets)
+			bus.dispatch = dispatchAutomatic ? std::max(0.0, runtime.lastBusDispatchDemand[id] - bus.available) : 0.0;
+		for (auto const& source : sharedGeneration) commitSource(source.ids, source.available);
+		dispatchLoadTargetKW = 0;
+		for (auto const& [id, bus] : busBudgets) dispatchLoadTargetKW += bus.dispatch;
 		for (auto& generator : runtime.generators)
 		{
 			generator.dispatchCommandKW = 0.0;
@@ -1029,10 +1070,14 @@ namespace core
 			// whether or not it is still commanded - the crank runs on at
 			// zero output, and the load must not be left blind to it.
 			if (generator.phase == StationGeneratorPhase::Starting)
-				dispatchStartupSupportKW += connections.inputDemand(powerPort("Generator", generator.authored.id), startupDrawForKW(generator, startupRequiredKJ));
+			{
+				auto const crank = connections.inputDemand(powerPort("Generator", generator.authored.id), startupDrawForKW(generator, startupRequiredKJ));
+				dispatchStartupSupportKW += crank;
+				busBudgets.at(consumerBus("Generator", generator.authored.id)).startup += crank;
+			}
 			auto const generationPort = connections.port("Generator", generator.authored.id, "Generation");
 			if (connections.efficiency(generationPort) == 0.0) continue;
-			auto const commandKW = std::min(capKW, connections.required(generationPort, dispatchRemainingKW));
+			auto const commandKW = std::min(capKW, connections.required(generationPort, sourceDemand(generator.authored.busIds)));
 			if (commandKW <= 0.0) continue;
 			generator.dispatchCommandKW = commandKW;
 			if (generator.phase == StationGeneratorPhase::Running
@@ -1045,7 +1090,8 @@ namespace core
 				auto const ramp = integrateGeneratorRamp(startKW, commandKW,
 					generator.authored.maxRampKWPerSecond, dispatchDtSeconds);
 				auto const deliverableKW = std::min(fuelCapKW, ramp.meanKW);
-				dispatchRemainingKW -= connections.available(generationPort, std::max(0.0, deliverableKW));
+				auto const committed = connections.available(generationPort, std::max(0.0, deliverableKW));
+				commitSource(generator.authored.busIds, committed);
 			}
 			else if (generator.phase == StationGeneratorPhase::Stopped)
 			{
@@ -1053,7 +1099,9 @@ namespace core
 				// output this tick, so its startup draw rides the target
 				// for the backup to fund beside the load it cannot yet
 				// serve.
-				dispatchStartupSupportKW += connections.inputDemand(powerPort("Generator", generator.authored.id), startupDrawForKW(generator, startupRequiredKJ));
+				auto const crank = connections.inputDemand(powerPort("Generator", generator.authored.id), startupDrawForKW(generator, startupRequiredKJ));
+				dispatchStartupSupportKW += crank;
+				busBudgets.at(consumerBus("Generator", generator.authored.id)).startup += crank;
 			}
 			// A machine in shutdown decay is commanded but serves
 			// nothing this tick; its residual flows on untouched.
@@ -1063,7 +1111,7 @@ namespace core
 		// serve this tick plus the startup energy a legitimate start
 		// still needs, and never for generation that is merely
 		// commanded but cannot deliver.
-		dispatchRemainingKW += dispatchStartupSupportKW;
+		for (auto& [id, bus] : busBudgets) bus.dispatch += bus.startup;
 		for (auto& cell : runtime.fuelCells)
 		{
 			cell.dispatchCommandKW = 0.0;
@@ -1098,11 +1146,14 @@ namespace core
 			if (capKW <= 0.0) continue;
 			auto const generationPort = connections.port("Fuel cell", cell.authored.id, "Backup generation");
 			if (connections.efficiency(generationPort) == 0.0) continue;
-			auto const commandKW = std::min(capKW, connections.required(generationPort, dispatchRemainingKW));
+			auto const commandKW = std::min(capKW, connections.required(generationPort, sourceDemand(cell.authored.busIds)));
 			if (commandKW <= 0.0) continue;
 			cell.dispatchCommandKW = commandKW;
-			dispatchRemainingKW -= connections.available(generationPort, commandKW);
+			auto const committed = connections.available(generationPort, commandKW);
+			commitSource(cell.authored.busIds, committed);
 		}
+		dispatchRemainingKW = 0;
+		for (auto const& [id, bus] : busBudgets) dispatchRemainingKW += bus.dispatch;
 		runtime.lastDispatchTargetKW = dispatchLoadTargetKW + dispatchStartupSupportKW;
 		runtime.lastDispatchCommittedKW = runtime.lastDispatchTargetKW - dispatchRemainingKW;
 		runtime.lastDispatchShortfallKW = dispatchRemainingKW;
@@ -1303,6 +1354,7 @@ namespace core
 			fuelCellHeatByReservoir[cell.sinkIndex] += connections.routeHeat(connections.port("Fuel cell", cell.authored.id, "Heat"), wasteKJ / dtSeconds);
 			auto const toPoolKW = connections.send(connections.port("Fuel cell", cell.authored.id, "Backup generation"), outputKW).delivered;
 			availableGeneration += toPoolKW; poolGenerationKW += toPoolKW;
+			addGeneration(cell.authored.busIds, toPoolKW);
 			cell.lastOutputKW = outputKW;
 			cell.lastHydrogenKg = h2ActualKg;
 			cell.lastOxygenKg = o2ActualKg;
@@ -1613,6 +1665,7 @@ namespace core
 					// earned with fuel, not sunshine.
 					auto const toPoolKW = connections.send(connections.port("Generator", generator.authored.id, "Generation"), generator.lastAverageOutputKW).delivered;
 					availableGeneration += toPoolKW; poolGenerationKW += toPoolKW;
+					addGeneration(generator.authored.busIds, toPoolKW);
 					totalGeneratorOutputKW += generator.lastAverageOutputKW;
 					totalGeneratorWasteKW += wasteKW;
 					if (exhaustedAtEnd)

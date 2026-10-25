@@ -95,6 +95,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/station/Bioconversion.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationBiologyChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/Documents.cpp` | module-owned | `pf-smoke-station` |
+| `smoke/station/StationBusDispatchChecks.cpp` | module-owned | `pf-smoke-station` (busDispatchBalance, busDispatchProtected, busDispatchBatteries, busDispatchInternal, busDispatchSources, busDispatchRecovery) |
 | `smoke/station/StationPowerBusChecks.cpp` | module-owned | `pf-smoke-station` (powerBusMigration, powerBusPersistence, powerBusRoles, powerBusValidation) |
 | `smoke/station/Connections.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/BatteryObservations.cpp` | module-owned | `pf-smoke-station` |

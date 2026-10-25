@@ -576,6 +576,7 @@ namespace core
 		// directly inflates every energy amount 3600x.
 		hours = static_cast<double>(seconds) / 3600.0;
 		availableGeneration = 0.0;
+		initializeBuses();
 		for (auto& array : runtime.solarArrays)
 		{
 			array.lastIllumination = evaluateStationProfile(array.authored.illumination, profileElapsed);
@@ -600,6 +601,7 @@ namespace core
 			array.lastEclipse = !array.lastDisabled && array.lastAvailableKW <= 0.0;
 			array.lastAvailableKW = connections.available(connections.port("Solar", array.authored.id, "Solar generation"), array.lastAvailableKW);
 			availableGeneration += array.lastAvailableKW;
+			addGeneration(array.authored.busIds, array.lastAvailableKW);
 			// #553: finite installed capacities do not guarantee a
 			// finite total — two finite arrays can sum past the largest
 			// representable double into infinity, and an infinite pool

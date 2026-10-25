@@ -1243,10 +1243,9 @@ namespace core
 		// has elapsed, the spare pool shows the declared hysteresis
 		// headroom above its demand, its cooling is qualified, and - for
 		// a heat-producing load - firm generation can carry the restart
-		// plus its surge. One load is released per tick, in priority
-		// order, so several restarts never surge together.
-		restartSlotOpen = bool{true};
-		pendingRestartHeadroomKW = double{0.0};
+		// plus its surge. One load per bus is released per tick in priority
+		// order; independent circuits do not block each other's recovery.
+		std::set<std::string> restartedBuses;
 		// #589: the restart demand of Shed loads that are eligible to
 		// come back but are held only because the pools cannot carry the
 		// restart yet. A Shed load draws nothing, so with automatic
@@ -1278,7 +1277,8 @@ namespace core
 			}
 			// Past dwell: this load is eligible to restart soon, so hold
 			// its restart need out of battery charging below.
-			pendingRestartHeadroomKW = std::max(pendingRestartHeadroomKW, restartNeed);
+			auto& bus = busBudgets.at(consumerBus("Equipment", load.authored.id));
+			bus.reserve = std::max(bus.reserve, restartNeed);
 			auto const headroom = load.lastRequestedKW
 				* (1.0 + load.authored.recoveryHysteresisFraction);
 			// #589: is this restart barred only by the pools? A
@@ -1303,7 +1303,7 @@ namespace core
 			}
 			if (restartFeasible)
 				pendingRecoveryDispatchKW[load.authored.id] += std::max(headroom, restartNeed);
-			if (!restartSlotOpen) continue;
+			if (restartedBuses.count(consumerBus("Equipment", load.authored.id))) continue;
 			auto const poolKW = powerAvailable("Equipment", load.authored.id);
 			if (poolKW + 1e-12 < headroom)
 			{
@@ -1323,7 +1323,7 @@ namespace core
 						continue;
 					}
 				}
-				if (availableGeneration + 1e-12 < restartNeed)
+				if (generationAvailable(consumerBus("Equipment", load.authored.id)) + 1e-12 < restartNeed)
 				{
 					load.lastRecoveryHoldReason =
 						"restart held: firm generation cannot carry the restart and surge";
@@ -1333,7 +1333,7 @@ namespace core
 			load.recoveryStage = StationLoadRecoveryStage::Restoring;
 			load.surgeRemainingSeconds = load.authored.restartSurgeSeconds;
 			load.lastRecoveryHoldReason.clear();
-			restartSlotOpen = false;
+			restartedBuses.insert(consumerBus("Equipment", load.authored.id));
 		}
 		// Tally the recovery stage for the power snapshot.
 		for (auto const& load : runtime.loads)
@@ -1363,15 +1363,16 @@ namespace core
 		// need is not charged into the batteries, so reserves refill only
 		// from the surplus the recovery does not need and never overload
 		// a service that is still coming back.
-		recoveryChargeReserveKW = recoveryPending ? pendingRestartHeadroomKW : 0.0;
 		// Charge from the surplus left after every allocation: batteries
 		// take only generation no load took, within the charge power
 		// limit, the headroom below nameplate and the charge efficiency.
 		// A battery that discharged this tick never charges in the same
 		// tick, so no charge/discharge cycle can circulate energy.
 		for (auto& battery : runtime.batteries)
+		for (auto const& busId : battery.authored.busIds)
 		{
-			if (batteryDisabled(battery) || availableGeneration <= 0.0) continue;
+			auto& bus = busBudgets.at(busId);
+			if (batteryDisabled(battery) || generationAvailable(busId) <= 0.0) continue;
 			if (battery.lastDischargeKW > 0.0) continue;
 			// #843: a faded bank fills only to its faded ceiling: the
 			// effective nameplate, not the authored one, bounds the
@@ -1382,16 +1383,23 @@ namespace core
 			// #417: during a recovery stage the pending restart headroom
 			// is held out of the charge pool, so charging never consumes
 			// the firm generation a waiting load needs to restart.
-			auto const chargeableKW = std::max(0.0, availableGeneration - recoveryChargeReserveKW);
+			auto reserve = bus.reserve;
+			for (auto const& source : sharedGeneration)
+				if (std::find(source.ids.begin(), source.ids.end(), busId) != source.ids.end())
+					for (auto const& id : source.ids) reserve = std::max(reserve, busBudgets.at(id).reserve);
+			auto const chargeableKW = std::max(0.0, generationAvailable(busId) - reserve);
 			if (chargeableKW <= 0.0) continue;
-			auto const wantedKW = std::min(battery.authored.maxChargeKW, headroom / hours / battery.authored.chargeEfficiency);
+			auto const wantedKW = std::min(std::max(0.0, battery.authored.maxChargeKW - battery.lastChargeKW), headroom / hours / battery.authored.chargeEfficiency);
 			auto const transport = connections.receive(connections.port("Battery", battery.authored.id, "Charge"), wantedKW, chargeableKW);
 			auto const storedGain = std::min(transport.delivered * hours * battery.authored.chargeEfficiency, headroom);
 			auto const busUsed = transport.delivered * hours;
 			battery.stored += storedGain;
 			battery.chargedKWh += storedGain;
 			battery.chargeInputKWh += busUsed;
-			battery.lastChargeKW = busUsed / hours;
+			battery.lastChargeKW += busUsed / hours;
+			bus.charge += transport.input;
+			bus.input += transport.input;
+			takeGeneration(busId, transport.input);
 			// #843: cycles are counted on real charge, half a round trip
 			// per side of the authored cyclable energy.
 			if (battery.authored.capacityFade && battery.authored.usableKWh > 0.0)

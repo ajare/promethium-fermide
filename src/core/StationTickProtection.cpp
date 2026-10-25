@@ -88,7 +88,7 @@ namespace core
 			protectedLoopPumpKW[loopIndex] = std::min(pumpDemandKW, suppliedKW);
 			protectedLoopHeaterKW[loopIndex] = std::max(0.0,
 				std::min(heaterDemandKW, suppliedKW - protectedLoopPumpKW[loopIndex]));
-			recordProtected(loop.authored.id, "containment-circulation", requestedKW,
+			recordProtected("Coolant loop", loop.authored.id, "containment-circulation", requestedKW,
 				suppliedKW, suppliedKW + 1e-12 < requestedKW
 					? "the shared electrical pool cannot supply the protected containment "
 						"circulation draw: the pumps and freeze heater run curtailed"
@@ -165,7 +165,7 @@ namespace core
 				{
 					auto const pumpSuppliedKW = drawPower("Coolant loop", loop.authored.id, loopPumpDemandKW);
 					protectedLoopPumpKW[chiller.loopIndex] = pumpSuppliedKW;
-					recordProtected(loop.authored.id, "critical-cooling-circulation",
+					recordProtected("Coolant loop", loop.authored.id, "critical-cooling-circulation",
 						loopPumpDemandKW, pumpSuppliedKW,
 						pumpSuppliedKW + 1e-12 < loopPumpDemandKW
 							? "the shared electrical pool cannot supply the circulation the "
@@ -211,7 +211,7 @@ namespace core
 			protectedChillerPowerKW[chillerIndex] = suppliedKW;
 			protectedChillerDraws[chillerIndex].fromGenerationKW = creditFromGenerationKW;
 			protectedChillerDraws[chillerIndex].fromBatteryKW = std::move(creditFromBatteryKW);
-			recordProtected(chiller.authored.id, "critical-cooling", requestedKW,
+			recordProtected("Chiller", chiller.authored.id, "critical-cooling", requestedKW,
 				suppliedKW, circulationFraction + 1e-12 < 1.0
 					? "the protected chiller's cold-loop circulation is unpowered or "
 						"curtailed: cooling service is limited by the circulation the "
@@ -235,7 +235,7 @@ namespace core
 			if (requestedKW <= 0.0) continue;
 			auto const suppliedKW = drawPower("Crops", crop.authored.id, requestedKW);
 			protectedCropCirculationKW[cropIndex] = suppliedKW;
-			recordProtected(crop.authored.id, "biological-circulation", requestedKW,
+			recordProtected("Crops", crop.authored.id, "biological-circulation", requestedKW,
 				suppliedKW, suppliedKW + 1e-12 < requestedKW
 					? "the shared electrical pool cannot supply the essential canopy "
 						"circulation: gas, water and nutrient exchange runs curtailed"
@@ -249,7 +249,7 @@ namespace core
 			if (requestedKW <= 0.0) continue;
 			auto const suppliedKW = drawPower("Algae", culture.authored.id, requestedKW);
 			protectedAlgaeCirculationKW[cultureIndex] = suppliedKW;
-			recordProtected(culture.authored.id, "biological-circulation", requestedKW,
+			recordProtected("Algae", culture.authored.id, "biological-circulation", requestedKW,
 				suppliedKW, suppliedKW + 1e-12 < requestedKW
 					? "the shared electrical pool cannot supply the essential culture "
 						"circulation: the culture exchange runs curtailed"
@@ -270,6 +270,7 @@ namespace core
 			if (!heat) continue;
 			auto const heldKW = heat->retainedHeatKJ / seconds;
 			if (heldKW + heat->lastInputRate <= 0.0) continue;
+			protectedServiceBuses.push_back(generator.authored.busIds.front());
 			protectedServices.push_back({generator.authored.id, "shutdown-cooling",
 				heat->lastInputRate + heldKW, heat->lastInputRate, heldKW,
 				heldKW > 0.0 ? "heat connection is constrained: unrejected heat remains at the source"

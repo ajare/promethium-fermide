@@ -98,6 +98,7 @@ pf_add_smoke_module(pf-smoke-station
         station/StationPrefabChecks.cpp
         station/StationPowerChecks.cpp
         station/StationPowerBusChecks.cpp
+        station/StationBusDispatchChecks.cpp
         station/StationCompoundPowerChecks.cpp
         station/StationBatteryChecks.cpp
         station/StationLogisticsChecks.cpp
@@ -272,6 +273,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         referenceBottomingCycleIdle referenceBottomingCycle
         crews water waterQualityGates waterQualityValidation waterQualityConsumers waterSelectiveIrrigation waterHydroponics waterContamination compoundWaterPartial compoundWaterPartialValidation compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance atmosphereStateCharts configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
         powerBusMigration powerBusPersistence powerBusRoles powerBusValidation
+        busDispatchBalance busDispatchProtected busDispatchBatteries busDispatchInternal busDispatchSources busDispatchRecovery
         compoundFiles powerFiles powerChainFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles maintenanceFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
         # #571: harvest, algae and the nutrient-conservation closure were
         # reachable through the binary but never registered here, so they

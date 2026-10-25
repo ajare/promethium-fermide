@@ -185,6 +185,12 @@ namespace
 		auto bad = good; bad.powerBuses.push_back(bad.powerBuses[0]); refuse(bad);
 		bad = good; bad.powerBuses[0].id.clear(); refuse(bad);
 		bad = good; bad.powerBuses.clear(); refuse(bad);
+		bad = good; bad.solarArrays[0].busIds.clear(); refuse(bad);
+		bad = good; bad.solarArrays[0].busIds = {"missing"}; refuse(bad);
+		bad = good; bad.solarArrays[0].busIds = {"main", "main"}; refuse(bad);
+		bad = good; bad.equipmentLoads[0].supplyBusIds.clear(); refuse(bad);
+		bad = good; bad.equipmentLoads[0].supplyBusIds = {"missing"}; refuse(bad);
+		bad = good; bad.equipmentLoads[0].supplyBusIds = {"main", "main"}; refuse(bad);
 		for (double value : {-1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
 		{
 			bad = good; bad.powerBuses[0].ratedCapacityKW = value; refuse(bad);
