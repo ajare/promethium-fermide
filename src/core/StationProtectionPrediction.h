@@ -14,7 +14,7 @@ namespace core::station_detail
 	// heating (or that a later interval undoes an earlier excursion).
 	struct ProtectionPrediction
 	{
-		enum class Body { Reservoir, Atmosphere, Loop };
+		enum class Body { Reservoir, Atmosphere, Loop, Machine };
 		static constexpr double unbounded = std::numeric_limits<double>::infinity();
 		struct Gate
 		{

@@ -169,6 +169,7 @@ namespace core
 		}
 		if (runtime.prediction.active)
 		{
+			for (auto const& cell : runtime.electrolyzers) protectionMachineBodyStart.push_back(cell.bodyTemperatureC);
 			for (auto const& body : runtime.reservoirs) protectionReservoirStart.push_back(body.temperatureC);
 			for (auto const& body : runtime.atmospheres) protectionAtmosphereStart.push_back(body.temperatureC);
 			for (auto const& body : runtime.coolantLoops) protectionLoopStart.push_back(body.temperatureC);

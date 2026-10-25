@@ -1,4 +1,7 @@
 #include "StationRig.h"
+#include "WaterGasObservationFixture.h"
+#include "core/StationMetrics.h"
+#include "core/StationConnections.h"
 #include "Smoke.h"
 #include "core/WorldDocument.h"
 #include <algorithm>
@@ -2093,10 +2096,160 @@ void thermalNodePersistence(smoke::Context const&)
 				"legacy atmosphere endpoint wire format changed");
 		}
 }
+core::StationSystemsSettings bodiedCell()
+{
+	auto s = waterGasObservationFixture();
+	s.waterCollectors.clear(); s.waterTreatments.clear(); s.co2Captures.clear();
+	s.coolantLoops.clear(); s.atmospheres.clear();
+	s.electrolyzers[0].thermalBody = core::ThermalBodySettings{100, 5, 0.5};
+	return s;
+}
+
+void thermalBodyCharge(smoke::Context const&)
+{
+	auto s = bodiedCell();
+	core::World world("Casing", 2, 2); std::string diagnostic;
+	configure(world, s, diagnostic); world.resumeSimulation();
+	require(advanceSeconds(world, 2), "casing advance failed");
+	auto snap = world.getStationSystemsSnapshot(); auto const& cell = snap.electrolyzers[0];
+	require(snap.healthy && cell.hasThermalBody && cell.bodyTemperatureC > 5
+		&& cell.lastBodyChargeKW > cell.lastSinkLegKW && cell.lastSinkLegKW > 0,
+		"working casing did not warm or conduct to its sink");
+	require(std::abs(cell.bodyResidualKJ) < 1e-7 && std::abs(cell.residualKJ) < 1e-7
+		&& std::abs(cell.bodyChargeKJ - cell.heatRoutedKJ) < 1e-7
+		&& std::abs(cell.sinkLegKJ - snap.thermal.reservoirs[0].electrolysisEnergyKJ) < 1e-7,
+		"casing charge/outflow/stored energy did not close");
+	auto observations = core::stationExchangeObservations(s);
+	for (auto role : {"Body temperature", "Body charge", "Sink leg"})
+		require(std::any_of(observations.begin(), observations.end(), [&](auto const& o) {
+			return o.metric.equipmentType == "Electrolyzer" && o.metric.exchangeRole == role;
+		}), "casing observable missing");
+	// The physical wire caps casing outflow; rejected energy must not also
+	// accumulate in the connection's retained-source tank.
+	auto limited = s; limited.electrolyzers[0].thermalBody->startingTemperatureC = 40;
+	for (auto const& link : core::station_connections::build(limited).links)
+		if (link.designKey.ownerType == "Electrolyzer" && link.designKey.relation == "Heat")
+			limited.connections[link.designKey] = {core::StationPhysicalConnection::Thermal, 0.1, 0.5};
+	require(!limited.connections.empty(), "casing heat wire missing");
+	core::World capped("CappedCasing", 2, 2); configure(capped, limited, diagnostic); capped.resumeSimulation();
+	require(advanceSeconds(capped, 2), "capped casing advance failed");
+	auto const cappedSnap = capped.getStationSystemsSnapshot(); auto const& cap = cappedSnap.electrolyzers[0];
+	require(cappedSnap.healthy && std::abs(cap.lastSinkLegKW - 0.1) < 1e-9
+		&& std::abs(cap.sinkLegKJ * 0.5 - cappedSnap.thermal.reservoirs[0].electrolysisEnergyKJ) < 1e-7
+		&& std::abs(cap.bodyResidualKJ) < 1e-7, "casing wire cap/loss broke energy closure");
+	for (auto const& wire : cappedSnap.connections)
+		if (wire.key.ownerType == "Electrolyzer" && wire.key.relation == "Heat")
+			require(wire.retainedHeatKJ == 0, "casing heat was stored twice");
+	// A sink's Thermal links see this tick's arriving casing heat, not
+	// yesterday's sink temperature. No gas or extra heat source is involved.
+	auto mesh = s; mesh.electrolyzers[0].rateKgPerS = 0;
+	mesh.electrolyzers[0].thermalBody = core::ThermalBodySettings{100, 40, 1e12};
+	mesh.thermalReservoirs.push_back(linkReservoir("neighbour", 5, 100000));
+	mesh.thermalLinks = {{"structure", "sink", "neighbour", 1e12, Kind::Reservoir, Kind::Reservoir}};
+	core::World meshed("MeshedCasing", 2, 2); configure(meshed, mesh, diagnostic); meshed.resumeSimulation();
+	require(advanceStationSteps(meshed, 1), "meshed casing advance failed");
+	auto const meshSnap = meshed.getStationSystemsSnapshot();
+	require(meshSnap.healthy && meshSnap.thermal.reservoirs[1].temperatureC > 5
+		&& meshSnap.thermalLinks[0].flowRateKW > 0
+		&& std::abs(meshSnap.electrolyzers[0].bodyResidualKJ) < 1e-7,
+		"sink mesh did not see already-booked casing heat");
+	// Removing the production command must not remove the casing's cooling.
+	auto idle = s; idle.electrolyzers[0].rateKgPerS = 0;
+	idle.electrolyzers[0].thermalBody->startingTemperatureC = 40;
+	core::World cooling("Cooling", 2, 2); configure(cooling, idle, diagnostic); cooling.resumeSimulation();
+	require(advanceSeconds(cooling, 2), "idle casing advance failed");
+	auto const cold = cooling.getStationSystemsSnapshot().electrolyzers[0];
+	require(cold.bodyTemperatureC < 40 && cold.lastBodyChargeKW == 0 && cold.lastSinkLegKW > 0
+		&& std::abs(cold.bodyResidualKJ) < 1e-7, "idle casing stopped cooling or lost energy");
+}
+
+void thermalBodyGate(smoke::Context const&)
+{
+	for (auto ratio : {1u, 6u, 60u})
+	{
+		auto s = bodiedCell(); s.systemsStepWorldTicks = ratio;
+		auto& cell = s.electrolyzers[0]; cell.maxSinkTemperatureC = 26;
+		cell.thermalBody = core::ThermalBodySettings{1, 20, 1};
+		// An unqualified remote sink refuses the leg, not production.
+		s.thermalReservoirs[0].startingTemperatureC = 30;
+		core::World world("HotCasing", 2, 2); std::string diagnostic;
+		configure(world, s, diagnostic); world.resumeSimulation();
+		require(advanceSeconds(world, 10), "hot casing advance failed");
+		auto snap = world.getStationSystemsSnapshot(); auto const& result = snap.electrolyzers[0];
+		require(snap.healthy && result.bodyTemperatureC > 20 && result.bodyChargeKJ > 0
+			&& result.sinkLegKJ == 0 && result.lastSplitKg == 0 && result.lastPowerSuppliedKW == 0
+			&& !result.coolingAvailable && std::abs(result.bodyResidualKJ) < 1e-7,
+			"refused sink leg did not warm casing and refuse machine whole");
+		// Conversely, a hot casing refuses even with a cold qualified sink.
+		cell.thermalBody->startingTemperatureC = 30; s.thermalReservoirs[0].startingTemperatureC = 5;
+		core::World hot("HotStart", 2, 2); configure(hot, s, diagnostic); hot.resumeSimulation();
+		require(advanceStationSteps(hot, 1), "hot-start advance failed");
+		auto const first = hot.getStationSystemsSnapshot().electrolyzers[0];
+		require(first.lastSplitKg == 0 && first.lastSinkLegKW > 0,
+			"temperature gate read cold sink rather than hot casing");
+		require(advanceSeconds(hot, 10), "casing restart advance failed");
+		require(hot.getStationSystemsSnapshot().electrolyzers[0].waterSplitKg > 0,
+			"cooled casing did not restart");
+	}
+}
+
+void thermalBodyValidation(smoke::Context const&)
+{
+	for (int mode = 0; mode < 7; ++mode)
+	{
+		auto s = bodiedCell(); auto& b = *s.electrolyzers[0].thermalBody;
+		if (mode == 0) b.heatCapacityKJPerK = 0;
+		if (mode == 1) b.heatCapacityKJPerK = -1;
+		if (mode == 2) b.sinkConductanceKWPerK = 0;
+		if (mode == 3) b.sinkConductanceKWPerK = std::numeric_limits<double>::infinity();
+		if (mode == 4) b.startingTemperatureC = -core::StationCelsiusOffset;
+		if (mode == 5) b.startingTemperatureC = std::numeric_limits<double>::quiet_NaN();
+		if (mode == 6) s.thermalReservoirs[0].thermalClass = "high";
+		core::World world("InvalidBody", 2, 2); world.pauseSimulation(); world.finishBuild();
+		auto const before = world.getStationSystemsSettings(); std::string diagnostic;
+		require(!world.configureStationSystems(s, false, &diagnostic)
+			&& !diagnostic.empty() && world.getStationSystemsSettings() == before,
+			"invalid casing accepted or mutated World");
+	}
+}
+
+void thermalBodyPersistence(smoke::Context const&)
+{
+	for (bool body : {false, true}) for (bool binary : {false, true})
+	{
+		auto s = bodiedCell(); if (!body) s.electrolyzers[0].thermalBody.reset();
+		core::World original("BodyPersistence", 2, 2), restored("Restored", 2, 2);
+		std::string diagnostic; configure(original, s, diagnostic);
+		auto writer = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+		core::SerializationWorkData work; original.serialize(*writer, work); writer->serialize();
+		auto const data = binary ? static_cast<core::BinarySerializer&>(*writer).getSerializedString()
+			: static_cast<core::YamlSerializer&>(*writer).getSerializedString();
+		auto reader = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+		reader->deserialize();
+		require(restored.deserialize(*reader, work) && restored.getStationSystemsSettings() == s,
+			"casing World round trip changed settings");
+		original.resumeSimulation(); restored.resumeSimulation();
+		require(advanceSeconds(original, 2) && advanceSeconds(restored, 2)
+			&& original.getStationSystemsSnapshot() == restored.getStationSystemsSnapshot(),
+			"casing round trip changed evolution");
+		core::StationConfigurationDocument document, loaded; document.settings = s;
+		auto text = core::serializeStationConfiguration(document);
+		require(core::parseStationConfiguration(text, loaded, &diagnostic) && loaded.settings == s,
+			"casing configuration YAML round trip failed");
+		require((text.find("thermalBody:") != std::string::npos) == body,
+			"bodyless document wire format changed");
+	}
+}
 } // namespace
 
 void registerStationThermalLinkChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"thermalBodyCharge", thermalBodyCharge});
+	checks.push_back({"thermalBodyGate", thermalBodyGate});
+	checks.push_back({"thermalBodyValidation", thermalBodyValidation});
+	checks.push_back({"thermalBodyPersistence", thermalBodyPersistence});
 	checks.push_back({"thermalNodePair", thermalNodePair});
 	checks.push_back({"thermalNodeMesh", thermalNodeMesh});
 	checks.push_back({"thermalNodeStarSeed", thermalNodeStarSeed});

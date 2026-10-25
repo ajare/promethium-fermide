@@ -31,6 +31,8 @@ namespace core
 			auto& water = runtime.stores[cell.waterStoreIndex];
 			auto& hydrogen = runtime.stores[cell.hydrogenStoreIndex];
 			cell.waterQuality = waterQuality(cell.waterStoreIndex, {}, 0.0, "electrolyzer", true);
+			cell.lastBodyChargeKW = 0.0;
+			cell.lastSinkLegKW = 0.0;
 			cell.lastScale = 0.0;
 			cell.lastLimiter.clear();
 			cell.lastRequestedKg = 0.0;
@@ -49,13 +51,18 @@ namespace core
 			}
 			auto const tickSeconds = static_cast<double>(seconds);
 			auto const fullKg = cell.authored.rateKgPerS * tickSeconds;
-			// Cooling is qualified while the sink sits below the maximum
-			// sink temperature: at or above it the interface cannot
-			// accept the cell's process heat, so the cell cannot run.
-			cell.lastCoolingAvailable = sinkQualified(cell.sinkIndex, cell.authored.maxSinkTemperatureC);
+			// Legacy machines qualify against their sink. A bodied machine
+			// qualifies against its own casing; a refused drain leg does not
+			// stop production until that casing itself becomes too hot.
+			cell.lastCoolingAvailable = cell.authored.thermalBody
+				? runtime.prediction.qualifies(ProtectionPrediction::Body::Machine, orderIndex,
+					cell.bodyTemperatureC, -std::numeric_limits<double>::infinity(), cell.authored.maxSinkTemperatureC)
+				: sinkQualified(cell.sinkIndex, cell.authored.maxSinkTemperatureC);
 			if (!cell.lastCoolingAvailable)
 			{
-				cell.lastBlockReason = temperatureRefusal("cooling is not qualified: sink at or above the maximum sink temperature");
+				cell.lastBlockReason = temperatureRefusal(cell.authored.thermalBody
+					? "cooling is not qualified: thermal body at or above the maximum sink temperature"
+					: "cooling is not qualified: sink at or above the maximum sink temperature");
 				cell.status = StationTransferStatus::Rejected;
 				continue;
 			}
@@ -193,7 +200,13 @@ namespace core
 			auto const chemicalKJ = hydrogenActualKg
 				* StationElectrolysisChemicalEnergyHydrogenKJPerKg;
 			auto const heatKJ = std::max(0.0, energySuppliedKJ - chemicalKJ);
-			electrolysisHeatByReservoir[cell.sinkIndex] += connections.routeHeat(connections.port("Electrolyzer", cell.authored.id, "Heat"), heatKJ / tickSeconds);
+			if (cell.authored.thermalBody)
+			{
+				cell.bodyChargeKJ += heatKJ;
+				cell.lastBodyChargeKW = heatKJ / tickSeconds;
+				cell.bodyTemperatureC += heatKJ / cell.authored.thermalBody->heatCapacityKJPerK;
+			}
+			else electrolysisHeatByReservoir[cell.sinkIndex] += connections.routeHeat(connections.port("Electrolyzer", cell.authored.id, "Heat"), heatKJ / tickSeconds);
 			cell.lastSplitKg = splitKg;
 			cell.lastOxygenKg = oxygenActualKg;
 			cell.lastHydrogenKg = hydrogenActualKg;
@@ -209,6 +222,29 @@ namespace core
 				&& suppliedKW + 1e-12 >= cell.lastPowerDemandKW)
 				cell.status = StationTransferStatus::Full;
 			else cell.status = StationTransferStatus::Partial;
+		}
+		// Casings cool even while stopped or temperature-refused. Unlike the
+		// legacy rate producer, a casing retains unaccepted heat itself: never
+		// enqueue it in the connection ledger's independent retained-heat tank.
+		for (auto index : runtime.electrolyzerOrder)
+		{
+			auto& cell = runtime.electrolyzers[index];
+			if (!cell.authored.thermalBody || cell.sinkIndex == SIZE_MAX) continue;
+			auto const& body = *cell.authored.thermalBody;
+			auto const& sink = runtime.reservoirs[cell.sinkIndex];
+			if (!sinkQualified(cell.sinkIndex, cell.authored.maxSinkTemperatureC)) continue;
+			auto const dt = static_cast<double>(seconds);
+			auto const sinkTemperature = sink.temperatureC
+				+ electrolysisHeatByReservoir[cell.sinkIndex] * dt / sink.authored.heatCapacityKJPerK;
+			auto const moved = std::max(0.0, twoBodyConductedHeatKJ(body.heatCapacityKJPerK,
+				sink.authored.heatCapacityKJPerK, cell.bodyTemperatureC, sinkTemperature,
+				body.sinkConductanceKWPerK, seconds));
+			auto const flow = connections.send(connections.port("Electrolyzer", cell.authored.id, "Heat"), moved / dt);
+			auto const out = flow.input * dt;
+			cell.bodyTemperatureC -= out / body.heatCapacityKJPerK;
+			cell.sinkLegKJ += out;
+			cell.lastSinkLegKW = flow.input;
+			electrolysisHeatByReservoir[cell.sinkIndex] += flow.delivered;
 		}
 		// CO2 removal (#404) runs in the same phase: captured gas is
 		// inventory, not vanished carbon. The machine can only scrub

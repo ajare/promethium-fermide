@@ -859,6 +859,14 @@ namespace core
 				serializer.beginMap("");
 				serializer.writeString("id", electrolyzer.id);
 				if (electrolyzer.membraneDegradation) writeWearBlock(serializer, "membraneDegradation", *electrolyzer.membraneDegradation);
+				if (electrolyzer.thermalBody)
+				{
+					serializer.beginMap("thermalBody");
+					serializer.writeDouble("heatCapacityKJPerK", electrolyzer.thermalBody->heatCapacityKJPerK);
+					serializer.writeDouble("startingTemperatureC", electrolyzer.thermalBody->startingTemperatureC);
+					serializer.writeDouble("sinkConductanceKWPerK", electrolyzer.thermalBody->sinkConductanceKWPerK);
+					serializer.endMap();
+				}
 				serializer.writeString("waterStoreId", electrolyzer.waterStoreId);
 				serializer.writeString("oxygenStoreId", electrolyzer.oxygenStoreId);
 				serializer.writeString("hydrogenStoreId", electrolyzer.hydrogenStoreId);
@@ -2303,6 +2311,14 @@ namespace core
 				ElectrolyzerSettings electrolyzer;
 				electrolyzer.id = serializer.readString("id");
 				readMachineWear(serializer, "membraneDegradation", version, electrolyzer.membraneDegradation);
+				if (serializer.hasField("thermalBody"))
+				{
+					if (version < 123) throw SerializationException("thermalBody requires schema 123");
+					serializer.beginMap("thermalBody");
+					electrolyzer.thermalBody = ThermalBodySettings{serializer.readDouble("heatCapacityKJPerK"),
+						serializer.readDouble("startingTemperatureC"), serializer.readDouble("sinkConductanceKWPerK")};
+					serializer.endMap();
+				}
 				electrolyzer.waterStoreId = serializer.readString("waterStoreId");
 				electrolyzer.oxygenStoreId = serializer.readString("oxygenStoreId");
 				electrolyzer.hydrogenStoreId = serializer.readString("hydrogenStoreId");

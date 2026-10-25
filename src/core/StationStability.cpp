@@ -810,6 +810,12 @@ namespace core
 			fin(electrolyzer.rateKgPerS, tag("rateKgPerS", electrolyzer.id));
 			fin(electrolyzer.specificEnergyKWhPerKgWater, tag("specificEnergyKWhPerKgWater", electrolyzer.id));
 			fin(electrolyzer.maxSinkTemperatureC, tag("maxSinkTemperatureC", electrolyzer.id));
+			fin(electrolyzer.bodyTemperatureC, tag("bodyTemperatureC", electrolyzer.id));
+			fin(electrolyzer.lastBodyChargeKW, tag("lastBodyChargeKW", electrolyzer.id));
+			fin(electrolyzer.lastSinkLegKW, tag("lastSinkLegKW", electrolyzer.id));
+			fin(electrolyzer.bodyChargeKJ, tag("bodyChargeKJ", electrolyzer.id));
+			fin(electrolyzer.sinkLegKJ, tag("sinkLegKJ", electrolyzer.id));
+			fin(electrolyzer.bodyResidualKJ, tag("bodyResidualKJ", electrolyzer.id));
 			fin(electrolyzer.scale, tag("scale", electrolyzer.id));
 			fin(electrolyzer.lastRequestedKg, tag("lastRequestedKg", electrolyzer.id));
 			fin(electrolyzer.lastSplitKg, tag("lastSplitKg", electrolyzer.id));

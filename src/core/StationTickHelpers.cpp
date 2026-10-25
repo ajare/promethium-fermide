@@ -487,6 +487,15 @@ namespace core
 	void StationSystemsRuntime::Impl::Tick::captureProtection()
 	{
 		if (!runtime.prediction.active) return;
+		for (size_t i = 0; i < runtime.electrolyzers.size(); ++i)
+		{
+			auto const& cell = runtime.electrolyzers[i];
+			if (!cell.authored.thermalBody) continue;
+			runtime.prediction.include(ProtectionPrediction::Body::Machine, i,
+				protectionMachineBodyStart[i], cell.bodyTemperatureC,
+				cell.authored.thermalBody->heatCapacityKJPerK, seconds,
+				{cell.lastBodyChargeKW, -cell.lastSinkLegKW});
+		}
 		for (size_t i = 0; i < runtime.reservoirs.size(); ++i)
 		{
 			auto const& r = runtime.reservoirs[i];

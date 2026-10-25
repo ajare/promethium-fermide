@@ -85,6 +85,19 @@ namespace core
 			if (!std::isfinite(massResidual) || std::abs(massResidual) > massBound)
 				return violation = where
 					+ "water/oxygen/hydrogen split does not close within tolerance", false;
+			if (cell.authored.thermalBody)
+			{
+				auto const& body = *cell.authored.thermalBody;
+				auto const residual = cell.bodyChargeKJ - cell.sinkLegKJ
+					- body.heatCapacityKJPerK * (cell.bodyTemperatureC - body.startingTemperatureC);
+				if (!requireFinite(cell.bodyTemperatureC, where + "body temperature")
+					|| !requireFinite(cell.lastBodyChargeKW, where + "body charge rate")
+					|| !requireFinite(cell.lastSinkLegKW, where + "sink leg rate")
+					|| !requireFinite(residual, where + "body residual")) return false;
+				if (std::abs(residual) > StationBalanceTolerance * std::max({1.0,
+					std::abs(body.heatCapacityKJPerK * body.startingTemperatureC), cell.bodyChargeKJ, cell.sinkLegKJ}))
+					return violation = where + "thermal body energy ledger does not close", false;
+			}
 			auto const energyResidual = cell.energySuppliedKJ
 				- cell.chemicalEnergyKJ - cell.heatRoutedKJ;
 			// The kJ ledger accumulates float roundoff at the energy

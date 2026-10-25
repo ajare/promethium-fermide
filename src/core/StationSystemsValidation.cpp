@@ -657,6 +657,14 @@ namespace
 				- StationBalanceTolerance * std::max(1.0,
 					StationElectrolysisChemicalEnergyKJPerKgWater))
 			return refuse(where + " specific energy is below the chemical energy the produced hydrogen retains: the electrical dose may not fund less than the products carry");
+		if (electrolyzer.thermalBody)
+		{
+			auto const& body = *electrolyzer.thermalBody;
+			if (!std::isfinite(body.heatCapacityKJPerK) || body.heatCapacityKJPerK <= 0.0
+				|| !std::isfinite(body.sinkConductanceKWPerK) || body.sinkConductanceKWPerK <= 0.0
+				|| !std::isfinite(body.startingTemperatureC) || body.startingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " thermalBody requires positive finite capacity/conductance and temperature above absolute zero");
+		}
 		if (!std::isfinite(electrolyzer.maxSinkTemperatureC)
 			|| electrolyzer.maxSinkTemperatureC <= -StationCelsiusOffset)
 			return refuse(where + " maximum sink temperature must be finite and above absolute zero");
@@ -706,6 +714,8 @@ namespace
 				{ return reservoir.id == electrolyzer.heatSinkId; });
 			if (sink == settings.thermalReservoirs.end())
 				return missing(where + " heat sink is unknown thermal reservoir '" + electrolyzer.heatSinkId + "'");
+			if (electrolyzer.thermalBody && sink->heatCapacityKJPerK <= 0.0)
+				return refuse(where + " thermalBody sink requires positive thermal capacity");
 			if (sink->thermalClass != electrolyzer.thermalClass)
 				return refuse(where + " thermal class '" + electrolyzer.thermalClass
 					+ "' does not match heat sink reservoir '" + sink->id + "' class '"

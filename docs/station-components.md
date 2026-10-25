@@ -687,6 +687,42 @@ same-class Reservoir; **Power in** is automatic.
 to the cabin and hydrogen to Sabatier. To also stockpile oxygen, use a separate
 Electrolyzer configured for an O2 Store; one unit cannot use both oxygen outlets.
 
+#### Optional casing (`thermalBody`, #854)
+
+Author an optional shared settings block on the Electrolyzer:
+
+```yaml
+thermalBody:
+  heatCapacityKJPerK: 100
+  startingTemperatureC: 20
+  sinkConductanceKWPerK: 0.5
+```
+
+Capacity and sink conductance must be finite and strictly positive; starting
+temperature must be finite and above absolute zero. Waste heat charges this
+lumped casing rather than entering the Reservoir directly. **Heat out** now
+drains the casing through the shared closed-form two-body conduction law,
+limited by the wire's throughput and efficiency. Unaccepted heat stays in the
+casing; wire loss remains an explicitly booked loss. Sink class/qualification
+still apply to this drain leg. The maximum-temperature gate and coarse-step
+protection instead read the casing temperature. The casing continues cooling
+while production is idle or refused, allowing restart after cooling.
+
+A refused sink leg leaves the casing to warm until protection refuses
+production. The Heat-out sink remains the existing required service contract.
+With no `thermalBody`, the historical direct
+heat-injection path and serialized representation are unchanged. Bodies are
+reconstructed from authored starting temperature on load/Reset; changing body
+parameters requires reapplication rather than repricing accumulated energy.
+
+Published casing fields are `hasThermalBody`, `bodyTemperatureC`,
+`lastBodyChargeKW`, `lastSinkLegKW`, `bodyChargeKJ`, `sinkLegKJ`, and
+`bodyResidualKJ`. Charge minus sink outflow equals the casing's capacity times
+its temperature change. Body temperature and both rates are selectable
+Electrolyzer observations. Binary World and Station YAML persistence use schema
+123 only when a body is present. Machine-body Thermal link endpoints and editor
+body controls remain follow-on work.
+
 ### CO2 capture
 
 **What it does:** extracts CO2 from an Atmosphere into finite storage, spending

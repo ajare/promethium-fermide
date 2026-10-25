@@ -1450,6 +1450,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		{
 			Impl::ElectrolyzerState state;
 			state.authored = electrolyzer;
+			if (electrolyzer.thermalBody) state.bodyTemperatureC = electrolyzer.thermalBody->startingTemperatureC;
 			state.waterStoreIndex = storeIndex[electrolyzer.waterStoreId];
 			if (!electrolyzer.oxygenStoreId.empty())
 				state.oxygenStoreIndex = storeIndex[electrolyzer.oxygenStoreId];

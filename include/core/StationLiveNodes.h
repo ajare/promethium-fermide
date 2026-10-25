@@ -311,7 +311,8 @@ namespace core
 		static auto& of(auto& settings) { return settings.electrolyzers; }
 		static bool restoreInitial(ElectrolyzerSettings const&, ElectrolyzerSettings&) { return false; }
 		static bool topologyChanged(ElectrolyzerSettings const& a, ElectrolyzerSettings const& b)
-		{ return a.membraneDegradation.has_value() != b.membraneDegradation.has_value()
+		{ return a.thermalBody != b.thermalBody
+			|| a.membraneDegradation.has_value() != b.membraneDegradation.has_value()
 			|| a.catalystPoisoning.has_value() != b.catalystPoisoning.has_value(); }
 	};
 	template <> struct LiveNode<Co2CaptureSettings>

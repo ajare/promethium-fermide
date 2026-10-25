@@ -618,6 +618,13 @@ namespace core
 				+ static_cast<long double>(atmosphereExchangeKJ[index])
 					/ compartment.authored.thermalCapacityKJPerK;
 		}
+		// Body sink legs were booked before this pass. Include their delivered
+		// energy in the provisional sink state without integrating it twice.
+		std::vector<double> bodySinkKW(runtime.reservoirs.size(), 0.0);
+		for (auto const& cell : runtime.electrolyzers)
+			if (cell.authored.thermalBody && cell.sinkIndex != SIZE_MAX)
+				bodySinkKW[cell.sinkIndex] += cell.lastSinkLegKW
+					* connections.efficiency(connections.port("Electrolyzer", cell.authored.id, "Heat"));
 		std::vector<long double> reservoirRelaxationC(runtime.reservoirs.size());
 		std::vector<double> reservoirConductedKJ(runtime.reservoirs.size(), 0.0);
 		for (size_t i = 0; i < runtime.reservoirs.size(); ++i)
@@ -627,7 +634,7 @@ namespace core
 			// this step. Do not spend tick-start heat a second time (#833).
 			reservoirRelaxationC[i] = static_cast<long double>(reservoir.temperatureC)
 				+ (static_cast<long double>(loopHeatIntoReservoir[i])
-					+ atmosphereHeatByReservoir[i]) * seconds / reservoir.authored.heatCapacityKJPerK;
+					+ atmosphereHeatByReservoir[i] + bodySinkKW[i]) * seconds / reservoir.authored.heatCapacityKJPerK;
 		}
 		auto capacity = [&](ThermalNodeKind kind, size_t i) -> long double {
 			return kind == ThermalNodeKind::Atmosphere

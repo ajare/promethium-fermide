@@ -72,6 +72,15 @@ void appendStationWaterGasObservations(StationSystemsSettings const& settings,
 		auto add = [&](std::string role, R dir, std::string material, double S::* m, double S::* req = nullptr, bool power = false) -> StationExchangeObservation& {
 			return scalar("Electrolyzer", e, std::move(role), dir, std::move(material), collection, m, req, power);
 		};
+		if (e.thermalBody)
+		{
+			add("Body charge", R::Input, "", &S::lastBodyChargeKW, nullptr, true);
+			add("Sink leg", R::Output, "", &S::lastSinkLegKW, nullptr, true);
+			auto& temperature = add("Body temperature", R::Condition, "", &S::bodyTemperatureC, nullptr, true);
+			temperature.metric.quantity = StationPhysicalQuantity::Temperature;
+			temperature.metric.unit = StationCanonicalUnit::Celsius;
+			temperature.metric.observationNote = "Committed lumped casing temperature; protection reads this temperature, not the remote sink.";
+		}
 		add("Feed water", R::Input, "water", &S::lastSplitKg, &S::lastRequestedKg);
 		add("Oxygen", R::Output, "oxygen", &S::lastOxygenKg);
 		add("Hydrogen", R::Output, "hydrogen", &S::lastHydrogenKg);

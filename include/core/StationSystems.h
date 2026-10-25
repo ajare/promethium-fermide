@@ -1523,6 +1523,14 @@ namespace core
 	// store caps production rather than venting or deleting the excess.
 	// Feed water is drawn only above its store's protected reserve, so a
 	// life-support water reserve is never electrolysed away.
+	// Optional lumped casing shared by eligible machine contracts. No service class.
+	struct ThermalBodySettings
+	{
+		double heatCapacityKJPerK{1.0};
+		double startingTemperatureC{20.0};
+		double sinkConductanceKWPerK{1.0};
+		bool operator==(ThermalBodySettings const&) const = default;
+	};
 	struct ElectrolyzerSettings
 	{
 		std::string id;
@@ -1543,6 +1551,7 @@ namespace core
 		// frozen topology; the rates inside stay live-tunable and never
 		// reprice the fade already banked.
 		std::optional<InstallationWearSettings> membraneDegradation;
+		std::optional<ThermalBodySettings> thermalBody;
 		bool operator==(ElectrolyzerSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationElectrolyzers{8};
@@ -4345,7 +4354,7 @@ namespace core
 		double hydrogenProducedKg{0.0};
 		double energySuppliedKJ{0.0};
 		double chemicalEnergyKJ{0.0};  // energy retained in the produced hydrogen
-		double heatRoutedKJ{0.0};      // process heat routed into the sink
+		double heatRoutedKJ{0.0};      // total process heat: to casing when present, otherwise sink
 		double residualKg{0.0};        // split - oxygen - hydrogen
 		double residualKJ{0.0};        // supplied - chemical - heat
 		StationTransferStatus status{StationTransferStatus::Idle};
@@ -4355,6 +4364,13 @@ namespace core
 		double effectiveRateKgPerS{0.0};
 		// #848: the permanent Wear this machine has accumulated.
 		StationMachineWearSnapshot wear;
+		bool hasThermalBody{false};
+		double bodyTemperatureC{0.0};
+		double lastBodyChargeKW{0.0};
+		double lastSinkLegKW{0.0}; // energy leaving casing, before connection loss
+		double bodyChargeKJ{0.0};
+		double sinkLegKJ{0.0};
+		double bodyResidualKJ{0.0}; // charge - outflow - stored energy change
 		bool operator==(StationElectrolyzerSnapshot const&) const = default;
 	};
 	// One CO2 capture machine as of the most recent tick (#404): the

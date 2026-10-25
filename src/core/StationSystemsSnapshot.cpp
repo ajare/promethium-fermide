@@ -1158,6 +1158,16 @@ namespace core
 			cellResult.energySuppliedKJ = cell.energySuppliedKJ;
 			cellResult.chemicalEnergyKJ = cell.chemicalEnergyKJ;
 			cellResult.heatRoutedKJ = cell.heatRoutedKJ;
+			cellResult.hasThermalBody = cell.authored.thermalBody.has_value();
+			cellResult.bodyTemperatureC = cell.bodyTemperatureC;
+			cellResult.lastBodyChargeKW = cell.lastBodyChargeKW;
+			cellResult.lastSinkLegKW = cell.lastSinkLegKW;
+			cellResult.bodyChargeKJ = cell.bodyChargeKJ;
+			cellResult.sinkLegKJ = cell.sinkLegKJ;
+			if (cell.authored.thermalBody)
+				cellResult.bodyResidualKJ = cell.bodyChargeKJ - cell.sinkLegKJ
+					- cell.authored.thermalBody->heatCapacityKJPerK
+					* (cell.bodyTemperatureC - cell.authored.thermalBody->startingTemperatureC);
 			cellResult.residualKg = cell.waterSplitKg
 				- cell.oxygenProducedKg - cell.hydrogenProducedKg;
 			cellResult.residualKJ = cell.energySuppliedKJ
