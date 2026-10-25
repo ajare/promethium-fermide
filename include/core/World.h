@@ -3522,6 +3522,11 @@ namespace core
 		// to the running World. History is owned by the calling document.
 		static bool editStationMonitor(StationSystemsSettings& draft,
 			StationMonitorSettings monitor, std::string& diagnostic);
+		// Empty type/id selects the station; type alone selects a subject family;
+		// both select one component/connection. One transactional draft edit,
+		// including materialization of omitted defaults; caller owns history.
+		static bool setStationMonitorsEnabled(StationSystemsSettings& draft, bool enabled,
+			std::string& diagnostic, std::string_view subjectType = {}, std::string_view subjectId = {});
 		// Paused-only. After ticking, confirmation resets the complete World.
 		bool configureStationSystems(StationSystemsSettings settings, bool confirmWorldReset = false,
 			std::string* diagnostic = nullptr);

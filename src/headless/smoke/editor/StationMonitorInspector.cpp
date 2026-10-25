@@ -170,6 +170,41 @@ void monitorInspector(smoke::Context const& context)
 				return m.id == monitorId && m.enabled;
 			}), "power enable did not commit through draft command");
 		}
+		// #877: every bulk scope goes through the real inspector and is a
+		// single history step, restoring the complete mixed flag set on undo.
+		REQ(window.flowNodeRect("Atmosphere", "room", &rect), "bulk subject missing");
+		ctx->MouseTeleportToPos({(rect.x + rect.z) / 2, (rect.y + rect.w) / 2});
+		ctx->Yield(2); ctx->MouseClick(); ctx->Yield(3);
+		ctx->ScrollToItemY("**/Bulk Monitor controls"); ctx->Yield(3);
+		ctx->ItemOpen("**/Bulk Monitor controls"); ctx->Yield(3);
+		for (auto const* scope : {"Component", "Subject-type", "Station"})
+		for (bool enabled : {true, false})
+		{
+			auto const before = window.draft();
+			auto expected = before;
+			for (auto& m : expected.monitors)
+				if (std::string(scope) == "Station" || (m.subjectType == "atmosphere"
+					&& (std::string(scope) == "Subject-type" || m.subjectId == "room")))
+					m.enabled = enabled;
+			auto const countBefore = window.draftHistory().undoCount();
+			auto const label = std::string("**/") + scope + " Monitors/" + (enabled ? "Enable all" : "Disable all");
+			ctx->ScrollToItemY(label.c_str()); ctx->Yield(3);
+			driver.click(ctx, label.c_str()); ctx->Yield(3);
+			REQ(window.draft() == expected && window.draftHistory().undoCount() == countBefore + 1,
+				(label + ": bulk edit mismatch; flags=" + std::to_string(window.draft() == expected)
+				+ ", history=" + std::to_string(window.draftHistory().undoCount())
+				+ ", before=" + std::to_string(countBefore)).c_str());
+			driver.click(ctx, label.c_str()); ctx->Yield(3);
+			REQ(window.draft() == expected && window.draftHistory().undoCount() == countBefore + 1,
+				"no-op bulk edit added history");
+			driver.click(ctx, "**/Undo configuration"); ctx->Yield(3);
+			REQ(window.draft() == before, "one undo did not restore all bulk flags");
+			driver.click(ctx, "**/Redo configuration"); ctx->Yield(3);
+			REQ(window.draft() == expected, "one redo did not reapply all bulk flags");
+			driver.click(ctx, "**/Undo configuration"); ctx->Yield(3);
+		}
+		REQ(world->getStationSystemsSettings() == seed && !world->isModified(),
+			"bulk draft controls mutated the World without Apply");
 	});
 #undef REQ
 	smoke::require(driver.passed(), "Monitor inspector Test Engine workflow failed");

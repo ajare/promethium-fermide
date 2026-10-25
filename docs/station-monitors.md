@@ -337,6 +337,30 @@ toggle and timing edits where defaults exist, undo/redo, and save/load.
 `station-editor-monitor-inspector` retains the full atmosphere control and
 validation workflow. Both are focused Release tests; no stability run is needed.
 
+## Bulk enable/disable (#877)
+
+Open **Bulk Monitor controls** in any component or Station connection's Monitors
+section. **Enable all** / **Disable all** operate on that component, its subject
+type, or the entire station. Each click is one configuration-history step;
+undo restores the complete previous mixed flag set, redo reapplies it, and
+repeating an unchanged command adds no history.
+
+The validated `World::setStationMonitorsEnabled(draft, enabled, diagnostic,
+subjectType, subjectId)` command selects one subject with both identifiers,
+a type with only `subjectType`, or the station with both empty. Unknown scopes
+and invalid Monitor sets are refused without partial changes. Like individual
+edits, it materializes omitted disabled defaults; thereafter only the selected
+per-Monitor enabled flags change, never rules, severity, or provenance.
+
+These are draft controls: use the existing **Apply** path to update the running
+World. Applying disable closes affected active Alerts immediately with
+`MonitorDisabled`; applying enable starts fresh persistence from that point,
+without backfill. No persistent component/type/station enable gate is introduced.
+
+Focused Release checks: `station-monitorBulkCommands` covers scopes, validation,
+flag-only changes, closeout and fresh evaluation; `station-editor-monitor-inspector`
+drives all three scopes and single-step undo/redo through the real controls.
+
 ## ECLSS machines and biology (#876)
 
 `stationEclssBiologyMonitorTemplates(subjectType)` and

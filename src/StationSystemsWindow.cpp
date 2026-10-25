@@ -893,6 +893,25 @@ void StationSystemsWindow::renderMonitorInspector(core::StationSystemsSettings& 
 	std::string_view subjectType, std::string const& subjectId)
 {
 	ImGui::SeparatorText("Monitors");
+	// One facade command per click, one draft-history step. Apply remains
+	// explicit, just as for individual Monitor edits.
+	if (ImGui::TreeNodeEx("Bulk Monitor controls", ImGuiTreeNodeFlags_NoAutoOpenOnLog))
+	{
+		auto bulk = [&](char const* scope, std::string_view type, std::string_view id) {
+			ImGui::TextUnformatted(scope);
+			ImGui::PushID(scope);
+			if (ImGui::Button("Enable all"))
+				core::World::setStationMonitorsEnabled(draft, true, mMonitorNotice, type, id);
+			ImGui::SameLine();
+			if (ImGui::Button("Disable all"))
+				core::World::setStationMonitorsEnabled(draft, false, mMonitorNotice, type, id);
+			ImGui::PopID();
+		};
+		bulk("Component Monitors", subjectType, subjectId);
+		bulk("Subject-type Monitors", subjectType, {});
+		bulk("Station Monitors", {}, {});
+		ImGui::TreePop();
+	}
 	// Omitted defaults are presented without dirtying a legacy document merely
 	// by selecting it. The first accepted command materializes the default set.
 	auto effective = draft;

@@ -849,6 +849,84 @@ void monitorCascade(smoke::Context const&)
 			&& parsed.settings == document, "the cascade did not survive the document round trip");
 	}
 }
+void monitorBulkCommands(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	auto seed = cascadeStation();
+	core::ResourceStoreSettings store;
+	store.id = "room"; store.unit = "kg"; store.capacity = 100; store.startingQualified = 10;
+	seed.stores = {store}; // same id, different subject type must not collide
+	seed.monitors.push_back({"store-low", "store", "room", "usableFraction",
+		{0.5, core::AlertDirection::Below, 30, 60}, core::AlertSeverity::Warning, true});
+	// Preserve custom tuning and mixed enabled states while materializing the
+	// same omitted defaults that the inspector presents.
+	auto baseline = seed;
+	core::applyStationAtmosphereDefaultMonitors(baseline);
+	core::applyStationThermalPlantDefaultMonitors(baseline);
+	core::applyStationEclssBiologyDefaultMonitors(baseline);
+	core::applyStationPowerSourceDefaultMonitors(baseline);
+	core::applyStationStoreConnectionDefaultMonitors(baseline);
+	std::string diagnostic;
+	for (auto const& scope : std::vector<std::pair<std::string, std::string>>{
+		{"atmosphere", "room"}, {"atmosphere", ""}, {"", ""}})
+	{
+		auto affected = [&](auto const& monitor) {
+			return (scope.first.empty() || monitor.subjectType == scope.first)
+				&& (scope.second.empty() || monitor.subjectId == scope.second);
+		};
+		for (bool enabled : {false, true})
+		{
+			auto draft = seed;
+			auto expected = baseline;
+			for (auto& monitor : expected.monitors) if (affected(monitor)) monitor.enabled = enabled;
+			require(core::World::setStationMonitorsEnabled(draft, enabled, diagnostic, scope.first, scope.second)
+				&& diagnostic.empty() && draft == expected, "bulk command changed more than scoped flags/default expansion");
+			require(core::World::setStationMonitorsEnabled(draft, enabled, diagnostic, scope.first, scope.second)
+				&& draft == expected, "repeated bulk command was not idempotent");
+		}
+		// Drive the actual live-update seam with the bulk command's output.
+		// Only the three custom enabled Monitors can fire in this initial run.
+		core::StationSystemsRuntime run(seed, 1);
+		require(run.advanceTo(30) && run.snapshot().activeAlerts.size() == 3, "bulk runtime setup failed");
+		auto draft = seed;
+		require(core::World::setStationMonitorsEnabled(draft, false, diagnostic, scope.first, scope.second)
+			&& run.updateSettings(draft), "bulk disable live update refused");
+		auto const disabled = run.snapshot();
+		size_t const closed = scope.first.empty() ? 3 : scope.second.empty() ? 2 : 1;
+		require(disabled.closedAlerts.size() == closed && disabled.activeAlerts.size() == 3 - closed,
+			"bulk disable closed an unaffected Alert or missed an affected one");
+		for (auto const& alert : disabled.closedAlerts)
+			require(affected(alert) && alert.clearReason == core::AlertClearReason::MonitorDisabled
+				&& alert.clearedAtSeconds == 30, "bulk disable closeout reason/time/scope wrong");
+		require(run.advanceTo(100), "disabled drive failed");
+		require(core::World::setStationMonitorsEnabled(draft, true, diagnostic, scope.first, scope.second)
+			&& run.updateSettings(draft) && run.advanceTo(129), "bulk re-enable failed");
+		for (auto const& alert : run.snapshot().activeAlerts)
+			require(!affected(alert) || (alert.monitorId != "oxygen-low"
+				&& alert.monitorId != "hub-oxygen-low" && alert.monitorId != "store-low"),
+				"bulk enable backfilled persistence");
+		require(run.advanceTo(130), "bulk fresh trigger drive failed");
+		auto const snap = run.snapshot();
+		auto const fired = std::find_if(snap.activeAlerts.begin(), snap.activeAlerts.end(),
+			[](auto const& alert) { return alert.monitorId == "oxygen-low"; });
+		require(fired != snap.activeAlerts.end() && fired->firedAtSeconds == 130,
+			"bulk enable did not start evaluation from enable time");
+	}
+	// Invalid scopes and an invalid Monitor elsewhere refuse the whole offer,
+	// including any materialization. Never silently treat a typo as station-wide.
+	for (auto const& scope : std::vector<std::pair<std::string, std::string>>{
+		{"", "room"}, {"pathway", ""}, {"atmosphere", "missing"}})
+	{
+		auto draft = seed;
+		require(!core::World::setStationMonitorsEnabled(draft, true, diagnostic, scope.first, scope.second)
+			&& !diagnostic.empty() && draft == seed, "invalid bulk scope left partial state");
+	}
+	auto invalid = seed; invalid.monitors.push_back(invalid.monitors[0]);
+	auto const before = invalid;
+	require(!core::World::setStationMonitorsEnabled(invalid, false, diagnostic, "store", "room")
+		&& !diagnostic.empty() && invalid == before, "invalid bulk offer partially landed");
+}
+
 void registerStationMonitorChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"monitorTiming", monitorTiming});
@@ -860,4 +938,5 @@ void registerStationMonitorChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"monitorDefaultBoundaries", monitorDefaultBoundaries});
 	checks.push_back({"monitorCallbackStream", monitorCallbackStream});
 	checks.push_back({"monitorCascade", monitorCascade});
+	checks.push_back({"monitorBulkCommands", monitorBulkCommands});
 }

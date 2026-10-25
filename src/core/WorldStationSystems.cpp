@@ -21,6 +21,35 @@ namespace core
 		return true;
 	}
 
+	bool World::setStationMonitorsEnabled(StationSystemsSettings& draft, bool enabled,
+		std::string& diagnostic, std::string_view subjectType, std::string_view subjectId)
+	{
+		if ((subjectType.empty() && !subjectId.empty())
+			|| (!subjectType.empty() && stationMonitorMetricCatalogue(subjectType).empty()))
+		{
+			diagnostic = "Unknown Monitor subject type for bulk operation";
+			return false;
+		}
+		if (!subjectId.empty() && !stationMonitorSubjectExists(draft, subjectType, subjectId))
+		{
+			diagnostic = "Unknown Monitor subject for bulk operation";
+			return false;
+		}
+		auto candidate = draft;
+		applyStationAtmosphereDefaultMonitors(candidate);
+		applyStationThermalPlantDefaultMonitors(candidate);
+		applyStationEclssBiologyDefaultMonitors(candidate);
+		applyStationPowerSourceDefaultMonitors(candidate);
+		applyStationStoreConnectionDefaultMonitors(candidate);
+		for (auto& monitor : candidate.monitors)
+			if ((subjectType.empty() || monitor.subjectType == subjectType)
+				&& (subjectId.empty() || monitor.subjectId == subjectId))
+				monitor.enabled = enabled;
+		if (!validateStationMonitors(candidate, diagnostic)) return false;
+		draft = std::move(candidate);
+		return true;
+	}
+
 	bool World::configureStationSystems(StationSystemsSettings settings, bool confirmWorldReset,
 		std::string* diagnostic)
 	{
