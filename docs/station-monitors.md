@@ -78,9 +78,14 @@ tagged Monitors per compartment, with deterministic `<subjectId>-<key>` ids
 | `compartment-leak` | `leakRateKgPerS` | Above 0.01 kg/s, 60 s / 120 s | Warning | `prov` |
 
 `applyStationAtmosphereDefaultMonitors(settings)` appends the defaults a
-configuration is missing. It is idempotent and non-destructive: a Monitor whose id
-is already present keeps its authored values, so a designer's per-Monitor tuning
-survives a re-apply and the table never overwrites hand-authored configuration.
+configuration is missing. All default families identify an existing template by
+its generated ID's stable template suffix scoped to its current subject type and
+ID, not by the complete generated ID alone. Subject rename therefore preserves
+Monitor IDs, tuning, enabled flags and provenance without duplicating defaults.
+If another subject reuses the old name, collisions receive a deterministic numeric
+prefix (leaving the template suffix intact); existing Monitor IDs never change.
+Re-application, persistence and history restoration preserve this identity without
+a schema change. Expansion never overwrites authored rules.
 The expansion is pure — it reads the configuration and authors settings, and never
 touches runtime state. A configuration with no compartments expands to nothing.
 

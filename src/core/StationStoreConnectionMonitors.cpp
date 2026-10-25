@@ -1,4 +1,5 @@
 #include "core/StationConnections.h"
+#include "StationMonitorDefaults.h"
 #include <algorithm>
 #include <cmath>
 
@@ -411,7 +412,7 @@ std::vector<StationMonitorSettings> stationPowerSourceDefaultMonitors(StationSys
 void applyStationPowerSourceDefaultMonitors(StationSystemsSettings& settings)
 {
 	for (auto const& candidate : stationPowerSourceDefaultMonitors(settings))
-		if (findId(settings.monitors, candidate.id) == settings.monitors.end()) settings.monitors.push_back(candidate);
+		monitor_defaults::apply(settings, candidate);
 }
 std::vector<StationMonitorTemplate> const& stationThermalPlantMonitorTemplates(std::string_view type)
 {
@@ -464,7 +465,7 @@ std::vector<StationMonitorSettings> stationThermalPlantDefaultMonitors(StationSy
 void applyStationThermalPlantDefaultMonitors(StationSystemsSettings& settings)
 {
 	for (auto const& candidate : stationThermalPlantDefaultMonitors(settings))
-		if (findId(settings.monitors, candidate.id) == settings.monitors.end()) settings.monitors.push_back(candidate);
+		monitor_defaults::apply(settings, candidate);
 }
 std::vector<StationMonitorTemplate> const& stationEclssBiologyMonitorTemplates(std::string_view type)
 {
@@ -503,11 +504,11 @@ std::vector<StationMonitorSettings> stationEclssBiologyDefaultMonitors(StationSy
 void applyStationEclssBiologyDefaultMonitors(StationSystemsSettings& settings)
 {
 	for (auto const& candidate : stationEclssBiologyDefaultMonitors(settings))
-		if (findId(settings.monitors, candidate.id) == settings.monitors.end()) settings.monitors.push_back(candidate);
+		monitor_defaults::apply(settings, candidate);
 }
 void applyStationStoreConnectionDefaultMonitors(StationSystemsSettings& settings)
 {
 	for (auto const& candidate : stationStoreConnectionDefaultMonitors(settings))
-		if (findId(settings.monitors, candidate.id) == settings.monitors.end()) settings.monitors.push_back(candidate);
+		monitor_defaults::apply(settings, candidate);
 }
 }

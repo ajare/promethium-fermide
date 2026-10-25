@@ -1,4 +1,5 @@
 #include "StationSystemsImpl.h"
+#include "StationMonitorDefaults.h"
 
 #include <format>
 
@@ -49,13 +50,12 @@ namespace
 
 	bool overridesLegacyRule(StationMonitorSettings const& monitor, StationMonitorSettings const& candidate)
 	{
-		if (monitor.id == candidate.id) return true;
 		// Rename cascades retarget the subject but deliberately preserve the
 		// Monitor's own ID. Its compatibility family must still suppress the
 		// newly named default, or rename would duplicate Alerts and undo disable.
 		auto const key = candidate.id.substr(candidate.id.rfind(':'));
-		return monitor.subjectType == candidate.subjectType && monitor.subjectId == candidate.subjectId
-			&& monitor.id.starts_with("legacy:" + candidate.subjectType + ":") && monitor.id.ends_with(key);
+		return monitor_defaults::sameTemplate(monitor, candidate, key)
+			&& monitor.id.starts_with("legacy:" + candidate.subjectType + ":");
 	}
 
 	// Derived Metric (spec §3.1): the §4.1 toxic-contaminant bound is a
@@ -199,13 +199,7 @@ namespace
 	void applyStationAtmosphereDefaultMonitors(StationSystemsSettings& settings)
 	{
 		for (auto const& candidate : stationAtmosphereDefaultMonitors(settings))
-		{
-			// An id already in the configuration is authored data, whatever
-			// its values: re-applying the table never overwrites it.
-			auto const existing = std::find_if(settings.monitors.begin(), settings.monitors.end(),
-				[&](auto const& monitor) { return monitor.id == candidate.id; });
-			if (existing == settings.monitors.end()) settings.monitors.push_back(candidate);
-		}
+			monitor_defaults::apply(settings, candidate);
 	}
 
 	std::vector<StationMonitorSettings> stationLegacyReportingMonitors(StationSystemsSettings const& settings)
@@ -240,7 +234,7 @@ namespace
 		for (auto const& candidate : stationLegacyReportingMonitors(settings))
 			if (std::none_of(settings.monitors.begin(), settings.monitors.end(),
 				[&](auto const& monitor) { return overridesLegacyRule(monitor, candidate); }))
-				settings.monitors.push_back(candidate);
+				monitor_defaults::appendUnique(settings.monitors, candidate, "legacy:" + candidate.subjectType + ":");
 	}
 
 	std::vector<StationMonitorSettings> stationEffectiveMonitors(StationSystemsSettings const& settings)
@@ -249,7 +243,7 @@ namespace
 		for (auto const& candidate : stationLegacyReportingMonitors(settings))
 			if (std::none_of(result.begin(), result.end(),
 				[&](auto const& monitor) { return overridesLegacyRule(monitor, candidate); }))
-				result.push_back(candidate);
+				monitor_defaults::appendUnique(result, candidate, "legacy:" + candidate.subjectType + ":");
 		return result;
 	}
 

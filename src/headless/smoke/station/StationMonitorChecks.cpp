@@ -849,6 +849,136 @@ void monitorCascade(smoke::Context const&)
 			&& parsed.settings == document, "the cascade did not survive the document round trip");
 	}
 }
+// #888: exercise the same expansion/edit/bulk seams as the inspector.
+void monitorDefaultRename(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	auto settings = monitorStation(); settings.monitors.clear();
+	core::applyStationAtmosphereDefaultMonitors(settings);
+	settings.monitors[0].rule.threshold = 16;
+	settings.monitors[0].provenance = core::MonitorProvenance::Custom;
+	auto const before = settings;
+	std::string diagnostic;
+	core::StationNodeRename plan;
+	require(core::planStationNodeRename(settings, "Atmosphere", "room", "renamed", plan, &diagnostic)
+		&& core::renameStationNode(settings, plan, &diagnostic), "default subject rename refused");
+	auto const renamed = settings;
+	core::applyStationAtmosphereDefaultMonitors(settings); // inspector preview
+	require(settings == renamed, "rename duplicated atmosphere defaults during preview");
+	auto edited = settings.monitors[0]; edited.rule.triggerOnSeconds = 2;
+	require(core::World::editStationMonitor(settings, edited, diagnostic), "renamed default edit refused");
+	require(std::count_if(settings.monitors.begin(), settings.monitors.end(), [](auto const& m) {
+		return m.subjectType == "atmosphere";
+	}) == 12, "Monitor edit duplicated renamed defaults");
+	require(settings.monitors[0] == edited, "edit lost stable ID, tuning or provenance");
+	require(core::World::setStationMonitorsEnabled(settings, true, diagnostic, "atmosphere", "renamed"), "renamed default bulk enable refused");
+	core::StationSystemsRuntime run(settings, 1);
+	require(run.advanceTo(30), "renamed default runtime refused");
+	auto const snapshot = run.snapshot();
+	require(std::count_if(snapshot.activeAlerts.begin(), snapshot.activeAlerts.end(), [](auto const& a) {
+		return a.subjectId == "renamed" && a.metric == "oxygenPartialPressureKPa";
+	}) == 1, "renamed subject fired duplicate low-oxygen Alerts");
+
+	settings.atmospheres.push_back(before.atmospheres[0]);
+	core::applyStationAtmosphereDefaultMonitors(settings);
+	require(std::count_if(settings.monitors.begin(), settings.monitors.end(), [](auto const& m) {
+		return m.subjectType == "atmosphere" && m.subjectId == "room";
+	}) == 12, "old-name reuse did not receive all defaults");
+	std::set<std::string> ids;
+	for (auto const& m : settings.monitors) require(ids.insert(m.id).second, "default IDs collided after old-name reuse");
+	auto const expanded = settings;
+	core::applyStationAtmosphereDefaultMonitors(settings);
+	require(settings == expanded, "collision-resolved defaults were not idempotent");
+	core::StationConfigurationDocument doc; doc.settings = settings;
+	core::StationConfigurationDocument loaded;
+	require(core::parseStationConfiguration(core::serializeStationConfiguration(doc), loaded, &diagnostic), "renamed defaults persistence refused");
+	core::applyStationAtmosphereDefaultMonitors(loaded.settings);
+	require(loaded.settings == expanded, "persisted renamed/reused defaults lost identity");
+	require(core::World::setStationMonitorsEnabled(loaded.settings, true, diagnostic, "atmosphere", "room"),
+		"reused-name bulk enable refused");
+	core::StationSystemsRuntime reusedRun(loaded.settings, 1);
+	require(reusedRun.advanceTo(30), "reused-name runtime refused");
+	auto const reusedSnapshot = reusedRun.snapshot();
+	require(std::count_if(reusedSnapshot.activeAlerts.begin(), reusedSnapshot.activeAlerts.end(), [](auto const& a) {
+		return a.metric == "oxygenPartialPressureKPa";
+	}) == 2, "renamed and reused-name subjects did not each fire exactly one low-oxygen Alert");
+	// Snapshot history restores authored IDs and rules, not regenerated defaults.
+	auto undone = before;
+	core::applyStationAtmosphereDefaultMonitors(undone);
+	require(undone == before, "undo snapshot regenerated defaults");
+	auto redone = renamed;
+	core::applyStationAtmosphereDefaultMonitors(redone);
+	require(redone == renamed, "redo snapshot regenerated defaults");
+
+	// Every default family, including endpoint-derived connection subjects,
+	// goes through the public rename cascade on a reconciled configuration.
+	auto expand = [](auto& s) {
+		core::applyStationAtmosphereDefaultMonitors(s);
+		core::applyStationStoreConnectionDefaultMonitors(s);
+		core::applyStationPowerSourceDefaultMonitors(s);
+		core::applyStationThermalPlantDefaultMonitors(s);
+		core::applyStationEclssBiologyDefaultMonitors(s);
+		core::applyStationLegacyReportingMonitors(s);
+	};
+	auto base = core::bundledStationReference().settings;
+	expand(base);
+	auto checkFamily = [&](std::string const& type, auto member) {
+		auto const& entries = base.*member;
+		require(!entries.empty(), ("reference lacks " + type).c_str());
+		auto copy = base;
+		auto const oldId = entries.front().id;
+		core::StationNodeRename rename;
+		auto const renamedOk = core::planStationNodeRename(copy, type, oldId, "renamed:" + oldId, rename, &diagnostic)
+			&& core::renameStationNode(copy, rename, &diagnostic);
+		require(renamedOk, (type + ": " + diagnostic).c_str());
+		auto const expected = copy;
+		expand(copy);
+		require(copy == expected, ("rename duplicated defaults for " + type).c_str());
+		(copy.*member).push_back(entries.front()); // reuse the old subject name
+		expand(copy);
+		std::set<std::string> unique;
+		for (auto const& m : copy.monitors)
+			require(unique.insert(m.id).second, ("reused-name Monitor collision for " + type).c_str());
+		auto const reused = copy;
+		expand(copy);
+		require(copy == reused, ("old-name defaults not idempotent for " + type).c_str());
+		// Reusing a name adds precisely the same number of own-subject rules.
+		auto const subjectType = core::stationMonitorSubjectTypeForNodeType(type);
+		auto count = [&](auto const& config, std::string const& id) {
+			return std::count_if(config.monitors.begin(), config.monitors.end(), [&](auto const& m) {
+				return m.subjectType == subjectType && m.subjectId == id;
+			});
+		};
+		require(count(copy, oldId) == count(base, oldId), ("old-name defaults missing for " + type).c_str());
+	};
+	checkFamily("Store", &core::StationSystemsSettings::stores);
+	checkFamily("Battery", &core::StationSystemsSettings::batteries);
+	checkFamily("Generator", &core::StationSystemsSettings::generators);
+	checkFamily("Solar", &core::StationSystemsSettings::solarArrays);
+	checkFamily("Coolant loop", &core::StationSystemsSettings::coolantLoops);
+	checkFamily("Chiller", &core::StationSystemsSettings::chillers);
+	// Heat engines currently have no public rename command; exercise the
+	// default-expansion seam with the same stable-ID reference retarget.
+	auto engine = base;
+	auto const engineId = engine.heatEngines.front().id;
+	engine.heatEngines.front().id = "renamed-engine";
+	for (auto& m : engine.monitors)
+		if (m.subjectType == "heat-engine" && m.subjectId == engineId) m.subjectId = "renamed-engine";
+	auto const engineExpected = engine;
+	core::applyStationThermalPlantDefaultMonitors(engine);
+	require(engine == engineExpected, "heat-engine default rename duplicated rules");
+	checkFamily("Radiator", &core::StationSystemsSettings::radiators);
+	checkFamily("Water treatment", &core::StationSystemsSettings::waterTreatments);
+	checkFamily("Electrolyzer", &core::StationSystemsSettings::electrolyzers);
+	checkFamily("CO2 capture", &core::StationSystemsSettings::co2Captures);
+	checkFamily("Sabatier", &core::StationSystemsSettings::sabatierReactors);
+	checkFamily("Methane processor", &core::StationSystemsSettings::methaneProcessors);
+	checkFamily("Fuel cell", &core::StationSystemsSettings::fuelCells);
+	checkFamily("Microbial processor", &core::StationSystemsSettings::microbialProcessors);
+	checkFamily("Crops", &core::StationSystemsSettings::cropPopulations);
+	checkFamily("Algae", &core::StationSystemsSettings::algaeCultures);
+	checkFamily("Reservoir", &core::StationSystemsSettings::thermalReservoirs);
+}
 void monitorBulkCommands(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
@@ -1034,4 +1164,5 @@ void registerStationMonitorChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"monitorCallbackStream", monitorCallbackStream});
 	checks.push_back({"monitorCascade", monitorCascade});
 	checks.push_back({"monitorBulkCommands", monitorBulkCommands});
+	checks.push_back({"monitorDefaultRename", monitorDefaultRename});
 }
