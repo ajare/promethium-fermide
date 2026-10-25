@@ -74,6 +74,78 @@ namespace core
 		s.endMap();
 		return true;
 	}
+	// #844: the shared repair-parts wiring block, written only when the
+	// machine opts in - the same shape the coolant loop carries since
+	// #842, so one writer and one reader serve every repairable kind.
+	void writeRepairPartsBlock(Serializer& s, RepairPartsSettings const& wiring)
+	{
+		s.beginMap("repairParts");
+		s.writeString("partsStoreId", wiring.partsStoreId);
+		s.beginArray("repairs");
+		for (auto const& plan : wiring.repairs)
+		{
+			s.beginMap("");
+			s.writeString("modeId", plan.modeId);
+			s.writeDouble("durationSeconds", plan.durationSeconds);
+			s.writeDouble("partsQuantity", plan.partsQuantity);
+			s.writeString("wasteStoreId", plan.wasteStoreId);
+			s.endMap();
+		}
+		s.endArray();
+		s.endMap();
+	}
+	bool readRepairPartsBlock(Serializer& s, uint32_t version, RepairPartsSettings& wiring)
+	{
+		if (!s.hasField("repairParts")) return false;
+		if (version < 117)
+			throw SerializationException("Thermal-plant repair-parts wiring requires schema 117");
+		s.beginMap("repairParts");
+		wiring.partsStoreId = s.readString("partsStoreId");
+		s.beginArray("repairs");
+		while (s.nextArrayItem())
+		{
+			s.beginMap("");
+			FaultRepairSettings plan;
+			plan.modeId = s.readString("modeId");
+			plan.durationSeconds = s.readDouble("durationSeconds");
+			plan.partsQuantity = s.readDouble("partsQuantity");
+			plan.wasteStoreId = s.readString("wasteStoreId");
+			wiring.repairs.push_back(std::move(plan));
+			s.endMap();
+		}
+		s.endArray();
+		s.endMap();
+		return true;
+	}
+	// #844: the shared finite-charge leak settings block for the
+	// refrigerant leak and the panel puncture: same field shape, written
+	// only when the machine opts in.
+	void writeChargeLeakBlock(Serializer& s, std::string const& name,
+		std::string const& compartmentId, double chargeKg, double leakRateKgPerS,
+		double specificHeatKJPerKgK)
+	{
+		s.beginMap(name);
+		s.writeString("compartmentId", compartmentId);
+		s.writeDouble("chargeKg", chargeKg);
+		s.writeDouble("leakRateKgPerS", leakRateKgPerS);
+		s.writeDouble("specificHeatKJPerKgK", specificHeatKJPerKgK);
+		s.endMap();
+	}
+	bool readChargeLeakBlock(Serializer& s, std::string const& name, uint32_t version,
+		char const* feature, std::string& compartmentId, double& chargeKg,
+		double& leakRateKgPerS, double& specificHeatKJPerKgK)
+	{
+		if (!s.hasField(name)) return false;
+		if (version < 117)
+			throw SerializationException(std::string(feature) + " requires schema 117");
+		s.beginMap(name);
+		compartmentId = s.readString("compartmentId");
+		chargeKg = s.readDouble("chargeKg");
+		leakRateKgPerS = s.readDouble("leakRateKgPerS");
+		specificHeatKJPerKgK = s.readDouble("specificHeatKJPerKgK");
+		s.endMap();
+		return true;
+	}
 	}
 	void writeStationSystemsSettingsMap(Serializer& serializer, StationSystemsSettings const& settings)
 	{
@@ -316,6 +388,17 @@ namespace core
 				serializer.writeDouble("emissivity", radiator.emissivity);
 				serializer.writeDouble("viewFactor", radiator.viewFactor);
 				serializer.writeDouble("sinkTemperatureC", radiator.sinkTemperatureC);
+				// #844: the puncture opt-in and repair wiring travel only
+				// when present, so a feature-absent radiator keeps its
+				// previous byte shape.
+				if (radiator.panelPuncture)
+					writeChargeLeakBlock(serializer, "panelPuncture",
+						radiator.panelPuncture->compartmentId,
+						radiator.panelPuncture->coolantKg,
+						radiator.panelPuncture->leakRateKgPerS,
+						radiator.panelPuncture->specificHeatKJPerKgK);
+				if (radiator.repairParts)
+					writeRepairPartsBlock(serializer, *radiator.repairParts);
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -418,6 +501,18 @@ namespace core
 				// the coolant loop note above.
 				if (chiller.criticalService)
 					serializer.writeBool("criticalService", true);
+				// #844: the fault opt-ins travel only when present, so a
+				// feature-absent chiller keeps its previous byte shape.
+				if (chiller.compressorFailure)
+					serializer.writeBool("compressorFailure", true);
+				if (chiller.refrigerantLeak)
+					writeChargeLeakBlock(serializer, "refrigerantLeak",
+						chiller.refrigerantLeak->compartmentId,
+						chiller.refrigerantLeak->chargeKg,
+						chiller.refrigerantLeak->leakRateKgPerS,
+						chiller.refrigerantLeak->specificHeatKJPerKgK);
+				if (chiller.repairParts)
+					writeRepairPartsBlock(serializer, *chiller.repairParts);
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -445,6 +540,13 @@ namespace core
 				serializer.writeDouble("auxiliaryPowerKW", engine.auxiliaryPowerKW);
 				serializer.writeDouble("minHotTemperatureC", engine.minHotTemperatureC);
 				serializer.writeDouble("maxSinkTemperatureC", engine.maxSinkTemperatureC);
+				// #844: the seizure opt-in and repair wiring travel only
+				// when present, so a feature-absent engine keeps its
+				// previous byte shape.
+				if (engine.mechanicalSeizure)
+					serializer.writeBool("mechanicalSeizure", true);
+				if (engine.repairParts)
+					writeRepairPartsBlock(serializer, *engine.repairParts);
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -1495,6 +1597,22 @@ namespace core
 				radiator.emissivity = serializer.readDouble("emissivity");
 				radiator.viewFactor = serializer.readDouble("viewFactor");
 				radiator.sinkTemperatureC = serializer.readDouble("sinkTemperatureC");
+				// #844: a pre-117 document carrying the puncture opt-in or
+				// repair wiring is refused rather than silently dropped.
+				{
+					std::string compartmentId;
+					double chargeKg{0.0}, leakRateKgPerS{0.0}, specificHeatKJPerKgK{0.0};
+					if (readChargeLeakBlock(serializer, "panelPuncture", version,
+						"Radiator panel puncture", compartmentId, chargeKg,
+						leakRateKgPerS, specificHeatKJPerKgK))
+						radiator.panelPuncture = PanelPunctureSettings{std::move(compartmentId),
+							chargeKg, leakRateKgPerS, specificHeatKJPerKgK};
+				}
+				{
+					RepairPartsSettings wiring;
+					if (readRepairPartsBlock(serializer, version, wiring))
+						radiator.repairParts = std::move(wiring);
+				}
 				stationSettings.radiators.push_back(std::move(radiator));
 				serializer.endMap();
 			}
@@ -1619,6 +1737,29 @@ namespace core
 						"Protected station service flags require World schema 92");
 					chiller.criticalService = serializer.readBool("criticalService");
 				}
+				// #844: a pre-117 document carrying the thermal-plant
+				// fault opt-ins or repair wiring is refused rather than
+				// silently dropped.
+				if (serializer.hasField("compressorFailure"))
+				{
+					if (version < 117) throw SerializationException(
+						"Chiller compressor-failure opt-in requires schema 117");
+					chiller.compressorFailure = serializer.readBool("compressorFailure");
+				}
+				{
+					std::string compartmentId;
+					double chargeKg{0.0}, leakRateKgPerS{0.0}, specificHeatKJPerKgK{0.0};
+					if (readChargeLeakBlock(serializer, "refrigerantLeak", version,
+						"Chiller refrigerant leak", compartmentId, chargeKg,
+						leakRateKgPerS, specificHeatKJPerKgK))
+						chiller.refrigerantLeak = RefrigerantLeakSettings{std::move(compartmentId),
+							chargeKg, leakRateKgPerS, specificHeatKJPerKgK};
+				}
+				{
+					RepairPartsSettings wiring;
+					if (readRepairPartsBlock(serializer, version, wiring))
+						chiller.repairParts = std::move(wiring);
+				}
 				stationSettings.chillers.push_back(std::move(chiller));
 				serializer.endMap();
 			}
@@ -1636,7 +1777,10 @@ namespace core
 				std::vector<std::string> fields{"id", "hotReservoirId",
 					"rejectionReservoirId", "thermalClass", "ratedThermalInputKW",
 					"commandedInputKW", "carnotFraction", "auxiliaryPowerKW",
-					"minHotTemperatureC", "maxSinkTemperatureC"};
+					"minHotTemperatureC", "maxSinkTemperatureC",
+					// #844: the seizure opt-in and repair wiring join the
+					// known-field set.
+					"mechanicalSeizure", "repairParts"};
 				for (auto const& field : serializer.mapKeys(""))
 					if (std::find(fields.begin(), fields.end(), field) == fields.end())
 						throw SerializationException("Station entry '" + id + "' field '" + field
@@ -1661,6 +1805,19 @@ namespace core
 				engine.auxiliaryPowerKW = serializer.readDouble("auxiliaryPowerKW");
 				engine.minHotTemperatureC = serializer.readDouble("minHotTemperatureC");
 				engine.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
+				// #844: a pre-117 document carrying the seizure opt-in or
+				// repair wiring is refused rather than silently dropped.
+				if (serializer.hasField("mechanicalSeizure"))
+				{
+					if (version < 117) throw SerializationException(
+						"Heat engine mechanical-seizure opt-in requires schema 117");
+					engine.mechanicalSeizure = serializer.readBool("mechanicalSeizure");
+				}
+				{
+					RepairPartsSettings wiring;
+					if (readRepairPartsBlock(serializer, version, wiring))
+						engine.repairParts = std::move(wiring);
+				}
 				stationSettings.heatEngines.push_back(std::move(engine));
 				serializer.endMap();
 			}

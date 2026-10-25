@@ -39,6 +39,79 @@ namespace core
 			}
 		};
 		trips(runtime.sabatierReactors); trips(runtime.methaneProcessors);
+		// #844: rate-driven hazard bookings for the thermal-plant
+		// catalogue. A chiller refrigerant leak and a radiator panel
+		// puncture bleed their finite charge into the compartment through
+		// the same spilled-coolant ledger path the coolant loop's one-shot
+		// leak uses, so the compartment's spill audit closes over every
+		// booking. The refrigerant is booked at the cold loop's tick-start
+		// temperature (the evaporator's interface) and the panel coolant
+		// at the host reservoir's tick-start temperature: carried sensible
+		// heat, booked once, never invented. The leak runs only while the
+		// Fault is active and the store still holds charge; an empty store
+		// leaks nothing and the Fault stays, fully capped, until repaired.
+		// The onset event is logged once, when the first booking lands.
+		for (auto& chiller : runtime.chillers)
+		{
+			if (chiller.compressorFailurePending)
+			{
+				appendBoundedEvent(runtime.events, tick, "fault", "Fault 'compressor-failure' on '"
+					+ chiller.authored.id + "': " + chiller.compressorFailure->causeDetail);
+				chiller.compressorFailurePending = false;
+			}
+			if (!chiller.refrigerantLeak) continue;
+			auto const mass = std::min(chiller.refrigerantKg,
+				chiller.refrigerantLeakRateKgPerS * seconds);
+			if (mass > 0.0)
+			{
+				auto& air = *std::find_if(runtime.atmospheres.begin(), runtime.atmospheres.end(),
+					[&](auto const& a) { return a.authored.id == chiller.refrigerantCompartmentId; });
+				auto const loopTemperatureC = runtime.coolantLoops[chiller.loopIndex].temperatureC;
+				auto const energy = mass * chiller.refrigerantCpKJPerKgK * loopTemperatureC;
+				chiller.refrigerantKg -= mass;
+				chiller.leakedRefrigerantKg += mass;
+				chiller.leakedRefrigerantEnergyKJ += energy;
+				air.spilledCoolantKg += mass;
+				air.spilledCoolantEnergyKJ += energy;
+			}
+			if (chiller.refrigerantLeakPending)
+			{
+				appendBoundedEvent(runtime.events, tick, "fault", "Fault 'refrigerant-leak' on '"
+					+ chiller.authored.id + "': " + chiller.refrigerantLeak->causeDetail);
+				chiller.refrigerantLeakPending = false;
+			}
+		}
+		for (auto& radiator : runtime.radiators)
+		{
+			if (!radiator.puncture) continue;
+			auto const mass = std::min(radiator.panelCoolantKg,
+				radiator.punctureLeakRateKgPerS * seconds);
+			if (mass > 0.0)
+			{
+				auto& air = *std::find_if(runtime.atmospheres.begin(), runtime.atmospheres.end(),
+					[&](auto const& a) { return a.authored.id == radiator.punctureCompartmentId; });
+				auto const reservoirTemperatureC = runtime.reservoirs[radiator.reservoirIndex].temperatureC;
+				auto const energy = mass * radiator.punctureCpKJPerKgK * reservoirTemperatureC;
+				radiator.panelCoolantKg -= mass;
+				radiator.leakedCoolantKg += mass;
+				radiator.leakedCoolantEnergyKJ += energy;
+				air.spilledCoolantKg += mass;
+				air.spilledCoolantEnergyKJ += energy;
+			}
+			if (radiator.puncturePending)
+			{
+				appendBoundedEvent(runtime.events, tick, "fault", "Fault 'panel-puncture' on '"
+					+ radiator.authored.id + "': " + radiator.puncture->causeDetail);
+				radiator.puncturePending = false;
+			}
+		}
+		for (auto& engine : runtime.heatEngines)
+		{
+			if (!engine.seizurePending) continue;
+			appendBoundedEvent(runtime.events, tick, "fault", "Fault 'mechanical-seizure' on '"
+				+ engine.authored.id + "': " + engine.seizure->causeDetail);
+			engine.seizurePending = false;
+		}
 		if (runtime.prediction.active)
 		{
 			for (auto const& body : runtime.reservoirs) protectionReservoirStart.push_back(body.temperatureC);

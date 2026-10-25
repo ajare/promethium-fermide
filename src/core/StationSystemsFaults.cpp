@@ -26,7 +26,11 @@ namespace core
 		auto const identities = stationInstallationIdentities(mImpl->settings);
 		if (std::none_of(identities.begin(), identities.end(), [&](auto const& i) { return i.id == id; })
 			&& std::none_of(mImpl->sabatierReactors.begin(), mImpl->sabatierReactors.end(), [&](auto const& s) { return s.authored.id == id; })
-			&& std::none_of(mImpl->methaneProcessors.begin(), mImpl->methaneProcessors.end(), [&](auto const& s) { return s.authored.id == id; }))
+			&& std::none_of(mImpl->methaneProcessors.begin(), mImpl->methaneProcessors.end(), [&](auto const& s) { return s.authored.id == id; })
+			// #844: radiators carry a puncture Fault even though they are
+			// not outage/maintenance-registered installations; the fault
+			// namespace reaches them directly.
+			&& std::none_of(mImpl->radiators.begin(), mImpl->radiators.end(), [&](auto const& r) { return r.authored.id == id; }))
 			return refuse("Unknown installation '" + std::string(id) + "'");
 		if (!isInjectableCause(cause.kind))
 			return refuse("Fault cause kind is not injectable: it names a Fault the simulation raises itself");
@@ -58,6 +62,125 @@ namespace core
 		}
 		auto loop = std::find_if(mImpl->coolantLoops.begin(), mImpl->coolantLoops.end(),
 			[&](auto const& l) { return l.authored.id == id; });
+		// #844: the thermal-plant catalogue. Each mode is injectable only
+		// on a machine of the kind that owns it, only when that machine
+		// opted in, and only once: an active or pending instance of the
+		// same mode is refused with no mutation. The injected mode names
+		// the machine kind, so an id that is not that kind's machine is
+		// an unknown installation for this mode.
+		if (mode == "compressor-failure" || mode == "refrigerant-leak")
+		{
+			auto chiller = std::find_if(mImpl->chillers.begin(), mImpl->chillers.end(),
+				[&](auto const& c) { return c.authored.id == id; });
+			if (chiller == mImpl->chillers.end())
+				return refuse("Unknown " + std::string(mode) + " installation");
+			if (mode == "compressor-failure")
+			{
+				if (!chiller->authored.compressorFailure)
+					return refuse("compressor-failure is not enabled");
+				if (chiller->compressorFailure)
+					return refuse("Fault mode is already active or pending on '" + std::string(id) + "'");
+				Impl::FaultCommand command;
+				command.kind = Impl::FaultCommand::Kind::Injection;
+				command.afterStep = mImpl->clock.steps(); command.installationId = id;
+				command.modeId = mode; command.cause = cause;
+				mImpl->faultCommands.push_back(std::move(command));
+				chiller->compressorFailure = StationFaultSnapshot{std::string(id), std::string(mode),
+					mImpl->clock.steps() + 1, cause.kind, cause.detail, 1.0};
+				chiller->compressorFailurePending = true;
+				if (diagnostic) diagnostic->clear();
+				return true;
+			}
+			if (!chiller->authored.refrigerantLeak)
+				return refuse("refrigerant-leak is not enabled");
+			if (chiller->refrigerantLeak)
+				return refuse("Fault mode is already active or pending on '" + std::string(id) + "'");
+			auto const& parameters = *chiller->authored.refrigerantLeak;
+			if (!std::isfinite(parameters.chargeKg) || parameters.chargeKg <= 0
+				|| !std::isfinite(parameters.leakRateKgPerS) || parameters.leakRateKgPerS <= 0
+				|| !std::isfinite(parameters.specificHeatKJPerKgK) || parameters.specificHeatKJPerKgK <= 0
+				|| std::none_of(mImpl->atmospheres.begin(), mImpl->atmospheres.end(),
+					[&](auto const& a) { return a.authored.id == parameters.compartmentId; }))
+				return refuse("Invalid refrigerant-leak parameters");
+			// All refusal paths precede mutation. The command freezes the
+			// effective leak parameters; the charge store starts full and
+			// the leak runs from the next audited boundary.
+			Impl::FaultCommand command;
+			command.kind = Impl::FaultCommand::Kind::Injection;
+			command.afterStep = mImpl->clock.steps(); command.installationId = id;
+			command.modeId = mode; command.cause = cause; command.refrigerantLeak = parameters;
+			mImpl->faultCommands.push_back(std::move(command));
+			chiller->refrigerantLeak = StationFaultSnapshot{std::string(id), std::string(mode),
+				mImpl->clock.steps() + 1, cause.kind, cause.detail, 0};
+			chiller->refrigerantLeakPending = true;
+			chiller->refrigerantLeakRateKgPerS = parameters.leakRateKgPerS;
+			chiller->refrigerantCpKJPerKgK = parameters.specificHeatKJPerKgK;
+			chiller->refrigerantCompartmentId = parameters.compartmentId;
+			if (chiller->refrigerantChargeKg <= 0.0)
+			{
+				chiller->refrigerantChargeKg = parameters.chargeKg;
+				chiller->refrigerantKg = parameters.chargeKg;
+			}
+			if (diagnostic) diagnostic->clear();
+			return true;
+		}
+		if (mode == "panel-puncture")
+		{
+			auto radiator = std::find_if(mImpl->radiators.begin(), mImpl->radiators.end(),
+				[&](auto const& r) { return r.authored.id == id; });
+			if (radiator == mImpl->radiators.end())
+				return refuse("Unknown " + std::string(mode) + " installation");
+			if (!radiator->authored.panelPuncture)
+				return refuse("panel-puncture is not enabled");
+			if (radiator->puncture)
+				return refuse("Fault mode is already active or pending on '" + std::string(id) + "'");
+			auto const& parameters = *radiator->authored.panelPuncture;
+			if (!std::isfinite(parameters.coolantKg) || parameters.coolantKg <= 0
+				|| !std::isfinite(parameters.leakRateKgPerS) || parameters.leakRateKgPerS <= 0
+				|| !std::isfinite(parameters.specificHeatKJPerKgK) || parameters.specificHeatKJPerKgK <= 0
+				|| std::none_of(mImpl->atmospheres.begin(), mImpl->atmospheres.end(),
+					[&](auto const& a) { return a.authored.id == parameters.compartmentId; }))
+				return refuse("Invalid panel-puncture parameters");
+			Impl::FaultCommand command;
+			command.kind = Impl::FaultCommand::Kind::Injection;
+			command.afterStep = mImpl->clock.steps(); command.installationId = id;
+			command.modeId = mode; command.cause = cause; command.panelPuncture = parameters;
+			mImpl->faultCommands.push_back(std::move(command));
+			radiator->puncture = StationFaultSnapshot{std::string(id), std::string(mode),
+				mImpl->clock.steps() + 1, cause.kind, cause.detail, 0};
+			radiator->puncturePending = true;
+			radiator->punctureLeakRateKgPerS = parameters.leakRateKgPerS;
+			radiator->punctureCpKJPerKgK = parameters.specificHeatKJPerKgK;
+			radiator->punctureCompartmentId = parameters.compartmentId;
+			if (radiator->panelCoolantCapacityKg <= 0.0)
+			{
+				radiator->panelCoolantCapacityKg = parameters.coolantKg;
+				radiator->panelCoolantKg = parameters.coolantKg;
+			}
+			if (diagnostic) diagnostic->clear();
+			return true;
+		}
+		if (mode == "mechanical-seizure")
+		{
+			auto engine = std::find_if(mImpl->heatEngines.begin(), mImpl->heatEngines.end(),
+				[&](auto const& e) { return e.authored.id == id; });
+			if (engine == mImpl->heatEngines.end())
+				return refuse("Unknown " + std::string(mode) + " installation");
+			if (!engine->authored.mechanicalSeizure)
+				return refuse("mechanical-seizure is not enabled");
+			if (engine->seizure)
+				return refuse("Fault mode is already active or pending on '" + std::string(id) + "'");
+			Impl::FaultCommand command;
+			command.kind = Impl::FaultCommand::Kind::Injection;
+			command.afterStep = mImpl->clock.steps(); command.installationId = id;
+			command.modeId = mode; command.cause = cause;
+			mImpl->faultCommands.push_back(std::move(command));
+			engine->seizure = StationFaultSnapshot{std::string(id), std::string(mode),
+				mImpl->clock.steps() + 1, cause.kind, cause.detail, 1.0};
+			engine->seizurePending = true;
+			if (diagnostic) diagnostic->clear();
+			return true;
+		}
 		if (loop == mImpl->coolantLoops.end() || mode != "coolant-leak")
 			return refuse("Unknown fault mode '" + std::string(mode) + "' for '" + std::string(id) + "'");
 		if (!loop->authored.coolantLeak) return refuse("coolant-leak is not enabled for '" + std::string(id) + "'");
@@ -144,29 +267,96 @@ namespace core
 		if (!mImpl->settings.enabled || !mImpl->snapshot.healthy) return refuse("Station runtime is not running or healthy");
 		if (mode == "overtemp-runaway")
 			return refuse("A latching Trip is not a repairable Fault: clear it with resetTrip");
-		if (mode != "coolant-leak" && mode != "pump-seizure")
-			return refuse("Unknown fault mode '" + std::string(mode) + "' for repair on '" + std::string(id) + "'");
-		auto const loop = std::find_if(mImpl->coolantLoops.begin(), mImpl->coolantLoops.end(),
-			[&](auto const& l) { return l.authored.id == id; });
-		if (loop == mImpl->coolantLoops.end())
+		// #844: the repairable mode names the machine kind that owns it,
+		// so the target resolves by kind - no cross-kind guessing. The
+		// thermal-plant catalogue joins the coolant-loop pilot in one
+		// repair starter: same reservation, isolation and completion
+		// machinery, only the target family differs.
+		using RepairTarget = Impl::MaintenanceState::Target;
+		RepairTarget target{RepairTarget::CoolantLoop};
+		size_t targetIndex{0};
+		std::string installationKind;
+		const RepairPartsSettings* wiring{nullptr};
+		bool faultPresent{false};
+		auto const unknownInstallation = [&](std::string_view machineKind)
 		{
 			auto const identities = stationInstallationIdentities(mImpl->settings);
 			if (std::none_of(identities.begin(), identities.end(), [&](auto const& i) { return i.id == id; })
 				&& std::none_of(mImpl->sabatierReactors.begin(), mImpl->sabatierReactors.end(),
 					[&](auto const& s) { return s.authored.id == id; })
 				&& std::none_of(mImpl->methaneProcessors.begin(), mImpl->methaneProcessors.end(),
-					[&](auto const& s) { return s.authored.id == id; }))
+					[&](auto const& s) { return s.authored.id == id; })
+				&& std::none_of(mImpl->radiators.begin(), mImpl->radiators.end(),
+					[&](auto const& r) { return r.authored.id == id; }))
 				return refuse("Unknown installation '" + std::string(id) + "'");
-			return refuse("Installation '" + std::string(id) + "' declares no repair-parts wiring");
+			return refuse("Installation '" + std::string(id) + "' is not a "
+				+ std::string(machineKind) + "; the repairable mode '"
+				+ std::string(mode) + "' names one");
+		};
+		if (mode == "coolant-leak" || mode == "pump-seizure")
+		{
+			auto const loop = std::find_if(mImpl->coolantLoops.begin(), mImpl->coolantLoops.end(),
+				[&](auto const& l) { return l.authored.id == id; });
+			if (loop == mImpl->coolantLoops.end())
+			{
+				auto const identities = stationInstallationIdentities(mImpl->settings);
+				if (std::none_of(identities.begin(), identities.end(), [&](auto const& i) { return i.id == id; })
+					&& std::none_of(mImpl->sabatierReactors.begin(), mImpl->sabatierReactors.end(),
+						[&](auto const& s) { return s.authored.id == id; })
+					&& std::none_of(mImpl->methaneProcessors.begin(), mImpl->methaneProcessors.end(),
+						[&](auto const& s) { return s.authored.id == id; }))
+					return refuse("Unknown installation '" + std::string(id) + "'");
+				return refuse("Installation '" + std::string(id) + "' declares no repair-parts wiring");
+			}
+			wiring = loop->authored.repairParts ? &*loop->authored.repairParts : nullptr;
+			target = RepairTarget::CoolantLoop;
+			targetIndex = static_cast<size_t>(std::distance(mImpl->coolantLoops.begin(), loop));
+			installationKind = "coolant loop";
+			faultPresent = mode == "coolant-leak" ? loop->fault.has_value() : loop->seizure.has_value();
 		}
-		if (!loop->authored.repairParts)
+		else if (mode == "compressor-failure" || mode == "refrigerant-leak")
+		{
+			auto const chiller = std::find_if(mImpl->chillers.begin(), mImpl->chillers.end(),
+				[&](auto const& c) { return c.authored.id == id; });
+			if (chiller == mImpl->chillers.end()) return unknownInstallation("chiller");
+			wiring = chiller->authored.repairParts ? &*chiller->authored.repairParts : nullptr;
+			target = RepairTarget::Chiller;
+			targetIndex = static_cast<size_t>(std::distance(mImpl->chillers.begin(), chiller));
+			installationKind = "chiller";
+			faultPresent = mode == "compressor-failure"
+				? chiller->compressorFailure.has_value() : chiller->refrigerantLeak.has_value();
+		}
+		else if (mode == "panel-puncture")
+		{
+			auto const radiator = std::find_if(mImpl->radiators.begin(), mImpl->radiators.end(),
+				[&](auto const& r) { return r.authored.id == id; });
+			if (radiator == mImpl->radiators.end()) return unknownInstallation("radiator");
+			wiring = radiator->authored.repairParts ? &*radiator->authored.repairParts : nullptr;
+			target = RepairTarget::Radiator;
+			targetIndex = static_cast<size_t>(std::distance(mImpl->radiators.begin(), radiator));
+			installationKind = "radiator";
+			faultPresent = radiator->puncture.has_value();
+		}
+		else if (mode == "mechanical-seizure")
+		{
+			auto const engine = std::find_if(mImpl->heatEngines.begin(), mImpl->heatEngines.end(),
+				[&](auto const& e) { return e.authored.id == id; });
+			if (engine == mImpl->heatEngines.end()) return unknownInstallation("heat engine");
+			wiring = engine->authored.repairParts ? &*engine->authored.repairParts : nullptr;
+			target = RepairTarget::HeatEngine;
+			targetIndex = static_cast<size_t>(std::distance(mImpl->heatEngines.begin(), engine));
+			installationKind = "heat engine";
+			faultPresent = engine->seizure.has_value();
+		}
+		else
+			return refuse("Unknown fault mode '" + std::string(mode) + "' for repair on '" + std::string(id) + "'");
+		if (!wiring)
 			return refuse("Installation '" + std::string(id) + "' declares no repair-parts wiring");
-		auto const& wiring = *loop->authored.repairParts;
-		auto const plan = std::find_if(wiring.repairs.begin(), wiring.repairs.end(),
+		auto const plan = std::find_if(wiring->repairs.begin(), wiring->repairs.end(),
 			[&](auto const& p) { return p.modeId == mode; });
-		if (plan == wiring.repairs.end())
+		if (plan == wiring->repairs.end())
 			return refuse("Installation '" + std::string(id) + "' declares no repair plan for fault mode '" + std::string(mode) + "'");
-		if (mode == "coolant-leak" ? !loop->fault : !loop->seizure)
+		if (!faultPresent)
 			return refuse("No active or pending '" + std::string(mode) + "' Fault on '" + std::string(id) + "' to repair");
 		if (std::any_of(mImpl->repairJobs.begin(), mImpl->repairJobs.end(), [&](auto const& job)
 			{
@@ -181,11 +371,11 @@ namespace core
 		size_t wasteStoreIndex{SIZE_MAX};
 		for (size_t index = 0; index < mImpl->stores.size(); ++index)
 		{
-			if (mImpl->stores[index].authored.id == wiring.partsStoreId) partsStoreIndex = index;
+			if (mImpl->stores[index].authored.id == wiring->partsStoreId) partsStoreIndex = index;
 			if (mImpl->stores[index].authored.id == plan->wasteStoreId) wasteStoreIndex = index;
 		}
 		if (partsStoreIndex == SIZE_MAX)
-			return refuse("Repair parts store '" + wiring.partsStoreId + "' resolved to no configured store");
+			return refuse("Repair parts store '" + wiring->partsStoreId + "' resolved to no configured store");
 		if (wasteStoreIndex == SIZE_MAX)
 			return refuse("Repair waste store '" + plan->wasteStoreId + "' resolved to no configured store");
 		// Reservable now: the parts the live reservations of running work
@@ -220,7 +410,7 @@ namespace core
 		auto const& parts = mImpl->stores[partsStoreIndex];
 		auto const drawable = parts.currentQualified - reservedParts;
 		if (!covers(drawable, plan->partsQuantity))
-			return refuse("Repair parts store '" + wiring.partsStoreId + "' cannot cover "
+			return refuse("Repair parts store '" + wiring->partsStoreId + "' cannot cover "
 				+ std::to_string(plan->partsQuantity) + " " + parts.authored.unit
 				+ " for the repair (drawable " + std::to_string(std::max(0.0, drawable)) + ")");
 		auto const& waste = mImpl->stores[wasteStoreIndex];
@@ -246,11 +436,11 @@ namespace core
 		job.authored.durationSeconds = plan->durationSeconds;
 		job.authored.recurrenceSeconds = 0.0;
 		job.authored.priority = 0;
-		job.authored.requirements = {MaintenanceRequirementSettings{wiring.partsStoreId, plan->partsQuantity, true}};
+		job.authored.requirements = {MaintenanceRequirementSettings{wiring->partsStoreId, plan->partsQuantity, true}};
 		job.authored.wasteStoreId = plan->wasteStoreId;
-		job.installationKind = "coolant loop";
-		job.target = Impl::MaintenanceState::Target::CoolantLoop;
-		job.targetIndex = static_cast<size_t>(std::distance(mImpl->coolantLoops.begin(), loop));
+		job.installationKind = installationKind;
+		job.target = target;
+		job.targetIndex = targetIndex;
 		Impl::MaintenanceState::RequirementState requirementState;
 		requirementState.storeIndex = partsStoreIndex;
 		job.requirements.push_back(requirementState);
@@ -348,7 +538,21 @@ namespace core
 				s.writeUint32("causeKind", static_cast<uint32_t>(command.cause.kind));
 				s.writeString("causeDetail", command.cause.detail);
 				if (command.modeId == "overtemp-runaway") s.writeDouble("heatSpikeKJ", command.heatSpikeKJ);
-				else
+				else if (command.modeId == "refrigerant-leak")
+				{
+					s.writeString("compartmentId", command.refrigerantLeak->compartmentId);
+					s.writeDouble("chargeKg", command.refrigerantLeak->chargeKg);
+					s.writeDouble("leakRateKgPerS", command.refrigerantLeak->leakRateKgPerS);
+					s.writeDouble("specificHeatKJPerKgK", command.refrigerantLeak->specificHeatKJPerKgK);
+				}
+				else if (command.modeId == "panel-puncture")
+				{
+					s.writeString("compartmentId", command.panelPuncture->compartmentId);
+					s.writeDouble("coolantKg", command.panelPuncture->coolantKg);
+					s.writeDouble("leakRateKgPerS", command.panelPuncture->leakRateKgPerS);
+					s.writeDouble("specificHeatKJPerKgK", command.panelPuncture->specificHeatKJPerKgK);
+				}
+				else if (command.modeId != "compressor-failure" && command.modeId != "mechanical-seizure")
 				{
 					s.writeString("compartmentId", command.parameters.compartmentId);
 					s.writeDouble("releasedKg", command.parameters.releasedKg);
@@ -366,7 +570,7 @@ namespace core
 		s.beginMap("stationFaultReplay");
 		auto const steps = s.readUint64("completedSteps");
 		StationSystemsSettings initial;
-		readStationSystemsSettingsMap(s, 116, initial);
+		readStationSystemsSettingsMap(s, 117, initial);
 		auto runtime = std::make_unique<StationSystemsRuntime>(initial, baseSeconds);
 		s.beginArray("commands");
 		uint64_t previous = 0;
@@ -382,7 +586,7 @@ namespace core
 			if (s.hasField("stationSystems"))
 			{
 				StationSystemsSettings update;
-				readStationSystemsSettingsMap(s, 116, update);
+				readStationSystemsSettingsMap(s, 117, update);
 				if (!runtime->updateSettings(update, &diagnostic))
 					throw SerializationException("Invalid fault replay settings: " + diagnostic);
 			}
@@ -405,14 +609,27 @@ namespace core
 				auto const detail = s.readString("causeDetail");
 				CoolantLeakSettings parameters;
 				double heat = 0;
+				std::optional<RefrigerantLeakSettings> refrigerant;
+				std::optional<PanelPunctureSettings> puncture;
 				if (mode == "overtemp-runaway") heat = s.readDouble("heatSpikeKJ");
-				else parameters = {s.readString("compartmentId"), s.readDouble("releasedKg")};
+				else if (mode == "refrigerant-leak")
+					refrigerant = RefrigerantLeakSettings{s.readString("compartmentId"),
+						s.readDouble("chargeKg"), s.readDouble("leakRateKgPerS"),
+						s.readDouble("specificHeatKJPerKgK")};
+				else if (mode == "panel-puncture")
+					puncture = PanelPunctureSettings{s.readString("compartmentId"),
+						s.readDouble("coolantKg"), s.readDouble("leakRateKgPerS"),
+						s.readDouble("specificHeatKJPerKgK")};
+				else if (mode != "compressor-failure" && mode != "mechanical-seizure")
+					parameters = {s.readString("compartmentId"), s.readDouble("releasedKg")};
 				if (!isInjectableCause(static_cast<FaultCause::Kind>(kind))
 					|| !runtime->injectFault(id, mode, {static_cast<FaultCause::Kind>(kind), detail}, &diagnostic))
 					throw SerializationException("Invalid fault replay: " + diagnostic);
 				if (runtime->mImpl->faultCommands.back().parameters != parameters
-					|| runtime->mImpl->faultCommands.back().heatSpikeKJ != heat)
-					throw SerializationException("Fault replay effective parameters disagree with the command");
+					|| runtime->mImpl->faultCommands.back().heatSpikeKJ != heat
+					|| runtime->mImpl->faultCommands.back().refrigerantLeak != refrigerant
+					|| runtime->mImpl->faultCommands.back().panelPuncture != puncture)
+					throw SerializationException("Fault replay effective parameters disagree with the command: " + mode);
 			}
 			s.endMap();
 			previous = after;

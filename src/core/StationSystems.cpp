@@ -911,7 +911,20 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			|| std::any_of(settings.sabatierReactors.begin(), settings.sabatierReactors.end(),
 				[](auto const& s) { return s.overtempRunaway.has_value(); })
 			|| std::any_of(settings.methaneProcessors.begin(), settings.methaneProcessors.end(),
-				[](auto const& s) { return s.overtempRunaway.has_value(); }))
+				[](auto const& s) { return s.overtempRunaway.has_value(); })
+			// #844: a thermal-plant fault opt-in pins the initial settings
+			// too, so a later live retune of a leak rate cannot make the
+			// replay block disagree with the parameters its frozen
+			// injection commands carry.
+			|| std::any_of(settings.chillers.begin(), settings.chillers.end(),
+				[](auto const& chiller) { return chiller.compressorFailure
+					|| chiller.refrigerantLeak.has_value() || chiller.repairParts.has_value(); })
+			|| std::any_of(settings.radiators.begin(), settings.radiators.end(),
+				[](auto const& radiator) { return radiator.panelPuncture.has_value()
+					|| radiator.repairParts.has_value(); })
+			|| std::any_of(settings.heatEngines.begin(), settings.heatEngines.end(),
+				[](auto const& engine) { return engine.mechanicalSeizure
+					|| engine.repairParts.has_value(); }))
 			mImpl->faultReplayInitialSettings = settings;
 		mImpl->snapshot.systemsStepWorldTicks = settings.systemsStepWorldTicks;
 		mImpl->snapshot.systemsTimestepSeconds = mImpl->clock.stepSeconds();
@@ -1116,6 +1129,15 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			Impl::RadiatorState state;
 			state.authored = radiator;
 			state.reservoirIndex = reservoirIndex[radiator.reservoirId];
+			// #844: a puncture-opted panel starts full: the finite coolant
+			// charge is machine state initialised from the authored value,
+			// like a loop's coolant inventory, and the puncture Fault is
+			// what drains it. A panel with no opt-in carries no charge.
+			if (radiator.panelPuncture)
+			{
+				state.panelCoolantCapacityKg = radiator.panelPuncture->coolantKg;
+				state.panelCoolantKg = radiator.panelPuncture->coolantKg;
+			}
 			mImpl->radiators.push_back(std::move(state));
 			mImpl->reservoirs[state.reservoirIndex].radiatorIndices.push_back(
 				mImpl->radiators.size() - 1);
@@ -1165,6 +1187,16 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			state.authored = chiller;
 			state.loopIndex = loopIndex[chiller.coldLoopId];
 			state.sinkIndex = reservoirIndex[chiller.condenserReservoirId];
+			// #844: a refrigerant-leak-opted chiller starts fully charged:
+			// the finite charge is machine state initialised from the
+			// authored value, like a loop's coolant inventory, and the
+			// leak Fault is what drains it. A chiller with no opt-in
+			// carries no charge and no cap.
+			if (chiller.refrigerantLeak)
+			{
+				state.refrigerantChargeKg = chiller.refrigerantLeak->chargeKg;
+				state.refrigerantKg = chiller.refrigerantLeak->chargeKg;
+			}
 			chillerIndex[chiller.id] = mImpl->chillers.size();
 			mImpl->chillers.push_back(std::move(state));
 		}

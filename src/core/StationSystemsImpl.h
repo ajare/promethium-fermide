@@ -26,6 +26,10 @@ using namespace station_detail;
 			CoolantLeakSettings parameters;
 			double heatSpikeKJ{0.0};
 			double restoreTarget{0.0};
+			// #844: the effective parameters frozen by a thermal-plant
+			// injection. Only the block matching the injected mode is set.
+			std::optional<RefrigerantLeakSettings> refrigerantLeak;
+			std::optional<PanelPunctureSettings> panelPuncture;
 			std::optional<StationSystemsSettings> settingsUpdate;
 		};
 		std::optional<StationSystemsSettings> faultReplayInitialSettings;
@@ -344,6 +348,22 @@ using namespace station_detail;
 			RadiatorSettings authored;
 			size_t reservoirIndex{0};
 			double lastRejectedKW{0.0};
+			// #844: the panel's finite coolant charge. The puncture Fault
+			// bleeds it into the compartment; the remaining fraction is the
+			// area still radiating and caps rejection. A radiator with no
+			// puncture opt-in keeps the charge at zero and the factor at 1.
+			std::optional<StationFaultSnapshot> puncture;
+			bool puncturePending{false};
+			double punctureLeakRateKgPerS{0.0};
+			double punctureCpKJPerKgK{0.0};
+			std::string punctureCompartmentId;
+			double panelCoolantKg{0.0};
+			double panelCoolantCapacityKg{0.0};
+			double leakedCoolantKg{0.0};
+			double leakedCoolantEnergyKJ{0.0};
+			// The area-driven availability the puncture charge leaves this
+			// tick, composed by minimum with maintenance isolation.
+			double availabilityFactor{1.0};
 		};
 		// The authoritative ledger of one thermal reservoir (#395).
 		// Temperature is integrated explicitly on the fixed World tick,
@@ -518,6 +538,23 @@ using namespace station_detail;
 			double extractedKJ{0.0};
 			double workKJ{0.0};
 			double condenserKJ{0.0};
+			// #844: the chiller's fault ledger entries and its finite
+			// refrigerant charge store. The refrigerant leak bleeds the
+			// charge into the compartment while the Fault is active; the
+			// remaining charge fraction caps deliverable cooling capacity.
+			// A chiller with no opt-in keeps the charge at zero and the
+			// capacity uncapped.
+			std::optional<StationFaultSnapshot> compressorFailure;
+			bool compressorFailurePending{false};
+			std::optional<StationFaultSnapshot> refrigerantLeak;
+			bool refrigerantLeakPending{false};
+			double refrigerantLeakRateKgPerS{0.0};
+			double refrigerantCpKJPerKgK{0.0};
+			std::string refrigerantCompartmentId;
+			double refrigerantKg{0.0};
+			double refrigerantChargeKg{0.0};
+			double leakedRefrigerantKg{0.0};
+			double leakedRefrigerantEnergyKJ{0.0};
 			// The cooling capacity available under every outage aimed at
 			// this chiller this tick (#413).
 			double availabilityFactor{1.0};
@@ -553,6 +590,12 @@ using namespace station_detail;
 			double efficiencyNow{0.0};
 			double carnotEfficiencyNow{0.0};
 			bool lastTripped{false};
+			// #844: the engine's `mechanical-seizure` Fault entry. A seized
+			// engine is held at zero availability until repaired. The entry
+			// is not published as active until the first tick has logged its
+			// onset, as for every other pending Fault.
+			std::optional<StationFaultSnapshot> seizure;
+			bool seizurePending{false};
 			double thermalInputKJ{0.0};
 			double electricalKJ{0.0};
 			double rejectionKJ{0.0};
@@ -1483,7 +1526,9 @@ using namespace station_detail;
 			// The target installation, resolved at construction. Exactly
 			// one kind matches, as for outages (#576). The heat engine is a
 			// registered installation from #807, so a job can isolate it.
-			enum class Target : std::uint8_t { Generator, CoolantLoop, Chiller, HeatEngine };
+			// #844 adds the radiator: a repair of a panel puncture must be
+			// able to isolate the panel it is sealing.
+			enum class Target : std::uint8_t { Generator, CoolantLoop, Chiller, HeatEngine, Radiator };
 			Target target{Target::Generator};
 			size_t targetIndex{0};
 			// One entry per authored requirement: the resolved store index

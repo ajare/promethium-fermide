@@ -419,10 +419,35 @@ namespace core
 			result.thermal.reservoirs.push_back(std::move(reservoirResult));
 		}
 		for (auto const& radiator : mImpl->radiators)
-			result.thermal.radiators.push_back({radiator.authored.id,
-				radiator.authored.reservoirId, radiator.authored.areaM2,
-					radiator.authored.emissivity, radiator.authored.viewFactor,
-					radiator.authored.sinkTemperatureC, radiator.lastRejectedKW});
+		{
+			StationRadiatorSnapshot radiatorResult;
+			radiatorResult.id = radiator.authored.id;
+			radiatorResult.reservoirId = radiator.authored.reservoirId;
+			radiatorResult.areaM2 = radiator.authored.areaM2;
+			radiatorResult.emissivity = radiator.authored.emissivity;
+			radiatorResult.viewFactor = radiator.authored.viewFactor;
+			radiatorResult.sinkTemperatureC = radiator.authored.sinkTemperatureC;
+			radiatorResult.lastRejectedKW = radiator.lastRejectedKW;
+			// #844: the panel's finite coolant charge, the remaining-area
+			// cap it drives, the cumulative puncture booking and the
+			// active-Fault ledger. A pending puncture is not published as
+			// active; its derived impact is the fraction of panel charge
+			// that has bled away.
+			if (radiator.puncture && !radiator.puncturePending)
+			{
+				auto fault = *radiator.puncture;
+				fault.derivedImpact = radiator.panelCoolantCapacityKg > 0.0
+					? 1.0 - radiator.panelCoolantKg / radiator.panelCoolantCapacityKg : 1.0;
+				radiatorResult.activeFaults.push_back(std::move(fault));
+			}
+			radiatorResult.panelCoolantKg = radiator.panelCoolantKg;
+			radiatorResult.panelCoolantCapacityKg = radiator.panelCoolantCapacityKg;
+			radiatorResult.remainingAreaFraction = radiator.availabilityFactor;
+			radiatorResult.leakedCoolantKg = radiator.leakedCoolantKg;
+			radiatorResult.leakedCoolantEnergyKJ = radiator.leakedCoolantEnergyKJ;
+			radiatorResult.availabilityFactor = radiator.availabilityFactor;
+			result.thermal.radiators.push_back(std::move(radiatorResult));
+		}
 		// The coolant loop snapshot reports the authored contract beside the
 		// runtime's finite inventory, the pump and freeze-heater service
 		// results, the exposed freeze condition and the closing loop energy
@@ -552,6 +577,23 @@ namespace core
 			chillerResult.workEnergyKJ = chiller.workKJ;
 			chillerResult.condenserEnergyKJ = chiller.condenserKJ;
 			chillerResult.residualKJ = chiller.extractedKJ + chiller.workKJ - chiller.condenserKJ;
+			// #844: the fault ledger and the finite refrigerant charge.
+			// A pending Fault is not published as active, as for every
+			// other ledger entry; the refrigerant leak's derived impact is
+			// the fraction of the charge that has leaked away.
+			if (chiller.compressorFailure && !chiller.compressorFailurePending)
+				chillerResult.activeFaults.push_back(*chiller.compressorFailure);
+			if (chiller.refrigerantLeak && !chiller.refrigerantLeakPending)
+			{
+				auto fault = *chiller.refrigerantLeak;
+				fault.derivedImpact = chiller.refrigerantChargeKg > 0.0
+					? 1.0 - chiller.refrigerantKg / chiller.refrigerantChargeKg : 1.0;
+				chillerResult.activeFaults.push_back(std::move(fault));
+			}
+			chillerResult.refrigerantChargeKg = chiller.refrigerantChargeKg;
+			chillerResult.refrigerantKg = chiller.refrigerantKg;
+			chillerResult.leakedRefrigerantKg = chiller.leakedRefrigerantKg;
+			chillerResult.leakedRefrigerantEnergyKJ = chiller.leakedRefrigerantEnergyKJ;
 			chillerResult.status = chiller.status;
 			result.thermal.totalCoolingProvidedKW += chiller.lastCoolingKW;
 			result.thermal.totalCoolingUnmetKW += chillerResult.coolingUnmetKW;
@@ -603,6 +645,11 @@ namespace core
 			auto const cableLossKJ = cable != result.connections.end() ? cable->lostTotal : 0.0;
 			engineResult.residualKJ = engine.thermalInputKJ
 				- engine.electricalKJ - cableLossKJ - engine.rejectionKJ;
+			// #844: the engine's fault ledger. A pending seizure is not
+			// published as active; a latched seizure carries full
+			// availability impact.
+			if (engine.seizure && !engine.seizurePending)
+				engineResult.activeFaults.push_back(*engine.seizure);
 			engineResult.status = engine.status;
 			result.heatEngines.push_back(std::move(engineResult));
 		}

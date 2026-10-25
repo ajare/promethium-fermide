@@ -39,6 +39,87 @@ namespace
 			return " wear model declares no fade rate";
 		return nullptr;
 	}
+	// #844: the shared repair-parts wiring contract for every machine
+	// kind that can opt in (#842 established it on the coolant loop).
+	// `allowedModes` names the repairable fault modes the machine kind
+	// owns; a plan for any other mode is an authoring error. The
+	// consumed-parts stream must land in a declared waste store that can
+	// actually receive it: same unit and same declared composition, as
+	// for scheduled maintenance (#414).
+	template <class Refuse, class Missing>
+	bool validateRepairPartsWiring(RepairPartsSettings const& wiring,
+		std::string const& where, std::string_view machineKind,
+		StationSystemsSettings const& settings,
+		std::initializer_list<std::string_view> allowedModes,
+		Refuse const& refuse, Missing const& missing)
+	{
+		auto const findRepairStore = [&](std::string const& id) -> ResourceStoreSettings const*
+		{
+			auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == id; });
+			return it == settings.stores.end() ? nullptr : &*it;
+		};
+		if (wiring.partsStoreId.empty())
+			return refuse(where + " repair-parts store id must not be empty");
+		auto const* parts = findRepairStore(wiring.partsStoreId);
+		if (!parts)
+			return missing(where + " repair-parts wiring references unknown store '"
+				+ wiring.partsStoreId + "'");
+		if (wiring.repairs.size() > MaxStationFaultRepairs)
+			return refuse(where + " repair plans are limited to "
+				+ std::to_string(MaxStationFaultRepairs) + " entries");
+		std::set<std::string> planModes;
+		for (auto const& plan : wiring.repairs)
+		{
+			auto const item = where + " repair plan '" + plan.modeId + "'";
+			if (std::find(allowedModes.begin(), allowedModes.end(), plan.modeId) == allowedModes.end())
+				return refuse(item + " names no repairable fault mode on "
+					+ std::string(machineKind));
+			if (!planModes.insert(plan.modeId).second)
+				return refuse(where + " declares a repair plan for mode '"
+					+ plan.modeId + "' more than once");
+			if (!std::isfinite(plan.durationSeconds) || plan.durationSeconds <= 0.0)
+				return refuse(item + " duration must be finite and positive");
+			if (!std::isfinite(plan.partsQuantity) || plan.partsQuantity <= 0.0)
+				return refuse(item + " parts quantity must be finite and positive");
+			if (plan.wasteStoreId.empty())
+				return refuse(item + " must name the waste store its consumed parts land in");
+			if (plan.wasteStoreId == wiring.partsStoreId)
+				return refuse(item + " consumes the parts store into itself;"
+					" the waste store may not also be the parts source");
+			auto const* waste = findRepairStore(plan.wasteStoreId);
+			if (!waste)
+				return missing(item + " references unknown waste store '"
+					+ plan.wasteStoreId + "'");
+			if (parts->unit != waste->unit)
+				return refuse(item + " parts store unit '" + parts->unit
+					+ "' does not match the waste store unit '" + waste->unit + "'");
+			if (parts->composition || waste->composition)
+			{
+				if (!parts->composition || !waste->composition
+					|| !compositionsClose(*parts->composition, *waste->composition))
+					return refuse(item + " crosses a compound-material boundary into the"
+						" waste store; consumed parts may only land in a store with the"
+						" same declared composition");
+			}
+		}
+		return true;
+	}
+	// #844: the shared finite-charge leak-block contract for the
+	// refrigerant leak and the panel puncture: a charge that can bleed
+	// needs a positive finite charge, a positive finite bleed rate, a
+	// positive finite carried-heat coefficient and an existing
+	// Atmosphere destination.
+	bool validateChargeLeakBlock(std::string const& compartmentId, double chargeKg,
+		double leakRateKgPerS, double specificHeatKJPerKgK, std::string_view modeName,
+		StationSystemsSettings const& settings)
+	{
+		return std::isfinite(chargeKg) && chargeKg > 0.0
+			&& std::isfinite(leakRateKgPerS) && leakRateKgPerS > 0.0
+			&& std::isfinite(specificHeatKJPerKgK) && specificHeatKJPerKgK > 0.0
+			&& std::any_of(settings.atmospheres.begin(), settings.atmospheres.end(),
+				[&](auto const& air) { return air.id == compartmentId; });
+	}
 }
 	bool isValidStationMaterialId(std::string const& id)
 	{
@@ -1196,6 +1277,22 @@ namespace
 			if (!std::isfinite(radiator.sinkTemperatureC)
 				|| radiator.sinkTemperatureC <= -StationCelsiusOffset)
 				return refuse(where + " sink temperature must be finite and above absolute zero (-273.15 C)");
+			// #844: the panel puncture opt-in names a finite panel charge
+			// that bleeds into an existing compartment, and the repair-parts
+			// wiring may plan only for the puncture mode this kind owns.
+			if (radiator.panelPuncture)
+			{
+				auto const& leak = *radiator.panelPuncture;
+				if (!validateChargeLeakBlock(leak.compartmentId, leak.coolantKg,
+					leak.leakRateKgPerS, leak.specificHeatKJPerKgK, "panel-puncture", settings))
+					return refuse(where + " panel puncture needs a finite positive charge,"
+						" bleed rate and specific heat, and an existing destination compartment");
+			}
+			if (radiator.repairParts)
+			{
+				if (!validateRepairPartsWiring(*radiator.repairParts, where, "a radiator", settings,
+					{"panel-puncture"}, refuse, missing)) return false;
+			}
 		} catch (BrokenDraftEntry const&) {}
 		if (settings.coolantLoops.size() > MaxStationCoolantLoops)
 			return refuse("Station coolant loops are limited to "
@@ -1275,56 +1372,8 @@ namespace
 			// declared composition, as for scheduled maintenance (#414).
 			if (loop.repairParts)
 			{
-				auto const& wiring = *loop.repairParts;
-				auto const findRepairStore = [&](std::string const& id) -> ResourceStoreSettings const*
-				{
-					auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
-						[&](ResourceStoreSettings const& store) { return store.id == id; });
-					return it == settings.stores.end() ? nullptr : &*it;
-				};
-				if (wiring.partsStoreId.empty())
-					return refuse(where + " repair-parts store id must not be empty");
-				auto const* parts = findRepairStore(wiring.partsStoreId);
-				if (!parts)
-					return missing(where + " repair-parts wiring references unknown store '"
-						+ wiring.partsStoreId + "'");
-				if (wiring.repairs.size() > MaxStationFaultRepairs)
-					return refuse(where + " repair plans are limited to "
-						+ std::to_string(MaxStationFaultRepairs) + " entries");
-				std::set<std::string> planModes;
-				for (auto const& plan : wiring.repairs)
-				{
-					auto const item = where + " repair plan '" + plan.modeId + "'";
-					if (plan.modeId != "coolant-leak" && plan.modeId != "pump-seizure")
-						return refuse(item + " names no repairable fault mode on a coolant loop");
-					if (!planModes.insert(plan.modeId).second)
-						return refuse(where + " declares a repair plan for mode '"
-							+ plan.modeId + "' more than once");
-					if (!std::isfinite(plan.durationSeconds) || plan.durationSeconds <= 0.0)
-						return refuse(item + " duration must be finite and positive");
-					if (!std::isfinite(plan.partsQuantity) || plan.partsQuantity <= 0.0)
-						return refuse(item + " parts quantity must be finite and positive");
-					if (plan.wasteStoreId.empty())
-						return refuse(item + " must name the waste store its consumed parts land in");
-					if (plan.wasteStoreId == wiring.partsStoreId)
-						return refuse(item + " consumes the parts store into itself;"
-							" the waste store may not also be the parts source");
-					auto const* waste = findRepairStore(plan.wasteStoreId);
-					if (!waste)
-						return missing(item + " references unknown waste store '"
-							+ plan.wasteStoreId + "'");
-					if (parts->unit != waste->unit)
-						return refuse(item + " parts store unit '" + parts->unit
-							+ "' does not match the waste store unit '" + waste->unit + "'");
-					if (parts->composition || waste->composition)
-					{
-						if (!parts->composition || !waste->composition
-							|| !compositionsClose(*parts->composition, *waste->composition))
-							return refuse(item + " crosses a compound-material boundary into the"
-								" waste store; consumed parts may only land in a store with the"
-								" same declared composition");
-					}
-				}
+				if (!validateRepairPartsWiring(*loop.repairParts, where, "a coolant loop", settings,
+					{"coolant-leak", "pump-seizure"}, refuse, missing)) return false;
 			}
 			if (loop.startingCoolantKg > loop.coolantCapacityKg)
 				return refuse(where + " starting coolant exceeds the loop capacity");
@@ -1421,6 +1470,22 @@ namespace
 				return refuse(where + " maximum condensing temperature must be finite and above absolute zero (-273.15 C)");
 			if (chiller.chilledSetpointC >= chiller.maxCondensingTemperatureC)
 				return refuse(where + " chilled setpoint must be below the maximum condensing temperature");
+			// #844: the refrigerant leak opt-in names a finite charge that
+			// bleeds into an existing compartment, and the repair-parts
+			// wiring may plan only for the modes this kind owns.
+			if (chiller.refrigerantLeak)
+			{
+				auto const& leak = *chiller.refrigerantLeak;
+				if (!validateChargeLeakBlock(leak.compartmentId, leak.chargeKg,
+					leak.leakRateKgPerS, leak.specificHeatKJPerKgK, "refrigerant-leak", settings))
+					return refuse(where + " refrigerant leak needs a finite positive charge,"
+						" bleed rate and specific heat, and an existing destination compartment");
+			}
+			if (chiller.repairParts)
+			{
+				if (!validateRepairPartsWiring(*chiller.repairParts, where, "a chiller", settings,
+					{"compressor-failure", "refrigerant-leak"}, refuse, missing)) return false;
+			}
 		} catch (BrokenDraftEntry const&) {}
 		// Heat engine contracts (#804): a Carnot-bounded heat-to-power
 		// crossing between two declared thermal reservoirs. The second law
@@ -1507,6 +1572,13 @@ namespace
 			if (engine.minHotTemperatureC <= engine.maxSinkTemperatureC)
 				return refuse(where + " minimum hot temperature must be above the maximum sink temperature:"
 					" the gates must admit a positive-gradient window");
+			// #844: the engine's repair-parts wiring may plan only for the
+			// mechanical-seizure mode this kind owns.
+			if (engine.repairParts)
+			{
+				if (!validateRepairPartsWiring(*engine.repairParts, where, "a heat engine", settings,
+					{"mechanical-seizure"}, refuse, missing)) return false;
+			}
 		} catch (BrokenDraftEntry const&) {}
 		// Thermal buffer contracts (#398): the buffer couples to a declared
 		// host reservoir; a circulation-access buffer additionally names a

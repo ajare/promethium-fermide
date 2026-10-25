@@ -22,6 +22,27 @@ namespace core
 	template <class Settings>
 	struct LiveNode; // undefined: specialise below via PF_STATION_LIVE_NODE
 
+	// #844: the shared repair-parts frozen-topology rule (#842): the
+	// parts store identity and the per-mode plan identities - which
+	// faults are repairable and which stores they draw from - cannot move
+	// under a live run. Each plan's duration and parts quantity stay
+	// live-tunable parameters; a repair already started keeps the
+	// parameters it froze at command time.
+	inline bool repairWiringTopologyChanged(
+		std::optional<RepairPartsSettings> const& a,
+		std::optional<RepairPartsSettings> const& b)
+	{
+		if (a.has_value() != b.has_value()) return true;
+		if (!a) return false;
+		return a->partsStoreId != b->partsStoreId
+			|| a->repairs.size() != b->repairs.size()
+			|| !std::equal(a->repairs.begin(), a->repairs.end(), b->repairs.begin(),
+				[](FaultRepairSettings const& x, FaultRepairSettings const& y)
+				{
+					return x.modeId == y.modeId && x.wasteStoreId == y.wasteStoreId;
+				});
+	}
+
 	// Restore the fields a live edit may not move. Returns true when the caller
 	// actually touched one, so the refusal can be reported rather than dropped.
 	// The conservation audit derives its baseline from the authored starting
@@ -90,7 +111,61 @@ namespace core
 	PF_STATION_LIVE_NODE(InstallationOutageSettings, outages, "Outage")
 	PF_STATION_LIVE_NODE_WITH(ThermalReservoirSettings, thermalReservoirs, "Reservoir",
 		&ThermalReservoirSettings::startingTemperatureC)
-	PF_STATION_LIVE_NODE(RadiatorSettings, radiators, "Radiator")
+	// #844: a radiator's puncture opt-in, its destination compartment and
+	// its panel charge size are frozen topology - the charge is the audit
+	// baseline for the puncture booking, like a loop's starting coolant.
+	// The bleed rate and specific heat inside the block stay live-tunable
+	// parameters, and the repair wiring follows the loop's rule: store
+	// identities and plan identities frozen, durations and quantities live.
+	template <> struct LiveNode<RadiatorSettings>
+	{
+		static constexpr std::string_view nodeType = "Radiator";
+		static auto& of(auto& settings) { return settings.radiators; }
+		static bool restoreInitial(RadiatorSettings const& running, RadiatorSettings& offered)
+		{
+			if (offered.panelPuncture && running.panelPuncture
+				&& offered.panelPuncture->coolantKg != running.panelPuncture->coolantKg)
+			{
+				offered.panelPuncture->coolantKg = running.panelPuncture->coolantKg;
+				return true;
+			}
+			return false;
+		}
+		static bool topologyChanged(RadiatorSettings const& a, RadiatorSettings const& b)
+		{
+			return a.panelPuncture.has_value() != b.panelPuncture.has_value()
+				|| (a.panelPuncture && b.panelPuncture
+					&& a.panelPuncture->compartmentId != b.panelPuncture->compartmentId)
+				|| repairWiringTopologyChanged(a.repairParts, b.repairParts);
+		}
+	};
+	// #844: the chiller's fault opt-ins are frozen topology, as for every
+	// other fault-carrying kind: which modes a machine can suffer, where a
+	// leak lands and what its charge is cannot move under a live run. The
+	// leak rate and specific heat inside the block stay live-tunable.
+	template <> struct LiveNode<ChillerSettings>
+	{
+		static constexpr std::string_view nodeType = "Chiller";
+		static auto& of(auto& settings) { return settings.chillers; }
+		static bool restoreInitial(ChillerSettings const& running, ChillerSettings& offered)
+		{
+			if (offered.refrigerantLeak && running.refrigerantLeak
+				&& offered.refrigerantLeak->chargeKg != running.refrigerantLeak->chargeKg)
+			{
+				offered.refrigerantLeak->chargeKg = running.refrigerantLeak->chargeKg;
+				return true;
+			}
+			return false;
+		}
+		static bool topologyChanged(ChillerSettings const& a, ChillerSettings const& b)
+		{
+			return a.compressorFailure != b.compressorFailure
+				|| a.refrigerantLeak.has_value() != b.refrigerantLeak.has_value()
+				|| (a.refrigerantLeak && b.refrigerantLeak
+					&& a.refrigerantLeak->compartmentId != b.refrigerantLeak->compartmentId)
+				|| repairWiringTopologyChanged(a.repairParts, b.repairParts);
+		}
+	};
 	template <> struct LiveNode<CoolantLoopSettings>
 	{
 		static constexpr std::string_view nodeType = "Coolant loop";
@@ -132,7 +207,6 @@ namespace core
 				);
 		}
 	};
-	PF_STATION_LIVE_NODE(ChillerSettings, chillers, "Chiller")
 	template <>
 	struct LiveNode<HeatEngineSettings>
 	{
@@ -142,8 +216,12 @@ namespace core
 		static bool restoreInitial(HeatEngineSettings const&, HeatEngineSettings&) { return false; }
 		static bool topologyChanged(HeatEngineSettings const& before, HeatEngineSettings const& after)
 		{
+			// #844: the seizure opt-in and the repair wiring join the
+			// frozen topology; every rate inside stays live-tunable.
 			return before.id != after.id || before.hotReservoirId != after.hotReservoirId
-				|| before.rejectionReservoirId != after.rejectionReservoirId;
+				|| before.rejectionReservoirId != after.rejectionReservoirId
+				|| before.mechanicalSeizure != after.mechanicalSeizure
+				|| repairWiringTopologyChanged(before.repairParts, after.repairParts);
 		}
 	};
 	PF_STATION_LIVE_NODE(GeneratorSettings, generators, "Generator")

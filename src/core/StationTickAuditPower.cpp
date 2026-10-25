@@ -722,6 +722,23 @@ namespace core
 				return violation = where + "condenser ledger residual "
 					+ std::to_string(residual) + " exceeds tolerance "
 					+ std::to_string(StationBalanceTolerance), false;
+			// #844: the refrigerant charge is a finite store: starting
+			// charge = remaining + leaked, always. A charge that goes
+			// negative or above its own ceiling is an unaccounted
+			// appearance or disappearance of mass - a conservation
+			// violation that fails the tick.
+			if (!requireFinite(chiller.refrigerantKg, where + "remaining refrigerant charge")
+				|| !requireFinite(chiller.refrigerantChargeKg, where + "refrigerant charge capacity")
+				|| !requireFinite(chiller.leakedRefrigerantKg, where + "leaked refrigerant mass")
+				|| !requireFinite(chiller.leakedRefrigerantEnergyKJ, where + "leaked refrigerant energy")) return false;
+			if (std::abs(chiller.refrigerantKg + chiller.leakedRefrigerantKg - chiller.refrigerantChargeKg)
+				> StationBalanceTolerance * std::max(1.0, chiller.refrigerantChargeKg))
+				return violation = where + "refrigerant mass ledger residual", false;
+			if (chiller.refrigerantKg < 0.0)
+				return violation = where + "refrigerant charge went negative", false;
+			if (chiller.refrigerantKg > chiller.refrigerantChargeKg + StationBalanceTolerance
+				* std::max(1.0, chiller.refrigerantChargeKg))
+				return violation = where + "refrigerant charge exceeds its finite store", false;
 			totalCoolingProvidedKW += chiller.lastCoolingKW;
 			totalCoolingUnmetKW += chiller.lastCoolingDemandKW - chiller.lastCoolingKW;
 			totalCondenserHeatKW += chiller.lastCondenserKW;
@@ -737,6 +754,26 @@ namespace core
 		if (!requireFinite(totalCoolingUnmetKW, "station total cooling unmet power")) return false;
 		if (!requireFinite(totalCondenserHeatKW, "station total condenser heat power")) return false;
 		if (!requireFinite(totalChillerSuppliedKW, "station total chiller electrical power")) return false;
+		// #844: the radiator panel charge is a finite store: starting
+		// charge = remaining + leaked, always, and the rejection cap never
+		// exceeds the authored area. A panel with no puncture opt-in keeps
+		// zero charge and the full-area factor.
+		for (auto const& radiator : runtime.radiators)
+		{
+			auto const where = "radiator '" + radiator.authored.id + "' ";
+			if (!requireFinite(radiator.panelCoolantKg, where + "remaining panel coolant charge")
+				|| !requireFinite(radiator.panelCoolantCapacityKg, where + "panel charge capacity")
+				|| !requireFinite(radiator.leakedCoolantKg, where + "punctured coolant mass")
+				|| !requireFinite(radiator.leakedCoolantEnergyKJ, where + "punctured coolant energy")
+				|| !requireFinite(radiator.availabilityFactor, where + "availability factor")) return false;
+			if (std::abs(radiator.panelCoolantKg + radiator.leakedCoolantKg - radiator.panelCoolantCapacityKg)
+				> StationBalanceTolerance * std::max(1.0, radiator.panelCoolantCapacityKg))
+				return violation = where + "panel coolant mass ledger residual", false;
+			if (radiator.panelCoolantKg < 0.0)
+				return violation = where + "panel coolant charge went negative", false;
+			if (radiator.availabilityFactor < 0.0 || radiator.availabilityFactor > 1.0)
+				return violation = where + "availability factor outside [0,1]", false;
+		}
 		// #565: a cold-class capacity is a sum of authored ratings —
 		// two finite 1e308 kW chillers in one class overflow the
 		// published capacity even when every per-chiller result is
@@ -825,6 +862,16 @@ namespace core
 			for (auto const& loop : runtime.coolantLoops)
 				if (loop.leakCompartmentId == compartment.authored.id)
 				{ bookedMass += loop.leakedKg; bookedEnergy += loop.leakedEnergyKJ; }
+			// #844: the thermal-plant hazard bookings land in the same
+			// retained-spill ledger: a chiller's leaked refrigerant and a
+			// radiator's punctured coolant are booked mass and energy, and
+			// the spill must equal exactly what the machines gave up.
+			for (auto const& chiller : runtime.chillers)
+				if (chiller.refrigerantCompartmentId == compartment.authored.id)
+				{ bookedMass += chiller.leakedRefrigerantKg; bookedEnergy += chiller.leakedRefrigerantEnergyKJ; }
+			for (auto const& radiator : runtime.radiators)
+				if (radiator.punctureCompartmentId == compartment.authored.id)
+				{ bookedMass += radiator.leakedCoolantKg; bookedEnergy += radiator.leakedCoolantEnergyKJ; }
 			if (!requireFinite(compartment.spilledCoolantKg, where + "spilled coolant")
 				|| !requireFinite(compartment.spilledCoolantEnergyKJ, where + "spilled energy")) return false;
 			if (std::abs(bookedMass - compartment.spilledCoolantKg) > StationBalanceTolerance * std::max(1.0, bookedMass)

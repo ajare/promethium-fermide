@@ -11,12 +11,33 @@ namespace core
 		for (auto& loop : runtime.coolantLoops)
 			loop.availabilityFactor = loop.seizure ? 0.0 : loop.fault
 				? std::min(1.0, loop.coolantKg / loop.authored.coolantCapacityKg) : 1.0;
-		for (auto& chiller : runtime.chillers) chiller.availabilityFactor = 1.0;
+		// #844: the chiller's availability is what its fault ledger and
+		// its finite refrigerant charge leave it: a compressor failure is
+		// total removal, and the remaining charge fraction caps the
+		// cooling capacity the machine can deliver - capacity tracks the
+		// charge whether or not the leak is still running, so a sealed
+		// leak leaves the capacity capped at what remains. A chiller with
+		// no opt-in carries no charge and stays fully available.
+		for (auto& chiller : runtime.chillers)
+			chiller.availabilityFactor = chiller.compressorFailure
+				? 0.0
+				: chiller.refrigerantChargeKg > 0.0
+					? std::min(1.0, chiller.refrigerantKg / chiller.refrigerantChargeKg)
+					: 1.0;
 		// The heat engine enters the shared availability contract here: the
 		// same reset, the same outage ceiling and the same maintenance
 		// isolation every registered family gets, so an engine's duty for
-		// the tick is decided in one place (#807).
-		for (auto& engine : runtime.heatEngines) engine.availabilityFactor = 1.0;
+		// the tick is decided in one place (#807). #844: a mechanical
+		// seizure is a total removal from service until repaired.
+		for (auto& engine : runtime.heatEngines)
+			engine.availabilityFactor = engine.seizure ? 0.0 : 1.0;
+		// #844: the radiator's area-driven availability. The fraction of
+		// panel charge still held is the fraction of area still radiating;
+		// a panel with no puncture opt-in keeps the full area.
+		for (auto& radiator : runtime.radiators)
+			radiator.availabilityFactor = radiator.panelCoolantCapacityKg > 0.0
+				? std::min(1.0, radiator.panelCoolantKg / radiator.panelCoolantCapacityKg)
+				: 1.0;
 		// Newly due outage starts and restorations are staged across all
 		// schedules and announced in the declared scenario event order
 		// (#577): occurrence simulation time ascending, then service
@@ -336,32 +357,73 @@ namespace core
 					+ (job.wasteStoreIndex == SIZE_MAX ? std::string("none")
 						: runtime.stores[job.wasteStoreIndex].authored.id)
 					+ "', reusable tools returned, installation restored (no supplies replenished)");
-				if (job.isRepair && job.target == MaintenanceState::Target::CoolantLoop)
+				if (job.isRepair)
 				{
 					// The repair's payoff: the target Fault leaves the
 					// ledger so its availability cap lifts with the
 					// isolation, and the clear is logged as a fault event
 					// beside the repair completion. Wear is untouched -
 					// only replacement reverses wear, and replacement is a
-					// reset, not a repair (#842).
-					auto& target = runtime.coolantLoops[job.targetIndex];
-					if (job.repairModeId == "pump-seizure" && target.seizure)
+					// reset, not a repair (#842). #844 extends the payoff
+					// to the thermal-plant catalogue: sealing a refrigerant
+					// leak or a panel puncture stops the bleed but never
+					// refills the store - the capacity stays capped at the
+					// charge that remains until replacement.
+					auto const cleared = [&](std::string_view mode,
+						std::optional<StationFaultSnapshot>& entry,
+						std::string_view tail)
 					{
-						target.seizure.reset();
+						if (!entry || entry->modeId != mode) return;
+						entry.reset();
 						appendBoundedEvent(runtime.events, tick, "fault",
-							"Fault 'pump-seizure' on " + job.installationKind + " '"
-							+ job.authored.installationId + "' cleared by repair '"
+							"Fault '" + std::string(mode) + "' on " + job.installationKind
+							+ " '" + job.authored.installationId + "' cleared by repair '"
 							+ job.authored.id + "' at " + std::to_string(elapsed)
-							+ " s: pump restored to service (no Wear reversed, no coolant replenished)");
+							+ " s: " + std::string(tail));
+					};
+					if (job.target == MaintenanceState::Target::CoolantLoop)
+					{
+						auto& target = runtime.coolantLoops[job.targetIndex];
+						if (job.repairModeId == "pump-seizure" && target.seizure)
+						{
+							target.seizure.reset();
+							appendBoundedEvent(runtime.events, tick, "fault",
+								"Fault 'pump-seizure' on " + job.installationKind + " '"
+								+ job.authored.installationId + "' cleared by repair '"
+								+ job.authored.id + "' at " + std::to_string(elapsed)
+								+ " s: pump restored to service (no Wear reversed, no coolant replenished)");
+						}
+						else if (job.repairModeId == "coolant-leak" && target.fault)
+						{
+							target.fault.reset();
+							appendBoundedEvent(runtime.events, tick, "fault",
+								"Fault 'coolant-leak' on " + job.installationKind + " '"
+								+ job.authored.installationId + "' cleared by repair '"
+								+ job.authored.id + "' at " + std::to_string(elapsed)
+								+ " s: leak sealed (no Wear reversed, no coolant replenished)");
+						}
 					}
-					else if (job.repairModeId == "coolant-leak" && target.fault)
+					else if (job.target == MaintenanceState::Target::Chiller)
 					{
-						target.fault.reset();
-						appendBoundedEvent(runtime.events, tick, "fault",
-							"Fault 'coolant-leak' on " + job.installationKind + " '"
-							+ job.authored.installationId + "' cleared by repair '"
-							+ job.authored.id + "' at " + std::to_string(elapsed)
-							+ " s: leak sealed (no Wear reversed, no coolant replenished)");
+						auto& target = runtime.chillers[job.targetIndex];
+						cleared("compressor-failure", target.compressorFailure,
+							"compressor restored to service (no Wear reversed, no refrigerant recharged)");
+						cleared("refrigerant-leak", target.refrigerantLeak,
+							"leak sealed (no Wear reversed, no refrigerant recharged: capacity stays capped at the charge that remains)");
+						target.refrigerantLeakPending = false;
+					}
+					else if (job.target == MaintenanceState::Target::Radiator)
+					{
+						auto& target = runtime.radiators[job.targetIndex];
+						cleared("panel-puncture", target.puncture,
+							"puncture sealed (no Wear reversed, no coolant refilled: rejection stays capped at the charge that remains)");
+						target.puncturePending = false;
+					}
+					else if (job.target == MaintenanceState::Target::HeatEngine)
+					{
+						auto& target = runtime.heatEngines[job.targetIndex];
+						cleared("mechanical-seizure", target.seizure,
+							"engine restored to service (no Wear reversed)");
 					}
 				}
 				// Advance past this occurrence; any occurrence whose
@@ -552,7 +614,9 @@ namespace core
 						? runtime.coolantLoops[job.targetIndex].availabilityFactor
 						: job.target == MaintenanceState::Target::Chiller
 							? runtime.chillers[job.targetIndex].availabilityFactor
-							: runtime.heatEngines[job.targetIndex].availabilityFactor;
+							: job.target == MaintenanceState::Target::Radiator
+								? runtime.radiators[job.targetIndex].availabilityFactor
+								: runtime.heatEngines[job.targetIndex].availabilityFactor;
 				factor = std::min(factor, 0.0);
 			}
 		}

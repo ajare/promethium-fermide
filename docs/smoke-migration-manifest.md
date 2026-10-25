@@ -75,6 +75,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/station/StationFaultChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationConditionChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationWearChecks.cpp` | module-owned | `pf-smoke-station` |
+| `smoke/station/StationThermalPlantFaultChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationHeatEngineChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationBottomingCycleChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationAdvectionChecks.cpp` | module-owned | `pf-smoke-station` |

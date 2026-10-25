@@ -39,8 +39,22 @@ namespace core
 			[](auto const& battery) { return battery.capacityFade.has_value(); })
 			|| std::any_of(document.settings.coolantLoops.begin(), document.settings.coolantLoops.end(),
 				[](auto const& loop) { return loop.wear.has_value(); });
-		output->writeUint32("schemaVersion", wear ? kWorldSchemaVersion
-			: repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
+		// #844: the thermal-plant Fault catalogue is the newest tier; a
+		// document carrying a chiller, radiator or heat-engine fault
+		// opt-in or repair wiring stamps the current schema, and
+		// wear-only documents keep stamping 116 unchanged.
+		auto const thermalPlant = std::any_of(document.settings.chillers.begin(),
+				document.settings.chillers.end(),
+				[](auto const& chiller) { return chiller.compressorFailure
+					|| chiller.refrigerantLeak.has_value() || chiller.repairParts.has_value(); })
+			|| std::any_of(document.settings.radiators.begin(), document.settings.radiators.end(),
+				[](auto const& radiator) { return radiator.panelPuncture.has_value()
+					|| radiator.repairParts.has_value(); })
+			|| std::any_of(document.settings.heatEngines.begin(), document.settings.heatEngines.end(),
+				[](auto const& engine) { return engine.mechanicalSeizure
+					|| engine.repairParts.has_value(); });
+		output->writeUint32("schemaVersion", thermalPlant ? kWorldSchemaVersion
+			: wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		writeStationSystemsSettingsMap(*output, document.settings);
 		output->beginMap("layout");
 		output->writeFloat("panX", document.panX);

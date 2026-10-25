@@ -149,6 +149,31 @@ namespace core
 				return false;
 			}
 		}
+		// #844: the thermal-plant fault opt-ins - compressor failure,
+		// refrigerant leak, panel puncture, mechanical seizure - and the
+		// repair wiring are run-shape decisions, not live knobs:
+		// preflight the whole collection before anything can land, so a
+		// mixed offer is atomic.
+		for (auto const& next : offered.chillers)
+		{
+			auto const old = std::find_if(s.chillers.begin(), s.chillers.end(),
+				[&](auto const& chiller) { return chiller.authored.id == next.id; });
+			if (old != s.chillers.end() && LiveNode<ChillerSettings>::topologyChanged(old->authored, next))
+			{
+				if (diagnostic) *diagnostic = "Chiller '" + next.id + "': fault opt-in, leak destination and repair wiring are frozen topology";
+				return false;
+			}
+		}
+		for (auto const& next : offered.radiators)
+		{
+			auto const old = std::find_if(s.radiators.begin(), s.radiators.end(),
+				[&](auto const& radiator) { return radiator.authored.id == next.id; });
+			if (old != s.radiators.end() && LiveNode<RadiatorSettings>::topologyChanged(old->authored, next))
+			{
+				if (diagnostic) *diagnostic = "Radiator '" + next.id + "': puncture opt-in, destination and repair wiring are frozen topology";
+				return false;
+			}
+		}
 		// #843: whether a battery bank has a capacity-fade model is a
 		// run-shape decision, not a live knob: preflight the whole
 		// collection before anything can land, so a mixed offer is atomic.

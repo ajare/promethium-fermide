@@ -854,8 +854,15 @@ namespace core
 				{
 					auto const& radiator = runtime.radiators[radiatorIndex];
 					auto const sinkK = radiator.authored.sinkTemperatureC + StationCelsiusOffset;
+					// #844: a punctured panel radiates only with the area
+					// that still holds coolant: the availability the puncture
+					// charge leaves scales the emitting area, so rejection -
+					// in either direction - is capped by the remaining area.
+					// A panel with no puncture opt-in keeps the full area.
+					auto const effectiveAreaM2 = radiator.authored.areaM2
+						* radiator.availabilityFactor;
 					auto const rejection = radiator.authored.emissivity
-						* radiator.authored.viewFactor * radiator.authored.areaM2
+						* radiator.authored.viewFactor * effectiveAreaM2
 						* StationStefanBoltzmannKWPerM2K4
 						* (temperatureK * temperatureK * temperatureK * temperatureK
 							- sinkK * sinkK * sinkK * sinkK);

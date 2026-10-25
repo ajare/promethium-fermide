@@ -1,10 +1,11 @@
-# Station Faults, Condition, Trips, Repair and Wear (#839–#843)
+# Station Faults, Condition, Trips, Repair and Wear (#839–#844)
 
 Implemented slices of [the failure framework](specs/station_degradation_failure_specification.md)
 include coolant-leak injection, opt-in coolant-loop Condition with funded recovery,
 latching Sabatier/methane processor Trips, repairFault as a runtime-started
-maintenance job, and permanent Wear accumulators with the battery capacity-fade
-pilot.
+maintenance job, permanent Wear accumulators with the battery capacity-fade
+pilot, and the thermal-plant Fault catalogue (chiller compressor-failure and
+refrigerant-leak, radiator panel-puncture, heat-engine mechanical-seizure).
 Other component catalogues remain follow-ups. Propagation follows
 [ADR-0030](adr/0030-faults-propagate-through-media-via-hazard-bookings-never-direct-damage-edges.md).
 
@@ -262,7 +263,79 @@ a save of a worn machine carries the fault-replay block even with no client
 ever issuing a command, and the fade reconstructs exactly through YAML and
 binary replay and World save/load.
 
+## Thermal-plant Fault catalogue
+
+The #844 slice extends the catalogue to the thermal plant with four code-owned
+modes. Each is opt-in per Installation and injectable through the same
+`injectFault` seam with the same refusal discipline (unknown installation,
+cross-kind mode, absent opt-in, invalid cause, active or pending duplicate).
+
+Chillers opt in with `compressorFailure: true` (a plain availability-zero mode)
+and/or a `refrigerantLeak` block; radiators with a `panelPuncture` block; heat
+engines with `mechanicalSeizure: true`.
+
+```yaml
+chillers:
+  - id: chiller
+    compressorFailure: true
+    refrigerantLeak:
+      compartmentId: machinery-room
+      chargeKg: 40          # the finite refrigerant charge the leak starts from
+      leakRateKgPerS: 0.5
+      specificHeatKJPerKgK: 1.6
+radiators:
+  - id: roof-panel
+    panelPuncture:
+      compartmentId: machinery-room
+      coolantKg: 20         # the finite panel coolant charge
+      leakRateKgPerS: 1.0
+      specificHeatKJPerKgK: 4.0
+heatEngines:
+  - id: orc
+    mechanicalSeizure: true
+```
+
+`compressor-failure` and `mechanical-seizure` remove the machine from service:
+availability zero, no cold delivery / no conversion, no electricity drawn or
+supplied by the failed path. They are the AV=0 shape and carry no parameters
+beyond the opt-in itself.
+
+`refrigerant-leak` and `panel-puncture` are finite-store modes. The machine
+carries a charge store (refrigerant charge, panel coolant charge) initialized
+from the authored size. While the Fault is active the leak drains the store at
+the authored rate through the ordinary transactional ledger: the lost mass and
+its carried sensible energy (`mass * cp * T`, at the loop/reservoir temperature
+the charge sits in) book into the declared Atmosphere compartment exactly as a
+coolant spill does, and both sides are audited. The remaining charge fraction
+is the machine's availability cap: cooling capacity (chiller) and radiative
+rejection area (radiator) scale with `remaining / initial`. The store is
+finite - a long-running leak drains to empty and the service dies with it;
+nothing is invented. The leak runs only while the Fault is active; the charge
+itself is initialized at construction from the authored block.
+
+All four modes follow the pending/active doctrine: acceptance queues the Fault,
+the first successful Station step logs the onset `fault` event and publishes
+it as active; snapshots never publish a pending Fault. `derivedImpact` is the
+availability the Fault removes: 1.0 for the AV=0 modes, the drained fraction
+for the finite-store modes.
+
+Repair follows the #842 pattern with `repairParts` wiring on chillers, radiators
+and heat engines; `repairFault` starts the maintenance job, isolates the
+machine for the full duration and on completion clears the Fault. Sealing a
+leak stops the bleed but never refills the store: the capacity stays capped at
+the charge that remains until replacement. Repair of the AV=0 modes restores
+full service. All four modes are repairable when wired; a plan naming a mode the
+machine cannot suffer (or a loop-only mode like `coolant-leak` on a chiller) is
+refused at authoring validation.
+
 ## Persistence and replay
+
+Schema 117 carries the thermal-plant Fault opt-ins and repair wiring; earlier
+documents carrying them are refused. Thermal-plant runs pin their initial
+settings for replay at construction, so a live retune of a leak rate cannot
+make the replay block disagree with the frozen parameters its injection
+commands carry. Feature-absent output keeps its previous schema tier and
+encoding.
 
 Schema 116 carries Wear opt-ins; earlier documents carrying a
 `capacityFade` or loop `wear` block are refused. Worn machines retain the
@@ -334,3 +407,15 @@ live-topology freeze with parameter retuning that cannot reach a started repair,
 repair of a degradation-spawned pump-seizure without re-raising, opt-in no-op,
 supported step ratios, the schema-115 guard, exact YAML/binary replay and World
 save/load with a repair in flight.
+
+The six `station-thermalPlant*` checks cover the thermal-plant catalogue:
+refusal of unknown/cross-kind/unopted injections with no mutation, the
+finite refrigerant charge draining through the ledger into the compartment
+with the remaining-charge capacity cap and full drain-to-zero, compressor
+and seizure availability-zero effects, panel puncture spill booking and the
+remaining-area rejection cap, deepest-wins composition with Outages, repair
+isolation and completion that seals leaks without refilling the store, live
+rate retuning that cannot reach a frozen injection, frozen charge/destination
+opt-in topology, authoring validation of malformed blocks, the schema-117
+round-trip and guard, and exact YAML/binary replay of a scripted sequence
+across all four modes with repairs in flight.

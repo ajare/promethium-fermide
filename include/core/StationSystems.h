@@ -565,48 +565,56 @@ namespace core
 		bool operator==(ThermalReservoirSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationThermalReservoirs{8};
+	// #844: the chiller's refrigerant leak opt-in. The machine carries a
+	// finite refrigerant charge; an injected `refrigerant-leak` bleeds that
+	// charge into the named Atmosphere compartment at the authored rate
+	// through the ordinary spilled-coolant ledger path, so every kilogram
+	// and kilojoule closes under the per-tick conservation audit. The
+	// remaining charge fraction caps the cooling capacity the machine can
+	// deliver - an empty charge is no cold service. The leak runs only
+	// while the Fault is active; repair seals the leak but never
+	// recharges the machine, so the capacity stays capped at the charge
+	// that remains until replacement. The leaked refrigerant is booked as
+	// a retained liquid spill at the cold loop's tick-start temperature
+	// (the evaporator's thermal interface); this models the spill, not its
+	// vapour chemistry. Opt-in presence, the destination compartment and
+	// the charge size are frozen topology; the leak rate and specific heat
+	// are live-tunable parameters, and an accepted injection freezes its
+	// effective parameters for the Fault it started.
+	struct RefrigerantLeakSettings
+	{
+		std::string compartmentId;
+		double chargeKg{0.0};           // finite refrigerant charge, > 0
+		double leakRateKgPerS{0.0};     // bleed rate while the Fault is active, > 0
+		double specificHeatKJPerKgK{0.0}; // carried heat per kg per K, > 0
+		bool operator==(RefrigerantLeakSettings const&) const = default;
+	};
+	// #844: the radiator's panel puncture opt-in. The panel carries a
+	// finite coolant charge; an injected `panel-puncture` bleeds it into
+	// the named Atmosphere compartment at the authored rate through the
+	// ordinary spilled-coolant ledger path, booked at the host
+	// reservoir's tick-start temperature. The remaining charge fraction is
+	// the fraction of panel area still holding coolant, and rejection is
+	// capped by that remaining area: a drained panel radiates nothing.
+	// Repair seals the puncture but never refills the panel, so the
+	// rejection stays capped at the charge that remains until
+	// replacement. Opt-in presence, the destination compartment and the
+	// charge size are frozen topology; the leak rate and specific heat are
+	// live-tunable parameters, and an accepted injection freezes its
+	// effective parameters for the Fault it started.
+	struct PanelPunctureSettings
+	{
+		std::string compartmentId;
+		double coolantKg{0.0};          // panel coolant charge that bleeds out, > 0
+		double leakRateKgPerS{0.0};     // bleed rate while the Fault is active, > 0
+		double specificHeatKJPerKgK{0.0}; // carried heat per kg per K, > 0
+		bool operator==(PanelPunctureSettings const&) const = default;
+	};
 	// An authored radiator that rejects a reservoir's heat to space by
 	// radiation. Rejection follows the Stefan-Boltzmann law with the
 	// declared emissivity and view factor against an authored effective
 	// sink temperature, so environment-dependent rejection (back-radiation
 	// included) is explicit rather than an infinite cold sink.
-	struct RadiatorSettings
-	{
-		std::string id;
-		std::string reservoirId;
-		double areaM2{0.0};       // radiator area, > 0
-		double emissivity{0.9};   // (0, 1]
-		double viewFactor{1.0};   // (0, 1] radiator/view assumption
-		double sinkTemperatureC{-270.0}; // effective radiative sink temperature
-		bool operator==(RadiatorSettings const&) const = default;
-	};
-	inline constexpr size_t MaxStationRadiators{8};
-
-	// A coolant loop (#396): a finite, loop-specific closed coolant
-	// circuit pumped through one thermal reservoir. The loop carries no
-	// class (#757): coolant is a thermal service fluid that is never
-	// potable water or nutrient solution, loops never pool coolant
-	// because each owns its own finite inventory by construction, and
-	// the only crossing with station thermal state is heat through the
-	// circulation-gated heat-only exchanger - through which no coolant
-	// ever crossed. The loop holds its own
-	// coolant inventory (kg) — finite and loop-specific — and exchanges heat only with its coupled reservoir
-	// through a circulation-gated exchanger: no coolant crosses into the
-	// reservoir, a Resource store, or any other loop. The pump circulates
-	// the coolant it actually holds; the freeze-protection heater is a
-	// bang-bang thermostat that demands up to its capacity whenever the
-	// loop's coolant temperature is below the authored setpoint. Zero
-	// starting coolant disables the loop entirely: a dry loop pumps no
-	// flow, draws no pump power and heats nothing — circulation is never
-	// invented from an empty inventory.
-	// Opt-in one-shot puncture booking. Coolant remains liquid in the
-	// destination compartment; it is not invented breathing gas or vapour.
-	struct CoolantLeakSettings
-	{
-		std::string compartmentId;
-		double releasedKg{0.0};
-		bool operator==(CoolantLeakSettings const&) const = default;
-	};
 	// One repair plan for one fault mode on this Installation (#842).
 	// A repairFault command instantiates the plan as a #414 maintenance
 	// job at runtime: the plan supplies what the authored starter cannot
@@ -638,6 +646,48 @@ namespace core
 		std::string partsStoreId;
 		std::vector<FaultRepairSettings> repairs;
 		bool operator==(RepairPartsSettings const&) const = default;
+	};
+	struct RadiatorSettings
+	{
+		std::string id;
+		std::string reservoirId;
+		double areaM2{0.0};       // radiator area, > 0
+		double emissivity{0.9};   // (0, 1]
+		double viewFactor{1.0};   // (0, 1] radiator/view assumption
+		double sinkTemperatureC{-270.0}; // effective radiative sink temperature
+		// #844: the radiator's opt-in panel puncture fault mode and its
+		// repair-parts wiring (#842 contract). Opt-in presence is frozen
+		// topology.
+		std::optional<PanelPunctureSettings> panelPuncture;
+		std::optional<RepairPartsSettings> repairParts;
+		bool operator==(RadiatorSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationRadiators{8};
+
+	// A coolant loop (#396): a finite, loop-specific closed coolant
+	// circuit pumped through one thermal reservoir. The loop carries no
+	// class (#757): coolant is a thermal service fluid that is never
+	// potable water or nutrient solution, loops never pool coolant
+	// because each owns its own finite inventory by construction, and
+	// the only crossing with station thermal state is heat through the
+	// circulation-gated heat-only exchanger - through which no coolant
+	// ever crossed. The loop holds its own
+	// coolant inventory (kg) — finite and loop-specific — and exchanges heat only with its coupled reservoir
+	// through a circulation-gated exchanger: no coolant crosses into the
+	// reservoir, a Resource store, or any other loop. The pump circulates
+	// the coolant it actually holds; the freeze-protection heater is a
+	// bang-bang thermostat that demands up to its capacity whenever the
+	// loop's coolant temperature is below the authored setpoint. Zero
+	// starting coolant disables the loop entirely: a dry loop pumps no
+	// flow, draws no pump power and heats nothing — circulation is never
+	// invented from an empty inventory.
+	// Opt-in one-shot puncture booking. Coolant remains liquid in the
+	// destination compartment; it is not invented breathing gas or vapour.
+	struct CoolantLeakSettings
+	{
+		std::string compartmentId;
+		double releasedKg{0.0};
+		bool operator==(CoolantLeakSettings const&) const = default;
 	};
 	struct FaultCause
 	{
@@ -798,6 +848,19 @@ namespace core
 		// while the condenser sink is over, capped by the heat the cold
 		// loop actually holds above the setpoint - never by the nameplate.
 		bool criticalService{false};
+		// #844: the chiller's opt-in fault modes. `compressor-failure`
+		// (availability zero) and `refrigerant-leak` (finite charge store,
+		// capacity scales with the charge that remains) are injectable only
+		// when opted in here; the opt-ins are frozen topology and the
+		// parameters inside the leak block are tunable.
+		bool compressorFailure{false};
+		std::optional<RefrigerantLeakSettings> refrigerantLeak;
+		// #844: the chiller's repair-parts wiring, the same contract as
+		// the coolant loop's (#842): which modes are repairable and which
+		// stores they draw from is frozen topology; plan durations and
+		// parts quantities are live-tunable and never reach a repair that
+		// already started.
+		std::optional<RepairPartsSettings> repairParts;
 		bool operator==(ChillerSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationChillers{8};
@@ -836,6 +899,11 @@ namespace core
 		double auxiliaryPowerKW{0.0};       // running auxiliaries, >= 0
 		double minHotTemperatureC{20.0};    // below this the source is too cold to work with
 		double maxSinkTemperatureC{60.0};   // rejection refused into a sink at or above this
+		// #844: the engine's opt-in `mechanical-seizure` fault mode
+		// (availability zero) and its repair-parts wiring (#842 contract).
+		// The opt-in is frozen topology.
+		bool mechanicalSeizure{false};
+		std::optional<RepairPartsSettings> repairParts;
 		bool operator==(HeatEngineSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationHeatEngines{8};
@@ -3105,6 +3173,17 @@ namespace core
 		double viewFactor{1.0};
 		double sinkTemperatureC{0.0};
 		double lastRejectedKW{0.0}; // signed net radiative exchange this tick
+		// #844: the panel's finite coolant charge, the fraction of panel
+		// area still holding coolant (the rejection cap), the cumulative
+		// puncture booking, and the active-Fault ledger. A radiator with no
+		// puncture opt-in reports the full charge, full area and no Faults.
+		std::vector<StationFaultSnapshot> activeFaults;
+		double panelCoolantKg{0.0};
+		double panelCoolantCapacityKg{0.0};
+		double remainingAreaFraction{1.0};
+		double leakedCoolantKg{0.0};
+		double leakedCoolantEnergyKJ{0.0};
+		double availabilityFactor{1.0};
 		bool operator==(StationRadiatorSnapshot const&) const = default;
 	};
 	// One thermal reservoir as of the most recent tick: the authored
@@ -3348,6 +3427,15 @@ namespace core
 		double workEnergyKJ{0.0};       // cumulative electrical work + auxiliaries
 		double condenserEnergyKJ{0.0};  // cumulative condenser heat rejected
 		double residualKJ{0.0};         // extracted + work - condenser
+		// #844: the chiller's finite refrigerant charge store, the
+		// cumulative leak booking, and the active-Fault ledger. A chiller
+		// with no refrigerant-leak opt-in reports zero charge fields and
+		// no Faults.
+		std::vector<StationFaultSnapshot> activeFaults;
+		double refrigerantChargeKg{0.0};
+		double refrigerantKg{0.0};
+		double leakedRefrigerantKg{0.0};
+		double leakedRefrigerantEnergyKJ{0.0};
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationChillerSnapshot const&) const = default;
 	};
@@ -3403,6 +3491,9 @@ namespace core
 		double electricalEnergyKJ{0.0};    // cumulative net power delivered to the bus
 		double rejectionEnergyKJ{0.0};     // cumulative rejection produced, including lost/retained heat
 		double residualKJ{0.0};            // input - (bus electrical + cable loss + rejection): closes on zero
+		// #844: the engine's active-Fault ledger. A seized engine reports
+		// its `mechanical-seizure` entry with full availability impact.
+		std::vector<StationFaultSnapshot> activeFaults;
 		StationHeatEngineStatus status{StationHeatEngineStatus::Disabled};
 		bool operator==(StationHeatEngineSnapshot const&) const = default;
 	};

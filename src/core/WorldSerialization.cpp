@@ -1010,8 +1010,22 @@ namespace core
 				[](auto const& battery) { return battery.capacityFade.has_value(); })
 			|| std::any_of(mStationSystemsSettings.coolantLoops.begin(), mStationSystemsSettings.coolantLoops.end(),
 				[](auto const& loop) { return loop.wear.has_value(); });
-		serializer.writeUint32("version", wear ? kWorldSchemaVersion
-			: repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
+		// #844: the thermal-plant Fault catalogue is the newest tier; a
+		// save carrying a chiller, radiator or heat-engine fault opt-in
+		// (or accepted thermal-plant commands) stamps the current schema,
+		// and wear-only saves keep stamping 116 unchanged.
+		bool const thermalPlant = std::any_of(mStationSystemsSettings.chillers.begin(),
+				mStationSystemsSettings.chillers.end(),
+				[](auto const& chiller) { return chiller.compressorFailure
+					|| chiller.refrigerantLeak.has_value() || chiller.repairParts.has_value(); })
+			|| std::any_of(mStationSystemsSettings.radiators.begin(), mStationSystemsSettings.radiators.end(),
+				[](auto const& radiator) { return radiator.panelPuncture.has_value()
+					|| radiator.repairParts.has_value(); })
+			|| std::any_of(mStationSystemsSettings.heatEngines.begin(), mStationSystemsSettings.heatEngines.end(),
+				[](auto const& engine) { return engine.mechanicalSeizure
+					|| engine.repairParts.has_value(); });
+		serializer.writeUint32("version", thermalPlant ? kWorldSchemaVersion
+			: wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
