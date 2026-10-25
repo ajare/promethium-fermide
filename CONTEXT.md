@@ -684,6 +684,18 @@ _Avoid_: Fault (the state and its consequence are named separately), outage (an 
 A protective automatic isolation of a Station installation taken by its own safety gate to prevent further harm, which latches until deliberately reset. A Trip is the machine protecting itself, distinct from a Fault-driven shutdown.
 _Avoid_: Shutdown (any stop, protective or not), breaker (a mechanism), fault (a Trip may precede or avert a Fault)
 
+**Monitor**:
+A read-only authored observation rule over one Station component or Station connection: a named Metric, one Alert Rule, and an enabled flag. It evaluates the Metric against the Rule and creates Alerts on match. Monitors are disabled by default; a disabled Monitor evaluates nothing and creates nothing. A Monitor never isolates, shuts down, or creates a Fault.
+_Avoid_: Sensor (the physical metaphor, not the modelled rule), watchdog (implies acting on timeout), alarm rule (alarm is reserved for existing internal scalars)
+
+**Alert Rule**:
+A Monitor's trigger definition: a threshold value with direction (above/below), a trigger-on time the Metric must persist beyond the threshold to fire, and a trigger-off time it must persist back inside before the Alert auto-clears. Hysteresis is temporal only; zero times mean instant fire or clear.
+_Avoid_: Deadband (there is no value-band hysteresis), window (reserved for the dashboard's run view)
+
+**Alert**:
+The raised condition a Monitor creates when its Alert Rule matches. An Alert is implemented in code as a bound callback function per alert type, so what an Alert does on fire and clear is an implementation decision, never an authored action; the authored surface stays the Rule alone.
+_Avoid_: Trip (a protective isolation taken by the machine), Fault (a discrete adverse state, not an observation), warning (a severity level, not the condition)
+
 **Repair**:
 A client-initiated action that clears a Fault from a Station installation and restores its service, at cost tiers from a free Trip reset to resource-reserved maintenance work. Repair clears Faults and restores Condition; it never reverses accumulated Wear.
 _Avoid_: Fix, restore (funded Condition recovery is one tier, not the whole), reset (the free Trip tier only)
