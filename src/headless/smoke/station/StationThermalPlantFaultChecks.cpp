@@ -296,6 +296,8 @@ void thermalPlantInjection(smoke::Context const&)
 		"the four catalogue onsets did not each log one fault event");
 }
 
+void simultaneousChillerRepairs();
+
 // Each mode clears through the repair seam: the repair isolates the
 // machine for its full duration, completion lifts the Fault, and the
 // physical consequence of the leak - the charge that already left -
@@ -303,6 +305,7 @@ void thermalPlantInjection(smoke::Context const&)
 void thermalPlantRepairs(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	simultaneousChillerRepairs();
 	auto const s = thermalPlantStation();
 	core::StationSystemsRuntime run(s, 0.25f);
 	require(run.advanceTo(1), "baseline drive failed");
@@ -450,6 +453,87 @@ void roundTrip(core::StationSystemsRuntime const& run)
 	require(replayBytes<Serializer>(*restored) == bytes,
 		"thermal-plant fault command log did not round-trip byte-exactly");
 	require(restored->advanceTo(80), "restored thermal-plant faults failed subsequent audited drive");
+}
+
+// #858: paying for either chiller repair must not clear its other Fault.
+// Exercise both orders with enough charge left to observe continued leakage.
+void simultaneousChillerRepairs()
+{
+	for (bool compressorFirst : {true, false})
+	{
+		auto s = thermalPlantStation();
+		s.chillers[0].refrigerantLeak->leakRateKgPerS = 0.1;
+		core::StationSystemsRuntime run(s, 0.25f);
+		require(run.advanceTo(1)
+			&& run.injectFault("chiller", "compressor-failure",
+				{core::FaultCause::Kind::AgentAction, "agent:compressor"})
+			&& run.injectFault("chiller", "refrigerant-leak",
+				{core::FaultCause::Kind::ScenarioEvent, "leak-strike"})
+			&& run.advanceTo(2), "simultaneous chiller Fault setup failed");
+		auto const initial = run.snapshot();
+		require(initial.chillers[0].activeFaults.size() == 2,
+			"both chiller Faults were not published");
+		std::string const first = compressorFirst ? "compressor-failure" : "refrigerant-leak";
+		std::string const second = compressorFirst ? "refrigerant-leak" : "compressor-failure";
+		auto const originalOther = *findFault(initial.chillers[0].activeFaults, second);
+		std::string jobId;
+		require(run.repairFault("chiller", first, &jobId) && jobId == "repair-1"
+			&& run.advanceTo(3), "first simultaneous chiller repair failed to start");
+		auto const active = run.snapshot();
+		require(findJob(active, jobId)->isolated
+			&& active.chillers[0].availabilityFactor == 0.0,
+			"first chiller repair did not isolate the installation");
+		roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+		require(run.advanceTo(12), "first simultaneous chiller repair completion failed");
+		auto const repaired = run.snapshot();
+		auto const& chiller = repaired.chillers[0];
+		require(chiller.activeFaults.size() == 1 && !findFault(chiller.activeFaults, first),
+			("repairing " + first + " also cleared the unrelated chiller Fault").c_str());
+		auto const* other = findFault(chiller.activeFaults, second);
+		require(other && other->onsetTick == originalOther.onsetTick
+			&& other->causeKind == originalOther.causeKind
+			&& other->causeDetail == originalOther.causeDetail,
+			"unrepaired chiller Fault lost its onset or attribution");
+		auto const* completed = findJob(repaired, jobId);
+		auto const firstCost = compressorFirst ? 2.0 : 3.0;
+		require(completed->phase == core::StationMaintenancePhase::Completed
+			&& completed->faultModeId == first && !completed->isolated
+			&& completed->requirements[0].consumedTotal == firstCost
+			&& countCategory(run, "fault") == 3
+			&& countCategory(run, "repair") == 2
+			&& sawMessage(run, "Fault '" + first + "' on chiller 'chiller' cleared by repair 'repair-1'")
+			&& !sawMessage(run, "Fault '" + second + "' on chiller 'chiller' cleared by repair"),
+			"first repair spent or logged work for the wrong Fault");
+		roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+		require(run.advanceTo(14), "unrepaired chiller effect drive failed");
+		auto const after = run.snapshot();
+		if (compressorFirst)
+			require(after.chillers[0].leakedRefrigerantKg > chiller.leakedRefrigerantKg
+				&& after.atmospheres[0].spilledCoolantKg > repaired.atmospheres[0].spilledCoolantKg
+				&& after.chillers[0].availabilityFactor > 0.0
+				&& std::abs(after.chillers[0].availabilityFactor
+					- after.chillers[0].refrigerantKg / after.chillers[0].refrigerantChargeKg) < 1e-12,
+				"compressor repair stopped the unrepaired leak or its charge cap");
+		else
+			require(after.chillers[0].leakedRefrigerantKg == chiller.leakedRefrigerantKg
+				&& after.chillers[0].availabilityFactor == 0.0
+				&& after.chillers[0].coolingKW == 0.0,
+				"leak repair restored the unrepaired compressor or failed to seal the leak");
+		require(run.repairFault("chiller", second, &jobId) && jobId == "repair-2"
+			&& run.advanceTo(15), "remaining chiller Fault could not be repaired");
+		auto const secondActive = run.snapshot();
+		require(findJob(secondActive, jobId)->isolated,
+			"second chiller repair did not isolate");
+		require(run.advanceTo(25), "second chiller repair completion failed");
+		auto const done = run.snapshot();
+		require(done.chillers[0].activeFaults.empty()
+			&& done.chillers[0].availabilityFactor > 0.0
+			&& findJob(done, "repair-2")->requirements[0].consumedTotal == 5.0 - firstCost
+			&& countCategory(run, "fault") == 4 && countCategory(run, "repair") == 4
+			&& sawMessage(run, "Fault '" + second + "' on chiller 'chiller' cleared by repair 'repair-2'"),
+			"second chiller repair did not independently spend, clear and restore service");
+		roundTrip<core::BinarySerializer>(run); roundTrip<core::YamlSerializer>(run);
+	}
 }
 
 // A scripted sequence across all four modes, with repairs and a live

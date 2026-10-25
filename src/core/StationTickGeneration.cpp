@@ -406,11 +406,15 @@ namespace core
 					else if (job.target == MaintenanceState::Target::Chiller)
 					{
 						auto& target = runtime.chillers[job.targetIndex];
-						cleared("compressor-failure", target.compressorFailure,
-							"compressor restored to service (no Wear reversed, no refrigerant recharged)");
-						cleared("refrigerant-leak", target.refrigerantLeak,
-							"leak sealed (no Wear reversed, no refrigerant recharged: capacity stays capped at the charge that remains)");
-						target.refrigerantLeakPending = false;
+						if (job.repairModeId == "compressor-failure")
+							cleared("compressor-failure", target.compressorFailure,
+								"compressor restored to service (no Wear reversed, no refrigerant recharged)");
+						else if (job.repairModeId == "refrigerant-leak")
+						{
+							cleared("refrigerant-leak", target.refrigerantLeak,
+								"leak sealed (no Wear reversed, no refrigerant recharged: capacity stays capped at the charge that remains)");
+							target.refrigerantLeakPending = false;
+						}
 					}
 					else if (job.target == MaintenanceState::Target::Radiator)
 					{
