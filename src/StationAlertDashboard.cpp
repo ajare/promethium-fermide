@@ -85,17 +85,20 @@ bool StationAlertDashboard::passes(core::StationAlertSnapshot const& alert, doub
 	// the window stays listed for as long as it runs, even past the edge of
 	// the window, because dropping it mid-crisis would hide the one thing the
 	// window was narrowed to find.
-	if (mWindowEnabled && alert.firedAtSeconds < now - mWindowMinutes * 60.0) return false;
+	if (mWindowEnabled && alert.firedAtSeconds < now - mWindowMinutes * 60.0
+		&& (alert.clearedAtSeconds.has_value()
+			|| !mWindowAdmissions.contains({alert.monitorId, alert.firedAtSeconds}))) return false;
 	return true;
 }
 
-void StationAlertDashboard::render(core::StationSystemsSnapshot const* snapshot)
+void StationAlertDashboard::render(core::StationSystemsSnapshot const* snapshot, uint64_t run)
 {
 	mActiveRows.clear();
 	mClosedRows.clear();
 	mSubjectTypes.clear();
 	if (!snapshot || !snapshot->enabled)
 	{
+		resetAdmissions();
 		// "Nothing is alarming" and "nothing is running" are different
 		// claims. Showing an empty Active list for a stopped scenario would
 		// say the first when the truth is the second.
@@ -104,6 +107,26 @@ void StationAlertDashboard::render(core::StationSystemsSnapshot const* snapshot)
 		return;
 	}
 	double const now = snapshot->elapsedSeconds;
+	if (run != mAdmissionRun || now < mAdmissionTime
+		|| mWindowEnabled != mAdmissionWindowEnabled
+		|| mWindowMinutes != mAdmissionWindowMinutes)
+		resetAdmissions();
+	mAdmissionRun = run;
+	mAdmissionTime = now;
+	mAdmissionWindowEnabled = mWindowEnabled;
+	mAdmissionWindowMinutes = mWindowMinutes;
+	// Keep only active episodes, including those hidden by severity/subject
+	// filters. Those filters must not erase time-window admission.
+	std::set<std::pair<std::string, double>> admissions;
+	if (mWindowEnabled)
+		for (auto const& alert : snapshot->activeAlerts)
+		{
+			auto const key = std::make_pair(alert.monitorId, alert.firedAtSeconds);
+			if (alert.firedAtSeconds >= now - mWindowMinutes * 60.0
+				|| mWindowAdmissions.contains(key))
+				admissions.insert(key);
+		}
+	mWindowAdmissions = std::move(admissions);
 
 	// The offered subject types come from the ledger itself, so the combo
 	// never lists a type the operator cannot filter to.

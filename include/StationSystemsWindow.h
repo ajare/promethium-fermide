@@ -224,9 +224,8 @@ private:
 	StationFaultPanel mFaultPanel;
 	bool mFaultPanelVisible{false};
 	// #870: the Alert dashboard. Held by the session like the alarm panel, so
-	// its filters survive a redraw, but it caches no Alert data of its own -
-	// the ledger it lists is re-read from the polled snapshot every frame, so
-	// a reset clears it as a side effect of having nothing to read.
+	// its filters survive a redraw. Rows are re-read from the snapshot;
+	// time-window admissions are presentation state scoped to the World/run.
 	StationAlertDashboard mAlertDashboard;
 	bool mAlertDashboardVisible{false};
 	std::string mInjectMode;

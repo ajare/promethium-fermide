@@ -2,7 +2,10 @@
 #include "core/StationSystems.h"
 
 #include <array>
+#include <cstdint>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 // #870 (spec §6): the Alert dashboard. A read-only surface over the
@@ -45,8 +48,10 @@ public:
 
 	// Renders inside the caller's window region. A null or disabled snapshot
 	// is "nothing is running", which is a different claim from "nothing is
-	// alarming" and is said differently.
-	void render(core::StationSystemsSnapshot const* snapshot);
+	// alarming" and is said differently. The caller supplies the observation
+	// run revision and resets admissions when switching Worlds.
+	void render(core::StationSystemsSnapshot const* snapshot, uint64_t run);
+	void resetAdmissions() { mWindowAdmissions.clear(); }
 
 	// The rows as currently filtered and ordered - what the operator sees,
 	// not the ledger behind them.
@@ -79,6 +84,13 @@ private:
 	std::vector<std::string> mSubjectTypes;
 	std::vector<ActiveRow> mActiveRows;
 	std::vector<ClosedRow> mClosedRows;
+
+	// Episode identity includes fire time: re-firing the same Monitor is new.
+	std::set<std::pair<std::string, double>> mWindowAdmissions;
+	bool mAdmissionWindowEnabled{false};
+	double mAdmissionWindowMinutes{10.0};
+	double mAdmissionTime{0};
+	uint64_t mAdmissionRun{0};
 
 	bool passes(core::StationAlertSnapshot const& alert, double now) const;
 };

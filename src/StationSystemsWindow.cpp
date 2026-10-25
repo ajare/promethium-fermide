@@ -115,6 +115,7 @@ bool StationSystemsWindow::syncWorld(std::shared_ptr<core::World> const& world)
 	if (!world)
 	{
 		mWorld.reset(); mConfirmReset = false; mPendingActivation.reset();
+		mAlertDashboard.resetAdmissions();
 		mFlowSnapshot.reset();
 		mObservationRevision = {~uint64_t{0}, 0};
 		mPendingLayoutEdit = false;
@@ -124,6 +125,7 @@ bool StationSystemsWindow::syncWorld(std::shared_ptr<core::World> const& world)
 	if (mWorld.lock() != world->getLifetimeToken().lock())
 	{
 		mWorld = world->getLifetimeToken(); mDraft = world->getStationSystemsSettings();
+		mAlertDashboard.resetAdmissions();
 		mFlowSnapshot.reset();
 		mObservationRevision = {~uint64_t{0}, 0};
 		mPendingLayoutEdit = false;
@@ -822,7 +824,8 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 		ImGui::SetNextWindowPos({48.0f, 48.0f}, ImGuiCond_Appearing);
 		ImGui::SetNextWindowSize({720.0f, 480.0f}, ImGuiCond_Appearing);
 		if (ImGui::Begin("Alert dashboard", &mAlertDashboardVisible))
-			mAlertDashboard.render(mFlowSnapshot ? &*mFlowSnapshot : nullptr);
+			mAlertDashboard.render(mFlowSnapshot ? &*mFlowSnapshot : nullptr,
+				world->getStationSystemsObservationRevision().run);
 		ImGui::End();
 	}
 }

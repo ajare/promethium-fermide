@@ -148,8 +148,79 @@ namespace
 			&& window.alertDashboardClosedRows().size() == closed;
 	}
 
+	// #886: drive the real window widget across the rolling cutoff, rather
+	// than duplicating the dashboard's predicate in an expected-count helper.
+	void alertWindowAdmission()
+	{
+		headless::ScopedImGuiContext imgui;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1600, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationAlertDashboard dashboard;
+		uint64_t run = 1;
+		core::StationSystemsSnapshot snapshot;
+		snapshot.enabled = true;
+		snapshot.elapsedSeconds = 300;
+		core::StationAlertSnapshot alert;
+		alert.monitorId = "critical";
+		alert.subjectType = "atmosphere"; alert.subjectId = "room";
+		alert.metric = "oxygenPartialPressureKPa";
+		alert.severity = AlertSeverity::Critical; alert.firedAtSeconds = 30;
+		snapshot.activeAlerts = {alert};
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowSize({1560, 960});
+			ImGui::Begin("Admission"); dashboard.render(&snapshot, run); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "alertWindowAdmission", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Admission");
+			driver.click(ctx, "**/Fired within last##AlertWindowEnabled"); ctx->Yield(3);
+			REQ(dashboard.activeRows().size() == 1, "in-window Alert was not admitted");
+			snapshot.elapsedSeconds = 631; ctx->Yield(3);
+			REQ(dashboard.activeRows().size() == 1,
+				"an admitted active Alert disappeared after aging past the cutoff");
+			// Severity changes must still hide/show a retained active episode.
+			driver.click(ctx, "**/Critical##AlertSeverityFilter"); ctx->Yield(3);
+			REQ(dashboard.activeRows().empty(), "severity did not hide a retained Alert");
+			driver.click(ctx, "**/Critical##AlertSeverityFilter"); ctx->Yield(3);
+			REQ(dashboard.activeRows().size() == 1, "severity lost the window admission");
+			snapshot.activeAlerts.clear();
+			alert.clearedAtSeconds = 631; alert.clearReason = AlertClearReason::AutoClear;
+			snapshot.closedAlerts = {alert}; ctx->Yield(3);
+			REQ(dashboard.activeRows().empty() && dashboard.closedRows().empty(),
+				"closed history was filtered by clear time instead of fire time");
+			// Re-firing is a new episode, never inherited from a monitor id.
+			alert.clearedAtSeconds.reset(); alert.clearReason.reset();
+			alert.firedAtSeconds = 632; snapshot.elapsedSeconds = 650;
+			snapshot.activeAlerts = {alert}; ctx->Yield(3);
+			REQ(dashboard.activeRows().size() == 1, "a new episode was not admitted");
+			// Changing the selected window re-evaluates already-old Alerts.
+			snapshot.elapsedSeconds = 1300;
+			driver.typeValue(ctx, "**/sim-minutes##AlertWindowMinutes", "1.0"); ctx->Yield(3);
+			REQ(dashboard.activeRows().empty(), "changing the window retained an already-old Alert");
+			// Reset is observable even when the next render already has Alerts.
+			snapshot.elapsedSeconds = 20; alert.firedAtSeconds = 10;
+			snapshot.activeAlerts = {alert}; ctx->Yield(3);
+			REQ(dashboard.activeRows().size() == 1, "reset-run Alert was not admitted");
+			snapshot.elapsedSeconds = 80; ctx->Yield(3);
+			REQ(dashboard.activeRows().size() == 1, "reset-run admission was not retained");
+			// A reset/load followed by advancement can reuse the same episode
+			// identity without showing a backward clock or an empty ledger.
+			++run; ctx->Yield(3);
+			REQ(dashboard.activeRows().empty(), "admission leaked into a replacement run");
+			driver.click(ctx, "**/Fired within last##AlertWindowEnabled"); ctx->Yield(3);
+			REQ(dashboard.activeRows().size() == 1, "disabling the window hid an old Alert");
+			driver.click(ctx, "**/Fired within last##AlertWindowEnabled"); ctx->Yield(3);
+			REQ(dashboard.activeRows().empty(), "selecting a window admitted an already-old Alert");
+		});
+		#undef REQ
+		smoke::require(driver.passed(), "Alert window admission regression failed");
+	}
+
 	void alertDashboardWorkflow(smoke::Context const& context)
 	{
+		alertWindowAdmission();
 		using smoke::require;
 		headless::ScopedImGuiContext imgui;
 		auto& io = ImGui::GetIO();
@@ -293,9 +364,8 @@ namespace
 				"the closed-out list is not ordered newest-close-out-first");
 
 			// --- filters -------------------------------------------------
-			// Every filter change is checked against the same rule applied to
-			// the ledger, so the assertion is about the widget driving the
-			// model and not about a repaint.
+			// These checks select filters without advancing time; episode aging
+			// and retained admission are covered by alertWindowAdmission above.
 			auto expectedCounts = [&](size_t& active, size_t& closed) {
 				auto const snap = world->getStationSystemsSnapshot();
 				// Disabled means no window at all: a cutoff far enough back
