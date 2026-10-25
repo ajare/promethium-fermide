@@ -1,3 +1,4 @@
+#include "InjectableFaultContract.h"
 #include "StationRig.h"
 #include "Smoke.h"
 #include "core/StationSystemsRuntime.h"
@@ -154,6 +155,7 @@ void contaminationChain(smoke::Context const&)
 void contaminationContracts(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	requireInjectableFaultContract(contaminationStation());
 	auto s = contaminationStation();
 	std::string diagnostic;
 	auto const valid = core::validateStationSystemsSettings(s, diagnostic);

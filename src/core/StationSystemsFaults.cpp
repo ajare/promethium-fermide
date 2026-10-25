@@ -368,6 +368,24 @@ namespace core
 			if (diagnostic) diagnostic->clear();
 			return true;
 		}
+		if (mode == "pump-seizure")
+		{
+			if (loop == mImpl->coolantLoops.end() || !loop->authored.condition)
+				return refuse("pump-seizure is not enabled on this installation");
+			if (loop->seizure)
+				return refuse("Fault mode is already active or pending on '" + std::string(id) + "'");
+			// External onset shares the Condition-crossing Fault and repair
+			// target, but preserves the client's cause and publishes next tick.
+			Impl::FaultCommand command;
+			command.afterStep = mImpl->clock.steps(); command.installationId = id;
+			command.modeId = mode; command.cause = cause;
+			mImpl->faultCommands.push_back(std::move(command));
+			loop->seizure = StationFaultSnapshot{std::string(id), std::string(mode),
+				mImpl->clock.steps() + 1, cause.kind, cause.detail, 1.0};
+			loop->seizurePending = true;
+			if (diagnostic) diagnostic->clear();
+			return true;
+		}
 		if (loop == mImpl->coolantLoops.end() || mode != "coolant-leak")
 			return refuse("Unknown fault mode '" + std::string(mode) + "' for '" + std::string(id) + "'");
 		if (!loop->authored.coolantLeak) return refuse("coolant-leak is not enabled for '" + std::string(id) + "'");
@@ -790,7 +808,8 @@ namespace core
 					s.writeDouble("heatKJ", command.thermalRunaway->heatKJ);
 					s.writeDouble("toxicKg", command.thermalRunaway->toxicKg);
 				}
-				else if (command.modeId != "compressor-failure" && command.modeId != "mechanical-seizure"
+				else if (command.modeId != "pump-seizure"
+					&& command.modeId != "compressor-failure" && command.modeId != "mechanical-seizure"
 					&& command.modeId != "failed-start" && command.modeId != "breakthrough"
 					&& command.modeId != "interrupted-cycle")
 				{
@@ -878,7 +897,8 @@ namespace core
 				else if (mode == "thermal-runaway")
 					thermalRunaway = BatteryThermalRunawaySettings{s.readString("compartmentId"),
 						s.readDouble("heatKJ"), s.readDouble("toxicKg")};
-				else if (mode != "compressor-failure" && mode != "mechanical-seizure"
+				else if (mode != "pump-seizure"
+					&& mode != "compressor-failure" && mode != "mechanical-seizure"
 					&& mode != "failed-start" && mode != "breakthrough" && mode != "interrupted-cycle")
 					parameters = {s.readString("compartmentId"), s.readDouble("releasedKg")};
 				if (!isInjectableCause(static_cast<FaultCause::Kind>(kind))

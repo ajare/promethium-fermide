@@ -1,3 +1,4 @@
+#include "InjectableFaultContract.h"
 #include "StationRig.h"
 #include "Smoke.h"
 #include "core/StationSystemsRuntime.h"
@@ -106,6 +107,7 @@ const core::StationFaultSnapshot* findFault(
 void powerSourceInjection(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	requireInjectableFaultContract(powerSourceStation());
 	auto const s = powerSourceStation();
 	core::StationSystemsRuntime run(s, 0.25f);
 	require(run.advanceTo(1), "baseline drive failed");

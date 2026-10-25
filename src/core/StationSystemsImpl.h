@@ -481,6 +481,7 @@ using namespace station_detail;
 			std::optional<StationFaultSnapshot> fault;
 			std::optional<CoolantLeakSettings> pendingLeak;
 			std::optional<StationFaultSnapshot> seizure;
+			bool seizurePending{false};
 			std::string leakCompartmentId;
 			double leakedKg{0.0}, leakedEnergyKJ{0.0};
 			// #840 Condition state. `condition` is the machine's aggregate

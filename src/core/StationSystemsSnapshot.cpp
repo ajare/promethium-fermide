@@ -498,7 +498,7 @@ namespace core
 				fault.derivedImpact = 1.0 - loop.coolantKg / loop.authored.coolantCapacityKg;
 				loopResult.activeFaults.push_back(std::move(fault));
 			}
-			if (loop.seizure)
+			if (loop.seizure && !loop.seizurePending)
 			{
 				auto fault = *loop.seizure;
 				fault.derivedImpact = 1.0;

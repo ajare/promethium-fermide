@@ -8,6 +8,12 @@ namespace core
 		// any allocation preview or service gate reads the remaining charge.
 		for (auto& loop : runtime.coolantLoops)
 		{
+			if (loop.seizurePending)
+			{
+				appendBoundedEvent(runtime.events, tick, "fault", "Fault 'pump-seizure' on '"
+					+ loop.authored.id + "': " + loop.seizure->causeDetail);
+				loop.seizurePending = false;
+			}
 			if (!loop.pendingLeak) continue;
 			auto& air = *std::find_if(runtime.atmospheres.begin(), runtime.atmospheres.end(),
 				[&](auto const& a) { return a.authored.id == loop.pendingLeak->compartmentId; });

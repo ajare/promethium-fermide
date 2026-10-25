@@ -1,3 +1,4 @@
+#include "InjectableFaultContract.h"
 #include "StationRig.h"
 #include "Smoke.h"
 #include "core/StationSystemsRuntime.h"
@@ -152,6 +153,7 @@ const core::StationMaintenanceSnapshot* findJob(
 void thermalPlantInjection(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	requireInjectableFaultContract(thermalPlantStation());
 	auto const s = thermalPlantStation();
 	core::StationSystemsRuntime run(s, 0.25f);
 	require(run.advanceTo(1), "baseline drive failed");

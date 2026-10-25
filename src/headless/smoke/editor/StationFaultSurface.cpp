@@ -95,7 +95,7 @@ namespace
 	}
 
 	// --- Badges, live injection through the inspector, and the repair tier.
-	void faultBadgeWorkflow(smoke::Context const& context)
+	void faultBadgeWorkflowForMode(smoke::Context const& context, std::string const& mode)
 	{
 		using smoke::require;
 		headless::ScopedImGuiContext imgui;
@@ -109,6 +109,12 @@ namespace
 		world->pauseSimulation(); world->finishBuild();
 		std::string diagnostic;
 		auto settings = faultLoopRig();
+		if (mode == "pump-seizure")
+		{
+			settings.coolantLoops[0].coolantLeak.reset();
+			settings.coolantLoops[0].condition = core::InstallationConditionSettings{};
+			settings.coolantLoops[0].repairParts->repairs[0].modeId = mode;
+		}
 		settings.atmospheres[0].fire = core::AtmosphereFireSettings{1, 0.1, 1, 20, 99.9};
 		require(world->configureStationSystems(settings, false, &diagnostic),
 			("configure fault rig: " + diagnostic).c_str());
@@ -161,7 +167,7 @@ namespace
 				ctx->Yield(1);
 			}
 			auto const badged = window.flowNodeFaults("Coolant loop", "loop1");
-			REQ(hasFault(badged, "coolant-leak"),
+			REQ(hasFault(badged, mode),
 				"the node did not badge the injected Fault");
 			REQ(badged.front().nodeType == "Coolant loop"
 				&& badged.front().installationId == "loop1"
@@ -181,7 +187,7 @@ namespace
 				"the alarm button did not open the panel");
 			ctx->SetRef("Station faults");
 			REQ(driver.contains("Active alarms"), "the alarm panel did not open");
-			auto const* row = alarmRow(window, "loop1", "coolant-leak");
+			auto const* row = alarmRow(window, "loop1", mode);
 			REQ(row != nullptr, "the alarm panel did not list the active Fault");
 			REQ(row->repairable && !row->resettable,
 				"a plain Fault is not repairable, or a non-Trip was offered as a Trip");
@@ -193,7 +199,7 @@ namespace
 			driver.click(ctx, "**/Repair"); ctx->Yield(3);
 			REQ(window.faultPanelNotice().empty(),
 				("the panel's repair command was refused: " + window.faultPanelNotice()).c_str());
-			auto const* started = alarmRow(window, "loop1", "coolant-leak");
+			auto const* started = alarmRow(window, "loop1", mode);
 			REQ(started != nullptr && !started->repairJobId.empty(),
 				"the repair did not report the job id it started");
 			// Let the five-second repair run. The Fault clears when it
@@ -204,9 +210,9 @@ namespace
 				world->advanceTicks(12);
 				ctx->Yield(1);
 			}
-			REQ(!hasFault(window.flowNodeFaults("Coolant loop", "loop1"), "coolant-leak"),
+			REQ(!hasFault(window.flowNodeFaults("Coolant loop", "loop1"), mode),
 				"the badge survived the completed repair");
-			REQ(alarmRow(window, "loop1", "coolant-leak") == nullptr,
+			REQ(alarmRow(window, "loop1", mode) == nullptr,
 				"the alarm panel still lists the repaired Fault");
 			// The transitions the panel lists are the framework's own
 			// categorised events, newest first.
@@ -231,6 +237,12 @@ namespace
 		});
 		#undef REQ
 		require(driver.passed(), "the fault badge and repair workflow failed on the Test Engine");
+	}
+
+	void faultBadgeWorkflow(smoke::Context const& context)
+	{
+		faultBadgeWorkflowForMode(context, "coolant-leak");
+		faultBadgeWorkflowForMode(context, "pump-seizure");
 	}
 
 	// --- Authoring the opt-ins through the real widgets, with history.

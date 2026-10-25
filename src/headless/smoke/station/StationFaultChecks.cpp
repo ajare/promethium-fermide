@@ -1,4 +1,5 @@
 #include "StationRig.h"
+#include "InjectableFaultContract.h"
 #include "CarbonObservationFixture.h"
 #include "Smoke.h"
 #include "core/StationSystemsRuntime.h"
@@ -39,6 +40,9 @@ core::StationSystemsSettings punctureStation()
 void faultInjection(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	auto contract = punctureStation();
+	contract.coolantLoops[0].condition = core::InstallationConditionSettings{};
+	requireInjectableFaultContract(contract);
 	for (bool critical : {false, true})
 	{
 		auto settings = punctureStation();
@@ -196,6 +200,7 @@ void tripLifecycle(smoke::Context const&)
 	settings.thermalReservoirs[0].startingTemperatureC = 30;
 	settings.sabatierReactors[0].overtempRunaway = {25, 100};
 	settings.methaneProcessors[0].overtempRunaway = {25, 200};
+	requireInjectableFaultContract(settings);
 	core::RadiatorSettings radiator; radiator.id = "radiator"; radiator.reservoirId = "sink"; radiator.areaM2 = 100;
 	settings.radiators = {radiator};
 	// Legacy gates share the very same sink: both must clear without reset,
@@ -725,6 +730,54 @@ void repairTransactions(smoke::Context const&)
 void repairSeizureClearing(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	for (auto kind : {core::FaultCause::Kind::Editor, core::FaultCause::Kind::AgentAction,
+		core::FaultCause::Kind::ScenarioEvent})
+	{
+		auto settings = repairStation();
+		settings.coolantLoops[0].condition = core::InstallationConditionSettings{};
+		settings.coolantLoops[0].repairParts->repairs[1].durationSeconds = 1;
+		core::StationSystemsRuntime external(settings, 0.25f);
+		require(external.advanceTo(1), "external seizure rig failed");
+		auto const before = external.snapshot();
+		auto const events = external.events();
+		std::string diagnostic;
+		for (auto invalid : {core::FaultCause::Kind::DegradationCrossing, core::FaultCause::Kind::ThermalGate})
+			require(!external.injectFault("loop", "pump-seizure", {invalid, "forged"}, &diagnostic)
+				&& !diagnostic.empty() && !external.hasFaultCommands(), "simulation-owned cause accepted");
+		require(external.injectFault("loop", "pump-seizure", {kind, "external damage"}, &diagnostic)
+			&& diagnostic.empty(), "external pump-seizure refused");
+		require(!external.injectFault("loop", "pump-seizure", {}, &diagnostic)
+			&& external.snapshot() == before && external.events() == events,
+			"pending seizure duplicate accepted or onset published early");
+		roundTrip<core::BinarySerializer>(external); roundTrip<core::YamlSerializer>(external);
+		require(external.advanceTo(1.25), "external seizure failed audit");
+		auto const active = external.snapshot();
+		auto const& loop = active.coolantLoops[0];
+		require(loop.activeFaults.size() == 1 && loop.activeFaults[0].modeId == "pump-seizure"
+			&& loop.activeFaults[0].causeKind == kind && loop.activeFaults[0].causeDetail == "external damage"
+			&& loop.activeFaults[0].onsetTick == before.worldTick + 1
+			&& loop.activeFaults[0].derivedImpact == 1 && loop.availabilityFactor == 0
+			&& loop.flowKgPerS == 0 && loop.coolantKg == 100 && loop.condition == before.coolantLoops[0].condition,
+			"external seizure lost cause, timing or zero-availability effect");
+		require(countCategory(external, "fault") == 1 && sawMessage(external, "external damage"),
+			"external seizure onset event missing or duplicated");
+		require(!external.injectFault("loop", "pump-seizure", {}, &diagnostic)
+			&& external.snapshot() == active, "active seizure duplicate accepted");
+		require(external.repairFault("loop", "pump-seizure") && external.advanceTo(3),
+			"external seizure repair failed");
+		require(external.snapshot().coolantLoops[0].activeFaults.empty()
+			&& external.snapshot().coolantLoops[0].availabilityFactor == 1,
+			"external seizure repair did not restore service");
+		require(external.injectFault("loop", "pump-seizure", {kind, "fresh damage"})
+			&& external.advanceTo(3.25), "repaired seizure could not be re-injected");
+		roundTrip<core::BinarySerializer>(external); roundTrip<core::YamlSerializer>(external);
+	}
+	{
+		core::StationSystemsRuntime disabled(punctureStation(), 0.25f);
+		std::string diagnostic;
+		require(!disabled.injectFault("loop", "pump-seizure", {}, &diagnostic)
+			&& !diagnostic.empty() && !disabled.hasFaultCommands(), "non-opted-in seizure accepted");
+	}
 	// A degradation-spawned pump-seizure is repairable like any other
 	// Fault: the crossing raises it, the repair clears it, and the edge-
 	// triggered crossing does not instantly re-raise while Condition
@@ -775,6 +828,7 @@ core::StationSystemsSettings atmosphereFaultStation()
 }
 void atmosphereFire(smoke::Context const&)
 {
+	requireInjectableFaultContract(atmosphereFaultStation());
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
 	for (uint32_t ratio : {1u, 6u, 60u})
 	{
