@@ -4091,6 +4091,19 @@ namespace core
 	// non-destructive: a Monitor already present keeps its authored values,
 	// so a designer's per-Monitor tuning survives a re-apply.
 	void applyStationAtmosphereDefaultMonitors(StationSystemsSettings& settings);
+	// #871: shared store/connection catalogue. Reads only published values;
+	// absent subjects or unavailable stream quality return no sample.
+	struct StationSystemsSnapshot;
+	struct StationMonitorMetric { std::string_view name, unit; };
+	std::vector<StationMonitorMetric> const& stationMonitorMetricCatalogue(std::string_view subjectType);
+	bool stationMonitorSubjectExists(StationSystemsSettings const&, std::string_view type, std::string_view id);
+	std::optional<double> readStationMonitorMetric(StationSystemsSettings const&, StationSystemsSnapshot const&,
+		std::string_view type, std::string_view id, std::string_view metric);
+	std::string stationConnectionMonitorSubjectId(StationConnectionKey const&);
+	std::vector<StationMonitorTemplate> const& stationStoreMonitorTemplates();
+	std::vector<StationMonitorTemplate> const& stationConnectionMonitorTemplates();
+	std::vector<StationMonitorSettings> stationStoreConnectionDefaultMonitors(StationSystemsSettings const&);
+	void applyStationStoreConnectionDefaultMonitors(StationSystemsSettings&);
 	// One scheduled airlock cycle as of the most recent tick (#400): the
 	// authored schedule beside the runtime's cycle history - what each
 	// occurrence removed from its compartment, how much was recovered

@@ -7,15 +7,11 @@
 
 namespace
 {
-	// The unit a monitored metric is read in, so a row reads "17.5 kPa"
-	// rather than a bare number the operator has to look up. Only atmosphere
-	// subjects are monitorable today; a later subject type adds a branch here
-	// rather than changing how a row is drawn.
+	// Resolve units from the same catalogue validation and evaluation use.
 	std::string metricUnit(std::string_view subjectType, std::string_view metric)
 	{
-		if (subjectType == "atmosphere")
-			if (auto const* entry = core::findStationAtmosphereMetric(metric))
-				return std::string(entry->unit);
+		for (auto const& entry : core::stationMonitorMetricCatalogue(subjectType))
+			if (entry.name == metric) return std::string(entry.unit);
 		return {};
 	}
 

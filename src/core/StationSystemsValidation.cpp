@@ -921,16 +921,12 @@ namespace
 			auto fail = [&](std::string reason) { return refuse("Monitor '" + monitor.id + "': " + reason); };
 			if (monitor.id.empty() || !monitorIds.insert(monitor.id).second)
 				return fail("id must be non-empty and unique");
-			// #866 deliberately registered only the tracer-bullet Metric.
-			// #867 opens the whole atmosphere catalogue, but `atmosphere` is
-			// still the only registered subject type: the other subjects land
-			// with their own default-table tickets.
-			if (monitor.subjectType != "atmosphere")
-				return fail("unknown subject type");
-			if (findStationAtmosphereMetric(monitor.metric) == nullptr)
+			auto const& catalogue = stationMonitorMetricCatalogue(monitor.subjectType);
+			if (catalogue.empty()) return fail("unknown subject type");
+			if (std::none_of(catalogue.begin(), catalogue.end(),
+				[&](auto const& entry) { return entry.name == monitor.metric; }))
 				return fail("unknown metric for subject type");
-			if (std::none_of(settings.atmospheres.begin(), settings.atmospheres.end(),
-				[&](auto const& a) { return a.id == monitor.subjectId; }))
+			if (!stationMonitorSubjectExists(settings, monitor.subjectType, monitor.subjectId))
 				return fail("subject does not exist");
 			auto const& rule = monitor.rule;
 			if (!std::isfinite(rule.threshold)) return fail("threshold must be finite");

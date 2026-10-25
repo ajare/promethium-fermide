@@ -620,8 +620,8 @@ namespace core
 	// #869: the Monitor subject type an Authored node type supervises, empty
 	// when that type has no Monitor subjects. The node-type spellings here are
 	// the cascade's, matching withNodeEntries; the subject spellings are the
-	// authored ones on StationMonitorSettings::subjectType. Only `atmosphere`
-	// is registered today - the other subjects arrive with their own
-	// default-table tickets, and the cascade follows them automatically.
+	// authored ones on StationMonitorSettings::subjectType. Store and atmosphere
+	// subjects follow their node; connection subjects follow the full design key
+	// and cascade with either endpoint.
 	std::string_view stationMonitorSubjectTypeForNodeType(std::string_view nodeType);
 }

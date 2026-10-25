@@ -1,4 +1,5 @@
 #include "core/StationPorts.h"
+#include "core/StationConnections.h"
 
 #include <algorithm>
 #include <utility>
@@ -11,6 +12,15 @@ namespace
 	void eraseConnectionProperties(StationSystemsSettings& settings, std::string const& type,
 		std::string const& id, std::string const& reference)
 	{
+		for (auto const& link : station_connections::build(settings).links)
+		{
+			auto const& key = link.designKey;
+			if (key.ownerType != type || key.ownerId != id || key.reference != reference) continue;
+			auto const subjectId = stationConnectionMonitorSubjectId(key);
+			std::erase_if(settings.monitors, [&](auto const& monitor) {
+				return monitor.subjectType == "connection" && monitor.subjectId == subjectId;
+			});
+		}
 		std::erase_if(settings.connections, [&](auto const& item) {
 			auto const& key = item.first;
 			return key.ownerType == type && key.ownerId == id && key.reference == reference;
@@ -1295,10 +1305,18 @@ namespace
 		std::string const& nodeId, std::vector<std::string>& ids)
 	{
 		auto const subject = stationMonitorSubjectTypeForNodeType(nodeType);
-		if (subject.empty()) return;
 		for (auto const& monitor : settings.monitors)
-			if (monitor.subjectType == subject && monitor.subjectId == nodeId)
+			if (!subject.empty() && monitor.subjectType == subject && monitor.subjectId == nodeId)
 				ids.push_back(monitor.id);
+		for (auto const& link : station_connections::build(settings).links)
+		{
+			auto const& key = link.designKey;
+			if ((key.ownerType != nodeType || key.ownerId != nodeId)
+				&& (key.peerType != nodeType || key.peerId != nodeId)) continue;
+			auto const id = stationConnectionMonitorSubjectId(key);
+			for (auto const& monitor : settings.monitors)
+				if (monitor.subjectType == "connection" && monitor.subjectId == id) ids.push_back(monitor.id);
+		}
 	}
 
 	void eraseMonitorsById(StationSystemsSettings& settings, std::vector<std::string> const& ids)
@@ -1315,7 +1333,7 @@ namespace
 		std::string const& newSubjectId)
 	{
 		for (auto& monitor : settings.monitors)
-			if (std::find(ids.begin(), ids.end(), monitor.id) != ids.end())
+			if (monitor.subjectType != "connection" && std::find(ids.begin(), ids.end(), monitor.id) != ids.end())
 				monitor.subjectId = newSubjectId;
 	}
 
@@ -1728,10 +1746,7 @@ bool clearStationLink(StationSystemsSettings& settings, std::string const& ident
 
 std::string_view stationMonitorSubjectTypeForNodeType(std::string_view nodeType)
 {
-	// Only the atmosphere compartment is a Monitor subject today. Everything
-	// here keys off withNodeEntries' node-type spelling, so a later subject
-	// type joins the cascade by adding one line to each side rather than by
-	// touching the cascade itself.
+	if (nodeType == "Store") return "store";
 	if (nodeType == "Atmosphere") return "atmosphere";
 	return {};
 }
@@ -1878,7 +1893,19 @@ bool renameStationNode(StationSystemsSettings& settings, StationNodeRename const
 	// #869: a Monitor watches its subject by id, so the reference follows the
 	// name in the same action rather than being left pointing at the old one.
 	// The Monitor's own id is untouched: that is what the author called it.
+	// Disconnect/reconnect during rename must not erase connection Monitors.
+	candidate.monitors = settings.monitors;
 	retargetMonitors(candidate, current.monitorIds, current.newNodeId);
+	for (auto const& link : station_connections::build(settings).links)
+	{
+		auto key = link.designKey;
+		auto const before = stationConnectionMonitorSubjectId(key);
+		if (key.ownerType == current.nodeType && key.ownerId == current.oldNodeId) key.ownerId = current.newNodeId;
+		if (key.peerType == current.nodeType && key.peerId == current.oldNodeId) key.peerId = current.newNodeId;
+		auto const after = stationConnectionMonitorSubjectId(key);
+		for (auto& monitor : candidate.monitors)
+			if (monitor.subjectType == "connection" && monitor.subjectId == before) monitor.subjectId = after;
+	}
 	if (!monitorsCommitValid(candidate, diagnostic)) return false;
 	settings = std::move(candidate);
 	return true;

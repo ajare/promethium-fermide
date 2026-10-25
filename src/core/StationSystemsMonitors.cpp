@@ -236,13 +236,16 @@ namespace
 		for (auto const& monitor : settings.monitors)
 		{
 			if (!monitor.enabled) continue; // no lookup, evaluation, or state for disabled rules
-			auto const subject = std::find_if(published.atmospheres.begin(), published.atmospheres.end(),
-				[&](auto const& a) { return a.id == monitor.subjectId; });
-			auto const* metric = findStationAtmosphereMetric(monitor.metric);
-			// Validation refuses both before these settings can land; reading
-			// nothing is the only safe answer if a subject ever stops publishing.
-			if (subject == published.atmospheres.end() || metric == nullptr) continue;
-			double const value = metric->read(*subject);
+			auto const sample = readStationMonitorMetric(settings, published,
+				monitor.subjectType, monitor.subjectId, monitor.metric);
+			// Unavailable telemetry cannot complete a continuous persistence interval.
+			if (!sample || !std::isfinite(*sample))
+			{
+				auto& state = monitorStates[monitor.id];
+				state.onSamples = state.offSamples = 0;
+				continue;
+			}
+			double const value = *sample;
 			auto& state = monitorStates[monitor.id];
 			state.lastValue = value;
 			auto const& rule = monitor.rule;

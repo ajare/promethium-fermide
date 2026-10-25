@@ -50,6 +50,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/editor/StationConnections.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/StationComponentHelp.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/StationFaultSurface.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/editor/StationAlertDashboard.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/station/StationCoreChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationClockChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationEventSplitChecks.cpp` | module-owned | `pf-smoke-station` |
@@ -75,6 +76,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/station/StationThermalLinkChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationFaultChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationMonitorChecks.cpp` | module-owned | `pf-smoke-station` |
+| `smoke/station/StationStoreConnectionMonitorChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationConditionChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationWearChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationWearCatalogueChecks.cpp` | module-owned | `pf-smoke-station` |

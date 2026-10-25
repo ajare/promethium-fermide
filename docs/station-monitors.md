@@ -1,4 +1,4 @@
-# Station Monitors: atmosphere habitability defaults (#867)
+# Station Monitors: atmosphere, store and connection defaults (#867, #871)
 
 `atmosphere` is the registered Monitor subject type, and it publishes the full
 spec §3.1 Metric set: `oxygenPartialPressureKPa`, `carbonDioxidePartialPressureKPa`,
@@ -71,9 +71,9 @@ monitors:
     provenance: iss
 ```
 
-`subjectId` must name an existing atmosphere compartment. IDs must be non-empty
+`subjectId` must name an existing subject (see store and connection identities below). IDs must be non-empty
 and unique; thresholds must be finite; both times must be finite and non-negative;
-the metric must be one the atmosphere subject publishes; the provenance tag must be
+the metric must be one the selected subject type publishes; the provenance tag must be
 one of the five known spellings. Directions are `Above` and `Below`; severities are
 `Advisory`, `Warning` and `Critical`. `enabled` defaults to false. Old documents
 without Monitors retain their existing wire schema. YAML and binary save only the
@@ -143,3 +143,76 @@ then a Critical Alert at 30 seconds. A validated live settings command opens the
 pathway; real gas diffusion replenishes room oxygen. After 60 consecutive
 sim-seconds of recovered samples the Alert auto-clears. The test asserts the
 actual published pO₂ and ledger, not callback internals.
+
+## Store and connection defaults (#871)
+
+`stationMonitorMetricCatalogue(subjectType)` lists names and units for all three
+registered subject types. Validation, evaluation and the dashboard use that same
+catalogue. `stationStoreMonitorTemplates()` and `stationConnectionMonitorTemplates()`
+provide the §4.2 / §4.8 registry rows; `stationStoreConnectionDefaultMonitors(settings)`
+expands them, and `applyStationStoreConnectionDefaultMonitors(settings)` appends only
+missing IDs, preserving author tuning. Like atmosphere defaults, expansion is an
+explicit authoring operation, not a runtime side effect. Every row starts disabled.
+No persistence schema change is needed.
+
+| Subject | Metric | Threshold | On / off (s) | Severity | Provenance |
+|---|---|---|---|---|---|
+| store | usableFraction | Below 0.25 | 120 / 60 | Warning | rated |
+| store | usableFraction | Below 0.10 | 60 / 60 | Critical | rated |
+| water store/stream | totalDissolved | Above 500 mg/L | 60 / 60 | Critical | who |
+| water store/stream | unexpectedSpecies | Above 0 (any species above 1 mg/L) | 60 / 60 | Warning | prov |
+| connection | lossFraction | Above 0.05 | 120 / 60 | Warning | rated |
+| connection | lossRate | Author-set (disabled zero placeholder) | 120 / 60 | Warning | custom |
+| connection | reversed | Above 0 | 1 / 1 | Critical | prov |
+| connection | utilizationFraction | Above 0.9 | 300 / 120 | Advisory | rated |
+
+A `store` subject uses the store ID. A `connection` subject uses
+`stationConnectionMonitorSubjectId(key)`: all six parts of its full design key,
+each prefixed by its decimal byte length and a colon. This is deterministic and
+unambiguous even when authored IDs contain punctuation. Node rename retargets
+these references without renaming Monitors; removing/disconnecting a connection
+removes its Monitors in the same command.
+
+### Metric sources and units
+
+* `usableFraction`: published `currentQualified / capacity`, zero for zero
+  capacity. Held stock is excluded, but protected qualified reserve is included.
+* Store water metrics: published `concentrations`, the actual constituent blend
+  of qualified plus held stock. `totalDissolved` sums non-water, non-energy
+  species; `maxContaminantConcentration` takes their maximum; `unexpectedSpecies`
+  is 1 if that maximum is strictly greater than 1 mg/L, otherwise 0. There is
+  deliberately no species allow-list: a designer need not name the contaminant.
+* The native concentrations are kg species/kg stream; multiply by 1,000,000
+  to obtain mg/L under the model's water-density approximation of 1 kg/L.
+  Water and the chemical-energy slot never count as contaminants.
+* `lossFraction`: published `lastLossRate / lastInputRate`, zero at zero input.
+  `lossRate` reads `lastLossRate` in the connection's native rate unit.
+* `reversed`: published direction flag mapped to 1/0 (not inferred from losses).
+* `utilizationFraction`: published `lastInputRate / maximumThroughput` from the
+  matching full-key design properties; omitted design uses the existing default
+  throughput. Zero throughput reads zero rather than dividing by zero.
+* Water-stream metrics read the feed-quality snapshot of Crew, Electrolyzer,
+  Microbial processor, Crops or Algae water inputs. Water treatment raw-feed
+  quality is reconstructed from last passed + removed constituent mass divided
+  by last processed mass; treated-stream quality uses passed / treated mass,
+  and concentrate uses removed / concentrate mass. Crew greywater uses its
+  published last constituent loads / greywater mass; microbial recovered water
+  uses last carried constituents / recovered water mass. These readers never
+  substitute a source store's closing blend for what actually flowed.
+  A stream without carried quality, or without flow, supplies no sample; pending
+  persistence resets and an active Alert cannot falsely clear on missing data.
+
+Water defaults are offered for explicitly identified `water` stores and stores
+connected to water-medium ports (and their water-carrying connections). There is
+no separate authored potable classification: the trace template is offered on
+all such water subjects, including potable supplies, and remains disabled until
+the designer opts in. No name-based classification or compatibility barrier is
+introduced. A plain Resource transfer publishes no carried quality, so its
+quality rules remain unsampled rather than guessing a contaminant fraction.
+
+Focused Release proofs:
+
+```sh
+ctest --test-dir build-linux -C Release -j 16 --output-on-failure \
+  -R '^station-monitor(StoreConnectionTable|StoreBoundaries|ConnectionBoundaries|WaterStream)$'
+```
