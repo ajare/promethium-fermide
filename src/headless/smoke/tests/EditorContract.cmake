@@ -270,13 +270,17 @@ set(editor_names
     station/flowConnectionTelemetryWorkflow
     station/flowConnectionsWorkflow
     station/mixedObservationWorkflow
+    station/componentHelpWorkflow
     station/prefabPlacementWorkflow
     station/prefabCompositeProjectionWorkflow
     station/prefabPersistenceWorkflow
+    station/prefabExpandedSavePositionWorkflow
     station/prefabUnitEditWorkflow
     station/prefabUnitKeyboardDeleteWorkflow
     station/prefabCompositeTelemetryWorkflow
     station/prefabDialOverrideWorkflow
+    station/prefabDialBoundaryWorkflow
+    station/prefabDuplicateInstancePinsWorkflow
     station/addEntryWorkflow
     station/configurationResources
     station/windowWorkflow

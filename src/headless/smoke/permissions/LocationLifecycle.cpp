@@ -1,5 +1,6 @@
 #include "Checks.h"
 #include "core/World.h"
+#include "core/WorldDocument.h"
 #include "core/BinarySerializer.h"
 #include "core/YamlSerializer.h"
 #include "core/SerializationException.h"
@@ -152,9 +153,13 @@ namespace
 				root["construction"][record]["locationPermissionRequirement"] = YAML::Load(value);
 				reject(root);
 			}
-		// Version 31 predates Location requirements; the other value is
-		// one past the writer's schema, so it must be refused as future.
-		auto const futureVersion = YAML::Load(before)["version"].as<uint32_t>() + 1u;
+		// Version 31 predates Location requirements; the other value is one
+		// past the reader's supported maximum (kWorldSchemaVersion), so it
+		// must be refused as future. Derive it from the shared constant, not
+		// from this document's own tier: the tiered writer can stamp below
+		// the maximum, and "document version + 1" would then still be
+		// supported.
+		auto const futureVersion = core::kWorldSchemaVersion + 1;
 		for (auto version : { 31u, futureVersion })
 		{
 			auto root = YAML::Load(before); root["version"] = version; reject(root);

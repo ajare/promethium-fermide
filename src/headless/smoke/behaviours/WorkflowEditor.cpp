@@ -2,6 +2,7 @@
 #include "TemporaryDirectory.h"
 #include "EditorState.h"
 #include "ImGuiContext.h"
+#include "core/WorldDocument.h"
 // End-to-end deterministic Agent behaviour workflow verification for #164.
 
 #include <bit>
@@ -217,19 +218,19 @@ return {
 			"Legacy unnamed Marker migration was not deterministic");
 
 		// The future probe has to sit above the reader's supported maximum.
-		// Derive it from the document's own version field rather than writing
-		// a literal: a schema bump that find-and-replaces "version: N" rewrites
-		// that literal along with the search string, which is what turned this
-		// check into a silent no-op that passed without ever reaching the
-		// boundary it claims to test.
+		// Derive it from the shared schema constant rather than from this
+		// document's own version field: the writer stamps a tier per opt-in
+		// feature, so a feature-absent document sits below the maximum and
+		// "document version + 1" can land inside the supported range - a
+		// probe that never reaches the boundary it claims to test.
 		auto future = currentYaml;
 		versionOffset = future.find("version: ");
 		require(versionOffset != std::string::npos, "Missing World version field");
 		auto const digitsBegin = versionOffset + std::string("version: ").size();
 		auto const digitsEnd = future.find_first_not_of("0123456789", digitsBegin);
 		require(digitsEnd != std::string::npos, "World version field is not numeric");
-		auto const writtenVersion = std::stoi(future.substr(digitsBegin, digitsEnd - digitsBegin));
-		future.replace(digitsBegin, digitsEnd - digitsBegin, std::to_string(writtenVersion + 1));
+		future.replace(digitsBegin, digitsEnd - digitsBegin,
+			std::to_string(core::kWorldSchemaVersion + 1));
 		bool futureRefused = false;
 		try { (void)deserializeWorld(future); }
 		catch (std::exception const& error)

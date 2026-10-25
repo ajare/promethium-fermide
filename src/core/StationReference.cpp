@@ -6,6 +6,7 @@
 #include "core/StationReference.h"
 
 #include "core/SerializationException.h"
+#include "core/WorldDocument.h"
 #include "core/YamlSerializer.h"
 
 #include <cmath>
@@ -2408,8 +2409,9 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 114)
-				return refuse("Reference station schema version must be from 65 to 114");
+			if (document.schemaVersion < 65 || document.schemaVersion > kWorldSchemaVersion)
+				return refuse("Reference station schema version must be from 65 to "
+					+ std::to_string(kWorldSchemaVersion));
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");
