@@ -871,7 +871,8 @@ void StationSystemsWindow::renderFlowInspectorContents(
 	// list-surface operation, and the inspector owns no list.
 	editor->renderEntry(draft, size_t(selected->index));
 	if (selected->type == "Atmosphere" || selected->type == "Coolant loop"
-		|| selected->type == "Chiller" || selected->type == "Heat engine" || selected->type == "Radiator")
+		|| selected->type == "Chiller" || selected->type == "Heat engine" || selected->type == "Radiator"
+		|| selected->type == "Battery" || selected->type == "Generator" || selected->type == "Solar")
 		renderMonitorInspector(draft, selected->id);
 	ImGui::Separator();
 	ImGui::TextDisabled("Edits change the Configuration draft only. Nothing is applied to the World from here.");
@@ -893,6 +894,7 @@ void StationSystemsWindow::renderMonitorInspector(core::StationSystemsSettings& 
 	auto effective = draft;
 	core::applyStationAtmosphereDefaultMonitors(effective);
 	core::applyStationThermalPlantDefaultMonitors(effective);
+	core::applyStationPowerSourceDefaultMonitors(effective);
 	auto const subjectType = core::stationMonitorSubjectTypeForNodeType(mFlow.selectedNode()->type);
 	for (auto monitor : effective.monitors)
 	{

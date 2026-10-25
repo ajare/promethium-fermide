@@ -324,7 +324,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         wearCatalogueTransactions wearCatalogueOptIn
         thermalPlantMonitors thermalPlantInjection thermalPlantRepairs thermalPlantOutages
         thermalPlantReplay thermalPlantOptIn thermalPlantLiveTuning
-        powerSourceInjection powerSourceRunaway powerSourceFailedStart
+        powerSourceMonitors powerSourceInjection powerSourceRunaway powerSourceFailedStart
         powerSourceReplay powerSourceOptIn powerSourceLiveTuning
         contaminationChain contaminationContracts contaminationWearPerformance contaminationOptIn)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})

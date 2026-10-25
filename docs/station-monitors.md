@@ -1,4 +1,4 @@
-# Station Monitors: atmosphere, store, connection and thermal-plant defaults (#867, #871, #873)
+# Station Monitors: atmosphere, store, connection, thermal-plant and power-source defaults (#867, #871, #873, #874)
 
 `atmosphere` is a registered Monitor subject type, and it publishes the full
 spec §3.1 Metric set: `oxygenPartialPressureKPa`, `carbonDioxidePartialPressureKPa`,
@@ -260,4 +260,55 @@ coolant leak that restricts circulation while cooling demand remains present.
 ```sh
 ctest --test-dir build-linux -C Release -j 16 --output-on-failure \
   -R '^station-(thermalPlantMonitors|editor-monitor-inspector)$'
+```
+
+## Power sources (#874)
+
+`stationPowerSourceMonitorTemplates(subjectType)` registers five `battery`, three
+`generator` and one `solar-array` default. `stationPowerSourceDefaultMonitors(settings)`
+expands them with deterministic `<type>-<id>-<key>` identities;
+`applyStationPowerSourceDefaultMonitors(settings)` appends missing IDs without
+replacing author tuning. The inspector lists these disabled defaults without
+modifying the draft; accepted edits materialize them through the validated command.
+Rename/delete cascades use the same subject mapping. No schema change is needed.
+
+| Subject / key | Metric | Threshold | On / off (s) | Severity | Provenance |
+|---|---|---|---|---|---|
+| battery / soc-low | stateOfCharge | Below 0.20 | 60 / 30 | Warning | iss (depth-of-discharge practice) |
+| battery / reserve-floor | stateOfCharge | Below 0.10 | 10 / 30 | Critical | rated |
+| battery / headroom-gone | stateOfCharge | Above 0.95 | 300 / 60 | Advisory | rated |
+| battery / discharge-shortfall | dischargeShortfallFraction | Above 0.05 | 30 / 30 | Warning | rated |
+| battery / wear-fade | wearFraction | Above 0.20 | 0 / 0 | Advisory | prov |
+| generator / output-off-command | outputDeviationFraction | Above 0.05 | 60 / 60 | Warning | rated |
+| generator / sink-near-limit | sinkTemperatureC | Above authored maxSinkTemperatureC − 5 | 60 / 120 | Warning | rated |
+| generator / startup-shortfall | startupUnmetKW | Above 0 kW | 30 / 10 | Advisory | rated |
+| solar-array / available-low | availableFraction | Below 0.5 | 300 / 120 | Advisory | prov |
+
+Metric sources are the subject's published power snapshot:
+
+* `stateOfCharge` and `wearFraction`: same-named battery fields. SOC is stored
+  energy divided by nameplate, not by usable capacity; the 0.10 rule is the
+  specified fixed SOC bound, not a dynamically inferred reserve floor.
+* `dischargeShortfallFraction`: `lastDischargeShortfallKW / maxDischargeKW`,
+  using the unit's rated terminal discharge limit, not its wear-reduced capacity.
+* `outputDeviationFraction`: `abs(outputKW - commandedOutputKW) / ratedOutputKW`.
+  Output is instantaneous endpoint output, not interval-average generation; the
+  published command includes dispatch when dispatch owns it.
+* `sinkTemperatureC` and `startupUnmetKW`: same-named generator fields.
+  Unfunded commanded starts and loss of support mid-crank publish the missing
+  cranking power in `startupUnmetKW`; no fuel/cooling refusal invents that deficit.
+  This reporting does not change startup qualification, draw, or phase transitions.
+* `availableFraction`: solar `availableKW / capacityKW`, including illumination,
+  outage, wear and Fault effects. Darkness is deliberately observable too.
+
+Each zero-rated denominator reads zero rather than dividing by zero. Missing
+subjects supply no sample. Permanent Wear has no physical recovery: its Alert
+stays active until the author changes/disables the rule or replaces the bank.
+Resolved sink thresholds stay authored values on reapplication.
+
+Focused Release proof (all defaults at 0.25 s and 1 s steps):
+
+```sh
+ctest --test-dir build-linux -C Release -j 16 --output-on-failure \
+  -R '^station-(powerSourceMonitors|editor-monitor-inspector)$'
 ```

@@ -126,6 +126,12 @@ std::vector<StationMonitorMetric> const& stationMonitorMetricCatalogue(std::stri
 	static std::vector<StationMonitorMetric> const chillers{{"coolingUnmetFraction", "fraction"}, {"sinkOverMaxCondensing", "boolean"}, {"refrigerantFraction", "fraction"}};
 	static std::vector<StationMonitorMetric> const engines{{"tripped", "boolean"}, {"hotHeadroomC", "°C"}};
 	static std::vector<StationMonitorMetric> const radiators{{"remainingAreaFraction", "fraction"}, {"reservoirTemperatureC", "°C"}};
+	static std::vector<StationMonitorMetric> const batteries{{"stateOfCharge", "fraction"}, {"dischargeShortfallFraction", "fraction"}, {"wearFraction", "fraction"}};
+	static std::vector<StationMonitorMetric> const generators{{"outputDeviationFraction", "fraction"}, {"sinkTemperatureC", "°C"}, {"startupUnmetKW", "kW"}};
+	static std::vector<StationMonitorMetric> const solar{{"availableFraction", "fraction"}};
+	if (type == "battery") return batteries;
+	if (type == "generator") return generators;
+	if (type == "solar-array") return solar;
 	if (type == "coolant-loop") return loops;
 	if (type == "chiller") return chillers;
 	if (type == "heat-engine") return engines;
@@ -135,6 +141,9 @@ std::vector<StationMonitorMetric> const& stationMonitorMetricCatalogue(std::stri
 }
 bool stationMonitorSubjectExists(StationSystemsSettings const& settings, std::string_view type, std::string_view id)
 {
+	if (type == "battery") return findId(settings.batteries, id) != settings.batteries.end();
+	if (type == "generator") return findId(settings.generators, id) != settings.generators.end();
+	if (type == "solar-array") return findId(settings.solarArrays, id) != settings.solarArrays.end();
 	if (type == "coolant-loop") return findId(settings.coolantLoops, id) != settings.coolantLoops.end();
 	if (type == "chiller") return findId(settings.chillers, id) != settings.chillers.end();
 	if (type == "heat-engine") return findId(settings.heatEngines, id) != settings.heatEngines.end();
@@ -156,6 +165,28 @@ std::optional<double> readStationMonitorMetric(StationSystemsSettings const& set
 		auto subject = findId(snapshot.atmospheres, id);
 		auto entry = findStationAtmosphereMetric(metric);
 		if (subject != snapshot.atmospheres.end() && entry) return entry->read(*subject);
+	}
+	if (type == "battery")
+	{
+		auto s = findId(snapshot.power.batteries, id);
+		if (s == snapshot.power.batteries.end()) return {};
+		if (metric == "stateOfCharge") return s->stateOfCharge;
+		if (metric == "wearFraction") return s->wearFraction;
+		return s->maxDischargeKW > 0 ? s->lastDischargeShortfallKW / s->maxDischargeKW : 0;
+	}
+	if (type == "generator")
+	{
+		auto s = findId(snapshot.power.generators, id);
+		if (s == snapshot.power.generators.end()) return {};
+		if (metric == "sinkTemperatureC") return s->sinkTemperatureC;
+		if (metric == "startupUnmetKW") return s->startupUnmetKW;
+		return s->ratedOutputKW > 0 ? std::abs(s->outputKW - s->commandedOutputKW) / s->ratedOutputKW : 0;
+	}
+	if (type == "solar-array")
+	{
+		auto s = findId(snapshot.power.sources, id);
+		if (s == snapshot.power.sources.end()) return {};
+		return s->capacityKW > 0 ? s->availableKW / s->capacityKW : 0;
 	}
 	if (type == "coolant-loop")
 	{
@@ -256,6 +287,44 @@ std::vector<StationMonitorSettings> stationStoreConnectionDefaultMonitors(Statio
 				if (row.metric != "usableFraction") add("connection", id, row);
 	}
 	return result;
+}
+std::vector<StationMonitorTemplate> const& stationPowerSourceMonitorTemplates(std::string_view type)
+{
+	using enum AlertDirection; using enum AlertSeverity; using enum MonitorProvenance;
+	static std::vector<StationMonitorTemplate> const batteries{
+		{"soc-low", "stateOfCharge", {0.20, Below, 60, 30}, Warning, Iss},
+		{"reserve-floor", "stateOfCharge", {0.10, Below, 10, 30}, Critical, Rated},
+		{"headroom-gone", "stateOfCharge", {0.95, Above, 300, 60}, Advisory, Rated},
+		{"discharge-shortfall", "dischargeShortfallFraction", {0.05, Above, 30, 30}, Warning, Rated},
+		{"wear-fade", "wearFraction", {0.20, Above, 0, 0}, Advisory, Provisional}};
+	static std::vector<StationMonitorTemplate> const generators{
+		{"output-off-command", "outputDeviationFraction", {0.05, Above, 60, 60}, Warning, Rated},
+		{"sink-near-limit", "sinkTemperatureC", {-5, Above, 60, 120}, Warning, Rated},
+		{"startup-shortfall", "startupUnmetKW", {0, Above, 30, 10}, Advisory, Rated}};
+	static std::vector<StationMonitorTemplate> const solar{
+		{"available-low", "availableFraction", {0.5, Below, 300, 120}, Advisory, Provisional}};
+	static std::vector<StationMonitorTemplate> const empty;
+	return type == "battery" ? batteries : type == "generator" ? generators : type == "solar-array" ? solar : empty;
+}
+std::vector<StationMonitorSettings> stationPowerSourceDefaultMonitors(StationSystemsSettings const& settings)
+{
+	std::vector<StationMonitorSettings> result;
+	auto add = [&](std::string const& type, auto const& entries) {
+		for (auto const& item : entries)
+			for (auto const& row : stationPowerSourceMonitorTemplates(type))
+				result.push_back({type + "-" + item.id + "-" + std::string(row.key), type, item.id,
+					std::string(row.metric), row.rule, row.severity, false, row.provenance});
+	};
+	add("battery", settings.batteries); add("generator", settings.generators); add("solar-array", settings.solarArrays);
+	for (auto& m : result)
+		if (m.subjectType == "generator" && m.metric == "sinkTemperatureC")
+			m.rule.threshold += findId(settings.generators, m.subjectId)->maxSinkTemperatureC;
+	return result;
+}
+void applyStationPowerSourceDefaultMonitors(StationSystemsSettings& settings)
+{
+	for (auto const& candidate : stationPowerSourceDefaultMonitors(settings))
+		if (findId(settings.monitors, candidate.id) == settings.monitors.end()) settings.monitors.push_back(candidate);
 }
 std::vector<StationMonitorTemplate> const& stationThermalPlantMonitorTemplates(std::string_view type)
 {

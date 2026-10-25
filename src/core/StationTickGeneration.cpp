@@ -1412,7 +1412,13 @@ namespace core
 					else if (startupRequiredKJ > 0.0
 						&& powerAvailable("Generator", generator.authored.id) + 1e-9
 							< generator.authored.startupPowerKW)
+					{
+						// Publish the unfunded request even though the safety gate
+						// refuses to crank; observation must not invent a power draw.
+						generator.lastStartupUnmetKW = std::max(0.0, generator.authored.startupPowerKW
+							- powerAvailable("Generator", generator.authored.id));
 						generator.lastBlockReason = "the pool cannot supply the startup energy draw";
+					}
 					else
 					{
 						generator.startupReceivedKJ = 0.0;
@@ -1475,6 +1481,7 @@ namespace core
 						// fails whole rather than cranking on a trickle.
 						generator.phase = StationGeneratorPhase::Stopped;
 						generator.startupReceivedKJ = 0.0;
+						generator.lastStartupUnmetKW = std::max(0.0, requestKW - poolKW);
 						generator.lastBlockReason = "startup energy support lost mid-crank";
 						break;
 					}

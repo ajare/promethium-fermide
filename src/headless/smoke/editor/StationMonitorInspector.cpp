@@ -7,6 +7,7 @@
 #include "imgui/imgui_internal.h"
 #include <algorithm>
 #include <filesystem>
+#include <tuple>
 
 namespace
 {
@@ -36,6 +37,21 @@ void monitorInspector(smoke::Context const& context)
 	loop.ratedFlowKgPerS = 10; loop.pumpPowerKW = 1;
 	loop.specificHeatKJPerKgK = 4; loop.startingTemperatureC = 20;
 	seed.coolantLoops = {loop};
+	core::BatterySettings bank;
+	bank.id = "bank"; bank.nameplateKWh = bank.usableKWh = 100;
+	bank.startingStoredKWh = 50; bank.maxChargeKW = bank.maxDischargeKW = 10;
+	seed.batteries = {bank};
+	core::SolarArraySettings solar; solar.id = "array"; solar.capacityKW = 20;
+	seed.solarArrays = {solar};
+	core::ResourceStoreSettings fuel;
+	fuel.id = "fuel"; fuel.unit = "kWh"; fuel.capacity = 100; fuel.startingQualified = 50;
+	seed.stores = {fuel};
+	core::GeneratorSettings generator;
+	generator.id = "gen"; generator.fuelStoreId = "fuel";
+	generator.heatSinkId = "sink"; generator.thermalClass = "moderate";
+	generator.ratedOutputKW = 20; generator.efficiency = 0.5; generator.maxRampKWPerSecond = 100;
+	generator.maxSinkTemperatureC = 90;
+	seed.generators = {generator};
 	std::string diagnostic;
 	bool const configured = world->configureStationSystems(seed, false, &diagnostic);
 	smoke::require(configured, ("configure seed: " + diagnostic).c_str());
@@ -64,7 +80,7 @@ void monitorInspector(smoke::Context const& context)
 		}
 		auto start = window.draft();
 		driver.click(ctx, "**/Enabled##room-po2-low"); ctx->Yield(3);
-		REQ(window.draft().monitors.size() == 16 && window.draft().monitors[0].enabled,
+		REQ(window.draft().monitors.size() == 25 && window.draft().monitors[0].enabled,
 			"enable did not materialize the disabled default set");
 		REQ(std::count_if(window.draft().monitors.begin(), window.draft().monitors.end(),
 			[](auto const& m) { return m.enabled; }) == 1, "other Monitors enabled unexpectedly");
@@ -132,6 +148,23 @@ void monitorInspector(smoke::Context const& context)
 		REQ(std::any_of(monitors.begin(), monitors.end(), [](auto const& m) {
 			return m.id == "coolant-loop-loop-fill-low" && m.enabled;
 		}), "thermal enable did not commit through draft command");
+		for (auto const& [type, id, subject] : std::vector<std::tuple<std::string, std::string, std::string>>{
+			{"Battery", "bank", "battery"}, {"Generator", "gen", "generator"}, {"Solar", "array", "solar-array"}})
+		{
+			REQ(window.flowNodeRect(type, id, &rect), "power node missing from canvas");
+			ctx->MouseTeleportToPos({(rect.x + rect.z) / 2, (rect.y + rect.w) / 2});
+			ctx->Yield(2); ctx->MouseClick(); ctx->Yield(3);
+			for (auto const& row : core::stationPowerSourceMonitorTemplates(subject))
+			{
+				auto ref = "**/Enabled##" + subject + "-" + id + "-" + std::string(row.key);
+				REQ(ctx->ItemInfo(ref.c_str(), ImGuiTestOpFlags_NoError)->ID != 0, "power default missing from inspector");
+			}
+			auto const monitorId = subject + "-" + id + "-" + std::string(core::stationPowerSourceMonitorTemplates(subject)[0].key);
+			driver.click(ctx, ("**/Enabled##" + monitorId).c_str()); ctx->Yield(3);
+			REQ(std::any_of(window.draft().monitors.begin(), window.draft().monitors.end(), [&](auto const& m) {
+				return m.id == monitorId && m.enabled;
+			}), "power enable did not commit through draft command");
+		}
 	});
 #undef REQ
 	smoke::require(driver.passed(), "Monitor inspector Test Engine workflow failed");

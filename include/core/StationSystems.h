@@ -4104,6 +4104,9 @@ namespace core
 	std::vector<StationMonitorTemplate> const& stationConnectionMonitorTemplates();
 	std::vector<StationMonitorSettings> stationStoreConnectionDefaultMonitors(StationSystemsSettings const&);
 	void applyStationStoreConnectionDefaultMonitors(StationSystemsSettings&);
+	std::vector<StationMonitorTemplate> const& stationPowerSourceMonitorTemplates(std::string_view subjectType);
+	std::vector<StationMonitorSettings> stationPowerSourceDefaultMonitors(StationSystemsSettings const&);
+	void applyStationPowerSourceDefaultMonitors(StationSystemsSettings&);
 	std::vector<StationMonitorTemplate> const& stationThermalPlantMonitorTemplates(std::string_view subjectType);
 	std::vector<StationMonitorSettings> stationThermalPlantDefaultMonitors(StationSystemsSettings const&);
 	void applyStationThermalPlantDefaultMonitors(StationSystemsSettings&);

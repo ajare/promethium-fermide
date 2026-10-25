@@ -104,6 +104,173 @@ const core::StationFaultSnapshot* findFault(
 
 // Every mode injects, applies its effect shape, publishes in the
 // snapshot with derived impact and logs its onset; refusals never mutate.
+void powerSourceMonitors(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	auto base = powerSourceStation();
+	core::applyStationPowerSourceDefaultMonitors(base);
+	auto const defaults = base.monitors;
+	require(defaults.size() == 9, "power default coverage incomplete");
+	std::vector<core::AlertRule> const rules{
+		{0.2, core::AlertDirection::Below, 60, 30}, {0.1, core::AlertDirection::Below, 10, 30},
+		{0.95, core::AlertDirection::Above, 300, 60}, {0.05, core::AlertDirection::Above, 30, 30},
+		{0.2, core::AlertDirection::Above, 0, 0}, {0.05, core::AlertDirection::Above, 60, 60},
+		{85, core::AlertDirection::Above, 60, 120}, {0, core::AlertDirection::Above, 30, 10},
+		{0.5, core::AlertDirection::Below, 300, 120}};
+	std::vector<core::AlertSeverity> const severities{
+		core::AlertSeverity::Warning, core::AlertSeverity::Critical, core::AlertSeverity::Advisory,
+		core::AlertSeverity::Warning, core::AlertSeverity::Advisory, core::AlertSeverity::Warning,
+		core::AlertSeverity::Warning, core::AlertSeverity::Advisory, core::AlertSeverity::Advisory};
+	std::string diagnostic;
+	require(core::validateStationMonitors(base, diagnostic), diagnostic.c_str());
+	core::applyStationPowerSourceDefaultMonitors(base);
+	require(base.monitors == defaults, "power defaults not idempotent");
+	for (size_t i = 0; i < defaults.size(); ++i)
+	{
+		auto const& m = defaults[i];
+		require(!m.enabled && m.rule == rules[i] && m.severity == severities[i], "power default table differs");
+		require(m.provenance == (i == 0 ? core::MonitorProvenance::Iss : i == 4 || i == 8
+			? core::MonitorProvenance::Provisional : core::MonitorProvenance::Rated), "power provenance differs");
+	}
+	base.monitors[0].rule.threshold = 0.3;
+	core::applyStationPowerSourceDefaultMonitors(base);
+	require(base.monitors[0].rule.threshold == 0.3, "power defaults overwrote tuning");
+	base.monitors = defaults;
+	core::StationConfigurationDocument document; document.settings = base;
+	core::StationConfigurationDocument loaded;
+	require(core::parseStationConfiguration(core::serializeStationConfiguration(document), loaded, &diagnostic)
+		&& loaded.settings == base, "power defaults did not round-trip");
+	// Catalogue readers normalize by each subject's own rating, including
+	// exact threshold values and zero-rated installations.
+	core::StationSystemsSnapshot sample;
+	core::StationBatterySnapshot bank; bank.id = "bank";
+	core::StationGeneratorSnapshot gen; gen.id = "gen";
+	core::StationSolarSourceSnapshot array; array.id = "array";
+	bank.maxDischargeKW = 200; bank.lastDischargeShortfallKW = 10;
+	gen.ratedOutputKW = 200; gen.commandedOutputKW = 100; gen.outputKW = 90;
+	array.capacityKW = 200; array.availableKW = 100;
+	sample.power.batteries = {bank}; sample.power.generators = {gen}; sample.power.sources = {array};
+	auto read = [&](std::string_view type, std::string_view id, std::string_view metric) {
+		return core::readStationMonitorMetric(base, sample, type, id, metric).value();
+	};
+	require(read("battery", "bank", "dischargeShortfallFraction") == 0.05
+		&& read("generator", "gen", "outputDeviationFraction") == 0.05
+		&& read("solar-array", "array", "availableFraction") == 0.5, "power normalization differs");
+	sample.power.generators[0].outputKW = 110;
+	require(read("generator", "gen", "outputDeviationFraction") == 0.05, "over-command deviation lost its absolute value");
+	sample.power.batteries[0].maxDischargeKW = 0;
+	sample.power.generators[0].ratedOutputKW = 0;
+	sample.power.sources[0].capacityKW = 0;
+	require(read("battery", "bank", "dischargeShortfallFraction") == 0
+		&& read("generator", "gen", "outputDeviationFraction") == 0
+		&& read("solar-array", "array", "availableFraction") == 0, "zero rating divided by zero");
+	require(!core::readStationMonitorMetric(base, sample, "battery", "missing", "stateOfCharge")
+		&& !core::readStationMonitorMetric(base, sample, "generator", "gen", "unknown"), "missing telemetry supplied a sample");
+	core::StationSystemsRuntime disabled(base, 1);
+	require(disabled.advanceTo(400) && disabled.snapshot().activeAlerts.empty()
+		&& disabled.snapshot().closedAlerts.empty(), "disabled power defaults emitted Alerts");
+	// Equality is inside for every default, even after a complete on interval.
+	for (size_t i = 0; i < defaults.size(); ++i)
+	{
+		auto s = base; auto m = defaults[i]; m.enabled = true; s.monitors = {m};
+		s.equipmentLoads[0].electricalDemandKW = 0; s.solarArrays[0].capacityKW = 0;
+		s.batteries[0].usableKWh = 100;
+		if (i <= 2) s.batteries[0].startingStoredKWh = m.rule.threshold * 100;
+		if (i == 3) { s.batteries[0].startingStoredKWh = 0; s.equipmentLoads[0].electricalDemandKW = 2.5; }
+		if (i == 4) s.batteries[0].capacityFade = core::InstallationWearSettings{0, 0, 0, 720, 0.2};
+		if (i == 5) { s.generators[0].commandedOutputKW = 1; s.stores[0].startingQualified = 0; }
+		if (i == 6) s.thermalReservoirs[0].startingTemperatureC = 85;
+		if (i == 8) { s.solarArrays[0].capacityKW = 20; s.solarArrays[0].illumination.constantLevel = 0.5; }
+		core::StationSystemsRuntime run(s, 1);
+		require(run.advanceTo(1), "equality sample failed");
+		auto value = core::readStationMonitorMetric(s, run.snapshot(), m.subjectType, m.subjectId, m.metric).value();
+		require(value == m.rule.threshold, ("equality fixture differs: " + m.id).c_str());
+		require(run.advanceTo(std::max(1.0, m.rule.triggerOnSeconds) + 1) && run.snapshot().activeAlerts.empty(),
+			("power default fired at equality: " + m.id).c_str());
+	}
+	for (auto dt : {0.25f, 1.0f})
+	for (size_t i = 0; i < defaults.size(); ++i)
+	{
+		auto s = base;
+		auto m = defaults[i]; m.enabled = true; s.monitors = {m};
+		s.solarArrays[0].capacityKW = 0;
+		s.equipmentLoads[0].electricalDemandKW = 0;
+		s.batteries[0].usableKWh = 100;
+		if (i <= 1) s.batteries[0].startingStoredKWh = i == 0 ? 15 : 5;
+		if (i == 2) s.batteries[0].startingStoredKWh = 99;
+		if (i == 3) { s.batteries[0].startingStoredKWh = 0; s.equipmentLoads[0].electricalDemandKW = 50; }
+		if (i == 4) s.batteries[0].capacityFade = core::InstallationWearSettings{0, 0, 0, 360, 0.5};
+		if (i == 5) { s.generators[0].commandedOutputKW = 20; s.stores[0].startingQualified = 0; }
+		if (i == 6)
+		{
+			s.thermalReservoirs[0].startingTemperatureC = 86;
+			core::RadiatorSettings radiator;
+			radiator.id = "rad"; radiator.reservoirId = "sink";
+			radiator.areaM2 = 1e-6; radiator.emissivity = 0.9; radiator.viewFactor = 1;
+			radiator.sinkTemperatureC = -270;
+			s.radiators = {radiator};
+		}
+		if (i == 7)
+		{
+			s.generators[0].commandedOutputKW = 20; s.generators[0].startupSeconds = 10000;
+			s.batteries[0].maxDischargeKW = 0;
+		}
+		if (i == 8) { s.solarArrays[0].capacityKW = 20; s.solarArrays[0].illumination.constantLevel = 0.25; }
+		core::StationSystemsRuntime run(s, dt);
+		double firstOutside = 0;
+		bool fired = false;
+		for (double t = dt; t <= 400; t += dt)
+		{
+			require(run.advanceTo(t), "power Monitor drive failed");
+			auto snap = run.snapshot();
+			auto value = core::readStationMonitorMetric(s, snap, m.subjectType, m.subjectId, m.metric);
+			require(value.has_value(), "power metric unavailable");
+			bool outside = m.rule.direction == core::AlertDirection::Above ? *value > m.rule.threshold : *value < m.rule.threshold;
+			if (outside && !firstOutside) firstOutside = t;
+			if (!outside) firstOutside = 0;
+			bool due = firstOutside && t - firstOutside + dt >= m.rule.triggerOnSeconds;
+			require((!snap.activeAlerts.empty()) == due, ("power fire boundary: " + m.id).c_str());
+			if (due)
+			{
+				auto const& a = snap.activeAlerts[0];
+				require(a.firedAtSeconds == t && a.currentValue == *value && a.severity == m.severity
+					&& a.provenance == m.provenance, "power Alert metadata differs");
+				fired = true; break;
+			}
+		}
+		require(fired, ("power symptom never fired: " + m.id).c_str());
+		// Recover through live physical levers, without changing the Monitor.
+		// Permanent wear cannot recover without replacing the bank.
+		if (i == 4) continue;
+		if (i == 6) s.radiators[0].areaM2 = 100;
+		if (i <= 1 || i == 3 || i == 7) s.solarArrays[0].capacityKW = 100;
+		if (i == 2) s.equipmentLoads[0].electricalDemandKW = 50;
+		if (i == 5) s.generators[0].commandedOutputKW = 0;
+		if (i == 8) s.solarArrays[0].illumination.constantLevel = 0.5; // equality is inside
+		require(run.updateSettings(s), "power physical recovery refused");
+		double firstInside = 0;
+		bool cleared = false;
+		for (double t = run.snapshot().elapsedSeconds + dt, end = t + 1500; t <= end; t += dt)
+		{
+			require(run.advanceTo(t), "power recovery drive failed");
+			auto snap = run.snapshot();
+			auto value = core::readStationMonitorMetric(s, snap, m.subjectType, m.subjectId, m.metric).value();
+			bool inside = m.rule.direction == core::AlertDirection::Above ? value <= m.rule.threshold : value >= m.rule.threshold;
+			if (inside && !firstInside) firstInside = t;
+			if (!inside) firstInside = 0;
+			bool due = firstInside && t - firstInside + dt >= m.rule.triggerOffSeconds;
+			require(snap.activeAlerts.empty() == due, ("power clear boundary: " + m.id).c_str());
+			if (due)
+			{
+				require(snap.closedAlerts.size() == 1 && snap.closedAlerts[0].clearedAtSeconds == t
+					&& snap.closedAlerts[0].clearReason == core::AlertClearReason::AutoClear, "power close metadata differs");
+				cleared = true; break;
+			}
+		}
+		require(cleared, ("power symptom never recovered: " + m.id).c_str());
+	}
+}
+
 void powerSourceInjection(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
@@ -578,6 +745,7 @@ void powerSourceLiveTuning(smoke::Context const&)
 }
 void registerStationPowerSourceFaultChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"powerSourceMonitors", powerSourceMonitors});
 	checks.push_back({"powerSourceInjection", powerSourceInjection});
 	checks.push_back({"powerSourceRunaway", powerSourceRunaway});
 	checks.push_back({"powerSourceFailedStart", powerSourceFailedStart});
