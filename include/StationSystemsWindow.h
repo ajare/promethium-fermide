@@ -7,6 +7,7 @@
 #include <string>
 #include "core/StationSystems.h"
 #include "core/StationHistory.h"
+#include "StationFaultPanel.h"
 #include "StationFlowDiagram.h"
 #include "DocumentHistory.h"
 #include "RecentFiles.h"
@@ -44,6 +45,13 @@ public:
 	void renderFlowInspectorContents(core::StationSystemsSettings& draft, core::World& world);
 	// Live controls drive the running scenario directly, bypassing the draft.
 	void renderLiveHatchControls(core::World& world, std::string const& pathwayId);
+	// #849: the inspector's fault surface for the selected Installation -
+	// its active Faults as the alarm panel shows them, and the debug
+	// injection of any mode this machine has opted into. Both go through the
+	// same validated World command surface a headless client uses; nothing
+	// here reaches into the station runtime.
+	void renderFaultControls(core::World& world, std::string const& nodeType,
+		std::string const& nodeId);
 	void setHatchOpenNow(core::World& world, std::string const& pathwayId, double openFraction);
 	void setHatchArea(core::World& world, std::string const& pathwayId, double areaM2);
 	core::StationSystemsSettings const& draft() const { return mDraft; }
@@ -62,6 +70,9 @@ public:
 	}
 	std::optional<station_flow::NodeTelemetry> flowTelemetry(std::string const& type,
 		std::string const& id) const { return mFlow.nodeTelemetry(type, id); }
+	// #849: the fault badges the canvas drew for one node last frame.
+	std::vector<station_flow::FaultBadge> flowNodeFaults(std::string const& type,
+		std::string const& id) const { return mFlow.nodeFaults(type, id); }
 	bool flowConnectionPosition(core::StationConnectionKey const& key, ImVec2* out) const
 	{ return mFlow.connectionScreenPosition(key, out); }
 	std::string const& flowLinkRejection() const { return mFlow.linkRejection(); }
@@ -85,6 +96,19 @@ public:
 	{ mFlow.setPrefabInstanceExpanded(instanceId, expanded); }
 	bool flowPrefabToggleRect(std::string const& instanceId, ImVec4* out) const
 	{ return mFlow.prefabToggleScreenRect(instanceId, out); }
+	// #849: the alarm panel's state, forwarded so a headless check driving
+	// the real controls can open it and assert on what it listed.
+	bool faultPanelVisible() const { return mFaultPanelVisible; }
+	void setFaultPanelVisible(bool visible) { mFaultPanelVisible = visible; }
+	std::vector<StationFaultPanel::Row> const& faultPanelRows() const
+	{ return mFaultPanel.rows(); }
+	std::vector<std::string> const& faultPanelTransitions() const
+	{ return mFaultPanel.transitions(); }
+	std::string const& faultPanelNotice() const { return mFaultPanel.notice(); }
+	// The mode selected in the inspector's injection control, kept between
+	// frames so the combobox does not reset on every redraw.
+	std::string const& faultInjectMode() const { return mInjectMode; }
+	void setFaultInjectMode(std::string mode) { mInjectMode = std::move(mode); }
 private:
 	std::vector<std::shared_ptr<StationConfigurationResource>> mConfigurationResources;
 	std::shared_ptr<core::PrefabCatalogue const> mPrefabCatalogue;
@@ -175,6 +199,12 @@ private:
 	bool mPendingLayoutEdit{false};
 	StationFlowDiagram mFlow;
 	std::optional<core::StationSystemsSnapshot> mFlowSnapshot;
+	// #849: the alarm panel and the inspector's injection pick. The panel
+	// holds no fault state of its own - it re-reads the snapshot every
+	// frame - so this is visibility and a selection buffer, nothing more.
+	StationFaultPanel mFaultPanel;
+	bool mFaultPanelVisible{false};
+	std::string mInjectMode;
 	// Slider buffers for the live hatch controls. The snapshot polls at 4 Hz,
 	// so writing the live value straight into the widget would yank a drag in
 	// progress; the buffer holds the operator's value while the item is

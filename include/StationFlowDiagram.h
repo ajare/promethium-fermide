@@ -55,6 +55,33 @@ namespace station_flow
 	};
 	// Shared display formatting: exact zero, signed trace, and non-finite --.
 	std::string formatTelemetryNumber(double value);
+	// #849: one active Fault as the editor presents it. The node identity is
+	// carried alongside the fault so the canvas badge, the alarm panel and the
+	// inspector all speak of the same object, and `latched` separates a
+	// protective Trip from a plain Fault: a Trip is cleared free by
+	// resetTrip, a Fault costs a funded repair.
+	struct FaultBadge
+	{
+		std::string nodeType;       // the Flow diagram's own node type name
+		std::string installationId;
+		std::string modeId;
+		uint64_t onsetTick{0};
+		core::FaultCause::Kind causeKind{core::FaultCause::Kind::ScenarioEvent};
+		double derivedImpact{0.0}; // fraction of rated capability the Fault has taken
+		bool latched{false};       // a protective Trip, not a plain Fault
+	};
+	// The mode ids the opt-in model latches as protective Trips. The free
+	// resetTrip is legal on exactly these, so the badge, the panel's action
+	// and the core's refusal cannot disagree about what a free reset fixes.
+	bool isLatchedTripMode(std::string const& modeId);
+	// Every active Fault and latched Trip in the snapshot, deepest derived
+	// impact first, ties broken by installation id then mode id so the alarm
+	// order never depends on the snapshot's collection order.
+	std::vector<FaultBadge> collectFaults(core::StationSystemsSnapshot const& snapshot);
+	// The cause kind as an operator reads it. A DegradationCrossing, ThermalGate
+	// or FeedContamination cause names a Fault the simulation raised itself and
+	// can never be injected from the editor.
+	char const* faultCauseName(core::FaultCause::Kind kind);
 	// #816: the composite footer's aggregated telemetry for one collapsed
 	// prefab unit, given its internal (nodeType, namespaced entryId) pairs in
 	// the fixed prefab walk order. The footer sums the unit's electrical draw
@@ -122,6 +149,11 @@ public:
 		std::function<void()> const& finishHeader = {});
 	// Last displayed readout, also used by headless UI checks.
 	std::optional<station_flow::NodeTelemetry> nodeTelemetry(std::string const& type,
+		std::string const& id) const;
+	// #849: the active Faults badged on one node as of the last rendered
+	// frame, deepest impact first. Empty when the node has no live snapshot or
+	// no active Fault.
+	std::vector<station_flow::FaultBadge> nodeFaults(std::string const& type,
 		std::string const& id) const;
 	// Empty when nothing is selected. The index addresses the entry inside the
 	// node type's own draft vector (stores for "Store", transfers for
@@ -223,6 +255,9 @@ private:
 
 	std::shared_ptr<StationComponentHelpResource const> mComponentHelp;
 	std::map<std::string, station_flow::NodeTelemetry> mTelemetry;
+	// #849: the last rendered frame's fault badges, keyed the same way as
+	// mTelemetry so a node's telemetry and its badges are read together.
+	std::map<std::string, std::vector<station_flow::FaultBadge>> mFaultBadges;
 	uint64_t mTelemetryTick{UINT64_MAX};
 	bool mTelemetryHealthy{true};
 	std::optional<core::StationSystemsSettings> mCached;

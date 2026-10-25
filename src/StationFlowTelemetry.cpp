@@ -74,6 +74,68 @@ namespace
 	}
 }
 
+// #849: the fault ledger the editor shows. Every Installation collection
+// that carries one is walked under the same node type name the Flow canvas
+// builds it with, so a badge on the node and a row in the alarm panel are
+// the same object rather than two lookups that can drift apart.
+bool isLatchedTripMode(std::string const& modeId)
+{
+	return modeId == "overtemp-runaway";
+}
+
+namespace
+{
+	template<class Entry>
+	void collectLedger(std::vector<FaultBadge>& out, char const* nodeType,
+		std::vector<Entry> const& entries)
+	{
+		for (auto const& entry : entries)
+			for (auto const& fault : entry.activeFaults)
+				out.push_back(station_flow::FaultBadge{nodeType, fault.installationId, fault.modeId,
+					fault.onsetTick, fault.causeKind, fault.derivedImpact,
+					isLatchedTripMode(fault.modeId)});
+	}
+}
+
+std::vector<FaultBadge> collectFaults(core::StationSystemsSnapshot const& snapshot)
+{
+	std::vector<FaultBadge> out;
+	collectLedger(out, "Solar", snapshot.power.sources);
+	collectLedger(out, "Battery", snapshot.power.batteries);
+	collectLedger(out, "Generator", snapshot.power.generators);
+	collectLedger(out, "Radiator", snapshot.thermal.radiators);
+	collectLedger(out, "Coolant loop", snapshot.coolantLoops);
+	collectLedger(out, "Chiller", snapshot.chillers);
+	collectLedger(out, "Heat engine", snapshot.heatEngines);
+	collectLedger(out, "Atmosphere", snapshot.atmospheres);
+	collectLedger(out, "Airlock cycle", snapshot.airlockCycles);
+	collectLedger(out, "Water treatment", snapshot.waterTreatments);
+	collectLedger(out, "Electrolyzer", snapshot.electrolyzers);
+	collectLedger(out, "Fuel cell", snapshot.fuelCells);
+	collectLedger(out, "Sabatier", snapshot.sabatierReactors);
+	collectLedger(out, "Methane processor", snapshot.methaneProcessors);
+	std::sort(out.begin(), out.end(), [](FaultBadge const& a, FaultBadge const& b) {
+		if (a.derivedImpact != b.derivedImpact) return a.derivedImpact > b.derivedImpact;
+		if (a.installationId != b.installationId) return a.installationId < b.installationId;
+		return a.modeId < b.modeId;
+	});
+	return out;
+}
+
+char const* faultCauseName(core::FaultCause::Kind kind)
+{
+	switch (kind)
+	{
+	case core::FaultCause::Kind::AgentAction: return "Agent action";
+	case core::FaultCause::Kind::ScenarioEvent: return "Scenario event";
+	case core::FaultCause::Kind::Editor: return "Editor";
+	case core::FaultCause::Kind::DegradationCrossing: return "Degradation crossing";
+	case core::FaultCause::Kind::ThermalGate: return "Thermal gate";
+	case core::FaultCause::Kind::FeedContamination: return "Feed contamination";
+	}
+	return "Unknown";
+}
+
 std::vector<std::string> connectionTelemetry(core::StationConnectionSnapshot const& flow)
 {
 	std::vector<std::string> lines{

@@ -663,6 +663,7 @@ void StationFlowDiagram::reset()
 	if (mNodeContext) { ImNodes::DestroyContext(mNodeContext); mNodeContext = nullptr; }
 	mCached.reset(); mGraph = {}; mPositions.clear(); mPan = {24, 24};
 	mTelemetry.clear(); mTelemetryTick = UINT64_MAX;
+	mFaultBadges.clear();
 	mZoom = 0.8f; mFitRequested = true; mSelected = -1; mConnectedOnly = false; mSearch[0] = 0;
 	mSelectedType.clear(); mSelectedId.clear();
 	mSelectedConnection.reset(); mConnectionScreen.clear();
@@ -903,6 +904,13 @@ std::optional<station_flow::NodeTelemetry> StationFlowDiagram::nodeTelemetry(
 {
 	auto const found = mTelemetry.find(type + keySeparator + id);
 	return found == mTelemetry.end() ? std::nullopt : std::optional{found->second};
+}
+
+std::vector<station_flow::FaultBadge> StationFlowDiagram::nodeFaults(
+	std::string const& type, std::string const& id) const
+{
+	auto const found = mFaultBadges.find(type + keySeparator + id);
+	return found == mFaultBadges.end() ? std::vector<station_flow::FaultBadge>{} : found->second;
 }
 
 bool StationFlowDiagram::pathwayScreenPosition(std::string const& id, ImVec2* out) const
@@ -1346,10 +1354,17 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	if (!showLive)
 	{
 		mTelemetry.clear(); mTelemetryTick = UINT64_MAX;
+		mFaultBadges.clear();
 	}
 	else if (mTelemetryTick != live->worldTick || mTelemetryHealthy != live->healthy)
 	{
 		mTelemetry.clear(); mTelemetryTick = live->worldTick; mTelemetryHealthy = live->healthy;
+		mFaultBadges.clear();
+		// #849: the badges are rebuilt from the same snapshot the readouts
+		// come from, so a node never wears a Fault its readouts have already
+		// moved past, and never keeps one that a repair cleared.
+		for (auto const& fault : station_flow::collectFaults(*live))
+			mFaultBadges[fault.nodeType + keySeparator + fault.installationId].push_back(fault);
 		auto const authored = core::stationAuthoredLinks(draft);
 		for (auto const& node : mGraph.nodes)
 			if (auto values = station_flow::telemetry(node, *live, core::World::getFixedTimestep(), &draft, authored))
@@ -1372,6 +1387,24 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			if (auto values = station_flow::compositeTelemetry(internals, *live,
 						core::World::getFixedTimestep(), &draft, authored))
 				mTelemetry[compositeKey] = std::move(*values);
+			// A collapsed unit carries its internals' Faults too: the unit is
+			// what the canvas shows, so a Fault inside it must not be invisible
+			// until somebody expands it. Deepest impact first, same order the
+			// flat list already has.
+			for (auto const& [internalType, internalId] : internals)
+			{
+				auto const found = mFaultBadges.find(internalType + keySeparator + internalId);
+				if (found == mFaultBadges.end()) continue;
+				for (auto const& fault : found->second)
+					mFaultBadges[compositeKey].push_back(fault);
+			}
+			std::sort(mFaultBadges[compositeKey].begin(), mFaultBadges[compositeKey].end(),
+				[](station_flow::FaultBadge const& a, station_flow::FaultBadge const& b) {
+					if (a.derivedImpact != b.derivedImpact) return a.derivedImpact > b.derivedImpact;
+					if (a.installationId != b.installationId) return a.installationId < b.installationId;
+					return a.modeId < b.modeId;
+				});
+			if (mFaultBadges[compositeKey].empty()) mFaultBadges.erase(compositeKey);
 		}
 	}
 	if (live && live->enabled && draftPending)
@@ -2522,6 +2555,48 @@ entry.thermalClass = "moderate";
 			+ (derived ? " (derived)" : "");
 		draw->AddText(ImGui::GetFont(), ImGui::GetFontSize() * 1.1f * mZoom, {a.x + 8 * mZoom, a.y + 6 * mZoom},
 			IM_COL32(235, 240, 245, 255), label.c_str(), nullptr, (nodeWidth - 16) * mZoom, &clip);
+		// #849: the fault badge. A node with an active Fault wears its mode
+		// and the derived impact that Fault costs, deepest first, so the
+		// canvas says what is broken and how much it costs without opening
+		// the inspector. A latched Trip reads hotter than a plain Fault
+		// because it will not clear itself: the machine stays out of service
+		// until somebody resets or repairs it.
+		if (auto const badged = nodeFaults(n.type, n.id); !badged.empty())
+		{
+			auto const& worst = badged.front();
+			std::string badge = (worst.latched ? "! " : "") + worst.modeId + " "
+				+ station_flow::formatTelemetryNumber(worst.derivedImpact * 100.0) + "%";
+			if (badged.size() > 1)
+				badge += " +" + std::to_string(badged.size() - 1);
+			auto* font = ImGui::GetFont();
+			float const fontSize = ImGui::GetFontSize() * 0.92f * mZoom;
+			auto const textSize = font->CalcTextSizeA(fontSize,
+				std::numeric_limits<float>::max(), 0.0f, badge.c_str());
+			float const padX = 5.0f * mZoom, padY = 2.0f * mZoom;
+			ImVec2 const ba{d.x - textSize.x - padX * 2.0f - 6.0f * mZoom, a.y + 5.0f * mZoom};
+			ImVec2 const bb{ba.x + textSize.x + padX * 2.0f, ba.y + textSize.y + padY * 2.0f};
+			ImU32 const fill = worst.latched ? IM_COL32(176, 32, 32, 245)
+				: worst.derivedImpact >= 0.5 ? IM_COL32(196, 74, 48, 235)
+				: worst.derivedImpact > 0.0 ? IM_COL32(176, 128, 36, 230)
+				: IM_COL32(96, 104, 118, 225);
+			draw->AddRectFilled(ba, bb, fill, 3.0f * mZoom);
+			draw->AddRect(ba, bb, IM_COL32(250, 236, 226, 235), 3.0f * mZoom, 1.2f);
+			draw->AddText(font, fontSize, {ba.x + padX, ba.y + padY},
+				IM_COL32(255, 248, 244, 255), badge.c_str());
+			if (hovered)
+			{
+				std::string tooltip;
+				for (auto const& fault : badged)
+				{
+					if (!tooltip.empty()) tooltip += "\n";
+					tooltip += fault.modeId + (fault.latched ? " (latched Trip)" : "") + " - "
+						+ station_flow::faultCauseName(fault.causeKind)
+						+ ", impact " + station_flow::formatTelemetryNumber(fault.derivedImpact * 100.0)
+						+ "% since tick " + std::to_string(fault.onsetTick);
+				}
+				ImGui::SetTooltip("%s", tooltip.c_str());
+			}
+		}
 		auto const liveNode = mTelemetry.find(n.type + keySeparator + n.id);
 		auto portRate = [&](std::string const& name) -> std::string_view {
 			if (liveNode == mTelemetry.end()) return {};

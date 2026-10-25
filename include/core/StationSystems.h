@@ -2327,6 +2327,17 @@ namespace core
 	// with a diagnostic rather than accepted and ignored.
 	std::vector<StationInstallationIdentity> stationInstallationIdentities(
 		StationSystemsSettings const& settings);
+	// #849: the fault modes one Installation has opted into, so an editor
+	// offers only what the core would accept for that machine. Empty when the
+	// id names nothing or nothing is enabled. Wear modes never appear: Wear
+	// is accumulated by duty and is never injected.
+	std::vector<std::string> stationInjectableFaultModes(
+		StationSystemsSettings const& settings, std::string_view installationId);
+	// #849: the repair plans authored for one Installation (#842). Empty
+	// when the machine has no repair-parts wiring, which is exactly what
+	// makes repairFault refuse it.
+	std::vector<FaultRepairSettings> stationRepairPlans(
+		StationSystemsSettings const& settings, std::string_view installationId);
 	// Profile shape validation and deterministic evaluation: the level of
 	// the last segment started at or before the current phase of the
 	// repeating period, or the constant level when there is no period.

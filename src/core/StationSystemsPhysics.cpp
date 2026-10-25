@@ -300,6 +300,82 @@ namespace core
 			identities.push_back({engine.id, "heat engine"});
 		return identities;
 	}
+	// #849: the fault modes one Installation can actually be injected with,
+	// read straight from its own opt-ins. The editor offers injection from
+	// this list rather than from a restated table, so a mode nobody opted in
+	// is never even presented, and a mode the core would refuse cannot be
+	// reached from the surface. Wear modes are deliberately absent: Wear is
+	// accumulated by duty, never injected, and Repair never reverses it.
+	std::vector<std::string> stationInjectableFaultModes(
+		StationSystemsSettings const& settings, std::string_view installationId)
+	{
+		std::vector<std::string> modes;
+		auto const named = [&](auto const& entries) {
+			for (auto const& entry : entries) if (entry.id == installationId) return &entry;
+			return static_cast<decltype(&entries.front())>(nullptr);
+		};
+		if (auto const* loop = named(settings.coolantLoops))
+		{
+			if (loop->coolantLeak) modes.push_back("coolant-leak");
+			if (loop->condition) modes.push_back("pump-seizure");
+		}
+		if (auto const* chiller = named(settings.chillers))
+		{
+			if (chiller->compressorFailure) modes.push_back("compressor-failure");
+			if (chiller->refrigerantLeak) modes.push_back("refrigerant-leak");
+		}
+		if (auto const* radiator = named(settings.radiators))
+			if (radiator->panelPuncture) modes.push_back("panel-puncture");
+		if (auto const* engine = named(settings.heatEngines))
+			if (engine->mechanicalSeizure) modes.push_back("mechanical-seizure");
+		if (auto const* generator = named(settings.generators))
+			if (generator->failedStart) modes.push_back("failed-start");
+		if (auto const* array = named(settings.solarArrays))
+		{
+			if (array->stringLoss) modes.push_back("string-loss");
+			if (array->trackingFailure) modes.push_back("tracking-failure");
+		}
+		if (auto const* battery = named(settings.batteries))
+			if (battery->thermalRunaway) modes.push_back("thermal-runaway");
+		if (auto const* air = named(settings.atmospheres))
+			if (air->fire) modes.push_back("fire");
+		if (auto const* cycle = named(settings.airlockCycles))
+		{
+			if (cycle->interruptedCycle) modes.push_back("interrupted-cycle");
+			if (cycle->interlockFailure) modes.push_back("interlock-failure");
+		}
+		if (auto const* treatment = named(settings.waterTreatments))
+			if (treatment->breakthrough) modes.push_back("breakthrough");
+		if (auto const* reactor = named(settings.sabatierReactors))
+			if (reactor->overtempRunaway) modes.push_back("overtemp-runaway");
+		if (auto const* processor = named(settings.methaneProcessors))
+			if (processor->overtempRunaway) modes.push_back("overtemp-runaway");
+		std::sort(modes.begin(), modes.end());
+		return modes;
+	}
+	// #849: the repair plans authored for one Installation (#842). Which
+	// modes are repairable, how long each takes and what it costs is the
+	// machine's own wiring; empty means there is none, which is exactly why
+	// repairFault would refuse that machine. The editor reads repairability
+	// from here rather than guessing, so a button never offers work the core
+	// would turn down.
+	std::vector<FaultRepairSettings> stationRepairPlans(
+		StationSystemsSettings const& settings, std::string_view installationId)
+	{
+		auto const plansOf = [&](auto const& entries) {
+			for (auto const& entry : entries)
+				if (entry.id == installationId)
+					return entry.repairParts
+						? entry.repairParts->repairs
+						: std::vector<FaultRepairSettings>{};
+			return std::vector<FaultRepairSettings>{};
+		};
+		auto plans = plansOf(settings.coolantLoops);
+		if (plans.empty()) plans = plansOf(settings.chillers);
+		if (plans.empty()) plans = plansOf(settings.radiators);
+		if (plans.empty()) plans = plansOf(settings.heatEngines);
+		return plans;
+	}
 	// The endpoint half of the transfer entry check (#640): exactly the rules
 	// a link between a store connector and a transfer connector can violate.
 	// The whole-configuration validator below runs it for every transfer, and

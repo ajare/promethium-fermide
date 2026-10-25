@@ -532,6 +532,7 @@ add_library(pf-agent-editing STATIC
     src/MarkerPanel.cpp
     src/FurniturePanel.cpp
     src/StationSystemsWindow.cpp
+    src/StationFaultPanel.cpp
     src/StationSystemsEntryEditor.cpp
     src/StationFlowDiagram.cpp
     src/StationFlowTelemetry.cpp

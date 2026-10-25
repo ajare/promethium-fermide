@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cmath>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -184,6 +185,13 @@ std::vector<std::string> coolantLoopIds(core::StationSystemsSettings const& draf
 {
 	return entryIds(draft.coolantLoops);
 }
+// #849: an airlock interlock failure breaches along an existing pathway,
+// so the candidate list is the draft's own pathways - a plan can never
+// name an opening that is not there.
+std::vector<std::string> pathwayIds(core::StationSystemsSettings const& draft)
+{
+	return entryIds(draft.atmospherePathways);
+}
 std::vector<std::string> installationIds(core::StationSystemsSettings const& draft)
 {
 	std::vector<std::string> ids;
@@ -322,6 +330,108 @@ void renderRangedDouble(std::string const& field, double& value, double step, do
 {
 	renderRangedDouble(field, value, step, stepFast, "%f");
 }
+
+// #849: the fault framework's opt-in blocks. Presence is frozen topology -
+// enabling or disabling one changes what the machine *is*, not how it is
+// tuned - while the rates inside stay live-tunable and never reprice the
+// fade, booking or repair already banked. The checkbox adds or drops the
+// whole block; the fields inside are reachable only while it exists,
+// because an absent block has nothing to tune. Enabling seeds the block's
+// own declared defaults rather than a blank record, so an opted-in machine
+// is valid the moment it is created.
+template<class Block, class Fields>
+void renderFaultOptIn(std::string const& field, std::optional<Block>& block, Fields&& fields)
+{
+	bool enabled = block.has_value();
+	if (ImGui::Checkbox(field.c_str(), &enabled))
+	{
+		if (enabled) block = Block{};
+		else block.reset();
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Enabling or disabling this block is a topology change. "
+			"The rates inside stay live-tunable and never reprice what has already accumulated.");
+	if (!enabled) return;
+	std::forward<Fields>(fields)(*block);
+}
+
+// The permanent Wear layer: fade driven by the accumulators the machine
+// really runs. Rates are fractions of rated capacity per accumulator unit,
+// and an unwired rate stays zero so no author can pay for fade the machine
+// cannot accumulate. Repair never reverses any of it - only replacement,
+// a topology reset, starts a machine unworn.
+void renderWearBlock(std::string const& label, std::string const& field,
+	std::optional<core::InstallationWearSettings>& wear)
+{
+	renderFaultOptIn(field, wear, [&](core::InstallationWearSettings& block) {
+		renderRangedDouble(describe("fade per cycle", label), block.fadePerCycle, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("fade per operating hour", label), block.fadePerOperatingHour, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("fade per throughput kg", label), block.fadePerThroughputKg, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("fade per calendar hour", label), block.fadePerCalendarHour, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("max wear fraction", label), block.maxWearFraction, 0.0, 0.0, "%.3f");
+	});
+}
+
+// The Condition layer: one aggregate intactness in [0, 1], eroded only by
+// the stressors actually acting and restored only by funded recovery from
+// the named service stock above its protected reserve. The thresholds are
+// the authored points at which a stressor starts acting, and the seizure
+// threshold is the Condition below which the catalogue 'pump-seizure'
+// Fault spawns on its own.
+void renderConditionBlock(core::StationSystemsSettings& draft, std::string const& label,
+	std::optional<core::InstallationConditionSettings>& condition)
+{
+	renderFaultOptIn(describe("Condition model", label), condition,
+		[&](core::InstallationConditionSettings& block) {
+		renderRangedDouble(describe("initial condition", label), block.initialCondition, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("overheat stress C", label), block.overheatStressC, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("overheat degrade per hour", label), block.overheatDegradePerHour, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("cavitation fill fraction", label), block.cavitationFillFraction, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("cavitation degrade per hour", label), block.cavitationDegradePerHour, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("seizure threshold", label), block.seizureThreshold, 0.0, 0.0, "%.3f");
+		renderRefCombo(describe("restore store", label), block.restoreStoreId, storeIds(draft), false);
+		renderRangedDouble(describe("restore per hour", label), block.restorePerHour, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("stock units per condition point", label),
+			block.stockUnitsPerConditionPoint, 0.0, 0.0, "%.3f");
+	});
+}
+
+// The repair-parts wiring (#842): the store this machine's spares live in
+// and the per-mode plans that draw from it. The mode list is the machine's
+// own injectable set asked of core, so a plan is never authored against a
+// mode this machine cannot have - and a machine with no wiring is exactly
+// the machine repairFault refuses.
+void renderRepairPartsBlock(core::StationSystemsSettings& draft, std::string const& label,
+	std::string const& installationId, std::optional<core::RepairPartsSettings>& parts)
+{
+	renderFaultOptIn(describe("Repair-parts wiring", label), parts,
+		[&](core::RepairPartsSettings& block) {
+		renderRefCombo(describe("parts store", label), block.partsStoreId, storeIds(draft), false);
+		auto const modes = core::stationInjectableFaultModes(draft, installationId);
+		if (modes.empty())
+			ImGui::TextDisabled("This machine has no injectable fault modes, so a plan has nothing to target.");
+		for (size_t plan = 0; plan < block.repairs.size(); )
+		{
+			auto& entry = block.repairs[plan];
+			auto const row = std::string("repair plan ") + std::to_string(plan);
+			renderRefCombo(describe(row + " mode", label), entry.modeId, modes, false);
+			ImGui::SameLine();
+			renderRangedDouble(describe(row + " duration seconds", label), entry.durationSeconds, 0.0, 0.0, "%.1f");
+			ImGui::SameLine();
+			renderRangedDouble(describe(row + " parts quantity", label), entry.partsQuantity, 0.0, 0.0, "%.3f");
+			ImGui::SameLine();
+			renderRefCombo(describe(row + " waste store", label), entry.wasteStoreId, storeIds(draft), false);
+			ImGui::SameLine();
+			if (ImGui::Button(describe("Remove " + row, label).c_str()))
+				block.repairs.erase(block.repairs.begin() + static_cast<std::ptrdiff_t>(plan));
+			else
+				++plan;
+		}
+		if (block.repairs.size() < core::MaxStationFaultRepairs
+			&& ImGui::Button(("Add repair plan to " + label).c_str()))
+			block.repairs.push_back({});
+	});
+}
 }
 
 bool renderConversionEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::ResourceConversionSettings& conversion,
@@ -423,6 +533,21 @@ bool renderSolarEntry([[maybe_unused]] core::StationSystemsSettings& draft, core
 			array.illumination.segments.push_back(
 				{array.illumination.periodSeconds * 0.5, 0.0});
 	}
+	// #849: the array's fault opt-ins. String loss removes a declared
+	// fraction of installed capacity while the Fault is active; a tracking
+	// failure leaves the stuck array holding a fixed low availability while
+	// the sun still rises and sets over mispointed panels. An accepted
+	// injection freezes the parameters, so a later retune cannot reach a
+	// Fault already running.
+	renderFaultOptIn(describe("Fault: string-loss", label), array.stringLoss,
+		[&](core::SolarStringLossSettings& block) {
+		renderRangedDouble(describe("string loss fraction", label), block.lossFraction, 0.0, 0.0, "%.3f");
+	});
+	renderFaultOptIn(describe("Fault: tracking-failure", label), array.trackingFailure,
+		[&](core::SolarTrackingFailureSettings& block) {
+		renderRangedDouble(describe("failed availability", label), block.availability, 0.0, 0.0, "%.3f");
+	});
+	renderWearBlock(label, describe("Wear: cell degradation", label), array.cellDegradation);
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
 		removeArray = true;
@@ -893,6 +1018,12 @@ bool renderWaterTreatmentEntry([[maybe_unused]] core::StationSystemsSettings& dr
 			ImGui::Text("  %s: %.8g", name, total > 0 ? effluent.at(name) / total : 0.0);
 	}
 	ImGui::InputInt(describe("priority", label).c_str(), &treatment.priority, 1, 0);
+	// #849: a breakthrough lands untreated feed in the treated store as
+	// unqualified material - the quality gates and reprocessing routing do
+	// the rest, exactly as the propagation rule requires. Membrane fouling
+	// is the permanent Wear layer beneath it.
+	ImGui::Checkbox(describe("Fault: breakthrough", label).c_str(), &treatment.breakthrough);
+	renderWearBlock(label, describe("Wear: membrane fouling", label), treatment.membraneFouling);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeTreatment = true;
@@ -916,6 +1047,14 @@ bool renderElectrolyzerEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	renderRangedDouble(describe("specific energy kWh/kg water", label), cell.specificEnergyKWhPerKgWater, 0.0, 0.0, "%.4f");
 	renderRangedDouble(describe("max sink temperature C", label), cell.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
 	ImGui::InputInt(describe("priority", label).c_str(), &cell.priority, 1, 0);
+	// #849: feed-contact poisoning, and the cell's permanent Wear: a
+	// degraded membrane costs more electricity per kilogram split.
+	renderFaultOptIn(describe("Fault: catalyst-poisoning", label), cell.catalystPoisoning,
+		[&](core::CatalystPoisoningSettings& block) {
+		renderRangedDouble(describe("poison trigger concentration", label), block.triggerConcentration, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("poison wear per hour", label), block.wearPerHour, 0.0, 0.0, "%.6f");
+	});
+	renderWearBlock(label, describe("Wear: membrane degradation", label), cell.membraneDegradation);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeCell = true;
@@ -936,6 +1075,9 @@ bool renderCo2CaptureEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	renderRangedDouble(describe("specific energy kWh/kg", label), capture.specificEnergyKWhPerKg, 0.0, 0.0, "%.4f");
 	renderRangedDouble(describe("consumable per kg", label), capture.consumablePerKg, 0.0, 0.0, "%.6f");
 	ImGui::InputInt(describe("priority", label).c_str(), &capture.priority, 1, 0);
+	// #849: spent absorbent takes up less per pass, so rated capture rate
+	// falls with the mass captured.
+	renderWearBlock(label, describe("Wear: absorbent degradation", label), capture.absorbentDegradation);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeCapture = true;
@@ -969,6 +1111,18 @@ bool renderAtmosphereEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	renderRangedDouble(describe("max pressure kPa", label), atmosphere.maxPressureKPa, 0.0, 0.0, "%.3f");
 	renderRangedDouble(describe("min O2 partial pressure kPa", label), atmosphere.minOxygenPartialPressureKPa, 0.0, 0.0, "%.3f");
 	renderRangedDouble(describe("max CO2 partial pressure kPa", label), atmosphere.maxCarbonDioxidePartialPressureKPa, 0.0, 0.0, "%.3f");
+	// #847: a fire books its species and heat into the compartment through
+	// the hazard-booking ledger, and self-extinguishes once the oxygen falls
+	// to the authored threshold - the model contains its own physics rather
+	// than burning until somebody stops it.
+	renderFaultOptIn(describe("Fault: fire", label), atmosphere.fire,
+		[&](core::AtmosphereFireSettings& block) {
+		renderRangedDouble(describe("fire oxygen kg/s", label), block.oxygenKgPerS, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("fire carbon monoxide kg/s", label), block.carbonMonoxideKgPerS, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("fire carbon dioxide kg/s", label), block.carbonDioxideKgPerS, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("fire heat kW", label), block.heatKW, 0.0, 0.0, "%.4f");
+		renderRangedDouble(describe("fire oxygen threshold kg", label), block.oxygenThresholdKg, 0.0, 0.0, "%.6f");
+	});
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeAtmosphere = true;
@@ -989,6 +1143,16 @@ bool renderAirlockCycleEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	renderRangedDouble(describe("recovered fraction", label), cycle.recoveredFraction, 0.0, 0.0, "%.3f");
 	ImGui::InputInt(describe("priority", label).c_str(),
 		&cycle.priority, 1, 0);
+	// #847: a failed cycle loses its whole dose with no recovery; an
+	// interlock failure vents the compartment to exterior through an
+	// existing pathway at the breach area authored here, so the breach is
+	// always a real opening rather than an invented one.
+	ImGui::Checkbox(describe("Fault: interrupted-cycle", label).c_str(), &cycle.interruptedCycle);
+	renderFaultOptIn(describe("Fault: interlock-failure", label), cycle.interlockFailure,
+		[&](core::AirlockInterlockFailureSettings& block) {
+		renderRefCombo(describe("breach pathway", label), block.pathwayId, pathwayIds(draft), false);
+		renderRangedDouble(describe("breach area m2", label), block.breachAreaM2, 0.0, 0.0, "%.4f");
+	});
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeCycle = true;
@@ -1257,6 +1421,16 @@ bool renderBatteryEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	renderRangedDouble(describe("max discharge kW", label), battery.maxDischargeKW, 0.0, 0.0, "%.3f");
 	renderRangedDouble(describe("charge efficiency", label), battery.chargeEfficiency, 0.0, 0.0, "%.3f");
 	renderRangedDouble(describe("discharge efficiency", label), battery.dischargeEfficiency, 0.0, 0.0, "%.3f");
+	// #849: the fault framework opt-ins. The bank fades on real cycles and
+	// calendar time, and runs away into the compartment it names - both are
+	// opt-in, and both are frozen topology while the rates inside stay live.
+	renderWearBlock(label, describe("Wear: capacity fade", label), battery.capacityFade);
+	renderFaultOptIn(describe("Fault: thermal-runaway", label), battery.thermalRunaway,
+		[&](core::BatteryThermalRunawaySettings& block) {
+		renderRefCombo(describe("runaway compartment", label), block.compartmentId, atmosphereIds(draft), false);
+		renderRangedDouble(describe("runaway heat kJ", label), block.heatKJ, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("runaway toxic kg", label), block.toxicKg, 0.0, 0.0, "%.3f");
+	});
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
@@ -1283,6 +1457,12 @@ bool renderGeneratorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	renderRangedDouble(describe("shutdown heat kW", label), generator.shutdownHeatKW, 0.0, 0.0, "%.3f");
 	renderRangedDouble(describe("shutdown seconds", label), generator.shutdownSeconds, 0.0, 0.0, "%.3f");
 	renderRangedDouble(describe("max sink temperature C", label), generator.maxSinkTemperatureC, 0.0, 0.0, "%.3f");
+	// #845: a failed start cranks and dissipates its cranking energy, then
+	// falls back without ever reaching Running. The mode carries no
+	// parameters beyond the opt-in: the failed crank is the machine's own
+	// authored crank.
+	ImGui::Checkbox(describe("Fault: failed-start", label).c_str(), &generator.failedStart);
+	renderWearBlock(label, describe("Wear: fouled injector", label), generator.fouledInjector);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
@@ -1307,6 +1487,14 @@ bool renderFuelCellEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 		cell.efficiency, 0.0, 0.05, "%.3f");
 	renderRangedDouble(describe("commanded output kW", label), cell.commandedOutputKW, 0.0, 1.0, "%.3f");
 	renderRangedDouble(describe("max sink temperature C", label), cell.maxSinkTemperatureC, 0.0, 5.0, "%.1f");
+	// #849: feed-contact poisoning fades the stack permanently per exposed
+	// hour; the fade itself is the `stack-degradation` Wear layer.
+	renderFaultOptIn(describe("Fault: catalyst-poisoning", label), cell.catalystPoisoning,
+		[&](core::CatalystPoisoningSettings& block) {
+		renderRangedDouble(describe("poison trigger concentration", label), block.triggerConcentration, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("poison wear per hour", label), block.wearPerHour, 0.0, 0.0, "%.6f");
+	});
+	renderWearBlock(label, describe("Wear: stack degradation", label), cell.stackDegradation);
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
 	return removeRequested;
@@ -1329,6 +1517,15 @@ bool renderSabatierReactorEntry([[maybe_unused]] core::StationSystemsSettings& d
 	renderRangedDouble(describe("specific energy kWh/kg CO2", label), reactor.specificEnergyKWhPerKgCO2, 0.0, 0.0, "%.4f");
 	renderRangedDouble(describe("max sink temperature C", label), reactor.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
 	ImGui::InputInt(describe("priority", label).c_str(), &reactor.priority, 1, 0);
+	// #849: the reactor's latching protective Trip. Crossing the trigger
+	// temperature books the spike heat and latches; the latch holds until a
+	// free resetTrip or a funded repair clears it.
+	renderFaultOptIn(describe("Fault: overtemp-runaway", label), reactor.overtempRunaway,
+		[&](core::OvertempRunawaySettings& block) {
+		renderRangedDouble(describe("runaway trigger temperature C", label), block.triggerTemperatureC, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("runaway heat spike kJ", label), block.heatSpikeKJ, 0.0, 0.0, "%.4f");
+	});
+	renderWearBlock(label, describe("Wear: catalyst deactivation", label), reactor.catalystDeactivation);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
@@ -1352,6 +1549,14 @@ bool renderMethaneProcessorEntry([[maybe_unused]] core::StationSystemsSettings& 
 	renderRangedDouble(describe("specific energy kWh/kg CH4", label), processor.specificEnergyKWhPerKgCH4, 0.0, 0.0, "%.4f");
 	renderRangedDouble(describe("max sink temperature C", label), processor.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
 	ImGui::InputInt(describe("priority", label).c_str(), &processor.priority, 1, 0);
+	// #849: same latching Trip and permanent catalyst fade as the Sabatier
+	// reactor, authored per processor.
+	renderFaultOptIn(describe("Fault: overtemp-runaway", label), processor.overtempRunaway,
+		[&](core::OvertempRunawaySettings& block) {
+		renderRangedDouble(describe("runaway trigger temperature C", label), block.triggerTemperatureC, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("runaway heat spike kJ", label), block.heatSpikeKJ, 0.0, 0.0, "%.4f");
+	});
+	renderWearBlock(label, describe("Wear: catalyst deactivation", label), processor.catalystDeactivation);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
@@ -1394,6 +1599,18 @@ bool renderRadiatorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	renderRangedDouble(describe("emissivity", label), radiator.emissivity, 0.0, 0.0, "%.3f");
 	renderRangedDouble(describe("view factor", label), radiator.viewFactor, 0.0, 0.0, "%.3f");
 	renderRangedDouble(describe("sink temperature C", label), radiator.sinkTemperatureC, 0.0, 0.0, "%.3f");
+	// #844: the panel carries a finite coolant charge; a puncture bleeds it
+	// into the named compartment and rejection stays capped at the area that
+	// still holds coolant. Repair seals the puncture but never refills the
+	// panel, so the cap stays until replacement.
+	renderFaultOptIn(describe("Fault: panel-puncture", label), radiator.panelPuncture,
+		[&](core::PanelPunctureSettings& block) {
+		renderRefCombo(describe("puncture compartment", label), block.compartmentId, atmosphereIds(draft), false);
+		renderRangedDouble(describe("panel coolant kg", label), block.coolantKg, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("puncture leak rate kg/s", label), block.leakRateKgPerS, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("puncture specific heat kJ/kg K", label), block.specificHeatKJPerKgK, 0.0, 0.0, "%.4f");
+	});
+	renderRepairPartsBlock(draft, label, radiator.id, radiator.repairParts);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;
@@ -1423,6 +1640,18 @@ bool renderCoolantLoopEntry([[maybe_unused]] core::StationSystemsSettings& draft
 		+ " (circulation and freeze heat drawn ahead of discretionary loads; "
 		  "protection is authored here, never inferred)").c_str(),
 		&loop.criticalService);
+	// #849: the loop is the framework's pilot machine - a leak that drains
+	// the finite inventory, the Condition the leak and the stressors erode,
+	// the Wear the duty leaves behind, and the repair plans that draw the
+	// spares to fix any of it.
+	renderFaultOptIn(describe("Fault: coolant-leak", label), loop.coolantLeak,
+		[&](core::CoolantLeakSettings& block) {
+		renderRefCombo(describe("leak compartment", label), block.compartmentId, atmosphereIds(draft), false);
+		renderRangedDouble(describe("leak released kg", label), block.releasedKg, 0.0, 0.0, "%.3f");
+	});
+	renderConditionBlock(draft, label, loop.condition);
+	renderWearBlock(label, describe("Wear: pump wear", label), loop.wear);
+	renderRepairPartsBlock(draft, label, loop.id, loop.repairParts);
 	ImGui::SameLine();
 	bool const remove = !removeLabel.empty() && ImGui::Button(removeLabel.c_str());
 	ImGui::PopID();
@@ -1479,6 +1708,18 @@ bool renderChillerEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	ImGui::Checkbox((label
 		+ " protected critical service (work credited ahead of discretionary loads)").c_str(),
 		&chiller.criticalService);
+	// #844: the chiller's two fault modes and its repair-parts wiring. The
+	// leak's charge is finite and the capacity tracks what remains; the
+	// compressor simply stops. Both are opt-in and frozen topology.
+	ImGui::Checkbox(describe("Fault: compressor-failure", label).c_str(), &chiller.compressorFailure);
+	renderFaultOptIn(describe("Fault: refrigerant-leak", label), chiller.refrigerantLeak,
+		[&](core::RefrigerantLeakSettings& block) {
+		renderRefCombo(describe("leak compartment", label), block.compartmentId, atmosphereIds(draft), false);
+		renderRangedDouble(describe("refrigerant charge kg", label), block.chargeKg, 0.0, 0.0, "%.3f");
+		renderRangedDouble(describe("refrigerant leak rate kg/s", label), block.leakRateKgPerS, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("refrigerant specific heat kJ/kg K", label), block.specificHeatKJPerKgK, 0.0, 0.0, "%.4f");
+	});
+	renderRepairPartsBlock(draft, label, chiller.id, chiller.repairParts);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeChiller = true;

@@ -322,6 +322,9 @@ set(editor_names
     station/enduranceWorkflow
     station/forecastWorkflow
     station/stabilityWorkflow
+    station/faultBadgeWorkflow
+    station/faultAuthoringWorkflow
+    station/faultTripResetWorkflow
 )
 
 if(DEFINED LANE)

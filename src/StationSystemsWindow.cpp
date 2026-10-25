@@ -745,6 +745,20 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 		mFlowRefreshTime = now;
 		mFlowWasPaused = paused;
 	}
+	// #849: the alarm panel's entry point. The active count rides on the
+	// button so an alarm is visible with the panel closed, and the panel is
+	// its own window so it never steals space from the canvas or the plot.
+	size_t const activeFaultCount = mFlowSnapshot
+		? station_flow::collectFaults(*mFlowSnapshot).size() : 0;
+	ImGui::SameLine();
+	ImGui::PushStyleColor(ImGuiCol_Button, mFaultPanelVisible
+		? ImVec4{0.30f, 0.42f, 0.60f, 1.0f}
+		: activeFaultCount ? ImVec4{0.52f, 0.22f, 0.20f, 1.0f}
+		: ImVec4{0.20f, 0.22f, 0.26f, 1.0f});
+	std::string const alarmLabel = activeFaultCount
+		? "Fault alarms (" + std::to_string(activeFaultCount) + ")" : "Fault alarms";
+	if (ImGui::Button(alarmLabel.c_str())) mFaultPanelVisible = !mFaultPanelVisible;
+	ImGui::PopStyleColor();
 	mFlow.render(mDraft, [this, world](core::StationSystemsSettings& draft) {
 		renderFlowInspectorContents(draft, *world);
 	}, [this] { commitDraftChanges(true); }, [this] {
@@ -774,6 +788,17 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 	// commit, not four (#653). The deactivation frame lands here once no
 	// item is active.
 	commitDraftChanges();
+	// #849: the alarm panel is a separate window, opened from the toolbar
+	// button above. It reads the same polled snapshot the canvas badges do,
+	// so the list and the badges can never disagree about what is active.
+	if (mFaultPanelVisible)
+	{
+		ImGui::SetNextWindowPos({24.0f, 24.0f}, ImGuiCond_Appearing);
+		ImGui::SetNextWindowSize({640.0f, 420.0f}, ImGuiCond_Appearing);
+		if (ImGui::Begin("Station faults", &mFaultPanelVisible))
+			mFaultPanel.render(*world, mFlowSnapshot ? &*mFlowSnapshot : nullptr);
+		ImGui::End();
+	}
 }
 
 void StationSystemsWindow::renderFlowInspectorContents(
@@ -825,6 +850,9 @@ void StationSystemsWindow::renderFlowInspectorContents(
 	// do the opposite of everything above them.
 	if (selected->type == "Atmosphere pathway")
 		renderLiveHatchControls(world, selected->id);
+	// #849: the fault surface sits under the draft fields too, and for the
+	// same reason: it drives the running scenario, not the draft.
+	renderFaultControls(world, selected->type, selected->id);
 }
 
 void StationSystemsWindow::renderPrefabDialInspector(core::StationSystemsSettings& draft)
@@ -972,6 +1000,76 @@ void StationSystemsWindow::renderLiveHatchControls(core::World& world, std::stri
 	ImGui::SameLine();
 	ImGui::TextWrapped("Live edits change the running scenario only - the draft above does not carry them, "
 		"so applying the draft will overwrite them.");
+	if (!mDiagnostic.empty()) ImGui::TextWrapped("%s", mDiagnostic.c_str());
+	ImGui::PopID();
+}
+
+// #849: the inspector's fault surface for the selected Installation.
+// Which modes the machine can be injected with is asked of core rather
+// than restated here, so the editor never offers a mode the runtime would
+// refuse, and a machine that opted into nothing shows no fault section at
+// all. Every command goes out through the World facade - the same
+// validated surface a headless client drives - with an Editor cause, so
+// the injection is attributed the way an Agent's or a scenario event's
+// would be and is never judged by the simulation.
+void StationSystemsWindow::renderFaultControls(core::World& world,
+	std::string const& nodeType, std::string const& nodeId)
+{
+	auto const injectable = core::stationInjectableFaultModes(
+		world.getStationSystemsSettings(), nodeId);
+	auto const active = mFlow.nodeFaults(nodeType, nodeId);
+	if (injectable.empty() && active.empty()) return;
+	ImGui::SeparatorText("Faults");
+	ImGui::PushID(("faults-" + nodeType + "-" + nodeId).c_str());
+	if (active.empty())
+		ImGui::TextDisabled("No active Fault on this Installation.");
+	for (auto const& fault : active)
+		ImGui::TextWrapped("%s%s - impact %s%% since tick %llu (%s)",
+			fault.modeId.c_str(),
+			fault.latched ? " (latched Trip)" : "",
+			station_flow::formatTelemetryNumber(fault.derivedImpact * 100.0).c_str(),
+			static_cast<unsigned long long>(fault.onsetTick),
+			station_flow::faultCauseName(fault.causeKind));
+	if (!injectable.empty())
+	{
+		// The pick follows the machine: a mode left over from another
+		// Installation is not offered here, so the buffer is reseeded to
+		// one this machine actually opted into rather than carrying a mode
+		// that would only be refused.
+		if (mInjectMode.empty()
+			|| std::find(injectable.begin(), injectable.end(), mInjectMode) == injectable.end())
+			mInjectMode = injectable.front();
+		ImGui::SetNextItemWidth(128);
+		if (ImGui::BeginCombo("Inject fault mode", mInjectMode.c_str()))
+		{
+			for (auto const& mode : injectable)
+				if (ImGui::Selectable(mode.c_str(), mode == mInjectMode)) mInjectMode = mode;
+			ImGui::EndCombo();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Inject"))
+		{
+			core::FaultCause cause;
+			cause.kind = core::FaultCause::Kind::Editor;
+			cause.detail = "editor injection on " + nodeId;
+			std::string diagnostic;
+			if (world.injectStationFault(nodeId, mInjectMode, cause, &diagnostic)) mDiagnostic.clear();
+			else mDiagnostic = diagnostic;
+		}
+	}
+	bool const latched = std::any_of(active.begin(), active.end(),
+		[](station_flow::FaultBadge const& fault) { return fault.latched; });
+	if (latched)
+	{
+		if (ImGui::Button("Reset trip"))
+		{
+			std::string diagnostic;
+			if (world.resetStationTrip(nodeId, &diagnostic)) mDiagnostic.clear();
+			else mDiagnostic = diagnostic;
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled("free, instant");
+	}
 	if (!mDiagnostic.empty()) ImGui::TextWrapped("%s", mDiagnostic.c_str());
 	ImGui::PopID();
 }

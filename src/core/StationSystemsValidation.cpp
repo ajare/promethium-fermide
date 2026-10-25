@@ -3272,32 +3272,36 @@ namespace
 		// floor of zero would refuse values the author plainly needs. These
 		// are unbounded: what matters is that they are degrees, not that they
 		// are positive.
-		static constexpr std::array<char const*, 13> celsiusFields{
+		static constexpr std::array<char const*, 15> celsiusFields{
 			"chilled setpoint C", "freeze setpoint C", "max condensing temperature C",
 			"max growing temperature C", "max sink temperature C", "max temperature C",
 			"max usable temperature C", "min growing temperature C", "min operating temperature C",
-			"min temperature C", "min usable temperature C", "sink temperature C",
-			"starting temperature C"};
+			"min temperature C", "min usable temperature C",
+			// #849: a Condition stressor's onset and a runaway Trip's trigger
+			// are both degrees, so neither may be floored at zero.
+			"overheat stress C", "runaway trigger temperature C",
+			"sink temperature C", "starting temperature C"};
 		// Values that are a share of something: fractions, ratios,
 		// efficiencies, an emissivity, a view factor. They are declared
 		// explicitly rather than matched on the word "fraction", because
 		// "evaporation", "respiration" and "duration" all contain "ratio"
 		// without being one, and a substring rule would quietly clamp a rate
 		// to 1.0 per second.
-		static constexpr std::array<char const*, 32> unitIntervalFields{
-			"atmospheric nitrogen fraction", "charge efficiency",
+		static constexpr std::array<char const*, 38> unitIntervalFields{
+			"atmospheric nitrogen fraction", "cavitation fill fraction", "charge efficiency",
 			"composition atmospheric nitrogen fraction", "composition moisture fraction",
 			"composition nutrient nitrogen fraction", "composition other minerals fraction",
 			"composition phosphorus fraction", "composition potassium fraction",
 			"discharge efficiency", "edible fraction of harvest", "efficiency",
-			"efficiency (0..1]", "emissivity",
+			"efficiency (0..1]", "emissivity", "failed availability",
 			"food fraction of harvest", "harvest fraction of living biomass", "heat release fraction",
-			"max curtailment", "moisture fraction", "nitrification fraction",
+			"initial condition", "max curtailment", "max wear fraction",
+			"moisture fraction", "nitrification fraction",
 			"nutrient nitrogen fraction", "open fraction", "organic oxidation fraction",
 			"other minerals fraction", "phosphorus fraction", "potassium fraction",
 			"process water target moisture", "recovered fraction",
 			"recovery fraction of harvest", "recovery hysteresis fraction", "recovery ratio",
-			"target RH", "view factor"};
+			"seizure threshold", "string loss fraction", "target RH", "view factor"};
 		if (fieldIsOneOf(field, celsiusFields)) return StationFieldRange{false, 0.0, false, 0.0};
 		if (fieldIsOneOf(field, unitIntervalFields)) return StationFieldRange{true, 0.0, true, 1.0};
 		return StationFieldRange{true, 0.0, false, 0.0};

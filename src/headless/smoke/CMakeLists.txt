@@ -914,7 +914,7 @@ set_tests_properties(smoke-harness-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-editor
     NAME editor
     SOURCES
-        editor/StationSystems.cpp editor/StationComponentHelp.cpp editor/StationObservations.cpp editor/StationConnections.cpp editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/TransportStopNames.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
+        editor/StationSystems.cpp editor/StationComponentHelp.cpp editor/StationObservations.cpp editor/StationConnections.cpp editor/StationFaultSurface.cpp editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/TransportStopNames.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
         agent/ActivationEditor.cpp
         agent/GroupEditor.cpp
         agent/GroupAssignmentEditor.cpp
@@ -1226,6 +1226,14 @@ set_tests_properties(station-editor-flow-biology PROPERTIES LABELS "smoke;functi
 
 add_test(NAME station-editor-flow-schedules COMMAND pf-smoke-editor --check station/flowSchedulesWorkflow)
 set_tests_properties(station-editor-flow-schedules PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+# #849: the fault framework's editor surface. Badges, the alarm panel and
+# the opt-in authoring controls, driven through the real widgets.
+add_test(NAME station-editor-fault-badge COMMAND pf-smoke-editor --check station/faultBadgeWorkflow)
+set_tests_properties(station-editor-fault-badge PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+add_test(NAME station-editor-fault-authoring COMMAND pf-smoke-editor --check station/faultAuthoringWorkflow)
+set_tests_properties(station-editor-fault-authoring PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+add_test(NAME station-editor-fault-trip-reset COMMAND pf-smoke-editor --check station/faultTripResetWorkflow)
+set_tests_properties(station-editor-fault-trip-reset PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 
 # Per-test CTest timeouts derived from measured Release timings (1.2x, rounded up
 # to the nearest 10s). Included last so it overrides the baseline timeouts set
