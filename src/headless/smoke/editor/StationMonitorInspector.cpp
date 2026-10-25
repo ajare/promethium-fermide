@@ -85,10 +85,12 @@ void monitorInspector(smoke::Context const& context)
 		core::applyStationThermalPlantDefaultMonitors(effective);
 		core::applyStationPowerSourceDefaultMonitors(effective);
 		core::applyStationStoreConnectionDefaultMonitors(effective);
+		core::applyStationLegacyReportingMonitors(effective);
 		REQ(window.draft().monitors.size() == effective.monitors.size() && window.draft().monitors[0].enabled,
 			"enable did not materialize the disabled default set");
 		REQ(std::count_if(window.draft().monitors.begin(), window.draft().monitors.end(),
-			[](auto const& m) { return m.enabled; }) == 1, "other Monitors enabled unexpectedly");
+			[](auto const& m) { return m.enabled; }) == 1 + std::count_if(effective.monitors.begin(), effective.monitors.end(),
+			[](auto const& m) { return m.enabled; }), "other Monitors enabled unexpectedly");
 		ctx->ItemOpen("**/room-po2-low [iss]"); ctx->Yield(3);
 		REQ(ctx->ItemInfo("**/Threshold##room-po2-low", ImGuiTestOpFlags_NoError)->ID != 0,
 			"expanded Monitor did not show its threshold");
@@ -169,6 +171,37 @@ void monitorInspector(smoke::Context const& context)
 			REQ(std::any_of(window.draft().monitors.begin(), window.draft().monitors.end(), [&](auto const& m) {
 				return m.id == monitorId && m.enabled;
 			}), "power enable did not commit through draft command");
+		}
+		// #865: aggregate and reservoir compatibility reporting use the
+		// same inspector command/history seam; derived pool nodes stay inert.
+		for (auto const& [type, id, metric] : std::vector<std::tuple<std::string, std::string, std::string>>{
+			{"Power", "Shared electrical pool", "reserveExhausted"},
+			{"Reservoir", "sink", "temperatureC"}})
+		{
+			if (type == "Power")
+			{
+				ctx->ItemOpen("**/Station-wide reporting"); ctx->Yield(3);
+			}
+			else
+			{
+				REQ(window.flowNodeRect(type, id, &rect), "compatibility Monitor node missing");
+				ctx->MouseTeleportToPos({(rect.x + rect.z) / 2, (rect.y + rect.w) / 2});
+				ctx->Yield(2); ctx->MouseClick(); ctx->Yield(3);
+			}
+			auto const before = window.draft();
+			auto monitor = std::find_if(before.monitors.begin(), before.monitors.end(), [&](auto const& m) {
+				return m.metric == metric && m.subjectId == (type == "Power" ? "station" : id);
+			});
+			REQ(monitor != before.monitors.end() && monitor->enabled, "compatibility rule not enabled");
+			auto const ref = "**/Enabled##" + monitor->id;
+			REQ(ctx->ItemInfo(ref.c_str(), ImGuiTestOpFlags_NoError)->ID != 0, "compatibility control missing");
+			driver.click(ctx, ref.c_str()); ctx->Yield(3);
+			REQ(std::any_of(window.draft().monitors.begin(), window.draft().monitors.end(), [&](auto const& m) {
+				return m.id == monitor->id && !m.enabled;
+			}), "compatibility disable did not reach the draft");
+			driver.click(ctx, "**/Undo configuration"); ctx->Yield(3);
+			REQ(window.draft() == before, "compatibility undo lost the default rule");
+			if (type == "Power") { ctx->ItemClose("**/Station-wide reporting"); ctx->Yield(3); }
 		}
 		// #877: every bulk scope goes through the real inspector and is a
 		// single history step, restoring the complete mixed flag set on undo.

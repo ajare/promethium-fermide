@@ -424,7 +424,7 @@ namespace core
 			else chiller.status = StationTransferStatus::Partial;
 		}
 		// #580: republish the protected totals after the chiller pass
-		// so the snapshot, the station alarm and the event announcements
+		// so the snapshot and its Monitor observations
 		// report the reconciled cooling work - the duty that actually
 		// moved - rather than the pre-verification reservation.
 		if (!std::isfinite(protectedSuppliedKW))

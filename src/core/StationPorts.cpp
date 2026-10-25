@@ -1746,6 +1746,7 @@ bool clearStationLink(StationSystemsSettings& settings, std::string const& ident
 
 std::string_view stationMonitorSubjectTypeForNodeType(std::string_view nodeType)
 {
+	if (nodeType == "Reservoir") return "thermal-reservoir";
 	if (nodeType == "Battery") return "battery";
 	if (nodeType == "Generator") return "generator";
 	if (nodeType == "Solar") return "solar-array";

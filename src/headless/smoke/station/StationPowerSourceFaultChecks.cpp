@@ -172,7 +172,7 @@ void powerSourceMonitors(smoke::Context const&)
 	// Equality is inside for every default, even after a complete on interval.
 	for (size_t i = 0; i < defaults.size(); ++i)
 	{
-		auto s = base; auto m = defaults[i]; m.enabled = true; s.monitors = {m};
+		auto s = base; auto m = defaults[i]; m.enabled = true; smoke::station::isolateMonitor(s, m);
 		s.equipmentLoads[0].electricalDemandKW = 0; s.solarArrays[0].capacityKW = 0;
 		s.batteries[0].usableKWh = 100;
 		if (i <= 2) s.batteries[0].startingStoredKWh = m.rule.threshold * 100;
@@ -192,7 +192,7 @@ void powerSourceMonitors(smoke::Context const&)
 	for (size_t i = 0; i < defaults.size(); ++i)
 	{
 		auto s = base;
-		auto m = defaults[i]; m.enabled = true; s.monitors = {m};
+		auto m = defaults[i]; m.enabled = true; smoke::station::isolateMonitor(s, m);
 		s.solarArrays[0].capacityKW = 0;
 		s.equipmentLoads[0].electricalDemandKW = 0;
 		s.batteries[0].usableKWh = 100;

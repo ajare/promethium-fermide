@@ -74,13 +74,6 @@ namespace core
 		if (!std::isfinite(poolResidualKW) || std::abs(poolResidualKW) > StationBalanceTolerance
 			* std::max(1.0, poolGenerationKW + batterySuppliedKW))
 			return violation = "electrical connection pool residual exceeds tolerance", false;
-		// The reserve-exhausted alarm: a bank that has fallen to its
-		// protected reserve floor while the station runs. The floor is
-		// never dischargeable (#394); the alarm reports that the
-		// bridging capacity above it is gone.
-		runtime.lastReserveExhausted = std::any_of(runtime.batteries.begin(), runtime.batteries.end(),
-			[this](BatteryState const& battery)
-			{ return !batteryDisabled(battery) && battery.lastAtReserve; });
 		for (auto const index : runtime.transferOrder)
 		{
 			auto& transfer = runtime.transfers[index];

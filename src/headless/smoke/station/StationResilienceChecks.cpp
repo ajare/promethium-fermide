@@ -173,7 +173,7 @@ void dispatch(smoke::Context const&)
 			"manual eclipse did not drain the battery carrying the load");
 		require(approx(power.totalUnmetKW, 0.0, 1e-9),
 			"manual mode left the critical load unmet while the battery could carry it");
-		require(!power.reserveExhausted,
+		require(!smoke::station::hasAlert(world.getStationSystemsSnapshot(), "reserveExhausted"),
 			"manual mode raised the automatic reserve alarm");
 	}
 
@@ -205,7 +205,7 @@ void dispatch(smoke::Context const&)
 			"automatic battery still discharging once the generator carried the load");
 		require(sawEvent(world, "Dispatch brought generator"),
 			"automatic generator start was not recorded as a dispatch action");
-		require(!power.reserveExhausted,
+		require(!smoke::station::hasAlert(world.getStationSystemsSnapshot(), "reserveExhausted"),
 			"reserve alarm raised while the generator could still carry the load");
 	}
 
@@ -228,11 +228,11 @@ void dispatch(smoke::Context const&)
 		rig.solar = {solarAt(0.0)};
 		run(world, std::move(rig), 24000);
 		auto const& power = world.getStationSystemsSnapshot().power;
-		require(power.reserveExhausted,
+		require(smoke::station::hasAlert(world.getStationSystemsSnapshot(), "reserveExhausted"),
 			"running the drawable fuel dry did not raise the reserve alarm");
 		require(power.totalUnmetKW > 1e-6,
 			"reserve exhaustion left no unmet demand while the load still needed power");
-		require(sawEvent(world, "Electrical reserve exhausted"),
+		require(sawEvent(world, "reserve-exhausted' on"),
 			"reserve exhaustion was not recorded as an alarm");
 		auto const diesel = world.getStationSystemsSnapshot().stores[0];
 		require(diesel.currentQualified + diesel.currentUnqualified >= 5.0 - 1e-9,
@@ -270,12 +270,11 @@ void dispatch(smoke::Context const&)
 		world.pauseSimulation();
 		world.finishBuild();
 		run(world, std::move(rig), 120);
-		auto const& power = world.getStationSystemsSnapshot().power;
-		require(power.backupEngaged,
+		require(smoke::station::hasAlert(world.getStationSystemsSnapshot(), "backupEngaged"),
 			"fuel-cell backup did not engage with the generator out of fuel");
 		require(world.getStationSystemsSnapshot().fuelCells[0].lastOutputKW > 1e-6,
 			"fuel-cell backup engaged but produced no power");
-		require(sawEvent(world, "Backup generation engaged"),
+		require(sawEvent(world, "backup-engaged' on"),
 			"backup engagement was not recorded as an alarm");
 	}
 
@@ -789,7 +788,7 @@ void protectedServices(smoke::Context const&)
 		require(closeTo(snap.power.protectedSuppliedKW, 1.0)
 			&& closeTo(snap.power.protectedUnmetKW, 0.0),
 			"the protected supply total is wrong");
-		require(!snap.power.protectedUnmet,
+		require(!smoke::station::hasAlert(snap, "protectedUnmetKW"),
 			"the protected alarm raised with no unmet protected demand");
 	}
 
@@ -825,7 +824,7 @@ void protectedServices(smoke::Context const&)
 		require(closeTo(snap.power.protectedDemandKW, 1.5)
 			&& closeTo(snap.power.protectedSuppliedKW, 1.5),
 			"the protection totals are wrong");
-		require(!snap.power.protectedUnmet,
+		require(!smoke::station::hasAlert(snap, "protectedUnmetKW"),
 			"the protection alarm raised while the pool covered the protected draw");
 	}
 	{
@@ -849,11 +848,11 @@ void protectedServices(smoke::Context const&)
 			"the protected pump lost supply even though the pool covered it first");
 		require(closeTo(loop.heaterSuppliedKW, 0.0),
 			"the freeze heater drew beyond the pool the protected pass left");
-		require(snap.power.protectedUnmet,
+		require(smoke::station::hasAlert(snap, "protectedUnmetKW"),
 			"the protected shortfall alarm did not raise under the tight pool");
 		require(closeTo(snap.power.protectedUnmetKW, 0.5),
 			"the unmet protected critical minimum is not the freeze-heater remainder");
-		require(sawEvent(world, "Protected containment-circulation 'hazLoop' unmet"),
+		require(sawEvent(world, "protected-unmet' on"),
 			"the protected circulation shortfall was not announced");
 		require(snap.power.protectedServices[0].reason.find("pool") != std::string::npos,
 			"the unmet protected service does not name the binding pool reason");
@@ -890,7 +889,7 @@ void protectedServices(smoke::Context const&)
 			"the noncritical loop was not shed like a discretionary load");
 		require(closeTo(snap.power.protectedDemandKW, 1.0)
 			&& closeTo(snap.power.protectedSuppliedKW, 1.0)
-			&& !snap.power.protectedUnmet,
+			&& !smoke::station::hasAlert(snap, "protectedUnmetKW"),
 			"the protected account is not exactly the one authored-critical loop");
 		require(snap.power.protectedServices.size() == 1
 			&& snap.power.protectedServices[0].id == "criticalLoop",
@@ -949,7 +948,7 @@ void protectedServices(smoke::Context const&)
 			"the generator block reason does not name the cooling shortfall");
 		require(closeTo(snap.cropPopulations[0].lastCirculationSuppliedKW, 1.0),
 			"the biological circulation was not protected through the generator cooling shortfall");
-		require(!snap.power.protectedUnmet,
+		require(!smoke::station::hasAlert(snap, "protectedUnmetKW"),
 			"the protected alarm raised while the pool covered the circulation");
 	}
 
@@ -1086,7 +1085,7 @@ void protectedServices(smoke::Context const&)
 			"the digester declared no meaningful electrical demand to be curtailed");
 		require(processor.lastPowerSuppliedKW + 1e-9 < processor.lastPowerDemandKW,
 			"the digester was not curtailed although the pool was short after the protected draw");
-		require(!snap.power.protectedUnmet,
+		require(!smoke::station::hasAlert(snap, "protectedUnmetKW"),
 			"the protected alarm raised while the protected draw was fully supplied");
 	}
 
@@ -1126,15 +1125,13 @@ void protectedServices(smoke::Context const&)
 			"the first-declared protected loop did not get its full draw");
 		require(closeTo(snap.coolantLoops[1].pumpSuppliedKW, 1.0),
 			"the second protected loop did not get exactly the pool remainder");
-		require(snap.power.protectedUnmet && closeTo(snap.power.protectedUnmetKW, 1.0),
+		require(smoke::station::hasAlert(snap, "protectedUnmetKW") && closeTo(snap.power.protectedUnmetKW, 1.0),
 			"the competing protected shortfall is not the second loop's unmet minimum");
-		require(sawEvent(*world, "Protected containment-circulation 'loopB' unmet"),
+		require(sawEvent(*world, "protected-unmet' on"),
 			"the second loop's protected shortfall was not announced");
-		bool firstLoopAnnounced = false;
-		for (auto const& event : world->getStationSystemsEvents())
-			if (event.message.find("loopA' unmet") != std::string::npos) firstLoopAnnounced = true;
-		require(!firstLoopAnnounced,
-			"the fully supplied first loop was announced as unmet");
+		require(std::count_if(snap.activeAlerts.begin(), snap.activeAlerts.end(), [&](auto const& alert) {
+			return alert.metric == "protectedUnmetKW" && closeTo(alert.currentValue, 1.0);
+		}) == 1, "the Alert ledger did not report exactly the competing unmet total");
 		auto const firstUnmet = snap.power.protectedUnmetKW;
 		auto const second = competingRun();
 		require(closeTo(second->getStationSystemsSnapshot().power.protectedUnmetKW, firstUnmet),
@@ -1244,7 +1241,7 @@ void protectedServices(smoke::Context const&)
 			&& closeTo(snap.power.protectedSuppliedKW, 2.0)
 			&& closeTo(snap.power.protectedUnmetKW, 1.0),
 			"the protected bundle totals do not account for pump plus curtailed cooling work");
-		require(snap.power.protectedUnmet,
+		require(smoke::station::hasAlert(snap, "protectedUnmetKW"),
 			"the protected alarm did not raise with unmet critical cooling");
 		auto const* pumpService = findProtectedService(snap, "loop",
 			"critical-cooling-circulation");
@@ -1262,7 +1259,7 @@ void protectedServices(smoke::Context const&)
 		require(coolingService != nullptr
 			&& coolingService->reason.find("pool") != std::string::npos,
 			"the curtailed cooling does not name the binding pool");
-		require(sawEvent(*world, "Protected critical-cooling 'chiller' unmet"),
+		require(sawEvent(*world, "protected-unmet' on"),
 			"the unmet protected cooling was not announced");
 		require(closeTo(snap.power.loads[0].suppliedKW, 0.0),
 			"the discretionary load took power ahead of the protected chiller bundle");
@@ -1296,9 +1293,9 @@ void protectedServices(smoke::Context const&)
 		require(coolingService != nullptr
 			&& coolingService->reason.find("circulation") != std::string::npos,
 			"the binding circulation dependency is not named in the unmet cooling reason");
-		require(sawEvent(*world, "Protected critical-cooling-circulation 'loop' unmet"),
+		require(sawEvent(*world, "protected-unmet' on"),
 			"the curtailed dependency pump draw was not announced");
-		require(sawEvent(*world, "Protected critical-cooling 'chiller' unmet"),
+		require(sawEvent(*world, "protected-unmet' on"),
 			"the circulation-blocked cooling was not announced");
 		require(closeTo(snap.power.protectedDemandKW, 3.0)
 			&& closeTo(snap.power.protectedSuppliedKW, 0.5)
@@ -1436,7 +1433,7 @@ void protectedServices(smoke::Context const&)
 			&& closeTo(snap.power.protectedSuppliedKW, 1.0)
 			&& closeTo(snap.power.protectedUnmetKW, 2.0),
 			"the protected account still counts the unused reservation as supplied work");
-		require(snap.power.protectedUnmet,
+		require(smoke::station::hasAlert(snap, "protectedUnmetKW"),
 			"the reconciled unmet cooling did not raise the protected alarm");
 		auto const* cooling = findProtectedService(snap, "chiller", "critical-cooling");
 		require(cooling != nullptr
@@ -1454,7 +1451,7 @@ void protectedServices(smoke::Context const&)
 			"the whole-bus energy balance does not close on the returned credit");
 		require(closeTo(snap.power.loads[0].suppliedKW, 0.0),
 			"the competing discretionary load received power in the reconciliation rig");
-		require(sawEvent(*world, "Protected critical-cooling 'chiller' unmet"),
+		require(sawEvent(*world, "protected-unmet' on"),
 			"the reconciled unused cooling was not announced as unmet");
 	}
 	// The exchange leaves a small but nonzero duty: the credit funds the

@@ -1064,7 +1064,6 @@ namespace core
 		// still needs, and never for generation that is merely
 		// commanded but cannot deliver.
 		dispatchRemainingKW += dispatchStartupSupportKW;
-		backupEngaged = bool{false};
 		for (auto& cell : runtime.fuelCells)
 		{
 			cell.dispatchCommandKW = 0.0;
@@ -1102,13 +1101,11 @@ namespace core
 			auto const commandKW = std::min(capKW, connections.required(generationPort, dispatchRemainingKW));
 			if (commandKW <= 0.0) continue;
 			cell.dispatchCommandKW = commandKW;
-			backupEngaged = true;
 			dispatchRemainingKW -= connections.available(generationPort, commandKW);
 		}
 		runtime.lastDispatchTargetKW = dispatchLoadTargetKW + dispatchStartupSupportKW;
 		runtime.lastDispatchCommittedKW = runtime.lastDispatchTargetKW - dispatchRemainingKW;
 		runtime.lastDispatchShortfallKW = dispatchRemainingKW;
-		runtime.lastBackupEngaged = backupEngaged;
 		// Fuel-cell backup (#406) runs on the supply side alongside the
 		// generators - and, since #578, ahead of the generator phase
 		// machine: the backup's output joins the shared pool before the

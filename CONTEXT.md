@@ -685,7 +685,7 @@ A protective automatic isolation of a Station installation taken by its own safe
 _Avoid_: Shutdown (any stop, protective or not), breaker (a mechanism), fault (a Trip may precede or avert a Fault)
 
 **Monitor**:
-A read-only authored observation rule over one Station component or Station connection: a named Metric, one Alert Rule, and an enabled flag. It evaluates the Metric against the Rule and creates Alerts on match. Monitors are disabled by default; a disabled Monitor evaluates nothing and creates nothing. A Monitor never isolates, shuts down, or creates a Fault.
+A read-only authored observation rule over one Station component or Station connection: a named Metric, one Alert Rule, and an enabled flag. It evaluates the Metric against the Rule and creates Alerts on match. New Monitors are disabled by default; compatibility Monitors preserve previously active limit reporting until explicitly disabled. A disabled Monitor evaluates nothing and creates nothing. A Monitor never isolates, shuts down, or creates a Fault.
 _Avoid_: Sensor (the physical metaphor, not the modelled rule), watchdog (implies acting on timeout), alarm rule (alarm is reserved for existing internal scalars)
 
 **Alert Rule**:

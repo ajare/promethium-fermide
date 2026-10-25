@@ -359,11 +359,10 @@ namespace
 			hot.resumeSimulation();
 			require(smoke::station::advanceSeconds(hot, 150.0), "Overheat run failed");
 			auto const snap = hot.getStationSystemsSnapshot();
-			require(snap.thermal.reservoirs[0].aboveLimit
-				&& !snap.thermal.reservoirs[0].belowLimit
+			require(smoke::station::hasAlert(snap, "temperatureC", "cabin", "thermal-reservoir")
 				&& approx(snap.thermal.reservoirs[0].temperatureC, 20.0 + snap.elapsedSeconds / 100.0, 1e-6),
 				"Overheat not reported or wrongly clamped to the limit");
-			require(sawEvent(hot, "Thermal reservoir 'cabin' above its declared maximum"),
+			require(sawEvent(hot, "cabin:above-limit' on"),
 				"Overheat transition missing from the event log");
 			core::World cold("LimitCold", 2, 2);
 			cold.pauseSimulation(); cold.finishBuild();
@@ -374,10 +373,9 @@ namespace
 			cold.resumeSimulation();
 			require(smoke::station::advanceSeconds(cold, 100.0), "Overcool run failed");
 			auto const coldSnap = cold.getStationSystemsSnapshot();
-			require(coldSnap.thermal.reservoirs[0].belowLimit
-				&& !coldSnap.thermal.reservoirs[0].aboveLimit,
+			require(smoke::station::hasAlert(coldSnap, "temperatureC", "cabin", "thermal-reservoir"),
 				"Overcool not reported in the snapshot");
-			require(sawEvent(cold, "Thermal reservoir 'cabin' below its declared minimum"),
+			require(sawEvent(cold, "cabin:below-limit' on"),
 				"Overcool transition missing from the event log");
 		}
 		// The bundled Lua model receives the reservoir, radiator and

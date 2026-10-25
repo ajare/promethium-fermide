@@ -9,6 +9,7 @@ The station already carries three overlapping "something is wrong" nouns — Bro
 
 ## Consequences
 
-- Four distinct nouns coexist with hard boundaries: *alarm* (internal scalar), *Fault* (state), *Trip* (self-protection), *Alert* (observation result). Code review should refuse cross-use.
+- *Fault* (state), *Trip* (self-protection), and *Alert* (observation result) retain hard boundaries. Legacy internal alarm reporting migrates to the same Monitor callback path in #865; physical telemetry and conservation audits remain independent.
 - Because disabled Monitors skip evaluation, enabling one mid-run monitors from that tick forward with no backfill — consistent with the "commands take effect at the time they name" rule.
+- #865 compatibility exception: existing reserve, dispatch/protected-shortfall and reservoir/chiller sink-limit reporting keeps its formerly enabled, immediate behavior when an old configuration omits its rules. These are ordinary Monitor rules, not a parallel evaluator; an explicit authored rule (including disable) overrides the compatibility default. New opt-in default tables remain disabled. This avoids silently removing existing oversight while allowing the same validated authoring, persistence and bulk-disable controls to govern it.
 - Alert handling flexibility lives entirely in the callback registry; adding a new alert behavior never changes the authored schema.

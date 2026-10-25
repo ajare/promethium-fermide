@@ -278,13 +278,10 @@ namespace core
 		result.power.dispatchTargetKW = mImpl->lastDispatchTargetKW;
 		result.power.dispatchCommittedKW = mImpl->lastDispatchCommittedKW;
 		result.power.dispatchShortfallKW = mImpl->lastDispatchShortfallKW;
-		result.power.backupEngaged = mImpl->lastBackupEngaged;
-		result.power.reserveExhausted = mImpl->lastReserveExhausted;
 		// #416: the protected critical service admission for this tick.
 		result.power.protectedDemandKW = mImpl->lastProtectedDemandKW;
 		result.power.protectedSuppliedKW = mImpl->lastProtectedSuppliedKW;
 		result.power.protectedUnmetKW = mImpl->lastProtectedUnmetTotalKW;
-		result.power.protectedUnmet = mImpl->lastProtectedUnmetTotalKW > 1e-12;
 		result.power.protectedServices = mImpl->lastProtectedServices;
 		// #417 recovery staging summary.
 		result.power.recoveryPending = mImpl->lastRecoveryPending;
@@ -429,8 +426,6 @@ namespace core
 			reservoirResult.lastHeatInKW = reservoir.lastHeatInKW;
 			reservoirResult.lastRejectedKW = reservoir.lastRejectedKW;
 			reservoirResult.lastNetKW = reservoir.lastNetKW;
-			reservoirResult.aboveLimit = reservoir.lastAboveLimit;
-			reservoirResult.belowLimit = reservoir.lastBelowLimit;
 			reservoirResult.startingEnergyKJ = reservoir.authored.heatCapacityKJPerK
 				* reservoir.authored.startingTemperatureC;
 			reservoirResult.currentEnergyKJ = reservoir.authored.heatCapacityKJPerK

@@ -60,6 +60,11 @@ Every station component class that publishes runtime telemetry, plus Station con
 - **Atmosphere compartments**.
 - **Biological populations**: crop populations, algae cultures.
 - **Station connections** (material/energy/service flows with throughput and efficiency).
+- Follow-up #865 adds **Thermal reservoirs** (`temperatureC`) and the singleton
+  **Station** subject (`station` / `station`) for aggregate reserve exhaustion,
+  backup engagement, dispatch shortfall and protected-service shortfall. These
+  preserve the former reporting scope without inventing an Installation or
+  making the derived electrical-pool node authorable.
 
 Explicitly **not** monitor subjects in v1: Atmosphere pathways, Thermal links, schedules
 (deliveries, outages, maintenance, waste ejections), and World traversal objects.
@@ -123,7 +128,10 @@ ordinary derived Metrics, not special rule types — one rule shape everywhere.
 
 ## 4. Default Monitor sets
 
-Every monitor subject ships with its default set pre-listed **disabled**. Values carry a
+Every new opt-in monitor set ships pre-listed **disabled**. Follow-up #865's
+compatibility rules preserve previously enabled immediate reporting when omitted
+by existing configurations; explicit authored disable still takes precedence
+(ADR-0031 and `docs/station-monitors.md`). Values carry a
 provenance tag: **[ISS]** human/crew-realistic derived from ISS limits, **[WHO]** drinking-
 water guideline, **[rated]** fraction of the subject's own rated/authored value,
 **[prov]** provisional engineering estimate. All defaults are adjustable per Monitor;
@@ -323,9 +331,10 @@ what the dashboard shows — never callback internals or tick-order artifacts.
 
 - Any actuation from Alerts (load shedding, crew dispatch, auto-repair).
 - Monitors on Atmosphere pathways, Thermal links, schedules, and World traversal objects.
-- Migration of the pre-existing internal alarm scalars (reserve-exhausted #394,
-  sink-temperature, shortfall alarms) — tracked as a follow-up issue to unify them into
-  Monitors later.
+- The original scope deferred migration of internal reserve-exhausted #394,
+  sink-temperature and shortfall reporting. Follow-up #865 now migrates these to
+  compatibility Monitor rules; see `docs/station-monitors.md` and ADR-0031's
+  compatibility exception. Conservation audits remain hard invariant checks.
 - Persisted alarm history across save/load.
 - Value-band (deadband) hysteresis, multi-condition compound rules, and rule expressions.
 - Random alert behaviour, notification sounds/chimes.

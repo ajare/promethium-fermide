@@ -77,22 +77,19 @@ namespace core
 		auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 		// #415: the dispatch demand signal crosses the tick boundary, so
 		// a rolled-back tick must restore it exactly; the per-tick target,
-		// committed, shortfall and alarm scalars are restored too so a
+		// committed and shortfall scalars are restored too so a
 		// failed dispatch never leaks a partial controller state.
 		auto const committedDispatchDemandKW = lastDispatchDemandKW;
 		auto const committedDispatchTargetKW = lastDispatchTargetKW;
 		auto const committedDispatchCommittedKW = lastDispatchCommittedKW;
 		auto const committedDispatchShortfallKW = lastDispatchShortfallKW;
-		auto const committedBackupEngaged = lastBackupEngaged;
-		auto const committedReserveExhausted = lastReserveExhausted;
 		// #416: the protected-service admission scalars and the
 		// per-service unmet flags cross the tick boundary, so a rolled-
 		// back tick restores them exactly and a failed protection pass
-		// never leaks a partial alarm state.
+		// never leaks a partial allocation state.
 		auto const committedProtectedDemandKW = lastProtectedDemandKW;
 		auto const committedProtectedSuppliedKW = lastProtectedSuppliedKW;
 		auto const committedProtectedUnmetTotalKW = lastProtectedUnmetTotalKW;
-		auto const committedProtectedServiceUnmet = lastProtectedServiceUnmet;
 		auto const committedProtectedServices = lastProtectedServices;
 		auto const committedRecoveryPending = lastRecoveryPending;
 		auto const committedRecoveringCount = lastRecoveringCount;
@@ -149,12 +146,9 @@ namespace core
 			lastDispatchTargetKW = committedDispatchTargetKW;
 			lastDispatchCommittedKW = committedDispatchCommittedKW;
 			lastDispatchShortfallKW = committedDispatchShortfallKW;
-			lastBackupEngaged = committedBackupEngaged;
-			lastReserveExhausted = committedReserveExhausted;
 			lastProtectedDemandKW = committedProtectedDemandKW;
 			lastProtectedSuppliedKW = committedProtectedSuppliedKW;
 			lastProtectedUnmetTotalKW = committedProtectedUnmetTotalKW;
-			lastProtectedServiceUnmet = committedProtectedServiceUnmet;
 			lastProtectedServices = committedProtectedServices;
 			lastRecoveryPending = committedRecoveryPending;
 			lastRecoveringCount = committedRecoveringCount;

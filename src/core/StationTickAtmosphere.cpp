@@ -1134,12 +1134,7 @@ namespace core
 				reservoir.bufferDischargeKJ += bufferDischargeKW * dt;
 				reservoir.rejectedKJ += rejectedKW * dt;
 				reservoir.temperatureC = newTemperatureC;
-				// Declared service limits are reported as crossings,
-				// never enforced by clamping the integrated state.
-				reservoir.lastAboveLimit = newTemperatureC
-					> reservoir.authored.maxTemperatureC + 1e-9;
-				reservoir.lastBelowLimit = newTemperatureC
-					< reservoir.authored.minTemperatureC - 1e-9;
+				// Declared limit reporting belongs to Monitors, never this solve.
 			}
 		}
 		// #417 recovery machine. Runs after every service has drawn and

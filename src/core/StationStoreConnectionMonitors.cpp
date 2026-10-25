@@ -110,6 +110,12 @@ std::string stationConnectionMonitorSubjectId(StationConnectionKey const& key)
 }
 std::vector<StationMonitorMetric> const& stationMonitorMetricCatalogue(std::string_view type)
 {
+	static std::vector<StationMonitorMetric> const station{
+		{"reserveExhausted", "boolean"}, {"backupEngaged", "boolean"},
+		{"dispatchShortfallKW", "kW"}, {"protectedUnmetKW", "kW"}};
+	static std::vector<StationMonitorMetric> const reservoirs{{"temperatureC", "°C"}};
+	if (type == "station") return station;
+	if (type == "thermal-reservoir") return reservoirs;
 	static std::vector<StationMonitorMetric> const stores{
 		{"usableFraction", "fraction"}, {"totalDissolved", "mg/L"},
 		{"maxContaminantConcentration", "mg/L"}, {"unexpectedSpecies", "boolean"}};
@@ -148,6 +154,8 @@ std::vector<StationMonitorMetric> const& stationMonitorMetricCatalogue(std::stri
 }
 bool stationMonitorSubjectExists(StationSystemsSettings const& settings, std::string_view type, std::string_view id)
 {
+	if (type == "station") return id == "station";
+	if (type == "thermal-reservoir") return findId(settings.thermalReservoirs, id) != settings.thermalReservoirs.end();
 	if (type == "water-treatment") return findId(settings.waterTreatments, id) != settings.waterTreatments.end();
 	if (type == "electrolyzer") return findId(settings.electrolyzers, id) != settings.electrolyzers.end();
 	if (type == "co2-capture") return findId(settings.co2Captures, id) != settings.co2Captures.end();
@@ -176,6 +184,26 @@ std::optional<double> readStationMonitorMetric(StationSystemsSettings const& set
 {
 	auto const& catalogue = stationMonitorMetricCatalogue(type);
 	if (std::none_of(catalogue.begin(), catalogue.end(), [&](auto const& entry) { return entry.name == metric; })) return {};
+	if (type == "station")
+	{
+		if (id != "station") return {};
+		if (metric == "protectedUnmetKW") return snapshot.power.protectedUnmetKW;
+		if (metric == "reserveExhausted")
+			return std::any_of(snapshot.power.batteries.begin(), snapshot.power.batteries.end(),
+				[](auto const& b) { return !b.disabled && b.atReserve && std::none_of(
+					b.activeFaults.begin(), b.activeFaults.end(), [](auto const& fault) {
+						return fault.modeId == "thermal-runaway";
+					}); }) ? 1.0 : 0.0;
+		if (snapshot.power.dispatchMode != StationDispatchMode::Automatic) return 0.0;
+		if (metric == "dispatchShortfallKW") return snapshot.power.dispatchShortfallKW;
+		return std::any_of(snapshot.fuelCells.begin(), snapshot.fuelCells.end(),
+			[](auto const& c) { return c.dispatchCommandKW > 0; }) ? 1.0 : 0.0;
+	}
+	if (type == "thermal-reservoir")
+	{
+		auto r = findId(snapshot.thermal.reservoirs, id);
+		return r == snapshot.thermal.reservoirs.end() ? std::optional<double>{} : r->temperatureC;
+	}
 	// Demand-normalised service, not the power-only unmet counters: missing
 	// feed and destination headroom are failures to deliver service too.
 	auto shortfall = [](double demand, double supplied) {

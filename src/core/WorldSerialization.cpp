@@ -912,7 +912,7 @@ namespace core
 		// Schema 91 adds the dispatch controller mode (#415); a pre-91
 		// document carrying `dispatchMode` is refused rather than silently
 		// dropped. The dispatch demand signal, target, committed and
-		// shortfall scalars and the alarms stay runtime-only, reconstructed
+		// shortfall scalars and the Alerts stay runtime-only, reconstructed
 		// on load from the authored mode and the World tick.
 		// Schema 92 adds the protected critical service flag on coolant
 		// loops and chillers (#416); a pre-92 document carrying

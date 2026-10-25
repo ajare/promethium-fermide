@@ -460,8 +460,6 @@ using namespace station_detail;
 			double engineExtractionKJ{0.0}; // cumulative heat drawn out of the reservoir by heat engines (#804)
 			double engineRejectionKJ{0.0}; // cumulative heat booked into the reservoir by heat engines (#804)
 			double rejectedKJ{0.0};
-			bool lastAboveLimit{false};
-			bool lastBelowLimit{false};
 		};
 		// The authoritative ledger of one authored coolant loop (#396).
 		// The loop owns a finite, loop-specific coolant inventory; the
@@ -1641,6 +1639,7 @@ using namespace station_detail;
 			// surfaces publish lives here, not in the ledger entry.
 			double lastValue{0.0};
 		};
+		std::vector<StationMonitorSettings> effectiveMonitors;
 		std::map<std::string, MonitorState> monitorStates;
 		std::vector<StationAlertSnapshot> activeAlerts, closedAlerts;
 		// Read-only for the evaluation loop: whether a Monitor already holds
@@ -1651,7 +1650,7 @@ using namespace station_detail;
 				[&](auto const& entry) { return entry.monitorId == monitorId; });
 		}
 		void evaluateMonitors(StationSystemsSnapshot const& published);
-		void reconcileMonitors(std::vector<StationMonitorSettings> const& offered);
+		void reconcileMonitors(StationSystemsSettings const& offered);
 		void clearAlert(std::string_view monitorId, AlertClearReason reason);
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
@@ -1856,27 +1855,23 @@ using namespace station_detail;
 		// the station-wide electrical request the last committed tick
 		// presented to the shared pool; the dispatcher commands the
 		// dispatchable sources against it minus this tick's solar. The
-		// target/committed/shortfall scalars and the two alarms describe the
-		// current tick; the previous flags edge-trigger the dispatch events.
-		// In Manual mode every one of these stays zero/false: the
+		// target/committed/shortfall scalars describe the current tick.
+		// In Manual mode every one of these stays zero: the
 		// dispatcher is inert and the authored commands rule.
 		double lastDispatchDemandKW{0.0};
 		double lastDispatchTargetKW{0.0};
 		double lastDispatchCommittedKW{0.0};
 		double lastDispatchShortfallKW{0.0};
-		bool lastBackupEngaged{false};
-		bool lastReserveExhausted{false};
 		// #416: the protected critical service admission state. The
 		// demand/supplied/unmet totals describe the current tick's
 		// electrical protection pass (containment circulation, biological
 		// circulation and authored critical cooling drawn ahead of
-		// discretionary loads); the per-service unmet flags edge-trigger
-		// the protection events. Shutdown-cooling obligations are listed
+		// discretionary loads). Monitors observe these committed amounts.
+		// Shutdown-cooling obligations are listed
 		// as protected services but contend for no electrical pool.
 		double lastProtectedDemandKW{0.0};
 		double lastProtectedSuppliedKW{0.0};
 		double lastProtectedUnmetTotalKW{0.0};
-		std::map<std::string, bool> lastProtectedServiceUnmet;
 		std::vector<StationProtectedServiceSnapshot> lastProtectedServices;
 		// #417: the recovery staging scalars. They cross the tick boundary
 		// like the other allocation results, so a rolled-back tick restores
@@ -1982,20 +1977,14 @@ using namespace station_detail;
 		std::vector<double> previousBatteryWearFraction{};
 		std::vector<bool> previousBatteryReserve{};
 		std::vector<bool> previousBatterySaturated{};
-		std::vector<bool> previousAboveLimit{};
-		std::vector<bool> previousBelowLimit{};
 		std::vector<StationTransferStatus> previousLoopStatus{};
 		std::vector<bool> previousBelowFreeze{};
 		std::vector<bool> previousCirculating{};
 		std::vector<StationTransferStatus> previousChillerStatus{};
 		std::vector<bool> previousChillerAtSetpoint{};
-		std::vector<bool> previousChillerSinkOver{};
 		std::vector<StationGeneratorPhase> previousGeneratorPhase{};
 		std::vector<bool> previousGeneratorDispatchOnline{};
 		std::vector<bool> previousFuelCellDispatchOnline{};
-		double previousDispatchShortfall{};
-		bool previousBackupEngaged{};
-		bool previousReserveExhausted{};
 		std::vector<bool> previousAbovePressure{};
 		std::vector<bool> previousBelowPressure{};
 		std::vector<bool> previousLowOxygen{};
@@ -2051,7 +2040,6 @@ using namespace station_detail;
 		double dispatchDtSeconds{};
 		double dispatchStartupSupportKW{};
 		double dispatchRemainingKW{};
-		bool backupEngaged{};
 		std::vector<double> fuelCellHeatByReservoir{};
 		double totalFuelCellOutputKW{};
 		double totalFuelCellWasteKW{};

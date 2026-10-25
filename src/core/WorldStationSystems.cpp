@@ -12,6 +12,7 @@ namespace core
 		applyStationEclssBiologyDefaultMonitors(candidate);
 		applyStationPowerSourceDefaultMonitors(candidate);
 		applyStationStoreConnectionDefaultMonitors(candidate);
+		applyStationLegacyReportingMonitors(candidate);
 		auto found = std::find_if(candidate.monitors.begin(), candidate.monitors.end(),
 			[&](auto const& entry) { return entry.id == monitor.id; });
 		if (found == candidate.monitors.end()) candidate.monitors.push_back(std::move(monitor));
@@ -41,6 +42,7 @@ namespace core
 		applyStationEclssBiologyDefaultMonitors(candidate);
 		applyStationPowerSourceDefaultMonitors(candidate);
 		applyStationStoreConnectionDefaultMonitors(candidate);
+		applyStationLegacyReportingMonitors(candidate);
 		for (auto& monitor : candidate.monitors)
 			if ((subjectType.empty() || monitor.subjectType == subjectType)
 				&& (subjectId.empty() || monitor.subjectId == subjectId))

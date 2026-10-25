@@ -322,7 +322,9 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 			"Upper limit margin " + quantity(p->maxTemperatureC - p->temperatureC, "C")};
 		out.ports["Heat in"] = quantity(p->lastHeatInKW, "kW");
 		out.ports["Hosted radiators"] = quantity(p->lastRejectedKW, "kW");
-		if (p->aboveLimit || p->belowLimit) warn(out, "Temperature outside limits", true);
+		if (std::any_of(s.activeAlerts.begin(), s.activeAlerts.end(), [&](auto const& alert) {
+			return alert.subjectType == "thermal-reservoir" && alert.subjectId == id;
+		})) warn(out, "Temperature Alert active", true);
 	}
 	else if (node.type == "Radiator")
 	{

@@ -130,12 +130,9 @@ namespace core
 						+ "' fully charged: stored energy reached nameplate capacity"
 					: "Battery '" + battery.authored.id + "' left full charge");
 		}
-		// #415: dispatch actions are recorded on their transitions: a
-		// source brought online or released by the controller, the
-		// fuel-cell backup engaged or stood down, and the dispatch
-		// shortfall opening or clearing. A shortfall is an operational
-		// shortage - published, never a software failure and never
-		// relabelled as permissible curtailment.
+		// Dispatch source commands remain operational action events.
+		// Shortfalls and limit crossings are observed by Monitors after
+		// the successful step commits, never by this event pass.
 		if (dispatchAutomatic)
 		{
 			for (size_t index = 0; index < runtime.generators.size(); ++index)
@@ -162,70 +159,9 @@ namespace core
 					: std::string("Dispatch stood down fuel-cell backup '") + cell.authored.id
 						+ "': the fuelled fleet covers the net load");
 			}
-			auto const shortfallNow = runtime.lastDispatchShortfallKW > 1e-12;
-			auto const shortfallBefore = previousDispatchShortfall > 1e-12;
-			if (shortfallNow != shortfallBefore)
-				appendBoundedEvent(runtime.events, tick, "dispatch", shortfallNow
-					? "Dispatch shortfall: " + std::to_string(runtime.lastDispatchShortfallKW)
-						+ " kW of station demand cannot be met by any available dispatchable source"
-						+ " (fuel, cooling or capacity limits)"
-					: std::string("Dispatch shortfall cleared: dispatchable sources cover the net load"));
-			if (runtime.lastBackupEngaged != previousBackupEngaged)
-				appendBoundedEvent(runtime.events, tick, "dispatch", runtime.lastBackupEngaged
-					? "Backup generation engaged: a fuel-cell backup stands under dispatch command"
-					: std::string("Backup generation stood down: no fuel-cell backup is under dispatch command"));
-			if (runtime.lastReserveExhausted != previousReserveExhausted)
-				appendBoundedEvent(runtime.events, tick, "dispatch", runtime.lastReserveExhausted
-					? "Electrical reserve exhausted: a battery bank sits at its protected reserve floor"
-					: std::string("Electrical reserve recovered: every battery bank is above its reserve floor"));
 		}
-		// #416: protected critical service shortfalls are announced on
-		// their transitions. A protected service that cannot be fully
-		// honoured keeps its deficit visible as unmet critical demand -
-		// never reclassified as permissible curtailment - and the event
-		// names the service, the unmet amount and the binding reason.
-		{
-			std::map<std::string, bool> protectedNow;
-			for (auto const& service : protectedServices)
-			{
-				auto const key = service.kind + '/' + service.id;
-				auto const unmet = service.unmetKW > 1e-12;
-				protectedNow[key] = unmet;
-				auto const previous = runtime.lastProtectedServiceUnmet.find(key);
-				auto const wasUnmet = previous != runtime.lastProtectedServiceUnmet.end()
-					&& previous->second;
-				if (unmet == wasUnmet) continue;
-				appendBoundedEvent(runtime.events, tick, "dispatch", unmet
-					? "Protected " + service.kind + " '" + service.id + "' unmet: "
-						+ std::to_string(service.unmetKW)
-						+ " kW of a protected " + std::to_string(service.requestedKW)
-						+ " kW demand - " + service.reason
-					: "Protected " + service.kind + " '" + service.id
-						+ "' restored: the pool covers the protected demand again");
-			}
-			runtime.lastProtectedServiceUnmet = std::move(protectedNow);
-		}
-		// Thermal limit crossings are announced so the event log
-		// records overheats and overcools without flooding every tick
-		// (#395).
-		for (size_t index = 0; index < runtime.reservoirs.size(); ++index)
-		{
-			auto const& reservoir = runtime.reservoirs[index];
-			if (reservoir.lastAboveLimit != previousAboveLimit[index])
-				appendBoundedEvent(runtime.events, tick, "thermal", reservoir.lastAboveLimit
-					? "Thermal reservoir '" + reservoir.authored.id
-						+ "' above its declared maximum: " + std::to_string(reservoir.temperatureC)
-						+ " > " + std::to_string(reservoir.authored.maxTemperatureC) + " C"
-					: std::string("Thermal reservoir '") + reservoir.authored.id
-						+ "' back within its maximum limit");
-			if (reservoir.lastBelowLimit != previousBelowLimit[index])
-				appendBoundedEvent(runtime.events, tick, "thermal", reservoir.lastBelowLimit
-					? "Thermal reservoir '" + reservoir.authored.id
-						+ "' below its declared minimum: " + std::to_string(reservoir.temperatureC)
-						+ " < " + std::to_string(reservoir.authored.minTemperatureC) + " C"
-					: std::string("Thermal reservoir '") + reservoir.authored.id
-						+ "' back above its minimum limit");
-		}
+		// Limit and shortfall announcements are emitted only by Alert callbacks.
+
 		// Coolant loop transitions are announced so the event log
 		// records circulation loss and freeze exposure without flooding
 		// every tick (#396): a loop that stops circulating, a loop that
@@ -289,15 +225,6 @@ namespace core
 						+ "' cold side at its chilled setpoint: no extraction demanded"
 					: std::string("Chiller '") + chiller.authored.id
 						+ "' cold side above its chilled setpoint: cooling demand returned");
-			if (chiller.lastSinkOver != previousChillerSinkOver[index])
-				appendBoundedEvent(runtime.events, tick, "chiller", chiller.lastSinkOver
-					? "Chiller '" + chiller.authored.id
-						+ "' condenser sink over its maximum condensing temperature: "
-						+ std::to_string(runtime.reservoirs[chiller.sinkIndex].temperatureC) + " >= "
-						+ std::to_string(chiller.authored.maxCondensingTemperatureC)
-						+ " C, cold service refused"
-					: std::string("Chiller '") + chiller.authored.id
-						+ "' condenser sink back below its maximum condensing temperature");
 		}
 		// Generator phase transitions are announced so the event log
 		// records starts, failed starts, trips, fuel depletion and the

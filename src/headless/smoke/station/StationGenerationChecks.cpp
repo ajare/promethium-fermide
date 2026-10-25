@@ -320,7 +320,7 @@ namespace
 			require(snapshot.thermal.reservoirs[1].temperatureC == 50.0
 				&& snapshot.thermal.reservoirs[1].condenserEnergyKJ == 0.0,
 				"refused condenser heat reached the sink anyway");
-			require(sawEvent(world, "condenser sink over its maximum condensing temperature")
+			require(sawEvent(world, "sink-over' on")
 				&& sawEvent(world, "service refused"),
 				"sink-over refusal not announced");
 		}

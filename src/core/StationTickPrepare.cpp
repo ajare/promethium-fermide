@@ -199,12 +199,6 @@ namespace core
 		previousBatterySaturated.reserve(runtime.batteries.size());
 		for (auto const& battery : runtime.batteries) previousBatterySaturated.push_back(battery.lastSaturated);
 
-		previousAboveLimit.reserve(runtime.reservoirs.size());
-		for (auto const& reservoir : runtime.reservoirs) previousAboveLimit.push_back(reservoir.lastAboveLimit);
-
-		previousBelowLimit.reserve(runtime.reservoirs.size());
-		for (auto const& reservoir : runtime.reservoirs) previousBelowLimit.push_back(reservoir.lastBelowLimit);
-
 		previousLoopStatus.reserve(runtime.coolantLoops.size());
 		for (auto const& loop : runtime.coolantLoops) previousLoopStatus.push_back(loop.status);
 
@@ -220,15 +214,9 @@ namespace core
 		previousChillerAtSetpoint.reserve(runtime.chillers.size());
 		for (auto const& chiller : runtime.chillers) previousChillerAtSetpoint.push_back(chiller.lastAtSetpoint);
 
-		previousChillerSinkOver.reserve(runtime.chillers.size());
-		for (auto const& chiller : runtime.chillers) previousChillerSinkOver.push_back(chiller.lastSinkOver);
-
 		previousGeneratorPhase.reserve(runtime.generators.size());
 		for (auto const& generator : runtime.generators) previousGeneratorPhase.push_back(generator.phase);
-		// #415: the dispatch controller's edge-detection state: which
-		// sources stood under dispatch command last tick, and whether the
-		// shortfall, the backup and the reserve alarm stood raised, so
-		// the events below announce each transition exactly once.
+		// Dispatch action transitions remain distinct from Monitor reporting.
 
 		previousGeneratorDispatchOnline.reserve(runtime.generators.size());
 		for (auto const& generator : runtime.generators)
@@ -237,9 +225,6 @@ namespace core
 		previousFuelCellDispatchOnline.reserve(runtime.fuelCells.size());
 		for (auto const& cell : runtime.fuelCells)
 			previousFuelCellDispatchOnline.push_back(cell.dispatchCommandKW > 0.0);
-		previousDispatchShortfall = runtime.lastDispatchShortfallKW;
-		previousBackupEngaged = runtime.lastBackupEngaged;
-		previousReserveExhausted = runtime.lastReserveExhausted;
 
 		previousAbovePressure.reserve(runtime.atmospheres.size());
 		for (auto const& atmosphere : runtime.atmospheres) previousAbovePressure.push_back(atmosphere.lastAbovePressure);

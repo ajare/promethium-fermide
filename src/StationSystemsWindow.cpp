@@ -834,6 +834,11 @@ void StationSystemsWindow::renderFlowInspectorContents(
 	// the early returns below, so the width cannot leak into the canvas or the
 	// plot beside it.
 	ItemWidthScope const inspectorWidth{128.0f};
+	if (ImGui::TreeNodeEx("Station-wide reporting", ImGuiTreeNodeFlags_NoAutoOpenOnLog))
+	{
+		renderMonitorInspector(draft, "station", "station");
+		ImGui::TreePop();
+	}
 	if (auto const connection = mFlow.selectedConnection())
 	{
 		renderMonitorInspector(draft, "connection", core::stationConnectionMonitorSubjectId(*connection));
@@ -920,6 +925,7 @@ void StationSystemsWindow::renderMonitorInspector(core::StationSystemsSettings& 
 	core::applyStationEclssBiologyDefaultMonitors(effective);
 	core::applyStationPowerSourceDefaultMonitors(effective);
 	core::applyStationStoreConnectionDefaultMonitors(effective);
+	core::applyStationLegacyReportingMonitors(effective);
 	bool listed = false;
 	for (auto monitor : effective.monitors)
 	{
@@ -1842,12 +1848,10 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		snapshot.power.generatorOutputKW, snapshot.power.generatorStartupDrawKW,
 		snapshot.power.generatorWasteHeatKW, snapshot.power.generatorDecayHeatKW);
 	// #415: the dispatch controller's own account for this tick.
-	ImGui::Text("Dispatch (%s): demand %.3f kW, target %.3f kW, committed %.3f kW, shortfall %.3f kW | alarms: backup %s, reserve %s",
+	ImGui::Text("Dispatch (%s): demand %.3f kW, target %.3f kW, committed %.3f kW, shortfall %.3f kW",
 		snapshot.power.dispatchMode == core::StationDispatchMode::Automatic ? "automatic" : "manual",
 		snapshot.power.dispatchDemandKW, snapshot.power.dispatchTargetKW,
-		snapshot.power.dispatchCommittedKW, snapshot.power.dispatchShortfallKW,
-		snapshot.power.backupEngaged ? "ENGAGED" : "off",
-		snapshot.power.reserveExhausted ? "EXHAUSTED" : "ok");
+		snapshot.power.dispatchCommittedKW, snapshot.power.dispatchShortfallKW);
 	// #416: the protected critical service admission for this tick.
 	// Containment circulation, biological circulation and authored
 	// critical cooling are drawn ahead of every discretionary external
@@ -1856,10 +1860,9 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	// permissible curtailment. Shutdown-cooling entries show the standing
 	// decay-heat obligation that books even when generation output stops.
 	ImGui::SeparatorText("Protected critical services (#416; drawn ahead of discretionary loads from actual services, not nameplate totals)");
-	ImGui::Text("Protected totals: demand %.3f kW, supplied %.3f kW, unmet critical %.3f kW | alarm: %s",
+	ImGui::Text("Protected totals: demand %.3f kW, supplied %.3f kW, unmet critical %.3f kW",
 		snapshot.power.protectedDemandKW, snapshot.power.protectedSuppliedKW,
-		snapshot.power.protectedUnmetKW,
-		snapshot.power.protectedUnmet ? "UNMET CRITICAL MINIMA" : "ok");
+		snapshot.power.protectedUnmetKW);
 	if (snapshot.power.protectedServices.empty())
 		ImGui::TextDisabled("No protected service demand this tick (no critical loops, biology or critical chillers operating).");
 	for (auto const& service : snapshot.power.protectedServices)
@@ -1981,10 +1984,6 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			thermalReservoir.absorbedEnergyKJ, thermalReservoir.routedEnergyKJ,
 			thermalReservoir.loopEnergyKJ, thermalReservoir.condenserEnergyKJ,
 			thermalReservoir.rejectedEnergyKJ, thermalReservoir.residualKJ, snapshot.balanceTolerance);
-		if (thermalReservoir.aboveLimit)
-			ImGui::Text("  ABOVE the declared maximum service temperature");
-		if (thermalReservoir.belowLimit)
-			ImGui::Text("  BELOW the declared minimum service temperature");
 	}
 	ImGui::SeparatorText("Radiators (live; rejection follows the emitting temperature and the authored sink)");
 	if (snapshot.thermal.radiators.empty()) ImGui::TextDisabled("No radiators authored.");

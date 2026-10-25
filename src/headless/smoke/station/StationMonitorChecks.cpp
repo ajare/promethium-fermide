@@ -866,6 +866,7 @@ void monitorBulkCommands(smoke::Context const&)
 	core::applyStationEclssBiologyDefaultMonitors(baseline);
 	core::applyStationPowerSourceDefaultMonitors(baseline);
 	core::applyStationStoreConnectionDefaultMonitors(baseline);
+	core::applyStationLegacyReportingMonitors(baseline);
 	std::string diagnostic;
 	for (auto const& scope : std::vector<std::pair<std::string, std::string>>{
 		{"atmosphere", "room"}, {"atmosphere", ""}, {"", ""}})
@@ -927,8 +928,102 @@ void monitorBulkCommands(smoke::Context const&)
 		&& !diagnostic.empty() && invalid == before, "invalid bulk offer partially landed");
 }
 
+void monitorLegacyReporting(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	for (float dt : {0.25f, 1.0f})
+	{
+		core::StationSystemsSettings settings;
+		settings.enabled = true; settings.systemsStepWorldTicks = 1;
+		core::BatterySettings battery;
+		battery.id = "bank"; battery.nameplateKWh = 10; battery.usableKWh = 8;
+		battery.startingStoredKWh = 2; battery.maxDischargeKW = 10; battery.maxChargeKW = 10;
+		settings.batteries = {battery};
+		core::ThermalReservoirSettings reservoir;
+		reservoir.id = "sink:main"; reservoir.thermalClass = "moderate";
+		reservoir.heatCapacityKJPerK = 100; reservoir.startingTemperatureC = 20;
+		reservoir.minTemperatureC = -270; reservoir.maxTemperatureC = 20.001;
+		reservoir.absorbedHeatKW = 4;
+		settings.thermalReservoirs = {reservoir};
+		core::RadiatorSettings radiator;
+		radiator.id = "panel"; radiator.reservoirId = reservoir.id;
+		radiator.areaM2 = 0.001; radiator.emissivity = 1; radiator.viewFactor = 1;
+		radiator.sinkTemperatureC = -270;
+		settings.radiators = {radiator};
+		auto const defaults = core::stationLegacyReportingMonitors(settings);
+		require(defaults.size() == 6 && std::all_of(defaults.begin(), defaults.end(), [](auto const& m) {
+			return m.enabled && m.rule.triggerOnSeconds == 0 && m.rule.triggerOffSeconds == 0;
+		}), "compatibility rules did not preserve immediate enabled reporting");
+		core::StationSystemsRuntime run(settings, dt);
+		require(run.snapshot().activeAlerts.empty() && run.advanceTo(dt), "legacy reporting initial step failed");
+		auto snap = run.snapshot();
+		require(hasAlert(snap, "reserveExhausted")
+			&& hasAlert(snap, "temperatureC", reservoir.id, "thermal-reservoir"),
+			"legacy reserve/temperature conditions did not reach the Alert ledger");
+		require(std::all_of(snap.activeAlerts.begin(), snap.activeAlerts.end(), [&](auto const& a) {
+			return a.firedAtSeconds == dt && a.provenance == core::MonitorProvenance::Rated;
+		}), "compatibility Alert payload or immediate timing changed");
+		auto reserve = *std::find_if(defaults.begin(), defaults.end(), [](auto const& m) {
+			return m.metric == "reserveExhausted";
+		});
+		auto const reserveId = reserve.id;
+		reserve.enabled = false;
+		std::string diagnostic;
+		require(core::World::editStationMonitor(settings, reserve, diagnostic) && run.updateSettings(settings),
+			"compatibility Monitor could not be authored/disabled");
+		snap = run.snapshot();
+		require(!hasAlert(snap, "reserveExhausted") && snap.closedAlerts.size() == 1
+			&& snap.closedAlerts[0].clearReason == core::AlertClearReason::MonitorDisabled,
+			"disabling compatibility reporting did not close its Alert");
+		require(run.advanceTo(3 * dt) && !hasAlert(run.snapshot(), "reserveExhausted"),
+			"omitted defaults re-enabled an explicitly disabled compatibility rule");
+		reserve.enabled = true; reserve.rule.triggerOnSeconds = 2 * dt;
+		require(core::World::editStationMonitor(settings, reserve, diagnostic) && run.updateSettings(settings)
+			&& run.advanceTo(4 * dt) && !hasAlert(run.snapshot(), "reserveExhausted")
+			&& run.advanceTo(5 * dt) && hasAlert(run.snapshot(), "reserveExhausted"),
+			"compatibility override did not start fresh persistence on enable");
+		// Recovery changes physical cooling, not the observation rule. The
+		// existing conservation audit must remain healthy while the Alert clears.
+		settings.radiators[0].areaM2 = 1000;
+		require(run.updateSettings(settings) && run.advanceTo(6 * dt), "physical sink recovery failed");
+		snap = run.snapshot();
+		require(snap.healthy && snap.thermal.reservoirs[0].temperatureC < reservoir.maxTemperatureC
+			&& !hasAlert(snap, "temperatureC", reservoir.id, "thermal-reservoir")
+			&& std::any_of(snap.closedAlerts.begin(), snap.closedAlerts.end(), [&](auto const& a) {
+				return a.subjectId == reservoir.id && a.clearReason == core::AlertClearReason::AutoClear;
+			}), "recovered sink did not auto-clear through the Monitor callback ledger");
+		auto const announcements = std::count_if(run.events().begin(), run.events().end(), [&](auto const& e) {
+			return e.category == "alert" && e.message.find(reserveId) != std::string::npos;
+		});
+		require(announcements == 3, "compatibility fire/disable/re-fire announcements duplicated or missing");
+		core::StationConfigurationDocument doc, parsed;
+		doc.settings = settings;
+		require(core::parseStationConfiguration(core::serializeStationConfiguration(doc), parsed)
+			&& parsed.settings == settings, "compatibility authoring did not persist");
+		core::StationSystemsRuntime fresh(parsed.settings, dt);
+		require(fresh.snapshot().activeAlerts.empty() && fresh.snapshot().closedAlerts.empty(),
+			"compatibility Alert history survived runtime reset/load");
+		// The subject reference follows rename but the authored Monitor ID
+		// stays stable. Do not resurrect a disabled rule under a new default ID.
+		for (auto& m : settings.monitors)
+			if (m.subjectId == reservoir.id && m.id.ends_with(":above-limit")) m.enabled = false;
+		auto const count = settings.monitors.size();
+		core::StationNodeRename rename;
+		require(core::planStationNodeRename(settings, "Reservoir", reservoir.id, "renamed:sink", rename, &diagnostic)
+			&& core::renameStationNode(settings, rename, &diagnostic), "compatibility subject rename refused");
+		core::applyStationLegacyReportingMonitors(settings);
+		auto const effective = core::stationEffectiveMonitors(settings);
+		require(settings.monitors.size() == count && std::count_if(effective.begin(), effective.end(), [](auto const& m) {
+			return m.subjectType == "thermal-reservoir" && m.subjectId == "renamed:sink";
+		}) == 2 && std::none_of(effective.begin(), effective.end(), [](auto const& m) {
+			return m.subjectId == "renamed:sink" && m.id.ends_with(":above-limit") && m.enabled;
+		}), "rename duplicated a compatibility rule or resurrected disabled reporting");
+	}
+}
+
 void registerStationMonitorChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"monitorLegacyReporting", monitorLegacyReporting});
 	checks.push_back({"monitorTiming", monitorTiming});
 	checks.push_back({"monitorCommands", monitorCommands});
 	checks.push_back({"monitorValidation", monitorValidation});

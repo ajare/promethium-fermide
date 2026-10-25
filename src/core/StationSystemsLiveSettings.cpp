@@ -451,7 +451,7 @@ namespace core
 
 		// Keep the runtime's own settings copy in step with the live authored
 		// state, so a later snapshot or audit reads what the tick is using.
-		s.reconcileMonitors(offered.monitors);
+		s.reconcileMonitors(offered);
 		s.settings = offered;
 		syncAuthored(s.settings.stores, s.stores);
 		syncAuthored(s.settings.transfers, s.transfers);

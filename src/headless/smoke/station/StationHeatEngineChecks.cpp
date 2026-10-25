@@ -1561,7 +1561,7 @@ void heatEngineProtectedService(smoke::Context const&)
 		require(service.unmetCriticalKW <= 1e-9 && service.admitted
 			&& service.suppliedKW >= 5.0 - 1e-9,
 			"a protected floor went unmet with the engine running for it");
-		require(snapshot.power.protectedUnmetKW <= 1e-9 && !snapshot.power.protectedUnmet,
+		require(snapshot.power.protectedUnmetKW <= 1e-9 && !smoke::station::hasAlert(snapshot, "protectedUnmetKW"),
 			"the station raised a protected-unmet alarm with the floor served");
 		// Never over-extract against unmet acceptance: the engine's net
 		// output cannot exceed the demand signal it was admitted against.
@@ -1587,7 +1587,7 @@ void heatEngineProtectedService(smoke::Context const&)
 		require(advanceSeconds(world, 30.0), "protected-solar run failed");
 		auto const snapshot = world.getStationSystemsSnapshot();
 		require(snapshot.healthy, "protected-solar run failed its audit");
-		require(snapshot.power.protectedUnmetKW <= 1e-9 && !snapshot.power.protectedUnmet
+		require(snapshot.power.protectedUnmetKW <= 1e-9 && !smoke::station::hasAlert(snapshot, "protectedUnmetKW")
 			&& loadSnap(snapshot, "life-support").unmetCriticalKW <= 1e-9,
 			"the engine throttle starved a protected floor the other source could carry");
 		require(engine(snapshot, "orc").lastThermalInputKW == 0.0

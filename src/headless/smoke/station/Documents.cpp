@@ -1713,7 +1713,7 @@ namespace
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.thermal.reservoirs.size() == 1
 			&& expected.thermal.reservoirs[0].temperatureC > 20.0
-			&& !expected.thermal.reservoirs[0].aboveLimit
+			&& !smoke::station::hasAlert(expected, "temperatureC", expected.thermal.reservoirs[0].id, "thermal-reservoir")
 			&& std::abs(expected.thermal.reservoirs[0].residualKJ) < 1e-6
 			&& expected.thermal.radiators[0].lastRejectedKW > 0.0
 			&& std::abs(expected.thermal.reservoirs[0].temperatureC - 20.0) < 40.0,

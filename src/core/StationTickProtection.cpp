@@ -261,7 +261,7 @@ namespace core
 		// generation never erases the heat. It contends for no
 		// electrical pool; the entry makes the standing obligation
 		// visible beside the electrical protections, and removal
-		// adequacy is tracked by the sink's own temperature alarms.
+		// adequacy is tracked by the sink's temperature Monitors.
 		for (auto const& generator : runtime.generators)
 		{
 			if (!generator.lastCoolingRequired) continue;
@@ -273,7 +273,7 @@ namespace core
 			protectedServices.push_back({generator.authored.id, "shutdown-cooling",
 				heat->lastInputRate + heldKW, heat->lastInputRate, heldKW,
 				heldKW > 0.0 ? "heat connection is constrained: unrejected heat remains at the source"
-					: "decay heat books unconditionally: removal adequacy is tracked by the sink temperature alarms"});
+					: "decay heat books unconditionally: removal adequacy is tracked by the sink temperature Monitors"});
 		}
 		if (!std::isfinite(protectedDemandKW) || !std::isfinite(protectedSuppliedKW))
 		{

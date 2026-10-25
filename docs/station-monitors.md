@@ -9,6 +9,51 @@ source of truth for which names are valid: validation, evaluation and surfaces a
 resolve there. A Monitor observes only: it cannot change supplies, operate a hatch,
 trip equipment, or create Faults.
 
+## Legacy reporting migration (#865)
+
+Reserve exhaustion, backup engagement, dispatch shortfall, protected-service
+shortfall, reservoir high/low limits and the chiller condenser-sink limit now
+report through ordinary Monitor rules, the callback registry, and the Alert
+dashboard. The old aggregate boolean alarm scalars and reservoir limit flags
+are removed; numerical demand/supply/shortfall accounts, physical gate telemetry,
+and all conservation audits remain unchanged. Dispatch source commands still
+announce operational actions; limit announcements no longer have a second writer.
+The protected-service table retains individual unmet quantities and reasons.
+
+`stationLegacyReportingMonitors(settings)` expands the compatibility rules.
+Unlike the newer opt-in tables, these preserve formerly always-on reporting:
+enabled, zero trigger-on/off times, **rated** provenance. An omitted rule takes
+its compatibility default; an explicitly authored matching ID overrides it,
+including disable. IDs are `legacy:<type>:<subject-ID-byte-length>:<subject-ID>:<key>`.
+`stationEffectiveMonitors` merges these with authored rules without changing the
+document, and the runtime caches that set until a settings command changes it.
+Explicit overrides save/load like any other Monitor; Alert history does not.
+Removing an override restores the compatibility default; disable it to silence it.
+Subject rename preserves authored Monitor IDs and tuning/disable state without
+creating a second compatibility rule for the renamed subject.
+
+| Subject | Key / Metric | Rule / severity |
+|---|---|---|
+| `station` / `station` | reserve-exhausted / reserveExhausted | Above 0 / Critical; any usable, non-runaway bank at its physical reserve floor |
+| `station` / `station` | backup-engaged / backupEngaged | Above 0 / Advisory; automatic dispatch commands any fuel cell on |
+| `station` / `station` | dispatch-shortfall / dispatchShortfallKW | Above 1e-12 kW / Warning; zero in manual mode |
+| `station` / `station` | protected-unmet / protectedUnmetKW | Above 1e-12 kW / Critical |
+| `thermal-reservoir` | above-limit / temperatureC | Above authored maximum + 1e-9 °C / Warning |
+| `thermal-reservoir` | below-limit / temperatureC | Below authored minimum − 1e-9 °C / Warning |
+| `chiller` | sink-over / sinkOverMaxCondensing | Above 0 / Critical; uses the machine's physical >= gate |
+
+Open **Station-wide reporting** in the Flow inspector for aggregate rules,
+select a reservoir for its limits, or a chiller for its sink rule. The shared
+electrical pool remains an inert derived node. Inspector preview remains non-mutating;
+accepted edits materialize compatibility rules alongside opt-in defaults.
+Station-wide bulk disable includes them. Their Alerts never control dispatch,
+protection, battery discharge, or thermal integration. A failed conservation audit
+still fails the step and never becomes an Alert.
+
+Focused Release proofs: `station-monitorLegacyReporting`, `station-dispatch`,
+`station-protectedServices`, `station-thermal`, `station-chillers`, plus the
+Monitor command/inspector/dashboard checks.
+
 ## The §4.1 default table
 
 `stationAtmosphereHabitabilityTemplates()` carries the twelve habitability defaults

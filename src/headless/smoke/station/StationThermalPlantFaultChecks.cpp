@@ -173,7 +173,7 @@ void thermalPlantMonitors(smoke::Context const&)
 	for (size_t index = 0; index < original.size(); ++index)
 	{
 		auto s = base;
-		auto m = original[index]; m.enabled = true; s.monitors = {m};
+		auto m = original[index]; m.enabled = true; smoke::station::isolateMonitor(s, m);
 		std::string faultTarget, faultMode;
 		if (index <= 2) { faultTarget = "loop"; faultMode = "coolant-leak"; }
 		if (index == 3) { s.coolantLoops[0].startingTemperatureC = 0; s.coolantLoops[0].exchangerConductanceKWPerK = 0; }

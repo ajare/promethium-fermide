@@ -16,6 +16,20 @@
 namespace smoke::station
 {
 	inline void require(bool condition, char const* message) { if (!condition) throw std::runtime_error(message); }
+	inline bool hasAlert(core::StationSystemsSnapshot const& snapshot, std::string_view metric,
+		std::string_view subject = "station", std::string_view type = "station")
+	{
+		return std::any_of(snapshot.activeAlerts.begin(), snapshot.activeAlerts.end(), [&](auto const& alert) {
+			return alert.subjectType == type && alert.subjectId == subject && alert.metric == metric;
+		});
+	}
+	// Isolate an opt-in rule's timing from enabled legacy reporting rules.
+	inline void isolateMonitor(core::StationSystemsSettings& settings, core::StationMonitorSettings monitor)
+	{
+		settings.monitors = core::stationLegacyReportingMonitors(settings);
+		for (auto& legacy : settings.monitors) legacy.enabled = false;
+		settings.monitors.push_back(std::move(monitor));
+	}
 	// For fixtures whose unit is one integration step. Physical-duration
 	// scenarios must continue to use advanceSeconds and compare elapsed time.
 	inline uint32_t requestedStepRatio()

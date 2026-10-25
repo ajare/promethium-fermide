@@ -907,6 +907,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		if (!validateStationSystemsSettings(settings, diagnostic)) throw SerializationException(diagnostic);
 		mImpl = std::make_unique<Impl>(settings.systemsStepWorldTicks, baseStepSeconds);
 		mImpl->settings = settings; mImpl->snapshot.enabled = settings.enabled;
+		mImpl->effectiveMonitors = stationEffectiveMonitors(settings);
 		// Wear-only runs also need their original rates pinned: accepted live
 		// settings changes must be journaled, never applied retroactively on replay.
 		if (std::any_of(settings.atmospheres.begin(), settings.atmospheres.end(),
@@ -2044,7 +2045,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		mImpl->clock.commitStep();
 		next.elapsedSeconds = mImpl->clock.elapsedSeconds();
 		mImpl->snapshot = next;
-		if (std::any_of(mImpl->settings.monitors.begin(), mImpl->settings.monitors.end(),
+		if (std::any_of(mImpl->effectiveMonitors.begin(), mImpl->effectiveMonitors.end(),
 			[](auto const& monitor) { return monitor.enabled; })) mImpl->evaluateMonitors(snapshot());
 		if (tick % mImpl->observationIntervalSteps == 0)
 		{

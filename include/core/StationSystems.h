@@ -3346,18 +3346,13 @@ namespace core
 		// down machine contributes nothing it cannot serve (#578);
 		// dispatchShortfallKW is the part of
 		// the target no available source could take - published, never
-		// fabricated. backupEngaged reports that a fuel-cell backup is
-		// under dispatch command, and reserveExhausted reports that a
-		// battery bank has fallen to its protected reserve floor while the
-		// station is running. In Manual mode the target/committed/shortfall
-		// and backup alarm stay zero/false: the dispatcher is inert.
+		// fabricated. In Manual mode target/committed/shortfall stay zero:
+		// the dispatcher is inert. Limit reporting lives in the Alert ledger.
 		StationDispatchMode dispatchMode{StationDispatchMode::Manual};
 		double dispatchDemandKW{0.0};
 		double dispatchTargetKW{0.0};
 		double dispatchCommittedKW{0.0};
 		double dispatchShortfallKW{0.0};
-		bool backupEngaged{false};
-		bool reserveExhausted{false};
 		// Coolant loop electrical service this tick (#396): pump and
 		// freeze-heater power actually drawn from the same allocation
 		// pool as external loads — never a second budget.
@@ -3402,11 +3397,10 @@ namespace core
 		// totals. protectedDemandKW is the protected demand presented to
 		// the pool, protectedSuppliedKW what the pool delivered, and
 		// protectedUnmetKW the unmet critical minimum that stays visible
-		// with its reason; protectedUnmet is the station-level alarm.
+		// with its reason. The corresponding Monitor reports on the Alert ledger.
 		double protectedDemandKW{0.0};
 		double protectedSuppliedKW{0.0};
 		double protectedUnmetKW{0.0};
-		bool protectedUnmet{false};
 		std::vector<StationProtectedServiceSnapshot> protectedServices;
 		// #417 recovery staging summary. recoveryPending is true while any
 		// purely discretionary load is Shed or Restoring - the station is in
@@ -3537,8 +3531,6 @@ namespace core
 		double lastHeatInKW{0.0};       // absorbed + routed + loop + condenser + generator + electrolysis + fuel cell this tick
 		double lastRejectedKW{0.0};     // radiator net rejection this tick
 		double lastNetKW{0.0};          // heat in minus rejected this tick
-		bool aboveLimit{false};
-		bool belowLimit{false};
 		double startingEnergyKJ{0.0};
 		double currentEnergyKJ{0.0};
 		double absorbedEnergyKJ{0.0};
@@ -4113,6 +4105,13 @@ namespace core
 	std::vector<StationMonitorTemplate> const& stationEclssBiologyMonitorTemplates(std::string_view subjectType);
 	std::vector<StationMonitorSettings> stationEclssBiologyDefaultMonitors(StationSystemsSettings const&);
 	void applyStationEclssBiologyDefaultMonitors(StationSystemsSettings&);
+
+	// Compatibility reporting for the pre-Monitor limits. These immediate rules
+	// remain enabled when omitted by old documents; an authored ID overrides them,
+	// including explicit disable. No physical control consumes their Alerts.
+	std::vector<StationMonitorSettings> stationLegacyReportingMonitors(StationSystemsSettings const&);
+	void applyStationLegacyReportingMonitors(StationSystemsSettings&);
+	std::vector<StationMonitorSettings> stationEffectiveMonitors(StationSystemsSettings const&);
 	// One scheduled airlock cycle as of the most recent tick (#400): the
 	// authored schedule beside the runtime's cycle history - what each
 	// occurrence removed from its compartment, how much was recovered

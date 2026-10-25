@@ -192,7 +192,7 @@ namespace core
 		serializer.writeFloat("observationIntervalSeconds", settings.observationIntervalSeconds);
 		serializer.writeFloat("trendRetentionSeconds", settings.trendRetentionSeconds);
 		// #415: the dispatch controller mode is authored settings; the
-		// controller's runtime scalars and alarms never travel.
+		// controller's runtime scalars and Alerts never travel.
 		serializer.writeString("dispatchMode",
 			settings.dispatchMode == StationDispatchMode::Automatic
 				? "automatic" : "manual");

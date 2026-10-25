@@ -47,6 +47,17 @@ namespace
 		return message;
 	}
 
+	bool overridesLegacyRule(StationMonitorSettings const& monitor, StationMonitorSettings const& candidate)
+	{
+		if (monitor.id == candidate.id) return true;
+		// Rename cascades retarget the subject but deliberately preserve the
+		// Monitor's own ID. Its compatibility family must still suppress the
+		// newly named default, or rename would duplicate Alerts and undo disable.
+		auto const key = candidate.id.substr(candidate.id.rfind(':'));
+		return monitor.subjectType == candidate.subjectType && monitor.subjectId == candidate.subjectId
+			&& monitor.id.starts_with("legacy:" + candidate.subjectType + ":") && monitor.id.ends_with(key);
+	}
+
 	// Derived Metric (spec §3.1): the §4.1 toxic-contaminant bound is a
 	// concentration, while the compartment keeps the hazard as retained
 	// mass. A compartment with no usable volume holds no concentration at
@@ -197,6 +208,51 @@ namespace
 		}
 	}
 
+	std::vector<StationMonitorSettings> stationLegacyReportingMonitors(StationSystemsSettings const& settings)
+	{
+		std::vector<StationMonitorSettings> result;
+		auto add = [&](std::string type, std::string id, std::string key, std::string metric,
+			double threshold, AlertDirection direction, AlertSeverity severity) {
+			// Length-prefixed identity cannot alias punctuation-bearing subject IDs.
+			auto identity = "legacy:" + type + ":" + std::to_string(id.size()) + ":" + id + ":" + key;
+			result.push_back({identity, type, id, metric, {threshold, direction, 0, 0},
+				severity, true, MonitorProvenance::Rated});
+		};
+		using enum AlertDirection; using enum AlertSeverity;
+		add("station", "station", "reserve-exhausted", "reserveExhausted", 0, Above, Critical);
+		add("station", "station", "backup-engaged", "backupEngaged", 0, Above, Advisory);
+		add("station", "station", "dispatch-shortfall", "dispatchShortfallKW", 1e-12, Above, Warning);
+		add("station", "station", "protected-unmet", "protectedUnmetKW", 1e-12, Above, Critical);
+		for (auto const& reservoir : settings.thermalReservoirs)
+		{
+			add("thermal-reservoir", reservoir.id, "above-limit", "temperatureC",
+				reservoir.maxTemperatureC + 1e-9, Above, Warning);
+			add("thermal-reservoir", reservoir.id, "below-limit", "temperatureC",
+				reservoir.minTemperatureC - 1e-9, Below, Warning);
+		}
+		for (auto const& chiller : settings.chillers)
+			add("chiller", chiller.id, "sink-over", "sinkOverMaxCondensing", 0, Above, Critical);
+		return result;
+	}
+
+	void applyStationLegacyReportingMonitors(StationSystemsSettings& settings)
+	{
+		for (auto const& candidate : stationLegacyReportingMonitors(settings))
+			if (std::none_of(settings.monitors.begin(), settings.monitors.end(),
+				[&](auto const& monitor) { return overridesLegacyRule(monitor, candidate); }))
+				settings.monitors.push_back(candidate);
+	}
+
+	std::vector<StationMonitorSettings> stationEffectiveMonitors(StationSystemsSettings const& settings)
+	{
+		auto result = settings.monitors;
+		for (auto const& candidate : stationLegacyReportingMonitors(settings))
+			if (std::none_of(result.begin(), result.end(),
+				[&](auto const& monitor) { return overridesLegacyRule(monitor, candidate); }))
+				result.push_back(candidate);
+		return result;
+	}
+
 	void StationSystemsRuntime::Impl::clearAlert(std::string_view monitorId, AlertClearReason reason)
 	{
 		auto const active = std::find_if(activeAlerts.begin(), activeAlerts.end(),
@@ -214,9 +270,10 @@ namespace
 		stationAlertCallbacksFor(alert.metric).onClear(sink, alert);
 	}
 
-	void StationSystemsRuntime::Impl::reconcileMonitors(std::vector<StationMonitorSettings> const& offered)
+	void StationSystemsRuntime::Impl::reconcileMonitors(StationSystemsSettings const& nextSettings)
 	{
-		for (auto const& before : settings.monitors)
+		auto const offered = stationEffectiveMonitors(nextSettings);
+		for (auto const& before : effectiveMonitors)
 		{
 			auto next = std::find_if(offered.begin(), offered.end(), [&](auto const& m) { return m.id == before.id; });
 			if (next != offered.end() && *next == before) continue;
@@ -228,12 +285,13 @@ namespace
 					? AlertClearReason::MonitorDisabled : AlertClearReason::MonitorChanged);
 			monitorStates.erase(before.id);
 		}
+		effectiveMonitors = offered;
 	}
 
 	void StationSystemsRuntime::Impl::evaluateMonitors(StationSystemsSnapshot const& published)
 	{
 		AlertSink sink{activeAlerts, closedAlerts, events, clock.steps()};
-		for (auto const& monitor : settings.monitors)
+		for (auto const& monitor : effectiveMonitors)
 		{
 			if (!monitor.enabled) continue; // no lookup, evaluation, or state for disabled rules
 			auto const sample = readStationMonitorMetric(settings, published,

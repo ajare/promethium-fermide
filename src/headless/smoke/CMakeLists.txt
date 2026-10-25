@@ -314,7 +314,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         stabilityLongRunFast stabilityPathEquivalenceFast stabilityResetIsolationFast
         stabilityMultiWorldIsolationFast stabilityAuditFaultInjection materialIdentity
         atmosphereFire airlockFaultBookings atmosphereFaultReplay atmosphereFaultTransactions atmosphereFaultWorld
-        monitorTiming monitorCommands monitorValidation monitorPersistence monitorDemo
+        monitorLegacyReporting monitorTiming monitorCommands monitorValidation monitorPersistence monitorDemo
         monitorDefaultTable monitorDefaultBoundaries monitorCallbackStream monitorCascade monitorBulkCommands
         monitorStoreConnectionTable monitorStoreBoundaries monitorConnectionBoundaries monitorWaterStream
         eclssBiologyMonitorTable eclssBiologyMonitorBoundaries
