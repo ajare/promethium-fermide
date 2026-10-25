@@ -342,6 +342,7 @@ namespace
 			|| (type == "Radiator" && draft.radiators.size() >= core::MaxStationRadiators)
 			|| (type == "Coolant loop" && draft.coolantLoops.size() >= core::MaxStationCoolantLoops)
 			|| (type == "Chiller" && draft.chillers.size() >= core::MaxStationChillers)
+			|| (type == "Heat engine" && draft.heatEngines.size() >= core::MaxStationHeatEngines)
 			|| (type == "Thermal buffer" && draft.thermalBuffers.size() >= core::MaxStationThermalBuffers)
 			|| (type == "Crew" && draft.crews.size() >= core::MaxStationCrews)
 			|| (type == "Crops" && draft.cropPopulations.size() >= core::MaxStationCropPopulations)
@@ -2332,6 +2333,23 @@ entry.thermalClass = "moderate";
 			}
 			mLayout["Thermal buffer:" + buffer.id + ":0"] = placeAt;
 			draft.thermalBuffers.push_back(std::move(buffer));
+			mFitRequested = false;
+		}
+		else if (mPlacingType == "Heat engine" && draft.heatEngines.size() < core::MaxStationHeatEngines)
+		{
+			core::HeatEngineSettings engine;
+			engine.thermalClass = "moderate";
+			engine.ratedThermalInputKW = engine.commandedInputKW = 10.0;
+			engine.minHotTemperatureC = 80.0;
+			engine.maxSinkTemperatureC = 60.0;
+			for (size_t candidate = 1;; ++candidate)
+			{
+				engine.id = "heatEngine" + std::to_string(candidate);
+				if (std::none_of(draft.heatEngines.begin(), draft.heatEngines.end(),
+					[&](auto const& entry) { return entry.id == engine.id; })) break;
+			}
+			mLayout["Heat engine:" + engine.id + ":0"] = placeAt;
+			draft.heatEngines.push_back(std::move(engine));
 			mFitRequested = false;
 		}
 		else if (mPlacingType == "Chiller" && draft.chillers.size() < core::MaxStationChillers)

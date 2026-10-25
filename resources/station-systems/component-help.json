@@ -968,7 +968,7 @@
         },
         {
           "kind": "paragraph",
-          "text": "hot Reservoir input, rejection Reservoir output, automatic net generation to the shared electrical pool. Reservoirs must be distinct; the rejection Reservoir must match the engine's thermal class, while the hot Reservoir need not share that class. Outage/Maintenance can target its installation identity. Select an existing Heat engine in Flow to edit its reservoir references, operating settings, mechanical-seizure opt-in, efficiency-drift Wear, and repair-parts plans in the Configuration draft. Apply uses the normal validated configuration path. Placement-menu entries and draggable Heat engine ports are not yet available; open a configuration containing a Heat engine to author it."
+          "text": "hot Reservoir input, rejection Reservoir output, automatic net generation to the shared electrical pool. Reservoirs must be distinct; the rejection Reservoir must match the engine's thermal class, while the hot Reservoir need not share that class. Place a Heat engine from the Thermal group in Place node or the canvas context menu. Connect Reservoir Heat out to Thermal intake, and Rejection heat to a different Reservoir Heat in; Power out connects automatically. Outage/Maintenance can target its Supervision port. Select the engine to edit reservoir references, operating settings, mechanical-seizure opt-in, efficiency-drift Wear, and repair-parts plans in the Flow Inspector. Placement starts unwired; Apply validates both thermal interfaces. Wiring, inspector edits, rename and cascade deletion support draft undo/redo."
         },
         {
           "kind": "settings",
@@ -1970,7 +1970,7 @@
         },
         {
           "kind": "paragraph",
-          "text": "Target installation names a Generator, Coolant loop, Chiller or Heat engine. Editable Flow Supervision ports currently exist on the first three; Heat engines use their configuration installation ID."
+          "text": "Target installation names a Generator, Coolant loop, Chiller or Heat engine. All four have editable Flow Supervision ports."
         },
         {
           "kind": "settings",

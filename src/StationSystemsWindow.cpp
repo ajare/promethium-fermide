@@ -1524,6 +1524,15 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		else
 			++index;
 	}
+	ImGui::SeparatorText("Draft heat engines (Carnot-bounded thermal intake, net generation and a distinct rejection sink)");
+	for (size_t index = 0; index < mDraft.heatEngines.size(); )
+	{
+		station_editor::findStationEntryEditor("Heat engine")->renderEntry(mDraft, index);
+		if (ImGui::Button(("Remove heat engine " + std::to_string(index)).c_str()))
+			mDraft.heatEngines.erase(mDraft.heatEngines.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
 	ImGui::SeparatorText("Draft generators (kW/kWh; fuel is an energy-unit Resource store; startup energy and a qualified cooling sink gate the start; zero installed capacity disables the source)");
 	station_editor::renderGeneratorList(mDraft);
 	ImGui::SeparatorText("Draft installation outages (#413; a scheduled capacity reduction of one registered installation - generator, coolant loop or chiller; the capacity fraction is the share of rated capacity left available during the window, [0,1); recurrence 0 is a one-off, a positive recurrence repeats the window and must be at least as long as it; overlapping outages on one installation take the deepest reduction; restoration only lifts the ceiling and never replenishes any inventory)");

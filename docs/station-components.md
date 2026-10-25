@@ -536,11 +536,15 @@ component, not a negative Equipment load or a discount on radiator heat.
 net generation to the shared electrical pool. Reservoirs must be distinct;
 the rejection Reservoir must match the engine's thermal class, while the hot
 Reservoir need not share that class. Outage/Maintenance can target its
-installation identity. Select an existing Heat engine in Flow to edit its reservoir
-references, operating settings, mechanical-seizure opt-in, efficiency-drift Wear,
-and repair-parts plans in the Configuration draft. Apply uses the normal validated
-configuration path. Placement-menu entries and draggable Heat engine ports are not
-yet available; open a configuration containing a Heat engine to author it.
+installation identity through its Supervision port. Place a Heat engine from the
+Thermal group in Flow's Place node menu (or the canvas context menu). Connect a
+Reservoir's Heat out to Thermal intake, and Rejection heat to a different
+Reservoir's Heat in. Power out connects automatically, like other generators.
+Select the engine to edit its reservoir references, operating settings,
+mechanical-seizure opt-in, efficiency-drift Wear, and repair-parts plans in the
+Flow Inspector. Placement starts unwired; Apply uses the normal validated
+configuration path once both thermal interfaces are connected. Wiring, inspector
+edits, rename and cascade deletion participate in draft undo/redo.
 
 | Dial/value | Purpose |
 | --- | --- |
@@ -982,8 +986,7 @@ selector will not clear a tank whose contents are all held.
 installation. It is a capacity constraint, not destruction or inventory reset.
 
 **Ports:** **Target installation** names a Generator, Coolant loop, Chiller or
-Heat engine. Editable Flow Supervision ports currently exist on the first
-three; Heat engines use their configuration installation ID.
+Heat engine. All four have editable Flow Supervision ports.
 
 | Dial/value | Purpose |
 | --- | --- |

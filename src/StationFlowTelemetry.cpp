@@ -355,6 +355,23 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		out.ports["Condenser heat"] = quantity(p->condenserHeatKW, "kW");
 		if (p->coolingUnmetKW > 1e-9 && p->blockReason.empty()) warn(out, "Cooling demand unmet");
 	}
+	else if (node.type == "Heat engine")
+	{
+		auto p = find(s.heatEngines, id); if (!p) return {};
+		out.status = "Operating";
+		if (p->status == core::StationHeatEngineStatus::Idle)
+		{ out.state = TelemetryState::Idle; out.status = "Idle"; }
+		out.values = {"Thermal intake " + quantity(p->lastThermalInputKW, "kW"),
+			"Net generation " + quantity(p->lastElectricalOutputKW, "kW"),
+			"Rejection heat " + quantity(p->lastRejectionKW, "kW"),
+			"Hot source " + quantity(p->hotTemperatureC, "C"),
+			"Sink " + quantity(p->sinkTemperatureC, "C")};
+		out.ports["Thermal intake"] = quantity(p->lastThermalInputKW, "kW");
+		out.ports["Rejection heat"] = quantity(p->lastRejectionKW, "kW");
+		out.ports["Power out"] = quantity(p->lastElectricalOutputKW, "kW");
+		warn(out, p->lastLimiter, p->tripped);
+		if (p->disabled) { out.state = TelemetryState::Idle; out.status = "Disabled"; }
+	}
 	else if (node.type == "Thermal buffer")
 	{
 		auto p = find(s.thermalBuffers, id); if (!p) return {}; state(out, *p);

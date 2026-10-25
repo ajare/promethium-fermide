@@ -2710,6 +2710,146 @@ namespace
 
 	// #659: author both chiller interfaces through the real Flow controls,
 	// sharing the form editor and leaving the World untouched.
+	void flowHeatEngineWorkflow(smoke::Context const& smokeContext)
+	{
+		using smoke::require;
+		core::StationSystemsSettings seed; seed.enabled = true;
+		core::ThermalReservoirSettings reservoir;
+		reservoir.id = "hot"; reservoir.thermalClass = "generation"; reservoir.heatCapacityKJPerK = 100;
+		seed.thermalReservoirs.push_back(reservoir);
+		reservoir.id = "sink"; reservoir.thermalClass = "moderate";
+		seed.thermalReservoirs.push_back(reservoir);
+		// Exercise the same link and cascade seams as canvas drags, including
+		// incomplete drafts and the historical connection-design identities.
+		{
+			auto draft = seed;
+			core::HeatEngineSettings engine; engine.id = "engine"; engine.thermalClass = "moderate";
+			engine.minHotTemperatureC = 80; engine.maxSinkTemperatureC = 60;
+			draft.heatEngines.push_back(engine);
+			core::StationPinRef const intake{"Heat engine", "engine", "Thermal intake"};
+			core::StationPinRef const rejection{"Heat engine", "engine", "Rejection heat"};
+			core::StationPinRef const hot{"Reservoir", "hot", "Heat out"};
+			core::StationPinRef const sink{"Reservoir", "sink", "Heat in"};
+			draft.heatEngines[0].hotReservoirId = "missing";
+			for (bool reverse : {false, true})
+			{
+				require(core::evaluateStationLink(draft, reverse ? core::CandidateLink{sink, rejection}
+					: core::CandidateLink{rejection, sink}).allowed, "dangling intake masked valid rejection");
+				require(!core::evaluateStationLink(draft, {rejection, {"Reservoir", "hot", "Heat in"}}).allowed,
+					"dangling intake masked rejection class mismatch");
+			}
+			draft.heatEngines[0].hotReservoirId.clear();
+			require(core::applyStationLink(draft, {rejection, sink}), "rejection write failed");
+			require(!core::evaluateStationLink(draft, {{"Reservoir", "sink", "Heat out"}, intake}).allowed,
+				"same-reservoir engine accepted");
+			require(core::evaluateStationLink(draft, {intake, hot}).allowed
+				&& core::applyStationLink(draft, {intake, hot}), "hot source incorrectly required rejection class");
+			auto graph = station_flow::build(draft);
+			for (auto const& link : graph.links)
+				if (link.designKey.ownerType == "Heat engine" && link.kind == station_flow::LinkKind::Heat)
+				{
+					require(link.designKey.reference == "$" + link.designKey.relation, "engine design identity changed");
+					draft.connections[link.designKey] = {};
+				}
+			std::string diagnostic;
+			core::StationNodeRename rename;
+			require(core::planStationNodeRename(draft, "Reservoir", "hot", "renamedHot", rename)
+				&& core::renameStationNode(draft, rename, &diagnostic), diagnostic.c_str());
+			require(draft.heatEngines[0].hotReservoirId == "renamedHot" && draft.connections.size() == 2,
+				"reservoir rename lost engine reference or ratings");
+			core::InstallationOutageSettings outage; outage.id = "outage"; outage.installationId = "engine";
+			draft.outages.push_back(outage);
+			require(core::planStationNodeRename(draft, "Heat engine", "engine", "renamedEngine", rename)
+				&& core::renameStationNode(draft, rename, &diagnostic), diagnostic.c_str());
+			require(draft.outages[0].installationId == "renamedEngine", "engine rename lost supervision");
+			core::StationNodeRemoval removal;
+			require(core::planStationNodeRemoval(draft, "Reservoir", "sink", removal)
+				&& core::removeStationNode(draft, removal), "reservoir removal failed");
+			require(draft.heatEngines[0].rejectionReservoirId.empty() && draft.connections.size() == 1,
+				"reservoir deletion left engine reference or design properties");
+			require(core::planStationNodeRemoval(draft, "Heat engine", "renamedEngine", removal)
+				&& core::removeStationNode(draft, removal), "engine removal failed");
+			require(draft.heatEngines.empty() && draft.outages[0].installationId.empty()
+				&& draft.connections.empty(), "engine deletion left dangling wiring");
+		}
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		auto world = std::make_shared<core::World>("Heat engine flow", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str()); world->markSaved();
+		StationSystemsWindow window;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "flowHeatEngine", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration"); ctx->ComboClick("Place node/Heat engine"); ctx->Yield(3);
+			REQ(driver.contains("Heat engine placement armed"), "engine placement not armed");
+			auto* canvas = flowCanvasWindow("Configuration");
+			ctx->MouseTeleportToPos({canvas->Pos.x + 300, canvas->Pos.y + 180}); ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			REQ(window.draft().heatEngines.size() == 1 && window.draft().heatEngines[0].id == "heatEngine1"
+				&& window.draft().heatEngines[0].hotReservoirId.empty()
+				&& window.draft().heatEngines[0].rejectionReservoirId.empty(), "engine placement defaults failed");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().heatEngines.empty(), "undo placement failed");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().heatEngines.size() == 1, "redo placement failed");
+			driver.click(ctx, "**/Find node"); ctx->KeyChars("heatEngine1"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			ImVec4 r{}; REQ(window.flowNodeRect("Heat engine", "heatEngine1", &r), "engine node missing");
+			ctx->MouseTeleportToPos({(r.x + r.z) / 2, (r.y + r.w) / 2}); ctx->MouseClick(); ctx->Yield(3);
+			driver.click(ctx, "**/Find node"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyPress(ImGuiKey_Delete); ctx->Yield(3);
+			ctx->MouseTeleportToPos({20, 20}); ctx->Yield(2);
+			driver.typeValue(ctx, "**/Carnot fraction##Heat engine 0", "0.5"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(window.draft().heatEngines[0].carnotFraction == 0.5, "inspector field edit failed");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().heatEngines[0].carnotFraction == 0.4, "undo inspector failed");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			driver.click(ctx, "Fit all"); ctx->Yield(3);
+			auto drag = [&](core::StationPinRef const& from, core::StationPinRef const& to) {
+				ImVec2 a{}, b{};
+				if (!window.flowPinPosition(from.nodeType, from.nodeId, from.portName, &a)
+					|| !window.flowPinPosition(to.nodeType, to.nodeId, to.portName, &b)) return false;
+				ctx->MouseTeleportToPos(a); ctx->Yield(3); ctx->MouseDown(); ctx->Yield(3);
+				ctx->MouseTeleportToPos({(a.x + b.x) / 2, (a.y + b.y) / 2}); ctx->Yield(2);
+				ctx->MouseTeleportToPos(b); ctx->Yield(2);
+				if (window.flowPinPosition(to.nodeType, to.nodeId, to.portName, &b)) ctx->MouseTeleportToPos(b);
+				ctx->Yield(3); ctx->MouseUp(); ctx->Yield(3); return true;
+			};
+			REQ(drag({"Heat engine", "heatEngine1", "Thermal intake"}, {"Reservoir", "hot", "Heat out"}), "intake pins missing");
+			REQ(window.draft().heatEngines[0].hotReservoirId == "hot", window.flowLinkRejection().c_str());
+			driver.click(ctx, "Fit all"); ctx->Yield(3);
+			REQ(drag({"Reservoir", "sink", "Heat in"}, {"Heat engine", "heatEngine1", "Rejection heat"}), "rejection pins missing");
+			REQ(window.draft().heatEngines[0].rejectionReservoirId == "sink", window.flowLinkRejection().c_str());
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().heatEngines[0].rejectionReservoirId.empty(), "undo wiring failed");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			ImVec2 power{}; REQ(window.flowPinPosition("Heat engine", "heatEngine1", "Power out", &power), "automatic generation port missing");
+			REQ(core::validateStationSystemsSettings(window.draft(), diagnostic), diagnostic.c_str());
+			core::StationConfigurationDocument document; document.settings = window.draft();
+			core::StationConfigurationDocument loaded;
+			auto const path = (smokeContext.temporaryRoot() / "heat-engine.station.yaml").string();
+			core::saveStationConfiguration(path, document);
+			REQ(core::loadStationConfiguration(path, loaded, &diagnostic), diagnostic.c_str());
+			REQ(loaded.settings == window.draft(), "save/load lost heat-engine authoring");
+			// Inspector disconnect is the same undoable action as removing a wire.
+			driver.click(ctx, "**/Find node"); ctx->KeyChars("heatEngine1"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(window.flowNodeRect("Heat engine", "heatEngine1", &r), "wired engine missing");
+			ctx->MouseTeleportToPos({(r.x + r.z) / 2, (r.y + r.w) / 2}); ctx->MouseClick(); ctx->Yield(3);
+			driver.click(ctx, "**/Find node"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyPress(ImGuiKey_Delete); ctx->Yield(3);
+			driver.click(ctx, "**/Disconnect Thermal intake hot"); ctx->Yield(3);
+			REQ(window.draft().heatEngines[0].hotReservoirId.empty(), "inspector disconnect failed");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().heatEngines[0].hotReservoirId == "hot", "undo disconnect failed");
+			REQ(world->getStationSystemsSettings() == seed && !world->isModified(), "draft edits mutated World");
+		});
+		#undef REQ
+		require(driver.passed(), "Flow heat-engine workflow failed");
+	}
+
 	void flowChillerWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -3382,7 +3522,7 @@ namespace
 		add(s.stores); add(s.transfers); add(s.conversions); add(s.power.loads);
 		add(s.power.sources); add(s.power.batteries); add(s.power.generators); add(s.fuelCells);
 		add(s.thermal.reservoirs); add(s.thermal.radiators); add(s.coolantLoops);
-		add(s.chillers); add(s.thermalBuffers); add(s.atmospheres); add(s.atmospherePathways); add(s.thermalLinks); add(s.crews);
+		add(s.chillers); add(s.heatEngines); add(s.thermalBuffers); add(s.atmospheres); add(s.atmospherePathways); add(s.thermalLinks); add(s.crews);
 		add(s.waterCollectors); add(s.waterTreatments); add(s.electrolyzers); add(s.co2Captures);
 		add(s.sabatierReactors); add(s.methaneProcessors); add(s.microbialProcessors);
 		add(s.cropPopulations); add(s.algaeCultures); add(s.deliveries); add(s.wasteEjections);
@@ -5286,6 +5426,7 @@ namespace
 				{"Generator", "Generator"}, {"Fuel cell", "Fuel cell"}, {"Sabatier", "Sabatier reactor"},
 				{"Methane processor", "Methane processor"}, {"Reservoir", "Thermal reservoir"},
 				{"Radiator", "Radiator"}, {"Coolant loop", "Coolant loop"}, {"Chiller", "Chiller"},
+				{"Heat engine", "Heat engine"},
 				{"Thermal buffer", "Thermal buffer"}, {"Thermal link", "Thermal link"}, {"Crew", "Crew"}, {"Crops", "Crop population"},
 				{"Algae", "Algae culture"}, {"Microbial processor", "Microbial processor"},
 				{"Water collector", "Water collector"}, {"Water treatment", "Water treatment"},
@@ -8274,6 +8415,7 @@ prefabCatalogue:
 	checks.push_back({"station/flowRadiatorWorkflow", flowRadiatorWorkflow});
 	checks.push_back({"station/flowCoolantLoopWorkflow", flowCoolantLoopWorkflow});
 	checks.push_back({"station/flowChillerWorkflow", flowChillerWorkflow});
+	checks.push_back({"station/flowHeatEngineWorkflow", flowHeatEngineWorkflow});
 	checks.push_back({"station/flowThermalBufferWorkflow", flowThermalBufferWorkflow});
 	checks.push_back({"station/transferWorkflow", transferWorkflow});
 	checks.push_back({"station/bioconversionFoodwasteWorkflow", bioconversionFoodwasteWorkflow});

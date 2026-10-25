@@ -354,6 +354,20 @@ namespace
 			}
 			return false;
 		}
+		// Keep the pre-authoring design keys: saved ratings and Monitors
+		// continue to identify the same physical connections.
+		if (link.from.nodeType == "Reservoir" && link.from.portName == "Heat out"
+			&& link.to.nodeType == "Heat engine" && link.to.portName == "Thermal intake")
+		{
+			mapping = {"Heat engine", link.to.nodeId, "$Thermal intake", link.from};
+			return true;
+		}
+		if (link.from.nodeType == "Heat engine" && link.from.portName == "Rejection heat"
+			&& link.to.nodeType == "Reservoir" && link.to.portName == "Heat in")
+		{
+			mapping = {"Heat engine", link.from.nodeId, "$Rejection heat", link.to};
+			return true;
+		}
 		if (link.from.nodeType == "Reservoir" && link.from.portName == "Hosted buffers"
 			&& link.to.nodeType == "Thermal buffer" && link.to.portName == "Host reservoir")
 		{
@@ -453,7 +467,7 @@ namespace
 			|| ownerType == "Water collector" || ownerType == "Water treatment" || ownerType == "Electrolyzer" || ownerType == "CO2 capture" || ownerType == "Atmosphere" || ownerType == "Airlock cycle"
 			|| ownerType == "Equipment" || ownerType == "Generator" || ownerType == "Fuel cell"
 			|| ownerType == "Sabatier" || ownerType == "Methane processor" || ownerType == "Radiator"
-			|| ownerType == "Coolant loop" || ownerType == "Chiller" || ownerType == "Thermal buffer";
+			|| ownerType == "Coolant loop" || ownerType == "Chiller" || ownerType == "Heat engine" || ownerType == "Thermal buffer";
 	}
 
 	// The reference field a machine link names, as a pointer into the draft
@@ -626,6 +640,15 @@ namespace
 			if (found == settings.thermalBuffers.end()) return nullptr;
 			if (field == "Host reservoir") return &found->reservoirId;
 			if (field == "Circulation gate") return &found->circulationLoopId;
+			return nullptr;
+		}
+		if (ownerType == "Heat engine")
+		{
+			auto const found = std::find_if(settings.heatEngines.begin(), settings.heatEngines.end(),
+				[&](HeatEngineSettings const& entry) { return entry.id == ownerId; });
+			if (found == settings.heatEngines.end()) return nullptr;
+			if (field == "$Thermal intake") return &found->hotReservoirId;
+			if (field == "$Rejection heat") return &found->rejectionReservoirId;
 			return nullptr;
 		}
 		if (ownerType == "Chiller")
@@ -856,6 +879,31 @@ namespace
 	// is empty when the entry is satisfied and otherwise carries the rule's
 	// own wording. Returns false when the owner type has no scoped rule yet -
 	// a fan-out ticket adds its entry's rule here beside its descriptors.
+	// Check interfaces independently: an unwired sibling must not mask an
+	// invalid drop in a partially authored engine (ADR 0029).
+	std::string scopedHeatEngineWiring(StationSystemsSettings const& settings, HeatEngineSettings const& engine)
+	{
+		auto const where = "Station heat engine '" + engine.id + "'";
+		if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+			engine.thermalClass) == StationThermalServiceClasses.end())
+			return where + " has unknown thermal service class '" + engine.thermalClass
+				+ "'; declared classes are: low, moderate, warm, generation";
+		if (!engine.hotReservoirId.empty() && engine.hotReservoirId == engine.rejectionReservoirId)
+			return where + " hot and rejection endpoints resolve to the same reservoir '"
+				+ engine.hotReservoirId + "'; a single-temperature engine is a perpetual-motion machine";
+		auto const* hot = findReservoirById(settings, engine.hotReservoirId);
+		auto const* sink = findReservoirById(settings, engine.rejectionReservoirId);
+		if (sink && sink->thermalClass != engine.thermalClass)
+			return where + " thermal class '" + engine.thermalClass
+				+ "' is incompatible with rejection reservoir '" + sink->id
+				+ "' of class '" + sink->thermalClass + "'; heat routes only to the same service class";
+		if (!engine.hotReservoirId.empty() && !hot)
+			return where + " hot source references unknown thermal reservoir '" + engine.hotReservoirId + "'";
+		if (!engine.rejectionReservoirId.empty() && !sink)
+			return where + " rejection sink references unknown thermal reservoir '" + engine.rejectionReservoirId + "'";
+		return {};
+	}
+
 	// Link-local counterpart of the validator's chiller rules. Check each
 	// available interface independently: a missing draft reference must not
 	// mask a class, exclusivity or same-reservoir violation on another.
@@ -1203,6 +1251,14 @@ namespace
 			}
 			return true;
 		}
+		if (mapping.ownerType == "Heat engine")
+		{
+			auto const found = std::find_if(settings.heatEngines.begin(), settings.heatEngines.end(),
+				[&](HeatEngineSettings const& entry) { return entry.id == mapping.ownerId; });
+			if (found == settings.heatEngines.end()) return false;
+			diagnostic = scopedHeatEngineWiring(settings, *found);
+			return true;
+		}
 		if (mapping.ownerType == "Chiller")
 		{
 			auto const found = std::find_if(settings.chillers.begin(), settings.chillers.end(),
@@ -1278,6 +1334,7 @@ namespace
 		if (type == "Radiator") return fn(settings.radiators);
 		if (type == "Coolant loop") return fn(settings.coolantLoops);
 		if (type == "Chiller") return fn(settings.chillers);
+		if (type == "Heat engine") return fn(settings.heatEngines);
 		if (type == "Generator") return fn(settings.generators);
 		if (type == "Atmosphere") return fn(settings.atmospheres);
 		if (type == "Atmosphere pathway") return fn(settings.atmospherePathways);
@@ -1635,6 +1692,17 @@ std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& set
 			links.push_back({linkIdentity("Thermal buffer", buffer.id, "Circulation gate"),
 				{"Coolant loop", buffer.circulationLoopId, "Buffer gates"},
 				{"Thermal buffer", buffer.id, "Circulation gate"}});
+	}
+	for (auto const& engine : settings.heatEngines)
+	{
+		if (!engine.hotReservoirId.empty())
+			links.push_back({linkIdentity("Heat engine", engine.id, "$Thermal intake"),
+				{"Reservoir", engine.hotReservoirId, "Heat out"},
+				{"Heat engine", engine.id, "Thermal intake"}});
+		if (!engine.rejectionReservoirId.empty())
+			links.push_back({linkIdentity("Heat engine", engine.id, "$Rejection heat"),
+				{"Heat engine", engine.id, "Rejection heat"},
+				{"Reservoir", engine.rejectionReservoirId, "Heat in"}});
 	}
 	for (auto const& chiller : settings.chillers)
 	{
@@ -2024,7 +2092,7 @@ LinkVerdict evaluateStationLink(StationSystemsSettings const& settings, Candidat
 			|| isScheduleType(mapping.ownerType)
 			|| mapping.ownerType == "Crew" || mapping.ownerType == "Crops"
 			|| mapping.ownerType == "Algae" || mapping.ownerType == "Microbial processor"
-			|| mapping.ownerType == "Chiller" || mapping.ownerType == "Coolant loop"
+			|| mapping.ownerType == "Chiller" || mapping.ownerType == "Heat engine" || mapping.ownerType == "Coolant loop"
 			|| mapping.ownerType == "Water collector" || mapping.ownerType == "Water treatment"
 			|| mapping.ownerType == "Electrolyzer" || mapping.ownerType == "CO2 capture"
 			|| mapping.ownerType == "Atmosphere" || mapping.ownerType == "Airlock cycle"))

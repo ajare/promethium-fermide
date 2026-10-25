@@ -1048,6 +1048,8 @@ add_test(NAME station-editor-flow-thermal-reservoir COMMAND pf-smoke-editor --ch
 set_tests_properties(station-editor-flow-thermal-reservoir PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-radiator COMMAND pf-smoke-editor --check station/flowRadiatorWorkflow)
 set_tests_properties(station-editor-flow-radiator PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+add_test(NAME station-editor-flow-heat-engine COMMAND pf-smoke-editor --check station/flowHeatEngineWorkflow)
+set_tests_properties(station-editor-flow-heat-engine PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-chiller COMMAND pf-smoke-editor --check station/flowChillerWorkflow)
 set_tests_properties(station-editor-flow-chiller PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 # #812: the prefab catalogue in the Place-node menu and atomic placement.

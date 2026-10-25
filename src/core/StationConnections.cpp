@@ -107,7 +107,7 @@ namespace
 		size_t installation(std::string const& id)
 		{
 			std::vector<size_t> matches;
-			for (auto type : {"Generator", "Coolant loop", "Chiller"})
+			for (auto type : {"Generator", "Coolant loop", "Chiller", "Heat engine"})
 				if (auto found = ids.find({type, id}); found != ids.end())
 					matches.insert(matches.end(), found->second.begin(), found->second.end());
 			if (matches.size() == 1) return matches.front();

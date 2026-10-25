@@ -2234,7 +2234,7 @@ struct EntryCreator
 
 // Existing form defaults and reference preferences, independent of list rendering.
 // Groups and ordering come from the same catalogue as Flow placement.
-constexpr std::array<EntryCreator, 31> kEntryCreators{{
+constexpr std::array<EntryCreator, 32> kEntryCreators{{
 	{"Store", "Store",
 		[](core::StationSystemsSettings const& draft) { return draft.stores.size() < core::MaxStationResourceStores; },
 		[](core::StationSystemsSettings& draft) {
@@ -2512,6 +2512,28 @@ constexpr std::array<EntryCreator, 31> kEntryCreators{{
 				if (!taken) break;
 			}
 			draft.coolantLoops.push_back(std::move(loop));
+		}},
+	{"Heat engine", "Heat engine",
+		[](core::StationSystemsSettings const& draft) { return draft.heatEngines.size() < core::MaxStationHeatEngines; },
+		[](core::StationSystemsSettings& draft) {
+			core::HeatEngineSettings engine;
+			engine.thermalClass = "moderate";
+			engine.ratedThermalInputKW = engine.commandedInputKW = 10.0;
+			engine.minHotTemperatureC = 80.0;
+			engine.maxSinkTemperatureC = 60.0;
+			for (auto const& reservoir : draft.thermalReservoirs)
+				if (reservoir.thermalClass == engine.thermalClass)
+				{ engine.rejectionReservoirId = reservoir.id; break; }
+			for (auto const& reservoir : draft.thermalReservoirs)
+				if (reservoir.id != engine.rejectionReservoirId)
+				{ engine.hotReservoirId = reservoir.id; break; }
+			for (size_t candidate = 1;; ++candidate)
+			{
+				engine.id = "heatEngine" + std::to_string(candidate);
+				if (std::none_of(draft.heatEngines.begin(), draft.heatEngines.end(),
+					[&](auto const& existing) { return existing.id == engine.id; })) break;
+			}
+			draft.heatEngines.push_back(std::move(engine));
 		}},
 	{"Chiller", "Chiller",
 		[](core::StationSystemsSettings const& draft) { return draft.chillers.size() < core::MaxStationChillers; },
