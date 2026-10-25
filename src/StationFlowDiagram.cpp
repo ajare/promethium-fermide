@@ -3249,9 +3249,16 @@ entry.thermalClass = "moderate";
 	{
 		if (mPendingRename)
 		{
-			ImGui::Text("Rename this %s? %zu links and %zu Monitors will be updated",
+			// Only name the Monitors when this cascade actually touches some.
+			// "and 0 Monitors" is noise on the common path; the operator's
+			// question is answered without it, and the clause earns its place
+			// by appearing exactly when there is something to weigh.
+			auto const monitorClause = mPendingRename->monitorIds.empty()
+				? std::string()
+				: " and " + std::to_string(mPendingRename->monitorIds.size()) + " Monitors";
+			ImGui::Text("Rename this %s? %zu links%s will be updated",
 				mPendingRename->nodeType == "Store" ? "store" : "node",
-				mPendingRename->linkIdentities.size(), mPendingRename->monitorIds.size());
+				mPendingRename->linkIdentities.size(), monitorClause.c_str());
 			if (ImGui::Button("Confirm node rename"))
 			{
 				core::StationNodeRename current;
@@ -3276,8 +3283,11 @@ entry.thermalClass = "moderate";
 	{
 		if (mPendingRemoval)
 		{
-			ImGui::Text("This removes %zu connections and %zu Monitors",
-				mPendingRemoval->linkIdentities.size(), mPendingRemoval->monitorIds.size());
+			auto const monitorClause = mPendingRemoval->monitorIds.empty()
+				? std::string()
+				: " and " + std::to_string(mPendingRemoval->monitorIds.size()) + " Monitors";
+			ImGui::Text("This removes %zu connections%s",
+				mPendingRemoval->linkIdentities.size(), monitorClause.c_str());
 			ImGui::Text("Delete %s '%s'?", mPendingRemoval->nodeType.c_str(), mPendingRemoval->nodeId.c_str());
 			if (ImGui::Button("Confirm node deletion"))
 			{
