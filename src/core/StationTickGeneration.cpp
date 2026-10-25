@@ -787,7 +787,7 @@ namespace core
 			// fraction is validated into (0, 1], so eta can never exceed
 			// the Carnot efficiency - the second law is enforced at
 			// authoring time, not rediscovered at runtime.
-			auto const eta = engine.authored.carnotFraction * carnotEfficiency;
+			auto const eta = engine.effectiveWearCapability() * carnotEfficiency;
 			// Hot-side supply cap: over the tick the engine can draw at
 			// most the heat its hot reservoir holds above the rejection
 			// reservoir's tick-start temperature - C_hot x (T_h - T_c).
@@ -1017,7 +1017,7 @@ namespace core
 			// this tick's rate: a machine with nothing drawable above the
 			// protected reserve cannot run and is passed over, so the
 			// target never reserves capacity that does not exist.
-			auto const fuelCapKW = drawableKWh * generator.authored.efficiency / hours;
+			auto const fuelCapKW = drawableKWh * generator.effectiveWearCapability() / hours;
 			auto const capKW = std::min(effectiveRatedKW, fuelCapKW);
 			auto const startupRequiredKJ = generator.authored.startupPowerKW
 				* generator.authored.startupSeconds;
@@ -1066,7 +1066,7 @@ namespace core
 			cell.dispatchCommandKW = 0.0;
 			auto ports = materialPorts("Fuel cell", cell.authored.id);
 			if (!dispatchAutomatic) continue;
-			if (cell.authored.ratedOutputKW <= 0.0) continue;
+			if (cell.effectiveWearCapability() <= 0.0) continue;
 			if (!sinkQualified(cell.sinkIndex, cell.authored.maxSinkTemperatureC)) continue;
 			auto const o2PerH2 = StationFuelCellOxygenMassPerHydrogenKg;
 			auto const elecKJPerKgH2 = cell.authored.efficiency
@@ -1086,7 +1086,7 @@ namespace core
 			// sustain this tick. A cell with nothing drawable above its
 			// protected reserves is passed over - protected breathing
 			// oxygen never becomes dispatchable capacity.
-			auto capKW = cell.authored.ratedOutputKW;
+			auto capKW = cell.effectiveWearCapability();
 			capKW = std::min(capKW, h2DrawableKg * elecKJPerKgH2 / static_cast<double>(seconds));
 			capKW = std::min(capKW, (o2DrawableKg / o2PerH2) * elecKJPerKgH2
 				/ static_cast<double>(seconds));
@@ -1134,10 +1134,10 @@ namespace core
 		{
 			if (cell.authored.catalystPoisoning && !poisonFeed(cell.poisoning, cell.wear,
 				*cell.authored.catalystPoisoning, cell.authored.id, cell.hydrogenStoreIndex,
-				cell.authored.ratedOutputKW > 0.0
+				cell.effectiveWearCapability() > 0.0
 					&& (dispatchAutomatic ? cell.dispatchCommandKW : cell.authored.commandedOutputKW) > 0.0)) return false;
 			auto ports = materialPorts("Fuel cell", cell.authored.id);
-			auto const disabled = cell.authored.ratedOutputKW <= 0.0;
+			auto const disabled = cell.effectiveWearCapability() <= 0.0;
 			// #415: under automatic dispatch the dispatcher's command for
 			// this tick replaces the authored setpoint; the cell still
 			// enforces its reactant, cooling and product-headroom limits.
@@ -1178,7 +1178,7 @@ namespace core
 				auto const usableH2Kg = std::min(remainingH2Kg * connections.efficiency(connections.port("Fuel cell", cell.authored.id, "Hydrogen")),
 					remainingO2Kg * connections.efficiency(connections.port("Fuel cell", cell.authored.id, "Oxygen")) / o2PerH2);
 				auto const referenceKW = cell.lastOutputKW > 0.0
-					? cell.lastOutputKW : cell.authored.ratedOutputKW;
+					? cell.lastOutputKW : cell.effectiveWearCapability();
 				cell.enduranceSeconds = referenceKW > 0.0
 					? usableH2Kg * elecKJPerKgH2 / referenceKW : 0.0;
 			};
@@ -1233,7 +1233,7 @@ namespace core
 				scale = capKW / commanded;
 				limiter = reason;
 			};
-			constrain(cell.authored.ratedOutputKW * (1.0 - cell.wear.fraction), "catalyst Wear");
+			constrain(cell.effectiveWearCapability() * (1.0 - cell.wear.fraction), "catalyst Wear");
 			// A compound impurity stream cannot be burned as pure hydrogen.
 			// Hold it for routing/disposal rather than destroy its species.
 			if (hydrogen.composition) constrain(0.0, "hydrogen feed contains compound impurities");
@@ -1353,7 +1353,7 @@ namespace core
 			auto const kwhPerUnit = energyUnitsToKWh(runtime.stores[generator.fuelStoreIndex].authored.unit);
 			if (coolingAvailable && commanded > 0.0)
 			{
-				auto const need = std::min(commanded, effectiveRatedKW) * hours / generator.authored.efficiency / kwhPerUnit;
+				auto const need = std::min(commanded, effectiveRatedKW) * hours / generator.effectiveWearCapability() / kwhPerUnit;
 				ports.limitDemand(ports.request(generator.fuelStoreIndex,
 					ports.input(generator.fuelStoreIndex, qualified[generator.fuelStoreIndex]
 						- runtime.stores[generator.fuelStoreIndex].authored.protectedReserve), need), need);
@@ -1538,7 +1538,7 @@ namespace core
 					for (auto const& binding : connections.storePorts("Generator", generator.authored.id, runtime.settings))
 						if (binding.input && binding.store == generator.fuelStoreIndex)
 							cableCapKW = std::min(cableCapKW, connections.remaining(binding.port)
-								* connections.efficiency(binding.port) * kwhPerUnit * 3600 * generator.authored.efficiency);
+								* connections.efficiency(binding.port) * kwhPerUnit * 3600 * generator.effectiveWearCapability());
 					auto const startKW = std::min({generator.outputKW, effectiveRatedKW, cableCapKW});
 					auto const targetKW = std::min({commanded, effectiveRatedKW, cableCapKW});
 					auto const ramp = integrateGeneratorRamp(startKW, targetKW,
@@ -1555,7 +1555,7 @@ namespace core
 					// Fuel feasibility: the fuel drawable above the
 					// protected reserve caps the output this tick. A
 					// generator with no fuel left cannot run at all.
-					auto const neededFuelKWh = generator.lastAverageOutputKW * hours / generator.authored.efficiency;
+					auto const neededFuelKWh = generator.lastAverageOutputKW * hours / generator.effectiveWearCapability();
 					if (neededFuelKWh > drawableKWh)
 					{
 						if (drawableKWh <= 0.0)
@@ -1569,7 +1569,7 @@ namespace core
 							generator.lastAverageOutputKW = 0.0;
 							break;
 						}
-						generator.lastAverageOutputKW = drawableKWh * generator.authored.efficiency / hours;
+						generator.lastAverageOutputKW = drawableKWh * generator.effectiveWearCapability() / hours;
 						generator.outputKW = std::min(generator.outputKW, generator.lastAverageOutputKW);
 					}
 					// A saturated inlet is not an empty inventory. Only the
@@ -1581,9 +1581,9 @@ namespace core
 							inventoryUnits *= connections.efficiency(binding.port);
 					exhaustedAtEnd = neededFuelKWh >= inventoryUnits * kwhPerUnit;
 					auto const drawnUnits = neededFuelKWh >= drawableKWh ? drawableUnits
-						: std::min(drawableUnits, generator.lastAverageOutputKW * hours / generator.authored.efficiency / kwhPerUnit);
+						: std::min(drawableUnits, generator.lastAverageOutputKW * hours / generator.effectiveWearCapability() / kwhPerUnit);
 					auto const drawnKWh = drawnUnits * kwhPerUnit;
-					generator.lastAverageOutputKW = drawnKWh * 3600.0 * generator.authored.efficiency / dtSeconds;
+					generator.lastAverageOutputKW = drawnKWh * 3600.0 * generator.effectiveWearCapability() / dtSeconds;
 					qualified[generator.fuelStoreIndex] -= drawnUnits;
 					flowOut[generator.fuelStoreIndex] += drawnUnits;
 					stagedUnitLoss[runtime.stores[generator.fuelStoreIndex].authored.unit] += drawnUnits;

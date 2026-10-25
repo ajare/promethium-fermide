@@ -154,6 +154,9 @@ namespace core
 			return true;
 		};
 		if (!faultTopology(s.waterTreatments, offered.waterTreatments)
+			|| !faultTopology(s.co2Captures, offered.co2Captures)
+			|| !faultTopology(s.sabatierReactors, offered.sabatierReactors)
+			|| !faultTopology(s.methaneProcessors, offered.methaneProcessors)
 			|| !faultTopology(s.electrolyzers, offered.electrolyzers)
 			|| !faultTopology(s.fuelCells, offered.fuelCells)
 			|| !faultTopology(s.atmospheres, offered.atmospheres)

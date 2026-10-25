@@ -478,13 +478,13 @@ namespace core
 			treatment.lastHoldReason.clear();
 			treatment.lastFiltrationCompleted = false;
 			treatment.lastTreatmentEvidenced = false;
-			if (treatment.authored.throughputKgPerS <= 0.0)
+			if (treatment.effectiveWearCapability() <= 0.0)
 			{
 				treatment.status = StationTransferStatus::Idle;
 				continue;
 			}
 			auto const tickSeconds = static_cast<double>(seconds);
-			auto const fullKg = treatment.authored.throughputKgPerS * tickSeconds;
+			auto const fullKg = treatment.effectiveWearCapability() * tickSeconds;
 			// Selectivity follows the current blend, including dilution/drift.
 			auto const waterFraction = source.authored.composition
 				? storeComposition(treatment.sourceIndex).moisture : 1.0;
@@ -539,7 +539,7 @@ namespace core
 					+ "' is exhausted");
 			scale = std::max(0.0, std::min(1.0, scale));
 			ports.limitDemand(powerAvailable("Water treatment", treatment.authored.id),
-				treatment.authored.throughputKgPerS * treatment.authored.specificEnergyKWhPerKg * 3600.0);
+				treatment.effectiveWearCapability() * treatment.authored.specificEnergyKWhPerKg * 3600.0);
 			treatment.lastScale = scale;
 			treatment.lastLimiter = limiter;
 			if (scale <= 0.0)
@@ -551,7 +551,7 @@ namespace core
 			// so the power the treatment draws is the dose times the
 			// throughput converted to the pool's kW (kWh/s x 3600),
 			// mirroring the electrolysis contract (#404, #566).
-			treatment.lastPowerDemandKW = scale * treatment.authored.throughputKgPerS
+			treatment.lastPowerDemandKW = scale * treatment.effectiveWearCapability()
 				* treatment.authored.specificEnergyKWhPerKg * 3600.0;
 			auto const suppliedKW = drawPower("Water treatment", treatment.authored.id, treatment.lastPowerDemandKW);
 			treatment.lastPowerSuppliedKW = suppliedKW;

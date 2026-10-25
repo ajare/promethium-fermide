@@ -1003,9 +1003,32 @@ namespace core
 		// stamping 114 exactly as before.
 		bool const repairs = std::any_of(mStationSystemsSettings.coolantLoops.begin(), mStationSystemsSettings.coolantLoops.end(),
 			[](auto const& loop) { return loop.repairParts.has_value(); });
-		// #843: Wear opt-ins are the newest tier; a save carrying a
-		// battery capacity-fade or a loop Wear model stamps the current
-		// schema, and repair-only saves keep stamping 115 unchanged.
+		// #848: the machine Wear catalogue is the newest tier; a save
+		// carrying any machine's named Wear opt-in stamps the current
+		// schema. Saves that opt into none of it - including every fixture
+		// written before this ticket - keep stamping exactly what they
+		// stamped before, so their bytes do not move.
+		bool const machineWear = std::any_of(mStationSystemsSettings.solarArrays.begin(), mStationSystemsSettings.solarArrays.end(),
+				[](auto const& machine) { return machine.cellDegradation.has_value(); })
+			|| std::any_of(mStationSystemsSettings.generators.begin(), mStationSystemsSettings.generators.end(),
+				[](auto const& machine) { return machine.fouledInjector.has_value(); })
+			|| std::any_of(mStationSystemsSettings.heatEngines.begin(), mStationSystemsSettings.heatEngines.end(),
+				[](auto const& machine) { return machine.efficiencyDrift.has_value(); })
+			|| std::any_of(mStationSystemsSettings.electrolyzers.begin(), mStationSystemsSettings.electrolyzers.end(),
+				[](auto const& machine) { return machine.membraneDegradation.has_value(); })
+			|| std::any_of(mStationSystemsSettings.waterTreatments.begin(), mStationSystemsSettings.waterTreatments.end(),
+				[](auto const& machine) { return machine.membraneFouling.has_value(); })
+			|| std::any_of(mStationSystemsSettings.co2Captures.begin(), mStationSystemsSettings.co2Captures.end(),
+				[](auto const& machine) { return machine.absorbentDegradation.has_value(); })
+			|| std::any_of(mStationSystemsSettings.fuelCells.begin(), mStationSystemsSettings.fuelCells.end(),
+				[](auto const& machine) { return machine.stackDegradation.has_value(); })
+			|| std::any_of(mStationSystemsSettings.sabatierReactors.begin(), mStationSystemsSettings.sabatierReactors.end(),
+				[](auto const& machine) { return machine.catalystDeactivation.has_value(); })
+			|| std::any_of(mStationSystemsSettings.methaneProcessors.begin(), mStationSystemsSettings.methaneProcessors.end(),
+				[](auto const& machine) { return machine.catalystDeactivation.has_value(); });
+		// #843: the pilot Wear tier - a battery capacity-fade or a loop
+		// Wear model - still stamps its own schema when it is the newest
+		// thing a save carries.
 		bool const wear = std::any_of(mStationSystemsSettings.batteries.begin(), mStationSystemsSettings.batteries.end(),
 				[](auto const& battery) { return battery.capacityFade.has_value(); })
 			|| std::any_of(mStationSystemsSettings.coolantLoops.begin(), mStationSystemsSettings.coolantLoops.end(),
@@ -1049,7 +1072,7 @@ namespace core
 			[](auto const& a) { return a.fire.has_value(); })
 			|| std::any_of(mStationSystemsSettings.airlockCycles.begin(), mStationSystemsSettings.airlockCycles.end(),
 				[](auto const& c) { return c.interruptedCycle || c.interlockFailure.has_value(); });
-		serializer.writeUint32("version", atmosphereFaults ? kWorldSchemaVersion : contamination ? 119 : powerSources ? 118
+		serializer.writeUint32("version", machineWear ? kWorldSchemaVersion : atmosphereFaults ? 120 : contamination ? 119 : powerSources ? 118
 			: thermalPlant ? 117 : wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);

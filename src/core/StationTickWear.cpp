@@ -131,6 +131,82 @@ namespace core
 				|| loop.wear.fraction < 0.0 || loop.wear.fraction > 1.0)
 				return violation = "Wear state left the declared range for '" + loop.authored.id + "'", false;
 		}
+		// #848: the catalogue machine Wear advance. Every mode names its own
+		// accumulator and its own authored model, so a machine can only ever
+		// accrue the fade it opted into. None of these modes counts cycles -
+		// no machine in the catalogue has a counted cycle - so the cycle term
+		// stays zero and validation refuses a cycle rate outright.
+		//
+		// `activity` gates the operating-hour term: a machine that did
+		// nothing during the systems tick just closed accrues no operating
+		// hours, so an idle machine never wears toward its ceiling. The
+		// calendar term runs regardless, which is what makes an opted-in
+		// machine unwearable to keep forever. `mass` is the material the mode
+		// metered - zero where the mode meters no mass at all.
+		//
+		// The fade is monotone by construction and re-clamped against the
+		// authored ceiling, so retuning `maxWearFraction` mid-run can stop
+		// future fade but never heal what already happened. Repair is not
+		// called here and never touches these fields: a repaired machine comes
+		// back exactly as worn as it went in.
+		auto advanceMachine = [&](auto& machine, WearState& wear,
+			std::optional<InstallationWearSettings> const& model, char const* mode,
+			double activity, double mass) {
+			if (!model) return true;
+			system = "Installation Wear";
+			if (!requireFinite(model->fadePerOperatingHour, "Wear operating rate")
+				|| !requireFinite(model->fadePerThroughputKg, "Wear throughput rate")
+				|| !requireFinite(model->fadePerCalendarHour, "Wear calendar rate")
+				|| !requireFinite(model->maxWearFraction, "Wear ceiling")) return false;
+			if (model->fadePerCycle != 0.0 || model->fadePerOperatingHour < 0.0
+				|| model->fadePerThroughputKg < 0.0 || model->fadePerCalendarHour < 0.0
+				|| model->maxWearFraction <= 0.0 || model->maxWearFraction > 1.0)
+				return violation = "Invalid machine Wear model for '" + machine.authored.id + "'", false;
+			auto const before = wear.fraction;
+			advanceWear(wear, *model, 0.0, activity > 0.0 ? hours : 0.0, mass, hours);
+			// Retuning a ceiling may stop future fade, never heal past Wear.
+			wear.fraction = std::max(before, wear.fraction);
+			if (!requireFinite(wear.fade, "accumulated machine Wear")
+				|| !requireFinite(wear.operatingHours, "Wear operating hours")
+				|| !requireFinite(wear.throughputKg, "Wear throughput")
+				|| !requireFinite(wear.calendarHours, "Wear calendar hours")) return false;
+			if (before == 0.0 && wear.fraction > 0.0)
+				appendBoundedEvent(runtime.events, tick, "fault", "Wear '" + std::string(mode)
+					+ "' on '" + machine.authored.id + "': permanent capability fade began");
+			return true;
+		};
+		// The activity each mode reads is the work it actually did, and the
+		// mass it metered where the mode meters mass. Solar is gated on the
+		// power the array actually delivered rather than on illumination
+		// alone: an array whose string is lost or whose tracker has failed
+		// sees no sun it cannot collect, so it does not wear while shaded.
+		for (auto& machine : runtime.solarArrays)
+			if (!advanceMachine(machine, machine.cellDegradation, machine.authored.cellDegradation,
+				"cell-degradation", machine.lastAvailableKW, 0.0)) return false;
+		for (auto& machine : runtime.generators)
+			if (!advanceMachine(machine, machine.fouledInjector, machine.authored.fouledInjector,
+				"fouled-injector", machine.lastAverageOutputKW, 0.0)) return false;
+		for (auto& machine : runtime.heatEngines)
+			if (!advanceMachine(machine, machine.efficiencyDrift, machine.authored.efficiencyDrift,
+				"efficiency-drift", machine.lastThermalInputKW, 0.0)) return false;
+		for (auto& machine : runtime.electrolyzers)
+			if (!advanceMachine(machine, machine.membraneDegradation, machine.authored.membraneDegradation,
+				"membrane-degradation", machine.lastSplitKg, machine.lastSplitKg)) return false;
+		for (auto& machine : runtime.waterTreatments)
+			if (!advanceMachine(machine, machine.membraneFouling, machine.authored.membraneFouling,
+				"membrane-fouling", machine.lastProcessedKg, machine.lastProcessedKg)) return false;
+		for (auto& machine : runtime.co2Captures)
+			if (!advanceMachine(machine, machine.absorbentDegradation, machine.authored.absorbentDegradation,
+				"absorbent-degradation", machine.lastCapturedKg, machine.lastCapturedKg)) return false;
+		for (auto& machine : runtime.fuelCells)
+			if (!advanceMachine(machine, machine.stackDegradation, machine.authored.stackDegradation,
+				"stack-degradation", machine.lastOutputKW, machine.lastHydrogenKg)) return false;
+		for (auto& machine : runtime.sabatierReactors)
+			if (!advanceMachine(machine, machine.catalystDeactivation, machine.authored.catalystDeactivation,
+				"catalyst-deactivation", machine.lastCo2ConsumedKg, machine.lastCo2ConsumedKg)) return false;
+		for (auto& machine : runtime.methaneProcessors)
+			if (!advanceMachine(machine, machine.catalystDeactivation, machine.authored.catalystDeactivation,
+				"catalyst-deactivation", machine.lastMethaneConsumedKg, machine.lastMethaneConsumedKg)) return false;
 		return true;
 	}
 }

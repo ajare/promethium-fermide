@@ -74,6 +74,20 @@ namespace core
 		s.endMap();
 		return true;
 	}
+	// #848: one machine's catalogue Wear opt-in on the wire. The field is
+	// named for the mode the machine opted into, so a document says which
+	// mode it authored instead of leaving a bare `wear` to be guessed from
+	// the collection. An absent field is an absent opt-in; a document older
+	// than the catalogue is refused rather than silently read unworn.
+	void readMachineWear(Serializer& s, std::string const& name, uint32_t version,
+		std::optional<InstallationWearSettings>& field)
+	{
+		if (!s.hasField(name)) return;
+		if (version < 121)
+			throw SerializationException("Machine Wear opt-in '" + name + "' requires schema 121");
+		InstallationWearSettings model;
+		if (readWearBlock(s, name, version, "Machine Wear", model)) field = model;
+	}
 	// #844: the shared repair-parts wiring block, written only when the
 	// machine opts in - the same shape the coolant loop carries since
 	// #842, so one writer and one reader serve every repairable kind.
@@ -277,6 +291,7 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", array.id);
+				if (array.cellDegradation) writeWearBlock(serializer, "cellDegradation", *array.cellDegradation);
 				serializer.writeDouble("capacityKW", array.capacityKW);
 				serializer.beginMap("illumination");
 				serializer.writeDouble("constantLevel", array.illumination.constantLevel);
@@ -541,6 +556,7 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", engine.id);
+				if (engine.efficiencyDrift) writeWearBlock(serializer, "efficiencyDrift", *engine.efficiencyDrift);
 				serializer.writeString("hotReservoirId", engine.hotReservoirId);
 				serializer.writeString("rejectionReservoirId", engine.rejectionReservoirId);
 				serializer.writeString("thermalClass", engine.thermalClass);
@@ -575,6 +591,7 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", generator.id);
+				if (generator.fouledInjector) writeWearBlock(serializer, "fouledInjector", *generator.fouledInjector);
 				serializer.writeString("fuelStoreId", generator.fuelStoreId);
 				serializer.writeString("thermalClass", generator.thermalClass);
 				serializer.writeString("heatSinkId", generator.heatSinkId);
@@ -779,6 +796,7 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", treatment.id);
+				if (treatment.membraneFouling) writeWearBlock(serializer, "membraneFouling", *treatment.membraneFouling);
 				serializer.writeString("sourceStoreId", treatment.sourceStoreId);
 				serializer.writeString("treatedStoreId", treatment.treatedStoreId);
 				serializer.writeString("concentrateStoreId", treatment.concentrateStoreId);
@@ -811,6 +829,7 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", electrolyzer.id);
+				if (electrolyzer.membraneDegradation) writeWearBlock(serializer, "membraneDegradation", *electrolyzer.membraneDegradation);
 				serializer.writeString("waterStoreId", electrolyzer.waterStoreId);
 				serializer.writeString("oxygenStoreId", electrolyzer.oxygenStoreId);
 				serializer.writeString("hydrogenStoreId", electrolyzer.hydrogenStoreId);
@@ -844,6 +863,7 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", capture.id);
+				if (capture.absorbentDegradation) writeWearBlock(serializer, "absorbentDegradation", *capture.absorbentDegradation);
 				serializer.writeString("atmosphereId", capture.atmosphereId);
 				serializer.writeString("captureStoreId", capture.captureStoreId);
 				serializer.writeString("consumableStoreId", capture.consumableStoreId);
@@ -866,6 +886,7 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", cell.id);
+				if (cell.stackDegradation) writeWearBlock(serializer, "stackDegradation", *cell.stackDegradation);
 				serializer.writeString("hydrogenStoreId", cell.hydrogenStoreId);
 				serializer.writeString("oxygenStoreId", cell.oxygenStoreId);
 				serializer.writeString("waterStoreId", cell.waterStoreId);
@@ -896,6 +917,7 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", reactor.id);
+				if (reactor.catalystDeactivation) writeWearBlock(serializer, "catalystDeactivation", *reactor.catalystDeactivation);
 				serializer.writeString("co2StoreId", reactor.co2StoreId);
 				serializer.writeString("hydrogenStoreId", reactor.hydrogenStoreId);
 				serializer.writeString("methaneStoreId", reactor.methaneStoreId);
@@ -928,6 +950,7 @@ namespace core
 			{
 				serializer.beginMap("");
 				serializer.writeString("id", processor.id);
+				if (processor.catalystDeactivation) writeWearBlock(serializer, "catalystDeactivation", *processor.catalystDeactivation);
 				serializer.writeString("methaneStoreId", processor.methaneStoreId);
 				serializer.writeString("hydrogenStoreId", processor.hydrogenStoreId);
 				serializer.writeString("carbonStoreId", processor.carbonStoreId);
@@ -1528,6 +1551,7 @@ namespace core
 				serializer.beginMap("");
 				SolarArraySettings array;
 				array.id = serializer.readString("id");
+				readMachineWear(serializer, "cellDegradation", version, array.cellDegradation);
 				array.capacityKW = serializer.readDouble("capacityKW");
 				serializer.beginMap("illumination");
 				array.illumination.constantLevel = serializer.readDouble("constantLevel");
@@ -1856,14 +1880,15 @@ namespace core
 					"commandedInputKW", "carnotFraction", "auxiliaryPowerKW",
 					"minHotTemperatureC", "maxSinkTemperatureC",
 					// #844: the seizure opt-in and repair wiring join the
-					// known-field set.
-					"mechanicalSeizure", "repairParts"};
+					// known-field set; #848 adds the Wear opt-in.
+					"mechanicalSeizure", "repairParts", "efficiencyDrift"};
 				for (auto const& field : serializer.mapKeys(""))
 					if (std::find(fields.begin(), fields.end(), field) == fields.end())
 						throw SerializationException("Station entry '" + id + "' field '" + field
 							+ "' is unknown; conversion required");
 				HeatEngineSettings engine;
 				engine.id = id;
+				readMachineWear(serializer, "efficiencyDrift", version, engine.efficiencyDrift);
 				engine.hotReservoirId = serializer.readString("hotReservoirId");
 				engine.rejectionReservoirId = serializer.readString("rejectionReservoirId");
 				engine.thermalClass = serializer.readString("thermalClass");
@@ -1910,6 +1935,7 @@ namespace core
 				serializer.beginMap("");
 				GeneratorSettings generator;
 				generator.id = serializer.readString("id");
+				readMachineWear(serializer, "fouledInjector", version, generator.fouledInjector);
 				generator.fuelStoreId = serializer.readString("fuelStoreId");
 				generator.thermalClass = serializer.readString("thermalClass");
 				generator.heatSinkId = serializer.readString("heatSinkId");
@@ -2153,6 +2179,7 @@ namespace core
 				serializer.beginMap("");
 				WaterTreatmentSettings treatment;
 				treatment.id = serializer.readString("id");
+				readMachineWear(serializer, "membraneFouling", version, treatment.membraneFouling);
 				treatment.sourceStoreId = serializer.readString("sourceStoreId");
 				treatment.treatedStoreId = serializer.readString("treatedStoreId");
 				treatment.concentrateStoreId = serializer.readString("concentrateStoreId");
@@ -2191,6 +2218,7 @@ namespace core
 				serializer.beginMap("");
 				ElectrolyzerSettings electrolyzer;
 				electrolyzer.id = serializer.readString("id");
+				readMachineWear(serializer, "membraneDegradation", version, electrolyzer.membraneDegradation);
 				electrolyzer.waterStoreId = serializer.readString("waterStoreId");
 				electrolyzer.oxygenStoreId = serializer.readString("oxygenStoreId");
 				electrolyzer.hydrogenStoreId = serializer.readString("hydrogenStoreId");
@@ -2224,6 +2252,7 @@ namespace core
 				serializer.beginMap("");
 				Co2CaptureSettings capture;
 				capture.id = serializer.readString("id");
+				readMachineWear(serializer, "absorbentDegradation", version, capture.absorbentDegradation);
 				capture.atmosphereId = serializer.readString("atmosphereId");
 				capture.captureStoreId = serializer.readString("captureStoreId");
 				capture.consumableStoreId = serializer.readString("consumableStoreId");
@@ -2246,6 +2275,7 @@ namespace core
 				serializer.beginMap("");
 				FuelCellSettings cell;
 				cell.id = serializer.readString("id");
+				readMachineWear(serializer, "stackDegradation", version, cell.stackDegradation);
 				cell.hydrogenStoreId = serializer.readString("hydrogenStoreId");
 				cell.oxygenStoreId = serializer.readString("oxygenStoreId");
 				cell.waterStoreId = serializer.readString("waterStoreId");
@@ -2302,6 +2332,7 @@ namespace core
 				serializer.beginMap("");
 				SabatierReactorSettings reactor;
 				reactor.id = serializer.readString("id");
+				readMachineWear(serializer, "catalystDeactivation", version, reactor.catalystDeactivation);
 				reactor.co2StoreId = serializer.readString("co2StoreId");
 				reactor.hydrogenStoreId = serializer.readString("hydrogenStoreId");
 				reactor.methaneStoreId = serializer.readString("methaneStoreId");
@@ -2335,6 +2366,7 @@ namespace core
 				serializer.beginMap("");
 				MethaneProcessorSettings processor;
 				processor.id = serializer.readString("id");
+				readMachineWear(serializer, "catalystDeactivation", version, processor.catalystDeactivation);
 				processor.methaneStoreId = serializer.readString("methaneStoreId");
 				processor.hydrogenStoreId = serializer.readString("hydrogenStoreId");
 				processor.carbonStoreId = serializer.readString("carbonStoreId");

@@ -80,6 +80,7 @@ pf_add_smoke_module(pf-smoke-station
         station/StationFaultChecks.cpp
         station/StationConditionChecks.cpp
         station/StationWearChecks.cpp
+        station/StationWearCatalogueChecks.cpp
         station/StationThermalPlantFaultChecks.cpp
         station/StationPowerSourceFaultChecks.cpp
         station/StationContaminationFaultChecks.cpp
@@ -314,6 +315,8 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         repairLifecycle repairInterruption repairTransactions repairSeizureClearing
         conditionStress conditionCrossing conditionRestore conditionReplay conditionValidation conditionTransactions
         wearLifecycle wearRepair wearReplay wearTransactions wearOptIn
+        wearCatalogueFade wearCataloguePermanence wearCatalogueReplay
+        wearCatalogueTransactions wearCatalogueOptIn
         thermalPlantInjection thermalPlantRepairs thermalPlantOutages
         thermalPlantReplay thermalPlantOptIn thermalPlantLiveTuning
         powerSourceInjection powerSourceRunaway powerSourceFailedStart

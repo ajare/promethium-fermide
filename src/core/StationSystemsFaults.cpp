@@ -673,6 +673,24 @@ namespace core
 
 	bool StationSystemsRuntime::hasFaultReplayState() const
 	{
+		if (mImpl->settings.enabled && std::any_of(mImpl->settings.solarArrays.begin(), mImpl->settings.solarArrays.end(),
+			[](auto const& machine) { return machine.cellDegradation.has_value(); })) return true;
+		if (mImpl->settings.enabled && std::any_of(mImpl->settings.generators.begin(), mImpl->settings.generators.end(),
+			[](auto const& machine) { return machine.fouledInjector.has_value(); })) return true;
+		if (mImpl->settings.enabled && std::any_of(mImpl->settings.heatEngines.begin(), mImpl->settings.heatEngines.end(),
+			[](auto const& machine) { return machine.efficiencyDrift.has_value(); })) return true;
+		if (mImpl->settings.enabled && std::any_of(mImpl->settings.electrolyzers.begin(), mImpl->settings.electrolyzers.end(),
+			[](auto const& machine) { return machine.membraneDegradation.has_value(); })) return true;
+		if (mImpl->settings.enabled && std::any_of(mImpl->settings.waterTreatments.begin(), mImpl->settings.waterTreatments.end(),
+			[](auto const& machine) { return machine.membraneFouling.has_value(); })) return true;
+		if (mImpl->settings.enabled && std::any_of(mImpl->settings.co2Captures.begin(), mImpl->settings.co2Captures.end(),
+			[](auto const& machine) { return machine.absorbentDegradation.has_value(); })) return true;
+		if (mImpl->settings.enabled && std::any_of(mImpl->settings.fuelCells.begin(), mImpl->settings.fuelCells.end(),
+			[](auto const& machine) { return machine.stackDegradation.has_value(); })) return true;
+		if (mImpl->settings.enabled && std::any_of(mImpl->settings.sabatierReactors.begin(), mImpl->settings.sabatierReactors.end(),
+			[](auto const& machine) { return machine.catalystDeactivation.has_value(); })) return true;
+		if (mImpl->settings.enabled && std::any_of(mImpl->settings.methaneProcessors.begin(), mImpl->settings.methaneProcessors.end(),
+			[](auto const& machine) { return machine.catalystDeactivation.has_value(); })) return true;
 		return hasFaultCommands() || (mImpl->settings.enabled
 			&& (std::any_of(mImpl->settings.waterTreatments.begin(), mImpl->settings.waterTreatments.end(),
 				[](auto const& t) { return t.breakthrough; })
@@ -792,7 +810,7 @@ namespace core
 		s.beginMap("stationFaultReplay");
 		auto const steps = s.readUint64("completedSteps");
 		StationSystemsSettings initial;
-		readStationSystemsSettingsMap(s, 120, initial);
+		readStationSystemsSettingsMap(s, 121, initial);
 		auto runtime = std::make_unique<StationSystemsRuntime>(initial, baseSeconds);
 		s.beginArray("commands");
 		uint64_t previous = 0;
@@ -808,7 +826,7 @@ namespace core
 			if (s.hasField("stationSystems"))
 			{
 				StationSystemsSettings update;
-				readStationSystemsSettingsMap(s, 120, update);
+				readStationSystemsSettingsMap(s, 121, update);
 				if (!runtime->updateSettings(update, &diagnostic))
 					throw SerializationException("Invalid fault replay settings: " + diagnostic);
 			}

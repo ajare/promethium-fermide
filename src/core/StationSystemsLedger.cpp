@@ -287,7 +287,7 @@ namespace core
 		bool generatorQualificationBoundary = false;
 		auto generatorCeiling = [&](GeneratorState const& g) {
 			auto cap = collected.connections.remaining(collected.connections.port("Generator", g.authored.id, "Generation"));
-			auto const factor = collected.energyUnitsToKWh(stores[g.fuelStoreIndex].authored.unit) * 3600 * g.authored.efficiency;
+			auto const factor = collected.energyUnitsToKWh(stores[g.fuelStoreIndex].authored.unit) * 3600 * g.effectiveWearCapability();
 			for (auto const& binding : collected.connections.storePorts("Generator", g.authored.id, settings))
 				if (binding.input && binding.store == g.fuelStoreIndex)
 					cap = std::min(cap, collected.connections.remaining(binding.port)
@@ -362,7 +362,7 @@ namespace core
 				double available = 0, slope = 0;
 				for (auto const& a : solarArrays)
 					available += collected.connections.available(collected.connections.port("Solar", a.authored.id, "Solar generation"),
-						a.authored.capacityKW * evaluateStationProfile(a.authored.illumination, cursor + maximum * 0.5));
+						a.effectiveWearCapability() * evaluateStationProfile(a.authored.illumination, cursor + maximum * 0.5));
 				for (size_t i = 0; i < generators.size(); ++i)
 				{
 					auto const& g = generators[i]; auto const& a = g.authored;

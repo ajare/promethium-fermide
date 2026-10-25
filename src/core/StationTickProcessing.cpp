@@ -99,7 +99,7 @@ namespace core
 				+ "' is full: the product has nowhere to go");
 			scale = std::max(0.0, std::min(1.0, scale));
 			ports.limitDemand(powerAvailable("Electrolyzer", cell.authored.id),
-				cell.authored.rateKgPerS * cell.authored.specificEnergyKWhPerKgWater * 3600.0);
+				cell.authored.rateKgPerS * cell.effectiveWearCapability() * 3600.0);
 			cell.lastScale = scale;
 			cell.lastLimiter = limiter;
 			cell.lastRequestedKg = fullKg;
@@ -116,7 +116,7 @@ namespace core
 			// energy always covers the chemical energy the validation
 			// floor guarantees (#404).
 			cell.lastPowerDemandKW = scale * cell.authored.rateKgPerS
-				* cell.authored.specificEnergyKWhPerKgWater * 3600.0;
+				* cell.effectiveWearCapability() * 3600.0;
 			auto const suppliedKW = drawPower("Electrolyzer", cell.authored.id, cell.lastPowerDemandKW);
 			cell.lastPowerSuppliedKW = suppliedKW;
 			if (cell.lastPowerDemandKW > 1e-12 && suppliedKW <= 1e-12)
@@ -236,13 +236,13 @@ namespace core
 			capture.lastConsumableRequested = 0.0;
 			capture.lastConsumableUsed = 0.0;
 			capture.lastBlockReason.clear();
-			if (capture.authored.maxRateKgPerS <= 0.0)
+			if (capture.effectiveWearCapability() <= 0.0)
 			{
 				capture.status = StationTransferStatus::Idle;
 				continue;
 			}
 			auto const tickSeconds = static_cast<double>(seconds);
-			auto const fullKg = capture.authored.maxRateKgPerS * tickSeconds;
+			auto const fullKg = capture.effectiveWearCapability() * tickSeconds;
 			auto const co2Port = connections.port("CO2 capture", capture.authored.id, "CO2");
 			auto const co2AvailableKg = connections.available(co2Port,
 				std::max(0.0, compartment.carbonDioxideKg) / tickSeconds) * tickSeconds;
@@ -280,7 +280,7 @@ namespace core
 					+ "' is exhausted");
 			scale = std::max(0.0, std::min(1.0, scale));
 			ports.limitDemand(powerAvailable("CO2 capture", capture.authored.id),
-				capture.authored.maxRateKgPerS * capture.authored.specificEnergyKWhPerKg * 3600.0);
+				capture.effectiveWearCapability() * capture.authored.specificEnergyKWhPerKg * 3600.0);
 			if (connections.efficiency(co2Port) == 0.0)
 			{
 				auto const lost = connections.receive(co2Port, fullKg * ports.demandScale() / tickSeconds,
@@ -300,7 +300,7 @@ namespace core
 			// so the power the machine draws is the dose times the
 			// throughput converted to the pool's kW (kWh/s x 3600),
 			// mirroring the electrolysis contract (#404, #567).
-			capture.lastPowerDemandKW = scale * capture.authored.maxRateKgPerS
+			capture.lastPowerDemandKW = scale * capture.effectiveWearCapability()
 				* capture.authored.specificEnergyKWhPerKg * 3600.0;
 			auto const suppliedKW = drawPower("CO2 capture", capture.authored.id, capture.lastPowerDemandKW);
 			capture.lastPowerSuppliedKW = suppliedKW;
@@ -406,13 +406,13 @@ namespace core
 				reactor.status = StationTransferStatus::Rejected;
 				continue;
 			}
-			if (reactor.authored.rateKgPerS <= 0.0)
+			if (reactor.effectiveWearCapability() <= 0.0)
 			{
 				reactor.status = StationTransferStatus::Idle;
 				continue;
 			}
 			auto const tickSeconds = static_cast<double>(seconds);
-			auto const fullKg = reactor.authored.rateKgPerS * tickSeconds;
+			auto const fullKg = reactor.effectiveWearCapability() * tickSeconds;
 			// Cooling is qualified while the sink sits below the maximum
 			// sink temperature: at or above it the interface cannot
 			// accept the reactor's dose and reaction heat.
@@ -462,7 +462,7 @@ namespace core
 				+ "' is full: the water has nowhere to go");
 			scale = std::max(0.0, std::min(1.0, scale));
 			ports.limitDemand(powerAvailable("Sabatier", reactor.authored.id),
-				reactor.authored.rateKgPerS * reactor.authored.specificEnergyKWhPerKgCO2 * 3600.0);
+				reactor.effectiveWearCapability() * reactor.authored.specificEnergyKWhPerKgCO2 * 3600.0);
 			reactor.lastScale = scale;
 			reactor.lastLimiter = limiter;
 			reactor.lastRequestedKg = fullKg;
@@ -476,7 +476,7 @@ namespace core
 			// so the power the reactor draws is the dose times the
 			// conversion rate converted to the pool's kW (kWh/s x 3600),
 			// mirroring the electrolysis contract (#404).
-			reactor.lastPowerDemandKW = scale * reactor.authored.rateKgPerS
+			reactor.lastPowerDemandKW = scale * reactor.effectiveWearCapability()
 				* reactor.authored.specificEnergyKWhPerKgCO2 * 3600.0;
 			auto const suppliedKW = drawPower("Sabatier", reactor.authored.id, reactor.lastPowerDemandKW);
 			reactor.lastPowerSuppliedKW = suppliedKW;
@@ -592,13 +592,13 @@ namespace core
 				processor.status = StationTransferStatus::Rejected;
 				continue;
 			}
-			if (processor.authored.rateKgPerS <= 0.0)
+			if (processor.effectiveWearCapability() <= 0.0)
 			{
 				processor.status = StationTransferStatus::Idle;
 				continue;
 			}
 			auto const tickSeconds = static_cast<double>(seconds);
-			auto const fullKg = processor.authored.rateKgPerS * tickSeconds;
+			auto const fullKg = processor.effectiveWearCapability() * tickSeconds;
 			processor.lastCoolingAvailable = sinkQualified(processor.sinkIndex, processor.authored.maxSinkTemperatureC);
 			if (!processor.lastCoolingAvailable)
 			{
@@ -636,7 +636,7 @@ namespace core
 				"carbon store '" + carbon.authored.id
 				+ "' is full: the solid carbon has nowhere to go");
 			ports.limitDemand(powerAvailable("Methane processor", processor.authored.id),
-				processor.authored.rateKgPerS * processor.authored.specificEnergyKWhPerKgCH4 * 3600.0);
+				processor.effectiveWearCapability() * processor.authored.specificEnergyKWhPerKgCH4 * 3600.0);
 			scale = std::max(0.0, std::min(1.0, scale));
 			processor.lastScale = scale;
 			processor.lastLimiter = limiter;
@@ -647,7 +647,7 @@ namespace core
 				processor.status = StationTransferStatus::Rejected;
 				continue;
 			}
-			processor.lastPowerDemandKW = scale * processor.authored.rateKgPerS
+			processor.lastPowerDemandKW = scale * processor.effectiveWearCapability()
 				* processor.authored.specificEnergyKWhPerKgCH4 * 3600.0;
 			auto const suppliedKW = drawPower("Methane processor", processor.authored.id, processor.lastPowerDemandKW);
 			processor.lastPowerSuppliedKW = suppliedKW;

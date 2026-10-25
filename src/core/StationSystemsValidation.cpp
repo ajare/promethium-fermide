@@ -916,6 +916,30 @@ namespace
 		std::vector<std::string>* brokenReferences)
 	{
 		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		// #848: every catalogue machine validates its own named Wear
+		// opt-in against the same model rules. None of these modes counts
+		// cycles, so a cycle rate is refused; `mass` says whether the mode
+		// meters throughput in kilograms at all.
+		auto validateMachineWear = [&](auto const& machines, auto const& optIn, bool mass) {
+			for (auto const& machine : machines)
+			{
+				auto const& model = machine.*optIn;
+				if (model)
+					if (auto const reason = wearModelViolation(*model, false, mass))
+						return refuse("Installation '" + machine.id + "'" + reason);
+			}
+			return true;
+		};
+		if (!validateMachineWear(settings.solarArrays, &SolarArraySettings::cellDegradation, false)) return false;
+		if (!validateMachineWear(settings.generators, &GeneratorSettings::fouledInjector, false)) return false;
+		if (!validateMachineWear(settings.heatEngines, &HeatEngineSettings::efficiencyDrift, false)) return false;
+		if (!validateMachineWear(settings.electrolyzers, &ElectrolyzerSettings::membraneDegradation, true)) return false;
+		if (!validateMachineWear(settings.waterTreatments, &WaterTreatmentSettings::membraneFouling, true)) return false;
+		if (!validateMachineWear(settings.co2Captures, &Co2CaptureSettings::absorbentDegradation, true)) return false;
+		if (!validateMachineWear(settings.fuelCells, &FuelCellSettings::stackDegradation, true)) return false;
+		if (!validateMachineWear(settings.sabatierReactors, &SabatierReactorSettings::catalystDeactivation, true)) return false;
+		if (!validateMachineWear(settings.methaneProcessors, &MethaneProcessorSettings::catalystDeactivation, true)) return false;
+
 		if (settings.systemsStepWorldTicks < 1 || settings.systemsStepWorldTicks > CORE_MAX_SYSTEMS_STEP_WORLD_TICKS)
 			return refuse("Station systemsStepWorldTicks " + std::to_string(settings.systemsStepWorldTicks)
 				+ " is outside allowed range [1, " + std::to_string(CORE_MAX_SYSTEMS_STEP_WORLD_TICKS) + "]");

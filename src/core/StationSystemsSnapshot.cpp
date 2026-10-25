@@ -120,6 +120,9 @@ namespace core
 		{
 			StationSolarSourceSnapshot sourceResult;
 			sourceResult.id = array.authored.id;
+			sourceResult.wear = { array.authored.cellDegradation ? "cell-degradation" : "", array.cellDegradation.fraction,
+				array.cellDegradation.operatingHours, array.cellDegradation.throughputKg, array.cellDegradation.calendarHours,
+				array.effectiveWearCapability(), array.cellDegradation.fraction };
 			sourceResult.capacityKW = array.authored.capacityKW;
 			sourceResult.illumination = array.lastIllumination;
 			sourceResult.availableKW = array.lastAvailableKW;
@@ -317,6 +320,9 @@ namespace core
 		{
 			StationGeneratorSnapshot generatorResult;
 			generatorResult.id = generator.authored.id;
+			generatorResult.wear = { generator.authored.fouledInjector ? "fouled-injector" : "", generator.fouledInjector.fraction,
+				generator.fouledInjector.operatingHours, generator.fouledInjector.throughputKg, generator.fouledInjector.calendarHours,
+				generator.effectiveWearCapability(), generator.fouledInjector.fraction };
 			generatorResult.fuelStoreId = generator.authored.fuelStoreId;
 			generatorResult.thermalClass = generator.authored.thermalClass;
 			generatorResult.heatSinkId = generator.authored.heatSinkId;
@@ -639,6 +645,9 @@ namespace core
 		{
 			StationHeatEngineSnapshot engineResult;
 			engineResult.id = engine.authored.id;
+			engineResult.wear = { engine.authored.efficiencyDrift ? "efficiency-drift" : "", engine.efficiencyDrift.fraction,
+				engine.efficiencyDrift.operatingHours, engine.efficiencyDrift.throughputKg, engine.efficiencyDrift.calendarHours,
+				engine.effectiveWearCapability(), engine.efficiencyDrift.fraction };
 			engineResult.thermalClass = engine.authored.thermalClass;
 			engineResult.hotReservoirId = engine.authored.hotReservoirId;
 			engineResult.rejectionReservoirId = engine.authored.rejectionReservoirId;
@@ -1050,6 +1059,9 @@ namespace core
 			treatmentResult.removedConstituents = treatment.removedConstituents;
 			treatmentResult.passedConstituents = treatment.passedConstituents;
 			treatmentResult.id = treatment.authored.id;
+			treatmentResult.wear = { treatment.authored.membraneFouling ? "membrane-fouling" : "", treatment.membraneFouling.fraction,
+				treatment.membraneFouling.operatingHours, treatment.membraneFouling.throughputKg, treatment.membraneFouling.calendarHours,
+				treatment.effectiveWearCapability(), treatment.membraneFouling.fraction };
 			treatmentResult.sourceStoreId = treatment.authored.sourceStoreId;
 			treatmentResult.treatedStoreId = treatment.authored.treatedStoreId;
 			treatmentResult.concentrateStoreId = treatment.authored.concentrateStoreId;
@@ -1105,6 +1117,9 @@ namespace core
 			StationElectrolyzerSnapshot cellResult;
 			cellResult.waterQuality = cell.waterQuality;
 			cellResult.id = cell.authored.id;
+			cellResult.wear = { cell.authored.membraneDegradation ? "membrane-degradation" : "", cell.membraneDegradation.fraction,
+				cell.membraneDegradation.operatingHours, cell.membraneDegradation.throughputKg, cell.membraneDegradation.calendarHours,
+				cell.effectiveWearCapability(), cell.membraneDegradation.fraction };
 			cellResult.waterStoreId = cell.authored.waterStoreId;
 			cellResult.oxygenStoreId = cell.authored.oxygenStoreId;
 			cellResult.hydrogenStoreId = cell.authored.hydrogenStoreId;
@@ -1161,6 +1176,9 @@ namespace core
 		{
 			StationCo2CaptureSnapshot captureResult;
 			captureResult.id = capture.authored.id;
+			captureResult.wear = { capture.authored.absorbentDegradation ? "absorbent-degradation" : "", capture.absorbentDegradation.fraction,
+				capture.absorbentDegradation.operatingHours, capture.absorbentDegradation.throughputKg, capture.absorbentDegradation.calendarHours,
+				capture.effectiveWearCapability(), capture.absorbentDegradation.fraction };
 			captureResult.atmosphereId = capture.authored.atmosphereId;
 			captureResult.captureStoreId = capture.authored.captureStoreId;
 			captureResult.consumableStoreId = capture.authored.consumableStoreId;
@@ -1201,6 +1219,9 @@ namespace core
 		{
 			StationFuelCellSnapshot cellResult;
 			cellResult.id = cell.authored.id;
+			cellResult.wear = { cell.authored.stackDegradation ? "stack-degradation" : "", cell.stackDegradation.fraction,
+				cell.stackDegradation.operatingHours, cell.stackDegradation.throughputKg, cell.stackDegradation.calendarHours,
+				cell.effectiveWearCapability(), cell.stackDegradation.fraction };
 			cellResult.hydrogenStoreId = cell.authored.hydrogenStoreId;
 			cellResult.oxygenStoreId = cell.authored.oxygenStoreId;
 			cellResult.waterStoreId = cell.authored.waterStoreId;
@@ -1267,6 +1288,9 @@ namespace core
 			reactorResult.tripped = reactor.trip.has_value() && !reactor.pendingTripHeat;
 			if (reactorResult.tripped) reactorResult.activeFaults.push_back(*reactor.trip);
 			reactorResult.id = reactor.authored.id;
+			reactorResult.wear = { reactor.authored.catalystDeactivation ? "catalyst-deactivation" : "", reactor.catalystDeactivation.fraction,
+				reactor.catalystDeactivation.operatingHours, reactor.catalystDeactivation.throughputKg, reactor.catalystDeactivation.calendarHours,
+				reactor.effectiveWearCapability(), reactor.catalystDeactivation.fraction };
 			reactorResult.co2StoreId = reactor.authored.co2StoreId;
 			reactorResult.hydrogenStoreId = reactor.authored.hydrogenStoreId;
 			reactorResult.methaneStoreId = reactor.authored.methaneStoreId;
@@ -1320,6 +1344,9 @@ namespace core
 			processorResult.tripped = processor.trip.has_value() && !processor.pendingTripHeat;
 			if (processorResult.tripped) processorResult.activeFaults.push_back(*processor.trip);
 			processorResult.id = processor.authored.id;
+			processorResult.wear = { processor.authored.catalystDeactivation ? "catalyst-deactivation" : "", processor.catalystDeactivation.fraction,
+				processor.catalystDeactivation.operatingHours, processor.catalystDeactivation.throughputKg, processor.catalystDeactivation.calendarHours,
+				processor.effectiveWearCapability(), processor.catalystDeactivation.fraction };
 			processorResult.methaneStoreId = processor.authored.methaneStoreId;
 			processorResult.hydrogenStoreId = processor.authored.hydrogenStoreId;
 			processorResult.carbonStoreId = processor.authored.carbonStoreId;

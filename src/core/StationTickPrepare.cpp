@@ -585,7 +585,7 @@ namespace core
 		for (auto& array : runtime.solarArrays)
 		{
 			array.lastIllumination = evaluateStationProfile(array.authored.illumination, profileElapsed);
-			array.lastDisabled = array.authored.capacityKW <= 0.0;
+			array.lastDisabled = array.effectiveWearCapability() <= 0.0;
 			// #845: the availability the array's fault ledger leaves it.
 			// A string loss takes a frozen fraction of the installed
 			// capacity; a tracking failure pins the array to its frozen
@@ -602,7 +602,7 @@ namespace core
 				array.availabilityFactor = std::min(array.availabilityFactor,
 					array.trackingAvailability);
 			array.lastAvailableKW = array.lastDisabled
-				? 0.0 : array.authored.capacityKW * array.lastIllumination * array.availabilityFactor;
+				? 0.0 : array.effectiveWearCapability() * array.lastIllumination * array.availabilityFactor;
 			array.lastEclipse = !array.lastDisabled && array.lastAvailableKW <= 0.0;
 			array.lastAvailableKW = connections.available(connections.port("Solar", array.authored.id, "Solar generation"), array.lastAvailableKW);
 			availableGeneration += array.lastAvailableKW;

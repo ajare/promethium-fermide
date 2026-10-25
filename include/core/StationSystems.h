@@ -407,6 +407,32 @@ namespace core
 		bool operator==(ProfileSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationProfileSegments{8};
+	// #843: the permanent Wear layer. Wear accumulators count actual
+	// operation - equivalent full cycles on real charge/discharge,
+	// operating hours while the machine really works, throughput of real
+	// flowed mass - plus calendar time, and the authored fade rates convert
+	// them into a permanent wearFraction of rated capacity lost within a
+	// run. Unlike Condition, Wear is never healed: Repair clears Faults and
+	// restores Condition but never reverses Wear; a repaired machine keeps
+	// its faded rating. Only replacement - a topology change, a reset -
+	// starts a fresh, unworn machine. Which accumulators a machine wires
+	// depends on what the machine physically is: a battery fades on cycles
+	// and calendar time, a coolant loop on operating hours and circulated
+	// mass. Rates are fractions of rated capacity per accumulator unit;
+	// unwired rates must be zero so no author can pay for fade the machine
+	// cannot accumulate. Presence of the model is frozen topology; the
+	// rates inside it are live-tunable parameters that never rewrite the
+	// fade already accumulated - each interval's fade is priced at the
+	// rates current when the operation happened.
+	struct InstallationWearSettings
+	{
+		double fadePerCycle{0.0};           // fraction of rated capacity per equivalent full cycle
+		double fadePerOperatingHour{0.0};   // fraction per hour of actual operation
+		double fadePerThroughputKg{0.0};    // fraction per kg actually flowed
+		double fadePerCalendarHour{0.0};    // fraction per simulated hour, operating or not
+		double maxWearFraction{1.0};        // permanent clamp on total fade, (0, 1]
+		bool operator==(InstallationWearSettings const&) const = default;
+	};
 
 	// #845: the solar array's string-loss opt-in. While the Fault is
 	// active a declared fraction of the array's installed capacity is
@@ -445,6 +471,12 @@ namespace core
 		ProfileSettings illumination; // fraction of full sun, [0, 1]
 		std::optional<SolarStringLossSettings> stringLoss;
 		std::optional<SolarTrackingFailureSettings> trackingFailure;
+		// #848: the array's `cell-degradation` Wear opt-in: illuminated cells
+		// lose installed capacity permanently, so the array delivers only
+		// what the surviving cells still see. Presence is frozen topology;
+		// the rates inside stay live-tunable and never reprice the fade
+		// already banked.
+		std::optional<InstallationWearSettings> cellDegradation;
 		bool operator==(SolarArraySettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationSolarArrays{4};
@@ -761,31 +793,24 @@ namespace core
 		double stockUnitsPerConditionPoint{1.0};// stock units consumed per condition point restored
 		bool operator==(InstallationConditionSettings const&) const = default;
 	};
-	// #843: the permanent Wear layer. Wear accumulators count actual
-	// operation - equivalent full cycles on real charge/discharge,
-	// operating hours while the machine really works, throughput of real
-	// flowed mass - plus calendar time, and the authored fade rates convert
-	// them into a permanent wearFraction of rated capacity lost within a
-	// run. Unlike Condition, Wear is never healed: Repair clears Faults and
-	// restores Condition but never reverses Wear; a repaired machine keeps
-	// its faded rating. Only replacement - a topology change, a reset -
-	// starts a fresh, unworn machine. Which accumulators a machine wires
-	// depends on what the machine physically is: a battery fades on cycles
-	// and calendar time, a coolant loop on operating hours and circulated
-	// mass. Rates are fractions of rated capacity per accumulator unit;
-	// unwired rates must be zero so no author can pay for fade the machine
-	// cannot accumulate. Presence of the model is frozen topology; the
-	// rates inside it are live-tunable parameters that never rewrite the
-	// fade already accumulated - each interval's fade is priced at the
-	// rates current when the operation happened.
-	struct InstallationWearSettings
+	// #848: one machine's permanent Wear as of the most recent tick.
+	// `effectiveCapability` carries the units of the mode's declared
+	// rating - kW of capacity or output, kg/s of throughput, a share of
+	// the Carnot ceiling, or kWh per kg of process dose - and
+	// `derivedImpact` is the fraction of rated capability the fade has
+	// taken. A machine with no Wear opt-in reports an empty modeId and
+	// zero fade, which is exactly what it is. Repair never resets any of
+	// it: only replacement, a topology reset, starts a machine unworn.
+	struct StationMachineWearSnapshot
 	{
-		double fadePerCycle{0.0};           // fraction of rated capacity per equivalent full cycle
-		double fadePerOperatingHour{0.0};   // fraction per hour of actual operation
-		double fadePerThroughputKg{0.0};    // fraction per kg actually flowed
-		double fadePerCalendarHour{0.0};    // fraction per simulated hour, operating or not
-		double maxWearFraction{1.0};        // permanent clamp on total fade, (0, 1]
-		bool operator==(InstallationWearSettings const&) const = default;
+		std::string modeId;
+		double wearFraction{0.0};
+		double operatingHours{0.0};
+		double throughputKg{0.0};
+		double calendarHours{0.0};
+		double effectiveCapability{0.0};
+		double derivedImpact{0.0};
+		bool operator==(StationMachineWearSnapshot const&) const = default;
 	};
 	struct StationFaultSnapshot
 	{
@@ -934,6 +959,12 @@ namespace core
 		// The opt-in is frozen topology.
 		bool mechanicalSeizure{false};
 		std::optional<RepairPartsSettings> repairParts;
+		// #848: the engine's `efficiency-drift` Wear opt-in: the declared Carnot
+		// fraction drifts down with duty, so the engine captures a
+		// shrinking share of its Carnot ceiling. Presence is frozen
+		// topology; the rates inside stay live-tunable and never reprice
+		// the fade already banked.
+		std::optional<InstallationWearSettings> efficiencyDrift;
 		bool operator==(HeatEngineSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationHeatEngines{8};
@@ -986,6 +1017,12 @@ namespace core
 		// topology and the mode carries no parameters beyond it: the
 		// failed crank is the machine's own authored crank.
 		bool failedStart{false};
+		// #848: the generator's `fouled-injector` Wear opt-in: injectors foul
+		// with duty, so each kWh of output costs more fuel. Rated
+		// efficiency falls as the accumulators grow. Presence is frozen
+		// topology; the rates inside stay live-tunable and never reprice
+		// the fade already banked.
+		std::optional<InstallationWearSettings> fouledInjector;
 		bool operator==(GeneratorSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationGenerators{8};
@@ -1431,6 +1468,11 @@ namespace core
 		double consumablePerKg{0.01};      // consumable units per kg processed
 		int priority{0};
 		bool breakthrough{false};
+		// #848: the plant's `membrane-fouling` Wear opt-in: fouled membranes
+		// pass less water, so rated throughput falls with the mass
+		// processed. Presence is frozen topology; the rates inside stay
+		// live-tunable and never reprice the fade already banked.
+		std::optional<InstallationWearSettings> membraneFouling;
 		bool operator==(WaterTreatmentSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationWaterTreatments{8};
@@ -1488,6 +1530,12 @@ namespace core
 		double maxSinkTemperatureC{60.0}; // cooling qualified while the sink is below this
 		int priority{0};
 		std::optional<CatalystPoisoningSettings> catalystPoisoning;
+		// #848: the cell's `membrane-degradation` Wear opt-in: a degraded
+		// membrane costs more electricity per kilogram split, so the
+		// specific-energy dose rises with the mass split. Presence is
+		// frozen topology; the rates inside stay live-tunable and never
+		// reprice the fade already banked.
+		std::optional<InstallationWearSettings> membraneDegradation;
 		bool operator==(ElectrolyzerSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationElectrolyzers{8};
@@ -1517,6 +1565,11 @@ namespace core
 		double specificEnergyKWhPerKg{0.5}; // electricity per kg captured
 		double consumablePerKg{0.0};   // consumable units per kg captured
 		int priority{0};
+		// #848: the loop's `absorbent-degradation` Wear opt-in: spent absorbent
+		// takes up less per pass, so rated capture rate falls with the
+		// mass captured. Presence is frozen topology; the rates inside
+		// stay live-tunable and never reprice the fade already banked.
+		std::optional<InstallationWearSettings> absorbentDegradation;
 		bool operator==(Co2CaptureSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationCo2Captures{8};
@@ -1562,6 +1615,12 @@ namespace core
 		double commandedOutputKW{0.0}; // dispatch setpoint, [0, rated]
 		double maxSinkTemperatureC{80.0}; // cooling qualified while the sink is below this
 		std::optional<CatalystPoisoningSettings> catalystPoisoning;
+		// #848: the stack's `stack-degradation` Wear opt-in: the stack loses
+		// rated output permanently as it is drawn, beside any catalyst
+		// poisoning its feed brings. Presence is frozen topology; the
+		// rates inside stay live-tunable and never reprice the fade
+		// already banked.
+		std::optional<InstallationWearSettings> stackDegradation;
 		bool operator==(FuelCellSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationFuelCells{8};
@@ -1674,6 +1733,12 @@ namespace core
 		double maxSinkTemperatureC{60.0}; // cooling qualified while the sink is below this
 		int priority{0};
 		std::optional<OvertempRunawaySettings> overtempRunaway;
+		// #848: the machine's `catalyst-deactivation` Wear opt-in: the catalyst
+		// loses activity with throughput, so rated conversion rate falls
+		// with the mass converted. Presence is frozen topology; the rates
+		// inside stay live-tunable and never reprice the fade already
+		// banked.
+		std::optional<InstallationWearSettings> catalystDeactivation;
 		bool operator==(SabatierReactorSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationSabatierReactors{8};
@@ -1709,6 +1774,12 @@ namespace core
 		double maxSinkTemperatureC{60.0}; // cooling qualified while the sink is below this
 		int priority{0};
 		std::optional<OvertempRunawaySettings> overtempRunaway;
+		// #848: the machine's `catalyst-deactivation` Wear opt-in: the catalyst
+		// loses activity with throughput, so rated conversion rate falls
+		// with the mass converted. Presence is frozen topology; the rates
+		// inside stay live-tunable and never reprice the fade already
+		// banked.
+		std::optional<InstallationWearSettings> catalystDeactivation;
 		bool operator==(MethaneProcessorSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationMethaneProcessors{8};
@@ -2935,6 +3006,8 @@ namespace core
 		// composed by minimum. 1.0 with no Fault active.
 		double availabilityFactor{1.0};
 		std::vector<StationFaultSnapshot> activeFaults;
+		// #848: the permanent Wear this machine has accumulated.
+		StationMachineWearSnapshot wear;
 		bool operator==(StationSolarSourceSnapshot const&) const = default;
 	};
 	// One External equipment load group as of the most recent tick: what
@@ -3131,6 +3204,8 @@ namespace core
 		// Running while the Fault is active.
 		std::vector<StationFaultSnapshot> activeFaults;
 		StationTransferStatus status{StationTransferStatus::Idle};
+		// #848: the permanent Wear this machine has accumulated.
+		StationMachineWearSnapshot wear;
 		bool operator==(StationGeneratorSnapshot const&) const = default;
 	};
 	// The station-wide electrical picture: generation actually available
@@ -3603,6 +3678,8 @@ namespace core
 		// its `mechanical-seizure` entry with full availability impact.
 		std::vector<StationFaultSnapshot> activeFaults;
 		StationHeatEngineStatus status{StationHeatEngineStatus::Disabled};
+		// #848: the permanent Wear this machine has accumulated.
+		StationMachineWearSnapshot wear;
 		bool operator==(StationHeatEngineSnapshot const&) const = default;
 	};
 	// One thermal buffer as of the most recent tick (#398): the authored
@@ -4074,6 +4151,8 @@ namespace core
 		double residualKg{0.0}; // processed - treated - concentrate
 		StationTransferStatus status{StationTransferStatus::Idle};
 		std::vector<StationFaultSnapshot> activeFaults;
+		// #848: the permanent Wear this machine has accumulated.
+		StationMachineWearSnapshot wear;
 		bool operator==(StationWaterTreatmentSnapshot const&) const = default;
 	};
 	// One electrolysis cell as of the most recent tick (#404): the authored
@@ -4125,6 +4204,8 @@ namespace core
 		double wearFraction{0.0};
 		double wearOperatingHours{0.0};
 		double effectiveRateKgPerS{0.0};
+		// #848: the permanent Wear this machine has accumulated.
+		StationMachineWearSnapshot wear;
 		bool operator==(StationElectrolyzerSnapshot const&) const = default;
 	};
 	// One CO2 capture machine as of the most recent tick (#404): the
@@ -4160,6 +4241,8 @@ namespace core
 		double energySuppliedKJ{0.0};  // cumulative electricity drawn
 		double consumablesUsed{0.0};   // cumulative consumable drawn
 		StationTransferStatus status{StationTransferStatus::Idle};
+		// #848: the permanent Wear this machine has accumulated.
+		StationMachineWearSnapshot wear;
 		bool operator==(StationCo2CaptureSnapshot const&) const = default;
 	};
 	// One fuel-cell backup unit as of the most recent tick (#406): the
@@ -4219,6 +4302,8 @@ namespace core
 		double wearFraction{0.0};
 		double wearOperatingHours{0.0};
 		double effectiveRatedOutputKW{0.0};
+		// #848: the permanent Wear this machine has accumulated.
+		StationMachineWearSnapshot wear;
 		bool operator==(StationFuelCellSnapshot const&) const = default;
 	};
 	// One Sabatier reactor as of the most recent tick (#405): the
@@ -4271,6 +4356,8 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool tripped{false};
 		std::vector<StationFaultSnapshot> activeFaults;
+		// #848: the permanent Wear this machine has accumulated.
+		StationMachineWearSnapshot wear;
 		bool operator==(StationSabatierReactorSnapshot const&) const = default;
 	};
 	// One methane processor as of the most recent tick (#405): the
@@ -4321,6 +4408,8 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool tripped{false};
 		std::vector<StationFaultSnapshot> activeFaults;
+		// #848: the permanent Wear this machine has accumulated.
+		StationMachineWearSnapshot wear;
 		bool operator==(StationMethaneProcessorSnapshot const&) const = default;
 	};
 	// One microbial processor as of the most recent tick (#407): the

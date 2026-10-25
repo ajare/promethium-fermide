@@ -32,9 +32,32 @@ namespace core
 		// stamping 114 exactly as before.
 		auto const repairs = std::any_of(document.settings.coolantLoops.begin(), document.settings.coolantLoops.end(),
 			[](auto const& loop) { return loop.repairParts.has_value(); });
-		// #843: Wear opt-ins are the newest tier; a document carrying a
-		// battery capacity-fade or a loop Wear model stamps the current
-		// schema, and repair-only documents keep stamping 115 unchanged.
+		// #848: the machine Wear catalogue is the newest tier; a document
+		// carrying any machine's named Wear opt-in stamps the current
+		// schema. Documents that opt into none of it - including every
+		// fixture written before this ticket - keep stamping exactly what
+		// they stamped before, so their bytes do not move.
+		auto const machineWear = std::any_of(document.settings.solarArrays.begin(), document.settings.solarArrays.end(),
+				[](auto const& machine) { return machine.cellDegradation.has_value(); })
+			|| std::any_of(document.settings.generators.begin(), document.settings.generators.end(),
+				[](auto const& machine) { return machine.fouledInjector.has_value(); })
+			|| std::any_of(document.settings.heatEngines.begin(), document.settings.heatEngines.end(),
+				[](auto const& machine) { return machine.efficiencyDrift.has_value(); })
+			|| std::any_of(document.settings.electrolyzers.begin(), document.settings.electrolyzers.end(),
+				[](auto const& machine) { return machine.membraneDegradation.has_value(); })
+			|| std::any_of(document.settings.waterTreatments.begin(), document.settings.waterTreatments.end(),
+				[](auto const& machine) { return machine.membraneFouling.has_value(); })
+			|| std::any_of(document.settings.co2Captures.begin(), document.settings.co2Captures.end(),
+				[](auto const& machine) { return machine.absorbentDegradation.has_value(); })
+			|| std::any_of(document.settings.fuelCells.begin(), document.settings.fuelCells.end(),
+				[](auto const& machine) { return machine.stackDegradation.has_value(); })
+			|| std::any_of(document.settings.sabatierReactors.begin(), document.settings.sabatierReactors.end(),
+				[](auto const& machine) { return machine.catalystDeactivation.has_value(); })
+			|| std::any_of(document.settings.methaneProcessors.begin(), document.settings.methaneProcessors.end(),
+				[](auto const& machine) { return machine.catalystDeactivation.has_value(); });
+		// #843: the pilot Wear tier - a battery capacity-fade or a loop
+		// Wear model - still stamps its own schema when it is the newest
+		// thing a document carries.
 		auto const wear = std::any_of(document.settings.batteries.begin(), document.settings.batteries.end(),
 			[](auto const& battery) { return battery.capacityFade.has_value(); })
 			|| std::any_of(document.settings.coolantLoops.begin(), document.settings.coolantLoops.end(),
@@ -76,7 +99,7 @@ namespace core
 			[](auto const& a) { return a.fire.has_value(); })
 			|| std::any_of(document.settings.airlockCycles.begin(), document.settings.airlockCycles.end(),
 				[](auto const& c) { return c.interruptedCycle || c.interlockFailure.has_value(); });
-		output->writeUint32("schemaVersion", atmosphereFaults ? kWorldSchemaVersion : contamination ? 119 : powerSources ? 118
+		output->writeUint32("schemaVersion", machineWear ? kWorldSchemaVersion : atmosphereFaults ? 120 : contamination ? 119 : powerSources ? 118
 			: thermalPlant ? 117 : wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		writeStationSystemsSettingsMap(*output, document.settings);
 		output->beginMap("layout");

@@ -120,6 +120,24 @@ using namespace station_detail;
 			StationTransferStatus status{StationTransferStatus::Idle};
 			std::string stallReason;
 		};
+		// #843: one opt-in Installation's wear accumulators and the
+		// permanent fade they drive. Accumulators grow only with actual
+		// operation and calendar time (the refund of a discharge that
+		// never actually happened is the only unwinding, because that
+		// operation truly did not occur). `fade` is the raw accumulated
+		// fade priced at each interval's then-current rates; `fraction`
+		// is the reported fade, `fade` clamped by the model's
+		// maxWearFraction. Repair never touches this state: only
+		// replacement, a topology reset, starts a machine unworn.
+		struct WearState
+		{
+			double cycles{0.0};
+			double operatingHours{0.0};
+			double throughputKg{0.0};
+			double calendarHours{0.0};
+			double fade{0.0};
+			double fraction{0.0};
+		};
 		// The authoritative ledger of one configured solar array. Output
 		// follows installed capacity and evaluated illumination; a
 		// zero-capacity array is disabled and contributes nothing.
@@ -144,6 +162,13 @@ using namespace station_detail;
 			bool trackingFailurePending{false};
 			double trackingAvailability{1.0};
 			double availabilityFactor{1.0};
+			// #848: the `cell-degradation` accumulators and the permanent fade they drive.
+			// The capability this machine may rate itself at is its authored
+			// rating faded by this state: every gate, dose and ledger in the
+			// tick reads the faded figure, so a worn machine never books what
+			// it can no longer do. Repair never touches it.
+			WearState cellDegradation;
+			double effectiveWearCapability() const { return authored.capacityKW * (1.0 - cellDegradation.fraction); }
 		};
 		// The authoritative ledger of one External equipment load group.
 		// Allocation runs in two passes: protected critical floors first,
@@ -226,24 +251,6 @@ using namespace station_detail;
 			double surgeRemainingSeconds{0.0};
 			double lastSurgeKW{0.0};
 			std::string lastRecoveryHoldReason;
-		};
-		// #843: one opt-in Installation's wear accumulators and the
-		// permanent fade they drive. Accumulators grow only with actual
-		// operation and calendar time (the refund of a discharge that
-		// never actually happened is the only unwinding, because that
-		// operation truly did not occur). `fade` is the raw accumulated
-		// fade priced at each interval's then-current rates; `fraction`
-		// is the reported fade, `fade` clamped by the model's
-		// maxWearFraction. Repair never touches this state: only
-		// replacement, a topology reset, starts a machine unworn.
-		struct WearState
-		{
-			double cycles{0.0};
-			double operatingHours{0.0};
-			double throughputKg{0.0};
-			double calendarHours{0.0};
-			double fade{0.0};
-			double fraction{0.0};
 		};
 		// The authoritative ledger of one configured battery bank (#394).
 		// Discharge covers the load demand generation could not reach, on
@@ -639,6 +646,13 @@ using namespace station_detail;
 			// tick sets Disabled for a zero-rated machine, so an enabled
 			// engine never misreports as disabled before the World has run.
 			StationHeatEngineStatus status{StationHeatEngineStatus::Idle};
+			// #848: the `efficiency-drift` accumulators and the permanent fade they drive.
+			// The capability this machine may rate itself at is its authored
+			// rating faded by this state: every gate, dose and ledger in the
+			// tick reads the faded figure, so a worn machine never books what
+			// it can no longer do. Repair never touches it.
+			WearState efficiencyDrift;
+			double effectiveWearCapability() const { return authored.carnotFraction * (1.0 - efficiencyDrift.fraction); }
 		};
 		// The authoritative ledger of one authored thermal buffer (#398).
 		// The store holds a finite amount of thermal energy, distinct from
@@ -726,6 +740,13 @@ using namespace station_detail;
 			double dispatchCommandKW{0.0};
 			double lastCommandedKW{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
+			// #848: the `fouled-injector` accumulators and the permanent fade they drive.
+			// The capability this machine may rate itself at is its authored
+			// rating faded by this state: every gate, dose and ledger in the
+			// tick reads the faded figure, so a worn machine never books what
+			// it can no longer do. Repair never touches it.
+			WearState fouledInjector;
+			double effectiveWearCapability() const { return authored.efficiency / (1.0 + fouledInjector.fraction); }
 		};
 		// The authoritative ledger of one authored compartment atmosphere
 		// (#400). The compartment owns a finite gas inventory in a fixed
@@ -1064,6 +1085,13 @@ using namespace station_detail;
 			double consumablesUsedTotal{0.0};
 			bool lastCurtailed{false};
 			StationTransferStatus status{StationTransferStatus::Idle};
+			// #848: the `membrane-fouling` accumulators and the permanent fade they drive.
+			// The capability this machine may rate itself at is its authored
+			// rating faded by this state: every gate, dose and ledger in the
+			// tick reads the faded figure, so a worn machine never books what
+			// it can no longer do. Repair never touches it.
+			WearState membraneFouling;
+			double effectiveWearCapability() const { return authored.throughputKgPerS * (1.0 - membraneFouling.fraction); }
 		};
 		// The authoritative ledger of one authored electrolysis cell (#404).
 		// The cell splits qualified water above the feed store's protected
@@ -1108,6 +1136,13 @@ using namespace station_detail;
 			double chemicalEnergyKJ{0.0};
 			double heatRoutedKJ{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
+			// #848: the `membrane-degradation` accumulators and the permanent fade they drive.
+			// The capability this machine may rate itself at is its authored
+			// rating faded by this state: every gate, dose and ledger in the
+			// tick reads the faded figure, so a worn machine never books what
+			// it can no longer do. Repair never touches it.
+			WearState membraneDegradation;
+			double effectiveWearCapability() const { return authored.specificEnergyKWhPerKgWater * (1.0 + membraneDegradation.fraction); }
 		};
 		// The authoritative ledger of one authored CO2 capture machine
 		// (#404). Capture is finite on every axis - rated rate, the CO2
@@ -1137,6 +1172,13 @@ using namespace station_detail;
 			double energySuppliedKJ{0.0};
 			double consumablesUsedTotal{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
+			// #848: the `absorbent-degradation` accumulators and the permanent fade they drive.
+			// The capability this machine may rate itself at is its authored
+			// rating faded by this state: every gate, dose and ledger in the
+			// tick reads the faded figure, so a worn machine never books what
+			// it can no longer do. Repair never touches it.
+			WearState absorbentDegradation;
+			double effectiveWearCapability() const { return authored.maxRateKgPerS * (1.0 - absorbentDegradation.fraction); }
 		};
 		// A fuel-cell backup unit's authoritative ledger (#406): the cell
 		// runs on the supply side in declaration order, its output joining
@@ -1175,6 +1217,13 @@ using namespace station_detail;
 			double dispatchCommandKW{0.0};
 			double lastCommandedKW{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
+			// #848: the `stack-degradation` accumulators and the permanent fade they drive.
+			// The capability this machine may rate itself at is its authored
+			// rating faded by this state: every gate, dose and ledger in the
+			// tick reads the faded figure, so a worn machine never books what
+			// it can no longer do. Repair never touches it.
+			WearState stackDegradation;
+			double effectiveWearCapability() const { return authored.ratedOutputKW * (1.0 - stackDegradation.fraction); }
 		};
 		// The authoritative ledger of one authored Sabatier reactor
 		// (#405). The reactor converts captured CO2 and hydrogen into
@@ -1219,6 +1268,13 @@ using namespace station_detail;
 			double reactionHeatKJ{0.0};
 			double heatRoutedKJ{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
+			// #848: the `catalyst-deactivation` accumulators and the permanent fade they drive.
+			// The capability this machine may rate itself at is its authored
+			// rating faded by this state: every gate, dose and ledger in the
+			// tick reads the faded figure, so a worn machine never books what
+			// it can no longer do. Repair never touches it.
+			WearState catalystDeactivation;
+			double effectiveWearCapability() const { return authored.rateKgPerS * (1.0 - catalystDeactivation.fraction); }
 		};
 		// The authoritative ledger of one authored methane processor
 		// (#405). The processor splits methane into recovered hydrogen
@@ -1261,6 +1317,13 @@ using namespace station_detail;
 			double reactionHeatKJ{0.0};
 			double heatRoutedKJ{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
+			// #848: the `catalyst-deactivation` accumulators and the permanent fade they drive.
+			// The capability this machine may rate itself at is its authored
+			// rating faded by this state: every gate, dose and ledger in the
+			// tick reads the faded figure, so a worn machine never books what
+			// it can no longer do. Repair never touches it.
+			WearState catalystDeactivation;
+			double effectiveWearCapability() const { return authored.rateKgPerS * (1.0 - catalystDeactivation.fraction); }
 		};
 		// The authoritative ledger of one authored microbial processor
 		// (#407). The processor digests a compound organic-waste feed and

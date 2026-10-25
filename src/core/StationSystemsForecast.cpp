@@ -465,7 +465,7 @@ namespace core
 					auto const kwhPerUnit = stationEnergyUnitsToKWh(
 						stores[generator.fuelStoreIndex].authored.unit);
 					auto const drawUnitsPerS = boundKW
-						/ generator.authored.efficiency / 3600.0 / kwhPerUnit;
+						/ generator.effectiveWearCapability() / 3600.0 / kwhPerUnit;
 					if (drawUnitsPerS <= 0.0) continue;
 					generatorDraw[index] = drawUnitsPerS;
 					generatorRunning[index] = 1;

@@ -59,7 +59,7 @@ namespace core
 			auto const port = connections.port("Solar", array.authored.id, "Solar generation");
 			auto const need = connections.efficiency(port) == 0.0 ? dispatchDemandKW
 				: std::min(solarUsedKW, array.lastAvailableKW);
-			auto const flow = connections.receive(port, need, array.authored.capacityKW * array.lastIllumination);
+			auto const flow = connections.receive(port, need, array.effectiveWearCapability() * array.lastIllumination);
 			solarUsedKW = std::max(0.0, solarUsedKW - flow.delivered);
 		}
 		consumerInputKW = 0.0;

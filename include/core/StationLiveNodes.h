@@ -100,7 +100,8 @@ namespace core
 		static bool restoreInitial(SolarArraySettings const&, SolarArraySettings&) { return false; }
 		static bool topologyChanged(SolarArraySettings const& a, SolarArraySettings const& b)
 		{
-			return a.stringLoss.has_value() != b.stringLoss.has_value()
+			return a.cellDegradation.has_value() != b.cellDegradation.has_value()
+				|| a.stringLoss.has_value() != b.stringLoss.has_value()
 				|| a.trackingFailure.has_value() != b.trackingFailure.has_value();
 		}
 	};
@@ -239,7 +240,8 @@ namespace core
 		{
 			// #844: the seizure opt-in and the repair wiring join the
 			// frozen topology; every rate inside stays live-tunable.
-			return before.id != after.id || before.hotReservoirId != after.hotReservoirId
+			return before.efficiencyDrift.has_value() != after.efficiencyDrift.has_value()
+				|| before.id != after.id || before.hotReservoirId != after.hotReservoirId
 				|| before.rejectionReservoirId != after.rejectionReservoirId
 				|| before.mechanicalSeizure != after.mechanicalSeizure
 				|| repairWiringTopologyChanged(before.repairParts, after.repairParts);
@@ -255,7 +257,7 @@ namespace core
 		static bool restoreInitial(GeneratorSettings const&, GeneratorSettings&) { return false; }
 		static bool topologyChanged(GeneratorSettings const& a, GeneratorSettings const& b)
 		{
-			return a.failedStart != b.failedStart;
+			return a.fouledInjector.has_value() != b.fouledInjector.has_value() || a.failedStart != b.failedStart;
 		}
 	};
 	template <> struct LiveNode<AtmosphereSettings>
@@ -301,7 +303,7 @@ namespace core
 		static auto& of(auto& settings) { return settings.waterTreatments; }
 		static bool restoreInitial(WaterTreatmentSettings const&, WaterTreatmentSettings&) { return false; }
 		static bool topologyChanged(WaterTreatmentSettings const& a, WaterTreatmentSettings const& b)
-		{ return a.breakthrough != b.breakthrough; }
+		{ return a.membraneFouling.has_value() != b.membraneFouling.has_value() || a.breakthrough != b.breakthrough; }
 	};
 	template <> struct LiveNode<ElectrolyzerSettings>
 	{
@@ -309,16 +311,25 @@ namespace core
 		static auto& of(auto& settings) { return settings.electrolyzers; }
 		static bool restoreInitial(ElectrolyzerSettings const&, ElectrolyzerSettings&) { return false; }
 		static bool topologyChanged(ElectrolyzerSettings const& a, ElectrolyzerSettings const& b)
-		{ return a.catalystPoisoning.has_value() != b.catalystPoisoning.has_value(); }
+		{ return a.membraneDegradation.has_value() != b.membraneDegradation.has_value()
+			|| a.catalystPoisoning.has_value() != b.catalystPoisoning.has_value(); }
 	};
-	PF_STATION_LIVE_NODE(Co2CaptureSettings, co2Captures, "CO2 capture")
+	template <> struct LiveNode<Co2CaptureSettings>
+	{
+		static constexpr std::string_view nodeType = "CO2 capture";
+		static auto& of(auto& settings) { return settings.co2Captures; }
+		static bool restoreInitial(Co2CaptureSettings const&, Co2CaptureSettings&) { return false; }
+		static bool topologyChanged(Co2CaptureSettings const& a, Co2CaptureSettings const& b)
+		{ return a.absorbentDegradation.has_value() != b.absorbentDegradation.has_value(); }
+	};
 	template <> struct LiveNode<FuelCellSettings>
 	{
 		static constexpr std::string_view nodeType = "Fuel cell";
 		static auto& of(auto& settings) { return settings.fuelCells; }
 		static bool restoreInitial(FuelCellSettings const&, FuelCellSettings&) { return false; }
 		static bool topologyChanged(FuelCellSettings const& a, FuelCellSettings const& b)
-		{ return a.catalystPoisoning.has_value() != b.catalystPoisoning.has_value(); }
+		{ return a.stackDegradation.has_value() != b.stackDegradation.has_value()
+			|| a.catalystPoisoning.has_value() != b.catalystPoisoning.has_value(); }
 	};
 	template <> struct LiveNode<SabatierReactorSettings>
 	{
@@ -326,7 +337,8 @@ namespace core
 		static auto& of(auto& settings) { return settings.sabatierReactors; }
 		static bool restoreInitial(SabatierReactorSettings const&, SabatierReactorSettings&) { return false; }
 		static bool topologyChanged(SabatierReactorSettings const& a, SabatierReactorSettings const& b)
-		{ return a.overtempRunaway.has_value() != b.overtempRunaway.has_value(); }
+		{ return a.catalystDeactivation.has_value() != b.catalystDeactivation.has_value()
+			|| a.overtempRunaway.has_value() != b.overtempRunaway.has_value(); }
 	};
 	template <> struct LiveNode<MethaneProcessorSettings>
 	{
@@ -334,7 +346,8 @@ namespace core
 		static auto& of(auto& settings) { return settings.methaneProcessors; }
 		static bool restoreInitial(MethaneProcessorSettings const&, MethaneProcessorSettings&) { return false; }
 		static bool topologyChanged(MethaneProcessorSettings const& a, MethaneProcessorSettings const& b)
-		{ return a.overtempRunaway.has_value() != b.overtempRunaway.has_value(); }
+		{ return a.catalystDeactivation.has_value() != b.catalystDeactivation.has_value()
+			|| a.overtempRunaway.has_value() != b.overtempRunaway.has_value(); }
 	};
 	PF_STATION_LIVE_NODE_WITH(MicrobialProcessorSettings, microbialProcessors, "Microbial processor",
 		&MicrobialProcessorSettings::initialCondition)
