@@ -135,6 +135,10 @@ add_test(NAME station-observable-registry-coverage COMMAND ${Python3_EXECUTABLE}
     "${PROJECT_SOURCE_DIR}/scripts/tests/station_observable_registry.py")
 set_tests_properties(station-observable-registry-coverage PROPERTIES
     LABELS "smoke;functional;validation-fast;station;station-timestep-invariance" TIMEOUT 10)
+add_test(NAME station-observable-registry-parser COMMAND ${Python3_EXECUTABLE}
+    "${PROJECT_SOURCE_DIR}/scripts/tests/station_observable_registry_parser.py")
+set_tests_properties(station-observable-registry-parser PROPERTIES
+    LABELS "smoke;functional;validation-fast;station;station-timestep-invariance" TIMEOUT 10)
 # #810: the prefab expander core slice. Pure headless checks - template
 # parsing and refusals, namespaced expansion, override application, cap
 # refusal and determinism - all cheap enough for the fast lane.
