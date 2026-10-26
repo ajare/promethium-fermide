@@ -1510,13 +1510,17 @@ bool renderFuelCellEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 		cell.efficiency, 0.0, 0.05, "%.3f");
 	renderRangedDouble(describe("commanded output kW", label), cell.commandedOutputKW, 0.0, 1.0, "%.3f");
 	renderRangedDouble(describe("max sink temperature C", label), cell.maxSinkTemperatureC, 0.0, 5.0, "%.1f");
-	// #849: feed-contact poisoning fades the stack permanently per exposed
-	// hour; the fade itself is the `stack-degradation` Wear layer.
+	// Keep unsupported modes visible, without silently removing an authored block.
+	bool const supportsPoisoning = core::FuelCellChemistryProfiles.at(
+		static_cast<size_t>(cell.chemistry)).supportsCatalystPoisoning;
+	ImGui::BeginDisabled(!supportsPoisoning);
 	renderFaultOptIn(describe("Fault: catalyst-poisoning", label), cell.catalystPoisoning,
 		[&](core::CatalystPoisoningSettings& block) {
 		renderRangedDouble(describe("poison trigger concentration", label), block.triggerConcentration, 0.0, 0.0, "%.6f");
 		renderRangedDouble(describe("poison wear per hour", label), block.wearPerHour, 0.0, 0.0, "%.6f");
 	});
+	ImGui::EndDisabled();
+	if (!supportsPoisoning) ImGui::TextDisabled("%s", core::FuelCellPoisoningUnavailableReason);
 	renderWearBlock(label, describe("Wear: stack degradation", label), cell.stackDegradation);
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;

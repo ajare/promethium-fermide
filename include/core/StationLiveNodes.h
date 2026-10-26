@@ -338,7 +338,8 @@ namespace core
 		static auto& of(auto& settings) { return settings.fuelCells; }
 		static bool restoreInitial(FuelCellSettings const&, FuelCellSettings&) { return false; }
 		static bool topologyChanged(FuelCellSettings const& a, FuelCellSettings const& b)
-		{ return a.stackDegradation.has_value() != b.stackDegradation.has_value()
+		{ return a.chemistry != b.chemistry
+			|| a.stackDegradation.has_value() != b.stackDegradation.has_value()
 			|| a.catalystPoisoning.has_value() != b.catalystPoisoning.has_value(); }
 	};
 	template <> struct LiveNode<SabatierReactorSettings>

@@ -153,7 +153,7 @@ namespace core
 				using Settings = std::decay_t<decltype(next)>;
 				if (old != running.end() && LiveNode<Settings>::topologyChanged(old->authored, next))
 				{
-					if (diagnostic) *diagnostic = "Fault opt-ins and endpoints are frozen topology";
+					if (diagnostic) *diagnostic = "Chemistry, fault opt-ins and endpoints are frozen topology";
 					return false;
 				}
 			}

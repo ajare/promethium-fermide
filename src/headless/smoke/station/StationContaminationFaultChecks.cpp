@@ -198,6 +198,24 @@ void contaminationContracts(smoke::Context const&)
 	if (!run.advanceTo(0.25)) throw std::runtime_error("autonomous drive failed: "
 		+ (run.diagnostics().empty() ? std::string("no diagnostic") : run.diagnostics().back().message));
 	require(run.hasFaultReplayState(), "autonomous poisoning replay state absent");
+	// Poisoning is a feed-induced mode (not client-injectable). A running
+	// onset must survive both live update paths, even if the opt-in is removed
+	// in the same attempted edit to make the new chemistry otherwise valid.
+	auto const poisoned = run.snapshot();
+	require(!poisoned.fuelCells[0].activeFaults.empty(), "running poisoning setup missing");
+	auto escaped = s;
+	escaped.fuelCells[0].chemistry = core::FuelCellChemistry::SolidOxide;
+	escaped.fuelCells[0].catalystPoisoning.reset();
+	require(!run.updateSettings(escaped, &diagnostic)
+		&& diagnostic.find("topology") != std::string::npos, "whole update escaped running poisoning");
+	require(!run.updateNode<core::FuelCellSettings>("backup", [](auto& c) {
+		c.chemistry = core::FuelCellChemistry::Alkaline;
+	}, &diagnostic) && diagnostic.find("topology") != std::string::npos
+		&& run.snapshot() == poisoned && run.effectiveSettings() == s,
+		"targeted chemistry update escaped poisoning or partially mutated runtime");
+	require(run.updateNode<core::FuelCellSettings>("backup", [](auto& c) {
+		c.commandedOutputKW = 5;
+	}), "running fault blocked ordinary live tuning");
 	replay<core::YamlSerializer>(run); replay<core::BinarySerializer>(run);
 	auto changed = s; changed.waterTreatments[0].breakthrough = false;
 	require(!run.updateSettings(changed, &diagnostic), "whole settings changed frozen opt-in");

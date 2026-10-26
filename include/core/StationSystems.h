@@ -1664,11 +1664,14 @@ namespace core
 		double minEfficiency; // inclusive; the generic (0, 1] bound also applies
 		double maxEfficiency;
 		char const* efficiencyBand;
+		bool supportsCatalystPoisoning;
 	};
 	inline constexpr std::array<FuelCellChemistryProfile, 3> FuelCellChemistryProfiles{{
-		{0.0, 1.0, "(0, 1]"},
-		{0.35, 0.75, "[0.35, 0.75]"},
-		{0.35, 0.70, "[0.35, 0.70]"}}};
+		{0.0, 1.0, "(0, 1]", true},
+		{0.35, 0.75, "[0.35, 0.75]", true},
+		{0.35, 0.70, "[0.35, 0.70]", false}}};
+	inline constexpr char FuelCellPoisoningUnavailableReason[] =
+		"catalyst-poisoning fault mode does not exist for this solid oxide stack";
 	struct FuelCellSettings
 	{
 		std::string id;

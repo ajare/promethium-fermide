@@ -2408,6 +2408,8 @@ namespace
 			if (!std::isfinite(cell.ratedOutputKW) || cell.ratedOutputKW < 0.0)
 				return refuse(where + " rated electrical output must be finite and non-negative");
 			auto const& profile = FuelCellChemistryProfiles.at(static_cast<size_t>(cell.chemistry));
+			if (cell.catalystPoisoning && !profile.supportsCatalystPoisoning)
+				return refuse(where + ": " + FuelCellPoisoningUnavailableReason);
 			auto const bandDiagnostic = std::string("; admitted efficiency band ") + profile.efficiencyBand
 				+ " for chemistry " + FuelCellChemistryNames.at(static_cast<size_t>(cell.chemistry));
 			if (!std::isfinite(cell.efficiency) || cell.efficiency <= 0.0 || cell.efficiency > 1.0)

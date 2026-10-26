@@ -2230,6 +2230,14 @@ namespace
 							"chemistry selector did not display its admitted band");
 						REQ(window.draft().fuelCells[0].efficiency == beforeEdit.fuelCells[0].efficiency,
 							"chemistry selection silently changed efficiency");
+						auto const* poisonOptIn = ctx->ItemInfo("**/Fault: catalyst-poisoning##Fuel cell 0");
+						REQ(poisonOptIn->ID != 0
+							&& bool(poisonOptIn->InFlags & ImGuiItemFlags_Disabled)
+								== (option.second == core::FuelCellChemistry::SolidOxide),
+							"poison opt-in hidden or incorrectly enabled for chemistry");
+						if (option.second == core::FuelCellChemistry::SolidOxide)
+							REQ(driver.contains("catalyst-poisoning fault mode does not exist for this solid oxide stack"),
+								"disabled poison opt-in reason missing");
 						auto const chemistryDraft = window.draft();
 						driver.typeValue(ctx, "**/efficiency (0..1]##Fuel cell 0", "0.9");
 						ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);

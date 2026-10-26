@@ -1442,6 +1442,70 @@ namespace
 			std::string diagnostic;
 			return world.configureStationSystems(settings, false, &diagnostic);
 		};
+		// #893: use the public World update seam for the topology/parameter contrast.
+		double baselineWear = -1.0;
+		for (auto chemistry : {core::FuelCellChemistry::PEM, core::FuelCellChemistry::Alkaline,
+			core::FuelCellChemistry::SolidOxide})
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = baseStores();
+			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
+			settings.fuelCells = { fuelCell("cell") };
+			auto& cell = settings.fuelCells[0];
+			cell.chemistry = chemistry;
+			cell.stackDegradation = core::InstallationWearSettings{};
+			cell.stackDegradation->fadePerCalendarHour = 0.1;
+			core::World world("ChemistryLive", 2, 2); world.pauseSimulation(); world.finishBuild();
+			std::string diagnostic;
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			auto changed = settings;
+			changed.fuelCells[0].chemistry = chemistry == core::FuelCellChemistry::PEM
+				? core::FuelCellChemistry::Alkaline : core::FuelCellChemistry::PEM;
+			require(!world.updateStationSystemsSettings(changed, &diagnostic)
+				&& diagnostic.find("topology") != std::string::npos, "live chemistry edit accepted or unexplained");
+			changed = settings;
+			changed.fuelCells[0].commandedOutputKW *= 0.5;
+			require(world.updateStationSystemsSettings(changed, &diagnostic),
+				"ordinary parameter update refused at the same World seam");
+			world.resumeSimulation();
+			require(advanceSeconds(world, 2), "chemistry wear run failed");
+			auto const wear = world.getStationSystemsSnapshot().fuelCells[0].wear.wearFraction;
+			require(wear > 0 && (baselineWear < 0 || wear == baselineWear),
+				"stack-degradation differs across chemistries");
+			baselineWear = wear;
+			cell.catalystPoisoning = core::CatalystPoisoningSettings{};
+			core::World poisoned("ChemistryPoisoning", 2, 2); poisoned.pauseSimulation(); poisoned.finishBuild();
+			bool const admitted = poisoned.configureStationSystems(settings, false, &diagnostic);
+			require(chemistry == core::FuelCellChemistry::SolidOxide
+				? !admitted && diagnostic.find("fault mode does not exist for this") != std::string::npos
+				: admitted, "chemistry poison opt-in admission/diagnostic wrong");
+			if (admitted)
+			{
+				// This mode is intentionally feed-induced, never client-injectable.
+				require(!poisoned.injectStationFault("cell", "catalyst-poisoning",
+					{core::FaultCause::Kind::Editor, "chemistry test"}, &diagnostic),
+					"feed-induced mode unexpectedly became injectable");
+				core::ResourceCompositionSettings contaminant;
+				contaminant.moisture = 0.9; contaminant.otherMinerals = 1.0;
+				settings.stores[0].composition = contaminant;
+				core::World exposed("ExposedChemistry", 2, 2);
+				exposed.pauseSimulation(); exposed.finishBuild();
+				require(exposed.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+				exposed.resumeSimulation();
+				require(advanceSeconds(exposed, 2), "poison exposure advance failed");
+				auto const before = exposed.getStationSystemsSnapshot();
+				require(before.fuelCells[0].activeFaults.size() == 1,
+					"admitted chemistry failed to acquire poisoning");
+				changed = settings;
+				changed.fuelCells[0].chemistry = chemistry == core::FuelCellChemistry::PEM
+					? core::FuelCellChemistry::Alkaline : core::FuelCellChemistry::PEM;
+				require(!exposed.updateStationSystemsSettings(changed, &diagnostic)
+					&& diagnostic.find("topology") != std::string::npos
+					&& exposed.getStationSystemsSnapshot() == before,
+					"World chemistry retune escaped running poisoning");
+			}
+		}
 		// #891: chemistry crosses both persistence boundaries but remains
 		// inert at runtime, including every material/thermal refusal path.
 		require(core::FuelCellSettings{}.chemistry == core::FuelCellChemistry::PEM,

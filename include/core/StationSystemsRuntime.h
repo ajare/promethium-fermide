@@ -125,7 +125,7 @@ namespace core
 					*entry = before;
 					if (diagnostic)
 						*diagnostic = std::string(LiveNode<Settings>::nodeType) + " '"
-							+ std::string(nodeId) + "': identity and endpoints cannot be changed live";
+							+ std::string(nodeId) + "': identity, endpoints, chemistry and fault/wear opt-ins are frozen topology and cannot be changed live";
 					return false;
 				}
 			}
