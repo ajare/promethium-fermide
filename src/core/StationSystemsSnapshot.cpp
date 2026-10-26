@@ -327,6 +327,7 @@ namespace core
 		{
 			StationGeneratorSnapshot generatorResult;
 			generatorResult.id = generator.authored.id;
+			generatorResult.primeMover = StationGeneratorPrimeMoverNames.at(static_cast<size_t>(generator.authored.primeMover));
 			generatorResult.wear = { generator.authored.fouledInjector ? "fouled-injector" : "", generator.fouledInjector.fraction,
 				generator.fouledInjector.operatingHours, generator.fouledInjector.throughputKg, generator.fouledInjector.calendarHours,
 				generator.effectiveWearCapability(), generator.fouledInjector.fraction };

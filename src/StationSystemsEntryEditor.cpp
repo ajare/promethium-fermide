@@ -1457,6 +1457,14 @@ bool renderGeneratorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	ImGui::PushID(label.c_str());
 	bool removeRequested = false;
 	renderIdentity(label, generator.id);
+	if (ImGui::BeginCombo(describe("prime mover", label).c_str(),
+		core::StationGeneratorPrimeMoverLabels.at(static_cast<size_t>(generator.primeMover))))
+	{
+		for (size_t index = 0; index < core::StationGeneratorPrimeMoverNames.size(); ++index)
+			if (ImGui::Selectable(core::StationGeneratorPrimeMoverLabels[index], static_cast<size_t>(generator.primeMover) == index))
+				generator.primeMover = static_cast<core::StationGeneratorPrimeMover>(index);
+		ImGui::EndCombo();
+	}
 	renderRefCombo(describe("fuel store", label), generator.fuelStoreId, storeIds(draft), portIsOptional("Generator", "Fuel in"));
 	renderThermalClassCombo(draft, describe("thermal class", label), generator.thermalClass, generator.heatSinkId);
 	renderRefCombo(describe("heat sink", label), generator.heatSinkId, reservoirIds(draft), portIsOptional("Generator", "Heat out"));

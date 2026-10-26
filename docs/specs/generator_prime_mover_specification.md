@@ -1,11 +1,15 @@
 # Generator Prime Mover Specification
 
-Status: approved. Published as GitHub issue **#894** (`ready-for-agent`). Not yet
-implemented.
+Status: approved. Published as GitHub issue **#894** (`ready-for-agent`).
+Tracer bullet **#896** implemented: selector, optional-read/unconditional-write
+`primeMover`, conditional schema 125, snapshot and editor telemetry. Existing
+contracts and runtime arithmetic remain unchanged; constraints are not yet enforced.
+Release coverage includes `station-generatorPrimeMover`, `station-referenceBundled`
+and `station-editor-flow-power-chain` (selection, undo/redo, no rewritten dials).
 
-Tickets: **#896** (tracer bullet, no blockers) → **#897** (bands and ramp ceiling)
-and **#898** (injector gate and frozen topology), both blocked by #896 and
-independent of each other. Frontier: #896.
+Tickets: **#896** (tracer bullet) → **#897** (bands and ramp ceiling)
+and **#898** (injector gate and frozen topology), independent of each other.
+Frontier: #897 and #898.
 
 Related gap: **#895** — "Known modelling gap: fuelled Generators consume no oxygen
 and produce no CO2". Filed separately so the largest honest gap in this component

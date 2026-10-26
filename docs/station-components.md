@@ -311,6 +311,7 @@ Maintenance references.
 
 | Dial/value | Purpose |
 | --- | --- |
+| Prime mover | Piston engine (`reciprocating`, default), gas turbine (`gas-turbine`), or Stirling (`stirling`). Identity is saved and published; selecting a type never rewrites other dials. |
 | Rated output kW | Installed electrical ceiling; zero disables. |
 | Commanded output kW | Manual dispatch request, between zero and rated. Automatic dispatch may replace the operating command. |
 | Efficiency | Electrical output / consumed fuel energy, `(0,1]`; the remainder becomes waste heat. |
@@ -319,6 +320,13 @@ Maintenance references.
 | Shutdown heat kW / seconds | Continued heat after generation stops. |
 | Thermal class / heat sink | Waste, startup and shutdown heat destination. |
 | Maximum sink temperature °C | Cooling gate; the sink must be below it for qualified operation. |
+
+**Prime mover tracer bullet (#896):** all three types currently use the same
+authored energy contract and phase machine. Efficiency/ramp profile constraints
+and injector/frozen-topology gating are follow-ups (#897/#898), not yet enforced.
+The `primeMover` key is always saved; missing keys load as `reciprocating`.
+Non-default types require World/configuration schema 125; all-piston documents
+retain their existing conditional schema version. Unknown types are refused.
 
 **Example:** a backup Generator draws from a finite `kWh` fuel Store and rejects
 heat to a Reservoir/Radiator plant. A Battery supplies cranking energy and

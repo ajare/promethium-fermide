@@ -2211,6 +2211,27 @@ namespace
 					"inspector edit did not change the selected machine as one history entry");
 				driver.click(ctx, "Undo configuration"); ctx->Yield(3);
 				REQ(window.draft() == beforeEdit, "undo did not restore the machine inspector edit");
+				if (std::string_view(probe.type) == "Generator")
+				{
+					REQ(window.draft().generators[0].primeMover == core::StationGeneratorPrimeMover::Reciprocating,
+						"newly authored generator did not default to piston");
+					for (auto const& option : {std::pair{"Gas turbine", core::StationGeneratorPrimeMover::GasTurbine},
+						std::pair{"Stirling", core::StationGeneratorPrimeMover::Stirling}})
+					{
+						auto const* sibling = ctx->ItemInfo("**/rated output kW##Generator 0");
+						ctx->ItemClick(ImHashStr("prime mover##Generator 0", 0, sibling->ParentID)); ctx->Yield(2);
+						driver.click(ctx, (std::string("**/") + option.first).c_str()); ctx->Yield(3);
+						auto expected = beforeEdit;
+						expected.generators[0].primeMover = option.second;
+						REQ(window.draft() == expected && window.draftHistory().undoCount() == historyCount + 1,
+							"prime mover selector rewrote authored values or did not make one history entry");
+						driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+						REQ(window.draft() == beforeEdit, "undo did not restore prime mover");
+						driver.click(ctx, "Redo configuration"); ctx->Yield(3);
+						REQ(window.draft() == expected, "redo did not restore prime mover selection");
+						driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+					}
+				}
 				if (std::string_view(probe.type) == "Fuel cell")
 				{
 					REQ(window.draft().fuelCells[0].chemistry == core::FuelCellChemistry::PEM,

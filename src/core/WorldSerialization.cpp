@@ -1078,7 +1078,9 @@ namespace core
 		// Chemistry is a schema-123 label-only extension, alongside thermal bodies.
 		auto const nonPem = std::any_of(mStationSystemsSettings.fuelCells.begin(), mStationSystemsSettings.fuelCells.end(),
 			[](auto const& cell) { return cell.chemistry != FuelCellChemistry::PEM; });
-		serializer.writeUint32("version", stationHasPowerBusAuthoring(mStationSystemsSettings) ? 124 : (bodies || nonPem) ? 123 : !mStationSystemsSettings.monitors.empty() ? 122 : machineWear ? 121 : atmosphereFaults ? 120 : contamination ? 119 : powerSources ? 118
+		auto const nonReciprocating = std::any_of(mStationSystemsSettings.generators.begin(), mStationSystemsSettings.generators.end(),
+			[](auto const& generator) { return generator.primeMover != StationGeneratorPrimeMover::Reciprocating; });
+		serializer.writeUint32("version", nonReciprocating ? 125 : stationHasPowerBusAuthoring(mStationSystemsSettings) ? 124 : (bodies || nonPem) ? 123 : !mStationSystemsSettings.monitors.empty() ? 122 : machineWear ? 121 : atmosphereFaults ? 120 : contamination ? 119 : powerSources ? 118
 			: thermalPlant ? 117 : wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);

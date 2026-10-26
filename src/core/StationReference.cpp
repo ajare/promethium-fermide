@@ -690,6 +690,7 @@ namespace core
 				serializer.beginMap("");
 				writePowerMembership(serializer, generator, explicitBuses);
 				serializer.writeString("id", generator.id);
+				serializer.writeString("primeMover", StationGeneratorPrimeMoverNames.at(static_cast<size_t>(generator.primeMover)));
 				if (generator.fouledInjector) writeWearBlock(serializer, "fouledInjector", *generator.fouledInjector);
 				serializer.writeString("fuelStoreId", generator.fuelStoreId);
 				serializer.writeString("thermalClass", generator.thermalClass);
@@ -2129,6 +2130,17 @@ namespace core
 				serializer.beginMap("");
 				GeneratorSettings generator;
 				generator.id = serializer.readString("id");
+				if (serializer.hasField("primeMover"))
+				{
+					auto const primeMover = serializer.readString("primeMover");
+					auto const found = std::find(StationGeneratorPrimeMoverNames.begin(), StationGeneratorPrimeMoverNames.end(), primeMover);
+					if (found == StationGeneratorPrimeMoverNames.end())
+						throw SerializationException("Station generator '" + generator.id + "' has unknown prime mover '" + primeMover
+							+ "'; declared prime movers are: reciprocating, gas-turbine, stirling");
+					generator.primeMover = static_cast<StationGeneratorPrimeMover>(found - StationGeneratorPrimeMoverNames.begin());
+					if (version < 125 && generator.primeMover != StationGeneratorPrimeMover::Reciprocating)
+						throw SerializationException("Non-reciprocating generator prime mover requires schema 125");
+				}
 				readMachineWear(serializer, "fouledInjector", version, generator.fouledInjector);
 				generator.fuelStoreId = serializer.readString("fuelStoreId");
 				generator.thermalClass = serializer.readString("thermalClass");

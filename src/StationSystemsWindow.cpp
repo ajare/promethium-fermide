@@ -2158,8 +2158,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		case core::StationTransferStatus::Rejected: status = "rejected"; break;
 		case core::StationTransferStatus::Idle: break;
 		}
-		ImGui::Text("%s (%s) fuel %s -> sink %s: %s / %s | output %.3f of commanded %.3f kW (rated %.3f, ramp %.3f kW/s, eff %.2f) | fuel %.4f kWh, waste %.3f kW | startup %.3f of %.3f kW (%.1f of %.1f kJ) | decay %.3f kW",
-			generator.id.c_str(), generator.thermalClass.c_str(), generator.fuelStoreId.c_str(),
+		ImGui::Text("%s [%s] (%s) fuel %s -> sink %s: %s / %s | output %.3f of commanded %.3f kW (rated %.3f, ramp %.3f kW/s, eff %.2f) | fuel %.4f kWh, waste %.3f kW | startup %.3f of %.3f kW (%.1f of %.1f kJ) | decay %.3f kW",
+			generator.id.c_str(), generator.primeMover.c_str(), generator.thermalClass.c_str(), generator.fuelStoreId.c_str(),
 			generator.heatSinkId.c_str(), phase, status,
 			generator.outputKW, generator.commandedOutputKW, generator.ratedOutputKW,
 			generator.maxRampKWPerSecond, generator.efficiency,

@@ -1016,9 +1016,17 @@ namespace core
 	// instantly a cold generator. This models the authored heat and energy
 	// contract of a fuelled source; it claims no reactor physics and no
 	// nuclear qualification of any kind.
+	// Prime mover labels are authored identity only (#896). Conversion and
+	// phase behaviour continue to use the installation's authored contract.
+	enum class StationGeneratorPrimeMover : std::uint8_t { Reciprocating, GasTurbine, Stirling };
+	inline constexpr std::array<char const*, 3> StationGeneratorPrimeMoverNames{
+		"reciprocating", "gas-turbine", "stirling"};
+	inline constexpr std::array<char const*, 3> StationGeneratorPrimeMoverLabels{
+		"Piston engine", "Gas turbine", "Stirling"};
 	struct GeneratorSettings
 	{
 		std::string id;
+		StationGeneratorPrimeMover primeMover{StationGeneratorPrimeMover::Reciprocating};
 		std::string fuelStoreId;      // energy-unit Resource store: the fuel inventory
 		std::string thermalClass;     // service class of the generator's waste heat
 		std::string heatSinkId;       // reservoir accepting waste, startup and decay heat
@@ -3332,6 +3340,7 @@ namespace core
 	struct StationGeneratorSnapshot
 	{
 		std::string id;
+		std::string primeMover{"reciprocating"};
 		std::string fuelStoreId;
 		std::string thermalClass;
 		std::string heatSinkId;

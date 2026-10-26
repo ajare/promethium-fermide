@@ -1,5 +1,7 @@
 #include "StationGenerationChecks.h"
 #include "StationRig.h"
+#include "core/BinarySerializer.h"
+#include "core/StationConfigurationDocument.h"
 #include <limits>
 
 namespace
@@ -1856,10 +1858,148 @@ namespace
 			core::setStationSystemsSourceLoader({});
 		}
 	}
+	// #896: only identity crosses this plumbing. Compare complete published
+	// snapshots (apart from that identity), not private integrator/profile state.
+	void generatorPrimeMover(smoke::Context const&)
+	{
+		require(core::GeneratorSettings{}.primeMover == core::StationGeneratorPrimeMover::Reciprocating,
+			"new generators must default to piston");
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1;
+		settings.stores = {{"fuel", "kWh", 1, 1, 0}};
+		core::ThermalReservoirSettings sink;
+		sink.id = "sink"; sink.thermalClass = "generation";
+		sink.heatCapacityKJPerK = 10000; sink.startingTemperatureC = 20;
+		sink.minTemperatureC = -50; sink.maxTemperatureC = 200;
+		settings.thermalReservoirs = {sink};
+		core::GeneratorSettings generator;
+		generator.id = "gen"; generator.fuelStoreId = "fuel";
+		generator.heatSinkId = "sink"; generator.thermalClass = "generation";
+		generator.ratedOutputKW = 5; generator.commandedOutputKW = 5;
+		generator.efficiency = 0.35; generator.maxRampKWPerSecond = 2;
+		generator.startupPowerKW = 1; generator.startupSeconds = 2;
+		generator.shutdownHeatKW = 1; generator.shutdownSeconds = 4;
+		settings.generators = {generator};
+		core::ProfileSettings sun; sun.constantLevel = 1;
+		settings.solarArrays = {{"sun", 2, sun}};
+		std::string diagnostic;
+		for (auto const& [primeMover, label] : {
+			std::pair{core::StationGeneratorPrimeMover::Reciprocating, "reciprocating"},
+			std::pair{core::StationGeneratorPrimeMover::GasTurbine, "gas-turbine"},
+			std::pair{core::StationGeneratorPrimeMover::Stirling, "stirling"}})
+		{
+			settings.generators[0].primeMover = primeMover;
+			bool const piston = primeMover == core::StationGeneratorPrimeMover::Reciprocating;
+			core::StationConfigurationDocument document, loaded;
+			document.settings = settings;
+			auto const text = core::serializeStationConfiguration(document);
+			auto const field = std::string("primeMover: ") + label;
+			auto const key = text.find(field);
+			require(key != std::string::npos, "configuration omitted prime mover");
+			require(text.find(piston ? "schemaVersion: 111" : "schemaVersion: 125") != std::string::npos,
+				"configuration prime mover schema floor wrong");
+			require(core::parseStationConfiguration(text, loaded, &diagnostic)
+				&& loaded.settings == settings && core::serializeStationConfiguration(loaded) == text,
+				"prime mover configuration round trip unstable");
+			auto bad = text;
+			bad.replace(key, field.size(), "primeMover: mystery");
+			require(!core::parseStationConfiguration(bad, loaded, &diagnostic)
+				&& diagnostic.find("gen") != std::string::npos && diagnostic.find("mystery") != std::string::npos
+				&& diagnostic.find("reciprocating, gas-turbine, stirling") != std::string::npos
+				&& loaded.settings == settings, "unknown prime mover not refused atomically with declared choices");
+			if (piston)
+			{
+				auto legacy = text;
+				auto const start = legacy.rfind('\n', key) + 1;
+				legacy.erase(start, legacy.find('\n', key) - start + 1);
+				require(core::parseStationConfiguration(legacy, loaded, &diagnostic) && loaded.settings == settings,
+					"absent prime mover did not preserve legacy settings");
+			}
+			else
+			{
+				auto old = text;
+				old.replace(old.find("schemaVersion: 125"), 18, "schemaVersion: 124");
+				require(!core::parseStationConfiguration(old, loaded, &diagnostic)
+					&& diagnostic.find("schema 125") != std::string::npos && loaded.settings == settings,
+					"non-piston prime mover accepted below schema floor");
+			}
+			for (bool binary : {false, true})
+			{
+				core::World original("PrimeMoverPersistence", 2, 2), restored("Restored", 2, 2);
+				original.pauseSimulation(); original.finishBuild();
+				require(original.configureStationSystems(settings, false, &diagnostic), "prime mover configure failed");
+				auto encode = [&](core::World const& world) {
+					auto writer = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+						: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+					core::SerializationWorkData work; world.serialize(*writer, work); writer->serialize();
+					return binary ? static_cast<core::BinarySerializer&>(*writer).getSerializedString()
+						: static_cast<core::YamlSerializer&>(*writer).getSerializedString();
+				};
+				auto const data = encode(original);
+				if (!binary) require(data.find(piston ? "version: 111" : "version: 125") != std::string::npos,
+					"World prime mover schema floor wrong");
+				auto reader = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+					: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+				reader->deserialize(); core::SerializationWorkData work;
+				require(restored.deserialize(*reader, work) && restored.getStationSystemsSettings() == settings
+					&& encode(restored) == data, "prime mover World round trip unstable");
+				original.resumeSimulation(); restored.resumeSimulation();
+				require(advanceSeconds(original, 10) && advanceSeconds(restored, 10)
+					&& original.getStationSystemsSnapshot() == restored.getStationSystemsSnapshot(),
+					"prime mover persistence changed simulation");
+			}
+			for (int scenario = 0; scenario < 6; ++scenario)
+			{
+				auto candidate = settings;
+				if (scenario == 1) candidate.stores[0].startingQualified = 0.01; // exhaustion and after-run
+				if (scenario == 2) candidate.thermalReservoirs[0].startingTemperatureC = 90; // cooling gate
+				if (scenario == 3) candidate.solarArrays.clear(); // unfunded crank
+				if (scenario == 4) candidate.generators[0].commandedOutputKW = 0;
+				if (scenario == 5) candidate.generators[0].ratedOutputKW = candidate.generators[0].commandedOutputKW = 0;
+				auto baselineSettings = candidate;
+				baselineSettings.generators[0].primeMover = core::StationGeneratorPrimeMover::Reciprocating;
+				core::World baseline("PrimeMoverInert", 2, 2), changed("PrimeMoverInert", 2, 2);
+				baseline.pauseSimulation(); baseline.finishBuild(); changed.pauseSimulation(); changed.finishBuild();
+				require(baseline.configureStationSystems(baselineSettings, false, &diagnostic)
+					&& changed.configureStationSystems(candidate, false, &diagnostic), "prime mover runtime configure failed");
+				baseline.resumeSimulation(); changed.resumeSimulation();
+				bool sawStarting = false, sawRunning = false, sawShutdown = false;
+				for (int second = 0; second < 20; ++second)
+				{
+					require(advanceSeconds(baseline, 1) && advanceSeconds(changed, 1), "prime mover runtime advance failed");
+					auto snap = changed.getStationSystemsSnapshot();
+					auto& live = snap.power.generators[0];
+					require(live.primeMover == label, "published prime mover wrong");
+					sawStarting |= live.phase == core::StationGeneratorPhase::Starting;
+					sawRunning |= live.phase == core::StationGeneratorPhase::Running;
+					sawShutdown |= live.phase == core::StationGeneratorPhase::Shutdown;
+					require(std::abs(live.fuelEnergyKJ - live.electricalKJ - live.wasteHeatKJ) < 1e-6,
+						"prime mover fuel ledger did not close");
+					live.primeMover = "reciprocating";
+					require(snap == baseline.getStationSystemsSnapshot(),
+						"prime mover changed phase, output, limiter, fuel, heat or power audit");
+				}
+				if (scenario == 0) require(sawStarting && sawRunning, "inertness did not exercise starting and running");
+				if (scenario == 1) require(sawShutdown, "inertness did not exercise after-run heat");
+			}
+		}
+		core::World world("PrimeMoverInvalid", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		require(world.configureStationSystems(settings, false, &diagnostic), "invalid enum baseline failed");
+		auto const before = world.getStationSystemsSnapshot();
+		auto bad = settings;
+		bad.generators[0].primeMover = static_cast<core::StationGeneratorPrimeMover>(255);
+		require(!world.configureStationSystems(bad, true, &diagnostic)
+			&& diagnostic.find("reciprocating, gas-turbine, stirling") != std::string::npos
+			&& world.getStationSystemsSettings() == settings && world.getStationSystemsSnapshot() == before,
+			"invalid prime mover enum mutated World or escaped validation");
+	}
 }
 
 void registerStationGenerationChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"chillers", chillers});
 	checks.push_back({"generators", generators});
+	checks.push_back({"generatorPrimeMover", generatorPrimeMover});
 }

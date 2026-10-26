@@ -402,6 +402,10 @@
           "kind": "settings",
           "rows": [
             {
+              "name": "Prime mover",
+              "description": "Piston engine (reciprocating, default), gas turbine (gas-turbine), or Stirling (stirling). Identity is saved and published; selecting a type never rewrites other dials."
+            },
+            {
               "name": "Rated output kW",
               "description": "Installed electrical ceiling; zero disables."
             },
@@ -434,6 +438,14 @@
               "description": "Cooling gate; the sink must be below it for qualified operation."
             }
           ]
+        },
+        {
+          "kind": "heading",
+          "text": "Prime mover tracer bullet (#896)"
+        },
+        {
+          "kind": "paragraph",
+          "text": "all three types currently use the same authored energy contract and phase machine. Efficiency/ramp profile constraints and injector/frozen-topology gating are follow-ups (#897/#898), not yet enforced. The primeMover key is always saved; missing keys load as reciprocating. Non-default types require World/configuration schema 125; all-piston documents retain their existing conditional schema version. Unknown types are refused."
         },
         {
           "kind": "heading",

@@ -286,7 +286,8 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		auto p = find(s.power.generators, id); if (!p) return {}; state(out, *p);
 		static constexpr char const* phases[]{"Stopped", "Starting", "Running", "Shutdown"};
 		out.values = {std::string("Phase ") + phases[static_cast<size_t>(p->phase)],
-			"Output " + quantity(p->outputKW, "kW"), "Fuel " + rate(p->fuelDrawKWh, "kWh")};
+			"Output " + quantity(p->outputKW, "kW"), "Fuel " + rate(p->fuelDrawKWh, "kWh"),
+			"Prime mover " + p->primeMover};
 		if (p->phase == core::StationGeneratorPhase::Starting)
 			out.values[2] = "Startup " + percent(p->startupRequiredKJ > 0 ? p->startupReceivedKJ / p->startupRequiredKJ : 0);
 		out.ports["Power in"] = quantity(p->startupDrawKW, "kW");

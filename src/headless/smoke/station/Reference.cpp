@@ -178,6 +178,34 @@ namespace
 			("re-parsing the packaged reference text failed: " + diagnostic).c_str());
 		require(reparsed.settings == reference.settings,
 			"re-parsing the packaged reference text produced different settings");
+		// #896: the packaged generators must remain a missing-key legacy fixture.
+		require(core::bundledStationReferenceText().find("primeMover:") == std::string::npos
+			&& !reference.settings.generators.empty(), "reference no longer exercises absent prime mover");
+		for (auto const& generator : reference.settings.generators)
+			require(generator.primeMover == core::StationGeneratorPrimeMover::Reciprocating,
+				"legacy reference did not default to piston");
+		for (auto const& [primeMover, label] : {
+			std::pair{core::StationGeneratorPrimeMover::Reciprocating, "reciprocating"},
+			std::pair{core::StationGeneratorPrimeMover::GasTurbine, "gas-turbine"},
+			std::pair{core::StationGeneratorPrimeMover::Stirling, "stirling"}})
+		{
+			core::World baseline("ReferencePrimeMover", 2, 2), labelled("ReferencePrimeMover", 2, 2);
+			baseline.pauseSimulation(); baseline.finishBuild(); labelled.pauseSimulation(); labelled.finishBuild();
+			auto changed = reference.settings;
+			for (auto& generator : changed.generators) generator.primeMover = primeMover;
+			require(baseline.configureStationSystems(reference.settings, false, &diagnostic)
+				&& labelled.configureStationSystems(changed, false, &diagnostic), "reference prime mover setup refused");
+			baseline.resumeSimulation(); labelled.resumeSimulation();
+			require(smoke::station::advanceSeconds(baseline, 30) && smoke::station::advanceSeconds(labelled, 30),
+				"reference prime mover run failed");
+			auto snapshot = labelled.getStationSystemsSnapshot();
+			for (auto& generator : snapshot.power.generators)
+			{
+				require(generator.primeMover == label, "reference snapshot prime mover missing");
+				generator.primeMover = "reciprocating";
+			}
+			require(snapshot == baseline.getStationSystemsSnapshot(), "prime mover changed reference simulation");
+		}
 		// #891: retain the reference as a genuine missing-key legacy fixture.
 		require(core::bundledStationReferenceText().find("chemistry:") == std::string::npos
 			&& !reference.settings.fuelCells.empty(), "reference no longer exercises absent chemistry");

@@ -1879,6 +1879,8 @@ namespace
 		for (auto const& generator : settings.generators) try
 		{
 			auto const where = "Station generator '" + generator.id + "'";
+			if (static_cast<size_t>(generator.primeMover) >= StationGeneratorPrimeMoverNames.size())
+				return refuse(where + " has unknown prime mover; declared prime movers are: reciprocating, gas-turbine, stirling");
 			if (generator.id.empty()) return refuse("Station generator id must not be empty");
 			if (generator.id.size() > MaxStationStoreIdLength)
 				return refuse("Station generator id exceeds "
