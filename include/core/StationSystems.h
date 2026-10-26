@@ -1029,11 +1029,14 @@ namespace core
 		double maxEfficiency;
 		char const* efficiencyBand;
 		std::optional<double> maxRampKWPerSecond; // absent = legacy unbounded
+		bool supportsInjectorFouling;
 	};
 	inline constexpr std::array<GeneratorPrimeMoverProfile, 3> GeneratorPrimeMoverProfiles{{
-		{0.0, 1.0, "(0, 1]", std::nullopt},
-		{0.15, 0.38, "[0.15, 0.38]", 200.0},
-		{0.20, 0.42, "[0.20, 0.42]", 30.0}}};
+		{0.0, 1.0, "(0, 1]", std::nullopt, true},
+		{0.15, 0.38, "[0.15, 0.38]", 200.0, true},
+		{0.20, 0.42, "[0.20, 0.42]", 30.0, false}}};
+	inline constexpr char GeneratorInjectorFoulingUnavailableReason[] =
+		"fouled-injector wear mode does not exist for this Stirling machine: it has no injector; combustion is external and the working fluid is sealed";
 	struct GeneratorSettings
 	{
 		std::string id;

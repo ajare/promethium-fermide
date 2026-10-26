@@ -258,7 +258,8 @@ namespace core
 		static bool restoreInitial(GeneratorSettings const&, GeneratorSettings&) { return false; }
 		static bool topologyChanged(GeneratorSettings const& a, GeneratorSettings const& b)
 		{
-			return a.fouledInjector.has_value() != b.fouledInjector.has_value() || a.failedStart != b.failedStart;
+			return a.primeMover != b.primeMover
+				|| a.fouledInjector.has_value() != b.fouledInjector.has_value() || a.failedStart != b.failedStart;
 		}
 	};
 	template <> struct LiveNode<AtmosphereSettings>

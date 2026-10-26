@@ -3,13 +3,20 @@
 Status: approved. Published as GitHub issue **#894** (`ready-for-agent`).
 Tracer bullet **#896** implemented: selector, optional-read/unconditional-write
 `primeMover`, conditional schema 125, snapshot and editor telemetry. Existing
-contracts and runtime arithmetic remain unchanged; constraints are not yet enforced.
+contracts and runtime arithmetic remain unchanged. **#897** enforces the profile
+bands and ramp ceilings; **#898** gates injector wear and freezes prime mover on
+both whole-settings and targeted live updates, including active Faults and banked
+wear. Stirling's injector opt-in remains visible, disabled with its reason.
+Release regression: `station-generatorPrimeMoverFaultGate` covers authoring and
+live World/runtime seams, accumulator-orphan refusal, and identical repeated
+failed starts across all archetypes; `station-editor-flow-power-chain` covers
+the disabled opt-in and explanation.
 Release coverage includes `station-generatorPrimeMover`, `station-referenceBundled`
 and `station-editor-flow-power-chain` (selection, undo/redo, no rewritten dials).
 
 Tickets: **#896** (tracer bullet) → **#897** (bands and ramp ceiling)
 and **#898** (injector gate and frozen topology), independent of each other.
-Frontier: #897 and #898.
+All three tickets implemented.
 
 Related gap: **#895** — "Known modelling gap: fuelled Generators consume no oxygen
 and produce no CO2". Filed separately so the largest honest gap in this component

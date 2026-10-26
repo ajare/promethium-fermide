@@ -2232,6 +2232,14 @@ namespace
 							? "Admitted efficiency [0.15, 0.38]; ramp ceiling 200 kW/s"
 							: "Admitted efficiency [0.20, 0.42]; ramp ceiling 30 kW/s"),
 							"prime mover limits hint missing");
+						auto const* injectorOptIn = ctx->ItemInfo("**/Wear: fouled injector##Generator 0");
+						REQ(injectorOptIn->ID != 0
+							&& bool(injectorOptIn->InFlags & ImGuiItemFlags_Disabled)
+								== (option.second == core::StationGeneratorPrimeMover::Stirling),
+							"injector opt-in hidden or incorrectly enabled for prime mover");
+						if (option.second == core::StationGeneratorPrimeMover::Stirling)
+							REQ(driver.contains(core::GeneratorInjectorFoulingUnavailableReason),
+								"disabled injector opt-in reason missing");
 						for (auto const& field : {std::pair{"efficiency##Generator 0", "0.9"},
 							std::pair{"ramp kW per second##Generator 0", "100000"}})
 						{

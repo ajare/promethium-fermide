@@ -226,7 +226,7 @@ namespace core
 				[&](auto const& generator) { return generator.authored.id == next.id; });
 			if (old != s.generators.end() && LiveNode<GeneratorSettings>::topologyChanged(old->authored, next))
 			{
-				if (diagnostic) *diagnostic = "Generator '" + next.id + "': failed-start opt-in is frozen topology";
+				if (diagnostic) *diagnostic = "Generator '" + next.id + "': prime mover and fault/wear opt-ins are frozen topology";
 				return false;
 			}
 		}

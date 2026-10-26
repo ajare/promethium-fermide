@@ -490,6 +490,98 @@ void powerSourceRunaway(smoke::Context const&)
 // The failed start: the crank runs, its energy dissipates into the sink
 // as accounted heat, and the attempt is zeroed - the machine never
 // reaches Running and delivers nothing.
+void generatorPrimeMoverFaultGate(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	std::string diagnostic;
+	auto base = powerSourceStation();
+	base.generators[0].efficiency = 0.35;
+	base.generators[0].maxRampKWPerSecond = 20;
+	for (auto mover : {core::StationGeneratorPrimeMover::Reciprocating,
+		core::StationGeneratorPrimeMover::GasTurbine, core::StationGeneratorPrimeMover::Stirling})
+	{
+		auto settings = base;
+		settings.generators[0].primeMover = mover;
+		auto worn = settings;
+		worn.generators[0].fouledInjector = core::InstallationWearSettings{0, 0.1, 0, 0.01, 1};
+		bool const stirling = mover == core::StationGeneratorPrimeMover::Stirling;
+		core::World world("PrimeMoverFaultGate", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		require(world.configureStationSystems(settings, false, &diagnostic), "World setup refused");
+		auto const worldBefore = world.getStationSystemsSnapshot();
+		require(world.configureStationSystems(worn, true, &diagnostic) != stirling,
+			"configured World did not enforce injector gate");
+		if (stirling) require(world.getStationSystemsSettings() == settings
+			&& world.getStationSystemsSnapshot() == worldBefore, "injector gate partially mutated World");
+		auto worldChange = world.getStationSystemsSettings();
+		worldChange.generators[0].primeMover = stirling ? core::StationGeneratorPrimeMover::Reciprocating
+			: core::StationGeneratorPrimeMover::GasTurbine;
+		if (mover == core::StationGeneratorPrimeMover::GasTurbine)
+			worldChange.generators[0].primeMover = core::StationGeneratorPrimeMover::Reciprocating;
+		require(!world.updateStationSystemsSettings(worldChange, &diagnostic)
+			&& diagnostic.find("topology") != std::string::npos, "World live path changed prime mover");
+		worldChange = world.getStationSystemsSettings(); worldChange.generators[0].commandedOutputKW = 10;
+		require(world.updateStationSystemsSettings(worldChange, &diagnostic), "World live path blocked ordinary tuning");
+		require(core::validateStationSystemsSettings(worn, diagnostic) != stirling,
+			("injector Wear gate disagrees with prime mover: " + diagnostic).c_str());
+		if (stirling) require(diagnostic.find(core::GeneratorInjectorFoulingUnavailableReason) != std::string::npos,
+			"Stirling refusal omitted absent injector explanation");
+		else
+		{
+			core::StationSystemsRuntime wearRun(worn, 0.25f);
+			require(wearRun.advanceTo(1), "injector accumulator drive failed");
+			auto const before = wearRun.snapshot();
+			require(before.power.generators[0].wear.calendarHours > 0, "injector accumulator did not age");
+			auto orphan = worn;
+			orphan.generators[0].primeMover = core::StationGeneratorPrimeMover::Stirling;
+			orphan.generators[0].fouledInjector.reset();
+			require(!wearRun.updateSettings(orphan, &diagnostic)
+				&& !wearRun.updateNode<core::GeneratorSettings>("gen", [](auto& g) {
+					g.primeMover = core::StationGeneratorPrimeMover::Stirling;
+					g.fouledInjector.reset();
+				}, &diagnostic) && wearRun.snapshot() == before && wearRun.effectiveSettings() == worn,
+				"switch to Stirling orphaned an injector accumulator");
+		}
+		core::StationSystemsRuntime run(settings, 0.25f);
+		auto changed = settings;
+		changed.generators[0].primeMover = stirling ? core::StationGeneratorPrimeMover::Reciprocating
+			: core::StationGeneratorPrimeMover::Stirling;
+		auto const initial = run.snapshot();
+		require(!run.updateSettings(changed, &diagnostic) && diagnostic.find("topology") != std::string::npos
+			&& !run.updateNode<core::GeneratorSettings>("gen", [&](auto& g) {
+				g.primeMover = changed.generators[0].primeMover;
+			}, &diagnostic) && run.snapshot() == initial && run.effectiveSettings() == settings,
+			"live prime mover change was not refused atomically");
+		require(run.injectFault("gen", "failed-start", {}) && run.advanceTo(1), "failed-start setup failed");
+		auto const faulted = run.snapshot();
+		require(!faulted.power.generators[0].activeFaults.empty(), "failed-start onset missing");
+		require(!run.updateSettings(changed, &diagnostic)
+			&& !run.updateNode<core::GeneratorSettings>("gen", [&](auto& g) {
+				g.primeMover = changed.generators[0].primeMover;
+			}, &diagnostic) && run.snapshot() == faulted && run.effectiveSettings() == settings,
+			"prime mover retune escaped failed-start");
+		changed = settings; changed.generators[0].commandedOutputKW = 20;
+		require(run.updateSettings(changed, &diagnostic)
+			&& run.updateNode<core::GeneratorSettings>("gen", [](auto& g) { g.maxSinkTemperatureC = 89; }),
+			"frozen prime mover incorrectly blocked ordinary live tuning");
+		core::StationSystemsRuntime reference(base, 0.25f);
+		require(reference.injectFault("gen", "failed-start", {}) && reference.advanceTo(1)
+			&& reference.updateNode<core::GeneratorSettings>("gen", [](auto& g) {
+				g.commandedOutputKW = 20; g.maxSinkTemperatureC = 89;
+			}), "failed-start reference setup failed");
+		for (double time : {1.25, 2.0, 3.0})
+		{
+			require(run.advanceTo(time) && reference.advanceTo(time), "failed-start comparison drive failed");
+			auto result = run.snapshot();
+			result.power.generators[0].primeMover = "reciprocating";
+			require(result == reference.snapshot(), "failed-start behaviour differs by prime mover");
+		}
+		require(run.snapshot().power.generators[0].startupHeatKJ == 20
+			&& run.snapshot().power.generators[0].electricalKJ == 0,
+			"failed-start did not repeat its accounted crank without generation");
+	}
+}
+
 void powerSourceFailedStart(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
@@ -821,6 +913,7 @@ void registerStationPowerSourceFaultChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"powerSourceInjection", powerSourceInjection});
 	checks.push_back({"powerSourceRunaway", powerSourceRunaway});
 	checks.push_back({"powerSourceFailedStart", powerSourceFailedStart});
+	checks.push_back({"generatorPrimeMoverFaultGate", generatorPrimeMoverFaultGate});
 	checks.push_back({"powerSourceReplay", powerSourceReplay});
 	checks.push_back({"powerSourceOptIn", powerSourceOptIn});
 	checks.push_back({"powerSourceLiveTuning", powerSourceLiveTuning});

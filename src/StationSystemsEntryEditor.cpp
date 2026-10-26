@@ -1489,7 +1489,12 @@ bool renderGeneratorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	// parameters beyond the opt-in: the failed crank is the machine's own
 	// authored crank.
 	ImGui::Checkbox(describe("Fault: failed-start", label).c_str(), &generator.failedStart);
+	// Keep unsupported wear visible and preserve any authored block for validation.
+	ImGui::BeginDisabled(!profile.supportsInjectorFouling);
 	renderWearBlock(label, describe("Wear: fouled injector", label), generator.fouledInjector);
+	ImGui::EndDisabled();
+	if (!profile.supportsInjectorFouling)
+		ImGui::TextDisabled("%s", core::GeneratorInjectorFoulingUnavailableReason);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
 		removeRequested = true;

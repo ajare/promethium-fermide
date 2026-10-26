@@ -1916,6 +1916,8 @@ namespace
 			if (!std::isfinite(generator.ratedOutputKW) || generator.ratedOutputKW < 0.0)
 				return refuse(where + " installed capacity must be finite and non-negative (0 disables the generator)");
 			auto const& profile = GeneratorPrimeMoverProfiles.at(static_cast<size_t>(generator.primeMover));
+			if (generator.fouledInjector && !profile.supportsInjectorFouling)
+				return refuse(where + ": " + GeneratorInjectorFoulingUnavailableReason);
 			auto const moverDiagnostic = std::string(" for prime mover ")
 				+ StationGeneratorPrimeMoverNames.at(static_cast<size_t>(generator.primeMover));
 			auto const bandDiagnostic = std::string("; admitted efficiency band ")
