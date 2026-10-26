@@ -1793,6 +1793,13 @@ bool renderHeatSourceEntry(core::StationSystemsSettings& draft,
 	renderRefCombo(describe("target reservoir", label), source.targetReservoirId, reservoirIds(draft), false);
 	renderThermalClassCombo(draft, describe("thermal class", label), source.thermalClass, source.targetReservoirId);
 	renderRangedDouble(describe("rated output kW", label), source.ratedOutputKW, 0.0, 0.0, "%.3f");
+	ImGui::Checkbox(describe("throttleable", label).c_str(), &source.throttleable);
+	ImGui::BeginDisabled(!source.throttleable);
+	auto command = source.commandedOutputKW.value_or(source.ratedOutputKW);
+	renderRangedDouble(describe("commanded output kW", label), command, 0.0, 0.0, "%.3f");
+	if (command != source.commandedOutputKW.value_or(source.ratedOutputKW)) source.commandedOutputKW = command;
+	ImGui::EndDisabled();
+	if (!source.throttleable) ImGui::TextDisabled("Non-throttleable source: command ignored; delivers its decayed rating.");
 	renderWearBlock(label, describe("Wear: decay", label), source.wear);
 	ImGui::PopID();
 	return false;

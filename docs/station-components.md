@@ -454,8 +454,15 @@ It produces no electricity and draws no power; conversion belongs to a Heat engi
 Primary heat input is reported separately from environmental absorption and waste
 heat in the reservoir ledger and station totals. Output is constant unless the
 source opts into the shared `wear` block. Its exponential half-life and initial
-age can model an isotope; linear Wear can compose with that decay. There is no
-dispatch throttle yet.
+age can model an isotope; linear Wear can compose with that decay. By default a
+source is non-throttleable: commands are ignored and it produces its decayed rating.
+A throttleable source produces the lesser of its command and decayed rating; an
+absent command means full rated. Throttleability and Wear presence are frozen on
+the live-update path, while commands, rating and decay rates remain live-tunable.
+Rate changes never reprice fade already accumulated. Heat sources currently have
+no injectable Fault modes; these topology refusals apply unconditionally.
+Throttle fields use schema 129 only when present; legacy source documents keep
+their previous schema and non-throttleable behaviour.
 
 **Ports:** **Heat out** joins one compatible Reservoir's **Heat in**. Connection
 throughput and efficiency apply as for other heat producers; unaccepted heat stays
@@ -467,6 +474,8 @@ at its source and transport loss is accounted separately.
 | Thermal class | Must match the destination reservoir's class. |
 | Rated output kW | Finite non-negative beginning-of-life heat production; zero disables. |
 | Wear | Optional shared permanent fade, including half-life and initial age in hours. |
+| Throttleable | Frozen boolean machine identity; defaults to false. |
+| Commanded output kW | Optional cap in [0, rated output]; disabled with an explanation when non-throttleable. |
 
 **Example:** feed a hot reservoir deliberately, then use a Heat engine to convert
 part of its heat into electricity. Service limits do not cap the source: overheating

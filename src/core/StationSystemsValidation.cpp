@@ -1729,6 +1729,9 @@ namespace
 			if (!heatSourceIds.insert(source.id).second) return refuse(where + " id is duplicated");
 			if (!std::isfinite(source.ratedOutputKW) || source.ratedOutputKW < 0.0)
 				return refuse(where + " rated output must be finite and non-negative");
+			if (source.commandedOutputKW && (!std::isfinite(*source.commandedOutputKW)
+				|| *source.commandedOutputKW < 0.0 || *source.commandedOutputKW > source.ratedOutputKW))
+				return refuse(where + " commanded output must be finite and within [0, rated output]");
 			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(), source.thermalClass)
 				== StationThermalServiceClasses.end()) return refuse(where + " has unknown thermal service class '" + source.thermalClass + "'");
 			auto const target = std::find_if(settings.thermalReservoirs.begin(), settings.thermalReservoirs.end(),

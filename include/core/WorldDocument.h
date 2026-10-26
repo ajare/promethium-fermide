@@ -21,7 +21,7 @@ namespace core
 	// boundary derive from here rather than from a written document's tier.
 	// 119 adds opt-in contamination-chain Faults; 120 adds atmosphere/airlock Faults;
 	// 121 adds the machine Wear catalogue (#848).
-	inline constexpr std::uint32_t kWorldSchemaVersion = 128;
+	inline constexpr std::uint32_t kWorldSchemaVersion = 129;
 	inline constexpr std::string_view YamlWorldDocumentFilenameSuffix{ ".world.yaml" };
 	inline constexpr auto WorldDocumentFilenameSuffix = BinaryWorldDocumentFilenameSuffix;
 

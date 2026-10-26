@@ -952,6 +952,8 @@ namespace core
 		std::string thermalClass{"generation"};
 		double ratedOutputKW{0.0};
 		std::optional<InstallationWearSettings> wear;
+		bool throttleable{false}; // Frozen machine identity; legacy sources cannot throttle.
+		std::optional<double> commandedOutputKW; // Absent = rated; cap, never a boost.
 		bool operator==(HeatSourceSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationHeatSources{16};

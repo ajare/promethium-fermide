@@ -699,6 +699,8 @@ namespace core
 				serializer.writeString("targetReservoirId", source.targetReservoirId);
 				serializer.writeString("thermalClass", source.thermalClass);
 				serializer.writeDouble("ratedOutputKW", source.ratedOutputKW);
+				if (source.throttleable) serializer.writeBool("throttleable", true);
+				if (source.commandedOutputKW) serializer.writeDouble("commandedOutputKW", *source.commandedOutputKW);
 				if (source.wear) writeWearBlock(serializer, "wear", *source.wear);
 				serializer.endMap();
 			}
@@ -2135,13 +2137,19 @@ namespace core
 			{
 				serializer.beginMap("");
 				for (auto const& key : serializer.mapKeys(""))
-					if (key != "id" && key != "targetReservoirId" && key != "thermalClass" && key != "ratedOutputKW" && key != "wear")
+					if (key != "id" && key != "targetReservoirId" && key != "thermalClass" && key != "ratedOutputKW" && key != "wear" && key != "throttleable" && key != "commandedOutputKW")
 						throw SerializationException("Heat source field '" + key + "' is unknown; conversion required");
 				HeatSourceSettings source;
 				source.id = serializer.readString("id");
 				source.targetReservoirId = serializer.readString("targetReservoirId");
 				source.thermalClass = serializer.readString("thermalClass");
 				source.ratedOutputKW = serializer.readDouble("ratedOutputKW");
+				if (serializer.hasField("throttleable") || serializer.hasField("commandedOutputKW"))
+				{
+					if (version < 129) throw SerializationException("Heat source throttle controls require schema 129");
+					if (serializer.hasField("throttleable")) source.throttleable = serializer.readBool("throttleable");
+					if (serializer.hasField("commandedOutputKW")) source.commandedOutputKW = serializer.readDouble("commandedOutputKW");
+				}
 				if (serializer.hasField("wear"))
 				{
 					if (version < 128) throw SerializationException("Heat source Wear requires schema 128");

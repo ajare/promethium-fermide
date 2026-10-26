@@ -1081,7 +1081,8 @@ namespace core
 		auto const nonReciprocating = std::any_of(mStationSystemsSettings.generators.begin(), mStationSystemsSettings.generators.end(),
 			[](auto const& generator) { return generator.primeMover != StationGeneratorPrimeMover::Reciprocating; });
 		// Schema 127 adds primary heat sources, only when present.
-		serializer.writeUint32("version", stationRequiresExtendedWearSchema(mStationSystemsSettings) ? 128 : !mStationSystemsSettings.heatSources.empty() ? 127 : std::any_of(mStationSystemsSettings.generators.begin(), mStationSystemsSettings.generators.end(),
+		serializer.writeUint32("version", std::any_of(mStationSystemsSettings.heatSources.begin(), mStationSystemsSettings.heatSources.end(),
+			[](auto const& source) { return source.throttleable || source.commandedOutputKW.has_value(); }) ? 129 : stationRequiresExtendedWearSchema(mStationSystemsSettings) ? 128 : !mStationSystemsSettings.heatSources.empty() ? 127 : std::any_of(mStationSystemsSettings.generators.begin(), mStationSystemsSettings.generators.end(),
 			[](auto const& g) { return g.methaneCombustion || !g.combustionAirId.empty() || !g.combustionExhaustId.empty(); }) ? 126 : nonReciprocating ? 125 : stationHasPowerBusAuthoring(mStationSystemsSettings) ? 124 : (bodies || nonPem) ? 123 : !mStationSystemsSettings.monitors.empty() ? 122 : machineWear ? 121 : atmosphereFaults ? 120 : contamination ? 119 : powerSources ? 118
 			: thermalPlant ? 117 : wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);

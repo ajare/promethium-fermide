@@ -246,6 +246,7 @@ namespace core
 		static bool topologyChanged(HeatSourceSettings const& before, HeatSourceSettings const& after)
 		{
 			return before.id != after.id || before.targetReservoirId != after.targetReservoirId
+				|| before.throttleable != after.throttleable
 				|| wearTopologyChanged(before.wear, after.wear);
 		}
 	};

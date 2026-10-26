@@ -34,6 +34,64 @@ void near(double a, double b, char const* why)
 {
 	require(std::abs(a - b) < 1e-7 * std::max(1.0, std::abs(b)), why);
 }
+void heatSourceThrottle(smoke::Context const&)
+{
+	for (bool throttleable : {false, true})
+	{
+		auto s = fixture(); s.systemsStepWorldTicks = 60;
+		s.heatSources[0].throttleable = throttleable;
+		s.heatSources[0].commandedOutputKW = 0.0;
+		core::InstallationWearSettings wear; wear.fadeHalfLifeHours = 0.01; wear.initialAgeHours = 0.01;
+		s.heatSources[0].wear = wear;
+		core::World world("Throttle", 2, 2); configure(world, s); world.resumeSimulation();
+		require(advanceSeconds(world, 1), "zero command drive failed");
+		auto snap = world.getStationSystemsSnapshot();
+		near(snap.heatSources[0].deliveredOutputKW, throttleable ? 0.0 : 5.0, "zero command changed unstoppable heat");
+		for (double cap : {2.0, 10.0})
+		{
+			s.heatSources[0].commandedOutputKW = cap; std::string why;
+			require(world.updateStationSystemsSettings(s, &why), why.c_str());
+			auto const decayed = snap.heatSources[0].decayedOutputKW;
+			require(advanceSeconds(world, 1), "cap drive failed");
+			snap = world.getStationSystemsSnapshot();
+			near(snap.heatSources[0].deliveredOutputKW, throttleable ? std::min(cap, decayed) : decayed,
+				"command is not a cap on decayed rating");
+			require(snap.healthy, "throttled heat failed conservation audit");
+		}
+	}
+}
+
+void heatSourceFrozenTopology(smoke::Context const&)
+{
+	for (bool throttleable : {false, true}) for (bool decay : {false, true})
+	{
+		auto s = fixture(); s.systemsStepWorldTicks = 60;
+		s.heatSources[0].throttleable = throttleable;
+		if (decay) { core::InstallationWearSettings w; w.fadeHalfLifeHours = 0.01; s.heatSources[0].wear = w; }
+		core::World world("FrozenHeat", 2, 2); configure(world, s); world.resumeSimulation();
+		require(advanceSeconds(world, 10), "topology drive failed");
+		auto const before = world.getStationSystemsSnapshot(); std::string why;
+		auto changed = s; changed.heatSources[0].throttleable = !throttleable;
+		require(!world.updateStationSystemsSettings(changed, &why) && why.find("topology") != std::string::npos,
+			"live throttleability change accepted or unexplained");
+		require(world.getStationSystemsSnapshot() == before && world.getStationSystemsSettings() == s,
+			"topology refusal partially mutated World");
+		changed = s;
+		if (decay) changed.heatSources[0].wear.reset();
+		else { core::InstallationWearSettings w; w.fadeHalfLifeHours = 0.01; changed.heatSources[0].wear = w; }
+		require(!world.updateStationSystemsSettings(changed, &why) && why.find("topology") != std::string::npos,
+			"live decay presence change accepted");
+		// Contrast in this same check: ordinary tuning remains live on this exact path.
+		s.heatSources[0].ratedOutputKW = 20;
+		if (decay) s.heatSources[0].wear->fadeHalfLifeHours *= 2;
+		require(world.updateStationSystemsSettings(s, &why), why.c_str());
+		require(advanceSeconds(world, 1), "live parameter drive failed");
+		auto const snap = world.getStationSystemsSnapshot();
+		near(snap.heatSources[0].deliveredOutputKW, 20 * (1 - before.heatSources[0].decayFraction),
+			"ordinary tuning failed or repriced banked decay");
+	}
+}
+
 void heatSourceDecay(smoke::Context const&)
 {
 	auto s = fixture(); s.systemsStepWorldTicks = 60;
@@ -236,6 +294,8 @@ void heatSourceValidation(smoke::Context const&)
 	refused([](auto& s) { s.heatSources[0].ratedOutputKW = -1.0; }, "rated output");
 	refused([](auto& s) { s.heatSources[0].ratedOutputKW = std::numeric_limits<double>::infinity(); }, "rated output");
 	refused([](auto& s) { s.heatSources[0].ratedOutputKW = std::numeric_limits<double>::quiet_NaN(); }, "rated output");
+	for (double command : {-1.0, 11.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+		refused([&](auto& s) { s.heatSources[0].commandedOutputKW = command; }, "commanded output");
 	refused([](auto& s) { s.heatSources[0].thermalClass = "unknown"; }, "unknown thermal");
 	refused([](auto& s) { s.heatSources[0].thermalClass = "warm"; }, "incompatible");
 	refused([](auto& s) { s.heatSources[0].targetReservoirId = "missing"; }, "unknown thermal reservoir");
@@ -252,6 +312,17 @@ void heatSourcePersistence(smoke::Context const&)
 	core::StationConfigurationDocument restored;
 	require(core::parseStationConfiguration(text, restored, &why), why.c_str());
 	require(core::serializeStationConfiguration(restored) == text, "configuration roundtrip not byte stable");
+	for (bool throttleable : {false, true})
+	{
+		auto controlled = doc; controlled.settings.heatSources[0].throttleable = throttleable;
+		controlled.settings.heatSources[0].commandedOutputKW = 2.0;
+		auto wire = core::serializeStationConfiguration(controlled);
+		require(wire.find("schemaVersion: 129") != std::string::npos, "throttle schema not claimed");
+		require(core::parseStationConfiguration(wire, restored, &why) && restored.settings == controlled.settings,
+			"throttle controls lost on round trip");
+		wire.replace(wire.find("schemaVersion: 129"), 18, "schemaVersion: 128");
+		require(!core::parseStationConfiguration(wire, restored, &why), "old schema accepted throttle controls");
+	}
 	auto old = text; old.replace(old.find("schemaVersion: 127"), 18, "schemaVersion: 126");
 	require(!core::parseStationConfiguration(old, restored, &why), "old schema accepted heat source");
 	auto unknown = text; auto pos = unknown.find("ratedOutputKW:");
@@ -262,6 +333,8 @@ void heatSourcePersistence(smoke::Context const&)
 	auto const legacy = core::serializeStationConfiguration(doc);
 	require(legacy.find("heatSources") == std::string::npos && legacy.find("schemaVersion: 111") != std::string::npos,
 		"absent source moved legacy document schema/shape");
+	s.heatSources[0].throttleable = true;
+	s.heatSources[0].commandedOutputKW = 2.0;
 	for (bool binary : {false, true})
 	{
 		core::World original("HeatPersistence", 2, 2), loaded("LoadedHeat", 2, 2);
@@ -367,6 +440,8 @@ void heatSourceOverheat(smoke::Context const&)
 }
 void registerStationHeatSourceChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"heatSourceThrottle", heatSourceThrottle});
+	checks.push_back({"heatSourceFrozenTopology", heatSourceFrozenTopology});
 	checks.push_back({"heatSourceDecay", heatSourceDecay});
 	checks.push_back({"heatSourceDecayComposition", heatSourceDecayComposition});
 	checks.push_back({"heatSourceDecayPersistence", heatSourceDecayPersistence});

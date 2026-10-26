@@ -2844,6 +2844,13 @@ namespace
 			REQ(window.draft().heatSources[0].ratedOutputKW == 25.0, "source inspector edit failed");
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 			REQ(window.draft().heatSources[0].ratedOutputKW == 10.0, "source field undo failed");
+			REQ(driver.contains("Non-throttleable source: command ignored; delivers its decayed rating."), "disabled throttle reason missing");
+			auto const* command = ctx->ItemInfo("**/commanded output kW##Heat source 0");
+			REQ(command->ID != 0 && bool(command->InFlags & ImGuiItemFlags_Disabled), "throttle control hidden or enabled");
+			driver.click(ctx, "**/throttleable##Heat source 0"); ctx->Yield(3);
+			REQ(window.draft().heatSources[0].throttleable, "throttleability checkbox failed");
+			driver.typeValue(ctx, "**/commanded output kW##Heat source 0", "2"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(window.draft().heatSources[0].commandedOutputKW == 2.0, "throttle command edit failed");
 			REQ(world->getStationSystemsSettings().heatSources.empty(), "draft changed world");
 		});
 		#undef REQ
