@@ -2407,8 +2407,13 @@ namespace
 					+ "'; declared classes are: " + declaredThermalClasses());
 			if (!std::isfinite(cell.ratedOutputKW) || cell.ratedOutputKW < 0.0)
 				return refuse(where + " rated electrical output must be finite and non-negative");
+			auto const& profile = FuelCellChemistryProfiles.at(static_cast<size_t>(cell.chemistry));
+			auto const bandDiagnostic = std::string("; admitted efficiency band ") + profile.efficiencyBand
+				+ " for chemistry " + FuelCellChemistryNames.at(static_cast<size_t>(cell.chemistry));
 			if (!std::isfinite(cell.efficiency) || cell.efficiency <= 0.0 || cell.efficiency > 1.0)
-				return refuse(where + " efficiency must be greater than 0 and at most 1: a cell cannot deliver more electrical energy than the reactants' chemical energy");
+				return refuse(where + " efficiency must be greater than 0 and at most 1: a cell cannot deliver more electrical energy than the reactants' chemical energy" + bandDiagnostic);
+			if (cell.efficiency < profile.minEfficiency || cell.efficiency > profile.maxEfficiency)
+				return refuse(where + " efficiency is outside the chemistry profile" + bandDiagnostic);
 			if (!std::isfinite(cell.commandedOutputKW) || cell.commandedOutputKW < 0.0
 				|| cell.commandedOutputKW > cell.ratedOutputKW)
 				return refuse(where + " commanded output must be finite and within the installed rating");

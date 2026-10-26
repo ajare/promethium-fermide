@@ -1461,6 +1461,36 @@ namespace
 			document.settings = settings;
 			auto const text = core::serializeStationConfiguration(document);
 			auto const label = std::string(core::FuelCellChemistryNames.at(static_cast<size_t>(chemistry)));
+			// #892: assert the decided bands explicitly, never by consulting the profile.
+			auto const pem = chemistry == core::FuelCellChemistry::PEM;
+			auto const upper = chemistry == core::FuelCellChemistry::Alkaline ? 0.75 : 0.70;
+			auto const band = pem ? "(0, 1]" : chemistry == core::FuelCellChemistry::Alkaline
+				? "[0.35, 0.75]" : "[0.35, 0.70]";
+			core::World bandWorld("ChemistryBand", 2, 2);
+			bandWorld.pauseSimulation(); bandWorld.finishBuild();
+			require(bandWorld.configureStationSystems(settings, false, &diagnostic), "band baseline refused");
+			for (double efficiency : {0.000001, 0.1, std::nextafter(0.35, 0.0), 0.35, 0.6,
+				upper, std::nextafter(upper, 1.0), 0.99, 1.0, 0.0, -0.1, 1.01,
+				std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+			{
+				auto candidate = settings;
+				candidate.fuelCells[0].efficiency = efficiency;
+				auto const beforeSettings = bandWorld.getStationSystemsSettings();
+				auto const beforeSnapshot = bandWorld.getStationSystemsSnapshot();
+				auto const admitted = std::isfinite(efficiency) && efficiency > 0 && efficiency <= 1
+					&& (pem || (efficiency >= 0.35 && efficiency <= upper));
+				require(bandWorld.configureStationSystems(candidate, true, &diagnostic) == admitted,
+					"chemistry efficiency admission differs from its inclusive band");
+				if (admitted)
+					require(bandWorld.getStationSystemsSettings().fuelCells[0].efficiency == efficiency,
+						"accepted efficiency was silently clamped");
+				else
+					require(bandWorld.getStationSystemsSettings() == beforeSettings
+						&& bandWorld.getStationSystemsSnapshot() == beforeSnapshot
+						&& diagnostic.find(band) != std::string::npos
+						&& diagnostic.find("chemistry " + label) != std::string::npos,
+						"band refusal mutated the World or omitted chemistry/band diagnostic");
+			}
 			require(text.find("chemistry: " + label) != std::string::npos,
 				"configuration did not save chemistry");
 			require(text.find(chemistry == core::FuelCellChemistry::PEM ? "schemaVersion: 111" : "schemaVersion: 123") != std::string::npos,
@@ -1527,7 +1557,7 @@ namespace
 				if (scenario == 3) candidate.stores[2].startingQualified = candidate.stores[2].capacity;
 				if (scenario == 4) candidate.thermalReservoirs[0].startingTemperatureC = 80;
 				if (scenario == 5) candidate.fuelCells[0].commandedOutputKW = 0;
-				if (scenario == 6) candidate.fuelCells[0].efficiency = 0.99; // no follow-up efficiency bands
+				if (scenario == 6) candidate.fuelCells[0].efficiency = 0.70; // shared admitted boundary
 				auto pem = candidate; pem.fuelCells[0].chemistry = core::FuelCellChemistry::PEM;
 				core::World baseline("ChemistryInert", 2, 2), changed("ChemistryInert", 2, 2);
 				baseline.pauseSimulation(); baseline.finishBuild(); changed.pauseSimulation(); changed.finishBuild();

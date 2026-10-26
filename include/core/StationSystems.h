@@ -1655,10 +1655,20 @@ namespace core
 	// Product water lands in the declared destination - the raw-water
 	// store a water treatment (#402) qualifies - so the backup's water
 	// goes through treatment rather than into drinking water directly.
-	// #891: descriptive only; chemistry does not change runtime conversion yet.
+	// Chemistry constrains authoring only; runtime conversion uses authored efficiency.
 	enum class FuelCellChemistry : std::uint8_t { PEM, Alkaline, SolidOxide };
 	inline constexpr std::array<char const*, 3> FuelCellChemistryNames{
 		"PEM", "alkaline", "solid oxide"};
+	struct FuelCellChemistryProfile
+	{
+		double minEfficiency; // inclusive; the generic (0, 1] bound also applies
+		double maxEfficiency;
+		char const* efficiencyBand;
+	};
+	inline constexpr std::array<FuelCellChemistryProfile, 3> FuelCellChemistryProfiles{{
+		{0.0, 1.0, "(0, 1]"},
+		{0.35, 0.75, "[0.35, 0.75]"},
+		{0.35, 0.70, "[0.35, 0.70]"}}};
 	struct FuelCellSettings
 	{
 		std::string id;

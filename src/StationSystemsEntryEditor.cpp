@@ -1497,6 +1497,9 @@ bool renderFuelCellEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 				cell.chemistry = static_cast<core::FuelCellChemistry>(index);
 		ImGui::EndCombo();
 	}
+	ImGui::SameLine();
+	ImGui::TextDisabled("Admitted efficiency %s",
+		core::FuelCellChemistryProfiles.at(static_cast<size_t>(cell.chemistry)).efficiencyBand);
 	renderRefCombo(describe("hydrogen reactant store", label), cell.hydrogenStoreId, storeIds(draft), portIsOptional("Fuel cell", "Hydrogen in"));
 	renderRefCombo(describe("oxygen reactant store", label), cell.oxygenStoreId, storeIds(draft), portIsOptional("Fuel cell", "Oxygen in"));
 	renderRefCombo(describe("product water store", label), cell.waterStoreId, storeIds(draft), portIsOptional("Fuel cell", "Water out"));

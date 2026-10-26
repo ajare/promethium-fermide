@@ -2215,6 +2215,7 @@ namespace
 				{
 					REQ(window.draft().fuelCells[0].chemistry == core::FuelCellChemistry::PEM,
 						"newly authored fuel cell did not default to PEM");
+					REQ(driver.contains("Admitted efficiency (0, 1]"), "PEM band hint missing");
 					for (auto const& option : {std::pair{"alkaline", core::FuelCellChemistry::Alkaline},
 						std::pair{"solid oxide", core::FuelCellChemistry::SolidOxide}})
 					{
@@ -2224,6 +2225,20 @@ namespace
 						REQ(window.draft().fuelCells[0].chemistry == option.second
 							&& window.draftHistory().undoCount() == historyCount + 1,
 							"chemistry selector did not make one undoable edit");
+						REQ(driver.contains(option.second == core::FuelCellChemistry::Alkaline
+							? "Admitted efficiency [0.35, 0.75]" : "Admitted efficiency [0.35, 0.70]"),
+							"chemistry selector did not display its admitted band");
+						REQ(window.draft().fuelCells[0].efficiency == beforeEdit.fuelCells[0].efficiency,
+							"chemistry selection silently changed efficiency");
+						auto const chemistryDraft = window.draft();
+						driver.typeValue(ctx, "**/efficiency (0..1]##Fuel cell 0", "0.9");
+						ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+						REQ(window.draft().fuelCells[0].efficiency == 0.9,
+							"out-of-band editor input was silently clamped");
+						REQ(driver.contains("Validation:") && driver.contains("admitted efficiency band")
+							&& driver.contains(option.first), "out-of-band edit did not show validation error");
+						driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+						REQ(window.draft() == chemistryDraft, "undo did not restore efficiency edit");
 						driver.click(ctx, "Undo configuration"); ctx->Yield(3);
 						REQ(window.draft() == beforeEdit, "undo did not restore chemistry");
 					}
