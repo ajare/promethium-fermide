@@ -2391,6 +2391,11 @@ namespace core
 		double firedAtSeconds{0};
 		std::optional<double> clearedAtSeconds;
 		std::optional<AlertClearReason> clearReason;
+		// #882: extra context the raising subsystem carries with the Alert so a
+		// scenario author reads the transition off the event stream without
+		// cross-referencing another ledger. Empty for every Monitor-raised Alert,
+		// so the standard announcement is unchanged for them.
+		std::string detail;
 		bool operator==(StationAlertSnapshot const&) const = default;
 	};
 	struct StationSystemsSettings
@@ -3388,6 +3393,32 @@ namespace core
 		bool operator==(StationProtectedServiceSnapshot const&) const = default;
 	};
 
+	// #882: one Transfer-mode load's automatic transfer switch, as of the
+	// most recent tick. A Transfer load owns a primary and a backup Power Bus
+	// and sits on exactly one of them: the switch never splits the load across
+	// both. `servingBusId` is the bus the load drew from, and the event fields
+	// record the route and the sim instant of the last time it moved.
+	struct StationSupplyTransferSnapshot
+	{
+		std::string consumerType;
+		std::string loadId;
+		std::string primaryBusId;
+		std::string backupBusId;
+		std::string servingBusId;
+		bool onBackup{false};
+		// The authored bar the primary must hold the load for before it may come
+		// back, and how long it has held so far. `primaryCapableSeconds` resets
+		// to zero the moment the primary falls short again, which is what stops a
+		// marginal primary from flapping the load between buses.
+		double returnDwellSeconds{0.0};
+		double primaryCapableSeconds{0.0};
+		// The most recent transfer this load went through. Both bus ids are
+		// empty and the instant is negative until the switch has moved once.
+		std::string eventFromBusId, eventToBusId;
+		double eventAtSimSeconds{-1.0};
+		bool operator==(StationSupplyTransferSnapshot const&) const = default;
+	};
+
 	struct StationBusPowerSnapshot
 	{
 		std::string busId;
@@ -3509,6 +3540,11 @@ namespace core
 		// #879 expand step: the single bus wraps the unchanged pool account.
 		// Multi-bus allocation is implemented separately in #880.
 		std::vector<StationBusPowerSnapshot> buses;
+		// #882: which bus serves each Transfer-mode load. The per-bus accounts
+		// above say what a bus carried; this says which side of its automatic
+		// transfer switch each load sat on, so a reader can see a failover and a
+		// dwell-gated return without diffing two bus ledgers. Authored order.
+		std::vector<StationSupplyTransferSnapshot> supplyTransfers;
 		bool operator==(StationPowerSnapshot const&) const = default;
 	};
 	// One radiator as of the most recent tick: the authored rejection

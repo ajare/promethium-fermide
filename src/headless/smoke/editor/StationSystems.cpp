@@ -5525,6 +5525,89 @@ namespace
 		require(driver.passed(), "Power bus authoring UI failed");
 	}
 
+	// #882: the Transfer-mode authoring surface. A transfer load is authored
+	// as an ordered primary/backup pair plus the dwell that gates its return,
+	// and the inspector must expose all three: the dwell belongs to the switch
+	// and must not be offered for a mode that has no return to gate, while a
+	// mode change must never disturb the order the pair was authored in.
+	void transferModeAuthoring(smoke::Context const&)
+	{
+		using smoke::require;
+		core::StationSystemsSettings rig;
+		rig.enabled = true;
+		rig.powerBuses = {{"main", "Main", 100, 0}, {"backup", "Backup", 100, 0}};
+		core::SolarArraySettings primarySource;
+		primarySource.id = "solar-main"; primarySource.capacityKW = 20; primarySource.busIds = {"main"};
+		core::SolarArraySettings backupSource;
+		backupSource.id = "solar-backup"; backupSource.capacityKW = 20; backupSource.busIds = {"backup"};
+		rig.solarArrays = {primarySource, backupSource};
+		core::EquipmentLoadSettings load;
+		load.id = "load"; load.electricalDemandKW = 4; load.thermalClass = "moderate";
+		load.supplyMode = core::StationSupplyMode::Transfer;
+		load.supplyBusIds = {"main", "backup"};
+		load.transferReturnDwellSeconds = 30.0;
+		rig.equipmentLoads = {load};
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1800, 1200};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Transfer authoring", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		require(world->configureStationSystems(rig, false, &diagnostic), diagnostic.c_str());
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1760, 1160});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "transferModeAuthoring", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			ctx->ItemClick("Fit all"); ctx->Yield(3);
+			ImVec4 rect{};
+			REQ(window.flowNodeRect("Equipment", "load", &rect), "Transfer load missing from the diagram");
+			ctx->MouseTeleportToPos({(rect.x + rect.z) / 2, rect.y + 3}); ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos({40, 40}); ctx->Yield(2);
+			REQ(driver.contains("Supply mode") && driver.contains("Return dwell (s)"),
+				"Transfer-mode authoring fields missing from the load inspector");
+			// The dwell is a per-load field: it moves the draft and nothing else.
+			driver.typeValue(ctx, "**/Return dwell (s)", "45");
+			ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(std::abs(window.draft().equipmentLoads[0].transferReturnDwellSeconds - 45.0) < 1e-9,
+				"return dwell edit never reached the draft");
+			REQ(std::abs(world->getStationSystemsSettings().equipmentLoads[0].transferReturnDwellSeconds - 30.0) < 1e-9,
+				"dwell edit reached the World without an Apply");
+			// A Single-mode load has no return to gate, so the dwell must go.
+			// BeginCombo lacks labelled wildcard metadata in this ImGui version,
+			// so address it through the window resolved from its neighbouring,
+			// labelled membership checkbox - the same seam #881 established.
+			auto* membership = ctx->ItemInfo("**/main##Supply buses (selection order: primary, backup)");
+			REQ(membership != nullptr && membership->Window != nullptr,
+				"supply membership inspector window missing");
+			ctx->SetRef(membership->ParentID);
+			ctx->ComboClick("Supply mode/Single"); ctx->Yield(2);
+			ctx->SetRef("Configuration");
+			REQ(!ctx->IsError() && window.draft().equipmentLoads[0].supplyMode == core::StationSupplyMode::Single,
+				"Single mode could not be selected");
+			REQ(!driver.contains("Return dwell (s)"),
+				"return dwell still offered for a load with no return to gate");
+			// Back to Transfer: the field returns and the authored pair is
+			// exactly as it was left - primary first, backup second.
+			ctx->SetRef(membership->ParentID);
+			ctx->ComboClick("Supply mode/Transfer"); ctx->Yield(2);
+			ctx->SetRef("Configuration");
+			REQ(driver.contains("Return dwell (s)"), "return dwell lost when Transfer was reselected");
+			REQ(std::abs(window.draft().equipmentLoads[0].transferReturnDwellSeconds - 45.0) < 1e-9,
+				"dwell lost across a supply-mode round trip");
+			REQ(window.draft().equipmentLoads[0].supplyBusIds == std::vector<std::string>({"main", "backup"}),
+				"supply-mode change disturbed the ordered primary/backup pair");
+			// The inspector owns draft edits only; the World is still the rig.
+			REQ(world->getStationSystemsSettings() == rig, "inspector draft edits leaked into the World");
+		});
+		#undef REQ
+		require(driver.passed(), "Transfer-mode authoring UI failed");
+	}
+
 	void addEntryWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -8507,6 +8590,7 @@ prefabCatalogue:
 	checks.push_back({"station/prefabDialBoundaryWorkflow", prefabDialBoundaryWorkflow});
 	checks.push_back({"station/prefabDuplicateInstancePinsWorkflow", prefabDuplicateInstancePinsWorkflow});
 	checks.push_back({"station/powerBusAuthoring", powerBusAuthoring});
+	checks.push_back({"station/transferModeAuthoring", transferModeAuthoring});
 	checks.push_back({"station/addEntryWorkflow", addEntryWorkflow});
 	checks.push_back({"station/configurationResources", configurationResources});
 	checks.push_back({"station/windowWorkflow", workflow});

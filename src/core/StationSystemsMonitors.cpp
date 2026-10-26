@@ -43,6 +43,12 @@ namespace
 			transition, alert.monitorId, alert.subjectType, alert.subjectId, alert.metric,
 			alert.currentValue, alert.threshold, stationAlertSeverityTag(alert.severity),
 			stationMonitorProvenanceTag(alert.provenance), simSeconds);
+		if (!alert.detail.empty())
+			// #882: a subsystem that raised the Alert directly carries the part of
+			// the story the generic value/threshold shape cannot hold - for a
+			// transfer, the route the load took. Empty for every Monitor-raised
+			// Alert, so their announcements read exactly as before.
+			message += std::format(" detail {}", alert.detail);
 		if (alert.clearReason)
 			message += std::format(" reason {}", stationAlertClearReasonTag(*alert.clearReason));
 		return message;

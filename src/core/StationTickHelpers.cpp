@@ -7,7 +7,23 @@ namespace core
 		for (auto const& bus : runtime.settings.powerBuses) busBudgets.try_emplace(bus.id);
 		auto bind = [&](char const* type, auto const& entries) {
 			for (auto const& entry : entries)
-				consumerBuses[{type, entry.authored.id}] = entry.authored.supplyBusIds.front();
+			{
+				// A Single or Shared consumer draws from its declared bus. A
+				// Transfer consumer sits on whichever side of its automatic
+				// transfer switch the last committed tick left it on (#882);
+				// transferSupply() may move it again this tick, before any draw.
+				// A load with fewer than two declared buses has nothing to switch
+				// to, so it stays on the first one.
+				auto bus = entry.authored.supplyBusIds.front();
+				if (entry.authored.supplyMode == StationSupplyMode::Transfer
+					&& entry.authored.supplyBusIds.size() > 1)
+				{
+					auto const state = runtime.supplyTransfers.find({type, entry.authored.id});
+					if (state != runtime.supplyTransfers.end() && state->second.onBackup)
+						bus = entry.authored.supplyBusIds[1];
+				}
+				consumerBuses[{type, entry.authored.id}] = bus;
+			}
 		};
 		bind("Equipment", runtime.loads); bind("Generator", runtime.generators);
 		bind("Coolant loop", runtime.coolantLoops); bind("Chiller", runtime.chillers);

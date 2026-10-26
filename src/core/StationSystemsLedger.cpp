@@ -96,6 +96,14 @@ namespace core
 		auto const committedRecoveryPending = lastRecoveryPending;
 		auto const committedRecoveringCount = lastRecoveringCount;
 		auto const committedRecoverySurgeKW = lastRecoverySurgeKW;
+		// #882: the automatic transfer switch position is committed state that
+		// the tick moves, and the per-consumer demand signal the switch reads
+		// crosses the tick boundary exactly like the dispatch signals above, so
+		// both restore together. A tick that fails after a failover must put the
+		// load back on the bus it was actually drawing from, or the next tick
+		// would book a load against a bus it never transferred onto.
+		auto const committedSupplyTransfers = supplyTransfers;
+		auto const committedConsumerDispatchRequest = lastConsumerDispatchRequest;
 		return [=, this]()
 		{
 			stores = committedStores;
@@ -157,6 +165,8 @@ namespace core
 			lastRecoveryPending = committedRecoveryPending;
 			lastRecoveringCount = committedRecoveringCount;
 			lastRecoverySurgeKW = committedRecoverySurgeKW;
+			supplyTransfers = committedSupplyTransfers;
+			lastConsumerDispatchRequest = committedConsumerDispatchRequest;
 		};
 	}
 
@@ -263,7 +273,7 @@ namespace core
 				auto const restore = ledgerCheckpoint();
 				auto const savedPrediction = prediction;
 				Tick preview(*this, tick, duration, system, violation, instant, true);
-				auto const valid = preview.prepare() && preview.generation()
+				auto const valid = preview.prepare() && preview.generation() && preview.transferSupply()
 					&& preview.protection() && preview.thermal() && preview.processing()
 					&& preview.biology() && preview.atmosphere() && preview.wear()
 					&& preview.auditPower();
@@ -276,7 +286,8 @@ namespace core
 			Tick scratch(*this, tick, duration, system, violation, instant, true);
 			scratch.engineAcceptanceDemandKW = engineDemandKW;
 			scratch.engineAcceptanceBusDemand = std::move(engineBusDemand);
-			if (!scratch.prepare() || !scratch.generation() || !scratch.protection()
+			if (!scratch.prepare() || !scratch.generation() || !scratch.transferSupply()
+				|| !scratch.protection()
 				|| !scratch.thermal() || !scratch.processing() || !scratch.biology()
 				|| !scratch.atmosphere() || !scratch.wear()) return false;
 			scratch.captureProtection();

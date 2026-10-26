@@ -2065,6 +2065,13 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		mImpl->snapshot = next;
 		if (std::any_of(mImpl->effectiveMonitors.begin(), mImpl->effectiveMonitors.end(),
 			[](auto const& monitor) { return monitor.enabled; })) mImpl->evaluateMonitors(snapshot());
+		// #882: transfer announcements ride the same post-commit seam as the
+		// Monitor evaluation. The switch already actuated inside the ledger and
+		// only its announcement waits here, so a tick that rolled back takes
+		// its transfer event with it and no Alert is raised for a move that
+		// never committed. Runs unconditionally: unlike a Monitor, no authored
+		// rule has to be switched on for a transfer to be announced.
+		mImpl->reconcileTransferAlerts();
 		if (tick % mImpl->observationIntervalSteps == 0)
 		{
 			appendBoundedEvent(mImpl->events, tick, "observation",

@@ -99,6 +99,7 @@ pf_add_smoke_module(pf-smoke-station
         station/StationPowerChecks.cpp
         station/StationPowerBusChecks.cpp
         station/StationBusDispatchChecks.cpp
+        station/StationTransferSupplyChecks.cpp
         station/StationCompoundPowerChecks.cpp
         station/StationBatteryChecks.cpp
         station/StationLogisticsChecks.cpp
@@ -274,6 +275,14 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         crews water waterQualityGates waterQualityValidation waterQualityConsumers waterSelectiveIrrigation waterHydroponics waterContamination compoundWaterPartial compoundWaterPartialValidation compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance atmosphereStateCharts configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
         powerBusMigration powerBusPersistence powerBusRoles powerBusValidation
         busDispatchBalance busDispatchProtected busDispatchBatteries busDispatchInternal busDispatchSources busDispatchRecovery
+        # #882: the automatic transfer switch - whole-load failover on any
+        # primary shortfall, the dwell-gated return that keeps a marginal
+        # primary from flapping, explicit unmet when the backup is short too,
+        # no implicit third path, and the Advisory transfer Alert that
+        # announces each move and clears itself.
+        transferHoldsPrimary transferFailover transferAlertAutoClears
+        transferDwellReturn transferZeroDwell transferNoFlapping
+        transferBackupAlsoShort transferNoThirdPath transferReplay transferPerLoadDwell
         compoundFiles powerFiles powerChainFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles maintenanceFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
         # #571: harvest, algae and the nutrient-conservation closure were
         # reachable through the binary but never registered here, so they
@@ -994,6 +1003,10 @@ add_test(NAME station-editor-material-identity COMMAND pf-smoke-editor --check s
 set_tests_properties(station-editor-material-identity PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 add_test(NAME station-editor-power-bus COMMAND pf-smoke-editor --check station/powerBusAuthoring)
 set_tests_properties(station-editor-power-bus PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+# #882: the Transfer-mode authoring surface - the per-load return dwell and
+# the fact that it belongs to the switch, not to every supply mode.
+add_test(NAME station-editor-transfer-mode COMMAND pf-smoke-editor --check station/transferModeAuthoring)
+set_tests_properties(station-editor-transfer-mode PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-add-entry COMMAND pf-smoke-editor --check station/addEntryWorkflow)
 set_tests_properties(station-editor-add-entry PROPERTIES
     LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)

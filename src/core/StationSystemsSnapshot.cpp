@@ -2122,6 +2122,54 @@ namespace core
 				bus = found->second;
 			result.power.buses.push_back(std::move(bus));
 		}
+		// #882: which bus actually serves each Transfer-mode load. The per-bus
+		// accounts above say what a bus carried; this says which side of its
+		// automatic transfer switch each load sat on, so a reader sees a
+		// failover and a dwell-gated return without diffing two bus ledgers.
+		// Authored order, so the list is stable across replays.
+		auto const transferNow = mImpl->clock.elapsedSeconds();
+		auto publishTransfer = [&](char const* type, auto const& entries) {
+			for (auto const& entry : entries)
+			{
+				if (entry.authored.supplyMode != StationSupplyMode::Transfer
+					|| entry.authored.supplyBusIds.size() != 2) continue;
+				StationSupplyTransferSnapshot transfer;
+				transfer.consumerType = type;
+				transfer.loadId = entry.authored.id;
+				transfer.primaryBusId = entry.authored.supplyBusIds[0];
+				transfer.backupBusId = entry.authored.supplyBusIds[1];
+				transfer.returnDwellSeconds = entry.authored.transferReturnDwellSeconds;
+				if (auto const state = mImpl->supplyTransfers.find({type, entry.authored.id});
+					state != mImpl->supplyTransfers.end())
+				{
+					transfer.onBackup = state->second.onBackup;
+					transfer.eventFromBusId = state->second.eventFromBusId;
+					transfer.eventToBusId = state->second.eventToBusId;
+					transfer.eventAtSimSeconds = state->second.eventAtSimSeconds;
+					// How long the primary has held the load whole, read off the
+					// instant it became capable rather than accumulated, so the
+					// published number is real elapsed time.
+					if (state->second.primaryCapableSince)
+						transfer.primaryCapableSeconds = std::max(0.0,
+							transferNow - *state->second.primaryCapableSince);
+				}
+				transfer.servingBusId = transfer.onBackup
+					? transfer.backupBusId : transfer.primaryBusId;
+				result.power.supplyTransfers.push_back(std::move(transfer));
+			}
+		};
+		publishTransfer("Equipment", mImpl->loads);
+		publishTransfer("Generator", mImpl->generators);
+		publishTransfer("Coolant loop", mImpl->coolantLoops);
+		publishTransfer("Chiller", mImpl->chillers);
+		publishTransfer("Water treatment", mImpl->waterTreatments);
+		publishTransfer("Electrolyzer", mImpl->electrolyzers);
+		publishTransfer("CO2 capture", mImpl->co2Captures);
+		publishTransfer("Sabatier", mImpl->sabatierReactors);
+		publishTransfer("Methane processor", mImpl->methaneProcessors);
+		publishTransfer("Microbial processor", mImpl->microbialProcessors);
+		publishTransfer("Crops", mImpl->cropPopulations);
+		publishTransfer("Algae", mImpl->algaeCultures);
 		return result;
 	}
 }

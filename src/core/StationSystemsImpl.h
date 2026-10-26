@@ -1664,6 +1664,44 @@ using namespace station_detail;
 		void evaluateMonitors(StationSystemsSnapshot const& published);
 		void reconcileMonitors(StationSystemsSettings const& offered);
 		void clearAlert(std::string_view monitorId, AlertClearReason reason);
+		// #882: one automatic transfer switch per Transfer-mode load. The switch
+		// position is committed runtime state, never a settings mutation: the
+		// authored primary/backup pair stays as authored and the load's draws
+		// follow the position through the single consumerBus() seam, so no
+		// allocation path has to know that a failover happened.
+		struct SupplyTransferState
+		{
+			bool onBackup{false};
+			// The instant the primary last became able to carry this load whole.
+			// The dwell is measured from here, not accumulated, so "30 s of
+			// continuous capability" means 30 s of the simulation actually
+			// elapsed on a capable primary. A short tick clears it and the
+			// dwell restarts from nothing.
+			std::optional<double> primaryCapableSince;
+			// The last move the switch made, published and announced from here.
+			std::string eventFromBusId, eventToBusId;
+			double eventAtSimSeconds{-1.0};
+			// What the load wanted and what the primary could deliver at the
+			// instant of the move, so the Alert reads as a measurement rather
+			// than as a bare "it switched".
+			double eventDemandKW{0.0};
+			double eventPrimaryAvailableKW{0.0};
+			// Which move this load's Advisory Alert was raised for, so the
+			// post-step pass raises exactly one Alert per transfer and never
+			// re-reads a stale one.
+			std::optional<double> alertRaisedForEventSeconds;
+		};
+		std::map<std::pair<std::string, std::string>, SupplyTransferState> supplyTransfers;
+		// #882: the electrical demand each consumer presented to the pool in
+		// the last committed tick - the same supply-independent signal dispatch
+		// runs on (#415) - kept per consumer so a transfer switch can weigh its
+		// own load against what its primary can actually deliver this tick.
+		std::map<std::pair<std::string, std::string>, double> lastConsumerDispatchRequest;
+		// Fires and auto-clears the Advisory Alert for every transfer the
+		// committed tick recorded. Runs outside the ledger beside the Monitor
+		// evaluation, so a rolled-back tick cannot leave a phantom Alert behind:
+		// the event it would have read rolls back with it.
+		void reconcileTransferAlerts();
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
@@ -2051,6 +2089,15 @@ using namespace station_detail;
 		std::vector<std::string> protectedServiceBuses;
 		void initializeBuses();
 		std::string const& consumerBus(std::string const& type, std::string const& id);
+		// #882: the automatic transfer switch resolution. Runs after every
+		// source has registered this tick's generation and before any load
+		// draws, so a shortfall on the primary moves the whole load onto its
+		// backup within the same tick and no draw ever straddles both buses.
+		bool transferSupply();
+		// What one bus could deliver to one consumer through that consumer's
+		// own supply connection: the bus's generation still on hand plus what
+		// its batteries can discharge, less what the cable between them loses.
+		double busAvailableFor(std::string const& type, std::string const& id, std::string const& busId);
 		void addGeneration(std::vector<std::string> const& ids, double power);
 		double sourceDemand(std::vector<std::string> const& ids);
 		void commitSource(std::vector<std::string> const& ids, double power);
