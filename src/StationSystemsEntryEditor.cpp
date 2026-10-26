@@ -1472,6 +1472,15 @@ bool renderGeneratorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 			profile.efficiencyBand, *profile.maxRampKWPerSecond);
 	else
 		ImGui::TextDisabled("Admitted efficiency %s; ramp ceiling unbounded", profile.efficiencyBand);
+	if (ImGui::Checkbox(describe("Methane combustion", label).c_str(), &generator.methaneCombustion)
+		&& !generator.methaneCombustion)
+	{ generator.combustionAirId.clear(); generator.combustionExhaustId.clear(); }
+	if (generator.methaneCombustion)
+	{
+		ImGui::TextUnformatted("Methane LHV 50 MJ/kg; O2 4, CO2 2.75, water 2.25 kg/kg fuel");
+		renderRefCombo(describe("Combustion air", label), generator.combustionAirId, atmosphereIds(draft), false);
+		renderRefCombo(describe("Combustion exhaust", label), generator.combustionExhaustId, atmosphereIds(draft), false);
+	}
 	renderRefCombo(describe("fuel store", label), generator.fuelStoreId, storeIds(draft), portIsOptional("Generator", "Fuel in"));
 	renderThermalClassCombo(draft, describe("thermal class", label), generator.thermalClass, generator.heatSinkId);
 	renderRefCombo(describe("heat sink", label), generator.heatSinkId, reservoirIds(draft), portIsOptional("Generator", "Heat out"));

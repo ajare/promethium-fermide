@@ -103,6 +103,8 @@ namespace core
 			// A generator always burns into a declared sink: its waste,
 			// startup and decay heat must route somewhere, so both
 			// connectors are required.
+			PortDescriptor{"Generator", "Combustion air", StationPortDirection::Input, "gas-draw", "atmosphere-source", 1, {}, true},
+			PortDescriptor{"Generator", "Combustion exhaust", StationPortDirection::Output, "combustion-exhaust", "exhaust-delivery", 1, {}, true},
 			PortDescriptor{"Generator", "Fuel in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
 			PortDescriptor{"Generator", "Heat out", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false},
 			PortDescriptor{"Fuel cell", "Hydrogen in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
@@ -144,6 +146,7 @@ namespace core
 			PortDescriptor{"Heat engine", "Thermal intake", StationPortDirection::Input, "heat-intake", "heat-source", 1, {}, false},
 			PortDescriptor{"Heat engine", "Rejection heat", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false},
 			PortDescriptor{"Heat engine", "Supervision", StationPortDirection::Input, "installation", "supervision", 0, {}, false},
+			PortDescriptor{"Atmosphere", "Exhaust in", StationPortDirection::Input, "exhaust-delivery", "combustion-exhaust", 0},
 			PortDescriptor{"Atmosphere", "Gas out", StationPortDirection::Output, "atmosphere-source", "gas-draw", 0, {}},
 			PortDescriptor{"Atmosphere", "Oxygen in", StationPortDirection::Input, "oxygen-target", "oxygen-delivery", 0, {}},
 			PortDescriptor{"Coolant loop", "Cold surfaces", StationPortDirection::Output, "cold-surface", "condensation", 0, {}},
@@ -357,7 +360,7 @@ namespace core
 	inline std::string_view stationMachineField(std::string_view nodeType,
 		std::string_view portName)
 	{
-		static constexpr std::array<std::pair<std::array<std::string_view, 2>, std::string_view>, 24> fields{{
+		static constexpr std::array<std::pair<std::array<std::string_view, 2>, std::string_view>, 26> fields{{
 			{{"Equipment", "Equipment input 1"}, "Material in 1"},
 			{{"Equipment", "Equipment input 2"}, "Material in 2"},
 			{{"Equipment", "Equipment return 1"}, "Material return 1"},
@@ -365,6 +368,8 @@ namespace core
 			{{"Equipment", "Heat out"}, "Heat sink"},
 			{{"Generator", "Fuel in"}, "Fuel store"},
 			{{"Generator", "Heat out"}, "Heat sink"},
+			{{"Generator", "Combustion air"}, "Combustion air"},
+			{{"Generator", "Combustion exhaust"}, "Combustion exhaust"},
 			{{"Fuel cell", "Hydrogen in"}, "Hydrogen store"},
 			{{"Fuel cell", "Oxygen in"}, "Oxygen store"},
 			{{"Fuel cell", "Water out"}, "Water store"},

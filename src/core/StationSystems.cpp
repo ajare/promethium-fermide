@@ -1319,6 +1319,12 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			atmosphereIndex[atmosphere.id] = mImpl->atmospheres.size();
 			mImpl->atmospheres.push_back(std::move(state));
 		}
+		for (auto& generator : mImpl->generators)
+			if (generator.authored.methaneCombustion)
+			{
+				generator.combustionAirIndex = atmosphereIndex.at(generator.authored.combustionAirId);
+				generator.combustionExhaustIndex = atmosphereIndex.at(generator.authored.combustionExhaustId);
+			}
 		for (auto const& pathway : settings.atmospherePathways)
 		{
 			Impl::AtmospherePathwayState state;

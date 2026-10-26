@@ -368,6 +368,12 @@ namespace core
 			generatorResult.disabled = generator.authored.ratedOutputKW <= 0.0;
 			generatorResult.availabilityFactor = generator.availabilityFactor;
 			generatorResult.blockReason = generator.lastBlockReason;
+			generatorResult.combustionFuelKg = generator.combustionFuelKg;
+			generatorResult.combustionOxygenKg = generator.combustionOxygenKg;
+			generatorResult.combustionCarbonDioxideKg = generator.combustionCarbonDioxideKg;
+			generatorResult.combustionWaterKg = generator.combustionWaterKg;
+			generatorResult.combustionAirKg = generator.combustionAirKg;
+			generatorResult.combustionExhaustKg = generator.combustionExhaustKg;
 			generatorResult.fuelEnergyKJ = generator.fuelEnergyKJ;
 			generatorResult.electricalKJ = generator.electricalKJ;
 			generatorResult.wasteHeatKJ = generator.wasteHeatKJ;
@@ -904,6 +910,7 @@ namespace core
 			atmosphereResult.condensedKg = compartment.condensedKg;
 			atmosphereResult.leakedKg = compartment.leakedKg;
 			atmosphereResult.exteriorLostKg = compartment.exteriorLostKg;
+			atmosphereResult.combustionKg = compartment.combustionKg;
 			atmosphereResult.recoveredKg = compartment.recoveredKg;
 			atmosphereResult.lostKg = compartment.lostKg;
 			atmosphereResult.connectionCarbonDioxideLostKg = compartment.connectionCarbonDioxideLostKg;

@@ -222,6 +222,12 @@ namespace
 			{ mapping = {type, owner.nodeId, field, peer}; biological = true; }
 		});
 		if (biological) return true;
+		if (link.to.nodeType == "Generator" && link.to.portName == "Combustion air"
+			&& link.from.nodeType == "Atmosphere" && link.from.portName == "Gas out")
+		{ mapping = {"Generator", link.to.nodeId, "Combustion air", link.from}; return true; }
+		if (link.from.nodeType == "Generator" && link.from.portName == "Combustion exhaust"
+			&& link.to.nodeType == "Atmosphere" && link.to.portName == "Exhaust in")
+		{ mapping = {"Generator", link.from.nodeId, "Combustion exhaust", link.to}; return true; }
 		if (link.to.nodeType == "Water collector" && link.to.portName == "Atmosphere"
 			&& link.from.nodeType == "Atmosphere" && link.from.portName == "Gas out")
 		{
@@ -627,7 +633,9 @@ namespace
 			if (found == settings.generators.end()) return nullptr;
 			static constexpr std::pair<char const*, std::string GeneratorSettings::*> const members[] = {
 				{"Fuel store", &GeneratorSettings::fuelStoreId},
-				{"Heat sink", &GeneratorSettings::heatSinkId}};
+				{"Heat sink", &GeneratorSettings::heatSinkId},
+				{"Combustion air", &GeneratorSettings::combustionAirId},
+				{"Combustion exhaust", &GeneratorSettings::combustionExhaustId}};
 			for (auto const& [name, member] : members)
 				if (field == name) return &((*found).*member);
 			return nullptr;
@@ -1168,6 +1176,16 @@ namespace
 				[&](GeneratorSettings const& entry) { return entry.id == mapping.ownerId; });
 			if (found == settings.generators.end()) return false;
 			auto const where = "Station generator '" + found->id + "'";
+			if (mapping.field == "Combustion air" || mapping.field == "Combustion exhaust")
+			{
+				auto const& id = mapping.field == "Combustion air" ? found->combustionAirId : found->combustionExhaustId;
+				if (id.empty()) return true; // incomplete draft, not a dangling reference
+				if (!found->methaneCombustion) diagnostic = where + " combustion ports require methaneCombustion";
+				else if (std::none_of(settings.atmospheres.begin(), settings.atmospheres.end(),
+					[&](auto const& air) { return air.id == id; }))
+					diagnostic = where + " combustion references unknown Atmosphere '" + id + "'";
+				return true;
+			}
 			if (mapping.field == "Fuel store")
 			{
 				if (found->fuelStoreId.empty()) return true;
@@ -1662,6 +1680,12 @@ std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& set
 	}
 	for (auto const& generator : settings.generators)
 	{
+		if (!generator.combustionAirId.empty())
+			links.push_back({linkIdentity("Generator", generator.id, "Combustion air"),
+				{"Atmosphere", generator.combustionAirId, "Gas out"}, {"Generator", generator.id, "Combustion air"}});
+		if (!generator.combustionExhaustId.empty())
+			links.push_back({linkIdentity("Generator", generator.id, "Combustion exhaust"),
+				{"Generator", generator.id, "Combustion exhaust"}, {"Atmosphere", generator.combustionExhaustId, "Exhaust in"}});
 		if (!generator.fuelStoreId.empty())
 			links.push_back({linkIdentity("Generator", generator.id, "Fuel store"),
 				{"Store", generator.fuelStoreId, "Inventory out"},

@@ -1041,6 +1041,10 @@ namespace core
 	{
 		std::string id;
 		StationGeneratorPrimeMover primeMover{StationGeneratorPrimeMover::Reciprocating};
+		// Opt-in methane basis: CH4 + 4 O2 (mass) -> 2.75 CO2 + 2.25 H2O.
+		// 50 MJ/kg lower heating value; independent of prime mover.
+		bool methaneCombustion{false};
+		std::string combustionAirId, combustionExhaustId;
 		std::string fuelStoreId;      // energy-unit Resource store: the fuel inventory
 		std::string thermalClass;     // service class of the generator's waste heat
 		std::string heatSinkId;       // reservoir accepting waste, startup and decay heat
@@ -3389,6 +3393,9 @@ namespace core
 		double dispatchCommandKW{0.0};
 		bool dispatchCommanded{false};
 		std::string blockReason;           // why a commanded start is not proceeding
+		double combustionFuelKg{0.0}, combustionOxygenKg{0.0};
+		double combustionCarbonDioxideKg{0.0}, combustionWaterKg{0.0};
+		double combustionAirKg{0.0}, combustionExhaustKg{0.0};
 		double fuelEnergyKJ{0.0};          // cumulative fuel energy consumed
 		double electricalKJ{0.0};          // cumulative electrical delivered
 		double wasteHeatKJ{0.0};           // cumulative waste heat routed
@@ -4240,6 +4247,7 @@ namespace core
 		// Cumulative loss through exterior pathways, in StationPathwayGases order.
 		// Separate from constant leaks and airlock losses; never counted twice.
 		std::array<double, 4> exteriorLostKg{};
+		std::array<double, 4> combustionKg{}; // signed O2/N2/CO2/vapour inlet/exhaust exchange
 		double collectedKg{0.0}; // cumulative vapour removed by water recovery
 		double electrolysisOxygenKg{0.0}; // cumulative O2 added by electrolysis (#404)
 		double co2CapturedKg{0.0}; // cumulative CO2 removed by capture (#404)

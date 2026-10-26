@@ -924,6 +924,14 @@ namespace core
 			if (!requireFinite(generator.lastStartupDrawKW, where + "startup draw")) return false;
 			if (!requireFinite(generator.lastDecayHeatKW, where + "decay heat")) return false;
 			if (!requireFinite(generator.startupReceivedKJ, where + "startup energy received")) return false;
+			for (auto const value : {generator.combustionFuelKg, generator.combustionOxygenKg,
+				generator.combustionCarbonDioxideKg, generator.combustionWaterKg,
+				generator.combustionAirKg, generator.combustionExhaustKg})
+				if (!requireFinite(value, where + "combustion mass") || value < 0.0) return false;
+			if (std::abs(generator.combustionFuelKg + generator.combustionOxygenKg
+				- generator.combustionCarbonDioxideKg - generator.combustionWaterKg)
+				> StationBalanceTolerance * std::max(1.0, generator.combustionFuelKg))
+				return violation = where + "combustion mass does not close", false;
 			if (!requireFinite(generator.fuelEnergyKJ, where + "cumulative fuel energy")) return false;
 			if (!requireFinite(generator.electricalKJ, where + "cumulative electrical energy")) return false;
 			if (!requireFinite(generator.wasteHeatKJ, where + "cumulative waste heat")) return false;
@@ -1096,17 +1104,17 @@ namespace core
 			std::array<ComponentClosure, 4> const closures{{
 				{"oxygen", compartment.authored.startingOxygenKg,
 					compartment.electrolysisOxygenKg + compartment.cropOxygenAddedKg
-						+ compartment.algaeOxygenAddedKg + compartment.diffusedKg[0],
+						+ compartment.algaeOxygenAddedKg + compartment.diffusedKg[0] + compartment.combustionKg[0],
 					compartment.fireOxygenConsumedKg + compartment.oxygenConsumedKg + compartment.leakOxygenKg
 						+ compartment.cycleOxygenKg + compartment.cropOxygenDrawnKg
 						+ compartment.algaeOxygenDrawnKg + compartment.exteriorLostKg[0],
 					compartment.oxygenKg},
-				{"nitrogen", compartment.authored.startingNitrogenKg, compartment.diffusedKg[1],
+				{"nitrogen", compartment.authored.startingNitrogenKg, compartment.diffusedKg[1] + compartment.combustionKg[1],
 					compartment.leakNitrogenKg + compartment.cycleNitrogenKg + compartment.exteriorLostKg[1],
 					compartment.nitrogenKg},
 				{"carbonDioxide", compartment.authored.startingCarbonDioxideKg,
 					compartment.fireCarbonDioxideKg + compartment.co2ProducedKg + compartment.cropCarbonDioxideAddedKg
-						+ compartment.algaeCarbonDioxideAddedKg + compartment.diffusedKg[2],
+						+ compartment.algaeCarbonDioxideAddedKg + compartment.diffusedKg[2] + compartment.combustionKg[2],
 					compartment.leakCarbonDioxideKg + compartment.cycleCarbonDioxideKg
 						+ compartment.capturedCarbonDioxideKg + compartment.cropCarbonDioxideDrawnKg
 						+ compartment.algaeCarbonDioxideDrawnKg + compartment.connectionCarbonDioxideLostKg
@@ -1114,7 +1122,7 @@ namespace core
 					compartment.carbonDioxideKg},
 				{"waterVapour", compartment.authored.startingWaterVapourKg,
 					compartment.vapourAddedKg + compartment.cropVapourAddedKg
-						+ compartment.algaeVapourAddedKg + compartment.diffusedKg[3],
+						+ compartment.algaeVapourAddedKg + compartment.diffusedKg[3] + compartment.combustionKg[3],
 					compartment.condensedKg + compartment.leakWaterVapourKg
 						+ compartment.cycleWaterVapourKg + compartment.collectedKg + compartment.connectionWaterVapourLostKg
 						+ compartment.exteriorLostKg[3],

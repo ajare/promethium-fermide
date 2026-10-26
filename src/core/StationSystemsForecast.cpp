@@ -51,6 +51,11 @@ namespace core
 				result.unavailableReason = "Crew greywater returns and their quality-dependent downstream use are not modelled by the declared-profile forecast.";
 				return result;
 			}
+		if (std::any_of(settings.generators.begin(), settings.generators.end(), [](auto const& g) { return g.methaneCombustion; }))
+		{
+			result.unavailableReason = "Generator combustion atmosphere coupling is not modelled by the declared-profile forecast.";
+			return result;
+		}
 		result.available = true;
 		// Exclude the complete material-connected component, not just the
 		// two endpoints: downstream Crew/transfer projections depend on it.

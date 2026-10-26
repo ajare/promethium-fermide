@@ -300,6 +300,40 @@ that load in full even when the bank contains plenty of energy.
 
 ### Generator
 
+**Combustion (opt-in, #895):** `methaneCombustion: true` declares an explicit
+methane lower-heating-value basis of 50 MJ/kg. Each kg of fuel consumes 4 kg O2
+and produces 2.75 kg CO2 and 2.25 kg water vapour. This basis is independent of
+prime mover; a Stirling burner can use it too. The fuel Store remains energy-
+denominated: its energy draw determines the declared methane mass, not its name.
+Omission preserves the historical energy-only source, not a claim that it burns
+fuel safely in a sealed compartment.
+
+`combustionAirId` and `combustionExhaustId` must both name Atmosphere compartments.
+The **Combustion air** port joins **Gas out**; **Combustion exhaust** joins the new
+**Exhaust in** face. Both are physical air ducts (kg/s), with ordinary throughput
+and efficiency limits. The inlet draws the compartment's whole mixture in the
+proportion needed for stoichiometric oxygen; nitrogen and existing CO2/moisture
+travel to the exhaust along with reaction products. The two references may name
+the same compartment: nitrogen then returns unchanged while O2 falls and CO2/
+moisture rise, so an unventilated installation becomes hazardous. A separate
+exhaust compartment can be connected to Exterior vacuum through an authored
+Atmosphere pathway; there is no implicit disposal boundary. Inlet leakage removes
+the source mixture, exhaust leakage loses exhaust mixture, and connection ledgers
+report both transport losses. Oxygen or duct exhaustion throttles generation and
+fuel burn; zero available oxygen prevents running. Breathing reserves are not
+silently protected: route dedicated supply explicitly if required.
+
+Generator snapshots publish cumulative fuel/O2/CO2/water masses and gross inlet /
+delivered exhaust mass. Each compartment publishes signed per-species
+`combustionKg` exchanges (O2, N2, CO2, water vapour), included in its conservation
+audit. Water vapour participates in the normal same-step condensation solve.
+The existing waste/startup/decay heat Reservoir contract is unchanged: this slice
+does **not** add hot-flue sensible enthalpy, excess-air control, incomplete
+combustion/CO, ignition thresholds, or arbitrary fuel chemistry. Configuration
+schema 126 persists the opt-in; changing the basis or either endpoint requires
+Apply, not a live scalar edit. The declared-profile forecast is unavailable for
+combustion configurations rather than promising oxygen-unconstrained endurance.
+
 **What it does:** converts finite stored fuel energy into dispatchable
 electricity, with real startup draw, ramping, waste heat and shutdown heat.
 It is an energy contract, not a nuclear-reactor physics model.
@@ -623,7 +657,8 @@ cannot accept power, the engine is not a guaranteed cooling path.
 thermal state. Pressure/partial pressures follow the ideal-gas model. Sharing
 an ID, label or thermal class does not make compartments mix.
 
-**Ports:** **Gas out** serves extraction processes/Airlock cycles; **Oxygen in**
+**Ports:** **Gas out** serves extraction processes/Airlock cycles and Generator
+combustion air; **Exhaust in** accepts Generator bulk exhaust; **Oxygen in**
 accepts direct Electrolyzer supply. **Biology in/out** bind Crew/Crops/Algae gas,
 moisture and heat exchanges. **Hosted pathways** and **Thermal links** host
 those two-ended aggregates. Optional **Heat out** names a Reservoir for a

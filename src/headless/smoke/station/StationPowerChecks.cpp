@@ -208,6 +208,13 @@ namespace
 			auto draft = base();
 			bool const input = port.direction == core::StationPortDirection::Input;
 			bool const heat = port.name == "Heat out";
+			bool const combustion = port.name == "Combustion air" || port.name == "Combustion exhaust";
+			if (combustion)
+			{
+				draft.generators[0].methaneCombustion = true;
+				core::AtmosphereSettings air; air.id = "peer";
+				draft.atmospheres.push_back(air);
+			}
 			bool const chain = port.nodeType == "Fuel cell" || port.nodeType == "Sabatier"
 				|| port.nodeType == "Methane processor";
 			if (port.nodeType == "Equipment" && !heat)
@@ -216,7 +223,8 @@ namespace
 			draft.stores.push_back(store("peer", port.nodeType == "Generator" ? "kJ" : "kg"));
 			draft.thermalReservoirs.push_back(reservoir("peer", thermalClass));
 			core::StationPinRef const machine{std::string(port.nodeType), id, std::string(port.name)};
-			core::StationPinRef const peer = heat
+			core::StationPinRef const peer = combustion
+				? pin("Atmosphere", "peer", input ? "Gas out" : "Exhaust in") : heat
 				? pin("Reservoir", "peer", "Heat in")
 				: pin("Store", "peer", input ? "Inventory out" : "Inventory in");
 			auto const candidate = link(machine, peer);
@@ -247,7 +255,7 @@ namespace
 			// faces), while unrelated missing references mask the full pass.
 			auto unknown = candidate;
 			unknown.to.nodeId = "ghost";
-			requireRefused(draft, unknown, heat ? "unknown thermal reservoir" : "store",
+			requireRefused(draft, unknown, combustion ? "Atmosphere" : heat ? "unknown thermal reservoir" : "store",
 				"an unknown machine counterpart");
 			if (heat)
 			{

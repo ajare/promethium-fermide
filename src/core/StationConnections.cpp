@@ -267,7 +267,9 @@ Graph build(core::StationSystemsSettings const& s)
 	b.connect(s.wasteEjections, "Waste ejection", [&](size_t n, auto const& p) {
 		b.input(n, p.storeId, "Disposal-ready waste"); });
 	b.connect(s.generators, "Generator", [&](size_t n, auto const& p) {
-		b.feed(n, p.fuelStoreId, "Fuel", Medium::Fuel); b.heat(n, p.heatSinkId); });
+		b.feed(n, p.fuelStoreId, "Fuel", Medium::Fuel); b.heat(n, p.heatSinkId);
+		b.input(n, p.combustionAirId, "Combustion air", "Atmosphere", LinkKind::Material, true, Medium::Atmosphere);
+		b.output(n, p.combustionExhaustId, "Combustion exhaust", "Atmosphere", LinkKind::Material, true, Medium::Atmosphere); });
 	b.connect(s.equipmentLoads, "Equipment", [&](size_t n, auto const& p) {
 		b.heat(n, p.heatSinkId);
 		size_t in = 0, out = 0;

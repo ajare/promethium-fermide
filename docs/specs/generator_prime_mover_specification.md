@@ -20,7 +20,10 @@ All three tickets implemented.
 
 Related gap: **#895** — "Known modelling gap: fuelled Generators consume no oxygen
 and produce no CO2". Filed separately so the largest honest gap in this component
-stays visible rather than being buried in the Out of Scope list.
+stays visible rather than being buried in the Out of Scope list. Subsequently
+implemented as opt-in methane combustion with explicit atmosphere air/exhaust
+ports; see `docs/station-components.md` § Generator. Energy-only legacy sources
+remain atmosphere-independent.
 
 Canonical vocabulary: `CONTEXT.md` § Station systems. This spec adds **Prime Mover**
 and **Prime Mover Profile**. It changes no other noun, adds no port, and supersedes
@@ -377,10 +380,10 @@ leaked into runtime arithmetic and the design has drifted out of scope.
 - **Multi-fuel or fuel-switching generators.** One fuel store per generator, as
   today.
 - **Combustion oxygen demand.** A real combustion generator consumes station
-  oxygen and produces CO₂. The current Generator has no atmosphere interface at
-  all, and adding one is a substantial ECLSS coupling well outside this spec.
-  Recorded here because it is the most significant thing this model does not say
-  about burning fuel. **Tracked as its own issue: #895.**
+  oxygen and produces CO₂. This was outside the prime-mover spec and was tracked
+  separately as **#895**, now implemented by opt-in methane combustion with
+  authored bulk-air and exhaust ducts. Prime mover selection alone still does
+  not imply combustion or choose its fuel basis.
 - **A generic role-based stream model.** Same reasoning as the fuel cell spec §14:
   would be inconsistent with the Sabatier reactor, Electrolyzer, Methane
   processor and Fuel cell unless applied to all four at once.

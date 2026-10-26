@@ -722,6 +722,10 @@ using namespace station_detail;
 		struct GeneratorState
 		{
 			GeneratorSettings authored;
+			size_t combustionAirIndex{SIZE_MAX}, combustionExhaustIndex{SIZE_MAX};
+			double combustionFuelKg{0.0}, combustionOxygenKg{0.0};
+			double combustionCarbonDioxideKg{0.0}, combustionWaterKg{0.0};
+			double combustionAirKg{0.0}, combustionExhaustKg{0.0};
 			size_t fuelStoreIndex{0};
 			size_t sinkIndex{0};
 			StationGeneratorPhase phase{StationGeneratorPhase::Stopped};
@@ -844,6 +848,8 @@ using namespace station_detail;
 			double startingPressureKPa{0.0};
 			// Signed net diffusion additions, included in each species audit.
 			std::array<double, 4> diffusedKg{};
+			// Signed generator inlet/exhaust exchange, including reaction products.
+			std::array<double, 4> combustionKg{};
 			// Exterior pathways remove material, never add an internal diffusion term.
 			std::array<double, 4> exteriorLostKg{};
 			// Cumulative per-component removals by pathway, the closure

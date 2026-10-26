@@ -1,4 +1,5 @@
 #include "StationSystemsImpl.h"
+#include "StationGeneratorCombustion.h"
 
 namespace core
 {
@@ -1425,8 +1426,25 @@ namespace core
 						&& powerAvailable("Generator", generator.authored.id) + 1e-9 < generator.authored.startupPowerKW))
 					ports.limitDemand(0.0, 1.0);
 			}
-			auto const drawableUnits = std::max(0.0,
+			auto drawableUnits = std::max(0.0,
 				ports.input(generator.fuelStoreIndex, qualified[generator.fuelStoreIndex] - runtime.stores[generator.fuelStoreIndex].authored.protectedReserve));
+			double airPerFuelKg = 0.0;
+			if (generator.authored.methaneCombustion)
+			{
+				auto const& air = runtime.atmospheres[generator.combustionAirIndex];
+				auto const mass = air.oxygenKg + air.nitrogenKg + air.carbonDioxideKg + air.waterVapourKg;
+				airPerFuelKg = air.oxygenKg > 0.0 ? 4.0 * mass / air.oxygenKg : 0.0;
+				auto const inlet = connections.port("Generator", generator.authored.id, "Combustion air");
+				auto const outlet = connections.port("Generator", generator.authored.id, "Combustion exhaust");
+				auto fuelKg = air.oxygenKg * connections.efficiency(inlet) / 4.0;
+				if (airPerFuelKg > 0.0)
+				{
+					fuelKg = std::min(fuelKg, connections.remaining(inlet) * connections.efficiency(inlet) * dtSeconds / airPerFuelKg);
+					fuelKg = std::min(fuelKg, connections.remaining(outlet) * dtSeconds / (airPerFuelKg + 1.0));
+				}
+				else fuelKg = 0.0;
+				drawableUnits = std::min(drawableUnits, std::max(0.0, fuelKg) * 50000.0 / (kwhPerUnit * 3600.0));
+			}
 			auto const drawableKWh = drawableUnits * kwhPerUnit;
 			auto const startupRequiredKJ = generator.authored.startupPowerKW * generator.authored.startupSeconds;
 			generator.lastAverageOutputKW = 0.0;
@@ -1467,7 +1485,8 @@ namespace core
 					if (!coolingAvailable)
 						generator.lastBlockReason = temperatureRefusal("cooling is not qualified: sink at or above the maximum sink temperature");
 					else if (drawableKWh <= 0.0)
-						generator.lastBlockReason = "no fuel is drawable above the protected reserve";
+						generator.lastBlockReason = generator.authored.methaneCombustion
+							? "fuel, combustion air or exhaust capacity unavailable" : "no fuel is drawable above the protected reserve";
 					else if (startupRequiredKJ > 0.0
 						&& powerAvailable("Generator", generator.authored.id) + 1e-9
 							< generator.authored.startupPowerKW)
@@ -1592,8 +1611,9 @@ namespace core
 					generator.outputKW = 0.0;
 					generator.lastBlockReason = "cooling lost: generator tripped to shutdown";
 				}
-				else if (commanded <= 0.0)
+				else if (commanded <= 0.0 || (generator.authored.methaneCombustion && drawableKWh <= 0.0))
 				{
+					if (commanded > 0.0) generator.lastBlockReason = "fuel, combustion air or exhaust capacity unavailable";
 					generator.phase = StationGeneratorPhase::Shutdown;
 					generator.shutdownElapsedSeconds = 0.0;
 					generator.outputKW = 0.0;
@@ -1609,6 +1629,13 @@ namespace core
 						if (binding.input && binding.store == generator.fuelStoreIndex)
 							cableCapKW = std::min(cableCapKW, connections.remaining(binding.port)
 								* connections.efficiency(binding.port) * kwhPerUnit * 3600 * generator.effectiveWearCapability());
+					if (generator.authored.methaneCombustion)
+					{
+						auto const& air = runtime.atmospheres[generator.combustionAirIndex];
+						cableCapKW = std::min(cableCapKW, combustionOutputCeiling(generator.authored, air.oxygenKg,
+							air.oxygenKg + air.nitrogenKg + air.carbonDioxideKg + air.waterVapourKg,
+							generator.effectiveWearCapability(), connections));
+					}
 					auto const startKW = std::min({generator.outputKW, effectiveRatedKW, cableCapKW});
 					auto const targetKW = std::min({commanded, effectiveRatedKW, cableCapKW});
 					auto const ramp = integrateGeneratorRamp(startKW, targetKW,
@@ -1635,7 +1662,8 @@ namespace core
 							generator.phase = StationGeneratorPhase::Shutdown;
 							generator.shutdownElapsedSeconds = 0.0;
 							generator.outputKW = 0.0;
-							generator.lastBlockReason = "fuel depleted: generator shut down";
+							generator.lastBlockReason = generator.authored.methaneCombustion
+								? "fuel or combustion air unavailable: generator shut down" : "fuel depleted: generator shut down";
 							generator.lastAverageOutputKW = 0.0;
 							break;
 						}
@@ -1659,6 +1687,41 @@ namespace core
 					stagedUnitLoss[runtime.stores[generator.fuelStoreIndex].authored.unit] += drawnUnits;
 					generator.lastFuelDrawKWh = drawnKWh;
 					auto const fuelKJ = drawnKWh * 3600.0;
+					if (generator.authored.methaneCombustion && fuelKJ > 0.0)
+					{
+						auto& air = runtime.atmospheres[generator.combustionAirIndex];
+						auto& exhaust = runtime.atmospheres[generator.combustionExhaustIndex];
+						auto const fuelKg = fuelKJ / 50000.0;
+						auto const oxygenKg = 4.0 * fuelKg;
+						auto const airKg = airPerFuelKg * fuelKg;
+						auto const inlet = connections.port("Generator", generator.authored.id, "Combustion air");
+						auto const outlet = connections.port("Generator", generator.authored.id, "Combustion exhaust");
+						auto const total = air.oxygenKg + air.nitrogenKg + air.carbonDioxideKg + air.waterVapourKg;
+						auto const flow = connections.receive(inlet, airKg / dtSeconds, total / dtSeconds);
+						auto const removed = flow.input * dtSeconds;
+						auto const delivered = connections.send(outlet, (airKg + fuelKg) / dtSeconds).delivered * dtSeconds;
+						auto const exhaustFraction = delivered / (airKg + fuelKg);
+						std::array<double*, 4> const source{&air.oxygenKg, &air.nitrogenKg, &air.carbonDioxideKg, &air.waterVapourKg};
+						std::array<double*, 4> const target{&exhaust.oxygenKg, &exhaust.nitrogenKg, &exhaust.carbonDioxideKg, &exhaust.waterVapourKg};
+						std::array<double, 4> const reaction{-oxygenKg, 0.0, 2.75 * fuelKg, 2.25 * fuelKg};
+						// Snapshot the mixture before touching either endpoint: same-room
+						// combustion is legal and must not feed its own products back in.
+						std::array<double, 4> mixture{};
+						for (size_t i = 0; i < 4; ++i) mixture[i] = *source[i] / total;
+						for (size_t i = 0; i < 4; ++i)
+						{
+							auto const taken = removed * mixture[i];
+							auto const returned = std::max(0.0, airKg * mixture[i] + reaction[i]) * exhaustFraction;
+							*source[i] -= taken; air.combustionKg[i] -= taken;
+							*target[i] += returned; exhaust.combustionKg[i] += returned;
+						}
+						generator.combustionFuelKg += fuelKg;
+						generator.combustionOxygenKg += oxygenKg;
+						generator.combustionCarbonDioxideKg += reaction[2];
+						generator.combustionWaterKg += reaction[3];
+						generator.combustionAirKg += removed;
+						generator.combustionExhaustKg += delivered;
+					}
 					auto const electricalKJ = generator.lastAverageOutputKW * dtSeconds;
 					// Waste heat is the fuel energy the conversion did
 					// not deliver as electricity: booked once into the

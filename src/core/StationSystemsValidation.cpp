@@ -1881,6 +1881,13 @@ namespace
 			auto const where = "Station generator '" + generator.id + "'";
 			if (static_cast<size_t>(generator.primeMover) >= StationGeneratorPrimeMoverNames.size())
 				return refuse(where + " has unknown prime mover; declared prime movers are: reciprocating, gas-turbine, stirling");
+			if (!generator.methaneCombustion && (!generator.combustionAirId.empty() || !generator.combustionExhaustId.empty()))
+				return refuse(where + " combustion ports require methaneCombustion");
+			if (generator.methaneCombustion)
+				for (auto const& id : {generator.combustionAirId, generator.combustionExhaustId})
+					if (std::none_of(settings.atmospheres.begin(), settings.atmospheres.end(),
+						[&](auto const& air) { return air.id == id; }))
+						return missing(where + " combustion references unknown Atmosphere '" + id + "'");
 			if (generator.id.empty()) return refuse("Station generator id must not be empty");
 			if (generator.id.size() > MaxStationStoreIdLength)
 				return refuse("Station generator id exceeds "

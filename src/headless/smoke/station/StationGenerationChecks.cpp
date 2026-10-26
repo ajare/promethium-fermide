@@ -2,6 +2,7 @@
 #include "StationRig.h"
 #include "core/BinarySerializer.h"
 #include "core/StationConfigurationDocument.h"
+#include "core/StationPorts.h"
 #include <limits>
 #include <tuple>
 
@@ -1859,6 +1860,155 @@ namespace
 			core::setStationSystemsSourceLoader({});
 		}
 	}
+	void generatorCombustion(smoke::Context const&)
+	{
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.stores = {{"fuel", "kWh", 1000, 1000, 0}};
+		core::ThermalReservoirSettings sink;
+		sink.id = "sink"; sink.thermalClass = "generation";
+		sink.heatCapacityKJPerK = 100000; sink.startingTemperatureC = 20;
+		sink.minTemperatureC = -50; sink.maxTemperatureC = 200;
+		settings.thermalReservoirs = {sink};
+		core::AtmosphereSettings air;
+		air.id = "air"; air.volumeM3 = 100; air.thermalCapacityKJPerK = 10000;
+		air.startingOxygenKg = 2; air.startingNitrogenKg = 8;
+		air.minPressureKPa = 0.01; air.maxPressureKPa = 1000;
+		air.minOxygenPartialPressureKPa = 1.45; air.maxCarbonDioxidePartialPressureKPa = 0.01;
+		settings.atmospheres = {air};
+		core::GeneratorSettings generator;
+		generator.id = "gen"; generator.fuelStoreId = "fuel";
+		generator.heatSinkId = "sink"; generator.thermalClass = "generation";
+		generator.ratedOutputKW = generator.commandedOutputKW = 100;
+		generator.maxRampKWPerSecond = 1e9;
+		generator.methaneCombustion = true;
+		generator.combustionAirId = generator.combustionExhaustId = "air";
+		settings.generators = {generator};
+		std::string diagnostic;
+		auto run = [&](core::StationSystemsSettings const& candidate, double seconds) {
+			core::World world("Combustion", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(world.configureStationSystems(candidate, true, &diagnostic), diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceSeconds(world, seconds), "combustion advance failed");
+			auto snapshot = world.getStationSystemsSnapshot();
+			require(snapshot.healthy, "combustion audit failed");
+			return snapshot;
+		};
+		auto const same = run(settings, 10);
+		auto const& g = same.power.generators.at(0);
+		require(!same.forecast.available && same.forecast.unavailableReason.find("combustion") != std::string::npos,
+			"forecast promised oxygen-unconstrained generator endurance");
+		require(g.combustionFuelKg > 0, "combustion burned no fuel");
+		auto near = [&](double a, double b) { require(std::abs(a - b) < 1e-7, "combustion ledger mismatch"); };
+		near(g.combustionFuelKg, g.fuelEnergyKJ / 50000);
+		near(g.combustionOxygenKg, g.combustionFuelKg * 4);
+		near(g.combustionCarbonDioxideKg, g.combustionFuelKg * 2.75);
+		near(g.combustionWaterKg, g.combustionFuelKg * 2.25);
+		near(same.atmospheres[0].oxygenKg, 2 - g.combustionOxygenKg);
+		near(same.atmospheres[0].carbonDioxideKg, g.combustionCarbonDioxideKg);
+		near(same.atmospheres[0].nitrogenKg, 8);
+		require(same.atmospheres[0].lowOxygen && same.atmospheres[0].highCarbonDioxide,
+			"sealed-room combustion did not cross habitability limits");
+		near(g.combustionAirKg + g.combustionFuelKg, g.combustionExhaustKg);
+		// Dedicated exhaust moves the entire carrier mixture, not just CO2.
+		auto exhaust = air; exhaust.id = "exhaust";
+		exhaust.startingOxygenKg = exhaust.startingNitrogenKg = 0;
+		settings.atmospheres.push_back(exhaust);
+		settings.generators[0].combustionExhaustId = "exhaust";
+		auto const routed = run(settings, 10);
+		require(routed.atmospheres[1].nitrogenKg > 0 && routed.atmospheres[0].nitrogenKg < 8,
+			"combustion air carrier was not routed");
+		near(routed.atmospheres[0].nitrogenKg + routed.atmospheres[1].nitrogenKg, 8);
+		// Duct caps constrain bulk air, not merely the oxygen constituent.
+		core::StationConnectionKey inlet{"Generator", "gen", "Combustion air", "Combustion air", "Atmosphere", "air"};
+		core::StationConnectionKey outlet{"Generator", "gen", "Combustion exhaust", "Combustion exhaust", "Atmosphere", "exhaust"};
+		settings.connections[inlet].maximumThroughput = 0.001;
+		auto const capped = run(settings, 10);
+		require(capped.power.generators[0].combustionAirKg <= 0.010001
+			&& capped.power.generators[0].combustionFuelKg > 0, "air duct cap ignored");
+		settings.generators[0].combustionExhaustId = "air";
+		auto const recirculated = run(settings, 10);
+		require(recirculated.power.generators[0].combustionAirKg <= 0.010001, "recirculated duct cap ignored");
+		settings.generators[0].combustionExhaustId = "exhaust";
+		settings.connections.clear();
+		settings.connections[outlet].maximumThroughput = 0.001;
+		auto const exhaustCapped = run(settings, 10);
+		require(exhaustCapped.power.generators[0].combustionExhaustKg <= 0.010001, "exhaust duct cap ignored");
+		settings.connections.clear();
+		settings.connections[inlet].efficiency = 0.5;
+		settings.connections[outlet].efficiency = 0.5;
+		auto const leaky = run(settings, 10);
+		auto const& lg = leaky.power.generators[0];
+		require(lg.combustionAirKg + lg.combustionFuelKg > lg.combustionExhaustKg,
+			"combustion transport losses disappeared");
+		settings.connections.clear();
+		// Exhaustion caps fuel and electrical output, with no negative oxygen.
+		settings.atmospheres[0].startingOxygenKg = 0.001;
+		auto const starved = run(settings, 10);
+		require(starved.power.generators[0].fuelEnergyKJ <= 12.500001
+			&& starved.atmospheres[0].oxygenKg >= -1e-10, "oxygen did not constrain generation");
+		settings.atmospheres[0].startingOxygenKg = 2;
+		core::StationConfigurationDocument document, loaded;
+		document.settings = settings;
+		auto const text = core::serializeStationConfiguration(document);
+		require(text.find("schemaVersion: 126") != std::string::npos, "combustion schema missing");
+		require(core::parseStationConfiguration(text, loaded, &diagnostic) && loaded.settings == settings,
+			"combustion document round trip failed");
+		auto oldSchema = text;
+		oldSchema.replace(oldSchema.find("schemaVersion: 126"), 18, "schemaVersion: 125");
+		require(!core::parseStationConfiguration(oldSchema, loaded, &diagnostic) && loaded.settings == settings,
+			"combustion schema downgrade admitted or changed target document");
+		for (bool binary : {false, true})
+		{
+			core::World original("CombustionPersistence", 2, 2), restored("Restored", 2, 2);
+			original.pauseSimulation(); original.finishBuild();
+			require(original.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			auto writer = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+			core::SerializationWorkData work; original.serialize(*writer, work); writer->serialize();
+			auto data = binary ? static_cast<core::BinarySerializer&>(*writer).getSerializedString()
+				: static_cast<core::YamlSerializer&>(*writer).getSerializedString();
+			auto reader = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+			reader->deserialize(); core::SerializationWorkData readWork;
+			require(restored.deserialize(*reader, readWork) && restored.getStationSystemsSettings() == settings,
+				"combustion World round trip failed");
+			original.resumeSimulation(); restored.resumeSimulation();
+			require(advanceSeconds(original, 5) && advanceSeconds(restored, 5)
+				&& original.getStationSystemsSnapshot() == restored.getStationSystemsSnapshot(), "combustion replay changed");
+		}
+		// Flow drag, clearing and cascade share the same reference fields.
+		auto draft = settings;
+		draft.generators[0].combustionAirId.clear(); draft.generators[0].combustionExhaustId.clear();
+		core::CandidateLink airLink{{"Atmosphere", "air", "Gas out"}, {"Generator", "gen", "Combustion air"}};
+		core::CandidateLink exhaustLink{{"Generator", "gen", "Combustion exhaust"}, {"Atmosphere", "exhaust", "Exhaust in"}};
+		require(core::evaluateStationLink(draft, airLink).allowed && core::applyStationLink(draft, airLink)
+			&& core::evaluateStationLink(draft, exhaustLink).allowed && core::applyStationLink(draft, exhaustLink)
+			&& draft == settings, "combustion Flow wiring failed");
+		core::StationNodeRename rename;
+		require(core::planStationNodeRename(draft, "Atmosphere", "air", "supply", rename, &diagnostic)
+			&& core::renameStationNode(draft, rename, &diagnostic)
+			&& draft.generators[0].combustionAirId == "supply", "combustion inlet rename failed");
+		require(core::clearStationLink(draft, "Generator:gen:Combustion exhaust")
+			&& draft.generators[0].combustionExhaustId.empty(), "combustion exhaust disconnect failed");
+		core::World world("CombustionValidation", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		require(world.configureStationSystems(settings, true, &diagnostic), diagnostic.c_str());
+		auto live = settings; live.generators[0].combustionAirId = "exhaust";
+		require(!world.updateStationSystemsSettings(live, &diagnostic), "live combustion endpoint changed");
+		auto bad = settings; bad.generators[0].combustionAirId = "missing";
+		require(!world.configureStationSystems(bad, true, &diagnostic)
+			&& world.getStationSystemsSettings() == settings, "dangling combustion inlet admitted");
+		bad = settings; bad.generators[0].methaneCombustion = false;
+		require(!world.configureStationSystems(bad, true, &diagnostic), "disabled combustion ports admitted");
+		// Explicit opt-in preserves legacy energy-only operation.
+		settings.generators[0].methaneCombustion = false;
+		settings.generators[0].combustionAirId.clear(); settings.generators[0].combustionExhaustId.clear();
+		auto const legacy = run(settings, 10);
+		near(legacy.atmospheres[0].oxygenKg, 2);
+		near(legacy.atmospheres[0].carbonDioxideKg, 0);
+	}
 	// #897: exercise the public configured-World seam, not profile lookups.
 	void generatorPrimeMoverLimits(smoke::Context const&)
 	{
@@ -2097,6 +2247,7 @@ void registerStationGenerationChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"chillers", chillers});
 	checks.push_back({"generators", generators});
+	checks.push_back({"generatorCombustion", generatorCombustion});
 	checks.push_back({"generatorPrimeMover", generatorPrimeMover});
 	checks.push_back({"generatorPrimeMoverLimits", generatorPrimeMoverLimits});
 }

@@ -384,6 +384,22 @@
       "blocks": [
         {
           "kind": "heading",
+          "text": "Combustion (opt-in, #895)"
+        },
+        {
+          "kind": "paragraph",
+          "text": "methaneCombustion: true declares an explicit methane lower-heating-value basis of 50 MJ/kg. Each kg of fuel consumes 4 kg O2 and produces 2.75 kg CO2 and 2.25 kg water vapour. This basis is independent of prime mover; a Stirling burner can use it too. The fuel Store remains energy- denominated: its energy draw determines the declared methane mass, not its name. Omission preserves the historical energy-only source, not a claim that it burns fuel safely in a sealed compartment."
+        },
+        {
+          "kind": "paragraph",
+          "text": "combustionAirId and combustionExhaustId must both name Atmosphere compartments. The Combustion air port joins Gas out; Combustion exhaust joins the new Exhaust in face. Both are physical air ducts (kg/s), with ordinary throughput and efficiency limits. The inlet draws the compartment's whole mixture in the proportion needed for stoichiometric oxygen; nitrogen and existing CO2/moisture travel to the exhaust along with reaction products. The two references may name the same compartment: nitrogen then returns unchanged while O2 falls and CO2/ moisture rise, so an unventilated installation becomes hazardous. A separate exhaust compartment can be connected to Exterior vacuum through an authored Atmosphere pathway; there is no implicit disposal boundary. Inlet leakage removes the source mixture, exhaust leakage loses exhaust mixture, and connection ledgers report both transport losses. Oxygen or duct exhaustion throttles generation and fuel burn; zero available oxygen prevents running. Breathing reserves are not silently protected: route dedicated supply explicitly if required."
+        },
+        {
+          "kind": "paragraph",
+          "text": "Generator snapshots publish cumulative fuel/O2/CO2/water masses and gross inlet / delivered exhaust mass. Each compartment publishes signed per-species combustionKg exchanges (O2, N2, CO2, water vapour), included in its conservation audit. Water vapour participates in the normal same-step condensation solve. The existing waste/startup/decay heat Reservoir contract is unchanged: this slice does not add hot-flue sensible enthalpy, excess-air control, incomplete combustion/CO, ignition thresholds, or arbitrary fuel chemistry. Configuration schema 126 persists the opt-in; changing the basis or either endpoint requires Apply, not a live scalar edit. The declared-profile forecast is unavailable for combustion configurations rather than promising oxygen-unconstrained endurance."
+        },
+        {
+          "kind": "heading",
           "text": "What it does"
         },
         {
@@ -441,11 +457,11 @@
         },
         {
           "kind": "heading",
-          "text": "Prime mover tracer bullet (#896)"
+          "text": "Prime mover limits (#897)"
         },
         {
           "kind": "paragraph",
-          "text": "all three types currently use the same authored energy contract and phase machine. Efficiency/ramp profile constraints and injector/frozen-topology gating are follow-ups (#897/#898), not yet enforced. The primeMover key is always saved; missing keys load as reciprocating. Non-default types require World/configuration schema 125; all-piston documents retain their existing conditional schema version. Unknown types are refused."
+          "text": "reciprocating admits the full legacy efficiency range (0, 1] and any finite positive ramp, including 100000 kW/s. Gas turbine admits efficiency [0.15, 0.38] and ramp at most 200 kW/s; Stirling admits [0.20, 0.42] and at most 30 kW/s. Band endpoints and ramp ceilings are inclusive. The selector shows these limits as read-only hints; out-of-profile values are validation errors naming the type and limit, never silently clamped. All three types retain the same authored energy contract and phase machine. Injector/frozen-topology gating remains a follow-up (#898). The primeMover key is always saved; missing keys load as reciprocating. Non-default types require World/configuration schema 125; all-piston documents retain their existing conditional schema version. Unknown types are refused."
         },
         {
           "kind": "heading",
@@ -1069,7 +1085,7 @@
         },
         {
           "kind": "paragraph",
-          "text": "Gas out serves extraction processes/Airlock cycles; Oxygen in accepts direct Electrolyzer supply. Biology in/out bind Crew/Crops/Algae gas, moisture and heat exchanges. Hosted pathways and Thermal links host those two-ended aggregates. Optional Heat out names a Reservoir for a bidirectional heat-only exchanger, not a gas destination."
+          "text": "Gas out serves extraction processes/Airlock cycles and Generator combustion air; Exhaust in accepts Generator bulk exhaust; Oxygen in accepts direct Electrolyzer supply. Biology in/out bind Crew/Crops/Algae gas, moisture and heat exchanges. Hosted pathways and Thermal links host those two-ended aggregates. Optional Heat out names a Reservoir for a bidirectional heat-only exchanger, not a gas destination."
         },
         {
           "kind": "settings",

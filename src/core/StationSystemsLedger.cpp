@@ -1,4 +1,5 @@
 #include "StationSystemsImpl.h"
+#include "StationGeneratorCombustion.h"
 namespace core
 {
 	// Capture the ledger's rollback state for a tick or allocation preview.
@@ -353,6 +354,13 @@ namespace core
 				if (binding.input && binding.store == g.fuelStoreIndex)
 					cap = std::min(cap, collected.connections.remaining(binding.port)
 						* collected.connections.efficiency(binding.port) * factor);
+			if (g.authored.methaneCombustion)
+			{
+				auto const& air = atmospheres[g.combustionAirIndex];
+				cap = std::min(cap, combustionOutputCeiling(g.authored, air.oxygenKg,
+					air.oxygenKg + air.nitrogenKg + air.carbonDioxideKg + air.waterVapourKg,
+					g.effectiveWearCapability(), collected.connections));
+			}
 			return cap;
 		};
 		auto powerPhaseCrossing = [&](double maximum)
@@ -389,7 +397,8 @@ namespace core
 						? g.lastCommandedKW : a.commandedOutputKW;
 					auto const cap = generatorCeiling(g);
 					auto const target = std::min({command, a.ratedOutputKW * g.availabilityFactor, cap});
-					auto const start = g.phase == StationGeneratorPhase::Running ? g.outputKW : 0.0;
+					auto const start = g.phase == StationGeneratorPhase::Running
+						? (a.methaneCombustion ? std::min({g.outputKW, a.ratedOutputKW * g.availabilityFactor, cap}) : g.outputKW) : 0.0;
 					if (command > 0)
 					{
 						crossing = std::abs(target - start) / a.maxRampKWPerSecond;

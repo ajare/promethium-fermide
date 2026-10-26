@@ -692,6 +692,12 @@ namespace core
 				serializer.writeString("id", generator.id);
 				serializer.writeString("primeMover", StationGeneratorPrimeMoverNames.at(static_cast<size_t>(generator.primeMover)));
 				if (generator.fouledInjector) writeWearBlock(serializer, "fouledInjector", *generator.fouledInjector);
+				if (generator.methaneCombustion || !generator.combustionAirId.empty() || !generator.combustionExhaustId.empty())
+				{
+					serializer.writeBool("methaneCombustion", generator.methaneCombustion);
+					serializer.writeString("combustionAirId", generator.combustionAirId);
+					serializer.writeString("combustionExhaustId", generator.combustionExhaustId);
+				}
 				serializer.writeString("fuelStoreId", generator.fuelStoreId);
 				serializer.writeString("thermalClass", generator.thermalClass);
 				serializer.writeString("heatSinkId", generator.heatSinkId);
@@ -2142,6 +2148,15 @@ namespace core
 						throw SerializationException("Non-reciprocating generator prime mover requires schema 125");
 				}
 				readMachineWear(serializer, "fouledInjector", version, generator.fouledInjector);
+				if (version < 126 && (serializer.hasField("methaneCombustion")
+					|| serializer.hasField("combustionAirId") || serializer.hasField("combustionExhaustId")))
+					throw SerializationException("Generator combustion requires schema 126");
+				if (serializer.hasField("methaneCombustion"))
+				{
+					generator.methaneCombustion = serializer.readBool("methaneCombustion");
+				}
+				if (serializer.hasField("combustionAirId")) generator.combustionAirId = serializer.readString("combustionAirId");
+				if (serializer.hasField("combustionExhaustId")) generator.combustionExhaustId = serializer.readString("combustionExhaustId");
 				generator.fuelStoreId = serializer.readString("fuelStoreId");
 				generator.thermalClass = serializer.readString("thermalClass");
 				generator.heatSinkId = serializer.readString("heatSinkId");

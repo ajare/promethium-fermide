@@ -258,7 +258,9 @@ namespace core
 		static bool restoreInitial(GeneratorSettings const&, GeneratorSettings&) { return false; }
 		static bool topologyChanged(GeneratorSettings const& a, GeneratorSettings const& b)
 		{
-			return a.primeMover != b.primeMover
+			return a.methaneCombustion != b.methaneCombustion
+				|| a.combustionAirId != b.combustionAirId || a.combustionExhaustId != b.combustionExhaustId
+				|| a.primeMover != b.primeMover
 				|| a.fouledInjector.has_value() != b.fouledInjector.has_value() || a.failedStart != b.failedStart;
 		}
 	};

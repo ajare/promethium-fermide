@@ -294,6 +294,13 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		out.ports["Power out"] = quantity(p->outputKW, "kW");
 		out.ports["Heat out"] = quantity(p->wasteHeatKW + p->decayHeatKW + p->startupDrawKW, "kW");
 		port("Fuel in", p->fuelDrawKWh, "kWh");
+		if (p->combustionFuelKg > 0.0)
+		{
+			out.values.push_back("Combustion O2 " + quantity(p->combustionOxygenKg, "kg")
+				+ ", CO2 " + quantity(p->combustionCarbonDioxideKg, "kg"));
+			out.ports["Combustion air"] = quantity(p->combustionAirKg, "kg total");
+			out.ports["Combustion exhaust"] = quantity(p->combustionExhaustKg, "kg total");
+		}
 	}
 	else if (node.type == "Fuel cell")
 	{

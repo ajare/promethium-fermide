@@ -2218,6 +2218,16 @@ namespace
 						"newly authored generator did not default to piston");
 					REQ(driver.contains("Admitted efficiency (0, 1]; ramp ceiling unbounded"),
 						"piston legacy limits hint missing");
+					driver.click(ctx, "**/Methane combustion##Generator 0"); ctx->Yield(3);
+					auto combustion = beforeEdit; combustion.generators[0].methaneCombustion = true;
+					REQ(window.draft() == combustion && window.draftHistory().undoCount() == historyCount + 1,
+						"combustion opt-in did not make one history entry");
+					REQ(driver.contains("Methane LHV 50 MJ/kg"), "combustion basis hint missing");
+					driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+					REQ(window.draft() == beforeEdit, "undo did not restore energy-only generator");
+					driver.click(ctx, "Redo configuration"); ctx->Yield(3);
+					REQ(window.draft() == combustion, "redo did not restore combustion opt-in");
+					driver.click(ctx, "Undo configuration"); ctx->Yield(3);
 					for (auto const& option : {std::pair{"Gas turbine", core::StationGeneratorPrimeMover::GasTurbine},
 						std::pair{"Stirling", core::StationGeneratorPrimeMover::Stirling}})
 					{

@@ -1080,7 +1080,8 @@ namespace core
 			[](auto const& cell) { return cell.chemistry != FuelCellChemistry::PEM; });
 		auto const nonReciprocating = std::any_of(mStationSystemsSettings.generators.begin(), mStationSystemsSettings.generators.end(),
 			[](auto const& generator) { return generator.primeMover != StationGeneratorPrimeMover::Reciprocating; });
-		serializer.writeUint32("version", nonReciprocating ? 125 : stationHasPowerBusAuthoring(mStationSystemsSettings) ? 124 : (bodies || nonPem) ? 123 : !mStationSystemsSettings.monitors.empty() ? 122 : machineWear ? 121 : atmosphereFaults ? 120 : contamination ? 119 : powerSources ? 118
+		serializer.writeUint32("version", std::any_of(mStationSystemsSettings.generators.begin(), mStationSystemsSettings.generators.end(),
+			[](auto const& g) { return g.methaneCombustion || !g.combustionAirId.empty() || !g.combustionExhaustId.empty(); }) ? 126 : nonReciprocating ? 125 : stationHasPowerBusAuthoring(mStationSystemsSettings) ? 124 : (bodies || nonPem) ? 123 : !mStationSystemsSettings.monitors.empty() ? 122 : machineWear ? 121 : atmosphereFaults ? 120 : contamination ? 119 : powerSources ? 118
 			: thermalPlant ? 117 : wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
