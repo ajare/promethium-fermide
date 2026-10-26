@@ -2257,7 +2257,23 @@ void renderPowerMembership(core::StationSystemsSettings& draft, std::string cons
 			for (auto const& bus : draft.powerBuses) {
 				bool selected = std::find(ids.begin(), ids.end(), bus.id) != ids.end();
 				if (ImGui::Checkbox((bus.id + "##" + label).c_str(), &selected)) {
-					if (selected) ids.push_back(bus.id); else std::erase(ids, bus.id);
+					if (selected) ids.push_back(bus.id);
+					else
+					{
+						// Use the same cascade as canvas/inspector disconnects,
+						// including both directions of a battery membership.
+						for (auto const& link : core::stationAuthoredLinks(draft))
+						{
+							auto const& member = link.from.nodeType == "Power bus" ? link.to : link.from;
+							auto const& peer = link.from.nodeType == "Power bus" ? link.from : link.to;
+							if (member.nodeType == type && member.nodeId == id
+								&& peer.nodeType == "Power bus" && peer.nodeId == bus.id)
+							{
+								core::clearStationLink(draft, link.identity);
+								break;
+							}
+						}
+					}
 				}
 			}
 			if (ids.empty()) ImGui::TextWrapped("Incomplete: required Power port is unwired");

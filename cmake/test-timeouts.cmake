@@ -295,6 +295,7 @@ set(PF_TEST_TIMEOUTS
     "station-component-help-extraction=10"
     "station-editor-component-help=10"
     "station-editor-configuration-resources=10"
+    "station-editor-power-disconnect=30"
     "station-editor-connection-design=10"
     "station-editor-connection-forecast=10"
     "station-editor-coolant=10"

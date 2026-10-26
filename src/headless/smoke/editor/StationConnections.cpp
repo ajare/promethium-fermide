@@ -14,6 +14,7 @@
 #include <cmath>
 #include <limits>
 #include <set>
+#include <tuple>
 
 namespace
 {
@@ -64,6 +65,174 @@ ImGuiWindow* findFlowCanvasLeaf(ImGuiWindow* window)
 	for (auto* child : window->DC.ChildWindows)
 		if (auto* found = findFlowCanvasLeaf(child)) return found;
 	return nullptr;
+}
+
+// #909: every power disconnect surface must remove the cable's design and
+// Monitor bundle. A battery's two directions share one bus membership.
+void powerDisconnectWorkflow(smoke::Context const& context)
+{
+	auto seed = connectionFixture();
+	std::string const backup = "grid:backup%";
+	seed.powerBuses.push_back({backup, "Backup", 0, 0});
+	seed.solarArrays[0].busIds.push_back(backup);
+	seed.batteries[0].busIds.push_back(backup);
+	core::EquipmentLoadSettings load;
+	load.id = "load"; load.electricalDemandKW = 4; load.thermalClass = "moderate";
+	load.supplyMode = core::StationSupplyMode::Transfer; load.supplyBusIds = {"main", backup};
+	seed.equipmentLoads = {load};
+	for (auto const& edge : station_flow::build(seed).links)
+		if (edge.kind == station_flow::LinkKind::Power)
+			seed.connections[edge.designKey] = {Type::PowerCable, 17, 0.5};
+	core::applyStationStoreConnectionDefaultMonitors(seed);
+	std::string diagnostic;
+	require(core::validateStationSystemsSettings(seed, diagnostic), diagnostic.c_str());
+	auto expectedDisconnect = [&](char const* type, std::string const& bus) {
+		auto expected = seed;
+		std::set<std::string> subjects;
+		std::erase_if(expected.connections, [&](auto const& item) {
+			auto const& key = item.first;
+			if (key.ownerType != type || key.peerId != bus) return false;
+			subjects.insert(core::stationConnectionMonitorSubjectId(key));
+			return true;
+		});
+		std::erase_if(expected.monitors, [&](auto const& monitor) {
+			return monitor.subjectType == "connection" && subjects.contains(monitor.subjectId);
+		});
+		if (std::string_view(type) == "Solar") std::erase(expected.solarArrays[0].busIds, bus);
+		else if (std::string_view(type) == "Battery") std::erase(expected.batteries[0].busIds, bus);
+		else std::erase(expected.equipmentLoads[0].supplyBusIds, bus);
+		return expected;
+	};
+	// Exact full-state comparisons protect sibling feeders and unrelated Monitors,
+	// for both primary and backup removal and both battery directions.
+	for (auto const& link : core::stationAuthoredLinks(seed))
+	{
+		if (link.from.nodeType != "Power bus" && link.to.nodeType != "Power bus") continue;
+		auto const& member = link.from.nodeType == "Power bus" ? link.to : link.from;
+		auto const& bus = link.from.nodeType == "Power bus" ? link.from : link.to;
+		auto draft = seed;
+		require(core::clearStationLink(draft, link.identity), "Power disconnect refused");
+		auto expected = expectedDisconnect(member.nodeType.c_str(), bus.nodeId);
+		require(draft == expected, "Power disconnect retained cable properties/Monitors or changed a sibling feeder");
+		if (member.nodeType == "Equipment") draft.equipmentLoads[0].supplyMode = core::StationSupplyMode::Single;
+		require(core::validateStationSystemsSettings(draft, diagnostic), diagnostic.c_str());
+	}
+
+	headless::ScopedImGuiContext imgui;
+	auto& io = ImGui::GetIO(); io.DisplaySize = {1800, 1200};
+	io.Fonts->AddFontDefault(); io.Fonts->Build();
+	auto world = std::make_shared<core::World>("Power disconnect", 2, 2);
+	world->pauseSimulation(); world->finishBuild();
+	require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+	core::StationConfigurationDocument document; document.settings = seed;
+	document.zoom = 0.5f;
+	document.positions = {{"Solar:solar:0", {0, 0}}, {"Power bus:main:0", {500, 0}},
+		{"Battery:battery:0", {1000, 0}}, {"Power bus:" + backup + ":0", {500, 550}},
+		{"Equipment:load:0", {1000, 650}}, {"Store:a:0", {0, 1000}},
+		{"Transfer:move:0", {500, 1000}}, {"Store:b:0", {1000, 1000}}};
+	auto path = (context.temporaryRoot() / "power-disconnect.station.yaml").string();
+	core::saveStationConfiguration(path, document);
+	StationSystemsWindow window;
+	window.setFilePicker([&](bool) -> std::optional<std::string> { return path; });
+	bool form = false;
+	DocumentHistory history;
+	headless::TestEngineDriver driver([&] {
+		ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1760, 1160});
+		ImGui::Begin("Configuration");
+		if (form) window.renderContents(world, history); else window.renderFlowContents(world);
+		ImGui::End();
+	});
+	driver.frame(); driver.frame();
+	#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+	driver.run("station", "powerDisconnect", [&](ImGuiTestContext* ctx) {
+		ctx->SetRef("Configuration");
+		for (int surface = 0; surface < 4; ++surface)
+		for (auto const& [type, id, port] : std::vector<std::tuple<char const*, char const*, char const*>>{
+			{"Solar", "solar", "Power out"}, {"Battery", "battery", "Power in"},
+			{"Battery", "battery", "Power out"}, {"Equipment", "load", "Power in"}})
+		{
+			// Keep the cable under test clear of unrelated curves; screen
+			// positions are curve samples, not exclusive hit-test handles.
+			document.positions["Solar:solar:0"] = {0, 1400};
+			document.positions["Battery:battery:0"] = {700, 1400};
+			document.positions["Equipment:load:0"] = {1400, 1400};
+			document.positions[std::string(type) + ":" + id + ":0"] = {0, 0};
+			document.positions["Power bus:" + backup + ":0"] = {700, 0};
+			document.positions["Power bus:main:0"] = {700, 700};
+			core::saveStationConfiguration(path, document);
+			driver.click(ctx, "Open configuration"); ctx->Yield(3);
+			if (driver.contains("Discard configuration changes")) {
+				driver.click(ctx, "Discard configuration changes"); ctx->Yield(3);
+			}
+			REQ(window.draft() == seed, "Power disconnect fixture did not reopen");
+			auto graph = station_flow::build(seed);
+			auto edge = std::find_if(graph.links.begin(), graph.links.end(), [&](auto const& item) {
+				return item.designKey.ownerType == type && item.designKey.peerId == backup
+					&& item.designKey.reference.starts_with(std::string(port) + "@");
+			});
+			REQ(edge != graph.links.end(), "Backup cable missing");
+			if (surface < 2)
+			{
+				ImVec4 rect{};
+				REQ(window.flowNodeRect(type, id, &rect), "Power member node missing");
+				ctx->MouseTeleportToPos({(rect.x + rect.z) / 2, rect.y + 3});
+				ctx->MouseClick(); ctx->Yield(3); ctx->MouseTeleportToPos({40, 40}); ctx->Yield(2);
+				auto label = surface == 0
+					? "**/" + backup + "##" + (std::string_view(type) == "Equipment"
+						? "Supply buses (selection order: primary, backup)" : "Source and battery buses")
+					: "**/Disconnect " + std::string(port) + " " + backup;
+				driver.click(ctx, label.c_str()); ctx->Yield(3);
+			}
+			else
+			{
+				ImVec2 position{};
+				REQ(window.flowConnectionPosition(edge->designKey, &position), "Power cable missing from canvas");
+				ctx->MouseTeleportToPos(position); ctx->Yield(2);
+				if (surface == 3) ctx->KeyPress(ImGuiKey_Delete);
+				else {
+					ctx->MouseClick(); ctx->Yield(3); ctx->MouseTeleportToPos({40, 40}); ctx->Yield(2);
+					driver.click(ctx, "**/Disconnect selected connection");
+				}
+				ctx->Yield(3);
+			}
+			auto const expected = expectedDisconnect(type, backup);
+			std::string removed;
+			for (auto const& [key, properties] : seed.connections)
+				if (!window.draft().connections.contains(key)) removed += " " + key.ownerType + ":" + key.reference;
+			REQ(window.draft() == expected, ("Editor power disconnect mismatch: surface=" + std::to_string(surface)
+				+ " " + type + " " + port + "; connections=" + std::to_string(window.draft().connections.size())
+				+ "/" + std::to_string(expected.connections.size()) + "; monitors="
+				+ std::to_string(window.draft().monitors.size()) + "/" + std::to_string(expected.monitors.size()) + removed).c_str());
+			REQ(world->getStationSystemsSettings() == seed, "Draft disconnect changed the live World");
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			REQ(window.draft() == seed, "Disconnect undo did not restore cable properties and Monitors");
+			driver.click(ctx, "Redo configuration"); ctx->Yield(3);
+			REQ(window.draft() == expected, "Disconnect redo did not restore the complete cascade");
+		}
+		// Correct the now one-bus consumer through its real inspector, then
+		// validate, save/reopen, and Apply the result rather than a test copy.
+		ImVec4 rect{};
+		REQ(window.flowNodeRect("Equipment", "load", &rect), "Consumer missing after disconnect");
+		ctx->MouseTeleportToPos({(rect.x + rect.z) / 2, rect.y + 3}); ctx->MouseClick(); ctx->Yield(3);
+		auto* membership = ctx->ItemInfo("**/main##Supply buses (selection order: primary, backup)");
+		REQ(membership->Window, "Consumer membership inspector missing");
+		ctx->SetRef(membership->ParentID); ctx->ComboClick("Supply mode/Single"); ctx->Yield(3);
+		ctx->SetRef("Configuration");
+		auto expected = expectedDisconnect("Equipment", backup);
+		expected.equipmentLoads[0].supplyMode = core::StationSupplyMode::Single;
+		REQ(window.draft() == expected, "Single supply correction changed other configuration");
+		REQ(core::validateStationSystemsSettings(window.draft(), diagnostic), diagnostic.c_str());
+		driver.click(ctx, "Save configuration"); ctx->Yield(3);
+		driver.click(ctx, "New configuration"); ctx->Yield(3);
+		driver.click(ctx, "Open configuration"); ctx->Yield(3);
+		REQ(window.draft() == expected, "Power disconnect save/load lost surviving cable configuration");
+		form = true; ctx->Yield(3);
+		driver.click(ctx, "Apply settings"); ctx->Yield(3);
+		if (driver.contains("Confirm World reset")) { driver.click(ctx, "Confirm World reset"); ctx->Yield(3); }
+		REQ(world->getStationSystemsSettings() == expected, "Disconnected configuration could not be Applied");
+	});
+	#undef REQ
+	require(driver.passed(), "Power disconnect editor workflow failed");
 }
 
 void pathwayDisplayWorkflow(smoke::Context const&)
@@ -1270,6 +1439,7 @@ void editor_smoke::registerStationConnections(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/thermalBodyEditorWorkflow", thermalBodyEditorWorkflow});
 	checks.push_back({"station/hatchInspectorWorkflow", hatchInspectorWorkflow});
 	checks.push_back({"station/connectionDesign", connectionDesign});
+	checks.push_back({"station/powerDisconnectWorkflow", powerDisconnectWorkflow});
 	checks.push_back({"station/connectionForecastWorkflow", connectionForecastWorkflow});
 	checks.push_back({"station/flowConnectionTelemetryWorkflow", flowConnectionTelemetryWorkflow});
 	checks.push_back({"station/flowConnectionsWorkflow", flowConnectionsWorkflow});

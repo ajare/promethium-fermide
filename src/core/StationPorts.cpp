@@ -1855,6 +1855,15 @@ bool clearStationLink(StationSystemsSettings& settings, std::string const& ident
 	auto const ownerId = identity.substr(first + 1, last - first - 1);
 	if (auto* ids = powerField(settings, ownerType, ownerId, field))
 	{
+		// Clean the design/Monitor subjects while the links still exist. A
+		// battery's charge and discharge cables share this one membership.
+		eraseConnectionProperties(settings, ownerType, ownerId, field);
+		if (ownerType == "Battery")
+		{
+			auto const peer = field.substr(field.find('@'));
+			eraseConnectionProperties(settings, ownerType, ownerId,
+				(field.starts_with("Power in@") ? "Power out" : "Power in") + peer);
+		}
 		std::erase(*ids, powerBusFromToken(field.substr(field.find('@') + 1)));
 		return true;
 	}

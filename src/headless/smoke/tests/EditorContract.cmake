@@ -264,8 +264,10 @@ set(editor_names
     roomHeightScale/occupiedPoseHistory
     station/pathwayDisplayWorkflow
     station/thermalLinkEditorWorkflow
+    station/thermalBodyEditorWorkflow
     station/hatchInspectorWorkflow
     station/connectionDesign
+    station/powerDisconnectWorkflow
     station/connectionForecastWorkflow
     station/flowConnectionTelemetryWorkflow
     station/flowConnectionsWorkflow
@@ -282,6 +284,7 @@ set(editor_names
     station/prefabDialBoundaryWorkflow
     station/prefabDuplicateInstancePinsWorkflow
     station/powerBusAuthoring
+    station/transferModeAuthoring
     station/addEntryWorkflow
     station/configurationResources
     station/windowWorkflow
@@ -333,6 +336,7 @@ set(editor_names
     station/alertDashboardWorkflow
     station/alertDashboardNoScenario
     station/monitorInspector
+    station/monitorFamilies
 )
 
 if(DEFINED LANE)
