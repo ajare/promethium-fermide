@@ -369,6 +369,8 @@ void renderWearBlock(std::string const& label, std::string const& field,
 		renderRangedDouble(describe("fade per operating hour", label), block.fadePerOperatingHour, 0.0, 0.0, "%.6f");
 		renderRangedDouble(describe("fade per throughput kg", label), block.fadePerThroughputKg, 0.0, 0.0, "%.6f");
 		renderRangedDouble(describe("fade per calendar hour", label), block.fadePerCalendarHour, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("fade half-life hours (0 disables)", label), block.fadeHalfLifeHours, 0.0, 0.0, "%.6f");
+		renderRangedDouble(describe("initial age hours", label), block.initialAgeHours, 0.0, 0.0, "%.6f");
 		renderRangedDouble(describe("max wear fraction", label), block.maxWearFraction, 0.0, 0.0, "%.3f");
 	});
 }
@@ -1791,6 +1793,7 @@ bool renderHeatSourceEntry(core::StationSystemsSettings& draft,
 	renderRefCombo(describe("target reservoir", label), source.targetReservoirId, reservoirIds(draft), false);
 	renderThermalClassCombo(draft, describe("thermal class", label), source.thermalClass, source.targetReservoirId);
 	renderRangedDouble(describe("rated output kW", label), source.ratedOutputKW, 0.0, 0.0, "%.3f");
+	renderWearBlock(label, describe("Wear: decay", label), source.wear);
 	ImGui::PopID();
 	return false;
 }

@@ -1944,6 +1944,18 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			lua_settop(object->state.get(), 0);
 			mImpl->objects[i] = std::move(object);
 		}
+		for (auto& machine : mImpl->batteries) machine.wear.initialize(machine.authored.capacityFade);
+		for (auto& machine : mImpl->coolantLoops) machine.wear.initialize(machine.authored.wear);
+		for (auto& machine : mImpl->heatSources) machine.wear.initialize(machine.authored.wear);
+		for (auto& machine : mImpl->solarArrays) machine.cellDegradation.initialize(machine.authored.cellDegradation);
+		for (auto& machine : mImpl->generators) machine.fouledInjector.initialize(machine.authored.fouledInjector);
+		for (auto& machine : mImpl->heatEngines) machine.efficiencyDrift.initialize(machine.authored.efficiencyDrift);
+		for (auto& machine : mImpl->electrolyzers) machine.membraneDegradation.initialize(machine.authored.membraneDegradation);
+		for (auto& machine : mImpl->waterTreatments) machine.membraneFouling.initialize(machine.authored.membraneFouling);
+		for (auto& machine : mImpl->co2Captures) machine.absorbentDegradation.initialize(machine.authored.absorbentDegradation);
+		for (auto& machine : mImpl->fuelCells) machine.stackDegradation.initialize(machine.authored.stackDegradation);
+		for (auto& machine : mImpl->sabatierReactors) machine.catalystDeactivation.initialize(machine.authored.catalystDeactivation);
+		for (auto& machine : mImpl->methaneProcessors) machine.catalystDeactivation.initialize(machine.authored.catalystDeactivation);
 		appendBoundedEvent(mImpl->events, 0, "station", "Station systems initialized with "
 			+ std::to_string(settings.stores.size()) + " resource store(s), "
 			+ std::to_string(settings.transfers.size()) + " transfer(s), "

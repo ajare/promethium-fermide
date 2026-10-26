@@ -27,12 +27,134 @@ void configure(core::World& world, core::StationSystemsSettings const& s)
 {
 	world.pauseSimulation(); world.finishBuild();
 	std::string why;
-	require(world.configureStationSystems(s, false, &why), why.c_str());
+	auto const configured = world.configureStationSystems(s, false, &why);
+	require(configured, why.c_str());
 }
 void near(double a, double b, char const* why)
 {
 	require(std::abs(a - b) < 1e-7 * std::max(1.0, std::abs(b)), why);
 }
+void heatSourceDecay(smoke::Context const&)
+{
+	auto s = fixture(); s.systemsStepWorldTicks = 60;
+	s.thermalReservoirs[0].heatCapacityKJPerK = 1e6;
+	core::InstallationWearSettings model;
+	model.fadeHalfLifeHours = 0.01;
+	model.initialAgeHours = model.fadeHalfLifeHours * 30.0 / 87.7;
+	s.heatSources[0].wear = model;
+	core::World aged("aged", 2, 2), fresh("fresh", 2, 2), consumed("consumed", 2, 2);
+	configure(aged, s);
+	near(aged.getStationSystemsSnapshot().heatSources[0].decayedOutputKW,
+		10 * std::exp2(-model.initialAgeHours / model.fadeHalfLifeHours), "initial age not applied at configuration");
+	auto birth = s; birth.heatSources[0].wear->initialAgeHours = 0;
+	configure(fresh, birth);
+	auto plant = s;
+	auto sink = plant.thermalReservoirs[0]; sink.id = "reject"; sink.startingTemperatureC = 0;
+	plant.thermalReservoirs.push_back(sink);
+	core::HeatEngineSettings engine;
+	engine.id = "converter"; engine.hotReservoirId = "hot"; engine.rejectionReservoirId = "reject";
+	engine.thermalClass = "generation"; engine.ratedThermalInputKW = engine.commandedInputKW = 1;
+	engine.minHotTemperatureC = 10; engine.maxSinkTemperatureC = 5;
+	plant.heatEngines = {engine};
+	core::EquipmentLoadSettings load; load.id = "load"; load.electricalDemandKW = 1; load.thermalClass = "moderate";
+	load.coolingDisposition = core::StationCoolingDisposition::Exported;
+	plant.equipmentLoads = {load};
+	configure(consumed, plant);
+	aged.resumeSimulation(); fresh.resumeSimulation(); consumed.resumeSimulation();
+	require(advanceSeconds(aged, 36) && advanceSeconds(fresh, 36) && advanceSeconds(consumed, 36), "decay drive failed");
+	auto a = aged.getStationSystemsSnapshot(); auto f = fresh.getStationSystemsSnapshot();
+	auto const expected = std::exp2(-(model.initialAgeHours + a.elapsedSeconds / 3600) / model.fadeHalfLifeHours);
+	near(a.heatSources[0].decayedOutputKW, 10 * expected, "age offset did not follow the same exponential curve");
+	near(a.heatSources[0].decayedOutputKW / f.heatSources[0].decayedOutputKW,
+		std::exp2(-model.initialAgeHours / model.fadeHalfLifeHours), "age offset changed level but not slope");
+	require(a.heatSources[0].decayFraction == consumed.getStationSystemsSnapshot().heatSources[0].decayFraction,
+		"consumption altered calendar decay");
+	require(consumed.getStationSystemsSnapshot().heatEngines[0].lastElectricalOutputKW > 0, "consumer did not actually use heat");
+	near(a.heatSources[0].deliveredOutputKW, 10 * std::exp2(-(model.initialAgeHours + (a.elapsedSeconds - a.systemsTimestepSeconds) / 3600) / model.fadeHalfLifeHours),
+		"delivered output ignored decay");
+	// A live rate change prices only future exposure; initial age and opt-in
+	// remain topology, so neither can erase fade while a run is active.
+	std::string why;
+	s.heatSources[0].wear->fadeHalfLifeHours *= 2;
+	require(aged.updateStationSystemsSettings(s, &why), why.c_str());
+	require(advanceSeconds(aged, 36), "retuned decay drive failed");
+	auto b = aged.getStationSystemsSnapshot();
+	near(b.heatSources[0].decayedOutputKW / a.heatSources[0].decayedOutputKW,
+		std::exp2(-(b.elapsedSeconds - a.elapsedSeconds) / 3600 / s.heatSources[0].wear->fadeHalfLifeHours), "rate retune repriced banked decay");
+	auto invalid = s; invalid.heatSources[0].wear->initialAgeHours = 0;
+	require(!aged.updateStationSystemsSettings(invalid, &why), "live initial-age rewrite accepted");
+	invalid = s; invalid.heatSources[0].wear.reset();
+	require(!aged.updateStationSystemsSettings(invalid, &why), "live decay removal accepted");
+}
+
+void heatSourceDecayComposition(smoke::Context const&)
+{
+	for (auto ceiling : {1.0, 0.6})
+	{
+		auto s = fixture(); s.systemsStepWorldTicks = 60;
+		core::InstallationWearSettings model;
+		model.fadeHalfLifeHours = 0.01; model.fadePerCalendarHour = 10;
+		model.maxWearFraction = ceiling;
+		s.heatSources[0].wear = model;
+		core::World world("decay", 2, 2); configure(world, s); world.resumeSimulation();
+		require(advanceSeconds(world, 36), "composition drive failed");
+		auto snap = world.getStationSystemsSnapshot();
+		auto h = snap.elapsedSeconds / 3600;
+		near(snap.heatSources[0].decayFraction,
+			std::min(ceiling, 1 - (1 - h * model.fadePerCalendarHour) * std::exp2(-h / model.fadeHalfLifeHours)),
+			"linear and exponential fade did not compose multiplicatively");
+		require(advanceSeconds(world, 360), "clamp drive failed");
+		require(world.getStationSystemsSnapshot().heatSources[0].decayFraction == ceiling, "linear fade failed to reach clamp");
+		s.heatSources[0].wear->fadePerCalendarHour = 0;
+		core::World exponential("exponential", 2, 2); configure(exponential, s); exponential.resumeSimulation();
+		require(advanceSeconds(exponential, 3600), "exponential clamp drive failed");
+		auto const fraction = exponential.getStationSystemsSnapshot().heatSources[0].decayFraction;
+		require(ceiling == 1.0 ? fraction < 1.0 : fraction == ceiling,
+			"exponential asymptote or lower Wear clamp is incorrect");
+	}
+}
+
+void heatSourceDecayPersistence(smoke::Context const&)
+{
+	auto s = fixture(); s.systemsStepWorldTicks = 60;
+	core::InstallationWearSettings model; model.fadeHalfLifeHours = 0.01; model.initialAgeHours = 0.02;
+	s.heatSources[0].wear = model;
+	core::StationConfigurationDocument doc; doc.settings = s;
+	auto bytes = core::serializeStationConfiguration(doc);
+	require(bytes.find("schemaVersion: 128") != std::string::npos, "decay schema not claimed");
+	core::StationConfigurationDocument loaded; std::string diagnostic;
+	require(core::parseStationConfiguration(bytes, loaded, &diagnostic) && loaded.settings == s, "decay settings lost on round trip");
+	core::World world("decay", 2, 2); configure(world, s); world.resumeSimulation();
+	require(advanceSeconds(world, 10), "decay replay drive failed");
+	for (bool binary : {false, true})
+	{
+		auto out = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+		core::SerializationWorkData data; world.serialize(*out, data); out->serialize();
+		auto const saved = binary ? static_cast<core::BinarySerializer&>(*out).getSerializedString()
+			: static_cast<core::YamlSerializer&>(*out).getSerializedString();
+		auto in = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(saved))
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(saved));
+		core::World restored("restored", 2, 2); restored.pauseSimulation(); restored.finishBuild();
+		in->deserialize(); restored.deserialize(*in, data);
+		require(restored.getStationSystemsSnapshot().heatSources == world.getStationSystemsSnapshot().heatSources,
+			"save/load healed accumulated decay");
+	}
+	auto badWire = bytes;
+	auto const field = badWire.find("fadeHalfLifeHours");
+	badWire.replace(field, std::string("fadeHalfLifeHours").size(), "unknownDecayField");
+	require(!core::parseStationConfiguration(badWire, loaded, &diagnostic), "unknown Wear field accepted");
+	badWire = bytes; badWire.replace(badWire.find("schemaVersion: 128"), 18, "schemaVersion: 127");
+	require(!core::parseStationConfiguration(badWire, loaded, &diagnostic), "old schema accepted new Wear fields");
+	for (auto value : {-1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+	{
+		auto bad = s; bad.heatSources[0].wear->fadeHalfLifeHours = value; std::string why;
+		require(!core::validateStationSystemsSettings(bad, why), "invalid half-life accepted");
+		bad = s; bad.heatSources[0].wear->initialAgeHours = value;
+		require(!core::validateStationSystemsSettings(bad, why), "invalid initial age accepted");
+	}
+}
+
 void heatSourceTracer(smoke::Context const&)
 {
 	for (auto ratio : {1u, 6u, 60u})
@@ -245,6 +367,9 @@ void heatSourceOverheat(smoke::Context const&)
 }
 void registerStationHeatSourceChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"heatSourceDecay", heatSourceDecay});
+	checks.push_back({"heatSourceDecayComposition", heatSourceDecayComposition});
+	checks.push_back({"heatSourceDecayPersistence", heatSourceDecayPersistence});
 	checks.push_back({"heatSourceTracer", heatSourceTracer});
 	checks.push_back({"heatSourceLive", heatSourceLive});
 	checks.push_back({"heatSourceValidation", heatSourceValidation});

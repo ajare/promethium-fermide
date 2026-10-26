@@ -4,6 +4,7 @@
 #include "StationProtectionPrediction.h"
 #include "core/SimulationStepTiming.h"
 #include <functional>
+#include <cmath>
 
 namespace core
 {
@@ -158,6 +159,14 @@ using namespace station_detail;
 			double calendarHours{0.0};
 			double fade{0.0};
 			double fraction{0.0};
+			double decayHalfLives{0.0};
+			void initialize(std::optional<InstallationWearSettings> const& model)
+			{
+				if (!model || model->fadeHalfLifeHours == 0.0) return;
+				decayHalfLives = std::min(1074.0, model->initialAgeHours / model->fadeHalfLifeHours);
+				fraction = std::min(model->maxWearFraction,
+					std::min(std::nextafter(1.0, 0.0), -std::expm1(-std::log(2.0) * decayHalfLives)));
+			}
 		};
 		// The authoritative ledger of one configured solar array. Output
 		// follows installed capacity and evaluated illumination; a
@@ -1818,6 +1827,7 @@ using namespace station_detail;
 			size_t sinkIndex{};
 			double deliveredOutputKW{};
 			double deliveredEnergyKJ{};
+			WearState wear;
 		};
 		std::vector<HeatSourceState> heatSources;
 		std::vector<HeatEngineState> heatEngines;

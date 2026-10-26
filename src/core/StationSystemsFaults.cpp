@@ -729,6 +729,8 @@ namespace core
 			[](auto const& machine) { return machine.catalystDeactivation.has_value(); })) return true;
 		if (mImpl->settings.enabled && std::any_of(mImpl->settings.methaneProcessors.begin(), mImpl->settings.methaneProcessors.end(),
 			[](auto const& machine) { return machine.catalystDeactivation.has_value(); })) return true;
+		if (mImpl->settings.enabled && std::any_of(mImpl->heatSources.begin(), mImpl->heatSources.end(),
+			[](auto const& source) { return source.authored.wear.has_value(); })) return true;
 		return (mImpl->settings.enabled && std::any_of(mImpl->settings.powerBuses.begin(), mImpl->settings.powerBuses.end(),
 			[](auto const& bus) { return bus.ratedCapacityKW > 0.0; })) || hasFaultCommands() || (mImpl->settings.enabled
 			&& (std::any_of(mImpl->settings.waterTreatments.begin(), mImpl->settings.waterTreatments.end(),

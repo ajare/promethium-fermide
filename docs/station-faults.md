@@ -229,6 +229,35 @@ batteries:
       maxWearFraction: 0.6        # permanent clamp on total fade
 ```
 
+### Exponential calendar decay (#902)
+
+Every shared Wear block also accepts `fadeHalfLifeHours` (finite, non-negative;
+zero disables) and `initialAgeHours` (finite, non-negative; requires a positive
+half-life). Both are omitted from the wire when zero. Extended Wear requires
+schema 128; documents without these fields preserve their previous schema and
+linear arithmetic exactly.
+
+For accumulated linear fade `L` and banked half-life exposure `E`, total fade is
+`1 - (1 - L) * 2^(-E)`, then clamped by `maxWearFraction`, without healing
+previously committed Wear. Linear damage acts on rated capacity first, and
+exponential decay multiplies the remaining capacity. A pure exponential approaches
+complete fade without reaching it; a lower authored ceiling can still be reached.
+
+At configuration, `E = initialAgeHours / fadeHalfLifeHours`; thereafter each
+interval banks `elapsedHours / currentHalfLifeHours`, regardless of operation,
+consumption, isolation, or Repair. Changing the positive half-life prices only
+future exposure. Model presence, exponential opt-in, and initial age are frozen
+live topology. For example, an 87.7-year half-life authored at age 30 years starts
+at about 79% of its rating and continues on that same exponential trajectory.
+Use the same year-to-hour conversion for both fields.
+
+`station-wearLegacyExact` compares every existing wearer (all nine catalogue
+modes, battery, and coolant loop) with exact binary64 values captured using the
+pre-#902 integrator, and exercises exponential initial age on every reader.
+Heat-source checks cover age slope, duty independence, live rate changes,
+composition, clamps, and YAML/binary replay; `station-wearDecayRepair` verifies
+that Repair neither heals decay nor pauses its clock.
+
 The battery is the capacity-fade pilot: equivalent full cycles are counted
 on real charge and real discharge - a full charge plus a full discharge of
 the authored cyclable energy is one cycle, so each side of the round trip

@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+
 namespace
 {
 using namespace smoke::station;
@@ -264,6 +265,76 @@ void roundTrip(core::StationSystemsRuntime const& run)
 		"catalogue wear replay log did not round-trip byte-exactly");
 	require(restored->advanceTo(run.snapshot().worldTick * 0.25 + 60),
 		"restored catalogue wear failed subsequent audited drive");
+}
+
+void wearLegacyExact(smoke::Context const&)
+{
+	core::ScopedStationStepRatioForTesting clock(std::nullopt);
+	// These two working plants cover every shared Wear reader: the nine
+	// catalogue modes, battery cycle/calendar fade, and coolant flow wear.
+	// Golden binary64 values are measured against the pre-#902 integrator.
+	for (bool dispatch : {false, true})
+	{
+		auto s = dispatch ? dispatchStation() : processStation();
+		s.systemsStepWorldTicks = 6;
+		core::BatterySettings battery;
+		battery.id = "bank"; battery.nameplateKWh = battery.usableKWh = 10;
+		battery.startingStoredKWh = 5; battery.maxChargeKW = battery.maxDischargeKW = 2;
+		battery.capacityFade = core::InstallationWearSettings{0.01, 0.02, 0, 0.03, 0.6};
+		s.batteries = {battery};
+		core::CoolantLoopSettings loop;
+		loop.id = "loop"; loop.reservoirId = dispatch ? "reject" : "sink";
+		loop.coolantCapacityKg = loop.startingCoolantKg = 100;
+		loop.specificHeatKJPerKgK = 4; loop.startingTemperatureC = 20;
+		loop.ratedFlowKgPerS = 10; loop.pumpPowerKW = 1;
+		loop.wear = core::InstallationWearSettings{0, 0.01, 0.001, 0.02, 0.6};
+		s.coolantLoops = {loop};
+		core::StationConfigurationDocument document; document.settings = s;
+		auto const bytes = core::serializeStationConfiguration(document);
+		require(bytes.find("fadeHalfLifeHours") == std::string::npos && bytes.find("initialAgeHours") == std::string::npos,
+			"disabled decay changed legacy wire shape");
+		core::StationConfigurationDocument loaded; std::string diagnostic;
+		require(core::parseStationConfiguration(bytes, loaded, &diagnostic) && loaded.settings == s,
+			"absent exponential fields did not default to disabled");
+		core::World world("legacy", 2, 2); world.pauseSimulation(); world.finishBuild();
+		std::string why; auto configured = world.configureStationSystems(s, false, &why);
+		require(configured, why.c_str()); world.resumeSimulation();
+		require(advanceSeconds(world, 2), "legacy wear drive failed");
+		auto snap = world.getStationSystemsSnapshot();
+		auto wear = allWear(snap);
+		require(wear.size() == (dispatch ? 4u : 6u), "legacy wearer coverage changed");
+		for (auto const& [id, w] : wear)
+			require(w.wearFraction == 0x1.00518f3078264p-14,
+				("legacy Wear changed bits for " + id).c_str());
+		require(snap.power.batteries[0].wearFraction == (dispatch ? 0x1.db451e7ba9d47p-16 : 0x1.db5abf141205fp-16),
+			"legacy battery Wear changed bits");
+		require(snap.coolantLoops[0].wearFraction == (dispatch ? 0x1.24ae1ded66732p-6 : 0x1.44db2c378a09ep-6),
+			"legacy coolant Wear changed bits");
+		// The same complete reader census also accepts the shared exponential
+		// form, including its initial age, even on idle installations.
+		core::InstallationWearSettings decay;
+		decay.fadeHalfLifeHours = 1.0 / 3600; decay.initialAgeHours = 0.5 / 3600;
+		for (auto& machine : s.batteries) machine.capacityFade = decay;
+		for (auto& machine : s.coolantLoops) machine.wear = decay;
+		for (auto& machine : s.solarArrays) machine.cellDegradation = decay;
+		for (auto& machine : s.generators) machine.fouledInjector = decay;
+		for (auto& machine : s.heatEngines) machine.efficiencyDrift = decay;
+		for (auto& machine : s.electrolyzers) machine.membraneDegradation = decay;
+		for (auto& machine : s.waterTreatments) machine.membraneFouling = decay;
+		for (auto& machine : s.co2Captures) machine.absorbentDegradation = decay;
+		for (auto& machine : s.fuelCells) machine.stackDegradation = decay;
+		for (auto& machine : s.sabatierReactors) machine.catalystDeactivation = decay;
+		for (auto& machine : s.methaneProcessors) machine.catalystDeactivation = decay;
+		core::World exponential("exponential readers", 2, 2); exponential.pauseSimulation(); exponential.finishBuild();
+		configured = exponential.configureStationSystems(s, false, &why); require(configured, why.c_str());
+		exponential.resumeSimulation(); require(advanceSeconds(exponential, 2), "exponential readers drive failed");
+		auto e = exponential.getStationSystemsSnapshot();
+		auto const expected = 1 - std::exp2(-(e.elapsedSeconds + 0.5));
+		for (auto const& [id, w] : allWear(e))
+			require(std::abs(w.wearFraction - expected) < 1e-12, ("shared decay missing on " + id).c_str());
+		require(std::abs(e.power.batteries[0].wearFraction - expected) < 1e-12
+			&& std::abs(e.coolantLoops[0].wearFraction - expected) < 1e-12, "pilot wearers did not use shared decay");
+	}
 }
 
 void wearCatalogueFade(smoke::Context const&)
@@ -666,6 +737,7 @@ void wearCatalogueOptIn(smoke::Context const&)
 
 void registerStationWearCatalogueChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"wearLegacyExact", wearLegacyExact});
 	checks.push_back({"wearCatalogueFade", wearCatalogueFade});
 	checks.push_back({"wearCataloguePermanence", wearCataloguePermanence});
 	checks.push_back({"wearCatalogueReplay", wearCatalogueReplay});

@@ -46,8 +46,24 @@ namespace core
 		// Normal operation is permanent even if the ceiling was lowered.
 		// A refund may unwind provisional fade, but not the Wear committed
 		// before this interval's discharge was reserved.
-		wear.fraction = std::max(floor,
-			std::min(model.maxWearFraction, std::max(0.0, wear.fade)));
+		auto fade = std::max(0.0, wear.fade);
+		// Keep the disabled path's arithmetic exactly unchanged. Linear
+		// damage spends capacity first; isotope decay acts on what is
+		// left, never on the beginning-of-life rating again. Bank exposure
+		// at the current rate, so a retune cannot reprice past decay.
+		if (model.fadeHalfLifeHours > 0.0)
+		{
+			wear.decayHalfLives = std::min(1074.0,
+				wear.decayHalfLives + hours / model.fadeHalfLifeHours);
+		}
+		if (wear.decayHalfLives > 0.0 && fade < 1.0)
+			fade += (1.0 - fade)
+				* -std::expm1(-std::log(2.0) * wear.decayHalfLives);
+		// A pure exponential approaches complete fade but never reaches
+		// it; keep that distinction even when binary64 rounds to one.
+		if (wear.decayHalfLives > 0.0 && wear.fade < 1.0)
+			fade = std::min(fade, std::nextafter(1.0, 0.0));
+		wear.fraction = std::max(floor, std::min(model.maxWearFraction, fade));
 	}
 
 	bool StationSystemsRuntime::Impl::Tick::poisonFeed(std::optional<StationFaultSnapshot>& fault,
@@ -85,8 +101,20 @@ namespace core
 	bool StationSystemsRuntime::Impl::Tick::wear()
 	{
 		if (!continuous) return true;
+		// Check every shared model, including idle machines and targeted live
+		// edits, before any accumulator can bank an invalid decay rate.
+		auto validDecay = [&](auto const& model) {
+			if (!model) return true;
+			if (!requireFinite(model->fadeHalfLifeHours, "Wear half-life")
+				|| !requireFinite(model->initialAgeHours, "Wear initial age")) return false;
+			if (model->fadeHalfLifeHours < 0.0 || model->initialAgeHours < 0.0
+				|| (model->fadeHalfLifeHours == 0.0 && model->initialAgeHours != 0.0))
+				return violation = "Invalid Wear half-life or initial age", false;
+			return true;
+		};
 		for (auto& battery : runtime.batteries)
 		{
+			if (!validDecay(battery.authored.capacityFade)) return false;
 			if (!battery.authored.capacityFade) continue;
 			system = "Installation Wear";
 			auto const& model = *battery.authored.capacityFade;
@@ -113,6 +141,7 @@ namespace core
 		}
 		for (auto& loop : runtime.coolantLoops)
 		{
+			if (!validDecay(loop.authored.wear)) return false;
 			if (!loop.authored.wear) continue;
 			system = "Installation Wear";
 			auto const& model = *loop.authored.wear;
@@ -158,6 +187,7 @@ namespace core
 		auto advanceMachine = [&](auto& machine, WearState& wear,
 			std::optional<InstallationWearSettings> const& model, char const* mode,
 			double activity, double mass) {
+			if (!validDecay(model)) return false;
 			if (!model) return true;
 			system = "Installation Wear";
 			if (!requireFinite(model->fadePerOperatingHour, "Wear operating rate")
@@ -186,6 +216,9 @@ namespace core
 		// power the array actually delivered rather than on illumination
 		// alone: an array whose string is lost or whose tracker has failed
 		// sees no sun it cannot collect, so it does not wear while shaded.
+		for (auto& machine : runtime.heatSources)
+			if (!advanceMachine(machine, machine.wear, machine.authored.wear,
+				"decay", machine.deliveredOutputKW, 0.0)) return false;
 		for (auto& machine : runtime.solarArrays)
 			if (!advanceMachine(machine, machine.cellDegradation, machine.authored.cellDegradation,
 				"cell-degradation", machine.lastAvailableKW, 0.0)) return false;

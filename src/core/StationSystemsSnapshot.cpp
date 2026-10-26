@@ -402,7 +402,8 @@ namespace core
 		// flows and the cumulative energy ledger (#395).
 		for (auto const& source : mImpl->heatSources)
 			result.heatSources.push_back({source.authored.id, source.authored.targetReservoirId,
-				source.authored.thermalClass, source.authored.ratedOutputKW, source.deliveredOutputKW, source.deliveredEnergyKJ});
+				source.authored.thermalClass, source.authored.ratedOutputKW, source.deliveredOutputKW, source.deliveredEnergyKJ,
+				source.wear.fraction, source.authored.ratedOutputKW * (1.0 - source.wear.fraction)});
 		for (auto const& reservoir : mImpl->reservoirs)
 		{
 			StationThermalReservoirSnapshot reservoirResult;

@@ -25,11 +25,14 @@ namespace
 		auto const fin = [](double v) { return std::isfinite(v); };
 		if (!fin(model.fadePerCycle) || !fin(model.fadePerOperatingHour)
 			|| !fin(model.fadePerThroughputKg) || !fin(model.fadePerCalendarHour)
-			|| !fin(model.maxWearFraction))
+			|| !fin(model.maxWearFraction) || !fin(model.fadeHalfLifeHours) || !fin(model.initialAgeHours))
 			return " wear rates must all be finite";
 		if (model.fadePerCycle < 0.0 || model.fadePerOperatingHour < 0.0
-			|| model.fadePerThroughputKg < 0.0 || model.fadePerCalendarHour < 0.0)
+			|| model.fadePerThroughputKg < 0.0 || model.fadePerCalendarHour < 0.0
+			|| model.fadeHalfLifeHours < 0.0 || model.initialAgeHours < 0.0)
 			return " wear rates must be non-negative";
+		if (model.initialAgeHours > 0.0 && model.fadeHalfLifeHours == 0.0)
+			return " initial age requires an exponential half-life";
 		if (model.maxWearFraction <= 0.0 || model.maxWearFraction > 1.0)
 			return " wear ceiling must be greater than 0 and at most 1";
 		if (!allowsCycles && model.fadePerCycle != 0.0)
@@ -37,7 +40,8 @@ namespace
 		if (!allowsThroughput && model.fadePerThroughputKg != 0.0)
 			return " flows no counted mass: fadePerThroughputKg must be zero";
 		if (model.fadePerCycle == 0.0 && model.fadePerOperatingHour == 0.0
-			&& model.fadePerThroughputKg == 0.0 && model.fadePerCalendarHour == 0.0)
+			&& model.fadePerThroughputKg == 0.0 && model.fadePerCalendarHour == 0.0
+			&& model.fadeHalfLifeHours == 0.0)
 			return " wear model declares no fade rate";
 		return nullptr;
 	}
@@ -1718,6 +1722,8 @@ namespace
 		for (auto const& source : settings.heatSources) try
 		{
 			auto const where = "Station heat source '" + source.id + "'";
+			if (source.wear)
+				if (auto const reason = wearModelViolation(*source.wear, false, false)) return refuse(where + reason);
 			if (source.id.empty() || source.id.size() > MaxStationStoreIdLength)
 				return refuse(where + " id must be non-empty and within the station id length limit");
 			if (!heatSourceIds.insert(source.id).second) return refuse(where + " id is duplicated");

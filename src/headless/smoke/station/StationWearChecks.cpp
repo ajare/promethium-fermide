@@ -218,6 +218,24 @@ void wearLifecycle(smoke::Context const&)
 		"a refused wear command mutated state, events or the command journal");
 }
 
+void wearDecayRepair(smoke::Context const&)
+{
+	auto s = wearLoopStation(); s.systemsStepWorldTicks = 60;
+	s.coolantLoops[0].wear = core::InstallationWearSettings{};
+	s.coolantLoops[0].wear->fadeHalfLifeHours = 0.01;
+	core::World world("decay repair", 2, 2); world.pauseSimulation(); world.finishBuild();
+	std::string why; auto configured = world.configureStationSystems(s, false, &why); require(configured, why.c_str());
+	world.resumeSimulation(); require(advanceSeconds(world, 10), "repair decay initial drive failed");
+	require(world.injectStationFault("loop", "coolant-leak", {core::FaultCause::Kind::AgentAction, "agent:1"}), "decay leak refused");
+	std::string job;
+	require(world.repairStationFault("loop", "coolant-leak", &job), "decay repair refused");
+	require(advanceSeconds(world, 20), "decay repair drive failed");
+	auto snap = world.getStationSystemsSnapshot();
+	require(snap.coolantLoops[0].activeFaults.empty(), "decay repair did not clear fault");
+	require(std::abs(snap.coolantLoops[0].wearFraction - (1 - std::exp2(-snap.elapsedSeconds / 36))) < 1e-12,
+		"repair healed decay or stopped its clock during isolation");
+}
+
 void wearRepair(smoke::Context const&)
 {
 	core::ScopedStationStepRatioForTesting clock(std::nullopt);
@@ -589,6 +607,7 @@ void wearOptIn(smoke::Context const&)
 void registerStationWearChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"wearLifecycle", wearLifecycle});
+	checks.push_back({"wearDecayRepair", wearDecayRepair});
 	checks.push_back({"wearRepair", wearRepair});
 	checks.push_back({"wearReplay", wearReplay});
 	checks.push_back({"wearTransactions", wearTransactions});

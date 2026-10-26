@@ -443,6 +443,8 @@ namespace core
 		double fadePerThroughputKg{0.0};    // fraction per kg actually flowed
 		double fadePerCalendarHour{0.0};    // fraction per simulated hour, operating or not
 		double maxWearFraction{1.0};        // permanent clamp on total fade, (0, 1]
+		double fadeHalfLifeHours{0.0};      // 0 disables exponential calendar fade
+		double initialAgeHours{0.0};        // beginning-of-life age; frozen at configuration
 		bool operator==(InstallationWearSettings const&) const = default;
 	};
 
@@ -949,6 +951,7 @@ namespace core
 		std::string targetReservoirId;
 		std::string thermalClass{"generation"};
 		double ratedOutputKW{0.0};
+		std::optional<InstallationWearSettings> wear;
 		bool operator==(HeatSourceSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationHeatSources{16};
@@ -2586,6 +2589,7 @@ namespace core
 		std::string& diagnostic, bool allowIncomplete = false, std::vector<std::string>* brokenReferences = nullptr);
 
 	// Shared Monitor preflight for document authoring and direct runtime commands.
+	bool stationRequiresExtendedWearSchema(StationSystemsSettings const&);
 	bool validateStationMonitors(StationSystemsSettings const&, std::string& diagnostic);
 	bool validateStationSystemsSettings(StationSystemsSettings const&, std::string& diagnostic,
 		std::vector<std::string>* brokenReferences = nullptr);
@@ -3701,6 +3705,8 @@ namespace core
 		double ratedOutputKW{};
 		double deliveredOutputKW{};
 		double deliveredEnergyKJ{};
+		double decayFraction{};             // permanent shared Wear fraction
+		double decayedOutputKW{};
 		bool operator==(StationHeatSourceSnapshot const&) const = default;
 	};
 

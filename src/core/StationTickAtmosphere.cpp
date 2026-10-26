@@ -928,7 +928,7 @@ namespace core
 			for (auto& source : runtime.heatSources)
 			{
 				auto const delivered = connections.routeHeat(
-					connections.port("Heat source", source.authored.id, "Heat"), source.authored.ratedOutputKW);
+					connections.port("Heat source", source.authored.id, "Heat"), source.authored.ratedOutputKW * (1.0 - source.wear.fraction));
 				source.deliveredOutputKW += delivered;
 				source.deliveredEnergyKJ += source.deliveredOutputKW * dt;
 				primaryIn[source.sinkIndex] += delivered;

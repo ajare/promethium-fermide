@@ -18,6 +18,39 @@
 
 namespace core
 {
+	bool stationRequiresExtendedWearSchema(StationSystemsSettings const& settings)
+	{
+		auto extended = [](auto const& model) {
+			return model && (model->fadeHalfLifeHours != 0.0 || model->initialAgeHours != 0.0);
+		};
+		for (auto const& machine : settings.batteries)
+			if (extended(machine.capacityFade)) return true;
+		for (auto const& machine : settings.coolantLoops)
+			if (extended(machine.wear)) return true;
+		for (auto const& machine : settings.heatSources)
+			if (machine.wear) return true;
+		for (auto const& machine : settings.solarArrays)
+			if (extended(machine.cellDegradation)) return true;
+		for (auto const& machine : settings.generators)
+			if (extended(machine.fouledInjector)) return true;
+		for (auto const& machine : settings.heatEngines)
+			if (extended(machine.efficiencyDrift)) return true;
+		for (auto const& machine : settings.electrolyzers)
+			if (extended(machine.membraneDegradation)) return true;
+		for (auto const& machine : settings.waterTreatments)
+			if (extended(machine.membraneFouling)) return true;
+		for (auto const& machine : settings.co2Captures)
+			if (extended(machine.absorbentDegradation)) return true;
+		for (auto const& machine : settings.fuelCells)
+			if (extended(machine.stackDegradation)) return true;
+		for (auto const& machine : settings.sabatierReactors)
+			if (extended(machine.catalystDeactivation)) return true;
+		for (auto const& machine : settings.methaneProcessors)
+			if (extended(machine.catalystDeactivation)) return true;
+		return false;
+	}
+
+
 	namespace
 	{
 	void writeWaterQuality(Serializer& s, WaterQualitySettings const& gate)
@@ -59,6 +92,8 @@ namespace core
 		s.writeDouble("fadePerThroughputKg", model.fadePerThroughputKg);
 		s.writeDouble("fadePerCalendarHour", model.fadePerCalendarHour);
 		s.writeDouble("maxWearFraction", model.maxWearFraction);
+		if (model.fadeHalfLifeHours != 0.0) s.writeDouble("fadeHalfLifeHours", model.fadeHalfLifeHours);
+		if (model.initialAgeHours != 0.0) s.writeDouble("initialAgeHours", model.initialAgeHours);
 		s.endMap();
 	}
 	bool readWearBlock(Serializer& s, std::string const& name, uint32_t version,
@@ -68,11 +103,22 @@ namespace core
 		if (version < 116)
 			throw SerializationException(std::string(feature) + " requires schema 116");
 		s.beginMap(name);
+		for (auto const& key : s.mapKeys(""))
+			if (key != "fadePerCycle" && key != "fadePerOperatingHour" && key != "fadePerThroughputKg"
+				&& key != "fadePerCalendarHour" && key != "maxWearFraction"
+				&& key != "fadeHalfLifeHours" && key != "initialAgeHours")
+				throw SerializationException("Wear field '" + key + "' is unknown; conversion required");
 		model.fadePerCycle = s.readDouble("fadePerCycle");
 		model.fadePerOperatingHour = s.readDouble("fadePerOperatingHour");
 		model.fadePerThroughputKg = s.readDouble("fadePerThroughputKg");
 		model.fadePerCalendarHour = s.readDouble("fadePerCalendarHour");
 		model.maxWearFraction = s.readDouble("maxWearFraction");
+		if (s.hasField("fadeHalfLifeHours") || s.hasField("initialAgeHours"))
+		{
+			if (version < 128) throw SerializationException("Exponential Wear requires schema 128");
+			if (s.hasField("fadeHalfLifeHours")) model.fadeHalfLifeHours = s.readDouble("fadeHalfLifeHours");
+			if (s.hasField("initialAgeHours")) model.initialAgeHours = s.readDouble("initialAgeHours");
+		}
 		s.endMap();
 		return true;
 	}
@@ -653,6 +699,7 @@ namespace core
 				serializer.writeString("targetReservoirId", source.targetReservoirId);
 				serializer.writeString("thermalClass", source.thermalClass);
 				serializer.writeDouble("ratedOutputKW", source.ratedOutputKW);
+				if (source.wear) writeWearBlock(serializer, "wear", *source.wear);
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -2088,13 +2135,20 @@ namespace core
 			{
 				serializer.beginMap("");
 				for (auto const& key : serializer.mapKeys(""))
-					if (key != "id" && key != "targetReservoirId" && key != "thermalClass" && key != "ratedOutputKW")
+					if (key != "id" && key != "targetReservoirId" && key != "thermalClass" && key != "ratedOutputKW" && key != "wear")
 						throw SerializationException("Heat source field '" + key + "' is unknown; conversion required");
 				HeatSourceSettings source;
 				source.id = serializer.readString("id");
 				source.targetReservoirId = serializer.readString("targetReservoirId");
 				source.thermalClass = serializer.readString("thermalClass");
 				source.ratedOutputKW = serializer.readDouble("ratedOutputKW");
+				if (serializer.hasField("wear"))
+				{
+					if (version < 128) throw SerializationException("Heat source Wear requires schema 128");
+					InstallationWearSettings model;
+					readWearBlock(serializer, "wear", version, "Heat source Wear", model);
+					source.wear = model;
+				}
 				serializer.endMap();
 				stationSettings.heatSources.push_back(std::move(source));
 			}

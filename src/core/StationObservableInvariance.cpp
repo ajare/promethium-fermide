@@ -95,7 +95,10 @@ namespace core
 				entry.basis = "70 s physicalCoupling fixtures only, ratios 1,6,7,30,60; analytical ODE truncation bounds for configured model coefficients, not physical parameter calibration or arbitrary configurations";
 				entry.verifiedBy = "station/physicalCoupling";
 			}
-			auto& cycle = result[60];
+			// Aggregate additions (including Heat sources) must not overwrite
+			// the preceding evidence or leave an empty registry entry.
+			auto const extra = names.size() + verified.size() + generatorFields.size() + boundedFields.size();
+			auto& cycle = result[extra];
 			cycle.name = "fuelCells[].electricalKJ";
 			cycle.classification = StationObservableInvarianceClass::Bound;
 			cycle.convergenceOrder = 1;
@@ -103,7 +106,7 @@ namespace core
 			cycle.verifiedThroughRatio = 60;
 			cycle.basis = "70 s solar-funded 0.001 kg/s electrolysis/fuel-cell cycle only; error is one Station interval of reactant production; ratios 1,6,7,30,60, not a global guarantee";
 			cycle.verifiedBy = "station/physicalCoupling";
-			auto& decay = result[61];
+			auto& decay = result[extra + 1];
 			decay.name = "power.generators[].decayHeatKJ";
 			decay.classification = StationObservableInvarianceClass::Exact;
 			decay.absoluteTolerance = 1e-8;
@@ -115,7 +118,7 @@ namespace core
 				"atmospherePathways[].lastCommandSeconds"};
 			for (size_t i = 0; i < commandFields.size(); ++i)
 			{
-				auto& entry = result[62 + i];
+				auto& entry = result[extra + 2 + i];
 				entry.name = commandFields[i];
 				entry.classification = StationObservableInvarianceClass::Exact;
 				entry.verifiedThroughRatio = 60;
