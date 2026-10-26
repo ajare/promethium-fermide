@@ -174,6 +174,7 @@ namespace core
 		// Free, immediate latch clear. Refuses pending/unlatched Trips and
 		// non-Trip Faults. An unresolved trigger may latch again next step.
 		bool resetTrip(std::string_view installationId, std::string* diagnostic = nullptr);
+		bool breakerReset(std::string_view busId, std::string* diagnostic = nullptr);
 		// Funded Condition recovery (#840): heal an Installation toward
 		// targetCondition, paying for every restored point from the
 		// service-stock store its Condition model names, above that

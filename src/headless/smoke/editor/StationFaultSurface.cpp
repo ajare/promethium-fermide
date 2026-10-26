@@ -2,6 +2,7 @@
 #include "ImGuiContext.h"
 #include "TestEngine.h"
 #include "StationSystemsWindow.h"
+#include "DocumentEdit.h"
 #include "StationFaultPanel.h"
 #include "StationFlowDiagram.h"
 #include "core/World.h"
@@ -639,10 +640,104 @@ namespace
 	}
 }
 
+namespace
+{
+	void busBreakerWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext imgui;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1600, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		auto world = std::make_shared<core::World>("Breaker", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings settings;
+		settings.enabled = true; settings.systemsStepWorldTicks = 1;
+		settings.powerBuses[0].ratedCapacityKW = 5;
+		settings.powerBuses[0].tripPersistenceSeconds = 0.5;
+		core::SolarArraySettings source;
+		source.id = "solar"; source.capacityKW = 20; source.illumination.constantLevel = 1;
+		settings.solarArrays = {source};
+		core::EquipmentLoadSettings load;
+		load.id = "load"; load.electricalDemandKW = 8; load.operatingProfile.constantLevel = 1; load.thermalClass = "moderate";
+		settings.equipmentLoads = {load};
+		std::string diagnostic;
+		if (!world->configureStationSystems(settings, false, &diagnostic))
+			require(false, ("breaker configuration: " + diagnostic).c_str());
+		world->resumeSimulation(); require(world->advanceTicks(120), "breaker World failed");
+		world->pauseSimulation();
+		require(world->getStationSystemsSnapshot().power.buses[0].tripped, "World did not trip");
+		// Replay without any client command must retain the autonomous Trip.
+		for (bool binary : {false, true})
+		{
+			std::unique_ptr<core::Serializer> out = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+			core::SerializationWorkData work; world->serialize(*out, work); out->serialize();
+			auto bytes = binary ? static_cast<core::BinarySerializer&>(*out).getSerializedString() : static_cast<core::YamlSerializer&>(*out).getSerializedString();
+			std::unique_ptr<core::Serializer> in = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+			in->deserialize(); core::World restored("Restored", 2, 2);
+			require(restored.deserialize(*in, work), "breaker reload refused");
+			auto a = restored.getStationSystemsSnapshot(), b = world->getStationSystemsSnapshot();
+			require(a.power == b.power, "breaker save/load power diverged");
+			require(a.activeAlerts == b.activeAlerts, "breaker save/load Alerts diverged");
+			require(a == b, "autonomous breaker save/load other snapshot fields diverged");
+		}
+		StationSystemsWindow window;
+		DocumentHistory history;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1560, 960});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world, &history); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "busBreakerWorkflow", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration"); ctx->Yield(2);
+			REQ(driver.contains("Latched trip - Reset breaker"), "latched marker missing");
+			bool deadColour = false;
+			for (auto* w : ImGui::GetCurrentContext()->Windows)
+				for (auto const& vertex : w->DrawList->VtxBuffer)
+					deadColour |= vertex.col == station_flow::DeadBusColor;
+			REQ(deadColour, "tripped bus did not render dead styling");
+			ImVec4 markerNode{};
+			REQ(window.flowNodeRect("Power bus", "main", &markerNode), "marker bus absent");
+			auto const zoom = (markerNode.z - markerNode.x) / station_flow::NodeWidth;
+			ctx->MouseTeleportToPos({markerNode.x + 8 * zoom + 80, markerNode.y + 64 * zoom + 9});
+			ctx->MouseClick(); ctx->Yield(3);
+			REQ(!world->getStationSystemsSnapshot().power.buses[0].tripped, "marker did not reset breaker");
+			REQ(history.undoCount() == 1, "marker did not issue one history entry");
+			REQ(world->getStationSystemsSnapshot().closedAlerts.back().clearReason == core::AlertClearReason::BreakerReset,
+				"marker did not clear the Critical Alert with BreakerReset");
+			auto resetSnapshot = world->getStationSystemsSnapshot();
+			auto restore = [&](DocumentSnapshot const& snapshot) {
+				world = deserializeDocumentSnapshot(snapshot, world, {});
+				world->pauseSimulation(); return true;
+			};
+			REQ(history.undo(captureDocumentSnapshot(world, history), restore)
+				&& world->getStationSystemsSnapshot().power.buses[0].tripped
+				&& !world->getStationSystemsSnapshot().activeAlerts.empty(), "undo lost trip or Alert");
+			ctx->Yield(3);
+			REQ(history.redo(captureDocumentSnapshot(world, history), restore)
+				&& world->getStationSystemsSnapshot() == resetSnapshot, "redo did not replay BreakerReset exactly");
+			world->resumeSimulation(); REQ(world->advanceTicks(60), "re-trip World failed"); world->pauseSimulation();
+			ctx->Yield(3);
+			REQ(world->getStationSystemsSnapshot().power.buses[0].tripped, "World persistent overload did not re-trip");
+			ImVec4 rect{};
+			REQ(window.flowNodeRect("Power bus", "main", &rect), "bus absent");
+			ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+			ctx->MouseClick(); ctx->Yield(3);
+			driver.click(ctx, "**/BreakerReset"); ctx->Yield(3);
+			REQ(!world->getStationSystemsSnapshot().power.buses[0].tripped, "inspector reset failed");
+		});
+		#undef REQ
+		require(driver.passed(), "bus breaker ImGui workflow failed");
+	}
+}
+
 namespace editor_smoke
 {
 	void registerStationFaultSurface(std::vector<smoke::Check>& checks)
 	{
+		checks.push_back({"station/busBreakerWorkflow", busBreakerWorkflow});
 		checks.push_back({"station/faultBadgeWorkflow", faultBadgeWorkflow});
 		checks.push_back({"station/faultAuthoringWorkflow", faultAuthoringWorkflow});
 		checks.push_back({"station/heatEngineFaultAuthoringWorkflow", heatEngineFaultAuthoringWorkflow});

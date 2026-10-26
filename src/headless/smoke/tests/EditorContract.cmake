@@ -324,6 +324,7 @@ set(editor_names
     station/enduranceWorkflow
     station/forecastWorkflow
     station/stabilityWorkflow
+    station/busBreakerWorkflow
     station/faultBadgeWorkflow
     station/faultAuthoringWorkflow
     station/heatEngineFaultAuthoringWorkflow

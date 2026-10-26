@@ -118,6 +118,7 @@ namespace station_flow
 	std::vector<ImVec2> forceLayout(Graph const& graph);
 	// One UI-only relaxation step; pinned node (if any) stays at its position.
 	void relaxLayout(Graph const& graph, std::vector<ImVec2>& positions, float temperature, int pinned = -1);
+	inline constexpr ImU32 DeadBusColor = IM_COL32(38, 39, 44, 255);
 	ImU32 nodeColor(Node const& node, bool hovered = false);
 	ImU32 edgeColor(Medium medium);
 	char const* mediumName(Medium medium);
@@ -146,7 +147,8 @@ public:
 		std::function<void()> const& beforeLayoutChange = {},
 		core::StationSystemsSnapshot const* live = nullptr,
 		bool draftMatchesLive = true, bool paused = false,
-		std::function<void()> const& finishHeader = {});
+		std::function<void()> const& finishHeader = {},
+		std::function<void(std::string const&)> const& resetBreaker = {});
 	// Last displayed readout, also used by headless UI checks.
 	std::optional<station_flow::NodeTelemetry> nodeTelemetry(std::string const& type,
 		std::string const& id) const;
@@ -255,6 +257,9 @@ private:
 
 	std::shared_ptr<StationComponentHelpResource const> mComponentHelp;
 	std::map<std::string, station_flow::NodeTelemetry> mTelemetry;
+	std::set<std::string> mTrippedBuses;
+	std::string mPressedBreaker;
+	ImVec2 mPressedBreakerPos{};
 	// #849: the last rendered frame's fault badges, keyed the same way as
 	// mTelemetry so a node's telemetry and its badges are read together.
 	std::map<std::string, std::vector<station_flow::FaultBadge>> mFaultBadges;

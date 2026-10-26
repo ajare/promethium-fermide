@@ -69,7 +69,7 @@ public:
 					| (mStation.flowModified() ? ImGuiTabItemFlags_UnsavedDocument : 0)))
 				{
 					mSelected = Tab::StationFlow;
-					mStation.renderFlowContents(world);
+					mStation.renderFlowContents(world, &history);
 					ImGui::EndTabItem();
 				}
 				mSelectRequested = false;

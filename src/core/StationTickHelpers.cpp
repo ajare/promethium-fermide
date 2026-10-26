@@ -5,6 +5,21 @@ namespace core
 	void StationSystemsRuntime::Impl::Tick::initializeBuses()
 	{
 		for (auto const& bus : runtime.settings.powerBuses) busBudgets.try_emplace(bus.id);
+		auto isolate = [&](char const* type, char const* role, auto const& entries, bool whole) {
+			for (auto const& entry : entries)
+			{
+				bool any = false, all = true;
+				for (auto const& id : entry.authored.busIds)
+				{ any |= runtime.busTripped(id); all &= runtime.busTripped(id); }
+				if (whole ? any : all) connections.isolate(type, entry.authored.id, role);
+			}
+		};
+		isolate("Solar", "Solar generation", runtime.solarArrays, false);
+		isolate("Generator", "Generation", runtime.generators, true);
+		isolate("Fuel cell", "Backup generation", runtime.fuelCells, false);
+		isolate("Heat engine", "Generation", runtime.heatEngines, false);
+		for (auto const& bus : runtime.settings.powerBuses)
+			if (runtime.busTripped(bus.id)) connections.isolateBus(bus.id);
 		auto bind = [&](char const* type, auto const& entries) {
 			for (auto const& entry : entries)
 			{
@@ -49,6 +64,10 @@ namespace core
 
 	void StationSystemsRuntime::Impl::Tick::addGeneration(std::vector<std::string> const& ids, double power)
 	{
+		std::vector<std::string> live;
+		for (auto const& id : ids) if (!runtime.busTripped(id)) live.push_back(id);
+		if (live.empty()) return;
+		if (live != ids) { addGeneration(live, power); return; }
 		// Multiple landings expose ONE finite source to the member buses.
 		// Actual allocation decides which landing carries each watt.
 		if (ids.size() > 1) { sharedGeneration.push_back({ids, power}); return; }
@@ -59,6 +78,7 @@ namespace core
 
 	double StationSystemsRuntime::Impl::Tick::generationAvailable(std::string const& id)
 	{
+		if (runtime.busTripped(id)) return 0.0;
 		double total = busBudgets.at(id).available;
 		for (auto const& source : sharedGeneration)
 			if (std::find(source.ids.begin(), source.ids.end(), id) != source.ids.end()) total += source.available;
@@ -102,9 +122,10 @@ namespace core
 
 	double StationSystemsRuntime::Impl::Tick::sourceDemand(std::vector<std::string> const& ids)
 	{
+		if (std::all_of(ids.begin(), ids.end(), [&](auto const& id) { return runtime.busTripped(id); })) return 0.0;
 		if (runtime.settings.powerBuses.size() == 1) return busBudgets.at(ids.front()).dispatch;
 		double result = 0;
-		for (auto const& id : ids) result += std::max(0.0, busBudgets.at(id).dispatch);
+		for (auto const& id : ids) if (!runtime.busTripped(id)) result += std::max(0.0, busBudgets.at(id).dispatch);
 		return result;
 	}
 
@@ -113,6 +134,7 @@ namespace core
 		if (runtime.settings.powerBuses.size() == 1) { busBudgets.at(ids.front()).dispatch -= power; return; }
 		for (auto const& id : ids)
 		{
+			if (runtime.busTripped(id)) continue;
 			auto& bus = busBudgets.at(id);
 			auto const committed = std::min(power, bus.dispatch);
 			bus.dispatch -= committed; power -= committed;
@@ -301,6 +323,7 @@ namespace core
 
 	double StationSystemsRuntime::Impl::Tick::batteryDeliverableKW(std::string const& busId)
 	{
+		if (runtime.busTripped(busId)) return 0.0;
 		double total{0.0};
 		for (auto const& battery : runtime.batteries)
 			if (std::find(battery.authored.busIds.begin(), battery.authored.busIds.end(), busId) != battery.authored.busIds.end())
@@ -311,7 +334,7 @@ namespace core
 	double StationSystemsRuntime::Impl::Tick::drawBatteries(std::string const& busId, double needKW,
 		std::vector<std::pair<size_t, double>>* contributions, std::vector<double> const* limits)
 	{
-		if (needKW <= 0.0) return 0.0;
+		if (needKW <= 0.0 || runtime.busTripped(busId)) return 0.0;
 		auto remaining = needKW;
 		for (size_t batteryIndex = 0; batteryIndex < runtime.batteries.size(); ++batteryIndex)
 		{
@@ -415,7 +438,7 @@ namespace core
 		for (auto const& busId : buses)
 		{
 			auto const port = powerPort(type, id, busId);
-			auto const cap = connections.efficiency(port) > 0.0 ? connections.remaining(port) : 0.0;
+			auto const cap = !runtime.busTripped(busId) && connections.efficiency(port) > 0.0 ? connections.remaining(port) : 0.0;
 			auto const local = std::min(cap, busBudgets.at(busId).available);
 			result.push_back({busId, 0.0, std::vector<double>(sharedGeneration.size()),
 				std::vector<double>(runtime.batteries.size())});
@@ -475,6 +498,7 @@ namespace core
 		std::string const& busId, double needKW, std::vector<std::pair<size_t, double>>* contributions,
 		double* generation, SupplyCapacity const* capacity)
 	{
+		if (runtime.busTripped(busId)) return 0.0;
 		auto const port = powerPort(type, id, busId);
 		auto const grossNeed = connections.required(port, needKW);
 		auto& bus = busBudgets.at(busId);

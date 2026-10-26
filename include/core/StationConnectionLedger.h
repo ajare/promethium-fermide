@@ -54,6 +54,36 @@ public:
 			mEntries.push_back(std::move(entry));
 		}
 	}
+	// Protective isolation changes the tick-local transport budget, never authoring.
+	void isolate(std::string_view type, std::string_view id, std::string_view role)
+	{
+		for (auto& entry : mEntries)
+		{
+			auto const& key = entry.snapshot.key;
+			if (key.ownerType == type && key.ownerId == id && key.relation == role)
+				entry.properties.maximumThroughput = 0.0;
+		}
+	}
+	void isolateBus(std::string_view id)
+	{
+		for (auto& entry : mEntries)
+			if (entry.snapshot.key.peerType == "Power bus" && entry.snapshot.key.peerId == id)
+				entry.properties.maximumThroughput = 0.0;
+		// Legacy source/storage callers address a role rather than a landing.
+		// Keep that role on a live landing, never book it on the opened cable.
+		for (auto& [key, index] : mLookup)
+		{
+			auto const& opened = mEntries[index].snapshot.key;
+			if (opened.peerType != "Power bus" || opened.peerId != id) continue;
+			for (size_t i = 0; i < mEntries.size(); ++i)
+			{
+				auto const& candidate = mEntries[i];
+				if (std::tuple{candidate.snapshot.key.ownerType, candidate.snapshot.key.ownerId,
+					candidate.snapshot.key.relation} == key && candidate.properties.maximumThroughput > 0.0)
+				{ index = i; break; }
+			}
+		}
+	}
 	using Port = size_t;
 	struct StorePort { Port port; size_t store; bool input; };
 	std::vector<StorePort> storePorts(std::string const& type, std::string const& id,

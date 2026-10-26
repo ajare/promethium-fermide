@@ -1284,8 +1284,11 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	std::function<void()> const& beforeNodeRemoval,
 	std::function<void()> const& beforeLayoutChange,
 	core::StationSystemsSnapshot const* live, bool draftPending, bool paused,
-	std::function<void()> const& finishHeader)
+	std::function<void()> const& finishHeader,
+	std::function<void(std::string const&)> const& resetBreaker)
 {
+	if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) && !ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+		mPressedBreaker.clear();
 	if (mLastFrame != ImGui::GetFrameCount() - 1)
 	{ mDragging = -1; mTemperature = 0; mActiveLinkPin.reset(); }
 	mPinEligibility.clear();
@@ -1362,6 +1365,9 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	// scenario away from a draft that has no pending edits, and hiding the
 	// readouts in that case blanks the canvas exactly when the user needs
 	// to see the effect - so it no longer does.
+	std::set<std::string> trips;
+	if (live) for (auto const& bus : live->power.buses) if (bus.tripped) trips.insert(bus.busId);
+	if (trips != mTrippedBuses) { mTrippedBuses = std::move(trips); mTelemetryTick = UINT64_MAX; }
 	bool const showLive = live && live->enabled && !draftPending;
 	if (!showLive)
 	{
@@ -2565,7 +2571,11 @@ entry.thermalClass = "moderate";
 		// with a dashed outline and a "derived" marker, so it can never be
 		// mistaken for something the user authored.
 		bool const derived = core::stationIsDerivedNodeType(n.type);
-		auto fill = derived ? ImU32(IM_COL32(46, 50, 58, 255)) : station_flow::nodeColor(n, over);
+		bool const deadBus = live && !draftPending && n.type == "Power bus"
+			&& std::any_of(live->power.buses.begin(), live->power.buses.end(),
+				[&](auto const& bus) { return bus.busId == n.id && bus.tripped; });
+		auto fill = deadBus ? station_flow::DeadBusColor
+			: derived ? ImU32(IM_COL32(46, 50, 58, 255)) : station_flow::nodeColor(n, over);
 		auto tint = ImGui::ColorConvertU32ToFloat4(station_flow::nodeColor(n, true));
 		tint.x = std::min(1.0f, tint.x * 1.8f); tint.y = std::min(1.0f, tint.y * 1.8f); tint.z = std::min(1.0f, tint.z * 1.8f);
 		auto border = n.unresolved ? IM_COL32(255, 80, 80, 255)
@@ -2595,6 +2605,28 @@ entry.thermalClass = "moderate";
 			+ (derived ? " (derived)" : "");
 		draw->AddText(ImGui::GetFont(), ImGui::GetFontSize() * 1.1f * mZoom, {a.x + 8 * mZoom, a.y + 6 * mZoom},
 			IM_COL32(235, 240, 245, 255), label.c_str(), nullptr, (nodeWidth - 16) * mZoom, &clip);
+		if (deadBus)
+		{
+			auto const saved = ImGui::GetCursorScreenPos();
+			ImGui::SetCursorScreenPos({a.x + 8 * mZoom, a.y + 64 * mZoom});
+			ImGui::PushID(n.id.c_str());
+			ImGui::BeginDisabled(!resetBreaker);
+			ImGui::Button("Latched trip - Reset breaker");
+			// ImNodes owns the canvas mouse item; use the marker's own bounds
+			// for actuation just like the growable-port controls on this overlay.
+			bool const hit = hovered && ImGui::IsMouseHoveringRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+			if (hit && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+			{ mPressedBreaker = n.id; mPressedBreakerPos = io.MousePos; }
+			if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && mPressedBreaker == n.id)
+			{
+				if (hit && resetBreaker && std::hypot(io.MousePos.x - mPressedBreakerPos.x,
+					io.MousePos.y - mPressedBreakerPos.y) < io.MouseDragThreshold) resetBreaker(n.id);
+				mPressedBreaker.clear();
+			}
+			ImGui::EndDisabled();
+			ImGui::PopID();
+			ImGui::SetCursorScreenPos(saved);
+		}
 		// #849: the fault badge. A node with an active Fault wears its mode
 		// and the derived impact that Fault costs, deepest first, so the
 		// canvas says what is broken and how much it costs without opening

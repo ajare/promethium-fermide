@@ -256,8 +256,152 @@ namespace
 		near(bus(snap, "unused").residualKW, 0, "internal stranded audit drift");
 	}
 }
+namespace
+{
+	void breakers(smoke::Context const&)
+	{
+		auto s = twoBuses();
+		s.powerBuses[0].ratedCapacityKW = 5;
+		s.powerBuses[0].tripPersistenceSeconds = 3;
+		s.equipmentLoads[0].criticalFloorKW = 4;
+		core::StationSystemsRuntime run(s, 1.0f);
+		std::string diagnostic;
+		require(!run.breakerReset("main", &diagnostic) && !diagnostic.empty()
+			&& !run.breakerReset("missing"), "invalid BreakerReset accepted");
+		require(run.advanceTo(2) && !bus(run.snapshot(), "main").tripped, "premature trip");
+		require(run.advanceTo(3) && bus(run.snapshot(), "main").tripped, "persistence did not trip");
+		auto snap = run.snapshot();
+		require(snap.activeAlerts.size() == 1 && snap.activeAlerts[0].metric == "busBreakerTrip"
+			&& snap.activeAlerts[0].severity == core::AlertSeverity::Critical
+			&& snap.activeAlerts[0].threshold == 5 && snap.activeAlerts[0].currentValue == 8
+			&& snap.activeAlerts[0].firedAtSeconds == 3, "breaker Alert payload missing without Monitor");
+		require(run.advanceTo(4), "dead bus failed audit");
+		snap = run.snapshot();
+		near(bus(snap, "main").generationKW, 0, "tripped solar connected");
+		near(bus(snap, "main").suppliedKW, 0, "tripped load supplied");
+		near(bus(snap, "main").unmetKW, 8, "dead demand vanished");
+		near(bus(snap, "main").unmetCriticalKW, 4, "dead critical floor vanished");
+		require(!bus(snap, "backup").tripped, "unrated bus tripped");
+		auto disabledMonitors = run.effectiveSettings();
+		require(core::World::setStationMonitorsEnabled(disabledMonitors, false, diagnostic)
+			&& run.updateSettings(disabledMonitors) && run.snapshot().activeAlerts.size() == 1,
+			"bulk Monitor disable cleared mandatory breaker Alert");
+		require(run.updateNode<core::EquipmentLoadSettings>("main", [](auto& load) { load.electricalDemandKW = 4; }), "load recovery refused");
+		require(run.advanceTo(8) && bus(run.snapshot(), "main").tripped
+			&& run.snapshot().activeAlerts.size() == 1, "latch auto-cleared on recovery");
+		require(run.breakerReset("main") && !bus(run.snapshot(), "main").tripped, "reset failed");
+		snap = run.snapshot();
+		require(snap.activeAlerts.empty() && snap.closedAlerts.size() == 1
+			&& snap.closedAlerts[0].clearReason == core::AlertClearReason::BreakerReset, "reset Alert lifecycle failed");
+		require(run.advanceTo(9), "reset supply drive failed");
+		near(bus(run.snapshot(), "main").suppliedKW, 4, "reset did not restore");
+		require(run.updateNode<core::EquipmentLoadSettings>("main", [](auto& load) { load.electricalDemandKW = 8; }), "overload restore refused");
+		require(run.advanceTo(11) && !bus(run.snapshot(), "main").tripped, "re-trip reused old persistence");
+		require(run.advanceTo(12) && bus(run.snapshot(), "main").tripped
+			&& run.snapshot().activeAlerts.size() == 1, "persistent overload did not re-trip");
+		// Authored Monitors cannot impersonate or disable this producer.
+		auto collision = s;
+		core::StationMonitorSettings monitor;
+		monitor.id = "breaker:main";
+		collision.monitors.push_back(monitor);
+		require(!core::validateStationMonitors(collision, diagnostic) && !diagnostic.empty(), "Monitor stole breaker Alert identity");
+		// A coarse Station interval splits exactly at a fractional persistence
+		// boundary. Its power accounts describe the whole elapsed interval.
+		{
+			core::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
+			auto coarseSettings = s;
+			coarseSettings.systemsStepWorldTicks = 6;
+			coarseSettings.powerBuses[0].tripPersistenceSeconds = 2.5;
+			core::StationSystemsRuntime coarse(coarseSettings, 1.0f);
+			require(coarse.advanceTo(6), "coarse breaker split failed");
+			auto coarseSnap = coarse.snapshot();
+			near(bus(coarseSnap, "main").trippedAtSimSeconds, 2.5, "coarse trip missed persistence boundary");
+			near(bus(coarseSnap, "main").suppliedKW, 8 * 2.5 / 6, "coarse trip leaked supply after boundary");
+		}
+		// Below-rating time resets the timer; equality is not overload.
+		auto pulseSettings = s;
+		pulseSettings.powerBuses[0].ratedCapacityKW = 8;
+		core::StationSystemsRuntime equal(pulseSettings, 1.0f);
+		require(equal.advanceTo(10) && !bus(equal.snapshot(), "main").tripped, "equality tripped");
+		pulseSettings.powerBuses[0].ratedCapacityKW = 5;
+		pulseSettings.equipmentLoads[0].operatingProfile.periodSeconds = 4;
+		pulseSettings.equipmentLoads[0].operatingProfile.segments = {{0, 1}, {2, 0}};
+		core::StationSystemsRuntime pulses(pulseSettings, 1.0f);
+		require(pulses.advanceTo(12) && !bus(pulses.snapshot(), "main").tripped, "separate overload pulses accumulated");
+		// Instant protection must roll back the trial draw, including batteries.
+		s.powerBuses[0].tripPersistenceSeconds = 0;
+		core::BatterySettings battery;
+		battery.id = "bank"; battery.busIds = {"main"}; battery.nameplateKWh = 10; battery.usableKWh = 10;
+		battery.startingStoredKWh = 10; battery.maxDischargeKW = 20; battery.maxChargeKW = 20;
+		s.batteries = {battery};
+		s.solarArrays[0].capacityKW = 0; // Only the battery can cause this overload.
+		core::StationSystemsRuntime instant(s, 1.0f);
+		require(instant.advanceTo(1), "instant trip audit failed");
+		snap = instant.snapshot();
+		require(bus(snap, "main").tripped, "zero persistence failed");
+		near(bus(snap, "main").throughPowerKW, 0, "instant trial draw leaked");
+		near(bus(snap, "main").batteryDischargeKW, 0, "tripped battery discharged");
+		near(bus(snap, "main").batteryChargeKW, 0, "tripped battery charged");
+		require(instant.breakerReset("main") && instant.advanceTo(2)
+			&& bus(instant.snapshot(), "main").tripped, "instant persistent re-trip failed");
+		// Charging alone is also through-power; its trial energy must not
+		// survive an instantaneous trip, even with no equipment demand.
+		auto chargingSettings = s;
+		chargingSettings.solarArrays[0].capacityKW = 20;
+		chargingSettings.batteries[0].startingStoredKWh = 0;
+		chargingSettings.equipmentLoads[0].electricalDemandKW = 0;
+		chargingSettings.equipmentLoads[0].criticalFloorKW = 0;
+		core::StationSystemsRuntime charging(chargingSettings, 1.0f);
+		require(charging.advanceTo(1) && bus(charging.snapshot(), "main").tripped, "charging overload did not trip");
+		near(charging.snapshot().power.batteries[0].storedKWh, 0, "instant charge probe leaked stored energy");
+		// Opening a first landing must not strand a multi-landing source or
+		// battery, and their remaining flow must never book on the opened wire.
+		auto landed = twoBuses();
+		landed.powerBuses[0].ratedCapacityKW = 5;
+		landed.solarArrays.resize(1); landed.solarArrays[0].busIds = {"main", "backup"};
+		core::StationSystemsRuntime sharedSource(landed, 1.0f);
+		require(sharedSource.advanceTo(2), "shared source isolation failed");
+		auto ls = sharedSource.snapshot();
+		near(bus(ls, "backup").suppliedKW, 8, "tripped first landing stranded live solar landing");
+		for (auto const& flow : ls.connections)
+			if (flow.key.peerType == "Power bus" && flow.key.peerId == "main")
+				near(flow.lastInputRate, 0, "opened source cable still carried power");
+		landed.solarArrays.clear(); landed.batteries = {battery};
+		landed.batteries[0].busIds = {"main", "backup"};
+		core::StationSystemsRuntime sharedBattery(landed, 1.0f);
+		require(sharedBattery.advanceTo(2), "shared battery isolation failed");
+		ls = sharedBattery.snapshot();
+		near(bus(ls, "backup").suppliedKW, 8, "tripped first landing stranded live battery landing");
+		for (auto const& flow : ls.connections)
+			if (flow.key.peerType == "Power bus" && flow.key.peerId == "main")
+				near(flow.lastInputRate, 0, "opened battery cable still carried power");
+		// A running generator isolated by a trip follows its ordinary shutdown
+		// and decay heat path, even if it also has an untripped landing.
+		s = twoBuses(); s.solarArrays.clear();
+		s.powerBuses[0].ratedCapacityKW = 5; s.powerBuses[0].tripPersistenceSeconds = 2;
+		core::ThermalReservoirSettings sink;
+		sink.id = "sink"; sink.thermalClass = "generation"; sink.heatCapacityKJPerK = 1000000; sink.startingTemperatureC = 20;
+		s.thermalReservoirs = {sink};
+		core::ResourceStoreSettings fuel;
+		fuel.id = "fuel"; fuel.unit = "kWh"; fuel.capacity = 100; fuel.startingQualified = 100; s.stores = {fuel};
+		core::GeneratorSettings gen;
+		gen.id = "gen"; gen.fuelStoreId = "fuel"; gen.heatSinkId = "sink"; gen.thermalClass = "generation";
+		gen.ratedOutputKW = 20; gen.commandedOutputKW = 20; gen.efficiency = 0.5;
+		gen.maxRampKWPerSecond = 1000; gen.maxSinkTemperatureC = 90;
+		gen.shutdownSeconds = 10; gen.shutdownHeatKW = 2;
+		gen.busIds = {"main", "backup"}; s.generators = {gen};
+		core::StationSystemsRuntime generated(s, 1.0f);
+		require(generated.advanceTo(4), "isolated generator drive failed");
+		auto gs = generated.snapshot();
+		require(bus(gs, "main").tripped && gs.power.generators[0].phase == core::StationGeneratorPhase::Shutdown
+			&& gs.power.generators[0].decayHeatKW > 0, "isolated generator skipped shutdown/decay heat");
+		near(gs.power.generators[0].averageOutputKW, 0, "isolated generator kept producing");
+		near(bus(gs, "backup").generationKW, 0, "isolated generator energized another landing");
+	}
+}
 void registerStationBusDispatchChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"busBreakers", breakers});
 	checks.push_back({"busDispatchBalance", balance});
 	checks.push_back({"busDispatchProtected", protectedFirst});
 	checks.push_back({"busDispatchBatteries", batteries});

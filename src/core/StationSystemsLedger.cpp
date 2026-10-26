@@ -27,6 +27,7 @@ namespace core
 		auto const committedConnectionFlows = connectionFlows;
 		auto const committedPoolGeneration = lastPoolGenerationKW;
 		auto const committedBusPower = lastBusPower;
+		auto const committedBreakers = busBreakers;
 		auto const committedBusDemand = lastBusDispatchDemand;
 		auto const committedConnectionLoss = lastConnectionPowerLossKW;
 		auto const committedPoolResidual = lastPoolResidualKW;
@@ -121,6 +122,7 @@ namespace core
 			connectionFlows = committedConnectionFlows;
 			lastPoolGenerationKW = committedPoolGeneration;
 			lastBusPower = committedBusPower;
+			busBreakers = committedBreakers;
 			lastBusDispatchDemand = committedBusDemand;
 			lastConnectionPowerLossKW = committedConnectionLoss;
 			lastPoolResidualKW = committedPoolResidual;
@@ -264,8 +266,12 @@ namespace core
 			violation = "profile transition count exceeds 65536 per step or its occurrence index is not representable";
 			return false;
 		}
-		auto integrate = [&](double instant, double duration, auto&& committed)
+		auto const hasBreakerProtection = std::any_of(settings.powerBuses.begin(), settings.powerBuses.end(),
+			[](auto const& bus) { return bus.ratedCapacityKW > 0.0; });
+		std::function<bool(double, double, std::function<void(Tick const&)>)> integrate;
+		integrate = [&](double instant, double duration, std::function<void(Tick const&)> committed)
 		{
+			auto const restoreInterval = hasBreakerProtection ? ledgerCheckpoint() : std::function<void()>{};
 			// #830: dispatch feedback is intentionally delayed, but engine
 			// acceptance is not. Discover THIS interval's requests through the
 			// real allocation path with all available engine capacity offered.
@@ -296,7 +302,47 @@ namespace core
 				|| !scratch.thermal() || !scratch.processing() || !scratch.biology()
 				|| !scratch.atmosphere() || !scratch.wear()) return false;
 			scratch.captureProtection();
-			if (!scratch.auditPower() || !scratch.auditState() || !scratch.commitAndEvents()) return false;
+			if (!scratch.auditPower() || !scratch.auditState()) return false;
+			// Locate protection boundaries using actual through-power, not demand.
+			// Trial allocations are rolled back before splitting or instantaneous
+			// isolation: no fuel, heat, wear or battery energy leaks from a probe.
+			double crossing = duration;
+			std::vector<std::pair<std::string, BusBreaker>> instantTrips;
+			for (auto const& authored : settings.powerBuses)
+			{
+				if (authored.ratedCapacityKW == 0.0) continue;
+				auto const& power = lastBusPower.at(authored.id);
+				auto& breaker = busBreakers[authored.id];
+				if (breaker.tripped) continue;
+				if (power.throughPowerKW <= authored.ratedCapacityKW) { breaker.elapsed = 0.0; continue; }
+				auto const remaining = std::max(0.0, authored.tripPersistenceSeconds - breaker.elapsed);
+				if (remaining == 0.0)
+					instantTrips.push_back({authored.id, {true, 0.0, instant - duration, power.throughPowerKW}});
+				else crossing = std::min(crossing, remaining);
+			}
+			if (!instantTrips.empty())
+			{
+				restoreInterval();
+				for (auto const& [id, state] : instantTrips) busBreakers[id] = state;
+				return integrate(instant, duration, committed);
+			}
+			if (crossing < duration && instant - duration + crossing > instant - duration)
+			{
+				restoreInterval();
+				return integrate(instant - duration + crossing, crossing, committed)
+					&& integrate(instant, duration - crossing, committed);
+			}
+			for (auto const& authored : settings.powerBuses)
+			{
+				if (authored.ratedCapacityKW == 0.0) continue;
+				auto& breaker = busBreakers[authored.id];
+				auto const through = lastBusPower.at(authored.id).throughPowerKW;
+				if (breaker.tripped || through <= authored.ratedCapacityKW) continue;
+				breaker.elapsed += duration;
+				if (breaker.elapsed + 1e-12 >= authored.tripPersistenceSeconds)
+				{ breaker.tripped = true; breaker.at = instant; breaker.through = through; }
+			}
+			if (!scratch.commitAndEvents()) return false;
 			committed(scratch);
 			return true;
 		};
@@ -456,11 +502,13 @@ namespace core
 			};
 			collect(false); collect(true);
 		}
+		// Rated circuits may introduce an overload boundary inside integrate(),
+		// even without an authored event. Keep the interval account collector.
 		auto const hasContinuousTransfers = std::any_of(transfers.begin(), transfers.end(),
 			[](auto const& transfer) { return transfer.authored.mode == ResourceTransferMode::Continuous; });
 		if (boundaries.empty() && collected.arrivals.empty() && maintenanceJobs.empty()
 			&& repairJobs.empty() && outages.empty()
-			&& !hasContinuousTransfers && powerPhaseCrossing(seconds) >= seconds)
+			&& !hasBreakerProtection && !hasContinuousTransfers && powerPhaseCrossing(seconds) >= seconds)
 			return integrate(end, seconds, [](Tick const&) {});
 		// Transfer rates are constant until an inventory boundary or an authored
 		// event changes admission. Predict crossings with the same input-side
@@ -500,7 +548,7 @@ namespace core
 		};
 		if (boundaries.empty() && collected.arrivals.empty() && maintenanceJobs.empty()
 			&& repairJobs.empty() && outages.empty()
-			&& transferCrossing(seconds) >= seconds && powerPhaseCrossing(seconds) >= seconds)
+			&& !hasBreakerProtection && transferCrossing(seconds) >= seconds && powerPhaseCrossing(seconds) >= seconds)
 			return integrate(end, seconds, [](Tick const&) {});
 		for (auto const& arrival : collected.arrivals)
 			if (arrival.key.occurrenceSeconds > cursor && arrival.key.occurrenceSeconds < end)

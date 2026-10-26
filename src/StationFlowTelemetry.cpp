@@ -313,6 +313,7 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		out.status = p->ratedCapacityKW == 0 ? "Unrated" : "Rated " + quantity(p->ratedCapacityKW, "kW");
 		if (p->protectedUnmetKW > 1e-9) warn(out, "Critical electrical demand unmet", true);
 		else if (p->unmetKW > 1e-9) warn(out, "Electrical shortage");
+		if (p->tripped) warn(out, "Dead bus - latched Bus Trip; BreakerReset required", true);
 	}
 	else if (node.type == "Reservoir")
 	{

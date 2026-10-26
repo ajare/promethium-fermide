@@ -275,7 +275,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         referenceBottomingCycleIdle referenceBottomingCycle
         crews water waterQualityGates waterQualityValidation waterQualityConsumers waterSelectiveIrrigation waterHydroponics waterContamination compoundWaterPartial compoundWaterPartialValidation compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance atmosphereStateCharts configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
         powerBusMigration powerBusPersistence powerBusRoles powerBusValidation
-        busDispatchBalance busDispatchProtected busDispatchBatteries busDispatchInternal busDispatchSources busDispatchRecovery
+        busBreakers busDispatchBalance busDispatchProtected busDispatchBatteries busDispatchInternal busDispatchSources busDispatchRecovery
         # #882: the automatic transfer switch - whole-load failover on any
         # primary shortfall, the dwell-gated return that keeps a marginal
         # primary from flapping, explicit unmet when the backup is short too,
@@ -1274,6 +1274,8 @@ add_test(NAME station-editor-heat-engine-fault-authoring COMMAND pf-smoke-editor
 set_tests_properties(station-editor-heat-engine-fault-authoring PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-fault-authoring COMMAND pf-smoke-editor --check station/faultAuthoringWorkflow)
 set_tests_properties(station-editor-fault-authoring PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+add_test(NAME station-editor-bus-breaker COMMAND pf-smoke-editor --check station/busBreakerWorkflow)
+set_tests_properties(station-editor-bus-breaker PROPERTIES LABELS "smoke;editor;station;functional;validation-fast")
 add_test(NAME station-editor-fault-trip-reset COMMAND pf-smoke-editor --check station/faultTripResetWorkflow)
 set_tests_properties(station-editor-fault-trip-reset PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #872: atmosphere Monitor authoring through the real inspector.

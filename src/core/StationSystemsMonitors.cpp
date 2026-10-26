@@ -28,7 +28,8 @@ namespace
 	// Metric that raised the Alert, the same identity #866 introduced; a type
 	// bound here replaces the v1 behaviour for that Metric alone.
 	std::map<std::string, AlertCallbacks> const typeBindings{
-		{"oxygenPartialPressureKPa", v1LedgerAndStream}};
+		{"oxygenPartialPressureKPa", v1LedgerAndStream},
+		{"busBreakerTrip", v1LedgerAndStream}};
 
 	// The whole Alert, readable straight off the stream: who watched what, on
 	// whom, the number that decided it and the bound it crossed, at what sim
@@ -106,6 +107,7 @@ namespace
 	{
 		switch (reason)
 		{
+		case AlertClearReason::BreakerReset: return "BreakerReset";
 		case AlertClearReason::AutoClear: return "AutoClear";
 		case AlertClearReason::MonitorDisabled: return "MonitorDisabled";
 		case AlertClearReason::MonitorChanged: return "MonitorChanged";
@@ -258,6 +260,7 @@ namespace
 		auto const active = std::find_if(activeAlerts.begin(), activeAlerts.end(),
 			[&](auto const& entry) { return entry.monitorId == monitorId; });
 		if (active == activeAlerts.end()) return;
+		if (active->metric == "busBreakerTrip" && reason != AlertClearReason::BreakerReset) return;
 		auto alert = *active;
 		// The value the Monitor last saw rides out with the closed-out record.
 		// It comes from the Monitor's own state because the ledger is written

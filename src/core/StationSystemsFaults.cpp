@@ -661,6 +661,25 @@ namespace core
 		return true;
 	}
 
+	bool StationSystemsRuntime::breakerReset(std::string_view id, std::string* diagnostic)
+	{
+		auto it = mImpl->busBreakers.find(std::string(id));
+		if (!mImpl->settings.enabled || !mImpl->snapshot.healthy
+			|| it == mImpl->busBreakers.end() || !it->second.tripped)
+		{
+			if (diagnostic) *diagnostic = "BreakerReset requires a tripped Power Bus '" + std::string(id) + "'";
+			return false;
+		}
+		Impl::FaultCommand command;
+		command.kind = Impl::FaultCommand::Kind::BreakerReset;
+		command.afterStep = mImpl->clock.steps(); command.installationId = id;
+		mImpl->faultCommands.push_back(command);
+		it->second = {};
+		mImpl->clearAlert("breaker:" + std::string(id), AlertClearReason::BreakerReset);
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool StationSystemsRuntime::resetTrip(std::string_view id, std::string* diagnostic)
 	{
 		auto reset = [&](auto& states) {
@@ -710,7 +729,8 @@ namespace core
 			[](auto const& machine) { return machine.catalystDeactivation.has_value(); })) return true;
 		if (mImpl->settings.enabled && std::any_of(mImpl->settings.methaneProcessors.begin(), mImpl->settings.methaneProcessors.end(),
 			[](auto const& machine) { return machine.catalystDeactivation.has_value(); })) return true;
-		return hasFaultCommands() || (mImpl->settings.enabled
+		return (mImpl->settings.enabled && std::any_of(mImpl->settings.powerBuses.begin(), mImpl->settings.powerBuses.end(),
+			[](auto const& bus) { return bus.ratedCapacityKW > 0.0; })) || hasFaultCommands() || (mImpl->settings.enabled
 			&& (std::any_of(mImpl->settings.waterTreatments.begin(), mImpl->settings.waterTreatments.end(),
 				[](auto const& t) { return t.breakthrough; })
 			|| std::any_of(mImpl->settings.electrolyzers.begin(), mImpl->settings.electrolyzers.end(),
@@ -744,6 +764,11 @@ namespace core
 			s.writeUint64("afterStep", command.afterStep);
 			if (command.kind == Impl::FaultCommand::Kind::SettingsUpdate)
 				writeStationSystemsSettingsMap(s, *command.settingsUpdate);
+			else if (command.kind == Impl::FaultCommand::Kind::BreakerReset)
+			{
+				s.writeUint32("commandKind", 4);
+				s.writeString("installationId", command.installationId);
+			}
 			else if (command.kind == Impl::FaultCommand::Kind::ResetTrip)
 			{
 				s.writeUint32("commandKind", 2);
@@ -853,9 +878,10 @@ namespace core
 			else if (s.hasField("commandKind"))
 			{
 				auto const kind = s.readUint32("commandKind");
-				if (kind != 1 && kind != 2 && kind != 3) throw SerializationException("Unknown fault replay command kind");
+				if (kind != 1 && kind != 2 && kind != 3 && kind != 4) throw SerializationException("Unknown fault replay command kind");
 				auto const id = s.readString("installationId");
-				bool const accepted = kind == 2 ? runtime->resetTrip(id, &diagnostic)
+				bool const accepted = kind == 4 ? runtime->breakerReset(id, &diagnostic)
+					: kind == 2 ? runtime->resetTrip(id, &diagnostic)
 					: kind == 1 ? runtime->restoreCondition(id, s.readDouble("targetCondition"), &diagnostic)
 					: runtime->repairFault(id, s.readString("modeId"), nullptr, &diagnostic);
 				if (!accepted)
@@ -929,12 +955,16 @@ namespace core
 			throw SerializationException("Fault replay final settings disagree with the document");
 		if (!runtime->advanceTo(steps * runtime->mImpl->clock.stepSeconds()))
 			throw SerializationException("Fault replay advance failed");
-		// Monitoring is run-scoped, not persisted fault history. Replay restores
-		// physical state, but observation starts fresh at the load boundary.
+		// Monitor observation starts fresh at load. Breaker announcements are
+		// protection lifecycle state: a loaded Trip must remain visible, and a
+		// replayed BreakerReset must retain its explicit clear reason.
 		runtime->mImpl->monitorStates.clear();
-		runtime->mImpl->activeAlerts.clear();
-		runtime->mImpl->closedAlerts.clear();
-		std::erase_if(runtime->mImpl->events, [](auto const& event) { return event.category == "alert"; });
+		auto monitorAlert = [](auto const& alert) { return alert.metric != "busBreakerTrip"; };
+		std::erase_if(runtime->mImpl->activeAlerts, monitorAlert);
+		std::erase_if(runtime->mImpl->closedAlerts, monitorAlert);
+		std::erase_if(runtime->mImpl->events, [](auto const& event) {
+			return event.category == "alert" && event.message.find("busBreakerTrip") == std::string::npos;
+		});
 		return runtime;
 	}
 }

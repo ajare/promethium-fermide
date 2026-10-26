@@ -37,7 +37,7 @@ public:
 	void render(std::shared_ptr<core::World> const& world, DocumentHistory& history);
 	// Embedded presentation; the caller owns the window and scrolling region.
 	void renderContents(std::shared_ptr<core::World> const& world, DocumentHistory& history);
-	void renderFlowContents(std::shared_ptr<core::World> const& world);
+	void renderFlowContents(std::shared_ptr<core::World> const& world, DocumentHistory* history = nullptr);
 	// #653: the Flow inspector's content for the currently selected node.
 	// Renders the type's shared entry editor (#652 seam) against the same
 	// draft; a type without an extracted editor shows a placeholder naming

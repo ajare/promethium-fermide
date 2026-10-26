@@ -931,6 +931,7 @@ namespace
 		for (auto const& monitor : settings.monitors)
 		{
 			auto fail = [&](std::string reason) { return refuse("Monitor '" + monitor.id + "': " + reason); };
+			if (monitor.id.starts_with("breaker:")) return fail("breaker: IDs are reserved for always-on Bus Trip Alerts");
 			if (monitor.id.empty() || !monitorIds.insert(monitor.id).second)
 				return fail("id must be non-empty and unique");
 			auto const& catalogue = stationMonitorMetricCatalogue(monitor.subjectType);

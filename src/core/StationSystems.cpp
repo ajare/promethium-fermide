@@ -2072,6 +2072,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		// never committed. Runs unconditionally: unlike a Monitor, no authored
 		// rule has to be switched on for a transfer to be announced.
 		mImpl->reconcileTransferAlerts();
+		mImpl->reconcileBreakerAlerts();
 		if (tick % mImpl->observationIntervalSteps == 0)
 		{
 			appendBoundedEvent(mImpl->events, tick, "observation",

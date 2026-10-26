@@ -680,11 +680,12 @@ namespace core
 		}
 		auto const acceptanceCeilingKW = engineAcceptanceDemandKW + chargeHeadroomKW;
 		auto engineAcceptance = [&](auto const& ids) {
+			if (std::all_of(ids.begin(), ids.end(), [&](auto const& id) { return runtime.busTripped(id); })) return 0.0;
 			if (runtime.settings.powerBuses.size() == 1)
 				return std::max(0.0, acceptanceCeilingKW - availableGeneration);
 			std::map<std::string, double> targets;
 			for (auto const& id : ids)
-				targets[id] = engineAcceptanceBusDemand.empty() ? std::numeric_limits<double>::infinity() : engineAcceptanceBusDemand[id];
+				if (!runtime.busTripped(id)) targets[id] = engineAcceptanceBusDemand.empty() ? std::numeric_limits<double>::infinity() : engineAcceptanceBusDemand[id];
 			for (auto const& [members, input] : chargeHeadrooms)
 			{
 				auto remaining = input;
@@ -1396,7 +1397,9 @@ namespace core
 			// this tick replaces the authored setpoint; the machine itself
 			// still enforces its startup, ramp, fuel and cooling physics,
 			// so the command can never buy supply the machine cannot make.
-			auto const commanded = disabled || capacityDisabled
+			auto const isolated = std::any_of(generator.authored.busIds.begin(), generator.authored.busIds.end(),
+				[&](auto const& id) { return runtime.busTripped(id); });
+			auto const commanded = disabled || capacityDisabled || isolated
 				? 0.0 : (dispatchAutomatic
 					? generator.dispatchCommandKW
 					: generator.authored.commandedOutputKW);

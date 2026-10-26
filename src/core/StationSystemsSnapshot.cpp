@@ -2120,6 +2120,11 @@ namespace core
 			bus.ratedCapacityKW = authored.ratedCapacityKW;
 			if (auto const found = mImpl->lastBusPower.find(authored.id); found != mImpl->lastBusPower.end())
 				bus = found->second;
+			if (auto const state = mImpl->busBreakers.find(authored.id); state != mImpl->busBreakers.end())
+			{
+				bus.tripped = state->second.tripped;
+				bus.trippedAtSimSeconds = state->second.at;
+			}
 			result.power.buses.push_back(std::move(bus));
 		}
 		// #882: which bus actually serves each Transfer-mode load. The per-bus

@@ -3542,6 +3542,7 @@ namespace core
 		bool updateStationSystemsSettings(StationSystemsSettings const& offered,
 			std::string* diagnostic = nullptr);
 		bool resetStationTrip(std::string_view installationId, std::string* diagnostic = nullptr);
+		bool resetStationBreaker(std::string_view busId, std::string* diagnostic = nullptr);
 		bool injectStationFault(std::string_view installationId, std::string_view modeId,
 			FaultCause const& cause, std::string* diagnostic = nullptr);
 		// #842: start a repair as a runtime-instantiated maintenance

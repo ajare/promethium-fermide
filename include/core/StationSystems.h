@@ -2328,7 +2328,7 @@ namespace core
 	inline constexpr uint32_t CORE_MAX_SYSTEMS_STEP_WORLD_TICKS = 60;
 	enum class AlertDirection { Above, Below };
 	enum class AlertSeverity { Advisory, Warning, Critical };
-	enum class AlertClearReason { AutoClear, MonitorDisabled, MonitorChanged };
+	enum class AlertClearReason { AutoClear, MonitorDisabled, MonitorChanged, BreakerReset };
 	// #867: where a Monitor's authored value came from, so a surface can tell
 	// a grounded limit from an estimate. `Custom` is a hand-authored value
 	// making no provenance claim; the four tagged kinds are the spec's

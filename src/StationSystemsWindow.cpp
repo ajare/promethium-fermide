@@ -713,7 +713,7 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 	ImPlot::SetCurrentContext(previous);
 }
 
-void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const& world)
+void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const& world, DocumentHistory* history)
 {
 	if (!syncWorld(world)) return;
 	// Groups keep the existing control IDs (tables introduce an ID scope).
@@ -779,7 +779,13 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 		? "Alerts (" + std::to_string(activeAlertCount) + ")" : "Alerts";
 	if (ImGui::Button(alertLabel.c_str())) mAlertDashboardVisible = !mAlertDashboardVisible;
 	ImGui::PopStyleColor();
-	mFlow.render(mDraft, [this, world](core::StationSystemsSettings& draft) {
+	std::optional<std::string> breakerRequest;
+	mFlow.render(mDraft, [this, world, &breakerRequest, draftPending](core::StationSystemsSettings& draft) {
+		auto const selected = mFlow.selectedNode();
+		if (!draftPending && selected && selected->type == "Power bus" && mFlowSnapshot)
+			for (auto const& bus : mFlowSnapshot->power.buses)
+				if (bus.busId == selected->id && bus.tripped
+					&& ImGui::Button("BreakerReset")) breakerRequest = bus.busId;
 		renderFlowInspectorContents(draft, *world);
 	}, [this] { commitDraftChanges(true); }, [this] {
 		commitDraftChanges(true);
@@ -801,7 +807,18 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 		renderObservationPlot(height, *world);
 		ImGui::EndGroup();
 		ImGui::EndGroup();
-	});
+	}, [&](std::string const& id) { breakerRequest = id; });
+	if (breakerRequest)
+	{
+		DocumentHistory localHistory;
+		auto& targetHistory = history ? *history : localHistory;
+		auto before = captureDocumentSnapshot(world, targetHistory);
+		if (world->resetStationBreaker(*breakerRequest, &mDiagnostic))
+		{
+			commitDocumentEdit(std::move(before), targetHistory);
+			mFlowSnapshot = world->getStationSystemsSnapshot();
+		}
+	}
 	// Placement is one action, including on the mouse-down frame. An
 	// inspector field edit is not: while a field is still being edited the
 	// pending snapshot stays open, so typing "1250" is one commit at field

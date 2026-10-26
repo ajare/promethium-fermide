@@ -106,6 +106,17 @@ namespace core
 		markModified();
 		return true;
 	}
+	bool World::resetStationBreaker(std::string_view busId, std::string* diagnostic)
+	{
+		if (!mStationSystemsRuntime)
+		{
+			if (diagnostic) *diagnostic = "Station systems are not running";
+			return false;
+		}
+		if (!mStationSystemsRuntime->breakerReset(busId, diagnostic)) return false;
+		markModified();
+		return true;
+	}
 	bool World::resetStationTrip(std::string_view installationId, std::string* diagnostic)
 	{
 		if (!mStationSystemsRuntime)

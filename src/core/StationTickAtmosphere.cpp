@@ -1380,6 +1380,7 @@ namespace core
 		for (auto const& busId : battery.authored.busIds)
 		{
 			auto& bus = busBudgets.at(busId);
+			if (runtime.busTripped(busId)) continue;
 			if (batteryDisabled(battery) || generationAvailable(busId) <= 0.0) continue;
 			if (battery.lastDischargeKW > 0.0) continue;
 			// #843: a faded bank fills only to its faded ceiling: the
