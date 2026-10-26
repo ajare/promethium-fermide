@@ -704,7 +704,7 @@ namespace
 			}
 			require(!offered("Power") && !offered("Cooling service"),
 				"a derived service node is offered as placeable");
-			require(core::stationIsDerivedNodeType("Power")
+			require(!core::stationIsDerivedNodeType("Power")
 				&& core::stationIsDerivedNodeType("Cooling service"),
 				"derived service node types are not recognised");
 			require(!core::stationIsDerivedNodeType("Store")
@@ -836,21 +836,20 @@ namespace
 				pin("Conversion", "c1", "Conversion output 1")),
 				"the last open endpoint of a half-wired conversion");
 		}
-		// The derived-node refusal rule: naming the pool or a cooling
-		// service refuses as derived, in either drag order, before any
-		// unknown-connector wording.
+		// The retired Power node has no connector; only cooling services
+		// remain derived. Neither can be wired, in either drag order.
 		{
 			requireRefused(base(), link(pin("Store", "silage", "Inventory out"),
-				pin("Power", "Shared electrical pool", "Supply")), "derived",
+				pin("Power", "Shared electrical pool", "Supply")), "Unknown connector",
 				"a store output dropped on the shared electrical pool");
 			requireRefused(base(), link(pin("Power", "Shared electrical pool", "Supply"),
-				pin("Store", "silage", "Inventory in")), "derived",
+				pin("Store", "silage", "Inventory in")), "Unknown connector",
 				"a drag started from the shared electrical pool");
 			requireRefused(base(), link(pin("Conversion", "c1", "Conversion output 1"),
 				pin("Cooling service", "primary", "Capacity")), "derived",
 				"a conversion output dropped on a cooling service");
 			requireRefused(base(), link(pin("Solar", "s1", "Output"),
-				pin("Power", "Shared electrical pool", "Supply")), "derived",
+				pin("Power", "Shared electrical pool", "Supply")), "Unknown connector",
 				"a solar-shaped drag onto the derived pool");
 		}
 		// The write/clear round trip through the growable mapping.
@@ -965,9 +964,14 @@ namespace
 		// Only explicit authored references project; derived cooling services are
 		// inert and never become a serialised or offered connector.
 		auto const links = core::stationAuthoredLinks(s);
-		require(links.size() == 6 && std::none_of(links.begin(), links.end(), [](auto const& entry)
+		// Two loop supplies and the chiller supply are now authored too.
+		require(links.size() == 9 && std::none_of(links.begin(), links.end(), [](auto const& entry)
 			{ return entry.from.nodeType == "Cooling service" || entry.to.nodeType == "Cooling service"; }),
 			"thermal projection lost an authored link or serialised an implicit service edge");
+		for (auto const& candidate : legal)
+			require(std::any_of(links.begin(), links.end(), [&](auto const& entry) {
+				return entry.from == candidate.from && entry.to == candidate.to;
+			}), "thermal projection lost a specific authored connector pair");
 		core::StationConfigurationDocument document; document.settings = s;
 		document.positions = {{"Chiller:chiller", {12, 24}}, {"Thermal buffer:buffer", {48, 96}}};
 		document.panX = 7; document.panY = -3; document.zoom = .9f;

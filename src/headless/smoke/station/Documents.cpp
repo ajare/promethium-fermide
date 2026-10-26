@@ -4401,7 +4401,19 @@ void powerChainFiles(smoke::Context const& context)
 	for (auto const& authored : plannedLinks)
 	{
 		core::CandidateLink const candidate{authored.from, authored.to};
+		// Either battery face restores its one bidirectional bus membership,
+		// projecting both cables. The second face is already wired, not a
+		// second legal canvas drop; verify the duplicate refusal explicitly.
+		auto const current = core::stationAuthoredLinks(settings);
+		bool const alreadyWired = std::find(current.begin(), current.end(), authored) != current.end();
 		auto const verdict = core::evaluateStationLink(settings, candidate);
+		if (alreadyWired)
+		{
+			require(authored.to.nodeType == "Battery" && authored.to.portName == "Power in"
+				&& !verdict.allowed && verdict.reason.find("already joined") != std::string::npos,
+				"only the battery's paired face should already be wired");
+			continue;
+		}
 		require(verdict.allowed, ("building the chain refused a legal link: " + verdict.reason).c_str());
 		require(core::applyStationLink(settings, candidate), "building the chain failed to write a reference");
 	}
@@ -4414,7 +4426,7 @@ void powerChainFiles(smoke::Context const& context)
 	// capture it before the round trip so the reloaded one can be
 	// compared as a set of identities.
 	auto const beforeLinks = core::stationAuthoredLinks(original.getStationSystemsSettings());
-	require(beforeLinks.size() >= 14,
+	require(beforeLinks == plannedLinks && beforeLinks.size() >= 14,
 		("the wired chain enumerated too few references: "
 			+ std::to_string(beforeLinks.size())).c_str());
 	for (auto const* suffix : {".world.yaml", ".world"})

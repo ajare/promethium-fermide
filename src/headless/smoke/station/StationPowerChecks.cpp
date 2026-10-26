@@ -1,9 +1,20 @@
 #include "StationPowerChecks.h"
 #include "StationRig.h"
+#include "core/StationPowerBuses.h"
 
 namespace
 {
 	using namespace smoke::station;
+	// These connector matrices start unwired. Default-main membership is
+	// authored wiring now, so clear it just like the material/heat fields.
+	void setPowerMembership(core::StationSystemsSettings& settings, std::vector<std::string> const& ids)
+	{
+		core::forEachStationPowerMember(settings, [&](auto& entry) {
+			if constexpr (requires { entry.busIds; }) entry.busIds = ids;
+			if constexpr (requires { entry.supplyBusIds; }) entry.supplyBusIds = ids;
+		});
+	}
+	void unwirePower(core::StationSystemsSettings& settings) { setPowerMembership(settings, {}); }
 	// #647: the power and conversion chain at the pure link seam. Every
 	// legal and illegal connector pair for equipment loads, batteries,
 	// generators, fuel cells, Sabatier reactors and methane processors is
@@ -74,6 +85,7 @@ namespace
 			processor.id = "mp1";			processor.thermalClass = "low"; processor.rateKgPerS = 0.001;
 			processor.specificEnergyKWhPerKgCH4 = 2.0;
 			settings.methaneProcessors = {processor};
+			unwirePower(settings);
 			return settings;
 		};
 		auto requireAllowed = [](core::StationSystemsSettings const& settings,
@@ -98,8 +110,8 @@ namespace
 		};
 		// The descriptor table declares each connector's kind, direction,
 		// cardinality and permitted counterpart kinds for the six types
-		// and the reservoir face they dump heat into. A battery declares
-		// no connectors: its pool relation is implicit.
+		// and the reservoir face they dump heat into. Batteries now carry
+		// both authored Power faces, backed by one bidirectional membership.
 		{
 			auto const& descriptors = core::stationPortDescriptors();
 			auto found = [&](char const* type, char const* name) -> core::PortDescriptor const*
@@ -108,10 +120,13 @@ namespace
 					if (descriptor.nodeType == type && descriptor.name == name) return &descriptor;
 				return nullptr;
 			};
-			require(found("Battery", "Charge") == nullptr
-				&& std::none_of(descriptors.begin(), descriptors.end(),
-					[](core::PortDescriptor const& d) { return d.nodeType == "Battery"; }),
-				"a battery declares no authored connector");
+			for (auto const* name : {"Power in", "Power out"})
+			{
+				auto const* port = found("Battery", name);
+				require(port && port->kind == "power" && port->counterpartKind == "bus"
+					&& port->maximumLinks == 0 && !port->optional,
+					"battery required Power connector contract changed");
+			}
 			struct Expectation
 			{
 				char const* type; char const* name; core::StationPortDirection direction;
@@ -151,12 +166,37 @@ namespace
 					(std::string("descriptor pairing/cardinality wrong for ") + e.type + " " + e.name).c_str());
 			}
 		}
+		// Either battery face joins the same bidirectional membership. Both
+		// cables project, and disconnecting either face removes both.
+		for (bool input : {false, true})
+		for (bool reverse : {false, true})
+		{
+			auto draft = base();
+			auto candidate = input
+				? link(pin("Power bus", "main", "Power out"), pin("Battery", "bat1", "Power in"))
+				: link(pin("Battery", "bat1", "Power out"), pin("Power bus", "main", "Power in"));
+			if (reverse) std::swap(candidate.from, candidate.to);
+			requireAllowed(draft, candidate, "battery membership from either face");
+			require(core::applyStationLink(draft, candidate), "battery membership write failed");
+			auto const links = core::stationAuthoredLinks(draft);
+			require(links.size() == 2 && draft.batteries[0].busIds == std::vector<std::string>{"main"}
+				&& links[0].from == pin("Battery", "bat1", "Power out")
+				&& links[0].to == pin("Power bus", "main", "Power in")
+				&& links[1].from == pin("Power bus", "main", "Power out")
+				&& links[1].to == pin("Battery", "bat1", "Power in"),
+				"battery membership did not project its two distinct cables");
+			for (auto const& cable : links)
+				requireRefused(draft, {cable.from, cable.to}, "already joined", "duplicate battery cable");
+			require(core::clearStationLink(draft, links[input ? 1 : 0].identity) && draft == base(),
+				"battery disconnect did not remove both paired faces");
+		}
 		// Every machine connector against every descriptor, in both drag
 		// orders. Independent expectations keep a permissive descriptor or
 		// a missing field mapping from making the matrix vacuously pass.
 		for (auto const& port : core::stationPortDescriptors())
 		{
 			if (port.name == "Supervision") continue; // #651 owns the control-face matrix.
+			if (port.kind == "power") continue; // Bus-role matrices own Power wiring.
 			std::string id;
 			std::string thermalClass = "low";
 			if (port.nodeType == "Equipment") { id = "load1"; thermalClass = "moderate"; }
@@ -251,6 +291,8 @@ namespace
 					processor.methaneStoreId = "ch4"; processor.hydrogenStoreId = "h2";
 					processor.carbonStoreId = "carbon"; processor.heatSinkId = "coldSink";
 				}
+				// Full validation requires the electrical references too.
+				setPowerMembership(complete, {"main"});
 				require(core::applyStationLink(complete, candidate), "full-validation probe did not write its field");
 				std::string diagnostic;
 				require(!core::validateStationSystemsSettings(complete, diagnostic),
@@ -403,9 +445,9 @@ namespace
 			requireRefused(base(), link(pin("Equipment", "load1", "Equipment input 1"),
 				pin("Generator", "gen1", "Fuel in")), "cannot join",
 				"two inputs cannot join");
-			// The derived pool stays inert for the new types too.
+			// The retired pool cannot be wired by machine outputs either.
 			requireRefused(base(), link(pin("Generator", "gen1", "Heat out"),
-				pin("Power", "Shared electrical pool", "Supply")), "derived",
+				pin("Power", "Shared electrical pool", "Supply")), "Unknown connector",
 				"a machine output dropped on the derived pool");
 		}
 		// The growable material-exchange set (0-2) behaves like the
@@ -648,6 +690,7 @@ namespace
 			processor.id = "mp1";			processor.thermalClass = "low"; processor.rateKgPerS = 0.001;
 			processor.specificEnergyKWhPerKgCH4 = 2.0;
 			settings.methaneProcessors = {processor};
+			unwirePower(settings);
 			return settings;
 		};
 		auto requireAllowed = [](core::StationSystemsSettings const& settings,
@@ -746,6 +789,7 @@ namespace
 				pin("Reservoir", "coldSink", "Heat in")),
 				"a legal heat link while an unrelated reservoir is invalid");
 			std::string diagnostic;
+			setPowerMembership(brokenElsewhere, {"main"});
 			require(!core::validateStationSystemsSettings(brokenElsewhere, diagnostic),
 				"the whole-config validator missed the unrelated invalid field");
 			// The same draft with the link already carried: rewiring to
@@ -832,6 +876,7 @@ namespace
 			core::EquipmentLoadSettings load;
 			load.id = "load1"; load.thermalClass = "low";
 			settings.equipmentLoads = {load};
+			unwirePower(settings);
 			return settings;
 		};
 		auto requireAllowed = [](core::StationSystemsSettings const& settings,
@@ -993,6 +1038,7 @@ namespace
 				"a legal host link while the radiator's own area is invalid");
 			std::string diagnostic;
 			brokenElsewhere.radiators.front().reservoirId = "host";
+			setPowerMembership(brokenElsewhere, {"main"});
 			require(!core::validateStationSystemsSettings(brokenElsewhere, diagnostic)
 				&& diagnostic.find("area") != std::string::npos,
 				"the whole-config validator missed the invalid radiator area");

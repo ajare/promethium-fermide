@@ -2,6 +2,7 @@
 #pragma once
 #include "core/World.h"
 #include "core/StationPorts.h"
+#include "core/StationPowerBuses.h"
 #include "core/StationReference.h"
 #include "core/StationSystems.h"
 #include "core/StationSystemsRuntime.h"
@@ -112,6 +113,13 @@ namespace smoke::station
 				return entry.identity.substr(0, entry.identity.rfind(':'));
 			};
 			if (link.identity == sibling.identity || owner(link) != owner(sibling)) continue;
+			// Battery faces alias one membership, not independent siblings.
+			if (link.from.nodeType == "Battery" && sibling.to.nodeType == "Battery"
+				&& link.from.nodeId == sibling.to.nodeId
+				&& link.to.nodeType == "Power bus" && sibling.from.nodeId == link.to.nodeId) continue;
+			if (link.to.nodeType == "Battery" && sibling.from.nodeType == "Battery"
+				&& link.to.nodeId == sibling.from.nodeId
+				&& link.from.nodeType == "Power bus" && sibling.to.nodeId == link.from.nodeId) continue;
 			auto draft = base;
 			require(core::clearStationLink(draft, link.identity), "candidate disconnect failed");
 			auto broken = sibling;
@@ -119,9 +127,29 @@ namespace smoke::station
 			if (prefix == sibling.from.nodeType + ":" + sibling.from.nodeId)
 				broken.to.nodeId = "missing";
 			else broken.from.nodeId = "missing";
-			require(core::applyStationLink(draft, {broken.from, broken.to}), "broken sibling write failed");
+			if (sibling.from.nodeType == "Power bus" || sibling.to.nodeType == "Power bus")
+			{
+				// The public writer correctly refuses ghost buses. Inject corrupt
+				// persisted membership directly to exercise evaluator tolerance.
+				core::forEachStationPowerNode(draft, [&](auto type, auto& entry) {
+					if (prefix != std::string(type) + ":" + entry.id) return;
+					auto corrupt = [&](auto& ids) {
+						auto const& bus = sibling.from.nodeType == "Power bus" ? sibling.from.nodeId : sibling.to.nodeId;
+						std::replace(ids.begin(), ids.end(), bus, std::string("missing"));
+					};
+					if constexpr (requires { entry.busIds; })
+						if (sibling.from.nodeType != "Power bus" || std::string_view(type) == "Battery") corrupt(entry.busIds);
+					if constexpr (requires { entry.supplyBusIds; })
+						if (sibling.from.nodeType == "Power bus") corrupt(entry.supplyBusIds);
+				});
+			}
+			else require(core::applyStationLink(draft, {broken.from, broken.to}), "broken sibling write failed");
 			auto cleared = draft;
-			require(core::clearStationLink(cleared, sibling.identity), "sibling disconnect failed");
+			auto brokenIdentity = sibling.identity;
+			if (auto const at = brokenIdentity.find('@'); at != std::string::npos)
+				brokenIdentity.replace(at + 1, std::string::npos, "missing");
+			require(core::clearStationLink(cleared, brokenIdentity) && cleared != draft,
+				"corrupt sibling was not present or could not be disconnected");
 			for (bool reverse : {false, true})
 			{
 				core::CandidateLink candidate = reverse ? core::CandidateLink{link.to, link.from}
@@ -144,7 +172,7 @@ namespace smoke::station
 						|| (candidate.to.nodeType == "Reservoir" && reservoir.id == candidate.to.nodeId))
 						reservoir.thermalClass = reservoir.thermalClass == "warm" ? "moderate" : "warm";
 				auto invalidCleared = invalid;
-				core::clearStationLink(invalidCleared, sibling.identity);
+				core::clearStationLink(invalidCleared, brokenIdentity);
 				auto const invalidExpected = core::evaluateStationLink(invalidCleared, candidate);
 				auto const invalidActual = core::evaluateStationLink(invalid, candidate);
 				require(invalidActual.allowed == invalidExpected.allowed,
