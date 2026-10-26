@@ -223,6 +223,204 @@ namespace
 		require(empty.advanceTo(5), "empty battery bus drive failed");
 		near(bus(empty.snapshot(), "backup").suppliedKW, 0, "empty battery bridged unrelated buses");
 	}
+	// Each landing is its own cable, but all landings share one finite device.
+	void landings(smoke::Context const&)
+	{
+		for (bool reverse : {false, true})
+		for (bool batterySource : {false, true})
+		for (bool tripFirst : {false, true})
+		{
+			auto s = twoBuses();
+			s.powerBuses[0].ratedCapacityKW = tripFirst ? 1 : 0;
+			if (!tripFirst) s.equipmentLoads.erase(s.equipmentLoads.begin());
+			s.solarArrays.resize(1);
+			auto ids = std::vector<std::string>{"main", "backup"};
+			if (reverse) std::reverse(ids.begin(), ids.end());
+			s.solarArrays[0].busIds = ids;
+			if (batterySource)
+			{
+				s.solarArrays.clear();
+				core::BatterySettings b;
+				b.id = "bank"; b.busIds = ids; b.nameplateKWh = 10; b.usableKWh = 10;
+				b.startingStoredKWh = 10; b.maxDischargeKW = 20; b.maxChargeKW = 20;
+				s.batteries = {b};
+			}
+			core::StationSystemsRuntime topology(s, 1.0f);
+			for (auto const& feeder : topology.snapshot().power.connections)
+				if (feeder.source && feeder.busId == "backup")
+				{
+					s.connections[feeder.key].maximumThroughput = 2;
+					s.connections[feeder.key].efficiency = 0.5;
+				}
+			core::StationSystemsRuntime run(s, 1.0f);
+			require(run.advanceTo(5), "landing drive failed");
+			auto const snap = run.snapshot();
+			near(bus(snap, "backup").suppliedKW, 1, "landing limit/loss bypassed");
+			near(bus(snap, "main").suppliedKW, 0, "unused landing supplied a load");
+			require(bus(snap, "main").tripped == tripFirst, "landing trip state wrong");
+			for (auto const& flow : snap.connections)
+				if (flow.key.peerType == "Power bus" && (flow.key.relation == "Solar generation" || flow.key.relation == "Discharge"))
+				{
+					near(flow.lastInputRate, flow.key.peerId == "backup" ? 2 : 0, "wrong source landing input");
+					near(flow.lastDeliveredRate, flow.key.peerId == "backup" ? 1 : 0, "wrong source landing delivery");
+				}
+			near(snap.power.poolResidualKW, 0, "landing pool residual");
+			for (auto const& circuit : snap.power.buses) near(circuit.residualKW, 0, "landing bus residual");
+		}
+	}
+	void generatingLandings(smoke::Context const&)
+	{
+		for (auto const* kind : {"Generator", "Fuel cell", "Heat engine"})
+		for (bool reverse : {false, true})
+		for (auto mode : {core::StationDispatchMode::Manual, core::StationDispatchMode::Automatic})
+		{
+			auto s = twoBuses(); s.solarArrays.clear();
+			s.powerBuses[0].ratedCapacityKW = 0; s.dispatchMode = mode;
+			s.equipmentLoads.erase(s.equipmentLoads.begin());
+			auto ids = std::vector<std::string>{"main", "backup"};
+			if (reverse) std::reverse(ids.begin(), ids.end());
+			core::ThermalReservoirSettings sink;
+			sink.id = "sink"; sink.thermalClass = "generation";
+			sink.heatCapacityKJPerK = 1000000; sink.startingTemperatureC = 20;
+			s.thermalReservoirs = {sink};
+			if (std::string_view(kind) == "Generator")
+			{
+				s.stores = {{"fuel", "kWh", 100, 100}};
+				core::GeneratorSettings g;
+				g.id = "source"; g.fuelStoreId = "fuel"; g.heatSinkId = "sink"; g.thermalClass = "generation";
+				g.ratedOutputKW = 20; g.commandedOutputKW = 20; g.efficiency = 0.5;
+				g.maxRampKWPerSecond = 1000; g.maxSinkTemperatureC = 90; g.busIds = ids;
+				s.generators = {g};
+			}
+			else if (std::string_view(kind) == "Fuel cell")
+			{
+				s.stores = {{"h2", "kg", 100, 10}, {"o2", "kg", 100, 10}, {"water", "kg", 100, 0}};
+				core::FuelCellSettings c;
+				c.id = "source"; c.hydrogenStoreId = "h2"; c.oxygenStoreId = "o2"; c.waterStoreId = "water";
+				c.heatSinkId = "sink"; c.thermalClass = "generation"; c.ratedOutputKW = 20;
+				c.commandedOutputKW = 20; c.busIds = ids; s.fuelCells = {c};
+			}
+			else
+			{
+				auto hot = sink; hot.id = "hot"; hot.startingTemperatureC = 90; hot.maxTemperatureC = 200;
+				s.thermalReservoirs.push_back(hot);
+				core::HeatEngineSettings e;
+				e.id = "source"; e.hotReservoirId = "hot"; e.rejectionReservoirId = "sink";
+				e.thermalClass = "generation"; e.ratedThermalInputKW = 100; e.commandedInputKW = 100;
+				e.carnotFraction = 0.5; e.minHotTemperatureC = 30; e.maxSinkTemperatureC = 25;
+				e.busIds = ids; s.heatEngines = {e};
+			}
+			core::StationSystemsRuntime topology(s, 1.0f);
+			for (auto const& feeder : topology.snapshot().power.connections)
+				if (feeder.source && feeder.busId == "backup")
+				{ s.connections[feeder.key].maximumThroughput = 2; s.connections[feeder.key].efficiency = 0.5; }
+			core::StationSystemsRuntime run(s, 1.0f);
+			require(run.advanceTo(5), (std::string(kind) + " landing drive failed").c_str());
+			auto const snap = run.snapshot();
+			near(bus(snap, "backup").suppliedKW, 1, "generation landing limit/loss bypassed");
+			double native = 0;
+			for (auto const& flow : snap.connections)
+				if (flow.key.peerType == "Power bus" && flow.key.ownerType == kind)
+				{
+					native += flow.lastInputRate;
+					if (flow.key.peerId == "backup")
+					{ near(flow.lastInputRate, 2, "generation backup input wrong"); near(flow.lastDeliveredRate, 1, "generation backup delivery wrong"); }
+				}
+			require(native <= 20 + 1e-8, "generation duplicated across landings");
+			near(snap.power.poolResidualKW, 0, "generation landing pool residual");
+			for (auto const& circuit : snap.power.buses) near(circuit.residualKW, 0, "generation landing bus residual");
+			if (std::string_view(kind) == "Heat engine")
+			{
+				// An unpowered first battery landing must not hide the charge
+				// headroom reachable through the engine's second landing.
+				s.equipmentLoads[0].electricalDemandKW = 0;
+				s.heatEngines[0].busIds = {"backup"}; s.connections.clear();
+				core::BatterySettings b;
+				b.id = "bank"; b.busIds = ids; b.nameplateKWh = 10; b.usableKWh = 10;
+				b.maxChargeKW = 10; b.chargeEfficiency = 1; s.batteries = {b};
+				core::StationSystemsRuntime chargeTopology(s, 1.0f);
+				for (auto const& f : chargeTopology.snapshot().power.connections)
+					if (f.key.ownerType == "Battery" && f.key.relation == "Charge" && f.busId == "backup")
+					{ s.connections[f.key].maximumThroughput = 2; s.connections[f.key].efficiency = 0.5; }
+				core::StationSystemsRuntime charge(s, 1.0f);
+				require(charge.advanceTo(1), "engine charge landing drive failed");
+				auto const charged = charge.snapshot();
+				near(charged.heatEngines[0].lastElectricalOutputKW, 2, "engine acceptance ignored charge landing");
+				near(charged.power.batteries[0].storedKWh, 1.0 / 3600, "engine charge headroom was duplicated or stranded");
+			}
+		}
+	}
+
+	void finiteLandings(smoke::Context const&)
+	{
+		for (bool reverse : {false, true})
+		for (bool battery : {false, true})
+		for (double native : {7.0, 8.0})
+		{
+			auto s = twoBuses(); s.equipmentLoads.resize(1); s.solarArrays.resize(1);
+			auto ids = std::vector<std::string>{"main", "backup"};
+			if (reverse) std::reverse(ids.begin(), ids.end());
+			auto& l = s.equipmentLoads[0]; l.supplyBusIds = ids;
+			l.supplyMode = core::StationSupplyMode::Shared; l.maxCurtailment = 0.125;
+			s.solarArrays[0].busIds = ids; s.solarArrays[0].capacityKW = native;
+			if (battery)
+			{
+				s.solarArrays.clear();
+				core::BatterySettings b;
+				b.id = "bank"; b.busIds = ids; b.nameplateKWh = 10; b.usableKWh = 10;
+				b.startingStoredKWh = 10; b.maxChargeKW = 0; b.maxDischargeKW = native;
+				s.batteries = {b};
+			}
+			core::StationSystemsRuntime topology(s, 1.0f);
+			for (auto const& f : topology.snapshot().power.connections)
+				if (f.source)
+				{
+					s.connections[f.key].maximumThroughput = f.busId == "main" ? 6 : 2;
+					s.connections[f.key].efficiency = f.busId == "main" ? 1 : 0.5;
+				}
+			core::StationSystemsRuntime run(s, 1.0f);
+			require(run.advanceTo(5), "finite landing drive failed");
+			auto const snap = run.snapshot();
+			near(snap.power.totalSuppliedKW, native == 8 ? 7 : 0, "finite native budget or operable gate wrong");
+			near(bus(snap, "main").suppliedKW, native == 8 ? 6 : 0, "finite main grant wrong");
+			near(bus(snap, "backup").suppliedKW, native == 8 ? 1 : 0, "finite backup grant wrong");
+			double actualNative = 0;
+			for (auto const& flow : snap.connections)
+				if (flow.key.relation == "Discharge" || flow.key.relation == "Solar generation") actualNative += flow.lastInputRate;
+			near(actualNative, native == 8 ? 8 : 0, "finite device duplicated native power");
+			near(snap.power.poolResidualKW, 0, "finite landing pool residual");
+		}
+	}
+
+	void chargingLandings(smoke::Context const&)
+	{
+		for (bool reverse : {false, true})
+		{
+			auto s = twoBuses(); s.equipmentLoads.clear();
+			s.solarArrays[0].capacityKW = 0; s.solarArrays[1].capacityKW = 20;
+			core::BatterySettings b;
+			b.id = "bank"; b.busIds = reverse ? std::vector<std::string>{"backup", "main"} : std::vector<std::string>{"main", "backup"};
+			b.nameplateKWh = 10; b.usableKWh = 10; b.maxChargeKW = 10; b.maxDischargeKW = 10;
+			b.chargeEfficiency = 1; s.batteries = {b};
+			core::StationSystemsRuntime topology(s, 1.0f);
+			for (auto const& f : topology.snapshot().power.connections)
+				if (f.key.ownerType == "Battery" && f.key.relation == "Charge" && f.busId == "backup")
+				{ s.connections[f.key].maximumThroughput = 2; s.connections[f.key].efficiency = 0.5; }
+			core::StationSystemsRuntime run(s, 1.0f);
+			require(run.advanceTo(5), "charge landing drive failed");
+			auto const snap = run.snapshot();
+			near(bus(snap, "backup").batteryChargeKW, 2, "charge landing input wrong");
+			near(bus(snap, "main").batteryChargeKW, 0, "charge crossed unrelated circuit");
+			near(snap.power.batteries[0].storedKWh, 5.0 / 3600, "charge landing energy/loss wrong");
+			for (auto const& flow : snap.connections)
+				if (flow.key.ownerType == "Battery" && flow.key.relation == "Charge")
+				{
+					near(flow.lastInputRate, flow.key.peerId == "backup" ? 2 : 0, "charge booked wrong cable input");
+					near(flow.lastDeliveredRate, flow.key.peerId == "backup" ? 1 : 0, "charge booked wrong cable delivery");
+				}
+			near(snap.power.poolResidualKW, 0, "charge landing residual");
+		}
+	}
 	void sourceDispatch(smoke::Context const&)
 	{
 		auto s = twoBuses(); s.solarArrays[1].capacityKW = 0;
@@ -481,5 +679,9 @@ void registerStationBusDispatchChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"busDispatchBatteries", batteries});
 	checks.push_back({"busDispatchInternal", internalConsumers});
 	checks.push_back({"busDispatchSources", sourceDispatch});
+	checks.push_back({"busDispatchLandings", landings});
+	checks.push_back({"busGeneratingLandings", generatingLandings});
+	checks.push_back({"busChargingLandings", chargingLandings});
+	checks.push_back({"busFiniteLandings", finiteLandings});
 	checks.push_back({"busDispatchRecovery", recoveryReserve});
 }

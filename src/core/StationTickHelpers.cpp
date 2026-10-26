@@ -62,18 +62,57 @@ namespace core
 		return consumerBuses.at({type, id});
 	}
 
-	void StationSystemsRuntime::Impl::Tick::addGeneration(std::vector<std::string> const& ids, double power)
+	double StationSystemsRuntime::Impl::Tick::sourceCapacity(std::string const& type,
+		std::string const& id, std::string const& role, std::vector<std::string> const& ids)
 	{
+		double total = 0;
+		for (auto const& bus : ids)
+			if (!runtime.busTripped(bus))
+				total = std::min(std::numeric_limits<double>::max() - total,
+					connections.remaining(connections.port(type, id, role, bus))) + total;
+		return total;
+	}
+
+	double StationSystemsRuntime::Impl::Tick::sourceAvailable(std::string const& type,
+		std::string const& id, std::string const& role, std::vector<std::string> const& ids, double nativeKW)
+	{
+		// This aggregate is an availability ceiling, not a routing decision.
+		// Prefer efficient cables so no native watt is offered twice.
+		auto ordered = ids;
+		std::stable_sort(ordered.begin(), ordered.end(), [&](auto const& a, auto const& b) {
+			return connections.efficiency(connections.port(type, id, role, a))
+				> connections.efficiency(connections.port(type, id, role, b));
+		});
+		double delivered = 0;
+		for (auto const& bus : ordered)
+		{
+			if (runtime.busTripped(bus)) continue;
+			auto const port = connections.port(type, id, role, bus);
+			auto const input = std::min(nativeKW, connections.remaining(port));
+			delivered += input * connections.efficiency(port);
+			nativeKW -= input;
+		}
+		return delivered;
+	}
+
+	double StationSystemsRuntime::Impl::Tick::addGeneration(std::string const& type,
+		std::string const& id, std::string const& role, std::vector<std::string> const& ids, double nativeKW)
+	{
+		auto const available = sourceAvailable(type, id, role, ids, nativeKW);
 		std::vector<std::string> live;
-		for (auto const& id : ids) if (!runtime.busTripped(id)) live.push_back(id);
-		if (live.empty()) return;
-		if (live != ids) { addGeneration(live, power); return; }
-		// Multiple landings expose ONE finite source to the member buses.
-		// Actual allocation decides which landing carries each watt.
-		if (ids.size() > 1) { sharedGeneration.push_back({ids, power}); return; }
-		auto& bus = busBudgets.at(ids.front());
-		bus.generated += power;
-		bus.available += power;
+		for (auto const& bus : ids) if (!runtime.busTripped(bus)) live.push_back(bus);
+		if (live.empty()) return 0;
+		if (ids.size() > 1)
+			sharedGeneration.push_back({live, nativeKW, type, id, role, type == "Solar"});
+		else
+		{
+			auto const delivered = type == "Solar" ? available
+				: connections.send(connections.port(type, id, role, ids.front()), nativeKW).delivered;
+			auto& bus = busBudgets.at(ids.front());
+			bus.generated += delivered;
+			bus.available += delivered;
+		}
+		return available;
 	}
 
 	double StationSystemsRuntime::Impl::Tick::generationAvailable(std::string const& id)
@@ -81,7 +120,8 @@ namespace core
 		if (runtime.busTripped(id)) return 0.0;
 		double total = busBudgets.at(id).available;
 		for (auto const& source : sharedGeneration)
-			if (std::find(source.ids.begin(), source.ids.end(), id) != source.ids.end()) total += source.available;
+			if (std::find(source.ids.begin(), source.ids.end(), id) != source.ids.end())
+				total += connections.available(connections.port(source.type, source.id, source.role, id), source.available);
 		return total;
 	}
 
@@ -97,47 +137,88 @@ namespace core
 		{
 			auto& source = sharedGeneration[i];
 			if (std::find(source.ids.begin(), source.ids.end(), id) == source.ids.end()) continue;
-			auto const limit = sharedLimits ? (*sharedLimits)[i] : source.available;
-			auto const take = std::min({remaining, source.available, limit});
-			source.available -= take; remaining -= take; bus.generated += take; delivered += take;
+			auto const port = connections.port(source.type, source.id, source.role, id);
+			auto const limit = sharedLimits ? (*sharedLimits)[i] : remaining;
+			auto const flow = connections.receive(port, std::min(remaining, limit), source.available);
+			source.available -= flow.input;
+			remaining -= flow.delivered; bus.generated += flow.delivered; delivered += flow.delivered;
 		}
 		return delivered;
 	}
 
 	void StationSystemsRuntime::Impl::Tick::settleGeneration()
 	{
-		// Unused availability is not service. Attribute only that remaining
-		// capacity equally for the surplus rollup, after all real draws.
+		// Settle unused native output over the still-open cable capacities.
+		// Solar surplus is availability only; fuelled output really crossed
+		// its cables even when no load accepted it. Redistribute capped slices.
 		for (auto& source : sharedGeneration)
 		{
+			std::vector<std::pair<std::string, double>> eligible;
 			for (auto const& id : source.ids)
+				eligible.push_back({id, connections.remaining(connections.port(source.type, source.id, source.role, id))});
+			while (source.available > 0 && !eligible.empty())
 			{
-				auto& bus = busBudgets.at(id);
-				bus.generated += source.available / source.ids.size();
-				bus.available += source.available / source.ids.size();
+				auto const slice = source.available / eligible.size();
+				bool capped = false;
+				for (auto& [id, room] : eligible)
+				{
+					auto const port = connections.port(source.type, source.id, source.role, id);
+					auto const input = std::min(slice, room);
+					auto const delivered = source.solar ? input * connections.efficiency(port)
+						: connections.send(port, input).delivered;
+					auto& bus = busBudgets.at(id);
+					bus.generated += delivered; bus.available += delivered;
+					source.available -= input;
+					room -= input;
+					capped |= room <= 0;
+				}
+				if (!capped) break;
+				std::erase_if(eligible, [](auto const& landing) { return landing.second <= 0; });
 			}
 			source.available = 0;
+			if (source.type == "Heat engine")
+			{
+				double delivered = 0;
+				for (auto const& id : source.ids)
+					if (auto const* flow = connections.snapshot(connections.port(source.type, source.id, source.role, id)))
+						delivered += flow->lastDeliveredRate;
+				for (auto& engine : runtime.heatEngines)
+					if (engine.authored.id == source.id)
+					{
+						engine.electricalKJ += (delivered - engine.lastElectricalOutputKW) * seconds;
+						engine.lastElectricalOutputKW = delivered;
+					}
+			}
 		}
+		// Asymmetric feeder losses make a source's initial upper bound differ
+		// from the routed result. Publish the actual independently closed buses.
+		poolGenerationKW = availableGeneration = 0;
+		for (auto const& [id, bus] : busBudgets)
+		{ poolGenerationKW += bus.generated; availableGeneration += bus.available; }
+		runtime.lastAvailableGenerationKW = availableGeneration;
 	}
 
-	double StationSystemsRuntime::Impl::Tick::sourceDemand(std::vector<std::string> const& ids)
+	double StationSystemsRuntime::Impl::Tick::sourceDemand(std::string const& type,
+		std::string const& id, std::string const& role, std::vector<std::string> const& ids)
 	{
-		if (std::all_of(ids.begin(), ids.end(), [&](auto const& id) { return runtime.busTripped(id); })) return 0.0;
-		if (runtime.settings.powerBuses.size() == 1) return busBudgets.at(ids.front()).dispatch;
-		double result = 0;
-		for (auto const& id : ids) if (!runtime.busTripped(id)) result += std::max(0.0, busBudgets.at(id).dispatch);
-		return result;
+		double native = 0;
+		for (auto const& bus : ids)
+			if (!runtime.busTripped(bus))
+				native += connections.required(connections.port(type, id, role, bus),
+					std::max(0.0, busBudgets.at(bus).dispatch));
+		return native;
 	}
 
-	void StationSystemsRuntime::Impl::Tick::commitSource(std::vector<std::string> const& ids, double power)
+	void StationSystemsRuntime::Impl::Tick::commitSource(std::string const& type,
+		std::string const& id, std::string const& role, std::vector<std::string> const& ids, double nativeKW)
 	{
-		if (runtime.settings.powerBuses.size() == 1) { busBudgets.at(ids.front()).dispatch -= power; return; }
-		for (auto const& id : ids)
+		for (auto const& busId : ids)
 		{
-			if (runtime.busTripped(id)) continue;
-			auto& bus = busBudgets.at(id);
-			auto const committed = std::min(power, bus.dispatch);
-			bus.dispatch -= committed; power -= committed;
+			if (runtime.busTripped(busId)) continue;
+			auto const port = connections.port(type, id, role, busId);
+			auto& bus = busBudgets.at(busId);
+			auto const input = std::min(nativeKW, connections.required(port, std::max(0.0, bus.dispatch)));
+			bus.dispatch -= input * connections.efficiency(port); nativeKW -= input;
 		}
 	}
 
@@ -315,9 +396,9 @@ namespace core
 		return std::max(0.0, std::min(byPower, byEnergy));
 	}
 
-	double StationSystemsRuntime::Impl::Tick::deliverableKW(BatteryState const& battery, double dtHours)
+	double StationSystemsRuntime::Impl::Tick::deliverableKW(BatteryState const& battery, double dtHours, std::string const& busId)
 	{
-		return connections.available(connections.port("Battery", battery.authored.id, "Discharge"),
+		return connections.available(connections.port("Battery", battery.authored.id, "Discharge", busId),
 			nativeDeliverableKW(battery, dtHours));
 	}
 
@@ -327,7 +408,7 @@ namespace core
 		double total{0.0};
 		for (auto const& battery : runtime.batteries)
 			if (std::find(battery.authored.busIds.begin(), battery.authored.busIds.end(), busId) != battery.authored.busIds.end())
-				total += deliverableKW(battery, hours);
+				total += deliverableKW(battery, hours, busId);
 		return total;
 	}
 
@@ -342,7 +423,7 @@ namespace core
 			if (remaining <= 1e-15) break;
 			if (batteryDisabled(battery)) continue;
 			if (std::find(battery.authored.busIds.begin(), battery.authored.busIds.end(), busId) == battery.authored.busIds.end()) continue;
-			auto const port = connections.port("Battery", battery.authored.id, "Discharge");
+			auto const port = connections.port("Battery", battery.authored.id, "Discharge", busId);
 			auto const claim = limits ? std::min(remaining, (*limits)[batteryIndex]) : remaining;
 			auto const request = connections.required(port, claim);
 			auto const transport = connections.receive(port, claim, nativeDeliverableKW(battery, hours));
@@ -451,10 +532,17 @@ namespace core
 		// a later bus's offer. Preview and execution then agree at the operable
 		// minimum even when generation or a battery bridges several buses.
 		auto offer = [&](std::vector<std::string> const& members, double available,
-			size_t resource, bool battery) {
+			size_t resource, bool battery, std::string const& type, std::string const& id, std::string const& role) {
+			std::vector<double> cableRoom(buses.size()), eta(buses.size());
+			for (size_t i = 0; i < buses.size(); ++i)
+			{
+				auto const port = connections.port(type, id, role, buses[i]);
+				eta[i] = connections.efficiency(port);
+				cableRoom[i] = eta[i] > 0 ? std::min(connections.remaining(port), room[i] / eta[i]) : 0;
+			}
 			std::vector<size_t> eligible;
 			for (size_t i = 0; i < buses.size(); ++i)
-				if (room[i] > 0.0 && std::find(members.begin(), members.end(), buses[i]) != members.end())
+				if (cableRoom[i] > 0.0 && std::find(members.begin(), members.end(), buses[i]) != members.end())
 					eligible.push_back(i);
 			while (available > 0.0 && !eligible.empty())
 			{
@@ -462,22 +550,28 @@ namespace core
 				bool capped = false;
 				for (auto i : eligible)
 				{
-					auto const give = std::min(slice, room[i]);
+					auto const native = std::min(slice, cableRoom[i]);
+					auto const give = native * eta[i];
 					(battery ? result[i].batteryLimits : result[i].generationLimits)[resource] += give;
 					input[i] += give;
 					room[i] -= give;
-					available -= give;
-					capped |= room[i] <= 0.0;
+					cableRoom[i] -= native;
+					available -= native;
+					capped |= cableRoom[i] <= 0.0;
 				}
 				if (!capped) break;
-				std::erase_if(eligible, [&](size_t i) { return room[i] <= 0.0; });
+				std::erase_if(eligible, [&](size_t i) { return cableRoom[i] <= 0.0; });
 			}
 		};
 		for (size_t i = 0; i < sharedGeneration.size(); ++i)
-			offer(sharedGeneration[i].ids, sharedGeneration[i].available, i, false);
+		{
+			auto const& source = sharedGeneration[i];
+			offer(source.ids, source.available, i, false, source.type, source.id, source.role);
+		}
 		if (includeBatteries)
 			for (size_t i = 0; i < runtime.batteries.size(); ++i)
-				offer(runtime.batteries[i].authored.busIds, deliverableKW(runtime.batteries[i], hours), i, true);
+				offer(runtime.batteries[i].authored.busIds, nativeDeliverableKW(runtime.batteries[i], hours), i, true,
+					"Battery", runtime.batteries[i].authored.id, "Discharge");
 		for (size_t i = 0; i < result.size(); ++i)
 			result[i].spareKW = input[i] * connections.efficiency(powerPort(type, id, buses[i]));
 		return result;
@@ -842,7 +936,7 @@ namespace core
 				auto const give = std::min(remaining, it->second);
 				if (give <= 0.0) continue;
 				auto& battery = runtime.batteries[it->first];
-				auto const dischargePort = connections.port("Battery", battery.authored.id, "Discharge");
+				auto const dischargePort = connections.port("Battery", battery.authored.id, "Discharge", feed->busId);
 				auto const nativeGive = give / connections.efficiency(dischargePort);
 				connections.refund(dischargePort, nativeGive);
 				auto const storedKWh = nativeGive * hours / battery.authored.dischargeEfficiency;

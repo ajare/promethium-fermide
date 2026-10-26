@@ -1399,7 +1399,7 @@ namespace core
 			auto const chargeableKW = std::max(0.0, generationAvailable(busId) - reserve);
 			if (chargeableKW <= 0.0) continue;
 			auto const wantedKW = std::min(std::max(0.0, battery.authored.maxChargeKW - battery.lastChargeKW), headroom / hours / battery.authored.chargeEfficiency);
-			auto const transport = connections.receive(connections.port("Battery", battery.authored.id, "Charge"), wantedKW, chargeableKW);
+			auto const transport = connections.receive(connections.port("Battery", battery.authored.id, "Charge", busId), wantedKW, chargeableKW);
 			auto const storedGain = std::min(transport.delivered * hours * battery.authored.chargeEfficiency, headroom);
 			auto const busUsed = transport.delivered * hours;
 			battery.stored += storedGain;

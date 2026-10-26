@@ -2093,7 +2093,15 @@ using namespace station_detail;
 			double available{}, generated{}, discharged{}, input{}, charge{}, reserve{}, dispatch{}, startup{};
 		};
 		std::map<std::string, BusBudget> busBudgets;
-		struct SharedGeneration { std::vector<std::string> ids; double available; };
+		// Multi-landing sources keep one native (pre-cable) budget. Each
+		// landing converts and books only the watts actually routed through it.
+		struct SharedGeneration
+		{
+			std::vector<std::string> ids;
+			double available;
+			std::string type, id, role;
+			bool solar;
+		};
 		std::vector<SharedGeneration> sharedGeneration;
 		double generationAvailable(std::string const& id);
 		double takeGeneration(std::string const& id, double need,
@@ -2143,9 +2151,16 @@ using namespace station_detail;
 		// own supply connection: the bus's generation still on hand plus what
 		// its batteries can discharge, less what the cable between them loses.
 		double busAvailableFor(std::string const& type, std::string const& id, std::string const& busId);
-		void addGeneration(std::vector<std::string> const& ids, double power);
-		double sourceDemand(std::vector<std::string> const& ids);
-		void commitSource(std::vector<std::string> const& ids, double power);
+		double sourceCapacity(std::string const& type, std::string const& id,
+			std::string const& role, std::vector<std::string> const& ids);
+		double sourceAvailable(std::string const& type, std::string const& id,
+			std::string const& role, std::vector<std::string> const& ids, double nativeKW);
+		double addGeneration(std::string const& type, std::string const& id,
+			std::string const& role, std::vector<std::string> const& ids, double nativeKW);
+		double sourceDemand(std::string const& type, std::string const& id,
+			std::string const& role, std::vector<std::string> const& ids);
+		void commitSource(std::string const& type, std::string const& id,
+			std::string const& role, std::vector<std::string> const& ids, double nativeKW);
 		double availableGeneration{};
 		double poolGenerationKW{};
 		std::vector<double> supplied{};
@@ -2256,7 +2271,7 @@ using namespace station_detail;
 		double batteryReserve(BatteryState const& battery);
 		bool batteryDisabled(BatteryState const& battery);
 		double nativeDeliverableKW(BatteryState const& battery, double dtHours);
-		double deliverableKW(BatteryState const& battery, double dtHours);
+		double deliverableKW(BatteryState const& battery, double dtHours, std::string const& busId);
 		double batteryDeliverableKW(std::string const& busId);
 		double drawBatteries(std::string const& busId, double needKW,
 			std::vector<std::pair<size_t, double>>* contributions = nullptr,

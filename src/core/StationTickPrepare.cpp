@@ -599,9 +599,9 @@ namespace core
 			array.lastAvailableKW = array.lastDisabled
 				? 0.0 : array.effectiveWearCapability() * array.lastIllumination * array.availabilityFactor;
 			array.lastEclipse = !array.lastDisabled && array.lastAvailableKW <= 0.0;
-			array.lastAvailableKW = connections.available(connections.port("Solar", array.authored.id, "Solar generation"), array.lastAvailableKW);
+			array.lastAvailableKW = addGeneration("Solar", array.authored.id, "Solar generation",
+				array.authored.busIds, array.lastAvailableKW);
 			availableGeneration += array.lastAvailableKW;
-			addGeneration(array.authored.busIds, array.lastAvailableKW);
 			// #553: finite installed capacities do not guarantee a
 			// finite total — two finite arrays can sum past the largest
 			// representable double into infinity, and an infinite pool

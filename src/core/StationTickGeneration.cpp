@@ -661,7 +661,6 @@ namespace core
 		// runLedger previews the real allocation transactionally before this
 		// pass. Protected claims therefore have supply on their first active
 		// interval, and vanished demand cannot spend one more interval of heat.
-		std::vector<std::pair<std::vector<std::string>, double>> chargeHeadrooms;
 		double chargeHeadroomKW = 0.0;
 		for (auto const& battery : runtime.batteries)
 		{
@@ -673,32 +672,38 @@ namespace core
 			// Match the charging allocator's receive request: acceptance is
 			// bus-side input, capped by the Charge connection and grossed up
 			// for its transport losses, not unrestricted battery headroom.
-			auto const input = connections.required(
-				connections.port("Battery", battery.authored.id, "Charge"), wantedKW);
-			chargeHeadroomKW += input;
-			chargeHeadrooms.push_back({battery.authored.busIds, input});
+			if (runtime.settings.powerBuses.size() == 1)
+				chargeHeadroomKW += connections.required(connections.port("Battery", battery.authored.id,
+					"Charge", battery.authored.busIds.front()), wantedKW);
 		}
 		auto const acceptanceCeilingKW = engineAcceptanceDemandKW + chargeHeadroomKW;
-		auto engineAcceptance = [&](auto const& ids) {
+		auto engineAcceptance = [&](auto const& engine) {
+			auto const& ids = engine.authored.busIds;
 			if (std::all_of(ids.begin(), ids.end(), [&](auto const& id) { return runtime.busTripped(id); })) return 0.0;
 			if (runtime.settings.powerBuses.size() == 1)
-				return std::max(0.0, acceptanceCeilingKW - availableGeneration);
+				return connections.required(connections.port("Heat engine", engine.authored.id, "Generation", ids.front()),
+					std::max(0.0, acceptanceCeilingKW - availableGeneration));
 			std::map<std::string, double> targets;
 			for (auto const& id : ids)
 				if (!runtime.busTripped(id)) targets[id] = engineAcceptanceBusDemand.empty() ? std::numeric_limits<double>::infinity() : engineAcceptanceBusDemand[id];
-			for (auto const& [members, input] : chargeHeadrooms)
+			for (auto const& battery : runtime.batteries)
 			{
-				auto remaining = input;
-				auto first = targets.end();
-				for (auto const& id : members)
+				if (batteryDisabled(battery)) continue;
+				auto remaining = std::max(0.0, std::min(battery.authored.maxChargeKW,
+					(battery.effectiveNameplateKWh() - battery.stored) / hours / battery.authored.chargeEfficiency));
+				for (auto const& id : battery.authored.busIds)
 				{
+					if (runtime.busTripped(id)) continue;
+					auto const port = connections.port("Battery", battery.authored.id, "Charge", id);
 					auto target = targets.find(id);
-					if (target == targets.end()) continue;
-					if (first == targets.end()) first = target;
-					auto const covered = std::min(remaining, std::max(0.0, busBudgets.at(id).available - target->second));
-					target->second += covered; remaining -= covered;
+					// A landing this engine cannot reach consumes headroom only
+					// when existing generation could actually charge through it.
+					auto const input = target == targets.end()
+						? std::min(connections.required(port, remaining), generationAvailable(id))
+						: connections.required(port, remaining);
+					if (target != targets.end()) target->second += input;
+					remaining = std::max(0.0, remaining - input * connections.efficiency(port));
 				}
-				if (first != targets.end()) first->second += remaining;
 			}
 			for (auto& [id, target] : targets) target = std::max(0.0, target - busBudgets.at(id).available);
 			for (auto const& source : sharedGeneration)
@@ -708,12 +713,14 @@ namespace core
 				{
 					auto target = targets.find(id);
 					if (target == targets.end()) continue;
-					auto const covered = std::min(remaining, target->second);
-					target->second -= covered; remaining -= covered;
+					auto const port = connections.port(source.type, source.id, source.role, id);
+					auto const input = std::min(remaining, connections.required(port, target->second));
+					target->second -= input * connections.efficiency(port); remaining -= input;
 				}
 			}
 			double acceptance = 0;
-			for (auto const& [id, target] : targets) acceptance += target;
+			for (auto const& [id, target] : targets)
+				acceptance += connections.required(connections.port("Heat engine", engine.authored.id, "Generation", id), target);
 			return acceptance;
 		};
 		auto const dtSeconds = static_cast<double>(seconds);
@@ -864,7 +871,7 @@ namespace core
 				// As for other actively requested physical inputs, zero
 				// efficiency loses the accepted input; it delivers no heat
 				// and therefore drives no conversion or auxiliaries.
-				auto const acceptanceKW = engineAcceptance(engine.authored.busIds);
+				auto const acceptanceKW = engineAcceptance(engine);
 				if (acceptanceKW > 1e-12)
 				{
 					auto const intake = connections.receive(intakePort, requestedIntakeKW, supplyKW);
@@ -886,8 +893,9 @@ namespace core
 				continue;
 			}
 			auto netKW = grossKW - auxKW;
-			auto const generationPort = connections.port("Heat engine",
-				engine.authored.id, "Generation");
+			auto const outputAvailable = [&](double native) {
+				return sourceAvailable("Heat engine", engine.authored.id, "Generation", engine.authored.busIds, native);
+			};
 			// The acceptance-coupled throttle (#805): the engine requests
 			// its net output and the station admits what it can use - the
 			// demand it presented to the pool plus the charge headroom the
@@ -895,8 +903,8 @@ namespace core
 			// the pool ahead of this engine. What is not admitted is not
 			// converted: the heat stays in the hot reservoir and the
 			// limiter names DemandAcceptance as the binding constraint.
-			auto const acceptanceKW = engineAcceptance(engine.authored.busIds);
-			if (connections.available(generationPort, netKW) > acceptanceKW + 1e-12
+			auto const acceptanceKW = engineAcceptance(engine);
+			if (netKW > acceptanceKW + 1e-12
 				|| acceptanceKW <= 1e-12)
 			{
 				if (acceptanceKW <= 1e-12)
@@ -907,16 +915,16 @@ namespace core
 					engine.lastLimiter = "DemandAcceptance";
 					continue;
 				}
-				netKW = connections.required(generationPort, acceptanceKW);
+				netKW = acceptanceKW;
 				engine.lastLimiter = "DemandAcceptance";
 			}
 			// Resolve the complete crossing before booking it. Conversion
 			// funds cable INPUT (including its external transport loss),
-			// whereas bus acceptance and published output are DELIVERED
-			// power. A cable that cannot deliver any power idles the whole
+			// whereas published output is DELIVERED power. Acceptance above
+			// was grossed up separately through each eligible landing. A cable that cannot deliver any power idles the whole
 			// machine, without leaving phantom cable-loss bookings.
-			auto const admittedInputKW = std::min(netKW, connections.remaining(generationPort));
-			auto const deliveredKW = connections.available(generationPort, admittedInputKW);
+			auto const admittedInputKW = std::min(netKW, sourceCapacity("Heat engine", engine.authored.id, "Generation", engine.authored.busIds));
+			auto const deliveredKW = outputAvailable(admittedInputKW);
 			if (deliveredKW + 1e-12 < netKW)
 			{
 				if (engine.lastLimiter != "DemandAcceptance")
@@ -947,7 +955,7 @@ namespace core
 			}
 			grossKW = admittedInputKW + auxKW;
 			intakeKW = grossKW / eta;
-			netKW = connections.send(generationPort, admittedInputKW).delivered;
+			netKW = addGeneration("Heat engine", engine.authored.id, "Generation", engine.authored.busIds, admittedInputKW);
 			// Rejection is the intake the conversion did not deliver as
 			// electricity, plus the auxiliaries the running machine
 			// dissipates into the sink: booked at one consistent
@@ -961,7 +969,6 @@ namespace core
 			engineRejectionByReservoir[engine.sinkIndex] += connections.routeHeat(
 				connections.port("Heat engine", engine.authored.id, "Rejection heat"), rejectKW);
 			availableGeneration += netKW; poolGenerationKW += netKW;
-			addGeneration(engine.authored.busIds, netKW);
 			engine.lastThermalInputKW = intakeKW;
 			engine.lastElectricalOutputKW = netKW;
 			engine.lastRejectionKW = rejectKW;
@@ -1041,7 +1048,8 @@ namespace core
 		dispatchStartupSupportKW = double{0.0};
 		for (auto& [id, bus] : busBudgets)
 			bus.dispatch = dispatchAutomatic ? std::max(0.0, runtime.lastBusDispatchDemand[id] - bus.available) : 0.0;
-		for (auto const& source : sharedGeneration) commitSource(source.ids, source.available);
+		for (auto const& source : sharedGeneration)
+			commitSource(source.type, source.id, source.role, source.ids, source.available);
 		dispatchLoadTargetKW = 0;
 		for (auto const& [id, bus] : busBudgets) dispatchLoadTargetKW += bus.dispatch;
 		for (auto& generator : runtime.generators)
@@ -1078,9 +1086,8 @@ namespace core
 				dispatchStartupSupportKW += addStartupDispatch("Generator",
 					generator.authored.id, startupDrawForKW(generator, startupRequiredKJ));
 			}
-			auto const generationPort = connections.port("Generator", generator.authored.id, "Generation");
-			if (connections.efficiency(generationPort) == 0.0) continue;
-			auto const commandKW = std::min(capKW, connections.required(generationPort, sourceDemand(generator.authored.busIds)));
+			if (sourceAvailable("Generator", generator.authored.id, "Generation", generator.authored.busIds, capKW) == 0.0) continue;
+			auto const commandKW = std::min(capKW, sourceDemand("Generator", generator.authored.id, "Generation", generator.authored.busIds));
 			if (commandKW <= 0.0) continue;
 			generator.dispatchCommandKW = commandKW;
 			if (generator.phase == StationGeneratorPhase::Running
@@ -1093,8 +1100,7 @@ namespace core
 				auto const ramp = integrateGeneratorRamp(startKW, commandKW,
 					generator.authored.maxRampKWPerSecond, dispatchDtSeconds);
 				auto const deliverableKW = std::min(fuelCapKW, ramp.meanKW);
-				auto const committed = connections.available(generationPort, std::max(0.0, deliverableKW));
-				commitSource(generator.authored.busIds, committed);
+				commitSource("Generator", generator.authored.id, "Generation", generator.authored.busIds, std::max(0.0, deliverableKW));
 			}
 			else if (generator.phase == StationGeneratorPhase::Stopped)
 			{
@@ -1149,13 +1155,11 @@ namespace core
 			capKW = std::min(capKW, (waterHeadroomKg / (1.0 + o2PerH2)) * elecKJPerKgH2
 				/ static_cast<double>(seconds));
 			if (capKW <= 0.0) continue;
-			auto const generationPort = connections.port("Fuel cell", cell.authored.id, "Backup generation");
-			if (connections.efficiency(generationPort) == 0.0) continue;
-			auto const commandKW = std::min(capKW, connections.required(generationPort, sourceDemand(cell.authored.busIds)));
+			if (sourceAvailable("Fuel cell", cell.authored.id, "Backup generation", cell.authored.busIds, capKW) == 0.0) continue;
+			auto const commandKW = std::min(capKW, sourceDemand("Fuel cell", cell.authored.id, "Backup generation", cell.authored.busIds));
 			if (commandKW <= 0.0) continue;
 			cell.dispatchCommandKW = commandKW;
-			auto const committed = connections.available(generationPort, commandKW);
-			commitSource(cell.authored.busIds, committed);
+			commitSource("Fuel cell", cell.authored.id, "Backup generation", cell.authored.busIds, commandKW);
 		}
 		dispatchRemainingKW = 0;
 		for (auto const& [id, bus] : busBudgets) dispatchRemainingKW += bus.dispatch;
@@ -1294,7 +1298,7 @@ namespace core
 			// A compound impurity stream cannot be burned as pure hydrogen.
 			// Hold it for routing/disposal rather than destroy its species.
 			if (hydrogen.composition) constrain(0.0, "hydrogen feed contains compound impurities");
-			constrain(connections.remaining(connections.port("Fuel cell", cell.authored.id, "Backup generation")),
+			constrain(sourceCapacity("Fuel cell", cell.authored.id, "Backup generation", cell.authored.busIds),
 				"electrical generation connection throughput");
 			constrain(byH2KW, "hydrogen store '" + hydrogen.id
 				+ "' has nothing drawable above its protected reserve");
@@ -1357,9 +1361,8 @@ namespace core
 			// electricity into the shared pool or as waste heat into
 			// the sink - booked once, never a third destination.
 			fuelCellHeatByReservoir[cell.sinkIndex] += connections.routeHeat(connections.port("Fuel cell", cell.authored.id, "Heat"), wasteKJ / dtSeconds);
-			auto const toPoolKW = connections.send(connections.port("Fuel cell", cell.authored.id, "Backup generation"), outputKW).delivered;
+			auto const toPoolKW = addGeneration("Fuel cell", cell.authored.id, "Backup generation", cell.authored.busIds, outputKW);
 			availableGeneration += toPoolKW; poolGenerationKW += toPoolKW;
-			addGeneration(cell.authored.busIds, toPoolKW);
 			cell.lastOutputKW = outputKW;
 			cell.lastHydrogenKg = h2ActualKg;
 			cell.lastOxygenKg = o2ActualKg;
@@ -1601,7 +1604,7 @@ namespace core
 					// move at most ramp x dt this tick, up or down, so
 					// no tick commands an instantaneous step the
 					// machine cannot physically make.
-					auto cableCapKW = connections.remaining(connections.port("Generator", generator.authored.id, "Generation"));
+					auto cableCapKW = sourceCapacity("Generator", generator.authored.id, "Generation", generator.authored.busIds);
 					for (auto const& binding : connections.storePorts("Generator", generator.authored.id, runtime.settings))
 						if (binding.input && binding.store == generator.fuelStoreIndex)
 							cableCapKW = std::min(cableCapKW, connections.remaining(binding.port)
@@ -1670,9 +1673,8 @@ namespace core
 					// The generator's output joins the shared pool the
 					// loads allocate against this tick - generation
 					// earned with fuel, not sunshine.
-					auto const toPoolKW = connections.send(connections.port("Generator", generator.authored.id, "Generation"), generator.lastAverageOutputKW).delivered;
+					auto const toPoolKW = addGeneration("Generator", generator.authored.id, "Generation", generator.authored.busIds, generator.lastAverageOutputKW);
 					availableGeneration += toPoolKW; poolGenerationKW += toPoolKW;
-					addGeneration(generator.authored.busIds, toPoolKW);
 					totalGeneratorOutputKW += generator.lastAverageOutputKW;
 					totalGeneratorWasteKW += wasteKW;
 					if (exhaustedAtEnd)

@@ -349,7 +349,7 @@ namespace core
 		std::vector<bool> blockedStarts(generators.size(), false);
 		bool generatorQualificationBoundary = false;
 		auto generatorCeiling = [&](GeneratorState const& g) {
-			auto cap = collected.connections.remaining(collected.connections.port("Generator", g.authored.id, "Generation"));
+			auto cap = collected.sourceCapacity("Generator", g.authored.id, "Generation", g.authored.busIds);
 			auto const factor = collected.energyUnitsToKWh(stores[g.fuelStoreIndex].authored.unit) * 3600 * g.effectiveWearCapability();
 			for (auto const& binding : collected.connections.storePorts("Generator", g.authored.id, settings))
 				if (binding.input && binding.store == g.fuelStoreIndex)
@@ -426,7 +426,7 @@ namespace core
 				auto onBus = [&](auto const& ids) { return std::find(ids.begin(), ids.end(), bus.id) != ids.end(); };
 				double available = 0, slope = 0;
 				for (auto const& a : solarArrays)
-					if (onBus(a.authored.busIds)) available += collected.connections.available(collected.connections.port("Solar", a.authored.id, "Solar generation"),
+					if (onBus(a.authored.busIds)) available += collected.connections.available(collected.connections.port("Solar", a.authored.id, "Solar generation", bus.id),
 						a.effectiveWearCapability() * evaluateStationProfile(a.authored.illumination, cursor + maximum * 0.5));
 				for (size_t i = 0; i < generators.size(); ++i)
 				{
@@ -435,7 +435,7 @@ namespace core
 						|| reservoirs[g.sinkIndex].temperatureC + 1e-9 >= a.maxSinkTemperatureC
 						|| stores[g.fuelStoreIndex].currentQualified <= stores[g.fuelStoreIndex].authored.protectedReserve)
 						continue;
-					auto const port = collected.connections.port("Generator", a.id, "Generation");
+					auto const port = collected.connections.port("Generator", a.id, "Generation", bus.id);
 					if (g.phase == StationGeneratorPhase::Running
 						|| (g.phase == StationGeneratorPhase::Stopped && !blockedStarts[i]
 							&& a.startupPowerKW * a.startupSeconds <= 0))

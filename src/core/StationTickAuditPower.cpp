@@ -80,6 +80,9 @@ namespace core
 		for (auto const& [id, bus] : busBudgets) solarUsedByBus[id] = std::max(0.0, bus.generated - bus.available);
 		for (auto const& array : runtime.solarArrays)
 		{
+			// Multi-landing solar was metered on each actual draw, not here
+			// against an aggregate role that could name the wrong cable.
+			if (array.authored.busIds.size() > 1) continue;
 			auto const port = connections.port("Solar", array.authored.id, "Solar generation");
 			double busNeed = 0, busDemand = 0;
 			for (auto const& id : array.authored.busIds)
@@ -1252,9 +1255,11 @@ namespace core
 			if (!requireFinite(engine.rejectionKJ, where + "cumulative rejection energy")) return false;
 			auto const closureBound = StationBalanceTolerance
 				* std::max(1.0, std::abs(engine.thermalInputKJ));
-			auto const cable = connections.snapshot(connections.port(
-				"Heat engine", engine.authored.id, "Generation"));
-			auto const cableLossKJ = cable ? cable->lostTotal : 0.0;
+			double cableLossKJ = 0;
+			for (auto const& busId : engine.authored.busIds)
+				if (auto const* cable = connections.snapshot(connections.port(
+					"Heat engine", engine.authored.id, "Generation", busId)))
+					cableLossKJ += cable->lostTotal;
 			auto const residual = engine.thermalInputKJ - engine.electricalKJ
 				- cableLossKJ - engine.rejectionKJ;
 			if (std::abs(residual) > closureBound)

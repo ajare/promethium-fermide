@@ -218,6 +218,13 @@ pro-rata, preserving explicit unmet demand and applying the minimum-operable
 gate to the combined grant (#883). Breaker protection remains a separate
 follow-up (#884).
 
+Each source or battery landing has its own cable throughput, efficiency and
+isolation state (#906). Multiple landings share one finite native source output
+or battery energy/rate budget; they do not copy capacity. Actual transfers are
+metered on the cable to the serving bus, including battery charging and refunded
+protected-service credits. Unused solar is availability rather than transmitted
+power; unused fuelled output is settled through the remaining live feeder budgets.
+
 ### Solar
 
 **What it does:** offers electricity according to installed capacity and a

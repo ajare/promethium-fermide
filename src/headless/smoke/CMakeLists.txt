@@ -275,7 +275,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         referenceBottomingCycleIdle referenceBottomingCycle
         crews water waterQualityGates waterQualityValidation waterQualityConsumers waterSelectiveIrrigation waterHydroponics waterContamination compoundWaterPartial compoundWaterPartialValidation compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance atmosphereStateCharts configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
         powerBusMigration powerBusPersistence powerBusRoles powerBusValidation
-        busBreakers busDispatchBalance busDispatchProtected busDispatchBatteries busDispatchInternal busDispatchSources busDispatchRecovery
+        busBreakers busDispatchBalance busDispatchProtected busDispatchBatteries busDispatchInternal busDispatchSources busDispatchLandings busGeneratingLandings busChargingLandings busFiniteLandings busDispatchRecovery
         # #882: the automatic transfer switch - whole-load failover on any
         # primary shortfall, the dwell-gated return that keeps a marginal
         # primary from flapping, explicit unmet when the backup is short too,
