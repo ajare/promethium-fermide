@@ -286,6 +286,31 @@ Per-connection telemetry published alongside, shaped as future #864 Monitor subj
   field so the future Monitor catalogue has the subject without a schema break;
 - transfer events (§5.2) as above.
 
+Implemented feeder subject list (`StationPowerSnapshot::connections`, #885): each
+`StationPowerConnectionSnapshot` retains the full `StationConnectionKey` (owner type,
+owner id, reference, relation, peer type, peer id), plus `busId` and `source` direction.
+All authored power connections appear, including idle, inactive Transfer, zero-spare
+Shared and tripped connections. Batteries have separate charge/load and discharge/source
+rows. These are the future Monitor catalogue's bus and feeder subjects; no catalogue
+entries or observation-driven actuation are introduced here.
+
+- `sourceDeliveredKW`: bus-side delivery, after cable loss; zero on load rows.
+- `loadDrawnKW`: bus-side draw, before cable loss; zero on source rows. The underlying
+  transport snapshot still exposes consumer-side delivery and loss independently.
+- `breakerState`: `Closed`, `Open` (reserved), or `TrippedWithBus`. An inactive Transfer
+  path is not a tripped breaker: its flow is zero but its breaker remains closed.
+- `servingBusId`: this load connection's bus when it actually delivered positive power,
+  otherwise empty. Shared loads can have several serving rows. An event-split reporting
+  interval can include delivery from both Transfer paths; instantaneous switch position
+  remains `supplyTransfers[].servingBusId`, not inferred from interval averages.
+- `reversePower`: constant `false` in v1, reserved for a future source feeder Monitor.
+
+Rates inherit the committed transport account's reporting interval; breaker state is
+current latched state, so a just-tripped connection can still report pre-trip interval
+flow. Snapshot reads never dispatch, trip, reset, or advance time. Bus load fraction is
+numerically zero when unrated, but the operator window explicitly displays **unrated**,
+never 0%. Its supply is generation plus battery discharge; station totals remain visible.
+
 Determinism: all of the above is a pure function of settings, prior state, and the tick's
 published values. Identical configs with identical perturbations replay identically.
 

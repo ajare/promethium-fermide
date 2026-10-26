@@ -1872,6 +1872,18 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 				!load.recoveryHoldReason.empty() ? load.recoveryHoldReason.c_str() : "");
 		}
 	}
+	ImGui::SeparatorText("Power buses (live; read-only)");
+	for (auto const& bus : snapshot.power.buses)
+	{
+		ImGui::Text("Bus %s: supply %.3f kW, demand %.3f kW, supplied %.3f kW, unmet %.3f kW, protected unmet %.3f kW",
+			bus.busId.c_str(), bus.generationKW + bus.batteryDischargeKW,
+			bus.demandKW, bus.suppliedKW, bus.unmetKW, bus.protectedUnmetKW);
+		if (bus.ratedCapacityKW == 0.0)
+			ImGui::Text("  Load fraction: unrated | Trip state: %s", bus.tripped ? "tripped" : "closed");
+		else
+			ImGui::Text("  Load fraction: %.1f%% of %.3f kW | Trip state: %s",
+				100.0 * bus.loadFraction, bus.ratedCapacityKW, bus.tripped ? "tripped" : "closed");
+	}
 	ImGui::Text("Power totals: generation %.3f kW, requested %.3f, supplied %.3f, unmet %.3f, unmet critical %.3f, surplus %.3f, exported heat %.3f kW, battery discharge %.3f kW, battery charge %.3f kW, battery shortfall %.3f kW, coolant pump %.3f kW, freeze heating %.3f kW, chiller power %.3f kW, generator output %.3f kW, generator startup %.3f kW, generator waste %.3f kW, generator decay %.3f kW",
 		snapshot.power.availableGenerationKW, snapshot.power.totalRequestedKW,
 		snapshot.power.totalSuppliedKW, snapshot.power.totalUnmetKW,

@@ -33,14 +33,85 @@ namespace
 		}
 		return s;
 	}
+	void checkTelemetry(core::StationSystemsSnapshot const& snap)
+	{
+		size_t count = 0;
+		for (auto const& flow : snap.connections)
+		{
+			if (flow.key.peerType != "Power bus") continue;
+			++count;
+			auto const found = std::find_if(snap.power.connections.begin(), snap.power.connections.end(),
+				[&](auto const& feeder) { return feeder.key == flow.key; });
+			require(found != snap.power.connections.end(), "missing feeder subject");
+			auto const& feeder = *found;
+			require(feeder.busId == flow.key.peerId && !feeder.reversePower, "feeder identity/reverse power incorrect");
+			require(feeder.source == (flow.key.relation == "Solar generation" || flow.key.relation == "Generation"
+				|| flow.key.relation == "Backup generation" || flow.key.relation == "Discharge"), "feeder direction incorrect");
+			near(feeder.sourceDeliveredKW, feeder.source ? flow.lastDeliveredRate : 0, "source delivery incorrect");
+			near(feeder.loadDrawnKW, feeder.source ? 0 : flow.lastInputRate, "load draw incorrect");
+			require(feeder.servingBusId == (!feeder.source && flow.lastDeliveredRate > 0 ? feeder.busId : ""),
+				"serving bus does not match actual delivery");
+			require(feeder.breakerState == (bus(snap, feeder.busId).tripped
+				? core::StationPowerBreakerState::TrippedWithBus : core::StationPowerBreakerState::Closed), "breaker telemetry incorrect");
+		}
+		require(count == snap.power.connections.size() && count > 0, "unexpected feeder subject count");
+	}
 	void balance(smoke::Context const&)
 	{
 		auto s = twoBuses();
+		for (auto mode : {core::StationSupplyMode::Transfer, core::StationSupplyMode::Shared})
+		{
+			auto multi = s;
+			multi.equipmentLoads.resize(1);
+			multi.equipmentLoads[0].supplyMode = mode;
+			multi.equipmentLoads[0].supplyBusIds = {"main", "backup"};
+			multi.solarArrays[0].capacityKW = mode == core::StationSupplyMode::Transfer ? 0 : 4;
+			core::StationSystemsRuntime run(multi, 1.0f);
+			require(run.advanceTo(2), "multi-feed telemetry drive failed");
+			auto const snap = run.snapshot();
+			checkTelemetry(snap);
+			double drawn = 0;
+			for (auto const& feeder : snap.power.connections)
+			{
+				if (feeder.source) continue;
+				drawn += feeder.loadDrawnKW;
+				if (mode == core::StationSupplyMode::Transfer && feeder.busId == "main")
+					require(feeder.servingBusId.empty() && feeder.loadDrawnKW == 0, "inactive Transfer claims service");
+			}
+			near(drawn, snap.power.totalSuppliedKW, "multi-feed draws differ from supplied power");
+		}
+		// Both rates are measured at the bus, not at the machine end of a
+		// lossy cable. A 20 kW source delivers 10; the load draws that 10
+		// while receiving only 5 kW itself.
+		{
+			auto lossy = s;
+			core::StationSystemsRuntime topology(lossy, 1.0f);
+			require(topology.advanceTo(1), "lossy topology drive failed");
+			for (auto const& flow : topology.snapshot().connections)
+				if (flow.key.peerType == "Power bus" && flow.key.peerId == "main")
+					lossy.connections[flow.key].efficiency = 0.5;
+			core::StationSystemsRuntime run(lossy, 1.0f);
+			require(run.advanceTo(2), "lossy feeder drive failed");
+			auto const snap = run.snapshot();
+			checkTelemetry(snap);
+			for (auto const& feeder : snap.power.connections)
+				if (feeder.busId == "main")
+					near(feeder.source ? feeder.sourceDeliveredKW : feeder.loadDrawnKW, 10, "wrong cable end measured");
+			near(bus(snap, "main").suppliedKW, 5, "consumer delivery ignored cable loss");
+		}
 		core::StationSystemsRuntime runtime(s, 1.0f), replay(s, 1.0f);
+		auto const initial = runtime.snapshot();
+		require(initial.power.connections.size() == 4, "feeder subjects absent before first dispatch");
+		for (auto const& feeder : initial.power.connections)
+			require(feeder.sourceDeliveredKW == 0 && feeder.loadDrawnKW == 0 && feeder.servingBusId.empty()
+				&& !feeder.reversePower && feeder.breakerState == core::StationPowerBreakerState::Closed,
+				"initial feeder state fabricated flow");
 		for (double time : {1.0, 5.0, 20.0})
 		{
 			require(runtime.advanceTo(time) && replay.advanceTo(time), "two-bus drive failed");
 			auto const snap = runtime.snapshot();
+			checkTelemetry(snap);
+			require(snap.power == runtime.snapshot().power, "snapshot observation mutated power");
 			require(snap.healthy && snap.power == replay.snapshot().power, "bus replay diverged");
 			near(bus(snap, "main").suppliedKW, 8, "main supply changed");
 			near(bus(snap, "main").surplusKW, 12, "main surplus changed");
@@ -75,6 +146,7 @@ namespace
 		core::StationSystemsRuntime split(s, 1.0f);
 		require(split.advanceTo(6), "split bus drive failed");
 		auto const snap = split.snapshot();
+		checkTelemetry(snap);
 		near(bus(snap, "backup").generationKW, 1.5, "split generation not averaged");
 		near(bus(snap, "backup").suppliedKW, 1.5, "split supply not averaged");
 		near(bus(snap, "backup").residualKW, 0, "split audit drift");
@@ -138,6 +210,7 @@ namespace
 		core::StationSystemsRuntime runtime(s, 1.0f);
 		require(runtime.advanceTo(5), "battery bus drive failed");
 		auto const snap = runtime.snapshot();
+		checkTelemetry(snap);
 		near(bus(snap, "main").batteryChargeKW, 5, "main battery did not charge from local surplus");
 		near(bus(snap, "main").batteryDischargeKW, 0, "main battery rescued backup");
 		near(bus(snap, "backup").batteryDischargeKW, 8, "backup battery did not fund local load");
@@ -277,6 +350,7 @@ namespace
 			&& snap.activeAlerts[0].firedAtSeconds == 3, "breaker Alert payload missing without Monitor");
 		require(run.advanceTo(4), "dead bus failed audit");
 		snap = run.snapshot();
+		checkTelemetry(snap);
 		near(bus(snap, "main").generationKW, 0, "tripped solar connected");
 		near(bus(snap, "main").suppliedKW, 0, "tripped load supplied");
 		near(bus(snap, "main").unmetKW, 8, "dead demand vanished");

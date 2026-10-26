@@ -51,7 +51,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/editor/StationComponentHelp.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/StationMonitorInspector.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/StationMonitorFamilies.cpp` | module-owned | `pf-smoke-editor` |
-| `smoke/editor/StationFaultSurface.cpp` | module-owned | `pf-smoke-editor` (includes station/busBreakerWorkflow: dead styling, marker/inspector reset, Alert lifecycle, save/load and undo/redo) |
+| `smoke/editor/StationFaultSurface.cpp` | module-owned | `pf-smoke-editor` (includes station/busBreakerWorkflow: read-only multi-bus operator rollups, unrated/tripped presentation and preserved totals (#885); dead styling, marker/inspector reset, Alert lifecycle, save/load and undo/redo) |
 | `smoke/editor/StationAlertDashboard.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/station/StationCoreChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationClockChecks.cpp` | module-owned | `pf-smoke-station` |
@@ -95,7 +95,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/station/Bioconversion.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationBiologyChecks.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/Documents.cpp` | module-owned | `pf-smoke-station` |
-| `smoke/station/StationBusDispatchChecks.cpp` | module-owned | `pf-smoke-station` (busBreakers, busDispatchBalance, busDispatchProtected, busDispatchBatteries, busDispatchInternal, busDispatchSources, busDispatchRecovery) |
+| `smoke/station/StationBusDispatchChecks.cpp` | module-owned | `pf-smoke-station` (busBreakers, busDispatchBalance, busDispatchProtected, busDispatchBatteries, busDispatchInternal, busDispatchSources, busDispatchRecovery; #885 feeder telemetry covers initial subjects, replay, cable losses, Transfer/Shared serving buses, battery directions, event-split rates and breaker state) |
 | `smoke/station/StationPowerBusChecks.cpp` | module-owned | `pf-smoke-station` (powerBusMigration, powerBusPersistence, powerBusRoles, powerBusValidation) |
 | `smoke/station/StationTransferSupplyChecks.cpp` | module-owned | `pf-smoke-station` (transferHoldsPrimary, transferFailover, transferAlertAutoClears, transferDwellReturn, transferZeroDwell, transferNoFlapping, transferBackupAlsoShort, transferNoThirdPath, transferReplay, transferPerLoadDwell) |
 | `smoke/station/StationSharedSupplyChecks.cpp` | module-owned | `pf-smoke-station` (sharedSupplySplitRatio, sharedSupplyZeroSpare, sharedSupplyCombinedShortfall, sharedSupplyMinimumOperable, sharedSupplyRecomputed, sharedSupplyCombinedDemo, sharedSupplyReplay, sharedSupplyProtectedSpare, sharedSupplyFiniteFeeds) |

@@ -3465,8 +3465,29 @@ namespace core
 		bool operator==(StationBusPowerSnapshot const&) const = default;
 	};
 
+	// #885: stable feeder subjects for the future Monitor catalogue. Source
+	// delivery is measured at the bus; load draw is measured leaving the bus
+	// (before cable loss). Batteries have one subject in each direction.
+	enum class StationPowerBreakerState { Closed, Open, TrippedWithBus };
+	struct StationPowerConnectionSnapshot
+	{
+		StationConnectionKey key;
+		std::string busId;
+		bool source{false};
+		double sourceDeliveredKW{0.0}, loadDrawnKW{0.0};
+		StationPowerBreakerState breakerState{StationPowerBreakerState::Closed};
+		// Empty if this connection delivered no power in the reported interval.
+		// Shared loads can have several serving rows; Transfer can change buses
+		// inside an event-split interval. This is flow, not switch position.
+		std::string servingBusId;
+		// Structurally false in v1: non-charging sources never receive power.
+		bool reversePower{false};
+		bool operator==(StationPowerConnectionSnapshot const&) const = default;
+	};
+
 	struct StationPowerSnapshot
 	{
+		std::vector<StationPowerConnectionSnapshot> connections;
 		// Network-side availability and actual physical connection losses.
 		double poolGenerationKW{0.0};
 		double connectionLossKW{0.0};

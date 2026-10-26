@@ -2127,6 +2127,32 @@ namespace core
 			}
 			result.power.buses.push_back(std::move(bus));
 		}
+		// #885: project committed transport measurements, never run allocation
+		// while observing. Use the full connection key for stable feeder identity.
+		std::map<StationConnectionKey, StationConnectionSnapshot const*> powerFlows;
+		for (auto const& flow : result.connections)
+			if (flow.key.peerType == "Power bus") powerFlows.emplace(flow.key, &flow);
+		for (auto const& link : mImpl->connectionGraph.links)
+		{
+			if (link.designKey.peerType != "Power bus") continue;
+			StationPowerConnectionSnapshot feeder;
+			feeder.key = link.designKey;
+			feeder.busId = feeder.key.peerId;
+			feeder.source = mImpl->connectionGraph.nodes[link.from].type != "Power bus";
+			// Subjects exist before the first tick too, with zero flow. A
+			// Monitor can bind identity without waiting for the first dispatch.
+			if (auto const flow = powerFlows.find(feeder.key); flow != powerFlows.end())
+			{
+				feeder.sourceDeliveredKW = feeder.source ? flow->second->lastDeliveredRate : 0.0;
+				feeder.loadDrawnKW = feeder.source ? 0.0 : flow->second->lastInputRate;
+				if (!feeder.source && flow->second->lastDeliveredRate > 0.0)
+					feeder.servingBusId = feeder.busId;
+			}
+			if (auto const state = mImpl->busBreakers.find(feeder.busId);
+				state != mImpl->busBreakers.end() && state->second.tripped)
+				feeder.breakerState = StationPowerBreakerState::TrippedWithBus;
+			result.power.connections.push_back(std::move(feeder));
+		}
 		// #882: which bus actually serves each Transfer-mode load. The per-bus
 		// accounts above say what a bus carried; this says which side of its
 		// automatic transfer switch each load sat on, so a reader sees a

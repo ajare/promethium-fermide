@@ -684,14 +684,50 @@ namespace
 		}
 		StationSystemsWindow window;
 		DocumentHistory history;
+		// Exercise multiple circuits, including an explicitly unrated one,
+		// without disturbing the breaker click fixture's diagram geometry.
+		{
+			auto rollupWorld = std::make_shared<core::World>("Rollups", 2, 2);
+			rollupWorld->pauseSimulation(); rollupWorld->finishBuild();
+			auto rollupSettings = settings;
+			rollupSettings.powerBuses.push_back({"unrated", "Unrated", 0, 0});
+			require(rollupWorld->configureStationSystems(rollupSettings, false), "rollup configuration failed");
+			StationSystemsWindow rollupWindow;
+			DocumentHistory rollupHistory;
+			auto const before = rollupWorld->getStationSystemsSnapshot();
+			headless::TestEngineDriver rollupDriver([&] {
+				ImGui::SetNextWindowSize({1560, 960}); ImGui::Begin("Rollups");
+				rollupWindow.renderContents(rollupWorld, rollupHistory); ImGui::End();
+			});
+			rollupDriver.frame(); rollupDriver.frame();
+			require(rollupDriver.contains("Bus main: supply") && rollupDriver.contains("Bus unrated: supply")
+				&& rollupDriver.contains("Load fraction: unrated") && rollupDriver.contains("of 5.000 kW")
+				&& rollupDriver.contains("Trip state: closed") && rollupDriver.contains("Power totals:"), "multiple bus rollups missing");
+			require(before == rollupWorld->getStationSystemsSnapshot() && rollupHistory.undoCount() == 0,
+				"rollup observation mutated World or history");
+		}
+		bool liveRollups = true;
 		headless::TestEngineDriver driver([&] {
 			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1560, 960});
-			ImGui::Begin("Configuration"); window.renderFlowContents(world, &history); ImGui::End();
+			ImGui::Begin("Configuration");
+			if (liveRollups) window.renderContents(world, history);
+			else window.renderFlowContents(world, &history);
+			ImGui::End();
 		});
 		driver.frame(); driver.frame();
 		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
 		driver.run("station", "busBreakerWorkflow", [&](ImGuiTestContext* ctx) {
 			ctx->SetRef("Configuration"); ctx->Yield(2);
+			auto const beforeObservation = world->getStationSystemsSnapshot();
+			REQ(driver.contains("Bus main: supply"), "per-bus rollups missing");
+			REQ(driver.contains("protected unmet")
+				&& driver.contains("Trip state: tripped") && driver.contains("of 5.000 kW")
+				&& driver.contains("Power totals:"), "rollup health or station totals missing");
+			ctx->Yield(2);
+			REQ(world->getStationSystemsSnapshot() == beforeObservation && history.undoCount() == 0,
+				"read-only rollups changed dispatch or history");
+			liveRollups = false; ctx->Yield(3);
+			ctx->ScrollToTop("Configuration"); ctx->Yield(2);
 			REQ(driver.contains("Latched trip - Reset breaker"), "latched marker missing");
 			bool deadColour = false;
 			for (auto* w : ImGui::GetCurrentContext()->Windows)
