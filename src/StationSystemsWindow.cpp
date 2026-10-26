@@ -1078,6 +1078,21 @@ void StationSystemsWindow::renderPrefabDialInspector(core::StationSystemsSetting
 	if (!mDialNotice.empty())
 		ImGui::TextWrapped("Refused: %s", mDialNotice.c_str());
 	ImGui::TextDisabled("Internal-only fields stay hidden while the unit is collapsed; expand it to edit internals.");
+	// Observe the unit through its ordinary entries: provenance never becomes
+	// a simulation dependency, and Monitors survive ungrouping or catalogue loss.
+	for (auto const& [type, localId] : core::prefabEntryOrder(tmpl->entries))
+	{
+		auto const subjectType = core::stationMonitorSubjectTypeForNodeType(type);
+		if (subjectType.empty()) continue;
+		auto const id = unit->instanceId + core::PrefabIdSeparator + localId;
+		ImGui::PushID(id.c_str());
+		if (ImGui::TreeNode(id.c_str()))
+		{
+			renderMonitorInspector(draft, subjectType, id);
+			ImGui::TreePop();
+		}
+		ImGui::PopID();
+	}
 }
 
 void StationSystemsWindow::applyPrefabDial(core::StationSystemsSettings& draft,

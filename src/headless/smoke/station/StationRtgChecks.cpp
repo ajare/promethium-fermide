@@ -92,7 +92,10 @@ void rtgDials(smoke::Context const& ctx)
 	require(!core::expandPrefab(t, {{"throttleable", true}}, "rtg1", refused, why), "hidden dial accepted");
 	for (auto const& p : t.parameters)
 		for (double value : {p.minValue, p.maxValue})
-			expand(t, {{p.name, value}}); // every advertised endpoint is a coherent composition
+		{
+			auto const endpoint = expand(t, {{p.name, value}});
+			require(!endpoint.entries.heatSources[0].throttleable, "dial endpoint made RTG throttleable");
+		} // every advertised endpoint preserves the machine's identity
 	// A coupled write cannot partially succeed if an internal target disappeared.
 	auto orphan = e.entries; orphan.heatEngines.clear(); auto const orphanBefore = orphan;
 	auto const overridesBefore = placed.overrides;
@@ -111,6 +114,48 @@ void rtgDials(smoke::Context const& ctx)
 	core::PrefabCatalogue catalogue;
 	require(!core::parsePrefabCatalogue(malformed, catalogue, &why) && catalogue.templates.empty(),
 		"invalid coupled mapping did not refuse catalogue atomically");
+}
+void rtgMonitors(smoke::Context const& ctx)
+{
+	auto const t = rtg(ctx);
+	auto s = plant(t, {{"Half-life (hours)", .01}, {"Initial age (hours)", .01 * 30 / 87.7}});
+	s.monitors.push_back({"end-of-life", "heat-source", "rtg1.isotope", "decayFraction",
+		{.3, core::AlertDirection::Above, 0, 0}, core::AlertSeverity::Warning, true});
+	require(core::stationMonitorSubjectTypeForNodeType("Heat source") == "heat-source", "source inspector lacks Monitors");
+	require(core::stationMonitorSubjectExists(s, "heat-source", "rtg1.isotope"), "RTG isotope not a Monitor subject");
+	require(!core::stationMonitorSubjectExists(s, "heat-source", "missing"), "unknown source accepted");
+	core::StationConfigurationDocument doc; doc.settings = s;
+	core::StationConfigurationDocument loaded; std::string why;
+	require(core::parseStationConfiguration(core::serializeStationConfiguration(doc), loaded, &why), why.c_str());
+	require(loaded.settings.monitors == s.monitors, "RTG Monitor did not round-trip without provenance");
+	core::World w("Monitored RTG", 2, 2); configure(w, loaded.settings);
+	auto opening = w.getStationSystemsSnapshot();
+	near(opening.heatSources[0].decayFraction, 1 - std::exp2(-30.0 / 87.7), "published ageing absent at opening");
+	auto read = [&](auto const& snapshot, char const* type, char const* id, char const* metric) {
+		auto value = core::readStationMonitorMetric(s, snapshot, type, id, metric);
+		require(value.has_value(), "RTG metric unavailable"); return *value;
+	};
+	near(read(opening, "heat-source", "rtg1.isotope", "decayFraction"), opening.heatSources[0].decayFraction, "Monitor ageing differs from snapshot");
+	require(advanceSeconds(w, 1), "RTG Monitor drive failed");
+	auto snap = w.getStationSystemsSnapshot();
+	require(std::none_of(snap.activeAlerts.begin(), snap.activeAlerts.end(), [](auto const& a) { return a.monitorId == "end-of-life"; }), "end-of-life fired early");
+	near(read(snap, "heat-engine", "rtg1.thermocouple", "electricalOutputKW"), snap.heatEngines[0].lastElectricalOutputKW, "Monitor electrical output wrong");
+	near(read(snap, "heat-engine", "rtg1.thermocouple", "rejectionKW"), snap.heatEngines[0].lastRejectionKW, "Monitor rejection wrong");
+	near(read(snap, "heat-source", "rtg1.isotope", "decayedOutputKW"), snap.heatSources[0].decayedOutputKW, "Monitor source output wrong");
+	require(advanceSeconds(w, 35), "RTG ageing drive failed");
+	snap = w.getStationSystemsSnapshot();
+	require(std::any_of(snap.activeAlerts.begin(), snap.activeAlerts.end(), [](auto const& a) { return a.monitorId == "end-of-life"; }), "aged RTG raised no end-of-life Alert");
+	near(snap.heatSources[0].decayFraction, 1 - std::exp2(-(30.0 / 87.7 + 1)), "monitored decay restarted");
+	near(read(snap, "heat-source", "rtg1.isotope", "deliveredOutputKW"), snap.heatSources[0].deliveredOutputKW, "Monitor delivery wrong");
+	require(!core::readStationMonitorMetric(s, snap, "heat-source", "missing", "decayFraction"), "missing snapshot subject read succeeded");
+	core::StationNodeRename rename;
+	require(core::planStationNodeRename(s, "Heat source", "rtg1.isotope", "aged-isotope", rename, &why), why.c_str());
+	require(core::renameStationNode(s, rename, &why), why.c_str());
+	require(s.monitors[0].subjectId == "aged-isotope", "source rename orphaned end-of-life Monitor");
+	core::StationNodeRemoval removal;
+	require(core::planStationNodeRemoval(s, "Heat source", "aged-isotope", removal), "source removal planning failed");
+	require(core::removeStationNode(s, removal, &why), why.c_str());
+	require(s.monitors.empty(), "source removal left end-of-life Monitor dangling");
 }
 void rtgConversionLedger(smoke::Context const& ctx)
 {
@@ -176,6 +221,7 @@ void rtgDecayStandalone(smoke::Context const& ctx)
 void registerStationRtgChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"rtgDials", rtgDials});
+	checks.push_back({"rtgMonitors", rtgMonitors});
 	checks.push_back({"rtgConversionLedger", rtgConversionLedger});
 	checks.push_back({"rtgDecayStandalone", rtgDecayStandalone});
 }

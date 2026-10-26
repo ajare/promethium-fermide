@@ -131,7 +131,10 @@ std::vector<StationMonitorMetric> const& stationMonitorMetricCatalogue(std::stri
 	}();
 	static std::vector<StationMonitorMetric> const loops{{"fillFraction", "fraction"}, {"circulationFraction", "fraction"}, {"loopTemperatureC", "°C"}, {"condition", "fraction"}};
 	static std::vector<StationMonitorMetric> const chillers{{"coolingUnmetFraction", "fraction"}, {"sinkOverMaxCondensing", "boolean"}, {"refrigerantFraction", "fraction"}};
-	static std::vector<StationMonitorMetric> const engines{{"tripped", "boolean"}, {"hotHeadroomC", "°C"}};
+	static std::vector<StationMonitorMetric> const heatSources{
+		{"decayFraction", "fraction"}, {"decayedOutputKW", "kW"}, {"deliveredOutputKW", "kW"}};
+	static std::vector<StationMonitorMetric> const engines{{"tripped", "boolean"}, {"hotHeadroomC", "°C"},
+		{"electricalOutputKW", "kW"}, {"rejectionKW", "kW"}};
 	static std::vector<StationMonitorMetric> const radiators{{"remainingAreaFraction", "fraction"}, {"reservoirTemperatureC", "°C"}};
 	static std::vector<StationMonitorMetric> const batteries{{"stateOfCharge", "fraction"}, {"dischargeShortfallFraction", "fraction"}, {"wearFraction", "fraction"}};
 	static std::vector<StationMonitorMetric> const generators{{"outputKW", "kW"}, {"outputDeviationFraction", "fraction"}, {"sinkTemperatureC", "°C"}, {"startupUnmetKW", "kW"}};
@@ -148,6 +151,7 @@ std::vector<StationMonitorMetric> const& stationMonitorMetricCatalogue(std::stri
 	if (type == "solar-array") return solar;
 	if (type == "coolant-loop") return loops;
 	if (type == "chiller") return chillers;
+	if (type == "heat-source") return heatSources;
 	if (type == "heat-engine") return engines;
 	if (type == "radiator") return radiators;
 	static std::vector<StationMonitorMetric> const empty;
@@ -171,6 +175,7 @@ bool stationMonitorSubjectExists(StationSystemsSettings const& settings, std::st
 	if (type == "solar-array") return findId(settings.solarArrays, id) != settings.solarArrays.end();
 	if (type == "coolant-loop") return findId(settings.coolantLoops, id) != settings.coolantLoops.end();
 	if (type == "chiller") return findId(settings.chillers, id) != settings.chillers.end();
+	if (type == "heat-source") return findId(settings.heatSources, id) != settings.heatSources.end();
 	if (type == "heat-engine") return findId(settings.heatEngines, id) != settings.heatEngines.end();
 	if (type == "radiator") return findId(settings.radiators, id) != settings.radiators.end();
 	if (type == "atmosphere") return findId(settings.atmospheres, id) != settings.atmospheres.end();
@@ -296,10 +301,20 @@ std::optional<double> readStationMonitorMetric(StationSystemsSettings const& set
 		// No finite-charge opt-in means no charge-loss symptom, not an empty machine.
 		return s->refrigerantChargeKg > 0 ? s->refrigerantKg / s->refrigerantChargeKg : 1.0;
 	}
+	if (type == "heat-source")
+	{
+		auto s = findId(snapshot.heatSources, id);
+		if (s == snapshot.heatSources.end()) return {};
+		if (metric == "decayFraction") return s->decayFraction;
+		if (metric == "decayedOutputKW") return s->decayedOutputKW;
+		return s->deliveredOutputKW;
+	}
 	if (type == "heat-engine")
 	{
 		auto s = findId(snapshot.heatEngines, id);
 		if (s == snapshot.heatEngines.end()) return {};
+		if (metric == "electricalOutputKW") return s->lastElectricalOutputKW;
+		if (metric == "rejectionKW") return s->lastRejectionKW;
 		if (metric == "tripped") return s->status == StationHeatEngineStatus::Tripped ? 1.0 : 0.0;
 		return s->hotTemperatureC - s->minHotTemperatureC;
 	}

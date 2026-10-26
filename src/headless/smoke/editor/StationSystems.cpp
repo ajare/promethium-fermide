@@ -7184,6 +7184,15 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 				&& window.draft().heatSources[0].targetReservoirId == "rtg1.hot"
 				&& window.draft().heatEngines[0].hotReservoirId == "rtg1.hot",
 				"RTG identity or internal wiring changed during placement");
+			ImVec4 rtgRect{};
+			REQ(window.flowNodeRect("rtg-unit", "rtg1", &rtgRect), "RTG composite missing");
+			ctx->MouseTeleportToPos({(rtgRect.x + rtgRect.z) * .5f, (rtgRect.y + rtgRect.w) * .5f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 4, canvas->Pos.y + 4}); ctx->Yield(3);
+			REQ(driver.contains("Initial age (hours)") && driver.contains("rtg1.isotope")
+				&& driver.contains("rtg1.thermocouple"), "collapsed RTG lacks age dial or constituent Monitors");
+			ctx->ItemClick("**/rtg1.isotope"); ctx->Yield(3);
+			REQ(driver.contains("Monitors"), "collapsed RTG isotope Monitor inspector did not open");
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 			REQ(window.draft().heatSources.empty() && window.draft().heatEngines.empty()
 				&& window.draft().thermalReservoirs.empty(), "RTG undo left internal entries");

@@ -64,9 +64,31 @@ expansion, persistence or World. All component validation remains strict and
 unchanged; an arbitrary missing reference is still an error. Template defaults
 are expanded and validated at catalogue load, including coupled targets.
 
+## Aged units and Monitors (#905)
+
+Set **Initial age (hours)** to **262980** for a thirty-Julian-year-old unit.
+With the default 87.7-year half-life it opens at 78.89% of beginning-of-life
+thermal output and continues on the same curve. Electrical output also depends
+on the live temperature gradient, stored heat and bus acceptance, not just age.
+
+The collapsed unit inspector exposes its constituent Monitors without exposing
+internal settings. Select `rtg1.isotope` there to author a `heat-source` Monitor
+on `decayFraction`, `decayedOutputKW` or `deliveredOutputKW`. `decayFraction` is
+**the fraction lost**, not remaining output: an enabled Above rule at 0.3 warns
+when the source has lost more than 30%. New Monitors remain disabled until enabled.
+Select `rtg1.thermocouple` for `heat-engine` metrics `electricalOutputKW` and
+`rejectionKW` (both last-step kW), alongside its existing trip/headroom metrics.
+The isotope's published snapshot already carries ageing at t=0.
+
+These are ordinary component subjects, not a provenance-dependent RTG simulation
+object. Their Monitors persist and run even after ungrouping or catalogue loss;
+normal component rename/delete cascades still apply. No dial exposes source
+throttleability, directly or through coupled targets; dial endpoints are tested
+to preserve that absence.
+
 ## Verification
 
-`station-prefab-rtgDials`, `station-prefab-rtgConversionLedger`, and
+`station-prefab-rtgDials`, `station-prefab-rtgMonitors`, `station-prefab-rtgConversionLedger`, and
 `station-prefab-rtgDecayStandalone` cover the shipped catalogue, constrained dials,
 actual delivered power and radiator rejection, temperature-sensitive efficiency,
 per-step composite energy closure, mid-curve initial age, calendar decay with

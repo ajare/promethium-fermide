@@ -1969,6 +1969,7 @@ std::string_view stationMonitorSubjectTypeForNodeType(std::string_view nodeType)
 	if (nodeType == "Atmosphere") return "atmosphere";
 	if (nodeType == "Coolant loop") return "coolant-loop";
 	if (nodeType == "Chiller") return "chiller";
+	if (nodeType == "Heat source") return "heat-source";
 	if (nodeType == "Heat engine") return "heat-engine";
 	if (nodeType == "Radiator") return "radiator";
 	if (nodeType == "Water treatment") return "water-treatment";

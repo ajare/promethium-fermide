@@ -156,7 +156,7 @@ set_tests_properties(station-observable-registry-parser PROPERTIES
 # #814 adds the provenance block: lossless YAML round trip, the schema-111
 # boundary refusal for old readers, malformed-provenance refusals, and the
 # catalogue-absent load where the expansion stands on its own.
-foreach(check rtgDials rtgConversionLedger rtgDecayStandalone
+foreach(check rtgDials rtgMonitors rtgConversionLedger rtgDecayStandalone
         prefabCatalogueParse prefabCatalogueRefusals prefabInstanceAllocation
         prefabEntryOrderIsFixed
         prefabTemplateParse prefabTemplateRefusals prefabExpansion prefabOverrides prefabDialEdit prefabCapRefusal prefabDeterminism
