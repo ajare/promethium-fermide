@@ -1238,6 +1238,9 @@ configured radiative environment; a Thermal link cannot conduct to Exterior.
 
 ### Prefabs
 
+The bundled [RTG prefab](rtg-prefab.md) provides a low-power, decaying
+radioisotope source with electrical, rejection and hot-tap interfaces.
+
 A prefab packages ordinary components and internal wiring with exposed ports
 and dials; it does not add a new physical process or bypass any of the rules
 above. For example, package a Reservoir, Coolant loop and Radiator as a reusable

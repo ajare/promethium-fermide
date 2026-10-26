@@ -119,7 +119,22 @@ namespace core
 		PrefabParameterKind kind{PrefabParameterKind::Number};
 		double* number{nullptr};
 		bool* flag{nullptr};
-		bool found() const { return number != nullptr || flag != nullptr; }
+		std::string* thermalClass{nullptr};
+		bool found() const { return number || flag || thermalClass; }
+		bool write(PrefabOverrideValue const& value) const
+		{
+			if (thermalClass)
+			{
+				auto const* n = std::get_if<double>(&value);
+				if (!n || !std::isfinite(*n) || *n != std::floor(*n) || *n < 0
+					|| *n >= StationThermalServiceClasses.size()) return false;
+				*thermalClass = StationThermalServiceClasses[static_cast<size_t>(*n)];
+			}
+			else if (number) *number = std::get<double>(value);
+			else if (flag) *flag = std::get<bool>(value);
+			else return false;
+			return true;
+		}
 	};
 
 	PrefabFieldTarget resolvePrefabField(StationSystemsSettings& settings,
@@ -128,7 +143,20 @@ namespace core
 		if (nodeType == "Heat source")
 		{
 			auto* entry = findPrefabEntryById(settings.heatSources, entryId);
-			if (entry && field == "ratedOutputKW") return {PrefabParameterKind::Number, &entry->ratedOutputKW, nullptr};
+			if (!entry) return {};
+			if (field == "ratedOutputKW") return {PrefabParameterKind::Number, &entry->ratedOutputKW, nullptr};
+			if (entry->wear && field == "wear.fadeHalfLifeHours") return {PrefabParameterKind::Number, &entry->wear->fadeHalfLifeHours, nullptr};
+			if (entry->wear && field == "wear.initialAgeHours") return {PrefabParameterKind::Number, &entry->wear->initialAgeHours, nullptr};
+			return {};
+		}
+		if (nodeType == "Heat engine")
+		{
+			auto* entry = findPrefabEntryById(settings.heatEngines, entryId);
+			if (!entry) return {};
+			if (field == "ratedThermalInputKW") return {PrefabParameterKind::Number, &entry->ratedThermalInputKW, nullptr};
+			if (field == "commandedInputKW") return {PrefabParameterKind::Number, &entry->commandedInputKW, nullptr};
+			if (field == "carnotFraction") return {PrefabParameterKind::Number, &entry->carnotFraction, nullptr};
+			if (field == "thermalClass") return {PrefabParameterKind::Number, nullptr, nullptr, &entry->thermalClass};
 			return {};
 		}
 		if (nodeType == "Chiller")
@@ -176,6 +204,30 @@ namespace core
 			return {};
 		}
 		return {};
+	}
+
+	// An exposed rejection connector is deliberately unwired until placement.
+	// Validate a copy with a finite, same-class outside peer, never a runtime
+	// component or a relaxed validator rule. All other missing links still fail.
+	bool validatePrefabEntries(StationSystemsSettings const& entries,
+		PrefabTemplate const& tmpl, std::string const& prefix, std::string& diagnostic)
+	{
+		auto candidate = entries;
+		for (auto const& port : tmpl.exposedPorts)
+		{
+			if (port.nodeType != "Heat engine" || port.portName != "Rejection heat") continue;
+			auto* engine = findPrefabEntryById(candidate.heatEngines, prefix + port.entryId);
+			if (!engine || !engine->rejectionReservoirId.empty()) continue;
+			std::string id = "prefab-validation-peer";
+			while (findPrefabEntryById(candidate.thermalReservoirs, id)) id += "x";
+			ThermalReservoirSettings sink;
+			sink.id = id; sink.thermalClass = engine->thermalClass;
+			sink.heatCapacityKJPerK = 1; sink.startingTemperatureC = 20;
+			sink.minTemperatureC = -50; sink.maxTemperatureC = 1000;
+			engine->rejectionReservoirId = id;
+			candidate.thermalReservoirs.push_back(sink);
+		}
+		return validateStationSystemsSettings(candidate, diagnostic);
 	}
 
 	PrefabParameter const* findPrefabParameter(PrefabTemplate const& tmpl, std::string const& name)
@@ -354,7 +406,7 @@ namespace core
 		// The template's internal entries are read under a World schema
 		// version like any stationSystems map; the default is the newest
 		// schema this reader knows.
-		std::uint32_t version = 111;
+		std::uint32_t version = kWorldSchemaVersion;
 		if (serializer.hasField("schemaVersion"))
 		{
 			version = static_cast<std::uint32_t>(serializer.readInt64("schemaVersion"));
@@ -435,6 +487,18 @@ namespace core
 				}
 				else
 					parameter.boolDefault = serializer.readBool("default", false, false);
+				if (serializer.hasField("additionalTargets"))
+				{
+					serializer.beginArray("additionalTargets");
+					while (serializer.nextArrayItem())
+					{
+						serializer.beginMap("");
+						parameter.additionalTargets.push_back({serializer.readString("nodeType"),
+							serializer.readString("entryId"), serializer.readString("field")});
+						serializer.endMap();
+					}
+					serializer.endArray();
+				}
 				serializer.endMap();
 				if (parameter.name.empty())
 					return refuse("Prefab '" + tmpl.id + "' parameter name must not be empty");
@@ -464,6 +528,12 @@ namespace core
 						return refuse("Prefab '" + tmpl.id + "' parameter '" + parameter.name
 							+ "' default is outside its declared range");
 				}
+				for (auto const& mapping : parameter.additionalTargets)
+				{
+					auto const extra = resolvePrefabField(tmpl.entries, mapping.nodeType, mapping.entryId, mapping.field);
+					if (!extra.found() || extra.kind != parameter.kind)
+						return refuse("Prefab parameter '" + parameter.name + "' has an invalid additional target");
+				}
 				tmpl.parameters.push_back(std::move(parameter));
 			}
 			serializer.endArray();
@@ -473,7 +543,7 @@ namespace core
 		// isolation, so the same rules that judge a draft judge the
 		// template, and a failing template never reaches placement.
 		std::string validationDiagnostic;
-		if (!validateStationSystemsSettings(tmpl.entries, validationDiagnostic))
+		if (!validatePrefabEntries(tmpl.entries, tmpl, "", validationDiagnostic))
 			return refuse("Prefab '" + tmpl.id + "' internal entries do not validate: "
 				+ validationDiagnostic);
 		// #811: the load-time boundary gate - with stub peers on the
@@ -698,8 +768,7 @@ namespace core
 		// core-owned reference rewriting the editor uses, so every mapped
 		// reference field - and the connection properties keyed by the old
 		// ids - is carried through by one mechanism. Types the core rename
-		// mechanism does not cover (heat engines, whose reservoir references
-		// are not in the port mapping) cannot be namespaced safely and are
+		// mechanism does not cover cannot be namespaced safely and are
 		// refused here atomically rather than landed with dangling peers.
 		// The template copy is discarded on any failure, so a half-namespaced
 		// instance can never escape this function.
@@ -734,16 +803,17 @@ namespace core
 			if (!target.found())
 				return refuse("Override for parameter '" + name + "' lost its target field '"
 					+ parameter->field + "' during namespacing");
-			if (parameter->kind == PrefabParameterKind::Number)
-				*target.number = std::get<double>(value);
-			else
-				*target.flag = std::get<bool>(value);
+			if (!target.write(value)) return refuse("Invalid value for parameter '" + name + "'");
+			for (auto const& mapping : parameter->additionalTargets)
+				if (!resolvePrefabField(expanded, mapping.nodeType,
+					instanceId + PrefabIdSeparator + mapping.entryId, mapping.field).write(value))
+					return refuse("Invalid additional target for parameter '" + name + "'");
 		}
 		// The expansion validates against the existing configuration
 		// validator: the flattened entries must stand on their own exactly
 		// like hand-authored draft entries.
 		std::string diagnostic;
-		if (!validateStationSystemsSettings(expanded, diagnostic))
+		if (!validatePrefabEntries(expanded, tmpl, instanceId + PrefabIdSeparator, diagnostic))
 			return refuse("Expansion of prefab '" + tmpl.id + "' as instance '" + instanceId
 				+ "' does not validate: " + diagnostic);
 		PrefabExpansion expansion;
@@ -812,20 +882,21 @@ namespace core
 		if (!target.found())
 			return refuse("dial '" + parameterName + "' lost its target field '" + parameter->field
 				+ "' on unit '" + placed.instanceId + "'");
-		if (parameter->kind == PrefabParameterKind::Number)
-			*target.number = std::get<double>(value);
-		else
-			*target.flag = std::get<bool>(value);
+		if (!target.write(value)) return refuse("Invalid value for dial '" + parameterName + "'");
+		for (auto const& mapping : parameter->additionalTargets)
+			if (!resolvePrefabField(candidate, mapping.nodeType,
+				placed.instanceId + PrefabIdSeparator + mapping.entryId, mapping.field).write(value))
+				return refuse("Invalid additional target for dial '" + parameterName + "'");
 		// The whole-configuration validator is the outer net, in the same
 		// before/after shape the link evaluator uses: a dial that breaks an
 		// otherwise valid draft is refused, while a draft that was already
 		// invalid in exactly the same way is not this edit's doing and may
 		// proceed.
 		std::string afterDiag;
-		if (!validateStationSystemsSettings(candidate, afterDiag))
+		if (!validatePrefabEntries(candidate, tmpl, placed.instanceId + PrefabIdSeparator, afterDiag))
 		{
 			std::string beforeDiag;
-			if (validateStationSystemsSettings(draft, beforeDiag) || afterDiag != beforeDiag)
+			if (validatePrefabEntries(draft, tmpl, placed.instanceId + PrefabIdSeparator, beforeDiag) || afterDiag != beforeDiag)
 				return refuse("dial '" + parameterName
 					+ "' would leave an invalid configuration: " + afterDiag);
 		}
@@ -848,6 +919,13 @@ namespace core
 		auto const target = resolvePrefabField(mutableDraft, parameter->nodeType, targetId,
 			parameter->field);
 		if (!target.found() || target.kind != parameter->kind) return false;
+		if (target.thermalClass)
+		{
+			auto const it = std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(), *target.thermalClass);
+			if (it == StationThermalServiceClasses.end()) return false;
+			out = static_cast<double>(it - StationThermalServiceClasses.begin());
+			return true;
+		}
 		out = parameter->kind == PrefabParameterKind::Number
 			? PrefabOverrideValue{*target.number}
 			: PrefabOverrideValue{*target.flag};
@@ -1171,7 +1249,7 @@ namespace core
 		// in for the instance id, so the expansion is the template as it
 		// would land, with the existing validator as its judge.
 		PrefabExpansion expansion;
-		if (!expandPrefab(tmpl, {}, tmpl.id, expansion, reason))
+		if (!expandPrefab(tmpl, defaultPrefabOverrides(tmpl), tmpl.id, expansion, reason))
 			return false;
 		// Stub peers on the exposed ports: for each exposed port the stub
 		// peer is the canonical outside connector from the port grammar -
@@ -1222,7 +1300,7 @@ namespace core
 		// and a failing template is refused atomically with its
 		// diagnostic.
 		std::string diagnostic;
-		if (!validateStationSystemsSettings(expansion.entries, diagnostic))
+		if (!validatePrefabEntries(expansion.entries, tmpl, tmpl.id + PrefabIdSeparator, diagnostic))
 			return refuse("Prefab '" + tmpl.id + "' isolated expansion with stub peers does "
 				"not validate: " + diagnostic);
 		reason.clear();

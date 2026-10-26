@@ -36,8 +36,18 @@ namespace core
 
 	enum class PrefabParameterKind { Number, Boolean };
 
+	struct PrefabParameterTarget
+	{
+		std::string nodeType;
+		std::string entryId;
+		std::string field;
+		bool operator==(PrefabParameterTarget const&) const = default;
+	};
+
 	// One exposed dial: a parameter mapped to one field of an internal
 	// template entry, with its default and permitted numeric range.
+	// thermalClass uses numeric indices into StationThermalServiceClasses;
+	// the editor displays a class selector and fractional indices are refused.
 	struct PrefabParameter
 	{
 		std::string name;
@@ -49,6 +59,8 @@ namespace core
 		double minValue{0.0};
 		double maxValue{0.0};
 		bool boolDefault{false};
+		// Optional coupled writes (same value, one atomic edit).
+		std::vector<PrefabParameterTarget> additionalTargets;
 		bool operator==(PrefabParameter const&) const = default;
 	};
 
@@ -102,6 +114,8 @@ namespace core
 	// the authoritative stationSystems reader and validated, template entry
 	// ids containing the namespacing separator are refused, and every exposed
 	// port and parameter must resolve to a real internal entry and connector.
+	// An empty, exposed engine rejection endpoint is checked with an outside
+	// peer in a temporary copy; placement must wire it before World Apply.
 	bool parsePrefabTemplate(std::string const& yaml, PrefabTemplate& out,
 		std::string* diagnostic = nullptr);
 

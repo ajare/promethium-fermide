@@ -1,0 +1,104 @@
+# Low-power Pu-238-class thermoelectric unit, not a station primary plant.
+# At 500 C / 30 C: eta = .115 * (1 - 303.15/773.15) = .0699088;
+# 2 kW thermal => 139.818 W electrical and 1.86018 kW rejection.
+# The outside station owns the rejection reservoir and radiator chain.
+schemaVersion: 129
+prefabCatalogue:
+  prefabs:
+    - id: rtg-unit
+      schemaVersion: 129
+      displayName: RTG (long-duration low-power source)
+      instancePrefix: rtg
+      stationSystems:
+        enabled: true
+        observationIntervalSeconds: 1
+        heatSources:
+          - id: isotope
+            targetReservoirId: hot
+            thermalClass: generation
+            ratedOutputKW: 2
+            throttleable: false
+            wear:
+              fadePerCycle: 0
+              fadePerOperatingHour: 0
+              fadePerThroughputKg: 0
+              fadePerCalendarHour: 0
+              maxWearFraction: 1
+              fadeHalfLifeHours: 768778.2
+              initialAgeHours: 0
+        thermalReservoirs:
+          - id: hot
+            thermalClass: generation
+            heatCapacityKJPerK: 100
+            startingTemperatureC: 500
+            minTemperatureC: 0
+            maxTemperatureC: 1000
+            absorbedHeatKW: 0
+        heatEngines:
+          - id: thermocouple
+            hotReservoirId: hot
+            rejectionReservoirId: ""
+            thermalClass: moderate
+            ratedThermalInputKW: 2
+            carnotFraction: 0.115
+            auxiliaryPowerKW: 0
+            minHotTemperatureC: 100
+            maxSinkTemperatureC: 80
+      exposedPorts:
+        - name: Electrical out
+          nodeType: Heat engine
+          entryId: thermocouple
+          portName: Power out
+        - name: Rejection out
+          nodeType: Heat engine
+          entryId: thermocouple
+          portName: Rejection heat
+        - name: Hot tap
+          nodeType: Reservoir
+          entryId: hot
+          portName: Heat out
+      parameters:
+        - name: Beginning-of-life thermal output (kW)
+          nodeType: Heat source
+          entryId: isotope
+          field: ratedOutputKW
+          default: 2
+          min: 0.1
+          max: 1000
+          additionalTargets:
+            - nodeType: Heat engine
+              entryId: thermocouple
+              field: ratedThermalInputKW
+            - nodeType: Heat engine
+              entryId: thermocouple
+              field: commandedInputKW
+        - name: Half-life (hours)
+          nodeType: Heat source
+          entryId: isotope
+          field: wear.fadeHalfLifeHours
+          default: 768778.2
+          min: 0.001
+          max: 10000000
+        - name: Initial age (hours)
+          nodeType: Heat source
+          entryId: isotope
+          field: wear.initialAgeHours
+          default: 0
+          min: 0
+          max: 10000000
+        - name: Conversion quality
+          nodeType: Heat engine
+          entryId: thermocouple
+          field: carnotFraction
+          default: 0.115
+          min: 0.01
+          max: 0.2
+        # Numeric wire value indexes StationThermalServiceClasses; editor combo.
+        # This is the rejection class. The sealed hot side stays generation.
+        - name: Thermal class
+          nodeType: Heat engine
+          entryId: thermocouple
+          field: thermalClass
+          default: 1
+          min: 0
+          max: 3

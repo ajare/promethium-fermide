@@ -7102,8 +7102,8 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
 		auto const root = fixtureContext.temporaryRoot() / "prefab-resources";
 		headless::StationResourceFixture resources(authored, root);
-		require(resources.catalogues.size() == 1,
-			"the bundled prefab catalogue should load from the manifest");
+		require(resources.catalogues.size() == 2,
+			"both bundled prefab catalogues should load from the manifest");
 
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
@@ -7171,6 +7171,22 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 			REQ(window.draft().chillers.empty() && window.draft().coolantLoops.empty()
 				&& window.draft().radiators.empty() && window.draft().thermalReservoirs.empty(),
 				"one undo did not remove the whole placed unit");
+			// #904: the real manifest also supplies the RTG. Place and undo
+			// its three entries through the same menu/history seam, leaving
+			// rejection deliberately unwired until the designer connects it.
+			ctx->ComboClick("Place node/RTG (long-duration low-power source)"); ctx->Yield(3);
+			ctx->MouseTeleportToPos({canvas->Pos.x + 300.0f, canvas->Pos.y + 180.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			REQ(window.draft().heatSources.size() == 1 && window.draft().heatEngines.size() == 1
+				&& window.draft().thermalReservoirs.size() == 1, "RTG did not place as a three-entry composite");
+			REQ(!window.draft().heatSources[0].throttleable
+				&& window.draft().heatSources[0].targetReservoirId == "rtg1.hot"
+				&& window.draft().heatEngines[0].hotReservoirId == "rtg1.hot",
+				"RTG identity or internal wiring changed during placement");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().heatSources.empty() && window.draft().heatEngines.empty()
+				&& window.draft().thermalReservoirs.empty(), "RTG undo left internal entries");
 			// Fill the reservoir ceiling, then try the unit again: it consumes
 			// two reservoirs, so there is no room and nothing may land.
 			ctx->ComboClick("Place node/Reservoir"); ctx->Yield(2);
@@ -7219,8 +7235,8 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
 		auto const root = fixtureContext.temporaryRoot() / "prefab-projection-resources";
 		headless::StationResourceFixture resources(authored, root);
-		require(resources.catalogues.size() == 1,
-			"the bundled prefab catalogue should load from the manifest");
+		require(resources.catalogues.size() == 2,
+			"both bundled prefab catalogues should load from the manifest");
 
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
@@ -7417,8 +7433,8 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
 		auto const root = fixtureContext.temporaryRoot() / "prefab-persistence-resources";
 		headless::StationResourceFixture resources(authored, root);
-		require(resources.catalogues.size() == 1,
-			"the bundled prefab catalogue should load from the manifest");
+		require(resources.catalogues.size() == 2,
+			"both bundled prefab catalogues should load from the manifest");
 
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
@@ -7538,8 +7554,8 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
 		auto const root = fixtureContext.temporaryRoot() / "prefab-expanded-save-resources";
 		headless::StationResourceFixture resources(authored, root);
-		require(resources.catalogues.size() == 1,
-			"the bundled prefab catalogue should load from the manifest");
+		require(resources.catalogues.size() == 2,
+			"both bundled prefab catalogues should load from the manifest");
 
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
@@ -7643,8 +7659,8 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
 		auto const root = fixtureContext.temporaryRoot() / "prefab-unit-edit-resources";
 		headless::StationResourceFixture resources(authored, root);
-		require(resources.catalogues.size() == 1,
-			"the bundled prefab catalogue should load from the manifest");
+		require(resources.catalogues.size() == 2,
+			"both bundled prefab catalogues should load from the manifest");
 
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1700};
@@ -7872,8 +7888,8 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
 		auto const root = fixtureContext.temporaryRoot() / "prefab-keyboard-delete-resources";
 		headless::StationResourceFixture resources(authored, root);
-		require(resources.catalogues.size() == 1,
-			"the bundled prefab catalogue should load from the manifest");
+		require(resources.catalogues.size() == 2,
+			"both bundled prefab catalogues should load from the manifest");
 
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1700};
@@ -8020,8 +8036,8 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
 		auto const root = fixtureContext.temporaryRoot() / "prefab-telemetry-resources";
 		headless::StationResourceFixture resources(authored, root);
-		require(resources.catalogues.size() == 1,
-			"the bundled prefab catalogue should load from the manifest");
+		require(resources.catalogues.size() == 2,
+			"both bundled prefab catalogues should load from the manifest");
 
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
@@ -8230,8 +8246,8 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
 		auto const root = fixtureContext.temporaryRoot() / "prefab-dial-resources";
 		headless::StationResourceFixture resources(authored, root);
-		require(resources.catalogues.size() == 1,
-			"the bundled prefab catalogue should load from the manifest");
+		require(resources.catalogues.size() == 2,
+			"both bundled prefab catalogues should load from the manifest");
 
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1700};
@@ -8598,8 +8614,8 @@ prefabCatalogue:
 		auto const authored = fixtureContext.fixture("resources/Resources.yaml").parent_path();
 		auto const root = fixtureContext.temporaryRoot() / "prefab-duplicate-pin-resources";
 		headless::StationResourceFixture resources(authored, root);
-		require(resources.catalogues.size() == 1,
-			"the bundled prefab catalogue should load from the manifest");
+		require(resources.catalogues.size() == 2,
+			"both bundled prefab catalogues should load from the manifest");
 
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};

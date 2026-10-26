@@ -1033,7 +1033,14 @@ void StationSystemsWindow::renderPrefabDialInspector(core::StationSystemsSetting
 			current = parameter.kind == core::PrefabParameterKind::Number
 				? core::PrefabOverrideValue{parameter.defaultValue}
 				: core::PrefabOverrideValue{parameter.boolDefault};
-		if (parameter.kind == core::PrefabParameterKind::Number)
+		if (parameter.field == "thermalClass")
+		{
+			int index = static_cast<int>(std::get<double>(current));
+			if (ImGui::Combo(parameter.name.c_str(), &index,
+				core::StationThermalServiceClasses.data(), static_cast<int>(core::StationThermalServiceClasses.size())))
+				applyPrefabDial(draft, unit->instanceId, parameter.name, static_cast<double>(index));
+		}
+		else if (parameter.kind == core::PrefabParameterKind::Number)
 		{
 			// #824: the buffer is a double, not a float. A float buffer
 			// drifts a non-float-exact boundary upward on the round trip -

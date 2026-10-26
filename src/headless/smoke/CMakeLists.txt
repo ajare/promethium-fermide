@@ -95,7 +95,7 @@ pf_add_smoke_module(pf-smoke-station
         station/StationEventSplitChecks.cpp
         station/StationPortChecks.cpp
         station/StationSeamChecks.cpp
-        station/StationPrefabChecks.cpp
+        station/StationPrefabChecks.cpp station/StationRtgChecks.cpp
         station/StationPowerChecks.cpp
         station/StationPowerBusChecks.cpp
         station/StationBusDispatchChecks.cpp
@@ -156,7 +156,8 @@ set_tests_properties(station-observable-registry-parser PROPERTIES
 # #814 adds the provenance block: lossless YAML round trip, the schema-111
 # boundary refusal for old readers, malformed-provenance refusals, and the
 # catalogue-absent load where the expansion stands on its own.
-foreach(check prefabCatalogueParse prefabCatalogueRefusals prefabInstanceAllocation
+foreach(check rtgDials rtgConversionLedger rtgDecayStandalone
+        prefabCatalogueParse prefabCatalogueRefusals prefabInstanceAllocation
         prefabEntryOrderIsFixed
         prefabTemplateParse prefabTemplateRefusals prefabExpansion prefabOverrides prefabDialEdit prefabCapRefusal prefabDeterminism
         prefabExposedPinResolution prefabLinkThroughComposite prefabTemplateLoadValidation

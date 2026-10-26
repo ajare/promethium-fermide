@@ -1,10 +1,11 @@
 # RTG Prefab Specification
 
-Status: approved. Published as GitHub issue **#900** (`ready-for-agent`). Not yet
-implemented.
+Status: approved. Published as GitHub issue **#900** (`ready-for-agent`).
+The placeable composite slice **#904** is implemented; see
+[RTG authoring and calibration](../rtg-prefab.md).
 
-**Blocked by #899** — Station primary heat source. Native `blockedBy` relationship
-set on the tracker. Hard dependency, not advisory.
+**Prerequisite #899** — Station primary heat source, including the shared
+exponential Wear and initial-age work (#901–#903), is implemented.
 
 Label: `feature:heat-sources`.
 

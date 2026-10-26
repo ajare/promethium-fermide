@@ -1521,8 +1521,10 @@ parameters:
 	}
 }
 
+void registerStationRtgChecks(std::vector<smoke::Check>& checks);
 void registerStationPrefabChecks(std::vector<smoke::Check>& checks)
 {
+	registerStationRtgChecks(checks);
 	checks.push_back({"prefabCatalogueParse", prefabCatalogueParse});
 	checks.push_back({"prefabCatalogueRefusals", prefabCatalogueRefusals});
 	checks.push_back({"prefabInstanceAllocation", prefabInstanceAllocation});
