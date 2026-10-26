@@ -201,23 +201,41 @@ commanded output is a **cap, never a boost**, exactly as the heat engine's
 
 ---
 
-## 5. New failure mode: a source can cook its reservoir
+## 5. Over-temperature: already handled (corrected)
 
-An unthrottleable source delivers heat the station may be unable to reject, driving
-a reservoir past its declared `maxTemperatureC`
-(`include/core/StationSystems.h:617`).
+**Correction to an earlier draft of this spec.** It previously stated that
+over-temperature checking "appears only on load heat sinks" and that a
+deliberately-authored hot side was "a case the current checks were never written
+for." That was wrong — it conflated two different mechanisms.
 
-**Today, over-temperature checking appears only on load heat sinks** —
-`src/core/StationTickAtmosphere.cpp:1292` and `:1319` both test
-`load.heatSinkIndex` against `maxTemperatureC`. A deliberately-authored hot side is
-a case the current checks were never written for.
+**Every thermal reservoir already raises an `above-limit` monitor.**
+`src/core/StationSystemsMonitors.cpp:222-223` adds, for **every** reservoir, an
+`above-limit` rule on `temperatureC` at `maxTemperatureC + 1e-9` with severity
+**Warning**, plus a matching `below-limit`. This is reservoir-wide, not
+load-specific. A primary heat source driving a reservoir over its declared limit
+**already raises a Warning**.
 
-**This must be defined and asserted, not left to emerge.** With an unthrottleable
-source it becomes reachable in normal authored content. Whatever the chosen
-behaviour — alert, trip, or simply rising temperature with downstream consequences —
-it should be a decision, not an accident.
+**The tick-level check gates something else entirely.**
+`src/core/StationTickAtmosphere.cpp:1292` and `:1319` test `load.heatSinkIndex`
+against `maxTemperatureC` as a **restart-feasibility gate on the consuming load**
+— *"restart held: heat sink at or above its maximum service temperature."* That is
+a consumer-side gate, not a source-side limit.
 
-It is a **runtime consequence, not an authoring error**: whether a reservoir
+**There is no undefined over-temperature gap.** The behaviour is defined.
+
+**One emergent interaction worth asserting.** If a primary heat source drives a
+reservoir above its limit, any load using that reservoir as a heat sink is **held
+from restarting**. Physically sensible — waste heat cannot be dumped into a sink
+that is already too hot — but worth a test so the interaction is understood rather
+than surprising. Covered in ticket #901.
+
+**What remains is a design question, not work:** is a Warning the right response to
+an *unthrottleable* source driving a reservoir over its limit, or should the source
+be capped? The source cannot be turned off, so the Warning is the only signal and
+nothing intervenes. Worth a deliberate call; not a blocker and not a missing
+behaviour.
+
+It remains a **runtime consequence, not an authoring error**: whether a reservoir
 overheats depends on the whole thermal system's state, not on the source alone. A
 source that is safe next to a working radiator chain may be unsafe next to a broken
 one.
@@ -365,9 +383,10 @@ primary regression guard.
 
 ## 11. Open questions
 
-1. **The over-temperature behaviour (§5).** Alert, trip, or rising temperature with
-   downstream consequences? Needs a deliberate decision before implementation, not
-   during it.
+1. **Over-temperature response for an unthrottleable source (§5).** The behaviour is
+   already defined — a reservoir-wide `above-limit` Warning. The open call is whether
+   a Warning suffices when the source cannot be turned off, or whether the source
+   should be capped. **Not a blocker; no missing behaviour.**
 
 2. **The RTG scale mismatch.** Real RTGs deliver hundreds of watts; this station's
    sources run in kilowatts and above. "Small emergency instrument source" and
