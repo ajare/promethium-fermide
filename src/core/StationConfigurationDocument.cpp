@@ -106,7 +106,7 @@ namespace core
 			[](auto const& cell) { return cell.chemistry != FuelCellChemistry::PEM; });
 		auto const nonReciprocating = std::any_of(document.settings.generators.begin(), document.settings.generators.end(),
 			[](auto const& generator) { return generator.primeMover != StationGeneratorPrimeMover::Reciprocating; });
-		output->writeUint32("schemaVersion", std::any_of(document.settings.generators.begin(), document.settings.generators.end(),
+		output->writeUint32("schemaVersion", !document.settings.heatSources.empty() ? 127 : std::any_of(document.settings.generators.begin(), document.settings.generators.end(),
 			[](auto const& g) { return g.methaneCombustion || !g.combustionAirId.empty() || !g.combustionExhaustId.empty(); }) ? 126 : nonReciprocating ? 125 : stationHasPowerBusAuthoring(document.settings) ? 124 : (bodies || nonPem) ? 123 : !document.settings.monitors.empty() ? 122 : machineWear ? 121 : atmosphereFaults ? 120 : contamination ? 119 : powerSources ? 118
 			: thermalPlant ? 117 : wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		writeStationSystemsSettingsMap(*output, document.settings);

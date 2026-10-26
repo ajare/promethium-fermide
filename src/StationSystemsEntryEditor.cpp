@@ -1783,6 +1783,18 @@ bool renderChillerEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	return removeChiller;
 }
 
+bool renderHeatSourceEntry(core::StationSystemsSettings& draft,
+	core::HeatSourceSettings& source, std::string const& label)
+{
+	ImGui::PushID(label.c_str());
+	renderIdentity(label, source.id);
+	renderRefCombo(describe("target reservoir", label), source.targetReservoirId, reservoirIds(draft), false);
+	renderThermalClassCombo(draft, describe("thermal class", label), source.thermalClass, source.targetReservoirId);
+	renderRangedDouble(describe("rated output kW", label), source.ratedOutputKW, 0.0, 0.0, "%.3f");
+	ImGui::PopID();
+	return false;
+}
+
 bool renderHeatEngineEntry(core::StationSystemsSettings& draft,
 	core::HeatEngineSettings& engine, std::string const& label)
 {
@@ -2231,7 +2243,7 @@ bool renderConversionEntryAt(core::StationSystemsSettings& draft, size_t index)
 }
 
 // Keyed by the Flow node type names in core::stationPortDescriptors().
-constexpr std::array<StationEntryEditor, 33> kEntryEditors{{
+constexpr std::array<StationEntryEditor, 34> kEntryEditors{{
 	{"Power bus", +[](core::StationSystemsSettings& draft, size_t index) {
 		if (index >= draft.powerBuses.size()) return false;
 		auto& bus = draft.powerBuses[index];
@@ -2274,6 +2286,10 @@ constexpr std::array<StationEntryEditor, 33> kEntryEditors{{
 	{"Reservoir", &renderThermalReservoirEntryAt},
 	{"Radiator", &renderRadiatorEntryAt},
 	{"Coolant loop", &renderCoolantLoopEntryAt},
+	{"Heat source", +[](core::StationSystemsSettings& draft, size_t index) {
+		if (index >= draft.heatSources.size()) return false;
+		return renderHeatSourceEntry(draft, draft.heatSources[index], "Heat source " + std::to_string(index));
+	}},
 	{"Heat engine", +[](core::StationSystemsSettings& draft, size_t index) {
 		if (index >= draft.heatEngines.size()) return false;
 		return renderHeatEngineEntry(draft, draft.heatEngines[index], "Heat engine " + std::to_string(index));
@@ -2386,7 +2402,7 @@ struct EntryCreator
 
 // Existing form defaults and reference preferences, independent of list rendering.
 // Groups and ordering come from the same catalogue as Flow placement.
-constexpr std::array<EntryCreator, 33> kEntryCreators{{
+constexpr std::array<EntryCreator, 34> kEntryCreators{{
 	{"Power bus", "Power bus", [](core::StationSystemsSettings const&) { return true; },
 		[](core::StationSystemsSettings& draft) {
 			core::PowerBusSettings bus;
@@ -2674,6 +2690,24 @@ constexpr std::array<EntryCreator, 33> kEntryCreators{{
 				if (!taken) break;
 			}
 			draft.coolantLoops.push_back(std::move(loop));
+		}},
+	{"Heat source", "Heat source",
+		[](core::StationSystemsSettings const& draft) { return draft.heatSources.size() < core::MaxStationHeatSources; },
+		[](core::StationSystemsSettings& draft) {
+			core::HeatSourceSettings source;
+			source.ratedOutputKW = 10.0;
+			if (!draft.thermalReservoirs.empty())
+			{
+				source.targetReservoirId = draft.thermalReservoirs.front().id;
+				source.thermalClass = draft.thermalReservoirs.front().thermalClass;
+			}
+			for (size_t candidate = 1;; ++candidate)
+			{
+				source.id = "heatSource" + std::to_string(candidate);
+				if (std::none_of(draft.heatSources.begin(), draft.heatSources.end(),
+					[&](auto const& existing) { return existing.id == source.id; })) break;
+			}
+			draft.heatSources.push_back(std::move(source));
 		}},
 	{"Heat engine", "Heat engine",
 		[](core::StationSystemsSettings const& draft) { return draft.heatEngines.size() < core::MaxStationHeatEngines; },

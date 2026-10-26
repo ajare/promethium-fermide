@@ -466,6 +466,8 @@ using namespace station_detail;
 			double pendingHazardKJ{0.0};
 			double hazardKJ{0.0};
 			double absorbedKJ{0.0};
+			double primaryHeatInputKW{};
+			double primaryHeatInputKJ{};
 			double routedKJ{0.0};
 			double loopKJ{0.0};
 			double condenserKJ{0.0};
@@ -1810,6 +1812,14 @@ using namespace station_detail;
 		std::vector<RadiatorState> radiators;
 		std::vector<LoopState> coolantLoops;
 		std::vector<ChillerState> chillers;
+		struct HeatSourceState
+		{
+			HeatSourceSettings authored;
+			size_t sinkIndex{};
+			double deliveredOutputKW{};
+			double deliveredEnergyKJ{};
+		};
+		std::vector<HeatSourceState> heatSources;
 		std::vector<HeatEngineState> heatEngines;
 		std::vector<BufferState> thermalBuffers;
 		std::vector<GeneratorState> generators;

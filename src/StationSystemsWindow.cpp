@@ -1546,6 +1546,14 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		else
 			++index;
 	}
+	ImGui::SeparatorText("Draft primary heat sources (heat only; zero rated output disables)");
+	for (size_t index = 0; index < mDraft.heatSources.size(); )
+	{
+		station_editor::findStationEntryEditor("Heat source")->renderEntry(mDraft, index);
+		if (ImGui::Button(("Remove heat source " + std::to_string(index)).c_str()))
+			mDraft.heatSources.erase(mDraft.heatSources.begin() + static_cast<std::ptrdiff_t>(index));
+		else ++index;
+	}
 	ImGui::SeparatorText("Draft heat engines (Carnot-bounded thermal intake, net generation and a distinct rejection sink)");
 	for (size_t index = 0; index < mDraft.heatEngines.size(); )
 	{
@@ -2038,8 +2046,13 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			radiator.id.c_str(), radiator.reservoirId.c_str(), radiator.areaM2,
 			radiator.emissivity, radiator.viewFactor, radiator.sinkTemperatureC,
 			radiator.lastRejectedKW);
-	ImGui::Text("Thermal totals: absorbed %.3f kW, routed %.3f kW, rejected %.3f kW, circulation %.3f kg/s, freeze heating %.3f kW, cold provided %.3f kW, cold unmet %.3f kW, condenser heat %.3f kW | buffers stored %.3f kJ, available %.3f kJ, charging %.3f kW, discharging %.3f kW",
-		snapshot.thermal.totalAbsorbedKW, snapshot.thermal.totalRoutedKW,
+	ImGui::SeparatorText("Primary heat sources (live; heat only)");
+	for (auto const& source : snapshot.heatSources)
+		ImGui::Text("%s -> %s: rated %.3f kW, delivered %.3f kW, delivered energy %.3f kJ",
+			source.id.c_str(), source.targetReservoirId.c_str(), source.ratedOutputKW,
+			source.deliveredOutputKW, source.deliveredEnergyKJ);
+	ImGui::Text("Thermal totals: primary input %.3f kW, absorbed %.3f kW, routed %.3f kW, rejected %.3f kW, circulation %.3f kg/s, freeze heating %.3f kW, cold provided %.3f kW, cold unmet %.3f kW, condenser heat %.3f kW | buffers stored %.3f kJ, available %.3f kJ, charging %.3f kW, discharging %.3f kW",
+		snapshot.thermal.totalPrimaryHeatInputKW, snapshot.thermal.totalAbsorbedKW, snapshot.thermal.totalRoutedKW,
 		snapshot.thermal.totalRejectedKW, snapshot.thermal.totalCirculationKgPerS,
 		snapshot.thermal.totalFreezeHeatingKW, snapshot.thermal.totalCoolingProvidedKW,
 		snapshot.thermal.totalCoolingUnmetKW, snapshot.thermal.totalCondenserHeatKW,

@@ -1,0 +1,254 @@
+#include "StationRig.h"
+#include "Smoke.h"
+#include "core/BinarySerializer.h"
+#include "core/StationConfigurationDocument.h"
+#include "core/StationConnections.h"
+#include "core/StationPrefab.h"
+#include "core/WorldDocument.h"
+#include <limits>
+
+namespace
+{
+using namespace smoke::station;
+
+core::StationSystemsSettings fixture(double output = 10.0)
+{
+	core::StationSystemsSettings s;
+	s.enabled = true;
+	core::ThermalReservoirSettings r;
+	r.id = "hot"; r.thermalClass = "generation";
+	r.heatCapacityKJPerK = 100.0; r.startingTemperatureC = 20.0;
+	r.minTemperatureC = 0.0; r.maxTemperatureC = 40.0;
+	s.thermalReservoirs = {r};
+	s.heatSources = {{"primary", "hot", "generation", output}};
+	return s;
+}
+void configure(core::World& world, core::StationSystemsSettings const& s)
+{
+	world.pauseSimulation(); world.finishBuild();
+	std::string why;
+	require(world.configureStationSystems(s, false, &why), why.c_str());
+}
+void near(double a, double b, char const* why)
+{
+	require(std::abs(a - b) < 1e-7 * std::max(1.0, std::abs(b)), why);
+}
+void heatSourceTracer(smoke::Context const&)
+{
+	for (auto ratio : {1u, 6u, 60u})
+	{
+		auto s = fixture(); s.systemsStepWorldTicks = ratio;
+		s.heatSources.push_back({"second", "hot", "generation", 5.0});
+		s.thermalReservoirs[0].absorbedHeatKW = 2.0;
+		core::World world("PrimaryHeat", 2, 2); configure(world, s);
+		world.resumeSimulation(); require(advanceSeconds(world, 60.0), "heat source run failed");
+		auto const snap = world.getStationSystemsSnapshot();
+		require(snap.healthy && snap.heatSources.size() == 2, "source not published or audit failed");
+		auto const& r = snap.thermal.reservoirs.at(0);
+		near(r.temperatureC, 30.2, "primary heat did not warm reservoir");
+		near(r.primaryHeatInputEnergyKJ, 900.0, "primary input not booked separately");
+		near(r.absorbedEnergyKJ, 120.0, "environmental input changed");
+		near(r.routedEnergyKJ, 0.0, "primary heat booked as waste");
+		near(r.residualKJ, 0.0, "thermal conservation failed");
+		near(snap.thermal.totalPrimaryHeatInputKW, 15.0, "primary rollup wrong");
+		near(snap.heatSources[0].ratedOutputKW, 10.0, "rating missing");
+		near(snap.heatSources[0].deliveredOutputKW, 10.0, "delivery missing");
+		near(snap.heatSources[0].deliveredEnergyKJ, 600.0, "source energy wrong");
+		near(snap.power.availableGenerationKW, 0.0, "heat source generated electricity");
+	}
+	// The zero producer is inert, including against an already hot sink.
+	core::World zero("ZeroHeat", 2, 2), absent("NoHeat", 2, 2);
+	auto s = fixture(0.0); configure(zero, s); s.heatSources.clear(); configure(absent, s);
+	zero.resumeSimulation(); absent.resumeSimulation();
+	require(advanceSeconds(zero, 30.0) && advanceSeconds(absent, 30.0), "zero-source run failed");
+	auto a = zero.getStationSystemsSnapshot(), b = absent.getStationSystemsSnapshot();
+	require(a.thermal == b.thermal && a.power == b.power, "zero heat source changed existing services");
+	near(a.heatSources[0].deliveredEnergyKJ, 0.0, "disabled source delivered heat");
+	// Primary heat uses the same finite, lossy transport ledger as waste heat.
+	auto constrained = fixture();
+	for (auto const& link : core::station_connections::build(constrained).links)
+		if (link.designKey.ownerType == "Heat source") constrained.connections[link.designKey] = {
+			core::StationPhysicalConnection::Automatic, 4.0, 0.5};
+	core::World capped("CappedPrimaryHeat", 2, 2); configure(capped, constrained);
+	capped.resumeSimulation(); require(advanceSeconds(capped, 60.0), "constrained primary run failed");
+	auto const c = capped.getStationSystemsSnapshot();
+	require(c.healthy, "constrained source failed audit");
+	near(c.heatSources[0].deliveredEnergyKJ, 120.0, "constrained source did not honor transport cap/loss");
+	near(c.thermal.reservoirs[0].primaryHeatInputEnergyKJ, 120.0, "reservoir counted unreceived primary heat");
+	for (auto const& connection : c.connections) if (connection.key.ownerType == "Heat source")
+	{
+		near(connection.producedHeatKJ, 600.0, "primary production missing from transport ledger");
+		near(connection.retainedHeatKJ, 360.0, "unaccepted primary heat disappeared");
+		near(connection.lostTotal, 120.0, "primary transport loss missing");
+	}
+}
+void heatSourceLive(smoke::Context const&)
+{
+	core::World world("LivePrimaryHeat", 2, 2); auto s = fixture(); configure(world, s);
+	world.resumeSimulation(); require(advanceSeconds(world, 10.0), "initial live run failed");
+	s.heatSources[0].ratedOutputKW = 25.0; std::string why;
+	require(world.updateStationSystemsSettings(s, &why), why.c_str());
+	require(advanceSeconds(world, 10.0), "retuned run failed");
+	near(world.getStationSystemsSnapshot().heatSources[0].deliveredEnergyKJ, 350.0, "live tuning repriced banked heat");
+	auto invalid = s; invalid.heatSources[0].targetReservoirId.clear();
+	require(!world.updateStationSystemsSettings(invalid, &why), "live endpoint rewiring accepted");
+	invalid = s; invalid.heatSources.clear();
+	require(!world.updateStationSystemsSettings(invalid, &why), "live source removal accepted");
+	s.heatSources[0].ratedOutputKW = 0.0;
+	require(world.updateStationSystemsSettings(s, &why), why.c_str());
+	require(advanceSeconds(world, 10.0), "disabled live run failed");
+	auto const snap = world.getStationSystemsSnapshot();
+	require(snap.healthy && snap.heatSources[0].deliveredOutputKW == 0.0, "live zero did not disable source");
+	near(snap.heatSources[0].deliveredEnergyKJ, 350.0, "disabled source changed cumulative heat");
+}
+void heatSourceValidation(smoke::Context const&)
+{
+	core::World world("HeatRefusals", 2, 2); configure(world, fixture());
+	auto const before = world.getStationSystemsSettings();
+	auto refused = [&](auto change, char const* expected) {
+		auto s = before; change(s); std::string why;
+		require(!world.configureStationSystems(s, false, &why), "invalid heat source accepted");
+		require(why.find(expected) != std::string::npos, why.c_str());
+		require(world.getStationSystemsSettings() == before, "refusal mutated world");
+	};
+	refused([](auto& s) { s.heatSources[0].ratedOutputKW = -1.0; }, "rated output");
+	refused([](auto& s) { s.heatSources[0].ratedOutputKW = std::numeric_limits<double>::infinity(); }, "rated output");
+	refused([](auto& s) { s.heatSources[0].ratedOutputKW = std::numeric_limits<double>::quiet_NaN(); }, "rated output");
+	refused([](auto& s) { s.heatSources[0].thermalClass = "unknown"; }, "unknown thermal");
+	refused([](auto& s) { s.heatSources[0].thermalClass = "warm"; }, "incompatible");
+	refused([](auto& s) { s.heatSources[0].targetReservoirId = "missing"; }, "unknown thermal reservoir");
+	refused([](auto& s) { s.heatSources[0].id.clear(); }, "id must");
+	refused([](auto& s) { s.heatSources.push_back(s.heatSources[0]); }, "duplicated");
+	refused([](auto& s) { s.heatSources.resize(core::MaxStationHeatSources + 1); }, "limited");
+}
+void heatSourcePersistence(smoke::Context const&)
+{
+	auto s = fixture(); std::string why;
+	core::StationConfigurationDocument doc; doc.settings = s;
+	auto const text = core::serializeStationConfiguration(doc);
+	require(text.find("schemaVersion: 127") != std::string::npos, "source schema not claimed");
+	core::StationConfigurationDocument restored;
+	require(core::parseStationConfiguration(text, restored, &why), why.c_str());
+	require(core::serializeStationConfiguration(restored) == text, "configuration roundtrip not byte stable");
+	auto old = text; old.replace(old.find("schemaVersion: 127"), 18, "schemaVersion: 126");
+	require(!core::parseStationConfiguration(old, restored, &why), "old schema accepted heat source");
+	auto unknown = text; auto pos = unknown.find("ratedOutputKW:");
+	unknown.replace(pos, 13, "unknownField:");
+	require(!core::parseStationConfiguration(unknown, restored, &why) && why.find("unknown") != std::string::npos,
+		"unknown source field silently dropped");
+	doc.settings.heatSources.clear();
+	auto const legacy = core::serializeStationConfiguration(doc);
+	require(legacy.find("heatSources") == std::string::npos && legacy.find("schemaVersion: 111") != std::string::npos,
+		"absent source moved legacy document schema/shape");
+	for (bool binary : {false, true})
+	{
+		core::World original("HeatPersistence", 2, 2), loaded("LoadedHeat", 2, 2);
+		configure(original, s); loaded.pauseSimulation(); loaded.finishBuild();
+		auto save = [&](core::World const& w) {
+			auto writer = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+			core::SerializationWorkData work; w.serialize(*writer, work); writer->serialize();
+			return binary ? static_cast<core::BinarySerializer&>(*writer).getSerializedString()
+				: static_cast<core::YamlSerializer&>(*writer).getSerializedString();
+		};
+		auto const bytes = save(original);
+		auto reader = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+			: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+		reader->deserialize(); core::SerializationWorkData work; loaded.deserialize(*reader, work);
+		require(loaded.getStationSystemsSettings() == s, "world lost heat source settings");
+		require(save(loaded) == bytes, "world roundtrip not byte stable");
+		original.resumeSimulation(); loaded.resumeSimulation();
+		require(advanceSeconds(original, 30.0) && advanceSeconds(loaded, 30.0), "reloaded run failed");
+		require(original.getStationSystemsSnapshot().heatSources == loaded.getStationSystemsSnapshot().heatSources,
+			"reloaded source changed delivery");
+	}
+}
+void heatSourcePrefab(smoke::Context const&)
+{
+	core::PrefabTemplate tmpl; std::string why;
+	auto const parsed = core::parsePrefabTemplate(R"(
+id: heater
+displayName: Heater
+schemaVersion: 127
+stationSystems:
+  enabled: true
+  observationIntervalSeconds: 1.0
+  thermalReservoirs:
+    - id: hot
+      thermalClass: generation
+      heatCapacityKJPerK: 100
+      startingTemperatureC: 20
+      minTemperatureC: 0
+      maxTemperatureC: 40
+      absorbedHeatKW: 0
+  heatSources:
+    - id: primary
+      targetReservoirId: hot
+      thermalClass: generation
+      ratedOutputKW: 10
+parameters:
+  - name: output
+    nodeType: Heat source
+    entryId: primary
+    field: ratedOutputKW
+    kind: number
+    min: 0
+    max: 100
+    default: 10
+)", tmpl, &why);
+	require(parsed, why.c_str());
+	core::PrefabExpansion expanded;
+	auto const expandedOk = core::expandPrefab(tmpl, {}, "unit", expanded, why);
+	require(expandedOk, why.c_str());
+	require(expanded.entries.heatSources.size() == 1, "prefab lost heat source");
+	require(expanded.entries.heatSources[0].id == "unit.primary"
+		&& expanded.entries.heatSources[0].targetReservoirId == "unit.hot", "prefab did not namespace source wiring");
+	core::World world("PrefabHeat", 2, 2); configure(world, expanded.entries);
+	world.resumeSimulation(); require(advanceSeconds(world, 10.0), "prefab run failed");
+	near(world.getStationSystemsSnapshot().thermal.reservoirs[0].temperatureC, 21.0, "prefab source inert");
+	auto draft = fixture(); draft.heatSources[0].targetReservoirId.clear();
+	core::CandidateLink link{{"Heat source", "primary", "Heat out"}, {"Reservoir", "hot", "Heat in"}};
+	require(core::evaluateStationLink(draft, link).allowed, "source link rejected");
+	require(core::applyStationLink(draft, link), "source link not written");
+	require(([&] { core::StationNodeRename plan; return core::planStationNodeRename(draft, "Reservoir", "hot", "renamed", plan, &why)
+		&& core::renameStationNode(draft, plan, &why); }()), why.c_str());
+	require(draft.heatSources[0].targetReservoirId == "renamed", "reservoir rename lost source link");
+}
+void heatSourceOverheat(smoke::Context const&)
+{
+	auto s = fixture(100.0);
+	// No power initially: the load sheds while the primary source warms its sink.
+	core::EquipmentLoadSettings load;
+	load.id = "load"; load.electricalDemandKW = 1.0; load.heatOutputKW = 1.0;
+	load.heatSinkId = "hot"; load.thermalClass = "generation"; load.maxCurtailment = 0.0;
+	load.operatingProfile = constantProfile(1.0);
+	s.equipmentLoads = {load};
+	s.solarArrays = {{"sun", 0.0, constantProfile(1.0)}};
+	core::World world("SourceOverheat", 2, 2); configure(world, s);
+	world.resumeSimulation(); require(advanceSeconds(world, 30.0), "overheat run failed");
+	auto snap = world.getStationSystemsSnapshot();
+	require(snap.healthy && snap.thermal.reservoirs[0].temperatureC > 40.0, "source capped at service limit");
+	require(std::any_of(snap.activeAlerts.begin(), snap.activeAlerts.end(), [](auto const& alert) {
+		return alert.subjectType == "thermal-reservoir" && alert.subjectId == "hot"
+			&& alert.monitorId.ends_with(":above-limit") && alert.severity == core::AlertSeverity::Warning;
+	}), "reservoir-wide above-limit Warning absent");
+	require(snap.power.loads[0].recoveryStage == core::StationLoadRecoveryStage::Shed, "unpowered load did not shed");
+	// Restore ample power without changing topology; heat must still bar restart.
+	s.solarArrays[0].capacityKW = 10.0; std::string why;
+	require(world.updateStationSystemsSettings(s, &why), why.c_str());
+	require(advanceSeconds(world, 10.0), "restart run failed");
+	snap = world.getStationSystemsSnapshot();
+	require(snap.healthy && snap.power.loads[0].recoveryStage == core::StationLoadRecoveryStage::Shed
+		&& snap.power.loads[0].recoveryHoldReason == "restart held: heat sink at or above its maximum service temperature",
+		"primary-heated sink did not hold load restart");
+}
+}
+void registerStationHeatSourceChecks(std::vector<smoke::Check>& checks)
+{
+	checks.push_back({"heatSourceTracer", heatSourceTracer});
+	checks.push_back({"heatSourceLive", heatSourceLive});
+	checks.push_back({"heatSourceValidation", heatSourceValidation});
+	checks.push_back({"heatSourcePersistence", heatSourcePersistence});
+	checks.push_back({"heatSourcePrefab", heatSourcePrefab});
+	checks.push_back({"heatSourceOverheat", heatSourceOverheat});
+}

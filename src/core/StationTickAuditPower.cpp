@@ -662,6 +662,8 @@ namespace core
 			if (!requireFinite(reservoir.lastHeatInKW, where + "total heat inflow")) return false;
 			if (!requireFinite(reservoir.lastRejectedKW, where + "radiator rejection")) return false;
 			if (!requireFinite(reservoir.lastNetKW, where + "net heat balance")) return false;
+			if (!requireFinite(reservoir.primaryHeatInputKJ, where + "cumulative primary heat input")) return false;
+			if (!requireFinite(reservoir.primaryHeatInputKW, where + "primary heat input power")) return false;
 			if (!requireFinite(reservoir.absorbedKJ, where + "cumulative absorbed energy")) return false;
 			if (!requireFinite(reservoir.routedKJ, where + "cumulative routed energy")) return false;
 			if (!requireFinite(reservoir.loopKJ, where + "cumulative loop exchange energy")) return false;
@@ -688,6 +690,21 @@ namespace core
 			totalRoutedKW += reservoir.lastHeatRoutedKW;
 			totalRejectedKW += reservoir.lastRejectedKW;
 		}
+		double primaryTotal = 0.0;
+		double primaryEnergy = 0.0;
+		for (auto const& source : runtime.heatSources)
+		{
+			if (!requireFinite(source.deliveredOutputKW, "primary heat source delivered output")
+				|| !requireFinite(source.deliveredEnergyKJ, "primary heat source delivered energy")) return false;
+			primaryTotal += source.deliveredOutputKW;
+			primaryEnergy += source.deliveredEnergyKJ;
+		}
+		if (!requireFinite(primaryTotal, "station total primary heat input")
+			|| !requireFinite(primaryEnergy, "station cumulative primary heat input")) return false;
+		double receivedPrimaryEnergy = 0.0;
+		for (auto const& reservoir : runtime.reservoirs) receivedPrimaryEnergy += reservoir.primaryHeatInputKJ;
+		if (std::abs(primaryEnergy - receivedPrimaryEnergy) > StationBalanceTolerance * std::max(1.0, primaryEnergy))
+			return violation = "primary heat input delivery ledger residual", false;
 		for (auto const& radiator : runtime.radiators)
 			if (!requireFinite(radiator.lastRejectedKW,
 				"radiator '" + radiator.authored.id + "' rejected power")) return false;

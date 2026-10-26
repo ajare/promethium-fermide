@@ -143,6 +143,7 @@ namespace core
 			PortDescriptor{"Thermal buffer", "Circulation gate", StationPortDirection::Input, "circulation-gate", "circulation-gate", 1, {}, true},
 			PortDescriptor{"Chiller", "Cold loop", StationPortDirection::Input, "evaporator", "cold-loop", 1, {}},
 			PortDescriptor{"Reservoir", "Heat out", StationPortDirection::Output, "heat-source", "heat-intake", 0, {}},
+			PortDescriptor{"Heat source", "Heat out", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false},
 			PortDescriptor{"Heat engine", "Thermal intake", StationPortDirection::Input, "heat-intake", "heat-source", 1, {}, false},
 			PortDescriptor{"Heat engine", "Rejection heat", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false},
 			PortDescriptor{"Heat engine", "Supervision", StationPortDirection::Input, "installation", "supervision", 0, {}, false},
@@ -513,6 +514,7 @@ namespace core
 			StationPlaceableType{"Radiator", "radiator", "Thermal"},
 			StationPlaceableType{"Coolant loop", "coolantLoop", "Thermal"},
 			StationPlaceableType{"Chiller", "chiller", "Thermal"},
+			StationPlaceableType{"Heat source", "heatSource", "Thermal"},
 			StationPlaceableType{"Heat engine", "heatEngine", "Thermal"},
 			StationPlaceableType{"Thermal buffer", "buffer", "Thermal"},
 			// #818: a conduction wall between two compartments. Placed with

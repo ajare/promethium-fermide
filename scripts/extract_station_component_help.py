@@ -64,7 +64,7 @@ def extract(text):
             entry["blocks"] += [{"kind": "heading", "text": "Shared biological requirements"}] + blocks(shared_biology)
         components.append(entry)
     assert len({entry["nodeType"] for entry in components}) == len(components)
-    assert len(components) == 38, f"Unexpected component count: {len(components)}"
+    assert len(components) == 39, f"Unexpected component count: {len(components)}"
     return {"version": 1, "source": "docs/station-components.md", "components": components}
 
 

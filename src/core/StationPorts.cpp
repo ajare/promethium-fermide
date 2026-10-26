@@ -412,6 +412,12 @@ namespace
 			mapping = {"Heat engine", link.to.nodeId, "$Thermal intake", link.from};
 			return true;
 		}
+		if (link.from.nodeType == "Heat source" && link.from.portName == "Heat out"
+			&& link.to.nodeType == "Reservoir" && link.to.portName == "Heat in")
+		{
+			mapping = {"Heat source", link.from.nodeId, "$Heat", link.to};
+			return true;
+		}
 		if (link.from.nodeType == "Heat engine" && link.from.portName == "Rejection heat"
 			&& link.to.nodeType == "Reservoir" && link.to.portName == "Heat in")
 		{
@@ -517,7 +523,7 @@ namespace
 			|| ownerType == "Water collector" || ownerType == "Water treatment" || ownerType == "Electrolyzer" || ownerType == "CO2 capture" || ownerType == "Atmosphere" || ownerType == "Airlock cycle"
 			|| ownerType == "Equipment" || ownerType == "Generator" || ownerType == "Fuel cell"
 			|| ownerType == "Sabatier" || ownerType == "Methane processor" || ownerType == "Radiator"
-			|| ownerType == "Coolant loop" || ownerType == "Chiller" || ownerType == "Heat engine" || ownerType == "Thermal buffer";
+			|| ownerType == "Coolant loop" || ownerType == "Chiller" || ownerType == "Heat source" || ownerType == "Heat engine" || ownerType == "Thermal buffer";
 	}
 
 	// The reference field a machine link names, as a pointer into the draft
@@ -692,6 +698,12 @@ namespace
 			if (found == settings.thermalBuffers.end()) return nullptr;
 			if (field == "Host reservoir") return &found->reservoirId;
 			if (field == "Circulation gate") return &found->circulationLoopId;
+			return nullptr;
+		}
+		if (ownerType == "Heat source")
+		{
+			for (auto& source : settings.heatSources)
+				if (source.id == ownerId && field == "$Heat") return &source.targetReservoirId;
 			return nullptr;
 		}
 		if (ownerType == "Heat engine")
@@ -1325,6 +1337,17 @@ namespace
 			}
 			return true;
 		}
+		if (mapping.ownerType == "Heat source")
+		{
+			for (auto const& source : settings.heatSources) if (source.id == mapping.ownerId)
+			{
+				auto const* reservoir = findReservoirById(settings, source.targetReservoirId);
+				if (!source.targetReservoirId.empty() && (!reservoir || reservoir->thermalClass != source.thermalClass))
+					diagnostic = "Station heat source '" + source.id + "' target reservoir is missing or has incompatible thermal class";
+				return true;
+			}
+			return false;
+		}
 		if (mapping.ownerType == "Heat engine")
 		{
 			auto const found = std::find_if(settings.heatEngines.begin(), settings.heatEngines.end(),
@@ -1409,6 +1432,7 @@ namespace
 		if (type == "Radiator") return fn(settings.radiators);
 		if (type == "Coolant loop") return fn(settings.coolantLoops);
 		if (type == "Chiller") return fn(settings.chillers);
+		if (type == "Heat source") return fn(settings.heatSources);
 		if (type == "Heat engine") return fn(settings.heatEngines);
 		if (type == "Generator") return fn(settings.generators);
 		if (type == "Atmosphere") return fn(settings.atmospheres);
@@ -1786,6 +1810,10 @@ std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& set
 				{"Coolant loop", buffer.circulationLoopId, "Buffer gates"},
 				{"Thermal buffer", buffer.id, "Circulation gate"}});
 	}
+	for (auto const& source : settings.heatSources)
+		if (!source.targetReservoirId.empty())
+			links.push_back({linkIdentity("Heat source", source.id, "$Heat"),
+				{"Heat source", source.id, "Heat out"}, {"Reservoir", source.targetReservoirId, "Heat in"}});
 	for (auto const& engine : settings.heatEngines)
 	{
 		if (!engine.hotReservoirId.empty())
@@ -2250,7 +2278,7 @@ LinkVerdict evaluateStationLink(StationSystemsSettings const& settings, Candidat
 			|| isScheduleType(mapping.ownerType)
 			|| mapping.ownerType == "Crew" || mapping.ownerType == "Crops"
 			|| mapping.ownerType == "Algae" || mapping.ownerType == "Microbial processor"
-			|| mapping.ownerType == "Chiller" || mapping.ownerType == "Heat engine" || mapping.ownerType == "Coolant loop"
+			|| mapping.ownerType == "Chiller" || mapping.ownerType == "Heat source" || mapping.ownerType == "Heat engine" || mapping.ownerType == "Coolant loop"
 			|| mapping.ownerType == "Water collector" || mapping.ownerType == "Water treatment"
 			|| mapping.ownerType == "Electrolyzer" || mapping.ownerType == "CO2 capture"
 			|| mapping.ownerType == "Atmosphere" || mapping.ownerType == "Airlock cycle"))

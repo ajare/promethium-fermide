@@ -643,6 +643,20 @@ namespace core
 			}
 			serializer.endArray();
 		}
+		if (!settings.heatSources.empty())
+		{
+			serializer.beginArray("heatSources");
+			for (auto const& source : settings.heatSources)
+			{
+				serializer.beginMap("");
+				serializer.writeString("id", source.id);
+				serializer.writeString("targetReservoirId", source.targetReservoirId);
+				serializer.writeString("thermalClass", source.thermalClass);
+				serializer.writeDouble("ratedOutputKW", source.ratedOutputKW);
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 		if (!settings.heatEngines.empty())
 		{
 			// Authored heat engine contracts only (#804): the intake, net
@@ -2063,6 +2077,26 @@ namespace core
 				readPowerMembership(serializer, chiller, version);
 				stationSettings.chillers.push_back(std::move(chiller));
 				serializer.endMap();
+			}
+			serializer.endArray();
+		}
+		if (serializer.hasField("heatSources"))
+		{
+			if (version < 127) throw SerializationException("Primary heat sources require schema 127");
+			serializer.beginArray("heatSources");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				for (auto const& key : serializer.mapKeys(""))
+					if (key != "id" && key != "targetReservoirId" && key != "thermalClass" && key != "ratedOutputKW")
+						throw SerializationException("Heat source field '" + key + "' is unknown; conversion required");
+				HeatSourceSettings source;
+				source.id = serializer.readString("id");
+				source.targetReservoirId = serializer.readString("targetReservoirId");
+				source.thermalClass = serializer.readString("thermalClass");
+				source.ratedOutputKW = serializer.readDouble("ratedOutputKW");
+				serializer.endMap();
+				stationSettings.heatSources.push_back(std::move(source));
 			}
 			serializer.endArray();
 		}

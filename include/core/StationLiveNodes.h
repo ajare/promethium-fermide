@@ -230,6 +230,16 @@ namespace core
 				);
 		}
 	};
+	template <> struct LiveNode<HeatSourceSettings>
+	{
+		static constexpr std::string_view nodeType = "Heat source";
+		static auto& of(auto& settings) { return settings.heatSources; }
+		static bool restoreInitial(HeatSourceSettings const&, HeatSourceSettings&) { return false; }
+		static bool topologyChanged(HeatSourceSettings const& before, HeatSourceSettings const& after)
+		{
+			return before.id != after.id || before.targetReservoirId != after.targetReservoirId;
+		}
+	};
 	template <>
 	struct LiveNode<HeatEngineSettings>
 	{

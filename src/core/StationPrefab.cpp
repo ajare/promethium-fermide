@@ -13,6 +13,7 @@
 
 #include "core/StationReference.h"
 #include "core/YamlSerializer.h"
+#include "core/WorldDocument.h"
 
 #include <algorithm>
 #include <cmath>
@@ -47,6 +48,7 @@ namespace core
 		visit("Radiator", settings.radiators);
 		visit("Coolant loop", settings.coolantLoops);
 		visit("Chiller", settings.chillers);
+		visit("Heat source", settings.heatSources);
 		visit("Heat engine", settings.heatEngines);
 		visit("Generator", settings.generators);
 		visit("Atmosphere", settings.atmospheres);
@@ -123,6 +125,12 @@ namespace core
 	PrefabFieldTarget resolvePrefabField(StationSystemsSettings& settings,
 		std::string_view nodeType, std::string_view entryId, std::string_view field)
 	{
+		if (nodeType == "Heat source")
+		{
+			auto* entry = findPrefabEntryById(settings.heatSources, entryId);
+			if (entry && field == "ratedOutputKW") return {PrefabParameterKind::Number, &entry->ratedOutputKW, nullptr};
+			return {};
+		}
 		if (nodeType == "Chiller")
 		{
 			auto* entry = findPrefabEntryById(settings.chillers, entryId);
@@ -203,6 +211,7 @@ namespace core
 		fn("Radiator", MaxStationRadiators);
 		fn("Coolant loop", MaxStationCoolantLoops);
 		fn("Chiller", MaxStationChillers);
+		fn("Heat source", MaxStationHeatSources);
 		fn("Heat engine", MaxStationHeatEngines);
 		fn("Generator", MaxStationGenerators);
 		fn("Thermal buffer", MaxStationThermalBuffers);
@@ -279,6 +288,7 @@ namespace core
 		append(draft.radiators, fragment.radiators);
 		append(draft.coolantLoops, fragment.coolantLoops);
 		append(draft.chillers, fragment.chillers);
+		append(draft.heatSources, fragment.heatSources);
 		append(draft.heatEngines, fragment.heatEngines);
 		append(draft.generators, fragment.generators);
 		append(draft.atmospheres, fragment.atmospheres);
@@ -348,8 +358,9 @@ namespace core
 		if (serializer.hasField("schemaVersion"))
 		{
 			version = static_cast<std::uint32_t>(serializer.readInt64("schemaVersion"));
-			if (version < 65 || version > 112)
-				return refuse("Prefab '" + tmpl.id + "' schema version must be from 65 to 112");
+			if (version < 65 || version > kWorldSchemaVersion)
+				return refuse("Prefab '" + tmpl.id + "' schema version must be from 65 to "
+					+ std::to_string(kWorldSchemaVersion));
 		}
 		// Internal entries: the existing stationSystems entry vocabulary,
 		// read through the authoritative reader. Full configuration

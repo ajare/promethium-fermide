@@ -1247,6 +1247,8 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		// index lookup is filled as the authored engines register, so an
 		// outage or maintenance job resolves the engine it names rather
 		// than a default-inserted index (#807).
+		for (auto const& source : settings.heatSources)
+			mImpl->heatSources.push_back({source, reservoirIndex.at(source.targetReservoirId)});
 		std::map<std::string, size_t> heatEngineIndex;
 		for (auto const& engine : settings.heatEngines)
 		{
@@ -2051,7 +2053,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			|| !mImpl->airlockCycles.empty() || !mImpl->crews.empty()
 			|| !mImpl->waterCollectors.empty() || !mImpl->waterTreatments.empty()
 			|| !mImpl->electrolyzers.empty() || !mImpl->co2Captures.empty()
-			|| !mImpl->fuelCells.empty() || !mImpl->thermalBuffers.empty()
+			|| !mImpl->fuelCells.empty() || !mImpl->thermalBuffers.empty() || !mImpl->heatSources.empty()
 			|| !mImpl->sabatierReactors.empty() || !mImpl->methaneProcessors.empty()
 			|| !mImpl->microbialProcessors.empty())
 		{

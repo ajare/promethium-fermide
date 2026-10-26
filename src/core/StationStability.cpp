@@ -237,6 +237,13 @@ namespace core
 		fin(snapshot.power.protectedUnmetKW, "power.protectedUnmetKW");
 		fin(snapshot.power.recoverySurgeKW, "power.recoverySurgeKW");
 		// StationThermalSnapshot aggregates
+		fin(snapshot.thermal.totalPrimaryHeatInputKW, "thermal.totalPrimaryHeatInputKW");
+		for (auto const& source : snapshot.heatSources)
+		{
+			fin(source.ratedOutputKW, tag("ratedOutputKW", source.id));
+			fin(source.deliveredOutputKW, tag("deliveredOutputKW", source.id));
+			fin(source.deliveredEnergyKJ, tag("deliveredEnergyKJ", source.id));
+		}
 		fin(snapshot.thermal.totalAbsorbedKW, "thermal.totalAbsorbedKW");
 		fin(snapshot.thermal.totalRoutedKW, "thermal.totalRoutedKW");
 		fin(snapshot.thermal.totalRejectedKW, "thermal.totalRejectedKW");
@@ -502,6 +509,8 @@ namespace core
 			fin(reservoir.lastNetKW, tag("lastNetKW", reservoir.id));
 			fin(reservoir.startingEnergyKJ, tag("startingEnergyKJ", reservoir.id));
 			fin(reservoir.currentEnergyKJ, tag("currentEnergyKJ", reservoir.id));
+			fin(reservoir.primaryHeatInputKW, tag("primaryHeatInputKW", reservoir.id));
+			fin(reservoir.primaryHeatInputEnergyKJ, tag("primaryHeatInputEnergyKJ", reservoir.id));
 			fin(reservoir.absorbedEnergyKJ, tag("absorbedEnergyKJ", reservoir.id));
 			fin(reservoir.routedEnergyKJ, tag("routedEnergyKJ", reservoir.id));
 			fin(reservoir.loopEnergyKJ, tag("loopEnergyKJ", reservoir.id));
@@ -1291,7 +1300,7 @@ namespace core
 		for (auto const& reservoir : snapshot.thermal.reservoirs)
 			ledger(reservoir.residualKJ, std::abs(reservoir.startingEnergyKJ)
 				+ std::abs(reservoir.currentEnergyKJ) + std::abs(reservoir.absorbedEnergyKJ)
-				+ std::abs(reservoir.hazardEnergyKJ)
+				+ std::abs(reservoir.hazardEnergyKJ) + std::abs(reservoir.primaryHeatInputEnergyKJ)
 				+ std::abs(reservoir.routedEnergyKJ) + std::abs(reservoir.loopEnergyKJ)
 				+ std::abs(reservoir.condenserEnergyKJ) + std::abs(reservoir.generatorEnergyKJ)
 				+ std::abs(reservoir.electrolysisEnergyKJ) + std::abs(reservoir.fuelCellEnergyKJ)

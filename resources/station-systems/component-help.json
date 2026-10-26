@@ -643,6 +643,53 @@
       ]
     },
     {
+      "nodeType": "Heat source",
+      "title": "Heat source",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "What it does"
+        },
+        {
+          "kind": "paragraph",
+          "text": "delivers declared primary heat into a named Thermal reservoir. It produces no electricity and draws no power; conversion belongs to a Heat engine. Primary heat input is reported separately from environmental absorption and waste heat in the reservoir ledger and station totals. This first slice is constant-output: there is no decay or dispatch throttle."
+        },
+        {
+          "kind": "heading",
+          "text": "Ports"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Heat out joins one compatible Reservoir's Heat in. Connection throughput and efficiency apply as for other heat producers; unaccepted heat stays at its source and transport loss is accounted separately."
+        },
+        {
+          "kind": "settings",
+          "rows": [
+            {
+              "name": "Target reservoir",
+              "description": "Required heat-only destination."
+            },
+            {
+              "name": "Thermal class",
+              "description": "Must match the destination reservoir's class."
+            },
+            {
+              "name": "Rated output kW",
+              "description": "Finite non-negative heat production; zero disables."
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Example"
+        },
+        {
+          "kind": "paragraph",
+          "text": "feed a hot reservoir deliberately, then use a Heat engine to convert part of its heat into electricity. Service limits do not cap the source: overheating raises the existing reservoir-wide Warning and holds heat-producing loads from restarting against that sink. Documents carrying sources require schema 127; source-absent documents retain their previous wire format."
+        }
+      ]
+    },
+    {
       "nodeType": "Reservoir",
       "title": "Reservoir",
       "blocks": [

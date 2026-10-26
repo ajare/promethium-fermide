@@ -1230,7 +1230,7 @@ namespace
 			for (auto const& entry : entries) contaminationIds.push_back(entry.id);
 		};
 		gatherIds(settings.generators); gatherIds(settings.coolantLoops); gatherIds(settings.chillers);
-		gatherIds(settings.heatEngines); gatherIds(settings.radiators); gatherIds(settings.solarArrays);
+		gatherIds(settings.heatSources); gatherIds(settings.heatEngines); gatherIds(settings.radiators); gatherIds(settings.solarArrays);
 		gatherIds(settings.batteries); gatherIds(settings.waterTreatments); gatherIds(settings.electrolyzers);
 		gatherIds(settings.fuelCells); gatherIds(settings.sabatierReactors); gatherIds(settings.methaneProcessors);
 		gatherIds(settings.atmospheres); gatherIds(settings.airlockCycles);
@@ -1712,6 +1712,26 @@ namespace
 		// or below its maximum sink gate can never run legally, and is
 		// refused rather than shipped dead. Every refusal names the
 		// offending entry and leaves the World unmutated.
+		if (settings.heatSources.size() > MaxStationHeatSources)
+			return refuse("Station heat sources are limited to " + std::to_string(MaxStationHeatSources) + " entries");
+		std::set<std::string> heatSourceIds;
+		for (auto const& source : settings.heatSources) try
+		{
+			auto const where = "Station heat source '" + source.id + "'";
+			if (source.id.empty() || source.id.size() > MaxStationStoreIdLength)
+				return refuse(where + " id must be non-empty and within the station id length limit");
+			if (!heatSourceIds.insert(source.id).second) return refuse(where + " id is duplicated");
+			if (!std::isfinite(source.ratedOutputKW) || source.ratedOutputKW < 0.0)
+				return refuse(where + " rated output must be finite and non-negative");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(), source.thermalClass)
+				== StationThermalServiceClasses.end()) return refuse(where + " has unknown thermal service class '" + source.thermalClass + "'");
+			auto const target = std::find_if(settings.thermalReservoirs.begin(), settings.thermalReservoirs.end(),
+				[&](auto const& r) { return r.id == source.targetReservoirId; });
+			if (target == settings.thermalReservoirs.end()) return missing(where + " references unknown thermal reservoir '" + source.targetReservoirId + "'");
+			if (target->thermalClass != source.thermalClass)
+				return refuse(where + " thermal class is incompatible with target reservoir '" + target->id + "'");
+		}
+		catch (BrokenDraftEntry const&) { }
 		if (settings.heatEngines.size() > MaxStationHeatEngines)
 			return refuse("Station heat engines are limited to "
 				+ std::to_string(MaxStationHeatEngines) + " entries");

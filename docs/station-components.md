@@ -447,6 +447,30 @@ consumed, so the combined loop still needs fresh hydrogen.
 
 ## Thermal
 
+### Heat source
+
+**What it does:** delivers declared primary heat into a named Thermal reservoir.
+It produces no electricity and draws no power; conversion belongs to a Heat engine.
+Primary heat input is reported separately from environmental absorption and waste
+heat in the reservoir ledger and station totals. This first slice is constant-output:
+there is no decay or dispatch throttle.
+
+**Ports:** **Heat out** joins one compatible Reservoir's **Heat in**. Connection
+throughput and efficiency apply as for other heat producers; unaccepted heat stays
+at its source and transport loss is accounted separately.
+
+| Dial/value | Purpose |
+| --- | --- |
+| Target reservoir | Required heat-only destination. |
+| Thermal class | Must match the destination reservoir's class. |
+| Rated output kW | Finite non-negative heat production; zero disables. |
+
+**Example:** feed a hot reservoir deliberately, then use a Heat engine to convert
+part of its heat into electricity. Service limits do not cap the source: overheating
+raises the existing reservoir-wide Warning and holds heat-producing loads from
+restarting against that sink. Documents carrying sources require schema 127;
+source-absent documents retain their previous wire format.
+
 ### Reservoir
 
 **What it does:** holds thermal energy in an effective thermal mass. Heat

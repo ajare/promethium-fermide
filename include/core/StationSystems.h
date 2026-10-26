@@ -942,6 +942,17 @@ namespace core
 	};
 	inline constexpr size_t MaxStationChillers{8};
 
+	// Declared primary thermal input; electrical conversion belongs to a Heat engine.
+	struct HeatSourceSettings
+	{
+		std::string id;
+		std::string targetReservoirId;
+		std::string thermalClass{"generation"};
+		double ratedOutputKW{0.0};
+		bool operator==(HeatSourceSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationHeatSources{16};
+
 	// A Heat engine (#804): the mirror of the chiller and the station's only
 	// thermal-to-electrical crossing. It takes a heat flow from a declared hot
 	// reservoir, rejects the remainder into a declared rejection reservoir,
@@ -2465,6 +2476,7 @@ namespace core
 		// Authored Heat engines (#804): the Carnot-bounded heat-to-power
 		// crossing, declared alongside the thermal plant it converts for.
 		std::vector<HeatEngineSettings> heatEngines;
+		std::vector<HeatSourceSettings> heatSources;
 		std::vector<GeneratorSettings> generators;
 		std::vector<AtmosphereSettings> atmospheres;
 		std::vector<AtmospherePathwaySettings> atmospherePathways;
@@ -3681,6 +3693,17 @@ namespace core
 	// and starting + absorbed + routed - rejected must equal it within
 	// the declared tolerance. Above/below-limit flags report crossings of
 	// the declared service limits; they never clamp the state.
+	struct StationHeatSourceSnapshot
+	{
+		std::string id;
+		std::string targetReservoirId;
+		std::string thermalClass;
+		double ratedOutputKW{};
+		double deliveredOutputKW{};
+		double deliveredEnergyKJ{};
+		bool operator==(StationHeatSourceSnapshot const&) const = default;
+	};
+
 	struct StationThermalReservoirSnapshot
 	{
 		std::string id;
@@ -3691,6 +3714,8 @@ namespace core
 		double minTemperatureC{0.0};
 		double maxTemperatureC{0.0};
 		double absorbedHeatKW{0.0};
+		double primaryHeatInputKW{};
+		double primaryHeatInputEnergyKJ{};
 		double lastHeatRoutedKW{0.0};   // equipment heat routed in this tick
 		// Net heat this tick from coolant loops coupled to this reservoir
 		// (#396): the loop side of the heat-only exchanger exchange, so
@@ -4048,6 +4073,7 @@ namespace core
 		std::vector<StationThermalReservoirSnapshot> reservoirs;
 		std::vector<StationRadiatorSnapshot> radiators;
 		double totalAbsorbedKW{0.0};
+		double totalPrimaryHeatInputKW{};
 		double totalRoutedKW{0.0};
 		double totalRejectedKW{0.0};
 		// Coolant service totals (#396): actual circulation and actual
@@ -5324,6 +5350,7 @@ namespace core
 		// rejection heat, status with its named limiter, and actual
 		// efficiency beside Carnot efficiency at the interface temperatures.
 		std::vector<StationHeatEngineSnapshot> heatEngines;
+		std::vector<StationHeatSourceSnapshot> heatSources;
 		// The thermal buffer picture (#398): per-buffer finite stored
 		// energy distinct from temperature, configured access gating,
 		// deficit-driven charging and surplus-driven discharge, with

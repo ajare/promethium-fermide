@@ -297,6 +297,21 @@ namespace core
 
 		// Engine reservoir indices and installation bindings are resolved once.
 		// Preflight the entire collection before any other parameter can land.
+		if (s.heatSources.size() != offered.heatSources.size())
+		{
+			if (diagnostic) *diagnostic = "heat sources: a live update cannot add or remove entries";
+			return false;
+		}
+		for (auto const& source : s.heatSources)
+		{
+			auto const found = std::find_if(offered.heatSources.begin(), offered.heatSources.end(),
+				[&](auto const& next) { return next.id == source.authored.id; });
+			if (found == offered.heatSources.end() || LiveNode<HeatSourceSettings>::topologyChanged(source.authored, *found))
+			{
+				if (diagnostic) *diagnostic = "heat source identity and endpoint are topology and cannot be changed live";
+				return false;
+			}
+		}
 		if (s.heatEngines.size() != offered.heatEngines.size())
 		{
 			if (diagnostic) *diagnostic = "heat engines: a live update cannot add or remove entries";
@@ -372,6 +387,7 @@ namespace core
 					&CoolantLoopSettings::startingTemperatureC);
 			}, diagnostic)) return false;
 		if (!rebindById(s.chillers, offered.chillers, "chillers", diagnostic)) return false;
+		if (!rebindById(s.heatSources, offered.heatSources, "heat sources", diagnostic)) return false;
 		if (!rebindById(s.heatEngines, offered.heatEngines, "heat engines", diagnostic)) return false;
 		if (!rebindById(s.generators, offered.generators, "generators", diagnostic)) return false;
 		if (!rebindById(s.atmospheres, offered.atmospheres, "atmospheres",
@@ -479,6 +495,7 @@ namespace core
 		syncAuthored(s.settings.radiators, s.radiators);
 		syncAuthored(s.settings.coolantLoops, s.coolantLoops);
 		syncAuthored(s.settings.chillers, s.chillers);
+		syncAuthored(s.settings.heatSources, s.heatSources);
 		syncAuthored(s.settings.heatEngines, s.heatEngines);
 		syncAuthored(s.settings.generators, s.generators);
 		syncAuthored(s.settings.atmospheres, s.atmospheres);
@@ -553,6 +570,7 @@ namespace core
 		PF_LIVE_ENTRY(RadiatorSettings, radiators)
 		PF_LIVE_ENTRY(CoolantLoopSettings, coolantLoops)
 		PF_LIVE_ENTRY(ChillerSettings, chillers)
+		PF_LIVE_ENTRY(HeatSourceSettings, heatSources)
 		PF_LIVE_ENTRY(HeatEngineSettings, heatEngines)
 		PF_LIVE_ENTRY(GeneratorSettings, generators)
 		PF_LIVE_ENTRY(AtmosphereSettings, atmospheres)
@@ -638,6 +656,7 @@ namespace core
 	PF_LIVE_INSTANTIATE(RadiatorSettings)
 	PF_LIVE_INSTANTIATE(CoolantLoopSettings)
 	PF_LIVE_INSTANTIATE(ChillerSettings)
+	PF_LIVE_INSTANTIATE(HeatSourceSettings)
 	PF_LIVE_INSTANTIATE(HeatEngineSettings)
 	PF_LIVE_INSTANTIATE(GeneratorSettings)
 	PF_LIVE_INSTANTIATE(AtmosphereSettings)

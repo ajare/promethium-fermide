@@ -342,6 +342,7 @@ namespace
 			|| (type == "Radiator" && draft.radiators.size() >= core::MaxStationRadiators)
 			|| (type == "Coolant loop" && draft.coolantLoops.size() >= core::MaxStationCoolantLoops)
 			|| (type == "Chiller" && draft.chillers.size() >= core::MaxStationChillers)
+			|| (type == "Heat source" && draft.heatSources.size() >= core::MaxStationHeatSources)
 			|| (type == "Heat engine" && draft.heatEngines.size() >= core::MaxStationHeatEngines)
 			|| (type == "Thermal buffer" && draft.thermalBuffers.size() >= core::MaxStationThermalBuffers)
 			|| (type == "Crew" && draft.crews.size() >= core::MaxStationCrews)
@@ -896,6 +897,7 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 		|| view.type == "Water collector" || view.type == "Water treatment" || view.type == "Electrolyzer"
 		|| view.type == "CO2 capture" || view.type == "Atmosphere" || view.type == "Airlock cycle"
 		|| view.type == "Coolant loop" || view.type == "Chiller" || view.type == "Thermal buffer"
+		|| view.type == "Heat source"
 		|| view.type == "Heat engine"
 		|| view.type == "Delivery" || view.type == "Waste ejection" || view.type == "Outage" || view.type == "Maintenance"
 		// A hatch is a first-class entry-backed node like the rest: without it
@@ -2360,6 +2362,20 @@ entry.thermalClass = "moderate";
 			}
 			mLayout["Thermal buffer:" + buffer.id + ":0"] = placeAt;
 			draft.thermalBuffers.push_back(std::move(buffer));
+			mFitRequested = false;
+		}
+		else if (mPlacingType == "Heat source" && draft.heatSources.size() < core::MaxStationHeatSources)
+		{
+			core::HeatSourceSettings source;
+			source.ratedOutputKW = 10.0;
+			for (size_t candidate = 1;; ++candidate)
+			{
+				source.id = "heatSource" + std::to_string(candidate);
+				if (std::none_of(draft.heatSources.begin(), draft.heatSources.end(),
+					[&](auto const& entry) { return entry.id == source.id; })) break;
+			}
+			mLayout["Heat source:" + source.id + ":0"] = placeAt;
+			draft.heatSources.push_back(std::move(source));
 			mFitRequested = false;
 		}
 		else if (mPlacingType == "Heat engine" && draft.heatEngines.size() < core::MaxStationHeatEngines)

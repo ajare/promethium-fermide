@@ -60,6 +60,7 @@ namespace core
 		// Engine cumulative ledgers and gates must roll back together with
 		// their reservoirs, both for protection refinement (#808) and for
 		// the current-interval demand preview (#830).
+		auto const committedHeatSources = heatSources;
 		auto const committedHeatEngines = heatEngines;
 		auto const committedThermalBuffers = thermalBuffers;
 		auto const committedGenerators = generators;
@@ -141,6 +142,7 @@ namespace core
 			radiators = committedRadiators;
 			coolantLoops = committedCoolantLoops;
 			chillers = committedChillers;
+			heatSources = committedHeatSources;
 			heatEngines = committedHeatEngines;
 			thermalBuffers = committedThermalBuffers;
 			generators = committedGenerators;
@@ -597,7 +599,8 @@ namespace core
 		for (auto& a : solarArrays) mean({&a.lastAvailableKW});
 		for (auto& l : loads) mean({&l.lastRequestedKW, &l.lastSuppliedKW, &l.lastUnmetKW,
 			&l.lastUnmetCriticalKW, &l.lastHeatExportedKW, &l.lastHeatRoutedKW, &l.lastProfileLevel, &l.lastSurgeKW});
-		for (auto& r : reservoirs) mean({&r.lastHeatRoutedKW, &r.lastLoopHeatKW,
+		for (auto& source : heatSources) mean({&source.deliveredOutputKW});
+		for (auto& r : reservoirs) mean({&r.primaryHeatInputKW, &r.lastHeatRoutedKW, &r.lastLoopHeatKW,
 			&r.lastCondenserHeatKW, &r.lastGeneratorHeatKW, &r.lastElectrolysisHeatKW,
 			&r.lastFuelCellHeatKW, &r.lastSabatierHeatKW, &r.lastMethaneProcessingHeatKW,
 			&r.lastMicrobialHeatKW, &r.lastAtmosphereHeatKW, &r.lastBufferChargeKW,

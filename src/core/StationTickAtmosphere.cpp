@@ -899,6 +899,8 @@ namespace core
 		// the terms that moved.
 		{
 			auto const dt = static_cast<double>(seconds);
+			std::vector<double> primaryIn(runtime.reservoirs.size(), 0.0);
+			for (auto& source : runtime.heatSources) source.deliveredOutputKW = 0.0;
 			// Unavoidable/unrejected producer heat remains at its source.
 			// Drain it on later ticks even when that producer has stopped.
 			for (auto const& [key, delivered] : connections.drainHeat())
@@ -906,7 +908,13 @@ namespace core
 				auto found = std::find_if(runtime.reservoirs.begin(), runtime.reservoirs.end(), [&](auto const& body) { return body.authored.id == key.peerId; });
 				if (found == runtime.reservoirs.end()) continue;
 				auto const index = static_cast<size_t>(found - runtime.reservoirs.begin());
-				if (key.ownerType == "Generator") generatorHeatBySink[index] += delivered;
+				if (key.ownerType == "Heat source")
+				{
+					primaryIn[index] += delivered;
+					for (auto& source : runtime.heatSources) if (source.authored.id == key.ownerId)
+						source.deliveredOutputKW += delivered;
+				}
+				else if (key.ownerType == "Generator") generatorHeatBySink[index] += delivered;
 				else if (key.ownerType == "Fuel cell") fuelCellHeatByReservoir[index] += delivered;
 				else if (key.ownerType == "Electrolyzer") electrolysisHeatByReservoir[index] += delivered;
 				else if (key.ownerType == "Sabatier") sabatierHeatByReservoir[index] += delivered;
@@ -916,6 +924,14 @@ namespace core
 				else if (key.ownerType == "Heat engine") engineRejectionByReservoir[index] += delivered;
 				else if (key.ownerType == "Equipment")
 					for (auto& load : runtime.loads) if (load.authored.id == key.ownerId) load.lastHeatRoutedKW += delivered;
+			}
+			for (auto& source : runtime.heatSources)
+			{
+				auto const delivered = connections.routeHeat(
+					connections.port("Heat source", source.authored.id, "Heat"), source.authored.ratedOutputKW);
+				source.deliveredOutputKW += delivered;
+				source.deliveredEnergyKJ += source.deliveredOutputKW * dt;
+				primaryIn[source.sinkIndex] += delivered;
 			}
 			std::vector<double> routedIn(runtime.reservoirs.size(), 0.0);
 			for (auto const& load : runtime.loads)
@@ -936,7 +952,7 @@ namespace core
 				auto const conductedKW = reservoirConductedKJ[index] / dt;
 				reservoir.lastConductedKW = conductedKW;
 				reservoir.conductedKJ += reservoirConductedKJ[index];
-				auto const heatInKW = conductedKW + reservoir.authored.absorbedHeatKW + routedIn[index]
+				auto const heatInKW = conductedKW + reservoir.authored.absorbedHeatKW + routedIn[index] + primaryIn[index]
 					+ reservoir.pendingHazardKJ / dt
 					+ loopHeatIntoReservoir[index] + condenserHeatBySink[index]
 					+ generatorHeatKW + atmosphereHeatKW
@@ -1155,6 +1171,8 @@ namespace core
 				reservoir.lastNetKW = netKW;
 				reservoir.hazardKJ += reservoir.pendingHazardKJ;
 				reservoir.pendingHazardKJ = 0.0;
+				reservoir.primaryHeatInputKW = primaryIn[index];
+				reservoir.primaryHeatInputKJ += primaryIn[index] * dt;
 				reservoir.absorbedKJ += reservoir.authored.absorbedHeatKW * dt;
 				reservoir.routedKJ += routedIn[index] * dt;
 				reservoir.loopKJ += loopHeatIntoReservoir[index] * dt;

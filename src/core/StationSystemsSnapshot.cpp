@@ -400,6 +400,9 @@ namespace core
 		// The thermal snapshot reports the authored capacity and declared
 		// limits beside the integrated temperature, the last tick's heat
 		// flows and the cumulative energy ledger (#395).
+		for (auto const& source : mImpl->heatSources)
+			result.heatSources.push_back({source.authored.id, source.authored.targetReservoirId,
+				source.authored.thermalClass, source.authored.ratedOutputKW, source.deliveredOutputKW, source.deliveredEnergyKJ});
 		for (auto const& reservoir : mImpl->reservoirs)
 		{
 			StationThermalReservoirSnapshot reservoirResult;
@@ -411,6 +414,8 @@ namespace core
 			reservoirResult.minTemperatureC = reservoir.authored.minTemperatureC;
 			reservoirResult.maxTemperatureC = reservoir.authored.maxTemperatureC;
 			reservoirResult.absorbedHeatKW = reservoir.authored.absorbedHeatKW;
+			reservoirResult.primaryHeatInputKW = reservoir.primaryHeatInputKW;
+			reservoirResult.primaryHeatInputEnergyKJ = reservoir.primaryHeatInputKJ;
 			reservoirResult.lastHeatRoutedKW = reservoir.lastHeatRoutedKW;
 			reservoirResult.lastLoopHeatKW = reservoir.lastLoopHeatKW;
 			reservoirResult.lastCondenserHeatKW = reservoir.lastCondenserHeatKW;
@@ -452,7 +457,7 @@ namespace core
 			reservoirResult.rejectedEnergyKJ = reservoir.rejectedKJ;
 			reservoirResult.hazardEnergyKJ = reservoir.hazardKJ;
 			reservoirResult.residualKJ = reservoirResult.startingEnergyKJ + reservoir.hazardKJ
-				+ reservoir.absorbedKJ + reservoir.routedKJ + reservoir.loopKJ
+				+ reservoir.absorbedKJ + reservoir.primaryHeatInputKJ + reservoir.routedKJ + reservoir.loopKJ
 				+ reservoir.condenserKJ + reservoir.generatorKJ + reservoir.electrolysisKJ
 				+ reservoir.fuelCellKJ + reservoir.sabatierKJ + reservoir.methaneProcessingKJ
 				+ reservoir.microbialKJ
@@ -461,6 +466,7 @@ namespace core
 				+ reservoir.bufferDischargeKJ - reservoir.bufferChargeKJ
 				- reservoir.engineExtractionKJ
 				- reservoir.rejectedKJ - reservoirResult.currentEnergyKJ;
+			result.thermal.totalPrimaryHeatInputKW += reservoir.primaryHeatInputKW;
 			result.thermal.totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
 			result.thermal.totalRoutedKW += reservoir.lastHeatRoutedKW;
 			result.thermal.totalRejectedKW += reservoir.lastRejectedKW;

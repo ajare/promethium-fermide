@@ -1005,7 +1005,7 @@ namespace core
 		for (size_t i = 0; i < runtime.reservoirs.size(); ++i)
 		{
 			auto const& r = runtime.reservoirs[i];
-			std::vector<double> rates{r.authored.absorbedHeatKW, r.lastHeatRoutedKW,
+			std::vector<double> rates{r.authored.absorbedHeatKW, r.primaryHeatInputKW, r.lastHeatRoutedKW,
 				r.lastCondenserHeatKW, r.lastGeneratorHeatKW, r.lastElectrolysisHeatKW,
 				r.lastFuelCellHeatKW, r.lastSabatierHeatKW, r.lastMethaneProcessingHeatKW,
 				r.lastMicrobialHeatKW, r.lastBufferDischargeKW, -r.lastBufferChargeKW,

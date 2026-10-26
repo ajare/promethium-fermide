@@ -2810,6 +2810,46 @@ namespace
 
 	// #659: author both chiller interfaces through the real Flow controls,
 	// sharing the form editor and leaving the World untouched.
+	void flowHeatSourceWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		auto world = std::make_shared<core::World>("Heat source flow", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		StationSystemsWindow window;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "flowHeatSource", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration"); ctx->ComboClick("Place node/Heat source"); ctx->Yield(3);
+			REQ(driver.contains("Heat source placement armed"), "source placement not armed");
+			auto* canvas = flowCanvasWindow("Configuration");
+			ctx->MouseTeleportToPos({canvas->Pos.x + 300, canvas->Pos.y + 180}); ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			REQ(window.draft().heatSources.size() == 1, "source not placed");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().heatSources.empty(), "source placement undo failed");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().heatSources.size() == 1, "source placement redo failed");
+			driver.click(ctx, "**/Find node"); ctx->KeyChars("heatSource1"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			ImVec4 r{}; REQ(window.flowNodeRect("Heat source", "heatSource1", &r), "source node missing");
+			ctx->MouseTeleportToPos({(r.x + r.z) / 2, (r.y + r.w) / 2}); ctx->MouseClick(); ctx->Yield(3);
+			driver.click(ctx, "**/Find node"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyPress(ImGuiKey_Delete); ctx->Yield(3);
+			ctx->MouseTeleportToPos({20, 20}); ctx->Yield(2);
+			driver.typeValue(ctx, "**/rated output kW##Heat source 0", "25"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(window.draft().heatSources[0].ratedOutputKW == 25.0, "source inspector edit failed");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().heatSources[0].ratedOutputKW == 10.0, "source field undo failed");
+			REQ(world->getStationSystemsSettings().heatSources.empty(), "draft changed world");
+		});
+		#undef REQ
+		require(driver.passed(), "Flow primary heat source workflow failed");
+	}
+
 	void flowHeatEngineWorkflow(smoke::Context const& smokeContext)
 	{
 		using smoke::require;
@@ -3622,7 +3662,7 @@ namespace
 		add(s.stores); add(s.transfers); add(s.conversions); add(s.power.loads);
 		add(s.power.sources); add(s.power.batteries); add(s.power.generators); add(s.fuelCells);
 		add(s.thermal.reservoirs); add(s.thermal.radiators); add(s.coolantLoops);
-		add(s.chillers); add(s.heatEngines); add(s.thermalBuffers); add(s.atmospheres); add(s.atmospherePathways); add(s.thermalLinks); add(s.crews);
+		add(s.chillers); add(s.heatSources); add(s.heatEngines); add(s.thermalBuffers); add(s.atmospheres); add(s.atmospherePathways); add(s.thermalLinks); add(s.crews);
 		add(s.waterCollectors); add(s.waterTreatments); add(s.electrolyzers); add(s.co2Captures);
 		add(s.sabatierReactors); add(s.methaneProcessors); add(s.microbialProcessors);
 		add(s.cropPopulations); add(s.algaeCultures); add(s.deliveries); add(s.wasteEjections);
@@ -5735,7 +5775,7 @@ namespace
 				{"Generator", "Generator"}, {"Fuel cell", "Fuel cell"}, {"Sabatier", "Sabatier reactor"},
 				{"Methane processor", "Methane processor"}, {"Reservoir", "Thermal reservoir"},
 				{"Radiator", "Radiator"}, {"Coolant loop", "Coolant loop"}, {"Chiller", "Chiller"},
-				{"Heat engine", "Heat engine"},
+				{"Heat source", "Heat source"}, {"Heat engine", "Heat engine"},
 				{"Thermal buffer", "Thermal buffer"}, {"Thermal link", "Thermal link"}, {"Crew", "Crew"}, {"Crops", "Crop population"},
 				{"Algae", "Algae culture"}, {"Microbial processor", "Microbial processor"},
 				{"Water collector", "Water collector"}, {"Water treatment", "Water treatment"},
@@ -8726,6 +8766,7 @@ prefabCatalogue:
 	checks.push_back({"station/flowRadiatorWorkflow", flowRadiatorWorkflow});
 	checks.push_back({"station/flowCoolantLoopWorkflow", flowCoolantLoopWorkflow});
 	checks.push_back({"station/flowChillerWorkflow", flowChillerWorkflow});
+	checks.push_back({"station/flowHeatSourceWorkflow", flowHeatSourceWorkflow});
 	checks.push_back({"station/flowHeatEngineWorkflow", flowHeatEngineWorkflow});
 	checks.push_back({"station/flowThermalBufferWorkflow", flowThermalBufferWorkflow});
 	checks.push_back({"station/transferWorkflow", transferWorkflow});

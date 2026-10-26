@@ -11,19 +11,19 @@ namespace core
 		// stamps. Comparing a few inventories cannot certify the entire object.
 		static constexpr auto entries = []
 		{
-			constexpr std::array<std::string_view, 47> names{
+			constexpr std::array<std::string_view, 48> names{
 				"enabled", "healthy", "systemsStepWorldTicks", "systemsTimestepSeconds",
 				"worldTick", "elapsedSeconds", "completedTicks", "stores", "transfers",
 				"connections", "conversions", "balances", "constituentBalances", "deliveries",
 				"wasteEjections", "outages", "maintenanceJobs", "power", "thermal", "coolantLoops",
-				"chillers", "heatEngines", "thermalBuffers", "atmospheres", "atmospherePathways",
+				"chillers", "heatSources", "heatEngines", "thermalBuffers", "atmospheres", "atmospherePathways",
 				"thermalLinks", "airlockCycles", "crews",
 				"waterCollectors", "waterTreatments", "electrolyzers", "co2Captures",
 				"sabatierReactors", "methaneProcessors", "microbialProcessors", "cropPopulations",
 				"algaeCultures", "fuelCells", "hasNextDelivery", "nextDeliverySeconds",
 				"hasNextWasteEjection", "nextWasteEjectionSeconds", "endurance", "forecast",
 				"balanceTolerance", "activeAlerts", "closedAlerts"};
-			std::array<StationObservableInvariance, 65> result{};
+			std::array<StationObservableInvariance, 66> result{};
 			for (size_t i = 0; i < names.size(); ++i)
 			{
 				auto& entry = result[i];
