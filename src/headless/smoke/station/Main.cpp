@@ -55,6 +55,7 @@ int main(int argc, char** argv)
 	registerStationPowerBusChecks(checks);
 	registerStationBusDispatchChecks(checks);
 	registerStationTransferSupplyChecks(checks);
+	registerStationSharedSupplyChecks(checks);
 	registerStationDocumentChecks(checks);
 	registerScheduledTransferChecks(checks);
 	registerStationConnectionChecks(checks);

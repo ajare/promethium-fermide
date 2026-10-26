@@ -3419,6 +3419,33 @@ namespace core
 		bool operator==(StationSupplyTransferSnapshot const&) const = default;
 	};
 
+	// #883: one bus's part in feeding one Shared-supply load this tick. `spareKW`
+	// is what that bus could put on the wire for this load when the split was
+	// weighed, `shareKW` the pro-rata slice it was asked to carry, and
+	// `suppliedKW` what it actually delivered.
+	struct StationSharedSupplyFeedSnapshot
+	{
+		std::string busId;
+		double spareKW{0.0};
+		double shareKW{0.0};
+		double suppliedKW{0.0};
+		bool operator==(StationSharedSupplyFeedSnapshot const&) const = default;
+	};
+
+	// #883: how a Shared-supply load's demand was divided across its buses.
+	// The counterpart to StationSupplyTransferSnapshot: where a Transfer load
+	// names the one bus serving it, a Shared load names them all and the slice
+	// each carried, so a reader can see a combined feed and a zero-spare bus
+	// without diffing two bus ledgers. Buses appear in declared order.
+	struct StationSharedSupplySnapshot
+	{
+		std::string consumerType;
+		std::string loadId;
+		std::vector<std::string> busIds;
+		std::vector<StationSharedSupplyFeedSnapshot> feeds;
+		bool operator==(StationSharedSupplySnapshot const&) const = default;
+	};
+
 	struct StationBusPowerSnapshot
 	{
 		std::string busId;
@@ -3545,6 +3572,12 @@ namespace core
 		// transfer switch each load sat on, so a reader can see a failover and a
 		// dwell-gated return without diffing two bus ledgers. Authored order.
 		std::vector<StationSupplyTransferSnapshot> supplyTransfers;
+		// #883: how each Shared-mode load split its demand across its buses this
+		// tick. Where supplyTransfers says which one bus served a Transfer load,
+		// this says how much of a Shared load every one of its buses carried, so
+		// a combined feed and a zero-spare bus are both readable directly.
+		// Authored order.
+		std::vector<StationSharedSupplySnapshot> sharedSupplies;
 		bool operator==(StationPowerSnapshot const&) const = default;
 	};
 	// One radiator as of the most recent tick: the authored rejection

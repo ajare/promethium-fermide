@@ -97,6 +97,8 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/station/Documents.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/StationBusDispatchChecks.cpp` | module-owned | `pf-smoke-station` (busDispatchBalance, busDispatchProtected, busDispatchBatteries, busDispatchInternal, busDispatchSources, busDispatchRecovery) |
 | `smoke/station/StationPowerBusChecks.cpp` | module-owned | `pf-smoke-station` (powerBusMigration, powerBusPersistence, powerBusRoles, powerBusValidation) |
+| `smoke/station/StationTransferSupplyChecks.cpp` | module-owned | `pf-smoke-station` (transferHoldsPrimary, transferFailover, transferAlertAutoClears, transferDwellReturn, transferZeroDwell, transferNoFlapping, transferBackupAlsoShort, transferNoThirdPath, transferReplay, transferPerLoadDwell) |
+| `smoke/station/StationSharedSupplyChecks.cpp` | module-owned | `pf-smoke-station` (sharedSupplySplitRatio, sharedSupplyZeroSpare, sharedSupplyCombinedShortfall, sharedSupplyMinimumOperable, sharedSupplyRecomputed, sharedSupplyCombinedDemo, sharedSupplyReplay, sharedSupplyProtectedSpare, sharedSupplyFiniteFeeds) |
 | `smoke/station/Connections.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/BatteryObservations.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/MaterialObservations.cpp` | module-owned | `pf-smoke-station` |

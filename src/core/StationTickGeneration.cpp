@@ -1071,9 +1071,11 @@ namespace core
 			// zero output, and the load must not be left blind to it.
 			if (generator.phase == StationGeneratorPhase::Starting)
 			{
-				auto const crank = connections.inputDemand(powerPort("Generator", generator.authored.id), startupDrawForKW(generator, startupRequiredKJ));
-				dispatchStartupSupportKW += crank;
-				busBudgets.at(consumerBus("Generator", generator.authored.id)).startup += crank;
+				// #883: the crank is booked against the buses that will actually
+				// fund it, so a Shared generator's start rides its circuits
+				// instead of landing wholly on whichever bus is listed first.
+				dispatchStartupSupportKW += addStartupDispatch("Generator",
+					generator.authored.id, startupDrawForKW(generator, startupRequiredKJ));
 			}
 			auto const generationPort = connections.port("Generator", generator.authored.id, "Generation");
 			if (connections.efficiency(generationPort) == 0.0) continue;
@@ -1099,9 +1101,11 @@ namespace core
 				// output this tick, so its startup draw rides the target
 				// for the backup to fund beside the load it cannot yet
 				// serve.
-				auto const crank = connections.inputDemand(powerPort("Generator", generator.authored.id), startupDrawForKW(generator, startupRequiredKJ));
-				dispatchStartupSupportKW += crank;
-				busBudgets.at(consumerBus("Generator", generator.authored.id)).startup += crank;
+				// #883: the crank is booked against the buses that will actually
+				// fund it, so a Shared generator's start rides its circuits
+				// instead of landing wholly on whichever bus is listed first.
+				dispatchStartupSupportKW += addStartupDispatch("Generator",
+					generator.authored.id, startupDrawForKW(generator, startupRequiredKJ));
 			}
 			// A machine in shutdown decay is commanded but serves
 			// nothing this tick; its residual flows on untouched.

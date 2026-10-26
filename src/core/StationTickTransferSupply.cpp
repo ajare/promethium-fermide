@@ -41,10 +41,10 @@ namespace core
 	{
 		// What this bus could deliver to this one consumer right now: the
 		// generation still unclaimed on the bus plus what the bus's batteries
-		// can discharge, all seen through the consumer's own supply
-		// connection, so cable loss and a disconnected supply port count
-		// exactly as they will when the load actually draws.
-		return connections.available(powerPort(type, id),
+		// can discharge, all seen through the consumer's own supply wire to
+		// THIS bus, so cable loss and a disconnected supply port count exactly
+		// as they will when the load actually draws.
+		return connections.available(powerPort(type, id, busId),
 			generationAvailable(busId) + batteryDeliverableKW(busId));
 	}
 

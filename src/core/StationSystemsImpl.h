@@ -60,6 +60,17 @@ using namespace station_detail;
 		std::vector<StationConnectionSnapshot> connectionFlows;
 		double lastPoolGenerationKW{}, lastConnectionPowerLossKW{}, lastPoolResidualKW{};
 		std::map<std::string, StationBusPowerSnapshot> lastBusPower;
+		// #883: the Shared-supply split the last committed tick actually ran,
+		// per consumer and per bus, so the snapshot can publish it without the
+		// tick's scratch state. Committed and rolled back with the bus accounts.
+		struct SharedSupplyFeed
+		{
+			std::string busId;
+			double spareKW{};
+			double shareKW{};
+			double suppliedKW{};
+		};
+		std::map<std::pair<std::string, std::string>, std::vector<SharedSupplyFeed>> lastSharedSupply;
 		std::map<std::string, double> lastBusDispatchDemand;
 		// Current inventory is runtime state only: it is initialised from the
 		// authored starting quantities when the runtime is constructed and is
@@ -2006,11 +2017,6 @@ using namespace station_detail;
 			bool isRestore{false};
 			std::string message;
 		};
-		struct ProtectedChillerDraw
-		{
-			double fromGenerationKW{0.0};
-			std::vector<std::pair<size_t, double>> fromBatteryKW{};
-		};
 		struct DueAirlockCycle
 		{
 			StationScenarioEventKey key;
@@ -2082,13 +2088,44 @@ using namespace station_detail;
 		struct SharedGeneration { std::vector<std::string> ids; double available; };
 		std::vector<SharedGeneration> sharedGeneration;
 		double generationAvailable(std::string const& id);
-		double takeGeneration(std::string const& id, double need);
+		double takeGeneration(std::string const& id, double need,
+			std::vector<double> const* sharedLimits = nullptr);
 		void settleGeneration();
 		std::map<std::pair<std::string, std::string>, std::string> consumerBuses;
 		std::map<std::pair<std::string, std::string>, double> consumerSupplied;
-		std::vector<std::string> protectedServiceBuses;
+		// #883: one Shared-supply consumer's split, kept per bus so every watt a
+		// circuit carried is attributable. `requestedKW` is the pro-rata slice
+		// routed to that bus, `deliveredKW` what it actually put on the wire.
+		struct BusSupply
+		{
+			std::string busId;
+			// What this bus could put on the wire for this consumer when the split
+			// was weighed - its spare after everything ahead of it had drawn.
+			double spareKW{};
+			double requestedKW{};
+			double deliveredKW{};
+			double fromGenerationKW{};
+			std::vector<std::pair<size_t, double>> fromBatteryKW{};
+		};
+		// Where each consumer's draws landed this tick, in the order the buses
+		// were served. Single and Transfer consumers get exactly one entry; a
+		// Shared consumer gets one per bus it was asked to feed.
+		std::map<std::pair<std::string, std::string>, std::vector<BusSupply>> consumerSupply;
+		// The buses a consumer may draw from. Only Shared consumers appear here;
+		// everything else resolves through consumerBus() to the one bus it sits on.
+		std::map<std::pair<std::string, std::string>, std::vector<std::string>> sharedSupplyBuses;
+		// Finds the record for one bus of one consumer, creating it so a bus that
+		// was weighed and found empty still shows in the published split.
+		BusSupply& supplyFeed(std::string const& type, std::string const& id,
+			std::string const& busId);
+		// #883: a protected service is attributed to every bus that carried it,
+		// with the share of the service each bus owns.
+		std::vector<std::vector<std::pair<std::string, double>>> protectedServiceBuses;
 		void initializeBuses();
 		std::string const& consumerBus(std::string const& type, std::string const& id);
+		// The buses one consumer draws from this tick: its declared Shared set,
+		// or the single bus it currently sits on.
+		std::vector<std::string> supplyBuses(std::string const& type, std::string const& id) const;
 		// #882: the automatic transfer switch resolution. Runs after every
 		// source has registered this tick's generation and before any load
 		// draws, so a shortfall on the primary moves the whole load onto its
@@ -2123,7 +2160,6 @@ using namespace station_detail;
 		std::vector<double> protectedLoopPumpKW{};
 		std::vector<double> protectedLoopHeaterKW{};
 		std::vector<double> protectedChillerPowerKW{};
-		std::vector<ProtectedChillerDraw> protectedChillerDraws{};
 		std::vector<size_t> chillerProtectedServiceIndex{};
 		std::vector<double> protectedCropCirculationKW{};
 		std::vector<double> protectedAlgaeCirculationKW{};
@@ -2214,10 +2250,52 @@ using namespace station_detail;
 		double nativeDeliverableKW(BatteryState const& battery, double dtHours);
 		double deliverableKW(BatteryState const& battery, double dtHours);
 		double batteryDeliverableKW(std::string const& busId);
-		double drawBatteries(std::string const& busId, double needKW, std::vector<std::pair<size_t, double>>* contributions = nullptr);
+		double drawBatteries(std::string const& busId, double needKW,
+			std::vector<std::pair<size_t, double>>* contributions = nullptr,
+			std::vector<double> const* limits = nullptr);
 		StationConnectionLedger::Port powerPort(std::string const& type, std::string const& id);
+		// The supply connection one consumer holds against one specific bus. A
+		// Shared consumer owns one of these per bus, and each is its own transport
+		// with its own throughput and loss.
+		StationConnectionLedger::Port powerPort(std::string const& type, std::string const& id,
+			std::string const& busId);
+		// True only when every supply wire the consumer owns is dead-zero-efficiency,
+		// which is what tells a Shared load with one live feed to run normally.
+		bool supplyDisconnected(std::string const& type, std::string const& id);
+		// A feasible combined offer: each finite source/battery is counted once,
+		// with its offered input partitioned across the consumer's live wires.
+		struct SupplyCapacity
+		{
+			std::string busId;
+			double spareKW{};
+			std::vector<double> generationLimits;
+			std::vector<double> batteryLimits;
+		};
+		std::vector<SupplyCapacity> supplyCapacity(std::string const& type,
+			std::string const& id, bool includeBatteries = true);
 		double powerAvailable(std::string const& type, std::string const& id);
 		double drawPower(std::string const& type, std::string const& id, double needKW, std::vector<std::pair<size_t, double>>* contributions = nullptr, double* generation = nullptr);
+		// One bus's side of a draw: takes generation first, batteries second, and
+		// books the share against that bus's own budget and cable.
+		double drawPowerFromBus(std::string const& type, std::string const& id,
+			std::string const& busId, double needKW,
+			std::vector<std::pair<size_t, double>>* contributions = nullptr,
+			double* generation = nullptr, SupplyCapacity const* capacity = nullptr);
+		// #883: how a consumer's demand is divided across its buses. Weights sum
+		// to 1; a consumer that was never served splits equally so its demand
+		// still lands on every circuit it asked.
+		std::vector<std::pair<std::string, double>> supplyAttribution(
+			std::string const& type, std::string const& id) const;
+		// What one bus actually delivered to one consumer this tick, after any
+		// refund of unused protected work has been taken back out.
+		double busSupplied(std::string const& type, std::string const& id,
+			std::string const& busId) const;
+		// #883: books the crank a starting machine owes against the buses that
+		// will actually fund it, and returns the total. A Shared generator cranks
+		// across every bus it is wired to, so the dispatch target follows the
+		// same split instead of landing wholly on whichever bus is listed first.
+		// A single-bus machine gives its one bus the whole crank, as before.
+		double addStartupDispatch(std::string const& type, std::string const& id, double crankKW);
 		double energyUnitsToKWh(std::string const& unit);
 		double startupDrawForKW(GeneratorState const& generator, double requiredKJ);
 		double exchangeFullAmount(LoadExchangeState const& exchange, double profileLevel);

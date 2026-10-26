@@ -7,6 +7,7 @@ void registerStationMonitorChecks(std::vector<smoke::Check>& checks);
 void registerStationPowerBusChecks(std::vector<smoke::Check>& checks);
 void registerStationBusDispatchChecks(std::vector<smoke::Check>& checks);
 void registerStationTransferSupplyChecks(std::vector<smoke::Check>& checks);
+void registerStationSharedSupplyChecks(std::vector<smoke::Check>& checks);
 void registerStationStoreConnectionMonitorChecks(std::vector<smoke::Check>& checks);
 void registerStationEclssBiologyMonitorChecks(std::vector<smoke::Check>& checks);
 void registerStationFaultChecks(std::vector<smoke::Check>& checks);

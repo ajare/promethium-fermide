@@ -23,6 +23,15 @@ namespace core
 						bus = entry.authored.supplyBusIds[1];
 				}
 				consumerBuses[{type, entry.authored.id}] = bus;
+				// #883: a Shared consumer draws from every bus it was authored on,
+				// simultaneously. The split across them is decided per draw from
+				// each bus's live spare, so nothing is pre-allocated here; only the
+				// eligible set is recorded. Anything with fewer than two declared
+				// buses has nothing to combine, so it keeps the single-bus path.
+				if (entry.authored.supplyMode == StationSupplyMode::Shared
+					&& entry.authored.supplyBusIds.size() > 1)
+					sharedSupplyBuses[{type, entry.authored.id}] = entry.authored.supplyBusIds;
+				consumerSupply[{type, entry.authored.id}] = {};
 			}
 		};
 		bind("Equipment", runtime.loads); bind("Generator", runtime.generators);
@@ -56,17 +65,20 @@ namespace core
 		return total;
 	}
 
-	double StationSystemsRuntime::Impl::Tick::takeGeneration(std::string const& id, double need)
+	double StationSystemsRuntime::Impl::Tick::takeGeneration(std::string const& id, double need,
+		std::vector<double> const* sharedLimits)
 	{
 		auto& bus = busBudgets.at(id);
 		auto const local = std::min(need, bus.available);
 		bus.available -= local;
 		double remaining = need - local;
 		double delivered = local;
-		for (auto& source : sharedGeneration)
+		for (size_t i = 0; i < sharedGeneration.size(); ++i)
 		{
+			auto& source = sharedGeneration[i];
 			if (std::find(source.ids.begin(), source.ids.end(), id) == source.ids.end()) continue;
-			auto const take = std::min(remaining, source.available);
+			auto const limit = sharedLimits ? (*sharedLimits)[i] : source.available;
+			auto const take = std::min({remaining, source.available, limit});
 			source.available -= take; remaining -= take; bus.generated += take; delivered += take;
 		}
 		return delivered;
@@ -296,7 +308,8 @@ namespace core
 		return total;
 	}
 
-	double StationSystemsRuntime::Impl::Tick::drawBatteries(std::string const& busId, double needKW, std::vector<std::pair<size_t, double>>* contributions)
+	double StationSystemsRuntime::Impl::Tick::drawBatteries(std::string const& busId, double needKW,
+		std::vector<std::pair<size_t, double>>* contributions, std::vector<double> const* limits)
 	{
 		if (needKW <= 0.0) return 0.0;
 		auto remaining = needKW;
@@ -307,8 +320,9 @@ namespace core
 			if (batteryDisabled(battery)) continue;
 			if (std::find(battery.authored.busIds.begin(), battery.authored.busIds.end(), busId) == battery.authored.busIds.end()) continue;
 			auto const port = connections.port("Battery", battery.authored.id, "Discharge");
-			auto const request = connections.required(port, remaining);
-			auto const transport = connections.receive(port, remaining, nativeDeliverableKW(battery, hours));
+			auto const claim = limits ? std::min(remaining, (*limits)[batteryIndex]) : remaining;
+			auto const request = connections.required(port, claim);
+			auto const transport = connections.receive(port, claim, nativeDeliverableKW(battery, hours));
 			auto const give = transport.delivered;
 			if (transport.input > 0.0)
 			{
@@ -337,31 +351,235 @@ namespace core
 
 	StationConnectionLedger::Port StationSystemsRuntime::Impl::Tick::powerPort(std::string const& type, std::string const& id)
 	{
-		return connections.port(type, id, type == "Generator" ? "Startup" : "Electrical supply"); }
+		// Bus-agnostic: the consumer's supply role however it is wired. Callers
+		// that care which bus a watt travels to use the bus-scoped overload,
+		// which is the only way to pick the right wire when a consumer owns
+		// several. This form deliberately resolves no bus, so it stays usable
+		// from the ledger's preview passes, where the tick's bus bindings for a
+		// given consumer may not have been taken yet.
+		return connections.port(type, id, type == "Generator" ? "Startup" : "Electrical supply");
+	}
+
+	StationConnectionLedger::Port StationSystemsRuntime::Impl::Tick::powerPort(std::string const& type,
+		std::string const& id, std::string const& busId)
+	{
+		// The consumer's own supply wire to this one bus. A Shared load owns one
+		// of these per bus and each is its own transport, so a pro-rata draw
+		// books its throughput and its loss against the cable it really ran down.
+		return connections.port(type, id,
+			type == "Generator" ? "Startup" : "Electrical supply", busId);
+	}
+
+	std::vector<std::string> StationSystemsRuntime::Impl::Tick::supplyBuses(
+		std::string const& type, std::string const& id) const
+	{
+		auto const shared = sharedSupplyBuses.find(std::pair<std::string, std::string>{type, id});
+		if (shared != sharedSupplyBuses.end()) return shared->second;
+		return { consumerBuses.at({type, id}) };
+	}
+
+	bool StationSystemsRuntime::Impl::Tick::supplyDisconnected(
+		std::string const& type, std::string const& id)
+	{
+		// Dead only when every wire is dead. A Shared load with one live feed and
+		// one severed one still runs on the live feed, so it must not be pushed
+		// down the "no connection at all" path.
+		for (auto const& busId : supplyBuses(type, id))
+			if (connections.efficiency(powerPort(type, id, busId)) != 0.0) return false;
+		return true;
+	}
 
 	double StationSystemsRuntime::Impl::Tick::powerAvailable(std::string const& type, std::string const& id)
 	{
-		auto const& busId = consumerBus(type, id);
-		return connections.available(powerPort(type, id), generationAvailable(busId) + batteryDeliverableKW(busId));
+		// #883: a Shared load sees the combined capacity of every bus it is
+		// wired to. That combined figure is also the bar the minimum-operable
+		// rule is measured against, so the rule binds the grant as a whole:
+		// a Shared load is never partly energized below its floor.
+		double total = 0.0;
+		for (auto const& capacity : supplyCapacity(type, id))
+		{
+			total += capacity.spareKW;
+			if (sharedSupplyBuses.contains({type, id}))
+				supplyFeed(type, id, capacity.busId).spareKW = capacity.spareKW;
+		}
+		return total;
 	}
 
-	double StationSystemsRuntime::Impl::Tick::drawPower(std::string const& type, std::string const& id, double needKW, std::vector<std::pair<size_t, double>>* contributions, double* generation)
+	std::vector<StationSystemsRuntime::Impl::Tick::SupplyCapacity>
+	StationSystemsRuntime::Impl::Tick::supplyCapacity(std::string const& type,
+		std::string const& id, bool includeBatteries)
 	{
-		auto const port = powerPort(type, id);
+		auto const buses = supplyBuses(type, id);
+		std::vector<SupplyCapacity> result;
+		std::vector<double> input, room;
+		for (auto const& busId : buses)
+		{
+			auto const port = powerPort(type, id, busId);
+			auto const cap = connections.efficiency(port) > 0.0 ? connections.remaining(port) : 0.0;
+			auto const local = std::min(cap, busBudgets.at(busId).available);
+			result.push_back({busId, 0.0, std::vector<double>(sharedGeneration.size()),
+				std::vector<double>(runtime.batteries.size())});
+			input.push_back(local);
+			room.push_back(cap - local);
+		}
+		// Each multi-landing resource offers ONE budget. Partition it over
+		// eligible wires, redistributing a capped/dead wire's slice. Keep these
+		// per-resource ceilings for the real draw so an early bus cannot spend
+		// a later bus's offer. Preview and execution then agree at the operable
+		// minimum even when generation or a battery bridges several buses.
+		auto offer = [&](std::vector<std::string> const& members, double available,
+			size_t resource, bool battery) {
+			std::vector<size_t> eligible;
+			for (size_t i = 0; i < buses.size(); ++i)
+				if (room[i] > 0.0 && std::find(members.begin(), members.end(), buses[i]) != members.end())
+					eligible.push_back(i);
+			while (available > 0.0 && !eligible.empty())
+			{
+				auto const slice = available / eligible.size();
+				bool capped = false;
+				for (auto i : eligible)
+				{
+					auto const give = std::min(slice, room[i]);
+					(battery ? result[i].batteryLimits : result[i].generationLimits)[resource] += give;
+					input[i] += give;
+					room[i] -= give;
+					available -= give;
+					capped |= room[i] <= 0.0;
+				}
+				if (!capped) break;
+				std::erase_if(eligible, [&](size_t i) { return room[i] <= 0.0; });
+			}
+		};
+		for (size_t i = 0; i < sharedGeneration.size(); ++i)
+			offer(sharedGeneration[i].ids, sharedGeneration[i].available, i, false);
+		if (includeBatteries)
+			for (size_t i = 0; i < runtime.batteries.size(); ++i)
+				offer(runtime.batteries[i].authored.busIds, deliverableKW(runtime.batteries[i], hours), i, true);
+		for (size_t i = 0; i < result.size(); ++i)
+			result[i].spareKW = input[i] * connections.efficiency(powerPort(type, id, buses[i]));
+		return result;
+	}
+
+	typename StationSystemsRuntime::Impl::Tick::BusSupply&
+	StationSystemsRuntime::Impl::Tick::supplyFeed(std::string const& type, std::string const& id,
+		std::string const& busId)
+	{
+		auto& feeds = consumerSupply[{type, id}];
+		auto found = std::find_if(feeds.begin(), feeds.end(),
+			[&](auto const& feed) { return feed.busId == busId; });
+		if (found == feeds.end()) found = feeds.insert(feeds.end(), BusSupply{busId, {}, {}, {}, {}, {}});
+		return *found;
+	}
+
+	double StationSystemsRuntime::Impl::Tick::drawPowerFromBus(std::string const& type, std::string const& id,
+		std::string const& busId, double needKW, std::vector<std::pair<size_t, double>>* contributions,
+		double* generation, SupplyCapacity const* capacity)
+	{
+		auto const port = powerPort(type, id, busId);
 		auto const grossNeed = connections.required(port, needKW);
-		auto const& busId = consumerBus(type, id);
 		auto& bus = busBudgets.at(busId);
-		auto const fromGeneration = takeGeneration(busId, grossNeed);
+		auto const fromGeneration = takeGeneration(busId, grossNeed,
+			capacity ? &capacity->generationLimits : nullptr);
 		availableGeneration -= fromGeneration;
-		auto const fromBattery = drawBatteries(busId, grossNeed - fromGeneration, contributions);
+		std::vector<std::pair<size_t, double>> busBattery;
+		auto const fromBattery = drawBatteries(busId, grossNeed - fromGeneration, &busBattery,
+			capacity ? &capacity->batteryLimits : nullptr);
+		if (contributions != nullptr)
+			for (auto const& entry : busBattery) contributions->push_back(entry);
 		bus.discharged += fromBattery;
 		bus.input += fromGeneration + fromBattery;
 		batterySuppliedKW += fromBattery;
 		batteryShortfallKW += grossNeed - fromGeneration - fromBattery;
-		if (generation) *generation = fromGeneration;
+		if (generation) *generation += fromGeneration;
 		auto const delivered = connections.send(port, fromGeneration + fromBattery).delivered;
 		consumerSupplied[{type, id}] += delivered;
+		// Record the slice against the bus that carried it. The audit, the
+		// published split and any refund of it all read back through here, so
+		// "what this bus did" is never re-derived from what was asked.
+		auto& feed = supplyFeed(type, id, busId);
+		feed.requestedKW += needKW;
+		feed.deliveredKW += delivered;
+		feed.fromGenerationKW += fromGeneration;
+		for (auto const& entry : busBattery)
+		{
+			auto hit = std::find_if(feed.fromBatteryKW.begin(), feed.fromBatteryKW.end(),
+				[&](auto const& claim) { return claim.first == entry.first; });
+			if (hit == feed.fromBatteryKW.end()) feed.fromBatteryKW.push_back(entry);
+			else hit->second += entry.second;
+		}
 		return delivered;
+	}
+
+	double StationSystemsRuntime::Impl::Tick::drawPower(std::string const& type, std::string const& id, double needKW, std::vector<std::pair<size_t, double>>* contributions, double* generation)
+	{
+		auto const buses = supplyBuses(type, id);
+		if (generation) *generation = 0.0;
+		if (buses.size() <= 1)
+			return drawPowerFromBus(type, id, buses.front(), needKW, contributions, generation);
+		// #883: the Shared split. Each bus is asked for the slice of this demand
+		// its own spare can carry, weighed right now - after the protected
+		// services ahead of it have taken theirs and after every load allocated
+		// earlier in this same pass has taken its. Nothing is carried over from
+		// last tick: generation moves, so the split moves with it.
+		auto const capacities = supplyCapacity(type, id);
+		std::vector<double> spare;
+		double totalSpare = 0.0;
+		for (auto const& capacity : capacities)
+		{
+			spare.push_back(capacity.spareKW);
+			totalSpare += capacity.spareKW;
+		}
+		std::vector<double> shares(buses.size(), 0.0);
+		if (totalSpare > 0.0)
+		{
+			// Pro-rata by spare, capped at that bus's spare. When the demand fits,
+			// every bus gives its proportional slice. When it does not, the cap
+			// binds everywhere at once, each bus empties into the load, and what
+			// is still missing is the load's own explicit unmet - never a silent
+			// clamp hidden on one circuit.
+			for (size_t i = 0; i < buses.size(); ++i)
+				shares[i] = std::min(spare[i], needKW * spare[i] / totalSpare);
+		}
+		double delivered = 0.0;
+		for (size_t i = 0; i < buses.size(); ++i)
+		{
+			// Publish what each bus was weighed at even when it carried nothing,
+			// so a reader can see the zero-spare bus take its zero share rather
+			// than simply being absent from the split.
+			supplyFeed(type, id, buses[i]).spareKW = spare[i];
+			// A bus with no spare takes no share: the others already absorbed it
+			// by carrying proportionally more of a fixed demand.
+			if (shares[i] <= 0.0) continue;
+			delivered += drawPowerFromBus(type, id, buses[i], shares[i], contributions, generation, &capacities[i]);
+		}
+		return delivered;
+	}
+
+	std::vector<std::pair<std::string, double>> StationSystemsRuntime::Impl::Tick::supplyAttribution(
+		std::string const& type, std::string const& id) const
+	{
+		auto const feeds = consumerSupply.find(std::pair<std::string, std::string>{type, id});
+		double total = 0.0;
+		if (feeds != consumerSupply.end())
+			for (auto const& feed : feeds->second) total += feed.requestedKW;
+		if (feeds != consumerSupply.end() && total > 0.0)
+		{
+			std::vector<std::pair<std::string, double>> result;
+			result.reserve(feeds->second.size());
+			for (auto const& feed : feeds->second)
+				result.push_back({feed.busId, feed.requestedKW / total});
+			return result;
+		}
+		// Nothing was ever asked of any bus this tick. Spread the consumer's
+		// demand equally across the buses it is wired to, so a load refused
+		// whole still shows up on every circuit it asked, and a single-bus
+		// consumer stays wholly on its one bus.
+		std::vector<std::pair<std::string, double>> result;
+		auto const buses = supplyBuses(type, id);
+		if (buses.empty()) return result;
+		for (auto const& busId : buses)
+			result.push_back({busId, 1.0 / static_cast<double>(buses.size())});
+		return result;
 	}
 
 	double StationSystemsRuntime::Impl::Tick::energyUnitsToKWh(std::string const& unit)
@@ -468,6 +686,30 @@ namespace core
 		return std::clamp(fraction, 0.0, 1.0);
 	}
 
+	double StationSystemsRuntime::Impl::Tick::busSupplied(std::string const& type, std::string const& id,
+		std::string const& busId) const
+	{
+		auto const feeds = consumerSupply.find(std::pair<std::string, std::string>{type, id});
+		if (feeds == consumerSupply.end()) return 0.0;
+		auto const hit = std::find_if(feeds->second.begin(), feeds->second.end(),
+			[&](auto const& feed) { return feed.busId == busId; });
+		return hit == feeds->second.end() ? 0.0 : hit->deliveredKW;
+	}
+
+	double StationSystemsRuntime::Impl::Tick::addStartupDispatch(std::string const& type,
+		std::string const& id, double crankKW)
+	{
+		double total = 0.0;
+		for (auto const& [busId, weight] : supplyAttribution(type, id))
+		{
+			auto const busCrank = connections.inputDemand(
+				powerPort(type, id, busId), crankKW * weight);
+			busBudgets.at(busId).startup += busCrank;
+			total += busCrank;
+		}
+		return total;
+	}
+
 	void StationSystemsRuntime::Impl::Tick::reserveMaterial(LoadState& load, double fraction)
 	{
 		for (auto& exchange : load.exchanges)
@@ -529,7 +771,10 @@ namespace core
 	void StationSystemsRuntime::Impl::Tick::recordProtected(std::string type, std::string id, std::string kind, double requestedKW, double suppliedKW, std::string reason)
 	{
 		if (requestedKW <= 0.0) return;
-		protectedServiceBuses.push_back(consumerBus(type, id));
+		// #883: a protected service on a Shared consumer is carried by several
+		// buses at once, so it is attributed to each of them by the share it
+		// actually took rather than pinned to whichever bus is listed first.
+		protectedServiceBuses.push_back(supplyAttribution(type, id));
 		protectedServices.push_back({std::move(id), std::move(kind), requestedKW,
 			suppliedKW, std::max(0.0, requestedKW - suppliedKW), std::move(reason)});
 		protectedDemandKW += requestedKW;
@@ -539,45 +784,65 @@ namespace core
 	void StationSystemsRuntime::Impl::Tick::refundChillerCredit(size_t chillerIndex, double refundKW)
 	{
 		if (refundKW <= 1e-15) return;
-		auto const port = powerPort("Chiller", runtime.chillers[chillerIndex].authored.id);
-		auto const eta = connections.efficiency(port);
-		if (eta <= 0.0) return;
-		refundKW /= eta;
-		connections.refund(port, refundKW);
 		auto const& id = runtime.chillers[chillerIndex].authored.id;
-		auto& bus = busBudgets.at(consumerBus("Chiller", id));
-		bus.input -= refundKW;
-		consumerSupplied[{"Chiller", id}] -= refundKW * eta;
-		auto& draw = protectedChillerDraws[chillerIndex];
-		for (auto it = draw.fromBatteryKW.rbegin();
-			it != draw.fromBatteryKW.rend() && refundKW > 1e-15; ++it)
+		auto const key = std::pair<std::string, std::string>{"Chiller", id};
+		auto const draws = consumerSupply.find(key);
+		if (draws == consumerSupply.end()) return;
+		double totalCredit = 0.0;
+		for (auto const& feed : draws->second) totalCredit += feed.deliveredKW;
+		if (totalCredit <= 0.0) return;
+		auto const refundFraction = std::min(1.0, refundKW / totalCredit);
+		// Every bus gives back the same fraction of what it carried. A Shared chiller's
+		// refund therefore returns to the circuits that funded it, so one bus
+		// never absorbs another's unused work and each circuit's own ledger
+		// still closes. The credit is always the chiller's first draw this tick,
+		// so what these feeds hold is exactly the credit and nothing else.
+		for (auto feed = draws->second.rbegin();
+			feed != draws->second.rend() && refundKW > 1e-15; ++feed)
 		{
-			auto const give = std::min(refundKW, it->second);
-			if (give <= 0.0) continue;
-			auto& battery = runtime.batteries[it->first];
-			auto const dischargePort = connections.port("Battery", battery.authored.id, "Discharge");
-			auto const nativeGive = give / connections.efficiency(dischargePort);
-			connections.refund(dischargePort, nativeGive);
-			auto const storedKWh = nativeGive * hours / battery.authored.dischargeEfficiency;
-			battery.stored += storedKWh;
-			battery.dischargedKWh -= storedKWh;
-			battery.deliveredKWh -= nativeGive * hours;
-			battery.lastDischargeKW -= nativeGive;
-			// #843: the refunded discharge never actually happened, so the
-			// cycle it was counted toward is unwound with it. This is the
-			// only unwinding Wear ever sees, and it removes operation that
-			// truly did not occur - it never heals fade from work that did.
-			if (battery.authored.capacityFade && battery.authored.usableKWh > 0.0)
-				advanceWear(battery.wear, *battery.authored.capacityFade,
-					-storedKWh / (2.0 * battery.authored.usableKWh), 0.0, 0.0, 0.0,
-					previousBatteryWearFraction[it->first]);
-			batterySuppliedKW -= give;
-			bus.discharged -= give;
-			it->second -= give;
-			refundKW -= give;
+			auto const port = powerPort("Chiller", id, feed->busId);
+			auto const eta = connections.efficiency(port);
+			if (eta <= 0.0) continue;
+			auto const giveDelivered = std::min(refundKW, feed->deliveredKW * refundFraction);
+			if (giveDelivered <= 1e-15) continue;
+			auto const giveInput = giveDelivered / eta;
+			connections.refund(port, giveInput);
+			auto& bus = busBudgets.at(feed->busId);
+			bus.input -= giveInput;
+			consumerSupplied[key] -= giveDelivered;
+			feed->deliveredKW -= giveDelivered;
+			auto remaining = giveInput;
+			for (auto it = feed->fromBatteryKW.rbegin();
+				it != feed->fromBatteryKW.rend() && remaining > 1e-15; ++it)
+			{
+				auto const give = std::min(remaining, it->second);
+				if (give <= 0.0) continue;
+				auto& battery = runtime.batteries[it->first];
+				auto const dischargePort = connections.port("Battery", battery.authored.id, "Discharge");
+				auto const nativeGive = give / connections.efficiency(dischargePort);
+				connections.refund(dischargePort, nativeGive);
+				auto const storedKWh = nativeGive * hours / battery.authored.dischargeEfficiency;
+				battery.stored += storedKWh;
+				battery.dischargedKWh -= storedKWh;
+				battery.deliveredKWh -= nativeGive * hours;
+				battery.lastDischargeKW -= nativeGive;
+				// #843: the refunded discharge never actually happened, so the
+				// cycle it was counted toward is unwound with it. This is the
+				// only unwinding Wear ever sees, and it removes operation that
+				// truly did not occur - it never heals fade from work that did.
+				if (battery.authored.capacityFade && battery.authored.usableKWh > 0.0)
+					advanceWear(battery.wear, *battery.authored.capacityFade,
+						-storedKWh / (2.0 * battery.authored.usableKWh), 0.0, 0.0, 0.0,
+						previousBatteryWearFraction[it->first]);
+				batterySuppliedKW -= give;
+				bus.discharged -= give;
+				it->second -= give;
+				remaining -= give;
+			}
+			availableGeneration += remaining;
+			bus.available += remaining;
+			refundKW -= giveDelivered;
 		}
-		availableGeneration += refundKW;
-		bus.available += refundKW;
 	}
 
 	void StationSystemsRuntime::Impl::Tick::reconcileChillerProtected(size_t chillerIndex)

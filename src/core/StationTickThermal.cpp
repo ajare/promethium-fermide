@@ -397,7 +397,7 @@ namespace core
 			// it, so the reservation never strands bus energy.
 			refundChillerCredit(chillerIndex, creditKW);
 			auto const repeatZeroCredit = chillerProtectedServiceIndex[chillerIndex] != static_cast<size_t>(-1)
-				&& connections.efficiency(powerPort("Chiller", chiller.authored.id)) == 0.0;
+				&& supplyDisconnected("Chiller", chiller.authored.id);
 			auto const suppliedKW = fromCreditKW + (repeatZeroCredit ? 0.0
 				: drawPower("Chiller", chiller.authored.id, remainingDemandKW));
 			chiller.lastPowerSuppliedKW = suppliedKW;

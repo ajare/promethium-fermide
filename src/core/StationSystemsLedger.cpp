@@ -104,6 +104,10 @@ namespace core
 		// would book a load against a bus it never transferred onto.
 		auto const committedSupplyTransfers = supplyTransfers;
 		auto const committedConsumerDispatchRequest = lastConsumerDispatchRequest;
+		// #883: the Shared split is committed state like the bus accounts it
+		// describes, so a tick that fails after a split published one puts the
+		// previous tick's split back rather than describing a draw that rolled back.
+		auto const committedSharedSupply = lastSharedSupply;
 		return [=, this]()
 		{
 			stores = committedStores;
@@ -167,6 +171,7 @@ namespace core
 			lastRecoverySurgeKW = committedRecoverySurgeKW;
 			supplyTransfers = committedSupplyTransfers;
 			lastConsumerDispatchRequest = committedConsumerDispatchRequest;
+			lastSharedSupply = committedSharedSupply;
 		};
 	}
 

@@ -45,7 +45,6 @@ namespace core
 		// protected account can be reconciled to the work actually
 		// supplied.
 
-		protectedChillerDraws = std::vector<ProtectedChillerDraw>(runtime.chillers.size());
 		chillerProtectedServiceIndex = std::vector<size_t>(
 			runtime.chillers.size(), static_cast<size_t>(-1));
 		protectedCropCirculationKW = std::vector<double>(runtime.cropPopulations.size(), 0.0);
@@ -204,13 +203,11 @@ namespace core
 			// drawProtected, but tracked (#580): the chiller pass owns
 			// the reservation from here and refunds whatever the real
 			// heat calculation leaves unused instead of stranding it.
-			double creditFromGenerationKW = 0.0;
-			std::vector<std::pair<size_t, double>> creditFromBatteryKW;
-			auto const suppliedKW = drawPower("Chiller", chiller.authored.id, usableWorkKW,
-				&creditFromBatteryKW, &creditFromGenerationKW);
+			// #883: the credit's per-bus composition is recorded by the draw
+			// itself, so a Shared chiller's refund returns along the wires that
+			// funded it instead of landing on whichever bus happens to be first.
+			auto const suppliedKW = drawPower("Chiller", chiller.authored.id, usableWorkKW);
 			protectedChillerPowerKW[chillerIndex] = suppliedKW;
-			protectedChillerDraws[chillerIndex].fromGenerationKW = creditFromGenerationKW;
-			protectedChillerDraws[chillerIndex].fromBatteryKW = std::move(creditFromBatteryKW);
 			recordProtected("Chiller", chiller.authored.id, "critical-cooling", requestedKW,
 				suppliedKW, circulationFraction + 1e-12 < 1.0
 					? "the protected chiller's cold-loop circulation is unpowered or "
@@ -270,7 +267,7 @@ namespace core
 			if (!heat) continue;
 			auto const heldKW = heat->retainedHeatKJ / seconds;
 			if (heldKW + heat->lastInputRate <= 0.0) continue;
-			protectedServiceBuses.push_back(generator.authored.busIds.front());
+			protectedServiceBuses.push_back({{generator.authored.busIds.front(), 1.0}});
 			protectedServices.push_back({generator.authored.id, "shutdown-cooling",
 				heat->lastInputRate + heldKW, heat->lastInputRate, heldKW,
 				heldKW > 0.0 ? "heat connection is constrained: unrejected heat remains at the source"
@@ -423,7 +420,7 @@ namespace core
 			}
 			auto const remaining = load.lastCappedRequestKW - supplied[index];
 			if (remaining <= 0.0) continue;
-			if (connections.efficiency(powerPort("Equipment", load.authored.id)) == 0.0)
+			if (supplyDisconnected("Equipment", load.authored.id))
 			{
 				drawPower("Equipment", load.authored.id, remaining);
 				continue;

@@ -100,6 +100,7 @@ pf_add_smoke_module(pf-smoke-station
         station/StationPowerBusChecks.cpp
         station/StationBusDispatchChecks.cpp
         station/StationTransferSupplyChecks.cpp
+        station/StationSharedSupplyChecks.cpp
         station/StationCompoundPowerChecks.cpp
         station/StationBatteryChecks.cpp
         station/StationLogisticsChecks.cpp
@@ -283,6 +284,9 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         transferHoldsPrimary transferFailover transferAlertAutoClears
         transferDwellReturn transferZeroDwell transferNoFlapping
         transferBackupAlsoShort transferNoThirdPath transferReplay transferPerLoadDwell
+        sharedSupplySplitRatio sharedSupplyZeroSpare sharedSupplyCombinedShortfall
+        sharedSupplyMinimumOperable sharedSupplyRecomputed sharedSupplyCombinedDemo
+        sharedSupplyReplay sharedSupplyProtectedSpare sharedSupplyFiniteFeeds
         compoundFiles powerFiles powerChainFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles maintenanceFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
         # #571: harvest, algae and the nutrient-conservation closure were
         # reachable through the binary but never registered here, so they

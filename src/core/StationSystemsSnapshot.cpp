@@ -2170,6 +2170,40 @@ namespace core
 		publishTransfer("Microbial processor", mImpl->microbialProcessors);
 		publishTransfer("Crops", mImpl->cropPopulations);
 		publishTransfer("Algae", mImpl->algaeCultures);
+		// #883: how each Shared-mode load divided its demand across its buses.
+		// Where the transfers above name the one bus serving a load, this names
+		// every bus that carried a share, so a combined feed, a zero-spare bus
+		// and a combined shortfall are all readable without diffing bus
+		// ledgers. Authored order, so the list is stable across replays.
+		auto publishShared = [&](char const* type, auto const& entries) {
+			for (auto const& entry : entries)
+			{
+				if (entry.authored.supplyMode != StationSupplyMode::Shared
+					|| entry.authored.supplyBusIds.size() < 2) continue;
+				StationSharedSupplySnapshot shared;
+				shared.consumerType = type;
+				shared.loadId = entry.authored.id;
+				shared.busIds = entry.authored.supplyBusIds;
+				auto const feeds = mImpl->lastSharedSupply.find({type, entry.authored.id});
+				if (feeds != mImpl->lastSharedSupply.end())
+					for (auto const& feed : feeds->second)
+						shared.feeds.push_back({feed.busId, feed.spareKW, feed.shareKW,
+							feed.suppliedKW});
+				result.power.sharedSupplies.push_back(std::move(shared));
+			}
+		};
+		publishShared("Equipment", mImpl->loads);
+		publishShared("Generator", mImpl->generators);
+		publishShared("Coolant loop", mImpl->coolantLoops);
+		publishShared("Chiller", mImpl->chillers);
+		publishShared("Water treatment", mImpl->waterTreatments);
+		publishShared("Electrolyzer", mImpl->electrolyzers);
+		publishShared("CO2 capture", mImpl->co2Captures);
+		publishShared("Sabatier", mImpl->sabatierReactors);
+		publishShared("Methane processor", mImpl->methaneProcessors);
+		publishShared("Microbial processor", mImpl->microbialProcessors);
+		publishShared("Crops", mImpl->cropPopulations);
+		publishShared("Algae", mImpl->algaeCultures);
 		return result;
 	}
 }

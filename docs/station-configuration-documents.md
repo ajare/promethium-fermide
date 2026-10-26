@@ -98,8 +98,17 @@ rename/delete confirmations cascade every membership, with one shared undo/redo
 entry. The last bus cannot be deleted. Consumer inspectors expose **Supply mode**
 and ordered bus membership: Single requires one, Transfer two distinct buses
 (primary first), Shared at least two. Select membership in the desired order;
-remove and reselect an entry to reorder it. These authoring declarations persist,
-but Transfer/Shared execution and breaker protection belong to #882–#884.
+remove and reselect an entry to reorder it. These authoring declarations persist.
+Transfer executes whole-load failover with a dwell-gated return (#882). Shared
+combines its feeds pro-rata by each bus's live post-protected spare (#883): a
+zero-spare bus contributes nothing, and remaining demand stays explicit unmet.
+The minimum-operable gate applies to the combined grant; a sub-minimum grant
+is refused whole. Each feed respects its own cable capacity and efficiency;
+a source or battery wired to multiple buses still offers only one finite budget.
+`power.sharedSupplies` exposes each consumer's bus IDs, spare, requested share
+and delivered power in declared order. Bus demand, supply, through-power and
+audit accounts include the shares each circuit carried. Breaker protection
+remains the separate #884 slice.
 
 Apply refuses invalid bus IDs, negative/non-finite rating or persistence, empty
 or nonexistent memberships, duplicate buses and invalid supply-mode counts

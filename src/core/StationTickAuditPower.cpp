@@ -46,9 +46,20 @@ namespace core
 		runtime.lastConsumerDispatchRequest.clear();
 		for (auto const& [owner, request] : dispatchRequests)
 		{
-			auto const input = connections.inputDemand(powerPort(owner.first, owner.second), request);
+			// #883: a Shared consumer's ask is spread across its circuits in the
+			// same pro-rata shape it was served in, so each bus's dispatcher is
+			// commanded for the share of this load it is actually expected to
+			// carry. A single-bus consumer gives one wire at weight 1, which is
+			// exactly what the pooled model measured before.
+			double input = 0.0;
+			for (auto const& [busId, weight] : supplyAttribution(owner.first, owner.second))
+			{
+				auto const busInput = connections.inputDemand(
+					powerPort(owner.first, owner.second, busId), request * weight);
+				input += busInput;
+				runtime.lastBusDispatchDemand[busId] += busInput;
+			}
 			dispatchDemandKW += input;
-			runtime.lastBusDispatchDemand[consumerBus(owner.first, owner.second)] += input;
 			// #882: the same supply-independent signal kept per consumer, so an
 			// automatic transfer switch weighs its own load against what its
 			// primary can deliver instead of against a station aggregate.
@@ -112,14 +123,39 @@ namespace core
 			bus.loadFraction = authored.ratedCapacityKW > 0 ? bus.throughPowerKW / authored.ratedCapacityKW : 0;
 		}
 		auto demand = [&](std::string const& type, std::string const& id, double requested) {
-			auto& bus = runtime.lastBusPower.at(consumerBus(type, id));
-			bus.demandKW += requested;
-			bus.suppliedKW += consumerSupplied[{type, id}];
+			// #883: the demand is attributed by the split that ran, and the
+			// supply by what each bus actually put on the wire. A Shared load's
+			// shortfall therefore shows up as unmet on the buses that could not
+			// cover their share, not as a hole in whichever bus is listed first.
+			for (auto const& [busId, weight] : supplyAttribution(type, id))
+			{
+				auto& bus = runtime.lastBusPower.at(busId);
+				bus.demandKW += requested * weight;
+				bus.suppliedKW += busSupplied(type, id, busId);
+			}
 		};
 		for (auto const& load : runtime.loads)
 		{
 			demand("Equipment", load.authored.id, load.lastRequestedKW + load.lastSurgeKW);
-			runtime.lastBusPower.at(consumerBus("Equipment", load.authored.id)).unmetCriticalKW += load.lastUnmetCriticalKW;
+			// #883: a Shared load's protected floor is short on the buses that
+			// could not carry it, so the critical shortfall follows the split.
+			for (auto const& [busId, weight] : supplyAttribution("Equipment", load.authored.id))
+				runtime.lastBusPower.at(busId).unmetCriticalKW += load.lastUnmetCriticalKW * weight;
+		}
+		// #883: publish the split this tick ran, per bus, for the snapshot.
+		runtime.lastSharedSupply.clear();
+		for (auto const& [consumer, busIds] : sharedSupplyBuses)
+		{
+			for (auto const& busId : busIds)
+			{
+				auto const drawn = consumerSupply.find(consumer);
+				if (drawn == consumerSupply.end()) continue;
+				auto const feed = std::find_if(drawn->second.begin(), drawn->second.end(),
+					[&](auto const& entry) { return entry.busId == busId; });
+				if (feed == drawn->second.end()) continue;
+				runtime.lastSharedSupply[consumer].push_back(
+					{busId, feed->spareKW, feed->requestedKW, feed->deliveredKW});
+			}
 		}
 		for (auto const& loop : runtime.coolantLoops) demand("Coolant loop", loop.authored.id, loop.lastPumpDemandKW + loop.lastHeaterDemandKW);
 		auto work = [&](char const* type, auto const& entries) {
@@ -133,14 +169,25 @@ namespace core
 		for (auto const& algae : runtime.algaeCultures) demand("Algae", algae.authored.id, algae.lastLightRequestedKW + algae.lastCirculationRequestedKW);
 		for (size_t i = 0; i < protectedServices.size(); ++i)
 		{
-			auto& bus = runtime.lastBusPower.at(protectedServiceBuses.at(i));
 			auto const& service = protectedServices[i];
-			bus.protectedServices.push_back(service);
-			if (service.kind == "shutdown-cooling") continue; // Thermal obligation, not electrical demand.
-			bus.protectedDemandKW += service.requestedKW;
-			bus.protectedSuppliedKW += service.suppliedKW;
-			bus.protectedUnmetKW += service.unmetKW;
-			bus.unmetCriticalKW += service.unmetKW;
+			// #883: one protected service can ride several buses. Each bus gets
+			// its own view of the service, scaled to the share it carried, so a
+			// Shared protected load's unmet critical is visible on the circuit
+			// that fell short of it.
+			for (auto const& [busId, weight] : protectedServiceBuses.at(i))
+			{
+				auto& bus = runtime.lastBusPower.at(busId);
+				auto scoped = service;
+				scoped.requestedKW *= weight;
+				scoped.suppliedKW *= weight;
+				scoped.unmetKW = std::max(0.0, scoped.requestedKW - scoped.suppliedKW);
+				bus.protectedServices.push_back(scoped);
+				if (service.kind == "shutdown-cooling") continue; // Thermal obligation, not electrical demand.
+				bus.protectedDemandKW += scoped.requestedKW;
+				bus.protectedSuppliedKW += scoped.suppliedKW;
+				bus.protectedUnmetKW += scoped.unmetKW;
+				bus.unmetCriticalKW += scoped.unmetKW;
+			}
 		}
 		for (auto& [id, bus] : runtime.lastBusPower) bus.unmetKW = std::max(0.0, bus.demandKW - bus.suppliedKW);
 		for (auto const index : runtime.transferOrder)

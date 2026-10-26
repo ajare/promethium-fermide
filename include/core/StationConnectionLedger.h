@@ -45,6 +45,12 @@ public:
 				entry.snapshot.heatProducer = found->heatProducer;
 			}
 			mLookup.emplace(std::tuple{link.designKey.ownerType, link.designKey.ownerId, link.designKey.relation}, mEntries.size());
+			// #883: a Shared-supply consumer holds one connection per bus it draws
+			// from, all under the same relation. The peer-scoped index keeps every
+			// one of those cables addressable, so a pro-rata draw books its share of
+			// throughput and loss against the cable it really travelled.
+			mPeerLookup.emplace(std::tuple{link.designKey.ownerType, link.designKey.ownerId,
+				link.designKey.relation, link.designKey.peerId}, mEntries.size());
 			mEntries.push_back(std::move(entry));
 		}
 	}
@@ -74,6 +80,14 @@ public:
 	{
 		auto found = mLookup.find(std::tuple{type, id, role});
 		return found == mLookup.end() ? Missing : found->second;
+	}
+	// The account for one role against one specific peer. Used where a member
+	// is wired to several buses at once and each wire is its own transport.
+	Port port(std::string_view type, std::string_view id, std::string_view role,
+		std::string_view peerId) const
+	{
+		auto found = mPeerLookup.find(std::tuple{type, id, role, peerId});
+		return found == mPeerLookup.end() ? Missing : found->second;
 	}
 	double efficiency(Port port) const { return port == Missing ? 1.0 : mEntries[port].properties.efficiency; }
 	double remaining(Port port) const
@@ -224,5 +238,6 @@ private:
 	double mSeconds;
 	std::vector<Entry> mEntries;
 	std::map<std::tuple<std::string, std::string, std::string>, Port, std::less<>> mLookup;
+	std::map<std::tuple<std::string, std::string, std::string, std::string>, Port, std::less<>> mPeerLookup;
 };
 }

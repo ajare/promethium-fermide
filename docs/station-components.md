@@ -212,8 +212,11 @@ inspectors or by wiring. Rename/delete cascades all references and supports
 undo/redo. See [Power Bus authoring](station-configuration-documents.md#power-bus-authoring-881).
 The older per-component descriptions of *automatic* electrical membership below
 refer to the legacy default-main topology, not an uneditable shared Power node;
-that derived node is retired. Transfer/Shared execution and breaker protection
-are separate follow-ups (#882–#884).
+that derived node is retired. Transfer executes whole-load failover with a
+dwell-gated return (#882). Shared combines each bus's live post-protected spare
+pro-rata, preserving explicit unmet demand and applying the minimum-operable
+gate to the combined grant (#883). Breaker protection remains a separate
+follow-up (#884).
 
 ### Solar
 

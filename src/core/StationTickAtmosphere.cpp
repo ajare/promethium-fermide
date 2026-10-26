@@ -1277,8 +1277,12 @@ namespace core
 			}
 			// Past dwell: this load is eligible to restart soon, so hold
 			// its restart need out of battery charging below.
-			auto& bus = busBudgets.at(consumerBus("Equipment", load.authored.id));
-			bus.reserve = std::max(bus.reserve, restartNeed);
+			auto const restartBuses = supplyBuses("Equipment", load.authored.id);
+			for (auto const& [busId, weight] : supplyAttribution("Equipment", load.authored.id))
+			{
+				auto& bus = busBudgets.at(busId);
+				bus.reserve = std::max(bus.reserve, restartNeed * weight);
+			}
 			auto const headroom = load.lastRequestedKW
 				* (1.0 + load.authored.recoveryHysteresisFraction);
 			// #589: is this restart barred only by the pools? A
@@ -1303,7 +1307,8 @@ namespace core
 			}
 			if (restartFeasible)
 				pendingRecoveryDispatchKW[load.authored.id] += std::max(headroom, restartNeed);
-			if (restartedBuses.count(consumerBus("Equipment", load.authored.id))) continue;
+			if (std::any_of(restartBuses.begin(), restartBuses.end(),
+				[&](auto const& busId) { return restartedBuses.contains(busId); })) continue;
 			auto const poolKW = powerAvailable("Equipment", load.authored.id);
 			if (poolKW + 1e-12 < headroom)
 			{
@@ -1323,7 +1328,10 @@ namespace core
 						continue;
 					}
 				}
-				if (generationAvailable(consumerBus("Equipment", load.authored.id)) + 1e-12 < restartNeed)
+				double firmKW = 0.0;
+				for (auto const& capacity : supplyCapacity("Equipment", load.authored.id, false))
+					firmKW += capacity.spareKW;
+				if (firmKW + 1e-12 < restartNeed)
 				{
 					load.lastRecoveryHoldReason =
 						"restart held: firm generation cannot carry the restart and surge";
@@ -1333,7 +1341,7 @@ namespace core
 			load.recoveryStage = StationLoadRecoveryStage::Restoring;
 			load.surgeRemainingSeconds = load.authored.restartSurgeSeconds;
 			load.lastRecoveryHoldReason.clear();
-			restartedBuses.insert(consumerBus("Equipment", load.authored.id));
+			restartedBuses.insert(restartBuses.begin(), restartBuses.end());
 		}
 		// Tally the recovery stage for the power snapshot.
 		for (auto const& load : runtime.loads)
