@@ -78,6 +78,85 @@ namespace
 		return s;
 	}
 
+	void restorePrimary(core::StationSystemsRuntime& runtime, double kw = 20.0)
+	{
+		require(runtime.updateNode<core::SolarArraySettings>("solar-main",
+			[&](auto& source) { source.capacityKW = kw; }), "primary source restore refused");
+	}
+
+	// #908: configure the consumer cables, not the solar feeders. Transfer
+	// decisions compare delivered service; dispatch still requests gross input.
+	core::StationSystemsSettings lossyRig(double primaryEta, double backupEta)
+	{
+		auto s = transferRig(4);
+		core::StationSystemsRuntime topology(s, 1.0f);
+		unsigned cables = 0;
+		for (auto const& flow : topology.snapshot().power.connections)
+			if (!flow.source && flow.key.ownerType == "Equipment" && flow.key.ownerId == "lab")
+			{
+				s.connections[flow.key].efficiency = flow.busId == "main" ? primaryEta : backupEta;
+				++cables;
+			}
+		require(cables == 2, "lossy rig did not configure both consumer cables");
+		return s;
+	}
+
+	void lossyPrimary(smoke::Context const&)
+	{
+		for (auto const& [primaryEta, backupEta] : {std::pair{0.5, 1.0}, {1.0, 0.5}, {0.5, 0.25}})
+		{
+			core::StationSystemsRuntime runtime(lossyRig(primaryEta, backupEta), 1.0f);
+			require(runtime.advanceTo(5), "lossy primary reproduction failed");
+			auto const snap = runtime.snapshot();
+			require(!transfer(snap, "lab").onBackup, "sufficient lossy primary triggered transfer");
+			require(transfer(snap, "lab").eventAtSimSeconds < 0, "sufficient primary published a switch event");
+			near(bus(snap, "main").suppliedKW, 8, "lossy primary delivered service wrong");
+			near(bus(snap, "backup").suppliedKW, 0, "unused backup supplied service");
+			near(snap.power.dispatchDemandKW, 8 / primaryEta, "dispatch lost gross cable demand");
+		}
+	}
+
+	void lossyCycles(smoke::Context const&)
+	{
+		for (auto const& [primaryEta, backupEta] : {std::pair{0.5, 1.0}, {1.0, 0.5}, {0.5, 0.25}})
+		{
+			auto s = lossyRig(primaryEta, backupEta);
+			// Even the least efficient backup must be able to carry all 8 kW.
+			s.solarArrays[1].capacityKW = 40;
+			core::StationSystemsRuntime runtime(s, 1.0f);
+			require(runtime.advanceTo(5), "lossy cycle baseline failed");
+			for (unsigned cycle = 0; cycle < 3; ++cycle)
+			{
+				double const start = 5 + cycle * 12;
+				// A real, nonzero shortfall at the consumer boundary: 7.5 < 8.
+				restorePrimary(runtime, 7.5 / primaryEta);
+				require(runtime.advanceTo(start + 1), "lossy shortfall failed");
+				auto snap = runtime.snapshot();
+				require(transfer(snap, "lab").onBackup, "true lossy shortfall did not transfer");
+				near(transfer(snap, "lab").eventAtSimSeconds, start, "lossy failover instant wrong");
+				near(bus(snap, "main").suppliedKW, 0, "failed primary retained partial service");
+				near(bus(snap, "backup").suppliedKW, 8, "lossy backup did not serve whole load");
+				near(snap.power.dispatchDemandKW, 8 / backupEta, "backup gross dispatch demand wrong");
+				restorePrimary(runtime);
+				require(runtime.advanceTo(start + 5), "lossy return dwell failed");
+				snap = runtime.snapshot();
+				require(transfer(snap, "lab").onBackup, "lossy primary returned before dwell");
+				near(transfer(snap, "lab").primaryCapableSeconds, 4, "lossy primary dwell did not accumulate");
+				require(runtime.advanceTo(start + 6), "lossy return failed");
+				snap = runtime.snapshot();
+				require(!transfer(snap, "lab").onBackup, "lossy primary failed to return after dwell");
+				near(transfer(snap, "lab").eventAtSimSeconds, start + 5, "lossy return instant wrong");
+				near(bus(snap, "main").suppliedKW, 8, "returned lossy primary service wrong");
+				near(bus(snap, "backup").suppliedKW, 0, "returned load still drew backup power");
+				near(snap.power.dispatchDemandKW, 8 / primaryEta, "returned gross dispatch demand wrong");
+				require(runtime.advanceTo(start + 12), "lossy repeated hold failed");
+				snap = runtime.snapshot();
+				require(!transfer(snap, "lab").onBackup, "serving cable change caused spurious transfer");
+				near(transfer(snap, "lab").eventAtSimSeconds, start + 5, "spurious switch during steady hold");
+			}
+		}
+	}
+
 	void contention(smoke::Context const&)
 	{
 		for (auto const protectedDemand : {false, true})
@@ -157,11 +236,6 @@ namespace
 	{
 		require(runtime.updateNode<core::SolarArraySettings>("solar-main",
 			[](auto& source) { source.capacityKW = 0; }), "primary source kill refused");
-	}
-	void restorePrimary(core::StationSystemsRuntime& runtime, double kw = 20.0)
-	{
-		require(runtime.updateNode<core::SolarArraySettings>("solar-main",
-			[&](auto& source) { source.capacityKW = kw; }), "primary source restore refused");
 	}
 
 	// Steady state: the load sits wholly on its primary and the backup carries
@@ -421,6 +495,8 @@ namespace
 
 void registerStationTransferSupplyChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"transferLossyPrimary", lossyPrimary});
+	checks.push_back({"transferLossyCycles", lossyCycles});
 	checks.push_back({"transferContention", contention});
 	checks.push_back({"transferMultipleContention", multipleContention});
 	checks.push_back({"transferContentionDwell", contentionDwell});

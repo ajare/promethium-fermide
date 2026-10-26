@@ -71,6 +71,9 @@ namespace core
 		visit("Algae", runtime.algaeCultures);
 		if (switches.empty()) return true;
 
+		// #908: both values are at the consumer (after cable losses).
+		// Gross cable-input requests belong only to bus dispatch; using them
+		// here would make switching depend on the currently serving cable.
 		struct Service { double demand{}, supplied{}; };
 		std::map<Key, Service> service;
 		auto trial = [&](Switch const* returning) {

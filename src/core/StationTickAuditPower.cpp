@@ -43,7 +43,6 @@ namespace core
 		for (auto const& item : runtime.cropPopulations) dispatchRequests[{"Crops", item.authored.id}] += item.lastLightRequestedKW + item.lastCirculationRequestedKW;
 		for (auto const& item : runtime.algaeCultures) dispatchRequests[{"Algae", item.authored.id}] += item.lastLightRequestedKW + item.lastCirculationRequestedKW;
 		runtime.lastBusDispatchDemand.clear();
-		runtime.lastConsumerDispatchRequest.clear();
 		for (auto const& [owner, request] : dispatchRequests)
 		{
 			// #883: a Shared consumer's ask is spread across its circuits in the
@@ -60,10 +59,6 @@ namespace core
 				runtime.lastBusDispatchDemand[busId] += busInput;
 			}
 			dispatchDemandKW += input;
-			// #882: the same supply-independent signal kept per consumer, so an
-			// automatic transfer switch weighs its own load against what its
-			// primary can deliver instead of against a station aggregate.
-			runtime.lastConsumerDispatchRequest[owner] += input;
 		}
 		if (!std::isfinite(dispatchDemandKW))
 		{

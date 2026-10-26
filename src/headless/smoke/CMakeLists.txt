@@ -281,6 +281,7 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
         # primary from flapping, explicit unmet when the backup is short too,
         # no implicit third path, and the Advisory transfer Alert that
         # announces each move and clears itself.
+        transferLossyPrimary transferLossyCycles
         transferContention transferMultipleContention transferContentionDwell
         transferHoldsPrimary transferFailover transferAlertAutoClears
         transferDwellReturn transferZeroDwell transferNoFlapping

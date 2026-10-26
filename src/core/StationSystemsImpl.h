@@ -1711,11 +1711,6 @@ using namespace station_detail;
 			std::optional<double> alertRaisedForEventSeconds;
 		};
 		std::map<std::pair<std::string, std::string>, SupplyTransferState> supplyTransfers;
-		// #882: the electrical demand each consumer presented to the pool in
-		// the last committed tick - the same supply-independent signal dispatch
-		// runs on (#415) - kept per consumer so a transfer switch can weigh its
-		// own load against what its primary can actually deliver this tick.
-		std::map<std::pair<std::string, std::string>, double> lastConsumerDispatchRequest;
 		// Fires and auto-clears the Advisory Alert for every transfer the
 		// committed tick recorded. Runs outside the ledger beside the Monitor
 		// evaluation, so a rolled-back tick cannot leave a phantom Alert behind:
