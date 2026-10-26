@@ -78,6 +78,81 @@ namespace
 		return s;
 	}
 
+	void contention(smoke::Context const&)
+	{
+		for (auto const protectedDemand : {false, true})
+		{
+			auto s = transferRig(4, 10, 20);
+			auto single = s.equipmentLoads.front();
+			single.id = "single";
+			single.supplyMode = StationSupplyMode::Single;
+			single.supplyBusIds = {"main"};
+			single.priority = protectedDemand ? -100 : 100;
+			single.criticalFloorKW = protectedDemand ? 8 : 0;
+			s.equipmentLoads.front().priority = 0;
+			s.equipmentLoads.push_back(single);
+			core::StationSystemsRuntime runtime(s, 1.0f);
+			require(runtime.advanceTo(5), "contention drive failed");
+			auto snap = runtime.snapshot();
+			require(transfer(snap, "lab").onBackup, "competing primary demand did not trigger failover");
+			near(bus(snap, "main").suppliedKW, 8, "Single service lost during failover");
+			near(bus(snap, "backup").suppliedKW, 8, "backup did not take whole Transfer load");
+			near(bus(snap, "main").unmetKW, 0, "primary contention remained unmet");
+			require(runtime.advanceTo(20), "contention dwell drive failed");
+			require(transfer(runtime.snapshot(), "lab").onBackup, "return ignored competing demand");
+		}
+	}
+
+	void multipleContention(smoke::Context const&)
+	{
+		for (auto const reverse : {false, true})
+		{
+			auto s = transferRig(0, 10, 20);
+			auto high = s.equipmentLoads.front();
+			high.id = "high";
+			high.priority = 100;
+			s.equipmentLoads.front().priority = 0;
+			s.equipmentLoads.push_back(high);
+			if (reverse) std::reverse(s.equipmentLoads.begin(), s.equipmentLoads.end());
+			core::StationSystemsRuntime runtime(s, 1.0f);
+			require(runtime.advanceTo(10), "multiple contention drive failed");
+			auto const snap = runtime.snapshot();
+			require(!transfer(snap, "high").onBackup, "priority winner left primary");
+			require(transfer(snap, "lab").onBackup, "second Transfer reused primary budget");
+			near(bus(snap, "main").suppliedKW, 8, "priority winner not fully served");
+			near(bus(snap, "backup").suppliedKW, 8, "second Transfer not served whole");
+		}
+	}
+
+	void contentionDwell(smoke::Context const&)
+	{
+		auto s = transferRig(4, 10, 20);
+		auto single = s.equipmentLoads.front();
+		single.id = "single";
+		single.supplyMode = StationSupplyMode::Single;
+		single.supplyBusIds = {"main"};
+		single.priority = 100;
+		s.equipmentLoads.push_back(single);
+		core::StationSystemsRuntime runtime(s, 1.0f);
+		require(runtime.advanceTo(5), "changing competition baseline failed");
+		auto setDemand = [&](double kw) {
+			require(runtime.updateNode<core::EquipmentLoadSettings>("single",
+				[&](auto& load) { load.electricalDemandKW = kw; }), "competition update refused");
+		};
+		setDemand(0);
+		require(runtime.advanceTo(8), "competition release failed");
+		require(transfer(runtime.snapshot(), "lab").primaryCapableSeconds >= 2, "return dwell did not start");
+		setDemand(8);
+		require(runtime.advanceTo(11), "competition restoration failed");
+		require(transfer(runtime.snapshot(), "lab").onBackup, "competition did not interrupt return dwell");
+		near(transfer(runtime.snapshot(), "lab").primaryCapableSeconds, 0, "competition failed to reset dwell");
+		setDemand(0);
+		require(runtime.advanceTo(15), "renewed dwell failed");
+		require(transfer(runtime.snapshot(), "lab").onBackup, "returned before renewed dwell completed");
+		require(runtime.advanceTo(16), "renewed return failed");
+		require(!transfer(runtime.snapshot(), "lab").onBackup, "sustainable primary never reclaimed load");
+	}
+
 	void killPrimary(core::StationSystemsRuntime& runtime)
 	{
 		require(runtime.updateNode<core::SolarArraySettings>("solar-main",
@@ -346,6 +421,9 @@ namespace
 
 void registerStationTransferSupplyChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"transferContention", contention});
+	checks.push_back({"transferMultipleContention", multipleContention});
+	checks.push_back({"transferContentionDwell", contentionDwell});
 	checks.push_back({"transferHoldsPrimary", holdsPrimary});
 	checks.push_back({"transferFailover", failover});
 	checks.push_back({"transferAlertAutoClears", alertAutoClears});

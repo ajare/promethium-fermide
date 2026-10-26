@@ -36,115 +36,28 @@ namespace core
 		}
 	}
 
-	double StationSystemsRuntime::Impl::Tick::busAvailableFor(std::string const& type,
-		std::string const& id, std::string const& busId)
-	{
-		// What this bus could deliver to this one consumer right now: the
-		// generation still unclaimed on the bus plus what the bus's batteries
-		// can discharge, all seen through the consumer's own supply wire to
-		// THIS bus, so cable loss and a disconnected supply port count exactly
-		// as they will when the load actually draws.
-		return connections.available(powerPort(type, id, busId),
-			generationAvailable(busId) + batteryDeliverableKW(busId));
-	}
-
 	bool StationSystemsRuntime::Impl::Tick::transferSupply()
 	{
-		// #882: the automatic transfer switch.
-		//
-		// A load authored in Transfer mode owns a primary and a backup Power
-		// Bus and sits on exactly one of them. The position is resolved here,
-		// once per tick, after every source has registered this tick's
-		// generation and before any load has drawn - so a primary that falls
-		// short moves the WHOLE load onto its backup in that same tick, and no
-		// draw ever straddles both buses. Every consumer's power path already
-		// resolves through consumerBus(), so moving the position here is the
-		// only change allocation needs: protected priority, battery dispatch,
-		// connection loss and the per-bus audit all follow the load with no
-		// knowledge that a switch exists.
-		//
-		// What the switch reads:
-		//   * demand - the load's own demand on the pool as it presented it in
-		//     the last committed tick, the same supply-independent signal
-		//     dispatch runs on (#415). A load that cannot run on its feed
-		//     never drives the switch either. The switch needs one tick to see
-		//     its load, so a Transfer load whose primary is already dead at
-		//     t=0 reads as unmet for that first tick before it moves.
-		//   * primary availability - THIS tick's, generation and battery
-		//     deliverable included, through the load's own supply connection.
-		//     A source that dies at t moves the load at t.
-		//
-		// Leaving is immediate; coming back is not. The primary must hold the
-		// load whole and continuously for the load's declared return dwell
-		// before the load returns, and one short tick restarts the clock,
-		// because a marginal primary would otherwise flap the switch every
-		// tick.
-		//
-		// There is no third path. A Transfer load resolves only to its declared
-		// primary or its declared backup, so a transfer onto a bus that cannot
-		// serve leaves the load explicitly unmet on that bus rather than
-		// quietly borrowing capacity from somewhere it was never wired to.
-		auto visit = [&](char const* type, auto const& entries) {
-			for (auto const& entry : entries)
-			{
-				if (entry.authored.supplyMode != StationSupplyMode::Transfer) continue;
-				// Validation refuses a Transfer load with anything but two
-				// distinct buses. Anything else has nothing to switch to, so
-				// it stays on its declared bus rather than inventing one.
-				if (entry.authored.supplyBusIds.size() != 2) continue;
-				auto const& primary = entry.authored.supplyBusIds[0];
-				auto const& backup = entry.authored.supplyBusIds[1];
-				auto const key = std::pair<std::string, std::string>{type, entry.authored.id};
-				auto& state = runtime.supplyTransfers[key];
-				auto const seen = runtime.lastConsumerDispatchRequest.find(key);
-				auto const demand = seen == runtime.lastConsumerDispatchRequest.end()
-					? 0.0 : seen->second;
-				auto const primaryAvailable = busAvailableFor(type, entry.authored.id, primary);
-				auto const canServe = primaryAvailable + kSupplyTransferEpsilonKW >= demand;
-				// The instant this tick begins serving on whatever bus it ends
-				// up on. Both the dwell clock and the event stamp are held to
-				// it, so "30 s on a capable primary" means thirty seconds of
-				// the simulation actually ran that way.
-				auto const switchInstant = elapsed - seconds;
-				if (!state.onBackup)
-				{
-					// Sitting on the primary. A shortfall of any size moves the
-					// whole load now: the switch holds no partial position to
-					// fall back on.
-					if (canServe) continue;
-					state.onBackup = true;
-					state.primaryCapableSince.reset();
-					state.eventFromBusId = primary;
-					state.eventToBusId = backup;
-					state.eventAtSimSeconds = switchInstant;
-					state.eventDemandKW = demand;
-					state.eventPrimaryAvailableKW = primaryAvailable;
-					consumerBuses[key] = backup;
-					continue;
-				}
-				// Sitting on the backup. The primary has to prove itself for
-				// the whole dwell before the load comes home.
-				if (!canServe)
-				{
-					state.primaryCapableSince.reset();
-					continue;
-				}
-				if (!state.primaryCapableSince.has_value())
-					state.primaryCapableSince = switchInstant;
-				auto const dwell = std::max(0.0, entry.authored.transferReturnDwellSeconds);
-				if (*state.primaryCapableSince + dwell > switchInstant + kSupplyTransferEpsilonKW)
-					continue;
-				state.onBackup = false;
-				state.primaryCapableSince.reset();
-				state.eventFromBusId = backup;
-				state.eventToBusId = primary;
-				state.eventAtSimSeconds = switchInstant;
-				state.eventDemandKW = demand;
-				state.eventPrimaryAvailableKW = primaryAvailable;
-				consumerBuses[key] = primary;
-			}
+		// Resolve against the authoritative allocation, not an independently
+		// reused gross bus budget (#907). Trials start after generation and
+		// roll back all runtime bookings; only the chosen switch positions
+		// survive. This keeps protected admission, shared feeders, batteries,
+		// material feasibility and cable losses identical to the real tick.
+		using Key = std::pair<std::string, std::string>;
+		struct Switch { Key key; std::string primary, backup; double dwell; };
+		std::vector<Switch> switches;
+		auto add = [&](char const* type, auto const& entry) {
+			if (entry.authored.supplyMode == StationSupplyMode::Transfer
+				&& entry.authored.supplyBusIds.size() == 2)
+				switches.push_back({{type, entry.authored.id}, entry.authored.supplyBusIds[0],
+					entry.authored.supplyBusIds[1], entry.authored.transferReturnDwellSeconds});
 		};
-		visit("Equipment", runtime.loads);
+		auto visit = [&](char const* type, auto const& entries) {
+			for (auto const& entry : entries) add(type, entry);
+		};
+		// Equipment uses the allocator's stable priority order, not declaration
+		// order. Other subsystems retain their authoritative phase order.
+		for (auto const index : runtime.loadOrder) add("Equipment", runtime.loads[index]);
 		visit("Generator", runtime.generators);
 		visit("Coolant loop", runtime.coolantLoops);
 		visit("Chiller", runtime.chillers);
@@ -156,6 +69,76 @@ namespace core
 		visit("Microbial processor", runtime.microbialProcessors);
 		visit("Crops", runtime.cropPopulations);
 		visit("Algae", runtime.algaeCultures);
+		if (switches.empty()) return true;
+
+		struct Service { double demand{}, supplied{}; };
+		std::map<Key, Service> service;
+		auto trial = [&](Switch const* returning) {
+			auto const restore = runtime.ledgerCheckpoint();
+			auto const savedPrediction = runtime.prediction;
+			auto preview = *this;
+			if (returning) preview.consumerBuses[returning->key] = returning->primary;
+			auto const valid = preview.protection() && preview.thermal()
+				&& preview.processing() && preview.biology() && preview.atmosphere()
+				&& preview.wear() && preview.auditPower();
+			service.clear();
+			if (valid)
+				for (auto const& item : switches)
+					service[item.key] = {preview.dispatchRequests[item.key], preview.consumerSupplied[item.key]};
+			restore();
+			runtime.prediction = savedPrediction;
+			return valid;
+		};
+		auto capable = [](Service const& value) {
+			return value.supplied + kSupplyTransferEpsilonKW >= value.demand;
+		};
+		auto const switchInstant = elapsed - seconds;
+		auto move = [&](Switch const& item, bool backup, Service const& value) {
+			auto& state = runtime.supplyTransfers[item.key];
+			state.onBackup = backup;
+			state.primaryCapableSince.reset();
+			state.eventFromBusId = backup ? item.primary : item.backup;
+			state.eventToBusId = backup ? item.backup : item.primary;
+			state.eventAtSimSeconds = switchInstant;
+			state.eventDemandKW = value.demand;
+			state.eventPrimaryAvailableKW = value.supplied;
+			consumerBuses[item.key] = state.eventToBusId;
+		};
+		// Remove one short primary load at a time, lowest priority first,
+		// then reallocate. Released protected claims may let another load
+		// stay whole; never unnecessarily transfer every partial grant.
+		std::vector<Key> moved;
+		auto failover = [&]() {
+			for (;;)
+			{
+				if (!trial(nullptr)) return false;
+				auto const shortLoad = std::find_if(switches.rbegin(), switches.rend(), [&](auto const& item) {
+					return consumerBuses.at(item.key) == item.primary && !capable(service.at(item.key));
+				});
+				if (shortLoad == switches.rend()) return true;
+				move(*shortLoad, true, service.at(shortLoad->key));
+				moved.push_back(shortLoad->key);
+			}
+		};
+		if (!failover()) return false;
+		// A returning load must fit alongside current competitors. Earlier
+		// returns become competitors for later trials, so simultaneous dwell
+		// expiry cannot return several loads against the same spare watts.
+		for (auto const& item : switches)
+		{
+			if (consumerBuses.at(item.key) != item.backup
+				|| std::find(moved.begin(), moved.end(), item.key) != moved.end()) continue;
+			if (!trial(&item)) return false;
+			auto const value = service.at(item.key);
+			auto& state = runtime.supplyTransfers[item.key];
+			if (!capable(value)) { state.primaryCapableSince.reset(); continue; }
+			if (!state.primaryCapableSince) state.primaryCapableSince = switchInstant;
+			if (*state.primaryCapableSince + item.dwell > switchInstant + kSupplyTransferEpsilonKW) continue;
+			move(item, false, value);
+			// A higher-priority return can displace a lower-priority incumbent.
+			// Move that incumbent whole in this interval, not one tick later.
+			if (!failover()) return false;
+		}
 		return true;
 	}
 

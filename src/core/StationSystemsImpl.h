@@ -2150,7 +2150,6 @@ using namespace station_detail;
 		// What one bus could deliver to one consumer through that consumer's
 		// own supply connection: the bus's generation still on hand plus what
 		// its batteries can discharge, less what the cable between them loses.
-		double busAvailableFor(std::string const& type, std::string const& id, std::string const& busId);
 		double sourceCapacity(std::string const& type, std::string const& id,
 			std::string const& role, std::vector<std::string> const& ids);
 		double sourceAvailable(std::string const& type, std::string const& id,
