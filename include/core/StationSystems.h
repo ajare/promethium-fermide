@@ -1016,13 +1016,24 @@ namespace core
 	// instantly a cold generator. This models the authored heat and energy
 	// contract of a fuelled source; it claims no reactor physics and no
 	// nuclear qualification of any kind.
-	// Prime mover labels are authored identity only (#896). Conversion and
-	// phase behaviour continue to use the installation's authored contract.
+	// Prime mover profiles constrain authoring only. Conversion and phase
+	// behaviour continue to use the installation's authored contract.
 	enum class StationGeneratorPrimeMover : std::uint8_t { Reciprocating, GasTurbine, Stirling };
 	inline constexpr std::array<char const*, 3> StationGeneratorPrimeMoverNames{
 		"reciprocating", "gas-turbine", "stirling"};
 	inline constexpr std::array<char const*, 3> StationGeneratorPrimeMoverLabels{
 		"Piston engine", "Gas turbine", "Stirling"};
+	struct GeneratorPrimeMoverProfile
+	{
+		double minEfficiency; // inclusive; the generic (0, 1] bound also applies
+		double maxEfficiency;
+		char const* efficiencyBand;
+		std::optional<double> maxRampKWPerSecond; // absent = legacy unbounded
+	};
+	inline constexpr std::array<GeneratorPrimeMoverProfile, 3> GeneratorPrimeMoverProfiles{{
+		{0.0, 1.0, "(0, 1]", std::nullopt},
+		{0.15, 0.38, "[0.15, 0.38]", 200.0},
+		{0.20, 0.42, "[0.20, 0.42]", 30.0}}};
 	struct GeneratorSettings
 	{
 		std::string id;

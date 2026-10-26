@@ -321,9 +321,14 @@ Maintenance references.
 | Thermal class / heat sink | Waste, startup and shutdown heat destination. |
 | Maximum sink temperature °C | Cooling gate; the sink must be below it for qualified operation. |
 
-**Prime mover tracer bullet (#896):** all three types currently use the same
-authored energy contract and phase machine. Efficiency/ramp profile constraints
-and injector/frozen-topology gating are follow-ups (#897/#898), not yet enforced.
+**Prime mover limits (#897):** reciprocating admits the full legacy efficiency
+range `(0, 1]` and any finite positive ramp, including `100000 kW/s`.
+Gas turbine admits efficiency `[0.15, 0.38]` and ramp at most `200 kW/s`;
+Stirling admits `[0.20, 0.42]` and at most `30 kW/s`. Band endpoints and ramp
+ceilings are inclusive. The selector shows these limits as read-only hints;
+out-of-profile values are validation errors naming the type and limit, never
+silently clamped. All three types retain the same authored energy contract and
+phase machine. Injector/frozen-topology gating remains a follow-up (#898).
 The `primeMover` key is always saved; missing keys load as `reciprocating`.
 Non-default types require World/configuration schema 125; all-piston documents
 retain their existing conditional schema version. Unknown types are refused.

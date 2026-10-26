@@ -1915,13 +1915,25 @@ namespace
 			// it is never mistaken for a source that can carry a load.
 			if (!std::isfinite(generator.ratedOutputKW) || generator.ratedOutputKW < 0.0)
 				return refuse(where + " installed capacity must be finite and non-negative (0 disables the generator)");
+			auto const& profile = GeneratorPrimeMoverProfiles.at(static_cast<size_t>(generator.primeMover));
+			auto const moverDiagnostic = std::string(" for prime mover ")
+				+ StationGeneratorPrimeMoverNames.at(static_cast<size_t>(generator.primeMover));
+			auto const bandDiagnostic = std::string("; admitted efficiency band ")
+				+ profile.efficiencyBand + moverDiagnostic;
 			if (!std::isfinite(generator.efficiency)
 				|| generator.efficiency <= 0.0 || generator.efficiency > 1.0)
-				return refuse(where + " conversion efficiency must be finite and greater than 0 up to 1");
+				return refuse(where + " conversion efficiency must be finite and greater than 0 up to 1" + bandDiagnostic);
+			if (generator.efficiency < profile.minEfficiency || generator.efficiency > profile.maxEfficiency)
+				return refuse(where + " conversion efficiency is outside the prime mover profile" + bandDiagnostic);
 			// A generator that cannot change its output at all could never
 			// reach any commanded level, so the ramp limit must be positive.
+			auto const rampDiagnostic = std::string("; admitted ramp ceiling ")
+				+ (profile.maxRampKWPerSecond ? std::to_string(*profile.maxRampKWPerSecond) + " kW/s" : "unbounded")
+				+ moverDiagnostic;
 			if (!std::isfinite(generator.maxRampKWPerSecond) || generator.maxRampKWPerSecond <= 0.0)
-				return refuse(where + " ramp limit must be finite and positive");
+				return refuse(where + " ramp limit must be finite and positive" + rampDiagnostic);
+			if (profile.maxRampKWPerSecond && generator.maxRampKWPerSecond > *profile.maxRampKWPerSecond)
+				return refuse(where + " ramp limit exceeds the prime mover profile" + rampDiagnostic);
 			if (!std::isfinite(generator.commandedOutputKW) || generator.commandedOutputKW < 0.0)
 				return refuse(where + " commanded output must be finite and non-negative");
 			if (generator.commandedOutputKW > generator.ratedOutputKW)

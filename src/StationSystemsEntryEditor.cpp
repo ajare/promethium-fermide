@@ -1465,6 +1465,13 @@ bool renderGeneratorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 				generator.primeMover = static_cast<core::StationGeneratorPrimeMover>(index);
 		ImGui::EndCombo();
 	}
+	auto const& profile = core::GeneratorPrimeMoverProfiles.at(static_cast<size_t>(generator.primeMover));
+	ImGui::SameLine();
+	if (profile.maxRampKWPerSecond)
+		ImGui::TextDisabled("Admitted efficiency %s; ramp ceiling %.0f kW/s",
+			profile.efficiencyBand, *profile.maxRampKWPerSecond);
+	else
+		ImGui::TextDisabled("Admitted efficiency %s; ramp ceiling unbounded", profile.efficiencyBand);
 	renderRefCombo(describe("fuel store", label), generator.fuelStoreId, storeIds(draft), portIsOptional("Generator", "Fuel in"));
 	renderThermalClassCombo(draft, describe("thermal class", label), generator.thermalClass, generator.heatSinkId);
 	renderRefCombo(describe("heat sink", label), generator.heatSinkId, reservoirIds(draft), portIsOptional("Generator", "Heat out"));

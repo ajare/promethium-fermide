@@ -2026,7 +2026,8 @@ namespace
 		core::GeneratorSettings generator;
 		generator.id = "gen1"; generator.thermalClass = "generation";
 		generator.fuelStoreId = "diesel"; generator.heatSinkId = "genSink";
-		generator.ratedOutputKW = 10.0; generator.efficiency = 0.4;
+		// Valid for every prime mover so each invalid dial is tested independently.
+		generator.ratedOutputKW = 10.0; generator.efficiency = 0.35;
 		generator.maxRampKWPerSecond = 2.0;
 		seed.generators = {generator};
 		core::FuelCellSettings cell;
@@ -2215,6 +2216,8 @@ namespace
 				{
 					REQ(window.draft().generators[0].primeMover == core::StationGeneratorPrimeMover::Reciprocating,
 						"newly authored generator did not default to piston");
+					REQ(driver.contains("Admitted efficiency (0, 1]; ramp ceiling unbounded"),
+						"piston legacy limits hint missing");
 					for (auto const& option : {std::pair{"Gas turbine", core::StationGeneratorPrimeMover::GasTurbine},
 						std::pair{"Stirling", core::StationGeneratorPrimeMover::Stirling}})
 					{
@@ -2225,6 +2228,26 @@ namespace
 						expected.generators[0].primeMover = option.second;
 						REQ(window.draft() == expected && window.draftHistory().undoCount() == historyCount + 1,
 							"prime mover selector rewrote authored values or did not make one history entry");
+						REQ(driver.contains(option.second == core::StationGeneratorPrimeMover::GasTurbine
+							? "Admitted efficiency [0.15, 0.38]; ramp ceiling 200 kW/s"
+							: "Admitted efficiency [0.20, 0.42]; ramp ceiling 30 kW/s"),
+							"prime mover limits hint missing");
+						for (auto const& field : {std::pair{"efficiency##Generator 0", "0.9"},
+							std::pair{"ramp kW per second##Generator 0", "100000"}})
+						{
+							driver.typeValue(ctx, (std::string("**/") + field.first).c_str(), field.second);
+							ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+							bool const efficiency = std::string_view(field.second) == "0.9";
+							REQ(efficiency ? window.draft().generators[0].efficiency == 0.9
+								: window.draft().generators[0].maxRampKWPerSecond == 100000,
+								"out-of-profile generator input silently clamped");
+							REQ(driver.contains("Validation:") && driver.contains(efficiency
+								? "admitted efficiency band" : "admitted ramp ceiling")
+								&& driver.contains(option.second == core::StationGeneratorPrimeMover::GasTurbine
+									? "gas-turbine" : "stirling"), "generator profile error not shown");
+							driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+							REQ(window.draft() == expected, "undo did not restore refused generator dial");
+						}
 						driver.click(ctx, "Undo configuration"); ctx->Yield(3);
 						REQ(window.draft() == beforeEdit, "undo did not restore prime mover");
 						driver.click(ctx, "Redo configuration"); ctx->Yield(3);

@@ -3,6 +3,7 @@
 #include "core/BinarySerializer.h"
 #include "core/StationConfigurationDocument.h"
 #include <limits>
+#include <tuple>
 
 namespace
 {
@@ -1858,6 +1859,101 @@ namespace
 			core::setStationSystemsSourceLoader({});
 		}
 	}
+	// #897: exercise the public configured-World seam, not profile lookups.
+	void generatorPrimeMoverLimits(smoke::Context const&)
+	{
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.stores = {{"fuel", "kWh", 1000, 1000, 0}};
+		core::ThermalReservoirSettings sink;
+		sink.id = "sink"; sink.thermalClass = "generation";
+		sink.heatCapacityKJPerK = 10000; sink.startingTemperatureC = 20;
+		sink.minTemperatureC = -50; sink.maxTemperatureC = 200;
+		settings.thermalReservoirs = {sink};
+		core::GeneratorSettings generator;
+		generator.id = "gen"; generator.fuelStoreId = "fuel";
+		generator.heatSinkId = "sink"; generator.thermalClass = "generation";
+		generator.ratedOutputKW = generator.commandedOutputKW = 5;
+		generator.maxRampKWPerSecond = 2;
+		settings.generators = {generator};
+		core::World world("PrimeMoverLimits", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		std::string diagnostic;
+		auto admit = [&](core::StationSystemsSettings const& candidate, char const* label) {
+			require(world.configureStationSystems(candidate, true, &diagnostic),
+				("prime mover boundary or legacy value refused: " + diagnostic).c_str());
+			require(world.getStationSystemsSettings() == candidate, "admitted generator values were clamped");
+			world.resumeSimulation();
+			require(advanceSeconds(world, 1), "prime mover limits advance failed");
+			require(world.getStationSystemsSnapshot().power.generators.at(0).primeMover == label,
+				"admitted prime mover not published");
+			world.pauseSimulation();
+		};
+		auto refuse = [&](core::StationSystemsSettings const& candidate, char const* label, char const* limit) {
+			auto const before = world.getStationSystemsSettings();
+			auto const snapshot = world.getStationSystemsSnapshot();
+			require(!world.configureStationSystems(candidate, true, &diagnostic), "out-of-profile generator admitted");
+			require(diagnostic.find("gen") != std::string::npos
+				&& diagnostic.find(label) != std::string::npos && diagnostic.find(limit) != std::string::npos,
+				("generator refusal omitted identity, prime mover or limit: " + diagnostic).c_str());
+			require(world.getStationSystemsSettings() == before && world.getStationSystemsSnapshot() == snapshot,
+				"generator profile refusal partially mutated World");
+		};
+		// Both halves intentionally live in one check: instant-ramp test idioms
+		// must remain legal on piston while the other machines' ceilings bind.
+		for (auto const& [mover, label, minimum, maximum, ceiling, band] : {
+			std::tuple{core::StationGeneratorPrimeMover::Reciprocating, "reciprocating", 0.0, 1.0, 0.0, "(0, 1]"},
+			std::tuple{core::StationGeneratorPrimeMover::GasTurbine, "gas-turbine", 0.15, 0.38, 200.0, "[0.15, 0.38]"},
+			std::tuple{core::StationGeneratorPrimeMover::Stirling, "stirling", 0.20, 0.42, 30.0, "[0.20, 0.42]"}})
+		{
+			settings.generators[0].primeMover = mover;
+			settings.generators[0].maxRampKWPerSecond = 2;
+			bool const piston = mover == core::StationGeneratorPrimeMover::Reciprocating;
+			for (double efficiency : {piston ? 0.000001 : minimum, maximum})
+			{
+				settings.generators[0].efficiency = efficiency;
+				admit(settings, label);
+			}
+			if (piston)
+			{
+				// The entire generic range, not an arbitrarily tightened piston
+				// band. Authoring extremes need not be numerically useful to run.
+				auto extreme = settings;
+				extreme.generators[0].efficiency = std::numeric_limits<double>::denorm_min();
+				extreme.generators[0].maxRampKWPerSecond = std::numeric_limits<double>::max();
+				require(world.configureStationSystems(extreme, true, &diagnostic)
+					&& world.getStationSystemsSettings() == extreme,
+					"reciprocating lost the full legacy efficiency/ramp range");
+				// Representative interior legacy values as well as both extremes.
+				for (double efficiency : {0.35, 0.4, 0.5})
+				{
+					settings.generators[0].efficiency = efficiency;
+					admit(settings, label);
+				}
+			}
+			for (double efficiency : {0.0, -0.1, 1.01, std::numeric_limits<double>::infinity(),
+				std::numeric_limits<double>::quiet_NaN()})
+			{
+				auto bad = settings; bad.generators[0].efficiency = efficiency;
+				refuse(bad, label, band);
+			}
+			if (!piston)
+				for (double efficiency : {std::nextafter(minimum, 0.0), std::nextafter(maximum, 1.0)})
+				{
+					auto bad = settings; bad.generators[0].efficiency = efficiency;
+					refuse(bad, label, band);
+				}
+			settings.generators[0].efficiency = 0.35;
+			settings.generators[0].maxRampKWPerSecond = piston ? 100000 : ceiling;
+			admit(settings, label);
+			if (!piston)
+				for (double ramp : {std::nextafter(ceiling, std::numeric_limits<double>::infinity()), 100000.0})
+				{
+					auto bad = settings; bad.generators[0].maxRampKWPerSecond = ramp;
+					refuse(bad, label, ceiling == 200 ? "200" : "30");
+				}
+		}
+	}
 	// #896: only identity crosses this plumbing. Compare complete published
 	// snapshots (apart from that identity), not private integrator/profile state.
 	void generatorPrimeMover(smoke::Context const&)
@@ -2002,4 +2098,5 @@ void registerStationGenerationChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"chillers", chillers});
 	checks.push_back({"generators", generators});
 	checks.push_back({"generatorPrimeMover", generatorPrimeMover});
+	checks.push_back({"generatorPrimeMoverLimits", generatorPrimeMoverLimits});
 }
