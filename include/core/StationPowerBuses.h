@@ -8,25 +8,31 @@ namespace core
 	// A producer has busIds; a consumer has supplyBusIds. Generators implement
 	// both roles because cranking is an electrical consumer, too.
 	template<class Settings, class Visitor>
+	void forEachStationPowerNode(Settings& settings, Visitor&& visit)
+	{
+		auto entries = [&](auto& collection, char const* type) { for (auto& entry : collection) visit(type, entry); };
+		entries(settings.solarArrays, "Solar");
+		entries(settings.generators, "Generator");
+		entries(settings.fuelCells, "Fuel cell");
+		entries(settings.heatEngines, "Heat engine");
+		entries(settings.batteries, "Battery");
+		entries(settings.equipmentLoads, "Equipment");
+		entries(settings.coolantLoops, "Coolant loop");
+		entries(settings.chillers, "Chiller");
+		entries(settings.waterTreatments, "Water treatment");
+		entries(settings.electrolyzers, "Electrolyzer");
+		entries(settings.co2Captures, "CO2 capture");
+		entries(settings.sabatierReactors, "Sabatier");
+		entries(settings.methaneProcessors, "Methane processor");
+		entries(settings.microbialProcessors, "Microbial processor");
+		entries(settings.cropPopulations, "Crops");
+		entries(settings.algaeCultures, "Algae");
+	}
+
+	template<class Settings, class Visitor>
 	void forEachStationPowerMember(Settings& settings, Visitor&& visit)
 	{
-		auto entries = [&](auto& collection) { for (auto& entry : collection) visit(entry); };
-		entries(settings.solarArrays);
-		entries(settings.generators);
-		entries(settings.fuelCells);
-		entries(settings.heatEngines);
-		entries(settings.batteries);
-		entries(settings.equipmentLoads);
-		entries(settings.coolantLoops);
-		entries(settings.chillers);
-		entries(settings.waterTreatments);
-		entries(settings.electrolyzers);
-		entries(settings.co2Captures);
-		entries(settings.sabatierReactors);
-		entries(settings.methaneProcessors);
-		entries(settings.microbialProcessors);
-		entries(settings.cropPopulations);
-		entries(settings.algaeCultures);
+		forEachStationPowerNode(settings, [&](auto, auto& entry) { visit(entry); });
 	}
 
 	// Default-only configurations keep their historical feature floor and wire

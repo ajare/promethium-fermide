@@ -926,7 +926,7 @@ void connectionTelemetryChecks()
 	auto transfer = station_flow::telemetry({"Transfer", "move"}, snap, core::World::getFixedTimestep(), &settings);
 	require(transfer && transfer->ports.at("Source") == "2 kg/s" && transfer->ports.at("Destination") == "2 kg/s",
 		"Transfer ports borrowed the destination's post-loss 1 kg/s reading");
-	auto pool = station_flow::telemetry({"Power", "Shared electrical pool"}, snap, core::World::getFixedTimestep(), &settings);
+	auto pool = station_flow::telemetry({"Power bus", "main"}, snap, core::World::getFixedTimestep(), &settings);
 	auto battery = station_flow::telemetry({"Battery", "battery"}, snap, core::World::getFixedTimestep(), &settings);
 	require(pool && battery && pool->values[2] == "Battery charging 4 kW"
 		&& battery->ports.at("Power in") == "2 kW" && pool->values.size() <= 5,
@@ -978,7 +978,7 @@ void flowConnectionTelemetryWorkflow(smoke::Context const& context)
 	require(configured, diagnostic.c_str()); world->markSaved();
 	core::StationConfigurationDocument document; document.settings = seed; document.zoom = 0.4f;
 	document.positions = {{"Store:a:0", {0, 0}}, {"Transfer:move:0", {600, 0}}, {"Store:b:0", {1200, 0}},
-		{"Solar:solar:0", {0, 650}}, {"Power:Shared electrical pool:0", {600, 650}}, {"Battery:battery:0", {1200, 650}}};
+		{"Solar:solar:0", {0, 650}}, {"Power bus:main:0", {600, 650}}, {"Battery:battery:0", {1200, 650}}};
 	auto path = (context.temporaryRoot() / "connection-telemetry.station.yaml").string();
 	core::saveStationConfiguration(path, document);
 	StationSystemsWindow window;
@@ -1093,7 +1093,7 @@ void flowConnectionsWorkflow(smoke::Context const& context)
 	core::StationConfigurationDocument document; document.settings = seed;
 	document.zoom = 0.4f;
 	document.positions = {{"Store:a:0", {0, 0}}, {"Transfer:move:0", {600, 0}}, {"Store:b:0", {1200, 0}},
-		{"Solar:solar:0", {0, 650}}, {"Power:Shared electrical pool:0", {600, 650}}, {"Battery:battery:0", {1200, 650}},
+		{"Solar:solar:0", {0, 650}}, {"Power bus:main:0", {600, 650}}, {"Battery:battery:0", {1200, 650}},
 		{"Outage:outage:0", {0, 1300}}, {"Missing Installation:missing:0", {600, 1300}}};
 	auto path = (context.temporaryRoot() / "connection-properties.station.yaml").string();
 	core::saveStationConfiguration(path, document);

@@ -80,9 +80,35 @@ with their owning entry.
 
 In the Flow canvas, select a Store or Transfer and press Delete (or use **Delete selected node**) to remove it from the draft. When its authored connector links have referrers, the confirmation counts them before any change; cancelling keeps the draft and history unchanged. Confirmation clears every mapped reference and removes the node as one undoable change. Unlinked nodes need no confirmation. Deletion is unavailable in drafts containing entry families whose references have no core-owned mapping yet, even for an otherwise isolated Store or Transfer; other projected node types likewise cannot be deleted from Flow yet. Derived service nodes are never authored.
 
-A placed Conversion arrives with one input and one output connector and can be grown with the `+` affordance below its port columns to four connectors per side; `−` removes the newest one, and neither affordance is offered past the limit, so the required floor of one input and one output can never be stripped. Every grown connector is a real connector: it takes drag-to-connect links and is judged by the same core constraint rules as fixed ones, writing its own flow of the conversion entry. Grown slots left unwired read as unused rather than missing. The Solar array is placeable and shows its implicit edge to the shared electrical pool; the pool itself renders as a derived service node - dashed, inert, with no draggable connectors and absent from the type combobox - and any link dropped on it, or click aimed at it, is refused with a reason naming it as derived. Placement, growth, shrinkage and wiring each commit one shared-history entry.
+A placed Conversion arrives with one input and one output connector and can be grown with the `+` affordance below its port columns to four connectors per side; `−` removes the newest one, and neither affordance is offered past the limit, so the required floor of one input and one output can never be stripped. Every grown connector is a real connector: it takes drag-to-connect links and is judged by the same core constraint rules as fixed ones, writing its own flow of the conversion entry. Grown slots left unwired read as unused rather than missing. Solar arrays expose required Power-out connectors wired to authored Power Buses. The former derived Power node is retired; it is neither rendered nor linkable. Placement, growth, shrinkage and wiring each commit one shared-history entry.
 
 Saves use the same exclusive temporary-file and atomic-replacement writer as World documents; an unsuccessful write does not mark the draft saved.
+
+## Power Bus authoring (#881)
+
+Place **Power bus** from the Power group. Every new or migrated configuration
+starts with one unrated `main` bus. Buses have unlimited incoming source landings
+and outgoing load taps; batteries expose both faces and share one membership list.
+Sources expose required **Power out**, consumers required **Power in**. Disconnecting
+the final membership leaves an incomplete draft port, never an invented supply path.
+
+Select a bus to edit its display name, rated capacity (0 explicitly means
+**Unrated**) and trip persistence. Rename its ID through **New node name**;
+rename/delete confirmations cascade every membership, with one shared undo/redo
+entry. The last bus cannot be deleted. Consumer inspectors expose **Supply mode**
+and ordered bus membership: Single requires one, Transfer two distinct buses
+(primary first), Shared at least two. Select membership in the desired order;
+remove and reselect an entry to reorder it. These authoring declarations persist,
+but Transfer/Shared execution and breaker protection belong to #882–#884.
+
+Apply refuses invalid bus IDs, negative/non-finite rating or persistence, empty
+or nonexistent memberships, duplicate buses and invalid supply-mode counts
+without changing the World. Incomplete drafts can still save and reopen.
+Inspector warnings are non-fatal: protected design demand above bus rating, loads
+on a bus without a source or battery, and a source-free Transfer backup. Split a
+station by wiring its sources and loads to separate buses, Apply, then run to see
+each circuit balance independently. Legacy cable design properties and connection
+Monitor subjects follow their migrated main-bus landing.
 
 ## Material identity (#699)
 

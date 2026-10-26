@@ -865,7 +865,7 @@ namespace
 		require(driver.passed(), "Flow installation rename workflow failed");
 	}
 
-	// #645: growable port sets and the derived pool on the live canvas.
+	// #645/#881: growable port sets and authored buses on the live canvas.
 	// Placement, growth, shrinkage, wiring and refusal are driven through
 	// the real controls; every assertion is about the draft and the shared
 	// history, never about the editor's bookkeeping.
@@ -953,6 +953,7 @@ namespace
 				&& window.draftHistory().undoCount() == 1,
 				"placing a conversion did not commit one entry at the floor");
 			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ctx->ItemClick("Fit all"); ctx->Yield(3);
 			// Select the conversion so the inspector reads its ports.
 			ImVec4 conversionRect{};
 			REQ(window.flowNodeRect("Conversion", "conversion1", &conversionRect),
@@ -1034,8 +1035,8 @@ namespace
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
 			REQ(window.draft().conversions[0].inputs[1].storeId == "silage",
 				"redo did not restore the conversion link");
-			// The Solar array is placeable and its implicit edge to the
-			// shared electrical pool is visible in the projection.
+			// Solar defaults to the migrated main bus, with an authored
+			// required output connector and a visible membership edge.
 			ctx->ComboClick("Place node/Solar"); ctx->Yield(2);
 			REQ(driver.contains("Solar placement armed"), "solar placement did not arm");
 			// Keep the new body clear of the existing conversion's output
@@ -1047,20 +1048,18 @@ namespace
 				"placing the solar array did not commit one entry");
 			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
 			ImVec4 poolRect{};
-			REQ(window.flowNodeRect("Power", "Shared electrical pool", &poolRect),
-				"the shared electrical pool is not drawn once a producer exists");
+			REQ(window.flowNodeRect("Power bus", "main", &poolRect),
+				"the authored main bus is missing");
 			auto const projection = station_flow::build(window.draft());
-			bool sawImplicitEdge = false;
+			bool sawBusEdge = false;
 			for (auto const& edge : projection.links)
 				if (projection.nodes[edge.from].type == "Solar"
-					&& projection.nodes[edge.to].type == "Power")
-					sawImplicitEdge = true;
-			REQ(sawImplicitEdge, "the solar array's implicit edge to the shared pool is missing");
-			// The pool is inert: touching it never selects it and says why.
-			clickAt({(poolRect.x + poolRect.z) * 0.5f, (poolRect.y + poolRect.w) * 0.5f});
-			REQ(window.flowLinkRejection().find("derived") != std::string::npos
-				&& !driver.contains("Selected: Power"),
-				"touching the derived pool selected it or gave no derived refusal");
+					&& projection.nodes[edge.to].type == "Power bus")
+					sawBusEdge = true;
+			REQ(sawBusEdge, "the solar array's authored edge to the main bus is missing");
+			// The bus is an ordinary authored node, not an inert pool.
+			clickAt({(poolRect.x + poolRect.z) * 0.5f, poolRect.y + 2});
+			REQ(driver.contains("Selected: Power bus"), "authored bus could not be selected");
 			// Clear the earlier refusal with a successful grown-output link,
 			// so the drop below must produce a fresh derived refusal.
 			REQ(drag("Conversion", "conversion1", "Conversion output 2",
@@ -1070,8 +1069,7 @@ namespace
 				&& window.draftHistory().undoCount() == 2 * core::MaxStationConversionFlows + 4,
 				("grown output wiring failed: " + window.flowLinkRejection()
 					+ " history=" + std::to_string(window.draftHistory().undoCount())).c_str());
-			// A link drag dropped on the pool body is refused as derived and
-			// writes nothing.
+			// A material link dropped on the bus body writes nothing.
 			ImVec2 originPin{};
 			REQ(window.flowPinPosition("Store", "silage", "Inventory out", &originPin),
 				"the silage connector is not on screen");
@@ -1080,12 +1078,10 @@ namespace
 			ctx->MouseTeleportToPos({(poolRect.x + poolRect.z) * 0.5f,
 				(poolRect.y + poolRect.w) * 0.5f}); ctx->Yield(2);
 			ctx->MouseUp(); ctx->Yield(3);
-			REQ(window.flowLinkRejection().find("derived") != std::string::npos
-				&& window.flowLinkRejection().find("Shared electrical pool") != std::string::npos,
-				("a link dropped on the derived pool was not refused by name: "
-					+ window.flowLinkRejection()).c_str());
+			REQ(window.draft().conversions[0].outputs[1].storeId == "grain",
+				"material drop onto a bus changed unrelated wiring");
 			REQ(window.draftHistory().undoCount() == 2 * core::MaxStationConversionFlows + 4,
-				"a dropped derived link changed the history");
+				"a material link dropped on a bus changed the history");
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 			REQ(window.draft().conversions[0].outputs[1].storeId.empty(),
 				"undo did not clear the grown output wiring");
@@ -1173,6 +1169,7 @@ namespace
 				driver.click(ctx, "**/New node name"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
 				ctx->KeyChars("renamed"); ctx->Yield(2);
 				driver.click(ctx, "**/Rename selected node"); ctx->Yield(3);
+				if (driver.contains("Confirm node rename")) { driver.click(ctx, "**/Confirm node rename"); ctx->Yield(3); }
 				REQ(window.draftHistory().undoCount() == 2, "water/gas rename did not commit once");
 				REQ(window.flowNodeRect(probe.type, "renamed", &rect), "inspector did not rename selected water/gas entry");
 				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
@@ -1256,6 +1253,7 @@ namespace
 				driver.click(ctx, "**/New node name"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
 				ctx->KeyChars("renamed"); ctx->Yield(2);
 				driver.click(ctx, "**/Rename selected node"); ctx->Yield(3);
+				if (driver.contains("Confirm node rename")) { driver.click(ctx, "**/Confirm node rename"); ctx->Yield(3); }
 				REQ(window.draftHistory().undoCount() == 2, "biology rename did not commit once");
 				REQ(window.flowNodeRect(probe.type, "renamed", &rect), "inspector did not rename selected biology entry");
 				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
@@ -1619,7 +1617,7 @@ namespace
 					{"Store", "store1"}, {"Store", "tank"}, {"Store", "sink"},
 					{"Transfer", "t1"}, {"Battery", "bat1"},
 					{"Reservoir", "res1"}, {"Thermal buffer", "buf1"},
-					{"Power", "Shared electrical pool"}})
+					{"Power bus", "main"}})
 				{
 					ImVec4 r{};
 					if (window.flowNodeRect(probe.first, probe.second, &r)) nodes.push_back(r);
@@ -2188,7 +2186,7 @@ namespace
 					(std::string(probe.type) + " node is not on screen").c_str());
 				// Select the title, not the body midpoint: at fit-to-station
 				// zoom the midpoint can fall within a Port's hit radius.
-				ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, rect.y + std::min(3.0f, (rect.w - rect.y) * 0.1f)});
+				ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, rect.y + std::min(10.0f, (rect.w - rect.y) * 0.15f)});
 				ctx->Yield(2);
 				ctx->MouseClick(); ctx->Yield(4);
 				// Clear the filter again for the next probe.
@@ -2241,7 +2239,7 @@ namespace
 					auto const& machine = graph.nodes[expected.produces ? link.from : link.to];
 					auto const& pool = graph.nodes[expected.produces ? link.to : link.from];
 					return link.label == expected.label && machine.type == expected.type && machine.id == expected.id
-						&& pool.type == "Power" && pool.id == "Shared electrical pool";
+						&& pool.type == "Power bus" && pool.id == "main";
 				}), "the projection lost or reversed a machine's shared-pool relationship");
 			// The Equipment exchange buttons share a ceiling across both
 			// faces, shrink to zero, and preserve wired references on undo.
@@ -2468,7 +2466,7 @@ namespace
 					{"Reservoir", "loopHost"}, {"Equipment", "load1"},
 					{"Equipment", "load2"}, {"Coolant loop", "loop1"},
 					{"Chiller", "chill1"}, {"Cooling service", "low"},
-					{"Store", "water"}, {"Power", "Shared electrical pool"}})
+					{"Store", "water"}, {"Power bus", "main"}})
 				{
 					ImVec4 r{};
 					if (window.flowNodeRect(probe.first, probe.second, &r)) nodes.push_back(r);
@@ -3264,7 +3262,7 @@ namespace
 					{"Reservoir", "host"}, {"Reservoir", "other"},
 					{"Radiator", "radiator1"}, {"Radiator", "radiator2"},
 					{"Equipment", "load1"}, {"Store", "water"},
-					{"Power", "Shared electrical pool"}})
+					{"Power bus", "main"}})
 				{
 					ImVec4 r{};
 					if (window.flowNodeRect(probe.first, probe.second, &r)) nodes.push_back(r);
@@ -3528,6 +3526,7 @@ namespace
 		add(s.cropPopulations); add(s.algaeCultures); add(s.deliveries); add(s.wasteEjections);
 		add(s.airlockCycles); add(s.outages); add(s.maintenanceJobs);
 		s.thermal.coolingByClass.emplace_back(); s.thermal.coolingByClass.back().thermalClass = "node";
+		s.power.buses.emplace_back(); s.power.buses.back().busId = "node";
 		auto const before = s;
 		for (auto const& type : core::stationPlaceableTypes())
 		{
@@ -3540,12 +3539,12 @@ namespace
 				require(line.find(" / ") == std::string::npos && line.find(" | ") == std::string::npos,
 					("Telemetry combines multiple metrics: " + line).c_str());
 		}
-		require(station_flow::telemetry({"Power", "node"}, s, 0.5).has_value()
+		require(!station_flow::telemetry({"Power", "node"}, s, 0.5).has_value()
 			&& station_flow::telemetry({"Cooling service", "node"}, s, 0.5).has_value(),
-			"Derived services have no telemetry");
+			"Retired Power node still has telemetry or Cooling service lost its telemetry");
 		require(s == before, "Telemetry formatting mutated the snapshot");
-		s.power.batteryChargeKW = 3.5; s.power.batteryDischargeKW = 7.5;
-		auto electrical = station_flow::telemetry({"Power", "node"}, s, 0.5);
+		s.power.buses[0].batteryChargeKW = 3.5; s.power.buses[0].batteryDischargeKW = 7.5;
+		auto electrical = station_flow::telemetry({"Power bus", "node"}, s, 0.5);
 		require(electrical->values[2] == "Battery charging 3.5 kW"
 			&& electrical->values[3] == "Battery discharging 7.5 kW",
 			"Electrical pool battery labels lost charging/discharging direction");
@@ -3638,8 +3637,8 @@ namespace
 			require(value->ports.at("Source") == expected && value->values[0] == "Actual " + expected,
 				("Trace formatting lost its boundary, zero or sign: " + expected).c_str());
 		}
-		tiny.power.batteryChargeKW = 0.0005;
-		require(station_flow::telemetry({"Power", "node"}, tiny, 0.5)->values[2] == "Battery charging trace kW",
+		tiny.power.buses[0].batteryChargeKW = 0.0005;
+		require(station_flow::telemetry({"Power bus", "node"}, tiny, 0.5)->values[2] == "Battery charging trace kW",
 			"Power readout omitted trace formatting");
 		tiny.power.batteries[0].stateOfCharge = 0.000005;
 		require(station_flow::telemetry({"Battery", "node"}, tiny, 0.5)->values[0] == "State of charge trace%",
@@ -4822,7 +4821,7 @@ namespace
 			require(!n.unresolved, ("Reference flow has unresolved node: " + n.type + " " + n.id).c_str());
 		for (auto const& e : graph.links)
 			require(e.from < graph.nodes.size() && e.to < graph.nodes.size(), "Flow link points outside node set");
-		require(station_flow::build({}).nodes.empty(), "Empty draft created a fictitious system");
+		require(station_flow::build({}).nodes.size() == 1 && station_flow::build({}).nodes[0].type == "Power bus", "Default draft must contain its authored main bus");
 		auto checkLayout = [&](station_flow::Graph const& input)
 		{
 			auto a = station_flow::forceLayout(input), b = station_flow::forceLayout(input);
@@ -4921,7 +4920,7 @@ namespace
 			ctx->SetRef("View");
 			ctx->ItemClick("Views/Station Flow"); ctx->Yield(3);
 			REQ(view.selectedTab() == ViewWindow::Tab::StationFlow
-				&& driver.contains("1 nodes, 0 connections"), "Flow did not show the unapplied draft store");
+				&& driver.contains("2 nodes, 0 connections"), "Flow did not show the unapplied draft store");
 			REQ(world->getStationSystemsSettings().stores.empty() && history.undoCount() == 0,
 				"Flow applied draft settings or changed document history");
 			auto storeBounds = [&]
@@ -4984,7 +4983,7 @@ namespace
 				&& history.undoCount() == 0, "Tab selection changed simulation or document state");
 			REQ(driver.contains("Draft differs from the authored start conditions"), "Tab switch discarded draft");
 			view.select(ViewWindow::Tab::StationFlow); ctx->Yield(3);
-			REQ(driver.contains("1 nodes, 0 connections"), "Flow lost draft after hiding tabs");
+			REQ(driver.contains("2 nodes, 0 connections"), "Flow lost draft after hiding tabs");
 			view.setStationSystemsVisible(false); ctx->Yield(3);
 			REQ(view.selectedTab() == ViewWindow::Tab::World && driver.contains("World canvas active")
 				&& !driver.contains("Station Systems"), "Hiding the active station tab did not return to World");
@@ -5002,13 +5001,13 @@ namespace
 			REQ(driver.contains("No World is open."), "Flow tab lacks empty state");
 			world = std::make_shared<core::World>("New empty World", 2, 2);
 			world->pauseSimulation(); world->finishBuild(); ctx->Yield(3);
-			REQ(driver.contains("No systems configured in the draft"), "Flow leaked the previous World's draft");
+			REQ(driver.contains("1 nodes, 0 connections"), "Flow leaked the previous World's draft");
 			view.select(ViewWindow::Tab::StationSystems); ctx->Yield(3);
 			ctx->SetRef(ImGui::FindWindowByName("View")->DC.ChildWindows.back());
 			ctx->ItemClick("Load into draft");
 			ctx->SetRef("View");
 			ctx->ItemClick("Views/Station Flow"); ctx->Yield(3);
-			REQ(driver.contains("Draft configuration flow") && !driver.contains("No systems configured in the draft"),
+			REQ(driver.contains("Draft configuration flow") && !driver.contains("1 nodes, 0 connections"),
 				"Packaged reference draft did not regenerate the flow diagram");
 			core::StationReferenceDocument flowReference;
 			std::string flowDiagnostic;
@@ -5359,7 +5358,7 @@ namespace
 		driver.run("station", "configurationDocument", [&](ImGuiTestContext* ctx)
 		{
 			ctx->SetRef("View");
-			REQ(driver.contains("1 nodes, 0 connections") && view.selectedTab() == ViewWindow::Tab::StationFlow,
+			REQ(driver.contains("2 nodes, 0 connections") && view.selectedTab() == ViewWindow::Tab::StationFlow,
 				"Initial World settings did not seed the draft");
 			ctx->ItemClick("Views/Station Flow/Save configuration"); ctx->Yield(3);
 			REQ(std::filesystem::exists(path) && !view.flowModified(), "Save did not clear the modified indicator");
@@ -5370,35 +5369,160 @@ namespace
 			ctx->ItemClick("Views/Station Flow/Save configuration"); ctx->Yield(3);
 			REQ(!view.flowModified(), "Successful retry did not clear the modified indicator");
 			ctx->ItemClick("Views/Station Flow/New configuration"); ctx->Yield(3);
-			REQ(driver.contains("No systems configured in the draft"), "New did not clear the draft");
+			REQ(driver.contains("1 nodes, 0 connections"), "New did not clear the draft");
 			ctx->ItemClick("Views/Station Flow/Open configuration"); ctx->Yield(3);
-			REQ(driver.contains("1 nodes, 0 connections"), "Open did not restore the saved draft");
+			REQ(driver.contains("2 nodes, 0 connections"), "Open did not restore the saved draft");
 			ctx->ItemClick("Views/Station Systems"); ctx->Yield(3);
 			ctx->SetRef(ImGui::FindWindowByName("View")->DC.ChildWindows.back());
 			ctx->ComboClick("Add entry/Store"); ctx->Yield(3);
 			ctx->SetRef("View");
 			ctx->ItemClick("Views/Station Flow"); ctx->Yield(3);
-			REQ(driver.contains("2 nodes, 0 connections"), "Draft edit was not visible in Flow");
+			REQ(driver.contains("3 nodes, 0 connections"), "Draft edit was not visible in Flow");
 			ctx->ItemClick("Views/Station Flow/New configuration"); ctx->Yield(3);
 			REQ(driver.contains("Discard unsaved Station configuration changes?"),
 				"Dirty New did not ask for confirmation");
 			ctx->ItemClick("Views/Station Flow/Keep configuration"); ctx->Yield(3);
-			REQ(driver.contains("2 nodes, 0 connections"), "Cancel discarded the draft");
+			REQ(driver.contains("3 nodes, 0 connections"), "Cancel discarded the draft");
 			ctx->ItemClick("Views/Station Flow/New configuration"); ctx->Yield(3);
 			ctx->ItemClick("Views/Station Flow/Discard configuration changes"); ctx->Yield(3);
-			REQ(driver.contains("No systems configured in the draft"), "Confirmed New did not clear the draft");
+			REQ(driver.contains("1 nodes, 0 connections"), "Confirmed New did not clear the draft");
 			REQ(world->getStationSystemsSettings() == initial && history.undoCount() == 0
 				&& world->getSimulationTick() == 0, "Draft file actions touched source World state");
 			world = std::make_shared<core::World>("Destination", 2, 2);
 			world->pauseSimulation(); world->finishBuild(); world->markSaved(); ctx->Yield(3);
 			ctx->ItemClick("Views/Station Flow/Open configuration"); ctx->Yield(3);
-			REQ(driver.contains("1 nodes, 0 connections") && world->getStationSystemsSettings().stores.empty()
+			REQ(driver.contains("2 nodes, 0 connections") && world->getStationSystemsSettings().stores.empty()
 				&& !world->isModified() && history.undoCount() == 0,
 				"Opening into another World changed its settings or failed to restore draft");
 
 		});
 		#undef REQ
 		require(driver.passed(), "Station configuration document workflow failed");
+	}
+
+	void powerBusAuthoring(smoke::Context const&)
+	{
+		using smoke::require;
+		// Cascade must preserve ordered Transfer membership, including when
+		// the primary alone is renamed. Deleting a bus leaves draft ports
+		// incomplete rather than silently inventing a replacement supply.
+		core::StationSystemsSettings rig;
+		rig.enabled = true;
+		rig.powerBuses.push_back({"backup", "Backup", 0, 0});
+		core::SolarArraySettings solar; solar.id = "solar"; solar.capacityKW = 20;
+		rig.solarArrays = {solar};
+		core::EquipmentLoadSettings load; load.id = "load"; load.electricalDemandKW = 4;
+		load.thermalClass = "moderate"; load.criticalFloorKW = 2;
+		load.supplyMode = core::StationSupplyMode::Transfer; load.supplyBusIds = {"main", "backup"};
+		rig.equipmentLoads = {load};
+		core::StationNodeRename rename;
+		std::string diagnostic;
+		require(core::planStationNodeRename(rig, "Power bus", "main", "primary", rename, &diagnostic)
+			&& core::renameStationNode(rig, rename, &diagnostic), "bus rename failed");
+		require(rig.solarArrays[0].busIds == std::vector<std::string>{"primary"}
+			&& rig.equipmentLoads[0].supplyBusIds == std::vector<std::string>({"primary", "backup"}), "bus rename lost ordered membership");
+		require(core::planStationNodeRename(rig, "Power bus", "primary", "grid:primary%", rename, &diagnostic)
+			&& core::renameStationNode(rig, rename, &diagnostic), "delimiter-bearing bus rename failed");
+		core::StationNodeRemoval removal;
+		require(core::planStationNodeRemoval(rig, "Power bus", "grid:primary%", removal)
+			&& core::removeStationNode(rig, removal, &diagnostic), "bus delete failed");
+		require(rig.solarArrays[0].busIds.empty() && rig.equipmentLoads[0].supplyBusIds == std::vector<std::string>{"backup"}, "bus delete left ghost memberships");
+		auto const beforeLastBus = rig;
+		require(core::planStationNodeRemoval(rig, "Power bus", "backup", removal)
+			&& !core::removeStationNode(rig, removal, &diagnostic)
+			&& !diagnostic.empty() && rig == beforeLastBus, "last-bus removal was not refused atomically");
+		rig.equipmentLoads[0].supplyMode = core::StationSupplyMode::Single;
+		rig.equipmentLoads[0].supplyBusIds = {"backup"};
+		rig.solarArrays[0].busIds = {"backup"};
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1800, 1200};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Power buses", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		require(world->configureStationSystems(rig, false, &diagnostic), diagnostic.c_str());
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1760, 1160});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "powerBusAuthoring", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			ctx->ComboClick("Place node/Power bus"); ctx->Yield(2);
+			auto* canvas = flowCanvasWindow("Configuration");
+			ctx->MouseTeleportToPos({canvas->Pos.x + 450, canvas->Pos.y + 420}); ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			REQ(window.draft().powerBuses.size() == 2, "Power bus placement missing");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(2);
+			REQ(window.draft().powerBuses.size() == 1, "bus placement undo failed");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(2);
+			REQ(window.draft().powerBuses.size() == 2, "bus placement redo failed");
+			ctx->ItemClick("Fit all"); ctx->Yield(3);
+			ImVec2 from{}, to{};
+			REQ(window.flowPinPosition("Solar", "solar", "Power out", &from)
+				&& window.flowPinPosition("Power bus", "bus1", "Power in", &to), "required power connectors missing");
+			ctx->MouseTeleportToPos(from); ctx->MouseDown(); ctx->Yield(2);
+			ctx->MouseTeleportToPos(to); ctx->Yield(2); ctx->MouseUp(); ctx->Yield(3);
+			REQ(window.draft().solarArrays[0].busIds == std::vector<std::string>({"backup", "bus1"}), "source landing did not append bus membership");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(2);
+			REQ(window.draft().solarArrays[0].busIds == std::vector<std::string>{"backup"}, "power wiring undo failed");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(2);
+			ImVec4 rect{};
+			REQ(window.flowNodeRect("Power bus", "bus1", &rect), "authored bus not selectable");
+			ctx->MouseTeleportToPos({(rect.x + rect.z) / 2, rect.y + 15}); ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos({40, 40}); ctx->Yield(2);
+			REQ(driver.contains("Unrated") && driver.contains("Trip persistence"), "bus inspector fields missing");
+			driver.typeValue(ctx, "**/New node name", "branch"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(2);
+			driver.click(ctx, "**/Rename selected node"); ctx->Yield(2);
+			driver.click(ctx, "**/Confirm node rename"); ctx->Yield(3);
+			REQ(window.draft().solarArrays[0].busIds == std::vector<std::string>({"backup", "branch"}), "UI rename did not cascade source membership");
+			driver.click(ctx, "**/Delete selected node"); ctx->Yield(2);
+			driver.click(ctx, "**/Confirm node deletion"); ctx->Yield(3);
+			REQ(window.draft().powerBuses.size() == 1 && window.draft().solarArrays[0].busIds == std::vector<std::string>{"backup"}, "UI delete left a bus reference");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(2);
+			REQ(window.draft().solarArrays[0].busIds == std::vector<std::string>({"backup", "branch"}), "UI cascade undo lost membership");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(2);
+			REQ(window.draft().powerBuses.size() == 1, "UI cascade redo lost deletion");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(2);
+			REQ(window.flowNodeRect("Equipment", "load", &rect), "load missing after cascade");
+			ctx->MouseTeleportToPos({(rect.x + rect.z) / 2, rect.y + 3}); ctx->MouseClick(); ctx->Yield(3);
+			driver.click(ctx, "**/branch##Supply buses (selection order: primary, backup)"); ctx->Yield(2);
+			REQ(driver.contains("Supply mode requires") && world->getStationSystemsSettings() == rig, "invalid count lacked feedback or changed the World");
+			// BeginCombo lacks labelled wildcard metadata in this ImGui
+			// version. Address it directly in the inspector window resolved
+			// from its neighbouring, labelled membership checkbox.
+			auto* membership = ctx->ItemInfo("**/branch##Supply buses (selection order: primary, backup)");
+			REQ(membership->Window, "membership inspector window missing");
+			ctx->SetRef(membership->ParentID);
+			ctx->ComboClick("Supply mode/Transfer"); ctx->Yield(2);
+			ctx->SetRef("Configuration");
+			REQ(!ctx->IsError(), "engine could not select Transfer");
+			REQ(window.draft().equipmentLoads[0].supplyMode == core::StationSupplyMode::Transfer
+				&& window.draft().equipmentLoads[0].supplyBusIds == std::vector<std::string>({"backup", "branch"}), "Transfer authoring lost ordered buses");
+			auto select = [&](char const* type, char const* id) {
+				if (!window.flowNodeRect(type, id, &rect)) return false;
+				ctx->MouseTeleportToPos({(rect.x + rect.z) / 2, rect.y + 3}); ctx->MouseClick(); ctx->Yield(3);
+				ctx->MouseTeleportToPos({40, 40}); ctx->Yield(2);
+				return true;
+			};
+			REQ(select("Solar", "solar"), "source inspector missing");
+			driver.click(ctx, "**/branch##Source and battery buses"); ctx->Yield(2);
+			REQ(window.draft().solarArrays[0].busIds == std::vector<std::string>{"backup"}, "source membership checkbox failed");
+			REQ(select("Equipment", "load"), "Transfer inspector missing");
+			REQ(driver.contains("Transfer backup has no source and no battery"), "source-free backup warning missing");
+			REQ(select("Power bus", "branch"), "branch inspector missing");
+			driver.typeValue(ctx, "**/Rated capacity (kW)", "1"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(2);
+			REQ(driver.contains("protected demand") && driver.contains("bus has loads but no source and no battery"), "bus design warnings missing");
+			std::string warningDiagnostic;
+			REQ(core::validateStationSystemsSettings(window.draft(), warningDiagnostic), "design warnings became fatal");
+			REQ(select("Solar", "solar"), "source inspector missing for disconnect");
+			driver.click(ctx, "**/backup##Source and battery buses"); ctx->Yield(2);
+			REQ(driver.contains("Incomplete: required Power port is unwired") && world->getStationSystemsSettings() == rig, "unwired required power port did not read incomplete");
+			REQ(!window.flowNodeRect("Power", "Shared electrical pool", &rect), "derived Power node survived");
+		});
+		#undef REQ
+		require(driver.passed(), "Power bus authoring UI failed");
 	}
 
 	void addEntryWorkflow(smoke::Context const&)
@@ -5422,7 +5546,7 @@ namespace
 			// All existing creation actions are available from one grouped control.
 			std::pair<char const*, char const*> const entries[] = {
 				{"Store", "Store"}, {"Transfer", "Transfer"}, {"Conversion", "Conversion"},
-				{"Solar", "Solar array"}, {"Equipment", "Equipment load"}, {"Battery", "Battery"},
+				{"Power bus", "Power bus"}, {"Solar", "Solar array"}, {"Equipment", "Equipment load"}, {"Battery", "Battery"},
 				{"Generator", "Generator"}, {"Fuel cell", "Fuel cell"}, {"Sabatier", "Sabatier reactor"},
 				{"Methane processor", "Methane processor"}, {"Reservoir", "Thermal reservoir"},
 				{"Radiator", "Radiator"}, {"Coolant loop", "Coolant loop"}, {"Chiller", "Chiller"},
@@ -5445,7 +5569,7 @@ namespace
 			{
 				ctx->ComboClick((std::string("Add entry/") + label).c_str()); ctx->Yield(3);
 				auto graph = station_flow::build(window.draft());
-				REQ(std::count_if(graph.nodes.begin(), graph.nodes.end(), [&](auto const& node) { return node.type == type; }) == 1,
+				REQ(std::count_if(graph.nodes.begin(), graph.nodes.end(), [&](auto const& node) { return node.type == type; }) == (std::string_view(type) == "Power bus" ? 2 : 1),
 					"Creation menu did not append the selected type exactly once");
 				REQ(window.draftHistory().undoCount() == ++count, "Creation did not commit exactly one draft history entry");
 			}
@@ -7744,7 +7868,7 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 			double ledgerDraw = 0.0;
 			for (auto const& flow : snapshot.connections)
 			{
-				if (flow.key.peerType != "Power") continue;
+				if (flow.key.peerType != "Power bus") continue;
 				if (flow.key.relation != "Electrical supply" && flow.key.relation != "Startup"
 					&& flow.key.relation != "Charge") continue;
 				if (std::find(internals.begin(), internals.end(),
@@ -8382,6 +8506,7 @@ prefabCatalogue:
 	checks.push_back({"station/prefabDialOverrideWorkflow", prefabDialOverrideWorkflow});
 	checks.push_back({"station/prefabDialBoundaryWorkflow", prefabDialBoundaryWorkflow});
 	checks.push_back({"station/prefabDuplicateInstancePinsWorkflow", prefabDuplicateInstancePinsWorkflow});
+	checks.push_back({"station/powerBusAuthoring", powerBusAuthoring});
 	checks.push_back({"station/addEntryWorkflow", addEntryWorkflow});
 	checks.push_back({"station/configurationResources", configurationResources});
 	checks.push_back({"station/windowWorkflow", workflow});

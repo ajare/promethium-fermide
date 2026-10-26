@@ -49,10 +49,11 @@ For editor operation, Apply/Reset, telemetry and execution details, see
 - An optional port may be left unused only when its associated feature does not
   require it. Hollow/unwired ports make partially built drafts possible; they
   do not waive complete-configuration validation at Apply.
-- **Power in/out is automatic.** Electrical producers and consumers join the
-  shared electrical pool; do not manually cable Solar to an individual load.
-  Automatic links can have connection design properties but cannot be manually
-  disconnected. Cooling-service relationships are also derived, not hand-wired.
+- **Power in/out is authored through Power Buses (#881).** Wire producers
+  to bus inputs and bus outputs to consumers; do not cable Solar directly to
+  a load. The default `main` membership preserves legacy documents. Power
+  ports can be disconnected and then read as incomplete. Cooling-service
+  relationships remain derived, not hand-wired.
 - A rating is a ceiling, not promised production. Available inputs, power,
   temperature gates, output headroom and connection constraints can reduce
   operation. Shortfalls are reported as Unmet demand or a named limiter.
@@ -200,6 +201,19 @@ the input. This models a conservative sorting/processing boundary rather than
 turning a waste label into food for free.
 
 ## Power
+
+### Power bus
+
+An authored distribution circuit, placed from the Power group. Its input and
+output faces accept unlimited landings/taps. The inspector authors display name,
+rated capacity (0 is visibly **Unrated**) and trip persistence. Source/battery
+memberships and consumer Single/Transfer/Shared supply modes are authored in
+inspectors or by wiring. Rename/delete cascades all references and supports
+undo/redo. See [Power Bus authoring](station-configuration-documents.md#power-bus-authoring-881).
+The older per-component descriptions of *automatic* electrical membership below
+refer to the legacy default-main topology, not an uneditable shared Power node;
+that derived node is retired. Transfer/Shared execution and breaker protection
+are separate follow-ups (#882–#884).
 
 ### Solar
 

@@ -1,4 +1,5 @@
 #include "core/StationPorts.h"
+#include "core/StationPowerBuses.h"
 #include "core/StationConnections.h"
 
 #include <algorithm>
@@ -142,6 +143,37 @@ namespace
 		return type;
 	}
 
+	std::string powerBusToken(std::string const& id)
+	{
+		std::string token;
+		for (char c : id) token += c == ':' ? "%3A" : c == '%' ? "%25" : std::string(1, c);
+		return token;
+	}
+	std::string powerBusFromToken(std::string const& token)
+	{
+		std::string id;
+		for (size_t i = 0; i < token.size(); ++i) {
+			if (token.compare(i, 3, "%3A") == 0) { id += ':'; i += 2; }
+			else if (token.compare(i, 3, "%25") == 0) { id += '%'; i += 2; }
+			else id += token[i];
+		}
+		return id;
+	}
+
+	std::vector<std::string>* powerField(StationSystemsSettings& settings,
+		std::string const& type, std::string const& id, std::string const& field)
+	{
+		std::vector<std::string>* result = nullptr;
+		forEachStationPowerNode(settings, [&](auto nodeType, auto& entry) {
+			if (type != nodeType || id != entry.id) return;
+			if constexpr (requires { entry.busIds; })
+				if (field.starts_with("Power out@") || (type == "Battery" && field.starts_with("Power in@"))) result = &entry.busIds;
+			if constexpr (requires { entry.supplyBusIds; })
+				if (field.starts_with("Power in@")) result = &entry.supplyBusIds;
+		});
+		return result;
+	}
+
 	bool mapLink(CandidateLink const& link, LinkMapping& mapping)
 	{
 		auto const* from = findPort(link.from.nodeType, link.from.portName);
@@ -152,6 +184,16 @@ namespace
 			return mapLink({link.to, link.from}, mapping);
 		if (from->direction != StationPortDirection::Output
 			|| to->direction != StationPortDirection::Input) return false;
+		if (link.to.nodeType == "Power bus" && link.to.portName == "Power in" && link.from.portName == "Power out")
+		{
+			mapping = {link.from.nodeType, link.from.nodeId, "Power out@" + powerBusToken(link.to.nodeId), link.to};
+			return true;
+		}
+		if (link.from.nodeType == "Power bus" && link.from.portName == "Power out" && link.to.portName == "Power in")
+		{
+			mapping = {link.to.nodeType, link.to.nodeId, "Power in@" + powerBusToken(link.from.nodeId), link.from};
+			return true;
+		}
 		StationSystemsSettings schedules;
 		schedules.deliveries.emplace_back(); schedules.wasteEjections.emplace_back();
 		schedules.outages.emplace_back(); schedules.maintenanceJobs.emplace_back();
@@ -1335,6 +1377,7 @@ namespace
 	template<class Settings, class F>
 	bool withNodeEntries(Settings& settings, std::string_view type, F fn)
 	{
+		if (type == "Power bus") return fn(settings.powerBuses);
 		if (type == "Store") return fn(settings.stores);
 		if (type == "Transfer") return fn(settings.transfers);
 		if (type == "Conversion") return fn(settings.conversions);
@@ -1425,6 +1468,18 @@ namespace
 std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& settings)
 {
 	std::vector<AuthoredLink> links;
+	forEachStationPowerNode(settings, [&](auto type, auto const& entry) {
+		auto add = [&](auto const& ids, bool input) {
+			for (auto const& bus : ids)
+			{
+				std::string port = input ? "Power in" : "Power out";
+				StationPinRef member{type, entry.id, port}, peer{"Power bus", bus, input ? "Power out" : "Power in"};
+				links.push_back({linkIdentity(type, entry.id, port + "@" + powerBusToken(bus)), input ? peer : member, input ? member : peer});
+			}
+		};
+		if constexpr (requires { entry.busIds; }) { add(entry.busIds, false); if (std::string_view(type) == "Battery") add(entry.busIds, true); }
+		if constexpr (requires { entry.supplyBusIds; }) add(entry.supplyBusIds, true);
+	});
 	visitStationBiologyReferences(settings, [&](auto type, auto const& id, auto port, auto field,
 		auto const& reference, bool input, auto peerType, auto peerPort) {
 		if (reference.empty()) return;
@@ -1744,6 +1799,12 @@ bool applyStationLink(StationSystemsSettings& settings, CandidateLink const& lin
 {
 	LinkMapping mapping;
 	if (!mapLink(link, mapping)) return false;
+	if (auto* ids = powerField(settings, mapping.ownerType, mapping.ownerId, mapping.field))
+	{
+		if (std::none_of(settings.powerBuses.begin(), settings.powerBuses.end(), [&](auto const& bus) { return bus.id == mapping.peer.nodeId; })) return false;
+		if (std::find(ids->begin(), ids->end(), mapping.peer.nodeId) == ids->end()) ids->push_back(mapping.peer.nodeId);
+		return true;
+	}
 	auto write = [&](std::string& target) {
 		if (target != mapping.peer.nodeId)
 			eraseConnectionProperties(settings, mapping.ownerType, mapping.ownerId, mapping.field);
@@ -1792,6 +1853,11 @@ bool clearStationLink(StationSystemsSettings& settings, std::string const& ident
 	auto const ownerType = identity.substr(0, first);
 	auto const field = identity.substr(last + 1);
 	auto const ownerId = identity.substr(first + 1, last - first - 1);
+	if (auto* ids = powerField(settings, ownerType, ownerId, field))
+	{
+		std::erase(*ids, powerBusFromToken(field.substr(field.find('@') + 1)));
+		return true;
+	}
 	auto clear = [&](std::string& target) {
 		eraseConnectionProperties(settings, ownerType, ownerId, field);
 		target.clear();
@@ -1880,6 +1946,11 @@ bool planStationNodeRemoval(StationSystemsSettings const& settings,
 bool removeStationNode(StationSystemsSettings& settings, StationNodeRemoval const& plan,
 	std::string* diagnostic)
 {
+	if (plan.nodeType == "Power bus" && settings.powerBuses.size() <= 1)
+	{
+		if (diagnostic) *diagnostic = "Station requires at least one Power Bus";
+		return false;
+	}
 	StationNodeRemoval current;
 	if (!planStationNodeRemoval(settings, plan.nodeType, plan.nodeId, current)
 		|| current.linkIdentities != plan.linkIdentities
@@ -2011,6 +2082,20 @@ bool renameStationNode(StationSystemsSettings& settings, StationNodeRename const
 		for (auto& monitor : candidate.monitors)
 			if (monitor.subjectType == "connection" && monitor.subjectId == before) monitor.subjectId = after;
 	}
+	// Keep Transfer primary/backup order when only a bus identity changes.
+	if (current.nodeType == "Power bus")
+	{
+		forEachStationPowerNode(settings, [&](auto type, auto const& entry) {
+			auto restore = [&](auto const& original, char const* port) {
+				auto* ids = powerField(candidate, type, entry.id, std::string(port) + "@");
+				if (!ids) return;
+				*ids = original;
+				for (auto& id : *ids) if (id == current.oldNodeId) id = current.newNodeId;
+			};
+			if constexpr (requires { entry.busIds; }) restore(entry.busIds, "Power out");
+			if constexpr (requires { entry.supplyBusIds; }) restore(entry.supplyBusIds, "Power in");
+		});
+	}
 	if (!monitorsCommitValid(candidate, diagnostic)) return false;
 	settings = std::move(candidate);
 	return true;
@@ -2069,6 +2154,26 @@ LinkVerdict evaluateStationLink(StationSystemsSettings const& settings, Candidat
 		auto const peers = joinedPeers(authored, oriented.from, false);
 		if (peers.size() >= from->maximumLinks)
 			return refuse(occupiedReason(oriented.from, from->maximumLinks, peers));
+	}
+
+	// Power wiring permits incomplete drafts, but never a ghost bus, a
+	// missing member, or a count beyond the authored supply mode.
+	if (from->kind == "power" || to->kind == "power")
+	{
+		LinkMapping power;
+		if (!mapLink(oriented, power)) return refuse("Power ports require a Power bus.");
+		auto candidate = settings;
+		auto* ids = powerField(candidate, power.ownerType, power.ownerId, power.field);
+		if (!ids || !applyStationLink(candidate, oriented)) return refuse("Power connector references a nonexistent member or bus.");
+		std::string reason;
+		forEachStationPowerNode(candidate, [&](auto type, auto const& entry) {
+			if (power.ownerType != type || power.ownerId != entry.id || !power.field.starts_with("Power in@")) return;
+			if constexpr (requires { entry.supplyBusIds; })
+				if ((entry.supplyMode == StationSupplyMode::Single && ids->size() > 1)
+					|| (entry.supplyMode == StationSupplyMode::Transfer && ids->size() > 2))
+					reason = "Supply mode bus count exceeded; disconnect a bus or change Supply mode first.";
+		});
+		return reason.empty() ? allow() : refuse(reason);
 	}
 
 	// Semantic layer: the configuration validator is the sole authority. The

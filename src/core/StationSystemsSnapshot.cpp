@@ -265,7 +265,7 @@ namespace core
 		// charging takes gross cable input; discharging contributes net delivery.
 		for (auto const& flow : result.connections)
 		{
-			if (flow.key.ownerType != "Battery" || flow.key.peerType != "Power") continue;
+			if (flow.key.ownerType != "Battery" || flow.key.peerType != "Power bus") continue;
 			if (flow.key.relation == "Charge") totalBatteryCharge += flow.lastInputRate;
 			else if (flow.key.relation == "Discharge") totalBatteryDischarge += flow.lastDeliveredRate;
 		}

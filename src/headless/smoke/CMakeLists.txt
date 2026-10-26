@@ -992,6 +992,8 @@ pf_add_smoke_module(pf-smoke-editor
 
 add_test(NAME station-editor-material-identity COMMAND pf-smoke-editor --check station/materialIdentityWorkflow)
 set_tests_properties(station-editor-material-identity PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
+add_test(NAME station-editor-power-bus COMMAND pf-smoke-editor --check station/powerBusAuthoring)
+set_tests_properties(station-editor-power-bus PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-add-entry COMMAND pf-smoke-editor --check station/addEntryWorkflow)
 set_tests_properties(station-editor-add-entry PROPERTIES
     LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)

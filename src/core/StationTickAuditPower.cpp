@@ -79,7 +79,7 @@ namespace core
 		consumerInputKW = 0.0;
 		connectionPowerLossKW = 0.0;
 		connections.forEachSnapshot([&](auto const& flow) {
-			if (flow.key.peerType != "Power") return;
+			if (flow.key.peerType != "Power bus") return;
 			connectionPowerLossKW += flow.lastLossRate;
 			if (flow.key.relation == "Electrical supply" || flow.key.relation == "Startup" || flow.key.relation == "Charge")
 				consumerInputKW += flow.lastInputRate;

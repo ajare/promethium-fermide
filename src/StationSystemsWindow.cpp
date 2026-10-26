@@ -143,6 +143,10 @@ bool StationSystemsWindow::draftDirty() const
 	core::StationConfigurationDocument document;
 	document.settings = mDraft;
 	mFlow.exportLayout(document);
+	// The default authored main bus is laid out automatically even in a
+	// pristine document. That projection is not an unsaved user edit.
+	if (!mHasSavedDocument && !mDraftHistory.isModified()
+		&& document.settings == core::StationSystemsSettings{} && document.prefabs.empty()) return false;
 	if (!mHasSavedDocument)
 		return mDraftHistory.isModified() || document.settings != core::StationSystemsSettings{}
 			|| !document.positions.empty() || !document.prefabs.empty()
@@ -883,6 +887,7 @@ void StationSystemsWindow::renderFlowInspectorContents(
 	// The same seam the form tab uses (#652), fields only: removal stays a
 	// list-surface operation, and the inspector owns no list.
 	editor->renderEntry(draft, size_t(selected->index));
+	station_editor::renderPowerMembership(draft, selected->type, selected->id);
 	auto const subjectType = core::stationMonitorSubjectTypeForNodeType(selected->type);
 	if (!subjectType.empty())
 		renderMonitorInspector(draft, subjectType, selected->id);

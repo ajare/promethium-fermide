@@ -1,5 +1,6 @@
 #include "StationSystemsEntryEditor.h"
 #include "core/StationPorts.h"
+#include "core/StationPowerBuses.h"
 
 #include "imgui/imgui.h"
 
@@ -2186,7 +2187,19 @@ bool renderConversionEntryAt(core::StationSystemsSettings& draft, size_t index)
 }
 
 // Keyed by the Flow node type names in core::stationPortDescriptors().
-constexpr std::array<StationEntryEditor, 32> kEntryEditors{{
+constexpr std::array<StationEntryEditor, 33> kEntryEditors{{
+	{"Power bus", +[](core::StationSystemsSettings& draft, size_t index) {
+		if (index >= draft.powerBuses.size()) return false;
+		auto& bus = draft.powerBuses[index];
+		renderIdentity("Power bus", bus.id);
+		char name[256]{};
+		std::strncpy(name, bus.name.c_str(), sizeof(name) - 1);
+		if (ImGui::InputText("Name", name, sizeof(name))) bus.name = name;
+		ImGui::InputDouble("Rated capacity (kW)", &bus.ratedCapacityKW);
+		if (bus.ratedCapacityKW == 0) ImGui::TextUnformatted("Unrated");
+		ImGui::InputDouble("Trip persistence (s)", &bus.tripPersistenceSeconds);
+		return false;
+	}},
 	{"Solar", &renderSolarEntryAt},
 	{"Conversion", &renderConversionEntryAt},
 	{"Delivery", &renderDeliveryEntryAt},
@@ -2226,6 +2239,70 @@ constexpr std::array<StationEntryEditor, 32> kEntryEditors{{
 }};
 }
 
+void renderPowerMembership(core::StationSystemsSettings& draft, std::string const& type, std::string const& id)
+{
+	ImGui::NewLine();
+	auto energized = [&](std::string const& bus) {
+		bool found = false;
+		core::forEachStationPowerMember(draft, [&](auto const& entry) {
+			if constexpr (requires { entry.busIds; })
+				found |= std::find(entry.busIds.begin(), entry.busIds.end(), bus) != entry.busIds.end();
+		});
+		return found;
+	};
+	core::forEachStationPowerNode(draft, [&](auto nodeType, auto& entry) {
+		if (type != nodeType || entry.id != id) return;
+		auto membership = [&](auto& ids, char const* label) {
+			ImGui::TextUnformatted(label);
+			for (auto const& bus : draft.powerBuses) {
+				bool selected = std::find(ids.begin(), ids.end(), bus.id) != ids.end();
+				if (ImGui::Checkbox((bus.id + "##" + label).c_str(), &selected)) {
+					if (selected) ids.push_back(bus.id); else std::erase(ids, bus.id);
+				}
+			}
+			if (ids.empty()) ImGui::TextWrapped("Incomplete: required Power port is unwired");
+		};
+		if constexpr (requires { entry.busIds; }) membership(entry.busIds, "Source and battery buses");
+		if constexpr (requires { entry.supplyBusIds; }) {
+			char const* modes[]{"Single", "Transfer", "Shared"};
+			int mode = static_cast<int>(entry.supplyMode);
+			ImGui::SetNextItemWidth(160.0f);
+			if (ImGui::BeginCombo("Supply mode", mode >= 0 && mode < 3 ? modes[mode] : "Invalid")) {
+				for (int n = 0; n < 3; ++n)
+					if (ImGui::Selectable(modes[n], mode == n)) entry.supplyMode = static_cast<core::StationSupplyMode>(n);
+				ImGui::EndCombo();
+			}
+			membership(entry.supplyBusIds, "Supply buses (selection order: primary, backup)");
+			if (entry.supplyMode == core::StationSupplyMode::Transfer) {
+				ImGui::InputDouble("Return dwell (s)", &entry.transferReturnDwellSeconds);
+				if (entry.supplyBusIds.size() == 2 && !energized(entry.supplyBusIds[1]))
+					ImGui::TextWrapped("Warning: Transfer backup has no source and no battery");
+			}
+		}
+	});
+	if (type == "Power bus") {
+		bool loads = false;
+		double protectedKW = 0;
+		core::forEachStationPowerMember(draft, [&](auto const& entry) {
+			if constexpr (requires { entry.supplyBusIds; }) {
+				if (std::find(entry.supplyBusIds.begin(), entry.supplyBusIds.end(), id) == entry.supplyBusIds.end()) return;
+				loads = true;
+				if constexpr (requires { entry.criticalFloorKW; }) protectedKW += entry.criticalFloorKW;
+				if constexpr (requires { entry.circulationPowerKW; }) protectedKW += entry.circulationPowerKW;
+				if constexpr (requires { entry.pumpPowerKW; }) { if (entry.criticalService) protectedKW += entry.pumpPowerKW + entry.heaterCapacityKW; }
+				if constexpr (requires { entry.cop; }) { if (entry.criticalService) protectedKW += entry.ratedCoolingCapacityKW / entry.cop + entry.auxiliaryPowerKW; }
+			}
+		});
+		for (auto const& bus : draft.powerBuses)
+			if (bus.id == id && bus.ratedCapacityKW > 0 && protectedKW > bus.ratedCapacityKW)
+				ImGui::TextWrapped("Warning: protected demand %.3f kW exceeds bus rating %.3f kW", protectedKW, bus.ratedCapacityKW);
+		if (loads && !energized(id)) ImGui::TextWrapped("Warning: bus has loads but no source and no battery");
+	}
+	std::string diagnostic;
+	if (!core::validateStationSystemsSettings(draft, diagnostic))
+		ImGui::TextWrapped("Validation: %s", diagnostic.c_str());
+}
+
 std::span<StationEntryEditor const> stationEntryEditors()
 {
 	return kEntryEditors;
@@ -2249,7 +2326,17 @@ struct EntryCreator
 
 // Existing form defaults and reference preferences, independent of list rendering.
 // Groups and ordering come from the same catalogue as Flow placement.
-constexpr std::array<EntryCreator, 32> kEntryCreators{{
+constexpr std::array<EntryCreator, 33> kEntryCreators{{
+	{"Power bus", "Power bus", [](core::StationSystemsSettings const&) { return true; },
+		[](core::StationSystemsSettings& draft) {
+			core::PowerBusSettings bus;
+			for (size_t n = 1;; ++n) {
+				bus.id = "bus" + std::to_string(n);
+				if (std::none_of(draft.powerBuses.begin(), draft.powerBuses.end(), [&](auto const& b) { return b.id == bus.id; })) break;
+			}
+			bus.name = bus.id;
+			draft.powerBuses.push_back(std::move(bus));
+		}},
 	{"Store", "Store",
 		[](core::StationSystemsSettings const& draft) { return draft.stores.size() < core::MaxStationResourceStores; },
 		[](core::StationSystemsSettings& draft) {

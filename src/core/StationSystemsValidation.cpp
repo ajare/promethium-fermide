@@ -983,18 +983,39 @@ namespace
 		forEachStationPowerMember(settings, [&](auto const& entry) {
 			auto membership = [&](auto const& ids) {
 				if (!powerValuesValid) return;
-				if (ids.empty()) { powerValuesValid = refuse("Station '" + entry.id + "' requires Power Bus membership"); return; }
+				if (ids.empty()) {
+					auto const text = "Station '" + entry.id + "' requires Power Bus membership";
+					if (brokenReferences) brokenReferences->push_back(text);
+					else powerValuesValid = refuse(text);
+					return;
+				}
 				std::set<std::string> unique;
 				for (auto const& id : ids)
-					if (!busIds.count(id) || !unique.insert(id).second)
+				{
+					if (!unique.insert(id).second)
+						powerValuesValid = refuse("Station '" + entry.id + "' has duplicate Power Bus '" + id + "'; Transfer primary and backup must be distinct");
+					if (!busIds.count(id))
 					{
-						auto const text = "Station '" + entry.id + "' has unknown or duplicate Power Bus '" + id + "'";
+						auto const text = "Station '" + entry.id + "' has unknown Power Bus '" + id + "'";
 						if (brokenReferences) brokenReferences->push_back(text);
 						else powerValuesValid = refuse(text);
 					}
+				}
 			};
 			if constexpr (requires { entry.busIds; }) membership(entry.busIds);
 			if constexpr (requires { entry.supplyBusIds; }) membership(entry.supplyBusIds);
+			if constexpr (requires { entry.supplyBusIds; })
+			{
+				auto const count = entry.supplyBusIds.size();
+				if (powerValuesValid && ((entry.supplyMode == StationSupplyMode::Single && count != 1)
+					|| (entry.supplyMode == StationSupplyMode::Transfer && count != 2)
+					|| (entry.supplyMode == StationSupplyMode::Shared && count < 2)))
+				{
+					auto const text = "Station '" + entry.id + "' Supply mode requires Single = 1, Transfer = 2 distinct buses, Shared >= 2 buses";
+					if (brokenReferences && (count == 0 || (entry.supplyMode != StationSupplyMode::Single && count < 2))) brokenReferences->push_back(text);
+					else powerValuesValid = refuse(text);
+				}
+			}
 			if constexpr (requires { entry.supplyBusIds; })
 				if (powerValuesValid && (!std::isfinite(entry.transferReturnDwellSeconds)
 					|| entry.transferReturnDwellSeconds < 0.0

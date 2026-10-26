@@ -1,6 +1,7 @@
 #include "StationRig.h"
 #include "Smoke.h"
 #include "core/StationPowerBuses.h"
+#include "core/StationConnections.h"
 #include "core/StationConfigurationDocument.h"
 #include "core/BinarySerializer.h"
 #include "core/WorldDocument.h"
@@ -62,6 +63,16 @@ namespace
 				&& bus.surplusKW == actual.power.surplusKW,
 				"single-bus wrapper disagrees with preserved station totals");
 		}
+		auto oldCables = before;
+		core::StationConnectionKey legacy{"Solar", before.solarArrays[0].id, "$Solar generation", "Solar generation", "Power", "Shared electrical pool"};
+		oldCables.connections[legacy].efficiency = 0.75;
+		core::StationSystemsSettings newCables;
+		readSettings(settingsYaml(oldCables), 123, newCables);
+		auto graph = core::station_connections::build(newCables);
+		auto landing = std::find_if(graph.links.begin(), graph.links.end(), [](auto const& link) { return link.designKey.ownerType == "Solar"; });
+		require(landing != graph.links.end() && newCables.connections.contains(landing->designKey)
+			&& newCables.connections.at(landing->designKey).efficiency == 0.75
+			&& !newCables.connections.contains(legacy), "retiring Power lost legacy cable properties");
 		auto dark = before;
 		dark.solarArrays[0].illumination.constantLevel = 0;
 		dark.equipmentLoads[0].maxCurtailment = 0;
@@ -167,6 +178,15 @@ namespace
 		s.powerBuses = {core::PowerBusSettings{}};
 		readSettings(settingsYaml(s), 123, restored, false);
 		require(restored == s, "an electrical role failed legacy main-bus migration");
+		core::StationConfigurationDocument incomplete;
+		incomplete.settings = fixture();
+		incomplete.settings.solarArrays[0].busIds.clear();
+		incomplete.settings.equipmentLoads[0].supplyBusIds.clear();
+		core::StationConfigurationDocument reopened;
+		std::string diagnostic;
+		require(core::parseStationConfiguration(core::serializeStationConfiguration(incomplete), reopened, &diagnostic)
+			&& reopened.settings == incomplete.settings, "incomplete Power ports could not save and reopen as a draft");
+		require(!core::validateStationSystemsSettings(reopened.settings, diagnostic), "incomplete draft was valid for Apply");
 	}
 	void powerBusValidation(smoke::Context const&)
 	{
@@ -191,6 +211,13 @@ namespace
 		bad = good; bad.equipmentLoads[0].supplyBusIds.clear(); refuse(bad);
 		bad = good; bad.equipmentLoads[0].supplyBusIds = {"missing"}; refuse(bad);
 		bad = good; bad.equipmentLoads[0].supplyBusIds = {"main", "main"}; refuse(bad);
+		bad = good; bad.equipmentLoads[0].supplyMode = core::StationSupplyMode::Transfer; refuse(bad);
+		bad = good; bad.equipmentLoads[0].supplyMode = core::StationSupplyMode::Shared; refuse(bad);
+		bad = good; bad.powerBuses.push_back({"backup", "Backup", 0, 0});
+		bad.equipmentLoads[0].supplyBusIds = {"main", "backup"}; refuse(bad);
+		bad.equipmentLoads[0].supplyMode = core::StationSupplyMode::Transfer;
+		require(world.configureStationSystems(bad, false, &diagnostic), "valid Transfer authoring refused");
+		require(world.configureStationSystems(good, false, &diagnostic), "restore fixture failed");
 		for (double value : {-1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
 		{
 			bad = good; bad.powerBuses[0].ratedCapacityKW = value; refuse(bad);

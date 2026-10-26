@@ -281,6 +281,7 @@ set(editor_names
     station/prefabDialOverrideWorkflow
     station/prefabDialBoundaryWorkflow
     station/prefabDuplicateInstancePinsWorkflow
+    station/powerBusAuthoring
     station/addEntryWorkflow
     station/configurationResources
     station/windowWorkflow

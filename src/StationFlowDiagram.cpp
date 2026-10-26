@@ -427,6 +427,11 @@ namespace
 			// set: it is always drawn, even on an equipment load whose
 			// producing face is empty.
 			bool const heat = descriptor.name == "Heat out";
+			if (descriptor.name == "Power in" || descriptor.name == "Power out")
+			{
+				(descriptor.direction == core::StationPortDirection::Input ? inputs : outputs).push_back({&descriptor, {}});
+				continue;
+			}
 			if (descriptor.direction == core::StationPortDirection::Input)
 			{
 				if (seenInputs++ < inputLimit) inputs.push_back({&descriptor, {}});
@@ -436,7 +441,8 @@ namespace
 		auto spread = [](std::vector<FlowPort>& ports, float x)
 		{
 			for (size_t i = 0; i < ports.size(); ++i)
-				ports[i].offset = {x, 80.0f + 180.0f * float(i + 1) / float(ports.size() + 1)};
+				ports[i].offset = {x, (ports[i].descriptor->name == "Power in" || ports[i].descriptor->name == "Power out")
+					? 68.0f : 80.0f + 180.0f * float(i + 1) / float(ports.size() + 1)};
 		};
 		spread(inputs, 0.0f);
 		spread(outputs, nodeWidth);
@@ -471,9 +477,7 @@ namespace
 		return all;
 	}
 
-	// Electrical membership is implicit configuration, not a user-wirable
-	// reference. Show dedicated service ports without inventing editable pins
-	// or allowing connections to the derived electrical pool.
+	// Electrical ports occupy a dedicated row above material/thermal faces.
 	ImVec2 powerPortOffset(bool input)
 	{
 		return {input ? 0.0f : nodeWidth, 68.0f};
@@ -886,7 +890,7 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 	// address its own draft vector (not the entire graph).
 	if (view.type == "Crew" || view.type == "Crops" || view.type == "Algae" || view.type == "Microbial processor"
 		|| view.type == "Store" || view.type == "Transfer" || view.type == "Conversion"
-		|| view.type == "Solar" || view.type == "Equipment" || view.type == "Battery"
+		|| view.type == "Power bus" || view.type == "Solar" || view.type == "Equipment" || view.type == "Battery"
 		|| view.type == "Generator" || view.type == "Fuel cell" || view.type == "Sabatier"
 		|| view.type == "Methane processor" || view.type == "Reservoir" || view.type == "Radiator"
 		|| view.type == "Water collector" || view.type == "Water treatment" || view.type == "Electrolyzer"
@@ -1660,10 +1664,10 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		ImNodes::PushColorStyle(colour, IM_COL32(0, 0, 0, 0));
 	// The connector is drawn by this view, not the library: keep the library's
 	// hover generous enough that a small zoomed connector is still grabbable.
-	float const pinSize = std::max(7.0f, 13.0f * mZoom);
+	float const pinSize = std::min(std::max(7.0f, 13.0f * mZoom), nodeHeight * mZoom * 0.2f);
 	// Draw connectors at imnodes' actual node-edge pin centres.
 	ImNodes::GetStyle().PinOffset = 0.0f;
-	ImNodes::GetStyle().PinHoverRadius = std::max(9.0f, pinSize * 0.75f + 3.0f);
+	ImNodes::GetStyle().PinHoverRadius = std::min(std::max(9.0f, pinSize * 0.75f + 3.0f), nodeHeight * mZoom * 0.22f);
 	std::map<std::string, ImVec2> framePins;
 	ImNodes::BeginNodeEditor();
 	auto* canvasDraw = ImGui::GetWindowDrawList();
@@ -1992,6 +1996,17 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			mLayout["Conversion:" + conversion.id + ":0"] = placeAt;
 			draft.conversions.push_back(std::move(conversion));
 			mFitRequested = false;
+		}
+		else if (mPlacingType == "Power bus")
+		{
+			core::PowerBusSettings bus;
+			for (size_t n = 1;; ++n) {
+				bus.id = "bus" + std::to_string(n);
+				if (std::none_of(draft.powerBuses.begin(), draft.powerBuses.end(), [&](auto const& b) { return b.id == bus.id; })) break;
+			}
+			bus.name = bus.id;
+			mLayout["Power bus:" + bus.id + ":0"] = placeAt;
+			draft.powerBuses.push_back(std::move(bus));
 		}
 		else if (mPlacingType == "Solar" && draft.solarArrays.size() < core::MaxStationSolarArrays)
 		{
@@ -2628,26 +2643,6 @@ entry.thermalClass = "moderate";
 			auto const found = liveNode->second.ports.find(name);
 			return found == liveNode->second.ports.end() ? std::string_view{} : found->second;
 		};
-		if (!derived)
-			for (bool input : {true, false})
-			{
-				bool const powered = std::any_of(mGraph.links.begin(), mGraph.links.end(),
-					[&](station_flow::Link const& link) {
-						return link.kind == station_flow::LinkKind::Power
-							&& (input ? link.to : link.from) == i;
-					});
-				if (!powered) continue;
-				auto const offset = powerPortOffset(input);
-				auto const centre = point({mPositions[i].x + offset.x, mPositions[i].y + offset.y});
-				mPinScreen[pinKey(n.type, n.id, input ? "Power in" : "Power out")] = centre;
-				auto const colour = station_flow::edgeColor(station_flow::Medium::Electricity);
-				draw->AddCircleFilled(centre, pinSize * 0.5f, colour, 20);
-				draw->AddCircle(centre, pinSize * 0.5f, IM_COL32(24, 28, 34, 255), 20);
-				drawPortLabel(draw, centre, input, input ? "Power in" : "Power out", mZoom, colour,
-					portRate(input ? "Power in" : "Power out"));
-				if (over && std::hypot(centre.x - io.MousePos.x, centre.y - io.MousePos.y) < 14.0f)
-					ImGui::SetTooltip("%s: shared electrical pool (automatic connection)", input ? "Power in" : "Power out");
-			}
 		for (auto const& port : portsFor(n.type, n.id, draft))
 		{
 			auto const key = pinKey(n.type, n.id, std::string(port.descriptor->name));
@@ -2717,12 +2712,13 @@ entry.thermalClass = "moderate";
 				core::StationPortSetStatus status;
 				if (!core::stationPortSetStatus(draft, n.type, n.id, decl.set, status)) continue;
 				bool const inputs = core::stationPortSetIsInputSide(decl.set);
-				float const bx = inputs ? a.x : d.x - 35.0f;
+				float const scale = std::min(1.0f, nodeWidth * mZoom / 90.0f);
+				float const bx = inputs ? a.x : d.x - 35.0f * scale;
 				float const by = d.y + 3.0f;
 				auto drawAffordance = [&](bool grow, char const* glyph)
 				{
-					ImVec2 ba{bx + (grow ? 0.0f : 19.0f), by};
-					ImVec2 bb{ba.x + 16.0f, ba.y + 16.0f};
+					ImVec2 ba{bx + (grow ? 0.0f : 19.0f * scale), by};
+					ImVec2 bb{ba.x + 16.0f * scale, ba.y + 16.0f * scale};
 					mPortButtons[n.type + keySeparator + n.id + keySeparator
 						+ (inputs ? "in" : "out") + keySeparator + (grow ? "+" : "-")] =
 						{ba.x, ba.y, bb.x, bb.y};
@@ -2730,9 +2726,9 @@ entry.thermalClass = "moderate";
 					draw->AddRectFilled(ba, bb, hot ? IM_COL32(78, 96, 120, 255) : IM_COL32(45, 50, 58, 235), 3);
 					draw->AddRect(ba, bb, IM_COL32(150, 170, 200, 220), 3);
 					auto* font = ImGui::GetFont();
-					float const fontSize = ImGui::GetFontSize();
+					float const fontSize = ImGui::GetFontSize() * scale;
 					auto const size = font->CalcTextSizeA(fontSize, std::numeric_limits<float>::max(), 0.0f, glyph);
-					draw->AddText(font, fontSize, {ba.x + (16.0f - size.x) * 0.5f, ba.y + (16.0f - size.y) * 0.5f},
+					draw->AddText(font, fontSize, {ba.x + (bb.x - ba.x - size.x) * 0.5f, ba.y + (bb.y - ba.y - size.y) * 0.5f},
 						IM_COL32(235, 240, 245, 255), glyph);
 				};
 				if (status.canGrow) drawAffordance(true, "+");

@@ -15,6 +15,8 @@
 // path. New type = descriptor entry + editor function (#638 story 43).
 namespace station_editor
 {
+	void renderPowerMembership(core::StationSystemsSettings&, std::string const& type, std::string const& id);
+
 	// Renders one store's settings widgets, mutating the entry in place.
 	// `label` prefixes every widget ("Store 0"), so each surface addresses
 	// the same entry with its own naming. `removeLabel` renders the row's

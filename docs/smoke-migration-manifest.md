@@ -45,7 +45,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/persistence/Furniture.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/render/Furniture.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/editor/Furniture.cpp` | module-owned | `pf-smoke-editor` |
-| `smoke/editor/StationSystems.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/editor/StationSystems.cpp` | module-owned | `pf-smoke-editor` (includes station/powerBusAuthoring: placement, wiring, inspector feedback, cascades, undo/redo) |
 | `smoke/editor/StationObservations.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/StationConnections.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/StationComponentHelp.cpp` | module-owned | `pf-smoke-editor` |

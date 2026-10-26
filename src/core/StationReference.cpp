@@ -5,6 +5,7 @@
 // this module contains no bundled configuration data or resource inventory.
 #include "core/StationReference.h"
 #include "core/StationPowerBuses.h"
+#include "core/StationConnections.h"
 
 #include "core/SerializationException.h"
 #include "core/WorldDocument.h"
@@ -3013,6 +3014,26 @@ namespace core
 			stationSettings.systemsStepWorldTicks = serializer.readUint32("systemsStepWorldTicks");
 		}
 		serializer.endMap();
+		// The implicit Power diagram endpoint is retired, including persisted
+		// cable ratings and connection Monitor subjects. Preserve the physical
+		// boundary's properties on the migrated main-bus landing.
+		for (auto const& link : station_connections::build(stationSettings).links)
+		{
+			auto const& key = link.designKey;
+			if (key.peerType != "Power bus" || key.peerId != "main") continue;
+			auto legacy = key;
+			legacy.peerType = "Power"; legacy.peerId = "Shared electrical pool";
+			legacy.reference = "$" + key.relation;
+			if (auto found = stationSettings.connections.find(legacy); found != stationSettings.connections.end())
+			{
+				stationSettings.connections.try_emplace(key, found->second);
+				stationSettings.connections.erase(found);
+			}
+			auto const oldSubject = stationConnectionMonitorSubjectId(legacy);
+			for (auto& monitor : stationSettings.monitors)
+				if (monitor.subjectType == "connection" && monitor.subjectId == oldSubject)
+					monitor.subjectId = stationConnectionMonitorSubjectId(key);
+		}
 		std::string diagnostic;
 		if (validate && !validateStationSystemsSettings(stationSettings, diagnostic))
 			throw SerializationException(diagnostic);

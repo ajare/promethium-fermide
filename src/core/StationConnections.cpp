@@ -212,21 +212,26 @@ Graph build(core::StationSystemsSettings const& s)
 	b.add(s.solarArrays, "Solar", 3); b.add(s.batteries, "Battery", 3);
 	b.add(s.generators, "Generator", 3); b.add(s.airlockCycles, "Airlock cycle", 3);
 	b.add(s.maintenanceJobs, "Maintenance", 3); b.add(s.outages, "Outage", 3);
-	bool const hasPower = !s.solarArrays.empty() || !s.batteries.empty() || !s.generators.empty()
-		|| !s.fuelCells.empty() || !s.equipmentLoads.empty() || !s.waterTreatments.empty()
-		|| !s.coolantLoops.empty() || !s.chillers.empty() || !s.heatEngines.empty()
-		|| !s.waterCollectors.empty() || !s.electrolyzers.empty() || !s.co2Captures.empty()
-		|| !s.sabatierReactors.empty() || !s.methaneProcessors.empty()
-		|| !s.microbialProcessors.empty() || !s.cropPopulations.empty() || !s.algaeCultures.empty();
-	size_t bus{};
-	if (hasPower) bus = b.node("Power", "Shared electrical pool", 3,
-		s.dispatchMode == core::StationDispatchMode::Automatic ? "Automatic dispatch" : "Manual dispatch");
+	b.add(s.powerBuses, "Power bus", 3);
+	b.connect(s.powerBuses, "Power bus", [&](size_t n, auto const& bus) {
+		b.graph.nodes[n].detail = bus.name + (bus.ratedCapacityKW == 0 ? " - unrated" : " - " + std::to_string(bus.ratedCapacityKW) + " kW");
+	});
+	for (auto const& link : b.authored)
+	{
+		if (link.from.nodeType != "Power bus" && link.to.nodeType != "Power bus") continue;
+		auto const& member = link.from.nodeType == "Power bus" ? link.to : link.from;
+		b.owner = b.resolve(member.nodeType, member.nodeId);
+		bool const input = link.from.nodeType == "Power bus";
+		std::string relation = input ? (member.nodeType == "Battery" ? "Charge" : member.nodeType == "Generator" ? "Startup" : "Electrical supply")
+			: member.nodeType == "Solar" ? "Solar generation" : member.nodeType == "Battery" ? "Discharge" : member.nodeType == "Fuel cell" ? "Backup generation" : "Generation";
+		b.edge(b.resolve(link.from.nodeType, link.from.nodeId), b.resolve(link.to.nodeType, link.to.nodeId), relation, LinkKind::Power);
+		b.graph.links.back().designKey.reference = link.identity.substr((member.nodeType + ":" + member.nodeId + ":").size());
+	}
 	for (auto const& chiller : s.chillers)
 	{
 		auto key = std::make_pair(std::string("Cooling service"), chiller.thermalClass);
 		if (!b.ids.contains(key)) b.node(key.first, key.second, 2, "Shared thermal service class");
 	}
-	auto powerIn = [&](size_t n) { b.edge(bus, n, "Electrical supply", LinkKind::Power); };
 	auto atmosphereExchange = [&](size_t n, std::string const& id, bool biological = false)
 	{
 		b.input(n, id, "Oxygen uptake", "Atmosphere", LinkKind::Material, false, Medium::Oxygen);
@@ -261,15 +266,10 @@ Graph build(core::StationSystemsSettings const& s)
 		b.output(n, p.storeId, "Scheduled delivery"); });
 	b.connect(s.wasteEjections, "Waste ejection", [&](size_t n, auto const& p) {
 		b.input(n, p.storeId, "Disposal-ready waste"); });
-	b.connect(s.solarArrays, "Solar", [&](size_t n, auto const&) {
-		b.edge(n, bus, "Solar generation", LinkKind::Power); });
-	b.connect(s.batteries, "Battery", [&](size_t n, auto const&) {
-		b.edge(n, bus, "Discharge", LinkKind::Power); b.edge(bus, n, "Charge", LinkKind::Power); });
 	b.connect(s.generators, "Generator", [&](size_t n, auto const& p) {
-		b.feed(n, p.fuelStoreId, "Fuel", Medium::Fuel); b.heat(n, p.heatSinkId);
-		b.edge(n, bus, "Generation", LinkKind::Power); b.edge(bus, n, "Startup", LinkKind::Power); });
+		b.feed(n, p.fuelStoreId, "Fuel", Medium::Fuel); b.heat(n, p.heatSinkId); });
 	b.connect(s.equipmentLoads, "Equipment", [&](size_t n, auto const& p) {
-		powerIn(n); b.heat(n, p.heatSinkId);
+		b.heat(n, p.heatSinkId);
 		size_t in = 0, out = 0;
 		for (auto const& flow : p.materialExchanges)
 			if (flow.consumes) b.input(n, flow.storeId, "Equipment input", "Store", LinkKind::Material, false,
@@ -285,42 +285,41 @@ Graph build(core::StationSystemsSettings const& s)
 		b.product(n, p.urineStoreId, "Urine", Medium::Urine); b.product(n, p.organicWasteStoreId, "Organic waste", Medium::OrganicWaste);
 		atmosphereExchange(n, p.atmosphereId); });
 	b.connect(s.waterCollectors, "Water collector", [&](size_t n, auto const& p) {
-		powerIn(n); b.input(n, p.atmosphereId, "Water vapour", "Atmosphere", LinkKind::Material, false, Medium::Water);
+		b.input(n, p.atmosphereId, "Water vapour", "Atmosphere", LinkKind::Material, false, Medium::Water);
 		b.product(n, p.destStoreId, "Condensate", Medium::Water);
 		b.output(n, p.coolingLoopId, "Condensation heat", "Coolant loop", LinkKind::Heat); });
 	b.connect(s.waterTreatments, "Water treatment", [&](size_t n, auto const& p) {
-		powerIn(n); b.feed(n, p.sourceStoreId, "Raw water", Medium::Water);
+		b.feed(n, p.sourceStoreId, "Raw water", Medium::Water);
 		b.input(n, p.consumableStoreId, "Treatment consumable", "Store", LinkKind::Material, true,
 			Medium::Consumables, "consumableStoreId");
 		b.product(n, p.treatedStoreId, "Treated water", Medium::Water); b.output(n, p.concentrateStoreId, "Concentrate"); });
 	b.connect(s.electrolyzers, "Electrolyzer", [&](size_t n, auto const& p) {
-		powerIn(n); b.feed(n, p.waterStoreId, "Feed water", Medium::Water); b.product(n, p.hydrogenStoreId, "Hydrogen", Medium::Hydrogen);
+		b.feed(n, p.waterStoreId, "Feed water", Medium::Water); b.product(n, p.hydrogenStoreId, "Hydrogen", Medium::Hydrogen);
 		if (p.oxygenStoreId.empty()) b.output(n, p.atmosphereId, "Oxygen", "Atmosphere", LinkKind::Material, false, Medium::Oxygen);
 		else b.product(n, p.oxygenStoreId, "Oxygen", Medium::Oxygen);
 		b.heat(n, p.heatSinkId); });
 	b.connect(s.co2Captures, "CO2 capture", [&](size_t n, auto const& p) {
-		powerIn(n); b.input(n, p.atmosphereId, "CO2", "Atmosphere", LinkKind::Material, false, Medium::CarbonDioxide);
+		b.input(n, p.atmosphereId, "CO2", "Atmosphere", LinkKind::Material, false, Medium::CarbonDioxide);
 		b.product(n, p.captureStoreId, "Captured CO2", Medium::CarbonDioxide);
 		b.feed(n, p.consumableStoreId, "Consumable", Medium::Consumables, true); });
 	b.connect(s.fuelCells, "Fuel cell", [&](size_t n, auto const& p) {
 		b.feed(n, p.hydrogenStoreId, "Hydrogen", Medium::Hydrogen); b.feed(n, p.oxygenStoreId, "Oxygen", Medium::Oxygen);
-		b.product(n, p.waterStoreId, "Product water", Medium::Water); b.heat(n, p.heatSinkId);
-		b.edge(n, bus, "Backup generation", LinkKind::Power); });
+		b.product(n, p.waterStoreId, "Product water", Medium::Water); b.heat(n, p.heatSinkId); });
 	b.connect(s.sabatierReactors, "Sabatier", [&](size_t n, auto const& p) {
-		powerIn(n); b.feed(n, p.co2StoreId, "CO2", Medium::CarbonDioxide); b.feed(n, p.hydrogenStoreId, "Hydrogen", Medium::Hydrogen);
+		b.feed(n, p.co2StoreId, "CO2", Medium::CarbonDioxide); b.feed(n, p.hydrogenStoreId, "Hydrogen", Medium::Hydrogen);
 		b.product(n, p.methaneStoreId, "Methane", Medium::Methane); b.product(n, p.waterStoreId, "Product water", Medium::Water); b.heat(n, p.heatSinkId); });
 	b.connect(s.methaneProcessors, "Methane processor", [&](size_t n, auto const& p) {
-		powerIn(n); b.feed(n, p.methaneStoreId, "Methane", Medium::Methane); b.product(n, p.hydrogenStoreId, "Recovered hydrogen", Medium::Hydrogen);
+		b.feed(n, p.methaneStoreId, "Methane", Medium::Methane); b.product(n, p.hydrogenStoreId, "Recovered hydrogen", Medium::Hydrogen);
 		b.product(n, p.carbonStoreId, "Solid carbon", Medium::Carbon); b.heat(n, p.heatSinkId); });
 	b.connect(s.microbialProcessors, "Microbial processor", [&](size_t n, auto const& p) {
-		powerIn(n); b.feed(n, p.feedStoreId, "Organic feed", Medium::OrganicWaste); b.feed(n, p.oxygenStoreId, "Oxygen", Medium::Oxygen);
+		b.feed(n, p.feedStoreId, "Organic feed", Medium::OrganicWaste); b.feed(n, p.oxygenStoreId, "Oxygen", Medium::Oxygen);
 		b.feed(n, p.waterStoreId, "Process water", Medium::Water);
 		b.feed(n, p.consumableStoreId, "Culture medium", Medium::Consumables, true);
 		b.input(n, p.stockStoreId, "Replacement stock", "Store", LinkKind::Material, true);
 		b.product(n, p.nutrientStoreId, "Recovered nutrients", Medium::Nutrients); b.product(n, p.recoveredWaterStoreId, "Recovered water", Medium::Water);
 		b.product(n, p.co2StoreId, "CO2", Medium::CarbonDioxide); b.output(n, p.residueStoreId, "Residue"); b.heat(n, p.heatSinkId); });
 	auto biology = [&](size_t n, auto const& p) {
-		powerIn(n); atmosphereExchange(n, p.atmosphereId, true); b.feed(n, p.waterStoreId, "Water", Medium::Water);
+		atmosphereExchange(n, p.atmosphereId, true); b.feed(n, p.waterStoreId, "Water", Medium::Water);
 		b.feed(n, p.nitrogenStoreId, "Nutrient nitrogen", Medium::Nutrients); b.feed(n, p.phosphorusStoreId, "Phosphorus", Medium::Nutrients);
 		b.feed(n, p.potassiumStoreId, "Potassium", Medium::Nutrients); b.feed(n, p.mineralsStoreId, "Other minerals", Medium::Nutrients);
 		b.product(n, p.foodStoreId, "Harvest food", Medium::Food); b.product(n, p.wasteStoreId, "Harvest / biomass waste", Medium::OrganicWaste); };
@@ -332,9 +331,9 @@ Graph build(core::StationSystemsSettings const& s)
 		if (!p.reservoirId.empty()) b.input(n, p.reservoirId, "Heat exchange", "Reservoir", LinkKind::Heat);
 	});
 	b.connect(s.coolantLoops, "Coolant loop", [&](size_t n, auto const& p) {
-		powerIn(n); b.output(n, p.reservoirId, "Heat exchanger", "Reservoir", LinkKind::Heat); });
+		b.output(n, p.reservoirId, "Heat exchanger", "Reservoir", LinkKind::Heat); });
 	b.connect(s.chillers, "Chiller", [&](size_t n, auto const& p) {
-		powerIn(n); b.input(n, p.coldLoopId, "Evaporator heat", "Coolant loop", LinkKind::Heat);
+		b.input(n, p.coldLoopId, "Evaporator heat", "Coolant loop", LinkKind::Heat);
 		b.output(n, p.condenserReservoirId, "Condenser heat", "Reservoir", LinkKind::Heat);
 		// A class is a shared service, not a physical pipe or assigned chiller.
 		b.output(n, p.thermalClass, "Cooling capacity", "Cooling service", LinkKind::Heat, false, Medium::Cooling);
@@ -346,7 +345,6 @@ Graph build(core::StationSystemsSettings const& s)
 	b.connect(s.heatEngines, "Heat engine", [&](size_t n, auto const& p) {
 		b.input(n, p.hotReservoirId, "Thermal intake", "Reservoir", LinkKind::Heat);
 		b.output(n, p.rejectionReservoirId, "Rejection heat", "Reservoir", LinkKind::Heat);
-		b.edge(n, bus, "Generation", LinkKind::Power);
 	});
 	b.connect(s.radiators, "Radiator", [&](size_t n, auto const& p) {
 		b.input(n, p.reservoirId, "Heat rejection to environment", "Reservoir", LinkKind::Heat); });

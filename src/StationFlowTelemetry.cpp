@@ -303,17 +303,16 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		out.ports["Power out"] = quantity(p->lastOutputKW, "kW");
 		out.ports["Heat out"] = quantity(p->lastWasteHeatKW, "kW");
 	}
-	else if (node.type == "Power")
+	else if (node.type == "Power bus")
 	{
-		out.values = {"Generation available " + quantity(s.connections.empty() ? s.power.availableGenerationKW : s.power.poolGenerationKW, "kW"),
-			"Power demand " + quantity(s.power.totalRequestedKW, "kW"),
-			"Battery charging " + quantity(s.power.batteryChargeKW, "kW"),
-			"Battery discharging " + quantity(s.power.batteryDischargeKW, "kW"),
-			"Unmet " + quantity(s.power.totalUnmetKW, "kW")};
-		out.status = "Demand supplied";
-		if (s.power.unmetCriticalKW > 1e-9 || s.power.protectedUnmetKW > 1e-9)
-			warn(out, "Critical electrical demand unmet", true);
-		else if (s.power.totalUnmetKW > 1e-9) warn(out, "Electrical shortage");
+		auto p = std::find_if(s.power.buses.begin(), s.power.buses.end(), [&](auto const& bus) { return bus.busId == id; });
+		if (p == s.power.buses.end()) return {};
+		out.values = {"Generation " + quantity(p->generationKW, "kW"), "Demand " + quantity(p->demandKW, "kW"),
+			"Battery charging " + quantity(p->batteryChargeKW, "kW"), "Battery discharging " + quantity(p->batteryDischargeKW, "kW"),
+			"Unmet " + quantity(p->unmetKW, "kW")};
+		out.status = p->ratedCapacityKW == 0 ? "Unrated" : "Rated " + quantity(p->ratedCapacityKW, "kW");
+		if (p->protectedUnmetKW > 1e-9) warn(out, "Critical electrical demand unmet", true);
+		else if (p->unmetKW > 1e-9) warn(out, "Electrical shortage");
 	}
 	else if (node.type == "Reservoir")
 	{
@@ -628,7 +627,7 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 			if (flow.key.ownerType != node.type || flow.key.ownerId != node.id) continue;
 			retained += flow.retainedHeatKJ;
 			losses[flow.rateUnit] += flow.lastLossRate;
-			if (flow.key.peerType == "Power")
+			if (flow.key.peerType == "Power bus")
 			{
 				bool const input = flow.key.relation == "Electrical supply" || flow.key.relation == "Startup" || flow.key.relation == "Charge";
 				physicalPorts[input ? "Power in" : "Power out"] = {input ? flow.lastDeliveredRate : flow.lastInputRate, flow.rateUnit};
@@ -664,8 +663,6 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 			if (out.values.size() < 5) out.values.push_back("Heat retained " + quantity(retained, "kJ"));
 			warn(out, "Heat connection constrained");
 		}
-		if (node.type == "Power")
-			out.details.push_back("Connection losses " + quantity(s.power.connectionLossKW, "kW"));
 	}
 	if (node.type == "Store" || node.type == "Battery")
 		for (auto const& endurance : s.endurance)
@@ -743,7 +740,7 @@ std::optional<NodeTelemetry> compositeTelemetry(
 	double draw = 0.0;
 	for (auto const& flow : s.connections)
 	{
-		if (flow.key.peerType != "Power") continue;
+		if (flow.key.peerType != "Power bus") continue;
 		if (flow.key.relation != "Electrical supply" && flow.key.relation != "Startup"
 			&& flow.key.relation != "Charge") continue;
 		if (std::find(entries.begin(), entries.end(),

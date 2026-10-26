@@ -38,6 +38,26 @@ namespace core
 		// Transfer names exactly one source store and exactly one destination
 		// store, so each of its faces carries at most one link.
 		static constexpr std::array descriptors{
+			PortDescriptor{"Power bus", "Power in", StationPortDirection::Input, "bus", "power", 0, {}, true},
+			PortDescriptor{"Power bus", "Power out", StationPortDirection::Output, "bus", "power", 0, {}, true},
+			PortDescriptor{"Solar", "Power out", StationPortDirection::Output, "power", "bus", 0},
+			PortDescriptor{"Generator", "Power out", StationPortDirection::Output, "power", "bus", 0},
+			PortDescriptor{"Generator", "Power in", StationPortDirection::Input, "power", "bus", 0},
+			PortDescriptor{"Fuel cell", "Power out", StationPortDirection::Output, "power", "bus", 0},
+			PortDescriptor{"Heat engine", "Power out", StationPortDirection::Output, "power", "bus", 0},
+			PortDescriptor{"Battery", "Power out", StationPortDirection::Output, "power", "bus", 0},
+			PortDescriptor{"Battery", "Power in", StationPortDirection::Input, "power", "bus", 0},
+			PortDescriptor{"Equipment", "Power in", StationPortDirection::Input, "power", "bus", 0},
+			PortDescriptor{"Coolant loop", "Power in", StationPortDirection::Input, "power", "bus", 0},
+			PortDescriptor{"Chiller", "Power in", StationPortDirection::Input, "power", "bus", 0},
+			PortDescriptor{"Water treatment", "Power in", StationPortDirection::Input, "power", "bus", 0},
+			PortDescriptor{"Electrolyzer", "Power in", StationPortDirection::Input, "power", "bus", 0},
+			PortDescriptor{"CO2 capture", "Power in", StationPortDirection::Input, "power", "bus", 0},
+			PortDescriptor{"Sabatier", "Power in", StationPortDirection::Input, "power", "bus", 0},
+			PortDescriptor{"Methane processor", "Power in", StationPortDirection::Input, "power", "bus", 0},
+			PortDescriptor{"Microbial processor", "Power in", StationPortDirection::Input, "power", "bus", 0},
+			PortDescriptor{"Crops", "Power in", StationPortDirection::Input, "power", "bus", 0},
+			PortDescriptor{"Algae", "Power in", StationPortDirection::Input, "power", "bus", 0},
 			PortDescriptor{"Store", "Inventory in", StationPortDirection::Input, "inventory", "material", 0, {}},
 			PortDescriptor{"Store", "Inventory out", StationPortDirection::Output, "inventory", "material", 0,
 				"a Transfer or Conversion"},
@@ -80,9 +100,6 @@ namespace core
 			// optional; a cooling-service load that wires one is refused by
 			// the validator's own rule.
 			PortDescriptor{"Equipment", "Heat out", StationPortDirection::Output, "heat", "heat-sink", 1, {}, true},
-			// A battery owns no authored connector: its relation to the
-			// shared electrical pool is implicit in the projection, exactly
-			// like the pool's other members, so it declares no ports.
 			// A generator always burns into a declared sink: its waste,
 			// startup and decay heat must route somewhere, so both
 			// connectors are required.
@@ -474,6 +491,7 @@ namespace core
 			StationPlaceableType{"Store", "store", "Resources"},
 			StationPlaceableType{"Transfer", "transfer", "Resources"},
 			StationPlaceableType{"Conversion", "conversion", "Resources"},
+			StationPlaceableType{"Power bus", "bus", "Power"},
 			StationPlaceableType{"Solar", "solar", "Power"},
 			StationPlaceableType{"Equipment", "load", "Power"},
 			StationPlaceableType{"Battery", "battery", "Power"},
@@ -525,7 +543,7 @@ namespace core
 	// naming one is refused as derived rather than as unknown.
 	inline bool stationIsDerivedNodeType(std::string_view nodeType)
 	{
-		static constexpr std::array<std::string_view, 3> derived{"Power", "Cooling service", "Exterior"};
+		static constexpr std::array<std::string_view, 2> derived{"Cooling service", "Exterior"};
 		return std::find(derived.begin(), derived.end(), nodeType) != derived.end();
 	}
 
