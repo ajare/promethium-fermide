@@ -1239,6 +1239,7 @@ namespace core
 		for (auto const& cell : mImpl->fuelCells)
 		{
 			StationFuelCellSnapshot cellResult;
+			cellResult.chemistry = FuelCellChemistryNames.at(static_cast<size_t>(cell.authored.chemistry));
 			cellResult.id = cell.authored.id;
 			cellResult.wear = { cell.authored.stackDegradation ? "stack-degradation" : "", cell.stackDegradation.fraction,
 				cell.stackDegradation.operatingHours, cell.stackDegradation.throughputKg, cell.stackDegradation.calendarHours,

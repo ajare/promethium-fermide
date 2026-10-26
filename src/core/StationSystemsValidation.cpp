@@ -2394,6 +2394,8 @@ namespace
 		for (auto const& cell : settings.fuelCells) try
 		{
 			auto const where = "Station fuel cell '" + cell.id + "'";
+			if (static_cast<size_t>(cell.chemistry) >= FuelCellChemistryNames.size())
+				return refuse(where + " has unknown chemistry; declared chemistries: PEM, alkaline, solid oxide");
 			if (cell.id.empty()) return refuse("Station fuel cell id must not be empty");
 			if (cell.id.size() > MaxStationStoreIdLength)
 				return refuse("Station fuel cell id exceeds "

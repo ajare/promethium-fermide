@@ -102,7 +102,9 @@ namespace core
 				[](auto const& c) { return c.interruptedCycle || c.interlockFailure.has_value(); });
 		auto const bodies = std::any_of(document.settings.electrolyzers.begin(), document.settings.electrolyzers.end(),
 			[](auto const& cell) { return cell.thermalBody.has_value(); });
-		output->writeUint32("schemaVersion", stationHasPowerBusAuthoring(document.settings) ? 124 : bodies ? 123 : !document.settings.monitors.empty() ? 122 : machineWear ? 121 : atmosphereFaults ? 120 : contamination ? 119 : powerSources ? 118
+		auto const nonPem = std::any_of(document.settings.fuelCells.begin(), document.settings.fuelCells.end(),
+			[](auto const& cell) { return cell.chemistry != FuelCellChemistry::PEM; });
+		output->writeUint32("schemaVersion", stationHasPowerBusAuthoring(document.settings) ? 124 : (bodies || nonPem) ? 123 : !document.settings.monitors.empty() ? 122 : machineWear ? 121 : atmosphereFaults ? 120 : contamination ? 119 : powerSources ? 118
 			: thermalPlant ? 117 : wear ? 116 : repairs ? 115 : trips ? 114 : condition ? 113 : faults ? 112 : 111);
 		writeStationSystemsSettingsMap(*output, document.settings);
 		output->beginMap("layout");

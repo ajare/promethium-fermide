@@ -178,6 +178,31 @@ namespace
 			("re-parsing the packaged reference text failed: " + diagnostic).c_str());
 		require(reparsed.settings == reference.settings,
 			"re-parsing the packaged reference text produced different settings");
+		// #891: retain the reference as a genuine missing-key legacy fixture.
+		require(core::bundledStationReferenceText().find("chemistry:") == std::string::npos
+			&& !reference.settings.fuelCells.empty(), "reference no longer exercises absent chemistry");
+		for (auto const& cell : reference.settings.fuelCells)
+			require(cell.chemistry == core::FuelCellChemistry::PEM, "legacy reference did not default to PEM");
+		for (auto chemistry : {core::FuelCellChemistry::PEM, core::FuelCellChemistry::Alkaline,
+			core::FuelCellChemistry::SolidOxide})
+		{
+			core::World baseline("ReferenceChemistry", 2, 2), labelled("ReferenceChemistry", 2, 2);
+			baseline.pauseSimulation(); baseline.finishBuild(); labelled.pauseSimulation(); labelled.finishBuild();
+			auto changed = reference.settings;
+			for (auto& cell : changed.fuelCells) cell.chemistry = chemistry;
+			require(baseline.configureStationSystems(reference.settings, false, &diagnostic)
+				&& labelled.configureStationSystems(changed, false, &diagnostic), "reference chemistry setup refused");
+			baseline.resumeSimulation(); labelled.resumeSimulation();
+			require(smoke::station::advanceSeconds(baseline, 30) && smoke::station::advanceSeconds(labelled, 30), "reference chemistry run failed");
+			auto snapshot = labelled.getStationSystemsSnapshot();
+			for (auto& cell : snapshot.fuelCells)
+			{
+				require(cell.chemistry == core::FuelCellChemistryNames.at(static_cast<size_t>(chemistry)),
+					"reference snapshot chemistry missing");
+				cell.chemistry = "PEM";
+			}
+			require(snapshot == baseline.getStationSystemsSnapshot(), "chemistry changed reference simulation");
+		}
 	}
 
 	// ------------------------------------------------------------------

@@ -1,6 +1,7 @@
 #include "StationWaterChecks.h"
 #include "StationRig.h"
 #include "core/StationConfigurationDocument.h"
+#include "core/BinarySerializer.h"
 #include <limits>
 
 namespace
@@ -1441,6 +1442,108 @@ namespace
 			std::string diagnostic;
 			return world.configureStationSystems(settings, false, &diagnostic);
 		};
+		// #891: chemistry crosses both persistence boundaries but remains
+		// inert at runtime, including every material/thermal refusal path.
+		require(core::FuelCellSettings{}.chemistry == core::FuelCellChemistry::PEM,
+			"new fuel cells must default to PEM");
+		for (auto chemistry : {core::FuelCellChemistry::PEM, core::FuelCellChemistry::Alkaline,
+			core::FuelCellChemistry::SolidOxide})
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = baseStores();
+			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
+			settings.fuelCells = { fuelCell("cell") };
+			settings.fuelCells[0].chemistry = chemistry;
+			std::string diagnostic;
+			core::StationConfigurationDocument document, loaded;
+			document.settings = settings;
+			auto const text = core::serializeStationConfiguration(document);
+			auto const label = std::string(core::FuelCellChemistryNames.at(static_cast<size_t>(chemistry)));
+			require(text.find("chemistry: " + label) != std::string::npos,
+				"configuration did not save chemistry");
+			require(text.find(chemistry == core::FuelCellChemistry::PEM ? "schemaVersion: 111" : "schemaVersion: 123") != std::string::npos,
+				"chemistry did not use the conditional schema floor");
+			require(core::parseStationConfiguration(text, loaded, &diagnostic)
+				&& loaded.settings == settings && core::serializeStationConfiguration(loaded) == text,
+				"chemistry configuration save/load/save was not byte stable");
+			auto bad = text;
+			auto const key = bad.find("chemistry: " + label);
+			bad.replace(key, std::string("chemistry: ").size() + label.size(), "chemistry: mystery");
+			auto const before = loaded;
+			require(!core::parseStationConfiguration(bad, loaded, &diagnostic)
+				&& diagnostic.find("PEM, alkaline, solid oxide") != std::string::npos
+				&& loaded.settings == before.settings, "unknown chemistry was not refused transactionally");
+			if (chemistry == core::FuelCellChemistry::PEM)
+			{
+				auto legacy = text;
+				auto const start = legacy.rfind('\n', key) + 1;
+				legacy.erase(start, legacy.find('\n', key) - start + 1);
+				require(core::parseStationConfiguration(legacy, loaded, &diagnostic) && loaded.settings == settings,
+					"missing chemistry did not load as PEM");
+			}
+			else
+			{
+				auto oldVersion = text;
+				oldVersion.replace(oldVersion.find("schemaVersion: 123"), 18, "schemaVersion: 122");
+				require(!core::parseStationConfiguration(oldVersion, loaded, &diagnostic)
+					&& diagnostic.find("schema 123") != std::string::npos, "non-PEM chemistry accepted below schema floor");
+			}
+			for (bool binary : {false, true})
+			{
+				core::World original("ChemistryPersistence", 2, 2), restored("Restored", 2, 2);
+				original.pauseSimulation(); original.finishBuild();
+				require(configure(original, settings), "chemistry World configuration refused");
+				auto encode = [&](core::World const& world) {
+					auto writer = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toString())
+						: std::unique_ptr<core::Serializer>(core::YamlSerializer::toString());
+					core::SerializationWorkData work; world.serialize(*writer, work); writer->serialize();
+					return binary ? static_cast<core::BinarySerializer&>(*writer).getSerializedString()
+						: static_cast<core::YamlSerializer&>(*writer).getSerializedString();
+				};
+				auto const data = encode(original);
+				if (!binary) require(data.find(chemistry == core::FuelCellChemistry::PEM ? "version: 111" : "version: 123") != std::string::npos,
+					"World chemistry schema floor changed");
+				auto reader = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+					: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+				reader->deserialize(); core::SerializationWorkData work;
+				require(restored.deserialize(*reader, work) && restored.getStationSystemsSettings() == settings
+					&& encode(restored) == data, "chemistry World round trip was not byte stable");
+				original.resumeSimulation(); restored.resumeSimulation();
+				require(advanceSeconds(original, 2) && advanceSeconds(restored, 2)
+					&& original.getStationSystemsSnapshot() == restored.getStationSystemsSnapshot(),
+					"chemistry World round trip changed simulation");
+			}
+			for (int scenario = 0; scenario < 7; ++scenario)
+			{
+				auto candidate = settings;
+				core::EquipmentLoadSettings load;
+				load.id = "shop"; load.electricalDemandKW = 5;
+				load.thermalClass = "low"; load.coolingDisposition = core::StationCoolingDisposition::Exported;
+				candidate.equipmentLoads = {load};
+				if (scenario == 1) candidate.stores[0].startingQualified = 0.00001;
+				if (scenario == 2) candidate.stores[1].startingQualified = 0.00001;
+				if (scenario == 3) candidate.stores[2].startingQualified = candidate.stores[2].capacity;
+				if (scenario == 4) candidate.thermalReservoirs[0].startingTemperatureC = 80;
+				if (scenario == 5) candidate.fuelCells[0].commandedOutputKW = 0;
+				if (scenario == 6) candidate.fuelCells[0].efficiency = 0.99; // no follow-up efficiency bands
+				auto pem = candidate; pem.fuelCells[0].chemistry = core::FuelCellChemistry::PEM;
+				core::World baseline("ChemistryInert", 2, 2), changed("ChemistryInert", 2, 2);
+				baseline.pauseSimulation(); baseline.finishBuild(); changed.pauseSimulation(); changed.finishBuild();
+				require(configure(baseline, pem) && configure(changed, candidate), "chemistry runtime setup refused");
+				baseline.resumeSimulation(); changed.resumeSimulation();
+				for (int second = 0; second < 3; ++second)
+				{
+					require(advanceSeconds(baseline, 1) && advanceSeconds(changed, 1), "chemistry runtime advance failed");
+					auto snap = changed.getStationSystemsSnapshot();
+					require(snap.fuelCells[0].chemistry == label, "snapshot lost chemistry name");
+					snap.fuelCells[0].chemistry = "PEM";
+					require(snap == baseline.getStationSystemsSnapshot(),
+						"chemistry changed runtime output, limiter, power audit, mass or energy ledger");
+				}
+			}
+		}
 		// Refused configurations: every malformed backup contract is
 		// rejected before anything runs, and none of the refusals mutates
 		// the World.
@@ -1453,6 +1556,11 @@ namespace
 			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
 			std::string diagnostic;
 			settings.fuelCells = { fuelCell("cell") };
+			settings.fuelCells[0].chemistry = static_cast<core::FuelCellChemistry>(255);
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("PEM, alkaline, solid oxide") != std::string::npos,
+				"invalid chemistry enum accepted through the configuration API");
+			settings.fuelCells[0].chemistry = core::FuelCellChemistry::PEM;
 			settings.fuelCells[0].hydrogenStoreId = "ghost";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("hydrogen reactant store 'ghost' does not exist") != std::string::npos,

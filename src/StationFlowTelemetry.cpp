@@ -297,7 +297,7 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 	else if (node.type == "Fuel cell")
 	{
 		auto p = find(s.fuelCells, id); if (!p) return {}; state(out, *p);
-		out.values = {"Output " + quantity(p->lastOutputKW, "kW"), "Hydrogen " + rate(p->lastHydrogenKg),
+		out.values = {"Chemistry " + p->chemistry, "Output " + quantity(p->lastOutputKW, "kW"), "Hydrogen " + rate(p->lastHydrogenKg),
 			"Oxygen " + rate(p->lastOxygenKg)};
 		port("Hydrogen in", p->lastHydrogenKg); port("Oxygen in", p->lastOxygenKg); port("Water out", p->lastWaterKg);
 		out.ports["Power out"] = quantity(p->lastOutputKW, "kW");

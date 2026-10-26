@@ -2484,8 +2484,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		case core::StationTransferStatus::Rejected: status = "refused (nothing delivered)"; break;
 		case core::StationTransferStatus::Idle: break;
 		}
-		ImGui::Text("%s (%s + %s -> %s): %s | commanded %.3f kW%s%s",
-			cell.id.c_str(),
+		ImGui::Text("%s [%s] (%s + %s -> %s): %s | commanded %.3f kW%s%s",
+			cell.id.c_str(), cell.chemistry.c_str(),
 			cell.hydrogenStoreId.c_str(), cell.oxygenStoreId.c_str(),
 			cell.waterStoreId.c_str(), status, cell.commandedOutputKW,
 			cell.limiter.empty() ? "" : " | limited by: ",

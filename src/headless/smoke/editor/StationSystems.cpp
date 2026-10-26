@@ -2211,6 +2211,23 @@ namespace
 					"inspector edit did not change the selected machine as one history entry");
 				driver.click(ctx, "Undo configuration"); ctx->Yield(3);
 				REQ(window.draft() == beforeEdit, "undo did not restore the machine inspector edit");
+				if (std::string_view(probe.type) == "Fuel cell")
+				{
+					REQ(window.draft().fuelCells[0].chemistry == core::FuelCellChemistry::PEM,
+						"newly authored fuel cell did not default to PEM");
+					for (auto const& option : {std::pair{"alkaline", core::FuelCellChemistry::Alkaline},
+						std::pair{"solid oxide", core::FuelCellChemistry::SolidOxide}})
+					{
+						auto const* sibling = ctx->ItemInfo("**/rated output kW##Fuel cell 0");
+						ctx->ItemClick(ImHashStr("chemistry##Fuel cell 0", 0, sibling->ParentID)); ctx->Yield(2);
+						driver.click(ctx, (std::string("**/") + option.first).c_str()); ctx->Yield(3);
+						REQ(window.draft().fuelCells[0].chemistry == option.second
+							&& window.draftHistory().undoCount() == historyCount + 1,
+							"chemistry selector did not make one undoable edit");
+						driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+						REQ(window.draft() == beforeEdit, "undo did not restore chemistry");
+					}
+				}
 			}
 			// The projection wires every machine to the shared pool it
 			// implicitly draws from or feeds.

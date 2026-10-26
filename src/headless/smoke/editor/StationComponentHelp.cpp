@@ -29,14 +29,14 @@ namespace
 		StationComponentHelpCatalogue parsed;
 		std::string diagnostic;
 		require(parseStationComponentHelp(contents.str(), parsed, diagnostic), diagnostic);
-		require(parsed.size() == 37 && parsed.at("Store").blocks.size() > 5, "extraction lost component information");
+		require(parsed.size() == 38 && parsed.at("Store").blocks.size() > 5, "extraction lost component information");
 		auto const originalTitle = parsed.at("Store").title;
 		for (auto const* invalid : {"{", "{}", R"({"version":2,"components":[]})",
 			R"({"version":1,"components":[{"nodeType":"Store","title":"Store","blocks":[{"kind":"bogus"}]}]})",
 			R"({"version":1,"components":[{"nodeType":"Store","title":"Store","blocks":[{"kind":"paragraph","text":"ok"}]},{"nodeType":"Store","title":"duplicate","blocks":[{"kind":"paragraph","text":"ok"}]}]})"})
 		{
 			require(!parseStationComponentHelp(invalid, parsed, diagnostic) && !diagnostic.empty(), "malformed help accepted");
-			require(parsed.size() == 37 && parsed.at("Store").title == originalTitle, "help parser partially replaced catalogue");
+			require(parsed.size() == 38 && parsed.at("Store").title == originalTitle, "help parser partially replaced catalogue");
 		}
 		// The guide must use the loaded resource, never reopen a relative
 		// source path each frame (including when launched outside the source tree).

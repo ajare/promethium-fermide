@@ -338,6 +338,7 @@ an Atmosphere or life-support reserve exists.
 
 | Dial/value | Purpose |
 | --- | --- |
+| Chemistry | PEM (default), alkaline or solid oxide. Persisted and shown in telemetry; currently descriptive only, with identical runtime behaviour and no chemistry-specific efficiency bands. |
 | Rated output kW | Installed electrical rating; zero disables. |
 | Commanded output kW | Dispatch request within rating; automatic dispatch can command backup output. |
 | Efficiency | Electricity / hydrogen chemical energy, `(0,1]`. |

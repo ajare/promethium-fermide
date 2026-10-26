@@ -1489,6 +1489,14 @@ bool renderFuelCellEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	ImGui::PushID(label.c_str());
 	bool removeRequested = false;
 	renderIdentity(label, cell.id);
+	if (ImGui::BeginCombo(describe("chemistry", label).c_str(),
+		core::FuelCellChemistryNames.at(static_cast<size_t>(cell.chemistry))))
+	{
+		for (size_t index = 0; index < core::FuelCellChemistryNames.size(); ++index)
+			if (ImGui::Selectable(core::FuelCellChemistryNames[index], static_cast<size_t>(cell.chemistry) == index))
+				cell.chemistry = static_cast<core::FuelCellChemistry>(index);
+		ImGui::EndCombo();
+	}
 	renderRefCombo(describe("hydrogen reactant store", label), cell.hydrogenStoreId, storeIds(draft), portIsOptional("Fuel cell", "Hydrogen in"));
 	renderRefCombo(describe("oxygen reactant store", label), cell.oxygenStoreId, storeIds(draft), portIsOptional("Fuel cell", "Oxygen in"));
 	renderRefCombo(describe("product water store", label), cell.waterStoreId, storeIds(draft), portIsOptional("Fuel cell", "Water out"));

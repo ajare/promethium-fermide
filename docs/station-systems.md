@@ -2180,6 +2180,19 @@ store, the product-water store, a thermal service class with its
 heat-sink reservoir, a rated electrical output, a conversion
 efficiency, a commanded output and a maximum sink temperature.
 
+The configuration editor also offers **chemistry**: `PEM` (the default),
+`alkaline`, or `solid oxide` (#891). The saved `chemistry` key round-trips
+through World YAML/binary and standalone Station configuration documents;
+absence means PEM and unknown values are refused with the declared choices.
+Each published fuel-cell snapshot and live telemetry names the chemistry.
+This tracer bullet is label-only: all three chemistries use exactly the same
+conversion, sink gate, reactant draws, power audit and mass/energy ledgers.
+Chemistry-specific efficiency bands and temperature constraints are follow-ups,
+not enforced here. Non-PEM chemistry requires schema 123; PEM keeps the previous
+conditional schema floor. This branch already uses 123 for thermal bodies and
+124 for Power Buses: those independent version triggers remain unchanged.
+The bundled reference intentionally retains PEM by absence of the key.
+
 The reactant draw is **stoichiometric on the mass ledger**: one
 kilogram of hydrogen consumes `FuelCellSettings::oxygenMassKgPerHydrogenKg()`
 — the molar-mass ratio (2·M_O2 / 2·M_H2) ≈ 7.9367 kg of oxygen — and

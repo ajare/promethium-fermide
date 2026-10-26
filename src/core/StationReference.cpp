@@ -1003,6 +1003,7 @@ namespace core
 				serializer.beginMap("");
 				writePowerMembership(serializer, cell, explicitBuses);
 				serializer.writeString("id", cell.id);
+				serializer.writeString("chemistry", FuelCellChemistryNames.at(static_cast<size_t>(cell.chemistry)));
 				if (cell.stackDegradation) writeWearBlock(serializer, "stackDegradation", *cell.stackDegradation);
 				serializer.writeString("hydrogenStoreId", cell.hydrogenStoreId);
 				serializer.writeString("oxygenStoreId", cell.oxygenStoreId);
@@ -2490,6 +2491,17 @@ namespace core
 				serializer.beginMap("");
 				FuelCellSettings cell;
 				cell.id = serializer.readString("id");
+				if (serializer.hasField("chemistry"))
+				{
+					auto const chemistry = serializer.readString("chemistry");
+					auto const found = std::find(FuelCellChemistryNames.begin(), FuelCellChemistryNames.end(), chemistry);
+					if (found == FuelCellChemistryNames.end())
+						throw SerializationException("Fuel cell '" + cell.id + "' has unknown chemistry '" + chemistry
+							+ "'; declared chemistries: PEM, alkaline, solid oxide");
+					cell.chemistry = static_cast<FuelCellChemistry>(found - FuelCellChemistryNames.begin());
+					if (version < 123 && cell.chemistry != FuelCellChemistry::PEM)
+						throw SerializationException("Non-PEM fuel cell chemistry requires schema 123");
+				}
 				readMachineWear(serializer, "stackDegradation", version, cell.stackDegradation);
 				cell.hydrogenStoreId = serializer.readString("hydrogenStoreId");
 				cell.oxygenStoreId = serializer.readString("oxygenStoreId");

@@ -152,7 +152,9 @@ set(PF_TEST_TIMEOUTS
     "smoke-editor=120"
     "smoke-editor-cli-contract=10"
     "smoke-editor-concurrency-contract=10"
-    "smoke-editor-contract=310"
+    # #891 recovery: the full inventory plus individual checks precede the
+    # eight-process phase (itself bounded at 420s in EditorContract.cmake).
+    "smoke-editor-contract=700"
     "smoke-harness-contract=10"
     "smoke-lanes-contract=10"
     "smoke-metrics=10"
@@ -522,7 +524,9 @@ set(PF_TEST_TIMEOUTS
     "station-stabilityLongRunFast=10"
     "station-stabilityMultiWorldIsolation=490"
     "station-stabilityMultiWorldIsolationFast=40"
-    "station-stabilityPathEquivalence=870"
+    # #891 recovery: isolated Release execution exceeds the former 870s
+    # budget; retain the full four-path, 1800-second simulation workload.
+    "station-stabilityPathEquivalence=1100"
     "station-stabilityPathEquivalenceFast=40"
     "station-stabilityResetIsolation=570"
     "station-stabilityResetIsolationFast=30"

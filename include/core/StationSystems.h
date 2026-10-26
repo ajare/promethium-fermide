@@ -1655,6 +1655,10 @@ namespace core
 	// Product water lands in the declared destination - the raw-water
 	// store a water treatment (#402) qualifies - so the backup's water
 	// goes through treatment rather than into drinking water directly.
+	// #891: descriptive only; chemistry does not change runtime conversion yet.
+	enum class FuelCellChemistry : std::uint8_t { PEM, Alkaline, SolidOxide };
+	inline constexpr std::array<char const*, 3> FuelCellChemistryNames{
+		"PEM", "alkaline", "solid oxide"};
 	struct FuelCellSettings
 	{
 		std::string id;
@@ -1675,6 +1679,7 @@ namespace core
 		// already banked.
 		std::optional<InstallationWearSettings> stackDegradation;
 		std::vector<std::string> busIds{"main"};
+		FuelCellChemistry chemistry{FuelCellChemistry::PEM};
 		bool operator==(FuelCellSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationFuelCells{8};
@@ -4637,6 +4642,7 @@ namespace core
 		double effectiveRatedOutputKW{0.0};
 		// #848: the permanent Wear this machine has accumulated.
 		StationMachineWearSnapshot wear;
+		std::string chemistry{"PEM"};
 		bool operator==(StationFuelCellSnapshot const&) const = default;
 	};
 	// One Sabatier reactor as of the most recent tick (#405): the
