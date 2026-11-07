@@ -771,6 +771,123 @@ bool WorldAuthoring::removeFurniture(uint64_t id, std::string* diagnostic)
 	return world().removeFurniture(id, diagnostic);
 }
 
+// --- Resource binding: Agent tag registry ---
+// Every one of these is a write to the document's registry reference, so it
+// goes through `world()`. None of them is answered from `document()`: a
+// binding change is not a read that could be preflighted here, and the World
+// owns the paused-only rule that governs it (#969).
+void WorldAuthoring::attachAgentTagRegistry(std::string resourceName, std::shared_ptr<core::AgentTagRegistry> registry)
+{
+	world().attachAgentTagRegistry(std::move(resourceName), std::move(registry));
+}
+void WorldAuthoring::attachAgentTagRegistryAndClearAssignments(std::string resourceName, std::shared_ptr<core::AgentTagRegistry> registry)
+{
+	world().attachAgentTagRegistryAndClearAssignments(std::move(resourceName), std::move(registry));
+}
+void WorldAuthoring::detachAgentTagRegistry()
+{
+	world().detachAgentTagRegistry();
+}
+void WorldAuthoring::detachAgentTagRegistryAndClearAssignments()
+{
+	world().detachAgentTagRegistryAndClearAssignments();
+}
+void WorldAuthoring::resolveAgentTagRegistry(std::shared_ptr<core::AgentTagRegistry> registry)
+{
+	world().resolveAgentTagRegistry(std::move(registry));
+}
+void WorldAuthoring::replaceAgentTagRegistryWithIndependentCopy(std::string resourceName, std::shared_ptr<core::AgentTagRegistry> registry)
+{
+	world().replaceAgentTagRegistryWithIndependentCopy(std::move(resourceName), std::move(registry));
+}
+
+// --- Resource binding: Agent behaviour registry ---
+void WorldAuthoring::attachAgentBehaviourRegistry(std::string resourceName, std::shared_ptr<core::AgentBehaviourRegistry> registry)
+{
+	world().attachAgentBehaviourRegistry(std::move(resourceName), std::move(registry));
+}
+void WorldAuthoring::attachAgentBehaviourRegistryAndClearAssignments(std::string resourceName, std::shared_ptr<core::AgentBehaviourRegistry> registry)
+{
+	world().attachAgentBehaviourRegistryAndClearAssignments(std::move(resourceName), std::move(registry));
+}
+void WorldAuthoring::detachAgentBehaviourRegistry()
+{
+	world().detachAgentBehaviourRegistry();
+}
+void WorldAuthoring::detachAgentBehaviourRegistryAndClearAssignments()
+{
+	world().detachAgentBehaviourRegistryAndClearAssignments();
+}
+void WorldAuthoring::resolveAgentBehaviourRegistry(std::shared_ptr<core::AgentBehaviourRegistry> registry)
+{
+	world().resolveAgentBehaviourRegistry(std::move(registry));
+}
+void WorldAuthoring::markAgentBehaviourRegistryUnavailable(std::string diagnostic)
+{
+	world().markAgentBehaviourRegistryUnavailable(std::move(diagnostic));
+}
+void WorldAuthoring::replaceAgentBehaviourRegistryWithIndependentCopy(std::string resourceName, std::shared_ptr<core::AgentBehaviourRegistry> registry)
+{
+	world().replaceAgentBehaviourRegistryWithIndependentCopy(std::move(resourceName), std::move(registry));
+}
+
+// --- Resource binding: Agent types ---
+bool WorldAuthoring::attachAgentType(std::string resourceName, std::string source, std::string* diagnostic)
+{
+	return world().attachAgentType(std::move(resourceName), std::move(source), diagnostic);
+}
+bool WorldAuthoring::detachUnusedAgentType(std::string_view typeId)
+{
+	return world().detachUnusedAgentType(typeId);
+}
+
+// --- Resource binding: catalogues and Action packages ---
+void WorldAuthoring::attachFurnitureCatalogue(std::string resourceName, std::shared_ptr<const core::FurnitureCatalogue> catalogue)
+{
+	world().attachFurnitureCatalogue(std::move(resourceName), std::move(catalogue));
+}
+bool WorldAuthoring::reloadFurnitureCatalogue(std::filesystem::path const& path, std::string* diagnostic)
+{
+	return world().reloadFurnitureCatalogue(path, diagnostic);
+}
+bool WorldAuthoring::selectActionRegistry(std::filesystem::path const& path, std::string* diagnostic)
+{
+	return world().selectActionRegistry(path, diagnostic);
+}
+bool WorldAuthoring::reloadActionRegistry(std::filesystem::path const& path, std::string* diagnostic)
+{
+	return world().reloadActionRegistry(path, diagnostic);
+}
+bool WorldAuthoring::clearActionRegistry(std::string* diagnostic)
+{
+	return world().clearActionRegistry(diagnostic);
+}
+
+// --- Resource binding: image-set names ---
+void WorldAuthoring::setSectorImageSetResourceName(std::string name)
+{
+	world().setSectorImageSetResourceName(std::move(name));
+}
+void WorldAuthoring::setAgentImageSetResourceName(std::string name)
+{
+	world().setAgentImageSetResourceName(std::move(name));
+}
+void WorldAuthoring::setFurnitureImageSetResourceName(std::string name)
+{
+	world().setFurnitureImageSetResourceName(std::move(name));
+}
+
+// --- Persistence ---
+void WorldAuthoring::saveTo(std::string const& filepath)
+{
+	// The whole save contract is the World's and is deliberately not
+	// restated or softened here: the document becomes clean only once the
+	// write has fully succeeded, and a throw leaves it dirty. The handle's
+	// history is left alone on purpose - see the header note on why the
+	// saved marker is the caller's to move (#969).
+	world().saveTo(filepath);
+}
+
 // --- History: undo and redo ---
 
 std::optional<DocumentSnapshot> WorldAuthoring::captureSnapshot() const

@@ -150,6 +150,8 @@ pf_add_smoke_module(pf-smoke-game-authoring
         game-authoring/SharedLibrary.cpp
         game-authoring/AuthoringTopology.cpp
         game-authoring/UndoRedo.cpp
+        game-authoring/ResourceBinding.cpp
+        game-authoring/Persistence.cpp
         game-authoring/Boundary.cpp
     LIBRARIES pf-game-authoring
     LABELS "core;game-authoring"

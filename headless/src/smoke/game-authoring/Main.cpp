@@ -10,6 +10,8 @@ int main(int argc, char** argv)
 	registerGameAuthoringSharedLibrary(checks);
 	registerGameAuthoringTopology(checks);
 	registerGameAuthoringUndoRedo(checks);
+	registerGameAuthoringResourceBinding(checks);
+	registerGameAuthoringPersistence(checks);
 	registerGameAuthoringBoundary(checks);
 	return smoke::main("game-authoring", checks, argc, argv);
 }

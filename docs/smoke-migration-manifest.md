@@ -312,6 +312,8 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/game-authoring/SharedLibrary.cpp` | module-owned | `pf-smoke-game-authoring` |
 | `smoke/game-authoring/AuthoringTopology.cpp` | module-owned | `pf-smoke-game-authoring` |
 | `smoke/game-authoring/UndoRedo.cpp` | module-owned | `pf-smoke-game-authoring` |
+| `smoke/game-authoring/ResourceBinding.cpp` | module-owned | `pf-smoke-game-authoring` |
+| `smoke/game-authoring/Persistence.cpp` | module-owned | `pf-smoke-game-authoring` |
 | `smoke/game-authoring/Boundary.cpp` | module-owned | `pf-smoke-game-authoring` |
 <!-- current-ownership-end -->
 Simulation Observation was migrated in #280. Its stable registered check

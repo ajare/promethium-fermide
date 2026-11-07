@@ -182,7 +182,7 @@ is registered as `smoke-game-runtime` with labels
 timeout. Everything is headless: CPU-only ImGui, no window, no dialog, no
 interactive input.
 
-## Game authoring module (#967)
+## Game authoring module (#967, #968, #969)
 
 ```sh
 cmake --build build-linux --target pf-smoke-game-authoring --parallel
@@ -194,7 +194,7 @@ ctest --test-dir build-linux -R '^smoke-game-authoring$' --output-on-failure
 `pf-smoke-game-authoring` exercises the authoring half of the game-facing
 boundary through the shared [`pf-game-authoring`](../pf-game-authoring)
 library. `game::WorldAuthoring` wraps a `game::WorldRuntime` instead of
-owning a World beside it, so its 12 registrations are all about the two
+owning a World beside it, so its 39 registrations are all about the two
 handles being one World: the authoring handle names the runtime it was given
 and its mutable `World&` is the very object the runtime owns (a counted
 `World` subclass shows wrapping adds no second World), the runtime handed
@@ -221,6 +221,36 @@ wrap a `const` runtime. The Linux `dladdr` checks report that
 `WorldAuthoring` code resolved into `libpf-game-authoring` and that this is
 a different image from the runtime it wraps; on other platforms those two
 registrations are not made.
+
+Resource binding and persistence (#969) sit on the same handle. `attach`,
+`detach`, the `AndClearAssignments` variants, `resolve`, `markUnavailable`
+and `replaceWithIndependentCopy` for the Agent tag and behaviour
+registries, the Furniture catalogue attach and reload, the Action registry
+select/reload/clear family, the three image-set name setters and the Agent
+type attach and rollback are all reachable through `WorldAuthoring`, and
+every one of them is read back through the wrapped runtime's `const` view:
+the tag registry resolves to the object attached, the catalogue name the
+runtime reports is the one bound, and a placement made against a bound
+catalogue lands in the World the runtime drives. `saveTo` writes a document
+that reloads with the authored content, clears the World's own modified
+flag only when the write actually succeeded, and leaves the handle's saved
+marker where it was — the editor's save transaction carries companion
+documents, so closing it stays the caller's act, completed by `markSaved`.
+The World gates the executable and structural families on pause, and that
+pause is taken through the runtime, which owns run state; the handle binds,
+it does not drive.
+
+`Boundary.cpp` pins the other direction at compile time. `attachAgentTagRegistry`,
+`detachAgentTagRegistry`, the behaviour registry equivalents,
+`attachFurnitureCatalogue`, `selectActionRegistry`, `clearActionRegistry`,
+the three image-set setters, `saveTo` and `markSaved` all fail to resolve
+against `game::WorldRuntime&`, so a render or game path holding a runtime
+cannot rebind what the World resolves against or persist it. What the
+runtime does keep is the read side: `agentTagRegistryResourceName`,
+`agentBehaviourRegistryResourceName`, `furnitureCatalogueResourceName`,
+the three image-set names and `actionRegistryFilename` are callable on a
+`const WorldRuntime&`, and report empty rather than faulting when the
+document references nothing.
 
 The other half of the boundary is a separate compile-only contract, not a
 smoke registration: `headless/src/GameOnlyLinkContract.cpp` is built as

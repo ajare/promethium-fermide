@@ -175,6 +175,38 @@ namespace game
 
 		static std::uint32_t getMaxTicksPerUpdate();
 
+		// --- Resource names ----------------------------------------------
+		// The names a World's external packages are referenced by (#969, spec
+		// #960 decision 5). Binding them - attaching, detaching, reloading -
+		// is an authoring act and lives on `WorldAuthoring`; the game never
+		// does it, because it loads Worlds through the Willpower resource
+		// system. What the game does need is to know which names the document
+		// was authored against, so it can resolve the visuals it renders.
+		//
+		// These are the read half of the binding family, and the split is the
+		// whole point: a name is a fact about the document, the act of
+		// changing which package answers to it is not. Each returns the name
+		// as the document holds it, empty when the World references nothing.
+
+		// The Agent tag registry Resource this document references.
+		std::string const& agentTagRegistryResourceName() const;
+
+		// The Agent behaviour registry package this document references.
+		std::string const& agentBehaviourRegistryResourceName() const;
+
+		// The Furniture catalogue Resource this document references.
+		std::string const& furnitureCatalogueResourceName() const;
+
+		// The image-set Resources the document was authored against.
+		std::string const& sectorImageSetResourceName() const;
+
+		std::string const& agentImageSetResourceName() const;
+
+		std::string const& furnitureImageSetResourceName() const;
+
+		// The Action registry package basename, empty when none is selected.
+		std::string const& actionRegistryFilename() const;
+
 	private:
 		// Exclusive ownership. Nothing else in the process holds this World: the
 		// runtime is not copyable, no shared_ptr is ever formed from it, and the

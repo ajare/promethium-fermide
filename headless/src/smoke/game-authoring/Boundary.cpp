@@ -1,8 +1,13 @@
 #include "Checks.h"
 
+#include <filesystem>
+#include <memory>
 #include <string>
 #include <type_traits>
 
+#include "core/AgentBehaviourRegistry.h"
+#include "core/AgentTagRegistry.h"
+#include "core/Furniture.h"
 #include "game/WorldAuthoring.h"
 #include "game/WorldRuntime.h"
 
@@ -66,6 +71,71 @@ PF_ASSERT_UNREACHABLE(const game::WorldRuntime&,
 	canAddSectorMarker(0u, 0u, 1.0f),
 	"the preflight guards are reachable through a const WorldRuntime (#968)")
 
+// --- The binding and persistence families, absent from the runtime (#969) ---
+// Binding a Resource package and writing the document are authoring acts.
+// A play or render path holds a `WorldRuntime` and must not be able to
+// rebind what the World resolves against, or to persist it.
+PF_ASSERT_UNREACHABLE(game::WorldRuntime&,
+	attachAgentTagRegistry(std::string{}, std::shared_ptr<core::AgentTagRegistry>{}),
+	"the Agent tag registry binding family is reachable from WorldRuntime (#969)")
+PF_ASSERT_UNREACHABLE(game::WorldRuntime&, detachAgentTagRegistry(),
+	"the Agent tag registry binding family is reachable from WorldRuntime (#969)")
+PF_ASSERT_UNREACHABLE(game::WorldRuntime&,
+	attachAgentBehaviourRegistry(std::string{}, std::shared_ptr<core::AgentBehaviourRegistry>{}),
+	"the behaviour registry binding family is reachable from WorldRuntime (#969)")
+PF_ASSERT_UNREACHABLE(game::WorldRuntime&, detachAgentBehaviourRegistry(),
+	"the behaviour registry binding family is reachable from WorldRuntime (#969)")
+PF_ASSERT_UNREACHABLE(game::WorldRuntime&,
+	attachFurnitureCatalogue(std::string{}, std::shared_ptr<const core::FurnitureCatalogue>{}),
+	"the Furniture catalogue binding family is reachable from WorldRuntime (#969)")
+PF_ASSERT_UNREACHABLE(game::WorldRuntime&,
+	selectActionRegistry(std::filesystem::path{}),
+	"the Action registry binding family is reachable from WorldRuntime (#969)")
+PF_ASSERT_UNREACHABLE(game::WorldRuntime&, clearActionRegistry(),
+	"the Action registry binding family is reachable from WorldRuntime (#969)")
+PF_ASSERT_UNREACHABLE(game::WorldRuntime&,
+	setSectorImageSetResourceName(std::string{}),
+	"the image set naming family is reachable from WorldRuntime (#969)")
+PF_ASSERT_UNREACHABLE(game::WorldRuntime&,
+	setAgentImageSetResourceName(std::string{}),
+	"the image set naming family is reachable from WorldRuntime (#969)")
+PF_ASSERT_UNREACHABLE(game::WorldRuntime&,
+	setFurnitureImageSetResourceName(std::string{}),
+	"the image set naming family is reachable from WorldRuntime (#969)")
+PF_ASSERT_UNREACHABLE(game::WorldRuntime&, saveTo(std::string{}),
+	"saveTo() is reachable from WorldRuntime: persistence belongs to the authoring handle (#969)")
+PF_ASSERT_UNREACHABLE(game::WorldRuntime&, markSaved(),
+	"markSaved() is reachable from WorldRuntime: the saved marker belongs to the authoring handle (#969)")
+
+// The same families, present on the authoring handle (#969).
+static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::attachAgentTagRegistry),
+	game::WorldAuthoring&, std::string, std::shared_ptr<core::AgentTagRegistry>>,
+	"the Agent tag registry binding family is not reachable through WorldAuthoring (#969)");
+static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::detachAgentTagRegistry),
+	game::WorldAuthoring&>,
+	"the Agent tag registry binding family is not reachable through WorldAuthoring (#969)");
+static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::attachAgentBehaviourRegistry),
+	game::WorldAuthoring&, std::string, std::shared_ptr<core::AgentBehaviourRegistry>>,
+	"the behaviour registry binding family is not reachable through WorldAuthoring (#969)");
+static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::detachAgentBehaviourRegistry),
+	game::WorldAuthoring&>,
+	"the behaviour registry binding family is not reachable through WorldAuthoring (#969)");
+static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::attachFurnitureCatalogue),
+	game::WorldAuthoring&, std::string, std::shared_ptr<const core::FurnitureCatalogue>>,
+	"the Furniture catalogue binding family is not reachable through WorldAuthoring (#969)");
+static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::selectActionRegistry),
+	game::WorldAuthoring&, std::filesystem::path const&, std::string*>,
+	"the Action registry binding family is not reachable through WorldAuthoring (#969)");
+static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::clearActionRegistry),
+	game::WorldAuthoring&, std::string*>,
+	"the Action registry binding family is not reachable through WorldAuthoring (#969)");
+static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::saveTo),
+	game::WorldAuthoring&, std::string const&>,
+	"saveTo() is not reachable through WorldAuthoring (#969)");
+static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::markSaved),
+	game::WorldAuthoring&>,
+	"markSaved() is not reachable through WorldAuthoring (#969)");
+
 // --- The same families, present on the authoring handle ---
 static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::undo),
 	game::WorldAuthoring&>,
@@ -103,6 +173,17 @@ namespace
 	struct CanRedo : std::false_type {};
 	template <typename T>
 	struct CanRedo<T, std::void_t<decltype(std::declval<T>().redo())>> : std::true_type {};
+
+	template <typename T, typename = void>
+	struct CanSave : std::false_type {};
+	template <typename T>
+	struct CanSave<T, std::void_t<decltype(std::declval<T>().saveTo(std::string{}))>> : std::true_type {};
+
+	template <typename T, typename = void>
+	struct CanBindTagRegistry : std::false_type {};
+	template <typename T>
+	struct CanBindTagRegistry<T, std::void_t<decltype(std::declval<T>().attachAgentTagRegistry(
+		std::string{}, std::shared_ptr<core::AgentTagRegistry>{}))>> : std::true_type {};
 }
 
 void registerGameAuthoringBoundary(std::vector<smoke::Check>& checks)
@@ -120,5 +201,13 @@ void registerGameAuthoringBoundary(std::vector<smoke::Check>& checks)
 				"WorldAuthoring does not expose undo()");
 			smoke::require(CanRedo<game::WorldAuthoring&>::value,
 				"WorldAuthoring does not expose redo()");
+			smoke::require(!CanSave<game::WorldRuntime&>::value,
+				"WorldRuntime exposes saveTo()");
+			smoke::require(!CanBindTagRegistry<game::WorldRuntime&>::value,
+				"WorldRuntime exposes the Agent tag registry binding family");
+			smoke::require(CanSave<game::WorldAuthoring&>::value,
+				"WorldAuthoring does not expose saveTo()");
+			smoke::require(CanBindTagRegistry<game::WorldAuthoring&>::value,
+				"WorldAuthoring does not expose the Agent tag registry binding family");
 		} });
 }

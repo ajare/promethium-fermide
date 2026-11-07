@@ -2,10 +2,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "DocumentHistory.h"
@@ -277,6 +279,102 @@ namespace game
 	core::AgentId createAgent(std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets);
 	core::AgentId createAgent(std::string const& name, uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets);
 	core::EntityRemovalResult removeAgent(core::AgentId id);
+
+	// --- Resource binding: Agent tag registry ---
+	// A World references zero or one Agent tag registry Resource by name and
+	// expected UUID, and the attach / detach family is how that reference is
+	// moved. It is grouped here rather than scattered because the whole family
+	// is one kind of act: changing which external package the document's tag
+	// IDs resolve against. None of it is something a running game does - it
+	// loads Worlds through the resource system and never rebinds them - which
+	// is why the family sits on the authoring handle and not the runtime
+	// (#969, spec #960 decision 5).
+	//
+	// The names travel with the packages. The read half of that pair - what
+	// name the document currently holds - stays on `WorldRuntime`, so a game
+	// can bind visuals without ever being able to rebind them.
+	//
+	// Attaching and detaching are paused-only, and the World is what enforces
+	// that; these forwards add no guard of their own. The `...AndClearAssignments`
+	// variants are the destructive transactions the editor reaches for only
+	// after confirmation, kept explicit rather than folded into the plain
+	// attach so a caller cannot clear a document's tag state by accident.
+	void attachAgentTagRegistry(std::string resourceName, std::shared_ptr<core::AgentTagRegistry> registry);
+	void attachAgentTagRegistryAndClearAssignments(std::string resourceName, std::shared_ptr<core::AgentTagRegistry> registry);
+	void detachAgentTagRegistry();
+	void detachAgentTagRegistryAndClearAssignments();
+	void resolveAgentTagRegistry(std::shared_ptr<core::AgentTagRegistry> registry);
+
+	// Save As moves an intact World into an equivalent, independent tag
+	// namespace. Forwarded because Save As is an authoring act through and
+	// through: assignments and samples are preserved, any definition or
+	// allocator difference is refused.
+	void replaceAgentTagRegistryWithIndependentCopy(std::string resourceName, std::shared_ptr<core::AgentTagRegistry> registry);
+
+	// --- Resource binding: Agent behaviour registry ---
+	void attachAgentBehaviourRegistry(std::string resourceName, std::shared_ptr<core::AgentBehaviourRegistry> registry);
+	void attachAgentBehaviourRegistryAndClearAssignments(std::string resourceName, std::shared_ptr<core::AgentBehaviourRegistry> registry);
+	void detachAgentBehaviourRegistry();
+	void detachAgentBehaviourRegistryAndClearAssignments();
+	void resolveAgentBehaviourRegistry(std::shared_ptr<core::AgentBehaviourRegistry> registry);
+
+	// A package load failure is dependency state, not malformed World data:
+	// recording it leaves the persisted reference and the unresolved
+	// assignments available for repair rather than dirtying the document.
+	void markAgentBehaviourRegistryUnavailable(std::string diagnostic);
+	void replaceAgentBehaviourRegistryWithIndependentCopy(std::string resourceName, std::shared_ptr<core::AgentBehaviourRegistry> registry);
+
+	// --- Resource binding: Agent types ---
+	// Registers a `.agent.lua` type definition under `resourceName`. The
+	// source is validated before it is accepted, and a refusal mutates nothing.
+	bool attachAgentType(std::string resourceName, std::string source, std::string* diagnostic = nullptr);
+
+	// Rolls back an unused placement registration. Paired with the attach
+	// above so a placement that was never committed can be taken back through
+	// the same handle that made it.
+	bool detachUnusedAgentType(std::string_view typeId);
+
+	// --- Resource binding: catalogues and Action packages ---
+	void attachFurnitureCatalogue(std::string resourceName, std::shared_ptr<const core::FurnitureCatalogue> catalogue);
+	bool reloadFurnitureCatalogue(std::filesystem::path const& path, std::string* diagnostic = nullptr);
+	bool selectActionRegistry(std::filesystem::path const& path, std::string* diagnostic = nullptr);
+	bool reloadActionRegistry(std::filesystem::path const& path, std::string* diagnostic = nullptr);
+	bool clearActionRegistry(std::string* diagnostic = nullptr);
+
+	// --- Resource binding: image-set names ---
+	// Which image set each visual class draws from. Setting one is a binding
+	// act, so it is here; reading one is a fact about the document, so it is
+	// on `WorldRuntime`. The pair is the boundary drawn at the finest grain
+	// this family allows.
+	void setSectorImageSetResourceName(std::string name);
+	void setAgentImageSetResourceName(std::string name);
+	void setFurnitureImageSetResourceName(std::string name);
+
+	// --- Persistence -------------------------------------------------
+	// Writing the document and settling the saved marker are two calls, not
+	// one, and that is deliberate rather than unfinished.
+	//
+	// `saveTo` writes this document. The World's own contract is that the
+	// clean-state transition happens only after the file has been opened,
+	// written, flushed, closed and replaced without error; anything thrown
+	// leaves the document exactly as dirty as it was, so a failed save never
+	// loses work by pretending it succeeded.
+	//
+	// The handle's saved marker is not moved by `saveTo`, because this handle
+	// cannot see the rest of the transaction. A World document travels with
+	// an Agent tag registry document and an Agent behaviour package, and only
+	// the caller orchestrating the save knows when all of them have reached
+	// disk. Marking the history saved here would clear the author's
+	// "unsaved" signal while a companion document was still pending. So the
+	// caller marks it - `markSaved()` - once the whole set is down, which is
+	// exactly the order the editor's save path already uses.
+	//
+	// Two modified flags exist and they mean different things. The document's
+	// own flag is read through `document().isModified()` and is cleared by
+	// `saveTo`. The handle's `isModified()` is the history's bookkeeping
+	// about committed edits and is cleared by `markSaved()`. Neither is a
+	// proxy for the other, and a document is stale when either is set.
+	void saveTo(std::string const& filepath);
 
 	// --- Agent groups ---
 	bool canAddAgentGroup(std::string const& name, std::string* diagnostic = nullptr) const;

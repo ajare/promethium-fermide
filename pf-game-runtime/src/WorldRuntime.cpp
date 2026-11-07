@@ -187,4 +187,53 @@ namespace game
 	{
 		return core::World::getMaxTicksPerUpdate();
 	}
+
+	// --- Resource names -------------------------------------------------
+	// Reads through the same const view rendering gets. There is no widening
+	// here: the names are read off `world_` exactly as a `core::World const&`
+	// would read them, and the binding acts that would change them are not on
+	// this type at all (#969).
+
+	// The World's own registry name getters throw when nothing is referenced,
+	// because the editor uses that as a programming-error signal. The runtime
+	// is a read surface, not an authoring one: an unbound Resource reads as
+	// "no name" here rather than faulting a render or game path.
+	std::string const& WorldRuntime::agentTagRegistryResourceName() const
+	{
+		static const std::string kNoName;
+		if (!world_->hasAgentTagRegistryReference()) return kNoName;
+		return world_->getAgentTagRegistryResourceName();
+	}
+
+	std::string const& WorldRuntime::agentBehaviourRegistryResourceName() const
+	{
+		static const std::string kNoName;
+		if (!world_->hasAgentBehaviourRegistryReference()) return kNoName;
+		return world_->getAgentBehaviourRegistryResourceName();
+	}
+
+	std::string const& WorldRuntime::furnitureCatalogueResourceName() const
+	{
+		return world_->furnitureCatalogueResourceName();
+	}
+
+	std::string const& WorldRuntime::sectorImageSetResourceName() const
+	{
+		return world_->sectorImageSetResourceName();
+	}
+
+	std::string const& WorldRuntime::agentImageSetResourceName() const
+	{
+		return world_->agentImageSetResourceName();
+	}
+
+	std::string const& WorldRuntime::furnitureImageSetResourceName() const
+	{
+		return world_->furnitureImageSetResourceName();
+	}
+
+	std::string const& WorldRuntime::actionRegistryFilename() const
+	{
+		return world_->actionRegistryFilename();
+	}
 }
