@@ -9,6 +9,7 @@ int main(int argc, char** argv)
 	registerGameRuntimeTicking(checks);
 	registerGameRuntimeLifecycle(checks);
 	registerGameRuntimeObservation(checks);
+	registerGameRuntimePlayerInput(checks);
 	registerGameRuntimeRenderView(checks);
 	registerGameRuntimeSharedLibrary(checks);
 	return smoke::main("game-runtime", checks, argc, argv);

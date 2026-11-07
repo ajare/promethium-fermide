@@ -91,6 +91,51 @@ namespace game
 		return world_->rebuildTraversalTopology();
 	}
 
+	core::AgentId WorldRuntime::getPlayerControlledAgent() const
+	{
+		return world_->getPlayerControlledAgent();
+	}
+
+	void WorldRuntime::setPlayerMovementDirection(int direction)
+	{
+		world_->setPlayerMovementDirection(direction);
+	}
+
+	void WorldRuntime::setPlayerStairSelection(bool up, bool down)
+	{
+		world_->setPlayerStairSelection(up, down);
+	}
+
+	void WorldRuntime::setPlayerCrouch(bool held)
+	{
+		world_->setPlayerCrouch(held);
+	}
+
+	void WorldRuntime::requestPlayerDoorAction()
+	{
+		world_->requestPlayerDoorAction();
+	}
+
+	std::optional<core::World::PlayerTransportSelector> WorldRuntime::getPlayerTransportSelector() const
+	{
+		return world_->getPlayerTransportSelector();
+	}
+
+	void WorldRuntime::browsePlayerTransportStop(int direction, bool horizontal)
+	{
+		world_->browsePlayerTransportStop(direction, horizontal);
+	}
+
+	void WorldRuntime::confirmPlayerTransportStop()
+	{
+		world_->confirmPlayerTransportStop();
+	}
+
+	void WorldRuntime::clearPlayerInput()
+	{
+		world_->clearPlayerInput();
+	}
+
 	std::uint64_t WorldRuntime::getSimulationTick() const noexcept
 	{
 		return world_->getSimulationTick();

@@ -145,20 +145,34 @@ ctest --test-dir build-linux -R '^smoke-game-runtime$' --output-on-failure
 `pf-smoke-game-runtime` is the first module that does not construct a World
 inline. It builds a World, hands it to `game::WorldRuntime` in
 [`pf-game-runtime`](../pf-game-runtime) and drives it only through that
-shared library, so the boundary is exercised rather than assumed. Its 23
+shared library, so the boundary is exercised rather than assumed. Its 33
 registrations cover exclusive ownership (the caller's `unique_ptr` is emptied,
 the World is destroyed exactly when the runtime is, a null World is refused,
 and a move carries the same World), the drive surface (`update` whole-tick
 accumulation, elapsed seconds, non-positive/non-finite input, time scale,
 `advanceTick`, `advanceTicks`, repeated-run determinism), pause/resume/reset
 including their boundary events, snapshot copy versus cached view, exact-once
-event consumption and observer registration, and the `World const&` render
-view read through the production `agentPathForRendering` entry point.
+event consumption and observer registration, the whole player-input surface
+(#965 — steering, crouch, Staircase selection, Door operation and transport
+Stop browse/confirm), and the `World const&` render view read through the
+production `agentPathForRendering` entry point.
+
+The player-input checks assert what a player would observe rather than that a
+call was forwarded: the Agent walks at its own speed and stops the moment
+steering is released, held C lowers the posture and releasing it stands the
+Agent back up, a Staircase is mounted only when a stair selection is held,
+a manual Door opens on one press of the contextual action and is crossed by
+the next, browsing a Lift's Stops moves only the highlight until a confirm
+books the requested Stop, control resolves to the lowest-ID eligible Agent,
+and `clearPlayerInput` leaves the Agent where it stood with its press
+discarded rather than delivered later. Input held while the runtime is paused
+is dropped rather than fired on resume.
 
 The ownership and const-correctness shape of the boundary is additionally a
 compile-time contract: `static_assert`s in `Ownership.cpp` and `RenderView.cpp`
 reject a copyable runtime, a mutable `world()` overload, and any attempt to
-drive or reset a `core::World const&`. The Linux `dladdr` check reports which
+drive or reset a `core::World const&`, while `PlayerInput.cpp` pins the exact
+signature of all nine player-input methods. The Linux `dladdr` check reports which
 image `WorldRuntime` code actually resolved into; on other platforms that one
 registration is not made.
 

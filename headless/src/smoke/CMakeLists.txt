@@ -122,6 +122,7 @@ pf_add_smoke_module(pf-smoke-game-runtime
         game-runtime/Ticking.cpp
         game-runtime/Lifecycle.cpp
         game-runtime/Observation.cpp
+        game-runtime/PlayerInput.cpp
         game-runtime/RenderView.cpp
         game-runtime/SharedLibrary.cpp
     LIBRARIES pf-game-runtime pf-headless-render-support
