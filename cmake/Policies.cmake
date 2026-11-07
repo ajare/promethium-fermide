@@ -109,10 +109,15 @@ function(pf_apply_project_library_policy target)
     else()
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
     endif()
+    # RUNTIME_OUTPUT_DIRECTORY is the Windows DLL location; it is a no-op for a
+    # STATIC library, which produces no runtime artifact. Every project-owned
+    # executable already lands in PF_OUTPUT_DIR too, so a shared library built
+    # here is discoverable next to the binary that loads it (#962).
     set_target_properties(${target} PROPERTIES
         POSITION_INDEPENDENT_CODE ON
         ARCHIVE_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
-        LIBRARY_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}")
+        LIBRARY_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}")
     pf_apply_high_analysis(${target})
 endfunction()
 

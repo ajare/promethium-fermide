@@ -781,7 +781,7 @@ prints named PASS/FAIL records and a summary, returning nonzero on any failure.
 
 ## Build the complete solution
 
-Build the shared static library, graphical application, and headless target through CMake:
+Build the shared core library, graphical application, and headless target through CMake:
 
 ```bat
 cmake --build build-windows --config Debug --parallel

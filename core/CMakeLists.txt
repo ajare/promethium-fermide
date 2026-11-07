@@ -33,11 +33,17 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/SimulationMetricsCo
 file(GLOB PF_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 file(GLOB PF_CORE_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/core/*.h")
 
-add_library(promethium-fermide-core STATIC ${PF_CORE_SOURCES} ${PF_CORE_HEADERS})
+# Core is SHARED so that exactly one copy of it exists in any process (#962).
+# Core performs dynamic_cast across Graph.cpp, Agent.cpp, Pathing.cpp and
+# WorldPlayerControl.cpp, and pf-render re-performs casts on core objects it
+# never created; with two copies of core in one binary a cast made in one
+# module on an object created in the other silently returns null. One shared
+# core removes that hazard by construction.
+add_library(promethium-fermide-core SHARED ${PF_CORE_SOURCES} ${PF_CORE_HEADERS})
 # The export macro in core/Platform.h resolves to an export while core itself
-# is compiled and to an import for every consumer (#961). Core remains a
-# STATIC library: declaring the surface now makes it explicit and
-# compile-verified before any linkage change is taken.
+# is compiled and to an import for every consumer (#961). It is what makes the
+# shared core linkable on Windows, where only annotated symbols cross the DLL
+# boundary; on Linux it keeps the exported surface explicit.
 target_compile_definitions(promethium-fermide-core PRIVATE PF_CORE_DLL_EXPORT)
 target_compile_definitions(promethium-fermide-core PUBLIC YAML_CPP_STATIC_DEFINE)
 # The include root is this module, but headers keep their `core/` prefix so
