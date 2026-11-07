@@ -10,4 +10,5 @@ void registerGameRuntimeLifecycle(std::vector<smoke::Check>& checks);
 void registerGameRuntimeObservation(std::vector<smoke::Check>& checks);
 void registerGameRuntimePlayerInput(std::vector<smoke::Check>& checks);
 void registerGameRuntimeRenderView(std::vector<smoke::Check>& checks);
+void registerGameRuntimeConstReadSurface(std::vector<smoke::Check>& checks);
 void registerGameRuntimeSharedLibrary(std::vector<smoke::Check>& checks);

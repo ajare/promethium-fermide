@@ -3263,6 +3263,9 @@ namespace core
 		// for a Lift or Shuttle; specify the Room object for a Platform lift.
 		// Positions are absolute Levels for Lifts and absolute x positions for Shuttles.
 		// Stop labels are authored metadata, independent of routing and admission.
+		// Reads nothing but its argument and mutates nothing, so it is static rather
+		// than a const member: there is no `this` to qualify, and a `World const&`
+		// reaches it exactly as a mutable one does (#963).
 		static bool isValidTransportStopShortName(std::string_view name);
 		std::string getTransportStopShortName(uint32_t sectorIndex, uint32_t stopIndex,
 			uint32_t objectIndex = ~0u) const;
@@ -3365,6 +3368,11 @@ namespace core
 		InteractionPointId createInteractionPoint(std::string const& name, SectorId sector,
 			Vector2 position, float reach, float durationSeconds, std::vector<InteractionBinding> bindings);
 
+		// The mutable overload serves the authoring and simulation paths; the const
+		// overload is the read path and answers with a const entity, so a lookup
+		// made through `World const&` cannot widen back into a mutable handle.
+		// Neither form mutates anything: no lazy caching, no snapshot invalidation,
+		// no registry touch, so the const overload is logically const (#963).
 		EntityLookup<InteractionPoint> lookupInteractionPoint(InteractionPointId id);
 
 		EntityLookup<InteractionPoint const> lookupInteractionPoint(InteractionPointId id) const;
@@ -3393,6 +3401,9 @@ namespace core
 
 		DeviceOperationId createDeviceOperation(std::string const& name, AgentId requester);
 
+		// Same pair as the InteractionPoint lookup above: the const overload reads
+		// the entity registry only and returns a const entity, which is what makes
+		// the DeviceOperation read available through `World const&` (#963).
 		EntityLookup<DeviceOperation> lookupDeviceOperation(DeviceOperationId id);
 
 		EntityLookup<DeviceOperation const> lookupDeviceOperation(DeviceOperationId id) const;
@@ -3464,6 +3475,9 @@ namespace core
 		// Controlled traversal never falls back to operating the resource directly.
 		bool addTraversalControl(TraversalResourceId resource, InteractionPointId control);
 
+		// Same pair again. The const overload borrows the registry as const rather
+		// than reaching through the owning pointer mutably, so the TraversalResource
+		// read is available through `World const&` and changes nothing (#963).
 		EntityLookup<TraversalResource> lookupTraversalResource(TraversalResourceId id);
 
 		EntityLookup<TraversalResource const> lookupTraversalResource(TraversalResourceId id) const;
@@ -3580,6 +3594,9 @@ namespace core
 
 		bool advanceTicks(uint64_t count);
 
+		// The fixed Tick rate is a compile-time constant of the simulation, not
+		// World state, so there is nothing to cv-qualify: being static is what makes
+		// it available through `World const&` (#963).
 		static constexpr float getFixedTimestep()
 		{
 			return 1.0f / 60.0f;
@@ -3611,6 +3628,8 @@ namespace core
 		{
 			return mSimulationStepTiming.averageMicroseconds();
 		}
+		// Static for the same reason as the timestep above: no World state is read
+		// or written, so a `World const&` can pace itself with it (#963).
 		static constexpr uint32_t getMaxTicksPerUpdate() { return 600; }
 
 		// Non-consuming view for presentation/diagnostic observers. Invalidated by mutation.

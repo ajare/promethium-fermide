@@ -37,6 +37,30 @@ namespace game_runtime_smoke
 		return WalkingWorld{ std::move(world), agentId };
 	}
 
+	// A World carrying one live entity of every kind the const read surface
+	// (#963) resolves: an InteractionPoint, a DeviceOperation and a
+	// TraversalResource, alongside the walking Agent. The const view cannot
+	// create any of them, so they are authored before the World is handed over
+	// and named here by id.
+	struct ReadSurfaceWorld
+	{
+		std::unique_ptr<core::World> world;
+		core::AgentId agent{};
+		core::InteractionPointId interactionPoint{};
+		core::DeviceOperationId deviceOperation{};
+		core::TraversalResourceId traversalResource{};
+	};
+
+	inline ReadSurfaceWorld makeReadSurfaceWorld(std::string const& name)
+	{
+		auto walking = makeWalkingWorld(name);
+		auto const agent = walking.agent;
+		auto const point = walking.world->createInteractionPoint("Read surface control");
+		auto const operation = walking.world->createDeviceOperation("Read surface operation", agent);
+		auto const resource = walking.world->createTraversalResource("Read surface resource");
+		return ReadSurfaceWorld{ std::move(walking.world), agent, point, operation, resource };
+	}
+
 	// Snapshots are read by identity: the runtime hands out plain data, so a
 	// check looks its Agent up rather than holding a live pointer past the
 	// ownership transfer.

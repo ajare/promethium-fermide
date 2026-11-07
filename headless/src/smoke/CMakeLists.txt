@@ -113,7 +113,10 @@ set_tests_properties(smoke-simulation-contract PROPERTIES LABELS "harness;core" 
 # check calls a production pf-render entry point that only accepts a
 # `core::World const&`, so the const view handed out by WorldRuntime is shown
 # to be the renderer's actual input; pf-headless-render-support supplies the
-# CPU-only globals that path expects.
+# CPU-only globals that path expects. The const-read-surface checks (#963) pin
+# the six read-shaped World methods to `core::World const&` at compile time,
+# so a later edit that drops a const path fails the build rather than quietly
+# narrowing what a render or game caller can read.
 pf_add_smoke_module(pf-smoke-game-runtime
     NAME game-runtime
     SOURCES
@@ -124,6 +127,7 @@ pf_add_smoke_module(pf-smoke-game-runtime
         game-runtime/Observation.cpp
         game-runtime/PlayerInput.cpp
         game-runtime/RenderView.cpp
+        game-runtime/ConstReadSurface.cpp
         game-runtime/SharedLibrary.cpp
     LIBRARIES pf-game-runtime pf-headless-render-support
     LABELS "core;game-runtime"
