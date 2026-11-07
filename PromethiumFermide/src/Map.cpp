@@ -1,7 +1,6 @@
 #include <utility>
 #include <stdexcept>
 
-#include <core/World.h>
 #include <willpower/application/resourcesystem/ResourceManager.h>
 
 #include "ApplicationResources.h"
@@ -22,20 +21,15 @@ Map::Map(std::string const& name, std::string const& namesp,
 
 Map::~Map() = default;
 
-core::World* Map::getWorld() noexcept {
-  return mWorldResource ? mWorldResource->world().get() : nullptr;
-}
-
-core::World const* Map::getWorld() const noexcept {
-  return mWorldResource ? mWorldResource->world().get() : nullptr;
-}
-
-std::shared_ptr<WorldResource> const& Map::getWorldResource() const noexcept {
-  return mWorldResource;
+std::shared_ptr<game::WorldRuntime> Map::getRuntime() const noexcept {
+  // Read through to the resource rather than caching the runtime: the
+  // resource's destroy() is what actually frees the World, and a held
+  // runtime would keep it alive past that (#970).
+  return mWorldResource ? mWorldResource->runtime() : nullptr;
 }
 
 void Map::setWorldResource(std::shared_ptr<WorldResource> resource) {
-  if (resource && !resource->world())
+  if (resource && !resource->runtime())
     throw std::invalid_argument("Map requires a created World resource");
   mWorldResource = std::move(resource);
 }

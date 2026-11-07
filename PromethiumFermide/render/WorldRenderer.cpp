@@ -177,9 +177,9 @@ class WorldRenderer::Impl {
 public:
     Impl(resources::ResourceManager& resources, mpp::RenderSystem& renderSystem,
          mpp::ResourceManager& renderResources, mpp::ScenePtr scene,
-         std::shared_ptr<const core::World> world)
+         core::World const& world)
         : mResources(resources), mRenderSystem(&renderSystem),
-          mRenderResources(&renderResources), mScene(std::move(scene)), mWorld(std::move(world)) {
+          mRenderResources(&renderResources), mScene(std::move(scene)), mWorld(&world) {
         try {
             mSectorName = mWorld->sectorImageSetResourceName();
             try {
@@ -319,7 +319,7 @@ public:
                     std::cerr << "Agent ImageSet " << mAgentName << " lacks required tile " << tile
                               << "; rendering physical bounds in magenta\n";
         }
-        auto commands = drawWorld(mWorld, static_cast<float>(width), static_cast<float>(height));
+        auto commands = drawWorld(*mWorld, static_cast<float>(width), static_cast<float>(height));
         auto segments = buildSegments(commands);
         prepareSlots(segments, {0, 0});
         mRenderSystem->pushProjectionMatrix();
@@ -586,7 +586,9 @@ private:
     mpp::RenderSystem* mRenderSystem;
     mpp::ResourceManager* mRenderResources;
     mpp::ScenePtr mScene;
-    std::shared_ptr<const core::World> mWorld;
+    // Borrowed from the WorldRuntime the game drives: the renderer never owns
+    // the World it draws, and only ever sees its const view (#970).
+    core::World const* mWorld;
     resources::ResourcePtr mSectorSet, mObjectSet, mAgentSet, mFurnitureSet;
     std::string mSectorName, mAgentName, mFurnitureName;
     std::set<std::string> mMissingAgentTiles, mMissingFurnitureTiles;
@@ -596,8 +598,8 @@ private:
 };
 WorldRenderer::WorldRenderer(resources::ResourceManager& resources, mpp::RenderSystem& renderSystem,
                              mpp::ResourceManager& renderResources, mpp::ScenePtr scene,
-                             std::shared_ptr<const core::World> world)
-    : mImpl(std::make_unique<Impl>(resources, renderSystem, renderResources, std::move(scene), std::move(world))) {}
+                             core::World const& world)
+    : mImpl(std::make_unique<Impl>(resources, renderSystem, renderResources, std::move(scene), world)) {}
 WorldRenderer::~WorldRenderer() = default;
 void WorldRenderer::render() { mImpl->render(); }
 } // namespace pf::application::render

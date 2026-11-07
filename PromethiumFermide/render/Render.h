@@ -375,13 +375,13 @@ inline std::shared_ptr<const core::Sector> boundarySector(
 // in front has no Location pair straddling this boundary, or when that pair is
 // not open.
 //
-inline bool frontLayerOpening(std::shared_ptr<const core::World> const& world,
+inline bool frontLayerOpening(core::World const& world,
 	int viewLayer, core::Sector const& sector, uint32_t levelIndex, int side,
 	float& openFrom, float& openTo)
 {
 	openFrom = openTo = 0.0f;
 
-	if (!world || viewLayer < 0 || sector.getLayerIndex() <= static_cast<uint32_t>(viewLayer))
+	if (viewLayer < 0 || sector.getLayerIndex() <= static_cast<uint32_t>(viewLayer))
 	{
 		return false;
 	}
@@ -393,15 +393,15 @@ inline bool frontLayerOpening(std::shared_ptr<const core::World> const& world,
 		: static_cast<int>(sector.getCellX()) + static_cast<int>(sector.getCellsWide());
 	int const globalY = static_cast<int>(sector.getCellY()) + static_cast<int>(levelIndex);
 
-	if (boundaryX <= 0 || boundaryX >= static_cast<int>(world->getCellsWide())
-		|| globalY < 0 || globalY >= static_cast<int>(world->getLevelsHigh()))
+	if (boundaryX <= 0 || boundaryX >= static_cast<int>(world.getCellsWide())
+		|| globalY < 0 || globalY >= static_cast<int>(world.getLevelsHigh()))
 	{
 		return false;
 	}
 
-	auto const left = world->getSectorAtPosition(static_cast<uint32_t>(viewLayer),
+	auto const left = world.getSectorAtPosition(static_cast<uint32_t>(viewLayer),
 		static_cast<float>(boundaryX) - 0.5f, static_cast<float>(globalY) + 0.5f);
-	auto const right = world->getSectorAtPosition(static_cast<uint32_t>(viewLayer),
+	auto const right = world.getSectorAtPosition(static_cast<uint32_t>(viewLayer),
 		static_cast<float>(boundaryX) + 0.5f, static_cast<float>(globalY) + 0.5f);
 
 	if (!left || !right)
@@ -483,7 +483,7 @@ inline std::vector<WallSpan> subtractSpan(WallSpan const& span, float from, floa
 // own opening covers, so a behind-Layer wall cannot masquerade as the wall the
 // player just removed. Pass a negative viewLayer to skip that second cut.
 //
-inline std::vector<WallSpan> wallSpansToDraw(std::shared_ptr<const core::World> const& world,
+inline std::vector<WallSpan> wallSpansToDraw(core::World const& world,
 	core::Sector const& sector, uint32_t levelIndex, int side, int viewLayer = -1)
 {
 	std::vector<WallSpan> spans;
@@ -507,9 +507,7 @@ inline std::vector<WallSpan> wallSpansToDraw(std::shared_ptr<const core::World> 
 	}
 	else
 	{
-		auto const neighbour = world
-			? boundarySector(*world, sector, levelIndex, side)
-			: nullptr;
+		auto const neighbour = boundarySector(world, sector, levelIndex, side);
 
 		if (!neighbour)
 		{
@@ -806,7 +804,7 @@ inline bool shouldRenderSectorAgents(core::SectorType /* sectorType */, LayerRen
 PackedColourValue agentRenderColour(core::Agent const& agent);
 void renderAgent(core::Agent const* agent, WorldDrawList* drawList);
 
-void renderWorld(std::shared_ptr<const core::World> world, WorldDrawList* drawList);
+void renderWorld(core::World const& world, WorldDrawList* drawList);
 
 //
 // Publishes the World the Sector-level render passes read while a render is
@@ -820,16 +818,17 @@ void renderWorld(std::shared_ptr<const core::World> world, WorldDrawList* drawLi
 // return or an exception, so no render path can leave a stale World reachable
 // by a later pass.
 //
-// The scope owns the World for exactly that span rather than becoming a
-// second document owner: releasing the last external shared_ptr destroys the
-// World as soon as the scope ends. renderWorld() opens one scope per call; a
-// headless caller driving the Sector-level passes directly opens its own
-// scope instead of relying on process-global state.
+// The World is borrowed, not owned (#970). The renderer is handed a
+// `core::World const&` out of the WorldRuntime that owns it, and the runtime -
+// not the render path - decides how long that World lives. Publishing a const
+// pointer is all this scope can do, which is the point: nothing in a render
+// pass can lengthen the World's lifetime or turn the published view back into
+// a mutable one.
 //
 class RenderWorldScope
 {
 public:
-	explicit RenderWorldScope(std::shared_ptr<const core::World> world);
+	explicit RenderWorldScope(core::World const& world);
 	~RenderWorldScope();
 
 	RenderWorldScope(RenderWorldScope const&) = delete;
@@ -838,7 +837,7 @@ public:
 	RenderWorldScope& operator=(RenderWorldScope&&) = delete;
 
 private:
-	std::shared_ptr<const core::World> mPrevious;
+	core::World const* mPrevious;
 };
 
 //
@@ -848,14 +847,14 @@ private:
 // here so the headless viewport-culling check can exercise the real bounds.
 //
 std::vector<std::shared_ptr<const core::Sector>> viewportSectors(
-	std::shared_ptr<const core::World> const& world, uint32_t layer);
+	core::World const& world, uint32_t layer);
 
 //
 // Draws every Sector one Layer contributes for a single viewport pass, culled
 // to the current viewport. Declared here so the headless viewport-culling
 // check (#58) can exercise the actual Application render pass.
 //
-void renderSectors(std::shared_ptr<const core::World> world, uint32_t layer,
+void renderSectors(core::World const& world, uint32_t layer,
 	LayerRenderStyle style, WorldDrawList* drawList);
 
 //

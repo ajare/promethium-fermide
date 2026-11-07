@@ -6,18 +6,25 @@
 
 #include "Application.h"
 
-namespace core {
-class World;
-}
 class WorldResource;
+
+namespace game {
+class WorldRuntime;
+}
 
 namespace pf::application {
 
 PF_APPLICATION_API void registerMapResourceTypes(
     wp::application::resourcesystem::ResourceManager& manager);
 
-// Resource identity and geometry belong to AppLib; the simulation aggregate
-// remains a World. Constructing this resource does not create or load a World.
+// Resource identity and geometry belong to AppLib; the running World belongs
+// to the game-facing façade. Constructing this resource does not create or
+// load a World.
+//
+// The Map reaches its World through the `game::WorldRuntime` that owns and
+// drives it (#970, spec #960). `getWorld()` is gone: the runtime's const
+// view is the only World a Map can name, so nothing holding a Map can mutate
+// what it renders.
 class PF_APPLICATION_API Map final : public applib::Map {
   std::shared_ptr<WorldResource> mWorldResource;
 
@@ -30,11 +37,21 @@ public:
   Map(Map const&) = delete;
   Map& operator=(Map const&) = delete;
 
-  // The WorldResource owns the World. These borrowed pointers remain valid only
-  // while its created data is retained by the resource lifecycle.
-  core::World* getWorld() noexcept;
-  core::World const* getWorld() const noexcept;
-  std::shared_ptr<WorldResource> const& getWorldResource() const noexcept;
+  // The runtime that owns this Map's World, read from the resource on every
+  // call rather than cached. That is deliberate: the Map must never be the
+  // reason a World outlives the resource that owns it, so it holds the
+  // resource rather than the runtime. When the resource system destroys the
+  // World data - or re-creates it - this follows immediately, and a Map whose
+  // World is gone reports no runtime at all.
+  //
+  // Null means there is nothing loaded. Otherwise the World comes back as the
+  // runtime's `core::World const&`, which is as mutable as this Map can get.
+  std::shared_ptr<game::WorldRuntime> getRuntime() const noexcept;
+
+  // The WorldResource owns the World; these bind the Map to it. A resource
+  // that has not run its create() - and so has no runtime to drive - is
+  // refused rather than stored, so a Map that claims to be loaded always has
+  // something behind it. Passing null clears the binding.
   void setWorldResource(std::shared_ptr<WorldResource> resource);
   void clearWorldResource() noexcept;
 };

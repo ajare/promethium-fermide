@@ -17,6 +17,7 @@
 #include "core/World.h"
 #include "core/Furniture.h"
 #include "core/YamlSerializer.h"
+#include "game/WorldRuntime.h"
 
 namespace resources = wp::application::resourcesystem;
 namespace
@@ -144,7 +145,11 @@ void WorldResource::create(resources::DataStreamPtr data,
 	std::string yaml(reinterpret_cast<char const*>(data->getData()), data->getSize());
 	auto serializer = core::YamlSerializer::fromString(yaml);
 	serializer->deserialize();
-	auto world = std::make_shared<core::World>("Loading", 1, 1);
+	// The World is built here while it is still a plain document being read.
+	// The last step hands it to a WorldRuntime, which owns it exclusively from
+	// then on: nothing in this resource, and nothing reachable from it, holds a
+	// mutable World afterwards (#970).
+	auto world = std::make_unique<core::World>("Loading", 1, 1);
 	core::SerializationWorkData workData;
 	if (hasDependentResource("Furniture"))
 	{
@@ -190,12 +195,12 @@ void WorldResource::create(resources::DataStreamPtr data,
 			world->markAgentBehaviourRegistryUnavailable(error.what());
 		}
 	}
-	mWorld = std::move(world);
+	mRuntime = std::make_shared<game::WorldRuntime>(std::move(world));
 }
 
 void WorldResource::destroy()
 {
-	mWorld.reset();
+	mRuntime.reset();
 }
 
 void registerApplicationResourceTypes(resources::ResourceManager& manager)

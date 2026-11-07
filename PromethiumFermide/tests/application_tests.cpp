@@ -10,6 +10,8 @@
 #include <willpower/application/resourcesystem/ImageResource.h>
 #include <willpower/application/resourcesystem/ImageSetResource.h>
 #include <core/World.h>
+#include <game/WorldRuntime.h>
+#include <game/WorldAuthoring.h>
 #include <core/Agent.h>
 #include <core/DoorSectorObject.h>
 #include <core/AirlockTransit.h>
@@ -42,7 +44,7 @@ class HeadlessAtlasImage final : public wp::application::resourcesystem::ImageRe
   }
   bool load(mpp::RenderSystem*, mpp::ResourceManager*) override {
     auto map = std::dynamic_pointer_cast<pf::application::Map>(mManager.getResource("World", "World"));
-    require(map && map->getWorld() && mManager.isResourceLoaded(map),
+    require(map && map->getRuntime() && mManager.isResourceLoaded(map),
             "Atlas post work must run after Map loading completes");
     if (mFail && getName() == "ObjectAtlasImage")
       throw std::runtime_error("Injected atlas upload failure");
@@ -774,39 +776,48 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
     bool returned = false;
     try {
       if (child->getName() == "Play") {
-        require(map && manager.isResourceLoaded(map) && map->getWorld(),
+        require(map && manager.isResourceLoaded(map) && map->getRuntime(),
                 "Map must remain loaded throughout Play");
         checkAtlases(manager, true);
-        auto const tick = map->getWorld()->getSimulationTick();
-        require(!map->getWorld()->isSimulationPaused() &&
-                    map->getWorld()->getSimulationTimeScale() == 1.0,
+        auto& runtime = *map->getRuntime();
+        auto const tick = runtime.getSimulationTick();
+        require(!runtime.isSimulationPaused() && runtime.getSimulationTimeScale() == 1.0,
                 "Play must start the simulation at normal speed");
         child->_update(1.0f);
-        require(map->getWorld()->getSimulationTick() == tick + 60,
+        require(runtime.getSimulationTick() == tick + 60,
                 "Play must advance one second at normal speed");
-        checkPlayerKeys(*child, *map->getWorld());
-        checkPlayerDoorKeys(*child, *map->getWorld());
-        checkPlayerPartialDoorKeys(*child, *map->getWorld());
-        checkPlayerStairKeys(*child, *map->getWorld());
-        checkPlayerStaircaseKeys(*child, *map->getWorld());
-        checkPlayerLadderKeys(*child, *map->getWorld());
-        checkPlayerButtonKeys(*child, *map->getWorld());
-        checkPlayerTransportKeys(*child, *map->getWorld());
-        checkPlayerAirlockKeys(*child, *map->getWorld());
-        checkPlayerChamberKeys(*child, *map->getWorld());
-        checkPlayerBoothWindowKeys(*child, *map->getWorld());
-        checkPlayerAccessPanelKeys(*child, *map->getWorld());
-        checkPlayerPoseKeys(*child, *map->getWorld());
-        auto const suspendTick = map->getWorld()->getSimulationTick();
+        // The fixtures these checks install are authored, not driven, so they
+        // arrive through WorldAuthoring - the privileged mutator over the very
+        // runtime Play is driving (#967, #970). The shipped game holds no such
+        // handle: PromethiumFermide links pf-game-runtime alone. That is why
+        // the authoring link sits on this test binary and nowhere else in the
+        // game, and why a fixture installed here is exercised by the same
+        // runtime path the player runs on.
+        game::WorldAuthoring authoring(runtime);
+        auto& world = authoring.world();
+        checkPlayerKeys(*child, world);
+        checkPlayerDoorKeys(*child, world);
+        checkPlayerPartialDoorKeys(*child, world);
+        checkPlayerStairKeys(*child, world);
+        checkPlayerStaircaseKeys(*child, world);
+        checkPlayerLadderKeys(*child, world);
+        checkPlayerButtonKeys(*child, world);
+        checkPlayerTransportKeys(*child, world);
+        checkPlayerAirlockKeys(*child, world);
+        checkPlayerChamberKeys(*child, world);
+        checkPlayerBoothWindowKeys(*child, world);
+        checkPlayerAccessPanelKeys(*child, world);
+        checkPlayerPoseKeys(*child, world);
+        auto const suspendTick = runtime.getSimulationTick();
         child->_suspend(true, true, true);
         child->_update(1.0f);
-        require(map->getWorld()->getSimulationTick() == suspendTick,
+        require(runtime.getSimulationTick() == suspendTick,
                 "Suspended Play must not update the World");
         child->_resume(arguments);
         if (exitInPlay) {
           child.reset();
           controller.reset(); // Same ordering as Launcher on an early exit.
-          require(worldLifetime.expired() && !map->getWorld() &&
+          require(worldLifetime.expired() && !map->getRuntime() &&
                       !manager.isResourceLoaded(map) && !manager.isResourceCreated(map),
                   "Early Controller destruction must release and destroy the Map");
           checkAtlases(manager, false);
@@ -833,21 +844,21 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
     require(returned, "Child must return to Controller");
     if (child->getName() == "Load") {
       map = std::dynamic_pointer_cast<pf::application::Map>(manager.getResource("World", "World"));
-      require(map && !map->getWorld(), "Load must scan but not create the Map");
+      require(map && !map->getRuntime(), "Load must scan but not create the Map");
       checkAtlases(manager, false);
     } else if (child->getName() == "MapLoad") {
-      require(map->getWorld() && manager.isResourceLoaded(map),
+      require(map->getRuntime() && manager.isResourceLoaded(map),
               "MapLoad must create and load the World resource");
       checkAtlases(manager, true);
-      require(map->getWorld()->getSimulationTick() == 0,
+      require(map->getRuntime()->getSimulationTick() == 0,
               "Loading must not advance the simulation");
       // Play must override a paused/non-normal runtime configuration on entry.
-      map->getWorld()->pauseSimulation();
-      map->getWorld()->setSimulationTimeScale(2.0);
-      worldLifetime = map->getWorld()->getLifetimeToken();
+      map->getRuntime()->pauseSimulation();
+      map->getRuntime()->setSimulationTimeScale(2.0);
+      worldLifetime = map->getRuntime()->world().getLifetimeToken();
     } else if (child->getName() == "MapUnload" || child->getName() == "Unload") {
       auto source = map->getDependentResource("World");
-      require(worldLifetime.expired() && !map->getWorld() &&
+      require(worldLifetime.expired() && !map->getRuntime() &&
                   !manager.isResourceLoaded(map) && !manager.isResourceCreated(map) &&
                   !manager.isResourceLoaded(source) && !manager.isResourceCreated(source),
               "Unloading must release both Map and its source data");
@@ -881,10 +892,13 @@ void checkSelectedSectorAtlases(wp::application::resourcesystem::ResourceManager
     pf::application::MapResources resources(manager);
     resources.load();
     auto map = std::dynamic_pointer_cast<pf::application::Map>(manager.getResource("World", "World"));
-    require(map->getWorld()->furnitureImageSetResourceName() == "FurnitureAtlas", "Map must default Furniture artwork");
-    map->getWorld()->setFurnitureImageSetResourceName(name);
+    // Artwork selection is a resource-binding edit, so it goes through the
+    // authoring surface rather than through anything the game can reach (#970).
+    game::WorldAuthoring authoring(*map->getRuntime());
+    require(map->getRuntime()->world().furnitureImageSetResourceName() == "FurnitureAtlas", "Map must default Furniture artwork");
+    authoring.world().setFurnitureImageSetResourceName(name);
     resources.loadAtlases();
-    require(map->getWorld()->furnitureImageSetResourceName() == name, "Map loading lost Furniture artwork name");
+    require(map->getRuntime()->world().furnitureImageSetResourceName() == name, "Map loading lost Furniture artwork name");
     if (std::string_view(name) == "FurnitureAtlas") {
       auto atlas = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource(name));
       auto objects = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource("ObjectAtlas"));
@@ -898,10 +912,11 @@ void checkSelectedSectorAtlases(wp::application::resourcesystem::ResourceManager
     pf::application::MapResources resources(manager);
     resources.load();
     auto map = std::dynamic_pointer_cast<pf::application::Map>(manager.getResource("World", "World"));
-    require(map->getWorld()->agentImageSetResourceName() == "AgentAtlas", "Map must default Agent artwork");
-    map->getWorld()->setAgentImageSetResourceName(name);
+    game::WorldAuthoring authoring(*map->getRuntime());
+    require(map->getRuntime()->world().agentImageSetResourceName() == "AgentAtlas", "Map must default Agent artwork");
+    authoring.world().setAgentImageSetResourceName(name);
     resources.loadAtlases();
-    require(map->getWorld()->agentImageSetResourceName() == name, "Map loading lost Agent artwork name");
+    require(map->getRuntime()->world().agentImageSetResourceName() == name, "Map loading lost Agent artwork name");
     if (std::string_view(name) == "AgentAtlas") {
       auto atlas = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource(name));
       auto objects = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource("ObjectAtlas"));
@@ -915,9 +930,10 @@ void checkSelectedSectorAtlases(wp::application::resourcesystem::ResourceManager
     pf::application::MapResources resources(manager);
     resources.load();
     auto map = std::dynamic_pointer_cast<pf::application::Map>(manager.getResource("World", "World"));
-    map->getWorld()->setSectorImageSetResourceName(name);
+    game::WorldAuthoring authoring(*map->getRuntime());
+    authoring.world().setSectorImageSetResourceName(name);
     resources.loadAtlases(); // Missing or wrong-type artwork must not refuse the World.
-    require(map->getWorld()->sectorImageSetResourceName() == name,
+    require(map->getRuntime()->world().sectorImageSetResourceName() == name,
         "Map atlas loading must preserve the authored resource name");
     if (std::string_view(name) == "StationAtlas") {
       auto atlas = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource(name));

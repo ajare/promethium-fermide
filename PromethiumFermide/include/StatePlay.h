@@ -5,6 +5,7 @@
 #include "PlayDebug.h"
 
 namespace core { class World; }
+namespace game { class WorldRuntime; }
 
 namespace pf::application {
 namespace render { class WorldRenderer; }
@@ -12,7 +13,11 @@ namespace render { class WorldRenderer; }
 // Use AppLib's scene lifecycle without StatePlay's map/player requirements.
 class StatePlay final : public applib::State {
   std::unique_ptr<render::WorldRenderer> mRenderer;
-  core::World* mWorld{nullptr}; // Borrowed from Controller's MapResources.
+  // Borrowed from Controller's MapResources. The runtime owns the World; this
+  // state drives the runtime and never holds the World itself, so everything
+  // Play reads - including what it hands the renderer - is the runtime's
+  // const view (#970).
+  game::WorldRuntime* mRuntime{nullptr};
   bool mLeftHeld{false}, mRightHeld{false}, mUpHeld{false}, mDownHeld{false};
   bool mCursorPressed[4]{false, false, false, false};
   bool mSpaceHeld{false}, mShiftHeld{false}, mF11Held{false}, mCrouchHeld{false};

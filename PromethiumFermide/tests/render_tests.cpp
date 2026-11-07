@@ -8,6 +8,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <core/World.h>
+#include <game/WorldRuntime.h>
 #include <core/Agent.h>
 #include "../../headless/src/smoke/support/AgentPoseTestAccess.h"
 #include <core/Window.h>
@@ -234,37 +235,40 @@ void checkStagedMap(std::filesystem::path const& directory) {
   pf::application::MapResources resources(manager);
   resources.scan(); resources.load();
   auto map = std::dynamic_pointer_cast<pf::application::Map>(manager.getResource("World", "World"));
-  auto world = map->getWorldResource()->world();
-  auto const tick = world->getSimulationTick();
+  // The renderer is handed the runtime's const view exactly as StatePlay
+  // hands it (#970). Nothing in this check holds the World, so nothing here
+  // can keep it alive past the resource that owns it.
+  auto const& stagedWorld = map->getRuntime()->world();
+  auto const tick = stagedWorld.getSimulationTick();
   for (auto const& size : {std::pair{1280.0f, 720.0f}, std::pair{320.0f, 200.0f}}) {
-    auto draws = render::drawWorld(world, size.first, size.second);
+    auto draws = render::drawWorld(stagedWorld, size.first, size.second);
     require(textured(draws, render::WorldDrawList::Texture::SectorAtlas) > 0,
             "Loaded Application Map must draw its sector atlas artwork");
     checkCanvas(draws, size.first, size.second);
   }
-  require(world->getSimulationTick() == tick, "Rendering must leave World simulation paused");
-  world.reset(); resources.unload();
-  require(!map->getWorld(), "Drawing must not retain the World after MapUnload");
+  require(stagedWorld.getSimulationTick() == tick, "Rendering must leave World simulation paused");
+  resources.unload();
+  require(!map->getRuntime(), "Drawing must not retain the World after MapUnload");
 }
 void checkNoOverlaysAndAgents() {
   auto world = std::make_shared<core::World>("Application render", 12, 2);
   auto room = world->addRoom("Front", 0, 0, 0, 12, 1);
   auto back = world->addRoom("Back", 1, 0, 0, 12, 1);
   world->finishBuild(); world->pauseSimulation();
-  auto baseline = render::drawWorld(world, 1280, 720);
+  auto baseline = render::drawWorld(*world, 1280, 720);
   world->addSectorMarker(room, 0, 8.5f, "Invisible annotation");
   world->finishBuild(); world->pauseSimulation();
-  auto marked = render::drawWorld(world, 1280, 720);
+  auto marked = render::drawWorld(*world, 1280, 720);
   require(marked.commands().size() == baseline.commands().size(),
           "Markers and graph vertices must not add Application drawing commands");
   auto id = world->createAgent("Visible", room, 0, 1.5f);
   auto agent = world->lookupAgent(id).entity;
   require(agent != nullptr, "Agent fixture creation failed");
-  auto visible = render::drawWorld(world, 1280, 720);
+  auto visible = render::drawWorld(*world, 1280, 720);
   auto const sprites = textured(visible, render::WorldDrawList::Texture::AgentAtlas);
   require(sprites >= 2, "Front-Layer Agent must draw pose artwork without an ImGui font/context");
   world->createAgent("Occluded", back, 0, 1.5f);
-  auto occluded = render::drawWorld(world, 1280, 720);
+  auto occluded = render::drawWorld(*world, 1280, 720);
   require(textured(occluded, render::WorldDrawList::Texture::AgentAtlas) == sprites,
           "Agent on a Layer without an aperture must remain hidden");
   require(occluded.commands().size() == visible.commands().size(),
@@ -296,16 +300,16 @@ void checkPlayerCamera() {
     require(found && std::abs((low + high) * 0.5f - width * 0.5f) < 0.001f,
             "Player artwork must be visible on its Layer and centred horizontally");
   };
-  auto draws = render::drawWorld(world, 640, 360);
+  auto draws = render::drawWorld(*world, 640, 360);
   centred(draws, 640); checkCanvas(draws, 640, 360);
   require(world->resumeSimulation(), "Camera fixture cannot resume");
   world->setPlayerMovementDirection(1); world->update(1.f);
   auto const tick = world->getSimulationTick();
-  draws = render::drawWorld(world, 320, 200);
+  draws = render::drawWorld(*world, 320, 200);
   centred(draws, 320); checkCanvas(draws, 320, 200);
   require(world->getSimulationTick() == tick, "Following must not update simulation");
   world->pauseSimulation(); world->clearAgentBehaviourAssignment(id);
-  require(textured(render::drawWorld(world, 640, 360), render::WorldDrawList::Texture::AgentAtlas) == 0,
+  require(textured(render::drawWorld(*world, 640, 360), render::WorldDrawList::Texture::AgentAtlas) == 0,
           "No Player must restore Layer-0 camera rather than reveal a back-Layer Agent");
 }
 
@@ -349,13 +353,13 @@ void checkStairwellDoorwayOutlines() {
     }
     return count;
   };
-  auto landingCount = outlines(render::drawWorld(world, 1280, 720));
+  auto landingCount = outlines(render::drawWorld(*world, 1280, 720));
   if (landingCount != 2) throw std::runtime_error(
           "Open Stairwell doorways must have visible boxes when viewed through landing apertures: expected 2, got "
           + std::to_string(landingCount));
   world->resumeSimulation(); world->requestPlayerDoorAction(); world->update(.2f);
   require(world->lookupAgent(id).entity->getSector()->getIndex() == stairs, "Player must enter Stairwell to view its Layer");
-  auto draws = render::drawWorld(world, 1280, 720);
+  auto draws = render::drawWorld(*world, 1280, 720);
   auto count = outlines(draws);
   if (count != 2) throw std::runtime_error("Viewed Stairwell must outline every Level doorway: expected 2, got " + std::to_string(count));
   checkCanvas(draws, 1280, 720);
@@ -370,7 +374,7 @@ void checkFurniture(std::filesystem::path const& directory, render::ObjectTilese
   world->placeFurniture(room, "chair", 2.25f, 0, "Visible chair");
   world->placeFurniture(back, "chair", 2.25f, 0, "Hidden chair");
   world->finishBuild(); world->pauseSimulation();
-  auto draws = render::drawWorld(world, 1280, 720);
+  auto draws = render::drawWorld(*world, 1280, 720);
   require(textured(draws, render::WorldDrawList::Texture::FurnitureAtlas) == 4,
           "Only the front chair should draw, including foreground restoration");
   auto const& chair = atlas.sprites.at("chair").region;
@@ -385,7 +389,7 @@ void checkFurniture(std::filesystem::path const& directory, render::ObjectTilese
   auto graph = world->getGraph();
   auto markers = world->getMarkerIds();
   auto assertFallback = [&] {
-    auto missing = render::drawWorld(world, 1280, 720);
+    auto missing = render::drawWorld(*world, 1280, 720);
     require(textured(missing, render::WorldDrawList::Texture::FurnitureAtlas) == 0,
         "Missing Furniture artwork must not fall back to ObjectAtlas");
     std::size_t magenta{};
@@ -406,7 +410,7 @@ void checkFurniture(std::filesystem::path const& directory, render::ObjectTilese
   assertFallback();
   custom.sprites.emplace("chair", render::ObjectSprite{{8, 63, 71, 193}, false});
   render::setFurnitureTileset(custom);
-  auto changed = render::drawWorld(world, 1280, 720);
+  auto changed = render::drawWorld(*world, 1280, 720);
   require(textured(changed, render::WorldDrawList::Texture::FurnitureAtlas) == 4,
       "Alternate Furniture tile proportions must remain usable");
   for (auto const& command : changed.commands())
@@ -424,7 +428,7 @@ void checkNestedApertures() {
   world->addRoom("Middle", 1, 0, 0, 6, 1);
   world->addBackground(2, 0, 0, 6, 1, {23, 67, 109});
   world->finishBuild(); world->pauseSimulation();
-  auto hidden = render::drawWorld(world, 1280, 720);
+  auto hidden = render::drawWorld(*world, 1280, 720);
   auto hasBackColour = [](render::WorldDrawList const& draws) {
     for (auto const& command : draws.commands())
       if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
@@ -437,7 +441,7 @@ void checkNestedApertures() {
   world->addSectorWindow(1, 0, 2, 3, 1,
       {false, core::Window::State::Closed, core::Window::Style::Clear});
   world->finishBuild(); world->pauseSimulation();
-  auto revealed = render::drawWorld(world, 1280, 720);
+  auto revealed = render::drawWorld(*world, 1280, 720);
   require(hasBackColour(revealed), "Aligned clear Windows must reveal the deeper Background");
   for (auto const& command : revealed.commands())
     if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
@@ -516,7 +520,7 @@ void checkAgentArtworkFallback() {
     if (present & 1) tiles.sprites.emplace("human-standing", render::ObjectSprite{{0, 0, 26, 72}, true});
     if (present & 2) tiles.sprites.emplace("human-sitting", render::ObjectSprite{{32, 0, 26, 43}, true});
     render::setAgentTileset(std::move(tiles));
-    auto list = render::drawWorld(world, 1024, 720);
+    auto list = render::drawWorld(*world, 1024, 720);
     unsigned missing = 0;
     float left = 1e6f, right = -1e6f, top = 1e6f, bottom = -1e6f;
     for (auto const& command : list.commands())
@@ -557,10 +561,12 @@ int main(int argc, char** argv) {
     checkFurniture(directory, atlas);
     checkNestedApertures();
     checkAgentArtworkFallback();
-    require(render::drawWorld(nullptr, 1280, 720).commands().empty(), "Null World must draw nothing");
+    // There is no "no World" case to check any more: drawWorld() takes the
+    // `core::World const&` its WorldRuntime published, so a caller cannot even
+    // express rendering nothing but a null World (#970).
     auto empty = std::make_shared<core::World>("Empty", 4, 2);
-    require(render::drawWorld(empty, 1280, 720).commands().empty(), "Empty World must draw nothing");
-    require(render::drawWorld(empty, 0, 0).commands().empty(), "Minimized window must draw nothing");
+    require(render::drawWorld(*empty, 1280, 720).commands().empty(), "Empty World must draw nothing");
+    require(render::drawWorld(*empty, 0, 0).commands().empty(), "Minimized window must draw nothing");
     render::clearObjectTileset(); render::clearSectorTileset(); render::clearAgentTileset();
     return 0;
   } catch (std::exception const& error) {

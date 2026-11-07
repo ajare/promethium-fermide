@@ -20,11 +20,13 @@ void MapWorldDefinitionFactory::create(
   node->requireOnlyChildren({"factory", "Resource"});
   auto const dependency = node->getChild("Resource")->getValue();
   auto worldResource = std::dynamic_pointer_cast<WorldResource>(map->getDependentResource(dependency));
-  if (!worldResource || !worldResource->world())
+  if (!worldResource || !worldResource->runtime())
     throw ResourceException(resource, "Map requires a created World resource dependency");
 
   // ResourceManager creates dependencies before the Map. Reuse the existing
-  // World instance and its resolved catalogues instead of deserializing again.
+  // resource - and with it the one runtime that owns its World and the
+  // catalogues that World resolved - instead of deserializing a second copy
+  // (#970).
   map->setWorldResource(std::move(worldResource));
 }
 

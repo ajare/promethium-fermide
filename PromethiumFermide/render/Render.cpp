@@ -54,17 +54,20 @@ namespace pf::application::render {
 // drives the Sector-level passes directly opens its own when those passes need
 // the World, instead of leaving it to process-global state.
 //
-static std::shared_ptr<const core::World> gRenderWorld;
+// A borrowed const pointer, not a shared owner (#970): the renderer only ever
+// holds the `core::World const&` its WorldRuntime published, so the render
+// path cannot keep a World alive, and cannot mutate one either.
+static core::World const* gRenderWorld;
 
-RenderWorldScope::RenderWorldScope(std::shared_ptr<const core::World> world)
-	: mPrevious(std::move(gRenderWorld))
+RenderWorldScope::RenderWorldScope(core::World const& world)
+	: mPrevious(gRenderWorld)
 {
-	gRenderWorld = std::move(world);
+	gRenderWorld = &world;
 }
 
 RenderWorldScope::~RenderWorldScope()
 {
-	gRenderWorld = std::move(mPrevious);
+	gRenderWorld = mPrevious;
 }
 
 
@@ -1442,7 +1445,13 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 			{
 				auto const x = side == CORE_SIDE_LEFT ? wallBounds0.x : wallBounds1.x;
 
-				for (auto const& span : wallSpansToDraw(gRenderWorld, *sector, y, side, viewLayer))
+				// The cut-outs this wall does not stand in are read from the
+				// published World; with no World published there is nothing to
+				// cut, exactly as when the old shared_ptr view was empty.
+				auto const spans = gRenderWorld
+					? wallSpansToDraw(*gRenderWorld, *sector, y, side, viewLayer)
+					: std::vector<WallSpan>{};
+				for (auto const& span : spans)
 				{
 					core::Vector2 from{ x, span.y0 }, to{ x, span.y1 };
 
@@ -1556,10 +1565,10 @@ void renderTransitThroughApertures(shared_ptr<const core::Sector> const& transit
 // made high levels vanish when scrolled into view.
 //
 std::vector<std::shared_ptr<const core::Sector>> viewportSectors(
-	std::shared_ptr<const core::World> const& world, uint32_t layer)
+	core::World const& world, uint32_t layer)
 {
 	auto const inverseZoom = 1.0f / gRenderSettings.worldZoom;
-	return world->getSectorsInBounds(layer,
+	return world.getSectorsInBounds(layer,
 		-gRenderSettings.xOffset * inverseZoom, -gRenderSettings.yOffset * inverseZoom,
 		gRenderSettings.worldViewportWidth * inverseZoom,
 		gRenderSettings.worldViewportHeight * inverseZoom);
@@ -1569,7 +1578,7 @@ std::vector<std::shared_ptr<const core::Sector>> viewportSectors(
 //
 // Draws every Sector one Layer contributes, in the given style.
 //
-void renderSectors(shared_ptr<const core::World> world, uint32_t layer, LayerRenderStyle style,
+void renderSectors(core::World const& world, uint32_t layer, LayerRenderStyle style,
 	WorldDrawList* drawList)
 {
 	if (style == LayerRenderStyle::Hidden)
@@ -1598,7 +1607,7 @@ void renderSectors(shared_ptr<const core::World> world, uint32_t layer, LayerRen
 // This pass runs whether or not the wireframe overlay is on: the overlay adds the
 // Layer behind's outlines, it is not what makes that Layer visible.
 //
-void renderBehindLayerTransits(shared_ptr<const core::World> world, uint32_t behindLayer,
+void renderBehindLayerTransits(core::World const& world, uint32_t behindLayer,
 	std::vector<std::shared_ptr<const core::Sector>> const& viewSectors, WorldDrawList* drawList)
 {
 	auto const viewLayer = core::layerInFront(behindLayer);
@@ -1613,16 +1622,15 @@ void renderBehindLayerTransits(shared_ptr<const core::World> world, uint32_t beh
 }
 
 
-void renderWorld(shared_ptr<const core::World> world, WorldDrawList* drawList)
+void renderWorld(core::World const& world, WorldDrawList* drawList)
 {
-	// Own the World for exactly this call. The scope restores the previous
-	// World on every exit, so closing the last document releases it as soon as
-	// the viewport stops rendering it and an early return cannot leave it
-	// reachable by the Sector-level passes.
+	// Publish the World for exactly this call. The scope restores the previous
+	// World on every exit, so an early return cannot leave it reachable by the
+	// Sector-level passes.
 	RenderWorldScope renderWorldScope(world);
-	if (!drawList || !world || world->getLayerCount() == 0) return;
+	if (!drawList || world.getLayerCount() == 0) return;
 
-	auto const layerCount = world->getLayerCount();
+	auto const layerCount = world.getLayerCount();
 	auto const viewLayer = static_cast<uint32_t>(clamp(gRenderSettings.visibleLayer, 0,
 		static_cast<int>(layerCount) - 1));
 
@@ -1664,7 +1672,7 @@ void renderWorld(shared_ptr<const core::World> world, WorldDrawList* drawList)
 		}
 	}
 
-	if (auto selector = world->getPlayerTransportSelector())
+	if (auto selector = world.getPlayerTransportSelector())
 	{
 		auto anchor = selector->anchor; transformPosition(anchor);
 		pf::drawPlayerTransportSelector(*selector, anchor.x, anchor.y,
@@ -1676,14 +1684,14 @@ void renderWorld(shared_ptr<const core::World> world, WorldDrawList* drawList)
 
 RenderSettings gRenderSettings;
 
-WorldDrawList drawWorld(std::shared_ptr<const core::World> const& world, float width, float height)
+WorldDrawList drawWorld(core::World const& world, float width, float height)
 {
     WorldDrawList commands(WorldDrawList::ClipRectangle{{0, 0}, {width, height}});
-    if (!world || width <= 0 || height <= 0 || world->getLayerCount() == 0) return commands;
+    if (width <= 0 || height <= 0 || world.getLayerCount() == 0) return commands;
     gRenderSettings = {};
     gRenderSettings.worldViewportWidth = width;
     gRenderSettings.worldViewportHeight = height;
-    auto sectors = world->getSectors(0);
+    auto sectors = world.getSectors(0);
     if (!sectors.empty()) {
         core::Vector2 minimum, maximum;
         sectors.front()->getBounds(minimum, maximum);
@@ -1700,7 +1708,7 @@ WorldDrawList drawWorld(std::shared_ptr<const core::World> const& world, float w
         gRenderSettings.xOffset = (width - contentWidth * zoom) * 0.5f - minimum.x * CORE_CELL_WIDTH_PIXELS * zoom;
         gRenderSettings.yOffset = (height - contentHeight * zoom) * 0.5f - minimum.y * CORE_LEVEL_HEIGHT_PIXELS * zoom;
     }
-    if (auto player = world->lookupAgent(world->getPlayerControlledAgent()); player) {
+    if (auto player = world.lookupAgent(world.getPlayerControlledAgent()); player) {
         auto const* agent = player.entity;
         auto centre = agent->getGlobalPosition();
         centre.y += agent->getHeight() * 0.5f;

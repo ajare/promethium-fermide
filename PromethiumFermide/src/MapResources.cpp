@@ -1,5 +1,5 @@
 #include <stdexcept>
-#include <core/World.h>
+#include <game/WorldRuntime.h>
 
 #include <willpower/application/resourcesystem/ResourceManager.h>
 #include <willpower/application/resourcesystem/ImageSetResource.h>
@@ -36,7 +36,7 @@ void MapResources::load(std::function<void()> postFunction) {
   try {
     mManager.createResource(mMap);
     mManager.loadResource(mMap);
-    if (!mMap->getWorld() || !mManager.isResourceLoaded(mMap))
+    if (!mMap->getRuntime() || !mManager.isResourceLoaded(mMap))
       throw std::runtime_error("World/World did not finish loading");
     if (postFunction) postFunction();
   } catch (...) {
@@ -48,8 +48,9 @@ void MapResources::load(std::function<void()> postFunction) {
 void MapResources::loadAtlases() {
   if (!mMap || !mManager.isResourceLoaded(mMap))
     throw std::runtime_error("Atlas post work requires a loaded Map");
-  std::array names{mMap->getWorld()->sectorImageSetResourceName(), std::string{"ObjectAtlas"},
-      mMap->getWorld()->agentImageSetResourceName(), mMap->getWorld()->furnitureImageSetResourceName()};
+  std::array names{mMap->getRuntime()->world().sectorImageSetResourceName(),
+      std::string{"ObjectAtlas"}, mMap->getRuntime()->world().agentImageSetResourceName(),
+      mMap->getRuntime()->world().furnitureImageSetResourceName()};
   for (std::size_t index = 0; index < names.size(); ++index) {
     if (mAtlases[index]) continue;
     std::shared_ptr<wp::application::resourcesystem::ImageSetResource> atlas;

@@ -13,7 +13,11 @@ namespace pf::application::render {
 // Application-only viewport: follows the first Player-controlled Agent and its
 // Layer, or fits Layer 0 when none exists. No simulation updates, editor globals,
 // debug overlays or ImGui context.
-PF_APPLICATION_API WorldDrawList drawWorld(std::shared_ptr<const core::World> const& world,
+//
+// Takes the World by const reference (#970). The game's viewport is handed the
+// read view its WorldRuntime publishes, so the renderer cannot mutate what it
+// draws - and cannot keep that World alive past the runtime that owns it either.
+PF_APPLICATION_API WorldDrawList drawWorld(core::World const& world,
                                           float width, float height);
 class WorldRenderer {
   class Impl;
@@ -21,7 +25,7 @@ class WorldRenderer {
 public:
   WorldRenderer(wp::application::resourcesystem::ResourceManager& resources,
                 mpp::RenderSystem& renderSystem, mpp::ResourceManager& renderResources,
-                mpp::ScenePtr scene, std::shared_ptr<const core::World> world);
+                mpp::ScenePtr scene, core::World const& world);
   ~WorldRenderer();
   void render();
 };

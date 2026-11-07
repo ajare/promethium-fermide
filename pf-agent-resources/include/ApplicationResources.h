@@ -17,6 +17,11 @@ namespace core
 	class FurnitureCatalogue;
 }
 
+namespace game
+{
+	class WorldRuntime;
+}
+
 namespace wp::application::resourcesystem
 {
 	class ResourceManager;
@@ -109,19 +114,32 @@ private:
 	std::shared_ptr<const core::FurnitureCatalogue> mCatalogue;
 };
 
+// The application's World resource (#970, spec #960). It holds the
+// `game::WorldRuntime` the game drives rather than a raw `core::World`.
+//
+// create() still deserializes a World exactly as before, but the moment that
+// World exists it is handed to a runtime, which owns it exclusively from
+// there on. The only thing this resource hands out is the runtime, so every
+// consumer reaches the loaded World through the same façade the shipped game
+// runs - and none of them can reach a mutable World without the authoring
+// surface, which lives above the runtime and is not part of the game.
+//
+// Before create() the resource holds nothing: an unloaded World resource has
+// no runtime, which is how callers tell "not created yet" apart from
+// "created".
 class WorldResource final : public wp::application::resourcesystem::Resource
 {
 public:
 	WorldResource(std::string const& name, std::string const& namesp,
 		std::string const& source, std::map<std::string, std::string> const& tags,
 		wp::application::resourcesystem::ResourceLocation* location);
-	std::shared_ptr<core::World> const& world() const { return mWorld; }
+	std::shared_ptr<game::WorldRuntime> const& runtime() const { return mRuntime; }
 
 private:
 	void create(wp::application::resourcesystem::DataStreamPtr data,
 		wp::application::resourcesystem::ResourceManager* manager) override;
 	void destroy() override;
-	std::shared_ptr<core::World> mWorld;
+	std::shared_ptr<game::WorldRuntime> mRuntime;
 };
 
 void registerApplicationResourceTypes(

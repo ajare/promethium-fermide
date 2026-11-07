@@ -14,6 +14,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Module.cmake")
 
 pf_require_module(AppLib)
 pf_require_module(promethium-fermide-core)
+pf_require_module(pf-game-runtime)
 pf_require_module(pf-agent-resources)
 pf_require_module(pf-render)
 pf_require_willpower()
@@ -40,7 +41,14 @@ target_include_directories(PromethiumFermide PUBLIC include PRIVATE render)
 # its own renderer implementation, so this is a header dependency only.
 target_include_directories(PromethiumFermide PRIVATE "${PF_REPO_ROOT}/pf-render/include")
 target_compile_definitions(PromethiumFermide PRIVATE PF_APPLICATION_EXPORT)
+# The game reaches its World through pf-game-runtime alone (#970, spec #960):
+# WorldRuntime owns the World, and the const view it publishes is the only
+# World this module can name. pf-game-authoring is deliberately absent from
+# the link line below - adding it would be a one-line, review-visible change
+# to what the shipped game is allowed to do, which is the whole point of the
+# boundary.
 target_link_libraries(PromethiumFermide PUBLIC AppLib promethium-fermide-core
+    pf-game-runtime
     PRIVATE pf-agent-resources)
 pf_apply_headless_verification_policy(PromethiumFermide)
 willpower_add_header_filter(PromethiumFermide)
@@ -77,7 +85,12 @@ if(BUILD_TESTING)
         ${PF_REPO_ROOT}/launcher/src/DirectoryResourceLocation.cpp)
     target_include_directories(pf_application_tests PRIVATE ${PF_REPO_ROOT}/pf-agent-resources/include ${PF_REPO_ROOT}/launcher/include)
     add_dependencies(pf_application_tests pf-application-assets)
-    target_link_libraries(pf_application_tests PRIVATE PromethiumFermide AppLib)
+    # The application tests author their fixtures - Door, Staircase, Lift,
+    # Chamber, artwork selection - so they carry the authoring link the game
+    # itself does not have. The World under test is still the one the game's
+    # own WorldRuntime owns and drives; only the way the fixture gets in is
+    # privileged (#970, spec #960).
+    target_link_libraries(pf_application_tests PRIVATE PromethiumFermide AppLib pf-game-authoring)
     pf_apply_headless_verification_policy(pf_application_tests)
     willpower_deploy_runtime_dlls(pf_application_tests)
     willpower_deploy_vendor_dlls(pf_application_tests)
