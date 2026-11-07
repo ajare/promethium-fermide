@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Edge.h"
 #include "core/Ladder.h"
 
@@ -8,7 +9,7 @@ namespace core
 {
 	class Agent;
 
-	class LadderMountEdge : public Edge
+	class PF_CORE_API LadderMountEdge : public Edge
 	{
 		friend struct RouteTraversalInputs;
 		std::shared_ptr<Ladder> mLadder;

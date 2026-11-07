@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/SectorObjectType.h"
 
 
@@ -17,7 +18,7 @@ namespace core
 		ForceBridge
 	};
 
-	std::string getCellFloorTypeString(CellFloorType type);
+	PF_CORE_API std::string getCellFloorTypeString(CellFloorType type);
 
 	struct CellDefinition
 	{

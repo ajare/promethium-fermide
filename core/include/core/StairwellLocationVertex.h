@@ -1,11 +1,12 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Vertex.h"
 
 
 namespace core
 {
-	class StairwellLocationVertex : public Vertex
+	class PF_CORE_API StairwellLocationVertex : public Vertex
 	{
 	public:
 

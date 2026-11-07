@@ -34,6 +34,11 @@ file(GLOB PF_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c
 file(GLOB PF_CORE_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/core/*.h")
 
 add_library(promethium-fermide-core STATIC ${PF_CORE_SOURCES} ${PF_CORE_HEADERS})
+# The export macro in core/Platform.h resolves to an export while core itself
+# is compiled and to an import for every consumer (#961). Core remains a
+# STATIC library: declaring the surface now makes it explicit and
+# compile-verified before any linkage change is taken.
+target_compile_definitions(promethium-fermide-core PRIVATE PF_CORE_DLL_EXPORT)
 target_compile_definitions(promethium-fermide-core PUBLIC YAML_CPP_STATIC_DEFINE)
 # The include root is this module, but headers keep their `core/` prefix so
 # consumers continue to write #include "core/World.h".

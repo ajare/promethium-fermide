@@ -5,13 +5,14 @@
 #include <string>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/Sector.h"
 
 
 namespace core
 {
 
-	class Location : public Sector
+	class PF_CORE_API Location : public Sector
 	{
 		friend class World;
 		friend class PermissionRequirementStore; // ADR 0022 requirement edits

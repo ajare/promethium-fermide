@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include "core/Platform.h"
 
 
 namespace core
@@ -21,7 +22,7 @@ namespace core
 		Dumbwaiter
 	};
 
-	std::string getSectorTypeString(SectorType type);
+	PF_CORE_API std::string getSectorTypeString(SectorType type);
 
 	// A Facade is a Location in every traversal respect: whatever may sit next to
 	// a Location and share a walkable boundary with it must accept a Facade too,
@@ -37,6 +38,6 @@ namespace core
 	// Footprint editing does not use this helper: a Facade is occupiable and
 	// resizes or deletes through its own plan entry points, with the same
 	// Agent-and-object cascade as a Room while preserving its Facade identity.
-	bool isLocationLike(SectorType type);
+	PF_CORE_API bool isLocationLike(SectorType type);
 
 } // core

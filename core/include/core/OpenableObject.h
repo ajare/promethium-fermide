@@ -1,10 +1,11 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Object.h"
 
 namespace core
 {
-	class OpenableObject : public Object
+	class PF_CORE_API OpenableObject : public Object
 	{
 	public:
 		enum struct State { Open, Opening, Closed, Closing };

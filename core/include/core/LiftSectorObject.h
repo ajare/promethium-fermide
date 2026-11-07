@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/Lift.h"
 #include "core/SectorObject.h"
 
@@ -14,7 +15,7 @@ namespace core
 		PlatformLift
 	};
 
-	class LiftSectorObject : public SectorObject, public VerticalEdgeCreator
+	class PF_CORE_API LiftSectorObject : public SectorObject, public VerticalEdgeCreator
 	{
 		LiftSectorObjectType mType;
 

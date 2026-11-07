@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Vertex.h"
 #include "core/Window.h"
 
@@ -8,7 +9,7 @@ namespace core
 {
 	class Location;
 
-	class WindowVertex : public Vertex
+	class PF_CORE_API WindowVertex : public Vertex
 	{
 		std::shared_ptr<const Window> mWindow;
 

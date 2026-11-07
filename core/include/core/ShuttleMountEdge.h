@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Edge.h"
 #include "core/Shuttle.h"
 
@@ -8,7 +9,7 @@ namespace core
 {
 	class Agent;
 
-	class ShuttleMountEdge : public Edge
+	class PF_CORE_API ShuttleMountEdge : public Edge
 	{
 		std::shared_ptr<Shuttle> mShuttle;
 

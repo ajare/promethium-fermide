@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <vector>
+#include "core/Platform.h"
 
 namespace core::physicalControl
 {
@@ -39,8 +40,8 @@ namespace core::physicalControl
 		Owner owner;
 	};
 
-	bool canonicalLess(Owner const& a, Owner const& b);
+	PF_CORE_API bool canonicalLess(Owner const& a, Owner const& b);
 	// One Layer/Level, across all hosting Locations. Same-Location stacks of
 	// at most four preserve each independent control.
-	std::vector<uint32_t> allocateCanonical(std::vector<Demand> const& demands);
+	PF_CORE_API std::vector<uint32_t> allocateCanonical(std::vector<Demand> const& demands);
 }

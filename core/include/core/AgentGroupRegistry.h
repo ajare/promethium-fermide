@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/World.h"
 
 namespace core
@@ -28,7 +29,7 @@ namespace core
 	// owns no state: it reaches the World's AgentGroup and Agent registries,
 	// the pause gate, and the coordinator through the World it was given,
 	// following the SimulationCoordinator and PlacementValidator pattern.
-	class AgentGroupRegistry
+	class PF_CORE_API AgentGroupRegistry
 	{
 	public:
 

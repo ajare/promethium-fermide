@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/Object.h"
 #include "core/Vector2.h"
 
@@ -10,7 +11,7 @@
 namespace core
 {
 
-	class Walkway : public Object
+	class PF_CORE_API Walkway : public Object
 	{
 		uint32_t mCellX, mCellY;
 

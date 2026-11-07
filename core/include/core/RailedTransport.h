@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/Object.h"
 #include "core/CellPosition.h"
 
@@ -10,7 +11,7 @@ namespace core
 {
 	// Shared render geometry for lift and shuttle vehicles. Scheduling and motion
 	// are authoritative in the world-owned traversal coordinator.
-	class RailedTransport : public Object
+	class PF_CORE_API RailedTransport : public Object
 	{
 	protected:
 		std::vector<CellPosition> mStops;

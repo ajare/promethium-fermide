@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/Coordination.h"
 #include "core/Defines.h"
 #include "core/World.h"
@@ -58,7 +59,7 @@ namespace core
 	// World keeps ownership of every entity registry (ADR 0001) and
 	// remains the facade (design pattern) through which callers reach
 	// these operations; no caller outside World names this class.
-	class TraversalResourceRegistry
+	class PF_CORE_API TraversalResourceRegistry
 	{
 	public:
 

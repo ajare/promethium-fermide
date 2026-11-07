@@ -3,12 +3,13 @@
 #include <string>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/SerializationWorkData.h"
 #include "core/Serializer.h"
 
 namespace core
 {
-	class Serializable
+	class PF_CORE_API Serializable
 	{
 		std::vector<std::string> mDeserializationWarnings;
 		std::vector<std::string> mDeserializationErrors;

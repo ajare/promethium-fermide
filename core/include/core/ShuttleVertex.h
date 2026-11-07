@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Vertex.h"
 #include "core/Shuttle.h"
 
@@ -8,7 +9,7 @@ namespace core
 {
 	class Location;
 
-	class ShuttleVertex : public Vertex
+	class PF_CORE_API ShuttleVertex : public Vertex
 	{
 		std::shared_ptr<Shuttle> mShuttle;
 

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/AgentBehaviour.h"
 #include "core/EntityId.h"
 #include "core/EntityRegistry.h"
@@ -107,7 +108,7 @@ namespace core
 	// is the package manifest; its source module paths name Lua files managed
 	// inside the package directory. Modules and factories are preflighted through
 	// the runtime adapter; Agent callbacks never execute in this document model.
-	class AgentBehaviourRegistry : public Serializable
+	class PF_CORE_API AgentBehaviourRegistry : public Serializable
 	{
 		std::string mUuid;
 		// Package revision covers the registry-local helper-module declarations.

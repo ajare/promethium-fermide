@@ -1,11 +1,12 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Edge.h"
 #include "core/Window.h"
 
 namespace core
 {
-	class WindowEdge : public Edge
+	class PF_CORE_API WindowEdge : public Edge
 	{
 		friend struct RouteTraversalInputs;
 		std::shared_ptr<Window> mWindow;

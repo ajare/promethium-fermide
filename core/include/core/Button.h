@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 
+#include "core/Platform.h"
 #include "core/Object.h"
 #include "core/EntityId.h"
 
@@ -10,7 +11,7 @@ namespace core
 {
 	// Visual representation of a physical control. Its actionable behaviour is
 	// represented by a world-owned InteractionPoint and typed bindings.
-	class Button : public Object
+	class PF_CORE_API Button : public Object
 	{
 		std::string mName;
 		float mEnableTimer{ -1.0f };

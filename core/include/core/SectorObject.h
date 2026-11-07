@@ -3,6 +3,7 @@
 #include <string>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/Area.h"
 #include "core/Object.h"
 #include "core/SectorObjectType.h"
@@ -16,7 +17,7 @@ namespace core
 	class World;
 
 	// Intended as a base class for Interactables, Windows, etc.
-	class SectorObject : public Area
+	class PF_CORE_API SectorObject : public Area
 	{
 		static uint32_t VertexIdentifierGenerator;
 

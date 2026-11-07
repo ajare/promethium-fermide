@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Edge.h"
 #include "core/Stairwell.h"
 
@@ -8,7 +9,7 @@ namespace core
 {
 	class Agent;
 
-	class StairwellEdge : public Edge
+	class PF_CORE_API StairwellEdge : public Edge
 	{
 		std::shared_ptr<Stairwell> mStairwell;
 

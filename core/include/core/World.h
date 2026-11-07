@@ -1,4 +1,5 @@
 #pragma once
+#include "core/Platform.h"
 #include "core/ActionRegistry.h"
 
 #include <string>
@@ -67,7 +68,7 @@ namespace core
 	class AgentProfileEditor;
 	class WorldBuilder;
 
-	class World : public Serializable
+	class PF_CORE_API World : public Serializable
 	{
 		friend class Agent;
 		friend class AgentTagRegistry;

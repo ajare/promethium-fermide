@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/Button.h"
 #include "core/SectorObject.h"
 
@@ -16,7 +17,7 @@ namespace core
 		UnAnchored
 	};
 
-	class ButtonSectorObject : public SectorObject
+	class PF_CORE_API ButtonSectorObject : public SectorObject
 	{
 		ButtonAnchorType mAnchorType;
 

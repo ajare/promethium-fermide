@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/EdgeType.h"
 #include "core/RouteCost.h"
 #include "core/EdgeTraversalRequestResult.h"
@@ -17,7 +18,7 @@ namespace core
 	class Vertex;
 	class Agent;
 
-	class Edge
+	class PF_CORE_API Edge
 	{
 		friend class Graph;
 		friend class Agent;

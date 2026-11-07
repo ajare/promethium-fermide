@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 
+#include "core/Platform.h"
 #include "core/VertexType.h"
 #include "core/Vector2.h"
 
@@ -16,7 +17,7 @@ namespace core
 	class Object;
 	class Sector;
 
-	class Vertex
+	class PF_CORE_API Vertex
 	{
 		friend class Graph;
 

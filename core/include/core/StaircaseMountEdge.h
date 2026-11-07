@@ -1,11 +1,12 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Edge.h"
 #include "core/Staircase.h"
 
 namespace core
 {
-	class StaircaseMountEdge : public Edge
+	class PF_CORE_API StaircaseMountEdge : public Edge
 	{
 		friend struct RouteTraversalInputs;
 		std::shared_ptr<Staircase> mStaircase;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/ObservationRevision.h"
 
 #include <array>
@@ -111,8 +112,8 @@ namespace core
 
 	// Classification only: callers still apply mutable permission, Broken and
 	// lifecycle checks before sharing an operation.
-	std::string deviceCommandName(DeviceCommand const& command);
-	bool isDeviceCommandCoalescible(DeviceCommandType type);
+	PF_CORE_API std::string deviceCommandName(DeviceCommand const& command);
+	PF_CORE_API bool isDeviceCommandCoalescible(DeviceCommandType type);
 
 	enum struct InteractionBindingRequirement
 	{

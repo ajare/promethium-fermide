@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/AgentTag.h"
 #include "core/EntityId.h"
 #include "core/EntityRegistry.h"
@@ -25,7 +26,7 @@ namespace core
 
 	// A separately persisted namespace for Agent tags. IDs belong to this
 	// registry, remain stable across rename, and are never reused.
-	class AgentTagRegistry : public Serializable
+	class PF_CORE_API AgentTagRegistry : public Serializable
 	{
 		std::string mUuid;
 		EntityRegistry<AgentTagId, AgentTag> mTags;

@@ -1,11 +1,12 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Vertex.h"
 
 
 namespace core
 {
-	class SectorMarkerVertex : public Vertex
+	class PF_CORE_API SectorMarkerVertex : public Vertex
 	{
 	public:
 

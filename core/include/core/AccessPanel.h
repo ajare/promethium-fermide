@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Object.h"
 #include "core/EntityId.h"
 #include <vector>
@@ -16,7 +17,7 @@ namespace core
 	};
 
 	// Authored geometry and cell ownership are independent of runtime state.
-	class AccessPanel : public Object
+	class PF_CORE_API AccessPanel : public Object
 	{
 		friend class World;
 		friend class SimulationCoordinator;
@@ -56,7 +57,7 @@ namespace core
 		std::string getDescription() const override { return std::string(getStateName()) + " Empty Access panel"; }
 	};
 
-	class AccessPanelSectorObject : public SectorObject
+	class PF_CORE_API AccessPanelSectorObject : public SectorObject
 	{
 	public:
 		AccessPanelSectorObject(std::shared_ptr<const Sector> sector, uint32_t cellX,

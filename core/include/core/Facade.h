@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 
+#include "core/Platform.h"
 #include "core/Background.h"
 #include "core/Location.h"
 
@@ -26,7 +27,7 @@ namespace core
 	// one Layer over a block of free cells with the same placement validation
 	// a Room plays by, and is persisted as a ConstructionType::Facade record
 	// carrying its name, footprint, and packed colour.
-	class Facade : public Location
+	class PF_CORE_API Facade : public Location
 	{
 		BackgroundColour mColour;
 

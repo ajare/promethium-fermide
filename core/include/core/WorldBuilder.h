@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/Window.h"
 #include "core/World.h"
 
@@ -42,7 +43,7 @@ namespace core
 	// ownership of every entity registry (ADR 0001) and remains the
 	// facade (design pattern) through which callers reach these
 	// operations; no caller outside World names this class.
-	class WorldBuilder
+	class PF_CORE_API WorldBuilder
 	{
 	public:
 

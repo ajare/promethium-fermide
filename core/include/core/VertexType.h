@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include "core/Platform.h"
 
 
 namespace core
@@ -54,8 +55,8 @@ namespace core
 		Staircase
 	};
 
-	std::string getVertexTypeString(VertexType type);
+	PF_CORE_API std::string getVertexTypeString(VertexType type);
 
-	std::string getSubVertexTypeString(VertexSubType type);
+	PF_CORE_API std::string getSubVertexTypeString(VertexSubType type);
 
 } // core

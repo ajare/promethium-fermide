@@ -9,6 +9,7 @@
 #include <optional>
 #include <set>
 #include <map>
+#include "core/Platform.h"
 #include "core/DeviceCondition.h"
 #include <utility>
 #include <vector>
@@ -289,7 +290,7 @@ namespace core
 		}
 	};
 
-	class Agent : public Serializable
+	class PF_CORE_API Agent : public Serializable
 	{
 		friend struct AgentPoseTestAccess;
 		friend class World;

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/Object.h"
 #include "core/Sector.h"
 #include "core/EntityId.h"
@@ -11,7 +12,7 @@
 namespace core
 {
 
-	class Window : public Object
+	class PF_CORE_API Window : public Object
 	{
 		friend class BoothWindow;
 	public:
@@ -107,7 +108,7 @@ namespace core
 
 	// Reuses aperture geometry, but cannot acquire glass or crossing capabilities,
 	// including through a Window reference.
-	class BoothWindow final : public Window
+	class PF_CORE_API BoothWindow final : public Window
 	{
 		friend class World;
 		friend class SimulationCoordinator;

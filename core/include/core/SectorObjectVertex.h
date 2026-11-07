@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Vertex.h"
 
 
@@ -7,7 +8,7 @@ namespace core
 {
 	class SectorObject;
 
-	class SectorObjectVertex : public Vertex
+	class PF_CORE_API SectorObjectVertex : public Vertex
 	{
 		std::shared_ptr<SectorObject> mObject;
 

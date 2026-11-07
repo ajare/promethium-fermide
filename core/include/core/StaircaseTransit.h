@@ -3,13 +3,14 @@
 #include <memory>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/Staircase.h"
 #include "core/Transit.h"
 #include "core/VerticalEdgeCreator.h"
 
 namespace core
 {
-	class StaircaseTransit : public Transit, public VerticalEdgeCreator
+	class PF_CORE_API StaircaseTransit : public Transit, public VerticalEdgeCreator
 	{
 		std::shared_ptr<Staircase> mStaircase;
 

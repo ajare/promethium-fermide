@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Vertex.h"
 #include "core/BulkheadDoor.h"
 
@@ -8,7 +9,7 @@ namespace core
 {
 	class Location;
 
-	class BulkheadDoorVertex : public Vertex
+	class PF_CORE_API BulkheadDoorVertex : public Vertex
 	{
 		std::shared_ptr<BulkheadDoor> mBulkheadDoor;
 

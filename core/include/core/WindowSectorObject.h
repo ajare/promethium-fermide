@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/SectorObject.h"
 
 
@@ -10,7 +11,7 @@ namespace core
 {
 	class Window;
 
-	class WindowSectorObject : public SectorObject
+	class PF_CORE_API WindowSectorObject : public SectorObject
 	{
 	public:
 

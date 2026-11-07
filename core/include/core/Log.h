@@ -4,6 +4,7 @@
 #include <deque>
 #include <vector>
 #include <string>
+#include "core/Platform.h"
 
 
 namespace core
@@ -26,8 +27,8 @@ namespace core
 
 	typedef std::deque<LogMessage> Log;
 
-	void addLogMessage(std::string const& source, uint32_t id, LogLevel level, std::string const& msg);
+	PF_CORE_API void addLogMessage(std::string const& source, uint32_t id, LogLevel level, std::string const& msg);
 
-	std::vector<LogMessage> consumeLogMessages();
+	PF_CORE_API std::vector<LogMessage> consumeLogMessages();
 
 } // core

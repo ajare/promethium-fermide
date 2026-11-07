@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/Agent.h"
 #include "core/AgentPropertyDescriptors.h"
 #include "core/AgentTag.h"
@@ -126,7 +127,7 @@ namespace core
 	// World keeps ownership of every entity registry (ADR 0001) and
 	// remains the facade (design pattern) through which callers reach
 	// these operations; no caller outside World names this class.
-	class AgentTagService
+	class PF_CORE_API AgentTagService
 	{
 	public:
 		explicit AgentTagService(World& world);

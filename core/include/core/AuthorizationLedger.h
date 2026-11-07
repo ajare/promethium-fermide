@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/World.h"
 
 namespace core
@@ -46,7 +47,7 @@ namespace core
 	// seams through the World it was given, following the
 	// SimulationCoordinator, PlacementValidator, and
 	// PermissionRequirementStore pattern.
-	class AuthorizationLedger
+	class PF_CORE_API AuthorizationLedger
 	{
 	public:
 

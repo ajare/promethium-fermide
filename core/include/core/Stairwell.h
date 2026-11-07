@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/Object.h"
 #include "core/EntityId.h"
 
@@ -12,7 +13,7 @@
 namespace core
 {
 
-	class Stairwell : public Object
+	class PF_CORE_API Stairwell : public Object
 	{
 		uint32_t mLevelsHigh;
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Edge.h"
 
 
@@ -7,7 +8,7 @@ namespace core
 {
 	class Agent;
 
-	class SectorEdge : public Edge
+	class PF_CORE_API SectorEdge : public Edge
 	{
 	public:
 

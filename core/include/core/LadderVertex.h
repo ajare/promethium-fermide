@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Vertex.h"
 #include "core/Ladder.h"
 
@@ -8,7 +9,7 @@ namespace core
 {
 	class Location;
 
-	class LadderVertex : public Vertex
+	class PF_CORE_API LadderVertex : public Vertex
 	{
 		std::shared_ptr<Ladder> mLadder;
 

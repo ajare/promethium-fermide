@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "core/Platform.h"
 #include "core/Coordination.h"
 #include "core/DeviceCondition.h"
 #include "core/World.h"
@@ -44,7 +45,7 @@ namespace core
 	// snapshot invalidation, and the coordinator's operation-failure seam
 	// through the World it was given, following the SimulationCoordinator,
 	// PlacementValidator, and PermissionRequirementStore pattern.
-	class DeviceConditionStore
+	class PF_CORE_API DeviceConditionStore
 	{
 	public:
 

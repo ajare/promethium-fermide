@@ -3,11 +3,12 @@
 #include <memory>
 #include <string>
 
+#include "core/Platform.h"
 #include "core/Serializer.h"
 
 namespace core
 {
-	class SerializerFactory
+	class PF_CORE_API SerializerFactory
 	{
 	public:
 		virtual ~SerializerFactory() = default;

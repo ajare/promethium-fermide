@@ -4,13 +4,14 @@
 #include <memory>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/Lift.h"
 
 
 namespace core
 {
 
-	class CarLift : public Lift
+	class PF_CORE_API CarLift : public Lift
 	{
 	public:
 

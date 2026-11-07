@@ -3,6 +3,7 @@
 #include <string>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/Vector2.h"
 
 
@@ -10,7 +11,7 @@ namespace core
 {
 
 	// Intended as a base class for Interactables, Windows, etc.
-	class Area
+	class PF_CORE_API Area
 	{
 		uint32_t mCellX, mCellY;
 

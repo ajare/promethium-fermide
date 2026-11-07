@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Edge.h"
 
 
@@ -8,7 +9,7 @@ namespace core
 
 	// Intended as a base class for Area and Shape, as subclasses of both of these need
 	// the ability to create Edges for a Graph.
-	class VerticalEdgeCreator
+	class PF_CORE_API VerticalEdgeCreator
 	{
 	public:
 

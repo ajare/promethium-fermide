@@ -1,13 +1,14 @@
 #pragma once
 
 #include <array>
+#include "core/Platform.h"
 #include "core/Transit.h"
 
 namespace core
 {
 	// Stationary same-Layer Transit. Device state lives here; admission and
 	// occupants belong to its World-owned Traversal resource.
-	class AirlockTransit : public Transit
+	class PF_CORE_API AirlockTransit : public Transit
 	{
 		friend class World;
 		friend class SimulationCoordinator;

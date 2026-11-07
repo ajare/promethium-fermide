@@ -3,12 +3,13 @@
 #include <array>
 #include <cstdint>
 
+#include "core/Platform.h"
 #include "core/Object.h"
 
 namespace core
 {
 	// A single straight flight connecting two adjacent levels.
-	class Staircase : public Object
+	class PF_CORE_API Staircase : public Object
 	{
 		uint32_t mCellsWide;
 		int mRiseSide;

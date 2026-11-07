@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include "core/Platform.h"
 
 namespace core
 {
@@ -25,7 +26,7 @@ namespace core
 	// the application resource system. When no resolver is installed,
 	// loadWorldDocument falls back to a file beside the World, which keeps
 	// GPU-less tools and hand-authored fixtures working.
-	class CatalogResourceResolver
+	class PF_CORE_API CatalogResourceResolver
 	{
 	public:
 		virtual ~CatalogResourceResolver() = default;
@@ -39,27 +40,27 @@ namespace core
 
 	// Installs the process-wide resolver. Passing nullptr restores the
 	// adjacent-file fallback.
-	void setCatalogResourceResolver(
+	PF_CORE_API void setCatalogResourceResolver(
 		std::shared_ptr<CatalogResourceResolver> resolver);
-	std::shared_ptr<CatalogResourceResolver> catalogResourceResolver();
+	PF_CORE_API std::shared_ptr<CatalogResourceResolver> catalogResourceResolver();
 
 	// Returns the declared source for a catalogue Resource, including an explicit
 	// imported Agent-type reference, or an empty path when it is unknown.
-	std::filesystem::path resolveCatalogSource(std::string const& type,
+	PF_CORE_API std::filesystem::path resolveCatalogSource(std::string const& type,
 		std::string const& resourceName);
 
-	bool isWorldDocumentPath(std::filesystem::path const& filepath);
-	void requireWorldDocumentPath(std::filesystem::path const& filepath);
-	WorldDocumentFormat worldDocumentFormat(std::filesystem::path const& filepath);
+	PF_CORE_API bool isWorldDocumentPath(std::filesystem::path const& filepath);
+	PF_CORE_API void requireWorldDocumentPath(std::filesystem::path const& filepath);
+	PF_CORE_API WorldDocumentFormat worldDocumentFormat(std::filesystem::path const& filepath);
 
 	// Applies the default binary suffix to a suffixless Save As result and
 	// refuses every path that does not have one of the exact supported suffixes.
-	std::filesystem::path worldDocumentSavePath(
+	PF_CORE_API std::filesystem::path worldDocumentSavePath(
 		std::filesystem::path const& filepath);
 
 	// Returns the path with the complete supported suffix removed. For example,
 	// both /project/station.world and /project/station.world.yaml become
 	// /project/station.
-	std::filesystem::path worldDocumentBasePath(
+	PF_CORE_API std::filesystem::path worldDocumentBasePath(
 		std::filesystem::path const& filepath);
 }

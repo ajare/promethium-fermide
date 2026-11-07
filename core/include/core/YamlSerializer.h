@@ -8,13 +8,14 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "core/Platform.h"
 #include "core/SerializationException.h"
 #include "core/Serializer.h"
 #include "core/SerializerFactory.h"
 
 namespace core
 {
-	class YamlSerializer : public Serializer
+	class PF_CORE_API YamlSerializer : public Serializer
 	{
 		enum class ObjectType
 		{
@@ -129,7 +130,7 @@ namespace core
 			std::string const& defaultValue = "") override;
 	};
 
-	class YamlSerializerFactory : public SerializerFactory
+	class PF_CORE_API YamlSerializerFactory : public SerializerFactory
 	{
 		bool mSerializing;
 		bool mIsFile;

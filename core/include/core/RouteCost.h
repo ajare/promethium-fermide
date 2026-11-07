@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/AgentTag.h"
 
 #include <algorithm>
@@ -232,7 +233,7 @@ namespace core
 	// Constructed once per synchronous query. Agent observations are confined to
 	// input capture; demand evaluation consumes value-only traversal inputs and
 	// this frozen profile/policy, never live Agent or resource state.
-	[[nodiscard]] int routeAgentLocalDepth(Agent const* agent);
+	PF_CORE_API [[nodiscard]] int routeAgentLocalDepth(Agent const* agent);
 
 	struct RouteDecisionContext
 	{

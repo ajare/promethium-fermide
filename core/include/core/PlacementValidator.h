@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 
+#include "core/Platform.h"
 #include "core/SectorObjectType.h"
 #include "core/World.h"
 
@@ -34,7 +35,7 @@ namespace core
 	// This is the first proof-of-pattern leaf of the ADR 0022 decomposition,
 	// following the SimulationCoordinator pattern: friend access to World,
 	// World-owned instance, World forwards each entry point.
-	class PlacementValidator
+	class PF_CORE_API PlacementValidator
 	{
 	public:
 

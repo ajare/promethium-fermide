@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include "core/Platform.h"
 
 
 namespace core
@@ -28,6 +29,6 @@ namespace core
 		return type == SectorObjectType::Window || type == SectorObjectType::BoothWindow;
 	}
 
-	std::string getSectorObjectTypeString(SectorObjectType type);
+	PF_CORE_API std::string getSectorObjectTypeString(SectorObjectType type);
 
 } // core

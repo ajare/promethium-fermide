@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 
+#include "core/Platform.h"
 #include "core/Furniture.h"
 #include "core/World.h"
 
@@ -49,7 +50,7 @@ namespace core
 	// AgentGroupRegistry, PermissionRequirementStore, AgentTypeCatalog,
 	// MarkerStore, TraversalResourceRegistry, and DeviceConditionStore
 	// pattern.
-	class FurnitureStore
+	class PF_CORE_API FurnitureStore
 	{
 	public:
 

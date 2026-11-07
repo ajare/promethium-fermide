@@ -11,6 +11,7 @@
 #include <variant>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/EntityId.h"
 
 namespace core
@@ -147,18 +148,18 @@ namespace core
 		bool operator==(AgentBehaviourAssignment const&) const = default;
 	};
 
-	char const* agentBehaviourConfigurationValueTypeName(
+	PF_CORE_API char const* agentBehaviourConfigurationValueTypeName(
 		AgentBehaviourConfigurationValue const& value);
 
-	char const* agentBehaviourSchemaTypeName(AgentBehaviourSchemaType type);
-	bool agentBehaviourSchemaTypeFromName(std::string const& name,
+	PF_CORE_API char const* agentBehaviourSchemaTypeName(AgentBehaviourSchemaType type);
+	PF_CORE_API bool agentBehaviourSchemaTypeFromName(std::string const& name,
 		AgentBehaviourSchemaType& type);
 
 	// Validates a schema field list the way a Record body is validated: field
 	// names are trimmed, non-empty, valid UTF-8, at most 63 bytes, and unique
 	// within their containing Record; Lists declare exactly one element type;
 	// Records declare at least one field; nesting is bounded.
-	bool agentBehaviourSchemaFieldsAreValid(
+	PF_CORE_API bool agentBehaviourSchemaFieldsAreValid(
 		std::vector<AgentBehaviourSchemaField> const& fields,
 		std::string* diagnostic = nullptr);
 
@@ -169,7 +170,7 @@ namespace core
 		Error
 	};
 
-	char const* agentBehaviourModuleStatusName(AgentBehaviourModuleStatus status);
+	PF_CORE_API char const* agentBehaviourModuleStatusName(AgentBehaviourModuleStatus status);
 
 	// One registry-local Lua module admitted by the package manifest. Import
 	// names are logical dotted identifiers rather than filesystem paths; source

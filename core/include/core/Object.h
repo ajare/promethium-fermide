@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/Shape.h"
 #include "core/SensorType.h"
 
@@ -14,7 +15,7 @@ namespace core
 
 	// Physical simulation/rendering object. Interaction and device-operation state
 	// is owned by World registries, not by this geometry base class.
-	class Object : public Shape
+	class PF_CORE_API Object : public Shape
 	{
 		std::shared_ptr<const SensorSource> mSensorSource;
 

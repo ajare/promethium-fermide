@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/Defines.h"
 #include "core/OpenableObject.h"
 #include "core/Coordination.h"
@@ -16,7 +17,7 @@ namespace core
 	class Sector;
 	class Agent;
 
-	class Door : public OpenableObject
+	class PF_CORE_API Door : public OpenableObject
 	{
 		friend class World;
 		friend class SimulationCoordinator;

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cmath>
+#include "core/Platform.h"
 #include "core/Transit.h"
 #include "core/ChamberSubtype.h"
 #include <stdexcept>
@@ -14,7 +15,7 @@ namespace core
 		PreDelay, Scanning, PostPause, ExitOpening, Exiting, ExitClosing, OccupancyViolation
 	};
 
-	class ChamberTransit : public Transit
+	class PF_CORE_API ChamberTransit : public Transit
 	{
 		friend class World;
 		friend class SimulationCoordinator;

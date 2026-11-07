@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/Serializer.h"
 #include "core/SerializerFactory.h"
 
@@ -12,7 +13,7 @@ namespace core
 {
 	// A deterministic, named-field binary implementation of Serializer. In-memory
 	// values returned by this class are opaque byte strings, not text.
-	class BinarySerializer : public Serializer
+	class PF_CORE_API BinarySerializer : public Serializer
 	{
 		struct Node;
 
@@ -82,7 +83,7 @@ namespace core
 			std::string const& defaultValue = "") override;
 	};
 
-	class BinarySerializerFactory : public SerializerFactory
+	class PF_CORE_API BinarySerializerFactory : public SerializerFactory
 	{
 		bool mSerializing;
 		bool mIsFile;

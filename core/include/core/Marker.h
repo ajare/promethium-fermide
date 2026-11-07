@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 
+#include "core/Platform.h"
 #include "core/EntityId.h"
 #include "core/Object.h"
 #include "core/Vector2.h"
@@ -24,7 +25,7 @@ namespace core
 		return static_cast<MarkerProperties>(property);
 	}
 
-	class Marker : public Object
+	class PF_CORE_API Marker : public Object
 	{
 		friend class World;
 		friend class MarkerSectorObject;

@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/Path.h"
 #include "core/RouteTraversalInputs.h"
 #include "core/Vector2.h"
@@ -127,33 +128,33 @@ namespace core
 
 	namespace pathing
 	{
-		std::shared_ptr<Path> findPath(Agent const* agent, Graph const* graph,
+		PF_CORE_API std::shared_ptr<Path> findPath(Agent const* agent, Graph const* graph,
 			std::shared_ptr<const Vertex> source, std::shared_ptr<const Vertex> target);
 
 		// Scores both suffixes from one immutable Route decision context so a
 		// waiting reconsideration never compares stale or differently observed costs.
-		std::optional<std::pair<float, float>> comparePathSuffixCosts(
+		PF_CORE_API std::optional<std::pair<float, float>> comparePathSuffixCosts(
 			Agent const& agent, Graph const& graph,
 			Path const& current, uint32_t currentFromNode,
 			Path const& alternative, uint32_t alternativeFromNode);
 
 		// Aggregation is intentionally on demand. A Path without a captured
 		// decision context (notably a restored Path) has no historical diagnostic.
-		std::optional<PathRouteDiagnostics> getRouteDiagnostics(Path const& path);
-		bool routeDiagnosticContextIsStale(Agent const& agent,
+		PF_CORE_API std::optional<PathRouteDiagnostics> getRouteDiagnostics(Path const& path);
+		PF_CORE_API bool routeDiagnosticContextIsStale(Agent const& agent,
 			Graph const& graph, RouteDiagnosticContext const& context);
-		bool routeDiagnosticContextIsStale(Agent const& agent,
+		PF_CORE_API bool routeDiagnosticContextIsStale(Agent const& agent,
 			Graph const& graph, Path const& path);
 
 		// Runs a bounded reverse search only when requested. It does not attach a
 		// search tree or alternative set to the Agent or Path.
-		std::optional<PathRouteExplanation> explainRoute(Agent const& agent,
+		PF_CORE_API std::optional<PathRouteExplanation> explainRoute(Agent const& agent,
 			Graph const& graph, Path const& path,
 			uint32_t maximumExpandedVertices = 4096,
 			uint32_t maximumEvaluatedTraversals = 32768);
-		char const* routeExclusionReasonText(RouteExclusionReason reason);
+		PF_CORE_API char const* routeExclusionReasonText(RouteExclusionReason reason);
 
-		std::shared_ptr<const Vertex> findNextVertexForVertexInPath(
+		PF_CORE_API std::shared_ptr<const Vertex> findNextVertexForVertexInPath(
 			std::shared_ptr<Path> path, Vertex const* vertex, uint32_t index = 0);
 	}
 }

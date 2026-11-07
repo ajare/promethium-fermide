@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/Door.h"
 #include "core/SectorObject.h"
 
@@ -10,7 +11,7 @@
 namespace core
 {
 
-	class DoorSectorObject : public SectorObject
+	class PF_CORE_API DoorSectorObject : public SectorObject
 	{
 		std::vector<float> calculateDoorQueueStopOffsets(World const* world, std::shared_ptr<Vertex> vertex, uint32_t x, uint32_t y, uint32_t doorWidth) const;
 

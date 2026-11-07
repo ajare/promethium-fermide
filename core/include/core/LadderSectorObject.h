@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/Ladder.h"
 #include "core/SectorObject.h"
 
@@ -10,7 +11,7 @@
 namespace core
 {
 
-	class LadderSectorObject : public SectorObject, public VerticalEdgeCreator
+	class PF_CORE_API LadderSectorObject : public SectorObject, public VerticalEdgeCreator
 	{
 	public:
 

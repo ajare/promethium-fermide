@@ -5,6 +5,7 @@
 #include <set>
 #include <functional>
 
+#include "core/Platform.h"
 #include "core/Area.h"
 #include "core/SectorType.h"
 #include "core/SectorEnd.h"
@@ -23,7 +24,7 @@ namespace core
 
 	typedef std::function<bool(std::shared_ptr<SectorObject>, std::shared_ptr<SectorObject>)> SectorObjectSortFunction;
 
-	class Sector : public Area
+	class PF_CORE_API Sector : public Area
 	{
 		friend class World;
 		friend class Graph;

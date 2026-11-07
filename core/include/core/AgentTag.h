@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include "core/Platform.h"
 #include "core/ObjectUsage.h"
 
 namespace core
@@ -118,7 +119,7 @@ namespace core
 		bool operator==(AgentEscalatorWalkingChanceProperty const&) const = default;
 	};
 
-	bool agentEscalatorWalkingChanceIsValid(float value,
+	PF_CORE_API bool agentEscalatorWalkingChanceIsValid(float value,
 		std::string* diagnostic = nullptr);
 
 	struct AgentColourProperty
@@ -367,40 +368,40 @@ namespace core
 		bool operator==(AgentMobilityProfileProperty const&) const = default;
 	};
 
-	void agentColourToFloats(AgentColour const& colour, float out[3]);
-	AgentColour agentColourFromFloats(float const in[3]);
+	PF_CORE_API void agentColourToFloats(AgentColour const& colour, float out[3]);
+	PF_CORE_API AgentColour agentColourFromFloats(float const in[3]);
 
 	// Draws one pastel from AgentTagColourPalette uniformly at random. Tag
 	// creation and legacy-load backfill share this so automatic Colours behave
 	// identically. The generator is never consulted by load or simulation reset.
-	AgentColour sampleAgentTagColour();
-	bool agentWalkSpeedModifierRangeIsValid(AgentModifierRange const& range,
+	PF_CORE_API AgentColour sampleAgentTagColour();
+	PF_CORE_API bool agentWalkSpeedModifierRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
-	bool agentHeightModifierRangeIsValid(AgentModifierRange const& range,
+	PF_CORE_API bool agentHeightModifierRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
-	bool agentStairSpeedModifierRangeIsValid(AgentModifierRange const& range,
+	PF_CORE_API bool agentStairSpeedModifierRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
-	bool agentLadderSpeedModifierRangeIsValid(AgentModifierRange const& range,
+	PF_CORE_API bool agentLadderSpeedModifierRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
-	bool agentInteractionAversionRangeIsValid(AgentModifierRange const& range,
+	PF_CORE_API bool agentInteractionAversionRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
-	bool agentEffortAversionRangeIsValid(AgentModifierRange const& range,
+	PF_CORE_API bool agentEffortAversionRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
-	bool agentWaitingAversionRangeIsValid(AgentModifierRange const& range,
+	PF_CORE_API bool agentWaitingAversionRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
-	bool agentCrowdAversionRangeIsValid(AgentModifierRange const& range,
+	PF_CORE_API bool agentCrowdAversionRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
-	bool agentRiskAversionRangeIsValid(AgentModifierRange const& range,
+	PF_CORE_API bool agentRiskAversionRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
-	bool agentRouteFamiliarityRangeIsValid(AgentModifierRange const& range,
+	PF_CORE_API bool agentRouteFamiliarityRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
-	bool agentRoutePersistenceRangeIsValid(AgentModifierRange const& range,
+	PF_CORE_API bool agentRoutePersistenceRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
-	bool agentMinimumRoutePlanningTimeRangeIsValid(AgentModifierRange const& range,
+	PF_CORE_API bool agentMinimumRoutePlanningTimeRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
-	bool agentMaximumRoutePlanningTimeRangeIsValid(AgentModifierRange const& range,
+	PF_CORE_API bool agentMaximumRoutePlanningTimeRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
-	float sampleAgentModifier(AgentModifierRange const& range);
+	PF_CORE_API float sampleAgentModifier(AgentModifierRange const& range);
 
 	// A named reusable set of Agent properties. Property types are hardcoded;
 	// the optional values and their revisions are authored registry data.

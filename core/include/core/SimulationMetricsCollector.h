@@ -1,4 +1,5 @@
 #pragma once
+#include "core/Platform.h"
 #include "core/Simulation.h"
 #include <map>
 #include <mutex>
@@ -27,7 +28,7 @@ public:
     static constexpr size_t maxSeries = 4096;
 };
 class World;
-class SimulationMetricsCollector final : public SimulationObserver {
+class PF_CORE_API SimulationMetricsCollector final : public SimulationObserver {
 public:
     explicit SimulationMetricsCollector(World const& world, bool detail = false);
     void onTick(uint64_t tick, std::vector<SimulationEvent> const& events) noexcept override;

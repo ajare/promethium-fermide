@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Transit.h"
 #include "core/VerticalEdgeCreator.h"
 #include "core/Ladder.h"
@@ -7,7 +8,7 @@
 
 namespace core
 {
-	class LadderTransit : public Transit, public VerticalEdgeCreator
+	class PF_CORE_API LadderTransit : public Transit, public VerticalEdgeCreator
 	{
 		std::shared_ptr<Ladder> mLadder;
 

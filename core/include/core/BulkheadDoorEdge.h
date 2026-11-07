@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Edge.h"
 #include "core/BulkheadDoor.h"
 
@@ -8,7 +9,7 @@ namespace core
 {
 	class Agent;
 
-	class BulkheadDoorEdge : public Edge
+	class PF_CORE_API BulkheadDoorEdge : public Edge
 	{
 		friend struct RouteTraversalInputs;
 		std::shared_ptr<BulkheadDoor> mDoor;

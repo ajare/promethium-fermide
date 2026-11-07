@@ -1,11 +1,12 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/SensorType.h"
 
 namespace core
 {
 
-	class SensorSource
+	class PF_CORE_API SensorSource
 	{
 	public:
 

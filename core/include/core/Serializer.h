@@ -3,10 +3,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include "core/Platform.h"
 
 namespace core
 {
-	class Serializer
+	class PF_CORE_API Serializer
 	{
 	public:
 		virtual ~Serializer() = default;

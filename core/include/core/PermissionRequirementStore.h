@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/World.h"
 
 namespace core
@@ -33,7 +34,7 @@ namespace core
 	// authorization replanning seams through the World it was given,
 	// following the SimulationCoordinator, PlacementValidator, and
 	// AgentGroupRegistry pattern.
-	class PermissionRequirementStore
+	class PF_CORE_API PermissionRequirementStore
 	{
 	public:
 

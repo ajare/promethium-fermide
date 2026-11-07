@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/Coordination.h"
 #include "core/Vector2.h"
 #include "core/Pose.h"
@@ -430,7 +431,7 @@ namespace core
 
 	// Non-owning observer; register/unregister on the simulation thread. Callbacks
 	// must not mutate World or consume its event queue.
-	class SimulationObserver
+	class PF_CORE_API SimulationObserver
 	{
 	public:
 		virtual ~SimulationObserver() = default;

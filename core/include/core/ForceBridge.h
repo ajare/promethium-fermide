@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/ExtensibleObject.h"
 #include "core/EntityId.h"
 
@@ -10,7 +11,7 @@
 namespace core
 {
 
-	class ForceBridge : public ExtensibleObject
+	class PF_CORE_API ForceBridge : public ExtensibleObject
 	{
 		friend class World;
 

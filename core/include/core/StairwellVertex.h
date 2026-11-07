@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Vertex.h"
 #include "core/Stairwell.h"
 
@@ -8,7 +9,7 @@ namespace core
 {
 	class Location;
 
-	class StairwellVertex : public Vertex
+	class PF_CORE_API StairwellVertex : public Vertex
 	{
 		std::shared_ptr<Stairwell> mStairwell;
 

@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/Coordination.h"
 #include "core/EntityId.h"
 #include "core/Simulation.h"
@@ -38,7 +39,7 @@ namespace core
 	// The name deliberately avoids "controller", which CONTEXT.md bans, and
 	// echoes ADR 0001's traversal-coordination vocabulary while covering the
 	// wider simulation scope.
-	class SimulationCoordinator
+	class PF_CORE_API SimulationCoordinator
 	{
 	public:
 

@@ -3,6 +3,7 @@
 #include <string>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/Vector2.h"
 #include "core/VerticalEdgeCreator.h"
 
@@ -11,7 +12,7 @@ namespace core
 {
 
 	// Intended as a base class for Interactables, Windows, etc.
-	class Shape
+	class PF_CORE_API Shape
 	{
 		Vector2 mPosition;
 

@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include "core/Platform.h"
 #include "core/AgentType.h"
 #include "core/World.h"
 
@@ -37,7 +38,7 @@ namespace core
 	// the pause gate, and the topology rebuild seam through the World it
 	// was given, following the SimulationCoordinator, PlacementValidator,
 	// and AgentGroupRegistry pattern.
-	class AgentTypeCatalog
+	class PF_CORE_API AgentTypeCatalog
 	{
 	public:
 

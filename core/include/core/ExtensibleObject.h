@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <set>
 #include <optional>
+#include "core/Platform.h"
 #include "core/DeviceCondition.h"
 
 #include "core/Object.h"
@@ -12,7 +13,7 @@ namespace core
 {
 	class Agent;
 	class Sector;
-	class ExtensibleObject : public Object
+	class PF_CORE_API ExtensibleObject : public Object
 	{
 		friend class World;
 		friend class SimulationCoordinator;

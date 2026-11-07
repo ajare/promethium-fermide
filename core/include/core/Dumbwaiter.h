@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Transit.h"
 #include "core/Window.h"
 #include <array>
@@ -10,7 +11,7 @@ namespace core
 	enum class DumbwaiterButtonState { Here, Elsewhere, Busy };
 
 	// An authored object-service device, deliberately not a passenger Transport.
-	class Dumbwaiter final : public Transit
+	class PF_CORE_API Dumbwaiter final : public Transit
 	{
 		friend class World;
 		friend class SimulationCoordinator;

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/Door.h"
 
 
@@ -11,7 +12,7 @@ namespace core
 
 	class Sector;
 
-	class BulkheadDoor : public Door
+	class PF_CORE_API BulkheadDoor : public Door
 	{
 		friend class World;
 

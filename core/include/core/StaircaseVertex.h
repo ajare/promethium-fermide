@@ -1,11 +1,12 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Staircase.h"
 #include "core/Vertex.h"
 
 namespace core
 {
-	class StaircaseVertex : public Vertex
+	class PF_CORE_API StaircaseVertex : public Vertex
 	{
 		std::shared_ptr<Staircase> mStaircase;
 	public:

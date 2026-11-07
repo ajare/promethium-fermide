@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 
+#include "core/Platform.h"
 #include "core/Agent.h"
 
 namespace core
@@ -30,27 +31,27 @@ namespace core
 	// creation and legacy document loading can resolve Human without an editor
 	// startup or a filesystem dependency. The embed is generated at build time
 	// directly from the bundled resource, never maintained as a second source.
-	AgentTypeDefinition bundledHumanAgentType();
+	PF_CORE_API AgentTypeDefinition bundledHumanAgentType();
 
 	// The frozen, validated Human baseline produced by running the bundled
 	// resource's new() once. Used only for the existing Human-default UI and
 	// Agent-less route-query policy; placed Agents use their own frozen baseline.
-	AgentPhysicalBaseline const& bundledHumanBaseline();
+	PF_CORE_API AgentPhysicalBaseline const& bundledHumanBaseline();
 
 	// Constructs a frozen, validated baseline for one resolved definition in an
 	// isolated scratch runtime, without a World and without retaining a live
 	// instance. Returns nullopt when construction fails. This is a validation
 	// boundary, not a per-frame query; rendering uses agentTypeResourcePreview.
-	std::optional<AgentPhysicalBaseline> agentTypeDefinitionBaseline(
+	PF_CORE_API std::optional<AgentPhysicalBaseline> agentTypeDefinitionBaseline(
 		AgentTypeDefinition const& definition);
 
 	// True when `typeId` is an acceptable stable type ID: a non-empty, bounded
 	// identifier using only letters, digits, underscore and hyphen.
-	bool agentTypeIdIsValid(std::string_view typeId);
+	PF_CORE_API bool agentTypeIdIsValid(std::string_view typeId);
 
 	// True when `name` is an acceptable type display name (non-empty, bounded,
 	// no control characters).
-	bool agentTypeDisplayNameIsValid(std::string_view name);
+	PF_CORE_API bool agentTypeDisplayNameIsValid(std::string_view name);
 
 	// Resolves a manifest-registered `.agent.lua` application Resource by its
 	// resource name (ADR 0010). When a resource-managed loader is installed it
@@ -60,10 +61,10 @@ namespace core
 	// Returns nullopt when the resource is unknown, unreadable, or invalid.
 	// Dynamic external Resource references are single names encoding the canonical
 	// source path. They need no mutable manifest/sidecar and can resolve after restart.
-	std::string externalAgentTypeResourceName(std::filesystem::path const& path);
-	std::filesystem::path externalAgentTypeResourcePath(std::string const& name);
+	PF_CORE_API std::string externalAgentTypeResourceName(std::filesystem::path const& path);
+	PF_CORE_API std::filesystem::path externalAgentTypeResourcePath(std::string const& name);
 
-	std::optional<AgentTypeDefinition> resolveAgentTypeResource(
+	PF_CORE_API std::optional<AgentTypeDefinition> resolveAgentTypeResource(
 		std::string const& resourceName);
 
 	// The rendering service installs its resource-managed loader so the editor
@@ -83,8 +84,8 @@ namespace core
 	};
 	using AgentTypePreviewLoader =
 		std::function<std::optional<AgentTypePreview>(std::string const&)>;
-	std::optional<AgentTypePreview> agentTypeResourcePreview(
+	PF_CORE_API std::optional<AgentTypePreview> agentTypeResourcePreview(
 		std::string const& resourceName, std::string& diagnostic);
-	void setAgentTypeResourceLoader(AgentTypeResourceLoader loader,
+	PF_CORE_API void setAgentTypeResourceLoader(AgentTypeResourceLoader loader,
 		AgentTypePreviewLoader previewLoader = {});
 }

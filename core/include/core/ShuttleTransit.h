@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include "core/Platform.h"
 #include "core/Transit.h"
 #include "core/VerticalEdgeCreator.h"
 #include "core/Shuttle.h"
@@ -9,7 +10,7 @@
 
 namespace core
 {
-	class ShuttleTransit : public Transit, public VerticalEdgeCreator
+	class PF_CORE_API ShuttleTransit : public Transit, public VerticalEdgeCreator
 	{
 		std::shared_ptr<Shuttle> mShuttle;
 

@@ -5,6 +5,7 @@
 #include <vector>
 #include <map>
 
+#include "core/Platform.h"
 #include "core/Vertex.h"
 #include "core/Edge.h"
 #include "core/VerticalEdgeCreator.h"
@@ -30,7 +31,7 @@ namespace core
 		Back
 	};
 
-	class Graph
+	class PF_CORE_API Graph
 	{
 		friend struct GraphSourceIndexTestAccess;
 		friend std::optional<PathRouteExplanation> pathing::explainRoute(Agent const&, Graph const&,

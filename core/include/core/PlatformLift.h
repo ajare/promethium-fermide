@@ -1,10 +1,11 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Lift.h"
 
 namespace core
 {
-	class PlatformLift : public Lift
+	class PF_CORE_API PlatformLift : public Lift
 	{
 	public:
 		PlatformLift(uint32_t cellX, uint32_t cellY, uint32_t cellsWide,

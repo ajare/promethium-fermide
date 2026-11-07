@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 
+#include "core/Platform.h"
 #include "core/CellDefinition.h"
 #include "core/Sector.h"
 
@@ -26,23 +27,23 @@ namespace core
 
 	// The persistence form of a BackgroundColour: one 0xRRGGBB integer, so a
 	// single ConstructionRecord field can carry a Background's whole appearance.
-	uint32_t packBackgroundColour(BackgroundColour const& colour);
+	PF_CORE_API uint32_t packBackgroundColour(BackgroundColour const& colour);
 
 	// Inverse of packBackgroundColour(). Bits above 0xFFFFFF are ignored: a
 	// packed colour carries no alpha, so there is nothing to recover from them.
-	BackgroundColour unpackBackgroundColour(uint32_t packed);
+	PF_CORE_API BackgroundColour unpackBackgroundColour(uint32_t packed);
 
 	// The 0..1 float triple a colour widget edits. A BackgroundColour has no alpha
 	// channel, so exactly three floats cross this boundary in either direction -
 	// there is no fourth slot an editor could fill in and nothing would ever read.
 	// The conversions live in core so the editor and the headless checks round-trip
 	// the same arithmetic rather than each inventing their own.
-	void backgroundColourToFloats(BackgroundColour const& colour, float out[3]);
+	PF_CORE_API void backgroundColourToFloats(BackgroundColour const& colour, float out[3]);
 
 	// Inverse of backgroundColourToFloats(). Out-of-range floats clamp and NaN
 	// collapses to 0, so a widget mid-drag can never produce a colour the record
 	// cannot carry.
-	BackgroundColour backgroundColourFromFloats(float const in[3]);
+	PF_CORE_API BackgroundColour backgroundColourFromFloats(float const in[3]);
 
 
 	// A Background is a non-occupiable Sector that exists only to be seen: the
@@ -53,7 +54,7 @@ namespace core
 	// World::addBackground() is the creation path: a Background is placed on
 	// any one Layer over a block of free cells, and is persisted as a
 	// ConstructionType::Background record carrying its packed colour.
-	class Background : public Sector
+	class PF_CORE_API Background : public Sector
 	{
 		BackgroundColour mColour;
 

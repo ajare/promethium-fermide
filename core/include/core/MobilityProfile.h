@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/AgentTag.h"
 
 namespace core
@@ -9,23 +10,23 @@ namespace core
 	class Serializer;
 	struct RouteDecisionContext;
 
-	[[nodiscard]] bool routeRejectsEdge(RouteDecisionContext const& context,
+	PF_CORE_API [[nodiscard]] bool routeRejectsEdge(RouteDecisionContext const& context,
 		Edge const& edge, TraversalKind kind);
-	[[nodiscard]] bool routeRejectsButtons(RouteDecisionContext const& context);
+	PF_CORE_API [[nodiscard]] bool routeRejectsButtons(RouteDecisionContext const& context);
 
-	void serializeMobilityProfile(Serializer& serializer, MobilityProfile const& profile);
-	[[nodiscard]] MobilityProfile deserializeMobilityProfile(Serializer& serializer);
+	PF_CORE_API void serializeMobilityProfile(Serializer& serializer, MobilityProfile const& profile);
+	PF_CORE_API [[nodiscard]] MobilityProfile deserializeMobilityProfile(Serializer& serializer);
 
-	[[nodiscard]] MobilityUse agentTraversalUse(Agent const* agent, TraversalKind kind);
-	[[nodiscard]] MobilityUse agentEdgeUse(Agent const* agent, Edge const& edge,
+	PF_CORE_API [[nodiscard]] MobilityUse agentTraversalUse(Agent const* agent, TraversalKind kind);
+	PF_CORE_API [[nodiscard]] MobilityUse agentEdgeUse(Agent const* agent, Edge const& edge,
 		TraversalKind kind);
-	[[nodiscard]] bool agentForbidsTraversal(Agent const* agent, TraversalKind kind);
-	[[nodiscard]] bool agentForbidsButtons(Agent const* agent);
-	[[nodiscard]] bool agentForbidsEdge(Agent const* agent, Edge const& edge,
+	PF_CORE_API [[nodiscard]] bool agentForbidsTraversal(Agent const* agent, TraversalKind kind);
+	PF_CORE_API [[nodiscard]] bool agentForbidsButtons(Agent const* agent);
+	PF_CORE_API [[nodiscard]] bool agentForbidsEdge(Agent const* agent, Edge const& edge,
 		TraversalKind kind);
-	[[nodiscard]] bool agentRejectsTraversal(Agent const* agent, TraversalKind kind,
+	PF_CORE_API [[nodiscard]] bool agentRejectsTraversal(Agent const* agent, TraversalKind kind,
 		bool allowFallback);
-	[[nodiscard]] bool agentRejectsButtons(Agent const* agent, bool allowFallback);
-	[[nodiscard]] bool agentRejectsEdge(Agent const* agent, Edge const& edge,
+	PF_CORE_API [[nodiscard]] bool agentRejectsButtons(Agent const* agent, bool allowFallback);
+	PF_CORE_API [[nodiscard]] bool agentRejectsEdge(Agent const* agent, Edge const& edge,
 		TraversalKind kind, bool allowFallback);
 }

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/ForceBridge.h"
 #include "core/SectorObject.h"
 
@@ -10,7 +11,7 @@
 namespace core
 {
 
-	class ForceBridgeSectorObject : public SectorObject
+	class PF_CORE_API ForceBridgeSectorObject : public SectorObject
 	{
 	public:
 

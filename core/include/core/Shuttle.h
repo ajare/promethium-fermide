@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/RailedTransport.h"
 #include "core/EntityId.h"
 
@@ -10,7 +11,7 @@
 namespace core
 {
 
-	class Shuttle : public RailedTransport
+	class PF_CORE_API Shuttle : public RailedTransport
 	{
 		friend class World;
 		friend class WorldBuilder; // ADR 0022 VerticalTransit authoring

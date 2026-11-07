@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "core/Platform.h"
 #include "core/BulkheadDoor.h"
 #include "core/SectorObject.h"
 
@@ -10,7 +11,7 @@
 namespace core
 {
 
-	class BulkheadDoorSectorObject : public SectorObject
+	class PF_CORE_API BulkheadDoorSectorObject : public SectorObject
 	{
 	public:
 

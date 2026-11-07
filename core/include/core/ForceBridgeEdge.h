@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Platform.h"
 #include "core/Edge.h"
 #include "core/ForceBridge.h"
 
@@ -8,7 +9,7 @@ namespace core
 {
 	class Agent;
 
-	class ForceBridgeEdge : public Edge
+	class PF_CORE_API ForceBridgeEdge : public Edge
 	{
 		friend struct RouteTraversalInputs;
 		std::shared_ptr<ForceBridge> mForceBridge;
