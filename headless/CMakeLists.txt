@@ -14,6 +14,7 @@ endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Module.cmake")
 
 pf_require_module(promethium-fermide-core)
+pf_require_module(pf-game-runtime)
 pf_require_module(pf-imgui-cpu)
 pf_require_module(pf-render)
 pf_require_module(pf-agent-editing)

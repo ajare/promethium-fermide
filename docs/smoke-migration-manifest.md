@@ -299,6 +299,12 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/persistence/TransportStopNames.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/simulation/UsablePointResolution.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/world/PhysicalControlLookup.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/game-runtime/Ownership.cpp` | module-owned | `pf-smoke-game-runtime` |
+| `smoke/game-runtime/Ticking.cpp` | module-owned | `pf-smoke-game-runtime` |
+| `smoke/game-runtime/Lifecycle.cpp` | module-owned | `pf-smoke-game-runtime` |
+| `smoke/game-runtime/Observation.cpp` | module-owned | `pf-smoke-game-runtime` |
+| `smoke/game-runtime/RenderView.cpp` | module-owned | `pf-smoke-game-runtime` |
+| `smoke/game-runtime/SharedLibrary.cpp` | module-owned | `pf-smoke-game-runtime` |
 <!-- current-ownership-end -->
 Simulation Observation was migrated in #280. Its stable registered check
 is `simulation/observation`; its old path was

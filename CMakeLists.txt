@@ -8,6 +8,7 @@
 # Dependency direction is acyclic:
 #
 #   core  <-  pf-imgui-cpu  <-  pf-render  <-  pf-agent-editing
+#   core  <-  pf-game-runtime      (WorldRuntime: owns and drives a World)
 #   core  <-  pf-metrics
 #   core, Willpower  <-  pf-agent-resources
 #   AppLib (no core)  <-  PromethiumFermide
@@ -26,6 +27,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Module.cmake")
 # choice rather than a correctness requirement: a module pulled in by another
 # is configured exactly once either way.
 add_subdirectory(core)
+add_subdirectory(pf-game-runtime)
 add_subdirectory(pf-imgui-cpu)
 add_subdirectory(pf-render)
 add_subdirectory(pf-agent-resources)

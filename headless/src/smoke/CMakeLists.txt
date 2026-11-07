@@ -107,6 +107,28 @@ pf_add_smoke_contract(NAME smoke-simulation-contract COMMAND ${CMAKE_COMMAND}
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/SimulationContract.cmake")
 set_tests_properties(smoke-simulation-contract PROPERTIES LABELS "harness;core" TIMEOUT 240)
 
+# The game-facing boundary (#964). Everything here is reached through the
+# shared pf-game-runtime library rather than by constructing a World inline,
+# which is what proves the linkage as well as the semantics. The render-view
+# check calls a production pf-render entry point that only accepts a
+# `core::World const&`, so the const view handed out by WorldRuntime is shown
+# to be the renderer's actual input; pf-headless-render-support supplies the
+# CPU-only globals that path expects.
+pf_add_smoke_module(pf-smoke-game-runtime
+    NAME game-runtime
+    SOURCES
+        game-runtime/Main.cpp
+        game-runtime/Ownership.cpp
+        game-runtime/Ticking.cpp
+        game-runtime/Lifecycle.cpp
+        game-runtime/Observation.cpp
+        game-runtime/RenderView.cpp
+        game-runtime/SharedLibrary.cpp
+    LIBRARIES pf-game-runtime pf-headless-render-support
+    LABELS "core;game-runtime"
+    TIMEOUT 30
+)
+
 pf_add_smoke_module(pf-smoke-metrics
     NAME metrics
     SOURCES metrics/Main.cpp metrics/Metrics.cpp

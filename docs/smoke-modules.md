@@ -13,8 +13,11 @@ remaining central inline scenarios (#298), the complete Simulation lifecycle
 and robustness coverage (#299), Metrics verification (#300), and graphics
 Startup subprocess verification (#301).
 The last Marker identity and two-sided Door Button suites belong to World (#305);
-see the [ownership manifest](smoke-migration-manifest.md). The legacy executable
-is now a [dispatch-only compatibility orchestrator](headless-compatibility.md).
+see the [ownership manifest](smoke-migration-manifest.md). The game-facing
+`WorldRuntime` boundary added its own module (#964), the first to drive a World
+only through the shared `pf-game-runtime` library rather than constructing one
+inline. The legacy executable is now a
+[dispatch-only compatibility orchestrator](headless-compatibility.md).
 Use direct modules or CTest for coverage without deprecation warnings. The
 complete active Linux matrix is documented in
 [Linux modular smoke validation](linux-smoke-validation.md). For MSVC direct-target
@@ -129,6 +132,41 @@ buildable and runnable executables. Their CTest entries are labelled
 use the same C++20, ordinary warning, and `PF_HIGH_ANALYSIS` policy as smoke
 modules. They remain direct checks—not domain-module registrations—and run without
 windows, dialogs, or interactive input.
+
+## Game runtime module (#964)
+
+```sh
+cmake --build build-linux --target pf-smoke-game-runtime --parallel
+build-linux/bin/x64/Release/pf-smoke-game-runtime --list
+build-linux/bin/x64/Release/pf-smoke-game-runtime --check runtimeTakesExclusiveOwnershipOfItsWorld
+ctest --test-dir build-linux -R '^smoke-game-runtime$' --output-on-failure
+```
+
+`pf-smoke-game-runtime` is the first module that does not construct a World
+inline. It builds a World, hands it to `game::WorldRuntime` in
+[`pf-game-runtime`](../pf-game-runtime) and drives it only through that
+shared library, so the boundary is exercised rather than assumed. Its 23
+registrations cover exclusive ownership (the caller's `unique_ptr` is emptied,
+the World is destroyed exactly when the runtime is, a null World is refused,
+and a move carries the same World), the drive surface (`update` whole-tick
+accumulation, elapsed seconds, non-positive/non-finite input, time scale,
+`advanceTick`, `advanceTicks`, repeated-run determinism), pause/resume/reset
+including their boundary events, snapshot copy versus cached view, exact-once
+event consumption and observer registration, and the `World const&` render
+view read through the production `agentPathForRendering` entry point.
+
+The ownership and const-correctness shape of the boundary is additionally a
+compile-time contract: `static_assert`s in `Ownership.cpp` and `RenderView.cpp`
+reject a copyable runtime, a mutable `world()` overload, and any attempt to
+drive or reset a `core::World const&`. The Linux `dladdr` check reports which
+image `WorldRuntime` code actually resolved into; on other platforms that one
+registration is not made.
+
+The module links `pf-game-runtime` and `pf-headless-render-support` only, and
+is registered as `smoke-game-runtime` with labels
+`smoke;functional;validation-fast;core;game-runtime` and a 30-second
+timeout. Everything is headless: CPU-only ImGui, no window, no dialog, no
+interactive input.
 
 ## Startup module (#301)
 

@@ -27,6 +27,7 @@ pf_register_module_dir(Launcher launcher)
 # #include "core/World.h" and #include "Render.h" both still resolve.
 set(PF_INCLUDE_DIR
     "${PF_REPO_ROOT}/core/include"
+    "${PF_REPO_ROOT}/pf-game-runtime/include"
     "${PF_REPO_ROOT}/pf-render/include"
     "${PF_REPO_ROOT}/pf-agent-editing/include"
     "${PF_REPO_ROOT}/pf-agent-resources/include"
