@@ -1,11 +1,39 @@
 #include "game/WorldAuthoring.h"
 
+#include <exception>
 #include <utility>
+
+#include "core/Log.h"
+#include "core/SerializationWorkData.h"
+#include "core/YamlSerializer.h"
+
+namespace
+{
+	// The work data every restore of this document needs, read off the World it
+	// is being restored into. The Furniture catalogue and the accepted Action
+	// package are not part of the snapshot - history holds the document, not
+	// the packages it depends on - so a restore resolves them from the live
+	// World, the same way the editor's undo does (#968).
+	core::SerializationWorkData makeRestoreWorkData(core::World const& world)
+	{
+		core::SerializationWorkData workData;
+		workData.markSerializedUnmodified = false;
+		workData.furnitureCatalogue = world.furnitureCatalogue();
+		workData.actionRegistry = world.actionRegistry();
+		return workData;
+}
+
+	std::string restoreFailure(std::exception const& error)
+	{
+		return "Could not restore the authored document: " + std::string(error.what());
+	}
+}
 
 namespace game
 {
 	WorldAuthoring::WorldAuthoring(WorldRuntime& runtime) noexcept
 		: runtime_(&runtime)
+		, history_(std::make_unique<DocumentHistory>())
 	{
 	}
 
@@ -13,6 +41,7 @@ namespace game
 
 	WorldAuthoring::WorldAuthoring(WorldAuthoring&& other) noexcept
 		: runtime_(other.runtime_)
+		, history_(std::move(other.history_))
 	{
 		other.runtime_ = nullptr;
 	}
@@ -22,6 +51,7 @@ namespace game
 		if (this != &other)
 		{
 			runtime_ = other.runtime_;
+			history_ = std::move(other.history_);
 			other.runtime_ = nullptr;
 		}
 		return *this;
@@ -44,4 +74,819 @@ namespace game
 	{
 		return *runtime_;
 	}
+
+	core::World const& WorldAuthoring::document() const noexcept
+	{
+		// The read view, taken from the runtime's own public const accessor
+		// rather than from the privileged one. Preflight and capture are reads,
+		// so they do not spend the mutable-view privilege (#968).
+		return runtime_->world();
+	}
+
+// --- Levels and Layers ---
+uint32_t WorldAuthoring::addLayer()
+{
+	return world().addLayer();
+}
+void WorldAuthoring::addLevel()
+{
+	world().addLevel();
+}
+core::World::LevelDeletePlan WorldAuthoring::planDeleteLevel(uint32_t level) const
+{
+	return document().planDeleteLevel(level);
+}
+bool WorldAuthoring::applyDeleteLevel(core::World::LevelDeletePlan const& plan)
+{
+	return world().applyDeleteLevel(plan);
+}
+core::World::LayerDeletePlan WorldAuthoring::planDeleteLayer(uint32_t layerIndex) const
+{
+	return document().planDeleteLayer(layerIndex);
+}
+bool WorldAuthoring::applyDeleteLayer(core::World::LayerDeletePlan const& plan)
+{
+	return world().applyDeleteLayer(plan);
+}
+
+// --- Locations ---
+uint32_t WorldAuthoring::addCorridor(uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh)
+{
+	// The World carries a (y, x, cellsWide, levelsHigh) form beside the
+	// (layerIndex, y, x, cellsWide, levelsHigh) one, and with every parameter a
+	// uint32_t a four-argument call names both. The cast picks the form this
+	// overload mirrors rather than leaving the choice to overload resolution.
+	auto const form = static_cast<std::uint32_t (core::World::*)(
+		std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t)>(&core::World::addCorridor);
+	return (world().*form)(y, x, cellsWide, levelsHigh);
+}
+uint32_t WorldAuthoring::addCorridor(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh)
+{
+	return world().addCorridor(layerIndex, y, x, cellsWide, levelsHigh);
+}
+uint32_t WorldAuthoring::addRoom(std::string const& name, uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight)
+{
+	return world().addRoom(name, layerIndex, y, x, cellsWide, levelsHigh, topLevelHeight);
+}
+bool WorldAuthoring::canAddBackground(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, std::string* diagnostic) const
+{
+	return document().canAddBackground(layerIndex, y, x, cellsWide, levelsHigh, diagnostic);
+}
+uint32_t WorldAuthoring::addBackground(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, core::BackgroundColour const& colour)
+{
+	return world().addBackground(layerIndex, y, x, cellsWide, levelsHigh, colour);
+}
+bool WorldAuthoring::canAddFacade(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, std::string* diagnostic) const
+{
+	return document().canAddFacade(layerIndex, y, x, cellsWide, levelsHigh, topLevelHeight, diagnostic);
+}
+uint32_t WorldAuthoring::addFacade(std::string const& name, uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, core::BackgroundColour const& colour)
+{
+	return world().addFacade(name, layerIndex, y, x, cellsWide, levelsHigh, topLevelHeight, colour);
+}
+uint32_t WorldAuthoring::addFacade(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, core::BackgroundColour const& colour)
+{
+	return world().addFacade(layerIndex, y, x, cellsWide, levelsHigh, topLevelHeight, colour);
+}
+core::World::LocationEditPlan WorldAuthoring::planResizeLocation(uint32_t sectorIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh) const
+{
+	return document().planResizeLocation(sectorIndex, x, y, cellsWide, levelsHigh);
+}
+core::World::LocationEditPlan WorldAuthoring::planRemoveLocation(uint32_t sectorIndex) const
+{
+	return document().planRemoveLocation(sectorIndex);
+}
+core::World::LocationEditPlan WorldAuthoring::planResizeFacade(uint32_t sectorIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh) const
+{
+	return document().planResizeFacade(sectorIndex, x, y, cellsWide, levelsHigh);
+}
+core::World::LocationEditPlan WorldAuthoring::planRemoveFacade(uint32_t sectorIndex) const
+{
+	return document().planRemoveFacade(sectorIndex);
+}
+uint32_t WorldAuthoring::applyLocationEdit(core::World::LocationEditPlan const& plan)
+{
+	return world().applyLocationEdit(plan);
+}
+core::World::LocationEditPlan WorldAuthoring::planResizeBackground(uint32_t sectorIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh) const
+{
+	return document().planResizeBackground(sectorIndex, x, y, cellsWide, levelsHigh);
+}
+core::World::LocationEditPlan WorldAuthoring::planRemoveBackground(uint32_t sectorIndex) const
+{
+	return document().planRemoveBackground(sectorIndex);
+}
+uint32_t WorldAuthoring::applyBackgroundEdit(core::World::LocationEditPlan const& plan)
+{
+	return world().applyBackgroundEdit(plan);
+}
+
+// --- Location walls ---
+bool WorldAuthoring::canAddLocationWall(uint32_t sectorIndex, uint32_t levelIndex, int side, std::string* diagnostic) const
+{
+	return document().canAddLocationWall(sectorIndex, levelIndex, side, diagnostic);
+}
+void WorldAuthoring::addLocationWall(uint32_t sectorIndex, uint32_t levelIndex, int side)
+{
+	world().addLocationWall(sectorIndex, levelIndex, side);
+}
+bool WorldAuthoring::canRemoveLocationWall(uint32_t sectorIndex, uint32_t levelIndex, int side, std::string* diagnostic) const
+{
+	return document().canRemoveLocationWall(sectorIndex, levelIndex, side, diagnostic);
+}
+void WorldAuthoring::removeLocationWall(uint32_t sectorIndex, uint32_t levelIndex, int side)
+{
+	world().removeLocationWall(sectorIndex, levelIndex, side);
+}
+
+// --- Ladders ---
+bool WorldAuthoring::canAddLadder(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t levelsHigh, std::string* diagnostic) const
+{
+	return document().canAddLadder(layerIndex, y, x, levelsHigh, diagnostic);
+}
+core::World::CreateLadderResult WorldAuthoring::addLadder(uint32_t layerIndex, uint32_t y, uint32_t x, core::World::CreateLadderOptions const& options)
+{
+	return world().addLadder(layerIndex, y, x, options);
+}
+core::World::CreateLadderResult WorldAuthoring::addSectorLadder(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, core::World::CreateLadderOptions const& options)
+{
+	return world().addSectorLadder(sectorIndex, levelIndex, xOffset, options);
+}
+bool WorldAuthoring::canAddRoomLadder(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, uint32_t* levelsHigh, std::string* diagnostic) const
+{
+	return document().canAddRoomLadder(sectorIndex, levelIndex, xOffset, levelsHigh, diagnostic);
+}
+core::World::CreateLadderResult WorldAuthoring::addRoomLadder(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset)
+{
+	return world().addRoomLadder(sectorIndex, levelIndex, xOffset);
+}
+core::World::CreateLadderResult WorldAuthoring::addRoomLadder(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, core::World::CreateLadderOptions options)
+{
+	return world().addRoomLadder(sectorIndex, levelIndex, xOffset, options);
+}
+std::shared_ptr<const core::SectorObject> WorldAuthoring::applyRoomLadderOptions(uint32_t sectorIndex, uint32_t objectIndex, core::World::CreateLadderOptions const& options)
+{
+	return world().applyRoomLadderOptions(sectorIndex, objectIndex, options);
+}
+bool WorldAuthoring::removeRoomLadder(uint32_t sectorIndex, uint32_t objectIndex)
+{
+	return world().removeRoomLadder(sectorIndex, objectIndex);
+}
+core::World::LadderEditPlan WorldAuthoring::planResizeLadder(uint32_t sectorIndex, uint32_t x, uint32_t y, core::World::CreateLadderOptions const& options) const
+{
+	return document().planResizeLadder(sectorIndex, x, y, options);
+}
+core::World::LadderEditPlan WorldAuthoring::planRemoveLadder(uint32_t sectorIndex) const
+{
+	return document().planRemoveLadder(sectorIndex);
+}
+uint32_t WorldAuthoring::applyLadderEdit(core::World::LadderEditPlan const& plan)
+{
+	return world().applyLadderEdit(plan);
+}
+
+// --- Stairwells and staircases ---
+bool WorldAuthoring::canAddStairwell(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t levelsHigh, std::string* diagnostic) const
+{
+	return document().canAddStairwell(layerIndex, y, x, levelsHigh, diagnostic);
+}
+uint32_t WorldAuthoring::addStairwell(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t levelsHigh, int mountSide)
+{
+	return world().addStairwell(layerIndex, y, x, levelsHigh, mountSide);
+}
+core::World::CreateStairwellResult WorldAuthoring::addStairwell(uint32_t layerIndex, uint32_t y, uint32_t x, core::World::CreateStairwellOptions const& options)
+{
+	return world().addStairwell(layerIndex, y, x, options);
+}
+bool WorldAuthoring::canAddStaircase(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, int riseSide, std::string* diagnostic) const
+{
+	return document().canAddStaircase(layerIndex, y, x, cellsWide, riseSide, diagnostic);
+}
+uint32_t WorldAuthoring::addStaircase(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, int riseSide, float speed)
+{
+	return world().addStaircase(layerIndex, y, x, cellsWide, riseSide, speed);
+}
+uint32_t WorldAuthoring::addStaircase(uint32_t layerIndex, uint32_t y, uint32_t x, core::World::CreateStaircaseOptions const& options)
+{
+	return world().addStaircase(layerIndex, y, x, options);
+}
+core::World::StairwellEditPlan WorldAuthoring::planResizeStairwell(uint32_t sectorIndex, uint32_t x, uint32_t y, core::World::CreateStairwellOptions const& options) const
+{
+	return document().planResizeStairwell(sectorIndex, x, y, options);
+}
+core::World::StairwellEditPlan WorldAuthoring::planRemoveStairwell(uint32_t sectorIndex) const
+{
+	return document().planRemoveStairwell(sectorIndex);
+}
+uint32_t WorldAuthoring::applyStairwellEdit(core::World::StairwellEditPlan const& plan)
+{
+	return world().applyStairwellEdit(plan);
+}
+core::World::StaircaseEditPlan WorldAuthoring::planResizeStaircase(uint32_t sectorIndex, uint32_t x, uint32_t y, core::World::CreateStaircaseOptions const& options) const
+{
+	return document().planResizeStaircase(sectorIndex, x, y, options);
+}
+core::World::StaircaseEditPlan WorldAuthoring::planRemoveStaircase(uint32_t sectorIndex) const
+{
+	return document().planRemoveStaircase(sectorIndex);
+}
+uint32_t WorldAuthoring::applyStaircaseEdit(core::World::StaircaseEditPlan const& plan)
+{
+	return world().applyStaircaseEdit(plan);
+}
+
+// --- Lifts ---
+core::World::CreateLiftResult WorldAuthoring::addLift(uint32_t layerIndex, uint32_t y, uint32_t x, core::World::CreateLiftOptions const& options)
+{
+	return world().addLift(layerIndex, y, x, options);
+}
+core::World::CreateLiftResult WorldAuthoring::addLift(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh)
+{
+	return world().addLift(layerIndex, y, x, cellsWide, levelsHigh);
+}
+bool WorldAuthoring::canAddPlatformLift(uint32_t sectorIndex, uint32_t xOffset, core::World::CreateLiftOptions const& options, std::string* diagnostic) const
+{
+	return document().canAddPlatformLift(sectorIndex, xOffset, options, diagnostic);
+}
+core::World::CreatePlatformLiftResult WorldAuthoring::addSectorPlatformLift(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, core::World::CreateLiftOptions const& options)
+{
+	return world().addSectorPlatformLift(sectorIndex, levelIndex, xOffset, options);
+}
+core::World::PlatformLiftEditPlan WorldAuthoring::planPlatformLiftEdit(uint32_t sectorIndex, uint32_t objectIndex, core::World::CreateLiftOptions const& options) const
+{
+	return document().planPlatformLiftEdit(sectorIndex, objectIndex, options);
+}
+core::World::PlatformLiftEditPlan WorldAuthoring::planRemovePlatformLift(uint32_t sectorIndex, uint32_t objectIndex) const
+{
+	return document().planRemovePlatformLift(sectorIndex, objectIndex);
+}
+std::shared_ptr<const core::SectorObject> WorldAuthoring::applyPlatformLiftEdit(core::World::PlatformLiftEditPlan const& plan)
+{
+	return world().applyPlatformLiftEdit(plan);
+}
+core::World::LiftEditPlan WorldAuthoring::planResizeLift(uint32_t sectorIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh) const
+{
+	return document().planResizeLift(sectorIndex, x, y, cellsWide, levelsHigh);
+}
+core::World::LiftEditPlan WorldAuthoring::planRemoveLift(uint32_t sectorIndex) const
+{
+	return document().planRemoveLift(sectorIndex);
+}
+core::World::LiftEditPlan WorldAuthoring::planRemoveLiftStop(uint32_t sectorIndex, uint32_t stopIndex) const
+{
+	return document().planRemoveLiftStop(sectorIndex, stopIndex);
+}
+uint32_t WorldAuthoring::applyLiftEdit(core::World::LiftEditPlan const& plan)
+{
+	return world().applyLiftEdit(plan);
+}
+
+// --- Shuttles ---
+core::World::CreateShuttleResult WorldAuthoring::addShuttle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, core::World::CreateShuttleOptions const& options)
+{
+	return world().addShuttle(layerIndex, y, x, cellsWide, options);
+}
+core::World::ShuttleEditPlan WorldAuthoring::planResizeShuttle(uint32_t sectorIndex, uint32_t x, uint32_t y, uint32_t cellsWide) const
+{
+	return document().planResizeShuttle(sectorIndex, x, y, cellsWide);
+}
+core::World::ShuttleEditPlan WorldAuthoring::planEditShuttleVehicle(uint32_t sectorIndex, uint32_t numCars, uint32_t carWidth, uint32_t doorMask) const
+{
+	return document().planEditShuttleVehicle(sectorIndex, numCars, carWidth, doorMask);
+}
+core::World::ShuttleEditPlan WorldAuthoring::planRemoveShuttle(uint32_t sectorIndex) const
+{
+	return document().planRemoveShuttle(sectorIndex);
+}
+core::World::ShuttleEditPlan WorldAuthoring::planRemoveShuttleStop(uint32_t sectorIndex, uint32_t stopIndex) const
+{
+	return document().planRemoveShuttleStop(sectorIndex, stopIndex);
+}
+core::World::ShuttleEditPlan WorldAuthoring::planAddShuttleStop(uint32_t sectorIndex, uint32_t stopOffset) const
+{
+	return document().planAddShuttleStop(sectorIndex, stopOffset);
+}
+uint32_t WorldAuthoring::applyShuttleEdit(core::World::ShuttleEditPlan const& plan)
+{
+	return world().applyShuttleEdit(plan);
+}
+
+// --- Airlocks ---
+bool WorldAuthoring::canAddAirlock(uint32_t layer, uint32_t y, uint32_t x, uint32_t width, float cycleSeconds, std::string* diagnostic) const
+{
+	return document().canAddAirlock(layer, y, x, width, cycleSeconds, diagnostic);
+}
+uint32_t WorldAuthoring::addAirlock(uint32_t layer, uint32_t y, uint32_t x, uint32_t width, float cycleSeconds)
+{
+	return world().addAirlock(layer, y, x, width, cycleSeconds);
+}
+core::World::AirlockEditPlan WorldAuthoring::planResizeAirlock(uint32_t sectorIndex, uint32_t x, uint32_t y, uint32_t width) const
+{
+	return document().planResizeAirlock(sectorIndex, x, y, width);
+}
+core::World::AirlockEditPlan WorldAuthoring::planRemoveAirlock(uint32_t sectorIndex) const
+{
+	return document().planRemoveAirlock(sectorIndex);
+}
+uint32_t WorldAuthoring::applyAirlockEdit(core::World::AirlockEditPlan const& plan)
+{
+	return world().applyAirlockEdit(plan);
+}
+
+// --- Chambers ---
+bool WorldAuthoring::canAddChamber(uint32_t layer, uint32_t y, uint32_t x, uint32_t width, std::string* diagnostic, core::ChamberSubtype subtype) const
+{
+	return document().canAddChamber(layer, y, x, width, diagnostic, subtype);
+}
+uint32_t WorldAuthoring::addChamber(uint32_t layer, uint32_t y, uint32_t x, uint32_t width, bool leftToRight, core::ChamberSubtype subtype)
+{
+	return world().addChamber(layer, y, x, width, leftToRight, subtype);
+}
+core::World::ChamberEditPlan WorldAuthoring::planResizeChamber(uint32_t sectorIndex, uint32_t x, uint32_t y, uint32_t width, bool leftToRight) const
+{
+	return document().planResizeChamber(sectorIndex, x, y, width, leftToRight);
+}
+core::World::ChamberEditPlan WorldAuthoring::planRemoveChamber(uint32_t sectorIndex) const
+{
+	return document().planRemoveChamber(sectorIndex);
+}
+core::World::ChamberEditPlan WorldAuthoring::planSetChamberSubtype(uint32_t sectorIndex, core::ChamberSubtype subtype) const
+{
+	return document().planSetChamberSubtype(sectorIndex, subtype);
+}
+uint32_t WorldAuthoring::applyChamberEdit(core::World::ChamberEditPlan const& plan)
+{
+	return world().applyChamberEdit(plan);
+}
+
+// --- Doors ---
+bool WorldAuthoring::canAddCorridorDoor(uint32_t layerIndex, uint32_t y, uint32_t x, std::string* diagnostic) const
+{
+	return document().canAddCorridorDoor(layerIndex, y, x, diagnostic);
+}
+bool WorldAuthoring::canAddCorridorDoor(uint32_t layerIndex, uint32_t y, uint32_t x, core::World::CreateDoorOptions const& options, std::string* diagnostic) const
+{
+	return document().canAddCorridorDoor(layerIndex, y, x, options, diagnostic);
+}
+core::World::CreateDoorResult WorldAuthoring::addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x)
+{
+	return world().addSectorDoor(layerIndex, y, x);
+}
+core::World::CreateDoorResult WorldAuthoring::addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x, core::World::CreateDoorOptions const& options)
+{
+	return world().addSectorDoor(layerIndex, y, x, options);
+}
+bool WorldAuthoring::canAddSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex) const
+{
+	return document().canAddSectorDoorButton(sectorIndex, objectIndex);
+}
+void WorldAuthoring::addSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex)
+{
+	world().addSectorDoorButton(sectorIndex, objectIndex);
+}
+bool WorldAuthoring::canRemoveSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex) const
+{
+	return document().canRemoveSectorDoorButton(sectorIndex, objectIndex);
+}
+std::shared_ptr<const core::DoorSectorObject> WorldAuthoring::removeSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex, std::optional<std::vector<core::AccessPermissionId>> resultingRequirement)
+{
+	return world().removeSectorDoorButton(sectorIndex, objectIndex, resultingRequirement);
+}
+bool WorldAuthoring::removeSectorDoor(uint32_t sectorIndex, uint32_t objectIndex)
+{
+	return world().removeSectorDoor(sectorIndex, objectIndex);
+}
+
+// --- Windows ---
+bool WorldAuthoring::canAddSectorWindow(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, std::string* diagnostic) const
+{
+	return document().canAddSectorWindow(layerIndex, y, x, cellsWide, levelsHigh, diagnostic);
+}
+uint32_t WorldAuthoring::addSectorWindow(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh)
+{
+	return world().addSectorWindow(layerIndex, y, x, cellsWide, levelsHigh);
+}
+core::World::CreateWindowResult WorldAuthoring::addSectorWindow(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, core::World::CreateWindowOptions const& options)
+{
+	return world().addSectorWindow(layerIndex, y, x, cellsWide, levelsHigh, options);
+}
+bool WorldAuthoring::removeSectorWindow(uint32_t sectorIndex, uint32_t objectIndex)
+{
+	return world().removeSectorWindow(sectorIndex, objectIndex);
+}
+bool WorldAuthoring::canAddBoothWindow(uint32_t layer, uint32_t y, uint32_t x, uint32_t width, uint32_t height, std::string* diagnostic) const
+{
+	return document().canAddBoothWindow(layer, y, x, width, height, diagnostic);
+}
+core::World::CreateWindowResult WorldAuthoring::addBoothWindow(uint32_t layer, uint32_t y, uint32_t x, core::Window::State initialState)
+{
+	return world().addBoothWindow(layer, y, x, initialState);
+}
+
+// --- Bulkhead doors ---
+bool WorldAuthoring::canAddSectorBulkheadDoor(uint32_t layerIndex, uint32_t y, uint32_t x, int side, core::World::CreateBulkheadDoorOptions const& options, std::string* diagnostic) const
+{
+	return document().canAddSectorBulkheadDoor(layerIndex, y, x, side, options, diagnostic);
+}
+core::World::CreateBulkheadDoorResult WorldAuthoring::addSectorBulkheadDoor(uint32_t layerIndex, uint32_t y, uint32_t x, int side)
+{
+	return world().addSectorBulkheadDoor(layerIndex, y, x, side);
+}
+core::World::CreateBulkheadDoorResult WorldAuthoring::addSectorBulkheadDoor(uint32_t layerIndex, uint32_t y, uint32_t x, int side, core::World::CreateBulkheadDoorOptions const& options)
+{
+	return world().addSectorBulkheadDoor(layerIndex, y, x, side, options);
+}
+std::shared_ptr<const core::SectorObject> WorldAuthoring::applySectorBulkheadDoorOptions(uint32_t sectorIndex, uint32_t objectIndex, core::World::CreateBulkheadDoorOptions const& options)
+{
+	return world().applySectorBulkheadDoorOptions(sectorIndex, objectIndex, options);
+}
+bool WorldAuthoring::removeSectorBulkheadDoor(uint32_t sectorIndex, uint32_t objectIndex)
+{
+	return world().removeSectorBulkheadDoor(sectorIndex, objectIndex);
+}
+
+// --- Switches and force bridges ---
+core::World::CreateObjectResult WorldAuthoring::addSectorLightSwitch(uint32_t sectorIndex, uint32_t xOffset)
+{
+	return world().addSectorLightSwitch(sectorIndex, xOffset);
+}
+bool WorldAuthoring::canAddSectorForceBridge(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, core::World::CreateForceBridgeOptions const& options, std::string* diagnostic) const
+{
+	return document().canAddSectorForceBridge(sectorIndex, levelIndex, xOffset, options, diagnostic);
+}
+core::World::CreateForceBridgeResult WorldAuthoring::addSectorForceBridge(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset)
+{
+	return world().addSectorForceBridge(sectorIndex, levelIndex, xOffset);
+}
+core::World::CreateForceBridgeResult WorldAuthoring::addSectorForceBridge(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, core::World::CreateForceBridgeOptions const& options)
+{
+	return world().addSectorForceBridge(sectorIndex, levelIndex, xOffset, options);
+}
+std::shared_ptr<const core::SectorObject> WorldAuthoring::applySectorForceBridgeOptions(uint32_t sectorIndex, uint32_t objectIndex, core::World::CreateForceBridgeOptions const& options)
+{
+	return world().applySectorForceBridgeOptions(sectorIndex, objectIndex, options);
+}
+bool WorldAuthoring::removeSectorForceBridge(uint32_t sectorIndex, uint32_t objectIndex)
+{
+	return world().removeSectorForceBridge(sectorIndex, objectIndex);
+}
+
+// --- Walkways ---
+bool WorldAuthoring::canAddSectorWalkway(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, std::string* diagnostic) const
+{
+	return document().canAddSectorWalkway(sectorIndex, levelIndex, xOffset, diagnostic);
+}
+core::World::CreateObjectResult WorldAuthoring::addSectorWalkway(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset)
+{
+	return world().addSectorWalkway(sectorIndex, levelIndex, xOffset);
+}
+core::World::WalkwayEditPlan WorldAuthoring::planRemoveSectorWalkway(uint32_t sectorIndex, uint32_t objectIndex) const
+{
+	return document().planRemoveSectorWalkway(sectorIndex, objectIndex);
+}
+bool WorldAuthoring::applyWalkwayEdit(core::World::WalkwayEditPlan const& plan)
+{
+	return world().applyWalkwayEdit(plan);
+}
+bool WorldAuthoring::removeSectorWalkway(uint32_t sectorIndex, uint32_t objectIndex)
+{
+	return world().removeSectorWalkway(sectorIndex, objectIndex);
+}
+
+// --- Markers ---
+bool WorldAuthoring::canAddSectorMarker(uint32_t sectorIndex, uint32_t levelIndex, float xOffset, std::string* diagnostic) const
+{
+	return document().canAddSectorMarker(sectorIndex, levelIndex, xOffset, diagnostic);
+}
+core::World::CreateObjectResult WorldAuthoring::addSectorMarker(uint32_t sectorIndex, uint32_t levelIndex, float xOffset, uint32_t* vertexIdentifier)
+{
+	return world().addSectorMarker(sectorIndex, levelIndex, xOffset, vertexIdentifier);
+}
+core::World::CreateObjectResult WorldAuthoring::addSectorMarker(uint32_t sectorIndex, uint32_t levelIndex, float xOffset, std::string const& name, uint32_t* vertexIdentifier)
+{
+	return world().addSectorMarker(sectorIndex, levelIndex, xOffset, name, vertexIdentifier);
+}
+bool WorldAuthoring::canRenameMarker(core::MarkerId id, std::string const& name, std::string* diagnostic) const
+{
+	return document().canRenameMarker(id, name, diagnostic);
+}
+bool WorldAuthoring::renameMarker(core::MarkerId id, std::string const& name, std::string* diagnostic)
+{
+	return world().renameMarker(id, name, diagnostic);
+}
+bool WorldAuthoring::canRemoveSectorMarker(uint32_t sectorIndex, uint32_t objectIndex, std::string* diagnostic) const
+{
+	return document().canRemoveSectorMarker(sectorIndex, objectIndex, diagnostic);
+}
+bool WorldAuthoring::removeSectorMarker(uint32_t sectorIndex, uint32_t objectIndex, std::string* diagnostic)
+{
+	return world().removeSectorMarker(sectorIndex, objectIndex, diagnostic);
+}
+
+// --- Moving authored objects ---
+core::World::ObjectMovePlan WorldAuthoring::planMoveSectorObject(uint32_t sectorIndex, uint32_t objectIndex, uint32_t x, uint32_t y) const
+{
+	return document().planMoveSectorObject(sectorIndex, objectIndex, x, y);
+}
+core::World::ObjectMovePlan WorldAuthoring::planResizeSectorWindow(uint32_t sectorIndex, uint32_t objectIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh) const
+{
+	return document().planResizeSectorWindow(sectorIndex, objectIndex, x, y, cellsWide, levelsHigh);
+}
+core::World::ObjectMovePlan WorldAuthoring::planResizeSectorDoor(uint32_t sectorIndex, uint32_t objectIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh) const
+{
+	return document().planResizeSectorDoor(sectorIndex, objectIndex, x, y, cellsWide, levelsHigh);
+}
+std::shared_ptr<const core::SectorObject> WorldAuthoring::applyObjectMove(core::World::ObjectMovePlan const& plan)
+{
+	return world().applyObjectMove(plan);
+}
+
+// --- Dumbwaiters ---
+bool WorldAuthoring::canAddDumbwaiter(uint32_t shaftLayer, uint32_t y, uint32_t x, core::World::CreateDumbwaiterOptions const& options, std::string* diagnostic) const
+{
+	return document().canAddDumbwaiter(shaftLayer, y, x, options, diagnostic);
+}
+core::DumbwaiterId WorldAuthoring::addDumbwaiter(uint32_t shaftLayer, uint32_t y, uint32_t x, core::World::CreateDumbwaiterOptions const& options)
+{
+	return world().addDumbwaiter(shaftLayer, y, x, options);
+}
+core::World::DumbwaiterMovePlan WorldAuthoring::planMoveDumbwaiter(core::DumbwaiterId id, uint32_t shaftLayer, uint32_t y, uint32_t x) const
+{
+	return document().planMoveDumbwaiter(id, shaftLayer, y, x);
+}
+bool WorldAuthoring::applyDumbwaiterMove(core::World::DumbwaiterMovePlan const& plan)
+{
+	return world().applyDumbwaiterMove(plan);
+}
+bool WorldAuthoring::removeDumbwaiter(core::DumbwaiterId id)
+{
+	return world().removeDumbwaiter(id);
+}
+
+// --- Agents ---
+bool WorldAuthoring::canPlaceAgentInLocation(uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets, std::string* diagnostic) const
+{
+	return document().canPlaceAgentInLocation(sectorId, grants, sets, diagnostic);
+}
+core::AgentId WorldAuthoring::createAgent(std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset)
+{
+	return world().createAgent(name, sectorId, levelOffset, xOffset);
+}
+core::AgentId WorldAuthoring::createAgent(std::string const& name, uint32_t sectorId)
+{
+	return world().createAgent(name, sectorId);
+}
+core::AgentId WorldAuthoring::createAgent(std::string typeId, std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset)
+{
+	return world().createAgent(typeId, name, sectorId, levelOffset, xOffset);
+}
+core::AgentId WorldAuthoring::createAgent(std::string typeId, std::string const& name, uint32_t sectorId)
+{
+	return world().createAgent(typeId, name, sectorId);
+}
+core::AgentId WorldAuthoring::createAgent(std::string typeId, std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets, std::optional<core::ObjectUsage> objectUsage, std::optional<float> objectUsageDistance, std::set<core::AgentTagId> const& tags)
+{
+	return world().createAgent(typeId, name, sectorId, levelOffset, xOffset, grants, sets, objectUsage, objectUsageDistance, tags);
+}
+core::AgentId WorldAuthoring::createAgent(std::string typeId, std::string const& name, uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets)
+{
+	return world().createAgent(typeId, name, sectorId, grants, sets);
+}
+core::AgentId WorldAuthoring::createAgent(std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets)
+{
+	return world().createAgent(name, sectorId, levelOffset, xOffset, grants, sets);
+}
+core::AgentId WorldAuthoring::createAgent(std::string const& name, uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets)
+{
+	return world().createAgent(name, sectorId, grants, sets);
+}
+core::EntityRemovalResult WorldAuthoring::removeAgent(core::AgentId id)
+{
+	return world().removeAgent(id);
+}
+
+// --- Agent groups ---
+bool WorldAuthoring::canAddAgentGroup(std::string const& name, std::string* diagnostic) const
+{
+	return document().canAddAgentGroup(name, diagnostic);
+}
+core::AgentGroupId WorldAuthoring::addAgentGroup(std::string const& name)
+{
+	return world().addAgentGroup(name);
+}
+bool WorldAuthoring::canRenameAgentGroup(core::AgentGroupId id, std::string const& name, std::string* diagnostic) const
+{
+	return document().canRenameAgentGroup(id, name, diagnostic);
+}
+bool WorldAuthoring::renameAgentGroup(core::AgentGroupId id, std::string const& name, std::string* diagnostic)
+{
+	return world().renameAgentGroup(id, name, diagnostic);
+}
+bool WorldAuthoring::canDeleteAgentGroup(core::AgentGroupId id, std::string* diagnostic) const
+{
+	return document().canDeleteAgentGroup(id, diagnostic);
+}
+bool WorldAuthoring::deleteAgentGroup(core::AgentGroupId id, std::string* diagnostic)
+{
+	return world().deleteAgentGroup(id, diagnostic);
+}
+
+// --- Agent tags ---
+bool WorldAuthoring::canRemoveAgentTag(core::AgentId agent, core::AgentTagId tag, std::string* diagnostic) const
+{
+	return document().canRemoveAgentTag(agent, tag, diagnostic);
+}
+bool WorldAuthoring::removeAgentTag(core::AgentId agent, core::AgentTagId tag, std::string* diagnostic)
+{
+	return world().removeAgentTag(agent, tag, diagnostic);
+}
+
+// --- Access control ---
+bool WorldAuthoring::canAddAccessPermission(std::string const& name, std::string* diagnostic) const
+{
+	return document().canAddAccessPermission(name, diagnostic);
+}
+core::AccessPermissionId WorldAuthoring::addAccessPermission(std::string const& name)
+{
+	return world().addAccessPermission(name);
+}
+bool WorldAuthoring::renameAccessPermission(core::AccessPermissionId id, std::string const& name, std::string* diagnostic)
+{
+	return world().renameAccessPermission(id, name, diagnostic);
+}
+core::PermissionSetId WorldAuthoring::addPermissionSet(std::string const& name)
+{
+	return world().addPermissionSet(name);
+}
+bool WorldAuthoring::renamePermissionSet(core::PermissionSetId id, std::string const& name, std::string* diagnostic)
+{
+	return world().renamePermissionSet(id, name, diagnostic);
+}
+
+// --- Interaction points and traversal resources ---
+core::EntityRemovalResult WorldAuthoring::removeInteractionPoint(core::InteractionPointId id)
+{
+	return world().removeInteractionPoint(id);
+}
+core::EntityRemovalResult WorldAuthoring::removeInteractionRequest(core::InteractionRequestId id)
+{
+	return world().removeInteractionRequest(id);
+}
+core::EntityRemovalResult WorldAuthoring::removeDeviceOperation(core::DeviceOperationId id)
+{
+	return world().removeDeviceOperation(id);
+}
+bool WorldAuthoring::addTraversalControl(core::TraversalResourceId resource, core::InteractionPointId control)
+{
+	return world().addTraversalControl(resource, control);
+}
+core::EntityRemovalResult WorldAuthoring::removeTraversalResource(core::TraversalResourceId id)
+{
+	return world().removeTraversalResource(id);
+}
+
+// --- Furniture ---
+bool WorldAuthoring::canPlaceFurniture(uint32_t sector, std::string const& definition, float x, float y, std::string const& name, std::string* diagnostic, int localDepth) const
+{
+	return document().canPlaceFurniture(sector, definition, x, y, name, diagnostic, localDepth);
+}
+uint64_t WorldAuthoring::placeFurniture(uint32_t sector, std::string const& definition, float x, float y, std::string const& name, int localDepth)
+{
+	return world().placeFurniture(sector, definition, x, y, name, localDepth);
+}
+bool WorldAuthoring::canEditFurniture(uint64_t id, float x, float y, std::string const& name, std::string* diagnostic, std::optional<int> localDepth) const
+{
+	return document().canEditFurniture(id, x, y, name, diagnostic, localDepth);
+}
+bool WorldAuthoring::editFurniture(uint64_t id, float x, float y, std::string const& name, std::string* diagnostic, std::optional<int> localDepth)
+{
+	return world().editFurniture(id, x, y, name, diagnostic, localDepth);
+}
+bool WorldAuthoring::canRemoveFurniture(uint64_t id, std::string* diagnostic) const
+{
+	return document().canRemoveFurniture(id, diagnostic);
+}
+bool WorldAuthoring::removeFurniture(uint64_t id, std::string* diagnostic)
+{
+	return world().removeFurniture(id, diagnostic);
+}
+
+// --- History: undo and redo ---
+
+std::optional<DocumentSnapshot> WorldAuthoring::captureSnapshot() const
+{
+	try
+	{
+		auto serializer = core::YamlSerializer::toString();
+		core::SerializationWorkData workData;
+		// Capturing is not saving. The document keeps its modified flag so an
+		// undo back to the saved state still reads as modified, which is what
+		// the editor's own snapshot path does.
+		workData.markSerializedUnmodified = false;
+		document().serialize(*serializer, workData);
+		serializer->serialize();
+		return history_->capture(serializer->getSerializedString());
+	}
+	catch (std::exception const& error)
+	{
+		core::addLogMessage("Authoring", 0, core::LogLevel::Error,
+			"Could not capture the authored document: " + std::string(error.what()));
+		return std::nullopt;
+	}
+}
+
+void WorldAuthoring::commitEdit(std::optional<DocumentSnapshot> snapshot)
+{
+	history_->commit(std::move(snapshot));
+}
+
+bool WorldAuthoring::undo()
+{
+	return history_->undo(captureSnapshot(),
+		[this](DocumentSnapshot const& target) { return restoreInPlace(target); });
+}
+
+bool WorldAuthoring::redo()
+{
+	return history_->redo(captureSnapshot(),
+		[this](DocumentSnapshot const& target) { return restoreInPlace(target); });
+}
+
+bool WorldAuthoring::canUndo() const noexcept
+{
+	return history_->canUndo();
+}
+
+bool WorldAuthoring::canRedo() const noexcept
+{
+	return history_->canRedo();
+}
+
+std::size_t WorldAuthoring::undoDepth() const noexcept
+{
+	return history_->undoCount();
+}
+
+std::size_t WorldAuthoring::redoDepth() const noexcept
+{
+	return history_->redoCount();
+}
+
+bool WorldAuthoring::isModified() const noexcept
+{
+	return history_->isModified();
+}
+
+void WorldAuthoring::markSaved() noexcept
+{
+	history_->markSaved();
+}
+
+void WorldAuthoring::clearHistory() noexcept
+{
+	history_->clear();
+}
+
+bool WorldAuthoring::restoreInPlace(DocumentSnapshot const& snapshot)
+{
+	// The probe runs the whole restore against a throwaway World first. A
+	// snapshot that cannot be read - a package the live process can no longer
+	// resolve, a document that contradicts itself - is rejected there, before
+	// the document under the running runtime is touched at all. It is not a
+	// proof that the live apply succeeds, because the live World starts from a
+	// different state than the probe does; it is what makes the common
+	// failure cheap and early (#968).
+	try
+	{
+		auto probe = core::World("Restore probe", 1, 1);
+		auto probeSerializer = core::YamlSerializer::fromString(snapshot.yaml);
+		probeSerializer->deserialize();
+		auto workData = makeRestoreWorkData(document());
+		if (!probe.deserialize(*probeSerializer, workData)) return false;
+	}
+	catch (std::exception const& error)
+	{
+		core::addLogMessage("Authoring", 0, core::LogLevel::Error, restoreFailure(error));
+		return false;
+	}
+
+	try
+	{
+		auto& target = world();
+		// The run state is the runtime's business, not the document's. A
+		// restore resets it, so it is put back the way it was found.
+		auto const wasPaused = target.isSimulationPaused();
+		auto serializer = core::YamlSerializer::fromString(snapshot.yaml);
+		serializer->deserialize();
+		auto workData = makeRestoreWorkData(target);
+		if (!target.deserialize(*serializer, workData)) return false;
+		if (wasPaused) target.pauseSimulation();
+		return true;
+	}
+	catch (std::exception const& error)
+	{
+		core::addLogMessage("Authoring", 0, core::LogLevel::Error, restoreFailure(error));
+		return false;
+	}
+}
 }

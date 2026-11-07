@@ -8,5 +8,8 @@ int main(int argc, char** argv)
 	registerGameAuthoringWrapping(checks);
 	registerGameAuthoringMutationThroughRuntime(checks);
 	registerGameAuthoringSharedLibrary(checks);
+	registerGameAuthoringTopology(checks);
+	registerGameAuthoringUndoRedo(checks);
+	registerGameAuthoringBoundary(checks);
 	return smoke::main("game-authoring", checks, argc, argv);
 }

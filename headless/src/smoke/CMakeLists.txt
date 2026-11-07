@@ -148,6 +148,9 @@ pf_add_smoke_module(pf-smoke-game-authoring
         game-authoring/Wrapping.cpp
         game-authoring/MutationThroughRuntime.cpp
         game-authoring/SharedLibrary.cpp
+        game-authoring/AuthoringTopology.cpp
+        game-authoring/UndoRedo.cpp
+        game-authoring/Boundary.cpp
     LIBRARIES pf-game-authoring
     LABELS "core;game-authoring"
     TIMEOUT 30

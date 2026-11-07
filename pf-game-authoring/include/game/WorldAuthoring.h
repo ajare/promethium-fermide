@@ -1,5 +1,14 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "DocumentHistory.h"
 #include "core/World.h"
 #include "game/AuthoringPlatform.h"
 #include "game/WorldRuntime.h"
@@ -29,10 +38,22 @@ namespace game
 	// (ADR 0022); authoring reaches `WorldBuilder` only through `World`,
 	// exactly as every other caller does.
 	//
-	// The tracer bullet is the wrapping itself: the mutable `World&` for
-	// authoring and the wrapped runtime handed back for preview. The authoring
-	// method families - topology and preflight (#968), resource binding and
-	// persistence (#969) - are later tickets and are deliberately not here yet.
+	// The families below are thin forwards with the signatures they forward
+	// mirrored one for one (#968). That mirroring is deliberate: a call site
+	// that today says `world->addRoom(...)` says `authoring.addRoom(...)` and
+	// nothing else changes, so the editor can converge on this handle without
+	// a translation layer that could drift from the thing it wraps. Nothing
+	// here holds state. Every plan is built by the World, every edit is applied
+	// by the World, and the construction records that replay is still the
+	// World's alone - behaviour moves, state does not (ADR 0022).
+	//
+	// The two views are used differently and that split is visible in the
+	// bodies. A write goes through `world()`, the mutable view the runtime
+	// grants this class alone. A preflight guard is `const` because the World
+	// says it is, so it reads through `document()`, the same `core::World
+	// const&` a render path gets from the runtime. Asking whether an edit is
+	// legal therefore requires no more privilege than drawing the World has
+	// always needed.
 	class PF_GAME_AUTHORING_API WorldAuthoring
 	{
 	public:
@@ -67,8 +88,315 @@ namespace game
 
 		WorldRuntime const& runtime() const noexcept;
 
+		// The read-only view of the document being authored. It is the same
+		// `core::World const&` the runtime hands to rendering, and every
+		// `can...` guard below is answered from it. Preflighting an edit is a
+		// read, so it is answered without spending the mutable-view privilege;
+		// only the edit itself needs that.
+		core::World const& document() const noexcept;
+
+		// The authoring topology and preflight families follow, grouped by
+		// what is being authored. Each `can...` guard is declared next to the
+		// operation it guards rather than in a separate preflight section, so
+		// the question and the act that answers for it are read together and
+		// cannot drift apart across a review.
+		//
+		// Every method forwards to the World unchanged, including its failure
+		// contract: a guard returns false and fills `diagnostic`, an operation
+		// either succeeds or throws `core::Exception`, and a `plan...` /
+		// `apply...` pair still validates in the plan and commits in the
+		// apply. Nothing here adds a policy of its own.
+
+	// --- Levels and Layers ---
+	uint32_t addLayer();
+	void addLevel();
+	core::World::LevelDeletePlan planDeleteLevel(uint32_t level) const;
+	bool applyDeleteLevel(core::World::LevelDeletePlan const& plan);
+	core::World::LayerDeletePlan planDeleteLayer(uint32_t layerIndex) const;
+	bool applyDeleteLayer(core::World::LayerDeletePlan const& plan);
+
+	// --- Locations ---
+	uint32_t addCorridor(uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh = 1);
+	uint32_t addCorridor(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh = 1);
+	uint32_t addRoom(std::string const& name, uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight = CORE_ROOM_MAX_HEIGHT);
+	bool canAddBackground(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, std::string* diagnostic = nullptr) const;
+	uint32_t addBackground(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, core::BackgroundColour const& colour = {});
+	bool canAddFacade(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, std::string* diagnostic = nullptr) const;
+	uint32_t addFacade(std::string const& name, uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight = CORE_ROOM_MAX_HEIGHT, core::BackgroundColour const& colour = core::Facade::defaultColour());
+	uint32_t addFacade(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight = CORE_ROOM_MAX_HEIGHT, core::BackgroundColour const& colour = core::Facade::defaultColour());
+	core::World::LocationEditPlan planResizeLocation(uint32_t sectorIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh) const;
+	core::World::LocationEditPlan planRemoveLocation(uint32_t sectorIndex) const;
+	core::World::LocationEditPlan planResizeFacade(uint32_t sectorIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh) const;
+	core::World::LocationEditPlan planRemoveFacade(uint32_t sectorIndex) const;
+	uint32_t applyLocationEdit(core::World::LocationEditPlan const& plan);
+	core::World::LocationEditPlan planResizeBackground(uint32_t sectorIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh) const;
+	core::World::LocationEditPlan planRemoveBackground(uint32_t sectorIndex) const;
+	uint32_t applyBackgroundEdit(core::World::LocationEditPlan const& plan);
+
+	// --- Location walls ---
+	bool canAddLocationWall(uint32_t sectorIndex, uint32_t levelIndex, int side, std::string* diagnostic = nullptr) const;
+	void addLocationWall(uint32_t sectorIndex, uint32_t levelIndex, int side);
+	bool canRemoveLocationWall(uint32_t sectorIndex, uint32_t levelIndex, int side, std::string* diagnostic = nullptr) const;
+	void removeLocationWall(uint32_t sectorIndex, uint32_t levelIndex, int side);
+
+	// --- Ladders ---
+	bool canAddLadder(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t levelsHigh, std::string* diagnostic = nullptr) const;
+	core::World::CreateLadderResult addLadder(uint32_t layerIndex, uint32_t y, uint32_t x, core::World::CreateLadderOptions const& options);
+	core::World::CreateLadderResult addSectorLadder(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, core::World::CreateLadderOptions const& options);
+	bool canAddRoomLadder(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, uint32_t* levelsHigh = nullptr, std::string* diagnostic = nullptr) const;
+	core::World::CreateLadderResult addRoomLadder(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset);
+	core::World::CreateLadderResult addRoomLadder(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, core::World::CreateLadderOptions options);
+	std::shared_ptr<const core::SectorObject> applyRoomLadderOptions(uint32_t sectorIndex, uint32_t objectIndex, core::World::CreateLadderOptions const& options);
+	bool removeRoomLadder(uint32_t sectorIndex, uint32_t objectIndex);
+	core::World::LadderEditPlan planResizeLadder(uint32_t sectorIndex, uint32_t x, uint32_t y, core::World::CreateLadderOptions const& options) const;
+	core::World::LadderEditPlan planRemoveLadder(uint32_t sectorIndex) const;
+	uint32_t applyLadderEdit(core::World::LadderEditPlan const& plan);
+
+	// --- Stairwells and staircases ---
+	bool canAddStairwell(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t levelsHigh, std::string* diagnostic = nullptr) const;
+	uint32_t addStairwell(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t levelsHigh, int mountSide);
+	core::World::CreateStairwellResult addStairwell(uint32_t layerIndex, uint32_t y, uint32_t x, core::World::CreateStairwellOptions const& options);
+	bool canAddStaircase(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, int riseSide, std::string* diagnostic = nullptr) const;
+	uint32_t addStaircase(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, int riseSide, float speed = 0.0f);
+	uint32_t addStaircase(uint32_t layerIndex, uint32_t y, uint32_t x, core::World::CreateStaircaseOptions const& options);
+	core::World::StairwellEditPlan planResizeStairwell(uint32_t sectorIndex, uint32_t x, uint32_t y, core::World::CreateStairwellOptions const& options) const;
+	core::World::StairwellEditPlan planRemoveStairwell(uint32_t sectorIndex) const;
+	uint32_t applyStairwellEdit(core::World::StairwellEditPlan const& plan);
+	core::World::StaircaseEditPlan planResizeStaircase(uint32_t sectorIndex, uint32_t x, uint32_t y, core::World::CreateStaircaseOptions const& options) const;
+	core::World::StaircaseEditPlan planRemoveStaircase(uint32_t sectorIndex) const;
+	uint32_t applyStaircaseEdit(core::World::StaircaseEditPlan const& plan);
+
+	// --- Lifts ---
+	core::World::CreateLiftResult addLift(uint32_t layerIndex, uint32_t y, uint32_t x, core::World::CreateLiftOptions const& options);
+	core::World::CreateLiftResult addLift(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh);
+	bool canAddPlatformLift(uint32_t sectorIndex, uint32_t xOffset, core::World::CreateLiftOptions const& options, std::string* diagnostic = nullptr) const;
+	core::World::CreatePlatformLiftResult addSectorPlatformLift(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, core::World::CreateLiftOptions const& options);
+	core::World::PlatformLiftEditPlan planPlatformLiftEdit(uint32_t sectorIndex, uint32_t objectIndex, core::World::CreateLiftOptions const& options) const;
+	core::World::PlatformLiftEditPlan planRemovePlatformLift(uint32_t sectorIndex, uint32_t objectIndex) const;
+	std::shared_ptr<const core::SectorObject> applyPlatformLiftEdit( core::World::PlatformLiftEditPlan const& plan);
+	core::World::LiftEditPlan planResizeLift(uint32_t sectorIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh) const;
+	core::World::LiftEditPlan planRemoveLift(uint32_t sectorIndex) const;
+	core::World::LiftEditPlan planRemoveLiftStop(uint32_t sectorIndex, uint32_t stopIndex) const;
+	uint32_t applyLiftEdit(core::World::LiftEditPlan const& plan);
+
+	// --- Shuttles ---
+	core::World::CreateShuttleResult addShuttle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, core::World::CreateShuttleOptions const& options);
+	core::World::ShuttleEditPlan planResizeShuttle(uint32_t sectorIndex, uint32_t x, uint32_t y, uint32_t cellsWide) const;
+	core::World::ShuttleEditPlan planEditShuttleVehicle(uint32_t sectorIndex, uint32_t numCars, uint32_t carWidth, uint32_t doorMask) const;
+	core::World::ShuttleEditPlan planRemoveShuttle(uint32_t sectorIndex) const;
+	core::World::ShuttleEditPlan planRemoveShuttleStop(uint32_t sectorIndex, uint32_t stopIndex) const;
+	core::World::ShuttleEditPlan planAddShuttleStop(uint32_t sectorIndex, uint32_t stopOffset) const;
+	uint32_t applyShuttleEdit(core::World::ShuttleEditPlan const& plan);
+
+	// --- Airlocks ---
+	bool canAddAirlock(uint32_t layer, uint32_t y, uint32_t x, uint32_t width, float cycleSeconds = 3.0f, std::string* diagnostic = nullptr) const;
+	uint32_t addAirlock(uint32_t layer, uint32_t y, uint32_t x, uint32_t width, float cycleSeconds = 3.0f);
+	core::World::AirlockEditPlan planResizeAirlock(uint32_t sectorIndex, uint32_t x, uint32_t y, uint32_t width) const;
+	core::World::AirlockEditPlan planRemoveAirlock(uint32_t sectorIndex) const;
+	uint32_t applyAirlockEdit(core::World::AirlockEditPlan const& plan);
+
+	// --- Chambers ---
+	bool canAddChamber(uint32_t layer, uint32_t y, uint32_t x, uint32_t width, std::string* diagnostic = nullptr, core::ChamberSubtype subtype = core::ChamberSubtype::SecurityScanner) const;
+	uint32_t addChamber(uint32_t layer, uint32_t y, uint32_t x, uint32_t width, bool leftToRight = true, core::ChamberSubtype subtype = core::ChamberSubtype::SecurityScanner);
+	core::World::ChamberEditPlan planResizeChamber(uint32_t sectorIndex, uint32_t x, uint32_t y, uint32_t width, bool leftToRight) const;
+	core::World::ChamberEditPlan planRemoveChamber(uint32_t sectorIndex) const;
+	core::World::ChamberEditPlan planSetChamberSubtype(uint32_t sectorIndex, core::ChamberSubtype subtype) const;
+	uint32_t applyChamberEdit(core::World::ChamberEditPlan const& plan);
+
+	// --- Doors ---
+	bool canAddCorridorDoor(uint32_t layerIndex, uint32_t y, uint32_t x, std::string* diagnostic = nullptr) const;
+	bool canAddCorridorDoor(uint32_t layerIndex, uint32_t y, uint32_t x, core::World::CreateDoorOptions const& options, std::string* diagnostic = nullptr) const;
+	core::World::CreateDoorResult addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x);
+	core::World::CreateDoorResult addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x, core::World::CreateDoorOptions const& options);
+	bool canAddSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex) const;
+	void addSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex);
+	bool canRemoveSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex) const;
+	std::shared_ptr<const core::DoorSectorObject> removeSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex, std::optional<std::vector<core::AccessPermissionId>> resultingRequirement = std::nullopt);
+	bool removeSectorDoor(uint32_t sectorIndex, uint32_t objectIndex);
+
+	// --- Windows ---
+	bool canAddSectorWindow(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide = 1, uint32_t levelsHigh = 1, std::string* diagnostic = nullptr) const;
+	uint32_t addSectorWindow(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh);
+	core::World::CreateWindowResult addSectorWindow(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, core::World::CreateWindowOptions const& options);
+	bool removeSectorWindow(uint32_t sectorIndex, uint32_t objectIndex);
+	bool canAddBoothWindow(uint32_t layer, uint32_t y, uint32_t x, uint32_t width = 1, uint32_t height = 1, std::string* diagnostic = nullptr) const;
+	core::World::CreateWindowResult addBoothWindow(uint32_t layer, uint32_t y, uint32_t x, core::Window::State initialState = core::Window::State::Closed);
+
+	// --- Bulkhead doors ---
+	bool canAddSectorBulkheadDoor(uint32_t layerIndex, uint32_t y, uint32_t x, int side, core::World::CreateBulkheadDoorOptions const& options, std::string* diagnostic = nullptr) const;
+	core::World::CreateBulkheadDoorResult addSectorBulkheadDoor(uint32_t layerIndex, uint32_t y, uint32_t x, int side);
+	core::World::CreateBulkheadDoorResult addSectorBulkheadDoor(uint32_t layerIndex, uint32_t y, uint32_t x, int side, core::World::CreateBulkheadDoorOptions const& options);
+	std::shared_ptr<const core::SectorObject> applySectorBulkheadDoorOptions(uint32_t sectorIndex, uint32_t objectIndex, core::World::CreateBulkheadDoorOptions const& options);
+	bool removeSectorBulkheadDoor(uint32_t sectorIndex, uint32_t objectIndex);
+
+	// --- Switches and force bridges ---
+	core::World::CreateObjectResult addSectorLightSwitch(uint32_t sectorIndex, uint32_t xOffset);
+	bool canAddSectorForceBridge(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, core::World::CreateForceBridgeOptions const& options, std::string* diagnostic = nullptr) const;
+	core::World::CreateForceBridgeResult addSectorForceBridge(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset);
+	core::World::CreateForceBridgeResult addSectorForceBridge(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, core::World::CreateForceBridgeOptions const& options);
+	std::shared_ptr<const core::SectorObject> applySectorForceBridgeOptions(uint32_t sectorIndex, uint32_t objectIndex, core::World::CreateForceBridgeOptions const& options);
+	bool removeSectorForceBridge(uint32_t sectorIndex, uint32_t objectIndex);
+
+	// --- Walkways ---
+	bool canAddSectorWalkway(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, std::string* diagnostic = nullptr) const;
+	core::World::CreateObjectResult addSectorWalkway(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset);
+	core::World::WalkwayEditPlan planRemoveSectorWalkway(uint32_t sectorIndex, uint32_t objectIndex) const;
+	bool applyWalkwayEdit(core::World::WalkwayEditPlan const& plan);
+	bool removeSectorWalkway(uint32_t sectorIndex, uint32_t objectIndex);
+
+	// --- Markers ---
+	bool canAddSectorMarker(uint32_t sectorIndex, uint32_t levelIndex, float xOffset, std::string* diagnostic = nullptr) const;
+	core::World::CreateObjectResult addSectorMarker(uint32_t sectorIndex, uint32_t levelIndex, float xOffset, uint32_t* vertexIdentifier = nullptr);
+	core::World::CreateObjectResult addSectorMarker(uint32_t sectorIndex, uint32_t levelIndex, float xOffset, std::string const& name, uint32_t* vertexIdentifier = nullptr);
+	bool canRenameMarker(core::MarkerId id, std::string const& name, std::string* diagnostic = nullptr) const;
+	bool renameMarker(core::MarkerId id, std::string const& name, std::string* diagnostic = nullptr);
+	bool canRemoveSectorMarker(uint32_t sectorIndex, uint32_t objectIndex, std::string* diagnostic = nullptr) const;
+	bool removeSectorMarker(uint32_t sectorIndex, uint32_t objectIndex, std::string* diagnostic = nullptr);
+
+	// --- Moving authored objects ---
+	core::World::ObjectMovePlan planMoveSectorObject(uint32_t sectorIndex, uint32_t objectIndex, uint32_t x, uint32_t y) const;
+	core::World::ObjectMovePlan planResizeSectorWindow(uint32_t sectorIndex, uint32_t objectIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh) const;
+	core::World::ObjectMovePlan planResizeSectorDoor(uint32_t sectorIndex, uint32_t objectIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh) const;
+	std::shared_ptr<const core::SectorObject> applyObjectMove(core::World::ObjectMovePlan const& plan);
+
+	// --- Dumbwaiters ---
+	bool canAddDumbwaiter(uint32_t shaftLayer, uint32_t y, uint32_t x, core::World::CreateDumbwaiterOptions const& options, std::string* diagnostic = nullptr) const;
+	core::DumbwaiterId addDumbwaiter(uint32_t shaftLayer, uint32_t y, uint32_t x, core::World::CreateDumbwaiterOptions const& options);
+	core::World::DumbwaiterMovePlan planMoveDumbwaiter(core::DumbwaiterId id, uint32_t shaftLayer, uint32_t y, uint32_t x) const;
+	bool applyDumbwaiterMove(core::World::DumbwaiterMovePlan const& plan);
+	bool removeDumbwaiter(core::DumbwaiterId id);
+
+	// --- Agents ---
+	bool canPlaceAgentInLocation(uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets, std::string* diagnostic = nullptr) const;
+	core::AgentId createAgent(std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset);
+	core::AgentId createAgent(std::string const& name, uint32_t sectorId);
+	core::AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset);
+	core::AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId);
+	core::AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets, std::optional<core::ObjectUsage> objectUsage = std::nullopt, std::optional<float> objectUsageDistance = std::nullopt, std::set<core::AgentTagId> const& tags = {});
+	core::AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets);
+	core::AgentId createAgent(std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets);
+	core::AgentId createAgent(std::string const& name, uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets);
+	core::EntityRemovalResult removeAgent(core::AgentId id);
+
+	// --- Agent groups ---
+	bool canAddAgentGroup(std::string const& name, std::string* diagnostic = nullptr) const;
+	core::AgentGroupId addAgentGroup(std::string const& name);
+	bool canRenameAgentGroup(core::AgentGroupId id, std::string const& name, std::string* diagnostic = nullptr) const;
+	bool renameAgentGroup(core::AgentGroupId id, std::string const& name, std::string* diagnostic = nullptr);
+	bool canDeleteAgentGroup(core::AgentGroupId id, std::string* diagnostic = nullptr) const;
+	bool deleteAgentGroup(core::AgentGroupId id, std::string* diagnostic = nullptr);
+
+	// --- Agent tags ---
+	bool canRemoveAgentTag(core::AgentId agent, core::AgentTagId tag, std::string* diagnostic = nullptr) const;
+	bool removeAgentTag(core::AgentId agent, core::AgentTagId tag, std::string* diagnostic = nullptr);
+
+	// --- Access control ---
+	bool canAddAccessPermission(std::string const& name, std::string* diagnostic = nullptr) const;
+	core::AccessPermissionId addAccessPermission(std::string const& name);
+	bool renameAccessPermission(core::AccessPermissionId id, std::string const& name, std::string* diagnostic = nullptr);
+	core::PermissionSetId addPermissionSet(std::string const& name);
+	bool renamePermissionSet(core::PermissionSetId id, std::string const& name, std::string* diagnostic = nullptr);
+
+	// --- Interaction points and traversal resources ---
+	core::EntityRemovalResult removeInteractionPoint(core::InteractionPointId id);
+	core::EntityRemovalResult removeInteractionRequest(core::InteractionRequestId id);
+	core::EntityRemovalResult removeDeviceOperation(core::DeviceOperationId id);
+	bool addTraversalControl(core::TraversalResourceId resource, core::InteractionPointId control);
+	core::EntityRemovalResult removeTraversalResource(core::TraversalResourceId id);
+
+	// --- Furniture ---
+	bool canPlaceFurniture(uint32_t sector, std::string const& definition, float x, float y, std::string const& name, std::string* diagnostic = nullptr, int localDepth = 0) const;
+	uint64_t placeFurniture(uint32_t sector, std::string const& definition, float x, float y, std::string const& name, int localDepth = 0);
+	bool canEditFurniture(uint64_t id, float x, float y, std::string const& name, std::string* diagnostic = nullptr, std::optional<int> localDepth = std::nullopt) const;
+	bool editFurniture(uint64_t id, float x, float y, std::string const& name, std::string* diagnostic = nullptr, std::optional<int> localDepth = std::nullopt);
+	bool canRemoveFurniture(uint64_t id, std::string* diagnostic = nullptr) const;
+	bool removeFurniture(uint64_t id, std::string* diagnostic = nullptr);
+
+	// The convenience overload the World carries inline, mirrored so a caller
+	// that wants a Dumbwaiter with all defaults does not have to name the
+	// options struct.
+	core::DumbwaiterId addDumbwaiter(std::uint32_t shaftLayer, std::uint32_t y, std::uint32_t x)
+	{
+		return addDumbwaiter(shaftLayer, y, x, core::World::CreateDumbwaiterOptions{});
+	}
+
+	// --- History: undo and redo -----------------------------------------
+	// The authoring handle owns the document history, because the history is
+	// the authoring half of the arrangement: the runtime drives, the author
+	// changes, and a change that cannot be taken back is not an edit.
+	//
+	// The transaction shape is the one the editor already uses, because it is
+	// the one the World's edit protocol forces. Snapshot the document before
+	// the edit, make the edit, commit the snapshot. `captureSnapshot()` is
+	// taken before the mutation and `commitEdit()` after it succeeds, so a
+	// thrown edit leaves the history untouched rather than recording a change
+	// that never happened.
+	//
+	// Undo and redo restore the wrapped World *in place*. The World object the
+	// runtime owns is never replaced - it is the same object before and after,
+	// which is what lets a running runtime keep driving while its document is
+	// rolled back underneath it. The restored World comes back built: the
+	// construction-record replay that `World::deserialize` performs ends in
+	// `finishBuild()`, so no separate rebuild step is needed.
+	//
+	// What in-place restoration does not do is preserve C++ object identity.
+	// Agents come back as new instances under the same stable `AgentId`, so a
+	// caller that held an `Agent*` across an undo is holding a dangling
+	// pointer. Ids are the currency across this boundary, exactly as they are
+	// across a save and load.
+	//
+	// The run state is left as it was found. A paused World stays paused and a
+	// running one keeps running; undo changes the document, not whether the
+	// simulation is live.
+
+	// Serialize the document as it currently stands, ready to be committed
+	// once an edit has succeeded. Returns nullopt when the document cannot be
+	// captured, which leaves the history untouched if committed anyway.
+	std::optional<DocumentSnapshot> captureSnapshot() const;
+
+	// Record a captured snapshot as an edit. Passing nullopt is a no-op, so
+	// a failed edit needs no special case at the call site.
+	void commitEdit(std::optional<DocumentSnapshot> snapshot);
+
+	// Roll the document back one edit, in place. False means there was
+	// nothing to undo, or the snapshot could not be restored; either way the
+	// World is left exactly as it was and the history is unchanged.
+	bool undo();
+
+	// Re-apply the last undone edit, in place. Same contract as `undo()`.
+	bool redo();
+
+	bool canUndo() const noexcept;
+
+	bool canRedo() const noexcept;
+
+	std::size_t undoDepth() const noexcept;
+
+	std::size_t redoDepth() const noexcept;
+
+	// True when the document differs from the last saved state. This is the
+	// history's own bookkeeping, not the World's modified flag.
+	bool isModified() const noexcept;
+
+	// Mark the current history position as saved, clearing the modified flag.
+	void markSaved() noexcept;
+
+	// Drop both stacks and the saved marker. Used when a document is closed or
+	// replaced wholesale, where replaying an old edit would be wrong.
+	void clearHistory() noexcept;
+
 	private:
+		// Replace the wrapped World's contents with `snapshot`, in place. Used
+		// by `undo()` and `redo()` as the history's restore callback; returns
+		// false without touching the history when the snapshot cannot be read.
+		bool restoreInPlace(DocumentSnapshot const& snapshot);
+
 		// Not owned. The runtime owns the World; this only names it.
 		WorldRuntime* runtime_;
+
+		// Owned. The history belongs to the authoring handle rather than to a
+		// process-wide global, so two documents in one process keep separate
+		// undo stacks and neither can roll back the other's work.
+		std::unique_ptr<DocumentHistory> history_;
 	};
 }
