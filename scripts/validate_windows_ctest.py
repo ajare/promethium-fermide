@@ -20,9 +20,9 @@ import validation_run as validation
 CORE = {'agent', 'agent-tags', 'behaviours', 'permissions', 'persistence',
         'routing', 'simulation', 'transports', 'world'}
 REPRESENTATIVES = {
-    'pf-smoke-agent': 'src/headless/smoke/agent/Identity.cpp',
-    'pf-smoke-render': 'src/headless/smoke/render/Walls.cpp',
-    'pf-smoke-editor': 'src/headless/smoke/editor/Isolation.cpp',
+    'pf-smoke-agent': 'headless/src/smoke/agent/Identity.cpp',
+    'pf-smoke-render': 'headless/src/smoke/render/Walls.cpp',
+    'pf-smoke-editor': 'headless/src/smoke/editor/Isolation.cpp',
 }
 
 
@@ -122,7 +122,7 @@ def audit_dependencies(targets):
             if not required <= dependencies:
                 raise RuntimeError(f'missing compiled production support: {required - dependencies}')
             own = [p for p, owner in sources.items() if owner == name]
-            if any(not p.startswith('src/headless/') for p in own):
+            if any(not p.startswith('headless/src/') for p in own):
                 raise RuntimeError(f'{name} compiles production implementations: {own}')
         links = by_name[name].get('link', {}).get('commandFragments', [])
         if name == 'pf-smoke-agent':
@@ -173,7 +173,7 @@ def audit_results(suite, inventory, checks):
 
 def object_snapshot(build, config):
     return {str(p.relative_to(build)): p.stat().st_mtime_ns
-            for p in (build / 'src/headless/smoke').rglob('*.obj')
+            for p in (build / 'headless/src/smoke').rglob('*.obj')
             if config in p.parts}
 
 

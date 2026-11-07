@@ -12,7 +12,7 @@ if len(sys.argv) != 4:
     raise SystemExit("usage: smoke_ownership.py <source-root> <smoke-cmake> <manifest>")
 
 source_root = pathlib.Path(sys.argv[1]).resolve()
-smoke_root = source_root / "src/headless/smoke"
+smoke_root = source_root / "headless/src/smoke"
 cmake_text = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
 manifest_text = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
 

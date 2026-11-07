@@ -28,7 +28,7 @@ existing #509 document-history seam, including when a failed candidate World is
 discarded. Neither clipboard nor history stores arbitrary Lua tables, closures,
 VM state, or embedded baseline snapshots.
 
-Release headless coverage lives in `src/headless/smoke/agent/AgentTypeEditor.cpp`:
+Release headless coverage lives in `headless/src/smoke/agent/AgentTypeEditor.cpp`:
 `agentTypesScriptedClipboardAndDeletionHistory` proves wire/property/sample
 preservation, preview agreement, paste undo/redo, fresh deleted-Agent restoration,
 survivor preservation, and restoration failure atomicity.

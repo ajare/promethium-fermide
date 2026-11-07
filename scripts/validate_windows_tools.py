@@ -49,7 +49,7 @@ def main():
         for name, expected_sources in TOOLS.items():
             target = by_name[name]
             sources = {item["path"] for item in target["sources"] if "compileGroupIndex" in item}
-            expected = {"src/headless/tools/" + item for item in expected_sources}
+            expected = {"headless/src/tools/" + item for item in expected_sources}
             if sources != expected:
                 raise RuntimeError(f"{config}: {name} compiles unexpected sources: {sources}")
             seen = set()

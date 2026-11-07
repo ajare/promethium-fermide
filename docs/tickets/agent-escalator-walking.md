@@ -63,10 +63,10 @@ walking speed  = abs(escalator speed) + agent.getWalkSpeed()
 
 ## Implementation starting points
 
-- `include/core/AgentTag.h` and the Agent tag registry implementation: typed property, validation, serialization, and existing property conflict conventions.
-- `include/core/Agent.h` and `src/core/Agent.cpp`: effective property resolution, transient traversal decision, lifecycle cleanup, and deterministic per-Agent simulation state.
-- `src/core/StaircaseEdge.cpp`: existing Escalator direction checks, standing-speed route cost, and traversal speed query. Keep cost queries observational and independent of the random decision.
-- `include/core/Simulation.h` and simulation snapshot construction: read-only active decision diagnostics.
+- `core/include/core/AgentTag.h` and the Agent tag registry implementation: typed property, validation, serialization, and existing property conflict conventions.
+- `core/include/core/Agent.h` and `core/src/Agent.cpp`: effective property resolution, transient traversal decision, lifecycle cleanup, and deterministic per-Agent simulation state.
+- `core/src/StaircaseEdge.cpp`: existing Escalator direction checks, standing-speed route cost, and traversal speed query. Keep cost queries observational and independent of the random decision.
+- `core/include/core/Simulation.h` and simulation snapshot construction: read-only active decision diagnostics.
 - Tag editing panels and headless smoke checks: authoring support and regression coverage.
 
 Preserve ADR 0001's separation of route intent, device state, and traversal permission; ADR 0007's external Agent tag registry ownership; and ADR 0008's deterministic, isolated Lua runtime boundary. No Lua API expansion is required.

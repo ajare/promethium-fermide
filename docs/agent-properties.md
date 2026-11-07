@@ -1,7 +1,7 @@
 # Agent properties
 
 This is the complete reference for the **20 editable Agent properties** declared
-by `AgentPropertyType` in `include/core/AgentTag.h`. Each can be authored directly
+by `AgentPropertyType` in `core/include/core/AgentTag.h`. Each can be authored directly
 on an Agent or supplied by an Agent tag. They are distinct from the physical
 baseline declared by an [Agent-type script](create-agent-script.md), and from
 runtime state such as Pose, destination and movement progress.
@@ -364,11 +364,11 @@ script baselines.
 
 ## Implementation references
 
-- [`include/core/AgentTag.h`](../include/core/AgentTag.h): complete property enum,
+- [`core/include/core/AgentTag.h`](../core/include/core/AgentTag.h): complete property enum,
   display names/namespaces, bounds and tag defaults.
-- [`src/core/AgentTag.cpp`](../src/core/AgentTag.cpp): numeric validation and sampling.
-- [`src/core/Agent.cpp`](../src/core/Agent.cpp): effective lookup and serialization.
-- [`include/core/RouteCost.h`](../include/core/RouteCost.h): preference weights and
+- [`core/src/AgentTag.cpp`](../core/src/AgentTag.cpp): numeric validation and sampling.
+- [`core/src/Agent.cpp`](../core/src/Agent.cpp): effective lookup and serialization.
+- [`core/include/core/RouteCost.h`](../core/include/core/RouteCost.h): preference weights and
   voluntary Path replacement threshold.
 - [ADR 0012: individual overrides](adr/0012-individual-agent-properties-override-tag-properties.md)
 - [ADR 0014: perceived cost versus traversal facts](adr/0014-separate-perceived-route-cost-from-traversal-facts.md)

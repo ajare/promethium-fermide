@@ -1,0 +1,70 @@
+# editor
+#
+# The interactive world editor: SDL/GL window, ImGui shell, and the authoring
+# panels supplied by pf-agent-editing. GUI-only, so the root project adds it
+# only when PF_BUILD_GUI is on.
+
+cmake_minimum_required(VERSION 3.25)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    project(editor-standalone LANGUAGES C CXX)
+endif()
+include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Module.cmake")
+
+pf_require_module(pf-render)
+pf_require_module(pf-metrics)
+pf_require_module(pf-agent-editing)
+pf_require_module(pf-agent-resources)
+pf_require_module(pf-imgui-cpu)
+pf_require_module(PromethiumFermide)
+pf_require_gui()
+pf_require_willpower()
+
+add_executable(editor
+    src/Helpers.cpp
+    src/ApplicationResources.cpp
+    src/Main.cpp
+    src/UI.cpp
+    src/WorldRenderSystem.cpp
+)
+target_compile_features(editor PRIVATE cxx_std_20)
+target_compile_definitions(editor PRIVATE
+    PF_RENDER_LOG_DIR="${CMAKE_BINARY_DIR}/logs/$<CONFIG>"
+    _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING
+    $<$<CONFIG:Debug>:_DEBUG>
+)
+# The editor's own headers live in this module's include root.
+target_include_directories(editor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+if(MSVC)
+    target_compile_options(editor PRIVATE
+        "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
+    target_link_options(editor PRIVATE "$<$<CONFIG:Release>:/SUBSYSTEM:WINDOWS>")
+else()
+    target_compile_options(editor PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+target_link_libraries(editor PRIVATE
+    pf-render
+    pf-metrics
+    pf-agent-editing
+    pf-agent-resources
+    pf-imgui-gui
+    nfd::nfd
+    spdlog::spdlog
+    Willpower.Application
+    ext::mpp-helper
+    PromethiumFermide
+)
+if(WIN32)
+    target_link_libraries(editor PRIVATE SDL2::SDL2main)
+endif()
+pf_apply_high_analysis(editor)
+set_target_properties(editor PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
+    FOLDER "Applications")
+willpower_deploy_runtime_dlls(editor)
+
+add_custom_command(TARGET editor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${PF_REPO_ROOT}/resources/promethium-fermide.ini"
+        "$<TARGET_FILE_DIR:editor>/promethium-fermide.ini"
+    COMMENT "Copying ImGui configuration"
+)

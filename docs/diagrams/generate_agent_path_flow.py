@@ -128,17 +128,17 @@ class Panel:
         emit('</g>')
 
 
-A = 'src/core/Agent.cpp'
-P = 'src/core/Pathing.cpp'
-T = 'src/core/SimulationCoordinatorTraversal.cpp'
-Q = 'src/core/SimulationCoordinatorQueues.cpp'
-I = 'src/core/SimulationCoordinatorInteractions.cpp'
-D = 'src/core/SimulationCoordinatorDoors.cpp'
-L = 'src/core/SimulationCoordinatorLifts.cpp'
-G = 'src/core/SimulationCoordinatorAgents.cpp'
-C = 'src/core/RouteTraversalCapture.cpp'
-E = 'src/core/RouteTraversalInputs.cpp'
-K = 'src/core/SimulationCoordinatorTick.cpp'
+A = 'core/src/Agent.cpp'
+P = 'core/src/Pathing.cpp'
+T = 'core/src/SimulationCoordinatorTraversal.cpp'
+Q = 'core/src/SimulationCoordinatorQueues.cpp'
+I = 'core/src/SimulationCoordinatorInteractions.cpp'
+D = 'core/src/SimulationCoordinatorDoors.cpp'
+L = 'core/src/SimulationCoordinatorLifts.cpp'
+G = 'core/src/SimulationCoordinatorAgents.cpp'
+C = 'core/src/RouteTraversalCapture.cpp'
+E = 'core/src/RouteTraversalInputs.cpp'
+K = 'core/src/SimulationCoordinatorTick.cpp'
 
 
 def main():
@@ -192,7 +192,7 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
     p = Panel('B',1,0,'Planning & search','Graph::calculatePath() delegates to pathing::findPath(); each candidate directed arc uses C, not runtime admission.')
     p.node('b0',0,'pathing::findPath() [inline]','Graph, target fit, destination occupancy and Location access valid?',P,'findPath',kind='decision')
     p.node('bx',0,'pathing::findPath()','Return nullptr; I handles Route loss or retained valid Path.',P,'findPath',side=True,kind='failure',target='I')
-    p.node('b1',1,'Graph::getPathSourceVertex()','Infer source when omitted; seed connected floor interval endpoints, never split controlled edges.', 'src/core/Graph.cpp','Graph::getPathSourceVertex')
+    p.node('b1',1,'Graph::getPathSourceVertex()','Infer source when omitted; seed connected floor interval endpoints, never split controlled edges.', 'core/src/Graph.cpp','Graph::getPathSourceVertex')
     p.node('b2',2,'PathfindingWorkspace::beginRouteDecision()','Freeze profile, Mobility and observations; capture non-Location traversal inputs.',P,'PathfindingWorkspace::beginRouteDecision')
     p.node('b3',3,'pathing::findPath() [inline]','runSearch: Local-depth routes present?',P,'findPath',kind='decision')
     p.node('bd',3,'findDepthContinuousPath()','Search depth-continuous states; Local depth is a secondary objective.',P,'findDepthContinuousPath',side=True)
@@ -215,7 +215,7 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
     p.node('c2',2,'RouteTraversalInputs::evaluate() [inline]','Traversal Mobility AND required Buttons allowed in this search pass?',E,'RouteTraversalInputs::evaluate',kind='decision')
     p.node('cm',2,'RouteTraversalInputs::evaluate()','CannotUse rejects; OnlyIfNoOtherOption rejects first pass. This authored classification is not current press necessity.',E,'RouteTraversalInputs::evaluate',side=True,kind='port',target='cx')
     p.node('c3',3,'RouteTraversalInputs::capture() [inline]','Location / Gap / Window edge?',C,'RouteTraversalInputs::capture',kind='decision')
-    p.node('cl',3,'SectorEdge::getDirectedTraversalFacts()','Location: Room fit/speed. Gap: no continuation. Window: normally traversable aperture only. Return c8.','src/core/SectorEdge.cpp','SectorEdge::getDirectedTraversalFacts',side=True,kind='port',target='c8')
+    p.node('cl',3,'SectorEdge::getDirectedTraversalFacts()','Location: Room fit/speed. Gap: no continuation. Window: normally traversable aperture only. Return c8.','core/src/SectorEdge.cpp','SectorEdge::getDirectedTraversalFacts',side=True,kind='port',target='c8')
     p.node('c4',4,'RouteTraversalInputs::capture() [inline]','Door/Bulkhead endpoints: ordinary threshold, transport landing, Airlock or Chamber?',C,'RouteTraversalInputs::capture',kind='decision')
     p.node('ct',4,'RouteTraversalInputs::capture()','selectAgentCrossing(); validate both journey apertures, direction, Location access, operation vs locally usable passage. Return c8.',C,'RouteTraversalInputs::capture',side=True,kind='port',target='c8')
     p.node('c5',5,'RouteTraversalInputs::capture() [inline]','Ladder or LadderMount edge?',C,'RouteTraversalInputs::capture',kind='decision')
@@ -254,7 +254,7 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
     p.node('e3',3,'SC::allocateTraversalRequest() [inline]','Extensible resource not yet admitting?',T,'SimulationCoordinator::allocateTraversalRequest',kind='decision')
     p.node('ef',3,'SC::allocateExtensiblePreparation()','Choose applicable nearest source-side control; F prepares it; then retry admission.',D,'SimulationCoordinator::allocateExtensiblePreparation',side=True,kind='port',target='F')
     p.node('e4',4,'SC::allocateTraversalRequest() [inline]','Ladder / coordinated Stairwell / ForceBridge?',T,'SimulationCoordinator::allocateTraversalRequest',kind='decision')
-    p.node('el',4,'SC::tryGrantLadderAdmissions()','Entry: direction, capacity, spacing. Non-entry grants directly. ForceBridge: tryGrantDoorQueue(). Return e9.', 'src/core/SimulationCoordinatorAdmissions.cpp','SimulationCoordinator::tryGrantLadderAdmissions',side=True,kind='port',target='e9')
+    p.node('el',4,'SC::tryGrantLadderAdmissions()','Entry: direction, capacity, spacing. Non-entry grants directly. ForceBridge: tryGrantDoorQueue(). Return e9.', 'core/src/SimulationCoordinatorAdmissions.cpp','SimulationCoordinator::tryGrantLadderAdmissions',side=True,kind='port',target='e9')
     p.node('e5',5,'SC::allocateTraversalRequest() [inline]','Ordinary Door/Bulkhead: Broken, Unavailable or already usable?',T,'SimulationCoordinator::allocateTraversalRequest',kind='decision')
     p.node('eu',5,'SC::tryGrantDoorQueue()','If physical passage, willingness and queue/lane safety pass, grant. Frozen/unavailable unusable aperture → I.',Q,'SimulationCoordinator::tryGrantDoorQueue',side=True,kind='port',target='e9')
     p.node('e6',6,'SC::allocateTraversalRequest() [inline]','RemoteControlled activation mode?',T,'SimulationCoordinator::allocateTraversalRequest',kind='decision')
@@ -284,7 +284,7 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 
     p = Panel('G',0,2,'Transport & chamber journeys','Source/target Sector selects boarding, riding or exit. This panel is called from E for every corresponding journey edge.')
     p.node('g0',0,'SC::allocateLiftTraversal() [inline]','Outside → inside: g1 boarding. Both inside: g4 riding. Inside → outside: g6 exit.',L,'SimulationCoordinator::allocateLiftTraversal',kind='decision')
-    p.node('gp',0,'SC::allocateOpenPlatformLiftTraversal()','Open Platform lift: same Room Sector; use mount/body role, occupant and Stop intent rather than Sector change.', 'src/core/SimulationCoordinatorPlatformLifts.cpp','SimulationCoordinator::allocateOpenPlatformLiftTraversal',side=True)
+    p.node('gp',0,'SC::allocateOpenPlatformLiftTraversal()','Open Platform lift: same Room Sector; use mount/body role, occupant and Stop intent rather than Sector change.', 'core/src/SimulationCoordinatorPlatformLifts.cpp','SimulationCoordinator::allocateOpenPlatformLiftTraversal',side=True)
     p.node('g1',1,'SC::allocateLiftBoarding()','Recheck landing/destination willingness and feasible complete journey; attach ticket and Trip intent.',L,'SimulationCoordinator::allocateLiftBoarding')
     p.node('g2',2,'SC::allocateLiftBoarding() [inline]','Locally boardable shared journey, or successful landing call?',L,'SimulationCoordinator::allocateLiftBoarding',kind='decision')
     p.node('gf',2,'F · Call / select control','Call if needed. None may only share a locally available accepted journey; no capability/permission bypass.',side=True,kind='port',target='F')
@@ -292,15 +292,15 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
     p.node('g4',4,'SC::allocateLiftRiding()','Occupant only: reuse accepted destination, or serialize requestLiftSelectorDestination(). Remote onboard selection is Lift/Platform only, not Shuttle.',L,'SimulationCoordinator::allocateLiftRiding')
     p.node('g5',5,'SC::advanceLiftResources()','Interlocked close → travel → open → disembark → board. Move passengers with vehicle; grant ride at scheduled destination.',K,'SimulationCoordinator::advanceLiftResources')
     p.node('g6',6,'SC::allocateLiftDisembarking()','Reserve safe exit; walk within car/carriage as needed; retain occupancy until crossing commit. Committed exits survive later authorization loss.',L,'SimulationCoordinator::allocateLiftDisembarking')
-    p.node('g7',7,'SC::allocateAirlockTraversal()','Alternative Airlock branch: entry control/shared accepted call, entry/exit clearance, same-side batch capacity, interlocked Door admission.', 'src/core/SimulationCoordinatorAirlocks.cpp','SimulationCoordinator::allocateAirlockTraversal')
-    p.node('g8',8,'SC::allocateSecurityScannerTraversal()','Alternative Chamber branch: fixed entry/exit, exit fit and Location access; automatic capacity-one Scanner or batched Decontamination.', 'src/core/SimulationCoordinatorSecurityScanners.cpp','SimulationCoordinator::allocateSecurityScannerTraversal')
+    p.node('g7',7,'SC::allocateAirlockTraversal()','Alternative Airlock branch: entry control/shared accepted call, entry/exit clearance, same-side batch capacity, interlocked Door admission.', 'core/src/SimulationCoordinatorAirlocks.cpp','SimulationCoordinator::allocateAirlockTraversal')
+    p.node('g8',8,'SC::allocateSecurityScannerTraversal()','Alternative Chamber branch: fixed entry/exit, exit fit and Location access; automatic capacity-one Scanner or batched Decontamination.', 'core/src/SimulationCoordinatorSecurityScanners.cpp','SimulationCoordinator::allocateSecurityScannerTraversal')
     p.node('g9',9,'SC::grantTraversalRequest()','Each journey leg grants only when ready. Airlock/Chamber close–process–open progression is resource-owned; return E/H for physical commit.',T,'SimulationCoordinator::grantTraversalRequest',kind='port',target='H')
     p.edge('g0','gp','platform'); p.edge('g0','g1','boarding'); p.edge('g1','g2'); p.edge('g2','gf','call needed'); p.edge('g2','g3','ready'); p.edge('g3','g4','after entry commit',True); p.edge('g4','g5','destination accepted'); p.edge('g5','g6','destination reached'); p.edge('g6','g9','exit ready',True); p.edge('g7','g9','cycle/exit ready',True); p.edge('g8','g9','scan/process/exit ready',True)
     p.end('g7 and g8 are independent entries from E, not stages after a Lift. Vehicle rides and entry/exit are separate requests. Platform contiguous Lift legs form one final-Stop journey; Shuttle carriage/door assignment is coordinated. Interrupted or Broken journeys use safe-exit recovery in I, never teleportation.')
 
     p = Panel('H',1,2,'Permit, motion & commit','Runtime movement preserves physical source membership until a valid authorized commit; source and target may coincide in 2D but lie on different Layers.')
     p.node('h0',0,'Agent::allocateTraversal()','Adopt Granted permit; record accepted exit pose, coalesce contiguous platform legs, and apply permitted waypoint skipping.',A,'Agent::allocateTraversal')
-    p.node('h1',1,'Door::selectAgentCrossing()','Door/Bulkhead: tallest allowed supported pose fitting aperture, including frozen opening; accepted exit pose may be grandfathered.', 'src/core/Door.cpp','Door::selectAgentCrossing')
+    p.node('h1',1,'Door::selectAgentCrossing()','Door/Bulkhead: tallest allowed supported pose fitting aperture, including frozen opening; accepted exit pose may be grandfathered.', 'core/src/Door.cpp','Door::selectAgentCrossing')
     p.node('h2',2,'Agent::allocateTraversal()','Set crossing pose/duration; release Furniture use on departure. Moving Escalator samples walk/stand once per admitted task.',A,'Agent::allocateTraversal')
     p.node('h3',3,'Agent::update() [inline]','Ordinary Door crossing duration still running?',A,'Agent::update',kind='decision')
     p.node('hw',3,'Agent::update()','Decrement crossing ticks in place; continue on a later tick.',A,'Agent::update',side=True,kind='port',target='h3')
@@ -308,7 +308,7 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
     p.node('hi',4,'Agent::update()','Enter AwaitingTraversalCommit without walking toward the far-side coincident/ride vertex.',A,'Agent::update',side=True,kind='port',target='h8')
     p.node('h5',5,'Agent::update() [inline]','Ladder mount not yet reached horizontally?',A,'Agent::update',kind='decision')
     p.node('hl',5,'Agent::moveToPosition()','First walk to Ladder source x; only then begin vertical climb.',A,'Agent::moveToPosition',side=True,kind='port',target='h5')
-    p.node('h6',6,'Edge::getTraversalSpeed()','Resolve type-specific climb/stair/escalator speed; fallback to climb/walk; apply crossing pose ratio. Vehicle translation runs in G.', 'include/core/Edge.h','getTraversalSpeed')
+    p.node('h6',6,'Edge::getTraversalSpeed()','Resolve type-specific climb/stair/escalator speed; fallback to climb/walk; apply crossing pose ratio. Vehicle translation runs in G.', 'core/include/core/Edge.h','getTraversalSpeed')
     p.node('h7',7,'Agent::moveToPosition()','Move toward destination; wait if not reached. A Location leg may stop/commit early at the next resource queue boundary.',A,'Agent::moveToPosition')
     p.node('h8',8,'SC::commitTraversal() [inline]','Request/permit live, owner matched, endpoint or in-place rule and reservations/sector/interlocks valid?',T,'SimulationCoordinator::commitTraversal',kind='decision')
     p.node('hc',8,'I · Commit not accepted','Stay AwaitingTraversalCommit; cleanup handles timeout/expiry. Never transfer without authority.',side=True,kind='failure',target='I')
@@ -320,7 +320,7 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
     p.node('i0',0,'SC::updateTraversalProgressAndTimeouts()','Observe queue/approach/permit progress. Permit expiry returns request to Pending; local-goal retries may deny LocalGoalUnreachable.',Q,'SimulationCoordinator::updateTraversalProgressAndTimeouts')
     p.node('i1',1,'Agent::considerTraversalReplan() [inline]','Unpermitted queued request waited to a replan boundary?',A,'Agent::considerTraversalReplan',kind='decision')
     p.node('iw',1,'E · Continue waiting','Move to assigned queue/local goal; repeat allocation. Already served Airlock/Chamber batch reservation suppresses voluntary replanning.',side=True,kind='port',target='E')
-    p.node('i2',2,'World::beginVoluntaryRoutePlanning()','Retain valid Path/intent; sample interval; return B. Route persistence prevents marginal voluntary switching.','src/core/World.cpp','World::beginVoluntaryRoutePlanning',kind='port',target='B')
+    p.node('i2',2,'World::beginVoluntaryRoutePlanning()','Retain valid Path/intent; sample interval; return B. Route persistence prevents marginal voluntary switching.','core/src/World.cpp','World::beginVoluntaryRoutePlanning',kind='port',target='B')
     p.node('i3',3,'SC::replanAgentAfterAuthorizationRefusal()','Hard invalidation (permission, fit or stale Path): mandatory planning; current valid commitment must finish first.',G,'SimulationCoordinator::replanAgentAfterAuthorizationRefusal')
     p.node('i4',4,'SC::hasCommittedMovement() [inline]','Crossing or occupied journey still committed?',G,'SimulationCoordinator::hasCommittedMovement',kind='decision')
     p.node('ic',4,'SC::requestLiftPassengerSafeExit()','Retain passenger/exit guarantees; defer ordinary planning until safe completion. Broken vehicle may have to wait aligned/open.',L,'SimulationCoordinator::requestLiftPassengerSafeExit',side=True,kind='port',target='G')

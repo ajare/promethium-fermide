@@ -9,7 +9,7 @@ Release validation is recorded in
 
 Ticket #164 closes the Agent behaviour feature with one public-facade workflow and
 an explicit prerequisite coverage map. The automated workflow is
-now split between `src/headless/smoke/behaviours/Workflow.cpp` and
+now split between `headless/src/smoke/behaviours/Workflow.cpp` and
 `WorkflowEditor.cpp` (#288); it uses the real fixed-tick pipeline, Lua 5.4/sol2
 adapter, registry package, World persistence, document history, and extracted
 ImGui panels. It does not inspect Lua stacks, command
@@ -107,7 +107,7 @@ Windows. The same CTest names and dependency pins apply.
 
 ## Reusable protected execution (#456)
 
-`src/core/ScriptSandbox.h` and `ScriptSandbox.cpp` are private execution
+`core/src/ScriptSandbox.h` and `ScriptSandbox.cpp` are private execution
 infrastructure, used by both behaviour preflight and the live per-World adapter.
 They own budget accounting/hooks, protected execution and marshalling,
 tracebacks, private deterministic environments, immutable values, declared-module

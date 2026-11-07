@@ -63,7 +63,7 @@ edits uses canonical reconstruction rather than previous placement retention.
 ## Reproduction and regression coverage
 
 The deterministic builder is `buildButtonDemo` in
-`src/headless/smoke/editor/ButtonDemo.h`. The Editor check builds all mixed owners
+`headless/src/smoke/editor/ButtonDemo.h`. The Editor check builds all mixed owners
 in opposite orders, writes a normal document to its invocation's temporary root,
 and compares the bundled document against the builder. Comparisons use centre,
 vertical rank, control name and authored Permission requirements, never Button,

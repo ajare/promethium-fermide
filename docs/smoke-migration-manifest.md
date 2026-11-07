@@ -302,7 +302,7 @@ contract/probe invocations are not new scenario owners. See
 <!-- current-ownership-end -->
 Simulation Observation was migrated in #280. Its stable registered check
 is `simulation/observation`; its old path was
-`src/headless/SimulationObservationSmokeChecks.cpp`. It is no longer compiled
+`headless/src/SimulationObservationSmokeChecks.cpp`. It is no longer compiled
 or invoked by the legacy aggregate. CTest executes it only as `smoke-simulation`.
 #281 migrates `WallRenderSmokeChecks.cpp` to `smoke/render/Walls.cpp`, registered
 as `render/walls`. Neither the legacy aggregate nor `--render-checks` invokes
@@ -407,7 +407,7 @@ all checked-in World fixtures; no source-location or working-directory lookup
 remains. Original workloads, reference oracles, Path digests, and all 241 assertion
 call sites remain in their new owners, including explicit tool assertions.
 The restoration benchmark and World export command now have standalone tool
-entry points under `src/headless/tools/` (#303).
+entry points under `headless/src/tools/` (#303).
 The population workload/assertions compile once in `pf-routing-population-support`,
 shared by Routing and the export tool; smoke does not export, sample memory, or
 report benchmark timings. Legacy aggregate calls and suite declarations are removed;
@@ -434,7 +434,7 @@ keep those owners. Route costs remain legacy-owned for #293.
 The legacy aggregate is not yet a compatibility orchestrator; converting it is
 follow-up work. Other overlapping legacy CTest selections are unchanged.
 
-Paths in the table are relative to `src/headless/`.
+Paths in the table are relative to `headless/src/`.
 
 #294 completes Render with 78 stable registrations. Ten legacy sources move to
 `smoke/render`: draw order (including Window/Background composition), three Door

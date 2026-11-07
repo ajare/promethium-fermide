@@ -108,7 +108,7 @@ then format outside that lock. The endpoint uses pinned MIT cpp-httplib in the
 separate `pf-metrics` library. The collector also catches observation failures so
 they cannot interrupt simulation.
 
-`src/headless/smoke/metrics/Metrics.cpp` checks exposition escaping, non-finite
+`headless/src/smoke/metrics/Metrics.cpp` checks exposition escaping, non-finite
 values, normalized family collisions, HTTP routing/content type, port conflicts,
 concurrent scrapes, lifecycle counters, and tick sampling across a multi-tick
 update through the standard smoke-module interface. The 500-Agent scale smoke

@@ -161,21 +161,21 @@ For a Sector Ladder, the capacity position remains an **admission reservation** 
 
 | Responsibility | Function |
 |---|---|
-| Create the Sector Ladder and resource | `src/core/World.cpp: World::addSectorLadder()` |
-| Derive Ladder capacity positions | `src/core/World.cpp: World::createLadderTraversalResource()` |
-| Configure endpoint queue lanes | `src/core/World.cpp: World::configureLadderQueueLanes()` |
-| Create endpoint/mount graph topology | `src/core/Graph.cpp: Graph::processLadderObject()` |
-| Join endpoints with the climbing edge | `src/core/Graph.cpp: Graph::processCrossLevelVertices()` and `src/core/LadderSectorObject.cpp: LadderSectorObject::createCrossLevelEdge()` |
-| Approach a path vertex / detect early queue tails | `src/core/Agent.cpp: Agent::moveToVertex()` and `src/core/World.cpp: World::stopForAvailableQueuePosition()` |
-| Create traversal intent | `src/core/Agent.cpp: Agent::collectTraversalIntent()` and `src/core/World.cpp: World::createTraversalRequest()` |
-| Decide whether an edge claims Ladder capacity | `src/core/World.cpp: World::isLadderAdmission()` |
-| Establish direction and logical order | `src/core/World.cpp: World::attachLadderAdmissionRequest()` |
-| Attach and physically arrange waiters | `src/core/World.cpp: World::attachQueueTicket()` and `World::refreshQueuePositions()` |
-| Allocate extension/admission | `src/core/Agent.cpp: Agent::allocateTraversal()` and `src/core/World.cpp: World::allocateTraversalRequest()` |
-| Decide when the next Agent can climb | `src/core/World.cpp: World::tryGrantLadderAdmissions()` |
-| Keep climbing entries physically spaced | `src/core/World.cpp: World::ladderEntryHasClearedSpacing()` |
-| Walk or climb | `src/core/Agent.cpp: Agent::update()` |
-| Commit climb and release capacity | `src/core/Agent.cpp: Agent::commitTraversal()` and `src/core/World.cpp: World::commitTraversal()` |
-| Release queue/reservation ownership | `src/core/World.cpp: World::releaseLadderAdmission()` |
-| Release dedicated Ladder-sector occupancy | `src/core/World.cpp: World::releaseLadderOccupancy()` |
-| Clean completed request/permit state | `src/core/Agent.cpp: Agent::cleanupTraversal()` |
+| Create the Sector Ladder and resource | `core/src/World.cpp: World::addSectorLadder()` |
+| Derive Ladder capacity positions | `core/src/World.cpp: World::createLadderTraversalResource()` |
+| Configure endpoint queue lanes | `core/src/World.cpp: World::configureLadderQueueLanes()` |
+| Create endpoint/mount graph topology | `core/src/Graph.cpp: Graph::processLadderObject()` |
+| Join endpoints with the climbing edge | `core/src/Graph.cpp: Graph::processCrossLevelVertices()` and `core/src/LadderSectorObject.cpp: LadderSectorObject::createCrossLevelEdge()` |
+| Approach a path vertex / detect early queue tails | `core/src/Agent.cpp: Agent::moveToVertex()` and `core/src/World.cpp: World::stopForAvailableQueuePosition()` |
+| Create traversal intent | `core/src/Agent.cpp: Agent::collectTraversalIntent()` and `core/src/World.cpp: World::createTraversalRequest()` |
+| Decide whether an edge claims Ladder capacity | `core/src/World.cpp: World::isLadderAdmission()` |
+| Establish direction and logical order | `core/src/World.cpp: World::attachLadderAdmissionRequest()` |
+| Attach and physically arrange waiters | `core/src/World.cpp: World::attachQueueTicket()` and `World::refreshQueuePositions()` |
+| Allocate extension/admission | `core/src/Agent.cpp: Agent::allocateTraversal()` and `core/src/World.cpp: World::allocateTraversalRequest()` |
+| Decide when the next Agent can climb | `core/src/World.cpp: World::tryGrantLadderAdmissions()` |
+| Keep climbing entries physically spaced | `core/src/World.cpp: World::ladderEntryHasClearedSpacing()` |
+| Walk or climb | `core/src/Agent.cpp: Agent::update()` |
+| Commit climb and release capacity | `core/src/Agent.cpp: Agent::commitTraversal()` and `core/src/World.cpp: World::commitTraversal()` |
+| Release queue/reservation ownership | `core/src/World.cpp: World::releaseLadderAdmission()` |
+| Release dedicated Ladder-sector occupancy | `core/src/World.cpp: World::releaseLadderOccupancy()` |
+| Clean completed request/permit state | `core/src/Agent.cpp: Agent::cleanupTraversal()` |

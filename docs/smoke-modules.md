@@ -69,7 +69,7 @@ summary. Execution records are flushed before process teardown.
 
 ## Narrow support and ownership
 
-`pf-smoke-support` (`src/headless/smoke/support/Smoke.*`) supplies failure handling,
+`pf-smoke-support` (`headless/src/smoke/support/Smoke.*`) supplies failure handling,
 CLI/reporting, process setup, required fixture lookup, and an RAII temporary root.
 The harness library has no production, ImGui, editor, renderer, or HTTP dependencies.
 Opt-in `PathFixture.h` and `SimulationTrace.h` provide narrow core-only Path

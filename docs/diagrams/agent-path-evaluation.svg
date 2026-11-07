@@ -60,9 +60,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="480" y="627.0" class="body" text-anchor="middle">
 <tspan x="480" dy="0">Accept destination Marker and explicitly selected Agent action.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorAgents.cpp#L398">
+<a href="../../core/src/SimulationCoordinatorAgents.cpp#L398">
 <text x="480" y="716.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorAgents.cpp:398</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorAgents.cpp:398</tspan>
 </text>
 </a>
 </g>
@@ -78,9 +78,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="480" y="902.0" class="body" text-anchor="middle">
 <tspan x="480" dy="0">Sample the planning interval; retain goal and remain stationary.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorAgents.cpp#L525">
+<a href="../../core/src/SimulationCoordinatorAgents.cpp#L525">
 <text x="480" y="991.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorAgents.cpp:525</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorAgents.cpp:525</tspan>
 </text>
 </a>
 </g>
@@ -111,9 +111,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="480" y="1452.0" class="body" text-anchor="middle">
 <tspan x="480" dy="0">ResourceAdvancement: advance devices, vehicles, Airlocks and Chambers.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorTick.cpp#L540">
+<a href="../../core/src/SimulationCoordinatorTick.cpp#L540">
 <text x="480" y="1541.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorTick.cpp:540</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorTick.cpp:540</tspan>
 </text>
 </a>
 </g>
@@ -176,9 +176,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Cleanup: progress/timeouts, task cleanup, interaction outcomes, planning</tspan>
 <tspan x="480" dy="21">expiry, movement goals.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorTick.cpp#L540">
+<a href="../../core/src/SimulationCoordinatorTick.cpp#L540">
 <text x="480" y="2641.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorTick.cpp:540</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorTick.cpp:540</tspan>
 </text>
 </a>
 </g>
@@ -194,9 +194,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="480" y="2827.0" class="body-small" text-anchor="middle">
 <tspan x="480" dy="0">Goal completed, cancelled or lost?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorAgents.cpp#L739">
+<a href="../../core/src/SimulationCoordinatorAgents.cpp#L739">
 <text x="480" y="2934.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorAgents.cpp:739</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorAgents.cpp:739</tspan>
 </text>
 </a>
 </g>
@@ -213,9 +213,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Publish DestinationReached / MovementCancelled / RouteLost; execute selected</tspan>
 <tspan x="480" dy="21">Action on arrival.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorAgents.cpp#L739">
+<a href="../../core/src/SimulationCoordinatorAgents.cpp#L739">
 <text x="480" y="3191.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorAgents.cpp:739</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorAgents.cpp:739</tspan>
 </text>
 </a>
 </g>
@@ -234,9 +234,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1185" dy="21">tick.</tspan>
 </text>
 </a>
-<a href="../../src/core/SimulationCoordinatorTick.cpp#L722">
+<a href="../../core/src/SimulationCoordinatorTick.cpp#L722">
 <text x="1185" y="2916.0" class="ref" text-anchor="middle">
-<tspan x="1185" dy="0">src/core/SimulationCoordinatorTick.cpp:722</tspan>
+<tspan x="1185" dy="0">core/src/SimulationCoordinatorTick.cpp:722</tspan>
 </text>
 </a>
 </g>
@@ -289,9 +289,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Graph, target fit, destination occupancy</tspan>
 <tspan x="1935" dy="21">and Location access valid?</tspan>
 </text>
-<a href="../../src/core/Pathing.cpp#L640">
+<a href="../../core/src/Pathing.cpp#L640">
 <text x="1935" y="734.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Pathing.cpp:640</tspan>
+<tspan x="1935" dy="0">core/src/Pathing.cpp:640</tspan>
 </text>
 </a>
 </g>
@@ -310,9 +310,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="2640" dy="21">retained valid Path.</tspan>
 </text>
 </a>
-<a href="../../src/core/Pathing.cpp#L640">
+<a href="../../core/src/Pathing.cpp#L640">
 <text x="2640" y="716.0" class="ref" text-anchor="middle">
-<tspan x="2640" dy="0">src/core/Pathing.cpp:640</tspan>
+<tspan x="2640" dy="0">core/src/Pathing.cpp:640</tspan>
 </text>
 </a>
 </g>
@@ -329,9 +329,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Infer source when omitted; seed connected floor interval endpoints, never</tspan>
 <tspan x="1935" dy="21">split controlled edges.</tspan>
 </text>
-<a href="../../src/core/Graph.cpp#L150">
+<a href="../../core/src/Graph.cpp#L150">
 <text x="1935" y="991.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Graph.cpp:150</tspan>
+<tspan x="1935" dy="0">core/src/Graph.cpp:150</tspan>
 </text>
 </a>
 </g>
@@ -348,9 +348,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Freeze profile, Mobility and observations; capture non-Location traversal</tspan>
 <tspan x="1935" dy="21">inputs.</tspan>
 </text>
-<a href="../../src/core/Pathing.cpp#L111">
+<a href="../../core/src/Pathing.cpp#L111">
 <text x="1935" y="1266.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Pathing.cpp:111</tspan>
+<tspan x="1935" dy="0">core/src/Pathing.cpp:111</tspan>
 </text>
 </a>
 </g>
@@ -366,9 +366,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="1935" y="1452.0" class="body-small" text-anchor="middle">
 <tspan x="1935" dy="0">runSearch: Local-depth routes present?</tspan>
 </text>
-<a href="../../src/core/Pathing.cpp#L640">
+<a href="../../core/src/Pathing.cpp#L640">
 <text x="1935" y="1559.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Pathing.cpp:640</tspan>
+<tspan x="1935" dy="0">core/src/Pathing.cpp:640</tspan>
 </text>
 </a>
 </g>
@@ -385,9 +385,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="2640" dy="0">Search depth-continuous states; Local depth</tspan>
 <tspan x="2640" dy="21">is a secondary objective.</tspan>
 </text>
-<a href="../../src/core/Pathing.cpp#L474">
+<a href="../../core/src/Pathing.cpp#L474">
 <text x="2640" y="1541.0" class="ref" text-anchor="middle">
-<tspan x="2640" dy="0">src/core/Pathing.cpp:474</tspan>
+<tspan x="2640" dy="0">core/src/Pathing.cpp:474</tspan>
 </text>
 </a>
 </g>
@@ -404,9 +404,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Expand minimum-priority vertex. Blocking</tspan>
 <tspan x="1935" dy="21">Marker is intermediate?</tspan>
 </text>
-<a href="../../src/core/Pathing.cpp#L640">
+<a href="../../core/src/Pathing.cpp#L640">
 <text x="1935" y="1834.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Pathing.cpp:640</tspan>
+<tspan x="1935" dy="0">core/src/Pathing.cpp:640</tspan>
 </text>
 </a>
 </g>
@@ -425,9 +425,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="2640" dy="21">destination may finish.</tspan>
 </text>
 </a>
-<a href="../../src/core/Pathing.cpp#L640">
+<a href="../../core/src/Pathing.cpp#L640">
 <text x="2640" y="1816.0" class="ref" text-anchor="middle">
-<tspan x="2640" dy="0">src/core/Pathing.cpp:640</tspan>
+<tspan x="2640" dy="0">core/src/Pathing.cpp:640</tspan>
 </text>
 </a>
 </g>
@@ -459,9 +459,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Arc cost exists and improves the target</tspan>
 <tspan x="1935" dy="21">score?</tspan>
 </text>
-<a href="../../src/core/Pathing.cpp#L640">
+<a href="../../core/src/Pathing.cpp#L640">
 <text x="1935" y="2384.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Pathing.cpp:640</tspan>
+<tspan x="1935" dy="0">core/src/Pathing.cpp:640</tspan>
 </text>
 </a>
 </g>
@@ -480,9 +480,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="2640" dy="21">frontier until target or exhaustion.</tspan>
 </text>
 </a>
-<a href="../../src/core/Pathing.cpp#L640">
+<a href="../../core/src/Pathing.cpp#L640">
 <text x="2640" y="2366.0" class="ref" text-anchor="middle">
-<tspan x="2640" dy="0">src/core/Pathing.cpp:640</tspan>
+<tspan x="2640" dy="0">core/src/Pathing.cpp:640</tspan>
 </text>
 </a>
 </g>
@@ -499,9 +499,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Update predecessor, perceived score, duration and priority; reconstruct</tspan>
 <tspan x="1935" dy="21">reached Path.</tspan>
 </text>
-<a href="../../src/core/Pathing.cpp#L640">
+<a href="../../core/src/Pathing.cpp#L640">
 <text x="1935" y="2641.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Pathing.cpp:640</tspan>
+<tspan x="1935" dy="0">core/src/Pathing.cpp:640</tspan>
 </text>
 </a>
 </g>
@@ -517,9 +517,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="1935" y="2827.0" class="body-small" text-anchor="middle">
 <tspan x="1935" dy="0">Search found a Path?</tspan>
 </text>
-<a href="../../src/core/Pathing.cpp#L640">
+<a href="../../core/src/Pathing.cpp#L640">
 <text x="1935" y="2934.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Pathing.cpp:640</tspan>
+<tspan x="1935" dy="0">core/src/Pathing.cpp:640</tspan>
 </text>
 </a>
 </g>
@@ -540,9 +540,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="2640" dy="21">observations.</tspan>
 </text>
 </a>
-<a href="../../src/core/Pathing.cpp#L142">
+<a href="../../core/src/Pathing.cpp#L142">
 <text x="2640" y="2916.0" class="ref" text-anchor="middle">
-<tspan x="2640" dy="0">src/core/Pathing.cpp:142</tspan>
+<tspan x="2640" dy="0">core/src/Pathing.cpp:142</tspan>
 </text>
 </a>
 </g>
@@ -561,9 +561,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="21">selected Path. No Path → I.</tspan>
 </text>
 </a>
-<a href="../../src/core/SimulationCoordinatorAgents.cpp#L628">
+<a href="../../core/src/SimulationCoordinatorAgents.cpp#L628">
 <text x="1935" y="3191.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/SimulationCoordinatorAgents.cpp:628</tspan>
+<tspan x="1935" dy="0">core/src/SimulationCoordinatorAgents.cpp:628</tspan>
 </text>
 </a>
 </g>
@@ -652,9 +652,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Target requiredPoseFor() and</tspan>
 <tspan x="3390" dy="21">canAgentAccessLocation() pass?</tspan>
 </text>
-<a href="../../src/core/Pathing.cpp#L152">
+<a href="../../core/src/Pathing.cpp#L152">
 <text x="3390" y="734.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/Pathing.cpp:152</tspan>
+<tspan x="3390" dy="0">core/src/Pathing.cpp:152</tspan>
 </text>
 </a>
 </g>
@@ -674,9 +674,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="4095" dy="21">/ PreparationSide / NoContinuation).</tspan>
 </text>
 </a>
-<a href="../../src/core/Pathing.cpp#L208">
+<a href="../../core/src/Pathing.cpp#L208">
 <text x="4095" y="716.0" class="ref" text-anchor="middle">
-<tspan x="4095" dy="0">src/core/Pathing.cpp:208</tspan>
+<tspan x="4095" dy="0">core/src/Pathing.cpp:208</tspan>
 </text>
 </a>
 </g>
@@ -693,9 +693,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Derive source = edge.getOtherVertex(target), observed Sector, rise, length</tspan>
 <tspan x="3390" dy="21">and requiresButton().</tspan>
 </text>
-<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<a href="../../core/src/RouteTraversalCapture.cpp#L22">
 <text x="3390" y="991.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+<tspan x="3390" dy="0">core/src/RouteTraversalCapture.cpp:22</tspan>
 </text>
 </a>
 </g>
@@ -713,9 +713,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Traversal Mobility AND required Buttons</tspan>
 <tspan x="3390" dy="21">allowed in this search pass?</tspan>
 </text>
-<a href="../../src/core/RouteTraversalInputs.cpp#L11">
+<a href="../../core/src/RouteTraversalInputs.cpp#L11">
 <text x="3390" y="1284.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/RouteTraversalInputs.cpp:11</tspan>
+<tspan x="3390" dy="0">core/src/RouteTraversalInputs.cpp:11</tspan>
 </text>
 </a>
 </g>
@@ -736,9 +736,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="4095" dy="21">necessity.</tspan>
 </text>
 </a>
-<a href="../../src/core/RouteTraversalInputs.cpp#L11">
+<a href="../../core/src/RouteTraversalInputs.cpp#L11">
 <text x="4095" y="1266.0" class="ref" text-anchor="middle">
-<tspan x="4095" dy="0">src/core/RouteTraversalInputs.cpp:11</tspan>
+<tspan x="4095" dy="0">core/src/RouteTraversalInputs.cpp:11</tspan>
 </text>
 </a>
 </g>
@@ -755,9 +755,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="3390" y="1461.5" class="body-small" text-anchor="middle">
 <tspan x="3390" dy="0">Location / Gap / Window edge?</tspan>
 </text>
-<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<a href="../../core/src/RouteTraversalCapture.cpp#L22">
 <text x="3390" y="1559.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+<tspan x="3390" dy="0">core/src/RouteTraversalCapture.cpp:22</tspan>
 </text>
 </a>
 </g>
@@ -778,9 +778,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="4095" dy="21">aperture only. Return c8.</tspan>
 </text>
 </a>
-<a href="../../src/core/SectorEdge.cpp#L53">
+<a href="../../core/src/SectorEdge.cpp#L53">
 <text x="4095" y="1541.0" class="ref" text-anchor="middle">
-<tspan x="4095" dy="0">src/core/SectorEdge.cpp:53</tspan>
+<tspan x="4095" dy="0">core/src/SectorEdge.cpp:53</tspan>
 </text>
 </a>
 </g>
@@ -799,9 +799,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="21">threshold, transport landing, Airlock or</tspan>
 <tspan x="3390" dy="21">Chamber?</tspan>
 </text>
-<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<a href="../../core/src/RouteTraversalCapture.cpp#L22">
 <text x="3390" y="1834.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+<tspan x="3390" dy="0">core/src/RouteTraversalCapture.cpp:22</tspan>
 </text>
 </a>
 </g>
@@ -822,9 +822,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="4095" dy="21">passage. Return c8.</tspan>
 </text>
 </a>
-<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<a href="../../core/src/RouteTraversalCapture.cpp#L22">
 <text x="4095" y="1816.0" class="ref" text-anchor="middle">
-<tspan x="4095" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+<tspan x="4095" dy="0">core/src/RouteTraversalCapture.cpp:22</tspan>
 </text>
 </a>
 </g>
@@ -841,9 +841,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="3390" y="2011.5" class="body-small" text-anchor="middle">
 <tspan x="3390" dy="0">Ladder or LadderMount edge?</tspan>
 </text>
-<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<a href="../../core/src/RouteTraversalCapture.cpp#L22">
 <text x="3390" y="2109.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+<tspan x="3390" dy="0">core/src/RouteTraversalCapture.cpp:22</tspan>
 </text>
 </a>
 </g>
@@ -863,9 +863,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="4095" dy="21">adherence. Return c8.</tspan>
 </text>
 </a>
-<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<a href="../../core/src/RouteTraversalCapture.cpp#L22">
 <text x="4095" y="2091.0" class="ref" text-anchor="middle">
-<tspan x="4095" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+<tspan x="4095" dy="0">core/src/RouteTraversalCapture.cpp:22</tspan>
 </text>
 </a>
 </g>
@@ -882,9 +882,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="3390" y="2286.5" class="body-small" text-anchor="middle">
 <tspan x="3390" dy="0">Staircase/Stairwell body or Mount edge?</tspan>
 </text>
-<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<a href="../../core/src/RouteTraversalCapture.cpp#L22">
 <text x="3390" y="2384.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+<tspan x="3390" dy="0">core/src/RouteTraversalCapture.cpp:22</tspan>
 </text>
 </a>
 </g>
@@ -904,9 +904,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="4095" dy="21">Staircase. Return c8.</tspan>
 </text>
 </a>
-<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<a href="../../core/src/RouteTraversalCapture.cpp#L22">
 <text x="4095" y="2366.0" class="ref" text-anchor="middle">
-<tspan x="4095" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+<tspan x="4095" dy="0">core/src/RouteTraversalCapture.cpp:22</tspan>
 </text>
 </a>
 </g>
@@ -923,9 +923,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">ForceBridge: Room fit, extension, approach side/control. Lift/Shuttle/Mount:</tspan>
 <tspan x="3390" dy="21">boarding, ride or exit; feasible landing/journey.</tspan>
 </text>
-<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<a href="../../core/src/RouteTraversalCapture.cpp#L22">
 <text x="3390" y="2641.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+<tspan x="3390" dy="0">core/src/RouteTraversalCapture.cpp:22</tspan>
 </text>
 </a>
 </g>
@@ -942,9 +942,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">For the matching type only: motion + known/expected wait + interaction +</tspan>
 <tspan x="3390" dy="21">effort + crowding + risk + uncertainty.</tspan>
 </text>
-<a href="../../src/core/RouteTraversalInputs.cpp#L11">
+<a href="../../core/src/RouteTraversalInputs.cpp#L11">
 <text x="3390" y="2916.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/RouteTraversalInputs.cpp:11</tspan>
+<tspan x="3390" dy="0">core/src/RouteTraversalInputs.cpp:11</tspan>
 </text>
 </a>
 </g>
@@ -963,9 +963,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="21">objective duration; cache by decision/pass.</tspan>
 </text>
 </a>
-<a href="../../src/core/Pathing.cpp#L208">
+<a href="../../core/src/Pathing.cpp#L208">
 <text x="3390" y="3191.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/Pathing.cpp:208</tspan>
+<tspan x="3390" dy="0">core/src/Pathing.cpp:208</tspan>
 </text>
 </a>
 </g>
@@ -1055,9 +1055,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="480" y="3762.0" class="body" text-anchor="middle">
 <tspan x="480" dy="0">Validate destination occupancy/access; sync pose; enter MovingToVertex.</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L1765">
+<a href="../../core/src/Agent.cpp#L1765">
 <text x="480" y="3851.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/Agent.cpp:1765</tspan>
+<tspan x="480" dy="0">core/src/Agent.cpp:1765</tspan>
 </text>
 </a>
 </g>
@@ -1075,9 +1075,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Can bypass this intermediate physical</tspan>
 <tspan x="480" dy="21">waypoint?</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L1898">
+<a href="../../core/src/Agent.cpp#L1898">
 <text x="480" y="4144.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/Agent.cpp:1898</tspan>
+<tspan x="480" dy="0">core/src/Agent.cpp:1898</tspan>
 </text>
 </a>
 </g>
@@ -1095,9 +1095,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1185" dy="21">same Local depth; no required source action</tspan>
 <tspan x="1185" dy="21">or Chamber waypoint.</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L1898">
+<a href="../../core/src/Agent.cpp#L1898">
 <text x="1185" y="4126.0" class="ref" text-anchor="middle">
-<tspan x="1185" dy="0">src/core/Agent.cpp:1898</tspan>
+<tspan x="1185" dy="0">core/src/Agent.cpp:1898</tspan>
 </text>
 </a>
 </g>
@@ -1114,9 +1114,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Use original or skippable target; look through coincident topology-only</tspan>
 <tspan x="480" dy="21">nodes, never skip an action-bearing edge.</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L1956">
+<a href="../../core/src/Agent.cpp#L1956">
 <text x="480" y="4401.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/Agent.cpp:1956</tspan>
+<tspan x="480" dy="0">core/src/Agent.cpp:1956</tspan>
 </text>
 </a>
 </g>
@@ -1133,9 +1133,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Can stop at a reserved waiting position before exact endpoint? Airlock</tspan>
 <tspan x="480" dy="21">occupants keep assigned interior position.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorQueues.cpp#L122">
+<a href="../../core/src/SimulationCoordinatorQueues.cpp#L122">
 <text x="480" y="4676.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorQueues.cpp:122</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorQueues.cpp:122</tspan>
 </text>
 </a>
 </g>
@@ -1152,9 +1152,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">For ordinary Door, threshold row and crossing-width band suffice; do not</tspan>
 <tspan x="480" dy="21">force convergence on vertex centre.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorQueues.cpp#L237">
+<a href="../../core/src/SimulationCoordinatorQueues.cpp#L237">
 <text x="480" y="4951.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorQueues.cpp:237</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorQueues.cpp:237</tspan>
 </text>
 </a>
 </g>
@@ -1171,9 +1171,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Queue boundary, Door arrival band, or exact</tspan>
 <tspan x="480" dy="21">source endpoint reached?</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L1956">
+<a href="../../core/src/Agent.cpp#L1956">
 <text x="480" y="5244.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/Agent.cpp:1956</tspan>
+<tspan x="480" dy="0">core/src/Agent.cpp:1956</tspan>
 </text>
 </a>
 </g>
@@ -1193,9 +1193,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1185" dy="21">approaching.</tspan>
 </text>
 </a>
-<a href="../../src/core/Agent.cpp#L1853">
+<a href="../../core/src/Agent.cpp#L1853">
 <text x="1185" y="5226.0" class="ref" text-anchor="middle">
-<tspan x="1185" dy="0">src/core/Agent.cpp:1853</tspan>
+<tspan x="1185" dy="0">core/src/Agent.cpp:1853</tspan>
 </text>
 </a>
 </g>
@@ -1211,9 +1211,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="480" y="5412.0" class="body-small" text-anchor="middle">
 <tspan x="480" dy="0">This is the final Path node?</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L1956">
+<a href="../../core/src/Agent.cpp#L1956">
 <text x="480" y="5519.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/Agent.cpp:1956</tspan>
+<tspan x="480" dy="0">core/src/Agent.cpp:1956</tspan>
 </text>
 </a>
 </g>
@@ -1233,9 +1233,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1185" dy="21">use.</tspan>
 </text>
 </a>
-<a href="../../src/core/SimulationCoordinatorAgents.cpp#L739">
+<a href="../../core/src/SimulationCoordinatorAgents.cpp#L739">
 <text x="1185" y="5501.0" class="ref" text-anchor="middle">
-<tspan x="1185" dy="0">src/core/SimulationCoordinatorAgents.cpp:739</tspan>
+<tspan x="1185" dy="0">core/src/SimulationCoordinatorAgents.cpp:739</tspan>
 </text>
 </a>
 </g>
@@ -1252,9 +1252,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">WaitingForTraversal with no task: bind next edge, source vertex and</tspan>
 <tspan x="480" dy="21">destination vertex.</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L2006">
+<a href="../../core/src/Agent.cpp#L2006">
 <text x="480" y="5776.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/Agent.cpp:2006</tspan>
+<tspan x="480" dy="0">core/src/Agent.cpp:2006</tspan>
 </text>
 </a>
 </g>
@@ -1271,9 +1271,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Create owned request; attach queue ticket / Ladder admission and extension</tspan>
 <tspan x="480" dy="21">lease where applicable.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorQueues.cpp#L37">
+<a href="../../core/src/SimulationCoordinatorQueues.cpp#L37">
 <text x="480" y="6051.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorQueues.cpp:37</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorQueues.cpp:37</tspan>
 </text>
 </a>
 </g>
@@ -1366,9 +1366,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Recheck opening fit, Location access, manual Door operation and committed-</tspan>
 <tspan x="1935" dy="21">exit pose. Entry/resource gates repeat hard Mobility constraints.</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L2032">
+<a href="../../core/src/Agent.cpp#L2032">
 <text x="1935" y="3851.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Agent.cpp:2032</tspan>
+<tspan x="1935" dy="0">core/src/Agent.cpp:2032</tspan>
 </text>
 </a>
 </g>
@@ -1385,9 +1385,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Destination fit valid, and resource exists</tspan>
 <tspan x="1935" dy="21">if identified?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<a href="../../core/src/SimulationCoordinatorTraversal.cpp#L83">
 <text x="1935" y="4144.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+<tspan x="1935" dy="0">core/src/SimulationCoordinatorTraversal.cpp:83</tspan>
 </text>
 </a>
 </g>
@@ -1421,9 +1421,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Airlock / Chamber / Lift / Shuttle</tspan>
 <tspan x="1935" dy="21">authority?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<a href="../../core/src/SimulationCoordinatorTraversal.cpp#L83">
 <text x="1935" y="4419.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+<tspan x="1935" dy="0">core/src/SimulationCoordinatorTraversal.cpp:83</tspan>
 </text>
 </a>
 </g>
@@ -1456,9 +1456,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="1935" y="4587.0" class="body-small" text-anchor="middle">
 <tspan x="1935" dy="0">Extensible resource not yet admitting?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<a href="../../core/src/SimulationCoordinatorTraversal.cpp#L83">
 <text x="1935" y="4694.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+<tspan x="1935" dy="0">core/src/SimulationCoordinatorTraversal.cpp:83</tspan>
 </text>
 </a>
 </g>
@@ -1478,9 +1478,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="2640" dy="21">admission.</tspan>
 </text>
 </a>
-<a href="../../src/core/SimulationCoordinatorDoors.cpp#L452">
+<a href="../../core/src/SimulationCoordinatorDoors.cpp#L452">
 <text x="2640" y="4676.0" class="ref" text-anchor="middle">
-<tspan x="2640" dy="0">src/core/SimulationCoordinatorDoors.cpp:452</tspan>
+<tspan x="2640" dy="0">core/src/SimulationCoordinatorDoors.cpp:452</tspan>
 </text>
 </a>
 </g>
@@ -1497,9 +1497,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Ladder / coordinated Stairwell /</tspan>
 <tspan x="1935" dy="21">ForceBridge?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<a href="../../core/src/SimulationCoordinatorTraversal.cpp#L83">
 <text x="1935" y="4969.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+<tspan x="1935" dy="0">core/src/SimulationCoordinatorTraversal.cpp:83</tspan>
 </text>
 </a>
 </g>
@@ -1519,9 +1519,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="2640" dy="21">tryGrantDoorQueue(). Return e9.</tspan>
 </text>
 </a>
-<a href="../../src/core/SimulationCoordinatorAdmissions.cpp#L147">
+<a href="../../core/src/SimulationCoordinatorAdmissions.cpp#L147">
 <text x="2640" y="4951.0" class="ref" text-anchor="middle">
-<tspan x="2640" dy="0">src/core/SimulationCoordinatorAdmissions.cpp:147</tspan>
+<tspan x="2640" dy="0">core/src/SimulationCoordinatorAdmissions.cpp:147</tspan>
 </text>
 </a>
 </g>
@@ -1538,9 +1538,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Ordinary Door/Bulkhead: Broken, Unavailable</tspan>
 <tspan x="1935" dy="21">or already usable?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<a href="../../core/src/SimulationCoordinatorTraversal.cpp#L83">
 <text x="1935" y="5244.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+<tspan x="1935" dy="0">core/src/SimulationCoordinatorTraversal.cpp:83</tspan>
 </text>
 </a>
 </g>
@@ -1560,9 +1560,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="2640" dy="21">Frozen/unavailable unusable aperture → I.</tspan>
 </text>
 </a>
-<a href="../../src/core/SimulationCoordinatorQueues.cpp#L736">
+<a href="../../core/src/SimulationCoordinatorQueues.cpp#L736">
 <text x="2640" y="5226.0" class="ref" text-anchor="middle">
-<tspan x="2640" dy="0">src/core/SimulationCoordinatorQueues.cpp:736</tspan>
+<tspan x="2640" dy="0">core/src/SimulationCoordinatorQueues.cpp:736</tspan>
 </text>
 </a>
 </g>
@@ -1578,9 +1578,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="1935" y="5412.0" class="body-small" text-anchor="middle">
 <tspan x="1935" dy="0">RemoteControlled activation mode?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<a href="../../core/src/SimulationCoordinatorTraversal.cpp#L83">
 <text x="1935" y="5519.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+<tspan x="1935" dy="0">core/src/SimulationCoordinatorTraversal.cpp:83</tspan>
 </text>
 </a>
 </g>
@@ -1599,9 +1599,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="2640" dy="21">preparation; F executes the press.</tspan>
 </text>
 </a>
-<a href="../../src/core/SimulationCoordinatorDoors.cpp#L269">
+<a href="../../core/src/SimulationCoordinatorDoors.cpp#L269">
 <text x="2640" y="5501.0" class="ref" text-anchor="middle">
-<tspan x="2640" dy="0">src/core/SimulationCoordinatorDoors.cpp:269</tspan>
+<tspan x="2640" dy="0">core/src/SimulationCoordinatorDoors.cpp:269</tspan>
 </text>
 </a>
 </g>
@@ -1621,9 +1621,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="21">spatial sensor. Return e9.</tspan>
 </text>
 </a>
-<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<a href="../../core/src/SimulationCoordinatorTraversal.cpp#L83">
 <text x="1935" y="5776.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+<tspan x="1935" dy="0">core/src/SimulationCoordinatorTraversal.cpp:83</tspan>
 </text>
 </a>
 </g>
@@ -1640,9 +1640,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">No shared resource: edge.isTraversable() or requestTraversal(); traversable</tspan>
 <tspan x="1935" dy="21">→ grantTraversalRequest(). Window resource: normally traversable only.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<a href="../../core/src/SimulationCoordinatorTraversal.cpp#L83">
 <text x="1935" y="6051.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+<tspan x="1935" dy="0">core/src/SimulationCoordinatorTraversal.cpp:83</tspan>
 </text>
 </a>
 </g>
@@ -1661,9 +1661,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="21">next tick. Denied/expired → I.</tspan>
 </text>
 </a>
-<a href="../../src/core/Agent.cpp#L2032">
+<a href="../../core/src/Agent.cpp#L2032">
 <text x="1935" y="6326.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Agent.cpp:2032</tspan>
+<tspan x="1935" dy="0">core/src/Agent.cpp:2032</tspan>
 </text>
 </a>
 </g>
@@ -1758,9 +1758,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="3390" y="3771.5" class="body-small" text-anchor="middle">
 <tspan x="3390" dy="0">Remote control Object usage?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1584">
+<a href="../../core/src/SimulationCoordinatorInteractions.cpp#L1584">
 <text x="3390" y="3869.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1584</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorInteractions.cpp:1584</tspan>
 </text>
 </a>
 </g>
@@ -1777,9 +1777,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="4095" dy="0">Arms: may press next Door control in</tspan>
 <tspan x="4095" dy="21">passing. None: cannot operate objects.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1646">
+<a href="../../core/src/SimulationCoordinatorInteractions.cpp#L1646">
 <text x="4095" y="3851.0" class="ref" text-anchor="middle">
-<tspan x="4095" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1646</tspan>
+<tspan x="4095" dy="0">core/src/SimulationCoordinatorInteractions.cpp:1646</tspan>
 </text>
 </a>
 </g>
@@ -1796,9 +1796,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Find first action-bearing edge after Location legs in current Sector; never</tspan>
 <tspan x="3390" dy="21">activate unrelated nearby objects.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1440">
+<a href="../../core/src/SimulationCoordinatorInteractions.cpp#L1440">
 <text x="3390" y="4126.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1440</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorInteractions.cpp:1440</tspan>
 </text>
 </a>
 </g>
@@ -1815,9 +1815,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Resolve remoteInteractionControls(); filter source-Sector physical Buttons,</tspan>
 <tspan x="3390" dy="21">permissions, enabled resource and needed command.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1478">
+<a href="../../core/src/SimulationCoordinatorInteractions.cpp#L1478">
 <text x="3390" y="4401.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1478</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorInteractions.cpp:1478</tspan>
 </text>
 </a>
 </g>
@@ -1836,9 +1836,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="21">Buttons allowed and eligible</tspan>
 <tspan x="3390" dy="21">geometry/capability?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L338">
+<a href="../../core/src/SimulationCoordinatorInteractions.cpp#L338">
 <text x="3390" y="4694.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:338</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorInteractions.cpp:338</tspan>
 </text>
 </a>
 </g>
@@ -1872,9 +1872,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Arms may queue an autonomous physical approach. Remote must enter eligible</tspan>
 <tspan x="3390" dy="21">range; use limitRemoteInteractionMovement() while walking.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L485">
+<a href="../../core/src/SimulationCoordinatorInteractions.cpp#L485">
 <text x="3390" y="4951.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:485</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorInteractions.cpp:485</tspan>
 </text>
 </a>
 </g>
@@ -1891,9 +1891,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Revalidate mutable eligibility; serialize control queue; compatible already-</tspan>
 <tspan x="3390" dy="21">activated work can be shared.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1748">
+<a href="../../core/src/SimulationCoordinatorInteractions.cpp#L1748">
 <text x="3390" y="5226.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1748</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorInteractions.cpp:1748</tspan>
 </text>
 </a>
 </g>
@@ -1910,9 +1910,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Current grants/capability valid, and</tspan>
 <tspan x="3390" dy="21">physical reach/range satisfied?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1813">
+<a href="../../core/src/SimulationCoordinatorInteractions.cpp#L1813">
 <text x="3390" y="5519.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1813</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorInteractions.cpp:1813</tspan>
 </text>
 </a>
 </g>
@@ -1932,9 +1932,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="4095" dy="21">Euclidean range to Button centre.</tspan>
 </text>
 </a>
-<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1813">
+<a href="../../core/src/SimulationCoordinatorInteractions.cpp#L1813">
 <text x="4095" y="5501.0" class="ref" text-anchor="middle">
-<tspan x="4095" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1813</tspan>
+<tspan x="4095" dy="0">core/src/SimulationCoordinatorInteractions.cpp:1813</tspan>
 </text>
 </a>
 </g>
@@ -1951,9 +1951,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Count normal press ticks; pressPhysicalControl(); activate typed operations.</tspan>
 <tspan x="3390" dy="21">Remote pauses locomotion while press work is queued.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1813">
+<a href="../../core/src/SimulationCoordinatorInteractions.cpp#L1813">
 <text x="3390" y="5776.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1813</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorInteractions.cpp:1813</tspan>
 </text>
 </a>
 </g>
@@ -1970,9 +1970,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Pending → Running → terminal. Reuse compatible work; enforce interlocks and</tspan>
 <tspan x="3390" dy="21">Broken state; observe actual device travel.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L982">
+<a href="../../core/src/SimulationCoordinatorInteractions.cpp#L982">
 <text x="3390" y="6051.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:982</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorInteractions.cpp:982</tspan>
 </text>
 </a>
 </g>
@@ -1991,9 +1991,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="21">best-effort failure). Return to E/G; still no traversal permit.</tspan>
 </text>
 </a>
-<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1910">
+<a href="../../core/src/SimulationCoordinatorInteractions.cpp#L1910">
 <text x="3390" y="6326.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1910</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorInteractions.cpp:1910</tspan>
 </text>
 </a>
 </g>
@@ -2068,9 +2068,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Outside → inside: g1 boarding. Both inside:</tspan>
 <tspan x="480" dy="21">g4 riding. Inside → outside: g6 exit.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorLifts.cpp#L614">
+<a href="../../core/src/SimulationCoordinatorLifts.cpp#L614">
 <text x="480" y="7004.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorLifts.cpp:614</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorLifts.cpp:614</tspan>
 </text>
 </a>
 </g>
@@ -2089,9 +2089,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1185" dy="21">mount/body role, occupant and Stop intent</tspan>
 <tspan x="1185" dy="21">rather than Sector change.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorPlatformLifts.cpp#L40">
+<a href="../../core/src/SimulationCoordinatorPlatformLifts.cpp#L40">
 <text x="1185" y="6986.0" class="ref" text-anchor="middle">
-<tspan x="1185" dy="0">src/core/SimulationCoordinatorPlatformLifts.cpp:40</tspan>
+<tspan x="1185" dy="0">core/src/SimulationCoordinatorPlatformLifts.cpp:40</tspan>
 </text>
 </a>
 </g>
@@ -2108,9 +2108,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Recheck landing/destination willingness and feasible complete journey;</tspan>
 <tspan x="480" dy="21">attach ticket and Trip intent.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorLifts.cpp#L775">
+<a href="../../core/src/SimulationCoordinatorLifts.cpp#L775">
 <text x="480" y="7261.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorLifts.cpp:775</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorLifts.cpp:775</tspan>
 </text>
 </a>
 </g>
@@ -2127,9 +2127,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Locally boardable shared journey, or</tspan>
 <tspan x="480" dy="21">successful landing call?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorLifts.cpp#L775">
+<a href="../../core/src/SimulationCoordinatorLifts.cpp#L775">
 <text x="480" y="7554.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorLifts.cpp:775</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorLifts.cpp:775</tspan>
 </text>
 </a>
 </g>
@@ -2163,9 +2163,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Wait for vehicle alignment, entry aperture, disembark-first order, queue</tspan>
 <tspan x="480" dy="21">priority, capacity and boarding window; reserve slot then grant.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorLifts.cpp#L775">
+<a href="../../core/src/SimulationCoordinatorLifts.cpp#L775">
 <text x="480" y="7811.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorLifts.cpp:775</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorLifts.cpp:775</tspan>
 </text>
 </a>
 </g>
@@ -2183,9 +2183,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="21">requestLiftSelectorDestination(). Remote onboard selection is Lift/Platform</tspan>
 <tspan x="480" dy="21">only, not Shuttle.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorLifts.cpp#L1112">
+<a href="../../core/src/SimulationCoordinatorLifts.cpp#L1112">
 <text x="480" y="8086.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorLifts.cpp:1112</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorLifts.cpp:1112</tspan>
 </text>
 </a>
 </g>
@@ -2202,9 +2202,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Interlocked close → travel → open → disembark → board. Move passengers with</tspan>
 <tspan x="480" dy="21">vehicle; grant ride at scheduled destination.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorTick.cpp#L54">
+<a href="../../core/src/SimulationCoordinatorTick.cpp#L54">
 <text x="480" y="8361.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorTick.cpp:54</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorTick.cpp:54</tspan>
 </text>
 </a>
 </g>
@@ -2221,9 +2221,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Reserve safe exit; walk within car/carriage as needed; retain occupancy</tspan>
 <tspan x="480" dy="21">until crossing commit. Committed exits survive later authorization loss.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorLifts.cpp#L1262">
+<a href="../../core/src/SimulationCoordinatorLifts.cpp#L1262">
 <text x="480" y="8636.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorLifts.cpp:1262</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorLifts.cpp:1262</tspan>
 </text>
 </a>
 </g>
@@ -2240,9 +2240,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Alternative Airlock branch: entry control/shared accepted call, entry/exit</tspan>
 <tspan x="480" dy="21">clearance, same-side batch capacity, interlocked Door admission.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorAirlocks.cpp#L144">
+<a href="../../core/src/SimulationCoordinatorAirlocks.cpp#L144">
 <text x="480" y="8911.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorAirlocks.cpp:144</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorAirlocks.cpp:144</tspan>
 </text>
 </a>
 </g>
@@ -2259,9 +2259,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="0">Alternative Chamber branch: fixed entry/exit, exit fit and Location access;</tspan>
 <tspan x="480" dy="21">automatic capacity-one Scanner or batched Decontamination.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorSecurityScanners.cpp#L237">
+<a href="../../core/src/SimulationCoordinatorSecurityScanners.cpp#L237">
 <text x="480" y="9186.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorSecurityScanners.cpp:237</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorSecurityScanners.cpp:237</tspan>
 </text>
 </a>
 </g>
@@ -2280,9 +2280,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="480" dy="21">progression is resource-owned; return E/H for physical commit.</tspan>
 </text>
 </a>
-<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L35">
+<a href="../../core/src/SimulationCoordinatorTraversal.cpp#L35">
 <text x="480" y="9461.0" class="ref" text-anchor="middle">
-<tspan x="480" dy="0">src/core/SimulationCoordinatorTraversal.cpp:35</tspan>
+<tspan x="480" dy="0">core/src/SimulationCoordinatorTraversal.cpp:35</tspan>
 </text>
 </a>
 </g>
@@ -2364,9 +2364,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Adopt Granted permit; record accepted exit pose, coalesce contiguous</tspan>
 <tspan x="1935" dy="21">platform legs, and apply permitted waypoint skipping.</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L2032">
+<a href="../../core/src/Agent.cpp#L2032">
 <text x="1935" y="6986.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Agent.cpp:2032</tspan>
+<tspan x="1935" dy="0">core/src/Agent.cpp:2032</tspan>
 </text>
 </a>
 </g>
@@ -2383,9 +2383,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Door/Bulkhead: tallest allowed supported pose fitting aperture, including</tspan>
 <tspan x="1935" dy="21">frozen opening; accepted exit pose may be grandfathered.</tspan>
 </text>
-<a href="../../src/core/Door.cpp#L91">
+<a href="../../core/src/Door.cpp#L91">
 <text x="1935" y="7261.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Door.cpp:91</tspan>
+<tspan x="1935" dy="0">core/src/Door.cpp:91</tspan>
 </text>
 </a>
 </g>
@@ -2402,9 +2402,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Set crossing pose/duration; release Furniture use on departure. Moving</tspan>
 <tspan x="1935" dy="21">Escalator samples walk/stand once per admitted task.</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L2032">
+<a href="../../core/src/Agent.cpp#L2032">
 <text x="1935" y="7536.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Agent.cpp:2032</tspan>
+<tspan x="1935" dy="0">core/src/Agent.cpp:2032</tspan>
 </text>
 </a>
 </g>
@@ -2421,9 +2421,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Ordinary Door crossing duration still</tspan>
 <tspan x="1935" dy="21">running?</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L2371">
+<a href="../../core/src/Agent.cpp#L2371">
 <text x="1935" y="7829.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Agent.cpp:2371</tspan>
+<tspan x="1935" dy="0">core/src/Agent.cpp:2371</tspan>
 </text>
 </a>
 </g>
@@ -2442,9 +2442,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="2640" dy="21">on a later tick.</tspan>
 </text>
 </a>
-<a href="../../src/core/Agent.cpp#L2371">
+<a href="../../core/src/Agent.cpp#L2371">
 <text x="2640" y="7811.0" class="ref" text-anchor="middle">
-<tspan x="2640" dy="0">src/core/Agent.cpp:2371</tspan>
+<tspan x="2640" dy="0">core/src/Agent.cpp:2371</tspan>
 </text>
 </a>
 </g>
@@ -2461,9 +2461,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Door or enclosed Lift/Shuttle ride commits</tspan>
 <tspan x="1935" dy="21">in place?</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L2371">
+<a href="../../core/src/Agent.cpp#L2371">
 <text x="1935" y="8104.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Agent.cpp:2371</tspan>
+<tspan x="1935" dy="0">core/src/Agent.cpp:2371</tspan>
 </text>
 </a>
 </g>
@@ -2483,9 +2483,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="2640" dy="21">vertex.</tspan>
 </text>
 </a>
-<a href="../../src/core/Agent.cpp#L2371">
+<a href="../../core/src/Agent.cpp#L2371">
 <text x="2640" y="8086.0" class="ref" text-anchor="middle">
-<tspan x="2640" dy="0">src/core/Agent.cpp:2371</tspan>
+<tspan x="2640" dy="0">core/src/Agent.cpp:2371</tspan>
 </text>
 </a>
 </g>
@@ -2501,9 +2501,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="1935" y="8272.0" class="body-small" text-anchor="middle">
 <tspan x="1935" dy="0">Ladder mount not yet reached horizontally?</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L2371">
+<a href="../../core/src/Agent.cpp#L2371">
 <text x="1935" y="8379.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Agent.cpp:2371</tspan>
+<tspan x="1935" dy="0">core/src/Agent.cpp:2371</tspan>
 </text>
 </a>
 </g>
@@ -2522,9 +2522,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="2640" dy="21">begin vertical climb.</tspan>
 </text>
 </a>
-<a href="../../src/core/Agent.cpp#L1853">
+<a href="../../core/src/Agent.cpp#L1853">
 <text x="2640" y="8361.0" class="ref" text-anchor="middle">
-<tspan x="2640" dy="0">src/core/Agent.cpp:1853</tspan>
+<tspan x="2640" dy="0">core/src/Agent.cpp:1853</tspan>
 </text>
 </a>
 </g>
@@ -2541,9 +2541,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Resolve type-specific climb/stair/escalator speed; fallback to climb/walk;</tspan>
 <tspan x="1935" dy="21">apply crossing pose ratio. Vehicle translation runs in G.</tspan>
 </text>
-<a href="../../include/core/Edge.h#L110">
+<a href="../../core/include/core/Edge.h#L110">
 <text x="1935" y="8636.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">include/core/Edge.h:110</tspan>
+<tspan x="1935" dy="0">core/include/core/Edge.h:110</tspan>
 </text>
 </a>
 </g>
@@ -2560,9 +2560,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="0">Move toward destination; wait if not reached. A Location leg may stop/commit</tspan>
 <tspan x="1935" dy="21">early at the next resource queue boundary.</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L1853">
+<a href="../../core/src/Agent.cpp#L1853">
 <text x="1935" y="8911.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Agent.cpp:1853</tspan>
+<tspan x="1935" dy="0">core/src/Agent.cpp:1853</tspan>
 </text>
 </a>
 </g>
@@ -2580,9 +2580,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="21">endpoint or in-place rule and</tspan>
 <tspan x="1935" dy="21">reservations/sector/interlocks valid?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L394">
+<a href="../../core/src/SimulationCoordinatorTraversal.cpp#L394">
 <text x="1935" y="9204.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:394</tspan>
+<tspan x="1935" dy="0">core/src/SimulationCoordinatorTraversal.cpp:394</tspan>
 </text>
 </a>
 </g>
@@ -2618,9 +2618,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="1935" dy="21">syncPoseToSector(); cleanup releases ownership → D or arrival A.</tspan>
 </text>
 </a>
-<a href="../../src/core/Agent.cpp#L2237">
+<a href="../../core/src/Agent.cpp#L2237">
 <text x="1935" y="9461.0" class="ref" text-anchor="middle">
-<tspan x="1935" dy="0">src/core/Agent.cpp:2237</tspan>
+<tspan x="1935" dy="0">core/src/Agent.cpp:2237</tspan>
 </text>
 </a>
 </g>
@@ -2700,9 +2700,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Observe queue/approach/permit progress. Permit expiry returns request to</tspan>
 <tspan x="3390" dy="21">Pending; local-goal retries may deny LocalGoalUnreachable.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorQueues.cpp#L521">
+<a href="../../core/src/SimulationCoordinatorQueues.cpp#L521">
 <text x="3390" y="6986.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorQueues.cpp:521</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorQueues.cpp:521</tspan>
 </text>
 </a>
 </g>
@@ -2720,9 +2720,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Unpermitted queued request waited to a</tspan>
 <tspan x="3390" dy="21">replan boundary?</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L2264">
+<a href="../../core/src/Agent.cpp#L2264">
 <text x="3390" y="7279.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/Agent.cpp:2264</tspan>
+<tspan x="3390" dy="0">core/src/Agent.cpp:2264</tspan>
 </text>
 </a>
 </g>
@@ -2759,9 +2759,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="21">prevents marginal voluntary switching.</tspan>
 </text>
 </a>
-<a href="../../src/core/World.cpp#L12232">
+<a href="../../core/src/World.cpp#L12232">
 <text x="3390" y="7536.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/World.cpp:12232</tspan>
+<tspan x="3390" dy="0">core/src/World.cpp:12232</tspan>
 </text>
 </a>
 </g>
@@ -2778,9 +2778,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Hard invalidation (permission, fit or stale Path): mandatory planning;</tspan>
 <tspan x="3390" dy="21">current valid commitment must finish first.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorAgents.cpp#L483">
+<a href="../../core/src/SimulationCoordinatorAgents.cpp#L483">
 <text x="3390" y="7811.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorAgents.cpp:483</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorAgents.cpp:483</tspan>
 </text>
 </a>
 </g>
@@ -2797,9 +2797,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Crossing or occupied journey still</tspan>
 <tspan x="3390" dy="21">committed?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorAgents.cpp#L439">
+<a href="../../core/src/SimulationCoordinatorAgents.cpp#L439">
 <text x="3390" y="8104.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorAgents.cpp:439</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorAgents.cpp:439</tspan>
 </text>
 </a>
 </g>
@@ -2820,9 +2820,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="4095" dy="21">aligned/open.</tspan>
 </text>
 </a>
-<a href="../../src/core/SimulationCoordinatorLifts.cpp#L433">
+<a href="../../core/src/SimulationCoordinatorLifts.cpp#L433">
 <text x="4095" y="8086.0" class="ref" text-anchor="middle">
-<tspan x="4095" dy="0">src/core/SimulationCoordinatorLifts.cpp:433</tspan>
+<tspan x="4095" dy="0">core/src/SimulationCoordinatorLifts.cpp:433</tspan>
 </text>
 </a>
 </g>
@@ -2840,9 +2840,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Temporary preparation failed but retry</tspan>
 <tspan x="3390" dy="21">budget remains?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorDoors.cpp#L269">
+<a href="../../core/src/SimulationCoordinatorDoors.cpp#L269">
 <text x="3390" y="8379.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorDoors.cpp:269</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorDoors.cpp:269</tspan>
 </text>
 </a>
 </g>
@@ -2876,9 +2876,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Cancel/release uncommitted requests and permits; clear local goals/remote</tspan>
 <tspan x="3390" dy="21">approach. Cancellation is requester-local for shared work.</tspan>
 </text>
-<a href="../../src/core/Agent.cpp#L2313">
+<a href="../../core/src/Agent.cpp#L2313">
 <text x="3390" y="8636.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/Agent.cpp:2313</tspan>
+<tspan x="3390" dy="0">core/src/Agent.cpp:2313</tspan>
 </text>
 </a>
 </g>
@@ -2910,9 +2910,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <text x="3390" y="9097.0" class="body-small" text-anchor="middle">
 <tspan x="3390" dy="0">No replacement AND no valid retained Path?</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorAgents.cpp#L628">
+<a href="../../core/src/SimulationCoordinatorAgents.cpp#L628">
 <text x="3390" y="9204.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorAgents.cpp:628</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorAgents.cpp:628</tspan>
 </text>
 </a>
 </g>
@@ -2945,9 +2945,9 @@ a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
 <tspan x="3390" dy="0">Publish RouteLost once. Cancellation/target removal emits its appropriate</tspan>
 <tspan x="3390" dy="21">outcome; behaviour may choose another destination.</tspan>
 </text>
-<a href="../../src/core/SimulationCoordinatorAgents.cpp#L739">
+<a href="../../core/src/SimulationCoordinatorAgents.cpp#L739">
 <text x="3390" y="9461.0" class="ref" text-anchor="middle">
-<tspan x="3390" dy="0">src/core/SimulationCoordinatorAgents.cpp:739</tspan>
+<tspan x="3390" dy="0">core/src/SimulationCoordinatorAgents.cpp:739</tspan>
 </text>
 </a>
 </g>

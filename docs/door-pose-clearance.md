@@ -367,7 +367,7 @@ non-finite values are rejected while loading the catalogue.
 
 ## Reproducible Release diagnostic
 
-Fixture: `src/headless/smoke/agent/DoorClearance.cpp`.
+Fixture: `headless/src/smoke/agent/DoorClearance.cpp`.
 
 ```sh
 cmake --build build-linux --target pf-smoke-agent -j 4

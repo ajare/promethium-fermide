@@ -35,7 +35,7 @@ return {
 }
 ```
 
-`src/headless/smoke/fixtures/objects.furniture.lua` is an independent integration
+`headless/src/smoke/fixtures/objects.furniture.lua` is an independent integration
 fixture with front/back desk routes, a non-usable table and a scripted chair.
 Its desk has neither callback; an optional desk movement point remains an ordinary
 owned Marker and does not imply Furniture use.

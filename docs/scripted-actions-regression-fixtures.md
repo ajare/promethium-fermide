@@ -6,7 +6,7 @@ All nine checked-in regression Furniture catalogues are native `.furniture.lua`
 modules; their YAML predecessors are deleted. UUIDs, definition and usable-point
 keys, artwork, explicit vertices/edges, Local depths, fractional positions and
 routing scenarios are preserved. Independent catalogue/World baselines moved
-from `fixtures/legacy-furniture` to `src/headless/smoke/fixtures/furniture`.
+from `fixtures/legacy-furniture` to `headless/src/smoke/fixtures/furniture`.
 Worlds remain YAML/binary; intended seated/lying fixture journeys explicitly
 select Use furniture. Geometry-only fixtures retain no callbacks.
 

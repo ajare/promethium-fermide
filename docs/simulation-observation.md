@@ -48,7 +48,7 @@ reused across ticks: authored changes or commands between ticks must not create
 extra `AgentChanged` events. The change predicate remains the original predicate,
 including its distinction between projected fields and event-triggering fields.
 
-`src/headless/smoke/simulation/Observation.cpp` (the `observation` check in
+`headless/src/smoke/simulation/Observation.cpp` (the `observation` check in
 [`pf-smoke-simulation`](smoke-modules.md)) checks the host clock, cache reuse and
 invalidation, value ownership, serialization exclusion, moving/stationary Agents,
 and publication against the original full-snapshot diff predicate. The existing

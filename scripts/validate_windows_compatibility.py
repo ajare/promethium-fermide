@@ -46,7 +46,7 @@ def main():
         by_id = {target["id"]: target for target in targets}
         aggregate = by_name[AGGREGATE]
         sources = [item["path"] for item in aggregate["sources"] if "compileGroupIndex" in item]
-        if sources != ["src/headless/SmokeScenario.cpp"]:
+        if sources != ["headless/src/SmokeScenario.cpp"]:
             raise RuntimeError(f"{config}: compatibility compiles unexpected sources: {sources}")
         libraries = {token.lower() for fragment in aggregate["link"]["commandFragments"]
                      if fragment["role"] == "libraries" for token in fragment["fragment"].split()}

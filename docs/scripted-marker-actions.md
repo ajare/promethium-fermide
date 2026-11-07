@@ -348,7 +348,7 @@ They cover the real use-to-finish journey, independent sofa points, deterministi
 competition, all-Action exclusivity and circulation, idempotence, replacement,
 unreachable/physical departure timing, safe views, failure cleanup, authored
 request persistence and headless editor selection/history. The fixture is
-`src/headless/smoke/fixtures/use.furniture.lua`, independent of demonstration content.
+`headless/src/smoke/fixtures/use.furniture.lua`, independent of demonstration content.
 
 ### #462 final Linux verification
 
