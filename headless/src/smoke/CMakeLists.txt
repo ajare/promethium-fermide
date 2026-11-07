@@ -130,6 +130,25 @@ pf_add_smoke_module(pf-smoke-game-runtime
     TIMEOUT 30
 )
 
+# The authoring half of the game-facing boundary (#967). WorldAuthoring wraps
+# the runtime rather than owning a World beside it, so these checks are run
+# against the same World the runtime drives: the mutation goes in through the
+# authoring handle and is read back out through the wrapped runtime, which is
+# what makes the editor's preview-the-game-path claim testable at all. The
+# module links pf-game-authoring only - the runtime and core arrive through
+# its PUBLIC link line, the way a real consumer gets them.
+pf_add_smoke_module(pf-smoke-game-authoring
+    NAME game-authoring
+    SOURCES
+        game-authoring/Main.cpp
+        game-authoring/Wrapping.cpp
+        game-authoring/MutationThroughRuntime.cpp
+        game-authoring/SharedLibrary.cpp
+    LIBRARIES pf-game-authoring
+    LABELS "core;game-authoring"
+    TIMEOUT 30
+)
+
 pf_add_smoke_module(pf-smoke-metrics
     NAME metrics
     SOURCES metrics/Main.cpp metrics/Metrics.cpp

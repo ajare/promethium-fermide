@@ -31,6 +31,13 @@ namespace game
 		return *world_;
 	}
 
+	core::World& WorldRuntime::authoringWorld() noexcept
+	{
+		// Reachable only from WorldAuthoring, which is declared a friend: the
+		// single widening of the const view in the whole boundary (#967).
+		return *world_;
+	}
+
 	void WorldRuntime::update(float elapsedSeconds)
 	{
 		world_->update(elapsedSeconds);

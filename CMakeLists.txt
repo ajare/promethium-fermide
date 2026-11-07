@@ -9,6 +9,8 @@
 #
 #   core  <-  pf-imgui-cpu  <-  pf-render  <-  pf-agent-editing
 #   core  <-  pf-game-runtime      (WorldRuntime: owns and drives a World)
+#   pf-game-runtime  <-  pf-game-authoring  (WorldAuthoring: mutates through
+#                                          the runtime it wraps)
 #   core  <-  pf-metrics
 #   core, Willpower  <-  pf-agent-resources
 #   AppLib (no core)  <-  PromethiumFermide
@@ -28,6 +30,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Module.cmake")
 # is configured exactly once either way.
 add_subdirectory(core)
 add_subdirectory(pf-game-runtime)
+add_subdirectory(pf-game-authoring)
 add_subdirectory(pf-imgui-cpu)
 add_subdirectory(pf-render)
 add_subdirectory(pf-agent-resources)

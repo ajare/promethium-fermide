@@ -306,6 +306,9 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/game-runtime/RenderView.cpp` | module-owned | `pf-smoke-game-runtime` |
 | `smoke/game-runtime/SharedLibrary.cpp` | module-owned | `pf-smoke-game-runtime` |
 | `smoke/game-runtime/PlayerInput.cpp` | module-owned | `pf-smoke-game-runtime` |
+| `smoke/game-authoring/Wrapping.cpp` | module-owned | `pf-smoke-game-authoring` |
+| `smoke/game-authoring/MutationThroughRuntime.cpp` | module-owned | `pf-smoke-game-authoring` |
+| `smoke/game-authoring/SharedLibrary.cpp` | module-owned | `pf-smoke-game-authoring` |
 <!-- current-ownership-end -->
 Simulation Observation was migrated in #280. Its stable registered check
 is `simulation/observation`; its old path was
@@ -1044,6 +1047,11 @@ with migration guidance.
   `pf-interaction-api-compile-contract`; `pf-compile-contracts` includes it in the
   default build, so a violated static assertion fails compilation without a
   runnable smoke owner.
+- `GameOnlyLinkContract.cpp` (#967): an object-only link contract owned by
+  `pf-game-only-link-contract`, also in `pf-compile-contracts`. It is compiled
+  against `pf-game-runtime` alone — no `PF_INCLUDE_DIR`, no authoring — so its
+  static assertions and its `__has_include` guard prove that a game linking only
+  the runtime cannot reach a mutable `World` or even find the authoring header.
 - `SimulationStepTimingChecks.cpp`, `OccupantPackingChecks.cpp`,
   `WorldRenderSlotChecks.cpp`, and `SectorTilesetChecks.cpp`: retained direct,
   headless standalone executables. Their CTest labels include `smoke;standalone`

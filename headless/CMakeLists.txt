@@ -15,6 +15,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Module.cmake")
 
 pf_require_module(promethium-fermide-core)
 pf_require_module(pf-game-runtime)
+pf_require_module(pf-game-authoring)
 pf_require_module(pf-imgui-cpu)
 pf_require_module(pf-render)
 pf_require_module(pf-agent-editing)
@@ -35,8 +36,20 @@ add_library(pf-interaction-api-compile-contract OBJECT
 )
 target_include_directories(pf-interaction-api-compile-contract PRIVATE ${PF_INCLUDE_DIR})
 pf_apply_headless_verification_policy(pf-interaction-api-compile-contract)
+
+# The game's whole link line, compiled as a contract (#967). This object is
+# built against pf-game-runtime alone - no PF_INCLUDE_DIR, no authoring - so
+# it sees exactly what a game sees. Its static_asserts are the compile-time
+# half of "a game linking only pf-game-runtime cannot reach mutable World
+# state", and its link line is the reviewable half.
+add_library(pf-game-only-link-contract OBJECT
+    src/GameOnlyLinkContract.cpp
+)
+target_link_libraries(pf-game-only-link-contract PRIVATE pf-game-runtime)
+pf_apply_headless_verification_policy(pf-game-only-link-contract)
+
 add_custom_target(pf-compile-contracts ALL
-    DEPENDS pf-interaction-api-compile-contract
+    DEPENDS pf-interaction-api-compile-contract pf-game-only-link-contract
 )
 
 # --- Headless render support -----------------------------------------------
@@ -273,7 +286,8 @@ if(BUILD_TESTING)
     set_tests_properties(world-generator-cli PROPERTIES TIMEOUT 180)
 endif()
 
-set_target_properties(pf-interaction-api-compile-contract pf-compile-contracts
+set_target_properties(pf-interaction-api-compile-contract pf-game-only-link-contract
+    pf-compile-contracts
     PROPERTIES FOLDER "Tests/Compile Contracts")
 set_target_properties(promethium-fermide-headless PROPERTIES FOLDER "Tests/Harness")
 set_target_properties(

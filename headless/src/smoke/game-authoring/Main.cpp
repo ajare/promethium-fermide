@@ -1,0 +1,12 @@
+#include "Checks.h"
+
+#include "game/WorldAuthoring.h"
+
+int main(int argc, char** argv)
+{
+	std::vector<smoke::Check> checks;
+	registerGameAuthoringWrapping(checks);
+	registerGameAuthoringMutationThroughRuntime(checks);
+	registerGameAuthoringSharedLibrary(checks);
+	return smoke::main("game-authoring", checks, argc, argv);
+}

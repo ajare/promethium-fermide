@@ -182,6 +182,65 @@ is registered as `smoke-game-runtime` with labels
 timeout. Everything is headless: CPU-only ImGui, no window, no dialog, no
 interactive input.
 
+## Game authoring module (#967)
+
+```sh
+cmake --build build-linux --target pf-smoke-game-authoring --parallel
+build-linux/bin/x64/Release/pf-smoke-game-authoring --list
+build-linux/bin/x64/Release/pf-smoke-game-authoring --check authoringCreatesNoSecondWorld
+ctest --test-dir build-linux -R '^smoke-game-authoring$' --output-on-failure
+```
+
+`pf-smoke-game-authoring` exercises the authoring half of the game-facing
+boundary through the shared [`pf-game-authoring`](../pf-game-authoring)
+library. `game::WorldAuthoring` wraps a `game::WorldRuntime` instead of
+owning a World beside it, so its 12 registrations are all about the two
+handles being one World: the authoring handle names the runtime it was given
+and its mutable `World&` is the very object the runtime owns (a counted
+`World` subclass shows wrapping adds no second World), the runtime handed
+back by `runtime()` drives the same run, and the two views do not drift
+apart across a Tick.
+
+The end-to-end proof is that authoring changes land in the runtime's own
+state: a Location added through `WorldAuthoring` is counted and resolved
+through the wrapped runtime's `const` view; an Agent created and given a
+route through the authoring handle appears in the runtime's snapshot and
+walks it under the runtime's drive; a Marker added through authoring extends
+the graph the runtime drives, advances the topology generation its snapshot
+reports, and clears the dirty flag on rebuild. The World's own edit/simulation
+boundary is enforced through the authoring handle rather than loosened by it:
+a structural edit made while the simulation runs is refused and leaves
+nothing half-applied, and a rebuild is refused while unpaused.
+
+The shape is also compile-time. `Wrapping.cpp` asserts that a
+`WorldAuthoring` can be built from nothing but a `WorldRuntime&` — not from
+a `core::World`, a `World*`, or a `unique_ptr<World>` — that it is movable
+and never copyable, that its `world()` is a mutable `core::World&` while the
+runtime it wraps hands out only `core::World const&`, and that it cannot
+wrap a `const` runtime. The Linux `dladdr` checks report that
+`WorldAuthoring` code resolved into `libpf-game-authoring` and that this is
+a different image from the runtime it wraps; on other platforms those two
+registrations are not made.
+
+The other half of the boundary is a separate compile-only contract, not a
+smoke registration: `headless/src/GameOnlyLinkContract.cpp` is built as
+`pf-game-only-link-contract` against `pf-game-runtime` alone, with no
+`PF_INCLUDE_DIR` and no authoring. Its `static_assert`s pin that the only
+World a runtime hands out is `const` under either cv-qualification, that a
+`core::World const&` is not convertible back to a mutable one, and that the
+drive and structural-edit paths do not compile against the const view; a
+`__has_include` guard fails the build if `game/WorldAuthoring.h` becomes
+reachable from that target at all, which is the game's link closure growing
+authoring. `WorldRuntime::authoringWorld()` is private and granted to
+`WorldAuthoring` as a friend, so no other code — including that contract —
+can widen the runtime's view.
+
+The module links `pf-game-authoring` only; `pf-game-runtime` and core arrive
+through its PUBLIC link line the way a real consumer gets them. It is
+registered as `smoke-game-authoring` with labels
+`smoke;functional;validation-fast;core;game-authoring` and a 30-second
+timeout. Everything is headless: no window, no dialog, no interactive input.
+
 ## Startup module (#301)
 
 ```sh

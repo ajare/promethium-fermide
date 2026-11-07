@@ -20,7 +20,7 @@ namespace game
 	// exclusively and is the only way to drive it (#964, spec #960).
 	//
 	// Exclusive ownership is the whole point of the type. The World is held as a
-	// `std::unique_ptr`, the runtime is not copyable, and the only World
+	// `std::unique_ptr`, the runtime is not copyable, and the only public World
 	// accessor hands out a `core::World const&`. A render path therefore
 	// cannot mutate what it renders, and no second holder of the same World can
 	// exist. Authoring lives over the runtime rather than beside it: the
@@ -178,7 +178,19 @@ namespace game
 	private:
 		// Exclusive ownership. Nothing else in the process holds this World: the
 		// runtime is not copyable, no shared_ptr is ever formed from it, and the
-		// only accessor is the const view above.
+		// only public accessor is the const view above.
 		std::unique_ptr<core::World> world_;
+
+		// The mutable view of the owned World. Private, and granted to
+		// WorldAuthoring alone (#967): ownership stays here, while the authoring
+		// handle wrapped over the runtime is the only code in the process that
+		// can turn this World back into a mutable one. Absent that grant there
+		// is no path from a WorldRuntime to a `core::World&` at all, which is
+		// what makes "authoring is the only mutable surface" a compile-time
+		// fact rather than a convention - and why a game linking only
+		// pf-game-runtime cannot reach mutable World state by any route.
+		core::World& authoringWorld() noexcept;
+
+		friend class WorldAuthoring;
 	};
 }
