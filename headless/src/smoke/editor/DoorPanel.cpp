@@ -186,7 +186,7 @@ namespace
 			door = std::static_pointer_cast<const core::DoorSectorObject>(object)->getDoor();
 		}
 		world->finishBuild(); world->pauseSimulation();
-		gWorldDocumentHistory.clear(); gWorldDocumentHistory.markSaved(); world->markSaved();
+		currentDocumentHistory().clear(); currentDocumentHistory().markSaved(); world->markSaved();
 		auto save = [&]
 		{
 			if (bulkhead)
@@ -236,21 +236,21 @@ namespace
 		};
 		click("Override opening/closing speed"); frame();
 		require(door->getSpeedOverride() == door->getDefaultSpeed()
-			&& gWorldDocumentHistory.undoCount() == 1 && save() != initial,
+			&& currentDocumentHistory().undoCount() == 1 && save() != initial,
 			"Door speed override did not commit authored history");
 		click("Override opening/closing speed"); frame();
 		require(!door->getSpeedOverride() && save() == initial
-			&& gWorldDocumentHistory.undoCount() == 2, "Clearing Door speed did not restore inherited default");
-		gWorldDocumentHistory.clear(); gWorldDocumentHistory.markSaved(); world->markSaved();
+			&& currentDocumentHistory().undoCount() == 2, "Clearing Door speed did not restore inherited default");
+		currentDocumentHistory().clear(); currentDocumentHistory().markSaved(); world->markSaved();
 		click("Initially Broken"); frame();
-		require(door->isInitiallyBroken() && door->isBroken() && gWorldDocumentHistory.undoCount() == 1,
+		require(door->isInitiallyBroken() && door->isBroken() && currentDocumentHistory().undoCount() == 1,
 			"Authored Door control did not commit one history entry");
 		require(text.find("Broken (position frozen)") != std::string::npos
 			&& text.find("0.00%") != std::string::npos, "Selection omitted Broken status or physical percentage");
 		auto authored = save(); world->markSaved();
 		click("Live Broken");
 		require(!door->isBroken() && door->isInitiallyBroken() && save() == authored
-			&& !world->isModified() && gWorldDocumentHistory.undoCount() == 1, "Live restore changed document/history");
+			&& !world->isModified() && currentDocumentHistory().undoCount() == 1, "Live restore changed document/history");
 		require(world->resumeSimulation(), "Simulation did not resume");
 		click("Live Broken");
 		require(door->isBroken() && save() == authored && !world->isModified(), "Running live break control failed: broken=" + std::to_string(door->isBroken())
@@ -263,9 +263,9 @@ namespace
 			require(loaded->deserialize(*reader, work), "Door history did not load"); world = loaded; world->pauseSimulation();
 			return true;
 		};
-		require(gWorldDocumentHistory.undo(gWorldDocumentHistory.capture(save()), restore) && save() == initial,
+		require(currentDocumentHistory().undo(currentDocumentHistory().capture(save()), restore) && save() == initial,
 			"Door initial Broken undo failed");
-		require(gWorldDocumentHistory.redo(gWorldDocumentHistory.capture(save()), restore) && save() == authored,
+		require(currentDocumentHistory().redo(currentDocumentHistory().capture(save()), restore) && save() == authored,
 			"Door initial Broken redo failed");
 		if (bulkhead)
 		{
@@ -285,9 +285,9 @@ namespace
 			points = world->getSimulationSnapshot().interactionPoints;
 			require(points.size() == 3 && points[1].position == core::Vector2{4.75f, 1}
 				&& points[2].position == core::Vector2{5.25f, 1}, "Bulkhead clipboard mirror failed to derive destination insets");
-			auto graph = world->getGraph(); auto count = gWorldDocumentHistory.undoCount(); bool refused = false;
+			auto graph = world->getGraph(); auto count = currentDocumentHistory().undoCount(); bool refused = false;
 			try { world->addSectorBulkheadDoor(0, 1, 5, CORE_SIDE_LEFT, copied); } catch (std::exception const&) { refused = true; }
-			require(refused && world->getGraph() == graph && gWorldDocumentHistory.undoCount() == count,
+			require(refused && world->getGraph() == graph && currentDocumentHistory().undoCount() == count,
 				"Refused Bulkhead clipboard paste changed graph/history");
 		}
 	}

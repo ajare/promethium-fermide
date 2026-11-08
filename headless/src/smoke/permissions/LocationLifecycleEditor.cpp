@@ -36,7 +36,7 @@ namespace
 		auto blue = world->addAccessPermission("Blue");
 		require(world->setLocationPermissionRequirement(selected, { red, blue })
 			&& world->setLocationPermissionRequirement(unrelated, { red }), "Requirements refused");
-		gWorldDocumentHistory.clear(); gWorldDocumentHistory.markSaved(); world->markSaved();
+		currentDocumentHistory().clear(); currentDocumentHistory().markSaved(); world->markSaved();
 		auto original = save(*world);
 		auto restore = [&](DocumentSnapshot const& snapshot)
 		{
@@ -46,8 +46,8 @@ namespace
 			require(restored->deserialize(*reader, work), "History snapshot did not load");
 			world = std::move(restored); world->pauseSimulation(); return true;
 		};
-		auto undo = [&] { require(gWorldDocumentHistory.undo(gWorldDocumentHistory.capture(save(*world)), restore), "Undo failed"); };
-		auto redo = [&] { require(gWorldDocumentHistory.redo(gWorldDocumentHistory.capture(save(*world)), restore), "Redo failed"); };
+		auto undo = [&] { require(currentDocumentHistory().undo(currentDocumentHistory().capture(save(*world)), restore), "Undo failed"); };
+		auto redo = [&] { require(currentDocumentHistory().redo(currentDocumentHistory().capture(save(*world)), restore), "Redo failed"); };
 		auto edit = [&](core::World::LocationEditPlan const& plan)
 		{
 			require(plan.valid, plan.diagnostic);
@@ -116,18 +116,18 @@ namespace
 		};
 		frame();
 		require(text.find("0 / 0 / 0 / 2") != std::string::npos, "Usage table omitted both Location references");
-		auto count = gWorldDocumentHistory.undoCount();
+		auto count = currentDocumentHistory().undoCount();
 		click(pointFor("Permissions lifecycle", rowDelete)); frame();
 		require(text.find("2 Location requirements") != std::string::npos, "Real deletion impact omitted Locations: " + text);
 		auto* popup = ImGui::FindWindowByName("Delete Access permission?");
 		require(popup != nullptr, "Deletion confirmation not rendered");
 		click(pointFor("Delete Access permission?", popup->GetID("Cancel")));
-		require(save(*world) == renamed && gWorldDocumentHistory.undoCount() == count, "Cancel changed document/history");
+		require(save(*world) == renamed && currentDocumentHistory().undoCount() == count, "Cancel changed document/history");
 		click(pointFor("Permissions lifecycle", rowDelete)); frame();
 		popup = ImGui::FindWindowByName("Delete Access permission?");
 		click(pointFor("Delete Access permission?", popup->GetID("Delete")));
 		auto deleted = save(*world);
-		require(gWorldDocumentHistory.undoCount() == count + 1
+		require(currentDocumentHistory().undoCount() == count + 1
 			&& world->getLocationPermissionRequirement(selected) == std::vector<core::AccessPermissionId>{ blue }
 			&& world->getLocationPermissionRequirement(unrelated).empty(), "Confirmed deletion did not clear every Location in one edit");
 		undo(); require(save(*world) == renamed && world->getAccessPermissionUsage(red).locationRequirements == 2, "Deletion undo lost references");

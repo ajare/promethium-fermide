@@ -96,20 +96,20 @@ namespace
 		auto unrestricted = save(*world);
 		require(world->setLiftDestinationPermissionRequirement(sector, 0, {}, &diagnostic, object)
 			&& save(*world) == unrestricted, "Empty no-op changed authored data");
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		require(commitLiftDestinationPermissionRequirement(world, sector, 2, red, true, diagnostic, object), diagnostic);
 		require(commitLiftDestinationPermissionRequirement(world, sector, 2, blue, true, diagnostic, object), diagnostic);
-		require(gWorldDocumentHistory.undoCount() == 2, "Destination edits bypass document history");
+		require(currentDocumentHistory().undoCount() == 2, "Destination edits bypass document history");
 		auto restore = [&](DocumentSnapshot const& snapshot) { world = load(snapshot.yaml); world->pauseSimulation(); return true; };
-		require(gWorldDocumentHistory.undo(gWorldDocumentHistory.capture(save(*world)), restore), "Destination undo failed");
+		require(currentDocumentHistory().undo(currentDocumentHistory().capture(save(*world)), restore), "Destination undo failed");
 		require(world->getLiftDestinationPermissionRequirement(sector, 2, object) == std::vector<core::AccessPermissionId>{ red }, "Undo lost destination requirement");
-		require(gWorldDocumentHistory.redo(gWorldDocumentHistory.capture(save(*world)), restore), "Destination redo failed");
+		require(currentDocumentHistory().redo(currentDocumentHistory().capture(save(*world)), restore), "Destination redo failed");
 		auto expected = std::vector<core::AccessPermissionId>{ red, blue };
 		require(world->getLiftDestinationPermissionRequirement(sector, 2, object) == expected, "Redo lost destination requirement");
 		require(commitClearLiftDestinationPermissionRequirement(world, sector, 2, diagnostic, object), diagnostic);
 		require(world->getLiftDestinationPermissionRequirement(sector, 2, object).empty(), "Clear retained destination permissions");
-		require(gWorldDocumentHistory.undoCount() == 3, "Destination clear bypassed document history");
-		require(gWorldDocumentHistory.undo(gWorldDocumentHistory.capture(save(*world)), restore), "Destination clear undo failed");
+		require(currentDocumentHistory().undoCount() == 3, "Destination clear bypassed document history");
+		require(currentDocumentHistory().undo(currentDocumentHistory().capture(save(*world)), restore), "Destination clear undo failed");
 		require(world->getLiftDestinationPermissionRequirement(sector, 2, object) == expected, "Destination clear undo lost requirements");
 		require(world->renameAccessPermission(red, "Renamed key", &diagnostic), diagnostic);
 		require(world->getLiftDestinationPermissionRequirement(sector, 2, object) == expected, "Rename changed identity");
@@ -226,7 +226,7 @@ namespace
 			require(world->getAccessPermissionUsage(blue).liftDestinationRequirements == 0, "Removed Shuttle counted in usage");
 			auto recreated = world->addShuttle(1, 0, 4, 60, { 2, 4, { 0, 24, 48 }, 0 });
 			require(world->getLiftDestinationPermissionRequirement(recreated.shuttle.sector->getIndex(), 2).empty(), "Recreated Shuttle inherited requirement");
-			gWorldDocumentHistory.clear();
+			currentDocumentHistory().clear();
 			return;
 		}
 
@@ -287,7 +287,7 @@ namespace
 			world->finishBuild(); world->pauseSimulation();
 			for (uint32_t stop = 0; stop < 3; ++stop)
 				require(world->getLiftDestinationPermissionRequirement(sector, stop, recreated.lift.index).empty(), "Recreated Platform is restricted");
-			gWorldDocumentHistory.clear();
+			currentDocumentHistory().clear();
 			return;
 		}
 
@@ -325,7 +325,7 @@ namespace
 		require(world->getAccessPermissionUsage(blue).liftDestinationRequirements == 0, "Deleted transport retained usage");
 		lift = world->addLift(1, 0, 8, options); world->finishBuild(); world->pauseSimulation();
 		require(world->getLiftDestinationPermissionRequirement(lift.lift.sector->getIndex(), 2).empty(), "Recreated Lift inherited requirements");
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 	}
 }
 

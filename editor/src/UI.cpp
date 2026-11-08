@@ -29,6 +29,7 @@
 #include "PaletteLayout.h"
 #include "ObjectTileset.h"
 #include "DocumentEdit.h"
+#include "DocumentSaveSeam.h"
 #include "DoorPanel.h"
 #include "AgentGroupsPanel.h"
 #include "AgentPosePanel.h"
@@ -2594,7 +2595,8 @@ namespace
 	int gNewWorldWidth{ 48 };
 	int gNewWorldLevels{ 6 };
 
-	void clearDocumentState(bool clearHistory = true)
+	void clearDocumentState(editor::DocumentPtr const& document,
+		bool clearHistory = true)
 	{
 		gHoveredInteractionPoint = {};
 		gHoveredAgent = nullptr;
@@ -2630,16 +2632,24 @@ namespace
 		resetTagsPanelState();
 		resetBehavioursPanelState();
 		gUISettings.worldPaused = false;
-		if (clearHistory) gWorldDocumentHistory.clear();
+		// The history is the document's, held by its authoring handle, so a
+		// closed document takes it with it and there is nothing left to clear
+		// on some stack beside the document (#975).
+		if (clearHistory && document) document->authoring().clearHistory();
 	}
 
 	bool restoreDocumentSnapshot(editor::DocumentPtr& document, bool redo)
 	{
-		auto const world = document ? document->world() : nullptr;
-		if (!world || (redo ? !gWorldDocumentHistory.canRedo()
-			: !gWorldDocumentHistory.canUndo())) return false;
+		auto const previous = document;
+		auto const world = previous ? previous->world() : nullptr;
+		if (!world) return false;
+		// The undo stack being walked is the open document's own, reached
+		// through the authoring handle that owns it. There is no other stack
+		// to reach for any more (#975).
+		auto& authoring = previous->authoring();
+		if (redo ? !authoring.canRedo() : !authoring.canUndo()) return false;
 
-		auto current = captureDocumentSnapshot(world);
+		auto current = captureDocumentSnapshot(world, authoring.history());
 		if (!current) return false;
 		try
 		{
@@ -2653,8 +2663,8 @@ namespace
 				return true;
 			};
 			auto const restored = redo
-				? gWorldDocumentHistory.redo(std::move(current), restore)
-				: gWorldDocumentHistory.undo(std::move(current), restore);
+				? authoring.redo(std::move(current), restore)
+				: authoring.undo(std::move(current), restore);
 			if (!restored) return false;
 
 			// The restored World goes into a document of its own - a new runtime
@@ -2664,11 +2674,19 @@ namespace
 			// keeps, so it is rebound here before anything reads through it, and
 			// the "unsaved" mark is put on the live World through the authoring
 			// handle rather than on the deserialized one before adoption (#972).
+			//
+			// A new handle, though, is a new empty history, and the author's
+			// work is not the old handle's to keep: the history belongs to the
+			// document, so it is carried across the seam rather than left
+			// behind with the object being discarded. Without this the first
+			// undo would empty the stack and every later one would report
+			// nothing left to take back (#975).
 			editor::adoptWorld(std::move(loaded));
 			document = editor::currentDocument();
-			if (gWorldDocumentHistory.isModified())
+			document->authoring().adoptHistoryFrom(authoring);
+			if (document->authoring().isModified())
 				document->authoring().world().markModified();
-			clearDocumentState(false);
+			clearDocumentState(document, false);
 			setWorldPaused(document, true);
 			return true;
 		}
@@ -2680,55 +2698,18 @@ namespace
 		}
 	}
 
-	bool isDocumentStale(editor::DocumentPtr const& document)
-	{
-		auto const world = document ? document->world() : nullptr;
-		return world && (world->isModified()
-			|| gWorldDocumentHistory.isModified()
-			|| attachedAgentTagRegistryIsModified(world)
-			|| attachedAgentBehaviourRegistryIsModified(world));
-	}
+	// The staleness question, the two companion-document path lookups and the
+	// save-target builder all moved to pf-agent-editing's DocumentSaveSeam
+	// (#975). They moved because the UI's copy of them could only be reached
+	// from behind a window, and the claim that the unsaved-changes prompt and
+	// the authoring façade read one and the same history is worth nothing if
+	// nothing can assert it. The UI asks the seam now.
 
 	void reportFileError(string message)
 	{
 		gFileError = std::move(message);
 		gOpenFileErrorPopup = true;
 		core::addLogMessage("File", 0, core::LogLevel::Error, gFileError);
-	}
-
-	string currentAgentTagRegistryFilepath(
-		editor::DocumentPtr const& document)
-	{
-		auto const world = document ? document->world() : nullptr;
-		if (!world || !world->hasAttachedAgentTagRegistry()) return {};
-		auto source = core::resolveCatalogSource("AgentTagRegistry",
-			world->getAgentTagRegistryResourceName());
-		if (!source.empty()) return source.string();
-		if (gWorldFilepath.empty()) return {};
-		return (filesystem::path(gWorldFilepath).parent_path()
-			/ world->getAgentTagRegistryResourceName()).string();
-	}
-
-	string currentAgentBehaviourRegistryPackagePath(
-		editor::DocumentPtr const& document)
-	{
-		auto const world = document ? document->world() : nullptr;
-		if (!world || !world->hasAttachedAgentBehaviourRegistry()) return {};
-		auto source = core::resolveCatalogSource("AgentBehaviourRegistry",
-			world->getAgentBehaviourRegistryResourceName());
-		if (!source.empty()) return source.string();
-		if (gWorldFilepath.empty()) return {};
-		return (filesystem::path(gWorldFilepath).parent_path()
-			/ world->getAgentBehaviourRegistryResourceName()).string();
-	}
-
-	WorldDocumentSaveTarget currentDocumentSaveTarget(
-		editor::DocumentPtr const& document, string worldFilepath)
-	{
-		auto const world = document ? document->world() : nullptr;
-		return { world, std::move(worldFilepath),
-			currentAgentTagRegistryFilepath(document), &gWorldDocumentHistory,
-			currentAgentBehaviourRegistryPackagePath(document) };
 	}
 
 	string normalizedFilepath(string const& filepath);
@@ -2772,7 +2753,7 @@ namespace
 		}
 
 		string diagnostic;
-		if (!saveWorldDocument(currentDocumentSaveTarget(document, filepath),
+		if (!saveWorldDocument(editor::currentDocumentSaveTarget(document, filepath, gWorldFilepath),
 			&diagnostic))
 		{
 			reportFileError(std::move(diagnostic));
@@ -2792,7 +2773,7 @@ namespace
 		if (gWorldFilepath.empty()) return saveWorld(document, false);
 		string diagnostic;
 		if (!saveAllDocuments(
-			{ currentDocumentSaveTarget(document, gWorldFilepath) }, &diagnostic))
+			{ editor::currentDocumentSaveTarget(document, gWorldFilepath, gWorldFilepath) }, &diagnostic))
 		{
 			reportFileError(std::move(diagnostic));
 			return false;
@@ -2850,8 +2831,11 @@ namespace
 			gWorldFilepath = normalized;
 			setWindowTitle(filesystem::path(gWorldFilepath).filename().string());
 			addRecentFile(gWorldFilepath);
-			clearDocumentState();
-			gWorldDocumentHistory.markSaved();
+			// A freshly opened document starts with an empty history and is
+			// immediately at its saved point: nothing carried over from whatever
+			// was open before, and nothing counted as unsaved work (#975).
+			clearDocumentState(document);
+			document->authoring().markSaved();
 			setWorldPaused(document, true);
 			presentWorldLoadWarnings(world->getLoadWarnings());
 			core::addLogMessage("File", 0, core::LogLevel::Info,
@@ -2918,7 +2902,10 @@ namespace
 			editor::closeDocument();
 			document.reset();
 			gWorldFilepath.clear();
-			clearDocumentState();
+			// The document is gone, and its history went with it: the handle
+			// that owned it is destroyed, so there is no stack left beside a
+			// closed document to leave dirty (#975).
+			clearDocumentState(document);
 			break;
 		case PendingFileAction::Exit:
 			throw ExitApplicationException(0, "Exit");
@@ -2930,7 +2917,7 @@ namespace
 	void requestFileAction(PendingFileAction action, editor::DocumentPtr& document)
 	{
 		auto const world = document ? document->world() : nullptr;
-		if (isDocumentStale(document))
+		if (editor::documentIsStale(document))
 		{
 			gPendingFileAction = action;
 			gOpenUnsavedChangesPopup = true;
@@ -3300,7 +3287,7 @@ namespace
 		if (ImGui::BeginPopupModal("Unsaved changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
 		{
 			auto prompt = unsavedDocumentPromptText(
-				currentDocumentSaveTarget(document, gWorldFilepath));
+				editor::currentDocumentSaveTarget(document, gWorldFilepath, gWorldFilepath));
 			if (attachedAgentBehaviourRegistryIsModified(world))
 				prompt += "\n- Agent behaviour registry package '"
 					+ world->getAgentBehaviourRegistryResourceName() + "'";
@@ -3365,7 +3352,7 @@ namespace
 					static_cast<uint32_t>(gNewWorldLevels));
 				document = editor::currentDocument();
 				gWorldFilepath.clear();
-				clearDocumentState();
+				clearDocumentState(document);
 				setWorldPaused(document, true);
 				ImGui::CloseCurrentPopup();
 			}
@@ -4254,7 +4241,12 @@ namespace
 	void restoreClipboardSnapshot(editor::DocumentPtr& document,
 		DocumentSnapshot const& snapshot, bool wasPaused)
 	{
-		auto const world = document ? document->world() : nullptr;
+		// The document being rolled back is held by its own handle for the
+		// whole restore: the adoption below replaces it, and the author's
+		// undo stack has to cross that seam rather than go down with the
+		// handle it was on (#975).
+		auto const previous = document;
+		auto const world = previous ? previous->world() : nullptr;
 		auto loaded = std::make_unique<core::World>("Loading", 1, 1);
 		auto serializer = core::YamlSerializer::fromString(snapshot.yaml);
 		serializer->deserialize();
@@ -4262,7 +4254,8 @@ namespace
 		loaded->deserialize(*serializer, workData);
 		editor::adoptWorld(std::move(loaded));
 		document = editor::currentDocument();
-		clearDocumentState(false);
+		if (previous) document->authoring().adoptHistoryFrom(previous->authoring());
+		clearDocumentState(document, false);
 		if (wasPaused) setWorldPaused(document, true);
 		else gUISettings.worldPaused = false;
 	}
@@ -4603,7 +4596,7 @@ void renderWorldLoadWarningsPopup()
 bool requestApplicationClose(editor::DocumentPtr& document)
 {
 	auto const world = document ? document->world() : nullptr;
-	if (!isDocumentStale(document)) return true;
+	if (!editor::documentIsStale(document)) return true;
 	requestFileAction(PendingFileAction::Exit, document);
 	return false;
 }
@@ -4616,7 +4609,7 @@ void resetWorldSimulation(editor::DocumentPtr const& document)
 		ApplicationBusyScope busy("Resetting simulation...");
 		auto& runtime = editor::previewRuntime(*world);
 		runtime.resetSimulation();
-		clearDocumentState(false);
+		clearDocumentState(document, false);
 		gUISettings.worldPaused = runtime.isSimulationPaused();
 	}
 	catch (std::exception const& error)
@@ -4633,7 +4626,7 @@ void handleShortcuts(editor::DocumentPtr& document)
 		requestFileAction(PendingFileAction::New, document);
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, 0, ImGuiInputFlags_RouteGlobalLow))
 		requestFileAction(PendingFileAction::Open, document);
-	if (isDocumentStale(document)
+	if (editor::documentIsStale(document)
 		&& ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, 0, ImGuiInputFlags_RouteGlobalLow))
 		saveWorld(document, false);
 
@@ -5170,9 +5163,9 @@ void renderMenu(editor::DocumentPtr& document)
 				ImGui::EndMenu();
 			}
 			ImGui::Separator();
-			if (ImGui::MenuItem("Save", "Ctrl+S", false, isDocumentStale(document)))
+			if (ImGui::MenuItem("Save", "Ctrl+S", false, editor::documentIsStale(document)))
 				saveWorld(document, false);
-			if (ImGui::MenuItem("Save All", nullptr, false, isDocumentStale(document)))
+			if (ImGui::MenuItem("Save All", nullptr, false, editor::documentIsStale(document)))
 				saveAllOpenDocuments(document);
 			if (ImGui::MenuItem("Save As...", nullptr, false, world != nullptr))
 				saveWorld(document, true);
@@ -5188,10 +5181,10 @@ void renderMenu(editor::DocumentPtr& document)
 		if (ImGui::BeginMenu("Edit"))
 		{
 			if (ImGui::MenuItem("Undo", "Ctrl+Z", false,
-				world != nullptr && gWorldDocumentHistory.canUndo()))
+				world != nullptr && document->authoring().canUndo()))
 				restoreDocumentSnapshot(document, false);
 			if (ImGui::MenuItem("Redo", "Ctrl+Y", false,
-				world != nullptr && gWorldDocumentHistory.canRedo()))
+				world != nullptr && document->authoring().canRedo()))
 				restoreDocumentSnapshot(document, true);
 			ImGui::Separator();
 			bool const canCopy = world != nullptr && hasClipboardSelection();
@@ -5327,19 +5320,19 @@ void renderDocumentToolbar(editor::DocumentPtr& document)
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Open... (Ctrl+O)");
 
 	ImGui::SameLine();
-	ImGui::BeginDisabled(!isDocumentStale(document));
+	ImGui::BeginDisabled(!editor::documentIsStale(document));
 	if (ImGui::Button(ICON_FA_SAVE "##SaveDocument")) saveWorld(document, false);
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Save (Ctrl+S)");
 	ImGui::EndDisabled();
 
 	ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
-	ImGui::BeginDisabled(world == nullptr || !gWorldDocumentHistory.canUndo());
+	ImGui::BeginDisabled(world == nullptr || !document->authoring().canUndo());
 	if (ImGui::Button(ICON_FA_UNDO "##Undo")) restoreDocumentSnapshot(document, false);
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Undo (Ctrl+Z)");
 	ImGui::EndDisabled();
 
 	ImGui::SameLine();
-	ImGui::BeginDisabled(world == nullptr || !gWorldDocumentHistory.canRedo());
+	ImGui::BeginDisabled(world == nullptr || !document->authoring().canRedo());
 	if (ImGui::Button(ICON_FA_REDO "##Redo")) restoreDocumentSnapshot(document, true);
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Redo (Ctrl+Y)");
 	ImGui::EndDisabled();
@@ -9903,5 +9896,5 @@ void renderUI(editor::DocumentPtr& document, shared_ptr<core::Agent> pathingAgen
 		ImGui::GetWindowDrawList()->AddImage(
 			reinterpret_cast<ImTextureID>(static_cast<intptr_t>(texture)),
 			position, {position.x + size.x, position.y + size.y}, {0, 1}, {1, 0});
-	}, gWorldDocumentHistory, gSelectedAgent);
+	}, document->authoring().history(), gSelectedAgent);
 }

@@ -149,7 +149,7 @@ namespace
 		invalid.individualMaximumRoutePlanningTime = std::numeric_limits<float>::quiet_NaN();
 		require(!commitAgentPlacement(f.world, invalid, f.world->getSector(f.corridor), 0, 4, copy, f.diagnostic)
 			&& serialize(*f.world) == beforeInvalidPaste, "Paste accepted a nonfinite planning time");
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		require(commitAgentPlacement(f.world, payload, f.world->getSector(f.corridor), 0, 4, copy, f.diagnostic), f.diagnostic);
 		auto const* pasted = f.world->lookupAgent(copy).entity;
 		require(pasted->getMinimumRoutePlanningTimeSample() == minimum
@@ -172,7 +172,7 @@ namespace
 		require(pasted->getEffectiveMinimumRoutePlanningTime().value == 1
 			&& pasted->getEffectiveMaximumRoutePlanningTime().value == 3,
 			"Legacy clipboard did not receive default planning times");
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 	}}
 
 namespace routing_smoke

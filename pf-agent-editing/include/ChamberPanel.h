@@ -21,4 +21,4 @@ uint32_t commitChamberDraft(core::World& world, uint32_t layer,
 // invalidate the controls' chamber reference partway through the frame.
 std::optional<core::World::ChamberEditPlan> drawChamberSelectionPanel(
 	std::shared_ptr<core::World> const& world, core::ChamberTransit const& chamber,
-	DocumentHistory& history = gWorldDocumentHistory);
+	DocumentHistory& history = currentDocumentHistory());

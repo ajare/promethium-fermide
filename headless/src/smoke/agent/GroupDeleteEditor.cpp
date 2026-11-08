@@ -197,7 +197,7 @@ namespace
 
 	void resetUndoHistory()
 	{
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 	}
 
 	// ---------------------------------------------------------------- world
@@ -285,8 +285,8 @@ namespace
 			return true;
 		};
 		auto const restored = redo
-			? gWorldDocumentHistory.redo(current, restore)
-			: gWorldDocumentHistory.undo(current, restore);
+			? currentDocumentHistory().redo(current, restore)
+			: currentDocumentHistory().undo(current, restore);
 		require(restored, redo ? "There is no redo entry to restore"
 			: "There is no undo entry to restore");
 		world = std::move(loaded);
@@ -491,9 +491,9 @@ namespace
 			"An empty Agent group asked for through the panel seam was not deleted");
 		require(!agentGroupDeletePending(),
 			"Deleting an empty Agent group left a confirmation armed");
-		require(gWorldDocumentHistory.undoCount() == 1,
+		require(currentDocumentHistory().undoCount() == 1,
 			"Deleting an empty Agent group did not commit exactly one document edit");
-		require(!gWorldDocumentHistory.canRedo(),
+		require(!currentDocumentHistory().canRedo(),
 			"Deleting an empty Agent group produced a redo entry");
 		require(groupSummary(*world) == "2:Crew=4;3:Delta=0;",
 			"Deleting an empty Agent group disturbed the others: " + groupSummary(*world));
@@ -520,7 +520,7 @@ namespace
 
 		auto const groupsBefore = groupSummary(*world);
 		auto const assignmentsBefore = assignmentSummary(*world);
-		auto const historyBefore = gWorldDocumentHistory.undoCount();
+		auto const historyBefore = currentDocumentHistory().undoCount();
 
 		requestAgentGroupDelete(world, fixture.crew);
 
@@ -543,9 +543,9 @@ namespace
 			"Arming a confirmation changed the member count");
 		require(!world->isModified(),
 			"Arming a confirmation marked the document modified");
-		require(gWorldDocumentHistory.undoCount() == historyBefore,
+		require(currentDocumentHistory().undoCount() == historyBefore,
 			"Arming a confirmation committed a document edit");
-		require(!gWorldDocumentHistory.canRedo(),
+		require(!currentDocumentHistory().canRedo(),
 			"Arming a confirmation produced a redo entry");
 	}
 
@@ -584,11 +584,11 @@ namespace
 		}
 		require(!world->isModified(),
 			"Cancelling an Agent group deletion marked the document modified");
-		require(!gWorldDocumentHistory.canUndo(),
+		require(!currentDocumentHistory().canUndo(),
 			"Cancelling an Agent group deletion committed an undo entry");
-		require(!gWorldDocumentHistory.canRedo(),
+		require(!currentDocumentHistory().canRedo(),
 			"Cancelling an Agent group deletion committed a redo entry");
-		require(gWorldDocumentHistory.currentStateId() == 0,
+		require(currentDocumentHistory().currentStateId() == 0,
 			"Cancelling an Agent group deletion moved the document's state id");
 
 		// And the panel is clean enough to ask again, with the same answer.
@@ -596,7 +596,7 @@ namespace
 		require(agentGroupDeletePending(),
 			"A second Agent group delete could not be armed after a cancel");
 		cancelPendingAgentGroupDelete();
-		require(!gWorldDocumentHistory.canUndo(),
+		require(!currentDocumentHistory().canUndo(),
 			"A second cancelled Agent group deletion committed an undo entry");
 	}
 
@@ -621,9 +621,9 @@ namespace
 			"The confirmation stayed armed after it was answered with a delete");
 		require(!world->lookupAgentGroup(fixture.crew),
 			"The confirmed Agent group is still in the World");
-		require(gWorldDocumentHistory.undoCount() == 1,
+		require(currentDocumentHistory().undoCount() == 1,
 			"A confirmed Agent group deletion was not exactly one document edit");
-		require(!gWorldDocumentHistory.canRedo(),
+		require(!currentDocumentHistory().canRedo(),
 			"A confirmed Agent group deletion produced a redo entry");
 		require(world->isModified(),
 			"A confirmed Agent group deletion did not mark the document modified");
@@ -643,7 +643,7 @@ namespace
 		// The newest - and only - undo snapshot is the state with the group
 		// and its four members still in place, which is what makes the whole
 		// deletion one step to step back.
-		auto const before = loadWorld(gWorldDocumentHistory.undoEntries().back().yaml);
+		auto const before = loadWorld(currentDocumentHistory().undoEntries().back().yaml);
 		require(before->getAgentGroupCount() == 3,
 			"The undo snapshot did not hold the state before the deletion: "
 			+ groupSummary(*before));
@@ -670,7 +670,7 @@ namespace
 		require(groupSummary(*world) == before,
 			"A confirmation with nothing armed changed the groups: "
 			+ groupSummary(*world));
-		require(!gWorldDocumentHistory.canUndo(),
+		require(!currentDocumentHistory().canUndo(),
 			"A confirmation with nothing armed committed an undo entry");
 	}
 
@@ -695,7 +695,7 @@ namespace
 			"Committing a delete for the empty AgentGroupId succeeded");
 		require(groupSummary(*world) == before,
 			"A refused delete changed the groups: " + groupSummary(*world));
-		require(!gWorldDocumentHistory.canUndo(),
+		require(!currentDocumentHistory().canUndo(),
 			"A refused delete committed an undo entry");
 		require(!world->isModified(),
 			"A refused delete marked the document modified");
@@ -713,7 +713,7 @@ namespace
 			"Confirming after the request was dropped reported a deletion");
 		require(groupSummary(*world) == before,
 			"A dropped delete request changed the groups: " + groupSummary(*world));
-		require(!gWorldDocumentHistory.canUndo(),
+		require(!currentDocumentHistory().canUndo(),
 			"A dropped delete request committed an undo entry");
 	}
 
@@ -926,7 +926,7 @@ namespace
 		std::string diagnostic;
 		require(commitAgentGroupDelete(world, fixture.crew, diagnostic),
 			("Committing the Agent group delete to undo failed: " + diagnostic).c_str());
-		require(gWorldDocumentHistory.undoCount() == 1,
+		require(currentDocumentHistory().undoCount() == 1,
 			"The delete is not one undo entry, so undo cannot restore one step");
 		auto const postDeleteYaml = serializeWorld(*world);
 

@@ -137,12 +137,30 @@ static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::markSaved),
 	"markSaved() is not reachable through WorldAuthoring (#969)");
 
 // --- The same families, present on the authoring handle ---
-static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::undo),
-	game::WorldAuthoring&>,
+static_assert(std::is_invocable_v<decltype(static_cast<bool (game::WorldAuthoring::*)()>(
+	&game::WorldAuthoring::undo)), game::WorldAuthoring&>,
 	"undo() is not reachable through WorldAuthoring (#968)");
-static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::redo),
-	game::WorldAuthoring&>,
+static_assert(std::is_invocable_v<decltype(static_cast<bool (game::WorldAuthoring::*)()>(
+	&game::WorldAuthoring::redo)), game::WorldAuthoring&>,
 	"redo() is not reachable through WorldAuthoring (#968)");
+// The caller-supplied-restore pair the editor drives its own undo through,
+// over the same handle-owned history (#975).
+static_assert(std::is_invocable_v<decltype(static_cast<bool (game::WorldAuthoring::*)(
+	std::optional<DocumentSnapshot>, DocumentHistory::RestoreDocument const&)>(
+	&game::WorldAuthoring::undo)), game::WorldAuthoring&,
+	std::optional<DocumentSnapshot>, DocumentHistory::RestoreDocument const&>,
+	"the caller-restored undo() is not reachable through WorldAuthoring (#975)");
+static_assert(std::is_invocable_v<decltype(static_cast<bool (game::WorldAuthoring::*)(
+	std::optional<DocumentSnapshot>, DocumentHistory::RestoreDocument const&)>(
+	&game::WorldAuthoring::redo)), game::WorldAuthoring&,
+	std::optional<DocumentSnapshot>, DocumentHistory::RestoreDocument const&>,
+	"the caller-restored redo() is not reachable through WorldAuthoring (#975)");
+static_assert(std::is_same_v<decltype(std::declval<game::WorldAuthoring&>().history()),
+	DocumentHistory&>,
+	"the history the authoring handle owns is not reachable through it (#975)");
+static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::adoptHistoryFrom),
+	game::WorldAuthoring&, game::WorldAuthoring&>,
+	"the history cannot be carried to a new authoring handle (#975)");
 static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::addRoom),
 	game::WorldAuthoring&, std::string const&, std::uint32_t, std::uint32_t, std::uint32_t,
 	std::uint32_t, std::uint32_t, float>,

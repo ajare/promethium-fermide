@@ -155,8 +155,8 @@ namespace
 				"Could not assign schema fixture behaviour");
 			participant->world->saveTo(participant->path.string());
 		}
-		gWorldDocumentHistory.clear();
-		auto const worldHistory = gWorldDocumentHistory.currentStateId();
+		currentDocumentHistory().clear();
+		auto const worldHistory = currentDocumentHistory().currentStateId();
 
 		// A nested optional field with a valid default is classified for every
 		// dependent configuration and materialized in stable World/Agent order.
@@ -192,7 +192,7 @@ namespace
 				"Compatible reconciliation did not update revision/default atomically");
 		}
 		require(registry->isModified()
-			&& gWorldDocumentHistory.currentStateId() == worldHistory,
+			&& currentDocumentHistory().currentStateId() == worldHistory,
 			"Coordinated reconciliation mixed registry and World histories");
 		require(saveAgentBehaviourRegistry(registry, package.string(), &diagnostic),
 			diagnostic);

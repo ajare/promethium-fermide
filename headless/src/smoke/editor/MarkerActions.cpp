@@ -59,10 +59,10 @@ namespace
 		auto configuration = world->getAgentBehaviourAssignment(agent)->configuration;
 		configuration["action"] = core::AgentBehaviourAction{action};
 		require(commitAgentBehaviourAssignment(world, agent, behaviour, 1, configuration, diagnostic), diagnostic);
-		auto count = gWorldDocumentHistory.undoCount();
+		auto count = currentDocumentHistory().undoCount();
 		configuration["action"] = core::AgentBehaviourAction{"missing"};
 		require(!commitAgentBehaviourAssignment(world, agent, behaviour, 1, configuration, diagnostic)
-			&& gWorldDocumentHistory.undoCount() == count && selected() == action,
+			&& currentDocumentHistory().undoCount() == count && selected() == action,
 			"Invalid configured Action changed assignment/history");
 		require(!world->clearActionRegistry(&diagnostic) && world->actionRegistry() && selected() == action,
 			"Registry removal invalidated an authored behaviour Action");
@@ -72,9 +72,9 @@ namespace
 			if (!replacement) return false;
 			world = std::move(replacement); world->pauseSimulation(); return true;
 		};
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore) && selected() == "idle",
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore) && selected() == "idle",
 			"Undo did not restore configured Idle");
-		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore) && selected() == action,
+		require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore) && selected() == action,
 			"Redo did not restore stable Action identity");
 		auto& io = ImGui::GetIO(); io.DisplaySize = {800,600};
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
@@ -121,7 +121,7 @@ namespace
 		auto& io = ImGui::GetIO(); io.DisplaySize = {800, 600}; io.Fonts->AddFontDefault(); io.Fonts->Build();
 		ImGui::NewFrame(); ImGui::Begin("Furniture Action selection");
 		bool choosingAction = true;
-		auto const popupHistory = gWorldDocumentHistory.undoCount();
+		auto const popupHistory = currentDocumentHistory().undoCount();
 		renderAgentMovementActionPopup(world, seat, true, choosingAction, agent);
 		ImGui::End(); ImGui::Render();
 		ImGui::NewFrame(); ImGui::Begin("Furniture Action selection");
@@ -135,30 +135,30 @@ namespace
 		require(choosingAction && popupText.find("Idle") != std::string::npos
 			&& popupText.find(world->agentActionDisplayName(core::UseFurnitureAction)) != std::string::npos,
 			"Furniture destination popup omitted its Actions");
-		require(gWorldDocumentHistory.undoCount() == popupHistory,
+		require(currentDocumentHistory().undoCount() == popupHistory,
 			"Opening the popup changed document history");
 		choosingAction = false;
 		require(!renderAgentMovementActionPopup(world, seat, false, choosingAction, agent) && !choosingAction,
 			"Cancelling the popup chose an Action");
 		ImGui::End(); ImGui::Render();
-		auto count = gWorldDocumentHistory.undoCount();
+		auto count = currentDocumentHistory().undoCount();
 		require(world->setRoomHeightScale(room, .4f), "Editor incompatible height refused");
 		require(!world->furnitureUseEligible(agent, seat, &diagnostic) && diagnostic.find("stand") != std::string::npos,
 			"Editor preflight missed a non-standing Sector");
 		require(!commitAgentMarkerActionRequest(world, agent, seat, core::UseFurnitureAction, diagnostic)
-			&& diagnostic.find("stand") != std::string::npos && gWorldDocumentHistory.undoCount() == count,
+			&& diagnostic.find("stand") != std::string::npos && currentDocumentHistory().undoCount() == count,
 			"Ineligible editor use started movement or added history");
 		require(world->setRoomHeightScale(room, 1.f), "Editor height restoration failed");
 		require(commitAgentMarkerActionRequest(world, agent, seat, core::UseFurnitureAction, diagnostic)
-			&& gWorldDocumentHistory.undoCount() == count + 1, "Editor use request missed history: " + diagnostic);
+			&& currentDocumentHistory().undoCount() == count + 1, "Editor use request missed history: " + diagnostic);
 		auto restore = [&](DocumentSnapshot const& snapshot)
 		{
 			auto loaded = deserializeDocumentSnapshot(snapshot, world, document);
 			if (!loaded) return false;
 			world = std::move(loaded); world->pauseSimulation(); return true;
 		};
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore)
-			&& gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Use request Undo/Redo failed");
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore)
+			&& currentDocumentHistory().redo(captureDocumentSnapshot(world), restore), "Use request Undo/Redo failed");
 		require(world->resumeSimulation(), "Editor use resume failed");
 		bool arrived = false;
 		for (unsigned tick = 0; tick < 1800 && !arrived; ++tick)
@@ -180,26 +180,26 @@ namespace
 		require(world->resumeSimulation() && world->advanceTicks(60) && world->usablePointOccupant(seat) == agent, "Editor edit-use setup failed");
 		world->pauseSimulation(); core::consumeLogMessages();
 		auto id = world->furniture()[0].id;
-		count = gWorldDocumentHistory.undoCount();
+		count = currentDocumentHistory().undoCount();
 		auto position = world->lookupAgent(agent).entity->getGlobalPosition();
 		require(!editSelectedFurniture(world, id, -1, 0, false, "Refused", diagnostic)
-			&& gWorldDocumentHistory.undoCount() == count && world->usablePointOccupant(seat) == agent,
+			&& currentDocumentHistory().undoCount() == count && world->usablePointOccupant(seat) == agent,
 			"Refused editor move changed use/history");
-		require(!deleteSelectedFurniture(world, 99999, diagnostic) && gWorldDocumentHistory.undoCount() == count,
+		require(!deleteSelectedFurniture(world, 99999, diagnostic) && currentDocumentHistory().undoCount() == count,
 			"Refused editor deletion changed history");
 		require(editSelectedFurniture(world, id, 4, 0, false, "Moved", diagnostic)
-			&& gWorldDocumentHistory.undoCount() == count + 1, diagnostic);
+			&& currentDocumentHistory().undoCount() == count + 1, diagnostic);
 		require(world->lookupAgent(agent).entity->getGlobalPosition() == position && !world->usablePointOccupant(seat)
 			&& world->lookupAgent(agent).entity->getPose() == core::Pose::Standing, "Editor move stranded/teleported user");
 		unsigned finishes = 0;
 		for (auto const& log : core::consumeLogMessages()) if (log.msg.starts_with("finish:")) ++finishes;
 		require(finishes == 1, "Editor move did not finish old use");
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore)
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore)
 			&& !world->usablePointOccupant(seat) && world->lookupAgent(agent).entity->getPose() == core::Pose::Standing
-			&& gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Furniture move history restored transient use");
+			&& currentDocumentHistory().redo(captureDocumentSnapshot(world), restore), "Furniture move history restored transient use");
 		require(deleteSelectedFurniture(world, id, diagnostic)
-			&& gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore)
-			&& gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Furniture deletion history failed");
+			&& currentDocumentHistory().undo(captureDocumentSnapshot(world), restore)
+			&& currentDocumentHistory().redo(captureDocumentSnapshot(world), restore), "Furniture deletion history failed");
 		for (auto const& log : core::consumeLogMessages())
 			require(!log.msg.starts_with("use:") && !log.msg.starts_with("finish:"), "History reconstruction replayed lifecycle effects");
 	}
@@ -222,43 +222,43 @@ namespace
 		std::string action = "ad603358-5ebf-45bb-a686-c3f491152c61:greet";
 		require(commitActionRegistrySelection(world, path, diagnostic)
 			&& commitMarkerActionAssignment(world, marker, {action}, diagnostic), diagnostic);
-		auto count = gWorldDocumentHistory.undoCount();
+		auto count = currentDocumentHistory().undoCount();
 		auto before = world->actionRegistry();
 		std::ofstream(path) << "return {}";
 		require(!reloadSelectedActionRegistry(world, path, diagnostic) && !diagnostic.empty()
-			&& world->actionRegistry() == before && gWorldDocumentHistory.undoCount() == count,
+			&& world->actionRegistry() == before && currentDocumentHistory().undoCount() == count,
 			"Failed editor reload changed package/history");
 		write("New");
-		require(reloadSelectedActionRegistry(world, path, diagnostic) && gWorldDocumentHistory.undoCount() == count,
+		require(reloadSelectedActionRegistry(world, path, diagnostic) && currentDocumentHistory().undoCount() == count,
 			"Runtime reload authored an undo entry");
 		auto restore = [&](DocumentSnapshot const& snapshot) {
 			auto loaded = deserializeDocumentSnapshot(snapshot, world, {});
 			if (!loaded) return false;
 			world = std::move(loaded); world->pauseSimulation(); return true;
 		};
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore)
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore)
 			&& world->markerActions(marker).empty() && world->agentActionDisplayName(action) == "New"
-			&& gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore)
+			&& currentDocumentHistory().redo(captureDocumentSnapshot(world), restore)
 			&& world->markerActions(marker) == std::vector<std::string>{action}
 			&& world->agentActionDisplayName(action) == "New", "History replayed old executable package");
 		require(world->resumeSimulation() && !reloadSelectedActionRegistry(world, path, diagnostic)
-			&& gWorldDocumentHistory.undoCount() == count, "Running editor reload changed history");
+			&& currentDocumentHistory().undoCount() == count, "Running editor reload changed history");
 		world->pauseSimulation();
 		auto furniturePath = root / "use.furniture.lua";
 		std::filesystem::copy_file(context.fixture("headless/src/smoke/fixtures/use.furniture.lua"), furniturePath);
 		auto document = root / "reload.world.yaml"; world->saveTo(document.string());
 		require(selectFurnitureCatalogue(world, document, furniturePath.filename().string(), diagnostic)
 			&& placeSelectedFurniture(world, room, "chair", 3, 0, false, "Chair", diagnostic), diagnostic);
-		count = gWorldDocumentHistory.undoCount();
+		count = currentDocumentHistory().undoCount();
 		auto catalogue = world->furnitureCatalogue();
 		std::ofstream(furniturePath) << "return {}";
 		require(!reloadSelectedFurnitureCatalogue(world, document, diagnostic) && !diagnostic.empty()
-			&& world->furnitureCatalogue() == catalogue && gWorldDocumentHistory.undoCount() == count,
+			&& world->furnitureCatalogue() == catalogue && currentDocumentHistory().undoCount() == count,
 			"Failed editor Furniture reload changed history/package");
 		std::filesystem::copy_file(context.fixture("headless/src/smoke/fixtures/use.furniture.lua"), furniturePath,
 			std::filesystem::copy_options::overwrite_existing);
 		require(reloadSelectedFurnitureCatalogue(world, document, diagnostic)
-			&& gWorldDocumentHistory.undoCount() == count && world->furniture()[0].marker,
+			&& currentDocumentHistory().undoCount() == count && world->furniture()[0].marker,
 			"Successful editor Furniture reload changed authored history");
 	}
 
@@ -284,7 +284,7 @@ namespace
 		require(commitActionRegistrySelection(world,path,diagnostic), diagnostic);
 		require(commitMarkerActionAssignment(world,marker,{second,first,second},diagnostic), diagnostic);
 		require(commitAgentMarkerActionRequest(world,agent,marker,first,diagnostic), diagnostic);
-		require(gWorldDocumentHistory.undoCount() == 3, "Authoring did not commit document history");
+		require(currentDocumentHistory().undoCount() == 3, "Authoring did not commit document history");
 		auto restore = [&](DocumentSnapshot const& snapshot)
 		{
 			auto replacement = deserializeDocumentSnapshot(snapshot, world, {});
@@ -292,10 +292,10 @@ namespace
 			world = std::move(replacement); world->pauseSimulation(); return true;
 		};
 		for (int i = 0; i < 3; ++i)
-			require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world),restore), "Action history undo failed");
+			require(currentDocumentHistory().undo(captureDocumentSnapshot(world),restore), "Action history undo failed");
 		require(!world->actionRegistry() && world->markerActions(marker).empty(), "Registry/assignment undo lost authored state");
 		for (int i = 0; i < 3; ++i)
-			require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world),restore), "Action history redo failed");
+			require(currentDocumentHistory().redo(captureDocumentSnapshot(world),restore), "Action history redo failed");
 		require(world->markerActions(marker) == std::vector<std::string>{second,first}, "Action identity/order lost through history");
 		require(world->renameMarker(marker,"Renamed"), "Marker rename refused");
 		auto& io = ImGui::GetIO(); io.DisplaySize = {800,600};
@@ -328,9 +328,9 @@ namespace
 		ImGui::End(); ImGui::Render();
 		require(diagnostic.empty(), "Headless editor surface produced an error");
 		require(world->resumeSimulation(), "Editor World resume failed");
-		auto const historyCount = gWorldDocumentHistory.undoCount();
+		auto const historyCount = currentDocumentHistory().undoCount();
 		require(!commitMarkerActionAssignment(world,marker,{},diagnostic)
-			&& gWorldDocumentHistory.undoCount() == historyCount, "Running assignment changed World/history");
+			&& currentDocumentHistory().undoCount() == historyCount, "Running assignment changed World/history");
 		bool arrived = false;
 		core::consumeLogMessages();
 		for (int tick = 0; tick < 1800 && !arrived; ++tick)
@@ -350,7 +350,7 @@ namespace
 		auto undo = captureDocumentSnapshot(world);
 		require(world->clearActionRegistry(&diagnostic), diagnostic);
 		commitDocumentEdit(std::move(undo));
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world),restore)
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world),restore)
 			&& world->markerActions(marker) == std::vector<std::string>{second,first}, "Registry removal cannot be undone");
 	}
 
@@ -371,12 +371,12 @@ namespace
 		// A live destination edit while running is a transient runtime request: it
 		// starts the Agent moving without pausing and authors no document state (#469).
 		require(!world->isSimulationPaused(), "Fixture did not start running");
-		auto const history = gWorldDocumentHistory.undoCount();
+		auto const history = currentDocumentHistory().undoCount();
 		auto const wasModified = world->isModified();
 		auto path = world->getGraph()->calculatePath(entity, nullptr, target);
 		require(path && applyAgentPathEdit(world, entity, std::move(path), true, true,
 			core::IdleAction, diagnostic), "Live destination edit refused: " + diagnostic);
-		require(gWorldDocumentHistory.undoCount() == history && world->isModified() == wasModified,
+		require(currentDocumentHistory().undoCount() == history && world->isModified() == wasModified,
 			"Live destination edit authored document state");
 		bool arrived = false;
 		for (unsigned tick = 0; tick < 1800 && !arrived; ++tick)
@@ -389,12 +389,12 @@ namespace
 		require(arrived, "Live destination edit never arrived");
 
 		// A refused live edit surfaces a diagnostic and leaves history untouched.
-		auto const refusedHistory = gWorldDocumentHistory.undoCount();
+		auto const refusedHistory = currentDocumentHistory().undoCount();
 		path = world->getGraph()->calculatePath(entity, nullptr, target);
 		diagnostic.clear();
 		require(!applyAgentPathEdit(world, entity, std::move(path), true, true,
 			core::UseFurnitureAction, diagnostic) && !diagnostic.empty()
-			&& gWorldDocumentHistory.undoCount() == refusedHistory,
+			&& currentDocumentHistory().undoCount() == refusedHistory,
 			"Refused live edit lost its diagnostic or changed history");
 
 		// The authored, reset-persistent request still requires a pause.
@@ -402,11 +402,11 @@ namespace
 		require(!commitAgentMarkerActionRequest(world, agent, marker, core::IdleAction, diagnostic)
 			&& !diagnostic.empty(), "Authored request was accepted while running");
 		world->pauseSimulation();
-		auto const authoredHistory = gWorldDocumentHistory.undoCount();
+		auto const authoredHistory = currentDocumentHistory().undoCount();
 		path = world->getGraph()->calculatePath(entity, nullptr, target);
 		diagnostic.clear();
 		require(applyAgentPathEdit(world, entity, std::move(path), true, true, core::IdleAction, diagnostic)
-			&& gWorldDocumentHistory.undoCount() == authoredHistory + 1,
+			&& currentDocumentHistory().undoCount() == authoredHistory + 1,
 			"Paused destination edit did not author document history: " + diagnostic);
 		require(world->isModified(), "Paused destination edit did not dirty the document");
 		core::World::TopologyPathIntent intent;
@@ -494,17 +494,17 @@ namespace
 			&& !world->actionRegistry(), "World accepted a registry outside its document directory");
 
 		// The panel seam mirrors the Furniture adjacency rule and adds no history.
-		auto history = gWorldDocumentHistory.undoCount();
+		auto history = currentDocumentHistory().undoCount();
 		diagnostic.clear();
 		require(!commitActionRegistrySelection(world, elsewhere, diagnostic) && !diagnostic.empty()
-			&& !world->actionRegistry() && gWorldDocumentHistory.undoCount() == history,
+			&& !world->actionRegistry() && currentDocumentHistory().undoCount() == history,
 			"Panel accepted a registry outside the World directory");
 
 		// A bare relative reference resolves beside the saved World and is accepted.
 		diagnostic.clear();
 		require(commitActionRegistrySelection(world, adjacent.filename(), diagnostic)
 			&& world->actionRegistryFilename() == adjacent.filename().string()
-			&& gWorldDocumentHistory.undoCount() == history + 1, diagnostic);
+			&& currentDocumentHistory().undoCount() == history + 1, diagnostic);
 		require(commitMarkerActionAssignment(world, marker, {action}, diagnostic), diagnostic);
 
 		// The reference round-trips: the saved document resolves the registry beside it.

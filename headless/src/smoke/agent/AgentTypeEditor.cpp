@@ -851,7 +851,7 @@ namespace
 
 	void inheritedObjectUsageWorkflow(smoke::Context const& context, core::ObjectUsage mode, bool shutters = false)
 	{
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		auto human = core::bundledHumanAgentType();
 		auto none = human;
 		none.typeId = "TagNone"; none.resourceName = "tag-none.agent.lua";
@@ -939,14 +939,14 @@ namespace
 			}
 			catch (std::exception const& error) { diagnostic = error.what(); return false; }
 		};
-		gWorldDocumentHistory.clear(); before = captureDocumentSnapshot(world);
+		currentDocumentHistory().clear(); before = captureDocumentSnapshot(world);
 		require(world->setAgentIndividualObjectUsageDistance(id, .8f), "Individual distance edit failed"); commitDocumentEdit(before);
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic); check(*world, id);
-		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), diagnostic);
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), diagnostic); check(*world, id);
+		require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore), diagnostic);
 		world->pauseSimulation(); require(world->setAgentIndividualObjectUsageDistance(id, std::nullopt), "Removal failed"); check(*world, id);
-		gWorldDocumentHistory.clear(); before = captureDocumentSnapshot(world);
+		currentDocumentHistory().clear(); before = captureDocumentSnapshot(world);
 		require(cutAgent(world, id, diagnostic), diagnostic); commitDocumentEdit(before);
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic); check(*world, id);
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), diagnostic); check(*world, id);
 		world->pauseSimulation();
 		// Reload accepted definitions propagates immediately; an invalid effective
 		// Arms combination refuses without changing the shared registry/history.
@@ -991,7 +991,7 @@ namespace
 			&& (shutters ? world->lookupAgent(id).entity->getEffectiveRemoteBoothWindowShutters().value : world->lookupAgent(id).entity->getEffectiveRemoteAccessPanels().value), diagnostic);
 		require(restoreAgentTagRegistrySnapshot(registry, false, &diagnostic)
 			&& !(shutters ? world->lookupAgent(id).entity->getEffectiveRemoteBoothWindowShutters().value : world->lookupAgent(id).entity->getEffectiveRemoteAccessPanels().value), diagnostic);
-		forgetAgentTagRegistryDocument(registry); gWorldDocumentHistory.clear();
+		forgetAgentTagRegistryDocument(registry); currentDocumentHistory().clear();
 	}
 
 	void inheritedObjectUsageWorkflows(smoke::Context const& context)
@@ -1004,7 +1004,7 @@ namespace
 
 	void objectUsageOverrideWorkflow(smoke::Context const& context, core::ObjectUsage mode, bool shutters = false)
 	{
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		auto human = core::bundledHumanAgentType();
 		agent_smoke::replaceSource(human.source, "object_usage = \"arms\",", (shutters ? "object_usage = 'arms', remote_booth_window_shutters = true," : "object_usage = 'arms', remote_access_panels = true,"));
 		AgentTypeLoaderScope loader{[&](std::string const& name) -> std::optional<core::AgentTypeDefinition> {
@@ -1065,39 +1065,39 @@ namespace
 		core::AgentId sameWorld;
 		require(commitAgentPlacement(world, payload, world->getSector(fixture.corridor), 0, 7.f, sameWorld, diagnostic)
 			&& (shutters ? world->lookupAgent(sameWorld).entity->getIndividualRemoteBoothWindowShutters() : world->lookupAgent(sameWorld).entity->getIndividualRemoteAccessPanels()) == false, "Same-World paste lost panel override");
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		auto restore = [&](DocumentSnapshot const& snapshot) {
 			try { auto candidate = deserializeDocumentSnapshot(snapshot, world, {}); if (!candidate) return false; world = std::move(candidate); return true; }
 			catch (std::exception const& error) { diagnostic = error.what(); return false; }
 		};
 		require(edit([&] { return (shutters ? world->setAgentIndividualRemoteBoothWindowShutters(id, std::nullopt) : world->setAgentIndividualRemoteAccessPanels(id, std::nullopt)); }), "Panel removal failed");
 		require((shutters ? world->lookupAgent(id).entity->getEffectiveRemoteBoothWindowShutters().value : world->lookupAgent(id).entity->getEffectiveRemoteAccessPanels().value), "Removal did not reveal script boolean");
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic); check();
-		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore)
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), diagnostic); check();
+		require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore)
 			&& (shutters ? world->lookupAgent(id).entity->getEffectiveRemoteBoothWindowShutters().value : world->lookupAgent(id).entity->getEffectiveRemoteAccessPanels().value), diagnostic);
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic); check();
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), diagnostic); check();
 		world->pauseSimulation();
 		require(edit([&] { return world->setAgentIndividualObjectUsage(id, std::nullopt); }), "Mode removal failed");
 		require(world->lookupAgent(id).entity->getObjectUsage() == core::ObjectUsage::Arms
 			&& world->lookupAgent(id).entity->getObjectUsageDistance() == .6f, "Mode removal destroyed distance/default");
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic); check();
-		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), diagnostic);
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), diagnostic); check();
+		require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore), diagnostic);
 		world->pauseSimulation();
 		require(edit([&] { return world->setAgentIndividualObjectUsageDistance(id, std::nullopt, &diagnostic); }), "Distance removal failed: " + diagnostic);
 		require(world->lookupAgent(id).entity->getObjectUsageDistance() == .25f, "Removal did not reveal frozen default");
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic);
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), diagnostic);
 		require(world->lookupAgent(id).entity->getObjectUsageDistance() == .6f, "Distance undo failed");
 		world->pauseSimulation();
-		world->markSaved(); auto before = captureDocumentSnapshot(world); auto undoCount = gWorldDocumentHistory.undoCount();
+		world->markSaved(); auto before = captureDocumentSnapshot(world); auto undoCount = currentDocumentHistory().undoCount();
 		require(!edit([&] { return world->setAgentIndividualObjectUsageDistance(id, 0.f); })
 			&& captureDocumentSnapshot(world)->yaml == before->yaml && !world->isModified()
-			&& gWorldDocumentHistory.undoCount() == undoCount, "Refused edit changed authored state/history");
+			&& currentDocumentHistory().undoCount() == undoCount, "Refused edit changed authored state/history");
 		auto malformed = *before;
 		auto offset = malformed.yaml.find("value: 0.6"); require(offset != std::string::npos, "Missing authored distance");
 		auto end = malformed.yaml.find('\n', offset);
 		malformed.yaml.replace(offset, end - offset, "value: 0");
 		require(!restore(malformed) && captureDocumentSnapshot(world)->yaml == before->yaml
-			&& gWorldDocumentHistory.undoCount() == undoCount, "Malformed document partially restored");
+			&& currentDocumentHistory().undoCount() == undoCount, "Malformed document partially restored");
 		auto invalidBoolean = *before;
 		auto booleanOffset = invalidBoolean.yaml.find((shutters ? "type: remoteBoothWindowShutters" : "type: remoteAccessPanels"));
 		require(booleanOffset != std::string::npos, "Missing authored panel property");
@@ -1116,7 +1116,7 @@ namespace
 		{
 			// Exercise the pasted capability through authored Door/history seams,
 			// not just serialized property observations.
-			gWorldDocumentHistory.clear();
+			currentDocumentHistory().clear();
 			auto beforeDoor = captureDocumentSnapshot(other.world);
 			auto back = other.world->addRoom("Remote destination", 1, 0, 0, 10, 1);
 			other.world->addSectorDoor(0, 0, 6, core::World::ManualDoor1Options);
@@ -1127,16 +1127,16 @@ namespace
 				if (!candidate) return false;
 				other.world = std::move(candidate); return true;
 			};
-			require(gWorldDocumentHistory.undo(captureDocumentSnapshot(other.world), restoreOther), "Door authoring undo failed");
-			require(gWorldDocumentHistory.redo(captureDocumentSnapshot(other.world), restoreOther), "Door authoring redo failed");
+			require(currentDocumentHistory().undo(captureDocumentSnapshot(other.world), restoreOther), "Door authoring undo failed");
+			require(currentDocumentHistory().redo(captureDocumentSnapshot(other.world), restoreOther), "Door authoring redo failed");
 			other.world->resumeSimulation();
 			require(other.world->moveAgentToNamedMarker(pasted, "Remote goal").accepted(), "Pasted remote Door intent refused");
 			other.world->advanceTicks(1500);
 			require(other.world->lookupAgent(pasted).entity->getSector()->getIndex() == back, "Clipboard/history remote Door journey failed");
 		}
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		require(edit([&] { return cutAgent(world, id, diagnostic); }), diagnostic);
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic);
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), diagnostic);
 		require(world->lookupAgent(id).entity->getIndividualObjectUsageDistance() == .6f, "Deletion restoration lost override");
 		world->pauseSimulation();
 		agent_smoke::replaceSource(human.source, (shutters ? "remote_booth_window_shutters = true" : "remote_access_panels = true"), (shutters ? "remote_booth_window_shutters = false" : "remote_access_panels = false"));
@@ -1163,7 +1163,7 @@ namespace
 		stable = captureDocumentSnapshot(world)->yaml; resetRefused = false;
 		try { world->resetSimulation(); } catch (std::exception const&) { resetRefused = true; }
 		require(resetRefused && captureDocumentSnapshot(world)->yaml == stable, "Override masked invalid fresh boolean");
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 	}
 
 	void objectUsageOverrideWorkflows(smoke::Context const& context)
@@ -1176,7 +1176,7 @@ namespace
 
 	void noneClipboardAndHistory(smoke::Context const&)
 	{
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		core::AgentTypeDefinition definition{"NoneHistory", "None history", "none-history.agent.lua", externalSource("NoneHistory")};
 		agent_smoke::replaceSource(definition.source, "object_usage = \"arms\"", "object_usage = 'none'");
 		agent_smoke::replaceSource(definition.source, "object_usage_distance = 0.25,", "");
@@ -1202,7 +1202,7 @@ namespace
 		world->addLevel();
 		require(world->lookupAgent(survivor).entity->getObjectUsage() == core::ObjectUsage::None
 			&& world->lookupAgent(pasted).entity->getObjectUsage() == core::ObjectUsage::None, "Structural replay reconstructed None survivors");
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		auto before = captureDocumentSnapshot(world);
 		require(cutAgent(world, pasted, diagnostic), diagnostic); commitDocumentEdit(before);
 		auto restore = [&](DocumentSnapshot const& snapshot) {
@@ -1211,19 +1211,19 @@ namespace
 		};
 		auto const deleted = captureDocumentSnapshot(world)->yaml;
 		agent_smoke::replaceSource(definition.source, "object_usage = \"arms\"", "object_usage = 'None'");
-		require(!gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore)
-			&& captureDocumentSnapshot(world)->yaml == deleted && gWorldDocumentHistory.undoCount() == 1
+		require(!currentDocumentHistory().undo(captureDocumentSnapshot(world), restore)
+			&& captureDocumentSnapshot(world)->yaml == deleted && currentDocumentHistory().undoCount() == 1
 			&& world->lookupAgent(survivor).entity->getObjectUsage() == core::ObjectUsage::None,
 			"Invalid fresh mode mutated the World/history or reused a deleted instance");
 		definition.source = externalSource("NoneHistory");
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic);
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), diagnostic);
 		require(world->lookupAgent(pasted).entity->getObjectUsage() == core::ObjectUsage::Arms
 			&& world->lookupAgent(pasted).entity->getObjectUsageDistance() == .25f
 			&& world->lookupAgent(survivor).entity->getObjectUsage() == core::ObjectUsage::None,
 			"Deletion undo failed fresh/surviving mode distinction");
-		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "None deletion redo failed");
+		require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore), "None deletion redo failed");
 		require(!world->lookupAgent(pasted).entity, "Redo retained restored Agent");
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Repeated None history undo failed");
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), "Repeated None history undo failed");
 		auto copied = makeAgentClipboardPayload(*world, survivor, "Copy");
 		auto other = buildWorld("Fresh copied None"); other.world->pauseSimulation();
 		core::AgentId copy;
@@ -1234,12 +1234,12 @@ namespace
 		world->resetSimulation();
 		require(world->lookupAgent(survivor).entity->getObjectUsage() == core::ObjectUsage::Arms
 			&& captureDocumentSnapshot(world)->yaml == authored, "Reset reused None or materialised defaults");
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 	}
 
 	void scriptedClipboardAndDeletionHistory(smoke::Context const& context)
 	{
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		auto definition = *core::resolveAgentTypeResource("android.agent.lua");
 		agent_smoke::replaceSource(definition.source, "door = \"can_use\"", "door = \"cannot_use\"");
 		auto const initialSource = definition.source;
@@ -1338,30 +1338,30 @@ namespace
 				return true;
 			} catch (std::exception const& error) { diagnostic = error.what(); return false; }
 		};
-		auto const pasteUndone = gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore);
+		auto const pasteUndone = currentDocumentHistory().undo(captureDocumentSnapshot(world), restore);
 		require(pasteUndone, "Paste undo failed: " + diagnostic);
 		require(!world->lookupAgent(pasted).entity && agentCount(*world) == 1,
 			"Paste undo kept the pasted Agent or removed its source");
 		definition.source = "return { api_version=2, type_id='Android', display_name='Android', new=function() error('redo constructor') end }";
 		auto const undone = captureDocumentSnapshot(world);
-		auto const redoCount = gWorldDocumentHistory.redoCount();
-		require(!gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore)
-			&& gWorldDocumentHistory.redoCount() == redoCount
+		auto const redoCount = currentDocumentHistory().redoCount();
+		require(!currentDocumentHistory().redo(captureDocumentSnapshot(world), restore)
+			&& currentDocumentHistory().redoCount() == redoCount
 			&& captureDocumentSnapshot(world)->yaml == undone->yaml,
 			"Paste redo reused a removed instance or changed state after failure");
 		definition.source = initialSource;
-		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Paste redo failed to recover");
+		require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore), "Paste redo failed to recover");
 		verify();
 		// Public copy of the placed Agent must produce the same portable data.
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		auto const beforeCut = captureDocumentSnapshot(world);
 		require(cutAgent(world, pasted, diagnostic), diagnostic);
 		commitDocumentEdit(beforeCut);
 		require(!world->lookupAgent(pasted).entity, "Cut kept the deleted Agent alive in the World");
 		auto const deleted = captureDocumentSnapshot(world);
-		auto const count = gWorldDocumentHistory.undoCount();
+		auto const count = currentDocumentHistory().undoCount();
 		require(count == 1, "Cut was not captured as one history edit");
-		auto const undo = [&] { return gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore); };
+		auto const undo = [&] { return currentDocumentHistory().undo(captureDocumentSnapshot(world), restore); };
 		for (int failure = 0; failure != 5; ++failure)
 		{
 			if (failure == 0) definition.resourceName = "missing.agent.lua";
@@ -1371,7 +1371,7 @@ namespace
 			if (failure == 4) agent_smoke::replaceSource(definition.source, "reach = 0.25", "object_usage = 'arms', object_usage_distance = 0");
 			require(!undo(), "Deletion undo accepted an invalid dependency or reused the deleted instance");
 			require(captureDocumentSnapshot(world)->yaml == deleted->yaml
-				&& gWorldDocumentHistory.undoCount() == count && !gWorldDocumentHistory.canRedo(),
+				&& currentDocumentHistory().undoCount() == count && !currentDocumentHistory().canRedo(),
 				"Failed deletion restoration changed the World/history");
 			if (failure == 3) require(diagnostic.find("android.agent.lua") != std::string::npos
 				&& diagnostic.find("door") != std::string::npos, "Invalid Mobility restoration lacked field/resource diagnostics");
@@ -1391,11 +1391,11 @@ namespace
 		require(world->lookupAgent(pasted).entity->getWidth() == 0.5f
 			&& world->lookupAgent(original).entity->getWidth() == 0.4f,
 			"Deletion restoration was not fresh or discarded the surviving instance");
-		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Deletion redo failed");
+		require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore), "Deletion redo failed");
 		require(!world->lookupAgent(pasted).entity, "Deletion redo retained its Agent");
 		require(undo(), "Repeated deletion undo failed");
 		verify(true);
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		// Copy the restored, placed Agent through the public editor seam into a
 		// new World. This exercises an actual copy, not just payload encoding.
 		auto copyFixture = buildWorld("Fresh copied lifetime");
@@ -1418,12 +1418,12 @@ namespace
 		agent_smoke::requireDoorRoute(*copyFixture.world, copied, copyBack, true);
 		require(copyFixture.world->setAgentIndividualMobilityProfile(copied, std::nullopt, &diagnostic), diagnostic);
 		agent_smoke::requireDoorRoute(*copyFixture.world, copied, copyBack, true);
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 	}
 
 	void scriptedClipboardRefusalAndLegacy(smoke::Context const&)
 	{
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		auto fixture = buildWorld("Clipboard refusals");
 		auto const validDefinition = *core::resolveAgentTypeResource("android.agent.lua");
 		auto definition = validDefinition;
@@ -1461,7 +1461,7 @@ namespace
 			require(!commitAgentPlacement(fixture.world, payload, fixture.world->getSector(fixture.corridor),
 				0, 1.f, placed, diagnostic) && !placed && !diagnostic.empty(), "Invalid paste was published");
 			require(captureDocumentSnapshot(fixture.world)->yaml == before->yaml
-				&& !gWorldDocumentHistory.canUndo(), "Refused paste changed World/history");
+				&& !currentDocumentHistory().canUndo(), "Refused paste changed World/history");
 			definition = validDefinition;
 		}
 		require(fixture.world->attachAgentType("competing.agent.lua", validDefinition.source, &diagnostic), diagnostic);
@@ -1496,7 +1496,7 @@ namespace
 			require(fixture.world->lookupAgent(placed).entity->getTypeResourceName() == "human.agent.lua",
 				"Legacy clipboard did not resolve bundled Human");
 		}
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 	}
 
 	void editorCopiedFixturePreservesTypeIdentity(smoke::Context const&)

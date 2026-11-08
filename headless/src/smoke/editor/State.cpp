@@ -23,12 +23,41 @@ extern ImFont* gAgentIconFont;
 
 namespace
 {
+	// The history the headless editor checks commit into.
+	//
+	// Production has no process-wide history at all: the shipped editor's
+	// history is the one its open document's authoring handle owns, and the
+	// global these checks used to share with it is gone (#975). These checks
+	// drive the same panels the GUI drives, but against a bare
+	// `core::World` with no `editor::EditorDocument` open, so they need a
+	// history of their own - and it has to be reachable through the same
+	// seam the panels use, otherwise the checks would not be driving the
+	// seam they claim to cover.
+	DocumentHistory gHarnessHistory;
+
+	// Installed once per check binary, before any check runs. This is the
+	// only place the resolver is ever replaced, and it is in the test tier:
+	// a shipped build answers through the open document and nothing can
+	// point it at a stack nobody owns.
+	struct HarnessHistoryResolver
+	{
+		HarnessHistoryResolver()
+		{
+			setDocumentHistoryResolver(
+				[]() -> DocumentHistory& { return gHarnessHistory; });
+		}
+	} gHarnessHistoryResolver;
+
 	void reset()
 	{
 		resetAgentGroupsPanelState();
 		resetTagsPanelState();
 		resetBehavioursPanelState();
-		gWorldDocumentHistory.clear();
+		// Cleared through the seam rather than by naming `gHarnessHistory`,
+		// so the isolation this fixture provides covers whatever the seam is
+		// currently answering with, not just the object it happens to answer
+		// with today.
+		currentDocumentHistory().clear();
 		core::setTransactionalWriteFailureAfterBytesForTesting(0);
 		(void)core::consumeLogMessages();
 		clearObjectTileset();

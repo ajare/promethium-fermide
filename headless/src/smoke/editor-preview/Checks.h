@@ -42,3 +42,4 @@ void registerEditorPreviewDocument(std::vector<smoke::Check>& checks);
 void registerEditorPreviewParity(std::vector<smoke::Check>& checks);
 void registerEditorPreviewBoundary(std::vector<smoke::Check>& checks);
 void registerEditorPreviewAuthoringRoute(std::vector<smoke::Check>& checks);
+void registerEditorPreviewHistorySeam(std::vector<smoke::Check>& checks);

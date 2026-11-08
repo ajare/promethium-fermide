@@ -26,6 +26,7 @@ add_library(pf-agent-editing STATIC
     src/BoothWindowEditor.cpp
     src/ChamberPanel.cpp
     src/DocumentEdit.cpp
+    src/DocumentSaveSeam.cpp
     src/DoorClipboard.cpp
     src/DoorPanel.cpp
     src/EditorDocument.cpp

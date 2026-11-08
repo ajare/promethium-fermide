@@ -15,7 +15,7 @@ namespace
 		broken_platform_lift::Scene scene;
 		auto world = scene.world;
 		world->pauseSimulation(); world->markSaved();
-		gWorldDocumentHistory.clear(); gWorldDocumentHistory.markSaved();
+		currentDocumentHistory().clear(); currentDocumentHistory().markSaved();
 		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr; io.DisplaySize = ImVec2(1600, 1000);
 		std::string text; io.ClipboardUserData = &text;
 		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
@@ -44,12 +44,12 @@ namespace
 			io.AddMousePosEvent(point.x, point.y); frame(); io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
 		};
 		click("Initially Broken"); frame();
-		require(lift()->isInitiallyBroken() && lift()->isBroken() && gWorldDocumentHistory.undoCount() == 1
+		require(lift()->isInitiallyBroken() && lift()->isBroken() && currentDocumentHistory().undoCount() == 1
 			&& text.find("Broken: whole Platform lift frozen") != std::string::npos && text.find("platform y:") != std::string::npos, "Initial control/status/history failed");
 		auto authored = save(); world->markSaved();
 		click("Live Broken");
 		require(!lift()->isBroken() && lift()->isInitiallyBroken() && save() == authored && !world->isModified()
-			&& gWorldDocumentHistory.undoCount() == 1, "Live control changed document/history");
+			&& currentDocumentHistory().undoCount() == 1, "Live control changed document/history");
 		world->resumeSimulation(); click("Live Broken");
 		require(lift()->isBroken() && save() == authored && !world->isModified(), "Running live control failed");
 		world->pauseSimulation();
@@ -59,8 +59,8 @@ namespace
 			auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
 			require(loaded->deserialize(*reader, work), "History load failed"); world = loaded; world->pauseSimulation(); return true;
 		};
-		require(gWorldDocumentHistory.undo(gWorldDocumentHistory.capture(save()), restore) && save() == original && !lift()->isInitiallyBroken(), "Authored undo failed");
-		require(gWorldDocumentHistory.redo(gWorldDocumentHistory.capture(save()), restore) && save() == authored && lift()->isInitiallyBroken(), "Authored redo failed");
+		require(currentDocumentHistory().undo(currentDocumentHistory().capture(save()), restore) && save() == original && !lift()->isInitiallyBroken(), "Authored undo failed");
+		require(currentDocumentHistory().redo(currentDocumentHistory().capture(save()), restore) && save() == authored && lift()->isInitiallyBroken(), "Authored redo failed");
 	}
 }
 

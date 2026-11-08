@@ -1019,6 +1019,18 @@ bool WorldAuthoring::redo()
 		[this](DocumentSnapshot const& target) { return restoreInPlace(target); });
 }
 
+bool WorldAuthoring::undo(std::optional<DocumentSnapshot> current,
+	DocumentHistory::RestoreDocument const& restore)
+{
+	return history_->undo(std::move(current), restore);
+}
+
+bool WorldAuthoring::redo(std::optional<DocumentSnapshot> current,
+	DocumentHistory::RestoreDocument const& restore)
+{
+	return history_->redo(std::move(current), restore);
+}
+
 bool WorldAuthoring::canUndo() const noexcept
 {
 	return history_->canUndo();
@@ -1052,6 +1064,27 @@ void WorldAuthoring::markSaved() noexcept
 void WorldAuthoring::clearHistory() noexcept
 {
 	history_->clear();
+}
+
+DocumentHistory& WorldAuthoring::history() noexcept
+{
+	return *history_;
+}
+
+DocumentHistory const& WorldAuthoring::history() const noexcept
+{
+	return *history_;
+}
+
+void WorldAuthoring::adoptHistoryFrom(WorldAuthoring& source) noexcept
+{
+	if (&source == this) return;
+	// Swap rather than move-and-rebuild: this handle's own history is emptied
+	// first and then becomes the fresh one the source is left holding, so
+	// nothing allocates and neither handle is ever left without a history
+	// to answer from (#975).
+	history_->clear();
+	std::swap(history_, source.history_);
 }
 
 bool WorldAuthoring::restoreInPlace(DocumentSnapshot const& snapshot)

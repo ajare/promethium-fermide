@@ -209,7 +209,7 @@ namespace
 			makeAgentClipboardPayload(*source.world, original, "Alice copy"), false));
 		auto const sourceRegistryBefore = serializeRegistry(*fixture.registry);
 		auto const destinationRegistryBefore = serializeRegistry(*destinationRegistry);
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 
 		PendingAgentPlacement pending;
 		std::string diagnostic;
@@ -240,7 +240,7 @@ namespace
 			&& pastedAgent->getLadderSpeedModifierSample()
 				== sourceAgent->getLadderSpeedModifierSample(),
 			"Same-registry paste resampled a modifier instead of restoring it exactly");
-		require(gWorldDocumentHistory.undoCount() == 1,
+		require(currentDocumentHistory().undoCount() == 1,
 			"A tagged Agent paste was not exactly one World edit");
 		require(serializeRegistry(*fixture.registry) == sourceRegistryBefore
 			&& serializeRegistry(*destinationRegistry) == destinationRegistryBefore,
@@ -263,7 +263,7 @@ namespace
 
 		for (auto const& destination : { different, absent })
 		{
-			gWorldDocumentHistory.clear();
+			currentDocumentHistory().clear();
 			PendingAgentPlacement pending;
 			std::string diagnostic;
 			require(!armAgentPlacement(pending, *destination.world, payload,
@@ -280,7 +280,7 @@ namespace
 				"A tagged paste into a different or absent registry landed");
 			require(!placed && agentCount(*destination.world) == 0,
 				"A refused tagged paste created an Agent");
-			require(!gWorldDocumentHistory.canUndo(),
+			require(!currentDocumentHistory().canUndo(),
 				"A refused tagged paste committed a World edit");
 		}
 
@@ -308,7 +308,7 @@ namespace
 			makeWorld("Portable different", otherRegistry),
 			makeWorld("Portable same", sourceRegistry) })
 		{
-			gWorldDocumentHistory.clear();
+			currentDocumentHistory().clear();
 			auto const pasted = place(destination, payload);
 			auto const entity = destination.world->lookupAgent(pasted).entity;
 			require(entity->getAgentTagIds().empty()

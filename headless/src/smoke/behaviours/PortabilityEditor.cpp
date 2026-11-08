@@ -124,7 +124,7 @@ namespace
 			"Clipboard text omitted portable behaviour or Marker identity");
 		auto payload = parse(text);
 
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		core::AgentId same{};
 		require(commitAgentPlacement(source.world, payload,
 			source.world->getSector(source.room), 0, 3.0f, same, diagnostic), diagnostic);

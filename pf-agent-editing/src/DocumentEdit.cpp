@@ -3,8 +3,10 @@
 #include "DocumentEdit.h"
 
 #include <exception>
+#include <stdexcept>
 #include <utility>
 
+#include "EditorDocument.h"
 #include "core/World.h"
 #include "core/Log.h"
 #include "core/SerializationWorkData.h"
@@ -12,7 +14,49 @@
 
 using namespace std;
 
-DocumentHistory gWorldDocumentHistory;
+namespace
+{
+	// The production answer: the open document's authoring history, which is
+	// the one object the façade's `isModified()` and the editor's
+	// unsaved-changes prompt both read (#975). There is deliberately no
+	// fallback stack here. A process-global history was the old fallback and
+	// the whole of #975 came from it: the edits went somewhere, the handle
+	// just was not the place they went, and `false` looked exactly like a
+	// clean document.
+	DocumentHistory& productionDocumentHistory()
+	{
+		auto const document = editor::currentDocument();
+		if (!document)
+			throw logic_error(
+				"No editor document is open, so this edit has no history to "
+				"belong to");
+		return document->authoring().history();
+	}
+
+	// A function-local slot rather than a namespace-scope object so the first
+	// call cannot arrive before the resolver has been constructed, and so the
+	// harness install has one obvious place to land.
+	DocumentHistoryResolver& resolverSlot()
+	{
+		static DocumentHistoryResolver slot = productionDocumentHistory;
+		return slot;
+	}
+}
+
+DocumentHistory& currentDocumentHistory()
+{
+	return resolverSlot()();
+}
+
+DocumentHistoryResolver setDocumentHistoryResolver(
+	DocumentHistoryResolver resolver)
+{
+	auto previous = std::move(resolverSlot());
+	resolverSlot() = resolver
+		? std::move(resolver)
+		: DocumentHistoryResolver(productionDocumentHistory);
+	return previous;
+}
 
 namespace
 {

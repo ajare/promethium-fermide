@@ -158,10 +158,10 @@ namespace
 		auto& registryHistory = agentTagRegistryDocumentHistory(fixture.registry);
 		require(registryHistory.undoCount() > 0 && !registryHistory.isModified(),
 			"The successful reload fixture needs saved but non-empty history");
-		gWorldDocumentHistory.clear();
-		gWorldDocumentHistory.commit(
-			gWorldDocumentHistory.capture("unrelated World history"));
-		auto const worldUndoBefore = gWorldDocumentHistory.undoCount();
+		currentDocumentHistory().clear();
+		currentDocumentHistory().commit(
+			currentDocumentHistory().capture("unrelated World history"));
+		auto const worldUndoBefore = currentDocumentHistory().undoCount();
 
 		fixture.writeExternalRange(1.15f);
 		std::string diagnostic;
@@ -185,9 +185,9 @@ namespace
 		require(!agentTagRegistryIsModified(fixture.registry)
 			&& registryHistory.undoCount() == 0 && registryHistory.redoCount() == 0,
 			"Successful reload did not establish a clean history baseline");
-		require(gWorldDocumentHistory.undoCount() == worldUndoBefore,
+		require(currentDocumentHistory().undoCount() == worldUndoBefore,
 			"Successful registry reload changed World history");
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 	}
 
 	void reloadFailuresAreAtomic(smoke::Context const& context)

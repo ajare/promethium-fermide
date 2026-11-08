@@ -151,7 +151,7 @@ namespace
 
 	void resetUndoHistory()
 	{
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 	}
 
 	// A two-Storey world with two Locations on each Layer, so a group's

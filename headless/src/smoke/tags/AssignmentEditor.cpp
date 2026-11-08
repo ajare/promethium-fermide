@@ -79,7 +79,7 @@ namespace
 		require(fixture.world->getAgentTags(normal).empty(),
 			"Normal Agent creation copied an existing Agent's tags");
 
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		core::AgentId placed{};
 		auto const sector = fixture.world->getSector(fixture.corridor);
 		require(commitAgentPlacement(fixture.world,
@@ -94,18 +94,18 @@ namespace
 	{
 		Fixture fixture;
 		fixture.world->pauseSimulation();
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		std::string diagnostic;
 
 		require(commitAgentTagAssignment(fixture.world, fixture.alice,
 			fixture.crew, true, diagnostic), "The editor seam refused the first assignment");
 		require(commitAgentTagAssignment(fixture.world, fixture.alice,
 			fixture.night, true, diagnostic), "The editor seam refused the second assignment");
-		require(gWorldDocumentHistory.undoCount() == 2,
+		require(currentDocumentHistory().undoCount() == 2,
 			"Two accepted assignment edits did not commit two World undo entries");
 		require(!commitAgentTagAssignment(fixture.world, fixture.alice,
 			fixture.crew, true, diagnostic)
-			&& gWorldDocumentHistory.undoCount() == 2,
+			&& currentDocumentHistory().undoCount() == 2,
 			"A duplicate assignment committed a World undo entry");
 
 		auto current = captureDocumentSnapshot(fixture.world);
@@ -116,7 +116,7 @@ namespace
 			restored->resolveAgentTagRegistry(fixture.registry);
 			return true;
 		};
-		require(gWorldDocumentHistory.undo(std::move(current), restore),
+		require(currentDocumentHistory().undo(std::move(current), restore),
 			"Undo refused the accepted Agent tag assignment");
 		fixture.world = restored;
 		require(fixture.world->getAgentTags(fixture.alice)
@@ -124,7 +124,7 @@ namespace
 			"Undo did not remove exactly the last assigned tag");
 
 		current = captureDocumentSnapshot(fixture.world);
-		require(gWorldDocumentHistory.redo(std::move(current), restore),
+		require(currentDocumentHistory().redo(std::move(current), restore),
 			"Redo refused the Agent tag assignment");
 		fixture.world = restored;
 		require(fixture.world->getAgentTags(fixture.alice)
@@ -132,10 +132,10 @@ namespace
 			"Redo did not restore the two-tag assignment set");
 
 		fixture.world->pauseSimulation();
-		auto const entriesBeforeRemoval = gWorldDocumentHistory.undoCount();
+		auto const entriesBeforeRemoval = currentDocumentHistory().undoCount();
 		require(commitAgentTagAssignment(fixture.world, fixture.alice,
 			fixture.crew, false, diagnostic)
-			&& gWorldDocumentHistory.undoCount() == entriesBeforeRemoval + 1
+			&& currentDocumentHistory().undoCount() == entriesBeforeRemoval + 1
 			&& fixture.world->getAgentTags(fixture.alice)
 				== std::set<core::AgentTagId>{ fixture.night },
 			"Removing an assigned tag did not commit exactly one World undo entry");

@@ -218,9 +218,9 @@ namespace
 		require(firstRestart.size() == 3,
 			"Reloaded instances were not recreated from all authored configurations");
 
-		auto const historyState = gWorldDocumentHistory.currentStateId();
-		auto const undoCount = gWorldDocumentHistory.undoCount();
-		auto const redoCount = gWorldDocumentHistory.redoCount();
+		auto const historyState = currentDocumentHistory().currentStateId();
+		auto const undoCount = currentDocumentHistory().undoCount();
+		auto const redoCount = currentDocumentHistory().redoCount();
 		auto assertRollback = [&](std::string const& candidate,
 			core::AgentBehaviourReloadDiagnosticScope expectedScope)
 		{
@@ -234,9 +234,9 @@ namespace
 					== core::AgentBehaviourModuleStatus::Loaded
 				&& !registry->isModified() && !alpha.world->isModified()
 				&& !zulu.world->isModified()
-				&& gWorldDocumentHistory.currentStateId() == historyState
-				&& gWorldDocumentHistory.undoCount() == undoCount
-				&& gWorldDocumentHistory.redoCount() == redoCount,
+				&& currentDocumentHistory().currentStateId() == historyState
+				&& currentDocumentHistory().undoCount() == undoCount
+				&& currentDocumentHistory().redoCount() == redoCount,
 				"A failed reload changed live registry/runtime document state or history");
 		};
 		assertRollback("return { api_version = 3, factory = function( }\n",
@@ -482,8 +482,8 @@ namespace
 
 		// A syntactically valid package whose assigned factory fails is not a
 		// repair. Candidate construction happens before reference/runtime adoption.
-		gWorldDocumentHistory.clear();
-		gWorldDocumentHistory.markSaved();
+		currentDocumentHistory().clear();
+		currentDocumentHistory().markSaved();
 		auto const beforeFailedRepair = serializeWorld(*unresolved);
 		auto const beforeFailedRepairModified = unresolved->isModified();
 		writeText(package / "worker.lua",
@@ -493,15 +493,15 @@ namespace
 			&& diagnostic.find("runtime preflight failed") != std::string::npos
 			&& serializeWorld(*unresolved) == beforeFailedRepair
 			&& unresolved->isModified() == beforeFailedRepairModified
-			&& !gWorldDocumentHistory.canUndo(),
+			&& !currentDocumentHistory().canUndo(),
 			"A failed expected-package repair changed authored state, dirty state, or history");
 		writeText(package / "worker.lua", originalSource);
 
 		// Selecting the expected repaired package validates every authored
 		// configuration and constructs all factories before making it live. The
 		// persisted reference is unchanged, so recovery is not an authored edit.
-		gWorldDocumentHistory.clear();
-		gWorldDocumentHistory.markSaved();
+		currentDocumentHistory().clear();
+		currentDocumentHistory().markSaved();
 		auto const unresolvedYaml = serializeWorld(*unresolved);
 		auto const unresolvedModified = unresolved->isModified();
 		require(commitAgentBehaviourRegistrySwitch(unresolved,
@@ -514,7 +514,7 @@ namespace
 			&& unresolved->getAgentBehaviourAssignment(agent)->behaviour == behaviour
 			&& serializeWorld(*unresolved) == unresolvedYaml
 			&& unresolved->isModified() == unresolvedModified
-			&& !gWorldDocumentHistory.canUndo(),
+			&& !currentDocumentHistory().canUndo(),
 			"Recovery changed authored state, assignment data, dirty state, or history");
 
 		// Another loaded World proves that switching one dependent never unloads
@@ -526,7 +526,7 @@ namespace
 			"Canonical recovery packages did not share one loaded instance");
 		std::shared_ptr<core::World> detacher = core::loadWorldDocument(worldPath);
 		detacher->pauseSimulation();
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		requestAgentBehaviourRegistryDetach(detacher);
 		std::string consequence;
 		require(agentBehaviourRegistryChangePending(&consequence)
@@ -536,11 +536,11 @@ namespace
 		require(confirmPendingAgentBehaviourRegistryChange(diagnostic)
 			&& !detacher->hasAgentBehaviourRegistryReference()
 			&& detacher->getAgentBehaviourAssignmentCount() == 0
-			&& gWorldDocumentHistory.undoCount() == 1,
+			&& currentDocumentHistory().undoCount() == 1,
 			"Confirmed used detachment did not clear assignment/configuration atomically");
 
-		gWorldDocumentHistory.clear();
-		gWorldDocumentHistory.markSaved();
+		currentDocumentHistory().clear();
+		currentDocumentHistory().markSaved();
 		auto const before = serializeWorld(*unresolved);
 		auto const sourceRegistry = unresolved->getAgentBehaviourRegistry();
 		auto const modified = unresolved->isModified();
@@ -549,14 +549,14 @@ namespace
 			&& serializeWorld(*unresolved) == before
 			&& unresolved->getAgentBehaviourRegistry() == sourceRegistry
 			&& unresolved->isModified() == modified
-			&& !gWorldDocumentHistory.canUndo(),
+			&& !currentDocumentHistory().canUndo(),
 			"Direct used detachment changed state or history");
 		requestAgentBehaviourRegistryDetach(unresolved);
 		cancelPendingAgentBehaviourRegistryChange();
 		require(!agentBehaviourRegistryChangePending()
 			&& serializeWorld(*unresolved) == before
 			&& unresolved->getAgentBehaviourRegistry() == sourceRegistry
-			&& !gWorldDocumentHistory.canUndo(),
+			&& !currentDocumentHistory().canUndo(),
 			"Cancelling used detachment changed state or history");
 
 		requestAgentBehaviourRegistrySwitch(unresolved, worldPath.string(),
@@ -565,7 +565,7 @@ namespace
 			&& serializeWorld(*unresolved) == before
 			&& unresolved->getAgentBehaviourRegistry() == sourceRegistry
 			&& unresolved->isModified() == modified
-			&& !gWorldDocumentHistory.canUndo(),
+			&& !currentDocumentHistory().canUndo(),
 			"A failed destructive replacement cleared data, replaced runtime, or changed history");
 
 		auto const replacementPackage = temporary.path / "replacement.behaviours";
@@ -582,8 +582,8 @@ namespace
 				== "replacement.behaviours"
 			&& unresolved->getAgentBehaviourAssignmentCount() == 0
 			&& !unresolved->getAgentBehaviourAssignment(agent)
-			&& gWorldDocumentHistory.undoCount() == 1
-			&& gWorldDocumentHistory.isModified(),
+			&& currentDocumentHistory().undoCount() == 1
+			&& currentDocumentHistory().isModified(),
 			"Confirmed replacement did not leave one unsaved, undoable World edit while clearing assignments and changing reference");
 		require(sourceRegistry->hasLoadedWorld(shared.get())
 			&& !core::unloadAgentBehaviourRegistryDocumentIfUnused(sourceRegistry),
@@ -601,7 +601,7 @@ namespace
 			&& core::unloadAgentBehaviourRegistryDocumentIfUnused(sourceRegistry, true),
 			"Dirty unreferenced package work was silently discarded or could not be explicitly discarded");
 		cancelPendingAgentBehaviourRegistryChange();
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 	}
 }
 

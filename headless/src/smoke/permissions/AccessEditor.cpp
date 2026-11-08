@@ -90,11 +90,11 @@ namespace
 		auto control = world->addSectorLightSwitch(corridor, 1);
 		world->finishBuild(); world->pauseSimulation();
 		auto agent = world->createAgent("agent", corridor, 0, 0.5f);
-		gWorldDocumentHistory.clear();
-		gWorldDocumentHistory.markSaved();
+		currentDocumentHistory().clear();
+		currentDocumentHistory().markSaved();
 		std::string diagnostic;
 		auto id = commitAccessPermissionAdd(world, "Staff", diagnostic);
-		require(id && gWorldDocumentHistory.canUndo() && world->isModified(),
+		require(id && currentDocumentHistory().canUndo() && world->isModified(),
 			"Permissions panel commit did not create one document edit");
 		auto permissionSet = commitPermissionSetAdd(world, "Operators", diagnostic);
 		require(static_cast<bool>(permissionSet), "Permissions panel did not add a Permission set");

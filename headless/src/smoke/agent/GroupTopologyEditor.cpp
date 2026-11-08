@@ -192,8 +192,8 @@ namespace
 			return true;
 		};
 		auto const restored = redo
-			? gWorldDocumentHistory.redo(current, restore)
-			: gWorldDocumentHistory.undo(current, restore);
+			? currentDocumentHistory().redo(current, restore)
+			: currentDocumentHistory().undo(current, restore);
 		require(restored, redo ? "There is no redo entry to restore"
 			: "There is no undo entry to restore");
 		world = std::move(loaded);
@@ -201,7 +201,7 @@ namespace
 
 	void resetUndoHistory()
 	{
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 	}
 
 	// The editor's undo and redo over a topology edit. The snapshot taken
@@ -225,8 +225,8 @@ namespace
 		require(plan.valid, "The Location move plan was refused: " + plan.diagnostic);
 		world->applyLocationEdit(plan);
 		commitDocumentEdit(snapshot);
-		require(gWorldDocumentHistory.undoCount() == 1, "The topology edit did not commit one undo entry");
-		require(!gWorldDocumentHistory.canRedo(), "The topology edit produced a redo entry");
+		require(currentDocumentHistory().undoCount() == 1, "The topology edit did not commit one undo entry");
+		require(!currentDocumentHistory().canRedo(), "The topology edit produced a redo entry");
 		expectAssignments(*world, expectedOf(crew), bothGroups(crew),
 			"after the edit, before undoing it");
 

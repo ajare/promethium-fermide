@@ -79,7 +79,7 @@ namespace
 			auto world = scene.world;
 			auto device = scene.device;
 			world->pauseSimulation();
-			gWorldDocumentHistory.clear(); gWorldDocumentHistory.markSaved(); world->markSaved();
+			currentDocumentHistory().clear(); currentDocumentHistory().markSaved(); world->markSaved();
 			auto save = [&]
 			{
 				core::SerializationWorkData work; work.markSerializedUnmodified = false;
@@ -121,14 +121,14 @@ namespace
 				io.AddMouseButtonEvent(ImGuiMouseButton_Left, false); frame();
 			};
 			click("Initially Broken"); frame();
-			require(device->isInitiallyBroken() && device->isBroken() && gWorldDocumentHistory.undoCount() == 1,
+			require(device->isInitiallyBroken() && device->isBroken() && currentDocumentHistory().undoCount() == 1,
 				"Authored control did not record one edit");
 			require(text.find("Broken (position frozen)") != std::string::npos && text.find("100.00%") != std::string::npos,
 				"Status omitted frozen physical extension");
 			auto authored = save(); world->markSaved();
 			click("Live Broken");
 			require(!device->isBroken() && device->isInitiallyBroken() && save() == authored && !world->isModified()
-				&& gWorldDocumentHistory.undoCount() == 1, "Live control overwrote document/history");
+				&& currentDocumentHistory().undoCount() == 1, "Live control overwrote document/history");
 			require(world->resumeSimulation(), "Resume failed"); click("Live Broken");
 			require(device->isBroken() && save() == authored && !world->isModified(), "Running live control failed");
 			world->pauseSimulation();
@@ -139,8 +139,8 @@ namespace
 				require(loaded->deserialize(*reader, work), "Extensible history did not load"); world = loaded; world->pauseSimulation();
 				return true;
 			};
-			require(gWorldDocumentHistory.undo(gWorldDocumentHistory.capture(save()), restore) && save() == initial, "Initial Broken undo failed");
-			require(gWorldDocumentHistory.redo(gWorldDocumentHistory.capture(save()), restore) && save() == authored, "Initial Broken redo failed");
+			require(currentDocumentHistory().undo(currentDocumentHistory().capture(save()), restore) && save() == initial, "Initial Broken undo failed");
+			require(currentDocumentHistory().redo(currentDocumentHistory().capture(save()), restore) && save() == authored, "Initial Broken redo failed");
 
 			Scene excluded(kind, true, false); world = excluded.world; device = excluded.device;
 			frame();

@@ -92,7 +92,7 @@ namespace
 	void assignEditClearUndoRedoAndPersistence()
 	{
 		Fixture fixture;
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		std::string diagnostic;
 		auto const revision = fixture.registry->lookupAgentBehaviour(fixture.behaviour)->getRevision();
 		require(commitAgentBehaviourAssignment(fixture.world, fixture.first,
@@ -108,7 +108,7 @@ namespace
 		edited["count"] = int64_t{ 9 };
 		require(commitAgentBehaviourAssignment(fixture.world, fixture.first,
 			fixture.behaviour, revision, edited, diagnostic)
-			&& gWorldDocumentHistory.undoCount() == 2,
+			&& currentDocumentHistory().undoCount() == 2,
 			"Configuration edit was not one undoable World edit");
 
 		auto current = fixture.world;
@@ -117,13 +117,13 @@ namespace
 			try { current = deserialize(snapshot.yaml, fixture.registry); return true; }
 			catch (...) { return false; }
 		};
-		require(gWorldDocumentHistory.undo(
-			gWorldDocumentHistory.capture(serialize(*current)), restore), "Undo failed");
+		require(currentDocumentHistory().undo(
+			currentDocumentHistory().capture(serialize(*current)), restore), "Undo failed");
 		require(*core::agentBehaviourConfigurationGetIf<int64_t>(
 			&current->getAgentBehaviourAssignment(fixture.first)
 				->configuration.at("count")) == 3, "Undo did not restore configuration");
-		require(gWorldDocumentHistory.redo(
-			gWorldDocumentHistory.capture(serialize(*current)), restore), "Redo failed");
+		require(currentDocumentHistory().redo(
+			currentDocumentHistory().capture(serialize(*current)), restore), "Redo failed");
 		require(*core::agentBehaviourConfigurationGetIf<int64_t>(
 			&current->getAgentBehaviourAssignment(fixture.first)
 				->configuration.at("count")) == 9, "Redo did not restore configuration edit");
@@ -170,7 +170,7 @@ namespace
 			} }
 		};
 		std::string diagnostic;
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		require(commitAgentBehaviourAssignment(fixture.world, fixture.first,
 			scheduleBehaviour, revision, configuration, diagnostic),
 			"Nested schedule was refused: " + diagnostic);
@@ -197,13 +197,13 @@ namespace
 			try { current = deserialize(snapshot.yaml, fixture.registry); return true; }
 			catch (...) { return false; }
 		};
-		require(gWorldDocumentHistory.undo(
-			gWorldDocumentHistory.capture(serialize(*current)), restore)
+		require(currentDocumentHistory().undo(
+			currentDocumentHistory().capture(serialize(*current)), restore)
 			&& current->getAgentBehaviourAssignment(fixture.first)->configuration
 				== normalized,
 			"Undo did not restore the authored schedule order");
-		require(gWorldDocumentHistory.redo(
-			gWorldDocumentHistory.capture(serialize(*current)), restore)
+		require(currentDocumentHistory().redo(
+			currentDocumentHistory().capture(serialize(*current)), restore)
 			&& current->getAgentBehaviourAssignment(fixture.first)->configuration
 				== reordered,
 			"Redo did not restore the reordered authored schedule");

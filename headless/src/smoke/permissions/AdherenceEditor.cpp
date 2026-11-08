@@ -70,7 +70,7 @@ namespace
 		require(payload.individualPermissionAdherence == false,
 			"Clipboard lost an explicit false Permission adherence value");
 		core::AgentId pastedId;
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		require(commitAgentPlacement(f.world, payload, f.world->getSector(f.corridor),
 			0, 4, pastedId, f.diagnostic), f.diagnostic);
 		require(f.world->lookupAgent(pastedId).entity->getIndividualPermissionAdherence() == false,
@@ -86,7 +86,7 @@ namespace
 			0, 6, pastedId, f.diagnostic), f.diagnostic);
 		require(f.world->lookupAgent(pastedId).entity->getEffectivePermissionAdherence().value,
 			"Legacy clipboard payload did not receive default-true Permission adherence");
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 	}
 }
 

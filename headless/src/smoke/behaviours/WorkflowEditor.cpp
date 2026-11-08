@@ -250,7 +250,7 @@ return {
 			&& serializeWorld(*current) == beforeReplacement,
 			"A malformed whole-document replacement disturbed the open World");
 
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		auto edited = current->getAgentBehaviourAssignment(agent)->configuration;
 		auto* code = core::agentBehaviourConfigurationGetIf<std::string>(
 			&edited.at("code"));
@@ -261,18 +261,18 @@ return {
 		{
 			return replaceDocument(snapshot.yaml);
 		};
-		require(gWorldDocumentHistory.undo(
-			gWorldDocumentHistory.capture(serializeWorld(*current)), restore)
+		require(currentDocumentHistory().undo(
+			currentDocumentHistory().capture(serializeWorld(*current)), restore)
 			&& *core::agentBehaviourConfigurationGetIf<std::string>(
 				&current->getAgentBehaviourAssignment(agent)->configuration.at("code")) == "D",
 			"Undo did not replace the complete authored World");
-		require(gWorldDocumentHistory.redo(
-			gWorldDocumentHistory.capture(serializeWorld(*current)), restore)
+		require(currentDocumentHistory().redo(
+			currentDocumentHistory().capture(serializeWorld(*current)), restore)
 			&& *core::agentBehaviourConfigurationGetIf<std::string>(
 				&current->getAgentBehaviourAssignment(agent)->configuration.at("code"))
 					== "Edited",
 			"Redo did not replace the complete authored World");
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 
 		writeText(package / "malformed.yaml", "version: 1\nuuid: not-a-uuid\n");
 		bool malformedRegistryRefused = false;

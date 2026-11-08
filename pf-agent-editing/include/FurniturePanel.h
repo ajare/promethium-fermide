@@ -17,23 +17,23 @@ core::FurnitureInstance const* selectedFurnitureInstance(std::shared_ptr<core::W
 // headless fixtures and hand-authored documents working.
 bool selectFurnitureCatalogue(std::shared_ptr<core::World> const& world,
 	std::filesystem::path const& worldPath, std::string const& resourceName,
-	std::string& diagnostic, DocumentHistory& history = gWorldDocumentHistory);
+	std::string& diagnostic, DocumentHistory& history = currentDocumentHistory());
 bool reloadSelectedFurnitureCatalogue(std::shared_ptr<core::World> const& world,
 	std::filesystem::path const& worldPath, std::string& diagnostic);
 bool placeSelectedFurniture(std::shared_ptr<core::World> const& world,
 	uint32_t sector, std::string const& key, float x, float y, bool snapX,
 	std::string const& name, std::string& diagnostic,
-	DocumentHistory& history = gWorldDocumentHistory, int localDepth = 0);
+	DocumentHistory& history = currentDocumentHistory(), int localDepth = 0);
 bool editSelectedFurniture(std::shared_ptr<core::World> const& world,
 	uint64_t id, float x, float y, bool snapX, std::string const& name,
-	std::string& diagnostic, DocumentHistory& history = gWorldDocumentHistory,
+	std::string& diagnostic, DocumentHistory& history = currentDocumentHistory(),
 	std::optional<int> localDepth = std::nullopt);
 bool deleteSelectedFurniture(std::shared_ptr<core::World> const& world,
-	uint64_t id, std::string& diagnostic, DocumentHistory& history = gWorldDocumentHistory);
+	uint64_t id, std::string& diagnostic, DocumentHistory& history = currentDocumentHistory());
 // Platform resources stay in the GUI; headless tests drive the same panel seam
 // by supplying the available Resource names and calling selectFurnitureCatalogue.
 using FurnitureCatalogueResourceProvider = std::function<std::vector<std::string>()>;
 void renderFurniturePanel(std::shared_ptr<core::World> const& world,
 	std::filesystem::path const& worldPath,
 	FurnitureCatalogueResourceProvider const& resources = {},
-	DocumentHistory& history = gWorldDocumentHistory);
+	DocumentHistory& history = currentDocumentHistory());

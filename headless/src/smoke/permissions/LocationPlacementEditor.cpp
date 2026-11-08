@@ -50,7 +50,7 @@ namespace
 			auto payload = makeAgentClipboardPayload(*world, id, "Copy");
 			payload.group = "New group";
 			world->markSaved(); world->consumeSimulationEvents();
-			gWorldDocumentHistory.clear(); gWorldDocumentHistory.markSaved();
+			currentDocumentHistory().clear(); currentDocumentHistory().markSaved();
 			auto document = save(*world);
 			auto pegman = pegmanAgentTargetAtWorld(world, { 1.5f, 0.5f });
 			require(!pegman && pegman.diagnostic.find("('Red')") != std::string::npos
@@ -70,14 +70,14 @@ namespace
 				checkDiagnostic();
 				require(save(*world) == document && !world->isModified() && world->getAgentGroupCount() == 0
 					&& sector->getAgents().empty() && world->consumeSimulationEvents().empty()
-					&& !gWorldDocumentHistory.canUndo(), "Rejected paste changed document, ownership, events or history");
+					&& !currentDocumentHistory().canUndo(), "Rejected paste changed document, ownership, events or history");
 			}
 			else
 			{
 				require(armAgentPlacement(pending, *world, payload, sector, 0, 1.5f, diagnostic), diagnostic);
 				require(commitPendingAgentPlacement(pending, world, placed, diagnostic) && placed && !pending.armed(), diagnostic);
 				require(world->lookupAgent(placed).entity->getSector()->getIndex() == protectedLocation
-					&& gWorldDocumentHistory.canUndo(), "Authorized paste lost placement/history");
+					&& currentDocumentHistory().canUndo(), "Authorized paste lost placement/history");
 				require(world->removeAgent(placed).removed, "Copy removal refused");
 				require(world->deleteAgentGroup(world->getAgentGroupIds()[0]), "Group removal refused");
 			}
@@ -88,11 +88,11 @@ namespace
 		auto payload = makeAgentClipboardPayload(*world, id, "Falling");
 		require(armAgentPlacement(pending, *world, payload, sector, 0, 1.5f, diagnostic), diagnostic);
 		require(world->setPermissionSetAccessPermission(card, blue, false), "Mid-fall membership loss refused");
-		gWorldDocumentHistory.clear(); world->markSaved(); world->consumeSimulationEvents();
+		currentDocumentHistory().clear(); world->markSaved(); world->consumeSimulationEvents();
 		auto document = save(*world);
 		require(!commitPendingAgentPlacement(pending, world, placed, diagnostic) && !placed && !pending.armed()
 			&& diagnostic.find("('Blue')") != std::string::npos, "Mid-fall loss bypassed landing gate");
-		require(save(*world) == document && !world->isModified() && !gWorldDocumentHistory.canUndo()
+		require(save(*world) == document && !world->isModified() && !currentDocumentHistory().canUndo()
 			&& world->consumeSimulationEvents().empty() && sector->getAgents().empty(), "Refused landing partially created Agent");
 		// Runtime grants govern direct drag relocation independently from copied authored grants.
 		require(world->setAgentRuntimeAccessPermissionGrant(id, blue, true), "Runtime gain refused");

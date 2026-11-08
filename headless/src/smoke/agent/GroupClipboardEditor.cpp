@@ -36,7 +36,7 @@ namespace
 	// from a clean instance rather than whatever the check before it left.
 	void resetUndoHistory()
 	{
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 	}
 
 	// The editor's own undo and redo, the same shape as UI.cpp's
@@ -57,8 +57,8 @@ namespace
 			return loaded->deserialize(*reader, workData);
 		};
 		auto const restored = redo
-			? gWorldDocumentHistory.redo(current, restore)
-			: gWorldDocumentHistory.undo(current, restore);
+			? currentDocumentHistory().redo(current, restore)
+			: currentDocumentHistory().undo(current, restore);
 		require(restored, redo ? "There is no redo entry to restore"
 			: "There is no undo entry to restore");
 		world = std::move(loaded);
@@ -250,10 +250,10 @@ namespace
 		invalid.type = "Robot";
 		core::AgentId refused;
 		auto const count = agentCount(*world.world);
-		auto const undoCount = gWorldDocumentHistory.undoCount();
+		auto const undoCount = currentDocumentHistory().undoCount();
 		require(!commitAgentPlacement(world.world, invalid, world.world->getSector(world.room),
 			0, 2.f, refused, diagnostic) && diagnostic.find("Robot") != std::string::npos
-			&& agentCount(*world.world) == count && gWorldDocumentHistory.undoCount() == undoCount,
+			&& agentCount(*world.world) == count && currentDocumentHistory().undoCount() == undoCount,
 			"Direct unsupported-type placement left an Agent or history entry");
 		require(read.payload.name == "Alice copy",
 			"The copied payload lost the copy's name");
@@ -373,7 +373,7 @@ namespace
 			"A refused clipboard payload placed an Agent");
 		require(world.world->getAgentGroupCount() == 0,
 			"A refused clipboard payload created an Agent group");
-		require(!gWorldDocumentHistory.canUndo(),
+		require(!currentDocumentHistory().canUndo(),
 			"A refused clipboard payload committed an undo entry");
 	}
 
@@ -405,7 +405,7 @@ namespace
 			"The destination ended up with two groups named Crew");
 		require(world.world->getAgentGroupMemberCount(crew) == 2,
 			"The reused group does not count the pasted Agent");
-		require(gWorldDocumentHistory.undoCount() == 1,
+		require(currentDocumentHistory().undoCount() == 1,
 			"A paste is one document edit");
 	}
 
@@ -464,7 +464,7 @@ namespace
 			"The paste did not add exactly one Agent");
 		require(world.world->lookupAgent(placed).entity->getFlags() == 3,
 			"The pasted Agent lost the flags its payload carried");
-		require(gWorldDocumentHistory.undoCount() == 1,
+		require(currentDocumentHistory().undoCount() == 1,
 			"A paste that creates a group is one document edit, not several");
 	}
 
@@ -490,7 +490,7 @@ namespace
 			"Arming a paste created an Agent");
 		require(world.world->getAgentGroupCount() == 0,
 			"Arming a paste created an Agent group");
-		require(!gWorldDocumentHistory.canUndo(), "Arming a paste committed an undo entry");
+		require(!currentDocumentHistory().canUndo(), "Arming a paste committed an undo entry");
 	}
 
 	// A cancelled fall is a dropped struct: there is nothing left that could
@@ -518,7 +518,7 @@ namespace
 			"Cancelling a paste created an Agent");
 		require(world.world->getAgentGroupCount() == 0,
 			"Cancelling a paste created an Agent group");
-		require(!gWorldDocumentHistory.canUndo(), "Cancelling a paste committed an undo entry");
+		require(!currentDocumentHistory().canUndo(), "Cancelling a paste committed an undo entry");
 
 		core::AgentId placed{};
 		require(!commitPendingAgentPlacement(pending, world.world, placed, diagnostic),
@@ -528,7 +528,7 @@ namespace
 			"Landing a cancelled placement created an Agent");
 		require(world.world->getAgentGroupCount() == 0,
 			"Landing a cancelled placement created an Agent group");
-		require(!gWorldDocumentHistory.canUndo(), "Landing a cancelled placement committed an undo entry");
+		require(!currentDocumentHistory().canUndo(), "Landing a cancelled placement committed an undo entry");
 	}
 
 	// A placement that cannot be performed is refused whole. The Agent is
@@ -555,14 +555,14 @@ namespace
 			"A failed placement added an Agent anyway");
 		require(world.world->getAgentGroupCount() == 0,
 			"A failed placement created the Agent group the payload named");
-		require(!gWorldDocumentHistory.canUndo(), "A failed placement committed an undo entry");
+		require(!currentDocumentHistory().canUndo(), "A failed placement committed an undo entry");
 
 		// The same refusal for a placement with nothing to place into.
 		resetUndoHistory();
 		require(!commitAgentPlacement(world.world, payload, nullptr, 0, 1.0f,
 			placed, diagnostic), "A placement with no sector was accepted");
 		require(!diagnostic.empty(), "A placement with no sector reported no reason");
-		require(!gWorldDocumentHistory.canUndo(),
+		require(!currentDocumentHistory().canUndo(),
 			"A placement with no sector committed an undo entry");
 
 		resetUndoHistory();
@@ -618,7 +618,7 @@ namespace
 			"An invalid clipboard Agent group name created a group anyway");
 		require(agentCount(*world.world) == 0,
 			"A refused Agent group name still placed an Agent");
-		require(!gWorldDocumentHistory.canUndo(),
+		require(!currentDocumentHistory().canUndo(),
 			"An invalid clipboard Agent group name committed an undo entry");
 	}
 
@@ -638,7 +638,7 @@ namespace
 		auto const placed = place(world.world, payload,
 			world.world->getSector(world.room), 0, 1.5f);
 		auto const created = findGroupNamed(*world.world, "Welders");
-		require(gWorldDocumentHistory.undoCount() == 1, "The paste committed one undo entry");
+		require(currentDocumentHistory().undoCount() == 1, "The paste committed one undo entry");
 
 		restoreDocument(world.world, false);
 
@@ -790,10 +790,10 @@ namespace
 			&& !pending.payload.authorizationWorldIdentity,
 			"Cross-World paste retained World-local authorization");
 		auto const beforeCancel = destination.world->getSimulationSnapshot().agents.size();
-		auto const undoBeforeCancel = gWorldDocumentHistory.undoCount();
+		auto const undoBeforeCancel = currentDocumentHistory().undoCount();
 		pending.cancel();
 		require(destination.world->getSimulationSnapshot().agents.size() == beforeCancel
-			&& gWorldDocumentHistory.undoCount() == undoBeforeCancel,
+			&& currentDocumentHistory().undoCount() == undoBeforeCancel,
 			"Cancelling deferred cross-World paste changed the document");
 
 		diagnostic.clear();
@@ -805,7 +805,7 @@ namespace
 		require(destination.world->getAgentDirectAccessGrants(crossPlaced).empty()
 			&& destination.world->getAgentPermissionSetAssignments(crossPlaced).empty(),
 			"Cross-World paste matched authorization by name or coincident ID");
-		require(gWorldDocumentHistory.undoCount() == undoBeforeCancel + 1,
+		require(currentDocumentHistory().undoCount() == undoBeforeCancel + 1,
 			"Warning-producing paste was not one document operation");
 		restoreDocument(destination.world, false);
 		require(!destination.world->lookupAgent(crossPlaced),

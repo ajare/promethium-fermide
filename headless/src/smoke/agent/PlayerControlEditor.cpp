@@ -13,7 +13,7 @@ namespace
 	void workflow()
 	{
 		agent_smoke::EditorState state;
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		auto world = std::make_shared<core::World>("Player editor", 12, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 12, 1);
 		world->finishBuild(); world->pauseSimulation();
@@ -21,16 +21,16 @@ namespace
 		std::string diagnostic;
 		smoke::require(commitAgentBehaviourAssignment(world, id, core::PlayerControlledBehaviour,
 			1, {}, diagnostic), "Assign Player controlled failed");
-		smoke::require(gWorldDocumentHistory.undoCount() == 1 && !world->hasAttachedAgentBehaviourRegistry(),
+		smoke::require(currentDocumentHistory().undoCount() == 1 && !world->hasAttachedAgentBehaviourRegistry(),
 			"Built-in assignment must be one edit without registry dependencies");
 		auto restore = [&](DocumentSnapshot const& snapshot)
 		{
 			world = deserializeDocumentSnapshot(snapshot, world, {});
 			return bool(world);
 		};
-		smoke::require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore)
+		smoke::require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore)
 			&& !world->getPlayerControlledAgent(), "Undo must clear Player eligibility");
-		smoke::require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore)
+		smoke::require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore)
 			&& world->getPlayerControlledAgent() == id, "Redo must restore built-in assignment");
 
 		auto& io = ImGui::GetIO();

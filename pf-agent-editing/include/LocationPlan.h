@@ -18,7 +18,7 @@ public:
 	void renderSelectionAction(std::shared_ptr<core::World> const& world,
 		std::shared_ptr<const core::Sector> const& selection, uint32_t worldLevel);
 	void render(std::shared_ptr<core::World> const& world, Presenter const& present,
-		DocumentHistory& history = gWorldDocumentHistory, core::Agent const* selectedAgent = nullptr);
+		DocumentHistory& history = currentDocumentHistory(), core::Agent const* selectedAgent = nullptr);
 	bool isOpen(std::shared_ptr<core::World> const& world);
 	// Called by the existing canvas palette. Returns mouse consumption.
 	bool renderPaletteRow(std::shared_ptr<core::World> const& world,

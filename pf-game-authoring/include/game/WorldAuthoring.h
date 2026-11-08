@@ -45,9 +45,14 @@ namespace game
 	// that today says `world->addRoom(...)` says `authoring.addRoom(...)` and
 	// nothing else changes, so the editor can converge on this handle without
 	// a translation layer that could drift from the thing it wraps. Nothing
-	// here holds state. Every plan is built by the World, every edit is applied
-	// by the World, and the construction records that replay is still the
-	// World's alone - behaviour moves, state does not (ADR 0022).
+	// here holds World state. Every plan is built by the World, every edit is
+	// applied by the World, and the construction records that replay is still
+	// the World's alone - behaviour moves, state does not (ADR 0022). The one
+	// thing the handle does own outright is the document's undo history, at the
+	// end of this class; that is not World state in the sense the sentence
+	// means, because the World can be driven, saved and loaded without ever
+	// consulting it. It is the author's state, which is why it sits here and
+	// not beside the runtime (#975).
 	//
 	// The two views are used differently and that split is visible in the
 	// bodies. A write goes through `world()`, the mutable view the runtime
@@ -489,6 +494,16 @@ namespace game
 	// the authoring half of the arrangement: the runtime drives, the author
 	// changes, and a change that cannot be taken back is not an edit.
 	//
+	// That claim is the kind that gets trusted without being checked, so it is
+	// worth saying what makes it true rather than leaving it asserted (#975).
+	// The editor's undo, redo, unsaved work and saved marker all read this
+	// history and no other: the process-wide `DocumentHistory` the editor used
+	// to drive is gone, so `isModified()` below and the editor's
+	// unsaved-changes prompt are one question asked of one object. The
+	// editor-preview smoke module pins that identity, because the way a façade
+	// like this one fails is not by answering wrongly but by answering truly
+	// about something nobody is looking at.
+	//
 	// The transaction shape is the one the editor already uses, because it is
 	// the one the World's edit protocol forces. Snapshot the document before
 	// the edit, make the edit, commit the snapshot. `captureSnapshot()` is
@@ -530,6 +545,28 @@ namespace game
 	// Re-apply the last undone edit, in place. Same contract as `undo()`.
 	bool redo();
 
+	// Undo or redo one step of this handle's history with the restore step
+	// supplied by the caller rather than with `restoreInPlace()`.
+	//
+	// The no-argument pair above restores the wrapped World in place, which
+	// is what a caller holding one World and one runtime wants. A caller
+	// whose document travels with companion documents does not: the editor's
+	// snapshot names an Agent tag registry and a behaviour package it does
+	// not carry, and has to resolve both before the restored state is
+	// accepted, so it brings its own restore. What is not brought, and cannot
+	// be, is the stack: that stays here on the handle, so an editor undo and
+	// the `isModified()` the editor's prompt reads are the same history
+	// either way (#975).
+	//
+	// `restore` runs before the stacks move, exactly as it does on
+	// `DocumentHistory`: returning false, or throwing, leaves the history
+	// untouched.
+	bool undo(std::optional<DocumentSnapshot> current,
+		DocumentHistory::RestoreDocument const& restore);
+
+	bool redo(std::optional<DocumentSnapshot> current,
+		DocumentHistory::RestoreDocument const& restore);
+
 	bool canUndo() const noexcept;
 
 	bool canRedo() const noexcept;
@@ -548,6 +585,36 @@ namespace game
 	// Drop both stacks and the saved marker. Used when a document is closed or
 	// replaced wholesale, where replaying an old edit would be wrong.
 	void clearHistory() noexcept;
+
+	// The history this handle owns, as the object rather than as this family's
+	// mirror of it.
+	//
+	// The families above forward to the World; this hands out the handle's own
+	// state, because some seams are written against `DocumentHistory` itself
+	// rather than against an authoring handle - the save target carries a
+	// saved-state marker, and the shared editor panels commit into whatever
+	// history they were passed. Handing over the object keeps one history of
+	// one type instead of re-declaring its surface twice, and it is the very
+	// same object `isModified()`, `markSaved()` and `clearHistory()` act on,
+	// which is what makes the editor's unsaved-changes prompt and this
+	// façade unable to drift apart (#975).
+	DocumentHistory& history() noexcept;
+
+	DocumentHistory const& history() const noexcept;
+
+	// Take over the history `source` holds, leaving `source` with a fresh
+	// empty one of its own.
+	//
+	// The history belongs to the document, not to the World instance inside it
+	// or to the runtime that happens to be driving that World. The editor's
+	// undo re-materialises its document over a restored World - a new runtime,
+	// and so a new handle, because a runtime owns the World it was built with
+	// for its whole life (#971) - and the author's undo stack has to cross
+	// that seam with the document instead of dying with the handle it happened
+	// to be sitting on. Without this the history would reset on the first
+	// undo, which is exactly the kind of quiet loss this family exists to
+	// prevent (#975).
+	void adoptHistoryFrom(WorldAuthoring& source) noexcept;
 
 	private:
 		// Replace the wrapped World's contents with `snapshot`, in place. Used

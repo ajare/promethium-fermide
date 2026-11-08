@@ -24,12 +24,12 @@ namespace
 		auto id = world->createAgent("Android", "Robot", room, 0, 2.5f);
 		require(world->setRoomHeightScale(room, .45f), "Robot exact placement fit refused");
 		world->saveTo((context.temporaryRoot() / "occupied-height.world.yaml").string());
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		auto before = captureDocumentSnapshot(world);
 		require(before.has_value(), "Occupied history snapshot unavailable");
 		std::string diagnostic;
 		if (world->setRoomHeightScale(room, .3f, &diagnostic)) commitDocumentEdit(before);
-		require(!diagnostic.empty() && !world->isModified() && gWorldDocumentHistory.undoCount() == 0
+		require(!diagnostic.empty() && !world->isModified() && currentDocumentHistory().undoCount() == 0
 			&& captureDocumentSnapshot(world)->yaml == before->yaml
 			&& world->lookupAgent(id).entity->getPose() == core::Pose::Standing,
 			"Refused occupied edit changed geometry, history, dirty state or pose");
@@ -43,9 +43,9 @@ namespace
 			world->pauseSimulation();
 			return ok;
 		};
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore)
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore)
 			&& world->lookupAgent(id).entity->getPose() == core::Pose::Standing, "Occupied height undo failed");
-		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore)
+		require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore)
 			&& world->lookupAgent(id).entity->getPose() == core::Pose::Standing, "Occupied height redo failed");
 	}
 
@@ -58,12 +58,12 @@ namespace
 		auto room = world->addRoom("Low room", 0, 0, 0, 7, 1);
 		world->finishBuild();
 		world->pauseSimulation();
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 
 		auto before = captureDocumentSnapshot(world);
 		require(world->setRoomHeightScale(room, 0.4f), "Room height scale edit was refused");
 		commitDocumentEdit(std::move(before));
-		require(gWorldDocumentHistory.undoCount() == 1, "Room height scale edit missing history");
+		require(currentDocumentHistory().undoCount() == 1, "Room height scale edit missing history");
 
 		auto restore = [&](DocumentSnapshot const& snapshot)
 		{
@@ -75,12 +75,12 @@ namespace
 			return ok;
 		};
 
-		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore),
+		require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore),
 			"Room height scale undo failed");
 		require(!std::dynamic_pointer_cast<const core::Location>(world->getSector(room))->getHeightScale(),
 			"Undo retained the Room height scale");
 
-		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore),
+		require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore),
 			"Room height scale redo failed");
 		auto roomLocation = std::dynamic_pointer_cast<const core::Location>(world->getSector(room));
 		require(roomLocation->getHeightScale() == std::optional<float>{0.4f},

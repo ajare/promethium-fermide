@@ -116,7 +116,7 @@ namespace
 
 	void resetUndoHistory()
 	{
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 	}
 
 	// The editor's own undo and redo, the same shape as UI.cpp's
@@ -135,8 +135,8 @@ namespace
 			return true;
 		};
 		auto const restored = redo
-			? gWorldDocumentHistory.redo(current, restore)
-			: gWorldDocumentHistory.undo(current, restore);
+			? currentDocumentHistory().redo(current, restore)
+			: currentDocumentHistory().undo(current, restore);
 		require(restored, redo ? "There is no redo entry to restore"
 			: "There is no undo entry to restore");
 		world = std::move(loaded);
@@ -236,14 +236,14 @@ namespace
 		auto world = loadWorld(exhaustedDocument());
 		auto const before = groupSummary(*world);
 		world->markSaved();
-		auto const historyBefore = gWorldDocumentHistory.undoCount();
+		auto const historyBefore = currentDocumentHistory().undoCount();
 
 		std::string diagnostic;
 		auto const refused = commitAgentGroupAdd(world, "Too many", diagnostic);
 		require(!static_cast<bool>(refused),
 			"The panel created an Agent group in an exhausted World");
 		require(!diagnostic.empty(), "The panel refused an Agent group without a diagnostic");
-		require(gWorldDocumentHistory.undoCount() == historyBefore,
+		require(currentDocumentHistory().undoCount() == historyBefore,
 			"A refused Agent group still reached the undo history");
 		require(groupSummary(*world) == before,
 			"A refused Agent group changed the World: " + groupSummary(*world));

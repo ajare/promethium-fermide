@@ -23,9 +23,9 @@ namespace
 					"Editor check reused the caller ImGui context");
 				smoke::require(!ImGui::GetIO().IniFilename && !ImGui::GetIO().LogFilename,
 					"Editor context permits persistent UI output");
-				smoke::require(!gUISettings.highlightNearestVertex && !gWorldDocumentHistory.canUndo(),
+				smoke::require(!gUISettings.highlightNearestVertex && !currentDocumentHistory().canUndo(),
 					"Editor check inherited settings or history");
-				gWorldDocumentHistory.commit(gWorldDocumentHistory.capture("temporary"));
+				currentDocumentHistory().commit(currentDocumentHistory().capture("temporary"));
 				if (fail) throw smoke::Failure("intentional unwind");
 			}
 			catch (smoke::Failure const& error)
@@ -35,7 +35,7 @@ namespace
 			}
 			smoke::require(ImGui::GetCurrentContext() == caller,
 				"Editor cleanup did not restore the caller context");
-			smoke::require(gUISettings.highlightNearestVertex && !gWorldDocumentHistory.canUndo(),
+			smoke::require(gUISettings.highlightNearestVertex && !currentDocumentHistory().canUndo(),
 				"Editor cleanup leaked settings or history");
 		}
 	}

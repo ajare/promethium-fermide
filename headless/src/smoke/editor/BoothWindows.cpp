@@ -27,7 +27,7 @@ namespace
 			world->setInteractionPointPermissionRequirement(unit->getLandingButton(0), {lower});
 			world->setInteractionPointPermissionRequirement(unit->getLandingButton(1), {upper});
 			world->pressDumbwaiterLanding(id, 0); world->resumeSimulation(); require(world->advanceTicks(60), "History cycle fixture failed");
-			world->pauseSimulation(); gWorldDocumentHistory.clear();
+			world->pauseSimulation(); currentDocumentHistory().clear();
 			auto button = unit->getLandingButton(0);
 			auto before = captureDocumentSnapshot(world);
 			if (edit == 0) world->applyWalkwayEdit(world->planRemoveSectorWalkway(0, 0));
@@ -42,8 +42,8 @@ namespace
 				auto input = core::YamlSerializer::fromString(snapshot.yaml); input->deserialize(); core::SerializationWorkData work;
 				bool result = world->deserialize(*input, work); world->pauseSimulation(); return result;
 			};
-			require(gWorldDocumentHistory.undoCount() == 1 && !world->lookupInteractionPoint(button), "Dependent edit not undoable/stale handle retained");
-			require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Dependent deletion undo failed");
+			require(currentDocumentHistory().undoCount() == 1 && !world->lookupInteractionPoint(button), "Dependent edit not undoable/stale handle retained");
+			require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), "Dependent deletion undo failed");
 			unit = world->lookupDumbwaiter(id);
 			require(unit && unit->getLayerIndex() == 2 && unit->getInitialStop() == 1 && unit->getTravelSeconds() == 0.37f
 				&& !unit->isBusy() && unit->getAperture(1)->getProgress() == 1 && unit->getAperture(0)->getProgress() == 0
@@ -58,7 +58,7 @@ namespace
 			world->resumeSimulation(); require(world->advanceTicks(130) && !unit->isBusy() && unit->getCarPosition().y == 0, "Undo-restored Agent operation failed");
 			world->pauseSimulation();
 			require(bool(world->pressDumbwaiterLanding(id, 0)), "Undo-restored user control refused");
-			require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Dependent deletion redo failed");
+			require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore), "Dependent deletion redo failed");
 			unit = world->lookupDumbwaiter(id);
 			require(bool(unit) == (edit >= 6) && world->getSimulationSnapshot().interactionPoints.size() == (edit >= 6 ? 2u : 0u),
 				"Redo restored orphan apertures/buttons");
@@ -70,7 +70,7 @@ namespace
 	void dumbwaiterHistory(smoke::Context const&)
 	{
 		editor_smoke::State state; using smoke::require;
-		auto world = dumbwaiter_fixture::make(); gWorldDocumentHistory.clear();
+		auto world = dumbwaiter_fixture::make(); currentDocumentHistory().clear();
 		dumbwaiter_fixture::addLandings(*world, 1, 4);
 		world->addRoom("Button history front", 0, 0, 0, 1, 1);
 		world->addRoom("Button history back", 1, 0, 0, 1, 1);
@@ -83,8 +83,8 @@ namespace
 			auto input = core::YamlSerializer::fromString(snapshot.yaml); input->deserialize(); core::SerializationWorkData work;
 			bool result = world->deserialize(*input, work); world->pauseSimulation(); return result;
 		};
-		auto undo = [&] { require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Dumbwaiter undo failed"); };
-		auto redo = [&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Dumbwaiter redo failed"); };
+		auto undo = [&] { require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), "Dumbwaiter undo failed"); };
+		auto redo = [&] { require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore), "Dumbwaiter redo failed"); };
 		auto placement = [&] {
 			std::vector<core::Vector2> positions;
 			for (uint32_t s = 0; s < world->getNumSectors(); ++s)
@@ -125,7 +125,7 @@ namespace
 			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
 		};
 		click("Travel time (seconds)");
-		require(world->lookupDumbwaiter(id)->getTravelSeconds() != 2 && gWorldDocumentHistory.undoCount() == 2,
+		require(world->lookupDumbwaiter(id)->getTravelSeconds() != 2 && currentDocumentHistory().undoCount() == 2,
 			"Actual Selection slider did not author history");
 		undo(); require(world->lookupDumbwaiter(id)->getTravelSeconds() == 2, "Timing undo failed");
 		redo(); require(world->lookupDumbwaiter(id)->getTravelSeconds() != 2, "Timing redo failed");
@@ -143,14 +143,14 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "Owned aperture can be copied independently");
 		auto authored = captureDocumentSnapshot(world)->yaml;
-		auto historyCount = gWorldDocumentHistory.undoCount();
+		auto historyCount = currentDocumentHistory().undoCount();
 		click("Press lower landing", false);
 		require(world->lookupDumbwaiter(id)->isBusy() && world->getSimulationSnapshot().deviceOperations.size() == 1,
 			"Actual runtime Selection did not submit typed landing press");
 		require(world->resumeSimulation() && world->advanceTicks(12), "Runtime Selection cycle setup failed");
 		world->pauseSimulation(); frame();
 		require(world->lookupDumbwaiter(id)->getPhase() == core::DumbwaiterPhase::Closing
-			&& captureDocumentSnapshot(world)->yaml == authored && gWorldDocumentHistory.undoCount() == historyCount,
+			&& captureDocumentSnapshot(world)->yaml == authored && currentDocumentHistory().undoCount() == historyCount,
 			"Runtime Selection press authored progress/history");
 		world->configureDumbwaiter(id, {1, 0.1f});
 		click("Press upper landing", false);
@@ -164,12 +164,12 @@ namespace
 		io.AddInputCharactersUTF8("4"); frame();
 		io.AddKeyEvent(ImGuiKey_Enter, true); frame(); io.AddKeyEvent(ImGuiKey_Enter, false); frame();
 		click("Move Dumbwaiter", false);
-		require(world->lookupDumbwaiter(id)->getCellX() == 4 && gWorldDocumentHistory.undoCount() == 3,
+		require(world->lookupDumbwaiter(id)->getCellX() == 4 && currentDocumentHistory().undoCount() == 3,
 			"Actual Selection whole-unit movement did not commit history");
 		undo(); require(world->lookupDumbwaiter(id)->getCellX() == 2, "Selection move undo failed");
 		redo(); require(world->lookupDumbwaiter(id)->getCellX() == 4, "Selection move redo failed");
 		click("Delete Dumbwaiter", false);
-		require(!world->lookupDumbwaiter(id) && gWorldDocumentHistory.undoCount() == 4, "Selection whole-unit deletion failed");
+		require(!world->lookupDumbwaiter(id) && currentDocumentHistory().undoCount() == 4, "Selection whole-unit deletion failed");
 		undo(); require(world->lookupDumbwaiter(id)->getAperture(0)->getDumbwaiterOwner() == id, "Delete undo lost owned children");
 		redo(); require(!world->lookupDumbwaiter(id), "Delete redo failed");
 		surroundingEditHistory();
@@ -178,7 +178,7 @@ namespace
 	{
 		editor_smoke::State state; using smoke::require;
 		auto world = dumbwaiter_fixture::make(); auto id = world->addDumbwaiter(1, 0, 2);
-		world->finishBuild(); world->pauseSimulation(); gWorldDocumentHistory.clear();
+		world->finishBuild(); world->pauseSimulation(); currentDocumentHistory().clear();
 		std::string diagnostic;
 		auto a = commitAccessPermissionAdd(world, "Lower", diagnostic);
 		auto b = commitAccessPermissionAdd(world, "Upper", diagnostic);
@@ -189,13 +189,13 @@ namespace
 			auto input = core::YamlSerializer::fromString(snapshot.yaml); input->deserialize(); core::SerializationWorkData data;
 			bool result = world->deserialize(*input, data); world->pauseSimulation(); return result;
 		};
-		auto undo = [&] { require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Requirement undo failed"); };
-		auto redo = [&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Requirement redo failed"); };
+		auto undo = [&] { require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), "Requirement undo failed"); };
+		auto redo = [&] { require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore), "Requirement redo failed"); };
 		undo(); require(requirements(0) == std::vector<core::AccessPermissionId>{a} && requirements(1).empty(), "Independent requirement undo failed");
 		redo(); require(requirements(1) == std::vector<core::AccessPermissionId>{b}, "Requirement redo failed");
-		auto snapshot = captureDocumentSnapshot(world)->yaml; auto count = gWorldDocumentHistory.undoCount();
+		auto snapshot = captureDocumentSnapshot(world)->yaml; auto count = currentDocumentHistory().undoCount();
 		require(!commitInteractionPermissionRequirement(world, world->lookupDumbwaiter(id)->getLandingButton(0), core::AccessPermissionId{255}, true, diagnostic)
-			&& captureDocumentSnapshot(world)->yaml == snapshot && gWorldDocumentHistory.undoCount() == count,
+			&& captureDocumentSnapshot(world)->yaml == snapshot && currentDocumentHistory().undoCount() == count,
 			"Invalid editor reference mutated document/history");
 		auto actor = world->createAgent("Manual operator", 0, 0, 0.0f);
 		require(world->grantAgentAccessPermission(actor, a), "Manual operator grant failed");
@@ -216,12 +216,12 @@ namespace
 			if (ImGui::GetHoveredID() == control) { found = true; point = {x,y}; }
 		}
 		require(found, "Manual Agent Selection action inaccessible");
-		snapshot = captureDocumentSnapshot(world)->yaml; count = gWorldDocumentHistory.undoCount();
+		snapshot = captureDocumentSnapshot(world)->yaml; count = currentDocumentHistory().undoCount();
 		io.AddMousePosEvent(point.x,point.y); frame(); io.AddMouseButtonEvent(0,true); frame(); io.AddMouseButtonEvent(0,false); frame();
 		require(world->getSimulationSnapshot().interactionRequests.size() == 1 && !world->lookupDumbwaiter(id)->isBusy(), "Manual action bypassed typed interaction activation");
 		world->resumeSimulation(); require(world->advanceTicks(80), "Manual Agent cycle failed"); world->pauseSimulation();
 		auto unit = world->lookupDumbwaiter(id); auto position = unit->getCarPosition(); auto operation = unit->getOperation();
-		require(captureDocumentSnapshot(world)->yaml == snapshot && gWorldDocumentHistory.undoCount() == count, "Manual action authored history");
+		require(captureDocumentSnapshot(world)->yaml == snapshot && currentDocumentHistory().undoCount() == count, "Manual action authored history");
 		require(commitInteractionPermissionRequirement(world, unit->getLandingButton(0), b, true, diagnostic), diagnostic);
 		require(unit->getCarPosition() == position && unit->getOperation() == operation && unit->isBusy(), "Editor permission edit reset active cycle");
 		world->resumeSimulation(); while (unit->isBusy()) require(world->advanceTick(), "Cycle continuation failed"); world->pauseSimulation();
@@ -277,7 +277,7 @@ namespace
 			require(count == 1, "Mixed reconstruction omitted/duplicated the light control");
 		};
 		world->pressDumbwaiterLanding(id, 0); world->resumeSimulation(); require(world->advanceTicks(60), "Copy cycle setup failed");
-		world->pauseSimulation(); gWorldDocumentHistory.clear();
+		world->pauseSimulation(); currentDocumentHistory().clear();
 		auto envelope = YAML::Load(makeDumbwaiterClipboardText(*world, *unit))["promethiumClipboard"];
 		require(envelope["version"].as<unsigned>() == 1 && envelope["type"].as<std::string>() == "Dumbwaiter"
 			&& envelope["operation"].as<std::string>() == "copy", "Editor clipboard envelope is not parseable by the production workflow");
@@ -300,8 +300,8 @@ namespace
 			auto input = core::YamlSerializer::fromString(snapshot.yaml); input->deserialize(); core::SerializationWorkData data;
 			bool result = world->deserialize(*input, data); world->pauseSimulation(); checkLight(); return result;
 		};
-		auto undo = [&] { require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Unit clipboard/move undo failed"); };
-		auto redo = [&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Unit clipboard/move redo failed"); };
+		auto undo = [&] { require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), "Unit clipboard/move undo failed"); };
+		auto redo = [&] { require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore), "Unit clipboard/move redo failed"); };
 		undo(); require(!world->lookupDumbwaiter(copy), "Paste undo retained unit");
 		redo(); require(world->lookupDumbwaiter(copy) && world->getSimulationSnapshot().interactionPoints.size() == 5, "Paste redo lost/duplicated child ownership");
 		require(dumbwaiter_fixture::control(*world, id, 0)->getCellX() == 3
@@ -344,9 +344,9 @@ namespace
 			"lowerLandingPermissionRequirement", "upperLandingPermissionRequirement", "operation"})
 		{
 			auto invalid = YAML::Clone(node); invalid[field] = "malformed";
-			auto snapshot = captureDocumentSnapshot(world)->yaml; auto history = gWorldDocumentHistory.undoCount(); refused = false;
+			auto snapshot = captureDocumentSnapshot(world)->yaml; auto history = currentDocumentHistory().undoCount(); refused = false;
 			try { pasteDumbwaiter(world, 1, 0, 4, readDumbwaiterClipboardObject(invalid)); } catch (std::exception const&) { refused = true; }
-			require(refused && captureDocumentSnapshot(world)->yaml == snapshot && gWorldDocumentHistory.undoCount() == history,
+			require(refused && captureDocumentSnapshot(world)->yaml == snapshot && currentDocumentHistory().undoCount() == history,
 				"Malformed unit clipboard mutated document/history");
 		}
 		for (uint32_t stop = 0; stop < 2; ++stop)
@@ -358,9 +358,9 @@ namespace
 		}
 		// Destination refusal must preserve an existing accepted cycle, document and history.
 		unit = world->lookupDumbwaiter(id); auto operation = world->pressDumbwaiterLanding(id, 0);
-		auto snapshot = captureDocumentSnapshot(world)->yaml; auto count = gWorldDocumentHistory.undoCount(); refused = false;
+		auto snapshot = captureDocumentSnapshot(world)->yaml; auto count = currentDocumentHistory().undoCount(); refused = false;
 		try { pasteDumbwaiter(world, 1, 0, 2, payload); } catch (std::exception const&) { refused = true; }
-		require(refused && captureDocumentSnapshot(world)->yaml == snapshot && gWorldDocumentHistory.undoCount() == count
+		require(refused && captureDocumentSnapshot(world)->yaml == snapshot && currentDocumentHistory().undoCount() == count
 			&& unit->getOperation() == operation && unit->isBusy(), "Invalid paste reset existing cycle/history");
 	}
 
@@ -369,7 +369,7 @@ namespace
 		editor_smoke::State state; using smoke::require;
 		auto world=std::make_shared<core::World>("BoothWindow editor",10,3);
 		world->addRoom("Front",0,0,0,9,2); world->addRoom("Back",1,0,0,9,2);
-		world->finishBuild(); world->pauseSimulation(); gWorldDocumentHistory.clear();
+		world->finishBuild(); world->pauseSimulation(); currentDocumentHistory().clear();
 		auto panels=[&] {
 			unsigned count=0;
 			for (uint32_t sectorIndex=0;sectorIndex<world->getNumSectors();++sectorIndex)
@@ -391,7 +391,7 @@ namespace
 		};
 		auto edit=[&](auto action) { auto before=captureDocumentSnapshot(world); action(); commitDocumentEdit(std::move(before)); panels(); };
 		edit([&] { world->addBoothWindow(0,0,2); world->finishBuild(); });
-		require(paletteSlotRow(PaletteSlot::BoothWindow)==1 && gWorldDocumentHistory.undoCount()==1,"Palette creation not distinct/undoable");
+		require(paletteSlotRow(PaletteSlot::BoothWindow)==1 && currentDocumentHistory().undoCount()==1,"Palette creation not distinct/undoable");
 		auto get=[&](uint32_t x) -> std::shared_ptr<const core::WindowSectorObject> {
 			auto owner=world->getSector(0);
 			for (uint32_t i=0;i<owner->getNumObjects();++i)
@@ -414,10 +414,10 @@ namespace
 		}
 		require(found,"Initial shutter checkbox inaccessible");
 		io.AddMousePosEvent(point.x,point.y); frame(); io.AddMouseButtonEvent(0,true); frame(); io.AddMouseButtonEvent(0,false); frame();
-		require(get(2)->getWindow()->getState()==core::Window::State::Open && gWorldDocumentHistory.undoCount()==2,"Panel did not edit authored state/history");
+		require(get(2)->getWindow()->getState()==core::Window::State::Open && currentDocumentHistory().undoCount()==2,"Panel did not edit authored state/history");
 		// Operate the actual runtime panel button; it must not author a history entry.
 		auto authoredSnapshot = captureDocumentSnapshot(world)->yaml;
-		auto historyCount = gWorldDocumentHistory.undoCount();
+		auto historyCount = currentDocumentHistory().undoCount();
 		auto toggleControl = window->GetID("Toggle shutter"); found = false;
 		for (float y=35;y<220 && !found;y+=8) for (float x=15;x<220 && !found;x+=16)
 		{
@@ -431,7 +431,7 @@ namespace
 		auto device = std::static_pointer_cast<const core::BoothWindow>(get(2)->getWindow());
 		require(device->getState()==core::Window::State::Closing && std::abs(device->getProgress()-0.75f)<0.00001f,
 			"Runtime panel did not animate shutter");
-		require(gWorldDocumentHistory.undoCount()==historyCount && captureDocumentSnapshot(world)->yaml==authoredSnapshot,
+		require(currentDocumentHistory().undoCount()==historyCount && captureDocumentSnapshot(world)->yaml==authoredSnapshot,
 			"Runtime panel mutated authored history/snapshot");
 		std::string diagnostic;
 		auto permission = commitAccessPermissionAdd(world, "Operator", diagnostic);
@@ -451,8 +451,8 @@ namespace
 			auto reader=core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize(); core::SerializationWorkData work;
 			bool result=world->deserialize(*reader,work); world->pauseSimulation(); panels(); return result;
 		};
-		auto undo=[&] { require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world),restore),"Undo failed"); };
-		auto redo=[&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world),restore),"Redo failed"); };
+		auto undo=[&] { require(currentDocumentHistory().undo(captureDocumentSnapshot(world),restore),"Undo failed"); };
+		auto redo=[&] { require(currentDocumentHistory().redo(captureDocumentSnapshot(world),restore),"Redo failed"); };
 		undo(); require(!get(4),"Paste undo failed"); redo(); require(bool(get(4)),"Paste redo failed");
 		require(requirement(4) == requirement(2), "Clipboard/history lost protection");
 		undo(); undo(); require(requirement(2).empty(), "Requirement undo failed");
@@ -485,10 +485,10 @@ namespace
 		{
 			auto malformed=YAML::Clone(payload);
 			if (std::string(field)=="initialState") malformed[field]="Broken"; else malformed[field]=2;
-			auto counts=gWorldDocumentHistory.undoCount(); bool refused=false;
+			auto counts=currentDocumentHistory().undoCount(); bool refused=false;
 			try { auto invalid=readBoothWindowClipboardObject(malformed); pasteBoothWindow(world,0,0,6,invalid); }
 			catch (std::exception const&) { refused=true; }
-			require(refused && !get(6) && gWorldDocumentHistory.undoCount()==counts,"Malformed clipboard mutated World/history");
+			require(refused && !get(6) && currentDocumentHistory().undoCount()==counts,"Malformed clipboard mutated World/history");
 		}
 		auto index=indexOf(get(2));
 		require(!world->planResizeSectorWindow(0,index,2,0,2,1).valid,"BoothWindow exposed resizing");

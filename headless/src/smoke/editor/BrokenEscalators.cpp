@@ -15,7 +15,7 @@ namespace
 		broken_escalator::Scene scene;
 		auto world = scene.world;
 		world->pauseSimulation(); world->markSaved();
-		gWorldDocumentHistory.clear(); gWorldDocumentHistory.markSaved();
+		currentDocumentHistory().clear(); currentDocumentHistory().markSaved();
 		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
 		io.DisplaySize = ImVec2(1600, 1000);
 		std::string text; io.ClipboardUserData = &text;
@@ -49,12 +49,12 @@ namespace
 			io.AddMousePosEvent(point.x, point.y); frame(); io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
 		};
 		click("Initially Broken"); frame();
-		require(scene.stairs->isInitiallyBroken() && scene.stairs->isBroken() && gWorldDocumentHistory.undoCount() == 1
+		require(scene.stairs->isInitiallyBroken() && scene.stairs->isBroken() && currentDocumentHistory().undoCount() == 1
 			&& text.find("Broken: stationary Staircase") != std::string::npos, "Initial control/status/history failed");
 		auto authored = save(); world->markSaved();
 		click("Live Broken");
 		require(!scene.stairs->isBroken() && scene.stairs->isInitiallyBroken() && save() == authored
-			&& !world->isModified() && gWorldDocumentHistory.undoCount() == 1, "Live control changed authored document/history");
+			&& !world->isModified() && currentDocumentHistory().undoCount() == 1, "Live control changed authored document/history");
 		world->resumeSimulation(); click("Live Broken");
 		require(scene.stairs->isBroken() && save() == authored && !world->isModified(), "Running live control failed");
 		world->pauseSimulation();
@@ -64,8 +64,8 @@ namespace
 			auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
 			require(loaded->deserialize(*reader, work), "History load failed"); world = loaded; world->pauseSimulation(); return true;
 		};
-		require(gWorldDocumentHistory.undo(gWorldDocumentHistory.capture(save()), restore) && save() == original, "Authored undo failed");
-		require(gWorldDocumentHistory.redo(gWorldDocumentHistory.capture(save()), restore) && save() == authored, "Authored redo failed");
+		require(currentDocumentHistory().undo(currentDocumentHistory().capture(save()), restore) && save() == original, "Authored undo failed");
+		require(currentDocumentHistory().redo(currentDocumentHistory().capture(save()), restore) && save() == authored, "Authored redo failed");
 		broken_escalator::Scene stationary(false, 0); world = stationary.world; scene.stairs = stationary.stairs;
 		frame(); require(text.find("Broken") == std::string::npos, "Stationary Staircase exposed Broken controls");
 	}

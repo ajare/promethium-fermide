@@ -121,7 +121,7 @@ namespace
 	void objectUsagePanelEdits()
 	{
 		agent_smoke::EditorState state;
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		auto world = std::make_shared<core::World>("Usage panel", 6, 2);
 		auto corridor = world->addCorridor(0, 0, 6); world->finishBuild(); world->pauseSimulation();
 		auto agent = world->createAgent("Edited", corridor, 0, 1.f);
@@ -144,19 +144,19 @@ namespace
 		auto& io = ImGui::GetIO(); io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 		click(combo.GetCenter()); key(ImGuiKey_Home); key(ImGuiKey_Space); key(ImGuiKey_Escape);
 		require(world->lookupAgent(agent).entity->getIndividualObjectUsage() == core::ObjectUsage::Arms
-			&& gWorldDocumentHistory.undoCount() == 1, "Panel failed to add mode override/history");
+			&& currentDocumentHistory().undoCount() == 1, "Panel failed to add mode override/history");
 		click(combo.GetCenter()); key(ImGuiKey_Home); key(ImGuiKey_DownArrow); key(ImGuiKey_Space); key(ImGuiKey_Escape);
 		require(world->lookupAgent(agent).entity->getIndividualObjectUsageDistance() == .25f
-			&& gWorldDocumentHistory.undoCount() == 2, "Panel failed to add concrete distance override");
+			&& currentDocumentHistory().undoCount() == 2, "Panel failed to add concrete distance override");
 		frame(); click(last.GetCenter());
 		require(!world->lookupAgent(agent).entity->getIndividualObjectUsageDistance()
 			&& world->lookupAgent(agent).entity->getIndividualObjectUsage()
-			&& gWorldDocumentHistory.undoCount() == 3, "Panel distance removal destroyed mode or history");
+			&& currentDocumentHistory().undoCount() == 3, "Panel distance removal destroyed mode or history");
 		frame(); click(last.GetCenter());
 		require(!world->lookupAgent(agent).entity->getIndividualObjectUsage()
 			&& world->lookupAgent(agent).entity->getObjectUsageDistance() == .25f
-			&& gWorldDocumentHistory.undoCount() == 4, "Panel mode removal lost default or history");
-		gWorldDocumentHistory.clear();
+			&& currentDocumentHistory().undoCount() == 4, "Panel mode removal lost default or history");
+		currentDocumentHistory().clear();
 	}
 
 	void editorSnapshotsEffectiveMobilityProfile()

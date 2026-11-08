@@ -13,7 +13,7 @@ void clipboardHistory(smoke::Context const&) {
     editor_smoke::State state; using smoke::require;
     auto world = std::make_shared<core::World>("Clipboard", 8, 2);
     world->addRoom("Front", 0, 0, 0, 8, 1); world->addRoom("Back", 1, 0, 0, 8, 1); world->finishBuild();
-    world->pauseSimulation(); gWorldDocumentHistory.clear();
+    world->pauseSimulation(); currentDocumentHistory().clear();
     core::World::CreateDoorOptions o; o.heightScale = 0.4f; o.speedOverride = 0.7f;
     o.openStyle = core::Door::OpenStyle::OpenApart;
     YAML::Emitter output; writeDoorClipboardObject(output, o);
@@ -27,9 +27,9 @@ void clipboardHistory(smoke::Context const&) {
         auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize(); core::SerializationWorkData work;
         bool ok = world->deserialize(*reader, work); world->pauseSimulation(); return ok;
     };
-    require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Door undo failed");
+    require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), "Door undo failed");
     require(!world->getSectorDoorOptions(0, 0, 2, 1, pasted), "Undo retained Door");
-    require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Door redo failed");
+    require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore), "Door redo failed");
     require(world->getSectorDoorOptions(0, 0, 2, 1, pasted) && pasted.heightScale == o.heightScale, "Redo lost scale");
     for (auto invalid : {0.f, 1.01f}) {
         node["heightScale"] = invalid; bool refused = false;
@@ -46,13 +46,13 @@ void crossingHistory(smoke::Context const&) {
     world->addSectorDoor(0, 0, 2, options);
     world->addSectorMarker(back, 0, 3.5f, "Goal"); world->finishBuild();
     auto id = world->createAgent("Traveller", front, 0, 2.5f);
-    world->pauseSimulation(); gWorldDocumentHistory.clear();
+    world->pauseSimulation(); currentDocumentHistory().clear();
     require(world->setAgentIndividualHeightModifier(id, .8f), "Initial Height edit failed");
     auto before = captureDocumentSnapshot(world);
     require(world->setSectorDoorHeightScale(0, 0, 2, 1, .85f), "Accepted height edit failed");
     commitDocumentEdit(std::move(before));
-    require(gWorldDocumentHistory.undoCount() == 1, "Accepted height edit missing history");
-    world->markSaved(); gWorldDocumentHistory.markSaved();
+    require(currentDocumentHistory().undoCount() == 1, "Accepted height edit missing history");
+    world->markSaved(); currentDocumentHistory().markSaved();
     require(world->resumeSimulation(), "Crossing resume failed");
     require(world->moveAgentToMarker(id, world->getMarkerIds().front()).accepted(), "Crossing goal failed");
     auto agent = world->lookupAgent(id).entity;
@@ -70,13 +70,13 @@ void crossingHistory(smoke::Context const&) {
         "Pause cancelled or teleported admitted crossing");
     auto snapshot = captureDocumentSnapshot(world);
     auto graph = world->getGraph(); auto dirty = world->isModified();
-    auto historyDirty = gWorldDocumentHistory.isModified();
+    auto historyDirty = currentDocumentHistory().isModified();
     require(!world->setSectorDoorHeightScale(0, 0, 2, 1, .6f, &reason)
         && reason.find("active crossing") != std::string::npos, "Paused crossing scale edit accepted");
     require(!world->setSectorDoorHeight(0, 0, 2, 1, core::Door::Height::Tall, &reason), "Paused crossing height edit accepted");
     require(captureDocumentSnapshot(world)->yaml == snapshot->yaml && world->getGraph() == graph
-        && world->isModified() == dirty && gWorldDocumentHistory.isModified() == historyDirty
-        && gWorldDocumentHistory.undoCount() == 1, "Refused edit mutated authored state/topology/history");
+        && world->isModified() == dirty && currentDocumentHistory().isModified() == historyDirty
+        && currentDocumentHistory().undoCount() == 1, "Refused edit mutated authored state/topology/history");
     require(world->setAgentIndividualHeightModifier(id, 1.f), "Admitted envelope edit failed");
     require(world->resumeSimulation(), "Admitted crossing resume failed");
     for (unsigned tick = 0; tick < 1200 && agent->getState() != core::Agent::State::Idle; ++tick) world->advanceTick();
@@ -96,11 +96,11 @@ void crossingHistory(smoke::Context const&) {
             }
         throw std::runtime_error("History lost Door edge");
     };
-    require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Height edit undo failed");
+    require(currentDocumentHistory().undo(captureDocumentSnapshot(world), restore), "Height edit undo failed");
     require(world->getSectorDoorOptions(0, 0, 2, 1, options) && options.heightScale == .8f,
         "Next undo did not undo previous accepted edit");
     require(!clearance(), "Undo retained enlarged clearance");
-    require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Height edit redo failed");
+    require(currentDocumentHistory().redo(captureDocumentSnapshot(world), restore), "Height edit redo failed");
     require(world->getSectorDoorOptions(0, 0, 2, 1, options) && options.heightScale == .85f, "Height redo lost geometry");
     require(clearance(), "Redo failed to restore enlarged clearance");
     if (core::hasEnvironmentVariable("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[live-clearance] editor outcome=unpaused-refusal/paused-atomic-refusal/admitted-enlargement-completed/undo-redo\n";

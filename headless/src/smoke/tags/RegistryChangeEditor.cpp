@@ -59,8 +59,8 @@ namespace
 			return true;
 		};
 		auto const succeeded = redo
-			? gWorldDocumentHistory.redo(std::move(current), restore)
-			: gWorldDocumentHistory.undo(std::move(current), restore);
+			? currentDocumentHistory().redo(std::move(current), restore)
+			: currentDocumentHistory().undo(std::move(current), restore);
 		if (succeeded) world = std::move(restored);
 		return succeeded;
 	}
@@ -119,8 +119,8 @@ namespace
 		auto const sourceUuid = fixture.sourceRegistry->getUuid();
 		auto const sourceText = readText(fixture.sourcePath);
 		auto const replacementText = readText(fixture.replacementPath);
-		gWorldDocumentHistory.clear();
-		gWorldDocumentHistory.markSaved();
+		currentDocumentHistory().clear();
+		currentDocumentHistory().markSaved();
 
 		std::string diagnostic;
 		require(commitAgentTagRegistrySwitch(world, fixture.worldPath.string(),
@@ -128,8 +128,8 @@ namespace
 			"An unused registry did not switch directly: " + diagnostic);
 		require(world->getAgentTagRegistryResourceName() == "replacement.tags.yaml"
 			&& world->getAgentTagRegistry()->getUuid() != sourceUuid
-			&& gWorldDocumentHistory.undoCount() == 1
-			&& gWorldDocumentHistory.isModified(),
+			&& currentDocumentHistory().undoCount() == 1
+			&& currentDocumentHistory().isModified(),
 			"A direct registry switch did not leave one unsaved, undoable World edit");
 		require(restoreWorldSnapshot(world, fixture.worldPath, false)
 			&& world->getExpectedAgentTagRegistryUuid() == sourceUuid,
@@ -138,11 +138,11 @@ namespace
 			&& world->getAgentTagRegistryResourceName() == "replacement.tags.yaml",
 			"Redo did not restore the direct registry switch");
 
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		require(commitAgentTagRegistryDetach(world, diagnostic),
 			"An unused registry did not detach directly: " + diagnostic);
 		require(!world->hasAgentTagRegistryReference()
-			&& gWorldDocumentHistory.undoCount() == 1,
+			&& currentDocumentHistory().undoCount() == 1,
 			"Direct detachment did not clear the reference in one undoable edit");
 		require(std::filesystem::is_regular_file(fixture.sourcePath)
 			&& std::filesystem::is_regular_file(fixture.replacementPath)
@@ -157,7 +157,7 @@ namespace
 	void directSwitchWithAssignmentsIsRefusedTransactionally(smoke::Context const& context)
 	{
 		Fixture fixture(context, true);
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		auto const before = serializeWorld(*fixture.world);
 		auto const source = fixture.world->getAgentTagRegistry();
 		auto const modified = fixture.world->isModified();
@@ -170,14 +170,14 @@ namespace
 		require(serializeWorld(*fixture.world) == before
 			&& fixture.world->getAgentTagRegistry() == source
 			&& fixture.world->isModified() == modified
-			&& !gWorldDocumentHistory.canUndo(),
+			&& !currentDocumentHistory().canUndo(),
 			"A refused direct registry switch changed state or created undo history");
 	}
 
 	void confirmedSwitchClearsEverythingAndCancellationDoesNothing(smoke::Context const& context)
 	{
 		Fixture fixture(context, true);
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		auto const before = serializeWorld(*fixture.world);
 		auto const sourceUuid = fixture.sourceRegistry->getUuid();
 		auto const sourceText = readText(fixture.sourcePath);
@@ -199,7 +199,7 @@ namespace
 		require(!agentTagRegistryChangePending()
 			&& serializeWorld(*fixture.world) == before
 			&& fixture.world->getExpectedAgentTagRegistryUuid() == sourceUuid
-			&& !gWorldDocumentHistory.canUndo(),
+			&& !currentDocumentHistory().canUndo(),
 			"Cancelling a destructive registry switch changed state or history");
 
 		// Confirming cannot make an invalid replacement less transactional: the
@@ -211,7 +211,7 @@ namespace
 		require(!confirmPendingAgentTagRegistryChange(diagnostic)
 			&& serializeWorld(*fixture.world) == before
 			&& fixture.world->getExpectedAgentTagRegistryUuid() == sourceUuid
-			&& !gWorldDocumentHistory.canUndo(),
+			&& !currentDocumentHistory().canUndo(),
 			"A failed confirmed switch partially cleared tag state or created history");
 
 		requestAgentTagRegistrySwitch(fixture.world,
@@ -233,8 +233,8 @@ namespace
 				->getWalkSpeedModifierSample()
 			&& !fixture.world->lookupAgent(fixture.secondAgent).entity
 				->getHeightModifierSample()
-			&& gWorldDocumentHistory.undoCount() == 1
-			&& gWorldDocumentHistory.isModified(),
+			&& currentDocumentHistory().undoCount() == 1
+			&& currentDocumentHistory().isModified(),
 			"The confirmed switch did not leave one unsaved, undoable World edit while clearing every assignment and sample");
 		require(readText(fixture.sourcePath) == sourceText
 			&& readText(fixture.replacementPath) == replacementText,
@@ -244,7 +244,7 @@ namespace
 			&& serializeWorld(*fixture.world) == before,
 			"Undo did not restore the original registry, assignments, and exact samples");
 
-		gWorldDocumentHistory.clear();
+		currentDocumentHistory().clear();
 		requestAgentTagRegistryDetach(fixture.world);
 		require(agentTagRegistryChangePending(&consequence)
 			&& consequence.find("detach source.tags.yaml") != std::string::npos
