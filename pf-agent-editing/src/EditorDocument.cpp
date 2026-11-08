@@ -72,6 +72,27 @@ namespace editor
 		return document->runtime();
 	}
 
+	game::WorldRuntime* tryPreviewRuntime(core::World const& world) noexcept
+	{
+		// Every way this can fail to name a runtime answers null rather than
+		// throwing, including a document whose runtime has gone unreachable:
+		// the caller cannot do anything with the answer but render without
+		// it, and a throw would arrive too late to be handled anywhere that
+		// matters (#979).
+		try
+		{
+			auto const document = gDocument;
+			if (!document) return nullptr;
+			auto& runtime = document->runtime();
+			if (&runtime.world() != &world) return nullptr;
+			return &runtime;
+		}
+		catch (...)
+		{
+			return nullptr;
+		}
+	}
+
 	std::shared_ptr<core::World> openNewWorld(std::string const& name,
 		std::uint32_t cellsWide, std::uint32_t levelsHigh)
 	{

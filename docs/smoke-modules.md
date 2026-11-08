@@ -296,7 +296,7 @@ live preview the game's own path. `editor::EditorDocument`
 ([`pf-agent-editing`](../pf-agent-editing/include/EditorDocument.h)) owns one
 `game::WorldRuntime` — the type the shipped game owns its World with — with a
 `game::WorldAuthoring` wrapped over it, and it is the only thing the editor
-holds its document by. The 18 registrations are about that one World being
+holds its document by. The 30 registrations are about that one World being
 seen from both sides.
 
 `Document.cpp` checks the ownership. The World the UI holds and the World the
@@ -350,6 +350,19 @@ The module links `pf-agent-editing`, which brings `pf-game-authoring` and
 labels `smoke;functional;validation-fast;editor;game-runtime` and a
 30-second timeout. Everything is headless: no window, no dialog, no
 interactive input.
+
+`PreviewControls.cpp` covers the editor's simulation controls (#979), which
+live in `pf-agent-editing` (`PreviewControls.h`) precisely so this tier can
+drive the same path the GUI's Start/Stop, Reset, `S` and `R` drive. With no
+document open the pause and reset shortcuts are a clean no-op: nothing is
+acted on, nothing throws, and no diagnostic is invented for a refusal that
+was never tested against a World. A handle to a document the editor has
+already replaced is refused the same way as no handle at all, which is the
+case a bare `world != nullptr` check lets through. The accepting path is
+proved against a built walking World so the refusals mean something, and
+`tryPreviewRuntime` is pinned to answer null exactly where `previewRuntime`
+throws — that non-throwing resolve is what keeps a render function from
+unwinding through a window it has already opened.
 
 ## Startup module (#301)
 

@@ -45,6 +45,7 @@
 #include "BoothWindowEditor.h"
 #include "AccessPanelEditor.h"
 #include "EditorDocument.h"
+#include "PreviewControls.h"
 
 #if defined(_WIN32)
 #include <nfd.h>
@@ -276,6 +277,7 @@ namespace
 		shared_ptr<const core::Vertex> const& vertex)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		if (!gSelectedAgent || !vertex || !isMarkerPathTarget(*world, *vertex)) return;
 		auto path = world->getGraph()->calculatePath(gSelectedAgent, nullptr, vertex);
 		if (!path)
@@ -1063,10 +1065,75 @@ namespace
 		return nullptr;
 	}
 
+	// The render path's view of the preview runtime (#979). A render
+	// function that has already called ImGui::Begin cannot carry the
+	// std::logic_error previewRuntime raises out through its own End, so
+	// every render-side read resolves through here instead: a World the
+	// preview no longer drives reads as "no runtime to show", and the
+	// caller renders without it rather than unwinding through the window
+	// around it.
+	game::WorldRuntime* previewRuntimeForRender(core::World const* world) noexcept
+	{
+		return world ? editor::tryPreviewRuntime(*world) : nullptr;
+	}
+
+	// Whether paused-only editing is allowed right now. A World with no
+	// runtime behind it reads as "not paused", which leaves the paused-only
+	// controls disabled instead of throwing them out of an open window.
+	// The catch is not decoration: the runtime's own reads are guarded and
+	// can raise, and on a `noexcept` boundary that would arrive as
+	// std::terminate rather than as anything the frame could survive.
+	bool previewIsPausedForRender(core::World const* world) noexcept
+	{
+		try
+		{
+			auto* runtime = previewRuntimeForRender(world);
+			return runtime && runtime->isSimulationPaused();
+		}
+		catch (...)
+		{
+			return false;
+		}
+	}
+
+	// The preview's snapshot view for render code, an empty one when nothing
+	// drives the World. Same reason as previewRuntimeForRender.
+	core::SimulationSnapshot const& previewSnapshotViewForRender(
+		core::World const* world) noexcept
+	{
+		static core::SimulationSnapshot const nothing{};
+		try
+		{
+			auto* runtime = previewRuntimeForRender(world);
+			return runtime ? runtime->getSimulationSnapshotView() : nothing;
+		}
+		catch (...)
+		{
+			return nothing;
+		}
+	}
+
+	// The freshly built snapshot, for the render code that asked for a new
+	// one rather than the runtime's cached view. Empty when there is nothing
+	// to build from, or when building it raised.
+	core::SimulationSnapshot previewSnapshotForRender(core::World const* world) noexcept
+	{
+		try
+		{
+			auto* runtime = previewRuntimeForRender(world);
+			return runtime ? runtime->getSimulationSnapshot()
+				: core::SimulationSnapshot{};
+		}
+		catch (...)
+		{
+			return core::SimulationSnapshot{};
+		}
+	}
+
 	string nextAgentName(shared_ptr<const core::World> const& world)
 	{
 		set<string> names;
-		for (auto const& agent : editor::previewRuntime(*world).getSimulationSnapshotView().agents)
+		for (auto const& agent : previewSnapshotViewForRender(world.get()).agents)
 			names.insert(agent.name);
 
 		while (true)
@@ -1356,31 +1423,28 @@ namespace
 		if (!runtime.isSimulationPaused()) runtime.pauseSimulation();
 	}
 
+
+	// Start/Stop, in one place the toolbar button and the global S shortcut
+	// both run through (#979). What "no document open" means is decided by
+	// the shared control seam rather than by a ternary at each call site:
+	// there is nothing to control, so the request is refused and the
+	// editor's indicator keeps the state it already had. The shape this
+	// replaced bound previewRuntime's reference to *world after its own
+	// guard had just made world null.
 	void setWorldPaused(editor::DocumentPtr const& document, bool paused)
 	{
-		auto const world = document ? document->world() : nullptr;
-		auto& runtime = editor::previewRuntime(*world);
-		if (paused)
-		{
-			runtime.pauseSimulation();
-			gUISettings.worldPaused = true;
-			return;
-		}
-		if (runtime.isSimulationPaused() && !runtime.resumeSimulation())
-		{
-			gUISettings.worldPaused = true;
+		auto const outcome = editor::setPreviewPaused(document, paused);
+		if (!outcome.handled) return;
+		if (!outcome.diagnostic.empty())
 			core::addLogMessage("Object palette", 0, core::LogLevel::Error,
-				world->agentBehaviourConfigurationsAreValid()
-					? world->getTopologyDiagnostic()
-					: world->getAgentBehaviourDependencyDiagnostic());
-			return;
-		}
-		gUISettings.worldPaused = false;
+				outcome.diagnostic);
+		gUISettings.worldPaused = outcome.paused;
 	}
 
 	void placeMarker(editor::DocumentPtr const& document, PegmanTarget const& target)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -1408,6 +1472,7 @@ namespace
 	void placeDoor(editor::DocumentPtr const& document, PegmanTarget const& target)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		// The Shuttle sits one Layer behind the Layer the Door is authored on.
 		gShuttleDoorCandidates = world->getShuttleStopCandidatesForDoor(gUISettings.visibleLayer + 1, target.cellY, target.cellX);
 		if (!gShuttleDoorCandidates.empty())
@@ -1440,6 +1505,7 @@ namespace
 	void placeBulkheadDoor(editor::DocumentPtr const& document, PegmanTarget const& target)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -1465,6 +1531,7 @@ namespace
 	void placeWindow(editor::DocumentPtr const& document, PegmanTarget const& target, bool booth = false)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -1490,6 +1557,7 @@ namespace
 	void placeWalkway(editor::DocumentPtr const& document, PegmanTarget const& target)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -1547,6 +1615,7 @@ namespace
 	void placeForceBridge(editor::DocumentPtr const& document, PegmanTarget const& target)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -1574,6 +1643,7 @@ namespace
 	void placeRoomLadder(editor::DocumentPtr const& document, PegmanTarget const& target)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -1599,6 +1669,7 @@ namespace
 	void landPegman(editor::DocumentPtr const& document)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		if (gUISettings.worldPaused && locationHasCapacity(gPegman.sector))
 		{
 			core::AgentId placed{};
@@ -1638,6 +1709,7 @@ namespace
 		ImVec2 canvasSize, WorldDrawList* drawList)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		constexpr ImU32 yellow = IM_COL32(251, 188, 4, 255);
 		constexpr ImU32 red = IM_COL32(244, 67, 54, 255);
 		constexpr ImU32 trayColour = IM_COL32(24, 24, 28, 210);
@@ -2523,6 +2595,7 @@ namespace
 	void renderLayerNameEditor(editor::DocumentPtr const& document, uint32_t layer, bool level = false)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto& edit = level ? gLevelNameEdits[layer] : gLayerNameEdits[layer];
 
 		if (!edit.editing)
@@ -2859,7 +2932,6 @@ namespace
 
 	void openWorld(editor::DocumentPtr& document)
 	{
-		auto const world = document ? document->world() : nullptr;
 		nfdu8char_t* selectedPathRaw{ nullptr };
 		auto const result = NFD_OpenDialogU8(&selectedPathRaw,
 			WorldDocumentDialogFilters, 2, nullptr);
@@ -2916,7 +2988,6 @@ namespace
 
 	void requestFileAction(PendingFileAction action, editor::DocumentPtr& document)
 	{
-		auto const world = document ? document->world() : nullptr;
 		if (editor::documentIsStale(document))
 		{
 			gPendingFileAction = action;
@@ -2928,7 +2999,6 @@ namespace
 
 	void requestRecentFile(string const& filepath, editor::DocumentPtr& document)
 	{
-		auto const world = document ? document->world() : nullptr;
 		gPendingRecentFilepath = filepath;
 		requestFileAction(PendingFileAction::OpenRecent, document);
 	}
@@ -2937,6 +3007,7 @@ namespace
 		core::World::LocationEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -2965,6 +3036,7 @@ namespace
 		core::World::LocationEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
@@ -2979,6 +3051,7 @@ namespace
 		core::World::LiftEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -3000,6 +3073,7 @@ namespace
 		core::World::LiftEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
@@ -3014,6 +3088,7 @@ namespace
 		core::World::ShuttleEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -3035,6 +3110,7 @@ namespace
 		core::World::ShuttleEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
@@ -3049,6 +3125,7 @@ namespace
 		core::World::AirlockEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		if (!plan.valid)
 		{ core::addLogMessage("Airlock editor", 0, core::LogLevel::Error, plan.diagnostic); return; }
 		auto undo = captureDocumentSnapshot(world);
@@ -3074,6 +3151,7 @@ namespace
 		core::World::LadderEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -3095,6 +3173,7 @@ namespace
 		core::World::LadderEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
@@ -3109,6 +3188,7 @@ namespace
 		core::World::StairwellEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -3130,6 +3210,7 @@ namespace
 		core::World::StairwellEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
@@ -3144,6 +3225,7 @@ namespace
 		core::World::PlatformLiftEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -3163,6 +3245,7 @@ namespace
 		core::World::PlatformLiftEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation()) { gPendingPlatformLiftEdit = plan; gOpenLocationEditPopup = true; }
@@ -3173,6 +3256,7 @@ namespace
 		core::World::WalkwayEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -3192,6 +3276,7 @@ namespace
 		core::World::WalkwayEditPlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation()) { gPendingWalkwayEdit = plan; gOpenLocationEditPopup = true; }
@@ -3202,6 +3287,7 @@ namespace
 		core::World::ObjectMovePlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -3220,6 +3306,7 @@ namespace
 		core::World::ObjectMovePlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation()) { gPendingObjectMove = plan; gOpenLocationEditPopup = true; resetObjectMove(); }
@@ -3230,6 +3317,7 @@ namespace
 		core::World::LayerDeletePlan const& plan)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -3772,7 +3860,7 @@ namespace
 	string uniqueAgentName(shared_ptr<const core::World> const& world, string base)
 	{
 		set<string> names;
-		for (auto const& agent : editor::previewRuntime(*world).getSimulationSnapshotView().agents) names.insert(agent.name);
+		for (auto const& agent : previewSnapshotViewForRender(world.get()).agents) names.insert(agent.name);
 		if (!names.contains(base)) return base;
 		for (uint32_t suffix = 2;; ++suffix)
 		{
@@ -4123,6 +4211,7 @@ namespace
 	bool removeClipboardSelection(editor::DocumentPtr const& document)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return false;
 		if (gUISettings.selectionMode == UISettings::SelectionMode::Sector && gSelectedSector
 			&& gSelectedSector->getType() == core::SectorType::Dumbwaiter)
 		{
@@ -4595,7 +4684,6 @@ void renderWorldLoadWarningsPopup()
 
 bool requestApplicationClose(editor::DocumentPtr& document)
 {
-	auto const world = document ? document->world() : nullptr;
 	if (!editor::documentIsStale(document)) return true;
 	requestFileAction(PendingFileAction::Exit, document);
 	return false;
@@ -4603,14 +4691,16 @@ bool requestApplicationClose(editor::DocumentPtr& document)
 
 void resetWorldSimulation(editor::DocumentPtr const& document)
 {
-	auto const world = document ? document->world() : nullptr;
+	// Nothing open, nothing to reset - and no point putting a wait cursor and
+	// a busy window title on an operation that will not run (#979).
+	if (!editor::previewIsControllable(document)) return;
 	try
 	{
 		ApplicationBusyScope busy("Resetting simulation...");
-		auto& runtime = editor::previewRuntime(*world);
-		runtime.resetSimulation();
+		auto const outcome = editor::resetPreview(document);
+		if (!outcome.handled) return;
 		clearDocumentState(document, false);
-		gUISettings.worldPaused = runtime.isSimulationPaused();
+		gUISettings.worldPaused = outcome.paused;
 	}
 	catch (std::exception const& error)
 	{
@@ -4662,8 +4752,14 @@ void handleShortcuts(editor::DocumentPtr& document)
 		beginAgentPathSelection(document);
 	}
 
-	// Start or stop the simulation
-	if (ImGui::Shortcut(ImGuiKey_S, 0, ImGuiInputFlags_RouteGlobalLow))
+	// Start or stop the simulation. Guarded on a live document the way the
+	// clipboard shortcuts above are: with nothing open there is nothing to
+	// pause, so S is a no-op rather than a trip through a null World
+	// (#979). `previewIsControllable` rather than a bare `world` check so a
+	// handle to a document the editor has already replaced is refused too.
+	bool const simulationShortcutAvailable = editor::previewIsControllable(document);
+	if (simulationShortcutAvailable
+		&& ImGui::Shortcut(ImGuiKey_S, 0, ImGuiInputFlags_RouteGlobalLow))
 	{
 		if (!ImGui::IsAnyItemActive() && !ImGui::IsAnyItemFocused())
 		{
@@ -4671,8 +4767,9 @@ void handleShortcuts(editor::DocumentPtr& document)
 		}
 	}
 
-	// Reset simulation
-	if (ImGui::Shortcut(ImGuiKey_R, 0, ImGuiInputFlags_RouteGlobalLow))
+	// Reset simulation. Same guard as S (#979).
+	if (simulationShortcutAvailable
+		&& ImGui::Shortcut(ImGuiKey_R, 0, ImGuiInputFlags_RouteGlobalLow))
 	{
 		if (!ImGui::IsAnyItemActive() && !ImGui::IsAnyItemFocused())
 		{
@@ -4932,6 +5029,7 @@ void handleWorldInteraction(editor::DocumentPtr const& document,
 	shared_ptr<const core::Graph> graph, MouseButtonStatus const& mouseStatus)
 {
 	auto const world = document ? document->world() : nullptr;
+	if (!world) return;
 	if (!gPegmanConsumesLeftMouse
 		&& mouseStatus.state[MouseButtonStatus::Left] == MouseButtonStatus::State::Clicked)
 	{
@@ -5383,21 +5481,29 @@ void renderDocumentToolbar(editor::DocumentPtr& document)
 
 void renderToolbar(editor::DocumentPtr const& document)
 {
+	// No document, nothing to report on and nothing to control. The shape
+	// this replaced read `world` out of a ternary that could yield null and
+	// then called through it on the very next line (#979).
 	auto const world = document ? document->world() : nullptr;
+	auto* runtime = previewRuntimeForRender(world.get());
+	if (!world || !runtime)
+	{
+		ImGui::TextDisabled("Simulation: no document open.");
+		return;
+	}
 	auto const averageStepMicroseconds = world->getAverageSimulationStepMicroseconds();
 	ImGui::Text("Simulation: %.1f us / step", averageStepMicroseconds);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Average completed core tick time over the last second; excludes rendering.");
 
 	ImGui::SetNextItemWidth(95.0f);
-	auto& runtime = editor::previewRuntime(*world);
-	auto speed = std::format("{:g}x", runtime.getSimulationTimeScale());
+	auto speed = std::format("{:g}x", runtime->getSimulationTimeScale());
 	if (ImGui::BeginCombo("##SimulationSpeed", speed.c_str()))
 	{
 		for (double scale : { 0.25, 0.5, 1.0, 2.0, 5.0, 20.0 })
 			if (ImGui::Selectable(std::format("{:g}x", scale).c_str(),
-				scale == runtime.getSimulationTimeScale()))
-				runtime.setSimulationTimeScale(scale);
+				scale == runtime->getSimulationTimeScale()))
+				runtime->setSimulationTimeScale(scale);
 		ImGui::EndCombo();
 	}
 	if (ImGui::IsItemHovered())
@@ -5544,6 +5650,7 @@ void renderMarkerPanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::SectorObject> object)
 {
 	auto const world = document ? document->world() : nullptr;
+	if (!world) return;
 	renderMarkerEditorPanel(world, object, [](string const& diagnostic)
 	{
 		reportEditorError("Marker editor", diagnostic);
@@ -5555,6 +5662,7 @@ void renderWalkwayPanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::SectorObject> object)
 {
 	auto const world = document ? document->world() : nullptr;
+	if (!world) return;
 	auto walkway = static_pointer_cast<const core::WalkwaySectorObject>(object)->getWalkway();
 	auto room = object->getSector();
 	ImGui::TextUnformatted("Walkway");
@@ -5642,6 +5750,7 @@ void renderBackgroundPanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::Sector> const& sector)
 {
 	auto const world = document ? document->world() : nullptr;
+	if (!world) return;
 	auto const background = dynamic_pointer_cast<const core::Background>(sector);
 	if (!background) return;
 
@@ -5753,6 +5862,7 @@ void renderFacadePanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::Sector> const& sector)
 {
 	auto const world = document ? document->world() : nullptr;
+	if (!world) return;
 	auto const facade = dynamic_pointer_cast<const core::Facade>(sector);
 	if (!facade) return;
 
@@ -5945,8 +6055,8 @@ void renderBulkheadDoorPanel(editor::DocumentPtr const& document,
 
 	ImGui::Separator();
 	bool activationOrControlsChanged = false;
-	auto& runtime = editor::previewRuntime(*world);
-	ImGui::BeginDisabled(!runtime.isSimulationPaused() || objectIndex == ~0u);
+	bool const paused = previewIsPausedForRender(world.get());
+	ImGui::BeginDisabled(!paused || objectIndex == ~0u);
 	if (ImGui::Combo("Activation", &activationMode,
 		"Automatic\0Manual\0Remote Controlled\0Unavailable\0"))
 	{
@@ -5974,7 +6084,7 @@ void renderBulkheadDoorPanel(editor::DocumentPtr const& document,
 	bool valid = core::isFiniteTiming(holdOpenSeconds) && isfinite(automaticSensorDistance)
 		&& automaticSensorDistance >= 0.0f && crossingLanes == 1
 		&& (remote || (!leftControl && !rightControl));
-	ImGui::BeginDisabled(!runtime.isSimulationPaused() || !valid || objectIndex == ~0u);
+	ImGui::BeginDisabled(!paused || !valid || objectIndex == ~0u);
 	if (ImGui::Button("Apply Bulkhead Door settings"))
 	{
 		try
@@ -6001,7 +6111,7 @@ void renderBulkheadDoorPanel(editor::DocumentPtr const& document,
 		}
 	}
 	ImGui::EndDisabled();
-	if (!runtime.isSimulationPaused())
+	if (!paused)
 		ImGui::TextDisabled("Pause simulation to edit settings.");
 	ImGui::Separator();
 	if (ImGui::Button("Delete Bulkhead Door"))
@@ -6100,6 +6210,7 @@ void renderForceBridgePanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::SectorObject> object)
 {
 	auto const world = document ? document->world() : nullptr;
+	if (!world) return;
 	auto fbObject = static_pointer_cast<const core::ForceBridgeSectorObject>(object);
 	auto forceBridge = fbObject->getForceBridge();
 	auto room = object->getSector();
@@ -6236,6 +6347,7 @@ void renderLadderPanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::SectorObject> object)
 {
 	auto const world = document ? document->world() : nullptr;
+	if (!world) return;
 	auto ladderObject = static_pointer_cast<const core::LadderSectorObject>(object);
 	auto ladder = ladderObject->getLadder();
 	auto room = object->getSector();
@@ -6484,7 +6596,7 @@ void renderLiftPanel(shared_ptr<const core::World> const& world,
 
 	if (!includeAgentDebug || !world) return;
 	auto resourceId = world->getTraversalResourceId(lift.get());
-	auto const& snapshot = editor::previewRuntime(*world).getSimulationSnapshotView();
+	auto const& snapshot = previewSnapshotViewForRender(world.get());
 	auto resource = find_if(snapshot.traversalResources.begin(), snapshot.traversalResources.end(),
 		[resourceId](auto const& candidate) { return candidate.id == resourceId; });
 	if (!resourceId || resource == snapshot.traversalResources.end())
@@ -6585,7 +6697,7 @@ void renderShuttlePanel(shared_ptr<const core::World> const& world,
 	}
 	if (!includeAgentDebug || !world) return;
 	auto resourceId = world->getTraversalResourceId(shuttle.get());
-	auto const& snapshot = editor::previewRuntime(*world).getSimulationSnapshotView();
+	auto const& snapshot = previewSnapshotViewForRender(world.get());
 	auto resource = find_if(snapshot.traversalResources.begin(), snapshot.traversalResources.end(),
 		[resourceId](auto const& value) { return value.id == resourceId; });
 	if (!resourceId || resource == snapshot.traversalResources.end())
@@ -6681,7 +6793,8 @@ void renderShuttlePanel(shared_ptr<const core::World> const& world,
 void renderAgentView(editor::DocumentPtr const& document)
 {
 	auto const world = document ? document->world() : nullptr;
-	auto& runtime = editor::previewRuntime(*world);
+	if (!world) return;
+	bool const paused = previewIsPausedForRender(world.get());
 	ImGuiTableFlags flags =
 		ImGuiTableFlags_SizingStretchSame |
 		ImGuiTableFlags_Resizable |
@@ -6740,7 +6853,7 @@ void renderAgentView(editor::DocumentPtr const& document)
 					// so the control is disabled in step with the rest of the
 					// paused-only editing UI.
 					ImGui::TableSetColumnIndex(1);
-					ImGui::BeginDisabled(!runtime.isSimulationPaused());
+					ImGui::BeginDisabled(!paused);
 					if (ImGui::Button(agent->isActive() ? ICON_FA_EYE : ICON_FA_EYE_SLASH,
 						ImVec2(ImGui::GetFrameHeight(), 0.0f)))
 					{
@@ -6754,7 +6867,7 @@ void renderAgentView(editor::DocumentPtr const& document)
 					ImGui::EndDisabled();
 					if (ImGui::IsItemHovered())
 					{
-						if (!runtime.isSimulationPaused())
+						if (!paused)
 						{
 							ImGui::SetTooltip("Pause the simulation to activate or deactivate this Agent");
 						}
@@ -6829,7 +6942,7 @@ void renderAgentView(editor::DocumentPtr const& document)
 					{
 						ImGui::Text("%u/%zu vertices", agent->getPathTargetNodeIndex(), path->nodes.size());
 					}
-					else if (runtime.isSimulationPaused())
+					else if (paused)
 					{
 						// Pausing tears down live traversal, so the Agent's path pointer is
 						// cleared. Its retained destination still tells us where it resumes.
@@ -6974,6 +7087,7 @@ void renderRoomHeightScaleEditor(editor::DocumentPtr const& document,
 	shared_ptr<const core::Sector> const& location)
 {
 	auto const world = document ? document->world() : nullptr;
+	if (!world) return;
 	auto const room = dynamic_pointer_cast<const core::Location>(location);
 	if (!room || !room->isRoom()) return;
 
@@ -6983,7 +7097,7 @@ void renderRoomHeightScaleEditor(editor::DocumentPtr const& document,
 
 	ImGui::Separator();
 	ImGui::TextUnformatted("Room height");
-	ImGui::BeginDisabled(!editor::previewRuntime(*world).isSimulationPaused() || !eligible);
+	ImGui::BeginDisabled(!previewIsPausedForRender(world.get()) || !eligible);
 	bool const changed = ImGui::Checkbox("Override height scale", &overridden)
 		|| (overridden && ImGui::SliderFloat("Height scale", &scale,
 			CORE_ROOM_HEIGHT_SCALE_MIN, CORE_ROOM_HEIGHT_SCALE_MAX, "%.3f"));
@@ -7023,6 +7137,7 @@ void renderLocationWallEditor(editor::DocumentPtr const& document,
 	shared_ptr<const core::Sector> const& location)
 {
 	auto const world = document ? document->world() : nullptr;
+	if (!world) return;
 	ImGui::Separator();
 	ImGui::TextUnformatted("Shared walls");
 	ImGui::TextDisabled("Open walls directly connect adjacent Rooms or Corridors.");
@@ -7176,7 +7291,7 @@ void renderSelectedObjectPanel(editor::DocumentPtr const& document)
 			ImGui::Text("Capacity: %u Agents", chamber->getCapacity());
 			ImGui::Text("Cycle remaining: %.1f seconds", chamber->getRemainingCycleSeconds());
 			float seconds = chamber->getCycleSeconds();
-			ImGui::BeginDisabled(!editor::previewRuntime(*world).isSimulationPaused());
+			ImGui::BeginDisabled(!previewIsPausedForRender(world.get()));
 			if (ImGui::SliderFloat("Cycle duration (seconds)", &seconds, 1.0f, 10.0f))
 			{
 				auto undo = captureDocumentSnapshot(world);
@@ -7734,6 +7849,7 @@ namespace
 void renderSelectedAgentPanel(editor::DocumentPtr const& document)
 {
 	auto const world = document ? document->world() : nullptr;
+	if (!world) return;
 	if (!gSelectedAgent) return;
 	auto const header = format("Selection: {}###Selection", gSelectedAgent->getName());
 	if (!ImGui::CollapsingHeader(header.c_str())) return;
@@ -7757,7 +7873,7 @@ void renderSelectedAgentPanel(editor::DocumentPtr const& document)
 	// route but no tick acts on it. The change is refused while the simulation
 	// runs, so the button is disabled in step with the rest of the
 	// paused-only editing UI.
-	ImGui::BeginDisabled(!editor::previewRuntime(*world).isSimulationPaused());
+	ImGui::BeginDisabled(!previewIsPausedForRender(world.get()));
 	if (ImGui::Button(gSelectedAgent->isActive() ? "Deactivate" : "Activate"))
 	{
 		string diagnostic;
@@ -7767,7 +7883,7 @@ void renderSelectedAgentPanel(editor::DocumentPtr const& document)
 		}
 	}
 	ImGui::EndDisabled();
-	if (!editor::previewRuntime(*world).isSimulationPaused() && ImGui::IsItemHovered())
+	if (!previewIsPausedForRender(world.get()) && ImGui::IsItemHovered())
 	{
 		ImGui::SetTooltip("Pause the simulation to activate or deactivate an Agent");
 	}
@@ -7829,7 +7945,8 @@ void renderSelectedAgentPanel(editor::DocumentPtr const& document)
 				// Recalculation keeps the Action chosen for this request, rather
 				// than reverting it to Idle now that there is no global picker.
 				string action{core::IdleAction};
-				for (auto const& snapshot : editor::previewRuntime(*world).getSimulationSnapshot().agents)
+				auto const preview = previewSnapshotForRender(world.get());
+				for (auto const& snapshot : preview.agents)
 					if (snapshot.id == id) { action = snapshot.selectedAction; break; }
 				applyAgentPathEdit(world, gSelectedAgent, std::move(newPath), wasPathing, true, action);
 			}
@@ -7883,7 +8000,8 @@ void renderSelectedAgentPanel(editor::DocumentPtr const& document)
 	auto renderTargetAction = [&]
 	{
 		string action{core::IdleAction};
-		for (auto const& snapshot : editor::previewRuntime(*world).getSimulationSnapshot().agents)
+		auto const preview = previewSnapshotForRender(world.get());
+		for (auto const& snapshot : preview.agents)
 			if (snapshot.id == id) { action = snapshot.selectedAction; break; }
 		ImGui::Text("Action: %s", world->agentActionDisplayName(action).c_str());
 	};
@@ -7903,7 +8021,7 @@ void renderSelectedAgentPanel(editor::DocumentPtr const& document)
 	{
 		// Pausing cancels live traversal, not the Agent's destination intent.
 		core::World::TopologyPathIntent intent;
-		if (editor::previewRuntime(*world).isSimulationPaused() && world->getPausedPathIntent(*gSelectedAgent, intent))
+		if (previewIsPausedForRender(world.get()) && world->getPausedPathIntent(*gSelectedAgent, intent))
 		{
 			auto const destination = intent.destinationSector
 				&& intent.destinationSector.value <= world->getNumSectors()
@@ -8194,6 +8312,7 @@ void renderLevelsPanel(editor::DocumentPtr const& document)
 void renderWorldPanel(editor::DocumentPtr const& document)
 {
 	auto const world = document ? document->world() : nullptr;
+	if (!world) return;
 	ImGui::Indent(ImGui::GetTreeNodeToLabelSpacing());
 
 	if (ImGui::CollapsingHeader("Tags"))
@@ -8292,7 +8411,7 @@ void renderWorldPanel(editor::DocumentPtr const& document)
 		if (!diagnostic.empty()) ImGui::TextWrapped("Agent ImageSet unavailable: %s", diagnostic.c_str());
 		else if (!agentSpriteSize(previewBaseline.poses.at(core::Pose::Standing).imageTile.c_str()))
 			ImGui::TextWrapped("Agent ImageSet lacks Standing artwork for the placement type; rendering previews in magenta.");
-		else for (auto const& snapshot : editor::previewRuntime(*world).getSimulationSnapshotView().agents)
+		else for (auto const& snapshot : previewSnapshotViewForRender(world.get()).agents)
 		{
 			auto agent = document->authoring().world().lookupAgent(snapshot.id).entity;
 			if (agent && (!agentSpriteSize(agent->getPoseImageTile().c_str())
@@ -8637,7 +8756,6 @@ void renderDockSpace()
 void renderControlsWindow(editor::DocumentPtr const& document, shared_ptr<const core::Graph> graph,
 	shared_ptr<core::Agent> pathingAgent)
 {
-	auto const world = document ? document->world() : nullptr;
 	ImGui::Begin("Controls");
 
 	if (ImGui::CollapsingHeader("Simulation", ImGuiTreeNodeFlags_DefaultOpen))
@@ -8717,6 +8835,7 @@ namespace
 	void updateAgentMove(editor::DocumentPtr const& document)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto& io = ImGui::GetIO();
 		if (gUISettings.selectionMode != UISettings::SelectionMode::Object)
 		{
@@ -9101,6 +9220,7 @@ namespace
 	void updateSectorResize(editor::DocumentPtr const& document)
 	{
 		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
 		auto& io = ImGui::GetIO();
 		if (gUISettings.selectionMode != UISettings::SelectionMode::Sector || !gSelectedSector
 			|| gSelectedSector->getLayerIndex() != (uint32_t)gUISettings.visibleLayer)
@@ -9245,7 +9365,7 @@ namespace
 			right = left + width;
 			top = bottom + height;
 			if ((deltaX != 0 || deltaY != 0) && !gSectorResize.lift && !gSectorResize.airlock
-				&& !editor::previewRuntime(*world).isSimulationPaused())
+				&& !previewIsPausedForRender(world.get()))
 			{
 				pausePreview(*world);
 				gUISettings.worldPaused = true;
@@ -9576,6 +9696,7 @@ namespace
 void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const core::Graph> graph)
 {
 	auto const world = document ? document->world() : nullptr;
+	if (!world) return;
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 	ImGui::Begin("World", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 	ImGui::PopStyleVar();

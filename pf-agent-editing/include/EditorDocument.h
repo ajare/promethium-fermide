@@ -81,6 +81,18 @@ namespace editor
 	// runtime owns.
 	game::WorldRuntime& previewRuntime(core::World const& world);
 
+	// The same resolution that answers with null instead of throwing: null
+	// when no document is open, or when `world` is not the World the open
+	// document's runtime drives (#979).
+	//
+	// This exists for the render path. A render function that has already
+	// called `ImGui::Begin` cannot carry a `std::logic_error` out through
+	// its own `End`, so a World that stopped being the preview has to read
+	// as "no runtime to show" rather than as an exception unwinding through
+	// the window around it. Callers that are not rendering should keep using
+	// the throwing form, which says which of the two conditions failed.
+	game::WorldRuntime* tryPreviewRuntime(core::World const& world) noexcept;
+
 	// Opens a new, empty document and returns the World the UI holds.
 	std::shared_ptr<core::World> openNewWorld(std::string const& name,
 		std::uint32_t cellsWide, std::uint32_t levelsHigh);

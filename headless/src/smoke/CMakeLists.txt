@@ -182,6 +182,7 @@ pf_add_smoke_module(pf-smoke-editor-preview
         editor-preview/Boundary.cpp
         editor-preview/AuthoringRoute.cpp
         editor-preview/HistorySeam.cpp
+        editor-preview/PreviewControls.cpp
     LIBRARIES pf-agent-editing
     LABELS "editor;game-runtime"
     TIMEOUT 30
