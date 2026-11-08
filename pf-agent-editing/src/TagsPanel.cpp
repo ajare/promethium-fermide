@@ -2054,7 +2054,7 @@ void cancelPendingAgentTagDelete()
 }
 
 DocumentHistory& agentTagRegistryDocumentHistory(
-	shared_ptr<core::AgentTagRegistry> const& registry)
+	shared_ptr<const core::AgentTagRegistry> const& registry)
 {
 	if (!registry) throw invalid_argument("There is no Agent tag registry document");
 	auto const [entry, inserted] = gRegistryHistories.try_emplace(registry->getUuid());
@@ -3167,7 +3167,7 @@ bool saveAgentTagRegistry(shared_ptr<core::AgentTagRegistry> const& registry,
 	}
 }
 
-bool agentTagRegistryIsModified(shared_ptr<core::AgentTagRegistry> const& registry)
+bool agentTagRegistryIsModified(shared_ptr<const core::AgentTagRegistry> const& registry)
 {
 	return registry && (registry->isModified()
 		|| agentTagRegistryDocumentHistory(registry).isModified());

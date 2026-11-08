@@ -232,7 +232,13 @@ namespace game
 		//
 		// Nothing below mutates, binds a resource or touches persistence: the
 		// whole section is `const`, forwards to the `const` overload of the same
-		// World method, and returns the same value the World returns.
+		// World method, and returns the same value the World returns. What a
+		// caller does with the returned handle is part of the contract too, so
+		// every entity this section answers with is `const`-qualified (#974):
+		// `Agent const*` rather than `Agent*`, and `shared_ptr<const Registry>`
+		// rather than a `shared_ptr<Registry>` a caller could write through.
+		// Mutable registries are bound and mutated by `WorldAuthoring` (#969),
+		// never reached from here.
 
 		// --- Identity, host state and diagnostics ---
 		std::string const& getName() const;
@@ -258,7 +264,7 @@ namespace game
 		std::vector<std::shared_ptr<const core::Sector>> getSectorsInBounds(std::uint32_t layerIndex, float x, float y, float width, float height) const;
 		std::vector<std::shared_ptr<const core::Sector>> getSectors(std::uint32_t layerIndex) const;
 		std::shared_ptr<const core::Sector> getSectorAtPosition(std::uint32_t layerIndex, float x, float y) const;
-		core::Agent* getAgentAtPosition(std::uint32_t layerIndex, float x, float y) const;
+		core::Agent const* getAgentAtPosition(std::uint32_t layerIndex, float x, float y) const;
 		std::shared_ptr<const core::Object> getObjectAtPosition(std::uint32_t layerIndex, float x, float y, std::shared_ptr<const core::SectorObject>* sectorObject = nullptr) const;
 
 		// --- Traversal topology state ---
@@ -330,7 +336,7 @@ namespace game
 		bool hasAgentBehaviourRegistryReference() const;
 		bool hasAttachedAgentBehaviourRegistry() const;
 		std::string const& getExpectedAgentBehaviourRegistryUuid() const;
-		std::shared_ptr<core::AgentBehaviourRegistry> const& getAgentBehaviourRegistry() const;
+		std::shared_ptr<const core::AgentBehaviourRegistry> getAgentBehaviourRegistry() const;
 		bool agentBehaviourConfigurationsAreValid() const;
 		std::string const& getAgentBehaviourDependencyDiagnostic() const;
 		bool validateAgentBehaviourAssignment(core::AgentBehaviourId behaviour, std::uint64_t revision, core::AgentBehaviourConfiguration const& configuration, core::AgentBehaviourConfiguration* normalized = nullptr, std::string* diagnostic = nullptr) const;
@@ -345,7 +351,7 @@ namespace game
 		bool hasAgentTagRegistryReference() const;
 		bool hasAttachedAgentTagRegistry() const;
 		std::string const& getExpectedAgentTagRegistryUuid() const;
-		std::shared_ptr<core::AgentTagRegistry> const& getAgentTagRegistry() const;
+		std::shared_ptr<const core::AgentTagRegistry> getAgentTagRegistry() const;
 		std::uint64_t getAgentTagAssignmentCount() const;
 		std::uint32_t getAgentTagAssignedAgentCount() const;
 		std::uint64_t getAgentTagSampleCount() const;

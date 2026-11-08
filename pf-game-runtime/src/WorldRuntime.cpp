@@ -326,8 +326,10 @@ std::shared_ptr<const core::Sector> WorldRuntime::getSectorAtPosition(std::uint3
 {
 	return world().getSectorAtPosition(layerIndex, x, y);
 }
-core::Agent* WorldRuntime::getAgentAtPosition(std::uint32_t layerIndex, float x, float y) const
+core::Agent const* WorldRuntime::getAgentAtPosition(std::uint32_t layerIndex, float x, float y) const
 {
+	// Through `world()`, so the `const` overload is the only one this forward
+	// can select (#974).
 	return world().getAgentAtPosition(layerIndex, x, y);
 }
 std::shared_ptr<const core::Object> WorldRuntime::getObjectAtPosition(std::uint32_t layerIndex, float x, float y, std::shared_ptr<const core::SectorObject>* sectorObject) const
@@ -572,8 +574,11 @@ std::string const& WorldRuntime::getExpectedAgentBehaviourRegistryUuid() const
 {
 	return world().getExpectedAgentBehaviourRegistryUuid();
 }
-std::shared_ptr<core::AgentBehaviourRegistry> const& WorldRuntime::getAgentBehaviourRegistry() const
+std::shared_ptr<const core::AgentBehaviourRegistry> WorldRuntime::getAgentBehaviourRegistry() const
 {
+	// A `const` read answers with a `const` handle (#974). The runtime has no
+	// mutable registry to hand out: binding and mutating the package is
+	// `WorldAuthoring`'s act, not the game's (#969).
 	return world().getAgentBehaviourRegistry();
 }
 bool WorldRuntime::agentBehaviourConfigurationsAreValid() const
@@ -626,8 +631,10 @@ std::string const& WorldRuntime::getExpectedAgentTagRegistryUuid() const
 {
 	return world().getExpectedAgentTagRegistryUuid();
 }
-std::shared_ptr<core::AgentTagRegistry> const& WorldRuntime::getAgentTagRegistry() const
+std::shared_ptr<const core::AgentTagRegistry> WorldRuntime::getAgentTagRegistry() const
 {
+	// A `const` read answers with a `const` handle (#974), matching
+	// `furnitureCatalogue()` and `lookupDumbwaiter()`.
 	return world().getAgentTagRegistry();
 }
 std::uint64_t WorldRuntime::getAgentTagAssignmentCount() const

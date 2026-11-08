@@ -291,6 +291,18 @@ namespace game
 	core::EntityRemovalResult removeAgent(core::AgentId id);
 
 	// --- Resource binding: Agent tag registry ---
+	// The attached Agent tag registry, mutable. #974 closed the hole where a
+	// `const` read on `WorldRuntime` handed out a writable registry; the
+	// writable handle did not disappear, it moved here, because writing a
+	// registry is an authoring act (#969). A game holding only the runtime
+	// reads the same registry as `shared_ptr<const AgentTagRegistry>` and
+	// cannot reach this.
+	//
+	// The registry object is handed out, not the World's slot: which package
+	// answers is the attach / detach family below, and no accessor reseats
+	// it. Null when nothing is attached, exactly as on the World.
+	std::shared_ptr<core::AgentTagRegistry> getAgentTagRegistry();
+
 	// A World references zero or one Agent tag registry Resource by name and
 	// expected UUID, and the attach / detach family is how that reference is
 	// moved. It is grouped here rather than scattered because the whole family
@@ -322,6 +334,9 @@ namespace game
 	void replaceAgentTagRegistryWithIndependentCopy(std::string resourceName, std::shared_ptr<core::AgentTagRegistry> registry);
 
 	// --- Resource binding: Agent behaviour registry ---
+	// The mutable package handle, for the same reason and with the same shape
+	// as `getAgentTagRegistry()` above (#974).
+	std::shared_ptr<core::AgentBehaviourRegistry> getAgentBehaviourRegistry();
 	void attachAgentBehaviourRegistry(std::string resourceName, std::shared_ptr<core::AgentBehaviourRegistry> registry);
 	void attachAgentBehaviourRegistryAndClearAssignments(std::string resourceName, std::shared_ptr<core::AgentBehaviourRegistry> registry);
 	void detachAgentBehaviourRegistry();

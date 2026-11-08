@@ -2106,7 +2106,13 @@ namespace core
 		bool hasAttachedAgentTagRegistry() const;
 		std::string const& getAgentTagRegistryResourceName() const;
 		std::string const& getExpectedAgentTagRegistryUuid() const;
-		std::shared_ptr<AgentTagRegistry> const& getAgentTagRegistry() const;
+		// The `const` view answers with a `const` handle (#974): reading the tag
+		// namespace through a `World const&` cannot widen into mutating it. The
+		// mutable handle exists only on a mutable World, which through the
+		// game-facing boundary means `WorldAuthoring` (#969) - binding and
+		// mutating registries is an authoring act, never a read.
+		std::shared_ptr<AgentTagRegistry const> getAgentTagRegistry() const;
+		std::shared_ptr<AgentTagRegistry> const& getAgentTagRegistry();
 		uint64_t getAgentTagAssignmentCount() const;
 		uint32_t getAgentTagAssignedAgentCount() const;
 		uint64_t getAgentTagSampleCount() const;
@@ -2136,7 +2142,12 @@ namespace core
 		bool hasAttachedAgentBehaviourRegistry() const;
 		std::string const& getAgentBehaviourRegistryResourceName() const;
 		std::string const& getExpectedAgentBehaviourRegistryUuid() const;
-		std::shared_ptr<AgentBehaviourRegistry> const& getAgentBehaviourRegistry() const;
+		// Same split as the tag registry above (#974): the `const` view answers
+		// with a `const` handle, the mutable handle is a mutable-World-only
+		// privilege and reaches the game-facing boundary only through
+		// `WorldAuthoring`.
+		std::shared_ptr<AgentBehaviourRegistry const> getAgentBehaviourRegistry() const;
+		std::shared_ptr<AgentBehaviourRegistry> const& getAgentBehaviourRegistry();
 		bool agentBehaviourConfigurationsAreValid() const
 		{
 			return mAgentBehaviourDependencyDiagnostic.empty();
@@ -2897,7 +2908,14 @@ namespace core
 
 		std::shared_ptr<const Sector> getSectorAtPosition(uint32_t layerIndex, float x, float y) const;
 
-		Agent* getAgentAtPosition(uint32_t layerIndex, float x, float y) const;
+		// The `const` view answers with a `const Agent` (#974), matching
+		// `lookupAgent`'s `EntityLookup<Agent const>`: a render path that finds
+		// an Agent under the cursor cannot write to it. The mutable form is a
+		// mutable-World privilege, which is what the editor's selection and
+		// inspection paths hold; the game reaches it only through
+		// `WorldAuthoring`.
+		Agent const* getAgentAtPosition(uint32_t layerIndex, float x, float y) const;
+		Agent* getAgentAtPosition(uint32_t layerIndex, float x, float y);
 
 		std::shared_ptr<const Object> getObjectAtPosition(uint32_t layerIndex, float x, float y,
 			std::shared_ptr<const SectorObject>* sectorObject = nullptr) const;

@@ -63,8 +63,11 @@ using AgentTagRegistryResourceNames
 
 // Registry edits use a history that is separate from the World history.
 // The same shared registry instance always resolves to the same history.
+// The registry is named through a `const` handle because the lookup reads it
+// only - for its UUID and its own modified flag (#974); the history it
+// returns is the editing layer's own bookkeeping, not part of the registry.
 DocumentHistory& agentTagRegistryDocumentHistory(
-	std::shared_ptr<core::AgentTagRegistry> const& registry);
+	std::shared_ptr<const core::AgentTagRegistry> const& registry);
 
 core::AgentTagId commitAgentTagAdd(
 	std::shared_ptr<core::AgentTagRegistry> const& registry,
@@ -302,8 +305,10 @@ bool reloadAgentTagRegistry(
 bool saveAgentTagRegistry(
 	std::shared_ptr<core::AgentTagRegistry> const& registry,
 	std::string const& filepath, std::string* diagnostic = nullptr);
+// A pure read, so it accepts the `const` registry handle the World's `const`
+// accessor answers with (#974).
 bool agentTagRegistryIsModified(
-	std::shared_ptr<core::AgentTagRegistry> const& registry);
+	std::shared_ptr<const core::AgentTagRegistry> const& registry);
 bool attachedAgentTagRegistryIsModified(
 	std::shared_ptr<const core::World> const& world);
 

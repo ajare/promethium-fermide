@@ -49,6 +49,20 @@ static_assert(!std::is_constructible_v<game::WorldRuntime, std::shared_ptr<core:
 
 namespace game_only_contract
 {
+	// The mutable spellings of the three reads #974 corrected, named so a
+	// game-only translation unit can assert it cannot reach them. Each is a
+	// mutable-`World` member, so overload resolution against the const view a
+	// game holds cannot select it.
+	constexpr auto mutableAgentAtPosition =
+		static_cast<core::Agent*(core::World::*)(std::uint32_t, float, float)>(
+			&core::World::getAgentAtPosition);
+	constexpr auto mutableTagRegistryGetter =
+		static_cast<std::shared_ptr<core::AgentTagRegistry> const& (core::World::*)()>(
+			&core::World::getAgentTagRegistry);
+	constexpr auto mutableBehaviourRegistryGetter =
+		static_cast<std::shared_ptr<core::AgentBehaviourRegistry> const& (core::World::*)()>(
+			&core::World::getAgentBehaviourRegistry);
+
 	// What a game does with its runtime, in the shape a game does it: read
 	// through the const view, drive through the runtime's own methods.
 	void readsThroughTheConstView(game::WorldRuntime& runtime)
@@ -70,6 +84,24 @@ namespace game_only_contract
 			core::World const&>);
 		static_assert(!std::is_invocable_v<decltype(&core::World::finishBuild), core::World const&>);
 		static_assert(!std::is_invocable_v<decltype(&core::World::rebuildTraversalTopology),
+			core::World const&>);
+
+		// #974: the three reads that used to hand out mutable handles answer
+		// `const` through the runtime, and their mutable spellings are not
+		// selectable against the const view. A game linking only
+		// pf-game-runtime therefore has no route to a writable Agent or a
+		// writable registry package.
+		static_assert(std::is_same_v<decltype(runtime.getAgentAtPosition(0u, 0.0f, 0.0f)),
+			core::Agent const*>);
+		static_assert(std::is_same_v<decltype(runtime.getAgentTagRegistry()),
+			std::shared_ptr<const core::AgentTagRegistry>>);
+		static_assert(std::is_same_v<decltype(runtime.getAgentBehaviourRegistry()),
+			std::shared_ptr<const core::AgentBehaviourRegistry>>);
+		static_assert(!std::is_invocable_v<decltype(mutableAgentAtPosition),
+			core::World const&, std::uint32_t, float, float>);
+		static_assert(!std::is_invocable_v<decltype(mutableTagRegistryGetter),
+			core::World const&>);
+		static_assert(!std::is_invocable_v<decltype(mutableBehaviourRegistryGetter),
 			core::World const&>);
 	}
 

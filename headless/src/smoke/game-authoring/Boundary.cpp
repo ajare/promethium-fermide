@@ -160,6 +160,46 @@ static_assert(std::is_invocable_v<decltype(&game::WorldAuthoring::canAddSectorMa
 	game::WorldAuthoring const&, std::uint32_t, std::uint32_t, float, std::string*>,
 	"the preflight guards are not reachable through WorldAuthoring (#968)");
 
+// --- Mutable registry access lives on the authoring handle only (#974) ---
+// The runtime's `const` reads used to answer a writable `shared_ptr<Registry>`,
+// so a render path could write the document's packages through a `const`
+// reference. #974 moved the writable handle here, where mutating a package
+// is the act it belongs to (#969). The runtime-side half - the read answers
+// `shared_ptr<const Registry>` and cannot be widened back - is pinned in the
+// game-runtime module's ConstReadSurface.cpp.
+static_assert(std::is_same_v<
+	std::invoke_result_t<decltype(&game::WorldAuthoring::getAgentTagRegistry),
+		game::WorldAuthoring&>,
+	std::shared_ptr<core::AgentTagRegistry>>,
+	"WorldAuthoring does not answer a mutable Agent tag registry (#974)");
+static_assert(std::is_same_v<
+	std::invoke_result_t<decltype(&game::WorldAuthoring::getAgentBehaviourRegistry),
+		game::WorldAuthoring&>,
+	std::shared_ptr<core::AgentBehaviourRegistry>>,
+	"WorldAuthoring does not answer a mutable Agent behaviour registry (#974)");
+
+// A const authoring handle does not get the mutable package either: writing
+// a registry is not something a read-only view of the handle allows.
+static_assert(!std::is_invocable_v<decltype(&game::WorldAuthoring::getAgentTagRegistry),
+	game::WorldAuthoring const&>,
+	"a mutable Agent tag registry is reachable through a const WorldAuthoring (#974)");
+static_assert(!std::is_invocable_v<decltype(&game::WorldAuthoring::getAgentBehaviourRegistry),
+	game::WorldAuthoring const&>,
+	"a mutable Agent behaviour registry is reachable through a const WorldAuthoring (#974)");
+
+// The runtime cannot answer a mutable registry even when held mutably: the
+// handle is not on the type in either value category.
+static_assert(!std::is_convertible_v<
+	std::invoke_result_t<decltype(&game::WorldRuntime::getAgentTagRegistry),
+		game::WorldRuntime&>,
+	std::shared_ptr<core::AgentTagRegistry>>,
+	"a mutable Agent tag registry is reachable through WorldRuntime (#974)");
+static_assert(!std::is_convertible_v<
+	std::invoke_result_t<decltype(&game::WorldRuntime::getAgentBehaviourRegistry),
+		game::WorldRuntime&>,
+	std::shared_ptr<core::AgentBehaviourRegistry>>,
+	"a mutable Agent behaviour registry is reachable through WorldRuntime (#974)");
+
 namespace
 {
 	// The same probes read as values, so the runtime check below reports the
@@ -184,6 +224,16 @@ namespace
 	template <typename T>
 	struct CanBindTagRegistry<T, std::void_t<decltype(std::declval<T>().attachAgentTagRegistry(
 		std::string{}, std::shared_ptr<core::AgentTagRegistry>{}))>> : std::true_type {};
+
+	// True only where `getAgentTagRegistry()` answers a *mutable* registry.
+	// A `WorldRuntime` answers `shared_ptr<const AgentTagRegistry>`, so the
+	// probe is false there even though the member exists (#974).
+	template <typename T, typename = void>
+	struct AnswersMutableTagRegistry : std::false_type {};
+	template <typename T>
+	struct AnswersMutableTagRegistry<T, std::void_t<std::enable_if_t<
+		std::is_same_v<decltype(std::declval<T>().getAgentTagRegistry()),
+			std::shared_ptr<core::AgentTagRegistry>>>>> : std::true_type {};
 }
 
 void registerGameAuthoringBoundary(std::vector<smoke::Check>& checks)
@@ -209,5 +259,33 @@ void registerGameAuthoringBoundary(std::vector<smoke::Check>& checks)
 				"WorldAuthoring does not expose saveTo()");
 			smoke::require(CanBindTagRegistry<game::WorldAuthoring&>::value,
 				"WorldAuthoring does not expose the Agent tag registry binding family");
+		} });
+
+	// The writable registry handle sits on the authoring handle and nowhere
+	// else, and it names the same live package the runtime reads as const - so
+	// the const read is a view of the document's registry, not a copy of it
+	// that a write could miss (#974).
+	checks.push_back({ "mutableRegistryAccessIsTheAuthoringHandleAlone", [](smoke::Context const&)
+		{
+			auto world = std::make_unique<core::World>("Registry access boundary", 8, 2);
+			world->addCorridor(0, 0, 4);
+			world->finishBuild();
+			game::WorldRuntime runtime(std::move(world));
+			game::WorldAuthoring authoring(runtime);
+
+			auto registry = core::AgentTagRegistry::create();
+			authoring.attachAgentTagRegistry("boundary.tags.yaml", registry);
+
+			smoke::require(authoring.getAgentTagRegistry() == registry,
+				"WorldAuthoring answered a different Agent tag registry than the one bound");
+			smoke::require(runtime.getAgentTagRegistry() == authoring.getAgentTagRegistry(),
+				"the runtime's const registry read is not the package the authoring handle holds");
+
+			smoke::require(!AnswersMutableTagRegistry<game::WorldRuntime&>::value,
+				"WorldRuntime answers a mutable Agent tag registry");
+			smoke::require(!AnswersMutableTagRegistry<const game::WorldRuntime&>::value,
+				"a const WorldRuntime answers a mutable Agent tag registry");
+			smoke::require(AnswersMutableTagRegistry<game::WorldAuthoring&>::value,
+				"WorldAuthoring does not answer a mutable Agent tag registry");
 		} });
 }

@@ -677,9 +677,19 @@ namespace core
 		return mAgentTagRegistryBinding->expectedUuid();
 	}
 
-	shared_ptr<AgentTagRegistry> const& World::getAgentTagRegistry() const
+	shared_ptr<AgentTagRegistry const> World::getAgentTagRegistry() const
 	{
-		return mAgentTagRegistryBinding->registry();
+		// The `const` view hands out a `const` handle (#974): the tag namespace
+		// can be read through a `World const&` but not written through it.
+		return mAgentTagRegistry;
+	}
+
+	shared_ptr<AgentTagRegistry> const& World::getAgentTagRegistry()
+	{
+		// The mutable handle is a mutable-World privilege. It returns by
+		// reference so the Agent property paths that read the registry every
+		// Tick keep the zero-copy access they have always had.
+		return mAgentTagRegistry;
 	}
 
 	uint64_t World::getAgentTagAssignmentCount() const
@@ -784,9 +794,19 @@ namespace core
 		return mAgentBehaviourRegistryBinding->expectedUuid();
 	}
 
-	shared_ptr<AgentBehaviourRegistry> const& World::getAgentBehaviourRegistry() const
+	shared_ptr<AgentBehaviourRegistry const> World::getAgentBehaviourRegistry() const
 	{
-		return mAgentBehaviourRegistryBinding->registry();
+		// The `const` view hands out a `const` handle (#974): a behaviour
+		// package can be read through a `World const&` but not written
+		// through it.
+		return mAgentBehaviourRegistry;
+	}
+
+	shared_ptr<AgentBehaviourRegistry> const& World::getAgentBehaviourRegistry()
+	{
+		// Mutable handle, mutable World only; by reference for the same reason
+		// as the tag registry above.
+		return mAgentBehaviourRegistry;
 	}
 
 	namespace
@@ -3925,7 +3945,7 @@ namespace core
 		return cellDef.sectorIndex != ~0u ? getSector(cellDef.sectorIndex) : nullptr;
 	}
 
-	Agent* World::getAgentAtPosition(uint32_t layerIndex, float x, float y) const
+	Agent const* World::getAgentAtPosition(uint32_t layerIndex, float x, float y) const
 	{
 		// Get cell
 		int cellX = (int)x;
@@ -3957,6 +3977,15 @@ namespace core
 		}
 
 		return nullptr;
+	}
+
+	Agent* World::getAgentAtPosition(uint32_t layerIndex, float x, float y)
+	{
+		// The mutable form is the same lookup, widened only on a mutable World
+		// (#974). The search itself reads nothing, so the widening happens at
+		// the result rather than being written twice.
+		return const_cast<Agent*>(
+			std::as_const(*this).getAgentAtPosition(layerIndex, x, y));
 	}
 
 	shared_ptr<const Object> World::getObjectAtPosition(uint32_t layerIndex, float x, float y,

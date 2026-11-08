@@ -799,7 +799,16 @@ bool WorldAuthoring::removeFurniture(uint64_t id, std::string* diagnostic)
 }
 
 // --- Resource binding: Agent tag registry ---
-// Every one of these is a write to the document's registry reference, so it
+// The mutable registry handle the runtime no longer gives out (#974).
+// Taken from the mutable view, so the mutable overload of the World's
+// accessor is the one this resolves; the returned handle writes the
+// registry but cannot reseat the World's reference to it.
+std::shared_ptr<core::AgentTagRegistry> WorldAuthoring::getAgentTagRegistry()
+{
+	return world().getAgentTagRegistry();
+}
+
+// Every attach below is a write to the document's registry reference, so it
 // goes through `world()`. None of them is answered from `document()`: a
 // binding change is not a read that could be preflighted here, and the World
 // owns the paused-only rule that governs it (#969).
@@ -829,6 +838,12 @@ void WorldAuthoring::replaceAgentTagRegistryWithIndependentCopy(std::string reso
 }
 
 // --- Resource binding: Agent behaviour registry ---
+std::shared_ptr<core::AgentBehaviourRegistry> WorldAuthoring::getAgentBehaviourRegistry()
+{
+	// Mutable package handle, same shape and same reason as the tag registry
+	// above (#974).
+	return world().getAgentBehaviourRegistry();
+}
 void WorldAuthoring::attachAgentBehaviourRegistry(std::string resourceName, std::shared_ptr<core::AgentBehaviourRegistry> registry)
 {
 	world().attachAgentBehaviourRegistry(std::move(resourceName), std::move(registry));

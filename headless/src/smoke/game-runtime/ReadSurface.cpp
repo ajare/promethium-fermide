@@ -29,6 +29,13 @@
 //     agree, which is what makes "the runtime forwards" a tested claim rather
 //     than a comment. A sweep is also fingerprinted before and after, so a
 //     read that disturbed observable state cannot pass unnoticed.
+//
+// Three of those pins were tightened by #974: `getAgentAtPosition` answers
+// `core::Agent const*` and both registry reads answer
+// `std::shared_ptr<const Registry>`, so a caller holding a `WorldRuntime
+// const&` can no longer write through what it read. The unreachable-side
+// half of that - the mutable spelling not being selectable against the const
+// view - is pinned in ConstReadSurface.cpp.
 
 // `call` must resolve on a `WorldRuntime const&` and return exactly `RetType`.
 // Written against a named parameter rather than a spelled-out object so that a
@@ -59,7 +66,7 @@ PF_REQUIRE_CONST_READ(getSector(::std::declval<std::uint32_t>()), std::shared_pt
 PF_REQUIRE_CONST_READ(getSectorsInBounds(::std::declval<std::uint32_t>(), ::std::declval<float>(), ::std::declval<float>(), ::std::declval<float>(), ::std::declval<float>()), std::vector<std::shared_ptr<const core::Sector>>)
 PF_REQUIRE_CONST_READ(getSectors(::std::declval<std::uint32_t>()), std::vector<std::shared_ptr<const core::Sector>>)
 PF_REQUIRE_CONST_READ(getSectorAtPosition(::std::declval<std::uint32_t>(), ::std::declval<float>(), ::std::declval<float>()), std::shared_ptr<const core::Sector>)
-PF_REQUIRE_CONST_READ(getAgentAtPosition(::std::declval<std::uint32_t>(), ::std::declval<float>(), ::std::declval<float>()), core::Agent*)
+PF_REQUIRE_CONST_READ(getAgentAtPosition(::std::declval<std::uint32_t>(), ::std::declval<float>(), ::std::declval<float>()), core::Agent const*)
 PF_REQUIRE_CONST_READ(getObjectAtPosition(::std::declval<std::uint32_t>(), ::std::declval<float>(), ::std::declval<float>(), ::std::declval<std::shared_ptr<const core::SectorObject>*>()), std::shared_ptr<const core::Object>)
 PF_REQUIRE_CONST_READ(getPausedPathIntent(::std::declval<core::Agent const&>(), ::std::declval<core::World::TopologyPathIntent&>()), bool)
 PF_REQUIRE_CONST_READ(isTraversalTopologyDirty(), bool)
@@ -117,7 +124,7 @@ PF_REQUIRE_CONST_READ(getAgentId(::std::declval<core::Agent const*>()), core::Ag
 PF_REQUIRE_CONST_READ(hasAgentBehaviourRegistryReference(), bool)
 PF_REQUIRE_CONST_READ(hasAttachedAgentBehaviourRegistry(), bool)
 PF_REQUIRE_CONST_READ(getExpectedAgentBehaviourRegistryUuid(), std::string const&)
-PF_REQUIRE_CONST_READ(getAgentBehaviourRegistry(), std::shared_ptr<core::AgentBehaviourRegistry> const&)
+PF_REQUIRE_CONST_READ(getAgentBehaviourRegistry(), std::shared_ptr<const core::AgentBehaviourRegistry>)
 PF_REQUIRE_CONST_READ(agentBehaviourConfigurationsAreValid(), bool)
 PF_REQUIRE_CONST_READ(getAgentBehaviourDependencyDiagnostic(), std::string const&)
 PF_REQUIRE_CONST_READ(validateAgentBehaviourAssignment(::std::declval<core::AgentBehaviourId>(), ::std::declval<std::uint64_t>(), ::std::declval<core::AgentBehaviourConfiguration const&>(), ::std::declval<core::AgentBehaviourConfiguration*>(), ::std::declval<std::string*>()), bool)
@@ -130,7 +137,7 @@ PF_REQUIRE_CONST_READ(actionRegistry(), std::shared_ptr<const core::ActionRegist
 PF_REQUIRE_CONST_READ(hasAgentTagRegistryReference(), bool)
 PF_REQUIRE_CONST_READ(hasAttachedAgentTagRegistry(), bool)
 PF_REQUIRE_CONST_READ(getExpectedAgentTagRegistryUuid(), std::string const&)
-PF_REQUIRE_CONST_READ(getAgentTagRegistry(), std::shared_ptr<core::AgentTagRegistry> const&)
+PF_REQUIRE_CONST_READ(getAgentTagRegistry(), std::shared_ptr<const core::AgentTagRegistry>)
 PF_REQUIRE_CONST_READ(getAgentTagAssignmentCount(), std::uint64_t)
 PF_REQUIRE_CONST_READ(getAgentTagAssignedAgentCount(), std::uint32_t)
 PF_REQUIRE_CONST_READ(getAgentTagSampleCount(), std::uint64_t)
@@ -570,11 +577,14 @@ void registerGameRuntimeReadSurface(std::vector<smoke::Check>& checks)
 			PF_SAME_READ(hasAgentTagRegistryReference());
 			PF_SAME_READ(hasAttachedAgentTagRegistry());
 			PF_SAME_OBJECT(getExpectedAgentTagRegistryUuid());
-			PF_SAME_OBJECT(getAgentTagRegistry());
+			// #974 made this read answer `shared_ptr<const AgentTagRegistry>` by
+			// value, so the agreement being asserted is that both handles own the
+			// same registry object, not that they are the same stored slot.
+			PF_SAME_READ(getAgentTagRegistry());
 			PF_SAME_READ(hasAgentBehaviourRegistryReference());
 			PF_SAME_READ(hasAttachedAgentBehaviourRegistry());
 			PF_SAME_OBJECT(getExpectedAgentBehaviourRegistryUuid());
-			PF_SAME_OBJECT(getAgentBehaviourRegistry());
+			PF_SAME_READ(getAgentBehaviourRegistry());
 
 			// Agent groups and tags.
 			PF_SAME_READ(getAgentGroup(fixture.agent));

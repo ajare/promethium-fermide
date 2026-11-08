@@ -8,6 +8,8 @@
 #include <utility>
 
 #include "core/Coordination.h"
+#include "core/AgentBehaviourRegistry.h"
+#include "core/AgentTagRegistry.h"
 #include "core/World.h"
 #include "game/WorldRuntime.h"
 
@@ -15,6 +17,7 @@ namespace
 {
 	using smoke::require;
 	using game_runtime_smoke::makeReadSurfaceWorld;
+	using game_runtime_smoke::makeFullReadSurfaceWorld;
 
 	// #963 asks that the six read-shaped World methods be reachable through a
 	// `core::World const&`, and that each be confirmed logically const rather than
@@ -72,6 +75,89 @@ namespace
 	static_assert(!std::is_invocable_v<decltype(mutableInteractionPointLookup), core::World const&, core::InteractionPointId>);
 	static_assert(!std::is_invocable_v<decltype(mutableDeviceOperationLookup), core::World const&, core::DeviceOperationId>);
 	static_assert(!std::is_invocable_v<decltype(mutableTraversalResourceLookup), core::World const&, core::TraversalResourceId>);
+
+	// --- #974: the three reads that used to widen the const view ----------
+	// `getAgentAtPosition` and the two registry getters were faithful mirrors
+	// of `World`'s own leaky `const` signatures, so a caller holding nothing
+	// but a `WorldRuntime const&` could write an `Agent` and both registries.
+	// Each is pinned three ways: reachable through the const view, answering
+	// the `const` entity type, and unable to answer the mutable type it used
+	// to return.
+	//
+	// The third pin is the one that closes the hole. `Agent const*` does not
+	// convert back to `Agent*`, and `shared_ptr<T const>` does not convert
+	// back to `shared_ptr<T>`, so the widening the const view used to allow is
+	// now a compile error rather than a convention the caller could route
+	// around. That is the same shape as the mutable-lookup assertions above,
+	// applied where the widening came from the return type rather than from a
+	// second overload.
+	static_assert(std::is_same_v<
+		decltype(std::declval<game::WorldRuntime const&>().getAgentAtPosition(
+			std::declval<std::uint32_t>(), std::declval<float>(), std::declval<float>())),
+		core::Agent const*>);
+	static_assert(std::is_same_v<
+		decltype(std::declval<game::WorldRuntime const&>().getAgentTagRegistry()),
+		std::shared_ptr<core::AgentTagRegistry const>>);
+	static_assert(std::is_same_v<
+		decltype(std::declval<game::WorldRuntime const&>().getAgentBehaviourRegistry()),
+		std::shared_ptr<core::AgentBehaviourRegistry const>>);
+
+	static_assert(!std::is_convertible_v<
+		decltype(std::declval<game::WorldRuntime const&>().getAgentAtPosition(
+			std::declval<std::uint32_t>(), std::declval<float>(), std::declval<float>())),
+		core::Agent*>,
+		"a const WorldRuntime still answers getAgentAtPosition with something that widens into a mutable Agent (#974)");
+	static_assert(!std::is_convertible_v<
+		decltype(std::declval<game::WorldRuntime const&>().getAgentTagRegistry()),
+		std::shared_ptr<core::AgentTagRegistry>>,
+		"a const WorldRuntime still answers getAgentTagRegistry with something that widens into a mutable registry (#974)");
+	static_assert(!std::is_convertible_v<
+		decltype(std::declval<game::WorldRuntime const&>().getAgentBehaviourRegistry()),
+		std::shared_ptr<core::AgentBehaviourRegistry>>,
+		"a const WorldRuntime still answers getAgentBehaviourRegistry with something that widens into a mutable registry (#974)");
+
+	// The guarantee does not stop at the façade. `runtime.world()` is the
+	// `core::World const&` rendering is handed, and it answers the same three
+	// with `const` entities too - which is what makes "a render path cannot
+	// mutate what it renders" true of these reads as well (#960 decision 9).
+	static_assert(std::is_same_v<
+		decltype(std::declval<core::World const&>().getAgentAtPosition(
+			std::declval<std::uint32_t>(), std::declval<float>(), std::declval<float>())),
+		core::Agent const*>);
+	static_assert(std::is_same_v<
+		decltype(std::declval<core::World const&>().getAgentTagRegistry()),
+		std::shared_ptr<core::AgentTagRegistry const>>);
+	static_assert(std::is_same_v<
+		decltype(std::declval<core::World const&>().getAgentBehaviourRegistry()),
+		std::shared_ptr<core::AgentBehaviourRegistry const>>);
+	static_assert(!std::is_convertible_v<
+		decltype(std::declval<core::World const&>().getAgentTagRegistry()),
+		std::shared_ptr<core::AgentTagRegistry>>,
+		"a const World still answers getAgentTagRegistry with something that widens into a mutable registry (#974)");
+	static_assert(!std::is_convertible_v<
+		decltype(std::declval<core::World const&>().getAgentBehaviourRegistry()),
+		std::shared_ptr<core::AgentBehaviourRegistry>>,
+		"a const World still answers getAgentBehaviourRegistry with something that widens into a mutable registry (#974)");
+
+	// The mutable spellings of all three still exist on a mutable `World`, so
+	// nothing was deleted - only moved behind the privilege that needs it.
+	// Naming them as pointer-to-member is what makes the unreachability claim
+	// checkable rather than merely asserted: overload resolution against a
+	// `World const&` cannot select any of them, which is the same pin #963
+	// uses for the mutable entity lookups above.
+	constexpr auto mutableAgentAtPosition =
+		static_cast<core::Agent*(core::World::*)(std::uint32_t, float, float)>(
+			&core::World::getAgentAtPosition);
+	constexpr auto mutableTagRegistryGetter =
+		static_cast<std::shared_ptr<core::AgentTagRegistry> const& (core::World::*)()>(
+			&core::World::getAgentTagRegistry);
+	constexpr auto mutableBehaviourRegistryGetter =
+		static_cast<std::shared_ptr<core::AgentBehaviourRegistry> const& (core::World::*)()>(
+			&core::World::getAgentBehaviourRegistry);
+
+	static_assert(!std::is_invocable_v<decltype(mutableAgentAtPosition), core::World const&, std::uint32_t, float, float>);
+	static_assert(!std::is_invocable_v<decltype(mutableTagRegistryGetter), core::World const&>);
+	static_assert(!std::is_invocable_v<decltype(mutableBehaviourRegistryGetter), core::World const&>);
 
 	// Everything a const read could plausibly disturb, read in one pass. The
 	// snapshot view is touched last so a rebuild happens inside the fingerprint:
@@ -239,5 +325,42 @@ void registerGameRuntimeConstReadSurface(std::vector<smoke::Check>& checks)
 				&& view.lookupDeviceOperation(fixture.deviceOperation)
 				&& view.lookupTraversalResource(fixture.traversalResource),
 				"an entity lookup stopped resolving across the run");
+		} });
+
+	// The compile-time half says the three reads answer `const`; this says the
+	// const answer is still a real answer. Const-correcting them must not have
+	// emptied the read - a render or game path holding only the runtime still
+	// finds the Agent under a position and still resolves both attached
+	// packages (#974).
+	checks.push_back({ "constHandlesStillResolveLiveEntities", [](smoke::Context const& ctx)
+		{
+			auto fixture = makeFullReadSurfaceWorld("const handles live", ctx.temporaryRoot());
+			game::WorldRuntime runtime(std::move(fixture.world));
+			game::WorldRuntime const& surface = runtime;
+
+			auto const position = surface.lookupAgent(fixture.agent).entity->getGlobalPosition();
+			auto const* found = surface.getAgentAtPosition(0, position.x, position.y);
+			require(found != nullptr,
+				"the const view could not find the walking Agent under its own position");
+			require(surface.getAgentId(found) == fixture.agent,
+				"the const view resolved the Agent under the position to a different Agent");
+
+			require(surface.getAgentTagRegistry() != nullptr,
+				"the const view answered a null Agent tag registry for a document that has one");
+			require(surface.getAgentBehaviourRegistry() != nullptr,
+				"the const view answered a null Agent behaviour registry for a document that has one");
+			require(surface.getAgentTagRegistry()->getUuid()
+					== surface.getExpectedAgentTagRegistryUuid(),
+				"the const Agent tag registry handle resolves a package other than the one the document names");
+			require(surface.getAgentBehaviourRegistry()->getUuid()
+					== surface.getExpectedAgentBehaviourRegistryUuid(),
+				"the const Agent behaviour registry handle resolves a package other than the one the document names");
+
+			// The const handles name the same packages the authoring side wrote,
+			// so const-correcting the read did not fork the document's view of
+			// its own registry.
+			require(surface.getAgentTagRegistry() == runtime.world().getAgentTagRegistry()
+				&& surface.getAgentBehaviourRegistry() == runtime.world().getAgentBehaviourRegistry(),
+				"the const registry handles read through the runtime differ from the same read through world()");
 		} });
 }
