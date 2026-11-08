@@ -158,6 +158,26 @@ pf_add_smoke_module(pf-smoke-game-authoring
     TIMEOUT 30
 )
 
+# The editor's live preview runs on the game's own runtime (#971). The editor
+# holds one WorldRuntime - the type the shipped game holds - with a
+# WorldAuthoring wrapped over it, and drives tick, snapshot, events and
+# pause/resume through that runtime instead of through the World. These
+# checks put the editor's document handle beside a plain WorldRuntime and
+# require both to reach the same state from the same elapsed time, which is
+# what makes "the preview is the game path" a tested claim rather than an
+# architectural assertion.
+pf_add_smoke_module(pf-smoke-editor-preview
+    NAME editor-preview
+    SOURCES
+        editor-preview/Main.cpp
+        editor-preview/Document.cpp
+        editor-preview/Preview.cpp
+        editor-preview/Boundary.cpp
+    LIBRARIES pf-agent-editing
+    LABELS "editor;game-runtime"
+    TIMEOUT 30
+)
+
 pf_add_smoke_module(pf-smoke-metrics
     NAME metrics
     SOURCES metrics/Main.cpp metrics/Metrics.cpp

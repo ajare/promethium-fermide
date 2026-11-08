@@ -13,6 +13,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Module.cmake")
 pf_require_module(promethium-fermide-core)
 pf_require_module(pf-imgui-cpu)
 pf_require_module(pf-render)
+pf_require_module(pf-game-authoring)
 
 add_library(pf-agent-editing STATIC
     src/AccessPanelEditor.cpp
@@ -27,6 +28,7 @@ add_library(pf-agent-editing STATIC
     src/DocumentEdit.cpp
     src/DoorClipboard.cpp
     src/DoorPanel.cpp
+    src/EditorDocument.cpp
     src/FurniturePanel.cpp
     src/LocationPlan.cpp
     src/LocationPlanRender.cpp
@@ -35,7 +37,8 @@ add_library(pf-agent-editing STATIC
     src/TagsPanel.cpp
 )
 target_include_directories(pf-agent-editing PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(pf-agent-editing PUBLIC promethium-fermide-core pf-imgui-cpu pf-render)
+target_link_libraries(pf-agent-editing PUBLIC promethium-fermide-core pf-imgui-cpu
+    pf-render pf-game-authoring)
 target_compile_definitions(pf-agent-editing PRIVATE
     $<$<CONFIG:Debug>:_DEBUG>
     $<$<CXX_COMPILER_ID:MSVC>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>

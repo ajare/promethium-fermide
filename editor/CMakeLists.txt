@@ -14,6 +14,7 @@ pf_require_module(pf-render)
 pf_require_module(pf-metrics)
 pf_require_module(pf-agent-editing)
 pf_require_module(pf-agent-resources)
+pf_require_module(pf-game-authoring)
 pf_require_module(pf-imgui-cpu)
 pf_require_module(PromethiumFermide)
 pf_require_gui()
@@ -46,6 +47,7 @@ target_link_libraries(editor PRIVATE
     pf-metrics
     pf-agent-editing
     pf-agent-resources
+    pf-game-authoring
     pf-imgui-gui
     nfd::nfd
     spdlog::spdlog

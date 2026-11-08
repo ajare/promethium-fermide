@@ -271,6 +271,62 @@ registered as `smoke-game-authoring` with labels
 `smoke;functional;validation-fast;core;game-authoring` and a 30-second
 timeout. Everything is headless: no window, no dialog, no interactive input.
 
+## Editor preview module (#971)
+
+```sh
+cmake --build build-linux --target pf-smoke-editor-preview --parallel
+build-linux/bin/x64/Release/pf-smoke-editor-preview --list
+build-linux/bin/x64/Release/pf-smoke-editor-preview --check thePreviewShowsWhatTheGameWouldForTheSameElapsedSeconds
+ctest --test-dir build-linux -R '^smoke-editor-preview$' --output-on-failure
+```
+
+`pf-smoke-editor-preview` exercises the arrangement that makes the editor's
+live preview the game's own path. `editor::EditorDocument`
+([`pf-agent-editing`](../pf-agent-editing/include/EditorDocument.h)) owns one
+`game::WorldRuntime` — the type the shipped game owns its World with — with a
+`game::WorldAuthoring` wrapped over it, and it is the only thing the editor
+holds its document by. The 14 registrations are about that one World being
+seen from both sides.
+
+`Document.cpp` checks the ownership. The World the UI holds and the World the
+runtime drives are the same object, and the authoring handle's mutable
+`World&` is that same object again; the runtime the editor reaches is the
+runtime its authoring handle wraps, so the preview is obtained from the
+authoring side rather than by building a second World. A World that is still
+shared cannot be adopted — the runtime takes exclusive ownership, so a
+`shared_ptr` with another holder is refused and the open document is left
+untouched. The World view is an aliasing `shared_ptr` over the runtime's
+control block, so it keeps the runtime alive after the document closes and
+never becomes a co-owner. Replacing the document replaces the runtime, and a
+stale view of the previous World is refused rather than allowed to drive a
+simulation nobody is looking at.
+
+`Preview.cpp` is the parity proof. Two identical walking-Agents Worlds, one
+driven the way the editor drives its preview — elapsed seconds through
+`editor::previewRuntime()` — and one driven the way the game drives its
+runtime, tick by tick: after the same elapsed time the canonical snapshots
+and the event digests are identical, for three seconds running. Pausing the
+preview through the runtime stops ticks dead and freezes the state it paused
+in; resuming picks the same run back up. Events drain exactly once, the
+snapshot view matches the snapshot, and the time scale applies to the
+preview as it does to the game. An edit made through the authoring handle is
+visible to the runtime on the next read, which is the whole point of there
+being one World.
+
+`Boundary.cpp` pins the shape at compile time: the document can be built
+from a `unique_ptr<core::World>` and from nothing else — not a `World&`, a
+`World*`, or a `shared_ptr<World>` — so the editor cannot keep a World of
+its own and put a runtime beside it. The document is never copyable, its
+`runtime()` hands out `game::WorldRuntime&` (never a World), and
+`editor::previewRuntime()` resolves to a runtime reference, so every drive
+call lands on the runtime rather than on the World underneath it.
+
+The module links `pf-agent-editing`, which brings `pf-game-authoring` and
+`pf-game-runtime` with it. It is registered as `smoke-editor-preview` with
+labels `smoke;functional;validation-fast;editor;game-runtime` and a
+30-second timeout. Everything is headless: no window, no dialog, no
+interactive input.
+
 ## Startup module (#301)
 
 ```sh

@@ -66,6 +66,7 @@
 #include "core/Exceptions.h"
 #include "core/Log.h"
 
+#include "EditorDocument.h"
 #include "Main.h"
 #include "Render.h"
 #include "Helpers.h"
@@ -824,15 +825,29 @@ std::shared_ptr<core::World> createTestWorld()
 void run()
 {
 	shared_ptr<core::World> world;// createTestWorld();
-	shared_ptr<core::World> metricsWorld;
+	// The metrics collector follows the open document rather than the World, so
+	// its observer is registered on the runtime that actually drives the
+	// preview (#971).
+	std::shared_ptr<editor::EditorDocument> metricsDocument;
 	std::unique_ptr<core::SimulationMetricsCollector> metricsCollector;
 	std::unique_ptr<metrics::MetricsHttpServer> metricsServer;
 	int metricsPort = -1;
 	struct ObserverCleanup
 	{
-		shared_ptr<core::World>& observedWorld;
-		~ObserverCleanup() { if (observedWorld) observedWorld->setSimulationObserver(nullptr); }
-	} observerCleanup{metricsWorld};
+		std::shared_ptr<editor::EditorDocument>& observedDocument;
+		~ObserverCleanup()
+		{
+			if (observedDocument)
+				observedDocument->runtime().setSimulationObserver(nullptr);
+		}
+	} observerCleanup{metricsDocument};
+	// The document is closed when the frame loop ends rather than being left to
+	// static destruction: the World and the runtime that owns it should be torn
+	// down while the process is still in a state to tear them down (#971).
+	struct DocumentCleanup
+	{
+		~DocumentCleanup() { editor::closeDocument(); }
+	} documentCleanup;
 	std::shared_ptr<core::Agent> pathingAgent = core::Agent::create(core::bundledHumanAgentType(), "Pather");
 
 	// Render settings
@@ -879,27 +894,33 @@ void run()
 		// Logic
 		float updateTimeSecs = updateTimeMicros / 1'000'000.0f;
 
-		if (metricsWorld != world || metricsPort != gUISettings.metricsPort || (!gUISettings.metricsEnabled && metricsCollector))
+		auto const document = editor::currentDocument();
+		if (metricsDocument != document || metricsPort != gUISettings.metricsPort || (!gUISettings.metricsEnabled && metricsCollector))
 		{
-			if (metricsWorld) metricsWorld->setSimulationObserver(nullptr);
-			metricsServer.reset(); metricsCollector.reset(); metricsWorld.reset();
+			if (metricsDocument) metricsDocument->runtime().setSimulationObserver(nullptr);
+			metricsServer.reset(); metricsCollector.reset(); metricsDocument.reset();
 			metricsPort = gUISettings.metricsPort;
 		}
-		if (gUISettings.metricsEnabled && world && !metricsCollector)
+		if (gUISettings.metricsEnabled && document && !metricsCollector)
 		{
-			metricsWorld = world;
-			metricsCollector = std::make_unique<core::SimulationMetricsCollector>(*world, gMetricsDetail);
+			metricsDocument = document;
+			metricsCollector = std::make_unique<core::SimulationMetricsCollector>(
+				metricsDocument->runtime().world(), gMetricsDetail);
 			metricsServer = std::make_unique<metrics::MetricsHttpServer>(*metricsCollector);
 			if (!metricsServer->start(metricsPort)) fprintf(stderr, "%s\n", metricsServer->diagnostic().c_str());
-			world->setSimulationObserver(metricsCollector.get());
+			metricsDocument->runtime().setSimulationObserver(metricsCollector.get());
 		}
-		if (metricsCollector && (gUISettings.worldPaused || world->isSimulationPaused())) metricsCollector->refresh();
+		if (metricsCollector && (gUISettings.worldPaused || metricsDocument->runtime().isSimulationPaused())) metricsCollector->refresh();
 		if (world)
 		{
-			world->update(gUISettings.worldPaused ? 0.0f : updateTimeSecs);
+			// The preview is ticked by the same WorldRuntime the shipped game
+			// ticks, and its event queue is drained here exactly as the game's
+			// would be (#971).
+			auto& runtime = editor::previewRuntime(*world);
+			runtime.update(gUISettings.worldPaused ? 0.0f : updateTimeSecs);
 			// The current UI observes entity state directly. Drain value events until
 			// an event-driven UI consumer is introduced so the queue remains bounded.
-			(void)world->consumeSimulationEvents();
+			(void)runtime.consumeSimulationEvents();
 		}
 
 		// Set up rendering

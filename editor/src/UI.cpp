@@ -43,6 +43,7 @@
 #include "AgentClipboard.h"
 #include "BoothWindowEditor.h"
 #include "AccessPanelEditor.h"
+#include "EditorDocument.h"
 
 #if defined(_WIN32)
 #include <nfd.h>
@@ -1061,7 +1062,7 @@ namespace
 	string nextAgentName(shared_ptr<const core::World> const& world)
 	{
 		set<string> names;
-		for (auto const& agent : world->getSimulationSnapshotView().agents)
+		for (auto const& agent : editor::previewRuntime(*world).getSimulationSnapshotView().agents)
 			names.insert(agent.name);
 
 		while (true)
@@ -1342,15 +1343,25 @@ namespace
 		gPegman.pastedAgent.cancel();
 	}
 
+	// The editor's edit protocol in one call: the preview the runtime drives
+	// is stopped before an edit goes in (#971). The pause is the runtime's, so
+	// the editor never reaches past it to the simulation underneath.
+	void pausePreview(core::World const& world)
+	{
+		auto& runtime = editor::previewRuntime(world);
+		if (!runtime.isSimulationPaused()) runtime.pauseSimulation();
+	}
+
 	void setWorldPaused(shared_ptr<core::World> const& world, bool paused)
 	{
+		auto& runtime = editor::previewRuntime(*world);
 		if (paused)
 		{
-			world->pauseSimulation();
+			runtime.pauseSimulation();
 			gUISettings.worldPaused = true;
 			return;
 		}
-		if (world->isSimulationPaused() && !world->resumeSimulation())
+		if (runtime.isSimulationPaused() && !runtime.resumeSimulation())
 		{
 			gUISettings.worldPaused = true;
 			core::addLogMessage("Object palette", 0, core::LogLevel::Error,
@@ -1367,7 +1378,7 @@ namespace
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			if (!world->isSimulationPaused()) world->pauseSimulation();
+			pausePreview(*world);
 			auto created = world->addSectorMarker(target.sector->getIndex(),
 				target.levelOffset, target.localX);
 			world->finishBuild();
@@ -1860,7 +1871,7 @@ namespace
 				resetPegman();
 				if (gPaint.tool != PaintTool::None)
 				{
-					if (!world->isSimulationPaused()) world->pauseSimulation();
+					pausePreview(*world);
 					gUISettings.worldPaused = true;
 				}
 			}
@@ -2631,7 +2642,11 @@ namespace
 			if (!restored) return false;
 			if (gWorldDocumentHistory.isModified()) loaded->markModified();
 
-			world = std::move(loaded);
+			// The restored World goes into a document of its own - a new runtime
+			// over it, with a new authoring handle - rather than into the runtime
+			// being rolled back, because the runtime owns the World it was built
+			// with for its whole life (#971).
+			world = editor::adoptWorld(loaded);
 			clearDocumentState(false);
 			setWorldPaused(world, true);
 			return true;
@@ -2796,7 +2811,7 @@ namespace
 			auto previousBehaviourRegistry = world
 				&& world->hasAttachedAgentBehaviourRegistry()
 				? world->getAgentBehaviourRegistry() : nullptr;
-			world = std::move(loaded);
+			world = editor::adoptWorld(loaded);
 			if (previousRegistry) forgetAgentTagRegistryDocument(previousRegistry);
 			if (previousBehaviourRegistry)
 				forgetAgentBehaviourRegistryDocument(previousBehaviourRegistry);
@@ -2868,6 +2883,7 @@ namespace
 				forgetAgentTagRegistryDocument(world->getAgentTagRegistry());
 			if (world && world->hasAttachedAgentBehaviourRegistry())
 				forgetAgentBehaviourRegistryDocument(world->getAgentBehaviourRegistry());
+			editor::closeDocument();
 			world.reset();
 			gWorldFilepath.clear();
 			clearDocumentState();
@@ -2926,7 +2942,7 @@ namespace
 	void queueLocationEdit(shared_ptr<core::World> const& world,
 		core::World::LocationEditPlan const& plan)
 	{
-		if (!world->isSimulationPaused()) world->pauseSimulation();
+		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
 		{
@@ -2959,7 +2975,7 @@ namespace
 	void queueLiftEdit(shared_ptr<core::World> const& world,
 		core::World::LiftEditPlan const& plan)
 	{
-		if (!world->isSimulationPaused()) world->pauseSimulation();
+		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
 		{
@@ -2992,7 +3008,7 @@ namespace
 	void queueShuttleEdit(shared_ptr<core::World> const& world,
 		core::World::ShuttleEditPlan const& plan)
 	{
-		if (!world->isSimulationPaused()) world->pauseSimulation();
+		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
 		{
@@ -3011,7 +3027,7 @@ namespace
 		try
 		{
 			// A cached Chamber drag plan must not turn a running edit into a pause.
-			if (!plan.chamber && !world->isSimulationPaused()) world->pauseSimulation();
+			if (!plan.chamber) pausePreview(*world);
 			auto index = plan.chamber ? world->applyChamberEdit(plan) : world->applyAirlockEdit(plan);
 			gUISettings.worldPaused = true;
 			gHoveredAgent = nullptr; gHoveredSector.reset(); gHoveredSectorObject.reset();
@@ -3049,7 +3065,7 @@ namespace
 	void queueLadderEdit(shared_ptr<core::World> const& world,
 		core::World::LadderEditPlan const& plan)
 	{
-		if (!world->isSimulationPaused()) world->pauseSimulation();
+		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
 		{
@@ -3082,7 +3098,7 @@ namespace
 	void queueStairwellEdit(shared_ptr<core::World> const& world,
 		core::World::StairwellEditPlan const& plan)
 	{
-		if (!world->isSimulationPaused()) world->pauseSimulation();
+		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
 		{
@@ -3098,7 +3114,7 @@ namespace
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			if (!world->isSimulationPaused()) world->pauseSimulation();
+			pausePreview(*world);
 			gUISettings.worldPaused = true;
 			gSelectedSectorObject = world->applyPlatformLiftEdit(plan);
 			gHoveredSectorObject.reset();
@@ -3113,7 +3129,7 @@ namespace
 	void queuePlatformLiftEdit(shared_ptr<core::World> const& world,
 		core::World::PlatformLiftEditPlan const& plan)
 	{
-		if (!world->isSimulationPaused()) world->pauseSimulation();
+		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation()) { gPendingPlatformLiftEdit = plan; gOpenLocationEditPopup = true; }
 		else commitPlatformLiftEdit(world, plan);
@@ -3125,7 +3141,7 @@ namespace
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			if (!world->isSimulationPaused()) world->pauseSimulation();
+			pausePreview(*world);
 			gUISettings.worldPaused = true;
 			if (world->applyWalkwayEdit(plan))
 			{
@@ -3140,7 +3156,7 @@ namespace
 	void queueWalkwayEdit(shared_ptr<core::World> const& world,
 		core::World::WalkwayEditPlan const& plan)
 	{
-		if (!world->isSimulationPaused()) world->pauseSimulation();
+		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation()) { gPendingWalkwayEdit = plan; gOpenLocationEditPopup = true; }
 		else commitWalkwayEdit(world, plan);
@@ -3152,7 +3168,7 @@ namespace
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			if (!world->isSimulationPaused()) world->pauseSimulation();
+			pausePreview(*world);
 			gUISettings.worldPaused = true;
 			gSelectedSectorObject = world->applyObjectMove(plan);
 			gHoveredSectorObject.reset(); gSelectedSector.reset(); gSelectedAgent = nullptr;
@@ -3166,7 +3182,7 @@ namespace
 	void queueObjectMove(shared_ptr<core::World> const& world,
 		core::World::ObjectMovePlan const& plan)
 	{
-		if (!world->isSimulationPaused()) world->pauseSimulation();
+		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation()) { gPendingObjectMove = plan; gOpenLocationEditPopup = true; resetObjectMove(); }
 		else commitObjectMove(world, plan);
@@ -3178,7 +3194,7 @@ namespace
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			if (!world->isSimulationPaused()) world->pauseSimulation();
+			pausePreview(*world);
 			gUISettings.worldPaused = true;
 			world->applyDeleteLayer(plan);
 
@@ -3206,7 +3222,7 @@ namespace
 	void requestLayerDelete(shared_ptr<core::World> const& world, uint32_t layer)
 	{
 		if (!world) return;
-		if (!world->isSimulationPaused()) world->pauseSimulation();
+		pausePreview(*world);
 		gUISettings.worldPaused = true;
 
 		auto const plan = world->planDeleteLayer(layer);
@@ -3290,7 +3306,7 @@ namespace
 					forgetAgentTagRegistryDocument(world->getAgentTagRegistry());
 				if (world && world->hasAttachedAgentBehaviourRegistry())
 					forgetAgentBehaviourRegistryDocument(world->getAgentBehaviourRegistry());
-				world = make_shared<core::World>(gNewWorldName,
+				world = editor::openNewWorld(gNewWorldName,
 					static_cast<uint32_t>(gNewWorldWidth),
 					static_cast<uint32_t>(gNewWorldLevels));
 				gWorldFilepath.clear();
@@ -3714,7 +3730,7 @@ namespace
 	string uniqueAgentName(shared_ptr<const core::World> const& world, string base)
 	{
 		set<string> names;
-		for (auto const& agent : world->getSimulationSnapshotView().agents) names.insert(agent.name);
+		for (auto const& agent : editor::previewRuntime(*world).getSimulationSnapshotView().agents) names.insert(agent.name);
 		if (!names.contains(base)) return base;
 		for (uint32_t suffix = 2;; ++suffix)
 		{
@@ -4095,7 +4111,7 @@ namespace
 		for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
 		{
 			if (sector->getObject(i) != selected) continue;
-			if (!world->isSimulationPaused()) world->pauseSimulation();
+			pausePreview(*world);
 			gUISettings.worldPaused = true;
 			auto type = selected->getObjectType();
 			bool removed;
@@ -4157,10 +4173,10 @@ namespace
 			if (!cut) return;
 			auto undo = captureDocumentSnapshot(world);
 			if (!undo) throw runtime_error("Could not capture editor state");
-			bool const wasPaused = world->isSimulationPaused();
+			bool const wasPaused = editor::previewRuntime(*world).isSimulationPaused();
 			try
 			{
-				if (!wasPaused) world->pauseSimulation();
+				if (!wasPaused) pausePreview(*world);
 				gUISettings.worldPaused = true;
 				if (!removeClipboardSelection(world)) throw runtime_error("Could not remove the selected object");
 				gConsumedCutClipboard.clear();
@@ -4181,12 +4197,12 @@ namespace
 	void restoreClipboardSnapshot(shared_ptr<core::World>& world,
 		DocumentSnapshot const& snapshot, bool wasPaused)
 	{
-		auto loaded = make_shared<core::World>("Loading", 1, 1);
+		auto loaded = std::make_unique<core::World>("Loading", 1, 1);
 		auto serializer = core::YamlSerializer::fromString(snapshot.yaml);
 		serializer->deserialize();
 		core::SerializationWorkData workData;
 		loaded->deserialize(*serializer, workData);
-		world = std::move(loaded);
+		world = editor::adoptWorld(std::move(loaded));
 		clearDocumentState(false);
 		if (wasPaused) setWorldPaused(world, true);
 		else gUISettings.worldPaused = false;
@@ -4270,7 +4286,7 @@ namespace
 				pending.localX = localX;
 				gPegman.pastedAgent = std::move(pending);
 				if (!diagnostic.empty()) reportClipboardWarning(diagnostic);
-				if (!world->isSimulationPaused()) world->pauseSimulation();
+				pausePreview(*world);
 				gUISettings.worldPaused = true;
 				gPegman.phase = PalettePhase::Falling;
 				gPegman.item = PaletteItem::Agent;
@@ -4393,10 +4409,10 @@ namespace
 
 			auto undo = captureDocumentSnapshot(world);
 			if (!undo) throw runtime_error("Could not capture editor state");
-			bool wasPaused = world->isSimulationPaused();
+			bool wasPaused = editor::previewRuntime(*world).isSimulationPaused();
 			try
 			{
-				if (!wasPaused) world->pauseSimulation();
+				if (!wasPaused) pausePreview(*world);
 				gUISettings.worldPaused = true;
 				shared_ptr<const core::SectorObject> created;
 				shared_ptr<const core::Dumbwaiter> createdUnit;
@@ -4536,9 +4552,10 @@ void resetWorldSimulation(shared_ptr<core::World> const& world)
 	try
 	{
 		ApplicationBusyScope busy("Resetting simulation...");
-		world->resetSimulation();
+		auto& runtime = editor::previewRuntime(*world);
+		runtime.resetSimulation();
 		clearDocumentState(false);
-		gUISettings.worldPaused = world->isSimulationPaused();
+		gUISettings.worldPaused = runtime.isSimulationPaused();
 	}
 	catch (std::exception const& error)
 	{
@@ -4658,7 +4675,7 @@ void handleShortcuts(shared_ptr<core::World>& world)
 					else try
 					{
 						auto undo = captureDocumentSnapshot(world);
-						if (!world->isSimulationPaused()) world->pauseSimulation();
+						pausePreview(*world);
 						world->applyStaircaseEdit(plan); commitDocumentEdit(std::move(undo)); clearSelections();
 					}
 					catch (std::exception const& error) { core::addLogMessage("Staircase editor", 0, core::LogLevel::Error, error.what()); }
@@ -4765,7 +4782,7 @@ void handleShortcuts(shared_ptr<core::World>& world)
 					for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
 					{
 						if (sector->getObject(i) != selected) continue;
-						if (!world->isSimulationPaused()) world->pauseSimulation();
+						pausePreview(*world);
 						gUISettings.worldPaused = true;
 						auto type = selected->getObjectType();
 						bool removed{ false };
@@ -5313,13 +5330,14 @@ void renderToolbar(shared_ptr<core::World> world)
 		ImGui::SetTooltip("Average completed core tick time over the last second; excludes rendering.");
 
 	ImGui::SetNextItemWidth(95.0f);
-	auto speed = std::format("{:g}x", world->getSimulationTimeScale());
+	auto& runtime = editor::previewRuntime(*world);
+	auto speed = std::format("{:g}x", runtime.getSimulationTimeScale());
 	if (ImGui::BeginCombo("##SimulationSpeed", speed.c_str()))
 	{
 		for (double scale : { 0.25, 0.5, 1.0, 2.0, 5.0, 20.0 })
 			if (ImGui::Selectable(std::format("{:g}x", scale).c_str(),
-				scale == world->getSimulationTimeScale()))
-				world->setSimulationTimeScale(scale);
+				scale == runtime.getSimulationTimeScale()))
+				runtime.setSimulationTimeScale(scale);
 		ImGui::EndCombo();
 	}
 	if (ImGui::IsItemHovered())
@@ -5862,7 +5880,8 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 
 	ImGui::Separator();
 	bool activationOrControlsChanged = false;
-	ImGui::BeginDisabled(!world->isSimulationPaused() || objectIndex == ~0u);
+	auto& runtime = editor::previewRuntime(*world);
+	ImGui::BeginDisabled(!runtime.isSimulationPaused() || objectIndex == ~0u);
 	if (ImGui::Combo("Activation", &activationMode,
 		"Automatic\0Manual\0Remote Controlled\0Unavailable\0"))
 	{
@@ -5890,7 +5909,7 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 	bool valid = core::isFiniteTiming(holdOpenSeconds) && isfinite(automaticSensorDistance)
 		&& automaticSensorDistance >= 0.0f && crossingLanes == 1
 		&& (remote || (!leftControl && !rightControl));
-	ImGui::BeginDisabled(!world->isSimulationPaused() || !valid || objectIndex == ~0u);
+	ImGui::BeginDisabled(!runtime.isSimulationPaused() || !valid || objectIndex == ~0u);
 	if (ImGui::Button("Apply Bulkhead Door settings"))
 	{
 		try
@@ -5917,7 +5936,7 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 		}
 	}
 	ImGui::EndDisabled();
-	if (!world->isSimulationPaused())
+	if (!runtime.isSimulationPaused())
 		ImGui::TextDisabled("Pause simulation to edit settings.");
 	ImGui::Separator();
 	if (ImGui::Button("Delete Bulkhead Door"))
@@ -6063,7 +6082,7 @@ void renderForceBridgePanel(shared_ptr<core::World> const& world,
 		try
 		{
 			auto undo = captureDocumentSnapshot(world);
-			if (!world->isSimulationPaused()) world->pauseSimulation();
+			pausePreview(*world);
 			gUISettings.worldPaused = true;
 			core::World::CreateForceBridgeOptions options{ (uint32_t)width,
 				side == 0 ? CORE_SIDE_LEFT : CORE_SIDE_RIGHT, extensible,
@@ -6193,7 +6212,7 @@ void renderLadderPanel(shared_ptr<core::World> const& world,
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			if (!world->isSimulationPaused()) world->pauseSimulation();
+			pausePreview(*world);
 			gUISettings.worldPaused = true;
 			gSelectedSectorObject = world->applyRoomLadderOptions(room->getIndex(), objectIndex,
 				{ ladder->getLevelsHigh(), desiredExtensible,
@@ -6240,7 +6259,7 @@ void renderLadderPanel(shared_ptr<core::World> const& world,
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			if (!world->isSimulationPaused()) world->pauseSimulation();
+			pausePreview(*world);
 			gUISettings.worldPaused = true;
 			if (world->removeRoomLadder(room->getIndex(), objectIndex))
 			{
@@ -6396,7 +6415,7 @@ void renderLiftPanel(shared_ptr<const core::World> const& world,
 
 	if (!includeAgentDebug || !world) return;
 	auto resourceId = world->getTraversalResourceId(lift.get());
-	auto const& snapshot = world->getSimulationSnapshotView();
+	auto const& snapshot = editor::previewRuntime(*world).getSimulationSnapshotView();
 	auto resource = find_if(snapshot.traversalResources.begin(), snapshot.traversalResources.end(),
 		[resourceId](auto const& candidate) { return candidate.id == resourceId; });
 	if (!resourceId || resource == snapshot.traversalResources.end())
@@ -6497,7 +6516,7 @@ void renderShuttlePanel(shared_ptr<const core::World> const& world,
 	}
 	if (!includeAgentDebug || !world) return;
 	auto resourceId = world->getTraversalResourceId(shuttle.get());
-	auto const& snapshot = world->getSimulationSnapshotView();
+	auto const& snapshot = editor::previewRuntime(*world).getSimulationSnapshotView();
 	auto resource = find_if(snapshot.traversalResources.begin(), snapshot.traversalResources.end(),
 		[resourceId](auto const& value) { return value.id == resourceId; });
 	if (!resourceId || resource == snapshot.traversalResources.end())
@@ -6592,6 +6611,7 @@ void renderShuttlePanel(shared_ptr<const core::World> const& world,
 
 void renderAgentView(shared_ptr<core::World> world)
 {
+	auto& runtime = editor::previewRuntime(*world);
 	ImGuiTableFlags flags =
 		ImGuiTableFlags_SizingStretchSame |
 		ImGuiTableFlags_Resizable |
@@ -6650,7 +6670,7 @@ void renderAgentView(shared_ptr<core::World> world)
 					// so the control is disabled in step with the rest of the
 					// paused-only editing UI.
 					ImGui::TableSetColumnIndex(1);
-					ImGui::BeginDisabled(!world->isSimulationPaused());
+					ImGui::BeginDisabled(!runtime.isSimulationPaused());
 					if (ImGui::Button(agent->isActive() ? ICON_FA_EYE : ICON_FA_EYE_SLASH,
 						ImVec2(ImGui::GetFrameHeight(), 0.0f)))
 					{
@@ -6664,7 +6684,7 @@ void renderAgentView(shared_ptr<core::World> world)
 					ImGui::EndDisabled();
 					if (ImGui::IsItemHovered())
 					{
-						if (!world->isSimulationPaused())
+						if (!runtime.isSimulationPaused())
 						{
 							ImGui::SetTooltip("Pause the simulation to activate or deactivate this Agent");
 						}
@@ -6739,7 +6759,7 @@ void renderAgentView(shared_ptr<core::World> world)
 					{
 						ImGui::Text("%u/%zu vertices", agent->getPathTargetNodeIndex(), path->nodes.size());
 					}
-					else if (world->isSimulationPaused())
+					else if (runtime.isSimulationPaused())
 					{
 						// Pausing tears down live traversal, so the Agent's path pointer is
 						// cleared. Its retained destination still tells us where it resumes.
@@ -6892,7 +6912,7 @@ void renderRoomHeightScaleEditor(shared_ptr<core::World> const& world,
 
 	ImGui::Separator();
 	ImGui::TextUnformatted("Room height");
-	ImGui::BeginDisabled(!world->isSimulationPaused() || !eligible);
+	ImGui::BeginDisabled(!editor::previewRuntime(*world).isSimulationPaused() || !eligible);
 	bool const changed = ImGui::Checkbox("Override height scale", &overridden)
 		|| (overridden && ImGui::SliderFloat("Height scale", &scale,
 			CORE_ROOM_HEIGHT_SCALE_MIN, CORE_ROOM_HEIGHT_SCALE_MAX, "%.3f"));
@@ -6905,7 +6925,7 @@ void renderRoomHeightScaleEditor(shared_ptr<core::World> const& world,
 	auto undo = captureDocumentSnapshot(world);
 	try
 	{
-		if (!world->isSimulationPaused()) world->pauseSimulation();
+		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		std::string diagnostic;
 		if (!world->setRoomHeightScale(location->getIndex(),
@@ -6970,7 +6990,7 @@ void renderLocationWallEditor(shared_ptr<core::World> const& world,
 			auto undo = captureDocumentSnapshot(world);
 			try
 			{
-				if (!world->isSimulationPaused()) world->pauseSimulation();
+				pausePreview(*world);
 				gUISettings.worldPaused = true;
 				if (isOpen) world->addLocationWall(location->getIndex(), level, side);
 				else world->removeLocationWall(location->getIndex(), level, side);
@@ -7083,7 +7103,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 			ImGui::Text("Capacity: %u Agents", chamber->getCapacity());
 			ImGui::Text("Cycle remaining: %.1f seconds", chamber->getRemainingCycleSeconds());
 			float seconds = chamber->getCycleSeconds();
-			ImGui::BeginDisabled(!world->isSimulationPaused());
+			ImGui::BeginDisabled(!editor::previewRuntime(*world).isSimulationPaused());
 			if (ImGui::SliderFloat("Cycle duration (seconds)", &seconds, 1.0f, 10.0f))
 			{
 				auto undo = captureDocumentSnapshot(world);
@@ -7336,7 +7356,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 				try
 				{
 					auto undo = captureDocumentSnapshot(world);
-					if (!world->isSimulationPaused()) world->pauseSimulation();
+					pausePreview(*world);
 					auto index = world->applyStaircaseEdit(plan);
 					commitDocumentEdit(std::move(undo));
 					if (remove) clearSelections(); else gSelectedSector = world->getSector(index);
@@ -7661,7 +7681,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	// route but no tick acts on it. The change is refused while the simulation
 	// runs, so the button is disabled in step with the rest of the
 	// paused-only editing UI.
-	ImGui::BeginDisabled(!world->isSimulationPaused());
+	ImGui::BeginDisabled(!editor::previewRuntime(*world).isSimulationPaused());
 	if (ImGui::Button(gSelectedAgent->isActive() ? "Deactivate" : "Activate"))
 	{
 		string diagnostic;
@@ -7671,7 +7691,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 		}
 	}
 	ImGui::EndDisabled();
-	if (!world->isSimulationPaused() && ImGui::IsItemHovered())
+	if (!editor::previewRuntime(*world).isSimulationPaused() && ImGui::IsItemHovered())
 	{
 		ImGui::SetTooltip("Pause the simulation to activate or deactivate an Agent");
 	}
@@ -7733,7 +7753,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 				// Recalculation keeps the Action chosen for this request, rather
 				// than reverting it to Idle now that there is no global picker.
 				string action{core::IdleAction};
-				for (auto const& snapshot : world->getSimulationSnapshot().agents)
+				for (auto const& snapshot : editor::previewRuntime(*world).getSimulationSnapshot().agents)
 					if (snapshot.id == id) { action = snapshot.selectedAction; break; }
 				applyAgentPathEdit(world, gSelectedAgent, std::move(newPath), wasPathing, true, action);
 			}
@@ -7754,7 +7774,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 			auto undo = captureDocumentSnapshot(world);
 			if (undo)
 			{
-				if (!world->isSimulationPaused()) world->pauseSimulation();
+				pausePreview(*world);
 				gUISettings.worldPaused = true;
 				if (world->clearAgentPath(id)) commitDocumentEdit(std::move(undo));
 			}
@@ -7787,7 +7807,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	auto renderTargetAction = [&]
 	{
 		string action{core::IdleAction};
-		for (auto const& snapshot : world->getSimulationSnapshot().agents)
+		for (auto const& snapshot : editor::previewRuntime(*world).getSimulationSnapshot().agents)
 			if (snapshot.id == id) { action = snapshot.selectedAction; break; }
 		ImGui::Text("Action: %s", world->agentActionDisplayName(action).c_str());
 	};
@@ -7807,7 +7827,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	{
 		// Pausing cancels live traversal, not the Agent's destination intent.
 		core::World::TopologyPathIntent intent;
-		if (world->isSimulationPaused() && world->getPausedPathIntent(*gSelectedAgent, intent))
+		if (editor::previewRuntime(*world).isSimulationPaused() && world->getPausedPathIntent(*gSelectedAgent, intent))
 		{
 			auto const destination = intent.destinationSector
 				&& intent.destinationSector.value <= world->getNumSectors()
@@ -7859,7 +7879,7 @@ void addBackLayer(shared_ptr<core::World> const& world)
 	auto undo = captureDocumentSnapshot(world);
 	try
 	{
-		if (!world->isSimulationPaused()) world->pauseSimulation();
+		pausePreview(*world);
 
 		auto const layer = world->addLayer();
 		world->finishBuild();
@@ -8019,7 +8039,7 @@ void renderLevelsPanel(shared_ptr<core::World> const& world)
 			ImGui::BeginDisabled(world->getLevelsHigh() <= 1);
 			if (ImGui::Button(ICON_FA_TRASH))
 			{
-				if (!world->isSimulationPaused()) world->pauseSimulation();
+				pausePreview(*world);
 				gUISettings.worldPaused = true;
 				auto plan = world->planDeleteLevel(level);
 				if (!plan.valid) reportEditorError("Levels", plan.diagnostic);
@@ -8192,7 +8212,7 @@ void renderWorldPanel(shared_ptr<core::World> world)
 		if (!diagnostic.empty()) ImGui::TextWrapped("Agent ImageSet unavailable: %s", diagnostic.c_str());
 		else if (!agentSpriteSize(previewBaseline.poses.at(core::Pose::Standing).imageTile.c_str()))
 			ImGui::TextWrapped("Agent ImageSet lacks Standing artwork for the placement type; rendering previews in magenta.");
-		else for (auto const& snapshot : world->getSimulationSnapshotView().agents)
+		else for (auto const& snapshot : editor::previewRuntime(*world).getSimulationSnapshotView().agents)
 		{
 			auto agent = world->lookupAgent(snapshot.id).entity;
 			if (agent && (!agentSpriteSize(agent->getPoseImageTile().c_str())
@@ -8674,7 +8694,7 @@ namespace
 		{
 			world->validateAgentLocationPlacement(*gAgentMove.preview.sector, *gSelectedAgent);
 			auto undo = captureDocumentSnapshot(world);
-			if (!world->isSimulationPaused()) world->pauseSimulation();
+			pausePreview(*world);
 			gUISettings.worldPaused = true;
 			gSelectedAgent->clearPath();
 			auto source = const_cast<core::Sector*>(gSelectedAgent->getSector());
@@ -9039,7 +9059,7 @@ namespace
 				&& gSelectedSector->getType() != core::SectorType::Airlock
 				&& gSelectedSector->getType() != core::SectorType::Chamber)
 			{
-				if (!world->isSimulationPaused()) world->pauseSimulation();
+				pausePreview(*world);
 				gUISettings.worldPaused = true;
 			}
 			gSectorResize.dragging = true;
@@ -9140,9 +9160,9 @@ namespace
 			right = left + width;
 			top = bottom + height;
 			if ((deltaX != 0 || deltaY != 0) && !gSectorResize.lift && !gSectorResize.airlock
-				&& !world->isSimulationPaused())
+				&& !editor::previewRuntime(*world).isSimulationPaused())
 			{
-				world->pauseSimulation();
+				pausePreview(*world);
 				gUISettings.worldPaused = true;
 			}
 			break;
