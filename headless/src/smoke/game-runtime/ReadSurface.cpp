@@ -62,6 +62,12 @@ PF_REQUIRE_CONST_READ(getLevelName(::std::declval<std::uint32_t>()), std::string
 PF_REQUIRE_CONST_READ(getNumSectors(), std::uint32_t)
 PF_REQUIRE_CONST_READ(getLayer(::std::declval<std::uint32_t>()), std::shared_ptr<const core::Layer>)
 PF_REQUIRE_CONST_READ(getGraph(), std::shared_ptr<const core::Graph>)
+// The two static forwards (#981). `PF_REQUIRE_CONST_READ` resolves against a
+// `WorldRuntime const&`, which a static answers just as it answers a const
+// member - so this pins the read as reachable through the const view, and
+// the `std::is_invocable_v` forms in ConstReadSurface.cpp pin that they need
+// no object at all.
+PF_REQUIRE_CONST_READ(dimensionsAreSupported(::std::declval<std::uint32_t>(), ::std::declval<std::uint32_t>(), ::std::declval<std::uint32_t>(), ::std::declval<std::string*>()), bool)
 PF_REQUIRE_CONST_READ(getSector(::std::declval<std::uint32_t>()), std::shared_ptr<const core::Sector>)
 PF_REQUIRE_CONST_READ(getSectorsInBounds(::std::declval<std::uint32_t>(), ::std::declval<float>(), ::std::declval<float>(), ::std::declval<float>(), ::std::declval<float>()), std::vector<std::shared_ptr<const core::Sector>>)
 PF_REQUIRE_CONST_READ(getSectors(::std::declval<std::uint32_t>()), std::vector<std::shared_ptr<const core::Sector>>)
@@ -177,6 +183,7 @@ PF_REQUIRE_CONST_READ(isInteractionPointPermissionEligible(::std::declval<core::
 PF_REQUIRE_CONST_READ(getInteractionPointPermissionRequirement(::std::declval<core::InteractionPointId>()), std::vector<core::AccessPermissionId>)
 PF_REQUIRE_CONST_READ(isManualDoorPermissionEligible(::std::declval<core::TraversalResourceId>()), bool)
 PF_REQUIRE_CONST_READ(getManualDoorPermissionRequirement(::std::declval<core::TraversalResourceId>()), std::vector<core::AccessPermissionId>)
+PF_REQUIRE_CONST_READ(isValidTransportStopShortName(::std::declval<std::string_view>()), bool)
 PF_REQUIRE_CONST_READ(getTransportStopShortName(::std::declval<std::uint32_t>(), ::std::declval<std::uint32_t>(), ::std::declval<std::uint32_t>()), std::string)
 PF_REQUIRE_CONST_READ(getTransportStopShortName(::std::declval<core::TraversalResourceId>(), ::std::declval<std::uint32_t>()), std::string)
 PF_REQUIRE_CONST_READ(getLiftDestinationLevels(::std::declval<std::uint32_t>(), ::std::declval<std::uint32_t>()), std::vector<std::uint32_t>)
@@ -412,6 +419,7 @@ namespace
 		(void)surface.getNumSectors();
 		(void)surface.getLayer(0);
 		(void)surface.getGraph();
+		(void)surface.dimensionsAreSupported(16u, 4u, 2u, nullptr);
 		(void)surface.getSector(corridor);
 		(void)surface.getSectors(0);
 		(void)surface.getSectorsInBounds(0, 0.0f, 0.0f, 16.0f, 4.0f);
@@ -467,6 +475,7 @@ namespace
 		(void)surface.isInteractionPointPermissionEligible(point);
 		(void)surface.getInteractionPointPermissionRequirement(point);
 		(void)surface.isAgentTransportOccupant(resource, agent);
+		(void)surface.isValidTransportStopShortName("AB");
 		(void)surface.isAgentInQueue(agent);
 		(void)surface.lookupInteractionPoint(point);
 		(void)surface.lookupDeviceOperation(operation);
@@ -543,6 +552,12 @@ void registerGameRuntimeReadSurface(std::vector<smoke::Check>& checks)
 			PF_SAME_READ(getNumSectors());
 			PF_SAME_READ(getLayer(0));
 			PF_SAME_READ(getGraph());
+			// The static size rule answers the same through the runtime as
+			// through the World, across a size it accepts and sizes it refuses
+			// (#981).
+			PF_SAME_READ(dimensionsAreSupported(16u, 4u, 2u, nullptr));
+			PF_SAME_READ(dimensionsAreSupported(0u, 4u, 2u, nullptr));
+			PF_SAME_READ(dimensionsAreSupported(16u, 4u, 1u, nullptr));
 
 			// Sectors and spatial lookup.
 			PF_SAME_READ(getSector(fixture.corridor));
@@ -641,6 +656,14 @@ void registerGameRuntimeReadSurface(std::vector<smoke::Check>& checks)
 			// Transport state and authorization. The fixture's bare
 			// TraversalResource is not a transport, so the Stop and condition
 			// reads refuse it - and refuse it the same way through both doors.
+			// The Stop label validator is static and answers from its argument
+			// alone, so it is pinned across the whole shape of that argument: a
+			// label accepted, and labels refused for length, case and punctuation.
+			PF_SAME_READ(isValidTransportStopShortName("A1"));
+			PF_SAME_READ(isValidTransportStopShortName(""));
+			PF_SAME_READ(isValidTransportStopShortName("ABCD"));
+			PF_SAME_READ(isValidTransportStopShortName("a1"));
+			PF_SAME_READ(isValidTransportStopShortName("A-"));
 			requireSameOutcome(
 				[&] { return surface.getTransportStopShortName(fixture.traversalResource, 0); },
 				[&] { return view.getTransportStopShortName(fixture.traversalResource, 0); },

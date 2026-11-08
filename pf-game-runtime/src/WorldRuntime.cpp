@@ -290,6 +290,12 @@ namespace game
 // a read through the runtime and a read through the render view are the
 // same call on the same object. The grouping mirrors the header's, and
 // each family answers for a different part of the document.
+//
+// The two `static` forwards below are the exception to "same const view":
+// they read no World state at all, so there is no view to go through and
+// no `requireLive` guard to run. They are on the read surface because the
+// audit that defines it counts a stateless public `World` static as a read
+// (#981), not despite that.
 
 // --- Identity, host state and diagnostics ---
 std::string const& WorldRuntime::getName() const
@@ -353,6 +359,12 @@ std::shared_ptr<const core::Layer> WorldRuntime::getLayer(std::uint32_t layerInd
 std::shared_ptr<const core::Graph> WorldRuntime::getGraph() const
 {
 	return world().getGraph();
+}
+bool WorldRuntime::dimensionsAreSupported(std::uint32_t cellsWide,
+	std::uint32_t levelsHigh, std::uint32_t layerCount, std::string* diagnostic)
+{
+	return core::World::dimensionsAreSupported(cellsWide, levelsHigh, layerCount,
+		diagnostic);
 }
 
 // --- Sectors and spatial lookup ---
@@ -859,6 +871,10 @@ std::vector<core::AccessPermissionId> WorldRuntime::getManualDoorPermissionRequi
 }
 
 // --- Transport state and authorization ---
+bool WorldRuntime::isValidTransportStopShortName(std::string_view name)
+{
+	return core::World::isValidTransportStopShortName(name);
+}
 std::string WorldRuntime::getTransportStopShortName(std::uint32_t sectorIndex, std::uint32_t stopIndex, std::uint32_t objectIndex) const
 {
 	return world().getTransportStopShortName(sectorIndex, stopIndex, objectIndex);

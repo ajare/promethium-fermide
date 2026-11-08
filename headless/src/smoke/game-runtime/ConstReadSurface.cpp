@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -10,6 +11,7 @@
 #include "core/Coordination.h"
 #include "core/AgentBehaviourRegistry.h"
 #include "core/AgentTagRegistry.h"
+#include "core/Defines.h"
 #include "core/World.h"
 #include "game/WorldRuntime.h"
 
@@ -47,6 +49,29 @@ namespace
 	static_assert(std::is_same_v<decltype(std::declval<core::World const&>().getFixedTimestep()), float>);
 	static_assert(std::is_same_v<decltype(std::declval<core::World const&>().getMaxTicksPerUpdate()), std::uint32_t>);
 	static_assert(std::is_same_v<decltype(std::declval<core::World const&>().isValidTransportStopShortName("AB")), bool>);
+
+	// The same statics are reachable through the runtime with no object at all
+	// (#981). The forward is `static` on both sides, so a game holding nothing
+	// but the type can validate a Stop label or a candidate World size - and
+	// reaching them cannot hand it a World to write to, because there is no
+	// World behind the call. This is the pin that was missing: the World-side
+	// assertions above proved the read existed, and nothing proved the runtime
+	// answered it, which is how #960's sixth method stayed unreachable.
+	static_assert(std::is_invocable_v<
+		decltype(game::WorldRuntime::isValidTransportStopShortName), std::string_view>);
+	// The defaulted `diagnostic` argument is only visible through the name, not
+	// through the function type, so the three-argument spelling is pinned with
+	// a requires-expression rather than `is_invocable_v`.
+	static_assert(requires {
+		game::WorldRuntime::dimensionsAreSupported(16u, 4u, 2u);
+	});
+	static_assert(std::is_invocable_v<
+		decltype(game::WorldRuntime::dimensionsAreSupported),
+		std::uint32_t, std::uint32_t, std::uint32_t, std::string*>);
+	static_assert(std::is_same_v<
+		decltype(game::WorldRuntime::isValidTransportStopShortName("AB")), bool>);
+	static_assert(std::is_same_v<
+		decltype(game::WorldRuntime::dimensionsAreSupported(16u, 4u, 2u, nullptr)), bool>);
 
 	// --- The three lookups: the const overload is the const view's only one ---
 	static_assert(std::is_same_v<
@@ -226,6 +251,74 @@ void registerGameRuntimeConstReadSurface(std::vector<smoke::Check>& checks)
 				"the const view accepts a lowercase Stop name");
 			require(!view.isValidTransportStopShortName("A-"),
 				"the const view accepts a punctuated Stop name");
+		} });
+
+	checks.push_back({ "runtimeReportsTheStaticReads", [](smoke::Context const&)
+		{
+			auto fixture = makeReadSurfaceWorld("Runtime static reads");
+			game::WorldRuntime runtime(std::move(fixture.world));
+
+			// The static half of the read surface, read through the runtime
+			// rather than through a `World const&` (#981). Every answer has to
+			// match the World's across the shape of the argument rather than on
+			// one accepted example: a divergence would mean the forward had
+			// quietly grown a rule of its own instead of forwarding one.
+			static constexpr std::string_view labels[] = {
+				"A", "9", "A1", "ZZZ", "ABCD", "", "ab", "A-", "A 1", "A_1", "\303\201" };
+			for (auto const label : labels)
+			{
+				require(game::WorldRuntime::isValidTransportStopShortName(label)
+						== core::World::isValidTransportStopShortName(label),
+					"the Stop label read through the runtime disagrees with the World's for \""
+						+ std::string(label) + "\"");
+			}
+			require(game::WorldRuntime::isValidTransportStopShortName("A1Z"),
+				"the runtime rejects a three-character alphanumeric Stop label");
+			require(!game::WorldRuntime::isValidTransportStopShortName(""),
+				"the runtime accepts an empty Stop label");
+			require(!game::WorldRuntime::isValidTransportStopShortName("ABCD"),
+				"the runtime accepts a four-character Stop label");
+
+			// The size rule, same agreement - and the diagnostic it writes has
+			// to be the World's diagnostic, not something the forward made up.
+			// The set covers each rejection the rule has, plus the cell budget
+			// boundary on both sides of it.
+			struct Size
+			{
+				std::uint32_t cellsWide;
+				std::uint32_t levelsHigh;
+				std::uint32_t layerCount;
+				bool expected;
+			};
+			static constexpr Size sizes[] = {
+				{ 16u, 4u, 2u, true },
+				{ 0u, 4u, 2u, false },
+				{ 16u, 0u, 2u, false },
+				{ 16u, 4u, 1u, false },
+				{ 16u, 4u, CORE_MAX_LAYERS + 1u, false },
+				{ 16u, CORE_MAX_LEVELS + 1u, 2u, false },
+				{ 4096u, CORE_MAX_LEVELS, 8u, true },
+				{ 4096u, CORE_MAX_LEVELS, 9u, false },
+				{ 0xFFFFFFFFu, 0xFFFFFFFFu, 2u, false },
+			};
+			for (auto const& size : sizes)
+			{
+				std::string throughRuntime;
+				std::string throughWorld;
+				auto const runtimeAnswer = game::WorldRuntime::dimensionsAreSupported(
+					size.cellsWide, size.levelsHigh, size.layerCount, &throughRuntime);
+				auto const worldAnswer = core::World::dimensionsAreSupported(
+					size.cellsWide, size.levelsHigh, size.layerCount, &throughWorld);
+				require(runtimeAnswer == worldAnswer && runtimeAnswer == size.expected,
+					"the size read through the runtime answered " + std::string(runtimeAnswer ? "yes" : "no")
+						+ " where the World answered " + std::string(worldAnswer ? "yes" : "no")
+						+ " for " + std::to_string(size.cellsWide) + "x" + std::to_string(size.levelsHigh)
+						+ " over " + std::to_string(size.layerCount) + " Layers");
+				require(throughRuntime == throughWorld,
+					"the size diagnostic read through the runtime differs from the World's for "
+						+ std::to_string(size.cellsWide) + "x" + std::to_string(size.levelsHigh)
+						+ " over " + std::to_string(size.layerCount) + " Layers");
+			}
 		} });
 
 	checks.push_back({ "constWorldResolvesEveryEntityLookup", [](smoke::Context const&)

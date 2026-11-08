@@ -145,7 +145,7 @@ ctest --test-dir build-linux -R '^smoke-game-runtime$' --output-on-failure
 `pf-smoke-game-runtime` is the first module that does not construct a World
 inline. It builds a World, hands it to `game::WorldRuntime` in
 [`pf-game-runtime`](../pf-game-runtime) and drives it only through that
-shared library, so the boundary is exercised rather than assumed. Its 47
+shared library, so the boundary is exercised rather than assumed. Its 48
 registrations cover exclusive ownership (the caller's `unique_ptr` is emptied,
 the World is destroyed exactly when the runtime is, a null World is refused,
 and a transfer to another holder goes through the pointer to a runtime that
@@ -177,6 +177,29 @@ drive or reset a `core::World const&`, while `PlayerInput.cpp` pins the exact
 signature of all nine player-input methods. The Linux `dladdr` check reports which
 image `WorldRuntime` code actually resolved into; on other platforms that one
 registration is not made.
+
+`ConstReadSurface.cpp` also pins the two `static` reads the read-surface rule
+had missed (#981). `isValidTransportStopShortName` and `dimensionsAreSupported`
+are `static` on `core::World` because they read no World state, so neither ever
+had a const-qualification problem to fix and the const work in #963/#974 walked
+past them: covered as `World` reads, absent as runtime reads. Both are forwarded
+as statics on `WorldRuntime` now and pinned there - `static_assert`s that the
+type answers them with no object at all, plus one runtime check that each
+answers exactly what the `World` answers across the whole shape of its
+argument, including the diagnostic `dimensionsAreSupported` writes and the
+cell-budget boundary on both sides of it. The editor's Platform Lift clipboard
+validation calls the runtime forward rather than reaching into core, so a real
+caller exercises the boundary instead of merely being able to.
+
+The completeness claim behind that is auditable rather than asserted.
+`scripts/audit_read_surface_completeness.py` diffs the public `const` *and*
+`static` read set on `World` against the forwarded set on `WorldRuntime` and
+exits non-zero on any gap. Each documented exclusion is itself checked rather
+than trusted: an authoring read only counts as excluded while `WorldAuthoring`
+really answers it, and a renamed resource-name read only counts while the
+runtime really carries the new name - so an exclusion that stops being true
+surfaces as a gap instead of quietly widening. It currently reports 261 public
+const reads, 4 public static reads and 69 exclusions with no gaps.
 
 The module links `pf-game-runtime` and `pf-headless-render-support` only, and
 is registered as `smoke-game-runtime` with labels

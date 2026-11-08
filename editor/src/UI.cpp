@@ -4190,7 +4190,8 @@ namespace
 				definition.platformLift.stopShortNames = requiredYaml<vector<string>>(object, "stopShortNames");
 				auto const& names = definition.platformLift.stopShortNames;
 				if (!names.empty() && (names.size() != definition.platformLift.stopOffsets.size()
-					|| !all_of(names.begin(), names.end(), core::World::isValidTransportStopShortName)))
+					|| !all_of(names.begin(), names.end(),
+						game::WorldRuntime::isValidTransportStopShortName)))
 					throw runtime_error("PlatformLift Stop short names must match Stops and use 1–3 characters A–Z or 0–9");
 			}
 			if (!core::isFiniteTiming(definition.platformLift.platformStopDurationSeconds))

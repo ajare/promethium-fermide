@@ -263,6 +263,15 @@ namespace game
 		// fall behind the World. A game therefore never needs a second path to
 		// read state - and never needs to know which of these the renderer wants.
 		//
+		// The audited set is that const set *plus* the statics (#981). A `static`
+		// read has no const-qualification problem to fix, and that is precisely
+		// how `isValidTransportStopShortName` was missed: it was named on #960's
+		// list of six read-shaped methods, but nothing about it failed to compile,
+		// so the const work in #963/#974 walked past it and it never reached this
+		// type. The completeness audit therefore counts a public `World` static
+		// that reads no state as a read as well, so the next one cannot go missing
+		// behind the same blind spot.
+		//
 		// Three exclusions, each a deliberate non-read rather than an omission:
 		//
 		//   * the names already on this type - the drive surface, the player-input
@@ -303,6 +312,16 @@ namespace game
 		std::uint32_t getNumSectors() const;
 		std::shared_ptr<const core::Layer> getLayer(std::uint32_t layerIndex) const;
 		std::shared_ptr<const core::Graph> getGraph() const;
+
+		// The size rule the World constructor enforces, answered before a World
+		// is built. Static on `World` because it reads no World state - only its
+		// arguments - so it is forwarded as a static rather than being made to
+		// pretend it needs a live document. The repeat completeness audit run for
+		// #981 found it as the one other public static read the const pass had
+		// passed by, so it lands with the forward that closed that hole.
+		static bool dimensionsAreSupported(std::uint32_t cellsWide,
+			std::uint32_t levelsHigh, std::uint32_t layerCount,
+			std::string* diagnostic = nullptr);
 
 		// --- Sectors and spatial lookup ---
 		std::shared_ptr<const core::Sector> getSector(std::uint32_t index) const;
@@ -446,6 +465,14 @@ namespace game
 		std::vector<core::AccessPermissionId> getManualDoorPermissionRequirement(core::TraversalResourceId door) const;
 
 		// --- Transport state and authorization ---
+		// Whether a Stop label is one the World will accept: 1-3 characters from
+		// A-Z or 0-9. The rule is a property of the argument, not of the
+		// document, so it is `static` on `World` (#963) and stays `static` here -
+		// a plain forward with no World to read and nothing to guard. It belongs
+		// on the read surface because a game that offers or validates Stop labels
+		// needs the same rule the World enforces on the write, rather than a
+		// second path into core to get it (#981).
+		static bool isValidTransportStopShortName(std::string_view name);
 		std::string getTransportStopShortName(std::uint32_t sectorIndex, std::uint32_t stopIndex, std::uint32_t objectIndex = ~0u) const;
 		std::string getTransportStopShortName(core::TraversalResourceId resource, std::uint32_t stopIndex) const;
 		std::vector<std::uint32_t> getLiftDestinationLevels(std::uint32_t sectorIndex, std::uint32_t objectIndex = ~0u) const;
