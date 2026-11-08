@@ -85,16 +85,19 @@ namespace editor
 	std::shared_ptr<core::World> openNewWorld(std::string const& name,
 		std::uint32_t cellsWide, std::uint32_t levelsHigh);
 
-	// Takes a World the caller has built - a clipboard restore, say - into a
-	// new document, and returns the World the UI holds.
+	// Takes a World the caller has built or loaded - a clipboard restore, a
+	// `core::loadWorldDocument()` result - into a new document, and returns the
+	// World the UI holds.
+	//
+	// This is the only adoption seam (#973). The World arrives as a
+	// `unique_ptr` because that is the only shape the runtime can take without
+	// lying about ownership: the loaders hand back exclusive ownership, so the
+	// editor never holds a `shared_ptr<World>` it would have to convert. A
+	// `shared_ptr` overload could only have been satisfied by fabricating a
+	// `unique_ptr` over the same object and releasing the caller's reference,
+	// which - when the caller was the sole owner, the normal case - destroyed
+	// the World right there and left the runtime driving freed memory.
 	std::shared_ptr<core::World> adoptWorld(std::unique_ptr<core::World> world);
-
-	// Same, from the `shared_ptr` the document loaders hand back. The loader's
-	// reference must be the only one: the runtime owns its World exclusively,
-	// so a World something else still holds is refused rather than quietly
-	// shared behind the runtime's back.
-	std::shared_ptr<core::World> adoptWorld(
-		std::shared_ptr<core::World>& loaded);
 
 	// Closes the document, releasing the runtime and the World it owns. Holders
 	// of the World view keep it alive until they let go.

@@ -229,7 +229,7 @@ namespace
 		auto const sourceUuid = sourceRegistry->getUuid();
 		auto const sourceRegistryYaml = serializeRegistry(*sourceRegistry);
 		auto const sourceWorldYaml = serializeWorld(*fixture.world);
-		auto copiedWorld = core::loadWorldDocument(fixture.worldPath);
+		std::shared_ptr<core::World> copiedWorld = core::loadWorldDocument(fixture.worldPath);
 		copiedWorld->pauseSimulation();
 		DocumentHistory copiedHistory;
 		copiedHistory.markSaved();
@@ -292,7 +292,7 @@ namespace
 		fixture.editModifier(1.15f);
 		require(saveWorldDocument(fixture.target(), &diagnostic), diagnostic);
 
-		auto binary = core::loadWorldDocument(fixture.worldPath);
+		std::shared_ptr<core::World> binary = core::loadWorldDocument(fixture.worldPath);
 		require(binary->getAgentTagRegistry() == sourceRegistry
 			&& binary->getExpectedAgentTagRegistryUuid() == sourceUuid
 			&& binary->getAgentTagAssignmentCount() == 1,
@@ -304,7 +304,7 @@ namespace
 		require(saveWorldDocument({ binary, yamlPath.string(),
 			fixture.registryPath.string(), &history }, &diagnostic),
 			"Binary-to-YAML coordinated conversion failed: " + diagnostic);
-		auto yaml = core::loadWorldDocument(yamlPath);
+		std::shared_ptr<core::World> yaml = core::loadWorldDocument(yamlPath);
 		require(yaml->getAgentTagRegistry() == sourceRegistry
 			&& yaml->getExpectedAgentTagRegistryUuid() == sourceUuid
 			&& yaml->getAgentTagAssignmentCount() == 1,

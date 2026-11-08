@@ -116,8 +116,13 @@ void restoration_support::verify(std::filesystem::path const& input, unsigned cy
 		if (report) report(cycle, reloadMs, resetMs);
 		oldGraph = world->getGraph();
 		if (world->getNumSectors()) oldSector = world->getSector(0);
-		std::weak_ptr<core::World> oldWorld = world;
-		world.reset();
+		// The loader hands the World back exclusively owned (#973). Moving it
+		// into a shared_ptr here keeps the retention check the same shape it had
+		// when the loader returned one: the last holder lets go, and nothing may
+		// keep the World alive behind it.
+		auto held = std::shared_ptr<core::World>(std::move(world));
+		std::weak_ptr<core::World> oldWorld = held;
+		held.reset();
 		require(oldWorld.expired() && oldGraph.expired() && oldSector.expired(),
 			"Reload retained World, Graph or Sector");
 	}

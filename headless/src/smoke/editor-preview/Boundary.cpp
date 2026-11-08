@@ -25,6 +25,23 @@ namespace
 	static_assert(!std::is_constructible_v<editor::EditorDocument,
 		std::shared_ptr<core::World>>);
 
+	// Adoption takes exclusive ownership and nothing else (#973). The
+	// `shared_ptr` overload is gone: it could only be satisfied by building a
+	// `unique_ptr` over the same object and releasing the caller's reference,
+	// which - sole owner, the normal case - destroyed the World being adopted
+	// and left the runtime driving freed memory. Refusing a World someone else
+	// holds is now a property of the seam rather than a runtime check the call
+	// sites could route around, and the loaders hand back exclusive ownership
+	// so the editor never needs the conversion.
+	static_assert(std::is_invocable_r_v<std::shared_ptr<core::World>,
+		decltype(editor::adoptWorld), std::unique_ptr<core::World>>);
+	static_assert(!std::is_invocable_v<decltype(editor::adoptWorld),
+		std::shared_ptr<core::World>&>);
+	static_assert(!std::is_invocable_v<decltype(editor::adoptWorld),
+		std::shared_ptr<core::World> const&>);
+	static_assert(!std::is_invocable_v<decltype(editor::adoptWorld),
+		std::shared_ptr<core::World>>);
+
 	// The document is one handle over one arrangement. Copying it would put
 	// two authoring privileges over one World in circulation.
 	static_assert(!std::is_copy_constructible_v<editor::EditorDocument>);

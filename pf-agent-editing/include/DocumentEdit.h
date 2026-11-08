@@ -24,7 +24,12 @@ std::optional<DocumentSnapshot> captureDocumentSnapshot(
 // Rebuild a snapshot into a detached World. A saved document's adjacent
 // dependencies are resolved from its directory; unsaved documents retain the
 // current World's loaded Furniture catalogue as the only available fallback.
-std::shared_ptr<core::World> deserializeDocumentSnapshot(
+//
+// The rebuilt World is handed back exclusively owned (#973): the editor puts
+// every restored World into a `WorldRuntime` of its own, and a runtime can only
+// take a World it will own alone. A caller that wants to share the result can
+// still move it into a `std::shared_ptr<core::World>`.
+std::unique_ptr<core::World> deserializeDocumentSnapshot(
 	DocumentSnapshot const& snapshot,
 	std::shared_ptr<const core::World> const& currentWorld,
 	std::filesystem::path const& documentPath);

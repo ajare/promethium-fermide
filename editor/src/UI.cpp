@@ -2643,7 +2643,7 @@ namespace
 		if (!current) return false;
 		try
 		{
-			shared_ptr<core::World> loaded;
+			unique_ptr<core::World> loaded;
 			auto restore = [&loaded, &world](DocumentSnapshot const& target)
 			{
 				loaded = deserializeDocumentSnapshot(target, world, gWorldFilepath);
@@ -2664,7 +2664,7 @@ namespace
 			// keeps, so it is rebound here before anything reads through it, and
 			// the "unsaved" mark is put on the live World through the authoring
 			// handle rather than on the deserialized one before adoption (#972).
-			editor::adoptWorld(loaded);
+			editor::adoptWorld(std::move(loaded));
 			document = editor::currentDocument();
 			if (gWorldDocumentHistory.isModified())
 				document->authoring().world().markModified();
@@ -2839,7 +2839,7 @@ namespace
 			auto previousBehaviourRegistry = world
 				&& world->hasAttachedAgentBehaviourRegistry()
 				? world->getAgentBehaviourRegistry() : nullptr;
-			editor::adoptWorld(loaded);
+			editor::adoptWorld(std::move(loaded));
 			document = editor::currentDocument();
 			world = document->world();
 			if (previousRegistry) forgetAgentTagRegistryDocument(previousRegistry);

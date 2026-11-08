@@ -226,7 +226,7 @@ namespace
 		require(core::unloadAgentBehaviourRegistryDocumentIfUnused(copiedRegistry),
 			"Copied package remained manager-owned after its World closed");
 		copiedRegistry.reset();
-		auto reopened = core::loadWorldDocument(destinationWorld);
+		std::shared_ptr<core::World> reopened = core::loadWorldDocument(destinationWorld);
 		require(reopened->hasAttachedAgentBehaviourRegistry()
 			&& reopened->getAgentBehaviourAssignmentCount() == 1,
 			"Copied World/package set did not reload from disk with its assignment");

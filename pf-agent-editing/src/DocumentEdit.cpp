@@ -52,12 +52,12 @@ optional<DocumentSnapshot> captureDocumentSnapshot(
 	}
 }
 
-shared_ptr<core::World> deserializeDocumentSnapshot(
+unique_ptr<core::World> deserializeDocumentSnapshot(
 	DocumentSnapshot const& snapshot,
 	shared_ptr<const core::World> const& currentWorld,
 	filesystem::path const& documentPath)
 {
-	auto loaded = make_shared<core::World>("Loading", 1, 1);
+	auto loaded = make_unique<core::World>("Loading", 1, 1);
 	if (currentWorld) loaded->reserveAccessPanelIdentitiesFrom(*currentWorld);
 	auto serializer = core::YamlSerializer::fromString(snapshot.yaml);
 	serializer->deserialize();

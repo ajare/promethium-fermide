@@ -83,23 +83,6 @@ namespace editor
 		return adopt(std::move(world));
 	}
 
-	std::shared_ptr<core::World> adoptWorld(
-		std::shared_ptr<core::World>& loaded)
-	{
-		if (!loaded)
-			throw std::invalid_argument("No loaded World to adopt");
-		// The runtime takes the World exclusively, so the loader has to be the
-		// only holder. Anything else means the World is already shared, which
-		// is exactly the state the runtime's ownership forbids.
-		if (loaded.use_count() != 1)
-			throw std::runtime_error(
-				"The loaded World is held by something else and cannot be "
-				"adopted as the editor's document");
-		std::unique_ptr<core::World> owned(loaded.get());
-		loaded.reset();
-		return adopt(std::move(owned));
-	}
-
 	void closeDocument() noexcept
 	{
 		gDocument.reset();

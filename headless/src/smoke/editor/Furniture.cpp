@@ -119,7 +119,7 @@ namespace
 		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture.furniture.lua"), root / "furniture.furniture.lua");
 		auto path = root / "demo.world.yaml";
 		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture.world.yaml"), path);
-		auto world = core::loadWorldDocument(path); world->pauseSimulation();
+		std::shared_ptr<core::World> world = core::loadWorldDocument(path); world->pauseSimulation();
 		DocumentHistory history; std::string diagnostic;
 		// The bundled demo's Room is sector 0; keep this chair clear of its desk/chair span.
 		// Depth 1 also supports the teaching chair's relative depth -1 front route.

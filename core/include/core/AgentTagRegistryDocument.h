@@ -65,6 +65,14 @@ namespace core
 	// Loads a complete binary or YAML World document and its optional registries
 	// into temporary state. No caller-owned World is changed when the World or a
 	// fatal dependency is refused.
-	PF_CORE_API std::shared_ptr<World> loadWorldDocument(
+	//
+	// The loaded World comes back exclusively owned (#973). A `shared_ptr` here
+	// would hand the caller a co-owned World that the runtime boundary cannot
+	// take over - the only way to put it in a `WorldRuntime` would be to
+	// fabricate a second owner over the same object, which frees it once and
+	// then reads and frees it again. Exclusive ownership transfers cleanly:
+	// `std::shared_ptr<World>` still accepts the result implicitly where a
+	// caller genuinely wants to share it.
+	PF_CORE_API std::unique_ptr<World> loadWorldDocument(
 		std::filesystem::path const& worldFilepath);
 }

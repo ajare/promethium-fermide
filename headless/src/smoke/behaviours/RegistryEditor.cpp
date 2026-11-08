@@ -443,7 +443,7 @@ namespace
 
 		auto assertRecoverableOpen = [&](char const* expectedDiagnostic)
 		{
-			auto loaded = core::loadWorldDocument(worldPath);
+			std::shared_ptr<core::World> loaded = core::loadWorldDocument(worldPath);
 			require(loaded->getName() == "Recovery" && loaded->getNumSectors() == 1
 				&& loaded->hasAgentBehaviourRegistryReference()
 				&& !loaded->hasAttachedAgentBehaviourRegistry()
@@ -519,12 +519,12 @@ namespace
 
 		// Another loaded World proves that switching one dependent never unloads
 		// a shared package. A third exercises confirmed destructive detachment.
-		auto shared = core::loadWorldDocument(worldPath);
+		std::shared_ptr<core::World> shared = core::loadWorldDocument(worldPath);
 		shared->pauseSimulation();
 		require(shared->getAgentBehaviourRegistry()
 			== unresolved->getAgentBehaviourRegistry(),
 			"Canonical recovery packages did not share one loaded instance");
-		auto detacher = core::loadWorldDocument(worldPath);
+		std::shared_ptr<core::World> detacher = core::loadWorldDocument(worldPath);
 		detacher->pauseSimulation();
 		gWorldDocumentHistory.clear();
 		requestAgentBehaviourRegistryDetach(detacher);

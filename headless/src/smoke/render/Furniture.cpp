@@ -46,7 +46,7 @@ namespace
 		}
 		require(demoDependency && catalogueDependency, "Required bundled Furniture resource dependencies are missing");
 		require(std::filesystem::is_regular_file(context.fixture("resources/textures/objects.png")), "Required placeholder atlas is missing");
-		auto world = core::loadWorldDocument(context.fixture("resources/test-worlds/furniture-integration.world.yaml"));
+		std::shared_ptr<core::World> world = core::loadWorldDocument(context.fixture("resources/test-worlds/furniture-integration.world.yaml"));
 		for (auto const& [key, definition] : world->furnitureCatalogue()->definitions())
 			for (auto const& tile : definition.tiles)
 			{

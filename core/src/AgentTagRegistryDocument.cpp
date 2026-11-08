@@ -499,7 +499,7 @@ namespace core
 		return true;
 	}
 
-	std::shared_ptr<World> loadWorldDocument(
+	std::unique_ptr<World> loadWorldDocument(
 		std::filesystem::path const& worldFilepath)
 	{
 		RestorationTiming timing("reload-total");
@@ -507,7 +507,7 @@ namespace core
 		auto const canonicalWorld = requireCanonicalRegularFile(
 			worldFilepath, "World");
 		requireWorldDocumentPath(canonicalWorld);
-		auto loaded = std::make_shared<World>("Loading", 1, 1);
+		auto loaded = std::make_unique<World>("Loading", 1, 1);
 		std::unique_ptr<Serializer> serializer;
 		if (worldDocumentFormat(canonicalWorld) == WorldDocumentFormat::Binary)
 			serializer = BinarySerializer::fromFile(canonicalWorld.string());

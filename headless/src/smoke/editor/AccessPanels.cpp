@@ -39,7 +39,7 @@ namespace
 		require(copy->getId()!=panel->getId() && copy->getSpeedOverride()==0.125f && copy->getGeometry()==panel->getGeometry() && copy->getState()==core::AccessPanel::State::Closed
 			&& copy->getControl(core::AccessPanel::Action::Open)!=panel->getControl(core::AccessPanel::Action::Open)
 			&& gWorldDocumentHistory.undoCount()==2, "Copy reused live identity/references/state");
-		auto restore=[&](DocumentSnapshot const& snapshot) { auto loaded=deserializeDocumentSnapshot(snapshot,world,{}); if (!loaded) return false; world=loaded; world->pauseSimulation(); return true; };
+		auto restore=[&](DocumentSnapshot const& snapshot) { std::shared_ptr<core::World> loaded=deserializeDocumentSnapshot(snapshot,world,{}); if (!loaded) return false; world=loaded; world->pauseSimulation(); return true; };
 		auto at=[&](uint32_t s,uint32_t x,uint32_t y) -> std::shared_ptr<const core::SectorObject> {
 			for (uint32_t i=0;i<world->getSector(s)->getNumObjects();++i) { auto o=world->getSector(s)->getObject(i);
 				if (o && o->getObjectType()==core::SectorObjectType::AccessPanel && o->getCellX()==x && o->getCellY()==y) return o; } return {}; };
@@ -84,7 +84,7 @@ namespace
 		refused=false; try { world->addSectorDoor(0,1,3); } catch (std::exception const&) { refused=true; }
 		require(refused && captureDocumentSnapshot(world)->yaml==before->yaml && world->getGraph()==graph
 			&& !world->isModified() && gWorldDocumentHistory.undoCount()==2, "Rejected surrounding editor edit changed history/state");
-		auto restore=[&](DocumentSnapshot const& snapshot) { auto loaded=deserializeDocumentSnapshot(snapshot,world,{});
+		auto restore=[&](DocumentSnapshot const& snapshot) { std::shared_ptr<core::World> loaded=deserializeDocumentSnapshot(snapshot,world,{});
 			if (!loaded) return false;
 			world=loaded; world->pauseSimulation(); return true; };
 		auto assertPanels=[&](uint32_t x,uint32_t y) {
@@ -132,7 +132,7 @@ namespace
 		auto object=placeAccessPanel(world,room,1,3,{},diagnostic);
 		require(object && gWorldDocumentHistory.undoCount()==1, "Palette action not undoable");
 		auto restore=[&](DocumentSnapshot const& snapshot) {
-			auto loaded=deserializeDocumentSnapshot(snapshot,world,{}); if (!loaded) return false;
+			std::shared_ptr<core::World> loaded=deserializeDocumentSnapshot(snapshot,world,{}); if (!loaded) return false;
 			world=loaded; world->pauseSimulation(); return true;
 		};
 		auto get=[&]() -> std::shared_ptr<const core::SectorObject> {
