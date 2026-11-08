@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "DocumentHistory.h"
+#include "game/DocumentHistory.h"
 #include "core/EntityId.h"
 
 namespace core

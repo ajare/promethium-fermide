@@ -23,7 +23,7 @@
 #include <memory>
 #include <optional>
 
-#include "DocumentHistory.h"
+#include "game/DocumentHistory.h"
 
 namespace core
 {

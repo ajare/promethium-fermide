@@ -1,7 +1,7 @@
 #include "Checks.h"
 #include "ImGuiContext.h"
 #include "DocumentEdit.h"
-#include "DocumentHistory.h"
+#include "game/DocumentHistory.h"
 #include "PaletteLayout.h"
 #include "ChamberPanel.h"
 #include "UI.h"

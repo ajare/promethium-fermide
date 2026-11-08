@@ -10,9 +10,9 @@
 #include <string_view>
 #include <vector>
 
-#include "DocumentHistory.h"
 #include "core/World.h"
 #include "game/AuthoringPlatform.h"
+#include "game/DocumentHistory.h"
 #include "game/WorldRuntime.h"
 
 namespace game

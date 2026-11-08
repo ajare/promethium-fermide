@@ -24,7 +24,7 @@
 #include "TagsPanel.h"
 #include "AgentDropTargets.h"
 #include "DocumentEdit.h"
-#include "DocumentHistory.h"
+#include "game/DocumentHistory.h"
 #include "core/Agent.h"
 #include "core/AgentType.h"
 #include "core/Sector.h"

@@ -3,6 +3,13 @@
 // Reusable history and saved-state tracking for independently persisted editor
 // documents. The history owns only serialized document snapshots, so World
 // documents and future external documents can each keep an isolated instance.
+//
+// This lives in pf-game-authoring rather than core (#987): it is the
+// authoring document-session type, core never referenced it, and it was
+// PF_CORE_API-annotated only so authoring could cross the shared-core
+// boundary. pf-game-authoring is the lowest module that exposes the type
+// publicly - WorldAuthoring owns a DocumentHistory and pf-agent-editing
+// builds its whole edit seam on it - so that is where the annotation belongs.
 
 #include <cstddef>
 #include <cstdint>
@@ -11,12 +18,12 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include "core/Platform.h"
+#include "game/AuthoringPlatform.h"
 
 // Optional document-specific state lets an editor transaction coordinate
 // dependent documents while the reusable history remains unaware of their
 // concrete types. Ordinary World snapshots leave this empty.
-struct PF_CORE_API DocumentSnapshotContext
+struct PF_GAME_AUTHORING_API DocumentSnapshotContext
 {
 	virtual ~DocumentSnapshotContext() = default;
 
@@ -26,14 +33,14 @@ struct PF_CORE_API DocumentSnapshotContext
 	virtual bool isRestorable() const { return true; }
 };
 
-struct PF_CORE_API DocumentSnapshot
+struct PF_GAME_AUTHORING_API DocumentSnapshot
 {
 	std::string yaml;
 	uint64_t stateId{ 0 };
 	std::shared_ptr<DocumentSnapshotContext> context;
 };
 
-class PF_CORE_API DocumentHistory
+class PF_GAME_AUTHORING_API DocumentHistory
 {
 public:
 	static constexpr size_t MaximumEntries{ 100 };

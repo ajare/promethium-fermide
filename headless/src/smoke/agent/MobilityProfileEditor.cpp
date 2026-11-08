@@ -1,5 +1,5 @@
 #include "AgentTagAssignmentPanel.h"
-#include "DocumentHistory.h"
+#include "game/DocumentHistory.h"
 #include "DocumentEdit.h"
 
 #include <memory>

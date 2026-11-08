@@ -20,6 +20,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Module.cmake")
 pf_require_module(pf-game-runtime)
 
 add_library(pf-game-authoring SHARED
+    src/DocumentHistory.cpp
     src/WorldAuthoring.cpp
 )
 # Headers keep their `game/` prefix, so consumers write

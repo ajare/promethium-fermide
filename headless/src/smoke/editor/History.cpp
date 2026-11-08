@@ -2,7 +2,7 @@
 #include "State.h"
 // Independent editor history, dirty-state, and saved-state checks for #127.
 
-#include "DocumentHistory.h"
+#include "game/DocumentHistory.h"
 #include "DocumentEdit.h"
 #include "core/World.h"
 #include "core/YamlSerializer.h"

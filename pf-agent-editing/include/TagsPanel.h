@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "DocumentHistory.h"
+#include "game/DocumentHistory.h"
 #include "core/AgentTag.h"
 #include "core/EntityId.h"
 
