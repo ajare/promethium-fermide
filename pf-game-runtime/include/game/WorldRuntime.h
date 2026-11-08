@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/Simulation.h"
@@ -206,6 +209,245 @@ namespace game
 
 		// The Action registry package basename, empty when none is selected.
 		std::string const& actionRegistryFilename() const;
+
+		// --- The read surface ---------------------------------------------
+		// Every read the World answers through a `const` member is answered here
+		// (#966, spec #960). The rule is the one #963 established: `const` is the
+		// compiler-checked definition of "read" in this codebase, so the read
+		// surface is the const method set rather than a hand-picked list that can
+		// fall behind the World. A game therefore never needs a second path to
+		// read state - and never needs to know which of these the renderer wants.
+		//
+		// Three exclusions, each a deliberate non-read rather than an omission:
+		//
+		//   * the names already on this type - the drive surface, the player-input
+		//     surface and the resource-name reads (#964, #965, #969) - are not
+		//     forwarded twice;
+		//   * `World::invalidateSimulationSnapshot()`, which is `const` only
+		//     because its cache is `mutable`: it writes, so it is not a read and
+		//     has no place on a read surface;
+		//   * the authoring families - `can...`/`plan...` guards, `add`/`remove`/
+		//     `rename`/`edit`, undo and redo - which are reached through
+		//     `WorldAuthoring` (#967), never from here.
+		//
+		// Nothing below mutates, binds a resource or touches persistence: the
+		// whole section is `const`, forwards to the `const` overload of the same
+		// World method, and returns the same value the World returns.
+
+		// --- Identity, host state and diagnostics ---
+		std::string const& getName() const;
+		std::string const& getClipboardIdentity() const;
+		std::weak_ptr<void const> getLifetimeToken() const;
+		std::uint64_t getRandomSeed() const;
+		std::filesystem::path const& documentDirectory() const;
+		std::vector<std::string> const& getLoadWarnings() const;
+		core::Log const& getBuildLog() const;
+
+		// --- World dimensions, Layers and Levels ---
+		std::uint32_t getCellsWide() const;
+		std::uint32_t getLevelsHigh() const;
+		std::uint32_t getLayerCount() const;
+		std::string const& getLayerName(std::uint32_t layerIndex) const;
+		std::string const& getLevelName(std::uint32_t level) const;
+		std::uint32_t getNumSectors() const;
+		std::shared_ptr<const core::Layer> getLayer(std::uint32_t layerIndex) const;
+		std::shared_ptr<const core::Graph> getGraph() const;
+
+		// --- Sectors and spatial lookup ---
+		std::shared_ptr<const core::Sector> getSector(std::uint32_t index) const;
+		std::vector<std::shared_ptr<const core::Sector>> getSectorsInBounds(std::uint32_t layerIndex, float x, float y, float width, float height) const;
+		std::vector<std::shared_ptr<const core::Sector>> getSectors(std::uint32_t layerIndex) const;
+		std::shared_ptr<const core::Sector> getSectorAtPosition(std::uint32_t layerIndex, float x, float y) const;
+		core::Agent* getAgentAtPosition(std::uint32_t layerIndex, float x, float y) const;
+		std::shared_ptr<const core::Object> getObjectAtPosition(std::uint32_t layerIndex, float x, float y, std::shared_ptr<const core::SectorObject>* sectorObject = nullptr) const;
+
+		// --- Traversal topology state ---
+		bool getPausedPathIntent(core::Agent const& agent, core::World::TopologyPathIntent& intent) const;
+		bool isTraversalTopologyDirty() const;
+		bool isTraversalTopologyValid() const;
+		std::uint64_t getTopologyGeneration() const;
+		std::string const& getTopologyDiagnostic() const;
+
+		// --- SectorObject ownership classification ---
+		bool hasDumbwaiters() const;
+		std::shared_ptr<const core::Dumbwaiter> lookupDumbwaiter(core::DumbwaiterId id) const;
+		bool isDumbwaiterOwnedControl(std::shared_ptr<const core::SectorObject> const& object) const;
+		bool isAirlockOwnedObject(std::shared_ptr<const core::SectorObject> const& object) const;
+		bool isChamberOwnedObject(std::shared_ptr<const core::SectorObject> const& object) const;
+		bool isLiftOwnedDoor(std::shared_ptr<const core::SectorObject> const& object, std::uint32_t* liftSectorIndex = nullptr, std::uint32_t* stopIndex = nullptr) const;
+		bool isLiftOwnedControl(std::shared_ptr<const core::SectorObject> const& object, std::uint32_t* liftSectorIndex = nullptr, std::uint32_t* stopIndex = nullptr) const;
+		bool isShuttleOwnedDoor(std::shared_ptr<const core::SectorObject> const& object, std::uint32_t* shuttleSectorIndex = nullptr, std::uint32_t* stopIndex = nullptr, std::uint32_t* carriageIndex = nullptr, std::uint32_t* doorIndex = nullptr) const;
+		bool isShuttleOwnedControl(std::shared_ptr<const core::SectorObject> const& object, std::uint32_t* shuttleSectorIndex = nullptr, std::uint32_t* stopIndex = nullptr) const;
+		bool isBulkheadDoorOwnedControl(std::shared_ptr<const core::SectorObject> const& object, std::uint32_t* doorSectorIndex = nullptr, std::uint32_t* doorObjectIndex = nullptr) const;
+		bool isForceBridgeOwnedControl(std::shared_ptr<const core::SectorObject> const& object, std::uint32_t* forceBridgeSectorIndex = nullptr, std::uint32_t* forceBridgeObjectIndex = nullptr) const;
+		bool isControlTargetBroken(core::InteractionPointId point) const;
+
+		// --- SectorObject authored options ---
+		bool getLadderOptions(std::uint32_t sectorIndex, core::World::CreateLadderOptions& options) const;
+		bool getStairwellOptions(std::uint32_t sectorIndex, core::World::CreateStairwellOptions& options) const;
+		bool getStaircaseOptions(std::uint32_t sectorIndex, core::World::CreateStaircaseOptions& options) const;
+		std::vector<core::World::LiftLandingRow> getLiftLandingRows(std::uint32_t layerIndex, std::uint32_t y, std::uint32_t x, std::uint32_t cellsWide, std::uint32_t levelsHigh) const;
+		bool getLiftLandingGeometry(std::uint32_t layerIndex, std::uint32_t y, std::uint32_t x, std::uint32_t& landingX, std::uint32_t& landingWidth) const;
+		std::vector<std::uint32_t> getValidShuttleStopOffsets(std::uint32_t layerIndex, std::uint32_t y, std::uint32_t x, std::uint32_t cellsWide, std::uint32_t numCars, std::uint32_t carWidth, bool allowPartialLandings, std::uint32_t doorMask) const;
+		bool getShuttleOptions(core::Shuttle const* shuttle, core::World::CreateShuttleOptions& options) const;
+		std::vector<core::World::ShuttleStopCandidate> getShuttleStopCandidatesForDoor(std::uint32_t shuttleLayer, std::uint32_t y, std::uint32_t doorX) const;
+		bool getSectorDoorOptions(std::uint32_t layerIndex, std::uint32_t y, std::uint32_t x, std::uint32_t width, core::World::CreateDoorOptions& options) const;
+		bool getSectorWindowOptions(std::uint32_t layerIndex, std::uint32_t y, std::uint32_t x, std::uint32_t cellsWide, std::uint32_t levelsHigh, core::World::CreateWindowOptions& options) const;
+		bool getSectorBulkheadDoorOptions(std::uint32_t sectorIndex, std::uint32_t objectIndex, core::World::CreateBulkheadDoorOptions& options) const;
+		bool calculateSectorForceBridgeWidthToRight(std::uint32_t sectorIndex, std::uint32_t levelIndex, std::uint32_t xOffset, std::uint32_t& width, std::string* diagnostic = nullptr) const;
+		bool getSectorForceBridgeOptions(std::uint32_t sectorIndex, std::uint32_t objectIndex, core::World::CreateForceBridgeOptions& options) const;
+		bool getRoomLadderOptions(std::uint32_t sectorIndex, std::uint32_t objectIndex, core::World::CreateLadderOptions& options) const;
+		std::vector<core::World::PlatformLiftStopCandidate> getPlatformLiftStopCandidates(std::uint32_t sectorIndex, std::uint32_t xOffset) const;
+		bool getPlatformLiftOptions(std::uint32_t sectorIndex, std::uint32_t objectIndex, core::World::CreateLiftOptions& options) const;
+
+		// --- Markers and Agent actions ---
+		std::vector<std::string> availableAgentActions(core::MarkerId marker) const;
+		std::vector<std::string> markerActions(core::MarkerId marker) const;
+		std::string agentActionDisplayName(std::string_view identity) const;
+		std::vector<core::MarkerId> getMarkerIds() const;
+		std::shared_ptr<const core::Marker> lookupMarker(core::MarkerId id) const;
+		bool furnitureUseEligible(core::AgentId agent, core::MarkerId marker, std::string* diagnostic = nullptr) const;
+		bool agentPoseStateFits(core::Agent const& agent, float clearance, float heightFactor = 1.0f) const;
+		bool agentHeightStateFits(core::Agent const& agent, float next, std::string* diagnostic) const;
+		void validateReplayPoseState(core::World const& candidate, std::uint32_t movedSectorIndex, int deltaX, int deltaY) const;
+		bool furniturePoseFits(core::AgentId agent, core::MarkerId marker, core::Pose pose, bool usingSupport, std::string* diagnostic = nullptr) const;
+		[[nodiscard]] float maximumInstalledStandingWidth() const;
+
+		// --- Agent types ---
+		bool hasAgentType(std::string_view typeId) const;
+		std::string agentTypeDisplayName(std::string_view typeId) const;
+		std::string agentTypeResourceName(std::string_view typeId) const;
+		std::optional<core::AgentTypeDefinition> registeredAgentTypeDefinition(std::string_view typeId, std::string_view resourceName) const;
+		std::optional<core::AgentPhysicalBaseline> registeredAgentTypeBaseline(std::string_view typeId, std::string_view resourceName) const;
+
+		// --- Agents ---
+		void validateAgentLocationPlacement(core::Sector const& sector, core::Agent const& agent, std::optional<float> floorY = std::nullopt) const;
+		core::EntityLookup<core::Agent const> lookupAgent(core::AgentId id) const;
+		bool canSetAgentActive(core::AgentId agent, bool active, std::string* diagnostic = nullptr) const;
+		core::AgentId getAgentId(core::Agent const* agent) const;
+
+		// --- Agent behaviour assignment and runtime ---
+		bool hasAgentBehaviourRegistryReference() const;
+		bool hasAttachedAgentBehaviourRegistry() const;
+		std::string const& getExpectedAgentBehaviourRegistryUuid() const;
+		std::shared_ptr<core::AgentBehaviourRegistry> const& getAgentBehaviourRegistry() const;
+		bool agentBehaviourConfigurationsAreValid() const;
+		std::string const& getAgentBehaviourDependencyDiagnostic() const;
+		bool validateAgentBehaviourAssignment(core::AgentBehaviourId behaviour, std::uint64_t revision, core::AgentBehaviourConfiguration const& configuration, core::AgentBehaviourConfiguration* normalized = nullptr, std::string* diagnostic = nullptr) const;
+		std::optional<core::AgentBehaviourAssignment> const& getAgentBehaviourAssignment(core::AgentId agent) const;
+		std::uint32_t getAgentBehaviourAssignmentCount() const;
+		bool agentBehaviourOwnsMovement(core::AgentId agent) const;
+		std::vector<core::AgentBehaviourRuntimeDiagnostic> getAgentBehaviourRuntimeDiagnostics() const;
+		core::AgentBehaviourRuntimeLimits getAgentBehaviourRuntimeLimits() const;
+		std::shared_ptr<const core::ActionRegistry> const& actionRegistry() const;
+
+		// --- Agent tags ---
+		bool hasAgentTagRegistryReference() const;
+		bool hasAttachedAgentTagRegistry() const;
+		std::string const& getExpectedAgentTagRegistryUuid() const;
+		std::shared_ptr<core::AgentTagRegistry> const& getAgentTagRegistry() const;
+		std::uint64_t getAgentTagAssignmentCount() const;
+		std::uint32_t getAgentTagAssignedAgentCount() const;
+		std::uint64_t getAgentTagSampleCount() const;
+		bool canAssignAgentTag(core::AgentId agent, core::AgentTagId tag, std::string* diagnostic = nullptr) const;
+		bool validateAgentTagAssignments(std::set<core::AgentTagId> const& tags, std::optional<core::AgentPropertySample> const& walkSpeedSample, std::optional<core::AgentPropertySample> const& heightSample, std::optional<core::AgentPropertySample> const& stairSpeedSample, std::optional<core::AgentPropertySample> const& ladderSpeedSample, std::optional<core::AgentPropertySample> const& interactionAversionSample, std::optional<core::AgentPropertySample> const& effortAversionSample, std::optional<core::AgentPropertySample> const& waitingAversionSample, std::optional<core::AgentPropertySample> const& crowdAversionSample, std::optional<core::AgentPropertySample> const& riskAversionSample, std::optional<core::AgentPropertySample> const& routeFamiliaritySample, std::optional<core::AgentPropertySample> const& routePersistenceSample, std::optional<core::AgentPropertySample> const& minimumRoutePlanningTimeSample, std::optional<core::AgentPropertySample> const& maximumRoutePlanningTimeSample, std::string* diagnostic = nullptr) const;
+		std::set<core::AgentTagId> const& getAgentTags(core::AgentId agent) const;
+
+		// --- Agent groups ---
+		std::uint32_t getAgentGroupCount() const;
+		std::vector<core::AgentGroupId> getAgentGroupIds() const;
+		core::EntityLookup<core::AgentGroup const> lookupAgentGroup(core::AgentGroupId id) const;
+		std::string const& getAgentGroupName(core::AgentGroupId id) const;
+		bool canSetAgentGroup(core::AgentId agent, core::AgentGroupId group, std::string* diagnostic = nullptr) const;
+		core::AgentGroupId getAgentGroup(core::AgentId agent) const;
+		bool isAgentGroupActive(core::AgentGroupId group) const;
+		bool canSetAgentGroupActive(core::AgentGroupId group, bool active, std::string* diagnostic = nullptr) const;
+		std::uint32_t getAgentGroupMemberCount(core::AgentGroupId id) const;
+
+		// --- Access permissions and permission sets ---
+		std::uint32_t getAccessPermissionCount() const;
+		std::vector<core::AccessPermissionId> getAccessPermissionIds() const;
+		core::EntityLookup<core::AccessPermission const> lookupAccessPermission(core::AccessPermissionId id) const;
+		std::string const& getAccessPermissionName(core::AccessPermissionId id) const;
+		core::World::AccessPermissionUsage getAccessPermissionUsage(core::AccessPermissionId id) const;
+		std::vector<core::AccessPermissionId> getAgentDirectAccessGrants(core::AgentId agent) const;
+		std::vector<core::AccessPermissionId> getAgentCurrentDirectAccessGrants(core::AgentId agent) const;
+		std::vector<core::PermissionSetId> getAgentCurrentPermissionSetAssignments(core::AgentId agent) const;
+		std::vector<core::AccessPermissionId> getAgentEffectiveAccessGrants(core::AgentId agent) const;
+		core::World::EffectiveAccessGrantSources getAgentAccessGrantSources(core::AgentId agent, core::AccessPermissionId permission) const;
+		std::uint32_t getPermissionSetCount() const;
+		std::vector<core::PermissionSetId> getPermissionSetIds() const;
+		core::EntityLookup<core::PermissionSet const> lookupPermissionSet(core::PermissionSetId id) const;
+		std::string const& getPermissionSetName(core::PermissionSetId id) const;
+		std::uint32_t getPermissionSetUsageCount(core::PermissionSetId id) const;
+		std::vector<core::AccessPermissionId> getPermissionSetPermissions(core::PermissionSetId id) const;
+		std::vector<core::PermissionSetId> getAgentPermissionSetAssignments(core::AgentId agent) const;
+		bool isLocationPermissionEligible(std::uint32_t sectorIndex) const;
+		std::vector<core::AccessPermissionId> getLocationPermissionRequirement(std::uint32_t sectorIndex) const;
+		bool canAgentAccessLocation(core::Sector const& sector, core::Agent const& agent) const;
+		bool isInteractionPointPermissionEligible(core::InteractionPointId point) const;
+		std::vector<core::AccessPermissionId> getInteractionPointPermissionRequirement(core::InteractionPointId point) const;
+		bool isManualDoorPermissionEligible(core::TraversalResourceId door) const;
+		std::vector<core::AccessPermissionId> getManualDoorPermissionRequirement(core::TraversalResourceId door) const;
+
+		// --- Transport state and authorization ---
+		std::string getTransportStopShortName(std::uint32_t sectorIndex, std::uint32_t stopIndex, std::uint32_t objectIndex = ~0u) const;
+		std::string getTransportStopShortName(core::TraversalResourceId resource, std::uint32_t stopIndex) const;
+		std::vector<std::uint32_t> getLiftDestinationLevels(std::uint32_t sectorIndex, std::uint32_t objectIndex = ~0u) const;
+		std::vector<core::AccessPermissionId> getLiftDestinationPermissionRequirement(std::uint32_t sectorIndex, std::uint32_t stopIndex, std::uint32_t objectIndex = ~0u) const;
+		std::optional<core::DeviceCondition> knownTransportCondition(core::TraversalResourceId resource, core::Agent const* agent, core::Sector const* observationSector) const;
+		std::optional<core::DeviceCondition> knownLiftCondition(core::TraversalResourceId resource, core::Agent const* agent, core::Sector const* observationSector) const;
+		bool canAgentEnterAirlock(core::TraversalResourceId resource, core::SectorId approach, core::AgentId agent, bool locallyObserved) const;
+		bool canAgentOpenManualDoor(core::TraversalResourceId door, core::AgentId agent) const;
+		bool agentHasFeasibleManualDoorOperation(core::TraversalResourceId door, core::AgentId agent) const;
+		std::optional<float> remoteButtonApproachDistance(core::InteractionPointId point, core::SectorId approach, core::Vector2 const& position, core::AgentId agent) const;
+		bool canAgentOperateDoorControl(core::TraversalResourceId door, core::SectorId approach, core::AgentId agent) const;
+		bool agentAdheresToDoorPermission(core::TraversalResourceId door, core::SectorId approach, core::AgentId agent) const;
+		bool canAgentOperateExtensibleControl(core::TraversalResourceId resource, core::SectorId approach, core::Vector2 const& approachPosition, core::AgentId agent) const;
+		bool agentAdheresToExtensiblePermission(core::TraversalResourceId resource, core::SectorId approach, core::Vector2 const& approachPosition, core::AgentId agent) const;
+		std::vector<core::AccessPermissionId> missingLiftDestinationPermissions(core::DeviceCommand const& command, core::AgentId agent) const;
+		bool canAgentUseLiftJourney(core::TraversalResourceId resource, core::Vector2 const& origin, core::Vector2 const& destination, core::AgentId agent) const;
+		bool agentHasFeasibleLiftJourney(core::TraversalResourceId resource, core::Vector2 const& origin, core::Vector2 const& destination, core::AgentId agent) const;
+		bool agentAdheresToLiftDestinationPermission(core::TraversalResourceId resource, std::uint32_t destinationStop, core::AgentId agent) const;
+		bool canAgentOperateTransportLandingControl(core::TraversalResourceId resource, core::SectorId approach, core::Vector2 const& endpoint, core::AgentId agent) const;
+		bool agentHasFeasibleTransportLandingOperation(core::TraversalResourceId resource, core::SectorId approach, core::Vector2 const& endpoint, core::AgentId agent) const;
+		bool agentAdheresToTransportLandingPermission(core::TraversalResourceId resource, core::SectorId approach, core::Vector2 const& endpoint, core::AgentId agent) const;
+		bool isAgentTransportOccupant(core::TraversalResourceId resource, core::AgentId agent) const;
+		bool isTransportLocallyBoardable(core::TraversalResourceId resource, core::Vector2 const& endpoint) const;
+		bool canAgentTraverseManualDoorNow(core::TraversalResourceId door, core::AgentId agent) const;
+
+		// --- Interaction points, devices and Access panels ---
+		core::EntityLookup<core::InteractionPoint const> lookupInteractionPoint(core::InteractionPointId id) const;
+		std::shared_ptr<const core::AccessPanel> lookupAccessPanel(core::AccessPanelId id) const;
+		bool canRequestAccessPanel(core::AccessPanelId id, core::AccessPanel::Action action, core::AgentId actor) const;
+		core::EntityLookup<core::InteractionRequest const> lookupInteractionRequest(core::InteractionRequestId id) const;
+		std::shared_ptr<const core::BoothWindow> lookupBoothWindow(core::BoothWindowId id) const;
+		core::EntityLookup<core::DeviceOperation const> lookupDeviceOperation(core::DeviceOperationId id) const;
+		core::EntityLookup<core::TraversalResource const> lookupTraversalResource(core::TraversalResourceId id) const;
+		core::TraversalResourceId getTraversalResourceId(core::Object const* object) const;
+		core::EntityLookup<core::TraversalRequest const> lookupTraversalRequest(core::TraversalRequestId id) const;
+		bool isAgentInQueue(core::AgentId id) const;
+
+		// --- Routing policy and live observation ---
+		core::RouteChoicePolicy const& getRouteChoicePolicy() const;
+		core::TraversalWaitingPolicy const& getTraversalWaitingPolicy() const;
+		core::TraversalGeometryPolicy const& getTraversalGeometryPolicy() const;
+		float estimateTraversalDelay(core::TraversalResourceId resource, core::SectorId sourceSector) const;
+		float observeAccessZoneDensity(core::TraversalResourceId resource, core::SectorId sourceSector) const;
+		std::optional<core::ShuttleRouteAccessObservation> observeShuttleAccess(core::TraversalResourceId resource, core::Vector2 const& endpoint, bool includeLocalQueue) const;
+		std::optional<core::LiftRouteAccessObservation> observeLiftAccess(core::TraversalResourceId resource, core::Vector2 const& sourceEndpoint, bool includeLocalQueue = true) const;
+		std::uint32_t countStandingAgentsOnEscalator(core::Agent const* observer, core::Edge const* edge) const;
+
+		// --- Furniture ---
+		std::shared_ptr<const core::FurnitureCatalogue> const& furnitureCatalogue() const;
+		std::vector<core::FurnitureInstance> const& furniture() const;
+		bool isFurnitureMarker(core::MarkerId id) const;
+		core::AgentId usablePointOccupant(core::MarkerId id) const;
+
+		// --- Simulation clock reads ---
+		double getDeferredSimulationTime() const;
+		double getAverageSimulationStepMicroseconds() const;
+		std::vector<core::SimulationEvent> const& getSimulationEvents() const;
 
 	private:
 		// Exclusive ownership. Nothing else in the process holds this World: the

@@ -116,7 +116,13 @@ set_tests_properties(smoke-simulation-contract PROPERTIES LABELS "harness;core" 
 # CPU-only globals that path expects. The const-read-surface checks (#963) pin
 # the six read-shaped World methods to `core::World const&` at compile time,
 # so a later edit that drops a const path fails the build rather than quietly
-# narrowing what a render or game caller can read.
+# narrowing what a render or game caller can read. ReadSurface.cpp widens
+# that to the whole read surface (#966): one compile-time assertion per
+# forwarded read pins it to a `WorldRuntime const&` and to the exact type the
+# World's const overload returns, and the runtime checks then take every read
+# twice - through the runtime and through the render view - and require the
+# two to agree, including agreeing on a refusal when the argument does not
+# apply.
 pf_add_smoke_module(pf-smoke-game-runtime
     NAME game-runtime
     SOURCES
@@ -128,6 +134,7 @@ pf_add_smoke_module(pf-smoke-game-runtime
         game-runtime/PlayerInput.cpp
         game-runtime/RenderView.cpp
         game-runtime/ConstReadSurface.cpp
+        game-runtime/ReadSurface.cpp
         game-runtime/SharedLibrary.cpp
     LIBRARIES pf-game-runtime pf-headless-render-support
     LABELS "core;game-runtime"

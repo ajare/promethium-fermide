@@ -12,6 +12,7 @@ int main(int argc, char** argv)
 	registerGameRuntimePlayerInput(checks);
 	registerGameRuntimeRenderView(checks);
 	registerGameRuntimeConstReadSurface(checks);
+	registerGameRuntimeReadSurface(checks);
 	registerGameRuntimeSharedLibrary(checks);
 	return smoke::main("game-runtime", checks, argc, argv);
 }
