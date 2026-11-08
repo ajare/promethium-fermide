@@ -40,7 +40,6 @@
 #include "ObjectTileset.h"
 #include "WorldDrawList.h"
 #include "UISettings.h"
-#include "Exceptions.h"
 
 
 // Declared in Helpers.h alongside the OpenGL texture loaders, which the
