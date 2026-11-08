@@ -74,7 +74,16 @@ namespace game
 		// The read view handed to rendering. Valid for as long as this runtime
 		// lives and remains the same World throughout; every read through it is
 		// const, so rendering cannot mutate what it renders.
-		core::World const& world() const noexcept;
+		//
+		// Throws `std::logic_error` naming this accessor if the runtime holds no
+		// World. It cannot happen today - both ctors refuse an empty one and the
+		// moves are deleted above, so there is no moved-from `WorldRuntime` to
+		// read from (#977) - but every read below goes through the same guard so
+		// that if that ever stops being true it reports itself instead of
+		// dereferencing null (#978). That is also why this is not `noexcept`: a
+		// guard that cannot throw answers a moved-from value with
+		// `std::terminate` rather than with anything a caller could read.
+		core::World const& world() const;
 
 		// --- Driving -------------------------------------------------------
 		// Rendering supplies elapsed wall time here. It is accumulated and only
@@ -97,7 +106,7 @@ namespace game
 
 		void resetSimulation();
 
-		bool isSimulationPaused() const noexcept;
+		bool isSimulationPaused() const;
 
 		// Release every Agent the World owns without reaching into Agent
 		// internals.
@@ -105,7 +114,7 @@ namespace game
 
 		void setSimulationTimeScale(double scale);
 
-		double getSimulationTimeScale() const noexcept;
+		double getSimulationTimeScale() const;
 
 		// Structural build steps the runtime lifecycle owns: finishBuild()
 		// generates the traversal graph for a freshly created World, and
@@ -169,9 +178,9 @@ namespace game
 		void clearPlayerInput();
 
 		// --- Observation ---------------------------------------------------
-		std::uint64_t getSimulationTick() const noexcept;
+		std::uint64_t getSimulationTick() const;
 
-		core::SimulationPhase getCurrentSimulationPhase() const noexcept;
+		core::SimulationPhase getCurrentSimulationPhase() const;
 
 		core::SimulationSnapshot getSimulationSnapshot() const;
 
@@ -179,7 +188,7 @@ namespace game
 		// copy it.
 		core::SimulationSnapshot const& getSimulationSnapshotView() const;
 
-		std::uint64_t getSimulationSnapshotBuildCount() const noexcept;
+		std::uint64_t getSimulationSnapshotBuildCount() const;
 
 		// Drains the event queue: each event is returned exactly once.
 		std::vector<core::SimulationEvent> consumeSimulationEvents();
@@ -187,7 +196,7 @@ namespace game
 		// Non-owning; register/unregister on the simulation thread. The
 		// observer must outlive its registration and may only read the World
 		// during callbacks.
-		void setSimulationObserver(core::SimulationObserver* observer) noexcept;
+		void setSimulationObserver(core::SimulationObserver* observer);
 
 		// The fixed simulation timestep and the per-update tick bound, mirrored
 		// from core so a host can pace itself without including core/World.h.
@@ -478,6 +487,24 @@ namespace game
 		// only public accessor is the const view above.
 		std::unique_ptr<core::World> world_;
 
+		// The dereference every accessor in this class goes through (#978).
+		//
+		// `world_` is non-null for the whole life of a constructed runtime:
+		// both ctors guarantee it and the moves are deleted above, so there is
+		// no moved-from `WorldRuntime` in existence to guard against (#977).
+		// This is the backstop for the day that stops being true - a default
+		// ctor, a release-the-World method, a move put back - and it turns what
+		// would otherwise be a null dereference at whichever call site happened
+		// to touch it into a `std::logic_error` naming the accessor and the
+		// condition. The check lives here rather than at each of the roughly
+		// forty dereference sites so an accessor cannot forget it.
+		//
+		// The const overload answers a read, the non-const one the drive and
+		// authoring surfaces; both raise the same failure.
+		core::World& requireLive(char const* accessor);
+
+		core::World const& requireLive(char const* accessor) const;
+
 		// The mutable view of the owned World. Private, and granted to
 		// WorldAuthoring alone (#967): ownership stays here, while the authoring
 		// handle wrapped over the runtime is the only code in the process that
@@ -486,7 +513,9 @@ namespace game
 		// what makes "authoring is the only mutable surface" a compile-time
 		// fact rather than a convention - and why a game linking only
 		// pf-game-runtime cannot reach mutable World state by any route.
-		core::World& authoringWorld() noexcept;
+		// Throws `std::logic_error` when the runtime holds no World, for the
+		// same reason as `world()` above (#978).
+		core::World& authoringWorld();
 
 		friend class WorldAuthoring;
 	};

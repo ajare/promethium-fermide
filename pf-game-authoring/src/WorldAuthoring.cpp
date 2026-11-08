@@ -8,27 +8,19 @@
 #include "core/Log.h"
 #include "core/SerializationWorkData.h"
 #include "core/YamlSerializer.h"
+#include "game/MovedFrom.h"
 
 namespace
 {
 	// A handle that has been moved from names no runtime and owns no history.
-	// Every accessor that needs one funnels through `requireLive` below, so the
-	// moved-from case fails with the accessor named instead of dereferencing a
-	// null pointer and reporting nothing about which handle or which call went
-	// wrong (#978). The string is built when the throw happens, not on every
-	// call.
-	[[noreturn]] void refuseMovedFrom(char const* accessor)
-	{
-		throw std::logic_error(std::string("game::") + accessor +
-			" was called on a value that has been moved from");
-	}
-
-	template <typename T>
-	T& requireLive(T* pointer, char const* accessor)
-	{
-		if (!pointer) refuseMovedFrom(accessor);
-		return *pointer;
-	}
+	// Every accessor that needs one funnels through `game::requireLive`, so
+	// the moved-from case fails with the accessor named instead of
+	// dereferencing a null pointer and reporting nothing about which handle or
+	// which call went wrong (#978). The helper is shared with `WorldRuntime`
+	// so the two halves of the boundary raise the same exception with the same
+	// shape of message, and one grep finds both. The string is built when the
+	// throw happens, not on every call.
+	using game::requireLive;
 
 	// The work data every restore of this document needs, read off the World it
 	// is being restored into. The Furniture catalogue and the accepted Action

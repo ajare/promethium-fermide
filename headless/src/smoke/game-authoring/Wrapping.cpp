@@ -185,6 +185,47 @@ void registerGameAuthoringWrapping(std::vector<smoke::Check>& checks)
 			require(refused, "a live handle adopted the null history of a moved-from one");
 		} });
 
+	checks.push_back({ "movedFromAuthoringPairFailsLoudly", [](smoke::Context const&)
+		{
+			// The pair is the one value in this boundary that still moves, and a
+			// moved-from pair holds neither the runtime nor the handle. Both
+			// accessors have to say so rather than hand back a null for the
+			// caller to dereference three frames later (#978).
+			auto fixture = game_authoring_smoke::makeCorridorWorld("Moved-from pair");
+			game::AuthoringPair source(std::move(fixture.world));
+			game::AuthoringPair live(std::move(source));
+			require(&live.authoring().runtime() == &live.runtime(),
+				"the moved-to pair does not name one runtime on both sides");
+
+			int failures = 0;
+			std::string message;
+			try { (void)source.runtime(); }
+			catch (std::logic_error const& error) { ++failures; message = error.what(); }
+			try { (void)source.authoring(); }
+			catch (std::logic_error const& error) { ++failures; message = error.what(); }
+			require(failures == 2,
+				"a moved-from pair answered " + std::to_string(2 - failures) +
+				" accessor(s) from behind a null pointer instead of failing");
+			require(message.find("AuthoringPair::") != std::string::npos,
+				"the moved-from failure does not name the type: " + message);
+			require(message.find("moved from") != std::string::npos,
+				"the moved-from failure does not name the condition: " + message);
+
+			// Move-assignment empties the source the same way, so the pair that
+			// was replaced cannot be driven by mistake.
+			game::AuthoringPair replacement(std::make_unique<core::World>("Replaced", 4, 1));
+			live = std::move(replacement);
+			failures = 0;
+			try { (void)replacement.runtime(); }
+			catch (std::logic_error const&) { ++failures; }
+			try { (void)replacement.authoring(); }
+			catch (std::logic_error const&) { ++failures; }
+			require(failures == 2,
+				"the pair emptied by move-assignment still answers its accessors");
+			require(live.runtime().world().getName() == "Replaced",
+				"the reassigned pair is not driving the World it took");
+		} });
+
 	checks.push_back({ "transferredPairKeepsTheHandleWiredToItsRuntime", [](smoke::Context const&)
 		{
 			// The legitimate transfer (#977): the pair moves, the runtime it

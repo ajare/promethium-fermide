@@ -3,11 +3,13 @@
 
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
 
 #include "core/World.h"
+#include "game/MovedFrom.h"
 #include "game/WorldRuntime.h"
 
 namespace
@@ -121,5 +123,49 @@ void registerGameRuntimeOwnership(std::vector<smoke::Check>& checks)
 				"the constructed World does not carry the requested name");
 			require(runtime.world().getLayerCount() == 2,
 				"the constructed World does not have the expected Layers");
+		} });
+
+	checks.push_back({ "movedFromRuntimeFailsLoudly", [](smoke::Context const&)
+		{
+			// #978 asked for a moved-from WorldRuntime to throw rather than
+			// dereference null. #977 removed the state that question is about:
+			// the moves are deleted above, so there is no expression that
+			// produces a moved-from runtime and no accessor that can be handed
+			// a shell with a null World. That is the stronger guarantee, and it
+			// is a compile-time one.
+			//
+			// What is still worth pinning at runtime is the failure itself.
+			// Every one of the roughly forty dereferences of `world_` funnels
+			// through the runtime's guard, which raises the boundary's shared
+			// moved-from error. If that error ever stopped being a thrown
+			// std::logic_error naming the accessor, all forty sites would turn
+			// back into silent null dereferences at once - so the contract is
+			// checked here rather than left to the prose in the headers.
+			constexpr char const* accessor = "WorldRuntime::world";
+			std::string message;
+			bool thrown = false;
+			try
+			{
+				game::requireLive(static_cast<core::World*>(nullptr), accessor);
+			}
+			catch (std::logic_error const& error)
+			{
+				thrown = true;
+				message = error.what();
+			}
+			require(thrown, "the WorldRuntime moved-from guard returned instead of throwing");
+			require(message.find(accessor) != std::string::npos,
+				"the moved-from failure does not name the accessor: " + message);
+			require(message.find("moved from") != std::string::npos,
+				"the moved-from failure does not name the moved-from condition: " + message);
+
+			// And it does not misfire: a live runtime hands back the World it
+			// owns through the very same guard, and drives it.
+			game::WorldRuntime runtime("Guarded", 4, 2);
+			require(game::requireLive(&runtime.world(), accessor).getName() == "Guarded",
+				"the guard refused a live runtime");
+			require(runtime.advanceTick(), "a guarded runtime cannot drive its World");
+			require(runtime.getSimulationTick() == 1,
+				"a guarded runtime ticked the wrong amount");
 		} });
 }

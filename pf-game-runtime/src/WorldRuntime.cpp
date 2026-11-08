@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "core/World.h"
+#include "game/MovedFrom.h"
 
 namespace game
 {
@@ -25,157 +26,172 @@ namespace game
 	// The move constructor and move assignment are deleted in the header (#977),
 	// so there is no moved-from WorldRuntime in existence to reason about: no
 	// shell, no null `world_`, and no authoring handle left pointing at one.
+	// What is left to police is the dereference itself, so that the day a null
+	// `world_` becomes reachable again the failure is named rather than silent
+	// (#978). Every read of `world_` in this file goes through `requireLive`.
 
-	core::World const& WorldRuntime::world() const noexcept
+	core::World& WorldRuntime::requireLive(char const* accessor)
 	{
+		if (!world_) refuseMovedFrom(accessor);
 		return *world_;
 	}
 
-	core::World& WorldRuntime::authoringWorld() noexcept
+	core::World const& WorldRuntime::requireLive(char const* accessor) const
+	{
+		if (!world_) refuseMovedFrom(accessor);
+		return *world_;
+	}
+
+	core::World const& WorldRuntime::world() const
+	{
+		return requireLive("WorldRuntime::world");
+	}
+
+	core::World& WorldRuntime::authoringWorld()
 	{
 		// Reachable only from WorldAuthoring, which is declared a friend: the
 		// single widening of the const view in the whole boundary (#967).
-		return *world_;
+		return requireLive("WorldRuntime::authoringWorld");
 	}
 
 	void WorldRuntime::update(float elapsedSeconds)
 	{
-		world_->update(elapsedSeconds);
+		requireLive("WorldRuntime::update").update(elapsedSeconds);
 	}
 
 	bool WorldRuntime::advanceTick()
 	{
-		return world_->advanceTick();
+		return requireLive("WorldRuntime::advanceTick").advanceTick();
 	}
 
 	bool WorldRuntime::advanceTicks(std::uint64_t count)
 	{
-		return world_->advanceTicks(count);
+		return requireLive("WorldRuntime::advanceTicks").advanceTicks(count);
 	}
 
 	void WorldRuntime::pauseSimulation()
 	{
-		world_->pauseSimulation();
+		requireLive("WorldRuntime::pauseSimulation").pauseSimulation();
 	}
 
 	bool WorldRuntime::resumeSimulation()
 	{
-		return world_->resumeSimulation();
+		return requireLive("WorldRuntime::resumeSimulation").resumeSimulation();
 	}
 
 	void WorldRuntime::resetSimulation()
 	{
-		world_->resetSimulation();
+		requireLive("WorldRuntime::resetSimulation").resetSimulation();
 	}
 
-	bool WorldRuntime::isSimulationPaused() const noexcept
+	bool WorldRuntime::isSimulationPaused() const
 	{
-		return world_->isSimulationPaused();
+		return requireLive("WorldRuntime::isSimulationPaused").isSimulationPaused();
 	}
 
 	void WorldRuntime::wakeAllAgents()
 	{
-		world_->wakeAllAgents();
+		requireLive("WorldRuntime::wakeAllAgents").wakeAllAgents();
 	}
 
 	void WorldRuntime::setSimulationTimeScale(double scale)
 	{
-		world_->setSimulationTimeScale(scale);
+		requireLive("WorldRuntime::setSimulationTimeScale").setSimulationTimeScale(scale);
 	}
 
-	double WorldRuntime::getSimulationTimeScale() const noexcept
+	double WorldRuntime::getSimulationTimeScale() const
 	{
-		return world_->getSimulationTimeScale();
+		return requireLive("WorldRuntime::getSimulationTimeScale").getSimulationTimeScale();
 	}
 
 	void WorldRuntime::finishBuild()
 	{
-		world_->finishBuild();
+		requireLive("WorldRuntime::finishBuild").finishBuild();
 	}
 
 	bool WorldRuntime::rebuildTraversalTopology()
 	{
-		return world_->rebuildTraversalTopology();
+		return requireLive("WorldRuntime::rebuildTraversalTopology").rebuildTraversalTopology();
 	}
 
 	core::AgentId WorldRuntime::getPlayerControlledAgent() const
 	{
-		return world_->getPlayerControlledAgent();
+		return requireLive("WorldRuntime::getPlayerControlledAgent").getPlayerControlledAgent();
 	}
 
 	void WorldRuntime::setPlayerMovementDirection(int direction)
 	{
-		world_->setPlayerMovementDirection(direction);
+		requireLive("WorldRuntime::setPlayerMovementDirection").setPlayerMovementDirection(direction);
 	}
 
 	void WorldRuntime::setPlayerStairSelection(bool up, bool down)
 	{
-		world_->setPlayerStairSelection(up, down);
+		requireLive("WorldRuntime::setPlayerStairSelection").setPlayerStairSelection(up, down);
 	}
 
 	void WorldRuntime::setPlayerCrouch(bool held)
 	{
-		world_->setPlayerCrouch(held);
+		requireLive("WorldRuntime::setPlayerCrouch").setPlayerCrouch(held);
 	}
 
 	void WorldRuntime::requestPlayerDoorAction()
 	{
-		world_->requestPlayerDoorAction();
+		requireLive("WorldRuntime::requestPlayerDoorAction").requestPlayerDoorAction();
 	}
 
 	std::optional<core::World::PlayerTransportSelector> WorldRuntime::getPlayerTransportSelector() const
 	{
-		return world_->getPlayerTransportSelector();
+		return requireLive("WorldRuntime::getPlayerTransportSelector").getPlayerTransportSelector();
 	}
 
 	void WorldRuntime::browsePlayerTransportStop(int direction, bool horizontal)
 	{
-		world_->browsePlayerTransportStop(direction, horizontal);
+		requireLive("WorldRuntime::browsePlayerTransportStop").browsePlayerTransportStop(direction, horizontal);
 	}
 
 	void WorldRuntime::confirmPlayerTransportStop()
 	{
-		world_->confirmPlayerTransportStop();
+		requireLive("WorldRuntime::confirmPlayerTransportStop").confirmPlayerTransportStop();
 	}
 
 	void WorldRuntime::clearPlayerInput()
 	{
-		world_->clearPlayerInput();
+		requireLive("WorldRuntime::clearPlayerInput").clearPlayerInput();
 	}
 
-	std::uint64_t WorldRuntime::getSimulationTick() const noexcept
+	std::uint64_t WorldRuntime::getSimulationTick() const
 	{
-		return world_->getSimulationTick();
+		return requireLive("WorldRuntime::getSimulationTick").getSimulationTick();
 	}
 
-	core::SimulationPhase WorldRuntime::getCurrentSimulationPhase() const noexcept
+	core::SimulationPhase WorldRuntime::getCurrentSimulationPhase() const
 	{
-		return world_->getCurrentSimulationPhase();
+		return requireLive("WorldRuntime::getCurrentSimulationPhase").getCurrentSimulationPhase();
 	}
 
 	core::SimulationSnapshot WorldRuntime::getSimulationSnapshot() const
 	{
-		return world_->getSimulationSnapshot();
+		return requireLive("WorldRuntime::getSimulationSnapshot").getSimulationSnapshot();
 	}
 
 	core::SimulationSnapshot const& WorldRuntime::getSimulationSnapshotView() const
 	{
-		return world_->getSimulationSnapshotView();
+		return requireLive("WorldRuntime::getSimulationSnapshotView").getSimulationSnapshotView();
 	}
 
-	std::uint64_t WorldRuntime::getSimulationSnapshotBuildCount() const noexcept
+	std::uint64_t WorldRuntime::getSimulationSnapshotBuildCount() const
 	{
-		return world_->getSimulationSnapshotBuildCount();
+		return requireLive("WorldRuntime::getSimulationSnapshotBuildCount").getSimulationSnapshotBuildCount();
 	}
 
 	std::vector<core::SimulationEvent> WorldRuntime::consumeSimulationEvents()
 	{
-		return world_->consumeSimulationEvents();
+		return requireLive("WorldRuntime::consumeSimulationEvents").consumeSimulationEvents();
 	}
 
-	void WorldRuntime::setSimulationObserver(core::SimulationObserver* observer) noexcept
+	void WorldRuntime::setSimulationObserver(core::SimulationObserver* observer)
 	{
-		world_->setSimulationObserver(observer);
+		requireLive("WorldRuntime::setSimulationObserver").setSimulationObserver(observer);
 	}
 
 	float WorldRuntime::getFixedTimestep()
@@ -201,40 +217,42 @@ namespace game
 	std::string const& WorldRuntime::agentTagRegistryResourceName() const
 	{
 		static const std::string kNoName;
-		if (!world_->hasAgentTagRegistryReference()) return kNoName;
-		return world_->getAgentTagRegistryResourceName();
+		auto const& world = requireLive("WorldRuntime::agentTagRegistryResourceName");
+		if (!world.hasAgentTagRegistryReference()) return kNoName;
+		return world.getAgentTagRegistryResourceName();
 	}
 
 	std::string const& WorldRuntime::agentBehaviourRegistryResourceName() const
 	{
 		static const std::string kNoName;
-		if (!world_->hasAgentBehaviourRegistryReference()) return kNoName;
-		return world_->getAgentBehaviourRegistryResourceName();
+		auto const& world = requireLive("WorldRuntime::agentBehaviourRegistryResourceName");
+		if (!world.hasAgentBehaviourRegistryReference()) return kNoName;
+		return world.getAgentBehaviourRegistryResourceName();
 	}
 
 	std::string const& WorldRuntime::furnitureCatalogueResourceName() const
 	{
-		return world_->furnitureCatalogueResourceName();
+		return requireLive("WorldRuntime::furnitureCatalogueResourceName").furnitureCatalogueResourceName();
 	}
 
 	std::string const& WorldRuntime::sectorImageSetResourceName() const
 	{
-		return world_->sectorImageSetResourceName();
+		return requireLive("WorldRuntime::sectorImageSetResourceName").sectorImageSetResourceName();
 	}
 
 	std::string const& WorldRuntime::agentImageSetResourceName() const
 	{
-		return world_->agentImageSetResourceName();
+		return requireLive("WorldRuntime::agentImageSetResourceName").agentImageSetResourceName();
 	}
 
 	std::string const& WorldRuntime::furnitureImageSetResourceName() const
 	{
-		return world_->furnitureImageSetResourceName();
+		return requireLive("WorldRuntime::furnitureImageSetResourceName").furnitureImageSetResourceName();
 	}
 
 	std::string const& WorldRuntime::actionRegistryFilename() const
 	{
-		return world_->actionRegistryFilename();
+		return requireLive("WorldRuntime::actionRegistryFilename").actionRegistryFilename();
 	}
 
 // --- The read surface ---------------------------------------------
