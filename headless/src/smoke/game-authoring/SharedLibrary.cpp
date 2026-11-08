@@ -57,8 +57,13 @@ void registerGameAuthoringSharedLibrary(std::vector<smoke::Check>& checks)
 	checks.push_back({ "authoringLibraryIsSeparateFromTheRuntimeItWraps", [](smoke::Context const&)
 		{
 			std::string const authoringImage = imageOf(entryOf(&game::WorldAuthoring::world));
+			// Same probe as the runtime module's: a member that stays out of
+			// line in the shared runtime library. `getFixedTimestep` cannot be
+			// used here since #983 made it `constexpr` - implicitly `inline`,
+			// so its address is this translation unit's own copy and the
+			// "runtime" image would have resolved to this executable instead.
 			std::string const runtimeImage = imageOf(
-				reinterpret_cast<void*>(&game::WorldRuntime::getFixedTimestep));
+				reinterpret_cast<void*>(&game::WorldRuntime::isValidTransportStopShortName));
 			require(runtimeImage.find("pf-game-runtime") != std::string::npos,
 				"WorldRuntime resolved outside the shared runtime library: " + runtimeImage);
 			require(authoringImage != runtimeImage,

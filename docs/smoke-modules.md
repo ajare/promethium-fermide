@@ -191,6 +191,23 @@ cell-budget boundary on both sides of it. The editor's Platform Lift clipboard
 validation calls the runtime forward rather than reaching into core, so a real
 caller exercises the boundary instead of merely being able to.
 
+`WorldRuntime::getFixedTimestep` and `getMaxTicksPerUpdate` are `constexpr`
+mirrors of the core originals, defined in the header rather than in
+`WorldRuntime.cpp` (#983). They used to be plain `static` forwards, so a host
+that wrote `constexpr float dt = core::World::getFixedTimestep();` lost the
+constant at the boundary and paid a cross-DLL call for a value the compiler
+already knew. `constexpr` implies `inline`, so neither is exported across the
+shared library - the rule `game/Platform.h` already states for `template` and
+`inline` members - and `ConstReadSurface.cpp` pins the fold with
+`static_assert`s over the host's own spellings: a `constexpr` variable, a
+non-type template argument, an array bound and constant arithmetic, each
+required to equal what `core::World` reports. Because the constants are inline
+now, the `dladdr` attribution probes in this module and in `game-authoring`
+moved to `isValidTransportStopShortName`: taking the address of an inline
+function yields the caller's own copy, which would have reported the smoke
+executable and looked exactly like the header-only stand-in the check exists to
+rule out.
+
 The completeness claim behind that is auditable rather than asserted.
 `scripts/audit_read_surface_completeness.py` diffs the public `const` *and*
 `static` read set on `World` against the forwarded set on `WorldRuntime` and

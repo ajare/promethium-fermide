@@ -194,15 +194,9 @@ namespace game
 		requireLive("WorldRuntime::setSimulationObserver").setSimulationObserver(observer);
 	}
 
-	float WorldRuntime::getFixedTimestep()
-	{
-		return core::World::getFixedTimestep();
-	}
-
-	std::uint32_t WorldRuntime::getMaxTicksPerUpdate()
-	{
-		return core::World::getMaxTicksPerUpdate();
-	}
+	// The two pacing constants are deliberately not defined here. They are
+	// `constexpr`, so their bodies have to be visible in every translation
+	// unit that folds them, which puts them in the header (#983).
 
 	// --- Resource names -------------------------------------------------
 	// Reads through the same const view rendering gets. There is no widening

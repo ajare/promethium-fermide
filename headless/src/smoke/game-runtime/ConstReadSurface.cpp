@@ -2,6 +2,7 @@
 #include "Fixture.h"
 
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -72,6 +73,56 @@ namespace
 		decltype(game::WorldRuntime::isValidTransportStopShortName("AB")), bool>);
 	static_assert(std::is_same_v<
 		decltype(game::WorldRuntime::dimensionsAreSupported(16u, 4u, 2u, nullptr)), bool>);
+
+	// --- The two pacing constants are constant expressions here too (#983) ---
+	// Reachable is not the same as foldable. The core originals are `constexpr`,
+	// so a host could write `constexpr float dt = core::World::getFixedTimestep();`
+	// and use the value in a template argument, an array bound or a
+	// `static_assert`; the runtime's plain `static` mirror turned every one of
+	// those into a compile error, which is a capability the boundary took away
+	// while claiming only to reroute the call. Each shape is spelled out below so
+	// a mirror that drops back to a runtime call fails the build instead of
+	// quietly costing a host its compile-time constant.
+	//
+	// Pinned by bit pattern rather than with `==`: what is being asserted is that
+	// the mirror folds to the identical constant, which is exactly what
+	// `std::bit_cast` says - and it says it without tripping the project's
+	// `-Wfloat-equal` pass the way a float comparison would.
+	static_assert(std::bit_cast<std::uint32_t>(game::WorldRuntime::getFixedTimestep())
+			== std::bit_cast<std::uint32_t>(core::World::getFixedTimestep()),
+		"the fixed timestep read through the runtime is not the core compile-time constant (#983)");
+	static_assert(game::WorldRuntime::getMaxTicksPerUpdate() == core::World::getMaxTicksPerUpdate(),
+		"the per-update Tick bound read through the runtime is not the core compile-time constant (#983)");
+
+	// The host's own spelling: a `constexpr` variable initialised from the
+	// runtime, holding the value core reports.
+	constexpr float fixedTimestep = game::WorldRuntime::getFixedTimestep();
+	constexpr std::uint32_t maxTicksPerUpdate = game::WorldRuntime::getMaxTicksPerUpdate();
+	static_assert(std::bit_cast<std::uint32_t>(fixedTimestep)
+			== std::bit_cast<std::uint32_t>(1.0f / 60.0f),
+		"the fixed timestep is not usable as a compile-time constant through the runtime (#983)");
+	static_assert(maxTicksPerUpdate == 600u,
+		"the per-update Tick bound is not usable as a compile-time constant through the runtime (#983)");
+
+	// The three uses a runtime-only call cannot serve: a non-type template
+	// argument, an array bound, and constant arithmetic.
+	template <float Timestep>
+	struct TimestepProbe
+	{
+		static constexpr float value = Timestep;
+	};
+	static_assert(std::bit_cast<std::uint32_t>(
+				TimestepProbe<game::WorldRuntime::getFixedTimestep()>::value)
+			== std::bit_cast<std::uint32_t>(fixedTimestep),
+		"the fixed timestep is not usable as a template argument through the runtime (#983)");
+	static_assert(sizeof(std::array<std::uint32_t, game::WorldRuntime::getMaxTicksPerUpdate()>)
+			== static_cast<std::size_t>(maxTicksPerUpdate) * sizeof(std::uint32_t),
+		"the per-update Tick bound is not usable as an array bound through the runtime (#983)");
+	static_assert(maxTicksPerUpdate / 2u == 300u
+			&& fixedTimestep > 0.0f && fixedTimestep < 1.0f,
+		"the runtime pacing constants are not usable in constant arithmetic (#983)");
+	static_assert(std::is_same_v<decltype(game::WorldRuntime::getFixedTimestep()), float>);
+	static_assert(std::is_same_v<decltype(game::WorldRuntime::getMaxTicksPerUpdate()), std::uint32_t>);
 
 	// --- The three lookups: the const overload is the const view's only one ---
 	static_assert(std::is_same_v<

@@ -198,11 +198,35 @@ namespace game
 		// during callbacks.
 		void setSimulationObserver(core::SimulationObserver* observer);
 
-		// The fixed simulation timestep and the per-update tick bound, mirrored
-		// from core so a host can pace itself without including core/World.h.
-		static float getFixedTimestep();
+		// The fixed simulation timestep and the per-update Tick bound, mirrored
+		// from core so the runtime is the single place a host asks about
+		// pacing (#983). Not to keep `core/World.h` out of the include set:
+		// this header includes that file whole near the top, so no consumer of
+		// the runtime avoids it and that was never what these bought.
+		//
+		// Both are `constexpr`, matching the core originals, so a host that
+		// wrote `constexpr float dt = core::World::getFixedTimestep();`
+		// before this boundary existed keeps writing it. The value stays a
+		// compile-time constant - usable in array bounds, template arguments,
+		// `static_assert`s and compile-time arithmetic - rather than decaying
+		// into a runtime call the moment the read is routed through here. The
+		// bodies forward to core rather than restating the literals, so the
+		// mirror still cannot drift from what the simulation runs on.
+		//
+		// `constexpr` implies `inline`, so both are defined here rather than
+		// in `WorldRuntime.cpp`, and they are not exported across the
+		// shared-library boundary: that is the rule `game/Platform.h` already
+		// states for `template` and `inline` members. A host pacing itself
+		// therefore makes no cross-DLL call for either constant.
+		static constexpr float getFixedTimestep()
+		{
+			return core::World::getFixedTimestep();
+		}
 
-		static std::uint32_t getMaxTicksPerUpdate();
+		static constexpr std::uint32_t getMaxTicksPerUpdate()
+		{
+			return core::World::getMaxTicksPerUpdate();
+		}
 
 		// --- Resource names ----------------------------------------------
 		// The names a World's external packages are referenced by (#969, spec
