@@ -112,6 +112,8 @@ namespace game
 	// --- Levels and Layers ---
 	uint32_t addLayer();
 	void addLevel();
+	void setLayerName(uint32_t layerIndex, std::string name);
+	void setLevelName(uint32_t level, std::string name);
 	core::World::LevelDeletePlan planDeleteLevel(uint32_t level) const;
 	bool applyDeleteLevel(core::World::LevelDeletePlan const& plan);
 	core::World::LayerDeletePlan planDeleteLayer(uint32_t layerIndex) const;
@@ -204,6 +206,14 @@ namespace game
 	core::World::ChamberEditPlan planRemoveChamber(uint32_t sectorIndex) const;
 	core::World::ChamberEditPlan planSetChamberSubtype(uint32_t sectorIndex, core::ChamberSubtype subtype) const;
 	uint32_t applyChamberEdit(core::World::ChamberEditPlan const& plan);
+
+	// --- Access panels ---
+	bool canAddAccessPanel(uint32_t sectorIndex, uint32_t levelOffset, uint32_t cellX,
+		core::AccessPanelGeometry geometry = {}, std::string* diagnostic = nullptr) const;
+	core::World::CreateObjectResult addAccessPanel(uint32_t sectorIndex,
+		uint32_t levelOffset, uint32_t cellX,
+		core::AccessPanelGeometry geometry = {}, std::optional<float> speed = {});
+	bool removeAccessPanel(uint32_t sectorIndex, uint32_t objectIndex);
 
 	// --- Doors ---
 	bool canAddCorridorDoor(uint32_t layerIndex, uint32_t y, uint32_t x, std::string* diagnostic = nullptr) const;
@@ -349,6 +359,47 @@ namespace game
 	void setSectorImageSetResourceName(std::string name);
 	void setAgentImageSetResourceName(std::string name);
 	void setFurnitureImageSetResourceName(std::string name);
+
+	// --- In-place property edits -------------------------------------
+	// These change one authored property of something that already exists, so
+	// there is no plan to make and no cascade to run: the World patches the
+	// live object and its construction record together. Each one still
+	// refuses when the document cannot accept it, and the refusal is the
+	// World's, not a new policy added here.
+	bool setRoomHeightScale(uint32_t sectorIndex, std::optional<float> scale,
+		std::string* diagnostic = nullptr);
+	bool setBackgroundColour(uint32_t sectorIndex,
+		core::BackgroundColour const& colour, std::string* diagnostic = nullptr);
+	bool setFacadeColour(uint32_t sectorIndex,
+		core::BackgroundColour const& colour, std::string* diagnostic = nullptr);
+	bool setMarkerProperties(core::MarkerId id, core::MarkerProperties properties,
+		std::string* diagnostic = nullptr);
+	bool setAirlockCycleSeconds(uint32_t sectorIndex, float seconds);
+
+	// --- Agent live state --------------------------------------------
+	// The editor changes whether an Agent runs and drops a Path it no longer
+	// wants; the World already labels these as editor operations. They are
+	// here rather than on the runtime because the game never asks for them -
+	// the player steers an Agent through the input surface, and never
+	// activates one or clears its route (#972, spec #960 decision 4).
+	bool setAgentActive(core::AgentId agent, bool active,
+		std::string* diagnostic = nullptr);
+	bool clearAgentPath(core::AgentId agent);
+
+	// Press an Interaction Point on behalf of some Agent the editor has
+	// picked, which is how the canvas tests a Button or an Access panel.
+	// This is not player input - the runtime's input surface is about the
+	// player - so it is an authoring-side act on the document.
+	core::InteractionRequestId requestInteraction(core::InteractionPointId point,
+		core::AgentId actor);
+
+	// --- Build -------------------------------------------------------
+	// The rebuild that closes a structural edit. `WorldRuntime` also exposes
+	// this, because a game has to build the World it loaded; the editor's
+	// call is not the same act. It follows an edit that changed topology and
+	// is part of the edit transaction the World forces - pause, edit, build,
+	// resume - so it belongs with the handle that made the edit (#972).
+	void finishBuild();
 
 	// --- Persistence -------------------------------------------------
 	// Writing the document and settling the saved marker are two calls, not

@@ -285,7 +285,7 @@ live preview the game's own path. `editor::EditorDocument`
 ([`pf-agent-editing`](../pf-agent-editing/include/EditorDocument.h)) owns one
 `game::WorldRuntime` — the type the shipped game owns its World with — with a
 `game::WorldAuthoring` wrapped over it, and it is the only thing the editor
-holds its document by. The 14 registrations are about that one World being
+holds its document by. The 18 registrations are about that one World being
 seen from both sides.
 
 `Document.cpp` checks the ownership. The World the UI holds and the World the
@@ -320,6 +320,19 @@ its own and put a runtime beside it. The document is never copyable, its
 `runtime()` hands out `game::WorldRuntime&` (never a World), and
 `editor::previewRuntime()` resolves to a runtime reference, so every drive
 call lands on the runtime rather than on the World underneath it.
+
+`AuthoringRoute.cpp` is the authoring half of the same proof (#972). The
+handle the UI carries is `editor::DocumentPtr`, and the only mutable view of
+the World reachable from the boundary is the one `WorldAuthoring` grants —
+`WorldRuntime::world()` is `core::World const&` and stays that way, so a
+call site cannot reach a mutating method without naming the authoring
+handle. An edit made through `document->authoring()` — a Room added, the
+rebuild that closes it, a Layer renamed — lands in the World the preview is
+running and in the `shared_ptr` the editing panels take, which is the same
+object under a different handle. A `WorldAuthoring const&` answers the
+`can...` guards, so preflight is proved to need the read view and never the
+mutable one, and the handle is not copyable, so there is never a second
+privilege over one document.
 
 The module links `pf-agent-editing`, which brings `pf-game-authoring` and
 `pf-game-runtime` with it. It is registered as `smoke-editor-preview` with

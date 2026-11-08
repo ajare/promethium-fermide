@@ -574,257 +574,13 @@ bool processEvents(SDL_Window* window)
 }
 
 
-std::shared_ptr<core::World> createTestWorld()
-{
-	auto world = make_shared<core::World>("Citadel", 48, 6);
-
-	try
-	{
-		enum CitadelLevel
-		{
-			ReactorLevel,
-			HospitalLevel,
-			MaintenanceLevel,
-			StorageLevel,
-			FlightLevel,
-			ExecutiveLevel,
-			EngineeringLevel,
-			SecurityLevel,
-			BridgeLevel
-		};
-
-		//
-		// Reactor
-		// 
-
-		// First corridor
-		world->addCorridor(ReactorLevel, 1, 8);
-		
-		world->addRoom("Pump Room", 1, ReactorLevel, 0, 4, 1);
-		
-		//world->addSectorLightSwitch(pumpRoomIndex, 0);
-
-		world->addRoom("Fuel Cells", 1, ReactorLevel, 5, 3, 1);
-		
-		world->addSectorDoor(0, ReactorLevel, 6);
-		
-		world->addSectorDoor(0, ReactorLevel, 2);
-		/*
-		world->addSectorWindow(0, ReactorLevel, 7, 1, 1);
-		
-		// Second corridor
-		auto corr2Index = world->addCorridor(ReactorLevel, 9, 6);
-
-		// Reactor core
-		auto reactorCoreIndex = world->addRoom("Reactor Core", 1, ReactorLevel, 9, 4, 3);
-		
-		world->addSectorWalkway(reactorCoreIndex, 1, 0);
-		world->addSectorWalkway(reactorCoreIndex, 1, 2);
-		world->addSectorWalkway(reactorCoreIndex, 1, 3);
-		world->addSectorWalkway(reactorCoreIndex, 2, 0);
-		world->addSectorWalkway(reactorCoreIndex, 2, 3);
-		
-		world->addSectorForceBridge(reactorCoreIndex, 1, 1, { 1, CORE_SIDE_RIGHT, true, true, 2 });
-		
-		world->addSectorLadder(reactorCoreIndex, 0, 0, { 2, true, true });
-		world->addSectorLadder(reactorCoreIndex, 1, 3, { 2, true, true });
-
-		world->addSectorMarker(reactorCoreIndex, 0, 3.0f);
-		
-		world->addSectorDoor(ReactorLevel, 10);
-
-		world->addSectorWindow(0, ReactorLevel, 1, 1, 1);
-		
-		// Decontamination
-		world->addRoom("Decontamination", 1, ReactorLevel, 14, 3, 1);
-		world->addSectorDoor(ReactorLevel, 14);
-
-		world->addSectorWindow(0, ReactorLevel, 11, 2, 1);
-
-		// Connect corridors
-		world->addSectorBulkheadDoor(0, ReactorLevel, 9, CORE_SIDE_LEFT);
-		
-		// Third corridor
-		world->addCorridor(ReactorLevel, 16, 14);
-
-		world->addSectorDoor(ReactorLevel, 16);
-
-		// Fourth corridor
-		world->addCorridor(ReactorLevel, 34, 9);
-
-		world->addSectorDoor(ReactorLevel, 38);
-
-		world->addShuttle(ReactorLevel, 24, 17, { 2, 3, { 0, 10 }, 0 });
-*/
-/*
-		//
-		// Hospital
-		//
-		world->addCorridor(HospitalLevel, 1, 4);
-		world->addCorridor(HospitalLevel, 6, 10);
-		auto corrIndex = world->addCorridor(HospitalLevel, 17, 4, 2);
-
-		world->addSectorWalkway(corrIndex, 1, 1);
-		world->addSectorWalkway(corrIndex, 1, 2);
-		world->addSectorWalkway(corrIndex, 1, 3);
-
-		auto icuIndex = world->addRoom("ICU", 1, HospitalLevel, 13, 3, 1, CORE_DOOR_HEIGHT + 0.1f);
-		world->addSectorDoor(HospitalLevel, 14);
-
-		world->removeLocationWall(icuIndex, 0, CORE_SIDE_LEFT);
-
-		auto acIndex = world->addRoom("Autoclaves", 1, HospitalLevel, 0, 3, 4, CORE_DOOR_HEIGHT + 0.1f);
-
-		world->addSectorWalkway(acIndex, 1, 0);
-		world->addSectorWalkway(acIndex, 1, 1);
-		world->addSectorWalkway(acIndex, 2, 0);
-		world->addSectorWalkway(acIndex, 2, 1);
-
-		world->addSectorPlatformLift(acIndex, 0, 0, { 1, { 0, 1, 2 } });
-
-		world->addSectorDoor(HospitalLevel, 2);
-		
-		auto morgueCorrIndex = world->addCorridor(HospitalLevel, 22, 9);
-		auto morgueIndex = world->addRoom("Morgue", 1, HospitalLevel, 22, 9, 1);
-		world->addSectorDoor(HospitalLevel, 26);
-
-		uint32_t vertexIdentifiers[20];
-		for (int i = 0; i < 9; ++i)
-		{
-			if (i == 4) continue;
-
-			uint32_t vertexIdentifier;
-			world->addSectorMarker(morgueCorrIndex, 0, i + 0.5f, &vertexIdentifier);
-			vertexIdentifiers[i * 2] = vertexIdentifier;
-
-			world->addSectorMarker(morgueIndex, 0, i + 0.5f, &vertexIdentifier);
-			vertexIdentifiers[i * 2 + 1] = vertexIdentifier;
-		}
-
-		uint32_t vertexIdentifier;
-		world->addSectorMarker(reactorCorr1, 0, 3.0f, &vertexIdentifier);
-		vertexIdentifiers[18] = vertexIdentifier;
-		world->addSectorMarker(pumpRoomIndex, 0, 1.5f, &vertexIdentifier);
-		vertexIdentifiers[19] = vertexIdentifier;
-
-
-		//
-		// Maintenance
-		//
-		world->addCorridor(MaintenanceLevel, 2, 3);
-		world->addCorridor(MaintenanceLevel, 6, 3);
-
-		//
-		// Storage
-		//
-		auto storageCorrIndex = world->addCorridor(StorageLevel, 6, 6);
-		world->addCorridor(StorageLevel, 15, 6);
-
-		world->addShuttle(StorageLevel, 10, 7, { 1, 3, { 0, 4 }, 0 });
-
-		//world->addSectorWindow(0, StorageLevel, 10, 2, 1);
-		//world->addSectorWindow(1, StorageLevel, 13, 1, 1);
-
-		//
-		// Flight level
-		//
-		world->addCorridor(FlightLevel, 6, 4);
-
-		//
-		// Join levels
-		//
-		world->addLadder(ReactorLevel, 4, { 3, true, true });
-		world->addLadder(HospitalLevel + 1, 18, { 2, true, true });
-		world->addStairwell(ReactorLevel, 19, 4, CORE_SIDE_LEFT);
-		world->addLift(ReactorLevel, 17, { 1, { 0, 1, 3 } });
-		world->addLift(HospitalLevel, 6, { 2, { 0, 1, 2, 3 } });
-
-		// Add Windows now that we've placed objects on both Layers
-		world->addSectorWindow(1, HospitalLevel, 4, 1, 1);
-		world->addSectorWindow(0, MaintenanceLevel, 17, 1, 1);
-		world->addSectorWindow(1, MaintenanceLevel, 0, 1, 1);
-		world->addSectorWindow(1, MaintenanceLevel, 12, 1, 1);
-*/
-		world->finishBuild();
-
-		// Add agents
-
-		// Door test agents
-		/*
-		for (int i = 0; i < 4; ++i)
-		{
-			if (i == 8) continue;
-			
-			int xx = i & 1 ? 9 - i : i / 2;
-			
-			// Fore
-			auto agentId = world->createAgent(format("PathAgentF {}", i + 1),
-				morgueCorrIndex, 0, xx + 0.5f);
-			auto agent = world->lookupAgent(agentId).entity;
-
-			// Generate path
-			auto graph = world->getGraph();
-			auto vertex = graph->getVertexByIdentifier(vertexIdentifiers[i * 2 + 1]);
-			auto path = core::pathing::findPath(agent, graph.get(), nullptr, vertex);
-			agent->setPath(path, false);
-
-			// Back
-			//agent = new core::Agent(format("PathAgentB {}", i + 1));
-
-			//vertex = graph->getVertexByIdentifier(vertexIdentifiers[i * 2]);
-			//path = core::pathing::findPath(agent, graph.get(), nullptr, vertex);
-			//agent->setPath(path, false);
-		}
-		*/
-
-		//auto agent = new core::Agent(format("PathAgent-ButtonTest"));
-
-		// Generate path
-		//auto graph = world->getGraph();
-		//auto vertex = graph->getVertexByIdentifier(vertexIdentifiers[19]);
-		//auto path = core::pathing::findPath(agent, graph.get(), nullptr, vertex);
-		//agent->setPath(path, false);
-	}
-	catch (core::WorldException& e)
-	{
-		auto const& buildLog = world->getBuildLog();
-
-		for (auto const& entry : buildLog)
-		{
-			auto const& [source, sourceId, level, msg] = entry;
-
-			string output = format("{}: {}", source, msg);
-
-			switch (level)
-			{
-			case core::LogLevel::Debug:
-				gLogger->debug(output);
-				break;
-
-			case core::LogLevel::Info:
-				gLogger->info(output);
-				break;
-
-			case core::LogLevel::Warning:
-				gLogger->warn(output);
-				break;
-
-			case core::LogLevel::Error:
-				gLogger->error(output);
-				break;
-			}
-		}
-
-		throw e;
-	}
-
-	return world;
-}
-
-
 void run()
 {
-	shared_ptr<core::World> world;// createTestWorld();
+	// The editor holds its authoring handle, not a World. What it holds is the
+	// open document, which owns the runtime that drives the preview and the
+	// `WorldAuthoring` that changes the document; the World only ever reaches
+	// the UI as the aliasing view that handle grants (#972).
+	editor::DocumentPtr document;// opened by File > New or File > Open below
 	// The metrics collector follows the open document rather than the World, so
 	// its observer is registered on the runtime that actually drives the
 	// preview (#971).
@@ -894,16 +650,16 @@ void run()
 		// Logic
 		float updateTimeSecs = updateTimeMicros / 1'000'000.0f;
 
-		auto const document = editor::currentDocument();
-		if (metricsDocument != document || metricsPort != gUISettings.metricsPort || (!gUISettings.metricsEnabled && metricsCollector))
+		auto const open = editor::currentDocument();
+		if (metricsDocument != open || metricsPort != gUISettings.metricsPort || (!gUISettings.metricsEnabled && metricsCollector))
 		{
 			if (metricsDocument) metricsDocument->runtime().setSimulationObserver(nullptr);
 			metricsServer.reset(); metricsCollector.reset(); metricsDocument.reset();
 			metricsPort = gUISettings.metricsPort;
 		}
-		if (gUISettings.metricsEnabled && document && !metricsCollector)
+		if (gUISettings.metricsEnabled && open && !metricsCollector)
 		{
-			metricsDocument = document;
+			metricsDocument = open;
 			metricsCollector = std::make_unique<core::SimulationMetricsCollector>(
 				metricsDocument->runtime().world(), gMetricsDetail);
 			metricsServer = std::make_unique<metrics::MetricsHttpServer>(*metricsCollector);
@@ -911,12 +667,14 @@ void run()
 			metricsDocument->runtime().setSimulationObserver(metricsCollector.get());
 		}
 		if (metricsCollector && (gUISettings.worldPaused || metricsDocument->runtime().isSimulationPaused())) metricsCollector->refresh();
-		if (world)
+		if (document)
 		{
 			// The preview is ticked by the same WorldRuntime the shipped game
 			// ticks, and its event queue is drained here exactly as the game's
-			// would be (#971).
-			auto& runtime = editor::previewRuntime(*world);
+			// would be (#971). The runtime is the document's own, taken through
+			// the authoring handle the document was built with, so there is no
+			// lookup that could pick up a stale one.
+			auto& runtime = document->runtime();
 			runtime.update(gUISettings.worldPaused ? 0.0f : updateTimeSecs);
 			// The current UI observes entity state directly. Drain value events until
 			// an event-driven UI consumer is introduced so the queue remains bounded.
@@ -939,9 +697,9 @@ void run()
 
 		ImGui::NewFrame();
 
-		if (closeRequested) done = requestApplicationClose(world);
-		handleShortcuts(world);
-		if (world) handleContinuousKeyboardInput(world, updateTimeMicros);
+		if (closeRequested) done = requestApplicationClose(document);
+		handleShortcuts(document);
+		if (document) handleContinuousKeyboardInput(document, updateTimeMicros);
 
 		if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_F11)))
 		{
@@ -954,12 +712,12 @@ void run()
 			ImGui::ShowDemoWindow();
 		}
 
-		renderUI(world, pathingAgent);
+		renderUI(document, pathingAgent);
 
-		if (world)
+		if (document)
 		{
 			auto mouseButtonStatus = getMouseButtonStatus();
-			handleWorldInteraction(world, world->getGraph(), mouseButtonStatus);
+			handleWorldInteraction(document, document->world()->getGraph(), mouseButtonStatus);
 		}
 
 		// Rendering

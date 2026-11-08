@@ -10,10 +10,10 @@
 //
 // Every drive call - tick, snapshot, events, pause/resume, time scale - goes
 // through `runtime()`, which the document takes from its own authoring handle.
-// Authoring itself still reaches the raw World; #972 moves those calls onto
-// `WorldAuthoring`. `world()` is the mutable view the authoring grants, held
-// as an aliasing `shared_ptr` so the many existing holders keep the runtime -
-// and therefore the World - alive without any of them becoming a second owner.
+// Authoring goes through `authoring()`, and `world()` is the mutable view that
+// handle grants, held as an aliasing `shared_ptr` so the many existing holders
+// - the editing panels in particular - keep the runtime, and therefore the
+// World, alive without any of them becoming a second owner (#972).
 //
 // The editor is a single-document application: one World, one runtime driving
 // it, one authoring handle over that runtime. The free functions below are
@@ -52,8 +52,9 @@ namespace editor
 
 		game::WorldRuntime const& runtime() const noexcept;
 
-		// The privileged mutator over the runtime. Authoring reaches the
-		// World through it; #972 moves the editor's authoring calls onto it.
+		// The privileged mutator over the runtime. Every authoring call the
+		// editor makes goes through this handle; it is the only mutable view of
+		// the World the editor has (#972).
 		game::WorldAuthoring& authoring() noexcept;
 
 		// The World being shown, as the mutable view the authoring handle
@@ -98,4 +99,12 @@ namespace editor
 	// Closes the document, releasing the runtime and the World it owns. Holders
 	// of the World view keep it alive until they let go.
 	void closeDocument() noexcept;
+
+	// The handle the editor's UI carries (#972). The document owns the
+	// runtime that owns the World and the authoring handle that changes it,
+	// so holding the document holds the whole arrangement together; the
+	// World only ever arrives through `authoring()` or the aliasing `world()`
+	// view taken from it. Threading this rather than a `shared_ptr<World>` is
+	// what stops the UI from holding a World that nothing authorises.
+	using DocumentPtr = std::shared_ptr<EditorDocument>;
 }

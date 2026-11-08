@@ -318,6 +318,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/editor-preview/Document.cpp` | module-owned | `pf-smoke-editor-preview` |
 | `smoke/editor-preview/Preview.cpp` | module-owned | `pf-smoke-editor-preview` |
 | `smoke/editor-preview/Boundary.cpp` | module-owned | `pf-smoke-editor-preview` |
+| `smoke/editor-preview/AuthoringRoute.cpp` | module-owned | `pf-smoke-editor-preview` |
 <!-- current-ownership-end -->
 Simulation Observation was migrated in #280. Its stable registered check
 is `simulation/observation`; its old path was

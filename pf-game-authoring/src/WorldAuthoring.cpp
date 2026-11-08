@@ -92,6 +92,14 @@ void WorldAuthoring::addLevel()
 {
 	world().addLevel();
 }
+void WorldAuthoring::setLayerName(uint32_t layerIndex, std::string name)
+{
+	world().setLayerName(layerIndex, std::move(name));
+}
+void WorldAuthoring::setLevelName(uint32_t level, std::string name)
+{
+	world().setLevelName(level, std::move(name));
+}
 core::World::LevelDeletePlan WorldAuthoring::planDeleteLevel(uint32_t level) const
 {
 	return document().planDeleteLevel(level);
@@ -417,6 +425,25 @@ core::World::ChamberEditPlan WorldAuthoring::planSetChamberSubtype(uint32_t sect
 uint32_t WorldAuthoring::applyChamberEdit(core::World::ChamberEditPlan const& plan)
 {
 	return world().applyChamberEdit(plan);
+}
+
+// --- Access panels ---
+bool WorldAuthoring::canAddAccessPanel(uint32_t sectorIndex, uint32_t levelOffset,
+	uint32_t cellX, core::AccessPanelGeometry geometry,
+	std::string* diagnostic) const
+{
+	return document().canAddAccessPanel(sectorIndex, levelOffset, cellX, geometry,
+		diagnostic);
+}
+core::World::CreateObjectResult WorldAuthoring::addAccessPanel(uint32_t sectorIndex,
+	uint32_t levelOffset, uint32_t cellX, core::AccessPanelGeometry geometry,
+	std::optional<float> speed)
+{
+	return world().addAccessPanel(sectorIndex, levelOffset, cellX, geometry, speed);
+}
+bool WorldAuthoring::removeAccessPanel(uint32_t sectorIndex, uint32_t objectIndex)
+{
+	return world().removeAccessPanel(sectorIndex, objectIndex);
 }
 
 // --- Doors ---
@@ -875,6 +902,54 @@ void WorldAuthoring::setAgentImageSetResourceName(std::string name)
 void WorldAuthoring::setFurnitureImageSetResourceName(std::string name)
 {
 	world().setFurnitureImageSetResourceName(std::move(name));
+}
+
+// --- In-place property edits ---
+bool WorldAuthoring::setRoomHeightScale(uint32_t sectorIndex,
+	std::optional<float> scale, std::string* diagnostic)
+{
+	return world().setRoomHeightScale(sectorIndex, scale, diagnostic);
+}
+bool WorldAuthoring::setBackgroundColour(uint32_t sectorIndex,
+	core::BackgroundColour const& colour, std::string* diagnostic)
+{
+	return world().setBackgroundColour(sectorIndex, colour, diagnostic);
+}
+bool WorldAuthoring::setFacadeColour(uint32_t sectorIndex,
+	core::BackgroundColour const& colour, std::string* diagnostic)
+{
+	return world().setFacadeColour(sectorIndex, colour, diagnostic);
+}
+bool WorldAuthoring::setMarkerProperties(core::MarkerId id,
+	core::MarkerProperties properties, std::string* diagnostic)
+{
+	return world().setMarkerProperties(id, properties, diagnostic);
+}
+bool WorldAuthoring::setAirlockCycleSeconds(uint32_t sectorIndex, float seconds)
+{
+	return world().setAirlockCycleSeconds(sectorIndex, seconds);
+}
+
+// --- Agent live state ---
+bool WorldAuthoring::setAgentActive(core::AgentId agent, bool active,
+	std::string* diagnostic)
+{
+	return world().setAgentActive(agent, active, diagnostic);
+}
+bool WorldAuthoring::clearAgentPath(core::AgentId agent)
+{
+	return world().clearAgentPath(agent);
+}
+core::InteractionRequestId WorldAuthoring::requestInteraction(
+	core::InteractionPointId point, core::AgentId actor)
+{
+	return world().requestInteraction(point, actor);
+}
+
+// --- Build ---
+void WorldAuthoring::finishBuild()
+{
+	world().finishBuild();
 }
 
 // --- Persistence ---

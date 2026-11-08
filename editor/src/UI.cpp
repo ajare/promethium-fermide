@@ -246,8 +246,9 @@ namespace
 	UISettings::SelectionMode gPathSelectionPreviousMode{ UISettings::SelectionMode::Object };
 	bool gPathSelectionPreviouslyRenderedGraph{ false };
 
-	void beginAgentPathSelection(shared_ptr<core::World> const& world)
+	void beginAgentPathSelection(editor::DocumentPtr const& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (!gSelectedAgent || gSelectingAgentPathDestination) return;
 		auto const id = world ? world->getAgentId(gSelectedAgent) : core::AgentId{};
 		if (world && id && world->agentBehaviourOwnsMovement(id)) return;
@@ -270,9 +271,10 @@ namespace
 		gSelectedVertex.reset();
 	}
 
-	void chooseAgentDestinationAction(shared_ptr<core::World> const& world,
+	void chooseAgentDestinationAction(editor::DocumentPtr const& document,
 		shared_ptr<const core::Vertex> const& vertex)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (!gSelectedAgent || !vertex || !isMarkerPathTarget(*world, *vertex)) return;
 		auto path = world->getGraph()->calculatePath(gSelectedAgent, nullptr, vertex);
 		if (!path)
@@ -285,8 +287,9 @@ namespace
 		endAgentPathSelection();
 	}
 
-	void renderDestinationActionPopup(shared_ptr<core::World> const& world)
+	void renderDestinationActionPopup(editor::DocumentPtr const& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto& pending = gPendingMovementAction;
 		// Stable identities avoid retaining a Path or a raw Agent across edits,
 		// topology rebuilds, selection changes, and World replacement.
@@ -1352,8 +1355,9 @@ namespace
 		if (!runtime.isSimulationPaused()) runtime.pauseSimulation();
 	}
 
-	void setWorldPaused(shared_ptr<core::World> const& world, bool paused)
+	void setWorldPaused(editor::DocumentPtr const& document, bool paused)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto& runtime = editor::previewRuntime(*world);
 		if (paused)
 		{
@@ -1373,15 +1377,16 @@ namespace
 		gUISettings.worldPaused = false;
 	}
 
-	void placeMarker(shared_ptr<core::World> const& world, PegmanTarget const& target)
+	void placeMarker(editor::DocumentPtr const& document, PegmanTarget const& target)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
 			pausePreview(*world);
-			auto created = world->addSectorMarker(target.sector->getIndex(),
+			auto created = document->authoring().addSectorMarker(target.sector->getIndex(),
 				target.levelOffset, target.localX);
-			world->finishBuild();
+			document->authoring().finishBuild();
 			gUISettings.renderMarkers = true;
 			setSelectionMode(UISettings::SelectionMode::Object);
 			gSelectedAgent = nullptr;
@@ -1399,8 +1404,9 @@ namespace
 		}
 	}
 
-	void placeDoor(shared_ptr<core::World> const& world, PegmanTarget const& target)
+	void placeDoor(editor::DocumentPtr const& document, PegmanTarget const& target)
 	{
+		auto const world = document ? document->world() : nullptr;
 		// The Shuttle sits one Layer behind the Layer the Door is authored on.
 		gShuttleDoorCandidates = world->getShuttleStopCandidatesForDoor(gUISettings.visibleLayer + 1, target.cellY, target.cellX);
 		if (!gShuttleDoorCandidates.empty())
@@ -1412,8 +1418,8 @@ namespace
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			auto created = world->addSectorDoor(gUISettings.visibleLayer, target.cellY, target.cellX, gDoorDraft);
-			world->finishBuild();
+			auto created = document->authoring().addSectorDoor(gUISettings.visibleLayer, target.cellY, target.cellX, gDoorDraft);
+			document->authoring().finishBuild();
 			setSelectionMode(UISettings::SelectionMode::Object);
 			gSelectedAgent = nullptr;
 			gSelectedSector.reset();
@@ -1430,14 +1436,15 @@ namespace
 		}
 	}
 
-	void placeBulkheadDoor(shared_ptr<core::World> const& world, PegmanTarget const& target)
+	void placeBulkheadDoor(editor::DocumentPtr const& document, PegmanTarget const& target)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			auto created = world->addSectorBulkheadDoor(gUISettings.visibleLayer,
+			auto created = document->authoring().addSectorBulkheadDoor(gUISettings.visibleLayer,
 				target.cellY, target.cellX, CORE_SIDE_LEFT);
-			world->finishBuild();
+			document->authoring().finishBuild();
 			setSelectionMode(UISettings::SelectionMode::Object);
 			gSelectedAgent = nullptr;
 			gSelectedSector.reset();
@@ -1454,14 +1461,15 @@ namespace
 		}
 	}
 
-	void placeWindow(shared_ptr<core::World> const& world, PegmanTarget const& target, bool booth = false)
+	void placeWindow(editor::DocumentPtr const& document, PegmanTarget const& target, bool booth = false)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			auto created = booth ? world->addBoothWindow(gUISettings.visibleLayer, target.cellY, target.cellX)
-				: world->addSectorWindow(gUISettings.visibleLayer, target.cellY, target.cellX, 1, 1, {});
-			world->finishBuild();
+			auto created = booth ? document->authoring().addBoothWindow(gUISettings.visibleLayer, target.cellY, target.cellX)
+				: document->authoring().addSectorWindow(gUISettings.visibleLayer, target.cellY, target.cellX, 1, 1, {});
+			document->authoring().finishBuild();
 			setSelectionMode(UISettings::SelectionMode::Object);
 			gSelectedAgent = nullptr;
 			gSelectedSector.reset();
@@ -1478,14 +1486,15 @@ namespace
 		}
 	}
 
-	void placeWalkway(shared_ptr<core::World> const& world, PegmanTarget const& target)
+	void placeWalkway(editor::DocumentPtr const& document, PegmanTarget const& target)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			auto created = world->addSectorWalkway(target.sector->getIndex(),
+			auto created = document->authoring().addSectorWalkway(target.sector->getIndex(),
 				target.levelOffset, (uint32_t)target.localX);
-			world->finishBuild();
+			document->authoring().finishBuild();
 			setSelectionMode(UISettings::SelectionMode::Object);
 			gSelectedAgent = nullptr;
 			gSelectedSector.reset();
@@ -1502,8 +1511,9 @@ namespace
 		}
 	}
 
-	void placePlatformLift(shared_ptr<core::World> const& world, PegmanTarget const& target)
+	void placePlatformLift(editor::DocumentPtr const& document, PegmanTarget const& target)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
@@ -1516,9 +1526,9 @@ namespace
 				string diagnostic;
 				if (!world->canAddPlatformLift(target.sector->getIndex(),
 					(uint32_t)target.localX, options, &diagnostic)) continue;
-				auto created = world->addSectorPlatformLift(target.sector->getIndex(), 0,
+				auto created = document->authoring().addSectorPlatformLift(target.sector->getIndex(), 0,
 					(uint32_t)target.localX, options);
-				world->finishBuild();
+				document->authoring().finishBuild();
 				setSelectionMode(UISettings::SelectionMode::Object);
 				gSelectedAgent = nullptr; gSelectedSector.reset();
 				gSelectedSectorObject = created.lift.sector->getObject(created.lift.index);
@@ -1533,16 +1543,17 @@ namespace
 		{ core::addLogMessage("PlatformLift editor", 0, core::LogLevel::Error, error.what()); }
 	}
 
-	void placeForceBridge(shared_ptr<core::World> const& world, PegmanTarget const& target)
+	void placeForceBridge(editor::DocumentPtr const& document, PegmanTarget const& target)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
 			core::World::CreateForceBridgeOptions options;
 			options.width = target.cellsWide;
-			auto created = world->addSectorForceBridge(target.sector->getIndex(),
+			auto created = document->authoring().addSectorForceBridge(target.sector->getIndex(),
 				target.levelOffset, (uint32_t)target.localX, options);
-			world->finishBuild();
+			document->authoring().finishBuild();
 			setSelectionMode(UISettings::SelectionMode::Object);
 			gSelectedAgent = nullptr;
 			gSelectedSector.reset();
@@ -1559,14 +1570,15 @@ namespace
 		}
 	}
 
-	void placeRoomLadder(shared_ptr<core::World> const& world, PegmanTarget const& target)
+	void placeRoomLadder(editor::DocumentPtr const& document, PegmanTarget const& target)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			auto created = world->addRoomLadder(target.sector->getIndex(),
+			auto created = document->authoring().addRoomLadder(target.sector->getIndex(),
 				target.levelOffset, (uint32_t)target.localX);
-			world->finishBuild();
+			document->authoring().finishBuild();
 			setSelectionMode(UISettings::SelectionMode::Object);
 			gSelectedAgent = nullptr;
 			gSelectedSector.reset();
@@ -1583,8 +1595,9 @@ namespace
 		}
 	}
 
-	void landPegman(shared_ptr<core::World> const& world)
+	void landPegman(editor::DocumentPtr const& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (gUISettings.worldPaused && locationHasCapacity(gPegman.sector))
 		{
 			core::AgentId placed{};
@@ -1612,7 +1625,7 @@ namespace
 			else
 			{
 				setSelectionMode(UISettings::SelectionMode::Object);
-				gSelectedAgent = world->lookupAgent(placed).entity;
+				gSelectedAgent = document->authoring().world().lookupAgent(placed).entity;
 				gSelectedSector.reset();
 				gSelectedSectorObject.reset();
 			}
@@ -1620,9 +1633,10 @@ namespace
 		resetPegman();
 	}
 
-	void renderObjectPalette(shared_ptr<core::World> const& world, ImVec2 canvasPos,
+	void renderObjectPalette(editor::DocumentPtr const& document, ImVec2 canvasPos,
 		ImVec2 canvasSize, WorldDrawList* drawList)
 	{
+		auto const world = document ? document->world() : nullptr;
 		constexpr ImU32 yellow = IM_COL32(251, 188, 4, 255);
 		constexpr ImU32 red = IM_COL32(244, 67, 54, 255);
 		constexpr ImU32 trayColour = IM_COL32(24, 24, 28, 210);
@@ -1720,7 +1734,7 @@ namespace
 				PegmanTerminalVelocity);
 			gPegman.feetY = max(gPegman.floorY,
 				gPegman.feetY - gPegman.velocity * frameTime);
-			if (gPegman.feetY <= gPegman.floorY) landPegman(world);
+			if (gPegman.feetY <= gPegman.floorY) landPegman(document);
 		}
 
 		bool const furnitureRow = gLocationPlan.isOpen(world);
@@ -1975,7 +1989,7 @@ namespace
 					{
 						auto undo = captureDocumentSnapshot(world);
 						if (tool == PaintTool::Room)
-							world->addRoom(nextRoomName(world), gPaint.layer,
+							document->authoring().addRoom(nextRoomName(world), gPaint.layer,
 								paintRectangle.y, paintRectangle.x, paintRectangle.width,
 								paintRectangle.height, CORE_ROOM_MAX_HEIGHT);
 						else if (tool == PaintTool::Facade)
@@ -1983,20 +1997,20 @@ namespace
 							// Placed with the Room's validation - the drag already shrank to
 							// the largest free block - and selected on release so the colour
 							// picker is one click away.
-							auto const index = world->addFacade(nextFacadeName(world),
+							auto const index = document->authoring().addFacade(nextFacadeName(world),
 								gPaint.layer, paintRectangle.y, paintRectangle.x,
 								paintRectangle.width, paintRectangle.height, CORE_ROOM_MAX_HEIGHT);
 							setSelectionMode(UISettings::SelectionMode::Sector);
 							gSelectedSector = world->getSector(index);
 						}
 						else if (tool == PaintTool::Corridor)
-							world->addCorridor(gPaint.layer, paintRectangle.y, paintRectangle.x,
+							document->authoring().addCorridor(gPaint.layer, paintRectangle.y, paintRectangle.x,
 								paintRectangle.width, 1);
 						else if (tool == PaintTool::Background)
 						{
 							// Painted on the drag's Layer. A Background is legal on any
 							// Layer, so it never takes the transit front-layer gate.
-							auto const index = world->addBackground(gPaint.layer, paintRectangle.y,
+							auto const index = document->authoring().addBackground(gPaint.layer, paintRectangle.y,
 								paintRectangle.x, paintRectangle.width, paintRectangle.height);
 							setSelectionMode(UISettings::SelectionMode::Sector);
 							gSelectedSector = world->getSector(index);
@@ -2011,24 +2025,24 @@ namespace
 						}
 						else if (tool == PaintTool::Dumbwaiter)
 						{
-							auto id = world->addDumbwaiter(gPaint.layer, paintRectangle.y, paintRectangle.x);
+							auto id = document->authoring().addDumbwaiter(gPaint.layer, paintRectangle.y, paintRectangle.x);
 							setSelectionMode(UISettings::SelectionMode::Sector);
 							gSelectedSector = world->lookupDumbwaiter(id);
 						}
 						else if (tool == PaintTool::Airlock)
 						{
-							auto index = world->addAirlock(gPaint.layer, paintRectangle.y, paintRectangle.x, paintRectangle.width);
+							auto index = document->authoring().addAirlock(gPaint.layer, paintRectangle.y, paintRectangle.x, paintRectangle.width);
 							setSelectionMode(UISettings::SelectionMode::Sector);
 							gSelectedSector = world->getSector(index);
 						}
 						else if (tool == PaintTool::Ladder)
-							world->addLadder(gUISettings.visibleLayer, paintRectangle.y, paintRectangle.x,
+							document->authoring().addLadder(gUISettings.visibleLayer, paintRectangle.y, paintRectangle.x,
 								{ paintRectangle.height, false, true });
 						else if (tool == PaintTool::Stairwell)
 						{
 							int mountSide = paintRectangle.x < (uint32_t)gPaint.anchorX
 								? CORE_SIDE_RIGHT : CORE_SIDE_LEFT;
-							world->addStairwell(gUISettings.visibleLayer, paintRectangle.y, paintRectangle.x,
+							document->authoring().addStairwell(gUISettings.visibleLayer, paintRectangle.y, paintRectangle.x,
 								{ paintRectangle.height, mountSide });
 						}
 						else if (tool == PaintTool::Staircase)
@@ -2039,12 +2053,12 @@ namespace
 									? (int)(paintRectangle.x + paintRectangle.width - 1) : (int)paintRectangle.x);
 							int riseSide = lowerX == (int)paintRectangle.x
 								? CORE_SIDE_RIGHT : CORE_SIDE_LEFT;
-							world->addStaircase(gUISettings.visibleLayer, paintRectangle.y, paintRectangle.x,
+							document->authoring().addStaircase(gUISettings.visibleLayer, paintRectangle.y, paintRectangle.x,
 								paintRectangle.width, riseSide);
 						}
-						else world->addLift(gUISettings.visibleLayer, paintRectangle.y, paintRectangle.x,
+						else document->authoring().addLift(gUISettings.visibleLayer, paintRectangle.y, paintRectangle.x,
 							paintRectangle.width, paintRectangle.height);
-						world->finishBuild();
+						document->authoring().finishBuild();
 						commitDocumentEdit(std::move(undo));
 					}
 					catch (core::Exception const& error)
@@ -2177,42 +2191,42 @@ namespace
 				}
 				else if (target && gPegman.item == PaletteItem::Marker)
 				{
-					placeMarker(world, target);
+					placeMarker(document, target);
 					resetPegman();
 				}
 				else if (target && gPegman.item == PaletteItem::Door)
 				{
-					placeDoor(world, target);
+					placeDoor(document, target);
 					resetPegman();
 				}
 				else if (target && gPegman.item == PaletteItem::BulkheadDoor)
 				{
-					placeBulkheadDoor(world, target);
+					placeBulkheadDoor(document, target);
 					resetPegman();
 				}
 				else if (target && (gPegman.item == PaletteItem::Window || gPegman.item == PaletteItem::BoothWindow))
 				{
-					placeWindow(world, target, gPegman.item == PaletteItem::BoothWindow);
+					placeWindow(document, target, gPegman.item == PaletteItem::BoothWindow);
 					resetPegman();
 				}
 				else if (target && gPegman.item == PaletteItem::Walkway)
 				{
-					placeWalkway(world, target);
+					placeWalkway(document, target);
 					resetPegman();
 				}
 				else if (target && gPegman.item == PaletteItem::ForceBridge)
 				{
-					placeForceBridge(world, target);
+					placeForceBridge(document, target);
 					resetPegman();
 				}
 				else if (target && gPegman.item == PaletteItem::RoomLadder)
 				{
-					placeRoomLadder(world, target);
+					placeRoomLadder(document, target);
 					resetPegman();
 				}
 				else if (target && gPegman.item == PaletteItem::PlatformLift)
 				{
-					placePlatformLift(world, target);
+					placePlatformLift(document, target);
 					resetPegman();
 				}
 				else if (target && gPegman.item == PaletteItem::Agent)
@@ -2224,7 +2238,7 @@ namespace
 					gPegman.feetY = target.feetY;
 					gPegman.floorY = target.floorY;
 					gPegman.velocity = 0.0f;
-					if (gPegman.feetY <= gPegman.floorY) landPegman(world);
+					if (gPegman.feetY <= gPegman.floorY) landPegman(document);
 				}
 				else resetPegman();
 			}
@@ -2505,8 +2519,9 @@ namespace
 
 	// Inline editor for one layer's name.  The edit is committed when the field is
 	// submitted with Enter or loses focus, and is undoable as a single document edit.
-	void renderLayerNameEditor(shared_ptr<core::World> const& world, uint32_t layer, bool level = false)
+	void renderLayerNameEditor(editor::DocumentPtr const& document, uint32_t layer, bool level = false)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto& edit = level ? gLevelNameEdits[layer] : gLayerNameEdits[layer];
 
 		if (!edit.editing)
@@ -2540,8 +2555,8 @@ namespace
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			if (level) world->setLevelName(layer, next);
-			else world->setLayerName(layer, next);
+			if (level) document->authoring().setLevelName(layer, next);
+			else document->authoring().setLayerName(layer, next);
 			commitDocumentEdit(std::move(undo));
 		}
 		catch (std::exception const& error)
@@ -2618,8 +2633,9 @@ namespace
 		if (clearHistory) gWorldDocumentHistory.clear();
 	}
 
-	bool restoreDocumentSnapshot(shared_ptr<core::World>& world, bool redo)
+	bool restoreDocumentSnapshot(editor::DocumentPtr& document, bool redo)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (!world || (redo ? !gWorldDocumentHistory.canRedo()
 			: !gWorldDocumentHistory.canUndo())) return false;
 
@@ -2640,15 +2656,20 @@ namespace
 				? gWorldDocumentHistory.redo(std::move(current), restore)
 				: gWorldDocumentHistory.undo(std::move(current), restore);
 			if (!restored) return false;
-			if (gWorldDocumentHistory.isModified()) loaded->markModified();
 
 			// The restored World goes into a document of its own - a new runtime
 			// over it, with a new authoring handle - rather than into the runtime
 			// being rolled back, because the runtime owns the World it was built
-			// with for its whole life (#971).
-			world = editor::adoptWorld(loaded);
+			// with for its whole life (#971). The document is the handle the UI
+			// keeps, so it is rebound here before anything reads through it, and
+			// the "unsaved" mark is put on the live World through the authoring
+			// handle rather than on the deserialized one before adoption (#972).
+			editor::adoptWorld(loaded);
+			document = editor::currentDocument();
+			if (gWorldDocumentHistory.isModified())
+				document->authoring().world().markModified();
 			clearDocumentState(false);
-			setWorldPaused(world, true);
+			setWorldPaused(document, true);
 			return true;
 		}
 		catch (std::exception const& error)
@@ -2659,8 +2680,9 @@ namespace
 		}
 	}
 
-	bool isDocumentStale(shared_ptr<core::World> const& world)
+	bool isDocumentStale(editor::DocumentPtr const& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		return world && (world->isModified()
 			|| gWorldDocumentHistory.isModified()
 			|| attachedAgentTagRegistryIsModified(world)
@@ -2675,8 +2697,9 @@ namespace
 	}
 
 	string currentAgentTagRegistryFilepath(
-		shared_ptr<core::World> const& world)
+		editor::DocumentPtr const& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (!world || !world->hasAttachedAgentTagRegistry()) return {};
 		auto source = core::resolveCatalogSource("AgentTagRegistry",
 			world->getAgentTagRegistryResourceName());
@@ -2687,8 +2710,9 @@ namespace
 	}
 
 	string currentAgentBehaviourRegistryPackagePath(
-		shared_ptr<core::World> const& world)
+		editor::DocumentPtr const& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (!world || !world->hasAttachedAgentBehaviourRegistry()) return {};
 		auto source = core::resolveCatalogSource("AgentBehaviourRegistry",
 			world->getAgentBehaviourRegistryResourceName());
@@ -2699,18 +2723,20 @@ namespace
 	}
 
 	WorldDocumentSaveTarget currentDocumentSaveTarget(
-		shared_ptr<core::World> const& world, string worldFilepath)
+		editor::DocumentPtr const& document, string worldFilepath)
 	{
+		auto const world = document ? document->world() : nullptr;
 		return { world, std::move(worldFilepath),
-			currentAgentTagRegistryFilepath(world), &gWorldDocumentHistory,
-			currentAgentBehaviourRegistryPackagePath(world) };
+			currentAgentTagRegistryFilepath(document), &gWorldDocumentHistory,
+			currentAgentBehaviourRegistryPackagePath(document) };
 	}
 
 	string normalizedFilepath(string const& filepath);
 	void addRecentFile(string const& filepath);
 
-	bool saveWorld(shared_ptr<core::World> const& world, bool saveAs)
+	bool saveWorld(editor::DocumentPtr const& document, bool saveAs)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (!world) return false;
 
 		string filepath = gWorldFilepath;
@@ -2746,7 +2772,7 @@ namespace
 		}
 
 		string diagnostic;
-		if (!saveWorldDocument(currentDocumentSaveTarget(world, filepath),
+		if (!saveWorldDocument(currentDocumentSaveTarget(document, filepath),
 			&diagnostic))
 		{
 			reportFileError(std::move(diagnostic));
@@ -2758,14 +2784,15 @@ namespace
 		return true;
 	}
 
-	bool saveAllOpenDocuments(shared_ptr<core::World> const& world)
+	bool saveAllOpenDocuments(editor::DocumentPtr const& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (!world) return false;
 		// An untitled World still needs the ordinary Save location chooser.
-		if (gWorldFilepath.empty()) return saveWorld(world, false);
+		if (gWorldFilepath.empty()) return saveWorld(document, false);
 		string diagnostic;
 		if (!saveAllDocuments(
-			{ currentDocumentSaveTarget(world, gWorldFilepath) }, &diagnostic))
+			{ currentDocumentSaveTarget(document, gWorldFilepath) }, &diagnostic))
 		{
 			reportFileError(std::move(diagnostic));
 			return false;
@@ -2795,8 +2822,9 @@ namespace
 		}
 	}
 
-	void openWorld(shared_ptr<core::World>& world, string const& filepath,
+	void openWorld(editor::DocumentPtr& document, string const& filepath,
 		bool fromRecentFiles = false)	{
+		auto world = document ? document->world() : nullptr;
 		string normalized;
 		try
 		{
@@ -2811,7 +2839,9 @@ namespace
 			auto previousBehaviourRegistry = world
 				&& world->hasAttachedAgentBehaviourRegistry()
 				? world->getAgentBehaviourRegistry() : nullptr;
-			world = editor::adoptWorld(loaded);
+			editor::adoptWorld(loaded);
+			document = editor::currentDocument();
+			world = document->world();
 			if (previousRegistry) forgetAgentTagRegistryDocument(previousRegistry);
 			if (previousBehaviourRegistry)
 				forgetAgentBehaviourRegistryDocument(previousBehaviourRegistry);
@@ -2822,7 +2852,7 @@ namespace
 			addRecentFile(gWorldFilepath);
 			clearDocumentState();
 			gWorldDocumentHistory.markSaved();
-			setWorldPaused(world, true);
+			setWorldPaused(document, true);
 			presentWorldLoadWarnings(world->getLoadWarnings());
 			core::addLogMessage("File", 0, core::LogLevel::Info,
 				"Opened World from " + gWorldFilepath);
@@ -2843,8 +2873,9 @@ namespace
 		}
 	}
 
-	void openWorld(shared_ptr<core::World>& world)
+	void openWorld(editor::DocumentPtr& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		nfdu8char_t* selectedPathRaw{ nullptr };
 		auto const result = NFD_OpenDialogU8(&selectedPathRaw,
 			WorldDocumentDialogFilters, 2, nullptr);
@@ -2858,24 +2889,25 @@ namespace
 			return;
 		}
 
-		openWorld(world, selectedPath.get());
+		openWorld(document, selectedPath.get());
 	}
 
-	void executeFileAction(PendingFileAction action, shared_ptr<core::World>& world)
+	void executeFileAction(PendingFileAction action, editor::DocumentPtr& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		switch (action)
 		{
 		case PendingFileAction::New:
 			gOpenNewWorldPopup = true;
 			break;
 		case PendingFileAction::Open:
-			openWorld(world);
+			openWorld(document);
 			break;
 		case PendingFileAction::OpenRecent:
 		{
 			auto const filepath = std::move(gPendingRecentFilepath);
 			gPendingRecentFilepath.clear();
-			openWorld(world, filepath, true);
+			openWorld(document, filepath, true);
 			break;
 		}
 		case PendingFileAction::Close:
@@ -2884,7 +2916,7 @@ namespace
 			if (world && world->hasAttachedAgentBehaviourRegistry())
 				forgetAgentBehaviourRegistryDocument(world->getAgentBehaviourRegistry());
 			editor::closeDocument();
-			world.reset();
+			document.reset();
 			gWorldFilepath.clear();
 			clearDocumentState();
 			break;
@@ -2895,30 +2927,33 @@ namespace
 		}
 	}
 
-	void requestFileAction(PendingFileAction action, shared_ptr<core::World>& world)
+	void requestFileAction(PendingFileAction action, editor::DocumentPtr& document)
 	{
-		if (isDocumentStale(world))
+		auto const world = document ? document->world() : nullptr;
+		if (isDocumentStale(document))
 		{
 			gPendingFileAction = action;
 			gOpenUnsavedChangesPopup = true;
 			return;
 		}
-		executeFileAction(action, world);
+		executeFileAction(action, document);
 	}
 
-	void requestRecentFile(string const& filepath, shared_ptr<core::World>& world)
+	void requestRecentFile(string const& filepath, editor::DocumentPtr& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		gPendingRecentFilepath = filepath;
-		requestFileAction(PendingFileAction::OpenRecent, world);
+		requestFileAction(PendingFileAction::OpenRecent, document);
 	}
 
-	void commitLocationEdit(shared_ptr<core::World> const& world,
+	void commitLocationEdit(editor::DocumentPtr const& document,
 		core::World::LocationEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			auto newIndex = world->applyLocationEdit(plan);
+			auto newIndex = document->authoring().applyLocationEdit(plan);
 			gUISettings.worldPaused = true;
 			gHoveredAgent = nullptr;
 			gHoveredSector.reset();
@@ -2939,9 +2974,10 @@ namespace
 		resetSectorResize();
 	}
 
-	void queueLocationEdit(shared_ptr<core::World> const& world,
+	void queueLocationEdit(editor::DocumentPtr const& document,
 		core::World::LocationEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
@@ -2949,16 +2985,17 @@ namespace
 			gPendingLocationEdit = plan;
 			gOpenLocationEditPopup = true;
 		}
-		else commitLocationEdit(world, plan);
+		else commitLocationEdit(document, plan);
 	}
 
-	void commitLiftEdit(shared_ptr<core::World> const& world,
+	void commitLiftEdit(editor::DocumentPtr const& document,
 		core::World::LiftEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			auto newIndex = world->applyLiftEdit(plan);
+			auto newIndex = document->authoring().applyLiftEdit(plan);
 			gUISettings.worldPaused = true;
 			gHoveredAgent = nullptr; gHoveredSector.reset(); gHoveredSectorObject.reset();
 			gSelectedAgent = nullptr; gSelectedSectorObject.reset();
@@ -2972,9 +3009,10 @@ namespace
 		resetSectorResize();
 	}
 
-	void queueLiftEdit(shared_ptr<core::World> const& world,
+	void queueLiftEdit(editor::DocumentPtr const& document,
 		core::World::LiftEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
@@ -2982,16 +3020,17 @@ namespace
 			gPendingLiftEdit = plan;
 			gOpenLocationEditPopup = true;
 		}
-		else commitLiftEdit(world, plan);
+		else commitLiftEdit(document, plan);
 	}
 
-	void commitShuttleEdit(shared_ptr<core::World> const& world,
+	void commitShuttleEdit(editor::DocumentPtr const& document,
 		core::World::ShuttleEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			auto newIndex = world->applyShuttleEdit(plan);
+			auto newIndex = document->authoring().applyShuttleEdit(plan);
 			gUISettings.worldPaused = true;
 			gHoveredAgent = nullptr; gHoveredSector.reset(); gHoveredSectorObject.reset();
 			gSelectedAgent = nullptr; gSelectedSectorObject.reset();
@@ -3005,9 +3044,10 @@ namespace
 		resetSectorResize();
 	}
 
-	void queueShuttleEdit(shared_ptr<core::World> const& world,
+	void queueShuttleEdit(editor::DocumentPtr const& document,
 		core::World::ShuttleEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
@@ -3015,12 +3055,13 @@ namespace
 			gPendingShuttleEdit = plan;
 			gOpenLocationEditPopup = true;
 		}
-		else commitShuttleEdit(world, plan);
+		else commitShuttleEdit(document, plan);
 	}
 
-	void commitAirlockEdit(shared_ptr<core::World> const& world,
+	void commitAirlockEdit(editor::DocumentPtr const& document,
 		core::World::AirlockEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (!plan.valid)
 		{ core::addLogMessage("Airlock editor", 0, core::LogLevel::Error, plan.diagnostic); return; }
 		auto undo = captureDocumentSnapshot(world);
@@ -3028,7 +3069,7 @@ namespace
 		{
 			// A cached Chamber drag plan must not turn a running edit into a pause.
 			if (!plan.chamber) pausePreview(*world);
-			auto index = plan.chamber ? world->applyChamberEdit(plan) : world->applyAirlockEdit(plan);
+			auto index = plan.chamber ? document->authoring().applyChamberEdit(plan) : document->authoring().applyAirlockEdit(plan);
 			gUISettings.worldPaused = true;
 			gHoveredAgent = nullptr; gHoveredSector.reset(); gHoveredSectorObject.reset();
 			gSelectedAgent = nullptr; gSelectedSectorObject.reset();
@@ -3042,13 +3083,14 @@ namespace
 		resetSectorResize();
 	}
 
-	void commitLadderEdit(shared_ptr<core::World> const& world,
+	void commitLadderEdit(editor::DocumentPtr const& document,
 		core::World::LadderEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			auto newIndex = world->applyLadderEdit(plan);
+			auto newIndex = document->authoring().applyLadderEdit(plan);
 			gUISettings.worldPaused = true;
 			gHoveredAgent = nullptr; gHoveredSector.reset(); gHoveredSectorObject.reset();
 			gSelectedAgent = nullptr; gSelectedSectorObject.reset();
@@ -3062,9 +3104,10 @@ namespace
 		resetSectorResize();
 	}
 
-	void queueLadderEdit(shared_ptr<core::World> const& world,
+	void queueLadderEdit(editor::DocumentPtr const& document,
 		core::World::LadderEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
@@ -3072,16 +3115,17 @@ namespace
 			gPendingLadderEdit = plan;
 			gOpenLocationEditPopup = true;
 		}
-		else commitLadderEdit(world, plan);
+		else commitLadderEdit(document, plan);
 	}
 
-	void commitStairwellEdit(shared_ptr<core::World> const& world,
+	void commitStairwellEdit(editor::DocumentPtr const& document,
 		core::World::StairwellEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			auto newIndex = world->applyStairwellEdit(plan);
+			auto newIndex = document->authoring().applyStairwellEdit(plan);
 			gUISettings.worldPaused = true;
 			gHoveredAgent = nullptr; gHoveredSector.reset(); gHoveredSectorObject.reset();
 			gSelectedAgent = nullptr; gSelectedSectorObject.reset();
@@ -3095,9 +3139,10 @@ namespace
 		resetSectorResize();
 	}
 
-	void queueStairwellEdit(shared_ptr<core::World> const& world,
+	void queueStairwellEdit(editor::DocumentPtr const& document,
 		core::World::StairwellEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation())
@@ -3105,18 +3150,19 @@ namespace
 			gPendingStairwellEdit = plan;
 			gOpenLocationEditPopup = true;
 		}
-		else commitStairwellEdit(world, plan);
+		else commitStairwellEdit(document, plan);
 	}
 
-	void commitPlatformLiftEdit(shared_ptr<core::World> const& world,
+	void commitPlatformLiftEdit(editor::DocumentPtr const& document,
 		core::World::PlatformLiftEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
 			pausePreview(*world);
 			gUISettings.worldPaused = true;
-			gSelectedSectorObject = world->applyPlatformLiftEdit(plan);
+			gSelectedSectorObject = document->authoring().applyPlatformLiftEdit(plan);
 			gHoveredSectorObject.reset();
 			commitDocumentEdit(std::move(undo));
 		}
@@ -3126,24 +3172,26 @@ namespace
 		{ reportEditorError("PlatformLift editor", error.what()); }
 	}
 
-	void queuePlatformLiftEdit(shared_ptr<core::World> const& world,
+	void queuePlatformLiftEdit(editor::DocumentPtr const& document,
 		core::World::PlatformLiftEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation()) { gPendingPlatformLiftEdit = plan; gOpenLocationEditPopup = true; }
-		else commitPlatformLiftEdit(world, plan);
+		else commitPlatformLiftEdit(document, plan);
 	}
 
-	void commitWalkwayEdit(shared_ptr<core::World> const& world,
+	void commitWalkwayEdit(editor::DocumentPtr const& document,
 		core::World::WalkwayEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
 			pausePreview(*world);
 			gUISettings.worldPaused = true;
-			if (world->applyWalkwayEdit(plan))
+			if (document->authoring().applyWalkwayEdit(plan))
 			{
 				gSelectedSectorObject.reset(); gHoveredSectorObject.reset();
 				commitDocumentEdit(std::move(undo));
@@ -3153,24 +3201,26 @@ namespace
 		catch (std::exception const& error) { reportEditorError("Walkway editor", error.what()); }
 	}
 
-	void queueWalkwayEdit(shared_ptr<core::World> const& world,
+	void queueWalkwayEdit(editor::DocumentPtr const& document,
 		core::World::WalkwayEditPlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation()) { gPendingWalkwayEdit = plan; gOpenLocationEditPopup = true; }
-		else commitWalkwayEdit(world, plan);
+		else commitWalkwayEdit(document, plan);
 	}
 
-	void commitObjectMove(shared_ptr<core::World> const& world,
+	void commitObjectMove(editor::DocumentPtr const& document,
 		core::World::ObjectMovePlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
 			pausePreview(*world);
 			gUISettings.worldPaused = true;
-			gSelectedSectorObject = world->applyObjectMove(plan);
+			gSelectedSectorObject = document->authoring().applyObjectMove(plan);
 			gHoveredSectorObject.reset(); gSelectedSector.reset(); gSelectedAgent = nullptr;
 			commitDocumentEdit(std::move(undo));
 		}
@@ -3179,24 +3229,26 @@ namespace
 		resetObjectMove();
 	}
 
-	void queueObjectMove(shared_ptr<core::World> const& world,
+	void queueObjectMove(editor::DocumentPtr const& document,
 		core::World::ObjectMovePlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		if (plan.requiresConfirmation()) { gPendingObjectMove = plan; gOpenLocationEditPopup = true; resetObjectMove(); }
-		else commitObjectMove(world, plan);
+		else commitObjectMove(document, plan);
 	}
 
-	void commitLayerDelete(shared_ptr<core::World> const& world,
+	void commitLayerDelete(editor::DocumentPtr const& document,
 		core::World::LayerDeletePlan const& plan)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
 			pausePreview(*world);
 			gUISettings.worldPaused = true;
-			world->applyDeleteLayer(plan);
+			document->authoring().applyDeleteLayer(plan);
 
 			// Selections and inline name edits can point at Sectors, Agents, and
 			// Layers which no longer exist.
@@ -3219,8 +3271,9 @@ namespace
 
 	// Layer deletion is always destructive, so it is planned first and only applied
 	// once the user confirms the consequence list.
-	void requestLayerDelete(shared_ptr<core::World> const& world, uint32_t layer)
+	void requestLayerDelete(editor::DocumentPtr const& document, uint32_t layer)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (!world) return;
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
@@ -3236,8 +3289,9 @@ namespace
 		gOpenLocationEditPopup = true;
 	}
 
-	void renderFilePopups(shared_ptr<core::World>& world)
+	void renderFilePopups(editor::DocumentPtr& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (gOpenUnsavedChangesPopup)
 		{
 			ImGui::OpenPopup("Unsaved changes");
@@ -3246,19 +3300,19 @@ namespace
 		if (ImGui::BeginPopupModal("Unsaved changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
 		{
 			auto prompt = unsavedDocumentPromptText(
-				currentDocumentSaveTarget(world, gWorldFilepath));
+				currentDocumentSaveTarget(document, gWorldFilepath));
 			if (attachedAgentBehaviourRegistryIsModified(world))
 				prompt += "\n- Agent behaviour registry package '"
 					+ world->getAgentBehaviourRegistryResourceName() + "'";
 			ImGui::TextUnformatted(prompt.c_str());
 			if (ImGui::Button("Save All"))
 			{
-				if (saveAllOpenDocuments(world))
+				if (saveAllOpenDocuments(document))
 				{
 					auto const action = gPendingFileAction;
 					gPendingFileAction = PendingFileAction::None;
 					ImGui::CloseCurrentPopup();
-					executeFileAction(action, world);
+					executeFileAction(action, document);
 				}
 			}
 			ImGui::SameLine();
@@ -3267,7 +3321,7 @@ namespace
 				auto const action = gPendingFileAction;
 				gPendingFileAction = PendingFileAction::None;
 				ImGui::CloseCurrentPopup();
-				executeFileAction(action, world);
+				executeFileAction(action, document);
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("Cancel"))
@@ -3306,12 +3360,13 @@ namespace
 					forgetAgentTagRegistryDocument(world->getAgentTagRegistry());
 				if (world && world->hasAttachedAgentBehaviourRegistry())
 					forgetAgentBehaviourRegistryDocument(world->getAgentBehaviourRegistry());
-				world = editor::openNewWorld(gNewWorldName,
+				editor::openNewWorld(gNewWorldName,
 					static_cast<uint32_t>(gNewWorldWidth),
 					static_cast<uint32_t>(gNewWorldLevels));
+				document = editor::currentDocument();
 				gWorldFilepath.clear();
 				clearDocumentState();
-				setWorldPaused(world, true);
+				setWorldPaused(document, true);
 				ImGui::CloseCurrentPopup();
 			}
 			ImGui::SameLine();
@@ -3476,8 +3531,8 @@ namespace
 							(uint32_t)draft.initialStop, (uint32_t)draft.capacity,
 							draft.minimumDwellSeconds, draft.maximumBoardingSeconds,
 							draft.allowPartialLandings, draft.doorMask };
-						auto created = world->addShuttle(gUISettings.visibleLayer, draft.y, draft.x, draft.cellsWide, options);
-						world->finishBuild();
+						auto created = document->authoring().addShuttle(gUISettings.visibleLayer, draft.y, draft.x, draft.cellsWide, options);
+						document->authoring().finishBuild();
 						setSelectionMode(UISettings::SelectionMode::Sector);
 						gSelectedSector = created.shuttle.sector;
 						commitDocumentEdit(std::move(undo));
@@ -3524,7 +3579,7 @@ namespace
 					gShuttleDoorCandidates.clear();
 					ImGui::CloseCurrentPopup();
 					if (!plan.valid) core::addLogMessage("Shuttle editor", 0, core::LogLevel::Error, plan.diagnostic);
-					else queueShuttleEdit(world, plan);
+					else queueShuttleEdit(document, plan);
 				}
 				ImGui::SameLine();
 				if (ImGui::Button("Cancel"))
@@ -3594,15 +3649,15 @@ namespace
 				gPendingPlatformLiftEdit.reset(); gPendingWalkwayEdit.reset(); gPendingObjectMove.reset();
 				gPendingLayerDelete.reset();
 				ImGui::CloseCurrentPopup();
-				if (locationPlan) commitLocationEdit(world, *locationPlan);
-				else if (liftPlan) commitLiftEdit(world, *liftPlan);
-				else if (shuttlePlan) commitShuttleEdit(world, *shuttlePlan);
-				else if (ladderPlan) commitLadderEdit(world, *ladderPlan);
-				else if (stairwellPlan) commitStairwellEdit(world, *stairwellPlan);
-				else if (platformLiftPlan) commitPlatformLiftEdit(world, *platformLiftPlan);
-				else if (walkwayPlan) commitWalkwayEdit(world, *walkwayPlan);
-				else if (objectMove) commitObjectMove(world, *objectMove);
-				else if (layerDelete) commitLayerDelete(world, *layerDelete);
+				if (locationPlan) commitLocationEdit(document, *locationPlan);
+				else if (liftPlan) commitLiftEdit(document, *liftPlan);
+				else if (shuttlePlan) commitShuttleEdit(document, *shuttlePlan);
+				else if (ladderPlan) commitLadderEdit(document, *ladderPlan);
+				else if (stairwellPlan) commitStairwellEdit(document, *stairwellPlan);
+				else if (platformLiftPlan) commitPlatformLiftEdit(document, *platformLiftPlan);
+				else if (walkwayPlan) commitWalkwayEdit(document, *walkwayPlan);
+				else if (objectMove) commitObjectMove(document, *objectMove);
+				else if (layerDelete) commitLayerDelete(document, *layerDelete);
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("Cancel"))
@@ -4078,12 +4133,13 @@ namespace
 		return definition;
 	}
 
-	bool removeClipboardSelection(shared_ptr<core::World> const& world)
+	bool removeClipboardSelection(editor::DocumentPtr const& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (gUISettings.selectionMode == UISettings::SelectionMode::Sector && gSelectedSector
 			&& gSelectedSector->getType() == core::SectorType::Dumbwaiter)
 		{
-			bool removed = world->removeDumbwaiter(static_pointer_cast<const core::Dumbwaiter>(gSelectedSector)->getId());
+			bool removed = document->authoring().removeDumbwaiter(static_pointer_cast<const core::Dumbwaiter>(gSelectedSector)->getId());
 			if (removed) gSelectedSector.reset();
 			return removed;
 		}
@@ -4117,33 +4173,33 @@ namespace
 			bool removed;
 			if (type == core::SectorObjectType::Lift)
 			{
-				world->applyPlatformLiftEdit(world->planRemovePlatformLift(sector->getIndex(), i));
+				document->authoring().applyPlatformLiftEdit(world->planRemovePlatformLift(sector->getIndex(), i));
 				removed = true;
 			}
 			else if (type == core::SectorObjectType::Marker)
 			{
 				string diagnostic;
-				removed = world->removeSectorMarker(sector->getIndex(), i, &diagnostic);
+				removed = document->authoring().removeSectorMarker(sector->getIndex(), i, &diagnostic);
 				if (!removed && !diagnostic.empty()) reportEditorError("Marker editor", diagnostic);
 			}
 			else removed = type == core::SectorObjectType::Door
-					? world->removeSectorDoor(sector->getIndex(), i)
+					? document->authoring().removeSectorDoor(sector->getIndex(), i)
 					: type == core::SectorObjectType::BulkheadDoor
-						? world->removeSectorBulkheadDoor(sector->getIndex(), i)
+						? document->authoring().removeSectorBulkheadDoor(sector->getIndex(), i)
 						: core::isWindowAperture(type)
-						? world->removeSectorWindow(sector->getIndex(), i)
+						? document->authoring().removeSectorWindow(sector->getIndex(), i)
 						: type == core::SectorObjectType::Ladder
-							? world->removeRoomLadder(sector->getIndex(), i)
+							? document->authoring().removeRoomLadder(sector->getIndex(), i)
 							: type == core::SectorObjectType::ForceBridge
-								? world->removeSectorForceBridge(sector->getIndex(), i)
-								: world->removeSectorWalkway(sector->getIndex(), i);
+								? document->authoring().removeSectorForceBridge(sector->getIndex(), i)
+								: document->authoring().removeSectorWalkway(sector->getIndex(), i);
 			if (!removed)
 			{
 				reportEditorError("Object editor", format("{} could not be deleted",
 					selected->getDescription()));
 				return false;
 			}
-			if (type == core::SectorObjectType::Marker) world->finishBuild();
+			if (type == core::SectorObjectType::Marker) document->authoring().finishBuild();
 			if (gHoveredSectorObject == selected) gHoveredSectorObject.reset();
 			gSelectedSectorObject.reset();
 			return true;
@@ -4151,11 +4207,12 @@ namespace
 		return false;
 	}
 
-	void restoreClipboardSnapshot(shared_ptr<core::World>& world,
+	void restoreClipboardSnapshot(editor::DocumentPtr& document,
 		DocumentSnapshot const& snapshot, bool wasPaused);
 
-	void copyOrCutSelection(shared_ptr<core::World>& world, bool cut)
+	void copyOrCutSelection(editor::DocumentPtr& document, bool cut)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (!world || !hasClipboardSelection()) return;
 		try
 		{
@@ -4178,7 +4235,7 @@ namespace
 			{
 				if (!wasPaused) pausePreview(*world);
 				gUISettings.worldPaused = true;
-				if (!removeClipboardSelection(world)) throw runtime_error("Could not remove the selected object");
+				if (!removeClipboardSelection(document)) throw runtime_error("Could not remove the selected object");
 				gConsumedCutClipboard.clear();
 				commitDocumentEdit(std::move(undo));
 			}
@@ -4186,7 +4243,7 @@ namespace
 			{
 				auto failure = current_exception();
 				ImGui::SetClipboardText(previousText.c_str());
-				restoreClipboardSnapshot(world, *undo, wasPaused);
+				restoreClipboardSnapshot(document, *undo, wasPaused);
 				rethrow_exception(failure);
 			}
 		}
@@ -4194,22 +4251,25 @@ namespace
 		catch (std::exception const& error) { reportClipboardError(error.what()); }
 	}
 
-	void restoreClipboardSnapshot(shared_ptr<core::World>& world,
+	void restoreClipboardSnapshot(editor::DocumentPtr& document,
 		DocumentSnapshot const& snapshot, bool wasPaused)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto loaded = std::make_unique<core::World>("Loading", 1, 1);
 		auto serializer = core::YamlSerializer::fromString(snapshot.yaml);
 		serializer->deserialize();
 		core::SerializationWorkData workData;
 		loaded->deserialize(*serializer, workData);
-		world = editor::adoptWorld(std::move(loaded));
+		editor::adoptWorld(std::move(loaded));
+		document = editor::currentDocument();
 		clearDocumentState(false);
-		if (wasPaused) setWorldPaused(world, true);
+		if (wasPaused) setWorldPaused(document, true);
 		else gUISettings.worldPaused = false;
 	}
 
-	void pasteClipboard(shared_ptr<core::World>& world, bool useCurrentCursor = false)
+	void pasteClipboard(editor::DocumentPtr& document, bool useCurrentCursor = false)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (!world) return;
 		if (gPegman.phase != PalettePhase::Home || gPaint.tool != PaintTool::None
 			|| gAgentMove.dragging || gObjectMove.dragging || gSectorResize.dragging
@@ -4297,7 +4357,7 @@ namespace
 				gPegman.floorY = static_cast<float>(y);
 				gPegman.velocity = 0.0f;
 				if (definition.cut) gConsumedCutClipboard = clipboardText;
-				if (gPegman.feetY <= gPegman.floorY) landPegman(world);
+				if (gPegman.feetY <= gPegman.floorY) landPegman(document);
 				return;
 			}
 
@@ -4423,18 +4483,18 @@ namespace
 				}
 				else if (definition.type == ClipboardObjectType::Door)
 				{
-					auto result = world->addSectorDoor(gUISettings.visibleLayer, y, x, definition.door);
+					auto result = document->authoring().addSectorDoor(gUISettings.visibleLayer, y, x, definition.door);
 					created = result.door.sector->getObject(result.door.index);
 				}
 				else if (definition.type == ClipboardObjectType::BulkheadDoor)
 				{
-					auto result = world->addSectorBulkheadDoor(gUISettings.visibleLayer,
+					auto result = document->authoring().addSectorBulkheadDoor(gUISettings.visibleLayer,
 						y, x, CORE_SIDE_LEFT, definition.bulkheadDoor);
 					created = result.door.sector->getObject(result.door.index);
 				}
 				else if (definition.type == ClipboardObjectType::AccessPanel)
 				{
-					auto result = world->addAccessPanel(markerSector->getIndex(), y - markerSector->getCellY(), x, definition.accessPanel, definition.accessPanelSpeed);
+					auto result = document->authoring().addAccessPanel(markerSector->getIndex(), y - markerSector->getCellY(), x, definition.accessPanel, definition.accessPanelSpeed);
 					created = result.sector->getObject(result.index);
 				}
 				else if (definition.type == ClipboardObjectType::BoothWindow)
@@ -4443,47 +4503,47 @@ namespace
 				}
 				else if (definition.type == ClipboardObjectType::Window)
 				{
-					auto result = world->addSectorWindow(gUISettings.visibleLayer, y, x,
+					auto result = document->authoring().addSectorWindow(gUISettings.visibleLayer, y, x,
 						definition.width, definition.height, definition.window);
 					created = result.window.sector->getObject(result.window.index);
 				}
 				else if (definition.type == ClipboardObjectType::Walkway)
 				{
-					auto result = world->addSectorWalkway(markerSector->getIndex(),
+					auto result = document->authoring().addSectorWalkway(markerSector->getIndex(),
 						y - markerSector->getCellY(), x - markerSector->getCellX());
 					created = result.sector->getObject(result.index);
 				}
 				else if (definition.type == ClipboardObjectType::ForceBridge)
 				{
-					auto result = world->addSectorForceBridge(markerSector->getIndex(),
+					auto result = document->authoring().addSectorForceBridge(markerSector->getIndex(),
 						y - markerSector->getCellY(), x - markerSector->getCellX(),
 						definition.forceBridge);
 					created = result.forceBridge.sector->getObject(result.forceBridge.index);
 				}
 				else if (definition.type == ClipboardObjectType::RoomLadder)
 				{
-					auto result = world->addRoomLadder(markerSector->getIndex(),
+					auto result = document->authoring().addRoomLadder(markerSector->getIndex(),
 						y - markerSector->getCellY(), x - markerSector->getCellX(), definition.ladder);
 					created = result.ladder.sector->getObject(result.ladder.index);
 				}
 				else if (definition.type == ClipboardObjectType::PlatformLift)
 				{
-					auto result = world->addSectorPlatformLift(markerSector->getIndex(), 0,
+					auto result = document->authoring().addSectorPlatformLift(markerSector->getIndex(), 0,
 						x - markerSector->getCellX(), definition.platformLift);
 					created = result.lift.sector->getObject(result.lift.index);
 				}
 				else
 				{
-					auto result = world->addSectorMarker(markerSector->getIndex(),
+					auto result = document->authoring().addSectorMarker(markerSector->getIndex(),
 						y - markerSector->getCellY(), markerOffset);
 					created = result.sector->getObject(result.index);
 					auto marker = static_pointer_cast<const core::MarkerSectorObject>(
 						created)->getMarker();
-					if (!world->setMarkerProperties(marker->getId(),
+					if (!document->authoring().setMarkerProperties(marker->getId(),
 						definition.markerProperties, &diagnostic))
 						throw runtime_error(diagnostic);
 				}
-				world->finishBuild();
+				document->authoring().finishBuild();
 				setSelectionMode(createdUnit ? UISettings::SelectionMode::Sector : UISettings::SelectionMode::Object);
 				gSelectedAgent = nullptr;
 				gSelectedSector = createdUnit;
@@ -4494,7 +4554,7 @@ namespace
 			catch (...)
 			{
 				auto failure = current_exception();
-				restoreClipboardSnapshot(world, *undo, wasPaused);
+				restoreClipboardSnapshot(document, *undo, wasPaused);
 				rethrow_exception(failure);
 			}
 		}
@@ -4540,15 +4600,17 @@ void renderWorldLoadWarningsPopup()
 	ImGui::EndPopup();
 }
 
-bool requestApplicationClose(shared_ptr<core::World>& world)
+bool requestApplicationClose(editor::DocumentPtr& document)
 {
-	if (!isDocumentStale(world)) return true;
-	requestFileAction(PendingFileAction::Exit, world);
+	auto const world = document ? document->world() : nullptr;
+	if (!isDocumentStale(document)) return true;
+	requestFileAction(PendingFileAction::Exit, document);
 	return false;
 }
 
-void resetWorldSimulation(shared_ptr<core::World> const& world)
+void resetWorldSimulation(editor::DocumentPtr const& document)
 {
+	auto const world = document ? document->world() : nullptr;
 	try
 	{
 		ApplicationBusyScope busy("Resetting simulation...");
@@ -4564,35 +4626,36 @@ void resetWorldSimulation(shared_ptr<core::World> const& world)
 	}
 }
 
-void handleShortcuts(shared_ptr<core::World>& world)
+void handleShortcuts(editor::DocumentPtr& document)
 {
+	auto const world = document ? document->world() : nullptr;
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, 0, ImGuiInputFlags_RouteGlobalLow))
-		requestFileAction(PendingFileAction::New, world);
+		requestFileAction(PendingFileAction::New, document);
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, 0, ImGuiInputFlags_RouteGlobalLow))
-		requestFileAction(PendingFileAction::Open, world);
-	if (isDocumentStale(world)
+		requestFileAction(PendingFileAction::Open, document);
+	if (isDocumentStale(document)
 		&& ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, 0, ImGuiInputFlags_RouteGlobalLow))
-		saveWorld(world, false);
+		saveWorld(document, false);
 
 	if (!world) return;
 
 	bool const clipboardShortcutAvailable = !ImGui::IsAnyItemActive() && !ImGui::IsAnyItemFocused();
 	if (clipboardShortcutAvailable
 		&& ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_X, 0, ImGuiInputFlags_RouteGlobalLow))
-		copyOrCutSelection(world, true);
+		copyOrCutSelection(document, true);
 	if (clipboardShortcutAvailable
 		&& ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_C, 0, ImGuiInputFlags_RouteGlobalLow))
-		copyOrCutSelection(world, false);
+		copyOrCutSelection(document, false);
 	if (clipboardShortcutAvailable
 		&& ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_V, 0, ImGuiInputFlags_RouteGlobalLow))
 	{
-		pasteClipboard(world, true);
+		pasteClipboard(document, true);
 	}
 
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, 0, ImGuiInputFlags_RouteGlobalLow))
-		restoreDocumentSnapshot(world, false);
+		restoreDocumentSnapshot(document, false);
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y, 0, ImGuiInputFlags_RouteGlobalLow))
-		restoreDocumentSnapshot(world, true);
+		restoreDocumentSnapshot(document, true);
 
 	if (gSelectingAgentPathDestination
 		&& ImGui::Shortcut(ImGuiKey_Escape, 0, ImGuiInputFlags_RouteGlobalLow))
@@ -4603,7 +4666,7 @@ void handleShortcuts(shared_ptr<core::World>& world)
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_P, 0, ImGuiInputFlags_RouteGlobalLow)
 		&& gSelectedAgent && !ImGui::IsAnyItemActive() && !ImGui::IsAnyItemFocused())
 	{
-		beginAgentPathSelection(world);
+		beginAgentPathSelection(document);
 	}
 
 	// Start or stop the simulation
@@ -4611,7 +4674,7 @@ void handleShortcuts(shared_ptr<core::World>& world)
 	{
 		if (!ImGui::IsAnyItemActive() && !ImGui::IsAnyItemFocused())
 		{
-			setWorldPaused(world, !gUISettings.worldPaused);
+			setWorldPaused(document, !gUISettings.worldPaused);
 		}
 	}
 
@@ -4620,7 +4683,7 @@ void handleShortcuts(shared_ptr<core::World>& world)
 	{
 		if (!ImGui::IsAnyItemActive() && !ImGui::IsAnyItemFocused())
 		{
-			resetWorldSimulation(world);
+			resetWorldSimulation(document);
 		}
 	}
 
@@ -4641,32 +4704,32 @@ void handleShortcuts(shared_ptr<core::World>& world)
 			if (gUISettings.selectionMode == UISettings::SelectionMode::Sector && gSelectedSector)
 			{
 				if (gSelectedSector->getType() == core::SectorType::Chamber)
-					commitAirlockEdit(world, world->planRemoveChamber(gSelectedSector->getIndex()));
+					commitAirlockEdit(document, world->planRemoveChamber(gSelectedSector->getIndex()));
 				else if (gSelectedSector->getType() == core::SectorType::Airlock)
-					commitAirlockEdit(world, world->planRemoveAirlock(gSelectedSector->getIndex()));
+					commitAirlockEdit(document, world->planRemoveAirlock(gSelectedSector->getIndex()));
 				else if (gSelectedSector->getType() == core::SectorType::Lift)
 				{
 					auto plan = world->planRemoveLift(gSelectedSector->getIndex());
 					if (!plan.valid) core::addLogMessage("Lift editor", 0, core::LogLevel::Error, plan.diagnostic);
-					else queueLiftEdit(world, plan);
+					else queueLiftEdit(document, plan);
 				}
 				else if (gSelectedSector->getType() == core::SectorType::Shuttle)
 				{
 					auto plan = world->planRemoveShuttle(gSelectedSector->getIndex());
 					if (!plan.valid) core::addLogMessage("Shuttle editor", 0, core::LogLevel::Error, plan.diagnostic);
-					else queueShuttleEdit(world, plan);
+					else queueShuttleEdit(document, plan);
 				}
 				else if (gSelectedSector->getType() == core::SectorType::Ladder)
 				{
 					auto plan = world->planRemoveLadder(gSelectedSector->getIndex());
 					if (!plan.valid) core::addLogMessage("Ladder editor", 0, core::LogLevel::Error, plan.diagnostic);
-					else queueLadderEdit(world, plan);
+					else queueLadderEdit(document, plan);
 				}
 				else if (gSelectedSector->getType() == core::SectorType::Stairwell)
 				{
 					auto plan = world->planRemoveStairwell(gSelectedSector->getIndex());
 					if (!plan.valid) core::addLogMessage("Stairwell editor", 0, core::LogLevel::Error, plan.diagnostic);
-					else queueStairwellEdit(world, plan);
+					else queueStairwellEdit(document, plan);
 				}
 				else if (gSelectedSector->getType() == core::SectorType::Staircase)
 				{
@@ -4676,7 +4739,7 @@ void handleShortcuts(shared_ptr<core::World>& world)
 					{
 						auto undo = captureDocumentSnapshot(world);
 						pausePreview(*world);
-						world->applyStaircaseEdit(plan); commitDocumentEdit(std::move(undo)); clearSelections();
+						document->authoring().applyStaircaseEdit(plan); commitDocumentEdit(std::move(undo)); clearSelections();
 					}
 					catch (std::exception const& error) { core::addLogMessage("Staircase editor", 0, core::LogLevel::Error, error.what()); }
 				}
@@ -4688,7 +4751,7 @@ void handleShortcuts(shared_ptr<core::World>& world)
 					auto plan = world->planRemoveBackground(gSelectedSector->getIndex());
 					if (!plan.valid)
 						core::addLogMessage("Background editor", 0, core::LogLevel::Error, plan.diagnostic);
-					else queueLocationEdit(world, plan);
+					else queueLocationEdit(document, plan);
 				}
 				else if (gSelectedSector->getType() == core::SectorType::Facade)
 				{
@@ -4698,14 +4761,14 @@ void handleShortcuts(shared_ptr<core::World>& world)
 					auto plan = world->planRemoveFacade(gSelectedSector->getIndex());
 					if (!plan.valid)
 						core::addLogMessage("Facade editor", 0, core::LogLevel::Error, plan.diagnostic);
-					else queueLocationEdit(world, plan);
+					else queueLocationEdit(document, plan);
 				}
 				else
 				{
 					auto plan = world->planRemoveLocation(gSelectedSector->getIndex());
 					if (!plan.valid)
 						core::addLogMessage("Sector editor", 0, core::LogLevel::Error, plan.diagnostic);
-					else queueLocationEdit(world, plan);
+					else queueLocationEdit(document, plan);
 				}
 			}
 			else if (gSelectedAgent)
@@ -4716,7 +4779,7 @@ void handleShortcuts(shared_ptr<core::World>& world)
 					auto undo = captureDocumentSnapshot(world);
 					auto selected = gSelectedAgent;
 					selected->clearPath();
-					auto const removal = world->removeAgent(id);
+					auto const removal = document->authoring().removeAgent(id);
 					if (removal.removed)
 					{
 						if (gHoveredAgent == selected) gHoveredAgent = nullptr;
@@ -4746,13 +4809,13 @@ void handleShortcuts(shared_ptr<core::World>& world)
 				{
 					auto plan = world->planRemoveLiftStop(liftIndex, stopIndex);
 					if (!plan.valid) reportEditorError("Lift editor", plan.diagnostic);
-					else queueLiftEdit(world, plan);
+					else queueLiftEdit(document, plan);
 				}
 				else if (world->isShuttleOwnedDoor(gSelectedSectorObject, &liftIndex, &stopIndex))
 				{
 					auto plan = world->planRemoveShuttleStop(liftIndex, stopIndex);
 					if (!plan.valid) reportEditorError("Shuttle editor", plan.diagnostic);
-					else queueShuttleEdit(world, plan);
+					else queueShuttleEdit(document, plan);
 				}
 				else if (gSelectedSectorObject->getObjectType() == core::SectorObjectType::Lift)
 				{
@@ -4762,7 +4825,7 @@ void handleShortcuts(shared_ptr<core::World>& world)
 						if (room->getObject(i) == gSelectedSectorObject) { index = i; break; }
 					auto plan = world->planRemovePlatformLift(room->getIndex(), index);
 					if (!plan.valid) reportEditorError("PlatformLift editor", plan.diagnostic);
-					else queuePlatformLiftEdit(world, plan);
+					else queuePlatformLiftEdit(document, plan);
 				}
 				else if (gSelectedSectorObject->getObjectType() == core::SectorObjectType::Walkway)
 				{
@@ -4772,7 +4835,7 @@ void handleShortcuts(shared_ptr<core::World>& world)
 						if (room->getObject(i) == gSelectedSectorObject) { index = i; break; }
 					auto plan = world->planRemoveSectorWalkway(room->getIndex(), index);
 					if (!plan.valid) reportEditorError("Walkway editor", plan.diagnostic);
-					else queueWalkwayEdit(world, plan);
+					else queueWalkwayEdit(document, plan);
 				}
 				else try
 				{
@@ -4789,23 +4852,23 @@ void handleShortcuts(shared_ptr<core::World>& world)
 						if (type == core::SectorObjectType::Marker)
 						{
 							string diagnostic;
-							removed = world->removeSectorMarker(sector->getIndex(), i, &diagnostic);
+							removed = document->authoring().removeSectorMarker(sector->getIndex(), i, &diagnostic);
 							if (!removed && !diagnostic.empty())
 								reportEditorError("Marker editor", diagnostic);
 						}
 						else removed = type == core::SectorObjectType::AccessPanel
-							? world->removeAccessPanel(sector->getIndex(), i)
+							? document->authoring().removeAccessPanel(sector->getIndex(), i)
 							: type == core::SectorObjectType::Door
-								? world->removeSectorDoor(sector->getIndex(), i)
+								? document->authoring().removeSectorDoor(sector->getIndex(), i)
 								: type == core::SectorObjectType::BulkheadDoor
-									? world->removeSectorBulkheadDoor(sector->getIndex(), i)
+									? document->authoring().removeSectorBulkheadDoor(sector->getIndex(), i)
 									: core::isWindowAperture(type)
-									? world->removeSectorWindow(sector->getIndex(), i)
+									? document->authoring().removeSectorWindow(sector->getIndex(), i)
 									: type == core::SectorObjectType::Ladder
-										? world->removeRoomLadder(sector->getIndex(), i)
+										? document->authoring().removeRoomLadder(sector->getIndex(), i)
 										: type == core::SectorObjectType::ForceBridge
-											? world->removeSectorForceBridge(sector->getIndex(), i)
-											: world->removeSectorWalkway(sector->getIndex(), i);
+											? document->authoring().removeSectorForceBridge(sector->getIndex(), i)
+											: document->authoring().removeSectorWalkway(sector->getIndex(), i);
 						if (!removed)
 							reportEditorError("Object editor", format("{} could not be deleted",
 								selected->getDescription()));
@@ -4815,7 +4878,7 @@ void handleShortcuts(shared_ptr<core::World>& world)
 							gHoveredAgent = nullptr;
 							gSelectedAgent = nullptr;
 							gSelectedSectorObject.reset();
-							if (type == core::SectorObjectType::Marker) world->finishBuild();
+							if (type == core::SectorObjectType::Marker) document->authoring().finishBuild();
 							commitDocumentEdit(std::move(undo));
 						}
 						break;
@@ -4872,9 +4935,10 @@ void handleShortcuts(shared_ptr<core::World>& world)
 }
 
 
-void handleWorldInteraction(shared_ptr<core::World> world,
+void handleWorldInteraction(editor::DocumentPtr const& document,
 	shared_ptr<const core::Graph> graph, MouseButtonStatus const& mouseStatus)
 {
+	auto const world = document ? document->world() : nullptr;
 	if (!gPegmanConsumesLeftMouse
 		&& mouseStatus.state[MouseButtonStatus::Left] == MouseButtonStatus::State::Clicked)
 	{
@@ -4883,7 +4947,7 @@ void handleWorldInteraction(shared_ptr<core::World> world,
 		{
 			if (gSelectingAgentPathDestination && gSelectedAgent)
 			{
-				chooseAgentDestinationAction(world, gHoveredVertex);
+				chooseAgentDestinationAction(document, gHoveredVertex);
 			}
 			else if (ImGui::GetIO().KeyCtrl)
 			{
@@ -4909,7 +4973,7 @@ void handleWorldInteraction(shared_ptr<core::World> world,
 		else if (gHoveredInteractionPoint && !gUISettings.worldPaused && gSelectedAgent)
 		{
 			auto actor = world->getAgentId(gSelectedAgent);
-			if (actor) world->requestInteraction(gHoveredInteractionPoint, actor);
+			if (actor) document->authoring().requestInteraction(gHoveredInteractionPoint, actor);
 		}
 		else if (gHoveredSectorObject)
 		{
@@ -4948,7 +5012,7 @@ void handleWorldInteraction(shared_ptr<core::World> world,
 	}
 }
 
-void handleContinuousKeyboardInput(std::shared_ptr<core::World> /* world */, uint64_t updateTimeMicros)
+void handleContinuousKeyboardInput(editor::DocumentPtr const& /* document */, uint64_t updateTimeMicros)
 {
 	const float MoveSpeed{ 500.0f };
 
@@ -5085,17 +5149,18 @@ void initializeRecentFiles(filesystem::path const& filepath)
 
 ImVec2 gMainMenuWindowSize;
 
-void renderMenu(shared_ptr<core::World>& world)
+void renderMenu(editor::DocumentPtr& document)
 {
+	auto const world = document ? document->world() : nullptr;
 	optional<string> recentFileToOpen;
 	if (ImGui::BeginMainMenuBar())
 	{
 		if (ImGui::BeginMenu("File"))
 		{
 			if (ImGui::MenuItem("New", "Ctrl+N"))
-				requestFileAction(PendingFileAction::New, world);
+				requestFileAction(PendingFileAction::New, document);
 			if (ImGui::MenuItem("Open...", "Ctrl+O"))
-				requestFileAction(PendingFileAction::Open, world);
+				requestFileAction(PendingFileAction::Open, document);
 			if (ImGui::BeginMenu("Open Recent", !gRecentFiles.empty()))
 			{
 				for (auto const& filepath : gRecentFiles.entries())
@@ -5105,17 +5170,17 @@ void renderMenu(shared_ptr<core::World>& world)
 				ImGui::EndMenu();
 			}
 			ImGui::Separator();
-			if (ImGui::MenuItem("Save", "Ctrl+S", false, isDocumentStale(world)))
-				saveWorld(world, false);
-			if (ImGui::MenuItem("Save All", nullptr, false, isDocumentStale(world)))
-				saveAllOpenDocuments(world);
+			if (ImGui::MenuItem("Save", "Ctrl+S", false, isDocumentStale(document)))
+				saveWorld(document, false);
+			if (ImGui::MenuItem("Save All", nullptr, false, isDocumentStale(document)))
+				saveAllOpenDocuments(document);
 			if (ImGui::MenuItem("Save As...", nullptr, false, world != nullptr))
-				saveWorld(world, true);
+				saveWorld(document, true);
 			if (ImGui::MenuItem("Close", nullptr, false, world != nullptr))
-				requestFileAction(PendingFileAction::Close, world);
+				requestFileAction(PendingFileAction::Close, document);
 			ImGui::Separator();
 			if (ImGui::MenuItem("Exit"))
-				requestFileAction(PendingFileAction::Exit, world);
+				requestFileAction(PendingFileAction::Exit, document);
 
 			ImGui::EndMenu();
 		}
@@ -5124,17 +5189,17 @@ void renderMenu(shared_ptr<core::World>& world)
 		{
 			if (ImGui::MenuItem("Undo", "Ctrl+Z", false,
 				world != nullptr && gWorldDocumentHistory.canUndo()))
-				restoreDocumentSnapshot(world, false);
+				restoreDocumentSnapshot(document, false);
 			if (ImGui::MenuItem("Redo", "Ctrl+Y", false,
 				world != nullptr && gWorldDocumentHistory.canRedo()))
-				restoreDocumentSnapshot(world, true);
+				restoreDocumentSnapshot(document, true);
 			ImGui::Separator();
 			bool const canCopy = world != nullptr && hasClipboardSelection();
-			if (ImGui::MenuItem("Cut", "Ctrl+X", false, canCopy)) copyOrCutSelection(world, true);
-			if (ImGui::MenuItem("Copy", "Ctrl+C", false, canCopy)) copyOrCutSelection(world, false);
+			if (ImGui::MenuItem("Cut", "Ctrl+X", false, canCopy)) copyOrCutSelection(document, true);
+			if (ImGui::MenuItem("Copy", "Ctrl+C", false, canCopy)) copyOrCutSelection(document, false);
 			auto clipboard = ImGui::GetClipboardText();
 			if (ImGui::MenuItem("Paste", "Ctrl+V", false,
-				world != nullptr && clipboard && *clipboard)) pasteClipboard(world);
+				world != nullptr && clipboard && *clipboard)) pasteClipboard(document);
 			ImGui::Separator();
 
 			if (ImGui::BeginMenu("Selection"))
@@ -5232,12 +5297,13 @@ void renderMenu(shared_ptr<core::World>& world)
 		ImGui::EndMainMenuBar();
 	}
 
-	if (recentFileToOpen) requestRecentFile(*recentFileToOpen, world);
+	if (recentFileToOpen) requestRecentFile(*recentFileToOpen, document);
 }
 
 
-void renderDocumentToolbar(shared_ptr<core::World>& world)
+void renderDocumentToolbar(editor::DocumentPtr& document)
 {
+	auto const world = document ? document->world() : nullptr;
 	ImGuiViewportP* viewport = (ImGuiViewportP*)(void*)ImGui::GetMainViewport();
 	auto const& style = ImGui::GetStyle();
 	float const height = ImGui::GetFrameHeight() + style.WindowPadding.y * 2.0f;
@@ -5252,45 +5318,45 @@ void renderDocumentToolbar(shared_ptr<core::World>& world)
 	}
 
 	if (ImGui::Button(ICON_FA_FILE "##NewDocument"))
-		requestFileAction(PendingFileAction::New, world);
+		requestFileAction(PendingFileAction::New, document);
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("New (Ctrl+N)");
 
 	ImGui::SameLine();
 	if (ImGui::Button(ICON_FA_FOLDER_OPEN "##OpenDocument"))
-		requestFileAction(PendingFileAction::Open, world);
+		requestFileAction(PendingFileAction::Open, document);
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Open... (Ctrl+O)");
 
 	ImGui::SameLine();
-	ImGui::BeginDisabled(!isDocumentStale(world));
-	if (ImGui::Button(ICON_FA_SAVE "##SaveDocument")) saveWorld(world, false);
+	ImGui::BeginDisabled(!isDocumentStale(document));
+	if (ImGui::Button(ICON_FA_SAVE "##SaveDocument")) saveWorld(document, false);
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Save (Ctrl+S)");
 	ImGui::EndDisabled();
 
 	ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
 	ImGui::BeginDisabled(world == nullptr || !gWorldDocumentHistory.canUndo());
-	if (ImGui::Button(ICON_FA_UNDO "##Undo")) restoreDocumentSnapshot(world, false);
+	if (ImGui::Button(ICON_FA_UNDO "##Undo")) restoreDocumentSnapshot(document, false);
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Undo (Ctrl+Z)");
 	ImGui::EndDisabled();
 
 	ImGui::SameLine();
 	ImGui::BeginDisabled(world == nullptr || !gWorldDocumentHistory.canRedo());
-	if (ImGui::Button(ICON_FA_REDO "##Redo")) restoreDocumentSnapshot(world, true);
+	if (ImGui::Button(ICON_FA_REDO "##Redo")) restoreDocumentSnapshot(document, true);
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Redo (Ctrl+Y)");
 	ImGui::EndDisabled();
 
 	ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
 	ImGui::BeginDisabled(world == nullptr || !hasClipboardSelection());
-	if (ImGui::Button(ICON_FA_CUT "##Cut")) copyOrCutSelection(world, true);
+	if (ImGui::Button(ICON_FA_CUT "##Cut")) copyOrCutSelection(document, true);
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Cut (Ctrl+X)");
 	ImGui::SameLine();
-	if (ImGui::Button(ICON_FA_COPY "##Copy")) copyOrCutSelection(world, false);
+	if (ImGui::Button(ICON_FA_COPY "##Copy")) copyOrCutSelection(document, false);
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Copy (Ctrl+C)");
 	ImGui::EndDisabled();
 
 	auto clipboard = ImGui::GetClipboardText();
 	ImGui::SameLine();
 	ImGui::BeginDisabled(world == nullptr || !clipboard || !*clipboard);
-	if (ImGui::Button(ICON_FA_PASTE "##Paste")) pasteClipboard(world);
+	if (ImGui::Button(ICON_FA_PASTE "##Paste")) pasteClipboard(document);
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Paste (Ctrl+V)");
 	ImGui::EndDisabled();
 
@@ -5322,8 +5388,9 @@ void renderDocumentToolbar(shared_ptr<core::World>& world)
 }
 
 
-void renderToolbar(shared_ptr<core::World> world)
+void renderToolbar(editor::DocumentPtr const& document)
 {
+	auto const world = document ? document->world() : nullptr;
 	auto const averageStepMicroseconds = world->getAverageSimulationStepMicroseconds();
 	ImGui::Text("Simulation: %.1f us / step", averageStepMicroseconds);
 	if (ImGui::IsItemHovered())
@@ -5345,7 +5412,7 @@ void renderToolbar(shared_ptr<core::World> world)
 	ImGui::SameLine();
 	if (ImGui::Button(gUISettings.worldPaused ? "Start" : "Stop"))
 	{
-		setWorldPaused(world, !gUISettings.worldPaused);
+		setWorldPaused(document, !gUISettings.worldPaused);
 	}
 	if (ImGui::IsItemHovered())
 	{
@@ -5355,7 +5422,7 @@ void renderToolbar(shared_ptr<core::World> world)
 		ImGui::SameLine();
 		if (ImGui::Button("Reset"))
 		{
-			resetWorldSimulation(world);
+			resetWorldSimulation(document);
 		}
 		if (ImGui::IsItemHovered()) ImGui::SetTooltip("Reset (R)");
 
@@ -5480,9 +5547,10 @@ void renderStatusBar(shared_ptr<const core::World> const& world)
 }
 
 
-void renderMarkerPanel(shared_ptr<core::World> const& world,
+void renderMarkerPanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::SectorObject> object)
 {
+	auto const world = document ? document->world() : nullptr;
 	renderMarkerEditorPanel(world, object, [](string const& diagnostic)
 	{
 		reportEditorError("Marker editor", diagnostic);
@@ -5490,9 +5558,10 @@ void renderMarkerPanel(shared_ptr<core::World> const& world,
 }
 
 
-void renderWalkwayPanel(shared_ptr<core::World> const& world,
+void renderWalkwayPanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::SectorObject> object)
 {
+	auto const world = document ? document->world() : nullptr;
 	auto walkway = static_pointer_cast<const core::WalkwaySectorObject>(object)->getWalkway();
 	auto room = object->getSector();
 	ImGui::TextUnformatted("Walkway");
@@ -5509,7 +5578,7 @@ void renderWalkwayPanel(shared_ptr<core::World> const& world,
 			if (room->getObject(i) == object) { objectIndex = i; break; }
 		auto plan = world->planRemoveSectorWalkway(room->getIndex(), objectIndex);
 		if (!plan.valid) reportEditorError("Walkway editor", plan.diagnostic);
-		else queueWalkwayEdit(world, plan);
+		else queueWalkwayEdit(document, plan);
 	}
 	ImGui::SameLine();
 	ImGui::TextDisabled("Delete key");
@@ -5576,9 +5645,10 @@ void renderWindowPanel(shared_ptr<const core::World> const& world,
 // There is deliberately no "Agents:" line. A Background hosts no agent, and a
 // permanently-zero readout reads as a broken panel rather than an empty one. No
 // wall editor, no capacity, no lights: none of those mean anything here.
-void renderBackgroundPanel(shared_ptr<core::World> const& world,
+void renderBackgroundPanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::Sector> const& sector)
 {
+	auto const world = document ? document->world() : nullptr;
 	auto const background = dynamic_pointer_cast<const core::Background>(sector);
 	if (!background) return;
 
@@ -5615,7 +5685,7 @@ void renderBackgroundPanel(shared_ptr<core::World> const& world,
 	auto applyColour = [&](core::BackgroundColour const& colour)
 	{
 		string diagnostic;
-		if (world->setBackgroundColour(sector->getIndex(), colour, &diagnostic)) return true;
+		if (document->authoring().setBackgroundColour(sector->getIndex(), colour, &diagnostic)) return true;
 		core::addLogMessage("Background editor", 0, core::LogLevel::Error, diagnostic);
 		editedSector = nullptr;
 		return false;
@@ -5670,7 +5740,7 @@ void renderBackgroundPanel(shared_ptr<core::World> const& world,
 		{
 			// The Sector this panel has been driving may not survive the confirmation.
 			editedSector = nullptr;
-			queueLocationEdit(world, plan);
+			queueLocationEdit(document, plan);
 		}
 	}
 	ImGui::SameLine();
@@ -5686,9 +5756,10 @@ void renderBackgroundPanel(shared_ptr<core::World> const& world,
 // wall commands against it refuse rather than blur the type. The colour picker
 // reuses Background's picker arithmetic wholesale: the same 0..1 float triple,
 // the same no-alpha widget, the same pack/unpack pair on the way back.
-void renderFacadePanel(shared_ptr<core::World> const& world,
+void renderFacadePanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::Sector> const& sector)
 {
+	auto const world = document ? document->world() : nullptr;
 	auto const facade = dynamic_pointer_cast<const core::Facade>(sector);
 	if (!facade) return;
 
@@ -5726,7 +5797,7 @@ void renderFacadePanel(shared_ptr<core::World> const& world,
 	auto applyColour = [&](core::BackgroundColour const& colour)
 	{
 		string diagnostic;
-		if (world->setFacadeColour(sector->getIndex(), colour, &diagnostic)) return true;
+		if (document->authoring().setFacadeColour(sector->getIndex(), colour, &diagnostic)) return true;
 		core::addLogMessage("Facade editor", 0, core::LogLevel::Error, diagnostic);
 		editedSector = nullptr;
 		return false;
@@ -5785,7 +5856,7 @@ void renderFacadePanel(shared_ptr<core::World> const& world,
 		{
 			// The Sector this panel has been driving may not survive the confirmation.
 			editedSector = nullptr;
-			queueLocationEdit(world, plan);
+			queueLocationEdit(document, plan);
 		}
 	}
 	ImGui::SameLine();
@@ -5793,9 +5864,10 @@ void renderFacadePanel(shared_ptr<core::World> const& world,
 }
 
 
-void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
+void renderBulkheadDoorPanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::SectorObject> object)
 {
+	auto const world = document ? document->world() : nullptr;
 	auto doorObject = static_pointer_cast<const core::BulkheadDoorSectorObject>(object);
 	auto door = doorObject->getDoor();
 	if (world->isChamberOwnedObject(object))
@@ -5860,7 +5932,7 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 			options.controls[0] = leftControl;
 			options.controls[1] = rightControl;
 			auto undo = captureDocumentSnapshot(world);
-			gSelectedSectorObject = world->applySectorBulkheadDoorOptions(
+			gSelectedSectorObject = document->authoring().applySectorBulkheadDoorOptions(
 				owner->getIndex(), objectIndex, options);
 			gHoveredSectorObject.reset(); editedObject = nullptr;
 			commitDocumentEdit(std::move(undo));
@@ -5919,7 +5991,7 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 				{ leftControl, rightControl },
 				static_cast<core::DoorActivationMode>(activationMode),
 				holdOpenSeconds, (uint32_t)crossingLanes, automaticSensorDistance, {}, door->isInitiallyBroken(), door->getBrokenOpenPercentage(), door->getSpeedOverride() };
-			gSelectedSectorObject = world->applySectorBulkheadDoorOptions(
+			gSelectedSectorObject = document->authoring().applySectorBulkheadDoorOptions(
 				owner->getIndex(), objectIndex, options);
 			gHoveredSectorObject.reset(); editedObject = nullptr;
 			commitDocumentEdit(std::move(undo));
@@ -5944,7 +6016,7 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 		try
 		{
 			auto undo = captureDocumentSnapshot(world);
-			if (removeClipboardSelection(world)) commitDocumentEdit(std::move(undo));
+			if (removeClipboardSelection(document)) commitDocumentEdit(std::move(undo));
 		}
 		catch (core::Exception const& error)
 		{
@@ -5959,9 +6031,10 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 }
 
 
-void renderLiftOwnedControlPanel(shared_ptr<core::World> const& world,
+void renderLiftOwnedControlPanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::SectorObject> object)
 {
+	auto const world = document ? document->world() : nullptr;
 	if (world->isDumbwaiterOwnedControl(object))
 	{
 		ImGui::TextUnformatted("Dumbwaiter-owned landing Button");
@@ -6030,9 +6103,10 @@ void renderLiftOwnedControlPanel(shared_ptr<core::World> const& world,
 	ImGui::TextDisabled("This button is managed by its transport landing and is read-only.");
 }
 
-void renderForceBridgePanel(shared_ptr<core::World> const& world,
+void renderForceBridgePanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::SectorObject> object)
 {
+	auto const world = document ? document->world() : nullptr;
 	auto fbObject = static_pointer_cast<const core::ForceBridgeSectorObject>(object);
 	auto forceBridge = fbObject->getForceBridge();
 	auto room = object->getSector();
@@ -6088,7 +6162,7 @@ void renderForceBridgePanel(shared_ptr<core::World> const& world,
 				side == 0 ? CORE_SIDE_LEFT : CORE_SIDE_RIGHT, extensible,
 				extensible ? initiallyExtended : true, extensible ? (uint32_t)controls : 0u,
 				{}, forceBridge->isInitiallyBroken() };
-			gSelectedSectorObject = world->applySectorForceBridgeOptions(
+			gSelectedSectorObject = document->authoring().applySectorForceBridgeOptions(
 				room->getIndex(), objectIndex, options);
 			gHoveredSectorObject.reset();
 			editedObject = nullptr;
@@ -6149,7 +6223,7 @@ void renderForceBridgePanel(shared_ptr<core::World> const& world,
 		try
 		{
 			auto undo = captureDocumentSnapshot(world);
-			if (removeClipboardSelection(world)) commitDocumentEdit(std::move(undo));
+			if (removeClipboardSelection(document)) commitDocumentEdit(std::move(undo));
 		}
 		catch (core::Exception const& error)
 		{
@@ -6165,9 +6239,10 @@ void renderForceBridgePanel(shared_ptr<core::World> const& world,
 }
 
 
-void renderLadderPanel(shared_ptr<core::World> const& world,
+void renderLadderPanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::SectorObject> object)
 {
+	auto const world = document ? document->world() : nullptr;
 	auto ladderObject = static_pointer_cast<const core::LadderSectorObject>(object);
 	auto ladder = ladderObject->getLadder();
 	auto room = object->getSector();
@@ -6214,7 +6289,7 @@ void renderLadderPanel(shared_ptr<core::World> const& world,
 		{
 			pausePreview(*world);
 			gUISettings.worldPaused = true;
-			gSelectedSectorObject = world->applyRoomLadderOptions(room->getIndex(), objectIndex,
+			gSelectedSectorObject = document->authoring().applyRoomLadderOptions(room->getIndex(), objectIndex,
 				{ ladder->getLevelsHigh(), desiredExtensible,
 					desiredExtensible ? desiredInitiallyExtended : true,
 					(uint32_t)desiredBatchLimit, {}, ladder->isInitiallyBroken() });
@@ -6261,7 +6336,7 @@ void renderLadderPanel(shared_ptr<core::World> const& world,
 		{
 			pausePreview(*world);
 			gUISettings.worldPaused = true;
-			if (world->removeRoomLadder(room->getIndex(), objectIndex))
+			if (document->authoring().removeRoomLadder(room->getIndex(), objectIndex))
 			{
 				gSelectedSectorObject.reset(); gHoveredSectorObject.reset();
 				commitDocumentEdit(std::move(undo));
@@ -6281,9 +6356,10 @@ void renderLadderPanel(shared_ptr<core::World> const& world,
 void renderLiftPanel(shared_ptr<const core::World> const& world,
 	shared_ptr<const core::Lift> lift, bool includeAgentDebug = false);
 
-void renderPlatformLiftPanel(shared_ptr<core::World> const& world,
+void renderPlatformLiftPanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::SectorObject> object)
 {
+	auto const world = document ? document->world() : nullptr;
 	auto room = object->getSector();
 	uint32_t objectIndex = ~0u;
 	for (uint32_t i = 0; i < room->getNumObjects(); ++i)
@@ -6360,7 +6436,7 @@ void renderPlatformLiftPanel(shared_ptr<core::World> const& world,
 	{
 		auto plan = world->planPlatformLiftEdit(room->getIndex(), objectIndex, draft);
 		if (!plan.valid) reportEditorError("PlatformLift editor", plan.diagnostic);
-		else { editedObject = nullptr; queuePlatformLiftEdit(world, plan); }
+		else { editedObject = nullptr; queuePlatformLiftEdit(document, plan); }
 	}
 	ImGui::EndDisabled();
 
@@ -6372,7 +6448,7 @@ void renderPlatformLiftPanel(shared_ptr<core::World> const& world,
 	{
 		auto plan = world->planRemovePlatformLift(room->getIndex(), objectIndex);
 		if (!plan.valid) reportEditorError("PlatformLift editor", plan.diagnostic);
-		else { editedObject = nullptr; queuePlatformLiftEdit(world, plan); }
+		else { editedObject = nullptr; queuePlatformLiftEdit(document, plan); }
 	}
 	ImGui::SameLine(); ImGui::TextDisabled("Delete key");
 }
@@ -6609,8 +6685,9 @@ void renderShuttlePanel(shared_ptr<const core::World> const& world,
 }
 
 
-void renderAgentView(shared_ptr<core::World> world)
+void renderAgentView(editor::DocumentPtr const& document)
 {
+	auto const world = document ? document->world() : nullptr;
 	auto& runtime = editor::previewRuntime(*world);
 	ImGuiTableFlags flags =
 		ImGuiTableFlags_SizingStretchSame |
@@ -6675,7 +6752,7 @@ void renderAgentView(shared_ptr<core::World> world)
 						ImVec2(ImGui::GetFrameHeight(), 0.0f)))
 					{
 						string diagnostic;
-						if (!world->setAgentActive(world->getAgentId(agent),
+						if (!document->authoring().setAgentActive(world->getAgentId(agent),
 							!agent->isActive(), &diagnostic))
 						{
 							core::addLogMessage("Agents", 0, core::LogLevel::Warning, diagnostic);
@@ -6900,9 +6977,10 @@ void renderObjectView(shared_ptr<const core::World> world)
 // [0.2, 1.0]. The override is a separate authored percentage: it replaces the
 // Room's top-level height, and is removed automatically when the Room grows to
 // more than one cell high.
-void renderRoomHeightScaleEditor(shared_ptr<core::World> const& world,
+void renderRoomHeightScaleEditor(editor::DocumentPtr const& document,
 	shared_ptr<const core::Sector> const& location)
 {
+	auto const world = document ? document->world() : nullptr;
 	auto const room = dynamic_pointer_cast<const core::Location>(location);
 	if (!room || !room->isRoom()) return;
 
@@ -6928,13 +7006,13 @@ void renderRoomHeightScaleEditor(shared_ptr<core::World> const& world,
 		pausePreview(*world);
 		gUISettings.worldPaused = true;
 		std::string diagnostic;
-		if (!world->setRoomHeightScale(location->getIndex(),
+		if (!document->authoring().setRoomHeightScale(location->getIndex(),
 			overridden ? std::optional<float>{scale} : std::nullopt, &diagnostic))
 		{
 			reportEditorError("Room height scale", diagnostic);
 			return;
 		}
-		world->finishBuild();
+		document->authoring().finishBuild();
 		commitDocumentEdit(std::move(undo));
 	}
 	catch (core::Exception const& error)
@@ -6948,9 +7026,10 @@ void renderRoomHeightScaleEditor(shared_ptr<core::World> const& world,
 }
 
 
-void renderLocationWallEditor(shared_ptr<core::World> const& world,
+void renderLocationWallEditor(editor::DocumentPtr const& document,
 	shared_ptr<const core::Sector> const& location)
 {
+	auto const world = document ? document->world() : nullptr;
 	ImGui::Separator();
 	ImGui::TextUnformatted("Shared walls");
 	ImGui::TextDisabled("Open walls directly connect adjacent Rooms or Corridors.");
@@ -6992,9 +7071,9 @@ void renderLocationWallEditor(shared_ptr<core::World> const& world,
 			{
 				pausePreview(*world);
 				gUISettings.worldPaused = true;
-				if (isOpen) world->addLocationWall(location->getIndex(), level, side);
-				else world->removeLocationWall(location->getIndex(), level, side);
-				world->finishBuild();
+				if (isOpen) document->authoring().addLocationWall(location->getIndex(), level, side);
+				else document->authoring().removeLocationWall(location->getIndex(), level, side);
+				document->authoring().finishBuild();
 				commitDocumentEdit(std::move(undo));
 			}
 			catch (core::Exception const& error)
@@ -7011,8 +7090,9 @@ void renderLocationWallEditor(shared_ptr<core::World> const& world,
 }
 
 
-void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
+void renderSelectedObjectPanel(editor::DocumentPtr const& document)
 {
+	auto const world = document ? document->world() : nullptr;
 	if (!gSelectedSector && !gSelectedSectorObject) return;
 
 	string selectedName;
@@ -7035,7 +7115,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 		// panel rather than the generic Sector readout with its "Agents:" line.
 		if (gSelectedSector->getType() == core::SectorType::Background)
 		{
-			renderBackgroundPanel(world, gSelectedSector);
+			renderBackgroundPanel(document, gSelectedSector);
 			return;
 		}
 
@@ -7043,7 +7123,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 		// takes its own panel and never reaches the wall editor below.
 		if (gSelectedSector->getType() == core::SectorType::Facade)
 		{
-			renderFacadePanel(world, gSelectedSector);
+			renderFacadePanel(document, gSelectedSector);
 			return;
 		}
 
@@ -7093,7 +7173,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 		{
 			auto chamber = static_pointer_cast<const core::ChamberTransit>(gSelectedSector);
 			if (auto plan = drawChamberSelectionPanel(world, *chamber))
-				commitAirlockEdit(world, *plan);
+				commitAirlockEdit(document, *plan);
 			break;
 		}
 		case core::SectorType::Airlock:
@@ -7107,7 +7187,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 			if (ImGui::SliderFloat("Cycle duration (seconds)", &seconds, 1.0f, 10.0f))
 			{
 				auto undo = captureDocumentSnapshot(world);
-				if (world->setAirlockCycleSeconds(chamber->getIndex(), seconds))
+				if (document->authoring().setAirlockCycleSeconds(chamber->getIndex(), seconds))
 					commitDocumentEdit(std::move(undo));
 			}
 			int x = (int)chamber->getCellX(), y = (int)chamber->getCellY();
@@ -7116,17 +7196,17 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 			edit = ImGui::InputInt("Chamber Level", &y) || edit;
 			edit = ImGui::InputInt("Chamber width", &width) || edit;
 			if (edit)
-				commitAirlockEdit(world, world->planResizeAirlock(chamber->getIndex(),
+				commitAirlockEdit(document, world->planResizeAirlock(chamber->getIndex(),
 					(uint32_t)x, (uint32_t)y, (uint32_t)width));
 			if (ImGui::Button("Delete Airlock"))
-				commitAirlockEdit(world, world->planRemoveAirlock(chamber->getIndex()));
+				commitAirlockEdit(document, world->planRemoveAirlock(chamber->getIndex()));
 			ImGui::EndDisabled();
 			break;
 		}
 		case core::SectorType::Location:
 			renderLocationPermissionRequirements(world, gSelectedSector->getIndex());
-			renderRoomHeightScaleEditor(world, gSelectedSector);
-			renderLocationWallEditor(world, gSelectedSector);
+			renderRoomHeightScaleEditor(document, gSelectedSector);
+			renderLocationWallEditor(document, gSelectedSector);
 			break;
 
 		case core::SectorType::Lift:
@@ -7149,7 +7229,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 				auto plan = world->planRemoveShuttle(gSelectedSector->getIndex());
 				if (!plan.valid)
 					core::addLogMessage("Shuttle editor", 0, core::LogLevel::Error, plan.diagnostic);
-				else queueShuttleEdit(world, plan);
+				else queueShuttleEdit(document, plan);
 			}
 			ImGui::SameLine();
 			ImGui::TextDisabled("Delete key");
@@ -7194,7 +7274,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 						plan.diagnostic);
 					return false;
 				}
-				queueLadderEdit(world, plan);
+				queueLadderEdit(document, plan);
 				return true;
 			};
 			bool previousExtensible = extensible;
@@ -7227,7 +7307,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 					gSelectedSector->getCellX(), gSelectedSector->getCellY(), options);
 				if (!plan.valid)
 					core::addLogMessage("Ladder editor", 0, core::LogLevel::Error, plan.diagnostic);
-				else queueLadderEdit(world, plan);
+				else queueLadderEdit(document, plan);
 			}
 			ImGui::EndDisabled();
 			ImGui::Separator();
@@ -7236,7 +7316,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 				auto plan = world->planRemoveLadder(gSelectedSector->getIndex());
 				if (!plan.valid)
 					core::addLogMessage("Ladder editor", 0, core::LogLevel::Error, plan.diagnostic);
-				else queueLadderEdit(world, plan);
+				else queueLadderEdit(document, plan);
 			}
 			ImGui::SameLine();
 			ImGui::TextDisabled("Delete key");
@@ -7282,7 +7362,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 					else
 					{
 						mountSide = requestedSide;
-						queueStairwellEdit(world, plan);
+						queueStairwellEdit(document, plan);
 					}
 				}
 				return;
@@ -7303,7 +7383,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 					gSelectedSector->getCellX(), gSelectedSector->getCellY(), options);
 				if (!plan.valid)
 					core::addLogMessage("Stairwell editor", 0, core::LogLevel::Error, plan.diagnostic);
-				else queueStairwellEdit(world, plan);
+				else queueStairwellEdit(document, plan);
 			}
 			ImGui::EndDisabled();
 			ImGui::Separator();
@@ -7312,7 +7392,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 				auto plan = world->planRemoveStairwell(gSelectedSector->getIndex());
 				if (!plan.valid)
 					core::addLogMessage("Stairwell editor", 0, core::LogLevel::Error, plan.diagnostic);
-				else queueStairwellEdit(world, plan);
+				else queueStairwellEdit(document, plan);
 			}
 			ImGui::SameLine();
 			ImGui::TextDisabled("Delete key");
@@ -7357,7 +7437,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 				{
 					auto undo = captureDocumentSnapshot(world);
 					pausePreview(*world);
-					auto index = world->applyStaircaseEdit(plan);
+					auto index = document->authoring().applyStaircaseEdit(plan);
 					commitDocumentEdit(std::move(undo));
 					if (remove) clearSelections(); else gSelectedSector = world->getSector(index);
 				}
@@ -7380,7 +7460,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 		switch (gSelectedSectorObject->getObjectType())
 		{
 		case core::SectorObjectType::BulkheadDoor:
-			renderBulkheadDoorPanel(world, gSelectedSectorObject);
+			renderBulkheadDoorPanel(document, gSelectedSectorObject);
 			break;
 
 		case core::SectorObjectType::Door:
@@ -7388,23 +7468,23 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 			break;
 
 		case core::SectorObjectType::InteractionPoint:
-			renderLiftOwnedControlPanel(world, gSelectedSectorObject);
+			renderLiftOwnedControlPanel(document, gSelectedSectorObject);
 			break;
 
 		case core::SectorObjectType::ForceBridge:
-			renderForceBridgePanel(world, gSelectedSectorObject);
+			renderForceBridgePanel(document, gSelectedSectorObject);
 			break;
 
 		case core::SectorObjectType::Ladder:
-			renderLadderPanel(world, gSelectedSectorObject);
+			renderLadderPanel(document, gSelectedSectorObject);
 			break;
 
 		case core::SectorObjectType::Lift:
-			renderPlatformLiftPanel(world, gSelectedSectorObject);
+			renderPlatformLiftPanel(document, gSelectedSectorObject);
 			break;
 
 		case core::SectorObjectType::Marker:
-			renderMarkerPanel(world, gSelectedSectorObject);
+			renderMarkerPanel(document, gSelectedSectorObject);
 			break;
 
 		case core::SectorObjectType::AccessPanel:
@@ -7422,7 +7502,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 			break;
 
 		case core::SectorObjectType::Walkway:
-			renderWalkwayPanel(world, gSelectedSectorObject);
+			renderWalkwayPanel(document, gSelectedSectorObject);
 			break;
 
 		default:
@@ -7447,9 +7527,10 @@ namespace
 		}
 	}
 
-	void renderRouteCostDiagnostics(shared_ptr<core::World> const& world,
+	void renderRouteCostDiagnostics(editor::DocumentPtr const& document,
 		core::Agent const& agent)
 	{
+		auto const world = document ? document->world() : nullptr;
 		if (!ImGui::TreeNode("Route cost diagnostics")) return;
 		auto const& path = agent.getPath();
 		std::optional<core::PathRouteDiagnostics> diagnostic;
@@ -7516,9 +7597,10 @@ namespace
 		ImGui::TreePop();
 	}
 
-	void renderRouteExplanation(shared_ptr<core::World> const& world,
+	void renderRouteExplanation(editor::DocumentPtr const& document,
 		core::Agent const& agent)
 	{
+		auto const world = document ? document->world() : nullptr;
 		static core::AgentId explainedAgentId{};
 		static shared_ptr<core::Path> explainedPath;
 		static shared_ptr<core::Path> explainedLivePath;
@@ -7656,8 +7738,9 @@ namespace
 	}
 }
 
-void renderSelectedAgentPanel(shared_ptr<core::World> world)
+void renderSelectedAgentPanel(editor::DocumentPtr const& document)
 {
+	auto const world = document ? document->world() : nullptr;
 	if (!gSelectedAgent) return;
 	auto const header = format("Selection: {}###Selection", gSelectedAgent->getName());
 	if (!ImGui::CollapsingHeader(header.c_str())) return;
@@ -7685,7 +7768,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	if (ImGui::Button(gSelectedAgent->isActive() ? "Deactivate" : "Activate"))
 	{
 		string diagnostic;
-		if (!world->setAgentActive(id, !gSelectedAgent->isActive(), &diagnostic))
+		if (!document->authoring().setAgentActive(id, !gSelectedAgent->isActive(), &diagnostic))
 		{
 			core::addLogMessage("Agents", 0, core::LogLevel::Warning, diagnostic);
 		}
@@ -7714,7 +7797,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 		auto const behaviourOwnsMovement = world->agentBehaviourOwnsMovement(id);
 		ImGui::BeginDisabled(behaviourOwnsMovement);
 		if (ImGui::Button("Select path destination (Ctrl+P)"))
-			beginAgentPathSelection(world);
+			beginAgentPathSelection(document);
 		ImGui::EndDisabled();
 		if (behaviourOwnsMovement && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 			ImGui::SetTooltip("The enabled Agent behaviour owns movement");
@@ -7776,7 +7859,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 			{
 				pausePreview(*world);
 				gUISettings.worldPaused = true;
-				if (world->clearAgentPath(id)) commitDocumentEdit(std::move(undo));
+				if (document->authoring().clearAgentPath(id)) commitDocumentEdit(std::move(undo));
 			}
 		}
 		ImGui::EndDisabled();
@@ -7848,8 +7931,8 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	renderDumbwaiterAgentActions(world, id);
 	renderAccessPanelAgentActions(world, id);
 
-	renderRouteCostDiagnostics(world, *gSelectedAgent);
-	renderRouteExplanation(world, *gSelectedAgent);
+	renderRouteCostDiagnostics(document, *gSelectedAgent);
+	renderRouteExplanation(document, *gSelectedAgent);
 
 	if (gSelectedVertex)
 	{
@@ -7858,15 +7941,16 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 		ImGui::BeginDisabled(behaviourOwnsMovement || !isMarkerPathTarget(*world, *gSelectedVertex));
 		if (ImGui::Button("Path to selected Marker"))
 		{
-			chooseAgentDestinationAction(world, gSelectedVertex);
+			chooseAgentDestinationAction(document, gSelectedVertex);
 		}
 		ImGui::EndDisabled();
 	}
 }
 
 
-void addBackLayer(shared_ptr<core::World> const& world)
+void addBackLayer(editor::DocumentPtr const& document)
 {
+	auto const world = document ? document->world() : nullptr;
 	if (!world) return;
 
 	if (world->getLayerCount() >= CORE_MAX_LAYERS)
@@ -7881,8 +7965,8 @@ void addBackLayer(shared_ptr<core::World> const& world)
 	{
 		pausePreview(*world);
 
-		auto const layer = world->addLayer();
-		world->finishBuild();
+		auto const layer = document->authoring().addLayer();
+		document->authoring().finishBuild();
 		commitDocumentEdit(std::move(undo));
 		core::addLogMessage("Layers", 0, core::LogLevel::Info,
 			format("Added {} as the new back layer", world->getLayerName(layer)));
@@ -7898,8 +7982,9 @@ void addBackLayer(shared_ptr<core::World> const& world)
 }
 
 
-void renderLayersPanel(shared_ptr<core::World> const& world)
+void renderLayersPanel(editor::DocumentPtr const& document)
 {
+	auto const world = document ? document->world() : nullptr;
 	if (!world) return;
 
 	auto const layerCount = world->getLayerCount();
@@ -7972,7 +8057,7 @@ void renderLayersPanel(shared_ptr<core::World> const& world)
 			}
 
 			ImGui::TableSetColumnIndex(1);
-			renderLayerNameEditor(world, layer);
+			renderLayerNameEditor(document, layer);
 
 			// A World keeps at least two Layers, so deletion is only offered while
 			// it has more than two.
@@ -7981,7 +8066,7 @@ void renderLayersPanel(shared_ptr<core::World> const& world)
 			ImGui::BeginDisabled(!canDelete);
 			if (ImGui::Button(ICON_FA_TRASH, ImVec2(ImGui::GetFrameHeight(), 0.0f)))
 			{
-				requestLayerDelete(world, layer);
+				requestLayerDelete(document, layer);
 			}
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
@@ -8004,7 +8089,7 @@ void renderLayersPanel(shared_ptr<core::World> const& world)
 
 	ImGui::BeginDisabled(atMaximum);
 	if (ImGui::Button(ICON_FA_PLUS " Add Layer"))
-		addBackLayer(world);
+		addBackLayer(document);
 	ImGui::EndDisabled();
 	if (atMaximum && ImGui::IsItemHovered())
 	{
@@ -8017,8 +8102,9 @@ void renderLayersPanel(shared_ptr<core::World> const& world)
 }
 
 
-void renderLevelsPanel(shared_ptr<core::World> const& world)
+void renderLevelsPanel(editor::DocumentPtr const& document)
 {
+	auto const world = document ? document->world() : nullptr;
 	if (!world) return;
 	static optional<core::World::LevelDeletePlan> pending;
 	static weak_ptr<core::World> pendingWorld;
@@ -8034,7 +8120,7 @@ void renderLevelsPanel(shared_ptr<core::World> const& world)
 			ImGui::PushID(level);
 			ImGui::TableNextRow();
 			ImGui::TableSetColumnIndex(0);
-			renderLayerNameEditor(world, level, true);
+			renderLayerNameEditor(document, level, true);
 			ImGui::TableSetColumnIndex(1);
 			ImGui::BeginDisabled(world->getLevelsHigh() <= 1);
 			if (ImGui::Button(ICON_FA_TRASH))
@@ -8070,7 +8156,7 @@ void renderLevelsPanel(shared_ptr<core::World> const& world)
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			world->addLevel();
+			document->authoring().addLevel();
 			gUISettings.worldPaused = true;
 			clearSelections();
 			commitDocumentEdit(std::move(undo));
@@ -8096,7 +8182,7 @@ void renderLevelsPanel(shared_ptr<core::World> const& world)
 				auto undo = captureDocumentSnapshot(world);
 				try
 				{
-					world->applyDeleteLevel(*pending);
+					document->authoring().applyDeleteLevel(*pending);
 					clearSelections();
 					commitDocumentEdit(std::move(undo));
 				}
@@ -8112,8 +8198,9 @@ void renderLevelsPanel(shared_ptr<core::World> const& world)
 	}
 }
 
-void renderWorldPanel(shared_ptr<core::World> world)
+void renderWorldPanel(editor::DocumentPtr const& document)
 {
+	auto const world = document ? document->world() : nullptr;
 	ImGui::Indent(ImGui::GetTreeNodeToLabelSpacing());
 
 	if (ImGui::CollapsingHeader("Tags"))
@@ -8150,7 +8237,7 @@ void renderWorldPanel(shared_ptr<core::World> world)
 		// Groups are defined here, above the Agents they will classify, so the
 		// definitions read before the rows that use them.
 		renderAgentGroupsPanel(world);
-		renderAgentView(world);
+		renderAgentView(document);
 	}
 
 	if (ImGui::CollapsingHeader("Sector artwork"))
@@ -8162,7 +8249,7 @@ void renderWorldPanel(shared_ptr<core::World> world)
 				if (ImGui::Selectable(name.c_str(), name == selected))
 				{
 					auto before = captureDocumentSnapshot(world);
-					world->setSectorImageSetResourceName(name);
+					document->authoring().setSectorImageSetResourceName(name);
 					commitDocumentEdit(std::move(before));
 				}
 			ImGui::EndCombo();
@@ -8179,7 +8266,7 @@ void renderWorldPanel(shared_ptr<core::World> world)
 				if (ImGui::Selectable(name.c_str(), name == selected))
 				{
 					auto before = captureDocumentSnapshot(world);
-					world->setFurnitureImageSetResourceName(name);
+					document->authoring().setFurnitureImageSetResourceName(name);
 					commitDocumentEdit(std::move(before));
 				}
 			ImGui::EndCombo();
@@ -8201,7 +8288,7 @@ void renderWorldPanel(shared_ptr<core::World> world)
 				if (ImGui::Selectable(name.c_str(), name == selected))
 				{
 					auto before = captureDocumentSnapshot(world);
-					world->setAgentImageSetResourceName(name);
+					document->authoring().setAgentImageSetResourceName(name);
 					commitDocumentEdit(std::move(before));
 				}
 			ImGui::EndCombo();
@@ -8214,7 +8301,7 @@ void renderWorldPanel(shared_ptr<core::World> world)
 			ImGui::TextWrapped("Agent ImageSet lacks Standing artwork for the placement type; rendering previews in magenta.");
 		else for (auto const& snapshot : editor::previewRuntime(*world).getSimulationSnapshotView().agents)
 		{
-			auto agent = world->lookupAgent(snapshot.id).entity;
+			auto agent = document->authoring().world().lookupAgent(snapshot.id).entity;
 			if (agent && (!agentSpriteSize(agent->getPoseImageTile().c_str())
 				|| !agentSpriteSize(agent->getPhysicalBaseline().poses.at(core::Pose::Standing).imageTile.c_str())))
 			{
@@ -8225,8 +8312,8 @@ void renderWorldPanel(shared_ptr<core::World> world)
 	}
 	renderFurniturePanel(world, gWorldFilepath,
 		[] { return applicationResourceNames("FurnitureCatalogue"); });
-	renderSelectedObjectPanel(world);
-	renderSelectedAgentPanel(world);
+	renderSelectedObjectPanel(document);
+	renderSelectedAgentPanel(document);
 
 	ImGui::Unindent(ImGui::GetTreeNodeToLabelSpacing());
 }
@@ -8282,9 +8369,10 @@ void renderGraphPanel(shared_ptr<const core::Graph> graph)
 }
 
 
-void renderPathingPanel(shared_ptr<core::World> const& world,
+void renderPathingPanel(editor::DocumentPtr const& document,
 	shared_ptr<const core::Agent> /* agent */)
 {
+		auto const world = document ? document->world() : nullptr;
 		string selectedVertexText = format("Selected vertex: {}", gSelectedVertex ? gSelectedVertex->getDescription() : "<none>");
 		string hoveredVertexText = format("Hovered vertex: {}", gHoveredVertex ? gHoveredVertex->getDescription() : "<none>");
 
@@ -8553,21 +8641,22 @@ void renderDockSpace()
 	ImGui::End();
 }
 
-void renderControlsWindow(shared_ptr<core::World> world, shared_ptr<const core::Graph> graph,
+void renderControlsWindow(editor::DocumentPtr const& document, shared_ptr<const core::Graph> graph,
 	shared_ptr<core::Agent> pathingAgent)
 {
+	auto const world = document ? document->world() : nullptr;
 	ImGui::Begin("Controls");
 
 	if (ImGui::CollapsingHeader("Simulation", ImGuiTreeNodeFlags_DefaultOpen))
-		renderToolbar(world);
+		renderToolbar(document);
 	if (ImGui::CollapsingHeader("Layers", ImGuiTreeNodeFlags_DefaultOpen))
-		renderLayersPanel(world);
+		renderLayersPanel(document);
 	if (ImGui::CollapsingHeader("Levels", ImGuiTreeNodeFlags_DefaultOpen))
-		renderLevelsPanel(world);
+		renderLevelsPanel(document);
 	if (ImGui::CollapsingHeader("World", ImGuiTreeNodeFlags_DefaultOpen))
-		renderWorldPanel(world);
+		renderWorldPanel(document);
 	if (ImGui::CollapsingHeader("Path finding"))
-		renderPathingPanel(world, pathingAgent);
+		renderPathingPanel(document, pathingAgent);
 	if (ImGui::CollapsingHeader("Graph"))
 		renderGraphPanel(graph);
 	if (ImGui::CollapsingHeader("Log"))
@@ -8632,8 +8721,9 @@ namespace
 			? ResizeEdge::Move : ResizeEdge::None;
 	}
 
-	void updateAgentMove(shared_ptr<core::World> const& world)
+	void updateAgentMove(editor::DocumentPtr const& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto& io = ImGui::GetIO();
 		if (gUISettings.selectionMode != UISettings::SelectionMode::Object)
 		{
@@ -8834,8 +8924,9 @@ namespace
 		return true;
 	}
 
-	void updateObjectMove(shared_ptr<core::World> const& world)
+	void updateObjectMove(editor::DocumentPtr const& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto& io = ImGui::GetIO();
 		if (!gObjectMove.dragging && gWorldHovered
 			&& gUISettings.selectionMode == UISettings::SelectionMode::Object
@@ -9010,12 +9101,13 @@ namespace
 				resetObjectMove();
 				return;
 			}
-			queueObjectMove(world, gObjectMove.preview);
+			queueObjectMove(document, gObjectMove.preview);
 		}
 	}
 
-	void updateSectorResize(shared_ptr<core::World> const& world)
+	void updateSectorResize(editor::DocumentPtr const& document)
 	{
+		auto const world = document ? document->world() : nullptr;
 		auto& io = ImGui::GetIO();
 		if (gUISettings.selectionMode != UISettings::SelectionMode::Sector || !gSelectedSector
 			|| gSelectedSector->getLayerIndex() != (uint32_t)gUISettings.visibleLayer)
@@ -9269,7 +9361,7 @@ namespace
 					else
 					{
 						auto undo = captureDocumentSnapshot(world);
-						if (world->applyDumbwaiterMove(plan))
+						if (document->authoring().applyDumbwaiterMove(plan))
 						{
 							gHoveredAgent = nullptr; gHoveredSector.reset(); gHoveredSectorObject.reset();
 							gSelectedAgent = nullptr; gSelectedSectorObject.reset();
@@ -9284,7 +9376,7 @@ namespace
 				{ core::addLogMessage("Dumbwaiter editor", 0, core::LogLevel::Error, error.what()); }
 				resetSectorResize();
 			}
-			else if (gSectorResize.airlock) commitAirlockEdit(world, gSectorResize.airlockPreview);
+			else if (gSectorResize.airlock) commitAirlockEdit(document, gSectorResize.airlockPreview);
 			else if (gSectorResize.lift && !gSectorResize.liftPreview.valid)
 			{
 				core::addLogMessage("Lift editor", 0, core::LogLevel::Error,
@@ -9316,11 +9408,11 @@ namespace
 					gSectorResize.preview.diagnostic);
 				resetSectorResize();
 			}
-			else if (gSectorResize.lift) queueLiftEdit(world, gSectorResize.liftPreview);
-			else if (gSectorResize.shuttle) queueShuttleEdit(world, gSectorResize.shuttlePreview);
-			else if (gSectorResize.ladder) queueLadderEdit(world, gSectorResize.ladderPreview);
-			else if (gSectorResize.stairwell) queueStairwellEdit(world, gSectorResize.stairwellPreview);
-			else queueLocationEdit(world, gSectorResize.preview);
+			else if (gSectorResize.lift) queueLiftEdit(document, gSectorResize.liftPreview);
+			else if (gSectorResize.shuttle) queueShuttleEdit(document, gSectorResize.shuttlePreview);
+			else if (gSectorResize.ladder) queueLadderEdit(document, gSectorResize.ladderPreview);
+			else if (gSectorResize.stairwell) queueStairwellEdit(document, gSectorResize.stairwellPreview);
+			else queueLocationEdit(document, gSectorResize.preview);
 		}
 	}
 
@@ -9488,8 +9580,9 @@ namespace
 	}
 }
 
-void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Graph> graph)
+void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const core::Graph> graph)
 {
+	auto const world = document ? document->world() : nullptr;
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 	ImGui::Begin("World", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 	ImGui::PopStyleVar();
@@ -9688,9 +9781,9 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 	// Set after the hover tests so a pan outranks the Hand cursor.
 	if (gViewPan.dragging) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
 
-	updateAgentMove(world);
-	updateObjectMove(world);
-	updateSectorResize(world);
+	updateAgentMove(document);
+	updateObjectMove(document);
+	updateSectorResize(document);
 	if (gAgentMove.dragging || gObjectMove.dragging) gPegmanConsumesLeftMouse = true;
 
 	if (gSelectingAgentPathDestination) gUISettings.renderGraph = true;
@@ -9763,7 +9856,7 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 	drawList->PopClipRect();
 
 	// The palette is editor chrome, so it remains available across the canvas.
-	renderObjectPalette(world, canvasPos, canvasSize, drawList);
+	renderObjectPalette(document, canvasPos, canvasSize, drawList);
 	drawList->PopClipRect();
 
 	// MPP owns every primitive in the canvas. ImGui only composites the
@@ -9776,14 +9869,15 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 	ImGui::End();
 }
 
-void renderUI(shared_ptr<core::World>& world, shared_ptr<core::Agent> pathingAgent)
+void renderUI(editor::DocumentPtr& document, shared_ptr<core::Agent> pathingAgent)
 {
+	auto const world = document ? document->world() : nullptr;
 	ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
 
-	renderMenu(world);
-	renderDocumentToolbar(world);
-	renderDestinationActionPopup(world);
-	renderFilePopups(world);
+	renderMenu(document);
+	renderDocumentToolbar(document);
+	renderDestinationActionPopup(document);
+	renderFilePopups(document);
 	renderDockSpace();
 
 	if (!world)
@@ -9801,8 +9895,8 @@ void renderUI(shared_ptr<core::World>& world, shared_ptr<core::Agent> pathingAge
 	selectWorldFurnitureImageSet(world->furnitureImageSetResourceName());
 	auto const graph = world->getGraph();
 	renderStatusBar(world);
-	renderControlsWindow(world, graph, pathingAgent);
-	renderWorldWindow(world, graph);
+	renderControlsWindow(document, graph, pathingAgent);
+	renderWorldWindow(document, graph);
 	gLocationPlan.render(world, [](WorldDrawList const& commands, ImVec2 position, ImVec2 size)
 	{
 		auto texture = renderWorldCommands(commands, position, size, WorldCanvas::LocationPlan);

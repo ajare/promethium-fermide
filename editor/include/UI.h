@@ -9,6 +9,8 @@
 #include "core/Graph.h"
 #include "core/Agent.h"
 
+#include "EditorDocument.h"
+
 #include "MouseButtonStatus.h"
 
 inline bool isCanvasSelectableSectorType(core::SectorType type)
@@ -58,7 +60,7 @@ MouseButtonStatus getMouseButtonStatus();
 // Loads the recent-file list, creating its storage file when needed.
 void initializeRecentFiles(std::filesystem::path const& filepath);
 
-void handleShortcuts(std::shared_ptr<core::World>& world);
+void handleShortcuts(editor::DocumentPtr& document);
 
 // Queues and renders the non-fatal diagnostics produced while loading a World.
 // Public seams let headless editor checks exercise the real modal.
@@ -67,13 +69,13 @@ void renderWorldLoadWarningsPopup();
 
 // Returns true when the application may close immediately. A modified document
 // instead opens the existing save/discard/cancel confirmation and returns false.
-bool requestApplicationClose(std::shared_ptr<core::World>& world);
+bool requestApplicationClose(editor::DocumentPtr& document);
 
-void handleWorldInteraction(std::shared_ptr<core::World> world,
+void handleWorldInteraction(editor::DocumentPtr const& document,
 	std::shared_ptr<const core::Graph> graph, MouseButtonStatus const& mouseStatus);
 
-void handleContinuousKeyboardInput(std::shared_ptr<core::World> world, uint64_t updateTimeMicros);
+void handleContinuousKeyboardInput(editor::DocumentPtr const& document, uint64_t updateTimeMicros);
 
-void renderUI(std::shared_ptr<core::World>& world, std::shared_ptr<core::Agent> pathingAgent);
+void renderUI(editor::DocumentPtr& document, std::shared_ptr<core::Agent> pathingAgent);
 
 

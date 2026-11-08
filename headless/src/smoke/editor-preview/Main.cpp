@@ -6,5 +6,6 @@ int main(int argc, char** argv)
 	registerEditorPreviewDocument(checks);
 	registerEditorPreviewParity(checks);
 	registerEditorPreviewBoundary(checks);
+	registerEditorPreviewAuthoringRoute(checks);
 	return smoke::main("editor-preview", checks, argc, argv);
 }
