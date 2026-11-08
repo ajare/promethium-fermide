@@ -148,7 +148,9 @@ inline. It builds a World, hands it to `game::WorldRuntime` in
 shared library, so the boundary is exercised rather than assumed. Its 33
 registrations cover exclusive ownership (the caller's `unique_ptr` is emptied,
 the World is destroyed exactly when the runtime is, a null World is refused,
-and a move carries the same World), the drive surface (`update` whole-tick
+and a transfer to another holder goes through the pointer to a runtime that
+cannot itself move, so the address the World is driven at never changes
+(#977)), the drive surface (`update` whole-tick
 accumulation, elapsed seconds, non-positive/non-finite input, time scale,
 `advanceTick`, `advanceTicks`, repeated-run determinism), pause/resume/reset
 including their boundary events, snapshot copy versus cached view, exact-once
@@ -217,10 +219,19 @@ The shape is also compile-time. `Wrapping.cpp` asserts that a
 a `core::World`, a `World*`, or a `unique_ptr<World>` — that it is movable
 and never copyable, that its `world()` is a mutable `core::World&` while the
 runtime it wraps hands out only `core::World const&`, and that it cannot
-wrap a `const` runtime. The Linux `dladdr` checks report that
-`WorldAuthoring` code resolved into `libpf-game-authoring` and that this is
-a different image from the runtime it wraps; on other platforms those two
-registrations are not made.
+wrap a `const` runtime. It also asserts the #977 half: the runtime is
+neither movable nor copyable, because a handle caches its address and a
+runtime that could move could leave one naming the shell it moved out of.
+The transfer that deleted move used to be is `game::AuthoringPair`, movable
+as a whole while the runtime inside it is pinned, and the runtime checks
+show the property rather than the type: after a transfer the handle authors
+into the World `runtime().world()` reads and is driven by the same Tick.
+A moved-from handle is refused too — eight ways back into the document all
+throw rather than reading through a null pointer, and adopting a history
+across one is refused in both directions. The Linux `dladdr` checks report
+that `WorldAuthoring` code resolved into `libpf-game-authoring` and that
+this is a different image from the runtime it wraps; on other platforms
+those two registrations are not made.
 
 Resource binding and persistence (#969) sit on the same handle. `attach`,
 `detach`, the `AndClearAssignments` variants, `resolve`, `markUnavailable`

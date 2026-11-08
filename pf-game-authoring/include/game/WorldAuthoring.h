@@ -75,7 +75,13 @@ namespace game
 
 		// The handle is movable but never copied: copying would suggest two
 		// independently held privileges where there is only one view of one
-		// World. A moved-from handle holds nothing and must not be used again.
+		// World.
+		//
+		// Moving a handle cannot strand anything, because the runtime it names
+		// cannot move - the moves were deleted in #977 for exactly that reason.
+		// What a move does leave behind is an empty handle, and every accessor
+		// below fails loudly on one instead of dereferencing the null `runtime_`
+		// it now holds (#978).
 		WorldAuthoring(WorldAuthoring&& other) noexcept;
 		WorldAuthoring& operator=(WorldAuthoring&& other) noexcept;
 		WorldAuthoring(WorldAuthoring const&) = delete;
@@ -86,21 +92,27 @@ namespace game
 		// as long as the wrapped runtime lives. Structural edits follow the
 		// protocol the World already enforces: pause at the edit/simulation
 		// boundary, edit, rebuild, resume.
-		core::World& world() noexcept;
+		//
+		// Throws `std::logic_error` when this handle has been moved from. There
+		// is no World behind it any more, and a null dereference is not an
+		// answer to a question about the document (#978).
+		core::World& world();
 
 		// The wrapped runtime, for preview. The editor renders and drives
 		// through this, so what it previews is the same runtime path the game
-		// runs - the guarantee this arrangement exists to provide.
-		WorldRuntime& runtime() noexcept;
+		// runs - the guarantee this arrangement exists to provide. Throws
+		// `std::logic_error` on a moved-from handle, for the same reason.
+		WorldRuntime& runtime();
 
-		WorldRuntime const& runtime() const noexcept;
+		WorldRuntime const& runtime() const;
 
 		// The read-only view of the document being authored. It is the same
 		// `core::World const&` the runtime hands to rendering, and every
 		// `can...` guard below is answered from it. Preflighting an edit is a
 		// read, so it is answered without spending the mutable-view privilege;
-		// only the edit itself needs that.
-		core::World const& document() const noexcept;
+		// only the edit itself needs that. Throws `std::logic_error` on a
+		// moved-from handle, for the same reason.
+		core::World const& document() const;
 
 		// The authoring topology and preflight families follow, grouped by
 		// what is being authored. Each `can...` guard is declared next to the
@@ -567,24 +579,28 @@ namespace game
 	bool redo(std::optional<DocumentSnapshot> current,
 		DocumentHistory::RestoreDocument const& restore);
 
-	bool canUndo() const noexcept;
+	// The remaining history family reads and writes this handle's own history,
+	// and none of it is `noexcept`: a handle that has been moved from owns no
+	// history, and every one of these throws `std::logic_error` on one rather
+	// than dereferencing the null pointer it now holds (#978).
+	bool canUndo() const;
 
-	bool canRedo() const noexcept;
+	bool canRedo() const;
 
-	std::size_t undoDepth() const noexcept;
+	std::size_t undoDepth() const;
 
-	std::size_t redoDepth() const noexcept;
+	std::size_t redoDepth() const;
 
 	// True when the document differs from the last saved state. This is the
 	// history's own bookkeeping, not the World's modified flag.
-	bool isModified() const noexcept;
+	bool isModified() const;
 
 	// Mark the current history position as saved, clearing the modified flag.
-	void markSaved() noexcept;
+	void markSaved();
 
 	// Drop both stacks and the saved marker. Used when a document is closed or
 	// replaced wholesale, where replaying an old edit would be wrong.
-	void clearHistory() noexcept;
+	void clearHistory();
 
 	// The history this handle owns, as the object rather than as this family's
 	// mirror of it.
@@ -598,9 +614,9 @@ namespace game
 	// same object `isModified()`, `markSaved()` and `clearHistory()` act on,
 	// which is what makes the editor's unsaved-changes prompt and this
 	// façade unable to drift apart (#975).
-	DocumentHistory& history() noexcept;
+	DocumentHistory& history();
 
-	DocumentHistory const& history() const noexcept;
+	DocumentHistory const& history() const;
 
 	// Take over the history `source` holds, leaving `source` with a fresh
 	// empty one of its own.
@@ -614,7 +630,11 @@ namespace game
 	// to be sitting on. Without this the history would reset on the first
 	// undo, which is exactly the kind of quiet loss this family exists to
 	// prevent (#975).
-	void adoptHistoryFrom(WorldAuthoring& source) noexcept;
+	// Both handles have to be live. Adopting from a moved-from handle, or into
+	// one, would leave a handle with no history to answer from - the same
+	// quiet loss arriving by a different route - so it throws
+	// `std::logic_error` rather than performing the swap (#978).
+	void adoptHistoryFrom(WorldAuthoring& source);
 
 	private:
 		// Replace the wrapped World's contents with `snapshot`, in place. Used
@@ -629,5 +649,72 @@ namespace game
 		// process-wide global, so two documents in one process keep separate
 		// undo stacks and neither can roll back the other's work.
 		std::unique_ptr<DocumentHistory> history_;
+	};
+
+	// A `WorldRuntime` and the `WorldAuthoring` wrapped over it, held as one
+	// value that can be stored, returned and moved (#977).
+	//
+	// This is the transfer the boundary needs and that the runtime alone cannot
+	// offer. `WorldRuntime` refuses to move because a handle names it by
+	// address, so the pair cannot hold the runtime by value either: it pins
+	// the runtime on the heap and wires the handle to that pinned address once,
+	// at construction, for the pair's whole life. Moving the pair moves two
+	// pointers and leaves the runtime exactly where it was, so there is no
+	// move left in the type system that a handle can be left behind by.
+	//
+	// That is the whole guarantee, and it is structural rather than policed:
+	// a caller that wants to hand a World over with its authoring powers
+	// attached does it through this type, or through a pointer to a runtime it
+	// has already pinned, or not at all. The bug this exists to prevent was
+	// not a wrong value flowing through an API but a legal one, and the fix is
+	// to make the illegal shape unwriteable rather than to check for it.
+	class PF_GAME_AUTHORING_API AuthoringPair
+	{
+	public:
+		// Takes the World, builds the runtime that owns it, and wraps this
+		// pair's own authoring handle over that runtime. A null `world` is
+		// refused by the runtime itself with `std::invalid_argument`, and the
+		// refusal is passed through unchanged: a pair with nothing to drive is
+		// no more constructible than a runtime with nothing to drive.
+		explicit AuthoringPair(std::unique_ptr<core::World> world);
+
+		// Wraps a fresh authoring handle over a runtime the caller already
+		// owns. The runtime keeps the address it already has, which is what
+		// makes the handle safe to hold: from here the pair keeps that object
+		// pinned. A null `runtime` throws `std::invalid_argument`, because a
+		// pair whose runtime is null has no address to pin and every accessor
+		// on it would be a question with no thing behind it.
+		explicit AuthoringPair(std::unique_ptr<WorldRuntime> runtime);
+
+		~AuthoringPair();
+
+		// Movable as a whole, never copied. The move hands over two pointers;
+		// the runtime and the World inside it do not move, so the handle is
+		// still wired to the thing it was wired to. A moved-from pair is empty
+		// and its accessors fail loudly rather than dereferencing null (#978).
+		AuthoringPair(AuthoringPair&& other) noexcept;
+		AuthoringPair& operator=(AuthoringPair&& other) noexcept;
+		AuthoringPair(AuthoringPair const&) = delete;
+		AuthoringPair& operator=(AuthoringPair const&) = delete;
+
+		// The pinned runtime. `authoring().runtime()` and this name the same
+		// object, and that identity is the property the transfer exists to
+		// preserve: driving through here drives what the handle authors.
+		// Throws `std::logic_error` on a moved-from pair.
+		WorldRuntime& runtime();
+
+		WorldRuntime const& runtime() const;
+
+		// The authoring handle wrapped over the runtime above. Throws
+		// `std::logic_error` on a moved-from pair.
+		WorldAuthoring& authoring();
+
+		WorldAuthoring const& authoring() const;
+
+	private:
+		// Held by pointer on purpose. The handle below caches this object's
+		// address, so the one thing that must never happen to it is moving.
+		std::unique_ptr<WorldRuntime> runtime_;
+		std::unique_ptr<WorldAuthoring> authoring_;
 	};
 }

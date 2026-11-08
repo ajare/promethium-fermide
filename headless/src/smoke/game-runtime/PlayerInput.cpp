@@ -132,9 +132,13 @@ namespace
 
 	// Two Rooms stacked in depth with a manual Door between them, and the
 	// Player standing at the Door so the contextual action means something.
+	// The runtime is held pinned behind a pointer because the fixture hands
+	// this struct back by value: a `WorldRuntime` cannot move (#977), so the
+	// only way a fixture that returns one can be written is to move the
+	// pointer and leave the runtime where it was made.
 	struct DoorWorld
 	{
-		game::WorldRuntime runtime;
+		std::unique_ptr<game::WorldRuntime> runtime;
 		core::AgentId player{};
 		std::shared_ptr<core::Door> door;
 		uint32_t front{ 0 };
@@ -155,12 +159,12 @@ namespace
 		world->finishBuild();
 		world->pauseSimulation();
 		auto const player = makePlayer(*world, world->createAgent("Player", front, 0, 2.5f));
-		DoorWorld built{ game::WorldRuntime(std::move(world)), player, door, front, back };
-		resume(built.runtime);
+		DoorWorld built{ std::make_unique<game::WorldRuntime>(std::move(world)), player, door, front, back };
+		resume(*built.runtime);
 		require(!built.door->isOpen() && !built.door->isOpening(),
 			"the fixture Door must start closed");
-		require(playerSector(built.runtime, built.player) == front,
-			"the Player must start in the front Room, " + describe(built.runtime, built.player));
+		require(playerSector(*built.runtime, built.player) == front,
+			"the Player must start in the front Room, " + describe(*built.runtime, built.player));
 		return built;
 	}
 
@@ -184,10 +188,11 @@ namespace
 
 	// Walks the Player to a Lift's ground-floor Door, waits for it to open and
 	// boards it. Standing in the shaft Transit is the only state in which the
-	// Stop selector exists at all.
+	// Stop selector exists at all. The runtime is pinned for the same reason
+	// as in `DoorWorld` above (#977).
 	struct BoardedLift
 	{
-		game::WorldRuntime runtime;
+		std::unique_ptr<game::WorldRuntime> runtime;
 		core::AgentId player{};
 		core::TraversalResourceId resource{};
 		uint32_t transitSector{ 0 };
@@ -248,10 +253,10 @@ namespace
 		world->pauseSimulation();
 		auto const player = makePlayer(*world, world->createAgent("Player", lower, 0,
 			point->getPosition().x - world->getSector(lower)->getPosition().x));
-		BoardedLift boarded{ game::WorldRuntime(std::move(world)), player,
+		BoardedLift boarded{ std::make_unique<game::WorldRuntime>(std::move(world)), player,
 			created.traversalResource, created.lift.sector->getIndex() };
-		resume(boarded.runtime);
-		boardLift(boarded.runtime, boarded.player, *door, boarded.transitSector);
+		resume(*boarded.runtime);
+		boardLift(*boarded.runtime, boarded.player, *door, boarded.transitSector);
 		return boarded;
 	}
 
@@ -392,50 +397,50 @@ void registerGameRuntimePlayerInput(std::vector<smoke::Check>& checks)
 		[](smoke::Context const&)
 		{
 			auto fixture = makeDoorWorld("Player Door input");
-			fixture.runtime.requestPlayerDoorAction();
-			require(fixture.runtime.advanceTick(), "the run stopped while opening the Door");
+			fixture.runtime->requestPlayerDoorAction();
+			require(fixture.runtime->advanceTick(), "the run stopped while opening the Door");
 			require(fixture.door->isOpening() || fixture.door->isOpen(),
 				"the contextual action must open the manual Door");
-			require(fixture.runtime.advanceTicks(180), "the run stopped while the Door opened");
+			require(fixture.runtime->advanceTicks(180), "the run stopped while the Door opened");
 			require(fixture.door->isOpen(), "the Door never reached Open");
-			require(playerSector(fixture.runtime, fixture.player) == fixture.front,
+			require(playerSector(*fixture.runtime, fixture.player) == fixture.front,
 				"opening a Door must not move the Player onto it, "
-					+ describe(fixture.runtime, fixture.player));
+					+ describe(*fixture.runtime, fixture.player));
 
-			fixture.runtime.requestPlayerDoorAction();
-			require(fixture.runtime.advanceTick(), "the run stopped while crossing the Door");
-			require(fixture.runtime.advanceTicks(60), "the run stopped after crossing the Door");
-			require(playerSector(fixture.runtime, fixture.player) == fixture.back,
+			fixture.runtime->requestPlayerDoorAction();
+			require(fixture.runtime->advanceTick(), "the run stopped while crossing the Door");
+			require(fixture.runtime->advanceTicks(60), "the run stopped after crossing the Door");
+			require(playerSector(*fixture.runtime, fixture.player) == fixture.back,
 				"a second contextual action must cross the open Door into the Room behind it, "
-					+ describe(fixture.runtime, fixture.player));
+					+ describe(*fixture.runtime, fixture.player));
 		} });
 
 	checks.push_back({ "transportStopBrowseMovesTheHighlightAndConfirmRequestsIt",
 		[](smoke::Context const&)
 		{
 			auto boarded = makeBoardedLift();
-			auto selector = boarded.runtime.getPlayerTransportSelector();
+			auto selector = boarded.runtime->getPlayerTransportSelector();
 			require(selector.has_value(), "a boarded Player must be shown the Stop selector");
 			require(selector->stops.size() == 3, "the Lift must offer three Stops, got "
 				+ std::to_string(selector->stops.size()));
 			require(selector->focus == 1, "the highlight must start on the Stop being boarded, got "
 				+ std::to_string(selector->focus));
-			require(stopRequests(vehicle(boarded.runtime, boarded.resource), 2) == 0,
+			require(stopRequests(vehicle(*boarded.runtime, boarded.resource), 2) == 0,
 				"nothing may be requested before a confirm");
 
-			boarded.runtime.browsePlayerTransportStop(1, false);
-			auto const browsed = boarded.runtime.getPlayerTransportSelector();
+			boarded.runtime->browsePlayerTransportStop(1, false);
+			auto const browsed = boarded.runtime->getPlayerTransportSelector();
 			require(browsed.has_value() && browsed->focus == 2,
 				"browsing forward must move the highlight to the next Stop, got "
 					+ std::to_string(browsed ? int(browsed->focus) : -1));
-			require(stopRequests(vehicle(boarded.runtime, boarded.resource), 2) == 0,
+			require(stopRequests(vehicle(*boarded.runtime, boarded.resource), 2) == 0,
 				"browsing alone must not request a Stop");
 
-			boarded.runtime.confirmPlayerTransportStop();
-			require(stopRequests(vehicle(boarded.runtime, boarded.resource), 2) == 1,
+			boarded.runtime->confirmPlayerTransportStop();
+			require(stopRequests(vehicle(*boarded.runtime, boarded.resource), 2) == 1,
 				"confirming must request the highlighted Stop");
-			boarded.runtime.confirmPlayerTransportStop();
-			require(stopRequests(vehicle(boarded.runtime, boarded.resource), 2) == 1,
+			boarded.runtime->confirmPlayerTransportStop();
+			require(stopRequests(vehicle(*boarded.runtime, boarded.resource), 2) == 1,
 				"confirming the same Stop twice must not double-book it");
 		} });
 
@@ -513,17 +518,17 @@ void registerGameRuntimePlayerInput(std::vector<smoke::Check>& checks)
 			// it. Clearing first must throw the press away rather than deliver
 			// it on some later Tick.
 			auto cleared = makeDoorWorld("Discarded Door press");
-			cleared.runtime.requestPlayerDoorAction();
-			cleared.runtime.clearPlayerInput();
-			require(cleared.runtime.advanceTicks(60), "the run stopped after discarding the press");
+			cleared.runtime->requestPlayerDoorAction();
+			cleared.runtime->clearPlayerInput();
+			require(cleared.runtime->advanceTicks(60), "the run stopped after discarding the press");
 			require(!cleared.door->isOpening() && !cleared.door->isOpen(),
 				"a cleared press must never reach the Door, opening="
 					+ std::to_string(cleared.door->isOpening()) + " open="
 					+ std::to_string(cleared.door->isOpen()));
 
 			auto kept = makeDoorWorld("Delivered Door press");
-			kept.runtime.requestPlayerDoorAction();
-			require(kept.runtime.advanceTicks(2), "the run stopped delivering the press");
+			kept.runtime->requestPlayerDoorAction();
+			require(kept.runtime->advanceTicks(2), "the run stopped delivering the press");
 			require(kept.door->isOpening() || kept.door->isOpen(),
 				"the same press, not cleared, must reach the Door");
 		} });

@@ -1,6 +1,8 @@
 #include "game/WorldAuthoring.h"
 
 #include <exception>
+#include <stdexcept>
+#include <string>
 #include <utility>
 
 #include "core/Log.h"
@@ -9,6 +11,25 @@
 
 namespace
 {
+	// A handle that has been moved from names no runtime and owns no history.
+	// Every accessor that needs one funnels through `requireLive` below, so the
+	// moved-from case fails with the accessor named instead of dereferencing a
+	// null pointer and reporting nothing about which handle or which call went
+	// wrong (#978). The string is built when the throw happens, not on every
+	// call.
+	[[noreturn]] void refuseMovedFrom(char const* accessor)
+	{
+		throw std::logic_error(std::string("game::") + accessor +
+			" was called on a value that has been moved from");
+	}
+
+	template <typename T>
+	T& requireLive(T* pointer, char const* accessor)
+	{
+		if (!pointer) refuseMovedFrom(accessor);
+		return *pointer;
+	}
+
 	// The work data every restore of this document needs, read off the World it
 	// is being restored into. The Furniture catalogue and the accepted Action
 	// package are not part of the snapshot - history holds the document, not
@@ -57,30 +78,30 @@ namespace game
 		return *this;
 	}
 
-	core::World& WorldAuthoring::world() noexcept
+	core::World& WorldAuthoring::world()
 	{
 		// The one place the mutable World is taken. `WorldRuntime::authoringWorld`
 		// is private and granted to this class alone, so the privilege does not
 		// come from a cast that any caller could repeat (#967).
-		return runtime_->authoringWorld();
+		return requireLive(runtime_, "WorldAuthoring::world").authoringWorld();
 	}
 
-	WorldRuntime& WorldAuthoring::runtime() noexcept
+	WorldRuntime& WorldAuthoring::runtime()
 	{
-		return *runtime_;
+		return requireLive(runtime_, "WorldAuthoring::runtime");
 	}
 
-	WorldRuntime const& WorldAuthoring::runtime() const noexcept
+	WorldRuntime const& WorldAuthoring::runtime() const
 	{
-		return *runtime_;
+		return requireLive(runtime_, "WorldAuthoring::runtime");
 	}
 
-	core::World const& WorldAuthoring::document() const noexcept
+	core::World const& WorldAuthoring::document() const
 	{
 		// The read view, taken from the runtime's own public const accessor
 		// rather than from the privileged one. Preflight and capture are reads,
 		// so they do not spend the mutable-view privilege (#968).
-		return runtime_->world();
+		return requireLive(runtime_, "WorldAuthoring::document").world();
 	}
 
 // --- Levels and Layers ---
@@ -982,6 +1003,10 @@ void WorldAuthoring::saveTo(std::string const& filepath)
 
 std::optional<DocumentSnapshot> WorldAuthoring::captureSnapshot() const
 {
+	// Guarded before the try rather than inside it: a moved-from handle is a
+	// programming error, not a document that could not be captured, and it has
+	// to reach the caller instead of arriving as a nullopt (#978).
+	requireLive(history_.get(), "WorldAuthoring::captureSnapshot");
 	try
 	{
 		auto serializer = core::YamlSerializer::toString();
@@ -1004,81 +1029,86 @@ std::optional<DocumentSnapshot> WorldAuthoring::captureSnapshot() const
 
 void WorldAuthoring::commitEdit(std::optional<DocumentSnapshot> snapshot)
 {
-	history_->commit(std::move(snapshot));
+	history().commit(std::move(snapshot));
 }
 
 bool WorldAuthoring::undo()
 {
-	return history_->undo(captureSnapshot(),
+	return history().undo(captureSnapshot(),
 		[this](DocumentSnapshot const& target) { return restoreInPlace(target); });
 }
 
 bool WorldAuthoring::redo()
 {
-	return history_->redo(captureSnapshot(),
+	return history().redo(captureSnapshot(),
 		[this](DocumentSnapshot const& target) { return restoreInPlace(target); });
 }
 
 bool WorldAuthoring::undo(std::optional<DocumentSnapshot> current,
 	DocumentHistory::RestoreDocument const& restore)
 {
-	return history_->undo(std::move(current), restore);
+	return history().undo(std::move(current), restore);
 }
 
 bool WorldAuthoring::redo(std::optional<DocumentSnapshot> current,
 	DocumentHistory::RestoreDocument const& restore)
 {
-	return history_->redo(std::move(current), restore);
+	return history().redo(std::move(current), restore);
 }
 
-bool WorldAuthoring::canUndo() const noexcept
+bool WorldAuthoring::canUndo() const
 {
-	return history_->canUndo();
+	return history().canUndo();
 }
 
-bool WorldAuthoring::canRedo() const noexcept
+bool WorldAuthoring::canRedo() const
 {
-	return history_->canRedo();
+	return history().canRedo();
 }
 
-std::size_t WorldAuthoring::undoDepth() const noexcept
+std::size_t WorldAuthoring::undoDepth() const
 {
-	return history_->undoCount();
+	return history().undoCount();
 }
 
-std::size_t WorldAuthoring::redoDepth() const noexcept
+std::size_t WorldAuthoring::redoDepth() const
 {
-	return history_->redoCount();
+	return history().redoCount();
 }
 
-bool WorldAuthoring::isModified() const noexcept
+bool WorldAuthoring::isModified() const
 {
-	return history_->isModified();
+	return history().isModified();
 }
 
-void WorldAuthoring::markSaved() noexcept
+void WorldAuthoring::markSaved()
 {
-	history_->markSaved();
+	history().markSaved();
 }
 
-void WorldAuthoring::clearHistory() noexcept
+void WorldAuthoring::clearHistory()
 {
-	history_->clear();
+	history().clear();
 }
 
-DocumentHistory& WorldAuthoring::history() noexcept
+DocumentHistory& WorldAuthoring::history()
 {
-	return *history_;
+	return requireLive(history_.get(), "WorldAuthoring::history");
 }
 
-DocumentHistory const& WorldAuthoring::history() const noexcept
+DocumentHistory const& WorldAuthoring::history() const
 {
-	return *history_;
+	return requireLive(history_.get(), "WorldAuthoring::history");
 }
 
-void WorldAuthoring::adoptHistoryFrom(WorldAuthoring& source) noexcept
+void WorldAuthoring::adoptHistoryFrom(WorldAuthoring& source)
 {
 	if (&source == this) return;
+	// Both sides have to be live. Swapping with a moved-from handle would leave
+	// one of them holding a null history, which is the quiet loss this family
+	// exists to prevent rather than a transfer to perform (#978).
+	requireLive(history_.get(), "WorldAuthoring::adoptHistoryFrom");
+	requireLive(source.history_.get(), "WorldAuthoring::adoptHistoryFrom");
 	// Swap rather than move-and-rebuild: this handle's own history is emptied
 	// first and then becomes the fresh one the source is left holding, so
 	// nothing allocates and neither handle is ever left without a history
@@ -1128,5 +1158,67 @@ bool WorldAuthoring::restoreInPlace(DocumentSnapshot const& snapshot)
 		core::addLogMessage("Authoring", 0, core::LogLevel::Error, restoreFailure(error));
 		return false;
 	}
+}
+
+// --- AuthoringPair -------------------------------------------------
+
+AuthoringPair::AuthoringPair(std::unique_ptr<core::World> world)
+	// The World goes into a runtime first, so the null refusal is the runtime's
+	// own and is not restated here: a pair cannot be more permissive than the
+	// thing it pairs.
+	: AuthoringPair(std::make_unique<WorldRuntime>(std::move(world)))
+{
+}
+
+AuthoringPair::AuthoringPair(std::unique_ptr<WorldRuntime> runtime)
+	// The handle is wired here and only here, against the address the runtime
+	// has had since it was allocated and will keep until the pair is destroyed.
+	// Nothing later can reseat it, because nothing later can move the runtime.
+	: runtime_(std::move(runtime))
+	, authoring_(runtime_ ? std::make_unique<WorldAuthoring>(*runtime_) : nullptr)
+{
+	if (!authoring_)
+		throw std::invalid_argument(
+			"game::AuthoringPair requires a WorldRuntime to pair with");
+}
+
+AuthoringPair::~AuthoringPair() = default;
+
+AuthoringPair::AuthoringPair(AuthoringPair&& other) noexcept = default;
+
+AuthoringPair& AuthoringPair::operator=(AuthoringPair&& other) noexcept
+{
+	if (this != &other)
+	{
+		// The handle goes before the runtime it names, so there is no moment in
+		// which a live handle outlives the World it was wired to. The incoming
+		// pair then arrives with its own handle and its own pinned runtime, and
+		// the two keep pointing at each other exactly as they did before the
+		// move - which is the whole property this type exists to hold (#977).
+		authoring_.reset();
+		runtime_ = std::move(other.runtime_);
+		authoring_ = std::move(other.authoring_);
+	}
+	return *this;
+}
+
+WorldRuntime& AuthoringPair::runtime()
+{
+	return requireLive(runtime_.get(), "AuthoringPair::runtime");
+}
+
+WorldRuntime const& AuthoringPair::runtime() const
+{
+	return requireLive(runtime_.get(), "AuthoringPair::runtime");
+}
+
+WorldAuthoring& AuthoringPair::authoring()
+{
+	return requireLive(authoring_.get(), "AuthoringPair::authoring");
+}
+
+WorldAuthoring const& AuthoringPair::authoring() const
+{
+	return requireLive(authoring_.get(), "AuthoringPair::authoring");
 }
 }

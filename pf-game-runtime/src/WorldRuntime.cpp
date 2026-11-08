@@ -22,9 +22,9 @@ namespace game
 
 	WorldRuntime::~WorldRuntime() = default;
 
-	WorldRuntime::WorldRuntime(WorldRuntime&& other) noexcept = default;
-
-	WorldRuntime& WorldRuntime::operator=(WorldRuntime&& other) noexcept = default;
+	// The move constructor and move assignment are deleted in the header (#977),
+	// so there is no moved-from WorldRuntime in existence to reason about: no
+	// shell, no null `world_`, and no authoring handle left pointing at one.
 
 	core::World const& WorldRuntime::world() const noexcept
 	{

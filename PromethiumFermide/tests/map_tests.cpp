@@ -60,6 +60,14 @@ static_assert(!std::is_copy_constructible_v<game::WorldRuntime>);
 static_assert(!std::is_copy_assignable_v<game::WorldRuntime>);
 static_assert(!std::is_constructible_v<game::WorldRuntime, core::World&>);
 static_assert(!std::is_constructible_v<game::WorldRuntime, core::World*>);
+// The runtime is not movable either (#977). A `WorldAuthoring` handle caches
+// the address of the runtime it wraps, so a runtime that could move could
+// leave one naming the shell it moved out of. The Map hands the runtime over
+// as a `shared_ptr` and the game holds it the same way, so exclusive
+// ownership still transfers freely - through the pointer, to a runtime that
+// stays pinned where it was made.
+static_assert(!std::is_move_constructible_v<game::WorldRuntime>);
+static_assert(!std::is_move_assignable_v<game::WorldRuntime>);
 
 void require(bool condition, char const* message) {
   if (!condition) throw std::runtime_error(message);

@@ -47,6 +47,16 @@ static_assert(!std::is_constructible_v<game::WorldRuntime, core::World&>);
 static_assert(!std::is_constructible_v<game::WorldRuntime, core::World*>);
 static_assert(!std::is_constructible_v<game::WorldRuntime, std::shared_ptr<core::World>>);
 
+// Nor is it movable (#977). An authoring handle caches the address of the
+// runtime it wraps, so a movable runtime is a runtime that can move out
+// from under one and leave it naming a shell whose World is null. Deleting
+// the moves is what makes that unwriteable. It costs the game nothing: the
+// runtime reaches a game as a `shared_ptr` from `Map::getRuntime()`, and
+// moving a pointer moves the address rather than the thing addressed, so
+// the pinned runtime the game drives is the same object for its whole life.
+static_assert(!std::is_move_constructible_v<game::WorldRuntime>);
+static_assert(!std::is_move_assignable_v<game::WorldRuntime>);
+
 namespace game_only_contract
 {
 	// The mutable spellings of the three reads #974 corrected, named so a

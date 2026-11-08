@@ -23,11 +23,13 @@ namespace game
 	// exclusively and is the only way to drive it (#964, spec #960).
 	//
 	// Exclusive ownership is the whole point of the type. The World is held as a
-	// `std::unique_ptr`, the runtime is not copyable, and the only public World
-	// accessor hands out a `core::World const&`. A render path therefore
-	// cannot mutate what it renders, and no second holder of the same World can
-	// exist. Authoring lives over the runtime rather than beside it: the
-	// privileged mutable view arrives with WorldAuthoring (#967), never here.
+	// `std::unique_ptr`, the runtime is neither copyable nor movable, and the
+	// only public World accessor hands out a `core::World const&`. A render
+	// path therefore cannot mutate what it renders, and no second holder of the
+	// same World can exist. Authoring lives over the runtime rather than beside
+	// it: the privileged mutable view arrives with WorldAuthoring (#967), never
+	// here. The runtime does not move because that view names it by address -
+	// see the deleted move operations below (#977).
 	//
 	// Everything below is a thin forward onto the same simulation the editor
 	// already drives, so behaviour is unchanged; only the shape of the surface
@@ -46,11 +48,26 @@ namespace game
 
 		~WorldRuntime();
 
-		// Exclusive ownership transfers; it is never shared or copied. A moved-from
-		// runtime holds nothing and must not be driven again: it is a shell whose
-		// only purpose is to have handed the World over.
-		WorldRuntime(WorldRuntime&& other) noexcept;
-		WorldRuntime& operator=(WorldRuntime&& other) noexcept;
+		// Neither moved nor copied (#977). The moves used to be defaulted, and
+		// that was the bug: a `WorldAuthoring` handle names the runtime it wraps
+		// by address, so moving a runtime that a handle was wrapped over left
+		// the handle naming the moved-from shell - whose `world_` is null - with
+		// nothing to re-point it and nothing to detect that it had gone stale.
+		// The hazard was legal at every call site and invisible at all of them.
+		//
+		// Exclusive ownership still transfers; what is gone is transferring it
+		// by moving the runtime object. Every consumer already holds the runtime
+		// behind a pointer - `std::unique_ptr<WorldRuntime>`, or
+		// `std::shared_ptr<WorldRuntime>` where several holders share one World
+		// - and moving a pointer moves the address the handle cached instead of
+		// the address of the thing it cached, which is exactly why the existing
+		// holders were never bitten. Where a caller wants the runtime and its
+		// authoring handle as one value it takes `game::AuthoringPair` from
+		// pf-game-authoring (#977), which pins the runtime on the heap for the
+		// pair's whole life: the transfer cannot be spelled in a form that
+		// leaves a handle behind.
+		WorldRuntime(WorldRuntime&&) = delete;
+		WorldRuntime& operator=(WorldRuntime&&) = delete;
 		WorldRuntime(WorldRuntime const&) = delete;
 		WorldRuntime& operator=(WorldRuntime const&) = delete;
 
