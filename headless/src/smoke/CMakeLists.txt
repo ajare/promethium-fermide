@@ -133,6 +133,7 @@ pf_add_smoke_module(pf-smoke-game-runtime
         game-runtime/Observation.cpp
         game-runtime/PlayerInput.cpp
         game-runtime/RenderView.cpp
+        game-runtime/ResourceReads.cpp
         game-runtime/ConstReadSurface.cpp
         game-runtime/ReadSurface.cpp
         game-runtime/SharedLibrary.cpp

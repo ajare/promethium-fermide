@@ -145,7 +145,7 @@ ctest --test-dir build-linux -R '^smoke-game-runtime$' --output-on-failure
 `pf-smoke-game-runtime` is the first module that does not construct a World
 inline. It builds a World, hands it to `game::WorldRuntime` in
 [`pf-game-runtime`](../pf-game-runtime) and drives it only through that
-shared library, so the boundary is exercised rather than assumed. Its 33
+shared library, so the boundary is exercised rather than assumed. Its 47
 registrations cover exclusive ownership (the caller's `unique_ptr` is emptied,
 the World is destroyed exactly when the runtime is, a null World is refused,
 and a transfer to another holder goes through the pointer to a runtime that
@@ -183,6 +183,16 @@ is registered as `smoke-game-runtime` with labels
 `smoke;functional;validation-fast;core;game-runtime` and a 30-second
 timeout. Everything is headless: CPU-only ImGui, no window, no dialog, no
 interactive input.
+
+`ResourceReads.cpp` pins the unbound half of the resource-binding read
+contract (#980). One check per registry reads the expected UUID and the
+Resource name through a `WorldRuntime const&` over a document bound to no
+package and requires an empty answer rather than a throw - the same contract
+the name reads already had, now shared by the UUID reads instead of two
+adjacent reads claiming opposite things. A third check pins the other side
+of the split: `core::World`'s own four registry reads still raise on that
+unbound document, which is the programming-error signal the editor's save
+path reads, and the runtime over the same World still answers empty.
 
 ## Game authoring module (#967, #968, #969)
 

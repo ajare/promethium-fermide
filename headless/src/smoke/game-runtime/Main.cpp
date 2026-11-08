@@ -11,6 +11,7 @@ int main(int argc, char** argv)
 	registerGameRuntimeObservation(checks);
 	registerGameRuntimePlayerInput(checks);
 	registerGameRuntimeRenderView(checks);
+	registerGameRuntimeResourceReads(checks);
 	registerGameRuntimeConstReadSurface(checks);
 	registerGameRuntimeReadSurface(checks);
 	registerGameRuntimeSharedLibrary(checks);

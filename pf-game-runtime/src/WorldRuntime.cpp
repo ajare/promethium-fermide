@@ -210,24 +210,52 @@ namespace game
 	// would read them, and the binding acts that would change them are not on
 	// this type at all (#969).
 
-	// The World's own registry name getters throw when nothing is referenced,
-	// because the editor uses that as a programming-error signal. The runtime
-	// is a read surface, not an authoring one: an unbound Resource reads as
-	// "no name" here rather than faulting a render or game path.
+	namespace
+	{
+		// The one empty value the unbound reads answer with (#980). A single
+		// object shared by the whole family, so the reference handed back
+		// outlives every caller and two unbound reads of the same package read
+		// the same value rather than two equal-but-distinct ones.
+		std::string const& noResource()
+		{
+			static const std::string kNoResource;
+			return kNoResource;
+		}
+
+		// The guard the resource-name reads and the expected-UUID reads share
+		// (#980). `core::World`'s own getters throw when nothing is
+		// referenced, because the editor uses that as a programming-error
+		// signal. The runtime is a read surface, not an authoring one, and a
+		// document bound to no package is a normal state rather than a fault:
+		// the absence is answered here instead of faulting a render or game
+		// path - and instead of arriving as a `std::runtime_error` thrown in
+		// another module and crossing the shared-library boundary into a game
+		// loop that has no way to author the reference it is missing.
+		//
+		// `read` is taken only when the reference exists, which is what keeps
+		// the throwing World getter unreachable from this type. It must return
+		// `std::string const&` explicitly: a lambda that lets its return type
+		// deduce returns a copy, and the guard would then hand back a
+		// reference to a temporary that dies at the end of the call.
+		template <typename Read>
+		std::string const& readResourceString(bool hasReference, Read read)
+		{
+			return hasReference ? read() : noResource();
+		}
+	}
+
 	std::string const& WorldRuntime::agentTagRegistryResourceName() const
 	{
-		static const std::string kNoName;
 		auto const& world = requireLive("WorldRuntime::agentTagRegistryResourceName");
-		if (!world.hasAgentTagRegistryReference()) return kNoName;
-		return world.getAgentTagRegistryResourceName();
+		return readResourceString(world.hasAgentTagRegistryReference(),
+			[&world]() -> std::string const& { return world.getAgentTagRegistryResourceName(); });
 	}
 
 	std::string const& WorldRuntime::agentBehaviourRegistryResourceName() const
 	{
-		static const std::string kNoName;
 		auto const& world = requireLive("WorldRuntime::agentBehaviourRegistryResourceName");
-		if (!world.hasAgentBehaviourRegistryReference()) return kNoName;
-		return world.getAgentBehaviourRegistryResourceName();
+		return readResourceString(world.hasAgentBehaviourRegistryReference(),
+			[&world]() -> std::string const& { return world.getAgentBehaviourRegistryResourceName(); });
 	}
 
 	std::string const& WorldRuntime::furnitureCatalogueResourceName() const
@@ -590,7 +618,14 @@ bool WorldRuntime::hasAttachedAgentBehaviourRegistry() const
 }
 std::string const& WorldRuntime::getExpectedAgentBehaviourRegistryUuid() const
 {
-	return world().getExpectedAgentBehaviourRegistryUuid();
+	// Same contract as the resource-name family above (#980): the document
+	// expecting no package reads as empty here. The throwing form stays on
+	// `core::World`, reached through `world()`, for the editor's save path.
+	// `requireLive` is spelled out rather than reached through `world()` so
+	// that this reads as one shape with the resource-name getters above.
+	auto const& world = requireLive("WorldRuntime::getExpectedAgentBehaviourRegistryUuid");
+	return readResourceString(world.hasAgentBehaviourRegistryReference(),
+		[&world]() -> std::string const& { return world.getExpectedAgentBehaviourRegistryUuid(); });
 }
 std::shared_ptr<const core::AgentBehaviourRegistry> WorldRuntime::getAgentBehaviourRegistry() const
 {
@@ -647,7 +682,14 @@ bool WorldRuntime::hasAttachedAgentTagRegistry() const
 }
 std::string const& WorldRuntime::getExpectedAgentTagRegistryUuid() const
 {
-	return world().getExpectedAgentTagRegistryUuid();
+	// Same contract as the resource-name family above (#980): the document
+	// expecting no package reads as empty here. The throwing form stays on
+	// `core::World`, reached through `world()`, for the editor's save path.
+	// `requireLive` is spelled out rather than reached through `world()` so
+	// that this reads as one shape with the resource-name getters above.
+	auto const& world = requireLive("WorldRuntime::getExpectedAgentTagRegistryUuid");
+	return readResourceString(world.hasAgentTagRegistryReference(),
+		[&world]() -> std::string const& { return world.getExpectedAgentTagRegistryUuid(); });
 }
 std::shared_ptr<const core::AgentTagRegistry> WorldRuntime::getAgentTagRegistry() const
 {

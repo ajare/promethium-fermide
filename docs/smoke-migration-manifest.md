@@ -304,6 +304,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/game-runtime/Lifecycle.cpp` | module-owned | `pf-smoke-game-runtime` |
 | `smoke/game-runtime/Observation.cpp` | module-owned | `pf-smoke-game-runtime` |
 | `smoke/game-runtime/RenderView.cpp` | module-owned | `pf-smoke-game-runtime` |
+| `smoke/game-runtime/ResourceReads.cpp` | module-owned | `pf-smoke-game-runtime` |
 | `smoke/game-runtime/SharedLibrary.cpp` | module-owned | `pf-smoke-game-runtime` |
 | `smoke/game-runtime/PlayerInput.cpp` | module-owned | `pf-smoke-game-runtime` |
 | `smoke/game-runtime/ConstReadSurface.cpp` | module-owned | `pf-smoke-game-runtime` |

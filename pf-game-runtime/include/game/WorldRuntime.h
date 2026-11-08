@@ -216,6 +216,25 @@ namespace game
 		// whole point: a name is a fact about the document, the act of
 		// changing which package answers to it is not. Each returns the name
 		// as the document holds it, empty when the World references nothing.
+		//
+		// That non-throwing contract is the contract for the whole family, and
+		// it covers the expected-UUID reads too - `getExpectedAgentTagRegistryUuid()`
+		// and `getExpectedAgentBehaviourRegistryUuid()`, declared with their
+		// registry families below (#980). A document bound to no package is a
+		// normal authored state, not a programming error, so those read empty
+		// on the same guard rather than faulting a game or render path - and
+		// rather than throwing a `std::runtime_error` raised in another module
+		// across the shared-library boundary into a loop that has no way to
+		// author the reference it is missing.
+		//
+		// The throwing forms stay where they are wanted, on `core::World`:
+		// `getAgentTagRegistryResourceName()` / `getExpectedAgentTagRegistryUuid()`
+		// and the behaviour pair still raise when the World references
+		// nothing, because the editor's save path uses an absent reference as
+		// a programming-error signal. The editor holds the World directly -
+		// through `world()` when it starts from a runtime - so the signal is
+		// reachable exactly where it is meaningful, and nothing on this type
+		// forwards it.
 
 		// The Agent tag registry Resource this document references.
 		std::string const& agentTagRegistryResourceName() const;
@@ -361,6 +380,8 @@ namespace game
 		// --- Agent behaviour assignment and runtime ---
 		bool hasAgentBehaviourRegistryReference() const;
 		bool hasAttachedAgentBehaviourRegistry() const;
+		// Empty rather than throwing when the document references no package:
+		// the resource-name contract above, applied to the UUID (#980).
 		std::string const& getExpectedAgentBehaviourRegistryUuid() const;
 		std::shared_ptr<const core::AgentBehaviourRegistry> getAgentBehaviourRegistry() const;
 		bool agentBehaviourConfigurationsAreValid() const;
@@ -376,6 +397,8 @@ namespace game
 		// --- Agent tags ---
 		bool hasAgentTagRegistryReference() const;
 		bool hasAttachedAgentTagRegistry() const;
+		// Empty rather than throwing when the document references no package:
+		// the resource-name contract above, applied to the UUID (#980).
 		std::string const& getExpectedAgentTagRegistryUuid() const;
 		std::shared_ptr<const core::AgentTagRegistry> getAgentTagRegistry() const;
 		std::uint64_t getAgentTagAssignmentCount() const;
