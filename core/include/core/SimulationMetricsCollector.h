@@ -19,7 +19,7 @@ struct MetricFamily {
     std::map<MetricLabels, MetricSample> samples;
 };
 // Value-only registry snapshots are safe to pass to another thread.
-class MetricsRegistry {
+class PF_CORE_API MetricsRegistry {
 public:
     std::map<std::string, MetricFamily> families;
     void add(std::string const& name, MetricType type, MetricLabels labels, double value);

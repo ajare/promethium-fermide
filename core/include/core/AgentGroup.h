@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include "core/Platform.h"
 
 namespace core
 {
@@ -14,7 +15,7 @@ namespace core
 	//
 	// An AgentGroup is authored editor metadata. It never reaches the runtime
 	// snapshot, the simulation events, or any traversal decision.
-	class AgentGroup
+	class PF_CORE_API AgentGroup
 	{
 		friend class World;
 		friend class AgentGroupRegistry;

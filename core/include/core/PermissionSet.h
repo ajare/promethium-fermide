@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include "core/Platform.h"
 
 namespace core
 {
@@ -12,7 +13,7 @@ namespace core
 
 	// A stable, World-owned bundle of Access permissions. Permission sets are
 	// deliberately independent of Agent tags and may contain only permissions.
-	class PermissionSet
+	class PF_CORE_API PermissionSet
 	{
 		friend class World;
 		friend class AuthorizationLedger; // ADR 0022 (#684) membership edits

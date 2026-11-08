@@ -405,7 +405,7 @@ namespace core
 
 	// A named reusable set of Agent properties. Property types are hardcoded;
 	// the optional values and their revisions are authored registry data.
-	class AgentTag
+	class PF_CORE_API AgentTag
 	{
 		friend class AgentTagRegistry;
 

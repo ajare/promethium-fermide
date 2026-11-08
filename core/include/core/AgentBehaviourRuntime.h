@@ -11,6 +11,7 @@
 #include "core/AgentBehaviour.h"
 #include "core/EntityId.h"
 #include "core/ScriptExecution.h"
+#include "core/Platform.h"
 
 namespace core
 {
@@ -97,7 +98,7 @@ namespace core
 	// remain confined to private implementation files. Coroutine resumes queue
 	// commands; the adapter applies them through the World facade only after
 	// every resume at the boundary has returned.
-	class AgentBehaviourRuntimeAdapter
+	class PF_CORE_API AgentBehaviourRuntimeAdapter
 	{
 		friend class AgentBehaviourRegistry;
 		friend class World;

@@ -3,12 +3,13 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include "core/Platform.h"
 
 namespace core
 {
 	// A World-owned authorization name. Identity is the fixed slot allocated by
 	// World; names are labels and may change without rewriting references.
-	class AccessPermission
+	class PF_CORE_API AccessPermission
 	{
 		friend class World;
 		friend class AuthorizationLedger; // ADR 0022 (#684) rename edits

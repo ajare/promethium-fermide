@@ -10,6 +10,7 @@
 #include "core/EntityId.h"
 #include "core/ActionRegistry.h"
 #include "core/Pose.h"
+#include "core/Platform.h"
 
 namespace core
 {
@@ -66,7 +67,7 @@ namespace core
 		uint32_t properties{ 0 };
 	};
 
-	class FurnitureCatalogue
+	class PF_CORE_API FurnitureCatalogue
 	{
 		std::string mUuid;
 		// Accepted executable source snapshot, never serialized or exposed as VM state.

@@ -4,6 +4,7 @@
 
 #include "core/RouteCost.h"
 #include "core/EdgeType.h"
+#include "core/Platform.h"
 
 namespace core
 {
@@ -12,7 +13,7 @@ namespace core
 	// Value-only inputs captured before a synchronous decision. No Agent, World,
 	// resource, registry or endpoint reads are permitted by evaluate(). Ordinary
 	// walking arcs use the Graph's immutable length directly, without a snapshot.
-	struct RouteTraversalInputs
+	struct PF_CORE_API RouteTraversalInputs
 	{
 		EdgeType type{};
 		std::optional<TraversalKind> mobilityKind;

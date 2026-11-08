@@ -8,6 +8,7 @@
 
 #include "core/Agent.h"
 #include "core/ScriptExecution.h"
+#include "core/Platform.h"
 
 namespace core
 {
@@ -48,7 +49,7 @@ namespace core
 	// World's Lua state; Lua and sol2 remain confined to private implementation
 	// files. Source is shared between instances, executed mutable instance state
 	// is not: every construct runs new() in a fresh private environment.
-	class AgentTypeRuntimeAdapter
+	class PF_CORE_API AgentTypeRuntimeAdapter
 	{
 		friend class World;
 

@@ -11,11 +11,12 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include "core/Platform.h"
 
 // Optional document-specific state lets an editor transaction coordinate
 // dependent documents while the reusable history remains unaware of their
 // concrete types. Ordinary World snapshots leave this empty.
-struct DocumentSnapshotContext
+struct PF_CORE_API DocumentSnapshotContext
 {
 	virtual ~DocumentSnapshotContext() = default;
 
@@ -25,14 +26,14 @@ struct DocumentSnapshotContext
 	virtual bool isRestorable() const { return true; }
 };
 
-struct DocumentSnapshot
+struct PF_CORE_API DocumentSnapshot
 {
 	std::string yaml;
 	uint64_t stateId{ 0 };
 	std::shared_ptr<DocumentSnapshotContext> context;
 };
 
-class DocumentHistory
+class PF_CORE_API DocumentHistory
 {
 public:
 	static constexpr size_t MaximumEntries{ 100 };

@@ -9,6 +9,8 @@ cmake-build*/
 build-windows/
 build-linux/
 build-linux-validation/
+# -fvisibility=hidden proxy build used to check the core export surface (#976)
+build-linux-visibility/
 out/
 
 # Python bytecode cache

@@ -22,7 +22,7 @@ namespace core
 
 	// Reusable, Graph-owned scratch for one path search. Slots are dense indices
 	// into Graph::getVertices(); generation stamps make starting a search O(1).
-	class PathfindingWorkspace
+	class PF_CORE_API PathfindingWorkspace
 	{
 	public:
 		struct FrontierNode

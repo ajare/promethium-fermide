@@ -4,8 +4,9 @@
 #include <deque>
 #include <filesystem>
 #include <string>
+#include "core/Platform.h"
 
-class RecentFiles
+class PF_CORE_API RecentFiles
 {
 	std::filesystem::path mFilepath;
 	std::deque<std::string> mEntries;

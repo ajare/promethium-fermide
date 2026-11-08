@@ -3,6 +3,7 @@
 #include <string>
 
 #include "core/Sector.h"
+#include "core/Platform.h"
 
 
 namespace core
@@ -14,7 +15,7 @@ namespace core
 		int sectorOffsetX, sectorOffsetY;
 	};
 
-	class Transit : public Sector
+	class PF_CORE_API Transit : public Sector
 	{
 		std::vector<TransitStop> mStops;
 

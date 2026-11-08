@@ -4,13 +4,14 @@
 #include <cstdint>
 
 #include "core/CellDefinition.h"
+#include "core/Platform.h"
 
 
 namespace core
 {
 	class World;
 
-	class Layer
+	class PF_CORE_API Layer
 	{
 		World const* mwWorld;
 

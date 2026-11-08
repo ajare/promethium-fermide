@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 #include "core/ScriptExecution.h"
+#include "core/Platform.h"
 
 namespace core
 {
@@ -47,7 +48,7 @@ namespace core
 
 	// Immutable authored metadata/source. Each invocation creates a fresh sandbox;
 	// neither closures nor a live VM belong to a World document.
-	class ActionRegistry
+	class PF_CORE_API ActionRegistry
 	{
 		std::string mUuid, mSource;
 		std::filesystem::path mSourcePath;

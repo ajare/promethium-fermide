@@ -175,7 +175,7 @@ namespace core
 	// One registry-local Lua module admitted by the package manifest. Import
 	// names are logical dotted identifiers rather than filesystem paths; source
 	// paths remain separately validated package-relative .lua paths.
-	class AgentBehaviourHelperModule
+	class PF_CORE_API AgentBehaviourHelperModule
 	{
 		friend class AgentBehaviourRegistry;
 
@@ -224,7 +224,7 @@ namespace core
 	// The source module path is registry-relative: it identifies one managed
 	// Lua file inside the registry package and never names an absolute path or
 	// a location outside the package directory.
-	class AgentBehaviour
+	class PF_CORE_API AgentBehaviour
 	{
 		friend class AgentBehaviourRegistry;
 

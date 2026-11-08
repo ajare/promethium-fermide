@@ -25,7 +25,7 @@ namespace core::physicalControl
 		Geometry hostingLocation;
 		Role role;
 	};
-	struct Candidate
+	struct PF_CORE_API Candidate
 	{
 		uint32_t cellX{ 0 };
 		int quarterOffset{ 0 }; // Only 0..3; 1.0 belongs to the next host.
