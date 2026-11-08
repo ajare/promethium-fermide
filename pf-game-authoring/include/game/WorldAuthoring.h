@@ -512,9 +512,9 @@ namespace game
 	// history and no other: the process-wide `DocumentHistory` the editor used
 	// to drive is gone, so `isModified()` below and the editor's
 	// unsaved-changes prompt are one question asked of one object. The
-	// editor-preview smoke module pins that identity, because the way a façade
-	// like this one fails is not by answering wrongly but by answering truly
-	// about something nobody is looking at.
+	// editor-preview smoke module pins that identity, because the way an
+	// authoring façade (design pattern) like this one fails is not by answering
+	// wrongly but by answering truly about something nobody is looking at.
 	//
 	// The transaction shape is the one the editor already uses, because it is
 	// the one the World's edit protocol forces. Snapshot the document before
@@ -613,7 +613,7 @@ namespace game
 	// one type instead of re-declaring its surface twice, and it is the very
 	// same object `isModified()`, `markSaved()` and `clearHistory()` act on,
 	// which is what makes the editor's unsaved-changes prompt and this
-	// façade unable to drift apart (#975).
+	// authoring façade (design pattern) unable to drift apart (#975).
 	DocumentHistory& history();
 
 	DocumentHistory const& history() const;

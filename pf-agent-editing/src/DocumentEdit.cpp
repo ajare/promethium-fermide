@@ -17,12 +17,12 @@ using namespace std;
 namespace
 {
 	// The production answer: the open document's authoring history, which is
-	// the one object the façade's `isModified()` and the editor's
-	// unsaved-changes prompt both read (#975). There is deliberately no
-	// fallback stack here. A process-global history was the old fallback and
-	// the whole of #975 came from it: the edits went somewhere, the handle
-	// just was not the place they went, and `false` looked exactly like a
-	// clean document.
+	// the one object that both the authoring façade (design pattern) and the
+	// editor's unsaved-changes prompt read `isModified()` from (#975). There
+	// is deliberately no fallback stack here. A process-global history was the
+	// old fallback and the whole of #975 came from it: the edits went
+	// somewhere, the handle just was not the place they went, and `false`
+	// looked exactly like a clean document.
 	DocumentHistory& productionDocumentHistory()
 	{
 		auto const document = editor::currentDocument();

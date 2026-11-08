@@ -141,8 +141,8 @@ namespace
 		std::shared_ptr<core::AgentBehaviourRegistry>>,
 		"a const WorldRuntime still answers getAgentBehaviourRegistry with something that widens into a mutable registry (#974)");
 
-	// The guarantee does not stop at the façade. `runtime.world()` is the
-	// `core::World const&` rendering is handed, and it answers the same three
+	// The guarantee does not stop at the façade (design pattern). `runtime.world()`
+	// is the `core::World const&` rendering is handed, and it answers the same three
 	// with `const` entities too - which is what makes "a render path cannot
 	// mutate what it renders" true of these reads as well (#960 decision 9).
 	static_assert(std::is_same_v<

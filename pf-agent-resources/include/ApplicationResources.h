@@ -120,9 +120,10 @@ private:
 // create() still deserializes a World exactly as before, but the moment that
 // World exists it is handed to a runtime, which owns it exclusively from
 // there on. The only thing this resource hands out is the runtime, so every
-// consumer reaches the loaded World through the same façade the shipped game
-// runs - and none of them can reach a mutable World without the authoring
-// surface, which lives above the runtime and is not part of the game.
+// consumer reaches the loaded World through the same façade (design pattern)
+// the shipped game runs - and none of them can reach a mutable World without
+// the authoring surface, which lives above the runtime and is not part of the
+// game.
 //
 // Before create() the resource holds nothing: an unloaded World resource has
 // no runtime, which is how callers tell "not created yet" apart from

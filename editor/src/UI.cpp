@@ -2775,8 +2775,8 @@ namespace
 	// save-target builder all moved to pf-agent-editing's DocumentSaveSeam
 	// (#975). They moved because the UI's copy of them could only be reached
 	// from behind a window, and the claim that the unsaved-changes prompt and
-	// the authoring façade read one and the same history is worth nothing if
-	// nothing can assert it. The UI asks the seam now.
+	// the authoring façade (design pattern) read one and the same history is
+	// worth nothing if nothing can assert it. The UI asks the seam now.
 
 	void reportFileError(string message)
 	{

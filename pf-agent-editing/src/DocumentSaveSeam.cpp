@@ -72,9 +72,9 @@ namespace editor
 		if (!world) return false;
 		// The authoring handle's own history, not a stack read from beside it.
 		// This is the line #975 is about: the prompt used to ask a different
-		// `DocumentHistory` than the one the façade reported, so the façade
-		// could answer "clean" while this answered "stale" and neither was
-		// wrong about its own object.
+		// `DocumentHistory` than the one the authoring façade (design pattern)
+		// reported, which let the two disagree - one reading "clean" while the
+		// other read "stale", neither wrong about its own object.
 		return world->isModified()
 			|| document->authoring().isModified()
 			|| attachedAgentTagRegistryIsModified(world)

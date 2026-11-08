@@ -50,6 +50,7 @@ namespace editor
 	// True when `document` holds work that has not reached disk. This is the
 	// question the close, New, Open and Exit prompts ask, and it reads
 	// `document->authoring().isModified()` rather than a parallel history,
-	// so the prompt and the façade cannot fall out of agreement (#975).
+	// so the prompt and the authoring façade (design pattern) cannot fall out
+	// of agreement (#975).
 	bool documentIsStale(DocumentPtr const& document);
 }

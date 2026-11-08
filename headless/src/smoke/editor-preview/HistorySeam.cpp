@@ -16,10 +16,10 @@
 // #975: the authoring handle says it owns the document history, and the
 // editor's unsaved-changes prompt has to be asking that same history. The
 // bug this pins was not a wrong answer from one of them - it was two
-// correct answers from two different objects, with the façade's being the
-// one a caller was told to trust. These checks assert object identity, not
-// matching behaviour, because matching behaviour is exactly what two
-// divergent stacks show right up until they do not.
+// correct answers from two different objects, and the authoring façade (design pattern)
+// was the one a caller was told to trust. These checks assert object identity, not
+// matching behaviour, because matching behaviour is exactly what two divergent stacks
+// show right up until they do not.
 namespace
 {
 	using tag_smoke::TemporaryDirectory;
@@ -34,8 +34,8 @@ namespace
 
 	// The editor's own edit transaction: capture the state the edit is made
 	// from, make the edit, commit what was captured. Every editor panel runs
-	// this shape, so this is what has to leave both the façade and the prompt
-	// dirty together.
+	// this shape, so both the authoring façade (design pattern) and the prompt
+	// have to be left dirty together.
 	void commitAnEdit(editor::DocumentPtr const& document,
 		std::string const& roomName, uint32_t x)
 	{
@@ -78,18 +78,19 @@ void registerEditorPreviewHistorySeam(std::vector<smoke::Check>& checks)
 			require(!editor::documentIsStale(document),
 				"a freshly saved document read stale to the prompt");
 
-			// The target the prompt is built from carries the façade's own
-			// history. Identity, not equivalence: a second stack that
-			// behaved identically for a while is precisely the shape of the
-			// bug this check exists to keep out.
+			// The target the prompt is built from carries the history owned by
+			// the authoring façade (design pattern). Identity, not equivalence:
+			// a second stack that behaved identically for a while is precisely
+			// the shape of the bug this check exists to keep out.
 			auto const target = editor::currentDocumentSaveTarget(document,
 				worldPath.string(), worldPath.string());
 			require(target.worldHistory == &authoring.history(),
 				"the save target carries a history other than the one the "
 				"authoring handle owns");
 
-			// An edit committed through the façade has to be visible to the
-			// prompt without anything telling the two about each other.
+			// An edit committed through the authoring façade (design pattern)
+			// has to be visible to the prompt without anything telling the two
+			// about each other.
 			commitAnEdit(document, "Added through the façade", 0);
 			require(authoring.canUndo(),
 				"an edit committed through the façade left nothing to take back");

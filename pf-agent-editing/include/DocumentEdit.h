@@ -13,10 +13,10 @@
 // capture and commit defaulted to, and that single default is what made the
 // authoring handle's documented `isModified()` a lie: the editor dirtied
 // the global stack while the handle's own stack sat empty, so a caller who
-// trusted the façade was told there was no unsaved work while the author
-// was hours deep in it. The global is gone. The seam resolves now, and a
-// default that has to look something up cannot quietly be a different
-// document's stack.
+// trusted the authoring façade (design pattern) was told there was no
+// unsaved work while the author was hours deep in it. The global is gone. The
+// seam resolves now, and a default that has to look something up cannot
+// quietly be a different document's stack.
 
 #include <filesystem>
 #include <functional>

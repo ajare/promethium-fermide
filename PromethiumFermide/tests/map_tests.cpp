@@ -36,11 +36,12 @@ concept ExposesWorldResource = requires(MapLike& map) { map.getWorldResource(); 
 // The boundary contract (#970, spec #960), asserted at compile time.
 //
 // These used to pin `Map::getWorld()`'s return type. They now pin the shape
-// of the façade the Map hands over instead: a Map gives out a WorldRuntime,
-// the runtime gives out a `core::World const&`, and there is no accessor on
-// Map that yields a World at all - not a mutable one, not even a raw const
-// pointer a caller could const_cast into a habit. Whether the game can reach
-// mutable World state is a question the compiler answers before anything runs.
+// of the façade (design pattern) the Map hands over instead: a Map gives out
+// a WorldRuntime, the runtime gives out a `core::World const&`, and there is
+// no accessor on Map that yields a World at all - not a mutable one, not
+// even a raw const pointer a caller could const_cast into a habit. Whether
+// the game can reach mutable World state is a question the compiler answers
+// before anything runs.
 static_assert(std::is_same_v<decltype(std::declval<Map&>().getRuntime()),
                             std::shared_ptr<game::WorldRuntime>>);
 static_assert(std::is_same_v<decltype(std::declval<Map const&>().getRuntime()),

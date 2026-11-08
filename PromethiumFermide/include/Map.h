@@ -18,8 +18,8 @@ PF_APPLICATION_API void registerMapResourceTypes(
     wp::application::resourcesystem::ResourceManager& manager);
 
 // Resource identity and geometry belong to AppLib; the running World belongs
-// to the game-facing façade. Constructing this resource does not create or
-// load a World.
+// to the game-facing façade (design pattern). Constructing this resource does
+// not create or load a World.
 //
 // The Map reaches its World through the `game::WorldRuntime` that owns and
 // drives it (#970, spec #960). `getWorld()` is gone: the runtime's const
