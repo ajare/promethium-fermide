@@ -166,6 +166,31 @@ Resources:
               - { name: "shuttle-car-right", x: "128", y: "320", width: "64", height: "160" }
               - { name: "shuttle-car-connector", x: "192", y: "320", width: "64", height: "160" }
               - { name: "lift-car", x: "256", y: "320", width: "64", height: "160" }
+    # The replacement Objects atlas, sized for the 128x320 World cell
+    # (#1014). Its render semantics - render offset, drawn size, tintable -
+    # are authored in resources/textures/objects-new.tileset.yaml, and the
+    # pixel regions below are generated from that file rather than authored
+    # beside it. The old ObjectAtlas stays registered and canonical until
+    # nothing references it.
+    - type: "Image"
+      name: "ObjectAtlasNewImage"
+      location: "textures/objects-new.png"
+      Option:
+        - { name: "filtering", value: "none" }
+        - { name: "uv-style", value: "atlas" }
+    - type: "ImageSet"
+      name: "ObjectAtlasNew"
+      DependentResources:
+        DependentResource:
+          id: "Image"
+          ref: "ObjectAtlasNewImage"
+      Definitions:
+        Definition:
+          Images:
+            Image:
+              # GENERATED from resources/textures/objects-new.tileset.yaml by scripts/generate_object_atlas_new.py. Do not hand-edit.
+              - { name: "walkway", x: "0", y: "0", width: "128", height: "24" }
+              # END GENERATED
     - type: "FurnitureCatalogue"
       name: "FurnitureCatalogue"
       location: "test-worlds/furniture.furniture.lua"

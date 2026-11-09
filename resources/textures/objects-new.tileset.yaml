@@ -1,0 +1,35 @@
+# Authored tileset for the ObjectAtlasNew set (#1014).
+#
+# A version 2 tileset declares, per tile, the three render semantics a
+# version 1 file left the renderer to guess: the render offset it draws at,
+# the drawn size it draws at, and whether it is tintable. Offsets and sizes
+# are World units, not pixels - one World unit of authored art is one
+# authored tile.
+#
+# The `ImageSet` entries the application manifest declares for this atlas
+# are generated from this file by `scripts/generate_object_atlas_new.py`
+# and are checked against it by the render smoke module, so the two cannot
+# drift. Pixel regions are cut from `image` in top-left-origin pixels; the
+# semantics below are World units and never pixels.
+#
+# The authored grid is 128 x 320: one World cell at the size the World is
+# now drawn. This is the tracer-bullet set - the Walkway is the one live
+# entry, and the rest of the ObjectAtlasNew sheet drops in against the same
+# image size.
+version: 2
+image: objects-new.png
+size: [768, 960]
+tile_size: [128, 320]
+sprites:
+  # A Walkway is `Object(cellX, cellY, 1.0, 0.0)`: deliberately zero
+  # physical height, so it never obstructs pathing, routing or support.
+  # Its visible slab belongs to the artwork. The tile is 24px tall; drawn
+  # at 0.075 World units - 24 of a 320px Level - it hangs that far below
+  # the floor line of the cell it was authored in, with -y pointing down
+  # from the anchor at the cell's bottom-left.
+  walkway:
+    cell: [0, 0]
+    content: [0, 0, 128, 24]
+    offset: [0.0, -0.075]
+    drawn_size: [1.0, 0.075]
+    tintable: true

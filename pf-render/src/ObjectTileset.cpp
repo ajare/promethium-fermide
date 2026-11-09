@@ -1,6 +1,7 @@
 #include "ObjectTileset.h"
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <utility>
 namespace {
@@ -10,11 +11,41 @@ ObjectTileset agents;
 TextureId agentTextureId{};
 ObjectTileset furniture;
 TextureId furnitureTextureId{};
+
+// Reads one required pair of World-unit numbers out of a tileset node. A
+// field the file never wrote, or one that is not a finite number, is a
+// refusal rather than a default: an offset that quietly became zero would
+// put artwork where no author said it goes.
+pf::render::Vec2 requirePair(YAML::Node const& node, std::string const& sprite,
+    char const* field)
+{
+    auto const value = node[field];
+    if (!value.IsSequence() || value.size() != 2)
+        throw std::runtime_error("Object sprite '" + sprite + "' is missing its "
+            + std::string(field) + " pair");
+    double first{}, second{};
+    try { first = value[0].as<double>(); second = value[1].as<double>(); }
+    catch (YAML::Exception const&)
+    {
+        throw std::runtime_error("Object sprite '" + sprite + "' " + field
+            + " must be two numbers");
+    }
+    if (!std::isfinite(first) || !std::isfinite(second))
+        throw std::runtime_error("Object sprite '" + sprite + "' " + field
+            + " must be finite");
+    return { static_cast<float>(first), static_cast<float>(second) };
+}
 }
 ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
 {
     auto root = YAML::LoadFile(path.string());
-    if (root["version"].as<int>() != 1) throw std::runtime_error("Unsupported object tileset version");
+    int const version = root["version"].as<int>();
+    // Version 1 declares a region and a tintable flag per tile. Version 2
+    // adds the render offset and the drawn size, so a tile's visual extent
+    // is authored rather than inferred from whatever object draws it
+    // (#1014).
+    if (version != 1 && version != 2)
+        throw std::runtime_error("Unsupported object tileset version");
     ObjectTileset result;
     result.image = path.parent_path() / root["image"].as<std::string>();
     result.width = root["size"][0].as<int>();
@@ -45,14 +76,46 @@ ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
             r.width > result.width || column * tw + r.x > result.width - r.width || r.y > th - r.height)
             throw std::runtime_error("Object sprite is outside its cell");
         r.x += column * tw; r.y += row * th;
-        if (!result.sprites.emplace(item.first.as<std::string>(), ObjectSprite{r, v["tintable"].as<bool>()}).second)
+        auto const name = item.first.as<std::string>();
+        TileArtwork artwork{ r, v["tintable"].as<bool>(), { 0.0f, 0.0f }, { 0.0f, 0.0f } };
+        if (version >= 2)
+        {
+            artwork.offset = requirePair(v, name, "offset");
+            artwork.drawnSize = requirePair(v, name, "drawn_size");
+            if (artwork.drawnSize.x <= 0.0f || artwork.drawnSize.y <= 0.0f)
+                throw std::runtime_error("Object sprite '" + name
+                    + "' drawn size must be positive");
+            // One World unit of authored art is one authored tile, so a
+            // drawn size larger than the image could never be drawn from it.
+            if (artwork.drawnSize.x * tw > result.width + 1e-4
+                || artwork.drawnSize.y * th > result.height + 1e-4)
+                throw std::runtime_error("Object sprite '" + name
+                    + "' drawn size does not fit the atlas image");
+        }
+        else
+        {
+            // A version 1 tileset authors no render semantics. The identity
+            // is the format's own: no offset, and a drawn size of whatever
+            // the content rectangle measures in World units over the
+            // authored grid.
+            artwork.drawnSize = { float(r.width) / float(tw), float(r.height) / float(th) };
+        }
+        if (!result.sprites.emplace(name, artwork).second)
             throw std::runtime_error("Duplicate object sprite");
     }
-    for (auto name : {"door", "button-enabled", "button-disabled", "window-clear", "window-frosted",
-        "window-tinted", "booth-window-open", "booth-window-closed", "agent", "marker", "platform-lift", "shuttle-car-left",
-        "shuttle-car-middle", "shuttle-car-right", "shuttle-car-connector", "lift-car"})
-        if (!result.sprites.count(name)) throw std::runtime_error("Missing object sprite: " + std::string(name));
-    if (!result.sprites.at("agent").tintable) throw std::runtime_error("Agent sprite must support tinting");
+    // The required-tile list is the version 1 object atlas's own contract.
+    // A version 2 set is a different authored set with a different shape;
+    // which tiles a World requires from it is validated where the World's
+    // atlas selection is resolved, not by holding every old set's list.
+    if (version == 1)
+    {
+        for (auto name : {"door", "button-enabled", "button-disabled", "window-clear", "window-frosted",
+            "window-tinted", "booth-window-open", "booth-window-closed", "agent", "marker", "platform-lift", "shuttle-car-left",
+            "shuttle-car-middle", "shuttle-car-right", "shuttle-car-connector", "lift-car"})
+            if (!result.sprites.count(name)) throw std::runtime_error("Missing object sprite: " + std::string(name));
+        if (!result.sprites.at("agent").tintable)
+            throw std::runtime_error("Agent sprite must support tinting");
+    }
     return result;
 }
 void setObjectTileset(ObjectTileset tileset, TextureId texture)
@@ -111,6 +174,12 @@ std::optional<Vec2> objectSpriteSize(char const* name)
     if (!textureId || sprite == active.sprites.end()) return std::nullopt;
     return Vec2{static_cast<float>(sprite->second.region.width),
         static_cast<float>(sprite->second.region.height)};
+}
+std::optional<TileArtwork> objectTileArtwork(std::string const& name)
+{
+    auto const sprite = active.sprites.find(name);
+    if (!textureId || sprite == active.sprites.end()) return std::nullopt;
+    return sprite->second;
 }
 bool drawObjectSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b,
     PackedColourValue tint, Vec2 sourceMin, Vec2 sourceMax)

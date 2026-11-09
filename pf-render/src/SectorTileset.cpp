@@ -46,6 +46,11 @@ SectorTileset SectorTileset::load(std::filesystem::path const& path)
     };
     read("surfaces", result.surfaces);
     read("boundaries", result.boundaries);
+    for (auto const& [name, region] : result.surfaces)
+        result.tiles.emplace(name, TileArtwork{ region, false, { 0.0f, 0.0f }, { 1.0f, 1.0f } });
+    for (auto const& [name, region] : result.boundaries)
+        result.tiles.emplace("boundary-" + name,
+            TileArtwork{ region, false, { 0.0f, 0.0f }, { 1.0f, 1.0f } });
     for (auto name : {"corridor", "room", "ladder", "lift", "shuttle", "stairwell", "staircase"})
         if (!result.surfaces.count(name)) throw std::runtime_error("Missing sector surface: " + std::string(name));
     for (auto name : {"floor", "ceiling", "left", "right"})

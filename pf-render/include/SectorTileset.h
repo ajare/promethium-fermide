@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include "TileArtwork.h"
 #include "WorldDrawList.h"
 
 // The tilesets' installed-artwork handle, from the shared drawing vocabulary.
@@ -11,13 +12,19 @@
 using pf::render::TextureId;
 
 // Pixel regions are explicit: the source artwork is not a uniform grid.
-struct SectorTileRegion { int x, y, width, height; };
 struct SectorTileset
 {
     std::filesystem::path image;
     int width{}, height{};
     std::map<std::string, SectorTileRegion> surfaces;
     std::map<std::string, SectorTileRegion> boundaries;
+    // Every tile in the set with its authored render semantics, keyed by the
+    // name the application manifest declares for it - a boundary keeps its
+    // `boundary-` prefix here, because that is the name the install pairs
+    // against the `ImageSet` (#1014). A version 1 sector tileset declares
+    // regions only, so these are the format's own semantics: a surface
+    // repeats once per World unit and nothing in the set is tinted.
+    TileArtworkMap tiles;
     static SectorTileset load(std::filesystem::path const& path);
 };
 void setSectorTileset(SectorTileset tileset, TextureId texture);

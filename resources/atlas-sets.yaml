@@ -1,0 +1,46 @@
+# Which authored tileset carries the render semantics of each atlas the
+# application asset manifest registers (#1014).
+#
+# The manifest cannot say this itself. The vendored Willpower `ImageSet`
+# schema fixes the Options an `ImageSet` is allowed to carry - filtering,
+# uv-style, colour-space, wrapping, mipmaps - and extending the vendored SDK
+# was rejected as a much wider blast radius than the atlas work.
+#
+# The tileset stays the single authority for what a tile means: its render
+# offset, its drawn size and whether it is tintable. This file only says
+# which tileset is asked about for which atlas, and in which authored
+# format that tileset is written. The install checks the declared format
+# against the slot it is installing, so a mismatch is reported rather than
+# silently loading the wrong shape.
+#
+# The render smoke module checks that every `ImageSet` in `Resources.yaml`
+# is covered here, that every named tileset loads, and that it defines every
+# tile the atlas declares, so the mapping cannot rot quietly.
+#
+# Paths are relative to this file.
+version: 1
+sets:
+  SectorAtlas:
+    kind: sector
+    tileset: textures/sectors.tileset.yaml
+  StationAtlas:
+    kind: sector
+    tileset: textures/sectors.tileset.yaml
+  ObjectAtlas:
+    kind: object
+    tileset: textures/objects.tileset.yaml
+  AgentAtlas:
+    kind: object
+    tileset: textures/objects.tileset.yaml
+  FurnitureAtlas:
+    kind: object
+    tileset: textures/objects.tileset.yaml
+  StationFurnitureAtlas:
+    kind: object
+    tileset: textures/objects.tileset.yaml
+  DoctorFemale1Atlas:
+    kind: object
+    tileset: textures/objects.tileset.yaml
+  ObjectAtlasNew:
+    kind: object
+    tileset: textures/objects-new.tileset.yaml

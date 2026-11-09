@@ -112,6 +112,88 @@ namespace
 		throw std::runtime_error(std::string("Atlas was accepted but should not have been: ") + expectation);
 	}
 
+	// A version 2 authored sprite: the version 1 fields plus the render
+	// offset and the drawn size the format gained (#1014). Every field is
+	// spelled as text so a fixture can write `.nan` or leave a field out
+	// entirely, which is what the loader is being asked to notice.
+	struct V2Sprite
+	{
+		std::string name;
+		int column{}, row{};
+		int x{}, y{}, width{}, height{};
+		bool tintable{};
+		bool hasOffset{ true };
+		bool hasDrawnSize{ true };
+		std::string offsetX{ "0" }, offsetY{ "0" };
+		std::string drawnWidth{ "1" }, drawnHeight{ "1" };
+	};
+
+	std::string v2Block(V2Sprite const& sprite)
+	{
+		std::ostringstream out;
+		out << "  " << sprite.name << ":\n"
+			<< "    cell: [" << sprite.column << ", " << sprite.row << "]\n"
+			<< "    content: [" << sprite.x << ", " << sprite.y << ", "
+			<< sprite.width << ", " << sprite.height << "]\n"
+			<< "    tintable: " << (sprite.tintable ? "true" : "false") << "\n";
+		if (sprite.hasOffset)
+			out << "    offset: [" << sprite.offsetX << ", " << sprite.offsetY << "]\n";
+		if (sprite.hasDrawnSize)
+			out << "    drawn_size: [" << sprite.drawnWidth << ", " << sprite.drawnHeight
+				<< "]\n";
+		return out.str();
+	}
+
+	// The same invented 192 x 120 image on the same 32 x 40 authored grid,
+	// written as a version 2 tileset.
+	ObjectTileset loadV2Fixture(smoke::Context const& context, std::string const& tag,
+		std::vector<V2Sprite> const& sprites, int imageWidth = kImageWidth,
+		int imageHeight = kImageHeight, int tileWidth = kTileWidth,
+		int tileHeight = kTileHeight)
+	{
+		std::ostringstream yaml;
+		yaml << "version: 2\n"
+			<< "image: invented.png\n"
+			<< "size: [" << imageWidth << ", " << imageHeight << "]\n"
+			<< "tile_size: [" << tileWidth << ", " << tileHeight << "]\n"
+			<< "sprites:\n";
+		for (auto const& sprite : sprites) yaml << v2Block(sprite);
+		auto const path = context.temporaryRoot() / (tag + ".v2.tileset.yaml");
+		std::ofstream out(path, std::ios::binary | std::ios::trunc);
+		out << yaml.str();
+		require(bool(out), "Could not write version 2 fixture: " + path.string());
+		out.close();
+		return ObjectTileset::load(path);
+	}
+
+	std::string v2Refusal(smoke::Context const& context, std::string const& tag,
+		std::vector<V2Sprite> const& sprites, char const* expectation)
+	{
+		try
+		{
+			loadV2Fixture(context, tag, sprites);
+		}
+		catch (std::exception const& error)
+		{
+			return error.what();
+		}
+		throw std::runtime_error(std::string("Version 2 atlas was accepted but should not "
+			"have been: ") + expectation);
+	}
+
+	V2Sprite slab()
+	{
+		V2Sprite sprite;
+		sprite.name = "slab";
+		sprite.column = 0; sprite.row = 0;
+		sprite.x = 0; sprite.y = 0; sprite.width = 32; sprite.height = 8;
+		sprite.tintable = true;
+		sprite.offsetX = "0"; sprite.offsetY = "-0.2";
+		sprite.drawnWidth = "1"; sprite.drawnHeight = "0.2";
+		return sprite;
+	}
+
+
 	AuthoredSprite& find(std::vector<AuthoredSprite>& sprites, std::string const& name)
 	{
 		for (auto& sprite : sprites)
@@ -219,6 +301,110 @@ namespace
 			[](char c) { return c >= '0' && c <= '9'; }),
 			"The rejection must not name a pixel size: " + uneven);
 	}
+
+	// A version 2 tileset authors the render semantics the renderer reads:
+	// the offset it draws at and the size it draws at, in World units, plus
+	// the tintable flag that was always meant to be the only source of
+	// tintability (#1014).
+	void versionTwoSemanticsAreReadFromTheFile(smoke::Context const& context)
+	{
+		auto const tiles = loadV2Fixture(context, "v2-valid", { slab() });
+		auto const& sprite = tiles.sprites.at("slab");
+		require(sprite.tintable, "The tintable flag was not read from the file");
+		auto near = [](float a, float b) { return std::abs(a - b) < 0.0001f; };
+		require(near(sprite.offset.x, 0.0f) && near(sprite.offset.y, -0.2f),
+			"The render offset was not read from the file");
+		require(near(sprite.drawnSize.x, 1.0f) && near(sprite.drawnSize.y, 0.2f),
+			"The drawn size was not read from the file");
+		// The pixel region still resolves in the authored grid's own units.
+		require(sprite.region.x == 0 && sprite.region.y == 0
+			&& sprite.region.width == 32 && sprite.region.height == 8,
+			"The content rectangle stopped resolving in the authored grid");
+	}
+
+	// A tile with no render offset is refused. A default of zero would be a
+	// claim no author made, and it is exactly the claim that would put a
+	// Walkway back on the floor line.
+	void missingRenderOffsetIsRefused(smoke::Context const& context)
+	{
+		auto missing = slab();
+		missing.hasOffset = false;
+		auto const reason = v2Refusal(context, "v2-no-offset", { missing },
+			"a tile with no render offset");
+		require(reason.find("offset") != std::string::npos,
+			"The refusal must name the missing render offset: " + reason);
+	}
+
+	// A non-finite offset is refused rather than carried into a destination
+	// rectangle, where it would silently become nothing or everything.
+	void nonFiniteRenderOffsetIsRefused(smoke::Context const& context)
+	{
+		for (auto const* value : { ".nan", ".inf", "-.inf" })
+		{
+			auto nonFinite = slab();
+			nonFinite.offsetY = value;
+			auto const reason = v2Refusal(context, std::string("v2-offset-") + value,
+				{ nonFinite }, "a non-finite render offset");
+			require(reason.find("finite") != std::string::npos,
+				std::string("A non-finite render offset must be refused as non-finite (")
+				+ value + "): " + reason);
+		}
+		auto sideways = slab();
+		sideways.offsetX = ".nan";
+		require(v2Refusal(context, "v2-offset-x-nan", { sideways },
+			"a non-finite x render offset").find("finite") != std::string::npos,
+			"A non-finite x render offset must be refused too");
+	}
+
+	// A drawn size that cannot be expressed inside the atlas image is
+	// refused: one World unit of authored art is one authored tile, so a
+	// drawn size wider or taller than the whole image could never be drawn
+	// from it.
+	void drawnSizeThatDoesNotFitTheImageIsRefused(smoke::Context const& context)
+	{
+		// 8 World units across a 32px tile is 256px in a 192px image.
+		auto tooWide = slab();
+		tooWide.drawnWidth = "8";
+		auto const wide = v2Refusal(context, "v2-drawn-too-wide", { tooWide },
+			"a drawn size wider than the atlas image");
+		require(wide.find("drawn size") != std::string::npos
+			&& wide.find("fit") != std::string::npos,
+			"The refusal must state that the drawn size does not fit: " + wide);
+
+		// 4 World units down a 40px tile is 160px in a 120px image.
+		auto tooTall = slab();
+		tooTall.drawnHeight = "4";
+		require(v2Refusal(context, "v2-drawn-too-tall", { tooTall },
+			"a drawn size taller than the atlas image")
+			.find("drawn size") != std::string::npos,
+			"A drawn size taller than the image must be refused");
+
+		// A drawn size of zero or less is refused as not positive.
+		auto zero = slab();
+		zero.drawnWidth = "0";
+		require(v2Refusal(context, "v2-drawn-zero", { zero },
+			"a zero drawn size").find("positive") != std::string::npos,
+			"A zero drawn size must be refused as not positive");
+
+		auto negative = slab();
+		negative.drawnHeight = "-1";
+		require(v2Refusal(context, "v2-drawn-negative", { negative },
+			"a negative drawn size").find("positive") != std::string::npos,
+			"A negative drawn size must be refused as not positive");
+
+		auto nonFinite = slab();
+		nonFinite.drawnWidth = ".nan";
+		require(v2Refusal(context, "v2-drawn-nan", { nonFinite },
+			"a non-finite drawn size").find("finite") != std::string::npos,
+			"A non-finite drawn size must be refused as non-finite");
+
+		// A missing drawn size is refused as loudly as a missing offset.
+		auto absent = slab();
+		absent.hasDrawnSize = false;
+		require(v2Refusal(context, "v2-no-drawn-size", { absent },
+			"a tile with no drawn size").find("drawn_size") != std::string::npos,
+			"The refusal must name the missing drawn size");
+	}
 }
 
 void render_smoke::registerObjectAtlas(std::vector<smoke::Check>& checks)
@@ -227,4 +413,12 @@ void render_smoke::registerObjectAtlas(std::vector<smoke::Check>& checks)
 		isolated<authoredGridNeedNotMatchTheCell> });
 	checks.push_back({ "objectAtlas/escapingContentAndRemaindersAreRefused",
 		isolated<escapingContentAndRemaindersAreRefused> });
+	checks.push_back({ "objectAtlas/versionTwoSemanticsAreReadFromTheFile",
+		isolated<versionTwoSemanticsAreReadFromTheFile> });
+	checks.push_back({ "objectAtlas/missingRenderOffsetIsRefused",
+		isolated<missingRenderOffsetIsRefused> });
+	checks.push_back({ "objectAtlas/nonFiniteRenderOffsetIsRefused",
+		isolated<nonFiniteRenderOffsetIsRefused> });
+	checks.push_back({ "objectAtlas/drawnSizeThatDoesNotFitTheImageIsRefused",
+		isolated<drawnSizeThatDoesNotFitTheImageIsRefused> });
 }

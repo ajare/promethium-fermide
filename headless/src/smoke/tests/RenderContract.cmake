@@ -51,6 +51,16 @@ set(names
     boothWindows/staticPresentationAndNestedClipping
     objectAtlas/authoredGridNeedNotMatchTheCell
     objectAtlas/escapingContentAndRemaindersAreRefused
+    objectAtlas/versionTwoSemanticsAreReadFromTheFile
+    objectAtlas/missingRenderOffsetIsRefused
+    objectAtlas/nonFiniteRenderOffsetIsRefused
+    objectAtlas/drawnSizeThatDoesNotFitTheImageIsRefused
+    walkwayArtwork/manifestPairIsGeneratedFromTheTileset
+    walkwayArtwork/everyAtlasIsCoveredByItsAuthoredTileset
+    walkwayArtwork/installSeparatesPixelsFromSemantics
+    walkwayArtwork/walkwayDrawsBelowTheFloorLine
+    walkwayArtwork/physicalExtentStaysZeroAndRoutes
+    walkwayArtwork/oldSetsStillDrawThePrimitiveLine
     accessPanels/closedPresentationAndIndicators
     accessPanels/canvasCoversTheWholeFixtureWorld
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations

@@ -1095,6 +1095,30 @@ void renderPhysicalControl(shared_ptr<const core::Button> button, uint32_t /* la
 }
 
 
+namespace
+{
+// Draws a tile at its authored render offset and drawn size from a World-unit
+// anchor. The anchor is where the object's own geometry starts; the artwork
+// goes where the authored tileset says it goes, which need not be where the
+// object is. Returns false when the tile is not installed or declares no
+// drawn size, so the caller keeps its primitive fallback (#1014).
+bool drawOffsetTile(char const* name, core::Vector2 worldAnchor,
+	PackedColourValue tint, WorldDrawList* drawList)
+{
+	auto const artwork = objectTileArtwork(name);
+	if (!artwork || artwork->drawnSize.x <= 0.0f || artwork->drawnSize.y <= 0.0f)
+		return false;
+	core::Vector2 from{ worldAnchor.x + artwork->offset.x,
+		worldAnchor.y + artwork->offset.y };
+	core::Vector2 to{ from.x + artwork->drawnSize.x, from.y + artwork->drawnSize.y };
+	transformPosition(from);
+	transformPosition(to);
+	return drawObjectSprite(name, drawList,
+		{ min(from.x, to.x), min(from.y, to.y) },
+		{ max(from.x, to.x), max(from.y, to.y) }, tint);
+}
+}
+
 void renderWalkway(shared_ptr<const core::Walkway> walkway, uint32_t /* layer */, LayerRenderStyle style,
 	bool selected, WorldDrawList* drawList)
 {
@@ -1103,10 +1127,18 @@ void renderWalkway(shared_ptr<const core::Walkway> walkway, uint32_t /* layer */
 
 	walkway->getFullShape(bounds0, bounds1);
 
+	// A Walkway is authored `Object(cellX, cellY, 1.0, 0.0)`: a deliberately
+	// zero height so it never obstructs pathing. Its visible slab belongs to
+	// the artwork, not to the object - the tile declares an offset that hangs
+	// it below the floor line of the cell it was authored in, and the
+	// physical shape stays exactly what it is (#1014).
+	core::Vector2 const anchor{ bounds0.x, bounds0.y };
+
 	transformPosition(bounds0);
 	transformPosition(bounds1);
 
 	auto colour = selected ? SelectedColour : packColour(64, 64, 64);
+	if (drawOffsetTile("walkway", anchor, colour, drawList)) return;
 	drawList->AddLine({ bounds0.x, bounds0.y }, { bounds1.x, bounds0.y }, colour,
 		selected ? 3.0f : 2.0f);
 }
