@@ -91,7 +91,8 @@
 #include "RecentFiles.h"
 #include "UI.h"
 #include "Render.h"
-#include "WorldRenderSystem.h"
+#include "ApplicationAssetCatalogue.h"
+#include "WorldRenderStack.h"
 #include "UISettings.h"
 #include "AgentDropTargets.h"
 #include "Helpers.h"
@@ -9984,7 +9985,7 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 
 	// MPP owns every primitive in the canvas. ImGui only composites the
 	// completed render target into the already-reserved canvas item.
-	auto const texture = renderWorldCommands(commandList, toVec2(canvasPos), toVec2(canvasSize));
+	auto const texture = submitWorldCommands(commandList, toVec2(canvasPos), toVec2(canvasSize));
 	ImGui::GetWindowDrawList()->AddImage(
 		reinterpret_cast<ImTextureID>(static_cast<intptr_t>(texture)),
 		canvasPos, canvasPos + canvasSize, { 0.0f, 1.0f }, { 1.0f, 0.0f });
@@ -10022,7 +10023,7 @@ void renderUI(editor::DocumentPtr& document, shared_ptr<core::Agent> pathingAgen
 	renderWorldWindow(document, graph);
 	gLocationPlan.render(world, [](WorldDrawList const& commands, Vec2 position, Vec2 size)
 	{
-		auto texture = renderWorldCommands(commands, position, size, WorldCanvas::LocationPlan);
+		auto texture = submitWorldCommands(commands, position, size, WorldCanvas::LocationPlan);
 		ImGui::GetWindowDrawList()->AddImage(
 			reinterpret_cast<ImTextureID>(static_cast<intptr_t>(texture)),
 			ImVec2(position.x, position.y), ImVec2(position.x + size.x, position.y + size.y), {0, 1}, {1, 0});

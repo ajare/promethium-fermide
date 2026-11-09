@@ -21,7 +21,9 @@
 #include <fstream>
 #include "Helpers.h"
 #include "NonInteractiveProcess.h"
-#include "WorldRenderSystem.h"
+#include "ApplicationAssetCatalogue.h"
+#include "ApplicationResources.h"
+#include "WorldRenderStack.h"
 
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -426,9 +428,18 @@ void setup()
 	SDL_GL_GetDrawableSize(gWindow, &drawableWidth, &drawableHeight);
 	try
 	{
-		createWorldRenderSystem(gResourceDirectory,
+		// The shared renderer owns the MPP render stack and the application
+		// resource manager. The editor's own Resource subclasses are installed
+		// into that manager before the manifest is scanned, because the manifest
+		// names the types it declares (#1001).
+		createWorldRenderStack(gResourceDirectory,
 			static_cast<std::size_t>(drawableWidth),
-			static_cast<std::size_t>(drawableHeight));
+			static_cast<std::size_t>(drawableHeight),
+			[](wp::application::resourcesystem::ResourceManager& manager)
+			{
+				registerApplicationResourceTypes(manager);
+			});
+		initialiseApplicationAssetCatalogue();
 	}
 	catch (std::exception const& error)
 	{
@@ -496,9 +507,12 @@ void shutdown()
 		gLogger->info("Shutting down");
 	}
 
-	// MPP and Willpower own GPU resources and must be destroyed while the GL
-	// context which created them is still current.
-	destroyWorldRenderSystem();
+	// The editor's catalogue reaches into the shared stack's resource manager,
+	// so it is detached first; then MPP and Willpower - which own GPU
+	// resources - are destroyed while the GL context which created them is
+	// still current.
+	shutdownApplicationAssetCatalogue();
+	destroyWorldRenderStack();
 
 	// ImGui backends, newest initialised first; skip anything that never came up.
 	if (gImGuiOpenGLBackendInitialised)
@@ -684,7 +698,7 @@ void run()
 		// Set up rendering
 		int drawableWidth, drawableHeight;
 		SDL_GL_GetDrawableSize(gWindow, &drawableWidth, &drawableHeight);
-		resizeWorldRenderSystem(static_cast<std::size_t>(drawableWidth),
+		resizeWorldRenderStack(static_cast<std::size_t>(drawableWidth),
 			static_cast<std::size_t>(drawableHeight));
 		glViewport(0, 0, drawableWidth, drawableHeight);
 		glClearColor(clearColour.x * clearColour.w, clearColour.y * clearColour.w, clearColour.z * clearColour.w, clearColour.w);

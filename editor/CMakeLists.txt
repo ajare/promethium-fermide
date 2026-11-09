@@ -22,14 +22,13 @@ pf_require_willpower()
 
 add_executable(editor
     src/Helpers.cpp
+    src/ApplicationAssetCatalogue.cpp
     src/ApplicationResources.cpp
     src/Main.cpp
     src/UI.cpp
-    src/WorldRenderSystem.cpp
 )
 target_compile_features(editor PRIVATE cxx_std_20)
 target_compile_definitions(editor PRIVATE
-    PF_RENDER_LOG_DIR="${CMAKE_BINARY_DIR}/logs/$<CONFIG>"
     _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING
     $<$<CONFIG:Debug>:_DEBUG>
 )
@@ -52,7 +51,6 @@ target_link_libraries(editor PRIVATE
     nfd::nfd
     spdlog::spdlog
     Willpower.Application
-    ext::mpp-helper
     PromethiumFermide
 )
 if(WIN32)

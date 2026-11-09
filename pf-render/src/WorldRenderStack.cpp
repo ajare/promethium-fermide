@@ -1,4 +1,4 @@
-#include "WorldRenderSystem.h"
+#include "WorldRenderStack.h"
 #include "WorldRenderSlotAllocator.h"
 
 #include <algorithm>
@@ -33,20 +33,23 @@
 #include <willpower/application/resourcesystem/ResourceManager.h>
 #include <willpower/common/Logger.h>
 
-#include "ApplicationResources.h"
-#include "core/AgentType.h"
-#include "core/Furniture.h"
 #include "core/ManifestCatalogResolver.h"
 #include "core/WorldDocument.h"
 #include "ObjectTileset.h"
 #include "SectorTileset.h"
 #include "WorldDrawList.h"
 
+#include "imgui/imgui.h"
+
 namespace resources = wp::application::resourcesystem;
 namespace
 {
 	using Float = mpp::mesh::DataTypeFloat;
 	using Byte = mpp::mesh::DataTypeUnsignedByte;
+	using pf::render::RedShift;
+	using pf::render::GreenShift;
+	using pf::render::BlueShift;
+	using pf::render::AlphaShift;
 
 	bool same(Vec2 left, Vec2 right)
 	{
@@ -59,25 +62,28 @@ namespace
 		return same(left.minimum, right.minimum) && same(left.maximum, right.maximum);
 	}
 
-	mpp::Colour colour(ImU32 value)
+	mpp::Colour colour(PackedColourValue value)
 	{
 		return {
-			static_cast<float>((value >> IM_COL32_R_SHIFT) & 0xff) / 255.0f,
-			static_cast<float>((value >> IM_COL32_G_SHIFT) & 0xff) / 255.0f,
-			static_cast<float>((value >> IM_COL32_B_SHIFT) & 0xff) / 255.0f,
-			static_cast<float>((value >> IM_COL32_A_SHIFT) & 0xff) / 255.0f
+			static_cast<float>((value >> RedShift) & 0xff) / 255.0f,
+			static_cast<float>((value >> GreenShift) & 0xff) / 255.0f,
+			static_cast<float>((value >> BlueShift) & 0xff) / 255.0f,
+			static_cast<float>((value >> AlphaShift) & 0xff) / 255.0f
 		};
 	}
 
-	void bytes(ImU32 value, uint8_t& red, uint8_t& green, uint8_t& blue,
+	void bytes(PackedColourValue value, uint8_t& red, uint8_t& green, uint8_t& blue,
 		uint8_t& alpha)
 	{
-		red = static_cast<uint8_t>((value >> IM_COL32_R_SHIFT) & 0xff);
-		green = static_cast<uint8_t>((value >> IM_COL32_G_SHIFT) & 0xff);
-		blue = static_cast<uint8_t>((value >> IM_COL32_B_SHIFT) & 0xff);
-		alpha = static_cast<uint8_t>((value >> IM_COL32_A_SHIFT) & 0xff);
+		red = static_cast<uint8_t>((value >> RedShift) & 0xff);
+		green = static_cast<uint8_t>((value >> GreenShift) & 0xff);
+		blue = static_cast<uint8_t>((value >> BlueShift) & 0xff);
+		alpha = static_cast<uint8_t>((value >> AlphaShift) & 0xff);
 	}
 
+	// Thick lines stay native line primitives (ADR 0010). The requested width
+	// is clamped to what the driver advertises rather than being turned into
+	// filled geometry, so a line remains a line at every width.
 	void setNativeLineWidth(mpp::RenderSystem const& renderSystem, float width)
 	{
 		auto const& range = renderSystem.getCaps().aliasedLineWidthRange;
@@ -193,7 +199,7 @@ namespace
 		std::vector<WorldDrawList::Text> texts;
 	};
 
-	class WorldRenderSystem
+	class WorldRenderStack
 	{
 		struct Slot
 		{
@@ -207,8 +213,9 @@ namespace
 		};
 
 	public:
-		WorldRenderSystem(std::filesystem::path const& resourceDirectory,
-			std::size_t width, std::size_t height)
+		WorldRenderStack(std::filesystem::path const& resourceDirectory,
+			std::size_t width, std::size_t height,
+			std::function<void(resources::ResourceManager&)> const& registerResourceTypes)
 		{
 			// Keep diagnostics in the build tree regardless of the launch directory.
 			std::filesystem::path const logDirectory(PF_RENDER_LOG_DIR);
@@ -228,7 +235,10 @@ namespace
 			mRenderSystem->createCoreResources(mRenderResources.get());
 			mResources = std::make_unique<resources::ResourceManager>(
 				mRenderSystem.get(), mRenderResources.get(), nullptr, mWpLogger.get());
-			registerApplicationResourceTypes(*mResources);
+			// The application's Resource subclasses are declared above this
+			// module, so the host installs them here - before the manifest is
+			// scanned, because the manifest names the types it declares.
+			registerResourceTypes(*mResources);
 			mResources->addResourceLocationFactory("Directory",
 				[logger = mWpLogger.get()](std::string const& location,
 					std::string const& definition)
@@ -249,35 +259,16 @@ namespace
 			mFurnitureSet = requireImageSet("FurnitureAtlas");
 			installAtlasDefinitions();
 
-			mAgentTypes = std::make_unique<ApplicationAgentTypes>(*mResources);
-			if (!mAgentTypes->resolve("human.agent.lua"))
-				throw std::runtime_error("The bundled Human Agent type could not be loaded");
-			core::setAgentTypeResourceLoader([this](std::string const& name)
-			{
-				return mAgentTypes->resolve(name);
-			}, [this](std::string const& name)
-			{
-				return mAgentTypes->preview(name);
-			});
-
 			mScene = mRenderSystem->createScene("Default");
 			mScene->load();
 			mScene->setClearColour({ 0.08f, 0.08f, 0.08f, 1.0f });
-			core::FurnitureCatalogue::setResourceLoader([this](std::filesystem::path const& path)
-			{
-				// Loading is an explicit package preflight, including reload. Never
-				// return a path-only cache: external edits must be read and scripts
-				// validated into a fresh immutable snapshot. Existing Worlds retain
-				// their own accepted catalogue until their transaction commits.
-
-				return FurnitureCatalogueResource::createSnapshot(*mResources, path)->catalogue();
-			});
 		}
 
-		~WorldRenderSystem()
+		~WorldRenderStack()
 		{
-			core::setAgentTypeResourceLoader({});
-			core::FurnitureCatalogue::setResourceLoader({});
+			// Anything the host registered against the resource manager has to
+			// go before the manager does, and every GPU object here has to go
+			// before the OpenGL context does. This order is the guarantee.
 			core::setCatalogResourceResolver({});
 			mCatalogResolver.reset();
 			for (auto& slot : mSlots) remove(slot);
@@ -293,7 +284,6 @@ namespace
 			if (mObjectSet) mResources->releaseResource(mObjectSet);
 			if (mFurnitureSet) mResources->releaseResource(mFurnitureSet);
 			if (mAgentSet) mResources->releaseResource(mAgentSet);
-			mAgentTypes.reset();
 			clearSectorTileset();
 			clearObjectTileset();
 			clearAgentTileset();
@@ -306,7 +296,8 @@ namespace
 			mMppLogger.reset();
 		}
 
-		uint32_t render(WorldDrawList const& commandList, Vec2 origin, Vec2 size, WorldCanvas canvas)
+		OffscreenTargetId render(WorldDrawList const& commandList, Vec2 origin,
+			Vec2 size, WorldCanvas canvas)
 		{
 			auto const width = static_cast<std::size_t>(std::max(1.0f, std::ceil(size.x)));
 			auto const height = static_cast<std::size_t>(std::max(1.0f, std::ceil(size.y)));
@@ -351,10 +342,63 @@ namespace
 			setNativeLineWidth(*mRenderSystem, 1.0f);
 			mRenderSystem->popRenderTarget();
 
-			return static_cast<mpp::RenderTexture*>(target.get())->getId();
+			return static_cast<std::uint64_t>(
+				static_cast<mpp::RenderTexture*>(target.get())->getId());
+		}
+
+		// The host reads its catalogue through the manager this stack created;
+		// it never owns a second one.
+		resources::ResourceManager& resources() { return *mResources; }
+
+		std::string selectSectorImageSet(std::string const& name)
+		{
+			if (name == mSectorSetName) return mSectorDiagnostic;
+			mSectorSetName = name;
+			for (auto& slot : mSlots) remove(slot);
+			mSlots.clear();
+			mSlotAllocator = {};
+			mSectorDiagnostic.clear();
+			if (mSectorSet) mResources->releaseResource(mSectorSet);
+			mSectorSet.reset();
+			try { mSectorSet = requireImageSet(name); }
+			catch (std::exception const& error) { mSectorDiagnostic = error.what(); }
+			installAtlasDefinitions();
+			return mSectorDiagnostic;
+		}
+
+		std::string selectAgentImageSet(std::string const& name)
+		{
+			if (name == mAgentSetName) return mAgentDiagnostic;
+			mAgentSetName = name;
+			for (auto& slot : mSlots) remove(slot);
+			mSlots.clear(); mSlotAllocator = {};
+			mAgentDiagnostic.clear();
+			if (mAgentSet) mResources->releaseResource(mAgentSet);
+			mAgentSet.reset();
+			try { mAgentSet = requireImageSet(name); }
+			catch (std::exception const& error) { mAgentDiagnostic = error.what(); }
+			installAtlasDefinitions();
+			return mAgentDiagnostic;
+		}
+
+		std::string selectFurnitureImageSet(std::string const& name)
+		{
+			if (name == mFurnitureSetName) return mFurnitureDiagnostic;
+			mFurnitureSetName = name;
+			for (auto& slot : mSlots) remove(slot);
+			mSlots.clear(); mSlotAllocator = {};
+			mFurnitureDiagnostic.clear();
+			if (mFurnitureSet) mResources->releaseResource(mFurnitureSet);
+			mFurnitureSet.reset();
+			try { mFurnitureSet = requireImageSet(name); }
+			catch (std::exception const& error) { mFurnitureDiagnostic = error.what(); }
+			installAtlasDefinitions();
+			return mFurnitureDiagnostic;
 		}
 
 	private:
+		// A mandatory viewport atlas. Anything that is not a loadable ImageSet
+		// fails the whole startup rather than leaving a canvas half-drawn.
 		resources::ResourcePtr requireImageSet(std::string const& name)
 		{
 			auto resource = mResources->acquireResource(name);
@@ -375,6 +419,10 @@ namespace
 			return resource;
 		}
 
+		// Installs the four viewport atlases as the tilesets the producer
+		// reads. A missing atlas installs an empty tileset: every lookup then
+		// misses and the draw helpers paint the cell opaque magenta, so a
+		// broken install is visible rather than blank.
 		void installAtlasDefinitions()
 		{
 			auto sector = std::dynamic_pointer_cast<resources::ImageSetResource>(mSectorSet);
@@ -434,78 +482,6 @@ namespace
 			setFurnitureTileset(std::move(furnitureTiles), reinterpret_cast<ImTextureID>(1));
 		}
 
-	public:
-		std::string selectSectorImageSet(std::string const& name)
-		{
-			if (name == mSectorSetName) return mSectorDiagnostic;
-			mSectorSetName = name;
-			for (auto& slot : mSlots) remove(slot);
-			mSlots.clear();
-			mSlotAllocator = {};
-			mSectorDiagnostic.clear();
-			if (mSectorSet) mResources->releaseResource(mSectorSet);
-			mSectorSet.reset();
-			try { mSectorSet = requireImageSet(name); }
-			catch (std::exception const& error) { mSectorDiagnostic = error.what(); }
-			installAtlasDefinitions();
-			return mSectorDiagnostic;
-		}
-
-		std::string selectAgentImageSet(std::string const& name)
-		{
-			if (name == mAgentSetName) return mAgentDiagnostic;
-			mAgentSetName = name;
-			for (auto& slot : mSlots) remove(slot);
-			mSlots.clear(); mSlotAllocator = {};
-			mAgentDiagnostic.clear();
-			if (mAgentSet) mResources->releaseResource(mAgentSet);
-			mAgentSet.reset();
-			try { mAgentSet = requireImageSet(name); }
-			catch (std::exception const& error) { mAgentDiagnostic = error.what(); }
-			installAtlasDefinitions();
-			return mAgentDiagnostic;
-		}
-
-		std::string selectFurnitureImageSet(std::string const& name)
-		{
-			if (name == mFurnitureSetName) return mFurnitureDiagnostic;
-			mFurnitureSetName = name;
-			for (auto& slot : mSlots) remove(slot);
-			mSlots.clear(); mSlotAllocator = {};
-			mFurnitureDiagnostic.clear();
-			if (mFurnitureSet) mResources->releaseResource(mFurnitureSet);
-			mFurnitureSet.reset();
-			try { mFurnitureSet = requireImageSet(name); }
-			catch (std::exception const& error) { mFurnitureDiagnostic = error.what(); }
-			installAtlasDefinitions();
-			return mFurnitureDiagnostic;
-		}
-
-		std::vector<std::string> resourceNames(std::string const& type)
-		{
-			std::vector<std::string> names;
-			for (auto const& resource : mResources->getResourcesByType(type))
-				if (resource) names.push_back(resource->getName());
-			std::sort(names.begin(), names.end());
-			names.erase(std::unique(names.begin(), names.end()), names.end());
-			return names;
-		}
-
-		std::vector<ApplicationAgentType> agentTypes() { return mAgentTypes->types(); }
-
-		bool importAgentType(std::filesystem::path const& path,
-			ApplicationAgentType& imported, std::string& diagnostic)
-		{
-			return mAgentTypes->importFile(path, imported, diagnostic);
-		}
-
-		std::filesystem::path resourceSource(std::string const& type,
-			std::string const& name)
-		{
-			return core::resolveCatalogSource(type, name);
-		}
-
-	private:
 		mpp::ResourcePtr texture(WorldDrawList::Texture textureKind)
 		{
 			if (textureKind == WorldDrawList::Texture::None) return {};
@@ -728,12 +704,8 @@ namespace
 		std::string mFurnitureSetName{"FurnitureAtlas"};
 		std::string mFurnitureDiagnostic;
 		resources::ResourcePtr mObjectSet;
-		// Every valid, loaded Agent type Resource, keyed by Resource name. The
-		// bundled Human and all manifest-registered types are loaded at startup
-		// so the creation selector and document loading can resolve them.
-		std::unique_ptr<ApplicationAgentTypes> mAgentTypes;
 		mpp::ScenePtr mScene;
-		// Both images are composited later by ImGui, so neither canvas may
+		// Both images are composited later by the caller, so neither canvas may
 		// overwrite the other's offscreen texture during the same frame.
 		mpp::RenderTargetPtr mTargets[2];
 		mpp::RenderTargetPtr mFontAtlas;
@@ -743,81 +715,60 @@ namespace
 		std::vector<std::size_t> mSegmentSlots;
 	};
 
-	std::unique_ptr<WorldRenderSystem> gSystem;
+	std::unique_ptr<WorldRenderStack> gStack;
 }
 
-void createWorldRenderSystem(std::filesystem::path const& resourceDirectory,
-	std::size_t drawableWidth, std::size_t drawableHeight)
+void createWorldRenderStack(std::filesystem::path const& resourceDirectory,
+	std::size_t drawableWidth, std::size_t drawableHeight,
+	std::function<void(resources::ResourceManager&)> const& registerResourceTypes)
 {
-	if (gSystem) throw std::logic_error("The World render system already exists");
-	gSystem = std::make_unique<WorldRenderSystem>(resourceDirectory,
-		drawableWidth, drawableHeight);
+	if (gStack) throw std::logic_error("The World render stack already exists");
+	gStack = std::make_unique<WorldRenderStack>(resourceDirectory, drawableWidth,
+		drawableHeight, registerResourceTypes);
 }
 
-void resizeWorldRenderSystem(std::size_t, std::size_t)
+void resizeWorldRenderStack(std::size_t, std::size_t)
 {
 	// Offscreen targets follow the canvas. MPP's window dimensions are used only
-	// by presentation pipelines, which this editor-owned renderer does not use.
+	// by presentation pipelines, which this render stack does not use.
 }
 
-void destroyWorldRenderSystem()
+void destroyWorldRenderStack()
 {
-	gSystem.reset();
+	gStack.reset();
 }
 
-std::uint32_t renderWorldCommands(WorldDrawList const& commands,
+bool worldRenderStackActive()
+{
+	return static_cast<bool>(gStack);
+}
+
+resources::ResourceManager* worldRenderResourceManager()
+{
+	return gStack ? &gStack->resources() : nullptr;
+}
+
+OffscreenTargetId submitWorldCommands(WorldDrawList const& commands,
 	Vec2 canvasPosition, Vec2 canvasSize, WorldCanvas canvas)
 {
-	if (!gSystem) throw std::runtime_error("The World render system is not initialised");
-	return gSystem->render(commands, canvasPosition, canvasSize, canvas);
+	if (!gStack) throw std::runtime_error("The World render stack is not initialised");
+	return gStack->render(commands, canvasPosition, canvasSize, canvas);
 }
 
 std::string selectWorldSectorImageSet(std::string const& name)
 {
-	if (!gSystem) return {};
-	return gSystem->selectSectorImageSet(name);
+	if (!gStack) return {};
+	return gStack->selectSectorImageSet(name);
 }
 
 std::string selectWorldAgentImageSet(std::string const& name)
 {
-	if (!gSystem) return {};
-	return gSystem->selectAgentImageSet(name);
+	if (!gStack) return {};
+	return gStack->selectAgentImageSet(name);
 }
 
 std::string selectWorldFurnitureImageSet(std::string const& name)
 {
-	if (!gSystem) return "Rendering service is not initialized";
-	return gSystem->selectFurnitureImageSet(name);
-}
-
-std::vector<std::string> applicationResourceNames(std::string const& type)
-{
-	if (!gSystem) return {};
-	return gSystem->resourceNames(type);
-}
-
-std::vector<ApplicationAgentType> applicationAgentTypes()
-{
-	if (!gSystem) return {};
-	return gSystem->agentTypes();
-}
-
-std::optional<std::filesystem::path> applicationResourceSource(
-	std::string const& type, std::string const& name)
-{
-	if (!gSystem) return std::nullopt;
-	auto source = gSystem->resourceSource(type, name);
-	if (source.empty()) return std::nullopt;
-	return source;
-}
-
-bool importApplicationAgentType(std::filesystem::path const& path,
-	ApplicationAgentType& imported, std::string& diagnostic)
-{
-	if (!gSystem)
-	{
-		diagnostic = "Application resources are unavailable";
-		return false;
-	}
-	return gSystem->importAgentType(path, imported, diagnostic);
+	if (!gStack) return "Rendering service is not initialized";
+	return gStack->selectFurnitureImageSet(name);
 }
