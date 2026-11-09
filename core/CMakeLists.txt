@@ -33,6 +33,18 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/SimulationMetricsCo
 file(GLOB PF_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 file(GLOB PF_CORE_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/core/*.h")
 
+# Every core header is under include/core/ and therefore covered by the glob
+# above. A header left loose at include/ is invisible to that glob and drifts
+# out of the module unnoticed, so it fails the configure instead (#991).
+file(GLOB PF_CORE_LOOSE_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp")
+if(PF_CORE_LOOSE_HEADERS)
+    string(REPLACE ";" "\n  " PF_CORE_LOOSE_HEADERS_LIST "${PF_CORE_LOOSE_HEADERS}")
+    message(FATAL_ERROR
+        "core/include must hold only the core/ header directory. Loose headers:\n  ${PF_CORE_LOOSE_HEADERS_LIST}")
+endif()
+
 # Core is SHARED so that exactly one copy of it exists in any process (#962).
 # Core performs dynamic_cast across Graph.cpp, Agent.cpp, Pathing.cpp and
 # WorldPlayerControl.cpp, and pf-render re-performs casts on core objects it

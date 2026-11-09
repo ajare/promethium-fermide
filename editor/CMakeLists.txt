@@ -10,6 +10,9 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Module.cmake")
 
+# The non-interactive process bootstrap is shared with the headless tier, so
+# it is its own header-only module rather than an editor or core header (#991).
+pf_require_module(pf-app-bootstrap)
 pf_require_module(pf-render)
 pf_require_module(pf-metrics)
 pf_require_module(pf-agent-editing)
@@ -42,6 +45,7 @@ else()
     target_compile_options(editor PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 target_link_libraries(editor PRIVATE
+    pf-app-bootstrap
     pf-render
     pf-metrics
     pf-agent-editing

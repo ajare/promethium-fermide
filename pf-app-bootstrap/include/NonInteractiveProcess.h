@@ -18,6 +18,9 @@ namespace pf
 {
 	// OS mode is inherited by children; CRT reporting is process-local, so each
 	// entry point must also set it. Preserve flags selected by the caller.
+	//
+	// This is a process-launch concern, not World domain, which is why it lives
+	// in pf-app-bootstrap rather than in the core include tree (#991).
 	inline void setupNonInteractiveProcess()
 	{
 #if defined(_WIN32)

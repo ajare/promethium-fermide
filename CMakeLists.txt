@@ -7,6 +7,9 @@
 #
 # Dependency direction is acyclic:
 #
+#   pf-app-bootstrap (no dependencies: a header-only process bootstrap the
+#                    editor and the headless tier share, and headless cannot
+#                    link the editor)
 #   core  <-  pf-imgui-cpu  <-  pf-render  <-  pf-agent-editing
 #   core  <-  pf-game-runtime      (WorldRuntime: owns and drives a World)
 #   pf-game-runtime  <-  pf-game-authoring  (WorldAuthoring: mutates through
@@ -28,6 +31,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Module.cmake")
 # Libraries. pf_require_module() makes the ordering below a readability
 # choice rather than a correctness requirement: a module pulled in by another
 # is configured exactly once either way.
+add_subdirectory(pf-app-bootstrap)
 add_subdirectory(core)
 add_subdirectory(pf-game-runtime)
 add_subdirectory(pf-game-authoring)

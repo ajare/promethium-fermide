@@ -73,7 +73,6 @@
 #include "Main.h"
 #include "Render.h"
 #include "Helpers.h"
-#include "NonInteractiveProcess.h"
 #include "UI.h"
 #include "UISettings.h"
 #include "metrics/MetricsHttpServer.h"

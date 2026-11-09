@@ -13,6 +13,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Module.cmake")
 
+# Header-only, links nothing: the smoke support library and the compatibility
+# orchestrator both call the non-interactive process bootstrap, and neither
+# can reach it through the editor (#991).
+pf_require_module(pf-app-bootstrap)
 pf_require_module(promethium-fermide-core)
 pf_require_module(pf-game-runtime)
 pf_require_module(pf-game-authoring)
@@ -126,7 +130,9 @@ target_link_libraries(pf-pause-position-repro PRIVATE pf-pause-position-support)
 
 # --- Legacy compatibility orchestrator -------------------------------------
 # Deliberately no linked libraries: all compatibility work happens in children.
+# The one exception is the header-only bootstrap, which adds no linkage.
 pf_add_headless_tool(promethium-fermide-headless src/SmokeScenario.cpp)
+target_link_libraries(promethium-fermide-headless PRIVATE pf-app-bootstrap)
 target_include_directories(promethium-fermide-headless PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}/generated" ${PF_INCLUDE_DIR})
 
