@@ -1,10 +1,10 @@
 # Object atlas
 
-`resources/textures/objects.png` is a 320x640 RGBA atlas. Its uniform cells are
-64x160 authored pixels, laid out one world unit to a cell rather than the 64x64
-a square grid would suggest. The World cell's screen size is a separate fact: the
-renderer stretches each resolved region into the World-unit rectangle it is drawn
-into, so the artwork magnifies with the cell instead of being re-cut (#1007).
+`resources/textures/objects.png` is a 320x960 RGBA atlas laid out on a uniform
+64x160 authored grid: 5 cells across by 6 down, one world unit to a cell rather than
+a 64x64 square of screen pixels. The World cell's screen size is a separate fact:
+the renderer stretches each resolved region into the World-unit rectangle it is
+drawn into, so the artwork magnifies with the cell instead of being re-cut (#1007).
 Unoccupied cell space is transparent. Small objects do not expand to fill their
 cell.
 
