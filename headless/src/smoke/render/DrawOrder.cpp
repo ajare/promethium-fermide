@@ -1009,7 +1009,11 @@ namespace
 		setSectorTileset(std::move(station), static_cast<TextureId>(1));
 		WorldDrawList tiles({{0, 0}, {1000, 1000}});
 		// Two World cells wide, three quarters of a Level tall: two tiles side
-		// by side, the second Level cropped rather than stretched to fit.
+		// by side in one row, that row cropped at three quarters of its tile
+		// height rather than stretched to fit. A tile is a whole Level tall on
+		// screen, so this probe never reaches a second Level; the crop is the
+		// point - the UV stops at the same 0.75 fraction as the geometry
+		// instead of running the whole tile.
 		float const zoom = 2.f;
 		float const probeWide = 2.0f * CORE_CELL_WIDTH_PIXELS * zoom;
 		float const probeHigh = 0.75f * CORE_LEVEL_HEIGHT_PIXELS * zoom;
