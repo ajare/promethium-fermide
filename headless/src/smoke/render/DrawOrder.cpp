@@ -1025,12 +1025,17 @@ namespace
 		require(maxX == CORE_CELL_WIDTH_PIXELS * zoom && maxY == probeHigh
 			&& maxUvY > .74f && maxUvY < .76f,
 			"Station tile must scale to World cells and crop partial cells");
+		// The fallbacks below are probed on one World cell. Neither area is
+		// asserted against - only the emitted texture and colour are - but both
+		// are World extents, so they say so.
 		WorldDrawList fallback({{0, 0}, {1000, 1000}});
-		drawSectorTileSurface("room", &fallback, {0, 0}, {64, 160}, White);
+		drawSectorTileSurface("room", &fallback, {0, 0},
+			{CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS}, White);
 		auto const& missing = std::get<WorldDrawList::Triangle>(fallback.commands().front());
 		require(missing.texture == WorldDrawList::Texture::None && missing.colour == packColour(255, 0, 255, 255),
 			"Missing surface must render opaque magenta");
-		require(!drawSectorTileBoundary("floor", &fallback, {0, 0}, {64, 2}),
+		// One World cell wide; the 2 is a plain line's pixel thickness, not a World unit.
+		require(!drawSectorTileBoundary("floor", &fallback, {0, 0}, {CORE_CELL_WIDTH_PIXELS, 2}),
 			"Missing boundary must use the plain-line fallback");
 		clearSectorTileset();
 		core::World world("Staircase shaft surface", 12, 3);

@@ -41,11 +41,19 @@ int main(int argc, char** argv)
                     throw std::runtime_error("Invalid tile position or UV");
             }
         }
+        // One Level of run at the strip's 2px thickness. The 2 is a plain
+        // line's pixel thickness, not a World unit: the renderer keeps every
+        // boundary 2px thick whatever the zoom, exactly as its plain-line
+        // fallback does. Only the return value is asserted, so the run's
+        // orientation here is arbitrary.
         for (auto name : {"left", "right", "floor", "ceiling"})
-            if (!drawSectorTileBoundary(name, &list, {0, 0}, {2, 160}))
+            if (!drawSectorTileBoundary(name, &list, {0, 0}, {2, CORE_LEVEL_HEIGHT_PIXELS}))
                 throw std::runtime_error("Missing textured boundary");
         clearSectorTileset();
-        if (drawSectorTileSurface("room", &list, {0, 0}, {64, 160}, IM_COL32_WHITE))
+        // One World cell, probed only for the fallback it must emit. The area is
+        // never asserted against, but it is a World extent, so it says so.
+        if (drawSectorTileSurface("room", &list, {0, 0},
+                {CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS}, IM_COL32_WHITE))
             throw std::runtime_error("Texture remained active after cleanup");
         auto objects = ObjectTileset::load(std::filesystem::path(argv[1]).parent_path() / "objects.tileset.yaml");
         if (!std::filesystem::is_regular_file(objects.image))
