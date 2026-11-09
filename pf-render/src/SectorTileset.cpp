@@ -70,8 +70,9 @@ bool drawSectorTileSurface(std::string const& kind, WorldDrawList* list,
         return true;
     }
     auto const& region = found->second;
-    // One world unit is 64 screen pixels wide and 160 high. Crop partial
-    // levels instead of stretching a complete tile to a Corridor's height.
+    // A surface repeats once per 1x1 world unit, magnified to the World cell's
+    // screen size at the current zoom (the macros below). Crop partial levels
+    // instead of stretching a complete tile to a Corridor's height.
     auto const clipMin = list->GetClipRectMin();
     auto const clipMax = list->GetClipRectMax();
     float const cellWidth = CORE_CELL_WIDTH_PIXELS * zoom;
