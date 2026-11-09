@@ -11,7 +11,9 @@
 // magenta instead of drawing nothing (#1003).
 using pf::render::TextureId;
 
-// Pixel regions are explicit: the source artwork is not a uniform grid.
+// A version 1 sector tileset names explicit pixel regions: its draft artwork
+// is not a uniform grid. A version 2 set is authored on the uniform grid
+// the object atlases use and carries no boundary artwork at all (#1017).
 struct SectorTileset
 {
     std::filesystem::path image;
@@ -23,12 +25,19 @@ struct SectorTileset
     // `boundary-` prefix here, because that is the name the install pairs
     // against the `ImageSet` (#1014). A version 1 sector tileset declares
     // regions only, so these are the format's own semantics: a surface
-    // repeats once per World unit and nothing in the set is tinted.
+    // repeats once per World unit and nothing in the set is tinted. A
+    // version 2 set authors those semantics in the file, and leaves
+    // `boundaries` empty because it draws no edge artwork (#1017).
     TileArtworkMap tiles;
     static SectorTileset load(std::filesystem::path const& path);
 };
 void setSectorTileset(SectorTileset tileset, TextureId texture);
 void clearSectorTileset();
+// Whether the installed atlas carries a surface tile under this name. A
+// caller that has a type-specific tile and a borrowed one asks this before
+// drawing, so an atlas that predates the specific tile keeps drawing the
+// borrowed art instead of the missing-tile magenta (#1017).
+bool hasSectorTileSurface(std::string const& kind);
 // The tileset helpers cross to the command stream on the shared drawing
 // types (#997), so a caller hands them pf::render::Vec2 and a packed colour.
 bool drawSectorTileSurface(std::string const& kind, WorldDrawList* drawList,

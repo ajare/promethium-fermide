@@ -1,13 +1,67 @@
 #include "SectorTileset.h"
+#include "AuthoredTileGrid.h"
 #include "core/Defines.h"
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
+#include <array>
 #include <stdexcept>
 #include <utility>
 
 namespace {
 SectorTileset active;
 TextureId textureId{};
+
+// The ten surface-bearing Sector types. Each fills its own full-cell tile;
+// Background and Facade are authored flat colour by domain definition and
+// so are not in the set (#1017).
+constexpr std::array<char const*, 10> kSectorSurfaces{ "room", "corridor",
+    "ladder", "lift", "shuttle", "stairwell", "staircase", "airlock",
+    "chamber", "dumbwaiter" };
+
+// A version 2 sector tileset authors the same grid the object atlases use:
+// a cell in the artist's own layout, a content rectangle inside it, and
+// the render semantics per tile (#1014). What differs is what the set is
+// for. Every tile in it is a surface; the boundary strips are dropped, so
+// every Sector edge falls back to the primitive line the renderer already
+// emits. A file that still declares a `boundaries` map is refused rather
+// than quietly ignored, which is what stops the dropped artwork coming
+// back by accident.
+//
+// A surface is one full World cell of artwork repeated once per cell across
+// the Sector's area. A tile drawn at any other size, or offset off its
+// cell's anchor, would repeat at a geometry the per-cell repeat rule cannot
+// express, so the loader refuses it rather than drawing something that
+// contradicts its own repeat.
+SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
+    YAML::Node const& root)
+{
+    if (root["boundaries"].IsDefined())
+        throw std::runtime_error("A version 2 sector tileset declares no boundary "
+            "strips; every Sector edge draws the primitive line ('"
+            + path.filename().string() + "')");
+    SectorTileset result;
+    result.image = path.parent_path() / root["image"].as<std::string>();
+    auto const grid = loadAuthoredTileGrid(root, true, "sector surface");
+    result.width = grid.width;
+    result.height = grid.height;
+    for (auto const& [name, artwork] : grid.tiles) {
+        if (artwork.offset.x != 0.0f || artwork.offset.y != 0.0f)
+            throw std::runtime_error("Sector surface '" + name
+                + "' must be drawn at its cell's anchor, because the repeat is "
+                "per World cell");
+        if (artwork.drawnSize.x != 1.0f || artwork.drawnSize.y != 1.0f)
+            throw std::runtime_error("Sector surface '" + name
+                + "' must be drawn at one full World cell, because the repeat "
+                "is per World cell");
+        result.tiles.emplace(name, artwork);
+        result.surfaces.emplace(name, artwork.region);
+    }
+    for (auto const* name : kSectorSurfaces)
+        if (!result.surfaces.count(name))
+            throw std::runtime_error("Missing sector surface: " + std::string(name));
+    return result;
+}
+
 void image(WorldDrawList* list, SectorTileRegion const& r, Vec2 a, Vec2 b,
     float fractionX, float fractionY, PackedColourValue tint)
 {
@@ -22,7 +76,13 @@ void image(WorldDrawList* list, SectorTileRegion const& r, Vec2 a, Vec2 b,
 SectorTileset SectorTileset::load(std::filesystem::path const& path)
 {
     auto root = YAML::LoadFile(path.string());
-    if (root["version"].as<int>() != 1)
+    int const version = root["version"].as<int>();
+    // Version 1 is the draft's irregular-rectangle format: explicit regions
+    // for seven surfaces and four boundary strips. Version 2 is the authored
+    // grid, carries no boundary artwork at all, and names every one of the
+    // ten surface-bearing Sector types (#1017).
+    if (version == 2) return loadVersion2SectorTileset(path, root);
+    if (version != 1)
         throw std::runtime_error("Unsupported sector tileset version");
     SectorTileset result;
     result.image = path.parent_path() / root["image"].as<std::string>();
@@ -64,6 +124,11 @@ void setSectorTileset(SectorTileset tileset, TextureId texture)
     textureId = texture;
 }
 void clearSectorTileset() { textureId = {}; active = {}; }
+
+bool hasSectorTileSurface(std::string const& kind)
+{
+    return bool(textureId) && active.surfaces.count(kind) > 0;
+}
 
 bool drawSectorTileSurface(std::string const& kind, WorldDrawList* list,
     Vec2 minimum, Vec2 maximum, PackedColourValue tint, float zoom)

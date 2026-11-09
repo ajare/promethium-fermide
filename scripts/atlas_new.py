@@ -221,5 +221,6 @@ def run(spec: AtlasSpec) -> int:
 
 if __name__ == "__main__":
     raise SystemExit("atlas_new.py is a library; run "
-                    "scripts/generate_object_atlas_new.py or "
-                    "scripts/generate_furniture_atlas_new.py")
+                    "scripts/generate_object_atlas_new.py, "
+                    "scripts/generate_furniture_atlas_new.py or "
+                    "scripts/generate_sector_atlas_new.py")

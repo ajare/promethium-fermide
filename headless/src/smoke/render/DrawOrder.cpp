@@ -998,10 +998,14 @@ namespace
 		}
 	}
 
-	// A Staircase's procedural steps are drawn over a plain shaft surface. Using
-	// the decorative staircase atlas region as the Sector surface paints a second,
-	// fixed stair image underneath them on the Staircase's own Layer.
-	void aStaircaseUsesThePlainShaftSurface()
+	// A Staircase fills with its own surface tile rather than the Stairwell's
+	// (#1017). Its steps are procedural and draw on top of that surface,
+	// which is why the old code borrowed the plain shaft: a fixed stair image
+	// underneath them would have fought the real one. The Staircase's own tile
+	// is Infrastructure - one full cell of the fabric the Staircase runs
+	// through, not a picture of steps - so the procedural steps stay the only
+	// stairs in the picture.
+	void aStaircaseUsesItsOwnSurfaceUnderItsSteps()
 	{
 		SectorTileset station;
 		station.width = 512; station.height = 320;
@@ -1042,7 +1046,7 @@ namespace
 		require(!drawSectorTileBoundary("floor", &fallback, {0, 0}, {CORE_CELL_WIDTH_PIXELS, 2}),
 			"Missing boundary must use the plain-line fallback");
 		clearSectorTileset();
-		core::World world("Staircase shaft surface", 12, 3);
+		core::World world("Staircase own surface", 12, 3);
 		while (world.getLayerCount() < 2) world.addLayer();
 		world.addCorridor(0, 0, 6);
 		world.addCorridor(1, 0, 7);
@@ -1066,18 +1070,38 @@ namespace
 		renderSector(staircase, 1, LayerRenderStyle::Solid, false,
 			ImColor(White), &commands);
 
+		// The two tiles are told apart by where they sit in the fixture's own
+		// 100x100 sheet: the Stairwell's occupies the corner, the Staircase's
+		// sits at the far side of it.
 		bool foundSurface = false;
-		for (auto const& command : commands.commands())
+		size_t lastSurfaceCommand{};
+		auto const& stream = commands.commands();
+		for (size_t index = 0; index < stream.size(); ++index)
 		{
-			auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command);
+			auto const* triangle = std::get_if<WorldDrawList::Triangle>(&stream[index]);
 			if (!triangle || triangle->texture != WorldDrawList::Texture::SectorAtlas) continue;
 			foundSurface = true;
+			lastSurfaceCommand = index + 1;
 			for (auto const& uv : triangle->texcoords)
-				require(uv.x < 0.2f && uv.y < 0.2f,
-					"the Staircase Sector used decorative stair artwork instead of the plain shaft surface");
+				require(uv.x > 0.4f && uv.y > 0.4f,
+					"the Staircase Sector filled with the Stairwell's tile instead of "
+					"its own");
 		}
+		require(foundSurface, "the Staircase Sector emitted no textured surface");
+		// The procedural steps still draw, and draw over the surface they sit
+		// on: the dark and light treads the Staircase pass emits both come
+		// after every surface quad (#1017).
+		bool darkTreadsAboveSurface = false, lightTreadsAboveSurface = false;
+		for (size_t index = lastSurfaceCommand; index < stream.size(); ++index)
+		{
+			auto const* line = std::get_if<WorldDrawList::Line>(&stream[index]);
+			if (!line) continue;
+			darkTreadsAboveSurface |= line->colour == packColour(32, 32, 32, 255);
+			lightTreadsAboveSurface |= line->colour == packColour(220, 220, 220, 255);
+		}
+		require(darkTreadsAboveSurface && lightTreadsAboveSurface,
+			"the Staircase's procedural steps no longer draw over its own surface");
 		clearSectorTileset();
-		require(foundSurface, "the Staircase Sector emitted no textured shaft surface");
 	}
 
 	void aLiftCarUsesItsObjectImage()
@@ -1825,7 +1849,7 @@ void render_smoke::registerDrawOrder(std::vector<smoke::Check>& checks)
 	checks.push_back({ "aLiftLandingDoorwayIsItsOwnThreshold", isolated<[](smoke::Context const&) { aLiftLandingDoorwayIsItsOwnThreshold(); }> });
 	checks.push_back({ "aShuttleOpensThroughItsOwnCarriageDoors", isolated<[](smoke::Context const&) { aShuttleOpensThroughItsOwnCarriageDoors(); }> });
 	checks.push_back({ "aStaircaseIsPaintedAcrossTheLocationsInView", isolated<[](smoke::Context const&) { aStaircaseIsPaintedAcrossTheLocationsInView(); }> });
-	checks.push_back({ "aStaircaseUsesThePlainShaftSurface", isolated<[](smoke::Context const&) { aStaircaseUsesThePlainShaftSurface(); }> });
+	checks.push_back({ "aStaircaseUsesItsOwnSurfaceUnderItsSteps", isolated<[](smoke::Context const&) { aStaircaseUsesItsOwnSurfaceUnderItsSteps(); }> });
 	checks.push_back({ "aLiftCarUsesItsObjectImage", isolated<[](smoke::Context const&) { aLiftCarUsesItsObjectImage(); }> });
 	checks.push_back({ "theOverlayNeverLeaksSolidGeometryOrAgents", isolated<[](smoke::Context const&) { theOverlayNeverLeaksSolidGeometryOrAgents(); }> });
 	checks.push_back({ "theSelectedLayerPaintsItselfWhole", isolated<[](smoke::Context const&) { theSelectedLayerPaintsItselfWhole(); }> });

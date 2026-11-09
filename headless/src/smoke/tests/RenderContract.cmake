@@ -70,6 +70,18 @@ set(names
     furnitureAtlasNew/loaderRefusesAnAbsoluteNameThatDisagreesWithItsPlacement
     furnitureAtlasNew/loaderAcceptsConformingFootprints
     furnitureAtlasNew/loaderLeavesLegacyNamesAlone
+    sectorAtlasNew/tenFullCellTilesAreRegistered
+    sectorAtlasNew/everyEdgeFallsBackToThePrimitiveLine
+    sectorAtlasNew/everySurfaceBearingSectorTypeResolvesToItsOwnTile
+    sectorAtlasNew/shuttleAndStaircaseNoLongerBorrow
+    sectorAtlasNew/carriageAndStepsStillDrawOnTop
+    sectorAtlasNew/flatColourSectorsTakeNoTile
+    sectorAtlasNew/loaderRefusesASetMissingASurface
+    sectorAtlasNew/loaderRefusesABoundaryStripInTheNewSet
+    sectorAtlasNew/loaderRefusesASurfaceThatIsNotOneFullCell
+    sectorAtlasNew/loaderRefusesASurfaceOffsetFromItsCell
+    sectorAtlasNew/loaderAcceptsAConformingSet
+    sectorAtlasNew/anOlderAtlasStillBorrowsForATypeItHasNoTileFor
     walkwayArtwork/manifestPairIsGeneratedFromTheTileset
     walkwayArtwork/everyAtlasIsCoveredByItsAuthoredTileset
     walkwayArtwork/installSeparatesPixelsFromSemantics
@@ -87,7 +99,7 @@ set(names
     aLiftLandingDoorwayIsItsOwnThreshold
     aShuttleOpensThroughItsOwnCarriageDoors
     aStaircaseIsPaintedAcrossTheLocationsInView
-    aStaircaseUsesThePlainShaftSurface
+    aStaircaseUsesItsOwnSurfaceUnderItsSteps
     aLiftCarUsesItsObjectImage
     theOverlayNeverLeaksSolidGeometryOrAgents
     theSelectedLayerPaintsItselfWhole

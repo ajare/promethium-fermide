@@ -61,6 +61,7 @@ add_library(pf-render STATIC
     src/SectorTileset.cpp
     src/ObjectTileset.cpp
     src/TileArtwork.cpp
+    src/AuthoredTileGrid.cpp
     src/WorldViewportZoom.cpp
 )
 file(GLOB PF_RENDER_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h")

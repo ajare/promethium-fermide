@@ -1,0 +1,128 @@
+# Authored tileset for the SectorAtlasNew set (#1017).
+#
+# A version 2 tileset declares, per tile, the three render semantics a
+# version 1 file left the renderer to guess: the render offset it draws at,
+# the drawn size it draws at, and whether it is tintable. Offsets and sizes
+# are World units, not pixels - one World unit of authored art is one
+# authored tile.
+#
+# The `ImageSet` entries the application manifest declares for this atlas
+# are generated from this file by `scripts/generate_sector_atlas_new.py`
+# and are checked against it by the render smoke module, so the two cannot
+# drift. Pixel regions are cut from `image` in top-left-origin pixels; the
+# semantics below are World units and never pixels.
+#
+# The authored grid is 128 x 320: one World cell at the size the World is
+# now drawn. Every Infrastructure tile fills its cell, so a Sector one cell
+# wide covers exactly one cell and a Sector four cells wide covers four.
+#
+# ## What this set is
+#
+# Infrastructure: the static World fabric, as one full-cell artwork per
+# Sector surface. Ten tiles, one for each of the ten surface-bearing Sector
+# types - Room, Corridor, Ladder, Lift, Shuttle, Stairwell, Staircase,
+# Airlock, Chamber and Dumbwaiter. Each repeats once per World cell across
+# the Sector's area, cropping partial cells rather than stretching a whole
+# tile to a Corridor's height.
+#
+# Two of these surfaces become live that were declared in the old manifest
+# but never drawn. The Shuttle and the Staircase used to borrow the Lift and
+# Stairwell tiles because their distinguishing art is procedural - the
+# Shuttle's carriage and the Staircase's steps - and a fixed tile was said
+# to fight it underneath. It does not: the procedural geometry renders on
+# top of the Sector surface either way, and now it renders on the type's own
+# art instead of over a borrowed shaft.
+#
+# Background and Facade get no tile here. They are authored flat colour by
+# domain definition (CONTEXT.md, ADR 0003) and the renderer fills them with
+# their own colour without ever asking this set for a surface.
+#
+# ## No boundary strips
+#
+# The old set's four boundary regions - the ceiling, floor and side wall
+# strips - are dropped. A version 2 sector tileset has no `boundaries` map
+# at all, and the loader refuses one that declares it. Every Sector edge
+# therefore takes the renderer's primitive line fallback. That is an
+# artwork removal only: the wall-span calculation, the partial-height
+# opening handling and the floor-and-ceiling-at-bounds-only rule are
+# unchanged, and the checks that prove them still pass.
+#
+# ## Why every tile is one full cell at the anchor
+#
+# A Sector surface repeats on a fixed per-cell grid: one tile per World cell,
+# magnified to the World cell's screen size. A tile drawn at another size,
+# or offset off its cell's anchor, would repeat on a geometry the per-cell
+# rule cannot express, so the loader refuses both. Art that does not fill its
+# cell is legal - it gets transparent padding - but it is drawn at the full
+# cell.
+#
+# `tintable` is authored true: a Sector surface takes the Layer's colour and
+# the lights-off tint through its fill today, and the flag says so rather
+# than leaving the next reader to guess it from the draw call.
+version: 2
+image: sectors-new.png
+size: [640, 640]
+tile_size: [128, 320]
+sprites:
+  # Row 0: the two Locations, then the three vertical transits.
+  room:
+    cell: [0, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+  corridor:
+    cell: [1, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+  ladder:
+    cell: [2, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+  lift:
+    cell: [3, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+  shuttle:
+    cell: [4, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+  # Row 1: the two stair types, then the three enclosed transits.
+  stairwell:
+    cell: [0, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+  staircase:
+    cell: [1, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+  airlock:
+    cell: [2, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+  chamber:
+    cell: [3, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+  dumbwaiter:
+    cell: [4, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true

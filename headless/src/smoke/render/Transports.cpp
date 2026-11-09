@@ -100,7 +100,11 @@ namespace
 			"A Shuttle carriage Door rendered as a solid front-side leaf");
 	}
 
-	void shuttleUsesAPlainShaftAndComposableCarriageImages()
+	// The Shuttle's rail corridor wears its own surface tile rather than the
+	// Lift's (#1017). The carriage stays procedural: it is composed from its
+	// own left, middle and right images and draws on top of the Sector
+	// surface, which is the reason the old code borrowed the plain shaft.
+	void shuttleUsesItsOwnSurfaceAndComposableCarriageImages()
 	{
 		core::World world("Textured Shuttle rendering", 16, 2);
 		auto const shuttleSector = buildShuttleSector(world);
@@ -126,20 +130,26 @@ namespace
 		renderSector(shuttleSector, 1, LayerRenderStyle::Solid, false,
 			kTransitColour, &commands);
 
-		bool plainShaft = false;
+		bool ownSurface = false;
+		size_t lastSurfaceCommand{};
+		size_t firstCarriageCommand = static_cast<size_t>(-1);
 		bool left = false, middle = false, right = false;
-		for (auto const& command : commands.commands())
+		auto const& stream = commands.commands();
+		for (size_t index = 0; index < stream.size(); ++index)
 		{
-			auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command);
+			auto const* triangle = std::get_if<WorldDrawList::Triangle>(&stream[index]);
 			if (!triangle) continue;
 			if (triangle->texture == WorldDrawList::Texture::SectorAtlas)
 			{
-				plainShaft = true;
+				ownSurface = true;
+				lastSurfaceCommand = index + 1;
 				for (auto const& uv : triangle->texcoords)
-					require(uv.x < 0.2f && uv.y < 0.2f,
-						"the Shuttle Sector used decorated architecture instead of the plain shaft surface");
+					require(uv.x > 0.4f && uv.y > 0.4f,
+						"the Shuttle Sector filled with the Lift's tile instead of its "
+						"own surface");
 			}
 			if (triangle->texture != WorldDrawList::Texture::ObjectAtlas) continue;
+			if (firstCarriageCommand == static_cast<size_t>(-1)) firstCarriageCommand = index;
 			auto const u = triangle->texcoords[0].x;
 			left |= u < 0.2f;
 			middle |= u >= 0.2f && u < 0.4f;
@@ -148,7 +158,10 @@ namespace
 
 		clearObjectTileset();
 		clearSectorTileset();
-		require(plainShaft, "the Shuttle Sector emitted no textured shaft surface");
+		require(ownSurface, "the Shuttle Sector emitted no textured surface");
+		require(firstCarriageCommand != static_cast<size_t>(-1)
+			&& firstCarriageCommand >= lastSurfaceCommand,
+			"the Shuttle carriage no longer draws over the Sector surface");
 		require(left && middle && right,
 			"the Shuttle carriage was not composed from left, middle, and right images");
 	}
@@ -163,5 +176,5 @@ void carriageDoors(smoke::Context const&)
 void carriageImages(smoke::Context const&)
 {
 	RenderState state;
-	shuttleUsesAPlainShaftAndComposableCarriageImages();
+	shuttleUsesItsOwnSurfaceAndComposableCarriageImages();
 }

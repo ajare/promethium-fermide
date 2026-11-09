@@ -1862,6 +1862,15 @@ void renderSectorDepthContent(shared_ptr<const core::Sector> sector, WorldDrawLi
 	}
 }
 
+// The surface a Sector type fills with: its own full-cell tile when the
+// installed atlas carries one, otherwise the shared surface the type
+// borrowed before its own artwork existed. The fallback is what keeps an
+// older atlas - one with no Airlock tile of its own - drawing Corridor art
+// rather than the missing-tile magenta (#1017).
+std::string sectorSurfaceOrBorrowed(char const* own, char const* borrowed)
+{
+	return hasSectorTileSurface(own) ? std::string{ own } : std::string{ borrowed };
+}
 
 void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRenderStyle style, bool renderEdges, PackedColourValue colour, WorldDrawList* drawList)
 {
@@ -1920,19 +1929,20 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		switch (sectorType)
 		{
 		case core::SectorType::Location: kind = static_pointer_cast<const core::Location>(sector)->isCorridor() ? "corridor" : "room"; break;
-		case core::SectorType::Airlock:
-		case core::SectorType::Chamber: kind = "corridor"; break;
+		case core::SectorType::Airlock: kind = sectorSurfaceOrBorrowed("airlock", "corridor"); break;
+		case core::SectorType::Chamber: kind = sectorSurfaceOrBorrowed("chamber", "corridor"); break;
 		case core::SectorType::Ladder: kind = "ladder"; break;
-		case core::SectorType::Lift:
-		case core::SectorType::Dumbwaiter: kind = "lift"; break;
-		// The rail corridor is static architecture; carriage images are rendered
-		// separately at the Shuttle's current position.
-		case core::SectorType::Shuttle: kind = "lift"; break;
+		case core::SectorType::Lift: kind = "lift"; break;
+		case core::SectorType::Dumbwaiter: kind = sectorSurfaceOrBorrowed("dumbwaiter", "lift"); break;
+		// The Shuttle's rail corridor is static architecture and now wears its
+		// own tile; carriage images are rendered separately at the Shuttle's
+		// current position, on top of it (#1017).
+		case core::SectorType::Shuttle: kind = sectorSurfaceOrBorrowed("shuttle", "lift"); break;
 		case core::SectorType::Stairwell: kind = "stairwell"; break;
-		// Staircase steps are rendered separately from their Sector surface. Use
-		// the same plain shaft tile as a Stairwell rather than painting a second,
-		// fixed staircase image underneath the procedural geometry.
-		case core::SectorType::Staircase: kind = "stairwell"; break;
+		// Staircase steps are procedural and render on top of their Sector
+		// surface, which is now the Staircase's own art rather than a borrowed
+		// Stairwell shaft tile (#1017).
+		case core::SectorType::Staircase: kind = sectorSurfaceOrBorrowed("staircase", "stairwell"); break;
 		default: break;
 		}
 		if (!drawSectorTileSurface(kind, drawList, {bounds0.x, bounds1.y},
