@@ -6,8 +6,15 @@
 expand to fill their cell.
 
 `objects.tileset.yaml` records each sprite's cell, local content rectangle and
-whether its RGB can be tinted. Content UVs map to the renderer's existing physical
-bounds; alpha padding never changes collision, selection or visual sizes.
+whether its RGB can be tinted. The manifest's `tile_size` is the authored grid:
+how the artist laid the image out. The loader requires only that whole authored
+cells cover the image with no remainder; it never compares that grid with the
+World cell, because a World unit's screen size is a different fact and the
+renderer stretches a resolved region into whatever destination it is drawn into
+(#1006). A content rectangle that escapes the image, or that does not start
+inside its own authored cell, is refused. Content rectangles exclude alpha
+padding and may run from their own cell into a neighbour, as the wide Lying tile
+does. Alpha padding never changes collision, selection or visual sizes.
 The Agent and Marker sprites have grayscale RGB. Agents use the existing resolved
 Agent colour, including tag overrides and selection, as the vertex tint carried on
 the recorded command. Existing height scaling, horizontal centring and foot
@@ -54,3 +61,8 @@ a draft; the packer makes its sizing and alpha layout deterministic.
 
 The `sector-tileset` CTest also checks object quads, inverted screen-Y bounds,
 Agent tint, door UV cropping, fully-open leaf suppression and cleanup.
+The `render` smoke module's `objectAtlas/*` checks prove the loader contract
+itself: an invented atlas on a 32x40 authored grid loads, resolves its regions
+in that grid's units and draws them, while a content rectangle escaping its
+cell or a grid leaving a remainder in the image is refused on the stated
+requirement.

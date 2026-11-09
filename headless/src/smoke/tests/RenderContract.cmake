@@ -49,6 +49,8 @@ set(names
     securityScanners/beamSweeps
     dumbwaiters/initialPresentationAndClipping
     boothWindows/staticPresentationAndNestedClipping
+    objectAtlas/authoredGridNeedNotMatchTheCell
+    objectAtlas/escapingContentAndRemaindersAreRefused
     accessPanels/closedPresentationAndIndicators
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations
     aTransitBehindTheSelectionIsPaintedSolidThroughItsLocations

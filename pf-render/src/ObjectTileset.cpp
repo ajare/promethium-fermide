@@ -1,5 +1,4 @@
 #include "ObjectTileset.h"
-#include "core/Defines.h"
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <stdexcept>
@@ -22,9 +21,16 @@ ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
     result.height = root["size"][1].as<int>();
     int const tw = root["tile_size"][0].as<int>();
     int const th = root["tile_size"][1].as<int>();
-    if (tw != CORE_CELL_WIDTH_PIXELS || th != CORE_LEVEL_HEIGHT_PIXELS ||
-        result.width <= 0 || result.height <= 0 || result.width % tw || result.height % th)
-        throw std::runtime_error("Object atlas must contain whole 64x160 world-unit tiles");
+    // The authored tile grid is how the artist laid the image out; the World
+    // cell is how large a World unit is on screen. They are not the same fact,
+    // and the renderer stretches a resolved region into whatever destination it
+    // is drawn into, so the grid is never compared with the cell. All that is
+    // required is that whole authored cells cover the image with no remainder,
+    // because a cell coordinate that leaves a remainder resolves to nothing
+    // (#1006).
+    if (tw <= 0 || th <= 0 || result.width <= 0 || result.height <= 0 ||
+        result.width % tw || result.height % th)
+        throw std::runtime_error("Object atlas must contain whole authored tiles");
     if (!root["sprites"].IsMap()) throw std::runtime_error("Missing object sprite definitions");
     for (auto const& item : root["sprites"]) {
         auto const v = item.second;

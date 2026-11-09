@@ -34,6 +34,7 @@ namespace render_smoke
 	}
 
 	void registerAccessPanels(std::vector<smoke::Check>& checks);
+	void registerObjectAtlas(std::vector<smoke::Check>& checks);
 	void registerBoothWindows(std::vector<smoke::Check>& checks);
 	void registerAgentPoses(std::vector<smoke::Check>& checks);
 	void registerFontMetrics(std::vector<smoke::Check>& checks);

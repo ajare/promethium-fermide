@@ -7,6 +7,9 @@ struct ObjectTileset
     std::filesystem::path image;
     int width{}, height{};
     std::map<std::string, ObjectSprite> sprites;
+    // Resolves every sprite's cell and content rectangle into image pixels using
+    // the manifest's own authored tile grid. That grid need not be the World
+    // cell - it only has to divide the image evenly (#1006).
     static ObjectTileset load(std::filesystem::path const& path);
 };
 void setObjectTileset(ObjectTileset tileset, TextureId texture);

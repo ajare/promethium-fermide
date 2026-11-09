@@ -593,7 +593,7 @@ set_tests_properties(smoke-persistence-contract PROPERTIES LABELS "harness;core"
 pf_add_smoke_module(pf-smoke-render
     NAME render
     SOURCES
-        render/ScaledDoors.cpp render/Main.cpp render/AccessPanels.cpp render/Airlocks.cpp render/Furniture.cpp render/State.cpp render/Walls.cpp render/AgentPaths.cpp render/Transports.cpp render/SecurityScanners.cpp render/BoothWindows.cpp
+        render/ScaledDoors.cpp render/Main.cpp render/AccessPanels.cpp render/Airlocks.cpp render/Furniture.cpp render/State.cpp render/Walls.cpp render/AgentPaths.cpp render/Transports.cpp render/SecurityScanners.cpp render/BoothWindows.cpp render/ObjectAtlas.cpp
         render/SerializationRendering.cpp
         render/AgentPoses.cpp
         render/FontMetrics.cpp
