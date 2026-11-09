@@ -25,6 +25,7 @@ int main(int argc, char** argv)
 	render_smoke::registerAgentAtlasNew(checks);
 	render_smoke::registerWalkwayArtwork(checks);
 	render_smoke::registerBulkheadAndPanelArtwork(checks);
+	render_smoke::registerObjectArtworkNew(checks);
 	render_smoke::registerAccessPanels(checks);
 	render_smoke::registerDrawOrder(checks);
 	render_smoke::registerDoorOpenApart(checks);

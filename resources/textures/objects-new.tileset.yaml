@@ -14,8 +14,15 @@
 #
 # The authored grid is 128 x 320: one World cell at the size the World is
 # now drawn. The Walkway was the tracer-bullet entry; the Bulkhead Door and
-# the Access panel are live here too (#1019), and the rest of the
-# ObjectAtlasNew sheet drops in against the same image size.
+# the Access panel are live here too (#1019), and #1020 lands the Door, the
+# three Window styles, the Booth Window's frame, shutter and closed panel,
+# the two Button states and the Marker on the same sheet.
+#
+# Every content rectangle below is the tile's declared drawn size measured
+# at the authored grid's pixel size, rounded to whole pixels: a tile drawn
+# 0.8 x 0.5 World units is 102 x 160 px on this 128 x 320 grid. That keeps
+# the art and its declared extent in the same proportion, so nothing is
+# stretched on its way to the screen.
 version: 2
 image: objects-new.png
 size: [768, 960]
@@ -67,6 +74,130 @@ sprites:
     content: [0, 0, 64, 80]
     offset: [0.0, 0.0]
     drawn_size: [0.5, 0.25]
+    tintable: true
+
+  # One Door tile serves all four opening styles. The style decides which
+  # way the leaf crops, not which artwork is used: an OpenLeft leaf crops
+  # from the art's left edge, an OpenRight leaf from its right, an OpenUp
+  # leaf from its bottom and an OpenApart pair from the middle out. A
+  # sliding leaf therefore crops rather than squashing into the strip of
+  # aperture it still covers.
+  #
+  # The declared drawn size is the regular one-cell Door's own extent:
+  # `cellsWide - 2 * CORE_DOOR_X_INSET` across a regular Door's
+  # `CORE_DOOR_HEIGHT`, which is 0.8 x 0.5 World units and 102 x 160 px
+  # on this grid. A wider or height-scaled Door draws the same art into its
+  # own shape, exactly as the Access panel draws at its authored geometry;
+  # the declared size is the reference the art is authored against, not a
+  # cap on what the object may be.
+  door:
+    cell: [3, 0]
+    content: [0, 0, 102, 160]
+    offset: [0.0, 0.0]
+    drawn_size: [0.8, 0.5]
+    tintable: false
+
+  # A Button's two states are two tiles, not one tile and two tints, so
+  # the state is legible from the artwork alone at the 12.8 x 12.8 px the
+  # control actually occupies. Both are untintable: the renderer's enabled
+  # green, disabled grey and Broken red are a wireframe and fallback fact,
+  # and letting them multiply into the art would wash out the difference
+  # between the two tiles the state is carried by.
+  #
+  # The drawn size is the Button's own shape - CORE_BUTTON_SIZE wide and
+  # that divided by the cell's y:x render ratio tall.
+  button-enabled:
+    cell: [4, 0]
+    content: [0, 0, 13, 13]
+    offset: [0.0, 0.0]
+    drawn_size: [0.1, 0.04]
+    tintable: false
+
+  button-disabled:
+    cell: [5, 0]
+    content: [0, 0, 13, 13]
+    offset: [0.0, 0.0]
+    drawn_size: [0.1, 0.04]
+    tintable: false
+
+  # The three Window styles are three tiles at the same size: a one-cell,
+  # one-Level Window is `1 - 2 * CORE_WINDOW_X_INSET` wide by
+  # `CORE_WINDOW_HEIGHT` tall, which is 0.8 x 0.3 World units and
+  # 102 x 96 px here. The style is the artwork - clear glass, frosted
+  # glass, tinted glass - and never a different geometry, so a Window's
+  # aperture, its Background seam and its clip stay identical across all
+  # three.
+  window-clear:
+    cell: [0, 1]
+    content: [0, 0, 102, 96]
+    offset: [0.0, 0.0]
+    drawn_size: [0.8, 0.3]
+    tintable: false
+
+  window-frosted:
+    cell: [1, 1]
+    content: [0, 0, 102, 96]
+    offset: [0.0, 0.0]
+    drawn_size: [0.8, 0.3]
+    tintable: false
+
+  window-tinted:
+    cell: [2, 1]
+    content: [0, 0, 102, 96]
+    offset: [0.0, 0.0]
+    drawn_size: [0.8, 0.3]
+    tintable: false
+
+  # A Booth Window is three tiles that compose rather than three states of
+  # one tile. `booth-window-open` is the frame: opaque at its edges,
+  # transparent through its centre, and it never moves. The shutter is
+  # the opaque panel that slides behind that frame, and the frame's
+  # transparent centre is what makes the slide visible. `booth-window-
+  # closed` is the whole aperture filled, for the artwork path that wants
+  # one tile for the closed state.
+  booth-window-open:
+    cell: [3, 1]
+    content: [0, 0, 102, 96]
+    offset: [0.0, 0.0]
+    drawn_size: [0.8, 0.3]
+    tintable: false
+
+  # The shutter fills the frame's transparent centre, so its drawn size is
+  # that centre, not the frame: 42/52 of the frame's 0.8 across and 38/48
+  # of its 0.3 down, which is 0.6461538 x 0.2375 World units and
+  # 83 x 76 px on this grid. The renderer clips it to that same inner
+  # rect, so the shutter can never paint over the frame it slides behind.
+  booth-window-shutter:
+    cell: [4, 1]
+    content: [0, 0, 83, 76]
+    offset: [0.0, 0.0]
+    drawn_size: [0.6461538, 0.2375]
+    tintable: false
+
+  booth-window-closed:
+    cell: [5, 1]
+    content: [0, 0, 102, 96]
+    offset: [0.0, 0.0]
+    drawn_size: [0.8, 0.3]
+    tintable: false
+
+  # The Marker is the one tile in this set that takes a tint. Its icon is
+  # grayscale so the gold the renderer carries multiplies into it, and
+  # that gold is `core::SelectedAgentColour` - the same colour the Agent
+  # selection highlight resolves to - which is what lets a destination
+  # read as part of the Agent colour vocabulary rather than as a fixed
+  # decal. Make this tile untintable and the icon goes white, which is how
+  # a tintability regression shows up here.
+  #
+  # The icon's on-screen size is a screen-space fact (`MarkerIconSize`, a
+  # fixed pixel longest edge that does not follow the World cell), so the
+  # declared drawn size is the authored art's own reference extent:
+  # 32 x 44 px at this grid, 0.25 x 0.1375 World units.
+  marker:
+    cell: [0, 2]
+    content: [0, 0, 32, 44]
+    offset: [0.0, 0.0]
+    drawn_size: [0.25, 0.1375]
     tintable: true
 
   # No `force-bridge` tile, deliberately. A Force Bridge's span is

@@ -60,10 +60,11 @@ that far below the floor line of the cell it was authored in.
 
 `resources/textures/objects-new.tileset.yaml` is the version 2 authored tileset
 behind the replacement Objects atlas, laid out on the 128x320 World cell at
-768x960. The Walkway, the Bulkhead Door and the Access panel are live in it,
-and the rest of the sheet drops in against the same image size. The old
-`ObjectAtlas` and `ObjectAtlasImage` stay registered and canonical until
-nothing references them.
+768x960. The Walkway, the Bulkhead Door, the Access panel, the Door, the three
+Window styles, the Booth Window's frame, shutter and closed panel, the two Button
+states and the Marker are live in it, and the rest of the sheet drops in against
+the same image size. The old `ObjectAtlas` and `ObjectAtlasImage` stay registered
+and canonical until nothing references them.
 
 The `ImageSet` entries the application manifest declares for `ObjectAtlasNew` are
 generated from the tileset, not authored beside it:
@@ -76,6 +77,69 @@ python3 scripts/generate_object_atlas_new.py --check   # verify, as CI does
 The render smoke module checks the committed manifest against the tileset on every
 run, so a drift fails the build rather than showing up as artwork in the wrong
 place.
+
+Every content rectangle in the set is the tile's declared drawn size measured at
+the authored grid's pixel size, rounded to whole pixels: a tile drawn 0.8 x 0.5
+World units is 102 x 160 px on this 128 x 320 grid. Art and declared extent stay
+in the same proportion, so nothing is stretched on its way to the screen.
+
+### One Door tile serves all four opening styles
+
+A Door has one tile. The opening style decides which way the leaf crops, not which
+artwork is used, so a sliding leaf crops rather than squashing into the strip of
+aperture it still covers:
+
+| Style | What the leaf keeps |
+|---|---|
+| `OpenUp` | the top of the aperture and the bottom of the art |
+| `OpenLeft` | the left of the aperture and the right of the art |
+| `OpenRight` | the right of the aperture and the left of the art |
+| `OpenApart` | two half leaves, one wearing each half of the tile, splitting at the centre |
+
+The crop is driven by the Door's own open fraction, read from the live device
+state on every frame rather than from a frame counter, which is what makes a Door
+half open show exactly half open however long it took to get there. Fully open,
+nothing of the leaf is left and no geometry is emitted - on `OpenApart` that means
+both leaves, not one.
+
+The declared drawn size is the regular one-cell Door's own extent: `cellsWide -
+2 * CORE_DOOR_X_INSET` across a regular Door's `CORE_DOOR_HEIGHT`, which is 0.8 x
+0.5 World units. As with the Access panel, the object's own geometry is what the
+artwork is drawn into; the declared size is the reference the art is authored
+against, not a cap on what the object may be.
+
+### The Booth Window is a fixed frame with a shutter behind it
+
+A Booth Window composes three tiles rather than switching between three states of
+one. `booth-window-open` is the frame - opaque at its edges, transparent through
+its centre - and it never moves. The shutter is the opaque panel that slides
+behind that frame, and the frame's transparent centre is what makes the slide
+visible. `booth-window-closed` fills the whole aperture for the artwork path that
+wants one tile for the closed state.
+
+The shutter's declared drawn size is the frame's transparent centre rather than
+the frame: 42/52 of the frame's 0.8 across and 38/48 of its 0.3 down, which is
+0.6461538 x 0.2375 World units. The renderer clips it to that same inner rect,
+so the shutter can never paint over the frame it retracts behind, and any
+enclosing aperture clip intersects with it as it travels.
+
+### Buttons carry their state in the art, Markers carry theirs in the tint
+
+A Button's two states are two tiles rather than one tile and two tints, so the
+state is legible from the artwork alone at the 12.8 x 12.8 px the control
+actually occupies. Both are authored untintable: the renderer's enabled green,
+disabled grey and Broken red are wireframe and fallback facts, and letting them
+multiply into the art would wash out the difference between the two tiles the
+state is carried by.
+
+The Marker is the one tile in the set that takes a tint. Its icon is grayscale so
+the gold the renderer carries multiplies into it, and that gold is
+`core::SelectedAgentColour` - the same colour the Agent selection highlight
+resolves to - which lets a destination read as part of the Agent colour
+vocabulary rather than as a fixed decal. The icon's on-screen size is a
+screen-space fact (`MarkerIconSize`, a fixed pixel longest edge that does not
+follow the World cell), so the Marker's declared drawn size is the authored art's
+own reference extent rather than the destination it is drawn into.
 
 ### The Bulkhead Door draws its own slab, not a cell
 
@@ -270,8 +334,9 @@ Supported sprites:
 - Platform lift car: the sprite follows the moving slab's actual bounds, not the
   shaft bounds. The editor shaft outline is retained.
 
-Bulkhead Doors and Access panels render from `ObjectAtlasNew` when that set is
-installed, and keep their flat fills against a set that has no tile for them. Force
+Bulkhead Doors, Access panels, ordinary Doors, Windows, Booth Windows, Buttons and
+Markers render from `ObjectAtlasNew` when that set is installed, and keep their
+flat fills against a set that has no tile for them. Force
 Bridges remain entirely primitive-rendered - see below. Other
 transport geometry and editor overlays are unchanged. Headless tests without a
 texture retain the primitive/font fallback.

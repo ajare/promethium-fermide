@@ -14,9 +14,12 @@
 #include "core/World.h"
 #include "core/Facade.h"
 #include "core/Defines.h"
+#include "core/Button.h"
 #include "core/Door.h"
 #include "core/DoorSectorObject.h"
 #include "core/Graph.h"
+#include "core/Marker.h"
+#include "core/Window.h"
 #include "core/LadderTransit.h"
 #include "core/LiftTransit.h"
 #include "core/Location.h"
@@ -958,6 +961,20 @@ void renderSectors(std::shared_ptr<const core::World> world, uint32_t layer,
 // the real renderSector() draw-call order rather than a model of it.
 //
 void renderDoor(std::shared_ptr<const core::Door> door, uint32_t layer,
+	LayerRenderStyle style, bool selected, WorldDrawList* drawList);
+
+// The Window, control and Marker passes, declared for the same reason
+// renderDoor is: the headless checks (#1020) drive the real functions and
+// state their own selection flag, rather than reaching for the editor's
+// selection globals or reconstructing a whole Sector to get at one object.
+//
+void renderWindow(std::shared_ptr<const core::Window> window, uint32_t layer,
+	LayerRenderStyle style, bool selected, WorldDrawList* drawList);
+
+void renderPhysicalControl(std::shared_ptr<const core::Button> button,
+	uint32_t layer, LayerRenderStyle style, bool selected, WorldDrawList* drawList);
+
+void renderMarker(std::shared_ptr<const core::Marker> marker, uint32_t layer,
 	LayerRenderStyle style, bool selected, WorldDrawList* drawList);
 
 void renderSector(std::shared_ptr<const core::Sector> sector, uint32_t layer,

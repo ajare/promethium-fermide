@@ -103,6 +103,12 @@ set(names
     bulkheadAndPanel/forceBridgeStillRendersAsAPrimitiveLine
     bulkheadAndPanel/loaderRefusesAForceBridgeTile
     bulkheadAndPanel/aSetWithNeitherTileKeepsThePrimitives
+    objectArtworkNew/tenTilesAreRegistered
+    objectArtworkNew/doorCropFollowsTheOpenFractionOnEveryStyle
+    objectArtworkNew/aFullyOpenDoorEmitsNoLeafGeometry
+    objectArtworkNew/boothWindowShutterTranslatesBehindTheStationaryFrame
+    objectArtworkNew/buttonStateIsLegibleAtTheDrawnSize
+    objectArtworkNew/markerStaysTintableAndFollowsSelection
     accessPanels/closedPresentationAndIndicators
     accessPanels/canvasCoversTheWholeFixtureWorld
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations

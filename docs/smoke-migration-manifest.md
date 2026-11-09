@@ -268,6 +268,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/render/SectorAtlasNew.cpp` | SectorAtlasNew full-cell surface registration, per-type surface resolution, boundary-strip removal and tileset loader refusals | `pf-smoke-render` |
 | `smoke/render/AgentAtlasNew.cpp` | AgentAtlasNew appearance-keyed tile registration, shared and generic fallback rows, authored-flag tint and over-wide Pose cell resolution | `pf-smoke-render` |
 | `smoke/render/BulkheadAndPanelArtwork.cpp` | Bulkhead Door straddling slab and state-synced open progress, Access panel authored-geometry draw and leaf retraction, Force Bridge primitive-line and loader refusal | `pf-smoke-render` |
+| `smoke/render/ObjectArtworkNew.cpp` | ObjectAtlasNew Door, Window, Booth Window, Button and Marker registration, open-fraction leaf crop with no squash on all four styles, fully-open leaf suppression, Booth Window shutter translation behind a stationary clipped frame, Button state and Marker tint | `pf-smoke-render` |
 | `smoke/render/AccessPanels.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/render/Airlocks.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/editor/BoothWindows.cpp` | module-owned | `pf-smoke-editor` |
