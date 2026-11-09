@@ -33,17 +33,17 @@ namespace
 						if (triangle->colour == packColour(180, 190, 205, 255))
 						{
 							++car;
-							if (layer == 0) require(triangle->clip.minimum.x > 2.1f * 64
-								&& triangle->clip.maximum.x < 2.9f * 64
+							if (layer == 0) require(triangle->clip.minimum.x > 2.1f * CORE_CELL_WIDTH_PIXELS
+								&& triangle->clip.maximum.x < 2.9f * CORE_CELL_WIDTH_PIXELS
 								&& triangle->clip.maximum.y - triangle->clip.minimum.y < 48,
 								"Car escaped owned aperture clipping");
-							else require(triangle->clip.maximum.x - triangle->clip.minimum.x > 64,
+							else require(triangle->clip.maximum.x - triangle->clip.minimum.x > CORE_CELL_WIDTH_PIXELS,
 								"Selected shaft car incorrectly aperture-clipped");
 						}
 						if (triangle->colour == packColour(80, 200, 120, 255) || triangle->colour == packColour(200, 160, 80, 255))
 						{
-							for (auto p : triangle->positions) require(p.x >= (2.0f - CORE_BUTTON_SIZE * 0.5f) * 64 - 0.01f
-								&& p.x <= (2.0f + CORE_BUTTON_SIZE * 0.5f) * 64 + 0.01f,
+							for (auto p : triangle->positions) require(p.x >= (2.0f - CORE_BUTTON_SIZE * 0.5f) * CORE_CELL_WIDTH_PIXELS - 0.01f
+								&& p.x <= (2.0f + CORE_BUTTON_SIZE * 0.5f) * CORE_CELL_WIDTH_PIXELS + 0.01f,
 								"Landing button did not use the allocated left fallback");
 							if (triangle->colour == packColour(80, 200, 120, 255)) ++here; else ++elsewhere;
 						}
@@ -84,6 +84,11 @@ namespace
 								if (layer == 0)
 								{
 									auto shutter = ticks <= 48 ? unit->getAperture(initial) : unit->getAperture(1 - initial);
+									// Artwork pixels, not World units: 48 is the height of the
+									// authored 52 x 48 frame tile and 38 that of the 42 x 38
+									// shutter tile, both inside the object atlas. Re-cutting the
+									// artwork moves these literals without moving any World
+									// geometry.
 									auto fullHeight = 48.0f * 38 / 48;
 									require(triangle->clip.maximum.x - triangle->clip.minimum.x < 52
 										&& triangle->clip.maximum.y - triangle->clip.minimum.y <= fullHeight * shutter->getProgress() + 0.001f,
@@ -137,8 +142,8 @@ namespace
 					{
 						++triangles;
 						for (auto p : triangle->positions)
-							require(p.x >= button->getPosition().x * 64 - 0.001f
-								&& p.x <= (button->getPosition().x + button->getSize().x) * 64 + 0.001f
+							require(p.x >= button->getPosition().x * CORE_CELL_WIDTH_PIXELS - 0.001f
+								&& p.x <= (button->getPosition().x + button->getSize().x) * CORE_CELL_WIDTH_PIXELS + 0.001f
 								&& p.y >= 800 - (button->getPosition().y + button->getSize().y) * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
 								&& p.y <= 800 - button->getPosition().y * CORE_LEVEL_HEIGHT_PIXELS + 0.001f,
 								"Landing rendered at old aperture inset or incorrect stack height");
@@ -175,8 +180,8 @@ namespace
 							++car; require(bool(unit), "Deleted car remains in production draw commands");
 							for (auto p : triangle->positions) require(p.y >= 800 - 1.55f * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
 								&& p.y <= 800 - 1.18f * CORE_LEVEL_HEIGHT_PIXELS + 0.001f, "Reconciled car retained in-flight position");
-							if (layer + 1 == unit->getLayerIndex()) require(triangle->clip.minimum.x > 2.1f * 64
-								&& triangle->clip.maximum.x < 2.9f * 64, "Restored car escaped aperture clip");
+							if (layer + 1 == unit->getLayerIndex()) require(triangle->clip.minimum.x > 2.1f * CORE_CELL_WIDTH_PIXELS
+								&& triangle->clip.maximum.x < 2.9f * CORE_CELL_WIDTH_PIXELS, "Restored car escaped aperture clip");
 						}
 						if (triangle->colour == packColour(80, 200, 120, 255) || triangle->colour == packColour(200, 160, 80, 255)) ++buttons;
 						if (triangle->colour == packColour(220, 80, 80, 255)) ++busy;
@@ -201,7 +206,7 @@ namespace
 			for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
 				triangle && triangle->colour == packColour(180, 190, 205, 255))
 			{
-				++car; require(triangle->clip.minimum.x > 2.1f * 64 && triangle->clip.maximum.x < 2.9f * 64
+				++car; require(triangle->clip.minimum.x > 2.1f * CORE_CELL_WIDTH_PIXELS && triangle->clip.maximum.x < 2.9f * CORE_CELL_WIDTH_PIXELS
 					&& triangle->clip.maximum.y - triangle->clip.minimum.y < 48, "Nested aperture clipping leaked car geometry");
 			}
 			require(car == 2, "Recursive aperture lost initial car");
@@ -224,18 +229,18 @@ namespace
 					{
 						++cars;
 						for (auto p : triangle->positions)
-							require(p.x > x * 64 && p.x < (x + 1) * 64
+							require(p.x > x * CORE_CELL_WIDTH_PIXELS && p.x < (x + 1) * CORE_CELL_WIDTH_PIXELS
 								&& p.y >= 800 - (y + 0.55f) * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
 								&& p.y <= 800 - (y + 0.18f) * CORE_LEVEL_HEIGHT_PIXELS + 0.001f,
 								"Moved/pasted car rendered at old shaft/Level");
-						if (layer % 2 == 0) require(triangle->clip.minimum.x > (x + 0.1f) * 64
-							&& triangle->clip.maximum.x < (x + 0.9f) * 64, "Moved/pasted car lost landing aperture clip");
+						if (layer % 2 == 0) require(triangle->clip.minimum.x > (x + 0.1f) * CORE_CELL_WIDTH_PIXELS
+							&& triangle->clip.maximum.x < (x + 0.9f) * CORE_CELL_WIDTH_PIXELS, "Moved/pasted car lost landing aperture clip");
 					}
 					if (triangle->colour == packColour(80,200,120,255) || triangle->colour == packColour(200,160,80,255))
 					{
 						++buttons;
-						for (auto p : triangle->positions) require(p.x >= (x - CORE_BUTTON_SIZE * 0.5f) * 64 - 0.01f
-							&& p.x <= (x + CORE_BUTTON_SIZE * 0.5f) * 64 + 0.01f, "Old-location landing button remains");
+						for (auto p : triangle->positions) require(p.x >= (x - CORE_BUTTON_SIZE * 0.5f) * CORE_CELL_WIDTH_PIXELS - 0.01f
+							&& p.x <= (x + CORE_BUTTON_SIZE * 0.5f) * CORE_CELL_WIDTH_PIXELS + 0.01f, "Old-location landing button remains");
 					}
 				}
 				require(cars == 2 && buttons == (layer % 2 == 0 ? 8u : 0u), "Moved/pasted rendering duplicated/lost components");
@@ -255,11 +260,17 @@ namespace
 		auto frameRegion=tiles.sprites.at("booth-window-open").region;
 		auto shutterRegion=tiles.sprites.at("booth-window-shutter").region;
 		auto glassRegion=tiles.sprites.at("window-clear").region;
+		// Artwork pixels, not World units: the authored shutter tile inside the
+		// object atlas image is 42 x 38. Re-cutting the artwork moves these
+		// literals; resizing a World cell must not.
 		require(shutterRegion.width==42 && shutterRegion.height==38, "Shutter is not a distinct inner tile");
 		setObjectTileset(std::move(tiles), static_cast<TextureId>(1));
 		auto near=[](float a,float b) { return std::abs(a-b)<0.001f; };
-		// The supplied frame is 52x48, with a five-pixel inset on each edge.
-		float const left=3.1f*64, right=3.9f*64, top=720, bottom=768;
+		// The frame artwork is 52x48 with a five-pixel inset on each edge: the
+		// 5/52 and 5/48 ratios below are artwork facts about that tile, while the
+		// 3.1/3.9 multipliers are World units of one cell width each. top/bottom
+		// are viewport-absolute pixels, not World units of either kind.
+		float const left=3.1f*CORE_CELL_WIDTH_PIXELS, right=3.9f*CORE_CELL_WIDTH_PIXELS, top=720, bottom=768;
 		float const innerLeft=left+(right-left)*5/52, innerRight=right-(right-left)*5/52;
 		float const innerTop=top+(bottom-top)*5/48, innerBottom=bottom-(bottom-top)*5/48;
 		float const height=innerBottom-innerTop;

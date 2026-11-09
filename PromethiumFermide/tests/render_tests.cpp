@@ -577,6 +577,8 @@ void checkFurniture(std::filesystem::path const& directory, ObjectTileset const&
   };
   clearFurnitureTileset();
   assertFallback();
+  // Artwork pixels of an alternate atlas this check invents: 600 x 256, with the
+  // chair tile at 8,63 sized 71 x 193. None of it is World geometry.
   ObjectTileset custom;
   custom.width = 600; custom.height = 256;
   custom.sprites.emplace("other", ObjectSprite{{0, 0, 11, 13}, false});
@@ -648,6 +650,9 @@ void checkPlayerSelectorDrawing() {
 }
 
 void checkSectorTileScaling() {
+  // Artwork pixels, not World units: this invented atlas is 512 x 320 with a
+  // 128 x 320 corridor tile. The producer tiles by World cell regardless of
+  // the source grid, so these numbers say nothing about cell size.
   SectorTileset tiles;
   tiles.width = 512; tiles.height = 320;
   tiles.surfaces.emplace("corridor", SectorTileRegion{0, 0, 128, 320});
@@ -667,16 +672,19 @@ void checkSectorTileScaling() {
   require(maxX == 128.f && maxY == 240.f && maxUvY < .76f && maxUvY > .74f,
       "Tile must fill 1x1 World units and crop a partial-height cell");
   WorldDrawList missing({{0, 0}, {1000, 1000}});
-  require(drawSectorTileSurface("room", &missing, {0, 0}, {64, 160}, pf::render::White),
+  require(drawSectorTileSurface("room", &missing, {0, 0},
+      {CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS}, pf::render::White),
       "Missing tile must emit fallback geometry");
   auto const& fallback = std::get<WorldDrawList::Triangle>(missing.commands().front());
   require(fallback.texture == WorldDrawList::Texture::None
       && fallback.colour == packColour(255, 0, 255), "Missing tile must be opaque magenta");
-  require(!drawSectorTileBoundary("floor", &missing, {0, 0}, {64, 2}),
+  // One World cell wide; the 2 is a plain line's pixel height, not a World unit.
+  require(!drawSectorTileBoundary("floor", &missing, {0, 0}, {CORE_CELL_WIDTH_PIXELS, 2}),
       "Missing boundary must request plain-line fallback");
   setSectorTileset({}, kInstalled);
   WorldDrawList unavailable({{0, 0}, {1000, 1000}});
-  require(drawSectorTileSurface("corridor", &unavailable, {0, 0}, {64, 160}, pf::render::White),
+  require(drawSectorTileSurface("corridor", &unavailable, {0, 0},
+      {CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS}, pf::render::White),
       "Unavailable ImageSet must emit fallback geometry");
   clearSectorTileset();
 }
@@ -690,6 +698,8 @@ void checkAgentArtworkFallback() {
   core::AgentPoseTestAccess::set(*agent, core::Pose::Sitting);
   auto const physical = agent->getBounds().getSize();
   for (int present = 0; present < 4; ++present) {
+    // Artwork pixels of a stand-in Agent atlas; its tile grid is unrelated to
+    // the World cell, which is why the fallback below is sized in World units.
     ObjectTileset tiles; tiles.width = 128; tiles.height = 128;
     if (present & 1) tiles.sprites.emplace("human-standing", ObjectSprite{{0, 0, 26, 72}, true});
     if (present & 2) tiles.sprites.emplace("human-sitting", ObjectSprite{{32, 0, 26, 43}, true});
@@ -709,8 +719,8 @@ void checkAgentArtworkFallback() {
       }
     if (present == 3) require(missing == 0 && textured(list, WorldDrawList::Texture::AgentAtlas) == 4,
         "Complete Agent artwork must use its independent texture channel");
-    else require(missing == 4 && near(right - left, agent->getWidth() * 64.f)
-        && near(bottom - top, agent->getHeight() * 160.f),
+    else require(missing == 4 && near(right - left, agent->getWidth() * CORE_CELL_WIDTH_PIXELS)
+        && near(bottom - top, agent->getHeight() * CORE_LEVEL_HEIGHT_PIXELS),
         "Absent Agent atlas, pose or Standing tile must draw magenta physical bounds");
     auto const after = agent->getBounds().getSize();
     require(near(after.x, physical.x) && near(after.y, physical.y), "Agent artwork changed simulation geometry");
