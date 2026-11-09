@@ -1,0 +1,109 @@
+# Authored tileset for the FurnitureAtlasNew set (#1016).
+#
+# A version 2 tileset declares, per tile, the three render semantics a
+# version 1 file left the renderer to guess: the render offset it draws at,
+# the drawn size it draws at, and whether it is tintable. Offsets and sizes
+# are World units, not pixels - one World unit of authored art is one
+# authored tile.
+#
+# The `ImageSet` entries the application manifest declares for this atlas
+# are generated from this file by `scripts/generate_furniture_atlas_new.py`
+# and are checked against it by the render smoke module, so the two cannot
+# drift. Pixel regions are cut from `image` in top-left-origin pixels; the
+# semantics below are World units and never pixels.
+#
+# The authored grid is 128 x 320: one World cell at the size the World is
+# now drawn. Every Furniture tile fills its cell, so a piece one cell wide
+# covers exactly one cell and a piece four cells wide covers four.
+#
+# ## Tile naming: the position a tile holds in its piece
+#
+# Every name here is `<piece>-<role><level>`. The role is `L`, `M` or `R` -
+# the left cap, a middle cell, the right cap - and the level is the height
+# level within the piece's footprint. The anchor is the bottom-left of that
+# footprint, so every offset is non-negative and no sign has to be encoded
+# in a name. The invariant the loader enforces is that `L` is always
+# present because it is the anchor, `R` appears when the piece is at least
+# two cells wide, and `M` appears when it is at least three.
+#
+# Because the middle tile is named for its role rather than for its offset,
+# a four-cell sofa reuses `sofa-M0` twice instead of needing a fourth tile:
+# the name says what the tile is for, not where this particular width put
+# it. The absolute `-XY` vocabulary - an offset from the anchor, one digit
+# per axis - is retained as the escape hatch for irregular footprints, and
+# a piece never mixes the two. `core/src/FurnitureTileNaming.cpp` is where
+# both vocabularies are parsed and validated against the catalogue's
+# authoritative per-tile `{x, y}`.
+#
+# A single-cell object that can never span more than one cell - a Button, a
+# Marker - keeps its bare name and gains no suffix that would carry no
+# information. Furniture is the multi-cell kind, so all ten of its tiles
+# carry the role suffix, and a width-1 chair falls out of the rule as
+# `chair-L0` rather than being a special case.
+version: 2
+image: furniture-new.png
+size: [640, 640]
+tile_size: [128, 320]
+sprites:
+  # Row 0: the chair's single anchor cell, then the sofa's three roles.
+  chair-L0:
+    cell: [0, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+  sofa-L0:
+    cell: [1, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+  sofa-M0:
+    cell: [2, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+  sofa-R0:
+    cell: [3, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+  desk-L0:
+    cell: [4, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+  # Row 1: the desk's remaining roles, then the bed's three.
+  desk-M0:
+    cell: [0, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+  desk-R0:
+    cell: [1, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+  bed-L0:
+    cell: [2, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+  bed-M0:
+    cell: [3, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+  bed-R0:
+    cell: [4, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false

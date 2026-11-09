@@ -55,6 +55,21 @@ set(names
     objectAtlas/missingRenderOffsetIsRefused
     objectAtlas/nonFiniteRenderOffsetIsRefused
     objectAtlas/drawnSizeThatDoesNotFitTheImageIsRefused
+    furnitureAtlasNew/tenRoleTilesAreRegisteredAtFullCellSize
+    furnitureAtlasNew/sofaRendersFromItsRoleTiles
+    furnitureAtlasNew/fourCellSofaReusesTheMiddleTile
+    furnitureAtlasNew/loaderRefusesARoleAtAPositionItsWidthForbids
+    furnitureAtlasNew/loaderRefusesAFootprintWithNoAnchor
+    furnitureAtlasNew/loaderRefusesAMissingRightCap
+    furnitureAtlasNew/loaderRefusesAMissingMiddle
+    furnitureAtlasNew/loaderRefusesAMixedVocabulary
+    furnitureAtlasNew/loaderRefusesABareTileInASuffixedFootprint
+    furnitureAtlasNew/loaderRefusesAHalfSpecifiedHeight
+    furnitureAtlasNew/loaderRefusesANegativeOffset
+    furnitureAtlasNew/loaderRefusesAnOffsetPastOneDigit
+    furnitureAtlasNew/loaderRefusesAnAbsoluteNameThatDisagreesWithItsPlacement
+    furnitureAtlasNew/loaderAcceptsConformingFootprints
+    furnitureAtlasNew/loaderLeavesLegacyNamesAlone
     walkwayArtwork/manifestPairIsGeneratedFromTheTileset
     walkwayArtwork/everyAtlasIsCoveredByItsAuthoredTileset
     walkwayArtwork/installSeparatesPixelsFromSemantics

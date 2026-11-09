@@ -44,3 +44,6 @@ sets:
   ObjectAtlasNew:
     kind: object
     tileset: textures/objects-new.tileset.yaml
+  FurnitureAtlasNew:
+    kind: object
+    tileset: textures/furniture-new.tileset.yaml

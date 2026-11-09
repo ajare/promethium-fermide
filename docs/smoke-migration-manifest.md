@@ -264,6 +264,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/render/BoothWindows.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/render/ObjectAtlas.cpp` | Object atlas authored-grid loader checks | `pf-smoke-render` |
 | `smoke/render/WalkwayArtwork.cpp` | Walkway artwork offset, atlas install seam and manifest-pair checks | `pf-smoke-render` |
+| `smoke/render/FurnitureAtlasNew.cpp` | FurnitureAtlasNew role-tile registration, multi-cell render and catalogue loader refusals | `pf-smoke-render` |
 | `smoke/render/AccessPanels.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/render/Airlocks.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/editor/BoothWindows.cpp` | module-owned | `pf-smoke-editor` |

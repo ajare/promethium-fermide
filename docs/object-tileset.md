@@ -76,6 +76,60 @@ The render smoke module checks the committed manifest against the tileset on eve
 run, so a drift fails the build rather than showing up as artwork in the wrong
 place.
 
+## FurnitureAtlasNew and the tile naming convention
+
+`resources/textures/furniture-new.tileset.yaml` is the version 2 authored tileset
+behind `FurnitureAtlasNew`, the replacement Furniture atlas: ten full-cell tiles
+on the 128x320 grid at 640x640 - `chair-L0`, and `sofa`/`desk`/`bed` each at
+`-L0`, `-M0` and `-R0`. Every one of them is drawn at one full World cell with no
+render offset, so a piece one cell wide covers one cell and a piece four cells wide
+covers four. `scripts/generate_furniture_atlas_new.py` generates its sheet and its
+manifest entries the same way the Objects atlas's does; both scripts share
+`scripts/atlas_new.py`.
+
+A Furniture tile name is `<piece>-<role><level>`. The role is `L`, `M` or `R` -
+the left cap, a middle cell, the right cap - and the level is the height level
+within the piece's footprint. The anchor is the **bottom-left** of that footprint,
+so every offset is non-negative and no sign has to be encoded in a name, and one
+digit per axis caps a piece at 9x9. The other vocabulary is `-XY`, an absolute
+offset from the anchor, retained as the escape hatch for the irregular footprint a
+role vocabulary cannot name.
+
+The invariant the loader enforces is that `L` is always present because it is the
+anchor, `R` appears when the piece is at least two cells wide, and `M` appears when
+it is at least three. For height > 1 every role present must be present at every
+height level, so a footprint can never be half-specified. A piece speaks one
+vocabulary throughout: a footprint mixing role-suffixed and absolute-suffixed
+tiles is refused, and so is a bare name inside a footprint that names its other
+tiles by position.
+
+The suffix is applied only where the piece can span more than one cell. Furniture
+is that kind of thing, so all ten of its tiles carry a role suffix and a width-1
+chair falls out of the rule as `chair-L0` rather than being a special case; a
+single-cell object that can never span more than one cell - a Button, a Marker -
+keeps its bare name and gains no suffix carrying no information.
+
+**The catalogue's per-tile `{x, y}` stays authoritative for placement.** The
+suffix earns its place by making the art sheet self-describing, and the loader
+asserting agreement is what stops that becoming a lie: `sofa-R0` placed at a
+position a piece's width forbids, a `-Ly` name on a tile the catalogue places at
+another level, and an absolute name whose digits do not match its offset are each
+refused with the tile named. `core/src/FurnitureTileNaming.cpp` is where both
+vocabularies are parsed and checked, and `FurnitureCatalogue::readFile` asks it
+about every definition's whole footprint.
+
+Names that carry no recognized suffix - `chair`, `sofa-left`, `button-enabled` -
+are the old artwork's authoring and load exactly as they did. The convention binds
+a piece that speaks it, not every catalogue written before it, which is what lets
+the old `FurnitureAtlas` stay registered and canonical while the new set is
+brought up beside it.
+
+The `render` smoke module's `furnitureAtlasNew/*` checks prove all of this: the
+ten tiles registered at full-cell drawn size, a three-cell sofa rendering from
+`sofa-L0`, `sofa-M0` and `sofa-R0`, a four-cell sofa reusing the same middle
+tile across two cells and naming three tiles in all, and each refusal at the
+loader seam.
+
 ## The install seam
 
 `installAtlasTiles()` in `pf-render` is the one place the two authorities meet,

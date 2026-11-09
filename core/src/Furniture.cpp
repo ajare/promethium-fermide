@@ -8,6 +8,7 @@
 #include <utility>
 #include <fstream>
 #include "FurnitureLua.h"
+#include "FurnitureTileNaming.h"
 
 namespace core
 {
@@ -48,6 +49,11 @@ namespace core
 						d.maxX = std::max(d.maxX, t.x + 1); d.maxY = std::max(d.maxY, t.y + 1); }
 					d.tiles.push_back(std::move(t));
 				}
+				// The catalogue's per-tile {x, y} is authoritative for placement;
+				// the name suffix is validated against it, so a sheet that says one
+				// thing and a catalogue that says another cannot both be believed
+				// (#1016).
+				validateFurnitureTileNames(d.key, d.tiles);
 				std::string diagnostic;
 				std::set<std::string> keys, labels;
 				for (auto point : points)
