@@ -13,9 +13,9 @@
 # semantics below are World units and never pixels.
 #
 # The authored grid is 128 x 320: one World cell at the size the World is
-# now drawn. This is the tracer-bullet set - the Walkway is the one live
-# entry, and the rest of the ObjectAtlasNew sheet drops in against the same
-# image size.
+# now drawn. The Walkway was the tracer-bullet entry; the Bulkhead Door and
+# the Access panel are live here too (#1019), and the rest of the
+# ObjectAtlasNew sheet drops in against the same image size.
 version: 2
 image: objects-new.png
 size: [768, 960]
@@ -33,3 +33,45 @@ sprites:
     offset: [0.0, -0.075]
     drawn_size: [1.0, 0.075]
     tintable: true
+
+  # A Bulkhead Door is a solid physical slab straddling the boundary
+  # between two adjacent Locations. Its geometry puts it 0.1 into one cell
+  # and 0.1 into the next - `cellX + 0.9` to `cellX + 1.1` - so the
+  # artwork crosses that boundary exactly where the collision does. It is
+  # drawn at its own 0.2 x 0.7 aspect ratio, not the cell's 2:5: the
+  # declared drawn size is the slab, and the cell has no claim on it.
+  # Content is 26 x 224px, the slab at the authored grid's pixel size.
+  #
+  # The slab opens vertically from the floor, so what is visible is what
+  # is still down. The renderer crops the artwork's bottom by the live
+  # open state and draws the rest at the top of the extent, which is what
+  # keeps a door half open showing exactly half open rather than tracking
+  # a frame counter.
+  bulkhead-door:
+    cell: [1, 0]
+    content: [0, 0, 26, 224]
+    offset: [0.0, 0.0]
+    drawn_size: [0.2, 0.7]
+    tintable: true
+
+  # An Access panel is a cell-owned object drawn on the visible back
+  # surface of a Room, Corridor or Facade. Its geometry - width, height
+  # and the bottom offset it sits above the cell floor - is authored per
+  # panel (`AccessPanelGeometry`), so the panel's own rect is what the
+  # artwork is drawn into; the declared drawn size here is the reference
+  # the art is authored at, which is the default geometry of 0.5 x 0.25 -
+  # 64 x 80px on this grid. The leaf retracts into the top edge as it
+  # opens, and the renderer crops the artwork to follow it.
+  access-panel:
+    cell: [2, 0]
+    content: [0, 0, 64, 80]
+    offset: [0.0, 0.0]
+    drawn_size: [0.5, 0.25]
+    tintable: true
+
+  # No `force-bridge` tile, deliberately. A Force Bridge's span is
+  # continuous and arbitrary - it can be any fraction of a cell wide, over
+  # any gap - so a fixed tile would be stretched wrong at most lengths it
+  # gets used at. The 2px line is honest about being an energy field, and
+  # `ObjectTileset::load` refuses one so the decision cannot be reversed
+  # by an edit to this file that nobody thought about.

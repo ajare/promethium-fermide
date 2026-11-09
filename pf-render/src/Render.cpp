@@ -819,6 +819,83 @@ void renderDoor(shared_ptr<const core::Door> door, uint32_t layer, LayerRenderSt
 }
 
 
+namespace
+{
+// Draws a tile at its authored render offset and drawn size from a World-unit
+// anchor. The anchor is where the object's own geometry starts; the artwork
+// goes where the authored tileset says it goes, which need not be where the
+// object is. Returns false when the tile is not installed or declares no
+// drawn size, so the caller keeps its primitive fallback (#1014).
+bool drawOffsetTile(char const* name, core::Vector2 worldAnchor,
+	PackedColourValue tint, WorldDrawList* drawList)
+{
+	auto const artwork = objectTileArtwork(name);
+	if (!artwork || artwork->drawnSize.x <= 0.0f || artwork->drawnSize.y <= 0.0f)
+		return false;
+	core::Vector2 from{ worldAnchor.x + artwork->offset.x,
+		worldAnchor.y + artwork->offset.y };
+	core::Vector2 to{ from.x + artwork->drawnSize.x, from.y + artwork->drawnSize.y };
+	transformPosition(from);
+	transformPosition(to);
+	return drawObjectSprite(name, drawList,
+		{ min(from.x, to.x), min(from.y, to.y) },
+		{ max(from.x, to.x), max(from.y, to.y) }, tint);
+}
+
+// Draws the part of a tile's artwork a leaf has not yet retracted into its
+// top edge: the top `1 - progress` of the World-unit extent `fullMin` to
+// `fullMax`. The source crop follows the retraction, so the artwork slides
+// out of view through the top edge instead of squashing into the strip
+// that is left below it. `progress` is the device's own open state, not a
+// frame counter, which is what keeps a half-open leaf exactly half open
+// however long it took to get there (#1019).
+//
+// Returns false when the tile is not installed, so the caller keeps its
+// primitive fill.
+bool drawRetractedTile(char const* name, core::Vector2 fullMin,
+	core::Vector2 fullMax, float progress, PackedColourValue tint,
+	WorldDrawList* drawList)
+{
+	if (!objectSpriteSize(name)) return false;
+	auto const fraction = std::min(std::max(progress, 0.0f), 1.0f);
+	core::Vector2 from{ fullMin.x, fullMin.y + (fullMax.y - fullMin.y) * fraction };
+	core::Vector2 to{ fullMax.x, fullMax.y };
+	transformPosition(from);
+	transformPosition(to);
+	return drawObjectSprite(name, drawList,
+		{ min(from.x, to.x), min(from.y, to.y) },
+		{ max(from.x, to.x), max(from.y, to.y) }, tint,
+		{ 0.0f, fraction }, { 1.0f, 1.0f });
+}
+
+// The Bulkhead Door's artwork is the slab itself. The tile declares the
+// slab's own 0.2 x 0.7 drawn size at its declared offset from the door's
+// anchor, which is the bottom-left of the door's physical geometry - and
+// that geometry straddles the boundary between the two Locations the door
+// separates, 0.1 into each. So the artwork crosses the cell boundary
+// exactly where the collision does, and is drawn at the slab's aspect
+// ratio rather than the cell's 2:5 (#1019).
+//
+// The slab opens vertically from the floor, so what is visible is what is
+// still down: the visible height is the declared extent less the live open
+// state, which is why a door half open shows exactly half open.
+bool drawBulkheadDoorSlab(shared_ptr<const core::BulkheadDoor> const& door,
+	PackedColourValue tint, WorldDrawList* drawList)
+{
+	auto const artwork = objectTileArtwork("bulkhead-door");
+	if (!artwork || artwork->drawnSize.x <= 0.0f || artwork->drawnSize.y <= 0.0f)
+		return false;
+	core::Vector2 full0, full1;
+	door->getFullShape(full0, full1);
+	core::Vector2 const extentMin{ full0.x + artwork->offset.x,
+		full0.y + artwork->offset.y };
+	core::Vector2 const extentMax{ extentMin.x + artwork->drawnSize.x,
+		extentMin.y + artwork->drawnSize.y };
+	return drawRetractedTile("bulkhead-door", extentMin, extentMax,
+		door->getOpenPercentage(), tint, drawList);
+}
+}
+
 void renderBulkheadDoor(shared_ptr<const core::BulkheadDoor> door, uint32_t /* layer */, LayerRenderStyle style, bool selected, WorldDrawList* drawList)
 {
 	if (style == LayerRenderStyle::Hidden)
@@ -830,27 +907,28 @@ void renderBulkheadDoor(shared_ptr<const core::BulkheadDoor> door, uint32_t /* l
 
 	door->getCurrentShape(bounds0, bounds1);
 
-	transformPosition(bounds0);
-	transformPosition(bounds1);
-
-	auto topLeft = Vec2{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
-	auto bottomRight = Vec2{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
 	auto doorColour = packColour(128, 192, 182);
 	if (style == LayerRenderStyle::Wireframe)
 	{
-		drawList->AddRect(topLeft, bottomRight, packColour(0, 0, 0));
+		transformPosition(bounds0);
+		transformPosition(bounds1);
+		drawList->AddRect({ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) },
+			{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) }, packColour(0, 0, 0));
 	}
-	else
+	else if (!drawBulkheadDoorSlab(door, doorColour, drawList))
 	{
-		drawList->AddRectFilled(topLeft, bottomRight, doorColour);
+		transformPosition(bounds0);
+		transformPosition(bounds1);
+		drawList->AddRectFilled({ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) },
+			{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) }, doorColour);
 	}
 	if (selected)
 	{
 		core::Vector2 full0, full1;
 		door->getFullShape(full0, full1);
 		transformPosition(full0); transformPosition(full1);
-		topLeft = { min(full0.x, full1.x), min(full0.y, full1.y) };
-		bottomRight = { max(full0.x, full1.x), max(full0.y, full1.y) };
+		auto const topLeft = Vec2{ min(full0.x, full1.x), min(full0.y, full1.y) };
+		auto const bottomRight = Vec2{ max(full0.x, full1.x), max(full0.y, full1.y) };
 		drawList->AddRectFilled(topLeft, bottomRight, packColour(255, 255, 0, 48));
 		drawList->AddRect(topLeft, bottomRight, SelectedColour, 0.0f, 0, 2.0f);
 	}
@@ -1095,30 +1173,6 @@ void renderPhysicalControl(shared_ptr<const core::Button> button, uint32_t /* la
 }
 
 
-namespace
-{
-// Draws a tile at its authored render offset and drawn size from a World-unit
-// anchor. The anchor is where the object's own geometry starts; the artwork
-// goes where the authored tileset says it goes, which need not be where the
-// object is. Returns false when the tile is not installed or declares no
-// drawn size, so the caller keeps its primitive fallback (#1014).
-bool drawOffsetTile(char const* name, core::Vector2 worldAnchor,
-	PackedColourValue tint, WorldDrawList* drawList)
-{
-	auto const artwork = objectTileArtwork(name);
-	if (!artwork || artwork->drawnSize.x <= 0.0f || artwork->drawnSize.y <= 0.0f)
-		return false;
-	core::Vector2 from{ worldAnchor.x + artwork->offset.x,
-		worldAnchor.y + artwork->offset.y };
-	core::Vector2 to{ from.x + artwork->drawnSize.x, from.y + artwork->drawnSize.y };
-	transformPosition(from);
-	transformPosition(to);
-	return drawObjectSprite(name, drawList,
-		{ min(from.x, to.x), min(from.y, to.y) },
-		{ max(from.x, to.x), max(from.y, to.y) }, tint);
-}
-}
-
 void renderWalkway(shared_ptr<const core::Walkway> walkway, uint32_t /* layer */, LayerRenderStyle style,
 	bool selected, WorldDrawList* drawList)
 {
@@ -1187,6 +1241,11 @@ void renderFurnitureMarkers(shared_ptr<const core::Sector> const& sector, uint32
 void renderForceBridge(shared_ptr<const core::ForceBridge> forceBridge, uint32_t /* layer */,
 	LayerRenderStyle style, bool selected, WorldDrawList* drawList)
 {
+	// The Force Bridge stays a primitive line, deliberately. Its span is
+	// continuous and arbitrary - any fraction of a cell over any gap - so a
+	// fixed tile would be stretched wrong at most lengths it gets used at,
+	// and the 2px line is honest about being an energy field. It is given no
+	// tile in ObjectAtlasNew, and the loader refuses one (#1019).
 	if (style != LayerRenderStyle::Solid)
 	{
 		renderBrokenWarning(*forceBridge, drawList);
@@ -1562,6 +1621,12 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 				core::Vector2 min, max; panel->getFullShape(min, max);
 				bool degenerate = panel->getSize().x == 0 || panel->getSize().y == 0;
 				if (degenerate) panel->getSelectionShape(min, max);
+				// The panel's authored rect in World units before the screen
+				// transform: its authored width, its authored height, sitting its
+				// authored bottom offset above the cell floor. The artwork is drawn
+				// into that and not into a cell, because an Access panel's geometry
+				// is authored per panel and the tile cannot second-guess it (#1019).
+				core::Vector2 const authoredMin = min, authoredMax = max;
 				transformPosition(min); transformPosition(max);
 				if (!degenerate && isDrawnSolid(style))
 					drawList->AddRectFilled({min.x, max.y}, {max.x, min.y}, packColour(22, 30, 40, 255));
@@ -1576,7 +1641,15 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 				{
 					auto bottom = min.y + (max.y - min.y) * panel->getProgress();
 					if (isDrawnSolid(style))
-						drawList->AddRectFilled({min.x, max.y}, {max.x, bottom}, packColour(78, 92, 110, 255));
+					{
+						// The leaf draws its artwork over the part of the authored
+						// rect it still covers, cropped to match, so the art slides
+						// into the top edge with the live progress instead of being
+						// squashed into the strip left below it (#1019).
+						if (!drawRetractedTile("access-panel", authoredMin, authoredMax,
+							panel->getProgress(), packColour(78, 92, 110), drawList))
+							drawList->AddRectFilled({min.x, max.y}, {max.x, bottom}, packColour(78, 92, 110, 255));
+					}
 					if (panel->getProgress() > 0)
 						drawList->AddRect({min.x, max.y}, {max.x, bottom}, packColour(165, 180, 198, 255), 0, 0, 2);
 				}

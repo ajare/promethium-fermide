@@ -94,6 +94,15 @@ set(names
     walkwayArtwork/walkwayDrawsBelowTheFloorLine
     walkwayArtwork/physicalExtentStaysZeroAndRoutes
     walkwayArtwork/oldSetsStillDrawThePrimitiveLine
+    bulkheadAndPanel/newTilesAreAuthoredAtTheirContentSizes
+    bulkheadAndPanel/bulkheadDoorStraddlesTheCellBoundary
+    bulkheadAndPanel/bulkheadDoorProgressIsSyncedToTheDeviceState
+    bulkheadAndPanel/fullyOpenBulkheadDoorDrawsNoSlab
+    bulkheadAndPanel/accessPanelDrawsAtItsAuthoredGeometry
+    bulkheadAndPanel/accessPanelLeafRetractsIntoTheTopEdge
+    bulkheadAndPanel/forceBridgeStillRendersAsAPrimitiveLine
+    bulkheadAndPanel/loaderRefusesAForceBridgeTile
+    bulkheadAndPanel/aSetWithNeitherTileKeepsThePrimitives
     accessPanels/closedPresentationAndIndicators
     accessPanels/canvasCoversTheWholeFixtureWorld
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations

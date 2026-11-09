@@ -60,9 +60,10 @@ that far below the floor line of the cell it was authored in.
 
 `resources/textures/objects-new.tileset.yaml` is the version 2 authored tileset
 behind the replacement Objects atlas, laid out on the 128x320 World cell at
-768x960. It is the tracer-bullet set: the Walkway is its one live tile, and the
-rest of the sheet drops in against the same image size. The old `ObjectAtlas` and
-`ObjectAtlasImage` stay registered and canonical until nothing references them.
+768x960. The Walkway, the Bulkhead Door and the Access panel are live in it,
+and the rest of the sheet drops in against the same image size. The old
+`ObjectAtlas` and `ObjectAtlasImage` stay registered and canonical until
+nothing references them.
 
 The `ImageSet` entries the application manifest declares for `ObjectAtlasNew` are
 generated from the tileset, not authored beside it:
@@ -75,6 +76,49 @@ python3 scripts/generate_object_atlas_new.py --check   # verify, as CI does
 The render smoke module checks the committed manifest against the tileset on every
 run, so a drift fails the build rather than showing up as artwork in the wrong
 place.
+
+### The Bulkhead Door draws its own slab, not a cell
+
+A Bulkhead Door is a solid physical slab straddling the boundary between two
+adjacent Locations. Its geometry puts it at `cellX + 0.9` to `cellX + 1.1`:
+0.1 into one cell and 0.1 into the next. Its `bulkhead-door` tile declares
+`drawn_size: [0.2, 0.7]` at `offset: [0.0, 0.0]` from the door's own anchor,
+so the artwork crosses the cell boundary exactly where the collision does, and
+is drawn at the slab's 0.2 x 0.7 aspect ratio rather than the cell's 2:5. The
+tile's content rectangle is 26 x 224px, the slab at the authored grid's pixel
+size.
+
+The slab opens vertically from the floor, so what is visible is what is still
+down. The renderer draws the top `1 - openPercentage` of the declared extent
+and crops the artwork's source by the same fraction, so the art slides out
+through the top edge instead of squashing into the strip left below it. The
+fraction is read from the live device state on every frame, never from a frame
+counter, which is what makes a door half open show exactly half open however
+long it took to get there. Fully open, nothing of the slab is left and no
+geometry is emitted.
+
+### The Access panel draws at its authored geometry
+
+An Access panel sits on the visible back surface of a Room, Corridor or
+Facade, and its geometry - `width`, `height` and the `yOffset` it sits above
+the cell floor - is authored per panel. The panel's own authored rect is
+therefore what the artwork is drawn into; the `access-panel` tile's declared
+drawn size of 0.5 x 0.25 is the reference the art is authored at, which is
+the default geometry, and a panel authored 1.0 x 0.5 draws 1.0 x 0.5. Its
+content rectangle is 64 x 80px.
+
+The leaf retracts into the top edge as the panel opens, and the renderer crops
+the tile the same way it crops the Bulkhead Door's slab: the top edge stays
+where it was, the bottom rises with the live progress, and the revealed part of
+the panel shows the recess behind the leaf.
+
+### The Force Bridge is given no tile, deliberately
+
+A Force Bridge's span is continuous and arbitrary - any fraction of a cell
+over any gap - so a fixed tile would be stretched wrong at most lengths it is
+used at, and the 2px line is honest about being an energy field. A version 2
+object tileset that declares a `force-bridge` tile is refused by the loader, so
+the decision cannot be reversed by an edit to a sheet nobody thought about.
 
 ## FurnitureAtlasNew and the tile naming convention
 
@@ -226,7 +270,9 @@ Supported sprites:
 - Platform lift car: the sprite follows the moving slab's actual bounds, not the
   shaft bounds. The editor shaft outline is retained.
 
-Bulkhead Doors and Force Bridges remain entirely primitive-rendered. Other
+Bulkhead Doors and Access panels render from `ObjectAtlasNew` when that set is
+installed, and keep their flat fills against a set that has no tile for them. Force
+Bridges remain entirely primitive-rendered - see below. Other
 transport geometry and editor overlays are unchanged. Headless tests without a
 texture retain the primitive/font fallback.
 

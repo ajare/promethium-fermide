@@ -268,6 +268,8 @@ Resources:
           Images:
             Image:
               # GENERATED from resources/textures/objects-new.tileset.yaml by scripts/generate_object_atlas_new.py. Do not hand-edit.
+              - { name: "access-panel", x: "256", y: "0", width: "64", height: "80" }
+              - { name: "bulkhead-door", x: "128", y: "0", width: "26", height: "224" }
               - { name: "walkway", x: "0", y: "0", width: "128", height: "24" }
               # END GENERATED
     # The replacement Furniture atlas, sized for the 128x320 World cell

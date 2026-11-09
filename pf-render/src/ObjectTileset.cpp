@@ -31,6 +31,16 @@ ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
     result.width = grid.width;
     result.height = grid.height;
     result.sprites = grid.tiles;
+    // A version 2 set authors nothing for the Force Bridge, and is refused
+    // if it tries. A bridge's span is continuous and arbitrary, so a fixed
+    // tile would be stretched wrong at most lengths it is drawn at; the
+    // renderer's primitive line stays. Refusing it here is what keeps that
+    // decision from being quietly reversed by a tile added to a sheet
+    // nobody thought about (#1019).
+    if (version >= 2 && result.sprites.count("force-bridge"))
+        throw std::runtime_error("The Force Bridge is rendered as a primitive "
+            "line and is deliberately given no tile: its span is arbitrary, so "
+            "a fixed tile would be wrong at most lengths");
     // The required-tile list is the version 1 object atlas's own contract.
     // A version 2 set is a different authored set with a different shape;
     // which tiles a World requires from it is validated where the World's
