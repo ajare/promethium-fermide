@@ -8,12 +8,12 @@
 namespace {
 SectorTileset active;
 ImTextureID textureId{};
-void image(WorldDrawList* list, SectorTileRegion const& r, ImVec2 a, ImVec2 b,
-    float fractionX, float fractionY, ImU32 tint)
+void image(WorldDrawList* list, SectorTileRegion const& r, Vec2 a, Vec2 b,
+    float fractionX, float fractionY, PackedColourValue tint)
 {
     // Half-texel inset avoids sampling adjacent draft artwork with linear filtering.
-    ImVec2 uv0{(r.x + 0.5f) / active.width, (r.y + 0.5f) / active.height};
-    ImVec2 uv1{(r.x + 0.5f + (r.width - 1) * fractionX) / active.width,
+    Vec2 uv0{(r.x + 0.5f) / active.width, (r.y + 0.5f) / active.height};
+    Vec2 uv1{(r.x + 0.5f + (r.width - 1) * fractionX) / active.width,
         (r.y + 0.5f + (r.height - 1) * fractionY) / active.height};
     list->AddImage(WorldDrawList::Texture::SectorAtlas, a, b, uv0, uv1, tint);
 }
@@ -61,12 +61,12 @@ void setSectorTileset(SectorTileset tileset, ImTextureID texture)
 void clearSectorTileset() { textureId = {}; active = {}; }
 
 bool drawSectorTileSurface(std::string const& kind, WorldDrawList* list,
-    ImVec2 minimum, ImVec2 maximum, ImU32 tint, float zoom)
+    Vec2 minimum, Vec2 maximum, PackedColourValue tint, float zoom)
 {
     if (!textureId) return false;
     auto const found = active.surfaces.find(kind);
     if (found == active.surfaces.end() || active.width <= 0 || active.height <= 0) {
-        list->AddRectFilled(minimum, maximum, IM_COL32(255, 0, 255, 255));
+        list->AddRectFilled(minimum, maximum, packColour(255, 0, 255, 255));
         return true;
     }
     auto const& region = found->second;
@@ -81,18 +81,18 @@ bool drawSectorTileSurface(std::string const& kind, WorldDrawList* list,
     int const y0 = std::max(0, static_cast<int>((clipMin.y - minimum.y) / cellHeight));
     for (float y = minimum.y + y0 * cellHeight; y < std::min(maximum.y, clipMax.y); y += cellHeight)
         for (float x = minimum.x + x0 * cellWidth; x < std::min(maximum.x, clipMax.x); x += cellWidth) {
-            ImVec2 end{std::min(x + cellWidth, maximum.x), std::min(y + cellHeight, maximum.y)};
+            Vec2 end{std::min(x + cellWidth, maximum.x), std::min(y + cellHeight, maximum.y)};
             image(list, region, {x, y}, end, (end.x - x) / cellWidth,
                 (end.y - y) / cellHeight, tint);
         }
     return true;
 }
 
-bool drawSectorTileBoundary(char const* kind, WorldDrawList* list, ImVec2 a, ImVec2 b)
+bool drawSectorTileBoundary(char const* kind, WorldDrawList* list, Vec2 a, Vec2 b)
 {
     if (!textureId) return false;
     auto const found = active.boundaries.find(kind);
     if (found == active.boundaries.end() || active.width <= 0 || active.height <= 0) return false;
-    image(list, found->second, a, b, 1, 1, IM_COL32_WHITE);
+    image(list, found->second, a, b, 1, 1, White);
     return true;
 }

@@ -30,7 +30,7 @@ namespace
 				for (auto const& command : drawing.commands())
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
 					{
-						if (triangle->colour == IM_COL32(180, 190, 205, 255))
+						if (triangle->colour == packColour(180, 190, 205, 255))
 						{
 							++car;
 							if (layer == 0) require(triangle->clip.minimum.x > 2.1f * 64
@@ -40,12 +40,12 @@ namespace
 							else require(triangle->clip.maximum.x - triangle->clip.minimum.x > 64,
 								"Selected shaft car incorrectly aperture-clipped");
 						}
-						if (triangle->colour == IM_COL32(80, 200, 120, 255) || triangle->colour == IM_COL32(200, 160, 80, 255))
+						if (triangle->colour == packColour(80, 200, 120, 255) || triangle->colour == packColour(200, 160, 80, 255))
 						{
 							for (auto p : triangle->positions) require(p.x >= (2.0f - CORE_BUTTON_SIZE * 0.5f) * 64 - 0.01f
 								&& p.x <= (2.0f + CORE_BUTTON_SIZE * 0.5f) * 64 + 0.01f,
 								"Landing button did not use the allocated left fallback");
-							if (triangle->colour == IM_COL32(80, 200, 120, 255)) ++here; else ++elsewhere;
+							if (triangle->colour == packColour(80, 200, 120, 255)) ++here; else ++elsewhere;
 						}
 					}
 				require(car == 2, "Initial car missing or duplicated in production draw commands");
@@ -55,7 +55,7 @@ namespace
 			WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
 			unsigned car = 0;
 			for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-				triangle && triangle->colour == IM_COL32(180, 190, 205, 255)) ++car;
+				triangle && triangle->colour == packColour(180, 190, 205, 255)) ++car;
 			require(car == 2, "Wireframe leaked a second filled car over landing Layer");
 			gUISettings.renderNextLayerWireframe = false;
 			auto unit = world->lookupDumbwaiter(id);
@@ -74,10 +74,10 @@ namespace
 					for (auto const& command : motion.commands())
 						if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
 						{
-							if (triangle->colour == IM_COL32(220, 80, 80, 255)) ++busy;
-							if (triangle->colour == IM_COL32(80, 200, 120, 255)) ++here;
-							if (triangle->colour == IM_COL32(200, 160, 80, 255)) ++elsewhere;
-							if (triangle->colour == IM_COL32(180, 190, 205, 255))
+							if (triangle->colour == packColour(220, 80, 80, 255)) ++busy;
+							if (triangle->colour == packColour(80, 200, 120, 255)) ++here;
+							if (triangle->colour == packColour(200, 160, 80, 255)) ++elsewhere;
+							if (triangle->colour == packColour(180, 190, 205, 255))
 							{
 								++carCount;
 								for (auto p : triangle->positions) { low = std::min(low, p.y); high = std::max(high, p.y); }
@@ -130,7 +130,7 @@ namespace
 				std::shared_ptr<const core::SectorObject> selected;
 				require(world->getObjectAtPosition(0, centre.x, centre.y, &selected) == button && selected == object,
 					"Landing draw/hit targeting disagrees with physical allocation");
-				auto colour = stop == 0 ? IM_COL32(80, 200, 120, 255) : IM_COL32(200, 160, 80, 255);
+				auto colour = stop == 0 ? packColour(80, 200, 120, 255) : packColour(200, 160, 80, 255);
 				unsigned triangles = 0;
 				for (auto const& command : drawing.commands())
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command); triangle && triangle->colour == colour)
@@ -170,7 +170,7 @@ namespace
 					unsigned car = 0, buttons = 0, busy = 0;
 					for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
 					{
-						if (triangle->colour == IM_COL32(180, 190, 205, 255))
+						if (triangle->colour == packColour(180, 190, 205, 255))
 						{
 							++car; require(bool(unit), "Deleted car remains in production draw commands");
 							for (auto p : triangle->positions) require(p.y >= 800 - 1.55f * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
@@ -178,8 +178,8 @@ namespace
 							if (layer + 1 == unit->getLayerIndex()) require(triangle->clip.minimum.x > 2.1f * 64
 								&& triangle->clip.maximum.x < 2.9f * 64, "Restored car escaped aperture clip");
 						}
-						if (triangle->colour == IM_COL32(80, 200, 120, 255) || triangle->colour == IM_COL32(200, 160, 80, 255)) ++buttons;
-						if (triangle->colour == IM_COL32(220, 80, 80, 255)) ++busy;
+						if (triangle->colour == packColour(80, 200, 120, 255) || triangle->colour == packColour(200, 160, 80, 255)) ++buttons;
+						if (triangle->colour == packColour(220, 80, 80, 255)) ++busy;
 					}
 					bool visible = unit && (layer == unit->getLayerIndex() || layer + 1 == unit->getLayerIndex());
 					require(car == (visible ? 2u : 0u) && buttons == (unit && layer + 1 == unit->getLayerIndex() ? 8u : 0u)
@@ -199,7 +199,7 @@ namespace
 			WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
 			unsigned car = 0;
 			for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-				triangle && triangle->colour == IM_COL32(180, 190, 205, 255))
+				triangle && triangle->colour == packColour(180, 190, 205, 255))
 			{
 				++car; require(triangle->clip.minimum.x > 2.1f * 64 && triangle->clip.maximum.x < 2.9f * 64
 					&& triangle->clip.maximum.y - triangle->clip.minimum.y < 48, "Nested aperture clipping leaked car geometry");
@@ -220,7 +220,7 @@ namespace
 				unsigned cars = 0, buttons = 0; float x = layer < 2 ? 4.0f : 0.0f, y = layer < 2 ? 1.0f : 3.0f;
 				for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
 				{
-					if (triangle->colour == IM_COL32(180,190,205,255))
+					if (triangle->colour == packColour(180,190,205,255))
 					{
 						++cars;
 						for (auto p : triangle->positions)
@@ -231,7 +231,7 @@ namespace
 						if (layer % 2 == 0) require(triangle->clip.minimum.x > (x + 0.1f) * 64
 							&& triangle->clip.maximum.x < (x + 0.9f) * 64, "Moved/pasted car lost landing aperture clip");
 					}
-					if (triangle->colour == IM_COL32(80,200,120,255) || triangle->colour == IM_COL32(200,160,80,255))
+					if (triangle->colour == packColour(80,200,120,255) || triangle->colour == packColour(200,160,80,255))
 					{
 						++buttons;
 						for (auto p : triangle->positions) require(p.x >= (x - CORE_BUTTON_SIZE * 0.5f) * 64 - 0.01f
@@ -286,7 +286,7 @@ namespace
 				{
 					++index;
 					auto triangle=std::get_if<WorldDrawList::Triangle>(&command); if (!triangle) continue;
-					if (triangle->colour==IM_COL32(31,73,109,255))
+					if (triangle->colour==packColour(31,73,109,255))
 					{
 						backdrop=true; backdropIndex=index;
 						float const openingTop=innerBottom-height*(nestedBooth ? std::min(expected,backBooth->getProgress()) : expected);
@@ -336,7 +336,7 @@ namespace
 			toggle(booth); require(world->advanceTicks(12),"Reversal failed"); draw(0.25f);
 			toggle(booth); require(world->advanceTicks(36),"Full opening failed"); draw(1);
 			WorldDrawList outline({{0,0},{1200,800}});
-			renderSector(world->getSector(0),0,LayerRenderStyle::Wireframe,false,ImColor(IM_COL32_WHITE),&outline);
+			renderSector(world->getSector(0),0,LayerRenderStyle::Wireframe,false,ImColor(White),&outline);
 			require(std::any_of(outline.commands().begin(),outline.commands().end(),[&](auto const& c) {
 				auto line=std::get_if<WorldDrawList::Line>(&c); return line && near(line->from.x,left);
 			}),"Wireframe omitted BoothWindow frame");

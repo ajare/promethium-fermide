@@ -61,7 +61,7 @@ namespace
 				require(!floor.commands().empty() && floor.commands().size() == bed.commands().size(), "Bed offset changed body geometry");
 				for (size_t i = 0; i < floor.commands().size(); ++i)
 				{
-					auto checkOffset = [&](ImVec2 a, ImVec2 b) {
+					auto checkOffset = [&](Vec2 a, Vec2 b) {
 						require(std::abs(a.x - b.x - 0.25f * CORE_CELL_WIDTH_PIXELS * zoom) < 0.01f
 							&& std::abs(a.y - b.y - 0.25f * CORE_LEVEL_HEIGHT_PIXELS * zoom) < 0.01f,
 							"Bed body must retain artwork offsets in sprite and glyph rendering");
@@ -127,7 +127,7 @@ namespace
 				setAgentTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
 			}
 			int tileIndex = 0;
-			ImVec2 originalMin{}, originalMax{};
+			Vec2 originalMin{}, originalMax{};
 			for (auto pose : {core::Pose::Standing, core::Pose::Sitting, core::Pose::Lying,
 				core::Pose::Crouching, core::Pose::Crawling})
 			{
@@ -147,7 +147,7 @@ namespace
 					for (auto const& command : list.commands()) {
 						auto const& triangle = std::get<WorldDrawList::Triangle>(command);
 						require(triangle.texture == WorldDrawList::Texture::None
-							&& triangle.colour == IM_COL32(255, 0, 255, 255), "Missing Agent tile must be opaque magenta");
+							&& triangle.colour == packColour(255, 0, 255, 255), "Missing Agent tile must be opaque magenta");
 					}
 				}
 				ImDrawList adapter(ImGui::GetDrawListSharedData());
@@ -155,7 +155,7 @@ namespace
 				adapter.PushTextureID(ImGui::GetIO().Fonts->TexID);
 				adapter.PushClipRect({-1000,-1000},{2000,2000});
 				WorldDrawList adapted(&adapter); renderAgent(agent, &adapted);
-				ImVec2 lo{std::numeric_limits<float>::max(),std::numeric_limits<float>::max()}, hi{-lo.x,-lo.y};
+				Vec2 lo{std::numeric_limits<float>::max(),std::numeric_limits<float>::max()}, hi{-lo.x,-lo.y};
 				if (sprite)
 				{
 					require(list.commands().size() == 2, "Sprite pose must retain its two textured triangles");
@@ -198,13 +198,13 @@ namespace
 				adapter.PushTextureID(ImGui::GetIO().Fonts->TexID);
 				adapter.PushClipRect({-1000,-1000},{2000,2000});
 				WorldDrawList list(&adapter); renderAgent(agent, &list);
-				ImVec2 lo{FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX};
+				Vec2 lo{FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX};
 				for (auto const& vertex : adapter.VtxBuffer)
 				{
 					lo.x = std::min(lo.x, vertex.pos.x); lo.y = std::min(lo.y, vertex.pos.y);
 					hi.x = std::max(hi.x, vertex.pos.x); hi.y = std::max(hi.y, vertex.pos.y);
 				}
-				return ImVec2{hi.x-lo.x, hi.y-lo.y};
+				return Vec2{hi.x-lo.x, hi.y-lo.y};
 			};
 			auto const original = extent();
 			for (float modifier : {0.7f, 0.9f})
@@ -228,7 +228,7 @@ namespace
 		setAgentTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
 		auto humanId = world.createAgent("Human reference", 0, 0, 4.5f);
 		auto* human = world.lookupAgent(humanId).entity;
-		ImVec2 standingSize{};
+		Vec2 standingSize{};
 		for (auto pose : {core::Pose::Standing, core::Pose::Sitting, core::Pose::Lying,
 			core::Pose::Crouching, core::Pose::Crawling})
 		{
@@ -241,7 +241,7 @@ namespace
 			require(near(first.texcoords[0].x, (region.x + .5f) / atlasWidth)
 				&& near(first.texcoords[0].y, (region.y + .5f) / atlasHeight),
 				"Human artwork was rotated or mirrored at runtime");
-			ImVec2 lo{FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX};
+			Vec2 lo{FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX};
 			for (auto const& command : list.commands())
 				for (auto point : std::get<WorldDrawList::Triangle>(command).positions)
 				{
@@ -264,7 +264,7 @@ namespace
 			require(missing.commands().size() == 2, "Missing pose or Standing tile did not draw a rectangle");
 			for (auto const& command : missing.commands()) {
 				auto const& body = std::get<WorldDrawList::Triangle>(command);
-				require(body.texture == WorldDrawList::Texture::None && body.colour == IM_COL32(255, 0, 255, 255),
+				require(body.texture == WorldDrawList::Texture::None && body.colour == packColour(255, 0, 255, 255),
 					"Missing required Agent tile silently substituted artwork");
 			}
 		}
@@ -291,11 +291,11 @@ namespace
 			require(near(triangle.texcoords[0].x, (botRegion.x + .5f) / atlasWidth)
 				&& near(triangle.texcoords[0].y, (botRegion.y + .5f) / atlasHeight),
 				"CleaningBot drew another Agent's artwork");
-			ImVec2 lo{FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX};
+			Vec2 lo{FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX};
 			for (auto const& command : list.commands())
 			{
 				auto const& body = std::get<WorldDrawList::Triangle>(command);
-				require(body.colour == IM_COL32(251, 188, 4, 255),
+				require(body.colour == packColour(251, 188, 4, 255),
 					"Selected CleaningBot tile did not receive the yellow selection tint");
 				for (auto point : body.positions)
 				{

@@ -1008,7 +1008,7 @@ namespace
 		station.surfaces.emplace("corridor", SectorTileRegion{0, 0, 128, 320});
 		setSectorTileset(std::move(station), reinterpret_cast<ImTextureID>(1));
 		WorldDrawList tiles({{0, 0}, {1000, 1000}});
-		drawSectorTileSurface("corridor", &tiles, {0, 0}, {256, 240}, IM_COL32_WHITE, 2.f);
+		drawSectorTileSurface("corridor", &tiles, {0, 0}, {256, 240}, White, 2.f);
 		require(tiles.commands().size() == 4, "Station artwork must repeat once per World cell at zoom 2");
 		auto const& tile = std::get<WorldDrawList::Triangle>(tiles.commands().front());
 		float maxX{}, maxY{}, maxUvY{};
@@ -1020,9 +1020,9 @@ namespace
 		require(maxX == 128.f && maxY == 240.f && maxUvY > .74f && maxUvY < .76f,
 			"Station tile must scale to World cells and crop partial cells");
 		WorldDrawList fallback({{0, 0}, {1000, 1000}});
-		drawSectorTileSurface("room", &fallback, {0, 0}, {64, 160}, IM_COL32_WHITE);
+		drawSectorTileSurface("room", &fallback, {0, 0}, {64, 160}, White);
 		auto const& missing = std::get<WorldDrawList::Triangle>(fallback.commands().front());
-		require(missing.texture == WorldDrawList::Texture::None && missing.colour == IM_COL32(255, 0, 255, 255),
+		require(missing.texture == WorldDrawList::Texture::None && missing.colour == packColour(255, 0, 255, 255),
 			"Missing surface must render opaque magenta");
 		require(!drawSectorTileBoundary("floor", &fallback, {0, 0}, {64, 2}),
 			"Missing boundary must use the plain-line fallback");
@@ -1049,7 +1049,7 @@ namespace
 
 		WorldDrawList commands({ { -100000.0f, -100000.0f }, { 100000.0f, 100000.0f } });
 		renderSector(staircase, 1, LayerRenderStyle::Solid, false,
-			ImColor(IM_COL32_WHITE), &commands);
+			ImColor(White), &commands);
 
 		bool foundSurface = false;
 		for (auto const& command : commands.commands())
@@ -1085,7 +1085,7 @@ namespace
 
 		WorldDrawList commands({ { -100000.0f, -100000.0f }, { 100000.0f, 100000.0f } });
 		renderSector(created.lift.sector, 1, LayerRenderStyle::Solid, false,
-			ImColor(IM_COL32_WHITE), &commands);
+			ImColor(White), &commands);
 
 		bool foundCarImage = false;
 		for (auto const& command : commands.commands())

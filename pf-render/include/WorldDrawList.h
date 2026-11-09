@@ -5,7 +5,36 @@
 #include <variant>
 #include <vector>
 
-#include "imgui/imgui.h"
+#include "DrawTypes.h"
+
+// The command stream is written in the shared drawing vocabulary this module
+// owns (#996, #997): pf::render::Vec2 for positions and extents,
+// pf::render::PackedColourValue for colours, pf::render::DrawFlags for the
+// closed/open stroke flag. They are brought in unqualified here so the
+// recording API reads the way it did when it spelled ImVec2, ImU32 and
+// ImDrawFlags - but they are the shared types, not ImGui's.
+using pf::render::Vec2;
+using pf::render::Vec4;
+using pf::render::PackedColourValue;
+using pf::render::packColour;
+using pf::render::DrawFlags;
+using pf::render::DrawFlagsNone;
+using pf::render::DrawFlagsClosed;
+using pf::render::White;
+
+// Two ImGui names remain reachable from this header, and only as opaque
+// pointers, so no ImGui header version or context is needed to record a
+// World:
+//
+//   ImFont*  the explicit-font text path, replaced by the injected font
+//            metrics interface in a later step of #995;
+//   ImDrawList*  the optional test adapter, which a later step of #995
+//            moves out of the command stream into the headless harness.
+//
+// Neither is a value type carried by a command: a recorded command holds no
+// ImGui value.
+struct ImFont;
+struct ImDrawList;
 
 // CPU-side command stream for the World viewport. The GUI path submits these
 // commands to MPP; the optional ImDrawList adapter exists only for the
@@ -25,32 +54,32 @@ public:
 
 	struct ClipRectangle
 	{
-		ImVec2 minimum;
-		ImVec2 maximum;
+		Vec2 minimum;
+		Vec2 maximum;
 	};
 
 	struct Line
 	{
-		ImVec2 from;
-		ImVec2 to;
-		ImU32 colour{};
+		Vec2 from;
+		Vec2 to;
+		PackedColourValue colour{};
 		float thickness{ 1.0f };
 		ClipRectangle clip;
 	};
 
 	struct Triangle
 	{
-		ImVec2 positions[3];
-		ImVec2 texcoords[3];
-		ImU32 colour{};
+		Vec2 positions[3];
+		Vec2 texcoords[3];
+		PackedColourValue colour{};
 		Texture texture{ Texture::None };
 		ClipRectangle clip;
 	};
 
 	struct Text
 	{
-		ImVec2 position;
-		ImU32 colour{};
+		Vec2 position;
+		PackedColourValue colour{};
 		std::string value;
 		ClipRectangle clip;
 		// Explicit-font text can be tessellated for non-uniform stance
@@ -65,42 +94,42 @@ public:
 	explicit WorldDrawList(ClipRectangle initialClip);
 	explicit WorldDrawList(ImDrawList* testAdapter);
 
-	void PushClipRect(ImVec2 minimum, ImVec2 maximum, bool intersectWithCurrentClip = false);
+	void PushClipRect(Vec2 minimum, Vec2 maximum, bool intersectWithCurrentClip = false);
 	void PopClipRect();
-	ImVec2 GetClipRectMin() const;
-	ImVec2 GetClipRectMax() const;
+	Vec2 GetClipRectMin() const;
+	Vec2 GetClipRectMax() const;
 
-	void AddLine(ImVec2 from, ImVec2 to, ImU32 colour, float thickness = 1.0f);
-	void AddRect(ImVec2 minimum, ImVec2 maximum, ImU32 colour,
-		float rounding = 0.0f, ImDrawFlags flags = 0, float thickness = 1.0f);
-	void AddRectFilled(ImVec2 minimum, ImVec2 maximum, ImU32 colour,
-		float rounding = 0.0f, ImDrawFlags flags = 0);
-	void AddTriangleFilled(ImVec2 a, ImVec2 b, ImVec2 c, ImU32 colour);
-	void AddCircle(ImVec2 centre, float radius, ImU32 colour,
+	void AddLine(Vec2 from, Vec2 to, PackedColourValue colour, float thickness = 1.0f);
+	void AddRect(Vec2 minimum, Vec2 maximum, PackedColourValue colour,
+		float rounding = 0.0f, DrawFlags flags = DrawFlagsNone, float thickness = 1.0f);
+	void AddRectFilled(Vec2 minimum, Vec2 maximum, PackedColourValue colour,
+		float rounding = 0.0f, DrawFlags flags = DrawFlagsNone);
+	void AddTriangleFilled(Vec2 a, Vec2 b, Vec2 c, PackedColourValue colour);
+	void AddCircle(Vec2 centre, float radius, PackedColourValue colour,
 		int segments = 0, float thickness = 1.0f);
-	void AddCircleFilled(ImVec2 centre, float radius, ImU32 colour, int segments = 0);
-	void AddPolyline(ImVec2 const* points, int count, ImU32 colour,
-		ImDrawFlags flags, float thickness);
-	void AddText(ImVec2 position, ImU32 colour, char const* text);
-	void AddText(ImFont* font, float fontSize, ImVec2 position, ImU32 colour,
+	void AddCircleFilled(Vec2 centre, float radius, PackedColourValue colour, int segments = 0);
+	void AddPolyline(Vec2 const* points, int count, PackedColourValue colour,
+		DrawFlags flags, float thickness);
+	void AddText(Vec2 position, PackedColourValue colour, char const* text);
+	void AddText(ImFont* font, float fontSize, Vec2 position, PackedColourValue colour,
 		char const* text, char const* textEnd = nullptr, float wrapWidth = 0.0f,
-		ImVec4 const* fineClipRect = nullptr);
-	void AddImage(Texture texture, ImVec2 minimum, ImVec2 maximum,
-		ImVec2 uvMinimum, ImVec2 uvMaximum, ImU32 colour = IM_COL32_WHITE);
+		Vec4 const* fineClipRect = nullptr);
+	void AddImage(Texture texture, Vec2 minimum, Vec2 maximum,
+		Vec2 uvMinimum, Vec2 uvMaximum, PackedColourValue colour = White);
 	void AddDrawCmd();
 
 	// Transform only geometry appended since the bookmark, retaining UVs and
 	// the enclosing canvas clip. Used for bodily stance, not physical bounds.
 	size_t geometryBookmark() const;
-	void transformGeometrySince(size_t bookmark, ImVec2 pivot, ImVec2 scale,
+	void transformGeometrySince(size_t bookmark, Vec2 pivot, Vec2 scale,
 		bool clockwiseQuarterTurn);
 
 	std::vector<Command> const& commands() const { return mCommands; }
 
 private:
 	ClipRectangle currentClip() const;
-	void addTriangle(ImVec2 a, ImVec2 b, ImVec2 c, ImVec2 uvA, ImVec2 uvB,
-		ImVec2 uvC, ImU32 colour, Texture texture);
+	void addTriangle(Vec2 a, Vec2 b, Vec2 c, Vec2 uvA, Vec2 uvB,
+		Vec2 uvC, PackedColourValue colour, Texture texture);
 
 	ImDrawList* mTestAdapter{};
 	std::vector<ClipRectangle> mClipStack;

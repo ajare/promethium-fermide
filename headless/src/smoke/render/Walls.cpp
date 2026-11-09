@@ -62,7 +62,7 @@ namespace
 	}
 
 	// The colour Render.cpp strokes a Location's floor, ceiling, and walls with.
-	ImU32 const kWallColour = ImU32(ImColor(0, 0, 0));
+	PackedColourValue const kWallColour = PackedColourValue(ImColor(0, 0, 0));
 	ImColor const kRoomColour(192, 192, 255);
 
 	// The viewport-qualified draw list: the plain form needs a current window,

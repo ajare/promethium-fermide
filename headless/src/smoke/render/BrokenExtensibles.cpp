@@ -26,11 +26,11 @@ namespace
 			{
 				Scene scene(kind, false); scene.device->extend(); scene.device->update(scene.device->getExtendRetractTime() * fraction);
 				auto draw = ImGui::GetBackgroundDrawList(ImGui::GetMainViewport());
-				auto physicalColour = kind == Kind::Bridge ? ImU32(ImColor(0, 255, 0)) : ImU32(ImColor(128, 128, 192));
-				auto warningColour = ImU32(ImColor(255, 166, 26, 255));
+				auto physicalColour = kind == Kind::Bridge ? PackedColourValue(ImColor(0, 255, 0)) : PackedColourValue(ImColor(128, 128, 192));
+				auto warningColour = PackedColourValue(ImColor(255, 166, 26, 255));
 				auto physical = [&]
 				{
-					std::vector<std::tuple<float, float, ImU32>> vertices;
+					std::vector<std::tuple<float, float, PackedColourValue>> vertices;
 					for (auto const& vertex : draw->VtxBuffer)
 						if (vertex.col == physicalColour) vertices.emplace_back(vertex.pos.x, vertex.pos.y, vertex.col);
 					return vertices;

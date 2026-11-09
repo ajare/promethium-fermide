@@ -43,7 +43,7 @@ namespace
 		return false;
 	}
 
-	ImVec2 textPosition(WorldDrawList const& list, std::string const& value)
+	Vec2 textPosition(WorldDrawList const& list, std::string const& value)
 	{
 		for (auto const& command : list.commands())
 			if (auto text = std::get_if<WorldDrawList::Text>(&command);
@@ -51,7 +51,7 @@ namespace
 		throw std::runtime_error("Missing badge text: " + value);
 	}
 
-	bool hasSolidColour(WorldDrawList const& list, ImU32 colour)
+	bool hasSolidColour(WorldDrawList const& list, PackedColourValue colour)
 	{
 		for (auto const& command : list.commands())
 			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
@@ -182,7 +182,7 @@ void agentPaths(smoke::Context const&)
 	WorldDrawList successfulReplan({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
 	renderAgent(agent, &successfulReplan);
 	require(!hasText(successfulReplan, "?")
-		&& !hasSolidColour(successfulReplan, IM_COL32(40, 160, 72, 255)),
+		&& !hasSolidColour(successfulReplan, packColour(40, 160, 72, 255)),
 		"A successful replan rendered the obsolete result phase");
 
 	agent->pausePathing();
@@ -198,7 +198,7 @@ void agentPaths(smoke::Context const&)
 	WorldDrawList stacked({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
 	renderAgent(agent, &stacked);
 	require(hasText(stacked, "!")
-		&& hasSolidColour(stacked, IM_COL32(230, 126, 34, 255)),
+		&& hasSolidColour(stacked, packColour(230, 126, 34, 255)),
 		"A queued Agent did not render a white exclamation mark in an orange box");
 	require(!hasText(stacked, "?"), "Queue displayed an obsolete replan badge");
 
@@ -214,7 +214,7 @@ void agentPaths(smoke::Context const&)
 	WorldDrawList failedReplan({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
 	renderAgent(agent, &failedReplan);
 	require(!hasText(failedReplan, "?")
-		&& !hasSolidColour(failedReplan, IM_COL32(200, 48, 48, 255)),
+		&& !hasSolidColour(failedReplan, packColour(200, 48, 48, 255)),
 		"A failed replan rendered the obsolete result phase");
 
 	auto const plannerId = world.createAgent("Planner", corridor, 0, 3.25f);
@@ -226,7 +226,7 @@ void agentPaths(smoke::Context const&)
 		WorldDrawList planning({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
 		renderAgent(planner, &planning);
 		require(hasText(planning, "?") && !hasText(planning, "!")
-			&& hasSolidColour(planning, IM_COL32(96, 96, 96, 255)),
+			&& hasSolidColour(planning, packColour(96, 96, 96, 255)),
 			"Route planning must render only a neutral grey question badge on every frame");
 		gUISettings.renderAgentDebug = false;
 		WorldDrawList hidden({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
@@ -284,7 +284,7 @@ void agentPaths(smoke::Context const&)
 	bool planRoute = false;
 	for (auto const& command : pausedPlan.commands())
 		if (auto line = std::get_if<WorldDrawList::Line>(&command);
-			line && line->colour == IM_COL32(255, 196, 0, 240)) planRoute = true;
+			line && line->colour == packColour(255, 196, 0, 240)) planRoute = true;
 	require(planRoute, "Main view shows paused selected-Agent route but Location plan omits it");
 	require(!agent->getPath(), "Rendering paused route mutated the Agent's live Path");
 

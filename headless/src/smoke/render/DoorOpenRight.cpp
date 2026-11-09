@@ -53,9 +53,9 @@ namespace
 	}
 
 	// The colours Render.cpp paints the OpenRight Door with.
-	ImU32 const kDoorLeafColour = ImU32(ImColor(64, 192, 255));      // renderDoor*'s leaf
-	ImU32 const kApertureFillColour = ImU32(ImColor(224, 224, 255)); // BackLocationColour
-	ImU32 const kThresholdOutlineColour = ImU32(ImColor(0, 0, 0));    // wireframe thresholds
+	PackedColourValue const kDoorLeafColour = PackedColourValue(ImColor(64, 192, 255));      // renderDoor*'s leaf
+	PackedColourValue const kApertureFillColour = PackedColourValue(ImColor(224, 224, 255)); // BackLocationColour
+	PackedColourValue const kThresholdOutlineColour = PackedColourValue(ImColor(0, 0, 0));    // wireframe thresholds
 	// The front Room's own surface fill. Deliberately not black, so the
 	// wireframe threshold outlines stay distinguishable from it.
 	ImColor const kFrontRoomColour(192, 192, 255);
@@ -105,7 +105,7 @@ namespace
 		bool painted() const { return vertexCount > 0; }
 	};
 
-	ColourExtent extentOf(ImDrawList const* drawList, ImU32 colour)
+	ColourExtent extentOf(ImDrawList const* drawList, PackedColourValue colour)
 	{
 		ColourExtent extent;
 		for (int i = 0; i < drawList->VtxBuffer.Size; ++i)
@@ -122,7 +122,7 @@ namespace
 
 	// The ClipRect of the draw command that first consumes a vertex of the
 	// given colour - the clip the renderer painted that fill under.
-	ImVec4 clipCovering(ImDrawList const* drawList, ImU32 colour)
+	ImVec4 clipCovering(ImDrawList const* drawList, PackedColourValue colour)
 	{
 		for (int i = 0; i < drawList->VtxBuffer.Size; ++i)
 		{
@@ -378,14 +378,14 @@ namespace
 			{
 				auto scene = bulkhead ? buildBulkheadScene() : buildOpenRightDoorScene();
 				scene.door->setOpenStyle(style); driveTo(scene, fraction);
-				auto colour = bulkhead ? ImU32(ImColor(128, 192, 182)) : kDoorLeafColour;
+				auto colour = bulkhead ? PackedColourValue(ImColor(128, 192, 182)) : kDoorLeafColour;
 				auto drawList = testDrawList(); drawList->_ResetForNewFrame();
 				renderPass(scene, LayerRenderStyle::Solid, drawList);
 				auto leaf = extentOf(drawList, colour);
 				require(scene.world->setDoorBroken(scene.door->getTraversalResourceId(), true), "Canvas fixture break failed");
 				drawList->_ResetForNewFrame(); renderPass(scene, LayerRenderStyle::Solid, drawList);
 				auto brokenLeaf = extentOf(drawList, colour);
-				auto warning = extentOf(drawList, ImU32(ImColor(255, 166, 26, 255)));
+				auto warning = extentOf(drawList, PackedColourValue(ImColor(255, 166, 26, 255)));
 				require(warning.painted() && warning.maxY < toScreenY(scene.door->getSize().y),
 					"Broken warning missing or obscuring physical leaf");
 				require(leaf.vertexCount == brokenLeaf.vertexCount, "Warning changed leaf geometry");
@@ -395,10 +395,10 @@ namespace
 					near(brokenLeaf.minY, leaf.minY, "Frozen leaf top"); near(brokenLeaf.maxY, leaf.maxY, "Frozen leaf bottom");
 				}
 				drawList->_ResetForNewFrame(); renderPass(scene, LayerRenderStyle::Wireframe, drawList);
-				require(extentOf(drawList, ImU32(ImColor(255, 166, 26, 255))).painted(), "Wireframe omitted condition warning");
+				require(extentOf(drawList, PackedColourValue(ImColor(255, 166, 26, 255))).painted(), "Wireframe omitted condition warning");
 				scene.world->setDoorBroken(scene.door->getTraversalResourceId(), false);
 				drawList->_ResetForNewFrame(); renderPass(scene, LayerRenderStyle::Solid, drawList);
-				require(!extentOf(drawList, ImU32(ImColor(255, 166, 26, 255))).painted()
+				require(!extentOf(drawList, PackedColourValue(ImColor(255, 166, 26, 255))).painted()
 					&& std::abs(scene.door->getOpenPercentage() - fraction) < 0.0001f, "Restore warning/position mismatch");
 			}
 	}

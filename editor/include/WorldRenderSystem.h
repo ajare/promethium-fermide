@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "imgui/imgui.h"
+#include "DrawTypes.h"
 #include "ApplicationAgentTypes.h"
 
 class WorldDrawList;
@@ -20,10 +21,12 @@ void resizeWorldRenderSystem(std::size_t drawableWidth, std::size_t drawableHeig
 void destroyWorldRenderSystem();
 
 // Renders one CPU command stream into the MPP-owned offscreen target and
-// returns its OpenGL texture name for composition by ImGui.
+// returns its OpenGL texture name for composition by ImGui. The canvas
+// position and size cross on the shared drawing types (#997).
 enum class WorldCanvas { World, LocationPlan };
 std::uint32_t renderWorldCommands(WorldDrawList const& commands,
-	ImVec2 canvasPosition, ImVec2 canvasSize, WorldCanvas canvas = WorldCanvas::World);
+	pf::render::Vec2 canvasPosition, pf::render::Vec2 canvasSize,
+	WorldCanvas canvas = WorldCanvas::World);
 
 // Install the selected sector artwork before recording canvas commands.
 // An invalid resource installs magenta fallback and returns a diagnostic.

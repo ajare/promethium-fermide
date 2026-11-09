@@ -25,13 +25,13 @@ namespace
 		auto render = [&](LayerRenderStyle style)
 		{ draw->_ResetForNewFrame(); draw->PushClipRect(ImVec2(0, 0), ImVec2(1600, 720), false);
 			renderSector(scene.world->getSector(scene.owner), 2, style, false, ImColor(192, 192, 255), draw); draw->PopClipRect(); };
-		auto warningColour = ImU32(ImColor(255, 166, 26, 255));
+		auto warningColour = PackedColourValue(ImColor(255, 166, 26, 255));
 		auto geometry = [&]
 		{
-			std::vector<std::tuple<float, float, ImU32>> vertices;
+			std::vector<std::tuple<float, float, PackedColourValue>> vertices;
 			for (auto const& v : draw->VtxBuffer)
 				if ((v.col | IM_COL32_A_MASK) != warningColour
-					&& (v.col | IM_COL32_A_MASK) != ImU32(ImColor(30, 20, 0, 255))) vertices.emplace_back(v.pos.x, v.pos.y, v.col);
+					&& (v.col | IM_COL32_A_MASK) != PackedColourValue(ImColor(30, 20, 0, 255))) vertices.emplace_back(v.pos.x, v.pos.y, v.col);
 			return vertices;
 		};
 		render(LayerRenderStyle::Solid); auto baseline = geometry(); require(!baseline.empty(), "Missing coupled vehicle geometry");

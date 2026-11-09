@@ -10,6 +10,19 @@
 
 namespace
 {
+	// The palette tray is editor chrome geometry and stays ImGui-typed; the
+	// World command stream it records into speaks the shared drawing types
+	// (#997). These two convert at that crossing and nowhere else.
+	ImVec2 chromePoint(Vec2 point)
+	{
+		return ImVec2{ point.x, point.y };
+	}
+
+	Vec2 recordedPoint(ImVec2 point)
+	{
+		return Vec2{ point.x, point.y };
+	}
+
 	std::string placementName(core::World const& world, core::FurnitureDefinition const& definition)
 	{
 		size_t limit = core::Marker::MaxNameBytes;
@@ -103,7 +116,7 @@ bool LocationPlan::isOpen(std::shared_ptr<core::World> const& world)
 }
 
 bool LocationPlan::renderPaletteRow(std::shared_ptr<core::World> const& world,
-	WorldDrawList& commands, ImVec2 trayTopLeft, bool hovered)
+	WorldDrawList& commands, Vec2 trayTopLeft, bool hovered)
 {
 	if (!isOpen(world)) return false;
 	auto catalogue = world->furnitureCatalogue();
@@ -119,7 +132,7 @@ bool LocationPlan::renderPaletteRow(std::shared_ptr<core::World> const& world,
 	int capacity = count > static_cast<size_t>(paletteColumnCount()) ? paletteColumnCount() - 1 : paletteColumnCount();
 	if (!count)
 	{
-		auto min = paletteFurnitureSlotMin(trayTopLeft, 0);
+		auto const min = recordedPoint(paletteFurnitureSlotMin(chromePoint(trayTopLeft), 0));
 		commands.AddText(min, IM_COL32(180, 180, 190, 255),
 			catalogue ? "No Furniture definitions" : "No Furniture catalogue");
 	}
@@ -127,8 +140,9 @@ bool LocationPlan::renderPaletteRow(std::shared_ptr<core::World> const& world,
 	if (catalogue) for (auto const& [key, definition] : catalogue->definitions())
 	{
 		if (index++ < mPage * capacity || index > (mPage + 1) * capacity) continue;
-		auto min = paletteFurnitureSlotMin(trayTopLeft, static_cast<int>((index - 1) % capacity));
-		ImVec2 max{min.x + PaletteSlotWidth, min.y + PaletteSlotSize};
+		auto const min = recordedPoint(
+			paletteFurnitureSlotMin(chromePoint(trayTopLeft), static_cast<int>((index - 1) % capacity)));
+		Vec2 max{min.x + PaletteSlotWidth, min.y + PaletteSlotSize};
 		bool over = hovered && io.MousePos.x >= min.x && io.MousePos.x < max.x
 			&& io.MousePos.y >= min.y && io.MousePos.y < max.y;
 		commands.AddRect(min, max, over ? IM_COL32(251, 188, 4, 255) : IM_COL32(180, 180, 190, 180), 3);
@@ -137,9 +151,9 @@ bool LocationPlan::renderPaletteRow(std::shared_ptr<core::World> const& world,
 		float tileHeight = 28.f / float(definition.maxY - definition.minY);
 		for (auto const& tile : definition.tiles)
 		{
-			ImVec2 a{min.x + 3 + (tile.x - definition.minX) * tileWidth,
+			Vec2 a{min.x + 3 + (tile.x - definition.minX) * tileWidth,
 				min.y + 4 + (definition.maxY - tile.y - 1) * tileHeight};
-			ImVec2 b{a.x + tileWidth, a.y + tileHeight};
+			Vec2 b{a.x + tileWidth, a.y + tileHeight};
 			if (!drawFurnitureSprite(tile.image.c_str(), &commands, a, b))
 				commands.AddRectFilled(a, b, IM_COL32(255, 0, 255, 255));
 		}
@@ -157,15 +171,15 @@ bool LocationPlan::renderPaletteRow(std::shared_ptr<core::World> const& world,
 	}
 	if (count > static_cast<size_t>(capacity))
 	{
-		auto min = paletteFurnitureSlotMin(trayTopLeft, capacity);
-		ImVec2 max{min.x + PaletteSlotWidth, min.y + PaletteSlotSize};
+		auto const min = recordedPoint(paletteFurnitureSlotMin(chromePoint(trayTopLeft), capacity));
+		Vec2 max{min.x + PaletteSlotWidth, min.y + PaletteSlotSize};
 		commands.AddRect(min, max, IM_COL32(180, 180, 190, 180), 3);
 		commands.AddText({min.x + 4, min.y + 10}, IM_COL32_WHITE, "Next page");
 		if (hovered && io.MousePos.x >= min.x && io.MousePos.x < max.x
 			&& io.MousePos.y >= min.y && io.MousePos.y < max.y && ImGui::IsMouseClicked(0))
 			mPage = (mPage + 1) % ((count + capacity - 1) / capacity);
 	}
-	auto row = paletteFurnitureSlotMin(trayTopLeft, 0);
+	auto const row = recordedPoint(paletteFurnitureSlotMin(chromePoint(trayTopLeft), 0));
 	return mDragArmed || (hovered && io.MousePos.x >= row.x
 		&& io.MousePos.x < trayTopLeft.x + paletteTraySize(true).x - PalettePadding
 		&& io.MousePos.y >= row.y && io.MousePos.y < row.y + PaletteSlotSize);
@@ -223,11 +237,15 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 		if (!mDeleteDiagnostic.empty()) ImGui::TextWrapped("%s", mDeleteDiagnostic.c_str());
 		ImGui::TextUnformatted("World X / Local depth (ordering) - edges cyan / selected route yellow");
 		ImGui::TextUnformatted("Vertices: usable gold / external green / other cyan");
-		auto position = ImGui::GetCursorScreenPos();
-		auto size = ImGui::GetContentRegionAvail();
-		if (size.x > 0 && size.y > 0)
+		auto const chromeOrigin = ImGui::GetCursorScreenPos();
+		auto const chromeSize = ImGui::GetContentRegionAvail();
+		if (chromeSize.x > 0 && chromeSize.y > 0)
 		{
-			ImGui::InvisibleButton("##LocationPlanViewport", size);
+			ImGui::InvisibleButton("##LocationPlanViewport", chromeSize);
+			// The plan viewport records on the shared drawing types; the ImGui
+			// chrome origin and extent cross the seam here (#997).
+			Vec2 const position{chromeOrigin.x, chromeOrigin.y};
+			Vec2 const size{chromeSize.x, chromeSize.y};
 			WorldDrawList commands({position, {position.x + size.x, position.y + size.y}});
 			auto selected = selectedFurnitureInstance(world);
 			renderLocationPlanGrid(commands, *location, position, size, mDepthRows, world.get(), mWorldLevel,
@@ -247,7 +265,7 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 			if (!mDragging && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
 			{
 				if (auto name = locationPlanVertexNameAtPosition(*world, *location, mWorldLevel,
-					io.MousePos, position, size, mDepthRows))
+					recordedPoint(io.MousePos), position, size, mDepthRows))
 				{
 					ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
 					ImGui::SetTooltip("%s", name->c_str());

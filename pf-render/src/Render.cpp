@@ -753,14 +753,14 @@ static void renderBrokenWarning(Device const& device, WorldDrawList* drawList, b
 	else device.getFullShape(low, high);
 	core::Vector2 anchor{ (low.x + high.x) * 0.5f, high.y };
 	transformPosition(anchor);
-	drawList->AddTriangleFilled(ImVec2(anchor.x, anchor.y - 16.0f),
-		ImVec2(anchor.x - 7.0f, anchor.y - 3.0f),
-		ImVec2(anchor.x + 7.0f, anchor.y - 3.0f), ImColor(255, 166, 26, 255));
+	drawList->AddTriangleFilled(Vec2(anchor.x, anchor.y - 16.0f),
+		Vec2(anchor.x - 7.0f, anchor.y - 3.0f),
+		Vec2(anchor.x + 7.0f, anchor.y - 3.0f), ImColor(255, 166, 26, 255));
 	auto const ink = ImU32(ImColor(30, 20, 0, 255));
-	drawList->AddLine(ImVec2(anchor.x, anchor.y - 12.0f),
-		ImVec2(anchor.x, anchor.y - 8.0f), ink, 2.0f);
-	drawList->AddRectFilled(ImVec2(anchor.x - 1.0f, anchor.y - 6.0f),
-		ImVec2(anchor.x + 1.0f, anchor.y - 4.0f), ink);
+	drawList->AddLine(Vec2(anchor.x, anchor.y - 12.0f),
+		Vec2(anchor.x, anchor.y - 8.0f), ink, 2.0f);
+	drawList->AddRectFilled(Vec2(anchor.x - 1.0f, anchor.y - 6.0f),
+		Vec2(anchor.x + 1.0f, anchor.y - 4.0f), ink);
 }
 
 void renderDoor(shared_ptr<const core::Door> door, uint32_t layer, LayerRenderStyle style, bool selected, WorldDrawList* drawList)
@@ -797,8 +797,8 @@ void renderDoor(shared_ptr<const core::Door> door, uint32_t layer, LayerRenderSt
 		door->getFullShape(bounds0, bounds1);
 		transformPosition(bounds0);
 		transformPosition(bounds1);
-		ImVec2 topLeft{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
-		ImVec2 bottomRight{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
+		Vec2 topLeft{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
+		Vec2 bottomRight{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
 		drawList->AddRectFilled(topLeft, bottomRight, ImColor(255, 255, 0, 48));
 		drawList->AddRect(topLeft, bottomRight, SelectedColour, 0.0f, 0, 2.0f);
 	}
@@ -822,8 +822,8 @@ void renderBulkheadDoor(shared_ptr<const core::BulkheadDoor> door, uint32_t /* l
 	transformPosition(bounds0);
 	transformPosition(bounds1);
 
-	auto topLeft = ImVec2{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
-	auto bottomRight = ImVec2{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
+	auto topLeft = Vec2{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
+	auto bottomRight = Vec2{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
 	auto doorColour = ImColor(128, 192, 182);
 	if (style == LayerRenderStyle::Wireframe)
 	{
@@ -964,12 +964,12 @@ void renderBoothWindow(shared_ptr<const core::BoothWindow> booth, uint32_t layer
 	core::Vector2 from, to;
 	booth->getFullShape(from, to);
 	transformPosition(from); transformPosition(to);
-	ImVec2 topLeft{min(from.x, to.x), min(from.y, to.y)};
-	ImVec2 bottomRight{max(from.x, to.x), max(from.y, to.y)};
+	Vec2 topLeft{min(from.x, to.x), min(from.y, to.y)};
+	Vec2 bottomRight{max(from.x, to.x), max(from.y, to.y)};
 	// These insets are the transparent centre of the supplied 52 x 48 frame.
 	float const width = bottomRight.x - topLeft.x, height = bottomRight.y - topLeft.y;
-	ImVec2 innerMin{topLeft.x + width * 5.0f / 52.0f, topLeft.y + height * 5.0f / 48.0f};
-	ImVec2 innerMax{bottomRight.x - width * 5.0f / 52.0f, bottomRight.y - height * 5.0f / 48.0f};
+	Vec2 innerMin{topLeft.x + width * 5.0f / 52.0f, topLeft.y + height * 5.0f / 48.0f};
+	Vec2 innerMax{bottomRight.x - width * 5.0f / 52.0f, bottomRight.y - height * 5.0f / 48.0f};
 	float const travel = (innerMax.y - innerMin.y) * booth->getProgress();
 	if (booth->getProgress() > 0.0f)
 	{
@@ -979,8 +979,8 @@ void renderBoothWindow(shared_ptr<const core::BoothWindow> booth, uint32_t layer
 	}
 	// Only the shutter translates. Its clip intersects any enclosing aperture.
 	drawList->PushClipRect(innerMin, innerMax, true);
-	ImVec2 shutterMin{innerMin.x, innerMin.y - travel};
-	ImVec2 shutterMax{innerMax.x, innerMax.y - travel};
+	Vec2 shutterMin{innerMin.x, innerMin.y - travel};
+	Vec2 shutterMax{innerMax.x, innerMax.y - travel};
 	if (!drawObjectSprite("booth-window-shutter", drawList, shutterMin, shutterMax))
 		drawList->AddRectFilled(shutterMin, shutterMax, ImColor(90, 106, 116));
 	drawList->PopClipRect();
@@ -1031,8 +1031,8 @@ void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRe
 		window->getFullShape(bounds0, bounds1);
 		transformPosition(bounds0);
 		transformPosition(bounds1);
-		ImVec2 topLeft{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
-		ImVec2 bottomRight{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
+		Vec2 topLeft{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
+		Vec2 bottomRight{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
 		drawList->AddRectFilled(topLeft, bottomRight, ImColor(255, 255, 0, 48));
 		drawList->AddRect(topLeft, bottomRight, SelectedColour, 0.0f, 0, 2.0f);
 	}
@@ -1077,8 +1077,8 @@ void renderPhysicalControl(shared_ptr<const core::Button> button, uint32_t /* la
 	}
 	if (selected)
 	{
-		ImVec2 topLeft{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
-		ImVec2 bottomRight{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
+		Vec2 topLeft{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
+		Vec2 bottomRight{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
 		drawList->AddRect(topLeft, bottomRight, SelectedColour, 0.0f, 0, 2.0f);
 	}
 }
@@ -1116,7 +1116,7 @@ void renderMarker(shared_ptr<const core::Marker> marker, uint32_t /* layer */, L
 	auto fontSize = sourceSize * MarkerIconSize * gUISettings.worldZoom
 		/ max(max(sourceBounds.x, sourceBounds.y), 1.0f);
 	auto size = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, ICON_FA_MAP_MARKER_ALT);
-	ImVec2 topLeft{ point.x - size.x * 0.5f, point.y - size.y };
+	Vec2 topLeft{ point.x - size.x * 0.5f, point.y - size.y };
 	if (selected)
 		drawList->AddRect({ topLeft.x - 3.0f, topLeft.y - 3.0f },
 			{ topLeft.x + size.x + 3.0f, topLeft.y + size.y + 3.0f },
@@ -1205,8 +1205,8 @@ void renderPlatformLift(shared_ptr<const core::LiftSectorObject> const& platform
 	platformLift->getBounds(bounds0, bounds1);
 	transformPosition(bounds0);
 	transformPosition(bounds1);
-	ImVec2 topLeft{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
-	ImVec2 bottomRight{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
+	Vec2 topLeft{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
+	Vec2 bottomRight{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
 	drawList->AddRect(topLeft, bottomRight, ImColor(128, 128, 192, 72));
 
 	core::Vector2 car0, car1;
@@ -1268,20 +1268,20 @@ void renderStairwell(shared_ptr<const core::Stairwell> stairwell, uint32_t /* la
 	auto screenMax = worldMax;
 	transformPosition(screenMin);
 	transformPosition(screenMax);
-	ImVec2 topLeft{ min(screenMin.x, screenMax.x), min(screenMin.y, screenMax.y) };
-	ImVec2 bottomRight{ max(screenMin.x, screenMax.x), max(screenMin.y, screenMax.y) };
+	Vec2 topLeft{ min(screenMin.x, screenMax.x), min(screenMin.y, screenMax.y) };
+	Vec2 bottomRight{ max(screenMin.x, screenMax.x), max(screenMin.y, screenMax.y) };
 	drawList->AddRectFilled(topLeft, bottomRight, ImColor(255, 255, 255));
 
 	auto toScreen = [&](core::Vector2 point)
 	{
 		point += worldMin;
 		transformPosition(point);
-		return ImVec2{ point.x, point.y };
+		return Vec2{ point.x, point.y };
 	};
 
 	// Stairwell::getLevelPath is also used to place the Graph vertices. Build one
 	// continuous polyline so adjacent flights share their exact level endpoint.
-	vector<ImVec2> pathPoints;
+	vector<Vec2> pathPoints;
 	if (stairwell->getLevelsHigh() > 1)
 		pathPoints.reserve(1 + (stairwell->getLevelsHigh() - 1) * 3);
 	for (uint32_t level = 0; level + 1 < stairwell->getLevelsHigh(); ++level)
@@ -1295,7 +1295,7 @@ void renderStairwell(shared_ptr<const core::Stairwell> stairwell, uint32_t /* la
 	for (uint32_t level = 0; level < stairwell->getLevelsHigh(); ++level)
 		for (auto const& platform : stairwell->getLandingPaths(level))
 		{
-			array<ImVec2, 2> points{toScreen(platform[0]), toScreen(platform[1])};
+			array<Vec2, 2> points{toScreen(platform[0]), toScreen(platform[1])};
 			drawList->AddPolyline(points.data(), 2, ImColor(223, 223, 223), ImDrawFlags_None, 10.0f);
 			drawList->AddPolyline(points.data(), 2, ImColor(0, 0, 0), ImDrawFlags_None, 4.0f);
 		}
@@ -1330,7 +1330,7 @@ void renderStaircase(shared_ptr<const core::Staircase> staircase, WorldDrawList*
 	{
 		core::Vector2 point{ origin.x + x, origin.y + y };
 		transformPosition(point);
-		return ImVec2{ point.x, point.y };
+		return Vec2{ point.x, point.y };
 	};
 	auto drawSteps = [&](auto const& segments, ImU32 colour, float thickness)
 	{
@@ -1343,7 +1343,7 @@ void renderStaircase(shared_ptr<const core::Staircase> staircase, WorldDrawList*
 	{
 		// Each L-shaped tread/riser advances along the incline at the Escalator's
 		// world speed, then wraps to the opposite endpoint.
-		vector<array<ImVec2, 3>> segments;
+		vector<array<Vec2, 3>> segments;
 		segments.reserve(count);
 		float const step = 1.0f / (float)count;
 		float const phase = staircase->getAnimationPhase();
@@ -1364,7 +1364,7 @@ void renderStaircase(shared_ptr<const core::Staircase> staircase, WorldDrawList*
 		return;
 	}
 
-	vector<ImVec2> points;
+	vector<Vec2> points;
 	points.reserve(count * 2 + 1);
 	points.push_back(toScreen(path[0].x, path[0].y));
 	for (uint32_t i = 0; i < count; ++i)
@@ -1644,8 +1644,8 @@ namespace
 	void drawAgentDebugBadge(WorldDrawList* drawList, ImFont* font, char const* symbol,
 		ImU32 boxColour, float centreX, float side, float gap, float& bottom)
 	{
-		ImVec2 const minimum{ centreX - side * 0.5f, bottom - side };
-		ImVec2 const maximum{ centreX + side * 0.5f, bottom };
+		Vec2 const minimum{ centreX - side * 0.5f, bottom - side };
+		Vec2 const maximum{ centreX + side * 0.5f, bottom };
 		drawList->AddRectFilled(minimum, maximum, boxColour);
 		auto const textSize = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.0f, symbol);
 		drawList->AddText({ centreX - textSize.x * 0.5f,
@@ -1682,8 +1682,8 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 			* CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom;
 		auto const scale = min(standardWidth / standingTileSize->x, standardHeight / standingTileSize->y)
 			* agent->getEffectiveHeightModifier().value;
-		ImVec2 size{tileSize->x * scale, tileSize->y * scale};
-		ImVec2 minimum{(pos0.x + pos1.x - size.x) * .5f, pos0.y - size.y};
+		Vec2 size{tileSize->x * scale, tileSize->y * scale};
+		Vec2 minimum{(pos0.x + pos1.x - size.x) * .5f, pos0.y - size.y};
 		drawAgentSprite(agent->getPoseImageTile().c_str(), drawList, minimum,
 			{minimum.x + size.x, minimum.y + size.y}, colour);
 	}
@@ -1933,7 +1933,7 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 			float centreY = (bounds0.y + bounds1.y) * 0.5f;
 			float half = min((bounds1.x - bounds0.x) * 0.3f, 30.0f);
 			float direction = chamber->isLeftToRight() ? 1.0f : -1.0f;
-			ImVec2 tip{ centreX + direction * half, centreY };
+			Vec2 tip{ centreX + direction * half, centreY };
 			drawList->AddLine({ centreX - direction * half, centreY }, tip, IM_COL32_WHITE, 2);
 			drawList->AddLine(tip, { tip.x - direction * 8, centreY - 6 }, IM_COL32_WHITE, 2);
 			drawList->AddLine(tip, { tip.x - direction * 8, centreY + 6 }, IM_COL32_WHITE, 2);
@@ -2135,8 +2135,8 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		sector->getLayerIndex(), layer,
 		gUISettings.selectionMode == UISettings::SelectionMode::Sector))
 	{
-		ImVec2 topLeft{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
-		ImVec2 bottomRight{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
+		Vec2 topLeft{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
+		Vec2 bottomRight{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
 		drawList->AddRect(topLeft, bottomRight, SelectedColour, 0.0f, 0, 3.0f);
 	}
 }

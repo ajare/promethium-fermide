@@ -29,13 +29,13 @@ namespace
 		};
 		auto geometry = [&]
 		{
-			std::vector<std::tuple<float, float, ImU32>> vertices;
+			std::vector<std::tuple<float, float, PackedColourValue>> vertices;
 			for (auto const& vertex : draw->VtxBuffer)
-				if (vertex.col == IM_COL32(32, 32, 32, 255) || vertex.col == IM_COL32(220, 220, 220, 255))
+				if (vertex.col == packColour(32, 32, 32, 255) || vertex.col == packColour(220, 220, 220, 255))
 					vertices.emplace_back(vertex.pos.x, vertex.pos.y, vertex.col);
 			return vertices;
 		};
-		auto warningColour = ImU32(ImColor(255, 166, 26, 255));
+		auto warningColour = PackedColourValue(ImColor(255, 166, 26, 255));
 		render(LayerRenderStyle::Solid); auto baseline = geometry(); require(!baseline.empty(), "Missing Escalator steps");
 		scene.world->setEscalatorBroken(scene.owner, true); scene.stairs->update(100); render(LayerRenderStyle::Solid);
 		require(geometry() == baseline && scene.stairs->getDescription().find("Broken") != std::string::npos, "Broken changed physical geometry/missing status");

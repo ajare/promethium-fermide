@@ -50,7 +50,7 @@ namespace
 	}
 
 	// The Solid-pass Layer fill renderSectors() passes down as ForeLocationColour.
-	ImU32 const kForeLocationFill = ImU32(ImColor(192, 192, 255));
+	PackedColourValue const kForeLocationFill = PackedColourValue(ImColor(192, 192, 255));
 
 	// The scene: one Layer holding Rooms on the ground, on level 2 (just above
 	// a three-level viewport's initial range), and on the topmost level of an
@@ -124,9 +124,9 @@ namespace
 	// Sample the painter-ordered command stream, respecting nested scissor
 	// rectangles. These scenes use opaque untextured fills and sample away
 	// from outlines and text.
-	ImU32 colourAt(WorldDrawList const& draws, ImVec2 point)
+	PackedColourValue colourAt(WorldDrawList const& draws, Vec2 point)
 	{
-		ImU32 result = 0;
+		PackedColourValue result = 0;
 		for (auto const& command : draws.commands())
 		{
 			auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
@@ -134,7 +134,7 @@ namespace
 			auto const& clip = triangle->clip;
 			if (point.x < clip.minimum.x || point.x >= clip.maximum.x
 				|| point.y < clip.minimum.y || point.y >= clip.maximum.y) continue;
-			auto cross = [point](ImVec2 a, ImVec2 b)
+			auto cross = [point](Vec2 a, Vec2 b)
 				{ return (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x); };
 			auto const a = cross(triangle->positions[0], triangle->positions[1]);
 			auto const b = cross(triangle->positions[1], triangle->positions[2]);
@@ -146,7 +146,7 @@ namespace
 	}
 
 	// How many vertices of the given colour fall inside the rectangle.
-	int verticesIn(ImDrawList const* drawList, ImU32 colour, ScreenRect const& rect)
+	int verticesIn(ImDrawList const* drawList, PackedColourValue colour, ScreenRect const& rect)
 	{
 		int count = 0;
 		for (int i = 0; i < drawList->VtxBuffer.Size; ++i)
@@ -322,9 +322,9 @@ void nestedWindowsKeepTheirScissors()
 		return colourAt(draws, { x * CORE_CELL_WIDTH_PIXELS,
 			gUISettings.worldViewportHeight - y * CORE_LEVEL_HEIGHT_PIXELS });
 	};
-	require(sample((middleMin.x + frontMax.x) * 0.5f) == ImU32(ImColor(23, 67, 109)),
+	require(sample((middleMin.x + frontMax.x) * 0.5f) == PackedColourValue(ImColor(23, 67, 109)),
 		"Aligned Windows did not reveal the third Layer");
-	require(sample((frontMin.x + middleMin.x) * 0.5f) == ImU32(ImColor(224, 224, 255)),
+	require(sample((frontMin.x + middleMin.x) * 0.5f) == PackedColourValue(ImColor(224, 224, 255)),
 		"Deeper Window escaped its own scissor into the middle Room");
 	require(sample((frontMax.x + middleMax.x) * 0.5f) == kForeLocationFill,
 		"Deeper Window escaped the front Window's scissor");
@@ -362,7 +362,7 @@ void nestedOpenDoorsRevealTheBackLayer()
 	require(colourAt(draws, {
 		2.5f * CORE_CELL_WIDTH_PIXELS,
 		gUISettings.worldViewportHeight - 0.5f * CORE_LEVEL_HEIGHT_PIXELS })
-		== ImU32(ImColor(23, 67, 109)),
+		== PackedColourValue(ImColor(23, 67, 109)),
 		"Aligned open Doors did not reveal the back Layer");
 }
 

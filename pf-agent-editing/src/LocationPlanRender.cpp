@@ -69,8 +69,8 @@ namespace
 		return result;
 	}
 
-	ImVec2 vertexScreen(core::Vertex const& vertex, core::Sector const& location,
-		ImVec2 position, ImVec2 size, uint32_t depthRows, int depth)
+	Vec2 vertexScreen(core::Vertex const& vertex, core::Sector const& location,
+		Vec2 position, Vec2 size, uint32_t depthRows, int depth)
 	{
 		return {position.x + 48 + (vertex.getPosition().x - location.getCellX()) * (size.x - 60) / location.getCellsWide(),
 			position.y + size.y - 28 - static_cast<float>(depth) * (size.y - 36) / std::max(depthRows, 4u)};
@@ -78,8 +78,8 @@ namespace
 }
 
 std::optional<std::string> locationPlanVertexNameAtPosition(core::World const& world,
-	core::Sector const& location, uint32_t worldLevel, ImVec2 mouse,
-	ImVec2 position, ImVec2 size, uint32_t depthRows)
+	core::Sector const& location, uint32_t worldLevel, Vec2 mouse,
+	Vec2 position, Vec2 size, uint32_t depthRows)
 {
 	if (size.x <= 64 || size.y <= 40 || !location.getCellsWide()
 		|| mouse.x < std::max(position.x, position.x + 48 - GraphMargin)
@@ -101,22 +101,22 @@ std::optional<std::string> locationPlanVertexNameAtPosition(core::World const& w
 
 void renderLocationPlanPreview(WorldDrawList& commands, core::Sector const& location,
 	core::FurnitureDefinition const& definition, float x, int depth, bool valid,
-	ImVec2 position, ImVec2 size, uint32_t depthRows)
+	Vec2 position, Vec2 size, uint32_t depthRows)
 {
 	if (size.x <= 64 || size.y <= 40 || !location.getCellsWide()) return;
 	float left = position.x + 48, right = position.x + size.x - 12;
 	float top = position.y + 8, bottom = position.y + size.y - 28;
 	float cellWidth = (right - left) / location.getCellsWide();
 	float rowHeight = (bottom - top) / std::max(depthRows, 4u);
-	ImVec2 min{left + (x + definition.minX) * cellWidth, bottom - (float(depth) + 1) * rowHeight};
-	ImVec2 max{left + (x + definition.maxX) * cellWidth, bottom - float(depth) * rowHeight};
+	Vec2 min{left + (x + definition.minX) * cellWidth, bottom - (float(depth) + 1) * rowHeight};
+	Vec2 max{left + (x + definition.maxX) * cellWidth, bottom - float(depth) * rowHeight};
 	commands.PushClipRect({left, top}, {right, bottom}, true);
 	float tileHeight = rowHeight / float(definition.maxY - definition.minY);
 	for (auto const& tile : definition.tiles)
 	{
-		ImVec2 a{left + (x + tile.x) * cellWidth,
+		Vec2 a{left + (x + tile.x) * cellWidth,
 			min.y + (definition.maxY - tile.y - 1) * tileHeight};
-		ImVec2 b{a.x + cellWidth, a.y + tileHeight};
+		Vec2 b{a.x + cellWidth, a.y + tileHeight};
 		if (!drawFurnitureSprite(tile.image.c_str(), &commands, a, b))
 			commands.AddRectFilled(a, b, IM_COL32(255, 0, 255, 255));
 	}
@@ -156,7 +156,7 @@ uint32_t locationPlanDepthRows(core::World const& world, core::Sector const& loc
 }
 
 void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& location,
-	ImVec2 position, ImVec2 size, uint32_t depthRows, core::World const* world, uint32_t worldLevel,
+	Vec2 position, Vec2 size, uint32_t depthRows, core::World const* world, uint32_t worldLevel,
 	uint64_t selectedId, core::Agent const* selectedAgent)
 {
 	depthRows = std::max(depthRows, 4u);
@@ -288,7 +288,7 @@ void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& locatio
 				if (!definition) continue;
 				for (auto const& point : definition->usablePoints)
 				{
-					ImVec2 centre{left + (instance.x + point.x) * cellWidth,
+					Vec2 centre{left + (instance.x + point.x) * cellWidth,
 						bottom - (static_cast<float>(instance.localDepth) + .5f) * rowHeight};
 					auto destination = std::find_if(instance.destinations.begin(), instance.destinations.end(),
 						[&](auto const& entry) { return entry.key == point.key; });
@@ -313,7 +313,7 @@ void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& locatio
 		{
 			constexpr auto outline = IM_COL32(32, 32, 32, 220);
 			constexpr auto colour = IM_COL32(255, 196, 0, 240);
-			auto segment = [&](ImVec2 from, ImVec2 to)
+			auto segment = [&](Vec2 from, Vec2 to)
 			{
 				commands.AddLine(from, to, outline, 5);
 				commands.AddLine(from, to, colour, 2.5f);
@@ -329,7 +329,7 @@ void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& locatio
 			if (first && onPlan(*first, location, worldLevel) && agentSector
 				&& agentSector == &location && agentPosition.y == worldLevel)
 			{
-				ImVec2 from{left + (agentPosition.x - location.getCellX()) * cellWidth,
+				Vec2 from{left + (agentPosition.x - location.getCellX()) * cellWidth,
 					bottom - selectedAgent->getLocalDepth() * rowHeight};
 				segment(from, screen(*first, depthAt(0)));
 			}

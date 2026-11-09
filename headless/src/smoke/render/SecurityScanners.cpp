@@ -53,13 +53,13 @@ namespace
 					require(quads == 0, "Chamber occupant repainted above white quad by a later render pass");
 					occupant = true;
 				}
-				if (auto line = std::get_if<WorldDrawList::Line>(&command)) require(line->colour != IM_COL32(255, 0, 0, 128), "Decontamination drew red beams");
+				if (auto line = std::get_if<WorldDrawList::Line>(&command)) require(line->colour != packColour(255, 0, 0, 128), "Decontamination drew red beams");
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command); triangle && triangle->texture == WorldDrawList::Texture::None)
 				{
 					bool bounds = true;
 					for (auto point : triangle->positions) bounds = bounds && (point.x == left || point.x == right) && (point.y == top || point.y == bottom);
-					if (!bounds || (triangle->colour & 0x00ffffffu) != (IM_COL32_WHITE & 0x00ffffffu)) continue;
-					require(expected > 0 && occupant && triangle->colour == IM_COL32(255, 255, 255, (int)std::lround(expected * 255)), "White quad bounds/opacity/draw order incorrect");
+					if (!bounds || (triangle->colour & 0x00ffffffu) != (White & 0x00ffffffu)) continue;
+					require(expected > 0 && occupant && triangle->colour == packColour(255, 255, 255, (int)std::lround(expected * 255)), "White quad bounds/opacity/draw order incorrect");
 					++quads;
 				}
 			}
@@ -115,7 +115,7 @@ namespace
 							if (body->texture == WorldDrawList::Texture::AgentAtlas
 								&& body->colour == agentRenderColour(*rendered->lookupAgent(id).entity, false)) agentDrawn = true;
 						if (auto line = std::get_if<WorldDrawList::Line>(&command))
-							if (line->colour == IM_COL32(255, 0, 0, 128))
+							if (line->colour == packColour(255, 0, 0, 128))
 							{
 								require(agentDrawn, "Scan beam painted before occupant");
 								require(line->thickness == 4.0f, "Scan beam thickness changed");
@@ -216,14 +216,14 @@ namespace
 					{
 						float low = triangle->positions[0].x, high = low;
 						for (auto point : triangle->positions) { low = std::min(low, point.x); high = std::max(high, point.x); }
-						if (triangle->colour == ImU32(ImColor(128, 192, 182))) doors.insert((low + high) * 0.5f);
-						if (triangle->colour == ImU32(ImColor(0, 255, 128))) ++buttons;
+						if (triangle->colour == PackedColourValue(ImColor(128, 192, 182))) doors.insert((low + high) * 0.5f);
+						if (triangle->colour == PackedColourValue(ImColor(0, 255, 128))) ++buttons;
 						if (low == 2 * CORE_CELL_WIDTH_PIXELS && high == (2 + width) * CORE_CELL_WIDTH_PIXELS) surface = true;
 					}
 					if (auto line = std::get_if<WorldDrawList::Line>(&command))
 					{
-						if (line->colour == ImU32(ImColor(255, 255, 0)) && line->thickness == 3) selected = true;
-						if (line->colour == IM_COL32_WHITE && line->thickness == 2)
+						if (line->colour == PackedColourValue(ImColor(255, 255, 0)) && line->thickness == 3) selected = true;
+						if (line->colour == White && line->thickness == 2)
 						{
 							++arrows;
 							if (line->from.y == line->to.y)
@@ -255,7 +255,7 @@ namespace
 					if (auto text = std::get_if<WorldDrawList::Text>(&command))
 						require(text->value != "Capacity: 1", "Deleted scanner readout rendered");
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
-						require(triangle->colour != ImU32(ImColor(128, 192, 182)), "Deleted generated Door rendered");
+						require(triangle->colour != PackedColourValue(ImColor(128, 192, 182)), "Deleted generated Door rendered");
 				}
 			}
 		gSelectedSector.reset(); ImGui::EndFrame();

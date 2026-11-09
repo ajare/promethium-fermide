@@ -138,6 +138,14 @@ static ViewPanState gViewPan;
 
 void setSelectionMode(UISettings::SelectionMode mode);
 
+// The World canvas records on the shared drawing types (#997); the editor's
+// palette, hover and drag geometry is ImGui chrome and converts here at the
+// crossing. Nothing else in the editor's command stream names an ImGui value.
+static Vec2 toVec2(ImVec2 point)
+{
+	return Vec2{ point.x, point.y };
+}
+
 namespace
 {
 	struct PendingMovementAction
@@ -849,7 +857,7 @@ namespace
 			available.y / max(sourceBounds.y, 1.0f));
 		auto size = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, icon);
 		drawList->AddText(font, fontSize,
-			boundsMin + (boundsMax - boundsMin - size) * 0.5f, colour, icon);
+			toVec2(boundsMin + (boundsMax - boundsMin - size) * 0.5f), colour, icon);
 	}
 
 	void drawDoorIcon(WorldDrawList* drawList, ImVec2 boundsMin, ImVec2 boundsMax, ImU32 colour)
@@ -859,7 +867,7 @@ namespace
 		auto height = min(available.y, available.x / aspect);
 		auto size = ImVec2(height * aspect, height);
 		auto minimum = boundsMin + (boundsMax - boundsMin - size) * 0.5f;
-		if (!drawObjectSprite("door", drawList, minimum, minimum + size, colour))
+		if (!drawObjectSprite("door", drawList, toVec2(minimum), toVec2(minimum + size), colour))
 			drawObjectIcon(drawList, boundsMin, boundsMax, colour, ICON_FA_DOOR_OPED);
 	}
 
@@ -879,7 +887,7 @@ namespace
 		auto width = min(available.x, available.y * aspect);
 		auto size = ImVec2(width, width / aspect);
 		auto minimum = boundsMin + (boundsMax - boundsMin - size) * 0.5f;
-		if (!drawObjectSprite("window-clear", drawList, minimum, minimum + size, colour))
+		if (!drawObjectSprite("window-clear", drawList, toVec2(minimum), toVec2(minimum + size), colour))
 			drawObjectIcon(drawList, boundsMin, boundsMax, colour, ICON_FA_WINDOW_MAXIMIZE);
 	}
 
@@ -1873,10 +1881,10 @@ namespace
 		// palette shows that it can be picked up.
 		auto const trayBorder = gTrayDrag.dragging ? yellow
 			: overGrip ? IM_COL32(251, 188, 4, 150) : borderColour;
-		drawList->AddRectFilled(trayTopLeft, trayBottomRight, trayColour, 5.0f);
-		drawList->AddRect(trayTopLeft, trayBottomRight, trayBorder, 5.0f);
+		drawList->AddRectFilled(toVec2(trayTopLeft), toVec2(trayBottomRight), trayColour, 5.0f);
+		drawList->AddRect(toVec2(trayTopLeft), toVec2(trayBottomRight), trayBorder, 5.0f);
 		if (furnitureRow)
-			paletteConsumedMouse = gLocationPlan.renderPaletteRow(world, *drawList, trayTopLeft,
+			paletteConsumedMouse = gLocationPlan.renderPaletteRow(world, *drawList, toVec2(trayTopLeft),
 				gWorldHovered && gPegman.phase == PalettePhase::Home && !gTrayDrag.dragging)
 				|| paletteConsumedMouse;
 
@@ -1915,11 +1923,11 @@ namespace
 		auto drawPaintButton = [&](ImVec2 min, ImVec2 max, char const* label,
 			PaintTool tool, bool hovered, bool disabled)
 		{
-			if (gPaint.tool == tool) drawList->AddRectFilled(min, max, selectedColour, 3.0f);
-			drawList->AddRect(min, max,
+			if (gPaint.tool == tool) drawList->AddRectFilled(toVec2(min), toVec2(max), selectedColour, 3.0f);
+			drawList->AddRect(toVec2(min), toVec2(max),
 				disabled ? disabledColour : (hovered ? yellow : borderColour), 3.0f);
 			auto const textPosition = paletteLabelPosition(min, max, label);
-			drawList->AddText(textPosition, disabled ? disabledColour : IM_COL32_WHITE, label);
+			drawList->AddText(toVec2(textPosition), disabled ? disabledColour : IM_COL32_WHITE, label);
 		};
 
 		if (gPegman.phase == PalettePhase::Home && !gTrayDrag.dragging
@@ -1985,8 +1993,8 @@ namespace
 		drawPaintButton(dumbMin, dumbMax, "Dumbwaiter", PaintTool::Dumbwaiter, dumbHovered, backOnlyDisabled);
 		drawBulkheadDoorIcon(drawList, bulkheadDoorMin, bulkheadDoorMax, yellow);
 		drawWindowIcon(drawList, windowMin, windowMax, yellow);
-		drawList->AddRect(boothMin, boothMax, yellow, 3.0f);
-		drawList->AddText(paletteLabelPosition(boothMin, boothMax, "BoothWindow"), yellow, "BoothWindow");
+		drawList->AddRect(toVec2(boothMin), toVec2(boothMax), yellow, 3.0f);
+		drawList->AddText(toVec2(paletteLabelPosition(boothMin, boothMax, "BoothWindow")), yellow, "BoothWindow");
 		drawWalkwayIcon(drawList, walkwayMin, walkwayMax, yellow);
 		drawForceBridgeIcon(drawList, forceBridgeMin, forceBridgeMax, IM_COL32(0, 255, 0, 255));
 		drawLadderIcon(drawList, roomLadderMin, roomLadderMax, yellow);
@@ -2028,8 +2036,8 @@ namespace
 					(float)(paintRectangle.y + paintRectangle.height) });
 				auto bottomRight = worldToScreen({ (float)(paintRectangle.x + paintRectangle.width),
 					(float)paintRectangle.y });
-				drawList->AddRectFilled(topLeft, bottomRight, IM_COL32(251, 188, 4, 55));
-				drawList->AddRect(topLeft, bottomRight, yellow, 0.0f, 0, 2.0f);
+				drawList->AddRectFilled(toVec2(topLeft), toVec2(bottomRight), IM_COL32(251, 188, 4, 55));
+				drawList->AddRect(toVec2(topLeft), toVec2(bottomRight), yellow, 0.0f, 0, 2.0f);
 			}
 			else
 			{
@@ -2039,8 +2047,8 @@ namespace
 				auto height = paintRectangle.height ? paintRectangle.height : 1u;
 				auto topLeft = worldToScreen({ (float)x, (float)(y + height) });
 				auto bottomRight = worldToScreen({ (float)(x + width), (float)y });
-				drawList->AddRectFilled(topLeft, bottomRight, IM_COL32(244, 67, 54, 55));
-				drawList->AddRect(topLeft, bottomRight, red, 0.0f, 0, 2.0f);
+				drawList->AddRectFilled(toVec2(topLeft), toVec2(bottomRight), IM_COL32(244, 67, 54, 55));
+				drawList->AddRect(toVec2(topLeft), toVec2(bottomRight), red, 0.0f, 0, 2.0f);
 				ImGui::SetTooltip("%s", paintRectangle.diagnostic.empty()
 					? "The starting cell is occupied" : paintRectangle.diagnostic.c_str());
 			}
@@ -2163,26 +2171,26 @@ namespace
 			else if (pointInRect(io.MousePos, roomLadderMin, roomLadderMax)) hoveredItem = PaletteItem::RoomLadder;
 			else if (pointInRect(io.MousePos, platformLiftMin, platformLiftMax)) hoveredItem = PaletteItem::PlatformLift;
 		}
-		drawList->AddRect(panelMin, panelMax,
+		drawList->AddRect(toVec2(panelMin), toVec2(panelMax),
 			hoveredItem == PaletteItem::AccessPanel ? yellow : borderColour, 3.0f);
-		drawList->AddText(paletteLabelPosition(panelMin,panelMax,"Access panel"),yellow,"Access panel");
-		drawList->AddRect(bulkheadDoorMin, bulkheadDoorMax,
+		drawList->AddText(toVec2(paletteLabelPosition(panelMin,panelMax,"Access panel")),yellow,"Access panel");
+		drawList->AddRect(toVec2(bulkheadDoorMin), toVec2(bulkheadDoorMax),
 			hoveredItem == PaletteItem::BulkheadDoor ? yellow : borderColour, 3.0f);
-		drawList->AddRect(windowMin, windowMax,
+		drawList->AddRect(toVec2(windowMin), toVec2(windowMax),
 			hoveredItem == PaletteItem::Window ? yellow : borderColour, 3.0f);
-		drawList->AddRect(walkwayMin, walkwayMax,
+		drawList->AddRect(toVec2(walkwayMin), toVec2(walkwayMax),
 			hoveredItem == PaletteItem::Walkway ? yellow : borderColour, 3.0f);
-		drawList->AddRect(forceBridgeMin, forceBridgeMax,
+		drawList->AddRect(toVec2(forceBridgeMin), toVec2(forceBridgeMax),
 			hoveredItem == PaletteItem::ForceBridge ? yellow : borderColour, 3.0f);
-		drawList->AddRect(roomLadderMin, roomLadderMax,
+		drawList->AddRect(toVec2(roomLadderMin), toVec2(roomLadderMax),
 			hoveredItem == PaletteItem::RoomLadder ? yellow : borderColour, 3.0f);
-		drawList->AddRect(platformLiftMin, platformLiftMax,
+		drawList->AddRect(toVec2(platformLiftMin), toVec2(platformLiftMax),
 			hoveredItem == PaletteItem::PlatformLift ? yellow : borderColour, 3.0f);
-		drawList->AddRect(agentMin, agentMax,
+		drawList->AddRect(toVec2(agentMin), toVec2(agentMax),
 			hoveredItem == PaletteItem::Agent ? yellow : borderColour, 3.0f);
-		drawList->AddRect(markerMin, markerMax,
+		drawList->AddRect(toVec2(markerMin), toVec2(markerMax),
 			hoveredItem == PaletteItem::Marker ? yellow : borderColour, 3.0f);
-		drawList->AddRect(doorMin, doorMax,
+		drawList->AddRect(toVec2(doorMin), toVec2(doorMax),
 			hoveredItem == PaletteItem::Door ? yellow : borderColour, 3.0f);
 		if (hoveredItem != PaletteItem::None)
 		{
@@ -2332,7 +2340,7 @@ namespace
 			{
 				auto topLeft = target.sector ? worldToScreen({float(target.cellX)+0.25f,float(target.cellY)+0.5f}) : io.MousePos-ImVec2(16,20);
 				auto bottomRight = target.sector ? worldToScreen({float(target.cellX)+0.75f,float(target.cellY)+0.25f}) : io.MousePos+ImVec2(16,20);
-				drawList->AddRect(topLeft,bottomRight,colour,0,0,2);
+				drawList->AddRect(toVec2(topLeft), toVec2(bottomRight),colour,0,0,2);
 			}
 			else if (gPegman.item == PaletteItem::Marker)
 			{
@@ -2403,16 +2411,16 @@ namespace
 						(float)target.cellY + previewHeight });
 					auto bottomRight = worldToScreen({ (float)target.cellX + 1.0f,
 						(float)target.cellY });
-					drawList->AddRectFilled(topLeft, bottomRight,
+					drawList->AddRectFilled(toVec2(topLeft), toVec2(bottomRight),
 						colour == yellow ? IM_COL32(251, 188, 4, 55) : IM_COL32(244, 67, 54, 55));
-					drawList->AddRect(topLeft, bottomRight, colour, 0.0f, 0, 2.0f);
+					drawList->AddRect(toVec2(topLeft), toVec2(bottomRight), colour, 0.0f, 0, 2.0f);
 				}
 				else
 				{
 					auto previewHeight = gPegman.item == PaletteItem::Door ? core::Door::effectiveHeight(gDoorDraft.height, core::Door::heightScaleIsValid(gDoorDraft.heightScale) ? gDoorDraft.heightScale : nullopt) : 1.0f;
 					auto halfSize = ImVec2(CORE_CELL_WIDTH_PIXELS * 0.5f,
 						previewHeight * CORE_LEVEL_HEIGHT_PIXELS * 0.5f);
-					drawList->AddRect(io.MousePos - halfSize, io.MousePos + halfSize,
+					drawList->AddRect(toVec2(io.MousePos - halfSize), toVec2(io.MousePos + halfSize),
 						colour, 0.0f, 0, 2.0f);
 				}
 			}
@@ -9547,10 +9555,10 @@ namespace
 				(float)gSelectedSector->getCellY() });
 			switch (edge)
 			{
-			case ResizeEdge::Left: drawList->AddLine(topLeft, { topLeft.x, bottomRight.y }, IM_COL32(255, 255, 0, 255), 4.0f); break;
-			case ResizeEdge::Right: drawList->AddLine({ bottomRight.x, topLeft.y }, bottomRight, IM_COL32(255, 255, 0, 255), 4.0f); break;
-			case ResizeEdge::Top: drawList->AddLine(topLeft, { bottomRight.x, topLeft.y }, IM_COL32(255, 255, 0, 255), 4.0f); break;
-			case ResizeEdge::Bottom: drawList->AddLine({ topLeft.x, bottomRight.y }, bottomRight, IM_COL32(255, 255, 0, 255), 4.0f); break;
+			case ResizeEdge::Left: drawList->AddLine(toVec2(topLeft), toVec2({ topLeft.x, bottomRight.y }), IM_COL32(255, 255, 0, 255), 4.0f); break;
+			case ResizeEdge::Right: drawList->AddLine({ bottomRight.x, topLeft.y }, toVec2(bottomRight), IM_COL32(255, 255, 0, 255), 4.0f); break;
+			case ResizeEdge::Top: drawList->AddLine(toVec2(topLeft), toVec2({ bottomRight.x, topLeft.y }), IM_COL32(255, 255, 0, 255), 4.0f); break;
+			case ResizeEdge::Bottom: drawList->AddLine({ topLeft.x, bottomRight.y }, toVec2(bottomRight), IM_COL32(255, 255, 0, 255), 4.0f); break;
 			// The interior of a selected Sector needs no box of its own: the
 			// 1px footprint box drawn below already marks the cells a drag
 			// works on.
@@ -9574,8 +9582,8 @@ namespace
 				if (hoverX >= (int)cellX && hoverX < (int)(cellX + cellsWide)
 					&& hoverY >= (int)cellY && hoverY < (int)(cellY + levelsHigh))
 					drawList->AddRect(
-						worldToScreen({ (float)cellX, (float)(cellY + levelsHigh) }),
-						worldToScreen({ (float)(cellX + cellsWide), (float)cellY }),
+						toVec2(worldToScreen({ (float)cellX, (float)(cellY + levelsHigh) })),
+						toVec2(worldToScreen({ (float)(cellX + cellsWide), (float)cellY })),
 						IM_COL32(255, 255, 0, 255), 0.0f, 0, 1.0f);
 			}
 		}
@@ -9663,23 +9671,23 @@ namespace
 			auto topLeft = worldToScreen({ (float)draft.x, (float)draft.y + 1.0f });
 			auto bottomRight = worldToScreen({ (float)(draft.x + draft.cellsWide), (float)draft.y });
 			auto colour = draft.diagnostic.empty() ? IM_COL32(255, 255, 0, 255) : IM_COL32(255, 64, 64, 255);
-			drawList->AddRectFilled(topLeft, bottomRight,
+			drawList->AddRectFilled(toVec2(topLeft), toVec2(bottomRight),
 				draft.diagnostic.empty() ? IM_COL32(255, 255, 0, 35) : IM_COL32(255, 64, 64, 35));
-			drawList->AddRect(topLeft, bottomRight, colour, 0.0f, 0, 2.0f);
+			drawList->AddRect(toVec2(topLeft), toVec2(bottomRight), colour, 0.0f, 0, 2.0f);
 			for (auto offset : draft.stopOffsets)
 				for (int car = 0; car < draft.numCars; ++car)
 				{
 					auto carX = draft.x + offset + car * (draft.carWidth + 1);
 					auto carTop = worldToScreen({ (float)carX, (float)draft.y + CORE_SHUTTLE_CAR_HEIGHT });
 					auto carBottom = worldToScreen({ (float)(carX + draft.carWidth), (float)draft.y });
-					drawList->AddRect(carTop, carBottom, colour, 0.0f, 0, 2.0f);
+					drawList->AddRect(toVec2(carTop), toVec2(carBottom), colour, 0.0f, 0, 2.0f);
 					for (int doorOffset = 0; doorOffset < draft.carWidth; ++doorOffset)
 					{
 						if ((draft.doorMask & (1u << doorOffset)) == 0) continue;
 						auto doorTop = worldToScreen({ (float)(carX + doorOffset),
 							(float)draft.y + CORE_SHUTTLE_CAR_HEIGHT * 0.75f });
 						auto doorBottom = worldToScreen({ (float)(carX + doorOffset + 1), (float)draft.y });
-						drawList->AddRectFilled(doorTop, doorBottom, IM_COL32(80, 180, 255, 90));
+						drawList->AddRectFilled(toVec2(doorTop), toVec2(doorBottom), IM_COL32(80, 180, 255, 90));
 					}
 				}
 		}
@@ -9687,9 +9695,9 @@ namespace
 		auto topLeft = worldToScreen({ (float)x, (float)(y + height) });
 		auto bottomRight = worldToScreen({ (float)(x + width), (float)y });
 		auto colour = valid ? IM_COL32(255, 255, 0, 255) : IM_COL32(255, 64, 64, 255);
-		drawList->AddRectFilled(topLeft, bottomRight,
+		drawList->AddRectFilled(toVec2(topLeft), toVec2(bottomRight),
 			valid ? IM_COL32(255, 255, 0, 45) : IM_COL32(255, 64, 64, 45));
-		drawList->AddRect(topLeft, bottomRight, colour, 0.0f, 0, 2.0f);
+		drawList->AddRect(toVec2(topLeft), toVec2(bottomRight), colour, 0.0f, 0, 2.0f);
 		if (!valid && !diagnostic.empty()) ImGui::SetTooltip("%s", diagnostic.c_str());
 	}
 }
@@ -9903,15 +9911,15 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 
 	if (gSelectingAgentPathDestination) gUISettings.renderGraph = true;
 
-	WorldDrawList commandList({ canvasPos, canvasPos + canvasSize });
+	WorldDrawList commandList({ toVec2(canvasPos), toVec2(canvasPos + canvasSize) });
 	auto* drawList = &commandList;
-	drawList->PushClipRect(canvasPos, canvasPos + canvasSize, true);
+	drawList->PushClipRect(toVec2(canvasPos), toVec2(canvasPos + canvasSize), true);
 
 	// Keep world geometry and editor overlays inside the dimensions declared by
 	// the world. The canvas can be larger than the world when docked or resized.
 	auto worldTopLeft = worldToScreen({ 0.0f, (float)world->getLevelsHigh() });
 	auto worldBottomRight = worldToScreen({ (float)world->getCellsWide(), 0.0f });
-	drawList->PushClipRect(worldTopLeft, worldBottomRight, true);
+	drawList->PushClipRect(toVec2(worldTopLeft), toVec2(worldBottomRight), true);
 	renderWorld(world, drawList);
 	renderGraph(graph, world, drawList, gSelectingAgentPathDestination);
 	renderSelectedAgentPath(world.get(), drawList);
@@ -9953,18 +9961,18 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 		if (gSelectedSectorObject
 			&& gSelectedSectorObject->getObjectType() == core::SectorObjectType::BulkheadDoor)
 			drawList->AddLine(
-				worldToScreen({ (float)plan.x, (float)plan.y + CORE_CORRIDOR_HEIGHT }),
-				worldToScreen({ (float)plan.x, (float)plan.y }), colour, 5.0f);
+				toVec2(worldToScreen({ (float)plan.x, (float)plan.y + CORE_CORRIDOR_HEIGHT })),
+				toVec2(worldToScreen({ (float)plan.x, (float)plan.y })), colour, 5.0f);
 		else if (gSelectedSectorObject
 			&& (gSelectedSectorObject->getObjectType() == core::SectorObjectType::Walkway
 				|| gSelectedSectorObject->getObjectType() == core::SectorObjectType::ForceBridge))
-			drawList->AddLine(worldToScreen({ (float)plan.x, (float)plan.y }),
-				worldToScreen({ (float)plan.x + width, (float)plan.y }), colour, 3.0f);
+			drawList->AddLine(toVec2(worldToScreen({ (float)plan.x, (float)plan.y })),
+				toVec2(worldToScreen({ (float)plan.x + width, (float)plan.y })), colour, 3.0f);
 		else
 		{
-			drawList->AddRectFilled(topLeft, bottomRight,
+			drawList->AddRectFilled(toVec2(topLeft), toVec2(bottomRight),
 				plan.valid ? IM_COL32(255, 255, 0, 45) : IM_COL32(255, 64, 64, 45));
-			drawList->AddRect(topLeft, bottomRight, colour, 0.0f, 0, 2.0f);
+			drawList->AddRect(toVec2(topLeft), toVec2(bottomRight), colour, 0.0f, 0, 2.0f);
 		}
 		if (!plan.valid && !plan.diagnostic.empty()) ImGui::SetTooltip("%s", plan.diagnostic.c_str());
 	}
@@ -9976,7 +9984,7 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 
 	// MPP owns every primitive in the canvas. ImGui only composites the
 	// completed render target into the already-reserved canvas item.
-	auto const texture = renderWorldCommands(commandList, canvasPos, canvasSize);
+	auto const texture = renderWorldCommands(commandList, toVec2(canvasPos), toVec2(canvasSize));
 	ImGui::GetWindowDrawList()->AddImage(
 		reinterpret_cast<ImTextureID>(static_cast<intptr_t>(texture)),
 		canvasPos, canvasPos + canvasSize, { 0.0f, 1.0f }, { 1.0f, 0.0f });
@@ -10012,11 +10020,11 @@ void renderUI(editor::DocumentPtr& document, shared_ptr<core::Agent> pathingAgen
 	renderStatusBar(world);
 	renderControlsWindow(document, graph, pathingAgent);
 	renderWorldWindow(document, graph);
-	gLocationPlan.render(world, [](WorldDrawList const& commands, ImVec2 position, ImVec2 size)
+	gLocationPlan.render(world, [](WorldDrawList const& commands, Vec2 position, Vec2 size)
 	{
 		auto texture = renderWorldCommands(commands, position, size, WorldCanvas::LocationPlan);
 		ImGui::GetWindowDrawList()->AddImage(
 			reinterpret_cast<ImTextureID>(static_cast<intptr_t>(texture)),
-			position, {position.x + size.x, position.y + size.y}, {0, 1}, {1, 0});
+			ImVec2(position.x, position.y), ImVec2(position.x + size.x, position.y + size.y), {0, 1}, {1, 0});
 	}, document->authoring().history(), gSelectedAgent);
 }

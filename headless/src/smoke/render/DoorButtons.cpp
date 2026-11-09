@@ -97,11 +97,11 @@ namespace
 		return scene;
 	}
 
-	ImU32 const kEnabledButtonColour = ImU32(ImColor(0, 255, 128));
-	ImU32 const kBrokenButtonColour = ImU32(ImColor(255, 0, 0));
+	PackedColourValue const kEnabledButtonColour = PackedColourValue(ImColor(0, 255, 128));
+	PackedColourValue const kBrokenButtonColour = PackedColourValue(ImColor(255, 0, 0));
 	// BackLocationColour: the tint the renderer gives the Sector revealed through
 	// a Door's aperture.
-	ImU32 const kBackLayerFillColour = ImU32(ImColor(224, 224, 255));
+	PackedColourValue const kBackLayerFillColour = PackedColourValue(ImColor(224, 224, 255));
 
 	// The viewport the headless render checks draw into. The recording
 	// WorldDrawList carries it as the root clip, so every nested aperture clip is
@@ -114,7 +114,7 @@ namespace
 		float minX, maxX, minY, maxY;
 	};
 
-	ScreenBounds boundsOf(ImVec2 const* points, int count, float padding)
+	ScreenBounds boundsOf(Vec2 const* points, int count, float padding)
 	{
 		ScreenBounds bounds{ points[0].x, points[0].x, points[0].y, points[0].y };
 		for (int i = 1; i < count; ++i)
@@ -177,7 +177,7 @@ namespace
 			else if (auto const* line = std::get_if<WorldDrawList::Line>(&command))
 			{
 				if (line->colour != kEnabledButtonColour) continue;
-				ImVec2 const points[2]{ line->from, line->to };
+				Vec2 const points[2]{ line->from, line->to };
 				if (survivesClip(boundsOf(points, 2, line->thickness * 0.5f), line->clip))
 					++geometry.buttonOutlineLines;
 			}
@@ -336,7 +336,7 @@ namespace
 			require(geometry.buttonFillTriangles == 2 && geometry.buttonOutlineLines == 4,
 				"Stack draw omitted or merged a member/style");
 			ScreenBounds fill{1e10f, -1e10f, 1e10f, -1e10f}, outline = fill;
-			auto extend = [](ScreenBounds& bounds, ImVec2 p)
+			auto extend = [](ScreenBounds& bounds, Vec2 p)
 			{
 				bounds.minX = std::min(bounds.minX, p.x); bounds.maxX = std::max(bounds.maxX, p.x);
 				bounds.minY = std::min(bounds.minY, p.y); bounds.maxY = std::max(bounds.maxY, p.y);
@@ -348,7 +348,7 @@ namespace
 					for (auto p : triangle->positions) extend(fill, p);
 				if (auto line = std::get_if<WorldDrawList::Line>(&command); line && line->colour == kEnabledButtonColour)
 				{
-					ImVec2 points[]{line->from, line->to};
+					Vec2 points[]{line->from, line->to};
 					if (survivesClip(boundsOf(points, 2, line->thickness * 0.5f), line->clip)) { extend(outline, line->from); extend(outline, line->to); }
 				}
 			}
@@ -392,7 +392,7 @@ namespace
 					}
 					if (auto line = std::get_if<WorldDrawList::Line>(&command); line && line->colour == kEnabledButtonColour)
 					{
-						ImVec2 points[]{line->from, line->to}; auto bounds = boundsOf(points, 2, 0);
+						Vec2 points[]{line->from, line->to}; auto bounds = boundsOf(points, 2, 0);
 						if (survivesClip(boundsOf(points, 2, line->thickness * 0.5f), line->clip) && bounds.minY <= screenY + buttons[rank]->getSize().y * CORE_LEVEL_HEIGHT_PIXELS * 0.5f + 0.001f
 							&& bounds.maxY >= screenY - buttons[rank]->getSize().y * CORE_LEVEL_HEIGHT_PIXELS * 0.5f - 0.001f) ++lines;
 					}

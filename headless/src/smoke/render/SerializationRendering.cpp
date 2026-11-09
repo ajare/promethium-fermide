@@ -307,7 +307,7 @@ namespace
 				float const right = (3.f + CORE_STAIRWELL_PASSAGE_WIDTH * .5f) * CORE_CELL_WIDTH_PIXELS;
 				float const top = 720.f - (level + CORE_STAIRWELL_DOORWAY_HEIGHT) * CORE_LEVEL_HEIGHT_PIXELS;
 				float const bottom = 720.f - level * CORE_LEVEL_HEIGHT_PIXELS;
-				std::array<ImVec2, 4> corners{{{left, top}, {right, top}, {right, bottom}, {left, bottom}}};
+				std::array<Vec2, 4> corners{{{left, top}, {right, top}, {right, bottom}, {left, bottom}}};
 				unsigned sides = 0;
 				for (auto const& command : draws.commands())
 					if (auto line = std::get_if<WorldDrawList::Line>(&command);

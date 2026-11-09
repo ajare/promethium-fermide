@@ -11,7 +11,7 @@
 class LocationPlan
 {
 public:
-	using Presenter = std::function<void(WorldDrawList const&, ImVec2, ImVec2)>;
+	using Presenter = std::function<void(WorldDrawList const&, Vec2, Vec2)>;
 	bool open(std::shared_ptr<core::World> const& world,
 		std::shared_ptr<const core::Sector> const& location, uint32_t worldLevel);
 	void close();
@@ -22,7 +22,7 @@ public:
 	bool isOpen(std::shared_ptr<core::World> const& world);
 	// Called by the existing canvas palette. Returns mouse consumption.
 	bool renderPaletteRow(std::shared_ptr<core::World> const& world,
-		WorldDrawList& commands, ImVec2 trayTopLeft, bool hovered);
+		WorldDrawList& commands, Vec2 trayTopLeft, bool hovered);
 
 private:
 	std::shared_ptr<const core::Sector> target(std::shared_ptr<core::World> const& world);
@@ -46,19 +46,19 @@ private:
 // Screen-space grid geometry; Local depth is ordering, never World height.
 // The viewport is also intersected with the caller's clip by the recorder.
 void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& location,
-	ImVec2 viewportPosition, ImVec2 viewportSize, uint32_t depthRows = 4,
+	Vec2 viewportPosition, Vec2 viewportSize, uint32_t depthRows = 4,
 	core::World const* world = nullptr, uint32_t worldLevel = 0, uint64_t selectedId = 0,
 	core::Agent const* selectedAgent = nullptr);
 
 void renderLocationPlanPreview(WorldDrawList& commands, core::Sector const& location,
 	core::FurnitureDefinition const& definition, float x, int depth, bool valid,
-	ImVec2 viewportPosition, ImVec2 viewportSize, uint32_t depthRows);
+	Vec2 viewportPosition, Vec2 viewportSize, uint32_t depthRows);
 
 // Vertex-first hover uses the live graph, the same projection and paint order
 // as the renderer, and includes the graph's drawing margin.
 std::optional<std::string> locationPlanVertexNameAtPosition(core::World const& world,
-	core::Sector const& location, uint32_t worldLevel, ImVec2 mouse,
-	ImVec2 viewportPosition, ImVec2 viewportSize, uint32_t depthRows);
+	core::Sector const& location, uint32_t worldLevel, Vec2 mouse,
+	Vec2 viewportPosition, Vec2 viewportSize, uint32_t depthRows);
 
 // Derived afresh from the current catalogue; no cached instance/vertex pointers.
 uint32_t locationPlanDepthRows(core::World const& world, core::Sector const& location,

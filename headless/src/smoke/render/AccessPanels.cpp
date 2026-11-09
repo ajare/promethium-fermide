@@ -44,13 +44,13 @@ namespace
 					unsigned fills=0,lines=0;
 					for (auto const& command : drawing.commands())
 					{
-						if (auto triangle=std::get_if<WorldDrawList::Triangle>(&command); triangle && triangle->colour==IM_COL32(78,92,110,255))
+						if (auto triangle=std::get_if<WorldDrawList::Triangle>(&command); triangle && triangle->colour==packColour(78,92,110,255))
 						{
 							++fills;
 							for (auto p : triangle->positions) require(p.x>=min.x*64-0.001f && p.x<=max.x*64+0.001f
 								&& p.y>=800-max.y*CORE_LEVEL_HEIGHT_PIXELS-0.001f && p.y<=800-min.y*CORE_LEVEL_HEIGHT_PIXELS+0.001f,"Panel fill changed authored bounds");
 						}
-						if (auto line=std::get_if<WorldDrawList::Line>(&command); line && line->colour==(selected ? IM_COL32(251,188,4,255) : IM_COL32(165,180,198,255)))
+						if (auto line=std::get_if<WorldDrawList::Line>(&command); line && line->colour==(selected ? packColour(251,188,4,255) : packColour(165,180,198,255)))
 						{
 							++lines;
 							for (auto p : {line->from,line->to}) require(p.x>=min.x*64-0.001f && p.x<=max.x*64+0.001f
@@ -60,7 +60,7 @@ namespace
 					require(fills==(degenerate ? 0u : 2u) && lines==4,"Closed panel/selection indicator missing or duplicated");
 					require(panel->getGeometry()==geometry,"Editor indicator changed authored geometry");
 					WorldDrawList wire({{0,0},{1200,800}});
-					renderSector(world->getSector(owner),layer,LayerRenderStyle::Wireframe,false,ImColor(IM_COL32_WHITE),&wire);
+					renderSector(world->getSector(owner),layer,LayerRenderStyle::Wireframe,false,ImColor(White),&wire);
 					require(std::none_of(wire.commands().begin(),wire.commands().end(),[](auto const& c) {return std::holds_alternative<WorldDrawList::Triangle>(c);}),"Wireframe fills panel");
 				}
 				auto actor = world->createAgent("Operator", owner, 0, 4.5f);
@@ -73,11 +73,11 @@ namespace
 				{
 					require(panel->getState()==core::AccessPanel::State::Opening, "Missing partial opening");
 					WorldDrawList partial({{0,0},{1200,800}});
-					renderSector(world->getSector(owner),layer,LayerRenderStyle::Solid,false,ImColor(IM_COL32_WHITE),&partial);
+					renderSector(world->getSector(owner),layer,LayerRenderStyle::Solid,false,ImColor(White),&partial);
 					unsigned leaves=0;
 					float bottom=800-(min.y+(max.y-min.y)*panel->getProgress())*CORE_LEVEL_HEIGHT_PIXELS;
 					for (auto const& command : partial.commands())
-						if (auto t=std::get_if<WorldDrawList::Triangle>(&command); t && t->colour==IM_COL32(78,92,110,255))
+						if (auto t=std::get_if<WorldDrawList::Triangle>(&command); t && t->colour==packColour(78,92,110,255))
 						{
 							++leaves;
 							for (auto p : t->positions) require(p.y<=bottom+0.001f && p.y>=800-max.y*CORE_LEVEL_HEIGHT_PIXELS-0.001f,
@@ -90,17 +90,17 @@ namespace
 				for (auto style : {LayerRenderStyle::Solid, LayerRenderStyle::Wireframe})
 				{
 					WorldDrawList opened({{0,0},{1200,800}});
-					renderSector(world->getSector(owner),layer,style,false,ImColor(IM_COL32_WHITE),&opened);
+					renderSector(world->getSector(owner),layer,style,false,ImColor(White),&opened);
 					unsigned crosses = 0, openFills = 0;
 					for (auto const& command : opened.commands())
 					{
-						if (auto line = std::get_if<WorldDrawList::Line>(&command); line && line->colour == IM_COL32(100,210,180,255))
+						if (auto line = std::get_if<WorldDrawList::Line>(&command); line && line->colour == packColour(100,210,180,255))
 						{
 							++crosses;
 							for (auto p : {line->from, line->to}) require(p.x >= min.x*64-0.001f && p.x <= max.x*64+0.001f
 								&& p.y >= 800-max.y*CORE_LEVEL_HEIGHT_PIXELS-0.001f && p.y <= 800-min.y*CORE_LEVEL_HEIGHT_PIXELS+0.001f, "Open expands bounds");
 						}
-						if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command); triangle && triangle->colour == IM_COL32(22,30,40,255)) ++openFills;
+						if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command); triangle && triangle->colour == packColour(22,30,40,255)) ++openFills;
 					}
 					require(crosses == 2 && openFills == (!degenerate && style == LayerRenderStyle::Solid ? 2u : 0u), "Open indistinguishable on canvas/Facade/wireframe");
 				}
@@ -113,7 +113,7 @@ namespace
 				WorldDrawList after({{0,0},{1200,800}}); renderWorld(world,&after);
 				require(std::none_of(after.commands().begin(),after.commands().end(),[](auto const& c) {
 					auto t=std::get_if<WorldDrawList::Triangle>(&c); auto l=std::get_if<WorldDrawList::Line>(&c);
-					return (t && t->colour==IM_COL32(78,92,110,255)) || (l && (l->colour==IM_COL32(165,180,198,255) || l->colour==IM_COL32(251,188,4,255)));
+					return (t && t->colour==packColour(78,92,110,255)) || (l && (l->colour==packColour(165,180,198,255) || l->colour==packColour(251,188,4,255)));
 				}),"Deleted panel remains rendered/selectable");
 			}
 		gSelectedSectorObject.reset(); ImGui::Render();

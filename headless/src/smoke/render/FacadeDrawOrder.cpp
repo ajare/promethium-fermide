@@ -54,15 +54,15 @@ namespace
 	// Layer colours, not a Door leaf, not the lights-off tint.
 	core::BackgroundColour const kFacadeColour{ 210, 66, 138 };
 
-	ImU32 facadeFillColour()
+	PackedColourValue facadeFillColour()
 	{
-		return ImU32(ImColor(kFacadeColour.r, kFacadeColour.g, kFacadeColour.b, 255));
+		return PackedColourValue(ImColor(kFacadeColour.r, kFacadeColour.g, kFacadeColour.b, 255));
 	}
 
 	// The colours Render.cpp paints around the Facade's surface.
-	ImU32 const kDoorLeafColour = ImU32(ImColor(64, 192, 255));      // renderDoor's leaf
-	ImU32 const kApertureFillColour = ImU32(ImColor(224, 224, 255)); // BackLocationColour
-	ImU32 const kThresholdOutlineColour = ImU32(ImColor(0, 0, 0));    // wireframe thresholds
+	PackedColourValue const kDoorLeafColour = PackedColourValue(ImColor(64, 192, 255));      // renderDoor's leaf
+	PackedColourValue const kApertureFillColour = PackedColourValue(ImColor(224, 224, 255)); // BackLocationColour
+	PackedColourValue const kThresholdOutlineColour = PackedColourValue(ImColor(0, 0, 0));    // wireframe thresholds
 
 	// The first vertex painted with a colour, and how many vertices wear it.
 	struct PaintRun
@@ -73,7 +73,7 @@ namespace
 		bool painted() const { return firstVertex >= 0; }
 	};
 
-	PaintRun paintedWith(ImDrawList const* drawList, ImU32 colour)
+	PaintRun paintedWith(ImDrawList const* drawList, PackedColourValue colour)
 	{
 		PaintRun run;
 		for (int i = 0; i < drawList->VtxBuffer.Size; ++i)

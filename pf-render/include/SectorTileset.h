@@ -17,20 +17,22 @@ struct SectorTileset
 };
 void setSectorTileset(SectorTileset tileset, ImTextureID texture);
 void clearSectorTileset();
+// The tileset helpers cross to the command stream on the shared drawing
+// types (#997), so a caller hands them pf::render::Vec2 and a packed colour.
 bool drawSectorTileSurface(std::string const& kind, WorldDrawList* drawList,
-    ImVec2 minimum, ImVec2 maximum, ImU32 tint, float zoom = 1.0f);
+    Vec2 minimum, Vec2 maximum, PackedColourValue tint, float zoom = 1.0f);
 bool drawSectorTileBoundary(char const* kind, WorldDrawList* drawList,
-    ImVec2 minimum, ImVec2 maximum);
+    Vec2 minimum, Vec2 maximum);
 
 inline bool drawSectorTileSurface(std::string const& kind, ImDrawList* drawList,
-    ImVec2 minimum, ImVec2 maximum, ImU32 tint)
+    Vec2 minimum, Vec2 maximum, PackedColourValue tint)
 {
     WorldDrawList adapter(drawList);
     return drawSectorTileSurface(kind, &adapter, minimum, maximum, tint);
 }
 
 inline bool drawSectorTileBoundary(char const* kind, ImDrawList* drawList,
-    ImVec2 minimum, ImVec2 maximum)
+    Vec2 minimum, Vec2 maximum)
 {
     WorldDrawList adapter(drawList);
     return drawSectorTileBoundary(kind, &adapter, minimum, maximum);

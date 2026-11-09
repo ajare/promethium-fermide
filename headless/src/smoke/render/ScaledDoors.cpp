@@ -25,7 +25,7 @@ void commands(smoke::Context const&) {
         for (auto const& command : list.commands()) {
             if (auto t = std::get_if<WorldDrawList::Triangle>(&command); t &&
                 (t->texture == WorldDrawList::Texture::ObjectAtlas ||
-                 t->colour == IM_COL32(64,192,255,255) || t->colour == IM_COL32(255,255,0,48)))
+                 t->colour == packColour(64,192,255,255) || t->colour == packColour(255,255,0,48)))
                 for (auto p : t->positions) require(p.y >= top - 0.001f && p.y <= 800.001f, "Door artwork not scaled bottom-anchored");
         }
     }

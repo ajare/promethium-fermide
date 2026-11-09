@@ -80,9 +80,9 @@ namespace
 	// Sample the painter-ordered command stream, respecting nested scissor
 	// rectangles. These scenes use opaque untextured fills and sample away from
 	// outlines and text.
-	ImU32 colourAt(WorldDrawList const& draws, ImVec2 point)
+	PackedColourValue colourAt(WorldDrawList const& draws, Vec2 point)
 	{
-		ImU32 result = 0;
+		PackedColourValue result = 0;
 		for (auto const& command : draws.commands())
 		{
 			auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
@@ -90,7 +90,7 @@ namespace
 			auto const& clip = triangle->clip;
 			if (point.x < clip.minimum.x || point.x >= clip.maximum.x
 				|| point.y < clip.minimum.y || point.y >= clip.maximum.y) continue;
-			auto cross = [point](ImVec2 a, ImVec2 b)
+			auto cross = [point](Vec2 a, Vec2 b)
 				{ return (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x); };
 			auto const a = cross(triangle->positions[0], triangle->positions[1]);
 			auto const b = cross(triangle->positions[1], triangle->positions[2]);
@@ -121,7 +121,7 @@ namespace
 		}
 
 		// The screen point the Window reveals the Background through.
-		ImVec2 revealedPoint() const
+		Vec2 revealedPoint() const
 		{
 			require(window != nullptr, "the aperture fixture has no Window");
 			core::Vector2 windowMin, windowMax;
@@ -203,7 +203,7 @@ void nestedApertureSeesTheRenderedWorld()
 	auto draws = makeDraws();
 	renderWorld(scene.world, &draws);
 
-	require(colourAt(draws, scene.revealedPoint()) == ImU32(ImColor(23, 67, 109)),
+	require(colourAt(draws, scene.revealedPoint()) == PackedColourValue(ImColor(23, 67, 109)),
 		"the nested aperture pass did not receive the World renderWorld() installed (#199)");
 }
 
@@ -226,14 +226,14 @@ void nestedScopesRestoreThePreviousWorld()
 			auto innerDraws = makeDraws();
 			renderSector(inner.world->getSector(inner.frontRoom), 0,
 				LayerRenderStyle::Solid, false, ImColor(192, 192, 255), &innerDraws);
-			require(colourAt(innerDraws, inner.revealedPoint()) == ImU32(ImColor(151, 37, 83)),
+			require(colourAt(innerDraws, inner.revealedPoint()) == PackedColourValue(ImColor(151, 37, 83)),
 				"a nested RenderWorldScope did not publish its own World (#199)");
 		}
 
 		auto outerDraws = makeDraws();
 		renderSector(outer.world->getSector(outer.frontRoom), 0,
 			LayerRenderStyle::Solid, false, ImColor(192, 192, 255), &outerDraws);
-		require(colourAt(outerDraws, outer.revealedPoint()) == ImU32(ImColor(23, 67, 109)),
+		require(colourAt(outerDraws, outer.revealedPoint()) == PackedColourValue(ImColor(23, 67, 109)),
 			"a nested RenderWorldScope did not restore the previous World (#199)");
 	}
 }

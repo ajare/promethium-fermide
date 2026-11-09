@@ -52,9 +52,9 @@ namespace
 	}
 
 	// The colours Render.cpp paints the OpenLeft Door with.
-	ImU32 const kDoorLeafColour = ImU32(ImColor(64, 192, 255));      // renderDoor*'s leaf
-	ImU32 const kApertureFillColour = ImU32(ImColor(224, 224, 255)); // BackLocationColour
-	ImU32 const kThresholdOutlineColour = ImU32(ImColor(0, 0, 0));    // wireframe thresholds
+	PackedColourValue const kDoorLeafColour = PackedColourValue(ImColor(64, 192, 255));      // renderDoor*'s leaf
+	PackedColourValue const kApertureFillColour = PackedColourValue(ImColor(224, 224, 255)); // BackLocationColour
+	PackedColourValue const kThresholdOutlineColour = PackedColourValue(ImColor(0, 0, 0));    // wireframe thresholds
 	// The front Room's own surface fill. Deliberately not black, so the
 	// wireframe threshold outlines stay distinguishable from it.
 	ImColor const kFrontRoomColour(192, 192, 255);
@@ -104,7 +104,7 @@ namespace
 		bool painted() const { return vertexCount > 0; }
 	};
 
-	ColourExtent extentOf(ImDrawList const* drawList, ImU32 colour)
+	ColourExtent extentOf(ImDrawList const* drawList, PackedColourValue colour)
 	{
 		ColourExtent extent;
 		for (int i = 0; i < drawList->VtxBuffer.Size; ++i)
@@ -121,7 +121,7 @@ namespace
 
 	// The ClipRect of the draw command that first consumes a vertex of the
 	// given colour - the clip the renderer painted that fill under.
-	ImVec4 clipCovering(ImDrawList const* drawList, ImU32 colour)
+	ImVec4 clipCovering(ImDrawList const* drawList, PackedColourValue colour)
 	{
 		for (int i = 0; i < drawList->VtxBuffer.Size; ++i)
 		{

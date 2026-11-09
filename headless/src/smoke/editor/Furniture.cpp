@@ -652,12 +652,12 @@ namespace
 			for (auto const& command : row.commands())
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
 					triangle && (available ? triangle->texture == WorldDrawList::Texture::FurnitureAtlas
-						: triangle->texture == WorldDrawList::Texture::None && triangle->colour == IM_COL32(255,0,255,255))) ++triangles;
+						: triangle->texture == WorldDrawList::Texture::None && triangle->colour == packColour(255,0,255,255))) ++triangles;
 			require(triangles == 2, "Furniture palette ignored selected artwork/fallback");
 			ImGui::EndFrame();
 		}
 		clearFurnitureTileset();
-		ImVec2 tray{20, 430}, viewport{}, viewportSize{};
+		Vec2 tray{20, 430}, viewport{}, viewportSize{};
 		std::vector<std::string> rowLabels, depths;
 		unsigned previews = 0, invalidPreviews = 0;
 		bool paletteHovered = true;
@@ -674,7 +674,7 @@ namespace
 				if (auto text = std::get_if<WorldDrawList::Text>(&command)) rowLabels.push_back(text->value);
 			ImGui::End();
 			ImGui::SetNextWindowPos({300, 10}); ImGui::SetNextWindowSize({600, 360});
-			plan.render(world, [&](WorldDrawList const& commands, ImVec2 pos, ImVec2 size)
+			plan.render(world, [&](WorldDrawList const& commands, Vec2 pos, Vec2 size)
 			{
 				viewport = pos; viewportSize = size;
 				for (auto const& command : commands.commands())
@@ -683,16 +683,16 @@ namespace
 						if (std::abs(text->position.x - pos.x - 16) < .01f) depths.push_back(text->value);
 					if (auto line = std::get_if<WorldDrawList::Line>(&command))
 						{
-							if (line->colour == IM_COL32(80, 200, 120, 255) || line->colour == IM_COL32(244, 67, 54, 255)) ++previews;
-							if (line->colour == IM_COL32(244, 67, 54, 255)) ++invalidPreviews;
+							if (line->colour == packColour(80, 200, 120, 255) || line->colour == packColour(244, 67, 54, 255)) ++previews;
+							if (line->colour == packColour(244, 67, 54, 255)) ++invalidPreviews;
 						}
 				}
 			}, history);
 			ImGui::GetCurrentContext()->NextWindowData.ClearFlags(); ImGui::Render();
 		};
 		frame(); frame();
-		auto mouse = [&](ImVec2 p) { io.AddMousePosEvent(p.x, p.y); frame(); frame(); };
-		auto slot = paletteFurnitureSlotMin(tray, 0);
+		auto mouse = [&](Vec2 p) { io.AddMousePosEvent(p.x, p.y); frame(); frame(); };
+		auto slot = paletteFurnitureSlotMin(ImVec2{tray.x, tray.y}, 0);
 		auto start = [&]
 		{
 			paletteHovered = true; mouse({slot.x + 20, slot.y + 18});
@@ -701,7 +701,7 @@ namespace
 		};
 		auto point = [&](float x, float depth)
 		{
-			return ImVec2{viewport.x + 48 + x * (viewportSize.x - 60) / 6,
+			return Vec2{viewport.x + 48 + x * (viewportSize.x - 60) / 6,
 				viewport.y + viewportSize.y - 28 - (depth + .5f) * (viewportSize.y - 36) / depths.size()};
 		};
 		auto release = [&] { io.AddMouseButtonEvent(0, false); frame(); frame(); };
@@ -737,7 +737,7 @@ namespace
 		world->addSectorMarker(other, 0, .5f, "Chair 3 Seat"); world->finishBuild();
 		start(); mouse(point(0, 0)); release();
 		require(world->furniture().back().name == "Chair 4", "Generated name collided with a standalone owned-Marker name");
-		auto reject = [&](ImVec2 destination, bool onGrid = true)
+		auto reject = [&](Vec2 destination, bool onGrid = true)
 		{
 			auto before = captureDocumentSnapshot(world, history)->yaml; auto count = history.undoCount();
 			start(); mouse(destination);
@@ -789,7 +789,7 @@ end
 		world->attachFurnitureCatalogue("many.furniture.lua", catalogue); frame();
 		require(rowLabels.size() == 12 && rowLabels.front() == "Chair 10" && rowLabels.back() == "Next page",
 			"Large catalogue row does not fit tray or reset on replacement");
-		auto next = paletteFurnitureSlotMin(tray, paletteColumnCount() - 1);
+		auto next = paletteFurnitureSlotMin(ImVec2{tray.x, tray.y}, paletteColumnCount() - 1);
 		paletteHovered = true; mouse({next.x + 20, next.y + 18});
 		io.AddMouseButtonEvent(0, true); frame(); release();
 		require(rowLabels.size() == 5 && rowLabels.front() == "Chair 21" && rowLabels[3] == "Chair 24",
@@ -830,13 +830,13 @@ end
 		std::string text;
 		io.ClipboardUserData = &text;
 		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
-		ImVec2 viewport{}, size{}; unsigned rows = 0;
+		Vec2 viewport{}, size{}; unsigned rows = 0;
 		auto frame = [&]
 		{
 			text.clear(); rows = 0;
 			ImGui::NewFrame(); ImGui::LogToClipboard();
 			ImGui::SetNextWindowPos({300, 10}); ImGui::SetNextWindowSize({600, 420});
-			plan.render(world, [&](WorldDrawList const& commands, ImVec2 p, ImVec2 s)
+			plan.render(world, [&](WorldDrawList const& commands, Vec2 p, Vec2 s)
 			{
 				viewport = p; size = s;
 				for (auto const& command : commands.commands())
@@ -847,9 +847,9 @@ end
 			ImGui::LogFinish(); ImGui::Render();
 		};
 		frame(); frame();
-		auto point = [&](float x, float depth) { return ImVec2{viewport.x + 48 + x * (size.x - 60) / 8,
+		auto point = [&](float x, float depth) { return Vec2{viewport.x + 48 + x * (size.x - 60) / 8,
 			viewport.y + size.y - 28 - depth * (size.y - 36) / rows}; };
-		auto mouse = [&](ImVec2 p) { io.AddMousePosEvent(p.x, p.y); frame(); frame(); };
+		auto mouse = [&](Vec2 p) { io.AddMousePosEvent(p.x, p.y); frame(); frame(); };
 		auto expectVertex = [&](float x, float depth, std::string const& name)
 		{
 			mouse(point(x, depth));
@@ -907,14 +907,14 @@ end
 		require(plan.open(world, world->getSector(room), 4), "Cannot open movement plan");
 		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
 		io.DisplaySize = {1600, 1000}; io.Fonts->AddFontDefault(); io.Fonts->Build();
-		ImVec2 viewport{}, size{}; size_t rows = 4; unsigned validLines = 0, invalidLines = 0, selectionLines = 0;
+		Vec2 viewport{}, size{}; size_t rows = 4; unsigned validLines = 0, invalidLines = 0, selectionLines = 0;
 		float previewX = 0;
 		auto frame = [&]
 		{
 			rows = 0; validLines = invalidLines = selectionLines = 0; previewX = std::numeric_limits<float>::max();
 			ImGui::NewFrame();
 			ImGui::SetNextWindowPos({300, 10}); ImGui::SetNextWindowSize({600, 360});
-			plan.render(world, [&](WorldDrawList const& commands, ImVec2 p, ImVec2 s)
+			plan.render(world, [&](WorldDrawList const& commands, Vec2 p, Vec2 s)
 			{
 				viewport = p; size = s;
 				for (auto const& command : commands.commands())
@@ -923,22 +923,22 @@ end
 						if (std::abs(text->position.x - p.x - 16) < .01f) ++rows;
 					if (auto line = std::get_if<WorldDrawList::Line>(&command))
 					{
-						if (line->colour == IM_COL32(80, 200, 120, 255))
+						if (line->colour == packColour(80, 200, 120, 255))
 						{
 							++validLines;
 							previewX = std::min(previewX, (line->from.x - p.x - 48) * 8 / (s.x - 60));
 						}
-						if (line->colour == IM_COL32(244, 67, 54, 255)) ++invalidLines;
-						if (line->colour == IM_COL32(251, 188, 4, 255)) ++selectionLines;
+						if (line->colour == packColour(244, 67, 54, 255)) ++invalidLines;
+						if (line->colour == packColour(251, 188, 4, 255)) ++selectionLines;
 					}
 				}
 			}, history);
 			ImGui::GetCurrentContext()->NextWindowData.ClearFlags(); ImGui::Render();
 		};
 		frame(); frame();
-		auto point = [&](float x, float depth) { return ImVec2{viewport.x + 48 + x * (size.x - 60) / 8,
+		auto point = [&](float x, float depth) { return Vec2{viewport.x + 48 + x * (size.x - 60) / 8,
 			viewport.y + size.y - 28 - (depth + .5f) * (size.y - 36) / rows}; };
-		auto mouse = [&](ImVec2 p) { io.AddMousePosEvent(p.x, p.y); frame(); frame(); };
+		auto mouse = [&](Vec2 p) { io.AddMousePosEvent(p.x, p.y); frame(); frame(); };
 		auto start = [&] { auto const& instance = world->furniture().front(); mouse(point(instance.x + .5f, static_cast<float>(instance.localDepth)));
 			io.AddMouseButtonEvent(0, true); frame(); };
 		auto release = [&] { io.AddMouseButtonEvent(0, false); frame(); frame(); };
@@ -1051,14 +1051,14 @@ end
 		std::string text;
 		io.ClipboardUserData = &text;
 		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
-		ImVec2 viewport{}, size{}; unsigned rows = 0, outlines = 0;
+		Vec2 viewport{}, size{}; unsigned rows = 0, outlines = 0;
 		std::vector<std::string> labels;
 		auto frame = [&]
 		{
 			text.clear(); rows = outlines = 0; labels.clear();
 			ImGui::NewFrame(); ImGui::LogToClipboard();
 			ImGui::SetNextWindowPos({300, 10}); ImGui::SetNextWindowSize({600, 420});
-			plan.render(world, [&](WorldDrawList const& commands, ImVec2 p, ImVec2 s)
+			plan.render(world, [&](WorldDrawList const& commands, Vec2 p, Vec2 s)
 			{
 				viewport = p; size = s;
 				for (auto const& command : commands.commands())
@@ -1069,13 +1069,13 @@ end
 						if (std::abs(label->position.x - p.x - 16) < .01f) ++rows;
 					}
 					if (auto line = std::get_if<WorldDrawList::Line>(&command))
-						if (line->colour == IM_COL32(251, 188, 4, 255)) ++outlines;
+						if (line->colour == packColour(251, 188, 4, 255)) ++outlines;
 				}
 			}, history);
 			ImGui::GetCurrentContext()->NextWindowData.ClearFlags();
 			ImGui::LogFinish(); ImGui::Render();
 		};
-		auto click = [&](ImVec2 p)
+		auto click = [&](Vec2 p)
 		{
 			io.AddMousePosEvent(p.x, p.y); frame(); frame();
 			io.AddMouseButtonEvent(0, true); frame();
@@ -1090,7 +1090,7 @@ end
 		// Locate the production button using ImGui's item identity, not controller internals.
 		auto* window = ImGui::FindWindowByName("Location plan");
 		auto button = window->GetID("Delete selected Furniture");
-		ImVec2 deletePosition{}; bool found = false;
+		Vec2 deletePosition{}; bool found = false;
 		for (float y = window->Pos.y + 50; y < viewport.y && !found; y += 4)
 			for (float x = window->Pos.x + 10; x < window->Pos.x + 260; x += 16)
 			{
@@ -1188,7 +1188,7 @@ end
 		std::string text;
 		io.ClipboardUserData = &text;
 		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
-		ImVec2 actionPosition; unsigned presentations = 0, graphEdges = 0, graphVertices = 0;
+		Vec2 actionPosition; unsigned presentations = 0, graphEdges = 0, graphVertices = 0;
 		std::vector<std::string> labels, depths;
 		auto hasDepth = [&](std::string const& label) { return std::find(depths.begin(), depths.end(), label) != depths.end(); };
 		auto hasLabel = [&](std::string const& label) { return std::find(labels.begin(), labels.end(), label) != labels.end(); };
@@ -1206,7 +1206,7 @@ end
 			auto selectionText = text;
 			text.clear(); ImGui::LogToClipboard();
 			ImGui::SetNextWindowPos({300, 10}); ImGui::SetNextWindowSize({600, 360});
-			plan.render(world, [&](WorldDrawList const& commands, ImVec2 position, ImVec2)
+			plan.render(world, [&](WorldDrawList const& commands, Vec2 position, Vec2)
 			{
 				++presentations;
 				for (auto const& command : commands.commands())
@@ -1217,11 +1217,11 @@ end
 						if (std::abs(label->position.x - position.x - 16) < .01f) depths.push_back(label->value);
 					}
 					if (auto edge = std::get_if<WorldDrawList::Line>(&command);
-						edge && edge->colour == IM_COL32(80, 210, 220, 255)) ++graphEdges;
+						edge && edge->colour == packColour(80, 210, 220, 255)) ++graphEdges;
 					if (auto vertex = std::get_if<WorldDrawList::Triangle>(&command);
-						vertex && (vertex->colour == IM_COL32(150, 245, 255, 255)
-							|| vertex->colour == IM_COL32(105, 230, 140, 255)
-							|| vertex->colour == IM_COL32(255, 190, 60, 255))) ++graphVertices;
+						vertex && (vertex->colour == packColour(150, 245, 255, 255)
+							|| vertex->colour == packColour(105, 230, 140, 255)
+							|| vertex->colour == packColour(255, 190, 60, 255))) ++graphVertices;
 				}
 				require(!commands.commands().empty(), "Open plan did not present a command stream");
 			});
@@ -1229,7 +1229,7 @@ end
 			ImGui::GetCurrentContext()->NextWindowData.ClearFlags();
 			ImGui::LogFinish(); text += selectionText; ImGui::Render();
 		};
-		auto click = [&](ImVec2 position)
+		auto click = [&](Vec2 position)
 		{
 			io.AddMousePosEvent(position.x, position.y); frame(); frame();
 			io.AddMouseButtonEvent(0, true); frame();
@@ -1254,13 +1254,13 @@ end
 		// Change the Level via real combo and selectable mouse input.
 		auto* window = ImGui::FindWindowByName("Location plan");
 		auto comboId = window->GetID("Level");
-		auto findHovered = [&](ImGuiID id, ImVec2 min, ImVec2 max)
+		auto findHovered = [&](ImGuiID id, Vec2 min, Vec2 max)
 		{
 			for (float y = min.y; y < max.y; y += 5)
 				for (float x = min.x; x < max.x; x += 16)
 				{
 					io.AddMousePosEvent(x, y); frame(); frame();
-					if (ImGui::GetHoveredID() == id) return ImVec2{x, y};
+					if (ImGui::GetHoveredID() == id) return Vec2{x, y};
 				}
 			throw std::runtime_error("Cannot find Location plan control " + std::to_string(id)
 				+ " within " + std::to_string(min.x) + "," + std::to_string(min.y)
@@ -1269,7 +1269,7 @@ end
 		click(findHovered(comboId, {310, 65}, {870, 125})); frame(); frame();
 		auto* popup = ImGui::FindWindowByName("##Combo_00");
 		require(popup && popup->Active, "Level selector did not open");
-		click(findHovered(popup->GetID("5"), popup->Pos,
+		click(findHovered(popup->GetID("5"), Vec2{popup->Pos.x, popup->Pos.y},
 			{popup->Pos.x + popup->Size.x, popup->Pos.y + popup->Size.y}));
 		frame();
 		require(text.find("{ 5 } Level") != std::string::npos,

@@ -19,7 +19,7 @@ namespace
 		int width, int height)
 	{
 		auto const& r = sprite.region;
-		return std::all_of(std::begin(triangle.texcoords), std::end(triangle.texcoords), [&](ImVec2 uv) {
+		return std::all_of(std::begin(triangle.texcoords), std::end(triangle.texcoords), [&](Vec2 uv) {
 			return uv.x >= float(r.x) / width && uv.x <= float(r.x + r.width) / width
 				&& uv.y >= float(r.y) / height && uv.y <= float(r.y + r.height) / height;
 		});
@@ -181,7 +181,7 @@ namespace
 			for (auto const& command : drawing.commands())
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
 					triangle && (available ? triangle->texture == WorldDrawList::Texture::FurnitureAtlas
-						: triangle->texture == WorldDrawList::Texture::None && triangle->colour == IM_COL32(255,0,255,255)))
+						: triangle->texture == WorldDrawList::Texture::None && triangle->colour == packColour(255,0,255,255)))
 				{
 					++count;
 					for (auto p : triangle->positions)
@@ -199,7 +199,7 @@ namespace
 			for (auto const& command : preview.commands())
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
 					triangle && (available ? triangle->texture == WorldDrawList::Texture::FurnitureAtlas
-						: triangle->texture == WorldDrawList::Texture::None && triangle->colour == IM_COL32(255,0,255,255))) ++previewCount;
+						: triangle->texture == WorldDrawList::Texture::None && triangle->colour == packColour(255,0,255,255))) ++previewCount;
 			require(previewCount == 2, "Furniture placement preview ignored selected artwork/fallback");
 		}
 		setFurnitureTileset(originalFurniture, reinterpret_cast<ImTextureID>(1));
@@ -541,19 +541,19 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 			return list;
 		};
 		// World X offset 4 is translated into the pinned Location's grid.
-		auto screen = [](float x, int depth) { return ImVec2{128 + x * 260 / 8,
+		auto screen = [](float x, int depth) { return Vec2{128 + x * 260 / 8,
 			252 - depth * 204.f / 5}; };
 		auto list = draw();
 		std::vector<WorldDrawList::Line> edges, usableLines;
-		std::vector<std::pair<ImVec2, ImU32>> vertices;
-		std::vector<ImVec2> identityDots;
+		std::vector<std::pair<Vec2, PackedColourValue>> vertices;
+		std::vector<Vec2> identityDots;
 		size_t lastDot = 0;
 		size_t lastFootprint = 0, firstEdge = list.commands().size(), firstVertex = list.commands().size();
 		for (size_t i = 0; i < list.commands().size(); ++i)
 		{
 			auto const& command = list.commands()[i];
 			if (auto line = std::get_if<WorldDrawList::Line>(&command);
-				line && line->colour == IM_COL32(80, 210, 220, 255))
+				line && line->colour == packColour(80, 210, 220, 255))
 			{
 				edges.push_back(*line); firstEdge = std::min(firstEdge, i);
 				require(near(line->clip.minimum.x, 120) && near(line->clip.minimum.y, 60)
@@ -563,7 +563,7 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 				require(near(line->thickness, 3), "Graph edges did not stand out from thin grid lines");
 			}
 			if (auto line = std::get_if<WorldDrawList::Line>(&command);
-				line && line->colour == IM_COL32(255, 190, 60, 255))
+				line && line->colour == packColour(255, 190, 60, 255))
 			{
 				usableLines.push_back(*line);
 				require(near(line->clip.minimum.x, 120) && near(line->clip.minimum.y, 60)
@@ -572,7 +572,7 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 			}
 			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
 			{
-				if (triangle->colour == IM_COL32(180, 180, 180, 200))
+				if (triangle->colour == packColour(180, 180, 180, 200))
 				{
 					identityDots.push_back(triangle->positions[0]); lastDot = i;
 					require(i > lastFootprint && near(triangle->clip.minimum.x, 120)
@@ -585,10 +585,10 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 							"Vertex identity connector did not use small dots");
 					}
 				}
-				if (triangle->colour == IM_COL32(55, 90, 120, 255)) lastFootprint = i;
-				if (triangle->colour == IM_COL32(150, 245, 255, 255)
-					|| triangle->colour == IM_COL32(105, 230, 140, 255)
-					|| triangle->colour == IM_COL32(255, 190, 60, 255))
+				if (triangle->colour == packColour(55, 90, 120, 255)) lastFootprint = i;
+				if (triangle->colour == packColour(150, 245, 255, 255)
+					|| triangle->colour == packColour(105, 230, 140, 255)
+					|| triangle->colour == packColour(255, 190, 60, 255))
 				{
 					firstVertex = std::min(firstVertex, i);
 					vertices.emplace_back(triangle->positions[0], triangle->colour);
@@ -613,7 +613,7 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 					|| (near(edge.from.x, b.x) && near(edge.to.x, a.x)));
 			});
 		};
-		auto hasVertex = [&](float x, int depth, ImU32 colour = 0)
+		auto hasVertex = [&](float x, int depth, PackedColourValue colour = 0)
 		{
 			auto p = screen(x, depth);
 			return std::any_of(vertices.begin(), vertices.end(), [&](auto const& v) {
@@ -652,7 +652,7 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 			"Plan lost shared multi-depth, isolated routing-only or standalone vertices");
 		auto pointCentre = screen(2, 2); pointCentre.y -= .5f * 204 / 5;
 		unsigned circleLines = 0, connectors = 0;
-		auto squaredDistance = [](ImVec2 a, ImVec2 b) { return (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y); };
+		auto squaredDistance = [](Vec2 a, Vec2 b) { return (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y); };
 		for (auto const& line : usableLines)
 		{
 			if (near(squaredDistance(line.from, pointCentre), 36) && near(squaredDistance(line.to, pointCentre), 36)) ++circleLines;
@@ -665,20 +665,20 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 					"Usable-point connector did not join the matching live vertex to its instance-depth circle");
 			}
 		}
-		require(circleLines == 16 && connectors == 2 && hasVertex(2, 3, IM_COL32(255, 190, 60, 255)),
+		require(circleLines == 16 && connectors == 2 && hasVertex(2, 3, packColour(255, 190, 60, 255)),
 			"Usable point was duplicated per route depth, lost its outline, or used a different colour from its vertex");
-		require(hasVertex(1.25f, 0, IM_COL32(105, 230, 140, 255))
-			&& hasVertex(3.25f, 0, IM_COL32(105, 230, 140, 255))
-			&& hasVertex(2, 2, IM_COL32(255, 190, 60, 255))
-			&& hasVertex(7.5f, 0, IM_COL32(255, 190, 60, 255))
-			&& hasVertex(2, 0, IM_COL32(150, 245, 255, 255))
-			&& hasVertex(1.5f, 2, IM_COL32(150, 245, 255, 255)),
+		require(hasVertex(1.25f, 0, packColour(105, 230, 140, 255))
+			&& hasVertex(3.25f, 0, packColour(105, 230, 140, 255))
+			&& hasVertex(2, 2, packColour(255, 190, 60, 255))
+			&& hasVertex(7.5f, 0, packColour(255, 190, 60, 255))
+			&& hasVertex(2, 0, packColour(150, 245, 255, 255))
+			&& hasVertex(1.5f, 2, packColour(150, 245, 255, 255)),
 			"Plan did not distinguish external ports, usable points and ordinary/private vertices");
 		// Coincident floor anchors must not overpaint external port colours.
-		ImU32 visiblePort = 0;
+		PackedColourValue visiblePort = 0;
 		for (auto const& vertex : vertices)
 			if (near(vertex.first.x, screen(1.25f, 0).x) && near(vertex.first.y, screen(1.25f, 0).y)) visiblePort = vertex.second;
-		require(visiblePort == IM_COL32(105, 230, 140, 255), "Ordinary anchor obscured external vertex colour");
+		require(visiblePort == packColour(105, 230, 140, 255), "Ordinary anchor obscured external vertex colour");
 		for (auto const& edge : edges)
 			require(edge.from.y >= screen(0, 3).y, "Graph included another Level/Location's deep routes");
 		require(locationPlanDepthRows(*world, *world->getSector(host), 2) == 5,
@@ -699,14 +699,14 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 		for (auto const& command : highlighted.commands())
 		{
 			if (auto line = std::get_if<WorldDrawList::Line>(&command);
-				line && line->colour == IM_COL32(255, 196, 0, 240))
+				line && line->colour == packColour(255, 196, 0, 240))
 			{
 				depthRoute = depthRoute || (near(line->from.y, screen(0, 2).y) && near(line->to.y, screen(0, 2).y));
 				depthChange = depthChange || !near(line->from.y, line->to.y);
 				require(near(line->clip.minimum.x, 120) && near(line->clip.maximum.y, 220), "Selected route escaped plan clip");
 			}
 			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-				triangle && triangle->colour == IM_COL32(255, 196, 0, 240))
+				triangle && triangle->colour == packColour(255, 196, 0, 240))
 				seatDot = seatDot || (near(triangle->positions[0].x, screen(2, 2).x)
 					&& near(triangle->positions[0].y, screen(2, 2).y));
 		}
@@ -716,14 +716,14 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 		for (auto const& command : wrongLevel.commands())
 			std::visit([&](auto const& primitive) {
 				if constexpr (requires { primitive.colour; })
-					require(primitive.colour != IM_COL32(255, 196, 0, 240), "Selected route leaked to another Level");
+					require(primitive.colour != packColour(255, 196, 0, 240), "Selected route leaked to another Level");
 			}, command);
 		WorldDrawList wrongLocation({{0, 0}, {400, 300}});
 		renderLocationPlanGrid(wrongLocation, *world->getSector(other), {0, 0}, {400, 300}, 12, world.get(), 2, 0, visitor);
 		for (auto const& command : wrongLocation.commands())
 			std::visit([&](auto const& primitive) {
 				if constexpr (requires { primitive.colour; })
-					require(primitive.colour != IM_COL32(255, 196, 0, 240), "Selected route leaked to another Location/Layer");
+					require(primitive.colour != packColour(255, 196, 0, 240), "Selected route leaked to another Location/Layer");
 			}, command);
 		// Match editor inspection after pausing: the live Path is torn down,
 		// but both views must still show the retained route to Furniture.
@@ -736,7 +736,7 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 		bool pausedSeat = false;
 		for (auto const& command : pausedFurniture.commands())
 			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-				triangle && triangle->colour == IM_COL32(255, 196, 0, 240))
+				triangle && triangle->colour == packColour(255, 196, 0, 240))
 				pausedSeat = pausedSeat || (near(triangle->positions[0].x, screen(2, 2).x)
 					&& near(triangle->positions[0].y, screen(2, 2).y));
 		require(pausedSeat && !visitor->getPath(), "Paused Furniture route missing or rendering mutated live Path");
@@ -747,13 +747,13 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 		auto moved = draw(); bool movedRoute = false;
 		for (auto const& command : moved.commands())
 			if (auto edge = std::get_if<WorldDrawList::Line>(&command);
-				edge && edge->colour == IM_COL32(80, 210, 220, 255)
+				edge && edge->colour == packColour(80, 210, 220, 255)
 				&& near(edge->from.y, screen(0, 4).y))
 				movedRoute = movedRoute || near(edge->from.x, screen(2.5f, 4).x) || near(edge->to.x, screen(2.5f, 4).x);
 		unsigned movedDots = 0;
 		for (auto const& command : moved.commands())
 			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-				triangle && triangle->colour == IM_COL32(180, 180, 180, 200))
+				triangle && triangle->colour == packColour(180, 180, 180, 200))
 			{
 				++movedDots; auto p = triangle->positions[0];
 				require((near(p.x, screen(2.5f, 0).x) || near(p.x, screen(4, 0).x) || near(p.x, screen(3, 0).x))
@@ -767,9 +767,9 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 		for (auto const& command : removed.commands())
 		{
 			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
-				require(triangle->colour != IM_COL32(180, 180, 180, 200), "Deleted Furniture left stale vertex identity guides");
+				require(triangle->colour != packColour(180, 180, 180, 200), "Deleted Furniture left stale vertex identity guides");
 			if (auto edge = std::get_if<WorldDrawList::Line>(&command);
-				edge && edge->colour == IM_COL32(80, 210, 220, 255))
+				edge && edge->colour == packColour(80, 210, 220, 255))
 				require(near(edge->from.y, screen(0, 0).y), "Deleted Furniture left stale graph routes");
 		}
 		// Graph visibility is independent of attaching a Furniture catalogue.
@@ -784,15 +784,15 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 		for (auto const& command : ordinary.commands())
 		{
 			if (auto edge = std::get_if<WorldDrawList::Line>(&command);
-				edge && edge->colour == IM_COL32(80, 210, 220, 255))
+				edge && edge->colour == packColour(80, 210, 220, 255))
 			{
 				++lines;
 				require(near(edge->from.y, 272) && edge->clip.maximum.y >= edge->from.y + edge->thickness / 2,
 					"Depth-0 edge stroke was cut off at the grid boundary");
 			}
 			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-				triangle && (triangle->colour == IM_COL32(150, 245, 255, 255)
-					|| triangle->colour == IM_COL32(255, 190, 60, 255)))
+				triangle && (triangle->colour == packColour(150, 245, 255, 255)
+					|| triangle->colour == packColour(255, 190, 60, 255)))
 			{
 				++points;
 				require(near(triangle->clip.minimum.x, 40) && near(triangle->clip.maximum.y, 280),
@@ -820,13 +820,13 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 		for (auto const& command : walking.commands())
 		{
 			if (auto line = std::get_if<WorldDrawList::Line>(&command);
-				line && line->colour == IM_COL32(255, 196, 0, 240))
+				line && line->colour == packColour(255, 196, 0, 240))
 			{
 				++routeLines;
 				require(near(line->from.y, 272) && near(line->to.y, 272), "Plain route left depth 0");
 			}
 			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-				triangle && triangle->colour == IM_COL32(255, 196, 0, 240))
+				triangle && triangle->colour == packColour(255, 196, 0, 240))
 				standalone = standalone || (near(triangle->positions[0].x, 48 + 3.5f * 340 / 8)
 					&& near(triangle->positions[0].y, 272));
 		}
@@ -850,15 +850,15 @@ d.edges = {{from='left', to='seat', depthOffset=0}}
 		plain->placeFurniture(room, "chair", 1.25f, 0, "External seat", 0); plain->finishBuild();
 		WorldDrawList ports({{0, 0}, {400, 300}});
 		renderLocationPlanGrid(ports, *plain->getSector(room), {0, 0}, {400, 300}, 4, plain.get(), 0);
-		ImU32 visibleSeat = 0;
+		PackedColourValue visibleSeat = 0;
 		for (auto const& command : ports.commands())
 			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-				triangle && (triangle->colour == IM_COL32(150, 245, 255, 255)
-					|| triangle->colour == IM_COL32(105, 230, 140, 255)
-					|| triangle->colour == IM_COL32(255, 190, 60, 255)))
+				triangle && (triangle->colour == packColour(150, 245, 255, 255)
+					|| triangle->colour == packColour(105, 230, 140, 255)
+					|| triangle->colour == packColour(255, 190, 60, 255)))
 				if (near(triangle->positions[0].x, 48 + 1.75f * 340 / 8)
 					&& near(triangle->positions[0].y, 272)) visibleSeat = triangle->colour;
-		require(visibleSeat == IM_COL32(255, 190, 60, 255), "Usable external port did not retain visible usable colour");
+		require(visibleSeat == packColour(255, 190, 60, 255), "Usable external port did not retain visible usable colour");
 	}
 
 	void locationPlanGrid(smoke::Context const& context)
@@ -919,7 +919,7 @@ d.edges = {{from='left', to='seat', depthOffset=0}}
 				if (auto line = std::get_if<WorldDrawList::Line>(&command))
 				{
 					++lines;
-					require(line->colour == (valid ? IM_COL32(80, 200, 120, 255) : IM_COL32(244, 67, 54, 255)),
+					require(line->colour == (valid ? packColour(80, 200, 120, 255) : packColour(244, 67, 54, 255)),
 						"Preview does not distinguish authoritative validity");
 					require(line->from.x >= 193 && line->from.x <= 258 && line->from.y >= 201 && line->from.y <= 252
 						&& near(line->clip.maximum.y, 220) && near(line->clip.minimum.x, 128),
@@ -968,7 +968,7 @@ d.edges = {{from='left', to='seat', depthOffset=0}}
 		unsigned highlight = 0;
 		for (auto const& command : selected.commands())
 			if (auto line = std::get_if<WorldDrawList::Line>(&command);
-				line && line->colour == IM_COL32(251, 188, 4, 255))
+				line && line->colour == packColour(251, 188, 4, 255))
 			{
 				++highlight;
 				require(near(line->clip.minimum.x, 48) && near(line->clip.maximum.y, 272),
@@ -997,14 +997,14 @@ d.edges = {{from='left', to='seat', depthOffset=0}}
 				}
 			}
 			if (auto line = std::get_if<WorldDrawList::Line>(&command);
-				line && line->colour == IM_COL32(255, 190, 60, 255))
+				line && line->colour == packColour(255, 190, 60, 255))
 			{
 				require(near(line->clip.minimum.x, 40) && near(line->clip.maximum.y, 280), "Usable point escaped padded graph clip");
 				bool ring = false;
 				for (auto x : {.5f, 1.625f, 3.f})
 				{
-					ImVec2 centre{48 + x * 340 / 6, 272 - 3.5f * 264 / 5};
-					auto distance = [&](ImVec2 p) { return (p.x - centre.x) * (p.x - centre.x) + (p.y - centre.y) * (p.y - centre.y); };
+					Vec2 centre{48 + x * 340 / 6, 272 - 3.5f * 264 / 5};
+					auto distance = [&](Vec2 p) { return (p.x - centre.x) * (p.x - centre.x) + (p.y - centre.y) * (p.y - centre.y); };
 					if (near(distance(line->from), 36) && near(distance(line->to), 36)) ring = true;
 				}
 				if (ring) ++points;
@@ -1017,8 +1017,8 @@ d.edges = {{from='left', to='seat', depthOffset=0}}
 			}
 			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
 			{
-				if (triangle->colour == IM_COL32(55, 90, 120, 255)) ++footprints;
-				if (triangle->colour == IM_COL32(65, 40, 40, 255)) ++shaded;
+				if (triangle->colour == packColour(55, 90, 120, 255)) ++footprints;
+				if (triangle->colour == packColour(65, 40, 40, 255)) ++shaded;
 			}
 		}
 		require(points == 48 && links == 3 && footprints == 2 && shaded == 0,
@@ -1027,7 +1027,7 @@ d.edges = {{from='left', to='seat', depthOffset=0}}
 		shaded = 0;
 		for (auto const& command : upper.commands())
 			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-				triangle && triangle->colour == IM_COL32(65, 40, 40, 255))
+				triangle && triangle->colour == packColour(65, 40, 40, 255))
 			{
 				++shaded;
 				float minX = triangle->positions[0].x;
@@ -1048,7 +1048,7 @@ d.edges = {{from='left', to='seat', depthOffset=0}}
 		renderLocationPlanGrid(clipped, *furnished->getSector(host), {0, 0}, {400, 300}, 5, furnished.get(), 3);
 		for (auto const& command : clipped.commands())
 			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-				triangle && triangle->colour == IM_COL32(55, 90, 120, 255))
+				triangle && triangle->colour == packColour(55, 90, 120, 255))
 			{
 				require(near(triangle->clip.minimum.x, 350) && near(triangle->clip.maximum.x, 380),
 					"Footprint replaced the caller clip");

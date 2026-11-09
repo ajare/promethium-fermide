@@ -38,8 +38,8 @@ namespace
 			{
 				float lowX = triangle->positions[0].x, highX = lowX;
 				for (auto const& point : triangle->positions) { lowX = std::min(lowX, point.x); highX = std::max(highX, point.x); }
-				if (triangle->colour == ImU32(ImColor(128, 192, 182))) doors.insert((lowX + highX) * 0.5f);
-				if (triangle->colour == ImU32(ImColor(0, 255, 128))) buttons.insert((lowX + highX) * 0.5f);
+				if (triangle->colour == PackedColourValue(ImColor(128, 192, 182))) doors.insert((lowX + highX) * 0.5f);
+				if (triangle->colour == PackedColourValue(ImColor(0, 255, 128))) buttons.insert((lowX + highX) * 0.5f);
 				if (lowX == 2 * CORE_CELL_WIDTH_PIXELS && highX == 5 * CORE_CELL_WIDTH_PIXELS) chamberSurface = true;
 			}
 		require(chamberSurface && doors.size() == 2 && buttons.size() == 2, "Renderer must show chamber, two Bulkheads and only two outside buttons");
@@ -53,8 +53,8 @@ namespace
 			{
 				float lowX = triangle->positions[0].x, highX = lowX;
 				for (auto const& point : triangle->positions) { lowX = std::min(lowX, point.x); highX = std::max(highX, point.x); }
-				if (triangle->colour == ImU32(ImColor(128, 192, 182))) doors.insert((lowX + highX) * 0.5f);
-				if (triangle->colour == ImU32(ImColor(0, 255, 128))) buttons.insert((lowX + highX) * 0.5f);
+				if (triangle->colour == PackedColourValue(ImColor(128, 192, 182))) doors.insert((lowX + highX) * 0.5f);
+				if (triangle->colour == PackedColourValue(ImColor(0, 255, 128))) buttons.insert((lowX + highX) * 0.5f);
 				if (lowX == 4 * CORE_CELL_WIDTH_PIXELS && highX == 6 * CORE_CELL_WIDTH_PIXELS) chamberSurface = true;
 			}
 		require(chamberSurface && doors.size() == 2 && buttons.size() == 2
@@ -64,7 +64,7 @@ namespace
 		WorldDrawList removed({ { 0, 0 }, { 1600, 720 } }); renderWorld(world, &removed);
 		require(std::none_of(removed.commands().begin(), removed.commands().end(), [](auto const& command) {
 			auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-			return triangle && (triangle->colour == ImU32(ImColor(128, 192, 182)) || triangle->colour == ImU32(ImColor(0, 255, 128)));
+			return triangle && (triangle->colour == PackedColourValue(ImColor(128, 192, 182)) || triangle->colour == PackedColourValue(ImColor(0, 255, 128)));
 		}), "Deleted chamber rendered orphan Doors/buttons");
 		// Width-one chamber still renders all generated controls separately.
 		world = std::make_shared<core::World>("Single cell chamber", 8, 2);
@@ -75,7 +75,7 @@ namespace
 		renderWorld(world, &selected);
 		require(std::any_of(selected.commands().begin(), selected.commands().end(), [](auto const& command) {
 			auto line = std::get_if<WorldDrawList::Line>(&command);
-			return line && line->colour == ImU32(ImColor(255, 255, 0)) && line->thickness == 3;
+			return line && line->colour == PackedColourValue(ImColor(255, 255, 0)) && line->thickness == 3;
 		}), "Selected Airlock missing highlight");
 		gSelectedSector.reset();
 		// Observe an occupied closed-door cycle through production movement and

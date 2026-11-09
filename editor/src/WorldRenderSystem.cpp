@@ -48,7 +48,7 @@ namespace
 	using Float = mpp::mesh::DataTypeFloat;
 	using Byte = mpp::mesh::DataTypeUnsignedByte;
 
-	bool same(ImVec2 left, ImVec2 right)
+	bool same(Vec2 left, Vec2 right)
 	{
 		return left.x == right.x && left.y == right.y;
 	}
@@ -88,7 +88,7 @@ namespace
 		: public mpp::helper::TriangleBatch2DDataProvider<Float, Float, Byte>
 	{
 	public:
-		void set(std::vector<WorldDrawList::Triangle> triangles, ImVec2 origin)
+		void set(std::vector<WorldDrawList::Triangle> triangles, Vec2 origin)
 		{
 			mTriangles = std::move(triangles);
 			mOrigin = origin;
@@ -99,12 +99,12 @@ namespace
 			float& x1, float& y1, float& x2, float& y2) override
 		{
 			auto const& triangle = mTriangles.at(index);
-			auto transform = [this](ImVec2 point)
+			auto transform = [this](Vec2 point)
 			{
 				// MPP's 2D vertex shader converts top-left-origin screen Y to
 				// OpenGL coordinates. Supplying an already-inverted Y flips the
 				// complete canvas a second time.
-				return ImVec2{ point.x - mOrigin.x, point.y - mOrigin.y };
+				return Vec2{ point.x - mOrigin.x, point.y - mOrigin.y };
 			};
 			auto const a = transform(triangle.positions[0]);
 			auto const b = transform(triangle.positions[1]);
@@ -139,14 +139,14 @@ namespace
 
 	private:
 		std::vector<WorldDrawList::Triangle> mTriangles;
-		ImVec2 mOrigin{};
+		Vec2 mOrigin{};
 	};
 
 	class LineProvider final
 		: public mpp::helper::LineBatchDataProvider<Float, Byte>
 	{
 	public:
-		void set(std::vector<WorldDrawList::Line> lines, ImVec2 origin)
+		void set(std::vector<WorldDrawList::Line> lines, Vec2 origin)
 		{
 			mLines = std::move(lines);
 			mOrigin = origin;
@@ -179,7 +179,7 @@ namespace
 
 	private:
 		std::vector<WorldDrawList::Line> mLines;
-		ImVec2 mOrigin{};
+		Vec2 mOrigin{};
 	};
 
 	struct Segment
@@ -306,7 +306,7 @@ namespace
 			mMppLogger.reset();
 		}
 
-		uint32_t render(WorldDrawList const& commandList, ImVec2 origin, ImVec2 size, WorldCanvas canvas)
+		uint32_t render(WorldDrawList const& commandList, Vec2 origin, Vec2 size, WorldCanvas canvas)
 		{
 			auto const width = static_cast<std::size_t>(std::max(1.0f, std::ceil(size.x)));
 			auto const height = static_cast<std::size_t>(std::max(1.0f, std::ceil(size.y)));
@@ -592,7 +592,7 @@ namespace
 			return result;
 		}
 
-		void prepareSlots(std::vector<Segment> const& segments, ImVec2 origin)
+		void prepareSlots(std::vector<Segment> const& segments, Vec2 origin)
 		{
 			mSlotAllocator.beginFrame();
 			mSegmentSlots.resize(segments.size());
@@ -698,7 +698,7 @@ namespace
 		}
 
 		static mpp::ClipRectangle targetClip(WorldDrawList::ClipRectangle clip,
-			ImVec2 origin, int width, int height)
+			Vec2 origin, int width, int height)
 		{
 			int const left = std::clamp(static_cast<int>(std::floor(
 				clip.minimum.x - origin.x)), 0, width);
@@ -766,7 +766,7 @@ void destroyWorldRenderSystem()
 }
 
 std::uint32_t renderWorldCommands(WorldDrawList const& commands,
-	ImVec2 canvasPosition, ImVec2 canvasSize, WorldCanvas canvas)
+	Vec2 canvasPosition, Vec2 canvasSize, WorldCanvas canvas)
 {
 	if (!gSystem) throw std::runtime_error("The World render system is not initialised");
 	return gSystem->render(commands, canvasPosition, canvasSize, canvas);

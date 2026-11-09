@@ -54,9 +54,9 @@ namespace
 	}
 
 	// The colours Render.cpp paints an OpenApart Door with.
-	ImU32 const kDoorLeafColour = ImU32(ImColor(64, 192, 255));      // renderDoor*'s leaves
-	ImU32 const kApertureFillColour = ImU32(ImColor(224, 224, 255)); // BackLocationColour
-	ImU32 const kSeamColour = ImU32(ImColor(0, 0, 0));               // inner-edge/centre seam
+	PackedColourValue const kDoorLeafColour = PackedColourValue(ImColor(64, 192, 255));      // renderDoor*'s leaves
+	PackedColourValue const kApertureFillColour = PackedColourValue(ImColor(224, 224, 255)); // BackLocationColour
+	PackedColourValue const kSeamColour = PackedColourValue(ImColor(0, 0, 0));               // inner-edge/centre seam
 	// The front Room's own surface fill. Deliberately not black, so the seam and
 	// the wireframe outlines stay distinguishable from it.
 	ImColor const kFrontRoomColour(192, 192, 255);
@@ -123,7 +123,7 @@ namespace
 		bool painted() const { return vertexCount > 0; }
 	};
 
-	ColourExtent extentOf(ImDrawList const* drawList, ImU32 colour)
+	ColourExtent extentOf(ImDrawList const* drawList, PackedColourValue colour)
 	{
 		ColourExtent extent;
 		for (int i = 0; i < drawList->VtxBuffer.Size; ++i)
@@ -148,7 +148,7 @@ namespace
 	// The filled/outlined rectangles of one colour: each AddRectFilled or AddRect
 	// contributes four consecutive vertices, so grouping them in fours recovers
 	// the individual quads the renderer emitted.
-	std::vector<Rect> rectsOf(ImDrawList const* drawList, ImU32 colour)
+	std::vector<Rect> rectsOf(ImDrawList const* drawList, PackedColourValue colour)
 	{
 		std::vector<int> indices;
 		for (int i = 0; i < drawList->VtxBuffer.Size; ++i)
@@ -176,7 +176,7 @@ namespace
 
 	// The X of every vertex painted in the given colour - the seam is a pair of
 	// vertical lines, so its position is fully described by its vertices' X.
-	std::vector<float> xsOf(ImDrawList const* drawList, ImU32 colour)
+	std::vector<float> xsOf(ImDrawList const* drawList, PackedColourValue colour)
 	{
 		std::vector<float> xs;
 		for (int i = 0; i < drawList->VtxBuffer.Size; ++i)
@@ -192,7 +192,7 @@ namespace
 
 	// The ClipRect of the draw command that first consumes a vertex of the
 	// given colour - the clip the renderer painted that fill under.
-	ImVec4 clipCovering(ImDrawList const* drawList, ImU32 colour)
+	ImVec4 clipCovering(ImDrawList const* drawList, PackedColourValue colour)
 	{
 		for (int i = 0; i < drawList->VtxBuffer.Size; ++i)
 		{

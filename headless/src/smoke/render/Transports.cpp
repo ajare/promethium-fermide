@@ -40,20 +40,20 @@ namespace
 		if (!condition) throw std::runtime_error(message);
 	}
 
-	ImU32 const kDoorOutlineColour = ImU32(ImColor(0, 0, 0));
-	ImU32 const kDoorLeafColour = ImU32(ImColor(64, 192, 255));
-	ImU32 const kShuttleColour = ImU32(ImColor(128, 128, 192));
+	PackedColourValue const kDoorOutlineColour = PackedColourValue(ImColor(0, 0, 0));
+	PackedColourValue const kDoorLeafColour = PackedColourValue(ImColor(64, 192, 255));
+	PackedColourValue const kShuttleColour = PackedColourValue(ImColor(128, 128, 192));
 	ImColor const kTransitColour(210, 210, 210);
 
 
-	int firstVertexOfColour(ImDrawList const* drawList, ImU32 colour)
+	int firstVertexOfColour(ImDrawList const* drawList, PackedColourValue colour)
 	{
 		for (int i = 0; i < drawList->VtxBuffer.Size; ++i)
 			if (drawList->VtxBuffer[i].col == colour) return i;
 		return -1;
 	}
 
-	int lastVertexOfColour(ImDrawList const* drawList, ImU32 colour)
+	int lastVertexOfColour(ImDrawList const* drawList, PackedColourValue colour)
 	{
 		for (int i = drawList->VtxBuffer.Size - 1; i >= 0; --i)
 			if (drawList->VtxBuffer[i].col == colour) return i;
