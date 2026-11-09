@@ -35,6 +35,10 @@ set(names
     carriageImages
     agentPoses
     furniture/bedRenderOffset
+    text/entryPoints
+    text/markerCentring
+    text/badgeCentring
+    text/stanceTransformTessellation
     airlocks/chamberAndControls
     furniture/luaCommands
     furniture/chairCommands

@@ -21,9 +21,11 @@ namespace
 		return Vec2{ value.x, value.y };
 	}
 
-	ImVec4 toImGui(Vec4 value)
+	// Glyph geometry comes back from the metrics relative to the text origin,
+	// so the run's own position is added where it is replayed or transformed.
+	Vec2 offset(Vec2 origin, Vec2 relative)
 	{
-		return ImVec4{ value.x, value.y, value.z, value.w };
+		return Vec2{ origin.x + relative.x, origin.y + relative.y };
 	}
 
 	WorldDrawList::ClipRectangle intersect(
@@ -236,29 +238,47 @@ void WorldDrawList::AddText(Vec2 position, PackedColourValue colour, char const*
 		mTestAdapter->AddText(toImGui(position), colour, text);
 		return;
 	}
+	// The implicit entry point asks for the application's body face at its own
+	// size: the backend lays it out, and nothing here measures or tessellates
+	// it (#999).
 	mCommands.push_back(Text{ position, colour, text, currentClip() });
 }
 
-void WorldDrawList::AddText(ImFont* font, float fontSize, Vec2 position,
-	PackedColourValue colour, char const* text, char const* textEnd, float wrapWidth,
+void WorldDrawList::AddText(FontRef font, Vec2 position, PackedColourValue colour,
+	char const* text, char const* textEnd, float wrapWidth,
 	Vec4 const* fineClipRect)
 {
 	if (!text) return;
+	// Wrapping is a layout the backend does; the recorded command carries the
+	// run as given, as it always has.
+	(void)wrapWidth;
+	auto value = textEnd ? std::string(text, textEnd) : std::string(text);
 	if (mTestAdapter)
 	{
-		ImVec4 adapted{};
-		if (fineClipRect) adapted = toImGui(*fineClipRect);
-		mTestAdapter->AddText(font, fontSize, toImGui(position), colour, text, textEnd,
-			wrapWidth, fineClipRect ? &adapted : nullptr);
+		// The adapter has no font of its own either. Its glyphs arrive through
+		// the injected metrics like everywhere else, as atlas triangles
+		// written into the list against the texture it already has pushed.
+		if (font.size <= 0.0f) return;
+		if (fineClipRect)
+			mTestAdapter->PushClipRect(toImGui(Vec2{ fineClipRect->x, fineClipRect->y }),
+				toImGui(Vec2{ fineClipRect->z, fineClipRect->w }), true);
+		auto const glyphs = fontMetrics().tessellate(font, value.c_str());
+		if (!glyphs.empty())
+		{
+			auto const count = static_cast<int>(glyphs.size());
+			mTestAdapter->PrimReserve(count, count);
+			for (auto const& vertex : glyphs)
+				mTestAdapter->PrimVtx(toImGui(offset(position, vertex.position)),
+					toImGui(vertex.texcoord), colour);
+		}
+		if (fineClipRect) mTestAdapter->PopClipRect();
 		return;
 	}
-	(void)wrapWidth;
 	auto clip = currentClip();
 	if (fineClipRect)
 		clip = intersect(clip, { { fineClipRect->x, fineClipRect->y },
 			{ fineClipRect->z, fineClipRect->w } });
-	std::string value = textEnd ? std::string(text, textEnd) : std::string(text);
-	mCommands.push_back(Text{ position, colour, std::move(value), clip, font, fontSize });
+	mCommands.push_back(Text{ position, colour, std::move(value), clip, font });
 }
 
 void WorldDrawList::AddImage(Texture texture, Vec2 minimum, Vec2 maximum,
@@ -312,17 +332,15 @@ void WorldDrawList::transformGeometrySince(size_t bookmark, Vec2 pivot,
 	for (size_t i = bookmark; i < mCommands.size(); ++i)
 	{
 		auto command = mCommands[i];
-		if (auto* text = std::get_if<Text>(&command); text && text->font)
+		if (auto* text = std::get_if<Text>(&command); text && text->font.size > 0.0f)
 		{
 			// Tessellate before applying the stance, so glyph UVs and width
 			// remain intact. Clipping belongs to the transformed output, not
 			// the upright source glyph (a Lying body can overflow its cell).
-			ImDrawList glyphs(ImGui::GetDrawListSharedData());
-			glyphs._ResetForNewFrame();
-			glyphs.PushTextureID(text->font->ContainerAtlas->TexID);
-			glyphs.PushClipRectFullScreen();
-			glyphs.AddText(text->font, text->fontSize, toImGui(text->position), text->colour, text->value.c_str());
-			for (int index = 0; index + 2 < glyphs.IdxBuffer.Size; index += 3)
+			// The geometry comes from the injected metrics: the command stream
+			// never touches a font to get it (#999).
+			auto const glyphs = fontMetrics().tessellate(text->font, text->value.c_str());
+			for (size_t index = 0; index + 2 < glyphs.size(); index += 3)
 			{
 				Triangle triangle{};
 				triangle.colour = text->colour;
@@ -330,9 +348,9 @@ void WorldDrawList::transformGeometrySince(size_t bookmark, Vec2 pivot,
 				triangle.clip = text->clip;
 				for (int v = 0; v < 3; ++v)
 				{
-					auto const& vertex = glyphs.VtxBuffer[glyphs.IdxBuffer[index + v]];
-					triangle.positions[v] = transform(fromImGui(vertex.pos));
-					triangle.texcoords[v] = fromImGui(vertex.uv);
+					auto const& vertex = glyphs[index + static_cast<size_t>(v)];
+					triangle.positions[v] = transform(offset(text->position, vertex.position));
+					triangle.texcoords[v] = vertex.texcoord;
 				}
 				transformed.push_back(triangle);
 			}

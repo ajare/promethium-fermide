@@ -137,6 +137,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/persistence/TransactionalWrites.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/persistence/WorldDocuments.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/render/AgentPaths.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/FontMetrics.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/render/DoorButtons.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/render/DoorOpenApart.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/render/DoorOpenLeft.cpp` | module-owned | `pf-smoke-render` |

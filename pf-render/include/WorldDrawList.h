@@ -6,13 +6,15 @@
 #include <vector>
 
 #include "DrawTypes.h"
+#include "FontMetrics.h"
 
 // The command stream is written in the shared drawing vocabulary this module
-// owns (#996, #997): pf::render::Vec2 for positions and extents,
+// owns (#996, #997, #999): pf::render::Vec2 for positions and extents,
 // pf::render::PackedColourValue for colours, pf::render::DrawFlags for the
-// closed/open stroke flag. They are brought in unqualified here so the
-// recording API reads the way it did when it spelled ImVec2, ImU32 and
-// ImDrawFlags - but they are the shared types, not ImGui's.
+// closed/open stroke flag, and pf::render::FontRef for the font a text
+// command asks the application for. They are brought in unqualified here so
+// the recording API reads the way it did when it spelled ImVec2, ImU32,
+// ImDrawFlags and ImFont* - but they are the shared types, not ImGui's.
 using pf::render::Vec2;
 using pf::render::Vec4;
 using pf::render::PackedColourValue;
@@ -21,19 +23,21 @@ using pf::render::DrawFlags;
 using pf::render::DrawFlagsNone;
 using pf::render::DrawFlagsClosed;
 using pf::render::White;
+using pf::render::FontRef;
+using pf::render::WorldFont;
+using pf::render::IFontMetrics;
 
-// Two ImGui names remain reachable from this header, and only as opaque
-// pointers, so no ImGui header version or context is needed to record a
+// One ImGui name remains reachable from this header, and only as an opaque
+// pointer, so no ImGui header version or context is needed to record a
 // World:
 //
-//   ImFont*  the explicit-font text path, replaced by the injected font
-//            metrics interface in a later step of #995;
 //   ImDrawList*  the optional test adapter, which a later step of #995
 //            moves out of the command stream into the headless harness.
 //
-// Neither is a value type carried by a command: a recorded command holds no
-// ImGui value.
-struct ImFont;
+// It is not a value type carried by a command: a recorded command holds no
+// ImGui value. No font type reaches this header at all - a text command
+// carries a FontRef and the application answers for it through the
+// installed IFontMetrics (#999).
 struct ImDrawList;
 
 // CPU-side command stream for the World viewport. The GUI path submits these
@@ -82,10 +86,11 @@ public:
 		PackedColourValue colour{};
 		std::string value;
 		ClipRectangle clip;
-		// Explicit-font text can be tessellated for non-uniform stance
-		// transforms; ordinary text remains on the native MPP text path.
-		ImFont* font{};
-		float fontSize{};
+		// The font this run asked for, as a role and a size rather than a
+		// font object. A run left at the default size stays on the backend's
+		// native text path; a sized run is what a non-uniform stance
+		// transform tessellates through the injected metrics (#999).
+		FontRef font{};
 	};
 
 	struct Barrier {};
@@ -111,7 +116,7 @@ public:
 	void AddPolyline(Vec2 const* points, int count, PackedColourValue colour,
 		DrawFlags flags, float thickness);
 	void AddText(Vec2 position, PackedColourValue colour, char const* text);
-	void AddText(ImFont* font, float fontSize, Vec2 position, PackedColourValue colour,
+	void AddText(FontRef font, Vec2 position, PackedColourValue colour,
 		char const* text, char const* textEnd = nullptr, float wrapWidth = 0.0f,
 		Vec4 const* fineClipRect = nullptr);
 	void AddImage(Texture texture, Vec2 minimum, Vec2 maximum,
@@ -125,6 +130,14 @@ public:
 		bool clockwiseQuarterTurn);
 
 	std::vector<Command> const& commands() const { return mCommands; }
+
+	// The font metrics the application installed for this stream to measure
+	// and tessellate with (#999). Recording text with no metrics installed is
+	// a setup error rather than a silent fallback, so this throws.
+	static IFontMetrics const& fontMetrics()
+	{
+		return pf::render::requireFontMetrics();
+	}
 
 private:
 	ClipRectangle currentClip() const;

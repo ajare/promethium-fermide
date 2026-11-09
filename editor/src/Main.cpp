@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include "Helpers.h"
+#include "ImGuiFontMetrics.h"
 #include "NonInteractiveProcess.h"
 #include "ApplicationAssetCatalogue.h"
 #include "ApplicationResources.h"
@@ -498,6 +499,15 @@ void setup()
 	{
 		throw ExitApplicationException(1, "Could not load the Walkway palette icon.");
 	}
+
+	// The shared renderer records and measures World text through the font
+	// metrics installed here (#999); it holds no font of its own. The faces
+	// are resolved when measured rather than snapshotted now, so the icon
+	// face stays whatever the editor currently has loaded.
+	static ImGuiFontMetrics const fontMetrics(
+		[]() -> ImFont* { return ImGui::GetFont(); },
+		[]() -> ImFont* { return gAgentIconFont ? gAgentIconFont : ImGui::GetFont(); });
+	pf::render::installFontMetrics(&fontMetrics);
 }
 
 void shutdown()

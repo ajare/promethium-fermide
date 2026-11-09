@@ -78,7 +78,9 @@ RenderWorldScope::~RenderWorldScope()
 	gRenderWorld = std::move(mPrevious);
 }
 
-extern ImFont* gAgentIconFont;
+// Text is measured and tessellated through the font metrics the application
+// installed (#999). The producer names a face and a size; it never names a
+// font, never asks ImGui which font is current, and holds no icon-font global.
 
 using namespace std;
 
@@ -1124,12 +1126,15 @@ void renderMarker(shared_ptr<const core::Marker> marker, uint32_t /* layer */, L
 	point.y += MarkerFloorLift;
 	transformPosition(point);
 
-	ImFont* font = gAgentIconFont ? gAgentIconFont : ImGui::GetFont();
-	auto sourceSize = font->FontSize;
-	auto sourceBounds = font->CalcTextSizeA(sourceSize, FLT_MAX, 0.0f, ICON_FA_MAP_MARKER_ALT);
-	auto fontSize = sourceSize * MarkerIconSize * gUISettings.worldZoom
-		/ max(max(sourceBounds.x, sourceBounds.y), 1.0f);
-	auto size = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, ICON_FA_MAP_MARKER_ALT);
+	auto const& metrics = WorldDrawList::fontMetrics();
+	// The icon face measured at its own size: the height that comes back is
+	// the face's pixel size, which is what the icon is scaled from. The
+	// arithmetic is the one the producer used when it held the font itself,
+	// so the drawn icon keeps its exact centring and extents.
+	auto const natural = metrics.measure({ WorldFont::Icons, 0.0f }, ICON_FA_MAP_MARKER_ALT);
+	auto const fontSize = natural.y * MarkerIconSize * gUISettings.worldZoom
+		/ max(max(natural.x, natural.y), 1.0f);
+	auto const size = metrics.measure({ WorldFont::Icons, fontSize }, ICON_FA_MAP_MARKER_ALT);
 	Vec2 topLeft{ point.x - size.x * 0.5f, point.y - size.y };
 	if (selected)
 		drawList->AddRect({ topLeft.x - 3.0f, topLeft.y - 3.0f },
@@ -1137,7 +1142,8 @@ void renderMarker(shared_ptr<const core::Marker> marker, uint32_t /* layer */, L
 			SelectedColour, 2.0f, 0, 2.0f);
 	if (!drawObjectSprite("marker", drawList, topLeft,
 		{topLeft.x + size.x, topLeft.y + size.y}, packColour(251, 188, 4)))
-		drawList->AddText(font, fontSize, topLeft, packColour(251, 188, 4), ICON_FA_MAP_MARKER_ALT);
+		drawList->AddText({ WorldFont::Icons, fontSize }, topLeft,
+			packColour(251, 188, 4), ICON_FA_MAP_MARKER_ALT);
 }
 
 
@@ -1655,13 +1661,14 @@ PackedColourValue agentRenderColour(core::Agent const& agent, bool selected)
 
 namespace
 {
-	void drawAgentDebugBadge(WorldDrawList* drawList, ImFont* font, char const* symbol,
+	void drawAgentDebugBadge(WorldDrawList* drawList, char const* symbol,
 		PackedColourValue boxColour, float centreX, float side, float gap, float& bottom)
 	{
 		Vec2 const minimum{ centreX - side * 0.5f, bottom - side };
 		Vec2 const maximum{ centreX + side * 0.5f, bottom };
 		drawList->AddRectFilled(minimum, maximum, boxColour);
-		auto const textSize = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.0f, symbol);
+		auto const textSize = WorldDrawList::fontMetrics()
+			.measure({ WorldFont::Default, 0.0f }, symbol);
 		drawList->AddText({ centreX - textSize.x * 0.5f,
 			minimum.y + (side - textSize.y) * 0.5f }, White, symbol);
 		bottom = minimum.y - gap;
@@ -1716,10 +1723,10 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 	auto const centreX = (pos0.x + pos1.x) * 0.5f;
 	float badgeBottom = min(pos0.y, pos1.y) - gap;
 	if (inQueue)
-		drawAgentDebugBadge(drawList, ImGui::GetFont(), "!",
+		drawAgentDebugBadge(drawList, "!",
 			packColour(230, 126, 34, 255), centreX, side, gap, badgeBottom);
 	if (planning)
-		drawAgentDebugBadge(drawList, ImGui::GetFont(), "?",
+		drawAgentDebugBadge(drawList, "?",
 			packColour(96, 96, 96, 255), centreX, side, gap, badgeBottom);
 }
 

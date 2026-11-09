@@ -14,6 +14,14 @@
 # them (#996); this module's own producer still spells its ImGui types and
 # moves onto them in a later step.
 #
+# Text is the first ImGui dependency fully evicted (#999): a recorded Text
+# command carries a pf::render::FontRef - a face role and a size - and the
+# producer measures and tessellates through the IFontMetrics the
+# application installs (include/FontMetrics.h), the same seam convention
+# the four tilesets already use. The module names no font type, asks no
+# current-font question and holds no icon-font global; the editor supplies
+# the ImGui-backed implementation.
+#
 # The MPP render stack lives here too (#1001, ADR 0010 as amended): the
 # logger, render system, MPP and Willpower resource managers, the scene,
 # the offscreen canvas targets and the triangle/line batch renderers, plus
@@ -34,6 +42,7 @@ pf_require_willpower()
 
 add_library(pf-render STATIC
     src/Render.cpp
+    src/FontMetrics.cpp
     src/WorldDrawList.cpp
     src/WorldRenderStack.cpp
     src/SectorTileset.cpp

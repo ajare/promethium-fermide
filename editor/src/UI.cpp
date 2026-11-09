@@ -843,7 +843,8 @@ namespace
 		auto fontSize = sourceSize * maximumSize
 			/ max(max(sourceBounds.x, sourceBounds.y), 1.0f);
 		auto size = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, ICON_FA_MAP_MARKER_ALT);
-		drawList->AddText(font, fontSize, { point.x - size.x * 0.5f, point.y - size.y },
+		drawList->AddText({ WorldFont::Icons, fontSize },
+			{ point.x - size.x * 0.5f, point.y - size.y },
 			colour, ICON_FA_MAP_MARKER_ALT);
 	}
 
@@ -857,7 +858,7 @@ namespace
 		auto fontSize = sourceSize * min(available.x / max(sourceBounds.x, 1.0f),
 			available.y / max(sourceBounds.y, 1.0f));
 		auto size = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, icon);
-		drawList->AddText(font, fontSize,
+		drawList->AddText({ WorldFont::Icons, fontSize },
 			toVec2(boundsMin + (boundsMax - boundsMin - size) * 0.5f), colour, icon);
 	}
 

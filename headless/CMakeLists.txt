@@ -62,6 +62,11 @@ add_library(pf-headless-render-support OBJECT
 )
 target_include_directories(pf-headless-render-support PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/support")
+# The ImGui-backed font metrics the headless tier installs are the editor's
+# own implementation (#999) - the same class the editor injects, so a CPU
+# check measures World text the way the editor does.
+target_include_directories(pf-headless-render-support PRIVATE
+    "${PF_REPO_ROOT}/editor/include")
 target_link_libraries(pf-headless-render-support PUBLIC pf-render)
 if(MSVC)
     target_compile_options(pf-headless-render-support PRIVATE

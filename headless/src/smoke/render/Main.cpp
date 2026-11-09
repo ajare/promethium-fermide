@@ -14,6 +14,7 @@ int main(int argc, char** argv)
 		{ "carriageImages", isolated<carriageImages> },
 	};
 	render_smoke::registerAgentPoses(checks);
+	render_smoke::registerFontMetrics(checks);
 	render_smoke::registerAirlocks(checks);
 	render_smoke::registerFurniture(checks);
 	render_smoke::registerSecurityScanners(checks);
