@@ -109,6 +109,30 @@ namespace
 	WorldDrawList::ClipRectangle const kViewportClip{
 		{ 0.0f, 0.0f }, { 1280.0f, 720.0f } };
 
+	// A viewport that covers a whole three-Level scene at the current cell
+	// size. The 720-pixel viewport above clips the top Level out of view, so
+	// checks that tally a full control stack draw into this instead.
+	WorldDrawList::ClipRectangle const kTallViewportClip{
+		{ 0.0f, 0.0f },
+		{ 8.0f * CORE_CELL_WIDTH_PIXELS, 3.0f * CORE_LEVEL_HEIGHT_PIXELS } };
+
+	// Keeps the renderer's viewport in step with kTallViewportClip for as long
+	// as the guard lives, then restores whatever the checks opened with.
+	struct TallViewport
+	{
+		UISettings const previous{ gUISettings };
+		TallViewport()
+		{
+			gUISettings.worldViewportX = 0.0f;
+			gUISettings.worldViewportY = 0.0f;
+			gUISettings.worldViewportWidth = kTallViewportClip.maximum.x;
+			gUISettings.worldViewportHeight = kTallViewportClip.maximum.y;
+			gUISettings.xOffset = 0.0f;
+			gUISettings.yOffset = 0.0f;
+		}
+		~TallViewport() { gUISettings = previous; }
+	};
+
 	struct ScreenBounds
 	{
 		float minX, maxX, minY, maxY;
@@ -445,6 +469,9 @@ namespace
 
 		// Ladder endpoints and Platform Stops share the production draw/hit seam.
 		{
+			// The stack spans three Levels, so it draws through the tall
+			// viewport rather than the 720-pixel one.
+			TallViewport const viewport;
 			core::World world("Endpoint artwork", 8, 3);
 			world.addRoom("Neighbour", 0, 0, 0, 1, 3);
 			auto host = world.addRoom("Room", 0, 0, 1, 2, 3);
@@ -452,7 +479,7 @@ namespace
 			world.addRoomLadder(host, 0, 1, {0, true, false});
 			core::World::CreateLiftOptions options; options.stopOffsets = {0, 2};
 			world.addSectorPlatformLift(host, 0, 0, options); world.finishBuild();
-			WorldDrawList drawList(kViewportClip);
+			WorldDrawList drawList(kTallViewportClip);
 			renderSector(world.getSector(host), 0, LayerRenderStyle::Solid, false, roomColour, &drawList);
 			require(visibleGeometry(drawList).buttonFillTriangles == 8, "Endpoint stacks omitted independent artwork");
 			uint32_t count = 0;
@@ -472,6 +499,8 @@ namespace
 		// wall edit, not just the initial stack. Neither member may keep stale
 		// vertical artwork when the canonical assignment splits the stack.
 		{
+			// Same three-Level stack, seen after a structural wall edit.
+			TallViewport const viewport;
 			core::World world("Mixed structural artwork", 8, 3);
 			world.addRoom("Neighbour", 1, 0, 0, 1, 3);
 			auto host = world.addRoom("Room", 1, 0, 1, 2, 3);
@@ -488,7 +517,7 @@ namespace
 				else if (world.getSector(host)->getEndType(0, CORE_SIDE_LEFT) == core::SectorEndType::None)
 					world.addLocationWall(host, 0, CORE_SIDE_LEFT);
 				world.finishBuild();
-				WorldDrawList drawList(kViewportClip);
+				WorldDrawList drawList(kTallViewportClip);
 				renderSector(world.getSector(host), 1, LayerRenderStyle::Solid, false, roomColour, &drawList);
 				auto geometry = visibleGeometry(drawList);
 				require(geometry.buttonFillTriangles == 8 && geometry.buttonOutlineLines == 4, "Mixed reflow lost rendered controls");
@@ -513,6 +542,9 @@ namespace
 		// Fixed-side owners retain separately visible and targetable inset shapes.
 		for (int kind = 0; kind < 3; ++kind)
 		{
+			// The inset owners stand three Levels tall, so they draw through
+			// the tall viewport rather than the 720-pixel one.
+			TallViewport const viewport;
 			core::World world("Fixed inset artwork", 10, 3);
 			std::vector<std::pair<uint32_t, std::vector<float>>> hosts;
 			if (kind == 2)
@@ -533,7 +565,7 @@ namespace
 			world.finishBuild();
 			for (auto const& [host, expected] : hosts)
 			{
-				WorldDrawList drawList(kViewportClip);
+				WorldDrawList drawList(kTallViewportClip);
 				renderSector(world.getSector(host), 0, LayerRenderStyle::Solid, false, roomColour, &drawList);
 				require(visibleGeometry(drawList).buttonFillTriangles == static_cast<int>(expected.size() * 2),
 					"Inset owner omitted physical Button artwork");

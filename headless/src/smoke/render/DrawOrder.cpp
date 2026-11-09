@@ -1008,7 +1008,12 @@ namespace
 		station.surfaces.emplace("corridor", SectorTileRegion{0, 0, 128, 320});
 		setSectorTileset(std::move(station), static_cast<TextureId>(1));
 		WorldDrawList tiles({{0, 0}, {1000, 1000}});
-		drawSectorTileSurface("corridor", &tiles, {0, 0}, {256, 240}, White, 2.f);
+		// Two World cells wide, three quarters of a Level tall: two tiles side
+		// by side, the second Level cropped rather than stretched to fit.
+		float const zoom = 2.f;
+		float const probeWide = 2.0f * CORE_CELL_WIDTH_PIXELS * zoom;
+		float const probeHigh = 0.75f * CORE_LEVEL_HEIGHT_PIXELS * zoom;
+		drawSectorTileSurface("corridor", &tiles, {0, 0}, {probeWide, probeHigh}, White, zoom);
 		require(tiles.commands().size() == 4, "Station artwork must repeat once per World cell at zoom 2");
 		auto const& tile = std::get<WorldDrawList::Triangle>(tiles.commands().front());
 		float maxX{}, maxY{}, maxUvY{};
@@ -1017,7 +1022,8 @@ namespace
 			maxY = std::max(maxY, tile.positions[i].y);
 			maxUvY = std::max(maxUvY, tile.texcoords[i].y);
 		}
-		require(maxX == 128.f && maxY == 240.f && maxUvY > .74f && maxUvY < .76f,
+		require(maxX == CORE_CELL_WIDTH_PIXELS * zoom && maxY == probeHigh
+			&& maxUvY > .74f && maxUvY < .76f,
 			"Station tile must scale to World cells and crop partial cells");
 		WorldDrawList fallback({{0, 0}, {1000, 1000}});
 		drawSectorTileSurface("room", &fallback, {0, 0}, {64, 160}, White);

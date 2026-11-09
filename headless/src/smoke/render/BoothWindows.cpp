@@ -11,21 +11,48 @@
 extern UISettings gUISettings;
 namespace
 {
+	// The inner opening a BoothWindow clips to. The authored frame is 52 x 48
+	// with a five-pixel border, leaving a 42 x 38 opening; those ratios are
+	// artwork facts about the frame tile, while the World cell decides how many
+	// screen pixels that opening comes to.
+	struct ApertureInner
+	{
+		float width, height;
+	};
+
+	ApertureInner boothInner(core::BoothWindow const& booth)
+	{
+		core::Vector2 from{}, to{};
+		booth.getFullShape(from, to);
+		return {
+			std::abs(to.x - from.x) * CORE_CELL_WIDTH_PIXELS * 42.0f / 52.0f,
+			std::abs(to.y - from.y) * CORE_LEVEL_HEIGHT_PIXELS * 38.0f / 48.0f };
+	}
+
+	// The headless canvas every check here draws into. Five Levels tall keeps
+	// the same World-space coverage the checks were written against, so none
+	// of them loses artwork to Level culling at the current cell size.
+	float const kCanvasWidth = 1200.0f;
+	float const kCanvasHeight = 5.0f * CORE_LEVEL_HEIGHT_PIXELS;
+
 	void dumbwaiterPresentation(smoke::Context const&)
 	{
 		using smoke::require;
-		ImGui::GetIO().DisplaySize = {1200, 800}; ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build(); ImGui::NewFrame();
-		gUISettings.worldViewportWidth = 1200; gUISettings.worldViewportHeight = 800;
+		ImGui::GetIO().DisplaySize = {kCanvasWidth, kCanvasHeight}; ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build(); ImGui::NewFrame();
+		gUISettings.worldViewportWidth = kCanvasWidth; gUISettings.worldViewportHeight = kCanvasHeight;
 		gUISettings.worldZoom = 1; gUISettings.xOffset = 0; gUISettings.yOffset = 0;
 		gUISettings.renderNextLayerWireframe = false;
 		for (uint32_t initial : {0u, 1u})
 		{
 			auto world = dumbwaiter_fixture::make();
 			auto id = world->addDumbwaiter(1, 0, 2, {initial, 2}); world->finishBuild();
+			// The car shows only through its landing aperture, so the most of
+			// it that can ever reach the screen is that aperture's inner opening.
+			auto const landingInner = boothInner(*world->lookupDumbwaiter(id)->getAperture(initial));
 			for (uint32_t layer : {0u, 1u})
 			{
 				gUISettings.visibleLayer = layer;
-				WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
+				WorldDrawList drawing({{0, 0}, {kCanvasWidth, kCanvasHeight}}); renderWorld(world, &drawing);
 				unsigned car = 0, here = 0, elsewhere = 0;
 				for (auto const& command : drawing.commands())
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
@@ -35,7 +62,8 @@ namespace
 							++car;
 							if (layer == 0) require(triangle->clip.minimum.x > 2.1f * CORE_CELL_WIDTH_PIXELS
 								&& triangle->clip.maximum.x < 2.9f * CORE_CELL_WIDTH_PIXELS
-								&& triangle->clip.maximum.y - triangle->clip.minimum.y < 48,
+								&& triangle->clip.maximum.y - triangle->clip.minimum.y
+									<= landingInner.height + 0.001f,
 								"Car escaped owned aperture clipping");
 							else require(triangle->clip.maximum.x - triangle->clip.minimum.x > CORE_CELL_WIDTH_PIXELS,
 								"Selected shaft car incorrectly aperture-clipped");
@@ -52,7 +80,7 @@ namespace
 				require(here == (layer == 0 ? 4u : 0u) && elsewhere == here, "Landing buttons not visible exclusively on landing Layer: " + std::to_string(layer) + "/" + std::to_string(here) + "/" + std::to_string(elsewhere));
 			}
 			gUISettings.visibleLayer = 0; gUISettings.renderNextLayerWireframe = true;
-			WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
+			WorldDrawList drawing({{0, 0}, {kCanvasWidth, kCanvasHeight}}); renderWorld(world, &drawing);
 			unsigned car = 0;
 			for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
 				triangle && triangle->colour == packColour(180, 190, 205, 255)) ++car;
@@ -68,7 +96,7 @@ namespace
 				for (uint32_t layer : {0u, 1u})
 				{
 					gUISettings.visibleLayer = layer;
-					WorldDrawList motion({{0, 0}, {1200, 800}}); renderWorld(world, &motion);
+					WorldDrawList motion({{0, 0}, {kCanvasWidth, kCanvasHeight}}); renderWorld(world, &motion);
 					unsigned busy = 0, carCount = 0, here = 0, elsewhere = 0;
 					float low = 10000, high = -10000;
 					for (auto const& command : motion.commands())
@@ -84,21 +112,22 @@ namespace
 								if (layer == 0)
 								{
 									auto shutter = ticks <= 48 ? unit->getAperture(initial) : unit->getAperture(1 - initial);
-									// Artwork pixels, not World units: 48 is the height of the
-									// authored 52 x 48 frame tile and 38 that of the 42 x 38
-									// shutter tile, both inside the object atlas. Re-cutting the
-									// artwork moves these literals without moving any World
-									// geometry.
-									auto fullHeight = 48.0f * 38 / 48;
-									require(triangle->clip.maximum.x - triangle->clip.minimum.x < 52
-										&& triangle->clip.maximum.y - triangle->clip.minimum.y <= fullHeight * shutter->getProgress() + 0.001f,
+									// The car may only show inside the frame's inner opening, and
+									// only as far as that shutter has retracted. The 42/52 and 38/48
+									// ratios are artwork facts about the frame tile; the World cell
+									// decides how many screen pixels the opening comes to.
+									auto const inner = boothInner(*shutter);
+									require(triangle->clip.maximum.x - triangle->clip.minimum.x
+											<= inner.width + 0.001f
+										&& triangle->clip.maximum.y - triangle->clip.minimum.y
+											<= inner.height * shutter->getProgress() + 0.001f,
 										"Moving car escaped current shutter/depth clip");
 								}
 							}
 						}
 					if (layer == 1)
-						require(carCount == 2 && std::abs(low - (800 - (unit->getCarPosition().y + 0.55f) * CORE_LEVEL_HEIGHT_PIXELS)) < 0.001f
-							&& std::abs(high - (800 - (unit->getCarPosition().y + 0.18f) * CORE_LEVEL_HEIGHT_PIXELS)) < 0.001f,
+						require(carCount == 2 && std::abs(low - (kCanvasHeight - (unit->getCarPosition().y + 0.55f) * CORE_LEVEL_HEIGHT_PIXELS)) < 0.001f
+							&& std::abs(high - (kCanvasHeight - (unit->getCarPosition().y + 0.18f) * CORE_LEVEL_HEIGHT_PIXELS)) < 0.001f,
 							"Production shaft car did not follow physical intermediate position");
 					else
 					{
@@ -127,7 +156,7 @@ namespace
 				world->addSectorDoor(0, 0, 1, options);
 			}
 			auto id = world->addDumbwaiter(1, 0, 2); world->finishBuild(); gUISettings.visibleLayer = 0;
-			WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
+			WorldDrawList drawing({{0, 0}, {kCanvasWidth, kCanvasHeight}}); renderWorld(world, &drawing);
 			for (uint32_t stop = 0; stop < 2; ++stop)
 			{
 				auto object = dumbwaiter_fixture::control(*world, id, stop); auto button = object->_getObject();
@@ -144,8 +173,8 @@ namespace
 						for (auto p : triangle->positions)
 							require(p.x >= button->getPosition().x * CORE_CELL_WIDTH_PIXELS - 0.001f
 								&& p.x <= (button->getPosition().x + button->getSize().x) * CORE_CELL_WIDTH_PIXELS + 0.001f
-								&& p.y >= 800 - (button->getPosition().y + button->getSize().y) * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
-								&& p.y <= 800 - button->getPosition().y * CORE_LEVEL_HEIGHT_PIXELS + 0.001f,
+								&& p.y >= kCanvasHeight - (button->getPosition().y + button->getSize().y) * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
+								&& p.y <= kCanvasHeight - button->getPosition().y * CORE_LEVEL_HEIGHT_PIXELS + 0.001f,
 								"Landing rendered at old aperture inset or incorrect stack height");
 					}
 				require(triangles >= 2, "Allocated landing missing from production rendering");
@@ -171,15 +200,15 @@ namespace
 				auto unit = world->lookupDumbwaiter(id);
 				for (uint32_t layer = 0; layer < world->getLayerCount(); ++layer)
 				{
-					gUISettings.visibleLayer = layer; WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
+					gUISettings.visibleLayer = layer; WorldDrawList drawing({{0, 0}, {kCanvasWidth, kCanvasHeight}}); renderWorld(world, &drawing);
 					unsigned car = 0, buttons = 0, busy = 0;
 					for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
 					{
 						if (triangle->colour == packColour(180, 190, 205, 255))
 						{
 							++car; require(bool(unit), "Deleted car remains in production draw commands");
-							for (auto p : triangle->positions) require(p.y >= 800 - 1.55f * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
-								&& p.y <= 800 - 1.18f * CORE_LEVEL_HEIGHT_PIXELS + 0.001f, "Reconciled car retained in-flight position");
+							for (auto p : triangle->positions) require(p.y >= kCanvasHeight - 1.55f * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
+								&& p.y <= kCanvasHeight - 1.18f * CORE_LEVEL_HEIGHT_PIXELS + 0.001f, "Reconciled car retained in-flight position");
 							if (layer + 1 == unit->getLayerIndex()) require(triangle->clip.minimum.x > 2.1f * CORE_CELL_WIDTH_PIXELS
 								&& triangle->clip.maximum.x < 2.9f * CORE_CELL_WIDTH_PIXELS, "Restored car escaped aperture clip");
 						}
@@ -199,15 +228,20 @@ namespace
 			auto world = dumbwaiter_fixture::make(0, true, 2);
 			world->addRoom("Front", 0, 0, 2, 1, 2);
 			world->addSectorWindow(0, 0, 2, 1, 2);
-			world->addDumbwaiter(2, 0, 2); world->finishBuild();
+			auto const nestedId = world->addDumbwaiter(2, 0, 2); world->finishBuild();
+			// The car reaches the screen only through its landing aperture,
+			// nested inside the Window in front, so its clip can be no taller
+			// than that aperture's inner opening.
+			auto const nestedInner = boothInner(*world->lookupDumbwaiter(nestedId)->getAperture(0));
 			gUISettings.visibleLayer = 0;
-			WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
+			WorldDrawList drawing({{0, 0}, {kCanvasWidth, kCanvasHeight}}); renderWorld(world, &drawing);
 			unsigned car = 0;
 			for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
 				triangle && triangle->colour == packColour(180, 190, 205, 255))
 			{
 				++car; require(triangle->clip.minimum.x > 2.1f * CORE_CELL_WIDTH_PIXELS && triangle->clip.maximum.x < 2.9f * CORE_CELL_WIDTH_PIXELS
-					&& triangle->clip.maximum.y - triangle->clip.minimum.y < 48, "Nested aperture clipping leaked car geometry");
+					&& triangle->clip.maximum.y - triangle->clip.minimum.y <= nestedInner.height + 0.001f,
+					"Nested aperture clipping leaked car geometry");
 			}
 			require(car == 2, "Recursive aperture lost initial car");
 		}
@@ -221,7 +255,7 @@ namespace
 			for (uint32_t layer = 0; layer < 4; ++layer)
 			{
 				gUISettings.visibleLayer = layer;
-				WorldDrawList drawing({{0,0},{1200,800}}); renderWorld(world,&drawing);
+				WorldDrawList drawing({{0,0},{kCanvasWidth,kCanvasHeight}}); renderWorld(world,&drawing);
 				unsigned cars = 0, buttons = 0; float x = layer < 2 ? 4.0f : 0.0f, y = layer < 2 ? 1.0f : 3.0f;
 				for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
 				{
@@ -230,8 +264,8 @@ namespace
 						++cars;
 						for (auto p : triangle->positions)
 							require(p.x > x * CORE_CELL_WIDTH_PIXELS && p.x < (x + 1) * CORE_CELL_WIDTH_PIXELS
-								&& p.y >= 800 - (y + 0.55f) * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
-								&& p.y <= 800 - (y + 0.18f) * CORE_LEVEL_HEIGHT_PIXELS + 0.001f,
+								&& p.y >= kCanvasHeight - (y + 0.55f) * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
+								&& p.y <= kCanvasHeight - (y + 0.18f) * CORE_LEVEL_HEIGHT_PIXELS + 0.001f,
 								"Moved/pasted car rendered at old shaft/Level");
 						if (layer % 2 == 0) require(triangle->clip.minimum.x > (x + 0.1f) * CORE_CELL_WIDTH_PIXELS
 							&& triangle->clip.maximum.x < (x + 0.9f) * CORE_CELL_WIDTH_PIXELS, "Moved/pasted car lost landing aperture clip");
@@ -251,8 +285,8 @@ namespace
 	void presentation(smoke::Context const& context)
 	{
 		using smoke::require;
-		ImGui::GetIO().DisplaySize={1200,800}; ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build(); ImGui::NewFrame();
-		gUISettings.visibleLayer=0; gUISettings.worldViewportWidth=1200; gUISettings.worldViewportHeight=800;
+		ImGui::GetIO().DisplaySize = {kCanvasWidth, kCanvasHeight}; ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build(); ImGui::NewFrame();
+		gUISettings.visibleLayer=0; gUISettings.worldViewportWidth=kCanvasWidth; gUISettings.worldViewportHeight=kCanvasHeight;
 		gUISettings.worldZoom=1; gUISettings.xOffset=0; gUISettings.yOffset=0; gUISettings.renderNextLayerWireframe=false;
 		auto tiles = ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml"));
 		auto const atlasWidth = static_cast<float>(tiles.width);
@@ -266,20 +300,24 @@ namespace
 		require(shutterRegion.width==42 && shutterRegion.height==38, "Shutter is not a distinct inner tile");
 		setObjectTileset(std::move(tiles), static_cast<TextureId>(1));
 		auto near=[](float a,float b) { return std::abs(a-b)<0.001f; };
-		// The frame artwork is 52x48 with a five-pixel inset on each edge: the
-		// 5/52 and 5/48 ratios below are artwork facts about that tile, while the
-		// 3.1/3.9 multipliers are World units of one cell width each. top/bottom
-		// are viewport-absolute pixels, not World units of either kind.
-		float const left=3.1f*CORE_CELL_WIDTH_PIXELS, right=3.9f*CORE_CELL_WIDTH_PIXELS, top=720, bottom=768;
-		float const innerLeft=left+(right-left)*5/52, innerRight=right-(right-left)*5/52;
-		float const innerTop=top+(bottom-top)*5/48, innerBottom=bottom-(bottom-top)*5/48;
-		float const height=innerBottom-innerTop;
 		for (bool nestedBooth : {false,true})
 		{
 			auto world=std::make_shared<core::World>("BoothWindow clipping",8,3); world->addLayer();
 			world->addRoom("Front",0,0,0,7,2); world->addRoom("Middle",1,0,0,7,2);
 			world->addFacade(2,0,0,7,2,0.9f,{31,73,109});
 			auto booth=std::static_pointer_cast<const core::BoothWindow>(world->addBoothWindow(0,0,3).object);
+			// The frame artwork is 52x48 with a five-pixel inset on each edge:
+			// the 5/52 and 5/48 ratios below are artwork facts about that tile.
+			// left/right/top/bottom are viewport-absolute pixels for this
+			// canvas, read off the BoothWindow's own World shape so they follow
+			// the World cell instead of a remembered pixel count.
+			core::Vector2 frameMin{}, frameMax{};
+			booth->getFullShape(frameMin, frameMax);
+			float const left=frameMin.x*CORE_CELL_WIDTH_PIXELS, right=frameMax.x*CORE_CELL_WIDTH_PIXELS;
+			float const top=kCanvasHeight-frameMax.y*CORE_LEVEL_HEIGHT_PIXELS, bottom=kCanvasHeight-frameMin.y*CORE_LEVEL_HEIGHT_PIXELS;
+			float const innerLeft=left+(right-left)*5/52, innerRight=right-(right-left)*5/52;
+			float const innerTop=top+(bottom-top)*5/48, innerBottom=bottom-(bottom-top)*5/48;
+			float const height=innerBottom-innerTop;
 			std::shared_ptr<const core::BoothWindow> backBooth;
 			if (nestedBooth) backBooth=std::static_pointer_cast<const core::BoothWindow>(world->addBoothWindow(1,0,3,core::Window::State::Open).object);
 			else world->addSectorWindow(1,0,3,1,1);
@@ -290,7 +328,7 @@ namespace
 			};
 			auto draw=[&](float expected) {
 				require(near(booth->getProgress(),expected),"Renderer setup missed runtime progress");
-				WorldDrawList drawing({{0,0},{1200,800}}); renderWorld(world,&drawing);
+				WorldDrawList drawing({{0,0},{kCanvasWidth,kCanvasHeight}}); renderWorld(world,&drawing);
 				bool backdrop=false, frame=false, shutter=false; int frameIndex=-1, shutterIndex=-1, backdropIndex=-1, index=0;
 				float shutterMinY=10000, shutterMaxY=-10000;
 				for (auto const& command : drawing.commands())
@@ -346,7 +384,7 @@ namespace
 			if (backBooth) toggle(backBooth);
 			toggle(booth); require(world->advanceTicks(12),"Reversal failed"); draw(0.25f);
 			toggle(booth); require(world->advanceTicks(36),"Full opening failed"); draw(1);
-			WorldDrawList outline({{0,0},{1200,800}});
+			WorldDrawList outline({{0,0},{kCanvasWidth,kCanvasHeight}});
 			renderSector(world->getSector(0),0,LayerRenderStyle::Wireframe,false,ImColor(White),&outline);
 			require(std::any_of(outline.commands().begin(),outline.commands().end(),[&](auto const& c) {
 				auto line=std::get_if<WorldDrawList::Line>(&c); return line && near(line->from.x,left);

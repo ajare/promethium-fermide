@@ -1,6 +1,7 @@
 #include "SectorTileset.h"
 #include "WorldDrawReplay.h"
 #include "ObjectTileset.h"
+#include "core/Defines.h"
 #include "imgui/imgui_internal.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -20,16 +21,22 @@ int main(int argc, char** argv)
         ImDrawList list(ImGui::GetDrawListSharedData());
         list._ResetForNewFrame();
         list.PushClipRect({0, 0}, {1000, 1000});
+        // Two World cells wide, one and a half Levels tall. Every surface must
+        // lay one authored tile per World unit, so the probe covers a full
+        // Level plus a cropped partial Level above it - two columns of two
+        // quads - whatever the artwork's own grid.
+        float const probeWide = 2.0f * CORE_CELL_WIDTH_PIXELS;
+        float const probeHigh = 1.5f * CORE_LEVEL_HEIGHT_PIXELS;
         for (auto const& [name, region] : tileset.surfaces) {
             (void)region;
             int const start = list.VtxBuffer.Size;
-            if (!drawSectorTileSurface(name, &list, {0, 0}, {128, 240}, IM_COL32_WHITE))
+            if (!drawSectorTileSurface(name, &list, {0, 0}, {probeWide, probeHigh}, IM_COL32_WHITE))
                 throw std::runtime_error("Surface was not textured");
             if (list.VtxBuffer.Size - start != 16)
                 throw std::runtime_error("Expected four quads including partial upper level");
             for (int i = start; i < list.VtxBuffer.Size; ++i) {
                 auto const& v = list.VtxBuffer[i];
-                if (v.pos.x < 0 || v.pos.x > 128 || v.pos.y < 0 || v.pos.y > 240 ||
+                if (v.pos.x < 0 || v.pos.x > probeWide || v.pos.y < 0 || v.pos.y > probeHigh ||
                     v.uv.x < 0 || v.uv.x > 1 || v.uv.y < 0 || v.uv.y > 1)
                     throw std::runtime_error("Invalid tile position or UV");
             }

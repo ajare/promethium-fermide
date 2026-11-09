@@ -164,8 +164,8 @@ namespace
 	}
 }
 
-// The ticket's probe: a 159-pixel-high query - less than one 160-pixel
-// level - at the origin must see level 0 only. With the upper bound divided by
+// The ticket's probe: a query one pixel short of a whole Level, at the
+// origin, must see Level 0 only. With the upper bound divided by
 // CORE_CELL_WIDTH_PIXELS it reached level 2 and returned the Upper Room too.
 void subLevelHeightViewportExcludesLevelTwo()
 {
@@ -188,9 +188,10 @@ void verticalOffsetTracksTheVisibleOrigin()
 {
 	CullingScene scene;
 
-	// Three levels visible, scrolled so the band is [320, 800] world pixels:
-	// level 2 is in, level 0 is out.
-	setViewport(0.0f, 320.0f, 640.0f, 480.0f);
+	// Three Levels visible, scrolled so the band is [Level 1, Level 4]: the
+	// level-2 Room is in, the level-0 Room is out.
+	setViewport(0.0f, 1.0f * CORE_LEVEL_HEIGHT_PIXELS,
+		4.0f * CORE_CELL_WIDTH_PIXELS, 3.0f * CORE_LEVEL_HEIGHT_PIXELS);
 
 	auto const sectors = viewportSectors(scene.world, 0);
 
@@ -214,8 +215,10 @@ void fullyScrolledTopLevelIsVisible()
 {
 	CullingScene scene;
 
-	// scrollMax = 8 * 160 - 480 = 800: the band is [800, 1280], levels 5-7.
-	setViewport(0.0f, 8.0f * CORE_LEVEL_HEIGHT_PIXELS - 480.0f, 640.0f, 480.0f);
+	// scrollMax = 8 Levels - a 3-Level viewport = 5 Levels: the band is
+	// [Level 5, Level 8], so the topmost Level 7 sits at the end of the scroll.
+	setViewport(0.0f, 5.0f * CORE_LEVEL_HEIGHT_PIXELS,
+		4.0f * CORE_CELL_WIDTH_PIXELS, 3.0f * CORE_LEVEL_HEIGHT_PIXELS);
 
 	auto const sectors = viewportSectors(scene.world, 0);
 
@@ -240,7 +243,8 @@ void renderPassPaintsScrolledInSectorOnly()
 
 	CullingScene scene;
 
-	setViewport(0.0f, 320.0f, 640.0f, 480.0f);
+	setViewport(0.0f, 1.0f * CORE_LEVEL_HEIGHT_PIXELS,
+		4.0f * CORE_CELL_WIDTH_PIXELS, 3.0f * CORE_LEVEL_HEIGHT_PIXELS);
 
 	renderSectors(scene.world, 0, LayerRenderStyle::Solid, drawList);
 

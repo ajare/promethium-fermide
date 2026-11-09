@@ -161,7 +161,8 @@ ordinary movement, not a new Furniture behaviour API.
 
 `resources/test-worlds/layouts.furniture.lua` contains a two-seat sofa and a
 sparse three-by-two layout. Every `tiles` entry names a World-selected Furniture Image-set
-region of exactly one World tile (64 × 160 pixels), at integer `x`/`y` offsets.
+region of exactly one World tile (authored 64 × 160, rendered at the World cell's
+screen size), at integer `x`/`y` offsets.
 Offsets may extend horizontally either side of the instance origin; artwork may
 extend upward, but never below the supporting Floor. Transparent pixels and
 missing tiles inside the bounding rectangle do not shrink its footprint. Entire

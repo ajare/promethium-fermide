@@ -12,8 +12,8 @@ same result. The editor keeps no sector rendering of its own, and neither does t
 game. See [ADR 0010](adr/0010-render-world-canvases-with-mpp-and-manage-assets-as-resources.md)
 and the `pf-render` module header for the boundary this sits behind.
 
-The renderer repeats a surface every 1x1 world unit (64x160 screen pixels), cropping
-partial cells. Shared boundary strips compose centre, end, corner and open-wall
+The renderer repeats a surface every 1x1 world unit, magnified to the World cell's
+screen size, cropping partial cells. Shared boundary strips compose centre, end, corner and open-wall
 variants rather than baking every combination into separate sprites. Floors and
 ceilings appear only at sector bounds. Side strips use the existing wall-span
 calculation, including partial-height openings into Corridors. Open spans receive

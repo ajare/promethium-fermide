@@ -10,8 +10,8 @@
 //
 // Globals
 //
-#define CORE_CELL_WIDTH_PIXELS						64
-#define CORE_LEVEL_HEIGHT_PIXELS						160
+#define CORE_CELL_WIDTH_PIXELS						128
+#define CORE_LEVEL_HEIGHT_PIXELS						320
 #define CORE_CELL_YX_RENDER_RATIO					((float)CORE_LEVEL_HEIGHT_PIXELS / CORE_CELL_WIDTH_PIXELS)
 
 // Do not change side values as rendering and other things depends on them

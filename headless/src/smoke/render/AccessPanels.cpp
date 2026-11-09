@@ -47,13 +47,13 @@ namespace
 						if (auto triangle=std::get_if<WorldDrawList::Triangle>(&command); triangle && triangle->colour==packColour(78,92,110,255))
 						{
 							++fills;
-							for (auto p : triangle->positions) require(p.x>=min.x*64-0.001f && p.x<=max.x*64+0.001f
+							for (auto p : triangle->positions) require(p.x>=min.x*CORE_CELL_WIDTH_PIXELS-0.001f && p.x<=max.x*CORE_CELL_WIDTH_PIXELS+0.001f
 								&& p.y>=800-max.y*CORE_LEVEL_HEIGHT_PIXELS-0.001f && p.y<=800-min.y*CORE_LEVEL_HEIGHT_PIXELS+0.001f,"Panel fill changed authored bounds");
 						}
 						if (auto line=std::get_if<WorldDrawList::Line>(&command); line && line->colour==(selected ? packColour(251,188,4,255) : packColour(165,180,198,255)))
 						{
 							++lines;
-							for (auto p : {line->from,line->to}) require(p.x>=min.x*64-0.001f && p.x<=max.x*64+0.001f
+							for (auto p : {line->from,line->to}) require(p.x>=min.x*CORE_CELL_WIDTH_PIXELS-0.001f && p.x<=max.x*CORE_CELL_WIDTH_PIXELS+0.001f
 								&& p.y>=800-max.y*CORE_LEVEL_HEIGHT_PIXELS-0.001f && p.y<=800-min.y*CORE_LEVEL_HEIGHT_PIXELS+0.001f,"Panel outline/indicator disagrees with hit bounds");
 						}
 					}
@@ -97,7 +97,7 @@ namespace
 						if (auto line = std::get_if<WorldDrawList::Line>(&command); line && line->colour == packColour(100,210,180,255))
 						{
 							++crosses;
-							for (auto p : {line->from, line->to}) require(p.x >= min.x*64-0.001f && p.x <= max.x*64+0.001f
+							for (auto p : {line->from, line->to}) require(p.x >= min.x*CORE_CELL_WIDTH_PIXELS-0.001f && p.x <= max.x*CORE_CELL_WIDTH_PIXELS+0.001f
 								&& p.y >= 800-max.y*CORE_LEVEL_HEIGHT_PIXELS-0.001f && p.y <= 800-min.y*CORE_LEVEL_HEIGHT_PIXELS+0.001f, "Open expands bounds");
 						}
 						if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command); triangle && triangle->colour == packColour(22,30,40,255)) ++openFills;

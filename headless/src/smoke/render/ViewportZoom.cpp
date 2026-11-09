@@ -107,11 +107,16 @@ void viewportZoom()
 	auto const ground = world->addRoom("Ground", 0, 0, 0, 2, 1);
 	auto const upper = world->addRoom("Upper", 0, 2, 0, 2, 1);
 	world->finishBuild();
+	float const zoom = 2.0f;
 	gUISettings = UISettings{};
-	gUISettings.worldZoom = 2.0f;
-	gUISettings.yOffset = -640.0f;
-	gUISettings.worldViewportWidth = 320.0f;
-	gUISettings.worldViewportHeight = 320.0f;
+	gUISettings.worldZoom = zoom;
+	// The scaled viewport covers exactly Level 2: one Level tall, two cells
+	// wide. The scroll offset and canvas size are that World-unit band
+	// multiplied by the zoom, so the culling conversion must land back on
+	// Level 2 and on nothing below it.
+	gUISettings.yOffset = -2.0f * CORE_LEVEL_HEIGHT_PIXELS * zoom;
+	gUISettings.worldViewportWidth = 2.0f * CORE_CELL_WIDTH_PIXELS * zoom;
+	gUISettings.worldViewportHeight = 1.0f * CORE_LEVEL_HEIGHT_PIXELS * zoom;
 	auto const visible = viewportSectors(world, 0);
 	require(std::find(visible.begin(), visible.end(), world->getSector(upper))
 		!= visible.end(), "2x culling omitted the Sector inside the scaled viewport");

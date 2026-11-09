@@ -527,16 +527,21 @@ void checkStairwellDoorwayOutlines() {
     }
     return count;
   };
-  auto landingCount = outlines(app::drawWorld(*world, 1280, 720));
+  // Two Levels of Stairwell doorway, seen from a Level-0 landing that the
+  // player camera centres on. At the current cell size that needs more than
+  // a 720-pixel canvas to keep both doorway boxes on screen.
+  float const viewWidth = 1280.0f;
+  float const viewHeight = 3.0f * CORE_LEVEL_HEIGHT_PIXELS;
+  auto landingCount = outlines(app::drawWorld(*world, viewWidth, viewHeight));
   if (landingCount != 2) throw std::runtime_error(
           "Open Stairwell doorways must have visible boxes when viewed through landing apertures: expected 2, got "
           + std::to_string(landingCount));
   world->resumeSimulation(); world->requestPlayerDoorAction(); world->update(.2f);
   require(world->lookupAgent(id).entity->getSector()->getIndex() == stairs, "Player must enter Stairwell to view its Layer");
-  auto draws = app::drawWorld(*world, 1280, 720);
+  auto draws = app::drawWorld(*world, viewWidth, viewHeight);
   auto count = outlines(draws);
   if (count != 2) throw std::runtime_error("Viewed Stairwell must outline every Level doorway: expected 2, got " + std::to_string(count));
-  checkCanvas(draws, 1280, 720);
+  checkCanvas(draws, viewWidth, viewHeight);
 }
 
 void checkFurniture(std::filesystem::path const& directory, ObjectTileset const& atlas) {
@@ -652,13 +657,19 @@ void checkPlayerSelectorDrawing() {
 void checkSectorTileScaling() {
   // Artwork pixels, not World units: this invented atlas is 512 x 320 with a
   // 128 x 320 corridor tile. The producer tiles by World cell regardless of
-  // the source grid, so these numbers say nothing about cell size.
+  // the source grid, so the atlas numbers say nothing about cell size - but
+  // the probed area below is deliberately derived from the World cell.
   SectorTileset tiles;
   tiles.width = 512; tiles.height = 320;
   tiles.surfaces.emplace("corridor", SectorTileRegion{0, 0, 128, 320});
   setSectorTileset(tiles, kInstalled);
   WorldDrawList commands({{0, 0}, {1000, 1000}});
-  require(drawSectorTileSurface("corridor", &commands, {0, 0}, {256, 240}, pf::render::White, 2.f),
+  float const zoom = 2.f;
+  // Two World cells wide, three quarters of a Level tall: two tiles side by
+  // side, the second Level cropped rather than stretched to fit.
+  float const probeWide = 2.0f * CORE_CELL_WIDTH_PIXELS * zoom;
+  float const probeHigh = 0.75f * CORE_LEVEL_HEIGHT_PIXELS * zoom;
+  require(drawSectorTileSurface("corridor", &commands, {0, 0}, {probeWide, probeHigh}, pf::render::White, zoom),
       "Station corridor must render");
   require(textured(commands, WorldDrawList::Texture::SectorAtlas) == 4,
       "Two World cells must each render a tile at zoom 2 independent of source size");
@@ -669,7 +680,8 @@ void checkSectorTileScaling() {
     maxY = std::max(maxY, triangle.positions[i].y);
     maxUvY = std::max(maxUvY, triangle.texcoords[i].y);
   }
-  require(maxX == 128.f && maxY == 240.f && maxUvY < .76f && maxUvY > .74f,
+  require(maxX == CORE_CELL_WIDTH_PIXELS * zoom && maxY == probeHigh
+      && maxUvY < .76f && maxUvY > .74f,
       "Tile must fill 1x1 World units and crop a partial-height cell");
   WorldDrawList missing({{0, 0}, {1000, 1000}});
   require(drawSectorTileSurface("room", &missing, {0, 0},
@@ -704,7 +716,10 @@ void checkAgentArtworkFallback() {
     if (present & 1) tiles.sprites.emplace("human-standing", ObjectSprite{{0, 0, 26, 72}, true});
     if (present & 2) tiles.sprites.emplace("human-sitting", ObjectSprite{{32, 0, 26, 43}, true});
     setAgentTileset(std::move(tiles), kInstalled);
-    auto list = app::drawWorld(*world, 1024, 720);
+    // The game camera fits the World into the canvas and only stays at zoom 1
+    // when the canvas has room; the fallback below compares against unscaled
+    // World-unit bounds, so give it a canvas that does not shrink the World.
+    auto list = app::drawWorld(*world, 1280, 800);
     unsigned missing = 0;
     float left = 1e6f, right = -1e6f, top = 1e6f, bottom = -1e6f;
     for (auto const& command : list.commands())

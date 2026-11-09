@@ -1,6 +1,6 @@
 # Draft artwork uses irregular rectangles, not an assumed uniform atlas grid.
 # Coordinates are top-left-origin pixels: [x, y, width, height].
-# Surfaces repeat once per 1x1 world unit (64x160 screen pixels).
+# Surfaces repeat once per 1x1 world unit, magnified to the World cell's screen size.
 # Boundary strips compose centre/end/corner/open-wall variants at runtime:
 # only outer floors/ceilings and actual closed wall spans receive strips.
 # Multi-level Room interiors therefore have no artificial intermediate floors.

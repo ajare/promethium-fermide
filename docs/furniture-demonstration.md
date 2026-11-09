@@ -9,8 +9,8 @@ For the complete integration tour below, open
 `FurnitureIntegrationDemo` resource depends on `FurnitureIntegrationCatalogue`,
 which depends on `FurnitureAtlas`, sharing the current Object atlas PNG. Its separate catalogue
 keeps the explicit overlapping-route layout independent of the compact sample.
-The chair, sofa halves and desk halves are full 64 × 160 World-tile regions in
-`resources/Resources.yaml`. No production-quality artwork is intended.
+The chair, sofa halves and desk halves are full one-World-tile regions (authored
+64 × 160) in `resources/Resources.yaml`. No production-quality artwork is intended.
 
 ## Tour
 
