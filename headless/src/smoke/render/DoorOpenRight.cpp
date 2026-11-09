@@ -1,4 +1,5 @@
 #include "Checks.h"
+#include "WorldDrawReplay.h"
 #include "ImGuiContext.h"
 // The real renderer's OpenRight Door passes, for ticket #83.
 //

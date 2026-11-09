@@ -42,12 +42,6 @@
 #include "UISettings.h"
 
 
-// Declared in Helpers.h alongside the OpenGL texture loaders, which the
-// renderer itself never calls. Declared here instead so Render.cpp compiles
-// without OpenGL headers and can be linked into the headless checks (#49).
-core::Vector2 getMouseWorldPosition();
-
-
 extern UISettings gUISettings;
 extern core::Agent* gHoveredAgent, *gSelectedAgent;
 extern std::shared_ptr<const core::Vertex> gSelectedVertex;
@@ -307,7 +301,8 @@ shared_ptr<const core::Vertex> markerPathTargetAtPosition(core::World const& wor
 }
 
 void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::World> world,
-	WorldDrawList* drawList, bool markerTargetsOnly)
+	WorldDrawList* drawList, bool markerTargetsOnly,
+	std::optional<core::Vector2> cursorWorldPosition)
 {
 	if (!gUISettings.renderGraph || !drawList)
 	{
@@ -323,9 +318,9 @@ void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::Wor
 
 	shared_ptr<const core::Vertex> closestVertex{ nullptr };
 
-	if (gUISettings.highlightNearestVertex)
+	if (gUISettings.highlightNearestVertex && cursorWorldPosition)
 	{
-		auto mousePos = getMouseWorldPosition();
+		auto const& mousePos = *cursorWorldPosition;
 		auto sector = world->getSectorAtPosition(layer, mousePos.x, mousePos.y);
 	
 		if (sector)

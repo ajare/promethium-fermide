@@ -1,4 +1,5 @@
 #include "core/AgentType.h"
+#include "WorldDrawReplay.h"
 #include "Checks.h"
 #include "AgentPoseTestAccess.h"
 #include "Render.h"
@@ -154,7 +155,9 @@ namespace
 				adapter._ResetForNewFrame();
 				adapter.PushTextureID(ImGui::GetIO().Fonts->TexID);
 				adapter.PushClipRect({-1000,-1000},{2000,2000});
-				WorldDrawList adapted(&adapter); renderAgent(agent, &adapted);
+				WorldDrawList adapted(headless::clipUnder(&adapter));
+				renderAgent(agent, &adapted);
+				headless::replay(adapted, &adapter);
 				Vec2 lo{std::numeric_limits<float>::max(),std::numeric_limits<float>::max()}, hi{-lo.x,-lo.y};
 				if (sprite)
 				{
@@ -197,7 +200,9 @@ namespace
 				adapter._ResetForNewFrame();
 				adapter.PushTextureID(ImGui::GetIO().Fonts->TexID);
 				adapter.PushClipRect({-1000,-1000},{2000,2000});
-				WorldDrawList list(&adapter); renderAgent(agent, &list);
+				WorldDrawList list(headless::clipUnder(&adapter));
+				renderAgent(agent, &list);
+				headless::replay(list, &adapter);
 				Vec2 lo{FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX};
 				for (auto const& vertex : adapter.VtxBuffer)
 				{

@@ -1,4 +1,5 @@
 #include "SectorTileset.h"
+#include "WorldDrawReplay.h"
 #include "ObjectTileset.h"
 #include "imgui/imgui_internal.h"
 #define STB_IMAGE_IMPLEMENTATION

@@ -30,8 +30,10 @@ void viewportZoom()
 {
 	auto const previousSettings = gUISettings;
 
-	// Exercise the same mouse conversion and World picking used by the canvas.
-	headless::ScopedImGuiContext imgui;
+	// Exercise the same cursor conversion and World picking the canvas uses.
+	// The cursor is a parameter the check supplies rather than UI state the
+	// renderer goes looking for, so the screen point under test is stated
+	// outright instead of routed through ImGui (#1000).
 	core::World picking("Zoom selection", 8, 4);
 	auto const room = picking.addRoom("Room", 0, 0, 0, 4, 1);
 	auto const corridor = picking.addCorridor(0, 2, 0, 4, 1);
@@ -50,11 +52,11 @@ void viewportZoom()
 			gUISettings.xOffset = pan;
 			gUISettings.yOffset = pan * 2;
 			auto mouseAt = [&](float x, float y) {
-				ImGui::GetIO().MousePos = {
+				core::Vector2 const screen{
 					gUISettings.worldViewportX + pan + x * CORE_CELL_WIDTH_PIXELS * zoom,
 					gUISettings.worldViewportY + gUISettings.worldViewportHeight
 						- gUISettings.yOffset - y * CORE_LEVEL_HEIGHT_PIXELS * zoom };
-				return getMouseWorldPosition();
+				return worldPositionAtCursor(screen);
 			};
 			for (auto const& [id, y] : { std::pair{ room, 0.5f }, std::pair{ corridor, 2.5f } })
 			{

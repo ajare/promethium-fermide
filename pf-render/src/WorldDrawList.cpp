@@ -4,23 +4,8 @@
 #include <cmath>
 #include <limits>
 
-#include "imgui/imgui.h"
-
 namespace
 {
-	// Conversions exist only where the command stream hands its recording to the
-	// optional ImGui draw-list test adapter, or reads a clip back out of it.
-	// The recorded commands themselves never hold an ImGui value (#997).
-	ImVec2 toImGui(Vec2 value)
-	{
-		return ImVec2{ value.x, value.y };
-	}
-
-	Vec2 fromImGui(ImVec2 value)
-	{
-		return Vec2{ value.x, value.y };
-	}
-
 	// Glyph geometry comes back from the metrics relative to the text origin,
 	// so the run's own position is added where it is replayed or transformed.
 	Vec2 offset(Vec2 origin, Vec2 relative)
@@ -52,21 +37,6 @@ WorldDrawList::WorldDrawList(ClipRectangle initialClip)
 	mClipStack.push_back(initialClip);
 }
 
-WorldDrawList::WorldDrawList(ImDrawList* testAdapter)
-	: mTestAdapter(testAdapter)
-{
-	if (testAdapter)
-	{
-		mClipStack.push_back({ fromImGui(testAdapter->GetClipRectMin()),
-			fromImGui(testAdapter->GetClipRectMax()) });
-	}
-	else
-	{
-		float const limit = std::numeric_limits<float>::max();
-		mClipStack.push_back({ { -limit, -limit }, { limit, limit } });
-	}
-}
-
 WorldDrawList::ClipRectangle WorldDrawList::currentClip() const
 {
 	return mClipStack.back();
@@ -75,7 +45,6 @@ WorldDrawList::ClipRectangle WorldDrawList::currentClip() const
 void WorldDrawList::PushClipRect(Vec2 minimum, Vec2 maximum,
 	bool intersectWithCurrentClip)
 {
-	if (mTestAdapter) mTestAdapter->PushClipRect(toImGui(minimum), toImGui(maximum), intersectWithCurrentClip);
 	ClipRectangle next{ minimum, maximum };
 	if (intersectWithCurrentClip) next = intersect(currentClip(), next);
 	mClipStack.push_back(next);
@@ -84,7 +53,6 @@ void WorldDrawList::PushClipRect(Vec2 minimum, Vec2 maximum,
 void WorldDrawList::PopClipRect()
 {
 	if (mClipStack.size() <= 1) return;
-	if (mTestAdapter) mTestAdapter->PopClipRect();
 	mClipStack.pop_back();
 }
 
@@ -100,22 +68,12 @@ Vec2 WorldDrawList::GetClipRectMax() const
 
 void WorldDrawList::AddLine(Vec2 from, Vec2 to, PackedColourValue colour, float thickness)
 {
-	if (mTestAdapter)
-	{
-		mTestAdapter->AddLine(toImGui(from), toImGui(to), colour, thickness);
-		return;
-	}
 	mCommands.push_back(Line{ from, to, colour, thickness, currentClip() });
 }
 
 void WorldDrawList::AddRect(Vec2 minimum, Vec2 maximum, PackedColourValue colour,
 	float rounding, DrawFlags flags, float thickness)
 {
-	if (mTestAdapter)
-	{
-		mTestAdapter->AddRect(toImGui(minimum), toImGui(maximum), colour, rounding, flags, thickness);
-		return;
-	}
 	(void)rounding;
 	(void)flags;
 	AddLine(minimum, { maximum.x, minimum.y }, colour, thickness);
@@ -143,11 +101,6 @@ void WorldDrawList::addTriangle(Vec2 a, Vec2 b, Vec2 c,
 void WorldDrawList::AddRectFilled(Vec2 minimum, Vec2 maximum, PackedColourValue colour,
 	float rounding, DrawFlags flags)
 {
-	if (mTestAdapter)
-	{
-		mTestAdapter->AddRectFilled(toImGui(minimum), toImGui(maximum), colour, rounding, flags);
-		return;
-	}
 	(void)rounding;
 	(void)flags;
 	addTriangle(minimum, { maximum.x, minimum.y }, maximum, {}, {}, {}, colour, Texture::None);
@@ -156,22 +109,12 @@ void WorldDrawList::AddRectFilled(Vec2 minimum, Vec2 maximum, PackedColourValue 
 
 void WorldDrawList::AddTriangleFilled(Vec2 a, Vec2 b, Vec2 c, PackedColourValue colour)
 {
-	if (mTestAdapter)
-	{
-		mTestAdapter->AddTriangleFilled(toImGui(a), toImGui(b), toImGui(c), colour);
-		return;
-	}
 	addTriangle(a, b, c, {}, {}, {}, colour, Texture::None);
 }
 
 void WorldDrawList::AddCircle(Vec2 centre, float radius, PackedColourValue colour,
 	int segments, float thickness)
 {
-	if (mTestAdapter)
-	{
-		mTestAdapter->AddCircle(toImGui(centre), radius, colour, segments, thickness);
-		return;
-	}
 	auto const count = circleSegments(radius, segments);
 	constexpr float tau = 6.28318530717958647692f;
 	for (int index = 0; index < count; ++index)
@@ -188,11 +131,6 @@ void WorldDrawList::AddCircle(Vec2 centre, float radius, PackedColourValue colou
 
 void WorldDrawList::AddCircleFilled(Vec2 centre, float radius, PackedColourValue colour, int segments)
 {
-	if (mTestAdapter)
-	{
-		mTestAdapter->AddCircleFilled(toImGui(centre), radius, colour, segments);
-		return;
-	}
 	auto const count = circleSegments(radius, segments);
 	constexpr float tau = 6.28318530717958647692f;
 	for (int index = 0; index < count; ++index)
@@ -210,19 +148,6 @@ void WorldDrawList::AddCircleFilled(Vec2 centre, float radius, PackedColourValue
 void WorldDrawList::AddPolyline(Vec2 const* points, int count, PackedColourValue colour,
 	DrawFlags flags, float thickness)
 {
-	if (mTestAdapter)
-	{
-		std::vector<ImVec2> adapted;
-		if (points && count > 0)
-		{
-			adapted.reserve(static_cast<size_t>(count));
-			for (int index = 0; index < count; ++index)
-				adapted.push_back(toImGui(points[index]));
-		}
-		mTestAdapter->AddPolyline(adapted.empty() ? nullptr : adapted.data(),
-			static_cast<int>(adapted.size()), colour, flags, thickness);
-		return;
-	}
 	if (!points || count < 2) return;
 	for (int index = 1; index < count; ++index)
 		AddLine(points[index - 1], points[index], colour, thickness);
@@ -233,11 +158,6 @@ void WorldDrawList::AddPolyline(Vec2 const* points, int count, PackedColourValue
 void WorldDrawList::AddText(Vec2 position, PackedColourValue colour, char const* text)
 {
 	if (!text) return;
-	if (mTestAdapter)
-	{
-		mTestAdapter->AddText(toImGui(position), colour, text);
-		return;
-	}
 	// The implicit entry point asks for the application's body face at its own
 	// size: the backend lays it out, and nothing here measures or tessellates
 	// it (#999).
@@ -253,27 +173,6 @@ void WorldDrawList::AddText(FontRef font, Vec2 position, PackedColourValue colou
 	// run as given, as it always has.
 	(void)wrapWidth;
 	auto value = textEnd ? std::string(text, textEnd) : std::string(text);
-	if (mTestAdapter)
-	{
-		// The adapter has no font of its own either. Its glyphs arrive through
-		// the injected metrics like everywhere else, as atlas triangles
-		// written into the list against the texture it already has pushed.
-		if (font.size <= 0.0f) return;
-		if (fineClipRect)
-			mTestAdapter->PushClipRect(toImGui(Vec2{ fineClipRect->x, fineClipRect->y }),
-				toImGui(Vec2{ fineClipRect->z, fineClipRect->w }), true);
-		auto const glyphs = fontMetrics().tessellate(font, value.c_str());
-		if (!glyphs.empty())
-		{
-			auto const count = static_cast<int>(glyphs.size());
-			mTestAdapter->PrimReserve(count, count);
-			for (auto const& vertex : glyphs)
-				mTestAdapter->PrimVtx(toImGui(offset(position, vertex.position)),
-					toImGui(vertex.texcoord), colour);
-		}
-		if (fineClipRect) mTestAdapter->PopClipRect();
-		return;
-	}
 	auto clip = currentClip();
 	if (fineClipRect)
 		clip = intersect(clip, { { fineClipRect->x, fineClipRect->y },
@@ -284,15 +183,6 @@ void WorldDrawList::AddText(FontRef font, Vec2 position, PackedColourValue colou
 void WorldDrawList::AddImage(Texture texture, Vec2 minimum, Vec2 maximum,
 	Vec2 uvMinimum, Vec2 uvMaximum, PackedColourValue colour)
 {
-	if (mTestAdapter)
-	{
-		// The headless compatibility adapter has no production texture. A stable
-		// non-null ID preserves ImDrawList's image geometry for legacy checks.
-		auto id = reinterpret_cast<ImTextureID>(static_cast<intptr_t>(texture));
-		mTestAdapter->AddImage(id, toImGui(minimum), toImGui(maximum),
-			toImGui(uvMinimum), toImGui(uvMaximum), colour);
-		return;
-	}
 	Vec2 const topRight{ maximum.x, minimum.y };
 	Vec2 const bottomLeft{ minimum.x, maximum.y };
 	Vec2 const uvTopRight{ uvMaximum.x, uvMinimum.y };
@@ -305,7 +195,7 @@ void WorldDrawList::AddImage(Texture texture, Vec2 minimum, Vec2 maximum,
 
 size_t WorldDrawList::geometryBookmark() const
 {
-	return mTestAdapter ? static_cast<size_t>(mTestAdapter->VtxBuffer.Size) : mCommands.size();
+	return mCommands.size();
 }
 
 void WorldDrawList::transformGeometrySince(size_t bookmark, Vec2 pivot,
@@ -318,16 +208,6 @@ void WorldDrawList::transformGeometrySince(size_t bookmark, Vec2 pivot,
 		return clockwiseQuarterTurn ? Vec2{pivot.x - y, pivot.y + x}
 			: Vec2{pivot.x + x, pivot.y + y};
 	};
-	if (mTestAdapter)
-	{
-		for (size_t i = bookmark; i < static_cast<size_t>(mTestAdapter->VtxBuffer.Size); ++i)
-		{
-			auto& vertex = mTestAdapter->VtxBuffer[static_cast<int>(i)];
-			auto const moved = transform(fromImGui(vertex.pos));
-			vertex.pos = toImGui(moved);
-		}
-		return;
-	}
 	std::vector<Command> transformed;
 	for (size_t i = bookmark; i < mCommands.size(); ++i)
 	{
@@ -371,10 +251,5 @@ void WorldDrawList::transformGeometrySince(size_t bookmark, Vec2 pivot,
 
 void WorldDrawList::AddDrawCmd()
 {
-	if (mTestAdapter)
-	{
-		mTestAdapter->AddDrawCmd();
-		return;
-	}
 	mCommands.push_back(Barrier{});
 }

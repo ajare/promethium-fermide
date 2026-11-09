@@ -1,4 +1,5 @@
 #include "Transports.h"
+#include "WorldDrawReplay.h"
 #include "ImGuiContext.h"
 // Shuttle carriage Door rendering on the Shuttle's own Layer.
 //

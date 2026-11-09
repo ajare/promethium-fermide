@@ -46,6 +46,7 @@
 #include "Walls.h"
 
 #include "Render.h"
+#include "WorldDrawReplay.h"
 #include "core/World.h"
 #include "core/Defines.h"
 #include "core/Sector.h"

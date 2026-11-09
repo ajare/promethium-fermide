@@ -1,4 +1,5 @@
 #include "core/AgentType.h"
+#include "WorldDrawReplay.h"
 // Migrated from AgentHeightSmokeChecks.cpp (#286); editor dependency tier.
 
 #include "AgentTagAssignmentPanel.h"

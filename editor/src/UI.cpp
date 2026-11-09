@@ -5607,7 +5607,8 @@ void renderStatusBar(shared_ptr<const core::World> const& world)
 
 			ImGui::SetNextItemWidth(128);
 
-			auto mousePos = getMouseWorldPosition();
+			auto const cursor = ImGui::GetMousePos();
+			auto mousePos = worldPositionAtCursor(core::Vector2{ cursor.x, cursor.y });
 			string mouseData = format("{:.1f}, {:.1f}", mousePos.x, mousePos.y);
 
 			ImGui::TextUnformatted(mouseData.c_str());
@@ -9850,7 +9851,8 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 
 	if (gWorldHovered)
 	{
-		auto mousePos = getMouseWorldPosition();
+		auto const cursor = ImGui::GetMousePos();
+		auto mousePos = worldPositionAtCursor(core::Vector2{ cursor.x, cursor.y });
 		gLastWorldCursor = mousePos;
 		// Hit-test in reverse visual order. Graph vertices are rendered over agents,
 		// agents over sector objects, and sector objects over their owning sector.
@@ -9923,7 +9925,12 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 	auto worldBottomRight = worldToScreen({ (float)world->getCellsWide(), 0.0f });
 	drawList->PushClipRect(toVec2(worldTopLeft), toVec2(worldBottomRight), true);
 	renderWorld(world, drawList);
-	renderGraph(graph, world, drawList, gSelectingAgentPathDestination);
+	// The editor owns the pointer, so it converts the cursor and hands the
+	// World point to the graph pass instead of letting the renderer go and
+	// find it (#1000).
+	auto const graphCursor = ImGui::GetMousePos();
+	renderGraph(graph, world, drawList, gSelectingAgentPathDestination,
+		worldPositionAtCursor(core::Vector2{ graphCursor.x, graphCursor.y }));
 	renderSelectedAgentPath(world.get(), drawList);
 	drawSectorEditOverlay(drawList);
 	if (gAgentMove.dragging)

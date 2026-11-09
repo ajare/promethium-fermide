@@ -31,9 +31,5 @@ std::optional<Vec2> objectSpriteSize(char const* name);
 bool drawObjectSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b,
     PackedColourValue tint = White, Vec2 sourceMin = {0, 0}, Vec2 sourceMax = {1, 1});
 
-inline bool drawObjectSprite(char const* name, ImDrawList* list, Vec2 a, Vec2 b,
-    PackedColourValue tint = White, Vec2 sourceMin = {0, 0}, Vec2 sourceMax = {1, 1})
-{
-    WorldDrawList adapter(list);
-    return drawObjectSprite(name, &adapter, a, b, tint, sourceMin, sourceMax);
-}
+// No ImDrawList-taking form: see SectorTileset.h. The headless harness
+// records a command vector and replays it (#1000).

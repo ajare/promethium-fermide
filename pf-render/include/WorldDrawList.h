@@ -27,22 +27,18 @@ using pf::render::FontRef;
 using pf::render::WorldFont;
 using pf::render::IFontMetrics;
 
-// One ImGui name remains reachable from this header, and only as an opaque
-// pointer, so no ImGui header version or context is needed to record a
-// World:
-//
-//   ImDrawList*  the optional test adapter, which a later step of #995
-//            moves out of the command stream into the headless harness.
-//
-// It is not a value type carried by a command: a recorded command holds no
-// ImGui value. No font type reaches this header at all - a text command
+// Nothing ImGui is reachable from this header. No recorded command holds an
+// ImGui value and no ImGui type is named here. The stream used to accept a
+// live ImDrawList as an optional test adapter and mirror every recording
+// into it; that scaffolding is gone (#1000) - the headless harness now reads
+// commands() back out and replays them itself, so the adapter lives with the
+// tests that need it instead of inside production recording. A text command
 // carries a FontRef and the application answers for it through the
 // installed IFontMetrics (#999).
-struct ImDrawList;
 
-// CPU-side command stream for the World viewport. The GUI path submits these
-// commands to MPP; the optional ImDrawList adapter exists only for the
-// headless renderer checks and never participates in application rendering.
+// CPU-side command stream for the World viewport. Every recording method
+// writes to the command vector and to nothing else: the GUI path submits
+// those commands to MPP, and a caller inspects them through commands().
 class WorldDrawList
 {
 public:
@@ -97,7 +93,6 @@ public:
 	using Command = std::variant<Line, Triangle, Text, Barrier>;
 
 	explicit WorldDrawList(ClipRectangle initialClip);
-	explicit WorldDrawList(ImDrawList* testAdapter);
 
 	void PushClipRect(Vec2 minimum, Vec2 maximum, bool intersectWithCurrentClip = false);
 	void PopClipRect();
@@ -144,7 +139,6 @@ private:
 	void addTriangle(Vec2 a, Vec2 b, Vec2 c, Vec2 uvA, Vec2 uvB,
 		Vec2 uvC, PackedColourValue colour, Texture texture);
 
-	ImDrawList* mTestAdapter{};
 	std::vector<ClipRectangle> mClipStack;
 	std::vector<Command> mCommands;
 };

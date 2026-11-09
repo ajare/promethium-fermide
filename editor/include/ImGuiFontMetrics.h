@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cfloat>
+#include <cstdint>
 
 #include "FontMetrics.h"
 #include "imgui/imgui.h"
@@ -65,6 +66,22 @@ public:
 					Vec2{ vertex.uv.x, vertex.uv.y } });
 			}
 		return glyphs;
+	}
+
+	// The atlas ImGui built the glyphs from, handed over as the RGBA8 pixels
+	// the shared renderer uploads for stance-transformed text. ImGui owns
+	// the buffer and keeps it alive for the process; the renderer copies it
+	// into GPU memory once and never reads it again.
+	pf::render::FontAtlasImage atlas() const override
+	{
+		unsigned char* pixels{};
+		int width{}, height{};
+		ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+		pf::render::FontAtlasImage image;
+		image.pixels = static_cast<std::uint8_t const*>(pixels);
+		image.width = width;
+		image.height = height;
+		return image;
 	}
 
 private:

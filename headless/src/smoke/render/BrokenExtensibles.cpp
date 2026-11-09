@@ -1,4 +1,5 @@
 #include "Checks.h"
+#include "WorldDrawReplay.h"
 #include "ImGuiContext.h"
 #include "BrokenExtensibleFixture.h"
 #include "Render.h"

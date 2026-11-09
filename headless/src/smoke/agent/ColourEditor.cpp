@@ -1,6 +1,7 @@
 // Migrated from AgentColourSmokeChecks.cpp (#286); editor dependency tier.
 
 #include "AgentTagAssignmentPanel.h"
+#include "WorldDrawReplay.h"
 #include "Render.h"
 #include "ObjectTileset.h"
 #include "TagsPanel.h"

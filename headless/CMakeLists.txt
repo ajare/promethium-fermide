@@ -59,6 +59,7 @@ add_custom_target(pf-compile-contracts ALL
 add_library(pf-headless-render-support OBJECT
     src/RenderGuiStubs.cpp
     src/support/ImGuiContext.cpp
+    src/support/WorldDrawReplay.cpp
 )
 target_include_directories(pf-headless-render-support PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/support")
@@ -225,7 +226,8 @@ if(BUILD_TESTING)
 
     add_executable(pf-sector-tileset-checks src/SectorTilesetChecks.cpp)
     target_include_directories(pf-sector-tileset-checks PRIVATE ${PF_INCLUDE_DIR})
-    target_link_libraries(pf-sector-tileset-checks PRIVATE pf-render)
+    target_link_libraries(pf-sector-tileset-checks PRIVATE pf-render
+        pf-headless-render-support)
     pf_apply_headless_verification_policy(pf-sector-tileset-checks)
     add_test(NAME sector-tileset COMMAND pf-sector-tileset-checks
         "${PF_REPO_ROOT}/resources/textures/sectors.tileset.yaml")

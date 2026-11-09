@@ -882,9 +882,15 @@ bool isMarkerPathTarget(core::World const& world, core::Vertex const& vertex);
 std::shared_ptr<const core::Vertex> markerPathTargetAtPosition(core::World const& world,
 	uint32_t layer, core::Vector2 position, float radius);
 
+// The cursor, in World coordinates, for the pass that highlights the vertex
+// nearest to it. The renderer never asks the UI where the pointer is: the
+// caller that owns the cursor converts it and hands it in (#1000). A pass
+// with no cursor has nothing to highlight, which is what a caller drawing
+// with no pointer over the canvas passes.
 void renderGraph(std::shared_ptr<const core::Graph> graph,
 	std::shared_ptr<const core::World> world, WorldDrawList* drawList,
-	bool markerTargetsOnly = false);
+	bool markerTargetsOnly = false,
+	std::optional<core::Vector2> cursorWorldPosition = std::nullopt);
 
 // Ordinary Agents use their effective inherited Colour (or the editor
 // fallback); selection always wins with its fixed gold highlight.
@@ -958,24 +964,8 @@ void renderDoor(std::shared_ptr<const core::Door> door, uint32_t layer,
 void renderSector(std::shared_ptr<const core::Sector> sector, uint32_t layer,
 	LayerRenderStyle style, bool renderEdges, PackedColourValue colour, WorldDrawList* drawList);
 
-// Compatibility seams for CPU-only checks. Production code constructs a
-// recording WorldDrawList and never submits World primitives to ImGui.
-inline void renderAgent(core::Agent const* agent, ImDrawList* drawList)
-{
-	WorldDrawList adapter(drawList);
-	renderAgent(agent, &adapter);
-}
-
-inline void renderSectors(std::shared_ptr<const core::World> world, uint32_t layer,
-	LayerRenderStyle style, ImDrawList* drawList)
-{
-	WorldDrawList adapter(drawList);
-	renderSectors(std::move(world), layer, style, &adapter);
-}
-
-inline void renderSector(std::shared_ptr<const core::Sector> sector, uint32_t layer,
-	LayerRenderStyle style, bool renderEdges, PackedColourValue colour, ImDrawList* drawList)
-{
-	WorldDrawList adapter(drawList);
-	renderSector(std::move(sector), layer, style, renderEdges, colour, &adapter);
-}
+// There is no ImDrawList-taking form of any of the passes above. Production
+// code records into a WorldDrawList and submits the vector to MPP; the CPU
+// checks that used to drive these passes against a live ImGui draw list do
+// it from the headless harness, which records a real command vector and
+// replays it (#1000).

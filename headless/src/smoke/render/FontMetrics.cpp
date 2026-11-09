@@ -107,6 +107,14 @@ namespace
 			return font == WorldFont::Icons ? mIcons : mBody;
 		}
 
+		// The probe has no artwork behind its UVs - it exists so placement
+		// arithmetic can be pinned exactly, and nothing here uploads a
+		// texture. Saying so with an empty image is the honest answer.
+		pf::render::FontAtlasImage atlas() const override
+		{
+			return {};
+		}
+
 		mutable int measurements{};
 		mutable int tessellations{};
 

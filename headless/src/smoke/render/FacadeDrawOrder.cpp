@@ -1,4 +1,5 @@
 #include "Checks.h"
+#include "WorldDrawReplay.h"
 #include "ImGuiContext.h"
 // The real renderSector() draw-call order for a Facade hosting thresholds,
 // for ticket #49.

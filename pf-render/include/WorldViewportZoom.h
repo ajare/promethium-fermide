@@ -5,7 +5,12 @@
 #include "imgui/imgui.h"
 #include "core/Vector2.h"
 
-core::Vector2 getMouseWorldPosition();
+// Converts a screen-space cursor point into World coordinates under the
+// viewport the caller is looking at. The cursor arrives as a parameter:
+// the shared renderer no longer asks ImGui where the mouse is, so zooming
+// and picking keep working whatever surface the caller has the pointer on
+// (#1000). Screen position is in the same pixels ImGui reports.
+core::Vector2 worldPositionAtCursor(core::Vector2 screenPosition);
 
 struct WorldViewportLayout
 {

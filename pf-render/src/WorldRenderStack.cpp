@@ -487,14 +487,21 @@ namespace
 			if (textureKind == WorldDrawList::Texture::None) return {};
 			if (textureKind == WorldDrawList::Texture::FontAtlas)
 			{
-				// The same ImGui atlas supplies glyph UVs in the CPU stream.
-				// MPP's native overlay text cannot retain a stance transform.
+				// A stance-transformed glyph is triangle geometry MPP draws
+				// itself, so it needs the atlas sitting behind the UVs the
+				// metrics tessellated. The application's text system hands it
+				// over through the installed IFontMetrics: the renderer no
+				// longer reaches into ImGui to get its pixels (#1000).
 				if (!mFontAtlas)
 				{
-					unsigned char* pixels{}; int width{}, height{};
-					ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
-					mFontAtlas = mRenderSystem->createRenderTexture("world-font-atlas", width, height, 1, false);
-					static_cast<mpp::RenderTexture*>(mFontAtlas.get())->uploadData(0, pixels);
+					auto const image = pf::render::requireFontMetrics().atlas();
+					if (image.empty())
+						throw std::runtime_error("The installed font metrics supplied no "
+							"font atlas, so transformed World text has nothing to draw with.");
+					mFontAtlas = mRenderSystem->createRenderTexture("world-font-atlas",
+						image.width, image.height, 1, false);
+					static_cast<mpp::RenderTexture*>(mFontAtlas.get())
+						->uploadData(0, image.pixels);
 				}
 				return std::static_pointer_cast<mpp::RenderTexture>(mFontAtlas);
 			}

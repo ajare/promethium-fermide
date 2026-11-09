@@ -24,16 +24,6 @@ bool drawSectorTileSurface(std::string const& kind, WorldDrawList* drawList,
 bool drawSectorTileBoundary(char const* kind, WorldDrawList* drawList,
     Vec2 minimum, Vec2 maximum);
 
-inline bool drawSectorTileSurface(std::string const& kind, ImDrawList* drawList,
-    Vec2 minimum, Vec2 maximum, PackedColourValue tint)
-{
-    WorldDrawList adapter(drawList);
-    return drawSectorTileSurface(kind, &adapter, minimum, maximum, tint);
-}
-
-inline bool drawSectorTileBoundary(char const* kind, ImDrawList* drawList,
-    Vec2 minimum, Vec2 maximum)
-{
-    WorldDrawList adapter(drawList);
-    return drawSectorTileBoundary(kind, &adapter, minimum, maximum);
-}
+// No ImDrawList-taking form: a check that wants these on a live ImGui draw
+// list records a command vector and replays it from the headless harness
+// (#1000).

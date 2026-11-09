@@ -49,6 +49,22 @@ struct GlyphVertex
 // atlas - three GlyphVertex per triangle, in layout order.
 using TessellatedGlyphs = std::vector<GlyphVertex>;
 
+// The application's font atlas, as RGBA8 pixels.
+//
+// A glyph that has been through a stance transform is ordinary triangle
+// geometry the backend draws itself, so the backend needs the atlas sitting
+// behind the UVs the tessellation handed back. The renderer uploads it once
+// and never interprets it; who built the atlas, and how, stays with the
+// application that supplied these metrics.
+struct FontAtlasImage
+{
+	std::uint8_t const* pixels{};
+	int width{};
+	int height{};
+
+	bool empty() const { return pixels == nullptr || width <= 0 || height <= 0; }
+};
+
 // Everything the shared renderer can ask of an application's text system.
 class IFontMetrics
 {
@@ -66,6 +82,12 @@ public:
 	// the backend's native text path - so nothing comes back for it.
 	virtual TessellatedGlyphs tessellate(FontRef const& ref,
 		char const* text) const = 0;
+
+	// The atlas the tessellated UVs address, for a backend that has to own
+	// the upload. A text system whose transformed glyphs never reach such a
+	// backend returns an empty image and says so rather than lying about
+	// having pixels.
+	virtual FontAtlasImage atlas() const = 0;
 };
 
 // The metrics the shared renderer measures with, installed by the
