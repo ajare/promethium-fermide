@@ -34,9 +34,9 @@
 #include <willpower/common/Logger.h>
 
 #include "ApplicationResources.h"
-#include "ManifestCatalogResolver.h"
 #include "core/AgentType.h"
 #include "core/Furniture.h"
+#include "core/ManifestCatalogResolver.h"
 #include "core/WorldDocument.h"
 #include "ObjectTileset.h"
 #include "SectorTileset.h"
@@ -239,7 +239,7 @@ namespace
 			mResources->addResourceLocation("Directory", resourceDirectory.string(),
 				"Resources.yaml");
 			mResources->scanLocations();
-			mCatalogResolver = std::make_shared<ManifestCatalogResolver>(
+			mCatalogResolver = std::make_shared<core::ManifestCatalogResolver>(
 				resourceDirectory / "Resources.yaml");
 			core::setCatalogResourceResolver(mCatalogResolver);
 
@@ -717,7 +717,7 @@ namespace
 		std::unique_ptr<mpp::RenderSystem> mRenderSystem;
 		std::unique_ptr<mpp::ResourceManager> mRenderResources;
 		std::unique_ptr<resources::ResourceManager> mResources;
-		std::shared_ptr<ManifestCatalogResolver> mCatalogResolver;
+		std::shared_ptr<core::ManifestCatalogResolver> mCatalogResolver;
 		resources::ResourcePtr mSectorSet;
 		std::string mSectorSetName{"SectorAtlas"};
 		std::string mSectorDiagnostic;
