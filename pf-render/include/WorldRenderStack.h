@@ -6,9 +6,17 @@
 #include <functional>
 #include <string>
 
+#include <mpp/Scene.h>
+
 #include "DrawTypes.h"
 
 class WorldDrawList;
+
+namespace mpp
+{
+	class RenderSystem;
+	class ResourceManager;
+}
 
 namespace wp::application::resourcesystem
 {
@@ -46,6 +54,43 @@ enum class WorldCanvas { World, LocationPlan };
 // could install it in its own scene. The shared renderer never reads it back,
 // so nothing about the host's presentation leaks in here.
 using OffscreenTargetId = std::uint64_t;
+
+// The render infrastructure a host that already owns it lends to the shared
+// renderer (#1002).
+//
+// The editor creates its own stack and hands the shared renderer nothing but a
+// resource directory. The shipped game is different: its launcher creates the
+// window, the MPP render system, the MPP and Willpower resource managers and
+// the scene before the application module is even loaded, and the game is
+// handed those objects by its state framework. A host-bound shared renderer
+// draws through them and never owns them - it does not create them, resize them
+// or destroy them, and it does not create a second render system beside the
+// host's. Because the host's presentation is the window itself rather than an
+// offscreen texture it composites, a host-bound stack submits into whatever
+// render target the host has bound when the frame is drawn.
+struct WorldRenderStackHost
+{
+	mpp::RenderSystem& renderSystem;
+	mpp::ResourceManager& renderResources;
+	wp::application::resourcesystem::ResourceManager& resources;
+	mpp::ScenePtr scene;
+};
+
+// Creates the shared renderer over a host-owned stack. The four viewport
+// atlases are installed from the host's resource manager: `ObjectAtlas` is
+// mandatory, and a missing or foreign Sector, Agent or Furniture atlas is
+// reported through the corresponding `selectWorld*ImageSet` diagnostic and
+// drawn as magenta rather than failing the host's start-up.
+//
+// Throws `std::logic_error` if a stack already exists.
+void createWorldRenderStack(WorldRenderStackHost const& host);
+
+// Renders one CPU command stream into the host's currently-bound render
+// target. Valid only for a host-bound stack; throws `std::runtime_error`
+// otherwise, because silently drawing into an offscreen texture a host-bound
+// caller never looks at would hide the mistake.
+void renderWorldCommandsToHostTarget(WorldDrawList const& commands,
+	pf::render::Vec2 canvasPosition, pf::render::Vec2 canvasSize);
 
 // Creates the whole render stack against the current OpenGL context:
 //

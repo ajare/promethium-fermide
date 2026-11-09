@@ -1,8 +1,11 @@
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
+#include <string>
 #include <yaml-cpp/yaml.h>
 #include <core/Furniture.h>
 #include <iostream>
@@ -19,16 +22,27 @@
 #include <willpower/common/Logger.h>
 #include <mpp/Logger.h>
 #include <mpp/ResourceManager.h>
+#include "imgui/imgui.h"
 #include "ApplicationResources.h"
 #include "DirectoryResourceLocation.h"
 #include "Map.h"
 #include "MapResources.h"
-#include "WorldRenderer.h"
+// The game's own seam to the shared renderer, and the game's own font
+// metrics. Everything the checks below assert on is produced by pf-render
+// through those two - the game has no renderer of its own to test (#1002).
+#include "MppFontMetrics.h"
+#include "WorldCanvas.h"
+#include "Render.h"
+#include "WorldDrawList.h"
 #include "SectorTileset.h"
 #include "ObjectTileset.h"
 
 namespace {
-namespace render = pf::application::render;
+namespace app = pf::application::render;
+using pf::render::FontRef;
+using pf::render::WorldFont;
+using pf::render::packColour;
+
 void require(bool condition, char const* message) {
   if (!condition) throw std::runtime_error(message);
 }
@@ -43,7 +57,24 @@ std::pair<int, int> pngSize(std::filesystem::path const& path) {
   };
   return {dimension(0), dimension(4)};
 }
-render::ObjectTileset installAtlases(std::filesystem::path const& directory) {
+// The tilesets the shared producer draws with, installed from the same
+// source manifest the game loads at run time. The texture handle is a
+// placeholder: these checks never touch a GPU, they read the command stream
+// the tileset helpers record.
+// The texture handle the installed tilesets carry. These checks never touch
+// a GPU - they read the command stream the tileset helpers record - so the
+// handle is a placeholder that only has to be non-null.
+ImTextureID const kInstalled{(ImTextureID)(intptr_t)1};
+// The objects tileset goes in by value, not by move: the caller keeps it as
+// the reference copy the Furniture checks read back.
+void installTilesets(SectorTileset sectors, ObjectTileset const& objects,
+    ObjectTileset agents, ObjectTileset furniture) {
+  setSectorTileset(std::move(sectors), kInstalled);
+  setObjectTileset(objects, kInstalled);
+  setAgentTileset(std::move(agents), kInstalled);
+  setFurnitureTileset(std::move(furniture), kInstalled);
+}
+ObjectTileset installAtlases(std::filesystem::path const& directory) {
   auto manifest = YAML::LoadFile((directory / "Resources.yaml").string());
   auto resource = [&](std::string const& name) {
     for (auto entry : manifest["Resources"]["Resource"])
@@ -51,35 +82,35 @@ render::ObjectTileset installAtlases(std::filesystem::path const& directory) {
     throw std::runtime_error("Missing manifest resource: " + name);
   };
   auto sectorsSize = pngSize(directory / resource("SectorAtlasImage")["location"].as<std::string>());
-  render::SectorTileset sectors;
+  SectorTileset sectors;
   sectors.width = sectorsSize.first; sectors.height = sectorsSize.second;
   for (auto image : resource("SectorAtlas")["Definitions"]["Definition"]["Images"]["Image"]) {
     auto name = image["name"].as<std::string>();
-    render::SectorTileRegion region{image["x"].as<int>(), image["y"].as<int>(),
-                                   image["width"].as<int>(), image["height"].as<int>()};
+    SectorTileRegion region{image["x"].as<int>(), image["y"].as<int>(),
+                           image["width"].as<int>(), image["height"].as<int>()};
     if (name.starts_with("boundary-")) sectors.boundaries.emplace(name.substr(9), region);
     else sectors.surfaces.emplace(name, region);
   }
   auto objectsSize = pngSize(directory / resource("ObjectAtlasImage")["location"].as<std::string>());
-  render::ObjectTileset objects;
+  ObjectTileset objects;
   objects.width = objectsSize.first; objects.height = objectsSize.second;
   for (auto image : resource("ObjectAtlas")["Definitions"]["Definition"]["Images"]["Image"]) {
     auto name = image["name"].as<std::string>();
     bool tintable = name == "agent" || name == "marker" || name.starts_with("human-") ||
                     name == "robot-standing" || name == "cleaning-bot-standing";
-    objects.sprites.emplace(name, render::ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(),
+    objects.sprites.emplace(name, ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(),
         image["width"].as<int>(), image["height"].as<int>()}, tintable});
   }
-  render::ObjectTileset agents;
+  ObjectTileset agents;
   agents.width = objectsSize.first; agents.height = objectsSize.second;
   for (auto image : resource("AgentAtlas")["Definitions"]["Definition"]["Images"]["Image"]) {
     auto name = image["name"].as<std::string>();
     require(!objects.sprites.contains(name), "Agent tiles must be removed from ObjectAtlas");
-    agents.sprites.emplace(name, render::ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(),
+    agents.sprites.emplace(name, ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(),
         image["width"].as<int>(), image["height"].as<int>()}, true});
   }
   require(agents.sprites.size() == 8, "AgentAtlas must contain all eight extracted tiles");
-  render::ObjectTileset furniture;
+  ObjectTileset furniture;
   furniture.width = objectsSize.first; furniture.height = objectsSize.second;
   for (auto image : resource("FurnitureAtlas")["Definitions"]["Definition"]["Images"]["Image"]) {
     auto name = image["name"].as<std::string>();
@@ -87,39 +118,110 @@ render::ObjectTileset installAtlases(std::filesystem::path const& directory) {
     require(alias.x == image["x"].as<int>() && alias.y == image["y"].as<int>()
         && alias.width == image["width"].as<int>() && alias.height == image["height"].as<int>(),
         "Furniture compatibility alias must preserve its rectangle");
-    furniture.sprites.emplace(name, render::ObjectSprite{alias, false});
+    furniture.sprites.emplace(name, ObjectSprite{alias, false});
   }
-  require(furniture.sprites.size() == 7, "FurnitureAtlas must include chairs, desks, sofas and beds");
-  render::setFurnitureTileset(std::move(furniture));
-  render::setAgentTileset(std::move(agents));
-  render::setSectorTileset(std::move(sectors));
-  render::setObjectTileset(objects);
+  require(furniture.sprites.size() == 7, "FurnitureAtlas must include chairs, sofas, desks and beds");
+  installTilesets(std::move(sectors), objects, std::move(agents), std::move(furniture));
   return objects;
 }
-std::size_t textured(render::WorldDrawList const& draws, render::WorldDrawList::Texture texture) {
+std::size_t textured(WorldDrawList const& draws, WorldDrawList::Texture texture) {
   std::size_t count{};
   for (auto const& command : draws.commands())
-    if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
+    if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
         triangle && triangle->texture == texture) ++count;
   return count;
 }
-void checkCanvas(render::WorldDrawList const& draws, float width, float height) {
+void checkCanvas(WorldDrawList const& draws, float width, float height) {
   for (auto const& command : draws.commands()) {
     std::visit([&](auto const& primitive) {
       if constexpr (requires { primitive.clip; }) {
         require(primitive.clip.minimum.x >= 0 && primitive.clip.minimum.y >= 0 &&
                     primitive.clip.maximum.x <= width && primitive.clip.maximum.y <= height,
-                "Application geometry must retain its window clip");
+                "Game geometry must retain its window clip");
       }
       if constexpr (requires { primitive.positions; }) {
         for (auto const& position : primitive.positions)
           require(std::isfinite(position.x) && std::isfinite(position.y), "Non-finite geometry");
+      }
+      if constexpr (requires { primitive.texcoords; }) {
         for (auto const& uv : primitive.texcoords)
           require(uv.x >= 0 && uv.x <= 1 && uv.y >= 0 && uv.y <= 1, "Invalid atlas UV");
       }
     }, command);
   }
 }
+
+// The command-stream seam, compared as text. Both recordings come from the
+// one producer, so a difference means the game's pass changed the viewport,
+// added a pass of its own, or dropped one the editor has (#1002).
+std::string signature(WorldDrawList const& draws) {
+  std::ostringstream out;
+  out.setf(std::ios::fixed); out.precision(4);
+  for (auto const& command : draws.commands())
+    std::visit([&out](auto const& primitive) {
+      using Kind = std::decay_t<decltype(primitive)>;
+      auto clip = [&out](auto const& value) {
+        out << " clip[" << value.clip.minimum.x << "," << value.clip.minimum.y
+            << " " << value.clip.maximum.x << "," << value.clip.maximum.y << "]";
+      };
+      if constexpr (std::is_same_v<Kind, WorldDrawList::Barrier>) out << "barrier\n";
+      else if constexpr (std::is_same_v<Kind, WorldDrawList::Line>) {
+        out << "line " << primitive.from.x << "," << primitive.from.y << " "
+            << primitive.to.x << "," << primitive.to.y << " " << primitive.colour
+            << " w" << primitive.thickness;
+        clip(primitive); out << "\n";
+      }
+      else if constexpr (std::is_same_v<Kind, WorldDrawList::Triangle>) {
+        out << "tri " << int(primitive.texture) << " " << primitive.colour;
+        for (auto const& p : primitive.positions) out << " " << p.x << "," << p.y;
+        for (auto const& uv : primitive.texcoords) out << " uv" << uv.x << "," << uv.y;
+        clip(primitive); out << "\n";
+      }
+      else if constexpr (std::is_same_v<Kind, WorldDrawList::Text>) {
+        out << "text " << int(primitive.font.font) << "@" << primitive.font.size << " "
+            << primitive.position.x << "," << primitive.position.y << " "
+            << primitive.colour << " \"" << primitive.value << "\"";
+        clip(primitive); out << "\n";
+      }
+    }, command);
+  return out.str();
+}
+// Records the same World, Layer and viewport through the game's pass and
+// through the editor's, and requires the two command streams to be the same
+// stream. The game's pass sets the viewport it recorded with, so the editor
+// recording that follows lands on exactly the same canvas.
+void requireSameCanvasAsEditor(std::shared_ptr<core::World> const& world,
+    float width, float height, char const* what) {
+  auto const game = app::drawWorld(*world, width, height);
+  WorldDrawList editor(WorldDrawList::ClipRectangle{{0, 0}, {width, height}});
+  ::renderWorld(world, &editor);
+  auto const gameStream = signature(game);
+  auto const editorStream = signature(editor);
+  if (gameStream == editorStream) return;
+  std::ostringstream out;
+  out << "The game canvas is not the editor's World canvas for " << what
+     << ": " << game.commands().size() << " commands against "
+     << editor.commands().size() << ".";
+  throw std::runtime_error(out.str());
+}
+
+struct Body { float width{}, height{}; };
+Body agentBodyExtent(WorldDrawList const& draws) {
+  float left = 1e9f, right = -1e9f, top = 1e9f, bottom = -1e9f;
+  bool found = false;
+  for (auto const& command : draws.commands())
+    if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+        triangle && triangle->texture == WorldDrawList::Texture::AgentAtlas) {
+      found = true;
+      for (auto const& p : triangle->positions) {
+        left = std::min(left, p.x); right = std::max(right, p.x);
+        top = std::min(top, p.y); bottom = std::max(bottom, p.y);
+      }
+    }
+  require(found, "Agent pose artwork must reach the game canvas");
+  return Body{right - left, bottom - top};
+}
+
 void checkFurnitureCatalogueReload(std::filesystem::path const& directory) {
   using namespace wp::application::resourcesystem;
   struct Cleanup {
@@ -235,44 +337,116 @@ void checkStagedMap(std::filesystem::path const& directory) {
   pf::application::MapResources resources(manager);
   resources.scan(); resources.load();
   auto map = std::dynamic_pointer_cast<pf::application::Map>(manager.getResource("World", "World"));
-  // The renderer is handed the runtime's const view exactly as StatePlay
+  // The game's pass is handed the runtime's const view exactly as StatePlay
   // hands it (#970). Nothing in this check holds the World, so nothing here
   // can keep it alive past the resource that owns it.
   auto const& stagedWorld = map->getRuntime()->world();
   auto const tick = stagedWorld.getSimulationTick();
   for (auto const& size : {std::pair{1280.0f, 720.0f}, std::pair{320.0f, 200.0f}}) {
-    auto draws = render::drawWorld(stagedWorld, size.first, size.second);
-    require(textured(draws, render::WorldDrawList::Texture::SectorAtlas) > 0,
-            "Loaded Application Map must draw its sector atlas artwork");
+    auto draws = app::drawWorld(stagedWorld, size.first, size.second);
+    require(textured(draws, WorldDrawList::Texture::SectorAtlas) > 0,
+            "Loaded game Map must draw its sector atlas artwork");
     checkCanvas(draws, size.first, size.second);
   }
   require(stagedWorld.getSimulationTick() == tick, "Rendering must leave World simulation paused");
   resources.unload();
   require(!map->getRuntime(), "Drawing must not retain the World after MapUnload");
 }
-void checkNoOverlaysAndAgents() {
-  auto world = std::make_shared<core::World>("Application render", 12, 2);
+
+// The text the game could never draw before: a Sector's capacity readout and
+// a Marker's identification. Both are World text the shared producer emits
+// and the game's injected MPP-backed metrics make measurable (#1002).
+void checkWorldText(std::filesystem::path const& directory) {
+  auto world = std::make_shared<core::World>("Game text", 12, 2);
+  auto room = world->addRoom("Front", 0, 0, 0, 3, 1);
+  world->addCorridor(0, 0, 4, 3, 1);
+  world->addRoom("Back", 1, 0, 0, 12, 1);
+  world->addChamber(0, 0, 3, 1, true);
+  world->addSectorMarker(room, 0, 1.5f, "Meeting point");
+  world->finishBuild(); world->pauseSimulation();
+
+  auto const withAtlas = app::drawWorld(*world, 1280, 720);
+  bool capacity = false;
+  bool markerArtwork = false;
+  for (auto const& command : withAtlas.commands()) {
+    if (auto const* text = std::get_if<WorldDrawList::Text>(&command))
+      capacity = capacity || text->value.find("Capacity:") != std::string::npos;
+    if (auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command))
+      markerArtwork = markerArtwork
+          || triangle->texture == WorldDrawList::Texture::ObjectAtlas;
+  }
+  require(capacity, "The game canvas must carry the Sector capacity readout");
+  require(markerArtwork, "The game canvas must carry the Marker's artwork");
+  requireSameCanvasAsEditor(world, 1280.0f, 720.0f, "a Sector readout and a Marker");
+
+  // With no object artwork to draw, the Marker falls back to the icon glyph
+  // as a text run - the path that needs the game's own font metrics, and
+  // the one that used to be unreachable in the shipped game.
+  clearObjectTileset();
+  auto const withoutArtwork = app::drawWorld(*world, 1280, 720);
+  bool markerGlyph = false;
+  for (auto const& command : withoutArtwork.commands())
+    if (auto const* text = std::get_if<WorldDrawList::Text>(&command))
+      markerGlyph = markerGlyph || text->font.font == WorldFont::Icons;
+  require(markerGlyph,
+      "A Marker with no artwork must fall back to the icon face through the "
+      "game's injected font metrics");
+  installAtlases(directory);
+}
+
+// The pose the game could never draw: an Agent Lying on a Bed is drawn
+// rotated, an Agent Sitting is drawn squashed, and both are drawn exactly
+// as the editor draws them (#1002).
+void checkAgentPoses() {
+  auto world = std::make_shared<core::World>("Game poses", 12, 2);
+  world->addRoom("Front", 0, 0, 0, 12, 1);
+  world->addRoom("Back", 1, 0, 0, 12, 1);
+  world->finishBuild(); world->pauseSimulation();
+  auto id = world->createAgent("Actor", 0, 0, 3.5f);
+  auto* agent = world->lookupAgent(id).entity;
+  require(agent != nullptr, "Agent fixture creation failed");
+  auto const near = [](float a, float b) { return std::abs(a - b) < 0.01f; };
+
+  core::AgentPoseTestAccess::set(*agent, core::Pose::Standing);
+  auto const standing = agentBodyExtent(app::drawWorld(*world, 1280, 720));
+  requireSameCanvasAsEditor(world, 1280.0f, 720.0f, "a Standing Agent");
+
+  core::AgentPoseTestAccess::set(*agent, core::Pose::Sitting);
+  auto const sitting = agentBodyExtent(app::drawWorld(*world, 1280, 720));
+  require(near(sitting.width, standing.width) && sitting.height < standing.height,
+      "A Sitting Agent must be drawn squashed against its Standing body, not standing");
+  requireSameCanvasAsEditor(world, 1280.0f, 720.0f, "a Sitting Agent");
+
+  core::AgentPoseTestAccess::set(*agent, core::Pose::Lying);
+  auto const lying = agentBodyExtent(app::drawWorld(*world, 1280, 720));
+  require(lying.width > lying.height && near(lying.width, standing.height)
+      && near(lying.height, standing.width),
+      "A Lying Agent must be drawn rotated onto its side, not standing upright");
+  requireSameCanvasAsEditor(world, 1280.0f, 720.0f, "a Lying Agent");
+}
+
+void checkAgentsAndMarkers() {
+  auto world = std::make_shared<core::World>("Game agents", 12, 2);
   auto room = world->addRoom("Front", 0, 0, 0, 12, 1);
   auto back = world->addRoom("Back", 1, 0, 0, 12, 1);
   world->finishBuild(); world->pauseSimulation();
-  auto baseline = render::drawWorld(*world, 1280, 720);
-  world->addSectorMarker(room, 0, 8.5f, "Invisible annotation");
+  auto baseline = app::drawWorld(*world, 1280, 720);
+  world->addSectorMarker(room, 0, 8.5f, "Authored destination");
   world->finishBuild(); world->pauseSimulation();
-  auto marked = render::drawWorld(*world, 1280, 720);
-  require(marked.commands().size() == baseline.commands().size(),
-          "Markers and graph vertices must not add Application drawing commands");
+  auto marked = app::drawWorld(*world, 1280, 720);
+  require(marked.commands().size() > baseline.commands().size(),
+          "An authored Marker must contribute its artwork to the game canvas");
   auto id = world->createAgent("Visible", room, 0, 1.5f);
   auto agent = world->lookupAgent(id).entity;
   require(agent != nullptr, "Agent fixture creation failed");
-  auto visible = render::drawWorld(*world, 1280, 720);
-  auto const sprites = textured(visible, render::WorldDrawList::Texture::AgentAtlas);
-  require(sprites >= 2, "Front-Layer Agent must draw pose artwork without an ImGui font/context");
+  auto visible = app::drawWorld(*world, 1280, 720);
+  auto const sprites = textured(visible, WorldDrawList::Texture::AgentAtlas);
+  require(sprites >= 2, "Front-Layer Agent must draw pose artwork through the shared renderer");
   world->createAgent("Occluded", back, 0, 1.5f);
-  auto occluded = render::drawWorld(*world, 1280, 720);
-  require(textured(occluded, render::WorldDrawList::Texture::AgentAtlas) == sprites,
+  auto occluded = app::drawWorld(*world, 1280, 720);
+  require(textured(occluded, WorldDrawList::Texture::AgentAtlas) == sprites,
           "Agent on a Layer without an aperture must remain hidden");
-  require(occluded.commands().size() == visible.commands().size(),
-          "Back Layer must not contribute a wireframe or debug overlay");
+  requireSameCanvasAsEditor(world, 1280.0f, 720.0f, "hidden back-Layer content");
   checkCanvas(occluded, 1280, 720);
   std::weak_ptr<core::World> lifetime = world;
   world.reset();
@@ -286,12 +460,12 @@ void checkPlayerCamera() {
   auto id = world->createAgent("Back-Layer player", back, 0, 50.f);
   require(world->setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}),
           "Camera fixture must accept built-in assignment");
-  auto centred = [](render::WorldDrawList const& draws, float width) {
+  auto centred = [](WorldDrawList const& draws, float width) {
     float low = width, high = 0;
     bool found = false;
     for (auto const& command : draws.commands())
-      if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
-          triangle && triangle->texture == render::WorldDrawList::Texture::AgentAtlas) {
+      if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+          triangle && triangle->texture == WorldDrawList::Texture::AgentAtlas) {
         found = true;
         for (auto position : triangle->positions) {
           low = std::min(low, position.x); high = std::max(high, position.x);
@@ -300,16 +474,16 @@ void checkPlayerCamera() {
     require(found && std::abs((low + high) * 0.5f - width * 0.5f) < 0.001f,
             "Player artwork must be visible on its Layer and centred horizontally");
   };
-  auto draws = render::drawWorld(*world, 640, 360);
+  auto draws = app::drawWorld(*world, 640, 360);
   centred(draws, 640); checkCanvas(draws, 640, 360);
   require(world->resumeSimulation(), "Camera fixture cannot resume");
   world->setPlayerMovementDirection(1); world->update(1.f);
   auto const tick = world->getSimulationTick();
-  draws = render::drawWorld(*world, 320, 200);
+  draws = app::drawWorld(*world, 320, 200);
   centred(draws, 320); checkCanvas(draws, 320, 200);
   require(world->getSimulationTick() == tick, "Following must not update simulation");
   world->pauseSimulation(); world->clearAgentBehaviourAssignment(id);
-  require(textured(render::drawWorld(*world, 640, 360), render::WorldDrawList::Texture::AgentAtlas) == 0,
+  require(textured(app::drawWorld(*world, 640, 360), WorldDrawList::Texture::AgentAtlas) == 0,
           "No Player must restore Layer-0 camera rather than reveal a back-Layer Agent");
 }
 
@@ -321,12 +495,12 @@ void checkStairwellDoorwayOutlines() {
   world->finishBuild(); world->pauseSimulation();
   auto id = world->createAgent("Player", bottom, 0, 3.f);
   require(world->setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign Stairwell camera player");
-  auto outlines = [](render::WorldDrawList const& draws) {
+  auto outlines = [](WorldDrawList const& draws) {
     unsigned count = 0;
     auto const& commands = draws.commands();
     for (size_t i = 0; i + 3 < commands.size(); ++i) {
-      auto horizontal = std::get_if<render::WorldDrawList::Line>(&commands[i]);
-      auto vertical = std::get_if<render::WorldDrawList::Line>(&commands[i + 1]);
+      auto horizontal = std::get_if<WorldDrawList::Line>(&commands[i]);
+      auto vertical = std::get_if<WorldDrawList::Line>(&commands[i + 1]);
       if (!horizontal || !vertical || horizontal->from.y != horizontal->to.y || vertical->from.x != vertical->to.x) continue;
       float width = std::abs(horizontal->to.x - horizontal->from.x);
       float height = std::abs(vertical->to.y - vertical->from.y);
@@ -334,15 +508,15 @@ void checkStairwellDoorwayOutlines() {
           / (CORE_STAIRWELL_DOORWAY_HEIGHT * CORE_LEVEL_HEIGHT_PIXELS)) > .001f) continue;
       bool rectangle = true;
       for (size_t side = 0; side < 4; ++side) {
-        auto line = std::get_if<render::WorldDrawList::Line>(&commands[i + side]);
-        auto next = std::get_if<render::WorldDrawList::Line>(&commands[i + (side + 1) % 4]);
-        rectangle = rectangle && line && next && line->colour == render::packColour(0, 0, 0) && line->thickness == 1.f
+        auto line = std::get_if<WorldDrawList::Line>(&commands[i + side]);
+        auto next = std::get_if<WorldDrawList::Line>(&commands[i + (side + 1) % 4]);
+        rectangle = rectangle && line && next && line->colour == packColour(0, 0, 0) && line->thickness == 1.f
           && line->to.x == next->from.x && line->to.y == next->from.y;
       }
       if (rectangle) {
         // Emitted geometry outside its aperture clip is not a visible doorway.
         for (size_t side = 0; side < 4; ++side) {
-          auto const& line = std::get<render::WorldDrawList::Line>(commands[i + side]);
+          auto const& line = std::get<WorldDrawList::Line>(commands[i + side]);
           rectangle = rectangle && line.from.x >= line.clip.minimum.x - .001f
             && line.from.x <= line.clip.maximum.x + .001f
             && line.from.y >= line.clip.minimum.y - .001f
@@ -353,20 +527,20 @@ void checkStairwellDoorwayOutlines() {
     }
     return count;
   };
-  auto landingCount = outlines(render::drawWorld(*world, 1280, 720));
+  auto landingCount = outlines(app::drawWorld(*world, 1280, 720));
   if (landingCount != 2) throw std::runtime_error(
           "Open Stairwell doorways must have visible boxes when viewed through landing apertures: expected 2, got "
           + std::to_string(landingCount));
   world->resumeSimulation(); world->requestPlayerDoorAction(); world->update(.2f);
   require(world->lookupAgent(id).entity->getSector()->getIndex() == stairs, "Player must enter Stairwell to view its Layer");
-  auto draws = render::drawWorld(*world, 1280, 720);
+  auto draws = app::drawWorld(*world, 1280, 720);
   auto count = outlines(draws);
   if (count != 2) throw std::runtime_error("Viewed Stairwell must outline every Level doorway: expected 2, got " + std::to_string(count));
   checkCanvas(draws, 1280, 720);
 }
 
-void checkFurniture(std::filesystem::path const& directory, render::ObjectTileset const& atlas) {
-  auto world = std::make_shared<core::World>("Application Furniture", 8, 2);
+void checkFurniture(std::filesystem::path const& directory, ObjectTileset const& atlas) {
+  auto world = std::make_shared<core::World>("Game Furniture", 8, 2);
   auto room = world->addRoom("Front", 0, 0, 0, 8, 1);
   auto back = world->addRoom("Back", 1, 0, 0, 8, 1);
   world->attachFurnitureCatalogue("chair.furniture.lua",
@@ -374,13 +548,13 @@ void checkFurniture(std::filesystem::path const& directory, render::ObjectTilese
   world->placeFurniture(room, "chair", 2.25f, 0, "Visible chair");
   world->placeFurniture(back, "chair", 2.25f, 0, "Hidden chair");
   world->finishBuild(); world->pauseSimulation();
-  auto draws = render::drawWorld(*world, 1280, 720);
-  require(textured(draws, render::WorldDrawList::Texture::FurnitureAtlas) == 4,
+  auto draws = app::drawWorld(*world, 1280, 720);
+  require(textured(draws, WorldDrawList::Texture::FurnitureAtlas) == 4,
           "Only the front chair should draw, including foreground restoration");
   auto const& chair = atlas.sprites.at("chair").region;
   for (auto const& command : draws.commands())
-    if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
-        triangle && triangle->texture == render::WorldDrawList::Texture::FurnitureAtlas)
+    if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+        triangle && triangle->texture == WorldDrawList::Texture::FurnitureAtlas)
       for (auto uv : triangle->texcoords)
         require(uv.x >= float(chair.x) / atlas.width && uv.x <= float(chair.x + chair.width) / atlas.width &&
                     uv.y >= float(chair.y) / atlas.height && uv.y <= float(chair.y + chair.height) / atlas.height,
@@ -389,50 +563,50 @@ void checkFurniture(std::filesystem::path const& directory, render::ObjectTilese
   auto graph = world->getGraph();
   auto markers = world->getMarkerIds();
   auto assertFallback = [&] {
-    auto missing = render::drawWorld(*world, 1280, 720);
-    require(textured(missing, render::WorldDrawList::Texture::FurnitureAtlas) == 0,
+    auto missing = app::drawWorld(*world, 1280, 720);
+    require(textured(missing, WorldDrawList::Texture::FurnitureAtlas) == 0,
         "Missing Furniture artwork must not fall back to ObjectAtlas");
     std::size_t magenta{};
     for (auto const& command : missing.commands())
-      if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
-          triangle && triangle->texture == render::WorldDrawList::Texture::None
-          && triangle->colour == render::packColour(255, 0, 255, 255)) ++magenta;
+      if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+          triangle && triangle->texture == WorldDrawList::Texture::None
+          && triangle->colour == packColour(255, 0, 255, 255)) ++magenta;
     require(magenta == 4, "Missing Furniture tiles must render cell-sized magenta rectangles");
     require(world->getGraph() == graph && world->getMarkerIds() == markers,
         "Artwork selection changed physical Furniture layout");
   };
-  render::clearFurnitureTileset();
+  clearFurnitureTileset();
   assertFallback();
-  render::ObjectTileset custom;
+  ObjectTileset custom;
   custom.width = 600; custom.height = 256;
-  custom.sprites.emplace("other", render::ObjectSprite{{0, 0, 11, 13}, false});
-  render::setFurnitureTileset(custom);
+  custom.sprites.emplace("other", ObjectSprite{{0, 0, 11, 13}, false});
+  setFurnitureTileset(custom, kInstalled);
   assertFallback();
-  custom.sprites.emplace("chair", render::ObjectSprite{{8, 63, 71, 193}, false});
-  render::setFurnitureTileset(custom);
-  auto changed = render::drawWorld(*world, 1280, 720);
-  require(textured(changed, render::WorldDrawList::Texture::FurnitureAtlas) == 4,
+  custom.sprites.emplace("chair", ObjectSprite{{8, 63, 71, 193}, false});
+  setFurnitureTileset(custom, kInstalled);
+  auto changed = app::drawWorld(*world, 1280, 720);
+  require(textured(changed, WorldDrawList::Texture::FurnitureAtlas) == 4,
       "Alternate Furniture tile proportions must remain usable");
   for (auto const& command : changed.commands())
-    if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
-        triangle && triangle->texture == render::WorldDrawList::Texture::FurnitureAtlas)
+    if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+        triangle && triangle->texture == WorldDrawList::Texture::FurnitureAtlas)
       for (auto uv : triangle->texcoords)
         require(uv.x >= 8.f / 600 && uv.x <= 79.f / 600 && uv.y >= 63.f / 256 && uv.y <= 256.f / 256,
             "Selected Furniture atlas UVs were not applied");
   installAtlases(directory);
 }
 void checkNestedApertures() {
-  auto world = std::make_shared<core::World>("Application apertures", 6, 2);
+  auto world = std::make_shared<core::World>("Game apertures", 6, 2);
   while (world->getLayerCount() < 3) world->addLayer();
   world->addRoom("Front", 0, 0, 0, 6, 1);
   world->addRoom("Middle", 1, 0, 0, 6, 1);
   world->addBackground(2, 0, 0, 6, 1, {23, 67, 109});
   world->finishBuild(); world->pauseSimulation();
-  auto hidden = render::drawWorld(*world, 1280, 720);
-  auto hasBackColour = [](render::WorldDrawList const& draws) {
+  auto hidden = app::drawWorld(*world, 1280, 720);
+  auto hasBackColour = [](WorldDrawList const& draws) {
     for (auto const& command : draws.commands())
-      if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
-          triangle && triangle->colour == render::packColour(23, 67, 109, 255)) return true;
+      if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+          triangle && triangle->colour == packColour(23, 67, 109, 255)) return true;
     return false;
   };
   require(!hasBackColour(hidden), "Deeper Background must not leak through an opaque Room");
@@ -441,11 +615,11 @@ void checkNestedApertures() {
   world->addSectorWindow(1, 0, 2, 3, 1,
       {false, core::Window::State::Closed, core::Window::Style::Clear});
   world->finishBuild(); world->pauseSimulation();
-  auto revealed = render::drawWorld(*world, 1280, 720);
+  auto revealed = app::drawWorld(*world, 1280, 720);
   require(hasBackColour(revealed), "Aligned clear Windows must reveal the deeper Background");
   for (auto const& command : revealed.commands())
-    if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
-        triangle && triangle->colour == render::packColour(23, 67, 109, 255))
+    if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+        triangle && triangle->colour == packColour(23, 67, 109, 255))
       require(triangle->clip.maximum.x - triangle->clip.minimum.x < 3 * CORE_CELL_WIDTH_PIXELS,
               "Deeper Background must retain the intersection of both Window apertures");
   checkCanvas(revealed, 1280, 720);
@@ -474,16 +648,16 @@ void checkPlayerSelectorDrawing() {
 }
 
 void checkSectorTileScaling() {
-  render::SectorTileset tiles;
+  SectorTileset tiles;
   tiles.width = 512; tiles.height = 320;
-  tiles.surfaces.emplace("corridor", render::SectorTileRegion{0, 0, 128, 320});
-  render::setSectorTileset(tiles);
-  render::WorldDrawList commands({{0, 0}, {1000, 1000}});
-  require(render::drawSectorTileSurface("corridor", &commands, {0, 0}, {256, 240}, render::White, 2.f),
+  tiles.surfaces.emplace("corridor", SectorTileRegion{0, 0, 128, 320});
+  setSectorTileset(tiles, kInstalled);
+  WorldDrawList commands({{0, 0}, {1000, 1000}});
+  require(drawSectorTileSurface("corridor", &commands, {0, 0}, {256, 240}, pf::render::White, 2.f),
       "Station corridor must render");
-  require(textured(commands, render::WorldDrawList::Texture::SectorAtlas) == 4,
+  require(textured(commands, WorldDrawList::Texture::SectorAtlas) == 4,
       "Two World cells must each render a tile at zoom 2 independent of source size");
-  auto const& triangle = std::get<render::WorldDrawList::Triangle>(commands.commands().front());
+  auto const& triangle = std::get<WorldDrawList::Triangle>(commands.commands().front());
   float maxX{}, maxY{}, maxUvY{};
   for (int i = 0; i < 3; ++i) {
     maxX = std::max(maxX, triangle.positions[i].x);
@@ -492,19 +666,19 @@ void checkSectorTileScaling() {
   }
   require(maxX == 128.f && maxY == 240.f && maxUvY < .76f && maxUvY > .74f,
       "Tile must fill 1x1 World units and crop a partial-height cell");
-  render::WorldDrawList missing({{0, 0}, {1000, 1000}});
-  require(render::drawSectorTileSurface("room", &missing, {0, 0}, {64, 160}, render::White),
+  WorldDrawList missing({{0, 0}, {1000, 1000}});
+  require(drawSectorTileSurface("room", &missing, {0, 0}, {64, 160}, pf::render::White),
       "Missing tile must emit fallback geometry");
-  auto const& fallback = std::get<render::WorldDrawList::Triangle>(missing.commands().front());
-  require(fallback.texture == render::WorldDrawList::Texture::None
-      && fallback.colour == render::packColour(255, 0, 255), "Missing tile must be opaque magenta");
-  require(!render::drawSectorTileBoundary("floor", &missing, {0, 0}, {64, 2}),
+  auto const& fallback = std::get<WorldDrawList::Triangle>(missing.commands().front());
+  require(fallback.texture == WorldDrawList::Texture::None
+      && fallback.colour == packColour(255, 0, 255), "Missing tile must be opaque magenta");
+  require(!drawSectorTileBoundary("floor", &missing, {0, 0}, {64, 2}),
       "Missing boundary must request plain-line fallback");
-  render::setSectorTileset({});
-  render::WorldDrawList unavailable({{0, 0}, {1000, 1000}});
-  require(render::drawSectorTileSurface("corridor", &unavailable, {0, 0}, {64, 160}, render::White),
+  setSectorTileset({}, kInstalled);
+  WorldDrawList unavailable({{0, 0}, {1000, 1000}});
+  require(drawSectorTileSurface("corridor", &unavailable, {0, 0}, {64, 160}, pf::render::White),
       "Unavailable ImageSet must emit fallback geometry");
-  render::clearSectorTileset();
+  clearSectorTileset();
 }
 
 void checkAgentArtworkFallback() {
@@ -516,24 +690,24 @@ void checkAgentArtworkFallback() {
   core::AgentPoseTestAccess::set(*agent, core::Pose::Sitting);
   auto const physical = agent->getBounds().getSize();
   for (int present = 0; present < 4; ++present) {
-    render::ObjectTileset tiles; tiles.width = 128; tiles.height = 128;
-    if (present & 1) tiles.sprites.emplace("human-standing", render::ObjectSprite{{0, 0, 26, 72}, true});
-    if (present & 2) tiles.sprites.emplace("human-sitting", render::ObjectSprite{{32, 0, 26, 43}, true});
-    render::setAgentTileset(std::move(tiles));
-    auto list = render::drawWorld(*world, 1024, 720);
+    ObjectTileset tiles; tiles.width = 128; tiles.height = 128;
+    if (present & 1) tiles.sprites.emplace("human-standing", ObjectSprite{{0, 0, 26, 72}, true});
+    if (present & 2) tiles.sprites.emplace("human-sitting", ObjectSprite{{32, 0, 26, 43}, true});
+    setAgentTileset(std::move(tiles), kInstalled);
+    auto list = app::drawWorld(*world, 1024, 720);
     unsigned missing = 0;
     float left = 1e6f, right = -1e6f, top = 1e6f, bottom = -1e6f;
     for (auto const& command : list.commands())
-      if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
-          triangle && triangle->texture == render::WorldDrawList::Texture::None
-          && triangle->colour == render::packColour(255, 0, 255, 255)) {
+      if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+          triangle && triangle->texture == WorldDrawList::Texture::None
+          && triangle->colour == packColour(255, 0, 255, 255)) {
         ++missing;
         for (auto p : triangle->positions) {
           left = std::min(left, p.x); right = std::max(right, p.x);
           top = std::min(top, p.y); bottom = std::max(bottom, p.y);
         }
       }
-    if (present == 3) require(missing == 0 && textured(list, render::WorldDrawList::Texture::AgentAtlas) == 4,
+    if (present == 3) require(missing == 0 && textured(list, WorldDrawList::Texture::AgentAtlas) == 4,
         "Complete Agent artwork must use its independent texture channel");
     else require(missing == 4 && near(right - left, agent->getWidth() * 64.f)
         && near(bottom - top, agent->getHeight() * 160.f),
@@ -543,10 +717,50 @@ void checkAgentArtworkFallback() {
   }
 }
 
+// The game's own text system, measured through the interface the shared
+// renderer asks questions with. MPP lays a run out one fixed cell per byte
+// on a 16 pixel line; the game's metrics have to answer with what MPP will
+// actually draw, or every centred label in the game drifts.
+void checkMppFontMetrics() {
+  app::MppFontMetrics metrics;
+  auto const native = metrics.measure({WorldFont::Default, 0.0f}, "Ab");
+  require(native.y == app::MppFontMetrics::NativeLineHeight,
+      "The MPP face must measure at its own 16 pixel line height");
+  require(native.x == 2.0f * app::MppFontMetrics::advanceFor('A'),
+      "A run must measure as the sum of its glyph advances");
+  auto const scaled = metrics.measure({WorldFont::Default, 32.0f}, "Ab");
+  require(std::abs(scaled.x - native.x * 2.0f) < 0.001f
+      && std::abs(scaled.y - native.y * 2.0f) < 0.001f,
+      "A sized ref must scale the whole run");
+  require(metrics.measure({WorldFont::Default, 0.0f}, nullptr).x == 0.0f,
+      "A null run must measure as nothing rather than throw");
+  require(metrics.tessellate({WorldFont::Default, 0.0f}, "Ab").empty(),
+      "An unsized run stays on MPP's native text path and tessellates nothing");
+  auto const glyphs = metrics.tessellate({WorldFont::Icons, 16.0f}, "AB");
+  require(glyphs.size() == 12, "Two glyphs must tessellate to two quads");
+  for (auto const& vertex : glyphs) {
+    require(vertex.position.x >= 0.0f && vertex.position.y >= 0.0f
+        && vertex.position.y <= app::MppFontMetrics::NativeLineHeight,
+        "Tessellated glyph geometry must sit on the text baseline box");
+    require(vertex.texcoord.x >= 0.0f && vertex.texcoord.x <= 1.0f
+        && vertex.texcoord.y >= 0.0f && vertex.texcoord.y <= 1.0f,
+        "Tessellated glyph UVs must stay inside the atlas");
+  }
+  auto const atlas = metrics.atlas();
+  require(!atlas.empty() && atlas.width == atlas.height,
+      "The game must hand the renderer the MPP font atlas to draw transformed text with");
+}
+
 int main(int argc, char** argv) {
   try {
     require(argc == 2, "Expected the repository resource directory");
     auto directory = std::filesystem::path(argv[1]);
+    // The game's own font metrics, installed the way the game installs them.
+    // Every text measurement below runs through MPP, not through a font the
+    // renderer reached for itself (#999, #1002).
+    app::MppFontMetrics fontMetrics;
+    pf::render::installFontMetrics(&fontMetrics);
+    checkMppFontMetrics();
     // The same source manifest supplies the CPU-only artwork rectangles; no
     // graphics context, texture upload, auxiliary manifest or ImGui is needed.
     checkSectorTileScaling();
@@ -554,20 +768,22 @@ int main(int argc, char** argv) {
     checkFurnitureCatalogueReload(directory);
     checkAtlasReload(directory);
     checkStagedMap(directory);
-    checkNoOverlaysAndAgents();
+    checkWorldText(directory);
+    checkAgentPoses();
+    checkAgentsAndMarkers();
     checkPlayerCamera();
     checkPlayerSelectorDrawing();
     checkStairwellDoorwayOutlines();
     checkFurniture(directory, atlas);
     checkNestedApertures();
     checkAgentArtworkFallback();
-    // There is no "no World" case to check any more: drawWorld() takes the
-    // `core::World const&` its WorldRuntime published, so a caller cannot even
-    // express rendering nothing but a null World (#970).
+    // There is no "no World" case to check any more: the game's pass takes
+    // the `core::World const&` its WorldRuntime published, so a caller
+    // cannot even express rendering nothing but a null World (#970).
     auto empty = std::make_shared<core::World>("Empty", 4, 2);
-    require(render::drawWorld(*empty, 1280, 720).commands().empty(), "Empty World must draw nothing");
-    require(render::drawWorld(*empty, 0, 0).commands().empty(), "Minimized window must draw nothing");
-    render::clearObjectTileset(); render::clearSectorTileset(); render::clearAgentTileset();
+    require(app::drawWorld(*empty, 1280, 720).commands().empty(), "Empty World must draw nothing");
+    require(app::drawWorld(*empty, 0, 0).commands().empty(), "Minimized window must draw nothing");
+    clearObjectTileset(); clearSectorTileset(); clearAgentTileset(); clearFurnitureTileset();
     return 0;
   } catch (std::exception const& error) {
     std::cerr << error.what() << '\n';

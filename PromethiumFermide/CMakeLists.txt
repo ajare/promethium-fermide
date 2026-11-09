@@ -31,15 +31,12 @@ add_library(PromethiumFermide SHARED
     src/StateController.cpp
     src/StateLifecycle.cpp
     src/StatePlay.cpp
-    render/Render.cpp
-    render/WorldDrawList.cpp
-    render/SectorTileset.cpp
-    render/ObjectTileset.cpp
-    render/WorldRenderer.cpp)
+    # The game has no renderer of its own (#1002): these two are the whole
+    # seam through which it reaches pf-render - the game's MPP-backed font
+    # metrics, and the create / render / destroy canvas surface.
+    render/MppFontMetrics.cpp
+    render/WorldCanvas.cpp)
 target_include_directories(PromethiumFermide PUBLIC include PRIVATE render)
-# The application renderer draws with pf-render's shared headers. It keeps
-# its own renderer implementation, so this is a header dependency only.
-target_include_directories(PromethiumFermide PRIVATE "${PF_REPO_ROOT}/pf-render/include")
 target_compile_definitions(PromethiumFermide PRIVATE PF_APPLICATION_EXPORT)
 # The game reaches its World through pf-game-runtime alone (#970, spec #960):
 # WorldRuntime owns the World, and the const view it publishes is the only
@@ -49,7 +46,10 @@ target_compile_definitions(PromethiumFermide PRIVATE PF_APPLICATION_EXPORT)
 # boundary.
 target_link_libraries(PromethiumFermide PUBLIC AppLib promethium-fermide-core
     pf-game-runtime
-    PRIVATE pf-agent-resources)
+    # The shared World renderer. The game draws through it rather than
+    # keeping a second producer, command stream, tileset pair and MPP
+    # consumer beside it (#1002, spec #995).
+    PRIVATE pf-agent-resources pf-render)
 pf_apply_headless_verification_policy(PromethiumFermide)
 willpower_add_header_filter(PromethiumFermide)
 set_target_properties(PromethiumFermide PROPERTIES
@@ -112,7 +112,12 @@ if(BUILD_TESTING)
 
     add_executable(pf_application_render_tests tests/render_tests.cpp
         ${PF_REPO_ROOT}/launcher/src/DirectoryResourceLocation.cpp)
-    target_include_directories(pf_application_render_tests PRIVATE render ${PF_REPO_ROOT}/pf-render/include ${PF_REPO_ROOT}/pf-agent-resources/include ${PF_REPO_ROOT}/launcher/include)
+    # pf-imgui-cpu/include goes first so this target sees the same ImTextureID
+    # pf-render was compiled against. The game's own link pulls MPP's imgui
+    # headers along, and those typedef ImTextureID as an integer - the same
+    # 64 bits, but a different mangled name, so the tileset setters would
+    # not resolve without this ordering.
+    target_include_directories(pf_application_render_tests PRIVATE ${PF_REPO_ROOT}/pf-imgui-cpu/include render ${PF_REPO_ROOT}/pf-render/include ${PF_REPO_ROOT}/pf-agent-resources/include ${PF_REPO_ROOT}/launcher/include)
     target_link_libraries(pf_application_render_tests PRIVATE PromethiumFermide)
     add_dependencies(pf_application_render_tests pf-application-assets)
     pf_apply_headless_verification_policy(pf_application_render_tests)

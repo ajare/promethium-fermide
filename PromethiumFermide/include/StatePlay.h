@@ -8,11 +8,12 @@ namespace core { class World; }
 namespace game { class WorldRuntime; }
 
 namespace pf::application {
-namespace render { class WorldRenderer; }
 
 // Use AppLib's scene lifecycle without StatePlay's map/player requirements.
 class StatePlay final : public applib::State {
-  std::unique_ptr<render::WorldRenderer> mRenderer;
+  // The World canvas is the shared renderer's, not this state's: it is
+  // created against the host's render stack and destroyed before the OpenGL
+  // context goes, and nothing here holds a renderer of its own (#1002).
   // Borrowed from Controller's MapResources. The runtime owns the World; this
   // state drives the runtime and never holds the World itself, so everything
   // Play reads - including what it hands the renderer - is the runtime's

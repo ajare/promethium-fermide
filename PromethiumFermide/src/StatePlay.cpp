@@ -7,8 +7,7 @@
 #include <game/WorldRuntime.h>
 #include <core/Defines.h>
 #include "ApplicationResources.h"
-#include "WorldRenderer.h"
-#include "RenderSettings.h"
+#include "WorldCanvas.h"
 #include <algorithm>
 #include <cmath>
 #include <willpower/application/resourcesystem/ResourceManager.h>
@@ -27,15 +26,17 @@ void StatePlay::setup(wp::application::resourcesystem::ResourceManager* resource
   if (!map || !map->getRuntime()) throw std::runtime_error("Play requires the loaded World Map");
   // The renderer is handed the runtime's const view of the World it drives.
   // It cannot mutate what it draws because there is nothing mutable in the
-  // reference it is given (#970).
-  mRenderer = std::make_unique<render::WorldRenderer>(*resources, *renderSystem,
-      *renderResources, mScene, map->getRuntime()->world());
+  // reference it is given (#970). The canvas is the shared renderer's: the
+  // host's render system, resource managers and scene cross once, as the
+  // shared renderer's own host struct, and the game never touches them
+  // again (#1002).
+  render::createWorldCanvas({*renderSystem, *renderResources, *resources, mScene});
 }
 
 void StatePlay::teardown() {
   if (mRuntime) mRuntime->clearPlayerInput();
   resetInput();
-  mRenderer.reset();
+  render::destroyWorldCanvas();
   mDebug = {};
   mRuntime = nullptr;
 }
@@ -126,10 +127,12 @@ void StatePlay::injectKeyInputImpl(wp::application::KeyEvent event,
 void StatePlay::renderImpl(mpp::RenderSystem* renderSystem,
                            mpp::ResourceManager*) {
   mScene->setViewport(0, 0, renderSystem->getWindowWidth(), renderSystem->getWindowHeight());
-  // Batches stay hidden from the normal scene pass: the Application renderer
+  // Batches stay hidden from the normal scene pass: the shared renderer
   // submits them explicitly in command order with each aperture's scissor.
   renderSystem->renderScene(mScene, mCamera, glm::vec2(0.0f), getName());
-  if (mRenderer) mRenderer->render();
+  if (mRuntime) render::renderWorldCanvas(mRuntime->world(),
+      static_cast<float>(renderSystem->getWindowWidth()),
+      static_cast<float>(renderSystem->getWindowHeight()));
   if (!mDebug.enabled() || !mRuntime || !renderSystem->getWindowWidth() || !renderSystem->getWindowHeight()) return;
   renderSystem->pushProjectionMatrix();
   renderSystem->pushModelMatrix();
@@ -138,7 +141,7 @@ void StatePlay::renderImpl(mpp::RenderSystem* renderSystem,
     renderSystem->renderText("DEBUG [F11] - press a Lift Button for live variables", 9, 9, mpp::Colour::Black);
     renderSystem->renderText("DEBUG [F11] - press a Lift Button for live variables", 8, 8, mpp::Colour::White);
     if (auto readout = liftDebugReadout(mRuntime->world(), mDebug.lift())) {
-      auto const& view = render::gRenderSettings;
+      auto const& view = render::worldCanvasViewport();
       float x = readout->anchor.x * CORE_CELL_WIDTH_PIXELS * view.worldZoom + view.worldViewportX + view.xOffset;
       float y = view.worldViewportY + view.worldViewportHeight - readout->anchor.y * CORE_LEVEL_HEIGHT_PIXELS * view.worldZoom - view.yOffset;
       size_t columns = 0; for (auto const& line : readout->lines) columns = std::max(columns, line.size());

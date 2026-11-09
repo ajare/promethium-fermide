@@ -228,13 +228,17 @@ namespace
 			mWpLogger = std::make_unique<wp::Logger>();
 			mWpLogger->open((logDirectory / "promethium-fermide-resources.html").string());
 
-			mRenderSystem = std::make_unique<mpp::RenderSystem>(width, height,
+			mOwnedRenderSystem = std::make_unique<mpp::RenderSystem>(width, height,
 				mMppLogger.get());
-			mRenderResources = std::make_unique<mpp::ResourceManager>(
-				mRenderSystem.get(), mMppLogger.get());
-			mRenderSystem->createCoreResources(mRenderResources.get());
-			mResources = std::make_unique<resources::ResourceManager>(
-				mRenderSystem.get(), mRenderResources.get(), nullptr, mWpLogger.get());
+			mOwnedRenderResources = std::make_unique<mpp::ResourceManager>(
+				mOwnedRenderSystem.get(), mMppLogger.get());
+			mOwnedRenderSystem->createCoreResources(mOwnedRenderResources.get());
+			mOwnedResources = std::make_unique<resources::ResourceManager>(
+				mOwnedRenderSystem.get(), mOwnedRenderResources.get(), nullptr,
+				mWpLogger.get());
+			mRenderSystem = mOwnedRenderSystem.get();
+			mRenderResources = mOwnedRenderResources.get();
+			mResources = mOwnedResources.get();
 			// The application's Resource subclasses are declared above this
 			// module, so the host installs them here - before the manifest is
 			// scanned, because the manifest names the types it declares.
@@ -264,22 +268,54 @@ namespace
 			mScene->setClearColour({ 0.08f, 0.08f, 0.08f, 1.0f });
 		}
 
+		// A host-bound stack (#1002). The host's render system, resource
+		// managers and scene are borrowed, never owned: nothing here creates,
+		// resizes or destroys them, and no second render system is made to go
+		// beside the host's. The atlases are installed from the manager the host
+		// already scanned, so the shared renderer draws with the same artwork
+		// the host loaded rather than a second copy of it.
+		//
+		// Only `ObjectAtlas` is mandatory here. The game tolerates a missing or
+		// foreign Sector, Agent or Furniture atlas - its Map load treats an
+		// invalid artwork selection as recoverable - so those three are installed
+		// through the same tolerant path a later `selectWorld*ImageSet` takes,
+		// and a failure lands in the diagnostic and draws magenta.
+		explicit WorldRenderStack(WorldRenderStackHost const& host)
+			: mHostBound(true)
+			, mRenderSystem(&host.renderSystem)
+			, mRenderResources(&host.renderResources)
+			, mResources(&host.resources)
+			, mScene(host.scene)
+		{
+			mObjectSet = requireImageSet("ObjectAtlas");
+			installOptionalAtlas(mSectorSet, mSectorSetName, mSectorDiagnostic);
+			installOptionalAtlas(mAgentSet, mAgentSetName, mAgentDiagnostic);
+			installOptionalAtlas(mFurnitureSet, mFurnitureSetName,
+				mFurnitureDiagnostic);
+			installAtlasDefinitions();
+		}
+
 		~WorldRenderStack()
 		{
 			// Anything the host registered against the resource manager has to
 			// go before the manager does, and every GPU object here has to go
 			// before the OpenGL context does. This order is the guarantee.
-			core::setCatalogResourceResolver({});
-			mCatalogResolver.reset();
+			if (!mHostBound)
+			{
+				core::setCatalogResourceResolver({});
+				mCatalogResolver.reset();
+			}
 			for (auto& slot : mSlots) remove(slot);
 			mSlots.clear();
-			if (mScene)
+			if (!mHostBound && mScene)
 			{
 				mScene->unload();
 				mScene.reset();
 			}
 			for (auto& target : mTargets) target.reset();
 			mFontAtlas.reset();
+			// The acquisitions this stack made are released either way: that is
+			// balanced against the acquire, not against who owns the manager.
 			if (mSectorSet) mResources->releaseResource(mSectorSet);
 			if (mObjectSet) mResources->releaseResource(mObjectSet);
 			if (mFurnitureSet) mResources->releaseResource(mFurnitureSet);
@@ -288,10 +324,21 @@ namespace
 			clearObjectTileset();
 			clearAgentTileset();
 			clearFurnitureTileset();
-			mResources.reset();
-			if (mRenderSystem) mRenderSystem->destroyCoreResources();
-			mRenderResources.reset();
-			mRenderSystem.reset();
+			if (mHostBound)
+			{
+				// The host tears its own stack down, in its own order, before its
+				// OpenGL context goes. Dropping the borrowed pointers here is all
+				// this side may do.
+				mScene.reset();
+				mResources = nullptr;
+				mRenderResources = nullptr;
+				mRenderSystem = nullptr;
+				return;
+			}
+			mOwnedResources.reset();
+			if (mOwnedRenderSystem) mOwnedRenderSystem->destroyCoreResources();
+			mOwnedRenderResources.reset();
+			mOwnedRenderSystem.reset();
 			mWpLogger.reset();
 			mMppLogger.reset();
 		}
@@ -349,6 +396,66 @@ namespace
 		// The host reads its catalogue through the manager this stack created;
 		// it never owns a second one.
 		resources::ResourceManager& resources() { return *mResources; }
+
+		bool hostBound() const { return mHostBound; }
+
+		// Draws a recorded stream into whatever target the host has bound
+		// (#1002). The host's own presentation - the window, its viewport and
+		// its clear - is left alone; this pushes the orthographic World
+		// transform, submits the batches in command order under each segment's
+		// aperture, and restores the matrices it pushed.
+		void renderToHostTarget(WorldDrawList const& commandList, Vec2 origin,
+			Vec2 size)
+		{
+			auto const width = static_cast<int>(std::max(1.0f, std::ceil(size.x)));
+			auto const height = static_cast<int>(std::max(1.0f, std::ceil(size.y)));
+			auto segments = buildSegments(commandList);
+			prepareSlots(segments, origin);
+
+			mRenderSystem->pushProjectionMatrix();
+			mRenderSystem->pushModelMatrix();
+			mRenderSystem->setProjection2dOrthographic();
+			mRenderSystem->resetTransform();
+			auto const restore = [&] {
+				mRenderSystem->popModelMatrix();
+				mRenderSystem->popProjectionMatrix();
+				setNativeLineWidth(*mRenderSystem, 1.0f);
+				for (auto& slot : mSlots)
+					if (slot.sceneModel) slot.sceneModel->setVisible(false);
+			};
+			try
+			{
+				for (std::size_t index = 0; index < segments.size(); ++index)
+				{
+					auto const& segment = segments[index];
+					auto const clip = targetClip(segment.clip, origin, width, height);
+					if (clip.width == 0 || clip.height == 0) continue;
+					mRenderSystem->pushClipRectangle(clip);
+					try
+					{
+						if (segment.kind == Segment::Kind::Text)
+						{
+							for (auto const& text : segment.texts)
+								mRenderSystem->renderText(text.value,
+									static_cast<int>(text.position.x - origin.x),
+									static_cast<int>(text.position.y - origin.y),
+									colour(text.colour));
+						}
+						else
+						{
+							if (segment.kind == Segment::Kind::Lines)
+								setNativeLineWidth(*mRenderSystem, segment.lineWidth);
+							mSlots[mSegmentSlots[index]].sceneModel->render({});
+							mRenderSystem->flushVertexBuffers();
+						}
+					}
+					catch (...) { mRenderSystem->popClipRectangle(); throw; }
+					mRenderSystem->popClipRectangle();
+				}
+			}
+			catch (...) { restore(); throw; }
+			restore();
+		}
 
 		std::string selectSectorImageSet(std::string const& name)
 		{
@@ -417,6 +524,17 @@ namespace
 				throw;
 			}
 			return resource;
+		}
+
+		// A host-bound atlas the host can live without. A failure leaves the set
+		// unset - which installs an empty tileset and paints magenta - and keeps
+		// the reason for the caller instead of throwing through the host's
+		// start-up.
+		void installOptionalAtlas(resources::ResourcePtr& destination,
+			std::string const& name, std::string& diagnostic)
+		{
+			try { destination = requireImageSet(name); }
+			catch (std::exception const& error) { diagnostic = error.what(); }
 		}
 
 		// Installs the four viewport atlases as the tilesets the producer
@@ -634,7 +752,7 @@ namespace
 				slot.triangleRenderer = std::make_shared<
 					mpp::helper::TriangleBatch2DRenderer<Float, Float, Byte>>(
 						name, options, slot.triangles, texture(slot.texture),
-						mRenderSystem.get(), mRenderResources.get());
+						mRenderSystem, mRenderResources);
 				slot.triangleRenderer->create();
 				slot.sceneModel = mScene->add2dBatch(
 					slot.triangles, slot.triangleRenderer, static_cast<int>(order));
@@ -646,8 +764,8 @@ namespace
 				mpp::helper::LineBatchRendererParams options{ false, true, false };
 				slot.lineRenderer = std::make_shared<
 					mpp::helper::LineBatchRenderer<Float, Byte>>(
-						name, options, slot.lines, mRenderSystem.get(),
-						mRenderResources.get());
+						name, options, slot.lines, mRenderSystem,
+						mRenderResources);
 				slot.lineRenderer->create();
 				slot.sceneModel = mScene->add2dBatch(
 					slot.lines, slot.lineRenderer, static_cast<int>(order));
@@ -695,11 +813,20 @@ namespace
 				std::max(0, bottom - top) };
 		}
 
+		// Everything the stack draws through goes via these three. In the
+		// editor-shaped stack they address the owners just beneath them; in a
+		// host-bound stack they address the host's objects and the owners stay
+		// null, which is what keeps the destructor from tearing down a stack it
+		// does not own (#1002).
+		bool mHostBound{ false };
+		mpp::RenderSystem* mRenderSystem{};
+		mpp::ResourceManager* mRenderResources{};
+		resources::ResourceManager* mResources{};
 		std::unique_ptr<mpp::Logger> mMppLogger;
 		std::unique_ptr<wp::Logger> mWpLogger;
-		std::unique_ptr<mpp::RenderSystem> mRenderSystem;
-		std::unique_ptr<mpp::ResourceManager> mRenderResources;
-		std::unique_ptr<resources::ResourceManager> mResources;
+		std::unique_ptr<mpp::RenderSystem> mOwnedRenderSystem;
+		std::unique_ptr<mpp::ResourceManager> mOwnedRenderResources;
+		std::unique_ptr<resources::ResourceManager> mOwnedResources;
 		std::shared_ptr<core::ManifestCatalogResolver> mCatalogResolver;
 		resources::ResourcePtr mSectorSet;
 		std::string mSectorSetName{"SectorAtlas"};
@@ -734,6 +861,12 @@ void createWorldRenderStack(std::filesystem::path const& resourceDirectory,
 		drawableHeight, registerResourceTypes);
 }
 
+void createWorldRenderStack(WorldRenderStackHost const& host)
+{
+	if (gStack) throw std::logic_error("The World render stack already exists");
+	gStack = std::make_unique<WorldRenderStack>(host);
+}
+
 void resizeWorldRenderStack(std::size_t, std::size_t)
 {
 	// Offscreen targets follow the canvas. MPP's window dimensions are used only
@@ -759,7 +892,20 @@ OffscreenTargetId submitWorldCommands(WorldDrawList const& commands,
 	Vec2 canvasPosition, Vec2 canvasSize, WorldCanvas canvas)
 {
 	if (!gStack) throw std::runtime_error("The World render stack is not initialised");
+	if (gStack->hostBound())
+		throw std::runtime_error("A host-bound World render stack draws into the host's "
+			"target; it owns no offscreen canvas to submit to.");
 	return gStack->render(commands, canvasPosition, canvasSize, canvas);
+}
+
+void renderWorldCommandsToHostTarget(WorldDrawList const& commands,
+	Vec2 canvasPosition, Vec2 canvasSize)
+{
+	if (!gStack) throw std::runtime_error("The World render stack is not initialised");
+	if (!gStack->hostBound())
+		throw std::runtime_error("Only a host-bound World render stack draws into the "
+			"host's target; an owning stack submits to its own offscreen canvas.");
+	gStack->renderToHostTarget(commands, canvasPosition, canvasSize);
 }
 
 std::string selectWorldSectorImageSet(std::string const& name)
