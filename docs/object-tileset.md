@@ -130,6 +130,46 @@ ten tiles registered at full-cell drawn size, a three-cell sofa rendering from
 tile across two cells and naming three tiles in all, and each refusal at the
 loader seam.
 
+## AgentAtlasNew and the appearance-keyed grid
+
+`resources/textures/agents-new.tileset.yaml` is the version 2 authored tileset
+behind `AgentAtlasNew`: four Agent appearances, each carrying all five Poses,
+twenty tiles on the 128x320 grid at 640x1280. `scripts/generate_agent_atlas_new.py`
+generates its sheet and its manifest entries the same way the other `New` atlases'
+does; all of them share `scripts/atlas_new.py`.
+
+The atlas is keyed by distinct **appearance**, not by Agent type. Human and Remote
+operator are one appearance, so both name the `human-*` tiles and neither gets its
+own copy of five tiles; a new type that looks like an existing one names that
+appearance's row, and only a genuinely new look costs five new tiles. The fourth
+row is the generic `agent` appearance, the fallback a type with no artwork of its
+own names. It is a row like any other, so the fallback is drawn by the same path
+as the real appearances rather than by a special case in the renderer. Every
+appearance gets all five Poses authored even where that appearance can never
+perform them - a Cleaning Bot never Lies down, an Android never Crawls - so the
+grid stays uniform and an artist always knows which cell holds which Pose.
+
+Appearance is the row and Pose is the column, and that is forced rather than
+chosen. Lying and Crawling are 144px wide - more than one 128px cell - and a
+content rectangle must start inside its own cell and fit inside the image, so a
+row of four over-wide tiles cannot be laid out in four columns at all: the last
+one runs off the right edge. With the appearances down the rows, every over-wide
+Pose has a neighbouring cell to overhang into. The column order is standing,
+sitting, lying, crawling, crouching rather than the domain's canonical Pose order
+for the same reason: the tile following each over-wide one is inset by exactly its
+overhang - 16px after Lying, 32px after Crawling - so no two tiles' art ever
+overlaps, and the last column is a one-cell-wide tile, which is what keeps the
+widest tile inside the image.
+
+Every tile is authored `tintable: true`. Agent art is grayscale, and the vertex
+tint is the resolved Agent colour - the Agent's own colour, a Colour tag's
+override, or the selection gold - which multiplies into it faithfully. The
+`render` smoke module's `agentAtlasNew/*` checks prove the twenty tiles
+registered as a full cross product, two types sharing one row, the generic row
+standing in for a type with no artwork, the Agent colour and its tag override and
+the selection highlight all still driving the tint, and the over-wide Lying and
+Crawling tiles resolving across adjacent cells rather than being cut back to one.
+
 ## The install seam
 
 `installAtlasTiles()` in `pf-render` is the one place the two authorities meet,

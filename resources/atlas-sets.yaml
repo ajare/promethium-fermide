@@ -50,3 +50,6 @@ sets:
   SectorAtlasNew:
     kind: sector
     tileset: textures/sectors-new.tileset.yaml
+  AgentAtlasNew:
+    kind: object
+    tileset: textures/agents-new.tileset.yaml

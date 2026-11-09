@@ -82,6 +82,12 @@ set(names
     sectorAtlasNew/loaderRefusesASurfaceOffsetFromItsCell
     sectorAtlasNew/loaderAcceptsAConformingSet
     sectorAtlasNew/anOlderAtlasStillBorrowsForATypeItHasNoTileFor
+    agentAtlasNew/twentyTilesAreRegistered
+    agentAtlasNew/twoTypesNamingOneAppearanceShareTheirTiles
+    agentAtlasNew/genericAppearanceIsTheFallbackForATypeWithNoArtwork
+    agentAtlasNew/tintFollowsTheAuthoredFlagNotTheName
+    agentAtlasNew/agentColourTagOverrideAndSelectionStillDriveTheTint
+    agentAtlasNew/overWidePoseTilesResolveAcrossAdjacentCells
     walkwayArtwork/manifestPairIsGeneratedFromTheTileset
     walkwayArtwork/everyAtlasIsCoveredByItsAuthoredTileset
     walkwayArtwork/installSeparatesPixelsFromSemantics

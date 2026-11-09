@@ -266,6 +266,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/render/WalkwayArtwork.cpp` | Walkway artwork offset, atlas install seam and manifest-pair checks | `pf-smoke-render` |
 | `smoke/render/FurnitureAtlasNew.cpp` | FurnitureAtlasNew role-tile registration, multi-cell render and catalogue loader refusals | `pf-smoke-render` |
 | `smoke/render/SectorAtlasNew.cpp` | SectorAtlasNew full-cell surface registration, per-type surface resolution, boundary-strip removal and tileset loader refusals | `pf-smoke-render` |
+| `smoke/render/AgentAtlasNew.cpp` | AgentAtlasNew appearance-keyed tile registration, shared and generic fallback rows, authored-flag tint and over-wide Pose cell resolution | `pf-smoke-render` |
 | `smoke/render/AccessPanels.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/render/Airlocks.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/editor/BoothWindows.cpp` | module-owned | `pf-smoke-editor` |

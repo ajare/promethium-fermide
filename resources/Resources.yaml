@@ -107,6 +107,50 @@ Resources:
               - { name: "human-crawling", x: "192", y: "952", width: "72", height: "8" }
               - { name: "robot-standing", x: "288", y: "888", width: "26", height: "72" }
               - { name: "cleaning-bot-standing", x: "240", y: "912", width: "26", height: "24" }
+    # The replacement Agent atlas, sized for the 128x320 World cell
+    # (#1018). Its render semantics are authored in
+    # resources/textures/agents-new.tileset.yaml: four appearances, each
+    # carrying all five Poses, keyed by appearance rather than by Agent
+    # type. The old AgentAtlas stays registered and canonical until nothing
+    # references it.
+    - type: "Image"
+      name: "AgentAtlasNewImage"
+      location: "textures/agents-new.png"
+      Option:
+        - { name: "filtering", value: "none" }
+        - { name: "uv-style", value: "atlas" }
+    - type: "ImageSet"
+      name: "AgentAtlasNew"
+      DependentResources:
+        DependentResource:
+          id: "Image"
+          ref: "AgentAtlasNewImage"
+      Definitions:
+        Definition:
+          Images:
+            Image:
+              # GENERATED from resources/textures/agents-new.tileset.yaml by scripts/generate_agent_atlas_new.py. Do not hand-edit.
+              - { name: "agent-crawling", x: "400", y: "1264", width: "144", height: "16" }
+              - { name: "agent-crouching", x: "544", y: "1194", width: "52", height: "86" }
+              - { name: "agent-lying", x: "256", y: "1228", width: "144", height: "52" }
+              - { name: "agent-sitting", x: "128", y: "1194", width: "52", height: "86" }
+              - { name: "agent-standing", x: "0", y: "1136", width: "52", height: "144" }
+              - { name: "android-crawling", x: "400", y: "624", width: "144", height: "16" }
+              - { name: "android-crouching", x: "544", y: "554", width: "52", height: "86" }
+              - { name: "android-lying", x: "256", y: "588", width: "144", height: "52" }
+              - { name: "android-sitting", x: "128", y: "554", width: "52", height: "86" }
+              - { name: "android-standing", x: "0", y: "496", width: "52", height: "144" }
+              - { name: "cleaning-bot-crawling", x: "400", y: "944", width: "144", height: "16" }
+              - { name: "cleaning-bot-crouching", x: "544", y: "874", width: "52", height: "86" }
+              - { name: "cleaning-bot-lying", x: "256", y: "908", width: "144", height: "52" }
+              - { name: "cleaning-bot-sitting", x: "128", y: "874", width: "52", height: "86" }
+              - { name: "cleaning-bot-standing", x: "0", y: "816", width: "52", height: "144" }
+              - { name: "human-crawling", x: "400", y: "304", width: "144", height: "16" }
+              - { name: "human-crouching", x: "544", y: "234", width: "52", height: "86" }
+              - { name: "human-lying", x: "256", y: "268", width: "144", height: "52" }
+              - { name: "human-sitting", x: "128", y: "234", width: "52", height: "86" }
+              - { name: "human-standing", x: "0", y: "176", width: "52", height: "144" }
+              # END GENERATED
     - type: "Image"
       name: "DoctorFemale1AtlasImage"
       location: "textures/doctor-female-1-320.png"

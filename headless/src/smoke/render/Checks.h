@@ -37,6 +37,7 @@ namespace render_smoke
 	void registerObjectAtlas(std::vector<smoke::Check>& checks);
 	void registerFurnitureAtlasNew(std::vector<smoke::Check>& checks);
 	void registerSectorAtlasNew(std::vector<smoke::Check>& checks);
+	void registerAgentAtlasNew(std::vector<smoke::Check>& checks);
 	void registerWalkwayArtwork(std::vector<smoke::Check>& checks);
 	void registerBoothWindows(std::vector<smoke::Check>& checks);
 	void registerAgentPoses(std::vector<smoke::Check>& checks);

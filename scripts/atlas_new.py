@@ -98,6 +98,7 @@ def render_placeholder(spec: AtlasSpec, tileset: dict) -> Image.Image:
     of the geometry recorded in the tileset.
     """
     width, height = tileset["size"]
+    tile_width, tile_height = tileset["tile_size"]
     sheet = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(sheet)
     for name, x, y, region_width, region_height in resolve_regions(tileset):
@@ -109,7 +110,15 @@ def render_placeholder(spec: AtlasSpec, tileset: dict) -> Image.Image:
         draw.rectangle([x, y, x + region_width - 1, min(y + 1, y + region_height - 1)],
                        fill=edge)
         if spec.label_tiles:
-            draw.text((x + 6, y + 6), name, fill=(52, 58, 70, 255))
+            # The label goes on the cell, not on the content. A tile that
+            # fills its cell - which every other labelled sheet is made of -
+            # reads the same either way, and a tile that does not leaves its
+            # cell's own space free to be written on. Labelling the content
+            # instead puts a long name on top of the neighbouring tile's
+            # art, which is the one thing a sheet should never do.
+            column, row = tileset["sprites"][name]["cell"]
+            draw.text((column * tile_width + 6, row * tile_height + 6), name,
+                     fill=(52, 58, 70, 255))
     return sheet
 
 

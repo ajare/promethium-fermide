@@ -92,14 +92,25 @@ ObjectTileset installAtlases(std::filesystem::path const& directory) {
     else sectors.surfaces.emplace(name, region);
   }
   auto objectsSize = pngSize(directory / resource("ObjectAtlasImage")["location"].as<std::string>());
+  // Tintability is an authored fact, never an inferred one. The tileset behind
+  // the Objects atlas is the only source: the rule that used to derive it here
+  // by matching a tile's name against `agent`, `human-*`, `robot-standing`
+  // and `cleaning-bot-standing` is deleted (#1018). A new Agent type can no
+  // longer become tintable by accident of what it is called, and a tile named
+  // without a hint can no longer fail to be.
+  auto const authored = ObjectTileset::load(directory / "textures/objects.tileset.yaml");
+  auto tintable = [&](std::string const& name) {
+    auto const found = authored.sprites.find(name);
+    require(found != authored.sprites.end(),
+        "The authored tileset defines no tile the atlas declares");
+    return found->second.tintable;
+  };
   ObjectTileset objects;
   objects.width = objectsSize.first; objects.height = objectsSize.second;
   for (auto image : resource("ObjectAtlas")["Definitions"]["Definition"]["Images"]["Image"]) {
     auto name = image["name"].as<std::string>();
-    bool tintable = name == "agent" || name == "marker" || name.starts_with("human-") ||
-                    name == "robot-standing" || name == "cleaning-bot-standing";
     objects.sprites.emplace(name, ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(),
-        image["width"].as<int>(), image["height"].as<int>()}, tintable});
+        image["width"].as<int>(), image["height"].as<int>()}, tintable(name)});
   }
   ObjectTileset agents;
   agents.width = objectsSize.first; agents.height = objectsSize.second;
@@ -107,7 +118,7 @@ ObjectTileset installAtlases(std::filesystem::path const& directory) {
     auto name = image["name"].as<std::string>();
     require(!objects.sprites.contains(name), "Agent tiles must be removed from ObjectAtlas");
     agents.sprites.emplace(name, ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(),
-        image["width"].as<int>(), image["height"].as<int>()}, true});
+        image["width"].as<int>(), image["height"].as<int>()}, tintable(name)});
   }
   require(agents.sprites.size() == 8, "AgentAtlas must contain all eight extracted tiles");
   ObjectTileset furniture;

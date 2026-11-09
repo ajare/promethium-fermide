@@ -66,10 +66,16 @@ std::optional<Vec2> agentSpriteSize(char const* name)
 bool drawAgentSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b, PackedColourValue tint)
 {
     if (!agentSpriteSize(name)) return false;
-    auto const& r = agents.sprites.at(name).region;
+    auto const& sprite = agents.sprites.at(name);
+    auto const& r = sprite.region;
     Vec2 uv0{(r.x + .5f) / agents.width, (r.y + .5f) / agents.height};
     Vec2 uv1{(r.x + r.width - .5f) / agents.width, (r.y + r.height - .5f) / agents.height};
-    list->AddImage(WorldDrawList::Texture::AgentAtlas, a, b, uv0, uv1, tint);
+    // Whether the resolved Agent colour reaches the sheet at all is the tile's
+    // authored fact, exactly as it is for an Object sprite. The Agent's colour,
+    // its Colour tags and the selection gold are still resolved by the caller;
+    // `tintable` says whether this artwork takes a tint (#1018).
+    list->AddImage(WorldDrawList::Texture::AgentAtlas, a, b, uv0, uv1,
+        sprite.tintable ? tint : White);
     return true;
 }
 void setFurnitureTileset(ObjectTileset tileset, TextureId texture)

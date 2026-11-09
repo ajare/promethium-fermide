@@ -1,0 +1,204 @@
+# Authored tileset for the AgentAtlasNew set (#1018).
+#
+# A version 2 tileset declares, per tile, the three render semantics a
+# version 1 file left the renderer to guess: the render offset it draws at,
+# the drawn size it draws at, and whether it is tintable. Offsets and sizes
+# are World units, not pixels - one World unit of authored art is one
+# authored tile.
+#
+# The `ImageSet` entries the application manifest declares for this atlas
+# are generated from this file by `scripts/generate_agent_atlas_new.py`
+# and are checked against it by the render smoke module, so the two cannot
+# drift. Pixel regions are cut from `image` in top-left-origin pixels; the
+# semantics below are World units and never pixels.
+#
+# ## What this set is
+#
+# Agents: four appearances, each carrying all five Poses. Twenty tiles, the
+# full cross product, with no gaps to author around later.
+#
+# The atlas is keyed by distinct *appearance*, not by Agent type. Human and
+# Remote operator are one appearance, so both name the `human-*` tiles and
+# neither gets its own copy of five tiles. A new type that looks like an
+# existing one names that appearance's tiles and shares them; only a
+# genuinely new look costs five new tiles.
+#
+# The fourth appearance is the generic `agent` one, retained as the fallback
+# a type with no artwork of its own names. It is a row like any other, so the
+# fallback is drawn by the same path as the real appearances rather than by a
+# special case in the renderer.
+#
+# Every appearance gets all five Poses authored even where that appearance
+# can never perform them - a Cleaning Bot never Lies down, an Android never
+# Crawls - so the grid stays uniform and an artist always knows which cell
+# holds which Pose.
+#
+# ## The grid, and why the Poses are the columns
+#
+# The authored grid is 128 x 320: one World cell at the size the World is
+# now drawn. The sheet is 5 columns x 4 rows, so the image is 640 x 1280.
+#
+# Appearance is the row and Pose is the column. That is forced, not chosen.
+# Lying and Crawling are 144px wide - more than one 128px cell - and a
+# content rectangle must start inside its own cell and fit inside the image,
+# so a row of four over-wide tiles cannot be laid out in four columns at all:
+# the last one runs off the right edge. Putting the four appearances down the
+# rows and the five Poses across the columns is the orientation that leaves
+# every over-wide Pose a neighbouring cell to overhang into.
+#
+# The column order is standing, sitting, lying, crawling, crouching rather
+# than the domain's canonical Pose order for the same reason. The two
+# over-wide Poses sit at columns 2 and 3, and the tile that follows each one
+# is inset by exactly its overhang - 16px after Lying, 32px after Crawling -
+# so no two tiles' art ever overlaps. The last column is a one-cell-wide
+# tile, which is what keeps the widest tile inside the image.
+#
+# ## Why every tile is tintable
+#
+# Agent art is grayscale. The vertex tint is the resolved Agent colour -
+# the Agent's own colour, a Colour tag's override, or the selection gold -
+# and it multiplies into the sheet faithfully. `tintable: true` says that
+# out loud. It is the only place tintability is stated: nothing in the
+# renderer reads a tile's name to decide whether to tint it, which is what
+# let a new Agent type become tintable, or stop being tintable, by accident
+# of what it was called.
+
+version: 2
+image: agents-new.png
+size: [640, 1280]
+tile_size: [128, 320]
+sprites:
+  # Content is authored relative to its own cell. Every tile is bottom-
+  # anchored in the 320px cell, so the Pose's feet sit on the cell floor.
+
+  # Row 0: the Human appearance, shared by every type that looks Human.
+  human-standing:
+    cell: [0, 0]
+    content: [0, 176, 52, 144]
+    offset: [0.0, 0.0]
+    drawn_size: [0.40625, 0.45]
+    tintable: true
+  human-sitting:
+    cell: [1, 0]
+    content: [0, 234, 52, 86]
+    offset: [0.0, 0.0]
+    drawn_size: [0.40625, 0.26875]
+    tintable: true
+  # 144px wide: it starts at its own cell's left edge and overhangs 16px
+  # into the Crawling cell, which is authored with that gap.
+  human-lying:
+    cell: [2, 0]
+    content: [0, 268, 144, 52]
+    offset: [0.0, 0.0]
+    drawn_size: [1.125, 0.1625]
+    tintable: true
+  # Also over-wide, inset 16px to clear the Lying overhang; it in turn
+  # overhangs 32px into the Crouching cell.
+  human-crawling:
+    cell: [3, 0]
+    content: [16, 304, 144, 16]
+    offset: [0.0, 0.0]
+    drawn_size: [1.125, 0.05]
+    tintable: true
+  human-crouching:
+    cell: [4, 0]
+    content: [32, 234, 52, 86]
+    offset: [0.0, 0.0]
+    drawn_size: [0.40625, 0.26875]
+    tintable: true
+
+  # Row 1: the Android appearance.
+  android-standing:
+    cell: [0, 1]
+    content: [0, 176, 52, 144]
+    offset: [0.0, 0.0]
+    drawn_size: [0.40625, 0.45]
+    tintable: true
+  android-sitting:
+    cell: [1, 1]
+    content: [0, 234, 52, 86]
+    offset: [0.0, 0.0]
+    drawn_size: [0.40625, 0.26875]
+    tintable: true
+  android-lying:
+    cell: [2, 1]
+    content: [0, 268, 144, 52]
+    offset: [0.0, 0.0]
+    drawn_size: [1.125, 0.1625]
+    tintable: true
+  android-crawling:
+    cell: [3, 1]
+    content: [16, 304, 144, 16]
+    offset: [0.0, 0.0]
+    drawn_size: [1.125, 0.05]
+    tintable: true
+  android-crouching:
+    cell: [4, 1]
+    content: [32, 234, 52, 86]
+    offset: [0.0, 0.0]
+    drawn_size: [0.40625, 0.26875]
+    tintable: true
+
+  # Row 2: the Cleaning Bot appearance.
+  cleaning-bot-standing:
+    cell: [0, 2]
+    content: [0, 176, 52, 144]
+    offset: [0.0, 0.0]
+    drawn_size: [0.40625, 0.45]
+    tintable: true
+  cleaning-bot-sitting:
+    cell: [1, 2]
+    content: [0, 234, 52, 86]
+    offset: [0.0, 0.0]
+    drawn_size: [0.40625, 0.26875]
+    tintable: true
+  cleaning-bot-lying:
+    cell: [2, 2]
+    content: [0, 268, 144, 52]
+    offset: [0.0, 0.0]
+    drawn_size: [1.125, 0.1625]
+    tintable: true
+  cleaning-bot-crawling:
+    cell: [3, 2]
+    content: [16, 304, 144, 16]
+    offset: [0.0, 0.0]
+    drawn_size: [1.125, 0.05]
+    tintable: true
+  cleaning-bot-crouching:
+    cell: [4, 2]
+    content: [32, 234, 52, 86]
+    offset: [0.0, 0.0]
+    drawn_size: [0.40625, 0.26875]
+    tintable: true
+
+  # Row 3: the generic appearance, the fallback a type with no artwork names.
+  agent-standing:
+    cell: [0, 3]
+    content: [0, 176, 52, 144]
+    offset: [0.0, 0.0]
+    drawn_size: [0.40625, 0.45]
+    tintable: true
+  agent-sitting:
+    cell: [1, 3]
+    content: [0, 234, 52, 86]
+    offset: [0.0, 0.0]
+    drawn_size: [0.40625, 0.26875]
+    tintable: true
+  agent-lying:
+    cell: [2, 3]
+    content: [0, 268, 144, 52]
+    offset: [0.0, 0.0]
+    drawn_size: [1.125, 0.1625]
+    tintable: true
+  agent-crawling:
+    cell: [3, 3]
+    content: [16, 304, 144, 16]
+    offset: [0.0, 0.0]
+    drawn_size: [1.125, 0.05]
+    tintable: true
+  agent-crouching:
+    cell: [4, 3]
+    content: [32, 234, 52, 86]
+    offset: [0.0, 0.0]
+    drawn_size: [0.40625, 0.26875]
+    tintable: true
