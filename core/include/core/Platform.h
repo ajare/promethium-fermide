@@ -4,14 +4,23 @@
 // APPLIB_API and WP_*_API export-macro convention already established in
 // this repo.
 //
-// promethium-fermide-core is a STATIC library today. The macro is declared
-// now, ahead of any linkage change, so the export surface is explicit and
-// compile-verified before the risk is taken (#961, part of #960):
+// promethium-fermide-core is a SHARED library (#962, part of #960) so that
+// exactly one copy of it exists in any process: core performs dynamic_cast
+// across Graph.cpp, Agent.cpp, Pathing.cpp and WorldPlayerControl.cpp, and
+// pf-render re-performs casts on core objects it never created. With two copies
+// of core in one binary, a cast made in one module on an object created in the
+// other silently returns null; one shared core removes that hazard by
+// construction.
 //
-//   * building core defines PF_CORE_DLL_EXPORT privately, so PF_CORE_API
-//     resolves to an export;
-//   * every consumer compiles without that definition, so PF_CORE_API
-//     resolves to an import.
+// PF_CORE_API (#961) is what makes that shared linkage work. It resolves:
+//
+//   * to an export when core itself is compiled, which defines
+//     PF_CORE_DLL_EXPORT privately;
+//   * to an import for every consumer, which compiles without it.
+//
+// On Windows only annotated symbols cross the DLL boundary, so the annotation is
+// what makes core linkable at all; on Linux it keeps the exported surface
+// explicit.
 //
 // `template` and `inline` members are deliberately left header-only and are
 // not annotated: they are instantiated in the including translation unit and
