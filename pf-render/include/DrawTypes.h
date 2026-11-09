@@ -2,9 +2,15 @@
 
 #include <cstdint>
 
-namespace pf::application::render {
-// Application-local drawing types. Neither the command stream nor its GPU
-// renderer depends on an ImGui context, header version or linked runtime.
+namespace pf::render {
+// The project's single drawing vocabulary, owned by the shared renderer.
+// Neither the command stream nor any consumer of it depends on an ImGui
+// context, header version or linked runtime - which is exactly why this
+// set exists instead of the producer spelling its values ImVec2, ImU32,
+// ImVec4 and ImDrawFlags (#995, ADR 0010).
+//
+// A packed colour keeps R in the low byte and A in the high byte, so it is
+// the same layout MPP and ImGui both consume.
 struct Vec2 {
   float x{}, y{};
   constexpr Vec2(float x = 0, float y = 0) : x(x), y(y) {}
@@ -24,4 +30,4 @@ constexpr PackedColourValue packColour(int r, int g, int b, int a = 255) {
          (static_cast<PackedColourValue>(a) << AlphaShift);
 }
 inline constexpr auto White = packColour(255, 255, 255);
-} // namespace pf::application::render
+} // namespace pf::render

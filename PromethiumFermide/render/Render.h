@@ -8,7 +8,7 @@
 #include <optional>
 #include <vector>
 
-#include "DrawTypes.h"
+#include "ApplicationDrawTypes.h"
 #include "WorldDrawList.h"
 #include "PackedColour.h"
 

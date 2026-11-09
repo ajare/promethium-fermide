@@ -4,6 +4,14 @@
 # tilesets, location-plan rendering and viewport zoom. CPU-only - it draws
 # into a supplied device and needs no window, which is what lets the Render
 # smoke modules exercise it headlessly.
+#
+# This module also owns the project's single drawing vocabulary
+# (include/DrawTypes.h: Vec2, Vec4, PackedColourValue, DrawFlags,
+# packColour, White). It is deliberately ImGui-free so a consumer never
+# needs an ImGui context, header version or linked runtime to render a
+# World (#995). The application aliases those types rather than redefining
+# them (#996); this module's own producer still spells its ImGui types and
+# moves onto them in a later step.
 
 cmake_minimum_required(VERSION 3.25)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)

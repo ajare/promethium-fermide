@@ -1,7 +1,7 @@
 #pragma once
 
 #include <algorithm>
-#include "DrawTypes.h"
+#include "ApplicationDrawTypes.h"
 
 namespace pf::application::render {
 // Keep the editor's convenient colour notation without depending on an ImGui
