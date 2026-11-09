@@ -55,9 +55,9 @@ namespace
 					"Required sample artwork must resolve a full World tile");
 			}
 		auto const human = tiles.sprites.at(core::bundledHumanBaseline().poses.at(core::Pose::Standing).imageTile);
-		setAgentTileset(tiles, reinterpret_cast<ImTextureID>(1));
-		setFurnitureTileset(tiles, reinterpret_cast<ImTextureID>(1));
-		setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
+		setAgentTileset(tiles, static_cast<TextureId>(1));
+		setFurnitureTileset(tiles, static_cast<TextureId>(1));
+		setObjectTileset(std::move(tiles), static_cast<TextureId>(1));
 		RenderWorldScope scope(world);
 		for (auto style : {LayerRenderStyle::Solid, LayerRenderStyle::Aperture, LayerRenderStyle::Wireframe, LayerRenderStyle::Hidden})
 		{
@@ -119,10 +119,10 @@ namespace
 						tiles.sprites.emplace(image["name"].as<std::string>(), ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(), image["width"].as<int>(), image["height"].as<int>()}, false});
 		require(tiles.sprites.contains("chair"), "Required chair Image-set artwork is missing");
 		auto const human = tiles.sprites.at(core::bundledHumanBaseline().poses.at(core::Pose::Standing).imageTile);
-		setAgentTileset(tiles, reinterpret_cast<ImTextureID>(1));
-		setFurnitureTileset(tiles, reinterpret_cast<ImTextureID>(1));
+		setAgentTileset(tiles, static_cast<TextureId>(1));
+		setFurnitureTileset(tiles, static_cast<TextureId>(1));
 		auto const originalFurniture = tiles;
-		setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
+		setObjectTileset(std::move(tiles), static_cast<TextureId>(1));
 		auto world = std::make_shared<core::World>("Chair rendering", 8, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 8, 1);
 		world->attachFurnitureCatalogue(lua ? "objects.furniture.lua" : "chair.furniture.lua",
@@ -174,7 +174,7 @@ namespace
 		{
 			ObjectTileset alternate; alternate.width = 600; alternate.height = 256;
 			if (available) alternate.sprites.emplace("chair", ObjectSprite{{8, 63, 71, 193}, false});
-			setFurnitureTileset(std::move(alternate), reinterpret_cast<ImTextureID>(1));
+			setFurnitureTileset(std::move(alternate), static_cast<TextureId>(1));
 			WorldDrawList drawing({{0,0},{800,600}});
 			renderSector(world->getSector(room), 0, LayerRenderStyle::Solid, false, ImColor(192,192,255), &drawing);
 			unsigned count = 0;
@@ -202,7 +202,7 @@ namespace
 						: triangle->texture == WorldDrawList::Texture::None && triangle->colour == packColour(255,0,255,255))) ++previewCount;
 			require(previewCount == 2, "Furniture placement preview ignored selected artwork/fallback");
 		}
-		setFurnitureTileset(originalFurniture, reinterpret_cast<ImTextureID>(1));
+		setFurnitureTileset(originalFurniture, static_cast<TextureId>(1));
 		world->setFurnitureImageSetResourceName("FurnitureAtlas");
 		gUISettings.visibleLayer = 0;
 		check(LayerRenderStyle::Solid, {{0,0},{800,600}}, 4, true);

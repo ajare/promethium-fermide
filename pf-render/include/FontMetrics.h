@@ -23,6 +23,15 @@ enum class WorldFont
 	Icons		// Its icon face: Marker glyphs and object icons.
 };
 
+// The glyph the producer draws for a Marker, as the UTF-8 encoding of the
+// code point the application's icon face maps to a map marker (FontAwesome 5
+// U+F3C5). The shared renderer names the glyph it needs instead of
+// including an icon-font header belonging to the editor's UI layer (#1003);
+// whichever face an application installs for WorldFont::Icons is what has to
+// answer for this code point, exactly as the editor's ImGui-backed metrics
+// implementation does today.
+inline constexpr char const* MarkerIconGlyph = "\xef\x8f\x85";
+
 // The font request a recorded Text command carries.
 //
 // `size` is the glyph size in pixels the producer has chosen for itself.

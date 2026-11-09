@@ -1,5 +1,10 @@
 #include "AgentPaths.h"
 #include "ImGuiContext.h"
+// This check drives a live CPU ImGui context of its own, because the font
+// metrics the headless tier installs are the editor's ImGui-backed ones.
+// It used to pick the include up from the renderer's headers; the shared
+// renderer no longer carries one (#1003).
+#include "imgui/imgui.h"
 
 #include "Render.h"
 #include "LocationPlan.h"

@@ -644,7 +644,7 @@ namespace
 		{
 			ObjectTileset artwork; artwork.width = 600; artwork.height = 256;
 			if (available) artwork.sprites.emplace("chair", ObjectSprite{{8,63,71,193}, false});
-			setFurnitureTileset(std::move(artwork), reinterpret_cast<ImTextureID>(1));
+			setFurnitureTileset(std::move(artwork), static_cast<TextureId>(1));
 			ImGui::NewFrame();
 			WorldDrawList row({{0,0},{1600,1000}});
 			plan.renderPaletteRow(world, row, {20,430}, false);

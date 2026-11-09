@@ -16,7 +16,7 @@ int main(int argc, char** argv)
         auto tileset = SectorTileset::load(argv[1]);
         if (!std::filesystem::is_regular_file(tileset.image))
             throw std::runtime_error("Atlas image missing");
-        setSectorTileset(tileset, (ImTextureID)(intptr_t)123);
+        setSectorTileset(tileset, static_cast<TextureId>(123));
         ImDrawList list(ImGui::GetDrawListSharedData());
         list._ResetForNewFrame();
         list.PushClipRect({0, 0}, {1000, 1000});
@@ -83,7 +83,7 @@ int main(int argc, char** argv)
             || maxX < boxWidth - 1 - edgeFringe || maxY < boxHeight - 1 - edgeFringe)
             throw std::runtime_error("Shuttle carriage artwork does not fill its authored bounding box");
 
-        setObjectTileset(objects, (ImTextureID)(intptr_t)456);
+        setObjectTileset(objects, static_cast<TextureId>(456));
         ImU32 const overrideColour = IM_COL32(21, 173, 91, 255);
         for (auto const& [name, sprite] : objects.sprites) {
             int const start = list.VtxBuffer.Size;

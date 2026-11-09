@@ -9,8 +9,18 @@ expand to fill their cell.
 whether its RGB can be tinted. Content UVs map to the renderer's existing physical
 bounds; alpha padding never changes collision, selection or visual sizes.
 The Agent and Marker sprites have grayscale RGB. Agents use the existing resolved
-Agent colour, including tag overrides and selection, as the ImGui vertex tint.
-Existing height scaling, horizontal centring and foot position are preserved.
+Agent colour, including tag overrides and selection, as the vertex tint carried on
+the recorded command. Existing height scaling, horizontal centring and foot
+position are preserved.
+
+There is one object renderer. `pf-render` loads the definition, installs the atlas
+as a Willpower `ImageSet` resource, and emits the sprite quads into the World
+command stream; the editor and the shipped game both draw from that same code and
+see the same result. Neither application keeps an object renderer of its own, and
+the renderer itself contains no ImGui code - the tint is a packed colour on the
+command, not an ImGui vertex type. See
+[ADR 0010](adr/0010-render-world-canvases-with-mpp-and-manage-assets-as-resources.md)
+and the `pf-render` module header for the boundary this sits behind.
 
 Supported sprites:
 
@@ -31,10 +41,10 @@ Bulkhead Doors and Force Bridges remain entirely primitive-rendered. Other
 transport geometry and editor overlays are unchanged. Headless tests without a
 texture retain the primitive/font fallback.
 
-The GUI loads and validates both the definition and PNG beside its executable,
-under `textures/`. CMake deploys them even on builds without C++ changes. Missing
-or invalid assets cause a controlled startup error, and the GL texture is released
-before the context is destroyed.
+The shared renderer loads and validates both the definition and PNG beside the
+executable, under `textures/`. CMake deploys them even on builds without C++
+changes. Missing or invalid assets cause a controlled startup error, and the GL
+texture is released before the context is destroyed.
 
 The original generated art is in `resources/textures/source/objects-generated.png`.
 Run `python3 scripts/pack_object_atlas.py` (requires Pillow) to reproduce the packed

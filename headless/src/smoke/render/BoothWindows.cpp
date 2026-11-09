@@ -256,7 +256,7 @@ namespace
 		auto shutterRegion=tiles.sprites.at("booth-window-shutter").region;
 		auto glassRegion=tiles.sprites.at("window-clear").region;
 		require(shutterRegion.width==42 && shutterRegion.height==38, "Shutter is not a distinct inner tile");
-		setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
+		setObjectTileset(std::move(tiles), static_cast<TextureId>(1));
 		auto near=[](float a,float b) { return std::abs(a-b)<0.001f; };
 		// The supplied frame is 52x48, with a five-pixel inset on each edge.
 		float const left=3.1f*64, right=3.9f*64, top=720, bottom=768;

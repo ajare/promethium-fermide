@@ -1006,7 +1006,7 @@ namespace
 		SectorTileset station;
 		station.width = 512; station.height = 320;
 		station.surfaces.emplace("corridor", SectorTileRegion{0, 0, 128, 320});
-		setSectorTileset(std::move(station), reinterpret_cast<ImTextureID>(1));
+		setSectorTileset(std::move(station), static_cast<TextureId>(1));
 		WorldDrawList tiles({{0, 0}, {1000, 1000}});
 		drawSectorTileSurface("corridor", &tiles, {0, 0}, {256, 240}, White, 2.f);
 		require(tiles.commands().size() == 4, "Station artwork must repeat once per World cell at zoom 2");
@@ -1045,7 +1045,7 @@ namespace
 		tileset.height = 100;
 		tileset.surfaces.emplace("stairwell", SectorTileRegion{ 0, 0, 10, 10 });
 		tileset.surfaces.emplace("staircase", SectorTileRegion{ 50, 50, 10, 10 });
-		setSectorTileset(std::move(tileset), reinterpret_cast<ImTextureID>(1));
+		setSectorTileset(std::move(tileset), static_cast<TextureId>(1));
 
 		WorldDrawList commands({ { -100000.0f, -100000.0f }, { 100000.0f, 100000.0f } });
 		renderSector(staircase, 1, LayerRenderStyle::Solid, false,
@@ -1081,7 +1081,7 @@ namespace
 		objects.width = 100;
 		objects.height = 100;
 		objects.sprites.emplace("lift-car", ObjectSprite{ { 0, 0, 50, 100 }, false });
-		setObjectTileset(std::move(objects), reinterpret_cast<ImTextureID>(1));
+		setObjectTileset(std::move(objects), static_cast<TextureId>(1));
 
 		WorldDrawList commands({ { -100000.0f, -100000.0f }, { 100000.0f, 100000.0f } });
 		renderSector(created.lift.sector, 1, LayerRenderStyle::Solid, false,

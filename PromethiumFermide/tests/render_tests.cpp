@@ -63,8 +63,8 @@ std::pair<int, int> pngSize(std::filesystem::path const& path) {
 // the tileset helpers record.
 // The texture handle the installed tilesets carry. These checks never touch
 // a GPU - they read the command stream the tileset helpers record - so the
-// handle is a placeholder that only has to be non-null.
-ImTextureID const kInstalled{(ImTextureID)(intptr_t)1};
+// handle is a placeholder that only has to be non-zero.
+pf::render::TextureId const kInstalled{1};
 // The objects tileset goes in by value, not by move: the caller keeps it as
 // the reference copy the Furniture checks read back.
 void installTilesets(SectorTileset sectors, ObjectTileset const& objects,

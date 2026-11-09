@@ -7,7 +7,7 @@
 
 namespace {
 SectorTileset active;
-ImTextureID textureId{};
+TextureId textureId{};
 void image(WorldDrawList* list, SectorTileRegion const& r, Vec2 a, Vec2 b,
     float fractionX, float fractionY, PackedColourValue tint)
 {
@@ -53,7 +53,7 @@ SectorTileset SectorTileset::load(std::filesystem::path const& path)
     return result;
 }
 
-void setSectorTileset(SectorTileset tileset, ImTextureID texture)
+void setSectorTileset(SectorTileset tileset, TextureId texture)
 {
     active = std::move(tileset);
     textureId = texture;

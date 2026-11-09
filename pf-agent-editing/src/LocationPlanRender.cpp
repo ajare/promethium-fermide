@@ -1,6 +1,10 @@
 #include "LocationPlan.h"
 #include "AgentPathForRendering.h"
 #include "ObjectTileset.h"
+// The plan overlay is drawn into the editor's ImGui draw list, so this seam
+// spells ImGui types itself rather than picking them up from a renderer header -
+// the shared renderer no longer carries one (#1003).
+#include "imgui/imgui.h"
 #include <string>
 #include <algorithm>
 #include <set>

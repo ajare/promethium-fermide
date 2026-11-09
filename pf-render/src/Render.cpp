@@ -6,10 +6,6 @@
 #include <optional>
 #include <unordered_map>
 
-#include "imgui/imgui.h"
-#include "imgui/imgui_internal.h"
-#include "imgui/IconsFontAwesome5.h"
-
 #include "core/Defines.h"
 #include "core/Background.h"
 #include "core/Facade.h"
@@ -77,6 +73,10 @@ RenderWorldScope::~RenderWorldScope()
 // font, never asks ImGui which font is current, and holds no icon-font global.
 
 using namespace std;
+// The Marker glyph the icon face is asked for, from the shared renderer's own
+// text vocabulary (#1003) - no icon-font header from the editor's UI layer is
+// included here.
+using pf::render::MarkerIconGlyph;
 
 PackedColourValue ForeLocationColour = packColour(192, 192, 255);
 PackedColourValue BackLocationColour = packColour(224, 224, 255);
@@ -1126,10 +1126,10 @@ void renderMarker(shared_ptr<const core::Marker> marker, uint32_t /* layer */, L
 	// the face's pixel size, which is what the icon is scaled from. The
 	// arithmetic is the one the producer used when it held the font itself,
 	// so the drawn icon keeps its exact centring and extents.
-	auto const natural = metrics.measure({ WorldFont::Icons, 0.0f }, ICON_FA_MAP_MARKER_ALT);
+	auto const natural = metrics.measure({ WorldFont::Icons, 0.0f }, MarkerIconGlyph);
 	auto const fontSize = natural.y * MarkerIconSize * gUISettings.worldZoom
 		/ max(max(natural.x, natural.y), 1.0f);
-	auto const size = metrics.measure({ WorldFont::Icons, fontSize }, ICON_FA_MAP_MARKER_ALT);
+	auto const size = metrics.measure({ WorldFont::Icons, fontSize }, MarkerIconGlyph);
 	Vec2 topLeft{ point.x - size.x * 0.5f, point.y - size.y };
 	if (selected)
 		drawList->AddRect({ topLeft.x - 3.0f, topLeft.y - 3.0f },
@@ -1138,7 +1138,7 @@ void renderMarker(shared_ptr<const core::Marker> marker, uint32_t /* layer */, L
 	if (!drawObjectSprite("marker", drawList, topLeft,
 		{topLeft.x + size.x, topLeft.y + size.y}, packColour(251, 188, 4)))
 		drawList->AddText({ WorldFont::Icons, fontSize }, topLeft,
-			packColour(251, 188, 4), ICON_FA_MAP_MARKER_ALT);
+			packColour(251, 188, 4), MarkerIconGlyph);
 }
 
 

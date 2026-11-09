@@ -20,6 +20,14 @@ struct Vec4 {
   constexpr Vec4(float x, float y, float z, float w) : x(x), y(y), z(z), w(w) {}
 };
 using PackedColourValue = std::uint32_t;
+// An installed texture, as an opaque handle the shared renderer never
+// dereferences. A tileset asks one question of it - is artwork installed,
+// or is this tileset empty and every lookup meant to fall back to magenta -
+// and never more. It replaces the ImGui texture id the tilesets used to
+// carry, which the renderer never looked at either; the atlas a command
+// actually draws from is resolved by the MPP consumer through the resource
+// manager, so no parallel texture metadata lives here (#1003, ADR 0010).
+using TextureId = std::uint64_t;
 using DrawFlags = int;
 inline constexpr DrawFlags DrawFlagsNone = 0, DrawFlagsClosed = 1;
 inline constexpr int RedShift = 0, GreenShift = 8, BlueShift = 16, AlphaShift = 24;

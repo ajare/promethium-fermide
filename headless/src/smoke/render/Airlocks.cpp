@@ -18,7 +18,7 @@ namespace
 	void chamber(smoke::Context const& context)
 	{
 		setAgentTileset(ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml")),
-			reinterpret_cast<ImTextureID>(1));
+			static_cast<TextureId>(1));
 		using smoke::require;
 		ImGui::GetIO().DisplaySize = { 1600, 720 };
 		ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build(); ImGui::NewFrame();

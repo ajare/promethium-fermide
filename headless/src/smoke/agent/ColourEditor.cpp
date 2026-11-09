@@ -199,7 +199,7 @@ namespace
 			ArtworkScope() {
 				ObjectTileset tiles; tiles.width = 26; tiles.height = 72;
 				tiles.sprites.emplace("human-standing", ObjectSprite{{0, 0, 26, 72}, true});
-				setAgentTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
+				setAgentTileset(std::move(tiles), static_cast<TextureId>(1));
 			}
 			~ArtworkScope() { clearAgentTileset(); }
 		} artwork;

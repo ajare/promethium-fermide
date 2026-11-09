@@ -9,10 +9,10 @@ struct ObjectTileset
     std::map<std::string, ObjectSprite> sprites;
     static ObjectTileset load(std::filesystem::path const& path);
 };
-void setObjectTileset(ObjectTileset tileset, ImTextureID texture);
+void setObjectTileset(ObjectTileset tileset, TextureId texture);
 void clearObjectTileset();
 // Agent artwork is independently selected, even when it shares the image.
-void setAgentTileset(ObjectTileset tileset, ImTextureID texture);
+void setAgentTileset(ObjectTileset tileset, TextureId texture);
 void clearAgentTileset();
 // The sprite helpers cross to the command stream on the shared drawing
 // types (#997): pf::render::Vec2 for the destination rectangle and a
@@ -20,7 +20,7 @@ void clearAgentTileset();
 std::optional<Vec2> agentSpriteSize(char const* name);
 bool drawAgentSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b,
     PackedColourValue tint = White);
-void setFurnitureTileset(ObjectTileset tileset, ImTextureID texture);
+void setFurnitureTileset(ObjectTileset tileset, TextureId texture);
 void clearFurnitureTileset();
 std::optional<Vec2> furnitureSpriteSize(char const* name);
 bool drawFurnitureSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b);

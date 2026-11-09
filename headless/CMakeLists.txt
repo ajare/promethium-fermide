@@ -68,7 +68,11 @@ target_include_directories(pf-headless-render-support PUBLIC
 # check measures World text the way the editor does.
 target_include_directories(pf-headless-render-support PRIVATE
     "${PF_REPO_ROOT}/editor/include")
-target_link_libraries(pf-headless-render-support PUBLIC pf-render)
+# The harness replays recorded commands into a live ImGui draw list and the
+# ImGui-backed font metrics need a context, so this tier uses the CPU ImGui
+# library itself. It used to arrive through pf-render; the shared renderer no
+# longer carries it, which is the whole point of #1003.
+target_link_libraries(pf-headless-render-support PUBLIC pf-render pf-imgui-cpu)
 if(MSVC)
     target_compile_options(pf-headless-render-support PRIVATE
         "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)

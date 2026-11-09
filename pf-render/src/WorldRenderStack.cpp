@@ -39,8 +39,6 @@
 #include "SectorTileset.h"
 #include "WorldDrawList.h"
 
-#include "imgui/imgui.h"
-
 namespace resources = wp::application::resourcesystem;
 namespace
 {
@@ -560,7 +558,7 @@ namespace
 					else sectorTiles.surfaces.emplace(name, region);
 				}
 			}
-			setSectorTileset(std::move(sectorTiles), reinterpret_cast<ImTextureID>(1));
+			setSectorTileset(std::move(sectorTiles), static_cast<TextureId>(1));
 
 			auto objects = std::dynamic_pointer_cast<resources::ImageSetResource>(mObjectSet);
 			auto objectImage = std::dynamic_pointer_cast<resources::ImageResource>(objects->getImage());
@@ -577,7 +575,7 @@ namespace
 					|| name == "cleaning-bot-standing";
 				objectTiles.sprites.emplace(name, ObjectSprite{ region, tintable });
 			}
-			setObjectTileset(std::move(objectTiles), reinterpret_cast<ImTextureID>(1));
+			setObjectTileset(std::move(objectTiles), static_cast<TextureId>(1));
 			ObjectTileset agentTiles;
 			if (auto agents = std::dynamic_pointer_cast<resources::ImageSetResource>(mAgentSet))
 			{
@@ -587,7 +585,7 @@ namespace
 					agentTiles.sprites.emplace(name, ObjectSprite{{int(definition.x), int(definition.y),
 						int(definition.width), int(definition.height)}, true});
 			}
-			setAgentTileset(std::move(agentTiles), reinterpret_cast<ImTextureID>(1));
+			setAgentTileset(std::move(agentTiles), static_cast<TextureId>(1));
 			ObjectTileset furnitureTiles;
 			if (auto furniture = std::dynamic_pointer_cast<resources::ImageSetResource>(mFurnitureSet))
 			{
@@ -597,7 +595,7 @@ namespace
 					furnitureTiles.sprites.emplace(name, ObjectSprite{{int(definition.x), int(definition.y),
 						int(definition.width), int(definition.height)}, false});
 			}
-			setFurnitureTileset(std::move(furnitureTiles), reinterpret_cast<ImTextureID>(1));
+			setFurnitureTileset(std::move(furnitureTiles), static_cast<TextureId>(1));
 		}
 
 		mpp::ResourcePtr texture(WorldDrawList::Texture textureKind)

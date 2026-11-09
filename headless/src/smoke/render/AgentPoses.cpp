@@ -51,7 +51,7 @@ namespace
 			if (sprite)
 			{
 				auto tiles = ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml"));
-				setAgentTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
+				setAgentTileset(std::move(tiles), static_cast<TextureId>(1));
 			}
 			for (float zoom : {1.f, 2.f})
 			{
@@ -125,7 +125,7 @@ namespace
 					tiles.sprites.emplace(std::string("pose-") + name, ObjectSprite{{64 * index++, 0, 64, 160}, true});
 				// A generic tile must not override a pose's declared artwork.
 				tiles.sprites.emplace("agent", ObjectSprite{{320, 0, 64, 160}, true});
-				setAgentTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
+				setAgentTileset(std::move(tiles), static_cast<TextureId>(1));
 			}
 			int tileIndex = 0;
 			Vec2 originalMin{}, originalMax{};
@@ -230,7 +230,7 @@ namespace
 		auto tiles = ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml"));
 		auto const regions = tiles.sprites;
 		auto const atlasWidth = tiles.width, atlasHeight = tiles.height;
-		setAgentTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
+		setAgentTileset(std::move(tiles), static_cast<TextureId>(1));
 		auto humanId = world.createAgent("Human reference", 0, 0, 4.5f);
 		auto* human = world.lookupAgent(humanId).entity;
 		Vec2 standingSize{};
@@ -263,7 +263,7 @@ namespace
 		{
 			auto incomplete = ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml"));
 			incomplete.sprites.erase(absent);
-			setAgentTileset(std::move(incomplete), reinterpret_cast<ImTextureID>(1));
+			setAgentTileset(std::move(incomplete), static_cast<TextureId>(1));
 			WorldDrawList missing(WorldDrawList::ClipRectangle{{-2000,-2000},{2000,2000}});
 			renderAgent(human, &missing);
 			require(missing.commands().size() == 2, "Missing pose or Standing tile did not draw a rectangle");
@@ -273,7 +273,7 @@ namespace
 					"Missing required Agent tile silently substituted artwork");
 			}
 		}
-		setAgentTileset(ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml")), reinterpret_cast<ImTextureID>(1));
+		setAgentTileset(ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml")), static_cast<TextureId>(1));
 		// A short non-Human Standing tile keeps its own proportions and UVs.
 		std::ifstream botInput(context.fixture("resources/test-worlds/cleaning-bot.agent.lua"));
 		std::string botSource{std::istreambuf_iterator<char>(botInput), {}};

@@ -7,7 +7,6 @@
 #include <optional>
 #include <vector>
 
-#include "imgui/imgui.h"
 #include "DrawTypes.h"
 #include "WorldDrawList.h"
 

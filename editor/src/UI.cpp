@@ -9719,11 +9719,14 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 	float const scrollbarThickness = ImGui::GetFrameHeight();
 	float const horizontalScrollbarSpace = scrollbarThickness + style.ItemSpacing.y;
 	float const verticalScrollbarSpace = scrollbarThickness + style.ItemSpacing.x;
-	auto const layout = worldViewportLayout(ImGui::GetContentRegionAvail(),
+	auto const availableRegion = ImGui::GetContentRegionAvail();
+	auto const layout = worldViewportLayout({ availableRegion.x, availableRegion.y },
 		{ (float)world->getCellsWide() * (float)CORE_CELL_WIDTH_PIXELS,
 			(float)world->getLevelsHigh() * (float)CORE_LEVEL_HEIGHT_PIXELS },
 		gUISettings.worldZoom, horizontalScrollbarSpace, verticalScrollbarSpace);
-	auto const canvasSize = layout.canvasSize;
+	// The layout is resolved on the shared renderer's drawing types; the thing
+	// it sizes is an ImGui widget, so it crosses back here (#1003).
+	ImVec2 const canvasSize{ layout.canvasSize.x, layout.canvasSize.y };
 	bool const showHorizontalScrollbar = layout.horizontalScrollbar;
 	bool const showVerticalScrollbar = layout.verticalScrollbar;
 	float const horizontalScrollMax = layout.scrollMaximum.x;

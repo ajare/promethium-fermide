@@ -6,11 +6,11 @@
 #include <utility>
 namespace {
 ObjectTileset active;
-ImTextureID textureId{};
+TextureId textureId{};
 ObjectTileset agents;
-ImTextureID agentTextureId{};
+TextureId agentTextureId{};
 ObjectTileset furniture;
-ImTextureID furnitureTextureId{};
+TextureId furnitureTextureId{};
 }
 ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
 {
@@ -49,12 +49,12 @@ ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
     if (!result.sprites.at("agent").tintable) throw std::runtime_error("Agent sprite must support tinting");
     return result;
 }
-void setObjectTileset(ObjectTileset tileset, ImTextureID texture)
+void setObjectTileset(ObjectTileset tileset, TextureId texture)
 {
     active = std::move(tileset); textureId = texture;
 }
 void clearObjectTileset() { textureId = {}; active = {}; }
-void setAgentTileset(ObjectTileset tileset, ImTextureID texture)
+void setAgentTileset(ObjectTileset tileset, TextureId texture)
 {
     agents = std::move(tileset); agentTextureId = texture;
 }
@@ -75,7 +75,7 @@ bool drawAgentSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b, Pack
     list->AddImage(WorldDrawList::Texture::AgentAtlas, a, b, uv0, uv1, tint);
     return true;
 }
-void setFurnitureTileset(ObjectTileset tileset, ImTextureID texture)
+void setFurnitureTileset(ObjectTileset tileset, TextureId texture)
 {
     furniture = std::move(tileset); furnitureTextureId = texture;
 }
@@ -98,7 +98,7 @@ bool drawFurnitureSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b)
         {(r.x + r.width - .5f) / furniture.width, (r.y + r.height - .5f) / furniture.height});
     return true;
 }
-bool hasObjectTileset() { return textureId != ImTextureID{}; }
+bool hasObjectTileset() { return textureId != TextureId{}; }
 std::optional<Vec2> objectSpriteSize(char const* name)
 {
     auto const sprite = active.sprites.find(name);

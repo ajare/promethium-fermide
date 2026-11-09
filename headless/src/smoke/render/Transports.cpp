@@ -110,7 +110,7 @@ namespace
 		sectors.height = 100;
 		sectors.surfaces.emplace("lift", SectorTileRegion{ 0, 0, 10, 10 });
 		sectors.surfaces.emplace("shuttle", SectorTileRegion{ 50, 50, 10, 10 });
-		setSectorTileset(std::move(sectors), reinterpret_cast<ImTextureID>(1));
+		setSectorTileset(std::move(sectors), static_cast<TextureId>(1));
 
 		ObjectTileset objects;
 		objects.width = 500;
@@ -120,7 +120,7 @@ namespace
 		objects.sprites.emplace("shuttle-car-right", ObjectSprite{ { 200, 0, 50, 100 }, false });
 		objects.sprites.emplace("shuttle-car-connector", ObjectSprite{ { 300, 0, 50, 100 }, false });
 		objects.sprites.emplace("door", ObjectSprite{ { 400, 0, 50, 100 }, false });
-		setObjectTileset(std::move(objects), reinterpret_cast<ImTextureID>(2));
+		setObjectTileset(std::move(objects), static_cast<TextureId>(2));
 
 		WorldDrawList commands({ { -100000.0f, -100000.0f }, { 100000.0f, 100000.0f } });
 		renderSector(shuttleSector, 1, LayerRenderStyle::Solid, false,
