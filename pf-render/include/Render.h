@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "imgui/imgui.h"
+#include "DrawTypes.h"
 #include "WorldDrawList.h"
 
 #include "core/Background.h"
@@ -158,16 +159,22 @@ inline bool rendersAsFlatColour(core::SectorType type)
 //
 // The flat surface colour a Sector carries of its own, if it carries one.
 //
-inline std::optional<core::BackgroundColour> flatSurfaceColour(core::Sector const& sector)
+// The authored triple is packed here, once, into the shared colour the command
+// stream records with. The rule answers in the drawing vocabulary instead of
+// handing the producer a domain colour to convert at every call site (#998).
+//
+inline std::optional<PackedColourValue> flatSurfaceColour(core::Sector const& sector)
 {
 	if (sector.getType() == core::SectorType::Background)
 	{
-		return static_cast<core::Background const&>(sector).getColour();
+		auto const colour = static_cast<core::Background const&>(sector).getColour();
+		return packColour(colour.r, colour.g, colour.b);
 	}
 
 	if (sector.getType() == core::SectorType::Facade)
 	{
-		return static_cast<core::Facade const&>(sector).getColour();
+		auto const colour = static_cast<core::Facade const&>(sector).getColour();
+		return packColour(colour.r, colour.g, colour.b);
 	}
 
 	return std::nullopt;
@@ -199,7 +206,7 @@ inline bool bypassesLightsOffTint(core::SectorType type)
 // Window faces several Backgrounds at once, backgroundApertureRegions() below
 // answers this once per Background in the composite.
 //
-inline std::optional<core::BackgroundColour> apertureFillColour(core::Sector const& backSector)
+inline std::optional<PackedColourValue> apertureFillColour(core::Sector const& backSector)
 {
 	return flatSurfaceColour(backSector);
 }
@@ -212,8 +219,11 @@ inline std::optional<core::BackgroundColour> apertureFillColour(core::Sector con
 struct BackgroundApertureRegion
 {
 	std::shared_ptr<const core::Background> background;
-	core::Vector2 min;
-	core::Vector2 max;
+	// The rectangle rides the shared point type, the same one the clip stack and
+	// the recorded commands use, so the composite reaches the stream without a
+	// further crossing (#998). It stays world-space, in cell units.
+	Vec2 min;
+	Vec2 max;
 };
 
 //
@@ -241,8 +251,8 @@ struct BackgroundApertureRegion
 inline std::vector<BackgroundApertureRegion> backgroundApertureRegions(
 	core::World const& world,
 	uint32_t backLayerIndex,
-	core::Vector2 const& apertureMin,
-	core::Vector2 const& apertureMax)
+	Vec2 const& apertureMin,
+	Vec2 const& apertureMax)
 {
 	std::vector<BackgroundApertureRegion> regions;
 
@@ -293,8 +303,8 @@ inline std::vector<BackgroundApertureRegion> backgroundApertureRegions(
 
 			BackgroundApertureRegion region;
 			region.background = background;
-			region.min = { std::max(bgMin.x, apertureMin.x), std::max(bgMin.y, apertureMin.y) };
-			region.max = { std::min(bgMax.x, apertureMax.x), std::min(bgMax.y, apertureMax.y) };
+			region.min = Vec2{ std::max(bgMin.x, apertureMin.x), std::max(bgMin.y, apertureMin.y) };
+			region.max = Vec2{ std::min(bgMax.x, apertureMax.x), std::min(bgMax.y, apertureMax.y) };
 
 			if (region.max.x - region.min.x <= 0.0f || region.max.y - region.min.y <= 0.0f)
 			{
@@ -646,8 +656,9 @@ inline bool shouldRenderLadderGeometry(LayerRenderStyle style)
 //
 struct TransitAperture
 {
-	core::Vector2 min;
-	core::Vector2 max;
+	// Shared point type, as in the clip rectangle an aperture becomes.
+	Vec2 min;
+	Vec2 max;
 
 	// The Location on the selected Layer that this aperture opens through. Null
 	// when the aperture belongs to the Transit alone, as a Stairwell level does.
@@ -723,9 +734,13 @@ inline std::vector<TransitAperture> transitApertures(
 			return;
 		}
 
+		core::Vector2 lo, hi;
+		location->getBounds(lo, hi);
+
 		TransitAperture aperture;
 		aperture.location = location;
-		location->getBounds(aperture.min, aperture.max);
+		aperture.min = Vec2{ lo.x, lo.y };
+		aperture.max = Vec2{ hi.x, hi.y };
 		apertures.push_back(aperture);
 	};
 
@@ -873,7 +888,7 @@ void renderGraph(std::shared_ptr<const core::Graph> graph,
 
 // Ordinary Agents use their effective inherited Colour (or the editor
 // fallback); selection always wins with its fixed gold highlight.
-ImU32 agentRenderColour(core::Agent const& agent, bool selected);
+PackedColourValue agentRenderColour(core::Agent const& agent, bool selected);
 void renderAgent(core::Agent const* agent, WorldDrawList* drawList);
 // Draws the selected Agent's assigned Path as a viewport overlay when Agent
 // debug rendering is enabled. Only portions on the visible Layer are shown.
@@ -941,7 +956,7 @@ void renderDoor(std::shared_ptr<const core::Door> door, uint32_t layer,
 	LayerRenderStyle style, bool selected, WorldDrawList* drawList);
 
 void renderSector(std::shared_ptr<const core::Sector> sector, uint32_t layer,
-	LayerRenderStyle style, bool renderEdges, ImColor colour, WorldDrawList* drawList);
+	LayerRenderStyle style, bool renderEdges, PackedColourValue colour, WorldDrawList* drawList);
 
 // Compatibility seams for CPU-only checks. Production code constructs a
 // recording WorldDrawList and never submits World primitives to ImGui.
@@ -959,7 +974,7 @@ inline void renderSectors(std::shared_ptr<const core::World> world, uint32_t lay
 }
 
 inline void renderSector(std::shared_ptr<const core::Sector> sector, uint32_t layer,
-	LayerRenderStyle style, bool renderEdges, ImColor colour, ImDrawList* drawList)
+	LayerRenderStyle style, bool renderEdges, PackedColourValue colour, ImDrawList* drawList)
 {
 	WorldDrawList adapter(drawList);
 	renderSector(std::move(sector), layer, style, renderEdges, colour, &adapter);

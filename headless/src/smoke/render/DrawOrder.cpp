@@ -1372,17 +1372,17 @@ namespace
 		// The Aperture pass is handed the Background's own colour.
 		auto const fill = apertureFillColour(*back);
 		require(fill.has_value(), "a Background back Sector offers no aperture fill colour");
-		require(*fill == core::BackgroundColour{ 255, 128, 0 },
+		require(*fill == packColour(255, 128, 0),
 			"the aperture fill colour is not the Background's own colour");
 
 		// The glass follows the Background: re-colour it and the fill follows,
 		// which is the headless half of the hand-edited-YAML manual test.
 		auto const recolourable = std::make_shared<core::Background>(
 			"Backdrop", 1u, backdropIndex, 0u, 0u, 6u, 1u, core::BackgroundColour{ 255, 128, 0 });
-		require(apertureFillColour(*recolourable) == core::BackgroundColour{ 255, 128, 0 },
+		require(apertureFillColour(*recolourable) == packColour(255, 128, 0),
 			"a freshly built Background does not offer its own colour");
 		recolourable->setColour({ 12, 34, 56 });
-		require(apertureFillColour(*recolourable) == core::BackgroundColour{ 12, 34, 56 },
+		require(apertureFillColour(*recolourable) == packColour(12, 34, 56),
 			"the aperture fill colour did not follow the Background's recolour");
 
 		// The control: a clear Window looking into a Room carries no colour of
@@ -1599,6 +1599,10 @@ namespace
 		// the imgui manual test of the ticket body, authored headlessly.
 		constexpr core::BackgroundColour kSky{ 96, 128, 160 };
 		constexpr core::BackgroundColour kCarPark{ 112, 112, 112 };
+		// The same two colours in the packed vocabulary the aperture-fill rule
+		// answers with (#998).
+		constexpr PackedColourValue kSkyFill = packColour(kSky.r, kSky.g, kSky.b);
+		constexpr PackedColourValue kCarParkFill = packColour(kCarPark.r, kCarPark.g, kCarPark.b);
 
 		core::World world("Multi-background aperture", 12, 2);
 		while (world.getLayerCount() < 2) world.addLayer();
@@ -1628,7 +1632,7 @@ namespace
 		require(wLo.x > 4.0f && wHi.x < 8.0f && wLo.y > 0.0f && wHi.y < 1.0f,
 			"the spanning Window is not where it was authored");
 
-		auto const regions = backgroundApertureRegions(world, 1, wLo, wHi);
+		auto const regions = backgroundApertureRegions(world, 1, Vec2{ wLo.x, wLo.y }, Vec2{ wHi.x, wHi.y });
 		require(regions.size() == 2,
 			"a Window over two Backgrounds did not composite two regions");
 
@@ -1660,9 +1664,9 @@ namespace
 		// the #34 rule read once per region of the composite.
 		auto const skyFill = apertureFillColour(*regions[0].background);
 		auto const carFill = apertureFillColour(*regions[1].background);
-		require(skyFill.has_value() && *skyFill == kSky,
+		require(skyFill.has_value() && *skyFill == kSkyFill,
 			"the sky region does not fill with the sky Background's own colour");
-		require(carFill.has_value() && *carFill == kCarPark,
+		require(carFill.has_value() && *carFill == kCarParkFill,
 			"the car-park region does not fill with the car-park Background's own colour");
 
 		// The composite is world-space: the helper reads the cell grid, not the
@@ -1696,7 +1700,7 @@ namespace
 		require(single.object != nullptr, "the single-Background Window was not created");
 		core::Vector2 sLo, sHi;
 		single.object->getFullShape(sLo, sHi);
-		auto const singleRegions = backgroundApertureRegions(world, 1, sLo, sHi);
+		auto const singleRegions = backgroundApertureRegions(world, 1, Vec2{ sLo.x, sLo.y }, Vec2{ sHi.x, sHi.y });
 		require(singleRegions.size() == 1
 				&& singleRegions[0].background->getIndex() == skyIndex,
 			"a Window wholly over one Background did not yield exactly that Background's region");
@@ -1710,7 +1714,7 @@ namespace
 		core::Vector2 aLo, aHi;
 		abutting.object->getFullShape(aLo, aHi);
 		require(aHi.x < 6.0f, "the abutting Window's glass does not stop short of the seam");
-		auto const abuttingRegions = backgroundApertureRegions(world, 1, aLo, aHi);
+		auto const abuttingRegions = backgroundApertureRegions(world, 1, Vec2{ aLo.x, aLo.y }, Vec2{ aHi.x, aHi.y });
 		require(abuttingRegions.size() == 1
 				&& abuttingRegions[0].background->getIndex() == skyIndex
 				&& abuttingRegions[0].max.x == aHi.x,
@@ -1718,7 +1722,7 @@ namespace
 
 		// The order is deterministic: the same World swept twice gives the
 		// same composite, which is what keeps the two-pass renderer stable.
-		auto const again = backgroundApertureRegions(world, 1, wLo, wHi);
+		auto const again = backgroundApertureRegions(world, 1, Vec2{ wLo.x, wLo.y }, Vec2{ wHi.x, wHi.y });
 		require(again.size() == regions.size()
 				&& again[0].background->getIndex() == regions[0].background->getIndex()
 				&& again[1].background->getIndex() == regions[1].background->getIndex(),
@@ -1747,7 +1751,7 @@ namespace
 
 		core::Vector2 wLo, wHi;
 		spanning.object->getFullShape(wLo, wHi);
-		auto const regions = backgroundApertureRegions(world, 1, wLo, wHi);
+		auto const regions = backgroundApertureRegions(world, 1, Vec2{ wLo.x, wLo.y }, Vec2{ wHi.x, wHi.y });
 		require(regions.size() == 3, "a Window over three Backgrounds did not composite three regions");
 		require(regions[0].background->getIndex() == firstIndex
 				&& regions[1].background->getIndex() == secondIndex
@@ -1775,7 +1779,7 @@ namespace
 		require(intoRoom.object != nullptr, "the Window into a Room was not created");
 		core::Vector2 rLo, rHi;
 		intoRoom.object->getFullShape(rLo, rHi);
-		require(backgroundApertureRegions(rooms, 1, rLo, rHi).empty(),
+		require(backgroundApertureRegions(rooms, 1, Vec2{ rLo.x, rLo.y }, Vec2{ rHi.x, rHi.y }).empty(),
 			"a Window into a Room yielded Background regions; the tint path would be overridden");
 	}
 

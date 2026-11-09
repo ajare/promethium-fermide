@@ -56,6 +56,16 @@ namespace
 	core::BackgroundColour const kForeLayerColour{ 192, 192, 255 };
 	core::BackgroundColour const kBackLayerColour{ 224, 224, 255 };
 
+	// The same colours in the shared drawing vocabulary the renderer records
+	// with. The model below answers in packed colours because renderSector()
+	// does: flatSurfaceColour() hands back a PackedColourValue, and the
+	// lights-off tint is packed from the shared LightsOffTint rather than a
+	// literal, so the comparison still names the rule it proves (#998).
+	PackedColourValue const kFacadeFill = packColour(kFacadeColour.r, kFacadeColour.g, kFacadeColour.b);
+	PackedColourValue const kForeLayerFill = packColour(kForeLayerColour.r, kForeLayerColour.g, kForeLayerColour.b);
+	PackedColourValue const kBackLayerFill = packColour(kBackLayerColour.r, kBackLayerColour.g, kBackLayerColour.b);
+	PackedColourValue const kLightsOffFill = packColour(LightsOffTint.r, LightsOffTint.g, LightsOffTint.b);
+
 	//
 	// One surface stroke renderSector() would emit: filled or outlined, in a
 	// definite colour.
@@ -63,7 +73,7 @@ namespace
 	struct Stroke
 	{
 		bool filled{ false };
-		core::BackgroundColour colour{};
+		PackedColourValue colour{};
 	};
 
 	//
@@ -77,7 +87,7 @@ namespace
 	//     the wireframe overlay, never both in one pass.
 	//
 	std::vector<Stroke> modelSurfaceStrokes(core::Sector const& sector,
-		LayerRenderStyle style, core::BackgroundColour const& layerColour)
+		LayerRenderStyle style, PackedColourValue const& layerColour)
 	{
 		std::vector<Stroke> strokes;
 
@@ -89,7 +99,7 @@ namespace
 		auto colour = layerColour;
 		if (!bypassesLightsOffTint(sector.getType()) && !sector.areLightsOn())
 		{
-			colour = LightsOffTint;
+			colour = kLightsOffFill;
 		}
 
 		if (!rendersAsFlatColour(sector.getType()))
@@ -213,19 +223,19 @@ namespace
 		Frontage const f;
 
 		auto const strokes = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Solid,
-			kForeLayerColour);
+			kForeLayerFill);
 		auto const stroke = expectSingleStroke(strokes, true, " for a Facade in the Solid pass");
 
-		require(stroke.colour == kFacadeColour,
+		require(stroke.colour == kFacadeFill,
 			"the Solid pass does not fill a Facade with the Facade's own colour");
-		require(stroke.colour != kForeLayerColour,
+		require(stroke.colour != kForeLayerFill,
 			"the Facade fill is the Layer colour, not its own");
-		require(stroke.colour != LightsOffTint,
+		require(stroke.colour != kLightsOffFill,
 			"the Facade fill is the lights-off tint");
 
 		// flatSurfaceColour is the single source the renderer reads.
 		auto const own = flatSurfaceColour(*f.facade);
-		require(own.has_value() && *own == kFacadeColour,
+		require(own.has_value() && *own == kFacadeFill,
 			"flatSurfaceColour() does not report the Facade's colour");
 
 		// Re-colouring the Facade moves the fill with it: the colour is live,
@@ -233,9 +243,9 @@ namespace
 		auto mutableFacade = std::const_pointer_cast<core::Facade>(f.facade);
 		mutableFacade->setColour(core::BackgroundColour{ 12, 200, 66 });
 		auto const recoloured = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Solid,
-			kForeLayerColour);
+			kForeLayerFill);
 		require(recoloured.size() == 1 && recoloured[0].filled
-				&& recoloured[0].colour == core::BackgroundColour{ 12, 200, 66 },
+				&& recoloured[0].colour == packColour(12, 200, 66),
 			"the Solid fill did not follow the Facade's recolour");
 	}
 
@@ -250,10 +260,10 @@ namespace
 		Frontage const f;
 
 		auto const strokes = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Wireframe,
-			kBackLayerColour);
+			kBackLayerFill);
 		auto const stroke = expectSingleStroke(strokes, false,
 			" for a Facade in the wireframe overlay");
-		require(stroke.colour == kFacadeColour,
+		require(stroke.colour == kFacadeFill,
 			"the wireframe outline of a Facade is not drawn in the Facade's colour");
 
 		// The pass-level rule keeps its shape: one pass never both fills and
@@ -264,7 +274,7 @@ namespace
 			"the wireframe pass does not outline a flat-colour Sector");
 
 		// Hidden paints nothing at all.
-		require(modelSurfaceStrokes(*f.facade, LayerRenderStyle::Hidden, kBackLayerColour).empty(),
+		require(modelSurfaceStrokes(*f.facade, LayerRenderStyle::Hidden, kBackLayerFill).empty(),
 			"the Hidden style paints a Facade");
 	}
 
@@ -279,26 +289,26 @@ namespace
 
 		require(f.facade->areLightsOn(), "a freshly built Facade starts with its lights off");
 
-		auto const on = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Solid, kForeLayerColour);
+		auto const on = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Solid, kForeLayerFill);
 		std::const_pointer_cast<core::Facade>(f.facade)->lightsOff();
 		require(!f.facade->areLightsOn(), "the Facade's lights did not go off");
-		auto const off = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Solid, kForeLayerColour);
+		auto const off = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Solid, kForeLayerFill);
 
 		require(on.size() == off.size(),
 			"turning a Facade's lights off changed how many strokes it paints");
-		require(!off.empty() && off[0].filled && off[0].colour == kFacadeColour,
+		require(!off.empty() && off[0].filled && off[0].colour == kFacadeFill,
 			"a Facade with its lights off is not filled with its own colour");
-		require(off[0].colour != LightsOffTint,
+		require(off[0].colour != kLightsOffFill,
 			"the lights-off tint reached a Facade's fill");
 
 		// The same for the Aperture pass: the glass shows the authored colour
 		// with the lights off just as it does with them on.
 		auto const apertureOn = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Aperture,
-			kBackLayerColour);
+			kBackLayerFill);
 		auto const apertureOff = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Aperture,
-			kBackLayerColour);
+			kBackLayerFill);
 		require(apertureOff.size() == 1 && apertureOff[0].filled
-				&& apertureOff[0].colour == apertureOn[0].colour && apertureOff[0].colour == kFacadeColour,
+				&& apertureOff[0].colour == apertureOn[0].colour && apertureOff[0].colour == kFacadeFill,
 			"the aperture fill changed when the Facade's lights went off");
 
 		// The control: a Room's fill does follow its lights, so the bypass
@@ -310,8 +320,8 @@ namespace
 		require(room != nullptr && room->getType() == core::SectorType::Location,
 			"the control Sector is not a plain Location");
 		std::const_pointer_cast<core::Sector>(room)->lightsOff();
-		auto const roomOff = modelSurfaceStrokes(*room, LayerRenderStyle::Solid, kForeLayerColour);
-		require(roomOff.size() == 1 && roomOff[0].filled && roomOff[0].colour == LightsOffTint,
+		auto const roomOff = modelSurfaceStrokes(*room, LayerRenderStyle::Solid, kForeLayerFill);
+		require(roomOff.size() == 1 && roomOff[0].filled && roomOff[0].colour == kLightsOffFill,
 			"a Room with its lights off does not take the lights-off tint");
 	}
 
@@ -338,12 +348,12 @@ namespace
 		// generic back-layer tint (#34's rule, now covering the Facade).
 		auto const fill = apertureFillColour(*back);
 		require(fill.has_value(), "a Facade back Sector offers no aperture fill colour");
-		require(*fill == kFacadeColour, "the aperture fill is not the Facade's own colour");
+		require(*fill == kFacadeFill, "the aperture fill is not the Facade's own colour");
 
 		// The glass follows the Facade: re-colour it and the fill follows.
 		auto mutableFacade = std::const_pointer_cast<core::Facade>(f.facade);
 		mutableFacade->setColour(core::BackgroundColour{ 30, 90, 210 });
-		require(apertureFillColour(*back) == core::BackgroundColour{ 30, 90, 210 },
+		require(apertureFillColour(*back) == packColour(30, 90, 210),
 			"the aperture fill did not follow the Facade's recolour");
 		mutableFacade->setColour(kFacadeColour);
 
@@ -356,7 +366,7 @@ namespace
 		require(windowMin.x >= facadeMin.x && windowMax.x <= facadeMax.x
 				&& windowMin.y >= facadeMin.y && windowMax.y <= facadeMax.y,
 			"the Window does not sit wholly inside the Facade it looks into");
-		require(apertureFillColour(*back) == kFacadeColour,
+		require(apertureFillColour(*back) == kFacadeFill,
 			"the clipped aperture fill lost the Facade's colour");
 
 		// Objects inside the Facade reach the glass: the aperture pass draws
@@ -387,7 +397,7 @@ namespace
 		// flat colour - the light switch moves the agents' world, not the
 		// paint.
 		std::const_pointer_cast<core::Facade>(f.facade)->lightsOff();
-		require(apertureFillColour(*back) == kFacadeColour,
+		require(apertureFillColour(*back) == kFacadeFill,
 			"the aperture fill changed when the Facade's lights went off");
 	}
 

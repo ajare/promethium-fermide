@@ -82,24 +82,24 @@ extern ImFont* gAgentIconFont;
 
 using namespace std;
 
-ImColor ForeLocationColour = ImColor(192, 192, 255);
-ImColor BackLocationColour = ImColor(224, 224, 255);
+PackedColourValue ForeLocationColour = packColour(192, 192, 255);
+PackedColourValue BackLocationColour = packColour(224, 224, 255);
 // The value lives in Render.h as LightsOffTint so the headless checks can read
 // the same colour the viewport paints with.
-ImColor LightsOffColour = ImColor(LightsOffTint.r, LightsOffTint.g, LightsOffTint.b);
-ImColor LadderColour = ImColor(128, 128, 192);
-ImColor LiftColour = ImColor(128, 128, 192);
-ImColor ShuttleColour = ImColor(128, 128, 192);
-ImColor StairwellColour = ImColor(128, 128, 192);
-ImColor VertexColour = ImColor(255, 128, 0);
-ImColor EdgeColour = ImColor(255, 128, 0);
-ImColor InterLayerEdgeColour = ImColor(255, 255, 64);
-ImColor SelectedColour = ImColor(255, 255, 0);
+PackedColourValue LightsOffColour = packColour(LightsOffTint.r, LightsOffTint.g, LightsOffTint.b);
+PackedColourValue LadderColour = packColour(128, 128, 192);
+PackedColourValue LiftColour = packColour(128, 128, 192);
+PackedColourValue ShuttleColour = packColour(128, 128, 192);
+PackedColourValue StairwellColour = packColour(128, 128, 192);
+PackedColourValue VertexColour = packColour(255, 128, 0);
+PackedColourValue EdgeColour = packColour(255, 128, 0);
+PackedColourValue InterLayerEdgeColour = packColour(255, 255, 64);
+PackedColourValue SelectedColour = packColour(255, 255, 0);
 
 #define RENDER_SECTOR_OBJECTS_BEHIND 1
 #define RENDER_SECTOR_OBJECTS_INFRONT 2
 
-void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRenderStyle style, bool renderEdges, ImColor colour, WorldDrawList* drawList);
+void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRenderStyle style, bool renderEdges, PackedColourValue colour, WorldDrawList* drawList);
 void renderSectorDepthContent(shared_ptr<const core::Sector> sector, WorldDrawList* drawList);
 
 void renderTransitThroughApertures(shared_ptr<const core::Sector> const& transit, uint32_t behindLayer,
@@ -126,6 +126,20 @@ void transformPosition(float& x, float& y)
 
 	x = p.x;
 	y = p.y;
+}
+
+
+// The same world-to-screen transform, applied in place to a shared point. The
+// producer carries rectangles in pf::render::Vec2 now, so the pass does not
+// have to drop back to the domain point type to move a corner (#998).
+void transformPosition(Vec2& point)
+{
+	core::Vector2 p{ point.x, point.y };
+
+	transformPosition(p);
+
+	point.x = p.x;
+	point.y = p.y;
 }
 
 
@@ -180,8 +194,8 @@ void renderSelectedQueues(shared_ptr<const core::World> const& world, int layer,
 		[resourceId](auto const& candidate) { return candidate.id == resourceId; });
 	if (resource == snapshot.traversalResources.end()) return;
 
-	const ImColor laneColour(0, 210, 255, 210);
-	const ImColor occupiedColour(255, 170, 0, 230);
+	const PackedColourValue laneColour = packColour(0, 210, 255, 210);
+	const PackedColourValue occupiedColour = packColour(255, 170, 0, 230);
 	const float slotRadius = max(5.0f,
 		CORE_RESOURCE_SLOT_WIDTH * CORE_CELL_WIDTH_PIXELS * 0.35f)
 		* gUISettings.worldZoom;
@@ -239,7 +253,7 @@ void renderSelectedQueues(shared_ptr<const core::World> const& world, int layer,
 	}
 }
 
-void renderGrid(shared_ptr<const core::World> const& world, ImColor const& colour,
+void renderGrid(shared_ptr<const core::World> const& world, PackedColourValue const& colour,
 	float width, WorldDrawList* drawList)
 {
 	core::Vector2 topLeft{ 0.0f, (float)world->getLevelsHigh() };
@@ -350,10 +364,10 @@ void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::Wor
 			edgeIsInPath = edgeInPath != path->nodes.end();
 		}
 
-		auto interLayerEdgeColour = edgeIsInPath ? ImColor(255, 0, 0) : InterLayerEdgeColour;
-		auto ladderMountColour = edgeIsInPath ? ImColor(255, 0, 0) : ImColor(0, 192, 255);
-		auto liftMountColour = edgeIsInPath ? ImColor(255, 0, 0) : ImColor(0, 192, 255);
-		auto edgeColour = edgeIsInPath ? ImColor(255, 0, 0) : EdgeColour;
+		auto interLayerEdgeColour = edgeIsInPath ? packColour(255, 0, 0) : InterLayerEdgeColour;
+		auto ladderMountColour = edgeIsInPath ? packColour(255, 0, 0) : packColour(0, 192, 255);
+		auto liftMountColour = edgeIsInPath ? packColour(255, 0, 0) : packColour(0, 192, 255);
+		auto edgeColour = edgeIsInPath ? packColour(255, 0, 0) : EdgeColour;
 		auto edgeThickness = edgeIsInPath ? 5.0f : lineThickness;
 
 		if (edge->isInterLayer())
@@ -432,12 +446,12 @@ void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::Wor
 			}
 		}
 
-		auto vertexColour = vertexIsInPath ? ImColor(255, 0, 0) : VertexColour;
+		auto vertexColour = vertexIsInPath ? packColour(255, 0, 0) : VertexColour;
 		
 		float outlineSize{ 2 };
 		if (gSelectedVertex && vertex->sameAs(gSelectedVertex))
 		{
-			vertexColour = ImColor(255, 0, 0);
+			vertexColour = packColour(255, 0, 0);
 
 			drawList->AddRect(
 				{ pos.x - RENDER_VERTEX_SIZE - outlineSize, pos.y - RENDER_VERTEX_SIZE - outlineSize },
@@ -449,7 +463,7 @@ void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::Wor
 		}
 		if (vertex == closestVertex)
 		{
-			vertexColour = ImColor(255, 128, 0);
+			vertexColour = packColour(255, 128, 0);
 
 			drawList->AddRect(
 				{ pos.x - RENDER_VERTEX_SIZE - outlineSize, pos.y - RENDER_VERTEX_SIZE - outlineSize },
@@ -483,9 +497,9 @@ void renderDoorOpenUp(shared_ptr<const core::Door> door, uint32_t layer, LayerRe
 
 	if (style == LayerRenderStyle::Solid)
 	{
-		auto doorColour = ImColor(64, 192, 255);
+		auto doorColour = packColour(64, 192, 255);
 		if (!drawObjectSprite("door", drawList, {bounds1.x, bounds1.y}, {bounds2.x, bounds2.y},
-			IM_COL32_WHITE, {0, door->getOpenPercentage()}, {1, 1}))
+			White, {0, door->getOpenPercentage()}, {1, 1}))
 			drawList->AddRectFilled({ bounds1.x, bounds1.y }, { bounds2.x, bounds2.y }, doorColour);
 
 		drawList->AddDrawCmd();
@@ -507,7 +521,7 @@ void renderDoorOpenUp(shared_ptr<const core::Door> door, uint32_t layer, LayerRe
 	}
 	else if (style == LayerRenderStyle::Wireframe)
 	{
-		drawList->AddRect({ bounds1.x, bounds1.y }, { bounds2.x, bounds2.y }, ImColor(0, 0, 0));
+		drawList->AddRect({ bounds1.x, bounds1.y }, { bounds2.x, bounds2.y }, packColour(0, 0, 0));
 	}
 }
 
@@ -535,9 +549,9 @@ void renderDoorOpenLeft(shared_ptr<const core::Door> door, uint32_t layer, Layer
 
 	if (style == LayerRenderStyle::Solid)
 	{
-		auto doorColour = ImColor(64, 192, 255);
+		auto doorColour = packColour(64, 192, 255);
 		if (leafVisible && !drawObjectSprite("door", drawList,
-			{bounds0.x, bounds0.y}, {bounds1.x, bounds2.y}, IM_COL32_WHITE,
+			{bounds0.x, bounds0.y}, {bounds1.x, bounds2.y}, White,
 			{door->getOpenPercentage(), 0}, {1, 1}))
 			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds2.y }, doorColour);
 
@@ -565,7 +579,7 @@ void renderDoorOpenLeft(shared_ptr<const core::Door> door, uint32_t layer, Layer
 	{
 		// Only the remaining leaf is outlined; the aperture carries no solid fill.
 		if (leafVisible)
-			drawList->AddRect({ bounds0.x, bounds0.y }, { bounds1.x, bounds2.y }, ImColor(0, 0, 0));
+			drawList->AddRect({ bounds0.x, bounds0.y }, { bounds1.x, bounds2.y }, packColour(0, 0, 0));
 	}
 }
 
@@ -593,9 +607,9 @@ void renderDoorOpenRight(shared_ptr<const core::Door> door, uint32_t layer, Laye
 
 	if (style == LayerRenderStyle::Solid)
 	{
-		auto doorColour = ImColor(64, 192, 255);
+		auto doorColour = packColour(64, 192, 255);
 		if (leafVisible && !drawObjectSprite("door", drawList,
-			{bounds1.x, bounds0.y}, {bounds2.x, bounds2.y}, IM_COL32_WHITE,
+			{bounds1.x, bounds0.y}, {bounds2.x, bounds2.y}, White,
 			{0, 0}, {1 - door->getOpenPercentage(), 1}))
 			drawList->AddRectFilled({ bounds1.x, bounds0.y }, { bounds2.x, bounds2.y }, doorColour);
 
@@ -623,7 +637,7 @@ void renderDoorOpenRight(shared_ptr<const core::Door> door, uint32_t layer, Laye
 	{
 		// Only the remaining leaf is outlined; the aperture carries no solid fill.
 		if (leafVisible)
-			drawList->AddRect({ bounds1.x, bounds0.y }, { bounds2.x, bounds2.y }, ImColor(0, 0, 0));
+			drawList->AddRect({ bounds1.x, bounds0.y }, { bounds2.x, bounds2.y }, packColour(0, 0, 0));
 	}
 }
 
@@ -672,8 +686,8 @@ void renderDoorOpenApart(shared_ptr<const core::Door> door, uint32_t layer, Laye
 
 	if (style == LayerRenderStyle::Solid)
 	{
-		auto doorColour = ImColor(64, 192, 255);
-		auto seamColour = ImColor(0, 0, 0);
+		auto doorColour = packColour(64, 192, 255);
+		auto seamColour = packColour(0, 0, 0);
 
 		// The leaves slide out of the Door, so their fill is clipped to the full
 		// aperture and never paints over the surrounding Location.
@@ -682,7 +696,7 @@ void renderDoorOpenApart(shared_ptr<const core::Door> door, uint32_t layer, Laye
 		if (leftLeafVisible)
 		{
 			if (!drawObjectSprite("door", drawList, {screenX(leftLeafX0), apertureTop},
-				{screenX(leftLeafX1), apertureBottom}, IM_COL32_WHITE, {0, 0}, {0.5f, 1}))
+				{screenX(leftLeafX1), apertureBottom}, White, {0, 0}, {0.5f, 1}))
 				drawList->AddRectFilled({ screenX(leftLeafX0), apertureTop },
 					{ screenX(leftLeafX1), apertureBottom }, doorColour);
 			// The inner edge is the centre seam while closed and the facing edge of
@@ -694,7 +708,7 @@ void renderDoorOpenApart(shared_ptr<const core::Door> door, uint32_t layer, Laye
 		if (rightLeafVisible)
 		{
 			if (!drawObjectSprite("door", drawList, {screenX(rightLeafX0), apertureTop},
-				{screenX(rightLeafX1), apertureBottom}, IM_COL32_WHITE, {0.5f, 0}, {1, 1}))
+				{screenX(rightLeafX1), apertureBottom}, White, {0.5f, 0}, {1, 1}))
 				drawList->AddRectFilled({ screenX(rightLeafX0), apertureTop },
 					{ screenX(rightLeafX1), apertureBottom }, doorColour);
 			drawList->AddLine({ screenX(rightLeafX0), apertureTop },
@@ -731,11 +745,11 @@ void renderDoorOpenApart(shared_ptr<const core::Door> door, uint32_t layer, Laye
 
 		if (leftLeafVisible)
 			drawList->AddRect({ screenX(leftLeafX0), apertureTop },
-				{ screenX(leftLeafX1), apertureBottom }, ImColor(0, 0, 0));
+				{ screenX(leftLeafX1), apertureBottom }, packColour(0, 0, 0));
 
 		if (rightLeafVisible)
 			drawList->AddRect({ screenX(rightLeafX0), apertureTop },
-				{ screenX(rightLeafX1), apertureBottom }, ImColor(0, 0, 0));
+				{ screenX(rightLeafX1), apertureBottom }, packColour(0, 0, 0));
 
 		drawList->PopClipRect();
 		drawList->AddDrawCmd();
@@ -755,8 +769,8 @@ static void renderBrokenWarning(Device const& device, WorldDrawList* drawList, b
 	transformPosition(anchor);
 	drawList->AddTriangleFilled(Vec2(anchor.x, anchor.y - 16.0f),
 		Vec2(anchor.x - 7.0f, anchor.y - 3.0f),
-		Vec2(anchor.x + 7.0f, anchor.y - 3.0f), ImColor(255, 166, 26, 255));
-	auto const ink = ImU32(ImColor(30, 20, 0, 255));
+		Vec2(anchor.x + 7.0f, anchor.y - 3.0f), packColour(255, 166, 26, 255));
+	auto const ink = packColour(30, 20, 0, 255);
 	drawList->AddLine(Vec2(anchor.x, anchor.y - 12.0f),
 		Vec2(anchor.x, anchor.y - 8.0f), ink, 2.0f);
 	drawList->AddRectFilled(Vec2(anchor.x - 1.0f, anchor.y - 6.0f),
@@ -799,7 +813,7 @@ void renderDoor(shared_ptr<const core::Door> door, uint32_t layer, LayerRenderSt
 		transformPosition(bounds1);
 		Vec2 topLeft{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
 		Vec2 bottomRight{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
-		drawList->AddRectFilled(topLeft, bottomRight, ImColor(255, 255, 0, 48));
+		drawList->AddRectFilled(topLeft, bottomRight, packColour(255, 255, 0, 48));
 		drawList->AddRect(topLeft, bottomRight, SelectedColour, 0.0f, 0, 2.0f);
 	}
 	// Owned transport Doors share failure, but the warning belongs to the
@@ -824,10 +838,10 @@ void renderBulkheadDoor(shared_ptr<const core::BulkheadDoor> door, uint32_t /* l
 
 	auto topLeft = Vec2{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
 	auto bottomRight = Vec2{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
-	auto doorColour = ImColor(128, 192, 182);
+	auto doorColour = packColour(128, 192, 182);
 	if (style == LayerRenderStyle::Wireframe)
 	{
-		drawList->AddRect(topLeft, bottomRight, ImColor(0, 0, 0));
+		drawList->AddRect(topLeft, bottomRight, packColour(0, 0, 0));
 	}
 	else
 	{
@@ -840,7 +854,7 @@ void renderBulkheadDoor(shared_ptr<const core::BulkheadDoor> door, uint32_t /* l
 		transformPosition(full0); transformPosition(full1);
 		topLeft = { min(full0.x, full1.x), min(full0.y, full1.y) };
 		bottomRight = { max(full0.x, full1.x), max(full0.y, full1.y) };
-		drawList->AddRectFilled(topLeft, bottomRight, ImColor(255, 255, 0, 48));
+		drawList->AddRectFilled(topLeft, bottomRight, packColour(255, 255, 0, 48));
 		drawList->AddRect(topLeft, bottomRight, SelectedColour, 0.0f, 0, 2.0f);
 	}
 	renderBrokenWarning(*door, drawList);
@@ -858,7 +872,7 @@ void renderWindowClear(shared_ptr<const core::Window> window, uint32_t layer, La
 
 	if (style == LayerRenderStyle::Wireframe)
 	{
-		drawList->AddRect({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, ImColor(0, 0, 0));
+		drawList->AddRect({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, packColour(0, 0, 0));
 		return;
 	}
 
@@ -868,8 +882,10 @@ void renderWindowClear(shared_ptr<const core::Window> window, uint32_t layer, La
 	auto const backLayer = core::layerBehind(layer);
 
 	// The aperture's rect in world (cell) units, before the screen transform.
-	core::Vector2 worldMin, worldMax;
-	window->getFullShape(worldMin, worldMax);
+	core::Vector2 shapeMin, shapeMax;
+	window->getFullShape(shapeMin, shapeMax);
+	Vec2 const worldMin{ shapeMin.x, shapeMin.y };
+	Vec2 const worldMax{ shapeMax.x, shapeMax.y };
 
 	drawList->AddDrawCmd();
 
@@ -893,7 +909,7 @@ void renderWindowClear(shared_ptr<const core::Window> window, uint32_t layer, La
 		// region; black stands in behind the glass there, as it does for a
 		// Window with no back Sector at all. The opaque fills below cover it
 		// wherever a Background is present.
-		drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, ImColor(0, 0, 0));
+		drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, packColour(0, 0, 0));
 
 		for (auto const& region : regions)
 		{
@@ -923,16 +939,14 @@ void renderWindowClear(shared_ptr<const core::Window> window, uint32_t layer, La
 		// back-layer tint (#34). A back Sector that carries no colour of its
 		// own keeps the tint.
 		auto const ownColour = apertureFillColour(*backSector);
-		auto const apertureColour = ownColour
-			? ImColor(ownColour->r, ownColour->g, ownColour->b, 255)
-			: BackLocationColour;
+		auto const apertureColour = ownColour.value_or(BackLocationColour);
 
 		renderSector(backSector, core::layerBehind(layer), LayerRenderStyle::Aperture, false,
 			apertureColour, drawList);
 	}
 	else
 	{
-		drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, ImColor(0, 0, 0));
+		drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, packColour(0, 0, 0));
 	}
 
 	drawList->PopClipRect();
@@ -982,10 +996,10 @@ void renderBoothWindow(shared_ptr<const core::BoothWindow> booth, uint32_t layer
 	Vec2 shutterMin{innerMin.x, innerMin.y - travel};
 	Vec2 shutterMax{innerMax.x, innerMax.y - travel};
 	if (!drawObjectSprite("booth-window-shutter", drawList, shutterMin, shutterMax))
-		drawList->AddRectFilled(shutterMin, shutterMax, ImColor(90, 106, 116));
+		drawList->AddRectFilled(shutterMin, shutterMax, packColour(90, 106, 116));
 	drawList->PopClipRect();
 	if (!drawObjectSprite("booth-window-open", drawList, topLeft, bottomRight))
-		drawList->AddRect(topLeft, bottomRight, ImColor(148, 162, 170), 0.0f, 0, 2.0f);
+		drawList->AddRect(topLeft, bottomRight, packColour(148, 162, 170), 0.0f, 0, 2.0f);
 }
 
 void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRenderStyle style, bool selected, WorldDrawList* drawList)
@@ -1033,7 +1047,7 @@ void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRe
 		transformPosition(bounds1);
 		Vec2 topLeft{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
 		Vec2 bottomRight{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
-		drawList->AddRectFilled(topLeft, bottomRight, ImColor(255, 255, 0, 48));
+		drawList->AddRectFilled(topLeft, bottomRight, packColour(255, 255, 0, 48));
 		drawList->AddRect(topLeft, bottomRight, SelectedColour, 0.0f, 0, 2.0f);
 	}
 }
@@ -1050,16 +1064,16 @@ void renderPhysicalControl(shared_ptr<const core::Button> button, uint32_t /* la
 	// green, so a failed threshold is visible from its control.
 	auto const broken = gRenderWorld
 		&& gRenderWorld->isControlTargetBroken(button->getInteractionPointId());
-	auto colour = broken ? ImColor(255, 0, 0)
-		: button->isEnabled() ? ImColor(0, 255, 128) : ImColor(192, 128, 128);
+	auto colour = broken ? packColour(255, 0, 0)
+		: button->isEnabled() ? packColour(0, 255, 128) : packColour(192, 128, 128);
 	auto point = gRenderWorld ? gRenderWorld->lookupInteractionPoint(button->getInteractionPointId()).entity : nullptr;
 	auto unit = point ? gRenderWorld->lookupDumbwaiter(point->getDumbwaiterOwner()) : nullptr;
 	if (unit && !broken)
 	{
 		auto stop = unit->getLandingButton(0) == button->getInteractionPointId() ? 0u : 1u;
-		colour = unit->isBusy() ? ImColor(220, 80, 80)
+		colour = unit->isBusy() ? packColour(220, 80, 80)
 			: unit->getButtonState(stop) == core::DumbwaiterButtonState::Here
-				? ImColor(80, 200, 120) : ImColor(200, 160, 80);
+				? packColour(80, 200, 120) : packColour(200, 160, 80);
 	}
 
 	// A Button seen from the Layer its controlling threshold was authored on is
@@ -1095,7 +1109,7 @@ void renderWalkway(shared_ptr<const core::Walkway> walkway, uint32_t /* layer */
 	transformPosition(bounds0);
 	transformPosition(bounds1);
 
-	auto colour = selected ? SelectedColour : ImColor(64, 64, 64);
+	auto colour = selected ? SelectedColour : packColour(64, 64, 64);
 	drawList->AddLine({ bounds0.x, bounds0.y }, { bounds1.x, bounds0.y }, colour,
 		selected ? 3.0f : 2.0f);
 }
@@ -1122,8 +1136,8 @@ void renderMarker(shared_ptr<const core::Marker> marker, uint32_t /* layer */, L
 			{ topLeft.x + size.x + 3.0f, topLeft.y + size.y + 3.0f },
 			SelectedColour, 2.0f, 0, 2.0f);
 	if (!drawObjectSprite("marker", drawList, topLeft,
-		{topLeft.x + size.x, topLeft.y + size.y}, ImColor(251, 188, 4)))
-		drawList->AddText(font, fontSize, topLeft, ImColor(251, 188, 4), ICON_FA_MAP_MARKER_ALT);
+		{topLeft.x + size.x, topLeft.y + size.y}, packColour(251, 188, 4)))
+		drawList->AddText(font, fontSize, topLeft, packColour(251, 188, 4), ICON_FA_MAP_MARKER_ALT);
 }
 
 
@@ -1158,7 +1172,7 @@ void renderForceBridge(shared_ptr<const core::ForceBridge> forceBridge, uint32_t
 	transformPosition(bounds0);
 	transformPosition(bounds1);
 	drawList->AddLine({ bounds0.x, bounds0.y }, { bounds1.x, bounds0.y },
-		ImColor(0, 255, 0), selected ? 3.0f : 2.0f);
+		packColour(0, 255, 0), selected ? 3.0f : 2.0f);
 	renderBrokenWarning(*forceBridge, drawList);
 }
 
@@ -1207,7 +1221,7 @@ void renderPlatformLift(shared_ptr<const core::LiftSectorObject> const& platform
 	transformPosition(bounds1);
 	Vec2 topLeft{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
 	Vec2 bottomRight{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
-	drawList->AddRect(topLeft, bottomRight, ImColor(128, 128, 192, 72));
+	drawList->AddRect(topLeft, bottomRight, packColour(128, 128, 192, 72));
 
 	core::Vector2 car0, car1;
 	platformLift->getLift()->getCurrentShape(car0, car1);
@@ -1270,7 +1284,7 @@ void renderStairwell(shared_ptr<const core::Stairwell> stairwell, uint32_t /* la
 	transformPosition(screenMax);
 	Vec2 topLeft{ min(screenMin.x, screenMax.x), min(screenMin.y, screenMax.y) };
 	Vec2 bottomRight{ max(screenMin.x, screenMax.x), max(screenMin.y, screenMax.y) };
-	drawList->AddRectFilled(topLeft, bottomRight, ImColor(255, 255, 255));
+	drawList->AddRectFilled(topLeft, bottomRight, packColour(255, 255, 255));
 
 	auto toScreen = [&](core::Vector2 point)
 	{
@@ -1296,15 +1310,15 @@ void renderStairwell(shared_ptr<const core::Stairwell> stairwell, uint32_t /* la
 		for (auto const& platform : stairwell->getLandingPaths(level))
 		{
 			array<Vec2, 2> points{toScreen(platform[0]), toScreen(platform[1])};
-			drawList->AddPolyline(points.data(), 2, ImColor(223, 223, 223), ImDrawFlags_None, 10.0f);
-			drawList->AddPolyline(points.data(), 2, ImColor(0, 0, 0), ImDrawFlags_None, 4.0f);
+			drawList->AddPolyline(points.data(), 2, packColour(223, 223, 223), DrawFlagsNone, 10.0f);
+			drawList->AddPolyline(points.data(), 2, packColour(0, 0, 0), DrawFlagsNone, 4.0f);
 		}
 	if (pathPoints.size() >= 2)
 	{
 		drawList->AddPolyline(pathPoints.data(), (int)pathPoints.size(),
-			ImColor(223, 223, 223), ImDrawFlags_None, 10.0f);
+			packColour(223, 223, 223), DrawFlagsNone, 10.0f);
 		drawList->AddPolyline(pathPoints.data(), (int)pathPoints.size(),
-			ImColor(0, 0, 0), ImDrawFlags_None, 4.0f);
+			packColour(0, 0, 0), DrawFlagsNone, 4.0f);
 	}
 	// Outline each permanently open doorway both from inside the Stairwell
 	// and through the landing aperture. The aperture pass already clips each
@@ -1315,7 +1329,7 @@ void renderStairwell(shared_ptr<const core::Stairwell> stairwell, uint32_t /* la
 			auto low = toScreen({1.f - CORE_STAIRWELL_PASSAGE_WIDTH * .5f, float(level)});
 			auto high = toScreen({1.f + CORE_STAIRWELL_PASSAGE_WIDTH * .5f,
 				float(level) + CORE_STAIRWELL_DOORWAY_HEIGHT});
-			drawList->AddRect({low.x, high.y}, {high.x, low.y}, ImColor(0, 0, 0));
+			drawList->AddRect({low.x, high.y}, {high.x, low.y}, packColour(0, 0, 0));
 		}
 }
 
@@ -1332,11 +1346,11 @@ void renderStaircase(shared_ptr<const core::Staircase> staircase, WorldDrawList*
 		transformPosition(point);
 		return Vec2{ point.x, point.y };
 	};
-	auto drawSteps = [&](auto const& segments, ImU32 colour, float thickness)
+	auto drawSteps = [&](auto const& segments, PackedColourValue colour, float thickness)
 	{
 		for (auto const& segment : segments)
 			drawList->AddPolyline(segment.data(), (int)segment.size(), colour,
-				ImDrawFlags_None, thickness);
+				DrawFlagsNone, thickness);
 	};
 
 	if (staircase->isEscalator())
@@ -1358,8 +1372,8 @@ void renderStaircase(shared_ptr<const core::Staircase> staircase, WorldDrawList*
 			float const y1 = path[0].y + (path[1].y - path[0].y) * t;
 			segments.push_back({ toScreen(x0, y0), toScreen(x1, y0), toScreen(x1, y1) });
 		}
-		drawSteps(segments, IM_COL32(32, 32, 32, 255), 10.0f);
-		drawSteps(segments, IM_COL32(220, 220, 220, 255), 6.0f);
+		drawSteps(segments, packColour(32, 32, 32, 255), 10.0f);
+		drawSteps(segments, packColour(220, 220, 220, 255), 6.0f);
 		renderBrokenWarning(*staircase, drawList);
 		return;
 	}
@@ -1377,10 +1391,10 @@ void renderStaircase(shared_ptr<const core::Staircase> staircase, WorldDrawList*
 		points.push_back(toScreen(x1, y0));
 		points.push_back(toScreen(x1, y1));
 	}
-	drawList->AddPolyline(points.data(), (int)points.size(), IM_COL32(32, 32, 32, 255),
-		ImDrawFlags_None, 10.0f);
-	drawList->AddPolyline(points.data(), (int)points.size(), IM_COL32(220, 220, 220, 255),
-		ImDrawFlags_None, 6.0f);
+	drawList->AddPolyline(points.data(), (int)points.size(), packColour(32, 32, 32, 255),
+		DrawFlagsNone, 10.0f);
+	drawList->AddPolyline(points.data(), (int)points.size(), packColour(220, 220, 220, 255),
+		DrawFlagsNone, 6.0f);
 }
 
 void renderSelected(shared_ptr<const core::Object> object, int /* layer */, bool /* visibleLayer */, WorldDrawList* drawList)
@@ -1517,24 +1531,24 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 				if (degenerate) panel->getSelectionShape(min, max);
 				transformPosition(min); transformPosition(max);
 				if (!degenerate && isDrawnSolid(style))
-					drawList->AddRectFilled({min.x, max.y}, {max.x, min.y}, IM_COL32(22, 30, 40, 255));
+					drawList->AddRectFilled({min.x, max.y}, {max.x, min.y}, packColour(22, 30, 40, 255));
 				if (panel->getProgress() > 0)
 				{
 					// An inset cross distinguishes Open even in wireframe and zero-area indicators.
-					drawList->AddLine({min.x, max.y}, {max.x, min.y}, IM_COL32(100, 210, 180, 255), 2);
-					drawList->AddLine({min.x, min.y}, {max.x, max.y}, IM_COL32(100, 210, 180, 255), 2);
+					drawList->AddLine({min.x, max.y}, {max.x, min.y}, packColour(100, 210, 180, 255), 2);
+					drawList->AddLine({min.x, min.y}, {max.x, max.y}, packColour(100, 210, 180, 255), 2);
 				}
 				// OpenUp: the leaf retracts into the top edge, revealing the bottom first.
 				if (!degenerate && panel->getProgress() < 1)
 				{
 					auto bottom = min.y + (max.y - min.y) * panel->getProgress();
 					if (isDrawnSolid(style))
-						drawList->AddRectFilled({min.x, max.y}, {max.x, bottom}, IM_COL32(78, 92, 110, 255));
+						drawList->AddRectFilled({min.x, max.y}, {max.x, bottom}, packColour(78, 92, 110, 255));
 					if (panel->getProgress() > 0)
-						drawList->AddRect({min.x, max.y}, {max.x, bottom}, IM_COL32(165, 180, 198, 255), 0, 0, 2);
+						drawList->AddRect({min.x, max.y}, {max.x, bottom}, packColour(165, 180, 198, 255), 0, 0, 2);
 				}
 				drawList->AddRect({min.x, max.y}, {max.x, min.y},
-					selected ? IM_COL32(251, 188, 4, 255) : IM_COL32(165, 180, 198, 255), 0, 0, 2);
+					selected ? packColour(251, 188, 4, 255) : packColour(165, 180, 198, 255), 0, 0, 2);
 			}
 			break;
 
@@ -1632,24 +1646,24 @@ void renderThresholdsControlsAndAgentsAboveTransit(vector<shared_ptr<const core:
 }
 
 
-ImU32 agentRenderColour(core::Agent const& agent, bool selected)
+PackedColourValue agentRenderColour(core::Agent const& agent, bool selected)
 {
 	auto const colour = selected
 		? core::SelectedAgentColour : agent.getEffectiveColour().value;
-	return ImU32(ImColor(colour.r, colour.g, colour.b));
+	return packColour(colour.r, colour.g, colour.b);
 }
 
 namespace
 {
 	void drawAgentDebugBadge(WorldDrawList* drawList, ImFont* font, char const* symbol,
-		ImU32 boxColour, float centreX, float side, float gap, float& bottom)
+		PackedColourValue boxColour, float centreX, float side, float gap, float& bottom)
 	{
 		Vec2 const minimum{ centreX - side * 0.5f, bottom - side };
 		Vec2 const maximum{ centreX + side * 0.5f, bottom };
 		drawList->AddRectFilled(minimum, maximum, boxColour);
 		auto const textSize = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.0f, symbol);
 		drawList->AddText({ centreX - textSize.x * 0.5f,
-			minimum.y + (side - textSize.y) * 0.5f }, IM_COL32_WHITE, symbol);
+			minimum.y + (side - textSize.y) * 0.5f }, White, symbol);
 		bottom = minimum.y - gap;
 	}
 }
@@ -1687,7 +1701,7 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 		drawAgentSprite(agent->getPoseImageTile().c_str(), drawList, minimum,
 			{minimum.x + size.x, minimum.y + size.y}, colour);
 	}
-	else drawList->AddRectFilled({pos0.x, pos1.y}, {pos1.x, pos0.y}, IM_COL32(255, 0, 255, 255));
+	else drawList->AddRectFilled({pos0.x, pos1.y}, {pos1.x, pos0.y}, packColour(255, 0, 255, 255));
 
 	auto const planning = agent->getState() == core::Agent::State::RoutePlanning;
 	if (!gUISettings.renderAgentDebug) return;
@@ -1703,10 +1717,10 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 	float badgeBottom = min(pos0.y, pos1.y) - gap;
 	if (inQueue)
 		drawAgentDebugBadge(drawList, ImGui::GetFont(), "!",
-			IM_COL32(230, 126, 34, 255), centreX, side, gap, badgeBottom);
+			packColour(230, 126, 34, 255), centreX, side, gap, badgeBottom);
 	if (planning)
 		drawAgentDebugBadge(drawList, ImGui::GetFont(), "?",
-			IM_COL32(96, 96, 96, 255), centreX, side, gap, badgeBottom);
+			packColour(96, 96, 96, 255), centreX, side, gap, badgeBottom);
 }
 
 
@@ -1742,8 +1756,8 @@ void renderSelectedAgentPath(core::World const* world, WorldDrawList* drawList)
 	if (!path || path->nodes.empty()) return;
 
 	auto const visibleLayer = static_cast<uint32_t>(max(gUISettings.visibleLayer, 0));
-	auto const outlineColour = IM_COL32(32, 32, 32, 220);
-	auto const pathColour = IM_COL32(255, 196, 0, 240);
+	auto const outlineColour = packColour(32, 32, 32, 220);
+	auto const pathColour = packColour(255, 196, 0, 240);
 
 	auto positionOnVisibleLayer = [visibleLayer](
 		shared_ptr<const core::Vertex> const& vertex, core::Vector2& position)
@@ -1809,13 +1823,13 @@ void renderSectorDepthContent(shared_ptr<const core::Sector> sector, WorldDrawLi
 			core::Vector2 bottom{ top.x + 1, top.y - 1 };
 			transformPosition(top); transformPosition(bottom);
 			if (!drawFurnitureSprite(tile.image.c_str(), drawList, { top.x, top.y }, { bottom.x, bottom.y }))
-				drawList->AddRectFilled({top.x, top.y}, {bottom.x, bottom.y}, IM_COL32(255, 0, 255, 255));
+				drawList->AddRectFilled({top.x, top.y}, {bottom.x, bottom.y}, packColour(255, 0, 255, 255));
 		}
 	}
 }
 
 
-void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRenderStyle style, bool renderEdges, ImColor colour, WorldDrawList* drawList)
+void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRenderStyle style, bool renderEdges, PackedColourValue colour, WorldDrawList* drawList)
 {
 	if (style == LayerRenderStyle::Hidden)
 	{
@@ -1855,7 +1869,7 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	{
 		auto const surface = flatSurfaceColour(*sector);
 		assert(surface.has_value());
-		auto const fill = ImColor(surface->r, surface->g, surface->b, 255);
+		auto const fill = *surface;
 
 		if (shouldFillBackground(style))
 			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, fill);
@@ -1920,8 +1934,8 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 			core::Vector2 high{position.x + 0.9f, position.y + 0.55f};
 			transformPosition(low); transformPosition(high);
 			// Procedural empty car: normal sector recursion supplies depth and clipping.
-			drawList->AddRectFilled({low.x, high.y}, {high.x, low.y}, IM_COL32(180, 190, 205, 255));
-			drawList->AddRect({low.x, high.y}, {high.x, low.y}, IM_COL32(60, 70, 85, 255), 0, 0, 2);
+			drawList->AddRectFilled({low.x, high.y}, {high.x, low.y}, packColour(180, 190, 205, 255));
+			drawList->AddRect({low.x, high.y}, {high.x, low.y}, packColour(60, 70, 85, 255), 0, 0, 2);
 		}
 		break;
 	case core::SectorType::Chamber:
@@ -1934,13 +1948,13 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 			float half = min((bounds1.x - bounds0.x) * 0.3f, 30.0f);
 			float direction = chamber->isLeftToRight() ? 1.0f : -1.0f;
 			Vec2 tip{ centreX + direction * half, centreY };
-			drawList->AddLine({ centreX - direction * half, centreY }, tip, IM_COL32_WHITE, 2);
-			drawList->AddLine(tip, { tip.x - direction * 8, centreY - 6 }, IM_COL32_WHITE, 2);
-			drawList->AddLine(tip, { tip.x - direction * 8, centreY + 6 }, IM_COL32_WHITE, 2);
+			drawList->AddLine({ centreX - direction * half, centreY }, tip, White, 2);
+			drawList->AddLine(tip, { tip.x - direction * 8, centreY - 6 }, White, 2);
+			drawList->AddLine(tip, { tip.x - direction * 8, centreY + 6 }, White, 2);
 			auto capacity = std::format("Capacity: {}", chamber->getJourneyCapacity());
-			drawList->AddText({ bounds0.x + 4, bounds1.y + 4 }, IM_COL32_WHITE, capacity.c_str());
+			drawList->AddText({ bounds0.x + 4, bounds1.y + 4 }, White, capacity.c_str());
 			auto readout = std::format("{}: {:.1f} s", chamber->getPhaseName(), chamber->getRemainingSeconds());
-			drawList->AddText({ bounds0.x + 4, bounds1.y + 20 }, IM_COL32_WHITE, readout.c_str());
+			drawList->AddText({ bounds0.x + 4, bounds1.y + 20 }, White, readout.c_str());
 		}
 		break;
 	}
@@ -1950,7 +1964,7 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		if (!chamber->isCycleComplete() && isDrawnSolid(style))
 		{
 			auto text = std::format("{:.1f} s", chamber->getRemainingCycleSeconds());
-			drawList->AddText({ (bounds0.x + bounds1.x) * 0.5f, bounds1.y + 4 }, IM_COL32_WHITE, text.c_str());
+			drawList->AddText({ (bounds0.x + bounds1.x) * 0.5f, bounds1.y + 4 }, White, text.c_str());
 		}
 		break;
 	}
@@ -2046,14 +2060,14 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 			float sweep = 1.0f - std::abs(2.0f * progress - 1.0f);
 			float x = bounds0.x + (bounds1.x - bounds0.x) * sweep;
 			float y = bounds1.y + (bounds0.y - bounds1.y) * sweep;
-			auto colour = IM_COL32(255, 0, 0, 128);
+			auto colour = packColour(255, 0, 0, 128);
 			drawList->AddLine({ bounds0.x, y }, { bounds1.x, y }, colour, 4.0f);
 			drawList->AddLine({ x, bounds1.y }, { x, bounds0.y }, colour, 4.0f);
 		}
 		else if (chamber->getDecontaminationOpacity() > 0)
 		{
 			auto alpha = (int)std::lround(chamber->getDecontaminationOpacity() * 255.0f);
-			drawList->AddRectFilled({ bounds0.x, bounds1.y }, { bounds1.x, bounds0.y }, IM_COL32(255, 255, 255, alpha));
+			drawList->AddRectFilled({ bounds0.x, bounds1.y }, { bounds1.x, bounds0.y }, packColour(255, 255, 255, alpha));
 			// Generated Doors belong to neighbouring Sectors and may already have
 			// been painted. Restore their visible leaves above the interior effect.
 			for (int side = 0; side < 2; ++side)
@@ -2071,12 +2085,12 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	{
 		if (style == LayerRenderStyle::Wireframe || !drawSectorTileBoundary("ceiling", drawList,
 			{bounds0.x, bounds1.y}, {bounds1.x, bounds1.y + 2.0f}))
-			drawList->AddLine({ bounds0.x, bounds1.y }, { bounds1.x, bounds1.y }, ImColor(0, 0, 0), 2.0f);
+			drawList->AddLine({ bounds0.x, bounds1.y }, { bounds1.x, bounds1.y }, packColour(0, 0, 0), 2.0f);
 
 		// Render floor
 		if (style == LayerRenderStyle::Wireframe || !drawSectorTileBoundary("floor", drawList,
 			{bounds0.x, bounds0.y - 2.0f}, {bounds1.x, bounds0.y}))
-			drawList->AddLine({ bounds0.x, bounds0.y }, { bounds1.x, bounds0.y }, ImColor(0, 0, 0), 2.0f);
+			drawList->AddLine({ bounds0.x, bounds0.y }, { bounds1.x, bounds0.y }, packColour(0, 0, 0), 2.0f);
 
 		// Render walls
 		//
@@ -2119,7 +2133,7 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 					if (style == LayerRenderStyle::Wireframe || !drawSectorTileBoundary(
 						side == CORE_SIDE_LEFT ? "left" : "right", drawList,
 						{left, std::min(from.y, to.y)}, {left + 2.0f, std::max(from.y, to.y)}))
-						drawList->AddLine({ from.x, from.y }, { to.x, to.y }, ImColor(0, 0, 0), 2.0f);
+						drawList->AddLine({ from.x, from.y }, { to.x, to.y }, packColour(0, 0, 0), 2.0f);
 				}
 			}
 
@@ -2357,7 +2371,7 @@ void renderWorld(shared_ptr<const core::World> world, WorldDrawList* drawList)
 	// Grid
 	if (gUISettings.renderGrid)
 	{
-		renderGrid(world, ImColor(128, 128, 127), 1.0f, drawList);
+		renderGrid(world, packColour(128, 128, 127), 1.0f, drawList);
 	}
 	drawList->PopClipRect();
 }
