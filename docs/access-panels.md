@@ -189,7 +189,9 @@ state. YAML/binary loading and reset reconstruct Closed destination panels.
   `accessPanels/staleRequestCleanup`
 - Editor: `accessPanels/selectionAndHistory`
 - Persistence: `accessPanels/roundTripAndMalformedRecords`
-- Render command stream: `accessPanels/closedPresentationAndIndicators` (Closed/Open)
+- Render command stream: `accessPanels/closedPresentationAndIndicators` (Closed/Open),
+  `accessPanels/canvasCoversTheWholeFixtureWorld` (the render canvas reaches the
+  fixture's top Level, so no panel geometry is lost to the clip)
 
 Editor coverage includes the actual Agent action buttons, runtime history isolation,
 and operable reconstructed controls. Persistence checks YAML/binary saving while Open,

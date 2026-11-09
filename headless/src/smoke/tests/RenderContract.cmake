@@ -52,6 +52,7 @@ set(names
     objectAtlas/authoredGridNeedNotMatchTheCell
     objectAtlas/escapingContentAndRemaindersAreRefused
     accessPanels/closedPresentationAndIndicators
+    accessPanels/canvasCoversTheWholeFixtureWorld
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations
     aTransitBehindTheSelectionIsPaintedSolidThroughItsLocations
     aTransitIsNotPaintedWhereTheSelectedLayerDoesNotOpen

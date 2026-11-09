@@ -111,9 +111,12 @@ void viewportZoom()
 	gUISettings = UISettings{};
 	gUISettings.worldZoom = zoom;
 	// The scaled viewport covers exactly Level 2: one Level tall, two cells
-	// wide. The scroll offset and canvas size are that World-unit band
-	// multiplied by the zoom, so the culling conversion must land back on
-	// Level 2 and on nothing below it.
+	// wide from the World origin. The scroll offset and canvas size are that
+	// World-unit band multiplied by the zoom, so the culling conversion must
+	// land back on Level 2 and on nothing below it. Both offsets are pinned:
+	// the UISettings xOffset default of 32 would shift the x band to
+	// [-0.125, 1.875] cells, which only reaches this Room by overlap.
+	gUISettings.xOffset = 0.0f;
 	gUISettings.yOffset = -2.0f * CORE_LEVEL_HEIGHT_PIXELS * zoom;
 	gUISettings.worldViewportWidth = 2.0f * CORE_CELL_WIDTH_PIXELS * zoom;
 	gUISettings.worldViewportHeight = 1.0f * CORE_LEVEL_HEIGHT_PIXELS * zoom;
