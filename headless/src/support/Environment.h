@@ -2,8 +2,11 @@
 
 #include <cstdlib>
 
-namespace core
+namespace headless_support
 {
+	// Verification-only platform helper: checks gate optional trace output on an
+	// environment variable. It lives in the headless tier because the World
+	// domain aggregate keeps no general-purpose environment API (#993).
 	inline bool hasEnvironmentVariable(char const* name)
 	{
 #if defined(_MSC_VER)

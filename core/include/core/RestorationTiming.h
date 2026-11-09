@@ -2,7 +2,7 @@
 
 #include <chrono>
 #include <cstdio>
-#include "Environment.h"
+#include <cstdlib>
 
 namespace core
 {
@@ -14,9 +14,22 @@ namespace core
 		char const* mPhase;
 		bool mEnabled;
 		Clock::time_point mStart;
+
+		// The diagnostic opt-in is read here rather than through a shared
+		// helper: core keeps no general-purpose environment API, so the one
+		// platform call this timing needs stays private to it (#993).
+		static bool phaseEnabled(char const* name)
+		{
+#if defined(_MSC_VER)
+			size_t requiredSize = 0;
+			return getenv_s(&requiredSize, nullptr, 0, name) == 0 && requiredSize != 0;
+#else
+			return std::getenv(name) != nullptr;
+#endif
+		}
 	public:
 		explicit RestorationTiming(char const* phase)
-			: mPhase(phase), mEnabled(hasEnvironmentVariable("PF_RESTORATION_TIMING")),
+			: mPhase(phase), mEnabled(phaseEnabled("PF_RESTORATION_TIMING")),
 			mStart(mEnabled ? Clock::now() : Clock::time_point{}) {}
 		~RestorationTiming()
 		{

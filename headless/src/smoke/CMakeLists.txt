@@ -6,6 +6,10 @@ function(pf_smoke_target_policy target)
     # for free from a single flat include/ exported by core; with per-module
     # include roots it has to be stated here.
     target_include_directories(${target} PRIVATE ${PF_INCLUDE_DIR})
+    # Shared headless verification support sits next to the checks that reuse it,
+    # so every smoke module sees it whether or not it links a support library
+    # that happens to export the directory (#993).
+    target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../support")
     set_target_properties(${target} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
         FOLDER "Tests/Smoke")
