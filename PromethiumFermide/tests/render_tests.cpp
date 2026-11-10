@@ -46,6 +46,9 @@ using pf::render::packColour;
 void require(bool condition, char const* message) {
   if (!condition) throw std::runtime_error(message);
 }
+void require(bool condition, std::string const& message) {
+  if (!condition) throw std::runtime_error(message);
+}
 std::pair<int, int> pngSize(std::filesystem::path const& path) {
   std::ifstream file(path, std::ios::binary);
   std::array<unsigned char, 8> data{};
@@ -335,6 +338,111 @@ void checkAtlasReload(std::filesystem::path const& directory) {
     }
   }
 }
+// The game's canvas selection path (#1026). The World owns which atlas
+// fills each of the four viewport slots; the game owns handing all four of
+// them over every frame. Until this ticket it handed over three, so the
+// renderer kept its constructed `ObjectAtlas` default and a World asking
+// for `ObjectAtlasNew` drew the old sheet everywhere but in the editor.
+//
+// The renderer's install path needs a live OpenGL context, which no
+// headless check has, so what is asserted here is the game's half of the
+// seam: the one table the render pass walks, row by row - that all four
+// slots are in it, that each row reads its own World field, and that each
+// row is bound to the renderer's own entry for that slot rather than to
+// another slot's. The Objects row being bound to `selectWorldObjectImageSet`
+// is what carries the Objects contract (#1022) into the shipped game, and
+// the render smoke module already pins what that entry refuses.
+void checkCanvasAtlasSelection() {
+  auto const& slots = app::worldAtlasSlots();
+  std::array<char const*, 4> const expectedSlots{"Sector", "Objects", "Agent",
+      "Furniture"};
+  require(slots.size() == expectedSlots.size(),
+      "The game selects " + std::to_string(slots.size())
+      + " viewport atlases; a World makes four selections");
+  for (std::size_t index = 0; index < slots.size(); ++index)
+    require(expectedSlots[index] == std::string(slots[index].slot),
+        "The game's atlas slot " + std::to_string(index) + " is '"
+        + std::string(slots[index].slot) + "', expected '" + expectedSlots[index] + "'");
+
+  // Each row installs through its own renderer entry. A row wired to
+  // another slot's entry would push the right name into the wrong slot -
+  // and for Objects would skip the contract that keeps a Door's artwork
+  // inside the collision that stops the Agent.
+  require(slots[0].install == &selectWorldSectorImageSet,
+      "The Sector slot is not installed through selectWorldSectorImageSet");
+  require(slots[1].install == &selectWorldObjectImageSet,
+      "The Objects slot is not installed through selectWorldObjectImageSet, so a "
+      "World's Objects atlas selection never reaches the shipped game");
+  require(slots[2].install == &selectWorldAgentImageSet,
+      "The Agent slot is not installed through selectWorldAgentImageSet");
+  require(slots[3].install == &selectWorldFurnitureImageSet,
+      "The Furniture slot is not installed through selectWorldFurnitureImageSet");
+
+  auto world = std::make_shared<core::World>("Atlas selection", 8, 2);
+  world->addRoom("Front", 0, 0, 0, 8, 1);
+  world->addRoom("Back", 1, 0, 0, 8, 1);
+  world->finishBuild();
+  world->pauseSimulation();
+  std::array<std::string, 4> const selected{world->sectorImageSetResourceName(),
+      world->objectImageSetResourceName(), world->agentImageSetResourceName(),
+      world->furnitureImageSetResourceName()};
+  for (std::size_t index = 0; index < slots.size(); ++index)
+    require(slots[index].selected(*world) == selected[index],
+        "The game's '" + std::string(expectedSlots[index])
+        + "' slot does not read the World's own selection for that slot");
+
+  // A fresh World selects the new family, and the game pushes the Objects
+  // name with the other three rather than leaving the slot at the
+  // renderer's default - which is what makes #1023 land in the game and
+  // not only in the editor.
+  auto const pushed = app::applyWorldAtlasSelections(*world);
+  require(pushed.size() == slots.size(),
+      "The game pushed " + std::to_string(pushed.size())
+      + " atlas selections against a four-slot table");
+  require(std::array<std::string, 4>{pushed[0].name, pushed[1].name,
+      pushed[2].name, pushed[3].name} == selected,
+      "The game did not push the World's four atlas selections");
+  require(pushed[1].name == "ObjectAtlasNew",
+      "A fresh World's Objects selection is not what the game pushes: "
+      + pushed[1].name);
+  require(pushed[1].slot == std::string("Objects"),
+      "The Objects name was pushed through a slot named '" + pushed[1].slot + "'");
+
+  // Repointing the World's Objects atlas changes what the game pushes on
+  // the very next pass. The game holds no copy of the choice of its own,
+  // so there is nothing that can go stale against a live artwork change.
+  world->setObjectImageSetResourceName("ObjectAtlas");
+  auto const repointed = app::applyWorldAtlasSelections(*world);
+  require(repointed[1].name == "ObjectAtlas",
+      "Repointing the World's Objects atlas did not change what the game pushes: "
+      + repointed[1].name);
+  require(repointed[0].name == selected[0] && repointed[2].name == selected[2]
+      && repointed[3].name == selected[3],
+      "Repointing the Objects atlas moved another slot's selection with it");
+
+  // A refused atlas reaches the game's report with the renderer's reason
+  // in it, which is the whole of the difference between a World that says
+  // its Objects set cannot carry its geometry and one that quietly draws a
+  // Door outside its collision. An accepted set reports nothing, so the
+  // report is a signal rather than noise.
+  std::vector<app::WorldAtlasSelection> refused{
+      {"Sector", "SectorAtlasNew", ""},
+      {"Objects", "BrokenAtlas",
+          "Objects atlas 'BrokenAtlas' cannot be used by this World: 1 tile(s) do "
+          "not match what the object renderer draws\n  - tile 'lift-car' is not in "
+          "the atlas"},
+      {"Agent", "AgentAtlasNew", ""},
+      {"Furniture", "FurnitureAtlasNew", ""}};
+  auto const report = app::worldAtlasReport(refused);
+  require(report.find("BrokenAtlas") != std::string::npos
+      && report.find("lift-car") != std::string::npos,
+      "A refused Objects atlas does not reach the game's report with its reason: "
+      + report);
+  refused[1].diagnostic.clear();
+  require(app::worldAtlasReport(refused).empty(),
+      "An atlas selection every slot accepted still produced a report");
+}
+
 void checkStagedMap(std::filesystem::path const& directory) {
   using namespace wp::application::resourcesystem;
   wp::Logger logger;
@@ -808,6 +916,7 @@ int main(int argc, char** argv) {
     checkFurnitureCatalogueReload(directory);
     checkAtlasReload(directory);
     checkStagedMap(directory);
+    checkCanvasAtlasSelection();
     checkWorldText(directory);
     checkAgentPoses();
     checkAgentsAndMarkers();

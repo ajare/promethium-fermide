@@ -396,6 +396,16 @@ way the message names the atlas, names every offending tile, and gives the
 declared extent beside the expected one, so it can be acted on rather than
 guessed at.
 
+The game selects all four slots from one table (`worldAtlasSlots`,
+`PromethiumFermide/render/WorldCanvas.cpp`) every frame, because the World
+owns the choice and the game owns nothing but handing all of it over. One
+list rather than four separate calls is what makes a slot left out a gap in
+a checked list rather than a line nobody counted - which is how the game
+came to draw the old Objects sheet while the World asked for
+`ObjectAtlasNew` (#1026). The game has no artwork panel to show a refusal
+in, so its render pass writes every slot's diagnostic to the application
+log once per distinct value rather than dropping it.
+
 The contract applies only to a tileset that declares its own render semantics -
 version 2. A version 1 set derives them from each tile's content rect, makes no
 declaration of its own, and is the artwork every existing World already draws;

@@ -30,7 +30,8 @@ void StatePlay::setup(wp::application::resourcesystem::ResourceManager* resource
   // host's render system, resource managers and scene cross once, as the
   // shared renderer's own host struct, and the game never touches them
   // again (#1002).
-  render::createWorldCanvas({*renderSystem, *renderResources, *resources, mScene});
+  render::createWorldCanvas({*renderSystem, *renderResources, *resources, mScene},
+      mwLogger);
 }
 
 void StatePlay::teardown() {

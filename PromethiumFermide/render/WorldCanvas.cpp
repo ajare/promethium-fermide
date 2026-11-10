@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "core/Agent.h"
 #include "core/Defines.h"
@@ -11,6 +13,8 @@
 #include "core/SectorObject.h"
 #include "core/Vertex.h"
 #include "core/World.h"
+
+#include <willpower/common/Logger.h>
 
 #include "MppFontMetrics.h"
 #include "Render.h"
@@ -42,6 +46,24 @@ namespace {
 
 std::unique_ptr<MppFontMetrics> gFontMetrics;
 IFontMetrics const* gPreviousMetrics{ nullptr };
+
+// Where a refused atlas selection is written, and the last thing written
+// there. The selection runs every frame, so without remembering what was
+// already reported one bad atlas would fill the log at frame rate.
+wp::Logger* gAtlasReport{ nullptr };
+std::string gAtlasReported;
+
+// Writes a refused selection to the game's report once per distinct
+// diagnostic, so a World that cannot carry its own object geometry says
+// so and then stops saying it.
+void reportAtlasSelections(std::vector<WorldAtlasSelection> const& selections)
+{
+	if (!gAtlasReport) return;
+	auto const report = worldAtlasReport(selections);
+	if (report.empty() || report == gAtlasReported) return;
+	gAtlasReported = report;
+	gAtlasReport->error(report);
+}
 
 // The game's camera, into the viewport the producer reads. Fitted to the
 // World's Layer-0 content when there is no Player to follow; centred on the
@@ -112,8 +134,66 @@ std::shared_ptr<const core::World> viewedWorld(core::World const& world)
 
 } // namespace
 
-void createWorldCanvas(WorldRenderStackHost const& host)
+std::string worldAtlasReport(std::vector<WorldAtlasSelection> const& selections)
 {
+	// Each diagnostic already names its own atlas and its own reason, so
+	// the report is the refusals joined rather than a restatement of them.
+	std::string report;
+	for (auto const& selection : selections)
+	{
+		if (selection.diagnostic.empty()) continue;
+		if (!report.empty()) report += "\n";
+		report += selection.diagnostic;
+	}
+	return report;
+}
+
+std::array<WorldAtlasSlot, 4> const& worldAtlasSlots()
+{
+	// One row per viewport slot, each bound to the World's own selection
+	// for that slot and to the renderer entry that installs it. The Objects
+	// row is the one this ticket adds: the renderer's Objects entry is the
+	// one that runs the Objects contract, so binding this row to it is
+	// what makes a World's Objects choice - and its refusal - reach the
+	// shipped game rather than only the editor (#1026).
+	static std::array<WorldAtlasSlot, 4> const slots{{
+		{"Sector",
+			[](core::World const& world) -> std::string const&
+			{ return world.sectorImageSetResourceName(); },
+			&selectWorldSectorImageSet},
+		{"Objects",
+			[](core::World const& world) -> std::string const&
+			{ return world.objectImageSetResourceName(); },
+			&selectWorldObjectImageSet},
+		{"Agent",
+			[](core::World const& world) -> std::string const&
+			{ return world.agentImageSetResourceName(); },
+			&selectWorldAgentImageSet},
+		{"Furniture",
+			[](core::World const& world) -> std::string const&
+			{ return world.furnitureImageSetResourceName(); },
+			&selectWorldFurnitureImageSet},
+	}};
+	return slots;
+}
+
+std::vector<WorldAtlasSelection> applyWorldAtlasSelections(core::World const& world)
+{
+	std::vector<WorldAtlasSelection> selections;
+	auto const& slots = worldAtlasSlots();
+	selections.reserve(slots.size());
+	for (auto const& slot : slots)
+	{
+		auto const& name = slot.selected(world);
+		selections.push_back({slot.slot, name, slot.install(name)});
+	}
+	return selections;
+}
+
+void createWorldCanvas(WorldRenderStackHost const& host, wp::Logger* report)
+{
+	gAtlasReport = report;
+	gAtlasReported.clear();
 	// The game's text answers go in before the stack is built, so the first
 	// frame has a face to measure with and never falls back to a font nobody
 	// chose (#999).
@@ -128,6 +208,7 @@ void createWorldCanvas(WorldRenderStackHost const& host)
 		installFontMetrics(gPreviousMetrics);
 		gPreviousMetrics = nullptr;
 		gFontMetrics.reset();
+		gAtlasReport = nullptr;
 		throw;
 	}
 }
@@ -135,6 +216,8 @@ void createWorldCanvas(WorldRenderStackHost const& host)
 void destroyWorldCanvas()
 {
 	destroyWorldRenderStack();
+	gAtlasReport = nullptr;
+	gAtlasReported.clear();
 	if (gFontMetrics)
 	{
 		installFontMetrics(gPreviousMetrics);
@@ -161,12 +244,14 @@ void renderWorldCanvas(core::World const& world, float width, float height)
 {
 	if (!worldRenderStackActive()) return;
 	// The World chooses its own artwork; the shared renderer resolves and
-	// installs it, and reports a bad selection rather than throwing over it.
-	// A selection this set already has is a no-op, so calling every frame is
-	// how the game follows a live artwork change without owning the switch.
-	selectWorldSectorImageSet(world.sectorImageSetResourceName());
-	selectWorldAgentImageSet(world.agentImageSetResourceName());
-	selectWorldFurnitureImageSet(world.furnitureImageSetResourceName());
+	// installs it, and reports a bad selection rather than throwing over
+	// it. A selection this set already has is a no-op, so calling every
+	// frame is how the game follows a live artwork change without owning
+	// the switch. All four slots go every frame: leaving one out is how the
+	// game came to draw the old Objects sheet while the World asked for
+	// `ObjectAtlasNew`, and the Objects slot is the one whose refusal
+	// decides whether a Door's artwork sits inside its collision (#1026).
+	reportAtlasSelections(applyWorldAtlasSelections(world));
 	auto const commands = drawWorld(world, width, height);
 	if (commands.commands().empty()) return;
 	renderWorldCommandsToHostTarget(commands, { 0.0f, 0.0f },
