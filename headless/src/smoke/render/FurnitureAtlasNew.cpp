@@ -36,8 +36,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <set>
+#include <utility>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -71,6 +75,7 @@ namespace
 	std::string const kFixture =
 		"headless/src/smoke/fixtures/furniture/furniture-atlas-new.furniture.lua";
 	std::string const kTileset = "resources/textures/furniture-new.tileset.yaml";
+	std::string const kFurnitureAtlasNew{ "FurnitureAtlasNew" };
 
 	// ------------------------------------------------------------------
 	// The atlas as the application holds it.
@@ -140,26 +145,78 @@ namespace
 		return sets;
 	}
 
+	// Installs one Furniture atlas through the one install path the render
+	// stack uses: pixel regions from the manifest's `ImageSet`, render
+	// semantics from the authored tileset the atlas-set registry names for it.
+	// Which sheet is installed is a parameter because the shipped-catalogue
+	// pairing is asserted against every `-New` Furniture atlas, and the old
+	// sheets are installed too to prove the Furniture art of every World that
+	// has not moved is still there (#1029).
+	// The atlas image's own pixel size, read from its PNG header. The install
+	// pairs the `ImageSet`'s regions with the authored tileset's semantics,
+	// and it is the image those regions have to live in - which is not
+	// necessarily the size the tileset file declares for its own image, as
+	// the station Furniture theme shows: it borrows the old object tileset for
+	// its semantics and carries its own sheet.
+	std::pair<int, int> atlasImageSize(smoke::Context const& context,
+		std::string const& location, std::string const& setName)
+	{
+		auto const path = context.fixture("resources/" + location);
+		std::ifstream input(path, std::ios::binary);
+		require(bool(input), "Could not read " + setName + "'s atlas image: "
+			+ path.string());
+		unsigned char header[24]{};
+		input.read(reinterpret_cast<char*>(header), sizeof(header));
+		require(input.gcount() == static_cast<std::streamsize>(sizeof(header)),
+			"Atlas image is too short to read its header: " + path.string());
+		auto const be = [&](int offset) {
+			return (int(unsigned(header[offset]) << 24)
+				| int(unsigned(header[offset + 1]) << 16)
+				| int(unsigned(header[offset + 2]) << 8)
+				| int(unsigned(header[offset + 3])));
+		};
+		require(be(0) == 0x89504e47 && be(12) == 0x49484452,
+			"Atlas image is not a PNG: " + path.string());
+		return { be(16), be(20) };
+	}
+
+	ObjectTileset installFurnitureAtlas(smoke::Context const& context,
+		std::string const& setName)
+	{
+		auto const manifest = bundledManifest(context);
+		auto const set = manifestResource(manifest, setName);
+		require(set.found && set.type == "ImageSet",
+			"The application manifest registers no " + setName + " ImageSet");
+		auto const tileset = atlasSetTilesets(context)[setName];
+		require(!tileset.empty(), "The atlas-set registry names no tileset for "
+			+ setName);
+		// The registry's paths are relative to the registry file, which sits
+		// in `resources/` beside the manifest.
+		auto const authored = ObjectTileset::load(
+			context.fixture("resources/" + tileset));
+		require(!set.imageReference.empty(), setName
+			+ " ImageSet names no paired Image, so its pixel regions have no image");
+		auto const size = atlasImageSize(context,
+			manifestResource(manifest, set.imageReference).location, setName);
+		ObjectTileset installed;
+		installed.width = size.first;
+		installed.height = size.second;
+		installed.sprites = installAtlasTiles(authored.sprites, set.regions,
+			size.first, size.second, setName);
+		setFurnitureTileset(installed, static_cast<TextureId>(1));
+		return installed;
+	}
+
 	// Installs the new Furniture atlas through the one install path the
 	// render stack uses: pixel regions from the ImageSet, render semantics
 	// from the authored tileset.
 	ObjectTileset installNewFurnitureAtlas(smoke::Context const& context)
 	{
-		auto const manifest = bundledManifest(context);
-		auto const set = manifestResource(manifest, "FurnitureAtlasNew");
-		require(set.found && set.type == "ImageSet",
-			"The application manifest registers no FurnitureAtlasNew ImageSet");
-		require(atlasSetTilesets(context)["FurnitureAtlasNew"] == "textures/furniture-new.tileset.yaml",
+		require(atlasSetTilesets(context)["FurnitureAtlasNew"]
+			== "textures/furniture-new.tileset.yaml",
 			"The atlas-set registry does not name furniture-new.tileset.yaml for "
 			"FurnitureAtlasNew");
-		auto const authored = ObjectTileset::load(context.fixture(kTileset));
-		ObjectTileset installed;
-		installed.width = authored.width;
-		installed.height = authored.height;
-		installed.sprites = installAtlasTiles(authored.sprites, set.regions,
-			authored.width, authored.height, "FurnitureAtlasNew");
-		setFurnitureTileset(installed, static_cast<TextureId>(1));
-		return installed;
+		return installFurnitureAtlas(context, kFurnitureAtlasNew);
 	}
 
 	// ------------------------------------------------------------------
@@ -192,15 +249,15 @@ namespace
 		return world;
 	}
 
-	void prepareCanvas()
+	void prepareCanvasOn(float width, float height)
 	{
-		ImGui::GetIO().DisplaySize = { kCanvasWidth, kCanvasHeight };
+		ImGui::GetIO().DisplaySize = { width, height };
 		ImGui::GetIO().Fonts->AddFontDefault();
 		ImGui::GetIO().Fonts->Build();
 		ImGui::NewFrame();
 		gUISettings.worldZoom = 1;
-		gUISettings.worldViewportWidth = kCanvasWidth;
-		gUISettings.worldViewportHeight = kCanvasHeight;
+		gUISettings.worldViewportWidth = width;
+		gUISettings.worldViewportHeight = height;
 		gUISettings.worldViewportX = 0;
 		gUISettings.worldViewportY = 0;
 		gUISettings.xOffset = 0;
@@ -208,12 +265,20 @@ namespace
 		gUISettings.visibleLayer = 0;
 	}
 
-	WorldDrawList drawWorld(std::shared_ptr<core::World> const& world)
+	void prepareCanvas() { prepareCanvasOn(kCanvasWidth, kCanvasHeight); }
+
+	WorldDrawList drawWorldOn(std::shared_ptr<core::World> const& world,
+		float width, float height)
 	{
-		WorldDrawList drawing{ { { 0, 0 }, { kCanvasWidth, kCanvasHeight } } };
+		WorldDrawList drawing{ { { 0, 0 }, { width, height } } };
 		RenderWorldScope scope(world);
 		renderWorld(world, &drawing);
 		return drawing;
+	}
+
+	WorldDrawList drawWorld(std::shared_ptr<core::World> const& world)
+	{
+		return drawWorldOn(world, kCanvasWidth, kCanvasHeight);
 	}
 
 	// One drawn Furniture cell: where it landed on screen and which part of
@@ -654,6 +719,393 @@ namespace
 			&& legacy->tiles[1].image == "sofa-right",
 			"The legacy fixture stopped naming the tiles the old atlas holds");
 	}
+
+	// ------------------------------------------------------------------
+	// The shipped bundle, paired with the atlas.
+	// ------------------------------------------------------------------
+	//
+	// Everything above this line proves the sheet is well-formed and that a
+	// catalogue *made* to name role tiles draws them. None of it could see the
+	// bug this ticket is about: #1016 authored the ten role tiles, every check
+	// drove the fixture catalogue, and the real shipped catalogues went on
+	// naming `chair`, `sofa-left` and `desk-right` - names this sheet has never
+	// carried - so every piece drew the missing-tile magenta under the atlas
+	// #1023 made the default. The checks below read the shipped catalogues
+	// themselves and pair them with the sheet (#1029).
+
+	// The directory the bundled Furniture catalogues live in, reached through
+	// the fixture API by way of one file that has to be there: `fixture()`
+	// resolves regular files only, and the repository root is private to the
+	// smoke support module.
+	std::filesystem::path bundledFurnitureCatalogueDirectory(
+		smoke::Context const& context)
+	{
+		return context.fixture("resources/test-worlds/furniture.furniture.lua")
+			.parent_path();
+	}
+
+	struct ShippedCatalogue
+	{
+		std::string resourceName;
+		std::shared_ptr<const core::FurnitureCatalogue> catalogue;
+	};
+
+	// The Furniture catalogues the application ships, read out of the bundle
+	// rather than listed by hand. A hand-written list goes stale by omission -
+	// a catalogue added next month is simply never paired - which is the same
+	// class of miss as the one this ticket closes.
+	std::vector<ShippedCatalogue> shippedFurnitureCatalogues(
+		smoke::Context const& context)
+	{
+		auto const suffix = std::string{ ".furniture.lua" };
+		std::vector<ShippedCatalogue> catalogues;
+		for (auto const& entry : std::filesystem::directory_iterator(
+				bundledFurnitureCatalogueDirectory(context)))
+		{
+			if (!entry.is_regular_file()) continue;
+			auto const name = entry.path().filename().string();
+			if (name.size() <= suffix.size()
+				|| name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0)
+				continue;
+			catalogues.push_back({ name,
+				core::FurnitureCatalogue::readFile(entry.path()) });
+		}
+		std::sort(catalogues.begin(), catalogues.end(),
+			[](ShippedCatalogue const& a, ShippedCatalogue const& b)
+			{ return a.resourceName < b.resourceName; });
+		return catalogues;
+	}
+
+	// One shipped piece, with the catalogue it came from so a failure can name
+	// both. The catalogues outlive every use of these in the checks below.
+	struct ShippedPiece
+	{
+		std::string catalogueName;
+		std::string key;
+		core::FurnitureDefinition const* definition;
+		// Carried so the piece can be rendered on its own, in a World that
+		// has its catalogue attached and nothing else.
+		std::shared_ptr<const core::FurnitureCatalogue> catalogue;
+	};
+
+	std::vector<ShippedPiece> shippedPieces(
+		std::vector<ShippedCatalogue> const& catalogues)
+	{
+		std::vector<ShippedPiece> pieces;
+		for (auto const& catalogue : catalogues)
+			for (auto const& [key, definition] : catalogue.catalogue->definitions())
+				pieces.push_back({ catalogue.resourceName, key, &definition,
+					catalogue.catalogue });
+		return pieces;
+	}
+
+	std::string footprintKey(std::string const& catalogue, std::string const& piece)
+	{
+		return catalogue + ":" + piece;
+	}
+
+	// The `-New` Furniture atlases the atlas-set registry knows about, read
+	// from the registry rather than hardcoded so a second replacement Furniture
+	// sheet is paired the day it is registered. The name test is the
+	// transition's own: `FurnitureAtlas` plus a `New` suffix.
+	std::vector<std::string> newFurnitureAtlases(smoke::Context const& context)
+	{
+		std::vector<std::string> names;
+		for (auto const& [name, tileset] : atlasSetTilesets(context))
+			if (name.rfind("FurnitureAtlas", 0) == 0
+				&& name.size() > 3
+				&& name.compare(name.size() - 3, 3, "New") == 0)
+				names.push_back(name);
+		require(!names.empty(), "The atlas-set registry names no `-New` Furniture "
+			"atlas, so the shipped catalogues have nothing to be paired against");
+		return names;
+	}
+
+	// Which shipped footprints the sheet holds back, and why. A gap nobody has
+	// to justify is where a magenta rectangle goes to stay unnoticed, so the
+	// reason is part of the entry rather than a bare name.
+	std::map<std::string, std::string> uncoveredFootprints(
+		smoke::Context const& context)
+	{
+		auto const root = YAML::LoadFile(context.fixture(kTileset).string());
+		std::map<std::string, std::string> uncovered;
+		auto const node = root["uncovered_footprints"];
+		if (!node) return uncovered;
+		require(node.IsMap(), "`uncovered_footprints` in " + kTileset
+			+ " must be a map of `<catalogue>:<piece>` to the reason this sheet "
+			"cannot carry it");
+		for (auto const& entry : node)
+		{
+			auto const key = entry.first.as<std::string>();
+			auto const reason = entry.second.IsScalar()
+				? entry.second.as<std::string>() : std::string{};
+			require(!reason.empty(), "`uncovered_footprints` records '" + key
+				+ "' with no reason; every recorded gap has to say why the sheet "
+				"cannot carry the piece");
+			uncovered.emplace(key, reason);
+		}
+		return uncovered;
+	}
+
+	// The old Furniture sheets' own names and the role names that now alias
+	// them. The alias says nothing new about the art: `sofa-left` is the sofa's
+	// left cap and `chair` is the chair's anchor cell. Only the middle roles are
+	// absent, because the old sheets never had middle art (#1029).
+	std::map<std::string, std::string> const kOldFurnitureAliases{
+		{ "chair", "chair-L0" },
+		{ "sofa-left", "sofa-L0" },
+		{ "sofa-right", "sofa-R0" },
+		{ "desk-left", "desk-L0" },
+		{ "desk-right", "desk-R0" },
+		{ "bed-left", "bed-L0" },
+		{ "bed-right", "bed-R0" },
+	};
+
+	// The Furniture atlases outside the `-New` family that the shipped
+	// catalogues are drawn from today: the old default and the station theme.
+	std::vector<std::string> legacyFurnitureAtlases()
+	{
+		return { "FurnitureAtlas", "StationFurnitureAtlas" };
+	}
+
+	// The missing-tile magenta, as the command stream records it: two
+	// untextured triangles per cell `renderSectorDepthContent` could not draw.
+	std::size_t magentaTriangles(WorldDrawList const& drawing)
+	{
+		auto const magenta = packColour(255, 0, 255, 255);
+		std::size_t count{};
+		for (auto const& command : drawing.commands())
+			if (auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command);
+				triangle && triangle->texture == WorldDrawList::Texture::None
+				&& triangle->colour == magenta)
+				++count;
+		return count;
+	}
+
+	std::size_t drawnFurnitureTriangles(WorldDrawList const& drawing)
+	{
+		std::size_t count{};
+		for (auto const& command : drawing.commands())
+			if (auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command);
+				triangle && triangle->texture == WorldDrawList::Texture::FurnitureAtlas)
+				++count;
+		return count;
+	}
+
+	// Places one shipped piece in a Room of its own and renders it, so the
+	// magenta a missing tile causes cannot hide behind another piece's art, and
+	// so a piece's own footprint is what is on trial rather than whatever else
+	// happened to be in the sector.
+	WorldDrawList renderShippedPiece(ShippedPiece const& piece)
+	{
+		auto const& definition = *piece.definition;
+		int height{};
+		for (auto const& tile : definition.tiles)
+			height = std::max(height, tile.y + 1);
+		// A piece whose routes dip below its own Local depth needs to be sat
+		// deep enough for those offsets to stay non-negative, or the loader
+		// refuses it before it can ever be drawn.
+		int deepest{};
+		for (auto const& edge : definition.edges)
+			if (edge.depthOffset) deepest = std::min(deepest, *edge.depthOffset);
+		int const localDepth = std::max(0, -deepest);
+		uint32_t const roomCellsWide = 12;
+		uint32_t const roomLevelsHigh = std::max(1, height);
+		auto world = std::make_shared<core::World>("Shipped " + piece.key,
+			roomCellsWide * 2, roomLevelsHigh + 1);
+		world->attachFurnitureCatalogue(piece.catalogueName, piece.catalogue);
+		auto const room = world->addRoom("Room", 0, 0, 0, roomCellsWide,
+			roomLevelsHigh);
+		float const x = 1.0f;
+		std::string refusal;
+		bool const allowed = world->canPlaceFurniture(room, piece.key, x, 0.0f,
+			piece.key, &refusal, localDepth);
+		require(allowed, "The shipped '" + piece.key + "' piece of "
+			+ piece.catalogueName + " was refused placement in a Room "
+			+ std::to_string(roomCellsWide) + " cells wide and "
+			+ std::to_string(roomLevelsHigh) + " levels high: " + refusal);
+		world->placeFurniture(room, piece.key, x, 0.0f, piece.key, localDepth);
+		world->finishBuild();
+		world->pauseSimulation();
+		float const canvasWidth = float(roomCellsWide) * kCellWidth;
+		float const canvasHeight = float(roomLevelsHigh) * kLevelHeight;
+		prepareCanvasOn(canvasWidth, canvasHeight);
+		return drawWorldOn(world, canvasWidth, canvasHeight);
+	}
+
+	// AC: every shipped Furniture catalogue resolves all of its tile images
+	// in every `-New` Furniture atlas, and a disagreement names the catalogue,
+	// the piece and the tile. Every shipped piece is asked, not a selection: a
+	// check that sampled the bundle would leave the unsampled pieces exactly as
+	// unpaired as they were before it was written.
+	void everyShippedFurnitureCatalogueResolvesInEveryNewFurnitureAtlas(
+		smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const atlases = newFurnitureAtlases(context);
+		auto const catalogues = shippedFurnitureCatalogues(context);
+		require(catalogues.size() >= 7, "Only " + std::to_string(catalogues.size())
+			+ " bundled `.furniture.lua` catalogues were found in "
+			+ bundledFurnitureCatalogueDirectory(context).string() + "; the bundle ships "
+			"seven, so the pairing is being asserted against less than the whole bundle");
+		auto const uncovered = uncoveredFootprints(context);
+		for (auto const& atlasName : atlases)
+		{
+			auto const atlas = installFurnitureAtlas(context, atlasName);
+			require(!atlas.sprites.empty(), "Installing " + atlasName
+				+ " produced no tiles, so nothing could resolve in it");
+			for (auto const& piece : shippedPieces(catalogues))
+			{
+				if (uncovered.count(footprintKey(piece.catalogueName, piece.key))) continue;
+				for (auto const& tile : piece.definition->tiles)
+					require(atlas.sprites.count(tile.image),
+						"The shipped catalogue '" + piece.catalogueName + "' names tile '"
+						+ tile.image + "' at " + std::to_string(tile.x) + ","
+						+ std::to_string(tile.y) + " of its '" + piece.key + "' piece, which "
+						+ atlasName + " does not carry, so every placed " + piece.key
+						+ " draws the missing-tile magenta. Repoint the tile onto a "
+						+ atlasName + " tile, or record the gap under "
+						"`uncovered_footprints` in " + kTileset + " with the reason.");
+			}
+		}
+	}
+
+	// AC: no shipped Furniture piece renders the missing-tile magenta under
+	// the new default atlas. Each piece is rendered on its own so the count is
+	// attributable, and the detector is then proved not to be deaf: with the
+	// atlas pulled out from under the same piece the very same count has to
+	// light up, or the check above could not have failed on magenta at all.
+	void noShippedFurnitureRendersMagentaUnderTheNewDefaultAtlas(
+		smoke::Context const& context)
+	{
+		using smoke::require;
+		installNewFurnitureAtlas(context);
+		auto const catalogues = shippedFurnitureCatalogues(context);
+		auto const uncovered = uncoveredFootprints(context);
+		std::vector<ShippedPiece> rendered;
+		for (auto const& piece : shippedPieces(catalogues))
+		{
+			if (uncovered.count(footprintKey(piece.catalogueName, piece.key))) continue;
+			auto const drawing = renderShippedPiece(piece);
+			auto const magenta = magentaTriangles(drawing);
+			require(magenta == 0, "The shipped '" + piece.key + "' piece of "
+				+ piece.catalogueName + " drew " + std::to_string(magenta)
+				+ " missing-tile magenta triangles under " + kFurnitureAtlasNew
+				+ " instead of its artwork");
+			require(drawnFurnitureTriangles(drawing) > 0, "The shipped '" + piece.key
+				+ "' piece of " + piece.catalogueName + " drew no Furniture artwork at all "
+				"under " + kFurnitureAtlasNew + ", so its tiles resolve in name only");
+			rendered.push_back(piece);
+		}
+		require(rendered.size() >= 10, "Only " + std::to_string(rendered.size())
+			+ " shipped pieces were rendered under " + kFurnitureAtlasNew + "; the bundle "
+			"defines more, so the magenta check is being asserted against a fraction of it");
+		// The vacuity guard, on the same piece that just passed.
+		clearFurnitureTileset();
+		auto const bare = renderShippedPiece(rendered.front());
+		require(magentaTriangles(bare) > 0, "The magenta detector saw nothing with no "
+			"Furniture atlas installed, so the check above could not have failed on "
+			"magenta at all");
+	}
+
+	// AC: the `-New` Furniture sheet covers every footprint the shipped
+	// catalogues define, or the gap is recorded explicitly. A record has to be
+	// reasoned, has to name something the bundle still ships, and has to be a
+	// gap still - a record for a piece the sheet now covers is a claim that has
+	// stopped describing anything, and a stale claim is where the next gap gets
+	// hidden.
+	void everyShippedFootprintIsCoveredOrRecorded(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const authored = ObjectTileset::load(context.fixture(kTileset));
+		auto const catalogues = shippedFurnitureCatalogues(context);
+		auto const uncovered = uncoveredFootprints(context);
+		std::set<std::string> recordedGaps;
+		for (auto const& piece : shippedPieces(catalogues))
+		{
+			auto const id = footprintKey(piece.catalogueName, piece.key);
+			std::string missing;
+			for (auto const& tile : piece.definition->tiles)
+				if (!authored.sprites.count(tile.image)) { missing = tile.image; break; }
+			if (missing.empty())
+			{
+				require(!uncovered.count(id), "`uncovered_footprints` records '" + id
+					+ "' as a gap this sheet cannot carry, but every tile its piece names "
+					"resolves in " + kFurnitureAtlasNew + ". The record no longer "
+					"describes a gap and should go with it.");
+				continue;
+			}
+			require(uncovered.count(id), "The shipped '" + piece.key + "' piece of "
+				+ piece.catalogueName + " names tile '" + missing + "', which "
+				+ kFurnitureAtlasNew + " does not carry, and the gap is recorded nowhere. "
+				"Repoint the tile onto a " + kFurnitureAtlasNew + " tile, or record it "
+				"under `uncovered_footprints` in " + kTileset + " with the reason this "
+				"sheet cannot carry the piece.");
+			recordedGaps.insert(id);
+		}
+		for (auto const& [id, reason] : uncovered)
+			require(recordedGaps.count(id), "`uncovered_footprints` records '" + id
+				+ "', which no shipped catalogue defines any more. The reason given - \""
+				+ reason + "\" - no longer describes anything the bundle ships, so the "
+				"record should go with the piece.");
+	}
+
+	// AC: existing Worlds on the old Furniture atlases are unaffected. Those
+	// sheets keep every name they always had, and the role names they now carry
+	// as aliases cover the identical pixel region, so a World that has not
+	// moved draws the pixels it has always drawn - which is asserted by
+	// rendering a shipped piece through the old sheet and requiring its art,
+	// not a magenta rectangle.
+	void theOldFurnitureAtlasesStillDrawTheirOwnArt(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const catalogues = shippedFurnitureCatalogues(context);
+		ShippedPiece chair{};
+		for (auto const& piece : shippedPieces(catalogues))
+			if (piece.catalogueName == "furniture.furniture.lua" && piece.key == "chair")
+				chair = piece;
+		require(chair.definition != nullptr, "The bundle ships no `chair` piece in "
+			"furniture.furniture.lua, so the old sheets have nothing to be rendered "
+			"against");
+		for (auto const& atlasName : legacyFurnitureAtlases())
+		{
+			auto const atlas = installFurnitureAtlas(context, atlasName);
+			for (auto const& [own, alias] : kOldFurnitureAliases)
+			{
+				require(atlas.sprites.count(own), "'" + own + "' no longer resolves in "
+					+ atlasName + ", the tile the old Furniture artwork lives under for "
+					"every World still drawing that sheet");
+				require(atlas.sprites.count(alias), "'" + alias + "' does not resolve in "
+					+ atlasName + ", so a shipped catalogue naming it draws the "
+					"missing-tile magenta in every World that has not moved to "
+					+ kFurnitureAtlasNew);
+				auto const& from = atlas.sprites.at(own).region;
+				auto const& to = atlas.sprites.at(alias).region;
+				require(from.x == to.x && from.y == to.y && from.width == to.width
+					&& from.height == to.height, "'" + alias + "' covers a different pixel "
+					"region to '" + own + "' in " + atlasName + ", so repointing the "
+					"shipped catalogues onto the role name changed the artwork of every "
+					"World still drawing " + atlasName);
+			}
+			auto const drawing = renderShippedPiece(chair);
+			require(magentaTriangles(drawing) == 0, "The shipped chair drew "
+				+ std::to_string(magentaTriangles(drawing))
+				+ " missing-tile magenta triangles under " + atlasName + " instead of the "
+				"artwork that World has always drawn");
+			require(drawnFurnitureTriangles(drawing) > 0, "The shipped chair drew no "
+				"Furniture artwork under " + atlasName + " at all");
+		}
+		// The old sheets are not the new one: the middle roles the new sheet
+		// authors were never part of the old art, and saying so here is what
+		// stops a future alias quietly inventing artwork nobody drew.
+		auto const old = ObjectTileset::load(
+			context.fixture("resources/textures/objects.tileset.yaml"));
+		for (auto const* name : { "sofa-M0", "desk-M0", "bed-M0" })
+			require(!old.sprites.count(name), std::string{ "'" } + name
+				+ "' has been added to the old Furniture sheet, which never had "
+				"middle art; an alias here would be inventing artwork rather than "
+				"renaming it");
+	}
 }
 
 void render_smoke::registerFurnitureAtlasNew(std::vector<smoke::Check>& checks)
@@ -688,4 +1140,12 @@ void render_smoke::registerFurnitureAtlasNew(std::vector<smoke::Check>& checks)
 		isolated<loaderAcceptsConformingFootprints> });
 	checks.push_back({ "furnitureAtlasNew/loaderLeavesLegacyNamesAlone",
 		isolated<loaderLeavesLegacyNamesAlone> });
+	checks.push_back({ "furnitureAtlasNew/everyShippedFurnitureCatalogueResolvesInEveryNewFurnitureAtlas",
+		isolated<everyShippedFurnitureCatalogueResolvesInEveryNewFurnitureAtlas> });
+	checks.push_back({ "furnitureAtlasNew/noShippedFurnitureRendersMagentaUnderTheNewDefaultAtlas",
+		isolated<noShippedFurnitureRendersMagentaUnderTheNewDefaultAtlas> });
+	checks.push_back({ "furnitureAtlasNew/everyShippedFootprintIsCoveredOrRecorded",
+		isolated<everyShippedFootprintIsCoveredOrRecorded> });
+	checks.push_back({ "furnitureAtlasNew/theOldFurnitureAtlasesStillDrawTheirOwnArt",
+		isolated<theOldFurnitureAtlasesStillDrawTheirOwnArt> });
 }

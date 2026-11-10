@@ -1,4 +1,8 @@
 -- Native Lua catalogue; UUID, keys, artwork and routes are stable.
+--
+-- Every tile wears the Furniture role convention (#1029), so this catalogue
+-- resolves in FurnitureAtlasNew - the atlas a new World now draws - instead of
+-- falling through to the missing-tile magenta.
 local function sit(agent, world, marker)
 
   world.claim()
@@ -15,7 +19,7 @@ return {
       key = "chair",
       label = "Chair",
       tiles = {
-        {x = 0, y = 0, image = "chair"},
+        {x = 0, y = 0, image = "chair-L0"},
       },
       usablePoints = {
         {key = "seat", label = "Seat", x = 0.5},
@@ -27,8 +31,8 @@ return {
       label = "Two-seat sofa",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, image = "sofa-left"},
-        {x = 1, y = 0, image = "sofa-right"},
+        {x = 0, y = 0, image = "sofa-L0"},
+        {x = 1, y = 0, image = "sofa-R0"},
       },
       usablePoints = {
         {key = "left", label = "Left seat", x = 0.5},
@@ -57,8 +61,8 @@ return {
       label = "Desk with front and back routes",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, image = "desk-left"},
-        {x = 1, y = 0, image = "desk-right"},
+        {x = 0, y = 0, image = "desk-L0"},
+        {x = 1, y = 0, image = "desk-R0"},
       },
       usablePoints = {
       },

@@ -1,4 +1,8 @@
 -- Native Lua catalogue; UUID, keys, artwork and routes are stable.
+--
+-- The tiles wear the Furniture role convention (#1029): this catalogue's desk is
+-- two cells wide and names the desk's caps, and its chair is one cell and names the
+-- chair's anchor.
 local function sit(agent, world, marker)
 
   world.claim()
@@ -16,8 +20,8 @@ return {
       label = "Desk with front and back routes",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, image = "chair"},
-        {x = 1, y = 0, image = "chair"},
+        {x = 0, y = 0, image = "desk-L0"},
+        {x = 1, y = 0, image = "desk-R0"},
       },
       usablePoints = {
         {key = "seat", label = "Seat", x = 0.75},
@@ -46,7 +50,7 @@ return {
       key = "chair",
       label = "Attaching chair",
       tiles = {
-        {x = 0, y = 0, image = "chair"},
+        {x = 0, y = 0, image = "chair-L0"},
       },
       usablePoints = {
         {key = "seat", label = "Seat", x = 0.5},

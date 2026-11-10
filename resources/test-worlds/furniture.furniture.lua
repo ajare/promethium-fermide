@@ -1,4 +1,11 @@
 -- Native Lua catalogue; UUID, keys, artwork and routes are stable.
+--
+-- Every tile is named by the Furniture role convention (#1029): `<piece>-<role><level>`,
+-- the role being `L`, `M` or `R` for the left cap, a middle cell and the right cap,
+-- and the level the height level within the footprint. This catalogue resolves in
+-- FurnitureAtlasNew, the atlas a new World now draws; the old bare names it used to
+-- carry (`chair`, `sofa-left`, `bed-right`, `desk-right`) belong to the retired
+-- FurnitureAtlas sheet and are not what a new World renders.
 local function sit(agent, world, marker)
 
   world.claim()
@@ -20,7 +27,7 @@ return {
       label = "Chair",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, image = "chair"},
+        {x = 0, y = 0, image = "chair-L0"},
       },
       usablePoints = {
         {key = "seat", label = "Seat", x = 0.5, blocksPathing = false},
@@ -55,8 +62,8 @@ return {
       label = "Sofa",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, image = "sofa-left"},
-        {x = 1, y = 0, image = "sofa-right"},
+        {x = 0, y = 0, image = "sofa-L0"},
+        {x = 1, y = 0, image = "sofa-R0"},
       },
       usablePoints = {
         {key = "left", label = "Left seat", x = 0.5, blocksPathing = false},
@@ -89,8 +96,8 @@ return {
       label = "Bed",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, image = "bed-left"},
-        {x = 1, y = 0, image = "bed-right"},
+        {x = 0, y = 0, image = "bed-L0"},
+        {x = 1, y = 0, image = "bed-R0"},
       },
       usablePoints = {
         {key = "middle", label = "Middle", x = 1, blocksPathing = false},
@@ -120,8 +127,8 @@ return {
       label = "Desk",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, image = "desk-left"},
-        {x = 1, y = 0, image = "desk-right"},
+        {x = 0, y = 0, image = "desk-L0"},
+        {x = 1, y = 0, image = "desk-R0"},
       },
       usablePoints = {
       },

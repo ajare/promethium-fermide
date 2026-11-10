@@ -282,11 +282,59 @@ a piece that speaks it, not every catalogue written before it, which is what let
 the old `FurnitureAtlas` stay registered and canonical while the new set is
 brought up beside it.
 
+### The shipped catalogues were repointed (#1029)
+
+Registering the role tiles was only half the migration. Every shipped catalogue
+under `resources/test-worlds/` still named the pre-convention sheet - `chair`,
+`sofa-left`, `desk-right` - and `FurnitureAtlasNew` carries none of those names,
+so any World pairing the atlas a new World now defaults to with a shipped
+catalogue drew every Furniture piece as the missing-tile magenta. The shipped
+catalogues now speak the convention: `chair-L0`, `sofa-L0`/`sofa-R0`,
+`bed-L0`/`bed-R0`, `desk-L0`/`desk-R0`, and the four-cell composition piece
+reuses `sofa-M0` twice rather than needing a fourth tile.
+
+Two things had to come with that repoint.
+
+**The old sheets keep their Worlds.** A World that has not moved to
+`FurnitureAtlasNew` - which is every document written before the selection
+existed, plus the station theme - draws the old sheet, and the repoint must not
+change a pixel of it. `FurnitureAtlas` and `StationFurnitureAtlas` therefore
+carry each role name the shipped catalogues now use over the identical pixel
+region as the old name it stands for. The alias says nothing new about the art:
+`sofa-left` *is* the sofa's left cap and `chair` *is* the chair's anchor cell.
+The middle roles are deliberately absent, because the old sheets never had
+middle art; a piece wider than two cells was not something they could express.
+
+**A footprint the sheet cannot serve is a stated gap.** `layouts.furniture.lua`'s
+`larger` piece reaches a negative offset from its anchor and a second height
+level with no left cap there, so neither the role vocabulary nor the `-XY`
+escape hatch can name it as placed, and the sheet is a full 5x2 grid of
+full-cell role tiles with no irregular art to give it. `uncovered_footprints`
+at the top of `furniture-new.tileset.yaml` records it with the reason, in the
+same shape as the Agent sheet's `reserved_appearances`. A record with no reason
+is refused, as is one naming a piece the sheet now covers: a gap that is written
+down is a decision, and one that is not is a magenta rectangle nobody noticed.
+
 The `render` smoke module's `furnitureAtlasNew/*` checks prove all of this: the
 ten tiles registered at full-cell drawn size, a three-cell sofa rendering from
 `sofa-L0`, `sofa-M0` and `sofa-R0`, a four-cell sofa reusing the same middle
 tile across two cells and naming three tiles in all, and each refusal at the
-loader seam.
+loader seam. The four added with #1029 read the shipped bundle itself rather
+than a fixture made to conform - which is the whole point, since a synthetic
+catalogue cannot see that the real one names something else:
+
+- `everyShippedFurnitureCatalogueResolvesInEveryNewFurnitureAtlas` pairs every
+  tile of every shipped catalogue with every `-New` Furniture atlas the atlas-set
+  registry names, and a disagreement names the catalogue, the piece and the tile.
+- `noShippedFurnitureRendersMagentaUnderTheNewDefaultAtlas` renders each shipped
+  piece on its own under `FurnitureAtlasNew` and requires its artwork, then pulls
+  the atlas out from under the same piece to prove the magenta detector is not
+  deaf.
+- `everyShippedFootprintIsCoveredOrRecorded` holds the covered-or-recorded rule
+  and refuses a gap record that is reasonless or has stopped describing a gap.
+- `theOldFurnitureAtlasesStillDrawTheirOwnArt` installs the old sheets the way
+  the render stack does and requires each role alias to cover the identical
+  region to the name it stands for, so an existing World's pixels are unchanged.
 
 ## AgentAtlasNew and the appearance-keyed grid
 

@@ -1,4 +1,9 @@
 -- Native Lua catalogue; UUID, keys, artwork and routes are stable.
+--
+-- The tiles wear the Furniture role convention (#1029). These are synthetic
+-- replacement pieces, so they borrow the sofa's roles: `outer` is four cells wide
+-- and reuses `sofa-M0` twice, which is what the role vocabulary buys - the middle
+-- tile is named for what it is for and not for where one particular width put it.
 return {
   api_version = 1,
   uuid = "9a486bac-52cc-4c45-a190-3a317be86536",
@@ -8,10 +13,10 @@ return {
       label = "Wide replacement",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, image = "chair"},
-        {x = 1, y = 0, image = "chair"},
-        {x = 2, y = 0, image = "chair"},
-        {x = 3, y = 0, image = "chair"},
+        {x = 0, y = 0, image = "sofa-L0"},
+        {x = 1, y = 0, image = "sofa-M0"},
+        {x = 2, y = 0, image = "sofa-M0"},
+        {x = 3, y = 0, image = "sofa-R0"},
       },
       usablePoints = {
         {key = "seat", label = "Seat", x = 0.75},
@@ -37,8 +42,8 @@ return {
       label = "Narrow replacement",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, image = "chair"},
-        {x = 1, y = 0, image = "chair"},
+        {x = 0, y = 0, image = "sofa-L0"},
+        {x = 1, y = 0, image = "sofa-R0"},
       },
       usablePoints = {
         {key = "seat", label = "Seat", x = 0.75},

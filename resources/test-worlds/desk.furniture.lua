@@ -1,4 +1,8 @@
 -- Native Lua catalogue; UUID, keys, artwork and routes are stable.
+--
+-- The tiles wear the Furniture role convention (#1029). This piece is a desk two
+-- cells wide, so it names the desk's left cap and right cap rather than the chair
+-- artwork the pre-convention sheet happened to draw in both cells.
 return {
   api_version = 1,
   uuid = "1c639f04-1183-4e51-9385-86cce6b0f031",
@@ -8,8 +12,8 @@ return {
       label = "Desk with front and back routes",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, image = "chair"},
-        {x = 1, y = 0, image = "chair"},
+        {x = 0, y = 0, image = "desk-L0"},
+        {x = 1, y = 0, image = "desk-R0"},
       },
       usablePoints = {
         {key = "seat", label = "Seat", x = 0.75},

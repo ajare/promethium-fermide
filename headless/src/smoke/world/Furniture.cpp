@@ -102,7 +102,19 @@ namespace
 				// Teaching catalogues add use to geometry-only regression seating.
 				original.hasUse = key == "chair" || key == "sofa" || key == "bed";
 				if (original.hasUse) original.usePose = key == "bed" ? core::Pose::Lying : core::Pose::Sitting;
-				require(original == definition, "Conversion changed artwork, geometry, keys, explicit routes or defaults: " + filename + "/" + key);
+				// Which sheet a tile's art lives on is not this check's business.
+				// #1029 repointed the shipped catalogues onto the Furniture role
+				// vocabulary while this fixture baseline still names the old one,
+				// so the tile's position in the footprint is what is compared
+				// here. The artwork pairing itself is guarded where the atlas is,
+				// by `furnitureAtlasNew/
+				// everyShippedFurnitureCatalogueResolvesInEveryNewFurnitureAtlas`.
+				auto const withoutArtwork = [](core::FurnitureDefinition shaped) {
+					for (auto& tile : shaped.tiles) { tile.image.clear(); tile.imageSet.clear(); }
+					return shaped;
+				};
+				require(withoutArtwork(original) == withoutArtwork(definition),
+					"Conversion changed geometry, keys, explicit routes or defaults: " + filename + "/" + key);
 				core::World world("Bundled " + key, 24, 3);
 				auto room = world.addRoom("Room", 0, 0, 0, 24, 2);
 				world.attachFurnitureCatalogue(filename, catalogue);

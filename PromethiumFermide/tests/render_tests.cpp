@@ -128,13 +128,20 @@ ObjectTileset installAtlases(std::filesystem::path const& directory) {
   furniture.width = objectsSize.first; furniture.height = objectsSize.second;
   for (auto image : resource("FurnitureAtlas")["Definitions"]["Definition"]["Images"]["Image"]) {
     auto name = image["name"].as<std::string>();
-    auto const& alias = objects.sprites.at(name).region;
+    // The authored tileset is the authority the alias is checked against: it
+    // carries every Furniture name the atlas declares, the role names the
+    // shipped catalogues now use included (#1029).
+    auto const& alias = authored.sprites.at(name).region;
     require(alias.x == image["x"].as<int>() && alias.y == image["y"].as<int>()
         && alias.width == image["width"].as<int>() && alias.height == image["height"].as<int>(),
         "Furniture compatibility alias must preserve its rectangle");
     furniture.sprites.emplace(name, ObjectSprite{alias, false});
   }
-  require(furniture.sprites.size() == 7, "FurnitureAtlas must include chairs, sofas, desks and beds");
+  // Seven pieces of old Furniture art, each reachable under its own name and
+  // under the role name the shipped catalogues now use (#1029).
+  require(furniture.sprites.size() == 14,
+      "FurnitureAtlas must include chairs, sofas, desks and beds under both "
+      "vocabularies");
   installTilesets(std::move(sectors), objects, std::move(agents), std::move(furniture));
   return objects;
 }
@@ -792,7 +799,9 @@ void checkFurniture(std::filesystem::path const& directory, ObjectTileset const&
   custom.sprites.emplace("other", ObjectSprite{{0, 0, 11, 13}, false});
   setFurnitureTileset(custom, kInstalled);
   assertFallback();
-  custom.sprites.emplace("chair", ObjectSprite{{8, 63, 71, 193}, false});
+  // The shipped catalogue names the chair by its role tile (#1029), so the
+  // alternate atlas has to carry that name for the piece to draw from it.
+  custom.sprites.emplace("chair-L0", ObjectSprite{{8, 63, 71, 193}, false});
   setFurnitureTileset(custom, kInstalled);
   auto changed = app::drawWorld(*world, 1280, 720);
   require(textured(changed, WorldDrawList::Texture::FurnitureAtlas) == 4,

@@ -70,6 +70,10 @@ set(names
     furnitureAtlasNew/loaderRefusesAnAbsoluteNameThatDisagreesWithItsPlacement
     furnitureAtlasNew/loaderAcceptsConformingFootprints
     furnitureAtlasNew/loaderLeavesLegacyNamesAlone
+    furnitureAtlasNew/everyShippedFurnitureCatalogueResolvesInEveryNewFurnitureAtlas
+    furnitureAtlasNew/noShippedFurnitureRendersMagentaUnderTheNewDefaultAtlas
+    furnitureAtlasNew/everyShippedFootprintIsCoveredOrRecorded
+    furnitureAtlasNew/theOldFurnitureAtlasesStillDrawTheirOwnArt
     sectorAtlasNew/tenFullCellTilesAreRegistered
     sectorAtlasNew/everyEdgeFallsBackToThePrimitiveLine
     sectorAtlasNew/everySurfaceBearingSectorTypeResolvesToItsOwnTile

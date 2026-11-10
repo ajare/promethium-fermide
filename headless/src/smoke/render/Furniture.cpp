@@ -40,7 +40,12 @@ namespace
 			auto name = resource["name"].as<std::string>();
 			if (name == "FurnitureIntegrationDemo") demoDependency = resource["DependentResources"]["DependentResource"]["ref"].as<std::string>() == "FurnitureIntegrationCatalogue";
 			if (name == "FurnitureIntegrationCatalogue") catalogueDependency = resource["DependentResources"]["DependentResource"]["ref"].as<std::string>() == "FurnitureAtlas";
-			if (name == "ObjectAtlas" || name == "AgentAtlas")
+			// The Furniture tiles come from the Furniture atlas, which is what the
+			// World actually draws them from. They used to be reachable through the
+			// Object atlas's copy of the same sheet; the shipped catalogue names
+			// them by role now (#1029), and those names live in FurnitureAtlas and
+			// nowhere else.
+			if (name == "ObjectAtlas" || name == "AgentAtlas" || name == "FurnitureAtlas")
 				for (auto image : resource["Definitions"]["Definition"]["Images"]["Image"])
 					tiles.sprites.emplace(image["name"].as<std::string>(), ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(), image["width"].as<int>(), image["height"].as<int>()}, false});
 		}

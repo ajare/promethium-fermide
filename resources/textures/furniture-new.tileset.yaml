@@ -44,6 +44,27 @@ version: 2
 image: furniture-new.png
 size: [640, 640]
 tile_size: [128, 320]
+# Shipped Furniture pieces whose footprint this sheet cannot serve, and why
+# (#1029).
+#
+# The shipped catalogues are checked tile by tile against every `-New` Furniture
+# atlas, and a piece listed here is the only thing exempting it from that. A gap
+# that is recorded is a decision somebody made about art that does not exist; one
+# that is not recorded is a magenta rectangle nobody noticed. A record with no
+# reason is refused, as is one naming a piece this sheet now covers - a stale
+# record is where the next gap gets hidden.
+#
+# Keyed `<catalogue file>:<definition key>`, the catalogue being the shipped
+# resource under `resources/test-worlds/`.
+uncovered_footprints:
+  "layouts.furniture.lua:larger": >-
+    An irregular three-cell layout that reaches a negative offset from its anchor
+    and a second height level with no left cap at that level, so neither the role
+    vocabulary nor the `-XY` escape hatch can name it as the catalogue places it,
+    and this sheet is a full 5x2 grid of full-cell role tiles with no irregular
+    art to give it. Closing the gap means authoring irregular-footprint artwork
+    and widening the sheet, not renaming the piece; until then this piece draws
+    the old sheet's bare `chair` art and magenta under FurnitureAtlasNew.
 sprites:
   # Row 0: the chair's single anchor cell, then the sofa's three roles.
   chair-L0:

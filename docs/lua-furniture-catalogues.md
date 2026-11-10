@@ -21,8 +21,8 @@ return {
     {
       key = "desk", label = "Desk", sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, image = "chair"},
-        {x = 1, y = 0, image = "chair"}
+        {x = 0, y = 0, image = "desk-L0"},
+        {x = 1, y = 0, image = "desk-R0"}
       },
       usablePoints = {},
       vertices = {
@@ -47,7 +47,11 @@ owned Marker and does not imply Furniture use.
   are a non-empty ordered array of at most 256 records. Lists must be dense arrays;
   unknown fields, mixed table keys, metatables and unsupported values are refused.
 - Tiles have integer `x/y` and a named `image`. They determine the complete
-  cell-based artwork rectangle, including gaps. The World selects `furnitureImageSet`
+  cell-based artwork rectangle, including gaps. A Furniture tile name carries the
+  position it holds in its piece - `<piece>-<role><level>`, or `-XY` for the
+  irregular footprint a role cannot name; see
+  [FurnitureAtlasNew and the tile naming convention](object-tileset.md#furnitureatlasnew-and-the-tile-naming-convention).
+  The World selects `furnitureImageSet`
   (default `FurnitureAtlas`), independently of its catalogue, Agent and Sector artwork.
   The editor's **Furniture artwork** selector lists registered ImageSets; changes are
   immediate, persisted and undoable, including palette and placement previews. Play
@@ -57,7 +61,9 @@ owned Marker and does not imply Furniture use.
   than substituting defaults. Legacy tile `imageSet` fields naming `ObjectAtlas` or
   `FurnitureAtlas` are accepted but do not override the World; other values are refused.
   `FurnitureAtlas` shares `ObjectAtlasImage`; old `ObjectAtlas` Furniture regions remain
-  as compatibility aliases.
+  as compatibility aliases, and the old Furniture sheets also carry each role name the
+  shipped catalogues now use over the identical region, so a World that has not moved
+  to `FurnitureAtlasNew` draws the artwork it has always drawn (#1029).
 - `usablePoints` is required but may be empty. Points have `key`, `label`, finite
   `x`, optional floor-height `y = 0` and optional boolean `blocksPathing` (default
   true). Each explicit bound routing vertex must match its point's position.

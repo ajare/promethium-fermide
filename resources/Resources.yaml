@@ -195,6 +195,17 @@ Resources:
               - { name: "sofa-right", x: "128", y: "320", width: "128", height: "320" }
               - { name: "desk-left", x: "256", y: "320", width: "128", height: "320" }
               - { name: "desk-right", x: "384", y: "320", width: "128", height: "320" }
+              # Role-name aliases over the same station Furniture art (#1029). The
+              # shipped catalogues name their tiles by the role convention now, so
+              # a World wearing this theme keeps its own artwork under the names it
+              # asks for instead of the missing-tile magenta.
+              - { name: "chair-L0", x: "0", y: "0", width: "128", height: "320" }
+              - { name: "bed-L0", x: "256", y: "0", width: "128", height: "320" }
+              - { name: "bed-R0", x: "384", y: "0", width: "128", height: "320" }
+              - { name: "sofa-L0", x: "0", y: "320", width: "128", height: "320" }
+              - { name: "sofa-R0", x: "128", y: "320", width: "128", height: "320" }
+              - { name: "desk-L0", x: "256", y: "320", width: "128", height: "320" }
+              - { name: "desk-R0", x: "384", y: "320", width: "128", height: "320" }
     - type: "ImageSet"
       name: "FurnitureAtlas"
       DependentResources:
@@ -212,6 +223,19 @@ Resources:
               - { name: "desk-right", x: "192", y: "480", width: "64", height: "160" }
               - { name: "bed-left", x: "0", y: "640", width: "64", height: "160" }
               - { name: "bed-right", x: "64", y: "640", width: "64", height: "160" }
+              # Role-name aliases over the same old Furniture art (#1029). The
+              # shipped Furniture catalogues name their tiles by the role
+              # convention now, so a World that stays on this sheet draws the
+              # artwork it has always drawn rather than the missing-tile magenta.
+              # Each alias covers the identical region to the name it aliases,
+              # which is what the render smoke module insists on.
+              - { name: "chair-L0", x: "256", y: "160", width: "64", height: "160" }
+              - { name: "sofa-L0", x: "0", y: "480", width: "64", height: "160" }
+              - { name: "sofa-R0", x: "64", y: "480", width: "64", height: "160" }
+              - { name: "desk-L0", x: "128", y: "480", width: "64", height: "160" }
+              - { name: "desk-R0", x: "192", y: "480", width: "64", height: "160" }
+              - { name: "bed-L0", x: "0", y: "640", width: "64", height: "160" }
+              - { name: "bed-R0", x: "64", y: "640", width: "64", height: "160" }
     - type: "ImageSet"
       name: "ObjectAtlas"
       DependentResources:

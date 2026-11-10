@@ -903,8 +903,10 @@ void checkSelectedSectorAtlases(wp::application::resourcesystem::ResourceManager
       auto atlas = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource(name));
       auto objects = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource("ObjectAtlas"));
       require(atlas && manager.isResourceLoaded(atlas) && manager.isResourceLoaded(atlas->getImage())
-          && atlas->getImage() == objects->getImage() && atlas->getImageDefinitions().size() == 7,
-          "FurnitureAtlas must load all seven tiles using the shared Object image");
+          && atlas->getImage() == objects->getImage() && atlas->getImageDefinitions().size() == 14,
+          "FurnitureAtlas must load all seven pieces of old Furniture art using the "
+          "shared Object image, each under its own name and under the role name "
+          "the shipped catalogues now use (#1029)");
     }
     resources.unload();
   }
