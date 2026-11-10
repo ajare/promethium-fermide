@@ -20,7 +20,9 @@ namespace core
 	//
 	// The anchor is the bottom-left of the piece's footprint, so every
 	// offset is non-negative and no sign has to be encoded in a name. One
-	// digit per axis caps a piece at 9x9.
+	// digit per axis carries the offsets 0 through 9, which caps a piece at
+	// ten cells per axis - ten columns and ten rows. An eleventh column or
+	// row cannot be named, and the loader refuses it.
 	//
 	// The catalogue's per-tile `{x, y}` stays authoritative for placement.
 	// The suffix earns its place by making the art sheet self-describing,

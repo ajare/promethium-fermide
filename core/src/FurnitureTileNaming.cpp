@@ -12,9 +12,12 @@ namespace core
 {
 	namespace
 	{
-		// One digit per axis: the cap a single decimal digit reaches, which is
-		// also the widest and tallest piece the convention can name.
+		// One digit per axis carries the offsets 0 through 9, so the widest
+		// and tallest piece the convention can name is ten cells per axis -
+		// ten columns and ten rows. An offset past the digit's reach names
+		// nothing and is refused below.
 		int const kMaxAxisDigit = 9;
+		int const kMaxAxisCells = kMaxAxisDigit + 1;
 
 		bool isRoleDigit(char const* suffix, char& role, int& digit)
 		{
@@ -129,7 +132,9 @@ namespace core
 				throw SerializationException("Furniture '" + definitionKey
 					+ "' tile '" + tile.image
 					+ "' sits past the one digit per axis the naming convention "
-					"carries");
+					"carries; offsets run 0 through " + std::to_string(kMaxAxisDigit)
+					+ ", which caps a piece at " + std::to_string(kMaxAxisCells)
+					+ " cells per axis");
 		}
 
 		if (vocabulary == FurnitureTileVocabulary::Absolute)

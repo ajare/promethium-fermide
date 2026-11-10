@@ -535,16 +535,41 @@ namespace
 		return {};
 	}
 
-	void loadAccepts(smoke::Context const& context, std::string const& tag,
+	// Loads one variant of the fixture catalogue and hands back what it
+	// read, so a check can assert on the footprint it was given and not
+	// only on the fact that it loaded.
+	std::shared_ptr<const core::FurnitureCatalogue> loadVariant(
+		smoke::Context const& context, std::string const& tag,
 		std::string const& mutation)
 	{
-		using smoke::require;
 		auto source = smoke::catalogueSource(context.fixture(kFixture));
 		source += mutation + "\n";
 		auto const filename = context.temporaryRoot() / (tag + ".furniture.lua");
 		smoke::writeCatalogue(filename, source);
-		auto catalogue = core::FurnitureCatalogue::load(filename);
+		return core::FurnitureCatalogue::load(filename);
+	}
+
+	void loadAccepts(smoke::Context const& context, std::string const& tag,
+		std::string const& mutation)
+	{
+		using smoke::require;
+		auto catalogue = loadVariant(context, tag, mutation);
 		require(bool(catalogue), "A conforming footprint was refused: " + tag);
+	}
+
+	// The Lua that appends a sofa `cells` wide, named by the role
+	// vocabulary: `L` at the anchor, `M` across the middle, `R` on the
+	// last cell. One generator drives both sides of the naming cap so the
+	// two pieces differ only in how far the footprint reaches.
+	std::string wideSofaSource(int cells)
+	{
+		auto const last = std::to_string(cells - 1);
+		return "local wide = { key = \"wideSofa\", label = \"Wide sofa\", "
+			"tiles = {}, usablePoints = {} }\n"
+			"for x = 0, " + last + " do local role = x == 0 and \"L\" or (x == "
+			+ last + " and \"R\" or \"M\") table.insert(wide.tiles, {x = x, "
+			"y = 0, image = \"sofa-\" .. role .. \"0\"}) end\n"
+			"table.insert(catalogue.definitions, wide)";
 	}
 
 	// A `R` at a position its width forbids is refused. Adding a fourth
@@ -650,7 +675,8 @@ namespace
 			+ refusal);
 	}
 
-	// One digit per axis: a tenth column cannot be named.
+	// One digit per axis carries offsets 0 through 9, so an offset of 10 -
+	// the eleventh column - names nothing and is refused.
 	void loaderRefusesAnOffsetPastOneDigit(smoke::Context const& context)
 	{
 		using smoke::require;
@@ -658,6 +684,39 @@ namespace
 			"catalogue.definitions[1].tiles[3].x = 10");
 		require(refusal.find("one digit") != std::string::npos,
 			"An offset past one digit was accepted: " + refusal);
+	}
+
+	// Where the cap runs, pinned from both sides (#1032). One digit per
+	// axis carries the offsets 0 through 9, so ten cells per axis is the
+	// widest and tallest piece the convention can name: a ten-cell-wide
+	// sofa, its right cap at x = 9, loads, and an eleven-cell-wide one -
+	// a right cap at x = 10, which no single digit names - is refused.
+	void loaderCapsAPieceAtTenCellsPerAxis(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const widest = loadVariant(context, "accepts-ten-cells-wide",
+			wideSofaSource(10));
+		require(bool(widest), "A ten-cell-wide piece was refused");
+		auto const piece = widest->definition("wideSofa");
+		require(bool(piece) && piece->tiles.size() == 10,
+			"The ten-cell-wide piece loaded as "
+			+ std::to_string(piece ? piece->tiles.size() : 0)
+			+ " tiles, not ten");
+		int furthestX{};
+		for (auto const& tile : piece->tiles)
+			furthestX = std::max(furthestX, tile.x);
+		require(furthestX == 9, "The widest accepted piece reached x = "
+			+ std::to_string(furthestX) + ", not the digit's last offset, 9");
+		require(piece->tiles.back().image == "sofa-R0",
+			"The widest accepted piece lost its right cap: "
+			+ piece->tiles.back().image);
+
+		// One column past the digit's reach cannot be named, so it cannot be
+		// placed either.
+		auto const refusal = loadRefusal(context, "refuses-eleven-cells-wide",
+			wideSofaSource(11));
+		require(refusal.find("one digit") != std::string::npos,
+			"An eleven-cell-wide piece was accepted: " + refusal);
 	}
 
 	// The catalogue's `{x, y}` is authoritative and the absolute name is
@@ -1134,6 +1193,8 @@ void render_smoke::registerFurnitureAtlasNew(std::vector<smoke::Check>& checks)
 		isolated<loaderRefusesANegativeOffset> });
 	checks.push_back({ "furnitureAtlasNew/loaderRefusesAnOffsetPastOneDigit",
 		isolated<loaderRefusesAnOffsetPastOneDigit> });
+	checks.push_back({ "furnitureAtlasNew/loaderCapsAPieceAtTenCellsPerAxis",
+		isolated<loaderCapsAPieceAtTenCellsPerAxis> });
 	checks.push_back({ "furnitureAtlasNew/loaderRefusesAnAbsoluteNameThatDisagreesWithItsPlacement",
 		isolated<loaderRefusesAnAbsoluteNameThatDisagreesWithItsPlacement> });
 	checks.push_back({ "furnitureAtlasNew/loaderAcceptsConformingFootprints",

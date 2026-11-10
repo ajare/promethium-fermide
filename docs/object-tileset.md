@@ -256,9 +256,11 @@ A Furniture tile name is `<piece>-<role><level>`. The role is `L`, `M` or `R` -
 the left cap, a middle cell, the right cap - and the level is the height level
 within the piece's footprint. The anchor is the **bottom-left** of that footprint,
 so every offset is non-negative and no sign has to be encoded in a name, and one
-digit per axis caps a piece at 9x9. The other vocabulary is `-XY`, an absolute
-offset from the anchor, retained as the escape hatch for the irregular footprint a
-role vocabulary cannot name.
+digit per axis carries the offsets 0 through 9 - which caps a piece at ten cells
+per axis, ten columns and ten rows. An eleventh column cannot be named, and the
+loader refuses it. The other vocabulary is `-XY`, an absolute offset from the
+anchor, retained as the escape hatch for the irregular footprint a role
+vocabulary cannot name.
 
 The invariant the loader enforces is that `L` is always present because it is the
 anchor, `R` appears when the piece is at least two cells wide, and `M` appears when

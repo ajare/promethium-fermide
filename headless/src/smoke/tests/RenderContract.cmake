@@ -67,6 +67,7 @@ set(names
     furnitureAtlasNew/loaderRefusesAHalfSpecifiedHeight
     furnitureAtlasNew/loaderRefusesANegativeOffset
     furnitureAtlasNew/loaderRefusesAnOffsetPastOneDigit
+    furnitureAtlasNew/loaderCapsAPieceAtTenCellsPerAxis
     furnitureAtlasNew/loaderRefusesAnAbsoluteNameThatDisagreesWithItsPlacement
     furnitureAtlasNew/loaderAcceptsConformingFootprints
     furnitureAtlasNew/loaderLeavesLegacyNamesAlone
