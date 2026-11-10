@@ -108,7 +108,7 @@ namespace
 	float const kFrameInsetXRatio = 5.0f / 52.0f;
 	float const kFrameInsetYRatio = 5.0f / 48.0f;
 
-	// The ten tiles this ticket lands, with the drawn size and content
+	// The tiles this ticket lands, with the drawn size and content
 	// rectangle each is authored at and whether each takes a tint.
 	struct TileExpectation
 	{
@@ -125,7 +125,6 @@ namespace
 		{ "window-tinted", 0.8f, 0.3f, 102, 96, false },
 		{ "booth-window-open", 0.8f, 0.3f, 102, 96, false },
 		{ "booth-window-shutter", 0.6461538f, 0.2375f, 83, 76, false },
-		{ "booth-window-closed", 0.8f, 0.3f, 102, 96, false },
 		{ "button-enabled", 0.1f, 0.04f, 13, 13, false },
 		{ "button-disabled", 0.1f, 0.04f, 13, 13, false },
 		{ "marker", 0.25f, 0.1375f, 32, 44, true },
@@ -576,16 +575,19 @@ namespace
 	}
 
 	// ------------------------------------------------------------------
-	// The ten tiles: authored sizes, tintability, generated manifest pair.
+	// The ticket's tiles: authored sizes, tintability, generated manifest
+	// pair.
 	// ------------------------------------------------------------------
-	void tenTilesAreRegisteredInObjectAtlasNew(smoke::Context const& context)
+	void authoredTilesAreRegisteredInObjectAtlasNew(smoke::Context const& context)
 	{
 		using smoke::require;
 		auto const atlas = loadNewObjectsAtlas(context);
 
 		// The sheet is the 6x4 grid of 128x320 cells the set is sized for.
-		// It was 6x3 until the vehicles arrived: nineteen tiles do not fit
-		// eighteen cells (#1021).
+		// It was 6x3 until the vehicles arrived, and the row has stayed
+		// since #1031 dropped the Booth Window's undrawn closed panel: the
+		// image is sized for the art still to come, not trimmed to the tile
+		// count of the moment (#1021).
 		require(atlas.width == 768 && atlas.height == 1280,
 			"ObjectAtlasNew is not the 768x1280 sheet its set is sized for, saw "
 			+ std::to_string(atlas.width) + "x" + std::to_string(atlas.height));
@@ -1176,8 +1178,8 @@ namespace
 
 void render_smoke::registerObjectArtworkNew(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "objectArtworkNew/tenTilesAreRegistered",
-		isolated<tenTilesAreRegisteredInObjectAtlasNew> });
+	checks.push_back({ "objectArtworkNew/authoredTilesAreRegistered",
+		isolated<authoredTilesAreRegisteredInObjectAtlasNew> });
 	checks.push_back({ "objectArtworkNew/doorCropFollowsTheOpenFractionOnEveryStyle",
 		isolated<doorCropFollowsTheOpenFractionOnEveryStyle> });
 	checks.push_back({ "objectArtworkNew/aFullyOpenDoorEmitsNoLeafGeometry",

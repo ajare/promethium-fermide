@@ -24,6 +24,8 @@
 #include "core/Defines.h"
 
 #include <algorithm>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -34,13 +36,118 @@ namespace
 	std::string const kNewObjectsTileset =
 		"resources/textures/objects-new.tileset.yaml";
 
+	// The object renderer itself. The contract is about what it draws, so
+	// this is the file the contract has to be read against.
+	std::string const kRendererSource = "pf-render/src/Render.cpp";
+
+	// The calls that take an Objects tile name and put it on the screen.
+	// `drawPart` is the Shuttle carriage's own wrapper: it names the tile
+	// to the sprite call and falls back to the carriage fill when the
+	// installed set carries no tile for the cell.
+	std::vector<std::string> const kDrawHelpers{
+		"drawObjectSprite(", "drawOffsetTile(", "drawRetractedTile(",
+		"drawPart(",
+	};
+
+	// A tile name reaches a draw call by being an argument to one, or by
+	// being the arm of the conditional that picks the name for one. The
+	// widest shape that does so in the renderer today is the Shuttle's
+	// three-way role choice, four lines from the call that consumes it; the
+	// window leaves room for one more line of conditional without letting a
+	// name two statements away pass for a drawn one.
+	std::size_t const kDrawCallWindow = 6;
+
+	std::string readText(std::filesystem::path const& path)
+	{
+		std::ifstream file(path, std::ios::binary);
+		require(file.is_open(), "Could not open " + path.string());
+		std::ostringstream text;
+		text << file.rdbuf();
+		return text.str();
+	}
+
+	std::vector<std::string> splitLines(std::string const& text)
+	{
+		std::vector<std::string> lines;
+		std::istringstream stream(text);
+		for (std::string line; std::getline(stream, line);)
+			lines.push_back(line);
+		return lines;
+	}
+
+	// Comments stripped, string and character literals kept. A tile named
+	// only in prose is not a tile that gets drawn - that is the whole
+	// finding this check exists to make impossible - and a `//` or `/*`
+	// inside a literal must not be read as the start of a comment.
+	std::string withoutComments(std::string const& source)
+	{
+		std::string code;
+		code.reserve(source.size());
+		enum class State { Code, Line, Block, Text, Char } state{State::Code};
+		for (std::size_t i = 0; i < source.size(); ++i)
+		{
+			auto const c = source[i];
+			auto const next = i + 1 < source.size() ? source[i + 1] : '\0';
+			switch (state)
+			{
+			case State::Code:
+				if (c == '/' && next == '/') { state = State::Line; ++i; }
+				else if (c == '/' && next == '*') { state = State::Block; ++i; code += ' '; }
+				else if (c == '"') { state = State::Text; code += c; }
+				else if (c == '\'') { state = State::Char; code += c; }
+				else code += c;
+				break;
+			case State::Line:
+				if (c == '\n') { state = State::Code; code += c; }
+				break;
+			case State::Block:
+				if (c == '*' && next == '/') { state = State::Code; ++i; code += ' '; }
+				else if (c == '\n') code += '\n';
+				else code += ' ';
+				break;
+			case State::Text:
+			case State::Char:
+				if (c == '\\' && i + 1 < source.size()) { code += c; code += source[++i]; }
+				else if ((c == '"' && state == State::Text)
+					|| (c == '\'' && state == State::Char)) { state = State::Code; code += c; }
+				else if (c == '\n') { state = State::Code; code += c; }
+				else code += c;
+				break;
+			}
+		}
+		return code;
+	}
+
+	std::vector<std::size_t> linesCalling(std::vector<std::string> const& lines)
+	{
+		std::vector<std::size_t> calls;
+		for (std::size_t i = 0; i < lines.size(); ++i)
+			for (auto const& helper : kDrawHelpers)
+				if (lines[i].find(helper) != std::string::npos)
+				{
+					calls.push_back(i);
+					break;
+				}
+		return calls;
+	}
+
+	std::vector<std::size_t> linesNaming(std::vector<std::string> const& lines,
+		std::string const& tileName)
+	{
+		auto const literal = "\"" + tileName + "\"";
+		std::vector<std::size_t> found;
+		for (std::size_t i = 0; i < lines.size(); ++i)
+			if (lines[i].find(literal) != std::string::npos) found.push_back(i);
+		return found;
+	}
+
 	// The tiles this ticket's contract is about, in the order the renderer
 	// names them. Kept here as a list rather than derived so a tile dropped
 	// from the contract shows up as a missing name rather than as nothing.
 	std::vector<std::string> const kRequiredTiles{
 		"door", "bulkhead-door", "access-panel",
 		"window-clear", "window-frosted", "window-tinted",
-		"booth-window-open", "booth-window-shutter", "booth-window-closed",
+		"booth-window-open", "booth-window-shutter",
 		"button-enabled", "button-disabled", "marker",
 		"walkway", "lift-car", "platform-lift",
 		"shuttle-L0", "shuttle-M0", "shuttle-R0", "shuttle-connector",
@@ -78,6 +185,49 @@ namespace
 				"The Objects contract does not require '" + name
 				+ "', so a World could select an atlas with no artwork for it");
 		}
+	}
+
+	// Every entry the contract makes has to be a tile the renderer draws.
+	// #1031 found `booth-window-closed` required here with no draw call
+	// naming it anywhere: a hard requirement on artwork nothing consumed,
+	// costing an atlas slot, able to refuse an otherwise usable atlas, and
+	// guarding nothing with its declared drawn size. The list's own comment
+	// used to say the two lists belong in one review; this is that review,
+	// run on every check instead of left to whoever edits next.
+	void everyRequiredTileIsNamedByADrawCall(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const lines = splitLines(withoutComments(
+			readText(context.fixture(kRendererSource))));
+		require(!lines.empty(), "The object renderer source read no lines");
+		auto const drawCalls = linesCalling(lines);
+		require(!drawCalls.empty(),
+			"The object renderer source calls no sprite draw helper at all, so no "
+			"required tile could be seen being drawn");
+
+		std::vector<std::string> undrawn;
+		for (auto const& expected : requiredObjectTiles())
+		{
+			auto const named = linesNaming(lines, expected.tileName);
+			bool reachesADrawCall = false;
+			for (auto const namedLine : named)
+				for (auto const drawLine : drawCalls)
+					if (drawLine + kDrawCallWindow >= namedLine
+						&& drawLine <= namedLine + kDrawCallWindow)
+						reachesADrawCall = true;
+			if (!reachesADrawCall)
+				undrawn.push_back(std::string(expected.tileName)
+					+ (named.empty()
+						? " is named nowhere in the renderer"
+						: " is named only where no draw call reaches it"));
+		}
+		std::string joined;
+		for (auto const& problem : undrawn)
+			joined += "\n  - " + problem;
+		require(undrawn.empty(),
+			"The Objects contract requires " + std::to_string(undrawn.size())
+			+ " tile(s) the object renderer never draws, so an atlas could be "
+			"refused for artwork nothing would ever ask for:" + joined);
 	}
 
 	// Each expectation is composed from the domain's own constants rather
@@ -217,6 +367,8 @@ void render_smoke::registerObjectAtlasContract(std::vector<smoke::Check>& checks
 		isolated<shippedObjectsAtlasSatisfiesTheContract> });
 	checks.push_back({ "objectAtlasContract/coversEveryDrawnTile",
 		isolated<theContractCoversEveryDrawnTile> });
+	checks.push_back({ "objectAtlasContract/everyRequiredTileIsNamedByADrawCall",
+		isolated<everyRequiredTileIsNamedByADrawCall> });
 	checks.push_back({ "objectAtlasContract/expectedExtentsFollowTheDomainGeometry",
 		isolated<theExpectedExtentsFollowTheDomainGeometry> });
 	checks.push_back({ "objectAtlasContract/aMissingRequiredTileIsRefused",

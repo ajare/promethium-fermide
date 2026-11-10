@@ -15,15 +15,19 @@
 # The authored grid is 128 x 320: one World cell at the size the World is
 # now drawn. The Walkway was the tracer-bullet entry; the Bulkhead Door and
 # the Access panel are live here too (#1019); #1020 lands the Door, the
-# three Window styles, the Booth Window's frame, shutter and closed panel,
-# the two Button states and the Marker; and the vehicles - the Lift car, the
-# Platform lift and the Shuttle carriage - arrive on the same sheet (#1021).
+# three Window styles, the Booth Window's frame and shutter, the two Button
+# states and the Marker; and the vehicles - the Lift car, the Platform lift
+# and the Shuttle carriage - arrive on the same sheet (#1021).
 #
-# The vehicles are what took the sheet to a fourth row. Nineteen tiles do
-# not fit an 18-cell grid, and two tiles crammed into one cell would break
-# the one promise the grid makes to whoever draws the real art: that a tile
-# owns its whole 128 x 320 slot. So the image grows by a row rather than a
-# cell being shared.
+# The vehicles are what took the sheet to a fourth row. They arrived when
+# the set held nineteen tiles, and two tiles crammed into one cell would
+# break the one promise the grid makes to whoever draws the real art: that
+# a tile owns its whole 128 x 320 slot. So the image grew by a row rather
+# than a cell being shared, and the row stays. #1031 dropped the Booth
+# Window's closed panel - the Objects contract required it and no draw call
+# named it - which leaves one cell free. Pulling the last tile up into it
+# would move every other tile's pixels to buy nothing, and the sheet is
+# sized for the art that has not landed yet.
 #
 # Every content rectangle below is the tile's declared drawn size measured
 # at the authored grid's pixel size, rounded to whole pixels: a tile drawn
@@ -155,13 +159,15 @@ sprites:
     drawn_size: [0.8, 0.3]
     tintable: false
 
-  # A Booth Window is three tiles that compose rather than three states of
-  # one tile. `booth-window-open` is the frame: opaque at its edges,
+  # A Booth Window is two tiles that compose rather than two states of
+  # one. `booth-window-open` is the frame: opaque at its edges,
   # transparent through its centre, and it never moves. The shutter is
   # the opaque panel that slides behind that frame, and the frame's
-  # transparent centre is what makes the slide visible. `booth-window-
-  # closed` is the whole aperture filled, for the artwork path that wants
-  # one tile for the closed state.
+  # transparent centre is what makes the slide visible. Fully closed, the
+  # shutter fills that centre, so the closed state is already drawn and
+  # needs no tile of its own: the `booth-window-closed` panel this set
+  # carried was required by the Objects contract and named by no draw
+  # call, so #1031 dropped it rather than inventing a consumer for it.
   booth-window-open:
     cell: [3, 1]
     content: [0, 0, 102, 96]
@@ -179,13 +185,6 @@ sprites:
     content: [0, 0, 83, 76]
     offset: [0.0, 0.0]
     drawn_size: [0.6461538, 0.2375]
-    tintable: false
-
-  booth-window-closed:
-    cell: [5, 1]
-    content: [0, 0, 102, 96]
-    offset: [0.0, 0.0]
-    drawn_size: [0.8, 0.3]
     tintable: false
 
   # The Marker is the one tile in this set that takes a tint. Its icon is

@@ -112,7 +112,7 @@ set(names
     bulkheadAndPanel/forceBridgeStillRendersAsAPrimitiveLine
     bulkheadAndPanel/loaderRefusesAForceBridgeTile
     bulkheadAndPanel/aSetWithNeitherTileKeepsThePrimitives
-    objectArtworkNew/tenTilesAreRegistered
+    objectArtworkNew/authoredTilesAreRegistered
     objectArtworkNew/doorCropFollowsTheOpenFractionOnEveryStyle
     objectArtworkNew/aFullyOpenDoorEmitsNoLeafGeometry
     objectArtworkNew/boothWindowShutterTranslatesBehindTheStationaryFrame
@@ -120,6 +120,7 @@ set(names
     objectArtworkNew/markerStaysTintableAndFollowsSelection
     objectAtlasContract/shippedAtlasSatisfiesTheContract
     objectAtlasContract/coversEveryDrawnTile
+    objectAtlasContract/everyRequiredTileIsNamedByADrawCall
     objectAtlasContract/expectedExtentsFollowTheDomainGeometry
     objectAtlasContract/aMissingRequiredTileIsRefused
     objectAtlasContract/aMismatchedDrawnSizeIsRefused

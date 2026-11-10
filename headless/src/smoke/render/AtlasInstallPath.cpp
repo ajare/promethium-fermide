@@ -880,8 +880,15 @@ namespace
 				"ones objects-new.tileset.yaml authors");
 			++objectsReadBack;
 		}
-		require(objectsReadBack >= 19, "Only " + std::to_string(objectsReadBack)
-			+ " Objects tiles were read back; ObjectAtlasNew declares more");
+		// The read-back covers the whole authored set rather than merely
+		// some of it: a slot filled with part of the sheet draws part of the
+		// World and magenta for the rest. Counted against the tileset rather
+		// than a remembered number, so the bound follows the sheet instead
+		// of being left behind when one tile is dropped from it (#1031).
+		require(objectsReadBack == authoredObjects.size(),
+			std::to_string(objectsReadBack) + " Objects tiles were read back "
+			"through the renderer's surface, but objects-new.tileset.yaml authors "
+			+ std::to_string(authoredObjects.size()));
 
 		// The Agent and Furniture slots, read back the same way.
 		for (auto const& [tile, region] : entries.at("AgentAtlasNew").regions)

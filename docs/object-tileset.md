@@ -61,16 +61,19 @@ that far below the floor line of the cell it was authored in.
 `resources/textures/objects-new.tileset.yaml` is the version 2 authored tileset
 behind the replacement Objects atlas, laid out on the 128x320 World cell at
 768x1280. The Walkway, the Bulkhead Door, the Access panel, the Door, the three
-Window styles, the Booth Window's frame, shutter and closed panel, the two Button
-states and the Marker are live in it, along with the three vehicles - the Lift
-car, the Platform lift and the Shuttle carriage - and the rest of the sheet
+Window styles, the Booth Window's frame and shutter, the two Button states and
+the Marker are live in it, along with the three vehicles - the Lift car, the
+Platform lift and the Shuttle carriage - and the rest of the sheet
 drops in against the same image size. The old `ObjectAtlas` and
 `ObjectAtlasImage` stay registered and canonical until nothing references them.
 
-The vehicles are what took the sheet from three rows to four. Nineteen tiles do
-not fit an 18-cell grid, and cramming two into one cell would break the one
+The vehicles are what took the sheet from three rows to four. They arrived when
+the set held nineteen tiles, and cramming two into one cell would break the one
 promise the grid makes to whoever draws the real art: that a tile owns its whole
-128 x 320 slot.
+128 x 320 slot. The row has stayed since #1031 dropped the Booth Window's closed
+panel, which left one cell free: pulling the last tile up into it would move
+every other tile's pixels to buy nothing, and the image is sized for the art that
+has not landed yet.
 
 The `ImageSet` entries the application manifest declares for `ObjectAtlasNew` are
 generated from the tileset, not authored beside it:
@@ -116,12 +119,16 @@ against, not a cap on what the object may be.
 
 ### The Booth Window is a fixed frame with a shutter behind it
 
-A Booth Window composes three tiles rather than switching between three states of
+A Booth Window composes two tiles rather than switching between two states of
 one. `booth-window-open` is the frame - opaque at its edges, transparent through
 its centre - and it never moves. The shutter is the opaque panel that slides
 behind that frame, and the frame's transparent centre is what makes the slide
-visible. `booth-window-closed` fills the whole aperture for the artwork path that
-wants one tile for the closed state.
+visible. Fully closed, the shutter fills that centre, so the closed state is
+already drawn and needs no tile of its own. The set used to carry a
+`booth-window-closed` panel for "the artwork path that wants one tile for the
+closed state"; no such path existed, the Objects contract required the tile, and
+nothing drew it - so #1031 dropped it rather than inventing a consumer for art
+nobody asked for.
 
 The shutter's declared drawn size is the frame's transparent centre rather than
 the frame: 42/52 of the frame's 0.8 across and 38/48 of its 0.3 down, which is
@@ -468,6 +475,15 @@ checked against a contract before it is installed
 - each must declare the render offset the renderer draws it at, which for the
   Walkway is the whole of its placement: its physical shape is a zero-height
   line, so the offset is the only thing hanging its slab on the floor.
+
+The contract is held in both directions. `requiredObjectTiles()` is the list it
+is written against, and the render smoke module reads `pf-render/src/Render.cpp`
+and requires every entry in that list to be named by a draw call - directly, as
+an argument to one, or as the arm of the conditional that picks the name for one.
+A tile named only in a comment does not count, which is the point: that is exactly
+how `booth-window-closed` read as used while nothing drew it (#1031). Without
+that check the list can only ever grow, because adding a requirement costs the
+person adding it nothing and dropping one takes someone who happens to notice.
 
 A set that fails is not installed at all. At stack construction the failure
 throws, so the game refuses to start on an atlas that cannot carry its geometry;

@@ -197,9 +197,14 @@ namespace
 
 std::vector<ObjectTileExpectation> const& requiredObjectTiles()
 {
-    // The list mirrors the names Render.cpp asks the Objects slot for. A
-    // tile added to the renderer without being added here goes unchecked,
-    // so the two lists belong in one review.
+    // The list mirrors the names Render.cpp asks the Objects slot for, and
+    // nothing else. A tile added to the renderer without being added here
+    // goes unchecked; a tile kept here that the renderer never names refuses
+    // an atlas over artwork nothing draws, which is the shape
+    // `booth-window-closed` had before #1031 dropped it. The render smoke
+    // module reads the renderer's source and requires every entry here to
+    // be named by a draw call, so the review the two lists used to need is
+    // a check rather than a habit.
     static std::vector<ObjectTileExpectation> const tiles{
         // The Door leaf is the doorway itself: the cell less the door's x
         // insets, at the door's height. Drawing it any wider would paint
@@ -221,8 +226,6 @@ std::vector<ObjectTileExpectation> const& requiredObjectTiles()
         ObjectTileExpectation{"window-tinted",
             1.0f - 2.0f * CORE_WINDOW_X_INSET, CORE_WINDOW_HEIGHT, {0.0f, 0.0f}},
         ObjectTileExpectation{"booth-window-open",
-            1.0f - 2.0f * CORE_WINDOW_X_INSET, CORE_WINDOW_HEIGHT, {0.0f, 0.0f}},
-        ObjectTileExpectation{"booth-window-closed",
             1.0f - 2.0f * CORE_WINDOW_X_INSET, CORE_WINDOW_HEIGHT, {0.0f, 0.0f}},
         // The shutter is drawn inside the frame's aperture, inset by the
         // frame's own wall thickness: 5 px of the 52 px frame and 5 px of
