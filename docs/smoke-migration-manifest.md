@@ -269,6 +269,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/render/AgentAtlasNew.cpp` | AgentAtlasNew appearance-keyed tile registration, shared and generic fallback rows, authored-flag tint and over-wide Pose cell resolution | `pf-smoke-render` |
 | `smoke/render/BulkheadAndPanelArtwork.cpp` | Bulkhead Door straddling slab and state-synced open progress, Access panel authored-geometry draw and leaf retraction, Force Bridge primitive-line and loader refusal | `pf-smoke-render` |
 | `smoke/render/ObjectArtworkNew.cpp` | ObjectAtlasNew Door, Window, Booth Window, Button and Marker registration, open-fraction leaf crop with no squash on all four styles, fully-open leaf suppression, Booth Window shutter translation behind a stationary clipped frame, Button state and Marker tint | `pf-smoke-render` |
+| `smoke/render/VehicleArtworkNew.cpp` | ObjectAtlasNew Lift car, Platform lift and Shuttle carriage registration, Shuttle carriage composed from role tiles at two, three and four cells wide with the middle reused, carriage connector drawn at the seam rather than a cell position, Platform lift sprite following the live slab over the shaft, Lift car filling its cell and tracking the car, pre-convention sets keeping their own carriage art | `pf-smoke-render` |
 | `smoke/render/AccessPanels.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/render/Airlocks.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/editor/BoothWindows.cpp` | module-owned | `pf-smoke-editor` |

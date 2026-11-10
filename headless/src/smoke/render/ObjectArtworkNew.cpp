@@ -583,9 +583,11 @@ namespace
 		using smoke::require;
 		auto const atlas = loadNewObjectsAtlas(context);
 
-		// The sheet is the 6x3 grid of 128x320 cells the set is sized for.
-		require(atlas.width == 768 && atlas.height == 960,
-			"ObjectAtlasNew is not the 768x960 sheet its set is sized for, saw "
+		// The sheet is the 6x4 grid of 128x320 cells the set is sized for.
+		// It was 6x3 until the vehicles arrived: nineteen tiles do not fit
+		// eighteen cells (#1021).
+		require(atlas.width == 768 && atlas.height == 1280,
+			"ObjectAtlasNew is not the 768x1280 sheet its set is sized for, saw "
 			+ std::to_string(atlas.width) + "x" + std::to_string(atlas.height));
 
 		for (auto const& tile : kTiles)

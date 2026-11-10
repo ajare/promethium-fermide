@@ -1324,6 +1324,19 @@ void renderPlatformLift(shared_ptr<const core::LiftSectorObject> const& platform
 }
 
 
+// The tile one Shuttle carriage cell wears: the role-named tile when the
+// installed atlas carries one, otherwise the left/middle/right tile that
+// same cell drew before the naming convention existed. The fallback is the
+// same shape as the Sector surface fallback further down - a set with no
+// role tiles keeps drawing its own carriage art instead of dropping to the
+// flat fill - so adopting the convention is an upgrade an older sheet
+// survives rather than a break (#1021).
+char const* carriageTileOrLegacy(char const* role, char const* legacy)
+{
+	return objectSpriteSize(role) ? role : legacy;
+}
+
+
 void renderShuttle(shared_ptr<const core::Shuttle> shuttle, uint32_t /* layer */, LayerRenderStyle /* style */, bool /* selected */, WorldDrawList* drawList)
 {
 	core::Vector2 bounds0, bounds1;
@@ -1344,21 +1357,32 @@ void renderShuttle(shared_ptr<const core::Shuttle> shuttle, uint32_t /* layer */
 
 	for (uint32_t car = 0; car < numCars; ++car)
 	{
+		// The carriage is composed from its role tiles, not from art cut per
+		// width: the first cell is the left end, the last is the right end,
+		// and every cell between reuses the middle. A two-cell carriage has
+		// no middle to draw, a four-cell carriage draws the same middle
+		// twice. Widening a carriage buys cells, never tiles (#1021).
 		auto const carX = bounds0.x + car * (carWidth + 1);
 		for (uint32_t cell = 0; cell < carWidth; ++cell)
 		{
-			auto const* sprite = cell == 0 ? "shuttle-car-left"
-				: cell + 1 == carWidth ? "shuttle-car-right"
-				: "shuttle-car-middle";
+			auto const* sprite = cell == 0
+				? carriageTileOrLegacy("shuttle-L0", "shuttle-car-left")
+				: cell + 1 == carWidth
+				? carriageTileOrLegacy("shuttle-R0", "shuttle-car-right")
+				: carriageTileOrLegacy("shuttle-M0", "shuttle-car-middle");
 			drawPart(sprite, { carX + cell, bounds0.y },
 				{ carX + cell + 1.0f, bounds1.y });
 		}
 
 		if (car + 1 < numCars)
 		{
+			// The coupling sits in the one-cell gap between carriages, which
+			// belongs to neither of them. That is why its tile keeps a bare
+			// name: it is not a cell position on a carriage, and a role name
+			// would invite composing it into a carriage's own cell count.
 			auto const connectorX = carX + carWidth;
-			drawPart("shuttle-car-connector", { connectorX, bounds0.y },
-				{ connectorX + 1.0f, bounds1.y });
+			drawPart(carriageTileOrLegacy("shuttle-connector", "shuttle-car-connector"),
+				{ connectorX, bounds0.y }, { connectorX + 1.0f, bounds1.y });
 		}
 	}
 	renderBrokenWarning(*shuttle, drawList, true);

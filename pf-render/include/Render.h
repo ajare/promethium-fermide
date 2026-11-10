@@ -17,6 +17,7 @@
 #include "core/Button.h"
 #include "core/Door.h"
 #include "core/DoorSectorObject.h"
+#include "core/LiftSectorObject.h"
 #include "core/Graph.h"
 #include "core/Marker.h"
 #include "core/Window.h"
@@ -975,6 +976,22 @@ void renderPhysicalControl(std::shared_ptr<const core::Button> button,
 	uint32_t layer, LayerRenderStyle style, bool selected, WorldDrawList* drawList);
 
 void renderMarker(std::shared_ptr<const core::Marker> marker, uint32_t layer,
+	LayerRenderStyle style, bool selected, WorldDrawList* drawList);
+
+// The vehicle passes, declared for the same reason the three above are. A
+// Shuttle carriage narrower than three cells is below what a World will
+// author, and a Lift car part-way up its shaft is not a state a check can
+// ask a World to sit still in, so the vehicle artwork checks (#1021) drive
+// these passes directly against the object rather than reconstructing a
+// whole Sector to reach one moving part.
+//
+void renderLift(std::shared_ptr<const core::Lift> lift, uint32_t layer,
+	LayerRenderStyle style, bool selected, WorldDrawList* drawList);
+
+void renderPlatformLift(std::shared_ptr<const core::LiftSectorObject> const& platformLift,
+	uint32_t layer, LayerRenderStyle style, bool selected, WorldDrawList* drawList);
+
+void renderShuttle(std::shared_ptr<const core::Shuttle> shuttle, uint32_t layer,
 	LayerRenderStyle style, bool selected, WorldDrawList* drawList);
 
 void renderSector(std::shared_ptr<const core::Sector> sector, uint32_t layer,

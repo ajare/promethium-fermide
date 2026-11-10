@@ -14,9 +14,16 @@
 #
 # The authored grid is 128 x 320: one World cell at the size the World is
 # now drawn. The Walkway was the tracer-bullet entry; the Bulkhead Door and
-# the Access panel are live here too (#1019), and #1020 lands the Door, the
+# the Access panel are live here too (#1019); #1020 lands the Door, the
 # three Window styles, the Booth Window's frame, shutter and closed panel,
-# the two Button states and the Marker on the same sheet.
+# the two Button states and the Marker; and the vehicles - the Lift car, the
+# Platform lift and the Shuttle carriage - arrive on the same sheet (#1021).
+#
+# The vehicles are what took the sheet to a fourth row. Nineteen tiles do
+# not fit an 18-cell grid, and two tiles crammed into one cell would break
+# the one promise the grid makes to whoever draws the real art: that a tile
+# owns its whole 128 x 320 slot. So the image grows by a row rather than a
+# cell being shared.
 #
 # Every content rectangle below is the tile's declared drawn size measured
 # at the authored grid's pixel size, rounded to whole pixels: a tile drawn
@@ -25,7 +32,7 @@
 # stretched on its way to the screen.
 version: 2
 image: objects-new.png
-size: [768, 960]
+size: [768, 1280]
 tile_size: [128, 320]
 sprites:
   # A Walkway is `Object(cellX, cellY, 1.0, 0.0)`: deliberately zero
@@ -199,6 +206,78 @@ sprites:
     offset: [0.0, 0.0]
     drawn_size: [0.25, 0.1375]
     tintable: true
+
+  # The Lift car is the vehicle inside the shaft. Its own geometry is
+  # `cellsWide - 2 * CORE_LIFT_CAR_BORDER` across `CORE_LIFT_CAR_HEIGHT`
+  # - the car is inset from the shaft walls by the border on each side, and
+  # it is a hand taller than a Door so the roof reads as a roof - which for
+  # the regular one-cell car is 0.9 x 0.55 World units and 115 x 176 px
+  # here. The renderer draws it into the car's live shape, so the sprite
+  # fills the cell the car occupies and travels with the car through the
+  # shaft rather than sitting at the authored cell.
+  lift-car:
+    cell: [1, 2]
+    content: [0, 0, 115, 176]
+    offset: [0.0, 0.0]
+    drawn_size: [0.9, 0.55]
+    tintable: false
+
+  # The Platform lift is a slab, not a car: `cellsWide` across and 0.05
+  # World units thick, with no car border because there is no car body to
+  # inset. A one-cell slab is therefore 1.0 x 0.05 and 128 x 16 px. The
+  # renderer draws it into the slab's live bounds - the moving thing - and
+  # never into the shaft bounds, which is what keeps a slab halfway up a
+  # four-Level shaft drawn halfway up rather than parked at the bottom.
+  platform-lift:
+    cell: [2, 2]
+    content: [0, 0, 128, 16]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 0.05]
+    tintable: false
+
+  # The Shuttle carriage is composed from three role tiles rather than
+  # from art cut per width. A carriage's cells are all one cell wide and
+  # `CORE_SHUTTLE_CAR_HEIGHT` tall - 1.0 x 0.55 World units, 128 x 176 px
+  # - and the only difference between them is which end of the train they
+  # are at, which is exactly what the role in the name carries. So a
+  # three-cell carriage is L0, M0, R0; a four-cell carriage is L0, M0, M0,
+  # R0; a two-cell carriage is L0, R0 with no middle at all. No width needs
+  # its own artwork, and widening a carriage buys cells rather than tiles.
+  shuttle-L0:
+    cell: [3, 2]
+    content: [0, 0, 128, 176]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 0.55]
+    tintable: false
+
+  shuttle-M0:
+    cell: [4, 2]
+    content: [0, 0, 128, 176]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 0.55]
+    tintable: false
+
+  shuttle-R0:
+    cell: [5, 2]
+    content: [0, 0, 128, 176]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 0.55]
+    tintable: false
+
+  # The connector between two carriages keeps a bare name and no role
+  # suffix, because it is not drawn at a cell of a carriage. It is drawn
+  # at the join: the one-cell gap that separates one carriage from the
+  # next, which belongs to neither. A role name would claim it was a cell
+  # position on the carriage and invite someone to compose it into the
+  # carriage's own cell count, which would put a coupling in the middle of
+  # a train. Same extent as a carriage cell - 1.0 x 0.55, 128 x 176 px -
+  # since it spans the same height across that gap.
+  shuttle-connector:
+    cell: [0, 3]
+    content: [0, 0, 128, 176]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 0.55]
+    tintable: false
 
   # No `force-bridge` tile, deliberately. A Force Bridge's span is
   # continuous and arbitrary - it can be any fraction of a cell wide, over

@@ -41,6 +41,7 @@ namespace render_smoke
 	void registerWalkwayArtwork(std::vector<smoke::Check>& checks);
 	void registerBulkheadAndPanelArtwork(std::vector<smoke::Check>& checks);
 	void registerObjectArtworkNew(std::vector<smoke::Check>& checks);
+	void registerVehicleArtworkNew(std::vector<smoke::Check>& checks);
 	void registerBoothWindows(std::vector<smoke::Check>& checks);
 	void registerAgentPoses(std::vector<smoke::Check>& checks);
 	void registerFontMetrics(std::vector<smoke::Check>& checks);

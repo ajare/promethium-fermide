@@ -109,6 +109,12 @@ set(names
     objectArtworkNew/boothWindowShutterTranslatesBehindTheStationaryFrame
     objectArtworkNew/buttonStateIsLegibleAtTheDrawnSize
     objectArtworkNew/markerStaysTintableAndFollowsSelection
+    vehicleArtworkNew/vehicleTilesAreRegistered
+    vehicleArtworkNew/carriageComposesAtTwoThreeAndFourCellsWide
+    vehicleArtworkNew/connectorSitsAtTheSeamNotACellPosition
+    vehicleArtworkNew/platformLiftSpriteFollowsTheLiveSlab
+    vehicleArtworkNew/liftCarFillsItsCellAndTracksTheCar
+    vehicleArtworkNew/aSetWithoutRoleTilesKeepsItsOwnCarriageArt
     accessPanels/closedPresentationAndIndicators
     accessPanels/canvasCoversTheWholeFixtureWorld
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations

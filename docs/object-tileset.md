@@ -60,11 +60,17 @@ that far below the floor line of the cell it was authored in.
 
 `resources/textures/objects-new.tileset.yaml` is the version 2 authored tileset
 behind the replacement Objects atlas, laid out on the 128x320 World cell at
-768x960. The Walkway, the Bulkhead Door, the Access panel, the Door, the three
+768x1280. The Walkway, the Bulkhead Door, the Access panel, the Door, the three
 Window styles, the Booth Window's frame, shutter and closed panel, the two Button
-states and the Marker are live in it, and the rest of the sheet drops in against
-the same image size. The old `ObjectAtlas` and `ObjectAtlasImage` stay registered
-and canonical until nothing references them.
+states and the Marker are live in it, along with the three vehicles - the Lift
+car, the Platform lift and the Shuttle carriage - and the rest of the sheet
+drops in against the same image size. The old `ObjectAtlas` and
+`ObjectAtlasImage` stay registered and canonical until nothing references them.
+
+The vehicles are what took the sheet from three rows to four. Nineteen tiles do
+not fit an 18-cell grid, and cramming two into one cell would break the one
+promise the grid makes to whoever draws the real art: that a tile owns its whole
+128 x 320 slot.
 
 The `ImageSet` entries the application manifest declares for `ObjectAtlasNew` are
 generated from the tileset, not authored beside it:
@@ -175,6 +181,50 @@ The leaf retracts into the top edge as the panel opens, and the renderer crops
 the tile the same way it crops the Bulkhead Door's slab: the top edge stays
 where it was, the bottom rises with the live progress, and the revealed part of
 the panel shows the recess behind the leaf.
+
+### The Shuttle carriage is composed from role tiles
+
+A carriage is drawn from three tiles - `shuttle-L0`, `shuttle-M0`, `shuttle-R0`
+- and the only difference between a three-cell carriage and a four-cell one is
+how many times the middle gets reused. That is the whole value of putting the
+role in the name: the end-versus-middle difference is carried by the tile rather
+than by the width, so widening a carriage buys cells and never tiles. A two-cell
+carriage is `shuttle-L0`, `shuttle-R0` with no middle at all; a four-cell
+carriage is `shuttle-L0`, `shuttle-M0`, `shuttle-M0`, `shuttle-R0`.
+
+Each carriage cell declares `drawn_size: [1.0, 0.55]` - one cell across
+`CORE_SHUTTLE_CAR_HEIGHT`, 128 x 176 px on this grid - and the renderer draws
+it into that cell of the carriage's live shape. The role vocabulary is the same
+one `FurnitureAtlasNew` speaks further down; a carriage cell is one cell wide at
+one height level, so `L0`, `M0` and `R0` say everything there is to say about
+where a cell sits in the train.
+
+The coupling between two carriages keeps a bare name, `shuttle-connector`, with
+no role suffix. It is drawn at the join: the one-cell gap that separates one
+carriage from the next and belongs to neither. A role name would claim it was a
+cell position on a carriage and invite someone to compose it into a carriage's
+own cell count, which would put a coupling in the middle of a train.
+
+The renderer prefers the role tile and falls back to the pre-convention
+`shuttle-car-left`/`-middle`/`-right`/`-connector` names when the installed set
+carries no role tiles, in the same shape as the Sector surface fallback. Adopting
+the convention is therefore an upgrade an older sheet survives rather than a
+break it takes.
+
+### The Lift car and the Platform lift follow the moving thing
+
+Both are drawn into their own live shape rather than into the shaft they run in.
+
+The Lift car's `lift-car` tile declares `drawn_size: [0.9, 0.55]`: the cell
+width less the `CORE_LIFT_CAR_BORDER` the car is inset by on each side, across
+`CORE_LIFT_CAR_HEIGHT`. The renderer draws it into `Lift::getCurrentShape`, so
+the sprite fills the cell the car occupies and travels with the car up the shaft.
+
+The Platform lift is a slab rather than a car: `platform-lift` declares
+`drawn_size: [1.0, 0.05]` - one cell across its 0.05 thickness, 128 x 16 px -
+and is drawn into the slab's live bounds. The shaft the slab runs in is drawn
+separately, as its own subdued outline, precisely so the two are not confused:
+a slab halfway up a four-Level shaft is drawn halfway up.
 
 ### The Force Bridge is given no tile, deliberately
 
@@ -331,12 +381,17 @@ Supported sprites:
   subregion of the Closed tile translates upwards behind it, clipped to its centre.
   See [BoothWindows](booth-windows.md) for authoring and regeneration.
 - Agents and Markers, keeping the existing icon-fit dimensions.
+- Lift car: the sprite fills the car's own extent and follows the car's live
+  shape through the shaft.
 - Platform lift car: the sprite follows the moving slab's actual bounds, not the
   shaft bounds. The editor shaft outline is retained.
+- Shuttle carriage: composed from the `shuttle-L0`/`-M0`/`-R0` role tiles at any
+  width, with the middle reused, and the `shuttle-connector` drawn at the seam
+  between carriages.
 
-Bulkhead Doors, Access panels, ordinary Doors, Windows, Booth Windows, Buttons and
-Markers render from `ObjectAtlasNew` when that set is installed, and keep their
-flat fills against a set that has no tile for them. Force
+Bulkhead Doors, Access panels, ordinary Doors, Windows, Booth Windows, Buttons,
+Markers and the three vehicles render from `ObjectAtlasNew` when that set is
+installed, and keep their flat fills against a set that has no tile for them. Force
 Bridges remain entirely primitive-rendered - see below. Other
 transport geometry and editor overlays are unchanged. Headless tests without a
 texture retain the primitive/font fallback.
