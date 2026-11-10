@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
+#include <set>
 #include <string>
 #include <utility>
 #include <variant>
@@ -469,34 +470,22 @@ namespace
 		std::string selectSectorImageSet(std::string const& name)
 		{
 			return selectImageSet(mAtlases.sectorName, mAtlases.sector,
-				mAtlases.sectorDiagnostic, name, [this]
-				{
-					mAtlasInstaller.installSectorSlot(mAtlases.sectorName,
-						mAtlases.sector, mAtlases.sectorDiagnostic);
-				});
+				mAtlases.sectorDiagnostic, name,
+				[this] { installSectorSlotArtwork(); });
 		}
 
 		std::string selectAgentImageSet(std::string const& name)
 		{
 			return selectImageSet(mAtlases.agentName, mAtlases.agent,
-				mAtlases.agentDiagnostic, name, [this]
-				{
-					mAtlasInstaller.installObjectSlot(mAtlases.agentName,
-						mAtlases.agent, setAgentTileset, mAtlases.agentDiagnostic,
-						/*mandatory=*/ false, /*enforceObjectContract=*/ false);
-				});
+				mAtlases.agentDiagnostic, name,
+				[this] { installAgentSlotArtwork(); });
 		}
 
 		std::string selectFurnitureImageSet(std::string const& name)
 		{
 			return selectImageSet(mAtlases.furnitureName, mAtlases.furniture,
-				mAtlases.furnitureDiagnostic, name, [this]
-				{
-					mAtlasInstaller.installObjectSlot(mAtlases.furnitureName,
-						mAtlases.furniture, setFurnitureTileset,
-						mAtlases.furnitureDiagnostic, /*mandatory=*/ false,
-						/*enforceObjectContract=*/ false);
-				});
+				mAtlases.furnitureDiagnostic, name,
+				[this] { installFurnitureSlotArtwork(); });
 		}
 
 		// The fourth atlas selection (#1022). Unlike the other three, a bad
@@ -508,30 +497,163 @@ namespace
 		std::string selectObjectImageSet(std::string const& name)
 		{
 			return selectImageSet(mAtlases.objectName, mAtlases.objects,
-				mAtlases.objectDiagnostic, name, [this]
+				mAtlases.objectDiagnostic, name,
+				[this] { installObjectSlotArtwork(); });
+		}
+
+		// Reloads the four selected atlases from disk, definitions and images
+		// both.
+		//
+		// This is a refresh, not a teardown, and the shared `Image` is why it
+		// has to be. The Objects, Agent and Furniture slots all reference
+		// `ObjectAtlasImage` at once, and the resource graph holds its own
+		// acquisitions on top of those. A reload built on release-and-destroy
+		// could therefore never reach the ones that matter most: the ref-count
+		// says the sheet is in use, the ref-count is right, and so the destroy
+		// refuses it. A refresh says something different - the resource is
+		// going back to the state it is already in, only read again - so the
+		// ref-count has nothing to object to, and every holder keeps the same
+		// resource object it had before.
+		//
+		// Both halves get refreshed. The `Image` is the resource that holds the
+		// decoded PNG, so refreshing only the `ImageSet` would re-read the
+		// definitions and leave the pixels exactly as they were. The image goes
+		// first, so the set is re-read over a sheet that is already current.
+		//
+		// The render slots are deliberately left standing. A refresh keeps the
+		// MPP texture the same object with new pixels behind it, so the batches
+		// already holding it draw the new sheet without being torn down and
+		// rebuilt - which is just as well, since that churn was never what a
+		// reload needed.
+		std::string reloadImageSets()
+		{
+			// The registry is re-read rather than reused.
+			mAtlasInstaller = {};
+
+			struct ReloadableSlot
+			{
+				char const* label;
+				std::string* name;
+				resources::ResourcePtr* resource;
+				std::string* diagnostic;
+				void (WorldRenderStack::*install)();
+			};
+			std::vector<ReloadableSlot> const slots{
+				{ "Sector", &mAtlases.sectorName, &mAtlases.sector,
+					&mAtlases.sectorDiagnostic,
+					&WorldRenderStack::installSectorSlotArtwork },
+				{ "Objects", &mAtlases.objectName, &mAtlases.objects,
+					&mAtlases.objectDiagnostic,
+					&WorldRenderStack::installObjectSlotArtwork },
+				{ "Agent", &mAtlases.agentName, &mAtlases.agent,
+					&mAtlases.agentDiagnostic,
+					&WorldRenderStack::installAgentSlotArtwork },
+				{ "Furniture", &mAtlases.furnitureName, &mAtlases.furniture,
+					&mAtlases.furnitureDiagnostic,
+					&WorldRenderStack::installFurnitureSlotArtwork } };
+
+			std::vector<std::string> failures;
+			// Three of the four slots share one `Image`, so the same resource
+			// turns up in this pass several times. Once is enough.
+			std::set<resources::Resource*> refreshed;
+
+			for (auto const& slot : slots)
+			{
+				slot.diagnostic->clear();
+				try
 				{
-					mAtlasInstaller.installObjectSlot(mAtlases.objectName,
-						mAtlases.objects, setObjectTileset, mAtlases.objectDiagnostic,
-						/*mandatory=*/ false, /*enforceObjectContract=*/ true);
-				});
+					if (!*slot.resource)
+					{
+						// Nothing there to refresh; take it up the way a
+						// start-up would.
+						*slot.resource = requireImageSet(*slot.name);
+					}
+					else
+					{
+						// The `Image` is the resource holding the decoded
+						// PNG, so it goes first: refreshing only the `ImageSet`
+						// would re-read the definitions and leave the pixels
+						// exactly as they were.
+						auto const imageSet = std::dynamic_pointer_cast<
+							resources::ImageSetResource>(*slot.resource);
+						if (imageSet)
+						{
+							auto const pixels = imageSet->getImage();
+							if (pixels && refreshed.insert(pixels.get()).second)
+							{
+								mResources->refreshResource(pixels);
+							}
+						}
+						if (refreshed.insert(slot.resource->get()).second)
+						{
+							mResources->refreshResource(*slot.resource);
+						}
+					}
+				}
+				catch (std::exception const& error)
+				{
+					*slot.diagnostic = error.what();
+				}
+				(this->*(slot.install))();
+				if (!slot.diagnostic->empty())
+					failures.push_back(std::string(slot.label) + ": "
+						+ *slot.diagnostic);
+			}
+
+			std::string joined;
+			for (auto const& failure : failures)
+			{
+				if (!joined.empty()) joined += "\n";
+				joined += failure;
+			}
+			return joined;
 		}
 
 	private:
-		// The shape every atlas selection shares: drop the atlas the slot
-		// holds, take the named one, and install that slot through
-		// `installSlot`. Nothing here reaches for a neighbour slot, which is
-		// the whole of #1035 as this class sees it - stated once, so no
-		// selection can pick the four-slot pass back up by accident.
-		//
-		// The unchanged-name short-circuit stays the first thing done: a
-		// selection that names what the slot already holds costs nothing.
-		template <typename Install>
-		std::string selectImageSet(std::string& slotName,
-			resources::ResourcePtr& slotResource, std::string& slotDiagnostic,
-			std::string const& name, Install const& installSlot)
+		// The four slot installs, named so a selection and a reload ask for the
+		// same thing and cannot drift apart. Each reads its slot's current name,
+		// resource and diagnostic at the moment it is called, which is what
+		// lets one install serve a switch to a different set and a reload of
+		// the same one.
+		void installSectorSlotArtwork()
 		{
-			if (name == slotName) return slotDiagnostic;
-			slotName = name;
+			mAtlasInstaller.installSectorSlot(mAtlases.sectorName, mAtlases.sector,
+				mAtlases.sectorDiagnostic);
+		}
+
+		void installObjectSlotArtwork()
+		{
+			mAtlasInstaller.installObjectSlot(mAtlases.objectName, mAtlases.objects,
+				setObjectTileset, mAtlases.objectDiagnostic,
+				/*mandatory=*/ false, /*enforceObjectContract=*/ true);
+		}
+
+		void installAgentSlotArtwork()
+		{
+			mAtlasInstaller.installObjectSlot(mAtlases.agentName, mAtlases.agent,
+				setAgentTileset, mAtlases.agentDiagnostic,
+				/*mandatory=*/ false, /*enforceObjectContract=*/ false);
+		}
+
+		void installFurnitureSlotArtwork()
+		{
+			mAtlasInstaller.installObjectSlot(mAtlases.furnitureName,
+				mAtlases.furniture, setFurnitureTileset,
+				mAtlases.furnitureDiagnostic, /*mandatory=*/ false,
+				/*enforceObjectContract=*/ false);
+		}
+
+		// Drops what the slot holds, takes the named set back up, and installs
+		// it. This is the atlas *switch*: the old set is released and left
+		// created, which is what lets Willpower reuse its decoded pixels and
+		// its MPP declaration if it is ever selected again. A reload is not
+		// this - see `reloadImageSets`, which has to treat all four slots as
+		// one operation because of the shared `Image`.
+		template <typename Install>
+		std::string switchImageSet(std::string const& name,
+			resources::ResourcePtr& slotResource, std::string& slotDiagnostic,
+			Install const& installSlot)
+		{
 			for (auto& slot : mSlots) remove(slot);
 			mSlots.clear();
 			mSlotAllocator = {};
@@ -542,6 +664,26 @@ namespace
 			catch (std::exception const& error) { slotDiagnostic = error.what(); }
 			installSlot();
 			return slotDiagnostic;
+		}
+
+		// The shape every atlas selection shares: take the named set and
+		// install that slot through the reload above. Nothing here reaches for
+		// a neighbour slot, which is the whole of #1035 as this class sees it
+		// - stated once, so no selection can pick the four-slot pass back up by
+		// accident.
+		//
+		// The unchanged-name short-circuit stays the first thing done: a
+		// selection that names what the slot already holds costs nothing. A
+		// reload asks for the round trip explicitly, because for it the name
+		// not changing is the whole point.
+		template <typename Install>
+		std::string selectImageSet(std::string& slotName,
+			resources::ResourcePtr& slotResource, std::string& slotDiagnostic,
+			std::string const& name, Install const& installSlot)
+		{
+			if (name == slotName) return slotDiagnostic;
+			slotName = name;
+			return switchImageSet(name, slotResource, slotDiagnostic, installSlot);
 		}
 
 		// A mandatory viewport atlas. Anything that is not a loadable ImageSet
@@ -954,4 +1096,25 @@ std::string selectWorldObjectImageSet(std::string const& name)
 {
 	if (!gStack) return kNoRenderStack;
 	return gStack->selectObjectImageSet(name);
+}
+
+// Reloads the four currently-selected viewport atlases from disk, the
+// definitions and the images both. Each slot's `ImageSet` and its paired
+// `Image` are released, destroyed and taken back through create and load -
+// the destroy is what clears Willpower's created flag, and without it the
+// create short-circuits and the PNG is never read again - so the texture is
+// rebuilt from the file as it is now. Each slot's authored tileset is read
+// again and re-paired with the `ImageSet`'s regions, and the atlas-set
+// registry is re-parsed rather than served from the cache this stack has
+// been installing from.
+//
+// Returns a diagnostic naming every slot that failed to reload, one per
+// line; empty means all four came back. A failed slot keeps its own
+// diagnostic as well, so the Artwork panel still reports it and the slot
+// draws magenta until it is fixed. With no render stack there is nothing to
+// reload, and that is reported the same way a refused selection is (#1034).
+std::string reloadWorldArtwork()
+{
+	if (!gStack) return kNoRenderStack;
+	return gStack->reloadImageSets();
 }

@@ -167,3 +167,23 @@ std::string selectWorldSectorImageSet(std::string const& name);
 std::string selectWorldObjectImageSet(std::string const& name);
 std::string selectWorldAgentImageSet(std::string const& name);
 std::string selectWorldFurnitureImageSet(std::string const& name);
+
+// Reloads the four currently-selected viewport atlases from disk, the
+// definitions and the images both. Each slot's `ImageSet` and its paired
+// `Image` are released, destroyed, and taken back through create and load.
+// The destroy is the load-bearing step: Willpower's `unload` leaves the
+// resource flagged as created, and `_createResource` returns early on a
+// created resource, so without it `parseData` never runs again and the
+// texture is rebuilt from the pixels decoded at startup. With it, the PNG is
+// read afresh. Each slot's authored tileset is read again and re-paired with
+// the pixel regions the `ImageSet` declares, and the atlas-set registry is
+// re-parsed as well, rather than served from the cache the stack has been
+// installing from, so a definition edited outside the editor since it
+// started is what the next frame draws.
+//
+// Returns a diagnostic naming every slot that failed to reload, one per
+// line; empty means all four came back. A slot that fails keeps its own
+// diagnostic too, so the Artwork panel still reports it and the slot draws
+// magenta until it is fixed. With no render stack there is nothing to
+// reload, and that is reported rather than answered with an empty string.
+std::string reloadWorldArtwork();
