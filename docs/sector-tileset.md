@@ -31,11 +31,20 @@ Two of those surfaces become live that were declared in the old manifest but nev
 drawn. The Shuttle and the Staircase used to borrow the Lift and Stairwell tiles,
 with comments saying their procedural carriage and steps would fight a fixed tile
 underneath. They do not: the procedural geometry renders over the Sector surface
-either way, and now it renders over the type's own art. A Sector type asks for its
-own tile first and falls back to the surface it used to borrow only when the
-installed atlas has no tile for it, which is what keeps an older atlas - one with
-no Airlock, Chamber or Dumbwaiter tile - drawing Corridor art rather than the
-missing-tile magenta.
+either way, and in this family it renders over the type's own art.
+
+Which surface a Sector type wears is decided by the family the installed atlas was
+authored in, not by whether the atlas merely has a tile of that name. Airlock,
+Chamber and Dumbwaiter may ask presence, because the old set has no tile under any
+of those names and so keeps borrowing the Corridor and Lift art it does have rather
+than hitting the missing-tile magenta. Shuttle and Staircase may not: the old sheet
+has declared both regions since it was written and never drew them. A presence test
+there reads those dormant regions as own art and repaints every World on
+`SectorAtlas` - the Shuttle's rail corridor dropping from the Lift's 32x117 shaft
+to a 31x46 fragment, and a second fixed staircase appearing underneath the
+procedural steps (#1027). `SectorTileset::family` carries the file's `version`
+through the install, and `sectorTilesetIsNewFamily()` is what the renderer asks
+before it puts a Shuttle or a Staircase on its own tile.
 
 The boundary strips are dropped. A version 2 sector tileset has no `boundaries`
 map, and the loader refuses one that declares it, so the dropped artwork cannot
@@ -64,7 +73,10 @@ tile grid, and four boundary strips - `floor`, `ceiling`, `left` and `right` -
 that compose centre, end, corner and open-wall variants rather than baking every
 combination into separate sprites. It declares seven surfaces; Shuttle and
 Staircase were among them but were never drawn, because the renderer mapped those
-types to the Lift and Stairwell tiles.
+types to the Lift and Stairwell tiles. That is still what they draw: the version 1
+loader puts the set in the Old family, and the Old family borrows both, so a World
+that has always been drawn on `SectorAtlas` keeps drawing what it drew before the
+new family existed (#1027).
 
 The old `SectorAtlas` and `StationAtlas` stay registered and canonical until
 nothing references them; `SectorAtlasNew` comes up beside them.

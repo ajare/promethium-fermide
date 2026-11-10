@@ -539,6 +539,12 @@ namespace
 			// render offset, which is what makes it checkable against the
 			// Objects contract (#1022).
 			bool declaresRenderSemantics{ false };
+			// The artwork family the authored set belongs to, carried through
+			// for the Sector slot, which gates the surfaces its own-tile types
+			// wear on the family the artwork was authored in (#1027). The
+			// object-shaped slots read nothing from it: an object tileset's
+			// version says nothing about which surface a Sector type wears.
+			SectorTilesetFamily family{ SectorTilesetFamily::Old };
 		};
 
 		// Every installed atlas draws with this handle. The shared renderer
@@ -652,6 +658,10 @@ namespace
 			{
 				tiles.width = atlas->width;
 				tiles.height = atlas->height;
+				// The family travels with the artwork, because the Shuttle and
+				// the Staircase choose their surface from it and from nothing
+				// else (#1027).
+				tiles.family = atlas->family;
 				for (auto const& [name, artwork] : atlas->tiles)
 				{
 					// The manifest carries a sector atlas's boundary tiles
@@ -706,7 +716,7 @@ namespace
 				auto const authored = authoredTiles(*imageSet, format);
 				return InstalledAtlas{ width, height,
 					installAtlasTiles(authored.tiles, regions, width, height, setName),
-					authored.declaresRenderSemantics };
+					authored.declaresRenderSemantics, authored.family };
 			}
 			catch (std::exception const& error)
 			{
@@ -725,6 +735,11 @@ namespace
 		{
 			TileArtworkMap tiles;
 			bool declaresRenderSemantics{ false };
+			// The family the sector loader read out of the file's `version`.
+			// Only the sector format has one that means anything; the object
+			// branch leaves it at the Old family because nothing downstream
+			// asks an object atlas which family it is (#1027).
+			SectorTilesetFamily family{ SectorTilesetFamily::Old };
 		};
 
 		static AuthoredAtlasTiles authoredTiles(resources::Resource const& resource,
@@ -737,7 +752,14 @@ namespace
 					+ authoredFormatName(authored.format) + " ('"
 					+ authored.path.string() + "')");
 			if (format == authoredFormat::SectorTiles)
-				return { SectorTileset::load(authored.path).tiles, false };
+			{
+				// The family has to come out with the tiles. The renderer
+				// cannot recover it later: by then all it holds is a map of
+				// regions, and a `shuttle` region says nothing about whether
+				// the family it came from ever meant to draw it (#1027).
+				auto set = SectorTileset::load(authored.path);
+				return { std::move(set.tiles), false, set.family };
+			}
 			auto set = ObjectTileset::load(authored.path);
 			return { std::move(set.sprites), set.declaresRenderSemantics };
 		}

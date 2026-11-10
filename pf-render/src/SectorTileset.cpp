@@ -41,6 +41,7 @@ SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
             + path.filename().string() + "')");
     SectorTileset result;
     result.image = path.parent_path() / root["image"].as<std::string>();
+    result.family = SectorTilesetFamily::New;
     auto const grid = loadAuthoredTileGrid(root, true, "sector surface");
     result.width = grid.width;
     result.height = grid.height;
@@ -86,6 +87,9 @@ SectorTileset SectorTileset::load(std::filesystem::path const& path)
         throw std::runtime_error("Unsupported sector tileset version");
     SectorTileset result;
     result.image = path.parent_path() / root["image"].as<std::string>();
+    // The draft family. Stated rather than left to the default so the two
+    // loaders each say which family they produce (#1027).
+    result.family = SectorTilesetFamily::Old;
     result.width = root["size"][0].as<int>();
     result.height = root["size"][1].as<int>();
     if (result.width <= 0 || result.height <= 0)
@@ -128,6 +132,14 @@ void clearSectorTileset() { textureId = {}; active = {}; }
 bool hasSectorTileSurface(std::string const& kind)
 {
     return bool(textureId) && active.surfaces.count(kind) > 0;
+}
+
+bool sectorTilesetIsNewFamily()
+{
+    // An uninstalled atlas is not the new family. `clearSectorTileset()`
+    // resets `active`, so the family resets with it and nothing survives a
+    // teardown as a stale promise that own art is available.
+    return bool(textureId) && active.family == SectorTilesetFamily::New;
 }
 
 bool drawSectorTileSurface(std::string const& kind, WorldDrawList* list,

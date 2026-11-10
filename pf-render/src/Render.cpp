@@ -1964,9 +1964,33 @@ void renderSectorDepthContent(shared_ptr<const core::Sector> sector, WorldDrawLi
 // borrowed before its own artwork existed. The fallback is what keeps an
 // older atlas - one with no Airlock tile of its own - drawing Corridor art
 // rather than the missing-tile magenta (#1017).
+//
+// Presence is a trustworthy test only for a surface the old family never
+// declared. The old sheet declares `shuttle` and `staircase` as dormant
+// regions - cut out of the draft, never drawn - so those two ask the
+// family instead, below (#1027).
 std::string sectorSurfaceOrBorrowed(char const* own, char const* borrowed)
 {
 	return hasSectorTileSurface(own) ? std::string{ own } : std::string{ borrowed };
+}
+
+// The surface of a Sector type whose own tile is a New-family thing: the
+// Shuttle's and the Staircase's. In the New family both wear it. In the
+// Old family both borrow the Lift's and the Stairwell's shafts, which is
+// what every existing World has always drawn - the old set's `shuttle`
+// and `staircase` regions were declared but never drawn, because the
+// Shuttle's rail corridor and the Staircase's steps are procedural and a
+// second fixed image underneath them fights the real one.
+//
+// The gate is the family the tile was authored to be drawn in, not the
+// presence of the name. The name has been in the old sheet since the day
+// it was written, so a repoint keyed on presence alone reads those dormant
+// regions as own art and repaints every World on `SectorAtlas` (#1027).
+std::string newFamilySurfaceOrBorrowed(char const* own, char const* borrowed)
+{
+	return sectorTilesetIsNewFamily() && hasSectorTileSurface(own)
+		? std::string{ own }
+		: std::string{ borrowed };
 }
 
 void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRenderStyle style, bool renderEdges, PackedColourValue colour, WorldDrawList* drawList)
@@ -2031,15 +2055,20 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		case core::SectorType::Ladder: kind = "ladder"; break;
 		case core::SectorType::Lift: kind = "lift"; break;
 		case core::SectorType::Dumbwaiter: kind = sectorSurfaceOrBorrowed("dumbwaiter", "lift"); break;
-		// The Shuttle's rail corridor is static architecture and now wears its
-		// own tile; carriage images are rendered separately at the Shuttle's
-		// current position, on top of it (#1017).
-		case core::SectorType::Shuttle: kind = sectorSurfaceOrBorrowed("shuttle", "lift"); break;
+		// The Shuttle's rail corridor is static architecture and wears its
+		// own tile in the new family; carriage images are rendered separately
+		// at the Shuttle's current position, on top of it (#1017). On the
+		// old family it still borrows the Lift's shaft, as it always did
+		// while the `shuttle` region sat undrawn (#1027).
+		case core::SectorType::Shuttle: kind = newFamilySurfaceOrBorrowed("shuttle", "lift"); break;
 		case core::SectorType::Stairwell: kind = "stairwell"; break;
 		// Staircase steps are procedural and render on top of their Sector
-		// surface, which is now the Staircase's own art rather than a borrowed
-		// Stairwell shaft tile (#1017).
-		case core::SectorType::Staircase: kind = sectorSurfaceOrBorrowed("staircase", "stairwell"); break;
+		// surface, which in the new family is the Staircase's own art rather
+		// than a borrowed Stairwell shaft tile (#1017). On the old family it
+		// is still the plain shaft: the same rule the deleted comment stated,
+		// kept where it belongs - on the family that has no Staircase art of
+		// its own (#1027).
+		case core::SectorType::Staircase: kind = newFamilySurfaceOrBorrowed("staircase", "stairwell"); break;
 		default: break;
 		}
 		if (!drawSectorTileSurface(kind, drawList, {bounds0.x, bounds1.y},

@@ -1062,6 +1062,11 @@ namespace
 		SectorTileset tileset;
 		tileset.width = 100;
 		tileset.height = 100;
+		// The New family: this check is about a Sector wearing its own tile,
+		// which is what the New family does. The Old family borrows the
+		// Stairwell's shaft for a Staircase, and that case has its own check
+		// (#1027).
+		tileset.family = SectorTilesetFamily::New;
 		tileset.surfaces.emplace("stairwell", SectorTileRegion{ 0, 0, 10, 10 });
 		tileset.surfaces.emplace("staircase", SectorTileRegion{ 50, 50, 10, 10 });
 		setSectorTileset(std::move(tileset), static_cast<TextureId>(1));

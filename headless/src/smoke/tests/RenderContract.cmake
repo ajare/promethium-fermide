@@ -82,6 +82,7 @@ set(names
     sectorAtlasNew/loaderRefusesASurfaceOffsetFromItsCell
     sectorAtlasNew/loaderAcceptsAConformingSet
     sectorAtlasNew/anOlderAtlasStillBorrowsForATypeItHasNoTileFor
+    sectorAtlasNew/theOldFamilyStillBorrowsForShuttleAndStaircase
     agentAtlasNew/twentyTilesAreRegistered
     agentAtlasNew/twoTypesNamingOneAppearanceShareTheirTiles
     agentAtlasNew/genericAppearanceIsTheFallbackForATypeWithNoArtwork

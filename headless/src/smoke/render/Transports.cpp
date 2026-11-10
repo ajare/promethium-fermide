@@ -112,6 +112,10 @@ namespace
 		SectorTileset sectors;
 		sectors.width = 100;
 		sectors.height = 100;
+		// The New family, whose Shuttle wears its own tile. The Old family
+		// still borrows the Lift's shaft for the rail corridor, and that case
+		// has its own check (#1027).
+		sectors.family = SectorTilesetFamily::New;
 		sectors.surfaces.emplace("lift", SectorTileRegion{ 0, 0, 10, 10 });
 		sectors.surfaces.emplace("shuttle", SectorTileRegion{ 50, 50, 10, 10 });
 		setSectorTileset(std::move(sectors), static_cast<TextureId>(1));

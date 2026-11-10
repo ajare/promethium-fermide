@@ -6,8 +6,10 @@
 // repeats per cell across the Sector's area. Two of those surfaces become
 // live that were declared in the old manifest but never drawn: the Shuttle
 // and the Staircase used to borrow the Lift and Stairwell tiles, and no
-// longer do. Their procedural carriage and steps still draw on top, over
-// their own art rather than over a borrowed shaft.
+// longer do in this family. Their procedural carriage and steps still draw
+// on top, over their own art rather than over a borrowed shaft. The old
+// family keeps borrowing both, because its sheet has always declared the
+// two regions and never meant them to be drawn (#1027).
 //
 // The boundary strips are gone. The new set carries no boundary regions at
 // all, so every Sector edge takes the renderer's primitive line fallback -
@@ -177,14 +179,66 @@ namespace
 			"The atlas-set registry does not name sectors-new.tileset.yaml for "
 			"SectorAtlasNew");
 		auto const authored = SectorTileset::load(context.fixture(kTileset));
+		require(authored.family == SectorTilesetFamily::New,
+			"sectors-new.tileset.yaml did not load as the New family its version 2 "
+			"format declares");
 		SectorTileset installed;
 		installed.width = authored.width;
 		installed.height = authored.height;
+		// The family is installed with the tiles, exactly as the render stack
+		// installs it. Dropping it here would leave every check below running
+		// on a set that is not the one the game draws (#1027).
+		installed.family = authored.family;
 		installed.tiles = installAtlasTiles(authored.tiles, set.regions,
 			authored.width, authored.height, "SectorAtlasNew");
 		for (auto const& [name, artwork] : installed.tiles)
 			installed.surfaces.emplace(name, artwork.region);
 		setSectorTileset(installed, static_cast<TextureId>(1));
+		require(sectorTilesetIsNewFamily(),
+			"The installed new Sector atlas did not come up as the New family");
+		return installed;
+	}
+
+	// Installs the old-family Sector atlas the way the render stack installs
+	// one: pixel regions from the application manifest's `ImageSet`, render
+	// semantics from the authored tileset the atlas-set registry names for
+	// it, and the family the loader read out of that file's `version`. The
+	// `boundary-` prefix the manifest carries is the install's convention
+	// and not the tileset's, so it is split here the way the stack splits
+	// it (#1027).
+	SectorTileset installOldSectorAtlas(smoke::Context const& context)
+	{
+		auto const setName = std::string{ "SectorAtlas" };
+		auto const set = manifestResource(bundledManifest(context), setName);
+		require(set.found && set.type == "ImageSet",
+			"The application manifest registers no " + setName + " ImageSet");
+		auto const tileset = atlasSetTilesets(context)[setName];
+		require(tileset == "textures/sectors.tileset.yaml",
+			"The atlas-set registry does not name the version 1 sector tileset for "
+			+ setName);
+		// The registry's path is relative to the registry file, which sits in
+		// `resources/` beside the manifest.
+		auto const authored = SectorTileset::load(
+			context.fixture("resources/" + tileset));
+		require(authored.family == SectorTilesetFamily::Old,
+			setName + "'s tileset did not load as the Old family its version 1 "
+			"format declares");
+		SectorTileset installed;
+		installed.width = authored.width;
+		installed.height = authored.height;
+		installed.family = authored.family;
+		installed.tiles = installAtlasTiles(authored.tiles, set.regions,
+			authored.width, authored.height, setName);
+		for (auto const& [name, artwork] : installed.tiles)
+		{
+			if (name.rfind("boundary-", 0) == 0)
+				installed.boundaries.emplace(name.substr(9), artwork.region);
+			else
+				installed.surfaces.emplace(name, artwork.region);
+		}
+		setSectorTileset(installed, static_cast<TextureId>(1));
+		require(!sectorTilesetIsNewFamily(),
+			"The installed " + setName + " reported as the New family");
 		return installed;
 	}
 
@@ -833,6 +887,61 @@ namespace
 					+ joined(tiles) + "; it should still borrow a surface it has");
 		}
 	}
+
+	// The pin #1027 asks for. The old family declares `shuttle` and
+	// `staircase` on its sheet and never drew either: the Shuttle's rail
+	// corridor and the Staircase's steps are procedural, and both types
+	// wore the plain Lift and Stairwell shafts underneath them. A repoint
+	// keyed on whether the installed atlas carries the name - which is what
+	// #1017 shipped - reads those dormant regions as own art, and every
+	// World on `SectorAtlas` repaints: the Shuttle's rail corridor drops
+	// from the Lift's 32x117 shaft to a 31x46 fragment, and a second fixed
+	// staircase appears underneath the procedural steps.
+	//
+	// The check runs on the real old sheet with both regions present, and
+	// asserts the presence test passes before it asserts the borrow. That
+	// order is the point: if a future change makes these two types ask
+	// presence again, this fails while the sheet still declares both names,
+	// which is the case the #1017 suite never asked about.
+	void theOldFamilyStillBorrowsForShuttleAndStaircase(
+		smoke::Context const& context)
+	{
+		using smoke::require;
+		// The old atlas as the application holds it, installed through the
+		// same pairing the render stack uses.
+		auto const old = installOldSectorAtlas(context);
+		// The two dormant regions, present in the atlas the renderer
+		// actually queries. If either ever leaves the sheet this check stops
+		// pinning anything, and says so rather than passing on an empty
+		// premise.
+		require(old.surfaces.count("shuttle") && old.surfaces.count("staircase"),
+			"The installed old-family atlas no longer carries the 'shuttle' and "
+			"'staircase' regions this check pins the borrowing against");
+		// Presence says yes to both, so presence is not what keeps the
+		// borrowing here - the family is.
+		require(hasSectorTileSurface("shuttle") && hasSectorTileSurface("staircase"),
+			"The installed old-family atlas does not answer for the two regions it "
+			"declares, so the borrow below is not being tested against a "
+			"presence-based repoint");
+		std::map<std::string, std::string> const stillBorrowed{
+			{ "shuttle", "lift" }, { "staircase", "stairwell" } };
+		for (auto const& [surface, borrowed] : stillBorrowed)
+		{
+			auto const fixture = fixtureFor(surface);
+			require(fixture.sector != nullptr,
+				"No Sector was built for the '" + surface + "' surface");
+			auto const tiles = surfaceTiles(fixture.sector,
+				fixture.sector->getLayerIndex(), old);
+			require(std::find(tiles.begin(), tiles.end(), surface) == tiles.end(),
+				"An Old-family atlas put the " + surface + " Sector on its own "
+					"declared-but-never-drawn tile instead of borrowing the "
+					+ borrowed + "'s surface, which is the #1027 repaint");
+			require(tiles.size() == 1 && tiles.front() == borrowed,
+				"An Old-family atlas left the " + surface + " Sector on "
+					+ joined(tiles) + "; it must fill with the " + borrowed
+					+ "'s surface, exactly as it did before #1017");
+		}
+	}
 }
 
 void render_smoke::registerSectorAtlasNew(std::vector<smoke::Check>& checks)
@@ -861,4 +970,6 @@ void render_smoke::registerSectorAtlasNew(std::vector<smoke::Check>& checks)
 		isolated<loaderAcceptsAConformingSet> });
 	checks.push_back({ "sectorAtlasNew/anOlderAtlasStillBorrowsForATypeItHasNoTileFor",
 		isolated<anOlderAtlasStillBorrowsForATypeItHasNoTileFor> });
+	checks.push_back({ "sectorAtlasNew/theOldFamilyStillBorrowsForShuttleAndStaircase",
+		isolated<theOldFamilyStillBorrowsForShuttleAndStaircase> });
 }
