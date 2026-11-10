@@ -404,7 +404,10 @@ a checked list rather than a line nobody counted - which is how the game
 came to draw the old Objects sheet while the World asked for
 `ObjectAtlasNew` (#1026). The game has no artwork panel to show a refusal
 in, so its render pass writes every slot's diagnostic to the application
-log once per distinct value rather than dropping it.
+log once per distinct value rather than dropping it, and forgets that value
+when a pass comes back clean - so a bad atlas that comes back after a fix
+is reported again instead of being silenced by what the log already
+remembered.
 
 The contract applies only to a tileset that declares its own render semantics -
 version 2. A version 1 set derives them from each tile's content rect, makes no

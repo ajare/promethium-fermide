@@ -443,6 +443,90 @@ void checkCanvasAtlasSelection() {
       "An atlas selection every slot accepted still produced a report");
 }
 
+// The game's report for a refused atlas, driven through the same
+// `wp::Logger` the game's own state hands the canvas (#1026). The game
+// has no artwork panel to show a refusal in, so the log is the whole of
+// what a player or a support pass gets: it has to carry the renderer's
+// reason, and it must not carry it sixty times a second.
+void checkCanvasAtlasReport() {
+  struct Cleanup {
+    std::filesystem::path path;
+    ~Cleanup() {
+      std::error_code error;
+      std::filesystem::remove_all(path, error);
+    }
+  } cleanup{std::filesystem::temp_directory_path() / ("pf-canvas-atlas-report-"
+      + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))};
+  std::filesystem::create_directories(cleanup.path);
+
+  auto refused = std::vector<app::WorldAtlasSelection>{
+      {"Sector", "SectorAtlasNew", ""},
+      {"Objects", "ObjectAtlasBroken",
+          "Objects atlas 'ObjectAtlasBroken' cannot be used by this World: 1 "
+          "tile(s) do not match what the object renderer draws"
+          "\n  - tile 'lift-car' is not in the atlas"},
+      {"Agent", "AgentAtlasNew", ""},
+      {"Furniture", "FurnitureAtlasNew", ""}};
+  auto accepted = refused;
+  accepted[1].diagnostic.clear();
+  auto changed = refused;
+  changed[1].name = "ObjectAtlasAlsoBroken";
+  changed[1].diagnostic = "Objects atlas 'ObjectAtlasAlsoBroken' is not registered";
+
+  // One pass through a logger of its own, read back once the logger has
+  // closed and flushed: the answer is whether the pass wrote, and what the
+  // game's log actually says.
+  auto pass = [&](std::string const& tag,
+      std::vector<app::WorldAtlasSelection> const& selections,
+      std::string& lastReported) {
+    auto const path = cleanup.path / ("report-" + tag + ".log");
+    bool wrote{false};
+    {
+      wp::Logger logger;
+      require(logger.open(path.string()),
+          "Could not open the game's log at " + path.string());
+      wrote = app::reportWorldAtlasSelections(logger, selections, lastReported);
+    }
+    std::ifstream file(path);
+    require(bool(file), "Could not read back the game's log at " + path.string());
+    std::stringstream body;
+    body << file.rdbuf();
+    return std::pair<bool, std::string>{wrote, body.str()};
+  };
+
+  std::string lastReported;
+  auto const first = pass("refused", refused, lastReported);
+  require(first.first, "A refused Objects atlas wrote nothing to the game's log");
+  require(first.second.find("ObjectAtlasBroken") != std::string::npos
+      && first.second.find("lift-car") != std::string::npos,
+      "The game's log does not carry the refusal's reason: " + first.second);
+
+  // The selection runs every frame. A refusal that repeats writes once,
+  // not once per frame.
+  auto const again = pass("repeat", refused, lastReported);
+  require(!again.first && again.second.find("ObjectAtlasBroken") == std::string::npos,
+      "The same refusal was reported again; the selection runs every frame and "
+      "the log would fill at frame rate");
+
+  auto const next = pass("changed", changed, lastReported);
+  require(next.first && next.second.find("ObjectAtlasAlsoBroken") != std::string::npos,
+      "A different refusal did not reach the game's log");
+
+  auto const recovered = pass("recovered", accepted, lastReported);
+  require(!recovered.first && recovered.second.find("Objects atlas") == std::string::npos,
+      "A selection every slot accepted still wrote to the game's log");
+
+  // Recovery clears what was remembered, so a refusal that comes back is
+  // heard about again. `changed` is what was last reported, so repeating
+  // it after a clean pass is the case a remembered refusal would
+  // silence - and the reason the report forgets rather than keeps.
+  auto const regression = pass("regression", changed, lastReported);
+  require(regression.first
+      && regression.second.find("ObjectAtlasAlsoBroken") != std::string::npos,
+      "After a clean pass the refusal that came back stayed silent: the report "
+      "remembered a refusal the game had already recovered from");
+}
+
 void checkStagedMap(std::filesystem::path const& directory) {
   using namespace wp::application::resourcesystem;
   wp::Logger logger;
@@ -917,6 +1001,7 @@ int main(int argc, char** argv) {
     checkAtlasReload(directory);
     checkStagedMap(directory);
     checkCanvasAtlasSelection();
+    checkCanvasAtlasReport();
     checkWorldText(directory);
     checkAgentPoses();
     checkAgentsAndMarkers();

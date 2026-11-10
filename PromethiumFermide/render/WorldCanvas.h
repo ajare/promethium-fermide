@@ -91,6 +91,19 @@ std::vector<WorldAtlasSelection> applyWorldAtlasSelections(core::World const& wo
 // than restating it.
 std::string worldAtlasReport(std::vector<WorldAtlasSelection> const& selections);
 
+// Writes the refusals in `selections` to `report`, once per distinct
+// report. The selection runs every frame, so the caller carries what was
+// last written in `lastReported`: without it one bad atlas fills the log
+// at frame rate. It clears when nothing is refused, so a World that
+// recovers and then fails again is reported again rather than silenced
+// by a stale memory. Returns true when this call wrote.
+//
+// This is the game's whole answer to a refused atlas. The game has no
+// artwork panel to show a diagnostic in, so the log is what a player and
+// a support pass get, and it has to carry the renderer's reason (#1026).
+bool reportWorldAtlasSelections(wp::Logger& report,
+	std::vector<WorldAtlasSelection> const& selections, std::string& lastReported);
+
 // Creates the shared renderer over the host's stack and installs the game's
 // font metrics. Throws whatever `pf::render::createWorldRenderStack` throws
 // when the render infrastructure or the Object atlas is unusable - a broken

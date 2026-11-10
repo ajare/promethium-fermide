@@ -53,16 +53,11 @@ IFontMetrics const* gPreviousMetrics{ nullptr };
 wp::Logger* gAtlasReport{ nullptr };
 std::string gAtlasReported;
 
-// Writes a refused selection to the game's report once per distinct
-// diagnostic, so a World that cannot carry its own object geometry says
-// so and then stops saying it.
+// The frame's report: the game's own logger, once per distinct refusal.
 void reportAtlasSelections(std::vector<WorldAtlasSelection> const& selections)
 {
-	if (!gAtlasReport) return;
-	auto const report = worldAtlasReport(selections);
-	if (report.empty() || report == gAtlasReported) return;
-	gAtlasReported = report;
-	gAtlasReport->error(report);
+	if (gAtlasReport) reportWorldAtlasSelections(*gAtlasReport, selections,
+		gAtlasReported);
 }
 
 // The game's camera, into the viewport the producer reads. Fitted to the
@@ -146,6 +141,21 @@ std::string worldAtlasReport(std::vector<WorldAtlasSelection> const& selections)
 		report += selection.diagnostic;
 	}
 	return report;
+}
+
+bool reportWorldAtlasSelections(wp::Logger& report,
+	std::vector<WorldAtlasSelection> const& selections, std::string& lastReported)
+{
+	auto const message = worldAtlasReport(selections);
+	// Nothing refused. Clearing what was last written is what keeps a later
+	// failure audible: hold on to it and a World that recovers, then takes
+	// the same bad atlas again, says nothing the second time - which is
+	// the time somebody is looking for it.
+	if (message.empty()) { lastReported.clear(); return false; }
+	if (message == lastReported) return false;
+	lastReported = message;
+	report.error(message);
+	return true;
 }
 
 std::array<WorldAtlasSlot, 4> const& worldAtlasSlots()
