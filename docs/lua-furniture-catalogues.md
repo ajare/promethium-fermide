@@ -53,7 +53,7 @@ owned Marker and does not imply Furniture use.
   [FurnitureAtlasNew and the tile naming convention](object-tileset.md#furnitureatlasnew-and-the-tile-naming-convention).
   The World selects `furnitureImageSet`
   (default `FurnitureAtlas`), independently of its catalogue, Agent and Sector artwork.
-  The editor's **Furniture artwork** selector lists registered ImageSets; changes are
+  The editor's **Artwork** section lists registered ImageSets for its slot; changes are
   immediate, persisted and undoable, including palette and placement previews. Play
   uses the same selection. Each region fills one World cell regardless of source pixel
   dimensions; routing, usable points and physical layout never change with artwork.
