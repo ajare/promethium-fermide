@@ -1,5 +1,6 @@
-version: 68
-sectorImageSet: StationAtlas
+version: 69
+sectorImageSet: SectorAtlasNew
+objectImageSet: ObjectAtlas
 agentImageSet: DoctorFemale1Atlas
 furnitureImageSet: StationFurnitureAtlas
 nextDumbwaiterId: 1
@@ -84,6 +85,21 @@ construction:
         markerId: 7
         markerName: Sofa Right seat
         properties: 0
+  - type: room
+    name: Room 1
+    layer: 0
+    y: 1
+    x: 3
+    cellsWide: 1
+    levelsHigh: 1
+    topLevelHeight: 0.9
+    hasHeightScale: false
+  - type: corridor
+    layer: 0
+    y: 1
+    x: 2
+    cellsWide: 1
+    levelsHigh: 1
 agentGroups:
   []
 accessPermissions:

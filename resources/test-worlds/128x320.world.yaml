@@ -1,0 +1,45 @@
+version: 69
+sectorImageSet: SectorAtlasNew
+objectImageSet: ObjectAtlasNew
+agentImageSet: AgentAtlasNew
+furnitureImageSet: FurnitureAtlasNew
+nextDumbwaiterId: 1
+nextFurnitureId: 1
+name: Untitled
+randomSeed: 0
+cellsWide: 16
+levelsHigh: 2
+layers: 2
+levelNames:
+  - Level 0
+  - Level 1
+layerNames:
+  - Layer 0
+  - Layer 1
+construction:
+  - type: room
+    name: Room 1
+    layer: 0
+    y: 0
+    x: 4
+    cellsWide: 1
+    levelsHigh: 1
+    topLevelHeight: 0.9
+    hasHeightScale: false
+agentGroups:
+  []
+accessPermissions:
+  []
+permissionSets:
+  []
+nextPermissionSetId: 1
+agentPermissionSetAssignments:
+  []
+accessPermissionGrants:
+  []
+interactionPermissionRequirements:
+  []
+nextMarkerId: 1
+nextAgentGroupId: 1
+agents:
+  []
