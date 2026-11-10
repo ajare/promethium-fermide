@@ -2157,6 +2157,38 @@ namespace
 				}
 			}
 		}
+		// The hover affordance for a sector tool. With a tool picked from the
+		// palette and no drag running, the cell under the cursor is outlined so
+		// the World says what a click there would do: yellow where the paint can
+		// start, red where it cannot. Those are the same two answers the click
+		// itself gets from the same gate - a cell inside the World that nothing
+		// already occupies - so the colour never promises a placement the click
+		// would refuse. The box is the cell's four edges, a plain outline with no
+		// fill, so it stays legible over the artwork underneath.
+		else if (gPaint.tool != PaintTool::None && gWorldHovered && !overTray
+			&& !gViewPan.dragging && gPegman.phase == PalettePhase::Home)
+		{
+			auto const hoverPosition = screenToWorld(io.MousePos);
+			int const hoverX = (int)floor(hoverPosition.x);
+			int const hoverY = (int)floor(hoverPosition.y);
+			if (hoverX >= 0 && hoverY >= 0
+				&& hoverX < (int)world->getCellsWide()
+				&& hoverY < (int)world->getLevelsHigh())
+			{
+				// Read through a const World: a hover asks what is there,
+				// never what it can change, and the const Layer read is all it
+				// needs.
+				core::World const& hoveredWorld = *world;
+				auto const hoverLayer = hoveredWorld.getLayer((uint32_t)gUISettings.visibleLayer);
+				bool const placeable = hoverLayer
+					&& !hoverLayer->getCellDefinition((uint32_t)hoverX,
+						(uint32_t)hoverY).occupied();
+				auto const topLeft = worldToScreen({ (float)hoverX, (float)(hoverY + 1) });
+				auto const bottomRight = worldToScreen({ (float)(hoverX + 1), (float)hoverY });
+				drawList->AddRect(toVec2(topLeft), toVec2(bottomRight),
+					placeable ? yellow : red, 0.0f, 0, 2.0f);
+			}
+		}
 
 		PaletteItem hoveredItem = PaletteItem::None;
 		if (gWorldHovered && gPegman.phase == PalettePhase::Home && !gTrayDrag.dragging)
