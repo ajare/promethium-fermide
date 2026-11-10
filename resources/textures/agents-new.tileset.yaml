@@ -67,6 +67,29 @@ version: 2
 image: agents-new.png
 size: [640, 1280]
 tile_size: [128, 320]
+
+# Which appearance rows this sheet holds back rather than wears.
+#
+# Every row an atlas authors is normally named by at least one shipped
+# Agent type. A row nothing names is orphaned artwork: someone drew it, it
+# costs sheet space forever, and no check notices it missing because
+# nothing asks for it. The `android-*` row sat exactly that way from #1018
+# to #1028 while the shipped Android type went on naming `robot-standing`,
+# a tile this sheet never carried, so every Android drew the missing-tile
+# magenta under the new default atlas.
+#
+# The render smoke module reads this map and refuses any authored row that
+# is neither named by a shipped Agent type nor listed here, and refuses a
+# reservation that carries no reason. A row that becomes worn does not have
+# to be removed from this list, but a reservation naming a row the sheet no
+# longer authors is refused, because a stale reservation is where the next
+# orphan hides.
+reserved_appearances:
+  # The generic fallback row a type with no artwork of its own names. It is
+  # a row like any other - that is what makes the fallback draw through the
+  # same path as the real appearances rather than as a renderer special
+  # case - and no shipped type needs it, because every shipped type has art.
+  agent: the generic fallback row a type with no artwork of its own names
 sprites:
   # Content is authored relative to its own cell. Every tile is bottom-
   # anchored in the 320px cell, so the Pose's feet sit on the cell floor.

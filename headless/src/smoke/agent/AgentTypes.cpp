@@ -752,7 +752,7 @@ namespace
 			auto const* loaded = restored.lookupAgent(id).entity;
 			require(loaded && loaded->getTypeId() == "Android"
 				&& loaded->getTypeResourceName() == "android.agent.lua"
-				&& loaded->getPoseImageTile() == "robot-standing"
+				&& loaded->getPoseImageTile() == "android-standing"
 				&& loaded->getPhysicalBaseline().poses == agent->getPhysicalBaseline().poses
 				&& !loaded->supportsPose(core::Pose::Crawling), "Robot capability/identity roundtrip changed");
 		}

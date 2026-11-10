@@ -46,9 +46,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -67,6 +69,13 @@ namespace
 	bool near(float a, float b) { return std::abs(a - b) < 0.01f; }
 
 	std::string const kTileset = "resources/textures/agents-new.tileset.yaml";
+
+	// The replacement Agent atlas, and the one it replaces. The pairing this
+	// ticket adds is asserted against every `-New` Agent atlas; the old one
+	// is asserted about only to pin that its Android artwork survived the
+	// shipped type's repoint (#1028).
+	std::string const kAgentAtlasNew{ "AgentAtlasNew" };
+	std::string const kOldAgentAtlas{ "AgentAtlas" };
 
 	// The four appearances, in sheet order. `agent` is the generic one.
 	std::vector<std::string> const kAppearances{ "human", "android",
@@ -193,27 +202,38 @@ namespace
 		return { int(be(16)), int(be(20)) };
 	}
 
-	// Installs the new Agent atlas through the one install path the render
-	// stack uses: pixel regions from the `ImageSet`, render semantics from
-	// the authored tileset.
-	ObjectTileset installNewAgentAtlas(smoke::Context const& context)
+	// Installs one Agent atlas through the one install path the render stack
+	// uses: pixel regions from the manifest's `ImageSet`, render semantics
+	// from the authored tileset the atlas-set registry names for it. Which
+	// sheet is installed is a parameter because the shipped-type pairing is
+	// asserted against every `-New` Agent atlas, and the old sheet is
+	// installed too to prove its Android art is still there (#1028).
+	ObjectTileset installAgentAtlas(smoke::Context const& context,
+		std::string const& setName)
 	{
 		auto const manifest = bundledManifest(context);
-		auto const set = manifestResource(manifest, "AgentAtlasNew");
+		auto const set = manifestResource(manifest, setName);
 		require(set.found && set.type == "ImageSet",
-			"The application manifest registers no AgentAtlasNew ImageSet");
-		require(atlasSetTilesets(context)["AgentAtlasNew"]
-			== "textures/agents-new.tileset.yaml",
-			"The atlas-set registry does not name agents-new.tileset.yaml for "
-			"AgentAtlasNew");
-		auto const authored = ObjectTileset::load(context.fixture(kTileset));
+			"The application manifest registers no " + setName + " ImageSet");
+		auto const tileset = atlasSetTilesets(context)[setName];
+		require(!tileset.empty(), "The atlas-set registry names no tileset for "
+			+ setName);
+		// The registry's paths are relative to the registry file, which sits
+		// in `resources/` beside the manifest.
+		auto const authored = ObjectTileset::load(
+			context.fixture("resources/" + tileset));
 		ObjectTileset installed;
 		installed.width = authored.width;
 		installed.height = authored.height;
 		installed.sprites = installAtlasTiles(authored.sprites, set.regions,
-			authored.width, authored.height, "AgentAtlasNew");
+			authored.width, authored.height, setName);
 		setAgentTileset(installed, static_cast<TextureId>(1));
 		return installed;
+	}
+
+	ObjectTileset installNewAgentAtlas(smoke::Context const& context)
+	{
+		return installAgentAtlas(context, kAgentAtlasNew);
 	}
 
 	// ------------------------------------------------------------------
@@ -311,6 +331,12 @@ namespace
 		pf::render::PackedColourValue colour{};
 		float width{}, height{};
 		bool drawn{ false };
+		// The missing-tile fallback: the flat magenta quad `renderAgent`
+		// draws when the current Pose tile - or the Standing tile it scales
+		// against - does not resolve in the installed atlas. It is not
+		// artwork, it is the renderer saying it had nothing to draw, and no
+		// shipped Agent type should ever produce it (#1028).
+		bool missingTile{ false };
 	};
 
 	// The tile one quad started from. The comparison is on the minimum UV,
@@ -341,12 +367,17 @@ namespace
 			{ 100000.0f, 100000.0f } });
 		renderAgent(&agent, &commands);
 		Body body;
+		auto const magenta = packColour(255, 0, 255, 255);
 		float left = 1e9f, right = -1e9f, bottom = 1e9f, top = -1e9f;
 		for (auto const& command : commands.commands())
 		{
 			auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command);
-			if (!triangle || triangle->texture != WorldDrawList::Texture::AgentAtlas)
+			if (!triangle) continue;
+			if (triangle->texture != WorldDrawList::Texture::AgentAtlas)
+			{
+				if (triangle->colour == magenta) body.missingTile = true;
 				continue;
+			}
 			body.drawn = true;
 			body.colour = triangle->colour;
 			if (body.tile.empty()) body.tile = tileSampledBy(*triangle, atlas);
@@ -722,6 +753,338 @@ namespace
 				"the Standing tile");
 		}
 	}
+
+	// ------------------------------------------------------------------
+	// The shipped bundle, paired with the atlas.
+	// ------------------------------------------------------------------
+	//
+	// Everything above this line proves the atlas is well-formed and that a
+	// type *made* to name a row draws it. None of it could see the bug this
+	// ticket is about: #1018 authored the `android-*` row, every check
+	// drove a synthetic type re-prefixed onto a row, and the real shipped
+	// Android type went on naming `robot-standing` - a tile this sheet has
+	// never carried - so every Android drew the missing-tile magenta under
+	// the atlas #1023 made the default. The checks below read the shipped
+	// Agent types themselves and pair them with the sheet (#1028).
+
+	// The directory the bundled Agent-type resources live in, reached
+	// through the fixture API by way of one file that has to be there:
+	// `fixture()` resolves regular files only, and the repository root is
+	// private to the smoke support module.
+	std::filesystem::path bundledAgentTypeDirectory(smoke::Context const& context)
+	{
+		return context.fixture("resources/test-worlds/human.agent.lua").parent_path();
+	}
+
+	std::string declaredTypeId(std::string const& source,
+		std::filesystem::path const& path)
+	{
+		auto const key = std::string{ "type_id" };
+		auto const at = source.find(key);
+		require(at != std::string::npos, "The bundled Agent type "
+			+ path.filename().string() + " declares no type_id");
+		auto const first = source.find('"', at + key.size());
+		auto const last = first == std::string::npos
+			? std::string::npos : source.find('"', first + 1);
+		require(first != std::string::npos && last != std::string::npos,
+			"The bundled Agent type " + path.filename().string()
+			+ " has an unterminated type_id");
+		return source.substr(first + 1, last - first - 1);
+	}
+
+	struct ShippedAgentType
+	{
+		std::string resourceName;
+		std::string typeId;
+		std::string source;
+	};
+
+	// The Agent types the application ships, read out of the bundle rather
+	// than listed by hand. A hand-written list goes stale by omission - a
+	// type added tomorrow is simply never paired - which is the same class
+	// of miss as the one this ticket closes.
+	std::vector<ShippedAgentType> shippedAgentTypes(smoke::Context const& context)
+	{
+		auto const suffix = std::string{ ".agent.lua" };
+		std::vector<ShippedAgentType> types;
+		for (auto const& entry :
+			std::filesystem::directory_iterator(bundledAgentTypeDirectory(context)))
+		{
+			if (!entry.is_regular_file()) continue;
+			auto const name = entry.path().filename().string();
+			if (name.size() <= suffix.size()
+				|| name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0)
+				continue;
+			auto const source = readFile(entry.path());
+			types.push_back({ name, declaredTypeId(source, entry.path()), source });
+		}
+		std::sort(types.begin(), types.end(), [](ShippedAgentType const& a,
+			ShippedAgentType const& b) { return a.resourceName < b.resourceName; });
+		return types;
+	}
+
+	// Attaches one shipped Agent type to a fixture World, or accepts the
+	// registration the World already carries. The bundled Human is registered
+	// by every World's own constructor from the embed generated from that same
+	// resource, so re-attaching it is a duplicate rather than a fresh read.
+	// Accepting the existing registration is only honest when it names the
+	// bundled resource, which is what the second half of this check insists on.
+	//
+	// The attach result is taken into a variable before the message is built.
+	// Building it inline would let the compiler evaluate the message - and read
+	// `diagnostic` - before the call that fills it, which turns every attach
+	// failure into a failure that reports nothing.
+	void attachShippedType(core::World& world, ShippedAgentType const& type)
+	{
+		if (world.hasAgentType(type.typeId))
+		{
+			auto const registered = world.agentTypeResourceName(type.typeId);
+			require(registered == type.resourceName, "The World already registers the "
+				"shipped " + type.typeId + " Agent type under '" + registered
+				+ "' rather than the bundled '" + type.resourceName + "', so the "
+				"pairing would be asserted against a different source");
+			return;
+		}
+		std::string diagnostic;
+		bool const attached = world.attachAgentType(type.resourceName, type.source,
+			&diagnostic);
+		require(attached, "Could not attach the shipped " + type.typeId
+			+ " Agent type: " + diagnostic);
+	}
+
+	// The appearance a tile name claims: everything before its `-<Pose>`
+	// suffix. `cleaning-bot-standing` is the `cleaning-bot` row's Standing
+	// tile, and the row is the thing a shipped type either wears or leaves
+	// orphaned.
+	std::string appearanceOf(std::string const& tile)
+	{
+		for (auto const& pose : kPoses)
+		{
+			auto const suffix = "-" + pose;
+			if (tile.size() > suffix.size()
+				&& tile.compare(tile.size() - suffix.size(), suffix.size(), suffix) == 0)
+				return tile.substr(0, tile.size() - suffix.size());
+		}
+		return {};
+	}
+
+	// The `-New` Agent atlases the atlas-set registry knows about, read
+	// from the registry rather than hardcoded so a second replacement Agent
+	// sheet is paired the day it is registered. The name test is the
+	// transition's own: `AgentAtlas` plus a `New` suffix.
+	std::vector<std::string> newAgentAtlases(smoke::Context const& context)
+	{
+		std::vector<std::string> names;
+		for (auto const& [name, tileset] : atlasSetTilesets(context))
+			if (name.rfind("AgentAtlas", 0) == 0
+				&& name.size() > 3
+				&& name.compare(name.size() - 3, 3, "New") == 0)
+				names.push_back(name);
+		require(!names.empty(), "The atlas-set registry names no `-New` Agent "
+			"atlas, so the shipped Agent types have nothing to be paired against");
+		return names;
+	}
+
+	// Which rows the sheet holds back, and why. A reservation nobody has to
+	// justify is where orphaned artwork goes to stay orphaned, so the
+	// reason is part of the entry rather than a bare name.
+	std::map<std::string, std::string> reservedAppearances(
+		smoke::Context const& context)
+	{
+		auto const root = YAML::LoadFile(context.fixture(kTileset).string());
+		std::map<std::string, std::string> reserved;
+		auto const node = root["reserved_appearances"];
+		if (!node) return reserved;
+		require(node.IsMap(), "`reserved_appearances` in " + kTileset
+			+ " must be a map of appearance to the reason the row is held back");
+		for (auto const& entry : node)
+		{
+			auto const appearance = entry.first.as<std::string>();
+			auto const reason = entry.second.IsScalar()
+				? entry.second.as<std::string>() : std::string{};
+			require(!reason.empty(), "`reserved_appearances` reserves '" + appearance
+				+ "' with no reason; every reserved row has to say why it is not "
+				"worn by anything");
+			reserved.emplace(appearance, reason);
+		}
+		return reserved;
+	}
+
+	// The rows the shipped Agent types actually name, read off their own
+	// declared Pose tiles rather than off any list of who is supposed to
+	// wear what. Attaching the real sources is the point: the shipped
+	// Android type's tiles are the thing that was wrong, and they are only
+	// readable through the type's own frozen baseline.
+	std::set<std::string> appearancesWornByShippedTypes(smoke::Context const& context)
+	{
+		std::set<std::string> worn;
+		auto fixture = makeFixture();
+		size_t index{};
+		for (auto const& type : shippedAgentTypes(context))
+		{
+			attachShippedType(*fixture.world, type);
+			auto const spawned = spawn(fixture.world, fixture.room, type.typeId,
+				1.5f + float(index++) * 1.5f);
+			for (auto const& [pose, definition] :
+				spawned.entity->getPhysicalBaseline().poses)
+			{
+				auto const appearance = appearanceOf(definition.imageTile);
+				require(!appearance.empty(), "The shipped " + type.typeId
+					+ " Agent type's " + std::string{ core::poseName(pose) }
+					+ " Pose names '" + definition.imageTile + "', a tile named with no "
+					+ "appearance row, so the pairing cannot see which row it wears");
+				worn.insert(appearance);
+			}
+		}
+		return worn;
+	}
+
+	// AC: the Android Agent type names the `android-*` appearance and
+	// renders its artwork under AgentAtlasNew.
+	void theShippedAndroidTypeWearsTheAndroidAppearance(smoke::Context const& context)
+	{
+		auto const atlas = installNewAgentAtlas(context);
+		auto fixture = makeFixture();
+		// The type identity comes off the bundled source rather than a copy of
+		// it kept here, so a rename in the resource moves this check with it
+		// instead of leaving it asserting a name nothing uses.
+		ShippedAgentType const* androidType{};
+		auto const types = shippedAgentTypes(context);
+		for (auto const& type : types)
+			if (type.resourceName == "android.agent.lua") androidType = &type;
+		require(androidType != nullptr,
+			"The bundle ships no android.agent.lua Agent type, so there is no "
+			"Android appearance to check");
+		attachShippedType(*fixture.world, *androidType);
+		auto const android = spawn(fixture.world, fixture.room, androidType->typeId,
+			2.5f);
+		auto const& poses = android.entity->getPhysicalBaseline().poses;
+		require(poses.count(core::Pose::Standing),
+			"The shipped Android type declares no Standing Pose, which every "
+			"renderable Agent type needs to scale its art against");
+		for (auto const& [pose, definition] : poses)
+		{
+			auto const expected = tileName("android", std::string{ core::poseName(pose) });
+			require(definition.imageTile == expected, "The shipped Android type names '"
+				+ definition.imageTile + "' for the "
+				+ std::string{ core::poseName(pose) } + " Pose instead of its own "
+				"appearance row's '" + expected + "' tile");
+			core::AgentPoseTestAccess::set(*android.entity, pose);
+			auto const body = drawBody(*android.entity, atlas);
+			require(!body.missingTile && body.drawn && body.tile == expected,
+				"The shipped Android Agent drew '" + body.tile + "' under "
+				+ kAgentAtlasNew + " for the " + std::string{ core::poseName(pose) }
+				+ " Pose instead of its own android- artwork" + (body.missingTile
+					? " - it drew the missing-tile magenta" : ""));
+		}
+	}
+
+	// AC: every shipped Agent type's declared Pose tiles resolve in every
+	// `-New` Agent atlas, and the failure names the type and the tile.
+	void everyShippedAgentTypeResolvesInEveryNewAgentAtlas(smoke::Context const& context)
+	{
+		auto const atlases = newAgentAtlases(context);
+		auto const types = shippedAgentTypes(context);
+		require(types.size() >= 4, "Only " + std::to_string(types.size())
+			+ " bundled `.agent.lua` Agent types were found in "
+			+ bundledAgentTypeDirectory(context).string() + "; the bundle ships "
+			"Human, Android, Cleaning Bot and Remote operator, so the pairing is "
+			"being asserted against less than the whole bundle");
+		for (auto const& atlasName : atlases)
+		{
+			auto const atlas = installAgentAtlas(context, atlasName);
+			auto fixture = makeFixture();
+			size_t index{};
+			for (auto const& type : types)
+			{
+				attachShippedType(*fixture.world, type);
+				auto const spawned = spawn(fixture.world, fixture.room, type.typeId,
+					1.5f + float(index++) * 1.5f);
+				auto const& poses = spawned.entity->getPhysicalBaseline().poses;
+				require(!poses.empty(), "The shipped " + type.typeId
+					+ " Agent type declares no Poses, so it can never be drawn");
+				for (auto const& [pose, definition] : poses)
+				{
+					auto const who = "The shipped " + type.typeId + " Agent type's "
+						+ std::string{ core::poseName(pose) } + " Pose names '";
+					require(!definition.imageTile.empty(), who + "' declares no image "
+						"tile, which " + atlasName + " cannot resolve");
+					core::AgentPoseTestAccess::set(*spawned.entity, pose);
+					auto const body = drawBody(*spawned.entity, atlas);
+					require(!body.missingTile, who + definition.imageTile + "' which "
+						+ atlasName + " does not carry, so that Agent draws the "
+						"missing-tile magenta instead of artwork");
+					require(body.drawn && body.tile == definition.imageTile, who
+						+ definition.imageTile + "' but " + atlasName + " drew '" + body.tile
+						+ "' for it instead");
+				}
+			}
+		}
+	}
+
+	// AC: every appearance row registered in AgentAtlasNew is named by at
+	// least one shipped Agent type, or is explicitly documented as
+	// reserved. An unworn row is artwork someone drew that nothing will
+	// ever draw, and nothing notices it missing because nothing asks for
+	// it - which is exactly how the `android-*` row stayed empty-handed
+	// from #1018 to #1028.
+	void everyAppearanceRowIsWornOrReserved(smoke::Context const& context)
+	{
+		auto const authored = ObjectTileset::load(context.fixture(kTileset));
+		auto const worn = appearancesWornByShippedTypes(context);
+		auto const reserved = reservedAppearances(context);
+
+		std::set<std::string> rows;
+		for (auto const& [name, artwork] : authored.sprites)
+		{
+			auto const appearance = appearanceOf(name);
+			require(!appearance.empty(), "'" + name + "' is authored in " + kTileset
+				+ " under a name carrying no `-<Pose>` suffix, so the pairing cannot "
+				"read which appearance row it belongs to");
+			rows.insert(appearance);
+		}
+
+		for (auto const& row : rows)
+			require(worn.count(row) || reserved.count(row), "'" + row
+				+ "' is an appearance row " + kAgentAtlasNew + " authors that no "
+				"shipped Agent type names, so it is orphaned artwork. Give a shipped "
+				"Agent type this appearance, or reserve it under "
+				"`reserved_appearances` in " + kTileset + " with the reason it is "
+				"held back.");
+
+		// A reservation for a row the sheet no longer authors is a stale
+		// claim, and a stale claim is where the next orphan hides.
+		for (auto const& [row, reason] : reserved)
+			require(rows.count(row), "`reserved_appearances` reserves '" + row
+				+ "', which " + kAgentAtlasNew + " no longer authors. The reason "
+				"given - \"" + reason + "\" - no longer describes anything on the "
+				"sheet, so the reservation should go with the row.");
+	}
+
+	// AC: `robot-standing` remains resolvable in the old AgentAtlas.
+	// This ticket repoints the shipped Android type onto the row #1018
+	// authored for it and changes nothing in the old sheet. That sheet is
+	// still registered and still canonical for every World that names it,
+	// and a custom Agent type written against it still names `robot-
+	// standing`; sweeping the tile up as "unused now that nothing in the
+	// bundle names it" would take the Android artwork away from all of
+	// them (#1028).
+	void theOldAgentAtlasStillResolvesRobotStanding(smoke::Context const& context)
+	{
+		auto const authored = ObjectTileset::load(
+			context.fixture("resources/textures/objects.tileset.yaml"));
+		require(authored.sprites.count("robot-standing"),
+			"objects.tileset.yaml no longer declares 'robot-standing', the tile the "
+			"old AgentAtlas's Android artwork lives under");
+		require(authored.sprites.at("robot-standing").tintable,
+			"'robot-standing' is no longer authored tintable, so the old sheet's "
+			"Android art stopped taking the resolved Agent colour");
+		installAgentAtlas(context, kOldAgentAtlas);
+		require(agentSpriteSize("robot-standing").has_value(), "'robot-standing' "
+			"does not resolve in the installed " + kOldAgentAtlas + ", so every "
+			"World still drawing that sheet lost its Android artwork when the "
+			"shipped Android type was repointed onto the android- row");
+	}
 }
 
 void render_smoke::registerAgentAtlasNew(std::vector<smoke::Check>& checks)
@@ -738,4 +1101,12 @@ void render_smoke::registerAgentAtlasNew(std::vector<smoke::Check>& checks)
 		isolated<agentColourTagOverrideAndSelectionStillDriveTheTint> });
 	checks.push_back({ "agentAtlasNew/overWidePoseTilesResolveAcrossAdjacentCells",
 		isolated<overWidePoseTilesResolveAcrossAdjacentCells> });
+	checks.push_back({ "agentAtlasNew/theShippedAndroidTypeWearsTheAndroidAppearance",
+		isolated<theShippedAndroidTypeWearsTheAndroidAppearance> });
+	checks.push_back({ "agentAtlasNew/everyShippedAgentTypeResolvesInEveryNewAgentAtlas",
+		isolated<everyShippedAgentTypeResolvesInEveryNewAgentAtlas> });
+	checks.push_back({ "agentAtlasNew/everyAppearanceRowIsWornOrReserved",
+		isolated<everyAppearanceRowIsWornOrReserved> });
+	checks.push_back({ "agentAtlasNew/theOldAgentAtlasStillResolvesRobotStanding",
+		isolated<theOldAgentAtlasStillResolvesRobotStanding> });
 }

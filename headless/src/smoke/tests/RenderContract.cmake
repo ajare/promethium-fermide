@@ -89,6 +89,10 @@ set(names
     agentAtlasNew/tintFollowsTheAuthoredFlagNotTheName
     agentAtlasNew/agentColourTagOverrideAndSelectionStillDriveTheTint
     agentAtlasNew/overWidePoseTilesResolveAcrossAdjacentCells
+    agentAtlasNew/theShippedAndroidTypeWearsTheAndroidAppearance
+    agentAtlasNew/everyShippedAgentTypeResolvesInEveryNewAgentAtlas
+    agentAtlasNew/everyAppearanceRowIsWornOrReserved
+    agentAtlasNew/theOldAgentAtlasStillResolvesRobotStanding
     walkwayArtwork/manifestPairIsGeneratedFromTheTileset
     walkwayArtwork/everyAtlasIsCoveredByItsAuthoredTileset
     walkwayArtwork/installSeparatesPixelsFromSemantics

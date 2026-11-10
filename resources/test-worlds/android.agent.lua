@@ -13,7 +13,10 @@ return {
             climb_speed = 0.25,
             stair_ascent_speed = 0.35,
             stair_descent_speed = 0.45,
-            poses = { standing = { image_tile = "robot-standing" } },
+            -- The `android-` appearance row of AgentAtlasNew (#1028). The
+            -- old `robot-standing` tile belongs to the retired AgentAtlas
+            -- sheet and is not in the atlas a new World now draws.
+            poses = { standing = { image_tile = "android-standing" } },
             automatic_poses = {
                 room_movement = {{ pose = "standing", speed_ratio = 1 }},
                 door_crossing = {{ pose = "standing", speed_ratio = 1 }},

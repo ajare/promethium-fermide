@@ -328,6 +328,39 @@ standing in for a type with no artwork, the Agent colour and its tag override an
 the selection highlight all still driving the tint, and the over-wide Lying and
 Crawling tiles resolving across adjacent cells rather than being cut back to one.
 
+### Every appearance row is worn, or says why it is not
+
+Keying by appearance means a row exists independently of anything wearing it. An
+unworn row is artwork somebody drew that nothing will ever draw, and nothing
+notices it missing because nothing asks for it. That is exactly what happened:
+#1018 authored the `android-*` row and never repointed the shipped Android type,
+which went on naming `robot-standing` - a tile this sheet has never carried - so
+under the atlas #1023 made the default every Android Agent drew the missing-tile
+magenta (#1028).
+
+The shipped Android type now names `android-standing`, and the pairing is asserted
+rather than hoped for:
+
+- every shipped Agent type's declared Pose tiles resolve in every `-New` Agent
+  atlas the atlas-set registry names, and a failure names the type and the tile;
+- every appearance row the sheet authors is named by at least one shipped Agent
+  type, or is listed under `reserved_appearances` in the tileset with the reason it
+  is held back. The generic `agent` row is reserved on that basis - it is the
+  fallback a type with no artwork of its own names, and no shipped type needs it.
+  A reservation with no reason is refused, and so is a reservation naming a row the
+  sheet no longer authors, because a stale reservation is where the next orphan
+  hides.
+
+The shipped types are discovered from the bundled `.agent.lua` resources rather than
+listed by hand, so a type added to the bundle is paired against the atlas the day
+it lands.
+
+The old `AgentAtlas` keeps its `robot-standing` tile. This ticket changes nothing in
+the old sheet: it stays registered and canonical for every World that names it, and
+a custom Agent type written against it still names that tile. A check pins the tile
+resolvable there so it cannot be swept up as unused art the bundle no longer
+references (#1028).
+
 ## The install seam
 
 `installAtlasTiles()` in `pf-render` is the one place the two authorities meet,

@@ -13,7 +13,9 @@ and lifecycle evidence, see [Object usage](object-usage.md).
 
 An Agent type is one managed `.agent.lua` resource returning a type table. Human
 and Android are bundled alongside Cleaning Bot. Android supports only Standing,
-using `resources/test-worlds/android.agent.lua`. Cleaning Bot (`CleaningBot`,
+using `resources/test-worlds/android.agent.lua`, and wears the `android-`
+appearance row of `AgentAtlasNew` (`android-standing`) rather than the old sheet's
+`robot-standing` tile, which the new atlas never carried (#1028). Cleaning Bot (`CleaningBot`,
 `cleaning-bot.agent.lua`) is a compact wheeled Agent with a 0.4-unit width,
 0.15-unit Standing height, 0.3-unit/s walking speed and its own
 `cleaning-bot-standing` tile. It supports only Standing in Rooms and Doors.
