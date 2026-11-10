@@ -4,9 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
-#include <map>
 #include <memory>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -38,9 +36,9 @@
 
 #include "core/ManifestCatalogResolver.h"
 #include "core/WorldDocument.h"
+#include "AtlasInstall.h"
 #include "ObjectTileset.h"
 #include "SectorTileset.h"
-#include "TileArtwork.h"
 #include "WorldDrawList.h"
 
 namespace resources = wp::application::resourcesystem;
@@ -259,10 +257,10 @@ namespace
 				resourceDirectory / "Resources.yaml");
 			core::setCatalogResourceResolver(mCatalogResolver);
 
-			mSectorSet = requireImageSet("SectorAtlas");
-			mObjectSet = requireImageSet(mObjectSetName);
-			mAgentSet = requireImageSet("AgentAtlas");
-			mFurnitureSet = requireImageSet("FurnitureAtlas");
+			mAtlases.sector = requireImageSet("SectorAtlas");
+			mAtlases.objects = requireImageSet(mAtlases.objectName);
+			mAtlases.agent = requireImageSet("AgentAtlas");
+			mAtlases.furniture = requireImageSet("FurnitureAtlas");
 			installAtlasDefinitions(/*objectsAreMandatory=*/ true);
 
 			mScene = mRenderSystem->createScene("Default");
@@ -289,11 +287,11 @@ namespace
 			, mResources(&host.resources)
 			, mScene(host.scene)
 		{
-			mObjectSet = requireImageSet(mObjectSetName);
-			installOptionalAtlas(mSectorSet, mSectorSetName, mSectorDiagnostic);
-			installOptionalAtlas(mAgentSet, mAgentSetName, mAgentDiagnostic);
-			installOptionalAtlas(mFurnitureSet, mFurnitureSetName,
-				mFurnitureDiagnostic);
+			mAtlases.objects = requireImageSet(mAtlases.objectName);
+			installOptionalAtlas(mAtlases.sector, mAtlases.sectorName, mAtlases.sectorDiagnostic);
+			installOptionalAtlas(mAtlases.agent, mAtlases.agentName, mAtlases.agentDiagnostic);
+			installOptionalAtlas(mAtlases.furniture, mAtlases.furnitureName,
+				mAtlases.furnitureDiagnostic);
 			installAtlasDefinitions(/*objectsAreMandatory=*/ true);
 		}
 
@@ -318,10 +316,10 @@ namespace
 			mFontAtlas.reset();
 			// The acquisitions this stack made are released either way: that is
 			// balanced against the acquire, not against who owns the manager.
-			if (mSectorSet) mResources->releaseResource(mSectorSet);
-			if (mObjectSet) mResources->releaseResource(mObjectSet);
-			if (mFurnitureSet) mResources->releaseResource(mFurnitureSet);
-			if (mAgentSet) mResources->releaseResource(mAgentSet);
+			if (mAtlases.sector) mResources->releaseResource(mAtlases.sector);
+			if (mAtlases.objects) mResources->releaseResource(mAtlases.objects);
+			if (mAtlases.furniture) mResources->releaseResource(mAtlases.furniture);
+			if (mAtlases.agent) mResources->releaseResource(mAtlases.agent);
 			clearSectorTileset();
 			clearObjectTileset();
 			clearAgentTileset();
@@ -461,48 +459,48 @@ namespace
 
 		std::string selectSectorImageSet(std::string const& name)
 		{
-			if (name == mSectorSetName) return mSectorDiagnostic;
-			mSectorSetName = name;
+			if (name == mAtlases.sectorName) return mAtlases.sectorDiagnostic;
+			mAtlases.sectorName = name;
 			for (auto& slot : mSlots) remove(slot);
 			mSlots.clear();
 			mSlotAllocator = {};
-			mSectorDiagnostic.clear();
-			if (mSectorSet) mResources->releaseResource(mSectorSet);
-			mSectorSet.reset();
-			try { mSectorSet = requireImageSet(name); }
-			catch (std::exception const& error) { mSectorDiagnostic = error.what(); }
+			mAtlases.sectorDiagnostic.clear();
+			if (mAtlases.sector) mResources->releaseResource(mAtlases.sector);
+			mAtlases.sector.reset();
+			try { mAtlases.sector = requireImageSet(name); }
+			catch (std::exception const& error) { mAtlases.sectorDiagnostic = error.what(); }
 			installAtlasDefinitions(/*objectsAreMandatory=*/ false);
-			return mSectorDiagnostic;
+			return mAtlases.sectorDiagnostic;
 		}
 
 		std::string selectAgentImageSet(std::string const& name)
 		{
-			if (name == mAgentSetName) return mAgentDiagnostic;
-			mAgentSetName = name;
+			if (name == mAtlases.agentName) return mAtlases.agentDiagnostic;
+			mAtlases.agentName = name;
 			for (auto& slot : mSlots) remove(slot);
 			mSlots.clear(); mSlotAllocator = {};
-			mAgentDiagnostic.clear();
-			if (mAgentSet) mResources->releaseResource(mAgentSet);
-			mAgentSet.reset();
-			try { mAgentSet = requireImageSet(name); }
-			catch (std::exception const& error) { mAgentDiagnostic = error.what(); }
+			mAtlases.agentDiagnostic.clear();
+			if (mAtlases.agent) mResources->releaseResource(mAtlases.agent);
+			mAtlases.agent.reset();
+			try { mAtlases.agent = requireImageSet(name); }
+			catch (std::exception const& error) { mAtlases.agentDiagnostic = error.what(); }
 			installAtlasDefinitions(/*objectsAreMandatory=*/ false);
-			return mAgentDiagnostic;
+			return mAtlases.agentDiagnostic;
 		}
 
 		std::string selectFurnitureImageSet(std::string const& name)
 		{
-			if (name == mFurnitureSetName) return mFurnitureDiagnostic;
-			mFurnitureSetName = name;
+			if (name == mAtlases.furnitureName) return mAtlases.furnitureDiagnostic;
+			mAtlases.furnitureName = name;
 			for (auto& slot : mSlots) remove(slot);
 			mSlots.clear(); mSlotAllocator = {};
-			mFurnitureDiagnostic.clear();
-			if (mFurnitureSet) mResources->releaseResource(mFurnitureSet);
-			mFurnitureSet.reset();
-			try { mFurnitureSet = requireImageSet(name); }
-			catch (std::exception const& error) { mFurnitureDiagnostic = error.what(); }
+			mAtlases.furnitureDiagnostic.clear();
+			if (mAtlases.furniture) mResources->releaseResource(mAtlases.furniture);
+			mAtlases.furniture.reset();
+			try { mAtlases.furniture = requireImageSet(name); }
+			catch (std::exception const& error) { mAtlases.furnitureDiagnostic = error.what(); }
 			installAtlasDefinitions(/*objectsAreMandatory=*/ false);
-			return mFurnitureDiagnostic;
+			return mAtlases.furnitureDiagnostic;
 		}
 
 		// The fourth atlas selection (#1022). Unlike the other three, a bad
@@ -513,44 +511,20 @@ namespace
 		// does, leaving the slot empty and magenta rather than misaligned.
 		std::string selectObjectImageSet(std::string const& name)
 		{
-			if (name == mObjectSetName) return mObjectDiagnostic;
-			mObjectSetName = name;
+			if (name == mAtlases.objectName) return mAtlases.objectDiagnostic;
+			mAtlases.objectName = name;
 			for (auto& slot : mSlots) remove(slot);
 			mSlots.clear(); mSlotAllocator = {};
-			mObjectDiagnostic.clear();
-			if (mObjectSet) mResources->releaseResource(mObjectSet);
-			mObjectSet.reset();
-			try { mObjectSet = requireImageSet(name); }
-			catch (std::exception const& error) { mObjectDiagnostic = error.what(); }
+			mAtlases.objectDiagnostic.clear();
+			if (mAtlases.objects) mResources->releaseResource(mAtlases.objects);
+			mAtlases.objects.reset();
+			try { mAtlases.objects = requireImageSet(name); }
+			catch (std::exception const& error) { mAtlases.objectDiagnostic = error.what(); }
 			installAtlasDefinitions(/*objectsAreMandatory=*/ false);
-			return mObjectDiagnostic;
+			return mAtlases.objectDiagnostic;
 		}
 
 	private:
-		// Which authored tileset format sits behind an atlas. Both produce the
-		// same render semantics; only the file shape differs.
-		enum class authoredFormat { ObjectTiles, SectorTiles };
-
-		struct InstalledAtlas
-		{
-			int width{}, height{};
-			TileArtworkMap tiles;
-			// Whether the authored tileset declared its own drawn size and
-			// render offset, which is what makes it checkable against the
-			// Objects contract (#1022).
-			bool declaresRenderSemantics{ false };
-			// The artwork family the authored set belongs to, carried through
-			// for the Sector slot, which gates the surfaces its own-tile types
-			// wear on the family the artwork was authored in (#1027). The
-			// object-shaped slots read nothing from it: an object tileset's
-			// version says nothing about which surface a Sector type wears.
-			SectorTilesetFamily family{ SectorTilesetFamily::Old };
-		};
-
-		// Every installed atlas draws with this handle. The shared renderer
-		// only separates "an atlas is installed" from "nothing is".
-		static constexpr TextureId kInstalledAtlasTexture{ 1 };
-
 		// A mandatory viewport atlas. Anything that is not a loadable ImageSet
 		// fails the whole startup rather than leaving a canvas half-drawn.
 		resources::ResourcePtr requireImageSet(std::string const& name)
@@ -585,255 +559,24 @@ namespace
 		}
 
 		// Installs the viewport atlases as the tilesets the producer reads.
-		// Every atlas goes through the one install path below (#1014), so the
-		// two authorities - the `ImageSet` for pixels, the authored tileset
-		// for render semantics - are read the same way for all four.
 		//
-		// A missing atlas installs an empty tileset: every lookup then misses
-		// and the draw helpers paint the cell opaque magenta, so a broken
-		// install is visible rather than blank.
+		// The install itself is `pf::render::installAtlasDefinitions()`, the
+		// one install path every viewport atlas goes through (#1014). It lives
+		// outside this class for one reason: this class cannot exist without a
+		// live OpenGL context, and the install path needs nothing of the sort -
+		// a decoded `ImageSet` on one side, an authored tileset file on the
+		// other, and a CPU to pair them. Taking it out of the class is what
+		// lets the headless Render check drive the very function the
+		// application runs against the shipped manifest, rather than
+		// re-implementing the pairing beside it and proving the helper while
+		// the caller went untested (#1030).
 		//
-		// `objectsAreMandatory` decides whether the Objects slot's failure
-		// throws as well as being reported. At stack construction it throws:
-		// a World cannot be drawn without an Objects atlas that can carry its
-		// geometry, and starting up without one would be a half-drawn canvas.
-		// At a live selection it does not, because the editor treats a bad
-		// artwork choice as recoverable and reports it through the
-		// diagnostic instead of throwing through the UI.
+		// Everything the install needs is in `mAtlases`, which is handed over
+		// directly: the four loaded `ImageSet`s, the name each slot is
+		// installed under, and the diagnostic each install leaves behind.
 		void installAtlasDefinitions(bool objectsAreMandatory)
 		{
-			installSectorAtlas(mSectorDiagnostic);
-			installObjectAtlas(mObjectSetName, mObjectSet, setObjectTileset,
-				mObjectDiagnostic, objectsAreMandatory,
-				/*enforceObjectContract=*/ true);
-			installObjectAtlas(mAgentSetName, mAgentSet, setAgentTileset,
-				mAgentDiagnostic, /*mandatory=*/ false, /*enforceObjectContract=*/ false);
-			installObjectAtlas(mFurnitureSetName, mFurnitureSet,
-				setFurnitureTileset, mFurnitureDiagnostic, /*mandatory=*/ false,
-				/*enforceObjectContract=*/ false);
-		}
-
-		// Installs the Objects slot's artwork, and - because the object
-		// renderer draws its Doors, Windows, Lifts and Shuttles from it at the
-		// extents the tileset declares - checks that the atlas can carry them
-		// (#1022). Only a tileset that declares its own render semantics is
-		// checked; a version 1 set derives them and is the artwork every
-		// existing World already draws. The Agent and Furniture slots share
-		// the object-shaped loader but not the object geometry, so they are
-		// installed without the contract.
-		void installObjectAtlas(std::string const& setName,
-			resources::ResourcePtr const& set,
-			void (*install)(ObjectTileset, TextureId), std::string& diagnostic,
-			bool mandatory, bool enforceObjectContract)
-		{
-			ObjectTileset tiles;
-			std::string error;
-			if (auto const atlas = atlasArtwork(setName, set,
-					authoredFormat::ObjectTiles, error))
-			{
-				tiles.width = atlas->width;
-				tiles.height = atlas->height;
-				tiles.sprites = std::move(atlas->tiles);
-				tiles.declaresRenderSemantics = atlas->declaresRenderSemantics;
-			}
-			if (enforceObjectContract && tiles.declaresRenderSemantics && error.empty())
-				error = checkObjectAtlasContract(setName, tiles.sprites);
-			// A set that cannot carry the object geometry is not installed at
-			// all. Installing it and reporting the problem afterwards would
-			// still draw a Door's artwork outside the Door's collision, which
-			// is the exact failure this check exists to prevent; the slot goes
-			// empty and draws magenta instead.
-			if (!error.empty() && enforceObjectContract) tiles = {};
-			install(std::move(tiles), kInstalledAtlasTexture);
-			if (!error.empty() && (mandatory || diagnostic.empty())) diagnostic = error;
-			if (mandatory && !error.empty()) throw std::runtime_error(error);
-		}
-
-		void installSectorAtlas(std::string& diagnostic)
-		{
-			SectorTileset tiles;
-			std::string error;
-			if (auto const atlas = atlasArtwork(mSectorSetName, mSectorSet,
-					authoredFormat::SectorTiles, error))
-			{
-				tiles.width = atlas->width;
-				tiles.height = atlas->height;
-				// The family travels with the artwork, because the Shuttle and
-				// the Staircase choose their surface from it and from nothing
-				// else (#1027).
-				tiles.family = atlas->family;
-				for (auto const& [name, artwork] : atlas->tiles)
-				{
-					// The manifest carries a sector atlas's boundary tiles
-					// under a `boundary-` prefix; the tileset keeps them in
-					// its own map under the bare name.
-					if (name.rfind("boundary-", 0) == 0)
-						tiles.boundaries.emplace(name.substr(9), artwork.region);
-					else tiles.surfaces.emplace(name, artwork.region);
-				}
-			}
-			setSectorTileset(std::move(tiles), kInstalledAtlasTexture);
-			if (!error.empty() && diagnostic.empty()) diagnostic = error;
-		}
-
-		// The one install path for every viewport atlas (#1014).
-		//
-		// Pixel regions come from the atlas's `ImageSet` resource - the
-		// runtime pixel-region contract ADR 0010 names, and the only place a
-		// drawn region is taken from. The render semantics that go with each
-		// tile - the tintable flag, the render offset and the drawn size -
-		// come from the authored tileset that resource names with its
-		// `tileset` option. Nothing here derives a tint from a tile's name or
-		// a drawn size from a domain object's geometry.
-		//
-		// The pairing is done by `installAtlasTiles()`, the shared core of
-		// the install path: it walks the `ImageSet`'s regions and takes only
-		// the render semantics from the tileset. A region that escapes the
-		// atlas image, and a tile the `ImageSet` declares that the tileset
-		// never authored, are both refused there rather than installed as
-		// artwork that samples outside the sheet (#1025).
-		//
-		// Returns nullopt and leaves `diagnostic` set when the atlas is
-		// absent or cannot be paired with its authored tileset.
-		std::optional<InstalledAtlas> atlasArtwork(std::string const& setName,
-			resources::ResourcePtr const& set, authoredFormat format,
-			std::string& diagnostic) const
-		{
-			diagnostic.clear();
-			auto const imageSet = std::dynamic_pointer_cast<
-				resources::ImageSetResource>(set);
-			if (!imageSet)
-			{
-				diagnostic = setName
-					+ " is not an installed ImageSet resource, so its atlas has no "
-					"pixel regions to install";
-				return std::nullopt;
-			}
-			try
-			{
-				int width{}, height{};
-				auto const regions = atlasPixelRegions(*imageSet, width, height);
-				auto const authored = authoredTiles(*imageSet, format);
-				return InstalledAtlas{ width, height,
-					installAtlasTiles(authored.tiles, regions, width, height, setName),
-					authored.declaresRenderSemantics, authored.family };
-			}
-			catch (std::exception const& error)
-			{
-				diagnostic = error.what();
-				return std::nullopt;
-			}
-		}
-
-		// The authored render semantics behind one atlas. The object-shaped
-		// atlases and the sector atlas are different authored formats, so the
-		// registry declares which loader applies; both produce the same map
-		// the install pairs against. The declared format is checked against
-		// the slot being installed, so a mismatch is reported rather than
-		// silently loading the wrong shape.
-		struct AuthoredAtlasTiles
-		{
-			TileArtworkMap tiles;
-			bool declaresRenderSemantics{ false };
-			// The family the sector loader read out of the file's `version`.
-			// Only the sector format has one that means anything; the object
-			// branch leaves it at the Old family because nothing downstream
-			// asks an object atlas which family it is (#1027).
-			SectorTilesetFamily family{ SectorTilesetFamily::Old };
-		};
-
-		static AuthoredAtlasTiles authoredTiles(resources::Resource const& resource,
-			authoredFormat format)
-		{
-			auto const authored = authoredTileset(resource);
-			if (authored.format != format)
-				throw std::runtime_error(resource.getName() + " is installed as "
-					+ authoredFormatName(format) + " but the atlas-set registry says "
-					+ authoredFormatName(authored.format) + " ('"
-					+ authored.path.string() + "')");
-			if (format == authoredFormat::SectorTiles)
-			{
-				// The family has to come out with the tiles. The renderer
-				// cannot recover it later: by then all it holds is a map of
-				// regions, and a `shuttle` region says nothing about whether
-				// the family it came from ever meant to draw it (#1027).
-				auto set = SectorTileset::load(authored.path);
-				return { std::move(set.tiles), false, set.family };
-			}
-			auto set = ObjectTileset::load(authored.path);
-			return { std::move(set.sprites), set.declaresRenderSemantics };
-		}
-
-		static char const* authoredFormatName(authoredFormat format)
-		{
-			return format == authoredFormat::SectorTiles ? "sector tiles"
-				: "object tiles";
-		}
-
-		// The authored tileset behind one atlas, read from the authored
-		// atlas-set registry beside the application manifest. The manifest
-		// cannot name it itself: the vendored Willpower `ImageSet` schema
-		// fixes the Options an `ImageSet` is allowed to carry, and extending
-		// the vendored SDK was rejected as a much wider blast radius than the
-		// atlas work. The tileset stays the single authority for what a tile
-		// means; the registry only says which tileset is asked about, and in
-		// which authored format it is written.
-		struct AuthoredTileset
-		{
-			authoredFormat format{};
-			std::filesystem::path path{};
-		};
-
-		static AuthoredTileset authoredTileset(
-			resources::Resource const& resource)
-		{
-			auto const registry = std::filesystem::path(resource.getDefinitionFile())
-				.parent_path() / "atlas-sets.yaml";
-			auto uncovered = [&registry, &resource](std::string const& why)
-			{
-				return std::runtime_error(resource.getName() + " has no authored tileset: "
-					+ why + " ('" + registry.string() + "')");
-			};
-			YAML::Node root;
-			try { root = YAML::LoadFile(registry.string()); }
-			catch (std::exception const& error)
-			{
-				throw std::runtime_error("Could not read the authored atlas-set registry '"
-					+ registry.string() + "': " + error.what());
-			}
-			if (!root.IsMap() || !root["sets"].IsMap())
-				throw std::runtime_error("The authored atlas-set registry '" + registry.string()
-					+ "' has no `sets` map of atlas name to authored tileset");
-			auto const entry = root["sets"][resource.getName()];
-			if (!entry.IsMap()) throw uncovered("no map entry names it");
-			auto const file = entry["tileset"].as<std::string>();
-			if (file.empty()) throw uncovered("its tileset is empty");
-			auto const kind = entry["kind"].as<std::string>();
-			if (kind == "sector") return { authoredFormat::SectorTiles,
-				registry.parent_path() / file };
-			if (kind == "object") return { authoredFormat::ObjectTiles,
-				registry.parent_path() / file };
-			throw uncovered("its kind '" + kind + "' is neither 'sector' nor 'object'");
-		}
-
-		// The pixel regions one atlas's `ImageSet` declares, with the image
-		// size they are cut from.
-		static AtlasPixelRegions atlasPixelRegions(
-			resources::ImageSetResource& set, int& imageWidth,
-			int& imageHeight)
-		{
-			auto image = std::dynamic_pointer_cast<resources::ImageResource>(
-				set.getImage());
-			if (!image) throw std::runtime_error(set.getName()
-				+ " has no Image resource to cut its regions from");
-			imageWidth = image->getWidth();
-			imageHeight = image->getHeight();
-			AtlasPixelRegions regions;
-			for (auto const& [name, definition] : set.getImageDefinitions())
-				regions.emplace(name, AtlasPixelRegion{ static_cast<int>(definition.x),
-					static_cast<int>(definition.y), static_cast<int>(definition.width),
-					static_cast<int>(definition.height) });
-			return regions;
+			pf::render::installAtlasDefinitions(mAtlases, objectsAreMandatory);
 		}
 
 
@@ -861,9 +604,9 @@ namespace
 				return std::static_pointer_cast<mpp::RenderTexture>(mFontAtlas);
 			}
 			auto set = std::dynamic_pointer_cast<resources::ImageSetResource>(
-				textureKind == WorldDrawList::Texture::SectorAtlas ? mSectorSet
-					: textureKind == WorldDrawList::Texture::AgentAtlas ? mAgentSet
-					: textureKind == WorldDrawList::Texture::FurnitureAtlas ? mFurnitureSet : mObjectSet);
+				textureKind == WorldDrawList::Texture::SectorAtlas ? mAtlases.sector
+					: textureKind == WorldDrawList::Texture::AgentAtlas ? mAtlases.agent
+					: textureKind == WorldDrawList::Texture::FurnitureAtlas ? mAtlases.furniture : mAtlases.objects);
 			return set->getImage()->getMppResource();
 		}
 
@@ -1065,20 +808,15 @@ namespace
 		std::unique_ptr<mpp::ResourceManager> mOwnedRenderResources;
 		std::unique_ptr<resources::ResourceManager> mOwnedResources;
 		std::shared_ptr<core::ManifestCatalogResolver> mCatalogResolver;
-		resources::ResourcePtr mSectorSet;
-		std::string mSectorSetName{"SectorAtlas"};
-		std::string mSectorDiagnostic;
-		resources::ResourcePtr mAgentSet;
-		std::string mAgentSetName{"AgentAtlas"};
-		std::string mAgentDiagnostic;
-		resources::ResourcePtr mFurnitureSet;
-		std::string mFurnitureSetName{"FurnitureAtlas"};
-		std::string mFurnitureDiagnostic;
-		resources::ResourcePtr mObjectSet;
-		// The fourth viewport atlas selection (#1022). The default is the set
-		// every World drew from before the choice existed.
-		std::string mObjectSetName{"ObjectAtlas"};
-		std::string mObjectDiagnostic;
+		// The four viewport atlas slots, in the shape the install path works
+		// on: which resource each slot is named for, what is loaded behind it,
+		// and the diagnostic its last install produced. One struct rather than
+		// twelve members because the install is a free function over exactly
+		// this value (#1030), so what the application installs and what a
+		// headless check installs are the same thing installed the same way.
+		// The Objects slot's default is the set every World drew from before
+		// the choice existed (#1022).
+		pf::render::ViewportAtlasSlots mAtlases;
 		mpp::ScenePtr mScene;
 		// Both images are composited later by the caller, so neither canvas may
 		// overwrite the other's offscreen texture during the same frame.

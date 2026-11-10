@@ -126,6 +126,16 @@ set(names
     objectAtlasContract/aMismatchedRenderOffsetIsRefused
     objectAtlasContract/everyProblemIsReportedAtOnce
     objectAtlasContract/theLegacyObjectAtlasIsExempt
+    atlasInstall/everyRegisteredImageSetInstallsFromTheShippedManifest
+    atlasInstall/theInstalledRegionIsTheImageSetsNotTheTilesets
+    atlasInstall/aRegionEscapingTheAtlasImageIsNeverLoadable
+    atlasInstall/aManifestTileTheAuthoredTilesetNeverDefinesIsRefused
+    atlasInstall/everyNewAtlasMatchesItsTilesetNameForName
+    atlasInstall/theFourSlotsInstallThroughTheRenderStacksPass
+    atlasInstall/aMissingAtlasLeavesItsSlotEmptyAndReported
+    atlasInstall/aBadObjectsAtlasRefusesAMandatoryInstall
+    atlasInstall/everyShippedAgentPoseTileResolvesInTheInstalledAgentAtlas
+    atlasInstall/everyShippedFurnitureTileResolvesInTheInstalledFurnitureAtlas
     vehicleArtworkNew/vehicleTilesAreRegistered
     vehicleArtworkNew/carriageComposesAtTwoThreeAndFourCellsWide
     vehicleArtworkNew/connectorSitsAtTheSeamNotACellPosition

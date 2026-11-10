@@ -27,6 +27,7 @@ int main(int argc, char** argv)
 	render_smoke::registerBulkheadAndPanelArtwork(checks);
 	render_smoke::registerObjectArtworkNew(checks);
 	render_smoke::registerObjectAtlasContract(checks);
+	render_smoke::registerAtlasInstallPath(checks);
 	render_smoke::registerVehicleArtworkNew(checks);
 	render_smoke::registerAccessPanels(checks);
 	render_smoke::registerDrawOrder(checks);

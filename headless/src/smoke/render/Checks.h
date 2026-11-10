@@ -42,6 +42,7 @@ namespace render_smoke
 	void registerBulkheadAndPanelArtwork(std::vector<smoke::Check>& checks);
 	void registerObjectArtworkNew(std::vector<smoke::Check>& checks);
 	void registerObjectAtlasContract(std::vector<smoke::Check>& checks);
+	void registerAtlasInstallPath(std::vector<smoke::Check>& checks);
 	void registerVehicleArtworkNew(std::vector<smoke::Check>& checks);
 	void registerBoothWindows(std::vector<smoke::Check>& checks);
 	void registerAgentPoses(std::vector<smoke::Check>& checks);
