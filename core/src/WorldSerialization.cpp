@@ -713,8 +713,14 @@ namespace core
 		// Version 65 adds authored transport Stop short names.
 		// Version 67 adds the World's Agent ImageSet resource name.
 		// Version 68 adds the World's Furniture ImageSet resource name.
-		serializer.writeUint32("version", 68);
+		// Version 69 adds the World's Objects ImageSet resource name, the fourth
+		// of the four viewport atlases a World selects (#1022). It is written
+		// beside the other three and read with the same default, so a pre-69
+		// document - which carries no such field - draws the Objects atlas it
+		// drew before the choice existed.
+		serializer.writeUint32("version", 69);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
+		serializer.writeString("objectImageSet", mObjectImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
@@ -1613,7 +1619,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 68)
+		if (version < 1 || version > 69)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1626,6 +1632,10 @@ namespace core
 
 		std::shared_ptr<const FurnitureCatalogue> furnitureCatalogue;
 		auto sectorImageSetName = serializer.readString("sectorImageSet", true, "SectorAtlas");
+		// The fourth atlas selection (#1022). Absent on every document written
+		// before the Objects atlas became selectable, where it means exactly what
+		// it means now: the World draws the Objects atlas it has always drawn.
+		auto objectImageSetName = serializer.readString("objectImageSet", true, "ObjectAtlas");
 		auto agentImageSetName = serializer.readString("agentImageSet", true, "AgentAtlas");
 		auto furnitureImageSetName = serializer.readString("furnitureImageSet", true, "FurnitureAtlas");
 		std::string furnitureResourceName;
@@ -2324,6 +2334,7 @@ namespace core
 			candidate.mFurnitureCatalogue = furnitureCatalogue;
 			candidate.mFurnitureCatalogueResourceName = furnitureResourceName;
 			candidate.mSectorImageSetResourceName = sectorImageSetName;
+			candidate.mObjectImageSetResourceName = objectImageSetName;
 			candidate.mAgentImageSetResourceName = agentImageSetName;
 			candidate.mFurnitureImageSetResourceName = furnitureImageSetName;
 			candidate.mDeserializingConstruction = true;
@@ -2407,6 +2418,7 @@ namespace core
 		mFurnitureCatalogue = std::move(furnitureCatalogue);
 		mFurnitureCatalogueResourceName = std::move(furnitureResourceName);
 		mSectorImageSetResourceName = std::move(sectorImageSetName);
+		mObjectImageSetResourceName = std::move(objectImageSetName);
 		mAgentImageSetResourceName = std::move(agentImageSetName);
 		mFurnitureImageSetResourceName = std::move(furnitureImageSetName);
 		mActionRegistry = std::move(actionRegistry);
@@ -3085,6 +3097,7 @@ namespace core
 		candidate->mFurnitureCatalogue = mFurnitureCatalogue;
 		candidate->mFurnitureCatalogueResourceName = mFurnitureCatalogueResourceName;
 		candidate->mSectorImageSetResourceName = mSectorImageSetResourceName;
+		candidate->mObjectImageSetResourceName = mObjectImageSetResourceName;
 		candidate->mAgentImageSetResourceName = mAgentImageSetResourceName;
 		candidate->mFurnitureImageSetResourceName = mFurnitureImageSetResourceName;
 		candidate->mActionRegistry = mActionRegistry;

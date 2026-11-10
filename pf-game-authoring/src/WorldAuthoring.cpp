@@ -923,6 +923,10 @@ void WorldAuthoring::setSectorImageSetResourceName(std::string name)
 {
 	world().setSectorImageSetResourceName(std::move(name));
 }
+void WorldAuthoring::setObjectImageSetResourceName(std::string name)
+{
+	world().setObjectImageSetResourceName(std::move(name));
+}
 void WorldAuthoring::setAgentImageSetResourceName(std::string name)
 {
 	world().setAgentImageSetResourceName(std::move(name));

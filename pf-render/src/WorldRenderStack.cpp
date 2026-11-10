@@ -259,10 +259,10 @@ namespace
 			core::setCatalogResourceResolver(mCatalogResolver);
 
 			mSectorSet = requireImageSet("SectorAtlas");
-			mObjectSet = requireImageSet("ObjectAtlas");
+			mObjectSet = requireImageSet(mObjectSetName);
 			mAgentSet = requireImageSet("AgentAtlas");
 			mFurnitureSet = requireImageSet("FurnitureAtlas");
-			installAtlasDefinitions();
+			installAtlasDefinitions(/*objectsAreMandatory=*/ true);
 
 			mScene = mRenderSystem->createScene("Default");
 			mScene->load();
@@ -288,12 +288,12 @@ namespace
 			, mResources(&host.resources)
 			, mScene(host.scene)
 		{
-			mObjectSet = requireImageSet("ObjectAtlas");
+			mObjectSet = requireImageSet(mObjectSetName);
 			installOptionalAtlas(mSectorSet, mSectorSetName, mSectorDiagnostic);
 			installOptionalAtlas(mAgentSet, mAgentSetName, mAgentDiagnostic);
 			installOptionalAtlas(mFurnitureSet, mFurnitureSetName,
 				mFurnitureDiagnostic);
-			installAtlasDefinitions();
+			installAtlasDefinitions(/*objectsAreMandatory=*/ true);
 		}
 
 		~WorldRenderStack()
@@ -470,7 +470,7 @@ namespace
 			mSectorSet.reset();
 			try { mSectorSet = requireImageSet(name); }
 			catch (std::exception const& error) { mSectorDiagnostic = error.what(); }
-			installAtlasDefinitions();
+			installAtlasDefinitions(/*objectsAreMandatory=*/ false);
 			return mSectorDiagnostic;
 		}
 
@@ -485,7 +485,7 @@ namespace
 			mAgentSet.reset();
 			try { mAgentSet = requireImageSet(name); }
 			catch (std::exception const& error) { mAgentDiagnostic = error.what(); }
-			installAtlasDefinitions();
+			installAtlasDefinitions(/*objectsAreMandatory=*/ false);
 			return mAgentDiagnostic;
 		}
 
@@ -500,8 +500,29 @@ namespace
 			mFurnitureSet.reset();
 			try { mFurnitureSet = requireImageSet(name); }
 			catch (std::exception const& error) { mFurnitureDiagnostic = error.what(); }
-			installAtlasDefinitions();
+			installAtlasDefinitions(/*objectsAreMandatory=*/ false);
 			return mFurnitureDiagnostic;
+		}
+
+		// The fourth atlas selection (#1022). Unlike the other three, a bad
+		// Objects atlas is not merely an absent picture: the object renderer
+		// draws its Doors, Windows, Lifts and Shuttles at the extents this
+		// atlas declares, so a wrong selection is refused rather than drawn.
+		// The refusal lands in the diagnostic the same way an unloadable set
+		// does, leaving the slot empty and magenta rather than misaligned.
+		std::string selectObjectImageSet(std::string const& name)
+		{
+			if (name == mObjectSetName) return mObjectDiagnostic;
+			mObjectSetName = name;
+			for (auto& slot : mSlots) remove(slot);
+			mSlots.clear(); mSlotAllocator = {};
+			mObjectDiagnostic.clear();
+			if (mObjectSet) mResources->releaseResource(mObjectSet);
+			mObjectSet.reset();
+			try { mObjectSet = requireImageSet(name); }
+			catch (std::exception const& error) { mObjectDiagnostic = error.what(); }
+			installAtlasDefinitions(/*objectsAreMandatory=*/ false);
+			return mObjectDiagnostic;
 		}
 
 	private:
@@ -513,6 +534,10 @@ namespace
 		{
 			int width{}, height{};
 			TileArtworkMap tiles;
+			// Whether the authored tileset declared its own drawn size and
+			// render offset, which is what makes it checkable against the
+			// Objects contract (#1022).
+			bool declaresRenderSemantics{ false };
 		};
 
 		// Every installed atlas draws with this handle. The shared renderer
@@ -559,26 +584,40 @@ namespace
 		//
 		// A missing atlas installs an empty tileset: every lookup then misses
 		// and the draw helpers paint the cell opaque magenta, so a broken
-		// install is visible rather than blank. The Object atlas is mandatory,
-		// so its failure is reported instead.
-		void installAtlasDefinitions()
+		// install is visible rather than blank.
+		//
+		// `objectsAreMandatory` decides whether the Objects slot's failure
+		// throws as well as being reported. At stack construction it throws:
+		// a World cannot be drawn without an Objects atlas that can carry its
+		// geometry, and starting up without one would be a half-drawn canvas.
+		// At a live selection it does not, because the editor treats a bad
+		// artwork choice as recoverable and reports it through the
+		// diagnostic instead of throwing through the UI.
+		void installAtlasDefinitions(bool objectsAreMandatory)
 		{
 			installSectorAtlas(mSectorDiagnostic);
-			installObjectAtlas("ObjectAtlas", mObjectSet, setObjectTileset,
-				mObjectDiagnostic, /*mandatory=*/ true);
+			installObjectAtlas(mObjectSetName, mObjectSet, setObjectTileset,
+				mObjectDiagnostic, objectsAreMandatory,
+				/*enforceObjectContract=*/ true);
 			installObjectAtlas(mAgentSetName, mAgentSet, setAgentTileset,
-				mAgentDiagnostic, /*mandatory=*/ false);
+				mAgentDiagnostic, /*mandatory=*/ false, /*enforceObjectContract=*/ false);
 			installObjectAtlas(mFurnitureSetName, mFurnitureSet,
-				setFurnitureTileset, mFurnitureDiagnostic, /*mandatory=*/ false);
+				setFurnitureTileset, mFurnitureDiagnostic, /*mandatory=*/ false,
+				/*enforceObjectContract=*/ false);
 		}
 
-		// One object-shaped atlas slot. The Sector atlas is the only slot that
-		// is not object-shaped; it reads through the same `atlasArtwork()` and
-		// lands in its own tileset type.
+		// Installs the Objects slot's artwork, and - because the object
+		// renderer draws its Doors, Windows, Lifts and Shuttles from it at the
+		// extents the tileset declares - checks that the atlas can carry them
+		// (#1022). Only a tileset that declares its own render semantics is
+		// checked; a version 1 set derives them and is the artwork every
+		// existing World already draws. The Agent and Furniture slots share
+		// the object-shaped loader but not the object geometry, so they are
+		// installed without the contract.
 		void installObjectAtlas(std::string const& setName,
 			resources::ResourcePtr const& set,
 			void (*install)(ObjectTileset, TextureId), std::string& diagnostic,
-			bool mandatory)
+			bool mandatory, bool enforceObjectContract)
 		{
 			ObjectTileset tiles;
 			std::string error;
@@ -588,7 +627,16 @@ namespace
 				tiles.width = atlas->width;
 				tiles.height = atlas->height;
 				tiles.sprites = std::move(atlas->tiles);
+				tiles.declaresRenderSemantics = atlas->declaresRenderSemantics;
 			}
+			if (enforceObjectContract && tiles.declaresRenderSemantics && error.empty())
+				error = checkObjectAtlasContract(setName, tiles.sprites);
+			// A set that cannot carry the object geometry is not installed at
+			// all. Installing it and reporting the problem afterwards would
+			// still draw a Door's artwork outside the Door's collision, which
+			// is the exact failure this check exists to prevent; the slot goes
+			// empty and draws magenta instead.
+			if (!error.empty() && enforceObjectContract) tiles = {};
 			install(std::move(tiles), kInstalledAtlasTexture);
 			if (!error.empty() && (mandatory || diagnostic.empty())) diagnostic = error;
 			if (mandatory && !error.empty()) throw std::runtime_error(error);
@@ -648,8 +696,8 @@ namespace
 				int width{}, height{};
 				auto const regions = atlasPixelRegions(*imageSet, width, height);
 				auto const authored = authoredTiles(*imageSet, format);
-				return InstalledAtlas{ width, height,
-					installAtlasTiles(authored, regions, width, height, setName) };
+				return InstalledAtlas{ width, height, std::move(authored.tiles),
+					authored.declaresRenderSemantics };
 			}
 			catch (std::exception const& error)
 			{
@@ -664,7 +712,13 @@ namespace
 		// the install pairs against. The declared format is checked against
 		// the slot being installed, so a mismatch is reported rather than
 		// silently loading the wrong shape.
-		static TileArtworkMap authoredTiles(resources::Resource const& resource,
+		struct AuthoredAtlasTiles
+		{
+			TileArtworkMap tiles;
+			bool declaresRenderSemantics{ false };
+		};
+
+		static AuthoredAtlasTiles authoredTiles(resources::Resource const& resource,
 			authoredFormat format)
 		{
 			auto const authored = authoredTileset(resource);
@@ -673,9 +727,10 @@ namespace
 					+ authoredFormatName(format) + " but the atlas-set registry says "
 					+ authoredFormatName(authored.format) + " ('"
 					+ authored.path.string() + "')");
-			return format == authoredFormat::SectorTiles
-				? SectorTileset::load(authored.path).tiles
-				: ObjectTileset::load(authored.path).sprites;
+			if (format == authoredFormat::SectorTiles)
+				return { SectorTileset::load(authored.path).tiles, false };
+			auto set = ObjectTileset::load(authored.path);
+			return { std::move(set.sprites), set.declaresRenderSemantics };
 		}
 
 		static char const* authoredFormatName(authoredFormat format)
@@ -989,6 +1044,9 @@ namespace
 		std::string mFurnitureSetName{"FurnitureAtlas"};
 		std::string mFurnitureDiagnostic;
 		resources::ResourcePtr mObjectSet;
+		// The fourth viewport atlas selection (#1022). The default is the set
+		// every World drew from before the choice existed.
+		std::string mObjectSetName{"ObjectAtlas"};
 		std::string mObjectDiagnostic;
 		mpp::ScenePtr mScene;
 		// Both images are composited later by the caller, so neither canvas may
@@ -1076,4 +1134,15 @@ std::string selectWorldFurnitureImageSet(std::string const& name)
 {
 	if (!gStack) return "Rendering service is not initialized";
 	return gStack->selectFurnitureImageSet(name);
+}
+
+// Installs the World's selected Objects atlas (#1022). Returns the
+// diagnostic: empty when the atlas was accepted, and otherwise the reason
+// it was refused - which for a set that lacks a required Objects tile, or
+// declares a drawn size or render offset the renderer does not draw at,
+// names the tile and both values.
+std::string selectWorldObjectImageSet(std::string const& name)
+{
+	if (!gStack) return "Rendering service is not initialized";
+	return gStack->selectObjectImageSet(name);
 }

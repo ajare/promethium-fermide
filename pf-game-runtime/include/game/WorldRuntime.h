@@ -272,6 +272,9 @@ namespace game
 		// The image-set Resources the document was authored against.
 		std::string const& sectorImageSetResourceName() const;
 
+		// The fourth of the four viewport atlases the document selects (#1022).
+		std::string const& objectImageSetResourceName() const;
+
 		std::string const& agentImageSetResourceName() const;
 
 		std::string const& furnitureImageSetResourceName() const;

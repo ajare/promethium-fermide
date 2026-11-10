@@ -80,7 +80,10 @@ struct WorldRenderStackHost
 // atlases are installed from the host's resource manager: `ObjectAtlas` is
 // mandatory, and a missing or foreign Sector, Agent or Furniture atlas is
 // reported through the corresponding `selectWorld*ImageSet` diagnostic and
-// drawn as magenta rather than failing the host's start-up.
+// drawn as magenta rather than failing the host's start-up. The Objects
+// atlas carries a further check: a set that declares render semantics must
+// contain every required Objects tile at the drawn size and offset the
+// renderer draws it at, or the selection is refused (#1022).
 //
 // Throws `std::logic_error` if a stack already exists.
 void createWorldRenderStack(WorldRenderStackHost const& host);
@@ -154,5 +157,6 @@ OffscreenTargetId submitWorldCommands(WorldDrawList const& commands,
 // of throwing: a bad selection is recoverable at run time, unlike a missing
 // atlas at startup.
 std::string selectWorldSectorImageSet(std::string const& name);
+std::string selectWorldObjectImageSet(std::string const& name);
 std::string selectWorldAgentImageSet(std::string const& name);
 std::string selectWorldFurnitureImageSet(std::string const& name);

@@ -8381,6 +8381,28 @@ void renderWorldPanel(editor::DocumentPtr const& document)
 		auto diagnostic = selectWorldSectorImageSet(world->sectorImageSetResourceName());
 		if (!diagnostic.empty()) ImGui::TextWrapped("Sector ImageSet unavailable: %s", diagnostic.c_str());
 	}
+	if (ImGui::CollapsingHeader("Objects artwork"))
+	{
+		// The fourth atlas selection (#1022). Choosing here is what the World
+		// persists, and the render stack refuses a set that cannot carry the
+		// object geometry - the diagnostic below names the tile and both the
+		// declared and the expected extent, so the choice is actionable
+		// rather than just wrong.
+		auto const& selected = world->objectImageSetResourceName();
+		if (ImGui::BeginCombo("Objects ImageSet", selected.c_str()))
+		{
+			for (auto const& name : applicationResourceNames("ImageSet"))
+				if (ImGui::Selectable(name.c_str(), name == selected))
+				{
+					auto before = captureDocumentSnapshot(world);
+					document->authoring().setObjectImageSetResourceName(name);
+					commitDocumentEdit(std::move(before));
+				}
+			ImGui::EndCombo();
+		}
+		auto diagnostic = selectWorldObjectImageSet(selected);
+		if (!diagnostic.empty()) ImGui::TextWrapped("Objects ImageSet unavailable: %s", diagnostic.c_str());
+	}
 	if (ImGui::CollapsingHeader("Furniture artwork"))
 	{
 		auto const& selected = world->furnitureImageSetResourceName();
@@ -10026,6 +10048,7 @@ void renderUI(editor::DocumentPtr& document, shared_ptr<core::Agent> pathingAgen
 	}
 
 	selectWorldSectorImageSet(world->sectorImageSetResourceName());
+	selectWorldObjectImageSet(world->objectImageSetResourceName());
 	selectWorldAgentImageSet(world->agentImageSetResourceName());
 	selectWorldFurnitureImageSet(world->furnitureImageSetResourceName());
 	auto const graph = world->getGraph();

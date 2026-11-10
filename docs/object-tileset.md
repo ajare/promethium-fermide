@@ -359,6 +359,48 @@ A tile the `ImageSet` declares that the tileset never authored is refused, as is
 pixel region escaping the atlas image. Nothing in the install derives a tint from
 a name or a drawn size from a domain object's geometry.
 
+### The Objects atlas is a World-level choice, and is checked at load
+
+A World selects the atlas each of its four viewport slots draws from, and the
+Objects slot is one of them (`World::objectImageSetResourceName`, persisted as
+`objectImageSet` from schema version 69). Its default is `ObjectAtlas`, the set
+every World drew from before the choice existed, so a document that never names
+one is drawn exactly as it was.
+
+Because the renderer takes a tile's drawn size and render offset from the
+tileset rather than from a cell-sized quad, that choice cannot be trusted the way
+the Sector, Agent and Furniture choices can. A Door's artwork drawn at an extent
+that disagrees with the Door's shape lands outside the collision that stops the
+Agent, which is a worse failure than no artwork at all. So the Objects slot is
+checked against a contract before it is installed
+(`checkObjectAtlasContract`, `pf-render`):
+
+- every tile the object renderer draws from the slot must be present;
+- each must declare the drawn size the renderer draws it at, composed from core's
+  own geometry constants where the domain fixes one - the Door leaf is the
+  doorway less `CORE_DOOR_X_INSET` at `CORE_DOOR_HEIGHT`, the Lift car the cell
+  less `CORE_LIFT_CAR_BORDER` at `CORE_LIFT_CAR_HEIGHT`, the Shuttle cells at
+  `CORE_SHUTTLE_CAR_HEIGHT`, the Button `CORE_BUTTON_SIZE` over the cell's y:x
+  render ratio - and the authored reference extent where it does not, which is
+  the case for the screen-space Marker icon and for the Walkway and Platform lift
+  slab thicknesses;
+- each must declare the render offset the renderer draws it at, which for the
+  Walkway is the whole of its placement: its physical shape is a zero-height
+  line, so the offset is the only thing hanging its slab on the floor.
+
+A set that fails is not installed at all. At stack construction the failure
+throws, so the game refuses to start on an atlas that cannot carry its geometry;
+at a live selection in the editor it lands in the slot's diagnostic and the slot
+draws magenta, which is the same recoverable shape a missing atlas takes. Either
+way the message names the atlas, names every offending tile, and gives the
+declared extent beside the expected one, so it can be acted on rather than
+guessed at.
+
+The contract applies only to a tileset that declares its own render semantics -
+version 2. A version 1 set derives them from each tile's content rect, makes no
+declaration of its own, and is the artwork every existing World already draws;
+checking it would refuse the default.
+
 
 There is one object renderer. `pf-render` loads the definition, installs the atlas
 as a Willpower `ImageSet` resource, and emits the sprite quads into the World

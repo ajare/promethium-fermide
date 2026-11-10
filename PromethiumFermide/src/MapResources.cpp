@@ -49,7 +49,8 @@ void MapResources::loadAtlases() {
   if (!mMap || !mManager.isResourceLoaded(mMap))
     throw std::runtime_error("Atlas post work requires a loaded Map");
   std::array names{mMap->getRuntime()->world().sectorImageSetResourceName(),
-      std::string{"ObjectAtlas"}, mMap->getRuntime()->world().agentImageSetResourceName(),
+      mMap->getRuntime()->world().objectImageSetResourceName(),
+      mMap->getRuntime()->world().agentImageSetResourceName(),
       mMap->getRuntime()->world().furnitureImageSetResourceName()};
   for (std::size_t index = 0; index < names.size(); ++index) {
     if (mAtlases[index]) continue;

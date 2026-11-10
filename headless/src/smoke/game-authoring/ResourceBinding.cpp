@@ -140,14 +140,18 @@ void registerGameAuthoringResourceBinding(std::vector<smoke::Check>& checks)
 			// document says otherwise, and the runtime reads those too.
 			require(runtime.sectorImageSetResourceName() == "SectorAtlas"
 				&& runtime.agentImageSetResourceName() == "AgentAtlas"
-				&& runtime.furnitureImageSetResourceName() == "FurnitureAtlas",
+				&& runtime.furnitureImageSetResourceName() == "FurnitureAtlas"
+				&& runtime.objectImageSetResourceName() == "ObjectAtlas",
 				"the runtime does not read the default image set names a fresh World carries");
 
 			authoring.setSectorImageSetResourceName("sectors.tiles.lua");
+			authoring.setObjectImageSetResourceName("objects.tiles.lua");
 			authoring.setAgentImageSetResourceName("agents.tiles.lua");
 			authoring.setFurnitureImageSetResourceName("furniture.tiles.lua");
 			require(runtime.sectorImageSetResourceName() == "sectors.tiles.lua",
 				"the runtime does not report the Sector image set the handle named");
+			require(runtime.objectImageSetResourceName() == "objects.tiles.lua",
+				"the runtime does not report the Objects image set the handle named");
 			require(runtime.agentImageSetResourceName() == "agents.tiles.lua",
 				"the runtime does not report the Agent image set the handle named");
 			require(runtime.furnitureImageSetResourceName() == "furniture.tiles.lua",

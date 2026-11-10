@@ -109,6 +109,14 @@ set(names
     objectArtworkNew/boothWindowShutterTranslatesBehindTheStationaryFrame
     objectArtworkNew/buttonStateIsLegibleAtTheDrawnSize
     objectArtworkNew/markerStaysTintableAndFollowsSelection
+    objectAtlasContract/shippedAtlasSatisfiesTheContract
+    objectAtlasContract/coversEveryDrawnTile
+    objectAtlasContract/expectedExtentsFollowTheDomainGeometry
+    objectAtlasContract/aMissingRequiredTileIsRefused
+    objectAtlasContract/aMismatchedDrawnSizeIsRefused
+    objectAtlasContract/aMismatchedRenderOffsetIsRefused
+    objectAtlasContract/everyProblemIsReportedAtOnce
+    objectAtlasContract/theLegacyObjectAtlasIsExempt
     vehicleArtworkNew/vehicleTilesAreRegistered
     vehicleArtworkNew/carriageComposesAtTwoThreeAndFourCellsWide
     vehicleArtworkNew/connectorSitsAtTheSeamNotACellPosition

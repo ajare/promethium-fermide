@@ -262,6 +262,11 @@ namespace game
 		return requireLive("WorldRuntime::sectorImageSetResourceName").sectorImageSetResourceName();
 	}
 
+	std::string const& WorldRuntime::objectImageSetResourceName() const
+	{
+		return requireLive("WorldRuntime::objectImageSetResourceName").objectImageSetResourceName();
+	}
+
 	std::string const& WorldRuntime::agentImageSetResourceName() const
 	{
 		return requireLive("WorldRuntime::agentImageSetResourceName").agentImageSetResourceName();

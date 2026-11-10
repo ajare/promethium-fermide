@@ -1,7 +1,10 @@
 #pragma once
 #include "SectorTileset.h"
 #include "TileArtwork.h"
+#include <map>
 #include <optional>
+#include <string>
+#include <vector>
 // One tile of an object-shaped atlas is the shared artwork type: a pixel
 // region plus the render semantics the authored tileset declared for it
 // (#1014).
@@ -15,7 +18,49 @@ struct ObjectTileset
     // the manifest's own authored tile grid. That grid need not be the World
     // cell - it only has to divide the image evenly (#1006).
     static ObjectTileset load(std::filesystem::path const& path);
+    // True when the tileset declares its own drawn size and render offset
+    // per tile (version 2). A version 1 set derives them from each tile's
+    // content rect instead, and so makes no declaration to check (#1022).
+    bool declaresRenderSemantics{ false };
 };
+
+// What the World's object renderer requires of the atlas installed in its
+// Objects slot (#1022).
+//
+// The renderer takes a tile's drawn size and render offset from the tileset
+// rather than from a cell-sized quad, so an atlas whose declared values
+// disagree with the domain's geometry would place a Door's artwork somewhere
+// other than where its collision is. That is a worse failure than no
+// artwork at all, so a World's Objects selection is checked rather than
+// trusted.
+//
+// Each expectation is the geometry the renderer draws that tile into. Where
+// the domain fixes it, it is composed from core's own constants: the Door
+// leaf is the doorway minus its x insets, the Lift car the cell minus the
+// car border, the Shuttle cells the car height. Where the renderer draws in
+// screen space rather than World units - the Marker icon - or the extent is
+// an artwork fact rather than a physical one - the Walkway and Platform lift
+// slabs - the expectation is the authored reference extent the shipped set
+// declares, which still catches a set that disagrees.
+struct ObjectTileExpectation
+{
+    char const* tileName;
+    float drawnWidth;
+    float drawnHeight;
+    pf::render::Vec2 renderOffset{ 0.0f, 0.0f };
+};
+
+// Every tile the object renderer draws from the Objects slot, in the order
+// it names them. A tile listed here but absent from the atlas is a refusal.
+std::vector<ObjectTileExpectation> const& requiredObjectTiles();
+
+// Empty when `sprites` satisfies the contract for `atlasName`; otherwise a
+// multi-line diagnostic naming every tile that is missing, and for each
+// mismatch the declared value beside the expected one. The message is
+// written to be acted on: it names the tile, the atlas, and what differs.
+std::string checkObjectAtlasContract(std::string const& atlasName,
+    std::map<std::string, ObjectSprite> const& sprites);
+
 void setObjectTileset(ObjectTileset tileset, TextureId texture);
 void clearObjectTileset();
 // Agent artwork is independently selected, even when it shares the image.

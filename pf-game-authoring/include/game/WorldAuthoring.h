@@ -389,6 +389,7 @@ namespace game
 	// on `WorldRuntime`. The pair is the boundary drawn at the finest grain
 	// this family allows.
 	void setSectorImageSetResourceName(std::string name);
+	void setObjectImageSetResourceName(std::string name);
 	void setAgentImageSetResourceName(std::string name);
 	void setFurnitureImageSetResourceName(std::string name);
 

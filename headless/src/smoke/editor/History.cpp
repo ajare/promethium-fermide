@@ -55,6 +55,21 @@ namespace
 			&& world->sectorImageSetResourceName() == "StationAtlas", "Furniture artwork undo changed other artwork");
 		require(artworkHistory.redo(captureDocumentSnapshot(world, artworkHistory), restore)
 			&& world->furnitureImageSetResourceName() == "CustomFurniture", "Furniture artwork redo lost the selection");
+		// The fourth atlas selection round-trips through undo and redo the
+		// same way the other three do, and changing it leaves them alone
+		// (#1022).
+		auto const objectsBefore = captureDocumentSnapshot(world, artworkHistory);
+		world->setObjectImageSetResourceName("CustomObjects");
+		commitDocumentEdit(std::move(objectsBefore), artworkHistory);
+		require(artworkHistory.undo(captureDocumentSnapshot(world, artworkHistory), restore)
+			&& world->objectImageSetResourceName() == "ObjectAtlas"
+			&& world->furnitureImageSetResourceName() == "CustomFurniture"
+			&& world->agentImageSetResourceName() == "CustomAgents"
+			&& world->sectorImageSetResourceName() == "StationAtlas",
+			"Objects artwork undo changed other artwork or restored the wrong set");
+		require(artworkHistory.redo(captureDocumentSnapshot(world, artworkHistory), restore)
+			&& world->objectImageSetResourceName() == "CustomObjects",
+			"Objects artwork redo lost the selection");
 		DocumentHistory worldHistory;
 		DocumentHistory registryHistory;
 

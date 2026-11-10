@@ -803,7 +803,12 @@ namespace core
 		std::shared_ptr<const FurnitureCatalogue> mFurnitureCatalogue;
 		// The catalogue is an application Resource (ADR 0010) resolved by name.
 		std::string mFurnitureCatalogueResourceName;
+		// The four viewport atlases this World draws from (#1022). Each is an
+		// application Resource name the renderer resolves; the defaults are the
+		// sets a World drew from before the Objects atlas became selectable, so a
+		// document that never names one is drawn exactly as it was.
 		std::string mSectorImageSetResourceName{"SectorAtlas"};
+		std::string mObjectImageSetResourceName{"ObjectAtlas"};
 		std::string mAgentImageSetResourceName{"AgentAtlas"};
 		std::string mFurnitureImageSetResourceName{"FurnitureAtlas"};
 		std::vector<FurnitureInstance> mFurniture;
@@ -3560,6 +3565,13 @@ namespace core
 		{
 			if (name == mSectorImageSetResourceName) return;
 			mSectorImageSetResourceName = std::move(name);
+			modify();
+		}
+		std::string const& objectImageSetResourceName() const { return mObjectImageSetResourceName; }
+		void setObjectImageSetResourceName(std::string name)
+		{
+			if (name == mObjectImageSetResourceName) return;
+			mObjectImageSetResourceName = std::move(name);
 			modify();
 		}
 		std::string const& agentImageSetResourceName() const { return mAgentImageSetResourceName; }
