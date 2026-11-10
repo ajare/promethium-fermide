@@ -8324,6 +8324,20 @@ void renderLevelsPanel(editor::DocumentPtr const& document)
 	}
 }
 
+namespace
+{
+	// Every artwork panel reports its slot's selection the same way: the
+	// renderer's own diagnostic for the set the World chose, prefixed with the
+	// slot it belongs to. An empty diagnostic means the selection was accepted,
+	// and that is the only case these panels stay quiet about - a refused set,
+	// including "there is no render stack", always says why (#1034).
+	void renderAtlasSelectionReport(char const* slot, std::string const& diagnostic)
+	{
+		if (diagnostic.empty()) return;
+		ImGui::TextWrapped("%s ImageSet unavailable: %s", slot, diagnostic.c_str());
+	}
+}
+
 void renderWorldPanel(editor::DocumentPtr const& document)
 {
 	auto const world = document ? document->world() : nullptr;
@@ -8381,8 +8395,8 @@ void renderWorldPanel(editor::DocumentPtr const& document)
 				}
 			ImGui::EndCombo();
 		}
-		auto diagnostic = selectWorldSectorImageSet(world->sectorImageSetResourceName());
-		if (!diagnostic.empty()) ImGui::TextWrapped("Sector ImageSet unavailable: %s", diagnostic.c_str());
+		auto const diagnostic = selectWorldSectorImageSet(selected);
+		renderAtlasSelectionReport("Sector", diagnostic);
 	}
 	if (ImGui::CollapsingHeader("Objects artwork"))
 	{
@@ -8403,8 +8417,8 @@ void renderWorldPanel(editor::DocumentPtr const& document)
 				}
 			ImGui::EndCombo();
 		}
-		auto diagnostic = selectWorldObjectImageSet(selected);
-		if (!diagnostic.empty()) ImGui::TextWrapped("Objects ImageSet unavailable: %s", diagnostic.c_str());
+		auto const diagnostic = selectWorldObjectImageSet(selected);
+		renderAtlasSelectionReport("Objects", diagnostic);
 	}
 	if (ImGui::CollapsingHeader("Furniture artwork"))
 	{
@@ -8420,8 +8434,8 @@ void renderWorldPanel(editor::DocumentPtr const& document)
 				}
 			ImGui::EndCombo();
 		}
-		auto diagnostic = selectWorldFurnitureImageSet(selected);
-		if (!diagnostic.empty()) ImGui::TextWrapped("Furniture ImageSet unavailable: %s", diagnostic.c_str());
+		auto const diagnostic = selectWorldFurnitureImageSet(selected);
+		if (!diagnostic.empty()) renderAtlasSelectionReport("Furniture", diagnostic);
 		else if (auto catalogue = world->furnitureCatalogue())
 			for (auto const& [key, definition] : catalogue->definitions())
 				for (auto const& tile : definition.tiles)
@@ -8442,10 +8456,10 @@ void renderWorldPanel(editor::DocumentPtr const& document)
 				}
 			ImGui::EndCombo();
 		}
-		auto diagnostic = selectWorldAgentImageSet(world->agentImageSetResourceName());
+		auto const diagnostic = selectWorldAgentImageSet(selected);
 		auto const previewBaseline = world->registeredAgentTypeBaseline(gAgentTypeDraft.typeId,
 			gAgentTypeDraft.resourceName).value_or(core::bundledHumanBaseline());
-		if (!diagnostic.empty()) ImGui::TextWrapped("Agent ImageSet unavailable: %s", diagnostic.c_str());
+		if (!diagnostic.empty()) renderAtlasSelectionReport("Agent", diagnostic);
 		else if (!agentSpriteSize(previewBaseline.poses.at(core::Pose::Standing).imageTile.c_str()))
 			ImGui::TextWrapped("Agent ImageSet lacks Standing artwork for the placement type; rendering previews in magenta.");
 		else for (auto const& snapshot : previewSnapshotViewForRender(world.get()).agents)

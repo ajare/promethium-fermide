@@ -829,6 +829,13 @@ namespace
 	};
 
 	std::unique_ptr<WorldRenderStack> gStack;
+
+	// What every atlas-selection entry point below reports when there is no
+	// render stack to select into. An empty diagnostic means the selection was
+	// accepted, so a missing stack has to say so out loud: the Sector and
+	// Agent entries used to answer with an empty string here, which a panel
+	// cannot tell apart from an atlas that loaded (#1034).
+	char const* const kNoRenderStack{"Rendering service is not initialized"};
 }
 
 void createWorldRenderStack(std::filesystem::path const& resourceDirectory,
@@ -887,21 +894,25 @@ void renderWorldCommandsToHostTarget(WorldDrawList const& commands,
 	gStack->renderToHostTarget(commands, canvasPosition, canvasSize);
 }
 
+// The four atlas selections answer with one shape: empty means accepted,
+// non-empty means refused with that reason. A missing render stack is a
+// refusal, and all four report it with the same message rather than two of
+// them going silent (#1034).
 std::string selectWorldSectorImageSet(std::string const& name)
 {
-	if (!gStack) return {};
+	if (!gStack) return kNoRenderStack;
 	return gStack->selectSectorImageSet(name);
 }
 
 std::string selectWorldAgentImageSet(std::string const& name)
 {
-	if (!gStack) return {};
+	if (!gStack) return kNoRenderStack;
 	return gStack->selectAgentImageSet(name);
 }
 
 std::string selectWorldFurnitureImageSet(std::string const& name)
 {
-	if (!gStack) return "Rendering service is not initialized";
+	if (!gStack) return kNoRenderStack;
 	return gStack->selectFurnitureImageSet(name);
 }
 
@@ -912,6 +923,6 @@ std::string selectWorldFurnitureImageSet(std::string const& name)
 // names the tile and both values.
 std::string selectWorldObjectImageSet(std::string const& name)
 {
-	if (!gStack) return "Rendering service is not initialized";
+	if (!gStack) return kNoRenderStack;
 	return gStack->selectObjectImageSet(name);
 }

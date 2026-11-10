@@ -156,6 +156,13 @@ OffscreenTargetId submitWorldCommands(WorldDrawList const& commands,
 // draw helpers render as opaque magenta, and returns the diagnostic instead
 // of throwing: a bad selection is recoverable at run time, unlike a missing
 // atlas at startup.
+//
+// All four answer with the same shape, and an empty diagnostic means exactly
+// one thing: the selection was accepted. Anything else - a set that is not
+// an ImageSet, one that cannot carry the geometry the renderer draws from it,
+// or there being no render stack at all - is reported. A caller that shows
+// the diagnostic in a panel therefore never mistakes "nothing to say" for a
+// selection that worked when the renderer was not there to make it (#1034).
 std::string selectWorldSectorImageSet(std::string const& name);
 std::string selectWorldObjectImageSet(std::string const& name);
 std::string selectWorldAgentImageSet(std::string const& name);

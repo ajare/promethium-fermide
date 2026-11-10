@@ -450,6 +450,54 @@ void checkCanvasAtlasSelection() {
       "An atlas selection every slot accepted still produced a report");
 }
 
+// The missing-render-stack case, which is where the four atlas-selection
+// entry points used to disagree: Sector and Agent answered with an empty
+// diagnostic - indistinguishable from an atlas that had been accepted -
+// while Objects and Furniture reported the missing stack. An empty diagnostic
+// has to mean exactly one thing, so all four refuse the same way, and the
+// editor's Sector, Agent and Furniture artwork panels get the report the
+// Objects panel already showed (#1034).
+//
+// This whole test process is CPU-only and never creates a render stack, so
+// every call below lands in the missing-stack branch.
+void checkAtlasSelectionWithoutRenderStack() {
+  require(!worldRenderStackActive(),
+      "A render stack is live, so the missing-stack case cannot be checked here");
+  std::array<char const*, 4> const slots{"Sector", "Objects", "Agent",
+      "Furniture"};
+  std::array<std::string, 4> const refused{
+      selectWorldSectorImageSet("SectorAtlasNew"),
+      selectWorldObjectImageSet("ObjectAtlasNew"),
+      selectWorldAgentImageSet("AgentAtlasNew"),
+      selectWorldFurnitureImageSet("FurnitureAtlasNew")};
+  for (std::size_t index = 0; index < refused.size(); ++index)
+    require(!refused[index].empty(), std::string("The ") + slots[index]
+        + " selection answered with nothing while no render stack exists, which a "
+          "panel reads as an atlas that was accepted");
+  for (std::size_t index = 1; index < refused.size(); ++index)
+    require(refused[index] == refused[0], std::string("The ") + slots[index]
+        + " slot reports a missing render stack differently from the Sector one: '"
+        + refused[index] + "' against '" + refused[0] + "'");
+
+  // The same refusals arrive through the game's own slot table, which is the
+  // shape every artwork panel's report line prints, so no slot can come back
+  // quieter than another on the way up.
+  auto world = std::make_shared<core::World>("No render stack", 8, 2);
+  world->addRoom("Front", 0, 0, 0, 8, 1);
+  world->addRoom("Back", 1, 0, 0, 8, 1);
+  world->finishBuild();
+  world->pauseSimulation();
+  auto const pushed = app::applyWorldAtlasSelections(*world);
+  require(pushed.size() == refused.size(),
+      "The game pushed " + std::to_string(pushed.size())
+      + " atlas selections against a four-slot table");
+  for (std::size_t index = 0; index < pushed.size(); ++index)
+    require(pushed[index].diagnostic == refused[index],
+        "The game's '" + pushed[index].slot + "' slot reports a missing render "
+        "stack differently from the renderer's own entry for that slot: '"
+        + pushed[index].diagnostic + "' against '" + refused[index] + "'");
+}
+
 // The game's report for a refused atlas, driven through the same
 // `wp::Logger` the game's own state hands the canvas (#1026). The game
 // has no artwork panel to show a refusal in, so the log is the whole of
@@ -1010,6 +1058,7 @@ int main(int argc, char** argv) {
     checkAtlasReload(directory);
     checkStagedMap(directory);
     checkCanvasAtlasSelection();
+    checkAtlasSelectionWithoutRenderStack();
     checkCanvasAtlasReport();
     checkWorldText(directory);
     checkAgentPoses();
