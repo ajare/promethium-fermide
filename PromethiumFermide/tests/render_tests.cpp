@@ -928,9 +928,9 @@ void checkSectorTileScaling() {
   // Two World cells wide, three quarters of a Level tall: two tiles side by
   // side in one row, that row cropped at three quarters of its tile height
   // rather than stretched to fit. A tile is a whole Level tall on screen, so
-  // this probe never reaches a second Level; the crop is the point - the UV
-  // stops at the same 0.75 fraction as the geometry instead of running the
-  // whole tile.
+  // this probe never reaches a second Level; the crop is the point - the tile
+  // keeps its bottom edge on the probed floor line at one artwork pixel to one
+  // screen pixel, and the top quarter of the tile never reaches the screen.
   float const probeWide = 2.0f * CORE_CELL_WIDTH_PIXELS * zoom;
   float const probeHigh = 0.75f * CORE_LEVEL_HEIGHT_PIXELS * zoom;
   require(drawSectorTileSurface("corridor", &commands, {0, 0}, {probeWide, probeHigh}, pf::render::White, zoom),
@@ -938,15 +938,18 @@ void checkSectorTileScaling() {
   require(textured(commands, WorldDrawList::Texture::SectorAtlas) == 4,
       "Two World cells must each render a tile at zoom 2 independent of source size");
   auto const& triangle = std::get<WorldDrawList::Triangle>(commands.commands().front());
-  float maxX{}, maxY{}, maxUvY{};
+  float maxX{}, maxY{}, topUvY{ 1.f }, floorUvY{};
   for (int i = 0; i < 3; ++i) {
     maxX = std::max(maxX, triangle.positions[i].x);
     maxY = std::max(maxY, triangle.positions[i].y);
-    maxUvY = std::max(maxUvY, triangle.texcoords[i].y);
+    // Atlas rows run top down, so the least uv.y is the topmost texel row the
+    // crop still samples and the greatest is the tile's own floor end.
+    topUvY = std::min(topUvY, triangle.texcoords[i].y);
+    floorUvY = std::max(floorUvY, triangle.texcoords[i].y);
   }
   require(maxX == CORE_CELL_WIDTH_PIXELS * zoom && maxY == probeHigh
-      && maxUvY < .76f && maxUvY > .74f,
-      "Tile must fill 1x1 World units and crop a partial-height cell");
+      && topUvY > .24f && topUvY < .26f && floorUvY > .99f,
+      "Tile must fill 1x1 World units and crop the top of a partial-height cell");
   WorldDrawList missing({{0, 0}, {1000, 1000}});
   require(drawSectorTileSurface("room", &missing, {0, 0},
       {CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS}, pf::render::White),

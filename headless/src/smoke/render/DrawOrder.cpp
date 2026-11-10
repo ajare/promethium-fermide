@@ -1016,23 +1016,27 @@ namespace
 		// by side in one row, that row cropped at three quarters of its tile
 		// height rather than stretched to fit. A tile is a whole Level tall on
 		// screen, so this probe never reaches a second Level; the crop is the
-		// point - the UV stops at the same 0.75 fraction as the geometry
-		// instead of running the whole tile.
+		// point - the tile keeps its floor end on the probed floor line at one
+		// artwork pixel to one screen pixel, and the top quarter of the tile is
+		// what gets dropped.
 		float const zoom = 2.f;
 		float const probeWide = 2.0f * CORE_CELL_WIDTH_PIXELS * zoom;
 		float const probeHigh = 0.75f * CORE_LEVEL_HEIGHT_PIXELS * zoom;
 		drawSectorTileSurface("corridor", &tiles, {0, 0}, {probeWide, probeHigh}, White, zoom);
 		require(tiles.commands().size() == 4, "Station artwork must repeat once per World cell at zoom 2");
 		auto const& tile = std::get<WorldDrawList::Triangle>(tiles.commands().front());
-		float maxX{}, maxY{}, maxUvY{};
+		float maxX{}, maxY{}, topUvY{ 1.f }, floorUvY{};
 		for (int i = 0; i < 3; ++i) {
 			maxX = std::max(maxX, tile.positions[i].x);
 			maxY = std::max(maxY, tile.positions[i].y);
-			maxUvY = std::max(maxUvY, tile.texcoords[i].y);
+			// Atlas rows run top down: the least uv.y is the topmost texel row
+			// the crop still samples, the greatest is the tile's floor end.
+			topUvY = std::min(topUvY, tile.texcoords[i].y);
+			floorUvY = std::max(floorUvY, tile.texcoords[i].y);
 		}
 		require(maxX == CORE_CELL_WIDTH_PIXELS * zoom && maxY == probeHigh
-			&& maxUvY > .74f && maxUvY < .76f,
-			"Station tile must scale to World cells and crop partial cells");
+			&& topUvY > .24f && topUvY < .26f && floorUvY > .99f,
+			"Station tile must scale to World cells and crop the top of partial cells");
 		// The fallbacks below are probed on one World cell. Neither area is
 		// asserted against - only the emitted texture and colour are - but both
 		// are World extents, so they say so.

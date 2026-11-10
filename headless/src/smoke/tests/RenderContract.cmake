@@ -78,6 +78,7 @@ set(names
     sectorAtlasNew/tenFullCellTilesAreRegistered
     sectorAtlasNew/everyEdgeFallsBackToThePrimitiveLine
     sectorAtlasNew/everySurfaceBearingSectorTypeResolvesToItsOwnTile
+    sectorAtlasNew/aShortSectorCropsTheTopOfItsTileOntoItsFloorLine
     sectorAtlasNew/shuttleAndStaircaseNoLongerBorrow
     sectorAtlasNew/carriageAndStepsStillDrawOnTop
     sectorAtlasNew/flatColourSectorsTakeNoTile

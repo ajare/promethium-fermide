@@ -371,24 +371,36 @@ namespace
 	// Reading the surface back out of the command stream.
 	// ------------------------------------------------------------------
 
-	// The tile one textured quad started from. The comparison is on the
-	// minimum UV, which a cropped partial cell never moves: it is the tile's
-	// own top-left texel, so it names the tile the renderer asked for no
-	// matter how much of it reached the screen.
+	// The tile one textured quad started from. The comparison is on the centre
+	// of the sampled UV range, not on its corner: a crop moves the corner - a
+	// short Sector samples its tile from part-way down - but it can never move
+	// the centre off the tile it came from. The tiles are disjoint regions of
+	// one sheet, so the centre lands on exactly one of them.
 	std::string tileSampledBy(WorldDrawList::Triangle const& triangle,
 		SectorTileset const& atlas)
 	{
-		float u0 = 1e9f, v0 = 1e9f;
+		if (atlas.width <= 0 || atlas.height <= 0) return {};
+		float u0 = 1e9f, v0 = 1e9f, u1 = -1e9f, v1 = -1e9f;
 		for (auto const& uv : triangle.texcoords)
 		{
 			u0 = std::min(u0, uv.x);
 			v0 = std::min(v0, uv.y);
+			u1 = std::max(u1, uv.x);
+			v1 = std::max(v1, uv.y);
 		}
+		float const centreU = (u0 + u1) * 0.5f;
+		float const centreV = (v0 + v1) * 0.5f;
 		for (auto const& [name, artwork] : atlas.tiles)
 		{
-			auto const u = (float(artwork.region.x) + 0.5f) / float(atlas.width);
-			auto const v = (float(artwork.region.y) + 0.5f) / float(atlas.height);
-			if (near(u0, u) && near(v0, v)) return name;
+			auto const left = float(artwork.region.x) / float(atlas.width);
+			auto const right =
+				float(artwork.region.x + artwork.region.width) / float(atlas.width);
+			auto const top = float(artwork.region.y) / float(atlas.height);
+			auto const bottom =
+				float(artwork.region.y + artwork.region.height) / float(atlas.height);
+			if (centreU >= left && centreU < right && centreV >= top
+				&& centreV < bottom)
+				return name;
 		}
 		return {};
 	}
@@ -548,6 +560,107 @@ namespace
 			require(tiles.size() == 1 && tiles.front() == surface,
 				"The '" + surface + "' Sector filled with " + joined(tiles)
 					+ " instead of its own tile");
+		}
+	}
+
+	// What part of its tile one surface quad reads, as fractions of the tile.
+	// Atlas rows run top down, so v runs with them: 0 is the tile's ceiling
+	// end, 1 its floor end.
+	struct TileSpan
+	{
+		float top{};
+		float floor{};
+	};
+
+	TileSpan spanSampledBy(WorldDrawList::Triangle const& triangle,
+		SectorTileRegion const& region, int const atlasHeight)
+	{
+		if (atlasHeight <= 0 || region.height <= 1) return {};
+		float lo = 1e9f, hi = -1e9f;
+		for (auto const& uv : triangle.texcoords)
+		{
+			lo = std::min(lo, uv.y);
+			hi = std::max(hi, uv.y);
+		}
+		float const inset = float(region.y) + 0.5f;
+		float const span = float(region.height - 1);
+		return { (lo * float(atlasHeight) - inset) / span,
+			(hi * float(atlasHeight) - inset) / span };
+	}
+
+	// A Corridor is 0.7 of a Level and a Room 0.9, so neither fills the cell
+	// its tile is drawn for. The repeat is anchored on the Sector's floor
+	// line, so what reaches the screen is the bottom of the tile at one
+	// artwork pixel to one screen pixel, and what is dropped is the top - the
+	// band that would have stood above the Sector's ceiling. Anchored on the
+	// top instead, every short Sector would drop its own floor and keep its
+	// ceiling band down at floor level.
+	void aShortSectorCropsTheTopOfItsTileOntoItsFloorLine(
+		smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const atlas = installNewSectorAtlas(context);
+		std::map<std::string, float> const shortSectors{
+			{ "corridor", CORE_CORRIDOR_HEIGHT },
+			{ "room", CORE_ROOM_STANDARD_HEIGHT } };
+		for (auto const& [surface, height] : shortSectors)
+		{
+			auto const fixture = fixtureFor(surface);
+			require(fixture.sector != nullptr,
+				"No Sector was built for the '" + surface + "' surface");
+			WorldDrawList commands({ { -100000.0f, -100000.0f },
+				{ 100000.0f, 100000.0f } });
+			renderSector(fixture.sector, fixture.sector->getLayerIndex(),
+				LayerRenderStyle::Solid, false, White, &commands);
+			int drawn{};
+			for (auto const& command : commands.commands())
+			{
+				auto const* triangle =
+					std::get_if<WorldDrawList::Triangle>(&command);
+				if (!triangle
+					|| triangle->texture != WorldDrawList::Texture::SectorAtlas)
+					continue;
+				if (tileSampledBy(*triangle, atlas) != surface) continue;
+				float left = 1e9f, right = -1e9f, top = 1e9f, bottom = -1e9f;
+				for (auto const& p : triangle->positions)
+				{
+					left = std::min(left, p.x);
+					right = std::max(right, p.x);
+					top = std::min(top, p.y);
+					bottom = std::max(bottom, p.y);
+				}
+				// The column is one whole World cell wide, so its width says
+				// what a cell costs on screen at this zoom and its height says
+				// what the Sector actually had to draw into.
+				float const cellOnScreen =
+					(right - left) * CORE_CELL_YX_RENDER_RATIO;
+				require(cellOnScreen > 0.f,
+					"The '" + surface + "' surface quad is too thin to measure");
+				float const drawnFraction = (bottom - top) / cellOnScreen;
+				require(near(drawnFraction, height),
+					"The '" + surface + "' Sector drew " + std::to_string(drawnFraction)
+						+ " of a Level; the Sector is " + std::to_string(height)
+						+ " high, so its tile must be cropped, not stretched");
+				auto const span = spanSampledBy(*triangle,
+					atlas.tiles.at(surface).region, atlas.height);
+				require(near(span.floor, 1.0f),
+					"The '" + surface + "' crop stopped at " + std::to_string(span.floor)
+						+ " of its tile; the tile's floor end must land on the "
+						+ "Sector's floor line");
+				require(near(span.top, 1.0f - height),
+					"The '" + surface + "' crop samples from " + std::to_string(span.top)
+						+ " of its tile; the top " + std::to_string(1.0f - height)
+						+ " must be dropped");
+				// One artwork pixel to one screen pixel: the slice sampled and
+				// the area drawn are the same fraction of their whole.
+				require(near(span.floor - span.top, drawnFraction),
+					"The '" + surface + "' tile was squashed rather than cropped: "
+						"it draws " + std::to_string(drawnFraction) + " of a cell from "
+						+ std::to_string(span.floor - span.top) + " of its tile");
+				++drawn;
+			}
+			require(drawn > 0,
+				"The '" + surface + "' Sector drew no surface quad at all");
 		}
 	}
 
@@ -952,6 +1065,8 @@ void render_smoke::registerSectorAtlasNew(std::vector<smoke::Check>& checks)
 		isolated<everyEdgeFallsBackToThePrimitiveLine> });
 	checks.push_back({ "sectorAtlasNew/everySurfaceBearingSectorTypeResolvesToItsOwnTile",
 		isolated<everySurfaceBearingSectorTypeResolvesToItsOwnTile> });
+	checks.push_back({ "sectorAtlasNew/aShortSectorCropsTheTopOfItsTileOntoItsFloorLine",
+		isolated<aShortSectorCropsTheTopOfItsTileOntoItsFloorLine> });
 	checks.push_back({ "sectorAtlasNew/shuttleAndStaircaseNoLongerBorrow",
 		isolated<shuttleAndStaircaseNoLongerBorrow> });
 	checks.push_back({ "sectorAtlasNew/carriageAndStepsStillDrawOnTop",

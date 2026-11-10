@@ -22,8 +22,11 @@
 # Sector surface. Ten tiles, one for each of the ten surface-bearing Sector
 # types - Room, Corridor, Ladder, Lift, Shuttle, Stairwell, Staircase,
 # Airlock, Chamber and Dumbwaiter. Each repeats once per World cell across
-# the Sector's area, cropping partial cells rather than stretching a whole
-# tile to a Corridor's height.
+# the Sector's area, anchored on the Sector's floor line, cropping partial
+# cells rather than stretching a whole tile to a Corridor's height. A short
+# Sector keeps the tile's floor end on its own floor at one artwork pixel to
+# one screen pixel and drops the top band that would have stood above its
+# ceiling.
 #
 # Two of these surfaces become live that were declared in the old manifest
 # but never drawn. The Shuttle and the Staircase used to borrow the Lift and

@@ -4,6 +4,7 @@
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <stdexcept>
 #include <utility>
 
@@ -63,13 +64,20 @@ SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
     return result;
 }
 
+// Draws one strip of a tile region into a screen rectangle. The four
+// fractions say which part of the tile reaches the screen: `u0`/`u1` run
+// left to right across the tile, `v0`/`v1` top to bottom. A whole tile is
+// 0..1 on both axes; a crop is a sub-range drawn at the same pixels per
+// artwork texel the whole tile would have had, which is what keeps a crop a
+// crop and not a squash.
 void image(WorldDrawList* list, SectorTileRegion const& r, Vec2 a, Vec2 b,
-    float fractionX, float fractionY, PackedColourValue tint)
+    float u0, float u1, float v0, float v1, PackedColourValue tint)
 {
     // Half-texel inset avoids sampling adjacent draft artwork with linear filtering.
-    Vec2 uv0{(r.x + 0.5f) / active.width, (r.y + 0.5f) / active.height};
-    Vec2 uv1{(r.x + 0.5f + (r.width - 1) * fractionX) / active.width,
-        (r.y + 0.5f + (r.height - 1) * fractionY) / active.height};
+    Vec2 uv0{(r.x + 0.5f + (r.width - 1) * u0) / active.width,
+        (r.y + 0.5f + (r.height - 1) * v0) / active.height};
+    Vec2 uv1{(r.x + 0.5f + (r.width - 1) * u1) / active.width,
+        (r.y + 0.5f + (r.height - 1) * v1) / active.height};
     list->AddImage(WorldDrawList::Texture::SectorAtlas, a, b, uv0, uv1, tint);
 }
 }
@@ -153,21 +161,44 @@ bool drawSectorTileSurface(std::string const& kind, WorldDrawList* list,
     }
     auto const& region = found->second;
     // A surface repeats once per 1x1 world unit, magnified to the World cell's
-    // screen size at the current zoom (the macros below). Crop partial levels
-    // instead of stretching a complete tile to a Corridor's height.
+    // screen size at the current zoom (the macros below). Partial levels are
+    // cropped, never stretched to a Sector's height.
+    //
+    // The repeat is anchored on the bottom of the Sector's area, which is its
+    // floor line: the tile's own bottom edge lands there and further rows stack
+    // upward. A Sector shorter than a full cell - a 0.7 Corridor, a 0.9 Room -
+    // keeps the end of the tile it was drawn beside, the floor end, at one
+    // artwork pixel to one screen pixel, and loses the top of the tile that
+    // would have stood above its ceiling. Anchoring on the top instead cuts the
+    // floor off every short Sector and leaves the tile's ceiling band sitting on
+    // the floor it is supposed to be above.
     auto const clipMin = list->GetClipRectMin();
     auto const clipMax = list->GetClipRectMax();
     float const cellWidth = CORE_CELL_WIDTH_PIXELS * zoom;
     float const cellHeight = CORE_LEVEL_HEIGHT_PIXELS * zoom;
     if (cellWidth <= 0 || cellHeight <= 0) return true;
+    float const top = std::max(minimum.y, clipMin.y);
+    float const right = std::min(maximum.x, clipMax.x);
+    if (top >= maximum.y || right <= minimum.x) return true;
     int const x0 = std::max(0, static_cast<int>((clipMin.x - minimum.x) / cellWidth));
-    int const y0 = std::max(0, static_cast<int>((clipMin.y - minimum.y) / cellHeight));
-    for (float y = minimum.y + y0 * cellHeight; y < std::min(maximum.y, clipMax.y); y += cellHeight)
-        for (float x = minimum.x + x0 * cellWidth; x < std::min(maximum.x, clipMax.x); x += cellWidth) {
-            Vec2 end{std::min(x + cellWidth, maximum.x), std::min(y + cellHeight, maximum.y)};
-            image(list, region, {x, y}, end, (end.x - x) / cellWidth,
-                (end.y - y) / cellHeight, tint);
+    // Rows are counted up from the floor line, so the clip cannot move the
+    // anchor; it only decides which rows are worth emitting. Everything below
+    // the clip's bottom edge and everything above `top` is left out.
+    int const firstRow = std::max(0, static_cast<int>(std::ceil(
+        (maximum.y - std::min(maximum.y, clipMax.y)) / cellHeight)));
+    for (int row = firstRow; ; ++row) {
+        float const rowBottom = maximum.y - float(row) * cellHeight;
+        if (rowBottom <= top) break;
+        float const rowTop = std::max(rowBottom - cellHeight, top);
+        // Whatever of the tile stands above this row's top edge never reaches
+        // the screen, so sampling starts that far down the tile.
+        float const v0 = 1.0f - (rowBottom - rowTop) / cellHeight;
+        for (float x = minimum.x + float(x0) * cellWidth; x < right; x += cellWidth) {
+            float const colRight = std::min(x + cellWidth, right);
+            image(list, region, {x, rowTop}, {colRight, rowBottom}, 0.0f,
+                (colRight - x) / cellWidth, v0, 1.0f, tint);
         }
+    }
     return true;
 }
 
@@ -176,6 +207,6 @@ bool drawSectorTileBoundary(char const* kind, WorldDrawList* list, Vec2 a, Vec2 
     if (!textureId) return false;
     auto const found = active.boundaries.find(kind);
     if (found == active.boundaries.end() || active.width <= 0 || active.height <= 0) return false;
-    image(list, found->second, a, b, 1, 1, White);
+    image(list, found->second, a, b, 0.0f, 1.0f, 0.0f, 1.0f, White);
     return true;
 }

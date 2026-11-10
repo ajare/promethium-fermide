@@ -9,8 +9,14 @@ and the `pf-render` module header for the boundary this sits behind.
 
 The renderer repeats a surface every 1x1 world unit, magnified to the World cell's
 screen size, cropping partial cells rather than stretching a whole tile to a
-Corridor's height. Room interiors therefore support arbitrary height without
-intermediate floors. Backgrounds and Facades intentionally retain their authored
+Corridor's height. The repeat is anchored on the bottom of the Sector's area - its
+floor line - so the tile's own bottom edge lands on the floor and further rows
+stack upward. A Sector shorter than a full cell, a 0.7 Corridor or a 0.9 Room,
+therefore keeps the end of the tile it was drawn beside at one artwork pixel to
+one screen pixel, and drops the top of the tile that would have stood above its
+ceiling. Anchored on the top instead, every short Sector would lose its floor and
+keep its ceiling band down at floor level. Room interiors therefore support
+arbitrary height without intermediate floors. Backgrounds and Facades intentionally retain their authored
 opaque colours and take no tile at all - they are authored flat colour by domain
 definition, and the renderer fills them without asking the atlas for a surface.
 Vehicles, stair and ladder mechanisms, thresholds, other objects, Agents and editor
