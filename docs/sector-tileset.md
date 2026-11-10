@@ -27,6 +27,13 @@ at 640x640, one for each of the ten surface-bearing Sector types - `room`,
 render offset, because the repeat is per World cell; the loader refuses a surface
 drawn at any other size or offset off its cell's anchor.
 
+Every one of the ten tiles fills its cell: `drawn_size: [1.0, 1.0]`, content
+128 x 320 at the authored grid's pixel size, `offset: [0.0, 0.0]`. That is the
+whole of this set's content-size story - Infrastructure has no sub-cell art - and
+it is what the #1013 spec's dimensions table records for `SectorAtlasNew`
+(#1033). The sub-cell sizes live in the Objects set and are tabulated in
+[the object atlas doc](object-tileset.md#content-sizes-as-shipped).
+
 Two of those surfaces become live that were declared in the old manifest but never
 drawn. The Shuttle and the Staircase used to borrow the Lift and Stairwell tiles,
 with comments saying their procedural carriage and steps would fight a fixed tile

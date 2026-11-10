@@ -67,13 +67,13 @@ Platform lift and the Shuttle carriage - and the rest of the sheet
 drops in against the same image size. The old `ObjectAtlas` and
 `ObjectAtlasImage` stay registered and canonical until nothing references them.
 
-The vehicles are what took the sheet from three rows to four. They arrived when
-the set held nineteen tiles, and cramming two into one cell would break the one
-promise the grid makes to whoever draws the real art: that a tile owns its whole
-128 x 320 slot. The row has stayed since #1031 dropped the Booth Window's closed
-panel, which left one cell free: pulling the last tile up into it would move
-every other tile's pixels to buy nothing, and the image is sized for the art that
-has not landed yet.
+The set holds 18 tiles in the 24 cells of that 6x4 grid. The vehicles are what
+took the sheet from three rows to four. They arrived when the set held nineteen
+tiles, and cramming two into one cell would break the one promise the grid makes
+to whoever draws the real art: that a tile owns its whole 128 x 320 slot. The row
+has stayed since #1031 dropped the Booth Window's closed panel, which left one
+cell free: pulling the last tile up into it would move every other tile's pixels
+to buy nothing, and the image is sized for the art that has not landed yet.
 
 The `ImageSet` entries the application manifest declares for `ObjectAtlasNew` are
 generated from the tileset, not authored beside it:
@@ -91,6 +91,47 @@ Every content rectangle in the set is the tile's declared drawn size measured at
 the authored grid's pixel size, rounded to whole pixels: a tile drawn 0.8 x 0.5
 World units is 102 x 160 px on this 128 x 320 grid. Art and declared extent stay
 in the same proportion, so nothing is stretched on its way to the screen.
+
+### Content sizes as shipped
+
+The table is the shipped geometry for every tile in the set: the World-unit drawn
+size the tile declares, the content rectangle that size measures at the 128x320
+grid, and where the drawn size comes from - the core geometry constants the
+Objects contract (`requiredObjectTiles()`, `pf-render/src/ObjectTileset.cpp`)
+composes it from, or the authored reference extent where the domain fixes no
+geometry of its own. #1033 reconciled it against the #1013 spec, which carried
+three sizes that no code ever built.
+
+| Tile | Drawn size (World units) | Content px | Basis |
+|---|---|---|---|
+| `walkway` | 1.0 x 0.075 | 128 x 24 | the slab's own thickness, drawn at `offset: [0.0, -0.075]` below the cell's floor line |
+| `bulkhead-door` | 0.2 x 0.7 | 26 x 224 | `CORE_BULKHEAD_DOOR_WIDTH` x `CORE_CORRIDOR_HEIGHT` |
+| `access-panel` | 0.5 x 0.25 | 64 x 80 | the default `AccessPanelGeometry`; a panel authored at another size draws at its own rect |
+| `door` | 0.8 x 0.5 | 102 x 160 | `1 - 2 * CORE_DOOR_X_INSET` x `CORE_DOOR_HEIGHT` |
+| `button-enabled`, `button-disabled` | 0.1 x 0.04 | 13 x 13 | `CORE_BUTTON_SIZE` x `CORE_BUTTON_SIZE / CORE_CELL_YX_RENDER_RATIO` - square on screen |
+| `window-clear`, `window-frosted`, `window-tinted` | 0.8 x 0.3 | 102 x 96 | `1 - 2 * CORE_WINDOW_X_INSET` x `CORE_WINDOW_HEIGHT` |
+| `booth-window-open` (the frame) | 0.8 x 0.3 | 102 x 96 | the same one-cell Window extent: the frame is the Window |
+| `booth-window-shutter` | 0.6461538 x 0.2375 | 83 x 76 | the frame's inner aperture - 42/52 of its width and 38/48 of its height, the frame's wall taking 5 of those 52 px across and 5 of the 48 down on each side |
+| `marker` | 0.25 x 0.1375 | 32 x 44 | the authored art's own reference extent; the icon's on-screen size is screen-space (`MarkerIconSize`) |
+| `lift-car` | 0.9 x 0.55 | 115 x 176 | the car's own extent: the cell less `CORE_LIFT_CAR_BORDER` on each side, at `CORE_LIFT_CAR_HEIGHT` |
+| `platform-lift` | 1.0 x 0.05 | 128 x 16 | the slab's own thickness, drawn from its own anchor |
+| `shuttle-L0`, `shuttle-M0`, `shuttle-R0` | 1.0 x 0.55 | 128 x 176 | one cell wide at `CORE_SHUTTLE_CAR_HEIGHT` |
+| `shuttle-connector` | 1.0 x 0.55 | 128 x 176 | the same extent, drawn at the join between two carriages |
+
+No tile in this set is a full cell. The cell is the slot the grid gives the art to
+sit in; what a tile declares is the extent it actually draws at, which is why a
+Button is 13 x 13 px inside a 128 x 320 cell and a Lift car is 115 x 176 rather
+than the 128 x 320 the shaft it runs in fills. The #1013 spec first wrote the two
+vehicle entries as 128 x 320 because it was describing one cell of a transport's
+route rather than the vehicle; the renderer draws a car into the car's own live
+shape and the Objects contract checks the declared size against the core constants
+behind it, so the spec now states the extent and not the slot.
+
+The Button is the entry where the spec was wrong rather than loosely worded. It
+read 12 x 32 - a tall button. `core/src/Button.cpp` builds the physical shape as
+`CORE_BUTTON_SIZE x CORE_BUTTON_SIZE / CORE_CELL_YX_RENDER_RATIO`, which is 0.1 x
+0.04 World units and 12.8 x 12.8 px: a square. The domain has no tall button, so
+the spec moved to the geometry and the sheet did not move at all.
 
 ### One Door tile serves all four opening styles
 
@@ -531,9 +572,12 @@ Supported sprites:
 - Clear, frosted and tinted Windows: back-sector rendering precedes the overlay.
   Clear glass has a transparent centre; tinted glass is translucent.
 - BoothWindow frame and distinct inner shutter: fixed ordinary one-cell Window
-  geometry. The transparent Open frame stays stationary; the opaque 42x38 shutter
-  subregion of the Closed tile translates upwards behind it, clipped to its centre.
-  See [BoothWindows](booth-windows.md) for authoring and regeneration.
+  geometry. The transparent Open frame stays stationary and the opaque shutter
+  translates upwards behind it, clipped to the frame's centre. On the old
+  `ObjectAtlas` the shutter is the 42x38 subregion of the Closed tile; on
+  `ObjectAtlasNew` it is its own `booth-window-shutter` tile and the closed state
+  is that shutter fully closed, with no closed panel in the set. See
+  [BoothWindows](booth-windows.md) for the old sheet's authoring and regeneration.
 - Agents and Markers, keeping the existing icon-fit dimensions.
 - Lift car: the sprite fills the car's own extent and follows the car's live
   shape through the shaft.
