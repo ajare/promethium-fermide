@@ -328,6 +328,10 @@ namespace game
 		std::uint64_t getRandomSeed() const;
 		std::filesystem::path const& documentDirectory() const;
 		std::vector<std::string> const& getLoadWarnings() const;
+		// This World's mixed-atlas-family report: empty when its four viewport
+		// atlas selections stay inside one family, and otherwise the message the
+		// loader warned with (#1023).
+		std::string atlasFamilyDiagnostic() const;
 		core::Log const& getBuildLog() const;
 
 		// --- World dimensions, Layers and Levels ---

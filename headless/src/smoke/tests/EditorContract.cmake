@@ -256,6 +256,8 @@ set(editor_names
     palette/trayAlwaysOverlapsTheCanvas
     palette/aCanvasSmallerThanTheTrayClipsTheTray
     palette/paddingAndGapsAreTheGrip
+    world-artwork/newDefaultsShowOnAFreshWorld
+    world-artwork/repointedAtlasIsReportedBySlot
     history/independentHistoriesDoNotLeakCommandsOrState
     isolation/normalAndExceptionalExit
     scaled-doors/clipboard-history

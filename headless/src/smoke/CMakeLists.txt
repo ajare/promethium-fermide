@@ -696,6 +696,7 @@ pf_add_smoke_module(pf-smoke-editor
         editor/BrokenShuttles.cpp
         editor/Palette.cpp
         editor/History.cpp
+        editor/WorldArtworkPanel.cpp
     LIBRARIES pf-agent-editing pf-agent-resources pf-headless-render-support
     LABELS editor
     TIMEOUT 60

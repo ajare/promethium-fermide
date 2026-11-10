@@ -68,6 +68,31 @@ namespace core
 	class AgentProfileEditor;
 	class WorldBuilder;
 
+	// The two atlas families a World's four viewport atlases come from while
+	// the #1013 replacement sets are registered beside the old ones. The
+	// names are the whole rule: the transition's sets carry the `New` suffix
+	// and the sets they replace do not. A name in neither group is a custom
+	// set - a station theme, a work-in-progress sheet - which the transition
+	// says nothing about, so it never counts towards a straddle on its own.
+	enum class AtlasFamily
+	{
+		Legacy,
+		Replacement,
+		Unaffiliated
+	};
+
+	// Which family one atlas resource name puts a World's selection in.
+	PF_CORE_API AtlasFamily atlasFamilyOf(std::string const& resourceName);
+
+	// The loader's warning for a World whose four atlas selections straddle
+	// the families, or empty when they stay inside one. `ObjectAtlas` and
+	// `ObjectAtlasNew` differ by three characters and both are registered
+	// during the transition, so a World pointing at the wrong one loads and
+	// renders the wrong sheet; this is what makes that near-miss loud (#1023).
+	PF_CORE_API std::string atlasFamilyMixDiagnostic(std::string const& sector,
+		std::string const& object, std::string const& agent,
+		std::string const& furniture);
+
 	class PF_CORE_API World : public Serializable
 	{
 		friend class Agent;
@@ -804,13 +829,14 @@ namespace core
 		// The catalogue is an application Resource (ADR 0010) resolved by name.
 		std::string mFurnitureCatalogueResourceName;
 		// The four viewport atlases this World draws from (#1022). Each is an
-		// application Resource name the renderer resolves; the defaults are the
-		// sets a World drew from before the Objects atlas became selectable, so a
-		// document that never names one is drawn exactly as it was.
-		std::string mSectorImageSetResourceName{"SectorAtlas"};
-		std::string mObjectImageSetResourceName{"ObjectAtlas"};
-		std::string mAgentImageSetResourceName{"AgentAtlas"};
-		std::string mFurnitureImageSetResourceName{"FurnitureAtlas"};
+		// application Resource name the renderer resolves. A newly created World
+		// defaults to the four `New` sets (#1023); the sets a document names -
+		// including the pre-transition defaults a document that names none reads
+		// with - are what it draws, so no existing World is re-skinned here.
+		std::string mSectorImageSetResourceName{"SectorAtlasNew"};
+		std::string mObjectImageSetResourceName{"ObjectAtlasNew"};
+		std::string mAgentImageSetResourceName{"AgentAtlasNew"};
+		std::string mFurnitureImageSetResourceName{"FurnitureAtlasNew"};
 		std::vector<FurnitureInstance> mFurniture;
 		uint64_t mNextFurnitureId{ 1 };
 		struct MovementGoal
@@ -3587,6 +3613,16 @@ namespace core
 			if (name == mFurnitureImageSetResourceName) return;
 			mFurnitureImageSetResourceName = std::move(name);
 			modify();
+		}
+		// This World's own straddle report: empty when its four selections stay
+		// inside one atlas family, and otherwise the message the loader warned
+		// with (#1023). It reads the four names and changes nothing, so it can
+		// be asked at any point in a World's life, not only at the load seam.
+		std::string atlasFamilyDiagnostic() const
+		{
+			return atlasFamilyMixDiagnostic(mSectorImageSetResourceName,
+				mObjectImageSetResourceName, mAgentImageSetResourceName,
+				mFurnitureImageSetResourceName);
 		}
 		auto const& furniture() const { return mFurniture; }
 		bool isFurnitureMarker(MarkerId id) const;

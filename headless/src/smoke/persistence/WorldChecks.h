@@ -12,6 +12,10 @@ namespace persistence
 	void securityScanners(smoke::Context const&);
 	void restorationPreservesStatePathsAndLifetimes(smoke::Context const&);
 	void worldRoundTripsAuthoredStateAndAgents(smoke::Context const&);
+	void newWorldsDefaultToTheNewAtlasFamily(smoke::Context const&);
+	void existingWorldsKeepTheirStoredAtlasSelections(smoke::Context const&);
+	void loaderWarnsOnMixedAtlasFamilies(smoke::Context const&);
+	void atlasFamilyClassificationIsExact(smoke::Context const&);
 	void legacyWorldYamlStillLoads(smoke::Context const&);
 	void legacyVersion3WorldYamlStillLoadsWithDefaultLayers(smoke::Context const&);
 	void version4WorldYamlStillLoads(smoke::Context const&);

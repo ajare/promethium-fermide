@@ -4676,7 +4676,10 @@ void renderWorldLoadWarningsPopup()
 		ImVec2(800.0f, 500.0f));
 	if (!ImGui::BeginPopupModal("World loaded with warnings")) return;
 
-	ImGui::TextWrapped("The World was opened, but some saved Agent destinations could not be restored:");
+	// The loader's warning channel carries more than Agent restoration now - a
+	// World whose four atlases straddle the old and new families lands here too
+	// (#1023) - so the header names the channel rather than one of its kinds.
+	ImGui::TextWrapped("The World was opened, but the loader reported problems:");
 	ImGui::Spacing();
 	for (auto const& warning : gWorldLoadWarnings)
 	{

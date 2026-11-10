@@ -100,6 +100,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/editor/History.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/Isolation.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/Palette.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/editor/WorldArtworkPanel.cpp` | The World artwork panel's four bound reads on a fresh World: new-family defaults shown, no straddle report, unmodified document, runtime agreeing, and a repointed atlas reported by slot | `pf-smoke-editor` |
 | `smoke/metrics/Metrics.cpp` | module-owned | `pf-smoke-metrics` |
 | `smoke/permissions/Access.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/permissions/AccessEditor.cpp` | module-owned | `pf-smoke-editor` |

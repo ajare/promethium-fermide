@@ -136,12 +136,12 @@ void registerGameAuthoringResourceBinding(std::vector<smoke::Check>& checks)
 			auto fixture = bindingFixture("Image set names");
 			auto& authoring = *fixture.authoring;
 			auto& runtime = *fixture.runtime;
-			// A World is authored against the bundled atlases unless the
-			// document says otherwise, and the runtime reads those too.
-			require(runtime.sectorImageSetResourceName() == "SectorAtlas"
-				&& runtime.agentImageSetResourceName() == "AgentAtlas"
-				&& runtime.furnitureImageSetResourceName() == "FurnitureAtlas"
-				&& runtime.objectImageSetResourceName() == "ObjectAtlas",
+			// A World is authored against the replacement atlases it defaults to
+			// (#1023), and the runtime reads those too.
+			require(runtime.sectorImageSetResourceName() == "SectorAtlasNew"
+				&& runtime.agentImageSetResourceName() == "AgentAtlasNew"
+				&& runtime.furnitureImageSetResourceName() == "FurnitureAtlasNew"
+				&& runtime.objectImageSetResourceName() == "ObjectAtlasNew",
 				"the runtime does not read the default image set names a fresh World carries");
 
 			authoring.setSectorImageSetResourceName("sectors.tiles.lua");

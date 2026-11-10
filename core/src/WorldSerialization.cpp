@@ -2421,6 +2421,15 @@ namespace core
 		mObjectImageSetResourceName = std::move(objectImageSetName);
 		mAgentImageSetResourceName = std::move(agentImageSetName);
 		mFurnitureImageSetResourceName = std::move(furnitureImageSetName);
+		// The four atlases are four separate selections, so nothing structural
+		// stops a World naming `ObjectAtlas` beside `AgentAtlasNew` - three
+		// characters from the set it meant, and both registered while the
+		// transition runs. It loads happily and draws the wrong sheet, so the
+		// near-miss is reported rather than left to be noticed in the render
+		// (#1023). A warning, not a refusal: the World is readable, and the
+		// author repoints it or leaves it alone.
+		if (auto mixed = atlasFamilyDiagnostic(); !mixed.empty())
+			mLoadWarnings.push_back(std::move(mixed));
 		mActionRegistry = std::move(actionRegistry);
 		mActionRegistryFilename = std::move(actionFilename);
 		mMarkerActions = std::move(markerActions);
