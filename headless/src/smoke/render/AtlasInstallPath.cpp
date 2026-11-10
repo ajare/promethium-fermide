@@ -1,7 +1,8 @@
 // AtlasInstallPath drives the shared renderer's atlas install path - the
-// `pf::render::installAtlasArtwork()` / `installAtlasDefinitions()` pair the
-// application actually runs at start-up and on every atlas selection - against
-// the manifest the application actually ships.
+// `AtlasInstaller::installAtlasArtwork()` / `installAll()` pair the
+// application actually runs at start-up, and the per-slot install every
+// atlas selection runs (#1035) - against the manifest the application
+// actually ships.
 //
 // Until #1030 every install assertion in this suite called `installAtlasTiles()`
 // by hand. That proved the helper and left its caller untested, which is the
@@ -426,17 +427,29 @@ namespace
 	};
 
 	// Runs one install and returns the thrown refusal's text, or an empty
-	// string when the install succeeded.
-	std::string installRefusal(std::string const& setName,
-		resources::ResourcePtr const& set,
+	// string when the install succeeded. The installer is passed in rather
+	// than made here because the caller's read counts are part of what the
+	// checks below assert on (#1035).
+	std::string installRefusal(pf::render::AtlasInstaller& installer,
+		std::string const& setName, resources::ResourcePtr const& set,
 		pf::render::AtlasAuthoredFormat format)
 	{
 		try
 		{
-			pf::render::installAtlasArtwork(setName, set, format);
+			installer.installAtlasArtwork(setName, set, format);
 			return {};
 		}
 		catch (std::exception const& error) { return error.what(); }
+	}
+
+	// How many times one atlas's authored tileset was read off disk. A
+	// missing entry reads as zero rather than throwing, so a count that went
+	// missing fails an assertion with a message instead of ending the check.
+	std::size_t tilesetLoadsFor(pf::render::AtlasInstallReads const& reads,
+		std::string const& atlas)
+	{
+		auto const entry = reads.tilesetLoadsByAtlas.find(atlas);
+		return entry == reads.tilesetLoadsByAtlas.end() ? 0 : entry->second;
 	}
 
 	pf::render::AtlasAuthoredFormat registryFormat(std::string const& kind)
@@ -491,6 +504,7 @@ namespace
 				"to pair its pixels with");
 
 		StagedAtlasDirectory staged{ context, "shipped-atlases", atlases };
+		pf::render::AtlasInstaller installer;
 		std::size_t tilesChecked{};
 		for (auto const& name : atlases)
 		{
@@ -501,7 +515,7 @@ namespace
 			pf::render::InstalledAtlas installed;
 			try
 			{
-				installed = pf::render::installAtlasArtwork(name, set, format);
+				installed = installer.installAtlasArtwork(name, set, format);
 			}
 			catch (std::exception const& error)
 			{
@@ -590,6 +604,7 @@ namespace
 		StagedAtlasDirectory staged{ context, "pixel-authority",
 			registeredImageSets(entries) };
 
+		pf::render::AtlasInstaller installer;
 		std::size_t disagreements{};
 		std::vector<std::string> checkedAtlases;
 		for (auto const& name : registeredImageSets(entries))
@@ -597,7 +612,7 @@ namespace
 			auto const entry = registry.at(name);
 			auto const authored = authoredTilesetTiles(context, entry);
 			auto const set = staged.load(name);
-			auto const installed = pf::render::installAtlasArtwork(name, set,
+			auto const installed = installer.installAtlasArtwork(name, set,
 				registryFormat(entry.kind));
 			for (auto const& [tile, artwork] : installed.tiles)
 			{
@@ -706,7 +721,8 @@ namespace
 			} };
 		auto const set = staged.load("SectorAtlasNew");
 
-		auto const refusal = installRefusal("SectorAtlasNew", set,
+		pf::render::AtlasInstaller installer;
+		auto const refusal = installRefusal(installer, "SectorAtlasNew", set,
 			pf::render::AtlasAuthoredFormat::SectorTiles);
 		require(!refusal.empty(), "The manifest gained a tile its authored "
 			"tileset never defines and the install accepted it, so a tile with no "
@@ -722,8 +738,9 @@ namespace
 		pf::render::ViewportAtlasSlots slots;
 		slots.sectorName = "SectorAtlasNew";
 		slots.sector = set;
-		pf::render::installAtlasDefinitions(slots, /*objectsAreMandatory=*/ false);
-		require(!slots.sectorDiagnostic.empty(), "installAtlasDefinitions left the "
+		pf::render::AtlasInstaller{}.installAll(slots,
+			/*objectsAreMandatory=*/ false);
+		require(!slots.sectorDiagnostic.empty(), "installAll left the "
 			"Sector slot's diagnostic empty over an atlas the install refused, so "
 			"the application would draw the bad atlas and report nothing");
 		require(slots.sectorDiagnostic.find("tile-nobody-authored")
@@ -799,9 +816,10 @@ namespace
 	std::vector<std::string> const kNewAtlases{ "SectorAtlasNew",
 		"ObjectAtlasNew", "AgentAtlasNew", "FurnitureAtlasNew" };
 
-	// Installs the four `-New` atlases through the render stack's own pass and
-	// hands back the slots so a check can read what landed.
-	pf::render::ViewportAtlasSlots installNewAtlasQuadruple(
+	// Loads the four `-New` atlases into the slots each is named for, without
+	// installing anything. A check that wants to drive the install itself -
+	// and read the installer's counts afterwards - starts here (#1035).
+	pf::render::ViewportAtlasSlots loadNewAtlasQuadruple(
 		StagedAtlasDirectory& staged)
 	{
 		pf::render::ViewportAtlasSlots slots;
@@ -813,7 +831,17 @@ namespace
 		slots.agent = staged.load(slots.agentName);
 		slots.furnitureName = "FurnitureAtlasNew";
 		slots.furniture = staged.load(slots.furnitureName);
-		pf::render::installAtlasDefinitions(slots, /*objectsAreMandatory=*/ true);
+		return slots;
+	}
+
+	// Installs the four `-New` atlases through the render stack's own pass and
+	// hands back the slots so a check can read what landed.
+	pf::render::ViewportAtlasSlots installNewAtlasQuadruple(
+		StagedAtlasDirectory& staged)
+	{
+		auto slots = loadNewAtlasQuadruple(staged);
+		pf::render::AtlasInstaller{}.installAll(slots,
+			/*objectsAreMandatory=*/ true);
 		return slots;
 	}
 
@@ -931,7 +959,8 @@ namespace
 		slots.sectorName = "SectorAtlasNew";
 		slots.agentName = "AgentAtlasNew";
 		slots.furnitureName = "FurnitureAtlasNew";
-		pf::render::installAtlasDefinitions(slots, /*objectsAreMandatory=*/ false);
+		pf::render::AtlasInstaller{}.installAll(slots,
+			/*objectsAreMandatory=*/ false);
 
 		require(slots.sectorDiagnostic.find("not an installed ImageSet")
 			!= std::string::npos, "An empty Sector slot reported: '"
@@ -984,8 +1013,8 @@ namespace
 		std::string message;
 		try
 		{
-			pf::render::installAtlasDefinitions(slots, /*objectsAreMandatory=*/
-				true);
+			pf::render::AtlasInstaller{}.installAll(slots,
+				/*objectsAreMandatory=*/ true);
 		}
 		catch (std::exception const& error) { threw = true; message = error.what(); }
 		require(threw, "A mandatory Objects install accepted an atlas that cannot "
@@ -998,6 +1027,262 @@ namespace
 		require(!objectTileArtwork("door").has_value(), "The refused Objects "
 			"atlas was installed anyway, so the contract reported without "
 			"stopping the draw");
+	}
+
+	// Runs one registry lookup and returns the thrown refusal's text, or an
+	// empty string when the entry resolved.
+	std::string registryRefusal(pf::render::AtlasSetRegistry const& registry,
+		std::string const& atlas)
+	{
+		try { registry.require(atlas); return {}; }
+		catch (std::exception const& error) { return error.what(); }
+	}
+
+	// ------------------------------------------------------------------
+	// AC (#1035): the parsed registry answers what the install asks of it,
+	// and still refuses what names nothing. The install reads the registry
+	// through this type now, so the refusals the per-atlas read used to
+	// raise have to survive the move rather than quietly become something
+	// else - or nothing.
+	// ------------------------------------------------------------------
+	void theParsedRegistryAnswersAndRefuses(smoke::Context const& context)
+	{
+		auto const directory = context.temporaryRoot() / "registry-parse";
+		std::filesystem::create_directories(directory);
+		auto const path = directory / "atlas-sets.yaml";
+		{
+			std::ofstream out(path);
+			require(bool(out), "Could not write the staged registry into "
+				+ directory.string());
+			out << "version: 1\n"
+				<< "sets:\n"
+				<< "  GoodSectorAtlas:\n"
+				<< "    kind: sector\n"
+				<< "    tileset: textures/sectors-new.tileset.yaml\n"
+				<< "  GoodObjectAtlas:\n"
+				<< "    kind: object\n"
+				<< "    tileset: textures/objects-new.tileset.yaml\n"
+				<< "  NoTilesetAtlas:\n"
+				<< "    kind: object\n"
+				<< "    tileset: \"\"\n"
+				<< "  NoKindAtlas:\n"
+				<< "    tileset: textures/objects-new.tileset.yaml\n"
+				<< "  BogusKindAtlas:\n"
+				<< "    kind: mosaic\n"
+				<< "    tileset: textures/objects-new.tileset.yaml\n"
+				<< "  NotAMapAtlas: 7\n";
+		}
+		auto const registry = pf::render::AtlasSetRegistry::load(path);
+		require(registry.path() == path, "The parsed registry does not name the "
+			"file it came from, so its refusals would name somewhere else: "
+			+ registry.path().string());
+		// Five entries are entries. The one that is not a map names nothing,
+		// and throwing over it would take every slot down with it.
+		require(registry.size() == 5, "The staged registry parsed "
+			+ std::to_string(registry.size()) + " entries; five are maps, and the "
+			"scalar one is not an entry at all");
+
+		auto const sector = registry.require("GoodSectorAtlas");
+		require(sector.format == pf::render::AtlasAuthoredFormat::SectorTiles,
+			"A `kind: sector` entry did not resolve to the sector authored format");
+		require(sector.path == directory / "textures/sectors-new.tileset.yaml",
+			"The tileset path is not resolved against the registry's own directory: "
+			+ sector.path.string());
+		require(registry.require("GoodObjectAtlas").format
+			== pf::render::AtlasAuthoredFormat::ObjectTiles,
+			"A `kind: object` entry did not resolve to the object authored format");
+		require(registry.find("NotAMapAtlas") == nullptr, "An entry that is not a "
+			"map was parsed as one, so the install would read a scalar as a tileset");
+		require(registry.find("NobodyNamedThis") == nullptr, "An atlas the registry "
+			"never mentions resolved to something");
+
+		// Every refusal names the atlas, the reason and the file, which is
+		// what made the per-atlas read actionable and what the install's
+		// diagnostics are built out of.
+		auto const noTileset = registryRefusal(registry, "NoTilesetAtlas");
+		require(noTileset.find("NoTilesetAtlas") != std::string::npos
+			&& noTileset.find("its tileset is empty") != std::string::npos
+			&& noTileset.find(path.string()) != std::string::npos,
+			"An entry with no tileset refused as: '" + noTileset + "'");
+		require(registryRefusal(registry, "NoKindAtlas").find("its kind '' is "
+			"neither 'sector' nor 'object'") != std::string::npos,
+			"An entry with no kind refused as: '" + registryRefusal(registry,
+				"NoKindAtlas") + "'");
+		require(registryRefusal(registry, "BogusKindAtlas").find("'mosaic' is "
+			"neither 'sector' nor 'object'") != std::string::npos,
+			"An entry with an unknown kind refused as: '" + registryRefusal(registry,
+				"BogusKindAtlas") + "'");
+		require(registryRefusal(registry, "NotAMapAtlas").find("no map entry "
+			"names it") != std::string::npos, "An atlas with no map entry refused "
+			"as: '" + registryRefusal(registry, "NotAMapAtlas") + "'");
+
+		// A registry that cannot be read, and one that can be read but says
+		// nothing, are different refusals and both are said out loud.
+		std::string unreadable;
+		try { pf::render::AtlasSetRegistry::load(directory / "no-such-file.yaml"); }
+		catch (std::exception const& error) { unreadable = error.what(); }
+		require(unreadable.find("Could not read the authored atlas-set registry")
+			!= std::string::npos, "A missing registry file refused as: '"
+			+ unreadable + "'");
+		auto const empty = directory / "not-a-registry.yaml";
+		{
+			std::ofstream out(empty);
+			out << "version: 1\n";
+		}
+		std::string noSets;
+		try { pf::render::AtlasSetRegistry::load(empty); }
+		catch (std::exception const& error) { noSets = error.what(); }
+		require(noSets.find("has no `sets` map") != std::string::npos,
+			"A registry with no `sets` map refused as: '" + noSets + "'");
+	}
+
+	// ------------------------------------------------------------------
+	// AC (#1035): the atlas-set registry is parsed once per stack.
+	//
+	// The registry is one small file that says which authored tileset each
+	// atlas is installed from, and every atlas install asks it that
+	// question. Reading it off disk per atlas made one artwork switch cost
+	// eight YAML reads, four of them the same registry file over and over.
+	// The counts come off the installer's own seam, so what is asserted is
+	// what the install did rather than how this file reads.
+	// ------------------------------------------------------------------
+	void theAtlasSetRegistryIsParsedOncePerStack(smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		StagedAtlasDirectory staged{ context, "registry-reads", kNewAtlases };
+		auto slots = loadNewAtlasQuadruple(staged);
+		pf::render::AtlasInstaller installer;
+		installer.installAll(slots, /*objectsAreMandatory=*/ true);
+		require(slots.sectorDiagnostic.empty() && slots.objectDiagnostic.empty()
+			&& slots.agentDiagnostic.empty() && slots.furnitureDiagnostic.empty(),
+			"The four-slot install refused a shipped atlas: "
+			+ slots.sectorDiagnostic + " / " + slots.objectDiagnostic + " / "
+			+ slots.agentDiagnostic + " / " + slots.furnitureDiagnostic);
+
+		auto const reads = installer.reads();
+		require(reads.registryParses == 1, "Installing the four viewport atlases "
+			"parsed atlas-sets.yaml " + std::to_string(reads.registryParses)
+			+ " time(s). Four atlases asking which tileset they use is four "
+			"lookups in one parsed registry, not four reads of the file (#1035).");
+		require(reads.tilesetLoads == kNewAtlases.size(), "The four-slot install "
+			"read " + std::to_string(reads.tilesetLoads) + " authored tilesets; "
+			"four slots read one each, so anything else means a slot installed "
+			"twice or not at all");
+		for (auto const& name : kNewAtlases)
+			require(tilesetLoadsFor(reads, name) == 1, name + "'s authored tileset "
+				"was read " + std::to_string(tilesetLoadsFor(reads, name))
+				+ " time(s) by one four-slot install");
+
+		// A second pass over the same stack - what re-selecting every slot
+		// amounts to - still does not go back to the registry. The tilesets
+		// are read again because that pass asked for them; the registry is
+		// not, because the installer already holds it parsed.
+		installer.installAll(slots, /*objectsAreMandatory=*/ true);
+		require(installer.reads().registryParses == 1, "A second install pass "
+			"over the same installer took the parse count to "
+			+ std::to_string(installer.reads().registryParses)
+			+ "; the registry is parsed once per stack, not once per pass (#1035).");
+		require(installer.reads().tilesetLoads == kNewAtlases.size() * 2,
+			"Two four-slot passes read " + std::to_string(installer.reads().tilesetLoads)
+			+ " authored tilesets between them; two passes over four slots read "
+			"eight, so one of them is not doing what it says");
+	}
+
+	// ------------------------------------------------------------------
+	// AC (#1035): selecting one atlas installs one slot. The three atlases
+	// that did not change are not read again; only the one that did is.
+	//
+	// This is the shape every `selectWorld*ImageSet` drives: the new atlas
+	// loaded over the slot, then that slot installed. The stack itself needs
+	// a live GL context, so what is driven here is the install half - the
+	// half that touches disk - which is the half this ticket is about.
+	// ------------------------------------------------------------------
+	void selectingOneAtlasReReadsOnlyItsOwnTileset(smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		// The four `-New` sheets the stack starts on, plus the two old sheets
+		// the selections below switch to. They are different files, so a
+		// re-read of a sheet that was not selected cannot hide behind a
+		// re-read of the one that was.
+		StagedAtlasDirectory staged{ context, "selection-reads",
+			{ "SectorAtlasNew", "ObjectAtlasNew", "AgentAtlasNew",
+				"FurnitureAtlasNew", "SectorAtlas", "ObjectAtlas" } };
+		auto slots = loadNewAtlasQuadruple(staged);
+		pf::render::AtlasInstaller installer;
+		installer.installAll(slots, /*objectsAreMandatory=*/ true);
+		auto const baseline = installer.reads();
+		require(baseline.registryParses == 1 && baseline.tilesetLoads == 4,
+			"The starting four-slot pass read "
+			+ std::to_string(baseline.registryParses) + " registry file(s) and "
+			+ std::to_string(baseline.tilesetLoads) + " tileset(s); the selection "
+			"counts below are differences against that, so it has to be the "
+			"four-slot pass first");
+
+		// The Objects selection, which is the one that carries the Objects
+		// contract with it (#1022).
+		std::string objectDiagnostic;
+		installer.installObjectSlot("ObjectAtlas", staged.load("ObjectAtlas"),
+			setObjectTileset, objectDiagnostic, /*mandatory=*/ false,
+			/*enforceObjectContract=*/ true);
+		require(objectDiagnostic.empty(), "Switching the Objects slot to the "
+			"shipped ObjectAtlas was refused: " + objectDiagnostic);
+		auto const afterObjects = installer.reads();
+		require(afterObjects.registryParses == baseline.registryParses,
+			"Selecting one atlas went back to atlas-sets.yaml: "
+			+ std::to_string(baseline.registryParses) + " parse(s) before the "
+			"selection, " + std::to_string(afterObjects.registryParses)
+			+ " after (#1035).");
+		require(afterObjects.tilesetLoads == baseline.tilesetLoads + 1,
+			"Selecting the Objects atlas read "
+			+ std::to_string(afterObjects.tilesetLoads - baseline.tilesetLoads)
+			+ " authored tilesets; one slot changed, so only the atlas that "
+			"changed may be read");
+		require(tilesetLoadsFor(afterObjects, "ObjectAtlas") == 1, "The selected "
+			"ObjectAtlas was read " + std::to_string(tilesetLoadsFor(afterObjects,
+				"ObjectAtlas")) + " time(s) by the selection that selected it");
+		// The three slots nobody touched keep what the starting pass installed
+		// for them, and were not read again to find out.
+		for (auto const* name : { "SectorAtlasNew", "AgentAtlasNew",
+			"FurnitureAtlasNew" })
+			require(tilesetLoadsFor(afterObjects, name) == 1, std::string{ name }
+				+ "'s authored "
+				"tileset was read " + std::to_string(tilesetLoadsFor(afterObjects,
+					name)) + " time(s) by a selection that changed the Objects "
+				"slot; an unchanged slot keeps the tileset it was installed from "
+				"instead of re-reading it (#1035)");
+		// And the slot really did change hands rather than reporting that it
+		// had without installing.
+		require(objectTileArtwork("door").has_value(), "The Objects slot holds no "
+			"artwork after a selection the install accepted, so the selection "
+			"reported without installing");
+
+		// The Sector selection, which is the other-shaped slot.
+		std::string sectorDiagnostic;
+		installer.installSectorSlot("SectorAtlas", staged.load("SectorAtlas"),
+			sectorDiagnostic);
+		require(sectorDiagnostic.empty(), "Switching the Sector slot to the "
+			"shipped SectorAtlas was refused: " + sectorDiagnostic);
+		auto const afterSector = installer.reads();
+		require(afterSector.registryParses == 1, "Two selections later the "
+			"registry has been parsed " + std::to_string(afterSector.registryParses)
+			+ " time(s); one stack parses it once (#1035).");
+		require(afterSector.tilesetLoads == baseline.tilesetLoads + 2,
+			"Two single-slot selections read "
+			+ std::to_string(afterSector.tilesetLoads - baseline.tilesetLoads)
+			+ " tilesets beyond the starting pass; two selections read two");
+		require(tilesetLoadsFor(afterSector, "SectorAtlas") == 1, "The selected "
+			"SectorAtlas was read " + std::to_string(tilesetLoadsFor(afterSector,
+				"SectorAtlas")) + " time(s) by the selection that selected it");
+		for (auto const* name : { "ObjectAtlas", "AgentAtlasNew",
+			"FurnitureAtlasNew" })
+			require(tilesetLoadsFor(afterSector, name) == 1, std::string{ name }
+				+ "'s authored "
+				"tileset was read " + std::to_string(tilesetLoadsFor(afterSector,
+					name)) + " time(s) by a selection that changed the Sector "
+				"slot (#1035)");
+		require(hasSectorTileSurface("room"), "The Sector slot does not resolve "
+			"the old sheet's `room` surface after being switched to it, so the "
+			"selection reported without installing");
 	}
 
 	// ------------------------------------------------------------------
@@ -1244,6 +1529,12 @@ void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
 		isolated<aMissingAtlasLeavesItsSlotEmptyAndReported> });
 	checks.push_back({ "atlasInstall/aBadObjectsAtlasRefusesAMandatoryInstall",
 		isolated<aBadObjectsAtlasRefusesAMandatoryInstall> });
+	checks.push_back({ "atlasInstall/theParsedRegistryAnswersAndRefuses",
+		isolated<theParsedRegistryAnswersAndRefuses> });
+	checks.push_back({ "atlasInstall/theAtlasSetRegistryIsParsedOncePerStack",
+		isolated<theAtlasSetRegistryIsParsedOncePerStack> });
+	checks.push_back({ "atlasInstall/selectingOneAtlasReReadsOnlyItsOwnTileset",
+		isolated<selectingOneAtlasReReadsOnlyItsOwnTileset> });
 	checks.push_back({ "atlasInstall/everyShippedAgentPoseTileResolvesInTheInstalledAgentAtlas",
 		isolated<everyShippedAgentPoseTileResolvesInTheInstalledAgentAtlas> });
 	checks.push_back({ "atlasInstall/everyShippedFurnitureTileResolvesInTheInstalledFurnitureAtlas",

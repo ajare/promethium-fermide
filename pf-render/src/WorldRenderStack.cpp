@@ -457,50 +457,46 @@ namespace
 			restore();
 		}
 
+		// The four atlas selections, each one a call to the shared selection
+		// shape below with its own slot and its own install.
+		//
+		// What each installs is the slot that changed and nothing else (#1035).
+		// Until here a selection ended in the four-slot install pass, which
+		// re-read every authored tileset behind the three atlases nobody had
+		// touched; each of those reads went back to the registry on disk with
+		// it. The other three slots keep whatever the last install put in them,
+		// which is what the canvas draws.
 		std::string selectSectorImageSet(std::string const& name)
 		{
-			if (name == mAtlases.sectorName) return mAtlases.sectorDiagnostic;
-			mAtlases.sectorName = name;
-			for (auto& slot : mSlots) remove(slot);
-			mSlots.clear();
-			mSlotAllocator = {};
-			mAtlases.sectorDiagnostic.clear();
-			if (mAtlases.sector) mResources->releaseResource(mAtlases.sector);
-			mAtlases.sector.reset();
-			try { mAtlases.sector = requireImageSet(name); }
-			catch (std::exception const& error) { mAtlases.sectorDiagnostic = error.what(); }
-			installAtlasDefinitions(/*objectsAreMandatory=*/ false);
-			return mAtlases.sectorDiagnostic;
+			return selectImageSet(mAtlases.sectorName, mAtlases.sector,
+				mAtlases.sectorDiagnostic, name, [this]
+				{
+					mAtlasInstaller.installSectorSlot(mAtlases.sectorName,
+						mAtlases.sector, mAtlases.sectorDiagnostic);
+				});
 		}
 
 		std::string selectAgentImageSet(std::string const& name)
 		{
-			if (name == mAtlases.agentName) return mAtlases.agentDiagnostic;
-			mAtlases.agentName = name;
-			for (auto& slot : mSlots) remove(slot);
-			mSlots.clear(); mSlotAllocator = {};
-			mAtlases.agentDiagnostic.clear();
-			if (mAtlases.agent) mResources->releaseResource(mAtlases.agent);
-			mAtlases.agent.reset();
-			try { mAtlases.agent = requireImageSet(name); }
-			catch (std::exception const& error) { mAtlases.agentDiagnostic = error.what(); }
-			installAtlasDefinitions(/*objectsAreMandatory=*/ false);
-			return mAtlases.agentDiagnostic;
+			return selectImageSet(mAtlases.agentName, mAtlases.agent,
+				mAtlases.agentDiagnostic, name, [this]
+				{
+					mAtlasInstaller.installObjectSlot(mAtlases.agentName,
+						mAtlases.agent, setAgentTileset, mAtlases.agentDiagnostic,
+						/*mandatory=*/ false, /*enforceObjectContract=*/ false);
+				});
 		}
 
 		std::string selectFurnitureImageSet(std::string const& name)
 		{
-			if (name == mAtlases.furnitureName) return mAtlases.furnitureDiagnostic;
-			mAtlases.furnitureName = name;
-			for (auto& slot : mSlots) remove(slot);
-			mSlots.clear(); mSlotAllocator = {};
-			mAtlases.furnitureDiagnostic.clear();
-			if (mAtlases.furniture) mResources->releaseResource(mAtlases.furniture);
-			mAtlases.furniture.reset();
-			try { mAtlases.furniture = requireImageSet(name); }
-			catch (std::exception const& error) { mAtlases.furnitureDiagnostic = error.what(); }
-			installAtlasDefinitions(/*objectsAreMandatory=*/ false);
-			return mAtlases.furnitureDiagnostic;
+			return selectImageSet(mAtlases.furnitureName, mAtlases.furniture,
+				mAtlases.furnitureDiagnostic, name, [this]
+				{
+					mAtlasInstaller.installObjectSlot(mAtlases.furnitureName,
+						mAtlases.furniture, setFurnitureTileset,
+						mAtlases.furnitureDiagnostic, /*mandatory=*/ false,
+						/*enforceObjectContract=*/ false);
+				});
 		}
 
 		// The fourth atlas selection (#1022). Unlike the other three, a bad
@@ -511,20 +507,43 @@ namespace
 		// does, leaving the slot empty and magenta rather than misaligned.
 		std::string selectObjectImageSet(std::string const& name)
 		{
-			if (name == mAtlases.objectName) return mAtlases.objectDiagnostic;
-			mAtlases.objectName = name;
-			for (auto& slot : mSlots) remove(slot);
-			mSlots.clear(); mSlotAllocator = {};
-			mAtlases.objectDiagnostic.clear();
-			if (mAtlases.objects) mResources->releaseResource(mAtlases.objects);
-			mAtlases.objects.reset();
-			try { mAtlases.objects = requireImageSet(name); }
-			catch (std::exception const& error) { mAtlases.objectDiagnostic = error.what(); }
-			installAtlasDefinitions(/*objectsAreMandatory=*/ false);
-			return mAtlases.objectDiagnostic;
+			return selectImageSet(mAtlases.objectName, mAtlases.objects,
+				mAtlases.objectDiagnostic, name, [this]
+				{
+					mAtlasInstaller.installObjectSlot(mAtlases.objectName,
+						mAtlases.objects, setObjectTileset, mAtlases.objectDiagnostic,
+						/*mandatory=*/ false, /*enforceObjectContract=*/ true);
+				});
 		}
 
 	private:
+		// The shape every atlas selection shares: drop the atlas the slot
+		// holds, take the named one, and install that slot through
+		// `installSlot`. Nothing here reaches for a neighbour slot, which is
+		// the whole of #1035 as this class sees it - stated once, so no
+		// selection can pick the four-slot pass back up by accident.
+		//
+		// The unchanged-name short-circuit stays the first thing done: a
+		// selection that names what the slot already holds costs nothing.
+		template <typename Install>
+		std::string selectImageSet(std::string& slotName,
+			resources::ResourcePtr& slotResource, std::string& slotDiagnostic,
+			std::string const& name, Install const& installSlot)
+		{
+			if (name == slotName) return slotDiagnostic;
+			slotName = name;
+			for (auto& slot : mSlots) remove(slot);
+			mSlots.clear();
+			mSlotAllocator = {};
+			slotDiagnostic.clear();
+			if (slotResource) mResources->releaseResource(slotResource);
+			slotResource.reset();
+			try { slotResource = requireImageSet(name); }
+			catch (std::exception const& error) { slotDiagnostic = error.what(); }
+			installSlot();
+			return slotDiagnostic;
+		}
+
 		// A mandatory viewport atlas. Anything that is not a loadable ImageSet
 		// fails the whole startup rather than leaving a canvas half-drawn.
 		resources::ResourcePtr requireImageSet(std::string const& name)
@@ -558,25 +577,31 @@ namespace
 			catch (std::exception const& error) { diagnostic = error.what(); }
 		}
 
-		// Installs the viewport atlases as the tilesets the producer reads.
+		// Installs the four viewport atlases as the tilesets the producers
+		// read, which is what a stack does at start-up. A later selection
+		// installs one slot, not this pass (#1035).
 		//
-		// The install itself is `pf::render::installAtlasDefinitions()`, the
-		// one install path every viewport atlas goes through (#1014). It lives
-		// outside this class for one reason: this class cannot exist without a
-		// live OpenGL context, and the install path needs nothing of the sort -
-		// a decoded `ImageSet` on one side, an authored tileset file on the
-		// other, and a CPU to pair them. Taking it out of the class is what
-		// lets the headless Render check drive the very function the
-		// application runs against the shipped manifest, rather than
-		// re-implementing the pairing beside it and proving the helper while
-		// the caller went untested (#1030).
+		// The install itself is `pf::render::AtlasInstaller`, the one install
+		// path every viewport atlas goes through (#1014). It lives outside this
+		// class for one reason: this class cannot exist without a live OpenGL
+		// context, and the install path needs nothing of the sort - a decoded
+		// `ImageSet` on one side, an authored tileset file on the other, and a
+		// CPU to pair them. Taking it out of the class is what lets the
+		// headless Render check drive the very function the application runs
+		// against the shipped manifest, rather than re-implementing the
+		// pairing beside it and proving the helper while the caller went
+		// untested (#1030).
 		//
 		// Everything the install needs is in `mAtlases`, which is handed over
 		// directly: the four loaded `ImageSet`s, the name each slot is
 		// installed under, and the diagnostic each install leaves behind.
+		//
+		// The installer is a member rather than a call because it caches: the
+		// atlas-set registry is parsed once for this stack's lifetime and every
+		// install after the first reads the parsed value (#1035).
 		void installAtlasDefinitions(bool objectsAreMandatory)
 		{
-			pf::render::installAtlasDefinitions(mAtlases, objectsAreMandatory);
+			mAtlasInstaller.installAll(mAtlases, objectsAreMandatory);
 		}
 
 
@@ -811,12 +836,16 @@ namespace
 		// The four viewport atlas slots, in the shape the install path works
 		// on: which resource each slot is named for, what is loaded behind it,
 		// and the diagnostic its last install produced. One struct rather than
-		// twelve members because the install is a free function over exactly
-		// this value (#1030), so what the application installs and what a
-		// headless check installs are the same thing installed the same way.
-		// The Objects slot's default is the set every World drew from before
-		// the choice existed (#1022).
+		// twelve members because the install works on exactly this value
+		// (#1030), so what the application installs and what a headless check
+		// installs are the same thing installed the same way. The Objects
+		// slot's default is the set every World drew from before the choice
+		// existed (#1022).
 		pf::render::ViewportAtlasSlots mAtlases;
+		// The install path this stack installs through, and the cache that goes
+		// with it: the atlas-set registry is parsed once here rather than once
+		// per atlas per install (#1035).
+		pf::render::AtlasInstaller mAtlasInstaller;
 		mpp::ScenePtr mScene;
 		// Both images are composited later by the caller, so neither canvas may
 		// overwrite the other's offscreen texture during the same frame.

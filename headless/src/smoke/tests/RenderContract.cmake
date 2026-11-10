@@ -136,6 +136,9 @@ set(names
     atlasInstall/theFourSlotsInstallThroughTheRenderStacksPass
     atlasInstall/aMissingAtlasLeavesItsSlotEmptyAndReported
     atlasInstall/aBadObjectsAtlasRefusesAMandatoryInstall
+    atlasInstall/theParsedRegistryAnswersAndRefuses
+    atlasInstall/theAtlasSetRegistryIsParsedOncePerStack
+    atlasInstall/selectingOneAtlasReReadsOnlyItsOwnTileset
     atlasInstall/everyShippedAgentPoseTileResolvesInTheInstalledAgentAtlas
     atlasInstall/everyShippedFurnitureTileResolvesInTheInstalledFurnitureAtlas
     vehicleArtworkNew/vehicleTilesAreRegistered

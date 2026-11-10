@@ -2,6 +2,10 @@
 // a headless check can drive the same code the application runs (#1030). See
 // include/AtlasInstall.h for what the two authorities are and why neither
 // derives the other.
+//
+// The registry read is parsed once per installer and every slot install goes
+// through the parsed value (#1035); the read counts on the installer are what
+// lets a check pin that, rather than leaving it to be read off this file.
 
 #include "AtlasInstall.h"
 
@@ -28,49 +32,20 @@ namespace pf::render
 		// only separates "an atlas is installed" from "nothing is".
 		constexpr TextureId kInstalledAtlasTexture{ 1 };
 
-		// The authored tileset behind one atlas, read from the authored
-		// atlas-set registry beside the application manifest. The manifest
-		// cannot say this itself: the vendored Willpower `ImageSet` schema
-		// fixes the Options an `ImageSet` is allowed to carry, and extending
-		// the vendored SDK was rejected as a much wider blast radius than the
-		// atlas work. The tileset stays the single authority for what a tile
-		// means; the registry only says which tileset is asked about, and in
-		// which authored format it is written.
-		struct AuthoredTileset
+		// The registry file that governs a resource: the `atlas-sets.yaml`
+		// beside the manifest that declared it.
+		//
+		// The manifest cannot say which tileset an atlas is installed from
+		// itself: the vendored Willpower `ImageSet` schema fixes the Options
+		// an `ImageSet` is allowed to carry, and extending the vendored SDK
+		// was rejected as a much wider blast radius than the atlas work. The
+		// tileset stays the single authority for what a tile means; the
+		// registry only says which tileset is asked about, and in which
+		// authored format it is written.
+		std::filesystem::path registryPathFor(resources::Resource const& resource)
 		{
-			AtlasAuthoredFormat format{};
-			std::filesystem::path path{};
-		};
-
-		AuthoredTileset authoredTileset(resources::Resource const& resource)
-		{
-			auto const registry = std::filesystem::path(resource.getDefinitionFile())
+			return std::filesystem::path(resource.getDefinitionFile())
 				.parent_path() / "atlas-sets.yaml";
-			auto uncovered = [&registry, &resource](std::string const& why)
-			{
-				return std::runtime_error(resource.getName() + " has no authored tileset: "
-					+ why + " ('" + registry.string() + "')");
-			};
-			YAML::Node root;
-			try { root = YAML::LoadFile(registry.string()); }
-			catch (std::exception const& error)
-			{
-				throw std::runtime_error("Could not read the authored atlas-set registry '"
-					+ registry.string() + "': " + error.what());
-			}
-			if (!root.IsMap() || !root["sets"].IsMap())
-				throw std::runtime_error("The authored atlas-set registry '" + registry.string()
-					+ "' has no `sets` map of atlas name to authored tileset");
-			auto const entry = root["sets"][resource.getName()];
-			if (!entry.IsMap()) throw uncovered("no map entry names it");
-			auto const file = entry["tileset"].as<std::string>();
-			if (file.empty()) throw uncovered("its tileset is empty");
-			auto const kind = entry["kind"].as<std::string>();
-			if (kind == "sector") return { AtlasAuthoredFormat::SectorTiles,
-				registry.parent_path() / file };
-			if (kind == "object") return { AtlasAuthoredFormat::ObjectTiles,
-				registry.parent_path() / file };
-			throw uncovered("its kind '" + kind + "' is neither 'sector' nor 'object'");
 		}
 
 		char const* authoredFormatName(AtlasAuthoredFormat format)
@@ -96,15 +71,22 @@ namespace pf::render
 			SectorTilesetFamily family{ SectorTilesetFamily::Old };
 		};
 
+		// Reads one atlas's authored tiles out of the tileset file its
+		// registry entry names, counting the read against `reads` on the way
+		// in. This is the only place the install path opens an authored tileset,
+		// so the per-atlas count is the whole story (#1035).
 		AuthoredAtlasTiles authoredTiles(resources::Resource const& resource,
-			AtlasAuthoredFormat format)
+			AtlasAuthoredFormat format, AtlasSetRegistry const& registry,
+			AtlasInstallReads& reads)
 		{
-			auto const authored = authoredTileset(resource);
+			auto const authored = registry.require(resource.getName());
 			if (authored.format != format)
 				throw std::runtime_error(resource.getName() + " is installed as "
 					+ authoredFormatName(format) + " but the atlas-set registry says "
 					+ authoredFormatName(authored.format) + " ('"
 					+ authored.path.string() + "')");
+			++reads.tilesetLoads;
+			++reads.tilesetLoadsByAtlas[resource.getName()];
 			if (format == AtlasAuthoredFormat::SectorTiles)
 			{
 				// The family has to come out with the tiles. The renderer
@@ -138,7 +120,95 @@ namespace pf::render
 		}
 	}
 
-	InstalledAtlas installAtlasArtwork(std::string const& setName,
+	// ------------------------------------------------------------------
+	// The atlas-set registry, parsed once (#1035).
+	// ------------------------------------------------------------------
+
+	AtlasSetRegistry AtlasSetRegistry::load(std::filesystem::path const& path)
+	{
+		AtlasSetRegistry registry;
+		registry.mPath = path;
+		YAML::Node root;
+		try { root = YAML::LoadFile(path.string()); }
+		catch (std::exception const& error)
+		{
+			throw std::runtime_error("Could not read the authored atlas-set registry '"
+				+ path.string() + "': " + error.what());
+		}
+		// A node the file never wrote is an invalid node, and asking it
+		// anything throws. Every read below is guarded on the node first, so
+		// an entry that says nothing refuses as "it says nothing" rather than
+		// as a conversion error nobody can act on. Reading through a const
+		// handle is what keeps a missing key a missing key rather than an
+		// inserted one.
+		YAML::Node const& document = root;
+		auto const sets = document["sets"];
+		if (!document.IsMap() || !sets || !sets.IsMap())
+			throw std::runtime_error("The authored atlas-set registry '" + path.string()
+				+ "' has no `sets` map of atlas name to authored tileset");
+		for (auto const& entry : sets)
+		{
+			// A key that is not a scalar cannot name an atlas, and throwing over
+			// one would take every slot down with it. Skipping it leaves that
+			// atlas unnamed, which is the refusal the install already reports.
+			if (!entry.first.IsScalar()) continue;
+			auto const name = entry.first.as<std::string>();
+			// Something that is not a map is no entry: the install reads a
+			// missing entry and a malformed one the same way, as a refusal to
+			// name a tileset for that atlas.
+			if (!entry.second.IsMap()) continue;
+			auto const kind = entry.second["kind"];
+			auto const tileset = entry.second["tileset"];
+			Entry written;
+			if (kind && kind.IsScalar()) written.kind = kind.as<std::string>();
+			if (tileset && tileset.IsScalar())
+				written.tileset = tileset.as<std::string>();
+			registry.mEntries.emplace(name, std::move(written));
+		}
+		return registry;
+	}
+
+	AtlasSetRegistry::Entry const* AtlasSetRegistry::find(
+		std::string const& atlasName) const
+	{
+		auto const entry = mEntries.find(atlasName);
+		return entry == mEntries.end() ? nullptr : &entry->second;
+	}
+
+	AuthoredAtlasSet AtlasSetRegistry::require(std::string const& atlasName) const
+	{
+		auto const uncovered = [&atlasName, this](std::string const& why)
+		{
+			return std::runtime_error(atlasName + " has no authored tileset: "
+				+ why + " ('" + mPath.string() + "')");
+		};
+		auto const entry = find(atlasName);
+		if (!entry) throw uncovered("no map entry names it");
+		if (entry->tileset.empty()) throw uncovered("its tileset is empty");
+		if (entry->kind == "sector") return { AtlasAuthoredFormat::SectorTiles,
+			mPath.parent_path() / entry->tileset };
+		if (entry->kind == "object") return { AtlasAuthoredFormat::ObjectTiles,
+			mPath.parent_path() / entry->tileset };
+		throw uncovered("its kind '" + entry->kind + "' is neither 'sector' nor 'object'");
+	}
+
+	// ------------------------------------------------------------------
+	// The install path, with its registry cached (#1035).
+	// ------------------------------------------------------------------
+
+	AtlasSetRegistry const& AtlasInstaller::registryFor(
+		resources::Resource const& resource)
+	{
+		if (!mRegistry)
+		{
+			++mReads.registryParses;
+			mRegistry = std::make_shared<AtlasSetRegistry const>(
+				AtlasSetRegistry::load(registryPathFor(resource)));
+		}
+		return *mRegistry;
+	}
+
+	InstalledAtlas AtlasInstaller::installAtlasArtwork(std::string const& setName,
 		AtlasResource const& set, AtlasAuthoredFormat format)
 	{
 		auto const imageSet = std::dynamic_pointer_cast<
@@ -149,13 +219,14 @@ namespace pf::render
 				"pixel regions to install");
 		int width{}, height{};
 		auto const regions = atlasPixelRegions(*imageSet, width, height);
-		auto const authored = authoredTiles(*imageSet, format);
+		auto const authored = authoredTiles(*imageSet, format,
+			registryFor(*imageSet), mReads);
 		return InstalledAtlas{ width, height,
 			installAtlasTiles(authored.tiles, regions, width, height, setName),
 			authored.declaresRenderSemantics, authored.family };
 	}
 
-	void installObjectAtlasSlot(std::string const& setName,
+	void AtlasInstaller::installObjectSlot(std::string const& setName,
 		AtlasResource const& set, void (*install)(ObjectTileset, TextureId),
 		std::string& diagnostic, bool mandatory, bool enforceObjectContract)
 	{
@@ -184,7 +255,7 @@ namespace pf::render
 		if (mandatory && !error.empty()) throw std::runtime_error(error);
 	}
 
-	void installSectorAtlasSlot(std::string const& setName,
+	void AtlasInstaller::installSectorSlot(std::string const& setName,
 		AtlasResource const& set, std::string& diagnostic)
 	{
 		SectorTileset tiles;
@@ -214,17 +285,17 @@ namespace pf::render
 		if (!error.empty() && diagnostic.empty()) diagnostic = error;
 	}
 
-	void installAtlasDefinitions(ViewportAtlasSlots& slots, bool objectsAreMandatory)
+	void AtlasInstaller::installAll(ViewportAtlasSlots& slots,
+		bool objectsAreMandatory)
 	{
-		installSectorAtlasSlot(slots.sectorName, slots.sector,
-			slots.sectorDiagnostic);
-		installObjectAtlasSlot(slots.objectName, slots.objects, setObjectTileset,
+		installSectorSlot(slots.sectorName, slots.sector, slots.sectorDiagnostic);
+		installObjectSlot(slots.objectName, slots.objects, setObjectTileset,
 			slots.objectDiagnostic, objectsAreMandatory,
 			/*enforceObjectContract=*/ true);
-		installObjectAtlasSlot(slots.agentName, slots.agent, setAgentTileset,
+		installObjectSlot(slots.agentName, slots.agent, setAgentTileset,
 			slots.agentDiagnostic, /*mandatory=*/ false,
 			/*enforceObjectContract=*/ false);
-		installObjectAtlasSlot(slots.furnitureName, slots.furniture,
+		installObjectSlot(slots.furnitureName, slots.furniture,
 			setFurnitureTileset, slots.furnitureDiagnostic, /*mandatory=*/ false,
 			/*enforceObjectContract=*/ false);
 	}
