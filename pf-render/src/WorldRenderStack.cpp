@@ -40,6 +40,7 @@
 #include "core/WorldDocument.h"
 #include "ObjectTileset.h"
 #include "SectorTileset.h"
+#include "TileArtwork.h"
 #include "WorldDrawList.h"
 
 namespace resources = wp::application::resourcesystem;
@@ -675,6 +676,13 @@ namespace
 		// `tileset` option. Nothing here derives a tint from a tile's name or
 		// a drawn size from a domain object's geometry.
 		//
+		// The pairing is done by `installAtlasTiles()`, the shared core of
+		// the install path: it walks the `ImageSet`'s regions and takes only
+		// the render semantics from the tileset. A region that escapes the
+		// atlas image, and a tile the `ImageSet` declares that the tileset
+		// never authored, are both refused there rather than installed as
+		// artwork that samples outside the sheet (#1025).
+		//
 		// Returns nullopt and leaves `diagnostic` set when the atlas is
 		// absent or cannot be paired with its authored tileset.
 		std::optional<InstalledAtlas> atlasArtwork(std::string const& setName,
@@ -696,7 +704,8 @@ namespace
 				int width{}, height{};
 				auto const regions = atlasPixelRegions(*imageSet, width, height);
 				auto const authored = authoredTiles(*imageSet, format);
-				return InstalledAtlas{ width, height, std::move(authored.tiles),
+				return InstalledAtlas{ width, height,
+					installAtlasTiles(authored.tiles, regions, width, height, setName),
 					authored.declaresRenderSemantics };
 			}
 			catch (std::exception const& error)
