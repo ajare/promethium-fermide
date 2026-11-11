@@ -49,10 +49,11 @@ Resources:
     # The replacement Sector atlas, sized for the 128x320 World cell
     # (#1017). Its render semantics are authored in
     # resources/textures/sectors-new.tileset.yaml: ten full-cell
-    # Infrastructure tiles, one per surface-bearing Sector type, and no
-    # boundary strips at all, so every Sector edge draws the renderer's
-    # primitive line. The old SectorAtlas stays registered and canonical
-    # until nothing references it.
+    # Infrastructure tiles, one per surface-bearing Sector type, each
+    # declaring a family of three variants that the loader derives into the
+    # column beneath its base, and no boundary strips at all, so every
+    # Sector edge draws the renderer's primitive line. The old SectorAtlas
+    # stays registered and canonical until nothing references it.
     - type: "Image"
       name: "SectorAtlasNewImage"
       location: "textures/sectors-new.png"
@@ -70,16 +71,46 @@ Resources:
           Images:
             Image:
               # GENERATED from resources/textures/sectors-new.tileset.yaml by scripts/generate_sector_atlas_new.py. Do not hand-edit.
-              - { name: "airlock", x: "256", y: "320", width: "128", height: "320" }
-              - { name: "chamber", x: "384", y: "320", width: "128", height: "320" }
+              - { name: "airlock", x: "896", y: "0", width: "128", height: "320" }
+              - { name: "airlock-V1", x: "896", y: "320", width: "128", height: "320" }
+              - { name: "airlock-V2", x: "896", y: "640", width: "128", height: "320" }
+              - { name: "airlock-V3", x: "896", y: "960", width: "128", height: "320" }
+              - { name: "chamber", x: "1024", y: "0", width: "128", height: "320" }
+              - { name: "chamber-V1", x: "1024", y: "320", width: "128", height: "320" }
+              - { name: "chamber-V2", x: "1024", y: "640", width: "128", height: "320" }
+              - { name: "chamber-V3", x: "1024", y: "960", width: "128", height: "320" }
               - { name: "corridor", x: "128", y: "0", width: "128", height: "320" }
-              - { name: "dumbwaiter", x: "512", y: "320", width: "128", height: "320" }
+              - { name: "corridor-V1", x: "128", y: "320", width: "128", height: "320" }
+              - { name: "corridor-V2", x: "128", y: "640", width: "128", height: "320" }
+              - { name: "corridor-V3", x: "128", y: "960", width: "128", height: "320" }
+              - { name: "dumbwaiter", x: "1152", y: "0", width: "128", height: "320" }
+              - { name: "dumbwaiter-V1", x: "1152", y: "320", width: "128", height: "320" }
+              - { name: "dumbwaiter-V2", x: "1152", y: "640", width: "128", height: "320" }
+              - { name: "dumbwaiter-V3", x: "1152", y: "960", width: "128", height: "320" }
               - { name: "ladder", x: "256", y: "0", width: "128", height: "320" }
+              - { name: "ladder-V1", x: "256", y: "320", width: "128", height: "320" }
+              - { name: "ladder-V2", x: "256", y: "640", width: "128", height: "320" }
+              - { name: "ladder-V3", x: "256", y: "960", width: "128", height: "320" }
               - { name: "lift", x: "384", y: "0", width: "128", height: "320" }
+              - { name: "lift-V1", x: "384", y: "320", width: "128", height: "320" }
+              - { name: "lift-V2", x: "384", y: "640", width: "128", height: "320" }
+              - { name: "lift-V3", x: "384", y: "960", width: "128", height: "320" }
               - { name: "room", x: "0", y: "0", width: "128", height: "320" }
+              - { name: "room-V1", x: "0", y: "320", width: "128", height: "320" }
+              - { name: "room-V2", x: "0", y: "640", width: "128", height: "320" }
+              - { name: "room-V3", x: "0", y: "960", width: "128", height: "320" }
               - { name: "shuttle", x: "512", y: "0", width: "128", height: "320" }
-              - { name: "staircase", x: "128", y: "320", width: "128", height: "320" }
-              - { name: "stairwell", x: "0", y: "320", width: "128", height: "320" }
+              - { name: "shuttle-V1", x: "512", y: "320", width: "128", height: "320" }
+              - { name: "shuttle-V2", x: "512", y: "640", width: "128", height: "320" }
+              - { name: "shuttle-V3", x: "512", y: "960", width: "128", height: "320" }
+              - { name: "staircase", x: "768", y: "0", width: "128", height: "320" }
+              - { name: "staircase-V1", x: "768", y: "320", width: "128", height: "320" }
+              - { name: "staircase-V2", x: "768", y: "640", width: "128", height: "320" }
+              - { name: "staircase-V3", x: "768", y: "960", width: "128", height: "320" }
+              - { name: "stairwell", x: "640", y: "0", width: "128", height: "320" }
+              - { name: "stairwell-V1", x: "640", y: "320", width: "128", height: "320" }
+              - { name: "stairwell-V2", x: "640", y: "640", width: "128", height: "320" }
+              - { name: "stairwell-V3", x: "640", y: "960", width: "128", height: "320" }
               # END GENERATED
     - type: "Image"
       name: "ObjectAtlasImage"

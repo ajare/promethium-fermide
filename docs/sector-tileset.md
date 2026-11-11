@@ -35,11 +35,77 @@ every short Room and 0.7 Corridor in every saved World.
 
 `resources/textures/sectors-new.tileset.yaml` is the version 2 authored tileset
 behind `SectorAtlasNew`: ten full-cell Infrastructure tiles on the 128x320 grid
-at 640x640, one for each of the ten surface-bearing Sector types - `room`,
+at 1280x1280, one for each of the ten surface-bearing Sector types - `room`,
 `corridor`, `ladder`, `lift`, `shuttle`, `stairwell`, `staircase`, `airlock`,
 `chamber` and `dumbwaiter`. Every tile is drawn at one full World cell with no
 render offset, because the repeat is per World cell; the loader refuses a surface
 drawn at any other size or offset off its cell's anchor.
+
+The ten base tiles sit in a single row across the top of the sheet - columns 0 to
+9 of row 0 - rather than in the 5x2 block they filled at 640x640. They were moved
+there to make room for what now hangs beneath them.
+
+### Variant families
+
+Each base sprite declares how many variants its type has:
+
+```yaml
+  corridor:
+    cell: [1, 0]
+    variants: 3
+    content: [0, 0, 128, 320]
+    tintable: true
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+```
+
+That one number is the whole of what is authored about a family. The loader
+expands it into `-V1` .. `-VN`, each in the base's own column one row below the
+tile above it, and each inheriting the base's content rectangle, render offset,
+drawn size and tintable flag:
+
+| Tile | Cell | Region |
+| --- | --- | --- |
+| `corridor` | `[1, 0]` | `x 128, y 0` |
+| `corridor-V1` | `[1, 1]` | `x 128, y 320` |
+| `corridor-V2` | `[1, 2]` | `x 128, y 640` |
+| `corridor-V3` | `[1, 3]` | `x 128, y 960` |
+
+The name and the cell both come from the rule rather than from the file, so they
+cannot be written into disagreement with each other, and a variant cannot be given
+art that does not line up with the base it is a variant of. `-V` is used rather
+than a role suffix because it is the one prefix clear of the `-L0`, `-M0` and
+`-XY` role vocabulary the object atlases author with.
+
+What the format refuses, at load:
+
+- **A family that runs past the bottom of the declared sheet.** `-Vn` sits at
+  `baseRow + n`, so a count reaching past the last row describes a tile no cell
+  exists for. A sheet that quietly stopped short of what was asked is worse than
+  one that says so: the author would ship believing there were four.
+- **`variants` written on the file.** The key means "a family descends from this
+  sprite". Set-wide it would read as a count with no base to descend from, so it
+  is refused rather than given a meaning nobody wrote.
+- **`variants` in the version 1 format.** Its surfaces are bare rectangles with
+  no cell to descend from, so the key there is a family nothing could derive.
+- **`variants` on any other atlas's sprite.** The object, furniture and agent
+  formats have no family column to lay out, and the shared grid loader refuses
+  the key in their own vocabulary rather than leaving it unread. Only the sector
+  format asks for families at all.
+- **A `-Vn` name authored beside its own family.** That name is the derivation's
+  to give. A hand-authored `corridor-V1` would collide with the derived tile, and
+  which of the two won would come down to map order.
+
+`SectorTileset::variantCount(kind)` answers the declared count for a base type,
+and `sectorSurfaceVariantCount(kind)` answers it for a caller that never held the
+set. Both answer 0 for a derived tile, which is not the base of a family, and for
+anything unknown. A caller sizes a swatch strip from that query rather than from a
+constant it would have to keep in step with the tileset.
+
+The placeholder sheet labels every tile with its own name and steps the slab one
+shade darker per row, so the family structure reads off the artwork: a variant
+that landed in the wrong row shows as a band of the wrong shade rather than only
+as a diff. Row 0 keeps the shade the placeholder has always used.
 
 Every one of the ten tiles fills its cell: `drawn_size: [1.0, 1.0]`, content
 128 x 320 at the authored grid's pixel size, `offset: [0.0, 0.0]`. That is the
@@ -109,6 +175,14 @@ The grid resolution the version 2 sector and object tilesets share lives in
 way whichever atlas it fills. Pixel regions still come from the `ImageSet` and
 render semantics still come from the authored tileset - the split ADR 0010 as
 amended describes.
+
+Whether a base sprite may declare a variant family is a parameter of that shared
+loader and not a fact about grids, because it is not the grid that has to keep the
+promise. The sector loader passes `Derived` and gets the count validated and
+recorded; every other atlas passes `Refused`, which is the default, and a sprite
+carrying the key is refused. The derived tiles themselves are named and placed by
+the sector loader, which owns the `-V` vocabulary; the shared grid only establishes
+that the declared count has room to stand on the declared sheet.
 
 CMake copies both assets beside each executable under `textures/`, including
 on builds with no C++ changes. Startup resolves that directory relative to the

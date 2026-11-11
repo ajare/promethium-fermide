@@ -36,6 +36,10 @@ SPEC = AtlasSpec(
     tileset="resources/textures/sectors-new.tileset.yaml",
     script="generate_sector_atlas_new.py",
     label_tiles=True,
+    # The sector format lays out variant family columns: a base sprite's
+    # `-V1` .. `-VN` stack directly beneath it, inheriting its geometry
+    # (#1038). The other `New` atlases leave this off and refuse the key.
+    variant_families=True,
 )
 
 if __name__ == "__main__":

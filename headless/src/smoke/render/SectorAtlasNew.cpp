@@ -189,6 +189,11 @@ namespace
 		// installs it. Dropping it here would leave every check below running
 		// on a set that is not the one the game draws (#1027).
 		installed.family = authored.family;
+		// The declared variant counts travel with it for the same reason the
+		// family does: the installed set is what a caller asks its counts
+		// of, and building it here without them would leave that query
+		// running on something the stack never installs (#1038).
+		installed.variantCounts = authored.variantCounts;
 		installed.tiles = installAtlasTiles(authored.tiles, set.regions,
 			authored.width, authored.height, "SectorAtlasNew");
 		for (auto const& [name, artwork] : installed.tiles)
@@ -444,16 +449,23 @@ namespace
 	{
 		using smoke::require;
 		auto const authored = SectorTileset::load(context.fixture(kTileset));
-		require(authored.surfaces.size() == kSurfaces.size(),
+		// Ten base surfaces, each declaring a family of three, so the set
+		// holds forty tiles and not the ten it carried before families were
+		// derived.
+		require(authored.surfaces.size() == kSurfaces.size() * 4,
 			"SectorAtlasNew authors " + std::to_string(authored.surfaces.size())
-			+ " surfaces; the set is ten");
+			+ " surfaces; ten bases with three derived variants under each is forty");
 		for (auto const& name : kSurfaces)
 			require(authored.surfaces.count(name),
 				"SectorAtlasNew registers no '" + name + "' surface");
-		// The sheet is the 5x2 grid of full cells the set is sized for, on
-		// the 128x320 authored grid one World cell now draws at.
-		require(authored.width == 640 && authored.height == 640,
-			"SectorAtlasNew is not the 640x640 sheet its set is sized for");
+		// The ten bases form one row across the top of the sheet. That is
+		// what leaves every column below a base free to hold that base's
+		// family, and why the sheet grew down rather than sideways.
+		require(authored.width == 1280 && authored.height == 1280,
+			"SectorAtlasNew is not the 1280x1280 sheet its set is sized for");
+		for (auto const& name : kSurfaces)
+			require(authored.surfaces.at(name).y == 0,
+				"'" + name + "' is not in the base strip along the top of the sheet");
 		auto const sheet = pngSize(context.fixture("resources/textures/sectors-new.png"));
 		require(sheet.first == authored.width && sheet.second == authored.height,
 			"The committed sectors-new.png is " + std::to_string(sheet.first) + "x"
@@ -874,6 +886,33 @@ namespace
 		return yaml.str();
 	}
 
+	// The full ten-surface set laid out across one row of a sheet deep
+	// enough for each base's family to descend beneath it. The variant
+	// count, the sheet depth and the row the bases sit in are the only
+	// things a caller controls, so a refusal about one is never confounded
+	// by another.
+	std::string familyTilesetYaml(int variants, int sheetRows, int baseRow = 0)
+	{
+		std::ostringstream yaml;
+		yaml << "version: 2\n"
+			<< "image: invented.png\n"
+			<< "size: [1280, " << (sheetRows * 320) << "]\n"
+			<< "tile_size: [128, 320]\n"
+			<< "sprites:\n";
+		int column = 0;
+		for (auto const& name : kSurfaces)
+		{
+			yaml << "  " << name << ":\n"
+				<< "    cell: [" << column++ << ", " << baseRow << "]\n"
+				<< "    variants: " << variants << "\n"
+				<< "    content: [0, 0, 128, 320]\n"
+				<< "    offset: [0.0, 0.0]\n"
+				<< "    drawn_size: [1.0, 1.0]\n"
+				<< "    tintable: true\n";
+		}
+		return yaml.str();
+	}
+
 	// Loads a generated tileset and hands back the refusal, or empty when
 	// the file was accepted.
 	std::string loadRefusal(smoke::Context const& context, std::string const& tag,
@@ -969,6 +1008,166 @@ namespace
 			require(artwork.tintable,
 				"'" + name + "' lost its authored tintable flag on load");
 		}
+	}
+
+	// The per-type count is what a caller sizes a swatch strip from, so it
+	// answers from what the base sprite declared rather than from a constant
+	// the caller would have to keep in step with the tileset.
+	void variantFamiliesAreDerivedAndReported(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const atlas = installNewSectorAtlas(context);
+		for (auto const& name : kSurfaces)
+			require(atlas.variantCount(name) == 3,
+				"'" + name + "' reports no family of three on the installed atlas");
+		// A derived tile is not the base of a family, so it holds no count
+		// of its own; answering 3 there would invite a family under a family.
+		require(atlas.variantCount("corridor-V1") == 0,
+			"A derived tile reported a family of its own");
+		require(atlas.variantCount("nope") == 0,
+			"An unknown kind reported a family");
+		// The same number reaches a caller that never held the set.
+		require(sectorSurfaceVariantCount("corridor") == 3,
+			"The installed-atlas query does not report the declared count");
+		require(sectorSurfaceVariantCount("corridor-V1") == 0,
+			"The installed-atlas query reports a count for a derived tile");
+	}
+
+	// A family that runs past the bottom of the declared sheet describes a
+	// tile no cell exists for. The sheet cannot show what was asked, and a
+	// sheet that quietly stopped short of the count is worse than a load
+	// that says so: the author would ship believing there were four.
+	void loaderRefusesAFamilyThatRunsPastTheSheet(smoke::Context const& context)
+	{
+		using smoke::require;
+		// Four sheet rows, numbered 0 to 3. A base in the last row that
+		// declares one variant wants a row 4 the sheet does not have.
+		auto const refusal = loadRefusal(context, "family-past-the-sheet",
+			familyTilesetYaml(1, 4, 3));
+		require(refusal.find("run past the bottom") != std::string::npos,
+			"A family descending past the last declared row was accepted: "
+			+ refusal);
+	}
+
+	// The same set with room to stand loads, and every derived tile lands
+	// where the rule puts it: its base's column, one authored tile height
+	// per step down, with the base's content, offset, drawn size and
+	// tintable flag carried through untouched.
+	void loaderDerivesEachVariantOfAFamilyThatFits(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const path = context.temporaryRoot() / "family-fits.tileset.yaml";
+		std::ofstream out(path, std::ios::binary | std::ios::trunc);
+		out << familyTilesetYaml(3, 4);
+		out.close();
+		require(bool(out), "Could not write the fixture tileset: " + path.string());
+		auto const loaded = SectorTileset::load(path);
+		require(loaded.surfaces.size() == kSurfaces.size() * 4,
+			"A conforming family set did not load forty tiles");
+		for (auto const& name : kSurfaces)
+		{
+			auto const& base = loaded.tiles.at(name);
+			require(loaded.variantCount(name) == 3,
+				"'" + name + "' reports no count after a load that declared three");
+			for (int step = 1; step <= 3; ++step)
+			{
+				auto const variant = name + "-V" + std::to_string(step);
+				require(loaded.tiles.count(variant), variant + " was not derived");
+				auto const& derived = loaded.tiles.at(variant);
+				require(derived.region.x == base.region.x,
+					variant + " left its base's column");
+				require(derived.region.y == base.region.y + step * 320,
+					variant + " is not one authored tile height per step below its base");
+				require(derived.region.width == base.region.width
+						&& derived.region.height == base.region.height,
+					variant + " cuts different content than its base cuts");
+				require(derived.offset.x == base.offset.x
+						&& derived.offset.y == base.offset.y
+						&& derived.drawnSize.x == base.drawnSize.x
+						&& derived.drawnSize.y == base.drawnSize.y,
+					variant + " did not inherit its base's render semantics");
+				require(derived.tintable == base.tintable,
+					variant + " did not inherit its base's tintable flag");
+			}
+		}
+	}
+
+	// A hand-authored name inside a derived family's own space is the one
+	// way the derivation could be contradicted. It is refused by name
+	// rather than shadowed by whichever of the two a map happened to keep.
+	void loaderRefusesAVariantNameAuthoredBesideItsFamily(
+		smoke::Context const& context)
+	{
+		using smoke::require;
+		auto yaml = familyTilesetYaml(1, 2);
+		yaml += "  corridor-V1:\n"
+			"    cell: [0, 1]\n"
+			"    content: [0, 0, 128, 320]\n"
+			"    offset: [0.0, 0.0]\n"
+			"    drawn_size: [1.0, 1.0]\n"
+			"    tintable: true\n";
+		auto const refusal = loadRefusal(context, "authored-beside-family", yaml);
+		require(refusal.find("corridor-V1") != std::string::npos
+				&& refusal.find("reserves") != std::string::npos,
+			"A hand-authored name inside a derived family was accepted: " + refusal);
+	}
+
+	// `variants` means "a family descends from this sprite". Written on the
+	// file it would read as a set-wide count with no base to descend from,
+	// so it is refused rather than given a meaning nobody wrote.
+	void loaderRefusesVariantsWrittenOnTheFile(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto yaml = familyTilesetYaml(0, 1);
+		yaml.insert(yaml.find("sprites:"), "variants: 3\n");
+		auto const refusal = loadRefusal(context, "variants-on-the-file", yaml);
+		require(refusal.find("declared on a base sprite") != std::string::npos,
+			"A set-wide `variants` key was accepted: " + refusal);
+	}
+
+	// The version 1 format's surfaces are bare rectangles with no cell to
+	// descend from, so a set-wide `variants` key there is a family nothing
+	// could ever derive.
+	void loaderRefusesVariantFamiliesInTheOldFormat(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const refusal = loadRefusal(context, "v1-variants",
+			"version: 1\nimage: invented.png\nsize: [1024, 1024]\n"
+			"regions:\n  room: [0, 0, 128, 128]\nvariants: 3\n");
+		require(refusal.find("no variant families") != std::string::npos,
+			"A version 1 sector tileset declaring variant families was accepted: "
+			+ refusal);
+	}
+
+	// The refusal of a key the format cannot derive belongs to the shared
+	// authored-grid loader and not to the sector loader. An object tileset
+	// has no family column either, and says so in its own vocabulary rather
+	// than leaving the key unread.
+	void theObjectFormatRefusesVariantFamilies(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const path = context.temporaryRoot() / "object-family.tileset.yaml";
+		std::ofstream out(path, std::ios::binary | std::ios::trunc);
+		out << "version: 2\n"
+			"image: invented.png\n"
+			"size: [512, 512]\n"
+			"tile_size: [128, 128]\n"
+			"sprites:\n"
+			"  wall:\n"
+			"    cell: [0, 0]\n"
+			"    variants: 2\n"
+			"    content: [0, 0, 128, 128]\n"
+			"    offset: [0.0, 0.0]\n"
+			"    drawn_size: [1.0, 1.0]\n"
+			"    tintable: true\n";
+		out.close();
+		require(bool(out), "Could not write the fixture tileset: " + path.string());
+		std::string reason;
+		bool refused = false;
+		try { ObjectTileset::load(path); }
+		catch (std::exception const& error) { refused = true; reason = error.what(); }
+		require(refused && reason.find("no family column to derive") != std::string::npos,
+			"An object sprite declaring a variant family was accepted: " + reason);
 	}
 
 	// The fallback that keeps an older atlas honest. The v1 set has no
@@ -1083,6 +1282,20 @@ void render_smoke::registerSectorAtlasNew(std::vector<smoke::Check>& checks)
 		isolated<loaderRefusesASurfaceOffsetFromItsCell> });
 	checks.push_back({ "sectorAtlasNew/loaderAcceptsAConformingSet",
 		isolated<loaderAcceptsAConformingSet> });
+	checks.push_back({ "sectorAtlasNew/variantFamiliesAreDerivedAndReported",
+		isolated<variantFamiliesAreDerivedAndReported> });
+	checks.push_back({ "sectorAtlasNew/loaderRefusesAFamilyThatRunsPastTheSheet",
+		isolated<loaderRefusesAFamilyThatRunsPastTheSheet> });
+	checks.push_back({ "sectorAtlasNew/loaderDerivesEachVariantOfAFamilyThatFits",
+		isolated<loaderDerivesEachVariantOfAFamilyThatFits> });
+	checks.push_back({ "sectorAtlasNew/loaderRefusesAVariantNameAuthoredBesideItsFamily",
+		isolated<loaderRefusesAVariantNameAuthoredBesideItsFamily> });
+	checks.push_back({ "sectorAtlasNew/loaderRefusesVariantsWrittenOnTheFile",
+		isolated<loaderRefusesVariantsWrittenOnTheFile> });
+	checks.push_back({ "sectorAtlasNew/loaderRefusesVariantFamiliesInTheOldFormat",
+		isolated<loaderRefusesVariantFamiliesInTheOldFormat> });
+	checks.push_back({ "sectorAtlasNew/theObjectFormatRefusesVariantFamilies",
+		isolated<theObjectFormatRefusesVariantFamilies> });
 	checks.push_back({ "sectorAtlasNew/anOlderAtlasStillBorrowsForATypeItHasNoTileFor",
 		isolated<anOlderAtlasStillBorrowsForATypeItHasNoTileFor> });
 	checks.push_back({ "sectorAtlasNew/theOldFamilyStillBorrowsForShuttleAndStaircase",

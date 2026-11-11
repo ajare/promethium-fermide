@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <string>
 
 #include "TileArtwork.h"
@@ -24,12 +25,37 @@
 // `tileNoun` names the kind in a refusal - "object sprite", "sector
 // surface" - so the atlas loaders report in their own vocabulary while
 // resolving the grid once.
+//
+// Whether a base sprite may declare a variant family is the caller's call,
+// because it is not a fact about the grid. A `variants: N` key promises N
+// more tiles stacked in the base's own column directly beneath it, and only
+// a format that lays those columns out can keep that promise. Where the
+// format has no column to grow, the key is refused rather than ignored: an
+// ignored declaration is a family an author believes exists and nothing
+// derives (#1038).
+enum class AuthoredVariantFamilies
+{
+    // The key is not part of this format. A sprite carrying it is refused.
+    Refused,
+    // The key is legal on a base sprite, and the declared count must fit
+    // the sheet below the sprite it was written on.
+    Derived
+};
+
 struct AuthoredTileGrid
 {
     int width{}, height{};
     int tileWidth{}, tileHeight{};
     TileArtworkMap tiles;
+    // How many variants each base sprite declared, keyed by that sprite's
+    // own name. Only filled when the caller derives variant families; the
+    // count is the author's statement, not something read back off the
+    // derived tiles, so a caller can tell "declared none" from "never had
+    // the option".
+    std::map<std::string, int> variantCounts;
 };
 
 AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
-    bool declaresRenderSemantics, std::string const& tileNoun);
+    bool declaresRenderSemantics, std::string const& tileNoun,
+    AuthoredVariantFamilies variantFamilies
+        = AuthoredVariantFamilies::Refused);

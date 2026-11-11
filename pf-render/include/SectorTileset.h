@@ -50,6 +50,16 @@ struct SectorTileset
     SectorTilesetFamily family{ SectorTilesetFamily::Old };
     std::map<std::string, SectorTileRegion> surfaces;
     std::map<std::string, SectorTileRegion> boundaries;
+    // How many variants each base surface declared (#1038). The count is the
+    // author's own number, read off the base sprite rather than counted back
+    // from the tiles derived from it, so it says what was stated rather than
+    // what happened to be present. A derived `-Vn` name is not a base and
+    // holds no count of its own.
+    std::map<std::string, int> variantCounts;
+    // The variant count declared for one base surface, or 0 when that name
+    // declares no family. This is the query a caller asks instead of
+    // hardcoding how many variants a Sector type has.
+    int variantCount(std::string const& kind) const;
     // Every tile in the set with its authored render semantics, keyed by the
     // name the application manifest declares for it - a boundary keeps its
     // `boundary-` prefix here, because that is the name the install pairs
@@ -78,6 +88,12 @@ bool hasSectorTileSurface(std::string const& kind);
 // tile. False when no atlas is installed, which is the safe answer: with
 // nothing installed there is no own art to wear.
 bool sectorTilesetIsNewFamily();
+// How many surface variants the installed atlas declares for one Sector
+// type (#1038), which is what an editor sizes a swatch strip from rather
+// than assuming a number. 0 when no atlas is installed, when the installed
+// set is the version 1 family - which declares no families at all - or when
+// the named type declares none.
+int sectorSurfaceVariantCount(std::string const& kind);
 // The tileset helpers cross to the command stream on the shared drawing
 // types (#997), so a caller hands them pf::render::Vec2 and a packed colour.
 bool drawSectorTileSurface(std::string const& kind, WorldDrawList* drawList,

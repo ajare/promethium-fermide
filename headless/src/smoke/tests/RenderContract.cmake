@@ -87,6 +87,13 @@ set(names
     sectorAtlasNew/loaderRefusesASurfaceThatIsNotOneFullCell
     sectorAtlasNew/loaderRefusesASurfaceOffsetFromItsCell
     sectorAtlasNew/loaderAcceptsAConformingSet
+    sectorAtlasNew/variantFamiliesAreDerivedAndReported
+    sectorAtlasNew/loaderRefusesAFamilyThatRunsPastTheSheet
+    sectorAtlasNew/loaderDerivesEachVariantOfAFamilyThatFits
+    sectorAtlasNew/loaderRefusesAVariantNameAuthoredBesideItsFamily
+    sectorAtlasNew/loaderRefusesVariantsWrittenOnTheFile
+    sectorAtlasNew/loaderRefusesVariantFamiliesInTheOldFormat
+    sectorAtlasNew/theObjectFormatRefusesVariantFamilies
     sectorAtlasNew/anOlderAtlasStillBorrowsForATypeItHasNoTileFor
     sectorAtlasNew/theOldFamilyStillBorrowsForShuttleAndStaircase
     sectorSurfaceDrawContract/everyCellOfANoVariantSectorDrawsItsBaseTile

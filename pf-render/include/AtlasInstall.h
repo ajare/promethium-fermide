@@ -66,6 +66,13 @@ namespace pf::render
 		// slots read nothing from it: an object tileset's version says nothing
 		// about which surface a Sector type wears.
 		SectorTilesetFamily family{ SectorTilesetFamily::Old };
+		// How many variants each base surface declared (#1038). Carried with
+		// the artwork for the same reason the family is: the count is authored
+		// in the tileset, and by the time the install is over a map of regions
+		// says nothing about what was declared above them. Empty for every set
+		// that derives no families, which is the honest answer rather than a
+		// missing one.
+		std::map<std::string, int> variantCounts;
 	};
 
 	// The four viewport atlas slots as the shared renderer holds them: which

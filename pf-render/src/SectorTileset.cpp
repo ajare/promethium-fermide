@@ -4,6 +4,7 @@
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
@@ -19,6 +20,20 @@ constexpr std::array<char const*, 10> kSectorSurfaces{ "room", "corridor",
     "ladder", "lift", "shuttle", "stairwell", "staircase", "airlock",
     "chamber", "dumbwaiter" };
 
+// `-V` followed by digits and nothing else: exactly the shape the variant
+// derivation produces. A sprite authored under one of those names would
+// collide with whatever the family rule derives, and which of the two won
+// would come down to map order, so the name is refused before anything is
+// derived (#1038).
+bool isDerivedVariantName(std::string const& name)
+{
+    auto const mark = name.rfind("-V");
+    if (mark == std::string::npos || mark + 2 >= name.size()) return false;
+    for (auto it = name.begin() + mark + 2; it != name.end(); ++it)
+        if (!std::isdigit(static_cast<unsigned char>(*it))) return false;
+    return true;
+}
+
 // A version 2 sector tileset authors the same grid the object atlases use:
 // a cell in the artist's own layout, a content rectangle inside it, and
 // the render semantics per tile (#1014). What differs is what the set is
@@ -33,6 +48,13 @@ constexpr std::array<char const*, 10> kSectorSurfaces{ "room", "corridor",
 // cell's anchor, would repeat at a geometry the per-cell repeat rule cannot
 // express, so the loader refuses it rather than drawing something that
 // contradicts its own repeat.
+//
+// A variant family is derived here rather than read. Each base sprite's
+// `variants: N` yields `-V1` .. `-VN` in the base's own column, one row
+// below the last, each inheriting the base's content rectangle, render
+// offset, drawn size and tintable flag. The author states the count and the
+// grid does the rest, so a variant's name and its position cannot disagree
+// with the family they belong to (#1038).
 SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
     YAML::Node const& root)
 {
@@ -40,12 +62,25 @@ SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
         throw std::runtime_error("A version 2 sector tileset declares no boundary "
             "strips; every Sector edge draws the primitive line ('"
             + path.filename().string() + "')");
+    // `variants` is a per-sprite key. Written on the file it would read as a
+    // set-wide count with no base to descend from, which is not what the key
+    // means, so it is refused rather than given a meaning nobody wrote.
+    if (root["variants"].IsDefined())
+        throw std::runtime_error("`variants` is declared on a base sprite, not on "
+            "the file; each family descends from the sprite that stated it ('"
+            + path.filename().string() + "')");
     SectorTileset result;
     result.image = path.parent_path() / root["image"].as<std::string>();
     result.family = SectorTilesetFamily::New;
-    auto const grid = loadAuthoredTileGrid(root, true, "sector surface");
+    auto const grid = loadAuthoredTileGrid(root, true, "sector surface",
+        AuthoredVariantFamilies::Derived);
     result.width = grid.width;
     result.height = grid.height;
+    for (auto const& [name, tile] : grid.tiles)
+        if (isDerivedVariantName(name))
+            throw std::runtime_error("Sector surface '" + name + "' uses a name the "
+                "variant derivation reserves; a family's variants are derived from "
+                "its base and are not authored beside it");
     for (auto const& [name, artwork] : grid.tiles) {
         if (artwork.offset.x != 0.0f || artwork.offset.y != 0.0f)
             throw std::runtime_error("Sector surface '" + name
@@ -57,6 +92,28 @@ SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
                 "is per World cell");
         result.tiles.emplace(name, artwork);
         result.surfaces.emplace(name, artwork.region);
+        auto const declared = grid.variantCounts.find(name);
+        if (declared == grid.variantCounts.end()) continue;
+        // One row down the sheet is one authored tile height down, and the
+        // base's region is already resolved into image pixels, so a variant
+        // is the base's own rectangle shifted by that much. Everything else
+        // - the content it cuts, the offset it draws at, the size it draws
+        // at, whether it takes a tint - is the base's, unchanged.
+        for (int variant = 1; variant <= declared->second; ++variant) {
+            auto derived = artwork;
+            derived.region.y += variant * grid.tileHeight;
+            auto const variantName = name + "-V" + std::to_string(variant);
+            // The pre-pass above already refuses any authored name in this
+            // shape, so this is the backstop rather than the guard: it keeps a
+            // derivation that somehow collided from being silently swallowed,
+            // which is how a tile ends up drawing as something else.
+            if (!result.tiles.emplace(variantName, derived).second)
+                throw std::runtime_error("Sector surface '" + variantName
+                    + "' is derived from '" + name + "' and cannot also be authored "
+                    "beside the family it belongs to");
+            result.surfaces.emplace(variantName, derived.region);
+        }
+        result.variantCounts.emplace(name, declared->second);
     }
     for (auto const* name : kSectorSurfaces)
         if (!result.surfaces.count(name))
@@ -93,6 +150,14 @@ SectorTileset SectorTileset::load(std::filesystem::path const& path)
     if (version == 2) return loadVersion2SectorTileset(path, root);
     if (version != 1)
         throw std::runtime_error("Unsupported sector tileset version");
+    // The version 1 format has no variant families: its surfaces are bare
+    // rectangles with no cell to descend from, so a `variants` key here is a
+    // family nothing derives. Refused rather than ignored, because an ignored
+    // declaration reads as one that worked (#1038).
+    if (root["variants"].IsDefined())
+        throw std::runtime_error("A version 1 sector tileset has no variant families; "
+            "`variants` is a version 2 base-sprite key ('" + path.filename().string()
+            + "')");
     SectorTileset result;
     result.image = path.parent_path() / root["image"].as<std::string>();
     // The draft family. Stated rather than left to the default so the two
@@ -148,6 +213,23 @@ bool sectorTilesetIsNewFamily()
     // resets `active`, so the family resets with it and nothing survives a
     // teardown as a stale promise that own art is available.
     return bool(textureId) && active.family == SectorTilesetFamily::New;
+}
+
+int sectorSurfaceVariantCount(std::string const& kind)
+{
+    // Guarded on the install the same way the surface lookup is: with no
+    // atlas behind the handle there is no declared count to report. The
+    // version 1 family declares no families either, and its loader leaves
+    // the map empty, so both answer 0 for the same reason - no author ever
+    // stated a count.
+    if (!textureId) return 0;
+    return active.variantCount(kind);
+}
+
+int SectorTileset::variantCount(std::string const& kind) const
+{
+    auto const found = variantCounts.find(kind);
+    return found == variantCounts.end() ? 0 : found->second;
 }
 
 bool drawSectorTileSurface(std::string const& kind, WorldDrawList* list,

@@ -69,6 +69,11 @@ namespace pf::render
 			// branch leaves it at the Old family because nothing downstream
 			// asks an object atlas which family it is (#1027).
 			SectorTilesetFamily family{ SectorTilesetFamily::Old };
+			// The variant counts the sector loader read off its base sprites
+			// (#1038). The object branch has none to carry: the object format
+			// refuses the key, so an empty map is what a successful load of
+			// one always holds.
+			std::map<std::string, int> variantCounts;
 		};
 
 		// Reads one atlas's authored tiles out of the tileset file its
@@ -92,12 +97,24 @@ namespace pf::render
 				// The family has to come out with the tiles. The renderer
 				// cannot recover it later: by then all it holds is a map of
 				// regions, and a `shuttle` region says nothing about whether
-				// the family it came from ever meant to draw it (#1027).
+				// the family it came from ever meant to draw it (#1027). The
+				// variant counts travel for the same reason - a derived
+				// `corridor-V2` region does not say that `corridor` declared
+				// three of them, and the editor sizes its swatch strip from
+				// that number rather than from a constant (#1038).
 				auto set = SectorTileset::load(authored.path);
-				return { std::move(set.tiles), false, set.family };
+				return { std::move(set.tiles), false, set.family,
+					std::move(set.variantCounts) };
 			}
 			auto set = ObjectTileset::load(authored.path);
-			return { std::move(set.sprites), set.declaresRenderSemantics };
+			AuthoredAtlasTiles result;
+			result.tiles = std::move(set.sprites);
+			result.declaresRenderSemantics = set.declaresRenderSemantics;
+			// No variant counts travel back. The object format refuses a
+			// `variants` key outright, so an empty map is the whole of what a
+			// load that reached here could hold - stated rather than left to
+			// the default so the absence is seen to be deliberate (#1038).
+			return result;
 		}
 
 		// The pixel regions one atlas's `ImageSet` declares, with the image
@@ -223,7 +240,8 @@ namespace pf::render
 			registryFor(*imageSet), mReads);
 		return InstalledAtlas{ width, height,
 			installAtlasTiles(authored.tiles, regions, width, height, setName),
-			authored.declaresRenderSemantics, authored.family };
+			authored.declaresRenderSemantics, authored.family,
+			std::move(authored.variantCounts) };
 	}
 
 	void AtlasInstaller::installObjectSlot(std::string const& setName,
@@ -270,6 +288,10 @@ namespace pf::render
 			// the Staircase choose their surface from it and from nothing
 			// else (#1027).
 			tiles.family = atlas.family;
+			// So do the variant counts, because the per-type count is a fact
+			// about the authored set and not something the installed region
+			// map can be asked (#1038).
+			tiles.variantCounts = std::move(atlas.variantCounts);
 			for (auto const& [name, artwork] : atlas.tiles)
 			{
 				// The manifest carries a sector atlas's boundary tiles

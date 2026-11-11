@@ -54,6 +54,13 @@ class AtlasSpec:
     # Placeholder art for a full-cell sheet is unreadable without the tile
     # name on it; a sheet of small tiles does not have room for one.
     label_tiles: bool = False
+    # Whether this atlas's format lays out variant family columns. A base
+    # sprite's `variants: N` promises N more tiles stacked directly beneath
+    # it, and only a format with somewhere to put them can keep that promise.
+    # Where the format has no column to grow, the key is refused rather than
+    # ignored - an ignored declaration is a family the author believes
+    # exists and nothing derives (#1038).
+    variant_families: bool = False
 
     @property
     def tileset_path(self) -> pathlib.Path:
@@ -63,6 +70,26 @@ class AtlasSpec:
     def begin_marker(self) -> str:
         return (f"# GENERATED from {self.tileset} by scripts/{self.script}. "
                 "Do not hand-edit.")
+
+
+# The placeholder slab steps one shade darker per sheet row, so the row a
+# tile landed in reads off the sheet itself. That is what makes a variant
+# that derived into the wrong row visible as artwork rather than only as a
+# diff (#1038). Row 0 keeps the shade the placeholder has always used, so
+# the base strip looks the same as it did before families existed.
+ROW_SHADE_STEP = 40
+
+
+def slab_shades(row: int, tintable: bool) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """The placeholder slab body and edge for one sheet row, one step darker
+    than the row above it. The hue is kept, so a tintable tile stays a
+    grayscale tile and a non-tintable one stays the blue-grey it was."""
+    body_base = (236, 236, 236) if tintable else (150, 160, 176)
+    edge_base = (198, 198, 198) if tintable else (110, 120, 138)
+    step = ROW_SHADE_STEP * row
+    body = tuple(max(16, channel - step) for channel in body_base) + (255,)
+    edge = tuple(max(8, channel - step) for channel in edge_base) + (255,)
+    return body, edge
 
 
 def load_tileset(spec: AtlasSpec) -> dict:
@@ -78,11 +105,91 @@ def load_tileset(spec: AtlasSpec) -> dict:
     return tileset
 
 
-def resolve_regions(tileset: dict) -> list[tuple[str, int, int, int, int]]:
-    """Every tile's region in image pixels: its cell plus its content offset."""
+def is_reserved_variant_name(name: str) -> bool:
+    """`-V` followed by digits and nothing else: exactly the shape the variant
+    derivation produces."""
+    mark = name.rfind("-V")
+    if mark == -1:
+        return False
+    tail = name[mark + 2:]
+    return bool(tail) and all(c in "0123456789" for c in tail)
+
+
+def derive_sprites(spec: AtlasSpec, tileset: dict) -> dict:
+    """Every sprite the sheet holds, with each declared variant family expanded.
+
+    A base sprite's `-Vn` sits in the base's own column one row below the
+    tile above it, and inherits the base's content rectangle, render offset,
+    drawn size and tintable flag. The name and the cell both come from the
+    rule rather than from the file, so neither can be written wrong (#1038).
+
+    A derived tile carries no `variants` key of its own: the key belongs on
+    the base that stated the family, and a family under a family has no
+    column of its own to live in.
+    """
+    rows = tileset["size"][1] // tileset["tile_size"][1]
+    derived: dict[str, dict] = {}
+    for name, sprite in tileset["sprites"].items():
+        # `-Vn` is the derivation's own vocabulary. A sprite authored under one
+        # of those names would collide with whatever the family rule derives,
+        # and which of the two won would come down to file order, so the name is
+        # refused before anything is derived. The C++ loader refuses it the same
+        # way; a generator that let it through would emit a manifest the loader
+        # then rejects (#1038).
+        if spec.variant_families and is_reserved_variant_name(name):
+            raise SystemExit(f"{spec.tileset}: sprite '{name}' uses a name the "
+                            "variant derivation reserves; a family's variants are "
+                            "derived from its base and are not authored beside it")
+        if name in derived:
+            raise SystemExit(f"{spec.tileset}: '{name}' is both a derived variant "
+                            "and an authored sprite; variant names come from the "
+                            "family rule and cannot be authored beside it")
+        derived[name] = sprite
+        if "variants" not in sprite:
+            continue
+        if not spec.variant_families:
+            raise SystemExit(f"{spec.tileset}: sprite '{name}' declares `variants`, "
+                            f"which {spec.atlas} has no family column to derive; "
+                            "only the sector tileset stacks variants beneath a base")
+        count = sprite["variants"]
+        if isinstance(count, bool) or not isinstance(count, int):
+            raise SystemExit(f"{spec.tileset}: sprite '{name}' `variants` must be a "
+                            "whole number")
+        if count < 0:
+            raise SystemExit(f"{spec.tileset}: sprite '{name}' `variants` must not "
+                            "be negative")
+        column, row = sprite["cell"]
+        # The family descends from the base's own row, so its last variant
+        # sits at row + count. Past the last row of the declared sheet there
+        # is no cell for it, and a sheet that quietly stopped short of what
+        # was asked is the silent failure a refusal is here to avoid.
+        if row + count >= rows:
+            raise SystemExit(f"{spec.tileset}: sprite '{name}' declares {count} "
+                            f"variants, which would run past the bottom of the "
+                            f"declared sheet: the base sits at row {row} of {rows}")
+        for variant in range(1, count + 1):
+            variant_name = f"{name}-V{variant}"
+            if variant_name in derived:
+                raise SystemExit(f"{spec.tileset}: sprite '{variant_name}' is "
+                                f"derived from '{name}' and cannot also be authored "
+                                "beside the family it belongs to")
+            inherited = {key: value for key, value in sprite.items()
+                         if key != "variants"}
+            inherited["cell"] = [column, row + variant]
+            derived[variant_name] = inherited
+    return derived
+
+
+def resolve_regions(spec: AtlasSpec,
+                   tileset: dict) -> list[tuple[str, int, int, int, int]]:
+    """Every tile's region in image pixels: its cell plus its content offset.
+
+    Variant families are expanded first, so the regions the manifest
+    declares are the whole sheet's and not just the base sprites'.
+    """
     tile_width, tile_height = tileset["tile_size"]
     regions = []
-    for name, sprite in tileset["sprites"].items():
+    for name, sprite in derive_sprites(spec, tileset).items():
         column, row = sprite["cell"]
         x, y, width, height = sprite["content"]
         regions.append((name, column * tile_width + x, row * tile_height + y,
@@ -95,16 +202,19 @@ def render_placeholder(spec: AtlasSpec, tileset: dict) -> Image.Image:
 
     Tintable tiles are drawn in grayscale so a vertex tint multiplies into
     them faithfully; the real sheets replace this file without changing any
-    of the geometry recorded in the tileset.
+    of the geometry recorded in the tileset. Every tile - base or derived
+    variant - is labelled with its own name, and the slab steps one shade
+    darker per sheet row, so the sheet reads as the family structure it is.
     """
     width, height = tileset["size"]
     tile_width, tile_height = tileset["tile_size"]
+    sprites = derive_sprites(spec, tileset)
     sheet = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(sheet)
-    for name, x, y, region_width, region_height in resolve_regions(tileset):
-        tintable = tileset["sprites"][name].get("tintable", False)
-        body = (236, 236, 236, 255) if tintable else (150, 160, 176, 255)
-        edge = (198, 198, 198, 255) if tintable else (110, 120, 138, 255)
+    for name, x, y, region_width, region_height in resolve_regions(spec, tileset):
+        sprite = sprites[name]
+        tintable = sprite.get("tintable", False)
+        body, edge = slab_shades(sprite["cell"][1], tintable)
         draw.rectangle([x, y, x + region_width - 1, y + region_height - 1],
                        fill=body)
         draw.rectangle([x, y, x + region_width - 1, min(y + 1, y + region_height - 1)],
@@ -116,7 +226,7 @@ def render_placeholder(spec: AtlasSpec, tileset: dict) -> Image.Image:
             # cell's own space free to be written on. Labelling the content
             # instead puts a long name on top of the neighbouring tile's
             # art, which is the one thing a sheet should never do.
-            column, row = tileset["sprites"][name]["cell"]
+            column, row = sprite["cell"]
             draw.text((column * tile_width + 6, row * tile_height + 6), name,
                      fill=(52, 58, 70, 255))
     return sheet
@@ -203,7 +313,7 @@ def run(spec: AtlasSpec) -> int:
     arguments = parser.parse_args()
 
     tileset = load_tileset(spec)
-    regions = resolve_regions(tileset)
+    regions = resolve_regions(spec, tileset)
 
     if arguments.emit:
         for line in manifest_block(spec, regions):
