@@ -31,5 +31,8 @@ void registerFurniture(std::vector<smoke::Check>& checks);
 // Sector surface variants surviving a Location resize or move (#1044).
 void registerSectorSurfaceVariants(std::vector<smoke::Check>& checks);
 
+// Sector surface variants surviving a vertical Transit resize or move (#1045).
+void registerTransitSurfaceVariants(std::vector<smoke::Check>& checks);
+
 void registerScaledDoors(std::vector<smoke::Check>& checks);
 void registerRoomHeightScale(std::vector<smoke::Check>& checks);

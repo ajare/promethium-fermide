@@ -301,6 +301,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/editor/ScaledDoors.cpp` | Scaled Regular Door editor checks | `pf-smoke-editor` |
 | `smoke/world/RoomHeightScale.cpp` | Room height scale world checks | `pf-smoke-world` |
 | `smoke/world/SectorSurfaceVariants.cpp` | Sector surface variant carry-through across Location edits: a Room or Corridor move carries its entries unchanged, growing left or upward renumbers nothing, shrinking drops the entries outside the new footprint rather than clamping them inward, the plan announces what it drops, the entries survive save and load across the resize, and a Facade or Background holds none across its edits | `pf-smoke-world` |
+| `smoke/world/TransitSurfaceVariants.cpp` | Sector surface variant carry-through across the four vertical Transit edits: a Lift, Ladder, Stairwell or Staircase move carries its entries unchanged, a Lift grows without renumbering, a shortened shaft, Ladder run or Stairwell drops the entries above the new ceiling, a narrowed shaft or shortened flight drops the entries outside the new width, nothing clamps into a surviving cell, each plan announces what it drops, and every edit round-trips through save and reload | `pf-smoke-world` |
 | `smoke/persistence/RoomHeightScaleDocuments.cpp` | Room height scale persistence checks | `pf-smoke-persistence` |
 | `smoke/simulation/RoomHeights.cpp` | Room height pose checks | `pf-smoke-simulation` |
 | `smoke/editor/RoomHeightScale.cpp` | Room height scale editor checks | `pf-smoke-editor` |

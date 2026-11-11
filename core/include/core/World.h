@@ -1590,6 +1590,18 @@ namespace core
 			std::vector<SectorSurfaceVariant>& entries,
 			uint32_t cellsWide, uint32_t levelsHigh);
 
+		// The consequence line every footprint-changing edit shows when the new
+		// footprint would cost the Sector its artwork, counted through the same
+		// prune the record rewrite performs so the line the author is shown
+		// cannot disagree with the entries that actually go. Asked of a copy,
+		// because a plan is a read and must not touch what it is planning about.
+		// Shared by every plan that changes a footprint: the Location plans
+		// (#1044) and the four vertical Transit plans (#1045).
+		static void appendSurfaceVariantDropConsequence(
+			std::vector<std::string>& consequences,
+			std::vector<SectorSurfaceVariant> const& entries,
+			uint32_t cellsWide, uint32_t levelsHigh);
+
 		bool prepareLocationEdit(LocationEditPlan const& plan,
 			std::vector<ConstructionRecord>& records, uint32_t& newSectorIndex,
 			std::string& diagnostic) const;

@@ -3601,6 +3601,17 @@ namespace core
 			}
 			found->a = plan.y; found->b = plan.x; found->c = plan.cellsWide;
 			found->e = plan.levelsHigh;
+			// The shaft's own grid just changed shape, and the variant entries name
+			// cells of that grid (#1045). The same answer the Location record
+			// rewrite gives (#1044): a footprint that grows renumbers nothing, and
+			// a footprint that shrinks past an entry drops it rather than clamping
+			// it onto a surviving cell nobody painted it on. A Lift is the one
+			// vertical Transit whose width changes as well as its height, so a
+			// shaft narrowed from two cells to one loses the entries that named
+			// its second column along with the ones that named a level above the
+			// new ceiling.
+			pruneSurfaceVariantsToFootprint(found->surfaceVariants,
+				plan.cellsWide, plan.levelsHigh);
 			// Per-stop Door style overrides follow their stop, keyed by the
 			// stop's absolute landing level rather than its offset from the
 			// shaft anchor: a move or a shaft extension that shifts the offsets
@@ -4646,6 +4657,12 @@ namespace core
 			plan.consequences.push_back("Change the Lift width and rebuild every landing door and button");
 		if (levelsHigh < lift->getLevelsHigh())
 			plan.consequences.push_back("Shrink the Lift shaft");
+		// Cells the shaft takes away take the artwork they wear with them, and the
+		// author is told before the edit is confirmed rather than left to find it
+		// gone (#1045). Both edges are asked at once because a Lift is the one
+		// vertical Transit whose width moves as well as its ceiling.
+		appendSurfaceVariantDropConsequence(plan.consequences, lift->getSurfaceVariants(),
+			cellsWide, levelsHigh);
 		for (auto level : oldStops) if (find(newStops.begin(), newStops.end(), level) == newStops.end())
 			plan.consequences.push_back(format("Remove Lift stop and landing at level {}", level));
 		bool const destructive = !plan.consequences.empty();
@@ -5265,6 +5282,14 @@ namespace core
 		{
 			found->a = plan.y; found->b = plan.x; found->c = plan.options.levelsHigh;
 			found->p = plan.options.extensible; found->q = plan.options.startExtended;
+			// The Ladder's own grid just changed shape, and the variant entries
+			// name cells of that grid (#1045). A Ladder is one cell wide and
+			// always was, so the only footprint edge that can move is its ceiling:
+			// shortening the run drops the entries that named a level above where
+			// the Ladder now ends, the same answer the Location rewrite gives
+			// (#1044) and not a clamp onto the topmost surviving cell.
+			pruneSurfaceVariantsToFootprint(found->surfaceVariants,
+				1, plan.options.levelsHigh);
 			found->initiallyBroken = plan.options.extensible && plan.options.initiallyBroken;
 			found->d = plan.options.directionalBatchLimit;
 			if (!plan.options.extensible) found->controlPermissionRequirements = {};
@@ -5375,6 +5400,10 @@ namespace core
 			if (position.y < y || position.y >= y + options.levelsHigh)
 				plan.consequences.push_back("Delete Agent " + agent->getName());
 		}
+		// Shortening the run takes the top cells' artwork with it (#1045), on the
+		// one footprint edge a Ladder has.
+		appendSurfaceVariantDropConsequence(plan.consequences, ladder->getSurfaceVariants(),
+			1, options.levelsHigh);
 		vector<ConstructionRecord> records;
 		plan.valid = prepareLadderEdit(plan, records, plan.diagnostic);
 		if (plan.valid && records.size() < mConstructionRecords.size())
@@ -5706,6 +5735,12 @@ namespace core
 			return plan;
 		auto old = dynamic_pointer_cast<const StaircaseTransit>(mSectors[sectorIndex]);
 		plan.move = old->getCellX() != x || old->getCellY() != y;
+		// Shortening the flight takes the far end's artwork with it (#1045). The
+		// Staircase's own plan is the only place this question gets asked for the
+		// type, because its record rewrite lives in the apply path rather than a
+		// prepare of its own; the same shared prune answers it here and there.
+		appendSurfaceVariantDropConsequence(plan.consequences, old->getSurfaceVariants(),
+			options.cellsWide, 2);
 		plan.valid = true;
 		return plan;
 	}
@@ -5765,6 +5800,15 @@ namespace core
 			found->a = plan.y; found->b = plan.x; found->c = plan.options.cellsWide; found->i = plan.options.riseSide;
 			found->x = plan.options.speed;
 			found->initiallyBroken = plan.options.initiallyBroken;
+			// The flight's own grid just changed shape, and the variant entries
+			// name cells of that grid (#1045). A Staircase is one flight and so
+			// is two levels high however far it is widened or shortened - the one
+			// vertical Transit whose ceiling never moves and whose width always
+			// can - so shortening the run drops the entries that named a step
+			// beyond the new far end, the same answer the Location rewrite gives
+			// (#1044) and not a clamp onto the last surviving cell.
+			pruneSurfaceVariantsToFootprint(found->surfaceVariants,
+				plan.options.cellsWide, 2);
 		}
 		// Replay Locations before Transits regardless of the order they were
 		// authored in: a moved Staircase may land on a Location that was painted
@@ -5827,6 +5871,13 @@ namespace core
 			found->a = plan.y; found->b = plan.x; found->c = plan.options.levelsHigh;
 			found->i = plan.options.mountSide; found->d = plan.options.directionalCapacity;
 			found->e = plan.options.directionalBatchLimit;
+			// The Stairwell's own grid just changed shape, and the variant entries
+			// name cells of that grid (#1045). A Stairwell is two cells wide and
+			// always was - the two flights share one shaft - so the only footprint
+			// edge that can move is its ceiling, and shortening the well drops the
+			// entries that named a level above the new top of the shaft.
+			pruneSurfaceVariantsToFootprint(found->surfaceVariants,
+				2, plan.options.levelsHigh);
 		}
 
 		// Replay Locations before Transits regardless of the order they were
@@ -5921,6 +5972,10 @@ namespace core
 			if (position.y < y || position.y >= y + options.levelsHigh)
 				plan.consequences.push_back("Delete Agent " + agent->getName());
 		}
+		// Shortening the well takes the top levels' artwork with it (#1045), on
+		// the one footprint edge a Stairwell has.
+		appendSurfaceVariantDropConsequence(plan.consequences, stairwell->getSurfaceVariants(),
+			2, options.levelsHigh);
 		vector<ConstructionRecord> records;
 		plan.valid = prepareStairwellEdit(plan, records, plan.diagnostic);
 		if (plan.valid && records.size() < mConstructionRecords.size())
@@ -8295,15 +8350,8 @@ namespace core
 		// the only way one can be lost: the new footprint no longer has the cell
 		// it names. The author is told rather than left to find the artwork gone
 		// after the fact, which is what every other destructive line here is for.
-		// Counted through the same prune the record rewrite performs - on a copy,
-		// because a plan is a read and must not touch what it is planning about -
-		// so the line the author is shown cannot disagree with the entries that
-		// actually go.
-		vector<SectorSurfaceVariant> planned{ sector->getSurfaceVariants() };
-		if (auto const dropped = pruneSurfaceVariantsToFootprint(planned,
-				cellsWide, levelsHigh))
-			plan.consequences.push_back(format("Drop {} variant {} outside the new footprint",
-				dropped, dropped == 1 ? "cell" : "cells"));
+		appendSurfaceVariantDropConsequence(plan.consequences, sector->getSurfaceVariants(),
+			cellsWide, levelsHigh);
 
 		set<void const*> seen;
 		for (uint32_t i = 0; i < sector->getNumObjects(); ++i)

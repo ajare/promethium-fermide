@@ -182,6 +182,24 @@ new footprint` - so the author confirms it rather than discovering it, and a
 Room shrunk back to no entries saves with no field at all, the same as one
 that never wore a variant.
 
+The four vertical Transits are carried through the same rule and the same
+helper, not a copy of it written four times (#1045). What differs is which
+edges of the footprint each type is allowed to move, and therefore which
+entries it can ever lose:
+
+| Transit | Cells wide | Levels high | What a resize can cost |
+| --- | --- | --- | --- |
+| Lift | 1 or 2 | 2 or more | both edges - a shortened shaft and a narrowed one in the same edit |
+| Ladder | 1, fixed | 2 or more | the ceiling only |
+| Stairwell | 2, fixed | 2 or more | the ceiling only |
+| Staircase | 2 or more | 2, fixed | the far end only |
+
+So `above the new ceiling` is the Lift's, the Ladder's and the Stairwell's
+loss and `outside the new width` is the Lift's and the Staircase's, and both
+are the same question asked of the same grid. A move costs any of them
+nothing, for the same reason a Room move costs nothing: the keys are
+Sector-local and a move only changes where the record puts the Sector.
+
 What the loader refuses:
 
 - **An entry outside the Sector's own grid.** A column past `cellsWide` or a

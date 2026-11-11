@@ -74,6 +74,10 @@ set(checks
     surfaceVariantCarry/entriesSurviveSaveAndLoadAcrossTheResize
     surfaceVariantCarry/aFacadeHoldsNoVariantEntriesAcrossItsEdits
     surfaceVariantCarry/aBackgroundHoldsNoVariantEntriesAcrossItsEdits
+    transitVariantCarry/everyVerticalTransitEditCarriesItsEntriesAndSaysSo
+    transitVariantCarry/aVerticalTransitShrinkDropsItsEntryAndClampsNothingInward
+    transitVariantCarry/wideningAVerticalTransitDropsNothingAndSaysNothing
+    transitVariantCarry/theVerticalTransitBoundIsTheNewFootprintsOwnExtent
 )
 string(JOIN "\n" listed ${checks})
 string(APPEND listed "\n")

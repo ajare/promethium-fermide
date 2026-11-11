@@ -49,6 +49,23 @@ namespace core
 		return static_cast<uint32_t>(before - entries.size());
 	}
 
+	void World::appendSurfaceVariantDropConsequence(
+		std::vector<std::string>& consequences,
+		std::vector<SectorSurfaceVariant> const& entries,
+		uint32_t cellsWide, uint32_t levelsHigh)
+	{
+		// Counted on a copy through the prune the record rewrite will perform, so
+		// one answer is computed one way and every edit path that announces a loss
+		// announces exactly what goes (#1044, carried to the vertical Transits by
+		// #1045). A footprint that loses nothing says nothing: a move and a grow
+		// cost no artwork and should not ask about any.
+		auto planned = entries;
+		if (auto const dropped = pruneSurfaceVariantsToFootprint(planned,
+				cellsWide, levelsHigh))
+			consequences.push_back(format("Drop {} variant {} outside the new footprint",
+				dropped, dropped == 1 ? "cell" : "cells"));
+	}
+
 	World::ConstructionRecord const* World::findCreatingRecord(uint32_t sectorIndex) const
 	{
 		uint32_t producer = 0;

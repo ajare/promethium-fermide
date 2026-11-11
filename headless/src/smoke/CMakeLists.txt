@@ -543,6 +543,7 @@ pf_add_smoke_module(pf-smoke-world
         world/Topology.cpp
         world/RoomHeightScale.cpp
         world/SectorSurfaceVariants.cpp
+        world/TransitSurfaceVariants.cpp
         world/LayerDeletion.cpp
     LIBRARIES promethium-fermide-core
     LABELS core
