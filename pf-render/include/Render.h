@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "DrawTypes.h"
@@ -195,6 +196,31 @@ inline char const* sectorSurfaceKind(core::Sector const& sector)
 	}
 	return nullptr;
 }
+
+//
+// The doorframe tile name for one cell of one opening in one wall
+// (#1054, #1059).
+//
+// `doorframe-<wall>-<width><height>-<role>`: the wall is the family the
+// wall belongs to - `room`, `corridor`, `facade` - the width is how many
+// cells the opening spans, the height is `r`egular or `t`all, and the role
+// is `L0` for the opening's left cell and `R0` for its right one. A
+// 1-wide opening has only an `L0`.
+//
+// This is the name the draw derives, stated as a function of the four
+// facts so it can be asked without a live Door to derive it from. The tall
+// Facade frame is why that matters: a tall Door in a Facade is refused at
+// authoring until #1060 admits one, so no fixture can put that tile on
+// screen, and the thing worth pinning about it is that the render path asks
+// for the tall tile and the installed atlas carries it.
+//
+// Whether the installed atlas actually has the name is a separate question
+// - `hasSectorTileOverlay()` answers it - and a name with no tile behind it
+// draws no frame rather than the missing-art colour, which is what keeps a
+// World drawn on an older atlas drawing what it always drew.
+//
+std::string doorframeTileName(std::string const& wall, std::uint32_t cellsWide,
+	core::Door::Height height, bool rightCell);
 
 //
 // The flat surface colour a Sector carries of its own, if it carries one.

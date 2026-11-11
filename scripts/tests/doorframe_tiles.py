@@ -35,12 +35,18 @@ from generate_sector_atlas_new import SPEC as SECTOR  # noqa: E402
 CELL_WIDTH = 128
 CELL_HEIGHT = 320
 
-# The nine frames a Room or a Corridor wears, with the aperture each one
-# frames in World units: the horizontal span across the cell and the height
-# above the cell's floor line. A 2-wide opening spans two cells, and each
+# The fifteen frames a Room, a Corridor or a Facade wears, with the aperture
+# each one frames in World units: the horizontal span across the cell and the
+# height above the cell's floor line. A 2-wide opening spans two cells, and each
 # cell's own span is what its frame has to open onto - the left cell from
 # its 0.1 inset to its right edge, the right cell from its left edge to
 # its 0.9 inset. Together they make the 1.8-wide aperture.
+#
+# The Facade's six are the Room's six again: a Facade frames the same
+# openings a Room does and only the moulding around them is a different
+# wall's. Its tall pair is authored ahead of the tall Facade Door that will
+# wear it, which #1060 admits; unlike the Corridor's missing tall frames,
+# these are not artwork nobody can ever reach (#1059).
 APERTURES = {
     "doorframe-room-1r-L0": (0.1, 0.9, 0.5),
     "doorframe-room-2r-L0": (0.1, 1.0, 0.5),
@@ -51,6 +57,12 @@ APERTURES = {
     "doorframe-corridor-1r-L0": (0.1, 0.9, 0.5),
     "doorframe-corridor-2r-L0": (0.1, 1.0, 0.5),
     "doorframe-corridor-2r-R0": (0.0, 0.9, 0.5),
+    "doorframe-facade-1r-L0": (0.1, 0.9, 0.5),
+    "doorframe-facade-2r-L0": (0.1, 1.0, 0.5),
+    "doorframe-facade-2r-R0": (0.0, 0.9, 0.5),
+    "doorframe-facade-1t-L0": (0.1, 0.9, 0.9),
+    "doorframe-facade-2t-L0": (0.1, 1.0, 0.9),
+    "doorframe-facade-2t-R0": (0.0, 0.9, 0.9),
 }
 
 # The tall frames a Corridor does not have, because a tall Door is refused
@@ -97,8 +109,8 @@ def main() -> int:
         return 1
 
     check(set(overlays) == set(APERTURES),
-          f"the authored overlays are {sorted(overlays)}, expected the nine "
-          f"Room and Corridor frames {sorted(APERTURES)}")
+          f"the authored overlays are {sorted(overlays)}, expected the fifteen "
+          f"Room, Corridor and Facade frames {sorted(APERTURES)}")
     for name in FORBIDDEN:
         check(name not in overlays,
               f"{name} is authored, and no Door can ever be authored to wear it")

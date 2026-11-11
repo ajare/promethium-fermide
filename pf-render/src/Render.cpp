@@ -2085,6 +2085,30 @@ std::string newFamilySurfaceOrBorrowed(char const* own, char const* borrowed)
 // short of the gap.
 constexpr std::uint32_t kMaxFramedDoorCellsWide = 2;
 
+// The doorframe tile one cell of one opening in one wall wears (#1054, #1059).
+//
+// `doorframe-<wall>-<width><height>-<role>`, where the wall is the family the
+// wall belongs to - `room`, `corridor`, `facade` - the width is how many cells
+// the opening spans, the height is `r`egular or `t`all, and the role is `L0`
+// for the opening's left cell and `R0` for its right one. A 1-wide opening has
+// only an `L0`.
+//
+// Stated as a function of the four facts rather than spelled out where each
+// frame is derived, so the name a wall's opening resolves to can be pinned
+// without a live Door standing in that wall to derive it from. That is what
+// lets the tall Facade frame be pinned today: a tall Door in a Facade is
+// refused at authoring until #1060 admits one, so no fixture can reach that
+// name through a draw, and the only thing worth pinning about it - that the
+// render path asks for the tall tile and the installed atlas carries it - is
+// this name and nothing else.
+std::string doorframeTileName(std::string const& wall, std::uint32_t cellsWide,
+	core::Door::Height height, bool rightCell)
+{
+	return "doorframe-" + wall + "-" + std::to_string(cellsWide)
+		+ (height == core::Door::Height::Tall ? "t" : "r") + "-"
+		+ (rightCell ? "R0" : "L0");
+}
+
 // The doorframes the cells of one wall wear, keyed Sector-local (#1054).
 //
 // A cell a Door stands in draws that wall's doorframe tile instead of the
@@ -2131,14 +2155,11 @@ doorframeTilesForSector(std::string const& wall,
 			- static_cast<std::int64_t>(sector->getCellX0());
 		auto const bottom = static_cast<std::int64_t>(object->getCellY())
 			- static_cast<std::int64_t>(sector->getCellY0());
-		std::string const height = door->getHeight() == core::Door::Height::Tall
-			? "t" : "r";
 		for (std::uint32_t cell = 0; cell < cellsWide; ++cell) {
 			if (left + static_cast<std::int64_t>(cell) < 0 || bottom < 0)
 				continue;
-			std::string const name = "doorframe-" + wall + "-"
-				+ std::to_string(cellsWide) + height + "-"
-				+ (cell == 0 ? "L0" : "R0");
+			std::string const name = doorframeTileName(wall, cellsWide,
+				door->getHeight(), cell != 0);
 			// A frame the installed atlas does not carry is no frame at all.
 			// The cell falls back to its wall's tile - the base, or the
 			// variant its author painted - rather than to the missing-art
@@ -2266,6 +2287,53 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, fill);
 		else if (shouldOutlineBackground(style))
 			drawList->AddRect({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, fill);
+
+		// A Door set into a Facade wears the Facade's doorframe (#1059).
+		//
+		// A Facade takes no surface tile at all, so the frame cannot arrive
+		// through the per-cell surface resolver the way the Room's and the
+		// Corridor's do. It arrives here instead - over the fill, before the
+		// thresholds - which is the same position the Room's frame draws
+		// from, because the frame is part of the wall and the wall's surface
+		// is emitted here. The flat-fill rule is not bent by it: the fill is
+		// neither narrowed nor punched, it still covers every cell of the
+		// Facade including the door cells, and the frame only ever lands on
+		// top of it where a Door stands.
+		//
+		// What that position buys is the whole of the safety the rule was
+		// written for. Every threshold - this Door's own aperture and every
+		// other threshold's - is drawn after the frame, so the frame can sit
+		// under an aperture and never over one. And it is drawn only on the
+		// cells the Door itself stands in, which placement refuses to share.
+		//
+		// The loop is the Sector surface's own, so the frame takes the same
+		// floor-anchored crop and the same culling as any other tile (#1037).
+		// It is asked for the Facade's whole area and answers only the door
+		// cells; every other cell answers no tile and draws nothing, leaving
+		// the fill as all there is to see there.
+		//
+		// The tint is the Facade's own colour rather than the Layer's: the
+		// frame is moulding on this wall, and this wall's colour is the
+		// Facade's, which is the colour the rest of the wall is drawn in.
+		// A frame the installed atlas does not carry is no frame at all, so
+		// a World drawn on an atlas written before Facades were framed keeps
+		// drawing exactly what it drew before.
+		if (sectorType == core::SectorType::Facade && shouldFillBackground(style))
+		{
+			auto const frames = doorframeTilesForSector("facade", sector);
+			// A Facade with no Door in it walks no cells at all. The loop is
+			// the surface loop, with the culling and the anchor it owns, and
+			// asking it to resolve an empty map over a wide Facade would be
+			// work for no picture.
+			if (!frames.empty())
+				drawSectorTileSurfacePerCell(drawList, { bounds0.x, bounds1.y },
+					{ bounds1.x, bounds0.y }, fill, gUISettings.worldZoom,
+					[&frames](std::uint32_t column, std::uint32_t level) -> std::string
+					{
+						auto const found = frames.find(std::make_pair(column, level));
+						return found == frames.end() ? std::string{} : found->second;
+					});
+		}
 	}
 	else if (style == LayerRenderStyle::Wireframe)
 	{

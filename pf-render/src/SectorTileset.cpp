@@ -371,9 +371,20 @@ bool drawSectorTileSurfacePerCell(WorldDrawList* list, Vec2 minimum,
             float const x = minimum.x + float(column) * cellWidth;
             if (x >= right) break;
             float const colRight = std::min(x + cellWidth, right);
-            drawSurfaceCell(list,
-                resolveTile(static_cast<std::uint32_t>(column),
-                    static_cast<std::uint32_t>(row)),
+            auto const tile = resolveTile(static_cast<std::uint32_t>(column),
+                static_cast<std::uint32_t>(row));
+            // A cell that resolves to no tile at all draws nothing. That is
+            // not the missing-art case, which is "a tile was asked for and
+            // this atlas has none of it" and answers in magenta; this is "no
+            // tile was asked for". The Facade's doorframe pass is what
+            // needs it (#1059): a Facade has one tile per door cell and no
+            // surface tile anywhere else, because it is authored flat
+            // colour (ADR 0003), so its resolver answers empty on every
+            // cell the fill already covers. No Sector that draws a surface
+            // today answers empty - its base is always a name - so nothing
+            // that reaches the screen now changes.
+            if (tile.empty()) continue;
+            drawSurfaceCell(list, tile,
                 { x, rowTop }, { colRight, rowBottom }, 0.0f,
                 (colRight - x) / cellWidth, v0, 1.0f, tint);
         }

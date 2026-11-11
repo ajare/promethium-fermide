@@ -56,6 +56,12 @@ Resources:
               - { name: "doorframe-corridor-1r-L0", x: "1280", y: "640", width: "128", height: "320" }
               - { name: "doorframe-corridor-2r-L0", x: "1408", y: "640", width: "128", height: "320" }
               - { name: "doorframe-corridor-2r-R0", x: "1536", y: "640", width: "128", height: "320" }
+              - { name: "doorframe-facade-1r-L0", x: "1280", y: "960", width: "128", height: "320" }
+              - { name: "doorframe-facade-1t-L0", x: "1280", y: "1280", width: "128", height: "320" }
+              - { name: "doorframe-facade-2r-L0", x: "1408", y: "960", width: "128", height: "320" }
+              - { name: "doorframe-facade-2r-R0", x: "1536", y: "960", width: "128", height: "320" }
+              - { name: "doorframe-facade-2t-L0", x: "1408", y: "1280", width: "128", height: "320" }
+              - { name: "doorframe-facade-2t-R0", x: "1536", y: "1280", width: "128", height: "320" }
               - { name: "doorframe-room-1r-L0", x: "1280", y: "0", width: "128", height: "320" }
               - { name: "doorframe-room-1t-L0", x: "1280", y: "320", width: "128", height: "320" }
               - { name: "doorframe-room-2r-L0", x: "1408", y: "0", width: "128", height: "320" }

@@ -20,6 +20,8 @@ keep its ceiling band down at floor level. Room interiors therefore support
 arbitrary height without intermediate floors. Backgrounds and Facades intentionally retain their authored
 opaque colours and take no tile at all - they are authored flat colour by domain
 definition, and the renderer fills them without asking the atlas for a surface.
+A Facade asks the atlas for one thing only, and it is an overlay rather than a
+surface: the doorframe over the cells a Door stands in (#1059).
 Vehicles, stair and ladder mechanisms, thresholds, other objects, Agents and editor
 overlays retain their existing rendering. Aperture clipping and render order are
 unchanged; wireframe mode remains primitive-based.
@@ -484,14 +486,15 @@ overlays:
     hole: [13, 160, 102, 160]
 ```
 
-The name is `doorframe-<wall>-<width><height>-<role>`: the wall is `room`
-or `corridor`, the width is 1 or 2 cells, the height is `r`egular or
-`t`all, and the role is `L0` for the opening's left cell and `R0` for its
-right. A 1-wide opening has only an `L0`. Corridors get no tall frame,
-because a tall Door is refused in a Corridor and a tile nothing can ever
-reach is artwork that reads as unfinished. Nine tiles in all, in the three
-columns to the right of the surface strip, which is why the sheet is 1664
-x 1280 rather than the 1280 x 1280 it was.
+The name is `doorframe-<wall>-<width><height>-<role>`: the wall is `room`,
+`corridor` or `facade`, the width is 1 or 2 cells, the height is
+`r`egular or `t`all, and the role is `L0` for the opening's left cell and
+`R0` for its right. A 1-wide opening has only an `L0`. Corridors get no
+tall frame, because a tall Door is refused in a Corridor and a tile
+nothing can ever reach is artwork that reads as unfinished. Fifteen tiles
+in all, in the three columns to the right of the surface strip - one band
+per wall, its regular frames above its tall ones - which is why the sheet
+is 1664 x 1600 rather than the 1280 x 1280 it was.
 
 The second map is not tidiness. `hasSectorTileSurface()` is asked "is this
 a Sector surface" by the borrow rule and by the editor's swatch strip, and
@@ -576,13 +579,55 @@ Sectors of the pair it joins, and the Sector behind is seen *through* the
 opening rather than framing it, so it keeps its own base tile. Rendering
 the back face of a threshold is out of the feature's way.
 
+### The Facade's frame: over the flat fill, not through the resolver
+
+A Facade takes no surface tile at all. Its surface is a flat fill emitted
+before the thresholds, so that nothing in the threshold path can paint
+over an aperture (ADR 0003, #49), and `sectorSurfaceKind()` answers null
+for it. There is no per-cell surface resolution here for a Facade's door
+cells to arrive through (#1059).
+
+The frame is emitted by the Facade's own flat-colour branch instead: the
+same per-cell tile loop, asked for the Facade's whole area, with a
+resolver that answers the frame name on the door cells and **no tile at
+all** everywhere else. A cell that resolves to the empty string draws
+nothing - deliberately not the missing-art case, which is a name asked
+for and not carried - and the fill the branch already emitted stays the
+whole of what shows on every cell that is not a door cell.
+
+The flat-fill rule is not bent by this. The fill is neither narrowed nor
+punched: it still covers the whole Facade, the door cells included, and
+the frame lands over it. What the rule was written for survives twice. The
+frame is emitted *before* the threshold pass, so every aperture - this
+Door's own and every other threshold's - is drawn over the frame rather
+than the frame over it; and the frame is drawn only on the cells the Door
+itself stands in, which placement refuses to share.
+
+The tint is the Facade's own colour rather than the Layer's. The frame is
+moulding on this wall, and this wall's colour is the Facade's.
+
+The Facade's tall frames are authored now and unreachable: a tall Door in
+a Facade is refused at authoring until #1060 admits one. They are
+authored anyway because the alternative is worse - a Facade has no base
+tile to fall back to, so a tall Facade opening with no tall frame
+authored would show a doorway with no frame at all, which is the picture
+this whole feature exists to remove.
+
 `smoke/render/DoorframeCells.cpp` pins all of it: the 1-wide and 2-wide
 regular frames in a Room, the tall pair for a tall Door, the same three
 cases in a Corridor, the frame taking its row's floor-anchored crop and
 the same culling as the plain cell beside it, the painted variant hidden
 and coming back, two adjacent doors each framing their own cells without
 leaking, a removed Door reverting with no residue, the back wall taking no
-frame, and the fallback when no frame is authored.
+frame, and the fallback when no frame is authored. The Facade's side of
+it is pinned in the same file: the 1-wide and 2-wide frames over the flat
+fill, the fill still spanning the whole Facade with the frame landing over
+it, every frame emitted before anything clipped to an aperture, no frame
+reaching a neighbouring Door's aperture, the tall Facade frame derived
+and carried while the Door that would wear it is still refused, a Facade
+on an atlas with no Facade frames drawing its fill and no missing art, and
+the frame following the fill through the solid, aperture and wireframe
+passes.
 
 ## The version 1 draft set
 

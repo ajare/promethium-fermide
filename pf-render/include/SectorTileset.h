@@ -128,6 +128,15 @@ int sectorSurfaceVariantCount(std::string const& kind);
 // else - so the question of which tile is asked per cell, where a per-cell
 // answer can be added, instead of in the loop, which would then have to
 // change again the day a cell got to wear something else.
+//
+// The answer may also be no tile at all: the empty string means this cell
+// draws nothing. That is the one thing a Sector that carries no surface
+// tile needs from a loop that owns the anchor, the crop and the culling -
+// which is what lets a Facade, whose surface is a flat fill it emitted
+// itself, ask for a doorframe on its door cells and nothing anywhere else
+// (#1059). It is deliberately not the missing-tile case: a name the atlas
+// does not carry is a broken picture and answers in magenta, and an empty
+// answer is no picture asked for.
 using SectorSurfaceTileResolver = std::function<std::string(
     std::uint32_t column, std::uint32_t level)>;
 
@@ -156,7 +165,8 @@ using SectorSurfaceTileResolver = std::function<std::string(
 // Returns false when no atlas is installed, which is the caller's cue to
 // fall back to a plain fill. Returns true when the surface was drawn,
 // including when a cell resolved to a name the atlas does not carry and
-// drew the missing-tile magenta for that cell alone.
+// drew the missing-tile magenta for that cell alone, and including when a
+// cell resolved to no tile at all and drew nothing (#1059).
 bool drawSectorTileSurfacePerCell(WorldDrawList* drawList, Vec2 minimum,
     Vec2 maximum, PackedColourValue tint, float zoom,
     SectorSurfaceTileResolver const& resolveTile);

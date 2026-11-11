@@ -80,7 +80,13 @@ namespace
 		"doorframe-room-1r-L0", "doorframe-room-2r-L0", "doorframe-room-2r-R0",
 		"doorframe-room-1t-L0", "doorframe-room-2t-L0", "doorframe-room-2t-R0",
 		"doorframe-corridor-1r-L0", "doorframe-corridor-2r-L0",
-		"doorframe-corridor-2r-R0" };
+		"doorframe-corridor-2r-R0",
+		// The Facade's six (#1059), the Room's six in the Facade's own
+		// moulding. Its tall pair is authored ahead of the tall Facade Door
+		// that will wear it, which #1060 admits.
+		"doorframe-facade-1r-L0", "doorframe-facade-2r-L0",
+		"doorframe-facade-2r-R0", "doorframe-facade-1t-L0",
+		"doorframe-facade-2t-L0", "doorframe-facade-2t-R0" };
 
 	// ------------------------------------------------------------------
 	// The atlas as the application holds it.
@@ -439,9 +445,10 @@ namespace
 		// what leaves every column below a base free to hold that base's
 		// family, and why the sheet grew down rather than sideways. The
 		// doorframe block stands to the right of the ten surface columns,
-		// so the sheet is thirteen columns wide (#1054).
-		require(authored.width == 1664 && authored.height == 1280,
-			"SectorAtlas is not the 1664x1280 sheet its set is sized for");
+		// so the sheet is thirteen columns wide, and five rows deep because
+		// each framed wall takes a row per height class (#1054, #1059).
+		require(authored.width == 1664 && authored.height == 1600,
+			"SectorAtlas is not the 1664x1600 sheet its set is sized for");
 		for (auto const& name : kSurfaces)
 			require(authored.surfaces.at(name).y == 0,
 				"'" + name + "' is not in the base strip along the top of the sheet");
@@ -471,7 +478,7 @@ namespace
 		// a Sector is authored with (#1054).
 		require(authored.overlays.size() == kDoorframes.size(),
 			"SectorAtlas authors " + std::to_string(authored.overlays.size())
-			+ " overlays; the Room and Corridor doorframe block is "
+			+ " overlays; the Room, Corridor and Facade doorframe block is "
 			+ std::to_string(kDoorframes.size()));
 		for (auto const& name : kDoorframes)
 		{

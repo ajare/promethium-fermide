@@ -137,6 +137,14 @@ set(names
     doorframeCells/theBackWallOfAThresholdTakesNoFrame
     doorframeCells/aWallWithNoFrameAuthoredDrawsItsBase
     doorframeCells/aFrameIsReachableWithoutBeingASurface
+    doorframeCells/oneWideFacadeDoorWearsItsFrame
+    doorframeCells/twoWideFacadeDoorWearsItsFramePair
+    doorframeCells/theFlatFillStillCoversEveryCellThatIsNotADoorCell
+    doorframeCells/theFrameIsEmittedBeforeEveryAperture
+    doorframeCells/theFrameNeverReachesAnotherThresholdsAperture
+    doorframeCells/theTallFacadeFrameIsDerivedAndCarried
+    doorframeCells/aFacadeWithNoFacadeFramesAuthoredDrawsItsFill
+    doorframeCells/theFrameFollowsTheFillThroughEveryStyle
     sectorTilePreview/oneTileFramesTheRectItIsGiven
     sectorTilePreview/anyRectFramesOneTileAndNotACellGrid
     sectorTilePreview/itIsOneTileWhereTheWorldRepeatIsFour
