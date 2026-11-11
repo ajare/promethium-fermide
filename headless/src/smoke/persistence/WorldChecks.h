@@ -59,6 +59,17 @@ namespace persistence
 	void doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted(smoke::Context const&);
 	void doorHeightPersistsAndIsLimitedToRooms(smoke::Context const&);
 	void roomHeightScaleRoundTrips(smoke::Context const&);
+	void sectorSurfaceVariantsRoundTrip(smoke::Context const&);
+	void aWorldThatNeverUsedVariantsWritesNoField(smoke::Context const&);
+	void aDocumentWrittenBeforeVariantsExistedLoadsAsNoVariants(smoke::Context const&);
+	void aVariantFieldBelowTheSchemaVersionThatDefinesItIsRefused(smoke::Context const&);
+	void variantEntriesSurviveTheRebuildAStructuralEditPerforms(smoke::Context const&);
+	void anEntryOutsideTheSectorIsRefused(smoke::Context const&);
+	void aDuplicateEntryForOneCellIsRefused(smoke::Context const&);
+	void aRecordThatDrawsNoSurfaceRefusesVariantEntries(smoke::Context const&);
+	void variantEntriesLandOnTheSectorTheirRecordCreated(smoke::Context const&);
+	void variantsChangeNothingElseInTheDocument(smoke::Context const&);
+	void variantsChangeNoTraversalCapacityOrEndTypes(smoke::Context const&);
 	void doorOpenLeftPersistsThroughEveryEditorPath(smoke::Context const&);
 	void doorOpenRightPersistsThroughEveryEditorPath(smoke::Context const&);
 	void doorOpenApartPersistsThroughEveryEditorPath(smoke::Context const&);

@@ -102,6 +102,11 @@ set(names
     sectorSurfacePerCell/everyCellIsResolvedOnceAndDrawnAtItsOwnRect
     sectorSurfacePerCell/aDifferentTilePerCellChangesThePictureNotTheGeometry
     sectorSurfacePerCell/aCellOutsideTheClipIsNeverResolved
+    sectorSurfaceVariants/aRecordedCellDrawsItsVariantTileAndEveryOtherCellDrawsBase
+    sectorSurfaceVariants/aVariantTheAtlasDoesNotCarryFallsBackToBaseSilently
+    sectorSurfaceVariants/aMissingBaseTileStillDrawsTheMissingArtMagenta
+    sectorSurfaceVariants/theOldFamilyDrawsBaseOnEveryVariantCellAndKeepsTheEntries
+    sectorSurfaceVariants/aVariantChangesThePictureAndNotTheGeometry
     agentAtlasNew/twentyTilesAreRegistered
     agentAtlasNew/twoTypesNamingOneAppearanceShareTheirTiles
     agentAtlasNew/genericAppearanceIsTheFallbackForATypeWithNoArtwork

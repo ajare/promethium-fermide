@@ -4,11 +4,13 @@
 #include <vector>
 #include <set>
 #include <functional>
+#include <optional>
 
 #include "core/Platform.h"
 #include "core/Area.h"
 #include "core/SectorType.h"
 #include "core/SectorEnd.h"
+#include "core/SectorSurfaceVariant.h"
 #include "core/SectorObject.h"
 #include "core/SectorPosition.h"
 #include "core/Agent.h"
@@ -61,6 +63,13 @@ namespace core
 
 		bool mLightsOn;
 
+		// The cells of this surface that wear a variant of the type's tile
+		// rather than its base, in the Sector-local frame `SectorSurfaceVariant`
+		// describes (#1040). Artwork only: nothing here is read by traversal,
+		// capacity or any simulation state, and a Sector that never had a
+		// variant recorded holds an empty list and draws what it always drew.
+		std::vector<SectorSurfaceVariant> mSurfaceVariants;
+
 		std::vector<std::shared_ptr<SectorObject>> mObjects;
 
 		std::set<Agent*> mAgents;
@@ -106,6 +115,12 @@ namespace core
 		uint32_t createBulkheadDoor(std::shared_ptr<const Sector> sector, std::shared_ptr<const Sector> rightLocation, uint32_t levelIndex, int side);
 
 		void addBulkheadDoor(std::shared_ptr<BulkheadDoorSectorObject> door, uint32_t levelIndex, int side);
+
+		// Replaces this Sector's surface variant entries from its own
+		// construction record. World-only: the entries are authored on the
+		// record, and the live list is a projection of it that a rebuild
+		// re-derives rather than something to be edited in place (#1040).
+		void setSurfaceVariants(std::vector<SectorSurfaceVariant> entries);
 
 		void setEndType(uint32_t levelIndex, int side, SectorEndType type);
 
@@ -167,6 +182,19 @@ namespace core
 		[[nodiscard]] std::string const& getName() const;
 
 		[[nodiscard]] uint32_t getCapacity() const;
+
+		// The variant entries this Sector wears, in the order they were
+		// recorded. Sector-local: `column` from the Sector's left edge,
+		// `level` from its floor line, the same frame the per-cell surface
+		// loop resolves in (#1040).
+		[[nodiscard]] std::vector<SectorSurfaceVariant> const& getSurfaceVariants() const;
+
+		// The variant one Sector-local cell was recorded as wearing, or
+		// nothing where the cell wears the type's base tile. A cell with no
+		// entry is the ordinary case, so this answers with an optional rather
+		// than a sentinel a caller has to remember the meaning of.
+		[[nodiscard]] std::optional<uint32_t> surfaceVariantAt(uint32_t column,
+			uint32_t level) const;
 
 		[[nodiscard]] SectorEndType getEndType(uint32_t levelIndex, int side) const;
 

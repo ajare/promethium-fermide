@@ -1995,20 +1995,37 @@ std::string newFamilySurfaceOrBorrowed(char const* own, char const* borrowed)
 
 // The resolver the Sector surface loop asks for one cell's tile (#1039).
 //
-// Every cell answers the Sector type's own base tile, which is all a cell
-// can answer today: nothing records a per-cell choice yet, so nothing here
-// draws differently from the one-name repeat it replaces. The resolver is
-// asked anyway, per cell, because the resolver is where the answer grows
-// and the loop is where the answer must not change. The loop reproduces the
-// floor-anchored crop and the culling the #1037 contract pins, and a
-// variant is meant to be a different picture and not a different geometry.
-// When a Sector starts carrying a variant on a cell, the per-cell answer
-// appears here - the cell's own entry where it has one, the base tile where
-// it has none - and the loop that asks is untouched.
-SectorSurfaceTileResolver sectorSurfaceTileResolver(std::string baseTile)
+// A cell answers the variant it was recorded as wearing, and the base tile
+// everywhere else. That is the whole of what #1040 adds to the seam #1039
+// left: the loop is untouched, because the loop was written so that this
+// question could grow an answer without it.
+//
+// The variant's tile name follows the `-Vn` derivation the Sector tileset's
+// family rule established (#1038), and it is asked of the installed atlas
+// before it is worn. A recorded variant the installed atlas does not carry
+// draws the base rather than the missing-art magenta: the author picked a
+// number from a family the artwork they are looking at has no row for, and
+// the honest picture of that is the Sector's own base tile, not a hole.
+// The same rule is what makes a World repointed at the version 1 family -
+// which declares no families at all, and so carries no `-Vn` tile under any
+// name - draw base on every variant cell while keeping the entries, so
+// repointing it back at a family that has them restores the picture with no
+// data touched (#1040).
+//
+// A base tile that is itself missing still draws magenta: falling back from
+// a variant to a base that is not there is not falling back to something,
+// and the missing-art case belongs to the draw, not to the resolution.
+SectorSurfaceTileResolver sectorSurfaceTileResolver(std::string baseTile,
+	std::shared_ptr<const core::Sector> sector)
 {
-	return [baseTile = std::move(baseTile)](std::uint32_t, std::uint32_t)
-		{ return baseTile; };
+	return [baseTile = std::move(baseTile), sector](std::uint32_t column,
+		std::uint32_t level) -> std::string
+	{
+		auto const variant = sector->surfaceVariantAt(column, level);
+		if (!variant) return baseTile;
+		auto const tile = baseTile + "-V" + std::to_string(*variant);
+		return hasSectorTileSurface(tile) ? tile : baseTile;
+	};
 }
 
 void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRenderStyle style, bool renderEdges, PackedColourValue colour, WorldDrawList* drawList)
@@ -2098,7 +2115,7 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		// without this call changing again.
 		if (!drawSectorTileSurfacePerCell(drawList, {bounds0.x, bounds1.y},
 			{bounds1.x, bounds0.y}, colour, gUISettings.worldZoom,
-			sectorSurfaceTileResolver(std::move(kind))))
+			sectorSurfaceTileResolver(std::move(kind), sector)))
 			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
 	}
 

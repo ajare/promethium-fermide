@@ -81,6 +81,17 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords accessPanels/roundTri
     doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted
     doorHeightPersistsAndIsLimitedToRooms
     roomHeightScaleRoundTrips
+    sectorSurfaceVariantsRoundTrip
+    aWorldThatNeverUsedVariantsWritesNoField
+    aDocumentWrittenBeforeVariantsExistedLoadsAsNoVariants
+    aVariantFieldBelowTheSchemaVersionThatDefinesItIsRefused
+    variantEntriesSurviveTheRebuildAStructuralEditPerforms
+    anEntryOutsideTheSectorIsRefused
+    aDuplicateEntryForOneCellIsRefused
+    aRecordThatDrawsNoSurfaceRefusesVariantEntries
+    variantEntriesLandOnTheSectorTheirRecordCreated
+    variantsChangeNothingElseInTheDocument
+    variantsChangeNoTraversalCapacityOrEndTypes
     doorOpenLeftPersistsThroughEveryEditorPath
     doorOpenRightPersistsThroughEveryEditorPath
     doorOpenApartPersistsThroughEveryEditorPath

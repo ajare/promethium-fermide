@@ -113,6 +113,28 @@ namespace core
 		return mCapacity;
 	}
 
+	std::vector<SectorSurfaceVariant> const& Sector::getSurfaceVariants() const
+	{
+		return mSurfaceVariants;
+	}
+
+	std::optional<uint32_t> Sector::surfaceVariantAt(uint32_t column, uint32_t level) const
+	{
+		// A linear scan rather than an index: the entries are the handful of
+		// cells an author chose to decorate, not a dense per-cell table, and
+		// the common answer - no entry for this cell - costs one pass over a
+		// list that is usually empty. A Sector with no variants asks nothing
+		// of itself at all.
+		for (auto const& entry : mSurfaceVariants)
+			if (entry.column == column && entry.level == level) return entry.variant;
+		return std::nullopt;
+	}
+
+	void Sector::setSurfaceVariants(std::vector<SectorSurfaceVariant> entries)
+	{
+		mSurfaceVariants = std::move(entries);
+	}
+
 	SectorEndType Sector::getEndType(uint32_t levelIndex, int side) const
 	{
 		assert(levelIndex < getLevelsHigh());

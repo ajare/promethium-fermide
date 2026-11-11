@@ -209,6 +209,53 @@ namespace core
 		}
 	}
 
+	bool World::constructionTypeCarriesSurfaceVariants(ConstructionType type)
+	{
+		switch (type)
+		{
+		case ConstructionType::Corridor:
+		case ConstructionType::Room:
+		case ConstructionType::Ladder:
+		case ConstructionType::Stairwell:
+		case ConstructionType::Staircase:
+		case ConstructionType::Lift:
+		case ConstructionType::Shuttle:
+		case ConstructionType::Airlock:
+		case ConstructionType::Chamber:
+		case ConstructionType::Dumbwaiter:
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	void World::applySurfaceVariants(std::shared_ptr<Sector> const& sector,
+		ConstructionRecord const& record)
+	{
+		if (record.surfaceVariants.empty()) return;
+		if (!sector) throw SerializationException(
+			"A Sector surface variant record reached no Sector to wear them");
+
+		// The entries name cells of this Sector, so a name the Sector does not
+		// have is a miscount, and a miscount that drew nothing would be a silent
+		// failure where a refusal is a loud one. The bounds are the live
+		// Sector's own, because that is the grid the renderer walks: an entry
+		// inside them is drawn and one outside them is not, whatever the record
+		// that made the Sector was told.
+		std::set<std::pair<uint32_t, uint32_t>> seen;
+		for (auto const& entry : record.surfaceVariants)
+		{
+			if (entry.column >= sector->getCellsWide() || entry.level >= sector->getLevelsHigh())
+				throw SerializationException(format("Sector surface variant at column {}, level {} "
+					"is outside the Sector's {} cells wide by {} levels high",
+						entry.column, entry.level, sector->getCellsWide(), sector->getLevelsHigh()));
+			if (!seen.insert({ entry.column, entry.level }).second)
+				throw SerializationException(format("Duplicate Sector surface variant at column {}, level {}",
+					entry.column, entry.level));
+		}
+		sector->setSurfaceVariants(record.surfaceVariants);
+	}
+
 	void World::serializeConstructionRecord(Serializer& serializer, ConstructionRecord const& record) const
 	{
 		auto writeStops = [&]
@@ -636,6 +683,25 @@ namespace core
 			// The Facade reuses Background's packed 0xRRGGBB colour form.
 			serializer.writeUint32("colour", record.f); break;
 		}
+		// The Sector's surface variant entries, written after every field the
+		// record type already wrote so a Sector that never used variants saves
+		// exactly as it did before this feature existed: no empty field, no
+		// reordered key, nothing for an old reader to trip over (#1040).
+		if (!record.surfaceVariants.empty())
+		{
+			if (!constructionTypeCarriesSurfaceVariants(record.type))
+				throw SerializationException("Sector surface variants are supported only by Sectors that draw a tiled surface");
+			serializer.beginArray("surfaceVariants");
+			for (auto const& entry : record.surfaceVariants)
+			{
+				serializer.beginMap("");
+				serializer.writeUint32("column", entry.column);
+				serializer.writeUint32("level", entry.level);
+				serializer.writeUint32("variant", entry.variant);
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 	}
 
 	void World::serializeImpl(Serializer& serializer, SerializationWorkData& workData) const
@@ -718,7 +784,12 @@ namespace core
 		// beside the other three and read with the same default, so a pre-69
 		// document - which carries no such field - draws the Objects atlas it
 		// drew before the choice existed.
-		serializer.writeUint32("version", 69);
+		// Version 70 lets a Sector's construction record carry surface variant
+		// entries: cells of that Sector wearing a variant of its type's tile
+		// rather than the base (#1040). A pre-70 document carries no such field
+		// on any record, so it loads as no variants recorded and draws the base
+		// everywhere, which is exactly what it drew before the feature existed.
+		serializer.writeUint32("version", 70);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("objectImageSet", mObjectImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
@@ -1587,6 +1658,31 @@ namespace core
 			if (record.initiallyBroken && !record.p) throw SerializationException(
 				"Only extensible Ladders and Force Bridges may be initially Broken");
 		}
+		// The Sector's surface variant entries (#1040). Read after the type's own
+		// fields because they are the same kind of addition the write side makes:
+		// a record that never used variants simply has no such field, and a
+		// document written before this feature existed - which carries none -
+		// loads as no variants recorded rather than as a malformed one.
+		if (serializer.hasField("surfaceVariants"))
+		{
+			if (version < 70) throw SerializationException(
+				"Sector surface variants require World schema version 70 or later");
+			if (!constructionTypeCarriesSurfaceVariants(record.type))
+				throw SerializationException(
+					"Sector surface variants are supported only by Sectors that draw a tiled surface");
+			serializer.beginArray("surfaceVariants");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				SectorSurfaceVariant entry;
+				entry.column = serializer.readUint32("column");
+				entry.level = serializer.readUint32("level");
+				entry.variant = serializer.readUint32("variant");
+				serializer.endMap();
+				record.surfaceVariants.push_back(entry);
+			}
+			serializer.endArray();
+		}
 		return record;
 	}
 
@@ -1619,7 +1715,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 69)
+		if (version < 1 || version > 70)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -3143,6 +3239,7 @@ namespace core
 			auto& location = static_cast<Location&>(*mSectors[index]);
 			for (auto id : record.locationPermissionRequirement) location.mPermissionRequirement.set(id - 1);
 			if (record.roomHeightScale) location.setHeightScale(record.roomHeightScale);
+			applySurfaceVariants(mSectors[index], record);
 			break;
 		}
 		case ConstructionType::Ladder:
@@ -3151,15 +3248,17 @@ namespace core
 			for (size_t endpoint = 0; endpoint < 2; ++endpoint)
 				for (auto permission : record.controlPermissionRequirements[endpoint])
 					options.controlPermissionRequirements[endpoint].push_back(AccessPermissionId{ permission });
-			addLadder(transitLayer(record), record.a, record.b, options);
+			applySurfaceVariants(addLadder(transitLayer(record), record.a, record.b, options).ladder.sector,
+				record);
 			break;
 		}
 		case ConstructionType::Stairwell:
-			addStairwell(transitLayer(record), record.a, record.b,
-				{ record.c, record.i, record.d, record.e });
+			applySurfaceVariants(mSectors[addStairwell(transitLayer(record), record.a, record.b,
+				{ record.c, record.i, record.d, record.e }).sectorIndex], record);
 			break;
 		case ConstructionType::Staircase:
-			addStaircase(transitLayer(record), record.a, record.b, { record.c, record.i, record.x, record.initiallyBroken });
+			applySurfaceVariants(mSectors[addStaircase(transitLayer(record), record.a, record.b,
+				{ record.c, record.i, record.x, record.initiallyBroken })], record);
 			break;
 		case ConstructionType::Lift:
 		{
@@ -3171,7 +3270,8 @@ namespace core
 				for (auto permission : requirement)
 					options.landingControlPermissionRequirements.back().push_back(AccessPermissionId{ permission });
 			}
-			addLift(transitLayer(record), record.a, record.b, options);
+			applySurfaceVariants(addLift(transitLayer(record), record.a, record.b, options).lift.sector,
+				record);
 			break;
 		}
 		case ConstructionType::Chamber:
@@ -3186,6 +3286,7 @@ namespace core
 			if ((chamber->getPreviousEnd(0) == SectorEndType::None) != record.p
 				|| (chamber->getPreviousEnd(1) == SectorEndType::None) != record.q)
 				throw SerializationException("Invalid Security scanner wall restoration");
+			applySurfaceVariants(mSectors[index], record);
 			break;
 		}
 		case ConstructionType::Airlock:
@@ -3200,6 +3301,7 @@ namespace core
 				for (auto permission : record.controlPermissionRequirements[side])
 					point->mPermissionRequirement.set(permission - 1);
 			}
+			applySurfaceVariants(mSectors[index], record);
 			break;
 		}
 		case ConstructionType::Shuttle:
@@ -3212,7 +3314,8 @@ namespace core
 				for (auto permission : requirement)
 					options.landingControlPermissionRequirements.back().push_back(AccessPermissionId{ permission });
 			}
-			addShuttle(transitLayer(record), record.a, record.b, record.c, options);
+			applySurfaceVariants(addShuttle(transitLayer(record), record.a, record.b, record.c,
+				options).shuttle.sector, record);
 			break;
 		}
 		case ConstructionType::Door:
@@ -3249,6 +3352,7 @@ namespace core
 				for (auto permission : record.controlPermissionRequirements[stop])
 					point->mPermissionRequirement.set(permission - 1);
 			}
+			applySurfaceVariants(mSectors[unit->getIndex()], record);
 			break;
 		}
 		case ConstructionType::BoothWindow:

@@ -540,6 +540,10 @@ _Avoid_: World document, tile-set metadata
 A Willpower resource that names rectangular regions of one atlas image. Whether a region is tintable or repeated is a World-renderer semantic rather than a separate resource type.
 _Avoid_: Tile set
 
+**Sector surface variant**:
+One cell of a Sector's surface wearing a variant of its type's tile rather than that type's base. Recorded Sector-local - a column counted from the Sector's own left edge and a level counted up from its floor line - and carried on the Sector's construction record as well as on the live Sector, so the rebuild every structural edit performs replays the entries rather than losing them. Artwork only: a variant changes which tile a cell draws and nothing about traversal, capacity or simulation state.
+_Avoid_: per-cell texture, decoration
+
 ## Station systems
 
 **Station systems**:

@@ -121,6 +121,82 @@ shade darker per row, so the family structure reads off the artwork: a variant
 that landed in the wrong row shows as a band of the wrong shade rather than only
 as a diff. Row 0 keeps the shade the placeholder has always used.
 
+### Wearing a variant
+
+A family is only worth declaring if a World can put its members on the screen.
+A Sector's construction record can now say that one of its cells wears a
+variant rather than the type's base tile:
+
+```yaml
+  - type: room
+    name: Room 1
+    layer: 0
+    y: 1
+    x: 0
+    cellsWide: 6
+    levelsHigh: 2
+    topLevelHeight: 0.9
+    hasHeightScale: false
+    surfaceVariants:
+      - column: 2
+        level: 0
+        variant: 1
+```
+
+The entry is `SectorSurfaceVariant { column, level, variant }`, and the
+coordinates are **Sector-local**: `column` counts World cells from the
+Sector's own left edge and `level` counts them up from its floor line, which
+is the same frame the per-cell surface loop resolves a tile in. That is what
+lets the entries ride the record. Every structural edit tears the World down
+and replays the records, and a move changes only where the record puts the
+Sector; entries held in World coordinates would have to be rewritten by that
+move to keep pointing at the cells they were drawn for, and one missed by the
+rewrite is artwork silently lost. Held Sector-local, the record replays
+unchanged and the entries follow the Sector for free.
+
+The entries live on the record as well as on the live Sector for the same
+reason in the other direction: a fact held only on the live object would
+evaporate on the first resize, and a fact held only on the record leaves the
+renderer walking the record list to answer a question it asks once per cell.
+
+What the loader refuses:
+
+- **An entry outside the Sector's own grid.** A column past `cellsWide` or a
+  level past `levelsHigh` names a cell that does not exist. Refusing it is a
+  loud miscount; drawing nothing for it is a silent one.
+- **Two entries for one cell.** Which variant the cell wears would come down
+  to list order, so the loader refuses instead of choosing.
+- **The field on a record that draws no tiled surface.** A Background and a
+  Facade are authored as flat colour and never ask the atlas for a tile, so
+  a variant recorded on one is decoration that could never show. A Door or
+  Marker record has no surface at all.
+
+What it does not refuse is a `variant` number the installed artwork has no
+row for. The document records what was authored; the renderer decides what a
+number it cannot draw looks like, and the answer is the base tile rather than
+a hole. That single fallback is also what makes a World repointed at the
+version 1 family - which declares no families, and so has no `-Vn` tile
+under any name - draw base on every variant cell while keeping its entries,
+so repointing it back at a family that has them restores the picture with
+nothing rewritten. A base tile that is itself missing still draws the
+missing-art magenta: falling back from a variant to a base that is not there
+is not falling back to something.
+
+The field is behind World schema version 70. A document written before this
+feature existed carries no such field on any record and loads as no variants
+recorded, which is exactly what it drew before the feature existed, and a
+World that never used variants saves with no empty field written. An entry
+below version 70 is refused rather than read as a coincidence.
+
+Nothing about a variant reaches traversal, capacity or simulation state: the
+same World saved with variants and saved without them differs by nothing but
+the variant block itself. `smoke/persistence/SectorSurfaceVariants.cpp`
+pins that along with the round trip and the refusals, and
+`smoke/render/SectorSurfaceVariants.cpp` pins what each cell draws - the
+variant tile where one is recorded and its own tile behind it, the base
+everywhere else, on the same rectangle, at the same crop and the same tint
+it had before any cell could be recorded.
+
 Every one of the ten tiles fills its cell: `drawn_size: [1.0, 1.0]`, content
 128 x 320 at the authored grid's pixel size, `offset: [0.0, 0.0]`. That is the
 whole of this set's content-size story - Infrastructure has no sub-cell art - and

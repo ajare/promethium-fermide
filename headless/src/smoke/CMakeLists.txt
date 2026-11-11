@@ -570,6 +570,7 @@ pf_add_smoke_module(pf-smoke-persistence
         persistence/DomainReplay.cpp
         persistence/DoorDocuments.cpp
         persistence/RoomHeightScaleDocuments.cpp
+        persistence/SectorSurfaceVariants.cpp
         persistence/BrokenDoors.cpp
         persistence/BrokenExtensibles.cpp
         persistence/BrokenEscalators.cpp
@@ -596,6 +597,7 @@ pf_add_smoke_module(pf-smoke-render
         render/ScaledDoors.cpp render/Main.cpp render/AccessPanels.cpp render/Airlocks.cpp render/Furniture.cpp render/State.cpp render/Walls.cpp render/AgentPaths.cpp render/Transports.cpp render/SecurityScanners.cpp render/BoothWindows.cpp render/ObjectAtlas.cpp render/WalkwayArtwork.cpp render/FurnitureAtlasNew.cpp render/SectorAtlasNew.cpp render/AgentAtlasNew.cpp render/BulkheadAndPanelArtwork.cpp render/ObjectArtworkNew.cpp render/ObjectAtlasContract.cpp render/AtlasInstallPath.cpp render/VehicleArtworkNew.cpp
         render/SectorSurfaceDrawContract.cpp
         render/SectorSurfacePerCellResolution.cpp
+        render/SectorSurfaceVariants.cpp
         render/SerializationRendering.cpp
         render/AgentPoses.cpp
         render/FontMetrics.cpp

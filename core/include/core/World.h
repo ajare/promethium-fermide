@@ -31,6 +31,7 @@
 #include "core/Marker.h"
 #include "core/Furniture.h"
 #include "core/SectorType.h"
+#include "core/SectorSurfaceVariant.h"
 #include "core/ChamberSubtype.h"
 #include "core/Door.h"
 #include "core/DoorSectorObject.h"
@@ -1448,6 +1449,17 @@ namespace core
 			std::string definitionKey{};
 			std::vector<FurnitureDestination> furnitureDestinations{};
 			DumbwaiterId dumbwaiterId{};
+
+			// The cells of the Sector this record creates that wear a variant of
+			// its type's tile rather than the base (#1040). Sector-local column
+			// and level from the bottom-left anchor, so a move replays the record
+			// with a new position and the same entries and the artwork follows the
+			// Sector for free. The entries live here as well as on the live Sector
+			// because every structural edit tears the World down and replays the
+			// records: a fact held only on the live object would evaporate on the
+			// first resize. Empty is the ordinary case, and an empty list writes no
+			// field at all.
+			std::vector<SectorSurfaceVariant> surfaceVariants{};
 		};
 
 		bool validateAccessPanel(uint32_t sectorIndex, uint32_t levelOffset, uint32_t cellX,
@@ -1522,11 +1534,29 @@ namespace core
 		// agree on exactly this set.
 		static bool constructionTypeCreatesSector(ConstructionType type);
 
+		// Which Sector-creating record types may carry surface variant entries
+		// (#1040): every Sector that draws a tiled surface, and no others. A
+		// Background or a Facade is authored as a flat colour and never asks the
+		// atlas for a tile, so a variant recorded on one is artwork that could
+		// never show - refused rather than carried silently.
+		static bool constructionTypeCarriesSurfaceVariants(ConstructionType type);
+
 		void serializeConstructionRecord(Serializer& serializer, ConstructionRecord const& record) const;
 
 		ConstructionRecord deserializeConstructionRecord(Serializer& serializer, uint32_t version) const;
 
 		void applyConstructionRecord(ConstructionRecord const& record);
+
+		// Puts a creating record's variant entries on the Sector that record
+		// just built, refusing entries that describe a cell the Sector does not
+		// have. Called from the sector-creating cases of applyConstructionRecord,
+		// so the entries land on the live Sector by the same replay that put its
+		// geometry there (#1040). The Sector arrives as a handle rather than a
+		// reference because the creating calls answer with one, and a handle that
+		// came back empty with entries to place is a broken wiring rather than a
+		// thing to dereference.
+		static void applySurfaceVariants(std::shared_ptr<Sector> const& sector,
+			ConstructionRecord const& record);
 
 		bool prepareLocationEdit(LocationEditPlan const& plan,
 			std::vector<ConstructionRecord>& records, uint32_t& newSectorIndex,
