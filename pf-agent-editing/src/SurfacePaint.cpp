@@ -226,10 +226,19 @@ SurfacePaintRunOutcome applySurfacePaintRun(game::WorldAuthoring& authoring,
 			continue;
 		}
 		std::string reason;
-		if (authoring.setSectorSurfaceVariant(cell.target.sectorIndex,
-			cell.target.column, cell.target.level, cell.target.variant, &reason))
+		auto const write = authoring.setSectorSurfaceVariant(
+			cell.target.sectorIndex, cell.target.column, cell.target.level,
+			cell.target.variant, &reason);
+		if (write.accepted)
 		{
 			++outcome.painted;
+			// Accepted is not the same as written-into. The cell may already
+			// have been wearing the variant it was asked for, or may have
+			// been asked back to base from a cell that never had an entry.
+			// Either is a legal request that left the document where it was,
+			// and the caller needs to see that across the whole run rather
+			// than infer it from a count that cannot tell the two apart.
+			if (write.changed) ++outcome.changed;
 			continue;
 		}
 		// The resolve already asked the World whether this cell could take

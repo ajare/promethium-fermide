@@ -670,8 +670,9 @@ bool WorldAuthoring::canSetSectorSurfaceVariant(uint32_t sectorIndex, uint32_t c
 		diagnostic);
 }
 
-bool WorldAuthoring::setSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column,
-	uint32_t level, std::optional<uint32_t> variant, std::string* diagnostic)
+core::SurfaceVariantWrite WorldAuthoring::setSectorSurfaceVariant(
+	uint32_t sectorIndex, uint32_t column, uint32_t level,
+	std::optional<uint32_t> variant, std::string* diagnostic)
 {
 	return world().setSectorSurfaceVariant(sectorIndex, column, level, variant,
 		diagnostic);

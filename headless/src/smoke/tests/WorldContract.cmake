@@ -81,6 +81,7 @@ set(checks
     surfaceVariantCarry/anAnchorMovingResizeRoundTripsThroughSaveAndLoad
     surfaceVariantCarry/aFacadeHoldsNoVariantEntriesAcrossItsEdits
     surfaceVariantCarry/aBackgroundHoldsNoVariantEntriesAcrossItsEdits
+    surfaceVariantCarry/anAcceptedWriteThatChangesNothingLeavesTheWorldUnmodified
     transitVariantCarry/everyVerticalTransitEditCarriesItsEntriesAndSaysSo
     transitVariantCarry/aVerticalTransitShrinkDropsItsEntryAndClampsNothingInward
     transitVariantCarry/wideningAVerticalTransitDropsNothingAndSaysNothing

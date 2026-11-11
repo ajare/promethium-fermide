@@ -17,6 +17,16 @@
 // no field at all. A stored zero would be a third state that means the base
 // but is not the base, and every reader would have to know it.
 //
+// An accepted write that changes nothing is a third case, and it is not an
+// edit (#1051). A cell asked to be cleared that has nothing to clear, and
+// a cell already wearing the variant it was asked for, are both legal and
+// both leave the Sector holding exactly what it held. The write says so
+// rather than writing anyway and calling it a change, because a caller that
+// cannot see the difference records an undo step with nothing in it and
+// dirties a document that authored nothing. Refusal, accepted-and-changed
+// and accepted-and-unchanged are three answers and the type carries the
+// first distinction and the second one separately.
+//
 // Nothing here touches traversal, capacity or simulation state, which is
 // what the domain says a variant is. So the edit needs no pause and no
 // rebuild: it is not a topology change and it should not ask for one.
@@ -167,33 +177,68 @@ namespace core
 		return true;
 	}
 
-	bool World::setSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column,
-		uint32_t level, optional<uint32_t> variant, string* diagnostic)
+	SurfaceVariantWrite World::setSectorSurfaceVariant(uint32_t sectorIndex,
+		uint32_t column, uint32_t level, optional<uint32_t> variant,
+		string* diagnostic)
 	{
 		string reason;
 		if (!canSetSectorSurfaceVariant(sectorIndex, column, level, variant, &reason))
 		{
 			if (diagnostic) *diagnostic = reason;
-			return false;
+			return { false, false };
 		}
 
 		auto& record = mConstructionRecords[static_cast<size_t>(
 			findCreatingRecord(sectorIndex) - mConstructionRecords.data())];
 		auto& sector = mSectors[sectorIndex];
 
-		// Rebuilt rather than patched in place. One cell's entry is replaced or
-		// removed and every other entry is carried over untouched, in the order
-		// it was already in, so a Sector's saved list does not shuffle between
-		// one click and the next.
+		// Built up on a copy and compared before anything is put down. The
+		// two halves of the answer are different questions: whether the cell
+		// could take the entry, which `canSet...` has already settled, and
+		// whether taking it leaves the Sector holding anything other than
+		// what it holds now. Only the second tells a caller whether the press
+		// it is about to record is worth walking back.
+		//
+		// The cell's own entry is replaced where it sits rather than erased
+		// and pushed on the end. A repaint that moved its entry to the back of
+		// the list would make the rebuilt list differ from the current one in
+		// order alone, and an order-only difference read as a change is a
+		// no-op dressed up as an edit - the thing this exists to stop.
+		// Replaced in place, repainting the variant a cell already wears
+		// leaves the list equal, and a Sector's saved list still does not
+		// shuffle between one click and the next.
 		auto entries = record.surfaceVariants;
-		std::erase_if(entries, [&](auto const& entry)
-			{ return entry.column == column && entry.level == level; });
-		if (variant) entries.push_back({ column, level, *variant });
+		auto const existing = std::find_if(entries.begin(), entries.end(),
+			[&](auto const& entry)
+				{ return entry.column == column && entry.level == level; });
+		if (variant)
+		{
+			if (existing != entries.end()) existing->variant = *variant;
+			else entries.push_back({ column, level, *variant });
+		}
+		else
+			std::erase_if(entries, [&](auto const& entry)
+				{ return entry.column == column && entry.level == level; });
+
+		// Compared against both halves of what the write touches. The record
+		// is what saves and what the next rebuild replays; the live Sector is
+		// what draws this frame. Either one differing is a change worth the
+		// write, and neither is left behind while the other is written.
+		if (entries == record.surfaceVariants
+			&& entries == sector->getSurfaceVariants())
+		{
+			// Legal, and nothing to write: no entry touched, no `modify()`,
+			// and the document stays as clean as it was. The cell already
+			// wore what it was asked for, which is an answer rather than a
+			// refusal - the hover still shows that cell yellow.
+			if (diagnostic) diagnostic->clear();
+			return { true, false };
+		}
 
 		record.surfaceVariants = entries;
 		sector->setSurfaceVariants(entries);
 		modify();
 		if (diagnostic) diagnostic->clear();
-		return true;
+		return { true, true };
 	}
 }

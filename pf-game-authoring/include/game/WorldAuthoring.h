@@ -302,8 +302,13 @@ namespace game
 	// class is built on: the hover affordance that colours the cell under the
 	// cursor asks `canSet...` and needs no more privilege than drawing the
 	// World already has.
+	//
+	// The edit answers with both halves of what happened (#1051) - accepted
+	// or refused, and among the accepted whether the cell came out holding
+	// anything different - because the caller owns the undo step and has to
+	// be able to tell a press worth recording from one that is not.
 	bool canSetSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column, uint32_t level, std::optional<uint32_t> variant, std::string* diagnostic = nullptr) const;
-	bool setSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column, uint32_t level, std::optional<uint32_t> variant, std::string* diagnostic = nullptr);
+	core::SurfaceVariantWrite setSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column, uint32_t level, std::optional<uint32_t> variant, std::string* diagnostic = nullptr);
 
 	// --- Agents ---
 	bool canPlaceAgentInLocation(uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets, std::string* diagnostic = nullptr) const;

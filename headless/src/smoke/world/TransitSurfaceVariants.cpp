@@ -187,7 +187,7 @@ namespace
 		std::string diagnostic;
 		for (auto const& entry : entries)
 			require(world.setSectorSurfaceVariant(sectorIndex, entry.column,
-					entry.level, entry.variant, &diagnostic),
+					entry.level, entry.variant, &diagnostic).accepted,
 				"The fixture entry at column " + std::to_string(entry.column)
 					+ ", level " + std::to_string(entry.level) + " was refused: "
 					+ diagnostic);

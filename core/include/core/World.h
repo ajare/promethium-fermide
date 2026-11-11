@@ -3052,15 +3052,22 @@ namespace core
 		//
 		// Artwork only, exactly as the domain defines a variant: the edit touches
 		// no traversal, capacity or simulation state, so it needs neither a
-		// pause nor a rebuild. `set...` answers true when the request was
-		// accepted - including when the cell already wore what it was asked for,
-		// which is the same accepted answer, not a failure - and false with a
-		// `diagnostic` when it was refused.
+		// pause nor a rebuild. `canSet...` answers whether the request is legal,
+		// which is all the hover needs and less than the write decides.
+		//
+		// `set...` answers with both halves of what happened (#1051): accepted,
+		// or refused with a `diagnostic`; and, among the accepted, whether the
+		// cell was left holding anything different. A cell already wearing the
+		// variant asked for, and a cell asked to be cleared that has nothing to
+		// clear, are both accepted and both change nothing - legal requests the
+		// author is free to make, and not worth an undo step. The caller owns
+		// that decision, so the answer keeps `accepted` and `changed` apart
+		// rather than spending one bool on both questions.
 		bool canSetSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column,
 			uint32_t level, std::optional<uint32_t> variant,
 			std::string* diagnostic = nullptr) const;
-		bool setSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column,
-			uint32_t level, std::optional<uint32_t> variant,
+		SurfaceVariantWrite setSectorSurfaceVariant(uint32_t sectorIndex,
+			uint32_t column, uint32_t level, std::optional<uint32_t> variant,
 			std::string* diagnostic = nullptr);
 
 		// The `const` view answers with a `const Agent` (#974), matching

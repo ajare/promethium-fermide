@@ -159,12 +159,23 @@ SurfacePaintRun resolveSurfacePaintRun(core::World const& world, PaintTool tool,
 // What writing a resolved run did.
 struct SurfacePaintRunOutcome
 {
+	// Cells the seam accepted, whether or not they came out different.
 	std::size_t painted{ 0 };
 	std::size_t skipped{ 0 };
+	// Of the accepted cells, how many came out holding something other than
+	// what they held before (#1051). A cell that already wore the variant it
+	// was asked for, and a cell asked to be cleared with nothing on it, are
+	// both accepted and both change nothing: `painted` counts them, `changed`
+	// does not. A caller that owns an undo step decides on `changed`, because
+	// a step for a run that changed nothing is a press that visibly does
+	// nothing.
+	std::size_t changed{ 0 };
 	// The first write that was refused although the resolve had accepted the
 	// cell. Nothing in the normal path sets it; a non-empty string means the
 	// World changed between the resolve and the write and is worth logging.
 	std::string diagnostic;
+
+	bool anyChanged() const { return changed > 0; }
 };
 
 // Writes every paintable cell of a resolved run through the authoring
@@ -176,5 +187,12 @@ struct SurfacePaintRunOutcome
 // is touched, one commit after the last, and the whole run sits between
 // them as one step. A caller that committed per cell would build a history
 // the author cannot walk back without pressing undo fifteen times.
+//
+// It answers how much of the run actually landed (#1051). A run whose
+// every cell was accepted and none of them changed is a gesture made over
+// ground already painted, and a caller that reads `changed` spends no
+// snapshot on it; a run that changes some cells and not others is still
+// exactly one step, because the caller wraps the whole run once and the
+// cells that needed no change simply contributed nothing.
 SurfacePaintRunOutcome applySurfacePaintRun(game::WorldAuthoring& authoring,
 	SurfacePaintRun const& run);

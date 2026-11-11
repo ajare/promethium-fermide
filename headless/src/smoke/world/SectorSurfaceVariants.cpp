@@ -43,6 +43,11 @@
 // for a tile, and refuse a variant entry on the way in (#1040). An edit that
 // cannot add one must also not invent one, so their edits are checked to leave
 // the entry list empty rather than merely assumed to.
+//
+// The write seam's third answer is here too (#1051). An accepted write that
+// changes nothing - a clear with nothing to clear, a repaint of the variant a
+// cell already wears - leaves the World's own modified flag where it was, so a
+// press that authored nothing does not mark the document unsaved.
 
 #include "Checks.h"
 
@@ -191,7 +196,7 @@ namespace
 		std::string diagnostic;
 		for (auto const& entry : entries)
 			require(world.setSectorSurfaceVariant(sectorIndex, entry.column,
-					entry.level, entry.variant, &diagnostic),
+					entry.level, entry.variant, &diagnostic).accepted,
 				"The fixture entry at column " + std::to_string(entry.column)
 					+ ", level " + std::to_string(entry.level) + " was refused: "
 					+ diagnostic);
@@ -815,7 +820,7 @@ void aFacadeHoldsNoVariantEntriesAcrossItsEdits(smoke::Context const&)
 	std::string diagnostic;
 	require(!world.canSetSectorSurfaceVariant(0, 0, 0, 1, &diagnostic),
 		"A Facade accepted a variant entry: " + diagnostic);
-	require(!world.setSectorSurfaceVariant(0, 0, 0, 1, &diagnostic),
+	require(!world.setSectorSurfaceVariant(0, 0, 0, 1, &diagnostic).accepted,
 		"A Facade recorded a variant entry: " + diagnostic);
 	require(entriesOf(world, 0).empty(),
 		"A Facade holds variant entries after a refused paint: "
@@ -851,7 +856,7 @@ void aBackgroundHoldsNoVariantEntriesAcrossItsEdits(smoke::Context const&)
 	std::string diagnostic;
 	require(!world.canSetSectorSurfaceVariant(0, 0, 0, 1, &diagnostic),
 		"A Background accepted a variant entry: " + diagnostic);
-	require(!world.setSectorSurfaceVariant(0, 0, 0, 1, &diagnostic),
+	require(!world.setSectorSurfaceVariant(0, 0, 0, 1, &diagnostic).accepted,
 		"A Background recorded a variant entry: " + diagnostic);
 	require(entriesOf(world, 0).empty(),
 		"A Background holds variant entries after a refused paint: "
@@ -871,6 +876,67 @@ void aBackgroundHoldsNoVariantEntriesAcrossItsEdits(smoke::Context const&)
 		"a Background shrunk from the left and the bottom");
 	require(serialize(world).find("surfaceVariants") == std::string::npos,
 		"A World with a Background carrying variants wrote a surfaceVariants field");
+}
+
+// An accepted write that changes nothing is not an edit (#1051), and the
+// World's own modified flag is the half of that which an undo step does
+// not cover: `modify()` is what dirties a document, and a write with
+// nothing to write must not call it. Driven at the seam rather than
+// through the editor so the claim is about the World and not about a
+// transaction wrapped around it.
+void anAcceptedWriteThatChangesNothingLeavesTheWorldUnmodified(smoke::Context const&)
+{
+	core::World world("No-op variant write", 12, 8);
+	world.addRoom("Room", 0, 1, 1, 4, 2);
+	world.finishBuild();
+	world.pauseSimulation();
+	world.markUnmodified();
+	require(!world.isModified(),
+		"The fixture World was not clean to start with, so the dirty-flag "
+		"assertions below would prove nothing");
+
+	std::string diagnostic;
+
+	// Clearing a cell that has no entry: legal, and nothing to clear.
+	auto const cleared = world.setSectorSurfaceVariant(0, 2, 1,
+		std::optional<uint32_t>{}, &diagnostic);
+	require(cleared.accepted,
+		"Clearing an empty cell was refused: " + diagnostic);
+	require(!cleared.changed,
+		"Clearing a cell with no entry reported a change");
+	require(!world.isModified(),
+		"A no-op clear dirtied the World, so a press that authored nothing "
+		"still marks unsaved work");
+
+	// A write that does change something: accepted, changed, and dirty.
+	auto const painted = world.setSectorSurfaceVariant(0, 2, 1, 2u, &diagnostic);
+	require(painted.accepted && painted.changed,
+		"Painting variant 2 on an empty cell did not report a change: "
+			+ diagnostic);
+	require(world.isModified(),
+		"A write that put an entry down left the World clean");
+
+	// Repainting the same variant with a second entry in the list, so the
+	// repainted cell is not the last one: a write that erased the entry and
+	// appended a new one would move it and call that a change.
+	require(world.setSectorSurfaceVariant(0, 0, 0, 1u, &diagnostic).changed,
+		"The second entry paint reported no change: " + diagnostic);
+	world.markUnmodified();
+	auto const before = entriesOf(world, 0);
+	auto const repaint = world.setSectorSurfaceVariant(0, 2, 1, 2u, &diagnostic);
+	require(repaint.accepted && !repaint.changed,
+		"Repainting the variant a cell already wears reported a change");
+	require(!world.isModified(), "A repaint dirtied the World");
+	require(entriesOf(world, 0) == before,
+		"The repaint left the entry list other than it was: was "
+			+ entriesText(before) + ", now " + entriesText(entriesOf(world, 0)));
+
+	// A refusal is neither accepted nor changed, and says why. It is the
+	// third answer, and the one the two above are not.
+	auto const refused = world.setSectorSurfaceVariant(0, 0, 0, 0u, &diagnostic);
+	require(!refused.accepted && !refused.changed,
+		"Variant 0 came back accepted, or came back changed");
+	require(!diagnostic.empty(), "The refusal carried no reason");
 }
 
 void registerSectorSurfaceVariants(std::vector<smoke::Check>& checks)
@@ -913,4 +979,6 @@ void registerSectorSurfaceVariants(std::vector<smoke::Check>& checks)
 		aFacadeHoldsNoVariantEntriesAcrossItsEdits });
 	checks.push_back({ "surfaceVariantCarry/aBackgroundHoldsNoVariantEntriesAcrossItsEdits",
 		aBackgroundHoldsNoVariantEntriesAcrossItsEdits });
+	checks.push_back({ "surfaceVariantCarry/anAcceptedWriteThatChangesNothingLeavesTheWorldUnmodified",
+		anAcceptedWriteThatChangesNothingLeavesTheWorldUnmodified });
 }

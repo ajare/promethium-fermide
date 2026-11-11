@@ -29,6 +29,10 @@
 //     them changes the document or takes an undo step;
 //   * one undo step per accepted click, and undoing restores the document
 //     byte for byte;
+//   * an accepted click that changes nothing - the base swatch on a cell
+//     with no entry, a variant swatch on the cell already wearing that
+//     variant - is accepted rather than refused, and spends no snapshot,
+//     leaves no undo step and leaves the document unmodified (#1051);
 //   * create mode is untouched: with the strip on screen and nothing
 //     picked, the create path still builds Sectors and puts no variant
 //     entry on anything.
@@ -216,13 +220,21 @@ namespace
 
 	// The editor's own edit transaction over one surface-paint click:
 	// resolve the click, capture the state it is made from, apply through
-	// the authoring seam, commit what was captured. A click the resolve
-	// refuses spends no snapshot and commits nothing, which is why a refusal
-	// costs the author no undo step.
+	// the authoring seam, and commit what was captured only if the write
+	// changed something. A click the resolve refuses spends no snapshot and
+	// commits nothing, which is why a refusal costs the author no undo step
+	// (#1042). A click that was accepted and changed nothing captures a
+	// snapshot and drops it, and costs the same nothing (#1051): the press
+	// is legal, the ground was already painted, and an undo step for it
+	// would be a press that visibly does nothing.
 	struct PaintOutcome
 	{
 		bool applied{ false };
 		bool refused{ false };
+		// Whether the accepted write left the cell holding anything
+		// different. Never true without `applied`.
+		bool changed{ false };
+		bool committed{ false };
 		std::string diagnostic;
 	};
 
@@ -244,11 +256,16 @@ namespace
 		require(before.has_value(),
 			"the state a paint click is made from could not be captured");
 		std::string diagnostic;
-		outcome.applied = fixture.authoring().setSectorSurfaceVariant(
+		auto const write = fixture.authoring().setSectorSurfaceVariant(
 			target.sectorIndex, target.column, target.level, target.variant,
 			&diagnostic);
-		if (outcome.applied)
+		outcome.applied = write.accepted;
+		outcome.changed = write.changed;
+		if (write.accepted && write.changed)
+		{
 			commitDocumentEdit(std::move(before), fixture.authoring().history());
+			outcome.committed = true;
+		}
 		outcome.diagnostic = diagnostic;
 		return outcome;
 	}
@@ -829,6 +846,221 @@ namespace
 	}
 
 	// ------------------------------------------------------------------
+	// Accepted, and nothing changed.
+	//
+	// #1042 named two cases: refused, which spends no snapshot, and
+	// accepted, which takes one. #1051 names the third, which is neither.
+	// The request is legal, so the hover must not go red over it; the write
+	// leaves the cell holding exactly what it held, so the press must not
+	// leave a step behind. A check that only ever clicks a cell that needs
+	// the paint never drives this, and what it lets through is a press the
+	// author has to undo through and a document dirtied by a gesture that
+	// authored nothing.
+	// ------------------------------------------------------------------
+
+	// The base swatch on a cell that has no entry. There is nothing to
+	// clear, the seam says so instead of writing an empty change, and the
+	// author's history is no longer for it.
+	void clearingACellThatHasNothingToClearIsAcceptedAndChangesNothing(
+		smoke::Context const& context)
+	{
+		installAuthoredAtlas(context);
+		CloseOnExit const closer;
+		auto const world = editor::openNewWorld("Surface paint clear empty", 12, 4);
+		require(world != nullptr, "the editor opened no World");
+		auto fixture = makeFixture(false, false);
+		fixture.authoring().markSaved();
+		auto const pristine = serializeWorld(fixture.documentWorld());
+		auto const baseline = fixture.authoring().undoDepth();
+
+		SectorSwatchSelection swatches{ sectorVariantSwatches(PaintTool::Room) };
+		require(swatches.pick(0), "Picking the base swatch was refused");
+		require(fixture.sector(fixture.roomIndex)->getSurfaceVariants().empty(),
+			"The fixture Room did not start with nothing to clear: "
+				+ describe(fixture.sector(fixture.roomIndex)
+					->getSurfaceVariants()));
+
+		// The hover reads this as accepted, not as a refusal. "Already the
+		// base" is not a reason to colour a cell red; only a cell that
+		// cannot wear the swatch is.
+		require(canSurfacePaint(fixture.documentWorld(), PaintTool::Room,
+				swatches, 0, 2, 3),
+			"A cell with nothing to clear failed the hover gate, so the "
+			"affordance cannot tell 'already base' from 'wrong Sector type'");
+
+		auto const outcome = paintClick(fixture, PaintTool::Room, swatches, 0, 2, 3);
+		require(outcome.applied && !outcome.refused,
+			"Clearing an empty cell was refused: " + outcome.diagnostic);
+		require(!outcome.changed,
+			"Clearing a cell with no entry reported a change");
+		require(!outcome.committed,
+			"Clearing a cell with no entry committed an edit");
+		require(fixture.sector(fixture.roomIndex)->getSurfaceVariants().empty(),
+			"Clearing an empty cell put entries on the Room: "
+				+ describe(fixture.sector(fixture.roomIndex)
+					->getSurfaceVariants()));
+		require(fixture.authoring().undoDepth() == baseline,
+			"Clearing a cell with no entry took an undo step, leaving a press "
+			"that undoes nothing");
+		require(!fixture.authoring().isModified(),
+			"A no-op clear marked the document modified");
+		require(serializeWorld(fixture.documentWorld()) == pristine,
+			"A no-op clear changed the document");
+	}
+
+	// Repainting the variant a cell already wears. Accepted, and nothing
+	// written - including when the cell's entry is not the last in the
+	// list, which is where a write that erased the entry and pushed a new
+	// one on the end would turn an unchanged cell into a shuffled list, a
+	// dirty document and a spent undo step.
+	void repaintingTheVariantAlreadyWornIsAcceptedAndChangesNothing(
+		smoke::Context const& context)
+	{
+		installAuthoredAtlas(context);
+		CloseOnExit const closer;
+		auto const world = editor::openNewWorld("Surface paint repaint", 12, 4);
+		require(world != nullptr, "the editor opened no World");
+		auto fixture = makeFixture(false, false);
+
+		SectorSwatchSelection swatches{ sectorVariantSwatches(PaintTool::Room) };
+
+		// Two entries, so the cell repainted below is the first of them and
+		// not the last. Cell (1, 2) is column 0, level 0; cell (3, 3) is
+		// column 2, level 1.
+		require(swatches.pick(1), "Picking room-V1 was refused");
+		require(paintClick(fixture, PaintTool::Room, swatches, 0, 1, 2).changed,
+			"The first room-V1 paint reported no change");
+		require(swatches.pick(2), "Picking room-V2 was refused");
+		require(paintClick(fixture, PaintTool::Room, swatches, 0, 3, 3).changed,
+			"The first room-V2 paint reported no change");
+		auto const painted = describe(fixture.sector(fixture.roomIndex)
+			->getSurfaceVariants());
+		require(fixture.sector(fixture.roomIndex)->getSurfaceVariants().size() == 2,
+			"The two paints did not leave two entries: " + painted);
+		fixture.authoring().markSaved();
+		auto const baseline = fixture.authoring().undoDepth();
+		auto const saved = serializeWorld(fixture.documentWorld());
+
+		// Repaint the first entry with the variant it already wears.
+		require(swatches.pick(1), "Picking room-V1 again was refused");
+		require(canSurfacePaint(fixture.documentWorld(), PaintTool::Room,
+				swatches, 0, 1, 2),
+			"A cell already wearing the picked variant failed the hover gate");
+		auto const outcome = paintClick(fixture, PaintTool::Room, swatches, 0, 1, 2);
+		require(outcome.applied && !outcome.refused,
+			"Repainting a cell the variant it wears was refused: "
+				+ outcome.diagnostic);
+		require(!outcome.changed,
+			"Repainting room-V1 on a cell already wearing room-V1 reported a "
+			"change");
+		require(!outcome.committed, "A repaint committed an edit");
+		require(describe(fixture.sector(fixture.roomIndex)
+				->getSurfaceVariants()) == painted,
+			"The repaint moved entries in the list: was " + painted + ", now "
+				+ describe(fixture.sector(fixture.roomIndex)
+					->getSurfaceVariants()));
+		require(fixture.authoring().undoDepth() == baseline,
+			"A repaint took an undo step, leaving a press that undoes nothing");
+		require(!fixture.authoring().isModified(),
+			"A repaint marked the document modified");
+		require(serializeWorld(fixture.documentWorld()) == saved,
+			"A repaint changed the saved document");
+
+		// The control: the same cell, a variant it does not wear, is a
+		// change and exactly one step - the nothing above is the rule about
+		// unchanged writes and not a rule about this cell.
+		require(swatches.pick(3), "Picking room-V3 was refused");
+		auto const control = paintClick(fixture, PaintTool::Room, swatches, 0, 1, 2);
+		require(control.applied && control.changed && control.committed,
+			"Painting a different variant over an occupied cell reported no "
+			"change: " + control.diagnostic);
+		require(fixture.authoring().undoDepth() == baseline + 1,
+			"The control paint did not put exactly one step on the stack, got "
+				+ std::to_string(fixture.authoring().undoDepth() - baseline));
+		require(fixture.authoring().isModified(),
+			"A paint that changed a cell left the document unmodified");
+	}
+
+	// Refusal and accepted-but-unchanged are two answers, and the two are
+	// not interchangeable at either end: the hover reads `accepted` and must
+	// still go red for the cell that cannot wear the swatch and stay yellow
+	// for the one that already does, while the transaction reads `changed`
+	// and must spend nothing on either. Collapsing them into one bool loses
+	// one of those decisions whichever way the bool is read.
+	void refusalAndAcceptedButUnchangedAreNotTheSameAnswer(
+		smoke::Context const& context)
+	{
+		installAuthoredAtlas(context);
+		CloseOnExit const closer;
+		auto const world = editor::openNewWorld("Surface paint two answers", 12, 4);
+		require(world != nullptr, "the editor opened no World");
+		auto fixture = makeFixture(true, true);
+		fixture.authoring().markSaved();
+
+		SectorSwatchSelection swatches{ sectorVariantSwatches(PaintTool::Room) };
+		require(swatches.pick(1), "Picking room-V1 was refused");
+		require(paintClick(fixture, PaintTool::Room, swatches, 0, 2, 3).changed,
+			"The setup paint was refused");
+		fixture.authoring().markSaved();
+		auto const baseline = fixture.authoring().undoDepth();
+		auto const saved = serializeWorld(fixture.documentWorld());
+
+		// Accepted, unchanged: the cell already wears room-V1.
+		auto const already = resolveSurfacePaint(fixture.documentWorld(),
+			PaintTool::Room, swatches, 0, 2, 3);
+		require(already.ok && canSurfacePaint(fixture.documentWorld(),
+				PaintTool::Room, swatches, 0, 2, 3),
+			"A cell already wearing the picked variant is not paintable to the "
+			"hover: " + already.diagnostic);
+		std::string alreadyDiagnostic;
+		auto const alreadyWrite = fixture.authoring().setSectorSurfaceVariant(
+			already.sectorIndex, already.column, already.level, already.variant,
+			&alreadyDiagnostic);
+		require(alreadyWrite.accepted,
+			"The already-painted cell came back refused: " + alreadyDiagnostic);
+		require(!alreadyWrite.changed,
+			"The already-painted cell came back changed");
+
+		// Refused at the resolve: a Corridor cell under the Room's swatch.
+		auto const wrong = resolveSurfacePaint(fixture.documentWorld(),
+			PaintTool::Room, swatches, 0, Fixture::corridorX + 1,
+			Fixture::corridorY);
+		require(!wrong.ok
+				&& !canSurfacePaint(fixture.documentWorld(), PaintTool::Room,
+					swatches, 0, Fixture::corridorX + 1, Fixture::corridorY),
+			"A Corridor cell under a Room swatch came back paintable");
+		require(!wrong.diagnostic.empty(),
+			"The refusal carried no reason for the hover to show");
+
+		// Refused at the write: a Background, which the World will not let
+		// wear an entry at all. Accepted is false here and true above, which
+		// is the distinction the hover depends on and the one a single bool
+		// carrying "was it a no-op" would have thrown away.
+		std::string flatDiagnostic;
+		auto const flatWrite = fixture.authoring().setSectorSurfaceVariant(
+			fixture.backgroundIndex, 0, 0, 1, &flatDiagnostic);
+		require(!flatWrite.accepted && !flatWrite.changed,
+			"A Background write did not come back refused in both fields: "
+				+ flatDiagnostic);
+		require(!flatDiagnostic.empty(),
+			"The write refusal carried no reason: " + flatDiagnostic);
+
+		// And the two answers differ where they are supposed to: accepted
+		// separates the already-painted cell from the flat one, and neither
+		// of them is the refusal the resolve gave for the Corridor.
+		require(alreadyWrite.accepted && !flatWrite.accepted,
+			"Accepted and refused came back the same way, so the hover cannot "
+			"tell them apart");
+		require(serializeWorld(fixture.documentWorld()) == saved,
+			"Driving the accepted-unchanged and refused answers changed the "
+			"document");
+		require(fixture.authoring().undoDepth() == baseline,
+			"Driving the accepted-unchanged answer took an undo step");
+		require(!fixture.authoring().isModified(),
+			"Driving the accepted-unchanged answer marked the document modified");
+	}
+
+	// ------------------------------------------------------------------
 	// Create mode, unaffected.
 	// ------------------------------------------------------------------
 
@@ -940,6 +1172,27 @@ namespace editor_smoke
 			{
 				editor_smoke::State state;
 				oneUndoStepPerClickAndUndoRestoresExactly(context);
+			} });
+		checks.push_back({
+			"surfacePaint/clearingACellThatHasNothingToClearIsAcceptedAndChangesNothing",
+			[](smoke::Context const& context)
+			{
+				editor_smoke::State state;
+				clearingACellThatHasNothingToClearIsAcceptedAndChangesNothing(context);
+			} });
+		checks.push_back({
+			"surfacePaint/repaintingTheVariantAlreadyWornIsAcceptedAndChangesNothing",
+			[](smoke::Context const& context)
+			{
+				editor_smoke::State state;
+				repaintingTheVariantAlreadyWornIsAcceptedAndChangesNothing(context);
+			} });
+		checks.push_back({
+			"surfacePaint/refusalAndAcceptedButUnchangedAreNotTheSameAnswer",
+			[](smoke::Context const& context)
+			{
+				editor_smoke::State state;
+				refusalAndAcceptedButUnchangedAreNotTheSameAnswer(context);
 			} });
 		checks.push_back({
 			"surfacePaint/createModeStillCreatesSectorsWithNoSwatchPicked",

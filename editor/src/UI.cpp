@@ -2154,7 +2154,9 @@ namespace
 		// whole run inside one snapshot and one commit - one undo step for
 		// fifteen cells, the way a create drag commits one Sector rather
 		// than one per cell. A run with nothing paintable in it spends no
-		// snapshot and leaves no undo step, exactly as a refused click did.
+		// snapshot and leaves no undo step, exactly as a refused click did,
+		// and so does a paintable run that changed nothing - a drag over
+		// ground already wearing the picked variant (#1051).
 		//
 		// The create drag and the palette keep their own mouse. This branch
 		// is only entered with a swatch picked, so a tool in create mode
@@ -2230,7 +2232,18 @@ namespace
 							auto undo = captureDocumentSnapshot(world);
 							auto const outcome = applySurfacePaintRun(
 								document->authoring(), run);
-							commitDocumentEdit(std::move(undo));
+							// Only a run that changed something is worth a step
+							// (#1051). A drag over ground already painted, or a
+							// base drag over cells already at base, was accepted at
+							// every cell and wrote nothing: the snapshot it captured
+							// is dropped rather than committed, so the press leaves no
+							// undo step to walk back and the document is not marked
+							// modified. A run that changed some cells and left others
+							// alone is still exactly one step, because the whole run
+							// is wrapped once and the cells that needed no change
+							// contributed nothing to it.
+							if (outcome.anyChanged())
+								commitDocumentEdit(std::move(undo));
 							// The resolve asked the World about every cell
 							// before the write started, so a refusal here says
 							// the World moved under the gesture. Worth a log

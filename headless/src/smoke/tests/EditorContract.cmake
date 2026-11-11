@@ -275,11 +275,16 @@ set(editor_names
     surfacePaint/aCellOfTheWrongSectorTypeIsRefusedAndChangesNothing
     surfacePaint/aCellOutsideAnySectorOfThatTypeIsRefusedTheSameWay
     surfacePaint/oneUndoStepPerClickAndUndoRestoresExactly
+    surfacePaint/clearingACellThatHasNothingToClearIsAcceptedAndChangesNothing
+    surfacePaint/repaintingTheVariantAlreadyWornIsAcceptedAndChangesNothing
+    surfacePaint/refusalAndAcceptedButUnchangedAreNotTheSameAnswer
     surfacePaint/createModeStillCreatesSectorsWithNoSwatchPicked
     surfacePaintDrag/aDragPaintsEveryCellInTheRun
     surfacePaintDrag/theWholeRunIsOneUndoStep
     surfacePaintDrag/wrongTypeCellsInTheRunAreSkippedAndNamedBeforeAnyWrite
     surfacePaintDrag/aRunWithNothingPaintableTakesNoUndoStep
+    surfacePaintDrag/aPaintableRunThatChangesNothingTakesNoUndoStep
+    surfacePaintDrag/aRunThatChangesSomeCellsAndNotOthersIsStillOneStep
     surfacePaintDrag/aSingleCellRunIsTheSingleClickPaint
     surfacePaintDrag/aRunAcrossTwoSectorsOfTheSameTypePaintsBoth
     surfacePaintDrag/theBaseSwatchAlongARunClearsEveryEntry

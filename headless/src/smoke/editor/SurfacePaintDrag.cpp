@@ -27,6 +27,10 @@
 //   * a run with nothing paintable in it spends no snapshot and leaves no
 //     undo step, so a drag that lands entirely on the wrong type costs
 //     nothing to walk back;
+//   * a run that was paintable at every cell and changed nothing - over
+//     ground already wearing the picked variant, or a base drag over cells
+//     already at base - spends no snapshot either, and a run that changes
+//     some cells and not others is still exactly one step (#1051);
 //   * a run of one cell is the single-cell paint of #1042 answered cell
 //     for cell - the click is the shortest run down the same path, not a
 //     degenerate case of the drag;
@@ -194,15 +198,23 @@ namespace
 		return fixture;
 	}
 
-	// The editor's own transaction over one released drag: resolve the
-	// run, and only if it has anything paintable in it, capture the state
-	// the run is made from, write the whole run through the authoring
-	// seam, and commit what was captured. One snapshot, one commit, one
-	// undo step - and a run with nothing in it spends neither.
+	// The editor's own transaction over one released drag: resolve the run,
+	// and only if it has anything paintable in it, capture the state the run
+	// is made from, write the whole run through the authoring seam, and
+	// commit what was captured only if the write changed something. One
+	// snapshot, one commit, one undo step - and a run with nothing paintable
+	// in it spends neither.
+	//
+	// A run that was paintable and changed nothing drops the snapshot it
+	// captured instead of committing it (#1051). Every cell in it was
+	// accepted; none of them came out holding anything different, because
+	// the ground already wore the picked variant. That is not an edit, and
+	// a step for it is a press the author has to undo through.
 	struct DragOutcome
 	{
 		SurfacePaintRun run;
 		std::size_t painted{ 0 };
+		std::size_t changed{ 0 };
 		std::size_t skipped{ 0 };
 		bool committed{ false };
 	};
@@ -221,10 +233,14 @@ namespace
 			"the state a drag is made from could not be captured");
 		auto const applied = applySurfacePaintRun(fixture.authoring(),
 			outcome.run);
-		commitDocumentEdit(std::move(before), fixture.authoring().history());
 		outcome.painted = applied.painted;
+		outcome.changed = applied.changed;
 		outcome.skipped = applied.skipped;
-		outcome.committed = true;
+		if (applied.anyChanged())
+		{
+			commitDocumentEdit(std::move(before), fixture.authoring().history());
+			outcome.committed = true;
+		}
 		return outcome;
 	}
 
@@ -550,6 +566,150 @@ namespace
 			"A run across empty space committed an edit");
 		require(fixture.authoring().undoDepth() == baseline,
 			"A run across empty space took an undo step");
+	}
+
+	// ------------------------------------------------------------------
+	// Paintable, and nothing changed.
+	//
+	// A run whose cells all accept the swatch is not automatically an edit.
+	// Drag over ground that already wears the picked variant, or drag the
+	// base over cells that never had an entry, and every cell answers
+	// accepted while none of them changes (#1051). The run spends no
+	// snapshot and leaves no undo step - the same nothing a fully refused
+	// run costs, arrived at from the other end.
+	// ------------------------------------------------------------------
+
+	void aPaintableRunThatChangesNothingTakesNoUndoStep(
+		smoke::Context const& context)
+	{
+		installAuthoredAtlas(context);
+		CloseOnExit const closer;
+		auto const world = editor::openNewWorld("Drag paint no change", 12, 4);
+		require(world != nullptr, "the editor opened no World");
+		auto fixture = makeFixture();
+		fixture.authoring().markSaved();
+		auto const baseline = fixture.authoring().undoDepth();
+
+		// A base drag across a Room that never wore a variant: accepted at
+		// every cell, nothing to clear at any of them.
+		auto const cleared = paintDrag(fixture, PaintTool::Room, roomSwatch(0), 0,
+			Fixture::roomAX, Fixture::roomAY,
+			Fixture::roomAX + Fixture::roomAWide - 1,
+			Fixture::roomAY + Fixture::roomAHigh - 1);
+		require(cleared.run.anyPaintable(),
+			"A base drag found nothing paintable over a Room, so it proves "
+			"nothing about an accepted no-op");
+		require(cleared.painted == cleared.run.paintable,
+			"The base drag accepted " + std::to_string(cleared.painted)
+				+ " of " + std::to_string(cleared.run.paintable)
+				+ " paintable cells");
+		require(cleared.changed == 0,
+			"A base drag over cells with no entry reported "
+				+ std::to_string(cleared.changed) + " cells changed");
+		require(!cleared.committed,
+			"A base drag with nothing to clear committed an edit");
+		require(fixture.sector(fixture.roomAIndex)->getSurfaceVariants().empty(),
+			"A base drag over an untouched Room put entries on it: "
+				+ describe(fixture.sector(fixture.roomAIndex)
+					->getSurfaceVariants()));
+		require(fixture.authoring().undoDepth() == baseline,
+			"A base drag with nothing to clear took an undo step");
+		require(!fixture.authoring().isModified(),
+			"A base drag with nothing to clear marked the document modified");
+
+		// Paint the whole of Room A - one step - then drag the same swatch
+		// over the same block again.
+		auto const first = paintDrag(fixture, PaintTool::Room, roomSwatch(1), 0,
+			Fixture::roomAX, Fixture::roomAY,
+			Fixture::roomAX + Fixture::roomAWide - 1,
+			Fixture::roomAY + Fixture::roomAHigh - 1);
+		require(first.committed
+				&& first.changed == first.run.paintable && first.changed > 0,
+			"The first pass did not paint the whole of Room A as one step: "
+				+ std::to_string(first.changed) + " of "
+				+ std::to_string(first.run.paintable));
+		fixture.authoring().markSaved();
+		auto const paintedDepth = fixture.authoring().undoDepth();
+		auto const saved = serializeWorld(fixture.documentWorld());
+
+		auto const again = paintDrag(fixture, PaintTool::Room, roomSwatch(1), 0,
+			Fixture::roomAX, Fixture::roomAY,
+			Fixture::roomAX + Fixture::roomAWide - 1,
+			Fixture::roomAY + Fixture::roomAHigh - 1);
+		require(again.run.anyPaintable()
+				&& again.painted == again.run.paintable,
+			"The repeat run was not accepted at every cell it covered");
+		require(again.changed == 0,
+			"The repeat run reported " + std::to_string(again.changed)
+				+ " cells changed over ground already wearing the variant");
+		require(!again.committed,
+			"A run that changed nothing committed an edit");
+		require(fixture.authoring().undoDepth() == paintedDepth,
+			"A run over ground already painted took an undo step, leaving a "
+			"press that undoes nothing");
+		require(!fixture.authoring().isModified(),
+			"A run over ground already painted marked the document modified");
+		require(serializeWorld(fixture.documentWorld()) == saved,
+			"A run over ground already painted changed the document");
+	}
+
+	// A run that changes some cells and not others is still exactly one
+	// step. The cells that needed no change contribute nothing to it; they
+	// neither take a step of their own nor cancel the ones that did, and
+	// one undo walks the whole run back rather than leaving it one cell
+	// short.
+	void aRunThatChangesSomeCellsAndNotOthersIsStillOneStep(
+		smoke::Context const& context)
+	{
+		installAuthoredAtlas(context);
+		CloseOnExit const closer;
+		auto const world = editor::openNewWorld("Drag paint mixed", 12, 4);
+		require(world != nullptr, "the editor opened no World");
+		auto fixture = makeFixture();
+
+		// One cell of Room A already wears room-V1.
+		require(paintDrag(fixture, PaintTool::Room, roomSwatch(1), 0,
+				Fixture::roomAX + 1, Fixture::roomAY,
+				Fixture::roomAX + 1, Fixture::roomAY).changed == 1,
+			"The setup paint did not change exactly one cell");
+		fixture.authoring().markSaved();
+		auto const savedDepth = fixture.authoring().undoDepth();
+		auto const saved = serializeWorld(fixture.documentWorld());
+
+		// The whole of Room A: the one cell already wears it, the rest do
+		// not.
+		auto const total = Fixture::roomAWide * Fixture::roomAHigh;
+		auto const mixed = paintDrag(fixture, PaintTool::Room, roomSwatch(1), 0,
+			Fixture::roomAX, Fixture::roomAY,
+			Fixture::roomAX + Fixture::roomAWide - 1,
+			Fixture::roomAY + Fixture::roomAHigh - 1);
+		require(mixed.run.paintable == total && mixed.run.skipped == 0,
+			"The mixed run did not cover the whole of Room A: "
+				+ std::to_string(mixed.run.paintable) + " paintable, "
+				+ std::to_string(mixed.run.skipped) + " skipped");
+		require(mixed.painted == total,
+			"The mixed run accepted " + std::to_string(mixed.painted)
+				+ " cells of " + std::to_string(total));
+		require(mixed.changed == total - 1,
+			"The mixed run reported " + std::to_string(mixed.changed)
+				+ " cells changed; one of them already wore the variant");
+		require(mixed.committed,
+			"A run that changed cells committed nothing");
+		require(fixture.authoring().undoDepth() == savedDepth + 1,
+			"A run that changed some cells and not others put "
+				+ std::to_string(fixture.authoring().undoDepth() - savedDepth)
+				+ " steps on the stack instead of one");
+		require(fixture.authoring().isModified(),
+			"A run that changed cells left the document unmodified");
+
+		// One undo lands on the state the run started from, not one cell
+		// short of it.
+		undoOnce(fixture);
+		require(serializeWorld(fixture.documentWorld()) == saved,
+			"One undo of the mixed run did not restore the state it started "
+			"from");
+		require(fixture.authoring().undoDepth() == savedDepth,
+			"Undoing the mixed run left the stack away from where it started");
 	}
 
 	// ------------------------------------------------------------------
@@ -892,6 +1052,20 @@ namespace editor_smoke
 			{
 				editor_smoke::State state;
 				aRunWithNothingPaintableTakesNoUndoStep(context);
+			} });
+		checks.push_back({
+			"surfacePaintDrag/aPaintableRunThatChangesNothingTakesNoUndoStep",
+			[](smoke::Context const& context)
+			{
+				editor_smoke::State state;
+				aPaintableRunThatChangesNothingTakesNoUndoStep(context);
+			} });
+		checks.push_back({
+			"surfacePaintDrag/aRunThatChangesSomeCellsAndNotOthersIsStillOneStep",
+			[](smoke::Context const& context)
+			{
+				editor_smoke::State state;
+				aRunThatChangesSomeCellsAndNotOthersIsStillOneStep(context);
 			} });
 		checks.push_back({
 			"surfacePaintDrag/aSingleCellRunIsTheSingleClickPaint",

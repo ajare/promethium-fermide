@@ -48,4 +48,29 @@ namespace core
 		friend bool operator==(SectorSurfaceVariant const& left,
 			SectorSurfaceVariant const& right) = default;
 	};
+
+	// What asking for a cell's variant did (#1051).
+	//
+	// Two answers, kept apart on purpose.
+	//
+	// `accepted` is whether the request was legal, which is the question
+	// #1042's hover asks and the answer that paints a cell yellow rather
+	// than red. It says nothing about whether anything was written.
+	//
+	// `changed` is whether the write put anything down. A cell already
+	// wearing what it was asked for is perfectly acceptable and changes
+	// nothing, and an undo step for it is a press that visibly does
+	// nothing - a hole in the author's history that has to be walked back
+	// by hand, and a document dirtied by a gesture that authored no thing.
+	//
+	// Collapsing the two into one bool is the mistake this type exists to
+	// prevent. A caller that cannot tell "refused" from "already like
+	// this" cannot decide whether to show a red affordance, and cannot
+	// decide whether to spend a snapshot; one bool can serve neither of
+	// those decisions without lying about the other.
+	struct SurfaceVariantWrite
+	{
+		bool accepted{ false };
+		bool changed{ false };
+	};
 }

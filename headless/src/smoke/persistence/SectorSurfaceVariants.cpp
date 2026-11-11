@@ -322,7 +322,7 @@ namespace persistence
 			world.finishBuild();
 			world.pauseSimulation();
 			std::string diagnostic;
-			require(world.setSectorSurfaceVariant(0, 2, 1, variant, &diagnostic),
+			require(world.setSectorSurfaceVariant(0, 2, 1, variant, &diagnostic).accepted,
 				"The authoring seam refused the binary fixture's own variant: " + diagnostic);
 			return serializeBinary(world);
 		}
@@ -580,7 +580,7 @@ namespace persistence
 		require(reason.find("variant 0") != std::string::npos,
 			"The authoring seam's refusal does not name variant 0: " + reason);
 		require(!world.setSectorSurfaceVariant(0, 0, 0,
-				std::optional<uint32_t>{ 0 }, &reason),
+				std::optional<uint32_t>{ 0 }, &reason).accepted,
 			"The authoring seam wrote variant 0 onto the World");
 		require(!world.getSector(0)->surfaceVariantAt(0, 0),
 			"The refused paint still left an entry on the live Sector");
