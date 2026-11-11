@@ -72,6 +72,16 @@ namespace
 		"lift", "shuttle", "stairwell", "staircase", "airlock", "chamber",
 		"dumbwaiter" };
 
+	// The doorframes a Room or a Corridor wears where a Door stands in it
+	// (#1054). Keyed by the wall, then the width and height of the
+	// opening, then the cell's role in it: `L0` is the opening's left cell
+	// and `R0` its right. A 1-wide opening has only a left cell.
+	std::vector<std::string> const kDoorframes{
+		"doorframe-room-1r-L0", "doorframe-room-2r-L0", "doorframe-room-2r-R0",
+		"doorframe-room-1t-L0", "doorframe-room-2t-L0", "doorframe-room-2t-R0",
+		"doorframe-corridor-1r-L0", "doorframe-corridor-2r-L0",
+		"doorframe-corridor-2r-R0" };
+
 	// ------------------------------------------------------------------
 	// The atlas as the application holds it.
 	// ------------------------------------------------------------------
@@ -197,7 +207,17 @@ namespace
 		installed.tiles = installAtlasTiles(authored.tiles, set.regions,
 			authored.width, authored.height, "SectorAtlas");
 		for (auto const& [name, artwork] : installed.tiles)
-			installed.surfaces.emplace(name, artwork.region);
+		{
+			// A doorframe is a tile of this atlas but not a Sector surface,
+			// and the install the application runs routes it apart on the
+			// strength of what the authored file said. Copying every tile
+			// into `surfaces` here would install something the stack does
+			// not, and would make the surface query answer yes for a frame
+			// (#1054).
+			if (authored.overlays.count(name) > 0)
+				installed.overlays.emplace(name, artwork.region);
+			else installed.surfaces.emplace(name, artwork.region);
+		}
 		setSectorTileset(installed, static_cast<TextureId>(1));
 		require(sectorTilesetIsNewFamily(),
 			"The installed new Sector atlas did not come up as the New family");
@@ -417,9 +437,11 @@ namespace
 				"SectorAtlas registers no '" + name + "' surface");
 		// The ten bases form one row across the top of the sheet. That is
 		// what leaves every column below a base free to hold that base's
-		// family, and why the sheet grew down rather than sideways.
-		require(authored.width == 1280 && authored.height == 1280,
-			"SectorAtlas is not the 1280x1280 sheet its set is sized for");
+		// family, and why the sheet grew down rather than sideways. The
+		// doorframe block stands to the right of the ten surface columns,
+		// so the sheet is thirteen columns wide (#1054).
+		require(authored.width == 1664 && authored.height == 1280,
+			"SectorAtlas is not the 1664x1280 sheet its set is sized for");
 		for (auto const& name : kSurfaces)
 			require(authored.surfaces.at(name).y == 0,
 				"'" + name + "' is not in the base strip along the top of the sheet");
@@ -444,6 +466,32 @@ namespace
 		// No boundary artwork in the set at all.
 		require(authored.boundaries.empty(),
 			"SectorAtlas carries boundary strips; the new set draws none");
+		// The doorframes are in the set, and in the overlays map rather than
+		// the surfaces map: a frame is a tile of this atlas and not a surface
+		// a Sector is authored with (#1054).
+		require(authored.overlays.size() == kDoorframes.size(),
+			"SectorAtlas authors " + std::to_string(authored.overlays.size())
+			+ " overlays; the Room and Corridor doorframe block is "
+			+ std::to_string(kDoorframes.size()));
+		for (auto const& name : kDoorframes)
+		{
+			require(authored.overlays.count(name),
+				"SectorAtlas authors no doorframe '" + name + "'");
+			require(authored.surfaces.count(name) == 0,
+				"The doorframe '" + name + "' is authored as a Sector surface");
+			require(authored.tiles.count(name),
+				"The doorframe '" + name
+				+ "' is not in the tile map the install pairs against the "
+				"manifest");
+		}
+		// No tall Corridor frame: a tall Door is refused in a Corridor, so
+		// there is no opening for one to frame, and an authored tile nobody
+		// can ever reach is artwork that reads as unfinished.
+		require(authored.overlays.count("doorframe-corridor-1t-L0") == 0
+				&& authored.overlays.count("doorframe-corridor-2t-L0") == 0
+				&& authored.overlays.count("doorframe-corridor-2t-R0") == 0,
+			"SectorAtlas authors a tall Corridor doorframe, which no Door can "
+			"ever be authored to wear");
 		// The manifest's generated entries agree with the authored tileset,
 		// so the runtime pixel contract cannot drift from what was authored.
 		auto const manifest = bundledManifest(context);
@@ -843,6 +891,40 @@ namespace
 		return yaml.str();
 	}
 
+	// The full ten-surface set plus an `overlays` block holding one named
+	// tile, so a refusal about an overlay is confounded by nothing else.
+	// `extraKeys` is written into the overlay sprite itself, which is where
+	// a `variants` key would go if an author put one there.
+	std::string overlayTilesetYaml(std::string const& overlayName,
+		std::string const& extraKeys = {})
+	{
+		std::ostringstream yaml;
+		yaml << "version: 2\n"
+			<< "image: invented.png\n"
+			<< "size: [1280, 640]\n"
+			<< "tile_size: [128, 320]\n"
+			<< "sprites:\n";
+		int column = 0;
+		for (auto const& name : kSurfaces)
+		{
+			yaml << "  " << name << ":\n"
+				<< "    cell: [" << column++ << ", 0]\n"
+				<< "    content: [0, 0, 128, 320]\n"
+				<< "    offset: [0.0, 0.0]\n"
+				<< "    drawn_size: [1.0, 1.0]\n"
+				<< "    tintable: true\n";
+		}
+		yaml << "overlays:\n"
+			<< "  " << overlayName << ":\n"
+			<< "    cell: [0, 1]\n"
+			<< "    content: [0, 0, 128, 320]\n"
+			<< "    offset: [0.0, 0.0]\n"
+			<< "    drawn_size: [1.0, 1.0]\n"
+			<< "    tintable: true\n";
+		if (!extraKeys.empty()) yaml << extraKeys;
+		return yaml.str();
+	}
+
 	// The full ten-surface set laid out across one row of a sheet deep
 	// enough for each base's family to descend beneath it. The variant
 	// count, the sheet depth and the row the bases sit in are the only
@@ -919,6 +1001,86 @@ namespace
 			&& refusal.find("primitive line") != std::string::npos,
 			"The refusal must say the new set draws no boundary strips and the "
 			"edge takes the primitive line: " + refusal);
+	}
+
+	// An overlay is a tile of the atlas that is not a Sector surface. A
+	// name authored in both maps leaves the draw to settle which kind it is
+	// by lookup order, and a frame drawing as a wall - or the other way
+	// round - is not a thing two maps should be left to decide (#1054).
+	void loaderRefusesAnOverlayThatIsAlsoASurface(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const refusal = loadRefusal(context, "overlay-is-a-surface",
+			overlayTilesetYaml("room"));
+		require(!refusal.empty(),
+			"An overlay sharing a name with a Sector surface was accepted");
+		require(refusal.find("Sector surface") != std::string::npos,
+			"The refusal did not say the name is already a Sector surface: "
+			+ refusal);
+	}
+
+	// A frame has no variant family. A surface's variants are different
+	// pictures of the same thing an author picks from a swatch strip; a
+	// frame is not picked at all, it is derived from the wall the Door
+	// stands in, so a family of frames is a choice nobody can make. The
+	// key is refused rather than ignored, which is the same reason the
+	// version 1 formats refuse it.
+	void loaderRefusesVariantsOnAnOverlay(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const refusal = loadRefusal(context, "overlay-declares-variants",
+			overlayTilesetYaml("doorframe-room-1r-L0", "    variants: 2\n"));
+		require(!refusal.empty(),
+			"An overlay declaring a variant family was accepted");
+		require(refusal.find("variants") != std::string::npos,
+			"The refusal did not name the `variants` key: " + refusal);
+	}
+
+	// The install routes a `boundary-` prefix to the boundary map before
+	// it looks at anything else, so an overlay wearing that prefix would
+	// arrive as edge artwork nobody asked for.
+	void loaderRefusesAnOverlayWearingTheBoundaryPrefix(
+		smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const refusal = loadRefusal(context, "overlay-boundary-prefix",
+			overlayTilesetYaml("boundary-floor"));
+		require(!refusal.empty(),
+			"An overlay wearing the `boundary-` prefix was accepted");
+		require(refusal.find("boundary-") != std::string::npos,
+			"The refusal did not name the prefix it refused: " + refusal);
+	}
+
+	// A set that authors overlays reads apart: the frames land in the
+	// overlay map, the surfaces keep their ten, and the tile map the
+	// install pairs against the manifest holds both kinds.
+	void loaderReadsOverlaysApartFromSurfaces(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const path = context.temporaryRoot() / "overlays-apart.tileset.yaml";
+		{
+			std::ofstream out(path, std::ios::binary | std::ios::trunc);
+			out << overlayTilesetYaml("doorframe-room-1r-L0");
+		}
+		auto const set = SectorTileset::load(path);
+		require(set.surfaces.size() == kSurfaces.size(),
+			"The overlay set carries " + std::to_string(set.surfaces.size())
+			+ " surfaces; the ten bases were expected");
+		require(set.overlays.size() == 1,
+			"The overlay set carries " + std::to_string(set.overlays.size())
+			+ " overlays; one was authored");
+		require(set.overlays.count("doorframe-room-1r-L0") == 1,
+			"The authored overlay is not in the overlay map");
+		require(set.tiles.size() == kSurfaces.size() + 1,
+			"The tile map the install pairs against the manifest holds "
+			+ std::to_string(set.tiles.size()) + " tiles instead of the ten "
+			"surfaces plus the overlay");
+		// And a set with no `overlays` map at all - every file written
+		// before the doorframe existed - still loads, with the map empty.
+		auto const without = SectorTileset::load(
+			context.fixture(kTileset));
+		require(!without.overlays.empty(),
+			"The shipped set lost its doorframe block");
 	}
 
 	// The repeat is per World cell, so a surface drawn at any other size
@@ -1148,6 +1310,15 @@ void render_smoke::registerSectorAtlas(std::vector<smoke::Check>& checks)
 		isolated<loaderRefusesASetMissingASurface> });
 	checks.push_back({ "sectorAtlasNew/loaderRefusesABoundaryStripInTheNewSet",
 		isolated<loaderRefusesABoundaryStripInTheNewSet> });
+	checks.push_back({ "sectorAtlasNew/loaderRefusesAnOverlayThatIsAlsoASurface",
+		isolated<loaderRefusesAnOverlayThatIsAlsoASurface> });
+	checks.push_back({ "sectorAtlasNew/loaderRefusesVariantsOnAnOverlay",
+		isolated<loaderRefusesVariantsOnAnOverlay> });
+	checks.push_back({
+		"sectorAtlasNew/loaderRefusesAnOverlayWearingTheBoundaryPrefix",
+		isolated<loaderRefusesAnOverlayWearingTheBoundaryPrefix> });
+	checks.push_back({ "sectorAtlasNew/loaderReadsOverlaysApartFromSurfaces",
+		isolated<loaderReadsOverlaysApartFromSurfaces> });
 	checks.push_back({ "sectorAtlasNew/loaderRefusesASurfaceThatIsNotOneFullCell",
 		isolated<loaderRefusesASurfaceThatIsNotOneFullCell> });
 	checks.push_back({ "sectorAtlasNew/loaderRefusesASurfaceOffsetFromItsCell",

@@ -461,6 +461,129 @@ zero, so a cell painted back to its base and a cell that never wore a variant ar
 the same thing and save the same way - with no field at all. Each accepted click
 is one undo step, and undoing restores the document exactly.
 
+## The doorframe overlays
+
+A cell a Door stands in does not draw its wall's tile. It draws that wall's
+**doorframe** tile: the moulding around the opening, with the leaf
+animating inside it and the space behind showing through the hole. The
+frame is part of the wall rather than part of the Door, so it is keyed by
+the wall and lives in this atlas, while the leaf is keyed by the Door's
+function and lives in the Objects set (#1052).
+
+They are authored in a sibling `overlays` map rather than among the
+`sprites`:
+
+```yaml
+overlays:
+  doorframe-room-1r-L0:
+    cell: [10, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+    hole: [13, 160, 102, 160]
+```
+
+The name is `doorframe-<wall>-<width><height>-<role>`: the wall is `room`
+or `corridor`, the width is 1 or 2 cells, the height is `r`egular or
+`t`all, and the role is `L0` for the opening's left cell and `R0` for its
+right. A 1-wide opening has only an `L0`. Corridors get no tall frame,
+because a tall Door is refused in a Corridor and a tile nothing can ever
+reach is artwork that reads as unfinished. Nine tiles in all, in the three
+columns to the right of the surface strip, which is why the sheet is 1664
+x 1280 rather than the 1280 x 1280 it was.
+
+The second map is not tidiness. `hasSectorTileSurface()` is asked "is this
+a Sector surface" by the borrow rule and by the editor's swatch strip, and
+neither of them wants a doorframe coming back from that question. A frame
+is a tile of the atlas and not a surface a Sector is authored with, so it
+answers `hasSectorTileOverlay()` instead. The per-cell surface loop can
+still draw one: a resolved name that is not a surface is looked for among
+the overlays before the cell falls back to the missing-art colour, which
+is what lets the frame arrive through the loop #1037 pinned instead of
+through a second loop that would have to relearn the anchor, the crop and
+the culling.
+
+What the loader refuses:
+
+- **A name authored in both maps.** Which kind the draw found it in would
+  come down to lookup order, and a frame drawing as a wall - or a wall
+  drawing as a frame - is not a thing two maps should be left to settle.
+  This catches an overlay wearing a derived variant's name too, since the
+  derived tiles are already in the surface map by then.
+- **`variants` on an overlay.** A surface's variants are different
+  pictures of the same thing, picked from a swatch strip. A frame is not
+  picked at all - it is derived from the Door standing in the wall - so a
+  family of frames is a choice nobody can make. Refused rather than
+  ignored, the same reason the version 1 formats refuse the key.
+- **The `boundary-` prefix on an overlay.** The install routes that prefix
+  to the boundary map before it looks at anything else, so an overlay
+  wearing it would arrive as edge artwork nobody asked for.
+- **A `hole` outside its own cell or outside the content it was authored
+  inside.** A hole that ran past the cell would punch a neighbour's
+  artwork.
+
+### The hole, rounded down
+
+Every frame declares a `hole`: the transparent opening it frames, in image
+pixels from its own cell's top-left. The generator punches it, so the
+placeholder sheet shows the frame's shape rather than a solid slab, and
+what the tileset states is what the artwork has.
+
+The hole is rounded **down** from the aperture it frames - inward on every
+edge. A 0.8-wide aperture on a 128-pixel cell is 102.4 pixels; the hole
+is 102, inset from 13 to 115. The leaf is clipped to the aperture, so a
+hole smaller than the aperture costs at most a fraction of a pixel of
+moulding covered by the leaf. A hole larger than the aperture leaves a
+ring of whatever lies behind the wall showing outside the leaf at every
+open percentage, which is unambiguously wrong. The hole reaches the cell's
+bottom edge because the aperture does: there is no sill in this geometry.
+
+`scripts/tests/doorframe_tiles.py` pins the rounding against the aperture
+each frame frames, checks the committed sheet is actually punched where
+the tileset says, and checks the frames are declared in the `ImageSet` the
+install pairs against.
+
+### What a door cell resolves to
+
+The resolver #1039 left open is where the frame arrives, and it answers
+from the live Door objects rather than from anything recorded:
+
+- a cell of a Room or a Corridor that a Door covers, with that Door's
+  **front** side on this Sector, answers the frame for that Door's width
+  and height and the cell's role in the opening;
+- every other cell answers the variant it was recorded with, or the base,
+  exactly as before;
+- a frame the installed atlas does not carry is no frame at all, and the
+  cell falls back to its wall's tile rather than to the missing-art
+  colour. That is what makes the feature additive: a World drawn on the
+  version 1 family, or on any set with no frames authored, keeps drawing
+  what it drew before.
+
+Because the answer is computed from what is standing in the wall, nothing
+is consumed. A variant an author painted on a cell the Door later covers
+is outranked for as long as the Door is there and draws again when the
+Door is taken out - the entry underneath was never touched. A Door is a
+reversible placement, and so is taking it back.
+
+The frame follows the wall's own family, not the surface the borrow rule
+settled on, for the same reason #1050 keeps a borrowing Sector off the
+borrowed family's variants: an Airlock beside a Corridor is still an
+Airlock, and has no frame of its own authored.
+
+Only the front side of a threshold is framed. A Door is registered on both
+Sectors of the pair it joins, and the Sector behind is seen *through* the
+opening rather than framing it, so it keeps its own base tile. Rendering
+the back face of a threshold is out of the feature's way.
+
+`smoke/render/DoorframeCells.cpp` pins all of it: the 1-wide and 2-wide
+regular frames in a Room, the tall pair for a tall Door, the same three
+cases in a Corridor, the frame taking its row's floor-anchored crop and
+the same culling as the plain cell beside it, the painted variant hidden
+and coming back, two adjacent doors each framing their own cells without
+leaking, a removed Door reverting with no residue, the back wall taking no
+frame, and the fallback when no frame is authored.
+
 ## The version 1 draft set
 
 `resources/textures/sectors.tileset.yaml` is the version 1 format: explicit

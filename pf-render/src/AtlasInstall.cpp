@@ -74,6 +74,12 @@ namespace pf::render
 			// declares no families holds an empty map, which is the honest
 			// answer rather than a missing one.
 			std::map<std::string, int> variantCounts;
+			// The names the sector file authored under `overlays` rather than
+			// `sprites` (#1054). They travel as names, not as regions, because
+			// the install already pairs the regions through `tiles`; all the
+			// Sector slot needs is to know which names to route into its
+			// `overlays` map instead of its `surfaces` one.
+			std::set<std::string> overlayNames;
 		};
 
 		// Reads one atlas's authored tiles out of the tileset file its
@@ -103,8 +109,16 @@ namespace pf::render
 				// three of them, and the editor sizes its swatch strip from
 				// that number rather than from a constant (#1038).
 				auto set = SectorTileset::load(authored.path);
+				// Which names are overlays travels as a set of names rather
+				// than as the overlay map itself: the install pairs the
+				// regions through `tiles`, and all the Sector slot has to
+				// decide is which side of the `surfaces` line each name
+				// falls on (#1054).
+				std::set<std::string> overlayNames;
+				for (auto const& entry : set.overlays)
+					overlayNames.insert(entry.first);
 				return { std::move(set.tiles), false, set.family,
-					std::move(set.variantCounts) };
+					std::move(set.variantCounts), std::move(overlayNames) };
 			}
 			auto set = ObjectTileset::load(authored.path);
 			AuthoredAtlasTiles result;
@@ -244,7 +258,7 @@ namespace pf::render
 		return InstalledAtlas{ width, height,
 			installAtlasTiles(authored.tiles, regions, width, height, setName),
 			authored.declaresRenderSemantics, authored.family,
-			std::move(authored.variantCounts) };
+			std::move(authored.variantCounts), std::move(authored.overlayNames) };
 	}
 
 	void AtlasInstaller::installObjectSlot(std::string const& setName,
@@ -305,6 +319,14 @@ namespace pf::render
 				// its own map under the bare name.
 				if (name.rfind("boundary-", 0) == 0)
 					tiles.boundaries.emplace(name.substr(9), artwork.region);
+				// A doorframe is a tile of this atlas but not a Sector
+				// surface, and the query that answers "is this a Sector
+				// surface" is asked about every name this loop could put
+				// anywhere. The authored file said which names are frames;
+				// routing them apart is the whole of what that statement
+				// was for (#1054).
+				else if (atlas.overlayNames.count(name) > 0)
+					tiles.overlays.emplace(name, artwork.region);
 				else tiles.surfaces.emplace(name, artwork.region);
 			}
 		}

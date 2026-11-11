@@ -73,10 +73,49 @@
 # load. A column that walks off the sheet is a miscount, and drawing nothing
 # for it is a silent failure where a refusal is a loud one.
 #
-# Authored at three variants for all ten types, the sheet is 1280 x 1280:
-# the ten base tiles as a single 10 x 1 strip across the top - the type list
-# reading in one pass instead of wrapping mid-list as the old 5 x 2 grid did
-# - with three variant rows descending beneath each column.
+# Authored at three variants for all ten types, the ten base tiles sit as a
+# single 10 x 1 strip across the top - the type list reading in one pass
+# instead of wrapping mid-list as the old 5 x 2 grid did - with three
+# variant rows descending beneath each column. The doorframe block (#1054)
+# stands to the right of that strip, so the sheet is 1664 x 1280: thirteen
+# columns of the same 128 x 320 grid, the last three of them overlays.
+#
+# ## Doorframe overlays
+#
+# A cell a Door covers does not draw its wall's plain tile: it draws that
+# wall's *doorframe* tile instead - the moulding around the opening, with
+# the leaf animating inside it and the space behind showing through the
+# hole. The frame is part of the wall, so it is keyed by the wall and lives
+# in this atlas; the leaf is keyed by the Door's function and lives in the
+# Objects atlas (#1052).
+#
+# Frames are derived from the live Door and are never painted by an author,
+# so they sit in a sibling `overlays` map rather than in `surfaces`. That
+# keeps `hasSectorTileSurface()` answering the question its name asks - is
+# this a Sector surface - and a doorframe is not one. The per-cell surface
+# loop can still draw one: a resolved name that is not a surface is looked
+# up among the overlays before the cell falls back to the missing-art colour.
+#
+# `doorframe-<wall>-<width><height>-<role>`, where the wall is `room` or
+# `corridor`, the width is 1 or 2 cells, the height is `r`egular or
+# `t`all, and the role is `L0` for the left cell of the opening and `R0`
+# for its right cell. A 1-wide opening has only an `L0`. Corridors get no
+# tall frame: a tall Door is refused in a Corridor, so there is no opening
+# for one to frame.
+#
+# Every frame declares a `hole`: the transparent opening it frames, in
+# image pixels from its own cell's top-left. The generator punches it, so
+# the placeholder sheet shows the frame's shape rather than a solid slab,
+# and the hole the artwork actually has is the one this file states.
+#
+# The hole is rounded *down* from the aperture it frames - inset inward on
+# every edge, never outward. A 0.8-wide aperture on a 128-pixel cell is
+# 102.4 pixels; the hole is 102. The leaf is clipped to the aperture, so
+# rounding down costs at most a fraction of a pixel of moulding covered by
+# the leaf, while rounding up would leave a ring of whatever lies behind
+# the wall showing outside the leaf at every open percentage. The hole
+# reaches the cell's bottom edge because the aperture does: there is no
+# sill in this geometry.
 #
 # ## No boundary strips
 #
@@ -102,7 +141,7 @@
 # than leaving the next reader to guess it from the draw call.
 version: 2
 image: sectors-new.png
-size: [1280, 1280]
+size: [1664, 1280]
 tile_size: [128, 320]
 sprites:
   # One row across the top: the two Locations, the three vertical transits,
@@ -178,3 +217,84 @@ sprites:
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
     tintable: true
+
+overlays:
+  # The doorframes, in the three columns to the right of the surface strip.
+  # Regular frames on the top row of the block, tall frames beneath them,
+  # the Corridor's three under the Room's six. Each `hole` is the aperture
+  # it frames, rounded down into whole pixels of the 128 x 320 cell and
+  # measured from that cell's top-left; the aperture in World units is
+  # written beside each one. A frame declares no `variants`: it is derived
+  # from the wall it frames and there is no second picture of it to pick.
+  doorframe-room-1r-L0:
+    cell: [10, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+    # u[0.1,0.9] v[0,0.5] - a 0.8 x 0.5 aperture.
+    hole: [13, 160, 102, 160]
+  doorframe-room-2r-L0:
+    cell: [11, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+    # The left cell of a 1.8 x 0.5 aperture: u[0.1,1.0].
+    hole: [13, 160, 115, 160]
+  doorframe-room-2r-R0:
+    cell: [12, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+    # The right cell of a 1.8 x 0.5 aperture: u[0.0,0.9].
+    hole: [0, 160, 115, 160]
+  doorframe-room-1t-L0:
+    cell: [10, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+    # u[0.1,0.9] v[0,0.9] - a 0.8 x 0.9 aperture.
+    hole: [13, 32, 102, 288]
+  doorframe-room-2t-L0:
+    cell: [11, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+    # The left cell of a 1.8 x 0.9 aperture: u[0.1,1.0].
+    hole: [13, 32, 115, 288]
+  doorframe-room-2t-R0:
+    cell: [12, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+    # The right cell of a 1.8 x 0.9 aperture: u[0.0,0.9].
+    hole: [0, 32, 115, 288]
+  doorframe-corridor-1r-L0:
+    cell: [10, 2]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+    # u[0.1,0.9] v[0,0.5] - a 0.8 x 0.5 aperture.
+    hole: [13, 160, 102, 160]
+  doorframe-corridor-2r-L0:
+    cell: [11, 2]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+    # The left cell of a 1.8 x 0.5 aperture: u[0.1,1.0].
+    hole: [13, 160, 115, 160]
+  doorframe-corridor-2r-R0:
+    cell: [12, 2]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+    # The right cell of a 1.8 x 0.5 aperture: u[0.0,0.9].
+    hole: [0, 160, 115, 160]

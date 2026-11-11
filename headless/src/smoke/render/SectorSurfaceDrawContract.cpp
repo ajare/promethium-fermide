@@ -163,7 +163,15 @@ namespace
 			imageSetRegions(context, "SectorAtlas"), authored.width,
 			authored.height, "SectorAtlas");
 		for (auto const& [name, artwork] : installed.tiles)
-			installed.surfaces.emplace(name, artwork.region);
+		{
+			// Routed the way the application's own install routes it: a
+			// doorframe is a tile of this atlas but not a Sector surface,
+			// and a test install that copied it into `surfaces` would be
+			// installing something the stack never installs (#1054).
+			if (authored.overlays.count(name) > 0)
+				installed.overlays.emplace(name, artwork.region);
+			else installed.surfaces.emplace(name, artwork.region);
+		}
 		// An install that produced no surfaces would leave every draw below
 		// falling back to the missing-tile rectangle, and the contract would
 		// be pinning nothing. The count of tiles in the set is
@@ -472,16 +480,25 @@ namespace
 			cell.region = atlas.surfaces.at(cell.tile);
 			// The sampled fraction of the tile, undoing the half-texel inset
 			// the renderer uses so linear filtering never reads a neighbouring
-			// tile's edge texel.
-			auto const fraction = [&](float uv, int origin, int extent)
+			// tile's edge texel. Each axis undoes itself against the image
+			// extent it was divided by: the sheet is not square since the
+			// doorframe block widened it (#1054), so reading the v axis off
+			// the width would put every tile's sampling a fifth of a texel
+			// off and call the contract broken on a draw that never moved.
+			auto const fraction = [](float uv, int origin, int extent,
+				int imageExtent)
 			{
-				return (uv * float(atlas.width) - (float(origin) + 0.5f))
+				return (uv * float(imageExtent) - (float(origin) + 0.5f))
 					/ float(extent - 1);
 			};
-			cell.u0 = fraction(uvLeft, cell.region.x, cell.region.width);
-			cell.u1 = fraction(uvRight, cell.region.x, cell.region.width);
-			cell.v0 = fraction(uvTop, cell.region.y, cell.region.height);
-			cell.v1 = fraction(uvBottom, cell.region.y, cell.region.height);
+			cell.u0 = fraction(uvLeft, cell.region.x, cell.region.width,
+				atlas.width);
+			cell.u1 = fraction(uvRight, cell.region.x, cell.region.width,
+				atlas.width);
+			cell.v0 = fraction(uvTop, cell.region.y, cell.region.height,
+				atlas.height);
+			cell.v1 = fraction(uvBottom, cell.region.y, cell.region.height,
+				atlas.height);
 			cells.push_back(cell);
 		}
 		return cells;

@@ -59,27 +59,75 @@ SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
     SectorTileset result;
     result.image = path.parent_path() / root["image"].as<std::string>();
     result.family = SectorTilesetFamily::New;
+    // A Sector surface and a doorframe are the same shape of thing - one
+    // full cell at the cell's anchor, drawn once per World cell - so the
+    // same two refusals govern both. Saying it once keeps a frame from
+    // being let through with a geometry the per-cell repeat rule cannot
+    // express just because it arrived through the other map.
+    auto const requireFullCell = [](std::string const& name,
+        std::string const& what, TileArtwork const& artwork)
+    {
+        if (artwork.offset.x != 0.0f || artwork.offset.y != 0.0f)
+            throw std::runtime_error(what + " '" + name
+                + "' must be drawn at its cell's anchor, because the repeat "
+                "is per World cell");
+        if (artwork.drawnSize.x != 1.0f || artwork.drawnSize.y != 1.0f)
+            throw std::runtime_error(what + " '" + name
+                + "' must be drawn at one full World cell, because the "
+                "repeat is per World cell");
+    };
     auto const grid = loadAuthoredTileGrid(root, true, "sector surface",
         AuthoredVariantFamilies::Derived);
     result.width = grid.width;
     result.height = grid.height;
     // The grid hands back the base sprites and their derived variants in one
     // map, and every one of them is a surface: this format has no other kind
-    // of tile. A variant inherits its base's offset and drawn size, so the
-    // two checks below that a base passes its variants pass for the same
-    // reason, and a variant that somehow did not inherit them is refused
-    // here rather than drawn off the per-cell repeat rule.
+    // of tile in `sprites`. A variant inherits its base's offset and drawn
+    // size, so the two checks below that a base passes its variants pass for
+    // the same reason, and a variant that somehow did not inherit them is
+    // refused here rather than drawn off the per-cell repeat rule.
     for (auto const& [name, artwork] : grid.tiles) {
-        if (artwork.offset.x != 0.0f || artwork.offset.y != 0.0f)
-            throw std::runtime_error("Sector surface '" + name
-                + "' must be drawn at its cell's anchor, because the repeat is "
-                "per World cell");
-        if (artwork.drawnSize.x != 1.0f || artwork.drawnSize.y != 1.0f)
-            throw std::runtime_error("Sector surface '" + name
-                + "' must be drawn at one full World cell, because the repeat "
-                "is per World cell");
+        requireFullCell(name, "Sector surface", artwork);
         result.tiles.emplace(name, artwork);
         result.surfaces.emplace(name, artwork.region);
+    }
+    // The overlays are read through the same grid rule as the surfaces,
+    // because they are laid out on the same sheet the same way: a cell,
+    // a content rectangle inside it, and the render semantics the tile
+    // draws with. What the second map buys is a second answer to "what
+    // kind of tile is this", which is a question the sheet itself cannot
+    // ask (#1054). A file with no `overlays` map is a file with no
+    // overlays - every version 2 set written before the doorframe existed
+    // reads this way, and draws its door cells as its wall's plain tile,
+    // exactly as it always did.
+    if (root["overlays"].IsDefined())
+    {
+        auto const overlayGrid = loadAuthoredTileGrid(root, true,
+            "sector overlay", AuthoredVariantFamilies::Refused, "overlays");
+        if (overlayGrid.width != grid.width || overlayGrid.height != grid.height)
+            throw std::runtime_error("A sector tileset's overlays are authored "
+                "on the same sheet as its surfaces ('" + path.filename().string()
+                + "')");
+        for (auto const& [name, artwork] : overlayGrid.tiles) {
+            requireFullCell(name, "Sector overlay", artwork);
+            // One name, two kinds. Which map the draw would have found it in
+            // would come down to lookup order, and a frame drawing as a wall
+            // - or a wall drawing as a frame - is not a thing two maps
+            // should be left to settle between themselves.
+            if (result.surfaces.count(name) > 0)
+                throw std::runtime_error("Sector overlay '" + name
+                    + "' is also authored as a Sector surface; a tile is one "
+                    "kind or the other");
+            // The install routes a `boundary-` prefix to the boundary map
+            // before it looks at anything else, so an overlay wearing that
+            // prefix would be installed as edge artwork nobody asked for.
+            if (name.rfind("boundary-", 0) == 0)
+                throw std::runtime_error("Sector overlay '" + name
+                    + "' takes the `boundary-` prefix, which the install "
+                    "routes to boundary artwork");
+            result.tiles.emplace(name, artwork);
+            result.overlays.emplace(name, artwork.region);
+        }
     }
     // The count is the author's own number, kept beside the base that stated
     // it rather than counted back off the derived tiles, so a caller can ask
@@ -131,12 +179,31 @@ int cellsCovered(float span, float cell)
 void drawSurfaceCell(WorldDrawList* list, std::string const& kind, Vec2 a,
     Vec2 b, float u0, float u1, float v0, float v1, PackedColourValue tint)
 {
-    auto const found = active.surfaces.find(kind);
-    if (found == active.surfaces.end() || active.width <= 0 || active.height <= 0) {
+    // A resolved name is looked for among the surfaces first, then among
+    // the overlays. The resolver owns which name it answers with and the
+    // overlay map is how it says "this cell wears a doorframe"; the two
+    // maps stay apart so the queries about them stay apart, but the draw
+    // path is one loop and a frame has to be drawable through it without
+    // a second loop beside it that would have to relearn the anchor, the
+    // crop and the culling (#1054).
+    //
+    // Held as a pointer rather than as an iterator carried between the two
+    // lookups: an iterator into `surfaces` and an iterator into `overlays`
+    // are the same type and must never be compared to each other, which is
+    // undefined behaviour and one of the few ways this function could be
+    // wrong without any test being able to see it.
+    SectorTileRegion const* region = nullptr;
+    if (auto const surface = active.surfaces.find(kind);
+        surface != active.surfaces.end())
+        region = &surface->second;
+    else if (auto const overlay = active.overlays.find(kind);
+        overlay != active.overlays.end())
+        region = &overlay->second;
+    if (!region || active.width <= 0 || active.height <= 0) {
         list->AddRectFilled(a, b, packColour(255, 0, 255, 255));
         return;
     }
-    image(list, found->second, a, b, u0, u1, v0, v1, tint);
+    image(list, *region, a, b, u0, u1, v0, v1, tint);
 }
 }
 
@@ -206,6 +273,15 @@ void clearSectorTileset() { textureId = {}; active = {}; }
 bool hasSectorTileSurface(std::string const& kind)
 {
     return bool(textureId) && active.surfaces.count(kind) > 0;
+}
+
+bool hasSectorTileOverlay(std::string const& name)
+{
+    // Guarded on the install the same way the surface query is: with no
+    // atlas behind the handle there is no frame to draw, and a caller that
+    // asks gets the answer that makes it fall back rather than the answer
+    // that makes it draw magenta.
+    return bool(textureId) && active.overlays.count(name) > 0;
 }
 
 bool sectorTilesetIsNewFamily()

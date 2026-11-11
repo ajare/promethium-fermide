@@ -1,8 +1,10 @@
 #include <array>
 #include <cassert>
 #include <cfloat>
+#include <cstdint>
 #include <algorithm>
 #include <chrono>
+#include <map>
 #include <optional>
 #include <unordered_map>
 
@@ -1993,6 +1995,83 @@ std::string newFamilySurfaceOrBorrowed(char const* own, char const* borrowed)
 		: std::string{ borrowed };
 }
 
+// The widest opening a doorframe is authored for. Two cells is the whole
+// of the vocabulary - `L0` and `R0` - and a wider opening has no frame to
+// wear, so it draws its wall's plain tile rather than a frame that stops
+// short of the gap.
+constexpr std::uint32_t kMaxFramedDoorCellsWide = 2;
+
+// The doorframes the cells of one wall wear, keyed Sector-local (#1054).
+//
+// A cell a Door stands in draws that wall's doorframe tile instead of the
+// wall's own tile. The frame is keyed by the wall, not by the Door, because
+// the frame is part of the wall: the same Door set into a Corridor wears a
+// Corridor frame, and the leaf that animates inside the frame is a
+// different tile from a different atlas and says what kind of threshold it
+// is.
+//
+// Which wall a Sector is comes from `own`, the family name it belongs to -
+// not from the base tile the borrow rule settled on for the installed
+// sheet. A borrowing Sector has no frame of its own to wear, for the same
+// reason #1050 keeps it off the borrowed family's variants.
+//
+// Built once per Sector rather than per cell, so the per-cell answer stays
+// a lookup and the draw loop keeps the shape it had with a recorded
+// variant. A Sector with no Door in it builds an empty map and answers
+// every cell from the base or the variant, exactly as it did before any
+// cell could wear a frame.
+std::map<std::pair<std::uint32_t, std::uint32_t>, std::string>
+doorframeTilesForSector(std::string const& wall,
+	std::shared_ptr<const core::Sector> sector)
+{
+	std::map<std::pair<std::uint32_t, std::uint32_t>, std::string> frames;
+	if (wall.empty() || !sector) return frames;
+	for (std::uint32_t index = 0; index < sector->getNumObjects(); ++index) {
+		auto const object = sector->getObject(index);
+		if (!object || object->getObjectType() != core::SectorObjectType::Door)
+			continue;
+		auto const door = static_pointer_cast<const core::DoorSectorObject>(
+			object)->getDoor();
+		// A Door is registered on both Sectors of the pair it joins. Only
+		// the front wall wears the frame: the Sector behind is seen through
+		// the opening from the Layer in front, and framing its side of the
+		// same gap would draw a moulding nobody looks at and cover what the
+		// aperture reveals.
+		if (!door || door->getFrontSector() != sector) continue;
+		auto const cellsWide = door->getCellsWide();
+		if (cellsWide == 0 || cellsWide > kMaxFramedDoorCellsWide) continue;
+		// Signed, because a Door sitting left of, or below, the Sector's own
+		// anchor subtracts to a negative before anything compares it, and
+		// an unsigned wrap puts the frame on a cell nobody framed.
+		auto const left = static_cast<std::int64_t>(object->getCellX())
+			- static_cast<std::int64_t>(sector->getCellX0());
+		auto const bottom = static_cast<std::int64_t>(object->getCellY())
+			- static_cast<std::int64_t>(sector->getCellY0());
+		std::string const height = door->getHeight() == core::Door::Height::Tall
+			? "t" : "r";
+		for (std::uint32_t cell = 0; cell < cellsWide; ++cell) {
+			if (left + static_cast<std::int64_t>(cell) < 0 || bottom < 0)
+				continue;
+			std::string const name = "doorframe-" + wall + "-"
+				+ std::to_string(cellsWide) + height + "-"
+				+ (cell == 0 ? "L0" : "R0");
+			// A frame the installed atlas does not carry is no frame at all.
+			// The cell falls back to its wall's tile - the base, or the
+			// variant its author painted - rather than to the missing-art
+			// colour, which is what lets a World drawn on an atlas written
+			// before doorframes existed carry on drawing exactly what it
+			// drew before. The same fallback is what a tall Door in a wall
+			// with no tall frame authored answers with, and a Corridor has
+			// none because a tall Door is refused in one.
+			if (!hasSectorTileOverlay(name)) continue;
+			frames.emplace(std::make_pair(static_cast<std::uint32_t>(
+				left + static_cast<std::int64_t>(cell)),
+				static_cast<std::uint32_t>(bottom)), name);
+		}
+	}
+	return frames;
+}
+
 // The resolver the Sector surface loop asks for one cell's tile (#1039).
 //
 // A cell answers the variant it was recorded as wearing, and the base tile
@@ -2036,9 +2115,20 @@ std::string newFamilySurfaceOrBorrowed(char const* own, char const* borrowed)
 SectorSurfaceTileResolver sectorSurfaceTileResolver(std::string ownTile,
 	std::string baseTile, std::shared_ptr<const core::Sector> sector)
 {
-	return [own = std::move(ownTile), base = std::move(baseTile), sector](
+	// Which of this wall's cells a Door stands in is settled here, once, off
+	// the live Door objects. Nothing about a frame is recorded: it is
+	// derived every frame from what is standing in the wall, which is what
+	// makes a Door a reversible placement. Take the Door out and the cell
+	// answers its base or the variant its author painted, because the
+	// entry underneath was never touched - the frame only ever outranked it
+	// for as long as the Door was there (#1054).
+	auto frames = doorframeTilesForSector(ownTile, sector);
+	return [own = std::move(ownTile), base = std::move(baseTile), sector,
+		frames = std::move(frames)](
 		std::uint32_t column, std::uint32_t level) -> std::string
 	{
+		auto const frame = frames.find(std::make_pair(column, level));
+		if (frame != frames.end()) return frame->second;
 		auto const variant = sector->surfaceVariantAt(column, level);
 		if (!variant) return base;
 		auto const tile = own + "-V" + std::to_string(*variant);

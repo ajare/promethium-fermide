@@ -251,6 +251,49 @@ namespace
 					+ "' was offered with no tile behind it");
 	}
 
+	// A doorframe is never offered as a swatch (#1054).
+	//
+	// A frame is derived from the Door standing in a wall; there is no
+	// authoring act that puts one down. An author who could pick a
+	// `doorframe-*` swatch would be painting a moulding onto a cell no
+	// Door frames - a picture no rule produced, and one the next Door to
+	// arrive would cover anyway. The strip cannot offer one because it is
+	// built from the surface query and the per-kind variant count, and a
+	// frame is in neither. That is a property of how the strip is built,
+	// and worth pinning rather than rediscovering the day the strip is
+	// rebuilt.
+	void theStripNeverOffersADoorframeTile(smoke::Context const& context)
+	{
+		auto const atlas = installAuthoredAtlas(context);
+		require(!atlas.overlays.empty(),
+			"The authored atlas installed with no doorframes, so this check has "
+			"nothing to keep out of the strip");
+		for (auto const& [tool, kind] : surfaceTools())
+		{
+			for (auto const& swatch : sectorVariantSwatches(tool))
+			{
+				require(atlas.overlays.count(swatch.tileName) == 0,
+					kind + "'s swatch strip offers the doorframe '"
+					+ swatch.tileName + "'; a frame is derived from the Door in "
+					"the wall and is not a thing an author can paint");
+				require(swatch.tileName.rfind("doorframe-", 0) != 0,
+					kind + "'s swatch strip offers '" + swatch.tileName
+					+ "', which is named as a doorframe");
+				require(hasSectorTileSurface(swatch.tileName),
+					kind + "'s swatch '" + swatch.tileName
+						+ " is not a Sector surface, so the strip is offering a "
+						+ "tile the surface query does not know");
+			}
+		}
+		// And the frames the atlas does carry are reachable only through the
+		// overlay query, never the surface one the strip reads.
+		for (auto const& entry : atlas.overlays)
+			require(!hasSectorTileSurface(entry.first),
+				"The doorframe '" + entry.first
+					+ "' answers the Sector-surface query yes, so a strip built "
+					+ "from that query could offer it");
+	}
+
 	// A tool that paints no tiled surface has no strip. Background and
 	// Facade are Sector types authored as flat colour - they never ask the
 	// atlas for a tile, and a variant entry on one is refused at load
@@ -543,6 +586,8 @@ namespace editor_smoke
 			withState<theCountComesFromTheTilesetQuery> });
 		checks.push_back({ "sectorVariantStrip/everySwatchHasItsTileInTheInstalledAtlas",
 			withState<everySwatchHasItsTileInTheInstalledAtlas> });
+		checks.push_back({ "sectorVariantStrip/theStripNeverOffersADoorframeTile",
+			withState<theStripNeverOffersADoorframeTile> });
 		checks.push_back({ "sectorVariantStrip/aToolThatPaintsNoSurfaceShowsNoStrip",
 			withState<aToolThatPaintsNoSurfaceShowsNoStrip> });
 		checks.push_back({ "sectorVariantStrip/noAtlasInstalledShowsNoStrip",

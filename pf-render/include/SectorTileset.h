@@ -52,6 +52,15 @@ struct SectorTileset
     SectorTilesetFamily family{ SectorTilesetFamily::Old };
     std::map<std::string, SectorTileRegion> surfaces;
     std::map<std::string, SectorTileRegion> boundaries;
+    // Tiles this atlas carries that are not Sector surfaces (#1054): the
+    // doorframes a Door's cells wear instead of the wall's own tile. They
+    // are full-cell tiles of the same sheet and the per-cell surface loop
+    // can draw them, but they are deliberately kept out of `surfaces` so
+    // `hasSectorTileSurface()` keeps answering the question its name asks.
+    // A doorframe is part of a wall's dressing derived from a Door, not a
+    // surface a Sector is authored with, and a query that answered yes to
+    // both would stop being usable for either.
+    std::map<std::string, SectorTileRegion> overlays;
     // How many variants each base surface declared (#1038). The count is the
     // author's own number, read off the base sprite rather than counted back
     // from the tiles derived from it, so it says what was stated rather than
@@ -85,6 +94,17 @@ void clearSectorTileset();
 // Shuttle's and the Staircase's - it is the wrong question, and the
 // caller asks the family below instead (#1027).
 bool hasSectorTileSurface(std::string const& kind);
+// Whether the installed atlas carries a doorframe (overlay) tile under
+// this name (#1054).
+//
+// A separate query rather than a wider one, because the two questions are
+// asked for different reasons and neither wants the other's answer. A
+// caller deciding whether a Sector type owns its surface asks the surface
+// query; a caller deciding whether a framed opening can be drawn asks
+// this one. Answering both from one map would make "is this a Sector
+// surface" true of a doorframe, and the borrow rule and the swatch strip
+// both read that query looking for walls.
+bool hasSectorTileOverlay(std::string const& name);
 // Whether the installed sector atlas is the New family: a version 2
 // authored set, in which every surface-bearing Sector type wears its own
 // tile. False when no atlas is installed, which is the safe answer: with

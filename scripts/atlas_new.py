@@ -186,16 +186,109 @@ def resolve_regions(spec: AtlasSpec,
     """Every tile's region in image pixels: its cell plus its content offset.
 
     Variant families are expanded first, so the regions the manifest
-    declares are the whole sheet's and not just the base sprites'.
+    declares are the whole sheet's and not just the base sprites'. Overlays
+    are included with them: they are tiles of the same sheet and the same
+    `ImageSet`, whatever else separates what they draw (#1054).
     """
     tile_width, tile_height = tileset["tile_size"]
     regions = []
-    for name, sprite in derive_sprites(spec, tileset).items():
+    for name, sprite in all_sprites(spec, tileset).items():
         column, row = sprite["cell"]
         x, y, width, height = sprite["content"]
         regions.append((name, column * tile_width + x, row * tile_height + y,
                        width, height))
     return sorted(regions)
+
+
+def overlay_sprites(spec: AtlasSpec, tileset: dict) -> dict:
+    """The `overlays` map: tiles the atlas carries that are not surfaces.
+
+    A doorframe is the tile a door cell wears instead of its wall's surface
+    tile. It lives beside the surfaces rather than among them so the query
+    that answers "is this a Sector surface" keeps answering that question
+    and does not answer yes for a frame (#1054). Everything else about the
+    tile is authored the same way: a cell, a content rectangle, and the
+    render semantics it draws with.
+
+    An overlay declares no variant family. A surface's variants are
+    different pictures of the same thing an author picks; a frame is not
+    picked at all, it is derived from the wall the Door sits in, so a
+    family of frames is a choice nobody can make. The key is refused rather
+    than ignored, which is the same reason the version 1 formats refuse it.
+    """
+    overlays = tileset.get("overlays")
+    if overlays is None:
+        return {}
+    if not isinstance(overlays, dict):
+        raise SystemExit(f"{spec.tileset}: `overlays` must be a map of tile "
+                        "definitions, each authored like a sprite")
+    for name, sprite in overlays.items():
+        if not isinstance(sprite, dict):
+            raise SystemExit(f"{spec.tileset}: overlay '{name}' is not a tile "
+                            "definition")
+        if "variants" in sprite:
+            raise SystemExit(f"{spec.tileset}: overlay '{name}' declares "
+                            "`variants`, which an overlay does not derive; a "
+                            "doorframe is derived from the wall it frames and "
+                            "has no family of pictures to pick from")
+    return overlays
+
+
+def all_sprites(spec: AtlasSpec, tileset: dict) -> dict:
+    """Every tile the sheet holds: the sprites and their derived variants,
+    plus the overlays.
+
+    One map, because the sheet and the `ImageSet` are one thing. A name in
+    both maps is refused rather than resolved by precedence: two tiles in
+    one atlas under one name means whichever the loader happens to find, and
+    a frame drawing as a surface, or the other way round, is not a thing an
+    author should be able to author. It also covers the case of an overlay
+    wearing a derived variant's name - `room-V1` is already in the map by
+    the time the overlay is offered, and the collision is the refusal, so
+    no separate reserved-name rule is needed here for the overlays and the
+    C++ loader refuses the same way through the same check (#1054).
+    """
+    tiles = derive_sprites(spec, tileset)
+    for name, sprite in overlay_sprites(spec, tileset).items():
+        if name in tiles:
+            raise SystemExit(f"{spec.tileset}: '{name}' is authored in both "
+                            "`sprites` and `overlays`; a tile is one kind or "
+                            "the other")
+        tiles[name] = sprite
+    return tiles
+
+
+def hole_rect(spec: AtlasSpec, tileset: dict, name: str,
+              sprite: dict) -> tuple[int, int, int, int] | None:
+    """The transparent hole an overlay declares, checked against its own cell.
+
+    The hole is stated in image pixels from the sprite's cell top-left. It
+    has to sit inside the content the sprite authored: a hole that ran
+    outside the cell would punch a neighbour's artwork, and one that filled
+    the whole cell would leave nothing to draw.
+    """
+    hole = sprite.get("hole")
+    if hole is None:
+        return None
+    if not isinstance(hole, list) or len(hole) != 4 \
+            or not all(isinstance(v, int) and not isinstance(v, bool) for v in hole):
+        raise SystemExit(f"{spec.tileset}: '{name}' `hole` must be "
+                        "[x, y, width, height] in image pixels")
+    x, y, width, height = hole
+    grid_width, grid_height = tileset["tile_size"]
+    content_x, content_y, content_w, content_h = sprite["content"]
+    if width <= 0 or height <= 0:
+        raise SystemExit(f"{spec.tileset}: '{name}' `hole` must have a positive "
+                        "size")
+    if x < 0 or y < 0 or x + width > grid_width or y + height > grid_height:
+        raise SystemExit(f"{spec.tileset}: '{name}' `hole` runs outside its cell")
+    if x < content_x or y < content_y or x + width > content_x + content_w \
+            or y + height > content_y + content_h:
+        raise SystemExit(f"{spec.tileset}: '{name}' `hole` runs outside the "
+                        "content it was authored inside")
+    return (x, y, width, height)
+
+
 
 
 def render_placeholder(spec: AtlasSpec, tileset: dict) -> Image.Image:
@@ -206,10 +299,16 @@ def render_placeholder(spec: AtlasSpec, tileset: dict) -> Image.Image:
     of the geometry recorded in the tileset. Every tile - base or derived
     variant - is labelled with its own name, and the slab steps one shade
     darker per sheet row, so the sheet reads as the family structure it is.
+
+    A tile that declares a `hole` has it punched out transparent after
+    every slab and label is drawn. That is the whole of what makes a
+    doorframe placeholder read as a frame rather than as a wall: the
+    opening is exactly where the tile says it is, and nothing is painted
+    behind it (#1054).
     """
     width, height = tileset["size"]
     tile_width, tile_height = tileset["tile_size"]
-    sprites = derive_sprites(spec, tileset)
+    sprites = all_sprites(spec, tileset)
     sheet = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(sheet)
     for name, x, y, region_width, region_height in resolve_regions(spec, tileset):
@@ -230,6 +329,20 @@ def render_placeholder(spec: AtlasSpec, tileset: dict) -> Image.Image:
             column, row = sprite["cell"]
             draw.text((column * tile_width + 6, row * tile_height + 6), name,
                      fill=(52, 58, 70, 255))
+    # Punching happens in its own pass, after every slab and label, so a
+    # hole cannot be painted back over by a tile drawn after it and a label
+    # cannot survive inside an opening meant to show the space behind the
+    # wall.
+    for name, _, _, _, _ in resolve_regions(spec, tileset):
+        hole = hole_rect(spec, tileset, name, sprites[name])
+        if hole is None:
+            continue
+        hx, hy, hw, hh = hole
+        column, row = sprites[name]["cell"]
+        draw.rectangle([column * tile_width + hx, row * tile_height + hy,
+                       column * tile_width + hx + hw - 1,
+                       row * tile_height + hy + hh - 1],
+                       fill=(0, 0, 0, 0))
     return sheet
 
 

@@ -90,6 +90,10 @@ set(names
     sectorAtlasNew/flatColourSectorsTakeNoTile
     sectorAtlasNew/loaderRefusesASetMissingASurface
     sectorAtlasNew/loaderRefusesABoundaryStripInTheNewSet
+    sectorAtlasNew/loaderRefusesAnOverlayThatIsAlsoASurface
+    sectorAtlasNew/loaderRefusesVariantsOnAnOverlay
+    sectorAtlasNew/loaderRefusesAnOverlayWearingTheBoundaryPrefix
+    sectorAtlasNew/loaderReadsOverlaysApartFromSurfaces
     sectorAtlasNew/loaderRefusesASurfaceThatIsNotOneFullCell
     sectorAtlasNew/loaderRefusesASurfaceOffsetFromItsCell
     sectorAtlasNew/loaderAcceptsAConformingSet
@@ -121,6 +125,18 @@ set(names
     sectorSurfaceVariants/aVariantOnADumbwaiterBorrowingTheLiftDrawsTheLiftBase
     sectorSurfaceVariants/aVariantChangesThePictureAndNotTheGeometry
     sectorSurfaceVariants/aVariantOnTheRowTheViewportBottomCutsStillDraws
+    doorframeCells/oneWideRoomDoorWearsItsFrame
+    doorframeCells/twoWideRoomDoorWearsItsFramePair
+    doorframeCells/tallRoomDoorWearsItsTallFrame
+    doorframeCells/corridorDoorsWearCorridorFrames
+    doorframeCells/theFrameKeepsTheFloorAnchoredCrop
+    doorframeCells/aClippedDoorCellIsNeverDrawn
+    doorframeCells/aVariantUnderADoorIsHiddenAndComesBack
+    doorframeCells/adjacentDoorsFrameTheirOwnCells
+    doorframeCells/aRemovedDoorRevertsWithNoResidue
+    doorframeCells/theBackWallOfAThresholdTakesNoFrame
+    doorframeCells/aWallWithNoFrameAuthoredDrawsItsBase
+    doorframeCells/aFrameIsReachableWithoutBeingASurface
     sectorTilePreview/oneTileFramesTheRectItIsGiven
     sectorTilePreview/anyRectFramesOneTileAndNotACellGrid
     sectorTilePreview/itIsOneTileWhereTheWorldRepeatIsFour

@@ -874,10 +874,37 @@ namespace
 		require(sectorTilesetIsNewFamily(), "The installed Sector atlas did not "
 			"come up as the New family, so the Shuttle and Staircase would fall "
 			"back to borrowed art (#1027)");
+		// Every tile the SectorAtlas manifest declares is installed, and each
+		// lands on the side of the renderer's split the authored file put it
+		// on. A doorframe is a tile of this atlas but not a Sector surface,
+		// and the query that answers "is this a Sector surface" is asked
+		// about every name this loop could reach - so a frame that arrived in
+		// the surfaces map would answer it wrongly, and the borrow rule and
+		// the swatch strip would start treating a frame as a wall (#1054).
+		auto const authoredSector = SectorTileset::load(
+			context.fixture("resources/textures/sectors-new.tileset.yaml"));
+		std::size_t framesInstalled{};
 		for (auto const& [tile, region] : entries.at("SectorAtlas").regions)
-			require(hasSectorTileSurface(tile), "The installed Sector atlas has "
-				"no '" + tile + "' surface, though SectorAtlas declares it at "
+		{
+			if (authoredSector.overlays.count(tile) == 0)
+			{
+				require(hasSectorTileSurface(tile), "The installed Sector atlas "
+					"has no '" + tile + "' surface, though SectorAtlas declares "
+					"it at " + regionsText(region));
+				continue;
+			}
+			require(hasSectorTileOverlay(tile), "The installed Sector atlas has "
+				"no '" + tile + "' doorframe, though SectorAtlas declares it at "
 				+ regionsText(region));
+			require(!hasSectorTileSurface(tile), "The installed Sector atlas "
+				"answers 'is this a Sector surface' yes for the doorframe tile "
+				+ tile + "; a frame is not a surface a Sector is authored with");
+			++framesInstalled;
+		}
+		require(framesInstalled == authoredSector.overlays.size(),
+			std::to_string(framesInstalled) + " doorframes were installed from a "
+			"manifest that declares none of them, while the authored set holds "
+			+ std::to_string(authoredSector.overlays.size()));
 
 		// The Objects slot, read back through the renderer's own surface: the
 		// installed artwork per tile is the manifest's region under the

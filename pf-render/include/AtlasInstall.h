@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 
 #include "DrawTypes.h"
@@ -73,6 +74,13 @@ namespace pf::render
 		// that derives no families, which is the honest answer rather than a
 		// missing one.
 		std::map<std::string, int> variantCounts;
+		// The names the authored sector set put in its `overlays` map
+		// (#1054). The `ImageSet` has no kind column - every entry it declares
+		// is just a named pixel region - so which of them are doorframes and
+		// which are Sector surfaces is a fact only the authored tileset holds.
+		// The Sector slot routes them apart with this; every other slot reads
+		// nothing from it.
+		std::set<std::string> overlayNames;
 	};
 
 	// The four viewport atlas slots as the shared renderer holds them: which

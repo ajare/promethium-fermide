@@ -259,6 +259,7 @@ set(editor_names
     sectorVariantStrip/stripIsBasePlusEveryDeclaredVariant
     sectorVariantStrip/theCountComesFromTheTilesetQuery
     sectorVariantStrip/everySwatchHasItsTileInTheInstalledAtlas
+    sectorVariantStrip/theStripNeverOffersADoorframeTile
     sectorVariantStrip/aToolThatPaintsNoSurfaceShowsNoStrip
     sectorVariantStrip/noAtlasInstalledShowsNoStrip
     sectorVariantStrip/pickingHighlightsAndTheNextPickMoves

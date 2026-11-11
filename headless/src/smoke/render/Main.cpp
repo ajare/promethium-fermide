@@ -26,6 +26,7 @@ int main(int argc, char** argv)
 	render_smoke::registerSectorSurfacePerCellResolution(checks);
 	render_smoke::registerSectorSurfaceBottomClip(checks);
 	render_smoke::registerSectorSurfaceVariants(checks);
+	render_smoke::registerDoorframeCells(checks);
 	render_smoke::registerSectorTilePreview(checks);
 	render_smoke::registerAgentAtlas(checks);
 	render_smoke::registerWalkwayArtwork(checks);

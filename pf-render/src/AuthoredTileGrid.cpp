@@ -131,7 +131,7 @@ void deriveVariantFamily(DeclaredFamily const& family,
 
 AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
     bool declaresRenderSemantics, std::string const& tileNoun,
-    AuthoredVariantFamilies variantFamilies)
+    AuthoredVariantFamilies variantFamilies, std::string const& spritesKey)
 {
     AuthoredTileGrid grid;
     grid.width = root["size"][0].as<int>();
@@ -150,7 +150,7 @@ AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
         grid.width % tw || grid.height % th)
         throw std::runtime_error("An authored tile grid must cover the atlas "
             "image with no remainder");
-    if (!root["sprites"].IsMap())
+    if (!root[spritesKey].IsMap())
         throw std::runtime_error("Missing " + tileNoun + " definitions");
     int const rows = grid.height / th;
     // Families are derived in a second pass, after every authored sprite has
@@ -160,7 +160,7 @@ AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
     // duplicate-key complaint about the derivation rather than the plain
     // statement that the name is not the author's to write.
     std::vector<DeclaredFamily> families;
-    for (auto const& item : root["sprites"]) {
+    for (auto const& item : root[spritesKey]) {
         auto const v = item.second;
         if (!v["cell"].IsSequence() || v["cell"].size() != 2 ||
             !v["content"].IsSequence() || v["content"].size() != 4)

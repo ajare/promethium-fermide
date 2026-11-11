@@ -608,6 +608,7 @@ pf_add_smoke_module(pf-smoke-render
         render/SectorSurfacePerCellResolution.cpp
         render/SectorSurfaceBottomClip.cpp
         render/SectorSurfaceVariants.cpp
+        render/DoorframeCells.cpp
         render/SectorTilePreview.cpp
         render/SerializationRendering.cpp
         render/AgentPoses.cpp

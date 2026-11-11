@@ -257,6 +257,15 @@ if(BUILD_TESTING)
     set_tests_properties(atlas-variant-family-contract PROPERTIES
         LABELS "harness;tools;validation-fast" TIMEOUT 60)
 
+    # The doorframe tiles the shipped Sector atlas authors: each frame's
+    # transparent hole rounded down inside the aperture it frames, the
+    # committed sheet punched where the tileset says, and the frames kept
+    # in the overlay map rather than among the surfaces (#1054).
+    add_test(NAME doorframe-tile-contract COMMAND ${Python3_EXECUTABLE}
+        "${PF_REPO_ROOT}/scripts/tests/doorframe_tiles.py")
+    set_tests_properties(doorframe-tile-contract PROPERTIES
+        LABELS "harness;tools;validation-fast" TIMEOUT 60)
+
     pf_add_headless_tool(pf-compatibility-probe src/CompatibilityProbe.cpp)
     set_target_properties(pf-compatibility-probe PROPERTIES FOLDER "Tests/Harness")
     add_test(NAME headless-compatibility-contract COMMAND ${Python3_EXECUTABLE}

@@ -65,7 +65,15 @@ struct AuthoredTileGrid
     std::map<std::string, int> variantCounts;
 };
 
+// Where the sprites are read from is a parameter rather than a constant
+// because the same grid authors more than one kind of tile in one file. A
+// version 2 sector tileset keeps its surfaces under `sprites` and its
+// doorframes under `overlays`, and both are cells on the same sheet with
+// the same content rule and the same refusals - which is exactly why one
+// loader reads them both rather than a second one written beside it
+// (#1054).
 AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
     bool declaresRenderSemantics, std::string const& tileNoun,
     AuthoredVariantFamilies variantFamilies
-        = AuthoredVariantFamilies::Refused);
+        = AuthoredVariantFamilies::Refused,
+    std::string const& spritesKey = "sprites");
