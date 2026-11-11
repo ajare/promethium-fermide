@@ -318,6 +318,30 @@ nothing rewritten. A base tile that is itself missing still draws the
 missing-art magenta: falling back from a variant to a base that is not there
 is not falling back to something.
 
+The variant is derived from the family the Sector belongs to, never from the
+name the draw ended up with (#1050). Two questions meet at the surface seam
+and only one of them owns the variant. Which family a Sector is in is
+`sectorSurfaceKind`'s answer, and no artwork installed changes it: an
+Airlock next door to a Corridor is still an Airlock. Which tile it draws is
+the borrow rule's answer, and is entirely a fact about the sheet - an
+Airlock with no `airlock` tile wears the Corridor's base, a Dumbwaiter the
+Lift's. Deriving the variant from the drawn name agrees with both for every
+type that owns its tile, which is every type the shipped set declares, and
+leaks the moment a Sector borrows: on a sheet carrying `corridor-V2` and no
+`airlock` tile, an Airlock recorded as wearing variant 2 asked for
+`corridor-V2`, found it, and drew a Corridor's variant - neither the tile
+the document recorded nor the base the fallback answers with. Asking the
+own family makes that unrepresentable: a borrowing Sector has no
+own-family variant tile to find, so its variant cells fall back to the
+borrowed base their plain neighbours are already drawing. The borrow rule
+keeps deciding the base and nothing else.
+
+The shape only shows on a partially-authored sheet - one type's variants
+present while another type's base is absent - which is what an author has
+under way far more often than the shipped `SectorAtlasNew` with all ten
+types and three variants each, and is exactly when a wrong tile reads as
+unfinished art rather than as a bug.
+
 The field is behind World schema version 70. A document written before this
 feature existed carries no such field on any record and loads as no variants
 recorded, which is exactly what it drew before the feature existed, and a

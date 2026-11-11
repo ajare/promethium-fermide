@@ -19,6 +19,15 @@
 //   * a base tile that is itself missing still draws the missing-art
 //     magenta. Falling back from a variant to a base that is not there is
 //     not falling back to something;
+//   * a variant recorded on a Sector that borrows its tile falls back to
+//     the borrowed *base*, and never wears a variant of the borrowed
+//     family. The variant belongs to the family the Sector is in, which no
+//     installed artwork changes; the borrow belongs to the sheet and
+//     decides only the base. #1040 derived the variant name from the drawn
+//     name instead, so on a sheet carrying `corridor-V2` and no `airlock`
+//     tile an Airlock recorded as wearing variant 2 drew a Corridor's
+//     variant - neither the tile the document recorded nor the base the
+//     fallback answers with (#1050);
 //   * a World repointed at the version 1 family - which declares no
 //     families, and so has no `-Vn` tile under any name - draws base on
 //     every variant cell while the Sector keeps its entries, so repointing
@@ -56,6 +65,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -174,11 +184,14 @@ namespace
 		return writer->getSerializedString();
 	}
 
-	// Writes a `surfaceVariants` block into the document's Room record the
-	// way a hand-authored World file carries one, and returns the document
-	// text. Nothing here goes through a C++ authoring call: the ticket is
-	// that a World file can say this, so this is the shape being tested.
+	// Writes a `surfaceVariants` block into the record of the named type -
+	// the Sector's own family name, which is also the `type` its record
+	// serializes as - the way a hand-authored World file carries one, and
+	// returns the document text. Nothing here goes through a C++ authoring
+	// call: the ticket is that a World file can say this, so this is the
+	// shape being tested.
 	std::string withSurfaceVariants(std::string const& yaml,
+		std::string const& recordType,
 		std::vector<core::SectorSurfaceVariant> const& entries)
 	{
 		// No entries means no field, which is the shape a World that never
@@ -193,7 +206,7 @@ namespace
 		for (auto record : document["construction"])
 		{
 			if (!record.IsMap()) continue;
-			if (record["type"].as<std::string>() != "room") continue;
+			if (record["type"].as<std::string>() != recordType) continue;
 			YAML::Node variants;
 			for (auto const& entry : entries)
 			{
@@ -206,7 +219,8 @@ namespace
 			record["surfaceVariants"] = variants;
 			authored = true;
 		}
-		require(authored, "The serialized World document carried no Room record");
+		require(authored, "The serialized World document carried no "
+			+ recordType + " record to author on");
 		return YAML::Dump(document);
 	}
 
@@ -221,32 +235,119 @@ namespace
 		return world;
 	}
 
-	// A Room built with no variants, serialized, authored with the given
-	// entries, and loaded back. The returned World's Room is the one every
-	// check here draws.
-	struct AuthoredRoom
+	// A Sector built the way the ticket says one is: a plain World, its own
+	// record patched with a `surfaceVariants` block, and loaded back. The
+	// returned Sector is the one the checks here draw.
+	//
+	// It carries both names the draw works with, because #1050 is exactly
+	// the case where they are not the same name:
+	//
+	//   `own`  - the family the Sector belongs to, the name its own tile
+	//            would be authored under, and the name the recorded variant
+	//            is derived from. No installed artwork changes it.
+	//   `base` - the base tile name the installed atlas resolves this
+	//            Sector's surface to: its own name when the sheet carries
+	//            it, the borrowed name when it does not (#1017).
+	//
+	// The check states `base` rather than deriving it, because deriving it
+	// here would re-run the borrow rule being tested and agree with whatever
+	// the renderer did.
+	struct AuthoredSector
 	{
 		std::shared_ptr<const core::World> world;
 		std::shared_ptr<const core::Sector> sector;
+		std::string own;
+		std::string base;
 	};
 
-	AuthoredRoom authoredRoom(uint32_t cellsWide, uint32_t levelsHigh,
+	// Builds the smallest World carrying exactly one Sector of the family
+	// `own`, authors the entries onto that Sector's own record, and loads
+	// it back. The fixture insists on exactly one: a World that carried no
+	// such Sector, or one whose entry landed on a neighbour's record, would
+	// have every check below drawing the wrong thing and calling it a pass.
+	AuthoredSector authoredSector(std::string const& own, std::string const& base,
+		std::function<void(core::World&)> const& build,
 		std::vector<core::SectorSurfaceVariant> const& entries)
 	{
-		core::World plain("Variant room world", 12, 8);
-		plain.addRoom("Room", 0, 1, 1, cellsWide, levelsHigh);
+		core::World plain("Variant sector world", 12, 8);
+		build(plain);
 		plain.finishBuild();
 		plain.pauseSimulation();
 		auto const world = loadDocument(withSurfaceVariants(serializeWorld(plain),
-			entries));
+			own, entries));
 		std::shared_ptr<const core::Sector> sector;
+		size_t matches = 0;
 		for (uint32_t index = 0; index < world->getNumSectors(); ++index)
-			if (world->getSector(index)->getName() == "Room") sector = world->getSector(index);
-		require(sector != nullptr, "The loaded World carried no Room");
-		require(sector->getCellsWide() == cellsWide
-				&& sector->getLevelsHigh() == levelsHigh,
+		{
+			auto const candidate = world->getSector(index);
+			if (sectorSurfaceKind(*candidate) != own) continue;
+			++matches;
+			sector = candidate;
+		}
+		require(matches == 1, "The fixture World carried "
+			+ std::to_string(matches) + " Sectors of the family '" + own
+			+ "'; the check needs exactly one to draw");
+		require(sector->getCellsWide() > 0 && sector->getLevelsHigh() > 0,
+			"The loaded Sector has no cells to author on");
+		return { world, sector, own, base };
+	}
+
+	// The Room every pre-existing check here draws. A Room owns its tile on
+	// every sheet this file installs, so its own name and its base are the
+	// same name - which is precisely why this file could not see the
+	// difference #1050 is about until a borrowing Sector came along.
+	AuthoredSector authoredRoom(uint32_t cellsWide, uint32_t levelsHigh,
+		std::vector<core::SectorSurfaceVariant> const& entries)
+	{
+		auto const fixture = authoredSector("room", "room",
+			[cellsWide, levelsHigh](core::World& world)
+		{
+			world.addRoom("Room", 0, 1, 1, cellsWide, levelsHigh);
+		}, entries);
+		require(fixture.sector->getCellsWide() == cellsWide
+				&& fixture.sector->getLevelsHigh() == levelsHigh,
 			"The loaded Room is not the size it was authored as");
-		return { world, sector };
+		return fixture;
+	}
+
+	// The Corridor the ownership control draws: a Sector that owns its tile
+	// on the same partially-authored sheet a borrowing Airlock refuses to
+	// take a variant from.
+	AuthoredSector authoredCorridor(
+		std::vector<core::SectorSurfaceVariant> const& entries)
+	{
+		return authoredSector("corridor", "corridor", [](core::World& world)
+		{
+			world.addCorridor(0, 1, 1, 4, 1);
+		}, entries);
+	}
+
+	// The Airlock between two Rooms, on a Layer of its own, as the
+	// persistence fixtures author one. On the sheets these checks install
+	// it has no tile of its own and borrows the Corridor's base (#1017).
+	AuthoredSector authoredAirlock(
+		std::vector<core::SectorSurfaceVariant> const& entries)
+	{
+		return authoredSector("airlock", "corridor", [](core::World& world)
+		{
+			world.addRoom("Left", 0, 0, 0, 4, 1);
+			world.addRoom("Right", 0, 0, 6, 4, 1);
+			world.addAirlock(0, 0, 4, 2, 1.f);
+		}, entries);
+	}
+
+	// The Dumbwaiter shaft, which borrows the Lift's rather than the
+	// Corridor's - the other borrow, the other base, so the rule is seen to
+	// hold for a borrowed family other than the one the ticket reproduced.
+	AuthoredSector authoredDumbwaiter(
+		std::vector<core::SectorSurfaceVariant> const& entries)
+	{
+		return authoredSector("dumbwaiter", "lift", [](core::World& world)
+		{
+			world.addCorridor(0, 0, 8);
+			world.addCorridor(1, 0, 8);
+			world.addDumbwaiter(1, 0, 3);
+		}, entries);
 	}
 
 	// ------------------------------------------------------------------
@@ -387,21 +488,30 @@ namespace
 		return cells;
 	}
 
-	// The tile the rule says one cell draws, given the entries and what the
-	// installed atlas carries. Stated in the check rather than read out of
-	// the renderer, so a renderer that fell back wrongly fails against a
-	// rule that says otherwise. A resolved name the atlas does not carry -
-	// the base itself, on a sheet built without one - answers as a flat
-	// fill, because that is what the missing-art case looks like.
+	// The tile the rule says one cell draws, given the entries, what the
+	// installed atlas carries, and the two names the Sector works with.
+	// Stated in the check rather than read out of the renderer, so a
+	// renderer that fell back wrongly fails against a rule that says
+	// otherwise. A resolved name the atlas does not carry - the base
+	// itself, on a sheet built without one - answers as a flat fill,
+	// because that is what the missing-art case looks like.
+	//
+	// The `-Vn` name is built from `own`, never from `base` (#1050). That
+	// is the whole of the difference between this rule and the one the
+	// renderer followed before the fix: for a Room the two names are the
+	// same string and the two rules draw the same picture, and for a
+	// borrowing Sector they are not, and only this one refuses to wear
+	// another type's variant.
 	std::string expectedTile(SectorTileset const& atlas,
 		std::vector<core::SectorSurfaceVariant> const& entries,
+		std::string const& own, std::string const& base,
 		uint32_t column, uint32_t level)
 	{
-		std::string resolved = "room";
+		std::string resolved = base;
 		for (auto const& entry : entries)
 		{
 			if (entry.column != column || entry.level != level) continue;
-			auto const variant = "room-V" + std::to_string(entry.variant);
+			auto const variant = own + "-V" + std::to_string(entry.variant);
 			if (atlas.surfaces.count(variant)) resolved = variant;
 			break;
 		}
@@ -414,6 +524,7 @@ namespace
 		std::shared_ptr<const core::Sector> sector,
 		std::vector<RecordedCell> const& recorded,
 		std::vector<core::SectorSurfaceVariant> const& entries,
+		std::string const& own, std::string const& base,
 		SectorTileset const& atlas)
 	{
 		auto const cellsWide = sector->getCellsWide();
@@ -470,7 +581,8 @@ namespace
 						+ rectText(cellLeft, top, cellLeft + cellWidth, bottom) + ")");
 				taken[found] = true;
 				matched.push_back(recorded[found]);
-				auto const want = expectedTile(atlas, entries, column, level);
+				auto const want = expectedTile(atlas, entries, own, base, column,
+						level);
 				auto const& got = recorded[found];
 				auto const gotTile = got.textured ? got.tile : std::string(kFlat);
 				require(gotTile == want,
@@ -525,7 +637,8 @@ namespace
 			"A cell with no entry answered as though it had one");
 		auto const recorded = recordSurfaceCells(fixture.sector,
 			fixture.sector->getLayerIndex(), atlas);
-		matchedToGrid(fixture.sector, recorded, entries, atlas);
+		matchedToGrid(fixture.sector, recorded, entries, fixture.own,
+			fixture.base, atlas);
 
 		// Stated once more, plainly: the two cells with tiles behind them
 		// came off their own variant regions, and no cell came off a variant
@@ -560,7 +673,8 @@ namespace
 			"A variant with no tile behind it was not retained on the Sector");
 		auto const recorded = recordSurfaceCells(fixture.sector,
 			fixture.sector->getLayerIndex(), atlas);
-		matchedToGrid(fixture.sector, recorded, entries, atlas);
+		matchedToGrid(fixture.sector, recorded, entries, fixture.own,
+			fixture.base, atlas);
 		for (auto const& cell : recorded)
 			require(cell.tile == "room",
 				"A cell drew " + describe(cell) + "; an unbacked variant falls "
@@ -583,7 +697,8 @@ namespace
 		auto const fixture = authoredRoom(2, 2, entries);
 		auto const recorded = recordSurfaceCells(fixture.sector,
 			fixture.sector->getLayerIndex(), atlas);
-		matchedToGrid(fixture.sector, recorded, entries, atlas);
+		matchedToGrid(fixture.sector, recorded, entries, fixture.own,
+			fixture.base, atlas);
 
 		int magenta = 0;
 		for (auto const& cell : recorded)
@@ -619,7 +734,8 @@ namespace
 		plain.addRoom("Room", 0, 1, 1, 4, 2);
 		plain.finishBuild();
 		plain.pauseSimulation();
-		auto const document = withSurfaceVariants(serializeWorld(plain), entries);
+		auto const document = withSurfaceVariants(serializeWorld(plain), "room",
+			entries);
 
 		auto const oldAtlas = installOldFamilyAtlas();
 		require(!hasSectorTileSurface("room-V1"),
@@ -635,7 +751,7 @@ namespace
 			"the picture changes, the author's data does not");
 		auto const recorded = recordSurfaceCells(oldSector,
 			oldSector->getLayerIndex(), oldAtlas);
-		matchedToGrid(oldSector, recorded, entries, oldAtlas);
+		matchedToGrid(oldSector, recorded, entries, "room", "room", oldAtlas);
 		for (auto const& cell : recorded)
 			require(cell.textured && cell.tile == "room",
 				"A variant cell drew " + describe(cell) + " on the version 1 "
@@ -654,7 +770,8 @@ namespace
 			"The entries changed between the old-family load and the new one");
 		auto const restoredCells = recordSurfaceCells(restored,
 			restored->getLayerIndex(), newAtlas);
-		matchedToGrid(restored, restoredCells, entries, newAtlas);
+		matchedToGrid(restored, restoredCells, entries, "room", "room",
+			newAtlas);
 		int variantCells = 0;
 		for (auto const& cell : restoredCells)
 			if (cell.tile != "room") ++variantCells;
@@ -720,6 +837,141 @@ namespace
 				"no tile behind it and falls back to base)");
 	}
 
+	// The sheet the borrow leak needs: one type authored with its variants,
+	// another type absent entirely. A Sector that owns its tile cannot tell
+	// this shape from any other - it never looks at another type's region -
+	// so only a borrowing Sector meets it, and only here does "which name is
+	// the variant derived from" stop having one answer. The shipped
+	// `SectorAtlasNew` declares all ten types with three variants each and
+	// never shows it; a half-finished sheet does, which is exactly when an
+	// author is least able to tell a wrong tile from unfinished art.
+	SectorTileset installBorrowingAtlas()
+	{
+		return installAtlas(SectorTilesetFamily::New,
+			{ "room", "corridor", "corridor-V1", "corridor-V2" });
+	}
+
+	// A variant recorded on a Sector that borrows its tile draws the
+	// borrowed base, never a variant of the borrowed family (#1050).
+	//
+	// #1040's fallback says a recorded variant whose tile the installed
+	// atlas does not carry draws the base. The tile recorded here is
+	// `airlock-V2` and this sheet does not carry it, so the honest answer
+	// is the base - which for a borrowing Airlock is `corridor`. The
+	// resolver before the fix derived the variant name from the name the
+	// borrow rule had already settled on, so it asked for `corridor-V2`,
+	// found it, and drew a Corridor's variant: neither the tile the
+	// document recorded nor the base the rule answers with, and the kind
+	// of wrong an author reads as unfinished art rather than a bug.
+	//
+	// Two questions met at that seam and only one of them owns the variant:
+	// which family the Sector belongs to, which `sectorSurfaceKind` answers
+	// and no installed artwork changes, and which tile it draws, which is
+	// the borrow rule and is entirely a fact about the sheet. The variant
+	// belongs to the first; this check is the shape where telling them
+	// apart is the whole of the difference.
+	void aVariantOnABorrowingSectorDrawsTheBorrowedBaseAndNotABorrowedVariant(
+		smoke::Context const&)
+	{
+		pinViewport();
+		auto const atlas = installBorrowingAtlas();
+		require(!hasSectorTileSurface("airlock"),
+			"The test atlas was supposed to leave the Airlock's own tile out");
+		require(!hasSectorTileSurface("airlock-V2"),
+			"The test atlas reported carrying a tile it was not built with");
+		// The tile the leak wore is on the sheet and reachable. If this is
+		// ever false, the check below has quietly stopped testing anything.
+		require(hasSectorTileSurface("corridor-V2"),
+			"The test atlas was supposed to carry the borrowed family's variant");
+
+		auto const entries = std::vector<core::SectorSurfaceVariant>{ { 0, 0, 2 } };
+		auto const fixture = authoredAirlock(entries);
+		require(std::string{ sectorSurfaceKind(*fixture.sector) } == fixture.own
+				&& fixture.own == "airlock",
+			"The fixture Sector is not the borrowing Airlock this case is about");
+		require(fixture.base == "corridor",
+			"The Airlock was supposed to be drawing the Corridor's base");
+		// The entry survives the fallback, as #1040 requires: the tile may
+		// arrive with the next sheet, and the entry has to still be there.
+		require(fixture.sector->getSurfaceVariants() == entries,
+			"The borrowing Sector did not retain the recorded variant");
+
+		auto const recorded = recordSurfaceCells(fixture.sector,
+			fixture.sector->getLayerIndex(), atlas);
+		matchedToGrid(fixture.sector, recorded, entries, fixture.own,
+			fixture.base, atlas);
+		// Stated once more without the rule helper, so a rule that agreed
+		// with a wrong renderer still cannot hide it: every cell of the
+		// variant Sector, the recorded one included, came off the Corridor's
+		// base region and none came off a variant region at all.
+		for (auto const& cell : recorded)
+			require(cell.textured && cell.tile == "corridor",
+				"A cell of a borrowing Airlock recorded as wearing variant 2 drew "
+					+ describe(cell) + "; it draws the borrowed base, never a "
+					"variant of the borrowed family");
+	}
+
+	// The control that makes the case above mean something. Same sheet, the
+	// same variant number, on the Sector that owns the tile: the Corridor
+	// draws `corridor-V2`, because the atlas carries it and the variant is
+	// its own. Without this, an Airlock drawing `corridor` could be read as
+	// a sheet that never had the tile to reach, and the check above would
+	// pass for the wrong reason.
+	void aVariantOnASectorThatOwnsItsTileStillDrawsItsOwnVariantTile(
+		smoke::Context const&)
+	{
+		pinViewport();
+		auto const atlas = installBorrowingAtlas();
+		require(hasSectorTileSurface("corridor-V2"),
+			"The control needs the very tile the borrowing case refused");
+		auto const entries = std::vector<core::SectorSurfaceVariant>{ { 1, 0, 2 } };
+		auto const fixture = authoredCorridor(entries);
+		require(fixture.own == "corridor" && fixture.base == "corridor",
+			"The control Sector must own the tile it draws");
+		require(fixture.sector->getSurfaceVariants() == entries,
+			"The owning Sector did not retain the recorded variant");
+		auto const recorded = recordSurfaceCells(fixture.sector,
+			fixture.sector->getLayerIndex(), atlas);
+		matchedToGrid(fixture.sector, recorded, entries, fixture.own,
+			fixture.base, atlas);
+		int variantCells = 0;
+		for (auto const& cell : recorded)
+			if (cell.tile == "corridor-V2") ++variantCells;
+		require(variantCells == 1,
+			"Expected the one recorded cell of the owning Corridor to draw its own "
+				"corridor-V2 region; found " + std::to_string(variantCells));
+	}
+
+	// The other borrow, the other base. The Airlock above borrows the
+	// Corridor's; a Dumbwaiter borrows the Lift's. Same resolver, same
+	// rule, a different borrowed family - so the fix is seen to be about
+	// the Sector's own family rather than about staying off one particular
+	// sheet.
+	void aVariantOnADumbwaiterBorrowingTheLiftDrawsTheLiftBase(
+		smoke::Context const&)
+	{
+		pinViewport();
+		auto const atlas = installAtlas(SectorTilesetFamily::New,
+			{ "room", "lift", "lift-V1", "lift-V2" });
+		require(!hasSectorTileSurface("dumbwaiter"),
+			"The test atlas was supposed to leave the Dumbwaiter's own tile out");
+		require(hasSectorTileSurface("lift-V2"),
+			"The test atlas was supposed to carry the borrowed family's variant");
+		auto const entries = std::vector<core::SectorSurfaceVariant>{ { 0, 0, 2 } };
+		auto const fixture = authoredDumbwaiter(entries);
+		require(std::string{ sectorSurfaceKind(*fixture.sector) } == "dumbwaiter"
+				&& fixture.base == "lift",
+			"The Dumbwaiter was supposed to be drawing the Lift's base");
+		auto const recorded = recordSurfaceCells(fixture.sector,
+			fixture.sector->getLayerIndex(), atlas);
+		matchedToGrid(fixture.sector, recorded, entries, fixture.own,
+			fixture.base, atlas);
+		for (auto const& cell : recorded)
+			require(cell.textured && cell.tile == "lift",
+				"A cell of a borrowing Dumbwaiter recorded as wearing variant 2 "
+					"drew " + describe(cell) + "; it draws the borrowed base");
+	}
+
 	// The screen y of a Sector's floor line at the pinned viewport. World y
 	// runs up and screen y runs down, so the floor - the low end of the
 	// Sector's World bounds - is the larger screen y.
@@ -775,7 +1027,8 @@ namespace
 			"The viewport bottom cut left " + std::to_string(recorded.size())
 				+ " surface cells; the Room is 2 by 3 and every one of them is at "
 				"least partly above the clip");
-		matchedToGrid(fixture.sector, recorded, entries, atlas);
+		matchedToGrid(fixture.sector, recorded, entries, fixture.own,
+			fixture.base, atlas);
 
 		int straddling = 0;
 		for (auto const& cell : recorded)
@@ -821,6 +1074,15 @@ void render_smoke::registerSectorSurfaceVariants(std::vector<smoke::Check>& chec
 	checks.push_back(
 		{ "sectorSurfaceVariants/theOldFamilyDrawsBaseOnEveryVariantCellAndKeepsTheEntries",
 			isolated<theOldFamilyDrawsBaseOnEveryVariantCellAndKeepsTheEntries> });
+	checks.push_back(
+		{ "sectorSurfaceVariants/aVariantOnABorrowingSectorDrawsTheBorrowedBaseAndNotABorrowedVariant",
+			isolated<aVariantOnABorrowingSectorDrawsTheBorrowedBaseAndNotABorrowedVariant> });
+	checks.push_back(
+		{ "sectorSurfaceVariants/aVariantOnASectorThatOwnsItsTileStillDrawsItsOwnVariantTile",
+			isolated<aVariantOnASectorThatOwnsItsTileStillDrawsItsOwnVariantTile> });
+	checks.push_back(
+		{ "sectorSurfaceVariants/aVariantOnADumbwaiterBorrowingTheLiftDrawsTheLiftBase",
+			isolated<aVariantOnADumbwaiterBorrowingTheLiftDrawsTheLiftBase> });
 	checks.push_back(
 		{ "sectorSurfaceVariants/aVariantChangesThePictureAndNotTheGeometry",
 			isolated<aVariantChangesThePictureAndNotTheGeometry> });

@@ -2000,6 +2000,24 @@ std::string newFamilySurfaceOrBorrowed(char const* own, char const* borrowed)
 // left: the loop is untouched, because the loop was written so that this
 // question could grow an answer without it.
 //
+// The variant is asked of the Sector's own family, never of the name the
+// draw ended up with (#1050). Two questions meet at this seam and only one
+// of them owns the variant. Which family a Sector belongs to is what
+// `sectorSurfaceKind` answers, and no artwork installed changes it: an
+// Airlock next door to a Corridor is still an Airlock. Which tile it draws
+// is the borrow rule's answer, and is entirely a fact about the sheet.
+// Deriving the variant from the drawn name agrees with both for every type
+// that owns its tile - which is every type the shipped atlas declares - and
+// goes wrong the moment a Sector borrows: an Airlock with no `airlock` tile
+// on a sheet carrying `corridor-V2` asked for that, found it, and wore a
+// Corridor's variant. That is neither the tile the document recorded nor
+// the base the fallback rule answers with; it is a third thing, and the
+// kind of wrong an author reads as unfinished art rather than a bug.
+// Asking the own family makes the leak unrepresentable: a borrowing Sector
+// has no own-family variant tile to find, so its variant cells fall back to
+// the borrowed base their plain neighbours are already drawing. The borrow
+// rule keeps deciding the base and nothing else.
+//
 // The variant's tile name follows the `-Vn` derivation the Sector tileset's
 // family rule established (#1038), and it is asked of the installed atlas
 // before it is worn. A recorded variant the installed atlas does not carry
@@ -2015,16 +2033,16 @@ std::string newFamilySurfaceOrBorrowed(char const* own, char const* borrowed)
 // A base tile that is itself missing still draws magenta: falling back from
 // a variant to a base that is not there is not falling back to something,
 // and the missing-art case belongs to the draw, not to the resolution.
-SectorSurfaceTileResolver sectorSurfaceTileResolver(std::string baseTile,
-	std::shared_ptr<const core::Sector> sector)
+SectorSurfaceTileResolver sectorSurfaceTileResolver(std::string ownTile,
+	std::string baseTile, std::shared_ptr<const core::Sector> sector)
 {
-	return [baseTile = std::move(baseTile), sector](std::uint32_t column,
-		std::uint32_t level) -> std::string
+	return [own = std::move(ownTile), base = std::move(baseTile), sector](
+		std::uint32_t column, std::uint32_t level) -> std::string
 	{
 		auto const variant = sector->surfaceVariantAt(column, level);
-		if (!variant) return baseTile;
-		auto const tile = baseTile + "-V" + std::to_string(*variant);
-		return hasSectorTileSurface(tile) ? tile : baseTile;
+		if (!variant) return base;
+		auto const tile = own + "-V" + std::to_string(*variant);
+		return hasSectorTileSurface(tile) ? tile : base;
 	};
 }
 
@@ -2117,12 +2135,18 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		// lives with the atlas, because the cell size, the crop and the
 		// culling it reproduces are the atlas's business. Which tile each of
 		// those cells wears is asked through the resolver, because that is
-		// the Sector's. Today the two answers are the same everywhere; asking
-		// them separately is what lets one of them stop being the same
-		// without this call changing again.
+		// the Sector's. Asking them separately is what lets one of them stop
+		// being the same without this call changing again, and the two names
+		// handed down here already are not the same thing: `own` is which
+		// family the Sector belongs to, and `kind` is the base the borrow
+		// rule settled on for the installed sheet. The resolver needs each
+		// of them for its own question - the recorded variant is derived
+		// from `own`, never from `kind`, which is what stops a borrowing
+		// Sector wearing the borrowed family's variant (#1050).
 		if (!drawSectorTileSurfacePerCell(drawList, {bounds0.x, bounds1.y},
 			{bounds1.x, bounds0.y}, colour, gUISettings.worldZoom,
-			sectorSurfaceTileResolver(std::move(kind), sector)))
+			sectorSurfaceTileResolver(own ? std::string{ own } : std::string{},
+				std::move(kind), sector)))
 			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
 	}
 

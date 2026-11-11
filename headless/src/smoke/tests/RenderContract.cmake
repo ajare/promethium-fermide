@@ -112,6 +112,9 @@ set(names
     sectorSurfaceVariants/aVariantTheAtlasDoesNotCarryFallsBackToBaseSilently
     sectorSurfaceVariants/aMissingBaseTileStillDrawsTheMissingArtMagenta
     sectorSurfaceVariants/theOldFamilyDrawsBaseOnEveryVariantCellAndKeepsTheEntries
+    sectorSurfaceVariants/aVariantOnABorrowingSectorDrawsTheBorrowedBaseAndNotABorrowedVariant
+    sectorSurfaceVariants/aVariantOnASectorThatOwnsItsTileStillDrawsItsOwnVariantTile
+    sectorSurfaceVariants/aVariantOnADumbwaiterBorrowingTheLiftDrawsTheLiftBase
     sectorSurfaceVariants/aVariantChangesThePictureAndNotTheGeometry
     sectorSurfaceVariants/aVariantOnTheRowTheViewportBottomCutsStillDraws
     sectorTilePreview/oneTileFramesTheRectItIsGiven
