@@ -276,6 +276,16 @@ set(editor_names
     surfacePaint/aCellOutsideAnySectorOfThatTypeIsRefusedTheSameWay
     surfacePaint/oneUndoStepPerClickAndUndoRestoresExactly
     surfacePaint/createModeStillCreatesSectorsWithNoSwatchPicked
+    surfacePaintDrag/aDragPaintsEveryCellInTheRun
+    surfacePaintDrag/theWholeRunIsOneUndoStep
+    surfacePaintDrag/wrongTypeCellsInTheRunAreSkippedAndNamedBeforeAnyWrite
+    surfacePaintDrag/aRunWithNothingPaintableTakesNoUndoStep
+    surfacePaintDrag/aSingleCellRunIsTheSingleClickPaint
+    surfacePaintDrag/aRunAcrossTwoSectorsOfTheSameTypePaintsBoth
+    surfacePaintDrag/theBaseSwatchAlongARunClearsEveryEntry
+    surfacePaintDrag/theRunIsClippedToTheWorld
+    surfacePaintDrag/aRunWithNoSwatchPickedIsNoRunAtAll
+    surfacePaintDrag/resolvingARunChangesNothing
     world-artwork/newDefaultsShowOnAFreshWorld
     world-artwork/repointedAtlasIsReportedBySlot
     history/independentHistoriesDoNotLeakCommandsOrState

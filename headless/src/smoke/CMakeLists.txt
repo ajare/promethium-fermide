@@ -702,6 +702,7 @@ pf_add_smoke_module(pf-smoke-editor
         editor/Palette.cpp
         editor/SectorVariantStrip.cpp
         editor/SurfacePaint.cpp
+        editor/SurfacePaintDrag.cpp
         editor/History.cpp
         editor/WorldArtworkPanel.cpp
     LIBRARIES pf-agent-editing pf-agent-resources pf-headless-render-support

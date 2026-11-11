@@ -354,6 +354,38 @@ namespace
 
 	PaintState gPaint;
 
+	// The state of one surface-paint drag (#1043).
+	//
+	// Kept apart from the create drag rather than sharing `gPaint.dragging`,
+	// because the two gestures mean opposite things and each has to be able
+	// to say "the mouse is still mine" without the other reading that as a
+	// drag of its own having started.
+	struct SurfacePaintDrag
+	{
+		bool active{ false };
+		// The Layer the run started on. The run belongs to that Layer: the
+		// cells it paints are the ones the author was looking at when the
+		// button went down, not the ones some later Layer change happens to
+		// put under the same cursor.
+		uint32_t layer{ 0 };
+		int anchorX{ 0 };
+		int anchorY{ 0 };
+		// The far end follows the cursor, so it is the cell the run will
+		// reach if the button is released now. It does not move while the
+		// cursor is over the palette tray: the cells under the tray are ones
+		// the author cannot see, so the run stops where the view did rather
+		// than painting blind underneath the palette.
+		int endX{ 0 };
+		int endY{ 0 };
+	};
+
+	SurfacePaintDrag gSurfacePaintDrag;
+
+	void resetSurfacePaintDrag()
+	{
+		gSurfacePaintDrag = {};
+	}
+
 	struct ShuttleDraft
 	{
 		uint32_t x{ 0 }, y{ 0 }, cellsWide{ 0 };
@@ -496,6 +528,10 @@ namespace
 	void resetPaint(bool clearTool = true)
 	{
 		gPaint.dragging = false;
+		// Putting the paint tool down puts a run in progress down with it.
+		// Nothing is committed by the cancel: the run was never written, so
+		// there is nothing to walk back and no undo step spent.
+		resetSurfacePaintDrag();
 		if (clearTool)
 		{
 			gPaint.tool = PaintTool::None;
@@ -1806,6 +1842,13 @@ namespace
 
 		if (gPaint.dragging && gPaint.layer != (uint32_t)gUISettings.visibleLayer)
 			resetPaint(false);
+		// A paint run belongs to the Layer it started on for the same reason
+		// a create drag does: switching the visible Layer mid-gesture is not
+		// a request to paint the same cells somewhere else. The run is
+		// dropped, and dropping it costs nothing because nothing was written.
+		if (gSurfacePaintDrag.active
+			&& gSurfacePaintDrag.layer != (uint32_t)gUISettings.visibleLayer)
+			resetSurfacePaintDrag();
 		// A Corridor is a Location and may be painted on any Layer; Transits need a
 		// Layer in front to land on, so they cannot be painted on the front-most one.
 		if ((gPaint.tool == PaintTool::Ladder || gPaint.tool == PaintTool::Stairwell
@@ -1836,6 +1879,13 @@ namespace
 		// pick from. Asked once here so the click and the hover read the same
 		// answer and cannot disagree about which job they are serving.
 		auto const paintMode = paintModeOf(gPaint.tool, gPaint.swatches);
+		// A run only means something while the tool is still doing the job
+		// that started it. If the swatch the run was painted with is gone,
+		// the run is over: leaving it active would hold the mouse for a job
+		// the tool is no longer doing, and the create path below would find a
+		// half-finished drag it never started.
+		if (gSurfacePaintDrag.active && paintMode != PaintMode::SurfacePaint)
+			resetSurfacePaintDrag();
 		int const swatchCount = static_cast<int>(gPaint.swatches.size());
 		int const variantRows = paletteVariantStripRows(swatchCount);
 		auto const traySize = paletteTraySize(furnitureRow, variantRows);
@@ -2085,38 +2135,109 @@ namespace
 			paletteConsumedMouse = true;
 		}
 
-		// A picked swatch gives the tool a second job (#1042): a click puts
-		// that variant on the one cell under the cursor instead of starting a
-		// create drag. The paint is one undo step, captured the way every
-		// other editor edit captures its before-state, and a click the resolve
-		// refuses - the same refusal the red hover already showed - spends no
-		// snapshot and leaves no undo step behind. With nothing picked the tool
-		// drags exactly as it always did: this branch is not taken, and the
-		// create path below is untouched.
+		// A picked swatch gives the tool a second job (#1042), and that job
+		// is a drag (#1043): press on a cell, drag, release, and every cell
+		// the run swept wears the picked variant. A single click is the same
+		// gesture with a run of one cell - there is no separate click path
+		// that could drift away from the drag path, because there is one path
+		// and a click is just the shortest run down it.
+		//
+		// The run is resolved every frame the drag is up, and the frame's
+		// answer is what gets drawn: yellow where a cell will take the
+		// variant, red where it will be left alone, with the reason for the
+		// first red cell in the tooltip. That is the refusal arriving during
+		// the drag rather than only after it, and it is the same resolve the
+		// release writes from, so the colour cannot promise a cell the
+		// release would skip.
+		//
+		// Nothing is written until the release, and the release writes the
+		// whole run inside one snapshot and one commit - one undo step for
+		// fifteen cells, the way a create drag commits one Sector rather
+		// than one per cell. A run with nothing paintable in it spends no
+		// snapshot and leaves no undo step, exactly as a refused click did.
+		//
+		// The create drag and the palette keep their own mouse. This branch
+		// is only entered with a swatch picked, so a tool in create mode
+		// never reaches it; it will not start while the cursor is over the
+		// tray, while the view is being panned, or while a create drag is
+		// already running, and it holds the mouse itself for as long as the
+		// button is down.
 		if (paintMode == PaintMode::SurfacePaint)
 		{
-			if (gWorldHovered && !overTray && !gViewPan.dragging
-				&& io.MouseClicked[0])
+			if (!gSurfacePaintDrag.active && !gPaint.dragging && gWorldHovered
+				&& !overTray && !gViewPan.dragging && io.MouseClicked[0])
 			{
-				auto const worldPosition = screenToWorld(io.MousePos);
-				int const x = (int)floor(worldPosition.x);
-				int const y = (int)floor(worldPosition.y);
+				auto const start = screenToWorld(io.MousePos);
+				int const x = (int)floor(start.x);
+				int const y = (int)floor(start.y);
 				if (x >= 0 && y >= 0 && x < (int)world->getCellsWide()
 					&& y < (int)world->getLevelsHigh())
 				{
-					auto const target = resolveSurfacePaint(*world, gPaint.tool,
-						gPaint.swatches, (uint32_t)gUISettings.visibleLayer,
-						(uint32_t)x, (uint32_t)y);
-					if (target.ok)
+					gSurfacePaintDrag.active = true;
+					gSurfacePaintDrag.layer = (uint32_t)gUISettings.visibleLayer;
+					gSurfacePaintDrag.anchorX = gSurfacePaintDrag.endX = x;
+					gSurfacePaintDrag.anchorY = gSurfacePaintDrag.endY = y;
+				}
+			}
+
+			if (gSurfacePaintDrag.active)
+			{
+				paletteConsumedMouse = true;
+				// The far end follows the cursor, clamped to the World and
+				// held where it was while the cursor is over the tray.
+				if (!overTray)
+				{
+					auto const end = screenToWorld(io.MousePos);
+					gSurfacePaintDrag.endX = clamp((int)floor(end.x), 0,
+						(int)world->getCellsWide() - 1);
+					gSurfacePaintDrag.endY = clamp((int)floor(end.y), 0,
+						(int)world->getLevelsHigh() - 1);
+				}
+				auto const run = resolveSurfacePaintRun(*world, gPaint.tool,
+					gPaint.swatches, gSurfacePaintDrag.layer,
+					(uint32_t)gSurfacePaintDrag.anchorX,
+					(uint32_t)gSurfacePaintDrag.anchorY,
+					(uint32_t)gSurfacePaintDrag.endX,
+					(uint32_t)gSurfacePaintDrag.endY);
+				for (auto const& cell : run.cells)
+				{
+					auto const topLeft = worldToScreen({ (float)cell.x,
+						(float)(cell.y + 1) });
+					auto const bottomRight = worldToScreen({ (float)(cell.x + 1),
+						(float)cell.y });
+					drawList->AddRectFilled(toVec2(topLeft), toVec2(bottomRight),
+						cell.paintable() ? IM_COL32(251, 188, 4, 55)
+							: IM_COL32(244, 67, 54, 45));
+					drawList->AddRect(toVec2(topLeft), toVec2(bottomRight),
+						cell.paintable() ? yellow : red, 0.0f, 0, 2.0f);
+				}
+				if (run.skipped > 0)
+				{
+					auto const* first = run.firstSkipped();
+					ImGui::SetTooltip(
+						"%zu of %zu cells in this run will be left alone: %s",
+						run.skipped, run.cells.size(),
+						first ? first->target.diagnostic.c_str() : "");
+				}
+				ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+
+				if (io.MouseReleased[0])
+				{
+					if (run.anyPaintable())
 					{
-						paletteConsumedMouse = true;
 						try
 						{
 							auto undo = captureDocumentSnapshot(world);
-							document->authoring().setSectorSurfaceVariant(
-								target.sectorIndex, target.column, target.level,
-								target.variant);
+							auto const outcome = applySurfacePaintRun(
+								document->authoring(), run);
 							commitDocumentEdit(std::move(undo));
+							// The resolve asked the World about every cell
+							// before the write started, so a refusal here says
+							// the World moved under the gesture. Worth a log
+							// line; the author can undo it.
+							if (!outcome.diagnostic.empty())
+								core::addLogMessage("Surface paint", 0,
+									core::LogLevel::Error, outcome.diagnostic);
 						}
 						catch (core::Exception const& error)
 						{
@@ -2129,6 +2250,7 @@ namespace
 								core::LogLevel::Error, error.what());
 						}
 					}
+					resetSurfacePaintDrag();
 				}
 			}
 		}
@@ -2288,7 +2410,8 @@ namespace
 		// would refuse. The box is the cell's four edges, a plain outline with no
 		// fill, so it stays legible over the artwork underneath.
 		else if (gPaint.tool != PaintTool::None && gWorldHovered && !overTray
-			&& !gViewPan.dragging && gPegman.phase == PalettePhase::Home)
+			&& !gViewPan.dragging && !gSurfacePaintDrag.active
+			&& gPegman.phase == PalettePhase::Home)
 		{
 			auto const hoverPosition = screenToWorld(io.MousePos);
 			int const hoverX = (int)floor(hoverPosition.x);
