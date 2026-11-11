@@ -71,6 +71,20 @@ void SectorSwatchSelection::clear()
 	selected_ = -1;
 }
 
+bool SectorSwatchSelection::toggle(int index)
+{
+	// The already-picked swatch is the one case where the same index means
+	// the opposite thing. Checked before the strip lookup because a picked
+	// index is always inside the strip, so there is no out-of-range toggle
+	// to reason about: clearing it is simply putting it back to nothing.
+	if (index == selected_)
+	{
+		clear();
+		return false;
+	}
+	return pick(index);
+}
+
 std::optional<int> SectorSwatchSelection::selectedVariant() const
 {
 	if (selected_ < 0 || static_cast<std::size_t>(selected_) >= swatches_.size())

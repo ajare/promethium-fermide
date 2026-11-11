@@ -64,6 +64,7 @@ int main(int argc, char** argv)
 	editor_smoke::registerDoorPanel(checks);
 	editor_smoke::registerPalette(checks);
 	editor_smoke::registerSectorVariantStrip(checks);
+	editor_smoke::registerSurfacePaint(checks);
 	editor_smoke::registerWorldArtworkPanel(checks);
 	editor_smoke::registerHistory(checks);
 	editor_smoke::registerIsolation(checks);

@@ -160,6 +160,43 @@ inline bool rendersAsFlatColour(core::SectorType type)
 }
 
 //
+// The surface family a Sector belongs to: the base tile name its type asks
+// the atlas for, or null where the type draws no tiled surface at all.
+//
+// This is the Sector's own name, not necessarily the one it ends up
+// drawing. A Sector whose own tile the installed atlas does not carry
+// borrows another type's when it draws (#1017), but the family it belongs
+// to does not change with the artwork installed: an Airlock next door to a
+// Corridor is still an Airlock. So this answers "is this the kind of Sector
+// my swatch belongs to", and the draw keeps its own rule for "which tile
+// goes here" on top of it.
+//
+// A Background and a Facade answer null for the same reason they render as
+// flat colour: they never ask the atlas for a tile, and a variant recorded
+// on one is refused outright (#1040).
+//
+inline char const* sectorSurfaceKind(core::Sector const& sector)
+{
+	switch (sector.getType())
+	{
+	case core::SectorType::Location:
+		return static_cast<core::Location const&>(sector).isCorridor()
+			? "corridor" : "room";
+	case core::SectorType::Airlock: return "airlock";
+	case core::SectorType::Chamber: return "chamber";
+	case core::SectorType::Ladder: return "ladder";
+	case core::SectorType::Lift: return "lift";
+	case core::SectorType::Dumbwaiter: return "dumbwaiter";
+	case core::SectorType::Shuttle: return "shuttle";
+	case core::SectorType::Stairwell: return "stairwell";
+	case core::SectorType::Staircase: return "staircase";
+	case core::SectorType::Background:
+	case core::SectorType::Facade: return nullptr;
+	}
+	return nullptr;
+}
+
+//
 // The flat surface colour a Sector carries of its own, if it carries one.
 //
 // The authored triple is packed here, once, into the shared colour the command

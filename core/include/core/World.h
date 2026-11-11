@@ -1472,6 +1472,16 @@ namespace core
 		std::string furnitureSupportDiagnostic(uint32_t sector, uint32_t x, uint32_t y) const;
 		ConstructionRecord const* findLiftDestinationRecord(uint32_t sectorIndex, uint32_t objectIndex = ~0u) const;
 		ConstructionRecord const* findLiftDestinationRecord(TraversalResource const& resource) const;
+
+		// The record that created one Sector, or null where the Sector has none.
+		// A producing record's position among the producers is its live Sector
+		// index - the same mapping every other record-to-Sector lookup in this
+		// class walks - so the answer is a count over the record list rather than
+		// a stored back-reference. A back-reference would have to be repaired by
+		// every edit that inserts or removes a producing record, and one left
+		// pointing at the wrong record is a silent corruption; a count is
+		// recomputed from the list that is already the truth (#1042).
+		ConstructionRecord const* findCreatingRecord(uint32_t sectorIndex) const;
 		std::vector<ConstructionRecord> mConstructionRecords;
 		bool mDeserializingConstruction{ false };
 
@@ -2968,6 +2978,35 @@ namespace core
 		std::string const& getTopologyDiagnostic() const { return mTopologyDiagnostic; }
 
 		std::shared_ptr<const Sector> getSectorAtPosition(uint32_t layerIndex, float x, float y) const;
+
+		// --- Sector surface variants ---
+		//
+		// Records a variant on one live Sector cell, or clears the cell back to
+		// its type's base tile (#1042).
+		//
+		// `column` and `level` are Sector-local, counted the way
+		// `SectorSurfaceVariant` describes: from the Sector's own left edge and up
+		// from its floor line. `variant` is the variant's number within the
+		// Sector type's family; `std::nullopt` is the clearing request, so the
+		// base stays the absence of an entry rather than a zero written into one.
+		//
+		// The edit writes the live Sector *and* the record that created it. The
+		// live Sector alone would draw today and be lost at the next rebuild,
+		// which every structural edit performs; the record alone would survive
+		// that rebuild but draw nothing until one happened.
+		//
+		// Artwork only, exactly as the domain defines a variant: the edit touches
+		// no traversal, capacity or simulation state, so it needs neither a
+		// pause nor a rebuild. `set...` answers true when the request was
+		// accepted - including when the cell already wore what it was asked for,
+		// which is the same accepted answer, not a failure - and false with a
+		// `diagnostic` when it was refused.
+		bool canSetSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column,
+			uint32_t level, std::optional<uint32_t> variant,
+			std::string* diagnostic = nullptr) const;
+		bool setSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column,
+			uint32_t level, std::optional<uint32_t> variant,
+			std::string* diagnostic = nullptr);
 
 		// The `const` view answers with a `const Agent` (#974), matching
 		// `lookupAgent`'s `EntityLookup<Agent const>`: a render path that finds

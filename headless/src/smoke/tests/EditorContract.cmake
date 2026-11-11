@@ -268,6 +268,14 @@ set(editor_names
     sectorVariantStrip/aSwatchIsAtlasArtworkWithItsTileNameOverlaid
     sectorVariantStrip/theStripIsARowOfTheTrayAndFitsInsideIt
     sectorVariantStrip/theStripStartsUnderTheToolItBelongsTo
+    surfacePaint/pickingAnySwatchSwitchesTheToolIntoSurfacePaint
+    surfacePaint/deselectingTheSwatchReturnsTheToolToCreate
+    surfacePaint/aMatchingCellRecordsTheVariantAndItRendersImmediately
+    surfacePaint/theBaseSwatchRemovesTheEntryEntirely
+    surfacePaint/aCellOfTheWrongSectorTypeIsRefusedAndChangesNothing
+    surfacePaint/aCellOutsideAnySectorOfThatTypeIsRefusedTheSameWay
+    surfacePaint/oneUndoStepPerClickAndUndoRestoresExactly
+    surfacePaint/createModeStillCreatesSectorsWithNoSwatchPicked
     world-artwork/newDefaultsShowOnAFreshWorld
     world-artwork/repointedAtlasIsReportedBySlot
     history/independentHistoriesDoNotLeakCommandsOrState

@@ -20,6 +20,7 @@ namespace editor_smoke
 	void registerBrokenEscalators(std::vector<smoke::Check>& checks);
 	void registerPalette(std::vector<smoke::Check>& checks);
 	void registerSectorVariantStrip(std::vector<smoke::Check>& checks);
+	void registerSurfacePaint(std::vector<smoke::Check>& checks);
 	void registerWorldArtworkPanel(std::vector<smoke::Check>& checks);
 	void registerHistory(std::vector<smoke::Check>& checks);
 	void registerEscalators(std::vector<smoke::Check>& checks);

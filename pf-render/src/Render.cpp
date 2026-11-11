@@ -2082,28 +2082,35 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	else
 	{
 		std::string kind;
+		// The family name comes from the one place that says which family a
+		// Sector belongs to (#1042), so the editor's swatch strip and the
+		// surface actually being drawn cannot disagree about what a Sector is.
+		// What each type does when its own tile is missing stays here with the
+		// draw, because that is a question about the installed artwork and not
+		// about the Sector.
+		auto const* own = sectorSurfaceKind(*sector);
 		switch (sectorType)
 		{
-		case core::SectorType::Location: kind = static_pointer_cast<const core::Location>(sector)->isCorridor() ? "corridor" : "room"; break;
-		case core::SectorType::Airlock: kind = sectorSurfaceOrBorrowed("airlock", "corridor"); break;
-		case core::SectorType::Chamber: kind = sectorSurfaceOrBorrowed("chamber", "corridor"); break;
-		case core::SectorType::Ladder: kind = "ladder"; break;
-		case core::SectorType::Lift: kind = "lift"; break;
-		case core::SectorType::Dumbwaiter: kind = sectorSurfaceOrBorrowed("dumbwaiter", "lift"); break;
+		case core::SectorType::Location:
+		case core::SectorType::Ladder:
+		case core::SectorType::Lift:
+		case core::SectorType::Stairwell: kind = own; break;
+		case core::SectorType::Airlock:
+		case core::SectorType::Chamber: kind = sectorSurfaceOrBorrowed(own, "corridor"); break;
+		case core::SectorType::Dumbwaiter: kind = sectorSurfaceOrBorrowed(own, "lift"); break;
 		// The Shuttle's rail corridor is static architecture and wears its
 		// own tile in the new family; carriage images are rendered separately
 		// at the Shuttle's current position, on top of it (#1017). On the
 		// old family it still borrows the Lift's shaft, as it always did
 		// while the `shuttle` region sat undrawn (#1027).
-		case core::SectorType::Shuttle: kind = newFamilySurfaceOrBorrowed("shuttle", "lift"); break;
-		case core::SectorType::Stairwell: kind = "stairwell"; break;
+		case core::SectorType::Shuttle: kind = newFamilySurfaceOrBorrowed(own, "lift"); break;
 		// Staircase steps are procedural and render on top of their Sector
 		// surface, which in the new family is the Staircase's own art rather
 		// than a borrowed Stairwell shaft tile (#1017). On the old family it
 		// is still the plain shaft: the same rule the deleted comment stated,
 		// kept where it belongs - on the family that has no Staircase art of
 		// its own (#1027).
-		case core::SectorType::Staircase: kind = newFamilySurfaceOrBorrowed("staircase", "stairwell"); break;
+		case core::SectorType::Staircase: kind = newFamilySurfaceOrBorrowed(own, "stairwell"); break;
 		default: break;
 		}
 		// One tile per World cell (#1039). The loop that lays the cells out

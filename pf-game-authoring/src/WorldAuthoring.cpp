@@ -663,6 +663,20 @@ bool WorldAuthoring::removeDumbwaiter(core::DumbwaiterId id)
 	return world().removeDumbwaiter(id);
 }
 
+bool WorldAuthoring::canSetSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column,
+	uint32_t level, std::optional<uint32_t> variant, std::string* diagnostic) const
+{
+	return document().canSetSectorSurfaceVariant(sectorIndex, column, level, variant,
+		diagnostic);
+}
+
+bool WorldAuthoring::setSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column,
+	uint32_t level, std::optional<uint32_t> variant, std::string* diagnostic)
+{
+	return world().setSectorSurfaceVariant(sectorIndex, column, level, variant,
+		diagnostic);
+}
+
 // --- Agents ---
 bool WorldAuthoring::canPlaceAgentInLocation(uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets, std::string* diagnostic) const
 {

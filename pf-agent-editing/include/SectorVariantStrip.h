@@ -92,6 +92,16 @@ public:
 	// it was, when the strip holds no swatch there.
 	bool pick(int index);
 
+	// Toggles the pick at `index`: picking the swatch that is already
+	// picked deselects it (#1042). That is how an author puts the tool back
+	// the way it was - the swatch strip is a thing they step into and out of,
+	// not one they are stuck in - and why the base swatch can mean "the base
+	// tile" without also meaning "stay on this swatch forever". A refused
+	// pick is refused the same way `pick` refuses it: nothing moves.
+	// Returns true when the swatch ends up picked, false when it was cleared
+	// or never held.
+	bool toggle(int index);
+
 	// Puts the pick back to nothing. The strip itself is kept, so the
 	// swatches stay on screen; only the highlight goes.
 	void clear();

@@ -29,6 +29,7 @@
 #include "PaletteLayout.h"
 #include "PaintTool.h"
 #include "SectorVariantStrip.h"
+#include "SurfacePaint.h"
 #include "ObjectTileset.h"
 #include "DocumentEdit.h"
 #include "DocumentSaveSeam.h"
@@ -1829,6 +1830,12 @@ namespace
 		// hit-tested at. Putting the strip under the selection every frame
 		// is also what retires a pick the newly selected tool does not offer.
 		gPaint.swatches.setSwatches(sectorVariantSwatches(gPaint.tool));
+		// The job the armed tool is doing (#1042). A picked swatch - the base
+		// included - puts it into surface-paint; nothing picked leaves it in
+		// create, which is where a tool always was before a strip existed to
+		// pick from. Asked once here so the click and the hover read the same
+		// answer and cannot disagree about which job they are serving.
+		auto const paintMode = paintModeOf(gPaint.tool, gPaint.swatches);
 		int const swatchCount = static_cast<int>(gPaint.swatches.size());
 		int const variantRows = paletteVariantStripRows(swatchCount);
 		auto const traySize = paletteTraySize(furnitureRow, variantRows);
@@ -2067,7 +2074,7 @@ namespace
 			ImGui::SetTooltip("%s",
 				gPaint.swatches.swatches()[static_cast<std::size_t>(swatchUnderCursor)]
 					.tileName.c_str());
-			if (io.MouseClicked[0]) gPaint.swatches.pick(swatchUnderCursor);
+			if (io.MouseClicked[0]) gPaint.swatches.toggle(swatchUnderCursor);
 		}
 
 		bool paintWasActive = gPaint.tool != PaintTool::None;
@@ -2078,7 +2085,54 @@ namespace
 			paletteConsumedMouse = true;
 		}
 
-		if (gPaint.tool != PaintTool::None && !gPaint.dragging && gWorldHovered
+		// A picked swatch gives the tool a second job (#1042): a click puts
+		// that variant on the one cell under the cursor instead of starting a
+		// create drag. The paint is one undo step, captured the way every
+		// other editor edit captures its before-state, and a click the resolve
+		// refuses - the same refusal the red hover already showed - spends no
+		// snapshot and leaves no undo step behind. With nothing picked the tool
+		// drags exactly as it always did: this branch is not taken, and the
+		// create path below is untouched.
+		if (paintMode == PaintMode::SurfacePaint)
+		{
+			if (gWorldHovered && !overTray && !gViewPan.dragging
+				&& io.MouseClicked[0])
+			{
+				auto const worldPosition = screenToWorld(io.MousePos);
+				int const x = (int)floor(worldPosition.x);
+				int const y = (int)floor(worldPosition.y);
+				if (x >= 0 && y >= 0 && x < (int)world->getCellsWide()
+					&& y < (int)world->getLevelsHigh())
+				{
+					auto const target = resolveSurfacePaint(*world, gPaint.tool,
+						gPaint.swatches, (uint32_t)gUISettings.visibleLayer,
+						(uint32_t)x, (uint32_t)y);
+					if (target.ok)
+					{
+						paletteConsumedMouse = true;
+						try
+						{
+							auto undo = captureDocumentSnapshot(world);
+							document->authoring().setSectorSurfaceVariant(
+								target.sectorIndex, target.column, target.level,
+								target.variant);
+							commitDocumentEdit(std::move(undo));
+						}
+						catch (core::Exception const& error)
+						{
+							core::addLogMessage("Surface paint", 0,
+								core::LogLevel::Error, error.getMessage());
+						}
+						catch (std::exception const& error)
+						{
+							core::addLogMessage("Surface paint", 0,
+								core::LogLevel::Error, error.what());
+						}
+					}
+				}
+			}
+		}
+		else if (gPaint.tool != PaintTool::None && !gPaint.dragging && gWorldHovered
 			&& !overTray && !gViewPan.dragging && io.MouseClicked[0])
 		{
 			auto worldPosition = screenToWorld(io.MousePos);
@@ -2243,14 +2297,33 @@ namespace
 				&& hoverX < (int)world->getCellsWide()
 				&& hoverY < (int)world->getLevelsHigh())
 			{
-				// Read through a const World: a hover asks what is there,
-				// never what it can change, and the const Layer read is all it
-				// needs.
-				core::World const& hoveredWorld = *world;
-				auto const hoverLayer = hoveredWorld.getLayer((uint32_t)gUISettings.visibleLayer);
-				bool const placeable = hoverLayer
-					&& !hoverLayer->getCellDefinition((uint32_t)hoverX,
-						(uint32_t)hoverY).occupied();
+				bool placeable = false;
+				if (paintMode == PaintMode::SurfacePaint)
+				{
+					// The same resolve the click runs, so the red the author sees
+					// is exactly the refusal the click would give: no Sector of
+					// this type under the cursor, a flat-coloured Sector that never
+					// wears a tile, or a cell the World will not record an entry
+					// for. The tooltip says which, because a red box on its own
+					// says only "no".
+					auto const hover = resolveSurfacePaint(*world, gPaint.tool,
+						gPaint.swatches, (uint32_t)gUISettings.visibleLayer,
+						(uint32_t)hoverX, (uint32_t)hoverY);
+					placeable = hover.ok;
+					if (!placeable && !hover.diagnostic.empty())
+						ImGui::SetTooltip("%s", hover.diagnostic.c_str());
+				}
+				else
+				{
+					// Read through a const World: a hover asks what is there,
+					// never what it can change, and the const Layer read is all it
+					// needs.
+					core::World const& hoveredWorld = *world;
+					auto const hoverLayer = hoveredWorld.getLayer((uint32_t)gUISettings.visibleLayer);
+					placeable = hoverLayer
+						&& !hoverLayer->getCellDefinition((uint32_t)hoverX,
+							(uint32_t)hoverY).occupied();
+				}
 				auto const topLeft = worldToScreen({ (float)hoverX, (float)(hoverY + 1) });
 				auto const bottomRight = worldToScreen({ (float)(hoverX + 1), (float)hoverY });
 				drawList->AddRect(toVec2(topLeft), toVec2(bottomRight),

@@ -269,9 +269,34 @@ One tile in, one image out, whatever the box.
 The strip is a row of the tray rather than a panel floating over the canvas: the
 tray grows by exactly the rows the swatches need, the swatches sit below every
 row of buttons, and the strip starts under the tool it belongs to and is pulled
-back only as far as it must be to stay inside the tray. Nothing is painted from a
-swatch yet - the pick is what the strip highlights, and what it does to the World
-is the next ticket's business.
+back only as far as it must be to stay inside the tray.
+
+## Painting a variant onto a cell
+
+Picking a swatch gives the paint tool a second job (#1042). With nothing picked
+the tool does what it always did - dragging on the World creates Sectors. Picking
+any swatch, the base included, switches it into *surface paint*, where a click
+puts that variant on the one cell under the cursor instead of making anything.
+Clicking the swatch that is already picked deselects it and the tool falls back to
+create, which keeps create the thing an author returns to and keeps the base
+swatch meaning one thing: the base tile.
+
+A click resolves against the document before it changes it. The cell's Sector must
+be of the type the swatch belongs to - the same family name the renderer wears the
+Sector in - and the cell must be one the World will accept an entry for. A cell of
+the wrong Sector type, a cell with no Sector at all, a flat-coloured Background or
+Facade, and a cell off the map are all refused in the same shape, and the hover
+shows the refusal as a red outline before the click is ever made. The hover and
+the click run the same resolve, so the colour cannot promise a paint the click
+would refuse.
+
+An accepted click writes two things: the live Sector, which is what the renderer
+reads this frame and why the cell changes under the cursor with no rebuild, and
+the Sector's construction record, which is what the World saves and what the next
+structural edit replays. The base swatch removes the entry rather than storing a
+zero, so a cell painted back to its base and a cell that never wore a variant are
+the same thing and save the same way - with no field at all. Each accepted click
+is one undo step, and undoing restores the document exactly.
 
 ## The version 1 draft set
 

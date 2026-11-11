@@ -295,6 +295,16 @@ namespace game
 	bool applyDumbwaiterMove(core::World::DumbwaiterMovePlan const& plan);
 	bool removeDumbwaiter(core::DumbwaiterId id);
 
+	// --- Sector surface variants ---
+	//
+	// The authoring half of "this cell wears this variant" (#1042). The
+	// preflight is a read and the edit is not, which is the split the whole
+	// class is built on: the hover affordance that colours the cell under the
+	// cursor asks `canSet...` and needs no more privilege than drawing the
+	// World already has.
+	bool canSetSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column, uint32_t level, std::optional<uint32_t> variant, std::string* diagnostic = nullptr) const;
+	bool setSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column, uint32_t level, std::optional<uint32_t> variant, std::string* diagnostic = nullptr);
+
 	// --- Agents ---
 	bool canPlaceAgentInLocation(uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets, std::string* diagnostic = nullptr) const;
 	core::AgentId createAgent(std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset);
