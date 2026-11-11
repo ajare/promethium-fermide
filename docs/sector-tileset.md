@@ -60,10 +60,10 @@ pins all of that, and `smoke/render/SectorSurfaceVariants.cpp` pins the part
 an author actually notices - a variant painted on that row draws rather than
 vanishing.
 
-## SectorAtlasNew
+## SectorAtlas
 
 `resources/textures/sectors-new.tileset.yaml` is the version 2 authored tileset
-behind `SectorAtlasNew`: ten full-cell Infrastructure tiles on the 128x320 grid
+behind `SectorAtlas`: ten full-cell Infrastructure tiles on the 128x320 grid
 at 1280x1280, one for each of the ten surface-bearing Sector types - `room`,
 `corridor`, `ladder`, `lift`, `shuttle`, `stairwell`, `staircase`, `airlock`,
 `chamber` and `dumbwaiter`. Every tile is drawn at one full World cell with no
@@ -338,7 +338,7 @@ keeps deciding the base and nothing else.
 
 The shape only shows on a partially-authored sheet - one type's variants
 present while another type's base is absent - which is what an author has
-under way far more often than the shipped `SectorAtlasNew` with all ten
+under way far more often than the shipped `SectorAtlas` with all ten
 types and three variants each, and is exactly when a wrong tile reads as
 unfinished art rather than as a bug.
 
@@ -360,7 +360,7 @@ it had before any cell could be recorded.
 Every one of the ten tiles fills its cell: `drawn_size: [1.0, 1.0]`, content
 128 x 320 at the authored grid's pixel size, `offset: [0.0, 0.0]`. That is the
 whole of this set's content-size story - Infrastructure has no sub-cell art - and
-it is what the #1013 spec's dimensions table records for `SectorAtlasNew`
+it is what the #1013 spec's dimensions table records for `SectorAtlas`
 (#1033). The sub-cell sizes live in the Objects set and are tabulated in
 [the object atlas doc](object-tileset.md#content-sizes-as-shipped).
 
@@ -390,7 +390,7 @@ fallback. That is an artwork removal only: the wall-span calculation, the
 partial-height opening handling and the floor-and-ceiling-at-bounds-only rule are
 untouched, and the existing draw-order and Facade smoke modules still prove them.
 
-The `ImageSet` entries the application manifest declares for `SectorAtlasNew` are
+The `ImageSet` entries the application manifest declares for `SectorAtlas` are
 generated from the tileset, not authored beside it:
 
 ```sh
@@ -471,8 +471,10 @@ loader puts the set in the Old family, and the Old family borrows both, so a Wor
 that has always been drawn on `SectorAtlas` keeps drawing what it drew before the
 new family existed (#1027).
 
-The old `SectorAtlas` and `StationAtlas` stay registered and canonical until
-nothing references them; `SectorAtlasNew` comes up beside them.
+Since the #1013 terminus `SectorAtlas` is the only Sector atlas a World defaults
+to, and the old sheet it displaced was deleted (#1024). `StationAtlas` stays
+registered as a custom theme a World may point its Sector slot at; it is not a
+family, and nothing borrows across the two.
 
 ## Generation and installation
 

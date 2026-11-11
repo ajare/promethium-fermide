@@ -1,8 +1,8 @@
 version: 69
-sectorImageSet: SectorAtlasNew
-objectImageSet: ObjectAtlasNew
-agentImageSet: AgentAtlasNew
-furnitureImageSet: FurnitureAtlasNew
+sectorImageSet: SectorAtlas
+objectImageSet: ObjectAtlas
+agentImageSet: AgentAtlas
+furnitureImageSet: FurnitureAtlas
 nextDumbwaiterId: 1
 nextFurnitureId: 1
 name: Untitled

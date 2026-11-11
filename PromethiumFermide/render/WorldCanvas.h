@@ -57,7 +57,7 @@ struct WorldAtlasSlot
 // selects and the renderer keeps drawing whatever it was constructed
 // with. That is exactly what happened to Objects - the game selected three
 // of the four World atlases and left the fourth at the renderer's default,
-// so a World asking for `ObjectAtlasNew` drew the old sheet everywhere but
+// so a World asking for the new Objects sheet drew the old one everywhere but
 // in the editor (#1026). Walking one table is what makes the four slots
 // one checkable list rather than four lines somebody has to count.
 std::array<WorldAtlasSlot, 4> const& worldAtlasSlots();

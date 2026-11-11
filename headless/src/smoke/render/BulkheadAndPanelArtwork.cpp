@@ -270,20 +270,20 @@ namespace
 	NewObjectsAtlas loadNewObjectsAtlas(smoke::Context const& context)
 	{
 		auto const manifest = bundledManifest(context);
-		auto const set = manifestResource(manifest, "ObjectAtlasNew");
+		auto const set = manifestResource(manifest, "ObjectAtlas");
 		require(set.found && set.type == "ImageSet",
-			"The application manifest registers no ObjectAtlasNew ImageSet");
-		require(atlasSetRegistry(context).at("ObjectAtlasNew").tileset
+			"The application manifest registers no ObjectAtlas ImageSet");
+		require(atlasSetRegistry(context).at("ObjectAtlas").tileset
 			== "textures/objects-new.tileset.yaml",
 			"The atlas-set registry does not name objects-new.tileset.yaml for "
-			"ObjectAtlasNew");
+			"ObjectAtlas");
 		auto const image = manifestResource(manifest, set.imageReference);
 		require(image.found && image.type == "Image",
-			"ObjectAtlasNew's paired Image resource is missing");
+			"ObjectAtlas's paired Image resource is missing");
 
 		NewObjectsAtlas atlas;
 		atlas.authored = ObjectTileset::load(
-			context.fixture(authoredTilesetFor(context, "ObjectAtlasNew")));
+			context.fixture(authoredTilesetFor(context, "ObjectAtlas")));
 		atlas.regions = set.regions;
 		atlas.width = atlas.authored.width;
 		atlas.height = atlas.authored.height;
@@ -310,20 +310,7 @@ namespace
 	void installNewObjectsAtlas(smoke::Context const& context)
 	{
 		auto const atlas = loadNewObjectsAtlas(context);
-		installAtlas(atlas.authored, atlas.regions, "ObjectAtlasNew");
-	}
-
-	// The old Objects atlas, for the check that proves the primitives are
-	// what a set with no Bulkhead Door or Access panel tile falls back to.
-	void installOldObjectAtlas(smoke::Context const& context)
-	{
-		auto const manifest = bundledManifest(context);
-		auto const set = manifestResource(manifest, "ObjectAtlas");
-		require(set.found && set.type == "ImageSet",
-			"The application manifest registers no ObjectAtlas");
-		auto const authored = ObjectTileset::load(
-			context.fixture(authoredTilesetFor(context, "ObjectAtlas")));
-		installAtlas(authored, set.regions, "ObjectAtlas");
+		installAtlas(atlas.authored, atlas.regions, "ObjectAtlas");
 	}
 
 	// ------------------------------------------------------------------
@@ -495,30 +482,6 @@ namespace
 		return false;
 	}
 
-	bool anyFilledRect(WorldDrawList const& drawing, PackedColourValue colour,
-		ScreenRect const& area)
-	{
-		for (auto const& command : drawing.commands())
-		{
-			auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command);
-			if (!triangle || triangle->texture != WorldDrawList::Texture::None
-				|| triangle->colour != colour)
-				continue;
-			auto const minX = std::min({ triangle->positions[0].x,
-				triangle->positions[1].x, triangle->positions[2].x });
-			auto const maxX = std::max({ triangle->positions[0].x,
-				triangle->positions[1].x, triangle->positions[2].x });
-			auto const minY = std::min({ triangle->positions[0].y,
-				triangle->positions[1].y, triangle->positions[2].y });
-			auto const maxY = std::max({ triangle->positions[0].y,
-				triangle->positions[1].y, triangle->positions[2].y });
-			if (near(minX, area.left) && near(maxX, area.right)
-				&& near(minY, area.top) && near(maxY, area.bottom))
-				return true;
-		}
-		return false;
-	}
-
 	// ------------------------------------------------------------------
 	// The authored tiles: sizes, offsets and the generated manifest pair.
 	// ------------------------------------------------------------------
@@ -529,7 +492,7 @@ namespace
 
 		auto const slab = atlas.authored.sprites.find("bulkhead-door");
 		require(slab != atlas.authored.sprites.end(),
-			"The authored ObjectAtlasNew tileset has no bulkhead-door tile");
+			"The authored ObjectAtlas tileset has no bulkhead-door tile");
 		// The slab draws at its own 0.2 x 0.7 aspect ratio. The cell is 2:5,
 		// so a tile drawn at the cell's shape would be five times too wide.
 		require(near(slab->second.drawnSize.x, kSlabWidth)
@@ -550,7 +513,7 @@ namespace
 
 		auto const panel = atlas.authored.sprites.find("access-panel");
 		require(panel != atlas.authored.sprites.end(),
-			"The authored ObjectAtlasNew tileset has no access-panel tile");
+			"The authored ObjectAtlas tileset has no access-panel tile");
 		require(near(panel->second.drawnSize.x, kPanelWidth)
 			&& near(panel->second.drawnSize.y, kPanelHeight),
 			"The Access panel tile's reference size must be 0.5 x 0.25, saw "
@@ -950,45 +913,6 @@ namespace
 		require(refused, "A version 2 object tileset with a force-bridge tile was accepted");
 	}
 
-	// ------------------------------------------------------------------
-	// The old sets have neither tile, so the primitives stay.
-	// ------------------------------------------------------------------
-	void aSetWithNeitherTileKeepsThePrimitives(smoke::Context const& context)
-	{
-		using smoke::require;
-		auto const manifest = bundledManifest(context);
-		auto const set = manifestResource(manifest, "ObjectAtlas");
-		require(set.found, "The application manifest registers no ObjectAtlas");
-		auto const authored = ObjectTileset::load(
-			context.fixture(authoredTilesetFor(context, "ObjectAtlas")));
-		require(authored.sprites.count("bulkhead-door") == 0,
-			"The old Objects atlas must not have gained a bulkhead-door tile");
-		require(authored.sprites.count("access-panel") == 0,
-			"The old Objects atlas must not have gained an access-panel tile");
-		installOldObjectAtlas(context);
-
-		auto const bulkhead = buildBulkheadFixture();
-		prepareCanvas();
-		auto const bulkheadDrawing = drawWorld(bulkhead.world);
-		ScreenRect const column = worldToScreen(kBulkheadCellX + 0.9f,
-			kBulkheadLevelY, kSlabWidth, kSlabHeight);
-		require(!objectAtlasExtent(bulkheadDrawing, column).painted(),
-			"The old Objects atlas drew a Bulkhead Door tile it does not have");
-		require(anyFilledRect(bulkheadDrawing, packColour(128, 192, 182), column),
-			"Without a bulkhead-door tile the renderer must keep its flat slab fill");
-
-		auto const panel = buildPanelFixture(core::AccessPanelGeometry{});
-		prepareCanvas();
-		auto const panelDrawing = drawWorld(panel.world);
-		float const worldLeft = float(kPanelCellX) + (1.0f - kPanelWidth) * 0.5f;
-		float const worldBottom = float(kPanelLevel) + kPanelBottomOffset;
-		ScreenRect const rect = worldToScreen(worldLeft, worldBottom,
-			kPanelWidth, kPanelHeight);
-		require(!objectAtlasExtent(panelDrawing, rect).painted(),
-			"The old Objects atlas drew an Access panel tile it does not have");
-		require(anyFilledRect(panelDrawing, packColour(78, 92, 110), rect),
-			"Without an access-panel tile the renderer must keep its flat leaf fill");
-	}
 }
 
 void render_smoke::registerBulkheadAndPanelArtwork(std::vector<smoke::Check>& checks)
@@ -1009,6 +933,4 @@ void render_smoke::registerBulkheadAndPanelArtwork(std::vector<smoke::Check>& ch
 		isolated<forceBridgeStillRendersAsAPrimitiveLine> });
 	checks.push_back({ "bulkheadAndPanel/loaderRefusesAForceBridgeTile",
 		isolated<loaderRefusesAForceBridgeTile> });
-	checks.push_back({ "bulkheadAndPanel/aSetWithNeitherTileKeepsThePrimitives",
-		isolated<aSetWithNeitherTileKeepsThePrimitives> });
 }

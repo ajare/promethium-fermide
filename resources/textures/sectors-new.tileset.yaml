@@ -1,4 +1,4 @@
-# Authored tileset for the SectorAtlasNew set (#1017, variant families #1038).
+# Authored tileset for the SectorAtlas set (#1017, variant families #1038).
 #
 # A version 2 tileset declares, per tile, the three render semantics a
 # version 1 file left the renderer to guess: the render offset it draws at,

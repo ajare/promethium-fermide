@@ -53,7 +53,6 @@ PF_REQUIRE_CONST_READ(getLifetimeToken(), std::weak_ptr<void const>)
 PF_REQUIRE_CONST_READ(getRandomSeed(), std::uint64_t)
 PF_REQUIRE_CONST_READ(documentDirectory(), std::filesystem::path const&)
 PF_REQUIRE_CONST_READ(getLoadWarnings(), std::vector<std::string> const&)
-PF_REQUIRE_CONST_READ(atlasFamilyDiagnostic(), ::std::string)
 PF_REQUIRE_CONST_READ(getBuildLog(), core::Log const&)
 PF_REQUIRE_CONST_READ(getCellsWide(), std::uint32_t)
 PF_REQUIRE_CONST_READ(getLevelsHigh(), std::uint32_t)
@@ -411,7 +410,6 @@ namespace
 		(void)surface.getRandomSeed();
 		(void)surface.documentDirectory();
 		(void)surface.getLoadWarnings();
-		(void)surface.atlasFamilyDiagnostic();
 		(void)surface.getBuildLog();
 		(void)surface.getCellsWide();
 		(void)surface.getLevelsHigh();
@@ -542,7 +540,6 @@ void registerGameRuntimeReadSurface(std::vector<smoke::Check>& checks)
 			require(!tokenRuntime.owner_before(tokenView) && !tokenView.owner_before(tokenRuntime),
 				"the lifetime token read through the runtime names a different owner than the render view's");
 			PF_SAME_OBJECT(getLoadWarnings());
-			PF_SAME_READ(atlasFamilyDiagnostic());
 			PF_SAME_OBJECT(getBuildLog());
 			PF_SAME_OBJECT(documentDirectory());
 

@@ -1,7 +1,7 @@
 -- Native Lua catalogue; UUID, keys, artwork and routes are stable.
 --
 -- Every tile wears the Furniture role convention (#1029), so this catalogue
--- resolves in FurnitureAtlasNew - the atlas a new World now draws - instead of
+-- resolves in FurnitureAtlas - the atlas a new World now draws - instead of
 -- falling through to the missing-tile magenta.
 local function sit(agent, world, marker)
 

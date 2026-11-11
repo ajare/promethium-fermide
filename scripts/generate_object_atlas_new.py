@@ -28,7 +28,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from atlas_new import AtlasSpec, run  # noqa: E402
 
 SPEC = AtlasSpec(
-    atlas="ObjectAtlasNew",
+    atlas="ObjectAtlas",
     tileset="resources/textures/objects-new.tileset.yaml",
     script="generate_object_atlas_new.py",
 )

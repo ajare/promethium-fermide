@@ -14,6 +14,11 @@
 // World carries through the editor's own new-World seam is what the panel
 // shows (#1023). This drives that seam rather than the ImGui widgets: the
 // widgets have no state of their own to be wrong.
+//
+// Since the #1013 terminus dropped the `New` suffix, the four sets a fresh
+// World shows are the canonical four, and there is no second family left to
+// mix with them. What is still worth pinning is that the four slots stay
+// independent: repointing one must move that one bound read and no other.
 
 namespace
 {
@@ -45,17 +50,10 @@ namespace editor_smoke
 				require(world != nullptr, "the editor opened no World");
 				auto const shown = panelSelections(*world);
 				std::vector<std::string> const expected{
-					"SectorAtlasNew", "ObjectAtlasNew", "AgentAtlasNew", "FurnitureAtlasNew" };
+					"SectorAtlas", "ObjectAtlas", "AgentAtlas", "FurnitureAtlas" };
 				require(shown == expected,
-					"a fresh World's artwork panel does not show the new defaults: "
+					"a fresh World's artwork panel does not show the canonical sets: "
 					+ shown[0] + ", " + shown[1] + ", " + shown[2] + ", " + shown[3]);
-				// Every slot reads as the replacement family, so the panel is
-				// not showing a mix that the loader would call out.
-				for (auto const& name : shown)
-					require(core::atlasFamilyOf(name) == core::AtlasFamily::Replacement,
-						"a fresh World's artwork panel shows a set outside the new family: " + name);
-				require(world->atlasFamilyDiagnostic().empty(),
-					"a fresh World reports a mixed atlas family: " + world->atlasFamilyDiagnostic());
 				// The defaults are the World's own initial state rather than an
 				// edit made over it: saving the fresh World leaves the panel
 				// showing the same four sets, with nothing outstanding.
@@ -66,44 +64,38 @@ namespace editor_smoke
 				// And the runtime behind the panel reads the same four, which is
 				// what the viewport draws.
 				auto const& runtime = editor::currentDocument()->runtime();
-				require(runtime.sectorImageSetResourceName() == "SectorAtlasNew"
-					&& runtime.objectImageSetResourceName() == "ObjectAtlasNew"
-					&& runtime.agentImageSetResourceName() == "AgentAtlasNew"
-					&& runtime.furnitureImageSetResourceName() == "FurnitureAtlasNew",
+				require(runtime.sectorImageSetResourceName() == "SectorAtlas"
+					&& runtime.objectImageSetResourceName() == "ObjectAtlas"
+					&& runtime.agentImageSetResourceName() == "AgentAtlas"
+					&& runtime.furnitureImageSetResourceName() == "FurnitureAtlas",
 					"the runtime behind the artwork panel reads different sets than the panel shows");
 			} });
 
-		checks.push_back({ "world-artwork/repointedAtlasIsReportedBySlot", [](smoke::Context const&)
+		checks.push_back({ "world-artwork/repointedAtlasMovesItsOwnSlotOnly", [](smoke::Context const&)
 			{
 				State state;
 				CloseOnExit const closer;
 				auto const world = editor::openNewWorld("Repointed artwork panel", 8, 2);
 				require(world != nullptr, "the editor opened no World");
-				// Repointing one of the four at the old family is the near-miss
-				// the loader warns about, and the panel's bound read is the
-				// same value the warning was built from.
-				world->setObjectImageSetResourceName("ObjectAtlas");
-				require(world->objectImageSetResourceName() == "ObjectAtlas",
+				// The four selections are four separate writes. Repointing one
+				// at a custom theme must move that slot's bound read and leave
+				// the other three on the set they came with - the panel reads
+				// the World directly, so a shared write would show up here.
+				world->setObjectImageSetResourceName("StationObjects");
+				require(world->objectImageSetResourceName() == "StationObjects",
 					"the Objects artwork selection did not reach the World the panel binds to");
-				auto const diagnostic = world->atlasFamilyDiagnostic();
-				require(diagnostic.find("Objects=ObjectAtlas (old)") != std::string::npos,
-					"repointing one atlas did not produce a straddle naming it: " + diagnostic);
-				// The other three stay in the new family, which is the whole
-				// point: the World is one three-character typo away from the
-				// wrong sheet, and says so.
-				require(core::atlasFamilyOf(world->sectorImageSetResourceName())
-					== core::AtlasFamily::Replacement, "the Sector selection moved with the Objects one");
-				require(core::atlasFamilyOf(world->agentImageSetResourceName())
-					== core::AtlasFamily::Replacement, "the Agent selection moved with the Objects one");
-				require(core::atlasFamilyOf(world->furnitureImageSetResourceName())
-					== core::AtlasFamily::Replacement, "the Furniture selection moved with the Objects one");
-				// Repointing the last old set back into the new family clears
-				// the report, so the warning tracks the selection rather than
-				// sticking once raised.
-				world->setObjectImageSetResourceName("ObjectAtlasNew");
-				require(world->atlasFamilyDiagnostic().empty(),
-					"the straddle report survived the World being put back inside one family: "
-					+ world->atlasFamilyDiagnostic());
+				require(world->sectorImageSetResourceName() == "SectorAtlas",
+					"the Sector selection moved with the Objects one");
+				require(world->agentImageSetResourceName() == "AgentAtlas",
+					"the Agent selection moved with the Objects one");
+				require(world->furnitureImageSetResourceName() == "FurnitureAtlas",
+					"the Furniture selection moved with the Objects one");
+				// And the write is reversible through the same seam, so a
+				// repoint is a selection rather than a one-way edit.
+				world->setObjectImageSetResourceName("ObjectAtlas");
+				require(panelSelections(*world) == std::vector<std::string>{
+						"SectorAtlas", "ObjectAtlas", "AgentAtlas", "FurnitureAtlas" },
+					"putting the Objects selection back did not restore the four defaults");
 			} });
 	}
 }

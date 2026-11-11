@@ -74,7 +74,6 @@ set(names
     furnitureAtlasNew/everyShippedFurnitureCatalogueResolvesInEveryNewFurnitureAtlas
     furnitureAtlasNew/noShippedFurnitureRendersMagentaUnderTheNewDefaultAtlas
     furnitureAtlasNew/everyShippedFootprintIsCoveredOrRecorded
-    furnitureAtlasNew/theOldFurnitureAtlasesStillDrawTheirOwnArt
     sectorAtlasNew/tenFullCellTilesAreRegistered
     sectorAtlasNew/everyEdgeFallsBackToThePrimitiveLine
     sectorAtlasNew/everySurfaceBearingSectorTypeResolvesToItsOwnTile
@@ -95,7 +94,6 @@ set(names
     sectorAtlasNew/loaderRefusesVariantFamiliesInTheOldFormat
     sectorAtlasNew/theObjectFormatRefusesVariantFamilies
     sectorAtlasNew/anOlderAtlasStillBorrowsForATypeItHasNoTileFor
-    sectorAtlasNew/theOldFamilyStillBorrowsForShuttleAndStaircase
     sectorSurfaceDrawContract/everyCellOfANoVariantSectorDrawsItsBaseTile
     sectorSurfaceDrawContract/theRepeatIsAnchoredOnTheSectorFloorLine
     sectorSurfaceDrawContract/aPartialTopLevelIsCroppedAtItsTopNotStretched
@@ -135,13 +133,11 @@ set(names
     agentAtlasNew/theShippedAndroidTypeWearsTheAndroidAppearance
     agentAtlasNew/everyShippedAgentTypeResolvesInEveryNewAgentAtlas
     agentAtlasNew/everyAppearanceRowIsWornOrReserved
-    agentAtlasNew/theOldAgentAtlasStillResolvesRobotStanding
     walkwayArtwork/manifestPairIsGeneratedFromTheTileset
     walkwayArtwork/everyAtlasIsCoveredByItsAuthoredTileset
     walkwayArtwork/installSeparatesPixelsFromSemantics
     walkwayArtwork/walkwayDrawsBelowTheFloorLine
     walkwayArtwork/physicalExtentStaysZeroAndRoutes
-    walkwayArtwork/oldSetsStillDrawThePrimitiveLine
     bulkheadAndPanel/newTilesAreAuthoredAtTheirContentSizes
     bulkheadAndPanel/bulkheadDoorStraddlesTheCellBoundary
     bulkheadAndPanel/bulkheadDoorProgressIsSyncedToTheDeviceState
@@ -150,7 +146,6 @@ set(names
     bulkheadAndPanel/accessPanelLeafRetractsIntoTheTopEdge
     bulkheadAndPanel/forceBridgeStillRendersAsAPrimitiveLine
     bulkheadAndPanel/loaderRefusesAForceBridgeTile
-    bulkheadAndPanel/aSetWithNeitherTileKeepsThePrimitives
     objectArtworkNew/authoredTilesAreRegistered
     objectArtworkNew/doorCropFollowsTheOpenFractionOnEveryStyle
     objectArtworkNew/aFullyOpenDoorEmitsNoLeafGeometry
@@ -170,7 +165,7 @@ set(names
     atlasInstall/theInstalledRegionIsTheImageSetsNotTheTilesets
     atlasInstall/aRegionEscapingTheAtlasImageIsNeverLoadable
     atlasInstall/aManifestTileTheAuthoredTilesetNeverDefinesIsRefused
-    atlasInstall/everyNewAtlasMatchesItsTilesetNameForName
+    atlasInstall/everyViewportAtlasMatchesItsTilesetNameForName
     atlasInstall/theFourSlotsInstallThroughTheRenderStacksPass
     atlasInstall/aMissingAtlasLeavesItsSlotEmptyAndReported
     atlasInstall/aBadObjectsAtlasRefusesAMandatoryInstall

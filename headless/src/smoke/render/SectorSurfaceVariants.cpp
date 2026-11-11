@@ -842,7 +842,7 @@ namespace
 	// this shape from any other - it never looks at another type's region -
 	// so only a borrowing Sector meets it, and only here does "which name is
 	// the variant derived from" stop having one answer. The shipped
-	// `SectorAtlasNew` declares all ten types with three variants each and
+	// `SectorAtlas` declares all ten types with three variants each and
 	// never shows it; a half-finished sheet does, which is exactly when an
 	// author is least able to tell a wrong tile from unfinished art.
 	SectorTileset installBorrowingAtlas()

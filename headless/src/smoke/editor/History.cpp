@@ -33,7 +33,7 @@ namespace
 			return world->deserialize(*reader, data);
 		};
 		require(artworkHistory.undo(captureDocumentSnapshot(world, artworkHistory), restore)
-			&& world->sectorImageSetResourceName() == "SectorAtlasNew" && !artworkHistory.isModified(),
+			&& world->sectorImageSetResourceName() == "SectorAtlas" && !artworkHistory.isModified(),
 			"Artwork undo must restore the saved default");
 		require(artworkHistory.redo(captureDocumentSnapshot(world, artworkHistory), restore)
 			&& world->sectorImageSetResourceName() == "StationAtlas" && artworkHistory.isModified(),
@@ -42,7 +42,7 @@ namespace
 		world->setAgentImageSetResourceName("CustomAgents");
 		commitDocumentEdit(std::move(agentBefore), artworkHistory);
 		require(artworkHistory.undo(captureDocumentSnapshot(world, artworkHistory), restore)
-			&& world->agentImageSetResourceName() == "AgentAtlasNew"
+			&& world->agentImageSetResourceName() == "AgentAtlas"
 			&& world->sectorImageSetResourceName() == "StationAtlas", "Agent artwork undo changed sector artwork");
 		require(artworkHistory.redo(captureDocumentSnapshot(world, artworkHistory), restore)
 			&& world->agentImageSetResourceName() == "CustomAgents", "Agent artwork redo lost the selection");
@@ -50,7 +50,7 @@ namespace
 		world->setFurnitureImageSetResourceName("CustomFurniture");
 		commitDocumentEdit(std::move(furnitureBefore), artworkHistory);
 		require(artworkHistory.undo(captureDocumentSnapshot(world, artworkHistory), restore)
-			&& world->furnitureImageSetResourceName() == "FurnitureAtlasNew"
+			&& world->furnitureImageSetResourceName() == "FurnitureAtlas"
 			&& world->agentImageSetResourceName() == "CustomAgents"
 			&& world->sectorImageSetResourceName() == "StationAtlas", "Furniture artwork undo changed other artwork");
 		require(artworkHistory.redo(captureDocumentSnapshot(world, artworkHistory), restore)
@@ -62,7 +62,7 @@ namespace
 		world->setObjectImageSetResourceName("CustomObjects");
 		commitDocumentEdit(std::move(objectsBefore), artworkHistory);
 		require(artworkHistory.undo(captureDocumentSnapshot(world, artworkHistory), restore)
-			&& world->objectImageSetResourceName() == "ObjectAtlasNew"
+			&& world->objectImageSetResourceName() == "ObjectAtlas"
 			&& world->furnitureImageSetResourceName() == "CustomFurniture"
 			&& world->agentImageSetResourceName() == "CustomAgents"
 			&& world->sectorImageSetResourceName() == "StationAtlas",

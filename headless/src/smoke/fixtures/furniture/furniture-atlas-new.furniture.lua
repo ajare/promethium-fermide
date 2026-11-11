@@ -1,4 +1,4 @@
--- Role-named Furniture tiles for the FurnitureAtlasNew checks (#1016).
+-- Role-named Furniture tiles for the FurnitureAtlas checks (#1016).
 --
 -- Every tile here is named `<piece>-<role><level>`: the role is `L`, `M` or
 -- `R` - the left cap, a middle cell, the right cap - and the level is the
@@ -45,9 +45,9 @@ local chair = {
 }
 -- The absolute `-XY` escape hatch: an offset from the anchor rather than a
 -- role, for the irregular footprint a role vocabulary cannot name. These
--- three tiles are deliberately not in FurnitureAtlasNew - the sheet holds
--- the ten role tiles - because this definition exists to exercise the
--- loader, never the renderer.
+-- three tiles are deliberately not in FurnitureAtlas - the sheet holds
+-- the role tiles and the bare chair cell and nothing else - because this
+-- definition exists to exercise the loader, never the renderer.
 local irregularDesk = {
   key = "irregularDesk",
   label = "Irregular desk",

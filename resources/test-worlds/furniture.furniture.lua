@@ -3,9 +3,10 @@
 -- Every tile is named by the Furniture role convention (#1029): `<piece>-<role><level>`,
 -- the role being `L`, `M` or `R` for the left cap, a middle cell and the right cap,
 -- and the level the height level within the footprint. This catalogue resolves in
--- FurnitureAtlasNew, the atlas a new World now draws; the old bare names it used to
--- carry (`chair`, `sofa-left`, `bed-right`, `desk-right`) belong to the retired
--- FurnitureAtlas sheet and are not what a new World renders.
+-- FurnitureAtlas, the Furniture sheet the bundle ships. The pre-convention names
+-- it used to carry (`sofa-left`, `bed-right`, `desk-right`) belonged to the
+-- merged `objects.png` sheet, which was deleted when the #1013 transition ended
+-- (#1024); nothing resolves under those names any more.
 local function sit(agent, world, marker)
 
   world.claim()

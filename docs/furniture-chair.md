@@ -34,9 +34,10 @@ use normal document history.
 `resources/test-worlds/chair.furniture.lua` describes the format. Catalogue UUID,
 definition key and usable-point key are reference identities, not display labels.
 Artwork names a region in the World's selected `furnitureImageSet`, defaulting to
-`FurnitureAtlas`; the application resource manager owns its atlas. The placeholder
-chair's current rectangle is preserved in `resources/Resources.yaml` and shared with
-`ObjectAtlas` as a compatibility alias. Regions fill one World cell regardless of
+`FurnitureAtlas`; the application resource manager owns its atlas. The chair draws
+from the sheet's own `chair-L0` cell - the placeholder rectangle that used to be
+shared with `ObjectAtlas` went with the merged `objects.png` sheet at the #1013
+terminus (#1024). Regions fill one World cell regardless of
 pixel dimensions; missing artwork renders magenta without changing geometry.
 No Furniture TileSet resource is created.
 The GUI registers user-selected catalogues dynamically as FurnitureCatalogue

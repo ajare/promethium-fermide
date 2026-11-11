@@ -1,35 +1,6 @@
 Resources:
   Resource:
     - type: "Image"
-      name: "SectorAtlasImage"
-      location: "textures/sector-atlas-draft.png"
-      Option:
-        - name: "filtering"
-          value: "none"
-        - name: "uv-style"
-          value: "atlas"
-    - type: "ImageSet"
-      name: "SectorAtlas"
-      DependentResources:
-        DependentResource:
-          id: "Image"
-          ref: "SectorAtlasImage"
-      Definitions:
-        Definition:
-          Images:
-            Image:
-              - { name: "corridor", x: "151", y: "99", width: "45", height: "32" }
-              - { name: "room", x: "28", y: "179", width: "83", height: "69" }
-              - { name: "ladder", x: "370", y: "546", width: "35", height: "116" }
-              - { name: "lift", x: "158", y: "547", width: "32", height: "117" }
-              - { name: "shuttle", x: "373", y: "735", width: "31", height: "46" }
-              - { name: "stairwell", x: "366", y: "411", width: "36", height: "47" }
-              - { name: "staircase", x: "296", y: "412", width: "39", height: "69" }
-              - { name: "boundary-ceiling", x: "26", y: "154", width: "80", height: "9" }
-              - { name: "boundary-floor", x: "26", y: "255", width: "80", height: "9" }
-              - { name: "boundary-left", x: "8", y: "179", width: "9", height: "65" }
-              - { name: "boundary-right", x: "127", y: "179", width: "9", height: "65" }
-    - type: "Image"
       name: "StationAtlasImage"
       location: "textures/station-128x320.png"
       Option:
@@ -46,26 +17,25 @@ Resources:
           Images:
             Image:
               - { name: "corridor", x: "0", y: "0", width: "128", height: "320" }
-    # The replacement Sector atlas, sized for the 128x320 World cell
-    # (#1017). Its render semantics are authored in
+    # The Sector atlas, sized for the 128x320 World cell (#1017). Its
+    # render semantics are authored in
     # resources/textures/sectors-new.tileset.yaml: ten full-cell
     # Infrastructure tiles, one per surface-bearing Sector type, each
     # declaring a family of three variants that the loader derives into the
     # column beneath its base, and no boundary strips at all, so every
-    # Sector edge draws the renderer's primitive line. The old SectorAtlas
-    # stays registered and canonical until nothing references it.
+    # Sector edge draws the renderer's primitive line.
     - type: "Image"
-      name: "SectorAtlasNewImage"
+      name: "SectorAtlasImage"
       location: "textures/sectors-new.png"
       Option:
         - { name: "filtering", value: "none" }
         - { name: "uv-style", value: "atlas" }
     - type: "ImageSet"
-      name: "SectorAtlasNew"
+      name: "SectorAtlas"
       DependentResources:
         DependentResource:
           id: "Image"
-          ref: "SectorAtlasNewImage"
+          ref: "SectorAtlasImage"
       Definitions:
         Definition:
           Images:
@@ -112,50 +82,23 @@ Resources:
               - { name: "stairwell-V2", x: "640", y: "640", width: "128", height: "320" }
               - { name: "stairwell-V3", x: "640", y: "960", width: "128", height: "320" }
               # END GENERATED
-    - type: "Image"
-      name: "ObjectAtlasImage"
-      location: "textures/objects.png"
-      Option:
-        - name: "filtering"
-          value: "none"
-        - name: "uv-style"
-          value: "atlas"
-    - type: "ImageSet"
-      name: "AgentAtlas"
-      DependentResources:
-        DependentResource:
-          id: "Image"
-          ref: "ObjectAtlasImage"
-      Definitions:
-        Definition:
-          Images:
-            Image:
-              - { name: "agent", x: "83", y: "248", width: "26", height: "72" }
-              - { name: "human-standing", x: "0", y: "888", width: "26", height: "72" }
-              - { name: "human-sitting", x: "32", y: "917", width: "26", height: "43" }
-              - { name: "human-lying", x: "64", y: "934", width: "72", height: "26" }
-              - { name: "human-crouching", x: "144", y: "917", width: "26", height: "43" }
-              - { name: "human-crawling", x: "192", y: "952", width: "72", height: "8" }
-              - { name: "robot-standing", x: "288", y: "888", width: "26", height: "72" }
-              - { name: "cleaning-bot-standing", x: "240", y: "912", width: "26", height: "24" }
-    # The replacement Agent atlas, sized for the 128x320 World cell
-    # (#1018). Its render semantics are authored in
+    # The Agent atlas, sized for the 128x320 World cell (#1018). Its
+    # render semantics are authored in
     # resources/textures/agents-new.tileset.yaml: four appearances, each
     # carrying all five Poses, keyed by appearance rather than by Agent
-    # type. The old AgentAtlas stays registered and canonical until nothing
-    # references it.
+    # type.
     - type: "Image"
-      name: "AgentAtlasNewImage"
+      name: "AgentAtlasImage"
       location: "textures/agents-new.png"
       Option:
         - { name: "filtering", value: "none" }
         - { name: "uv-style", value: "atlas" }
     - type: "ImageSet"
-      name: "AgentAtlasNew"
+      name: "AgentAtlas"
       DependentResources:
         DependentResource:
           id: "Image"
-          ref: "AgentAtlasNewImage"
+          ref: "AgentAtlasImage"
       Definitions:
         Definition:
           Images:
@@ -237,87 +180,22 @@ Resources:
               - { name: "sofa-R0", x: "128", y: "320", width: "128", height: "320" }
               - { name: "desk-L0", x: "256", y: "320", width: "128", height: "320" }
               - { name: "desk-R0", x: "384", y: "320", width: "128", height: "320" }
-    - type: "ImageSet"
-      name: "FurnitureAtlas"
-      DependentResources:
-        DependentResource:
-          id: "Image"
-          ref: "ObjectAtlasImage"
-      Definitions:
-        Definition:
-          Images:
-            Image:
-              - { name: "chair", x: "256", y: "160", width: "64", height: "160" }
-              - { name: "sofa-left", x: "0", y: "480", width: "64", height: "160" }
-              - { name: "sofa-right", x: "64", y: "480", width: "64", height: "160" }
-              - { name: "desk-left", x: "128", y: "480", width: "64", height: "160" }
-              - { name: "desk-right", x: "192", y: "480", width: "64", height: "160" }
-              - { name: "bed-left", x: "0", y: "640", width: "64", height: "160" }
-              - { name: "bed-right", x: "64", y: "640", width: "64", height: "160" }
-              # Role-name aliases over the same old Furniture art (#1029). The
-              # shipped Furniture catalogues name their tiles by the role
-              # convention now, so a World that stays on this sheet draws the
-              # artwork it has always drawn rather than the missing-tile magenta.
-              # Each alias covers the identical region to the name it aliases,
-              # which is what the render smoke module insists on.
-              - { name: "chair-L0", x: "256", y: "160", width: "64", height: "160" }
-              - { name: "sofa-L0", x: "0", y: "480", width: "64", height: "160" }
-              - { name: "sofa-R0", x: "64", y: "480", width: "64", height: "160" }
-              - { name: "desk-L0", x: "128", y: "480", width: "64", height: "160" }
-              - { name: "desk-R0", x: "192", y: "480", width: "64", height: "160" }
-              - { name: "bed-L0", x: "0", y: "640", width: "64", height: "160" }
-              - { name: "bed-R0", x: "64", y: "640", width: "64", height: "160" }
+    # The Objects atlas, sized for the 128x320 World cell (#1014). Its
+    # render semantics - render offset, drawn size, tintable - are authored
+    # in resources/textures/objects-new.tileset.yaml, and the pixel regions
+    # below are generated from that file rather than authored beside it.
+    - type: "Image"
+      name: "ObjectAtlasImage"
+      location: "textures/objects-new.png"
+      Option:
+        - { name: "filtering", value: "none" }
+        - { name: "uv-style", value: "atlas" }
     - type: "ImageSet"
       name: "ObjectAtlas"
       DependentResources:
         DependentResource:
           id: "Image"
           ref: "ObjectAtlasImage"
-      Definitions:
-        Definition:
-          Images:
-            Image:
-              - { name: "door", x: "6", y: "80", width: "52", height: "80" }
-              - { name: "button-enabled", x: "93", y: "112", width: "6", height: "16" }
-              - { name: "button-disabled", x: "157", y: "112", width: "6", height: "16" }
-              - { name: "window-clear", x: "198", y: "80", width: "52", height: "48" }
-              - { name: "window-frosted", x: "262", y: "80", width: "52", height: "48" }
-              - { name: "window-tinted", x: "6", y: "240", width: "52", height: "48" }
-              - { name: "booth-window-open", x: "262", y: "560", width: "52", height: "48" }
-              - { name: "booth-window-shutter", x: "267", y: "501", width: "42", height: "38" }
-              - { name: "booth-window-closed", x: "262", y: "496", width: "52", height: "48" }
-              - { name: "marker", x: "152", y: "282", width: "16", height: "22" }
-              - { name: "chair", x: "256", y: "160", width: "64", height: "160" }
-              - { name: "sofa-left", x: "0", y: "480", width: "64", height: "160" }
-              - { name: "sofa-right", x: "64", y: "480", width: "64", height: "160" }
-              - { name: "desk-left", x: "128", y: "480", width: "64", height: "160" }
-              - { name: "desk-right", x: "192", y: "480", width: "64", height: "160" }
-              - { name: "bed-left", x: "0", y: "640", width: "64", height: "160" }
-              - { name: "bed-right", x: "64", y: "640", width: "64", height: "160" }
-              - { name: "platform-lift", x: "192", y: "310", width: "64", height: "10" }
-              - { name: "shuttle-car-left", x: "0", y: "320", width: "64", height: "160" }
-              - { name: "shuttle-car-middle", x: "64", y: "320", width: "64", height: "160" }
-              - { name: "shuttle-car-right", x: "128", y: "320", width: "64", height: "160" }
-              - { name: "shuttle-car-connector", x: "192", y: "320", width: "64", height: "160" }
-              - { name: "lift-car", x: "256", y: "320", width: "64", height: "160" }
-    # The replacement Objects atlas, sized for the 128x320 World cell
-    # (#1014). Its render semantics - render offset, drawn size, tintable -
-    # are authored in resources/textures/objects-new.tileset.yaml, and the
-    # pixel regions below are generated from that file rather than authored
-    # beside it. The old ObjectAtlas stays registered and canonical until
-    # nothing references it.
-    - type: "Image"
-      name: "ObjectAtlasNewImage"
-      location: "textures/objects-new.png"
-      Option:
-        - { name: "filtering", value: "none" }
-        - { name: "uv-style", value: "atlas" }
-    - type: "ImageSet"
-      name: "ObjectAtlasNew"
-      DependentResources:
-        DependentResource:
-          id: "Image"
-          ref: "ObjectAtlasNewImage"
       Definitions:
         Definition:
           Images:
@@ -342,25 +220,24 @@ Resources:
               - { name: "window-frosted", x: "128", y: "320", width: "102", height: "96" }
               - { name: "window-tinted", x: "256", y: "320", width: "102", height: "96" }
               # END GENERATED
-    # The replacement Furniture atlas, sized for the 128x320 World cell
-    # (#1016). Its render semantics are authored in
+    # The Furniture atlas, sized for the 128x320 World cell (#1016). Its
+    # render semantics are authored in
     # resources/textures/furniture-new.tileset.yaml, which also carries the
     # tile naming convention: every name is `<piece>-<role><level>`, so the
     # sheet says which cell of a multi-cell piece each tile belongs to and a
-    # middle tile stays reusable at any width. The old FurnitureAtlas stays
-    # registered and canonical until nothing references it.
+    # middle tile stays reusable at any width.
     - type: "Image"
-      name: "FurnitureAtlasNewImage"
+      name: "FurnitureAtlasImage"
       location: "textures/furniture-new.png"
       Option:
         - { name: "filtering", value: "none" }
         - { name: "uv-style", value: "atlas" }
     - type: "ImageSet"
-      name: "FurnitureAtlasNew"
+      name: "FurnitureAtlas"
       DependentResources:
         DependentResource:
           id: "Image"
-          ref: "FurnitureAtlasNewImage"
+          ref: "FurnitureAtlasImage"
       Definitions:
         Definition:
           Images:
@@ -369,6 +246,7 @@ Resources:
               - { name: "bed-L0", x: "256", y: "320", width: "128", height: "320" }
               - { name: "bed-M0", x: "384", y: "320", width: "128", height: "320" }
               - { name: "bed-R0", x: "512", y: "320", width: "128", height: "320" }
+              - { name: "chair", x: "0", y: "640", width: "128", height: "320" }
               - { name: "chair-L0", x: "0", y: "0", width: "128", height: "320" }
               - { name: "desk-L0", x: "512", y: "0", width: "128", height: "320" }
               - { name: "desk-M0", x: "0", y: "320", width: "128", height: "320" }

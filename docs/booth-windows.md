@@ -168,15 +168,18 @@ portion reveals the back Layer through normal recursive intersecting clips; nest
 Windows and BoothWindows retain their draw order. Closed omits the aperture pass.
 No Button tile or physical panel is drawn.
 
-Visual review of the supplied `objects.png`: the Open tile has a transparent centre
+Visual review of the artwork as it was first supplied, on the `objects.png` sheet
+that has since been deleted (#1024): the Open tile has a transparent centre
 and narrow dark/silver frame; the Closed tile has an opaque grey, horizontally
 slatted shutter. Its 42x38 inner region is suitable for vertical translation without
 moving the frame. Animation uses those existing pixels, not replacement artwork.
 
-The procedural tiles occupy the object-atlas cell [4,3], separate from the chair in [4,1].
-`python3 scripts/pack_booth_window_tiles.py` (Pillow) regenerates their pixels
-without changing other atlas regions; ImageSet and tileset definitions retain
-their distinct rectangles.
+On the shipped `ObjectAtlas` the frame and the shutter are two separate tiles -
+`booth-window-open` and `booth-window-shutter` - each generated from
+`objects-new.tileset.yaml` by `scripts/generate_object_atlas_new.py`, so the
+shutter translates as its own region rather than as a subrectangle cut out of the
+closed panel. The old one-sheet packing scripts that wrote pixels directly into
+`objects.png` were retired with the sheet.
 
 Focused headless module checks:
 

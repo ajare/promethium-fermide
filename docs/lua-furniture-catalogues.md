@@ -50,7 +50,7 @@ owned Marker and does not imply Furniture use.
   cell-based artwork rectangle, including gaps. A Furniture tile name carries the
   position it holds in its piece - `<piece>-<role><level>`, or `-XY` for the
   irregular footprint a role cannot name; see
-  [FurnitureAtlasNew and the tile naming convention](object-tileset.md#furnitureatlasnew-and-the-tile-naming-convention).
+  [FurnitureAtlas and the tile naming convention](object-tileset.md#furnitureatlas-and-the-tile-naming-convention).
   The World selects `furnitureImageSet`
   (default `FurnitureAtlas`), independently of its catalogue, Agent and Sector artwork.
   The editor's **Artwork** section lists registered ImageSets for its slot; changes are
@@ -60,10 +60,10 @@ owned Marker and does not imply Furniture use.
   Missing sets/regions retain the authored selection, warn and render magenta rather
   than substituting defaults. Legacy tile `imageSet` fields naming `ObjectAtlas` or
   `FurnitureAtlas` are accepted but do not override the World; other values are refused.
-  `FurnitureAtlas` shares `ObjectAtlasImage`; old `ObjectAtlas` Furniture regions remain
-  as compatibility aliases, and the old Furniture sheets also carry each role name the
-  shipped catalogues now use over the identical region, so a World that has not moved
-  to `FurnitureAtlasNew` draws the artwork it has always drawn (#1029).
+  `FurnitureAtlas` is its own sheet - `FurnitureAtlasImage`, the 640x960 grid of
+  full-cell role tiles. It no longer shares `ObjectAtlasImage`, and no
+  compatibility aliases survive: the merged `objects.png` sheet those aliases
+  pointed into was deleted when the #1013 transition ended (#1029, #1024).
 - `usablePoints` is required but may be empty. Points have `key`, `label`, finite
   `x`, optional floor-height `y = 0` and optional boolean `blocksPathing` (default
   true). Each explicit bound routing vertex must match its point's position.

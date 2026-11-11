@@ -64,59 +64,6 @@ namespace core
 	// its doors occupy - lives in SimulationCoordinator with the shuttle door
 	// assignment family that consumes that indexing (ADR 0004).
 
-	// The families are named by the transition rather than by anything the sets
-	// declare about themselves, so the rule is the exact name list and not a
-	// `New` suffix match. A custom theme keeps its own name and stays outside
-	// both families no matter how it reads; only the eight sets the transition
-	// actually registered are counted.
-	AtlasFamily atlasFamilyOf(string const& resourceName)
-	{
-		if (resourceName == "SectorAtlas" || resourceName == "ObjectAtlas"
-			|| resourceName == "AgentAtlas" || resourceName == "FurnitureAtlas")
-			return AtlasFamily::Legacy;
-		if (resourceName == "SectorAtlasNew" || resourceName == "ObjectAtlasNew"
-			|| resourceName == "AgentAtlasNew" || resourceName == "FurnitureAtlasNew")
-			return AtlasFamily::Replacement;
-		return AtlasFamily::Unaffiliated;
-	}
-
-	// Only a straddle is worth saying. A World wholly in one family is what the
-	// transition is aiming at, and a World mixing custom themes with either
-	// family is an author's own choice rather than the near-miss this warns
-	// about. Every slot is named with the family it points at, because the
-	// whole value of the message is telling the author which of the four is
-	// the odd one out.
-	string atlasFamilyMixDiagnostic(string const& sector, string const& object,
-		string const& agent, string const& furniture)
-	{
-		array<pair<char const*, string const*>, 4> const slots{
-			pair{"Sector", &sector}, pair{"Objects", &object},
-			pair{"Agents", &agent}, pair{"Furniture", &furniture}};
-		bool anyLegacy{ false };
-		bool anyReplacement{ false };
-		for (auto const& [label, name] : slots)
-		{
-			auto const family = atlasFamilyOf(*name);
-			anyLegacy = anyLegacy || family == AtlasFamily::Legacy;
-			anyReplacement = anyReplacement || family == AtlasFamily::Replacement;
-		}
-		if (!anyLegacy || !anyReplacement) return {};
-		string message{ "World artwork mixes the old and new atlas families: " };
-		for (size_t index = 0; index < slots.size(); ++index)
-		{
-			auto const& [label, name] = slots[index];
-			if (index != 0) message += ", ";
-			switch (atlasFamilyOf(*name))
-			{
-			case AtlasFamily::Legacy: message += format("{}={} (old)", label, *name); break;
-			case AtlasFamily::Replacement: message += format("{}={} (new)", label, *name); break;
-			case AtlasFamily::Unaffiliated: message += format("{}={} (custom)", label, *name); break;
-			}
-		}
-		message += ". A World should draw all four atlases from one family; mixing them renders the wrong sheet.";
-		return message;
-	}
-
 	World::CreateDoorOptions World::ManualDoor1Options{ 1, Door::Height::Regular, { false, false }, DoorActivationMode::Manual };
 	World::CreateDoorOptions World::RemoteControlledDoor1Options{ 1, Door::Height::Regular, { true, true }, DoorActivationMode::RemoteControlled };
 	World::CreateDoorOptions World::UnavailableDoor1Options{ 1, Door::Height::Regular, { false, false }, DoorActivationMode::Unavailable };

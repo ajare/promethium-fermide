@@ -1,4 +1,4 @@
-# Authored tileset for the FurnitureAtlasNew set (#1016).
+# Authored tileset for the Furniture atlas (#1016).
 #
 # A version 2 tileset declares, per tile, the three render semantics a
 # version 1 file left the renderer to guess: the render offset it draws at,
@@ -13,8 +13,9 @@
 # semantics below are World units and never pixels.
 #
 # The authored grid is 128 x 320: one World cell at the size the World is
-# now drawn. Every Furniture tile fills its cell, so a piece one cell wide
-# covers exactly one cell and a piece four cells wide covers four.
+# now drawn, five columns by three rows. Every Furniture tile fills its cell, so
+# a piece one cell wide covers exactly one cell and a piece four cells wide
+# covers four.
 #
 # ## Tile naming: the position a tile holds in its piece
 #
@@ -37,34 +38,14 @@
 #
 # A single-cell object that can never span more than one cell - a Button, a
 # Marker - keeps its bare name and gains no suffix that would carry no
-# information. Furniture is the multi-cell kind, so all ten of its tiles
-# carry the role suffix, and a width-1 chair falls out of the rule as
-# `chair-L0` rather than being a special case.
+# information. Furniture is the multi-cell kind, so every role tile carries
+# the suffix and a width-1 chair falls out of the rule as `chair-L0` rather
+# than being a special case. The one bare tile on the sheet - `chair` - is the
+# name a piece speaks when it names no position at all; see its note below.
 version: 2
 image: furniture-new.png
-size: [640, 640]
+size: [640, 960]
 tile_size: [128, 320]
-# Shipped Furniture pieces whose footprint this sheet cannot serve, and why
-# (#1029).
-#
-# The shipped catalogues are checked tile by tile against every `-New` Furniture
-# atlas, and a piece listed here is the only thing exempting it from that. A gap
-# that is recorded is a decision somebody made about art that does not exist; one
-# that is not recorded is a magenta rectangle nobody noticed. A record with no
-# reason is refused, as is one naming a piece this sheet now covers - a stale
-# record is where the next gap gets hidden.
-#
-# Keyed `<catalogue file>:<definition key>`, the catalogue being the shipped
-# resource under `resources/test-worlds/`.
-uncovered_footprints:
-  "layouts.furniture.lua:larger": >-
-    An irregular three-cell layout that reaches a negative offset from its anchor
-    and a second height level with no left cap at that level, so neither the role
-    vocabulary nor the `-XY` escape hatch can name it as the catalogue places it,
-    and this sheet is a full 5x2 grid of full-cell role tiles with no irregular
-    art to give it. Closing the gap means authoring irregular-footprint artwork
-    and widening the sheet, not renaming the piece; until then this piece draws
-    the old sheet's bare `chair` art and magenta under FurnitureAtlasNew.
 sprites:
   # Row 0: the chair's single anchor cell, then the sofa's three roles.
   chair-L0:
@@ -124,6 +105,21 @@ sprites:
     tintable: false
   bed-R0:
     cell: [4, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+  # Row 2: the bare chair cell.
+  #
+  # A piece that names no position - a single-cell chair, or a catalogue that
+  # repeats one chair art across an irregular footprint the role vocabulary
+  # cannot express - speaks a bare name, and that name has to resolve to
+  # something. This is that something. It is the tile that closed the
+  # `layouts.furniture.lua:larger` gap this sheet used to record as
+  # uncovered: widening the sheet by one cell was the fix the record named,
+  # and the old sheet's bare `chair` art is gone with the #1013 terminus.
+  chair:
+    cell: [0, 2]
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]

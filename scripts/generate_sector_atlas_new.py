@@ -32,7 +32,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from atlas_new import AtlasSpec, run  # noqa: E402
 
 SPEC = AtlasSpec(
-    atlas="SectorAtlasNew",
+    atlas="SectorAtlas",
     tileset="resources/textures/sectors-new.tileset.yaml",
     script="generate_sector_atlas_new.py",
     label_tiles=True,

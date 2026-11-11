@@ -487,15 +487,14 @@ namespace
 		auto const registry = atlasSetRegistry(context);
 		auto const atlases = registeredImageSets(entries);
 
-		// AC: all eleven registered `ImageSet`s, themed sheets included. The
-		// count is asserted rather than assumed so a twelfth atlas is noticed
+		// AC: all seven registered `ImageSet`s, themed sheets included. The
+		// count is asserted rather than assumed so an eighth atlas is noticed
 		// the day it is registered and paired here.
-		require(atlases.size() == 11, "The shipped manifest registers "
+		require(atlases.size() == 7, "The shipped manifest registers "
 			+ std::to_string(atlases.size()) + " `ImageSet`s; the install path is "
 			"being asserted against " + std::to_string(atlases.size())
 			+ ", and every atlas outside this set installs untested. The bundle "
-			"ships the four defaults, the four `-New` replacements and the three "
-			"themed sheets.");
+			"ships the four viewport atlases and the three themed sheets.");
 		// AC: every registered atlas is covered by the atlas-set registry.
 		for (auto const& name : atlases)
 			require(registry.count(name), "The shipped manifest registers the "
@@ -671,7 +670,7 @@ namespace
 		auto const manifest = YAML::LoadFile(
 			context.fixture("resources/Resources.yaml").string());
 		auto const entries = manifestEntries(manifest);
-		auto const image = entries.at(entries.at("SectorAtlasNew").imageReference);
+		auto const image = entries.at(entries.at("SectorAtlas").imageReference);
 		auto const [imageWidth, imageHeight] = pngSize(
 			context.fixture("resources/" + image.location));
 
@@ -679,10 +678,10 @@ namespace
 		// real, authored, positively-sized tile; the only thing wrong with it
 		// is that it no longer lies on the sheet.
 		StagedAtlasDirectory offImage{ context, "off-image-drift",
-			{ "SectorAtlasNew" }, "SectorAtlasNew", [&](YAML::Node regions)
+			{ "SectorAtlas" }, "SectorAtlas", [&](YAML::Node regions)
 			{
 				require(regions.IsSequence() && regions.size() > 0,
-					"SectorAtlasNew declares no regions to drift");
+					"SectorAtlas declares no regions to drift");
 				for (std::size_t index = 0; index < regions.size(); ++index)
 				{
 					auto region = regions[index];
@@ -691,7 +690,7 @@ namespace
 				}
 			} };
 		std::string loadRefusal;
-		try { offImage.load("SectorAtlasNew"); }
+		try { offImage.load("SectorAtlas"); }
 		catch (std::exception const& error) { loadRefusal = error.what(); }
 		require(!loadRefusal.empty(), "A `room` region pushed off the bottom of "
 			"the atlas image loaded cleanly, so an escaping region reached the "
@@ -709,7 +708,7 @@ namespace
 	{
 		ClearInstalledTilesets guard;
 		StagedAtlasDirectory staged{ context, "undefined-tile-drift",
-			{ "SectorAtlasNew" }, "SectorAtlasNew", [](YAML::Node regions)
+			{ "SectorAtlas" }, "SectorAtlas", [](YAML::Node regions)
 			{
 				auto added = YAML::Node(YAML::NodeType::Map);
 				added["name"] = "tile-nobody-authored";
@@ -719,10 +718,10 @@ namespace
 				added["height"] = "16";
 				regions.push_back(added);
 			} };
-		auto const set = staged.load("SectorAtlasNew");
+		auto const set = staged.load("SectorAtlas");
 
 		pf::render::AtlasInstaller installer;
-		auto const refusal = installRefusal(installer, "SectorAtlasNew", set,
+		auto const refusal = installRefusal(installer, "SectorAtlas", set,
 			pf::render::AtlasAuthoredFormat::SectorTiles);
 		require(!refusal.empty(), "The manifest gained a tile its authored "
 			"tileset never defines and the install accepted it, so a tile with no "
@@ -736,7 +735,7 @@ namespace
 		// rather than only being visible to whoever called the helper. A
 		// refusal nobody reports is a refusal that still renders.
 		pf::render::ViewportAtlasSlots slots;
-		slots.sectorName = "SectorAtlasNew";
+		slots.sectorName = "SectorAtlas";
 		slots.sector = set;
 		pf::render::AtlasInstaller{}.installAll(slots,
 			/*objectsAreMandatory=*/ false);
@@ -750,15 +749,22 @@ namespace
 			"installed its other surfaces, so the refusal did not stop the install");
 	}
 
+	// The four viewport atlases a new World defaults to, named once so every
+	// check that installs the quadruple installs the same four. Since the
+	// #1013 terminus dropped the `New` suffix these are the canonical names,
+	// and they are the sheets sized for the 128x320 World cell.
+	std::vector<std::string> const kViewportAtlases{ "SectorAtlas",
+		"ObjectAtlas", "AgentAtlas", "FurnitureAtlas" };
+
 	// ------------------------------------------------------------------
-	// AC: the other direction of the same drift. The four `-New` atlases
+	// AC: the other direction of the same drift. The four viewport atlases
 	// are generated from their tilesets, so their region lists and their
 	// tilesets' tile lists are supposed to be the same list. A tileset that
 	// grows a tile the manifest never got is an authored tile nothing
 	// draws, and an atlas the manifest trimmed is a tile the renderer will
 	// look up and not find.
 	// ------------------------------------------------------------------
-	void everyNewAtlasMatchesItsTilesetNameForName(
+	void everyViewportAtlasMatchesItsTilesetNameForName(
 		smoke::Context const& context)
 	{
 		auto const manifest = YAML::LoadFile(
@@ -767,12 +773,11 @@ namespace
 		auto const registry = atlasSetRegistry(context);
 
 		std::vector<std::string> atlases;
-		for (auto const& [name, entry] : registry)
-			if (name.size() > 3 && name.compare(name.size() - 3, 3, "New") == 0)
-				atlases.push_back(name);
+		for (auto const& name : kViewportAtlases)
+			if (registry.count(name)) atlases.push_back(name);
 		require(atlases.size() >= 4, "The atlas-set registry names only "
-			+ std::to_string(atlases.size()) + " `-New` atlases; the transition "
-			"shipped four, so there is too little here to pair");
+			+ std::to_string(atlases.size()) + " of the four viewport atlases; "
+			"the bundle ships four, so there is too little here to pair");
 
 		for (auto const& name : atlases)
 		{
@@ -810,36 +815,30 @@ namespace
 		}
 	}
 
-	// The four `-New` atlases the transition made the default for a new
-	// World (#1023), named once so every check that installs the quadruple
-	// installs the same four.
-	std::vector<std::string> const kNewAtlases{ "SectorAtlasNew",
-		"ObjectAtlasNew", "AgentAtlasNew", "FurnitureAtlasNew" };
-
-	// Loads the four `-New` atlases into the slots each is named for, without
+	// Loads the four viewport atlases into the slots each is named for, without
 	// installing anything. A check that wants to drive the install itself -
 	// and read the installer's counts afterwards - starts here (#1035).
-	pf::render::ViewportAtlasSlots loadNewAtlasQuadruple(
+	pf::render::ViewportAtlasSlots loadViewportAtlasQuadruple(
 		StagedAtlasDirectory& staged)
 	{
 		pf::render::ViewportAtlasSlots slots;
-		slots.sectorName = "SectorAtlasNew";
+		slots.sectorName = "SectorAtlas";
 		slots.sector = staged.load(slots.sectorName);
-		slots.objectName = "ObjectAtlasNew";
+		slots.objectName = "ObjectAtlas";
 		slots.objects = staged.load(slots.objectName);
-		slots.agentName = "AgentAtlasNew";
+		slots.agentName = "AgentAtlas";
 		slots.agent = staged.load(slots.agentName);
-		slots.furnitureName = "FurnitureAtlasNew";
+		slots.furnitureName = "FurnitureAtlas";
 		slots.furniture = staged.load(slots.furnitureName);
 		return slots;
 	}
 
-	// Installs the four `-New` atlases through the render stack's own pass and
+	// Installs the four viewport atlases through the render stack's own pass and
 	// hands back the slots so a check can read what landed.
-	pf::render::ViewportAtlasSlots installNewAtlasQuadruple(
+	pf::render::ViewportAtlasSlots installViewportAtlasQuadruple(
 		StagedAtlasDirectory& staged)
 	{
-		auto slots = loadNewAtlasQuadruple(staged);
+		auto slots = loadViewportAtlasQuadruple(staged);
 		pf::render::AtlasInstaller{}.installAll(slots,
 			/*objectsAreMandatory=*/ true);
 		return slots;
@@ -858,8 +857,8 @@ namespace
 			context.fixture("resources/Resources.yaml").string());
 		auto const entries = manifestEntries(manifest);
 		auto const registry = atlasSetRegistry(context);
-		StagedAtlasDirectory staged{ context, "new-quadruple", kNewAtlases };
-		auto const slots = installNewAtlasQuadruple(staged);
+		StagedAtlasDirectory staged{ context, "new-quadruple", kViewportAtlases };
+		auto const slots = installViewportAtlasQuadruple(staged);
 
 		require(slots.sectorDiagnostic.empty(), "The Sector slot refused its "
 			"shipped atlas: " + slots.sectorDiagnostic);
@@ -875,9 +874,9 @@ namespace
 		require(sectorTilesetIsNewFamily(), "The installed Sector atlas did not "
 			"come up as the New family, so the Shuttle and Staircase would fall "
 			"back to borrowed art (#1027)");
-		for (auto const& [tile, region] : entries.at("SectorAtlasNew").regions)
+		for (auto const& [tile, region] : entries.at("SectorAtlas").regions)
 			require(hasSectorTileSurface(tile), "The installed Sector atlas has "
-				"no '" + tile + "' surface, though SectorAtlasNew declares it at "
+				"no '" + tile + "' surface, though SectorAtlas declares it at "
 				+ regionsText(region));
 
 		// The Objects slot, read back through the renderer's own surface: the
@@ -885,19 +884,19 @@ namespace
 		// authored semantics. This is the slot #1026 left unselected, so it is
 		// the one whose wiring matters most here.
 		auto const authoredObjects = authoredTilesetTiles(context,
-			registry.at("ObjectAtlasNew"));
+			registry.at("ObjectAtlas"));
 		std::size_t objectsReadBack{};
-		for (auto const& [tile, region] : entries.at("ObjectAtlasNew").regions)
+		for (auto const& [tile, region] : entries.at("ObjectAtlas").regions)
 		{
 			auto const artwork = objectTileArtwork(tile);
 			require(artwork.has_value(), "The Objects slot holds no artwork for '"
-				+ tile + "', which ObjectAtlasNew declares, so the Objects slot is "
+				+ tile + "', which ObjectAtlas declares, so the Objects slot is "
 				"not being filled by the install pass");
 			require(artwork->region.x == region.x && artwork->region.y == region.y
 				&& artwork->region.width == region.width
 				&& artwork->region.height == region.height, "The Objects slot "
 				"holds '" + tile + "' at " + regionsText(artwork->region)
-				+ " but ObjectAtlasNew declares " + regionsText(region));
+				+ " but ObjectAtlas declares " + regionsText(region));
 			auto const author = authoredObjects.at(tile);
 			require(artwork->tintable == author.tintable
 				&& artwork->offset.x == author.offset.x
@@ -919,25 +918,25 @@ namespace
 			+ std::to_string(authoredObjects.size()));
 
 		// The Agent and Furniture slots, read back the same way.
-		for (auto const& [tile, region] : entries.at("AgentAtlasNew").regions)
+		for (auto const& [tile, region] : entries.at("AgentAtlas").regions)
 		{
 			auto const size = agentSpriteSize(tile.c_str());
 			require(size.has_value(), "The Agent slot resolves no '" + tile
-				+ "' that AgentAtlasNew declares");
+				+ "' that AgentAtlas declares");
 			require(int(size->x) == region.width && int(size->y) == region.height,
 				"The Agent slot resolves '" + tile + "' to " + std::to_string(
 					int(size->x)) + "x" + std::to_string(int(size->y))
-				+ " but AgentAtlasNew declares " + regionsText(region));
+				+ " but AgentAtlas declares " + regionsText(region));
 		}
-		for (auto const& [tile, region] : entries.at("FurnitureAtlasNew").regions)
+		for (auto const& [tile, region] : entries.at("FurnitureAtlas").regions)
 		{
 			auto const size = furnitureSpriteSize(tile.c_str());
 			require(size.has_value(), "The Furniture slot resolves no '" + tile
-				+ "' that FurnitureAtlasNew declares");
+				+ "' that FurnitureAtlas declares");
 			require(int(size->x) == region.width && int(size->y) == region.height,
 				"The Furniture slot resolves '" + tile + "' to " + std::to_string(
 					int(size->x)) + "x" + std::to_string(int(size->y))
-				+ " but FurnitureAtlasNew declares " + regionsText(region));
+				+ " but FurnitureAtlas declares " + regionsText(region));
 		}
 	}
 
@@ -950,15 +949,15 @@ namespace
 	{
 		ClearInstalledTilesets guard;
 		StagedAtlasDirectory staged{ context, "empty-slots",
-			{ "ObjectAtlasNew" } };
+			{ "ObjectAtlas" } };
 		pf::render::ViewportAtlasSlots slots;
-		slots.objectName = "ObjectAtlasNew";
+		slots.objectName = "ObjectAtlas";
 		slots.objects = staged.load(slots.objectName);
 		// The other three slots name atlases but carry no loaded resource,
 		// which is what a failed `requireImageSet` leaves behind.
-		slots.sectorName = "SectorAtlasNew";
-		slots.agentName = "AgentAtlasNew";
-		slots.furnitureName = "FurnitureAtlasNew";
+		slots.sectorName = "SectorAtlas";
+		slots.agentName = "AgentAtlas";
+		slots.furnitureName = "FurnitureAtlas";
 		pf::render::AtlasInstaller{}.installAll(slots,
 			/*objectsAreMandatory=*/ false);
 
@@ -992,7 +991,7 @@ namespace
 	{
 		ClearInstalledTilesets guard;
 		StagedAtlasDirectory staged{ context, "mandatory-objects-drift",
-			{ "ObjectAtlasNew" }, "ObjectAtlasNew", [](YAML::Node regions)
+			{ "ObjectAtlas" }, "ObjectAtlas", [](YAML::Node regions)
 			{
 				// The Door tile taken out of the manifest entirely. The Objects
 				// slot draws its Doors, Windows, Lifts and Shuttles at the
@@ -1007,8 +1006,8 @@ namespace
 			} };
 
 		pf::render::ViewportAtlasSlots slots;
-		slots.objectName = "ObjectAtlasNew";
-		slots.objects = staged.load("ObjectAtlasNew");
+		slots.objectName = "ObjectAtlas";
+		slots.objects = staged.load("ObjectAtlas");
 		bool threw{ false };
 		std::string message;
 		try
@@ -1149,8 +1148,8 @@ namespace
 	void theAtlasSetRegistryIsParsedOncePerStack(smoke::Context const& context)
 	{
 		ClearInstalledTilesets guard;
-		StagedAtlasDirectory staged{ context, "registry-reads", kNewAtlases };
-		auto slots = loadNewAtlasQuadruple(staged);
+		StagedAtlasDirectory staged{ context, "registry-reads", kViewportAtlases };
+		auto slots = loadViewportAtlasQuadruple(staged);
 		pf::render::AtlasInstaller installer;
 		installer.installAll(slots, /*objectsAreMandatory=*/ true);
 		require(slots.sectorDiagnostic.empty() && slots.objectDiagnostic.empty()
@@ -1164,11 +1163,11 @@ namespace
 			"parsed atlas-sets.yaml " + std::to_string(reads.registryParses)
 			+ " time(s). Four atlases asking which tileset they use is four "
 			"lookups in one parsed registry, not four reads of the file (#1035).");
-		require(reads.tilesetLoads == kNewAtlases.size(), "The four-slot install "
+		require(reads.tilesetLoads == kViewportAtlases.size(), "The four-slot install "
 			"read " + std::to_string(reads.tilesetLoads) + " authored tilesets; "
 			"four slots read one each, so anything else means a slot installed "
 			"twice or not at all");
-		for (auto const& name : kNewAtlases)
+		for (auto const& name : kViewportAtlases)
 			require(tilesetLoadsFor(reads, name) == 1, name + "'s authored tileset "
 				"was read " + std::to_string(tilesetLoadsFor(reads, name))
 				+ " time(s) by one four-slot install");
@@ -1182,7 +1181,7 @@ namespace
 			"over the same installer took the parse count to "
 			+ std::to_string(installer.reads().registryParses)
 			+ "; the registry is parsed once per stack, not once per pass (#1035).");
-		require(installer.reads().tilesetLoads == kNewAtlases.size() * 2,
+		require(installer.reads().tilesetLoads == kViewportAtlases.size() * 2,
 			"Two four-slot passes read " + std::to_string(installer.reads().tilesetLoads)
 			+ " authored tilesets between them; two passes over four slots read "
 			"eight, so one of them is not doing what it says");
@@ -1200,14 +1199,14 @@ namespace
 	void selectingOneAtlasReReadsOnlyItsOwnTileset(smoke::Context const& context)
 	{
 		ClearInstalledTilesets guard;
-		// The four `-New` sheets the stack starts on, plus the two old sheets
-		// the selections below switch to. They are different files, so a
-		// re-read of a sheet that was not selected cannot hide behind a
+		// The four viewport sheets the stack starts on, plus the two themed
+		// sheets the selections below switch to. They are different files, so
+		// a re-read of a sheet that was not selected cannot hide behind a
 		// re-read of the one that was.
 		StagedAtlasDirectory staged{ context, "selection-reads",
-			{ "SectorAtlasNew", "ObjectAtlasNew", "AgentAtlasNew",
-				"FurnitureAtlasNew", "SectorAtlas", "ObjectAtlas" } };
-		auto slots = loadNewAtlasQuadruple(staged);
+			{ "SectorAtlas", "ObjectAtlas", "AgentAtlas", "FurnitureAtlas",
+				"StationAtlas", "StationFurnitureAtlas" } };
+		auto slots = loadViewportAtlasQuadruple(staged);
 		pf::render::AtlasInstaller installer;
 		installer.installAll(slots, /*objectsAreMandatory=*/ true);
 		auto const baseline = installer.reads();
@@ -1218,50 +1217,51 @@ namespace
 			"counts below are differences against that, so it has to be the "
 			"four-slot pass first");
 
-		// The Objects selection, which is the one that carries the Objects
-		// contract with it (#1022).
-		std::string objectDiagnostic;
-		installer.installObjectSlot("ObjectAtlas", staged.load("ObjectAtlas"),
-			setObjectTileset, objectDiagnostic, /*mandatory=*/ false,
-			/*enforceObjectContract=*/ true);
-		require(objectDiagnostic.empty(), "Switching the Objects slot to the "
-			"shipped ObjectAtlas was refused: " + objectDiagnostic);
-		auto const afterObjects = installer.reads();
-		require(afterObjects.registryParses == baseline.registryParses,
+		// The Agent slot. It is object-shaped and carries no Objects contract
+		// of its own, so the themed Furniture sheet is a legal thing to point
+		// it at, and it is a different authored file from the one it replaces.
+		std::string agentDiagnostic;
+		installer.installObjectSlot("StationFurnitureAtlas",
+			staged.load("StationFurnitureAtlas"), setAgentTileset,
+			agentDiagnostic, /*mandatory=*/ false,
+			/*enforceObjectContract=*/ false);
+		require(agentDiagnostic.empty(), "Switching the Agent slot to the themed "
+			"StationFurnitureAtlas was refused: " + agentDiagnostic);
+		auto const afterAgent = installer.reads();
+		require(afterAgent.registryParses == baseline.registryParses,
 			"Selecting one atlas went back to atlas-sets.yaml: "
 			+ std::to_string(baseline.registryParses) + " parse(s) before the "
-			"selection, " + std::to_string(afterObjects.registryParses)
+			"selection, " + std::to_string(afterAgent.registryParses)
 			+ " after (#1035).");
-		require(afterObjects.tilesetLoads == baseline.tilesetLoads + 1,
-			"Selecting the Objects atlas read "
-			+ std::to_string(afterObjects.tilesetLoads - baseline.tilesetLoads)
+		require(afterAgent.tilesetLoads == baseline.tilesetLoads + 1,
+			"Selecting the Agent slot read "
+			+ std::to_string(afterAgent.tilesetLoads - baseline.tilesetLoads)
 			+ " authored tilesets; one slot changed, so only the atlas that "
 			"changed may be read");
-		require(tilesetLoadsFor(afterObjects, "ObjectAtlas") == 1, "The selected "
-			"ObjectAtlas was read " + std::to_string(tilesetLoadsFor(afterObjects,
-				"ObjectAtlas")) + " time(s) by the selection that selected it");
+		require(tilesetLoadsFor(afterAgent, "StationFurnitureAtlas") == 1,
+			"The selected StationFurnitureAtlas was read "
+			+ std::to_string(tilesetLoadsFor(afterAgent, "StationFurnitureAtlas"))
+			+ " time(s) by the selection that selected it");
 		// The three slots nobody touched keep what the starting pass installed
 		// for them, and were not read again to find out.
-		for (auto const* name : { "SectorAtlasNew", "AgentAtlasNew",
-			"FurnitureAtlasNew" })
-			require(tilesetLoadsFor(afterObjects, name) == 1, std::string{ name }
+		for (auto const* name : { "SectorAtlas", "ObjectAtlas",
+			"FurnitureAtlas" })
+			require(tilesetLoadsFor(afterAgent, name) == 1, std::string{ name }
 				+ "'s authored "
-				"tileset was read " + std::to_string(tilesetLoadsFor(afterObjects,
-					name)) + " time(s) by a selection that changed the Objects "
+				"tileset was read " + std::to_string(tilesetLoadsFor(afterAgent,
+					name)) + " time(s) by a selection that changed the Agent "
 				"slot; an unchanged slot keeps the tileset it was installed from "
 				"instead of re-reading it (#1035)");
-		// And the slot really did change hands rather than reporting that it
-		// had without installing.
-		require(objectTileArtwork("door").has_value(), "The Objects slot holds no "
+		require(agentSpriteSize("chair").has_value(), "The Agent slot holds no "
 			"artwork after a selection the install accepted, so the selection "
 			"reported without installing");
 
 		// The Sector selection, which is the other-shaped slot.
 		std::string sectorDiagnostic;
-		installer.installSectorSlot("SectorAtlas", staged.load("SectorAtlas"),
+		installer.installSectorSlot("StationAtlas", staged.load("StationAtlas"),
 			sectorDiagnostic);
 		require(sectorDiagnostic.empty(), "Switching the Sector slot to the "
-			"shipped SectorAtlas was refused: " + sectorDiagnostic);
+			"themed StationAtlas was refused: " + sectorDiagnostic);
 		auto const afterSector = installer.reads();
 		require(afterSector.registryParses == 1, "Two selections later the "
 			"registry has been parsed " + std::to_string(afterSector.registryParses)
@@ -1270,19 +1270,19 @@ namespace
 			"Two single-slot selections read "
 			+ std::to_string(afterSector.tilesetLoads - baseline.tilesetLoads)
 			+ " tilesets beyond the starting pass; two selections read two");
-		require(tilesetLoadsFor(afterSector, "SectorAtlas") == 1, "The selected "
-			"SectorAtlas was read " + std::to_string(tilesetLoadsFor(afterSector,
-				"SectorAtlas")) + " time(s) by the selection that selected it");
-		for (auto const* name : { "ObjectAtlas", "AgentAtlasNew",
-			"FurnitureAtlasNew" })
+		require(tilesetLoadsFor(afterSector, "StationAtlas") == 1, "The selected "
+			"StationAtlas was read " + std::to_string(tilesetLoadsFor(afterSector,
+				"StationAtlas")) + " time(s) by the selection that selected it");
+		for (auto const* name : { "ObjectAtlas", "AgentAtlas",
+			"FurnitureAtlas" })
 			require(tilesetLoadsFor(afterSector, name) == 1, std::string{ name }
 				+ "'s authored "
 				"tileset was read " + std::to_string(tilesetLoadsFor(afterSector,
 					name)) + " time(s) by a selection that changed the Sector "
 				"slot (#1035)");
-		require(hasSectorTileSurface("room"), "The Sector slot does not resolve "
-			"the old sheet's `room` surface after being switched to it, so the "
-			"selection reported without installing");
+		require(hasSectorTileSurface("corridor"), "The Sector slot does not "
+			"resolve the themed sheet's `corridor` surface after being switched "
+			"to it, so the selection reported without installing");
 	}
 
 	// ------------------------------------------------------------------
@@ -1337,7 +1337,7 @@ namespace
 
 	// ------------------------------------------------------------------
 	// AC (#1028): every shipped Agent type's declared Pose tiles resolve in
-	// the installed `-New` Agent atlas. The tiles come off the shipped
+	// the installed viewport Agent atlas. The tiles come off the shipped
 	// types' own frozen baselines, and the atlas they resolve against is the
 	// one the install path put in the Agent slot - not a tileset loaded
 	// beside it.
@@ -1346,8 +1346,8 @@ namespace
 		smoke::Context const& context)
 	{
 		ClearInstalledTilesets guard;
-		StagedAtlasDirectory staged{ context, "shipped-agent-tiles", kNewAtlases };
-		installNewAtlasQuadruple(staged);
+		StagedAtlasDirectory staged{ context, "shipped-agent-tiles", kViewportAtlases };
+		installViewportAtlasQuadruple(staged);
 		require(agentSpriteSize("android-standing").has_value(), "The installed "
 			"Agent atlas resolves no `android-standing`, so the pairing below "
 			"would be asserting against an empty slot");
@@ -1405,7 +1405,7 @@ namespace
 			"stopping short of the bundle");
 	}
 
-	// Which shipped Furniture footprints the `-New` sheet holds back, and why.
+	// Which shipped Furniture footprints the Furniture sheet holds back, and why.
 	// A gap nobody has to justify is where a magenta rectangle goes to stay
 	// unnoticed, so the reason is part of the record rather than a bare name.
 	// The same record the Furniture role-vocabulary checks read; honouring it
@@ -1414,7 +1414,7 @@ namespace
 	std::map<std::string, std::string> uncoveredFurnitureFootprints(
 		smoke::Context const& context)
 	{
-		auto const tileset = atlasSetRegistry(context).at("FurnitureAtlasNew").tileset;
+		auto const tileset = atlasSetRegistry(context).at("FurnitureAtlas").tileset;
 		auto const root = YAML::LoadFile(context.fixture("resources/" + tileset).string());
 		std::map<std::string, std::string> uncovered;
 		auto const node = root["uncovered_footprints"];
@@ -1437,15 +1437,15 @@ namespace
 
 	// ------------------------------------------------------------------
 	// AC (#1029): every shipped Furniture catalogue's tile images resolve
-	// in the installed `-New` Furniture atlas.
+	// in the installed Furniture atlas.
 	// ------------------------------------------------------------------
 	void everyShippedFurnitureTileResolvesInTheInstalledFurnitureAtlas(
 		smoke::Context const& context)
 	{
 		ClearInstalledTilesets guard;
 		StagedAtlasDirectory staged{ context, "shipped-furniture-tiles",
-			kNewAtlases };
-		installNewAtlasQuadruple(staged);
+			kViewportAtlases };
+		installViewportAtlasQuadruple(staged);
 		require(furnitureSpriteSize("chair-L0").has_value(), "The installed "
 			"Furniture atlas resolves no `chair-L0`, so the pairing below would "
 			"be asserting against an empty slot");
@@ -1505,7 +1505,7 @@ namespace
 		// loop above, and a gap recorded for a piece the sheet now covers is a
 		// stale claim this catches.
 		require(gaps == uncovered.size(), std::to_string(uncovered.size())
-			+ " footprint(s) are recorded as uncovered in the `-New` Furniture "
+			+ " footprint(s) are recorded as uncovered in the Furniture "
 			"tileset but only " + std::to_string(gaps)
 			+ " of them are shipped pieces, so a record has gone stale");
 	}
@@ -1521,8 +1521,8 @@ void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
 		isolated<aRegionEscapingTheAtlasImageIsNeverLoadable> });
 	checks.push_back({ "atlasInstall/aManifestTileTheAuthoredTilesetNeverDefinesIsRefused",
 		isolated<aManifestTileTheAuthoredTilesetNeverDefinesIsRefused> });
-	checks.push_back({ "atlasInstall/everyNewAtlasMatchesItsTilesetNameForName",
-		isolated<everyNewAtlasMatchesItsTilesetNameForName> });
+	checks.push_back({ "atlasInstall/everyViewportAtlasMatchesItsTilesetNameForName",
+		isolated<everyViewportAtlasMatchesItsTilesetNameForName> });
 	checks.push_back({ "atlasInstall/theFourSlotsInstallThroughTheRenderStacksPass",
 		isolated<theFourSlotsInstallThroughTheRenderStacksPass> });
 	checks.push_back({ "atlasInstall/aMissingAtlasLeavesItsSlotEmptyAndReported",

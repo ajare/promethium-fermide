@@ -1,12 +1,20 @@
 # Object atlas
 
-`resources/textures/objects.png` is a 320x960 RGBA atlas laid out on a uniform
-64x160 authored grid: 5 cells across by 6 down, one world unit to a cell rather than
-a 64x64 square of screen pixels. The World cell's screen size is a separate fact:
-the renderer stretches each resolved region into the World-unit rectangle it is
-drawn into, so the artwork magnifies with the cell instead of being re-cut (#1007).
-Unoccupied cell space is transparent. Small objects do not expand to fill their
-cell.
+The Objects atlas the game ships is `resources/textures/objects-new.png`, a
+768x1280 RGBA sheet laid out on a uniform 128x320 authored grid: one cell to a
+World cell rather than a 64x64 square of screen pixels. The World cell's screen
+size is a separate fact: the renderer stretches each resolved region into the
+World-unit rectangle it is drawn into, so the artwork magnifies with the cell
+instead of being re-cut (#1007). Unoccupied cell space is transparent. Small
+objects do not expand to fill their cell.
+
+The version 1 sheet this replaced - `resources/textures/objects.png`, a 320x960
+atlas on a 64x160 grid - was deleted when the #1013 transition ended (#1024).
+Its tileset file, `objects.tileset.yaml`, survives because the custom theme sheets
+share its vocabulary: `StationFurnitureAtlas` and `DoctorFemale1Atlas` author
+their semantics against it. Its `image` field names the sheet those rectangles
+were originally drawn against; nothing reads that field at runtime, because the
+install takes pixel regions from each theme's own `ImageSet` resource.
 
 `objects.tileset.yaml` records each sprite's cell, local content rectangle and
 whether its RGB can be tinted. The manifest's `tile_size` is the authored grid:
@@ -56,16 +64,17 @@ never obstructs pathing, routing or support, while its `walkway` tile draws a
 24px slab at `offset: [0.0, -0.075]` and `drawn_size: [1.0, 0.075]`, hanging
 that far below the floor line of the cell it was authored in.
 
-## ObjectAtlasNew
+## ObjectAtlas
 
 `resources/textures/objects-new.tileset.yaml` is the version 2 authored tileset
-behind the replacement Objects atlas, laid out on the 128x320 World cell at
+behind the Objects atlas, laid out on the 128x320 World cell at
 768x1280. The Walkway, the Bulkhead Door, the Access panel, the Door, the three
 Window styles, the Booth Window's frame and shutter, the two Button states and
 the Marker are live in it, along with the three vehicles - the Lift car, the
 Platform lift and the Shuttle carriage - and the rest of the sheet
-drops in against the same image size. The old `ObjectAtlas` and
-`ObjectAtlasImage` stay registered and canonical until nothing references them.
+drops in against the same image size. Since the #1013 terminus this is the only
+Objects atlas: the merged `objects.png` sheet and the old-family name it was
+installed under are both gone (#1024).
 
 The set holds 18 tiles in the 24 cells of that 6x4 grid. The vehicles are what
 took the sheet from three rows to four. They arrived when the set held nineteen
@@ -75,7 +84,7 @@ has stayed since #1031 dropped the Booth Window's closed panel, which left one
 cell free: pulling the last tile up into it would move every other tile's pixels
 to buy nothing, and the image is sized for the art that has not landed yet.
 
-The `ImageSet` entries the application manifest declares for `ObjectAtlasNew` are
+The `ImageSet` entries the application manifest declares for `ObjectAtlas` are
 generated from the tileset, not authored beside it:
 
 ```sh
@@ -243,7 +252,7 @@ carriage is `shuttle-L0`, `shuttle-M0`, `shuttle-M0`, `shuttle-R0`.
 Each carriage cell declares `drawn_size: [1.0, 0.55]` - one cell across
 `CORE_SHUTTLE_CAR_HEIGHT`, 128 x 176 px on this grid - and the renderer draws
 it into that cell of the carriage's live shape. The role vocabulary is the same
-one `FurnitureAtlasNew` speaks further down; a carriage cell is one cell wide at
+one `FurnitureAtlas` speaks further down; a carriage cell is one cell wide at
 one height level, so `L0`, `M0` and `R0` say everything there is to say about
 where a cell sits in the train.
 
@@ -282,12 +291,12 @@ used at, and the 2px line is honest about being an energy field. A version 2
 object tileset that declares a `force-bridge` tile is refused by the loader, so
 the decision cannot be reversed by an edit to a sheet nobody thought about.
 
-## FurnitureAtlasNew and the tile naming convention
+## FurnitureAtlas and the tile naming convention
 
 `resources/textures/furniture-new.tileset.yaml` is the version 2 authored tileset
-behind `FurnitureAtlasNew`, the replacement Furniture atlas: ten full-cell tiles
-on the 128x320 grid at 640x640 - `chair-L0`, and `sofa`/`desk`/`bed` each at
-`-L0`, `-M0` and `-R0`. Every one of them is drawn at one full World cell with no
+behind `FurnitureAtlas`: eleven full-cell tiles on the 128x320 grid at 640x960 -
+`chair` and `chair-L0`, and `sofa`/`desk`/`bed` each at `-L0`, `-M0` and `-R0`.
+Every one of them is drawn at one full World cell with no
 render offset, so a piece one cell wide covers one cell and a piece four cells wide
 covers four. `scripts/generate_furniture_atlas_new.py` generates its sheet and its
 manifest entries the same way the Objects atlas's does; both scripts share
@@ -312,7 +321,7 @@ tiles is refused, and so is a bare name inside a footprint that names its other
 tiles by position.
 
 The suffix is applied only where the piece can span more than one cell. Furniture
-is that kind of thing, so all ten of its tiles carry a role suffix and a width-1
+is that kind of thing, so its role tiles all carry a suffix and a width-1
 chair falls out of the rule as `chair-L0` rather than being a special case; a
 single-cell object that can never span more than one cell - a Button, a Marker -
 keeps its bare name and gains no suffix carrying no information.
@@ -326,17 +335,18 @@ refused with the tile named. `core/src/FurnitureTileNaming.cpp` is where both
 vocabularies are parsed and checked, and `FurnitureCatalogue::readFile` asks it
 about every definition's whole footprint.
 
-Names that carry no recognized suffix - `chair`, `sofa-left`, `button-enabled` -
-are the old artwork's authoring and load exactly as they did. The convention binds
-a piece that speaks it, not every catalogue written before it, which is what lets
-the old `FurnitureAtlas` stay registered and canonical while the new set is
-brought up beside it.
+Names that carry no recognized suffix - `sofa-left`, `button-enabled` - load
+exactly as they always did. The convention binds a piece that speaks it, not
+every catalogue written before it. The one bare name the Furniture sheet carries
+art for is `chair`: the cell a piece speaks when it names no position at all,
+which is what closed the `layouts.furniture.lua` `larger` gap this sheet used to
+record as uncovered.
 
 ### The shipped catalogues were repointed (#1029)
 
 Registering the role tiles was only half the migration. Every shipped catalogue
 under `resources/test-worlds/` still named the pre-convention sheet - `chair`,
-`sofa-left`, `desk-right` - and `FurnitureAtlasNew` carries none of those names,
+`sofa-left`, `desk-right` - and `FurnitureAtlas` carries none of those names,
 so any World pairing the atlas a new World now defaults to with a shipped
 catalogue drew every Furniture piece as the missing-tile magenta. The shipped
 catalogues now speak the convention: `chair-L0`, `sofa-L0`/`sofa-R0`,
@@ -345,25 +355,23 @@ reuses `sofa-M0` twice rather than needing a fourth tile.
 
 Two things had to come with that repoint.
 
-**The old sheets keep their Worlds.** A World that has not moved to
-`FurnitureAtlasNew` - which is every document written before the selection
-existed, plus the station theme - draws the old sheet, and the repoint must not
-change a pixel of it. `FurnitureAtlas` and `StationFurnitureAtlas` therefore
-carry each role name the shipped catalogues now use over the identical pixel
-region as the old name it stands for. The alias says nothing new about the art:
-`sofa-left` *is* the sofa's left cap and `chair` *is* the chair's anchor cell.
-The middle roles are deliberately absent, because the old sheets never had
-middle art; a piece wider than two cells was not something they could express.
+**The old sheets are gone.** Before the #1013 terminus a World that had not moved
+to `FurnitureAtlas` drew the merged `objects.png` sheet, and the repoint had to
+change not a pixel of it, so `FurnitureAtlas` and `StationFurnitureAtlas` each
+carried the role names over the identical pixel region as the old name they stood
+for. The old sheet was deleted with #1024 and those aliases went with it: there is
+one Furniture atlas now, and it carries its own art.
 
-**A footprint the sheet cannot serve is a stated gap.** `layouts.furniture.lua`'s
-`larger` piece reaches a negative offset from its anchor and a second height
-level with no left cap there, so neither the role vocabulary nor the `-XY`
-escape hatch can name it as placed, and the sheet is a full 5x2 grid of
-full-cell role tiles with no irregular art to give it. `uncovered_footprints`
-at the top of `furniture-new.tileset.yaml` records it with the reason, in the
+**A footprint the sheet cannot serve is a stated gap.** A piece whose offsets the
+role vocabulary and the `-XY` escape hatch both fail to name has to be written
+down rather than left to render as a missing tile. `uncovered_footprints`
+at the top of `furniture-new.tileset.yaml` records each one with the reason, in the
 same shape as the Agent sheet's `reserved_appearances`. A record with no reason
 is refused, as is one naming a piece the sheet now covers: a gap that is written
 down is a decision, and one that is not is a magenta rectangle nobody noticed.
+The `larger` piece in `layouts.furniture.lua` was the last entry; widening the
+sheet by one row for the bare `chair` cell covered it, and the record went with it
+(#1024).
 
 The `render` smoke module's `furnitureAtlasNew/*` checks prove all of this: the
 ten tiles registered at full-cell drawn size, a three-cell sofa rendering from
@@ -374,22 +382,19 @@ than a fixture made to conform - which is the whole point, since a synthetic
 catalogue cannot see that the real one names something else:
 
 - `everyShippedFurnitureCatalogueResolvesInEveryNewFurnitureAtlas` pairs every
-  tile of every shipped catalogue with every `-New` Furniture atlas the atlas-set
+  tile of every shipped catalogue with the Furniture atlas the atlas-set
   registry names, and a disagreement names the catalogue, the piece and the tile.
 - `noShippedFurnitureRendersMagentaUnderTheNewDefaultAtlas` renders each shipped
-  piece on its own under `FurnitureAtlasNew` and requires its artwork, then pulls
+  piece on its own under `FurnitureAtlas` and requires its artwork, then pulls
   the atlas out from under the same piece to prove the magenta detector is not
   deaf.
 - `everyShippedFootprintIsCoveredOrRecorded` holds the covered-or-recorded rule
   and refuses a gap record that is reasonless or has stopped describing a gap.
-- `theOldFurnitureAtlasesStillDrawTheirOwnArt` installs the old sheets the way
-  the render stack does and requires each role alias to cover the identical
-  region to the name it stands for, so an existing World's pixels are unchanged.
 
-## AgentAtlasNew and the appearance-keyed grid
+## AgentAtlas and the appearance-keyed grid
 
 `resources/textures/agents-new.tileset.yaml` is the version 2 authored tileset
-behind `AgentAtlasNew`: four Agent appearances, each carrying all five Poses,
+behind `AgentAtlas`: four Agent appearances, each carrying all five Poses,
 twenty tiles on the 128x320 grid at 640x1280. `scripts/generate_agent_atlas_new.py`
 generates its sheet and its manifest entries the same way the other `New` atlases'
 does; all of them share `scripts/atlas_new.py`.
@@ -439,8 +444,8 @@ magenta (#1028).
 The shipped Android type now names `android-standing`, and the pairing is asserted
 rather than hoped for:
 
-- every shipped Agent type's declared Pose tiles resolve in every `-New` Agent
-  atlas the atlas-set registry names, and a failure names the type and the tile;
+- every shipped Agent type's declared Pose tiles resolve in the Agent atlas the
+  atlas-set registry names, and a failure names the type and the tile;
 - every appearance row the sheet authors is named by at least one shipped Agent
   type, or is listed under `reserved_appearances` in the tileset with the reason it
   is held back. The generic `agent` row is reserved on that basis - it is the
@@ -451,13 +456,8 @@ rather than hoped for:
 
 The shipped types are discovered from the bundled `.agent.lua` resources rather than
 listed by hand, so a type added to the bundle is paired against the atlas the day
-it lands.
-
-The old `AgentAtlas` keeps its `robot-standing` tile. This ticket changes nothing in
-the old sheet: it stays registered and canonical for every World that names it, and
-a custom Agent type written against it still names that tile. A check pins the tile
-resolvable there so it cannot be swept up as unused art the bundle no longer
-references (#1028).
+it lands. The old Agent sheet that carried `robot-standing` was deleted with the
+#1013 terminus (#1024); `AgentAtlas` is the only Agent artwork the bundle ships.
 
 ## The install seam
 
@@ -542,7 +542,7 @@ owns the choice and the game owns nothing but handing all of it over. One
 list rather than four separate calls is what makes a slot left out a gap in
 a checked list rather than a line nobody counted - which is how the game
 came to draw the old Objects sheet while the World asked for
-`ObjectAtlasNew` (#1026). The game has no artwork panel to show a refusal
+`ObjectAtlas` (#1026). The game has no artwork panel to show a refusal
 in, so its render pass writes every slot's diagnostic to the application
 log once per distinct value rather than dropping it, and forgets that value
 when a pass comes back clean - so a bad atlas that comes back after a fix
@@ -573,11 +573,11 @@ Supported sprites:
   Clear glass has a transparent centre; tinted glass is translucent.
 - BoothWindow frame and distinct inner shutter: fixed ordinary one-cell Window
   geometry. The transparent Open frame stays stationary and the opaque shutter
-  translates upwards behind it, clipped to the frame's centre. On the old
-  `ObjectAtlas` the shutter is the 42x38 subregion of the Closed tile; on
-  `ObjectAtlasNew` it is its own `booth-window-shutter` tile and the closed state
-  is that shutter fully closed, with no closed panel in the set. See
-  [BoothWindows](booth-windows.md) for the old sheet's authoring and regeneration.
+  translates upwards behind it, clipped to the frame's centre. The shutter is its
+  own `booth-window-shutter` tile and the closed state is that shutter fully
+  closed, with no closed panel in the set - the 42x38 subregion of a Closed tile
+  that the deleted `objects.png` sheet used is gone with it. See
+  [BoothWindows](booth-windows.md) for the frame's authoring.
 - Agents and Markers, keeping the existing icon-fit dimensions.
 - Lift car: the sprite fills the car's own extent and follows the car's live
   shape through the shaft.
@@ -588,7 +588,7 @@ Supported sprites:
   between carriages.
 
 Bulkhead Doors, Access panels, ordinary Doors, Windows, Booth Windows, Buttons,
-Markers and the three vehicles render from `ObjectAtlasNew` when that set is
+Markers and the three vehicles render from `ObjectAtlas` when that set is
 installed, and keep their flat fills against a set that has no tile for them. Force
 Bridges remain entirely primitive-rendered - see below. Other
 transport geometry and editor overlays are unchanged. Headless tests without a

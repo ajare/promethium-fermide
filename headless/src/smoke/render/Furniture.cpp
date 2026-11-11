@@ -8,6 +8,7 @@
 #include "core/Agent.h"
 #include "core/MarkerSectorObject.h"
 #include "core/AgentTagRegistryDocument.h"
+#include <filesystem>
 #include <fstream>
 #include <tuple>
 #include <yaml-cpp/yaml.h>
@@ -25,6 +26,96 @@ namespace
 		});
 	}
 
+	// A PNG's own dimensions, read from its IHDR chunk.
+	std::pair<int, int> pngSize(std::filesystem::path const& path)
+	{
+		std::ifstream file(path, std::ios::binary);
+		smoke::require(bool(file), "Could not open the atlas image: " + path.string());
+		unsigned char header[24]{};
+		file.read(reinterpret_cast<char*>(header), sizeof(header));
+		auto const be = [&](std::size_t offset) -> int {
+			return int((unsigned(header[offset]) << 24) | (unsigned(header[offset + 1]) << 16)
+				| (unsigned(header[offset + 2]) << 8) | unsigned(header[offset + 3]));
+		};
+		smoke::require(be(0) == 0x89504e47 && be(12) == 0x49484452,
+			"The atlas image is not a PNG: " + path.string());
+		return { be(16), be(20) };
+	}
+
+	// One shipped viewport atlas: the `ImageSet` regions the application
+	// manifest declares, cut against the size of the image they are cut
+	// from.
+	//
+	// The viewport sheets are four separate images, so a check can no longer
+	// merge them into one synthetic space and read a tile's identity off the
+	// band its UV happened to land in. Identity comes from the texture tag
+	// each command carries and from the region the sprite occupies in its own
+	// sheet - which is what `pieceOf` below reads.
+	struct ShippedAtlas
+	{
+		int width{}, height{};
+		ObjectTileset tiles;
+	};
+
+	ShippedAtlas shippedAtlas(smoke::Context const& context,
+		YAML::Node const& manifest, std::string const& name)
+	{
+		ShippedAtlas atlas;
+		std::string imageName;
+		for (auto const& resource : manifest["Resources"]["Resource"])
+		{
+			if (resource["name"].as<std::string>() != name) continue;
+			if (auto const dependencies = resource["DependentResources"])
+			{
+				auto const dependency = dependencies["DependentResource"];
+				if (dependency.IsMap() && dependency["ref"])
+					imageName = dependency["ref"].as<std::string>();
+			}
+			for (auto const& entry : resource["Definitions"]["Definition"]["Images"]["Image"])
+				atlas.tiles.sprites.emplace(entry["name"].as<std::string>(),
+					ObjectSprite{ { entry["x"].as<int>(), entry["y"].as<int>(),
+						entry["width"].as<int>(), entry["height"].as<int>() }, false });
+		}
+		smoke::require(!atlas.tiles.sprites.empty(),
+			"The manifest registers no " + name + " ImageSet");
+		smoke::require(!imageName.empty(),
+			"The " + name + " ImageSet names no Image resource to cut from");
+		for (auto const& resource : manifest["Resources"]["Resource"])
+		{
+			if (resource["name"].as<std::string>() != imageName) continue;
+			auto const size = pngSize(context.fixture(
+				"resources/" + resource["location"].as<std::string>()));
+			atlas.width = size.first;
+			atlas.height = size.second;
+		}
+		smoke::require(atlas.width > 0 && atlas.height > 0,
+			"The manifest registers no Image resource named " + imageName);
+		atlas.tiles.width = atlas.width;
+		atlas.tiles.height = atlas.height;
+		return atlas;
+	}
+
+	// The name of the tile a triangle drew, by the region its texcoords fall
+	// inside. Empty when the triangle came from no tile this atlas declares.
+	std::string pieceOf(WorldDrawList::Triangle const& triangle,
+		ShippedAtlas const& atlas)
+	{
+		for (auto const& [name, sprite] : atlas.tiles.sprites)
+			if (spriteTriangle(triangle, sprite, atlas.width, atlas.height))
+				return name;
+		return {};
+	}
+
+	// The Furniture piece a Furniture-textured triangle belongs to, keyed on
+	// the tile-name prefix: `sofa-L0` and `sofa-M0` are both the sofa.
+	std::string furniturePieceOf(WorldDrawList::Triangle const& triangle,
+		ShippedAtlas const& furniture)
+	{
+		auto const name = pieceOf(triangle, furniture);
+		auto const dash = name.find('-');
+		return dash == std::string::npos ? name : name.substr(0, dash);
+	}
+
 	void demoCommands(smoke::Context const& context)
 	{
 		using smoke::require;
@@ -33,36 +124,29 @@ namespace
 		gUISettings.worldZoom = 1; gUISettings.worldViewportWidth = 1200; gUISettings.worldViewportHeight = 600;
 		gUISettings.worldViewportX = 0; gUISettings.worldViewportY = 0; gUISettings.xOffset = 0; gUISettings.yOffset = 0;
 		auto manifest = YAML::LoadFile(context.fixture("resources/Resources.yaml").string());
-		ObjectTileset tiles; tiles.width = 320; tiles.height = 640;
+		auto const furniture = shippedAtlas(context, manifest, "FurnitureAtlas");
+		auto const agents = shippedAtlas(context, manifest, "AgentAtlas");
+		auto const objects = shippedAtlas(context, manifest, "ObjectAtlas");
 		bool demoDependency = false, catalogueDependency = false;
 		for (auto resource : manifest["Resources"]["Resource"])
 		{
 			auto name = resource["name"].as<std::string>();
 			if (name == "FurnitureIntegrationDemo") demoDependency = resource["DependentResources"]["DependentResource"]["ref"].as<std::string>() == "FurnitureIntegrationCatalogue";
 			if (name == "FurnitureIntegrationCatalogue") catalogueDependency = resource["DependentResources"]["DependentResource"]["ref"].as<std::string>() == "FurnitureAtlas";
-			// The Furniture tiles come from the Furniture atlas, which is what the
-			// World actually draws them from. They used to be reachable through the
-			// Object atlas's copy of the same sheet; the shipped catalogue names
-			// them by role now (#1029), and those names live in FurnitureAtlas and
-			// nowhere else.
-			if (name == "ObjectAtlas" || name == "AgentAtlas" || name == "FurnitureAtlas")
-				for (auto image : resource["Definitions"]["Definition"]["Images"]["Image"])
-					tiles.sprites.emplace(image["name"].as<std::string>(), ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(), image["width"].as<int>(), image["height"].as<int>()}, false});
 		}
 		require(demoDependency && catalogueDependency, "Required bundled Furniture resource dependencies are missing");
-		require(std::filesystem::is_regular_file(context.fixture("resources/textures/objects.png")), "Required placeholder atlas is missing");
 		std::shared_ptr<core::World> world = core::loadWorldDocument(context.fixture("resources/test-worlds/furniture-integration.world.yaml"));
 		for (auto const& [key, definition] : world->furnitureCatalogue()->definitions())
 			for (auto const& tile : definition.tiles)
 			{
-				auto found = tiles.sprites.find(tile.image);
-				require(found != tiles.sprites.end() && found->second.region.width == 64 && found->second.region.height == 160,
+				auto found = furniture.tiles.sprites.find(tile.image);
+				require(found != furniture.tiles.sprites.end() && found->second.region.width == 128 && found->second.region.height == 320,
 					"Required sample artwork must resolve a full World tile");
 			}
-		auto const human = tiles.sprites.at(core::bundledHumanBaseline().poses.at(core::Pose::Standing).imageTile);
-		setAgentTileset(tiles, static_cast<TextureId>(1));
-		setFurnitureTileset(tiles, static_cast<TextureId>(1));
-		setObjectTileset(std::move(tiles), static_cast<TextureId>(1));
+		auto const human = agents.tiles.sprites.at(core::bundledHumanBaseline().poses.at(core::Pose::Standing).imageTile);
+		setAgentTileset(agents.tiles, static_cast<TextureId>(1));
+		setFurnitureTileset(furniture.tiles, static_cast<TextureId>(1));
+		setObjectTileset(objects.tiles, static_cast<TextureId>(1));
 		RenderWorldScope scope(world);
 		for (auto style : {LayerRenderStyle::Solid, LayerRenderStyle::Aperture, LayerRenderStyle::Wireframe, LayerRenderStyle::Hidden})
 		{
@@ -75,13 +159,14 @@ namespace
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
 					triangle && (triangle->texture == WorldDrawList::Texture::FurnitureAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas))
 				{
-					auto uv = triangle->texcoords[0];
-					if (uv.y >= 480.f / 640 && !spriteTriangle(*triangle, human, 320, 640))
+					if (triangle->texture == WorldDrawList::Texture::FurnitureAtlas)
 					{
-						if (uv.x >= 128.f / 320) { ++deskCount; deskFirst = std::min(deskFirst, i); deskLast = i; }
-						else ++sofaCount;
+						auto const piece = furniturePieceOf(*triangle, furniture);
+						if (piece == "desk") { ++deskCount; deskFirst = std::min(deskFirst, i); deskLast = i; }
+						else if (piece == "sofa") ++sofaCount;
+						else continue;
 					}
-					else if (spriteTriangle(*triangle, human, 320, 640))
+					else if (spriteTriangle(*triangle, human, agents.width, agents.height))
 					{
 						auto x = std::min({triangle->positions[0].x, triangle->positions[1].x, triangle->positions[2].x});
 						// Agent sprite's physical half-width is 0.2 World units.
@@ -117,17 +202,17 @@ namespace
 		// Resolve the same Image-set rectangle as the rendering service, rather
 		// than manufacturing a second Furniture/TileSet metadata authority.
 		auto manifest = YAML::LoadFile(context.fixture("resources/Resources.yaml").string());
-		ObjectTileset tiles; tiles.width = 320; tiles.height = 480;
-		for (auto resource : manifest["Resources"]["Resource"])
-			if (resource["name"].as<std::string>() == "ObjectAtlas" || resource["name"].as<std::string>() == "AgentAtlas")
-				for (auto image : resource["Definitions"]["Definition"]["Images"]["Image"])
-						tiles.sprites.emplace(image["name"].as<std::string>(), ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(), image["width"].as<int>(), image["height"].as<int>()}, false});
-		require(tiles.sprites.contains("chair"), "Required chair Image-set artwork is missing");
-		auto const human = tiles.sprites.at(core::bundledHumanBaseline().poses.at(core::Pose::Standing).imageTile);
-		setAgentTileset(tiles, static_cast<TextureId>(1));
-		setFurnitureTileset(tiles, static_cast<TextureId>(1));
-		auto const originalFurniture = tiles;
-		setObjectTileset(std::move(tiles), static_cast<TextureId>(1));
+		auto const furniture = shippedAtlas(context, manifest, "FurnitureAtlas");
+		auto const agents = shippedAtlas(context, manifest, "AgentAtlas");
+		auto const objects = shippedAtlas(context, manifest, "ObjectAtlas");
+		require(furniture.tiles.sprites.contains("chair"), "Required chair Image-set artwork is missing");
+		auto const human = agents.tiles.sprites.at(core::bundledHumanBaseline().poses.at(core::Pose::Standing).imageTile);
+		auto const chairSprite = furniture.tiles.sprites.at("chair");
+		auto const markerSprite = objects.tiles.sprites.at("marker");
+		setAgentTileset(agents.tiles, static_cast<TextureId>(1));
+		setFurnitureTileset(furniture.tiles, static_cast<TextureId>(1));
+		auto const originalFurniture = furniture.tiles;
+		setObjectTileset(objects.tiles, static_cast<TextureId>(1));
 		auto world = std::make_shared<core::World>("Chair rendering", 8, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 8, 1);
 		world->attachFurnitureCatalogue(lua ? "objects.furniture.lua" : "chair.furniture.lua",
@@ -143,8 +228,7 @@ namespace
 			unsigned triangles = 0;
 			for (auto const& command : drawing.commands())
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-					triangle && triangle->texture == WorldDrawList::Texture::FurnitureAtlas
-					&& triangle->texcoords[0].x >= 256.0f / 320 && triangle->texcoords[0].y <= 320.0f / 480)
+					triangle && triangle->texture == WorldDrawList::Texture::FurnitureAtlas)
 				{
 					++triangles;
 					require(triangle->clip.minimum.x == clip.minimum.x && triangle->clip.maximum.x == clip.maximum.x, "Chair escaped aperture clipping");
@@ -161,10 +245,12 @@ namespace
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
 						triangle && (triangle->texture == WorldDrawList::Texture::ObjectAtlas || triangle->texture == WorldDrawList::Texture::FurnitureAtlas))
 					{
-						auto u = std::min({triangle->texcoords[0].x, triangle->texcoords[1].x, triangle->texcoords[2].x});
-						auto v = std::min({triangle->texcoords[0].y, triangle->texcoords[1].y, triangle->texcoords[2].y});
-						if (u == 256.5f / 320 && v == 160.5f / 480) lastChair = i;
-						if (u == 152.5f / 320 && v == 282.5f / 480) { lastMarker = i; ++markerTriangles; }
+					if (triangle->texture == WorldDrawList::Texture::FurnitureAtlas
+							&& spriteTriangle(*triangle, chairSprite, furniture.width, furniture.height))
+						lastChair = i;
+					else if (triangle->texture == WorldDrawList::Texture::ObjectAtlas
+							&& spriteTriangle(*triangle, markerSprite, objects.width, objects.height))
+					{ lastMarker = i; ++markerTriangles; }
 					}
 				require(markerTriangles >= 2 && lastMarker > lastChair + 1,
 					"Chair seat Marker is missing or obscured by Furniture artwork: marker=" + std::to_string(lastMarker)
@@ -223,10 +309,12 @@ namespace
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
 					triangle && (triangle->texture == WorldDrawList::Texture::ObjectAtlas || triangle->texture == WorldDrawList::Texture::FurnitureAtlas))
 				{
-					auto u = std::min({triangle->texcoords[0].x, triangle->texcoords[1].x, triangle->texcoords[2].x});
-					auto v = std::min({triangle->texcoords[0].y, triangle->texcoords[1].y, triangle->texcoords[2].y});
-					if (u == 152.5f / 320 && v == 282.5f / 480) ++markerTriangles;
-					if (u == 256.5f / 320 && v == 160.5f / 480) ++chairTriangles;
+					if (triangle->texture == WorldDrawList::Texture::ObjectAtlas
+							&& spriteTriangle(*triangle, markerSprite, objects.width, objects.height))
+						++markerTriangles;
+					else if (triangle->texture == WorldDrawList::Texture::FurnitureAtlas
+							&& spriteTriangle(*triangle, chairSprite, furniture.width, furniture.height))
+						++chairTriangles;
 				}
 			require(markerTriangles == (visible ? 6u : 0u), "Marker visibility toggle missed standalone or Furniture-owned Markers");
 			require(chairTriangles == 4 && world->getMarkerIds() == markerIds,
@@ -254,8 +342,7 @@ namespace
 			std::map<std::pair<float, float>, unsigned> tilesDrawn;
 			for (auto const& command : drawing.commands())
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-					triangle && triangle->texture == WorldDrawList::Texture::FurnitureAtlas
-					&& triangle->texcoords[0].x >= 256.0f / 320 && triangle->texcoords[0].y <= 320.0f / 480)
+					triangle && triangle->texture == WorldDrawList::Texture::FurnitureAtlas)
 				{
 					require(triangle->clip.minimum.x == clip.minimum.x && triangle->clip.maximum.x == clip.maximum.x
 						&& triangle->clip.minimum.y == clip.minimum.y && triangle->clip.maximum.y == clip.maximum.y,
@@ -332,14 +419,14 @@ namespace
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
 						triangle && (triangle->texture == WorldDrawList::Texture::FurnitureAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas))
 					{
-						if (triangle->texcoords[0].x >= 256.f / 320)
+						if (triangle->texture == WorldDrawList::Texture::FurnitureAtlas)
 						{
 							float x = std::min({ triangle->positions[0].x, triangle->positions[1].x, triangle->positions[2].x });
 							if (x == 2 * CORE_CELL_WIDTH_PIXELS || x == 3 * CORE_CELL_WIDTH_PIXELS)
 							{ ++deskTriangles; deskFirst = std::min(deskFirst, i); deskLast = i; }
 							else { ++deepTriangles; deepLast = i; }
 						}
-						else if (spriteTriangle(*triangle, human, 320, 480))
+						else if (spriteTriangle(*triangle, human, agents.width, agents.height))
 						{ ++agentTriangles; agentFirst = std::min(agentFirst, i); agentLast = i; }
 						else continue;
 						require(triangle->clip.minimum.x == clip.minimum.x && triangle->clip.maximum.x == clip.maximum.x
@@ -380,8 +467,8 @@ namespace
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
 						triangle && (triangle->texture == WorldDrawList::Texture::FurnitureAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas))
 					{
-						if (triangle->texcoords[0].x >= 256.f / 320) deskLast = i;
-						else if (spriteTriangle(*triangle, human, 320, 480))
+						if (triangle->texture == WorldDrawList::Texture::FurnitureAtlas) deskLast = i;
+						else if (spriteTriangle(*triangle, human, agents.width, agents.height))
 							agentFirst = std::min(agentFirst, i);
 					}
 				require(agentFirst < drawing.commands().size() && deskLast < agentFirst,
@@ -400,8 +487,8 @@ namespace
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&edited.commands()[i]);
 					triangle && (triangle->texture == WorldDrawList::Texture::FurnitureAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas))
 				{
-					if (triangle->texcoords[0].x >= 256.f / 320) artworkLast = i;
-					else if (spriteTriangle(*triangle, human, 320, 480))
+					if (triangle->texture == WorldDrawList::Texture::FurnitureAtlas) artworkLast = i;
+					else if (spriteTriangle(*triangle, human, agents.width, agents.height))
 						walkerFirst = std::min(walkerFirst, i);
 				}
 			require(walkerFirst < artworkLast, "Edited artwork did not render in front of retained deeper Agent");
@@ -445,7 +532,7 @@ namespace
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
 						triangle && (triangle->texture == WorldDrawList::Texture::ObjectAtlas || triangle->texture == WorldDrawList::Texture::FurnitureAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas))
 					{
-						if (triangle->texcoords[0].x >= 256.f / 320)
+						if (triangle->texture == WorldDrawList::Texture::FurnitureAtlas)
 						{
 							furnitureLast = i;
 							auto x = std::min({triangle->positions[0].x, triangle->positions[1].x, triangle->positions[2].x});
@@ -453,10 +540,10 @@ namespace
 							{ ++chairTriangles; chairFirst = std::min(chairFirst, i); }
 							else { ++deskTriangles; deskLast = i; }
 						}
-						else if (spriteTriangle(*triangle, human, 320, 480))
+						else if (spriteTriangle(*triangle, human, agents.width, agents.height))
 						{ ++agentTriangles; agentFirst = std::min(agentFirst, i); agentLast = i; }
-						else if (triangle->texcoords[0].x >= 152.f / 320 && triangle->texcoords[0].x < 169.f / 320
-							&& triangle->texcoords[0].y >= 282.f / 480 && triangle->texcoords[0].y < 305.f / 480)
+						else if (triangle->texture == WorldDrawList::Texture::ObjectAtlas
+							&& spriteTriangle(*triangle, markerSprite, objects.width, objects.height))
 							markerFirst = std::min(markerFirst, i);
 						else continue;
 						require(triangle->clip.minimum.x == clip.minimum.x && triangle->clip.minimum.y == clip.minimum.y
@@ -500,8 +587,7 @@ namespace
 			unsigned triangles = 0;
 			for (auto const& command : drawing.commands())
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-					triangle && triangle->texture == WorldDrawList::Texture::FurnitureAtlas
-					&& triangle->texcoords[0].x >= 256.f / 320 && triangle->texcoords[0].y <= 320.f / 480)
+					triangle && triangle->texture == WorldDrawList::Texture::FurnitureAtlas)
 				{
 					++triangles;
 					require(triangle->clip.minimum.x == 150 && triangle->clip.maximum.x == 300,

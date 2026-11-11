@@ -1743,8 +1743,9 @@ namespace core
 		std::shared_ptr<const FurnitureCatalogue> furnitureCatalogue;
 		auto sectorImageSetName = serializer.readString("sectorImageSet", true, "SectorAtlas");
 		// The fourth atlas selection (#1022). Absent on every document written
-		// before the Objects atlas became selectable, where it means exactly what
-		// it means now: the World draws the Objects atlas it has always drawn.
+		// before the Objects atlas became selectable, where it reads the
+		// canonical `ObjectAtlas` - which, since the #1013 terminus dropped the
+		// `New` suffix, is the sheet sized for the 128x320 World cell.
 		auto objectImageSetName = serializer.readString("objectImageSet", true, "ObjectAtlas");
 		auto agentImageSetName = serializer.readString("agentImageSet", true, "AgentAtlas");
 		auto furnitureImageSetName = serializer.readString("furnitureImageSet", true, "FurnitureAtlas");
@@ -2531,15 +2532,6 @@ namespace core
 		mObjectImageSetResourceName = std::move(objectImageSetName);
 		mAgentImageSetResourceName = std::move(agentImageSetName);
 		mFurnitureImageSetResourceName = std::move(furnitureImageSetName);
-		// The four atlases are four separate selections, so nothing structural
-		// stops a World naming `ObjectAtlas` beside `AgentAtlasNew` - three
-		// characters from the set it meant, and both registered while the
-		// transition runs. It loads happily and draws the wrong sheet, so the
-		// near-miss is reported rather than left to be noticed in the render
-		// (#1023). A warning, not a refusal: the World is readable, and the
-		// author repoints it or leaves it alone.
-		if (auto mixed = atlasFamilyDiagnostic(); !mixed.empty())
-			mLoadWarnings.push_back(std::move(mixed));
 		mActionRegistry = std::move(actionRegistry);
 		mActionRegistryFilename = std::move(actionFilename);
 		mMarkerActions = std::move(markerActions);

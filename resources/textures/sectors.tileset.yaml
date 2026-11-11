@@ -1,3 +1,11 @@
+# The version 1 sector tileset. Since the #1013 terminus deleted the old
+# SectorAtlas sheet, this file survives to author one custom theme only:
+# `StationAtlas`, whose tile names are checked against the fixed list the
+# version 1 loader requires. The `image` field names the draft sheet these
+# rectangles were drawn against; that file is gone, and nothing reads the
+# field at runtime - the install takes pixel regions from each theme's own
+# `ImageSet` resource, so only the names declared here are load-bearing.
+#
 # Draft artwork uses irregular rectangles, not an assumed uniform atlas grid.
 # Coordinates are top-left-origin pixels: [x, y, width, height].
 # Surfaces repeat once per 1x1 world unit, magnified to the World cell's screen size.

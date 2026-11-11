@@ -31,7 +31,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from atlas_new import AtlasSpec, run  # noqa: E402
 
 SPEC = AtlasSpec(
-    atlas="FurnitureAtlasNew",
+    atlas="FurnitureAtlas",
     tileset="resources/textures/furniture-new.tileset.yaml",
     script="generate_furniture_atlas_new.py",
     label_tiles=True,

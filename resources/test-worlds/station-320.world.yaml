@@ -1,5 +1,5 @@
 version: 69
-sectorImageSet: SectorAtlasNew
+sectorImageSet: SectorAtlas
 objectImageSet: ObjectAtlas
 agentImageSet: DoctorFemale1Atlas
 furnitureImageSet: StationFurnitureAtlas

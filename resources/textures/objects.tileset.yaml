@@ -1,3 +1,13 @@
+# The version 1 object tileset. Since the #1013 terminus deleted the old
+# `objects.png` sheet, this file survives to author the custom theme sheets
+# that share its vocabulary - `StationFurnitureAtlas` and
+# `DoctorFemale1Atlas` - because a version 1 object set carries the v1
+# required-tile contract and those sheets author no render offsets or drawn
+# sizes to move. The `image` field names the sheet these rectangles were
+# drawn against; that file is gone, and nothing reads the field at runtime -
+# the install takes pixel regions from each theme's own `ImageSet` resource,
+# so only the names declared here are load-bearing.
+#
 # Pixel coordinates use top-left origin. Each cell is one world unit.
 # Content rectangles exclude alpha padding and may span adjacent storage cells.
 version: 1
@@ -132,7 +142,7 @@ sprites:
   # Role-name aliases over the same Furniture art (#1029).
   #
   # The shipped Furniture catalogues now name their tiles by the role convention,
-  # `<piece>-<role><level>`, because that is what FurnitureAtlasNew speaks and
+  # `<piece>-<role><level>`, because that is what FurnitureAtlas speaks and
   # what a new World therefore draws. Every World still drawing this sheet has to
   # go on drawing exactly what it drew before, so the same pixel regions stay
   # reachable under the names those catalogues now use. The aliases say nothing

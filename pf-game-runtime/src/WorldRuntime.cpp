@@ -321,10 +321,6 @@ std::vector<std::string> const& WorldRuntime::getLoadWarnings() const
 {
 	return world().getLoadWarnings();
 }
-std::string WorldRuntime::atlasFamilyDiagnostic() const
-{
-	return world().atlasFamilyDiagnostic();
-}
 core::Log const& WorldRuntime::getBuildLog() const
 {
 	return world().getBuildLog();

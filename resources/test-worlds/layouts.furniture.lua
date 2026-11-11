@@ -1,13 +1,13 @@
 -- Native Lua catalogue; UUID, keys, artwork and routes are stable.
 --
 -- The `sofa` piece wears the Furniture role convention (#1029). The `larger`
--- piece does not, and cannot: its footprint reaches a negative offset from its
--- anchor and a second height level with no left cap at that level, so neither the
--- role vocabulary nor the `-XY` escape hatch can name it as placed, and
--- FurnitureAtlasNew authors no art for an irregular multi-level footprint. It is
--- recorded under `uncovered_footprints` in
--- `resources/textures/furniture-new.tileset.yaml` with that reason, which is what
--- keeps the gap a stated decision rather than a silent magenta.
+-- piece does not: its footprint reaches a negative offset from its anchor and a
+-- second height level with no left cap at that level, so neither the role
+-- vocabulary nor the `-XY` escape hatch can name it as placed. Its tiles speak
+-- the bare `chair` name instead, which is the one position-free name
+-- `resources/textures/furniture-new.tileset.yaml` carries art for. Widening the
+-- sheet by that cell closed the gap this piece used to be recorded under
+-- `uncovered_footprints` for (#1024), so the record is gone and the piece draws.
 local function sit(agent, world, marker)
 
   world.claim()

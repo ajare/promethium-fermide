@@ -147,10 +147,10 @@ namespace
 
 	SectorTileset installNewSectorAtlas(smoke::Context const& context)
 	{
-		require(registryTileset(context, "SectorAtlasNew")
+		require(registryTileset(context, "SectorAtlas")
 			== "textures/sectors-new.tileset.yaml",
 			"The atlas-set registry does not name sectors-new.tileset.yaml for "
-			"SectorAtlasNew");
+			"SectorAtlas");
 		auto const authored = SectorTileset::load(context.fixture(kTileset));
 		require(authored.family == SectorTilesetFamily::New,
 			"sectors-new.tileset.yaml did not load as the New family its version 2 "
@@ -160,8 +160,8 @@ namespace
 		installed.height = authored.height;
 		installed.family = authored.family;
 		installed.tiles = installAtlasTiles(authored.tiles,
-			imageSetRegions(context, "SectorAtlasNew"), authored.width,
-			authored.height, "SectorAtlasNew");
+			imageSetRegions(context, "SectorAtlas"), authored.width,
+			authored.height, "SectorAtlas");
 		for (auto const& [name, artwork] : installed.tiles)
 			installed.surfaces.emplace(name, artwork.region);
 		// An install that produced no surfaces would leave every draw below
@@ -170,7 +170,7 @@ namespace
 		// `sectorAtlasNew`'s own business; what matters here is that the
 		// surfaces the cases ask for are actually installed.
 		require(!installed.surfaces.empty(),
-			"The installed SectorAtlasNew carries no surface tiles");
+			"The installed SectorAtlas carries no surface tiles");
 		setSectorTileset(installed, static_cast<TextureId>(1));
 		require(sectorTilesetIsNewFamily(),
 			"The installed new Sector atlas did not come up as the New family");

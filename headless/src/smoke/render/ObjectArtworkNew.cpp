@@ -1,4 +1,4 @@
-// Doors, Windows, Booth Windows, Buttons and Markers draw from ObjectAtlasNew
+// Doors, Windows, Booth Windows, Buttons and Markers draw from ObjectAtlas
 // at their declared drawn sizes (#1020).
 //
 // One Door tile serves all four opening styles: the style decides which way
@@ -280,16 +280,16 @@ namespace
 	NewObjectsAtlas loadNewObjectsAtlas(smoke::Context const& context)
 	{
 		auto const manifest = bundledManifest(context);
-		auto const set = manifestResource(manifest, "ObjectAtlasNew");
+		auto const set = manifestResource(manifest, "ObjectAtlas");
 		require(set.found && set.type == "ImageSet",
-			"The application manifest registers no ObjectAtlasNew ImageSet");
-		require(atlasSetTilesets(context)["ObjectAtlasNew"]
+			"The application manifest registers no ObjectAtlas ImageSet");
+		require(atlasSetTilesets(context)["ObjectAtlas"]
 			== "textures/objects-new.tileset.yaml",
 			"The atlas-set registry does not name objects-new.tileset.yaml for "
-			"ObjectAtlasNew");
+			"ObjectAtlas");
 		auto const image = manifestResource(manifest, set.imageReference);
 		require(image.found && image.type == "Image",
-			"ObjectAtlasNew's paired Image resource is missing");
+			"ObjectAtlas's paired Image resource is missing");
 
 		NewObjectsAtlas atlas;
 		atlas.authored = ObjectTileset::load(context.fixture(kTileset));
@@ -322,7 +322,7 @@ namespace
 	NewObjectsAtlas installNewObjectsAtlas(smoke::Context const& context)
 	{
 		auto const atlas = loadNewObjectsAtlas(context);
-		installAtlas(atlas.authored, atlas.regions, "ObjectAtlasNew");
+		installAtlas(atlas.authored, atlas.regions, "ObjectAtlas");
 		return atlas;
 	}
 
@@ -578,7 +578,7 @@ namespace
 	// The ticket's tiles: authored sizes, tintability, generated manifest
 	// pair.
 	// ------------------------------------------------------------------
-	void authoredTilesAreRegisteredInObjectAtlasNew(smoke::Context const& context)
+	void authoredTilesAreRegisteredInObjectAtlas(smoke::Context const& context)
 	{
 		using smoke::require;
 		auto const atlas = loadNewObjectsAtlas(context);
@@ -589,14 +589,14 @@ namespace
 		// image is sized for the art still to come, not trimmed to the tile
 		// count of the moment (#1021).
 		require(atlas.width == 768 && atlas.height == 1280,
-			"ObjectAtlasNew is not the 768x1280 sheet its set is sized for, saw "
+			"ObjectAtlas is not the 768x1280 sheet its set is sized for, saw "
 			+ std::to_string(atlas.width) + "x" + std::to_string(atlas.height));
 
 		for (auto const& tile : kTiles)
 		{
 			auto const found = atlas.authored.sprites.find(tile.name);
 			require(found != atlas.authored.sprites.end(),
-				std::string("ObjectAtlasNew registers no '") + tile.name
+				std::string("ObjectAtlas registers no '") + tile.name
 				+ "' tile");
 			auto const& art = found->second;
 			require(relNear(art.drawnSize.x, tile.drawnWidth)
@@ -1165,7 +1165,7 @@ namespace
 		{
 			auto untinted = atlas.authored;
 			untinted.sprites.at("marker").tintable = false;
-			installAtlas(untinted, atlas.regions, "ObjectAtlasNew");
+			installAtlas(untinted, atlas.regions, "ObjectAtlas");
 			auto const drawing = draw(false);
 			auto const art = tileQuad(drawing, region, atlas.width, atlas.height);
 			require(art.drawn, "The untintable Marker fixture drew no artwork");
@@ -1179,7 +1179,7 @@ namespace
 void render_smoke::registerObjectArtworkNew(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "objectArtworkNew/authoredTilesAreRegistered",
-		isolated<authoredTilesAreRegisteredInObjectAtlasNew> });
+		isolated<authoredTilesAreRegisteredInObjectAtlas> });
 	checks.push_back({ "objectArtworkNew/doorCropFollowsTheOpenFractionOnEveryStyle",
 		isolated<doorCropFollowsTheOpenFractionOnEveryStyle> });
 	checks.push_back({ "objectArtworkNew/aFullyOpenDoorEmitsNoLeafGeometry",

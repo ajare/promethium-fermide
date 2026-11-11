@@ -33,10 +33,8 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords accessPanels/roundTri
     transactional-concurrent save-dirty-state serializable-modification-state
     recent-documents-restart recent-documents-missing
     worldRoundTripsAuthoredStateAndAgents
-    newWorldsDefaultToTheNewAtlasFamily
+    worldsDefaultToTheCanonicalAtlases
     existingWorldsKeepTheirStoredAtlasSelections
-    loaderWarnsOnMixedAtlasFamilies
-    atlasFamilyClassificationIsExact
     legacyWorldYamlStillLoads
     legacyVersion3WorldYamlStillLoadsWithDefaultLayers
     version4WorldYamlStillLoads

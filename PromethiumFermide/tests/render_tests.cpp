@@ -69,7 +69,9 @@ std::pair<int, int> pngSize(std::filesystem::path const& path) {
 // handle is a placeholder that only has to be non-zero.
 pf::render::TextureId const kInstalled{1};
 // The objects tileset goes in by value, not by move: the caller keeps it as
-// the reference copy the Furniture checks read back.
+// the reference copy the Furniture checks read back. Since #1024 the
+// Furniture checks read the Furniture sheet, so that is what `installAtlases`
+// hands back.
 void installTilesets(SectorTileset sectors, ObjectTileset const& objects,
     ObjectTileset agents, ObjectTileset furniture) {
   setSectorTileset(std::move(sectors), kInstalled);
@@ -77,13 +79,63 @@ void installTilesets(SectorTileset sectors, ObjectTileset const& objects,
   setAgentTileset(std::move(agents), kInstalled);
   setFurnitureTileset(std::move(furniture), kInstalled);
 }
+// Installs the four viewport atlases from the same source manifest and
+// atlas-set registry the game loads at run time. Each atlas is read from
+// its own sheet and its own authored tileset: since the #1013 terminus
+// deleted the merged `objects.png` sheet, the Objects, Agent and Furniture
+// atlases are three separate images with three separate tilesets, and a
+// check that paired all three with one file would be describing a bundle
+// that no longer exists.
 ObjectTileset installAtlases(std::filesystem::path const& directory) {
   auto manifest = YAML::LoadFile((directory / "Resources.yaml").string());
+  auto registry = YAML::LoadFile((directory / "atlas-sets.yaml").string());
   auto resource = [&](std::string const& name) {
     for (auto entry : manifest["Resources"]["Resource"])
       if (entry["name"].as<std::string>() == name) return entry;
     throw std::runtime_error("Missing manifest resource: " + name);
   };
+  // The authored tileset the atlas-set registry names for one atlas. The
+  // registry is the single mapping from a manifest `ImageSet` to the file
+  // that says what its tiles mean, so reading it here rather than naming a
+  // path keeps this honest about what the game actually installs.
+  auto authoredFor = [&](std::string const& atlas) {
+    auto const entry = registry["sets"][atlas];
+    require(bool(entry), "The atlas-set registry names no tileset for " + atlas);
+    return ObjectTileset::load(
+        (directory / entry["tileset"].as<std::string>()).string());
+  };
+  // Tintability is an authored fact, never an inferred one. The tileset
+  // behind each atlas is the only source: the rule that used to derive it
+  // by matching a tile's name against `agent`, `human-*`, `robot-standing`
+  // and `cleaning-bot-standing` is deleted (#1018). A new Agent type can no
+  // longer become tintable by accident of what it is called, and a tile
+  // named without a hint can no longer fail to be.
+  auto spritesFor = [&](std::string const& atlas) {
+    auto const authored = authoredFor(atlas);
+    auto const size = pngSize(
+        directory / resource(atlas + "Image")["location"].as<std::string>());
+    ObjectTileset tiles;
+    tiles.width = size.first;
+    tiles.height = size.second;
+    for (auto image : resource(atlas)["Definitions"]["Definition"]["Images"]["Image"]) {
+      auto name = image["name"].as<std::string>();
+      auto const found = authored.sprites.find(name);
+      require(found != authored.sprites.end(),
+          "The authored " + atlas + " tileset defines no tile the atlas declares");
+      tiles.sprites.emplace(name, ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(),
+          image["width"].as<int>(), image["height"].as<int>()}, found->second.tintable});
+    }
+    // The generated manifest and the authored tileset are the same list.
+    // An authored tile the manifest never got is artwork nothing draws; a
+    // declared tile the tileset never defines is a lookup that fails at run
+    // time. Both are the drift this pairing exists to catch.
+    require(tiles.sprites.size() == authored.sprites.size(),
+        "The " + atlas + " manifest declares " + std::to_string(tiles.sprites.size())
+        + " tiles and its authored tileset authors "
+        + std::to_string(authored.sprites.size()));
+    return tiles;
+  };
+
   auto sectorsSize = pngSize(directory / resource("SectorAtlasImage")["location"].as<std::string>());
   SectorTileset sectors;
   sectors.width = sectorsSize.first; sectors.height = sectorsSize.second;
@@ -94,56 +146,19 @@ ObjectTileset installAtlases(std::filesystem::path const& directory) {
     if (name.starts_with("boundary-")) sectors.boundaries.emplace(name.substr(9), region);
     else sectors.surfaces.emplace(name, region);
   }
-  auto objectsSize = pngSize(directory / resource("ObjectAtlasImage")["location"].as<std::string>());
-  // Tintability is an authored fact, never an inferred one. The tileset behind
-  // the Objects atlas is the only source: the rule that used to derive it here
-  // by matching a tile's name against `agent`, `human-*`, `robot-standing`
-  // and `cleaning-bot-standing` is deleted (#1018). A new Agent type can no
-  // longer become tintable by accident of what it is called, and a tile named
-  // without a hint can no longer fail to be.
-  auto const authored = ObjectTileset::load(directory / "textures/objects.tileset.yaml");
-  auto tintable = [&](std::string const& name) {
-    auto const found = authored.sprites.find(name);
-    require(found != authored.sprites.end(),
-        "The authored tileset defines no tile the atlas declares");
-    return found->second.tintable;
-  };
-  ObjectTileset objects;
-  objects.width = objectsSize.first; objects.height = objectsSize.second;
-  for (auto image : resource("ObjectAtlas")["Definitions"]["Definition"]["Images"]["Image"]) {
-    auto name = image["name"].as<std::string>();
-    objects.sprites.emplace(name, ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(),
-        image["width"].as<int>(), image["height"].as<int>()}, tintable(name)});
-  }
-  ObjectTileset agents;
-  agents.width = objectsSize.first; agents.height = objectsSize.second;
-  for (auto image : resource("AgentAtlas")["Definitions"]["Definition"]["Images"]["Image"]) {
-    auto name = image["name"].as<std::string>();
+
+  auto objects = spritesFor("ObjectAtlas");
+  auto agents = spritesFor("AgentAtlas");
+  // The Agent rows live on their own sheet, not in the Objects one.
+  for (auto const& [name, sprite] : agents.sprites)
     require(!objects.sprites.contains(name), "Agent tiles must be removed from ObjectAtlas");
-    agents.sprites.emplace(name, ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(),
-        image["width"].as<int>(), image["height"].as<int>()}, tintable(name)});
-  }
-  require(agents.sprites.size() == 8, "AgentAtlas must contain all eight extracted tiles");
-  ObjectTileset furniture;
-  furniture.width = objectsSize.first; furniture.height = objectsSize.second;
-  for (auto image : resource("FurnitureAtlas")["Definitions"]["Definition"]["Images"]["Image"]) {
-    auto name = image["name"].as<std::string>();
-    // The authored tileset is the authority the alias is checked against: it
-    // carries every Furniture name the atlas declares, the role names the
-    // shipped catalogues now use included (#1029).
-    auto const& alias = authored.sprites.at(name).region;
-    require(alias.x == image["x"].as<int>() && alias.y == image["y"].as<int>()
-        && alias.width == image["width"].as<int>() && alias.height == image["height"].as<int>(),
-        "Furniture compatibility alias must preserve its rectangle");
-    furniture.sprites.emplace(name, ObjectSprite{alias, false});
-  }
-  // Seven pieces of old Furniture art, each reachable under its own name and
-  // under the role name the shipped catalogues now use (#1029).
-  require(furniture.sprites.size() == 14,
-      "FurnitureAtlas must include chairs, sofas, desks and beds under both "
-      "vocabularies");
-  installTilesets(std::move(sectors), objects, std::move(agents), std::move(furniture));
-  return objects;
+  // The Furniture sheet carries the role names the shipped catalogues use
+  // plus the bare `chair` cell, and nothing else (#1029, #1024).
+  auto furniture = spritesFor("FurnitureAtlas");
+  // By value, not by move: the caller keeps this copy to read the Furniture
+  // rectangles back against what it drew.
+  installTilesets(std::move(sectors), objects, std::move(agents), furniture);
+  return furniture;
 }
 std::size_t textured(WorldDrawList const& draws, WorldDrawList::Texture texture) {
   std::size_t count{};
@@ -348,8 +363,8 @@ void checkAtlasReload(std::filesystem::path const& directory) {
 // The game's canvas selection path (#1026). The World owns which atlas
 // fills each of the four viewport slots; the game owns handing all four of
 // them over every frame. Until this ticket it handed over three, so the
-// renderer kept its constructed `ObjectAtlas` default and a World asking
-// for `ObjectAtlasNew` drew the old sheet everywhere but in the editor.
+// renderer kept its constructed Objects default and a World asking for
+// the new Objects sheet drew the old one everywhere but in the editor.
 //
 // The renderer's install path needs a live OpenGL context, which no
 // headless check has, so what is asserted here is the game's half of the
@@ -409,7 +424,7 @@ void checkCanvasAtlasSelection() {
   require(std::array<std::string, 4>{pushed[0].name, pushed[1].name,
       pushed[2].name, pushed[3].name} == selected,
       "The game did not push the World's four atlas selections");
-  require(pushed[1].name == "ObjectAtlasNew",
+  require(pushed[1].name == "ObjectAtlas",
       "A fresh World's Objects selection is not what the game pushes: "
       + pushed[1].name);
   require(pushed[1].slot == std::string("Objects"),
@@ -433,13 +448,13 @@ void checkCanvasAtlasSelection() {
   // Door outside its collision. An accepted set reports nothing, so the
   // report is a signal rather than noise.
   std::vector<app::WorldAtlasSelection> refused{
-      {"Sector", "SectorAtlasNew", ""},
+      {"Sector", "SectorAtlas", ""},
       {"Objects", "BrokenAtlas",
           "Objects atlas 'BrokenAtlas' cannot be used by this World: 1 tile(s) do "
           "not match what the object renderer draws\n  - tile 'lift-car' is not in "
           "the atlas"},
-      {"Agent", "AgentAtlasNew", ""},
-      {"Furniture", "FurnitureAtlasNew", ""}};
+      {"Agent", "AgentAtlas", ""},
+      {"Furniture", "FurnitureAtlas", ""}};
   auto const report = app::worldAtlasReport(refused);
   require(report.find("BrokenAtlas") != std::string::npos
       && report.find("lift-car") != std::string::npos,
@@ -466,10 +481,10 @@ void checkAtlasSelectionWithoutRenderStack() {
   std::array<char const*, 4> const slots{"Sector", "Objects", "Agent",
       "Furniture"};
   std::array<std::string, 4> const refused{
-      selectWorldSectorImageSet("SectorAtlasNew"),
-      selectWorldObjectImageSet("ObjectAtlasNew"),
-      selectWorldAgentImageSet("AgentAtlasNew"),
-      selectWorldFurnitureImageSet("FurnitureAtlasNew")};
+      selectWorldSectorImageSet("SectorAtlas"),
+      selectWorldObjectImageSet("ObjectAtlas"),
+      selectWorldAgentImageSet("AgentAtlas"),
+      selectWorldFurnitureImageSet("FurnitureAtlas")};
   for (std::size_t index = 0; index < refused.size(); ++index)
     require(!refused[index].empty(), std::string("The ") + slots[index]
         + " selection answered with nothing while no render stack exists, which a "
@@ -515,13 +530,13 @@ void checkCanvasAtlasReport() {
   std::filesystem::create_directories(cleanup.path);
 
   auto refused = std::vector<app::WorldAtlasSelection>{
-      {"Sector", "SectorAtlasNew", ""},
+      {"Sector", "SectorAtlas", ""},
       {"Objects", "ObjectAtlasBroken",
           "Objects atlas 'ObjectAtlasBroken' cannot be used by this World: 1 "
           "tile(s) do not match what the object renderer draws"
           "\n  - tile 'lift-car' is not in the atlas"},
-      {"Agent", "AgentAtlasNew", ""},
-      {"Furniture", "FurnitureAtlasNew", ""}};
+      {"Agent", "AgentAtlas", ""},
+      {"Furniture", "FurnitureAtlas", ""}};
   auto accepted = refused;
   accepted[1].diagnostic.clear();
   auto changed = refused;
@@ -814,7 +829,7 @@ void checkFurniture(std::filesystem::path const& directory, ObjectTileset const&
   auto draws = app::drawWorld(*world, 1280, 720);
   require(textured(draws, WorldDrawList::Texture::FurnitureAtlas) == 4,
           "Only the front chair should draw, including foreground restoration");
-  auto const& chair = atlas.sprites.at("chair").region;
+  auto const& chair = atlas.sprites.at("chair-L0").region;
   for (auto const& command : draws.commands())
     if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
         triangle && triangle->texture == WorldDrawList::Texture::FurnitureAtlas)

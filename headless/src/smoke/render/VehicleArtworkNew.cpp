@@ -1,5 +1,5 @@
 // The vehicles - the Lift car, the Platform lift and the Shuttle carriage -
-// draw from ObjectAtlasNew (#1021).
+// draw from ObjectAtlas (#1021).
 //
 // The Shuttle carriage is where the naming convention earns its keep. A
 // carriage is composed from three role tiles - `shuttle-L0`, `shuttle-M0`,
@@ -194,9 +194,9 @@ namespace
 	{
 		auto const manifest = YAML::LoadFile(
 			context.fixture("resources/Resources.yaml").string());
-		auto const set = manifestResource(manifest, "ObjectAtlasNew");
+		auto const set = manifestResource(manifest, "ObjectAtlas");
 		require(set.found && set.type == "ImageSet",
-			"The application manifest registers no ObjectAtlasNew ImageSet");
+			"The application manifest registers no ObjectAtlas ImageSet");
 
 		NewObjectsAtlas atlas;
 		atlas.authored = ObjectTileset::load(context.fixture(kTileset));
@@ -210,7 +210,7 @@ namespace
 	{
 		auto const atlas = loadNewObjectsAtlas(context);
 		auto const tiles = installAtlasTiles(atlas.authored.sprites, atlas.regions,
-			atlas.width, atlas.height, "ObjectAtlasNew");
+			atlas.width, atlas.height, "ObjectAtlas");
 		ObjectTileset installed;
 		installed.width = atlas.width;
 		installed.height = atlas.height;
@@ -430,7 +430,7 @@ namespace
 	// ------------------------------------------------------------------
 	// The six vehicle tiles: authored sizes, tintability, generated pair.
 	// ------------------------------------------------------------------
-	void vehicleTilesAreRegisteredInObjectAtlasNew(smoke::Context const& context)
+	void vehicleTilesAreRegisteredInObjectAtlas(smoke::Context const& context)
 	{
 		auto const atlas = loadNewObjectsAtlas(context);
 
@@ -460,7 +460,7 @@ namespace
 		{
 			auto const found = atlas.authored.sprites.find(tile.name);
 			require(found != atlas.authored.sprites.end(),
-				std::string("ObjectAtlasNew registers no '") + tile.name
+				std::string("ObjectAtlas registers no '") + tile.name
 				+ "' tile");
 			auto const& art = found->second;
 			require(relNear(art.drawnSize.x, tile.drawnWidth)
@@ -526,7 +526,7 @@ namespace
 		for (auto const* legacy : { "shuttle-car-left", "shuttle-car-middle",
 			"shuttle-car-right", "shuttle-car-connector" })
 			require(atlas.authored.sprites.count(legacy) == 0,
-				std::string("ObjectAtlasNew still carries the pre-convention tile '")
+				std::string("ObjectAtlas still carries the pre-convention tile '")
 				+ legacy + "'");
 	}
 
@@ -862,7 +862,7 @@ namespace
 void render_smoke::registerVehicleArtworkNew(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "vehicleArtworkNew/vehicleTilesAreRegistered",
-		isolated<vehicleTilesAreRegisteredInObjectAtlasNew> });
+		isolated<vehicleTilesAreRegisteredInObjectAtlas> });
 	checks.push_back({ "vehicleArtworkNew/carriageComposesAtTwoThreeAndFourCellsWide",
 		isolated<carriageComposesFromRoleTilesAtTwoThreeAndFourCells> });
 	checks.push_back({ "vehicleArtworkNew/connectorSitsAtTheSeamNotACellPosition",

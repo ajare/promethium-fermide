@@ -292,7 +292,7 @@ set(editor_names
     surfacePaintDrag/aRunWithNoSwatchPickedIsNoRunAtAll
     surfacePaintDrag/resolvingARunChangesNothing
     world-artwork/newDefaultsShowOnAFreshWorld
-    world-artwork/repointedAtlasIsReportedBySlot
+    world-artwork/repointedAtlasMovesItsOwnSlotOnly
     history/independentHistoriesDoNotLeakCommandsOrState
     isolation/normalAndExceptionalExit
     scaled-doors/clipboard-history

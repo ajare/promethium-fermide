@@ -20,14 +20,14 @@ int main(int argc, char** argv)
 	render_smoke::registerSecurityScanners(checks);
 	render_smoke::registerBoothWindows(checks);
 	render_smoke::registerObjectAtlas(checks);
-	render_smoke::registerFurnitureAtlasNew(checks);
-	render_smoke::registerSectorAtlasNew(checks);
+	render_smoke::registerFurnitureAtlas(checks);
+	render_smoke::registerSectorAtlas(checks);
 	render_smoke::registerSectorSurfaceDrawContract(checks);
 	render_smoke::registerSectorSurfacePerCellResolution(checks);
 	render_smoke::registerSectorSurfaceBottomClip(checks);
 	render_smoke::registerSectorSurfaceVariants(checks);
 	render_smoke::registerSectorTilePreview(checks);
-	render_smoke::registerAgentAtlasNew(checks);
+	render_smoke::registerAgentAtlas(checks);
 	render_smoke::registerWalkwayArtwork(checks);
 	render_smoke::registerBulkheadAndPanelArtwork(checks);
 	render_smoke::registerObjectArtworkNew(checks);

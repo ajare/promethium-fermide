@@ -6,6 +6,12 @@ pixels at 160 pixels/World unit. Chair/sofa backs are about 61%/47% of
 that height; the desk surface is about 44%. Seats are roughly 25%.
 Keep full 64x160 Image-set cells and catalogue topology unchanged.
 """
+
+# RETIRED (#1024). This one-off packer writes into `resources/textures/objects.png`,
+# the merged version 1 sheet that was deleted when the #1013 transition ended. It is
+# kept as provenance for how that art was laid out and will not run against the
+# current bundle. The sheets the game ships are generated from their authored
+# tilesets by `scripts/generate_<atlas>_atlas_new.py`.
 from pathlib import Path
 from PIL import Image
 

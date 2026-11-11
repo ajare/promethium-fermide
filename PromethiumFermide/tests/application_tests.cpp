@@ -33,6 +33,25 @@ void require(bool condition, char const* message) {
   if (!condition) throw std::runtime_error(message);
 }
 
+// The PNG each headless stand-in decodes, kept in step with the `Image`
+// entries in Resources.yaml. A name with no entry here is a bundle change
+// this test has not caught up with, so it is reported rather than quietly
+// pointed at some other sheet.
+std::string headlessAtlasLocation(std::string const& name) {
+  static std::map<std::string, std::string> const locations{
+      {"SectorAtlasImage", "textures/sectors-new.png"},
+      {"ObjectAtlasImage", "textures/objects-new.png"},
+      {"AgentAtlasImage", "textures/agents-new.png"},
+      {"FurnitureAtlasImage", "textures/furniture-new.png"},
+      {"StationAtlasImage", "textures/station-128x320.png"},
+      {"StationFurnitureAtlasImage", "textures/station-furniture-320.png"},
+      {"DoctorFemale1AtlasImage", "textures/doctor-female-1-320.png"}};
+  auto const found = locations.find(name);
+  if (found == locations.end())
+    throw std::runtime_error("No headless stand-in location for " + name);
+  return found->second;
+}
+
 // Preserve the production ImageSet/dependency path, replacing only GPU upload.
 class HeadlessAtlasImage final : public wp::application::resourcesystem::ImageResource {
   wp::application::resourcesystem::ResourceManager& mManager;
@@ -55,9 +74,7 @@ public:
   HeadlessAtlasImage(std::string const& name,
                      wp::application::resourcesystem::ResourceManager& manager, bool& fail,
                      wp::application::resourcesystem::ResourceLocation* location)
-      : ImageResource(name, "", name == "SectorAtlasImage"
-            ? "textures/sector-atlas-draft.png" : name == "StationAtlasImage"
-                ? "textures/station-128x320.png" : "textures/objects.png", {}, location),
+      : ImageResource(name, "", headlessAtlasLocation(name), {}, location),
         mManager(manager), mFail(fail) {}
 };
 
@@ -69,7 +86,7 @@ void checkAtlases(wp::application::resourcesystem::ResourceManager& manager, boo
     // by this World; MapUnload respects those independent acquisitions.
     if (!loaded && std::string_view(name) == "AgentAtlas") {
       require(set && !manager.isResourceLoaded(set) && !manager.isResourceCreated(set),
-              "Agent atlas must unload independently of the shared Object image");
+              "Agent atlas must unload independently of the other viewport atlases");
       continue;
     }
     if (!loaded && std::string_view(name) == "ObjectAtlas") {
@@ -79,7 +96,7 @@ void checkAtlases(wp::application::resourcesystem::ResourceManager& manager, boo
     }
     if (!loaded && std::string_view(name) == "FurnitureAtlas") {
       require(set && (!manager.isResourceLoaded(set) || manager.isResourceLoaded(set->getImage())),
-              "A retained Furniture atlas must retain its shared image");
+              "A retained Furniture atlas must retain the image it draws from");
       continue;
     }
     require(set && manager.isResourceLoaded(set) == loaded &&
@@ -902,11 +919,13 @@ void checkSelectedSectorAtlases(wp::application::resourcesystem::ResourceManager
     if (std::string_view(name) == "FurnitureAtlas") {
       auto atlas = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource(name));
       auto objects = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource("ObjectAtlas"));
+      // The Furniture sheet is its own image now. Before the #1013 terminus
+      // deleted the merged `objects.png` sheet, Furniture was a band of the
+      // Objects picture and had to share its image to draw at all (#1029).
       require(atlas && manager.isResourceLoaded(atlas) && manager.isResourceLoaded(atlas->getImage())
-          && atlas->getImage() == objects->getImage() && atlas->getImageDefinitions().size() == 14,
-          "FurnitureAtlas must load all seven pieces of old Furniture art using the "
-          "shared Object image, each under its own name and under the role name "
-          "the shipped catalogues now use (#1029)");
+          && atlas->getImage() != objects->getImage() && atlas->getImageDefinitions().size() == 11,
+          "FurnitureAtlas must load its own sheet - the ten role tiles and the bare "
+          "chair cell - rather than sharing the Objects image (#1024)");
     }
     resources.unload();
   }
@@ -923,8 +942,9 @@ void checkSelectedSectorAtlases(wp::application::resourcesystem::ResourceManager
       auto atlas = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource(name));
       auto objects = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource("ObjectAtlas"));
       require(atlas && manager.isResourceLoaded(atlas) && manager.isResourceLoaded(atlas->getImage())
-          && atlas->getImage() == objects->getImage() && atlas->getImageDefinitions().size() == 8,
-          "AgentAtlas must load all eight tiles using the shared Object image");
+          && atlas->getImage() != objects->getImage() && atlas->getImageDefinitions().size() == 20,
+          "AgentAtlas must load its own sheet, carrying every authored Agent tile "
+          "rather than sharing the Objects image (#1024)");
     }
     resources.unload();
   }
@@ -975,7 +995,15 @@ int main(int argc, char** argv) {
           });
       manager.addResourceLocation("Directory", argv[1], "Resources.yaml");
       bool failAtlas = false;
-      for (auto name : {"SectorAtlasImage", "ObjectAtlasImage", "StationAtlasImage"})
+      // Every atlas image the bundle ships gets a headless stand-in. The
+      // harness builds its wp ResourceManager with no MPP resource manager
+      // at all, so a real `ImageResource::load` would call
+      // `declareResource` on a null one and take the process with it. The
+      // stand-ins decode the real PNGs and stop at the upload boundary,
+      // which is the point: this drives the resource graph, not a GPU.
+      for (auto name : {"SectorAtlasImage", "ObjectAtlasImage", "AgentAtlasImage",
+                       "FurnitureAtlasImage", "StationAtlasImage",
+                       "StationFurnitureAtlasImage", "DoctorFemale1AtlasImage"})
         manager.addResource(std::make_shared<HeadlessAtlasImage>(name, manager, failAtlas, location));
       std::array<wp::application::StateFactory*, 6> factories{};
       for (std::size_t index = 0; index < names.size(); ++index) {

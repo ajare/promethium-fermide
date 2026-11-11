@@ -17,39 +17,37 @@
 # is covered here, that every named tileset loads, and that it defines every
 # tile the atlas declares, so the mapping cannot rot quietly.
 #
+# The four viewport atlases below are named without a `New` suffix: the
+# #1013 transition ended when the old sheets were deleted, so the canonical
+# names now resolve to the sheets sized for the 128x320 World cell. The
+# three custom theme sets share the version 1 tilesets those sheets were
+# authored against; see the notes on each.
+#
 # Paths are relative to this file.
 version: 1
 sets:
   SectorAtlas:
     kind: sector
-    tileset: textures/sectors.tileset.yaml
+    tileset: textures/sectors-new.tileset.yaml
+  ObjectAtlas:
+    kind: object
+    tileset: textures/objects-new.tileset.yaml
+  AgentAtlas:
+    kind: object
+    tileset: textures/agents-new.tileset.yaml
+  FurnitureAtlas:
+    kind: object
+    tileset: textures/furniture-new.tileset.yaml
+  # Custom themes, unaffiliated with either transition family. They keep the
+  # version 1 tilesets: a v1 object tileset carries the v1 required-tile
+  # contract, and these sheets author no render offsets or drawn sizes, so
+  # there is nothing in them to move to a v2 set.
   StationAtlas:
     kind: sector
     tileset: textures/sectors.tileset.yaml
-  ObjectAtlas:
-    kind: object
-    tileset: textures/objects.tileset.yaml
-  AgentAtlas:
-    kind: object
-    tileset: textures/objects.tileset.yaml
-  FurnitureAtlas:
-    kind: object
-    tileset: textures/objects.tileset.yaml
   StationFurnitureAtlas:
     kind: object
     tileset: textures/objects.tileset.yaml
   DoctorFemale1Atlas:
     kind: object
     tileset: textures/objects.tileset.yaml
-  ObjectAtlasNew:
-    kind: object
-    tileset: textures/objects-new.tileset.yaml
-  FurnitureAtlasNew:
-    kind: object
-    tileset: textures/furniture-new.tileset.yaml
-  SectorAtlasNew:
-    kind: sector
-    tileset: textures/sectors-new.tileset.yaml
-  AgentAtlasNew:
-    kind: object
-    tileset: textures/agents-new.tileset.yaml

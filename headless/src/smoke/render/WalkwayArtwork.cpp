@@ -253,24 +253,24 @@ namespace
 	NewObjectsAtlas loadNewObjectsAtlas(smoke::Context const& context)
 	{
 		auto const manifest = bundledManifest(context);
-		auto const set = manifestResource(manifest, "ObjectAtlasNew");
+		auto const set = manifestResource(manifest, "ObjectAtlas");
 		require(set.found && set.type == "ImageSet",
-			"The application manifest registers no ObjectAtlasNew ImageSet");
-		require(atlasSetRegistry(context).at("ObjectAtlasNew").tileset
+			"The application manifest registers no ObjectAtlas ImageSet");
+		require(atlasSetRegistry(context).at("ObjectAtlas").tileset
 			== "textures/objects-new.tileset.yaml",
 			"The atlas-set registry does not name objects-new.tileset.yaml for "
-			"ObjectAtlasNew");
+			"ObjectAtlas");
 		auto const image = manifestResource(manifest, set.imageReference);
 		require(image.found && image.type == "Image",
-			"ObjectAtlasNew's paired Image resource is missing");
+			"ObjectAtlas's paired Image resource is missing");
 		require(image.options.count("filtering") && image.options.at("filtering") == "none"
 			&& image.options.count("uv-style")
 			&& image.options.at("uv-style") == "atlas",
-			"ObjectAtlasNew's paired Image must be an unfiltered atlas image");
+			"ObjectAtlas's paired Image must be an unfiltered atlas image");
 
 		NewObjectsAtlas atlas;
 		atlas.authored = ObjectTileset::load(
-			context.fixture(authoredTilesetFor(context, "ObjectAtlasNew")));
+			context.fixture(authoredTilesetFor(context, "ObjectAtlas")));
 		atlas.regions = set.regions;
 		atlas.width = atlas.authored.width;
 		atlas.height = atlas.authored.height;
@@ -286,7 +286,7 @@ namespace
 	{
 		auto const atlas = loadNewObjectsAtlas(context);
 		auto const tiles = installAtlasTiles(atlas.authored.sprites, atlas.regions,
-			atlas.width, atlas.height, "ObjectAtlasNew");
+			atlas.width, atlas.height, "ObjectAtlas");
 		ObjectTileset installed;
 		installed.width = atlas.width;
 		installed.height = atlas.height;
@@ -439,28 +439,28 @@ namespace
 	{
 		using smoke::require;
 		auto const manifest = bundledManifest(context);
-		auto const set = manifestResource(manifest, "ObjectAtlasNew");
+		auto const set = manifestResource(manifest, "ObjectAtlas");
 		require(set.found && set.type == "ImageSet",
-			"ObjectAtlasNew is not registered as an ImageSet in the application manifest");
-		require(set.imageReference == "ObjectAtlasNewImage",
-			"ObjectAtlasNew's paired Image is " + set.imageReference);
-		auto const image = manifestResource(manifest, "ObjectAtlasNewImage");
+			"ObjectAtlas is not registered as an ImageSet in the application manifest");
+		require(set.imageReference == "ObjectAtlasImage",
+			"ObjectAtlas's paired Image is " + set.imageReference);
+		auto const image = manifestResource(manifest, "ObjectAtlasImage");
 		require(image.found && image.type == "Image",
-			"ObjectAtlasNewImage is not registered as an Image in the application manifest");
+			"ObjectAtlasImage is not registered as an Image in the application manifest");
 		require(image.location == "textures/objects-new.png",
-			"ObjectAtlasNewImage points at " + image.location);
+			"ObjectAtlasImage points at " + image.location);
 
 		auto const atlas = loadNewObjectsAtlas(context);
 		// The ImageSet entries are generated from the authored tileset: the
 		// region each entry declares is the tileset's cell plus its content
 		// offset, and the tileset has an entry for every region and no others.
 		require(atlas.regions.size() == atlas.authored.sprites.size(),
-			"The manifest's ObjectAtlasNew entries and the authored tileset differ in count");
+			"The manifest's ObjectAtlas entries and the authored tileset differ in count");
 		for (auto const& [name, region] : atlas.regions)
 		{
 			auto const authored = atlas.authored.sprites.find(name);
 			require(authored != atlas.authored.sprites.end(),
-				"ObjectAtlasNew declares tile '" + name
+				"ObjectAtlas declares tile '" + name
 				+ "' that its authored tileset never defines");
 		}
 		for (auto const& [name, sprite] : atlas.authored.sprites)
@@ -479,7 +479,7 @@ namespace
 		// render semantics a version 1 tileset left the renderer to guess.
 		auto const walkway = atlas.authored.sprites.find("walkway");
 		require(walkway != atlas.authored.sprites.end(),
-			"The authored ObjectAtlasNew tileset has no walkway tile");
+			"The authored ObjectAtlas tileset has no walkway tile");
 		require(walkway->second.tintable,
 			"The Walkway tile must be tintable so selection shows through it");
 		require(near(walkway->second.offset.y, -kSlabWorldHeight)
@@ -515,8 +515,9 @@ namespace
 					name + " declares tile '" + tile + "' that its authored tileset "
 					+ found->second.tileset + " never defines");
 		}
-		require(atlases >= 8, "The bundled manifest should register every viewport "
-			"atlas pair; saw " + std::to_string(atlases) + " ImageSets");
+		require(atlases >= 7, "The bundled manifest should register every atlas "
+			"pair - the four viewport atlases and the three themed sheets; saw "
+			+ std::to_string(atlases) + " ImageSets");
 	}
 
 	// ------------------------------------------------------------------
@@ -528,7 +529,7 @@ namespace
 		using smoke::require;
 		auto const atlas = loadNewObjectsAtlas(context);
 		auto const tiles = installAtlasTiles(atlas.authored.sprites, atlas.regions,
-			atlas.width, atlas.height, "ObjectAtlasNew");
+			atlas.width, atlas.height, "ObjectAtlas");
 		require(tiles.size() == atlas.regions.size(),
 			"The install dropped a declared tile");
 		auto const& installed = tiles.at("walkway");
@@ -554,7 +555,7 @@ namespace
 		try
 		{
 			installAtlasTiles(atlas.authored.sprites, drifted, atlas.width,
-				atlas.height, "ObjectAtlasNew");
+				atlas.height, "ObjectAtlas");
 		}
 		catch (std::exception const& error)
 		{
@@ -571,7 +572,7 @@ namespace
 		try
 		{
 			installAtlasTiles(atlas.authored.sprites, escaped, atlas.width,
-				atlas.height, "ObjectAtlasNew");
+				atlas.height, "ObjectAtlas");
 		}
 		catch (std::exception const& error)
 		{
@@ -680,39 +681,6 @@ namespace
 			"The Walkway artwork reaches up into the cell it must not occupy");
 	}
 
-	// ------------------------------------------------------------------
-	// The old sets are untouched: no walkway tile, so the line stays.
-	// ------------------------------------------------------------------
-	void oldObjectAtlasStillDrawsThePrimitiveWalkwayLine(
-		smoke::Context const& context)
-	{
-		using smoke::require;
-		auto const manifest = bundledManifest(context);
-		auto const set = manifestResource(manifest, "ObjectAtlas");
-		require(set.found, "The application manifest registers no ObjectAtlas");
-		require(atlasSetRegistry(context).at("ObjectAtlas").tileset
-			== "textures/objects.tileset.yaml",
-			"The old ObjectAtlas must still be covered by the authored tileset");
-		auto const authored = ObjectTileset::load(
-			context.fixture(authoredTilesetFor(context, "ObjectAtlas")));
-		require(authored.sprites.count("walkway") == 0,
-			"The old Objects atlas must not have gained a walkway tile");
-		auto const tiles = installAtlasTiles(authored.sprites, set.regions,
-			authored.width, authored.height, "ObjectAtlas");
-		ObjectTileset installed;
-		installed.width = authored.width;
-		installed.height = authored.height;
-		installed.sprites = tiles;
-		setObjectTileset(std::move(installed), static_cast<TextureId>(1));
-
-		auto fixture = buildWalkwayFixture();
-		prepareCanvas();
-		auto const drawing = drawWorld(fixture.world);
-		require(objectAtlasQuad(drawing, walkwayCellX()).count == 0,
-			"The old Objects atlas drew a Walkway tile it does not have");
-		require(floorLineAtWalkway(drawing),
-			"Without a walkway tile the renderer must keep its primitive floor line");
-	}
 }
 
 void render_smoke::registerWalkwayArtwork(std::vector<smoke::Check>& checks)
@@ -727,6 +695,4 @@ void render_smoke::registerWalkwayArtwork(std::vector<smoke::Check>& checks)
 		isolated<walkwayDrawsItsArtworkBelowTheFloorLine> });
 	checks.push_back({ "walkwayArtwork/physicalExtentStaysZeroAndRoutes",
 		isolated<walkwayPhysicalExtentStaysZeroHeightAndRoutes> });
-	checks.push_back({ "walkwayArtwork/oldSetsStillDrawThePrimitiveLine",
-		isolated<oldObjectAtlasStillDrawsThePrimitiveWalkwayLine> });
 }

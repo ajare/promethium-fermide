@@ -24,12 +24,12 @@ local catalogue = {
           x = 0,
           y = 0,
           imageSet = "ObjectAtlas",
-          image = "sofa-left",
+          image = "sofa-L0",
         }, {
           x = 1,
           y = 0,
           imageSet = "ObjectAtlas",
-          image = "sofa-right",
+          image = "sofa-R0",
         }},
       usablePoints = {{
           key = "left",
@@ -94,12 +94,12 @@ local catalogue = {
           x = 0,
           y = 0,
           imageSet = "ObjectAtlas",
-          image = "desk-left",
+          image = "desk-L0",
         }, {
           x = 1,
           y = 0,
           imageSet = "ObjectAtlas",
-          image = "desk-right",
+          image = "desk-R0",
         }},
       usablePoints = {},
       vertices = {{

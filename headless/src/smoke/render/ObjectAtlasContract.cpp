@@ -161,7 +161,7 @@ namespace
 		require(atlas.declaresRenderSemantics,
 			"objects-new.tileset.yaml is a version 2 set but reports no declared "
 			"render semantics, so the contract would skip it");
-		auto const diagnostic = checkObjectAtlasContract("ObjectAtlasNew",
+		auto const diagnostic = checkObjectAtlasContract("ObjectAtlas",
 			atlas.sprites);
 		require(diagnostic.empty(),
 			"The shipped Objects atlas does not satisfy its own contract: "

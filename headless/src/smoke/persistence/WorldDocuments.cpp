@@ -81,22 +81,22 @@ namespace persistence
 		}
 	}
 
-	// The four `-New` sets are what a World created from nothing asks for
-	// (#1023), and the loader says so out loud when a World's four selections
-	// straddle the old and new families instead of staying inside one.
-	void newWorldsDefaultToTheNewAtlasFamily(smoke::Context const&)
+	// The four canonical sets are what a World created from nothing asks for,
+	// and what a document that names none reads. Since the #1013 terminus
+	// dropped the `New` suffix there is one family of transition sets and its
+	// name is the plain one, so a fresh World and a pre-selection document
+	// agree on all four names.
+	void worldsDefaultToTheCanonicalAtlases(smoke::Context const&)
 	{
-		core::World fresh("New atlas defaults", 4, 2);
-		require(fresh.sectorImageSetResourceName() == "SectorAtlasNew",
-			"A new World does not default to SectorAtlasNew");
-		require(fresh.objectImageSetResourceName() == "ObjectAtlasNew",
-			"A new World does not default to ObjectAtlasNew");
-		require(fresh.agentImageSetResourceName() == "AgentAtlasNew",
-			"A new World does not default to AgentAtlasNew");
-		require(fresh.furnitureImageSetResourceName() == "FurnitureAtlasNew",
-			"A new World does not default to FurnitureAtlasNew");
-		require(fresh.atlasFamilyDiagnostic().empty(),
-			"A World wholly inside the new atlas family reported a straddle");
+		core::World fresh("Canonical atlas defaults", 4, 2);
+		require(fresh.sectorImageSetResourceName() == "SectorAtlas",
+			"A new World does not default to SectorAtlas");
+		require(fresh.objectImageSetResourceName() == "ObjectAtlas",
+			"A new World does not default to ObjectAtlas");
+		require(fresh.agentImageSetResourceName() == "AgentAtlas",
+			"A new World does not default to AgentAtlas");
+		require(fresh.furnitureImageSetResourceName() == "FurnitureAtlas",
+			"A new World does not default to FurnitureAtlas");
 
 		// The defaults round-trip through the document they are written into.
 		fresh.addRoom("Round-trip room", 0, 0, 0, 3, 2);
@@ -106,26 +106,27 @@ namespace persistence
 		fresh.serialize(*writer, writeData);
 		writer->serialize();
 		auto const base = writer->getSerializedString();
-		for (auto const* field : { "sectorImageSet: SectorAtlasNew", "objectImageSet: ObjectAtlasNew",
-				"agentImageSet: AgentAtlasNew", "furnitureImageSet: FurnitureAtlasNew" })
+		for (auto const* field : { "sectorImageSet: SectorAtlas", "objectImageSet: ObjectAtlas",
+				"agentImageSet: AgentAtlas", "furnitureImageSet: FurnitureAtlas" })
 			require(base.find(field) != std::string::npos,
 				std::string("A new World did not write its default: ") + field);
 
-		auto const roundTripped = loadAtlasDocument(base, "new defaults");
-		require(atlasNames(*roundTripped) == expectedNames("SectorAtlasNew", "ObjectAtlasNew",
-			"AgentAtlasNew", "FurnitureAtlasNew"), "The new atlas defaults did not round-trip");
+		auto const roundTripped = loadAtlasDocument(base, "canonical defaults");
+		require(atlasNames(*roundTripped) == expectedNames("SectorAtlas", "ObjectAtlas",
+			"AgentAtlas", "FurnitureAtlas"), "The canonical atlas defaults did not round-trip");
 		require(roundTripped->getLoadWarnings().empty(),
-			"The new atlas defaults warned on load: "
+			"The canonical atlas defaults warned on load: "
 			+ (roundTripped->getLoadWarnings().empty() ? std::string{} : roundTripped->getLoadWarnings().front()));
 	}
 
-	// Nothing re-skins under the author: a document that names the old four -
-	// or names none, which reads the same four - keeps drawing them, and stays
-	// silent because it is wholly inside one family.
+	// Nothing re-skins under the author: a document that names its four sets -
+	// custom themes included - reads back exactly what it named, and a document
+	// that names none reads the canonical four rather than whatever the World it
+	// was saved from was wearing.
 	void existingWorldsKeepTheirStoredAtlasSelections(smoke::Context const&)
 	{
-		core::World base("Atlas family base", 4, 2);
-		base.addRoom("Family room", 0, 0, 0, 3, 2);
+		core::World base("Atlas selection base", 4, 2);
+		base.addRoom("Selection room", 0, 0, 0, 3, 2);
 		base.finishBuild();
 		core::SerializationWorkData writeData;
 		auto const writer = core::YamlSerializer::toString();
@@ -133,155 +134,41 @@ namespace persistence
 		writer->serialize();
 		auto const document = writer->getSerializedString();
 
-		auto const legacy = loadAtlasDocument(withAtlases(document,
-			"SectorAtlas", "ObjectAtlas", "AgentAtlas", "FurnitureAtlas"), "all old");
-		require(atlasNames(*legacy) == expectedNames("SectorAtlas", "ObjectAtlas",
-			"AgentAtlas", "FurnitureAtlas"), "A stored old-family selection was not read back");
-		require(legacy->getLoadWarnings().empty(),
-			"An all-old-family World warned on load: "
-			+ (legacy->getLoadWarnings().empty() ? std::string{} : legacy->getLoadWarnings().front()));
+		auto const themed = loadAtlasDocument(withAtlases(document,
+			"StationAtlas", "CustomObjects", "CustomAgents", "StationFurnitureAtlas"),
+			"custom theme");
+		require(atlasNames(*themed) == expectedNames("StationAtlas", "CustomObjects",
+			"CustomAgents", "StationFurnitureAtlas"),
+			"A themed document did not read back the sets it named");
+		require(themed->getLoadWarnings().empty(),
+			"A themed World warned on load: "
+			+ (themed->getLoadWarnings().empty() ? std::string{} : themed->getLoadWarnings().front()));
 
 		// A document predating the four selections names none of them and reads
-		// the sets it drew before the choice existed - not the new defaults a
-		// freshly created World now carries.
+		// the canonical four - the same four names a freshly created World
+		// carries, which is what makes the terminus a terminus rather than a
+		// second default to remember.
 		auto const unselected = loadAtlasDocument(
 			withAtlases(document, nullptr, nullptr, nullptr, nullptr), "unselected");
 		require(atlasNames(*unselected) == expectedNames("SectorAtlas", "ObjectAtlas",
 			"AgentAtlas", "FurnitureAtlas"),
-			"A document naming no atlases did not read the pre-transition defaults");
+			"A document naming no atlases did not read the canonical defaults");
 		require(unselected->getLoadWarnings().empty(), "A document naming no atlases warned on load");
-	}
-
-	// The near-miss, made loud. `ObjectAtlas` and `ObjectAtlasNew` differ by
-	// three characters and both are registered during the transition, so a
-	// World pointing at the wrong one loads fine and renders the wrong sheet.
-	void loaderWarnsOnMixedAtlasFamilies(smoke::Context const&)
-	{
-		core::World base("Atlas straddle base", 4, 2);
-		base.addRoom("Straddle room", 0, 0, 0, 3, 2);
-		base.finishBuild();
-		core::SerializationWorkData writeData;
-		auto const writer = core::YamlSerializer::toString();
-		base.serialize(*writer, writeData);
-		writer->serialize();
-		auto const document = writer->getSerializedString();
-
-		struct Case
-		{
-			char const* label;
-			char const* sector;
-			char const* object;
-			char const* agent;
-			char const* furniture;
-			char const* oddSlot;
-		};
-
-		// One odd slot in each of the four positions, in both directions: three
-		// replacement sets with one old set left behind, and three old sets with
-		// one replacement set pulled forward.
-		std::vector<Case> const straddles{
-			{ "old sector", "SectorAtlas", "ObjectAtlasNew", "AgentAtlasNew", "FurnitureAtlasNew",
-				"Sector=SectorAtlas (old)" },
-			{ "old objects", "SectorAtlasNew", "ObjectAtlas", "AgentAtlasNew", "FurnitureAtlasNew",
-				"Objects=ObjectAtlas (old)" },
-			{ "old agents", "SectorAtlasNew", "ObjectAtlasNew", "AgentAtlas", "FurnitureAtlasNew",
-				"Agents=AgentAtlas (old)" },
-			{ "old furniture", "SectorAtlasNew", "ObjectAtlasNew", "AgentAtlasNew", "FurnitureAtlas",
-				"Furniture=FurnitureAtlas (old)" },
-			{ "new sector", "SectorAtlasNew", "ObjectAtlas", "AgentAtlas", "FurnitureAtlas",
-				"Sector=SectorAtlasNew (new)" },
-			{ "new objects", "SectorAtlas", "ObjectAtlasNew", "AgentAtlas", "FurnitureAtlas",
-				"Objects=ObjectAtlasNew (new)" },
-			{ "new agents", "SectorAtlas", "ObjectAtlas", "AgentAtlasNew", "FurnitureAtlas",
-				"Agents=AgentAtlasNew (new)" },
-			{ "new furniture", "SectorAtlas", "ObjectAtlas", "AgentAtlas", "FurnitureAtlasNew",
-				"Furniture=FurnitureAtlasNew (new)" },
-			// Half and half straddles too - the warning is about the two families
-			// meeting, not about how many of each there are.
-			{ "two and two", "SectorAtlas", "ObjectAtlasNew", "AgentAtlas", "FurnitureAtlasNew",
-				"Objects=ObjectAtlasNew (new)" }
-		};
-
-		for (auto const& testCase : straddles)
-		{
-			auto const loaded = loadAtlasDocument(withAtlases(document, testCase.sector,
-				testCase.object, testCase.agent, testCase.furniture), testCase.label);
-			auto const& warnings = loaded->getLoadWarnings();
-			require(warnings.size() == 1,
-				std::string("A mixed-family World (") + testCase.label
-					+ ") did not produce exactly one load warning: " + std::to_string(warnings.size()));
-			auto const& warning = warnings.front();
-			require(warning.find("mixes the old and new atlas families") != std::string::npos,
-				std::string("The mixed-family warning (") + testCase.label + ") does not say what it is: " + warning);
-			require(warning.find(testCase.oddSlot) != std::string::npos,
-				std::string("The mixed-family warning (") + testCase.label
-					+ ") does not name the odd slot '" + testCase.oddSlot + "': " + warning);
-			// Every slot is named, so the author never has to guess which of the
-			// four the message is about.
-			for (auto const* slot : { "Sector=", "Objects=", "Agents=", "Furniture=" })
-				require(warning.find(slot) != std::string::npos,
-					std::string("The mixed-family warning (") + testCase.label
-						+ ") omits a slot '" + slot + "': " + warning);
-			// And the selection itself is untouched: the warning reports, it does
-			// not repair or refuse.
-			require(atlasNames(*loaded) == expectedNames(testCase.sector, testCase.object,
-				testCase.agent, testCase.furniture),
-				std::string("The mixed-family warning (") + testCase.label
-					+ ") changed the World's selections");
-		}
-
-		// A custom set belongs to neither family, so mixing custom with either
-		// family is an author's own theme choice and stays quiet. Only the two
-		// transition families meeting is the near-miss.
-		std::vector<Case> const quiet{
-			{ "all custom", "StationAtlas", "CustomObjects", "CustomAgents", "CustomFurniture", nullptr },
-			{ "custom and old", "StationAtlas", "ObjectAtlas", "AgentAtlas", "StationFurnitureAtlas", nullptr },
-			{ "custom and new", "StationAtlas", "ObjectAtlasNew", "AgentAtlasNew", "StationFurnitureAtlas", nullptr },
-			{ "custom and one new", "StationAtlas", "CustomObjects", "AgentAtlasNew", "StationFurnitureAtlas", nullptr }
-		};
-		for (auto const& testCase : quiet)
-		{
-			auto const loaded = loadAtlasDocument(withAtlases(document, testCase.sector,
-				testCase.object, testCase.agent, testCase.furniture), testCase.label);
-			require(loaded->getLoadWarnings().empty(),
-				std::string("A no-straddle World (") + testCase.label + ") warned: "
-					+ (loaded->getLoadWarnings().empty() ? std::string{} : loaded->getLoadWarnings().front()));
-		}
-	}
-
-	// The classifier the warning is built from, pinned directly so a rename in
-	// either family shows up here rather than as a warning that stopped firing.
-	void atlasFamilyClassificationIsExact(smoke::Context const&)
-	{
-		for (auto const* name : { "SectorAtlas", "ObjectAtlas", "AgentAtlas", "FurnitureAtlas" })
-			require(core::atlasFamilyOf(name) == core::AtlasFamily::Legacy,
-				std::string("A transition-era set did not classify as old: ") + name);
-		for (auto const* name : { "SectorAtlasNew", "ObjectAtlasNew", "AgentAtlasNew", "FurnitureAtlasNew" })
-			require(core::atlasFamilyOf(name) == core::AtlasFamily::Replacement,
-				std::string("A replacement set did not classify as new: ") + name);
-		for (auto const* name : { "StationAtlas", "DoctorFemale1Atlas", "StationFurnitureAtlas",
-				"sectors.tiles.lua", "", "ObjectAtlasNewish", "NewObjectAtlas", "objectatlasnew" })
-			require(core::atlasFamilyOf(name) == core::AtlasFamily::Unaffiliated,
-				std::string("A name outside both families classified inside one: ") + name);
-		// No name is in both families, which is what makes the straddle test
-		// meaningful rather than trivially true.
-		require(core::atlasFamilyOf("ObjectAtlas") != core::atlasFamilyOf("ObjectAtlasNew"),
-			"The two Objects atlases classify the same, so a straddle between them cannot be detected");
 	}
 
 	void worldRoundTripsAuthoredStateAndAgents(smoke::Context const&)
 	{
 		core::World original("Serializable world", 8, 3);
-		require(original.sectorImageSetResourceName() == "SectorAtlasNew", "New World artwork must default to SectorAtlasNew");
+		require(original.sectorImageSetResourceName() == "SectorAtlas", "New World artwork must default to SectorAtlas");
 		original.setSectorImageSetResourceName("StationAtlas");
-		require(original.agentImageSetResourceName() == "AgentAtlasNew", "New Worlds must default to AgentAtlasNew");
+		require(original.agentImageSetResourceName() == "AgentAtlas", "New Worlds must default to AgentAtlas");
 		original.setAgentImageSetResourceName("CustomAgents");
-		require(original.furnitureImageSetResourceName() == "FurnitureAtlasNew", "New Worlds must default to FurnitureAtlasNew");
+		require(original.furnitureImageSetResourceName() == "FurnitureAtlas", "New Worlds must default to FurnitureAtlas");
 		original.setFurnitureImageSetResourceName("CustomFurniture");
 		// The fourth atlas selection (#1022), defaulting to its replacement set
 		// with the other three (#1023).
-		require(original.objectImageSetResourceName() == "ObjectAtlasNew",
-			"New Worlds must default to ObjectAtlasNew");
+		require(original.objectImageSetResourceName() == "ObjectAtlas",
+			"New Worlds must default to ObjectAtlas");
 		original.setObjectImageSetResourceName("CustomObjects");
 		require(original.isModified(), "Selecting sector artwork must modify the World");
 		auto const fore = original.addRoom("Fore room", 0, 0, 0, 7, 2);

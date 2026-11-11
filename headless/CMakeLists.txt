@@ -234,15 +234,6 @@ if(BUILD_TESTING)
         src/WorldRenderSlotChecks.cpp world-render-slots 30 NO_CORE)
     set_tests_properties(world-render-slots PROPERTIES LABELS "smoke;standalone;render" TIMEOUT 30)
 
-    add_executable(pf-sector-tileset-checks src/SectorTilesetChecks.cpp)
-    target_include_directories(pf-sector-tileset-checks PRIVATE ${PF_INCLUDE_DIR})
-    target_link_libraries(pf-sector-tileset-checks PRIVATE pf-render
-        pf-headless-render-support)
-    pf_apply_headless_verification_policy(pf-sector-tileset-checks)
-    add_test(NAME sector-tileset COMMAND pf-sector-tileset-checks
-        "${PF_REPO_ROOT}/resources/textures/sectors.tileset.yaml")
-    set_tests_properties(sector-tileset PROPERTIES
-        LABELS "smoke;standalone;render" TIMEOUT 30)
 endif()
 
 # --- Harness contracts -----------------------------------------------------

@@ -259,7 +259,7 @@ void renderWorldCanvas(core::World const& world, float width, float height)
 	// frame is how the game follows a live artwork change without owning
 	// the switch. All four slots go every frame: leaving one out is how the
 	// game came to draw the old Objects sheet while the World asked for
-	// `ObjectAtlasNew`, and the Objects slot is the one whose refusal
+	// the new one, and the Objects slot is the one whose refusal
 	// decides whether a Door's artwork sits inside its collision (#1026).
 	reportAtlasSelections(applyWorldAtlasSelections(world));
 	auto const commands = drawWorld(world, width, height);
