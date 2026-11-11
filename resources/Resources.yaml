@@ -224,6 +224,18 @@ Resources:
               - { name: "door-R0-V1", x: "896", y: "320", width: "128", height: "320" }
               - { name: "door-R0-V2", x: "896", y: "640", width: "128", height: "320" }
               - { name: "door-R0-V3", x: "896", y: "960", width: "128", height: "320" }
+              - { name: "door-lift-L0", x: "1024", y: "0", width: "128", height: "320" }
+              - { name: "door-lift-L0-V1", x: "1024", y: "320", width: "128", height: "320" }
+              - { name: "door-lift-L0-V2", x: "1024", y: "640", width: "128", height: "320" }
+              - { name: "door-lift-L0-V3", x: "1024", y: "960", width: "128", height: "320" }
+              - { name: "door-lift-R0", x: "1152", y: "0", width: "128", height: "320" }
+              - { name: "door-lift-R0-V1", x: "1152", y: "320", width: "128", height: "320" }
+              - { name: "door-lift-R0-V2", x: "1152", y: "640", width: "128", height: "320" }
+              - { name: "door-lift-R0-V3", x: "1152", y: "960", width: "128", height: "320" }
+              - { name: "door-shuttle-L0", x: "1280", y: "0", width: "128", height: "320" }
+              - { name: "door-shuttle-L0-V1", x: "1280", y: "320", width: "128", height: "320" }
+              - { name: "door-shuttle-L0-V2", x: "1280", y: "640", width: "128", height: "320" }
+              - { name: "door-shuttle-L0-V3", x: "1280", y: "960", width: "128", height: "320" }
               - { name: "lift-car", x: "128", y: "640", width: "115", height: "176" }
               - { name: "marker", x: "0", y: "640", width: "32", height: "44" }
               - { name: "platform-lift", x: "256", y: "640", width: "128", height: "16" }

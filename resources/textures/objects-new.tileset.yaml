@@ -36,6 +36,13 @@
 # [7,0] with its own beneath. The old `door` cell at [3,0] is left empty
 # rather than backfilled, for the same reason the free cell above is.
 #
+# #1057 added the Lift and Shuttle leaf families beside the ordinary
+# pair, which is why the sheet is eleven columns wide. They are leaves of
+# the same shape - full cell, one drawn size, translated under the same
+# aperture clip - so each takes a column the same way, and the three of
+# them land in columns 8, 9 and 10 rather than being interleaved with the
+# tiles that got there first.
+#
 # Every content rectangle below is the tile's declared drawn size measured
 # at the authored grid's pixel size, rounded to whole pixels: a tile drawn
 # 0.8 x 0.5 World units is 102 x 160 px on this 128 x 320 grid. That keeps
@@ -43,7 +50,7 @@
 # stretched on its way to the screen.
 version: 2
 image: objects-new.png
-size: [1024, 1280]
+size: [1408, 1280]
 tile_size: [128, 320]
 sprites:
   # A Walkway is `Object(cellX, cellY, 1.0, 0.0)`: deliberately zero
@@ -124,6 +131,51 @@ sprites:
   # two-cell leaf. Same contract as door-L0.
   door-R0:
     cell: [7, 0]
+    variants: 3
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+
+  # The Lift landing's own leaves (#1057). A Lift landing Door draws
+  # these rather than the ordinary pair because the Lift owns it, which is
+  # what makes a lift read as a lift at a glance. The wall it happens to
+  # be set in - Room, Corridor or Facade - never enters the choice, so
+  # the artwork is keyed by the transport and not by the surround.
+  #
+  # Same full-cell contract as the ordinary leaves: the aperture clip,
+  # not the drawn size, bounds the leaf, and one tile serves both widths.
+  # A Lift landing is OpenApart by default, so the same symmetry rule as
+  # door-L0 applies - a 1-wide landing splits this tile at the cell centre
+  # and wears both halves, and an asymmetric panel reads as two mismatched
+  # leaves with nothing to catch it.
+  door-lift-L0:
+    cell: [8, 0]
+    variants: 3
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+
+  # The right-hand leaf of a two-cell-wide Lift landing: the two cells of
+  # one joined landing leaf. A shaft is refused at build past two cells
+  # wide (#1055), so this is the widest landing the family is drawn for.
+  door-lift-R0:
+    cell: [9, 0]
+    variants: 3
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+
+  # The Shuttle hatch. One leaf, not a pair: a Shuttle landing Door is
+  # authored one cell wide, so the hatch family has no right-hand leaf and
+  # no `-R0` to author. The hatch tile stands in for both roles rather
+  # than reaching across families for art that was never drawn - a wider
+  # hatch would then read as two hatches side by side, which is a visible
+  # wrong rather than a silent one.
+  door-shuttle-L0:
+    cell: [10, 0]
     variants: 3
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]

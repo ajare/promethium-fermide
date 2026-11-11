@@ -123,6 +123,12 @@ namespace
 		// the aperture clip, not the drawn size, bounds it (#1056).
 		{ "door-L0", 1.0f, 1.0f, 128, 320, false },
 		{ "door-R0", 1.0f, 1.0f, 128, 320, false },
+		// The Lift landing and Shuttle hatch leaves are the same shape for
+		// the same reason - full cell, zero offset, clipped not scaled - and
+		// each carries three variants like the ordinary leaf (#1057).
+		{ "door-lift-L0", 1.0f, 1.0f, 128, 320, false },
+		{ "door-lift-R0", 1.0f, 1.0f, 128, 320, false },
+		{ "door-shuttle-L0", 1.0f, 1.0f, 128, 320, false },
 		{ "window-clear", 0.8f, 0.3f, 102, 96, false },
 		{ "window-frosted", 0.8f, 0.3f, 102, 96, false },
 		{ "window-tinted", 0.8f, 0.3f, 102, 96, false },
@@ -586,15 +592,17 @@ namespace
 		using smoke::require;
 		auto const atlas = loadNewObjectsAtlas(context);
 
-		// The sheet is the 8x4 grid of 128x320 cells the set is sized for.
+		// The sheet is the 11x4 grid of 128x320 cells the set is sized for.
 		// It was 6x3 until the vehicles arrived, the row has stayed since
 		// #1031 dropped the Booth Window's undrawn closed panel, and #1056
 		// widened it by two columns for the Door leaf families - each of
 		// which owns its whole column, because `-Vn` derives at `baseRow +
-		// n`. The image is sized for the art still to come, not trimmed to
-		// the tile count of the moment (#1021).
-		require(atlas.width == 1024 && atlas.height == 1280,
-			"ObjectAtlas is not the 1024x1280 sheet its set is sized for, saw "
+		// n`. #1057 took it three columns further for the Lift and Shuttle
+		// leaf families, which own their columns the same way. The image is
+		// sized for the art still to come, not trimmed to the tile count of
+		// the moment (#1021).
+		require(atlas.width == 1408 && atlas.height == 1280,
+			"ObjectAtlas is not the 1408x1280 sheet its set is sized for, saw "
 			+ std::to_string(atlas.width) + "x" + std::to_string(atlas.height));
 
 		for (auto const& tile : kTiles)
@@ -668,6 +676,56 @@ namespace
 				|| enabledTile.height != disabledTile.height,
 			"The enabled and disabled Button tiles are the same region, so the "
 			"control's state cannot be read from its artwork");
+	}
+
+	// ------------------------------------------------------------------
+	// Every leaf family carries three variants, and each variant is its own
+	// full-cell tile rather than a re-use of its base's pixels (#1057).
+	// ------------------------------------------------------------------
+	void everyLeafFamilyCarriesThreeVariants(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const atlas = loadNewObjectsAtlas(context);
+
+		// The three families the ticket names. The ordinary pair landed in
+		// #1056; the Lift pair and the Shuttle hatch are this one.
+		for (auto const* base : { "door-L0", "door-R0", "door-lift-L0",
+			"door-lift-R0", "door-shuttle-L0" })
+		{
+			auto const stated = atlas.authored.variantCounts.find(base);
+			require(stated != atlas.authored.variantCounts.end(),
+				std::string("Leaf family '") + base
+				+ "' declares no variant family, so a Door could not pick a "
+				"second picture of it");
+			require(stated->second == 3,
+				std::string("Leaf family '") + base + "' declares "
+				+ std::to_string(stated->second)
+				+ " variants, expected the three every leaf family carries");
+
+			for (int variant = 1; variant <= 3; ++variant)
+			{
+				auto const name = std::string(base) + "-V" + std::to_string(variant);
+				auto const found = atlas.authored.sprites.find(name);
+				require(found != atlas.authored.sprites.end(),
+					"Variant '" + name + "' of leaf family '" + base
+					+ "' was not derived into the sheet");
+				require(found->second.region.width == 128
+						&& found->second.region.height == 320,
+					"'" + name + "' is not a full-cell tile: "
+					+ std::to_string(found->second.region.width) + "x"
+					+ std::to_string(found->second.region.height));
+				// A variant that shares its base's pixels is the same picture
+				// twice, which is not a variant of anything.
+				auto const& baseRegion = atlas.authored.sprites.at(base).region;
+				require(found->second.region.x != baseRegion.x
+						|| found->second.region.y != baseRegion.y,
+					"'" + name + "' wears its base's pixels, so the family has "
+					"one picture and three names");
+				require(atlas.regions.count(name) > 0,
+					"'" + name + "' has no generated ImageSet entry, so the "
+					"runtime cannot install it");
+			}
+		}
 	}
 
 	// ------------------------------------------------------------------
@@ -1222,6 +1280,8 @@ void render_smoke::registerObjectArtworkNew(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "objectArtworkNew/authoredTilesAreRegistered",
 		isolated<authoredTilesAreRegisteredInObjectAtlas> });
+	checks.push_back({ "objectArtworkNew/everyLeafFamilyCarriesThreeVariants",
+		isolated<everyLeafFamilyCarriesThreeVariants> });
 	checks.push_back({ "objectArtworkNew/doorLeafSlidesUnderTheApertureOnEveryStyle",
 		isolated<doorLeafSlidesUnderTheApertureOnEveryStyle> });
 	checks.push_back({ "objectArtworkNew/aFullyOpenDoorEmitsNoLeafGeometry",

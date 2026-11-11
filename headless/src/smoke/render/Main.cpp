@@ -35,6 +35,7 @@ int main(int argc, char** argv)
 	render_smoke::registerObjectAtlasContract(checks);
 	render_smoke::registerAtlasInstallPath(checks);
 	render_smoke::registerVehicleArtworkNew(checks);
+	render_smoke::registerTransportDoorLeaves(checks);
 	render_smoke::registerAccessPanels(checks);
 	render_smoke::registerDrawOrder(checks);
 	render_smoke::registerDoorOpenApart(checks);

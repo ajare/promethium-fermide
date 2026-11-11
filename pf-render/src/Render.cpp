@@ -771,8 +771,19 @@ void renderDoorLeaves(shared_ptr<const core::Door> door, uint32_t layer,
 
 		drawnLeaves([&](DoorLeaf const& leaf, ScreenRect const& r)
 		{
-			if (!drawObjectSprite(leaf.rightLeaf ? "door-R0" : "door-L0",
-				drawList, {r.x0, r.y0}, {r.x1, r.y1},
+			// The leaf family a Door wears is chosen by what the Door
+			// *does*, not by the wall it sits in (#1057): a Lift landing
+			// set in a Corridor wall still draws the lift leaf, because
+			// the Lift owns the Door. A Shuttle hatch is authored one
+			// cell wide, so its family has no right-hand leaf and the
+			// hatch tile stands in for both roles rather than reaching
+			// across families for art nobody drew.
+			char const* tile = leaf.rightLeaf ? "door-R0" : "door-L0";
+			if (door->isLiftOwned())
+				tile = leaf.rightLeaf ? "door-lift-R0" : "door-lift-L0";
+			else if (door->isShuttleOwned())
+				tile = "door-shuttle-L0";
+			if (!drawObjectSprite(tile, drawList, {r.x0, r.y0}, {r.x1, r.y1},
 				White, Vec2{leaf.uv0.x, leaf.uv0.y},
 				Vec2{leaf.uv1.x, leaf.uv1.y}))
 				drawList->AddRectFilled({r.x0, r.y0}, {r.x1, r.y1}, doorColour);

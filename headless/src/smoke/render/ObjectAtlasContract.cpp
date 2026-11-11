@@ -145,7 +145,9 @@ namespace
 	// names them. Kept here as a list rather than derived so a tile dropped
 	// from the contract shows up as a missing name rather than as nothing.
 	std::vector<std::string> const kRequiredTiles{
-		"door-L0", "door-R0", "bulkhead-door", "access-panel",
+		"door-L0", "door-R0",
+		"door-lift-L0", "door-lift-R0", "door-shuttle-L0",
+		"bulkhead-door", "access-panel",
 		"window-clear", "window-frosted", "window-tinted",
 		"booth-window-open", "booth-window-shutter",
 		"button-enabled", "button-disabled", "marker",
@@ -251,6 +253,24 @@ namespace
 		require(near(find("door-R0").drawnWidth, 1.0f)
 				&& near(find("door-R0").drawnHeight, 1.0f),
 			"The right Door leaf expectation is not a full cell");
+		// The Lift and Shuttle leaves are leaves too: the same full cell at
+		// the same zero offset, because the same aperture clip bounds them
+		// (#1057). A Shuttle hatch has no right-hand expectation because
+		// its family has no right-hand tile.
+		require(near(find("door-lift-L0").drawnWidth, 1.0f)
+				&& near(find("door-lift-L0").drawnHeight, 1.0f),
+			"The left Lift landing leaf expectation is not a full cell");
+		require(near(find("door-lift-R0").drawnWidth, 1.0f)
+				&& near(find("door-lift-R0").drawnHeight, 1.0f),
+			"The right Lift landing leaf expectation is not a full cell");
+		require(near(find("door-shuttle-L0").drawnWidth, 1.0f)
+				&& near(find("door-shuttle-L0").drawnHeight, 1.0f),
+			"The Shuttle hatch leaf expectation is not a full cell");
+		for (auto const* absent : { "door-shuttle-R0", "door-lift-M0" })
+			for (auto const& expected : requiredObjectTiles())
+				require(!(std::string(absent) == expected.tileName),
+					std::string("The Objects contract requires '") + absent
+					+ "', which no leaf family carries");
 		require(near(find("bulkhead-door").drawnWidth, CORE_BULKHEAD_DOOR_WIDTH)
 				&& near(find("bulkhead-door").drawnHeight, CORE_CORRIDOR_HEIGHT),
 			"The Bulkhead Door expectation is not its slab width at the corridor "

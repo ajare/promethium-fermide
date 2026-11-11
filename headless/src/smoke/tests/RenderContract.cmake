@@ -169,6 +169,7 @@ set(names
     bulkheadAndPanel/forceBridgeStillRendersAsAPrimitiveLine
     bulkheadAndPanel/loaderRefusesAForceBridgeTile
     objectArtworkNew/authoredTilesAreRegistered
+    objectArtworkNew/everyLeafFamilyCarriesThreeVariants
     objectArtworkNew/doorLeafSlidesUnderTheApertureOnEveryStyle
     objectArtworkNew/aFullyOpenDoorEmitsNoLeafGeometry
     objectArtworkNew/boothWindowShutterTranslatesBehindTheStationaryFrame
@@ -202,6 +203,12 @@ set(names
     vehicleArtworkNew/platformLiftSpriteFollowsTheLiveSlab
     vehicleArtworkNew/liftCarFillsItsCellAndTracksTheCar
     vehicleArtworkNew/aSetWithoutRoleTilesKeepsItsOwnCarriageArt
+    transportDoorLeaves/liftLandingResolvesByOwnership
+    transportDoorLeaves/twoWideLiftLandingJoinsItsLeafCells
+    transportDoorLeaves/shuttleLandingResolvesToShuttleFamily
+    transportDoorLeaves/ordinaryDoorsKeepTheOrdinaryFamily
+    transportDoorLeaves/everyShippedTransportRendersItsOwnLeaf
+    transportDoorLeaves/pullingTheAtlasOutTripsTheDetector
     accessPanels/closedPresentationAndIndicators
     accessPanels/canvasCoversTheWholeFixtureWorld
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations

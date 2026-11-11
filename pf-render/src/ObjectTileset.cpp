@@ -240,6 +240,15 @@ std::vector<ObjectTileExpectation> const& requiredObjectTiles()
         // whole family instead of one per width and height (#1056).
         ObjectTileExpectation{"door-L0", 1.0f, 1.0f, {0.0f, 0.0f}},
         ObjectTileExpectation{"door-R0", 1.0f, 1.0f, {0.0f, 0.0f}},
+        // A Lift landing Door and a Shuttle hatch draw their own leaves,
+        // chosen by the transport that owns the Door rather than by the
+        // wall it sits in. Same full-cell contract as the ordinary leaf,
+        // because the same aperture clip bounds them (#1057). A Shuttle
+        // hatch is one cell wide, so its family carries no right-hand
+        // leaf and no expectation here.
+        ObjectTileExpectation{"door-lift-L0", 1.0f, 1.0f, {0.0f, 0.0f}},
+        ObjectTileExpectation{"door-lift-R0", 1.0f, 1.0f, {0.0f, 0.0f}},
+        ObjectTileExpectation{"door-shuttle-L0", 1.0f, 1.0f, {0.0f, 0.0f}},
         // A Bulkhead Door is a slab, not a doorway: its own width, spanning
         // the corridor's full height.
         ObjectTileExpectation{"bulkhead-door",

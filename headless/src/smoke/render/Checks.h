@@ -50,6 +50,7 @@ namespace render_smoke
 	void registerObjectAtlasContract(std::vector<smoke::Check>& checks);
 	void registerAtlasInstallPath(std::vector<smoke::Check>& checks);
 	void registerVehicleArtworkNew(std::vector<smoke::Check>& checks);
+	void registerTransportDoorLeaves(std::vector<smoke::Check>& checks);
 	void registerBoothWindows(std::vector<smoke::Check>& checks);
 	void registerAgentPoses(std::vector<smoke::Check>& checks);
 	void registerFontMetrics(std::vector<smoke::Check>& checks);
