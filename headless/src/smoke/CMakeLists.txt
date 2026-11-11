@@ -275,6 +275,7 @@ pf_add_smoke_module(pf-smoke-agent
         agent/WalkSpeed.cpp
         agent/Height.cpp
         agent/DoorClearance.cpp
+        agent/FacadeDoorClearance.cpp
         agent/BulkheadCrawling.cpp
         agent/IndividualProperties.cpp
         agent/AgentTypes.cpp

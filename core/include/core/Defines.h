@@ -78,8 +78,10 @@ namespace core
 #define CORE_DOOR_OPEN_CLOSE_TIME					2.0f
 #define CORE_DOOR_STAY_OPEN_TIME					5.0f
 #define CORE_DOOR_HEIGHT							(CORE_CORRIDOR_HEIGHT - 0.2f)
-// Tall Doors are available only to ordinary Doors authored in Rooms. Transport
-// landing Doors, Corridor Doors and Facade Doors always use the regular height.
+// Tall Doors are available only to ordinary Doors authored in a Room or a
+// Facade, the two walls that stand 0.9 high. Transport landing Doors and
+// Corridor Doors always use the regular height: a Corridor stands 0.7, so
+// there is no opening above its ceiling for a taller leaf to wear.
 #define CORE_DOOR_TALL_HEIGHT					0.9f
 #define CORE_DOOR_X_INSET							0.1f
 #define CORE_RESOURCE_QUEUE_SLOT_PITCH					(CORE_RESOURCE_SLOT_WIDTH + 0.1f)

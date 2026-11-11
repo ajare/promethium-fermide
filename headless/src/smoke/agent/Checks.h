@@ -26,6 +26,7 @@ namespace agent_smoke
 	void registerColour(std::vector<smoke::Check>& checks);
 	void registerWalkSpeed(std::vector<smoke::Check>& checks);
 	void registerHeight(std::vector<smoke::Check>& checks);
+	void registerFacadeDoorClearance(std::vector<smoke::Check>& checks);
 	void registerIndividualProperties(std::vector<smoke::Check>& checks);
 	void registerAgentTypes(std::vector<smoke::Check>& checks);
 	void registerNoneUsage(std::vector<smoke::Check>& checks);

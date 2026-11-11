@@ -22,6 +22,7 @@ int main(int argc, char** argv)
 	agent_smoke::registerColour(checks);
 	agent_smoke::registerWalkSpeed(checks);
 	agent_smoke::registerHeight(checks);
+	agent_smoke::registerFacadeDoorClearance(checks);
 	agent_smoke::registerIndividualProperties(checks);
 	agent_smoke::registerAgentTypes(checks);
 	agent_smoke::registerNoneUsage(checks);

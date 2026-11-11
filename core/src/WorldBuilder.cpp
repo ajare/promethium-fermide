@@ -1239,8 +1239,8 @@ namespace core
 				auto back = dynamic_pointer_cast<const Location>(sectors[1]);
 				if (!fore) return reject("A Door must be placed in a Room, Corridor or Facade on the Layer where it is authored");
 				if (options.height == Door::Height::Tall
-					&& (fore->getType() != SectorType::Location || fore->isCorridor()))
-					return reject("A tall Door is only available in a Room");
+					&& !fore->isRoom() && fore->getType() != SectorType::Facade)
+					return reject("A tall Door is only available in a Room or Facade");
 				if (liftLanding)
 				{
 					if (sectors[1]->getType() != SectorType::Lift)

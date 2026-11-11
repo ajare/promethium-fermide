@@ -2489,11 +2489,14 @@ namespace core
 			return false;
 		}
 		auto const front = getSectorAtPosition(layerIndex, (float)x + 0.5f, (float)y + 0.5f);
-		auto const room = dynamic_pointer_cast<const Location>(front);
+		auto const wall = dynamic_pointer_cast<const Location>(front);
+		// A tall opening needs a wall that stands tall enough to carry it. A
+		// Room and a Facade both do; a Corridor does not, and the refusal says
+		// so in the words the author reading it needs (#1060).
 		if (height == Door::Height::Tall
-			&& (!room || room->getType() != SectorType::Location || room->isCorridor()))
+			&& (!wall || (!wall->isRoom() && wall->getType() != SectorType::Facade)))
 		{
-			if (diagnostic) *diagnostic = "A tall Door is only available in a Room";
+			if (diagnostic) *diagnostic = "A tall Door is only available in a Room or Facade";
 			return false;
 		}
 		auto found = find_if(mConstructionRecords.rbegin(), mConstructionRecords.rend(),

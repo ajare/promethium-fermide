@@ -606,12 +606,12 @@ itself stands in, which placement refuses to share.
 The tint is the Facade's own colour rather than the Layer's. The frame is
 moulding on this wall, and this wall's colour is the Facade's.
 
-The Facade's tall frames are authored now and unreachable: a tall Door in
-a Facade is refused at authoring until #1060 admits one. They are
-authored anyway because the alternative is worse - a Facade has no base
-tile to fall back to, so a tall Facade opening with no tall frame
-authored would show a doorway with no frame at all, which is the picture
-this whole feature exists to remove.
+The Facade's tall frames were authored in #1059 ahead of the tall Facade
+Door that wears them, and #1060 admits that Door, so they reach the screen
+now. They were authored early because the alternative is worse - a Facade
+has no base tile to fall back to, so a tall Facade opening with no tall
+frame authored would show a doorway with no frame at all, which is the
+picture this whole feature exists to remove.
 
 `smoke/render/DoorframeCells.cpp` pins all of it: the 1-wide and 2-wide
 regular frames in a Room, the tall pair for a tall Door, the same three

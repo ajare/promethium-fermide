@@ -142,7 +142,7 @@ set(names
     doorframeCells/theFlatFillStillCoversEveryCellThatIsNotADoorCell
     doorframeCells/theFrameIsEmittedBeforeEveryAperture
     doorframeCells/theFrameNeverReachesAnotherThresholdsAperture
-    doorframeCells/theTallFacadeFrameIsDerivedAndCarried
+    doorframeCells/theTallFacadeFrameIsDerivedAndDrawn
     doorframeCells/aFacadeWithNoFacadeFramesAuthoredDrawsItsFill
     doorframeCells/theFrameFollowsTheFillThroughEveryStyle
     sectorTilePreview/oneTileFramesTheRectItIsGiven
@@ -222,6 +222,7 @@ set(names
     tallDoorLeaves/openUpTravelScalesWithTheTallAperture
     tallDoorLeaves/regularDoorsKeepTheRegularFamily
     tallDoorLeaves/transportLandingsNeverWearTheTallFamily
+    tallDoorLeaves/aTallFacadeDoorRendersTheTallLeaves
     tallDoorLeaves/everyShippedTallDoorRendersFromTheTallFamily
     accessPanels/closedPresentationAndIndicators
     accessPanels/canvasCoversTheWholeFixtureWorld

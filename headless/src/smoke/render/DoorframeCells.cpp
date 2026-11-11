@@ -42,8 +42,9 @@
 //   * a Facade cell that is not a door cell resolves to no tile at all and
 //     draws nothing - not the missing-art colour, because nothing was
 //     asked for;
-//   * the tall Facade frame is derived and carried now, ahead of the tall
-//     Facade Door that will wear it, which #1060 admits.
+//   * the tall Facade frame is derived, carried and drawn - #1059 authored
+//     the tall pair ahead of the tall Facade Door that wears it, and #1060
+//     admits that Door.
 //
 // The atlas is a synthetic one with every tile in its own column, so a
 // quad's tile is read back out of the UVs it sampled rather than taken on
@@ -1233,16 +1234,13 @@ namespace
 		}
 	}
 
-	// The tall Facade frame is derived and carried now, ahead of the tall
-	// Facade Door that will wear it. A tall Door in a Facade is refused at
-	// authoring until #1060 admits one, so nothing can put this tile on
-	// screen yet; what is worth pinning is the two facts that will make it
-	// draw the moment one exists - the derivation names the tall tile for a
-	// tall opening in a Facade wall, and the atlas carries that tile as an
-	// overlay and not as a surface.
-	void theTallFacadeFrameIsDerivedAndCarried(smoke::Context const&)
+	// The tall Facade frame is derived, carried and drawn. #1059 authored
+	// the tall pair ahead of the Door that wears it; #1060 admits that Door,
+	// so the tile now reaches the screen through a live tall Facade opening
+	// rather than only through the naming rule that predicted it.
+	void theTallFacadeFrameIsDerivedAndDrawn(smoke::Context const&)
 	{
-		installAtlas(true);
+		auto atlas = installAtlas(true);
 		struct Case { uint32_t cellsWide; bool rightCell; std::string want; };
 		std::vector<Case> const cases{
 			{ 1, false, "doorframe-facade-1t-L0" },
@@ -1257,25 +1255,52 @@ namespace
 				+ std::string(c.rightCell ? "right" : "left")
 				+ " cell resolves to '" + name + "'; expected " + c.want);
 			require(hasSectorTileOverlay(name), "The installed atlas carries no "
-				"tall Facade frame '" + name + "', so a tall Facade Door would "
-				"draw no frame when #1060 admits one");
+				"tall Facade frame '" + name + "'");
 			require(!hasSectorTileSurface(name), "The installed atlas answers "
 				"'is this a Sector surface' yes for the tall Facade frame '"
 				+ name + "'; a frame is not one");
 		}
-		// The refusal that keeps the tile unreachable today is a refusal and
-		// not an absence: the Facade that takes a regular Door says no to a
-		// tall one. When #1060 lifts that, this is the check to update, and
-		// the frame above is already there for the Door to wear.
-		auto scene = facadeScene(4, 1, core::Door::Height::Regular, 2);
-		core::World::CreateDoorOptions tall;
-		tall.width = 1;
-		tall.height = core::Door::Height::Tall;
-		std::string diagnostic;
-		require(!scene.world->canAddCorridorDoor(0, 0, 3, tall, &diagnostic),
-			"A tall Door in a Facade is no longer refused at authoring. That is "
-			"#1060's change; update this check to draw the tall Facade frame "
-			"instead of pinning that it cannot be reached: " + diagnostic);
+		// The live draw: a tall 1-wide Facade Door wears the tall single, and
+		// a tall 2-wide one wears the tall pair in order. A tall opening that
+		// drew the regular moulding would be the dead-space picture #1058 was
+		// written to kill, wearing a frame.
+		{
+			auto scene = facadeScene(4, 1, core::Door::Height::Tall, 2);
+			auto const grid = drawGrid(scene, atlas, kNoClip, kFacadeFill);
+			require(tileAt(grid, 2, 0) == "doorframe-facade-1t-L0",
+				"A tall 1-wide Facade Door's cell drew " + tileAt(grid, 2, 0)
+					+ "; a tall Facade opening wears the tall frame");
+			require(tileAt(grid, 1, 0) == "<nothing>"
+					&& tileAt(grid, 3, 0) == "<nothing>",
+				"A tall Facade opening framed cells its Door does not stand in");
+		}
+		{
+			auto scene = facadeScene(5, 2, core::Door::Height::Tall, 2);
+			auto const grid = drawGrid(scene, atlas, kNoClip, kFacadeFill);
+			require(tileAt(grid, 2, 0) == "doorframe-facade-2t-L0",
+				"A tall 2-wide Facade opening's left cell drew "
+				+ tileAt(grid, 2, 0));
+			require(tileAt(grid, 3, 0) == "doorframe-facade-2t-R0",
+				"A tall 2-wide Facade opening's right cell drew "
+				+ tileAt(grid, 3, 0));
+		}
+		// And the tall Facade Door keeps the flat-fill invariant the regular
+		// one has: the fill spans the whole Facade, the frame lands over it,
+		// and nothing clipped to an aperture is drawn before the frame.
+		{
+			auto scene = facadeScene(5, 2, core::Door::Height::Tall, 2);
+			auto const pass = recordFacade(scene.front, atlas);
+			require(pass.hasFrame, "The tall framed Facade drew no frame at all");
+			require(pass.fillTriangles == 2, "The tall Facade's fill came out as "
+				+ std::to_string(pass.fillTriangles)
+				+ " triangles; the fill is not narrowed for a taller Door");
+			require(pass.firstFillIndex < pass.lastFrameIndex,
+				"The tall frame came out under the fill");
+			require(pass.lastFrameIndex < pass.firstClippedIndex,
+				"A command clipped to an aperture came out before the tall frame "
+				"at index " + std::to_string(pass.lastFrameIndex) + "; a frame "
+				"drawn after an aperture can paint it out");
+		}
 	}
 
 	// A Facade drawn on an atlas that carries no Facade frames draws its
@@ -1365,8 +1390,8 @@ void render_smoke::registerDoorframeCells(std::vector<smoke::Check>& checks)
 	checks.push_back({
 		"doorframeCells/theFrameNeverReachesAnotherThresholdsAperture",
 		isolated<theFrameNeverReachesAnotherThresholdsAperture> });
-	checks.push_back({ "doorframeCells/theTallFacadeFrameIsDerivedAndCarried",
-		isolated<theTallFacadeFrameIsDerivedAndCarried> });
+	checks.push_back({ "doorframeCells/theTallFacadeFrameIsDerivedAndDrawn",
+		isolated<theTallFacadeFrameIsDerivedAndDrawn> });
 	checks.push_back({
 		"doorframeCells/aFacadeWithNoFacadeFramesAuthoredDrawsItsFill",
 		isolated<aFacadeWithNoFacadeFramesAuthoredDrawsItsFill> });

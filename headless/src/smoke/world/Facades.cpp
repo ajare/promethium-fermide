@@ -19,7 +19,9 @@
 // can be hovered and clicked; and from #52, Transit landings: every Transit
 // type - Ladder, Stairwell, Lift, Shuttle and Staircase - lands on a Facade
 // exactly as it lands on a Room, its landing Vertex is a VertexType::Location,
-// and the whole menagerie round-trips through a canonical save/load.
+// and the whole menagerie round-trips through a canonical save/load; and from
+// #1060, a tall Door is admitted by a Facade front wall and still refused by
+// a Corridor, with the refusal naming both permitted walls.
 
 #include <array>
 #include <cstdint>
@@ -36,6 +38,8 @@
 #include "core/Button.h"
 #include "core/CellDefinition.h"
 #include "core/Defines.h"
+#include "core/Door.h"
+#include "core/DoorSectorObject.h"
 #include "core/Facade.h"
 #include "core/Graph.h"
 #include "core/Location.h"
@@ -611,6 +615,86 @@ namespace
 			"The Room-side cell does not carry the Door");
 		require(!std::as_const(back).getLayer(1)->getCellDefinition(1, 0).hasObject(),
 			"The Door claimed Facade object occupancy on its destination Layer");
+	}
+
+	// A tall Door may be authored with a Facade on the front side of its
+	// Layer pair (#1060). A Facade stands the Room's 0.9 high, which is the
+	// tall opening's own height, so the wall carries it the way a Room does;
+	// a Corridor stands 0.7 and has no opening above its ceiling for a
+	// taller leaf to wear, so it keeps refusing.
+	//
+	// The refusal is checked for its words as well as its verdict. "Not a
+	// Room" is true of a Corridor and useless to the author standing in one,
+	// because it leaves the Facade - the other wall that would take the Door
+	// - unmentioned.
+	void tallDoorsAreAdmittedInAFacadeAndRefusedInACorridor()
+	{
+		core::World::CreateDoorOptions tall;
+		tall.width = 1;
+		tall.height = core::Door::Height::Tall;
+		std::string diagnostic;
+
+		// The admitted case: a Facade in front, a Room directly behind.
+		core::World facade("Tall Facade door", 8, 1);
+		facade.addLayer();
+		facade.addFacade(0, 0, 0, 4, 1);
+		facade.addRoom("Back", 1, 0, 0, 4, 1);
+		facade.finishBuild();
+		facade.pauseSimulation();
+		require(facade.canAddCorridorDoor(0, 0, 1, tall, &diagnostic),
+			("A tall Door was refused in a Facade front: " + diagnostic).c_str());
+		auto const placed = facade.addSectorDoor(0, 0, 1, tall);
+		require(placed.door.sector != nullptr, "The tall Facade Door was not authored");
+		auto const door = std::static_pointer_cast<const core::DoorSectorObject>(
+			placed.door.sector->getObject(placed.door.index))->getDoor();
+		require(door && door->getHeight() == core::Door::Height::Tall,
+			"The tall Facade Door did not carry the tall height");
+		require(std::fabs(door->getSize().y - CORE_DOOR_TALL_HEIGHT) < 0.001f,
+			"The tall Facade Door is not the tall height physically");
+		require(door->getFrontSector()->getType() == core::SectorType::Facade,
+			"The tall Door's front Sector is not the Facade it was authored in");
+
+		// A tall Door may also be edited into an existing Facade Door, which
+		// is the path the editor's Height control takes.
+		require(facade.setSectorDoorHeight(0, 0, 1, 1, core::Door::Height::Regular,
+				&diagnostic),
+			("A Facade Door could not be reset to regular height: " + diagnostic).c_str());
+		require(facade.setSectorDoorHeight(0, 0, 1, 1, core::Door::Height::Tall,
+				&diagnostic),
+			("A Facade Door could not be made tall by edit: " + diagnostic).c_str());
+
+		// The refused case: the same tall Door set into a Corridor instead.
+		core::World corridor("Tall corridor refusal", 8, 1);
+		corridor.addCorridor(0, 0, 4);
+		corridor.addCorridor(1, 0, 0, 4, 1);
+		corridor.finishBuild();
+		corridor.pauseSimulation();
+		// A regular Corridor Door to try the edit on: the refusal is about the
+		// height, not about the wall taking Doors at all.
+		core::World::CreateDoorOptions regular;
+		regular.width = 1;
+		require(corridor.canAddCorridorDoor(0, 0, 1, regular, &diagnostic),
+			("A regular Door was refused in a Corridor: " + diagnostic).c_str());
+		corridor.addSectorDoor(0, 0, 1, regular);
+		std::string corridorDiagnostic;
+		require(!corridor.canAddCorridorDoor(0, 0, 2, tall, &corridorDiagnostic),
+			"A Corridor accepted a tall Door");
+		require(corridorDiagnostic.find("Room") != std::string::npos
+				&& corridorDiagnostic.find("Facade") != std::string::npos,
+			("The Corridor refusal does not name both permitted walls: "
+				+ corridorDiagnostic).c_str());
+		require(throws([&] { corridor.addSectorDoor(0, 0, 2, tall); }),
+			"addSectorDoor did not refuse a tall Door in a Corridor");
+
+		// The edit path refuses too, in the same words.
+		std::string editDiagnostic;
+		require(!corridor.setSectorDoorHeight(0, 0, 1, 1, core::Door::Height::Tall,
+				&editDiagnostic),
+			"A Corridor Door was made tall by edit");
+		require(editDiagnostic.find("Room") != std::string::npos
+				&& editDiagnostic.find("Facade") != std::string::npos,
+			("The Corridor height-edit refusal does not name both permitted walls: "
+				+ editDiagnostic).c_str());
 	}
 
 	// Wall edits refuse the Facade itself - its perimeter is not editable -
@@ -1681,6 +1765,7 @@ void runFacadeSmokeChecks()
 	hostedObjectsAreHitTestableThroughAFacade();
 	bulkheadDoorsAreRefusedOnAFacade();
 	doorAcceptsAFacadeOnEitherSide();
+	tallDoorsAreAdmittedInAFacadeAndRefusedInACorridor();
 	wallCommandsRefuseTheFacadeButNotTowardIt();
 	theFacadeRecordRoundTrips();
 	aHandAuthoredFacadeRecordLoads();

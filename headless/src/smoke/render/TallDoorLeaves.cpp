@@ -52,6 +52,8 @@
 #include "core/AgentTagRegistryDocument.h"
 #include "core/Door.h"
 #include "core/DoorSectorObject.h"
+#include "core/Facade.h"
+#include "core/SectorType.h"
 #include "core/World.h"
 
 #include "imgui/imgui.h"
@@ -410,6 +412,36 @@ namespace
 		scene.layer = scene.door->getFrontLayer();
 		scene.what = std::string(height == core::Door::Height::Tall ? "tall" : "regular")
 			+ " " + std::to_string(width) + "-cell " + styleName(style) + " Door";
+		return scene;
+	}
+
+	// A Facade in front of a Room with one ordinary Door set into the Facade
+	// wall (#1060). The wall is the only difference from `buildOrdinaryLanding`:
+	// the leaf family is picked by the Door's height class and its ownership,
+	// never by what stands behind it, so a tall Facade Door has to draw the
+	// same tall pair a tall Room Door does.
+	DoorScene buildFacadeLanding(uint32_t width, core::Door::Height height,
+		core::Door::OpenStyle style)
+	{
+		auto world = std::make_shared<core::World>("Facade tall Door artwork",
+			kWorldCellsWide, kWorldLevelsHigh);
+		world->addFacade("Front", 0, 0, 0, kWorldCellsWide, 1,
+			CORE_ROOM_MAX_HEIGHT, core::Facade::defaultColour());
+		world->addRoom("Back", 1, 0, 0, kWorldCellsWide, 1);
+		core::World::CreateDoorOptions options;
+		options.width = width;
+		options.height = height;
+		options.openStyle = style;
+		auto const made = world->addSectorDoor(0, 0, 3, options);
+		world->finishBuild();
+
+		DoorScene scene;
+		scene.world = world;
+		scene.door = doorAt(made);
+		scene.layer = scene.door->getFrontLayer();
+		scene.what = std::string(height == core::Door::Height::Tall ? "tall" : "regular")
+			+ " " + std::to_string(width) + "-cell " + styleName(style)
+			+ " Facade Door";
 		return scene;
 	}
 
@@ -928,6 +960,60 @@ namespace
 	}
 
 	// ------------------------------------------------------------------
+	// A tall Door set into a Facade renders the tall leaf family (#1060).
+	//
+	// The leaf family is picked by the Door's ownership and its height
+	// class, and by nothing about the wall, so admitting a tall Door into a
+	// Facade changes nothing here - only the frame behind the leaf changes,
+	// and that is the side DoorframeCells pins. This check is the other half
+	// of "a tall Facade Door renders the tall leaf family and the Facade's
+	// tall frame", and it is what fails if the wall ever creeps into the
+	// family selection.
+	// ------------------------------------------------------------------
+	void aTallFacadeDoorRendersTheTallLeaves(smoke::Context const& context)
+	{
+		auto const atlas = installNewObjectsAtlas(context);
+		prepareCanvas();
+
+		auto const ordinary = stringsOf(kOrdinaryFamily, std::size(kOrdinaryFamily));
+		auto const lift = stringsOf(kLiftFamily, std::size(kLiftFamily));
+		auto const shuttle = stringsOf(kShuttleFamily, std::size(kShuttleFamily));
+
+		for (uint32_t width : { 1u, 2u })
+		{
+			auto const scene = buildFacadeLanding(width,
+				core::Door::Height::Tall, core::Door::OpenStyle::OpenUp);
+			require(scene.door->getHeight() == core::Door::Height::Tall,
+				scene.what + " is not Tall, so the render below proves nothing");
+			require(scene.door->getFrontSector()->getType() == core::SectorType::Facade,
+				scene.what + " was not authored with a Facade on its front side");
+			require(!scene.door->isLiftOwned() && !scene.door->isShuttleOwned(),
+				scene.what + " reports itself transport-owned");
+
+			auto const drawing = renderLanding(scene);
+			auto const quads = objectQuads(drawing, atlas.authored);
+			std::vector<std::string> expected{ "door-tall-L0" };
+			if (width >= 2u) expected.push_back("door-tall-R0");
+			wearsOnly(quads, expected, ordinary, scene.what);
+			wearsOnly(quads, expected, lift, scene.what);
+			wearsOnly(quads, expected, shuttle, scene.what);
+			require(fallbackLeafFills(drawing).empty(), scene.what
+				+ " fell back to the primitive leaf fill with the Objects atlas "
+				"installed, so its tall leaf has no artwork behind it");
+		}
+
+		// The regular Facade Door is the control: the same wall with a
+		// regular height still draws the ordinary pair, so the tall render
+		// above came from the height class and not from the Facade.
+		auto const control = buildFacadeLanding(1, core::Door::Height::Regular,
+			core::Door::OpenStyle::OpenUp);
+		auto const controlDrawing = renderLanding(control);
+		wearsOnly(objectQuads(controlDrawing, atlas.authored),
+			{ "door-L0" }, stringsOf(kTallFamily, std::size(kTallFamily)),
+			control.what);
+	}
+
+	// ------------------------------------------------------------------
 	// Every shipped tall Door renders from the tall family, on the atlas
 	// the application installs. Sweeping the bundled documents rather
 	// than one fixture is what keeps a tall Door added to any shipped
@@ -1067,6 +1153,8 @@ void render_smoke::registerTallDoorLeaves(std::vector<smoke::Check>& checks)
 		isolated<regularDoorsKeepTheRegularFamily> });
 	checks.push_back({ "tallDoorLeaves/transportLandingsNeverWearTheTallFamily",
 		isolated<transportLandingsNeverWearTheTallFamily> });
+	checks.push_back({ "tallDoorLeaves/aTallFacadeDoorRendersTheTallLeaves",
+		isolated<aTallFacadeDoorRendersTheTallLeaves> });
 	checks.push_back({ "tallDoorLeaves/everyShippedTallDoorRendersFromTheTallFamily",
 		isolated<everyShippedTallDoorRendersFromTheTallFamily> });
 }

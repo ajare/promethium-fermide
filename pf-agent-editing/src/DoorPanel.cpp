@@ -271,9 +271,14 @@ void renderDoorPanel(shared_ptr<core::World> const& world,
 			: "The opening style is authored per Door and can be changed here.");
 	}
 
+	// The Height control is offered by the wall, not by the Door: only a Room
+	// and a Facade stand tall enough to carry a 0.9 opening (#1060). A
+	// transport landing is excluded because its transport owns the opening,
+	// whatever wall it was built into.
 	auto const frontLocation = dynamic_pointer_cast<const core::Location>(door->getFrontSector());
-	bool const roomDoor = !liftOwned && !shuttleOwned && frontLocation
-		&& frontLocation->getType() == core::SectorType::Location && !frontLocation->isCorridor();
+	bool const tallDoorAllowed = !liftOwned && !shuttleOwned && frontLocation
+		&& (frontLocation->isRoom()
+			|| frontLocation->getType() == core::SectorType::Facade);
 
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	if (!liftOwned && !shuttleOwned && door->getHeight() == core::Door::Height::Regular)
@@ -305,7 +310,7 @@ void renderDoorPanel(shared_ptr<core::World> const& world,
 			ImGui::EndDisabled();
 		}
 	}
-	if (roomDoor)
+	if (tallDoorAllowed)
 	{
 		char const* const heightItems[] = { "Regular", "Tall" };
 		int heightIndex = door->getHeight() == core::Door::Height::Tall ? 1 : 0;

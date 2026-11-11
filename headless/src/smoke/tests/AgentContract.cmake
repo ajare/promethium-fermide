@@ -110,6 +110,7 @@ set(agent_checks
     bulkheadCrawlingGates
     heightRangesAreBoundedRevisionedAndPersisted
     heightAssignmentPersistenceAndConflictsMatchOtherProperties
+    facadeTallDoorClearanceMatchesTheRoomRule
     individualPropertiesOverrideTagPropertiesAndPersist
     agentTypesArmsDeclarations
     agentTypesArmsPhysicalOperations

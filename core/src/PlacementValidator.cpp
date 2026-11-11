@@ -335,9 +335,15 @@ namespace core
 
 				if (options.height == Door::Height::Tall)
 				{
-					auto const room = dynamic_pointer_cast<const Location>(mWorld.getSector(cellDef0.sectorIndex));
-					if (!room || room->getType() != SectorType::Location || room->isCorridor())
-						throw WorldException(&mWorld, format("{} - a tall Door is only available in a Room", caller));
+					// A tall opening needs a wall that can carry it. A Room and a
+					// Facade both stand 0.9 high, which is the tall Door's own
+					// height; a Corridor stands 0.7, so a 0.9 leaf would open
+					// through its ceiling. The wall is named in the refusal because
+					// the author is the one reading it, and "not a Room" says
+					// nothing about the Facade that would take the Door (#1060).
+					auto const wall = dynamic_pointer_cast<const Location>(mWorld.getSector(cellDef0.sectorIndex));
+					if (!wall || (!wall->isRoom() && wall->getType() != SectorType::Facade))
+						throw WorldException(&mWorld, format("{} - a tall Door is only available in a Room or Facade", caller));
 				}
 
 				if (cellDef1.sectorIndex == ~0u)
