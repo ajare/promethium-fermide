@@ -29,6 +29,13 @@
 # would move every other tile's pixels to buy nothing, and the sheet is
 # sized for the art that has not landed yet.
 #
+# #1056 replaced the bare `door` tile with the `door-L0` and `door-R0`
+# leaf families, which is why the sheet is eight columns wide. A leaf
+# family owns its whole column for all four rows, because `-Vn` derives at
+# `baseRow + n`: L0 sits at [6,0] with its variants at [6,1..3], R0 at
+# [7,0] with its own beneath. The old `door` cell at [3,0] is left empty
+# rather than backfilled, for the same reason the free cell above is.
+#
 # Every content rectangle below is the tile's declared drawn size measured
 # at the authored grid's pixel size, rounded to whole pixels: a tile drawn
 # 0.8 x 0.5 World units is 102 x 160 px on this 128 x 320 grid. That keeps
@@ -36,7 +43,7 @@
 # stretched on its way to the screen.
 version: 2
 image: objects-new.png
-size: [768, 1280]
+size: [1024, 1280]
 tile_size: [128, 320]
 sprites:
   # A Walkway is `Object(cellX, cellY, 1.0, 0.0)`: deliberately zero
@@ -87,25 +94,40 @@ sprites:
     drawn_size: [0.5, 0.25]
     tintable: true
 
-  # One Door tile serves all four opening styles. The style decides which
-  # way the leaf crops, not which artwork is used: an OpenLeft leaf crops
-  # from the art's left edge, an OpenRight leaf from its right, an OpenUp
-  # leaf from its bottom and an OpenApart pair from the middle out. A
-  # sliding leaf therefore crops rather than squashing into the strip of
-  # aperture it still covers.
+  # A Door leaf is a full-cell tile. The artwork fills the whole 128 x 320
+  # cell, the renderer draws it at the cell rect, translates it by the
+  # opening animation and clips it to the doorway aperture. The clip is the
+  # doorway, so a leaf cannot paint outside it, and one tile serves both
+  # widths: a 1-wide Door sees L0 across u[0.1,0.9], a 2-wide Door sees
+  # the same L0 across u[0.1,1.0]. The clip selects the band, so the art
+  # never needs a width-specific variant.
   #
-  # The declared drawn size is the regular one-cell Door's own extent:
-  # `cellsWide - 2 * CORE_DOOR_X_INSET` across a regular Door's
-  # `CORE_DOOR_HEIGHT`, which is 0.8 x 0.5 World units and 102 x 160 px
-  # on this grid. A wider or height-scaled Door draws the same art into its
-  # own shape, exactly as the Access panel draws at its authored geometry;
-  # the declared size is the reference the art is authored against, not a
-  # cap on what the object may be.
-  door:
-    cell: [3, 0]
-    content: [0, 0, 102, 160]
+  # Every leaf tile declares the same drawn size and a zero render offset -
+  # one contract value for the whole family rather than one per width and
+  # height. This replaces the old bare `door` tile, which declared the
+  # 0.8 x 0.5 aperture as its drawn size and was cropped from its own edge
+  # to animate (#1056).
+  #
+  # ART CONSTRAINT NOTHING CAN VALIDATE: a 1-wide OpenApart Door splits
+  # this single tile at the cell centre and wears both halves, so the
+  # artwork must be symmetric about u = 0.5. An asymmetric panel reads as
+  # two mismatched leaves and no loader can catch it.
+  door-L0:
+    cell: [6, 0]
+    variants: 3
+    content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
-    drawn_size: [0.8, 0.5]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+
+  # The right-hand leaf of a 2-wide Door: the right half of one joined
+  # two-cell leaf. Same contract as door-L0.
+  door-R0:
+    cell: [7, 0]
+    variants: 3
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
     tintable: false
 
   # A Button's two states are two tiles, not one tile and two tints, so

@@ -1,35 +1,44 @@
 #include "Checks.h"
+#include "DoorLeafInspection.h"
+#include "DoorLeafModel.h"
 #include "WorldDrawReplay.h"
 #include "ImGuiContext.h"
-// The real renderer's OpenLeft Door passes, for ticket #82.
+// The real renderer's OpenLeft Door passes, re-pinned against the
+// translate-under-a-clip leaf model (#1056).
 //
-// An OpenLeft Door's leaf slides toward decreasing world X: its right edge
-// tracks the open percentage, so the aperture is vacated from the right edge
-// and the back Sector is revealed right-to-left. This check drives the real
-// renderSector() - which reaches renderDoor() and the OpenLeft branch - against
-// a live ImDrawList at closed, partial, and fully open percentages, and reads
-// the vertex buffer and draw-command clip rects back:
+// An OpenLeft Door's joined leaf slides toward decreasing world X. It is
+// no longer a strip cropped from the leaf tile's own edge: each of the
+// Door's cells wears a full-cell tile, drawn at the cell rect, translated
+// by the style's animation vector and clipped to the doorway aperture.
+// The aperture is inset from the cell by CORE_DOOR_X_INSET on each side,
+// so the leaf's inner edge starts one inset outside the aperture and
+// clearing the far jamb takes the aperture width plus that inset. This
+// check drives the real renderSector() - which reaches renderDoor() and
+// the one parameterised leaf draw - against a live ImDrawList at closed,
+// partial and fully open percentages, and reads the vertex buffer and the
+// draw-command clip rects back:
 //
-//   * the Solid leaf quad spans the aperture's full height and shrinks from
-//     the right, hugging the left jamb, so it stays clipped to the full Door
-//     aperture at every percentage;
-//   * the back Sector's aperture fill is clipped from the leaf's right edge to
-//     the aperture's right edge - the visible back region grows right-to-left
-//     and fills the whole aperture at 100% open;
-//   * the wireframe pass outlines only the remaining leaf geometry and adds
-//     no solid aperture fill: no leaf-coloured or back-coloured vertices reach
-//     the draw list at all.
+//   * every leaf quad is a whole World cell, one cell wide and one Level
+//     tall, wherever it has slid to - the tile is never squashed into the
+//     strip of aperture it still covers;
+//   * the clip the leaves are painted under is the doorway itself, so a
+//     leaf cannot paint over the wall its collision stops in;
+//   * the back Sector's fill is clipped to the region the leaves have
+//     vacated, and at 0% open nothing is vacated because the leaves cover
+//     the whole doorway;
+//   * a leaf that has slid clean out of the doorway emits no geometry at
+//     all, so a fully open Door paints neither leaf nor outline.
 //
-// Everything runs headless: ImGui is created without a renderer, so no window,
-// dialog, or GPU is ever touched.
+// Everything runs headless: ImGui is created without a renderer, so no
+// window, dialog, or GPU is ever touched.
 
 #include <algorithm>
-#include <cfloat>
 #include <cmath>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "imgui/imgui.h"
 
@@ -52,99 +61,30 @@ namespace
 		if (!condition) throw std::runtime_error(message);
 	}
 
-	// The colours Render.cpp paints the OpenLeft Door with.
-	PackedColourValue const kDoorLeafColour = PackedColourValue(ImColor(64, 192, 255));      // renderDoor*'s leaf
+	// The colours Render.cpp paints an OpenLeft Door with.
+	PackedColourValue const kDoorLeafColour = PackedColourValue(ImColor(64, 192, 255));      // the leaf fill
 	PackedColourValue const kApertureFillColour = PackedColourValue(ImColor(224, 224, 255)); // BackLocationColour
 	PackedColourValue const kThresholdOutlineColour = PackedColourValue(ImColor(0, 0, 0));    // wireframe thresholds
 	// The front Room's own surface fill. Deliberately not black, so the
 	// wireframe threshold outlines stay distinguishable from it.
 	ImColor const kFrontRoomColour(192, 192, 255);
 
-	// The Door under test: a two-cell ordinary Door on Layer 0 at cell (3, 0),
-	// with a Room directly behind it on Layer 1.
+	// The Door under test: an ordinary OpenLeft Door on Layer 0 at cell
+	// (3, 0), with a Room directly behind it on Layer 1.
 	struct DoorScene
 	{
 		std::unique_ptr<core::World> world;
 		uint32_t frontSectorIndex{ 0 };
 		std::shared_ptr<core::Door> door;
 		// The Door aperture in world (cell) units.
-		float worldX0{ 0.0f }, worldX2{ 0.0f };
+		door_leaf::Rect aperture;
 	};
 
 	// ImGui without a renderer: contexts are CPU-side only, nothing reaches a
 	// window or the GPU.
 	using ImGuiGuard = headless::ScopedImGuiContext;
 
-	// The same transforms transformPosition() applies, recomputed against the
-	// current viewport settings so the checks can predict screen coordinates.
-	float toScreenX(float worldX)
-	{
-		return worldX * CORE_CELL_WIDTH_PIXELS + gUISettings.worldViewportX + gUISettings.xOffset;
-	}
-
-	float toScreenY(float worldY)
-	{
-		return gUISettings.worldViewportY + gUISettings.worldViewportHeight
-			- worldY * CORE_LEVEL_HEIGHT_PIXELS - gUISettings.yOffset;
-	}
-
-	// The leaf's right edge in world units: it slides toward decreasing X as
-	// the Door opens, so the remaining leaf always hugs the left jamb.
-	float leafRightWorldX(DoorScene const& scene)
-	{
-		auto const open = scene.door->getOpenPercentage();
-		return scene.worldX2 - open * (scene.worldX2 - scene.worldX0);
-	}
-
-	struct ColourExtent
-	{
-		float minX{ FLT_MAX }, maxX{ -FLT_MAX };
-		float minY{ FLT_MAX }, maxY{ -FLT_MAX };
-		int vertexCount{ 0 };
-
-		bool painted() const { return vertexCount > 0; }
-	};
-
-	ColourExtent extentOf(ImDrawList const* drawList, PackedColourValue colour)
-	{
-		ColourExtent extent;
-		for (int i = 0; i < drawList->VtxBuffer.Size; ++i)
-		{
-			if (drawList->VtxBuffer[i].col != colour) continue;
-			extent.minX = std::min(extent.minX, drawList->VtxBuffer[i].pos.x);
-			extent.maxX = std::max(extent.maxX, drawList->VtxBuffer[i].pos.x);
-			extent.minY = std::min(extent.minY, drawList->VtxBuffer[i].pos.y);
-			extent.maxY = std::max(extent.maxY, drawList->VtxBuffer[i].pos.y);
-			++extent.vertexCount;
-		}
-		return extent;
-	}
-
-	// The ClipRect of the draw command that first consumes a vertex of the
-	// given colour - the clip the renderer painted that fill under.
-	ImVec4 clipCovering(ImDrawList const* drawList, PackedColourValue colour)
-	{
-		for (int i = 0; i < drawList->VtxBuffer.Size; ++i)
-		{
-			if (drawList->VtxBuffer[i].col != colour) continue;
-			for (int p = 0; p < drawList->IdxBuffer.Size; ++p)
-			{
-				if (drawList->IdxBuffer[p] != static_cast<ImDrawIdx>(i)) continue;
-				for (int c = 0; c < drawList->CmdBuffer.Size; ++c)
-				{
-					auto const& cmd = drawList->CmdBuffer[c];
-					if (p >= static_cast<int>(cmd.IdxOffset)
-						&& p < static_cast<int>(cmd.IdxOffset) + static_cast<int>(cmd.ElemCount))
-						return cmd.ClipRect;
-				}
-				return ImVec4(0.0f, 0.0f, -1.0f, -1.0f);
-			}
-			return ImVec4(0.0f, 0.0f, -1.0f, -1.0f);
-		}
-		return ImVec4(0.0f, 0.0f, -1.0f, -1.0f);
-	}
-
-	DoorScene buildOpenLeftDoorScene()
+	DoorScene buildOpenLeftDoorScene(uint32_t cellsWide = 2)
 	{
 		DoorScene scene;
 		scene.world = std::make_unique<core::World>("OpenLeft door render", 8, 3);
@@ -154,7 +94,7 @@ namespace
 		world.addRoom("Back", 1, 0, 0, 7, 1);
 
 		core::World::CreateDoorOptions doorOptions;
-		doorOptions.width = 2;
+		doorOptions.width = cellsWide;
 		doorOptions.openStyle = core::Door::OpenStyle::OpenLeft;
 		auto const created = world.addSectorDoor(0, 0, 3, doorOptions);
 		world.finishBuild();
@@ -176,11 +116,13 @@ namespace
 		require(scene.door != nullptr, "The ordinary Door could not be found");
 		require(scene.door->getOpenStyle() == core::Door::OpenStyle::OpenLeft,
 			"The Door was not authored OpenLeft");
+		require(scene.door->getCellsWide() == cellsWide,
+			"The Door was not authored the width the check asked for");
 
 		core::Vector2 lo, hi;
 		scene.door->getFullShape(lo, hi);
-		scene.worldX0 = std::min(lo.x, hi.x);
-		scene.worldX2 = std::max(lo.x, hi.x);
+		scene.aperture = {std::min(lo.x, hi.x), std::min(lo.y, hi.y),
+			std::max(lo.x, hi.x), std::max(lo.y, hi.y)};
 		return scene;
 	}
 
@@ -235,13 +177,55 @@ namespace
 	void near(float actual, float expected, char const* what, float epsilon = kEpsilon)
 	{
 		require(std::abs(actual - expected) < epsilon,
-			std::string(what) + " is not where the OpenLeft geometry predicts"
+			std::string(what) + " is not where the OpenLeft leaf model predicts"
 			+ " (expected " + std::to_string(expected) + ", got " + std::to_string(actual) + ")");
 	}
 
-	// Solid pass at a given percentage: the leaf hugs the left jamb and spans
-	// the aperture's full height; the back Sector's fill is clipped from the
-	// leaf's right edge to the aperture's right edge.
+	void nearBox(door_leaf::ScreenBox const& actual, door_leaf::ScreenBox const& expected,
+		std::string const& what, float epsilon = kEpsilon)
+	{
+		near(actual.left, expected.left, (what + " left edge").c_str(), epsilon);
+		near(actual.top, expected.top, (what + " top edge").c_str(), epsilon);
+		near(actual.right, expected.right, (what + " right edge").c_str(), epsilon);
+		near(actual.bottom, expected.bottom, (what + " bottom edge").c_str(), epsilon);
+	}
+
+	// The leaf quads the renderer emitted, matched one-for-one against the
+	// leaves the model says are still inside the doorway. Each one is a whole
+	// World cell, and each one was painted under the doorway's own clip.
+	void checkLeafQuads(std::vector<door_leaf::ScreenBox> const& quads,
+		door_leaf::Plan const& model, std::string const& pass)
+	{
+		auto const drawn = model.drawn();
+		require(quads.size() == drawn.size(),
+			pass + " painted " + std::to_string(quads.size())
+			+ " leaf quads, the model says " + std::to_string(drawn.size())
+			+ " leaves are still inside the doorway");
+
+		for (auto const& leaf : drawn)
+		{
+			auto const expected = door_leaf::project(leaf.slid());
+			auto const found = std::find_if(quads.begin(), quads.end(),
+				[&](door_leaf::ScreenBox const& q)
+				{
+					return std::abs(q.left - expected.left) < kEpsilon
+						&& std::abs(q.right - expected.right) < kEpsilon;
+				});
+			require(found != quads.end(),
+				pass + " painted no leaf quad where the model puts one at "
+				+ std::to_string(expected.left) + " -> " + std::to_string(expected.right));
+			// A full-cell tile drawn at its cell rect: one World cell wide
+			// and one Level tall, however far it has slid.
+			near(found->width(), CORE_CELL_WIDTH_PIXELS,
+				(pass + " leaf quad is not one cell wide").c_str());
+			near(found->height(), CORE_LEVEL_HEIGHT_PIXELS,
+				(pass + " leaf quad is not one Level tall").c_str());
+		}
+	}
+
+	// Solid pass at a given percentage: the leaf cells are whole cells
+	// painted under the doorway clip, and the back Sector's fill is clipped
+	// to the region they have vacated.
 	void checkSolidPass(float openPct)
 	{
 		ImGuiGuard imgui;
@@ -251,32 +235,49 @@ namespace
 
 		renderPass(scene, LayerRenderStyle::Solid, drawList);
 
-		auto const leafRight = leafRightWorldX(scene);
-		auto const apertureTop = toScreenY(CORE_DOOR_HEIGHT);
-		auto const apertureBottom = toScreenY(0.0f);
+		auto const model = door_leaf::plan(scene.door->getCellsWide(), scene.aperture,
+			core::Door::OpenStyle::OpenLeft, scene.door->getOpenPercentage());
+		auto const apertureBox = door_leaf::project(scene.aperture);
 
-		// The leaf: solid quad from the left jamb to its sliding right edge,
-		// over the full aperture height - never outside the aperture.
-		auto const leaf = extentOf(drawList, kDoorLeafColour);
-		require(leaf.painted(), "the Solid pass painted no Door leaf");
-		near(leaf.minX, toScreenX(scene.worldX0), "the leaf's left edge");
-		near(leaf.maxX, toScreenX(leafRight), "the leaf's sliding right edge");
-		near(leaf.minY, apertureTop, "the leaf's top edge");
-		near(leaf.maxY, apertureBottom, "the leaf's bottom edge");
+		auto const quads = door_leaf::filledRectsOf(drawList, kDoorLeafColour);
+		require(quads.empty() == model.drawn().empty(),
+			"the Solid pass and the leaf model disagree about whether any leaf is drawn");
+		checkLeafQuads(quads, model, "the Solid pass");
 
-		// The back Sector's aperture fill: clipped to the vacated region only.
-		// Its visible width grows from zero at closed to the whole aperture at
-		// fully open, always anchored to the aperture's right edge.
-		auto const back = extentOf(drawList, kApertureFillColour);
-		require(back.painted(), "no aperture fill reached the Sector behind");
-		auto const clip = clipCovering(drawList, kApertureFillColour);
-		near(clip.x, toScreenX(leafRight), "the aperture clip's left edge");
-		near(clip.z, toScreenX(scene.worldX2), "the aperture clip's right edge");
-		near(clip.y, apertureTop, "the aperture clip's top edge");
-		near(clip.w, apertureBottom, "the aperture clip's bottom edge");
+		// The clip the leaves were painted under is the doorway itself, so a
+		// leaf cannot paint over the wall its collision stops in.
+		if (!quads.empty())
+		{
+			auto const leafClip = door_leaf::clipCovering(drawList, kDoorLeafColour);
+			near(leafClip.x, apertureBox.left, "the leaf clip's left edge");
+			near(leafClip.z, apertureBox.right, "the leaf clip's right edge");
+			near(leafClip.y, apertureBox.top, "the leaf clip's top edge");
+			near(leafClip.w, apertureBox.bottom, "the leaf clip's bottom edge");
+		}
+
+		// The back Sector's aperture fill: the Door clips it to the vacated
+		// region only, which grows from nothing at closed to the whole
+		// aperture at fully open. With nothing vacated the Door issues no
+		// reveal draw at all, and what is asserted instead is that the leaves
+		// cover the doorway completely - which is why there is nothing to
+		// reveal.
+		auto const expectedReveal = model.reveal.intersect(scene.aperture);
+		if (expectedReveal.empty())
+		{
+			nearBox(door_leaf::project(model.covered()), apertureBox,
+				"a closed Door's leaves over its doorway");
+			return;
+		}
+
+		auto const expectedBox = door_leaf::project(expectedReveal);
+		auto const clip = door_leaf::clipCovering(drawList, kApertureFillColour);
+		near(clip.x, expectedBox.left, "the aperture clip's left edge");
+		near(clip.z, expectedBox.right, "the aperture clip's right edge");
+		near(clip.y, expectedBox.top, "the aperture clip's top edge");
+		near(clip.w, expectedBox.bottom, "the aperture clip's bottom edge");
 	}
 
-	// Fully open: the leaf has slid off the aperture's left jamb and paints no
+	// Fully open: every leaf has slid clean out of the doorway and paints no
 	// fill at all; the back Sector's clip covers the whole aperture.
 	void checkFullyOpenSolidPass()
 	{
@@ -287,23 +288,22 @@ namespace
 
 		renderPass(scene, LayerRenderStyle::Solid, drawList);
 
-		require(!extentOf(drawList, kDoorLeafColour).painted(),
-			"the fully-open Solid pass painted a degenerate Door leaf");
+		require(!door_leaf::extentOf(drawList, kDoorLeafColour).painted(),
+			"the fully-open Solid pass painted a leaf that has slid clean out of the doorway");
 
-		auto const apertureTop = toScreenY(CORE_DOOR_HEIGHT);
-		auto const apertureBottom = toScreenY(0.0f);
-
-		auto const back = extentOf(drawList, kApertureFillColour);
+		auto const apertureBox = door_leaf::project(scene.aperture);
+		auto const back = door_leaf::extentOf(drawList, kApertureFillColour);
 		require(back.painted(), "no aperture fill reached the Sector behind");
-		auto const clip = clipCovering(drawList, kApertureFillColour);
-		near(clip.x, toScreenX(scene.worldX0), "the aperture clip's left edge");
-		near(clip.z, toScreenX(scene.worldX2), "the aperture clip's right edge");
-		near(clip.y, apertureTop, "the aperture clip's top edge");
-		near(clip.w, apertureBottom, "the aperture clip's bottom edge");
+		auto const clip = door_leaf::clipCovering(drawList, kApertureFillColour);
+		near(clip.x, apertureBox.left, "the aperture clip's left edge");
+		near(clip.z, apertureBox.right, "the aperture clip's right edge");
+		near(clip.y, apertureBox.top, "the aperture clip's top edge");
+		near(clip.w, apertureBox.bottom, "the aperture clip's bottom edge");
 	}
 
-	// Wireframe pass at a given percentage: the remaining leaf is outlined and
-	// nothing is filled - no leaf colour, no back Sector colour.
+	// Wireframe pass at a given percentage: the leaves still inside the
+	// doorway are outlined as whole cells and nothing is filled - no leaf
+	// colour, no back Sector colour.
 	void checkWireframePass(float openPct)
 	{
 		ImGuiGuard imgui;
@@ -313,28 +313,122 @@ namespace
 
 		renderPass(scene, LayerRenderStyle::Wireframe, drawList);
 
-		auto const leafRight = leafRightWorldX(scene);
+		auto const model = door_leaf::plan(scene.door->getCellsWide(), scene.aperture,
+			core::Door::OpenStyle::OpenLeft, scene.door->getOpenPercentage());
 
-		auto const outline = extentOf(drawList, kThresholdOutlineColour);
-		require(outline.painted(), "the wireframe pass drew no Door outline");
-		near(outline.minX, toScreenX(scene.worldX0), "the outlined leaf's left edge",
-			kWireframeEpsilon);
-		near(outline.maxX, toScreenX(leafRight), "the outlined leaf's sliding right edge",
-			kWireframeEpsilon);
-		near(outline.minY, toScreenY(CORE_DOOR_HEIGHT), "the outlined leaf's top edge",
-			kWireframeEpsilon);
-		near(outline.maxY, toScreenY(0.0f), "the outlined leaf's bottom edge",
-			kWireframeEpsilon);
+		// An outlined rect carries more than four vertices once its
+		// anti-aliasing is counted, so the wireframe pass is asserted as the
+		// extent the outlines cover rather than as separate quads.
+		auto const outline = door_leaf::extentOf(drawList, kThresholdOutlineColour);
+		require(outline.painted() == !model.drawn().empty(),
+			"the wireframe pass and the leaf model disagree about whether any leaf is outlined");
+		if (!model.drawn().empty())
+		{
+			auto const expected = door_leaf::project(model.slidUnion());
+			near(outline.minX, expected.left, "the outlined leaves' left edge",
+				kWireframeEpsilon);
+			near(outline.maxX, expected.right, "the outlined leaves' right edge",
+				kWireframeEpsilon);
+			near(outline.minY, expected.top, "the outlined leaves' top edge",
+				kWireframeEpsilon);
+			near(outline.maxY, expected.bottom, "the outlined leaves' bottom edge",
+				kWireframeEpsilon);
+		}
 
-		require(!extentOf(drawList, kDoorLeafColour).painted(),
+		require(!door_leaf::extentOf(drawList, kDoorLeafColour).painted(),
 			"the wireframe pass filled the leaf solid");
-		require(!extentOf(drawList, kApertureFillColour).painted(),
+		require(!door_leaf::extentOf(drawList, kApertureFillColour).painted(),
 			"the wireframe pass filled the aperture");
 	}
 
-	// Fully open: the leaf has slid off the aperture's left jamb, so the
-	// wireframe pass outlines nothing at all - no stroked zero-width rectangle
-	// at the jamb - and nothing is filled.
+	// A paused simulation freezes the leaf exactly where it stopped
+	// mid-travel: the artwork is a pure function of the open percentage,
+	// so ticking a paused World moves nothing. (#1056)
+	void checkPausedSimulationFreezesTheLeafMidTravel()
+	{
+		ImGuiGuard imgui;
+		auto scene = buildOpenLeftDoorScene();
+		// Half way through the first half of the travel, where both leaf
+		// cells are still inside the doorway and neither has been culled.
+		driveTo(scene, 0.25f);
+		require(scene.world->isSimulationPaused(),
+			"The fixture should be paused for a freeze check");
+
+		auto drawList = testDrawList();
+		renderPass(scene, LayerRenderStyle::Solid, drawList);
+		auto const before = door_leaf::filledRectsOf(drawList, kDoorLeafColour);
+		auto const pctBefore = scene.door->getOpenPercentage();
+		require(before.size() == 2,
+			"a mid-travel 2-wide Door should paint two leaf quads, got "
+			+ std::to_string(before.size()));
+
+		for (int tick = 0; tick < 5; ++tick) scene.world->update(0.1f);
+
+		drawList->_ResetForNewFrame();
+		renderPass(scene, LayerRenderStyle::Solid, drawList);
+		auto const after = door_leaf::filledRectsOf(drawList, kDoorLeafColour);
+
+		require(scene.door->getOpenPercentage() == pctBefore,
+			"a paused World advanced the Door's open percentage from "
+			+ std::to_string(pctBefore) + " to "
+			+ std::to_string(scene.door->getOpenPercentage()));
+		require(after.size() == before.size(),
+			"the leaf geometry changed across a paused World tick");
+		for (std::size_t i = 0; i < before.size(); ++i)
+			nearBox(after[i], before[i], "a frozen leaf quad");
+	}
+
+	// A 2-wide Door's two leaf cells join seamlessly: they meet on their
+	// shared cell edge with no gap between them and no overlap across it,
+	// so the joined leaf reads as one leaf rather than two tiles that
+	// happen to be nearby. (#1056)
+	void checkTwoLeafCellsJoinSeamlessly()
+	{
+		ImGuiGuard imgui;
+		auto scene = buildOpenLeftDoorScene(2);
+		driveTo(scene, 0.0f);
+		auto drawList = testDrawList();
+
+		renderPass(scene, LayerRenderStyle::Solid, drawList);
+
+		auto const quads = door_leaf::filledRectsOf(drawList, kDoorLeafColour);
+		require(quads.size() == 2,
+			"a closed 2-wide Door should paint two leaf quads, got "
+			+ std::to_string(quads.size()));
+
+		auto const left = std::min_element(quads.begin(), quads.end(),
+			[](door_leaf::ScreenBox const& a, door_leaf::ScreenBox const& b)
+			{ return a.left < b.left; });
+		auto const right = std::max_element(quads.begin(), quads.end(),
+			[](door_leaf::ScreenBox const& a, door_leaf::ScreenBox const& b)
+			{ return a.left < b.left; });
+
+		// The shared cell edge is where the two leaves meet: the left
+		// cell's right edge is the right cell's left edge, exactly.
+		near(left->right, right->left,
+			"the two leaf cells do not meet on their shared cell edge");
+		// Same height, same floor line: the join is edge to edge, not
+		// corner to corner.
+		near(left->top, right->top, "the two leaf cells sit at different heights");
+		near(left->bottom, right->bottom,
+			"the two leaf cells stand on different floor lines");
+
+		// Together they cover the doorway with nothing left over on either
+		// side of the join.
+		// The cells are whole cells, wider than the doorway they are clipped
+		// to, so what the join has to guarantee is that between them they
+		// cover the aperture from jamb to jamb with nothing missing at the
+		// seam.
+		auto const unionBox = door_leaf::unionOf(quads);
+		auto const apertureBox = door_leaf::project(scene.aperture);
+		require(unionBox.minX <= apertureBox.left + kEpsilon
+				&& unionBox.maxX >= apertureBox.right - kEpsilon,
+			"the joined leaves do not cover the doorway from jamb to jamb");
+	}
+
+	// Fully open: every leaf has slid clean out of the doorway, so the
+	// wireframe pass outlines nothing at all - no stroked zero-width
+	// rectangle at the jamb - and nothing is filled.
 	void checkFullyOpenWireframePass()
 	{
 		ImGuiGuard imgui;
@@ -344,11 +438,11 @@ namespace
 
 		renderPass(scene, LayerRenderStyle::Wireframe, drawList);
 
-		require(!extentOf(drawList, kThresholdOutlineColour).painted(),
+		require(!door_leaf::extentOf(drawList, kThresholdOutlineColour).painted(),
 			"the fully-open wireframe pass drew a leaf outline at the jamb");
-		require(!extentOf(drawList, kDoorLeafColour).painted(),
+		require(!door_leaf::extentOf(drawList, kDoorLeafColour).painted(),
 			"the fully-open wireframe pass filled the leaf solid");
-		require(!extentOf(drawList, kApertureFillColour).painted(),
+		require(!door_leaf::extentOf(drawList, kApertureFillColour).painted(),
 			"the fully-open wireframe pass filled the aperture");
 	}
 }
@@ -362,4 +456,6 @@ void render_smoke::registerDoorOpenLeft(std::vector<smoke::Check>& checks)
 	checks.push_back({ "doorOpenLeftWireframePassHalfOpen", isolated<[](smoke::Context const&) { checkWireframePass(0.5f); }> });
 	checks.push_back({ "doorOpenLeftFullyOpenSolidPass", isolated<[](smoke::Context const&) { checkFullyOpenSolidPass(); }> });
 	checks.push_back({ "doorOpenLeftFullyOpenWireframePass", isolated<[](smoke::Context const&) { checkFullyOpenWireframePass(); }> });
+	checks.push_back({ "doorOpenLeftPausedSimulationFreezesTheLeafMidTravel", isolated<[](smoke::Context const&) { checkPausedSimulationFreezesTheLeafMidTravel(); }> });
+	checks.push_back({ "doorOpenLeftTwoLeafCellsJoinSeamlessly", isolated<[](smoke::Context const&) { checkTwoLeafCellsJoinSeamlessly(); }> });
 }

@@ -145,7 +145,7 @@ namespace
 	// names them. Kept here as a list rather than derived so a tile dropped
 	// from the contract shows up as a missing name rather than as nothing.
 	std::vector<std::string> const kRequiredTiles{
-		"door", "bulkhead-door", "access-panel",
+		"door-L0", "door-R0", "bulkhead-door", "access-panel",
 		"window-clear", "window-frosted", "window-tinted",
 		"booth-window-open", "booth-window-shutter",
 		"button-enabled", "button-disabled", "marker",
@@ -243,10 +243,14 @@ namespace
 		};
 		auto const near = [](float a, float b) { return std::abs(a - b) < 1e-5f; };
 
-		require(near(find("door").drawnWidth, 1.0f - 2.0f * CORE_DOOR_X_INSET)
-				&& near(find("door").drawnHeight, CORE_DOOR_HEIGHT),
-			"The Door expectation is not the doorway less its x insets at the "
-			"Door height");
+		// A Door leaf is a full World cell: the clip, not the drawn size,
+		// is what keeps it inside the doorway (#1056).
+		require(near(find("door-L0").drawnWidth, 1.0f)
+				&& near(find("door-L0").drawnHeight, 1.0f),
+			"The left Door leaf expectation is not a full cell");
+		require(near(find("door-R0").drawnWidth, 1.0f)
+				&& near(find("door-R0").drawnHeight, 1.0f),
+			"The right Door leaf expectation is not a full cell");
 		require(near(find("bulkhead-door").drawnWidth, CORE_BULKHEAD_DOOR_WIDTH)
 				&& near(find("bulkhead-door").drawnHeight, CORE_CORRIDOR_HEIGHT),
 			"The Bulkhead Door expectation is not its slab width at the corridor "
@@ -296,16 +300,17 @@ namespace
 	void aMismatchedDrawnSizeIsRefused(smoke::Context const& context)
 	{
 		auto atlas = ObjectTileset::load(context.fixture(kNewObjectsTileset));
-		atlas.sprites.at("door").drawnSize = { 1.0f, 0.7f };
+		atlas.sprites.at("door-L0").drawnSize = { 1.0f, 0.7f };
 		auto const diagnostic = checkObjectAtlasContract("WideDoorAtlas",
 			atlas.sprites);
-		require(diagnostic.find("door") != std::string::npos,
-			"The drawn-size refusal does not name the Door tile: " + diagnostic);
+		require(diagnostic.find("door-L0") != std::string::npos,
+			"The drawn-size refusal does not name the Door leaf tile: " + diagnostic);
 		require(diagnostic.find("1 x 0.7") != std::string::npos
 				|| diagnostic.find("1.0 x 0.7") != std::string::npos,
 			"The drawn-size refusal does not carry the declared extent: "
 			+ diagnostic);
-		require(diagnostic.find("0.8 x 0.5") != std::string::npos,
+		require(diagnostic.find("1 x 1") != std::string::npos
+				|| diagnostic.find("1.0 x 1.0") != std::string::npos,
 			"The drawn-size refusal does not carry the expected extent: "
 			+ diagnostic);
 	}
@@ -335,7 +340,7 @@ namespace
 	{
 		auto atlas = ObjectTileset::load(context.fixture(kNewObjectsTileset));
 		atlas.sprites.erase("marker");
-		atlas.sprites.at("door").drawnSize = { 0.5f, 0.5f };
+		atlas.sprites.at("door-L0").drawnSize = { 0.5f, 0.5f };
 		atlas.sprites.at("walkway").offset = { 0.1f, 0.0f };
 		auto const diagnostic = checkObjectAtlasContract("ManyWaysAtlas",
 			atlas.sprites);

@@ -1004,7 +1004,7 @@ namespace
 		require(!furnitureSpriteSize("chair-L0").has_value(), "An empty Furniture "
 			"slot still resolves a sprite");
 		// The slot that did load is unaffected by its three empty neighbours.
-		require(objectTileArtwork("door").has_value(), "The Objects slot lost its "
+		require(objectTileArtwork("door-L0").has_value(), "The Objects slot lost its "
 			"artwork because a neighbouring slot was empty");
 	}
 
@@ -1026,7 +1026,7 @@ namespace
 				// carry the geometry and a mandatory install has to refuse.
 				for (std::size_t index = 0; index < regions.size(); ++index)
 				{
-					if (regions[index]["name"].as<std::string>() != "door") continue;
+					if (regions[index]["name"].as<std::string>() != "door-L0") continue;
 					regions.remove(index);
 					break;
 				}
@@ -1046,11 +1046,11 @@ namespace
 		require(threw, "A mandatory Objects install accepted an atlas that cannot "
 			"carry the object geometry, so start-up would draw a Door's artwork "
 			"outside the Door's collision");
-		require(message.find("door") != std::string::npos, "The mandatory refusal "
-			"does not name the missing Door tile: " + message);
+		require(message.find("door-L0") != std::string::npos, "The mandatory refusal "
+			"does not name the missing Door leaf tile: " + message);
 		require(!slots.objectDiagnostic.empty(), "The mandatory refusal left the "
 			"Objects diagnostic empty");
-		require(!objectTileArtwork("door").has_value(), "The refused Objects "
+		require(!objectTileArtwork("door-L0").has_value(), "The refused Objects "
 			"atlas was installed anyway, so the contract reported without "
 			"stopping the draw");
 	}

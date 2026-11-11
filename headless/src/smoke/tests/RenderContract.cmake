@@ -169,7 +169,7 @@ set(names
     bulkheadAndPanel/forceBridgeStillRendersAsAPrimitiveLine
     bulkheadAndPanel/loaderRefusesAForceBridgeTile
     objectArtworkNew/authoredTilesAreRegistered
-    objectArtworkNew/doorCropFollowsTheOpenFractionOnEveryStyle
+    objectArtworkNew/doorLeafSlidesUnderTheApertureOnEveryStyle
     objectArtworkNew/aFullyOpenDoorEmitsNoLeafGeometry
     objectArtworkNew/boothWindowShutterTranslatesBehindTheStationaryFrame
     objectArtworkNew/buttonStateIsLegibleAtTheDrawnSize
@@ -227,22 +227,25 @@ set(names
     aMultiBackgroundApertureCompositesEachBackgroundClipped
     aMultiBackgroundApertureSpansEveryBackgroundAndSkipsNone
     theRenderSnapshotIsDeterministic
-    doorOpenApartSolidPassWidth2Closed
-    doorOpenApartWireframePassWidth2Closed
-    doorOpenApartSolidPassWidth2HalfOpen
-    doorOpenApartWireframePassWidth2HalfOpen
-    doorOpenApartSolidPassWidth2FullyOpen
-    doorOpenApartWireframePassWidth2FullyOpen
-    doorOpenApartSolidPassWidth1Closed
-    doorOpenApartSolidPassWidth1HalfOpen
-    doorOpenApartSolidPassWidth1FullyOpen
-    doorOpenApartWireframePassWidth1HalfOpen
+    doorOpenApartSolidPassClosed
+    doorOpenApartWireframePassClosed
+    doorOpenApartSolidPassHalfOpen
+    doorOpenApartWireframePassHalfOpen
+    doorOpenApartFullyOpenSolidPass
+    doorOpenApartFullyOpenWireframePass
+    doorOpenApartSeamIsDrawnLineClosed
+    doorOpenApartSeamIsDrawnLineHalfOpen
+    doorOpenApartSeamIsDrawnLineClosedOneWide
+    doorOpenApartSeamSymmetryHalfOpen
+    doorOpenApartSeamSymmetryHalfOpenOneWide
     doorOpenLeftSolidPassClosed
     doorOpenLeftWireframePassClosed
     doorOpenLeftSolidPassHalfOpen
     doorOpenLeftWireframePassHalfOpen
     doorOpenLeftFullyOpenSolidPass
     doorOpenLeftFullyOpenWireframePass
+    doorOpenLeftPausedSimulationFreezesTheLeafMidTravel
+    doorOpenLeftTwoLeafCellsJoinSeamlessly
     extensibles/warningPreservesPosition
     escalators/brokenWarningPreservesPosition
     lifts/brokenWarningPreservesPosition

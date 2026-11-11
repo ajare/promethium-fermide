@@ -119,7 +119,10 @@ namespace
 	};
 
 	std::vector<TileExpectation> const kTiles{
-		{ "door", 0.8f, 0.5f, 102, 160, false },
+		// A Door leaf is a full World cell: the artwork fills the tile and
+		// the aperture clip, not the drawn size, bounds it (#1056).
+		{ "door-L0", 1.0f, 1.0f, 128, 320, false },
+		{ "door-R0", 1.0f, 1.0f, 128, 320, false },
 		{ "window-clear", 0.8f, 0.3f, 102, 96, false },
 		{ "window-frosted", 0.8f, 0.3f, 102, 96, false },
 		{ "window-tinted", 0.8f, 0.3f, 102, 96, false },
@@ -583,13 +586,15 @@ namespace
 		using smoke::require;
 		auto const atlas = loadNewObjectsAtlas(context);
 
-		// The sheet is the 6x4 grid of 128x320 cells the set is sized for.
-		// It was 6x3 until the vehicles arrived, and the row has stayed
-		// since #1031 dropped the Booth Window's undrawn closed panel: the
-		// image is sized for the art still to come, not trimmed to the tile
-		// count of the moment (#1021).
-		require(atlas.width == 768 && atlas.height == 1280,
-			"ObjectAtlas is not the 768x1280 sheet its set is sized for, saw "
+		// The sheet is the 8x4 grid of 128x320 cells the set is sized for.
+		// It was 6x3 until the vehicles arrived, the row has stayed since
+		// #1031 dropped the Booth Window's undrawn closed panel, and #1056
+		// widened it by two columns for the Door leaf families - each of
+		// which owns its whole column, because `-Vn` derives at `baseRow +
+		// n`. The image is sized for the art still to come, not trimmed to
+		// the tile count of the moment (#1021).
+		require(atlas.width == 1024 && atlas.height == 1280,
+			"ObjectAtlas is not the 1024x1280 sheet its set is sized for, saw "
 			+ std::to_string(atlas.width) + "x" + std::to_string(atlas.height));
 
 		for (auto const& tile : kTiles)
@@ -666,155 +671,192 @@ namespace
 	}
 
 	// ------------------------------------------------------------------
-	// The Door crops by open fraction on every style, and never squashes.
+	// The Door leaf slides under the aperture clip on every style. It is
+	// never cropped from its own edge and never squashed: the animation is
+	// a translation of a full-cell tile, and the clip does the cropping
+	// (#1056).
 	// ------------------------------------------------------------------
-	void doorCropFollowsTheOpenFractionOnEveryStyle(smoke::Context const& context)
+	void doorLeafSlidesUnderTheApertureOnEveryStyle(smoke::Context const& context)
 	{
 		using smoke::require;
 		auto const atlas = installNewObjectsAtlas(context);
 		prepareCanvas();
-		auto const& region = atlas.authored.sprites.at("door").region;
+		auto const& region = atlas.authored.sprites.at("door-L0").region;
 		auto const leftU = tileLeftU(region, atlas.width);
 		auto const rightU = tileRightU(region, atlas.width);
 		auto const topV = tileTopV(region, atlas.height);
 		auto const bottomV = tileBottomV(region, atlas.height);
 		auto const spanU = rightU - leftU;
 		auto const spanV = bottomV - topV;
+		auto const midU = leftU + spanU * 0.5f;
 
-		auto const scene = buildDoorScene("Door crop artwork");
-		auto const size = scene.door->getSize();
-		float const fullWidth = size.x * kCellWidth;
-		float const fullHeight = size.y * kLevelHeight;
+		auto const scene = buildDoorScene("Door leaf artwork");
+		core::Vector2 lo, hi;
+		scene.door->getFullShape(lo, hi);
+		float const apertureWidthPx = std::abs(hi.x - lo.x) * kCellWidth;
+		float const apertureHeightPx = std::abs(hi.y - lo.y) * kLevelHeight;
+		// The leaf's cell is the aperture widened back out by the inset on
+		// each side, so a 1-wide Door's cell is a whole 128 x 320 cell.
+		float const cellWidthPx = apertureWidthPx
+			+ 2.0f * CORE_DOOR_X_INSET * kCellWidth;
+		// A sideways leaf travels the cell span less one inset: enough to
+		// clear the far jamb from a start at the cell boundary.
+		float const sideTravelPx = (kCellWidth - CORE_DOOR_X_INSET * kCellWidth);
 
 		// No squashing: the leaf draws at the same pixels-per-texture-unit
-		// the whole tile draws at across the whole Door, in both axes. A
-		// squashed leaf changes that ratio, which is exactly what a crop must
-		// not do.
-		auto const cropsWithoutSquashing = [&](TileQuad const& leaf,
-			std::string const& style)
+		// the whole tile draws at, in both axes, however far it has slid.
+		auto const drawnWithoutSquashing = [&](TileQuad const& leaf,
+			std::string const& what)
 		{
 			require(relNear(leaf.rect.width() / (leaf.uvMaxX - leaf.uvMinX),
-					fullWidth / spanU)
+					cellWidthPx / spanU)
 					&& relNear(leaf.rect.height() / (leaf.uvMaxY - leaf.uvMinY),
-						fullHeight / spanV),
-				style + " squashed its artwork: "
+						kLevelHeight / spanV),
+				what + " squashed its artwork: "
 				+ point(leaf.rect.width() / (leaf.uvMaxX - leaf.uvMinX),
 					leaf.rect.height() / (leaf.uvMaxY - leaf.uvMinY))
-				+ " against " + point(fullWidth / spanU, fullHeight / spanV));
+				+ " against " + point(cellWidthPx / spanU, kLevelHeight / spanV));
+		};
+
+		// The whole tile's uv band, never a band cut by the open fraction.
+		auto const wearsTheWholeTile = [&](TileQuad const& leaf,
+			std::string const& what)
+		{
+			require(relNear(leaf.uvMinX, leftU, 1e-4f)
+					&& relNear(leaf.uvMaxX, rightU, 1e-4f)
+					&& relNear(leaf.uvMinY, topV, 1e-4f)
+					&& relNear(leaf.uvMaxY, bottomV, 1e-4f),
+				what + " was cropped from its own edge instead of sliding whole "
+				"under the aperture clip");
+		};
+
+		auto const render = [&](WorldDrawList& into)
+		{
+			RenderWorldScope scope(scene.world);
+			renderDoor(scene.door, 0, LayerRenderStyle::Solid, false, &into);
+		};
+
+		auto const apartHalves = [&](WorldDrawList& from)
+		{
+			return std::pair<TileQuad, TileQuad>{
+				tileQuad(from, region, atlas.width, atlas.height,
+					[&](TileQuad const& q) { return q.uvMaxX < midU + 1e-4f; }),
+				tileQuad(from, region, atlas.width, atlas.height,
+					[&](TileQuad const& q) { return q.uvMinX > midU - 1e-4f; })};
 		};
 
 		for (auto const style : { core::Door::OpenStyle::OpenUp,
 			core::Door::OpenStyle::OpenLeft, core::Door::OpenStyle::OpenRight,
 			core::Door::OpenStyle::OpenApart })
 		{
+			// Baseline: where the closed leaf sits, so the travel is read
+			// as a delta rather than re-derived from the transform.
+			driveTo(scene.door, style, 0.0f);
+			WorldDrawList closed{ { { 0, 0 }, { kCanvasWidth, kCanvasHeight } } };
+			render(closed);
+
+			float closedLeftX = 0.0f;
+			float closedTopY = 0.0f;
+
+			if (style == core::Door::OpenStyle::OpenApart)
+			{
+				// A 1-wide OpenApart Door splits its single L0 at the cell
+				// centre and wears both halves - the art constraint nothing
+				// can validate.
+				auto const halves = apartHalves(closed);
+				require(halves.first.drawn && halves.second.drawn,
+					"A closed OpenApart Door lost one of its two half leaves");
+				require(relNear(halves.first.uvMinX, leftU, 1e-4f)
+						&& relNear(halves.first.uvMaxX, midU, 1e-4f),
+					"The left OpenApart leaf does not wear the tile's left half");
+				require(relNear(halves.second.uvMinX, midU, 1e-4f)
+						&& relNear(halves.second.uvMaxX, rightU, 1e-4f),
+					"The right OpenApart leaf does not wear the tile's right half");
+				drawnWithoutSquashing(halves.first, "The left OpenApart leaf");
+				drawnWithoutSquashing(halves.second, "The right OpenApart leaf");
+				closedLeftX = halves.first.rect.left;
+			}
+			else
+			{
+				auto const leaf = tileQuad(closed, region, atlas.width, atlas.height);
+				require(leaf.drawn,
+					"A closed " + styleName(style) + " Door drew no artwork");
+				wearsTheWholeTile(leaf, "The closed " + styleName(style) + " leaf");
+				drawnWithoutSquashing(leaf,
+					"The closed " + styleName(style) + " leaf");
+				require(relNear(leaf.rect.width(), cellWidthPx)
+						&& relNear(leaf.rect.height(), kLevelHeight),
+					"The closed leaf is not drawn at its full cell rect");
+				closedLeftX = leaf.rect.left;
+				closedTopY = leaf.rect.top;
+			}
+
 			for (float const fraction : { 0.25f, 0.5f, 0.75f })
 			{
 				driveTo(scene.door, style, fraction);
 				WorldDrawList drawing{ { { 0, 0 }, { kCanvasWidth, kCanvasHeight } } };
-				RenderWorldScope scope(scene.world);
-				renderDoor(scene.door, 0, LayerRenderStyle::Solid, false, &drawing);
+				render(drawing);
 				auto const label = styleName(style) + " at "
 					+ std::to_string(fraction) + " open";
 
 				if (style == core::Door::OpenStyle::OpenApart)
 				{
-					// Two half tiles, each keeping its own half of the art at
-					// half the Door's width however far it has slid. The gap
-					// between their inner edges is the open fraction of the
-					// Door's width, which is what keeps the reveal centred.
-					auto const midU = leftU + spanU * 0.5f;
-					// The left leaf's crop ends where the tile's midline is and
-					// the right leaf's starts there, which is what tells the two
-					// apart when they wear one tile.
-					auto const left = tileQuad(drawing, region, atlas.width,
-						atlas.height, [&](TileQuad const& q)
-						{ return q.uvMaxX < midU + 1e-4f; });
-					auto const right = tileQuad(drawing, region, atlas.width,
-						atlas.height, [&](TileQuad const& q)
-						{ return q.uvMinX > midU - 1e-4f; });
-					require(left.drawn && right.drawn,
+					auto const halves = apartHalves(drawing);
+					require(halves.first.drawn && halves.second.drawn,
 						"An OpenApart Door lost one of its two leaves, " + label);
-					cropsWithoutSquashing(left, "The left OpenApart leaf");
-					cropsWithoutSquashing(right, "The right OpenApart leaf");
-					require(relNear(left.rect.width(), fullWidth * 0.5f)
-							&& relNear(right.rect.width(), fullWidth * 0.5f),
-						"An OpenApart leaf changed its width as it slid, " + label);
-					require(relNear(left.uvMaxX - left.uvMinX, spanU * 0.5f)
-							&& relNear(right.uvMaxX - right.uvMinX, spanU * 0.5f),
+					// The crop never changes: each half keeps its half of the
+					// art whatever the open percentage. The gap grows because
+					// the halves translate, not because they are re-cropped.
+					require(relNear(halves.first.uvMinX, leftU, 1e-4f)
+							&& relNear(halves.first.uvMaxX, midU, 1e-4f)
+							&& relNear(halves.second.uvMinX, midU, 1e-4f)
+							&& relNear(halves.second.uvMaxX, rightU, 1e-4f),
 						"An OpenApart leaf changed its crop as it slid, " + label);
-					require(relNear(left.uvMinX, leftU, 1e-4f)
-						&& relNear(left.uvMaxX, midU, 1e-4f),
-						"The left OpenApart leaf does not wear the tile's left half, "
-						+ label);
-					require(relNear(right.uvMinX, midU, 1e-4f)
-						&& relNear(right.uvMaxX, rightU, 1e-4f),
-						"The right OpenApart leaf does not wear the tile's right half, "
-						+ label);
-					require(relNear(right.rect.left - left.rect.right,
-							fullWidth * fraction),
-						"The OpenApart gap is not the open fraction of the Door's "
+					drawnWithoutSquashing(halves.first,
+						"The left OpenApart leaf");
+					drawnWithoutSquashing(halves.second,
+						"The right OpenApart leaf");
+					// Each half travels half the aperture width, outward.
+					require(relNear(halves.first.rect.left - closedLeftX,
+							-fraction * apertureWidthPx * 0.5f),
+						"The left OpenApart leaf did not travel half the aperture "
 						"width, " + label);
 					continue;
 				}
 
 				auto const leaf = tileQuad(drawing, region, atlas.width, atlas.height);
 				require(leaf.drawn, "The " + label + " Door drew no artwork");
-				cropsWithoutSquashing(leaf, "The " + styleName(style) + " leaf");
+				wearsTheWholeTile(leaf, "The " + label + " leaf");
+				drawnWithoutSquashing(leaf, "The " + label + " leaf");
+				// The rect never changes size - only where it sits.
+				require(relNear(leaf.rect.width(), cellWidthPx)
+						&& relNear(leaf.rect.height(), kLevelHeight),
+					"A " + styleName(style) + " leaf changed its rect as it slid, "
+					+ label);
 
 				if (style == core::Door::OpenStyle::OpenUp)
 				{
-					// The leaf retracts upward, so what is left is the top of
-					// the aperture and the bottom of the art, and the amount
-					// left is the open fraction taken off both.
-					require(relNear(leaf.rect.height() / fullHeight, 1.0f - fraction)
-							&& relNear((leaf.uvMaxY - leaf.uvMinY) / spanV,
-								1.0f - fraction),
-						"An OpenUp leaf did not crop its height by the open "
-						"fraction, " + label);
-					require(near(leaf.rect.top,
-							kCanvasHeight - size.y * kLevelHeight),
-						"An OpenUp leaf moved its top edge instead of its bottom, "
+					require(relNear(leaf.rect.top - closedTopY,
+							-fraction * apertureHeightPx),
+						"An OpenUp leaf did not travel the aperture height, "
 						+ label);
-					require(relNear(leaf.uvMaxY, bottomV, 1e-4f),
-						"An OpenUp leaf slid the artwork's bottom edge off the bottom "
-						"of what is still drawn, " + label);
-					require(relNear(leaf.uvMinY, topV + spanV * fraction),
-						"An OpenUp leaf did not crop the art's top by the open "
-						"fraction, " + label);
-					continue;
+					require(relNear(leaf.rect.left, closedLeftX),
+						"An OpenUp leaf moved sideways, which it never does, "
+						+ label);
 				}
-
-				// OpenLeft and OpenRight: a horizontal leaf, cropped along U
-				// by the open fraction and keeping its full height.
-				require(relNear(leaf.rect.width() / fullWidth, 1.0f - fraction)
-						&& relNear((leaf.uvMaxX - leaf.uvMinX) / spanU,
-							1.0f - fraction),
-					"A " + styleName(style) + " leaf did not crop its width by the "
-					"open fraction, " + label);
-				require(relNear(leaf.uvMaxY - leaf.uvMinY, spanV)
-						&& near(leaf.rect.height(), fullHeight),
-					"A " + styleName(style) + " leaf cropped its height, which it "
-					"never does, " + label);
-				if (style == core::Door::OpenStyle::OpenLeft)
+				else if (style == core::Door::OpenStyle::OpenLeft)
 				{
-					// The leaf slides toward decreasing X, so the part still
-					// inside the aperture is the art's right side: the tile's
-					// right edge stays pinned to the leaf's right edge.
-					require(relNear(leaf.uvMaxX, rightU, 1e-4f),
-						"An OpenLeft leaf lost the tile's right edge instead of "
-						"keeping it pinned, " + label);
-					require(relNear(leaf.uvMinX, leftU + spanU * fraction),
-						"An OpenLeft leaf did not crop the art's left by the open "
-						"fraction, " + label);
+					require(relNear(leaf.rect.left - closedLeftX,
+							-fraction * sideTravelPx),
+						"An OpenLeft leaf did not travel the doorway clear, "
+						+ label);
 				}
 				else
 				{
-					require(relNear(leaf.uvMinX, leftU, 1e-4f),
-						"An OpenRight leaf lost the tile's left edge instead of "
-						"keeping it pinned, " + label);
-					require(relNear(leaf.uvMaxX, rightU - spanU * fraction),
-						"An OpenRight leaf did not crop the art's right by the open "
-						"fraction, " + label);
+					require(relNear(leaf.rect.left - closedLeftX,
+							fraction * sideTravelPx),
+						"An OpenRight leaf did not travel the doorway clear, "
+						+ label);
 				}
 			}
 		}
@@ -828,7 +870,7 @@ namespace
 		using smoke::require;
 		auto const atlas = installNewObjectsAtlas(context);
 		prepareCanvas();
-		auto const& region = atlas.authored.sprites.at("door").region;
+		auto const& region = atlas.authored.sprites.at("door-L0").region;
 		// The fallback fill the renderer uses when no tile is installed. If
 		// a fully open leaf emitted this, the doorway would look shut.
 		auto const fallbackColour = packColour(64, 192, 255);
@@ -1180,8 +1222,8 @@ void render_smoke::registerObjectArtworkNew(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "objectArtworkNew/authoredTilesAreRegistered",
 		isolated<authoredTilesAreRegisteredInObjectAtlas> });
-	checks.push_back({ "objectArtworkNew/doorCropFollowsTheOpenFractionOnEveryStyle",
-		isolated<doorCropFollowsTheOpenFractionOnEveryStyle> });
+	checks.push_back({ "objectArtworkNew/doorLeafSlidesUnderTheApertureOnEveryStyle",
+		isolated<doorLeafSlidesUnderTheApertureOnEveryStyle> });
 	checks.push_back({ "objectArtworkNew/aFullyOpenDoorEmitsNoLeafGeometry",
 		isolated<aFullyOpenDoorEmitsNoLeafGeometry> });
 	checks.push_back({ "objectArtworkNew/boothWindowShutterTranslatesBehindTheStationaryFrame",

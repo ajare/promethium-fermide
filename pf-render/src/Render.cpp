@@ -479,276 +479,352 @@ void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::Wor
 }
 
 
-void renderDoorOpenUp(shared_ptr<const core::Door> door, uint32_t layer, LayerRenderStyle style, bool /* selected */, WorldDrawList* drawList)
+namespace
 {
-	core::Vector2 bounds0, bounds1, bounds2;
+// A normalised rectangle in screen pixels.
+struct ScreenRect
+{
+	float x0;
+	float y0;
+	float x1;
+	float y1;
 
-	door->getFullShape(bounds0, bounds2);
-
-	bounds1 = bounds0;
-	// The leaf travels the Door's authored physical height. Door timing scales
-	// with this distance so regular and tall OpenUp leaves have the same speed.
-	bounds1.y += door->getOpenPercentage() * door->getSize().y;
-
-	transformPosition(bounds0);
-	transformPosition(bounds1);
-	transformPosition(bounds2);
-
-	if (style == LayerRenderStyle::Solid)
+	bool empty() const
 	{
-		auto doorColour = packColour(64, 192, 255);
-		if (!drawObjectSprite("door", drawList, {bounds1.x, bounds1.y}, {bounds2.x, bounds2.y},
-			White, {0, door->getOpenPercentage()}, {1, 1}))
-			drawList->AddRectFilled({ bounds1.x, bounds1.y }, { bounds2.x, bounds2.y }, doorColour);
+		return x1 <= x0 || y1 <= y0;
+	}
+};
 
-		drawList->AddDrawCmd();
+// A normalised rectangle in World units. The render transform flips y, so
+// a rect is normalised on the way in and projected on the way out.
+struct WorldRect
+{
+	float x0;
+	float y0;
+	float x1;
+	float y1;
 
-		// ImGui clipping expects ascending Y coordinates, but we have flipped them for rendering
-		drawList->PushClipRect({ bounds1.x, bounds1.y }, { bounds2.x, bounds0.y }, true);
+	bool empty() const
+	{
+		return x1 <= x0 || y1 <= y0;
+	}
 
-		// A Door is authored on the front Layer of its pair, so index 1 is the
-		// Sector on the Layer directly behind.
-		auto backSector = door->getBackSector();
-		if (backSector)
+	// Whether this rect still covers more than `tolerance` of `o` on every
+	// axis. The tolerance is what makes a leaf that has travelled exactly
+	// to the jamb read as clean out: the arithmetic that lands an inner
+	// edge exactly on a jamb arrives a hair either side of it, and a hair
+	// is far under a tenth of a pixel at any zoom a World is drawn at.
+	// Without it a fully open Door paints a leaf sliver nobody asked for.
+	bool overlaps(WorldRect const& o, float tolerance) const
+	{
+		return x1 > o.x0 + tolerance && x0 < o.x1 - tolerance
+			&& y1 > o.y0 + tolerance && y0 < o.y1 - tolerance;
+	}
+
+	WorldRect clippedTo(WorldRect const& o) const
+	{
+		return WorldRect{max(x0, o.x0), max(y0, o.y0), min(x1, o.x1), min(y1, o.y1)};
+	}
+
+	ScreenRect projected() const
+	{
+		auto a = core::Vector2{x0, y0};
+		auto b = core::Vector2{x1, y1};
+		transformPosition(a);
+		transformPosition(b);
+		return ScreenRect{min(a.x, b.x), min(a.y, b.y), max(a.x, b.x), max(a.y, b.y)};
+	}
+};
+
+// A leaf whose remaining overlap with the doorway is no wider than this is
+// treated as clean out of it. See WorldRect::overlaps.
+constexpr float kLeafCullTolerance = 1e-4f;
+
+// One Door leaf: a full-cell tile drawn at its cell rect, translated by
+// `travel` and clipped to the doorway aperture. `uv0`/`uv1` select the
+// source band, which is the whole tile except for the two halves a
+// 1-wide OpenApart Door cuts out of a single L0 (#1056).
+struct DoorLeaf
+{
+	// Which leaf family this leaf wears. A 1-wide OpenApart Door wears
+	// both halves of L0, so this is the tile the leaf draws from rather
+	// than the side of the doorway it sits on.
+	bool rightLeaf;
+	// The cell rect the leaf is drawn at, before the travel.
+	WorldRect cell;
+	// The band of the tile the leaf wears, as fractions of the tile.
+	core::Vector2 uv0;
+	core::Vector2 uv1;
+	// The animation vector: how far the leaf has slid from its cell.
+	core::Vector2 travel;
+	// Which of the leaf's vertical edges faces the Door's centre.
+	// OpenApart draws its inner edges as visible seams, and which edge
+	// that is belongs to the leaf rather than to the travel - at 0% open
+	// the travel is zero and its sign says nothing at all.
+	bool innerEdgeIsLeft;
+
+	// Where the leaf sits once it has slid.
+	WorldRect slid() const
+	{
+		return WorldRect{cell.x0 + travel.x, cell.y0 + travel.y,
+			cell.x1 + travel.x, cell.y1 + travel.y};
+	}
+};
+
+// What a Door's opening style contributes to the one draw: the leaves to
+// draw, the doorway they clip to, and the region of it they have vacated.
+// Everything else - the clip itself, the back Sector reveal, the wireframe
+// pass - is shared (#1056).
+struct DoorLeafPlan
+{
+	WorldRect aperture;
+	std::vector<DoorLeaf> leaves;
+	WorldRect reveal;
+	// OpenApart draws each leaf's inner edge as a visible seam; the other
+	// styles have no inner edge to draw.
+	bool seamPerLeaf = false;
+};
+
+DoorLeafPlan planDoorLeaves(shared_ptr<const core::Door> const& door)
+{
+	core::Vector2 ap0, ap1;
+	door->getFullShape(ap0, ap1);
+
+	auto const openPct = door->getOpenPercentage();
+	auto const cellsWide = door->getCellsWide();
+	auto const cellsWideF = static_cast<float>(cellsWide);
+
+	auto const apLeft = min(ap0.x, ap1.x);
+	auto const apBottom = min(ap0.y, ap1.y);
+	auto const apertureWidth = max(ap0.x, ap1.x) - apLeft;
+	auto const apertureHeight = max(ap0.y, ap1.y) - apBottom;
+
+	// The aperture is the Door's own shape: inset from the cell by
+	// CORE_DOOR_X_INSET on each x side, and standing on the cell's floor.
+	// The cell rect a leaf is drawn at is therefore the aperture widened
+	// back out by that inset and carried up to a full cell.
+	auto const cellX0 = apLeft - CORE_DOOR_X_INSET;
+	auto const cellY0 = apBottom;
+
+	DoorLeafPlan plan;
+	plan.aperture = WorldRect{apLeft, apBottom, apLeft + apertureWidth,
+		apBottom + apertureHeight};
+
+	// The leaf is drawn at its whole cell - one World cell wide and one
+	// Level tall - whatever the doorway's own height. The clip, not the
+	// drawn size, is what keeps it inside the doorway, which is what lets
+	// one tile serve every Door width and every height scale.
+	auto addLeaf = [&](bool rightLeaf, float x0, float x1,
+		core::Vector2 uvA, core::Vector2 uvB, core::Vector2 travel,
+		bool innerEdgeIsLeft)
+	{
+		plan.leaves.push_back(DoorLeaf{rightLeaf, {x0, cellY0, x1, cellY0 + 1.0f},
+			uvA, uvB, travel, innerEdgeIsLeft});
+	};
+
+	// The whole-cell leaf one of the Door's own cells wears. The left cell
+	// wears L0 and every other cell R0, so a 2-wide Door draws the two
+	// cells of one joined leaf.
+	auto cellLeaf = [&](uint32_t index, core::Vector2 travel)
+	{
+		auto const x0 = cellX0 + static_cast<float>(index);
+		addLeaf(index != 0, x0, x0 + 1.0f,
+			{0.0f, 0.0f}, {1.0f, 1.0f}, travel, false);
+	};
+
+	switch (door->getOpenStyle())
+	{
+	case core::Door::OpenStyle::OpenUp:
+	{
+		// The joined leaf rises out of the aperture. Its bottom edge
+		// starts on the cell floor, which is also the aperture's bottom
+		// edge, so travelling the aperture height clears it exactly.
+		auto const travel = openPct * apertureHeight;
+		for (uint32_t i = 0; i < cellsWide; ++i)
+			cellLeaf(i, {0.0f, travel});
+
+		// What the leaf has left behind is the strip between the floor
+		// and the leaf's new bottom edge.
+		plan.reveal = WorldRect{apLeft, cellY0, apLeft + apertureWidth,
+			cellY0 + travel};
+		break;
+	}
+
+	case core::Door::OpenStyle::OpenLeft:
+	case core::Door::OpenStyle::OpenRight:
+	{
+		// The joined leaf slides sideways out of the doorway. Its inner
+		// edge starts at the cell boundary, one inset outside the
+		// aperture, so clearing the far jamb takes the aperture width
+		// plus that inset. The inset is spent entirely behind the near
+		// jamb with the clip over it, so the visible edge still travels
+		// exactly one aperture width - far jamb to near jamb - and the
+		// reveal completes at 100% open exactly as it did under the
+		// source crop. Travelling only the aperture width would leave the
+		// leaf's last inset painted across the far jamb of a Door that
+		// reads as fully open.
+		auto const travel = openPct * (apertureWidth + CORE_DOOR_X_INSET);
+		auto const sign = door->getOpenStyle() == core::Door::OpenStyle::OpenLeft
+			? -1.0f : 1.0f;
+
+		for (uint32_t i = 0; i < cellsWide; ++i)
+			cellLeaf(i, {sign * travel, 0.0f});
+
+		if (sign < 0.0f)
+			plan.reveal = WorldRect{cellX0 + cellsWideF - travel, apBottom,
+				apLeft + apertureWidth, apBottom + apertureHeight};
+		else
+			plan.reveal = WorldRect{apLeft, apBottom, cellX0 + travel,
+				apBottom + apertureHeight};
+		break;
+	}
+
+	case core::Door::OpenStyle::OpenApart:
+	{
+		// Two equal leaves split at the aperture centre and slide
+		// outward, so the gap they leave is always centred. Each travels
+		// half an aperture width, which takes a leaf's inner edge from
+		// the centre to its own jamb exactly.
+		auto const halfWidth = apertureWidth * 0.5f;
+		auto const centre = cellX0 + cellsWideF * 0.5f;
+		auto const travel = openPct * halfWidth;
+		plan.seamPerLeaf = true;
+
+		// Split the cell span at the centre. A cell the centre cuts
+		// through becomes two half-cell leaves wearing the two halves of
+		// L0 - the 1-wide case, and the reason L0's artwork has to be
+		// symmetric about u = 0.5.
+		for (uint32_t i = 0; i < cellsWide; ++i)
 		{
-			renderSector(backSector, core::layerBehind(layer), LayerRenderStyle::Aperture, false,
-				BackLocationColour, drawList);
+			auto const x0 = cellX0 + static_cast<float>(i);
+			auto const x1 = x0 + 1.0f;
+			if (x1 <= centre)
+				addLeaf(false, x0, x1, {0.0f, 0.0f}, {1.0f, 1.0f},
+					{-travel, 0.0f}, false);
+			else if (x0 >= centre)
+				addLeaf(true, x0, x1, {0.0f, 0.0f}, {1.0f, 1.0f},
+					{travel, 0.0f}, true);
+			else
+			{
+				addLeaf(false, x0, centre, {0.0f, 0.0f}, {0.5f, 1.0f},
+					{-travel, 0.0f}, false);
+				addLeaf(false, centre, x1, {0.5f, 0.0f}, {1.0f, 1.0f},
+					{travel, 0.0f}, true);
+			}
 		}
 
-		drawList->PopClipRect();
-		drawList->AddDrawCmd();
+		plan.reveal = WorldRect{centre - travel, apBottom, centre + travel,
+			apBottom + apertureHeight};
+		break;
 	}
-	else if (style == LayerRenderStyle::Wireframe)
-	{
-		drawList->AddRect({ bounds1.x, bounds1.y }, { bounds2.x, bounds2.y }, packColour(0, 0, 0));
 	}
+
+	return plan;
 }
+} // namespace
 
-
-void renderDoorOpenLeft(shared_ptr<const core::Door> door, uint32_t layer, LayerRenderStyle style, bool /* selected */, WorldDrawList* drawList)
+// Draws a Door through one parameterised draw for all four opening styles
+// (#1056).
+//
+// A leaf is a full-cell tile drawn at its cell rect, translated by the
+// style's animation vector and clipped to the doorway aperture. The clip
+// is the doorway itself, so a leaf cannot paint outside it however far it
+// travels; the translation, and not a source crop taken from the leaf's
+// own edge, is what animates it. That is what lets one tile serve both
+// widths - a 1-wide Door sees L0 across u[0.1,0.9], a 2-wide Door sees
+// the same L0 across u[0.1,1.0] - and what lets a 2-wide Door read as one
+// joined two-cell leaf rather than one stretched tile.
+//
+// The style contributes only the leaves to draw and the region they
+// vacate; see planDoorLeaves.
+void renderDoorLeaves(shared_ptr<const core::Door> door, uint32_t layer,
+	LayerRenderStyle style, WorldDrawList* drawList)
 {
-	core::Vector2 bounds0, bounds1, bounds2;
+	auto const plan = planDoorLeaves(door);
+	auto const aperture = plan.aperture.projected();
 
-	door->getFullShape(bounds0, bounds2);
+	auto const doorColour = packColour(64, 192, 255);
+	auto const seamColour = packColour(0, 0, 0);
 
-	// The leaf slides toward decreasing world X: its right edge tracks the
-	// open percentage, so the aperture is vacated from the right edge and the
-	// back Sector is revealed right-to-left.
-	bounds1 = bounds2;
-	bounds1.x -= door->getOpenPercentage() * (bounds2.x - bounds0.x);
-
-	// At 100% open the leaf has slid clean out of the aperture, so it paints
-	// neither fill nor outline - otherwise the wireframe pass would emit a
-	// stroked zero-width rectangle at the left jamb.
-	bool const leafVisible = bounds1.x > bounds0.x;
-
-	transformPosition(bounds0);
-	transformPosition(bounds1);
-	transformPosition(bounds2);
-
-	if (style == LayerRenderStyle::Solid)
+	// A leaf paints only while some part of it is still inside the
+	// doorway. Once it has slid clean out it emits no geometry at all, so
+	// a fully open Door leaves nothing for the wireframe pass to stroke a
+	// zero-width outline of.
+	auto const drawnLeaves = [&](auto&& use)
 	{
-		auto doorColour = packColour(64, 192, 255);
-		if (leafVisible && !drawObjectSprite("door", drawList,
-			{bounds0.x, bounds0.y}, {bounds1.x, bounds2.y}, White,
-			{door->getOpenPercentage(), 0}, {1, 1}))
-			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds2.y }, doorColour);
-
-		drawList->AddDrawCmd();
-
-		// The back Sector shows only through the vacated region: from the leaf's
-		// right edge to the aperture's right edge, over the full aperture height.
-		// ImGui clipping expects ascending Y coordinates, but we have flipped
-		// them for rendering.
-		drawList->PushClipRect({ bounds1.x, bounds2.y }, { bounds2.x, bounds0.y }, true);
-
-		// A Door is authored on the front Layer of its pair, so index 1 is the
-		// Sector on the Layer directly behind.
-		auto backSector = door->getBackSector();
-		if (backSector)
+		for (auto const& leaf : plan.leaves)
 		{
-			renderSector(backSector, core::layerBehind(layer), LayerRenderStyle::Aperture, false,
-				BackLocationColour, drawList);
+			if (!leaf.slid().overlaps(plan.aperture, kLeafCullTolerance))
+				continue;
+			use(leaf, leaf.slid().projected());
 		}
-
-		drawList->PopClipRect();
-		drawList->AddDrawCmd();
-	}
-	else if (style == LayerRenderStyle::Wireframe)
-	{
-		// Only the remaining leaf is outlined; the aperture carries no solid fill.
-		if (leafVisible)
-			drawList->AddRect({ bounds0.x, bounds0.y }, { bounds1.x, bounds2.y }, packColour(0, 0, 0));
-	}
-}
-
-
-void renderDoorOpenRight(shared_ptr<const core::Door> door, uint32_t layer, LayerRenderStyle style, bool /* selected */, WorldDrawList* drawList)
-{
-	core::Vector2 bounds0, bounds1, bounds2;
-
-	door->getFullShape(bounds0, bounds2);
-
-	// The leaf slides toward increasing world X: its left edge tracks the open
-	// percentage, so the aperture is vacated from the left edge and the back
-	// Sector is revealed left-to-right.
-	bounds1 = bounds0;
-	bounds1.x += door->getOpenPercentage() * (bounds2.x - bounds0.x);
-
-	// At 100% open the leaf has slid clean out of the aperture, so it paints
-	// neither fill nor outline - otherwise the wireframe pass would emit a
-	// stroked zero-width rectangle at the right jamb.
-	bool const leafVisible = bounds1.x < bounds2.x;
-
-	transformPosition(bounds0);
-	transformPosition(bounds1);
-	transformPosition(bounds2);
-
-	if (style == LayerRenderStyle::Solid)
-	{
-		auto doorColour = packColour(64, 192, 255);
-		if (leafVisible && !drawObjectSprite("door", drawList,
-			{bounds1.x, bounds0.y}, {bounds2.x, bounds2.y}, White,
-			{0, 0}, {1 - door->getOpenPercentage(), 1}))
-			drawList->AddRectFilled({ bounds1.x, bounds0.y }, { bounds2.x, bounds2.y }, doorColour);
-
-		drawList->AddDrawCmd();
-
-		// The back Sector shows only through the vacated region: from the
-		// aperture's left edge to the leaf's left edge, over the full aperture
-		// height. ImGui clipping expects ascending Y coordinates, but we have
-		// flipped them for rendering.
-		drawList->PushClipRect({ bounds0.x, bounds2.y }, { bounds1.x, bounds0.y }, true);
-
-		// A Door is authored on the front Layer of its pair, so index 1 is the
-		// Sector on the Layer directly behind.
-		auto backSector = door->getBackSector();
-		if (backSector)
-		{
-			renderSector(backSector, core::layerBehind(layer), LayerRenderStyle::Aperture, false,
-				BackLocationColour, drawList);
-		}
-
-		drawList->PopClipRect();
-		drawList->AddDrawCmd();
-	}
-	else if (style == LayerRenderStyle::Wireframe)
-	{
-		// Only the remaining leaf is outlined; the aperture carries no solid fill.
-		if (leafVisible)
-			drawList->AddRect({ bounds1.x, bounds0.y }, { bounds2.x, bounds2.y }, packColour(0, 0, 0));
-	}
-}
-
-
-void renderDoorOpenApart(shared_ptr<const core::Door> door, uint32_t layer, LayerRenderStyle style, bool /* selected */, WorldDrawList* drawList)
-{
-	core::Vector2 bounds0, bounds2;
-
-	door->getFullShape(bounds0, bounds2);
-
-	// Two equal leaves split at the aperture midpoint and slide outward: each
-	// travels half an aperture width over the open percentage, so the gap they
-	// leave is always centred and becomes the whole aperture at 100% open.
-	// Fractional midpoints are valid, so any Door width is supported.
-	auto const worldX0 = bounds0.x;
-	auto const worldX2 = bounds2.x;
-	auto const halfWidth = (worldX2 - worldX0) * 0.5f;
-	auto const midX = worldX0 + halfWidth;
-	auto const travel = door->getOpenPercentage() * halfWidth;
-
-	auto const leftLeafX0 = midX - halfWidth - travel;
-	auto const leftLeafX1 = midX - travel;
-	auto const rightLeafX0 = midX + travel;
-	auto const rightLeafX1 = midX + halfWidth + travel;
-
-	// A leaf paints only while some part of it is still inside the aperture; at
-	// 100% open both have slid clean out and the Door draws no leaf geometry.
-	bool const leftLeafVisible = leftLeafX1 > worldX0;
-	bool const rightLeafVisible = rightLeafX0 < worldX2;
-
-	transformPosition(bounds0);
-	transformPosition(bounds2);
-
-	// The transform flips Y for rendering, so bounds2 carries the aperture's top
-	// and bounds0 its bottom.  X stays linear in world units, which lets the leaf
-	// edges be projected without re-running the whole transform.
-	auto const apertureLeft = min(bounds0.x, bounds2.x);
-	auto const apertureRight = max(bounds0.x, bounds2.x);
-	auto const apertureTop = min(bounds0.y, bounds2.y);
-	auto const apertureBottom = max(bounds0.y, bounds2.y);
-	auto const screenX = [&](float worldX)
-	{
-		return apertureLeft + (worldX - worldX0) * CORE_CELL_WIDTH_PIXELS
-			* gUISettings.worldZoom;
 	};
 
 	if (style == LayerRenderStyle::Solid)
 	{
-		auto doorColour = packColour(64, 192, 255);
-		auto seamColour = packColour(0, 0, 0);
+		drawList->AddDrawCmd();
 
-		// The leaves slide out of the Door, so their fill is clipped to the full
-		// aperture and never paints over the surrounding Location.
-		drawList->PushClipRect({ apertureLeft, apertureTop }, { apertureRight, apertureBottom }, true);
+		// The clip is the doorway, so no leaf can paint over the wall its
+		// collision stops in, however far it has travelled.
+		drawList->PushClipRect({aperture.x0, aperture.y0},
+			{aperture.x1, aperture.y1}, true);
 
-		if (leftLeafVisible)
+		drawnLeaves([&](DoorLeaf const& leaf, ScreenRect const& r)
 		{
-			if (!drawObjectSprite("door", drawList, {screenX(leftLeafX0), apertureTop},
-				{screenX(leftLeafX1), apertureBottom}, White, {0, 0}, {0.5f, 1}))
-				drawList->AddRectFilled({ screenX(leftLeafX0), apertureTop },
-					{ screenX(leftLeafX1), apertureBottom }, doorColour);
-			// The inner edge is the centre seam while closed and the facing edge of
-			// the two leaves while the Door is part open.
-			drawList->AddLine({ screenX(leftLeafX1), apertureTop },
-				{ screenX(leftLeafX1), apertureBottom }, seamColour);
-		}
+			if (!drawObjectSprite(leaf.rightLeaf ? "door-R0" : "door-L0",
+				drawList, {r.x0, r.y0}, {r.x1, r.y1},
+				White, Vec2{leaf.uv0.x, leaf.uv0.y},
+				Vec2{leaf.uv1.x, leaf.uv1.y}))
+				drawList->AddRectFilled({r.x0, r.y0}, {r.x1, r.y1}, doorColour);
 
-		if (rightLeafVisible)
-		{
-			if (!drawObjectSprite("door", drawList, {screenX(rightLeafX0), apertureTop},
-				{screenX(rightLeafX1), apertureBottom}, White, {0.5f, 0}, {1, 1}))
-				drawList->AddRectFilled({ screenX(rightLeafX0), apertureTop },
-					{ screenX(rightLeafX1), apertureBottom }, doorColour);
-			drawList->AddLine({ screenX(rightLeafX0), apertureTop },
-				{ screenX(rightLeafX0), apertureBottom }, seamColour);
-		}
+			if (plan.seamPerLeaf)
+			{
+				// The inner edge is the centre seam while closed and the
+				// facing edge of the two leaves while part open. It stays
+				// a drawn primitive rather than trusting two tile edges
+				// to land on the same pixel.
+				auto const inner = leaf.innerEdgeIsLeft ? r.x0 : r.x1;
+				drawList->AddLine({inner, aperture.y0}, {inner, aperture.y1},
+					seamColour);
+			}
+		});
 
 		drawList->PopClipRect();
 		drawList->AddDrawCmd();
 
-		// The back Sector shows only through the centred gap between the two
-		// leaves: it grows symmetrically from the midpoint and fills the whole
-		// aperture at 100% open.  ImGui clipping expects ascending Y coordinates,
-		// but we have flipped them for rendering.
-		drawList->PushClipRect({ screenX(leftLeafX1), apertureTop },
-			{ screenX(rightLeafX0), apertureBottom }, true);
-
-		// A Door is authored on the front Layer of its pair, so index 1 is the
-		// Sector on the Layer directly behind.
-		auto backSector = door->getBackSector();
-		if (backSector)
+		// The back Sector shows only through the region the leaves have
+		// vacated, which is bounded by the aperture: at 0% open nothing
+		// has been vacated and the reveal is empty.
+		auto const reveal = plan.reveal.clippedTo(plan.aperture).projected();
+		if (!reveal.empty())
 		{
-			renderSector(backSector, core::layerBehind(layer), LayerRenderStyle::Aperture, false,
-				BackLocationColour, drawList);
+			drawList->PushClipRect({reveal.x0, reveal.y0},
+				{reveal.x1, reveal.y1}, true);
+
+			// A Door is authored on the front Layer of its pair, so index
+			// 1 is the Sector on the Layer directly behind.
+			auto backSector = door->getBackSector();
+			if (backSector)
+			{
+				renderSector(backSector, core::layerBehind(layer),
+					LayerRenderStyle::Aperture, false, BackLocationColour, drawList);
+			}
+
+			drawList->PopClipRect();
 		}
 
-		drawList->PopClipRect();
 		drawList->AddDrawCmd();
 	}
 	else if (style == LayerRenderStyle::Wireframe)
 	{
-		// Both remaining leaves are outlined separately, clipped to the aperture,
-		// and the aperture carries no solid fill.
-		drawList->PushClipRect({ apertureLeft, apertureTop }, { apertureRight, apertureBottom }, true);
+		drawList->AddDrawCmd();
+		drawList->PushClipRect({aperture.x0, aperture.y0},
+			{aperture.x1, aperture.y1}, true);
 
-		if (leftLeafVisible)
-			drawList->AddRect({ screenX(leftLeafX0), apertureTop },
-				{ screenX(leftLeafX1), apertureBottom }, packColour(0, 0, 0));
-
-		if (rightLeafVisible)
-			drawList->AddRect({ screenX(rightLeafX0), apertureTop },
-				{ screenX(rightLeafX1), apertureBottom }, packColour(0, 0, 0));
+		drawnLeaves([&](DoorLeaf const&, ScreenRect const& r)
+		{
+			drawList->AddRect({r.x0, r.y0}, {r.x1, r.y1}, packColour(0, 0, 0));
+		});
 
 		drawList->PopClipRect();
 		drawList->AddDrawCmd();
@@ -783,26 +859,9 @@ void renderDoor(shared_ptr<const core::Door> door, uint32_t layer, LayerRenderSt
 		return;
 	}
 
-	auto openStyle = door->getOpenStyle();
-
-	switch (openStyle)
-	{
-	case core::Door::OpenStyle::OpenUp:
-		renderDoorOpenUp(door, layer, style, selected, drawList);
-		break;
-
-	case core::Door::OpenStyle::OpenLeft:
-		renderDoorOpenLeft(door, layer, style, selected, drawList);
-		break;
-
-	case core::Door::OpenStyle::OpenRight:
-		renderDoorOpenRight(door, layer, style, selected, drawList);
-		break;
-
-	case core::Door::OpenStyle::OpenApart:
-		renderDoorOpenApart(door, layer, style, selected, drawList);
-		break;
-	}
+	// One draw serves every opening style: the style is read inside the
+	// plan, so there is no per-style dispatch left here (#1056).
+	renderDoorLeaves(door, layer, style, drawList);
 
 	if (selected)
 	{

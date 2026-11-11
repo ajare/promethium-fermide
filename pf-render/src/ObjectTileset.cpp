@@ -231,11 +231,15 @@ std::vector<ObjectTileExpectation> const& requiredObjectTiles()
     // be named by a draw call, so the review the two lists used to need is
     // a check rather than a habit.
     static std::vector<ObjectTileExpectation> const tiles{
-        // The Door leaf is the doorway itself: the cell less the door's x
-        // insets, at the door's height. Drawing it any wider would paint
-        // over the wall its collision stops in.
-        ObjectTileExpectation{"door",
-            1.0f - 2.0f * CORE_DOOR_X_INSET, CORE_DOOR_HEIGHT, {0.0f, 0.0f}},
+        // A Door leaf is a full World cell. The renderer draws it at the
+        // cell rect and clips it to the doorway aperture, so the tile's
+        // own extent is the cell rather than the aperture it slides
+        // through: the clip, not the drawn size, is what keeps the leaf
+        // off the wall. Every leaf tile carries the same drawn size and a
+        // zero offset, which is what lets one contract value cover the
+        // whole family instead of one per width and height (#1056).
+        ObjectTileExpectation{"door-L0", 1.0f, 1.0f, {0.0f, 0.0f}},
+        ObjectTileExpectation{"door-R0", 1.0f, 1.0f, {0.0f, 0.0f}},
         // A Bulkhead Door is a slab, not a doorway: its own width, spanning
         // the corridor's full height.
         ObjectTileExpectation{"bulkhead-door",
