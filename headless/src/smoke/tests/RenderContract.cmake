@@ -102,11 +102,18 @@ set(names
     sectorSurfacePerCell/everyCellIsResolvedOnceAndDrawnAtItsOwnRect
     sectorSurfacePerCell/aDifferentTilePerCellChangesThePictureNotTheGeometry
     sectorSurfacePerCell/aCellOutsideTheClipIsNeverResolved
+    sectorSurfaceBottomClip/anInteriorBottomCutDrawsTheRowThatStraddlesTheClip
+    sectorSurfaceBottomClip/aBottomCutPartWayUpARowDrawsThatRowAndSkipsOnlyWhatIsBelow
+    sectorSurfaceBottomClip/aClipBottomExactlyOnARowBoundaryIsUnchanged
+    sectorSurfaceBottomClip/aClipBottomBelowTheWholeAreaIsUnchanged
+    sectorSurfaceBottomClip/aClipCuttingTopAndBottomAtOnceCropsEachEndItsOwnWay
+    sectorSurfaceBottomClip/aVariantOnTheStraddlingRowIsDrawnAndNotSkipped
     sectorSurfaceVariants/aRecordedCellDrawsItsVariantTileAndEveryOtherCellDrawsBase
     sectorSurfaceVariants/aVariantTheAtlasDoesNotCarryFallsBackToBaseSilently
     sectorSurfaceVariants/aMissingBaseTileStillDrawsTheMissingArtMagenta
     sectorSurfaceVariants/theOldFamilyDrawsBaseOnEveryVariantCellAndKeepsTheEntries
     sectorSurfaceVariants/aVariantChangesThePictureAndNotTheGeometry
+    sectorSurfaceVariants/aVariantOnTheRowTheViewportBottomCutsStillDraws
     sectorTilePreview/oneTileFramesTheRectItIsGiven
     sectorTilePreview/anyRectFramesOneTileAndNotACellGrid
     sectorTilePreview/itIsOneTileWhereTheWorldRepeatIsFour

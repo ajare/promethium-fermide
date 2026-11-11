@@ -259,6 +259,11 @@ namespace
 	{
 		std::string tile;   // empty for a cell filled with no texture at all
 		float left{}, top{}, right{}, bottom{};
+		// The bottom edge of the clip the cell was drawn under. The scissor
+		// crops the emitted geometry here, so a cell the viewport cuts is
+		// still emitted whole and this says where it stops being on screen
+		// (#1048).
+		float clipBottom{};
 		pf::render::PackedColourValue tint{};
 		bool textured{ true };
 	};
@@ -294,12 +299,20 @@ namespace
 	// missing-art colour, which is recorded here as a cell with no tile
 	// rather than skipped, because "it drew magenta" is an answer this file
 	// has to be able to see.
+	//
+	// The clip a recorded draw runs under. Wide open by default: what these
+	// cases ask is which tile each cell wears, not what the viewport leaves
+	// out. A check that wants the viewport's bottom edge to cut a row's
+	// interior passes one that does (#1048).
+	WorldDrawList::ClipRectangle const kNoClip{ { -100000.0f, -100000.0f },
+		{ 100000.0f, 100000.0f } };
+
 	std::vector<RecordedCell> recordSurfaceCells(
 		std::shared_ptr<const core::Sector> sector, uint32_t const layer,
-		SectorTileset const& atlas)
+		SectorTileset const& atlas,
+		WorldDrawList::ClipRectangle const& clip = kNoClip)
 	{
-		WorldDrawList commands({ { -100000.0f, -100000.0f },
-			{ 100000.0f, 100000.0f } });
+		WorldDrawList commands(clip);
 		renderSector(sector, layer, LayerRenderStyle::Solid, false, kTint,
 			&commands);
 
@@ -329,6 +342,10 @@ namespace
 				"The two triangles of one surface quad were tinted differently");
 			RecordedCell cell;
 			cell.tint = first.colour;
+			cell.clipBottom = first.clip.maximum.y;
+			require(near(second.clip.maximum.y, cell.clipBottom),
+				"The two triangles of one surface quad were recorded under "
+				"different clips");
 			cell.left = cell.top = 1e9f;
 			cell.right = cell.bottom = -1e9f;
 			float uvLeft = 1e9f, uvRight = -1e9f, uvTop = 1e9f, uvBottom = -1e9f;
@@ -702,6 +719,92 @@ namespace
 				+ std::to_string(differing) + " (the third recorded variant has "
 				"no tile behind it and falls back to base)");
 	}
+
+	// The screen y of a Sector's floor line at the pinned viewport. World y
+	// runs up and screen y runs down, so the floor - the low end of the
+	// Sector's World bounds - is the larger screen y.
+	float screenFloorLine(core::Sector const& sector)
+	{
+		core::Vector2 low{}, high{};
+		sector.getBounds(low, high);
+		auto const toScreenY = [](float worldY)
+		{
+			return gUISettings.worldViewportY + gUISettings.worldViewportHeight
+				- worldY * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom
+				- gUISettings.yOffset;
+		};
+		return std::max(toScreenY(low.y), toScreenY(high.y));
+	}
+
+	// The viewport's bottom edge cutting through a row does not take the
+	// artwork with it (#1048).
+	//
+	// Scroll a World until a Room's floor line sits below the bottom of the
+	// viewport, and the lowest visible row of that Room's surface is a row
+	// the clip cuts through. The loop counts rows up from the floor line,
+	// and until #1048 it rounded the distance from the clip's bottom edge
+	// to that line up: a clip one pixel above the floor rounded to a whole
+	// cell, and the bottom row - 319 of its 320 pixels on screen - was
+	// never emitted. Once a cell could wear a variant the author painted
+	// (#1040) that stopped being a strip of missing background and became
+	// lost artwork that no test could see.
+	//
+	// Driven the way the ticket describes it: a Room with variants recorded
+	// on its bottom row, drawn through the real surface path under a clip
+	// that cuts that row. Every cell still draws, at its full World cell,
+	// carrying the clip that crops it.
+	void aVariantOnTheRowTheViewportBottomCutsStillDraws(smoke::Context const&)
+	{
+		using smoke::require;
+		pinViewport();
+		auto const atlas = installVariantAtlas();
+		auto const entries = std::vector<core::SectorSurfaceVariant>{
+			{ 0, 0, 1 }, { 1, 0, 2 } };
+		auto const fixture = authoredRoom(2, 3, entries);
+		float const cellHeight = CORE_LEVEL_HEIGHT_PIXELS
+			* gUISettings.worldZoom;
+		float const floorLine = screenFloorLine(*fixture.sector);
+		float const clipBottom = floorLine - 1.0f;
+		auto const recorded = recordSurfaceCells(fixture.sector,
+			fixture.sector->getLayerIndex(), atlas,
+			{ { -100000.0f, -100000.0f }, { 100000.0f, clipBottom } });
+
+		// Nothing was counted out of the grid: all six cells drew, each the
+		// tile the rule says it wears.
+		require(recorded.size() == 6,
+			"The viewport bottom cut left " + std::to_string(recorded.size())
+				+ " surface cells; the Room is 2 by 3 and every one of them is at "
+				"least partly above the clip");
+		matchedToGrid(fixture.sector, recorded, entries, atlas);
+
+		int straddling = 0;
+		for (auto const& cell : recorded)
+		{
+			require(near(cell.clipBottom, clipBottom),
+				"A surface cell did not carry the clip that crops it: "
+					+ describe(cell));
+			auto const level = std::lround((floorLine - cell.bottom)
+				/ cellHeight);
+			if (level != 0) continue;
+			++straddling;
+			// The row the cut lands in is emitted whole: its own bottom edge
+			// on the floor line, one full cell tall, with the scissor taking
+			// the pixel below the viewport. Shrinking the rectangle to the
+			// clip instead would stretch the tile, which is the other way to
+			// get this wrong and is what this assertion is for.
+			require(near(cell.bottom, floorLine)
+					&& near(cell.top, floorLine - cellHeight)
+					&& cell.textured && cell.tile != "room",
+				"The variant cell on the row the viewport bottom cuts drew "
+					+ describe(cell) + "; it draws whole at its own World cell "
+					"and the clip crops it, which keeps one artwork pixel to one "
+					"screen pixel");
+		}
+		require(straddling == 2,
+			"Found " + std::to_string(straddling)
+				+ " cells on the row the viewport bottom cuts; both variant cells "
+				"of the bottom row were asked for");
+	}
 }
 
 void render_smoke::registerSectorSurfaceVariants(std::vector<smoke::Check>& checks)
@@ -721,4 +824,7 @@ void render_smoke::registerSectorSurfaceVariants(std::vector<smoke::Check>& chec
 	checks.push_back(
 		{ "sectorSurfaceVariants/aVariantChangesThePictureAndNotTheGeometry",
 			isolated<aVariantChangesThePictureAndNotTheGeometry> });
+	checks.push_back(
+		{ "sectorSurfaceVariants/aVariantOnTheRowTheViewportBottomCutsStillDraws",
+			isolated<aVariantOnTheRowTheViewportBottomCutsStillDraws> });
 }

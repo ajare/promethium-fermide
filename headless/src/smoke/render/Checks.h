@@ -39,6 +39,7 @@ namespace render_smoke
 	void registerSectorAtlasNew(std::vector<smoke::Check>& checks);
 	void registerSectorSurfaceDrawContract(std::vector<smoke::Check>& checks);
 	void registerSectorSurfacePerCellResolution(std::vector<smoke::Check>& checks);
+	void registerSectorSurfaceBottomClip(std::vector<smoke::Check>& checks);
 	void registerSectorSurfaceVariants(std::vector<smoke::Check>& checks);
 	void registerSectorTilePreview(std::vector<smoke::Check>& checks);
 	void registerAgentAtlasNew(std::vector<smoke::Check>& checks);

@@ -45,6 +45,21 @@ a different tile changing the picture and never the geometry, and a cell the cli
 hides entirely never resolved at all. `drawSectorTileSurface(kind, ...)` remains as
 the same loop with one name answered for every cell.
 
+Counting rows up from the floor line is what keeps the anchor out of reach of
+the viewport, and it makes the first row worth emitting a subtraction. That
+subtraction rounded up until #1048, which rounded past the row straddling the
+clip's bottom edge: scroll a Sector until its floor line sits below the
+bottom of the viewport and its lowest visible row - 319 of its 320 pixels on
+screen - drew nothing at all. Truncation is the fix, the shape the columns
+beside it already used. The row the cut lands in is emitted at its full World
+cell sampling its whole tile, and the scissor crops it at the clip, so the
+band that reaches the screen is still one artwork pixel to one screen pixel.
+A clip bottom landing exactly on a row boundary is unchanged: the row whose
+bottom edge *is* the cut lies under the clip, not above it. `smoke/render/SectorSurfaceBottomClip.cpp`
+pins all of that, and `smoke/render/SectorSurfaceVariants.cpp` pins the part
+an author actually notices - a variant painted on that row draws rather than
+vanishing.
+
 ## SectorAtlasNew
 
 `resources/textures/sectors-new.tileset.yaml` is the version 2 authored tileset

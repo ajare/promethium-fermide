@@ -124,8 +124,14 @@ using SectorSurfaceTileResolver = std::function<std::string(
 // left edge, one cell each. Only the top row is ever shorter than a cell,
 // and it is anchored on its own bottom edge and cropped at its top at one
 // artwork pixel to one screen pixel - never stretched into the partial
-// rect. Nothing outside the draw list's clip rectangle is emitted, and the
-// clip never moves the anchor or changes which tile a cell wears.
+// rect. No cell that lies wholly outside the draw list's clip rectangle is
+// emitted, and the clip never moves the anchor or changes which tile a cell
+// wears. A cell the clip cuts through is emitted at its full World cell and
+// sampling its whole tile, for the scissor to crop: the crop lands on the
+// clip, not on the geometry or the sample, which is what keeps the visible
+// band at one artwork pixel to one screen pixel. That includes the bottom
+// row of a Sector whose floor line sits below the clip's bottom edge - the
+// row that is nearly all on screen and was skipped entirely until #1048.
 //
 // Returns false when no atlas is installed, which is the caller's cue to
 // fall back to a plain fill. Returns true when the surface was drawn,

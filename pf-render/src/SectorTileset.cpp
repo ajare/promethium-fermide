@@ -298,10 +298,22 @@ bool drawSectorTileSurfacePerCell(WorldDrawList* list, Vec2 minimum,
     int const firstColumn = std::max(0, static_cast<int>(
         (clipMin.x - minimum.x) / cellWidth));
     // Rows are counted up from the floor line, so the clip cannot move the
-    // anchor; it only decides which rows are worth emitting. Everything below
-    // the clip's bottom edge and everything above `top` is left out.
-    int const firstRow = std::max(0, static_cast<int>(std::ceil(
-        (maximum.y - std::min(maximum.y, clipMax.y)) / cellHeight)));
+    // anchor; it only decides which rows are worth emitting. Everything
+    // above `top` is left out, and so is every row that lies wholly below
+    // the clip's bottom edge - but not a row the clip cuts through. That
+    // last row is partly on screen and has to be emitted, at its full cell
+    // rect and sampling its whole tile, for the scissor to crop it. Rounding
+    // the distance up (`ceil`, which is what this line did until #1048)
+    // rounds past exactly that row: with the clip's bottom edge one pixel
+    // above a Sector's floor line, the whole bottom row of that Sector -
+    // 319 of its 320 pixels visible - went undrawn. Truncation is the same
+    // shape `firstColumn` two lines above already uses, and it stays exact at
+    // the boundary: a clip bottom landing exactly on a row boundary leaves
+    // that boundary's row below the cut, where it belongs, because the row
+    // whose bottom edge *is* the cut lies under the clip rather than above
+    // it.
+    int const firstRow = std::max(0, static_cast<int>(
+        (maximum.y - std::min(maximum.y, clipMax.y)) / cellHeight));
     for (int row = firstRow; row < rows; ++row) {
         float const rowBottom = maximum.y - float(row) * cellHeight;
         if (rowBottom <= top) break;
