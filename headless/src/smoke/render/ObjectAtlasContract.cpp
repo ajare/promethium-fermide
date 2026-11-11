@@ -146,6 +146,7 @@ namespace
 	// from the contract shows up as a missing name rather than as nothing.
 	std::vector<std::string> const kRequiredTiles{
 		"door-L0", "door-R0",
+		"door-tall-L0", "door-tall-R0",
 		"door-lift-L0", "door-lift-R0", "door-shuttle-L0",
 		"bulkhead-door", "access-panel",
 		"window-clear", "window-frosted", "window-tinted",
@@ -266,6 +267,16 @@ namespace
 		require(near(find("door-shuttle-L0").drawnWidth, 1.0f)
 				&& near(find("door-shuttle-L0").drawnHeight, 1.0f),
 			"The Shuttle hatch leaf expectation is not a full cell");
+		// The tall pair is a full cell for the same reason as every other
+		// leaf: the taller aperture is a clip fact, not a drawn-size fact,
+		// so the tall Door's 0.9 opening never reaches into the tile's
+		// declared extent (#1058).
+		require(near(find("door-tall-L0").drawnWidth, 1.0f)
+				&& near(find("door-tall-L0").drawnHeight, 1.0f),
+			"The left tall Door leaf expectation is not a full cell");
+		require(near(find("door-tall-R0").drawnWidth, 1.0f)
+				&& near(find("door-tall-R0").drawnHeight, 1.0f),
+			"The right tall Door leaf expectation is not a full cell");
 		for (auto const* absent : { "door-shuttle-R0", "door-lift-M0" })
 			for (auto const& expected : requiredObjectTiles())
 				require(!(std::string(absent) == expected.tileName),

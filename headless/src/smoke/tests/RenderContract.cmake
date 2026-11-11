@@ -209,6 +209,12 @@ set(names
     transportDoorLeaves/ordinaryDoorsKeepTheOrdinaryFamily
     transportDoorLeaves/everyShippedTransportRendersItsOwnLeaf
     transportDoorLeaves/pullingTheAtlasOutTripsTheDetector
+    tallDoorLeaves/tallOrdinaryDoorResolvesToTallFamily
+    tallDoorLeaves/tallApertureClipsInEveryOpeningStyle
+    tallDoorLeaves/openUpTravelScalesWithTheTallAperture
+    tallDoorLeaves/regularDoorsKeepTheRegularFamily
+    tallDoorLeaves/transportLandingsNeverWearTheTallFamily
+    tallDoorLeaves/everyShippedTallDoorRendersFromTheTallFamily
     accessPanels/closedPresentationAndIndicators
     accessPanels/canvasCoversTheWholeFixtureWorld
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations

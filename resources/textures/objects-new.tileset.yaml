@@ -43,6 +43,13 @@
 # them land in columns 8, 9 and 10 rather than being interleaved with the
 # tiles that got there first.
 #
+# #1058 added the tall leaf family, which is why the sheet is thirteen
+# columns wide. A tall Door's aperture is taller than the regular Door's,
+# so drawing it from the regular leaf leaves the band between the two
+# jambs' tops as dead space above the panel. The tall pair is the same
+# full-cell contract again - the clip bounds the leaf, not the drawn size -
+# and takes its two columns the way every other family has.
+#
 # Every content rectangle below is the tile's declared drawn size measured
 # at the authored grid's pixel size, rounded to whole pixels: a tile drawn
 # 0.8 x 0.5 World units is 102 x 160 px on this 128 x 320 grid. That keeps
@@ -50,7 +57,7 @@
 # stretched on its way to the screen.
 version: 2
 image: objects-new.png
-size: [1408, 1280]
+size: [1664, 1280]
 tile_size: [128, 320]
 sprites:
   # A Walkway is `Object(cellX, cellY, 1.0, 0.0)`: deliberately zero
@@ -176,6 +183,41 @@ sprites:
   # wrong rather than a silent one.
   door-shuttle-L0:
     cell: [10, 0]
+    variants: 3
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+
+  # The tall Door's leaves (#1058). A tall ordinary Door opens 0.9 World
+  # units against the regular Door's 0.5 (`CORE_DOOR_TALL_HEIGHT` against
+  # `CORE_DOOR_HEIGHT`), so the same leaf artwork read at the taller
+  # aperture leaves the top of the panel short rather than filling it. The
+  # tall pair is authored for that aperture: same cell, same zero offset,
+  # same full-cell drawn size, and the taller doorway is what the clip
+  # cuts it to. Which pair a Door wears is the height class's answer, not
+  # the artwork's - a Regular Door never reaches these two and a Tall Door
+  # never reaches the regular pair.
+  #
+  # Tall is an ordinary-Room height only: a Lift landing, a Shuttle hatch,
+  # a Corridor Door or a Facade Door is always regular, so these two tiles
+  # are never drawn behind transport artwork and the families cannot meet.
+  #
+  # ART CONSTRAINT NOTHING CAN VALIDATE: as with `door-L0`, a 1-wide
+  # OpenApart Door splits this single tile at the cell centre and wears
+  # both halves, so the artwork must be symmetric about u = 0.5.
+  door-tall-L0:
+    cell: [11, 0]
+    variants: 3
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: false
+
+  # The right-hand leaf of a two-cell-wide tall Door: the right half of
+  # one joined two-cell tall leaf. Same contract as door-tall-L0.
+  door-tall-R0:
+    cell: [12, 0]
     variants: 3
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]

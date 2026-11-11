@@ -778,11 +778,25 @@ void renderDoorLeaves(shared_ptr<const core::Door> door, uint32_t layer,
 			// cell wide, so its family has no right-hand leaf and the
 			// hatch tile stands in for both roles rather than reaching
 			// across families for art nobody drew.
-			char const* tile = leaf.rightLeaf ? "door-R0" : "door-L0";
-			if (door->isLiftOwned())
-				tile = leaf.rightLeaf ? "door-lift-R0" : "door-lift-L0";
-			else if (door->isShuttleOwned())
-				tile = "door-shuttle-L0";
+			//
+			// Among ordinary Doors the height class then picks the pair
+			// (#1058). A Tall Door's aperture is taller than the regular
+			// leaf is drawn for, so the regular panel reads as a short
+			// door with dead wall above it inside the doorway; the tall
+			// pair is authored for that aperture. Ownership is asked first:
+			// a transport landing keeps its own art whatever its height
+			// happens to read, so the two rules cannot trade places and
+			// quietly re-skin a lift as a tall room door.
+			//
+			// One statement rather than a chain of assignments, because the
+			// choice is one question asked once, and because every arm of it
+			// has to stay within reach of the call that draws what it picked.
+			char const* tile = door->isLiftOwned()
+				? (leaf.rightLeaf ? "door-lift-R0" : "door-lift-L0")
+				: door->isShuttleOwned() ? "door-shuttle-L0"
+				: door->getHeight() == core::Door::Height::Tall
+				? (leaf.rightLeaf ? "door-tall-R0" : "door-tall-L0")
+				: (leaf.rightLeaf ? "door-R0" : "door-L0");
 			if (!drawObjectSprite(tile, drawList, {r.x0, r.y0}, {r.x1, r.y1},
 				White, Vec2{leaf.uv0.x, leaf.uv0.y},
 				Vec2{leaf.uv1.x, leaf.uv1.y}))

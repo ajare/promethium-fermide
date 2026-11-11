@@ -176,7 +176,7 @@ three sizes that no code ever built.
 | `walkway` | 1.0 x 0.075 | 128 x 24 | the slab's own thickness, drawn at `offset: [0.0, -0.075]` below the cell's floor line |
 | `bulkhead-door` | 0.2 x 0.7 | 26 x 224 | `CORE_BULKHEAD_DOOR_WIDTH` x `CORE_CORRIDOR_HEIGHT` |
 | `access-panel` | 0.5 x 0.25 | 64 x 80 | the default `AccessPanelGeometry`; a panel authored at another size draws at its own rect |
-| `door` | 0.8 x 0.5 | 102 x 160 | `1 - 2 * CORE_DOOR_X_INSET` x `CORE_DOOR_HEIGHT` |
+| `door-L0`, `door-R0`, `door-tall-L0`, `door-tall-R0`, `door-lift-L0`, `door-lift-R0`, `door-shuttle-L0` | 1.0 x 1.0 | 128 x 320 | one full cell: the aperture clip, not the drawn size, bounds a leaf, so one tile serves every Door width and each family differs by the doorway it is clipped by rather than by what it declares |
 | `button-enabled`, `button-disabled` | 0.1 x 0.04 | 13 x 13 | `CORE_BUTTON_SIZE` x `CORE_BUTTON_SIZE / CORE_CELL_YX_RENDER_RATIO` - square on screen |
 | `window-clear`, `window-frosted`, `window-tinted` | 0.8 x 0.3 | 102 x 96 | `1 - 2 * CORE_WINDOW_X_INSET` x `CORE_WINDOW_HEIGHT` |
 | `booth-window-open` (the frame) | 0.8 x 0.3 | 102 x 96 | the same one-cell Window extent: the frame is the Window |
@@ -187,10 +187,14 @@ three sizes that no code ever built.
 | `shuttle-L0`, `shuttle-M0`, `shuttle-R0` | 1.0 x 0.55 | 128 x 176 | one cell wide at `CORE_SHUTTLE_CAR_HEIGHT` |
 | `shuttle-connector` | 1.0 x 0.55 | 128 x 176 | the same extent, drawn at the join between two carriages |
 
-No tile in this set is a full cell. The cell is the slot the grid gives the art to
+Only the Door leaves are a full cell. The cell is the slot the grid gives the art to
 sit in; what a tile declares is the extent it actually draws at, which is why a
 Button is 13 x 13 px inside a 128 x 320 cell and a Lift car is 115 x 176 rather
-than the 128 x 320 the shaft it runs in fills. The #1013 spec first wrote the two
+than the 128 x 320 the shaft it runs in fills. A leaf is the exception on
+deliberate purpose: it is drawn at its whole cell and translated under the
+doorway clip, so the clip - not the declared extent - is what keeps it inside the
+opening, and one tile answers every width and each height class (#1056, #1058).
+The #1013 spec first wrote the two
 vehicle entries as 128 x 320 because it was describing one cell of a transport's
 route rather than the vehicle; the renderer draws a car into the car's own live
 shape and the Objects contract checks the declared size against the core constants

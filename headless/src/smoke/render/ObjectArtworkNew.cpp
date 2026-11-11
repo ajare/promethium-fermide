@@ -123,6 +123,11 @@ namespace
 		// the aperture clip, not the drawn size, bounds it (#1056).
 		{ "door-L0", 1.0f, 1.0f, 128, 320, false },
 		{ "door-R0", 1.0f, 1.0f, 128, 320, false },
+		// The tall Door's leaves are the same full-cell shape; what makes
+		// them a different family is the aperture they are clipped by, not
+		// the extent they are drawn at (#1058).
+		{ "door-tall-L0", 1.0f, 1.0f, 128, 320, false },
+		{ "door-tall-R0", 1.0f, 1.0f, 128, 320, false },
 		// The Lift landing and Shuttle hatch leaves are the same shape for
 		// the same reason - full cell, zero offset, clipped not scaled - and
 		// each carries three variants like the ordinary leaf (#1057).
@@ -592,17 +597,17 @@ namespace
 		using smoke::require;
 		auto const atlas = loadNewObjectsAtlas(context);
 
-		// The sheet is the 11x4 grid of 128x320 cells the set is sized for.
+		// The sheet is the 13x4 grid of 128x320 cells the set is sized for.
 		// It was 6x3 until the vehicles arrived, the row has stayed since
 		// #1031 dropped the Booth Window's undrawn closed panel, and #1056
 		// widened it by two columns for the Door leaf families - each of
 		// which owns its whole column, because `-Vn` derives at `baseRow +
 		// n`. #1057 took it three columns further for the Lift and Shuttle
-		// leaf families, which own their columns the same way. The image is
-		// sized for the art still to come, not trimmed to the tile count of
-		// the moment (#1021).
-		require(atlas.width == 1408 && atlas.height == 1280,
-			"ObjectAtlas is not the 1408x1280 sheet its set is sized for, saw "
+		// leaf families and #1058 two more for the tall pair, which own
+		// their columns the same way. The image is sized for the art still
+		// to come, not trimmed to the tile count of the moment (#1021).
+		require(atlas.width == 1664 && atlas.height == 1280,
+			"ObjectAtlas is not the 1664x1280 sheet its set is sized for, saw "
 			+ std::to_string(atlas.width) + "x" + std::to_string(atlas.height));
 
 		for (auto const& tile : kTiles)
@@ -687,9 +692,11 @@ namespace
 		using smoke::require;
 		auto const atlas = loadNewObjectsAtlas(context);
 
-		// The three families the ticket names. The ordinary pair landed in
-		// #1056; the Lift pair and the Shuttle hatch are this one.
-		for (auto const* base : { "door-L0", "door-R0", "door-lift-L0",
+		// The families the tickets name. The ordinary pair landed in
+		// #1056; the Lift pair and the Shuttle hatch in #1057; the tall
+		// pair in #1058.
+		for (auto const* base : { "door-L0", "door-R0", "door-tall-L0",
+			"door-tall-R0", "door-lift-L0",
 			"door-lift-R0", "door-shuttle-L0" })
 		{
 			auto const stated = atlas.authored.variantCounts.find(base);

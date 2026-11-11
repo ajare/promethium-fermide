@@ -249,6 +249,13 @@ std::vector<ObjectTileExpectation> const& requiredObjectTiles()
         ObjectTileExpectation{"door-lift-L0", 1.0f, 1.0f, {0.0f, 0.0f}},
         ObjectTileExpectation{"door-lift-R0", 1.0f, 1.0f, {0.0f, 0.0f}},
         ObjectTileExpectation{"door-shuttle-L0", 1.0f, 1.0f, {0.0f, 0.0f}},
+        // A tall ordinary Door wears its own pair, chosen by its height
+        // class. Same full-cell contract as every other leaf: the taller
+        // aperture is what the clip cuts the tile to, so the declared
+        // drawn size stays one cell and one value covers the family
+        // (#1058).
+        ObjectTileExpectation{"door-tall-L0", 1.0f, 1.0f, {0.0f, 0.0f}},
+        ObjectTileExpectation{"door-tall-R0", 1.0f, 1.0f, {0.0f, 0.0f}},
         // A Bulkhead Door is a slab, not a doorway: its own width, spanning
         // the corridor's full height.
         ObjectTileExpectation{"bulkhead-door",
