@@ -1096,37 +1096,6 @@ namespace
 			+ refusal);
 	}
 
-	// The refusal of a key the format cannot derive belongs to the shared
-	// authored-grid loader and not to the sector loader. An object tileset
-	// has no family column either, and says so in its own vocabulary rather
-	// than leaving the key unread.
-	void theObjectFormatRefusesVariantFamilies(smoke::Context const& context)
-	{
-		using smoke::require;
-		auto const path = context.temporaryRoot() / "object-family.tileset.yaml";
-		std::ofstream out(path, std::ios::binary | std::ios::trunc);
-		out << "version: 2\n"
-			"image: invented.png\n"
-			"size: [512, 512]\n"
-			"tile_size: [128, 128]\n"
-			"sprites:\n"
-			"  wall:\n"
-			"    cell: [0, 0]\n"
-			"    variants: 2\n"
-			"    content: [0, 0, 128, 128]\n"
-			"    offset: [0.0, 0.0]\n"
-			"    drawn_size: [1.0, 1.0]\n"
-			"    tintable: true\n";
-		out.close();
-		require(bool(out), "Could not write the fixture tileset: " + path.string());
-		std::string reason;
-		bool refused = false;
-		try { ObjectTileset::load(path); }
-		catch (std::exception const& error) { refused = true; reason = error.what(); }
-		require(refused && reason.find("no family column to derive") != std::string::npos,
-			"An object sprite declaring a variant family was accepted: " + reason);
-	}
-
 	// The fallback that keeps an older atlas honest. The v1 set has no
 	// Airlock, Chamber or Dumbwaiter tile; those types keep drawing the
 	// shared surface they borrowed instead of the missing-tile magenta.
@@ -1197,8 +1166,6 @@ void render_smoke::registerSectorAtlas(std::vector<smoke::Check>& checks)
 		isolated<loaderRefusesVariantsWrittenOnTheFile> });
 	checks.push_back({ "sectorAtlasNew/loaderRefusesVariantFamiliesInTheOldFormat",
 		isolated<loaderRefusesVariantFamiliesInTheOldFormat> });
-	checks.push_back({ "sectorAtlasNew/theObjectFormatRefusesVariantFamilies",
-		isolated<theObjectFormatRefusesVariantFamilies> });
 	checks.push_back({ "sectorAtlasNew/anOlderAtlasStillBorrowsForATypeItHasNoTileFor",
 		isolated<anOlderAtlasStillBorrowsForATypeItHasNoTileFor> });
 }

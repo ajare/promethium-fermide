@@ -117,13 +117,16 @@ What the format refuses, at load:
   is refused rather than given a meaning nobody wrote.
 - **`variants` in the version 1 format.** Its surfaces are bare rectangles with
   no cell to descend from, so the key there is a family nothing could derive.
-- **`variants` on any other atlas's sprite.** The object, furniture and agent
-  formats have no family column to lay out, and the shared grid loader refuses
-  the key in their own vocabulary rather than leaving it unread. Only the sector
-  format asks for families at all.
 - **A `-Vn` name authored beside its own family.** That name is the derivation's
   to give. A hand-authored `corridor-V1` would collide with the derived tile, and
   which of the two won would come down to map order.
+
+The same rule and the same refusals govern the object-shaped atlases, which took
+the capability in #1053. They are not a second implementation of it: the
+naming, the placement and the refusals all live in the shared authored-grid
+loader, and the sector loader and the object loader each just say whether the
+format they are reading derives families. See *Variant families* in
+`docs/object-tileset.md` for the object side.
 
 `SectorTileset::variantCount(kind)` answers the declared count for a base type,
 and `sectorSurfaceVariantCount(kind)` answers it for a caller that never held the
@@ -486,11 +489,15 @@ amended describes.
 
 Whether a base sprite may declare a variant family is a parameter of that shared
 loader and not a fact about grids, because it is not the grid that has to keep the
-promise. The sector loader passes `Derived` and gets the count validated and
-recorded; every other atlas passes `Refused`, which is the default, and a sprite
-carrying the key is refused. The derived tiles themselves are named and placed by
-the sector loader, which owns the `-V` vocabulary; the shared grid only establishes
-that the declared count has room to stand on the declared sheet.
+promise. The sector loader passes `Derived`; the object loader passes `Derived`
+for a version 2 set and `Refused` for a version 1 one, which is the default and
+refuses a sprite carrying the key. The derived tiles are named and placed by the
+shared grid too, since #1053 - the `-V` rule is arithmetic over the base's cell
+and the declared count, not vocabulary one loader owns and the other copies - and
+the grid is what establishes that the declared count has room to stand on the
+declared sheet. Each loader keeps the count with the base that stated it, so a
+caller can ask what was declared rather than infer it from what happened to be
+present.
 
 CMake copies both assets beside each executable under `textures/`, including
 on builds with no C++ changes. Startup resolves that directory relative to the

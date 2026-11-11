@@ -33,12 +33,18 @@
 // format has no column to grow, the key is refused rather than ignored: an
 // ignored declaration is a family an author believes exists and nothing
 // derives (#1038).
+//
+// Where it is derived, the grid derives it. Naming the `-V1` .. `-VN` tiles
+// and stepping them down the base's column is the grid's arithmetic, not the
+// atlas's, so every format that takes the capability gets the same rule and
+// the same refusals rather than one copy per loader (#1053).
 enum class AuthoredVariantFamilies
 {
     // The key is not part of this format. A sprite carrying it is refused.
     Refused,
-    // The key is legal on a base sprite, and the declared count must fit
-    // the sheet below the sprite it was written on.
+    // The key is legal on a base sprite. The declared count must fit the
+    // sheet below the sprite it was written on, and the `-V1` .. `-VN` it
+    // describes are derived into `tiles` beside the authored sprites.
     Derived
 };
 
@@ -46,12 +52,16 @@ struct AuthoredTileGrid
 {
     int width{}, height{};
     int tileWidth{}, tileHeight{};
+    // Every tile the sheet holds. When the caller derives variant families
+    // this is the authored sprites plus the `-V1` .. `-VN` each of them
+    // declared, so a caller never has to ask which of the two a name is.
     TileArtworkMap tiles;
     // How many variants each base sprite declared, keyed by that sprite's
     // own name. Only filled when the caller derives variant families; the
     // count is the author's statement, not something read back off the
     // derived tiles, so a caller can tell "declared none" from "never had
-    // the option".
+    // the option". A derived `-Vn` tile is not a base and holds no count of
+    // its own.
     std::map<std::string, int> variantCounts;
 };
 

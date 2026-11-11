@@ -64,6 +64,66 @@ never obstructs pathing, routing or support, while its `walkway` tile draws a
 24px slab at `offset: [0.0, -0.075]` and `drawn_size: [1.0, 0.075]`, hanging
 that far below the floor line of the cell it was authored in.
 
+## Variant families
+
+A version 2 object sprite may declare a variant family with one number:
+
+```yaml
+  door:
+    cell: [0, 0]
+    variants: 3
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    tintable: true
+```
+
+That count is the whole of what is authored about the family. The loader expands
+it into `-V1` .. `-VN`, each in the base's own column one row below the tile
+above it - `-V1` directly beneath the base, `-VN` N rows down - and each
+inheriting the base's content rectangle, render offset, drawn size and tintable
+flag (#1053). Adding a variant is a picture decision and never a re-declaration
+of geometry, so a variant cannot be given art that does not line up with the base
+it is a variant of, and no author writes a name or a cell that the rule could
+contradict. The base keeps its bare name and stays variant 0, so every tile name
+that existed before families still means what it meant.
+
+This is the promise the sector tileset format has made since #1038, kept by the
+same code rather than by a second copy of it. The naming, the placement, the
+sheet-fit check and the refusals all live in `pf-render/src/AuthoredTileGrid.cpp`,
+which both loaders read through; each loader only says whether the format it is
+reading derives families. The Object, Agent and Furniture atlases are all written
+in the object format and all take the capability with it, and their generators
+derive the same tiles under the same refusals - which matters because the install
+pairs from the manifest inward, so a family the sheet showed but the manifest
+left out is a family nothing installs.
+
+What the format refuses, at load:
+
+- **A family that runs past the bottom of the declared sheet.** `-Vn` sits at
+  `baseRow + n`, so a count reaching past the last row describes a tile no cell
+  exists for. The refusal names the base's row and the sheet's row count,
+  because "it does not fit" without both numbers is not something an author can
+  act on.
+- **A count that is not a whole number.** `two`, `1.5`, `true` and `[1]` are not
+  the author stating a count, and rounding one into a family - or dropping one -
+  is the loader inventing what the file did not say. A negative count describes a
+  family climbing above its base, which is not what the column means.
+- **A `-Vn` name authored beside a family.** That name is the derivation's to
+  give. A hand-authored `door-V1` would collide with the derived tile, and which
+  of the two won would come down to file order. The reservation covers the whole
+  `-Vn` shape rather than only the cells one family happens to occupy, because a
+  second family could be declared beside it in the next edit.
+- **`variants` in the version 1 object format.** A version 1 tile authors no
+  render semantics at all - its drawn size is whatever its content rectangle
+  measures over the grid - so a family stacked beneath such a base is a family
+  nobody sized. The key is refused rather than quietly derived, because an author
+  who wrote it meant to gain the capability and would not have gained it.
+
+The shipped object, agent and furniture sets declare no family yet. The
+capability lands alone, ahead of the Door leaf artwork that will use it, so the
+format change is proven before any artwork depends on it (#1053).
+
 ## ObjectAtlas
 
 `resources/textures/objects-new.tileset.yaml` is the version 2 authored tileset

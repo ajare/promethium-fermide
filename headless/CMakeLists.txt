@@ -247,6 +247,16 @@ if(BUILD_TESTING)
         "${PF_REPO_ROOT}/docs/smoke-migration-manifest.md")
     set_tests_properties(smoke-ownership-audit PROPERTIES LABELS "harness;ownership" TIMEOUT 30)
 
+    # The atlas generator's variant-family derivation, proved against the
+    # shipped specs rather than a committed sheet: the object-shaped atlases
+    # took the capability in #1053 and ship no family of their own yet, so
+    # nothing else shows the generator and the C++ loader agree on where a
+    # derived tile lands and on what an author may not write.
+    add_test(NAME atlas-variant-family-contract COMMAND ${Python3_EXECUTABLE}
+        "${PF_REPO_ROOT}/scripts/tests/atlas_variant_families.py")
+    set_tests_properties(atlas-variant-family-contract PROPERTIES
+        LABELS "harness;tools;validation-fast" TIMEOUT 60)
+
     pf_add_headless_tool(pf-compatibility-probe src/CompatibilityProbe.cpp)
     set_target_properties(pf-compatibility-probe PROPERTIES FOLDER "Tests/Harness")
     add_test(NAME headless-compatibility-contract COMMAND ${Python3_EXECUTABLE}

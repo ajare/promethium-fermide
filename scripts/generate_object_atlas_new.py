@@ -31,6 +31,14 @@ SPEC = AtlasSpec(
     atlas="ObjectAtlas",
     tileset="resources/textures/objects-new.tileset.yaml",
     script="generate_object_atlas_new.py",
+    # The version 2 object format lays out variant family columns: a base
+    # sprite's `-V1` .. `-VN` stack directly beneath it in the base's own
+    # column, inheriting its geometry. The C++ loader derives the same tiles
+    # from the same rule, so the sheet, the generated manifest, the
+    # placeholder art and the loader agree without anything being written
+    # twice (#1053). No shipped object set declares a family yet - the
+    # capability lands before the artwork that will use it.
+    variant_families=True,
 )
 
 if __name__ == "__main__":

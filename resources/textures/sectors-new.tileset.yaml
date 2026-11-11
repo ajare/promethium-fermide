@@ -61,9 +61,13 @@
 #
 # The key belongs on a base sprite and nowhere else. A `variants` key on the
 # file itself is refused, and so is one on a derived variant - a family
-# under a family has no layout to live in. The object-shaped atlases refuse
-# the key outright: they have no family column to derive, so accepting it
-# there would be accepting a promise nothing keeps.
+# under a family has no layout to live in. The object-shaped atlases take
+# the key on the same terms since #1053: the derivation is one shared rule
+# the two formats read through the same grid loader, not one copy apiece.
+# What still refuses it is the version 1 formats, each for the reason its
+# own shape gives - the sector's v1 surfaces are bare rectangles with no
+# cell to descend from, and the object's v1 tiles author no render
+# semantics for a variant to inherit.
 #
 # A count that would run past the bottom of the declared sheet is refused at
 # load. A column that walks off the sheet is a miscount, and drawing nothing

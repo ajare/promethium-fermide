@@ -31,10 +31,35 @@ ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
     result.image = path.parent_path() / root["image"].as<std::string>();
     // The grid resolution is shared with the sector atlas, which authors the
     // same cell-and-content shape (#1017).
-    auto const grid = loadAuthoredTileGrid(root, version >= 2, "object sprite");
+    //
+    // A version 2 object sprite may declare a variant family, and the shared
+    // grid derives it: `variants: N` yields `-V1` .. `-VN` in the base's own
+    // column one row below the last, each inheriting the base's content
+    // rectangle, render offset, drawn size and tintable flag. That is the
+    // sector format's promise, kept here by the same code rather than by a
+    // second copy that could drift from it (#1053).
+    //
+    // The version 1 object format does not take the key. It authors no render
+    // semantics at all - a v1 tile's drawn size is whatever its content
+    // rectangle measures over the grid - so a family stacked beneath such a
+    // base is a family nobody sized, and the version 1 set is the legacy
+    // custom-theme shape that nothing new is authored in. Refused rather than
+    // quietly derived, because an author who wrote the key meant to gain the
+    // capability and would not have gained it.
+    auto const variantFamilies = version >= 2
+        ? AuthoredVariantFamilies::Derived
+        : AuthoredVariantFamilies::Refused;
+    auto const grid = loadAuthoredTileGrid(root, version >= 2, "object sprite",
+        variantFamilies);
     result.width = grid.width;
     result.height = grid.height;
     result.sprites = grid.tiles;
+    // The count travels with the sprites for the same reason the sector's
+    // does: a map of resolved regions cannot say that `door` declared three
+    // variants, and anything that later sizes a strip of Door leaves from the
+    // set would rather size it from what was stated than from a constant
+    // (#1053).
+    result.variantCounts = grid.variantCounts;
     // A version 2 set authors nothing for the Force Bridge, and is refused
     // if it tries. A bridge's span is continuous and arbitrary, so a fixed
     // tile would be stretched wrong at most lengths it is drawn at; the

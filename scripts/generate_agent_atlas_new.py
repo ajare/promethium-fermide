@@ -36,6 +36,12 @@ SPEC = AtlasSpec(
     tileset="resources/textures/agents-new.tileset.yaml",
     script="generate_agent_atlas_new.py",
     label_tiles=True,
+    # The Agent slot is loaded by the object tileset loader, which derives a
+    # declared variant family (#1053). The generator has to derive the same
+    # tiles or the manifest it writes would leave the derived names out, and
+    # the install - which pairs from the manifest inward - would never
+    # install them. Same rule, same refusals, on every object-shaped sheet.
+    variant_families=True,
 )
 
 if __name__ == "__main__":

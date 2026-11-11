@@ -35,6 +35,12 @@ SPEC = AtlasSpec(
     tileset="resources/textures/furniture-new.tileset.yaml",
     script="generate_furniture_atlas_new.py",
     label_tiles=True,
+    # The Furniture slot is loaded by the object tileset loader, which
+    # derives a declared variant family (#1053). The generator derives the
+    # same tiles under the same refusals, because the install pairs from the
+    # manifest inward: a family the sheet showed but the manifest left out is
+    # a family nothing installs. Same rule on every object-shaped sheet.
+    variant_families=True,
 )
 
 if __name__ == "__main__":

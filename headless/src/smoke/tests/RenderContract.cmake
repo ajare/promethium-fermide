@@ -55,6 +55,13 @@ set(names
     objectAtlas/missingRenderOffsetIsRefused
     objectAtlas/nonFiniteRenderOffsetIsRefused
     objectAtlas/drawnSizeThatDoesNotFitTheImageIsRefused
+    objectAtlas/variantFamiliesAreDerivedBeneathTheirBase
+    objectAtlas/aBaseWithNoDeclaredFamilyStandsAlone
+    objectAtlas/aVariantNameAuthoredBesideItsFamilyIsRefused
+    objectAtlas/aVariantCountThatIsNotAWholeNumberIsRefused
+    objectAtlas/aNegativeVariantCountIsRefused
+    objectAtlas/aFamilyThatRunsPastTheSheetIsRefused
+    objectAtlas/theVersionOneObjectFormatRefusesVariantFamilies
     furnitureAtlasNew/tenRoleTilesAreRegisteredAtFullCellSize
     furnitureAtlasNew/sofaRendersFromItsRoleTiles
     furnitureAtlasNew/fourCellSofaReusesTheMiddleTile
@@ -92,7 +99,6 @@ set(names
     sectorAtlasNew/loaderRefusesAVariantNameAuthoredBesideItsFamily
     sectorAtlasNew/loaderRefusesVariantsWrittenOnTheFile
     sectorAtlasNew/loaderRefusesVariantFamiliesInTheOldFormat
-    sectorAtlasNew/theObjectFormatRefusesVariantFamilies
     sectorAtlasNew/anOlderAtlasStillBorrowsForATypeItHasNoTileFor
     sectorSurfaceDrawContract/everyCellOfANoVariantSectorDrawsItsBaseTile
     sectorSurfaceDrawContract/theRepeatIsAnchoredOnTheSectorFloorLine

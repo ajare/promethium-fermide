@@ -14,6 +14,13 @@ struct ObjectTileset
     std::filesystem::path image;
     int width{}, height{};
     std::map<std::string, ObjectSprite> sprites;
+    // How many variants each base sprite declared (#1053). The version 2
+    // object format derives a declared family the way the sector format
+    // does, and the count is kept beside the sprites rather than counted back
+    // off them, so it says what the author stated. A derived `-Vn` sprite is
+    // not a base and holds no count of its own; a version 1 set declares no
+    // families at all and so holds an empty map.
+    std::map<std::string, int> variantCounts;
     // Resolves every sprite's cell and content rectangle into image pixels using
     // the manifest's own authored tile grid. That grid need not be the World
     // cell - it only has to divide the image evenly (#1006).

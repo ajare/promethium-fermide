@@ -126,6 +126,10 @@ namespace
 		bool hasDrawnSize{ true };
 		std::string offsetX{ "0" }, offsetY{ "0" };
 		std::string drawnWidth{ "1" }, drawnHeight{ "1" };
+		// The variant family the base declares, as text; empty means the key
+		// is absent. Text rather than an int so a fixture can write `two`,
+		// `1.5` or `-1` and ask the loader which of them it notices (#1053).
+		std::string variants{};
 	};
 
 	std::string v2Block(V2Sprite const& sprite)
@@ -134,8 +138,10 @@ namespace
 		out << "  " << sprite.name << ":\n"
 			<< "    cell: [" << sprite.column << ", " << sprite.row << "]\n"
 			<< "    content: [" << sprite.x << ", " << sprite.y << ", "
-			<< sprite.width << ", " << sprite.height << "]\n"
-			<< "    tintable: " << (sprite.tintable ? "true" : "false") << "\n";
+			<< sprite.width << ", " << sprite.height << "]\n";
+		if (!sprite.variants.empty())
+			out << "    variants: " << sprite.variants << "\n";
+		out << "    tintable: " << (sprite.tintable ? "true" : "false") << "\n";
 		if (sprite.hasOffset)
 			out << "    offset: [" << sprite.offsetX << ", " << sprite.offsetY << "]\n";
 		if (sprite.hasDrawnSize)
@@ -191,6 +197,56 @@ namespace
 		sprite.offsetX = "0"; sprite.offsetY = "-0.2";
 		sprite.drawnWidth = "1"; sprite.drawnHeight = "0.2";
 		return sprite;
+	}
+
+	// Writes raw fixture YAML and hands back the loader's refusal of it, or
+	// empty when the file was accepted. Used where the shape being asked
+	// about - a version 1 sprite carrying a version 2 key - is not one the
+	// typed fixture builders can write.
+	std::string rawRefusal(smoke::Context const& context, std::string const& tag,
+		std::string const& yaml)
+	{
+		auto const path = context.temporaryRoot() / (tag + ".tileset.yaml");
+		std::ofstream out(path, std::ios::binary | std::ios::trunc);
+		out << yaml;
+		out.close();
+		require(bool(out), "Could not write the fixture tileset: " + path.string());
+		try
+		{
+			ObjectTileset::load(path);
+		}
+		catch (std::exception const& error)
+		{
+			return error.what();
+		}
+		return {};
+	}
+
+	// The same invented sheet, written as a version 1 tileset: the complete
+	// required set, with the key the version 1 format does not take put on
+	// the `door` sprite when asked for. Written whole rather than as one
+	// bare sprite because the version 1 loader holds its required-tile
+	// contract, and the refusal under test has to be the key rather than the
+	// shape around it.
+	std::string v1SheetWithVariants(bool withVariants)
+	{
+		std::ostringstream yaml;
+		yaml << "version: 1\n"
+			<< "image: invented.png\n"
+			<< "size: [" << kImageWidth << ", " << kImageHeight << "]\n"
+			<< "tile_size: [" << kTileWidth << ", " << kTileHeight << "]\n"
+			<< "sprites:\n";
+		for (auto const& sprite : completeSet())
+		{
+			yaml << "  " << sprite.name << ":\n"
+				<< "    cell: [" << sprite.column << ", " << sprite.row << "]\n";
+			if (withVariants && std::string(sprite.name) == "door")
+				yaml << "    variants: 2\n";
+			yaml << "    content: [" << sprite.x << ", " << sprite.y << ", "
+				<< sprite.width << ", " << sprite.height << "]\n"
+				<< "    tintable: " << (sprite.tintable ? "true" : "false") << "\n";
+		}
+		return yaml.str();
 	}
 
 
@@ -405,6 +461,211 @@ namespace
 			"a tile with no drawn size").find("drawn_size") != std::string::npos,
 			"The refusal must name the missing drawn size");
 	}
+
+	// ------------------------------------------------------------------
+	// Variant families (#1053): a base sprite states a count and the family
+	// descends beneath it in the base's own column.
+	// ------------------------------------------------------------------
+
+	// The invented sheet is 192 x 120 on a 32 x 40 grid: six columns, three
+	// rows. A family has to live inside that, so the deepest a base can sit
+	// and still claim a variant below itself is row 1.
+	int const kSheetRows = kImageHeight / kTileHeight;
+
+	// `variants: N` on a base sprite yields `-V1` .. `-VN` directly beneath
+	// it, each one the base's own rectangle stepped down the sheet by one
+	// authored tile height per step. Everything the variant draws - the
+	// content it cuts, the offset it draws at, the size it draws at,
+	// whether it takes a tint - is its base's, unchanged, because adding a
+	// variant is a picture decision and never a re-declaration of geometry.
+	void variantFamiliesAreDerivedBeneathTheirBase(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto base = slab();
+		base.column = 1;
+		base.variants = "2";
+		auto const tiles = loadV2Fixture(context, "v2-variants", { base });
+		require(tiles.sprites.size() == 3,
+			"A base declaring two variants did not load three sprites: "
+				+ std::to_string(tiles.sprites.size()));
+		auto const& parent = tiles.sprites.at("slab");
+		for (int step = 1; step <= 2; ++step)
+		{
+			auto const variant = "slab-V" + std::to_string(step);
+			require(tiles.sprites.count(variant), variant + " was not derived");
+			auto const& derived = tiles.sprites.at(variant);
+			require(derived.region.x == parent.region.x,
+				variant + " left its base's column");
+			require(derived.region.y == parent.region.y + step * kTileHeight,
+				variant + " is not one authored tile height per step below its base");
+			require(derived.region.width == parent.region.width
+					&& derived.region.height == parent.region.height,
+				variant + " cuts different content than its base cuts");
+			require(derived.offset.x == parent.offset.x
+					&& derived.offset.y == parent.offset.y
+					&& derived.drawnSize.x == parent.drawnSize.x
+					&& derived.drawnSize.y == parent.drawnSize.y,
+				variant + " did not inherit its base's render semantics");
+			require(derived.tintable == parent.tintable,
+				variant + " did not inherit its base's tintable flag");
+		}
+		// The count the author stated is kept with the base that stated it,
+		// so a caller can size a strip of leaves from the tileset rather
+		// than from a constant it would have to keep in step.
+		require(tiles.variantCounts.size() == 1
+				&& tiles.variantCounts.at("slab") == 2,
+			"The declared count was not kept with the base that declared it");
+		// A derived tile is not the base of a family, so it holds no count
+		// of its own; answering 2 there would invite a family under a family.
+		require(!tiles.variantCounts.count("slab-V1"),
+			"A derived tile reported a family of its own");
+	}
+
+	// A base may declare no family at all, and a family of zero is the same
+	// as none: the sheet holds the base and nothing descends from it.
+	void aBaseWithNoDeclaredFamilyStandsAlone(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const plain = loadV2Fixture(context, "v2-no-variants", { slab() });
+		require(plain.sprites.size() == 1 && plain.variantCounts.empty(),
+			"A base with no `variants` key gained a family");
+		auto zero = slab();
+		zero.variants = "0";
+		auto const none = loadV2Fixture(context, "v2-zero-variants", { zero });
+		require(none.sprites.size() == 1,
+			"A base declaring zero variants derived a tile anyway");
+		require(none.variantCounts.count("slab")
+				&& none.variantCounts.at("slab") == 0,
+			"A declared count of zero was not recorded as the statement it is");
+	}
+
+	// `-Vn` is the derivation's own vocabulary. A sprite authored under one
+	// of those names would collide with whatever the rule derives, and which
+	// of the two won would come down to file order, so the name is refused
+	// before anything is derived - which is what stops a tile silently
+	// drawing as something else.
+	void aVariantNameAuthoredBesideItsFamilyIsRefused(
+		smoke::Context const& context)
+	{
+		using smoke::require;
+		auto base = slab();
+		base.column = 0;
+		base.variants = "1";
+		auto authored = slab();
+		authored.name = "slab-V1";
+		authored.column = 2;
+		auto const reason = v2Refusal(context, "v2-authored-beside-family",
+			{ base, authored }, "a `-Vn` name authored beside its own family");
+		require(reason.find("slab-V1") != std::string::npos
+				&& reason.find("reserves") != std::string::npos,
+			"A hand-authored name inside a derived family was accepted: " + reason);
+		// The same name authored where no family is declared is refused too:
+		// the reservation is the whole `-Vn` shape, not just the cells one
+		// family happens to occupy, because a second family could be declared
+		// beside it in the next edit.
+		auto orphan = slab();
+		orphan.name = "slab-V1";
+		require(rawRefusal(context, "v2-orphan-variant-name",
+				"version: 2\nimage: invented.png\nsize: [192, 120]\n"
+				"tile_size: [32, 40]\nsprites:\n" + v2Block(orphan))
+				.find("reserves") != std::string::npos,
+			"A `-Vn` name authored with no family beside it was accepted");
+	}
+
+	// The count is the whole of the author's statement about a family, so
+	// it has to say a whole number. A word, a fraction or a boolean is not
+	// that, and rounding one into a family - or dropping one - is the loader
+	// inventing what the file did not say.
+	void aVariantCountThatIsNotAWholeNumberIsRefused(
+		smoke::Context const& context)
+	{
+		using smoke::require;
+		for (auto const* value : { "two", "1.5", "true", "[1]" })
+		{
+			auto base = slab();
+			base.variants = value;
+			auto const reason = v2Refusal(context,
+				std::string("v2-variants-not-whole-") + value,
+				{ base }, "a non-integer `variants` count");
+			require(reason.find("whole number") != std::string::npos,
+				std::string("A non-integer `variants` count (") + value
+					+ ") was not refused as one: " + reason);
+		}
+	}
+
+	// A negative count describes a family climbing above its base, which is
+	// not what the column means and not what any cell was laid out for.
+	void aNegativeVariantCountIsRefused(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto base = slab();
+		base.variants = "-1";
+		auto const reason = v2Refusal(context, "v2-variants-negative", { base },
+			"a negative `variants` count");
+		require(reason.find("negative") != std::string::npos,
+			"A negative `variants` count was not refused as one: " + reason);
+	}
+
+	// A family that runs past the bottom of the declared sheet describes a
+	// tile no cell exists for. The refusal names the base's row and the
+	// sheet's row count, because "it does not fit" without both numbers is
+	// not something an author can act on.
+	void aFamilyThatRunsPastTheSheetIsRefused(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto base = slab();
+		base.row = kSheetRows - 1;
+		base.variants = "1";
+		auto const reason = v2Refusal(context, "v2-family-past-the-sheet",
+			{ base }, "a family descending past the last declared row");
+		require(reason.find("run past the bottom") != std::string::npos,
+			"A family descending past the last declared row was accepted: "
+				+ reason);
+		require(reason.find("row " + std::to_string(kSheetRows - 1) + " of "
+					+ std::to_string(kSheetRows))
+				!= std::string::npos,
+			"The refusal must name the base's row and the sheet's row count: "
+				+ reason);
+		// The boundary is inclusive of the last row: a base at row 0 of a
+		// three-row sheet may claim rows 1 and 2, and no further.
+		auto fills = slab();
+		fills.variants = std::to_string(kSheetRows - 1);
+		require(loadV2Fixture(context, "v2-family-fills-the-sheet", { fills })
+				.sprites.size() == static_cast<std::size_t>(kSheetRows),
+			"A family filling the sheet down to its last row was not accepted");
+		auto over = slab();
+		over.variants = std::to_string(kSheetRows);
+		require(v2Refusal(context, "v2-family-one-row-over", { over },
+				"a family one row past the last row")
+				.find("run past the bottom") != std::string::npos,
+			"A family one row past the last row was accepted");
+	}
+
+	// The version 1 object format takes no family. It authors no render
+	// semantics at all - a v1 tile's drawn size is whatever its content
+	// rectangle measures over the grid - so a family stacked beneath such a
+	// base is a family nobody sized, and the refusal says so rather than
+	// deriving something the format cannot describe (#1053).
+	void theVersionOneObjectFormatRefusesVariantFamilies(
+		smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const reason = rawRefusal(context, "v1-variants",
+			v1SheetWithVariants(true));
+		require(!reason.empty(),
+			"A version 1 object sprite declaring a variant family was accepted");
+		require(reason.find("door") != std::string::npos
+				&& reason.find("does not derive") != std::string::npos,
+			"The refusal must name the sprite and say the format derives no "
+			"families: " + reason);
+		// The same version 1 file without the key still loads, so the refusal
+		// is the key and not the shape around it.
+		auto const without = rawRefusal(context, "v1-no-variants",
+			v1SheetWithVariants(false));
+		require(without.empty(),
+			"The version 1 fixture stopped loading once the `variants` key was "
+			"taken out of it: " + without);
+	}
 }
 
 void render_smoke::registerObjectAtlas(std::vector<smoke::Check>& checks)
@@ -421,4 +682,18 @@ void render_smoke::registerObjectAtlas(std::vector<smoke::Check>& checks)
 		isolated<nonFiniteRenderOffsetIsRefused> });
 	checks.push_back({ "objectAtlas/drawnSizeThatDoesNotFitTheImageIsRefused",
 		isolated<drawnSizeThatDoesNotFitTheImageIsRefused> });
+	checks.push_back({ "objectAtlas/variantFamiliesAreDerivedBeneathTheirBase",
+		isolated<variantFamiliesAreDerivedBeneathTheirBase> });
+	checks.push_back({ "objectAtlas/aBaseWithNoDeclaredFamilyStandsAlone",
+		isolated<aBaseWithNoDeclaredFamilyStandsAlone> });
+	checks.push_back({ "objectAtlas/aVariantNameAuthoredBesideItsFamilyIsRefused",
+		isolated<aVariantNameAuthoredBesideItsFamilyIsRefused> });
+	checks.push_back({ "objectAtlas/aVariantCountThatIsNotAWholeNumberIsRefused",
+		isolated<aVariantCountThatIsNotAWholeNumberIsRefused> });
+	checks.push_back({ "objectAtlas/aNegativeVariantCountIsRefused",
+		isolated<aNegativeVariantCountIsRefused> });
+	checks.push_back({ "objectAtlas/aFamilyThatRunsPastTheSheetIsRefused",
+		isolated<aFamilyThatRunsPastTheSheetIsRefused> });
+	checks.push_back({ "objectAtlas/theVersionOneObjectFormatRefusesVariantFamilies",
+		isolated<theVersionOneObjectFormatRefusesVariantFamilies> });
 }

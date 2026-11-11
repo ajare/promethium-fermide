@@ -38,7 +38,10 @@ SPEC = AtlasSpec(
     label_tiles=True,
     # The sector format lays out variant family columns: a base sprite's
     # `-V1` .. `-VN` stack directly beneath it, inheriting its geometry
-    # (#1038). The other `New` atlases leave this off and refuse the key.
+    # (#1038). Every other `New` atlas takes the same rule now - they are
+    # all loaded by the object tileset loader, which derives the identical
+    # families since #1053 - so no atlas generates against a sheet its
+    # loader would read differently.
     variant_families=True,
 )
 

@@ -69,10 +69,10 @@ namespace pf::render
 			// branch leaves it at the Old family because nothing downstream
 			// asks an object atlas which family it is (#1027).
 			SectorTilesetFamily family{ SectorTilesetFamily::Old };
-			// The variant counts the sector loader read off its base sprites
-			// (#1038). The object branch has none to carry: the object format
-			// refuses the key, so an empty map is what a successful load of
-			// one always holds.
+			// The variant counts the loader read off its base sprites (#1038,
+			// and off the object format's base sprites since #1053). A set that
+			// declares no families holds an empty map, which is the honest
+			// answer rather than a missing one.
 			std::map<std::string, int> variantCounts;
 		};
 
@@ -110,10 +110,13 @@ namespace pf::render
 			AuthoredAtlasTiles result;
 			result.tiles = std::move(set.sprites);
 			result.declaresRenderSemantics = set.declaresRenderSemantics;
-			// No variant counts travel back. The object format refuses a
-			// `variants` key outright, so an empty map is the whole of what a
-			// load that reached here could hold - stated rather than left to
-			// the default so the absence is seen to be deliberate (#1038).
+			// The variant counts travel back the same way they do for the
+			// sector format. A derived `door-V2` region does not say that
+			// `door` declared two of them, and the count is the author's
+			// statement rather than something the installed region map can be
+			// asked (#1053). A set that derives no families answers empty, which
+			// is the honest answer rather than a missing one.
+			result.variantCounts = std::move(set.variantCounts);
 			return result;
 		}
 
@@ -258,6 +261,9 @@ namespace pf::render
 			tiles.height = atlas.height;
 			tiles.sprites = atlas.tiles;
 			tiles.declaresRenderSemantics = atlas.declaresRenderSemantics;
+			// So do the variant counts, because a derived sprite says nothing
+			// about the base that declared it (#1053).
+			tiles.variantCounts = atlas.variantCounts;
 		}
 		catch (std::exception const& exception) { error = exception.what(); }
 		if (enforceObjectContract && tiles.declaresRenderSemantics && error.empty())

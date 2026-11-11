@@ -149,8 +149,9 @@ def derive_sprites(spec: AtlasSpec, tileset: dict) -> dict:
             continue
         if not spec.variant_families:
             raise SystemExit(f"{spec.tileset}: sprite '{name}' declares `variants`, "
-                            f"which {spec.atlas} has no family column to derive; "
-                            "only the sector tileset stacks variants beneath a base")
+                            f"which {spec.atlas} does not generate a family column "
+                            "for; the key belongs on a base sprite of a format that "
+                            "lays out the column beneath it")
         count = sprite["variants"]
         if isinstance(count, bool) or not isinstance(count, int):
             raise SystemExit(f"{spec.tileset}: sprite '{name}' `variants` must be a "

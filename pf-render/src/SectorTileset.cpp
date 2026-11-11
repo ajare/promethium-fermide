@@ -4,7 +4,6 @@
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
@@ -19,20 +18,6 @@ TextureId textureId{};
 constexpr std::array<char const*, 10> kSectorSurfaces{ "room", "corridor",
     "ladder", "lift", "shuttle", "stairwell", "staircase", "airlock",
     "chamber", "dumbwaiter" };
-
-// `-V` followed by digits and nothing else: exactly the shape the variant
-// derivation produces. A sprite authored under one of those names would
-// collide with whatever the family rule derives, and which of the two won
-// would come down to map order, so the name is refused before anything is
-// derived (#1038).
-bool isDerivedVariantName(std::string const& name)
-{
-    auto const mark = name.rfind("-V");
-    if (mark == std::string::npos || mark + 2 >= name.size()) return false;
-    for (auto it = name.begin() + mark + 2; it != name.end(); ++it)
-        if (!std::isdigit(static_cast<unsigned char>(*it))) return false;
-    return true;
-}
 
 // A version 2 sector tileset authors the same grid the object atlases use:
 // a cell in the artist's own layout, a content rectangle inside it, and
@@ -49,12 +34,14 @@ bool isDerivedVariantName(std::string const& name)
 // express, so the loader refuses it rather than drawing something that
 // contradicts its own repeat.
 //
-// A variant family is derived here rather than read. Each base sprite's
-// `variants: N` yields `-V1` .. `-VN` in the base's own column, one row
-// below the last, each inheriting the base's content rectangle, render
-// offset, drawn size and tintable flag. The author states the count and the
-// grid does the rest, so a variant's name and its position cannot disagree
-// with the family they belong to (#1038).
+// A variant family is derived by the shared grid rather than here. Each base
+// sprite's `variants: N` yields `-V1` .. `-VN` in the base's own column,
+// one row below the last, each inheriting the base's content rectangle,
+// render offset, drawn size and tintable flag. The author states the count
+// and the grid does the rest, so a variant's name and its position cannot
+// disagree with the family they belong to - and the object loader derives
+// the identical rule from the identical code rather than restating it
+// (#1038, #1053).
 SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
     YAML::Node const& root)
 {
@@ -76,11 +63,12 @@ SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
         AuthoredVariantFamilies::Derived);
     result.width = grid.width;
     result.height = grid.height;
-    for (auto const& [name, tile] : grid.tiles)
-        if (isDerivedVariantName(name))
-            throw std::runtime_error("Sector surface '" + name + "' uses a name the "
-                "variant derivation reserves; a family's variants are derived from "
-                "its base and are not authored beside it");
+    // The grid hands back the base sprites and their derived variants in one
+    // map, and every one of them is a surface: this format has no other kind
+    // of tile. A variant inherits its base's offset and drawn size, so the
+    // two checks below that a base passes its variants pass for the same
+    // reason, and a variant that somehow did not inherit them is refused
+    // here rather than drawn off the per-cell repeat rule.
     for (auto const& [name, artwork] : grid.tiles) {
         if (artwork.offset.x != 0.0f || artwork.offset.y != 0.0f)
             throw std::runtime_error("Sector surface '" + name
@@ -92,29 +80,11 @@ SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
                 "is per World cell");
         result.tiles.emplace(name, artwork);
         result.surfaces.emplace(name, artwork.region);
-        auto const declared = grid.variantCounts.find(name);
-        if (declared == grid.variantCounts.end()) continue;
-        // One row down the sheet is one authored tile height down, and the
-        // base's region is already resolved into image pixels, so a variant
-        // is the base's own rectangle shifted by that much. Everything else
-        // - the content it cuts, the offset it draws at, the size it draws
-        // at, whether it takes a tint - is the base's, unchanged.
-        for (int variant = 1; variant <= declared->second; ++variant) {
-            auto derived = artwork;
-            derived.region.y += variant * grid.tileHeight;
-            auto const variantName = name + "-V" + std::to_string(variant);
-            // The pre-pass above already refuses any authored name in this
-            // shape, so this is the backstop rather than the guard: it keeps a
-            // derivation that somehow collided from being silently swallowed,
-            // which is how a tile ends up drawing as something else.
-            if (!result.tiles.emplace(variantName, derived).second)
-                throw std::runtime_error("Sector surface '" + variantName
-                    + "' is derived from '" + name + "' and cannot also be authored "
-                    "beside the family it belongs to");
-            result.surfaces.emplace(variantName, derived.region);
-        }
-        result.variantCounts.emplace(name, declared->second);
     }
+    // The count is the author's own number, kept beside the base that stated
+    // it rather than counted back off the derived tiles, so a caller can ask
+    // how many variants a type declared (#1038).
+    result.variantCounts = grid.variantCounts;
     for (auto const* name : kSectorSurfaces)
         if (!result.surfaces.count(name))
             throw std::runtime_error("Missing sector surface: " + std::string(name));

@@ -1,7 +1,9 @@
 #include "AuthoredTileGrid.h"
 
 #include <cmath>
+#include <optional>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 // Reads one required pair of World-unit numbers out of a tileset node. A
@@ -32,19 +34,20 @@ pf::render::Vec2 requirePair(YAML::Node const& node, std::string const& tile,
 // of the author's statement about a family - the derived tiles' names and
 // cells come from it - so all the grid has to establish is that the key was
 // allowed here, that it says a whole number, and that the column it
-// describes has room to stand on the declared sheet. Naming the derived
-// tiles is left to the caller, because the vocabulary is the caller's and
-// not the grid's (#1038).
-void readVariantCount(YAML::Node const& sprite, std::string const& name,
-    std::string const& tileNoun, AuthoredVariantFamilies variantFamilies,
-    int row, int rows, AuthoredTileGrid& grid)
+// describes has room to stand on the declared sheet. Once the count is
+// settled the grid derives the family itself, so every format that takes the
+// capability gets the same rule rather than one copy per loader (#1038,
+// #1053).
+std::optional<int> readVariantCount(YAML::Node const& sprite,
+    std::string const& name, std::string const& tileNoun,
+    AuthoredVariantFamilies variantFamilies, int row, int rows)
 {
     auto const declared = sprite["variants"];
-    if (!declared.IsDefined()) return;
+    if (!declared.IsDefined()) return std::nullopt;
     if (variantFamilies == AuthoredVariantFamilies::Refused)
         throw std::runtime_error(tileNoun + " '" + name + "' declares `variants`, "
-            "which this format has no family column to derive; only a sector "
-            "tileset stacks variants beneath a base");
+            "which this format does not derive; the key belongs on a base "
+            "sprite of a format that lays out the family column beneath it");
     int count{};
     try { count = declared.as<int>(); }
     catch (YAML::Exception const&)
@@ -65,7 +68,64 @@ void readVariantCount(YAML::Node const& sprite, std::string const& name,
             + std::to_string(count) + " variants, which would run past the bottom "
             "of the declared sheet: the base sits at row " + std::to_string(row)
             + " of " + std::to_string(rows));
-    grid.variantCounts.emplace(name, count);
+    return count;
+}
+
+// One base sprite that declared a family, kept with the row it was authored
+// on so the derivation does not have to recover that row from a region that
+// has already had its content offset folded into it.
+struct DeclaredFamily
+{
+    std::string name;
+    int row{};
+    int count{};
+};
+
+// `-V` followed by digits and nothing else: exactly the shape the variant
+// derivation produces. A sprite authored under one of those names would
+// collide with whatever the family rule derives, and which of the two won
+// would come down to map order, so the name is refused before anything is
+// derived (#1038).
+bool isDerivedVariantName(std::string const& name)
+{
+    auto const mark = name.rfind("-V");
+    if (mark == std::string::npos || mark + 2 >= name.size()) return false;
+    for (auto it = name.begin() + mark + 2; it != name.end(); ++it)
+        if (!std::isdigit(static_cast<unsigned char>(*it))) return false;
+    return true;
+}
+
+// Expands one declared family into the grid. Variant *n* is `<base>-Vn`, in
+// the base's own column and one authored tile height further down per step,
+// and it inherits the base's content rectangle, render offset, drawn size
+// and tintable flag: adding a variant is a picture decision and never a
+// re-declaration of geometry. The count was already established to fit the
+// sheet, so every cell the family lands on exists.
+void deriveVariantFamily(DeclaredFamily const& family,
+    std::string const& tileNoun, AuthoredTileGrid& grid)
+{
+    auto const base = grid.tiles.find(family.name);
+    // The family was read off the same sprite this tile came from, so the
+    // base is here by construction. Saying so keeps a future edit from
+    // deriving a family onto a tile that was never put in the map.
+    if (base == grid.tiles.end())
+        throw std::runtime_error(tileNoun + " '" + family.name
+            + "' declared a variant family but is not in the grid it was "
+            "declared on");
+    for (int variant = 1; variant <= family.count; ++variant) {
+        auto derived = base->second;
+        derived.region.y += variant * grid.tileHeight;
+        auto const variantName = family.name + "-V" + std::to_string(variant);
+        // The pass over the authored names already refuses anything shaped
+        // like a derived tile, so this is the backstop rather than the
+        // guard: it keeps a derivation that somehow collided from being
+        // silently swallowed, which is how a tile ends up drawing as
+        // something else.
+        if (!grid.tiles.emplace(variantName, derived).second)
+            throw std::runtime_error(tileNoun + " '" + variantName + "' is "
+                "derived from '" + family.name + "' and cannot also be authored "
+                "beside the family it belongs to");
+    }
 }
 } // namespace
 
@@ -93,6 +153,13 @@ AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
     if (!root["sprites"].IsMap())
         throw std::runtime_error("Missing " + tileNoun + " definitions");
     int const rows = grid.height / th;
+    // Families are derived in a second pass, after every authored sprite has
+    // been read. Deriving inside this loop would let a base declared early
+    // claim a `-Vn` name before a later authored sprite of that same name
+    // had even been seen, and the refusal that came back would be a
+    // duplicate-key complaint about the derivation rather than the plain
+    // statement that the name is not the author's to write.
+    std::vector<DeclaredFamily> families;
     for (auto const& item : root["sprites"]) {
         auto const v = item.second;
         if (!v["cell"].IsSequence() || v["cell"].size() != 2 ||
@@ -107,6 +174,11 @@ AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
             throw std::runtime_error(tileNoun + " is outside its cell");
         r.x += column * tw; r.y += row * th;
         auto const name = item.first.as<std::string>();
+        if (variantFamilies == AuthoredVariantFamilies::Derived
+            && isDerivedVariantName(name))
+            throw std::runtime_error(tileNoun + " '" + name + "' uses a name the "
+                "variant derivation reserves; a family's variants are derived "
+                "from its base and are not authored beside it");
         TileArtwork artwork{ r, v["tintable"].as<bool>(), { 0.0f, 0.0f }, { 0.0f, 0.0f } };
         if (declaresRenderSemantics)
         {
@@ -132,7 +204,14 @@ AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
         }
         if (!grid.tiles.emplace(name, artwork).second)
             throw std::runtime_error("Duplicate " + tileNoun);
-        readVariantCount(v, name, tileNoun, variantFamilies, row, rows, grid);
+        if (auto const count = readVariantCount(v, name, tileNoun,
+                variantFamilies, row, rows))
+        {
+            grid.variantCounts.emplace(name, *count);
+            families.push_back({ name, row, *count });
+        }
     }
+    for (auto const& family : families)
+        deriveVariantFamily(family, tileNoun, grid);
     return grid;
 }
