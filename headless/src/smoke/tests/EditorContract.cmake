@@ -256,6 +256,18 @@ set(editor_names
     palette/trayAlwaysOverlapsTheCanvas
     palette/aCanvasSmallerThanTheTrayClipsTheTray
     palette/paddingAndGapsAreTheGrip
+    sectorVariantStrip/stripIsBasePlusEveryDeclaredVariant
+    sectorVariantStrip/theCountComesFromTheTilesetQuery
+    sectorVariantStrip/everySwatchHasItsTileInTheInstalledAtlas
+    sectorVariantStrip/aToolThatPaintsNoSurfaceShowsNoStrip
+    sectorVariantStrip/noAtlasInstalledShowsNoStrip
+    sectorVariantStrip/pickingHighlightsAndTheNextPickMoves
+    sectorVariantStrip/aPickOutsideTheStripIsRefused
+    sectorVariantStrip/aDifferentStripRetiresThePickAndTheSameOneKeepsIt
+    sectorVariantStrip/clearingTakesTheHighlightAndKeepsTheStrip
+    sectorVariantStrip/aSwatchIsAtlasArtworkWithItsTileNameOverlaid
+    sectorVariantStrip/theStripIsARowOfTheTrayAndFitsInsideIt
+    sectorVariantStrip/theStripStartsUnderTheToolItBelongsTo
     world-artwork/newDefaultsShowOnAFreshWorld
     world-artwork/repointedAtlasIsReportedBySlot
     history/independentHistoriesDoNotLeakCommandsOrState

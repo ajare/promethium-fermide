@@ -36,6 +36,7 @@ add_library(pf-agent-editing STATIC
     src/MarkerPanel.cpp
     src/PermissionsPanel.cpp
     src/PreviewControls.cpp
+    src/SectorVariantStrip.cpp
     src/TagsPanel.cpp
 )
 target_include_directories(pf-agent-editing PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

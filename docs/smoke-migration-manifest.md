@@ -101,6 +101,8 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/editor/Isolation.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/Palette.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/WorldArtworkPanel.cpp` | The World artwork panel's four bound reads on a fresh World: new-family defaults shown, no straddle report, unmodified document, runtime agreeing, and a repointed atlas reported by slot | `pf-smoke-editor` |
+| `smoke/editor/SectorVariantStrip.cpp` | The palette's variant sub-strip: base plus exactly the declared variants, the count read from the tileset's per-kind query, no swatch without its tile, no strip for a tool that paints no surface, pick-and-move selection, swatch artwork with the tile name overlaid, and the strip's tray geometry | `pf-smoke-editor` |
+| `smoke/render/SectorTilePreview.cpp` | The single-tile Sector preview draw: one tile framed into an arbitrary rect, whole-tile sampling, a variant framing its own row, and refusal with nothing drawn when there is no tile | `pf-smoke-render` |
 | `smoke/metrics/Metrics.cpp` | module-owned | `pf-smoke-metrics` |
 | `smoke/permissions/Access.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/permissions/AccessEditor.cpp` | module-owned | `pf-smoke-editor` |

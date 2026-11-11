@@ -139,6 +139,25 @@ bool drawSectorTileSurfacePerCell(WorldDrawList* drawList, Vec2 minimum,
 // what a Sector with no per-cell artwork resolves to (#1039).
 bool drawSectorTileSurface(std::string const& kind, WorldDrawList* drawList,
     Vec2 minimum, Vec2 maximum, PackedColourValue tint, float zoom = 1.0f);
+// Frames one whole tile into an arbitrary screen rect (#1041).
+//
+// This is the swatch draw, not the World draw. The surface path above cuts
+// its area into World cells, anchors the grid on the area's floor line and
+// crops whatever stands above the ceiling, so it needs a cell size, a zoom
+// and a floor to be anchored on. A swatch has none of those: it wants the
+// whole tile inside the box it was handed, whatever that box's size or
+// aspect. One tile in, one image out - no cell grid is walked, so a swatch
+// cannot come out as a partial repeat of its own tile, and no zoom or floor
+// line has any say in what it shows.
+//
+// Returns false when no atlas is installed or the named tile is not in it.
+// Unlike the per-cell surface path it draws no missing-art magenta for such
+// a tile: a swatch is a choice offered to an author, and a choice with no
+// artwork behind it should not be offered at all rather than drawn in the
+// colour that means broken. A rect with no area emits no command and still
+// counts as framed, because the tile was there.
+bool drawSectorTilePreview(std::string const& kind, WorldDrawList* drawList,
+    Vec2 minimum, Vec2 maximum, PackedColourValue tint = White);
 bool drawSectorTileBoundary(char const* kind, WorldDrawList* drawList,
     Vec2 minimum, Vec2 maximum);
 

@@ -42,6 +42,11 @@ inline constexpr float PaletteSlotWidth{ 96.0f };
 inline constexpr float PaletteGap{ 6.0f };
 inline constexpr float PalettePadding{ 6.0f };
 inline constexpr float PaletteTopMargin{ 14.0f }; // exposed grip above the buttons
+// A variant swatch is wider than a tool slot so the whole tile name fits
+// across its thumbnail (#1041). The longest name a family can put on the
+// tray is the longest base plus its `-Vn` suffix, and at the tray's fixed
+// canvas font that reads wider than a 96-pixel button.
+inline constexpr float PaletteSwatchWidth{ 128.0f };
 
 inline constexpr int paletteSlotRow(PaletteSlot slot)
 {
@@ -102,15 +107,21 @@ inline constexpr int paletteRowCount()
 	return tallest;
 }
 
-inline constexpr ImVec2 paletteTraySize(bool furnitureRow = false)
+inline constexpr ImVec2 paletteTraySize(bool furnitureRow = false,
+	int variantRows = 0)
 {
+	// Every row below the first costs one slot height plus one gap, whether
+	// it was the Furniture row or a row of the variant sub-strip (#1041).
+	// Left defaulted, every existing caller gets the size it always got.
+	auto const extraRows = (furnitureRow ? 1 : 0)
+		+ (variantRows > 0 ? variantRows : 0);
 	return ImVec2(PalettePadding * 2.0f
 			+ PaletteSlotWidth * static_cast<float>(paletteColumnCount())
 			+ PaletteGap * static_cast<float>(paletteColumnCount() - 1),
 		PaletteTopMargin + PalettePadding
 			+ PaletteSlotSize * static_cast<float>(paletteRowCount())
 			+ PaletteGap * static_cast<float>(paletteRowCount() - 1)
-			+ (furnitureRow ? PaletteSlotSize + PaletteGap : 0.0f));
+			+ static_cast<float>(extraRows) * (PaletteSlotSize + PaletteGap));
 }
 
 inline constexpr ImVec2 paletteSlotMin(ImVec2 trayTopLeft, PaletteSlot slot)
@@ -172,6 +183,77 @@ inline constexpr ImVec2 paletteLabelPosition(ImVec2 slotMin, ImVec2 slotMax,
 	};
 }
 
+// The variant sub-strip (#1041).
+//
+// When a Sector paint tool is selected the tray grows one further row
+// beneath its existing rows and shows one swatch per tile that type
+// declares. The swatches are wider than the tool buttons, so how many fit
+// in a row is its own count rather than the tool grid's column count, and
+// a strip that cannot fit in one row wraps into another.
+
+// The row the strip starts in: below every row the tray already has.
+inline constexpr int paletteVariantStripRow(bool furnitureRow)
+{
+	return paletteRowCount() + (furnitureRow ? 1 : 0);
+}
+
+// How many swatches fit across the tray's inner width.
+inline constexpr int paletteVariantSwatchesPerRow()
+{
+	auto const inner = paletteTraySize().x - PalettePadding * 2.0f;
+	auto const step = PaletteSwatchWidth + PaletteGap;
+	auto const fitted = static_cast<int>((inner + PaletteGap) / step);
+	return fitted > 0 ? fitted : 1;
+}
+
+// How many rows a strip of `swatchCount` swatches takes.
+inline constexpr int paletteVariantStripRows(int swatchCount)
+{
+	if (swatchCount <= 0) return 0;
+	return (swatchCount + paletteVariantSwatchesPerRow() - 1)
+		/ paletteVariantSwatchesPerRow();
+}
+
+// Where the strip starts along x. It wants to start under the selected
+// tool's own column; it is pulled back only as far as its own first row
+// must be to stay inside the tray, and never past the tray's inner left
+// edge. Clamping against the row the strip actually lays out, rather than
+// against the widest row the tray could hold, is what keeps a strip under a
+// tool near the right end of the tray from sliding all the way to the left.
+inline constexpr float paletteVariantStripOriginX(ImVec2 trayTopLeft,
+	int toolColumn, int swatchCount)
+{
+	auto const left = trayTopLeft.x + PalettePadding;
+	auto const inner = paletteTraySize().x - PalettePadding * 2.0f;
+	auto const perRow = paletteVariantSwatchesPerRow();
+	auto const firstRow = swatchCount < perRow ? (swatchCount > 0 ? swatchCount : 0)
+		: perRow;
+	auto const rowWidth = static_cast<float>(firstRow)
+		* (PaletteSwatchWidth + PaletteGap) - (firstRow > 0 ? PaletteGap : 0.0f);
+	auto const limit = left + (inner > rowWidth ? inner - rowWidth : 0.0f);
+	auto const wanted = left + static_cast<float>(toolColumn > 0 ? toolColumn : 0)
+		* (PaletteSlotWidth + PaletteGap);
+	return wanted > limit ? limit : wanted;
+}
+
+inline constexpr ImVec2 paletteVariantSwatchMin(ImVec2 trayTopLeft, int index,
+	float originX, int stripRow)
+{
+	auto const perRow = paletteVariantSwatchesPerRow();
+	return ImVec2(originX
+			+ static_cast<float>(index % perRow) * (PaletteSwatchWidth + PaletteGap),
+		trayTopLeft.y + PaletteTopMargin
+			+ static_cast<float>(stripRow + index / perRow)
+				* (PaletteSlotSize + PaletteGap));
+}
+
+inline constexpr ImVec2 paletteVariantSwatchMax(ImVec2 trayTopLeft, int index,
+	float originX, int stripRow)
+{
+	auto const minimum = paletteVariantSwatchMin(trayTopLeft, index, originX, stripRow);
+	return ImVec2(minimum.x + PaletteSwatchWidth, minimum.y + PaletteSlotSize);
+}
+
 // Where a dragged tray ends up, kept inside the view canvas (ticket #41).
 //
 // The tray is clamped to the canvas so it can never be dragged out of reach.
@@ -179,9 +261,9 @@ inline constexpr ImVec2 paletteLabelPosition(ImVec2 slotMin, ImVec2 slotMax,
 // collapses onto the canvas' top-left corner: the tray stays anchored there
 // and the canvas clips its overflow instead of the tray sliding away.
 inline constexpr ImVec2 paletteClampTopLeft(ImVec2 canvasMin, ImVec2 canvasSize,
-	ImVec2 trayTopLeft, bool furnitureRow = false)
+	ImVec2 trayTopLeft, bool furnitureRow = false, int variantRows = 0)
 {
-	auto const traySize = paletteTraySize(furnitureRow);
+	auto const traySize = paletteTraySize(furnitureRow, variantRows);
 	auto const clampAxis = [](float value, float limitMin, float limitMax)
 	{
 		return value < limitMin ? limitMin : (value > limitMax ? limitMax : value);

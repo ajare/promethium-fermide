@@ -242,6 +242,37 @@ The render smoke module checks the committed manifest, the paired `Image` and th
 atlas-set registry entry against the tileset on every run, so a drift fails the
 build rather than showing up as artwork in the wrong place.
 
+## The palette's variant sub-strip
+
+A declared family is only usable if the author can see it. Selecting a Sector paint
+tool in the editor reveals a sub-strip of that type's swatches beneath the tool:
+the base tile first, then `V1` .. `VN`, one swatch per tile the installed atlas
+declares (#1041). The count comes from `sectorSurfaceVariantCount(kind)` rather
+than from a number the editor keeps, so changing what a base sprite declares
+changes the strip and nothing in the editor is touched between one count and the
+next. A swatch is never offered without the tile behind it, so there is no empty
+slot an author can pick, and a type that declares nothing shows its base alone.
+
+Background and Facade get no strip. They are Sector types authored as flat colour,
+they never ask the atlas for a tile, and a variant entry on a record that draws no
+tiled surface is refused at load, so a swatch under either would be a choice that
+could never be drawn.
+
+Each swatch is the atlas tile itself, framed into the swatch's box with its tile
+name over the artwork - which is what keeps the strip readable on a placeholder
+sheet and needs no change when real art arrives. Framing is `drawSectorTilePreview`,
+which is deliberately not the World's surface draw: that one cuts its area into
+World cells, anchors on the Sector's floor line and crops whatever stands above
+the ceiling, and a swatch has no cells, no floor and no zoom to be anchored on.
+One tile in, one image out, whatever the box.
+
+The strip is a row of the tray rather than a panel floating over the canvas: the
+tray grows by exactly the rows the swatches need, the swatches sit below every
+row of buttons, and the strip starts under the tool it belongs to and is pulled
+back only as far as it must be to stay inside the tray. Nothing is painted from a
+swatch yet - the pick is what the strip highlights, and what it does to the World
+is the next ticket's business.
+
 ## The version 1 draft set
 
 `resources/textures/sectors.tileset.yaml` is the version 1 format: explicit

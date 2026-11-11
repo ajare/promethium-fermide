@@ -27,6 +27,8 @@
 #include "imgui/imgui_internal.h"
 #include "imgui/IconsFontAwesome5.h"
 #include "PaletteLayout.h"
+#include "PaintTool.h"
+#include "SectorVariantStrip.h"
 #include "ObjectTileset.h"
 #include "DocumentEdit.h"
 #include "DocumentSaveSeam.h"
@@ -319,23 +321,9 @@ namespace
 		}
 	}
 
-	enum class PaintTool
-	{
-		None,
-		Room,
-		Facade,
-		Corridor,
-		Background,
-		Ladder,
-		Stairwell,
-		Staircase,
-		Lift,
-		Shuttle,
-		Airlock,
-		Dumbwaiter,
-		Chamber
-	};
-
+	// PaintTool itself lives in pf-agent-editing's PaintTool.h (#1041), so
+	// the tool-to-Sector-kind mapping that sizes the variant sub-strip can
+	// be checked headlessly instead of only seen on the tray.
 	struct PaintState
 	{
 		PaintTool tool{ PaintTool::None };
@@ -344,6 +332,12 @@ namespace
 		int anchorX{ 0 };
 		int anchorY{ 0 };
 		core::Vector2 anchorPosition;
+		// The swatch picked from the selected tool's variant sub-strip
+		// (#1041). It owns the strip it was made on, so the tray can put a
+		// fresh strip under it every frame and a pick the current tool does
+		// not offer is retired with the tool that made it. Nothing is
+		// painted from it yet - the pick is what the strip highlights.
+		SectorSwatchSelection swatches;
 	};
 
 	struct PaintRectangle
@@ -501,7 +495,15 @@ namespace
 	void resetPaint(bool clearTool = true)
 	{
 		gPaint.dragging = false;
-		if (clearTool) gPaint.tool = PaintTool::None;
+		if (clearTool)
+		{
+			gPaint.tool = PaintTool::None;
+			// The strip goes with the tool and the pick goes with the strip.
+			// A pick left behind would be a highlight on a swatch that is no
+			// longer on screen, and the next tool would inherit a choice
+			// nobody made for it.
+			gPaint.swatches.clear();
+		}
 	}
 
 	bool pointInRect(ImVec2 point, ImVec2 min, ImVec2 max)
@@ -1821,18 +1823,48 @@ namespace
 		}
 
 		bool const furnitureRow = gLocationPlan.isOpen(world);
-		auto const traySize = paletteTraySize(furnitureRow);
+		// The variant sub-strip the selected tool shows, if any (#1041).
+		// Asked before the tray is sized because the strip is a row of the
+		// tray: it has to be inside the size the tray is clamped, drawn and
+		// hit-tested at. Putting the strip under the selection every frame
+		// is also what retires a pick the newly selected tool does not offer.
+		gPaint.swatches.setSwatches(sectorVariantSwatches(gPaint.tool));
+		int const swatchCount = static_cast<int>(gPaint.swatches.size());
+		int const variantRows = paletteVariantStripRows(swatchCount);
+		auto const traySize = paletteTraySize(furnitureRow, variantRows);
 		auto const trayHomeTopLeft = canvasPos + canvasSize
 			- ImVec2(PaletteInset, PaletteInset) - traySize;
 		auto const trayTopLeft = paletteClampTopLeft(canvasPos, canvasSize,
-			trayHomeTopLeft + gPaletteTrayOffset, furnitureRow);
+			trayHomeTopLeft + gPaletteTrayOffset, furnitureRow, variantRows);
 		auto const trayBottomRight = trayTopLeft + traySize;
-		// The grip is the tray minus its buttons: the padding and the slot gaps.
+		// The grip is the tray minus its buttons: the padding and the slot
+		// gaps, and minus the swatches, which are picked rather than grabbed.
 		bool overTray = gWorldHovered && pointInRect(io.MousePos, trayTopLeft, trayBottomRight);
 		auto const furnitureMin = paletteFurnitureSlotMin(trayTopLeft, 0);
 		bool overFurniture = furnitureRow && overTray && io.MousePos.y >= furnitureMin.y
 			&& io.MousePos.y < furnitureMin.y + PaletteSlotSize;
-		bool overGrip = overTray && !overFurniture && !paletteButtonAt(trayTopLeft, io.MousePos);
+		// Which swatch, if any, is under the cursor. The strip starts under
+		// the selected tool's own column, so the hit test uses the same
+		// origin the strip is drawn at and a swatch is where it was painted.
+		auto const stripRow = paletteVariantStripRow(furnitureRow);
+		auto const toolSlot = paletteSlotForPaintTool(gPaint.tool);
+		auto const stripOriginX = paletteVariantStripOriginX(trayTopLeft,
+			toolSlot ? paletteSlotColumn(*toolSlot) : 0, swatchCount);
+		int swatchUnderCursor = -1;
+		for (int index = 0; index < swatchCount; ++index)
+		{
+			auto const swatchMin = paletteVariantSwatchMin(trayTopLeft, index,
+				stripOriginX, stripRow);
+			auto const swatchMax = paletteVariantSwatchMax(trayTopLeft, index,
+				stripOriginX, stripRow);
+			if (overTray && pointInRect(io.MousePos, swatchMin, swatchMax))
+			{
+				swatchUnderCursor = index;
+				break;
+			}
+		}
+		bool overGrip = overTray && !overFurniture && swatchUnderCursor < 0
+			&& !paletteButtonAt(trayTopLeft, io.MousePos);
 		auto roomMin = paletteSlotMin(trayTopLeft, PaletteSlot::Room);
 		auto facadeMin = paletteSlotMin(trayTopLeft, PaletteSlot::Facade);
 		auto corridorMin = paletteSlotMin(trayTopLeft, PaletteSlot::Corridor);
@@ -2001,6 +2033,42 @@ namespace
 		drawForceBridgeIcon(drawList, forceBridgeMin, forceBridgeMax, IM_COL32(0, 255, 0, 255));
 		drawLadderIcon(drawList, roomLadderMin, roomLadderMax, yellow);
 		drawPlatformLiftIcon(drawList, platformLiftMin, platformLiftMax, yellow);
+
+		// The variant sub-strip (#1041): one swatch per tile the selected
+		// type declares, framed from the atlas with its tile name over it,
+		// and the picked one lit. Nothing is painted from a swatch here -
+		// the strip says what is chosen, not what the World will be drawn
+		// as - and with no tool selected there is no strip at all, because
+		// there is no type whose family to show.
+		for (int index = 0; index < swatchCount; ++index)
+		{
+			auto const swatchMin = paletteVariantSwatchMin(trayTopLeft, index,
+				stripOriginX, stripRow);
+			auto const swatchMax = paletteVariantSwatchMax(trayTopLeft, index,
+				stripOriginX, stripRow);
+			bool const picked = gPaint.swatches.isSelected(index);
+			bool const overSwatch = swatchUnderCursor == index;
+			if (picked)
+				drawList->AddRectFilled(toVec2(swatchMin), toVec2(swatchMax),
+					selectedColour, 3.0f);
+			// The artwork is set in from the frame so the lit background and
+			// the border both stay visible around a tile whose art is opaque.
+			drawSectorVariantSwatch(gPaint.swatches.swatches()[index], drawList,
+				toVec2(swatchMin + ImVec2(4.0f, 4.0f)),
+				toVec2(swatchMax - ImVec2(4.0f, 4.0f)), White);
+			drawList->AddRect(toVec2(swatchMin), toVec2(swatchMax),
+				picked || overSwatch ? yellow : borderColour, 3.0f);
+		}
+		if (swatchUnderCursor >= 0 && gPegman.phase == PalettePhase::Home
+			&& !gTrayDrag.dragging && !gViewPan.dragging)
+		{
+			paletteConsumedMouse = true;
+			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+			ImGui::SetTooltip("%s",
+				gPaint.swatches.swatches()[static_cast<std::size_t>(swatchUnderCursor)]
+					.tileName.c_str());
+			if (io.MouseClicked[0]) gPaint.swatches.pick(swatchUnderCursor);
+		}
 
 		bool paintWasActive = gPaint.tool != PaintTool::None;
 		if (paintWasActive && (ImGui::IsKeyPressed(ImGuiKey_Escape)

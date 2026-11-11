@@ -598,6 +598,7 @@ pf_add_smoke_module(pf-smoke-render
         render/SectorSurfaceDrawContract.cpp
         render/SectorSurfacePerCellResolution.cpp
         render/SectorSurfaceVariants.cpp
+        render/SectorTilePreview.cpp
         render/SerializationRendering.cpp
         render/AgentPoses.cpp
         render/FontMetrics.cpp
@@ -699,6 +700,7 @@ pf_add_smoke_module(pf-smoke-editor
         editor/BrokenPlatformLifts.cpp
         editor/BrokenShuttles.cpp
         editor/Palette.cpp
+        editor/SectorVariantStrip.cpp
         editor/History.cpp
         editor/WorldArtworkPanel.cpp
     LIBRARIES pf-agent-editing pf-agent-resources pf-headless-render-support

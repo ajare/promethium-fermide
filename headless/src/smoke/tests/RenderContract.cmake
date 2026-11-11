@@ -107,6 +107,15 @@ set(names
     sectorSurfaceVariants/aMissingBaseTileStillDrawsTheMissingArtMagenta
     sectorSurfaceVariants/theOldFamilyDrawsBaseOnEveryVariantCellAndKeepsTheEntries
     sectorSurfaceVariants/aVariantChangesThePictureAndNotTheGeometry
+    sectorTilePreview/oneTileFramesTheRectItIsGiven
+    sectorTilePreview/anyRectFramesOneTileAndNotACellGrid
+    sectorTilePreview/itIsOneTileWhereTheWorldRepeatIsFour
+    sectorTilePreview/aShortRectIsCroppedByTheWorldAndNotByTheSwatch
+    sectorTilePreview/aVariantFramesItsOwnRowAndNotItsBases
+    sectorTilePreview/noAtlasInstalledFramesNothing
+    sectorTilePreview/aTileTheAtlasDoesNotCarryIsRefusedWithoutMagenta
+    sectorTilePreview/aRectWithNoAreaIsFramedWithNothingInIt
+    sectorTilePreview/cornersTheOtherWayRoundStillFrameTheSameBox
     agentAtlasNew/twentyTilesAreRegistered
     agentAtlasNew/twoTypesNamingOneAppearanceShareTheirTiles
     agentAtlasNew/genericAppearanceIsTheFallbackForATypeWithNoArtwork

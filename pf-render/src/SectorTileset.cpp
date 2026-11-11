@@ -334,6 +334,35 @@ bool drawSectorTileSurface(std::string const& kind, WorldDrawList* list,
         [&](std::uint32_t, std::uint32_t) { return kind; });
 }
 
+bool drawSectorTilePreview(std::string const& kind, WorldDrawList* list,
+    Vec2 minimum, Vec2 maximum, PackedColourValue tint)
+{
+    // No atlas, or no tile under that name: nothing to frame, and the caller
+    // is told so it can leave the swatch off rather than show an empty one.
+    if (!textureId || !list) return false;
+    auto const found = active.surfaces.find(kind);
+    if (found == active.surfaces.end() || active.width <= 0 || active.height <= 0)
+        return false;
+    // The rect may be handed over either way round; frame the tile inside
+    // whichever corners it actually spans.
+    auto const left = std::min(minimum.x, maximum.x);
+    auto const right = std::max(minimum.x, maximum.x);
+    auto const top = std::min(minimum.y, maximum.y);
+    auto const bottom = std::max(minimum.y, maximum.y);
+    // A rect with no area has nothing to frame, but the tile was found, so
+    // this is a yes with no command rather than a missing tile.
+    if (left == right || top == bottom) return true;
+    // The whole tile, both fraction pairs running end to end. Nothing is
+    // cropped and nothing is repeated: whatever the rect's aspect, the tile's
+    // top-left lands on the rect's top-left and its bottom-right on the
+    // rect's bottom-right. The authored render offset and drawn size are
+    // World-space facts about how a Sector wears the tile and say nothing
+    // about how a swatch frames it, so they are not consulted here.
+    image(list, found->second, { left, top }, { right, bottom }, 0.0f, 1.0f,
+        0.0f, 1.0f, tint);
+    return true;
+}
+
 bool drawSectorTileBoundary(char const* kind, WorldDrawList* list, Vec2 a, Vec2 b)
 {
     if (!textureId) return false;
