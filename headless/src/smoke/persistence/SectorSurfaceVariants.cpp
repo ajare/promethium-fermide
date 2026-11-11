@@ -32,6 +32,8 @@
 #include "core/Sector.h"
 #include "core/SectorSurfaceVariant.h"
 #include "core/BinarySerializer.h"
+#include "core/ChamberSubtype.h"
+#include "core/Defines.h"
 #include "core/Exceptions.h"
 #include "core/SerializationException.h"
 #include "core/World.h"
@@ -207,6 +209,150 @@ namespace persistence
 				if (world.getSector(index)->getName() == name) return world.getSector(index);
 			return nullptr;
 		}
+
+		// The refusal's text, not only that a refusal happened. The message is
+		// the author's one notice of which cell was miscounted, so the checks
+		// that care about it assert it names the column and level rather than
+		// merely that something threw.
+		bool refusedWith(std::function<void()> action, std::string* reason)
+		{
+			try { action(); }
+			catch (core::SerializationException const& e) { *reason = e.what(); return true; }
+			catch (core::WorldException const& e) { *reason = e.what(); return true; }
+			catch (std::exception const& e) { *reason = e.what(); return true; }
+			reason->clear();
+			return false;
+		}
+
+		// The smallest World whose saved document carries one record of one
+		// type, for every record type that can carry variants. Each type gets
+		// its own fixture so a refusal for one of them cannot be hiding a
+		// record that was never there to refuse, and so the same refusal is
+		// seen arriving down ten different replay paths rather than one.
+		struct TypeFixture
+		{
+			char const* type;
+			std::function<void(core::World&)> build;
+		};
+
+		std::vector<TypeFixture> variantCarryingFixtures()
+		{
+			return {
+				{ "corridor", [](core::World& w) { w.addCorridor(0, 1, 1, 4, 1); } },
+				{ "room", [](core::World& w) { w.addRoom("Room", 0, 1, 1, 4, 2); } },
+				{ "ladder", [](core::World& w)
+					{
+						w.addCorridor(0, 0, 12); w.addCorridor(3, 0, 12);
+						w.addLadder(1, 0, 2, { 4, false, false });
+					} },
+				{ "stairwell", [](core::World& w)
+					{
+						w.addCorridor(0, 0, 12); w.addCorridor(1, 0, 12);
+						w.addStairwell(1, 0, 2, 2, CORE_SIDE_LEFT);
+					} },
+				{ "staircase", [](core::World& w)
+					{
+						w.addCorridor(0, 0, 12); w.addCorridor(1, 0, 12);
+						w.addStaircase(1, 0, 4, { 3, CORE_SIDE_RIGHT, 0.f });
+					} },
+				{ "lift", [](core::World& w)
+					{
+						w.addCorridor(0, 0, 12); w.addCorridor(3, 0, 12);
+						core::World::CreateLiftOptions options;
+						options.cellsWide = 1;
+						options.stopOffsets = { 0, 3 };
+						options.capacity = 2;
+						w.addLift(1, 0, 6, options);
+					} },
+				{ "shuttle", [](core::World& w)
+					{
+						w.addCorridor(0, 0, 40); w.addCorridor(2, 0, 40);
+						core::World::CreateShuttleOptions options;
+						options.numCars = 1;
+						options.carWidth = 4;
+						options.stopOffsets = { 0, 24 };
+						options.initialStop = 0;
+						w.addShuttle(1, 0, 4, 36, options);
+					} },
+				{ "airlock", [](core::World& w)
+					{
+						w.addRoom("Left", 0, 0, 0, 4, 1);
+						w.addRoom("Right", 0, 0, 6, 4, 1);
+						w.addAirlock(0, 0, 4, 2, 1.f);
+					} },
+				{ "chamber", [](core::World& w)
+					{
+						w.addRoom("Left", 0, 0, 0, 4, 1);
+						w.addRoom("Right", 0, 0, 6, 4, 1);
+						w.addChamber(0, 0, 4, 2, true, core::ChamberSubtype::Decontamination);
+					} },
+				{ "dumbwaiter", [](core::World& w)
+					{
+						w.addCorridor(0, 0, 8); w.addCorridor(1, 0, 8);
+						w.addDumbwaiter(1, 0, 3);
+					} },
+			};
+		}
+
+		// One entry authored onto the fixture's own record type, at its first
+		// cell, which every one of these Sectors has.
+		std::string authoredOn(TypeFixture const& fixture, uint32_t variant)
+		{
+			core::World world("Variant refusal fixture", 48, 12);
+			fixture.build(world);
+			world.finishBuild();
+			world.pauseSimulation();
+			auto document = YAML::Load(serialize(world));
+			setRecordVariants(document, fixture.type, { { 0, 0, variant } });
+			return YAML::Dump(document);
+		}
+
+		bool anySectorWears(WorldPtr const& world, Entries const& entries)
+		{
+			for (uint32_t index = 0; index < world->getNumSectors(); ++index)
+				if (world->getSector(index)->getSurfaceVariants() == entries) return true;
+			return false;
+		}
+
+		// A binary document recording one variant number on a Room's cell 2,1.
+		std::string binaryRecordingVariant(uint32_t variant)
+		{
+			core::World world("Binary variant fixture", 12, 8);
+			world.addRoom("Room", 0, 1, 1, 4, 2);
+			world.finishBuild();
+			world.pauseSimulation();
+			std::string diagnostic;
+			require(world.setSectorSurfaceVariant(0, 2, 1, variant, &diagnostic),
+				"The authoring seam refused the binary fixture's own variant: " + diagnostic);
+			return serializeBinary(world);
+		}
+
+		// The same document with that number set to zero, made by patching the
+		// one byte the variant occupies rather than by hand-writing the wire
+		// format. The patch is checked against the two documents it came from -
+		// equal length, exactly one differing byte, holding 1 in one and 2 in
+		// the other - so a wire format that moved the number fails this check
+		// loudly instead of quietly authoring nothing at all.
+		std::string binaryRecordingVariantZero()
+		{
+			auto const one = binaryRecordingVariant(1);
+			auto const two = binaryRecordingVariant(2);
+			require(one.size() == two.size(),
+				"The two binary documents that differ only by a variant number "
+				"differ in length, so the patched one is not what it claims to be");
+			std::vector<size_t> differing;
+			for (size_t offset = 0; offset < one.size(); ++offset)
+				if (one[offset] != two[offset]) differing.push_back(offset);
+			require(differing.size() == 1,
+				"The variant number is not the one byte this patch aims at: the two "
+				"documents differ at " + std::to_string(differing.size()) + " offsets");
+			require(static_cast<uint8_t>(one[differing[0]]) == 1
+					&& static_cast<uint8_t>(two[differing[0]]) == 2,
+				"The byte this patch overwrites does not hold the variant numbers 1 and 2");
+			auto zero = one;
+			zero[differing[0]] = '\0';
+			return zero;
+		}
 	}
 
 	// Save, reload, entries intact.
@@ -374,6 +520,152 @@ namespace persistence
 		auto const shared = authoredRoomWorld({ { 1, 0, 4 }, { 2, 0, 4 } });
 		require(shared->getSector(0)->getSurfaceVariants().size() == 2,
 			"The same variant on two different cells was refused");
+	}
+
+	// A document that records variant 0 is refused at load (#1049).
+	//
+	// The authoring seam has always refused it, and the load seam took whatever
+	// the file said. So a hand-authored `variant: 0` reached the Sector, the
+	// per-cell query answered 0 for a cell that is the base, and the save kept
+	// writing a field for a Sector visually identical to base. The renderer
+	// papers over it - there is no `-V0` tile, so it draws the base - which is
+	// exactly why the disagreement survived: the picture was right and the data
+	// was wrong, so nothing looked broken and nothing got fixed.
+	//
+	// Refused, not repaired. A silent drop would read as a clean load and hide
+	// the miscount, which is the same reasoning that made the bounds rule and
+	// the duplicate rule refusals rather than repairs.
+	void aVariantZeroEntryIsRefusedAtLoad(smoke::Context const&)
+	{
+		std::string reason;
+		require(refusedWith([] { (void)authoredRoomWorld({ { 0, 0, 0 } }); }, &reason),
+			"A Room record carrying variant 0 was accepted");
+		require(reason.find("column 0") != std::string::npos
+				&& reason.find("level 0") != std::string::npos,
+			"The refusal does not name the cell it refused: " + reason);
+
+		// The cell named is the entry's own, not a fixed one, so an author
+		// reading the message can find the line that is wrong.
+		require(refusedWith([] { (void)authoredRoomWorld({ { 3, 1, 0 } }); }, &reason),
+			"An entry at the Room's last cell carrying variant 0 was accepted");
+		require(reason.find("column 3") != std::string::npos
+				&& reason.find("level 1") != std::string::npos,
+			"The refusal does not name the cell it refused: " + reason);
+
+		// A zero buried among legal entries refuses the whole load rather than
+		// letting the good entries in and the bad one go unnoticed.
+		require(refusedWith([] {
+			(void)authoredRoomWorld({ { 0, 0, 1 }, { 1, 0, 0 }, { 2, 1, 7 } });
+		}, &reason), "A variant 0 entry among legal entries was accepted");
+		require(reason.find("column 1") != std::string::npos
+				&& reason.find("level 0") != std::string::npos,
+			"The refusal does not name the cell it refused: " + reason);
+
+		// The refusal is the zero's doing and nothing else: the same list with
+		// a real number in that slot loads all three entries.
+		auto const legal = authoredRoomWorld({ { 0, 0, 1 }, { 1, 0, 2 }, { 2, 1, 7 } });
+		require(legal->getSector(0)->getSurfaceVariants().size() == 3,
+			"The legal list that differs from a refused one only by the variant "
+			"number was refused as well");
+
+		// The authoring seam still refuses it, unchanged. The two seams now
+		// agree on what a legal entry is; neither was relaxed to meet the other.
+		core::World world("Authoring seam fixture", 12, 8);
+		world.addRoom("Room", 0, 1, 1, 4, 2);
+		world.finishBuild();
+		world.pauseSimulation();
+		require(!world.canSetSectorSurfaceVariant(0, 0, 0,
+				std::optional<uint32_t>{ 0 }, &reason),
+			"The authoring seam accepted variant 0");
+		require(reason.find("variant 0") != std::string::npos,
+			"The authoring seam's refusal does not name variant 0: " + reason);
+		require(!world.setSectorSurfaceVariant(0, 0, 0,
+				std::optional<uint32_t>{ 0 }, &reason),
+			"The authoring seam wrote variant 0 onto the World");
+		require(!world.getSector(0)->surfaceVariantAt(0, 0),
+			"The refused paint still left an entry on the live Sector");
+		require(serialize(world).find("surfaceVariants") == std::string::npos,
+			"A World whose variant paint was refused still saved a variant field");
+	}
+
+	// The refusal is the loader's rule about entries, not a Room-shaped accident
+	// of one replay path. Every record type that can carry variants goes
+	// through the same `applySurfaceVariants` on its way to the Sector it
+	// created, and each is shown here refusing a zero and accepting a one - the
+	// second half proving the refusal is about the number and not about the
+	// fixture, the record type, or the wiring from record to Sector.
+	void aVariantZeroEntryIsRefusedForEveryRecordTypeThatCarriesVariants(
+		smoke::Context const&)
+	{
+		for (auto const& fixture : variantCarryingFixtures())
+		{
+			std::string reason;
+			require(refusedWith([&] { (void)load(authoredOn(fixture, 0)); }, &reason),
+				std::string("A ") + fixture.type
+					+ " record carrying variant 0 was accepted");
+			require(reason.find("column 0") != std::string::npos
+					&& reason.find("level 0") != std::string::npos,
+				std::string("The ") + fixture.type
+					+ " refusal does not name the cell it refused: " + reason);
+
+			require(anySectorWears(load(authoredOn(fixture, 1)), { { 0, 0, 1 } }),
+				std::string("A ") + fixture.type
+					+ " record's variant 1 entry did not reach the Sector its own "
+					"record created, so the refusal above proves nothing about the "
+					"number itself");
+		}
+	}
+
+	// The binary wire carries the same entries and gets the same refusal.
+	// Half a rule enforced only in the text form would be a rule the game's
+	// own binary saves get past.
+	void aVariantZeroEntryIsRefusedInTheBinaryFormat(smoke::Context const&)
+	{
+		// The unpatched document loads, so the refusal below is about the byte
+		// that changed and not about a malformed file.
+		auto const ok = loadBinary(binaryRecordingVariant(1));
+		require(room(*ok, 0)->surfaceVariantAt(2, 1)
+				== std::optional<uint32_t>{ 1 },
+			"The binary fixture did not load the variant it recorded");
+
+		std::string reason;
+		require(refusedWith([] { (void)loadBinary(binaryRecordingVariantZero()); },
+			&reason), "A binary document recording variant 0 was accepted");
+		require(reason.find("column 2") != std::string::npos
+				&& reason.find("level 1") != std::string::npos,
+			"The binary refusal does not name the cell it refused: " + reason);
+	}
+
+	// No cell of any Sector loaded from a document answers variant 0. The
+	// per-cell query is what the editor's resolve asks and what any future
+	// tooling will ask; a zero there is a base cell reading as painted. Walked
+	// over every cell of every Sector of every fixture, so the answer is about
+	// the whole loaded World rather than the one cell a round-trip check
+	// happens to look at.
+	void noLoadedCellAnswersVariantZero(smoke::Context const&)
+	{
+		auto const walk = [](core::World const& world, std::string const& from)
+		{
+			for (uint32_t index = 0; index < world.getNumSectors(); ++index)
+			{
+				auto const& sector = *world.getSector(index);
+				for (uint32_t level = 0; level < sector.getLevelsHigh(); ++level)
+					for (uint32_t column = 0; column < sector.getCellsWide(); ++column)
+						require(!sector.surfaceVariantAt(column, level)
+								|| *sector.surfaceVariantAt(column, level) != 0,
+								from + ": " + sector.getName()
+									+ " answers variant 0 at column "
+									+ std::to_string(column) + ", level "
+									+ std::to_string(level));
+			}
+		};
+
+		walk(*authoredRoomWorld(sampleEntries()), "a Room World carrying variants");
+		walk(*loadBinary(serializeBinary(*authoredRoomWorld(sampleEntries()))),
+			"the same World through the binary form");
+		for (auto const& fixture : variantCarryingFixtures())
+			walk(*load(authoredOn(fixture, 1)),
+				std::string("a ") + fixture.type + " World carrying variant 1");
 	}
 
 	// A record that draws no tiled surface refuses variant entries. A

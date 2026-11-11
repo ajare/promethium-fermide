@@ -292,6 +292,16 @@ What the loader refuses:
   loud miscount; drawing nothing for it is a silent one.
 - **Two entries for one cell.** Which variant the cell wears would come down
   to list order, so the loader refuses instead of choosing.
+- **`variant: 0`.** The base is the absence of an entry, not a zero stored
+  in one. A recorded zero is a third state that means the base without being
+  it: the artwork has no `-V0` row so the renderer falls back to base and
+  the picture looks right, while the Sector answers `0` rather than `nullopt`
+  to every "is there a variant on this cell?" and the save keeps writing a
+  field for a Sector that never wore one. The authoring seam has always
+  refused it; the load seam refuses it too, so the two agree on what a legal
+  entry is (#1049). Refused rather than silently dropped, for the same reason
+  as the two rules above - a repair would read as a clean load and hide the
+  miscount.
 - **The field on a record that draws no tiled surface.** A Background and a
   Facade are authored as flat colour and never ask the atlas for a tile, so
   a variant recorded on one is decoration that could never show. A Door or

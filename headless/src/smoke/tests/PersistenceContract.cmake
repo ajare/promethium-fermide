@@ -88,6 +88,10 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords accessPanels/roundTri
     variantEntriesSurviveTheRebuildAStructuralEditPerforms
     anEntryOutsideTheSectorIsRefused
     aDuplicateEntryForOneCellIsRefused
+    aVariantZeroEntryIsRefusedAtLoad
+    aVariantZeroEntryIsRefusedForEveryRecordTypeThatCarriesVariants
+    aVariantZeroEntryIsRefusedInTheBinaryFormat
+    noLoadedCellAnswersVariantZero
     aRecordThatDrawsNoSurfaceRefusesVariantEntries
     variantEntriesLandOnTheSectorTheirRecordCreated
     variantsChangeNothingElseInTheDocument

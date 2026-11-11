@@ -249,6 +249,20 @@ namespace core
 				throw SerializationException(format("Sector surface variant at column {}, level {} "
 					"is outside the Sector's {} cells wide by {} levels high",
 						entry.column, entry.level, sector->getCellsWide(), sector->getLevelsHigh()));
+			// Variant 0 is not the base. The base is the absence of an entry, and
+			// a stored zero is a third state that means the base without being it:
+			// the artwork has no `-V0` row, so the renderer falls back to base and
+			// the picture looks right while the document keeps a field a Sector
+			// that never used variants must not carry, and every per-cell reader
+			// has to know the lie. The authoring seam already refuses it; the load
+			// seam refuses it here so the two agree on what a legal entry is.
+			// Refused rather than silently dropped, for the same reason the bounds
+			// and duplicate rules are: a repair would read as a clean load and hide
+			// a miscount the author should see.
+			if (entry.variant == 0)
+				throw SerializationException(format("Sector surface variant at column {}, level {} "
+					"records variant 0; the base tile is recorded as no entry at all",
+						entry.column, entry.level));
 			if (!seen.insert({ entry.column, entry.level }).second)
 				throw SerializationException(format("Duplicate Sector surface variant at column {}, level {}",
 					entry.column, entry.level));

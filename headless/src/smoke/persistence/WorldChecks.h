@@ -66,6 +66,11 @@ namespace persistence
 	void variantEntriesSurviveTheRebuildAStructuralEditPerforms(smoke::Context const&);
 	void anEntryOutsideTheSectorIsRefused(smoke::Context const&);
 	void aDuplicateEntryForOneCellIsRefused(smoke::Context const&);
+	void aVariantZeroEntryIsRefusedAtLoad(smoke::Context const&);
+	void aVariantZeroEntryIsRefusedForEveryRecordTypeThatCarriesVariants(
+		smoke::Context const&);
+	void aVariantZeroEntryIsRefusedInTheBinaryFormat(smoke::Context const&);
+	void noLoadedCellAnswersVariantZero(smoke::Context const&);
 	void aRecordThatDrawsNoSurfaceRefusesVariantEntries(smoke::Context const&);
 	void variantEntriesLandOnTheSectorTheirRecordCreated(smoke::Context const&);
 	void variantsChangeNothingElseInTheDocument(smoke::Context const&);
