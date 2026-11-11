@@ -4605,8 +4605,8 @@ namespace core
 		auto const transitLayer = lift->getLayerIndex();
 		auto const landingLayer = layerInFront(transitLayer);
 		plan.move = x != lift->getCellX() || y != lift->getCellY();
-		if (cellsWide < 1 || cellsWide > 2)
-		{ plan.diagnostic = "A Lift must be one or two cells wide"; return plan; }
+		if (cellsWide < 1 || cellsWide > LiftMaxShaftCellsWide)
+		{ plan.diagnostic = std::string(LiftShaftWidthDiagnostic); return plan; }
 		if (levelsHigh == 0 || x + cellsWide > mCellsWide || y + levelsHigh > mLevelsHigh)
 		{ plan.diagnostic = "The Lift shaft is outside the World bounds"; return plan; }
 		if (!lift->getAgents().empty())

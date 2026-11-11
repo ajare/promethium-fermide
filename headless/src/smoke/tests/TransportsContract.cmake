@@ -53,6 +53,10 @@ set(core_names
     multiStopLiftUsesDeterministicLookScheduling
     liftFailuresCancellationAndDisableDrainSafely
     editorLiftAuthoringReconcilesOwnedLandings
+    liftShaftsWiderThanTwoCellsAreRefused
+    resizingALiftShaftBeyondTwoCellsIsRefused
+    oneAndTwoCellLiftShaftsBuildUnchanged
+    everyShippedWorldStillBuilds
     shuttlePassengerWalksToForwardInteriorSpot
     shuttlePassengersSpreadAcrossCarriageAtWalkingSpeed
     shuttleBoardingRequiresDoorAlignment
@@ -61,6 +65,7 @@ set(core_names
     shuttleArrivalFollowsFinalPathNodeWithoutBacktracking
     multiCarriageShuttleCoordinatesIndependentCarriagesAndAccessZones
     editorShuttleAuthoringReconcilesOwnedLandings
+    shuttleLandingDoorsAreOneCellWide
     routeChoiceFactsAndLocalCongestion
     movementAndReplay
     luaRandomnessIsIndependent

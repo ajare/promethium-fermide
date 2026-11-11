@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <string_view>
 
 #define CORE_VAR_UNUSED(x)							(void)x
 
@@ -142,6 +143,19 @@ namespace core
 
 namespace core
 {
+	// A Lift shaft is at most two cells wide.  Its landing door spans the whole
+	// shaft and its artwork is a pair of leaves: one cell wears the single leaf,
+	// two cells wear the pair.  A third cell would ask for a middle landing tile
+	// that deliberately does not exist, so both authoring paths refuse the shaft
+	// rather than build a landing that cannot be drawn (#1055).  A PlatformLift
+	// has no landing door and is not covered by this cap.
+	inline constexpr uint32_t LiftMaxShaftCellsWide = 2u;
+
+	// One refusal sentence, shared so that adding a Lift and resizing one refuse
+	// a too-wide shaft the same way (#1055).
+	inline constexpr std::string_view LiftShaftWidthDiagnostic{
+		"A Lift shaft must be one or two cells wide" };
+
 	inline constexpr uint32_t maximumShuttleCarriageCapacity(uint32_t cellsWide)
 	{
 		return cellsWide == 0 ? 0 : static_cast<uint32_t>(

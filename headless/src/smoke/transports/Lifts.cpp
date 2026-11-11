@@ -1,10 +1,15 @@
 #include "Checks.h"
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <vector>
+#include "core/AgentTagRegistryDocument.h"
 #include "core/Agent.h"
+#include "core/Door.h"
+#include "core/Exceptions.h"
 #include "core/World.h"
 #include "core/Graph.h"
 #include "core/LiftTransit.h"
@@ -724,6 +729,133 @@ namespace
 		world.applyLiftEdit(remove);
 		return !world.getSectorAtPosition(1, 5.0f, 0.0f);
 	}
+
+	// #1055 - a Lift shaft wider than two cells is refused rather than built
+	// with a landing no artwork exists for.  Both authoring paths - the options
+	// path and the editor rectangle path - refuse with the one shared sentence,
+	// and the refusal leaves the World untouched.
+	bool liftShaftsWiderThanTwoCellsAreRefused()
+	{
+		auto const refusal = std::string(core::LiftShaftWidthDiagnostic);
+		auto refusedWith = [](auto&& add, std::string const& expected) -> bool
+		{
+			try
+			{
+				(void)add();
+			}
+			catch (core::WorldException const& error)
+			{
+				return error.getMessage().find(expected) != std::string::npos;
+			}
+			catch (std::exception const&)
+			{
+				return false;
+			}
+			return false;
+		};
+
+		for (uint32_t width : { core::LiftMaxShaftCellsWide + 1, core::LiftMaxShaftCellsWide + 2 })
+		{
+			{
+				core::World world("Wide shaft Lift options", 14, 8);
+				world.addCorridor(1, 0, 12);
+				world.addCorridor(4, 0, 12);
+				core::World::CreateLiftOptions options;
+				options.cellsWide = width;
+				options.stopOffsets = { 0, 3 };
+				if (!refusedWith([&] { return world.addLift(1, 0, 2, options); }, refusal))
+					return false;
+				// Refused before any structural edit: no shaft was laid.
+				if (world.getSectorAtPosition(1, 2.5f, 0.5f)) return false;
+			}
+			{
+				core::World world("Wide shaft editor Lift", 14, 8);
+				world.addCorridor(1, 0, 12);
+				world.addCorridor(4, 0, 12);
+				if (!refusedWith([&] { return world.addLift(1, 0, 2, width, 6); }, refusal))
+					return false;
+				if (world.getSectorAtPosition(1, 2.5f, 0.5f)) return false;
+			}
+		}
+		return true;
+	}
+
+	// #1055 - resizing an existing shaft past the cap is refused the same way:
+	// the plan comes back invalid carrying the same sentence, and applying it
+	// throws that sentence instead of rebuilding a three-cell shaft.
+	bool resizingALiftShaftBeyondTwoCellsIsRefused()
+	{
+		auto const refusal = std::string(core::LiftShaftWidthDiagnostic);
+		core::World world("Lift shaft resize width", 14, 8);
+		world.addCorridor(1, 0, 12);
+		world.addCorridor(4, 0, 12);
+		auto created = world.addLift(1, 0, 2, 2, 6);
+		world.finishBuild();
+		auto const index = created.lift.sector->getIndex();
+		world.pauseSimulation();
+
+		for (uint32_t width : { 0u, core::LiftMaxShaftCellsWide + 1, core::LiftMaxShaftCellsWide + 2 })
+		{
+			auto const plan = world.planResizeLift(index, 2, 0, width, 6);
+			if (plan.valid || plan.diagnostic != refusal) return false;
+			bool thrown = false;
+			try { (void)world.applyLiftEdit(plan); }
+			catch (core::WorldException const& error)
+			{
+				thrown = error.getMessage().find(refusal) != std::string::npos;
+			}
+			if (!thrown) return false;
+		}
+
+		// Every refused resize left the shaft exactly as it was.
+		auto const lift = std::dynamic_pointer_cast<const core::LiftTransit>(world.getSector(index));
+		return lift && lift->getCellsWide() == 2 && lift->getCellX() == 2
+			&& lift->getLevelsHigh() == 6 && lift->getNumStops() == 2;
+	}
+
+	// #1055 - the widths that do build are unchanged, and each landing door
+	// spans its shaft so the leaf pair lines up with the cells it wears.
+	bool oneAndTwoCellLiftShaftsBuildUnchanged()
+	{
+		for (uint32_t width : { 1u, core::LiftMaxShaftCellsWide })
+		{
+			core::World world("Supported Lift shaft widths", 14, 8);
+			world.addCorridor(1, 0, 12);
+			world.addCorridor(4, 0, 12);
+			auto created = world.addLift(1, 0, 2, width, 6);
+			world.finishBuild();
+			auto const lift = std::dynamic_pointer_cast<const core::LiftTransit>(created.lift.sector);
+			if (!lift || lift->getCellsWide() != width || lift->getLevelsHigh() != 6) return false;
+			if (lift->getNumStops() != 2 || created.doors.size() != 2) return false;
+			for (auto const& landing : created.doors)
+			{
+				auto const object = landing.door.sector->getObject(landing.door.index);
+				auto const doorObject = std::dynamic_pointer_cast<const core::DoorSectorObject>(object);
+				if (!doorObject || !world.isLiftOwnedDoor(object)) return false;
+				if (doorObject->getDoor()->getCellsWide() != width) return false;
+			}
+		}
+		return true;
+	}
+
+	// #1055 - the cap must not strand shipped content.  Every bundled World
+	// document still loads and builds.
+	bool everyShippedWorldStillBuilds(smoke::Context const& context)
+	{
+		auto const directory = context.fixture("resources/test-worlds/lift-test-1.world.yaml").parent_path();
+		uint32_t built = 0;
+		for (auto const& entry : std::filesystem::directory_iterator(directory))
+		{
+			auto const path = entry.path();
+			if (!path.filename().string().ends_with(".world.yaml")) continue;
+			auto const world = core::loadWorldDocument(path);
+			if (!world) return false;
+			++built;
+		}
+		// A floor on the count so a glob that silently matches nothing cannot
+		// pass the check.
+		return built >= 20;
+	}
 }
 
 void registerLifts(std::vector<smoke::Check>& checks)
@@ -736,4 +868,8 @@ void registerLifts(std::vector<smoke::Check>& checks)
 	checks.push_back({ "multiStopLiftUsesDeterministicLookScheduling", [](smoke::Context const&) { smoke::require(multiStopLiftUsesDeterministicLookScheduling(), "multiStopLiftUsesDeterministicLookScheduling"); } });
 	checks.push_back({ "liftFailuresCancellationAndDisableDrainSafely", [](smoke::Context const&) { smoke::require(liftFailuresCancellationAndDisableDrainSafely(), "liftFailuresCancellationAndDisableDrainSafely"); } });
 	checks.push_back({ "editorLiftAuthoringReconcilesOwnedLandings", [](smoke::Context const&) { smoke::require(editorLiftAuthoringReconcilesOwnedLandings(), "editorLiftAuthoringReconcilesOwnedLandings"); } });
+	checks.push_back({ "liftShaftsWiderThanTwoCellsAreRefused", [](smoke::Context const&) { smoke::require(liftShaftsWiderThanTwoCellsAreRefused(), "liftShaftsWiderThanTwoCellsAreRefused"); } });
+	checks.push_back({ "resizingALiftShaftBeyondTwoCellsIsRefused", [](smoke::Context const&) { smoke::require(resizingALiftShaftBeyondTwoCellsIsRefused(), "resizingALiftShaftBeyondTwoCellsIsRefused"); } });
+	checks.push_back({ "oneAndTwoCellLiftShaftsBuildUnchanged", [](smoke::Context const&) { smoke::require(oneAndTwoCellLiftShaftsBuildUnchanged(), "oneAndTwoCellLiftShaftsBuildUnchanged"); } });
+	checks.push_back({ "everyShippedWorldStillBuilds", [](smoke::Context const& c) { smoke::require(everyShippedWorldStillBuilds(c), "everyShippedWorldStillBuilds"); } });
 }

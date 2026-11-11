@@ -10,6 +10,7 @@
 #include "core/Graph.h"
 #include "core/LiftTransit.h"
 #include "core/LiftSectorObject.h"
+#include "core/Door.h"
 #include "core/DoorSectorObject.h"
 #include "core/DoorVertex.h"
 #include "core/Staircase.h"
@@ -756,6 +757,34 @@ namespace
 			&& !partialCreated.doors[6].traversalResource
 			&& !partialCreated.doors[7].traversalResource;
 	}
+	// #1055 - the Lift shaft cap says nothing about Shuttle landings.  A Shuttle
+	// landing door is still one cell wide however wide the route runs, so the
+	// hatch artwork keeps its single-cell contract.
+	bool shuttleLandingDoorsAreOneCellWide()
+	{
+		core::World world("Shuttle landing door widths", 32, 3);
+		world.addCorridor(0, 0, 31);
+		world.addCorridor(1, 0, 31);
+		core::World::CreateShuttleOptions options{ 2, 3, { 0, 18 }, 0 };
+		options.doorMask = 0b101;
+		auto created = world.addShuttle(1, 0, 0, 27, options);
+		world.finishBuild();
+		auto const shuttle = dynamic_pointer_cast<const core::ShuttleTransit>(created.shuttle.sector);
+		if (!shuttle || shuttle->getCellsWide() != 27 || created.doors.size() != 8) return false;
+		uint32_t built = 0;
+		for (auto const& landing : created.doors)
+		{
+			if (!landing.traversalResource) continue;
+			auto const object = landing.door.sector->getObject(landing.door.index);
+			auto const doorObject = std::dynamic_pointer_cast<const core::DoorSectorObject>(object);
+			uint32_t owner = 0, stop = 0, carriage = 0;
+			if (!doorObject || !world.isShuttleOwnedDoor(object, &owner, &stop, &carriage)) return false;
+			if (owner != shuttle->getIndex()) return false;
+			if (doorObject->getDoor()->getCellsWide() != 1) return false;
+			++built;
+		}
+		return built == 8;
+	}
 }
 
 void registerShuttles(std::vector<smoke::Check>& checks)
@@ -768,4 +797,5 @@ void registerShuttles(std::vector<smoke::Check>& checks)
 	checks.push_back({ "shuttleArrivalFollowsFinalPathNodeWithoutBacktracking", [](smoke::Context const&) { smoke::require(shuttleArrivalFollowsFinalPathNodeWithoutBacktracking(), "shuttleArrivalFollowsFinalPathNodeWithoutBacktracking"); } });
 	checks.push_back({ "multiCarriageShuttleCoordinatesIndependentCarriagesAndAccessZones", [](smoke::Context const&) { smoke::require(multiCarriageShuttleCoordinatesIndependentCarriagesAndAccessZones(), "multiCarriageShuttleCoordinatesIndependentCarriagesAndAccessZones"); } });
 	checks.push_back({ "editorShuttleAuthoringReconcilesOwnedLandings", [](smoke::Context const&) { smoke::require(editorShuttleAuthoringReconcilesOwnedLandings(), "editorShuttleAuthoringReconcilesOwnedLandings"); } });
+	checks.push_back({ "shuttleLandingDoorsAreOneCellWide", [](smoke::Context const&) { smoke::require(shuttleLandingDoorsAreOneCellWide(), "shuttleLandingDoorsAreOneCellWide"); } });
 }

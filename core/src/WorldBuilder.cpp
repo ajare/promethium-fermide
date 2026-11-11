@@ -2546,8 +2546,10 @@ namespace core
 		CreateLiftOptions options;
 		options.cellsWide = cellsWide;
 		options.levelsHigh = levelsHigh;
-		if (cellsWide == 0 || cellsWide > 2 || levelsHigh == 0)
-			throw WorldException(&mWorld, "Editor lifts must be one or two cells wide and at least one level high");
+		if (cellsWide == 0 || cellsWide > LiftMaxShaftCellsWide)
+			throw WorldException(&mWorld, std::string(LiftShaftWidthDiagnostic));
+		if (levelsHigh == 0)
+			throw WorldException(&mWorld, "A Lift must be at least one level high");
 		mWorld.validateLayer(format("World::addLift({}, ...)", layerIndex), layerIndex);
 		if (isFrontMostLayer(layerIndex))
 			throw WorldException(&mWorld, "A Lift cannot be placed on the front-most Layer, because it has no Layer in front to land on");
@@ -2579,8 +2581,8 @@ namespace core
 		// add is a true no-op and no non-finite timing reaches the tick
 		// conversion (#198).
 		mWorld.validateLiftOptions(caller, options);
-		if (options.cellsWide > 2)
-			throw WorldException(&mWorld, format("{} - enclosed Lift width must be one or two cells.", caller));
+		if (options.cellsWide > LiftMaxShaftCellsWide)
+			throw WorldException(&mWorld, format("{} - {}.", caller, LiftShaftWidthDiagnostic));
 
 		auto levelsHigh = options.levelsHigh ? options.levelsHigh : options.stopOffsets.back() + 1;
 		if (options.stopOffsets.back() >= levelsHigh)
