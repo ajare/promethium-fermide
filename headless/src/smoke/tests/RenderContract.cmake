@@ -89,6 +89,9 @@ set(names
     sectorAtlasNew/loaderAcceptsAConformingSet
     sectorAtlasNew/anOlderAtlasStillBorrowsForATypeItHasNoTileFor
     sectorAtlasNew/theOldFamilyStillBorrowsForShuttleAndStaircase
+    sectorSurfaceDrawContract/everyCellOfANoVariantSectorDrawsItsBaseTile
+    sectorSurfaceDrawContract/theRepeatIsAnchoredOnTheSectorFloorLine
+    sectorSurfaceDrawContract/aPartialTopLevelIsCroppedAtItsTopNotStretched
     agentAtlasNew/twentyTilesAreRegistered
     agentAtlasNew/twoTypesNamingOneAppearanceShareTheirTiles
     agentAtlasNew/genericAppearanceIsTheFallbackForATypeWithNoArtwork

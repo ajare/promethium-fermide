@@ -23,6 +23,14 @@ Vehicles, stair and ladder mechanisms, thresholds, other objects, Agents and edi
 overlays retain their existing rendering. Aperture clipping and render order are
 unchanged; wireframe mode remains primitive-based.
 
+The whole of that rule is pinned before the draw path changes. `smoke/render/SectorSurfaceDrawContract.cpp`
+(#1037) records the commands a no-variant Sector surface emits and asserts the
+tile region, destination rectangle and tint of every cell, the repeat count, the
+floor-line anchor, and the crop a partial top level takes. It is a contract, not a
+snapshot: the per-cell draw loop that Sector surface variants need (#1036) has to
+satisfy what that file states, so a decorative feature cannot quietly re-anchor
+every short Room and 0.7 Corridor in every saved World.
+
 ## SectorAtlasNew
 
 `resources/textures/sectors-new.tileset.yaml` is the version 2 authored tileset
