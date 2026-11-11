@@ -200,6 +200,35 @@ are the same question asked of the same grid. A move costs any of them
 nothing, for the same reason a Room move costs nothing: the keys are
 Sector-local and a move only changes where the record puts the Sector.
 
+The four horizontal Transits go through the same rule and the same helper
+(#1046), and the same question - which edges of the footprint can this type
+move - decides what each can lose:
+
+| Transit | Cells wide | Levels high | What an edit can cost |
+| --- | --- | --- | --- |
+| Shuttle | 1 or more | 1, fixed | the far end of the track only |
+| Airlock | 1 or more | 1, fixed | the width only |
+| Chamber | 1 or more | 1, fixed | the width only |
+| Dumbwaiter | 1, fixed | 2, fixed | nothing - it is never resized |
+
+A Shuttle is one level high however long it runs, so shortening the track is
+the only edit that can cost it anything, and what it costs is the entries
+beyond the new length. An Airlock's or Chamber's width is the whole of it,
+so a width change drops the entries outside the new footprint; widening
+costs nothing, since the new cells arrive as base beside what was already
+painted. A Dumbwaiter is a fixed 1x2 shaft that is moved rather than
+resized at all, which is where the Sector-local keys earn their keep most
+visibly: the entries ride across unchanged with no re-keying, because there
+is no re-keying to get wrong. The move replaces the Sector object whole, so
+carrying the entries is what the move has to do rather than something it gets
+to keep by not touching them.
+
+One difference is worth stating rather than papering over. The Shuttle plan
+confirms and so announces its drop in the same line the Location and vertical
+Transit plans use; the chamber plans commit without a confirmation step and
+have no consequences to announce, so a narrowing costs its artwork without
+being asked about it.
+
 What the loader refuses:
 
 - **An entry outside the Sector's own grid.** A column past `cellsWide` or a

@@ -78,6 +78,11 @@ set(checks
     transitVariantCarry/aVerticalTransitShrinkDropsItsEntryAndClampsNothingInward
     transitVariantCarry/wideningAVerticalTransitDropsNothingAndSaysNothing
     transitVariantCarry/theVerticalTransitBoundIsTheNewFootprintsOwnExtent
+    horizontalTransitVariantCarry/everyHorizontalTransitEditCarriesItsEntriesAndSaysSo
+    horizontalTransitVariantCarry/aHorizontalTransitShrinkDropsItsEntryAndClampsNothingInward
+    horizontalTransitVariantCarry/theHorizontalTransitBoundIsTheNewFootprintsOwnExtent
+    horizontalTransitVariantCarry/wideningAHorizontalTransitDropsNothing
+    horizontalTransitVariantCarry/aDumbwaiterMoveCarriesItsEntriesUnchanged
 )
 string(JOIN "\n" listed ${checks})
 string(APPEND listed "\n")

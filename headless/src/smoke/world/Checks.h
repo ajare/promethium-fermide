@@ -34,5 +34,8 @@ void registerSectorSurfaceVariants(std::vector<smoke::Check>& checks);
 // Sector surface variants surviving a vertical Transit resize or move (#1045).
 void registerTransitSurfaceVariants(std::vector<smoke::Check>& checks);
 
+// Sector surface variants surviving a horizontal Transit resize or move (#1046).
+void registerHorizontalTransitSurfaceVariants(std::vector<smoke::Check>& checks);
+
 void registerScaledDoors(std::vector<smoke::Check>& checks);
 void registerRoomHeightScale(std::vector<smoke::Check>& checks);

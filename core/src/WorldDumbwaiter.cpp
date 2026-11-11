@@ -258,6 +258,15 @@ namespace core
 		}
 		auto unit = std::make_shared<Dumbwaiter>(plan.id, old->getIndex(), plan.layer, plan.x, plan.y,
 			old->getInitialStop(), old->getTravelSeconds(), stops);
+		// The shaft is a fixed 1x2 footprint that is never resized, and the variant
+		// entries are Sector-local keys anchored to the Sector's own bottom-left,
+		// so a move carries them across exactly as they were - no re-keying, no
+		// pruning, nothing to renumber (#1046). This is the same reason a Room move
+		// costs its entries nothing (#1044), arrived at by not touching them. The
+		// new object replaces the old one wholesale, so without this the entries
+		// would go with the Sector they were painted on rather than ride along on
+		// the one that takes its place.
+		unit->setSurfaceVariants(old->getSurfaceVariants());
 		mSectors[old->getIndex()] = unit;
 		attachDumbwaiter(unit);
 		for (uint32_t stop = 0; stop < 2; ++stop)

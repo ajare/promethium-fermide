@@ -1595,8 +1595,9 @@ namespace core
 		// prune the record rewrite performs so the line the author is shown
 		// cannot disagree with the entries that actually go. Asked of a copy,
 		// because a plan is a read and must not touch what it is planning about.
-		// Shared by every plan that changes a footprint: the Location plans
-		// (#1044) and the four vertical Transit plans (#1045).
+		// Shared by every plan that changes a footprint and has a consequences
+		// channel to say it through: the Location plans (#1044), the four vertical
+		// Transit plans (#1045) and the Shuttle plan (#1046).
 		static void appendSurfaceVariantDropConsequence(
 			std::vector<std::string>& consequences,
 			std::vector<SectorSurfaceVariant> const& entries,

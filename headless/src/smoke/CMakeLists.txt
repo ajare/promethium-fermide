@@ -544,6 +544,7 @@ pf_add_smoke_module(pf-smoke-world
         world/RoomHeightScale.cpp
         world/SectorSurfaceVariants.cpp
         world/TransitSurfaceVariants.cpp
+        world/HorizontalTransitSurfaceVariants.cpp
         world/LayerDeletion.cpp
     LIBRARIES promethium-fermide-core
     LABELS core
@@ -553,7 +554,13 @@ pf_add_smoke_module(pf-smoke-world
 pf_add_smoke_contract(NAME smoke-world-contract COMMAND ${CMAKE_COMMAND}
     "-DWORLD=$<TARGET_FILE:pf-smoke-world>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/WorldContract.cmake")
-set_tests_properties(smoke-world-contract PROPERTIES LABELS "harness;core" TIMEOUT 30)
+# The contract drives one process per check plus a whole-list run, so its cost is
+# process startup times the number of checks. Debug startup alone already put it
+# within half a second of the flat 30s before #1046 added five more checks, which
+# is a flake waiting for a loaded machine rather than a bound worth keeping. Debug
+# gets room; Release keeps the tight bound it has always run inside.
+set_tests_properties(smoke-world-contract PROPERTIES LABELS "harness;core"
+    TIMEOUT "$<IF:$<CONFIG:Debug>,90,30>")
 
 pf_add_smoke_module(pf-smoke-persistence
     NAME persistence

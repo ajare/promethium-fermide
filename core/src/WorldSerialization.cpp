@@ -4805,6 +4805,15 @@ namespace core
 				{ oldPosition = resource->mLiftPosition; oldCurrentStop = resource->mLiftCurrentStop; break; }
 			}
 			found->a = plan.y; found->c = plan.cellsWide;
+			// The track's own grid just changed length, and the variant entries name
+			// cells of that grid (#1046). A Shuttle is one level high and always
+			// was, so the only footprint edge that can move is its far end: short
+			// the run and the entries that named a cell past the new end are dropped
+			// rather than clamped onto a surviving cell nobody painted them on - the
+			// same answer the Location rewrite gives (#1044) and the vertical
+			// Transits (#1045).
+			pruneSurfaceVariantsToFootprint(found->surfaceVariants,
+				plan.cellsWide, 1);
 			// Per-Door style overrides follow their stop's identity rather than
 			// its position in the stop list: adding, removing, or reindexing
 			// stops keeps every surviving Door's style on its own structural
@@ -5090,6 +5099,12 @@ namespace core
 		if (plan.move) plan.consequences.push_back("Move the Shuttle and rebuild every landing door and button");
 		else if (x != shuttleTransit->getCellX() || cellsWide != shuttleTransit->getCellsWide())
 			plan.consequences.push_back("Resize the Shuttle track and rebuild affected landings");
+		// Cells the track takes away take the artwork they wear with them, and the
+		// author is told before the edit is confirmed rather than left to find it
+		// gone (#1046). Only the far end is asked, because a Shuttle is one level
+		// high however long it runs.
+		appendSurfaceVariantDropConsequence(plan.consequences,
+			shuttleTransit->getSurfaceVariants(), cellsWide, 1);
 		if (vehicleChanged)
 		{
 			string layout;
@@ -5542,6 +5557,15 @@ namespace core
 					: candidate->canAddAirlock(edited.layer, plan.y, plan.x, plan.width, edited.x, &diagnostic);
 				if (!valid) return false;
 				edited.a = plan.y; edited.b = plan.x; edited.c = plan.width;
+				// The chamber's own grid just changed width, and the variant entries
+				// name cells of that grid (#1046). An Airlock or Chamber is one
+				// level high and always was, so the only footprint edge that can
+				// move is its far end: narrowing the chamber drops the entries that
+				// named a cell past the new end rather than clamping them onto a
+				// surviving cell nobody painted them on - the same answer the
+				// Location rewrite gives (#1044).
+				pruneSurfaceVariantsToFootprint(edited.surfaceVariants,
+					plan.width, 1);
 				if (plan.chamber) edited.d = plan.leftToRight ? 1 : 0;
 				for (int side = 0; side < 2; ++side)
 				{
