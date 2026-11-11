@@ -1,21 +1,30 @@
-// Variants survive a horizontal Transit resize and move (#1046).
+// Variants survive a horizontal Transit resize and move (#1046, re-keyed by
+// World cell by #1047).
 //
 // #1044 proved the carry-through for Rooms and Corridors and #1045 for the
 // four vertical Transits, and left one shared answer behind: the entries are
-// Sector-local, anchored to the Sector's own bottom-left, so a footprint that
-// grows renumbers nothing and a footprint that shrinks past an entry drops it
-// rather than clamping it onto a surviving cell nobody painted it on. This is
-// that same answer asked of the four horizontal ones - Shuttle, Airlock,
-// Chamber and Dumbwaiter - through their own record replay.
+// Sector-local, so a resize that moves the Sector's anchor has to re-derive
+// the local key or every surviving entry ends up naming a different World cell
+// than the one it was painted on, and a cell the new footprint does not have
+// drops its entry rather than clamping it onto a surviving cell nobody painted
+// it on. This is that same answer asked of the four horizontal ones - Shuttle,
+// Airlock, Chamber and Dumbwaiter - through their own record replay.
 //
 // The four are not one case in four costumes, and what each can lose is worth
 // stating because it is what the checks are picked against:
 //
 //   * a Shuttle is one level high however long it runs, so its only moving
-//     footprint edge is its far end and every entry it can lose is lost off
-//     the end of the track;
-//   * an Airlock is one level high and its width is the whole of it, so a
-//     width change is the only edit that can cost it anything;
+//     footprint edges are the two ends of the track, and it can be shortened
+//     at either of them;
+//   * an Airlock is one level high and its width is the whole of it, and both
+//     of its ends are pinned by the Location ends it must adjoin - so the only
+//     width it can take is the gap its row happens to have, and changing its
+//     width means moving it to a row with a different gap. That makes every
+//     chamber width change a resize whose new footprint shares no cell with the
+//     old one, which is the case the decided rule states rather than leaves to
+//     be discovered: none of the old cells survive, so none of the artwork
+//     survives. It is checked as the loss it is rather than being allowed to
+//     look like a clean edit;
 //   * a Chamber shares the Airlock's footprint rules and its record replay,
 //     and is checked separately to show the answer arrives with the type rather
 //     than being written twice;
@@ -24,10 +33,10 @@
 //     most visibly: the entries ride across unchanged with no re-keying,
 //     because there is no re-keying to get wrong.
 //
-// So "outside the new length" is the Shuttle's loss and "outside the new
-// width" is the Airlock's and the Chamber's, and both are the same question
-// asked of the same grid with the same helper the Location and vertical Transit
-// paths use.
+// So "outside the new length" is the Shuttle's loss at either end of its
+// track, and "no cell of the old footprint survives" is the Airlock's and the
+// Chamber's, and both are the same question asked of the same grid with the
+// same helper the Location and vertical Transit paths use.
 //
 // The checks drive the edit plans rather than the editor widgets, as #1044 and
 // #1045 did: a plan is where the footprint is decided and where the replay is
@@ -97,6 +106,71 @@ namespace
 		return world.getSector(sectorIndex)->getSurfaceVariants();
 	}
 
+	// One entry stated as the World cell it names rather than the Sector-local
+	// column and level that store it. The local frame is the view that could not
+	// see #1047: an entry whose key stayed put while the anchor moved looked
+	// unchanged and pointed somewhere else.
+	struct WorldEntry
+	{
+		uint32_t worldX{ 0 };
+		uint32_t worldY{ 0 };
+		uint32_t variant{ 0 };
+
+		friend bool operator==(WorldEntry const& left, WorldEntry const& right) = default;
+	};
+
+	std::string worldEntriesText(std::vector<WorldEntry> const& entries)
+	{
+		std::string text;
+		for (auto const& entry : entries)
+			text += "@" + std::to_string(entry.worldX) + "," + std::to_string(entry.worldY)
+				+ "->" + std::to_string(entry.variant);
+		return text.empty() ? "<none>" : text;
+	}
+
+	std::vector<WorldEntry> worldEntriesOf(core::World const& world, uint32_t sectorIndex)
+	{
+		auto const& sector = *world.getSector(sectorIndex);
+		std::vector<WorldEntry> out;
+		for (auto const& entry : sector.getSurfaceVariants())
+			out.push_back({ sector.getCellX() + entry.column,
+				sector.getCellY() + entry.level, entry.variant });
+		return out;
+	}
+
+	// Asserts the entries by the World cell each one names, and asks it of every
+	// cell of the footprint so a cell that should be bare cannot quietly be
+	// wearing something a neighbour wore.
+	void requireWorldCells(core::World const& world, uint32_t sectorIndex,
+		std::vector<WorldEntry> const& expected, std::string const& when)
+	{
+		require(sectorIndex < world.getNumSectors(),
+			"The edited Sector is not in the World after " + when);
+		auto const& sector = *world.getSector(sectorIndex);
+		auto const actual = worldEntriesOf(world, sectorIndex);
+		require(actual == expected, "The World cells named after " + when + " are "
+			+ worldEntriesText(actual) + ", expected " + worldEntriesText(expected));
+		for (uint32_t level = 0; level < sector.getLevelsHigh(); ++level)
+		{
+			for (uint32_t column = 0; column < sector.getCellsWide(); ++column)
+			{
+				auto const found = std::find_if(expected.begin(), expected.end(),
+					[&](WorldEntry const& entry)
+					{ return entry.worldX == sector.getCellX() + column
+						&& entry.worldY == sector.getCellY() + level; });
+				auto const want = found == expected.end()
+					? std::optional<uint32_t>{}
+					: std::optional<uint32_t>{ found->variant };
+				auto const got = sector.surfaceVariantAt(column, level);
+				require(got == want, "The World cell at "
+					+ std::to_string(sector.getCellX() + column) + ","
+					+ std::to_string(sector.getCellY() + level) + " answers as "
+					+ (got ? std::to_string(*got) : std::string("base")) + " after " + when
+					+ ", expected " + (want ? std::to_string(*want) : std::string("base")));
+			}
+		}
+	}
+
 	// Asserts the entries answer per cell as well as listing as a whole. A list
 	// that survived while the per-cell answer went stale would draw the variant
 	// on the wrong cell, and only the second question catches it.
@@ -155,6 +229,26 @@ namespace
 		auto world = std::make_shared<core::World>("Variant carry shuttle", 24, 2);
 		world->addCorridor(0, 0, 24);
 		core::World::CreateShuttleOptions options{ 1, 4, { 0, 10 }, 0 };
+		options.doorMask = 0b0010;
+		auto const created = world->addShuttle(1, 0, 0, 15, options);
+		world->finishBuild();
+		world->pauseSimulation();
+		auto const sector = created.shuttle.sector->getIndex();
+		paint(*world, sector, entries);
+		return { world, sector };
+	}
+
+	// The same track with both stops pulled in from the ends, so the near end of
+	// the track can be shortened without taking a stop with it. The plain
+	// fixture's first stop sits at offset 0, and moving the track's left edge
+	// east always drops an offset-0 stop, which leaves one stop and a refused
+	// edit - so the left-edge shrink needs its own fixture rather than a
+	// rearrangement of the shared one.
+	std::pair<WorldPtr, uint32_t> interiorStopShuttleFixture(Entries const& entries)
+	{
+		auto world = std::make_shared<core::World>("Variant carry shuttle, interior stops", 24, 2);
+		world->addCorridor(0, 0, 24);
+		core::World::CreateShuttleOptions options{ 1, 4, { 2, 10 }, 0 };
 		options.doorMask = 0b0010;
 		auto const created = world->addShuttle(1, 0, 0, 15, options);
 		world->finishBuild();
@@ -230,6 +324,11 @@ namespace
 		std::function<std::pair<uint32_t, std::vector<std::string>>(core::World&, uint32_t)> edit;
 		Entries expected;
 		std::optional<uint32_t> announced{ 0u };
+		// The World cells the surviving entries are expected to name after the
+		// edit. Stated rather than derived, because deriving it from the expected
+		// local keys and the new anchor would only restate the arithmetic being
+		// tested (#1047).
+		std::vector<WorldEntry> worldExpected{};
 	};
 
 	bool mentionsDrop(std::vector<std::string> const& consequences)
@@ -276,6 +375,7 @@ namespace
 		auto const& consequences = edited.second;
 
 		requireEntries(live, index, testCase.expected, testCase.label);
+		requireWorldCells(live, index, testCase.worldExpected, testCase.label);
 
 		auto const text = consequencesText(consequences);
 		if (!testCase.announced)
@@ -339,9 +439,29 @@ namespace
 		return { world.applyShuttleEdit(plan), plan.consequences };
 	}
 
+	// Two cells off the near end of the track. This is the direction the #1046
+	// coverage never drove: the anchor moves east, and an entry whose key stayed
+	// put would have been drawn two cells further along the track than the cell
+	// it was painted on. The entry on the taken cells goes with them and the two
+	// that survive stay on their World cells, with their keys pulled back by two.
+	std::pair<uint32_t, std::vector<std::string>> applyShuttleLeftShrink(core::World& world,
+		uint32_t sector)
+	{
+		auto const plan = world.planResizeShuttle(sector, 2, 0, 13);
+		require(plan.valid, "The Shuttle left-edge shrink was refused: " + plan.diagnostic);
+		require(!plan.move, "A Shuttle left-edge shrink reported itself as a move");
+		return { world.applyShuttleEdit(plan), plan.consequences };
+	}
+
+	// Both chamber types, narrowed. The width an Airlock or a Chamber can hold
+	// is the gap between the two Location ends it must adjoin, so a different
+	// width means a different row, and a different row means the new footprint
+	// shares no cell with the old one. Every entry the chamber wore is therefore
+	// lost, which is the decided rule rather than a quirk of the edit - and the
+	// chamber plan has no consequences channel to say it through, so the loss
+	// is asked of the live Sector and the saved document.
 	std::pair<uint32_t, std::vector<std::string>> applyAirlockNarrow(core::World& world, uint32_t sector)
 	{
-		// Five cells to two: everything columns 2, 3 and 4 wore goes with them.
 		auto const plan = world.planResizeAirlock(sector, 3, 1, 2);
 		require(plan.valid, "The Airlock narrowing was refused: " + plan.diagnostic);
 		return { world.applyAirlockEdit(plan), {} };
@@ -371,46 +491,50 @@ namespace
 		auto const shaft = shaftEntries();
 		return {
 			{ "Shuttle move", [track] { return shuttleFixture(track); }, applyShuttleMove,
-				track, 0u },
+				track, 0u, { { 5, 0, 1 }, { 12, 0, 2 }, { 19, 0, 3 } } },
 			{ "Shuttle shortening", [track] { return shuttleFixture(track); }, applyShuttleShorten,
-				{ { 0, 0, 1 }, { 7, 0, 2 } }, 1u },
+				{ { 0, 0, 1 }, { 7, 0, 2 } }, 1u, { { 0, 0, 1 }, { 7, 0, 2 } } },
 			{ "Shuttle lengthening", [track] { return shuttleFixture(track); }, applyShuttleLengthen,
-				track, 0u },
+				track, 0u, { { 0, 0, 1 }, { 7, 0, 2 }, { 14, 0, 3 } } },
+			{ "Shuttle left-edge shrink",
+				[track] { return interiorStopShuttleFixture(track); }, applyShuttleLeftShrink,
+				{ { 5, 0, 2 }, { 12, 0, 3 } }, 1u, { { 7, 0, 2 }, { 14, 0, 3 } } },
 			{ "Airlock narrowing", [chamber] { return chamberFixture(chamber, false); },
-				applyAirlockNarrow, { { 0, 0, 1 } }, std::nullopt },
+				applyAirlockNarrow, Entries{}, std::nullopt, {} },
 			{ "Chamber narrowing", [chamber] { return chamberFixture(chamber, true); },
-				applyChamberNarrow, { { 0, 0, 1 } }, std::nullopt },
+				applyChamberNarrow, Entries{}, std::nullopt, {} },
 			{ "Dumbwaiter move", [shaft] { return dumbwaiterFixture(shaft); }, applyDumbwaiterMove,
-				shaft, std::nullopt },
+				shaft, std::nullopt, { { 5, 0, 4 }, { 5, 1, 6 } } },
 		};
 	}
 
-	// --- widening, asked of the chamber pair -----------------------------
+	// --- the chamber's width change, asked in both directions ------------
 	//
-	// Widening is the other half of the width question and must cost nothing:
-	// the new cells arrive as base beside what was already painted, and the
-	// entries keep naming the same cells of the Sector they named before. The
-	// chamber types start narrow and are opened out to the wide row, which is
-	// the same two rows the narrowing case runs in reverse.
+	// An Airlock's or a Chamber's width is not free: both of its ends must
+	// adjoin a Room or Corridor end, so the width it can hold is the gap its
+	// row happens to have. Changing the width therefore means moving the chamber
+	// to a row with a different gap, and a one-level Sector moved to another row
+	// shares no cell with where it stood. That makes every chamber width change
+	// the no-overlap case: none of the old cells survive, so none of the
+	// artwork survives, in either direction. This is the decided rule arriving
+	// at its end rather than a fixture accident, and it is checked as the loss
+	// it is instead of being allowed to look like a clean edit.
 
-	uint32_t widenChamber(core::World& world, uint32_t sector, bool chamber)
+	void widenChamber(core::World& world, uint32_t sector, bool chamber)
 	{
 		auto const before = entriesOf(world, sector);
+		require(before.size() == 2, "The narrow chamber fixture did not start with two entries");
 		auto const plan = chamber
 			? world.planResizeChamber(sector, 3, 0, 5, true)
 			: world.planResizeAirlock(sector, 3, 0, 5);
 		require(plan.valid, "The chamber widening was refused: " + plan.diagnostic);
 		auto const index = chamber ? world.applyChamberEdit(plan) : world.applyAirlockEdit(plan);
-		requireEntries(world, index, before, chamber
-			? "a Chamber widened from two cells to five"
-			: "an Airlock widened from two cells to five");
-		// The cells it grew by are bare, not borrowed from their neighbours: the
-		// two cells it keeps keep what they were painted with and nothing lands on
-		// the three it just took.
-		for (uint32_t column = 2; column < 5; ++column)
-			require(!world.getSector(index)->surfaceVariantAt(column, 0),
-				"A cell the chamber just grew by came back wearing artwork it was never given");
-		return index;
+		requireEntries(world, index, {}, chamber
+			? "a Chamber widened into a different row"
+			: "an Airlock widened into a different row");
+		requireWorldCells(world, index, {}, chamber
+			? "a Chamber widened into a different row"
+			: "an Airlock widened into a different row");
 	}
 
 	// Builds the same chamber fixture standing in the narrow row instead of the
@@ -432,12 +556,13 @@ namespace
 	}
 }
 
-// Six cases through one driver: the three Shuttle edits, the Airlock and
-// Chamber width drops, and the Dumbwaiter move. Every case is asked for the
-// live answer and the answer the saved document gives, and the Shuttle cases
-// for the announced answer too, so a type that carried its entries while its
-// plan said otherwise - or carried them live and lost them on the save -
-// fails here rather than later in a document.
+// Seven cases through one driver: the four Shuttle edits, the Airlock and
+// Chamber width changes, and the Dumbwaiter move. Every case is asked for the
+// live answer, the World cell each entry names and the answer the saved
+// document gives, and the Shuttle cases for the announced answer too, so a
+// type that carried its entries while its plan said otherwise - or carried
+// them live and lost them on the save - fails here rather than later in a
+// document.
 void everyHorizontalTransitEditCarriesItsEntriesAndSaysSo(smoke::Context const&)
 {
 	for (auto const& testCase : carryCases())
@@ -507,27 +632,66 @@ void theHorizontalTransitBoundIsTheNewFootprintsOwnExtent(smoke::Context const&)
 			: live.planResizeAirlock(world.second, 3, 1, 2);
 		require(plan.valid, "The exact-bound chamber narrowing was refused: " + plan.diagnostic);
 		auto const index = chamber ? live.applyChamberEdit(plan) : live.applyAirlockEdit(plan);
-		requireEntries(live, index, { { 0, 0, 4 }, { 1, 0, 5 } },
-			"narrowing the chamber to exactly its last surviving cell");
-		// The cell that was the boundary before the edit is gone with the rest of
-		// the cells the new footprint does not have.
-		for (uint32_t column = 2; column < 5; ++column)
-			require(!live.getSector(index)->surfaceVariantAt(column, 0),
-				"A variant survived in a cell the narrowed chamber no longer has");
+		// The chamber's bound is asked on both axes at once. Its width is pinned
+		// by the two Location ends it adjoins, so a narrower width lives in
+		// another row, and every painted cell is outside the new footprint on
+		// the level axis as well as the column axis. Nothing survives, and
+		// nothing is clamped into the two cells the chamber now has.
+		requireEntries(live, index, {},
+			"narrowing the chamber into a row that shares no cell with the old one");
+		requireWorldCells(live, index, {},
+			"narrowing the chamber into a row that shares no cell with the old one");
+		require(serialize(live).find("surfaceVariants") == std::string::npos,
+			"A chamber left with no entries still wrote a surfaceVariants field");
 	}
 }
 
-// Widening costs nothing on any of the three: the new cells arrive as base
-// beside what was already painted and no entry is renumbered to make room.
+// Widening the Shuttle's track costs nothing: the new cell arrives as base
+// beside what was already painted, no entry is renumbered to make room, and
+// the World cells named after the edit are the ones the entries were painted
+// on. Asked of the Shuttle because it is the horizontal Transit whose width
+// can change where it stands.
 void wideningAHorizontalTransitDropsNothing(smoke::Context const&)
+{
+	auto world = shuttleFixture({ { 0, 0, 1 }, { 7, 0, 2 } });
+	auto& live = *world.first;
+	auto const plan = live.planResizeShuttle(world.second, 0, 0, 16);
+	require(plan.valid, "The Shuttle widening was refused: " + plan.diagnostic);
+	require(!mentionsDrop(plan.consequences),
+		"A Shuttle widening announced variant entries being dropped: "
+			+ consequencesText(plan.consequences));
+	auto const index = live.applyShuttleEdit(plan);
+	requireEntries(live, index, { { 0, 0, 1 }, { 7, 0, 2 } },
+		"a Shuttle track lengthened by one cell");
+	requireWorldCells(live, index, { { 0, 0, 1 }, { 7, 0, 2 } },
+		"a Shuttle track lengthened by one cell");
+	// The cell the track grew by is bare, not borrowed from its neighbour.
+	require(!live.getSector(index)->surfaceVariantAt(15, 0),
+		"The cell the Shuttle track just grew by came back wearing artwork it was never given");
+}
+
+// The chamber's width change asked in the widening direction as well, because
+// the loss runs the same way both ways and the ticket asks that it be stated
+// rather than discovered. A chamber cannot widen where it stands - both of its
+// ends are pinned by the Location ends it must adjoin - so widening moves it
+// to the wide row, and a one-level Sector moved to another row leaves every
+// cell it wore behind. The full loss is what the Sector holds and what the
+// saved document holds afterwards.
+void aChamberWidthChangeIsARelocationAndLosesWhatTheOldCellsHeld(
+	smoke::Context const&)
 {
 	for (bool chamber : { false, true })
 	{
 		auto world = narrowChamberFixture({ { 0, 0, 1 }, { 1, 0, 2 } }, chamber);
-		auto const index = widenChamber(*world.first, world.second, chamber);
-		auto const reloaded = load(serialize(*world.first));
-		requireEntries(*reloaded, index, { { 0, 0, 1 }, { 1, 0, 2 } },
-			std::string(chamber ? "a Chamber widening" : "an Airlock widening")
+		auto& live = *world.first;
+		require(live.getSector(world.second)->getCellY() == 1
+				&& live.getSector(world.second)->getCellsWide() == 2,
+			"The narrow chamber fixture is not where it was built");
+		widenChamber(live, world.second, chamber);
+		auto const reloaded = load(serialize(live));
+		requireEntries(*reloaded, world.second, {},
+			std::string(chamber ? "a Chamber widened into a different row"
+				: "an Airlock widened into a different row")
 				+ ", after the save and reload");
 	}
 }
@@ -583,6 +747,8 @@ void registerHorizontalTransitSurfaceVariants(std::vector<smoke::Check>& checks)
 		theHorizontalTransitBoundIsTheNewFootprintsOwnExtent });
 	checks.push_back({ "horizontalTransitVariantCarry/wideningAHorizontalTransitDropsNothing",
 		wideningAHorizontalTransitDropsNothing });
+	checks.push_back({ "horizontalTransitVariantCarry/aChamberWidthChangeIsARelocationAndLosesWhatTheOldCellsHeld",
+		aChamberWidthChangeIsARelocationAndLosesWhatTheOldCellsHeld });
 	checks.push_back({ "horizontalTransitVariantCarry/aDumbwaiterMoveCarriesItsEntriesUnchanged",
 		aDumbwaiterMoveCarriesItsEntriesUnchanged });
 }

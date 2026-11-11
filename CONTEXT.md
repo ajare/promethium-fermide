@@ -541,7 +541,7 @@ A Willpower resource that names rectangular regions of one atlas image. Whether 
 _Avoid_: Tile set
 
 **Sector surface variant**:
-One cell of a Sector's surface wearing a variant of its type's tile rather than that type's base. Recorded Sector-local - a column counted from the Sector's own left edge and a level counted up from its floor line - and carried on the Sector's construction record as well as on the live Sector, so the rebuild every structural edit performs replays the entries rather than losing them. Artwork only: a variant changes which tile a cell draws and nothing about traversal, capacity or simulation state.
+One cell of a Sector's surface wearing a variant of its type's tile rather than that type's base. Recorded Sector-local - a column counted from the Sector's own left edge and a level counted up from its floor line - and carried on the Sector's construction record as well as on the live Sector, so the rebuild every structural edit performs replays the entries rather than losing them. The local key is re-derived on a resize so the artwork stays on the World cell it was painted on; a pure move leaves it unchanged because the artwork rides along with the Sector. Artwork only: a variant changes which tile a cell draws and nothing about traversal, capacity or simulation state.
 _Avoid_: per-cell texture, decoration
 
 ## Station systems

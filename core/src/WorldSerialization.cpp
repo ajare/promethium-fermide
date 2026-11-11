@@ -3591,6 +3591,10 @@ namespace core
 		else
 		{
 			auto const oldY = found->a;
+			auto const oldAnchorX = (int64_t)found->b;
+			auto const oldAnchorY = (int64_t)found->a;
+			auto const oldCellsWide = found->c;
+			auto const oldLevelsHigh = found->e;
 			auto oldPosition = (float)oldY;
 			if (found->g < found->values.size()) oldPosition += found->values[found->g];
 			for (auto const& [id, resource] : mTraversalResources.entries())
@@ -3603,15 +3607,20 @@ namespace core
 			found->e = plan.levelsHigh;
 			// The shaft's own grid just changed shape, and the variant entries name
 			// cells of that grid (#1045). The same answer the Location record
-			// rewrite gives (#1044): a footprint that grows renumbers nothing, and
-			// a footprint that shrinks past an entry drops it rather than clamping
-			// it onto a surviving cell nobody painted it on. A Lift is the one
-			// vertical Transit whose width changes as well as its height, so a
-			// shaft narrowed from two cells to one loses the entries that named
-			// its second column along with the ones that named a level above the
-			// new ceiling.
-			pruneSurfaceVariantsToFootprint(found->surfaceVariants,
-				plan.cellsWide, plan.levelsHigh);
+			// rewrite gives (#1044, re-keyed to the World cell by #1047): a cell
+			// the resized shaft still has keeps the artwork it was painted with on
+			// the World cell it was painted on, and a cell the edit takes away takes
+			// its artwork with it rather than leaving it clamped onto a surviving
+			// cell nobody painted it on. A Lift is the one vertical Transit whose
+			// width changes as well as its height, so a shaft narrowed from two
+			// cells to one loses the entries that named its second column along
+			// with the ones that named a level above the new ceiling - and because
+			// a Lift's move flag says nothing about the size, a move that also
+			// resized is re-keyed here exactly as a resize in place is, while a
+			// same-size relocation carries the entries unchanged.
+			rekeySurfaceVariantsForResize(found->surfaceVariants,
+				oldAnchorX, oldAnchorY, oldCellsWide, oldLevelsHigh,
+				plan.x, plan.y, plan.cellsWide, plan.levelsHigh);
 			// Per-stop Door style overrides follow their stop, keyed by the
 			// stop's absolute landing level rather than its offset from the
 			// shaft anchor: a move or a shaft extension that shifts the offsets
@@ -4660,9 +4669,14 @@ namespace core
 		// Cells the shaft takes away take the artwork they wear with them, and the
 		// author is told before the edit is confirmed rather than left to find it
 		// gone (#1045). Both edges are asked at once because a Lift is the one
-		// vertical Transit whose width moves as well as its ceiling.
+		// vertical Transit whose width moves as well as its ceiling, and the old
+		// anchor is asked against the new one because a shaft that moved while it
+		// changed size takes its artwork with it unless the keys are re-derived by
+		// World cell (#1047). A same-size relocation is a move, drops nothing, and
+		// says nothing.
 		appendSurfaceVariantDropConsequence(plan.consequences, lift->getSurfaceVariants(),
-			cellsWide, levelsHigh);
+			lift->getCellX(), lift->getCellY(), lift->getCellsWide(), lift->getLevelsHigh(),
+			x, y, cellsWide, levelsHigh);
 		for (auto level : oldStops) if (find(newStops.begin(), newStops.end(), level) == newStops.end())
 			plan.consequences.push_back(format("Remove Lift stop and landing at level {}", level));
 		bool const destructive = !plan.consequences.empty();
@@ -4804,16 +4818,24 @@ namespace core
 				if (resource->mShuttle && resource->mLiftSector.value == (uint64_t)plan.sectorIndex + 1)
 				{ oldPosition = resource->mLiftPosition; oldCurrentStop = resource->mLiftCurrentStop; break; }
 			}
+			auto const oldAnchorX = (int64_t)found->b;
+			auto const oldAnchorY = (int64_t)found->a;
+			auto const oldCellsWide = found->c;
 			found->a = plan.y; found->c = plan.cellsWide;
 			// The track's own grid just changed length, and the variant entries name
 			// cells of that grid (#1046). A Shuttle is one level high and always
 			// was, so the only footprint edge that can move is its far end: short
-			// the run and the entries that named a cell past the new end are dropped
-			// rather than clamped onto a surviving cell nobody painted them on - the
-			// same answer the Location rewrite gives (#1044) and the vertical
-			// Transits (#1045).
-			pruneSurfaceVariantsToFootprint(found->surfaceVariants,
-				plan.cellsWide, 1);
+			// the run and the entries that named a World cell past the new end go
+			// with that cell rather than being clamped onto a surviving cell nobody
+			// painted them on - the same answer the Location rewrite gives (#1044)
+			// and the vertical Transits (#1045), and re-keyed to the World cell so
+			// that a track shortened at one end and lengthened at the other keeps
+			// its artwork where it was painted rather than sliding it along the
+			// track (#1047). A same-size relocation is a move, not a resize, and
+			// carries the entries unchanged.
+			rekeySurfaceVariantsForResize(found->surfaceVariants,
+				oldAnchorX, oldAnchorY, oldCellsWide, 1,
+				plan.x, plan.y, plan.cellsWide, 1);
 			// Per-Door style overrides follow their stop's identity rather than
 			// its position in the stop list: adding, removing, or reindexing
 			// stops keeps every surviving Door's style on its own structural
@@ -5102,9 +5124,14 @@ namespace core
 		// Cells the track takes away take the artwork they wear with them, and the
 		// author is told before the edit is confirmed rather than left to find it
 		// gone (#1046). Only the far end is asked, because a Shuttle is one level
-		// high however long it runs.
+		// high however long it runs, and the old anchor is asked against the new
+		// one so a track that moved while it changed length announces what that
+		// costs rather than looking clean (#1047).
 		appendSurfaceVariantDropConsequence(plan.consequences,
-			shuttleTransit->getSurfaceVariants(), cellsWide, 1);
+			shuttleTransit->getSurfaceVariants(),
+			shuttleTransit->getCellX(), shuttleTransit->getCellY(),
+			shuttleTransit->getCellsWide(), 1,
+			x, y, cellsWide, 1);
 		if (vehicleChanged)
 		{
 			string layout;
@@ -5295,16 +5322,24 @@ namespace core
 		}
 		else
 		{
+			auto const oldAnchorX = (int64_t)found->b;
+			auto const oldAnchorY = (int64_t)found->a;
+			auto const oldLevelsHigh = found->c;
 			found->a = plan.y; found->b = plan.x; found->c = plan.options.levelsHigh;
 			found->p = plan.options.extensible; found->q = plan.options.startExtended;
 			// The Ladder's own grid just changed shape, and the variant entries
 			// name cells of that grid (#1045). A Ladder is one cell wide and
 			// always was, so the only footprint edge that can move is its ceiling:
-			// shortening the run drops the entries that named a level above where
+			// shortening the run drops the entries whose World cell is above where
 			// the Ladder now ends, the same answer the Location rewrite gives
-			// (#1044) and not a clamp onto the topmost surviving cell.
-			pruneSurfaceVariantsToFootprint(found->surfaceVariants,
-				1, plan.options.levelsHigh);
+			// (#1044) and not a clamp onto the topmost surviving cell. Lowering the
+			// floor line re-keys the survivors so each one still names the World
+			// cell it was painted on rather than sliding the run's artwork down
+			// the shaft (#1047); a same-size relocation is a move and carries them
+			// unchanged.
+			rekeySurfaceVariantsForResize(found->surfaceVariants,
+				oldAnchorX, oldAnchorY, 1, oldLevelsHigh,
+				plan.x, plan.y, 1, plan.options.levelsHigh);
 			found->initiallyBroken = plan.options.extensible && plan.options.initiallyBroken;
 			found->d = plan.options.directionalBatchLimit;
 			if (!plan.options.extensible) found->controlPermissionRequirements = {};
@@ -5416,9 +5451,12 @@ namespace core
 				plan.consequences.push_back("Delete Agent " + agent->getName());
 		}
 		// Shortening the run takes the top cells' artwork with it (#1045), on the
-		// one footprint edge a Ladder has.
+		// one footprint edge a Ladder has, and the old anchor is asked against the
+		// new one so a run lowered and shortened in one edit announces the whole
+		// loss rather than part of it (#1047).
 		appendSurfaceVariantDropConsequence(plan.consequences, ladder->getSurfaceVariants(),
-			1, options.levelsHigh);
+			ladder->getCellX(), ladder->getCellY(), 1, ladder->getLevelsHigh(),
+			x, y, 1, options.levelsHigh);
 		vector<ConstructionRecord> records;
 		plan.valid = prepareLadderEdit(plan, records, plan.diagnostic);
 		if (plan.valid && records.size() < mConstructionRecords.size())
@@ -5556,16 +5594,23 @@ namespace core
 					? candidate->canAddChamber(edited.layer, plan.y, plan.x, plan.width, &diagnostic, edited.chamberSubtype)
 					: candidate->canAddAirlock(edited.layer, plan.y, plan.x, plan.width, edited.x, &diagnostic);
 				if (!valid) return false;
+				auto const oldAnchorX = (int64_t)edited.b;
+				auto const oldAnchorY = (int64_t)edited.a;
+				auto const oldCellsWide = edited.c;
 				edited.a = plan.y; edited.b = plan.x; edited.c = plan.width;
 				// The chamber's own grid just changed width, and the variant entries
 				// name cells of that grid (#1046). An Airlock or Chamber is one
 				// level high and always was, so the only footprint edge that can
-				// move is its far end: narrowing the chamber drops the entries that
-				// named a cell past the new end rather than clamping them onto a
+				// move is its far end: narrowing the chamber drops the entries whose
+				// World cell is past the new end rather than clamping them onto a
 				// surviving cell nobody painted them on - the same answer the
-				// Location rewrite gives (#1044).
-				pruneSurfaceVariantsToFootprint(edited.surfaceVariants,
-					plan.width, 1);
+				// Location rewrite gives (#1044). Moving the near end while the width
+				// changes re-keys the survivors onto the World cells they were painted
+				// on, so a chamber slid along its row and narrowed at the same time
+				// does not carry its artwork sideways with it (#1047).
+				rekeySurfaceVariantsForResize(edited.surfaceVariants,
+					oldAnchorX, oldAnchorY, oldCellsWide, 1,
+					plan.x, plan.y, plan.width, 1);
 				if (plan.chamber) edited.d = plan.leftToRight ? 1 : 0;
 				for (int side = 0; side < 2; ++side)
 				{
@@ -5762,9 +5807,12 @@ namespace core
 		// Shortening the flight takes the far end's artwork with it (#1045). The
 		// Staircase's own plan is the only place this question gets asked for the
 		// type, because its record rewrite lives in the apply path rather than a
-		// prepare of its own; the same shared prune answers it here and there.
+		// prepare of its own; the same shared helper answers it here and there,
+		// re-keyed by World cell so a flight that moved while it changed length
+		// announces what that costs too (#1047).
 		appendSurfaceVariantDropConsequence(plan.consequences, old->getSurfaceVariants(),
-			options.cellsWide, 2);
+			old->getCellX(), old->getCellY(), old->getCellsWide(), 2,
+			x, y, options.cellsWide, 2);
 		plan.valid = true;
 		return plan;
 	}
@@ -5821,6 +5869,9 @@ namespace core
 		}
 		else
 		{
+			auto const oldAnchorX = (int64_t)found->b;
+			auto const oldAnchorY = (int64_t)found->a;
+			auto const oldCellsWide = found->c;
 			found->a = plan.y; found->b = plan.x; found->c = plan.options.cellsWide; found->i = plan.options.riseSide;
 			found->x = plan.options.speed;
 			found->initiallyBroken = plan.options.initiallyBroken;
@@ -5828,11 +5879,16 @@ namespace core
 			// name cells of that grid (#1045). A Staircase is one flight and so
 			// is two levels high however far it is widened or shortened - the one
 			// vertical Transit whose ceiling never moves and whose width always
-			// can - so shortening the run drops the entries that named a step
+			// can - so shortening the run drops the entries whose World cell is
 			// beyond the new far end, the same answer the Location rewrite gives
-			// (#1044) and not a clamp onto the last surviving cell.
-			pruneSurfaceVariantsToFootprint(found->surfaceVariants,
-				plan.options.cellsWide, 2);
+			// (#1044) and not a clamp onto the last surviving cell. Because a
+			// Staircase's move flag says nothing about the width, a relocation that
+			// also shortened the flight is re-keyed here onto the World cells the
+			// entries were painted on, so the flight's artwork does not slide along
+			// with the move (#1047); a same-size relocation carries them unchanged.
+			rekeySurfaceVariantsForResize(found->surfaceVariants,
+				oldAnchorX, oldAnchorY, oldCellsWide, 2,
+				plan.x, plan.y, plan.options.cellsWide, 2);
 		}
 		// Replay Locations before Transits regardless of the order they were
 		// authored in: a moved Staircase may land on a Location that was painted
@@ -5892,6 +5948,9 @@ namespace core
 		}
 		else
 		{
+			auto const oldAnchorX = (int64_t)found->b;
+			auto const oldAnchorY = (int64_t)found->a;
+			auto const oldLevelsHigh = found->c;
 			found->a = plan.y; found->b = plan.x; found->c = plan.options.levelsHigh;
 			found->i = plan.options.mountSide; found->d = plan.options.directionalCapacity;
 			found->e = plan.options.directionalBatchLimit;
@@ -5899,9 +5958,14 @@ namespace core
 			// name cells of that grid (#1045). A Stairwell is two cells wide and
 			// always was - the two flights share one shaft - so the only footprint
 			// edge that can move is its ceiling, and shortening the well drops the
-			// entries that named a level above the new top of the shaft.
-			pruneSurfaceVariantsToFootprint(found->surfaceVariants,
-				2, plan.options.levelsHigh);
+			// entries whose World cell is above the new top of the shaft. Moving
+			// the floor line re-keys the survivors so each one still names the World
+			// cell it was painted on rather than sliding the well's artwork down
+			// with the anchor (#1047); a same-size relocation is a move and carries
+			// them unchanged.
+			rekeySurfaceVariantsForResize(found->surfaceVariants,
+				oldAnchorX, oldAnchorY, 2, oldLevelsHigh,
+				plan.x, plan.y, 2, plan.options.levelsHigh);
 		}
 
 		// Replay Locations before Transits regardless of the order they were
@@ -5997,9 +6061,12 @@ namespace core
 				plan.consequences.push_back("Delete Agent " + agent->getName());
 		}
 		// Shortening the well takes the top levels' artwork with it (#1045), on
-		// the one footprint edge a Stairwell has.
+		// the one footprint edge a Stairwell has, and the old anchor is asked
+		// against the new one so a well moved and shortened in one edit announces
+		// the whole loss rather than part of it (#1047).
 		appendSurfaceVariantDropConsequence(plan.consequences, stairwell->getSurfaceVariants(),
-			2, options.levelsHigh);
+			stairwell->getCellX(), stairwell->getCellY(), 2, stairwell->getLevelsHigh(),
+			x, y, 2, options.levelsHigh);
 		vector<ConstructionRecord> records;
 		plan.valid = prepareStairwellEdit(plan, records, plan.diagnostic);
 		if (plan.valid && records.size() < mConstructionRecords.size())
@@ -6137,13 +6204,25 @@ namespace core
 				if (producer && originalSectorIndex == plan.sectorIndex)
 				{
 					if (plan.remove) continue;
+					// The geometry the record holds before the rewrite, read per type
+					// because the three pack their anchor into different fields. The
+					// variant entries are keyed against that anchor, so it is what the
+					// re-key below works from (#1047).
+					int64_t oldAnchorX = 0;
+					int64_t oldAnchorY = 0;
+					uint32_t oldCellsWide = 0;
+					uint32_t oldLevelsHigh = 0;
 					if (source.type == ConstructionType::Corridor)
 					{
+						oldAnchorX = source.b; oldAnchorY = source.a;
+						oldCellsWide = source.c; oldLevelsHigh = source.d;
 						source.a = plan.y; source.b = plan.x;
 						source.c = plan.cellsWide; source.d = plan.levelsHigh;
 					}
 					else if (source.type == ConstructionType::Room)
 					{
+						oldAnchorX = source.c; oldAnchorY = source.b;
+						oldCellsWide = source.d; oldLevelsHigh = source.e;
 						source.b = plan.y; source.c = plan.x;
 						source.d = plan.cellsWide; source.e = plan.levelsHigh;
 						// The height override only applies to one-cell-high Rooms.
@@ -6151,6 +6230,8 @@ namespace core
 					}
 					else if (source.type == ConstructionType::Facade)
 					{
+						oldAnchorX = source.b; oldAnchorY = source.a;
+						oldCellsWide = source.c; oldLevelsHigh = source.d;
 						source.a = plan.y; source.b = plan.x;
 						source.c = plan.cellsWide; source.d = plan.levelsHigh;
 					}
@@ -6161,19 +6242,21 @@ namespace core
 					}
 
 					// The Sector's own grid just changed shape, and the variant
-					// entries name cells of that grid (#1044). Held Sector-local and
-					// anchored to the bottom-left, a footprint that grows - leftward,
-					// upward, or both - replays the same entries against the same
-					// cells, so growing never renumbers what was already painted, and
-					// a pure move needs nothing here at all. A footprint that shrinks
-					// past an entry leaves it naming a cell the Sector no longer has,
-					// and the entry goes with the cell rather than being clamped to
-					// the nearest one still standing: the replay's own bounds check
-					// refuses an out-of-grid entry outright, so pruning here is what
-					// makes a shrink an edit that succeeds rather than one that
-					// fails over artwork already lost.
-					pruneSurfaceVariantsToFootprint(source.surfaceVariants,
-						plan.cellsWide, plan.levelsHigh);
+					// entries name cells of that grid (#1044). The keys are Sector-
+					// local, so an edit that moves the anchor re-points every one of
+					// them at a different World cell unless the key moves with it;
+					// re-keying by World cell is what keeps a cell that survives the
+					// resize wearing what it was painted with, and takes the artwork
+					// of every cell the edit deletes with that cell (#1047). An entry
+					// is dropped rather than clamped to the nearest cell still
+					// standing: the replay's own bounds check refuses an out-of-grid
+					// entry outright, so dropping here is what makes a resize an edit
+					// that succeeds rather than one that fails over artwork already
+					// lost. A same-size relocation is a move, not a resize, and the
+					// helper carries the entries unchanged for it.
+					rekeySurfaceVariantsForResize(source.surfaceVariants,
+						oldAnchorX, oldAnchorY, oldCellsWide, oldLevelsHigh,
+						plan.x, plan.y, plan.cellsWide, plan.levelsHigh);
 				}
 
 				if (referencesSector(source.type))
@@ -8370,12 +8453,18 @@ namespace core
 			}
 
 		// Cells the plan takes away take the variants they wear with them (#1044).
-		// The entries are anchored to the Sector's own bottom-left, so this is
-		// the only way one can be lost: the new footprint no longer has the cell
-		// it names. The author is told rather than left to find the artwork gone
-		// after the fact, which is what every other destructive line here is for.
+		// The keys are Sector-local, so the question is asked of the old anchor
+		// against the new one: a cell the resized Sector still has keeps the
+		// artwork it was painted with on the World cell it was painted on, and a
+		// cell the edit deletes takes its artwork with it (#1047). The author is
+		// told rather than left to find the artwork gone after the fact, which is
+		// what every other destructive line here is for - including the resize
+		// that leaves none of the old cells behind, where the count announced is
+		// every entry the Sector had.
 		appendSurfaceVariantDropConsequence(plan.consequences, sector->getSurfaceVariants(),
-			cellsWide, levelsHigh);
+			sector->getCellX(), sector->getCellY(),
+			sector->getCellsWide(), sector->getLevelsHigh(),
+			x, y, cellsWide, levelsHigh);
 
 		set<void const*> seen;
 		for (uint32_t i = 0; i < sector->getNumObjects(); ++i)

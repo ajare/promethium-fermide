@@ -34,34 +34,76 @@ namespace core
 {
 	using namespace std;
 
-	uint32_t World::pruneSurfaceVariantsToFootprint(
+	uint32_t World::rekeySurfaceVariantsForResize(
 		std::vector<SectorSurfaceVariant>& entries,
+		int64_t oldAnchorX, int64_t oldAnchorY,
+		uint32_t oldCellsWide, uint32_t oldLevelsHigh,
+		int64_t newAnchorX, int64_t newAnchorY,
 		uint32_t cellsWide, uint32_t levelsHigh)
 	{
-		auto const before = entries.size();
-		// Everything inside the footprint keeps its entry, in the order it was
-		// already in, so a shrink that takes three cells out does not shuffle the
-		// forty the Sector still has - and a shrink that takes none out leaves the
-		// list byte for byte as it was, which is what lets a saved document say
-		// nothing changed.
-		std::erase_if(entries, [&](auto const& entry)
-			{ return entry.column >= cellsWide || entry.level >= levelsHigh; });
-		return static_cast<uint32_t>(before - entries.size());
+		// A move is not a resize. It translates the whole Sector and the artwork
+		// rides along with it, so the local keys that named the Sector's cells
+		// before still name them, and there is nothing to re-key and nothing to
+		// drop. Asked the other way - keep the artwork on the World cells - a move
+		// would drop every entry the moment it left the old footprint, which is
+		// the opposite of what an author means by picking the Sector up.
+		if (cellsWide == oldCellsWide && levelsHigh == oldLevelsHigh)
+			return 0;
+
+		// Walked into a new list rather than filtered in place, because the answer
+		// for each entry is a new pair of keys as much as it is a keep-or-drop
+		// decision. The order the entries were already in is carried over, so a
+		// resize that takes three cells out does not shuffle the forty the Sector
+		// still has - and a resize whose anchor never moved leaves the list equal
+		// to what it was, which is what lets a saved document say nothing
+		// changed.
+		std::vector<SectorSurfaceVariant> kept;
+		kept.reserve(entries.size());
+		for (auto const& entry : entries)
+		{
+			// Signed throughout. The World cell the entry was painted on is the
+			// old anchor plus the local key; the local key that names that same
+			// cell in the new footprint is that minus the new anchor. When the
+			// edit deleted the World cell the difference is negative, and an
+			// unsigned subtraction here would wrap to something huge that the
+			// extent check catches by luck on one axis and quietly misplaces on
+			// the other.
+			auto const column = oldAnchorX + static_cast<int64_t>(entry.column)
+				- newAnchorX;
+			auto const level = oldAnchorY + static_cast<int64_t>(entry.level)
+				- newAnchorY;
+			if (column < 0 || level < 0
+				|| column >= static_cast<int64_t>(cellsWide)
+				|| level >= static_cast<int64_t>(levelsHigh))
+				continue;
+			kept.push_back({ static_cast<uint32_t>(column),
+				static_cast<uint32_t>(level), entry.variant });
+		}
+		auto const dropped = static_cast<uint32_t>(entries.size() - kept.size());
+		entries = std::move(kept);
+		return dropped;
 	}
 
 	void World::appendSurfaceVariantDropConsequence(
 		std::vector<std::string>& consequences,
 		std::vector<SectorSurfaceVariant> const& entries,
+		int64_t oldAnchorX, int64_t oldAnchorY,
+		uint32_t oldCellsWide, uint32_t oldLevelsHigh,
+		int64_t newAnchorX, int64_t newAnchorY,
 		uint32_t cellsWide, uint32_t levelsHigh)
 	{
-		// Counted on a copy through the prune the record rewrite will perform, so
-		// one answer is computed one way and every edit path that announces a loss
-		// announces exactly what goes (#1044, carried to the vertical Transits by
-		// #1045). A footprint that loses nothing says nothing: a move and a grow
-		// cost no artwork and should not ask about any.
+		// Counted on a copy through the re-key the record rewrite will perform,
+		// so one answer is computed one way and every edit path that announces a
+		// loss announces exactly what goes (#1044, carried to the vertical
+		// Transits by #1045 and to the moving anchor by #1047). A footprint that
+		// loses nothing says nothing: a move and a grow cost no artwork and should
+		// not ask about any. A resize that leaves none of the old cells behind
+		// loses every entry, and the line says all of them rather than letting a
+		// total loss look like a clean edit.
 		auto planned = entries;
-		if (auto const dropped = pruneSurfaceVariantsToFootprint(planned,
-				cellsWide, levelsHigh))
+		if (auto const dropped = rekeySurfaceVariantsForResize(planned,
+				oldAnchorX, oldAnchorY, oldCellsWide, oldLevelsHigh,
+				newAnchorX, newAnchorY, cellsWide, levelsHigh))
 			consequences.push_back(format("Drop {} variant {} outside the new footprint",
 				dropped, dropped == 1 ? "cell" : "cells"));
 	}

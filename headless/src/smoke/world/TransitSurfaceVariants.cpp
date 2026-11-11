@@ -1,12 +1,14 @@
-// Variants survive a vertical Transit resize and move (#1045).
+// Variants survive a vertical Transit resize and move (#1045, re-keyed by
+// World cell by #1047).
 //
 // #1044 proved the carry-through for Rooms and Corridors and left one shared
-// answer behind: the entries are Sector-local and anchored to the Sector's own
-// bottom-left, so a footprint that grows renumbers nothing and a footprint
-// that shrinks past an entry drops it rather than clamping it onto a surviving
-// cell nobody painted it on. This is that same answer asked of the four
-// vertical Transits - Lift, Ladder, Stairwell and Staircase - through their
-// own record replay rather than the Location one.
+// answer behind: the entries are Sector-local, so a resize that moves the
+// Sector's anchor has to re-derive the local key or every surviving entry ends
+// up naming a different World cell than the one it was painted on, and a cell
+// the new footprint does not have drops its entry rather than clamping it onto
+// a surviving cell nobody painted it on. This is that same answer asked of the
+// four vertical Transits - Lift, Ladder, Stairwell and Staircase - through
+// their own record replay rather than the Location one.
 //
 // The four are not one case in four costumes, and what each can lose is worth
 // stating because it is what the checks are picked against:
@@ -29,6 +31,11 @@
 // a plan is where the footprint is decided, where the drop is counted and where
 // the consequence is announced, and a widget only forwards what a plan already
 // said. Testing through the widgets would test that a button was pressed.
+//
+// Every resize case here is asserted twice over: on the local keys the edit
+// left behind, and on the World cell each entry names. The second is the one
+// #1047 needed, because a resize that moved the anchor and left the keys alone
+// looked like a clean carry while shipping every entry one cell sideways.
 
 #include "Checks.h"
 
@@ -106,6 +113,71 @@ namespace
 					"it was given after " + when);
 	}
 
+	// One entry stated as the World cell it names rather than the Sector-local
+	// column and level that store it. The local frame is the view that could not
+	// see #1047: an entry whose key stayed put while the anchor moved looked
+	// unchanged and pointed somewhere else.
+	struct WorldEntry
+	{
+		uint32_t worldX{ 0 };
+		uint32_t worldY{ 0 };
+		uint32_t variant{ 0 };
+
+		friend bool operator==(WorldEntry const& left, WorldEntry const& right) = default;
+	};
+
+	std::string worldEntriesText(std::vector<WorldEntry> const& entries)
+	{
+		std::string text;
+		for (auto const& entry : entries)
+			text += "@" + std::to_string(entry.worldX) + "," + std::to_string(entry.worldY)
+				+ "->" + std::to_string(entry.variant);
+		return text.empty() ? "<none>" : text;
+	}
+
+	std::vector<WorldEntry> worldEntriesOf(core::World const& world, uint32_t sectorIndex)
+	{
+		auto const& sector = *world.getSector(sectorIndex);
+		std::vector<WorldEntry> out;
+		for (auto const& entry : sector.getSurfaceVariants())
+			out.push_back({ sector.getCellX() + entry.column,
+				sector.getCellY() + entry.level, entry.variant });
+		return out;
+	}
+
+	// Asserts the entries by the World cell each one names, and asks it of every
+	// cell of the footprint so a cell that should be bare cannot quietly be
+	// wearing something a neighbour wore.
+	void requireWorldCells(core::World const& world, uint32_t sectorIndex,
+		std::vector<WorldEntry> const& expected, std::string const& when)
+	{
+		require(sectorIndex < world.getNumSectors(),
+			"The edited Sector is not in the World after " + when);
+		auto const& sector = *world.getSector(sectorIndex);
+		auto const actual = worldEntriesOf(world, sectorIndex);
+		require(actual == expected, "The World cells named after " + when + " are "
+			+ worldEntriesText(actual) + ", expected " + worldEntriesText(expected));
+		for (uint32_t level = 0; level < sector.getLevelsHigh(); ++level)
+		{
+			for (uint32_t column = 0; column < sector.getCellsWide(); ++column)
+			{
+				auto const found = std::find_if(expected.begin(), expected.end(),
+					[&](WorldEntry const& entry)
+					{ return entry.worldX == sector.getCellX() + column
+						&& entry.worldY == sector.getCellY() + level; });
+				auto const want = found == expected.end()
+					? std::optional<uint32_t>{}
+					: std::optional<uint32_t>{ found->variant };
+				auto const got = sector.surfaceVariantAt(column, level);
+				require(got == want, "The World cell at "
+					+ std::to_string(sector.getCellX() + column) + ","
+					+ std::to_string(sector.getCellY() + level) + " answers as "
+					+ (got ? std::to_string(*got) : std::string("base")) + " after " + when
+					+ ", expected " + (want ? std::to_string(*want) : std::string("base")));
+			}
+		}
+	}
+
 	// Paints the given entries onto one Sector through the authoring call rather
 	// than a hand-written document: the entries under test are the ones an
 	// author actually puts there, and the ones a fixture does not name are the
@@ -141,11 +213,21 @@ namespace
 	// The shaft spans six levels and lands on two of them, so it can be
 	// shortened by two and still keep the two stops a Lift requires, and it has
 	// room to grow down and west as well.
+	//   Layer 1   .. | Li Li | ..      shaft at x=2..3, y=1..6
+	//   Layer 0   ================     Corridor floors at y=1, 4, 5, 7
+	//
+	// The shaft spans six levels and lands on three of them, so it can be
+	// shortened by two and still keep the two stops a Lift requires, and it has
+	// room to grow down and west as well. The floor at y=5 is there so a shrink
+	// that raises the floor line to y=2 still leaves the shaft two stops: a
+	// three-level gap at the bottom and one stop above is a refused edit, not a
+	// shorter Lift.
 	std::pair<WorldPtr, uint32_t> liftFixture(Entries const& entries)
 	{
 		auto world = std::make_shared<core::World>("Variant carry lift", 12, 8);
 		world->addCorridor(1, 0, 8);
 		world->addCorridor(4, 0, 8);
+		world->addCorridor(5, 0, 8);
 		world->addCorridor(7, 0, 8);
 		auto const created = world->addLift(1, 1, 2, 2, 6);
 		world->finishBuild();
@@ -231,6 +313,11 @@ namespace
 		std::function<std::pair<uint32_t, std::vector<std::string>>(core::World&, uint32_t)> edit;
 		Entries expected;
 		uint32_t dropped{ 0 };
+		// The World cells the surviving entries are expected to name after the
+		// edit. Stated rather than derived, because deriving it from the expected
+		// local keys and the new anchor would only restate the arithmetic being
+		// tested (#1047).
+		std::vector<WorldEntry> worldExpected{};
 	};
 
 	bool mentionsDrop(std::vector<std::string> const& consequences)
@@ -277,6 +364,7 @@ namespace
 		auto const& consequences = edited.second;
 
 		requireEntries(live, index, testCase.expected, testCase.label);
+		requireWorldCells(live, index, testCase.worldExpected, testCase.label);
 
 		auto const text = consequencesText(consequences);
 		if (testCase.dropped == 0)
@@ -332,11 +420,48 @@ namespace
 
 	std::pair<uint32_t, std::vector<std::string>> applyLiftGrow(core::World& world, uint32_t sector)
 	{
-		// One cell west and one down, and two taller on top. The anchor moves out
-		// from under the artwork and takes the count with it, so nothing already
-		// painted is renumbered.
-		auto const plan = world.planResizeLift(sector, 1, 0, 2, 8);
+		// One cell down and two taller on top. The floor line moves out from under
+		// the artwork and the keys are re-derived so each entry still names the
+		// World cell it was painted on - the World cells do not move at all, only
+		// the local numbers that reach them.
+		auto const plan = world.planResizeLift(sector, 2, 0, 2, 8);
 		require(plan.valid, "The Lift grow was refused: " + plan.diagnostic);
+		return { world.applyLiftEdit(plan), plan.consequences };
+	}
+
+	// One cell off the left edge: the shaft's west column is gone, and the entry
+	// that wore it goes with it. The entry on the surviving column keeps its
+	// World cell and its key is pulled back to column 0 - it does not follow the
+	// anchor eastward.
+	std::pair<uint32_t, std::vector<std::string>> applyLiftLeftShrink(core::World& world,
+		uint32_t sector)
+	{
+		auto const plan = world.planResizeLift(sector, 3, 1, 1, 6);
+		require(plan.valid, "The Lift left-edge shrink was refused: " + plan.diagnostic);
+		return { world.applyLiftEdit(plan), plan.consequences };
+	}
+
+	// One row off the bottom: the floor line rises, and an entry left at its old
+	// level would be drawn one level above the cell it was painted on.
+	std::pair<uint32_t, std::vector<std::string>> applyLiftBottomShrink(core::World& world,
+		uint32_t sector)
+	{
+		auto const plan = world.planResizeLift(sector, 2, 2, 2, 5);
+		require(plan.valid, "The Lift bottom-edge shrink was refused: " + plan.diagnostic);
+		return { world.applyLiftEdit(plan), plan.consequences };
+	}
+
+	// A resize whose new footprint overlaps the old one nowhere: none of the old
+	// cells survive, so none of the artwork survives, and the plan says all of it
+	// went rather than letting the edit look clean. Note that a Lift's own move
+	// flag reports true here because the anchor moved even though the shaft also
+	// changed size - which is exactly why the re-key keys off the footprint's
+	// size rather than off that flag.
+	std::pair<uint32_t, std::vector<std::string>> applyLiftResizeClearOfItself(
+		core::World& world, uint32_t sector)
+	{
+		auto const plan = world.planResizeLift(sector, 5, 0, 2, 5);
+		require(plan.valid, "The no-overlap Lift resize was refused: " + plan.diagnostic);
 		return { world.applyLiftEdit(plan), plan.consequences };
 	}
 
@@ -353,6 +478,18 @@ namespace
 	{
 		auto const plan = world.planResizeLadder(sector, 2, 0, { 2, false, true });
 		require(plan.valid, "The Ladder ceiling shrink was refused: " + plan.diagnostic);
+		return { world.applyLadderEdit(plan), plan.consequences };
+	}
+
+	// The Ladder's bottom edge rising two levels: the two entries painted on the
+	// World rows being taken go with them, and the two that survive keep their
+	// World cells with their levels pulled back by two. A Ladder is one cell wide
+	// and always was, so there is no left edge for it to shrink.
+	std::pair<uint32_t, std::vector<std::string>> applyLadderBottomShrink(core::World& world,
+		uint32_t sector)
+	{
+		auto const plan = world.planResizeLadder(sector, 2, 2, { 2, false, true });
+		require(plan.valid, "The Ladder bottom-edge shrink was refused: " + plan.diagnostic);
 		return { world.applyLadderEdit(plan), plan.consequences };
 	}
 
@@ -374,6 +511,18 @@ namespace
 		return { world.applyStairwellEdit(plan), plan.consequences };
 	}
 
+	// The well's floor line rising two levels. Two cells wide and always was, so
+	// the bottom edge is the only anchor this type can move besides its ceiling,
+	// and the entries that survive the loss stay on their World cells.
+	std::pair<uint32_t, std::vector<std::string>> applyStairwellBottomShrink(core::World& world,
+		uint32_t sector)
+	{
+		auto const plan = world.planResizeStairwell(sector, 2, 2,
+			core::World::CreateStairwellOptions{ 2, CORE_SIDE_RIGHT });
+		require(plan.valid, "The Stairwell bottom-edge shrink was refused: " + plan.diagnostic);
+		return { world.applyStairwellEdit(plan), plan.consequences };
+	}
+
 	std::pair<uint32_t, std::vector<std::string>> applyStaircaseMove(core::World& world, uint32_t sector)
 	{
 		auto const plan = world.planResizeStaircase(sector, 1, 0,
@@ -392,6 +541,20 @@ namespace
 		return { world.applyStaircaseEdit(plan), plan.consequences };
 	}
 
+	// The near end of the flight pulled one cell east while the far end stays
+	// put. The Staircase's own move flag says true for this edit because the
+	// anchor moved, but the footprint changed size as well, so it is a resize
+	// and the entries are re-keyed: the step that was on World column 0 goes
+	// with that cell and the two that survive stay on World columns 2 and 3.
+	std::pair<uint32_t, std::vector<std::string>> applyStaircaseLeftShrink(core::World& world,
+		uint32_t sector)
+	{
+		auto const plan = world.planResizeStaircase(sector, 1, 0,
+			core::World::CreateStaircaseOptions{ 3, CORE_SIDE_RIGHT, 0.0f });
+		require(plan.valid, "The Staircase left-edge shrink was refused: " + plan.diagnostic);
+		return { world.applyStaircaseEdit(plan), plan.consequences };
+	}
+
 	std::vector<CarryCase> carryCases()
 	{
 		auto const shaft = shaftEntries();
@@ -400,34 +563,55 @@ namespace
 		auto const flight = flightEntries();
 		return {
 			{ "Lift move", [shaft] { return liftFixture(shaft); }, applyLiftMove,
-				shaft, 0 },
+				shaft, 0, { { 5, 1, 1 }, { 6, 3, 2 }, { 6, 6, 3 } } },
 			{ "Lift ceiling shrink", [shaft] { return liftFixture(shaft); }, applyLiftCeilingShrink,
-				{ { 0, 0, 1 }, { 1, 2, 2 } }, 1 },
+				{ { 0, 0, 1 }, { 1, 2, 2 } }, 1, { { 2, 1, 1 }, { 3, 3, 2 } } },
 			{ "Lift narrowing", [shaft] { return liftFixture(shaft); }, applyLiftNarrow,
-				{ { 0, 0, 1 } }, 2 },
+				{ { 0, 0, 1 } }, 2, { { 2, 1, 1 } } },
+			// The grown shaft's entries name the same World cells they were painted
+			// on; only the local numbers that reach them changed.
 			{ "Lift grow", [shaft] { return liftFixture(shaft); }, applyLiftGrow,
-				shaft, 0 },
-			{ "Ladder move", [run] { return ladderFixture(run); }, applyLadderMove,
-				run, 0 },
+				{ { 0, 1, 1 }, { 1, 3, 2 }, { 1, 6, 3 } }, 0,
+				{ { 2, 1, 1 }, { 3, 3, 2 }, { 3, 6, 3 } } },
+			{ "Lift left-edge shrink", [shaft] { return liftFixture(shaft); },
+				applyLiftLeftShrink, { { 0, 2, 2 }, { 0, 5, 3 } }, 1,
+				{ { 3, 3, 2 }, { 3, 6, 3 } } },
+			{ "Lift bottom-edge shrink", [shaft] { return liftFixture(shaft); },
+				applyLiftBottomShrink, { { 1, 1, 2 }, { 1, 4, 3 } }, 1,
+				{ { 3, 3, 2 }, { 3, 6, 3 } } },
+			{ "Lift resize clear of itself", [shaft] { return liftFixture(shaft); },
+				applyLiftResizeClearOfItself, {}, 3, {} },			{ "Ladder move", [run] { return ladderFixture(run); }, applyLadderMove,
+				run, 0, { { 5, 0, 1 }, { 5, 2, 2 }, { 5, 3, 3 } } },
 			{ "Ladder ceiling shrink", [run] { return ladderFixture(run); }, applyLadderCeilingShrink,
-				{ { 0, 0, 1 } }, 2 },
+				{ { 0, 0, 1 } }, 2, { { 2, 0, 1 } } },
+			{ "Ladder bottom-edge shrink", [run] { return ladderFixture(run); },
+				applyLadderBottomShrink, { { 0, 0, 2 }, { 0, 1, 3 } }, 1,
+				{ { 2, 2, 2 }, { 2, 3, 3 } } },
 			{ "Stairwell move", [well] { return stairwellFixture(well); }, applyStairwellMove,
-				well, 0 },
+				well, 0, { { 5, 0, 1 }, { 6, 2, 2 }, { 6, 3, 3 } } },
 			{ "Stairwell ceiling shrink", [well] { return stairwellFixture(well); },
-				applyStairwellCeilingShrink, { { 0, 0, 1 } }, 2 },
+				applyStairwellCeilingShrink, { { 0, 0, 1 } }, 2, { { 2, 0, 1 } } },
+			{ "Stairwell bottom-edge shrink", [well] { return stairwellFixture(well); },
+				applyStairwellBottomShrink, { { 1, 0, 2 }, { 1, 1, 3 } }, 1,
+				{ { 3, 2, 2 }, { 3, 3, 3 } } },
 			{ "Staircase move", [flight] { return staircaseFixture(flight); }, applyStaircaseMove,
-				flight, 0 },
+				flight, 0, { { 1, 0, 1 }, { 3, 1, 2 }, { 4, 1, 3 } } },
 			{ "Staircase narrowing", [flight] { return staircaseFixture(flight); },
-				applyStaircaseNarrow, { { 0, 0, 1 } }, 2 },
+				applyStaircaseNarrow, { { 0, 0, 1 } }, 2, { { 0, 0, 1 } } },
+			{ "Staircase left-edge shrink", [flight] { return staircaseFixture(flight); },
+				applyStaircaseLeftShrink, { { 1, 1, 2 }, { 2, 1, 3 } }, 1,
+				{ { 2, 1, 2 }, { 3, 1, 3 } } },
 		};
 	}
 }
 
-// One driver, ten cases: the four moves, the four ways these Transits shrink
-// or narrow, and a grow. Every case is asked for the live answer, the
-// announced answer and the answer the saved document gives, so a type that
-// carried its entries while its plan said otherwise - or carried them live and
-// lost them on the save - fails here rather than later in a document.
+// One driver, sixteen cases: the four moves, the ways each type shrinks off
+// the edge it can move, the left-edge and bottom-edge shrinks #1047 needed, a
+// grow and a resize that clears its own footprint. Every case is asked for the
+// live answer, the World cell each entry names, the announced answer and the
+// answer the saved document gives, so a type that carried its entries while
+// its plan said otherwise - or carried them live and lost them on the save -
+// fails here rather than later in a document.
 void everyVerticalTransitEditCarriesItsEntriesAndSaysSo(smoke::Context const&)
 {
 	for (auto const& testCase : carryCases())

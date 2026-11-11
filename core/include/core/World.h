@@ -1568,39 +1568,59 @@ namespace core
 		static void applySurfaceVariants(std::shared_ptr<Sector> const& sector,
 			ConstructionRecord const& record);
 
-		// Drops the variant entries that name a cell the footprint does not have,
-		// answering how many went (#1044).
+		// Re-keys the variant entries onto the local columns and levels that name
+		// the same World cells in the resized footprint, dropping the ones whose
+		// World cell the edit removes, and answering how many went (#1047).
 		//
-		// Entries are anchored to the Sector's own bottom-left, so a footprint
-		// that grows - leftward, upward, or both - renumbers nothing: the same
-		// local column and level keep naming the same cell of the Sector however
-		// far the left edge or the floor line moved. A footprint that shrinks
-		// past an entry leaves it naming a cell the Sector no longer has, and the
-		// entry is dropped rather than clamped inward. Clamping would slide the
+		// The entries are stored Sector-local, so an edit that moves the Sector's
+		// anchor silently re-points every surviving entry at a different World
+		// cell unless the keys move with it. A cell that existed before the resize
+		// and still exists after keeps whatever it was painted with, on the same
+		// World cell; cells the edit deletes take their artwork with them; cells
+		// the edit adds arrive as base. Nothing is ever shifted sideways, and an
+		// entry is dropped rather than clamped inward - clamping would slide the
 		// artwork onto a surviving cell nobody painted it on, which is a worse
 		// loss than the one it hides: the author would have to find and fix every
 		// cell that had been moved under them. Dropping is also the only answer
 		// that keeps the loader's rule - an entry outside the Sector's grid is a
 		// miscount, and a refusal is louder than drawing nothing - from turning a
-		// shrink into a failed edit.
+		// resize into a failed edit.
+		//
+		// The arithmetic is done in signed space on purpose. `column` and `level`
+		// are unsigned and an entry whose World cell was just deleted shifts by a
+		// negative amount; left unsigned that wraps to a huge value the extent
+		// check happens to catch on one axis and silently misplaces on the other.
+		//
+		// A pure move is not a resize, and the helper says so itself rather than
+		// leaving each call site to remember: an edit that leaves the footprint the
+		// same size it was translates the whole Sector, its artwork rides along
+		// with it, and in the stored local keys that means unchanged.
 		//
 		// Shared by the record-rewriting edit paths so every Sector that carries
-		// entries answers a shrink the same way, the Transit paths included.
-		static uint32_t pruneSurfaceVariantsToFootprint(
+		// entries answers a resize the same way, the Transit paths included.
+		static uint32_t rekeySurfaceVariantsForResize(
 			std::vector<SectorSurfaceVariant>& entries,
+			int64_t oldAnchorX, int64_t oldAnchorY,
+			uint32_t oldCellsWide, uint32_t oldLevelsHigh,
+			int64_t newAnchorX, int64_t newAnchorY,
 			uint32_t cellsWide, uint32_t levelsHigh);
 
 		// The consequence line every footprint-changing edit shows when the new
 		// footprint would cost the Sector its artwork, counted through the same
-		// prune the record rewrite performs so the line the author is shown
-		// cannot disagree with the entries that actually go. Asked of a copy,
-		// because a plan is a read and must not touch what it is planning about.
+		// re-key the record rewrite performs so the line the author is shown
+		// cannot disagree with the entries that actually go - including the case
+		// where the new footprint overlaps the old one nowhere and the count is
+		// everything. Asked of a copy, because a plan is a read and must not
+		// touch what it is planning about.
 		// Shared by every plan that changes a footprint and has a consequences
 		// channel to say it through: the Location plans (#1044), the four vertical
 		// Transit plans (#1045) and the Shuttle plan (#1046).
 		static void appendSurfaceVariantDropConsequence(
 			std::vector<std::string>& consequences,
 			std::vector<SectorSurfaceVariant> const& entries,
+			int64_t oldAnchorX, int64_t oldAnchorY,
+			uint32_t oldCellsWide, uint32_t oldLevelsHigh,
+			int64_t newAnchorX, int64_t newAnchorY,
 			uint32_t cellsWide, uint32_t levelsHigh);
 
 		bool prepareLocationEdit(LocationEditPlan const& plan,

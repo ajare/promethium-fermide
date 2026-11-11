@@ -64,14 +64,21 @@ set(checks
     runMiddleLayerDeletion
     surfaceVariantCarry/aMoveCarriesARoomsEntriesUnchanged
     surfaceVariantCarry/aMoveCarriesACorridorsEntriesUnchanged
-    surfaceVariantCarry/growingLeftAndUpwardDoesNotRenumberTheEntries
+    surfaceVariantCarry/growingLeftAndUpwardKeepsEveryEntryOnItsWorldCell
     surfaceVariantCarry/shrinkingDropsTheEntriesOutsideTheNewFootprint
+    surfaceVariantCarry/shrinkingARoomFromTheLeftKeepsItsArtworkOnTheCellsItWasPaintedOn
+    surfaceVariantCarry/shrinkingARoomFromTheBottomKeepsItsArtworkOffTheLevelsAbove
+    surfaceVariantCarry/theReportedLeftEdgeResizeKeepsEachPaintedCellOnItsOwnWorldCell
+    surfaceVariantCarry/aCorridorShrinkFromTheLeftKeepsItsRemainingEntriesInPlace
     surfaceVariantCarry/aCorridorShrinkDropsItsRightHandEntries
     surfaceVariantCarry/anEntryOutsideIsDroppedAndNotClampedInward
+    surfaceVariantCarry/anEntryOutsideTheLeftEdgeIsDroppedAndNotWrappedInward
     surfaceVariantCarry/theBoundIsTheNewFootprintsOwnExtent
     surfaceVariantCarry/aShrinkThatDropsEveryEntryLeavesNoTrace
+    surfaceVariantCarry/aResizeThatOverlapsNothingDropsEveryEntryAndAnnouncesThemAll
     surfaceVariantCarry/thePlanAnnouncesTheEntriesItWillDrop
     surfaceVariantCarry/entriesSurviveSaveAndLoadAcrossTheResize
+    surfaceVariantCarry/anAnchorMovingResizeRoundTripsThroughSaveAndLoad
     surfaceVariantCarry/aFacadeHoldsNoVariantEntriesAcrossItsEdits
     surfaceVariantCarry/aBackgroundHoldsNoVariantEntriesAcrossItsEdits
     transitVariantCarry/everyVerticalTransitEditCarriesItsEntriesAndSaysSo
@@ -82,6 +89,7 @@ set(checks
     horizontalTransitVariantCarry/aHorizontalTransitShrinkDropsItsEntryAndClampsNothingInward
     horizontalTransitVariantCarry/theHorizontalTransitBoundIsTheNewFootprintsOwnExtent
     horizontalTransitVariantCarry/wideningAHorizontalTransitDropsNothing
+    horizontalTransitVariantCarry/aChamberWidthChangeIsARelocationAndLosesWhatTheOldCellsHeld
     horizontalTransitVariantCarry/aDumbwaiterMoveCarriesItsEntriesUnchanged
 )
 string(JOIN "\n" listed ${checks})

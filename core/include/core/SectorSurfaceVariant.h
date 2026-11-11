@@ -22,6 +22,13 @@ namespace core
 	// Held Sector-local, the record replays unchanged and the entries
 	// follow the Sector for free.
 	//
+	// A resize is the other case, and the storage does not follow for free
+	// there: an edit that moves the Sector's anchor re-points every surviving
+	// local key at a different World cell unless the key is re-derived. The
+	// resize paths re-key through World coordinates so the artwork stays on
+	// the cell it was painted on (#1047); the value stored here changes, the
+	// frame it is stored in does not.
+	//
 	// `variant` is the variant's number within the Sector type's family, as
 	// the installed tileset declares it (`-V1` .. `-VN`, #1038). It is
 	// deliberately not checked against the atlas here: the domain records

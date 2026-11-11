@@ -152,7 +152,9 @@ and replays the records, and a move changes only where the record puts the
 Sector; entries held in World coordinates would have to be rewritten by that
 move to keep pointing at the cells they were drawn for, and one missed by the
 rewrite is artwork silently lost. Held Sector-local, the record replays
-unchanged and the entries follow the Sector for free.
+unchanged and the entries follow the Sector for free. A resize is the other
+case, and the local key is re-derived there so the artwork stays on the World
+cell it was painted on - see the next section.
 
 The entries live on the record as well as on the live Sector for the same
 reason in the other direction: a fact held only on the live object would
@@ -161,26 +163,56 @@ renderer walking the record list to answer a question it asks once per cell.
 
 ### What a resize and a move do to the entries
 
-The entries are anchored to the Sector's own **bottom-left**, and nothing an
-edit does renumbers them (#1044). A move changes only where the record puts
-the Sector, so a Room or Corridor carries its entries unchanged. Growing the
-footprint leftward or upward moves that anchor out from under the artwork and
-takes the count with it: the entry at column 2, level 1 is still the entry at
-column 2, level 1, and the new cells arrive as base around what was already
-painted. Rewriting the entries to hold the artwork on the World cells it was
-painted on is the renumbering this rule rules out - it is the one that loses
-entries the moment a case is missed.
+A resize does not move artwork. It either removes it or creates new tiles
+(#1047). A cell that existed before the resize and still exists after keeps
+whatever it was painted with, on the same World cell. Cells the edit deletes
+take their artwork with them. Cells the edit adds arrive as base. Nothing is
+ever shifted sideways.
 
-Shrinking is the only way an entry can be lost, and it is lost with its cell.
-An entry naming a cell the new footprint does not have is **dropped**, not
-clamped inward: sliding it onto the nearest surviving cell would put artwork
-where nobody painted it and leave the author to hunt down every cell that had
-been moved under them. The record rewrite drops them before the replay, which
-is what keeps the loader's out-of-grid refusal from turning a shrink into a
-failed edit. The plan reports the loss - `Drop 2 variant cells outside the
-new footprint` - so the author confirms it rather than discovering it, and a
-Room shrunk back to no entries saves with no field at all, the same as one
-that never wore a variant.
+The entries are stored Sector-local, keyed against the Sector's own
+**bottom-left**, so an edit that moves that anchor silently re-points every
+surviving entry at a different World cell unless the key moves with it. The
+shared helper therefore re-keys through World coordinates on every resize:
+
+```
+worldColumn = oldAnchorX + entry.column
+worldLevel  = oldAnchorY + entry.level
+newColumn   = worldColumn - newAnchorX
+newLevel    = worldLevel  - newAnchorY
+
+drop when newColumn < 0 || newLevel < 0
+      || newColumn >= cellsWide || newLevel >= levelsHigh
+```
+
+The arithmetic is signed on purpose. `column` and `level` are `uint32_t`, and
+an entry whose World cell the edit just deleted shifts by a negative amount;
+left unsigned that wraps to a huge value the extent check happens to catch on
+one axis and silently misplaces on the other.
+
+A **move is not a resize**. A move translates the whole Sector and the
+artwork rides along with it, which in the stored local keys means unchanged.
+The helper recognises this itself - an edit that leaves the footprint the same
+size it was returns zero dropped and touches nothing - rather than leaving
+every call site to remember, because a move asked as a World-cell re-key would
+drop every entry the moment it left the old footprint, which is the opposite
+of what picking the Sector up means.
+
+An entry can only be lost by losing its cell, and an entry naming a cell the
+new footprint does not have is **dropped**, not clamped inward: sliding it
+onto the nearest surviving cell would put artwork where nobody painted it and
+leave the author to hunt down every cell that had been moved under them. The
+record rewrite drops them before the replay, which is what keeps the loader's
+out-of-grid refusal from turning a resize into a failed edit. The plan reports
+the loss - `Drop 2 variant cells outside the new footprint` - so the author
+confirms it rather than discovering it, and a Room shrunk back to no entries
+saves with no field at all, the same as one that never wore a variant. The
+announced count is computed through the same helper that performs the re-key,
+on a copy, so the line shown cannot disagree with the entries that go.
+
+That includes the case that follows from the rule rather than being carved out
+of it: a resize whose new footprint overlaps the old one nowhere leaves none
+of the old cells behind, so it leaves none of the artwork behind, and the plan
+says every entry went rather than letting a total loss look like a clean edit.
 
 The four vertical Transits are carried through the same rule and the same
 helper, not a copy of it written four times (#1045). What differs is which
@@ -189,16 +221,20 @@ entries it can ever lose:
 
 | Transit | Cells wide | Levels high | What a resize can cost |
 | --- | --- | --- | --- |
-| Lift | 1 or 2 | 2 or more | both edges - a shortened shaft and a narrowed one in the same edit |
-| Ladder | 1, fixed | 2 or more | the ceiling only |
-| Stairwell | 2, fixed | 2 or more | the ceiling only |
-| Staircase | 2 or more | 2, fixed | the far end only |
+| Lift | 1 or 2 | 2 or more | either end of either axis - a shortened shaft and a narrowed one in the same edit |
+| Ladder | 1, fixed | 2 or more | the ceiling and the floor line |
+| Stairwell | 2, fixed | 2 or more | the ceiling and the floor line |
+| Staircase | 2 or more | 2, fixed | either end of the flight |
 
-So `above the new ceiling` is the Lift's, the Ladder's and the Stairwell's
-loss and `outside the new width` is the Lift's and the Staircase's, and both
-are the same question asked of the same grid. A move costs any of them
-nothing, for the same reason a Room move costs nothing: the keys are
-Sector-local and a move only changes where the record puts the Sector.
+So `above the new ceiling` and `below the new floor line` are the Lift's, the
+Ladder's and the Stairwell's losses and `outside the new width at either
+end` is the Lift's and the Staircase's, and all of them are the same question
+asked of the same grid. A move costs any of them nothing, for the same reason
+a Room move costs nothing: the artwork rides along with the Sector. Note that
+a Lift's and a Staircase's own `move` flag reports any position change, even
+one made together with a size change; the re-key keys off the footprint's size
+rather than off that flag, which is why a Lift moved and shortened in one edit
+is re-keyed and a Lift merely moved is not.
 
 The four horizontal Transits go through the same rule and the same helper
 (#1046), and the same question - which edges of the footprint can this type
@@ -206,27 +242,32 @@ move - decides what each can lose:
 
 | Transit | Cells wide | Levels high | What an edit can cost |
 | --- | --- | --- | --- |
-| Shuttle | 1 or more | 1, fixed | the far end of the track only |
-| Airlock | 1 or more | 1, fixed | the width only |
-| Chamber | 1 or more | 1, fixed | the width only |
+| Shuttle | 1 or more | 1, fixed | either end of the track |
+| Airlock | 1 or more | 1, fixed | every cell it stood on - a width change is a relocation |
+| Chamber | 1 or more | 1, fixed | every cell it stood on - a width change is a relocation |
 | Dumbwaiter | 1, fixed | 2, fixed | nothing - it is never resized |
 
-A Shuttle is one level high however long it runs, so shortening the track is
-the only edit that can cost it anything, and what it costs is the entries
-beyond the new length. An Airlock's or Chamber's width is the whole of it,
-so a width change drops the entries outside the new footprint; widening
-costs nothing, since the new cells arrive as base beside what was already
-painted. A Dumbwaiter is a fixed 1x2 shaft that is moved rather than
-resized at all, which is where the Sector-local keys earn their keep most
-visibly: the entries ride across unchanged with no re-keying, because there
-is no re-keying to get wrong. The move replaces the Sector object whole, so
-carrying the entries is what the move has to do rather than something it gets
-to keep by not touching them.
+A Shuttle is one level high however long it runs, so the track's two ends are
+the only edges it can move, and shortening it at either end costs the entries
+beyond the new end while the survivors stay on the World cells they were
+painted on. An Airlock's or Chamber's width is not free: both of its ends
+must adjoin a Room or Corridor end, so the width it can hold is the gap its
+row happens to have, and a different width means a different row. A one-level
+Sector moved to another row shares no cell with where it stood, so every
+chamber width change - narrowing or widening - is the no-overlap case, and
+all of its artwork goes. That is the rule arriving at its end rather than a
+fixture accident, and it is stated here because the chamber plan has no
+confirmation step to say it through. A Dumbwaiter is a fixed 1x2 shaft that
+is moved rather than resized at all, which is where the Sector-local keys
+earn their keep most visibly: the entries ride across unchanged with no
+re-keying, because there is no re-keying to get wrong. The move replaces the
+Sector object whole, so carrying the entries is what the move has to do rather
+than something it gets to keep by not touching them.
 
 One difference is worth stating rather than papering over. The Shuttle plan
 confirms and so announces its drop in the same line the Location and vertical
 Transit plans use; the chamber plans commit without a confirmation step and
-have no consequences to announce, so a narrowing costs its artwork without
+have no consequences to announce, so a width change costs its artwork without
 being asked about it.
 
 What the loader refuses:
