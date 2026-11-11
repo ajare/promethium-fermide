@@ -1,5 +1,7 @@
 #pragma once
+#include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <string>
 #include "TileArtwork.h"
@@ -94,8 +96,47 @@ bool sectorTilesetIsNewFamily();
 // set is the version 1 family - which declares no families at all - or when
 // the named type declares none.
 int sectorSurfaceVariantCount(std::string const& kind);
+// Which tile one cell of a Sector surface wears (#1039). `column` counts
+// World cells from the drawn area's left edge and `level` from its floor
+// line, so for a Sector's own area both are Sector-local: column 0 is the
+// Sector's leftmost cell and level 0 the cell standing on its floor.
+//
+// The surface loop asks this for every cell it draws rather than being
+// handed one name for the whole area. That is what the seam is for. The
+// loop reproduces the floor-anchored crop and the culling the #1037
+// contract pins, and a variant is meant to change the picture and nothing
+// else - so the question of which tile is asked per cell, where a per-cell
+// answer can be added, instead of in the loop, which would then have to
+// change again the day a cell got to wear something else.
+using SectorSurfaceTileResolver = std::function<std::string(
+    std::uint32_t column, std::uint32_t level)>;
+
 // The tileset helpers cross to the command stream on the shared drawing
 // types (#997), so a caller hands them pf::render::Vec2 and a packed colour.
+//
+// Draws a Sector's surface as one tile per World cell: the area is cut
+// into the cells it covers and every cell is resolved, drawn and cropped on
+// its own. `minimum` and `maximum` are the drawn area's screen corners in
+// the renderer's orientation, with `maximum.y` the floor line and
+// `minimum.y` the ceiling.
+//
+// Rows stack upward from the floor line and columns rightward from the
+// left edge, one cell each. Only the top row is ever shorter than a cell,
+// and it is anchored on its own bottom edge and cropped at its top at one
+// artwork pixel to one screen pixel - never stretched into the partial
+// rect. Nothing outside the draw list's clip rectangle is emitted, and the
+// clip never moves the anchor or changes which tile a cell wears.
+//
+// Returns false when no atlas is installed, which is the caller's cue to
+// fall back to a plain fill. Returns true when the surface was drawn,
+// including when a cell resolved to a name the atlas does not carry and
+// drew the missing-tile magenta for that cell alone.
+bool drawSectorTileSurfacePerCell(WorldDrawList* drawList, Vec2 minimum,
+    Vec2 maximum, PackedColourValue tint, float zoom,
+    SectorSurfaceTileResolver const& resolveTile);
+
+// The same per-cell loop with one name answered for every cell, which is
+// what a Sector with no per-cell artwork resolves to (#1039).
 bool drawSectorTileSurface(std::string const& kind, WorldDrawList* drawList,
     Vec2 minimum, Vec2 maximum, PackedColourValue tint, float zoom = 1.0f);
 bool drawSectorTileBoundary(char const* kind, WorldDrawList* drawList,

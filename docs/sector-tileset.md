@@ -7,9 +7,10 @@ same result. The editor keeps no sector rendering of its own, and neither does t
 game. See [ADR 0010](adr/0010-render-world-canvases-with-mpp-and-manage-assets-as-resources.md)
 and the `pf-render` module header for the boundary this sits behind.
 
-The renderer repeats a surface every 1x1 world unit, magnified to the World cell's
-screen size, cropping partial cells rather than stretching a whole tile to a
-Corridor's height. The repeat is anchored on the bottom of the Sector's area - its
+The renderer draws a Sector's surface one tile per World cell: the drawn area is
+cut into the cells it covers, each cell is resolved to a tile, and each is drawn at
+the World cell's screen size, cropped rather than stretched where the cell is
+partial. The grid is anchored on the bottom of the Sector's area - its
 floor line - so the tile's own bottom edge lands on the floor and further rows
 stack upward. A Sector shorter than a full cell, a 0.7 Corridor or a 0.9 Room,
 therefore keeps the end of the tile it was drawn beside at one artwork pixel to
@@ -30,6 +31,19 @@ floor-line anchor, and the crop a partial top level takes. It is a contract, not
 snapshot: the per-cell draw loop that Sector surface variants need (#1036) has to
 satisfy what that file states, so a decorative feature cannot quietly re-anchor
 every short Room and 0.7 Corridor in every saved World.
+
+That loop asks a resolver for each cell's tile instead of being handed one name for
+the whole area (#1039). Every cell answers the Sector type's own base tile today -
+nothing records a per-cell choice yet, so nothing draws differently - and the
+resolver is where a per-cell answer appears later without the loop being touched
+again, because the loop is the part holding the anchor, the crop and the culling a
+variant must not disturb. `smoke/render/SectorSurfacePerCellResolution.cpp` pins
+that seam: every cell of the grid resolved exactly once in the Sector-local frame -
+column counted from the drawn area's left edge, level from its floor line - each
+cell drawing the tile it resolved to on the rectangle its own World cell occupies,
+a different tile changing the picture and never the geometry, and a cell the clip
+hides entirely never resolved at all. `drawSectorTileSurface(kind, ...)` remains as
+the same loop with one name answered for every cell.
 
 ## SectorAtlasNew
 

@@ -38,6 +38,7 @@ namespace render_smoke
 	void registerFurnitureAtlasNew(std::vector<smoke::Check>& checks);
 	void registerSectorAtlasNew(std::vector<smoke::Check>& checks);
 	void registerSectorSurfaceDrawContract(std::vector<smoke::Check>& checks);
+	void registerSectorSurfacePerCellResolution(std::vector<smoke::Check>& checks);
 	void registerAgentAtlasNew(std::vector<smoke::Check>& checks);
 	void registerWalkwayArtwork(std::vector<smoke::Check>& checks);
 	void registerBulkheadAndPanelArtwork(std::vector<smoke::Check>& checks);

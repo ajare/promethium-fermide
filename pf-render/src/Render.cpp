@@ -1993,6 +1993,24 @@ std::string newFamilySurfaceOrBorrowed(char const* own, char const* borrowed)
 		: std::string{ borrowed };
 }
 
+// The resolver the Sector surface loop asks for one cell's tile (#1039).
+//
+// Every cell answers the Sector type's own base tile, which is all a cell
+// can answer today: nothing records a per-cell choice yet, so nothing here
+// draws differently from the one-name repeat it replaces. The resolver is
+// asked anyway, per cell, because the resolver is where the answer grows
+// and the loop is where the answer must not change. The loop reproduces the
+// floor-anchored crop and the culling the #1037 contract pins, and a
+// variant is meant to be a different picture and not a different geometry.
+// When a Sector starts carrying a variant on a cell, the per-cell answer
+// appears here - the cell's own entry where it has one, the base tile where
+// it has none - and the loop that asks is untouched.
+SectorSurfaceTileResolver sectorSurfaceTileResolver(std::string baseTile)
+{
+	return [baseTile = std::move(baseTile)](std::uint32_t, std::uint32_t)
+		{ return baseTile; };
+}
+
 void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRenderStyle style, bool renderEdges, PackedColourValue colour, WorldDrawList* drawList)
 {
 	if (style == LayerRenderStyle::Hidden)
@@ -2071,8 +2089,16 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		case core::SectorType::Staircase: kind = newFamilySurfaceOrBorrowed("staircase", "stairwell"); break;
 		default: break;
 		}
-		if (!drawSectorTileSurface(kind, drawList, {bounds0.x, bounds1.y},
-			{bounds1.x, bounds0.y}, colour, gUISettings.worldZoom))
+		// One tile per World cell (#1039). The loop that lays the cells out
+		// lives with the atlas, because the cell size, the crop and the
+		// culling it reproduces are the atlas's business. Which tile each of
+		// those cells wears is asked through the resolver, because that is
+		// the Sector's. Today the two answers are the same everywhere; asking
+		// them separately is what lets one of them stop being the same
+		// without this call changing again.
+		if (!drawSectorTileSurfacePerCell(drawList, {bounds0.x, bounds1.y},
+			{bounds1.x, bounds0.y}, colour, gUISettings.worldZoom,
+			sectorSurfaceTileResolver(std::move(kind))))
 			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
 	}
 

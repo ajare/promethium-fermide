@@ -99,6 +99,9 @@ set(names
     sectorSurfaceDrawContract/everyCellOfANoVariantSectorDrawsItsBaseTile
     sectorSurfaceDrawContract/theRepeatIsAnchoredOnTheSectorFloorLine
     sectorSurfaceDrawContract/aPartialTopLevelIsCroppedAtItsTopNotStretched
+    sectorSurfacePerCell/everyCellIsResolvedOnceAndDrawnAtItsOwnRect
+    sectorSurfacePerCell/aDifferentTilePerCellChangesThePictureNotTheGeometry
+    sectorSurfacePerCell/aCellOutsideTheClipIsNeverResolved
     agentAtlasNew/twentyTilesAreRegistered
     agentAtlasNew/twoTypesNamingOneAppearanceShareTheirTiles
     agentAtlasNew/genericAppearanceIsTheFallbackForATypeWithNoArtwork

@@ -137,6 +137,37 @@ void image(WorldDrawList* list, SectorTileRegion const& r, Vec2 a, Vec2 b,
         (r.y + 0.5f + (r.height - 1) * v1) / active.height};
     list->AddImage(WorldDrawList::Texture::SectorAtlas, a, b, uv0, uv1, tint);
 }
+
+// How many whole World cells a span covers, counted from where it starts.
+// The tolerance is not slack. The screen coordinates the span was built
+// from carry float round-off of their own, so a Sector four cells wide can
+// read as 4.0000004 cells across, and counted without the tolerance that
+// fraction becomes a fifth column a hundredth of a pixel wide. A repeat
+// that walked the area could hide such a sliver; a loop that resolves a
+// tile per cell cannot, because the phantom cell is a cell it has to
+// answer for.
+int cellsCovered(float span, float cell)
+{
+    if (cell <= 0.0f || span <= 0.0f) return 0;
+    return std::max(0, static_cast<int>(std::ceil(span / cell - 1e-4f)));
+}
+
+// Puts one resolved cell on the screen. A name the installed atlas does
+// not carry is the missing-tile magenta, and it is magenta for that cell
+// alone: the resolver owns the question of which tile, so it owns what a
+// wrong answer looks like. A Sector whose base tile is genuinely absent
+// still fills its whole area with magenta, one cell at a time, which is
+// what it looked like when the whole area was filled at once.
+void drawSurfaceCell(WorldDrawList* list, std::string const& kind, Vec2 a,
+    Vec2 b, float u0, float u1, float v0, float v1, PackedColourValue tint)
+{
+    auto const found = active.surfaces.find(kind);
+    if (found == active.surfaces.end() || active.width <= 0 || active.height <= 0) {
+        list->AddRectFilled(a, b, packColour(255, 0, 255, 255));
+        return;
+    }
+    image(list, found->second, a, b, u0, u1, v0, v1, tint);
+}
 }
 
 SectorTileset SectorTileset::load(std::filesystem::path const& path)
@@ -232,56 +263,75 @@ int SectorTileset::variantCount(std::string const& kind) const
     return found == variantCounts.end() ? 0 : found->second;
 }
 
-bool drawSectorTileSurface(std::string const& kind, WorldDrawList* list,
-    Vec2 minimum, Vec2 maximum, PackedColourValue tint, float zoom)
+bool drawSectorTileSurfacePerCell(WorldDrawList* list, Vec2 minimum,
+    Vec2 maximum, PackedColourValue tint, float zoom,
+    SectorSurfaceTileResolver const& resolveTile)
 {
     if (!textureId) return false;
-    auto const found = active.surfaces.find(kind);
-    if (found == active.surfaces.end() || active.width <= 0 || active.height <= 0) {
-        list->AddRectFilled(minimum, maximum, packColour(255, 0, 255, 255));
-        return true;
-    }
-    auto const& region = found->second;
-    // A surface repeats once per 1x1 world unit, magnified to the World cell's
-    // screen size at the current zoom (the macros below). Partial levels are
+    // One tile per 1x1 world unit, magnified to the World cell's screen size
+    // at the current zoom (the two cell sizes below). Partial levels are
     // cropped, never stretched to a Sector's height.
     //
-    // The repeat is anchored on the bottom of the Sector's area, which is its
-    // floor line: the tile's own bottom edge lands there and further rows stack
-    // upward. A Sector shorter than a full cell - a 0.7 Corridor, a 0.9 Room -
-    // keeps the end of the tile it was drawn beside, the floor end, at one
-    // artwork pixel to one screen pixel, and loses the top of the tile that
-    // would have stood above its ceiling. Anchoring on the top instead cuts the
-    // floor off every short Sector and leaves the tile's ceiling band sitting on
-    // the floor it is supposed to be above.
-    auto const clipMin = list->GetClipRectMin();
-    auto const clipMax = list->GetClipRectMax();
+    // The grid is anchored on the bottom of the drawn area, which for a
+    // Sector is its floor line: the tile's own bottom edge lands there and
+    // further rows stack upward. A Sector shorter than a full cell - a 0.7
+    // Corridor, a 0.9 Room - keeps the end of the tile it was drawn beside,
+    // the floor end, at one artwork pixel to one screen pixel, and loses the
+    // top of the tile that would have stood above its ceiling. Anchoring on
+    // the top instead cuts the floor off every short Sector and leaves the
+    // tile's ceiling band sitting on the floor it is supposed to be above.
     float const cellWidth = CORE_CELL_WIDTH_PIXELS * zoom;
     float const cellHeight = CORE_LEVEL_HEIGHT_PIXELS * zoom;
     if (cellWidth <= 0 || cellHeight <= 0) return true;
+    auto const clipMin = list->GetClipRectMin();
+    auto const clipMax = list->GetClipRectMax();
     float const top = std::max(minimum.y, clipMin.y);
     float const right = std::min(maximum.x, clipMax.x);
     if (top >= maximum.y || right <= minimum.x) return true;
-    int const x0 = std::max(0, static_cast<int>((clipMin.x - minimum.x) / cellWidth));
+    // The grid is counted from the area's own left edge and floor line, not
+    // from the clip, and the resolver is asked in that frame. A Sector
+    // scrolled half out of view therefore still resolves its own columns
+    // and levels: the clip decides only which of them are worth emitting,
+    // never which tile a cell wears or where its edges fall.
+    int const columns = cellsCovered(maximum.x - minimum.x, cellWidth);
+    int const rows = cellsCovered(maximum.y - minimum.y, cellHeight);
+    int const firstColumn = std::max(0, static_cast<int>(
+        (clipMin.x - minimum.x) / cellWidth));
     // Rows are counted up from the floor line, so the clip cannot move the
     // anchor; it only decides which rows are worth emitting. Everything below
     // the clip's bottom edge and everything above `top` is left out.
     int const firstRow = std::max(0, static_cast<int>(std::ceil(
         (maximum.y - std::min(maximum.y, clipMax.y)) / cellHeight)));
-    for (int row = firstRow; ; ++row) {
+    for (int row = firstRow; row < rows; ++row) {
         float const rowBottom = maximum.y - float(row) * cellHeight;
         if (rowBottom <= top) break;
         float const rowTop = std::max(rowBottom - cellHeight, top);
         // Whatever of the tile stands above this row's top edge never reaches
         // the screen, so sampling starts that far down the tile.
         float const v0 = 1.0f - (rowBottom - rowTop) / cellHeight;
-        for (float x = minimum.x + float(x0) * cellWidth; x < right; x += cellWidth) {
+        for (int column = firstColumn; column < columns; ++column) {
+            float const x = minimum.x + float(column) * cellWidth;
+            if (x >= right) break;
             float const colRight = std::min(x + cellWidth, right);
-            image(list, region, {x, rowTop}, {colRight, rowBottom}, 0.0f,
+            drawSurfaceCell(list,
+                resolveTile(static_cast<std::uint32_t>(column),
+                    static_cast<std::uint32_t>(row)),
+                { x, rowTop }, { colRight, rowBottom }, 0.0f,
                 (colRight - x) / cellWidth, v0, 1.0f, tint);
         }
     }
     return true;
+}
+
+bool drawSectorTileSurface(std::string const& kind, WorldDrawList* list,
+    Vec2 minimum, Vec2 maximum, PackedColourValue tint, float zoom)
+{
+    // The per-cell loop with one name answered for every cell (#1039). A
+    // Sector with no per-cell artwork resolves to exactly this, and it is
+    // what a caller asks for when it has one tile and no wish to say which
+    // cell wears it.
+    return drawSectorTileSurfacePerCell(list, minimum, maximum, tint, zoom,
+        [&](std::uint32_t, std::uint32_t) { return kind; });
 }
 
 bool drawSectorTileBoundary(char const* kind, WorldDrawList* list, Vec2 a, Vec2 b)
