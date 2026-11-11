@@ -159,6 +159,29 @@ reason in the other direction: a fact held only on the live object would
 evaporate on the first resize, and a fact held only on the record leaves the
 renderer walking the record list to answer a question it asks once per cell.
 
+### What a resize and a move do to the entries
+
+The entries are anchored to the Sector's own **bottom-left**, and nothing an
+edit does renumbers them (#1044). A move changes only where the record puts
+the Sector, so a Room or Corridor carries its entries unchanged. Growing the
+footprint leftward or upward moves that anchor out from under the artwork and
+takes the count with it: the entry at column 2, level 1 is still the entry at
+column 2, level 1, and the new cells arrive as base around what was already
+painted. Rewriting the entries to hold the artwork on the World cells it was
+painted on is the renumbering this rule rules out - it is the one that loses
+entries the moment a case is missed.
+
+Shrinking is the only way an entry can be lost, and it is lost with its cell.
+An entry naming a cell the new footprint does not have is **dropped**, not
+clamped inward: sliding it onto the nearest surviving cell would put artwork
+where nobody painted it and leave the author to hunt down every cell that had
+been moved under them. The record rewrite drops them before the replay, which
+is what keeps the loader's out-of-grid refusal from turning a shrink into a
+failed edit. The plan reports the loss - `Drop 2 variant cells outside the
+new footprint` - so the author confirms it rather than discovering it, and a
+Room shrunk back to no entries saves with no field at all, the same as one
+that never wore a variant.
+
 What the loader refuses:
 
 - **An entry outside the Sector's own grid.** A column past `cellsWide` or a

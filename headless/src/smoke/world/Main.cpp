@@ -48,5 +48,6 @@ int main(int argc, char** argv)
 	registerScaledDoors(checks);
 	registerRoomHeightScale(checks);
 	registerLayerDeletion(checks);
+	registerSectorSurfaceVariants(checks);
 	return smoke::main("world", checks, argc, argv);
 }

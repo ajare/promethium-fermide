@@ -34,6 +34,21 @@ namespace core
 {
 	using namespace std;
 
+	uint32_t World::pruneSurfaceVariantsToFootprint(
+		std::vector<SectorSurfaceVariant>& entries,
+		uint32_t cellsWide, uint32_t levelsHigh)
+	{
+		auto const before = entries.size();
+		// Everything inside the footprint keeps its entry, in the order it was
+		// already in, so a shrink that takes three cells out does not shuffle the
+		// forty the Sector still has - and a shrink that takes none out leaves the
+		// list byte for byte as it was, which is what lets a saved document say
+		// nothing changed.
+		std::erase_if(entries, [&](auto const& entry)
+			{ return entry.column >= cellsWide || entry.level >= levelsHigh; });
+		return static_cast<uint32_t>(before - entries.size());
+	}
+
 	World::ConstructionRecord const* World::findCreatingRecord(uint32_t sectorIndex) const
 	{
 		uint32_t producer = 0;

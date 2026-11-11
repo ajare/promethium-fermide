@@ -1568,6 +1568,28 @@ namespace core
 		static void applySurfaceVariants(std::shared_ptr<Sector> const& sector,
 			ConstructionRecord const& record);
 
+		// Drops the variant entries that name a cell the footprint does not have,
+		// answering how many went (#1044).
+		//
+		// Entries are anchored to the Sector's own bottom-left, so a footprint
+		// that grows - leftward, upward, or both - renumbers nothing: the same
+		// local column and level keep naming the same cell of the Sector however
+		// far the left edge or the floor line moved. A footprint that shrinks
+		// past an entry leaves it naming a cell the Sector no longer has, and the
+		// entry is dropped rather than clamped inward. Clamping would slide the
+		// artwork onto a surviving cell nobody painted it on, which is a worse
+		// loss than the one it hides: the author would have to find and fix every
+		// cell that had been moved under them. Dropping is also the only answer
+		// that keeps the loader's rule - an entry outside the Sector's grid is a
+		// miscount, and a refusal is louder than drawing nothing - from turning a
+		// shrink into a failed edit.
+		//
+		// Shared by the record-rewriting edit paths so every Sector that carries
+		// entries answers a shrink the same way, the Transit paths included.
+		static uint32_t pruneSurfaceVariantsToFootprint(
+			std::vector<SectorSurfaceVariant>& entries,
+			uint32_t cellsWide, uint32_t levelsHigh);
+
 		bool prepareLocationEdit(LocationEditPlan const& plan,
 			std::vector<ConstructionRecord>& records, uint32_t& newSectorIndex,
 			std::string& diagnostic) const;

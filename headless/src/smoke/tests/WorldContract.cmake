@@ -62,6 +62,18 @@ set(checks
     room-height-scale
     room-height-scale-requires-pause
     runMiddleLayerDeletion
+    surfaceVariantCarry/aMoveCarriesARoomsEntriesUnchanged
+    surfaceVariantCarry/aMoveCarriesACorridorsEntriesUnchanged
+    surfaceVariantCarry/growingLeftAndUpwardDoesNotRenumberTheEntries
+    surfaceVariantCarry/shrinkingDropsTheEntriesOutsideTheNewFootprint
+    surfaceVariantCarry/aCorridorShrinkDropsItsRightHandEntries
+    surfaceVariantCarry/anEntryOutsideIsDroppedAndNotClampedInward
+    surfaceVariantCarry/theBoundIsTheNewFootprintsOwnExtent
+    surfaceVariantCarry/aShrinkThatDropsEveryEntryLeavesNoTrace
+    surfaceVariantCarry/thePlanAnnouncesTheEntriesItWillDrop
+    surfaceVariantCarry/entriesSurviveSaveAndLoadAcrossTheResize
+    surfaceVariantCarry/aFacadeHoldsNoVariantEntriesAcrossItsEdits
+    surfaceVariantCarry/aBackgroundHoldsNoVariantEntriesAcrossItsEdits
 )
 string(JOIN "\n" listed ${checks})
 string(APPEND listed "\n")

@@ -6080,6 +6080,21 @@ namespace core
 						diagnostic = "Only rooms, corridors, and Facades can be resized";
 						return false;
 					}
+
+					// The Sector's own grid just changed shape, and the variant
+					// entries name cells of that grid (#1044). Held Sector-local and
+					// anchored to the bottom-left, a footprint that grows - leftward,
+					// upward, or both - replays the same entries against the same
+					// cells, so growing never renumbers what was already painted, and
+					// a pure move needs nothing here at all. A footprint that shrinks
+					// past an entry leaves it naming a cell the Sector no longer has,
+					// and the entry goes with the cell rather than being clamped to
+					// the nearest one still standing: the replay's own bounds check
+					// refuses an out-of-grid entry outright, so pruning here is what
+					// makes a shrink an edit that succeeds rather than one that
+					// fails over artwork already lost.
+					pruneSurfaceVariantsToFootprint(source.surfaceVariants,
+						plan.cellsWide, plan.levelsHigh);
 				}
 
 				if (referencesSector(source.type))
@@ -8274,6 +8289,21 @@ namespace core
 					return plan;
 				}
 			}
+
+		// Cells the plan takes away take the variants they wear with them (#1044).
+		// The entries are anchored to the Sector's own bottom-left, so this is
+		// the only way one can be lost: the new footprint no longer has the cell
+		// it names. The author is told rather than left to find the artwork gone
+		// after the fact, which is what every other destructive line here is for.
+		// Counted through the same prune the record rewrite performs - on a copy,
+		// because a plan is a read and must not touch what it is planning about -
+		// so the line the author is shown cannot disagree with the entries that
+		// actually go.
+		vector<SectorSurfaceVariant> planned{ sector->getSurfaceVariants() };
+		if (auto const dropped = pruneSurfaceVariantsToFootprint(planned,
+				cellsWide, levelsHigh))
+			plan.consequences.push_back(format("Drop {} variant {} outside the new footprint",
+				dropped, dropped == 1 ? "cell" : "cells"));
 
 		set<void const*> seen;
 		for (uint32_t i = 0; i < sector->getNumObjects(); ++i)

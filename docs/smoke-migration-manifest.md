@@ -300,6 +300,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/render/ScaledDoors.cpp` | Scaled Regular Door render checks | `pf-smoke-render` |
 | `smoke/editor/ScaledDoors.cpp` | Scaled Regular Door editor checks | `pf-smoke-editor` |
 | `smoke/world/RoomHeightScale.cpp` | Room height scale world checks | `pf-smoke-world` |
+| `smoke/world/SectorSurfaceVariants.cpp` | Sector surface variant carry-through across Location edits: a Room or Corridor move carries its entries unchanged, growing left or upward renumbers nothing, shrinking drops the entries outside the new footprint rather than clamping them inward, the plan announces what it drops, the entries survive save and load across the resize, and a Facade or Background holds none across its edits | `pf-smoke-world` |
 | `smoke/persistence/RoomHeightScaleDocuments.cpp` | Room height scale persistence checks | `pf-smoke-persistence` |
 | `smoke/simulation/RoomHeights.cpp` | Room height pose checks | `pf-smoke-simulation` |
 | `smoke/editor/RoomHeightScale.cpp` | Room height scale editor checks | `pf-smoke-editor` |
