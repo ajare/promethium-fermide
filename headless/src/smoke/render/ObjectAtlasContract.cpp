@@ -78,10 +78,14 @@ namespace
 	// The calls that take an Objects tile name and put it on the screen.
 	// `drawPart` is the Shuttle carriage's own wrapper: it names the tile
 	// to the sprite call and falls back to the carriage fill when the
-	// installed set carries no tile for the cell.
+	// installed set carries no tile for the cell. `drawGlassRepeating` is
+	// the Window pane's wrapper, and it is a draw call in the sense this
+	// check means: it is the call the glass Style's tile name is handed to,
+	// and a name it were handed that the atlas did not carry would leave the
+	// pane unglazed with nothing saying so (#1079).
 	std::vector<std::string> const kDrawHelpers{
 		"drawObjectSprite(", "drawOffsetTile(", "drawRetractedTile(",
-		"drawPart(",
+		"drawPart(", "drawGlassRepeating(",
 	};
 
 	// A tile name reaches a draw call by being an argument to one, or by
@@ -566,7 +570,7 @@ namespace
 		"door-tall-L0", "door-tall-R0",
 		"door-lift-L0", "door-lift-R0", "door-shuttle-L0",
 		"bulkhead-door", "access-panel",
-		"window-clear", "window-frosted", "window-tinted",
+		"glass-clear", "glass-frosted", "glass-tinted",
 		"booth-window-open", "booth-window-shutter",
 		"button-enabled", "button-disabled", "marker",
 		"walkway", "lift-car", "platform-lift",
@@ -972,11 +976,29 @@ namespace
 				&& near(find("bulkhead-door").drawnHeight, CORE_CORRIDOR_HEIGHT),
 			"The Bulkhead Door expectation is not its slab width at the corridor "
 			"height");
-		require(near(find("window-clear").drawnWidth,
-				1.0f - 2.0f * CORE_WINDOW_X_INSET)
-				&& near(find("window-clear").drawnHeight, CORE_WINDOW_HEIGHT),
-			"The Window expectation is not the cell less its x insets at the "
-			"Window height");
+		// The glass tile is its own 0.25 x 0.25 extent and not the pane's:
+		// the pane is filled by repetition, so what the contract sizes is the
+		// tile that repeats. Being square in World units on a 128 x 320 grid
+		// is the whole reason the artwork is 32 x 80 px rather than square in
+		// pixels - the sheet draws at 128 px per World unit across and 320 up,
+		// so only those dimensions land the pattern undistorted at one artwork
+		// pixel to one screen pixel (#1079).
+		for (auto const* glass : { "glass-clear", "glass-frosted",
+			"glass-tinted" })
+			require(near(find(glass).drawnWidth, 0.25f)
+					&& near(find(glass).drawnHeight, 0.25f),
+				std::string("The '") + glass + "' glass expectation is not the "
+					"0.25 x 0.25 World-unit tile that repeats across a pane");
+		// The pane-sized Window tiles are retired. Leaving them required would
+		// hold the atlas to art sized to one pane and stretched to fit it -
+		// the defect this ticket is about - and would refuse the set that
+		// replaced them.
+		for (auto const* retired : { "window-clear", "window-frosted",
+			"window-tinted" })
+			for (auto const& expected : requiredObjectTiles())
+				require(!(std::string(retired) == expected.tileName),
+					std::string("The Objects contract still requires '") + retired
+					+ "', the pane-sized glass tile #1079 retired");
 		require(near(find("button-enabled").drawnWidth, CORE_BUTTON_SIZE)
 				&& near(find("button-enabled").drawnHeight,
 					CORE_BUTTON_SIZE / CORE_CELL_YX_RENDER_RATIO),

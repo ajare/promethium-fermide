@@ -266,12 +266,16 @@ std::vector<ObjectTileExpectation> const& requiredObjectTiles()
         // authored scale multiplies the object and its artwork together, so
         // the declared extent stays the default.
         ObjectTileExpectation{"access-panel", 0.5f, 0.25f, {0.0f, 0.0f}},
-        ObjectTileExpectation{"window-clear",
-            1.0f - 2.0f * CORE_WINDOW_X_INSET, CORE_WINDOW_HEIGHT, {0.0f, 0.0f}},
-        ObjectTileExpectation{"window-frosted",
-            1.0f - 2.0f * CORE_WINDOW_X_INSET, CORE_WINDOW_HEIGHT, {0.0f, 0.0f}},
-        ObjectTileExpectation{"window-tinted",
-            1.0f - 2.0f * CORE_WINDOW_X_INSET, CORE_WINDOW_HEIGHT, {0.0f, 0.0f}},
+        // The glass is one tile per glass Style, repeated across the pane
+        // rather than stretched to it, so the contract is the tile's own
+        // authored extent and not the pane's: 0.25 x 0.25 World units,
+        // which is 32 x 80 px on this grid and therefore square in World
+        // space at one artwork pixel to one screen pixel. The pane's size
+        // changes how many times the tile repeats and how much of the last
+        // column and row is cut, never what one tile draws at (#1079).
+        ObjectTileExpectation{"glass-clear", 0.25f, 0.25f, {0.0f, 0.0f}},
+        ObjectTileExpectation{"glass-frosted", 0.25f, 0.25f, {0.0f, 0.0f}},
+        ObjectTileExpectation{"glass-tinted", 0.25f, 0.25f, {0.0f, 0.0f}},
         ObjectTileExpectation{"booth-window-open",
             1.0f - 2.0f * CORE_WINDOW_X_INSET, CORE_WINDOW_HEIGHT, {0.0f, 0.0f}},
         // The shutter is drawn inside the frame's aperture, inset by the

@@ -187,6 +187,13 @@ set(names
     windowframeCells/everyWallFramesACorneredOpeningTheSameWay
     windowframeCells/aWindowOnABackLayerWearsItsOwnFrameThroughTheAperture
     windowframeCells/theFrameNameIsTheOpeningAndNothingElse
+    windowframeCells/aOneByOnePaneRepeatsItsTileWithTheLastColumnAndRowCut
+    windowframeCells/theRepeatScaleDoesNotChangeWithPaneSize
+    windowframeCells/eachGlassStyleEmitsItsOwnTileWithIdenticalGeometry
+    windowframeCells/theGlassFillsTheWholeApertureUnderTheFrame
+    windowframeCells/theGlassDrawsInTheSolidPassAndNotInTheWireframeOverlay
+    windowframeCells/aMissingGlassTileFallsBackWithoutPunchingAHole
+    windowframeCells/theRepeatIsAnchoredToThePaneAndNotToTheWorldGrid
     sectorTilePreview/oneTileFramesTheRectItIsGiven
     sectorTilePreview/anyRectFramesOneTileAndNotACellGrid
     sectorTilePreview/itIsOneTileWhereTheWorldRepeatIsFour
@@ -217,6 +224,7 @@ set(names
     bulkheadAndPanel/forceBridgeStillRendersAsAPrimitiveLine
     bulkheadAndPanel/loaderRefusesAForceBridgeTile
     objectArtworkNew/authoredTilesAreRegistered
+    objectArtworkNew/glassTilesAreOnePerStyleAndSquareInWorldUnits
     objectArtworkNew/everyLeafFamilyCarriesThreeVariants
     objectArtworkNew/doorLeafSlidesUnderTheApertureOnEveryStyle
     objectArtworkNew/aFullyOpenDoorEmitsNoLeafGeometry

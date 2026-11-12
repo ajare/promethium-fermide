@@ -54,6 +54,13 @@
 # 0.8 x 0.5 World units is 102 x 160 px on this 128 x 320 grid. That keeps
 # the art and its declared extent in the same proportion, so nothing is
 # stretched on its way to the screen.
+#
+# #1079 retired the three pane-sized `window-clear` / `-frosted` /
+# `-tinted` tiles and put three repeating glass tiles in their cells. The
+# old names described art sized to one pane and stretched to fit it; a
+# tile that repeats is a different thing and does not inherit the name
+# that means the old thing. See the glass block below for why the tile is
+# 32 x 80 px.
 version: 2
 image: objects-new.png
 size: [1664, 1280]
@@ -242,30 +249,61 @@ sprites:
     offset: [0.0, 0.0]
     drawn_size: [0.1, 0.04]
 
-  # The three Window styles are three tiles at the same size: a one-cell,
-  # one-Level Window is `1 - 2 * CORE_WINDOW_X_INSET` wide by
-  # `CORE_WINDOW_HEIGHT` tall, which is 0.8 x 0.3 World units and
-  # 102 x 96 px here. The style is the artwork - clear glass, frosted
-  # glass, tinted glass - and never a different geometry, so a Window's
-  # aperture, its Background seam and its clip stay identical across all
-  # three.
-  window-clear:
+  # The glass is one tile per glass Style, repeated across the pane the
+  # way a Sector surface repeats across a wall - not one pane-sized image
+  # stretched over whatever rectangle the Window happens to be (#1079).
+  #
+  # The tile is 32 x 80 px, which on this 128 x 320 grid is 0.25 x 0.25
+  # World units: square in World space. That is the whole reason for the
+  # odd pixel dimensions. The authored atlas is anisotropic - every tile
+  # in both authored sets draws at 128 pixels per World unit horizontally
+  # and 320 vertically - so a 64 x 64 tile would be 0.5 x 0.2 World units
+  # and would display as a rect 2.5 times wider than tall, forcing the
+  # artist to pre-distort the artwork. 32 x 80 is square in World units
+  # at one artwork pixel to one screen pixel.
+  #
+  # The tile is deliberately not a whole number of tiles across a pane. A
+  # 1x1 pane is 0.8 x 0.3 World units, which is 3.2 tiles across and 1.2
+  # down, so the last column and row on every pane are cut. That is the
+  # shape of the geometry and not a compromise: no whole-pixel tile width
+  # divides 0.8 exactly at this grid, so exact whole-tile fit is
+  # unreachable for any tile that keeps pixel parity. The renderer cuts the
+  # last tile at its remaining size, sampling only the matching fraction,
+  # so the pattern never squashes and the cut reads as a cut.
+  #
+  # The Style picks the tile and nothing else: the pane's geometry, its
+  # aperture and its clip are identical across all three, exactly as they
+  # were when one pane-sized tile carried the whole opening.
+  #
+  # `placeholder` is the RGBA the generated placeholder slab is drawn
+  # with, and it is the whole of what distinguishes the three styles
+  # before any real glass art exists: clear at roughly 12% so the space
+  # behind reads through, frosted at roughly 70% near-white so it hides
+  # the shape behind while still showing its light, tinted at roughly 45%
+  # blue-grey in between and carrying the hue. It is a picture fact about
+  # the placeholder sheet and not a render semantic - the renderer
+  # multiplies no colour into a tile on the way to the screen - which is
+  # why it says nothing about how the tile draws.
+  glass-clear:
     cell: [0, 1]
-    content: [0, 0, 102, 96]
+    content: [0, 0, 32, 80]
     offset: [0.0, 0.0]
-    drawn_size: [0.8, 0.3]
+    drawn_size: [0.25, 0.25]
+    placeholder: [226, 236, 246, 31]
 
-  window-frosted:
+  glass-frosted:
     cell: [1, 1]
-    content: [0, 0, 102, 96]
+    content: [0, 0, 32, 80]
     offset: [0.0, 0.0]
-    drawn_size: [0.8, 0.3]
+    drawn_size: [0.25, 0.25]
+    placeholder: [240, 244, 248, 178]
 
-  window-tinted:
+  glass-tinted:
     cell: [2, 1]
-    content: [0, 0, 102, 96]
+    content: [0, 0, 32, 80]
     offset: [0.0, 0.0]
-    drawn_size: [0.8, 0.3]
+    drawn_size: [0.25, 0.25]
+    placeholder: [122, 144, 166, 115]
 
   # A Booth Window is two tiles that compose rather than two states of
   # one. `booth-window-open` is the frame: opaque at its edges,

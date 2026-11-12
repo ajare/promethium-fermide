@@ -207,9 +207,22 @@ namespace
 		return atlas;
 	}
 
+	// The Object-side art this file installs, kept beside the install so a
+	// quad's tile is read back out of the UVs it sampled rather than taken
+	// on trust from a name the recorder kept to itself - the same reason the
+	// Sector side resolves a quad by the region it sampled rather than by
+	// what the draw asked for.
+	ObjectTileset gObjectArt;
+
 	// The Object-side art, each sprite in its own column of its own sheet,
 	// so an Object quad is distinguishable from a frame quad by which atlas
 	// it sampled and the frame's turn in the order is checkable against it.
+	//
+	// The three glass tiles are installed at the size the authored set
+	// declares them - 32 x 80 px drawn at 0.25 x 0.25 World units - because
+	// the scale a quad samples is the whole of what the glass checks read,
+	// and it has to come from the tile rather than from a size this fixture
+	// made up (#1079).
 	//
 	// The BoothWindow's own frame and shutter are in here for the same
 	// reason the glass is: the check that refuses a windowframe over a
@@ -218,18 +231,59 @@ namespace
 	void installObjectArt()
 	{
 		ObjectTileset art;
-		art.width = kCellWidth * 5;
 		art.height = kCellHeight;
 		int column = 0;
-		for (auto const* name : { "window-clear", "window-frosted",
-				"window-tinted", "booth-window-shutter", "booth-window-open" })
+		auto const add = [&](char const* name, int width, int height,
+			float drawnWidth, float drawnHeight)
+		{
 			art.sprites.emplace(name, TileArtwork{
-				{ column++ * kCellWidth, 0, kCellWidth, kCellHeight },
-				{ 0.0f, 0.0f }, { 1.0f, 1.0f } });
+				{ column++ * kCellWidth, 0, width, height },
+				{ 0.0f, 0.0f }, { drawnWidth, drawnHeight } });
+		};
+		for (auto const* name : { "glass-clear", "glass-frosted",
+			"glass-tinted" })
+			add(name, 32, 80, 0.25f, 0.25f);
+		add("booth-window-shutter", kCellWidth, kCellHeight, 1.0f, 1.0f);
+		add("booth-window-open", kCellWidth, kCellHeight, 1.0f, 1.0f);
+		art.width = column * kCellWidth;
+		gObjectArt = art;
 		setObjectTileset(std::move(art), static_cast<TextureId>(2));
 		require(hasObjectTileset(),
 			"The synthetic Object atlas did not install, so the glass layer "
 			"the frame is supposed to draw over would not exist to check");
+	}
+
+	// The Object atlas with one glass Style's tile taken out of it, which is
+	// the state a sheet that has not drawn that glass yet leaves the renderer
+	// in. Everything else the fixture installed stays.
+	void installObjectArtWithout(char const* tile)
+	{
+		auto art = gObjectArt;
+		require(art.sprites.erase(tile) != 0,
+			std::string{ "The fixture's Object atlas carries no '" } + tile
+			+ "', so taking it out would not be testing a miss");
+		gObjectArt = art;
+		setObjectTileset(std::move(art), static_cast<TextureId>(2));
+		require(!objectTileArtwork(tile),
+			std::string{ "'" } + tile + "' still resolved after being erased, so "
+			"this is not the missing-tile state the check means to be in");
+	}
+
+	// The glass tile one Object UV falls on, by the centre of the range the
+	// quad sampled. Each tile owns its own column, so the centre lands on
+	// exactly one of them.
+	std::string objectTileAt(float centreU, float centreV)
+	{
+		if (gObjectArt.width <= 0 || gObjectArt.height <= 0) return {};
+		auto const w = float(gObjectArt.width), h = float(gObjectArt.height);
+		for (auto const& [name, sprite] : gObjectArt.sprites)
+		{
+			auto const& r = sprite.region;
+			if (centreU >= float(r.x) / w && centreU < float(r.x + r.width) / w
+					&& centreV >= float(r.y) / h && centreV < float(r.y + r.height) / h)
+				return name;
+		}
+		return {};
 	}
 
 	// The tile one UV falls on, by the centre of the sampled range, across
@@ -317,6 +371,15 @@ namespace
 	bool isWindowframeTile(std::string const& name)
 	{
 		return name.rfind("windowframe-", 0) == 0;
+	}
+
+	// The glass is keyed by the Style alone, and every glass tile shares the
+	// `glass-` prefix, so the prefix is what separates a pane's glass from
+	// the other Object artwork a Window's pass can carry - the BoothWindow's
+	// frame and shutter draw from the same atlas and are not glass.
+	bool isGlassTile(std::string const& name)
+	{
+		return name.rfind("glass-", 0) == 0;
 	}
 
 	std::string tileList(std::vector<DrawnQuad> const& quads)
@@ -417,15 +480,28 @@ namespace
 			return out;
 		}
 
-		// The glass: an ObjectAtlas sprite drawn over the space behind.
-		// It is not a Sector tile, and it is drawn inside the aperture
-		// rather than under the Sector's own clip.
+		// The glass: the pane's own tiles, drawn from the Objects atlas over
+		// the space behind. It is not a Sector tile, and it is drawn inside
+		// the aperture rather than under the Sector's own clip. Filtered by
+		// name rather than by atlas so the BoothWindow's frame and shutter -
+		// which draw from the same atlas and are not glass - cannot be read
+		// as a pane that repeated.
 		std::vector<DrawnQuad> glass() const
 		{
 			std::vector<DrawnQuad> out;
 			for (auto const& q : quads)
-				if (q.texture == WorldDrawList::Texture::ObjectAtlas)
+				if (q.texture == WorldDrawList::Texture::ObjectAtlas
+						&& isGlassTile(q.tile))
 					out.push_back(q);
+			return out;
+		}
+
+		// Every ObjectAtlas quad the pass emitted, glass or otherwise.
+		std::vector<DrawnQuad> objectQuads() const
+		{
+			std::vector<DrawnQuad> out;
+			for (auto const& q : quads)
+				if (q.texture == WorldDrawList::Texture::ObjectAtlas) out.push_back(q);
 			return out;
 		}
 
@@ -519,11 +595,14 @@ namespace
 			}
 			else if (first.texture == WorldDrawList::Texture::ObjectAtlas)
 			{
-				// The glass is the only ObjectAtlas thing this fixture
-				// draws, and its name is what the pass asked for; the
-				// check that cares about the order only needs to know the
-				// quad was glass rather than a Sector tile.
-				q.tile = "glass";
+				// Read back out of the UVs rather than taken on trust, so a
+				// check can tell clear glass from frosted glass from the
+				// BoothWindow's shutter and know that a cut quad still landed
+				// inside the tile it means to be sampling.
+				q.tile = objectTileAt((q.u0 + q.u1) * 0.5f, (q.v0 + q.v1) * 0.5f);
+				require(!q.tile.empty(),
+					"An ObjectAtlas quad sampled UVs that fall on no tile in the "
+					"installed Object atlas");
 			}
 			q.textured = first.texture != WorldDrawList::Texture::None;
 			pass.quads.push_back(q);
@@ -2258,9 +2337,19 @@ namespace
 		// shutter go down - so the absence of a windowframe is the frame
 		// rule refusing it rather than the whole Window pass being skipped.
 		auto const pass = recordPass(scene.front, atlas);
-		require(!pass.glass().empty() || !pass.behindCells().empty(),
-			"The BoothWindow drew nothing at all, so the absence of a "
-			"windowframe here would prove nothing");
+		auto const drawn = tileList(pass.objectQuads());
+		require(pass.objectQuads().size() >= 2
+				&& drawn.find("booth-window-shutter") != std::string::npos
+				&& drawn.find("booth-window-open") != std::string::npos,
+			"The BoothWindow drew neither its own frame nor its shutter - it drew "
+			+ drawn
+			+ ", so the absence of a windowframe here would prove nothing");
+		// And the glass repeat stays off the hatch: the pane the tile repeats
+		// across is the ordinary Window's, and a shutter that also wore
+		// repeated glass would be drawn over by its own travelling panel.
+		require(pass.glass().empty(),
+			"A BoothWindow wore repeated glass behind the shutter that slides "
+			"over it: " + tileList(pass.glass()));
 		require(pass.frameCells().empty(),
 			"A BoothWindow wore a windowframe over the frame it already owns: "
 				+ tileList(pass.frameCells()));
@@ -2522,6 +2611,545 @@ namespace
 								+ "' and the installed atlas does not carry it");
 					}
 	}
+
+	// ------------------------------------------------------------------
+	// The glass: one tile per glass Style, repeated across the pane at the
+	// scale it was authored instead of one pane-sized image stretched over
+	// whatever rectangle the Window happens to be (#1079).
+	//
+	// The thing worth pinning is that the *scale* a tile samples does not
+	// change when the pane changes size. That is the entire defect, and it is
+	// directly readable off the recorded quads; pane size, repeat count and
+	// cut fractions all follow from it.
+	// ------------------------------------------------------------------
+
+	// The glass tile's screen extent at the current zoom. 0.25 World units
+	// is 32 px across and 80 px up on the 128 x 320 cell, which is what
+	// makes the tile square in World space while keeping one artwork pixel
+	// to one screen pixel on both axes at once.
+	float glassTileScreenWidth()
+	{
+		return 0.25f * float(kCellWidth) * gUISettings.worldZoom;
+	}
+
+	float glassTileScreenHeight()
+	{
+		return 0.25f * float(kCellHeight) * gUISettings.worldZoom;
+	}
+
+	bool close(float a, float b, float tolerance)
+	{
+		return std::abs(a - b) <= tolerance;
+	}
+
+	// The artwork pixels a quad sampled out of the tile it drew, across and
+	// down. The sprite helper insets a tile's sampled range by half a pixel
+	// at each edge so a quad never samples its neighbour's border, so a
+	// whole tile measures one pixel short of its region on each axis. Every
+	// tolerance used with these is that inset plus slack, and it stays an
+	// order of magnitude tighter than the stretch this ticket replaces: a
+	// pane-sized tile stretched over a two-level pane spread its whole 102
+	// px of artwork across 1.3 World units, 78 px per unit against the 128
+	// the glass is authored at.
+	void sampledArtworkPixels(DrawnQuad const& q, float& across, float& down)
+	{
+		auto const art = objectTileArtwork(q.tile);
+		require(!!art, "A glass quad names '" + q.tile
+			+ "', which the installed Object atlas does not carry");
+		across = (q.u1 - q.u0) * float(gObjectArt.width);
+		down = (q.v1 - q.v0) * float(gObjectArt.height);
+	}
+
+	// The artwork pixels per World unit a quad samples, on each axis. This
+	// is the number the whole ticket turns on: it is a fact about the tile
+	// and the transform, and it cannot move when the pane it happens to be
+	// filling changes size.
+	void sampledScale(DrawnQuad const& q, float& perUnitX, float& perUnitY)
+	{
+		float across{}, down{};
+		sampledArtworkPixels(q, across, down);
+		auto const worldX = (q.rect.right - q.rect.left)
+			/ (float(kCellWidth) * gUISettings.worldZoom);
+		auto const worldY = (q.rect.bottom - q.rect.top)
+			/ (float(kCellHeight) * gUISettings.worldZoom);
+		require(worldX > 0.0f && worldY > 0.0f,
+			"A glass quad was drawn with no extent, so the scale it samples "
+			"says nothing about anything");
+		perUnitX = across / worldX;
+		perUnitY = down / worldY;
+	}
+
+	// Lays the recorded glass into the column/row grid the repeat built,
+	// anchored at the pane's bottom-left, and requires it to cover the pane
+	// exactly: every cell filled, every edge landing either on the tile
+	// boundary or on the pane's own edge, and nothing outside the pane at
+	// all. A gap would be an unglazed strip; an overshoot would be glass on
+	// the wall.
+	std::map<std::pair<int, int>, DrawnQuad> layoutGlass(
+		std::vector<DrawnQuad> const& glass, ScreenRect const& pane,
+		int& columns, int& rows)
+	{
+		auto const tileW = glassTileScreenWidth();
+		auto const tileH = glassTileScreenHeight();
+		columns = int(std::ceil((pane.right - pane.left) / tileW - 1e-4f));
+		rows = int(std::ceil((pane.bottom - pane.top) / tileH - 1e-4f));
+		std::map<std::pair<int, int>, DrawnQuad> grid;
+		for (auto const& q : glass)
+		{
+			auto const column = int(std::floor(
+				(q.rect.left - pane.left) / tileW + 1e-4f));
+			auto const row = int(std::floor(
+				(pane.bottom - q.rect.bottom) / tileH + 1e-4f));
+			require(column >= 0 && column < columns, "A glass quad sat outside "
+				"the column range the pane's width describes at " + q.rect.str());
+			require(row >= 0 && row < rows, "A glass quad sat outside the row "
+				"range the pane's height describes at " + q.rect.str());
+			require(grid.find(std::make_pair(column, row)) == grid.end(),
+				"Two glass quads landed on column " + std::to_string(column)
+					+ ", row " + std::to_string(row) + ", so the repeat overlaps "
+					"itself");
+			auto const left = pane.left + float(column) * tileW;
+			auto const bottom = pane.bottom - float(row) * tileH;
+			require(near(q.rect.left, left) && near(q.rect.bottom, bottom),
+				"A glass quad is off the grid the repeat builds from the pane's "
+				"bottom-left: quad " + q.rect.str() + " expected at "
+				+ std::to_string(left) + ", " + std::to_string(bottom));
+			require(near(q.rect.right, std::min(left + tileW, pane.right)),
+				"A glass quad's right edge is neither a tile boundary nor the "
+				"pane's edge: " + q.rect.str());
+			require(near(q.rect.top, std::max(bottom - tileH, pane.top)),
+				"A glass quad's top edge is neither a tile boundary nor the "
+				"pane's edge: " + q.rect.str());
+			grid.emplace(std::make_pair(column, row), q);
+		}
+		require(int(grid.size()) == columns * rows, "The repeat covered "
+			+ std::to_string(grid.size()) + " of the " + std::to_string(columns)
+			+ " x " + std::to_string(rows) + " cells the pane needs, so a strip "
+			"of the aperture is left unglazed");
+		return grid;
+	}
+
+	// The fraction of its tile a quad sampled, on each axis.
+	void sampledTileFraction(DrawnQuad const& q, float& across, float& down)
+	{
+		float pixelsX{}, pixelsY{};
+		sampledArtworkPixels(q, pixelsX, pixelsY);
+		auto const art = objectTileArtwork(q.tile);
+		require(!!art, "The glass tile vanished from the atlas");
+		across = pixelsX / float(art->region.width);
+		down = pixelsY / float(art->region.height);
+	}
+
+	// A 1x1 pane is 0.8 x 0.3 World units against a 0.25 x 0.25 tile: four
+	// columns and two rows, the last of each cut. The cut tile is drawn at
+	// its remaining size sampling only the matching fraction of the tile,
+	// so the pattern never squashes and the cut reads as a cut rather than
+	// as a whole tile squeezed into the sliver that was left.
+	void aOneByOnePaneRepeatsItsTileWithTheLastColumnAndRowCut(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		installObjectArt();
+		auto scene = roomScene();
+		auto const pane = glassRect(*scene.window);
+		auto const pass = recordPass(scene.front, atlas);
+		auto const glass = pass.glass();
+		require(!glass.empty(), "The 1x1 pane drew no glass at all");
+
+		int columns{}, rows{};
+		auto const grid = layoutGlass(glass, pane, columns, rows);
+		require(columns == 4 && rows == 2, "A 1x1 pane repeated its tile "
+			+ std::to_string(columns) + " x " + std::to_string(rows)
+			+ "; a 0.8 x 0.3 World-unit pane against a 0.25 x 0.25 tile is "
+			"four columns and two rows");
+
+		auto const tileW = glassTileScreenWidth();
+		auto const tileH = glassTileScreenHeight();
+		for (auto const& [where, q] : grid)
+		{
+			bool const cutColumn = where.first + 1 == columns;
+			bool const cutRow = where.second + 1 == rows;
+			auto const widthFraction = (q.rect.right - q.rect.left) / tileW;
+			auto const heightFraction = (q.rect.bottom - q.rect.top) / tileH;
+			float sampledX{}, sampledY{};
+			sampledTileFraction(q, sampledX, sampledY);
+
+			// What the quad drew and what it sampled are the same fraction of
+			// the tile. A quad that filled the same rect while sampling the
+			// whole tile would be stretching, which is the defect.
+			require(close(sampledX, widthFraction, 0.05f)
+					&& close(sampledY, heightFraction, 0.05f),
+				"A glass quad fills " + std::to_string(widthFraction)
+					+ " x " + std::to_string(heightFraction)
+					+ " of the tile's extent while sampling " + std::to_string(sampledX)
+					+ " x " + std::to_string(sampledY)
+					+ " of its artwork, so the tile is being stretched rather "
+					"than cut: " + q.rect.str());
+
+			if (cutColumn)
+				require(widthFraction < 0.9f && sampledX < 0.9f,
+					"The pane's last column is not cut - it fills "
+					+ std::to_string(widthFraction)
+					+ " of the tile's width and samples "
+					+ std::to_string(sampledX)
+					+ ", so a partial tile is being drawn as a whole one");
+			else
+				require(widthFraction > 0.99f,
+					"A column that is not the pane's last was drawn short: "
+					+ std::to_string(widthFraction));
+
+			if (cutRow)
+				require(heightFraction < 0.9f && sampledY < 0.9f,
+					"The pane's last row is not cut - it fills "
+					+ std::to_string(heightFraction)
+					+ " of the tile's height and samples "
+					+ std::to_string(sampledY)
+					+ ", so a partial tile is being drawn as a whole one");
+			else
+				require(heightFraction > 0.99f,
+					"A row that is not the pane's last was drawn short: "
+					+ std::to_string(heightFraction));
+		}
+	}
+
+	// The whole ticket in one number. A 2x1 pane and a 1x2 pane repeat more
+	// tiles at the same scale rather than stretching the same tiles further,
+	// and the pixels-per-World-unit a quad samples is where that is visible:
+	// it is a fact about the tile and the transform, and it does not move
+	// with the pane.
+	void theRepeatScaleDoesNotChangeWithPaneSize(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		installObjectArt();
+
+		float referenceX{};
+		float referenceY{};
+		std::string referenceName;
+		int referenceTiles{};
+		std::vector<std::pair<std::string, int>> tileCounts;
+
+		auto const run = [&](char const* label, uint32_t wide, uint32_t high)
+		{
+			auto scene = buildScene("room", wide + 2, high, 1, 0,
+				CORE_ROOM_MAX_HEIGHT, false, wide, high);
+			auto const pane = glassRect(*scene.window);
+			auto const pass = recordPass(scene.front, atlas);
+			auto const glass = pass.glass();
+			require(!glass.empty(),
+				std::string{ "The " } + label + " pane drew no glass at all");
+
+			int columns{}, rows{};
+			layoutGlass(glass, pane, columns, rows);
+			auto const tiles = int(glass.size());
+			require(tiles == columns * rows,
+				std::string{ "The " } + label + " pane's tile count disagrees "
+					"with the grid it laid out");
+
+			for (auto const& q : glass)
+			{
+				float perUnitX{}, perUnitY{};
+				sampledScale(q, perUnitX, perUnitY);
+				if (referenceName.empty())
+				{
+					referenceX = perUnitX;
+					referenceY = perUnitY;
+					referenceName = label;
+					referenceTiles = tiles;
+					continue;
+				}
+				require(close(perUnitX, referenceX, referenceX * 0.02f)
+						&& close(perUnitY, referenceY, referenceY * 0.02f),
+					std::string{ "The " } + label + " pane samples "
+						+ std::to_string(perUnitX) + " x "
+						+ std::to_string(perUnitY)
+						+ " artwork pixels per World unit where the " + referenceName
+						+ " pane samples " + std::to_string(referenceX) + " x "
+						+ std::to_string(referenceY)
+						+ ", so a bigger pane is stretching the tile rather than "
+						"repeating it more times: " + q.rect.str());
+			}
+
+			// And the scale is the one the tile was authored at, so "the same
+			// scale" is not merely "a scale that happens to be constant".
+			require(close(referenceX, float(kCellWidth), float(kCellWidth) * 0.05f)
+					&& close(referenceY, float(kCellHeight),
+						float(kCellHeight) * 0.05f),
+				"The glass samples " + std::to_string(referenceX) + " x "
+					+ std::to_string(referenceY)
+					+ " artwork pixels per World unit, not the sheet's "
+					+ std::to_string(kCellWidth) + " x "
+					+ std::to_string(kCellHeight) + ", so the pattern lands "
+					"distorted even where it is consistent (first seen on "
+				+ referenceName + ")");
+
+			tileCounts.emplace_back(label, tiles);
+		};
+
+		run("1x1", 1, 1);
+		run("2x1", 2, 1);
+		run("1x2", 1, 2);
+
+		// A bigger pane repeats more tiles rather than drawing the same
+		// tiles bigger. The scale check above is what makes "more tiles" the
+		// only way a pane can get bigger; this is what makes sure it actually
+		// did get more of them, so a repeat that quietly drew one tile per
+		// pane cannot pass on the scale assertion alone.
+		require(tileCounts.size() == 3, "The pane sweep did not reach all three panes");
+		for (size_t index = 1; index < tileCounts.size(); ++index)
+			require(tileCounts[index].second > tileCounts[0].second,
+				"A " + tileCounts[index].first + " pane repeated "
+					+ std::to_string(tileCounts[index].second)
+					+ " tiles where the 1x1 pane repeated "
+					+ std::to_string(tileCounts[0].second)
+					+ ", so the bigger pane is not repeating more of them");
+		require(tileCounts[1].second != tileCounts[2].second,
+			"A 2x1 pane and a 1x2 pane repeated the same number of tiles, so "
+			"the sweep cannot tell the two axes apart");
+	}
+
+	// The Style picks the tile and nothing else. The pane rect, the aperture
+	// and the clip are identical between clear, frosted and tinted, exactly
+	// as they were when one pane-sized tile carried the whole opening; the
+	// only thing that differs is which tile repeats.
+	void eachGlassStyleEmitsItsOwnTileWithIdenticalGeometry(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		installObjectArt();
+
+		struct Shot
+		{
+			std::string tile;
+			std::vector<DrawnQuad> quads;
+			ScreenRect unionRect{};
+		};
+		std::vector<Shot> shots;
+
+		std::vector<std::pair<core::Window::Style, std::string>> const styles{
+			{ core::Window::Style::Clear, "glass-clear" },
+			{ core::Window::Style::Frosted, "glass-frosted" },
+			{ core::Window::Style::Tinted, "glass-tinted" },
+		};
+		for (auto const& [style, expected] : styles)
+		{
+			auto scene = roomScene();
+			std::const_pointer_cast<core::Window>(scene.window)->setState(
+				core::Window::State::Closed, style);
+			require(scene.window->getStyle() == style,
+				"The fixture Window did not take the glass Style it was set to");
+			auto const pass = recordPass(scene.front, atlas);
+			auto const glass = pass.glass();
+			require(!glass.empty(), "A '" + expected + "' pane drew no glass");
+			Shot shot;
+			shot.tile = expected;
+			for (auto const& q : glass)
+			{
+				require(q.tile == expected, "A pane set to '" + expected
+					+ "' drew '" + q.tile + "'; the glass Style picks the tile and "
+					"nothing else, so one Style must never wear another's art");
+				shot.unionRect.include({ q.rect.left, q.rect.top });
+				shot.unionRect.include({ q.rect.right, q.rect.bottom });
+				shot.quads.push_back(q);
+			}
+			require(shot.unionRect.sameAs(glassRect(*scene.window)),
+				"A '" + expected + "' pane's glass does not cover its own pane "
+				"rect: glass " + shot.unionRect.str() + ", pane "
+				+ glassRect(*scene.window).str());
+			shots.push_back(std::move(shot));
+		}
+
+		auto const& first = shots.front();
+		for (auto const& shot : shots)
+		{
+			require(shot.quads.size() == first.quads.size(), "A '" + shot.tile
+				+ "' pane repeated " + std::to_string(shot.quads.size())
+				+ " tiles where a '" + first.tile + "' pane repeated "
+				+ std::to_string(first.quads.size()) + ", so the Style changed "
+				"the geometry and not just the artwork");
+			for (size_t index = 0; index < shot.quads.size(); ++index)
+			{
+				require(shot.quads[index].rect.sameAs(first.quads[index].rect),
+					"A '" + shot.tile + "' pane's quad " + std::to_string(index)
+						+ " is at " + shot.quads[index].rect.str()
+						+ " where the same tile position on a '"
+						+ first.tile + "' pane is at "
+						+ first.quads[index].rect.str());
+				require(shot.quads[index].clip.sameAs(first.quads[index].clip),
+					"A '" + shot.tile + "' pane's quad " + std::to_string(index)
+						+ " is clipped to " + shot.quads[index].clip.str()
+						+ " where a '" + first.tile + "' pane's is clipped to "
+						+ first.quads[index].clip.str() + "; the aperture and the "
+						"clip are the same for every glass Style");
+			}
+			require(shot.unionRect.sameAs(first.unionRect),
+				"A '" + shot.tile + "' pane fills " + shot.unionRect.str()
+					+ " where a '" + first.tile + "' pane fills "
+					+ first.unionRect.str());
+		}
+	}
+
+	// The glass fills the whole aperture - including the strip the frame's
+	// moulding will cover - and goes down over the space behind and under the
+	// frame, so the moulding always lies on glass rather than on the gap
+	// where glass stopped short.
+	void theGlassFillsTheWholeApertureUnderTheFrame(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		installObjectArt();
+		auto scene = squareRoomScene(3, 3);
+		auto const pane = glassRect(*scene.window);
+		auto const pass = recordPass(scene.front, atlas);
+		auto const glass = pass.glass();
+		require(!glass.empty(), "The 3x3 pane drew no glass");
+
+		ScreenRect covered{};
+		for (auto const& q : glass)
+		{
+			covered.include({ q.rect.left, q.rect.top });
+			covered.include({ q.rect.right, q.rect.bottom });
+		}
+		require(covered.sameAs(pane), "The glass does not fill the whole "
+			"aperture: glass " + covered.str() + ", aperture " + pane.str());
+
+		auto const behind = pass.behindCells();
+		auto const frames = pass.frameCells();
+		require(!behind.empty(), "The fixture drew no space behind the glass, "
+			"so the ordering below would prove nothing");
+		require(!frames.empty(), "The fixture drew no frame over the glass, so "
+			"the ordering below would prove nothing");
+		require(*pass.lastIndexOf(behind) < *pass.firstIndexOf(glass),
+			"The glass is not drawn over the space behind it");
+		require(*pass.lastIndexOf(glass) < *pass.firstIndexOf(frames),
+			"The glass is not drawn under the frame that lies over it");
+
+		// And the moulding really does lie over glass: the frame's hole is
+		// inset from the pane, so some frame quad overlaps the pane rather
+		// than sitting wholly outside it.
+		bool mouldingOverGlass = false;
+		for (auto const& frame : frames)
+			if (frame.rect.overlaps(pane)) mouldingOverGlass = true;
+		require(mouldingOverGlass,
+			"No frame quad overlaps the pane, so the strip the moulding covers "
+			"is not being checked against the glass that fills it");
+	}
+
+	// Solid pass only. The glass draws in the solid pass as it does today;
+	// the wireframe overlay emits none.
+	void theGlassDrawsInTheSolidPassAndNotInTheWireframeOverlay(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		installObjectArt();
+		auto scene = roomScene();
+		auto const solid = recordPass(scene.front, atlas, kNoClip,
+			LayerRenderStyle::Solid);
+		require(!solid.glass().empty(),
+			"The solid pass drew no glass over its aperture");
+
+		auto const wire = recordPass(scene.front, atlas, kNoClip,
+			LayerRenderStyle::Wireframe);
+		require(wire.glass().empty(),
+			"The wireframe overlay drew glass: " + tileList(wire.glass()));
+		require(wire.objectQuads().empty(),
+			"The wireframe overlay drew Objects artwork at all: "
+			+ tileList(wire.objectQuads()));
+	}
+
+	// A glass tile the installed atlas does not carry is no glass at all: no
+	// quad, never the missing-art colour, and the space behind the aperture
+	// keeps showing through the pane instead of a hole being punched in it.
+	// That is the missing-tile answer every tile gives, and it is what lets
+	// a sheet be filled one tile at a time.
+	void aMissingGlassTileFallsBackWithoutPunchingAHole(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		installObjectArt();
+
+		// Establish that the pass is capable of drawing glass before one is
+		// taken away, so the absence below is the tile's absence and not the
+		// whole glass layer being skipped.
+		auto glazed = roomScene();
+		std::const_pointer_cast<core::Window>(glazed.window)->setState(
+			core::Window::State::Closed, core::Window::Style::Clear);
+		require(!recordPass(glazed.front, atlas).glass().empty(),
+			"The Clear pane drew no glass before the missing-tile test, so the "
+			"absence checked below would prove nothing");
+
+		installObjectArtWithout("glass-frosted");
+		auto scene = roomScene();
+		std::const_pointer_cast<core::Window>(scene.window)->setState(
+			core::Window::State::Closed, core::Window::Style::Frosted);
+		require(scene.window->getStyle() == core::Window::Style::Frosted,
+			"The fixture Window did not take the Frosted Style");
+		auto const pass = recordPass(scene.front, atlas);
+		require(pass.glass().empty(), "A pane whose glass tile the atlas does "
+			"not carry still drew glass: " + tileList(pass.glass()));
+		for (auto const& q : pass.quads)
+			require(q.colour != kMagenta,
+				"A missing glass tile drew the missing-art colour over the "
+				"aperture; a missing tile is no tile, not a hole");
+		// The aperture is not punched: the space behind still drew, the wall
+		// underneath is whole, and the frame still lies over the opening.
+		require(!pass.behindCells().empty(),
+			"The space behind stopped drawing when the glass went missing, so "
+			"the aperture is a hole rather than an unglazed opening");
+		require(!pass.frameCells().empty(),
+			"The frame stopped drawing when the glass went missing");
+		require(gridOf(pass.wallCells(), *scene.front).size() == 4,
+			"The wall under an unglazed pane stopped being whole");
+	}
+
+	// The repeat belongs to the pane, not to the World grid: two windows
+	// side by side each start their pattern at their own edge rather than
+	// forming one sheet across the wall. The pane's left edge sits 0.1 of a
+	// cell into the World grid, which is not a multiple of the tile's 0.25,
+	// so a World-anchored repeat would have to cut that first column to
+	// 0.15 wide. A full first column is what says the anchor is the pane's.
+	void theRepeatIsAnchoredToThePaneAndNotToTheWorldGrid(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		installObjectArt();
+		auto scene = multiWindowScene(6, { { 1, 1 }, { 3, 1 } });
+		auto const pass = recordPass(scene.front, atlas);
+		auto const glass = pass.glass();
+		require(!glass.empty(), "The fixture drew no glass");
+
+		int checked{};
+		for (uint32_t ordinal = 0; ordinal < 2; ++ordinal)
+		{
+			auto const window = windowOf(*scene.front, ordinal);
+			require(window != nullptr,
+				"The fixture lost Window " + std::to_string(ordinal));
+			auto const pane = glassRect(*window);
+			std::vector<DrawnQuad> mine;
+			for (auto const& q : glass)
+				if (q.rect.overlaps(pane)) mine.push_back(q);
+			require(!mine.empty(), "No glass landed inside Window "
+				+ std::to_string(ordinal) + "'s pane at " + pane.str());
+
+			int columns{}, rows{};
+			auto const grid = layoutGlass(mine, pane, columns, rows);
+			// The first column starts on the pane's own left edge and is a
+			// whole tile, and it samples from the tile's own left edge.
+			auto const& firstColumn = grid.at(std::make_pair(0, 0));
+			auto const tileW = glassTileScreenWidth();
+			require(near(firstColumn.rect.left, pane.left),
+				"Window " + std::to_string(ordinal) + "'s glass does not start "
+				"at its own pane's left edge: quad "
+				+ std::to_string(firstColumn.rect.left) + ", pane "
+				+ std::to_string(pane.left));
+			require(near(firstColumn.rect.right - firstColumn.rect.left, tileW),
+				"Window " + std::to_string(ordinal) + "'s first glass column is "
+				"cut rather than whole, so the repeat is anchored on the World "
+				"grid and not on the pane");
+			auto const art = objectTileArtwork(firstColumn.tile);
+			require(!!art, "The glass tile vanished from the atlas");
+			require(close(firstColumn.u0 * float(gObjectArt.width),
+					float(art->region.x) + 0.5f, 0.6f),
+				"Window " + std::to_string(ordinal) + "'s first glass column "
+				"does not sample from the tile's own left edge, so the pattern "
+				"is offset off the pane it belongs to");
+			++checked;
+		}
+		require(checked == 2, "The anchor check did not reach both Windows");
+	}
 }
 
 void render_smoke::registerWindowframeCells(std::vector<smoke::Check>& checks)
@@ -2600,4 +3228,18 @@ void render_smoke::registerWindowframeCells(std::vector<smoke::Check>& checks)
 		isolated<aWindowOnABackLayerWearsItsOwnFrameThroughTheAperture> });
 	checks.push_back({ "windowframeCells/theFrameNameIsTheOpeningAndNothingElse",
 		isolated<theFrameNameIsTheOpeningAndNothingElse> });
+	checks.push_back({ "windowframeCells/aOneByOnePaneRepeatsItsTileWithTheLastColumnAndRowCut",
+		isolated<aOneByOnePaneRepeatsItsTileWithTheLastColumnAndRowCut> });
+	checks.push_back({ "windowframeCells/theRepeatScaleDoesNotChangeWithPaneSize",
+		isolated<theRepeatScaleDoesNotChangeWithPaneSize> });
+	checks.push_back({ "windowframeCells/eachGlassStyleEmitsItsOwnTileWithIdenticalGeometry",
+		isolated<eachGlassStyleEmitsItsOwnTileWithIdenticalGeometry> });
+	checks.push_back({ "windowframeCells/theGlassFillsTheWholeApertureUnderTheFrame",
+		isolated<theGlassFillsTheWholeApertureUnderTheFrame> });
+	checks.push_back({ "windowframeCells/theGlassDrawsInTheSolidPassAndNotInTheWireframeOverlay",
+		isolated<theGlassDrawsInTheSolidPassAndNotInTheWireframeOverlay> });
+	checks.push_back({ "windowframeCells/aMissingGlassTileFallsBackWithoutPunchingAHole",
+		isolated<aMissingGlassTileFallsBackWithoutPunchingAHole> });
+	checks.push_back({ "windowframeCells/theRepeatIsAnchoredToThePaneAndNotToTheWorldGrid",
+		isolated<theRepeatIsAnchoredToThePaneAndNotToTheWorldGrid> });
 }

@@ -1252,6 +1252,99 @@ void renderBoothWindow(shared_ptr<const core::BoothWindow> booth, uint32_t layer
 		drawList->AddRect(topLeft, bottomRight, packColour(148, 162, 170), 0.0f, 0, 2.0f);
 }
 
+// The glass one Window's pane wears, laid down by repetition (#1079).
+//
+// One tile per glass Style, repeated across the pane the way a Sector
+// surface repeats across a wall, rather than one pane-sized image
+// stretched over whatever rectangle the Window happens to be. A tall
+// window repeats the tile rather than pulling it four times out of shape;
+// a wide window repeats it rather than smearing it sideways.
+//
+// The repeat is one quad per tile and not a wrapped texture coordinate.
+// The atlas is a single texture shared by every tile in the set, so
+// wrap-mode sampling cannot be enabled for one region without bleeding the
+// neighbouring tiles' artwork in. Each whole tile emits one quad sampling
+// the full tile, which is the same shape the Sector surface's per-cell
+// loop already uses.
+//
+// A cut tile samples only the fraction that fits. A pane's dimensions are
+// never a whole multiple of the tile - a 1x1 pane is 0.8 x 0.3 World
+// units against a 0.25 x 0.25 tile - so its last column and its last row
+// are cut. Each is drawn at its remaining size sampling only the matching
+// fraction of the tile, so the pattern stays at one artwork pixel to one
+// screen pixel and the cut reads as a cut rather than as a whole tile
+// squeezed into the sliver that was left.
+//
+// The repeat is anchored to the pane's bottom-left, not to the World
+// grid: the pattern belongs to the pane, so two windows side by side each
+// start their pattern at their own edge rather than forming one sheet
+// across the wall. The cut therefore always falls on the pane's far edges -
+// its right and its top - and never somewhere inside it.
+//
+// Returns false when the installed atlas carries no tile of that name, in
+// which case nothing was drawn. That is the missing-tile answer every tile
+// gives: no quad, never the missing-art colour, and the space behind the
+// aperture keeps showing through the glass's absence instead of a hole
+// being punched where the pane should have been.
+bool drawGlassRepeating(std::string const& tile, Vec2 paneMin, Vec2 paneMax,
+	WorldDrawList* drawList)
+{
+	auto const artwork = objectTileArtwork(tile);
+	if (!artwork || artwork->drawnSize.x <= 0.0f || artwork->drawnSize.y <= 0.0f)
+		return false;
+
+	// The tile's screen extent, read through the same transform the pane's
+	// own corners went through rather than restated from the cell metrics,
+	// so the repeat cannot drift from the pane about how a World unit maps
+	// to a screen pixel at this zoom. The transform flips y, which is why
+	// the step is read as an absolute extent.
+	core::Vector2 origin{}, step{ artwork->drawnSize.x, artwork->drawnSize.y };
+	transformPosition(origin);
+	transformPosition(step);
+	auto const tileWidth = std::abs(step.x - origin.x);
+	auto const tileHeight = std::abs(step.y - origin.y);
+	if (tileWidth <= 0.0f || tileHeight <= 0.0f) return true;
+
+	float const left = min(paneMin.x, paneMax.x);
+	float const right = max(paneMin.x, paneMax.x);
+	float const top = min(paneMin.y, paneMax.y);
+	// Screen y grows downward, so the pane's World bottom - the anchor the
+	// repeat is built from - is its *largest* y.
+	float const bottom = max(paneMin.y, paneMax.y);
+	// Anything thinner than this is the transform's own rounding rather than
+	// a tile, and a sub-pixel quad sampling a sub-pixel slice of artwork
+	// says nothing about the pattern either way.
+	constexpr float kSliver = 1e-3f;
+	if (right - left <= kSliver || bottom - top <= kSliver) return true;
+
+	for (int column = 0;; ++column)
+	{
+		// Each edge is multiplied out fresh rather than accumulated, so a
+		// long span cannot drift a pixel sideways by the end of it.
+		float const x0 = left + static_cast<float>(column) * tileWidth;
+		if (x0 >= right - kSliver) break;
+		float const x1 = min(x0 + tileWidth, right);
+		float const across = (x1 - x0) / tileWidth;
+
+		for (int row = 0;; ++row)
+		{
+			// Rows stack upward from the anchor, so a row's *lower* screen y
+			// is its top edge and its larger y is the edge it was laid from.
+			float const lower = bottom - static_cast<float>(row) * tileHeight;
+			if (lower <= top + kSliver) break;
+			float const upper = max(lower - tileHeight, top);
+			float const down = (lower - upper) / tileHeight;
+
+			// The tile's bottom edge sits on the pane's bottom, so a cut row
+			// loses the tile's *top*: it samples from 1 - down to 1. A cut
+			// column loses the tile's right, so it samples from 0 to `across`.
+			drawObjectSprite(tile.c_str(), drawList, { x0, upper }, { x1, lower },
+				Vec2{ 0.0f, 1.0f - down }, Vec2{ across, 1.0f });
+		}
+	}
+	return true;
+}
+
 void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRenderStyle style, bool selected, WorldDrawList* drawList)
 {
 	if (style == LayerRenderStyle::Hidden)
@@ -1284,9 +1377,14 @@ void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRe
 		window->getFullShape(from, to);
 		transformPosition(from);
 		transformPosition(to);
-		auto const sprite = windowStyle == core::Window::Style::Clear ? "window-clear"
-			: windowStyle == core::Window::Style::Frosted ? "window-frosted" : "window-tinted";
-		drawObjectSprite(sprite, drawList, {from.x, from.y}, {to.x, to.y});
+		// The Style picks the tile and nothing else. The pane's geometry, its
+		// aperture and its clip are identical across all three, exactly as
+		// they were when one pane-sized tile carried the whole opening
+		// (#1079).
+		auto const tile = windowStyle == core::Window::Style::Clear ? "glass-clear"
+			: windowStyle == core::Window::Style::Frosted ? "glass-frosted"
+			: "glass-tinted";
+		drawGlassRepeating(tile, { from.x, from.y }, { to.x, to.y }, drawList);
 	}
 
 	// The frame, over the glass and over the wall alike. Last, so its

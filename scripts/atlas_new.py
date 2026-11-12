@@ -93,6 +93,38 @@ def slab_shades(row: int) -> tuple[tuple[int, ...], tuple[int, ...]]:
     return body, edge
 
 
+def placeholder_slab(spec: AtlasSpec, name: str,
+                     sprite: dict) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """The body and edge colours one tile's placeholder slab is drawn with.
+
+    A tile that declares `placeholder` gets that RGBA as its body and the
+    same colour darkened as its edge, so the tile's bounds still read on
+    the sheet at whatever alpha the art will be drawn at. A glass tile is
+    the case this exists for: the whole difference between clear, frosted
+    and tinted is in the alpha, and a sheet that drew all three as an
+    opaque slab would show none of it (#1079).
+
+    This is a statement about the placeholder picture and nothing else. It
+    is not a render semantic: the renderer multiplies no colour into a
+    tile on the way to the screen, so the declared RGBA reaches the sheet
+    and stops there. Every other tile keeps the row-shaded slab.
+    """
+    declared = sprite.get("placeholder")
+    if declared is None:
+        return slab_shades(sprite["cell"][1])
+    if not isinstance(declared, list) or len(declared) != 4 \
+            or not all(isinstance(v, int) and not isinstance(v, bool) for v in declared):
+        raise SystemExit(f"{spec.tileset}: '{name}' `placeholder` must be "
+                        "[red, green, blue, alpha] as whole numbers 0..255")
+    if any(v < 0 or v > 255 for v in declared):
+        raise SystemExit(f"{spec.tileset}: '{name}' `placeholder` channels must "
+                        "be 0..255")
+    red, green, blue, alpha = declared
+    body = (red, green, blue, alpha)
+    edge = tuple(max(0, channel - 48) for channel in (red, green, blue)) + (alpha,)
+    return body, edge
+
+
 def load_tileset(spec: AtlasSpec) -> dict:
     path = spec.tileset_path
     with path.open(encoding="utf-8") as stream:
@@ -330,7 +362,7 @@ def render_placeholder(spec: AtlasSpec, tileset: dict) -> Image.Image:
     draw = ImageDraw.Draw(sheet)
     for name, x, y, region_width, region_height in resolve_regions(spec, tileset):
         sprite = sprites[name]
-        body, edge = slab_shades(sprite["cell"][1])
+        body, edge = placeholder_slab(spec, name, sprite)
         draw.rectangle([x, y, x + region_width - 1, y + region_height - 1],
                        fill=body)
         draw.rectangle([x, y, x + region_width - 1, min(y + 1, y + region_height - 1)],

@@ -933,7 +933,13 @@ namespace
 		auto width = min(available.x, available.y * aspect);
 		auto size = ImVec2(width, width / aspect);
 		auto minimum = boundsMin + (boundsMax - boundsMin - size) * 0.5f;
-		if (!drawObjectSprite("window-clear", drawList, toVec2(minimum), toVec2(minimum + size)))
+		// The pane-sized `window-clear` tile this slot drew was retired in
+		// #1079 along with the stretch it described, so asking for it here
+		// would leave the slot drawing its font glyph under the very set that
+		// carries glass art. The glass tile is the one that exists; the icon's
+		// own aspect handling resizes whatever it is given, exactly as the
+		// Door slot's does (#1063).
+		if (!drawObjectSprite("glass-clear", drawList, toVec2(minimum), toVec2(minimum + size)))
 			drawObjectIcon(drawList, boundsMin, boundsMax, colour, ICON_FA_WINDOW_MAXIMIZE);
 	}
 

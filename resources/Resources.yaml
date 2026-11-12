@@ -258,6 +258,9 @@ Resources:
               - { name: "door-tall-R0-V1", x: "1536", y: "320", width: "128", height: "320" }
               - { name: "door-tall-R0-V2", x: "1536", y: "640", width: "128", height: "320" }
               - { name: "door-tall-R0-V3", x: "1536", y: "960", width: "128", height: "320" }
+              - { name: "glass-clear", x: "0", y: "320", width: "32", height: "80" }
+              - { name: "glass-frosted", x: "128", y: "320", width: "32", height: "80" }
+              - { name: "glass-tinted", x: "256", y: "320", width: "32", height: "80" }
               - { name: "lift-car", x: "128", y: "640", width: "115", height: "176" }
               - { name: "marker", x: "0", y: "640", width: "32", height: "44" }
               - { name: "platform-lift", x: "256", y: "640", width: "128", height: "16" }
@@ -266,9 +269,6 @@ Resources:
               - { name: "shuttle-R0", x: "640", y: "640", width: "128", height: "176" }
               - { name: "shuttle-connector", x: "0", y: "960", width: "128", height: "176" }
               - { name: "walkway", x: "0", y: "0", width: "128", height: "24" }
-              - { name: "window-clear", x: "0", y: "320", width: "102", height: "96" }
-              - { name: "window-frosted", x: "128", y: "320", width: "102", height: "96" }
-              - { name: "window-tinted", x: "256", y: "320", width: "102", height: "96" }
               # END GENERATED
     # The Furniture atlas, sized for the 128x320 World cell (#1016). Its
     # render semantics are authored in

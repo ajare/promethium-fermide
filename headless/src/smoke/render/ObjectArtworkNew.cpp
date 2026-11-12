@@ -134,9 +134,14 @@ namespace
 		{ "door-lift-L0", 1.0f, 1.0f, 128, 320 },
 		{ "door-lift-R0", 1.0f, 1.0f, 128, 320 },
 		{ "door-shuttle-L0", 1.0f, 1.0f, 128, 320 },
-		{ "window-clear", 0.8f, 0.3f, 102, 96 },
-		{ "window-frosted", 0.8f, 0.3f, 102, 96 },
-		{ "window-tinted", 0.8f, 0.3f, 102, 96 },
+		// The glass is one tile per glass Style, repeated across the pane at
+		// the scale it was authored rather than stretched to it. 32 x 80 px is
+		// 0.25 x 0.25 World units on this 128 x 320 grid: square in World
+		// space at one artwork pixel to one screen pixel, which is the whole
+		// reason the tile is not square in pixels (#1079).
+		{ "glass-clear", 0.25f, 0.25f, 32, 80 },
+		{ "glass-frosted", 0.25f, 0.25f, 32, 80 },
+		{ "glass-tinted", 0.25f, 0.25f, 32, 80 },
 		{ "booth-window-open", 0.8f, 0.3f, 102, 96 },
 		{ "booth-window-shutter", 0.6461538f, 0.2375f, 83, 76 },
 		{ "button-enabled", 0.1f, 0.04f, 13, 13 },
@@ -677,6 +682,110 @@ namespace
 				|| enabledTile.height != disabledTile.height,
 			"The enabled and disabled Button tiles are the same region, so the "
 			"control's state cannot be read from its artwork");
+	}
+
+	// ------------------------------------------------------------------
+	// The glass tiles: one per glass Style, authored at the size that is
+	// square in World units, with no variant family, and paired in the
+	// ImageSet the install resolves against (#1079).
+	//
+	// The pixel dimensions look wrong for a glass tile and are the one
+	// thing here that cannot be derived from anything else. The authored
+	// sheet is anisotropic - every tile in both authored sets draws at
+	// CORE_CELL_WIDTH_PIXELS per World unit horizontally and
+	// CORE_LEVEL_HEIGHT_PIXELS per World unit vertically - so a square
+	// tile would display as a rect 2.5 times wider than tall and force the
+	// artist to pre-distort the artwork. 32 x 80 is what is square in
+	// World space while keeping one artwork pixel to one screen pixel.
+	// ------------------------------------------------------------------
+	void glassTilesAreOnePerStyleAndSquareInWorldUnits(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const atlas = loadNewObjectsAtlas(context);
+
+		// One tile per glass Style, and no more than the three Styles.
+		std::vector<std::string> const styles{ "glass-clear", "glass-frosted",
+			"glass-tinted" };
+		require(styles.size() == 3,
+			"The glass set states " + std::to_string(styles.size())
+				+ " tiles; there are three glass Styles and one tile each");
+
+		for (auto const& name : styles)
+		{
+			auto const found = atlas.authored.sprites.find(name);
+			require(found != atlas.authored.sprites.end(),
+				"The atlas carries no '" + name + "' glass tile, so that glass "
+				"Style has no artwork to repeat across its pane");
+			auto const& art = found->second;
+
+			// Authored at 32 x 80 px.
+			require(art.region.width == 32 && art.region.height == 80,
+				"'" + name + "' is authored " + std::to_string(art.region.width)
+					+ "x" + std::to_string(art.region.height)
+					+ ", and the glass tile is 32 x 80 px");
+
+			// Declares a drawn size of 0.25 x 0.25 World units.
+			require(relNear(art.drawnSize.x, 0.25f) && relNear(art.drawnSize.y, 0.25f),
+				"'" + name + "' declares a drawn size of "
+					+ point(art.drawnSize.x, art.drawnSize.y)
+					+ ", and the glass tile draws at 0.25 x 0.25 World units");
+
+			// Square in World units, stated as the parity that makes it so:
+			// the artwork pixels per World unit the tile carries are the same
+			// the sheet is drawn at, on both axes. That is what "one artwork
+			// pixel to one screen pixel" means as a number, and it is what
+			// stops the pattern landing distorted.
+			auto const pixelsPerWorldUnitX = art.region.width / art.drawnSize.x;
+			auto const pixelsPerWorldUnitY = art.region.height / art.drawnSize.y;
+			require(relNear(pixelsPerWorldUnitX, float(CORE_CELL_WIDTH_PIXELS))
+					&& relNear(pixelsPerWorldUnitY, float(CORE_LEVEL_HEIGHT_PIXELS)),
+				"'" + name + "' samples " + std::to_string(pixelsPerWorldUnitX)
+					+ " x " + std::to_string(pixelsPerWorldUnitY)
+					+ " artwork pixels per World unit, not the sheet's "
+					+ std::to_string(CORE_CELL_WIDTH_PIXELS) + " x "
+					+ std::to_string(CORE_LEVEL_HEIGHT_PIXELS)
+					+ ", so the glass would draw distorted or off pixel parity");
+
+			// No variant family. The Style picks the tile outright; there is
+			// no second picture of a glass type for an author to pick, and a
+			// derived family under these names would be a family nothing can
+			// select.
+			require(atlas.authored.variantCounts.find(name)
+					== atlas.authored.variantCounts.end(),
+				"'" + name + "' declares a variant family; a glass Style picks one "
+				"tile outright and there is no second picture of it to derive");
+			for (int variant = 1; variant <= 3; ++variant)
+				require(atlas.authored.sprites.find(name + "-V" + std::to_string(variant))
+						== atlas.authored.sprites.end(),
+					"'" + name + "-V" + std::to_string(variant)
+					+ " exists, so a family was derived under a tile that declares "
+					"none");
+
+			// Declared in the ImageSet the install pairs against, at the same
+			// region the authored tile resolves to.
+			auto const region = atlas.regions.find(name);
+			require(region != atlas.regions.end(),
+				"'" + name + "' is authored but has no generated ImageSet entry, so "
+				"the runtime pixel contract does not carry it");
+			require(region->second.x == art.region.x && region->second.y == art.region.y
+					&& region->second.width == art.region.width
+					&& region->second.height == art.region.height,
+				"The generated ImageSet entry for '" + name + "' drifted from the "
+				"authored tileset");
+		}
+
+		// The pane-sized glass tiles this replaced are gone. Their names
+		// describe art sized to one pane and stretched to fit it, and a
+		// repeating tile left sharing those names would mean two different
+		// things depending on which edit landed last.
+		for (auto const* retired : { "window-clear", "window-frosted",
+			"window-tinted" })
+			require(atlas.authored.sprites.find(retired)
+					== atlas.authored.sprites.end(),
+				std::string{ "The pane-sized '" } + retired
+					+ "' tile this ticket retired is still in the set"
+				+ "; a name that means a stretched pane cannot also be carried "
+				"beside the tile that repeats");
 	}
 
 	// ------------------------------------------------------------------
@@ -1231,6 +1340,8 @@ void render_smoke::registerObjectArtworkNew(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "objectArtworkNew/authoredTilesAreRegistered",
 		isolated<authoredTilesAreRegisteredInObjectAtlas> });
+	checks.push_back({ "objectArtworkNew/glassTilesAreOnePerStyleAndSquareInWorldUnits",
+		isolated<glassTilesAreOnePerStyleAndSquareInWorldUnits> });
 	checks.push_back({ "objectArtworkNew/everyLeafFamilyCarriesThreeVariants",
 		isolated<everyLeafFamilyCarriesThreeVariants> });
 	checks.push_back({ "objectArtworkNew/doorLeafSlidesUnderTheApertureOnEveryStyle",
