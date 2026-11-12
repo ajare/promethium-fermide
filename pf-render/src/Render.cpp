@@ -6,6 +6,9 @@
 #include <chrono>
 #include <map>
 #include <optional>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
 #include <unordered_map>
 
 #include "core/Defines.h"
@@ -482,12 +485,17 @@ void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::Wor
 namespace
 {
 // A normalised rectangle in screen pixels.
+//
+// Every member carries its own zero, so a rect that was never assigned is
+// an empty rect - `empty()` says so, and nothing is drawn under it - rather
+// than four indeterminate floats that would clip whatever the stack
+// happened to be holding where they sat (#1068).
 struct ScreenRect
 {
-	float x0;
-	float y0;
-	float x1;
-	float y1;
+	float x0{0.0f};
+	float y0{0.0f};
+	float x1{0.0f};
+	float y1{0.0f};
 
 	bool empty() const
 	{
@@ -495,14 +503,26 @@ struct ScreenRect
 	}
 };
 
+// The compile-time half of that rule. With the initialisers in place the
+// default constructor is not the trivial one that leaves the members
+// indeterminate; take them off and this assert is the message (#1068).
+static_assert(!std::is_trivially_default_constructible_v<ScreenRect>,
+	"ScreenRect members must carry a default initialiser: an unset rect has to "
+	"read as empty, not as indeterminate memory");
+
 // A normalised rectangle in World units. The render transform flips y, so
 // a rect is normalised on the way in and projected on the way out.
+//
+// Defaulted to the zero rect for the same reason as ScreenRect, and for the
+// same consequence: `DoorLeafPlan::reveal` is what the back Sector clips
+// to, and a reveal no opening style arm wrote must clip nothing rather than
+// clip garbage (#1068).
 struct WorldRect
 {
-	float x0;
-	float y0;
-	float x1;
-	float y1;
+	float x0{0.0f};
+	float y0{0.0f};
+	float x1{0.0f};
+	float y1{0.0f};
 
 	bool empty() const
 	{
@@ -535,6 +555,14 @@ struct WorldRect
 		return ScreenRect{min(a.x, b.x), min(a.y, b.y), max(a.x, b.x), max(a.y, b.y)};
 	}
 };
+
+// The same compile-time guard ScreenRect carries. `DoorLeafPlan::reveal` is
+// a WorldRect, so the opening style that never wrote it now hands the draw
+// an empty rect - which clips nothing - instead of four indeterminate
+// floats (#1068).
+static_assert(!std::is_trivially_default_constructible_v<WorldRect>,
+	"WorldRect members must carry a default initialiser: an unset rect has to "
+	"read as empty, not as indeterminate memory");
 
 // A leaf whose remaining overlap with the doorway is no wider than this is
 // treated as clean out of it. See WorldRect::overlaps.
@@ -734,6 +762,18 @@ DoorLeafPlan planDoorLeaves(shared_ptr<const core::Door> const& door)
 			apBottom + apertureHeight};
 		break;
 	}
+
+	default:
+		// A style with no arm here used to reach the draw with a `reveal`
+		// holding whatever the stack had in it, and clip the back Sector to
+		// that. The rect defaults to empty now, so the omission cannot paint
+		// garbage; this is the loud half, so a missing arm says so at the
+		// frame it lands on instead of drawing a Door with no leaves and no
+		// reveal. The style is reported by value, because this arm is only
+		// ever reached by a style this file does not name (#1068).
+		throw std::logic_error("Door opening style #"
+			+ std::to_string(static_cast<int>(door->getOpenStyle()))
+			+ " has no leaf plan in planDoorLeaves");
 	}
 
 	return plan;

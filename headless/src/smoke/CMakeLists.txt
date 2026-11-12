@@ -618,6 +618,7 @@ pf_add_smoke_module(pf-smoke-render
         render/DoorOpenApart.cpp
         render/DoorOpenLeft.cpp
         render/DoorOpenRight.cpp
+        render/UnplannedDoorStyle.cpp
         render/BrokenExtensibles.cpp
         render/BrokenEscalators.cpp
         render/BrokenLifts.cpp

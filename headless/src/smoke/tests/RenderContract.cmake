@@ -302,6 +302,10 @@ set(names
     doorOpenRightVisibleEdgeStartsAtTheJambOneWide
     doorOpenRightVisibleEdgeStartsAtTheJambTwoWide
     doorOpenRightFullyOpenClearsBothJambsOneWide
+    doorLeafPlan/anUnplannedStyleRefusesToDraw
+    doorLeafPlan/anUnplannedStylePaintsNothingBeforeRefusing
+    doorLeafPlan/aClosedDoorRevealsNothingOnEveryStyle
+    doorLeafPlan/aPlannedStyleStillDrawsItsLeavesAndReveal
     flatColourRuleNamesFacadeAndBackgroundOnly
     solidPassFillsTheFacadeWithItsOwnColour
     wireframePassOutlinesTheFacadeNeverFills
