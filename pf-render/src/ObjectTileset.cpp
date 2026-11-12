@@ -49,8 +49,13 @@ ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
     auto const variantFamilies = version >= 2
         ? AuthoredVariantFamilies::Derived
         : AuthoredVariantFamilies::Refused;
+    // The name reservation travels with the derivation, not with the key.
+    // A version 2 object file derives families in this very map, so `-Vn`
+    // is spoken for there; a version 1 file derives nothing anywhere, so no
+    // name shape belongs to anything and a legacy custom theme keeps a
+    // `door-V1` it may already be carrying (#1069).
     auto const grid = loadAuthoredTileGrid(root, version >= 2, "object sprite",
-        variantFamilies);
+        variantFamilies, "sprites", version >= 2);
     result.width = grid.width;
     result.height = grid.height;
     result.sprites = grid.tiles;

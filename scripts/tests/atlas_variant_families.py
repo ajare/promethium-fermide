@@ -53,6 +53,23 @@ def refused(spec, tileset: dict, expectation: str) -> str:
     raise SystemExit(f"FAIL: {expectation}: the fixture was accepted")
 
 
+def refused_call(fn, expectation: str) -> str:
+    """The refusal text for a call the rule must not let through.
+
+    The same shape as `refused`, for the readers that are not
+    `derive_sprites` - the overlay map goes through `overlay_sprites` and
+    `all_sprites`, and both have to refuse the same names the derivation
+    does (#1069).
+    """
+    try:
+        fn()
+    except SystemExit as refusal:
+        text = str(refusal)
+        check(text != "", f"{expectation}: the refusal carried no message")
+        return text
+    raise SystemExit(f"FAIL: {expectation}: the fixture was accepted")
+
+
 def sheet(rows: int, sprites: dict) -> dict:
     """A four-column invented sheet, `rows` deep, holding `sprites`."""
     return {
@@ -62,6 +79,22 @@ def sheet(rows: int, sprites: dict) -> dict:
         "tile_size": [TILE_WIDTH, TILE_HEIGHT],
         "sprites": sprites,
     }
+
+
+def overlay_sheet(name: str, base_variants=None) -> dict:
+    """The invented sheet: one `sprites` base and one overlay named `name`.
+
+    The base declares no family unless asked for, so an overlay named
+    `door-V9` collides with nothing that exists - only with the shape the
+    format's derivation reserves (#1069).
+    """
+    fixture = sheet(4, {"door": base(column=0, row=0, variants=base_variants)})
+    fixture["overlays"] = {
+        name: {"cell": [1, 0], "content": [4, 8, 100, 200],
+               "offset": [0.0, -0.075], "drawn_size": [1.0, 0.075],
+               "tintable": True},
+    }
+    return fixture
 
 
 def base(column: int = 1, row: int = 0, variants=None) -> dict:
@@ -146,6 +179,42 @@ collision = sheet(4, {
 text = refused(OBJECT, collision, "an authored `-Vn` name")
 check("door-V1" in text and "reserves" in text,
       f"the refusal does not name the reserved name: {text}")
+
+# The reservation reaches the overlays as well. An overlay derives nothing -
+# a frame is not picked from a swatch strip - but the `-Vn` shape belongs
+# to the derivation this same file runs over `sprites`, so an overlay named
+# `doorframe-room-1r-L0-V1` reads as a family nothing made and the file
+# says nothing is wrong with it. The both-maps collision in `all_sprites`
+# catches only the names some existing family has already derived; `door-V9`
+# collides with nothing at all and is refused by shape alone, which is the
+# half the collision could never reach (#1069).
+for reserved in ("doorframe-room-1r-L0-V1", "room-V1", "door-V9"):
+    check(atlas_new.is_reserved_variant_name(reserved),
+          f"`{reserved}` is not the reserved shape")
+    text = refused_call(lambda name=reserved: atlas_new.all_sprites(
+        OBJECT, overlay_sheet(name)),
+        f"an overlay named `{reserved}`")
+    check(reserved in text and "reserves" in text,
+          f"the overlay name refusal neither names `{reserved}` nor says the "
+          f"shape is reserved: {text}")
+
+# A name merely near the shape is nobody's, and an overlay in a format that
+# derives nothing anywhere is not refused by shape either: the reservation
+# follows the derivation, and where the format has none there is nothing to
+# reserve (#1069).
+for plain in ("doorframe-room-1r-L0", "doorframe-VX", "door-V1x", "door-V"):
+    check(not atlas_new.is_reserved_variant_name(plain),
+          f"`{plain}` is not the reserved shape and must still load")
+    tiles = atlas_new.all_sprites(OBJECT, overlay_sheet(plain))
+    check(plain in tiles, f"an overlay named `{plain}` was not carried")
+
+NO_DERIVATION = atlas_new.AtlasSpec(
+    atlas="LegacyTheme", tileset=OBJECT.tileset,
+    script="generate_object_atlas_new.py", variant_families=False)
+carried = atlas_new.all_sprites(NO_DERIVATION, overlay_sheet("door-V1"))
+check("door-V1" in carried,
+      "an overlay wearing the `-Vn` shape was refused in a format that derives "
+      "nothing anywhere, where no name shape is spoken for")
 
 # The count has to be a whole number. A float, a word or a boolean is not
 # the author stating a count, and deriving from one would either round a

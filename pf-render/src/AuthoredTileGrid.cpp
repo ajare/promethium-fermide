@@ -85,7 +85,9 @@ struct DeclaredFamily
 // derivation produces. A sprite authored under one of those names would
 // collide with whatever the family rule derives, and which of the two won
 // would come down to map order, so the name is refused before anything is
-// derived (#1038).
+// derived (#1038). It is refused in every map of a file that has a
+// derivation anywhere, not only in the map that derives - see
+// `reserveVariantNames` in the header (#1069).
 bool isDerivedVariantName(std::string const& name)
 {
     auto const mark = name.rfind("-V");
@@ -131,7 +133,8 @@ void deriveVariantFamily(DeclaredFamily const& family,
 
 AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
     bool declaresRenderSemantics, std::string const& tileNoun,
-    AuthoredVariantFamilies variantFamilies, std::string const& spritesKey)
+    AuthoredVariantFamilies variantFamilies, std::string const& spritesKey,
+    bool reserveVariantNames)
 {
     AuthoredTileGrid grid;
     grid.width = root["size"][0].as<int>();
@@ -186,8 +189,14 @@ AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
             throw std::runtime_error(tileNoun + " is outside its cell");
         r.x += column * tw; r.y += row * th;
         auto const name = item.first.as<std::string>();
-        if (variantFamilies == AuthoredVariantFamilies::Derived
-            && isDerivedVariantName(name))
+        // The reservation is asked on its own, not off `variantFamilies`.
+        // This map may derive nothing at all and still sit in a file that
+        // derives, and the shape belongs to the derivation either way: an
+        // authored `-Vn` here reads as a family nothing made, and would be
+        // the name a later family's derivation reaches (#1069). Where the
+        // caller says no derivation exists anywhere in the format - the
+        // version 1 object file - the shape is nobody's and is not refused.
+        if (reserveVariantNames && isDerivedVariantName(name))
             throw std::runtime_error(tileNoun + " '" + name + "' uses a name the "
                 "variant derivation reserves; a family's variants are derived "
                 "from its base and are not authored beside it");

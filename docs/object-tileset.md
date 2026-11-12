@@ -113,7 +113,11 @@ What the format refuses, at load:
   give. A hand-authored `door-V1` would collide with the derived tile, and which
   of the two won would come down to file order. The reservation covers the whole
   `-Vn` shape rather than only the cells one family happens to occupy, because a
-  second family could be declared beside it in the next edit.
+  second family could be declared beside it in the next edit. It follows the
+  derivation rather than the map being read, so it holds for the overlays of a
+  sector file that derives in its other map as much as it does here - and it does
+  not reach the version 1 format below, which derives nothing anywhere and so
+  speaks for no name shape at all (#1069).
 - **`variants` in the version 1 object format.** A version 1 tile authors no
   render semantics at all - its drawn size is whatever its content rectangle
   measures over the grid - so a family stacked beneath such a base is a family

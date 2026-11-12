@@ -250,6 +250,20 @@ namespace
 	}
 
 
+	// The same version 1 sheet with one extra sprite wearing a `-Vn` name,
+	// in the one cell of the invented grid the complete set leaves empty.
+	// Nothing in a version 1 file derives a family - the key is refused -
+	// so no name shape is spoken for there, and a legacy custom theme that
+	// carries a `door-V1` carries it legitimately (#1069).
+	std::string v1SheetWithADerivedShapeName()
+	{
+		return v1SheetWithVariants(false)
+			+ "  door-V1:\n"
+			  "    cell: [5, 2]\n"
+			  "    content: [0, 0, 32, 40]\n"
+			  "    tintable: true\n";
+	}
+
 	AuthoredSprite& find(std::vector<AuthoredSprite>& sprites, std::string const& name)
 	{
 		for (auto& sprite : sprites)
@@ -666,6 +680,23 @@ namespace
 			"The version 1 fixture stopped loading once the `variants` key was "
 			"taken out of it: " + without);
 	}
+
+	// The version 1 object format has no derivation anywhere, so the `-Vn`
+	// shape belongs to nothing in it and is not reserved. The reservation
+	// travels with the derivation, not with the shape on its own: hoisting
+	// it out unconditionally would have refused a legacy custom theme that
+	// was never in the derivation's way (#1069).
+	void theVersionOneObjectFormatReservesNoVariantNames(
+		smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const reason = rawRefusal(context, "v1-derived-shape-name",
+			v1SheetWithADerivedShapeName());
+		require(reason.empty(),
+			"A version 1 object sprite wearing a `-Vn` name was refused, though "
+			"the version 1 format derives no family anywhere and reserves no "
+			"name shape: " + reason);
+	}
 }
 
 void render_smoke::registerObjectAtlas(std::vector<smoke::Check>& checks)
@@ -696,4 +727,6 @@ void render_smoke::registerObjectAtlas(std::vector<smoke::Check>& checks)
 		isolated<aFamilyThatRunsPastTheSheetIsRefused> });
 	checks.push_back({ "objectAtlas/theVersionOneObjectFormatRefusesVariantFamilies",
 		isolated<theVersionOneObjectFormatRefusesVariantFamilies> });
+	checks.push_back({ "objectAtlas/theVersionOneObjectFormatReservesNoVariantNames",
+		isolated<theVersionOneObjectFormatReservesNoVariantNames> });
 }

@@ -38,6 +38,15 @@
 // and stepping them down the base's column is the grid's arithmetic, not the
 // atlas's, so every format that takes the capability gets the same rule and
 // the same refusals rather than one copy per loader (#1053).
+//
+// What this flag says is only "this map derives no family column". It is
+// not also a statement about the `-Vn` *name*, and reading it as one left
+// the two answers welded together: the sector overlays map takes `Refused`
+// because overlays derive nothing, which switched the name reservation off
+// with them, and an overlay authored as `doorframe-room-1r-L0-V1` loaded
+// without complaint in a file whose very other map derives families
+// (#1069). The reservation is a separate question, asked by
+// `reserveVariantNames` below.
 enum class AuthoredVariantFamilies
 {
     // The key is not part of this format. A sprite carrying it is refused.
@@ -79,8 +88,26 @@ struct AuthoredTileGrid
 // 2 sector file may leave `overlays` out entirely, or stub it with no
 // entries - has to settle that shape question before calling, because the
 // grid has no notion of an optional map (#1066).
+//
+// `reserveVariantNames` says whether the `-Vn` shape is refused in this
+// map, which is a different question from whether this map derives, and
+// one the same flag used to answer for both (#1069). The shape belongs to
+// the derivation, so it is reserved wherever a derivation exists anywhere
+// in the file - including in a map that takes part in none of it, which is
+// what the sector overlays are. An overlay named `doorframe-room-1r-L0-V1`
+// reads as a family nothing made, and the file gives no signal that it is
+// wrong; and if a real family is ever declared whose derivation reaches
+// that name, the collision surfaces as a complaint about the derivation
+// rather than about the name the author wrote.
+//
+// It defaults to true because every grid this loader reads today sits in a
+// file that derives somewhere, except the version 1 object format, which
+// passes false: nothing in that file derives a family, so no name shape is
+// spoken for there and a legacy custom theme keeps a `-Vn` name it may
+// already be carrying.
 AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
     bool declaresRenderSemantics, std::string const& tileNoun,
     AuthoredVariantFamilies variantFamilies
         = AuthoredVariantFamilies::Refused,
-    std::string const& spritesKey = "sprites");
+    std::string const& spritesKey = "sprites",
+    bool reserveVariantNames = true);

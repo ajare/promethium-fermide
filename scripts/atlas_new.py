@@ -215,6 +215,14 @@ def overlay_sprites(spec: AtlasSpec, tileset: dict) -> dict:
     picked at all, it is derived from the wall the Door sits in, so a
     family of frames is a choice nobody can make. The key is refused rather
     than ignored, which is the same reason the version 1 formats refuse it.
+
+    An overlay may not be *named* like a derived tile either. `overlays`
+    derives nothing, but the `-Vn` shape belongs to the derivation this
+    same file runs over `sprites`, so an overlay wearing it reads as a
+    family nothing made - and the map-collision check in `all_sprites` only
+    catches the names some existing family happens to reach, not the shape
+    a family declared in the next edit will (#1069). The C++ loader refuses
+    the same shape through the same grid, so the two readers still agree.
     """
     overlays = tileset.get("overlays")
     if overlays is None:
@@ -226,6 +234,11 @@ def overlay_sprites(spec: AtlasSpec, tileset: dict) -> dict:
         if not isinstance(sprite, dict):
             raise SystemExit(f"{spec.tileset}: overlay '{name}' is not a tile "
                             "definition")
+        if spec.variant_families and is_reserved_variant_name(name):
+            raise SystemExit(f"{spec.tileset}: overlay '{name}' uses a name the "
+                            "variant derivation reserves; `-Vn` belongs to the "
+                            "families this file's `sprites` map derives, and an "
+                            "overlay wearing it reads as a family nothing made")
         if "variants" in sprite:
             raise SystemExit(f"{spec.tileset}: overlay '{name}' declares "
                             "`variants`, which an overlay does not derive; a "
@@ -242,11 +255,14 @@ def all_sprites(spec: AtlasSpec, tileset: dict) -> dict:
     both maps is refused rather than resolved by precedence: two tiles in
     one atlas under one name means whichever the loader happens to find, and
     a frame drawing as a surface, or the other way round, is not a thing an
-    author should be able to author. It also covers the case of an overlay
-    wearing a derived variant's name - `room-V1` is already in the map by
-    the time the overlay is offered, and the collision is the refusal, so
-    no separate reserved-name rule is needed here for the overlays and the
-    C++ loader refuses the same way through the same check (#1054).
+    author should be able to author.
+
+    The map-collision check catches an overlay wearing a name some existing
+    family has already derived - `room-V1` is in the map by the time the
+    overlay is offered. It does not catch the `-Vn` *shape*, which is
+    reserved whether or not a family has reached this particular name yet,
+    and that half is refused in `overlay_sprites` rather than left to
+    whatever the next declared family happens to collide with (#1069).
     """
     tiles = derive_sprites(spec, tileset)
     for name, sprite in overlay_sprites(spec, tileset).items():

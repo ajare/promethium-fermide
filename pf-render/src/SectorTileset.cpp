@@ -122,8 +122,17 @@ SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
     auto const overlays = root["overlays"];
     if (overlays.IsDefined() && !overlays.IsNull())
     {
+        // The overlays derive nothing, and the `-Vn` shape is still the
+        // derivation's, because the derivation exists - in this same
+        // file's `sprites` map. `variantFamilies` says only that this map
+        // grows no family column; `reserveVariantNames` is asked
+        // separately, so an overlay authored as `doorframe-room-1r-L0-V1`
+        // is refused rather than reading as a family nothing made, and a
+        // family declared later cannot be stopped by a name an author had
+        // already written (#1069).
         auto const overlayGrid = loadAuthoredTileGrid(root, true,
-            "sector overlay", AuthoredVariantFamilies::Refused, "overlays");
+            "sector overlay", AuthoredVariantFamilies::Refused, "overlays",
+            true);
         if (overlayGrid.width != grid.width || overlayGrid.height != grid.height)
             throw std::runtime_error("A sector tileset's overlays are authored "
                 "on the same sheet as its surfaces ('" + path.filename().string()

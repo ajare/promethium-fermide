@@ -534,8 +534,16 @@ What the loader refuses:
 - **A name authored in both maps.** Which kind the draw found it in would
   come down to lookup order, and a frame drawing as a wall - or a wall
   drawing as a frame - is not a thing two maps should be left to settle.
-  This catches an overlay wearing a derived variant's name too, since the
-  derived tiles are already in the surface map by then.
+- **A `-Vn` name on an overlay.** The overlays derive nothing, and the
+  `-Vn` shape is still the derivation's, because the derivation exists -
+  in this same file's `sprites` map. An overlay authored as
+  `doorframe-room-1r-L0-V1` reads as a family nothing made, and the file
+  gives no signal that it is wrong; and if a real family is declared later
+  whose derivation reaches that name, the collision surfaces as a complaint
+  about the derivation rather than about the name the author wrote. The
+  both-maps collision above catches the names an existing family has already
+  derived; this catches the shape, whether or not anything has reached it
+  yet (#1069).
 - **`variants` on an overlay.** A surface's variants are different
   pictures of the same thing, picked from a swatch strip. A frame is not
   picked at all - it is derived from the Door standing in the wall - so a
@@ -698,6 +706,17 @@ the grid is what establishes that the declared count has room to stand on the
 declared sheet. Each loader keeps the count with the base that stated it, so a
 caller can ask what was declared rather than infer it from what happened to be
 present.
+
+The `-Vn` name reservation is a separate parameter (`reserveVariantNames`),
+because `Refused` answers only "does this map grow a family column" and says
+nothing about who owns the name shape. Reading one flag as both answers left the
+reservation switched off wherever the derivation was switched off, so the sector
+overlays - which derive nothing, in a file whose other map derives everything -
+loaded an overlay named `doorframe-room-1r-L0-V1` without complaint (#1069).
+The shape is reserved wherever a derivation exists anywhere in the format, so the
+overlays read with the reservation on and the version 1 object format, which
+derives nothing anywhere, reads with it off: no name is spoken for in that file,
+and a legacy custom theme keeps a `door-V1` it may already be carrying.
 
 CMake copies both assets beside each executable under `textures/`, including
 on builds with no C++ changes. Startup resolves that directory relative to the

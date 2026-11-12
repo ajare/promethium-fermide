@@ -1060,6 +1060,50 @@ namespace
 			"The refusal did not name the `variants` key: " + refusal);
 	}
 
+	// The `-Vn` shape belongs to the derivation, and the derivation exists
+	// in this file whether or not the map being read takes part in it. The
+	// overlays derive nothing, and the flag that turned the family column
+	// off turned the name reservation off with it, so an overlay authored as
+	// `doorframe-room-1r-L0-V1` loaded clean: a family nothing made, with
+	// nothing in the file saying so. The reservation is asked separately now,
+	// so the shape is refused in every map of a file that derives anywhere
+	// (#1069).
+	//
+	// The fixture's ten surfaces declare no family at all, so nothing in
+	// these files derives a single `-Vn` tile: every refusal below is about
+	// the shape the name has, not about a tile it collided with. That is the
+	// half the both-maps collision could never reach - a `-Vn` no current
+	// family derives is still the shape the next family's declaration will.
+	void loaderRefusesAnOverlayNamedLikeADerivedVariant(
+		smoke::Context const& context)
+	{
+		using smoke::require;
+		for (std::string const name : { "doorframe-room-1r-L0-V1",
+				"doorframe-corridor-2t-R0-V12", "room-V1", "frame-V0" })
+		{
+			auto const refusal = loadRefusal(context, "overlay-" + name,
+				overlayTilesetYaml(name));
+			require(refusal.find(name) != std::string::npos
+					&& refusal.find("reserves") != std::string::npos,
+				"An overlay named '" + name + "' was accepted, though `-Vn` is "
+				"the derivation's shape: " + refusal);
+			require(refusal.find("sector overlay") != std::string::npos,
+				"The refusal of '" + name + "' does not say which kind of tile it "
+				"refused: " + refusal);
+		}
+		// A name merely near the shape is nobody's. The reservation is `-V`
+		// followed by digits and nothing else, and widening it would refuse
+		// frames that have always loaded.
+		for (std::string const name : { "doorframe-room-1r-L0", "doorframe-VX",
+				"doorframe-room-1r-L0-V1x", "doorframe--V" })
+		{
+			require(loadRefusal(context, "overlay-" + name,
+					overlayTilesetYaml(name)).empty(),
+				"An overlay named '" + name + "' was refused though it does not "
+				"have the reserved shape");
+		}
+	}
+
 	// The install routes a `boundary-` prefix to the boundary map before
 	// it looks at anything else, so an overlay wearing that prefix would
 	// arrive as edge artwork nobody asked for.
@@ -1425,6 +1469,9 @@ void render_smoke::registerSectorAtlas(std::vector<smoke::Check>& checks)
 		isolated<loaderRefusesAnOverlayThatIsAlsoASurface> });
 	checks.push_back({ "sectorAtlasNew/loaderRefusesVariantsOnAnOverlay",
 		isolated<loaderRefusesVariantsOnAnOverlay> });
+	checks.push_back({
+		"sectorAtlasNew/loaderRefusesAnOverlayNamedLikeADerivedVariant",
+		isolated<loaderRefusesAnOverlayNamedLikeADerivedVariant> });
 	checks.push_back({
 		"sectorAtlasNew/loaderRefusesAnOverlayWearingTheBoundaryPrefix",
 		isolated<loaderRefusesAnOverlayWearingTheBoundaryPrefix> });

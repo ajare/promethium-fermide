@@ -62,6 +62,7 @@ set(names
     objectAtlas/aNegativeVariantCountIsRefused
     objectAtlas/aFamilyThatRunsPastTheSheetIsRefused
     objectAtlas/theVersionOneObjectFormatRefusesVariantFamilies
+    objectAtlas/theVersionOneObjectFormatReservesNoVariantNames
     furnitureAtlasNew/tenRoleTilesAreRegisteredAtFullCellSize
     furnitureAtlasNew/sofaRendersFromItsRoleTiles
     furnitureAtlasNew/fourCellSofaReusesTheMiddleTile
@@ -92,6 +93,7 @@ set(names
     sectorAtlasNew/loaderRefusesABoundaryStripInTheNewSet
     sectorAtlasNew/loaderRefusesAnOverlayThatIsAlsoASurface
     sectorAtlasNew/loaderRefusesVariantsOnAnOverlay
+    sectorAtlasNew/loaderRefusesAnOverlayNamedLikeADerivedVariant
     sectorAtlasNew/loaderRefusesAnOverlayWearingTheBoundaryPrefix
     sectorAtlasNew/loaderReadsOverlaysApartFromSurfaces
     sectorAtlasNew/loaderReadsEveryEmptyShapeOfOverlaysAsNoOverlays
