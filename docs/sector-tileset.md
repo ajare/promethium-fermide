@@ -730,7 +730,7 @@ overlays:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    hole: [13, 224, 102, 96]
+    hole: [13, 160, 102, 160]
   windowframe-MS:
     cell: [15, 2]
     content: [0, 0, 128, 320]
@@ -748,19 +748,19 @@ overlays:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    hole: [13, 224, 115, 96]
+    hole: [13, 160, 115, 160]
   windowframe-TM:
     cell: [17, 1]
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    hole: [0, 224, 128, 96]
+    hole: [0, 160, 128, 160]
   windowframe-TR:
     cell: [18, 1]
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    hole: [0, 224, 115, 96]
+    hole: [0, 160, 115, 160]
   windowframe-ML:
     cell: [16, 2]
     content: [0, 0, 128, 320]
@@ -884,27 +884,29 @@ tile shows.
 
 The tall column is what the vertical axis is for, and it says the same
 thing the wide row says, turned through a right angle. A Window's glass
-stands **0.2 of a level above the span's floor line** and grows **0.3 of a
-level for every level past the first**, so its top sits 0.7 of a level
-below the span's own top however tall the span gets. The stand-off belongs
-to the **ends of the span**, not to the top of every cell:
+stands **0.2 of a level above the span's floor line**, is 0.3 of a level
+tall on its first level and a whole level taller for every level past it,
+so its top sits **0.5 of a level below the span's own top** however tall
+the span gets. The stand-off belongs to the **ends of the span**, not to
+the top of every cell:
 
 | Role | The glass in its cell | Hole on the 320px cell |
 | ---- | ------------------- | -------------------- |
 | `S` | inset 0.2 at the bottom, stopping 0.5 above the floor line | `y 160 .. 256` |
 | `B` | standing 0.2 above the floor line and carrying on past the cell's top edge | `y 0 .. 256` |
 | `M` | running straight through, inset nowhere inside the cell | `y 0 .. 320` |
-| `T` | from the cell's own bottom edge up to where the span's glass stops | `y 224 .. 320` |
+| `T` | from the cell's own bottom edge up to where the span's glass stops | `y 160 .. 320` |
 
 The bottom cell's hole **stops above the cell's floor line where the glass
 does** - that 0.2 is the sill - and carries on up to the cell's own top
 edge. The top cell's hole **reaches the cell's bottom edge** where the
-glass runs down into it, and stops 0.3 of a level up. The two therefore
-join into **one continuous aperture across the cell boundary**, with a
-sill under the whole opening and a head over it and nothing lying across
-the seam. A `BS` hole that ran down to the floor would cut the sill out of
-the wall; a `TS` hole that stopped short of the cell's bottom edge would
-lay a transom of moulding across the glass.
+glass runs down into it, and stops 0.5 of a level up - the same image row
+the single-level `S` band holes at, so the two roles differ **only at the
+bottom**. The two therefore join into **one continuous aperture across the
+cell boundary**, with a sill under the whole opening and a head over it
+and nothing lying across the seam. A `BS` hole that ran down to the floor
+would cut the sill out of the wall; a `TS` hole that stopped short of the
+cell's bottom edge would lay a transom of moulding across the glass.
 
 A level that is neither end of the span wears `windowframe-MS`, whose hole
 is the **whole height of the cell**: jambs only, and **no head and no
@@ -915,15 +917,15 @@ cell of the stack says something different about where it is.
 Each of the three is constant per role however big the span gets, which is
 what lets one tile cover any tall window: `BS` is always 256px of hole
 over 64px of sill, `MS` is always the whole 320px cell, `TS` is always a
-96px hole against the cell's bottom edge. The number of cells stacked
+160px hole against the cell's bottom edge. The number of cells stacked
 between the ends is the only thing that changes, and that is the span's
 business and not the tile's.
 
 The joined holes are checked against the joined span the same way the wide
-row's are: a 2-level span's glass rect is `v[0.2, 1.3]` above the span's
-floor line and a 3-level span's is `v[0.2, 2.3]`, each rounded down at
+row's are: a 2-level span's glass rect is `v[0.2, 1.5]` above the span's
+floor line and a 3-level span's is `v[0.2, 2.5]`, each rounded down at
 both ends, and the sum of the cells' hole heights has to come to exactly
-that - 352px and 672px. `BS` plus `TS` and `BS` plus `MS` plus `TS` are
+that - 416px and 736px. `BS` plus `TS` and `BS` plus `MS` plus `TS` are
 checked as columns and not only tile by tile, because a hole that stopped
 short of the seam and one that overshot it are both wrong in a way no
 single tile shows.
@@ -944,9 +946,9 @@ cell's top and right edges because the glass carries on past both.
 | `BR` | sill + right jamb | `x 0..115`, `y 0..256` |
 | `ML` | left jamb only | `x 13..128`, `y 0..320` |
 | `MR` | right jamb only | `x 0..115`, `y 0..320` |
-| `TL` | head + left jamb | `x 13..128`, `y 224..320` |
-| `TM` | head only | `x 0..128`, `y 224..320` |
-| `TR` | head + right jamb | `x 0..115`, `y 224..320` |
+| `TL` | head + left jamb | `x 13..128`, `y 160..320` |
+| `TM` | head only | `x 0..128`, `y 160..320` |
+| `TR` | head + right jamb | `x 0..115`, `y 160..320` |
 
 What carrying two mouldings does **not** do is move the hole off the seam
 on the sides that face into the span. A `BL` that stopped short of its own
@@ -956,7 +958,7 @@ vertical moulding inside the opening at the join with `BM`. Neither is
 visible in the corner tile on its own, which is why the corners are
 checked as the joined rect of the whole span: the bottom row of a 2x2
 has to join to the same 230px the single-level wide row joins to, and
-the left column of a 3x3 to the same 672px the single-column tall span
+the left column of a 3x3 to the same 736px the single-column tall span
 makes, because the span's insets are the same on every row and column and
 only the band differs.
 
@@ -1029,11 +1031,12 @@ And it gives the tall column its numbers the same way, with the vertical
 span read from the part of the opening that falls in that cell rather than
 from the cell's own edges: `BS` runs 0 to 256 because the glass stands
 0.2 above the floor line and carries on past the cell's top edge, `TS`
-runs 224 to 320 because the glass reaches down to the cell's own bottom
-edge and stops 0.3 of a level up, and `MS` runs 0 to 320 because nothing
-is inset inside the middle of a span at all. The horizontal band is the
-same 13..115 for every tile of the column, which is what makes the joined
-aperture rectangular up the span.
+runs 160 to 320 because the glass reaches down to the cell's own bottom
+edge and stops 0.5 of a level up - the same top the single-level band has
+- and `MS` runs 0 to 320 because nothing is inset inside the middle of a
+span at all. The horizontal band is the same 13..115 for every tile of
+the column, which is what makes the joined aperture rectangular up the
+span.
 
 `scripts/tests/windowframe_tiles.py` pins this twice over: once as the
 exact expected value computed from the glass rect, and once as an

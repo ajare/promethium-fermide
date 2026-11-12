@@ -176,6 +176,7 @@ set(names
     windowframeCells/aTwoLevelWindowFramesItsSpanWithAHeadAndASill
     windowframeCells/aThreeLevelWindowFramesItsThreeLevelsBottomToTop
     windowframeCells/theTallOpeningIsOneContinuousAperture
+    windowframeCells/theFrameHoleCoversTheGlassItFrames
     windowframeCells/theTallFrameIsTrimmedAtTheCeiling
     windowframeCells/everyWallFramesATallOpeningTheSameWay
     windowframeCells/aTwoByTwoWindowFramesItsCornersTogether

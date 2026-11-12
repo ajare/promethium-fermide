@@ -49,7 +49,14 @@
 //     above the cell's floor line where the glass does and the top cell's
 //     hole reaches the cell's bottom edge where the glass runs down into
 //     it, so the holes join into one continuous aperture across the cell
-//     boundary;
+//     boundary. The glass tops out 0.5 of a level above the top cell's
+//     floor - the same row the single-level band holes at - and never
+//     0.3, which is the glass's *height* for one level and not its top;
+//   * the hole a frame tile declares covers the glass it frames wherever
+//     the two overlap, so no opaque moulding lies over the pane anywhere
+//     in the span. That is checked off the recorded quads and the glass
+//     rect rather than off a tile name, which is what keeps a tileset edit
+//     from putting the head back over the glass unnoticed (#1080);
 //   * a span that is wide and tall has corners, and a corner is joined and
 //     not butted: the cell that is the span's left end *and* its top
 //     carries the left jamb and the head on one tile, at neither the
@@ -94,7 +101,10 @@
 #include "core/WindowSectorObject.h"
 #include "core/World.h"
 
+#include <yaml-cpp/yaml.h>
+
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <map>
@@ -1476,6 +1486,175 @@ namespace
 				"which puts a bar across the glass at the join: "
 				+ column[level].rect.str() + " and "
 				+ column[level + 1].rect.str());
+	}
+
+	// ------------------------------------------------------------------
+	// The frame's hole against the glass it frames.
+	//
+	// A frame's hole is the only part of it that is not moulding, so the
+	// one thing its artwork cannot get wrong is being smaller than the pane
+	// it is cut for: every pixel of glass the hole misses is a pixel of
+	// opaque moulding laid over the pane. #1080 is exactly that defect -
+	// the four `T` tiles were holed at the glass *height* (0.3 of a level)
+	// rather than at the glass *top* (0.5 of a level above the top cell's
+	// floor), so the head lay over the top 0.2 of a level of glass and read
+	// 0.7 of a cell tall instead of 0.5.
+	//
+	// What pins it is therefore not the tile's name and not a hole value a
+	// test restates: it is the quads the draw actually emitted, each one's
+	// authored hole read out of the shipped tileset and mapped through the
+	// UVs that quad sampled, against the glass rect the Window is drawn to.
+	// The rounding rule lets the hole fall short of the glass rect by under
+	// one artwork pixel at each edge - it rounds inward on purpose, so the
+	// moulding never stands inside the pane - and nothing more, which is
+	// what makes a tenth of a pixel of inward rounding pass while a 64px
+	// shortfall cannot.
+	// ------------------------------------------------------------------
+
+	// The authored hole of every overlay in the shipped set, in artwork
+	// pixels from the tile's own top-left. Read off the shipped tileset
+	// rather than restated here, so a tileset edit moves this check with it
+	// instead of being blessed by it.
+	std::map<std::string, std::array<int, 4>> authoredHoles(
+		smoke::Context const& context)
+	{
+		auto const doc = YAML::LoadFile(context.fixture(
+			"resources/textures/sectors-new.tileset.yaml").string());
+		require(doc["overlays"] && doc["overlays"].IsMap(),
+			"The shipped sector tileset carries no `overlays` map to read a "
+			"frame hole out of");
+		std::map<std::string, std::array<int, 4>> holes;
+		for (auto const& entry : doc["overlays"])
+		{
+			auto const hole = entry.second["hole"];
+			if (!hole || !hole.IsSequence() || hole.size() != 4) continue;
+			holes[entry.first.as<std::string>()] = std::array<int, 4>{
+				hole[0].as<int>(), hole[1].as<int>(),
+				hole[2].as<int>(), hole[3].as<int>() };
+		}
+		require(!holes.empty(), "No shipped overlay declares a `hole`, so a "
+			"drawn frame would have nothing to be checked against");
+		return holes;
+	}
+
+	// The screen rect one frame quad's authored hole lands on.
+	//
+	// Mapped through the UVs the quad actually sampled rather than through
+	// the cell it was asked to fill. The draw insets a tile's sampled range
+	// by half a texel at each edge and crops a trimmed top row by starting
+	// the sample partway down the tile, and both of those land in these UVs;
+	// mapping through them puts the hole where the drawn artwork puts it,
+	// which is the only place worth checking.
+	ScreenRect holeScreenRect(DrawnQuad const& q, SectorTileset const& atlas,
+		std::array<int, 4> const& hole)
+	{
+		auto const found = atlas.overlays.find(q.tile);
+		require(found != atlas.overlays.end(), "A frame quad names '" + q.tile
+			+ "', which the installed atlas does not carry as an overlay");
+		auto const& region = found->second;
+		require(atlas.width > 0 && atlas.height > 0 && region.width > 1
+				&& region.height > 1,
+			"The installed frame region is too small to map a hole through");
+		auto const w = float(atlas.width), h = float(atlas.height);
+		// Undo the half-texel inset to get back to the 0..1 fraction of
+		// *this tile* each recorded UV sits at.
+		auto const tileU = [&](float uv)
+		{
+			return (uv * w - (float(region.x) + 0.5f)) / float(region.width - 1);
+		};
+		auto const tileV = [&](float vv)
+		{
+			return (vv * h - (float(region.y) + 0.5f)) / float(region.height - 1);
+		};
+		auto const u0 = tileU(q.u0), u1 = tileU(q.u1);
+		auto const v0 = tileV(q.v0), v1 = tileV(q.v1);
+		require(u1 > u0 && v1 > v0, "A '" + q.tile
+			+ "' frame quad sampled no range of its tile, so its hole cannot be "
+			"placed anywhere");
+		auto const sx = (q.rect.right - q.rect.left) / (u1 - u0);
+		auto const sy = (q.rect.bottom - q.rect.top) / (v1 - v0);
+		auto const map = [&](float fu, float fv)
+		{
+			return pf::render::Vec2{ q.rect.left + (fu - u0) * sx,
+				q.rect.top + (fv - v0) * sy };
+		};
+		ScreenRect rect;
+		rect.include(map(float(hole[0]) / float(region.width),
+			float(hole[1]) / float(region.height)));
+		rect.include(map(float(hole[0] + hole[2]) / float(region.width),
+			float(hole[1] + hole[3]) / float(region.height)));
+		return rect;
+	}
+
+	// Requires that no moulding of any frame quad in the pass lies over
+	// glass. Each quad is checked against the part of the glass rect it
+	// covers at all: glass outside that quad's own rect belongs to whichever
+	// quad covers it, or to no frame, and is that quad's business.
+	void requireNoMouldingOverGlass(Pass const& pass, SectorTileset const& atlas,
+		std::map<std::string, std::array<int, 4>> const& holes,
+		ScreenRect const& glass, std::string const& label)
+	{
+		auto const frames = pass.frameCells();
+		require(!frames.empty(), label + " drew no frame to check");
+		// The hole is rounded inward on every edge, so it may fall short of
+		// the glass by under one artwork pixel per edge. Every fixture here
+		// pins the zoom at 1, where one artwork pixel is one screen pixel.
+		float const roundingSlack = 1.0f;
+		size_t covering{};
+		for (auto const& q : frames)
+		{
+			auto const found = holes.find(q.tile);
+			require(found != holes.end(), "A frame quad names '" + q.tile
+				+ "', which the shipped tileset declares no hole for");
+			ScreenRect covered;
+			covered.left = std::max(glass.left, q.rect.left);
+			covered.right = std::min(glass.right, q.rect.right);
+			covered.top = std::max(glass.top, q.rect.top);
+			covered.bottom = std::min(glass.bottom, q.rect.bottom);
+			if (covered.left >= covered.right || covered.top >= covered.bottom)
+				continue;
+			++covering;
+			auto const hole = holeScreenRect(q, atlas, found->second);
+			require(hole.left <= covered.left + roundingSlack
+					&& hole.right >= covered.right - roundingSlack
+					&& hole.top <= covered.top + roundingSlack
+					&& hole.bottom >= covered.bottom - roundingSlack,
+				label + ": the '" + q.tile + "' frame lays moulding over glass - "
+					"the glass it covers spans " + covered.str()
+					+ " and its hole only " + hole.str());
+		}
+		require(covering > 0, label + " put no frame quad over any glass, so "
+			"there was nothing here to check");
+	}
+
+	// The frame's hole covers the glass it frames in every cell of the
+	// span, for every shape of span the role grid answers: the 1x1, the wide
+	// row, the tall column and the cornered span. The tall column is where
+	// the defect lived, and the cornered span is where the same dropped 0.2
+	// would hide a second time on the `TL`/`TM`/`TR` row.
+	void theFrameHoleCoversTheGlassItFrames(smoke::Context const& context)
+	{
+		auto const holes = authoredHoles(context);
+		auto atlas = installAtlas(true);
+		struct Span
+		{
+			std::string label;
+			Scene scene;
+		};
+		std::vector<Span> spans{
+			{ "a 1x1 opening", roomScene() },
+			{ "a 2-cell wide opening", wideRoomScene(2) },
+			{ "a 2-level tall opening", tallRoomScene(2) },
+			{ "a 3-level tall opening", tallRoomScene(3) },
+			{ "a 3x3 cornered opening", squareRoomScene(3, 3) } };
+		for (auto& span : spans)
+		{
+			span.scene.refresh();
+			require(span.scene.window != nullptr, span.label
+				+ " has no Window to frame");
+			requireNoMouldingOverGlass(recordPass(span.scene.front, atlas),
+				atlas, holes, glassRect(*span.scene.window), span.label);
+		}
 	}
 
 	// The tall frame is trimmed at the ceiling too. A Room stands 0.9 of a
@@ -3206,6 +3385,8 @@ void render_smoke::registerWindowframeCells(std::vector<smoke::Check>& checks)
 		isolated<aThreeLevelWindowFramesItsThreeLevelsBottomToTop> });
 	checks.push_back({ "windowframeCells/theTallOpeningIsOneContinuousAperture",
 		isolated<theTallOpeningIsOneContinuousAperture> });
+	checks.push_back({ "windowframeCells/theFrameHoleCoversTheGlassItFrames",
+		isolated<theFrameHoleCoversTheGlassItFrames> });
 	checks.push_back({ "windowframeCells/theTallFrameIsTrimmedAtTheCeiling",
 		isolated<theTallFrameIsTrimmedAtTheCeiling> });
 	checks.push_back({ "windowframeCells/everyWallFramesATallOpeningTheSameWay",

@@ -162,10 +162,10 @@
 # The hole is rounded down from the glass rect the frame frames - the
 # same rule the doorframes use, for the same reason. A Window's glass is
 # inset 0.1 at each end of its span, stands 0.2 above the span's floor
-# line and is 0.3 of a level tall, all of it constant per role however
-# big the span gets. On a 128 x 320 cell that rounds down to x 13, width
-# 102, y 160, height 96 - inset inward on every edge, so the moulding
-# never stands inside the pane.
+# line and is 0.3 of a level tall on its first level, all of it constant
+# per role however big the span gets. On a single level of a 128 x 320
+# cell that rounds down to x 13, width 102, y 160, height 96 - inset
+# inward on every edge, so the moulding never stands inside the pane.
 #
 # The inset belongs to the *ends of the span*, not to every cell, and
 # that is what the wide row says. A 2-wide span's glass runs from 0.1 of
@@ -179,13 +179,14 @@
 # of each end, because that is the only place the wall stops.
 #
 # The tall column says the same thing up the other axis. A Window's glass
-# stands 0.2 of a level above the *span's* floor line and is 0.3 of a
-# level taller for every level past the first, so its top sits 0.7 of a
-# level below the span's own top however tall the span gets. The inset is
-# at the ends of the span, not at the top of each cell: the bottom cell
-# carries the glass from its own 0.2 up to its own top edge, the top
-# cell carries it from its own bottom edge up to 0.3, and every cell in
-# between carries the whole cell height. The bottom cell's hole therefore
+# stands 0.2 of a level above the *span's* floor line, is 0.3 of a level
+# tall on its first level and a whole level taller for every level past
+# it, so its top sits 0.5 of a level below the span's own top however
+# tall the span gets. The inset is at the ends of the span, not at the
+# top of each cell: the bottom cell carries the glass from its own 0.2 up
+# to its own top edge, the top cell carries it from its own bottom edge
+# up to 0.5 above that cell's own floor line, and every cell in between
+# carries the whole cell height. The bottom cell's hole therefore
 # stops above the floor line exactly where the glass does - that 0.2 is
 # the sill - and the top cell's hole reaches the cell's bottom edge where
 # the glass runs down into it, so the two holes join into one continuous
@@ -198,7 +199,7 @@
 # Each of the three is still constant per role however big the span gets,
 # which is what lets one tile cover any tall window: `BS` is always 256px
 # of hole with 64px of sill under it, `MS` is always the whole 320px
-# cell, `TS` is always a 96px hole against the cell's bottom edge. The
+# cell, `TS` is always a 160px hole against the cell's bottom edge. The
 # number of cells stacked between them is the only thing that changes, and
 # that is the span's business and not the tile's.
 #
@@ -466,15 +467,19 @@ overlays:
     # The block's single-column, top cell: the top cell of a tall
     # single-column Window. The span's vertical inset is at the span's
     # ends, so this cell carries the glass from its own bottom edge up to
-    # 0.3 of a level - the head moulding sits over the glass and nothing
-    # is inset at the seam below.
+    # 0.5 of a level above that floor line - the head moulding sits over
+    # the glass above that and nothing is inset at the seam below.
     cell: [15, 1]
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    # u[0.1,0.9], v[0.0,0.3]: inset at each end of the column, and from
-    # the cell's own bottom edge up to where the span's glass stops.
-    hole: [13, 224, 102, 96]
+    # u[0.1,0.9], v[0.0,0.5]: inset at each end of the column, and from
+    # the cell's own bottom edge up to where the span's glass stops, 0.5
+    # of a level above this cell's floor line. Same top as `SS`, and the
+    # two differ only at the bottom: `SS` stops at the 0.2 sill band, `TS`
+    # runs on to the cell's bottom edge where the glass continues from the
+    # level below.
+    hole: [13, 160, 102, 160]
   windowframe-MS:
     # The block's single-column, middle cell: a level of a tall
     # single-column Window that is neither end of the span. Nothing is
@@ -509,8 +514,9 @@ overlays:
   # the jamb and the head meet on the hole's corner instead of one of them
   # stopping short and leaving the other to be seen end-on. Each is the
   # same inset it has on its own axis - 0.1 at the span's left and right
-  # ends, 0.2 above the span's floor line, 0.3 down from where the glass
-  # tops out - and neither is doubled because the other is there as well.
+  # ends, 0.2 above the span's floor line, and the glass top 0.5 of a
+  # level below the span's own top - and neither is doubled because the
+  # other is there as well.
   windowframe-TL:
     # The block's left-column, top cell: the top-left corner of a span
     # that is wide and tall. The jamb runs down the span's left end and
@@ -521,10 +527,10 @@ overlays:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    # u[0.1,1.0], v[0.0,0.3]: inset at the span's left end, stopped
-    # 0.3 above this cell's floor line, and running to the seam on both
-    # other sides.
-    hole: [13, 224, 115, 96]
+    # u[0.1,1.0], v[0.0,0.5]: inset at the span's left end, stopped at
+    # the glass top 0.5 above this cell's floor line, and running to the
+    # seam on both other sides.
+    hole: [13, 160, 115, 160]
   windowframe-TM:
     # The block's middle-column, top cell: the head of a wide tall span
     # with no jamb in it. Nothing is inset horizontally inside a middle
@@ -535,9 +541,9 @@ overlays:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    # u[0.0,1.0], v[0.0,0.3]: the whole cell width, stopped 0.3 above
-    # this cell's floor line.
-    hole: [0, 224, 128, 96]
+    # u[0.0,1.0], v[0.0,0.5]: the whole cell width, stopped at the glass
+    # top 0.5 above this cell's floor line.
+    hole: [0, 160, 128, 160]
   windowframe-TR:
     # The block's right-column, top cell: the top-right corner, the
     # mirror of `windowframe-TL` across the vertical axis.
@@ -545,9 +551,10 @@ overlays:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    # u[0.0,0.9], v[0.0,0.3]: from the cell's left edge, inset at the
-    # span's right end, stopped 0.3 above this cell's floor line.
-    hole: [0, 224, 115, 96]
+    # u[0.0,0.9], v[0.0,0.5]: from the cell's left edge, inset at the
+    # span's right end, stopped at the glass top 0.5 above this cell's
+    # floor line.
+    hole: [0, 160, 115, 160]
   windowframe-ML:
     # The block's left-column, middle cell: a level of a wide tall span
     # that is neither the top nor the bottom of it, at the span's left

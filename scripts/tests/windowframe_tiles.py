@@ -41,19 +41,22 @@ vertical moulding in the middle.
 
 The tall column says the same thing up the other axis, and it is checked
 the same two ways - tile by tile, and then joined. A Window's glass stands
-0.2 of a level above the *span's* floor line and grows 0.3 of a level for
-every level past the first, so its top sits 0.7 of a level below the
-span's top however tall the span gets. The bottom cell carries the glass
-from its own 0.2 up to its own top edge; the top cell carries it from its
-own bottom edge up to 0.3; every cell between carries the whole cell
-height. So the bottom cell's hole stops above the floor line exactly where
-the glass does - that 0.2 is the sill - and the top cell's hole reaches
-the cell's bottom edge where the glass runs down into it, and the holes
-join into one continuous aperture across the cell boundary. A `BS` hole
-that ran down to the floor would cut the sill out of the wall; a `TS` hole
-that stopped short of the cell's bottom edge would lay a transom of
-moulding across the glass; an `MS` hole that missed any of the cell would
-put a head or a sill in the middle of a span that has neither.
+0.2 of a level above the *span's* floor line, is 0.3 of a level tall on
+its first level and a whole level taller for every level past it, so its
+top sits 0.5 of a level below the span's top however tall the span gets.
+The bottom cell carries the glass from its own 0.2 up to its own top
+edge; the top cell carries it from its own bottom edge up to 0.5 above
+that cell's own floor line - the same image row the single-level `S` row
+holes at, the two roles differing only at the bottom; every cell between
+carries the whole cell height. So the bottom cell's hole stops above the
+floor line exactly where the glass does - that 0.2 is the sill - and the
+top cell's hole reaches the cell's bottom edge where the glass runs down
+into it, and the holes join into one continuous aperture across the cell
+boundary. A `BS` hole that ran down to the floor would cut the sill out of
+the wall; a `TS` hole that stopped short of the cell's bottom edge would
+lay a transom of moulding across the glass; an `MS` hole that missed any
+of the cell would put a head or a sill in the middle of a span that has
+neither.
 
 The corners are both axes at once, and they are where the grid closes. A
 cell that is an end of the span in both directions carries its jamb and
@@ -120,14 +123,15 @@ BLOCK_FIRST_COLUMN = 15
 # The frames this set authors, with the glass rect each one frames in
 # World units: the horizontal span across its cell, and the span's bottom
 # and top measured up from its cell's floor line. A Window is inset 0.1 at
-# each end of its *span*, stands 0.2 above the span's floor line and is
-# 0.3 of a level tall, and every one of those is constant per role however
-# big the span gets - which is what lets a fixed tile cover the opening
-# whatever the opening's total size turns out to be. The horizontal span
-# below is therefore the part of the span that falls inside the cell the
-# tile frames: inset at the span's ends, and running edge to edge wherever
-# the cell is not an end. The vertical span is the same read up the other
-# axis: inset at the span's ends, whole wherever the cell is between them.
+# each end of its *span*, stands 0.2 above the span's floor line and tops
+# out 0.5 of a level below the span's own top, and every one of those is
+# constant per role however big the span gets - which is what lets a fixed
+# tile cover the opening whatever the opening's total size turns out to be.
+# The horizontal span below is therefore the part of the span that falls
+# inside the cell the tile frames: inset at the span's ends, and running
+# edge to edge wherever the cell is not an end. The vertical span is the
+# same read up the other axis: inset at the span's ends, whole wherever
+# the cell is between them.
 GLASS_RECTS = {
     # The 1x1 Window: inset on both of its edges, because both are ends.
     "windowframe-SS": (0.1, 0.9, 0.2, 0.5),
@@ -141,9 +145,10 @@ GLASS_RECTS = {
     "windowframe-SR": (0.0, 0.9, 0.2, 0.5),
     # The top cell of a tall single-column span: the span's glass runs
     # down past this cell's bottom edge, so nothing is inset at the seam
-    # below, and it stops 0.3 of a level up - the head moulding lies over
-    # the glass above that.
-    "windowframe-TS": (0.1, 0.9, 0.0, 0.3),
+    # below, and it stops at the glass top - 0.5 of a level above this
+    # cell's own floor line, which is `levelsHigh - 0.5` above the span's.
+    # The head moulding lies over the glass above that.
+    "windowframe-TS": (0.1, 0.9, 0.0, 0.5),
     # A middle level of a tall single-column span: the glass runs straight
     # through, inset nowhere inside the cell, so the hole is the whole cell
     # height and no head or sill crosses the middle of the window.
@@ -159,12 +164,12 @@ GLASS_RECTS = {
     #
     # Top-left: the span's left inset and the head, running to the seam on
     # the right and below.
-    "windowframe-TL": (0.1, 1.0, 0.0, 0.3),
+    "windowframe-TL": (0.1, 1.0, 0.0, 0.5),
     # Top-middle: no horizontal inset at all inside a middle column, so
     # this is the head alone across the full cell width.
-    "windowframe-TM": (0.0, 1.0, 0.0, 0.3),
+    "windowframe-TM": (0.0, 1.0, 0.0, 0.5),
     # Top-right: the mirror of the top-left.
-    "windowframe-TR": (0.0, 0.9, 0.0, 0.3),
+    "windowframe-TR": (0.0, 0.9, 0.0, 0.5),
     # Middle-left: a level that is neither end of the span vertically, at
     # the span's left end - jamb only, the whole cell height.
     "windowframe-ML": (0.1, 1.0, 0.0, 1.0),
@@ -190,12 +195,12 @@ EXPECTED_HOLES = {
     "windowframe-SL": (13, 160, 115, 96),
     "windowframe-SM": (0, 160, 128, 96),
     "windowframe-SR": (0, 160, 115, 96),
-    "windowframe-TS": (13, 224, 102, 96),
+    "windowframe-TS": (13, 160, 102, 160),
     "windowframe-MS": (13, 0, 102, 320),
     "windowframe-BS": (13, 0, 102, 256),
-    "windowframe-TL": (13, 224, 115, 96),
-    "windowframe-TM": (0, 224, 128, 96),
-    "windowframe-TR": (0, 224, 115, 96),
+    "windowframe-TL": (13, 160, 115, 160),
+    "windowframe-TM": (0, 160, 128, 160),
+    "windowframe-TR": (0, 160, 115, 160),
     "windowframe-ML": (13, 0, 115, 320),
     "windowframe-MR": (0, 0, 115, 320),
     "windowframe-BL": (13, 0, 115, 256),
@@ -461,11 +466,29 @@ def main() -> int:
               f"{CELL_HEIGHT - (top[1] + top[3])}px short of its cell's "
               "bottom edge, which lays a transom across the glass at the "
               "join with the level below")
-        check(top[1] == CELL_HEIGHT - math.floor(0.3 * CELL_HEIGHT),
-              "windowframe-TS's hole does not reach 0.3 of a cell above its "
+        check(top[1] == CELL_HEIGHT - math.floor(0.5 * CELL_HEIGHT),
+              "windowframe-TS's hole does not reach 0.5 of a cell above its "
               f"cell's floor line: it starts at {top[1]}px from the cell "
-              "top, and the span's glass tops out 0.3 of a level above the "
+              "top, and the span's glass tops out 0.5 of a level above the "
               "top cell's floor wherever the span ends")
+        # The head and the single-level band are the same hole down to the
+        # head moulding: `T` shares `S`'s hole *top* and differs from it
+        # only at the bottom, where `S` stops at the 0.2 sill band and `T`
+        # runs on to the cell's bottom edge. Stating it against the `S`
+        # tile rather than only against the number is what stops the two
+        # drifting apart one row at a time.
+        single_top = hole_of("windowframe-SS")[1]
+        check(top[1] == single_top,
+              "windowframe-TS's hole starts "
+              f"{top[1] - single_top:+d}px away from windowframe-SS's, so the "
+              "head does not sit where the single-level band does: the glass "
+              "tops out at the same height above the cell either way, and only "
+              "the sill makes the two differ")
+        for corner in ("windowframe-TL", "windowframe-TM", "windowframe-TR"):
+            check(hole_of(corner)[1] == single_top,
+                  f"{corner}'s hole does not share the single-level band's "
+                  f"top: it starts at {hole_of(corner)[1]}px, the band at "
+                  f"{single_top}px")
         # The middle cell carries jambs only: no head, no sill, so its
         # hole is the whole cell height and nothing crosses the join at
         # either of its edges.
@@ -480,16 +503,16 @@ def main() -> int:
               "the tall column's holes are not the same horizontal band, so "
               "the joined aperture is not rectangular up the span")
         # The joined holes against the glass rect of the whole span: a
-        # 2-level span's glass is v[0.2, 1.3] above the span's floor line,
-        # a 3-level span's is v[0.2, 2.3], each rounded down at both ends.
+        # 2-level span's glass is v[0.2, 1.5] above the span's floor line,
+        # a 3-level span's is v[0.2, 2.5], each rounded down at both ends.
         for levels, parts in ((2, (bottom, top)),
                              (3, (bottom, middle, top))):
             joined = sum(part[3] for part in parts)
-            want = (math.floor((levels - 0.7) * CELL_HEIGHT)
+            want = (math.floor((levels - 0.5) * CELL_HEIGHT)
                     - math.floor(0.2 * CELL_HEIGHT))
             check(joined == want,
                   f"a {levels}-level span's holes joined are {joined}px tall; "
-                  f"the span's glass rect v[0.2,{levels - 0.7}] rounds down "
+                  f"the span's glass rect v[0.2,{levels - 0.5}] rounds down "
                   f"to {want}px")
 
     # The corners and interior edges join the two axes into one aperture.
@@ -574,14 +597,14 @@ def main() -> int:
                     and len({part[3] for part in row}) == 1,
                   f"the {row_name} row of a wide tall span is not one "
                   "horizontal band, so the joined aperture is not a rect")
-        # Up the side columns: BL + ML + TL is the same 672px the single
+        # Up the side columns: BL + ML + TL is the same 736px the single
         # -column tall span makes, because the vertical insets are the
         # same and only the horizontal band differs.
         for side, column in (("left", (bl, ml, tl)), ("right", (br, mr, tr))):
             for levels, parts in ((2, (column[0], column[2])),
                                  (3, column)):
                 joined = sum(part[3] for part in parts)
-                want = (math.floor((levels - 0.7) * CELL_HEIGHT)
+                want = (math.floor((levels - 0.5) * CELL_HEIGHT)
                        - math.floor(0.2 * CELL_HEIGHT))
                 check(joined == want,
                       f"a {levels}-level span's {side} column joins to "
