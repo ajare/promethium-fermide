@@ -19,6 +19,14 @@ namespace {
 	// leaf is drawn as a whole cell and the scaled doorway is what cuts
 	// it, so the check reads the triangle's clip instead of the extent of
 	// the triangle itself.
+	//
+	// This pins the leaf against the scaled aperture and nothing else. The
+	// frame the same Door would wear is pinned against the same aperture in
+	// `render/DoorframeCells.cpp` (#1062), which is where it belongs: the
+	// frame's hole is baked at the unscaled height, so a scaled Door wears
+	// no frame at all. Each half used to be pinned at its own scale without
+	// ever being compared with the other, and that is how the see-through
+	// band between them shipped.
 	float const kHeightScale = 0.5f;
 
 	void commands(smoke::Context const&) {

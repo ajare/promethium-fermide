@@ -562,6 +562,16 @@ from the live Door objects rather than from anything recorded:
   colour. That is what makes the feature additive: a World drawn on the
   version 1 family, or on any set with no frames authored, keeps drawing
   what it drew before.
+- a Regular Door whose `heightScale` leaves its aperture smaller than the
+  hole its frame is cut at is answered the same way - no frame - for the
+  same reason and with the same fallback. The frame replaces the wall's
+  tile rather than lying over it, so the band between the top of the
+  scaled aperture and the top of the baked hole would draw nothing: the
+  viewport background straight through the wall (#1062). A scale of
+  exactly 1.0 is not a mismatch and still wears its frame, and a Tall
+  Door cannot carry a scale at all, so the tall frame is untouched. One
+  frame per standardised door height is the intended replacement and
+  brings the moulding back when it lands.
 
 Because the answer is computed from what is standing in the wall, nothing
 is consumed. A variant an author painted on a cell the Door later covers

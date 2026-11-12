@@ -26,7 +26,13 @@
 //     base, because it is seen through the opening rather than framing it;
 //   * a wall with no frame authored - a Lift, or an atlas written before
 //     doorframes existed - draws its base rather than the missing-art
-//     colour, which is what makes the frame additive rather than a break.
+//     colour, which is what makes the frame additive rather than a break;
+//   * a Door whose aperture was scaled below the height its frame's hole
+//     is baked at wears no frame for the same reason and with the same
+//     fallback. The frame replaces the wall's tile rather than lying over
+//     it, so a frame whose hole is bigger than its opening leaves the band
+//     between the two drawing nothing - the viewport background straight
+//     through the wall (#1062).
 //
 // A Facade answers the same seam through a different door, because it has
 // no surface for the resolver to stand on (#1059). Its surface is a flat
@@ -59,6 +65,7 @@
 #include "UISettings.h"
 #include "WorldDrawList.h"
 
+#include "core/AgentTagRegistryDocument.h"
 #include "core/Background.h"
 #include "core/Defines.h"
 #include "core/Door.h"
@@ -71,9 +78,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -109,6 +118,13 @@ namespace
 		"doorframe-facade-1r-L0", "doorframe-facade-2r-L0",
 		"doorframe-facade-2r-R0", "doorframe-facade-1t-L0",
 		"doorframe-facade-2t-L0", "doorframe-facade-2t-R0" };
+
+	// The height a regular frame's transparent hole is baked at, in World
+	// units above the cell floor. Every regular frame - Room, Corridor and
+	// Facade alike - is cut at 0.5, which is the whole of an unscaled
+	// regular aperture. A Door scaled below it has no frame that fits, and
+	// the band between the two is what #1062 is about.
+	float const kRegularFrameHoleTop = 0.5f;
 
 	// The Facade's own colour, distinct from the tint every other pass in
 	// this file is drawn with, so "the frame wears the Facade's colour"
@@ -615,6 +631,26 @@ namespace
 		return ~0u;
 	}
 
+	// The Door standing in a fixture Sector, for the checks that have to ask
+	// the Door what it was authored as rather than assume the fixture set
+	// what it meant to set.
+	std::shared_ptr<const core::Door> doorOf(core::Sector const& sector)
+	{
+		auto const index = doorObjectIndex(sector);
+		require(index != ~0u, "The fixture Sector carries no Door to ask");
+		return std::static_pointer_cast<const core::DoorSectorObject>(
+			sector.getObject(index))->getDoor();
+	}
+
+	// Whether a resolved tile is a doorframe. Asked of the name rather than
+	// of a list, because the checks below need to say "nothing that is a
+	// frame drew here" over a whole row, and the frame family is exactly the
+	// names the derivation makes.
+	bool isFrameTile(std::string const& name)
+	{
+		return name.rfind("doorframe-", 0) == 0;
+	}
+
 	// One Location on the front Layer with the same Location behind it, and
 	// one ordinary Door set into the front wall.
 	//
@@ -625,7 +661,8 @@ namespace
 	// stays unfurnished.
 	Scene buildScene(std::string const& kind, uint32_t cellsWide,
 		uint32_t levelsHigh, uint32_t doorWidth, core::Door::Height height,
-		uint32_t doorX, uint32_t doorLevel, float frontTopLevelHeight)
+		uint32_t doorX, uint32_t doorLevel, float frontTopLevelHeight,
+		std::optional<float> doorHeightScale = std::nullopt)
 	{
 		auto world = std::make_shared<core::World>("Doorframe world", 16, 6);
 		while (world->getLayerCount() < 2) world->addLayer();
@@ -653,6 +690,7 @@ namespace
 		core::World::CreateDoorOptions options;
 		options.width = doorWidth;
 		options.height = height;
+		options.heightScale = doorHeightScale;
 		world->addSectorDoor(0, doorLevel, doorX, options);
 		world->finishBuild();
 		world->pauseSimulation();
@@ -679,29 +717,32 @@ namespace
 	Scene roomScene(uint32_t cellsWide, uint32_t doorWidth,
 		core::Door::Height height, uint32_t doorX, uint32_t doorLevel = 0,
 		float topLevelHeight = CORE_ROOM_MAX_HEIGHT,
-		uint32_t levelsHigh = 1)
+		uint32_t levelsHigh = 1,
+		std::optional<float> doorHeightScale = std::nullopt)
 	{
 		return buildScene("room", cellsWide, levelsHigh, doorWidth, height,
-			doorX, doorLevel, topLevelHeight);
+			doorX, doorLevel, topLevelHeight, doorHeightScale);
 	}
 
 	Scene corridorScene(uint32_t cellsWide, uint32_t doorWidth,
-		core::Door::Height height, uint32_t doorX, uint32_t doorLevel = 0)
+		core::Door::Height height, uint32_t doorX, uint32_t doorLevel = 0,
+		std::optional<float> doorHeightScale = std::nullopt)
 	{
 		// A Corridor is one level high and takes its own height, not the
 		// Room's: the top-level height a Room author sets means nothing to
 		// it, and the loader would say so.
 		return buildScene("corridor", cellsWide, 1, doorWidth, height, doorX,
-			doorLevel, CORE_CORRIDOR_HEIGHT);
+			doorLevel, CORE_CORRIDOR_HEIGHT, doorHeightScale);
 	}
 
 	// One Facade on the front Layer, one Room behind it, one ordinary Door
 	// set into the Facade.
 	Scene facadeScene(uint32_t cellsWide, uint32_t doorWidth,
-		core::Door::Height height, uint32_t doorX, uint32_t doorLevel = 0)
+		core::Door::Height height, uint32_t doorX, uint32_t doorLevel = 0,
+		std::optional<float> doorHeightScale = std::nullopt)
 	{
 		return buildScene("facade", cellsWide, 1, doorWidth, height, doorX,
-			doorLevel, CORE_ROOM_MAX_HEIGHT);
+			doorLevel, CORE_ROOM_MAX_HEIGHT, doorHeightScale);
 	}
 
 	std::map<std::pair<uint32_t, uint32_t>, RecordedCell> drawGrid(Scene& scene,
@@ -1055,6 +1096,183 @@ namespace
 	}
 
 	// ------------------------------------------------------------------
+	// A Door whose aperture does not fill its frame wears no frame (#1062).
+	// ------------------------------------------------------------------
+	//
+	// A frame's hole is baked at its height class. `heightScale` shrinks
+	// the aperture below the hole it would stand in, and because the frame
+	// *replaces* the wall's tile rather than lying over it, the band from
+	// the top of the aperture to the top of the hole draws nothing - the
+	// viewport background straight through the wall. A Door with no frame
+	// that fits is answered the way a wall with no frame authored is: the
+	// cell takes its base tile, or the variant its author painted there.
+	//
+	// The guard is on the mismatch, not on the key being present. A scale
+	// of exactly 1.0 leaves the aperture at the height the hole was cut
+	// at, and that Door wears its frame; a Door with no scale at all is
+	// the same Door wearing the same frame.
+
+	// A 0.5-scaled regular Door in a Room draws the Room's base tile on
+	// its cell, and no frame anywhere on the wall.
+	void aScaledRegularDoorWearsNoFrame(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		require(hasSectorTileOverlay("doorframe-room-1r-L0"),
+			"The atlas carries no regular Room frame, so the fallback below is "
+			"tested against a wall that could not have framed anything");
+		auto scene = roomScene(4, 1, core::Door::Height::Regular, 2, 0,
+			CORE_ROOM_MAX_HEIGHT, 1, /*doorHeightScale=*/ 0.5f);
+		auto const door = doorOf(*scene.front);
+		require(door->getHeightScale() == std::optional<float>{0.5f},
+			"The fixture's height scale never reached the Door, so this case is "
+			"an ordinary unscaled Door and pins nothing");
+		// The mismatch, stated as the two numbers that have to disagree for
+		// the band to exist: the aperture the leaf and the reveal are
+		// clipped to, and the height the frame's artwork is cut at.
+		require(near(door->getSize().y, CORE_DOOR_HEIGHT * 0.5f),
+			"The scaled aperture is not half a regular Door, so the fixture is "
+			"not the mismatch this case describes");
+		require(door->getSize().y < kRegularFrameHoleTop,
+			"The scaled aperture reaches the frame's hole, so nothing would have "
+			"drawn through the wall and the guard below is not being tested");
+		auto const grid = drawGrid(scene, atlas);
+		require(tileAt(grid, 2, 0) == "room", "The cell a 0.5-scaled regular "
+			"Door stands in drew " + tileAt(grid, 2, 0) + "; a scaled aperture "
+			"is smaller than the frame's baked hole, so the Door wears no frame "
+			"and the cell falls back to its wall's base tile");
+		for (uint32_t column = 0; column < 4; ++column)
+			require(!isFrameTile(tileAt(grid, column, 0)), "Column "
+				+ std::to_string(column) + " drew " + tileAt(grid, column, 0)
+				+ "; a scaled Door frames no cell of its wall");
+		// And the neighbours are untouched: taking the frame off the door
+		// cell changed nothing else about the Room.
+		require(tileAt(grid, 0, 0) == "room" && tileAt(grid, 1, 0) == "room"
+				&& tileAt(grid, 3, 0) == "room",
+			"Scaling one Door changed what its neighbours draw");
+	}
+
+	// A scale of exactly 1.0 is not a mismatch. The aperture is the height
+	// the hole was baked at, the band is nothing, and the Door wears its
+	// frame - as it does with the scale left unset entirely. The guard is
+	// on the mismatch, not on the key being present.
+	void aScaleOfOneStillWearsItsFrame(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		{
+			auto scene = roomScene(4, 1, core::Door::Height::Regular, 2, 0,
+				CORE_ROOM_MAX_HEIGHT, 1, /*doorHeightScale=*/ 1.0f);
+			auto const door = doorOf(*scene.front);
+			require(door->getHeightScale() == std::optional<float>{1.0f},
+				"The explicit 1.0 scale did not reach the Door, so this case is "
+				"not testing the key being present");
+			require(near(door->getSize().y, CORE_DOOR_HEIGHT),
+				"A 1.0-scaled aperture is not the full regular height, so the "
+				"frame it wears would not line up with its hole anyway");
+			auto const grid = drawGrid(scene, atlas);
+			require(tileAt(grid, 2, 0) == "doorframe-room-1r-L0", "A regular "
+				"Door authored with heightScale 1.0 drew " + tileAt(grid, 2, 0)
+					+ "; the guard is on the mismatch between aperture and hole, "
+					"not on the scale key being present");
+		}
+		{
+			// The unset control: the same cell, the same frame, no scale at
+			// all. Both halves of the guard's boundary answer the same way.
+			auto scene = roomScene(4, 1, core::Door::Height::Regular, 2);
+			require(!doorOf(*scene.front)->getHeightScale().has_value(),
+				"An unscaled fixture Door reports a height scale, so the control "
+				"below is not the unset case");
+			auto const grid = drawGrid(scene, atlas);
+			require(tileAt(grid, 2, 0) == "doorframe-room-1r-L0", "An unscaled "
+				"regular Door drew " + tileAt(grid, 2, 0) + "; taking the scale "
+				"away is not a reason to take the frame away");
+		}
+	}
+
+	// The fallback is the wall's own answer, variant included. A variant
+	// painted on the door cell shows through while a scaled Door stands
+	// there, because nothing outranks it: the frame that used to is the one
+	// that would have left the hole.
+	void aScaledDoorStillShowsTheVariantUnderIt(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto scene = roomScene(4, 1, core::Door::Height::Regular, 2, 0,
+			CORE_ROOM_MAX_HEIGHT, 1, /*doorHeightScale=*/ 0.4f);
+		require(doorOf(*scene.front)->getHeightScale()
+				== std::optional<float>{0.4f},
+			"The fixture's height scale never reached the Door");
+		std::string diagnostic;
+		require(scene.world->setSectorSurfaceVariant(scene.frontIndex, 2, 0, 1u,
+				&diagnostic).changed,
+			"The fixture variant could not be painted on the door cell: "
+			+ diagnostic);
+		auto const grid = drawGrid(scene, atlas);
+		require(tileAt(grid, 2, 0) == "room-V1", "The cell a 0.4-scaled Door "
+			"stands in drew " + tileAt(grid, 2, 0) + "; with no frame to "
+			"outrank it the cell answers the variant its author painted, which "
+			"is the same fallback the missing-frame case answers with");
+		require(scene.front->surfaceVariantAt(2, 0) == 1u,
+			"The painted entry did not stay on the Sector while the scaled Door "
+			"stood there");
+	}
+
+	// The same rule in a Corridor, where the shipped defect sits: the
+	// Corridor's frame is cut at the same 0.5 and its scaled Door gets the
+	// same answer - the Corridor's own base tile.
+	void aScaledDoorInACorridorWearsNoFrame(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		require(hasSectorTileOverlay("doorframe-corridor-1r-L0"),
+			"The atlas carries no regular Corridor frame, so the fallback below "
+			"is tested against a wall that could not have framed anything");
+		auto scene = corridorScene(4, 1, core::Door::Height::Regular, 2, 0,
+			/*doorHeightScale=*/ 0.5f);
+		require(doorOf(*scene.front)->getHeightScale()
+				== std::optional<float>{0.5f},
+			"The fixture's height scale never reached the Corridor Door");
+		auto const grid = drawGrid(scene, atlas);
+		require(tileAt(grid, 2, 0) == "corridor", "The cell a 0.5-scaled Door "
+			"in a Corridor stands in drew " + tileAt(grid, 2, 0) + "; the "
+			"Corridor's frame is cut at the same hole height, so a scaled "
+			"opening in one wears no frame either");
+		for (uint32_t column = 0; column < 4; ++column)
+			require(!isFrameTile(tileAt(grid, column, 0)), "Column "
+				+ std::to_string(column) + " of the Corridor drew "
+				+ tileAt(grid, column, 0) + "; a scaled Door frames no cell");
+	}
+
+	// A Tall Door is unaffected. Its frame's hole is baked at its own
+	// height class, and the domain never lets a Tall Door carry a scale in
+	// the first place - so the guard written for the regular mismatch has
+	// nothing to take away here.
+	void aTallDoorIsUnaffectedByTheScaleGuard(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto scene = roomScene(4, 1, core::Door::Height::Tall, 1);
+		auto const door = doorOf(*scene.front);
+		require(!door->getHeightScale().has_value(),
+			"A Tall Door came to carry a height scale; the domain rule is that "
+			"Tall refuses one, and a Tall Door that carried a scale would lose "
+			"its tall frame to a guard written for the regular case");
+		// And it still refuses one at the authoring seam, which is what "the
+		// guard cannot reach a Tall Door" actually rests on.
+		auto const object = std::static_pointer_cast<const core::DoorSectorObject>(
+			scene.front->getObject(doorObjectIndex(*scene.front)));
+		std::string diagnostic;
+		require(!scene.world->setSectorDoorHeightScale(
+				scene.front->getLayerIndex(), object->getCellY(),
+				object->getCellX(), door->getCellsWide(), 0.5f, &diagnostic),
+			"The authoring seam accepted a height scale on a Tall Door: "
+			+ diagnostic);
+		auto const grid = drawGrid(scene, atlas);
+		require(tileAt(grid, 1, 0) == "doorframe-room-1t-L0", "A Tall Door "
+			"drew " + tileAt(grid, 1, 0) + "; the scale guard is not allowed "
+			"to take a tall frame off a tall opening");
+		require(isFrameTile(tileAt(grid, 1, 0)),
+			"The tall cell's tile is not a frame at all, so the check above "
+			"matched a fallback rather than a tall frame being worn");
+	}
+
+	// ------------------------------------------------------------------
 	// The Facade's frames (#1059).
 	// ------------------------------------------------------------------
 
@@ -1326,6 +1544,43 @@ namespace
 			"atlas");
 	}
 
+	// A scaled Door set into a Facade lays no frame over its fill. A
+	// Facade's wall is a flat fill rather than a tile, so what the guard
+	// leaves behind is the picture a Facade with no frame authored gives:
+	// the wall colour across the whole area, the opening drawn over it in
+	// the pass that owns the aperture.
+	void aScaledFacadeDoorDrawsNoFrameOverItsFill(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto scene = facadeScene(4, 1, core::Door::Height::Regular, 2, 0,
+			/*doorHeightScale=*/ 0.5f);
+		require(doorOf(*scene.front)->getHeightScale()
+				== std::optional<float>{0.5f},
+			"The fixture's height scale never reached the Facade Door");
+		auto const pass = recordFacade(scene.front, atlas);
+		require(!pass.hasFrame, "A 0.5-scaled Facade Door laid a frame over its "
+			"wall; that frame's hole is cut at 0.5 and the aperture stops at "
+			"0.25, so the band between them would show the viewport "
+			"background straight through the Facade");
+		require(pass.cells.empty(), "A scaled Facade opening resolved "
+			+ std::to_string(pass.cells.size()) + " cells to tiles; none of "
+			"them may be a frame");
+		// The wall itself is untouched: the fill still covers the whole
+		// Facade, and the opening is still drawn over it rather than being
+		// painted out by it.
+		require(pass.fillTriangles == 2, "The scaled Facade stopped filling as "
+			"well as not framing; the fill is not the part that depends on the "
+			"frame");
+		require(pass.firstClippedIndex
+				!= std::numeric_limits<size_t>::max(),
+			"The scaled Facade Door drew nothing under an aperture clip, so the "
+			"opening itself is missing and the checks above would pass on a "
+			"wall with no doorway in it");
+		require(pass.firstFillIndex < pass.firstClippedIndex,
+			"The aperture was drawn before the fill, so the fill paints the "
+			"opening out");
+	}
+
 	// The style gate is the fill's own. A Facade that fills wears its frame,
 	// including when it is being seen through an aperture in the Layer in
 	// front; the wireframe overlay contributes an outline only and takes no
@@ -1350,7 +1605,287 @@ namespace
 			"the overlay contributes an outline only and no tile at all");
 		}
 	}
+
+	// ------------------------------------------------------------------
+	// The shipped Worlds (#1062).
+	// ------------------------------------------------------------------
+	//
+	// The fixture cases above pin the rule; this one pins that the
+	// bundled documents the defect was reported against no longer put the
+	// band on screen. It sweeps every bundled World rather than only the
+	// two named, because the thing worth keeping false is "some shipped
+	// Door wears a frame its aperture does not fill", and an edit to any
+	// one document can make that true.
+	//
+	// The positive control matters as much as the negative one here: a
+	// sweep that found no frames at all - an atlas that installed none,
+	// a draw that never reached a wall - would pass the scaled case for
+	// the wrong reason. So the same sweep insists that the unscaled Doors
+	// in the same documents do wear their frames.
+
+	// The atlas the application actually installs, so a shipped World is
+	// drawn with the artwork it ships with rather than with the synthetic
+	// sheet the fixture cases use.
+	SectorTileset installShippedSectorAtlas(smoke::Context const& context)
+	{
+		auto const atlas = SectorTileset::load(
+			context.fixture("resources/textures/sectors-new.tileset.yaml"));
+		require(atlas.family == SectorTilesetFamily::New,
+			"The bundled sector tileset is not the New family the application "
+			"installs, so the sweep below is not drawing shipped artwork");
+		require(atlas.overlays.count("doorframe-room-1r-L0") > 0
+				&& atlas.overlays.count("doorframe-corridor-1r-L0") > 0,
+			"The bundled atlas carries no regular doorframes, so a sweep that "
+			"finds no frame on a scaled Door would be finding nothing at all");
+		setSectorTileset(atlas, static_cast<TextureId>(1));
+		require(hasSectorTileOverlay("doorframe-room-1r-L0"),
+			"The bundled frames did not come up as installed overlays");
+		return atlas;
+	}
+
+	// Every bundled World document, the same way the tall-leaf sweep finds
+	// them: `fixture()` answers for files, so the walk starts from one and
+	// goes out from its parent.
+	std::vector<std::filesystem::path> shippedWorldDocuments(
+		smoke::Context const& context)
+	{
+		auto const root = context.fixture("resources/Resources.yaml").parent_path();
+		std::vector<std::filesystem::path> docs;
+		auto const collect = [&](std::filesystem::path const& directory)
+		{
+			if (!std::filesystem::is_directory(directory)) return;
+			for (auto const& entry : std::filesystem::directory_iterator(directory))
+			{
+				if (!entry.is_regular_file()) continue;
+				if (entry.path().filename().string().find(".world.yaml")
+					== std::string::npos) continue;
+				docs.push_back(entry.path());
+			}
+		};
+		collect(root);
+		collect(root / "test-worlds");
+		std::sort(docs.begin(), docs.end());
+		return docs;
+	}
+
+	// Whether this wall is one the shipped atlas authors frames for. A
+	// Lift, a Chamber or a Background has no frame to wear, so its Doors
+	// are not the control this sweep needs.
+	bool isFramedWallKind(core::Sector const& sector)
+	{
+		auto const* own = sectorSurfaceKind(sector);
+		if (!own) return false;
+		std::string const kind{ own };
+		return kind == "room" || kind == "corridor";
+	}
+
+	// The tiles one Sector's own surface pass drew, keyed by the
+	// Sector-local cell each landed on. Narrower on purpose than the
+	// recorder the fixture cases use: a shipped World carries furniture,
+	// windows and object art this sweep installs no atlas for, and their
+	// fallback fills are not Sector surfaces.
+	std::map<std::pair<uint32_t, uint32_t>, std::string> surfaceCellsOf(
+		std::shared_ptr<const core::Sector> sector, SectorTileset const& atlas)
+	{
+		WorldDrawList commands(kNoClip);
+		renderSector(sector, sector->getLayerIndex(), LayerRenderStyle::Solid,
+			false, kTint, &commands);
+
+		std::vector<WorldDrawList::Triangle const*> quads;
+		for (auto const& command : commands.commands())
+		{
+			auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command);
+			if (!triangle
+					|| triangle->texture != WorldDrawList::Texture::SectorAtlas)
+				continue;
+			// Anything under a clip other than the recorder's own is the
+			// Sector behind seen through an aperture, not this wall's face.
+			if (!near(triangle->clip.minimum.x, kNoClip.minimum.x)
+					|| !near(triangle->clip.maximum.x, kNoClip.maximum.x)
+					|| !near(triangle->clip.minimum.y, kNoClip.minimum.y)
+					|| !near(triangle->clip.maximum.y, kNoClip.maximum.y))
+				continue;
+			quads.push_back(triangle);
+		}
+		require(quads.size() % 2 == 0, "The shipped Sector emitted an odd "
+			"number of surface triangles, so they are not the pairs one quad "
+			"makes");
+
+		core::Vector2 low{}, high{};
+		sector->getBounds(low, high);
+		auto const a = toScreen(low);
+		auto const b = toScreen(high);
+		float const left = std::min(a.x, b.x);
+		float const floorLine = std::max(a.y, b.y);
+		float const cellWidth = CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom;
+		float const cellHeight = CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
+
+		std::map<std::pair<uint32_t, uint32_t>, std::string> cells;
+		for (size_t pair = 0; pair + 1 < quads.size(); pair += 2)
+		{
+			float uvLeft = 1e9f, uvRight = -1e9f, uvTop = 1e9f, uvBottom = -1e9f;
+			float cellLeft = 1e9f, cellBottom = -1e9f;
+			for (auto const* triangle : { quads[pair], quads[pair + 1] })
+			{
+				for (auto const& uv : triangle->texcoords)
+				{
+					uvLeft = std::min(uvLeft, uv.x);
+					uvRight = std::max(uvRight, uv.x);
+					uvTop = std::min(uvTop, uv.y);
+					uvBottom = std::max(uvBottom, uv.y);
+				}
+				for (auto const& point : triangle->positions)
+				{
+					cellLeft = std::min(cellLeft, point.x);
+					cellBottom = std::max(cellBottom, point.y);
+				}
+			}
+			auto const column = static_cast<uint32_t>(
+				std::lround((cellLeft - left) / cellWidth));
+			auto const level = static_cast<uint32_t>(
+				std::lround((floorLine - cellBottom) / cellHeight));
+			require(column < sector->getCellsWide()
+					&& level < sector->getLevelsHigh(),
+				"A shipped surface cell landed outside its Sector's own grid at "
+				"column " + std::to_string(column) + ", level "
+				+ std::to_string(level));
+			auto const tile = tileAt((uvLeft + uvRight) * 0.5f,
+				(uvTop + uvBottom) * 0.5f, atlas);
+			require(!tile.empty(), "A shipped surface quad sampled UVs that fall "
+				"on no tile in the bundled atlas");
+			cells[std::make_pair(column, level)] = tile;
+		}
+		return cells;
+	}
+
+	struct SweptDoor
+	{
+		uint32_t firstColumn{};
+		uint32_t level{};
+		uint32_t cellsWide{};
+		std::string scale;
+	};
+
+	void noShippedDoorWearsAFrameItsApertureDoesNotFill(
+		smoke::Context const& context)
+	{
+		auto const atlas = installShippedSectorAtlas(context);
+		pinViewport();
+		// Wider than the fixture viewport, so no bundled World's cells are
+		// culled out of the draw before the sweep can read them.
+		gUISettings.worldViewportWidth = 8192.0f;
+		gUISettings.worldViewportHeight = 8192.0f;
+
+		auto const docs = shippedWorldDocuments(context);
+		require(docs.size() >= 4, "The shipped World sweep found only "
+			+ std::to_string(docs.size()) + " bundled World documents, so it "
+			"cannot claim to cover the shipped Doors");
+
+		uint32_t scaledDoors{ 0 }, framedDoors{ 0 };
+		for (auto const& doc : docs)
+		{
+			std::shared_ptr<core::World> loaded;
+			try
+			{
+				loaded.reset(core::loadWorldDocument(doc).release());
+			}
+			catch (std::exception const& error)
+			{
+				require(false, "Bundled World document " + doc.filename().string()
+					+ " did not load: " + error.what());
+			}
+			require(bool(loaded), "Bundled World document " + doc.filename().string()
+				+ " loaded nothing");
+			std::string const document = doc.filename().string();
+			RenderWorldScope scope(loaded);
+			for (uint32_t layer = 0; layer < loaded->getLevelsHigh(); ++layer)
+			{
+				for (auto const& sector : loaded->getSectors(layer))
+				{
+					if (!sector) continue;
+					// This wall's own front Doors, collected first so the
+					// surface is drawn once per Sector rather than once per
+					// Door standing in it.
+					std::vector<SweptDoor> scaled, framed;
+					for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
+					{
+						auto const object = std::dynamic_pointer_cast<
+							const core::DoorSectorObject>(sector->getObject(i));
+						if (!object) continue;
+						auto const door = object->getDoor();
+						if (!door || door->getFrontSector() != sector) continue;
+						auto const cellsWide = door->getCellsWide();
+						if (cellsWide == 0 || cellsWide > 2) continue;
+						SweptDoor entry;
+						entry.firstColumn = object->getCellX()
+							- sector->getCellX0();
+						entry.level = object->getCellY() - sector->getCellY0();
+						entry.cellsWide = cellsWide;
+						auto const scale = door->getHeightScale();
+						if (scale && *scale != 1.0f)
+						{
+							entry.scale = std::to_string(*scale);
+							scaled.push_back(entry);
+						}
+						else if (isFramedWallKind(*sector))
+						{
+							framed.push_back(entry);
+						}
+					}
+					if (scaled.empty() && framed.empty()) continue;
+					auto const cells = surfaceCellsOf(sector, atlas);
+					for (auto const& door : scaled)
+					{
+						++scaledDoors;
+						for (uint32_t offset = 0; offset < door.cellsWide; ++offset)
+						{
+							auto const found = cells.find(std::make_pair(
+								door.firstColumn + offset, door.level));
+							std::string const tile = found == cells.end()
+								? std::string("<nothing>") : found->second;
+							require(!isFrameTile(tile), document + ": the cell a "
+								+ std::to_string(door.cellsWide) + "-wide Door with "
+								"heightScale " + door.scale + " stands in drew "
+								+ tile + "; that frame's hole is baked at the "
+								"unscaled height, so the band between the top of "
+								"the aperture and the top of the hole draws the "
+								"viewport background through the wall");
+						}
+					}
+					for (auto const& door : framed)
+					{
+						// The control: an unscaled Door in a Room or a
+						// Corridor still wears its frame on every cell of its
+						// opening, which is what makes the scaled result above
+						// a fallback rather than a draw that never framed
+						// anything at all.
+						++framedDoors;
+						for (uint32_t offset = 0; offset < door.cellsWide; ++offset)
+						{
+							auto const found = cells.find(std::make_pair(
+								door.firstColumn + offset, door.level));
+							std::string const tile = found == cells.end()
+								? std::string("<nothing>") : found->second;
+							require(isFrameTile(tile), document + ": the cell an "
+								"unscaled " + std::to_string(door.cellsWide)
+								+ "-wide Door stands in drew " + tile + "; the "
+								"control for the scaled case is that unscaled "
+								"Doors in the same documents still frame, and "
+								"this one does not");
+						}
+					}
+				}
+			}
+		}
+		require(scaledDoors > 0, "The shipped World sweep found no Door with a "
+			"height scale at all, so the scaled case above is untested against "
+			"shipped data");
+		require(framedDoors > 0, "The shipped World sweep found no framed "
+			"unscaled Door at all, so its scaled result proves nothing about "
+			"frames being available");
+	}
 }
+
 
 void render_smoke::registerDoorframeCells(std::vector<smoke::Check>& checks)
 {
@@ -1378,6 +1913,18 @@ void render_smoke::registerDoorframeCells(std::vector<smoke::Check>& checks)
 		isolated<aWallWithNoFrameAuthoredDrawsItsBase> });
 	checks.push_back({ "doorframeCells/aFrameIsReachableWithoutBeingASurface",
 		isolated<aFrameIsReachableWithoutBeingASurface> });
+	checks.push_back({ "doorframeCells/aScaledRegularDoorWearsNoFrame",
+		isolated<aScaledRegularDoorWearsNoFrame> });
+	checks.push_back({ "doorframeCells/aScaleOfOneStillWearsItsFrame",
+		isolated<aScaleOfOneStillWearsItsFrame> });
+	checks.push_back({
+		"doorframeCells/aScaledDoorStillShowsTheVariantUnderIt",
+		isolated<aScaledDoorStillShowsTheVariantUnderIt> });
+	checks.push_back({ "doorframeCells/aScaledDoorInACorridorWearsNoFrame",
+		isolated<aScaledDoorInACorridorWearsNoFrame> });
+	checks.push_back({
+		"doorframeCells/aTallDoorIsUnaffectedByTheScaleGuard",
+		isolated<aTallDoorIsUnaffectedByTheScaleGuard> });
 	checks.push_back({ "doorframeCells/oneWideFacadeDoorWearsItsFrame",
 		isolated<oneWideFacadeDoorWearsItsFrame> });
 	checks.push_back({ "doorframeCells/twoWideFacadeDoorWearsItsFramePair",
@@ -1397,4 +1944,10 @@ void render_smoke::registerDoorframeCells(std::vector<smoke::Check>& checks)
 		isolated<aFacadeWithNoFacadeFramesAuthoredDrawsItsFill> });
 	checks.push_back({ "doorframeCells/theFrameFollowsTheFillThroughEveryStyle",
 		isolated<theFrameFollowsTheFillThroughEveryStyle> });
+	checks.push_back({
+		"doorframeCells/aScaledFacadeDoorDrawsNoFrameOverItsFill",
+		isolated<aScaledFacadeDoorDrawsNoFrameOverItsFill> });
+	checks.push_back({
+		"doorframeCells/noShippedDoorWearsAFrameItsApertureDoesNotFill",
+		isolated<noShippedDoorWearsAFrameItsApertureDoesNotFill> });
 }

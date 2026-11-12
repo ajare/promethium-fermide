@@ -137,6 +137,11 @@ set(names
     doorframeCells/theBackWallOfAThresholdTakesNoFrame
     doorframeCells/aWallWithNoFrameAuthoredDrawsItsBase
     doorframeCells/aFrameIsReachableWithoutBeingASurface
+    doorframeCells/aScaledRegularDoorWearsNoFrame
+    doorframeCells/aScaleOfOneStillWearsItsFrame
+    doorframeCells/aScaledDoorStillShowsTheVariantUnderIt
+    doorframeCells/aScaledDoorInACorridorWearsNoFrame
+    doorframeCells/aTallDoorIsUnaffectedByTheScaleGuard
     doorframeCells/oneWideFacadeDoorWearsItsFrame
     doorframeCells/twoWideFacadeDoorWearsItsFramePair
     doorframeCells/theFlatFillStillCoversEveryCellThatIsNotADoorCell
@@ -145,6 +150,8 @@ set(names
     doorframeCells/theTallFacadeFrameIsDerivedAndDrawn
     doorframeCells/aFacadeWithNoFacadeFramesAuthoredDrawsItsFill
     doorframeCells/theFrameFollowsTheFillThroughEveryStyle
+    doorframeCells/aScaledFacadeDoorDrawsNoFrameOverItsFill
+    doorframeCells/noShippedDoorWearsAFrameItsApertureDoesNotFill
     sectorTilePreview/oneTileFramesTheRectItIsGiven
     sectorTilePreview/anyRectFramesOneTileAndNotACellGrid
     sectorTilePreview/itIsOneTileWhereTheWorldRepeatIsFour

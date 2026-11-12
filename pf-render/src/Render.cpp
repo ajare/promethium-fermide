@@ -2146,6 +2146,29 @@ doorframeTilesForSector(std::string const& wall,
 		// same gap would draw a moulding nobody looks at and cover what the
 		// aperture reveals.
 		if (!door || door->getFrontSector() != sector) continue;
+		// A frame's hole is baked at its height class - 0.5 for a regular
+		// frame, 0.9 for a tall one. A scaled aperture is smaller than the
+		// hole it would stand in, and because the frame replaces the wall's
+		// tile rather than lying over it, the band between the top of the
+		// aperture and the top of the hole draws nothing: the viewport
+		// background straight through the wall (#1062). A Door whose
+		// aperture does not match the frame it would wear is answered as a
+		// wall with no frame authored for it, which is the same answer the
+		// missing-atlas case below gives - the cell falls back to its base
+		// or to the variant its author painted, and no new state is kept.
+		//
+		// The guard is on the mismatch, not on the key being present: a
+		// scale of exactly 1.0 leaves the aperture at the height the hole
+		// was baked at, and that Door wears its frame. A Tall Door never
+		// reaches here with a scale at all - `Door::setHeightScale` and the
+		// document loader both refuse one on a Tall Door - so the tall
+		// frame is untouched by this.
+		//
+		// One frame per standardised door height is the proper fix and
+		// replaces this guard when it lands; that work is out of #1052's
+		// scope, so until then a scaled Door simply draws no moulding.
+		auto const scale = door->getHeightScale();
+		if (scale && *scale != 1.0f) continue;
 		auto const cellsWide = door->getCellsWide();
 		if (cellsWide == 0 || cellsWide > kMaxFramedDoorCellsWide) continue;
 		// Signed, because a Door sitting left of, or below, the Sector's own
