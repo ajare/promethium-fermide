@@ -244,6 +244,10 @@ set(names
     objectAtlasContract/doorPaletteIconNamesACarriedRequiredTile
     objectAtlasContract/doorPaletteIconFallsBackToTheGlyphOnAMiss
     objectAtlasContract/doorPaletteIconTileResolvesOnlyWhenTheAtlasCarriesIt
+    objectAtlasContract/windowPaletteIconNamesACarriedRequiredTile
+    objectAtlasContract/windowPaletteIconFallsBackToTheGlyphOnAMiss
+    objectAtlasContract/windowPaletteIconTileResolvesOnlyWhenTheAtlasCarriesIt
+    objectAtlasContract/windowPaletteIconDrawsAtTheTileOwnAspect
     objectAtlasContract/expectedExtentsFollowTheDomainGeometry
     objectAtlasContract/aMissingRequiredTileIsRefused
     objectAtlasContract/aMismatchedDrawnSizeIsRefused

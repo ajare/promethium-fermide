@@ -929,16 +929,23 @@ namespace
 	void drawWindowIcon(WorldDrawList* drawList, ImVec2 boundsMin, ImVec2 boundsMax, ImU32 colour)
 	{
 		auto available = boundsMax - boundsMin - ImVec2(10.0f, 8.0f);
-		constexpr float aspect = 52.0f / 48.0f;
+		// The tile's own region is the aspect. What was hardcoded here once
+		// #1079 retired the pane-sized `window-clear` tile was that tile's
+		// 52/48, which drew the 32 x 80 glass tile about 2.7x wider than it
+		// was authored - invisible only because the placeholder is a flat slab
+		// with nothing in it to distort, and wrong the moment an artist puts
+		// real glass art on the tile. Reading the region from the installed
+		// atlas means a re-cut of the glass moves the icon with it instead of
+		// stretching it again (#1082).
+		auto const glass = objectSpriteSize("glass-clear");
+		auto const aspect = glass && glass->y > 0.0f ? glass->x / glass->y : 1.0f;
 		auto width = min(available.x, available.y * aspect);
 		auto size = ImVec2(width, width / aspect);
 		auto minimum = boundsMin + (boundsMax - boundsMin - size) * 0.5f;
 		// The pane-sized `window-clear` tile this slot drew was retired in
 		// #1079 along with the stretch it described, so asking for it here
 		// would leave the slot drawing its font glyph under the very set that
-		// carries glass art. The glass tile is the one that exists; the icon's
-		// own aspect handling resizes whatever it is given, exactly as the
-		// Door slot's does (#1063).
+		// carries glass art. The glass tile is the one that exists.
 		if (!drawObjectSprite("glass-clear", drawList, toVec2(minimum), toVec2(minimum + size)))
 			drawObjectIcon(drawList, boundsMin, boundsMax, colour, ICON_FA_WINDOW_MAXIMIZE);
 	}

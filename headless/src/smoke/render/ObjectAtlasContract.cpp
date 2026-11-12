@@ -33,8 +33,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -549,22 +551,169 @@ namespace
 		return calls.front();
 	}
 
-	// The tile the editor's palette Door icon draws, read out of the icon's
-	// own draw call rather than from a constant the icon could stop using.
-	// Returns the literal use, so the caller can name the line it came from.
-	LiteralUse doorPaletteIconTile(smoke::Context const& context)
+	// One palette tray slot that draws an Objects tile as its icon. The slot
+	// checks are written once against this and run per slot, so the Window
+	// slot getting the coverage the Door slot has had since #1063 (#1082) is
+	// a row here rather than a second copy of every check.
+	struct PaletteSlot
 	{
-		auto const source = scanSource(context, kEditorPaletteSource);
-		auto const body = functionBody(source, "drawDoorIcon");
+		std::string function;  // the icon's function in the palette source
+		std::string label;     // how a failure names the slot
+		std::string noun;      // the tile's kind in prose: "door", "glass"
+		std::string glyph;     // the font glyph the slot falls back to
+	};
+
+	PaletteSlot const kDoorSlot{ "drawDoorIcon", "The palette's Door icon",
+		"door", "ICON_FA_DOOR_OPED" };
+	PaletteSlot const kWindowSlot{ "drawWindowIcon", "The palette's Window icon",
+		"glass", "ICON_FA_WINDOW_MAXIMIZE" };
+
+	// A label reads mid-sentence as often as at the start of one, so the
+	// sentence keeps its own capitalisation rather than the label's.
+	std::string lowerFirst(std::string const& text)
+	{
+		if (text.empty()) return text;
+		auto out = text;
+		out[0] = static_cast<char>(tolower(static_cast<unsigned char>(out[0])));
+		return out;
+	}
+
+	// The tile one palette slot draws, read out of the slot's own draw call
+	// rather than from a constant the slot could stop using. Returns the
+	// literal use, so the caller can name the line it came from.
+	LiteralUse paletteIconTile(ScannedSource const& source, PaletteSlot const& slot)
+	{
+		auto const body = functionBody(source, slot.function);
 		require(body.first != std::string::npos,
-			kEditorPaletteSource + " no longer defines drawDoorIcon, so the "
-			"palette's Door slot is drawn by code this check does not read");
-		auto const open = onlySpriteCall(source, body, "The palette's Door icon");
+			kEditorPaletteSource + " no longer defines " + slot.function
+			+ ", so " + lowerFirst(slot.label) + " is drawn by code this check "
+			"does not read");
+		auto const open = onlySpriteCall(source, body, slot.label);
 		auto const asked = namesAskedBy(source, open);
-		require(asked.size() == 1,
-			"The palette's Door icon's sprite call does not name exactly one "
-			"tile, so there is no single tile to hold the slot's artwork to");
+		require(asked.size() == 1, slot.label
+			+ "'s sprite call does not name exactly one tile, so there is no "
+			"single tile to hold the slot's artwork to");
 		return asked.front();
+	}
+
+	LiteralUse paletteIconTile(smoke::Context const& context, PaletteSlot const& slot)
+	{
+		return paletteIconTile(scanSource(context, kEditorPaletteSource), slot);
+	}
+
+	// One `<var> = objectSpriteSize("tile")` read: the variable the region
+	// lands in and the tile it was asked for.
+	struct RegionRead
+	{
+		std::string variable;
+		LiteralUse tile;
+	};
+
+	// The `<var> = objectSpriteSize("tile")` reads an icon takes from the
+	// installed atlas, within [from, to). The variable name comes back with
+	// each tile literal so the caller can hold the region read and the draw
+	// call to the same tile. An empty result is the shape that lets a
+	// remembered aspect constant back in (#1082); several is reported rather
+	// than guessed at, because the check cannot tell which one sizes the icon.
+	std::vector<RegionRead> regionReadsIn(ScannedSource const& source,
+		std::size_t from, std::size_t to)
+	{
+		std::vector<RegionRead> reads;
+		std::string const call{ "objectSpriteSize(" };
+		to = std::min(to, source.code.size());
+		for (std::size_t at = from; at + call.size() <= to; ++at)
+		{
+			if (source.code.compare(at, call.size(), call) != 0) continue;
+			if (at > from && isIdentChar(source.code[at - 1])) continue;
+			auto const args = callArgumentSpans(source.code, at + call.size() - 1);
+			require(!args.empty(),
+				"an objectSpriteSize call takes no argument to read");
+			auto const asked = trimmed(source.code.substr(args[0].first,
+				args[0].second - args[0].first));
+			require(asked.size() >= 2 && asked.front() == '"'
+					&& asked.back() == '"',
+				"objectSpriteSize is not asked for a literal tile name, so the "
+				"region it returns cannot be traced to one tile");
+			RegionRead read;
+			read.tile = { asked.substr(1, asked.size() - 2),
+				source.lineOf(args[0].first), false };
+			// The variable the region lands in: the identifier on the far side
+			// of the `=` that introduces the call. A comparison rather than an
+			// assignment says the result was tested and thrown away, which sizes
+			// nothing.
+			std::size_t i = at;
+			while (i > from && isSpace(source.code[i - 1])) --i;
+			require(i > from && source.code[i - 1] == '=',
+				"the objectSpriteSize result is not assigned, so nothing "
+				"downstream is sized from the tile's region");
+			require(i < 2 || (source.code[i - 2] != '=' && source.code[i - 2] != '!'
+					&& source.code[i - 2] != '<' && source.code[i - 2] != '>'),
+				"the objectSpriteSize result is compared rather than assigned, so "
+				"nothing downstream is sized from the tile's region");
+			std::size_t end = i - 1;
+			while (end > from && isSpace(source.code[end - 1])) --end;
+			std::size_t start = end;
+			while (start > from && isIdentChar(source.code[start - 1])) --start;
+			require(start < end,
+				"no variable name sits on the left of the objectSpriteSize read");
+			read.variable = source.code.substr(start, end - start);
+			reads.push_back(std::move(read));
+		}
+		return reads;
+	}
+
+	// `<var>` followed by `->` or `.` and an axis letter, starting at `at`.
+	// Returns the axis and the offset just past it.
+	std::optional<std::pair<char, std::size_t>> axisAt(ScannedSource const& source,
+		std::string const& var, std::size_t at, std::size_t to)
+	{
+		if (at + var.size() > to) return std::nullopt;
+		if (source.code.compare(at, var.size(), var) != 0) return std::nullopt;
+		std::size_t i = at + var.size();
+		if (i + 1 < to && source.code[i] == '-' && source.code[i + 1] == '>') i += 2;
+		else if (i < to && source.code[i] == '.') ++i;
+		else return std::nullopt;
+		if (i >= to) return std::nullopt;
+		auto const axis = source.code[i];
+		if (axis != 'x' && axis != 'y') return std::nullopt;
+		return std::make_pair(axis, i + 1);
+	}
+
+	// One `<var>-><axis> / <var>-><axis>` ratio read out of an icon's body.
+	struct AxisRatio
+	{
+		char numerator{ 0 };
+		char denominator{ 0 };
+		std::size_t line{ 0 };
+	};
+
+	// The ratios an icon builds its drawn size from. Either axis order is
+	// read; the check that owns this decides whether the ratio is the tile's
+	// aspect or its inverse, and reports several rather than guessing at one.
+	std::vector<AxisRatio> axisRatiosOf(ScannedSource const& source,
+		std::string const& var, std::size_t from, std::size_t to)
+	{
+		std::vector<AxisRatio> ratios;
+		to = std::min(to, source.code.size());
+		for (std::size_t at = from; at < to; ++at)
+		{
+			if (at > from && isIdentChar(source.code[at - 1])) continue;
+			auto const numerator = axisAt(source, var, at, to);
+			if (!numerator) continue;
+			std::size_t j = numerator->second;
+			while (j < to && isSpace(source.code[j])) ++j;
+			if (j >= to || source.code[j] != '/') continue;
+			++j;
+			while (j < to && isSpace(source.code[j])) ++j;
+			auto const denominator = axisAt(source, var, j, to);
+			if (!denominator) continue;
+			ratios.push_back(AxisRatio{ numerator->first, denominator->first,
+				source.lineOf(at) });
+			// A ratio's two operands cannot start another ratio inside
+			// themselves, so resume past the denominator.
+			at = denominator->second - 1;
+		}
+		return ratios;
 	}
 
 	// The tiles this ticket's contract is about, in the order the renderer
@@ -799,23 +948,24 @@ namespace
 			"file to kTileNamingSources:" + joined);
 	}
 
-	// The editor's palette Door slot draws a tile the shipped atlas carries
-	// and one the Objects contract covers. #1063 is what the gap cost: the
+	// A palette slot draws a tile the shipped atlas carries and one the
+	// Objects contract covers. #1063 is what the gap cost the Door slot: the
 	// bare `door` tile the icon asked for was deleted by #1056, the sprite
 	// call returned false exactly as designed, and the slot became a font
 	// glyph with the suite green. The reverse check above refuses a drawn
-	// name the installed atlas does not carry; this pins the icon's own
-	// shape - one tile named, that tile required - so the slot cannot drift
-	// onto an artwork name nobody sized, and reports it as the palette's
-	// Door icon rather than as a line number in a nine-thousand-line file.
-	void doorPaletteIconNamesACarriedRequiredTile(smoke::Context const& context)
+	// name the installed atlas does not carry; this pins the slot's own
+	// shape - one tile named, that tile required - so a slot cannot drift
+	// onto an artwork name nobody sized, and reports it as the palette slot
+	// it is rather than as a line number in a ten-thousand-line file.
+	void paletteIconNamesACarriedRequiredTile(smoke::Context const& context,
+		PaletteSlot const& slot)
 	{
-		auto const icon = doorPaletteIconTile(context);
+		auto const icon = paletteIconTile(context, slot);
 		auto const where = kEditorPaletteSource + ":" + std::to_string(icon.line);
 
 		auto const atlas = ObjectTileset::load(context.fixture(kNewObjectsTileset));
 		require(atlas.sprites.count(icon.text) != 0,
-			"The palette's Door icon asks the Objects slot for '" + icon.text
+			lowerFirst(slot.label) + " asks the Objects slot for '" + icon.text
 			+ "' (" + where + ") and the shipped Objects atlas does not carry it, "
 			"so the slot draws its font fallback rather than tile artwork (#1063)");
 
@@ -823,93 +973,116 @@ namespace
 		for (auto const& expected : requiredObjectTiles())
 			if (icon.text == expected.tileName) required = true;
 		require(required,
-			"The palette's Door icon draws '" + icon.text + "' (" + where
+			slot.label + " draws '" + icon.text + "' (" + where
 			+ "), which is not in requiredObjectTiles(), so no atlas contract "
 			"covers the tile the slot is drawn from and an atlas could be "
 			"selected that carries it at an extent nothing checked");
 	}
 
-	// The icon keeps its font-glyph fallback, and keeps it where a miss
-	// reaches it: the sprite call tested for failure, and the glyph drawn
-	// as the very next statement. That fallback is what the custom version
-	// 1 theme sets draw for this slot - neither carries a door leaf - so an
-	// icon that lost it would draw an empty slot under those themes instead
+	void doorPaletteIconNamesACarriedRequiredTile(smoke::Context const& context)
+	{
+		paletteIconNamesACarriedRequiredTile(context, kDoorSlot);
+	}
+
+	void windowPaletteIconNamesACarriedRequiredTile(smoke::Context const& context)
+	{
+		paletteIconNamesACarriedRequiredTile(context, kWindowSlot);
+	}
+
+	// The slot keeps its font-glyph fallback, and keeps it where a miss
+	// reaches it: the sprite call tested for failure, and the glyph drawn as
+	// the very next statement. That fallback is what the custom version 1
+	// theme sets draw for these slots - neither carries the tile - so a slot
+	// that lost it would draw an empty tray cell under those themes instead
 	// of the glyph it drew before the tile existed at all (#1063).
-	void doorPaletteIconFallsBackToTheGlyphOnAMiss(smoke::Context const& context)
+	void paletteIconFallsBackToTheGlyphOnAMiss(smoke::Context const& context,
+		PaletteSlot const& slot)
 	{
 		auto const source = scanSource(context, kEditorPaletteSource);
-		auto const body = functionBody(source, "drawDoorIcon");
+		auto const body = functionBody(source, slot.function);
 		require(body.first != std::string::npos,
-			kEditorPaletteSource + " no longer defines drawDoorIcon, so the "
-			"palette's Door slot is drawn by code this check does not read");
-		auto const open = onlySpriteCall(source, body, "The palette's Door icon");
+			kEditorPaletteSource + " no longer defines " + slot.function
+			+ ", so " + lowerFirst(slot.label) + " is drawn by code this check "
+			"does not read");
+		auto const open = onlySpriteCall(source, body, slot.label);
 
 		auto const bang = beforeCallee(source.code, open);
 		require(bang != std::string::npos && source.code[bang] == '!',
-			"The palette's Door icon does not test its sprite call's answer, so a "
-			"set with no door tile leaves the slot blank instead of falling back "
-			"to the glyph (#1063)");
+			slot.label + " does not test its sprite call's answer, so a set with "
+			"no " + slot.noun + " tile leaves the slot blank instead of falling "
+			"back to the glyph (#1063)");
 		auto const guard = previousNonSpace(source.code, bang);
 		require(guard != std::string::npos && source.code[guard] == '(',
-			"The palette's Door icon's test of its sprite call is not an `if`, so "
-			"a miss is routed nowhere (#1063)");
+			slot.label + "'s test of its sprite call is not an `if`, so a miss "
+			"is routed nowhere (#1063)");
 
 		auto const guardClose = callClose(source.code, guard);
 		require(guardClose != std::string::npos && guardClose < body.second,
-			"The palette's Door icon's guard does not close inside its own body, so "
-			"its fallback cannot be read (#1063)");
+			slot.label + "'s guard does not close inside its own body, so its "
+			"fallback cannot be read (#1063)");
 		std::string const fallbackCall{ "drawObjectIcon" };
 		// The statement the guard routes a miss to is the one the guard's own
 		// parenthesis closes over. Reading past the sprite call instead would
 		// land on the guard's closing paren and call it a statement.
 		auto const next = source.code.find_first_not_of(" \t\r\n", guardClose + 1);
 		require(next != std::string::npos && next < body.second,
-			"The palette's Door icon's guard has no statement to route a miss to, "
-			"so a set with no door tile leaves the slot blank (#1063)");
+			slot.label + "'s guard has no statement to route a miss to, so a set "
+			"with no " + slot.noun + " tile leaves the slot blank (#1063)");
 		// A braced body around the fallback says the same thing with two more
 		// characters, so read past it rather than failing on the shape.
 		auto const statement = source.code[next] == '{'
 			? source.code.find_first_not_of(" \t\r\n", next + 1) : next;
 		require(statement != std::string::npos && statement < body.second
 				&& source.code.compare(statement, fallbackCall.size(), fallbackCall) == 0,
-			"The statement after the palette's Door icon's sprite call is not a "
-			"drawObjectIcon fallback, so a miss draws nothing at all (#1063)");
+			"The statement after " + lowerFirst(slot.label) + "'s sprite call is "
+			"not a drawObjectIcon fallback, so a miss draws nothing at all (#1063)");
 		auto const fallbackArgs = callArgumentSpans(source.code,
 			statement + fallbackCall.size());
 		require(!fallbackArgs.empty(),
-			"The palette's Door icon's fallback call takes no arguments to read (#1063)");
+			slot.label + "'s fallback call takes no arguments to read (#1063)");
 		auto const last = trimmed(source.code.substr(fallbackArgs.back().first,
 			fallbackArgs.back().second - fallbackArgs.back().first));
-		require(last == "ICON_FA_DOOR_OPED",
-			"The palette's Door icon's fallback names '" + last + "' rather than "
-			"the door glyph, so the slot's fallback picture is not the door it "
-			"fell back to before the tile existed (#1063)");
+		require(last == slot.glyph,
+			slot.label + "'s fallback names '" + last + "' rather than the "
+			+ slot.noun + " glyph, so the slot's fallback picture is not the "
+			+ slot.noun + " it fell back to before the tile existed (#1063)");
 	}
 
-	// The mechanism the icon's guard tests, run against real atlases rather
-	// than read off the source: the tile the icon names resolves to Object
+	void doorPaletteIconFallsBackToTheGlyphOnAMiss(smoke::Context const& context)
+	{
+		paletteIconFallsBackToTheGlyphOnAMiss(context, kDoorSlot);
+	}
+
+	void windowPaletteIconFallsBackToTheGlyphOnAMiss(smoke::Context const& context)
+	{
+		paletteIconFallsBackToTheGlyphOnAMiss(context, kWindowSlot);
+	}
+
+	// The mechanism the slot's guard tests, run against real atlases rather
+	// than read off the source: the tile the slot names resolves to Object
 	// Atlas geometry while the shipped set is installed, and stops resolving
 	// the moment a set without it is. That second state is the one the
-	// custom version 1 theme sets leave this slot in, and the check above
-	// is what makes it draw the glyph rather than nothing (#1063).
-	void doorPaletteIconTileResolvesOnlyWhenTheAtlasCarriesIt(smoke::Context const& context)
+	// custom version 1 theme sets leave these slots in, and the check above
+	// is what makes them draw the glyph rather than nothing (#1063).
+	void paletteIconTileResolvesOnlyWhenTheAtlasCarriesIt(
+		smoke::Context const& context, PaletteSlot const& slot)
 	{
-		auto const icon = doorPaletteIconTile(context);
+		auto const icon = paletteIconTile(context, slot);
 		auto const shipped = ObjectTileset::load(context.fixture(kNewObjectsTileset));
 		setObjectTileset(shipped, static_cast<TextureId>(1));
 		WorldDrawList drawn(WorldDrawList::ClipRectangle{{-1000, -1000}, {1000, 1000}});
 		require(drawObjectSprite(icon.text.c_str(), &drawn, {10.0f, 10.0f},
 			{62.0f, 90.0f}),
 			"The sprite call refused '" + icon.text + "' from the shipped Objects "
-			"atlas, so the palette's Door slot takes its font fallback under the "
-			"very set the icon names (#1063)");
+			"atlas, so " + lowerFirst(slot.label) + " takes its font fallback "
+			"under the very set the slot names (#1063)");
 		std::size_t quads = 0;
 		for (auto const& command : drawn.commands())
 			if (auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command);
 				triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
 				++quads;
 		require(quads == 2,
-			"The palette's Door icon's tile drew " + std::to_string(quads)
+			lowerFirst(slot.label) + "'s tile drew " + std::to_string(quads)
 			+ " Object Atlas triangles rather than one quad, so the slot is not "
 			"drawing tile artwork (#1063)");
 
@@ -923,9 +1096,109 @@ namespace
 		require(!drawObjectSprite(icon.text.c_str(), &missing, {10.0f, 10.0f},
 			{62.0f, 90.0f}),
 			"The sprite call reported a tile drawn from a set the tile was "
-			"erased from, so the palette's Door icon would never reach its "
-			"fallback (#1063)");
+			"erased from, so " + lowerFirst(slot.label) + " would never reach "
+			"its fallback (#1063)");
 		clearObjectTileset();
+	}
+
+	void doorPaletteIconTileResolvesOnlyWhenTheAtlasCarriesIt(
+		smoke::Context const& context)
+	{
+		paletteIconTileResolvesOnlyWhenTheAtlasCarriesIt(context, kDoorSlot);
+	}
+
+	void windowPaletteIconTileResolvesOnlyWhenTheAtlasCarriesIt(
+		smoke::Context const& context)
+	{
+		paletteIconTileResolvesOnlyWhenTheAtlasCarriesIt(context, kWindowSlot);
+	}
+
+	// The Window palette slot draws its glass at the glass tile's own aspect.
+	// What the slot hardcoded after #1079 retired the pane-sized
+	// `window-clear` tile was that tile's 52/48, which drew the 32 x 80
+	// glass tile about 2.7x wider than it was authored - invisible under the
+	// flat placeholder slab, which has nothing in it to distort, and wrong
+	// the moment an artist puts real glass on the tile, in the one place
+	// they look to see what their tile reads as (#1082).
+	//
+	// What is refused here: a remembered number, because the aspect has to be
+	// read from the installed tile's region so a re-cut of the art moves the
+	// icon with it instead of leaving it stretched; a region read that names
+	// a tile other than the one drawn, which fits the icon to somebody else's
+	// shape; a drawn size not built from that region at all, or built from
+	// more than one candidate this check could not choose between; and a
+	// ratio that does not resolve to the region's width over its height,
+	// which is the same defect turned on its side.
+	//
+	// The Door slot is deliberately not read here. Its constant is a smaller
+	// mismatch against a full-cell leaf, and holding it to the same rule is a
+	// change of its own to make rather than a free rider on this one.
+	void windowPaletteIconDrawsAtTheTileOwnAspect(smoke::Context const& context)
+	{
+		auto const source = scanSource(context, kEditorPaletteSource);
+		auto const body = functionBody(source, kWindowSlot.function);
+		require(body.first != std::string::npos,
+			kEditorPaletteSource + " no longer defines " + kWindowSlot.function
+			+ ", so " + lowerFirst(kWindowSlot.label) + " is drawn by code this "
+			"check does not read");
+		auto const icon = paletteIconTile(source, kWindowSlot);
+		auto const where = kEditorPaletteSource + ":" + std::to_string(icon.line);
+
+		auto const reads = regionReadsIn(source, body.first, body.second);
+		require(!reads.empty(),
+			lowerFirst(kWindowSlot.label) + " reads no tile region from the "
+			"installed atlas, so its aspect is a remembered number rather than "
+			"the tile's own, and a re-cut of the glass would leave the icon "
+			"stretched again (" + where + ") (#1082)");
+		require(reads.size() == 1,
+			kWindowSlot.label + " reads " + std::to_string(reads.size())
+			+ " tile regions from the installed atlas, so this check cannot tell "
+			"which one the drawn aspect is fitted to (#1082)");
+		auto const& read = reads.front();
+		require(read.tile.text == icon.text,
+			kWindowSlot.label + " sizes itself from '" + read.tile.text
+			+ "' but draws '" + icon.text + "', so the aspect it fits to "
+			"describes a different tile than the one it draws (" + where
+			+ ") (#1082)");
+
+		auto const ratios = axisRatiosOf(source, read.variable, body.first,
+			body.second);
+		require(!ratios.empty(),
+			kWindowSlot.label + " does not build its drawn size from a ratio of "
+			"the region it read ('" + read.variable + "' over an axis of it), so "
+			"the drawn aspect cannot be read against the tile's region (#1082)");
+		require(ratios.size() == 1,
+			kWindowSlot.label + " builds " + std::to_string(ratios.size())
+			+ " ratios from the region it read, so this check cannot tell which "
+			"one the drawn size is fitted to (#1082)");
+		auto const& ratio = ratios.front();
+
+		// Resolve the ratio against the shipped atlas's region for the tile
+		// the slot draws, so the numbers compared are the artwork's own
+		// rather than ones this check remembered.
+		auto const atlas = ObjectTileset::load(context.fixture(kNewObjectsTileset));
+		setObjectTileset(atlas, static_cast<TextureId>(1));
+		auto const region = objectSpriteSize(icon.text.c_str());
+		clearObjectTileset();
+		require(region && region->y > 0.0f,
+			"objectSpriteSize('" + icon.text + "') reports no usable region "
+			"under the shipped Objects atlas, so there is no tile aspect to "
+			"hold " + lowerFirst(kWindowSlot.label) + " to (#1082)");
+		auto const component = [region](char axis) {
+			return axis == 'x' ? region->x : region->y;
+		};
+		auto const tileAspect = region->x / region->y;
+		auto const drawnAspect = component(ratio.numerator)
+			/ component(ratio.denominator);
+		require(std::abs(drawnAspect - tileAspect) <= 1e-4f,
+			kWindowSlot.label + " draws '" + icon.text + "' at aspect "
+			+ std::to_string(drawnAspect) + " (" + ratio.numerator + " over "
+			+ ratio.denominator + ") while the installed tile's region is "
+			+ std::to_string(static_cast<int>(region->x)) + " x "
+			+ std::to_string(static_cast<int>(region->y)) + ", aspect "
+			+ std::to_string(tileAspect) + ", so the tile is stretched on its "
+			"way to the palette tray (" + kEditorPaletteSource + ":"
+			+ std::to_string(ratio.line) + ") (#1082)");
 	}
 
 	// Each expectation is composed from the domain's own constants rather
@@ -1128,6 +1401,14 @@ void render_smoke::registerObjectAtlasContract(std::vector<smoke::Check>& checks
 		isolated<doorPaletteIconFallsBackToTheGlyphOnAMiss> });
 	checks.push_back({ "objectAtlasContract/doorPaletteIconTileResolvesOnlyWhenTheAtlasCarriesIt",
 		isolated<doorPaletteIconTileResolvesOnlyWhenTheAtlasCarriesIt> });
+	checks.push_back({ "objectAtlasContract/windowPaletteIconNamesACarriedRequiredTile",
+		isolated<windowPaletteIconNamesACarriedRequiredTile> });
+	checks.push_back({ "objectAtlasContract/windowPaletteIconFallsBackToTheGlyphOnAMiss",
+		isolated<windowPaletteIconFallsBackToTheGlyphOnAMiss> });
+	checks.push_back({ "objectAtlasContract/windowPaletteIconTileResolvesOnlyWhenTheAtlasCarriesIt",
+		isolated<windowPaletteIconTileResolvesOnlyWhenTheAtlasCarriesIt> });
+	checks.push_back({ "objectAtlasContract/windowPaletteIconDrawsAtTheTileOwnAspect",
+		isolated<windowPaletteIconDrawsAtTheTileOwnAspect> });
 	checks.push_back({ "objectAtlasContract/expectedExtentsFollowTheDomainGeometry",
 		isolated<theExpectedExtentsFollowTheDomainGeometry> });
 	checks.push_back({ "objectAtlasContract/aMissingRequiredTileIsRefused",
