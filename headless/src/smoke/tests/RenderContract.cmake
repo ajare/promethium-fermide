@@ -195,6 +195,10 @@ set(names
     windowframeCells/theGlassDrawsInTheSolidPassAndNotInTheWireframeOverlay
     windowframeCells/aMissingGlassTileFallsBackWithoutPunchingAHole
     windowframeCells/theRepeatIsAnchoredToThePaneAndNotToTheWorldGrid
+    windowframeCells/aVersionOneObjectAtlasDrawsItsPaneSizedGlass
+    windowframeCells/eachGlassStyleFallsBackToItsOwnVersionOneTile
+    windowframeCells/theVersionOneGlassStaysOneQuadWhenThePaneGrows
+    windowframeCells/theRepeatingGlassTileIsPreferredOverTheLegacyPaneTile
     sectorTilePreview/oneTileFramesTheRectItIsGiven
     sectorTilePreview/anyRectFramesOneTileAndNotACellGrid
     sectorTilePreview/itIsOneTileWhereTheWorldRepeatIsFour

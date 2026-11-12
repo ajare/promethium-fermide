@@ -204,7 +204,7 @@ authoring them (#1053).
 | `access-panel` | 0.5 x 0.25 | 64 x 80 | the default `AccessPanelGeometry`; a panel authored at another size draws at its own rect |
 | `door-L0`, `door-R0`, `door-tall-L0`, `door-tall-R0`, `door-lift-L0`, `door-lift-R0`, `door-shuttle-L0` | 1.0 x 1.0 | 128 x 320 | one full cell: the aperture clip, not the drawn size, bounds a leaf, so one tile serves every Door width and each family differs by the doorway it is clipped by rather than by what it declares |
 | `button-enabled`, `button-disabled` | 0.1 x 0.04 | 13 x 13 | `CORE_BUTTON_SIZE` x `CORE_BUTTON_SIZE / CORE_CELL_YX_RENDER_RATIO` - square on screen |
-| `window-clear`, `window-frosted`, `window-tinted` | 0.8 x 0.3 | 102 x 96 | `1 - 2 * CORE_WINDOW_X_INSET` x `CORE_WINDOW_HEIGHT` |
+| `glass-clear`, `glass-frosted`, `glass-tinted` | 0.25 x 0.25 | 32 x 80 | the repeating tile's own authored extent - square in World units, which on the anisotropic 128 x 320 grid is 32 x 80 px rather than a square in pixels; the pane is filled by repetition and never by stretching this tile (#1079) |
 | `booth-window-open` (the frame) | 0.8 x 0.3 | 102 x 96 | the same one-cell Window extent: the frame is the Window |
 | `booth-window-shutter` | 0.6461538 x 0.2375 | 83 x 76 | the frame's inner aperture - 42/52 of its width and 38/48 of its height, the frame's wall taking 5 of those 52 px across and 5 of the 48 down on each side |
 | `marker` | 0.25 x 0.1375 | 32 x 44 | the authored art's own reference extent; the icon's on-screen size is screen-space (`MarkerIconSize`) |
@@ -278,6 +278,52 @@ That is the difference the leaf's move to a full cell made (#1056): the bare
 size and was cropped from its own edge to animate, so the extent the art
 claimed and the crop the animation applied were one fact and could not be
 moved apart.
+
+### The glass repeats, and a version 1 set still draws its pane-sized art
+
+A Window's pane is filled by repetition, not by one pane-sized image stretched
+over whatever rectangle the Window happens to be. The shipped set carries one
+tile per glass Style - `glass-clear`, `glass-frosted`, `glass-tinted` - each
+0.25 x 0.25 World units, repeated across the pane from the pane's own
+bottom-left with the last column and row cut rather than squashed (#1079).
+
+The three pane-sized `window-clear` / `-frosted` / `-tinted` tiles that used to
+fill a pane were retired from the shipped sheet by that change, and the version 1
+set kept its copies - which is how a rename came to leave those sets drawing no
+glass at all. #1079 stopped asking for the old names, and a version 1 set has
+nothing under the new ones, so `drawGlassRepeating` returned false at its first
+guard and the pane simply vanished: the frame still framed, the space behind still
+showed, and nothing said so. That is a finished sheet's artwork turned into dead
+pixels, not the unfinished-sheet case the missing-tile answer is written for.
+
+**The answer chosen is that the fallback stays reachable** (#1083). A pane
+resolves through `glassTileOrLegacy`: the repeating `glass-<style>` tile when
+the installed set carries one, otherwise the pane-sized `window-<style>` art,
+drawn as one quad stretched over the whole pane at the extent that art was
+authored for - which for a 1x1 pane is the pane's own 0.8 x 0.3 World units to
+within the tile's pixel rounding, so the picture those themes drew before #1079
+is the picture they draw now. The resolution is a named call rather than a second
+conditional at the draw, in the shape `carriageTileOrLegacy` set for the Shuttle
+carriage (#1021), and the Objects contract reads the second name as the version 1
+arm of a fallback and requires the version 1 set to actually carry it. The
+alternative - dropping the three names from the version 1 required-tile list -
+would have made the silence explicit at the contract while changing the picture
+under `StationFurnitureAtlas` and `DoctorFemale1Atlas` for nothing.
+
+The preference is one-way. A set carrying both vocabularies - one caught
+mid-transition - draws the repeating tile; the fallback exists for a set that has
+nothing else, not as a second answer that competes with the first. A set carrying
+neither draws no glass, which stays the missing-tile answer: no quad, never the
+missing-art colour, and the aperture keeps showing the space behind it instead of
+a hole being punched where the pane should have been.
+
+`render`'s `windowframeCells/*` pins all of it against the real
+`objects.tileset.yaml` rather than a fixture made to conform: a 1x1 pane under a
+version 1 object atlas draws exactly one `window-clear` quad covering its own
+pane and sampling the whole tile at the tile's authored extent; each of the three
+Styles names its own `window-` tile; a 2x1 and a 1x2 pane still draw one quad
+covering the bigger pane rather than repeating; the repeating tile wins where a
+set carries both; and no pass paints the missing-art colour anywhere.
 
 ### The Booth Window is a fixed frame with a shutter behind it
 

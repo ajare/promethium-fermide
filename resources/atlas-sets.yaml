@@ -42,6 +42,15 @@ sets:
   # version 1 tilesets: a v1 object tileset carries the v1 required-tile
   # contract, and these sheets author no render offsets or drawn sizes, so
   # there is nothing in them to move to a v2 set.
+  #
+  # The two object-kind sets below carry no `glass-*` tile - that name
+  # arrived with the v2 sheets and the repeating glass #1079 put behind it.
+  # A Window's pane under them is not left unglazed: the renderer resolves
+  # the pane to `glass-<style>` and, finding no such tile, draws the
+  # pane-sized `window-clear` / `-frosted` / `-tinted` art the same pane
+  # drew before the repeating tile existed, stretched over the pane as one
+  # quad at the extent that art was authored for. Those themes draw glass,
+  # and the v1 required-tile list still names the tiles that say so (#1083).
   StationAtlas:
     kind: sector
     tileset: textures/sectors.tileset.yaml

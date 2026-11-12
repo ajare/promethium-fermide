@@ -82,10 +82,15 @@ namespace
 	// the Window pane's wrapper, and it is a draw call in the sense this
 	// check means: it is the call the glass Style's tile name is handed to,
 	// and a name it were handed that the atlas did not carry would leave the
-	// pane unglazed with nothing saying so (#1079).
+	// pane unglazed with nothing saying so (#1079). `drawGlassOrLegacy` is
+	// the same kind of wrapper one level up - the call the pane's glass is
+	// resolved into and drawn by - and it is listed for the same reason: a
+	// name handed to it that no installed set carried would leave the pane
+	// bare, and the version 1 arm of its resolution is exactly the name the
+	// role-or-legacy tagging below exists to catch (#1083).
 	std::vector<std::string> const kDrawHelpers{
 		"drawObjectSprite(", "drawOffsetTile(", "drawRetractedTile(",
-		"drawPart(", "drawGlassRepeating(",
+		"drawPart(", "drawGlassRepeating(", "drawGlassOrLegacy(",
 	};
 
 	// A tile name reaches a draw call by being an argument to one, or by

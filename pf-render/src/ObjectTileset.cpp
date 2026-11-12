@@ -79,6 +79,19 @@ ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
     // A version 2 set is a different authored set with a different shape;
     // which tiles a World requires from it is validated where the World's
     // atlas selection is resolved, not by holding every old set's list.
+    //
+    // `window-clear` / `-frosted` / `-tinted` stay required because the
+    // renderer still draws them. #1079 moved the shipped set onto the
+    // repeating `glass-<style>` tiles and left these names alone, which
+    // silently left every version 1 set - the custom theme atlases are
+    // authored on this one - drawing no glass at all, because nothing was
+    // asking for the pane-sized art any more. #1083 settled that in favour
+    // of the fallback: `glassTileOrLegacy` resolves a pane to
+    // `glass-<style>` and, when the installed set carries no such tile,
+    // draws the pane-sized `window-<style>` art stretched over the pane as
+    // one quad, which is the extent that art was authored at. So this list
+    // names glass the renderer asks for, and a version 1 set that drops it
+    // loses the pane rather than losing nothing.
     if (version == 1)
     {
         for (auto name : {"door", "button-enabled", "button-disabled", "window-clear", "window-frosted",

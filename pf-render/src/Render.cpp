@@ -1345,6 +1345,72 @@ bool drawGlassRepeating(std::string const& tile, Vec2 paneMin, Vec2 paneMax,
 	return true;
 }
 
+// What a pane's glass resolved to: the tile to wear, and how it is laid
+// down. `tile` is empty when the installed Object set carries neither
+// name, which is the missing-tile answer every tile gives - no quad, never
+// the missing-art colour, and the space behind the aperture keeps showing
+// through the glass's absence instead of a hole being punched where the
+// pane should have been.
+struct GlassDraw
+{
+	std::string tile;
+	// True when the tile repeats across the pane; false when it is one quad
+	// stretched over the whole pane.
+	bool repeats{ false };
+};
+
+// The glass one Window's pane wears, resolved against the installed Object
+// set (#1083).
+//
+// A version 2 set carries `glass-<style>`: one small tile repeated across
+// the pane (#1079). A version 1 set carries no such name. What it carries
+// is the pane-sized `window-<style>` art every World drew before the
+// repeating tile existed - art authored to be stretched over one whole
+// pane, at the pane's own extent. #1079 stopped asking for those names,
+// and every set that only had them was left drawing no glass at all: the
+// frame still framed, the space behind still showed, and the pane was
+// simply missing. That is a finished sheet's artwork turned into dead
+// pixels, not an unfinished sheet being filled one tile at a time, and it
+// is the case this settles rather than leaves as a side effect.
+//
+// The answer chosen is to keep the fallback reachable, the way #1063 kept
+// the Door palette slot's fallback reachable under the same version 1
+// theme sets and the way `carriageTileOrLegacy` keeps a Shuttle carriage
+// drawing its own art under a set that predates the role names. The
+// alternative - dropping `window-clear` / `-frosted` / `-tinted` from the
+// version 1 required-tile contract - would have made the silence explicit
+// at the contract but would have changed the picture under those themes
+// for nothing.
+//
+// The resolution is a named call rather than a second conditional at the
+// draw, so the two authored vocabularies are one decision made in one
+// place, and so the Objects atlas contract reads the second name as what
+// it is: the version 1 arm of a fallback, which the version 1 set is
+// still required to carry.
+GlassDraw glassTileOrLegacy(std::string const& repeating,
+	std::string const& stretched)
+{
+	if (objectTileArtwork(repeating)) return { repeating, true };
+	if (objectTileArtwork(stretched)) return { stretched, false };
+	return {};
+}
+
+// Lays a resolved glass down. A repeating tile fills the pane by
+// repetition; a stretched one is one quad over the pane's whole rect
+// sampling the whole tile, which is the picture the pane-sized art drew
+// before the repeating tile existed (#1083).
+void drawGlassOrLegacy(GlassDraw const& glass, Vec2 paneMin, Vec2 paneMax,
+	WorldDrawList* drawList)
+{
+	if (glass.repeats)
+	{
+		drawGlassRepeating(glass.tile, paneMin, paneMax, drawList);
+		return;
+	}
+	if (!glass.tile.empty())
+		drawObjectSprite(glass.tile.c_str(), drawList, paneMin, paneMax);
+}
+
 void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRenderStyle style, bool selected, WorldDrawList* drawList)
 {
 	if (style == LayerRenderStyle::Hidden)
@@ -1380,11 +1446,17 @@ void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRe
 		// The Style picks the tile and nothing else. The pane's geometry, its
 		// aperture and its clip are identical across all three, exactly as
 		// they were when one pane-sized tile carried the whole opening
-		// (#1079).
-		auto const tile = windowStyle == core::Window::Style::Clear ? "glass-clear"
-			: windowStyle == core::Window::Style::Frosted ? "glass-frosted"
-			: "glass-tinted";
-		drawGlassRepeating(tile, { from.x, from.y }, { to.x, to.y }, drawList);
+		// (#1079). A set that carries no `glass-` tile by that name - a
+		// version 1 set, which is what the custom theme atlases are - falls
+		// back to the pane-sized `window-` art the same pane drew before the
+		// repeating tile existed, so those themes keep drawing glass instead
+		// of an empty opening (#1083).
+		auto const glass = windowStyle == core::Window::Style::Clear
+			? glassTileOrLegacy("glass-clear", "window-clear")
+			: windowStyle == core::Window::Style::Frosted
+			? glassTileOrLegacy("glass-frosted", "window-frosted")
+			: glassTileOrLegacy("glass-tinted", "window-tinted");
+		drawGlassOrLegacy(glass, { from.x, from.y }, { to.x, to.y }, drawList);
 	}
 
 	// The frame, over the glass and over the wall alike. Last, so its

@@ -279,6 +279,64 @@ namespace
 			"this is not the missing-tile state the check means to be in");
 	}
 
+	// The fixture's Object atlas with the version 1 pane-sized names added
+	// beside the repeating tiles - the state a set caught mid-transition is
+	// in. Each new tile takes its own column so it stays readable back out
+	// of the UVs a quad sampled, and each is drawn at the pane-sized extent
+	// the real version 1 art declares (#1083).
+	void installObjectArtWithLegacyPaneTiles()
+	{
+		auto art = gObjectArt;
+		int column = 0;
+		for (auto const& [name, sprite] : art.sprites)
+			column = std::max(column, sprite.region.x + sprite.region.width);
+		for (auto const* name : { "window-clear", "window-frosted",
+			"window-tinted" })
+		{
+			art.sprites.emplace(name, TileArtwork{
+				{ column, 0, kCellWidth, kCellHeight },
+				{ 0.0f, 0.0f }, { 0.8f, 0.3f } });
+			column += kCellWidth;
+		}
+		art.width = column;
+		gObjectArt = art;
+		setObjectTileset(std::move(art), static_cast<TextureId>(2));
+		require(objectTileArtwork("glass-clear")
+				&& objectTileArtwork("window-clear"),
+			"The fixture's Object atlas does not carry both glass vocabularies, "
+			"so the preference checked against it has nothing to prefer");
+	}
+
+	// The real version 1 object tileset installed as the Object atlas. This
+	// is the state a World selecting one of the custom theme sets -
+	// `StationFurnitureAtlas` or `DoctorFemale1Atlas`, both authored on
+	// this very file - leaves the renderer in: no `glass-*` tile by any
+	// name, and the pane-sized `window-clear` / `-frosted` / `-tinted` art
+	// the version 1 required-tile contract still names.
+	void installVersionOneObjectArt(smoke::Context const& context)
+	{
+		auto art = ObjectTileset::load(
+			context.fixture("resources/textures/objects.tileset.yaml"));
+		require(!art.declaresRenderSemantics,
+			"The version 1 object tileset reports declared render semantics, so "
+			"installing it would not be testing the version 1 fallback path");
+		for (auto const* name : { "glass-clear", "glass-frosted",
+			"glass-tinted" })
+			require(art.sprites.count(name) == 0, std::string{ "The version 1 "
+				"set now carries '" } + name + "', so the pane below would not "
+				"be resolving a name the installed set does not have");
+		for (auto const* name : { "window-clear", "window-frosted",
+			"window-tinted" })
+			require(art.sprites.count(name) != 0, std::string{ "The version 1 "
+				"set carries no '" } + name + "', so there is no pane-sized "
+				"glass art left for the fallback to draw");
+		gObjectArt = art;
+		setObjectTileset(std::move(art), static_cast<TextureId>(2));
+		require(hasObjectTileset(),
+			"The version 1 Object atlas did not install, so the pane below has "
+			"no Objects artwork to resolve at all");
+	}
+
 	// The glass tile one Object UV falls on, by the centre of the range the
 	// quad sampled. Each tile owns its own column, so the centre lands on
 	// exactly one of them.
@@ -383,13 +441,17 @@ namespace
 		return name.rfind("windowframe-", 0) == 0;
 	}
 
-	// The glass is keyed by the Style alone, and every glass tile shares the
-	// `glass-` prefix, so the prefix is what separates a pane's glass from
-	// the other Object artwork a Window's pass can carry - the BoothWindow's
-	// frame and shutter draw from the same atlas and are not glass.
+	// The glass is keyed by the Style alone, and two vocabularies carry it:
+	// the version 2 `glass-<style>` tile that repeats across the pane
+	// (#1079) and the version 1 `window-<style>` pane-sized art a set with
+	// no repeating tile falls back to (#1083). Neither prefix is one any
+	// other Object artwork uses - the BoothWindow's frame and shutter are
+	// `booth-window-*`, and they draw from the same atlas without being
+	// glass - so the prefix still separates a pane's glass from everything
+	// else a Window's pass can carry.
 	bool isGlassTile(std::string const& name)
 	{
-		return name.rfind("glass-", 0) == 0;
+		return name.rfind("glass-", 0) == 0 || name.rfind("window-", 0) == 0;
 	}
 
 	std::string tileList(std::vector<DrawnQuad> const& quads)
@@ -3329,6 +3391,243 @@ namespace
 		}
 		require(checked == 2, "The anchor check did not reach both Windows");
 	}
+
+	// ------------------------------------------------------------------
+	// The glass under a version 1 Object atlas (#1083).
+	//
+	// #1079 moved the shipped set onto the repeating `glass-<style>` tiles
+	// and left the version 1 sets - the ones the custom theme atlases are
+	// authored against - holding only the pane-sized `window-<style>` art
+	// they have always held. Nothing asked for those names any more, so every
+	// Window under those themes drew no glass at all: framed, showing the
+	// space behind, and bare where the pane should have been. That is a
+	// finished sheet's artwork turned into dead pixels rather than an
+	// unfinished sheet being filled one tile at a time, and the ticket that
+	// noticed it settled the case instead of leaving it as a side effect.
+	//
+	// The settled answer is that the fallback stays reachable. A pane
+	// resolves to `glass-<style>` and, when the installed set carries no
+	// such tile, wears the pane-sized `window-<style>` art as one quad
+	// stretched over the pane at the extent that art was authored for - the
+	// picture those themes drew before the repeating tile existed. The
+	// checks below pin it so the next rename cannot repeat this one
+	// unnoticed.
+	// ------------------------------------------------------------------
+
+	// Nothing in the pass painted the missing-art colour. A pane's glass is
+	// a tile or it is nothing; it is never a magenta rectangle where the
+	// pane should be.
+	void requireNoMagenta(Pass const& pass, std::string const& label)
+	{
+		for (auto const& q : pass.quads)
+			require(q.colour != kMagenta, label
+				+ " painted the missing-art colour"
+				+ (q.tile.empty() ? std::string{ " on a flat quad" }
+					: " for tile '" + q.tile + "'")
+				+ "; a tile the set does not carry is no tile, not a hole");
+	}
+
+	// A 1x1 pane under a version 1 object atlas is not left bare. The
+	// repeating tile is not in the set by name, so the pane wears
+	// `window-clear`: one quad over the whole pane, sampling the whole
+	// tile, at the extent that art was authored for - which for a 1x1 pane
+	// is the pane's own 0.8 x 0.3 World units to within the tile's own
+	// pixel rounding, so the picture is undistorted exactly where the art
+	// was drawn to sit.
+	void aVersionOneObjectAtlasDrawsItsPaneSizedGlass(smoke::Context const& context)
+	{
+		auto atlas = installAtlas(true);
+		installVersionOneObjectArt(context);
+		auto scene = roomScene();
+		auto const pane = glassRect(*scene.window);
+		auto const pass = recordPass(scene.front, atlas);
+		auto const glass = pass.glass();
+		require(glass.size() == 1, "A Clear pane under a version 1 object "
+			"atlas drew " + std::to_string(glass.size()) + " glass quads; the "
+			"fallback is one pane-sized quad stretched over the pane, which is "
+			"what that art was authored to be");
+		auto const& quad = glass.front();
+		require(quad.tile == "window-clear", "A Clear pane under a version 1 "
+			"object atlas drew '" + quad.tile + "'; the fallback names the "
+			"pane-sized Clear art the set carries, which is `window-clear`");
+		require(quad.rect.sameAs(pane), "The fallback quad does not fill the "
+			"pane it belongs to: quad " + quad.rect.str() + ", pane "
+			+ pane.str());
+
+		// The whole tile is sampled: the pane-sized art draws whole, not cut
+		// and not repeated. The sprite helper insets a tile's sampled range
+		// by half a pixel at each edge so a quad never samples its
+		// neighbour's border, so a whole 48 px tile measures 47 px of the
+		// 48 it owns and the fraction lands just short of 1. The slack below
+		// is that inset and room; a real cut is a fraction of the tile, not
+		// a pixel of it.
+		float across{}, down{};
+		sampledTileFraction(quad, across, down);
+		require(close(across, 1.0f, 0.05f) && close(down, 1.0f, 0.05f),
+			"The fallback quad samples " + std::to_string(across) + " x "
+				+ std::to_string(down) + " of its tile's artwork rather than the "
+				"whole of it, so the pane-sized art is being cut rather than "
+				"stretched across the pane");
+
+		// And the pane's World extent is the tile's authored drawn size to
+		// within that rounding, so the fallback draws the legacy art at the
+		// extent its author sized it for rather than at a size this fixture
+		// made up.
+		auto const art = objectTileArtwork(quad.tile);
+		require(!!art, "The fallback tile vanished from the installed atlas");
+		auto const worldWide = (pane.right - pane.left)
+			/ (float(kCellWidth) * gUISettings.worldZoom);
+		auto const worldHigh = (pane.bottom - pane.top)
+			/ (float(kCellHeight) * gUISettings.worldZoom);
+		require(close(worldWide / art->drawnSize.x, 1.0f, 0.05f)
+				&& close(worldHigh / art->drawnSize.y, 1.0f, 0.05f),
+			"The pane is " + std::to_string(worldWide) + " x "
+				+ std::to_string(worldHigh) + " World units against the tile's "
+				"authored " + std::to_string(art->drawnSize.x) + " x "
+				+ std::to_string(art->drawnSize.y) + ", so the fallback is not "
+				"laying the legacy art on the extent it was authored at");
+
+		requireNoMagenta(pass, "A Clear pane under a version 1 object atlas");
+
+		// The glass lies over the opening rather than punching a hole in it:
+		// the space behind still drew, the frame still lies over the pane,
+		// and the glass sits between them as it does under the shipped set.
+		require(!pass.behindCells().empty(),
+			"The space behind stopped drawing under the version 1 fallback, so "
+			"the aperture is a hole rather than a glazed opening");
+		require(!pass.frameCells().empty(),
+			"The frame stopped drawing over the version 1 fallback");
+		require(*pass.lastIndexOf(pass.behindCells()) < *pass.firstIndexOf(glass),
+			"The version 1 glass is not drawn over the space behind it");
+		require(*pass.lastIndexOf(glass) < *pass.firstIndexOf(pass.frameCells()),
+			"The version 1 glass is not drawn under the frame that lies over it");
+	}
+
+	// The Style picks the fallback tile exactly as it picks the repeating
+	// one. Clear wears `window-clear`, Frosted `window-frosted` and Tinted
+	// `window-tinted`, each filling its own pane with one quad; no Style
+	// wears another's art, and none of the three is left unglazed because
+	// the name it resolves to is a version 1 name.
+	void eachGlassStyleFallsBackToItsOwnVersionOneTile(smoke::Context const& context)
+	{
+		auto atlas = installAtlas(true);
+		installVersionOneObjectArt(context);
+		std::vector<std::pair<core::Window::Style, std::string>> const styles{
+			{ core::Window::Style::Clear, "window-clear" },
+			{ core::Window::Style::Frosted, "window-frosted" },
+			{ core::Window::Style::Tinted, "window-tinted" },
+		};
+		for (auto const& [style, expected] : styles)
+		{
+			auto scene = roomScene();
+			std::const_pointer_cast<core::Window>(scene.window)->setState(
+				core::Window::State::Closed, style);
+			require(scene.window->getStyle() == style,
+				"The fixture Window did not take the glass Style it was set to");
+			auto const pane = glassRect(*scene.window);
+			auto const pass = recordPass(scene.front, atlas);
+			auto const glass = pass.glass();
+			require(glass.size() == 1, "A '" + expected + "' pane under a "
+				"version 1 object atlas drew " + std::to_string(glass.size())
+				+ " glass quads; one pane-sized tile fills one pane");
+			require(glass.front().tile == expected, "A pane set to the '"
+				+ expected + "' Style drew '" + glass.front().tile
+				+ "'; the glass Style picks the tile and nothing else, so one "
+				"Style must never wear another's art");
+			require(glass.front().rect.sameAs(pane), "A '" + expected
+				+ "' pane's fallback quad does not fill its own pane: quad "
+				+ glass.front().rect.str() + ", pane " + pane.str());
+			requireNoMagenta(pass, "A '" + expected + "' pane under a version "
+				"1 object atlas");
+		}
+	}
+
+	// The version 1 picture is one quad per pane whatever the pane's size,
+	// because that is what pane-sized art means: a wider pane stretches the
+	// same whole tile across more World units rather than repeating it. That
+	// is the pre-#1079 picture kept whole under these sets, and it is what
+	// tells the fallback apart from the repeat - which is what a set that
+	// carries `glass-` art does instead.
+	void theVersionOneGlassStaysOneQuadWhenThePaneGrows(smoke::Context const& context)
+	{
+		auto atlas = installAtlas(true);
+		installVersionOneObjectArt(context);
+		std::vector<std::pair<uint32_t, uint32_t>> const spans{
+			{ 1, 1 }, { 2, 1 }, { 1, 2 } };
+		std::vector<ScreenRect> panes;
+		for (auto const& [wide, high] : spans)
+		{
+			auto const label = std::to_string(wide) + "x" + std::to_string(high);
+			auto scene = squareRoomScene(wide, high);
+			auto const pane = glassRect(*scene.window);
+			auto const pass = recordPass(scene.front, atlas);
+			auto const glass = pass.glass();
+			require(glass.size() == 1, "A " + label + " pane under a version 1 "
+				"object atlas drew " + std::to_string(glass.size())
+				+ " glass quads; the pane-sized fallback is one quad per pane, "
+				"not one quad per tile");
+			require(glass.front().tile == "window-clear", "A " + label
+				+ " pane under a version 1 object atlas drew '" + glass.front().tile
+				+ "'; the Clear Style names `window-clear` whatever the pane's "
+				"size");
+			require(glass.front().rect.sameAs(pane), "A " + label
+				+ " pane's fallback quad does not fill its own pane: quad "
+				+ glass.front().rect.str() + ", pane " + pane.str());
+			float across{}, down{};
+			sampledTileFraction(glass.front(), across, down);
+			require(close(across, 1.0f, 0.05f) && close(down, 1.0f, 0.05f),
+				"A " + label + " pane's fallback quad samples only "
+				+ std::to_string(across) + " x " + std::to_string(down)
+				+ " of its tile, so the pane-sized art is being cut rather than "
+				"stretched to the pane");
+			requireNoMagenta(pass, "A " + label + " pane under a version 1 "
+				"object atlas");
+			panes.push_back(pane);
+		}
+		// The panes really did grow while the tile stayed one quad, so what
+		// the checks above read is a tile stretched over a bigger pane and
+		// not three copies of one rectangle: the wide span is wider than
+		// the 1x1 pane by more than the tile's own width, and the tall span
+		// taller by more than the tile's own height.
+		require(panes.size() == 3, "The pane sweep did not reach all three spans");
+		require(panes[1].right - panes[1].left
+				> (panes[0].right - panes[0].left) * 1.5f,
+			"The 2x1 span's pane is no wider than the 1x1 pane's, so the sweep "
+			"cannot see the tile being stretched across it");
+		require(panes[2].bottom - panes[2].top
+				> (panes[0].bottom - panes[0].top) * 1.5f,
+			"The 1x2 span's pane is no taller than the 1x1 pane's, so the "
+			"sweep cannot see the tile being stretched up it");
+	}
+
+	// The repeating tile wins wherever the installed set carries it. The
+	// fallback exists for a set that has nothing else, not as a second
+	// answer that competes with the first: a set caught mid-transition,
+	// carrying both the repeating `glass-` tiles and the old pane-sized
+	// ones, draws the repeat rather than the stretch.
+	void theRepeatingGlassTileIsPreferredOverTheLegacyPaneTile(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		installObjectArt();
+		installObjectArtWithLegacyPaneTiles();
+		auto scene = roomScene();
+		auto const pass = recordPass(scene.front, atlas);
+		auto const glass = pass.glass();
+		require(glass.size() > 1, "A pane whose set carries both the repeating "
+			"tile and the legacy pane-sized tile drew "
+			+ std::to_string(glass.size()) + " glass quads; the repeating tile "
+			"is what a pane wears when the installed set has it");
+		for (auto const& quad : glass)
+			require(quad.tile.rfind("glass-", 0) == 0, "A set carrying both "
+				"glass vocabularies drew '" + quad.tile + "' for its pane; the "
+				"repeating `glass-` tile is preferred over the pane-sized "
+				"`window-` art");
+		for (auto const& quad : pass.objectQuads())
+			require(quad.tile.rfind("window-", 0) != 0, "The legacy pane-sized "
+				"tile '" + quad.tile + "' drew even though the installed set "
+				"carries the repeating glass tile the pane prefers");
+		requireNoMagenta(pass, "A set carrying both glass vocabularies");
+	}
 }
 
 void render_smoke::registerWindowframeCells(std::vector<smoke::Check>& checks)
@@ -3423,4 +3722,12 @@ void render_smoke::registerWindowframeCells(std::vector<smoke::Check>& checks)
 		isolated<aMissingGlassTileFallsBackWithoutPunchingAHole> });
 	checks.push_back({ "windowframeCells/theRepeatIsAnchoredToThePaneAndNotToTheWorldGrid",
 		isolated<theRepeatIsAnchoredToThePaneAndNotToTheWorldGrid> });
+	checks.push_back({ "windowframeCells/aVersionOneObjectAtlasDrawsItsPaneSizedGlass",
+		isolated<aVersionOneObjectAtlasDrawsItsPaneSizedGlass> });
+	checks.push_back({ "windowframeCells/eachGlassStyleFallsBackToItsOwnVersionOneTile",
+		isolated<eachGlassStyleFallsBackToItsOwnVersionOneTile> });
+	checks.push_back({ "windowframeCells/theVersionOneGlassStaysOneQuadWhenThePaneGrows",
+		isolated<theVersionOneGlassStaysOneQuadWhenThePaneGrows> });
+	checks.push_back({ "windowframeCells/theRepeatingGlassTileIsPreferredOverTheLegacyPaneTile",
+		isolated<theRepeatingGlassTileIsPreferredOverTheLegacyPaneTile> });
 }
