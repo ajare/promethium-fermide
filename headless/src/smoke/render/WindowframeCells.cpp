@@ -1,16 +1,22 @@
 // A 1x1 Window wears a windowframe over its wall (#1075), a wide Window
-// frames its whole span as one opening (#1076), and a tall Window frames
-// its span with a head across the top and a sill along the bottom
-// (#1077).
+// frames its whole span as one opening (#1076), a tall Window frames its
+// span with a head across the top and a sill along the bottom (#1077),
+// and a Window that is wide *and* tall frames its corners and interior
+// edges so the role grid closes at fifteen tiles (#1078).
 //
 // The tracer bullet for the windowframe series pinned everything the wide,
 // tall and corner tickets hang off, in the smallest complete shape the
 // feature can take: the atlas carries the frame, the renderer derives it
 // from the live Window rather than from anything painted, and it lands
 // over the wall's own tile without taking anything away. The wide work
-// added the horizontal axis of the role grid; the tall work here adds the
-// vertical one. The frame a cell wears now depends on where that cell sits
-// in the opening's span on both axes, not only on the opening existing.
+// added the horizontal axis of the role grid; the tall work added the
+// vertical one; the corner work fills the wide columns of the tall rows,
+// where a cell is an end of the span in both directions at once and
+// carries its jamb and its head or sill together. The frame a cell wears
+// depends on where that cell sits in the opening's span on both axes, and
+// every one of those positions now has a tile - except the all-middle
+// cell, which asks for nothing because the middle of a big opening is all
+// glass with no moulding on it.
 //
 // The four layers a Window puts down, in order:
 //
@@ -44,6 +50,14 @@
 //     hole reaches the cell's bottom edge where the glass runs down into
 //     it, so the holes join into one continuous aperture across the cell
 //     boundary;
+//   * a span that is wide and tall has corners, and a corner is joined and
+//     not butted: the cell that is the span's left end *and* its top
+//     carries the left jamb and the head on one tile, at neither the
+//     jamb's position alone nor the head's but the corner's, so no
+//     moulding stops short where the two meet and no second tile is laid
+//     over the first. The interior edges carry one moulding across a
+//     whole cell - head, sill, or jamb - and the all-middle cell asks for
+//     no tile at all;
 //   * a Window on a back Layer, seen through a clear Window in the Layer
 //     in front, wears its own frame. It arrives through the aperture
 //     recursion - the far wall is drawn under the near Window's clip, and
@@ -86,6 +100,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -113,14 +128,17 @@ namespace
 	WorldDrawList::ClipRectangle const kNoClip{ { -100000.0f, -100000.0f },
 		{ 100000.0f, 100000.0f } };
 
-	// The frames the shipped set authors: the whole single-level row of
-	// the role grid, and the whole single-column column of it - the wide
-	// single-level opening and the tall single-column one. The grid has
-	// fifteen cells; the wide columns of the three tall rows are the
-	// corner work that hangs off this.
+	// The frames the shipped set authors: the whole role grid, fifteen
+	// tiles - sixteen cells less the all-middle one, which asks for no
+	// tile at all. The single-level row, the single-column column, and the
+	// wide columns of the three tall rows where a span has corners and
+	// interior edges.
 	std::vector<std::string> const kWindowframes{ "windowframe-SS",
 		"windowframe-SL", "windowframe-SM", "windowframe-SR",
-		"windowframe-TS", "windowframe-MS", "windowframe-BS" };
+		"windowframe-TS", "windowframe-MS", "windowframe-BS",
+		"windowframe-TL", "windowframe-TM", "windowframe-TR",
+		"windowframe-ML", "windowframe-MR",
+		"windowframe-BL", "windowframe-BM", "windowframe-BR" };
 
 	// The Facade's own colour, distinct from the tint every other pass in
 	// this file is drawn with, so "the frame lies over the Facade's own
@@ -836,6 +854,31 @@ namespace
 			CORE_ROOM_MAX_HEIGHT, false, 1, tall);
 	}
 
+	// A Room `wide` cells by `tall` levels with a Window of the same size
+	// set into it, so the span has corners on both axes and - once it is
+	// three or more in each direction - an interior cell that is middle in
+	// both. The wall is two cells wider than the opening so a check can
+	// see the cells outside the span wearing no frame; the height is the
+	// span's own, because a framed cell that stood above the ceiling would
+	// be trimmed rather than absent and the two need telling apart.
+	Scene squareRoomScene(uint32_t wide, uint32_t tall, uint32_t windowX = 1)
+	{
+		return buildScene("room", wide + 2, tall, windowX, 0,
+			CORE_ROOM_MAX_HEIGHT, false, wide, tall);
+	}
+
+	Scene squareCorridorScene(uint32_t wide, uint32_t tall, uint32_t windowX = 1)
+	{
+		return buildScene("corridor", wide + 2, tall, windowX, 0,
+			CORE_CORRIDOR_HEIGHT, false, wide, tall);
+	}
+
+	Scene squareFacadeScene(uint32_t wide, uint32_t tall, uint32_t windowX = 1)
+	{
+		return buildScene("facade", wide + 2, tall, windowX, 0,
+			CORE_ROOM_MAX_HEIGHT, false, wide, tall);
+	}
+
 	// A fixture carrying more than one Window, which `buildScene` cannot
 	// build because it resolves the front wall by asking the World which
 	// Sector fronts a Window and insists the answer is one. Here the front
@@ -1426,6 +1469,350 @@ namespace
 		require(drawnRoom == "windowframe-BS, windowframe-MS, windowframe-TS",
 			"A 3-level opening did not draw the tall triple bottom to top: "
 			+ drawnRoom);
+	}
+
+	// A 2x2 Window frames its four cells as one opening with corners: the
+	// bottom row wears `windowframe-BL` and `windowframe-BR`, the top row
+	// `windowframe-TL` and `windowframe-TR`. Each corner carries both its
+	// jamb and its head or sill, and carries them as one tile rather than
+	// as the edge tile of one axis with the other axis's tile laid over it:
+	// the cell that is the span's left end and its top wears a tile that
+	// is neither `BM` nor `ML` but the corner between them.
+	void aTwoByTwoWindowFramesItsCornersTogether(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto scene = squareRoomScene(2, 2);
+		require(scene.window->getCellsWide() == 2
+				&& scene.window->getLevelsHigh() == 2,
+			"The fixture Window is not 2x2");
+		auto const pass = recordPass(scene.front, atlas);
+		auto const frames = gridOf(pass.frameCells(), *scene.front);
+		require(frames.size() == 4, "A 2x2 Window drew "
+			+ std::to_string(frames.size()) + " frame cells; a span with "
+			"corners is framed on all four of its cells");
+		require(tileAt(frames, 1, 0) == "windowframe-BL",
+			"The bottom-left cell of a 2x2 Window wore " + tileAt(frames, 1, 0)
+				+ "; a cell that is the span's left end and its bottom carries "
+				"the jamb and the sill together, on one tile");
+		require(tileAt(frames, 2, 0) == "windowframe-BR",
+			"The bottom-right cell of a 2x2 Window wore " + tileAt(frames, 2, 0));
+		require(tileAt(frames, 1, 1) == "windowframe-TL",
+			"The top-left cell of a 2x2 Window wore " + tileAt(frames, 1, 1)
+				+ "; a cell that is the span's left end and its top carries the "
+				"jamb and the head together, on one tile");
+		require(tileAt(frames, 2, 1) == "windowframe-TR",
+			"The top-right cell of a 2x2 Window wore " + tileAt(frames, 2, 1));
+		require(tileAt(frames, 0, 0) == "<nothing>"
+				&& tileAt(frames, 3, 0) == "<nothing>"
+				&& tileAt(frames, 0, 1) == "<nothing>"
+				&& tileAt(frames, 3, 1) == "<nothing>",
+			"A cell outside the 2x2 span wore a frame: "
+				+ tileList(pass.frameCells()));
+		// The corner is its own tile and not one of the two edge roles it
+		// combines. Had the derivation asked for the horizontal role alone
+		// the corner would have worn `BM`, and the vertical alone `ML`; both
+		// would put moulding where the corner's is not, and neither says
+		// what the cell is.
+		require(tileAt(frames, 1, 0) != "windowframe-BM"
+				&& tileAt(frames, 1, 0) != "windowframe-ML",
+			"The bottom-left corner wore an edge tile rather than the corner "
+			"tile: " + tileAt(frames, 1, 0));
+		require(tileAt(frames, 1, 1) != "windowframe-TM"
+				&& tileAt(frames, 1, 1) != "windowframe-ML",
+			"The top-left corner wore an edge tile rather than the corner "
+			"tile: " + tileAt(frames, 1, 1));
+	}
+
+	// A 3x3 Window frames its whole edge with the correct corner and edge
+	// roles on every cell: corners at the four ends of both axes, head and
+	// sill across the top and bottom middles, jambs down the left and right
+	// middles, and nothing at all in the middle.
+	void aThreeByThreeWindowFramesItsWholeEdge(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto scene = squareRoomScene(3, 3);
+		require(scene.window->getCellsWide() == 3
+				&& scene.window->getLevelsHigh() == 3,
+			"The fixture Window is not 3x3");
+		auto const pass = recordPass(scene.front, atlas);
+		auto const frames = gridOf(pass.frameCells(), *scene.front);
+		require(frames.size() == 8, "A 3x3 Window drew "
+			+ std::to_string(frames.size()) + " frame cells; the whole edge of "
+			"a 3x3 span is framed - eight cells - and the ninth asks for "
+			"nothing");
+
+		struct Expectation
+		{
+			uint32_t column{};
+			uint32_t level{};
+			std::string tile;
+		};
+		std::vector<Expectation> const edge{
+			{ 1, 0, "windowframe-BL" }, { 2, 0, "windowframe-BM" },
+			{ 3, 0, "windowframe-BR" },
+			{ 1, 1, "windowframe-ML" }, { 3, 1, "windowframe-MR" },
+			{ 1, 2, "windowframe-TL" }, { 2, 2, "windowframe-TM" },
+			{ 3, 2, "windowframe-TR" } };
+		for (auto const& want : edge)
+			require(tileAt(frames, want.column, want.level) == want.tile,
+				"The cell at column " + std::to_string(want.column) + ", level "
+					+ std::to_string(want.level) + " of a 3x3 Window wore "
+					+ tileAt(frames, want.column, want.level) + ", expected "
+					+ want.tile);
+		// Nothing outside the span framed.
+		for (uint32_t column = 0; column < 5; ++column)
+			for (uint32_t level = 0; level < 3; ++level)
+				if (column < 1 || column > 3)
+					require(tileAt(frames, column, level) == "<nothing>",
+						"A cell outside the 3x3 span wore a frame at column "
+							+ std::to_string(column) + ", level "
+							+ std::to_string(level) + ": "
+							+ tileAt(frames, column, level));
+	}
+
+	// The all-middle cell of a 3x3 Window asks for no tile at all and
+	// emits nothing. It is not answered by a transparent tile: there is no
+	// quad at that cell in the frame pass, so nothing is sampled, nothing
+	// is blended, and the wall's own tile underneath is all that lies
+	// there. A transparent tile would have been a tile - authored,
+	// installed, sampled, drawn - standing in for the absence of one, and
+	// the absence is the point: the middle of a big opening is all glass
+	// with no moulding on it.
+	void theAllMiddleCellOfA3x3AsksForNoTileAndEmitsNothing(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		installObjectArt();
+		auto scene = squareRoomScene(3, 3);
+		auto const pass = recordPass(scene.front, atlas);
+
+		// The name the derivation gives the middle cell is empty, and the
+		// atlas is never even asked to resolve it into a tile.
+		require(windowframeTileName(3, 3, 1, 1).empty(),
+			"The all-middle cell of a 3x3 asked for a tile: "
+				+ windowframeTileName(3, 3, 1, 1));
+		auto const frames = gridOf(pass.frameCells(), *scene.front);
+		require(frames.count({ 2, 1 }) == 0,
+			"The all-middle cell of a 3x3 drew a frame: "
+				+ tileAt(frames, 2, 1));
+		// And nothing but the wall's own tile drew that whole cell. The
+		// wall is there because the wall keeps its tile whatever stands in
+		// it, and the glass is there over the space behind; what is not
+		// there is any moulding tile - not a transparent one, not a
+		// placeholder, nothing.
+		auto const wall = gridOf(pass.wallCells(), *scene.front);
+		require(wall.count({ 2, 1 }) == 1
+				&& wall.at({ 2, 1 }).tile == "room",
+			"The wall under the all-middle cell stopped drawing its own tile, "
+			"so the absence of a frame there would be an absence of the wall "
+			"rather than an absence of moulding");
+		require(!pass.glass().empty(),
+			"The 3x3 fixture drew no glass, so 'the middle is all glass' "
+			"would be an assertion about nothing");
+		auto const middleCell = cellRect(*scene.front, 2, 1);
+		for (auto const& q : pass.quads)
+			require(!(q.ownClip && q.texture == WorldDrawList::Texture::SectorAtlas
+					&& q.rect.sameAs(middleCell) && q.tile != "room"),
+				"Something other than the wall's own tile drew a whole Sector "
+				"cell at the all-middle position: " + q.tile);
+	}
+
+	// The interior cell's empty answer is the same answer a missing tile
+	// gets, and neither produces the missing-art colour. The all-middle cell
+	// and a cell whose frame the atlas does not carry are two different
+	// facts - one is "there is no moulding here", the other is "the
+	// moulding for this cell has not been drawn yet" - and they arrive at
+	// the same place in the draw: no tile asked for, nothing emitted, no
+	// magenta. That is what lets the grid be filled one tile at a time and
+	// what keeps a World drawn against an older atlas drawing the wall it
+	// always drew rather than a hole.
+	void theInteriorCellsEmptyAnswerIsTheMissingTilesAnswer(smoke::Context const&)
+	{
+		// With the whole grid installed, the middle cell asks for nothing.
+		auto atlas = installAtlas(true);
+		auto scene = squareRoomScene(3, 3);
+		auto const pass = recordPass(scene.front, atlas);
+		require(pass.frameCells().size() == 8,
+			"A 3x3 over the full grid drew "
+			+ std::to_string(pass.frameCells().size()) + " frames, not 8");
+		require(gridOf(pass.frameCells(), *scene.front).count({ 2, 1 }) == 0,
+			"The all-middle cell drew a tile over the full grid");
+		for (auto const& q : pass.quads)
+			require(q.colour != kMagenta,
+				"A cell drew the missing-art colour with the whole role grid "
+				"installed; the all-middle cell asks for no tile and that is "
+				"not a missing tile");
+
+		// With an atlas that carries no frames at all, every cell of the
+		// same span gets the same answer - nothing drawn, no magenta - and
+		// the wall stays whole. The two answers are indistinguishable on
+		// the wire, which is the point.
+		auto bare = installAtlas(false);
+		auto const barePass = recordPass(scene.front, bare);
+		require(barePass.frameCells().empty(),
+			"A frame drew from an atlas that authors none: "
+			+ tileList(barePass.frameCells()));
+		for (auto const& q : barePass.quads)
+			require(q.colour != kMagenta,
+				"A missing frame drew the missing-art colour; a frame that was "
+				"never authored is no frame, not a hole");
+		require(gridOf(barePass.wallCells(), *scene.front).size()
+				== gridOf(pass.wallCells(), *scene.front).size(),
+			"Taking the frames away took a wall cell with it; the wall is "
+			"drawn the same whether or not a frame lies over it");
+		// And the empty answer is the answer the resolver gives, not an
+		// answer the loop happens to skip: asked for the all-middle cell
+		// and for a name the atlas does not carry, it gives the same empty
+		// string and the atlas answers neither.
+		require(windowframeTileName(3, 3, 1, 1).empty()
+				&& !hasSectorTileOverlay(windowframeTileName(3, 3, 1, 1)),
+			"The all-middle cell's empty name resolved to a tile the loop "
+			"could have drawn");
+		require(!hasSectorTileOverlay("windowframe-ZZ"),
+			"A name the atlas does not carry resolved as though it did");
+	}
+
+	// Every frame of a span with corners still lies over the wall's own
+	// tile and is still drawn last - on every cell of the span, not only
+	// on the ones a single-level window would have had. A 3x3 puts its
+	// wall's tile down under all nine cells, then the space behind, then
+	// the glass, then the eight frame tiles, so the moulding reads as the
+	// edge of the opening at every point of the edge and the corner cells
+	// are covered by the same pass that covers the middles.
+	void theCornerFramesAreDrawnLastOverTheWallTileOnEveryCell(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		installObjectArt();
+		auto scene = squareRoomScene(3, 3);
+		auto const pass = recordPass(scene.front, atlas);
+		auto const wall = gridOf(pass.wallCells(), *scene.front);
+		auto const frames = gridOf(pass.frameCells(), *scene.front);
+		require(pass.frameCells().size() == 8 && pass.wallCells().size() == 15,
+			"The 3x3 fixture's draw was missing a layer: wall "
+			+ std::to_string(pass.wallCells().size()) + ", frames "
+			+ std::to_string(pass.frameCells().size()));
+		auto const lastWall = *pass.lastIndexOf(pass.wallCells());
+		auto const lastBehind = *pass.lastIndexOf(pass.behindCells());
+		auto const lastGlass = *pass.lastIndexOf(pass.glass());
+		for (uint32_t column = 1; column <= 3; ++column)
+			for (uint32_t level = 0; level < 3; ++level)
+			{
+				if (column == 2 && level == 1) continue;	// asks for nothing
+				require(frames.count({ column, level }) == 1,
+					"The cell at column " + std::to_string(column) + ", level "
+						+ std::to_string(level) + " of the span drew no frame");
+				require(wall.count({ column, level }) == 1,
+					"The cell at column " + std::to_string(column) + ", level "
+						+ std::to_string(level) + " drew no wall tile");
+				auto const& over = frames.at({ column, level });
+				auto const& under = wall.at({ column, level });
+				require(over.index > lastWall,
+					"The frame at column " + std::to_string(column) + ", level "
+						+ std::to_string(level)
+						+ " was drawn before the wall tile it lies over");
+				require(over.index > lastBehind,
+					"The frame at column " + std::to_string(column) + ", level "
+						+ std::to_string(level)
+						+ " was drawn before the space behind");
+				require(over.index > lastGlass,
+					"The frame at column " + std::to_string(column) + ", level "
+						+ std::to_string(level)
+						+ " was drawn before the glass it covers the seam of");
+				require(near(over.rect.left, under.rect.left)
+						&& near(over.rect.right, under.rect.right),
+					"The frame at column " + std::to_string(column) + ", level "
+						+ std::to_string(level) + " is not on the cell its wall "
+						"tile is: wall " + under.rect.str() + ", frame "
+						+ over.rect.str());
+				require(under.tile == "room",
+					"The wall under a cornered span stopped drawing its own tile");
+			}
+	}
+
+	// The corner frame is trimmed at the ceiling too. A Room standing 0.9
+	// of a cell per level has a ceiling that cuts across the cell's top,
+	// and the trim lands on the whole top *row* of a wide tall span - both
+	// corners and the head between them - while the levels under them keep
+	// their whole cells. Only the top of the span meets the ceiling, but
+	// the top of the span is a row once the span is wide.
+	void theCornerFrameIsTrimmedAtTheCeilingOnTheTopRow(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto scene = squareRoomScene(3, 3, 1);
+		core::Vector2 lo{}, hi{};
+		scene.front->getBounds(lo, hi);
+		auto const ceiling = std::min(toScreen(lo).y, toScreen(hi).y);
+		auto const cellHeight = CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
+
+		auto const pass = recordPass(scene.front, atlas);
+		require(!pass.frameCells().empty(),
+			"The cornered fixture drew no frame to trim");
+		for (auto const& frame : pass.frameCells())
+			require(frame.rect.top >= ceiling - 0.01f,
+				"A frame stood " + std::to_string(ceiling - frame.rect.top)
+					+ " pixels above the ceiling it is moulding at "
+					+ frame.rect.str());
+		auto const frames = gridOf(pass.frameCells(), *scene.front);
+		for (uint32_t column = 1; column <= 3; ++column)
+		{
+			require(frames.count({ column, 2 }) == 1,
+				"The top row of the span lost a cell, so there is no frame to "
+				"check the trim on at column " + std::to_string(column));
+			auto const& top = frames.at({ column, 2 });
+			require(near(top.rect.top, ceiling),
+				"The top-row frame at column " + std::to_string(column)
+					+ " was not cut back to the ceiling: its top is at "
+					+ std::to_string(top.rect.top) + ", the ceiling is at "
+					+ std::to_string(ceiling));
+			require(top.rect.bottom - top.rect.top < cellHeight - 0.01f,
+				"The top-row frame at column " + std::to_string(column)
+					+ " is a whole cell tall, so the trim never touched it and "
+					"moulding stands above the ceiling");
+		}
+		// The two levels under the top row keep their whole cells.
+		for (uint32_t level = 0; level < 2; ++level)
+			for (uint32_t column = 1; column <= 3; ++column)
+			{
+				if (column == 2 && level == 1) continue;
+				require(near(frames.at({ column, level }).rect.bottom
+						- frames.at({ column, level }).rect.top, cellHeight),
+					"A level under the top row was trimmed as well; only the top "
+					"of the span meets the ceiling");
+			}
+		// And the wall tiles it lies on are trimmed the same way.
+		for (auto const& wall : pass.wallCells())
+			require(wall.rect.top >= ceiling - 0.01f,
+				"A wall tile stood above its own ceiling; the trim cannot be "
+				"compared against a wall that is not trimmed either");
+	}
+
+	// The same frame names draw in a Room, a Corridor and a Facade alike,
+	// for a span with corners as for every other span. The corner tiles
+	// carry moulding and nothing else, and the moulding does not know a
+	// Room from a Corridor from a Facade - so a 2x2 opening draws the same
+	// four names in all three, and no wall-keyed frame name draws anywhere.
+	void everyWallFramesACorneredOpeningTheSameWay(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto const drawnRoom = tileList(recordPass(squareRoomScene(2, 2).front,
+			atlas).frameCells());
+		auto const drawnCorridor = tileList(recordPass(
+			squareCorridorScene(2, 2).front, atlas).frameCells());
+		auto const drawnFacade = tileList(recordPass(
+			squareFacadeScene(2, 2).front, atlas).frameCells());
+		require(drawnRoom == drawnCorridor && drawnCorridor == drawnFacade,
+			"A 2x2 opening drew a different frame per wall: Room " + drawnRoom
+				+ ", Corridor " + drawnCorridor + ", Facade " + drawnFacade);
+		require(drawnRoom == "windowframe-BL, windowframe-BR, windowframe-TL, "
+				"windowframe-TR",
+			"A 2x2 opening did not draw its four corners bottom-up, left to "
+			"right: " + drawnRoom);
+		// No wall-keyed frame name draws anywhere across all three walls.
+		for (auto const* drawn : { &drawnRoom, &drawnCorridor, &drawnFacade })
+			for (auto const* wall : { "room", "corridor", "facade" })
+				require(drawn->find(wall) == std::string::npos,
+					"A drawn frame name carries the wall '" + std::string{ wall }
+						+ "'; a frame laid over the wall's own tile does not "
+						"vary with the wall: " + *drawn);
 	}
 
 	// A Window on a back Layer, seen through a clear Window in the Layer in
@@ -2024,6 +2411,21 @@ namespace
 			"1x2 top cell: single column, top of a taller span");
 		require(windowframeTileName(3, 3, 0, 1) == "windowframe-ML",
 			"3x3 middle-left: leftmost column, middle level");
+		require(windowframeTileName(3, 3, 2, 1) == "windowframe-MR",
+			"3x3 middle-right: rightmost column, middle level");
+		require(windowframeTileName(2, 2, 0, 0) == "windowframe-BL",
+			"2x2 bottom-left corner: leftmost column, bottom of the span");
+		require(windowframeTileName(2, 2, 1, 0) == "windowframe-BR",
+			"2x2 bottom-right corner: rightmost column, bottom of the span");
+		require(windowframeTileName(2, 2, 0, 1) == "windowframe-TL",
+			"2x2 top-left corner: leftmost column, top of the span");
+		require(windowframeTileName(2, 2, 1, 1) == "windowframe-TR",
+			"2x2 top-right corner: rightmost column, top of the span");
+		require(windowframeTileName(3, 2, 1, 1) == "windowframe-TM",
+			"3x2 top-middle: middle column, top of the span - the head alone");
+		require(windowframeTileName(3, 3, 1, 0) == "windowframe-BM",
+			"3x3 bottom-middle: middle column, bottom of the span - the sill "
+			"alone");
 		// The all-middle cell asks for no tile rather than wearing a
 		// transparent one: a span that is middle in both directions is all
 		// glass with no moulding on it, and the empty name is the same
@@ -2031,6 +2433,11 @@ namespace
 		require(windowframeTileName(3, 3, 1, 1).empty(),
 			"The all-middle cell of a 3x3 asked for a tile; it is all glass "
 			"with no moulding and asks for nothing");
+		require(windowframeTileName(4, 4, 1, 1).empty()
+				&& windowframeTileName(4, 4, 2, 2).empty(),
+			"An all-middle cell of a bigger span asked for a tile; every span "
+			"has exactly one cell per axis that is middle in both, and it asks "
+			"for nothing whatever the span's size");
 
 		// The name carries the opening and nothing else. No wall, no glass
 		// style, no Window State appears in any name the derivation
@@ -2061,12 +2468,17 @@ namespace
 		require(!hasSectorTileSurface("windowframe-SS"),
 			"A windowframe answered the Sector-surface query; it is a tile of "
 			"the atlas but not a surface a Sector is authored with");
-		// The wide row and the tall column are carried on the same terms as
-		// the single-column tile: overlays the render path can ask for and
-		// the surface query never answers.
-		for (auto const* frame : { "windowframe-SL", "windowframe-SM",
-				"windowframe-SR", "windowframe-TS", "windowframe-MS",
-				"windowframe-BS" })
+		// The whole role grid is carried on the same terms as the
+		// single-column tile: overlays the render path can ask for and the
+		// surface query never answers. All fifteen, because the grid is
+		// filled - every cell of every span has its tile, and the only cell
+		// with none is the all-middle one, which asks for nothing.
+		for (auto const* frame : { "windowframe-SS", "windowframe-SL",
+				"windowframe-SM", "windowframe-SR", "windowframe-TS",
+				"windowframe-MS", "windowframe-BS", "windowframe-TL",
+				"windowframe-TM", "windowframe-TR", "windowframe-ML",
+				"windowframe-MR", "windowframe-BL", "windowframe-BM",
+				"windowframe-BR" })
 		{
 			require(hasSectorTileOverlay(frame),
 				std::string{ frame }
@@ -2076,6 +2488,39 @@ namespace
 				std::string{ frame } + " answered the Sector-surface query; a "
 				"windowframe is never a Sector surface");
 		}
+		// And the derivation never produces a name the grid does not have.
+		// Every cell of every span up to 7x4 - wider and taller than any
+		// opening the grid was sized for - answers one of the fifteen names
+		// or the empty string, and nothing else. That is what "the grid
+		// closes here" means on the derivation side: no bigger opening
+		// needs a tile that is not already drawn.
+		std::set<std::string> const grid{ "windowframe-SS", "windowframe-SL",
+			"windowframe-SM", "windowframe-SR", "windowframe-TS",
+			"windowframe-TL", "windowframe-TM", "windowframe-TR",
+			"windowframe-MS", "windowframe-ML", "windowframe-MR",
+			"windowframe-BS", "windowframe-BL", "windowframe-BM",
+			"windowframe-BR" };
+		require(grid.size() == 15,
+			"The role grid states " + std::to_string(grid.size())
+				+ " tiles; it closes at fifteen, sixteen cells less the "
+				"all-middle one");
+		for (uint32_t wide = 1; wide <= 7; ++wide)
+			for (uint32_t high = 1; high <= 4; ++high)
+				for (uint32_t column = 0; column < wide; ++column)
+					for (uint32_t level = 0; level < high; ++level)
+					{
+						auto const name = windowframeTileName(wide, high, column,
+							level);
+						if (name.empty()) continue;
+						require(grid.count(name) == 1,
+							"A span " + std::to_string(wide) + "x"
+								+ std::to_string(high) + " asked for '" + name
+								+ "', which is not one of the fifteen tiles the "
+								"role grid closes at");
+						require(hasSectorTileOverlay(name),
+							"A span asked for '" + name
+								+ "' and the installed atlas does not carry it");
+					}
 	}
 }
 
@@ -2137,6 +2582,20 @@ void render_smoke::registerWindowframeCells(std::vector<smoke::Check>& checks)
 		isolated<theTallFrameIsTrimmedAtTheCeiling> });
 	checks.push_back({ "windowframeCells/everyWallFramesATallOpeningTheSameWay",
 		isolated<everyWallFramesATallOpeningTheSameWay> });
+	checks.push_back({ "windowframeCells/aTwoByTwoWindowFramesItsCornersTogether",
+		isolated<aTwoByTwoWindowFramesItsCornersTogether> });
+	checks.push_back({ "windowframeCells/aThreeByThreeWindowFramesItsWholeEdge",
+		isolated<aThreeByThreeWindowFramesItsWholeEdge> });
+	checks.push_back({ "windowframeCells/theAllMiddleCellOfA3x3AsksForNoTileAndEmitsNothing",
+		isolated<theAllMiddleCellOfA3x3AsksForNoTileAndEmitsNothing> });
+	checks.push_back({ "windowframeCells/theInteriorCellsEmptyAnswerIsTheMissingTilesAnswer",
+		isolated<theInteriorCellsEmptyAnswerIsTheMissingTilesAnswer> });
+	checks.push_back({ "windowframeCells/theCornerFramesAreDrawnLastOverTheWallTileOnEveryCell",
+		isolated<theCornerFramesAreDrawnLastOverTheWallTileOnEveryCell> });
+	checks.push_back({ "windowframeCells/theCornerFrameIsTrimmedAtTheCeilingOnTheTopRow",
+		isolated<theCornerFrameIsTrimmedAtTheCeilingOnTheTopRow> });
+	checks.push_back({ "windowframeCells/everyWallFramesACorneredOpeningTheSameWay",
+		isolated<everyWallFramesACorneredOpeningTheSameWay> });
 	checks.push_back({ "windowframeCells/aWindowOnABackLayerWearsItsOwnFrameThroughTheAperture",
 		isolated<aWindowOnABackLayerWearsItsOwnFrameThroughTheAperture> });
 	checks.push_back({ "windowframeCells/theFrameNameIsTheOpeningAndNothingElse",

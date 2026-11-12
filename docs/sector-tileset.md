@@ -743,20 +743,71 @@ overlays:
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
     hole: [13, 0, 102, 256]
+  windowframe-TL:
+    cell: [16, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [13, 224, 115, 96]
+  windowframe-TM:
+    cell: [17, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [0, 224, 128, 96]
+  windowframe-TR:
+    cell: [18, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [0, 224, 115, 96]
+  windowframe-ML:
+    cell: [16, 2]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [13, 0, 115, 320]
+  windowframe-MR:
+    cell: [18, 2]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [0, 0, 115, 320]
+  windowframe-BL:
+    cell: [16, 3]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [13, 0, 115, 256]
+  windowframe-BM:
+    cell: [17, 3]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [0, 0, 128, 256]
+  windowframe-BR:
+    cell: [18, 3]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [0, 0, 115, 256]
 ```
 
 ### The block is the role grid
 
 The windowframe block is four columns by four rows, and the grid *is* the
 legend: an artist reads the role off where a tile sits rather than
-decoding a numbering.
+decoding a numbering. It is filled right out, and it closes here.
 
-|            | col 15 `S` | col 16 `L` | col 17 `M` | col 18 `R` |
-| ---------- | ---------- | ---------- | ---------- | ---------- |
-| row 0 `S`  | inset on both edges | inset left, hole to the right edge | hole the full cell width | hole from the left edge, inset right |
-| row 1 `T`  | single column, top cell | left cell, top | middle column, top | right cell, top |
-| row 2 `M`  | single column, middle level | left cell, middle | *all glass, asks for nothing* | right cell, middle |
-| row 3 `B`  | single column, bottom cell | left cell, bottom | middle column, bottom | right cell, bottom |
+| | col 15 `S` | col 16 `L` | col 17 `M` | col 18 `R` |
+| --- | --- | --- | --- | --- |
+| row 0 `S` | `SS` - inset on both edges, band above and below | `SL` - left jamb, hole to the right edge | `SM` - hole the full cell width, band above and below | `SR` - hole from the left edge, right jamb |
+| row 1 `T` | `TS` - head and both jambs | `TL` - head and left jamb, joined at the corner | `TM` - head only, full cell width | `TR` - head and right jamb, joined at the corner |
+| row 2 `M` | `MS` - jambs only, full cell height | `ML` - left jamb only, full cell height | *all glass - asks for no tile at all* | `MR` - right jamb only, full cell height |
+| row 3 `B` | `BS` - sill and both jambs | `BL` - sill and left jamb, joined at the corner | `BM` - sill only, full cell width | `BR` - sill and right jamb, joined at the corner |
+
+Fifteen tiles. Sixteen cells in the grid less the all-middle one, which
+has no tile because there is nothing to draw there.
 
 The name is `windowframe-<vertical><horizontal>`, with the vertical role
 first so `BL` reads as "bottom-left" the way it is said. The horizontal
@@ -769,15 +820,23 @@ lowest in the window.
 The all-middle cell - middle in both directions - asks for no tile. A
 span that is middle in both directions is all glass with no moulding on
 it, and the empty name the derivation gives there is the same answer a
-missing tile gives: nothing drawn, no frame, no magenta.
+missing tile gives: nothing drawn, no frame, no magenta. It is not
+answered by a transparent tile. A transparent tile would still be a tile
+- authored, installed, sampled, drawn - standing in for the absence of
+one, and the absence is the whole point.
 
-Only the single-level row and the single-column column are filled: the
-whole wide single-level opening and the whole tall single-column one. The
-wide columns of the three tall rows - an opening that is tall *and* wide,
-and so has corners where a head meets a jamb - arrive with the corner work
-that hangs off this, and the block is built one tile at a time because a
-cell asking for a tile the sheet does not carry draws no frame rather than
-a hole.
+**The grid closes at fifteen.** Every cell of every span is one of these
+fifteen positions: an end or a middle on each of two axes, with the one
+combination that needs no art left empty. So the same fifteen tiles frame
+a 1x1 window and a 7x4 one, and a bigger opening than either asks for
+nothing that is not already drawn. That is not a convenience of the
+count, it is what the two axes say: a cell's frame is a function of
+where it sits in the span and of nothing else, and there are only
+fifteen answers to that question. Widening a span turns `SS` into `SL`
+plus `SM`s plus `SR`; heightening it turns `SS` into `BS` plus `MS`s
+plus `TS`; doing both turns the corners into `BL`, `BR`, `TL` and `TR`
+and leaves the interior cells between them asking for the edge roles or
+for nothing. Nothing new appears.
 
 This is why the sheet is **2432 x 1280** - nineteen columns by four rows
 - rather than the 1920 x 1280 it was: twelve surface columns, three for
@@ -869,6 +928,49 @@ checked as columns and not only tile by tile, because a hole that stopped
 short of the seam and one that overshot it are both wrong in a way no
 single tile shows.
 
+### The corners: both axes at once
+
+A span that is wide *and* tall has cells that are ends in both directions
+at once, and those cells carry both mouldings. The corner is joined and
+not butted: `BL` is the `B` sill and the `L` jamb on one tile, with the
+hole inset 0.1 at the left because the span ends there, stopped 0.2 above
+the floor line because that is where the glass stands, and running to the
+cell's top and right edges because the glass carries on past both.
+
+| Tile | What it carries | Hole on the 128 x 320 cell |
+| ---- | ------------- | ------------------------ |
+| `BL` | sill + left jamb | `x 13..128`, `y 0..256` |
+| `BM` | sill only | `x 0..128`, `y 0..256` |
+| `BR` | sill + right jamb | `x 0..115`, `y 0..256` |
+| `ML` | left jamb only | `x 13..128`, `y 0..320` |
+| `MR` | right jamb only | `x 0..115`, `y 0..320` |
+| `TL` | head + left jamb | `x 13..128`, `y 224..320` |
+| `TM` | head only | `x 0..128`, `y 224..320` |
+| `TR` | head + right jamb | `x 0..115`, `y 224..320` |
+
+What carrying two mouldings does **not** do is move the hole off the seam
+on the sides that face into the span. A `BL` that stopped short of its own
+top edge would lay a bar across the glass where the corner meets the
+level above it; one that stopped short of its right edge would put a
+vertical moulding inside the opening at the join with `BM`. Neither is
+visible in the corner tile on its own, which is why the corners are
+checked as the joined rect of the whole span: the bottom row of a 2x2
+has to join to the same 230px the single-level wide row joins to, and
+the left column of a 3x3 to the same 672px the single-column tall span
+makes, because the span's insets are the same on every row and column and
+only the band differs.
+
+The interior edges - `TM`, `BM`, `ML`, `MR` - carry one moulding across a
+whole cell. They are the edge roles of one axis with the other axis's
+cells on either side of them asking for their own, and they are what makes
+a 3x3's edge read as a head across the top and a sill across the bottom
+rather than as four corners with a gap between them.
+
+And the all-middle cell carries nothing, because there is nothing to
+carry: it is not an end of the span in either direction, so no moulding
+falls inside it, and the derivation asks for no tile at all rather than
+wearing a transparent one.
+
 ### Why the Furniture role vocabulary cannot carry this
 
 Furniture names its pieces `<piece>-<role><level>`, and the trailing digit
@@ -942,8 +1044,11 @@ where the tileset says, that the frame is an overlay and not a surface,
 that it declares no variant family, that the block's cell matches the
 role the name states, that the wide row's holes join into the one
 aperture the whole span calls for, that the tall column's holes do the
-same up the other axis, and that every frame is declared in the `ImageSet`
-the install pairs against.
+same up the other axis, that the corners and interior edges join the two
+axes into one rect on both of them, that the wall-keyed naming the
+doorframe already refuses cannot come back under the window name, and
+that every one of the fifteen frames is declared in the `ImageSet` the
+install pairs against.
 
 ### What a Window draws, in order
 
@@ -965,12 +1070,14 @@ nothing else: not the glass style, not the Window's State, not the wall.
 The same tile frames a Room, a Corridor and a Facade alike, and the
 Facade's flat fill still spans every cell with the frame laid over it.
 
-That ordering holds on **every** cell of a wider span, not just the first.
-A 3-wide Window puts its wall's tile down under all three cells, then the
-space behind, then the glass, then the three frame tiles - so the
-moulding reads as the edge of the opening at both ends of the span and
-the middle cell's glass is covered by the same pass that covers the
-end cells'.
+That ordering holds on **every** cell of a wider span, not just the first
+and not just on one axis. A 3-wide Window puts its wall's tile down under
+all three cells, then the space behind, then the glass, then the three
+frame tiles - so the moulding reads as the edge of the opening at both
+ends of the span and the middle cell's glass is covered by the same pass
+that covers the end cells'. A 3x3 does it across all nine cells and its
+eight frame tiles, corners and interior edges included, and the one cell
+with no frame over it is the all-middle one, which asked for none.
 
 ### A BoothWindow wears none
 
@@ -989,12 +1096,15 @@ A Room standing 0.9 of a cell tall has a ceiling that cuts across the
 cell's top. The frame is trimmed to the front wall's bounds rather than
 drawn full-cell, so no moulding stands above the ceiling it is moulding.
 
-On a tall span the trim lands on the head cell alone. A three-level Room
-stands 2.9 cells - three levels at 1.0 with the top one at 0.9 - while
-three whole cells of frame would end at 3.0, so the head is cut back to
-the ceiling and the two levels under it keep their whole cells. The wall
-tile underneath is cut the same way by the same loop, so the frame lands
-on that tile at the same crop rather than above it.
+On a tall span the trim lands on the head row - the whole top row of the
+span, not just its head cell. A three-level Room stands 2.9 cells - three
+levels at 1.0 with the top one at 0.9 - while three whole cells of frame
+would end at 3.0, so the head is cut back to the ceiling and the two
+levels under it keep their whole cells. Once the span is wide the trim
+carries across that row: both top corners and the head tile between them
+are cut to the same line, because the ceiling does not stop at the
+corner. The wall tile underneath is cut the same way by the same loop,
+so the frame lands on that tile at the same crop rather than above it.
 
 ### A window seen through a window wears its own frame
 

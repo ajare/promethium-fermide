@@ -101,7 +101,8 @@
 # strip and its three variant rows - because neither frame needs a row per
 # wall: six doorframes, two rows in the three doorframe columns, and the
 # two cells below them stay empty, and the windowframes take the four
-# fresh columns as the role grid itself, described below.
+# fresh columns as the role grid itself, filled right out to its fifteen
+# tiles, described below.
 #
 # ## Windowframe overlays
 #
@@ -144,20 +145,19 @@
 # two-column window's left cell. Forcing the shape would make one
 # convention mean two different things in two different files.
 #
-# The set carries the whole single-level row now: `windowframe-SS`, the
-# single-column cell of the 1x1 window, and the three tiles of the wide
-# single-level opening - `windowframe-SL`, `windowframe-SM` and
-# `windowframe-SR` - which is what makes a two- or three-cell window one
-# opening rather than two or three adjacent ones. And it carries the
-# single-column column all the way down: `windowframe-BS`, `windowframe-MS`
-# and `windowframe-TS` frame the bottom, middle and top cell of a tall
-# single-column window, which is what makes a tall window read as tall
-# rather than as a stack of identical cells. The wide columns of those
-# tall rows - a span that is tall *and* wide, and so has corners - arrive
-# with the work that hangs off this; a cell whose frame the installed
-# atlas does not carry draws nothing, exactly as it does for a missing
-# doorframe, so the block can be filled one tile at a time and no World
-# ever draws a hole where a frame has not been drawn yet.
+# The block is filled out. It carries the whole single-level row -
+# `windowframe-SS` and the wide single-level triple `SL`, `SM`, `SR` -
+# the whole single-column column - `windowframe-BS`, `windowframe-MS`,
+# `windowframe-TS` - and the wide columns of the three tall rows, where
+# a span is tall *and* wide and so has corners: `windowframe-TL`,
+# `windowframe-TM`, `windowframe-TR` across the top, `windowframe-ML`
+# and `windowframe-MR` down the middle, and `windowframe-BL`,
+# `windowframe-BM`, `windowframe-BR` across the bottom. Fifteen tiles,
+# which is the whole of the grid: every cell of every span is answered by
+# its position, and the grid closes here. The same fifteen tiles frame a
+# 1x1 window and a 7x4 one, because a cell's frame is a function of
+# where it sits in the span and of nothing else, and every place in a
+# span is one of these fifteen.
 #
 # The hole is rounded down from the glass rect the frame frames - the
 # same rule the doorframes use, for the same reason. A Window's glass is
@@ -412,11 +412,11 @@ overlays:
   # are the horizontal role `S L M R`, rows top to bottom are
   # single-level, top cell, middle cell, bottom cell. A tile's place in
   # the block is the place its cell holds in the opening it frames, so an
-  # artist reads the grid off the sheet. The single-level row is filled
-  # across and the single-column column is filled down; the wide columns
-  # of the three tall rows are the grid's remaining shape, waiting for
-  # the corner work, and a cell asking for a tile the sheet does not carry
-  # draws no frame rather than a hole.
+  # artist reads the grid off the sheet. The block is filled right out:
+  # fifteen tiles, every cell of every span answered by its position, and
+  # the one cell left empty is the all-middle cell, where no tile is asked
+  # for because the middle of a big opening is all glass with no moulding
+  # on it.
   windowframe-SS:
     # The block's single-column, single-level cell: the 1x1 Window.
     cell: [15, 0]
@@ -502,3 +502,107 @@ overlays:
     # u[0.1,0.9], v[0.2,1.0]: inset at each end of the column, stopped
     # 0.2 above the cell's floor line and running to the cell's top edge.
     hole: [13, 0, 102, 256]
+
+  # The corners: a cell that is an end of the span in *both* directions
+  # carries both mouldings at once, joined rather than butted. The hole is
+  # still the glass rect that falls inside this cell and nothing else, so
+  # the jamb and the head meet on the hole's corner instead of one of them
+  # stopping short and leaving the other to be seen end-on. Each is the
+  # same inset it has on its own axis - 0.1 at the span's left and right
+  # ends, 0.2 above the span's floor line, 0.3 down from where the glass
+  # tops out - and neither is doubled because the other is there as well.
+  windowframe-TL:
+    # The block's left-column, top cell: the top-left corner of a span
+    # that is wide and tall. The jamb runs down the span's left end and
+    # the head runs across its top, and they meet at this cell's top-left;
+    # the hole runs to the cell's right edge and its bottom edge, because
+    # the glass carries on past both into the cells beyond.
+    cell: [16, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # u[0.1,1.0], v[0.0,0.3]: inset at the span's left end, stopped
+    # 0.3 above this cell's floor line, and running to the seam on both
+    # other sides.
+    hole: [13, 224, 115, 96]
+  windowframe-TM:
+    # The block's middle-column, top cell: the head of a wide tall span
+    # with no jamb in it. Nothing is inset horizontally inside a middle
+    # column, so the hole is the full width of the cell and the head is
+    # the only moulding - a head running straight across the top of the
+    # opening with jambs somewhere else.
+    cell: [17, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # u[0.0,1.0], v[0.0,0.3]: the whole cell width, stopped 0.3 above
+    # this cell's floor line.
+    hole: [0, 224, 128, 96]
+  windowframe-TR:
+    # The block's right-column, top cell: the top-right corner, the
+    # mirror of `windowframe-TL` across the vertical axis.
+    cell: [18, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # u[0.0,0.9], v[0.0,0.3]: from the cell's left edge, inset at the
+    # span's right end, stopped 0.3 above this cell's floor line.
+    hole: [0, 224, 115, 96]
+  windowframe-ML:
+    # The block's left-column, middle cell: a level of a wide tall span
+    # that is neither the top nor the bottom of it, at the span's left
+    # end. Jamb only - the sill and the head belong to the ends of the
+    # span and are not here - so the hole runs the whole height of the
+    # cell and is inset 0.1 at the left.
+    cell: [16, 2]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # u[0.1,1.0], v[0.0,1.0]: inset at the span's left end, the whole
+    # cell height.
+    hole: [13, 0, 115, 320]
+  windowframe-MR:
+    # The block's right-column, middle cell: the mirror of
+    # `windowframe-ML`. Jamb only, running the whole cell height.
+    cell: [18, 2]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # u[0.0,0.9], v[0.0,1.0]: the whole cell height, inset at the span's
+    # right end.
+    hole: [0, 0, 115, 320]
+  windowframe-BL:
+    # The block's left-column, bottom cell: the bottom-left corner of a
+    # wide tall span. Sill and jamb together - the hole stops 0.2 above
+    # the cell's floor line, which is the sill, and 0.1 in from the cell's
+    # left edge, which is the jamb, and runs to the seam on both other
+    # sides so the aperture joins the cells above and to the right.
+    cell: [16, 3]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # u[0.1,1.0], v[0.2,1.0]: inset at the span's left end and 0.2 above
+    # the span's floor line, running to the cell's top edge.
+    hole: [13, 0, 115, 256]
+  windowframe-BM:
+    # The block's middle-column, bottom cell: the sill of a wide tall
+    # span with no jamb in it. The hole is the full width of the cell and
+    # stops 0.2 above the floor line, so the sill runs straight across the
+    # bottom of the opening with the jambs somewhere else.
+    cell: [17, 3]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # u[0.0,1.0], v[0.2,1.0]: the whole cell width, stopped 0.2 above
+    # the span's floor line.
+    hole: [0, 0, 128, 256]
+  windowframe-BR:
+    # The block's right-column, bottom cell: the bottom-right corner, the
+    # mirror of `windowframe-BL` across the vertical axis.
+    cell: [18, 3]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # u[0.0,0.9], v[0.2,1.0]: from the cell's left edge, inset at the
+    # span's right end and 0.2 above the span's floor line.
+    hole: [0, 0, 115, 256]

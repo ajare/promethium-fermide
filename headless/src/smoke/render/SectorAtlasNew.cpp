@@ -100,25 +100,35 @@ namespace
 		"doorframe-1t-L0", "doorframe-2t-L0", "doorframe-2t-R0" };
 
 	// The windowframes the set authors (#1075, wide row #1076, tall column
-	// #1077). Keyed by where the cell sits in the opening it frames - the
-	// vertical role first, so `BL` reads as "bottom-left" the way it is
-	// said - and by nothing else: not the glass style, not the Window's
-	// State, not the wall.
+	// #1077, corners and interior edges #1078). Keyed by where the cell
+	// sits in the opening it frames - the vertical role first, so `BL`
+	// reads as "bottom-left" the way it is said - and by nothing else: not
+	// the glass style, not the Window's State, not the wall.
 	//
-	// The single-level row is filled across and the single-column column is
-	// filled down. `windowframe-SS` is the single-column, single-level
-	// cell, which is the 1x1 Window that is eight of the ten windows every
-	// bundled document authors; `SL`/`SM`/`SR` are the wide single-level
-	// opening, a jamb at each end and no vertical moulding in the middle;
-	// and `BS`/`MS`/`TS` are the tall single-column opening, a sill under
-	// the bottom cell, jambs only down the middle and a head over the top.
-	// The wide columns of the three tall rows - an opening that is tall
-	// *and* wide, and so has corners - arrive with the corner work, and a
-	// cell asking for a tile the sheet does not carry draws no frame rather
-	// than a hole, so the block can be filled one tile at a time.
+	// The block is filled right out to its fifteen tiles. `windowframe-SS`
+	// is the single-column, single-level cell, which is the 1x1 Window that
+	// is eight of the ten windows every bundled document authors;
+	// `SL`/`SM`/`SR` are the wide single-level opening, a jamb at each end
+	// and no vertical moulding in the middle; `BS`/`MS`/`TS` are the tall
+	// single-column opening, a sill under the bottom cell, jambs only down
+	// the middle and a head over the top; and the wide columns of the
+	// three tall rows are the openings that are tall *and* wide, where a
+	// corner carries its jamb and its head or sill together
+	// (`TL`/`TR`/`BL`/`BR`) and an interior edge carries one moulding
+	// across a whole cell (`TM` head, `BM` sill, `ML`/`MR` jamb).
+	//
+	// Fifteen is the whole vocabulary, not a milestone. Sixteen cells in
+	// the role grid less the all-middle one, which asks for no tile at all:
+	// the middle of a span that is middle in both directions is all glass
+	// with no moulding on it. Every cell of every span is one of these
+	// fifteen positions, so the same tiles frame a 1x1 window and a 7x4
+	// one and nothing further is ever needed for a bigger opening.
 	std::vector<std::string> const kWindowframes{ "windowframe-SS",
 		"windowframe-SL", "windowframe-SM", "windowframe-SR",
-		"windowframe-TS", "windowframe-MS", "windowframe-BS" };
+		"windowframe-TS", "windowframe-MS", "windowframe-BS",
+		"windowframe-TL", "windowframe-TM", "windowframe-TR",
+		"windowframe-ML", "windowframe-MR",
+		"windowframe-BL", "windowframe-BM", "windowframe-BR" };
 
 	// The sheet cell each frame holds, which is the pair of roles read off
 	// the block rather than decoded from a name: columns 15..18 are the
@@ -137,8 +147,16 @@ namespace
 		{ "windowframe-SM", { 17, 0 } },
 		{ "windowframe-SR", { 18, 0 } },
 		{ "windowframe-TS", { 15, 1 } },
+		{ "windowframe-TL", { 16, 1 } },
+		{ "windowframe-TM", { 17, 1 } },
+		{ "windowframe-TR", { 18, 1 } },
 		{ "windowframe-MS", { 15, 2 } },
-		{ "windowframe-BS", { 15, 3 } } };
+		{ "windowframe-ML", { 16, 2 } },
+		{ "windowframe-MR", { 18, 2 } },
+		{ "windowframe-BS", { 15, 3 } },
+		{ "windowframe-BL", { 16, 3 } },
+		{ "windowframe-BM", { 17, 3 } },
+		{ "windowframe-BR", { 18, 3 } } };
 
 	// ------------------------------------------------------------------
 	// The atlas as the application holds it.
@@ -536,8 +554,8 @@ namespace
 			"SectorAtlas authors " + std::to_string(authored.overlays.size())
 			+ " overlays; the doorframe block is six, one per opening width, "
 			"height class and role, and the windowframe block carries the "
-			"single-level row and the single-column column of the role grid "
-			"on top of them");
+			"whole role grid on top of them - fifteen tiles, sixteen cells "
+			"less the all-middle one that asks for no tile");
 		for (auto const& name : kDoorframes)
 		{
 			require(authored.overlays.count(name),

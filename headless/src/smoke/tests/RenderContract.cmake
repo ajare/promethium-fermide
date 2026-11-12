@@ -178,6 +178,13 @@ set(names
     windowframeCells/theTallOpeningIsOneContinuousAperture
     windowframeCells/theTallFrameIsTrimmedAtTheCeiling
     windowframeCells/everyWallFramesATallOpeningTheSameWay
+    windowframeCells/aTwoByTwoWindowFramesItsCornersTogether
+    windowframeCells/aThreeByThreeWindowFramesItsWholeEdge
+    windowframeCells/theAllMiddleCellOfA3x3AsksForNoTileAndEmitsNothing
+    windowframeCells/theInteriorCellsEmptyAnswerIsTheMissingTilesAnswer
+    windowframeCells/theCornerFramesAreDrawnLastOverTheWallTileOnEveryCell
+    windowframeCells/theCornerFrameIsTrimmedAtTheCeilingOnTheTopRow
+    windowframeCells/everyWallFramesACorneredOpeningTheSameWay
     windowframeCells/aWindowOnABackLayerWearsItsOwnFrameThroughTheAperture
     windowframeCells/theFrameNameIsTheOpeningAndNothingElse
     sectorTilePreview/oneTileFramesTheRectItIsGiven

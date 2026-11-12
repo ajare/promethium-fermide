@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""The windowframe tiles the shipped Sector atlas authors (#1075).
+"""The windowframe tiles the shipped Sector atlas authors (#1075, #1076,
+#1077, #1078).
 
 A windowframe is the moulding laid over the wall's own tile around the
 opening a Window stands in. Its transparent hole is the glass the frame
@@ -22,10 +23,10 @@ The frame is keyed by where its cell sits in the opening's span and by
 nothing else. The block on the sheet *is* the role grid: columns left to
 right are the horizontal role `S L M R`, rows top to bottom are
 single-level, top cell, middle cell, bottom cell, so an artist reads the
-grid off the sheet rather than learning a numbering. The single-level row
-is filled across - the 1x1 Window and the wide single-level opening - and
-the single-column column is filled down - the tall single-column opening
-with its head, its sill and its levels in between.
+grid off the sheet rather than learning a numbering. The grid closes at
+fifteen tiles - sixteen cells less the all-middle one, where no tile is
+asked for - and those fifteen answer every cell of every span, so the
+same tiles frame a 1x1 window and a 7x4 one.
 
 The wide row is where the horizontal roles earn their keep. A span's inset
 belongs to the *ends of the span*, not to every cell: a 2-wide Window's
@@ -54,6 +55,19 @@ that stopped short of the cell's bottom edge would lay a transom of
 moulding across the glass; an `MS` hole that missed any of the cell would
 put a head or a sill in the middle of a span that has neither.
 
+The corners are both axes at once, and they are where the grid closes. A
+cell that is an end of the span in both directions carries its jamb and
+its head or sill together, joined rather than butted: `BL` is `B`'s sill
+and `L`'s jamb on one tile, with the hole inset 0.1 at the left and
+stopped 0.2 above the floor line and running to the seam on its other two
+sides. Nothing is doubled because both mouldings are present, and nothing
+is missing on the axis the tile shares with its edge-role neighbours, so
+the corner's hole lines up with the `BM` beside it and the `ML` above it
+and the joined aperture of a 2x2 or 3x3 span is one rectangle with no
+step at the corner. That is checked here as the joined rect of the whole
+span, because a corner that stopped short of the seam and one that
+overshot it are both wrong in a way no single tile shows.
+
 The Furniture role vocabulary cannot carry this shape, and the test keeps
 it from being tried anyway. That convention is `<piece>-<role><level>`,
 its trailing digit the height level within the footprint. A windowframe's
@@ -64,6 +78,12 @@ one-column cell that is inset on both of its edges. A name that tried to
 read `windowframe-L0` as "left cell, level 0" would be a second meaning
 for one convention in a second file, so the digit-suffixed shape is
 refused here.
+
+The wall cannot come back into the name either. The doorframe already
+refused `doorframe-room-*`, `doorframe-corridor-*` and `doorframe-facade-*`
+because a frame laid over a wall's own tile has nothing left to say about
+which wall it lies on, and the same refusal is made here under the window
+name so the wall-keyed shape cannot return wearing the new prefix.
 """
 
 from __future__ import annotations
@@ -106,7 +126,8 @@ BLOCK_FIRST_COLUMN = 15
 # whatever the opening's total size turns out to be. The horizontal span
 # below is therefore the part of the span that falls inside the cell the
 # tile frames: inset at the span's ends, and running edge to edge wherever
-# the cell is not an end.
+# the cell is not an end. The vertical span is the same read up the other
+# axis: inset at the span's ends, whole wherever the cell is between them.
 GLASS_RECTS = {
     # The 1x1 Window: inset on both of its edges, because both are ends.
     "windowframe-SS": (0.1, 0.9, 0.2, 0.5),
@@ -131,6 +152,30 @@ GLASS_RECTS = {
     # of a level above the span's floor line, and that 0.2 is the sill, so
     # the hole stops there and carries on up to this cell's own top edge.
     "windowframe-BS": (0.1, 0.9, 0.2, 1.0),
+    # The corners and the interior edges: the same two insets, read on both
+    # axes at once. A corner is an end of the span in both directions, so
+    # it carries both mouldings; an interior edge is an end in one and
+    # middle in the other, so it carries one.
+    #
+    # Top-left: the span's left inset and the head, running to the seam on
+    # the right and below.
+    "windowframe-TL": (0.1, 1.0, 0.0, 0.3),
+    # Top-middle: no horizontal inset at all inside a middle column, so
+    # this is the head alone across the full cell width.
+    "windowframe-TM": (0.0, 1.0, 0.0, 0.3),
+    # Top-right: the mirror of the top-left.
+    "windowframe-TR": (0.0, 0.9, 0.0, 0.3),
+    # Middle-left: a level that is neither end of the span vertically, at
+    # the span's left end - jamb only, the whole cell height.
+    "windowframe-ML": (0.1, 1.0, 0.0, 1.0),
+    # Middle-right: the mirror.
+    "windowframe-MR": (0.0, 0.9, 0.0, 1.0),
+    # Bottom-left: the span's left inset and the sill.
+    "windowframe-BL": (0.1, 1.0, 0.2, 1.0),
+    # Bottom-middle: the sill alone across the full cell width.
+    "windowframe-BM": (0.0, 1.0, 0.2, 1.0),
+    # Bottom-right: the mirror of the bottom-left.
+    "windowframe-BR": (0.0, 0.9, 0.2, 1.0),
 }
 
 # The exact hole each frame authors, restated independently of the
@@ -148,7 +193,40 @@ EXPECTED_HOLES = {
     "windowframe-TS": (13, 224, 102, 96),
     "windowframe-MS": (13, 0, 102, 320),
     "windowframe-BS": (13, 0, 102, 256),
+    "windowframe-TL": (13, 224, 115, 96),
+    "windowframe-TM": (0, 224, 128, 96),
+    "windowframe-TR": (0, 224, 115, 96),
+    "windowframe-ML": (13, 0, 115, 320),
+    "windowframe-MR": (0, 0, 115, 320),
+    "windowframe-BL": (13, 0, 115, 256),
+    "windowframe-BM": (0, 0, 128, 256),
+    "windowframe-BR": (0, 0, 115, 256),
 }
+
+# The grid closes at fifteen. Sixteen cells in the role grid less the
+# all-middle one, which asks for no tile at all: the middle of a span
+# that is middle in both directions is all glass with no moulding on it,
+# so there is nothing to author there and nothing to draw. Fifteen tiles
+# is the whole of the vocabulary - every cell of every span, from a 1x1 to
+# a 7x4, is one of these fifteen positions, so no further tile is ever
+# needed for a bigger opening.
+GRID_CELLS = len(HORIZONTAL_ROLES) * len(VERTICAL_ROLES)
+ALL_MIDDLE = "MM"
+FRAME_COUNT = GRID_CELLS - 1
+
+# The wall-keyed frames the doorframe already refused, restated under the
+# window name. A frame laid over the wall's own tile does not vary with
+# the wall, and the fifteen `doorframe-room-*`/`-corridor-*`/`-facade-*`
+# tiles this replaced were three copies of artwork that could not tell the
+# copies apart. The same argument applies here word for word, so the shape
+# is refused under the new prefix as well rather than being left free to
+# come back as though a window frame needed a wall in its name.
+FORBIDDEN = [
+    f"windowframe-{wall}-{vertical}{horizontal}"
+    for wall in ("room", "corridor", "facade")
+    for vertical in VERTICAL_ROLES
+    for horizontal in HORIZONTAL_ROLES
+]
 
 failures: list[str] = []
 
@@ -193,6 +271,25 @@ def main() -> int:
     check(set(authored) == set(GLASS_RECTS),
           f"the authored windowframes are {sorted(authored)}, expected "
           f"{sorted(GLASS_RECTS)}")
+    check(len(GLASS_RECTS) == FRAME_COUNT,
+          f"this test states {len(GLASS_RECTS)} windowframes; the role grid "
+          f"closes at {FRAME_COUNT} - {GRID_CELLS} cells less the all-middle "
+          "one, which asks for no tile")
+
+    # The wall-keyed shape is refused under the window name, the same way
+    # the doorframe refuses it, so the fifteen copies that were dropped
+    # cannot come back wearing the new prefix.
+    for name in FORBIDDEN:
+        check(name not in overlays,
+              f"{name} is authored under a wall key; a frame laid over the "
+              "wall's own tile does not vary with the wall, and the "
+              "wall-keyed frames the doorframe already refused are refused "
+              "here too")
+    for name in authored:
+        for wall in ("room", "corridor", "facade"):
+            check(wall not in name,
+                  f"{name} carries the wall '{wall}'; the frame is keyed by "
+                  "its place in the span and by nothing else")
 
     # The sheet grew to the size the role grid needs: nineteen columns by
     # four rows, so the block has four columns of its own and four rows
@@ -234,6 +331,12 @@ def main() -> int:
               f"{name} is not named from the role grid: the vertical role "
               f"is one of {VERTICAL_ROLES} and the horizontal one of "
               f"{HORIZONTAL_ROLES}")
+        if vertical not in VERTICAL_ROLES or horizontal not in HORIZONTAL_ROLES:
+            continue
+        check(f"{vertical}{horizontal}" != ALL_MIDDLE,
+              f"{name} is the all-middle cell of the grid; a span that is "
+              "middle in both directions is all glass with no moulding and "
+              "asks for no tile at all")
         column, row = sprite["cell"]
         check(column == BLOCK_FIRST_COLUMN
                 + HORIZONTAL_ROLES.index(horizontal)
@@ -281,6 +384,9 @@ def main() -> int:
               f"{name}'s hole has no area, so the frame would be a solid "
               "slab over its own opening")
 
+    def hole_of(name: str) -> tuple[int, int, int, int]:
+        return tuple(overlays[name]["hole"])
+
     # The wide row frames *one* opening. The left cell's hole has to run
     # to that cell's own right edge and the right cell's hole has to start
     # at its own left edge, so laid side by side the two are one aperture
@@ -289,12 +395,10 @@ def main() -> int:
     # joined rect too, against the glass rect of the whole 2- and 3-cell
     # span, because a hole that stops short of the seam and a hole that
     # overshoots it are both wrong in a way no single tile shows.
-    wide = {name: tuple(overlays[name]["hole"])
-            for name in ("windowframe-SL", "windowframe-SM", "windowframe-SR")
-            if name in overlays}
+    wide = [hole_of(n) for n in ("windowframe-SL", "windowframe-SM",
+                                "windowframe-SR") if n in overlays]
     if len(wide) == 3:
-        left, middle, right = (wide["windowframe-SL"], wide["windowframe-SM"],
-                             wide["windowframe-SR"])
+        left, middle, right = wide
         check(left[0] + left[2] == CELL_WIDTH,
               "windowframe-SL's hole stops "
               f"{CELL_WIDTH - (left[0] + left[2])}px short of its cell's right "
@@ -332,12 +436,10 @@ def main() -> int:
     # of each tile and then as the joined rect of the whole 2- and 3-level
     # span, because a hole that stopped short of the seam and one that
     # overshot it are both wrong in a way no single tile shows.
-    tall = {name: tuple(overlays[name]["hole"])
-            for name in ("windowframe-BS", "windowframe-MS", "windowframe-TS")
-            if name in overlays}
+    tall = [hole_of(n) for n in ("windowframe-BS", "windowframe-MS",
+                                "windowframe-TS") if n in overlays]
     if len(tall) == 3:
-        bottom, middle, top = (tall["windowframe-BS"], tall["windowframe-MS"],
-                              tall["windowframe-TS"])
+        bottom, middle, top = tall
         # The bottom cell's hole stops above the cell's floor line where
         # the glass does - the 0.2 that is the sill - and reaches the
         # cell's own top edge, which is where the cell above takes over.
@@ -390,6 +492,116 @@ def main() -> int:
                   f"the span's glass rect v[0.2,{levels - 0.7}] rounds down "
                   f"to {want}px")
 
+    # The corners and interior edges join the two axes into one aperture.
+    # A corner carries both mouldings, and the test that matters is that
+    # carrying both does not move the hole off the seam on either side: a
+    # `BL` that stopped short of its top edge would leave a bar across the
+    # glass where the corner meets the level above, and one that stopped
+    # short of its right edge would put a vertical moulding inside the
+    # opening at the join with `BM`.
+    corners = {name: hole_of(name) for name in
+              ("windowframe-BL", "windowframe-BM", "windowframe-BR",
+               "windowframe-ML", "windowframe-MR",
+               "windowframe-TL", "windowframe-TM", "windowframe-TR")
+              if name in overlays}
+    if len(corners) == 8:
+        bl, bm, br = corners["windowframe-BL"], corners["windowframe-BM"], corners["windowframe-BR"]
+        ml, mr = corners["windowframe-ML"], corners["windowframe-MR"]
+        tl, tm, tr = corners["windowframe-TL"], corners["windowframe-TM"], corners["windowframe-TR"]
+
+        # Each corner is inset on its own end of each axis and runs to the
+        # seam on the two sides that face into the span.
+        check(bl[0] == math.ceil(0.1 * CELL_WIDTH) and bl[1] == 0
+                and bl[0] + bl[2] == CELL_WIDTH and bl[1] + bl[3] == 256,
+              f"windowframe-BL's hole {bl} is not the sill-and-jamb corner: "
+              "it should be inset 0.1 at the left, stop 0.2 above the floor "
+              "line, and run to the cell's top and right edges")
+        check(br[0] == 0 and br[1] == 0
+                and br[0] + br[2] == math.floor(0.9 * CELL_WIDTH)
+                and br[1] + br[3] == 256,
+              f"windowframe-BR's hole {br} is not the sill-and-jamb corner: "
+              "it should run from the cell's left edge, be inset 0.1 at the "
+              "right, stop 0.2 above the floor line, and reach the cell's "
+              "top edge")
+        check(tl[0] == math.ceil(0.1 * CELL_WIDTH)
+                and tl[0] + tl[2] == CELL_WIDTH
+                and tl[1] + tl[3] == CELL_HEIGHT,
+              f"windowframe-TL's hole {tl} is not the head-and-jamb corner: "
+              "it should be inset 0.1 at the left and run to the cell's "
+              "right and bottom edges")
+        check(tr[0] == 0 and tr[0] + tr[2] == math.floor(0.9 * CELL_WIDTH)
+                and tr[1] + tr[3] == CELL_HEIGHT,
+              f"windowframe-TR's hole {tr} is not the head-and-jamb corner: "
+              "it should run from the cell's left edge, be inset 0.1 at the "
+              "right, and reach the cell's bottom edge")
+        # The interior edges carry one moulding only: ML and MR are jamb
+        # only over the whole cell height, and BM and TM are sill and head
+        # only over the whole cell width.
+        check(ml[0] == math.ceil(0.1 * CELL_WIDTH) and ml[1] == 0
+                and ml[1] + ml[3] == CELL_HEIGHT,
+              "windowframe-ML's hole is not jamb-only over the whole cell "
+              "height, so a middle level of a wide tall span carries a head "
+              "or a sill it has no business carrying")
+        check(mr[0] == 0 and mr[1] == 0
+                and mr[1] + mr[3] == CELL_HEIGHT,
+              "windowframe-MR's hole is not jamb-only over the whole cell "
+              "height")
+        check(bm[0] == 0 and bm[0] + bm[2] == CELL_WIDTH
+                and bm[1] == 0 and bm[1] + bm[3] == 256,
+              "windowframe-BM's hole is not the sill alone across the full "
+              "cell width")
+        check(tm[0] == 0 and tm[0] + tm[2] == CELL_WIDTH
+                and tm[1] + tm[3] == CELL_HEIGHT,
+              "windowframe-TM's hole is not the head alone across the full "
+              "cell width")
+
+        # The bottom row of a wide tall span joins to the same width the
+        # single-level wide row does, because the span's insets are the
+        # same on both rows - only the vertical band differs.
+        for row_name, row in (("bottom", (bl, bm, br)),
+                             ("top", (tl, tm, tr))):
+            for cells, parts in ((2, (row[0], row[2])),
+                                (3, row)):
+                joined = sum(part[2] for part in parts)
+                want = (int((cells - 0.1) * CELL_WIDTH)
+                       - math.ceil(0.1 * CELL_WIDTH))
+                check(joined == want,
+                      f"a {cells}-cell span's {row_name} row joins to "
+                      f"{joined}px; the span's glass rect rounds down to "
+                      f"{want}px, so the corner and the interior edge do "
+                      "not line up with the ends of the span")
+            check(len({part[1] for part in row}) == 1
+                    and len({part[3] for part in row}) == 1,
+                  f"the {row_name} row of a wide tall span is not one "
+                  "horizontal band, so the joined aperture is not a rect")
+        # Up the side columns: BL + ML + TL is the same 672px the single
+        # -column tall span makes, because the vertical insets are the
+        # same and only the horizontal band differs.
+        for side, column in (("left", (bl, ml, tl)), ("right", (br, mr, tr))):
+            for levels, parts in ((2, (column[0], column[2])),
+                                 (3, column)):
+                joined = sum(part[3] for part in parts)
+                want = (math.floor((levels - 0.7) * CELL_HEIGHT)
+                       - math.floor(0.2 * CELL_HEIGHT))
+                check(joined == want,
+                      f"a {levels}-level span's {side} column joins to "
+                      f"{joined}px tall; the span's glass rect rounds down "
+                      f"to {want}px, so the corner and the interior edge "
+                      "do not line up with the ends of the span")
+            # Every tile of a side column is inset the same at that side of
+            # the span, or the jamb is not a straight line up the opening.
+            if side == "left":
+                check({part[0] for part in column} == {math.ceil(0.1 * CELL_WIDTH)},
+                      "the left column's holes are not all inset 0.1 at the "
+                      "span's left end, so the jamb does not run straight up "
+                      "the opening")
+            else:
+                check({part[0] + part[2] for part in column}
+                      == {math.floor(0.9 * CELL_WIDTH)},
+                      "the right column's holes do not all reach the same "
+                      "place at the span's right end, so the jamb does not "
+                      "run straight up the opening")
+
     # Nobody tried to read the Furniture role convention into the block.
     # `<piece>-<role><level>` means the height level within a footprint;
     # this file's vertical role is end-versus-middle, and a digit-suffixed
@@ -411,7 +623,7 @@ def main() -> int:
         check(sheet.size == (width, height),
               f"the committed {tileset['image']} is {sheet.size[0]}x"
               f"{sheet.size[1]}, the tileset states {width}x{height}")
-        for name, rect in GLASS_RECTS.items():
+        for name in GLASS_RECTS:
             sprite = overlays.get(name)
             if sprite is None:
                 continue
@@ -421,12 +633,13 @@ def main() -> int:
             ox, oy = cell_x + hx, cell_y + hy
             # The moulding just outside the opening, where the opening does
             # not run to the cell's own edge. Where the hole *does* reach
-            # the cell edge - the seam side of every wide-row tile, and
-            # both sides of the middle column - there is no neighbour
-            # inside this cell to probe, and the pixel beyond belongs to the
-            # next tile's art rather than to this frame's moulding, so it
-            # is skipped. That the hole reaches the edge at all is pinned by
-            # the joined-span check above, not by probing here.
+            # the cell edge - the seam side of every wide-row tile, both
+            # sides of the middle column, and the seam sides of every
+            # corner and interior edge - there is no neighbour inside this
+            # cell to probe, and the pixel beyond belongs to the next
+            # tile's art rather than to this frame's moulding, so it is
+            # skipped. That the hole reaches the edge at all is pinned by
+            # the joined-span checks above, not by probing here.
             for (px, py, expect_open) in (
                     (ox, oy, True),
                     (ox + hw - 1, oy + hh - 1, True),
@@ -445,7 +658,7 @@ def main() -> int:
                 else:
                     check(alpha == 255,
                           f"{name}: pixel ({px},{py}) is moulding beside the "
-                          f"opening and should be opaque, alpha {alpha}")
+                          "opening and should be opaque, alpha {alpha}")
 
     # The manifest declares the frames, so the install pairs them and the
     # renderer can reach them.
@@ -462,9 +675,10 @@ def main() -> int:
         for failure in failures:
             print(f"FAIL: {failure}")
         return 1
-    print(f"windowframe tiles: {len(GLASS_RECTS)} frames, each holed inside "
-          "its glass rect, punched in the committed sheet, laid out as the "
-          "role grid and declared in the manifest")
+    print(f"windowframe tiles: {len(GLASS_RECTS)} frames - the whole role "
+          "grid less its all-middle cell - each holed inside its glass rect, "
+          "punched in the committed sheet, laid out as the role grid and "
+          "declared in the manifest; the grid closes here")
     return 0
 
 
