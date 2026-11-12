@@ -434,7 +434,18 @@ namespace core
 		}
 	}
 
-	void PlacementValidator::validateLiftOptions(string const& caller, CreateLiftOptions const& options) const
+	// The Lift shaft width bound, stated once.  Zero is included because a shaft of
+	// no cells is no shaft at all, and the plan-shaped caller which asks this has
+	// no separate zero-width rule of its own (#1072).
+	optional<string> PlacementValidator::liftShaftWidthDiagnostic(uint32_t cellsWide)
+	{
+		if (cellsWide == 0 || cellsWide > LiftMaxShaftCellsWide)
+			return string(LiftShaftWidthDiagnostic);
+		return nullopt;
+	}
+
+	void PlacementValidator::validateLiftOptions(string const& caller, CreateLiftOptions const& options,
+		LiftShaftKind const shaftKind) const
 	{
 		if (options.stopOffsets.size() > 1000 || (!options.stopShortNames.empty()
 			&& (options.stopShortNames.size() != options.stopOffsets.size()
@@ -446,6 +457,17 @@ namespace core
 		{
 			throw WorldException(&mWorld, format("{} - Lift width must be positive.", caller));
 		}
+		// The cap belongs to the enclosed Lift alone: its landing door spans the
+		// shaft and its artwork is a pair of leaves, so a third cell would ask for
+		// a middle landing tile that deliberately does not exist, while an open
+		// PlatformLift has no landing door and is not capped (#1055).  It gates
+		// authoring only: a World saved before the cap can carry a wider shaft,
+		// and construction replay is not where that save is destroyed - replay
+		// tolerates what it is replaying, the way a map saved before a Window was
+		// required to have a Layer behind it still replays that Window (#20).
+		if (shaftKind == LiftShaftKind::Enclosed && !mWorld.mDeserializingConstruction)
+			if (auto const refusal = liftShaftWidthDiagnostic(options.cellsWide))
+				throw WorldException(&mWorld, format("{} - {}.", caller, *refusal));
 		if (options.stopOffsets.size() < 2)
 		{
 			throw WorldException(&mWorld, format("{} - Lift must have at least 2 stops.", caller));

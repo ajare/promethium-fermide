@@ -1661,9 +1661,10 @@ namespace core
 		mPlacementValidator->validateSectorLadderOptions(caller, options);
 	}
 
-	void World::validateLiftOptions(string const& caller, CreateLiftOptions const& options) const
+	void World::validateLiftOptions(string const& caller, CreateLiftOptions const& options,
+		LiftShaftKind const shaftKind) const
 	{
-		mPlacementValidator->validateLiftOptions(caller, options);
+		mPlacementValidator->validateLiftOptions(caller, options, shaftKind);
 	}
 
 	void World::validateShuttleOptions(string const& caller, CreateShuttleOptions const& options) const
@@ -3544,7 +3545,10 @@ namespace core
 		// Checks
 		string caller = format("World::addSectorPlatformLift({}, {}, {})", sectorIndex, levelIndex, xOffset);
 
-		validateLiftOptions(caller, options);
+		// An open PlatformLift has no landing door, so the enclosed Lift's shaft
+		// width cap does not apply to it; every other option rule is the same
+		// (#1055, #1072).
+		validateLiftOptions(caller, options, LiftShaftKind::OpenPlatform);
 		validateObjectAllowedInSector(caller, SectorObjectType::Lift, sectorIndex);
 		validateSpaceOnlyInOneSector(caller, layerIndex, x, y, options.cellsWide, options.stopOffsets.back());
 

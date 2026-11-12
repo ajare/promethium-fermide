@@ -2552,8 +2552,9 @@ namespace core
 		CreateLiftOptions options;
 		options.cellsWide = cellsWide;
 		options.levelsHigh = levelsHigh;
-		if (cellsWide == 0 || cellsWide > LiftMaxShaftCellsWide)
-			throw WorldException(&mWorld, std::string(LiftShaftWidthDiagnostic));
+		// The shaft width cap is not checked here: this path ends in the options
+		// overload below, which asks validateLiftOptions, and that is where the cap
+		// lives for every Lift creation path (#1072).
 		if (levelsHigh == 0)
 			throw WorldException(&mWorld, "A Lift must be at least one level high");
 		mWorld.validateLayer(format("World::addLift({}, ...)", layerIndex), layerIndex);
@@ -2587,8 +2588,6 @@ namespace core
 		// add is a true no-op and no non-finite timing reaches the tick
 		// conversion (#198).
 		mWorld.validateLiftOptions(caller, options);
-		if (options.cellsWide > LiftMaxShaftCellsWide)
-			throw WorldException(&mWorld, format("{} - {}.", caller, LiftShaftWidthDiagnostic));
 
 		auto levelsHigh = options.levelsHigh ? options.levelsHigh : options.stopOffsets.back() + 1;
 		if (options.stopOffsets.back() >= levelsHigh)

@@ -57,6 +57,8 @@ set(core_names
     resizingALiftShaftBeyondTwoCellsIsRefused
     oneAndTwoCellLiftShaftsBuildUnchanged
     everyShippedWorldStillBuilds
+    aPreCapOversizedLiftShaftStillLoads
+    aPreCapOversizedLiftShaftCanStillBeEdited
     shuttlePassengerWalksToForwardInteriorSpot
     shuttlePassengersSpreadAcrossCarriageAtWalkingSpeed
     shuttleBoardingRequiresDoorAlignment

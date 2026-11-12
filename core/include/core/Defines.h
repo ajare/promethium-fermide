@@ -148,9 +148,12 @@ namespace core
 	// A Lift shaft is at most two cells wide.  Its landing door spans the whole
 	// shaft and its artwork is a pair of leaves: one cell wears the single leaf,
 	// two cells wear the pair.  A third cell would ask for a middle landing tile
-	// that deliberately does not exist, so both authoring paths refuse the shaft
-	// rather than build a landing that cannot be drawn (#1055).  A PlatformLift
-	// has no landing door and is not covered by this cap.
+	// that deliberately does not exist, so every authoring path refuses the shaft
+	// rather than build a landing that cannot be drawn.  The rule is enforced in
+	// PlacementValidator::validateLiftOptions and read back through
+	// PlacementValidator::liftShaftWidthDiagnostic, so no call site restates it
+	// (#1055, #1072).  A PlatformLift has no landing door and is not covered by
+	// this cap.
 	inline constexpr uint32_t LiftMaxShaftCellsWide = 2u;
 
 	// One refusal sentence, shared so that adding a Lift and resizing one refuse

@@ -18,6 +18,7 @@
 #include "core/DoorVertex.h"
 #include "core/Staircase.h"
 #include "core/Transit.h"
+#include "core/YamlSerializer.h"
 
 namespace
 {
@@ -856,6 +857,131 @@ namespace
 		// pass the check.
 		return built >= 20;
 	}
+
+	// #1072 - the save-compatibility answer, settled here: the cap gates
+	// authoring, and construction replay tolerates what it is replaying.  A World
+	// saved before #1055 with a three-cell shaft still opens and keeps the shaft
+	// it was saved with; the save is never clamped to fit the cap, because a
+	// clamped shaft would move the landing doors, the markers and the Agents that
+	// the rest of the save names cells of.  This is the answer the back-most Layer
+	// Window rule already gives - maps saved before that rule still replay such a
+	// Window unchanged (#20).  The cap is not a schema-version rule, so the map
+	// below is written at the current version: what makes it legacy is the width,
+	// not the version number.  Its capacity sits well inside the standing positions
+	// a three-cell car has, so the map is about the shaft and not about a
+	// capacity that only just fits.
+	char const* preCapWideShaftMap()
+	{
+		static std::string const yaml = R"YAML(
+version: 70
+name: Pre-cap Wide Shaft
+randomSeed: 0
+cellsWide: 12
+levelsHigh: 6
+layers: 2
+layerNames: [Corridors, Lifts]
+construction:
+  - {type: corridor, layer: 0, y: 0, x: 0, cellsWide: 12, levelsHigh: 1}
+  - {type: corridor, layer: 0, y: 1, x: 0, cellsWide: 12, levelsHigh: 1}
+  - {type: corridor, layer: 0, y: 2, x: 0, cellsWide: 12, levelsHigh: 1}
+  - {type: corridor, layer: 0, y: 3, x: 0, cellsWide: 12, levelsHigh: 1}
+  - {type: corridor, layer: 0, y: 4, x: 0, cellsWide: 12, levelsHigh: 1}
+  - {type: corridor, layer: 0, y: 5, x: 0, cellsWide: 12, levelsHigh: 1}
+  - {type: lift, layer: 1, y: 0, x: 4, cellsWide: 3, levelsHigh: 5,
+     stopOffsets: [0, 2, 4], capacity: 4, minimumDwellSeconds: 0.75,
+     maximumBoardingSeconds: 5, initialStop: 0}
+agentGroups: []
+nextMarkerId: 1
+nextAgentGroupId: 1
+nextFurnitureId: 1
+nextDumbwaiterId: 1
+agents: []
+)YAML";
+		return yaml.c_str();
+	}
+
+	void loadPreCapWideShaftMap(core::World& loaded)
+	{
+		auto reader = core::YamlSerializer::fromString(preCapWideShaftMap());
+		reader->deserialize();
+		core::SerializationWorkData workData;
+		if (!loaded.deserialize(*reader, workData))
+			throw std::runtime_error("The pre-cap wide-shaft map did not load");
+	}
+
+	std::shared_ptr<const core::LiftTransit> wideShaftLift(core::World const& world)
+	{
+		return std::dynamic_pointer_cast<const core::LiftTransit>(
+			world.getSectorAtPosition(1, 5.5f, 0.5f));
+	}
+
+	// Loading is not where an oversized shaft is refused or rewritten: it comes
+	// back three cells wide, with the three stops it was saved with.
+	bool aPreCapOversizedLiftShaftStillLoads()
+	{
+		core::World world("placeholder", 1, 1);
+		loadPreCapWideShaftMap(world);
+		auto const lift = wideShaftLift(world);
+		if (!lift || lift->getCellsWide() != core::LiftMaxShaftCellsWide + 1) return false;
+		if (lift->getNumStops() != 3) return false;
+
+		// The tolerance belongs to replay, not to authoring: the very next
+		// authored shaft of that width in the same World is refused with the one
+		// shared sentence, and the refusal lays nothing.
+		world.pauseSimulation();
+		core::World::CreateLiftOptions options;
+		options.cellsWide = core::LiftMaxShaftCellsWide + 1;
+		options.stopOffsets = { 0, 2 };
+		bool refused = false;
+		try { (void)world.addLift(1, 0, 8, options); }
+		catch (core::WorldException const& error)
+		{
+			refused = error.getMessage().find(std::string(core::LiftShaftWidthDiagnostic))
+				!= std::string::npos;
+		}
+		if (!refused) return false;
+		if (world.getSectorAtPosition(1, 9.5f, 0.5f)) return false;
+
+		// And the save round-trips: re-saving keeps the oversized shaft rather
+		// than dropping the Lift or quietly narrowing it.
+		core::SerializationWorkData workData;
+		auto writer = core::YamlSerializer::toString();
+		world.serialize(*writer, workData);
+		writer->serialize();
+		core::World reloaded("placeholder", 1, 1);
+		auto reader = core::YamlSerializer::fromString(writer->getSerializedString());
+		reader->deserialize();
+		if (!reloaded.deserialize(*reader, workData)) return false;
+		auto const kept = wideShaftLift(reloaded);
+		return kept && kept->getCellsWide() == core::LiftMaxShaftCellsWide + 1
+			&& kept->getNumStops() == 3;
+	}
+
+	// Tolerating an oversized shaft on load must not strand it: deleting the Lift,
+	// or one of its stops, re-plans at the Lift's own width, so the authoring cap
+	// has nothing to say about either.  A plan that refused here would leave the
+	// author with a Lift they cannot remove.
+	bool aPreCapOversizedLiftShaftCanStillBeEdited()
+	{
+		core::World world("placeholder", 1, 1);
+		loadPreCapWideShaftMap(world);
+		auto const lift = wideShaftLift(world);
+		if (!lift) return false;
+		world.pauseSimulation();
+
+		auto const stopPlan = world.planRemoveLiftStop(lift->getIndex(), 1);
+		if (!stopPlan.valid) return false;
+		auto const afterStopRemoval = world.applyLiftEdit(stopPlan);
+		auto const edited = std::dynamic_pointer_cast<const core::LiftTransit>(
+			world.getSector(afterStopRemoval));
+		if (!edited || edited->getCellsWide() != core::LiftMaxShaftCellsWide + 1) return false;
+		if (edited->getNumStops() != 2) return false;
+
+		auto const removePlan = world.planRemoveLift(afterStopRemoval);
+		if (!removePlan.valid) return false;
+		world.applyLiftEdit(removePlan);
+		return !wideShaftLift(world);
+	}
 }
 
 void registerLifts(std::vector<smoke::Check>& checks)
@@ -872,4 +998,6 @@ void registerLifts(std::vector<smoke::Check>& checks)
 	checks.push_back({ "resizingALiftShaftBeyondTwoCellsIsRefused", [](smoke::Context const&) { smoke::require(resizingALiftShaftBeyondTwoCellsIsRefused(), "resizingALiftShaftBeyondTwoCellsIsRefused"); } });
 	checks.push_back({ "oneAndTwoCellLiftShaftsBuildUnchanged", [](smoke::Context const&) { smoke::require(oneAndTwoCellLiftShaftsBuildUnchanged(), "oneAndTwoCellLiftShaftsBuildUnchanged"); } });
 	checks.push_back({ "everyShippedWorldStillBuilds", [](smoke::Context const& c) { smoke::require(everyShippedWorldStillBuilds(c), "everyShippedWorldStillBuilds"); } });
+	checks.push_back({ "aPreCapOversizedLiftShaftStillLoads", [](smoke::Context const&) { smoke::require(aPreCapOversizedLiftShaftStillLoads(), "aPreCapOversizedLiftShaftStillLoads"); } });
+	checks.push_back({ "aPreCapOversizedLiftShaftCanStillBeEdited", [](smoke::Context const&) { smoke::require(aPreCapOversizedLiftShaftCanStillBeEdited(), "aPreCapOversizedLiftShaftCanStillBeEdited"); } });
 }

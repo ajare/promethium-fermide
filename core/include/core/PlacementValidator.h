@@ -45,6 +45,7 @@ namespace core
 		using CreateForceBridgeOptions = World::CreateForceBridgeOptions;
 		using CreateLadderOptions = World::CreateLadderOptions;
 		using CreateLiftOptions = World::CreateLiftOptions;
+		using LiftShaftKind = World::LiftShaftKind;
 		using CreateShuttleOptions = World::CreateShuttleOptions;
 
 		explicit PlacementValidator(World& world);
@@ -107,7 +108,19 @@ namespace core
 
 		void validateSectorLadderOptions(std::string const& caller, CreateLadderOptions const& options) const;
 
-		void validateLiftOptions(std::string const& caller, CreateLiftOptions const& options) const;
+		// Every Lift creation path reaches its option rules here, the shaft width cap
+		// included, so the cap cannot be skipped by a path added later (#1072).
+		// `shaftKind` selects whose width rule applies: the capped enclosed Lift, or
+		// the open PlatformLift, which has no landing door and so no cap (#1055).
+		void validateLiftOptions(std::string const& caller, CreateLiftOptions const& options,
+			LiftShaftKind shaftKind = LiftShaftKind::Enclosed) const;
+
+		// The Lift shaft width bound as a value rather than a throw: nullopt when the
+		// shaft is one or two cells, the shared refusal sentence otherwise.  The
+		// validator throws it; World::planResizeLift carries it in the plan instead
+		// of throwing, which is why that call site asks here rather than re-stating
+		// the bound (#1072).
+		static std::optional<std::string> liftShaftWidthDiagnostic(uint32_t cellsWide);
 
 		void validateShuttleOptions(std::string const& caller, CreateShuttleOptions const& options) const;
 

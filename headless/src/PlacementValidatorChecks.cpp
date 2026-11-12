@@ -218,6 +218,44 @@ int main()
 			options.maximumBoardingSeconds = 5.0f;
 			requireNoThrow([&] { validator.validateLiftOptions("check", options); },
 				"repaired Lift options");
+
+			// #1072 - the shaft width cap lives in this validator, so a Lift
+			// creation path which passes no width check of its own is still
+			// gated.  The capped reading is the default, and the open PlatformLift
+			// - which has no landing door to run out of artwork - is the one
+			// exemption (#1055).
+			auto const refusal = std::string(core::LiftShaftWidthDiagnostic);
+			auto refusedWith = [&](auto&& check, std::string const& what)
+			{
+				try { check(); }
+				catch (core::WorldException const& error)
+				{
+					require(std::string(error.getMessage()).find(refusal) != std::string::npos,
+						what + " refused with the wrong words: " + error.getMessage());
+					return;
+				}
+				throw std::runtime_error("PlacementValidator check did not throw: " + what);
+			};
+			for (uint32_t width : { core::LiftMaxShaftCellsWide + 1, core::LiftMaxShaftCellsWide + 2 })
+			{
+				options.cellsWide = width;
+				refusedWith([&] { validator.validateLiftOptions("check", options); },
+					"over-wide enclosed Lift options");
+				refusedWith([&] { validator.validateLiftOptions("check", options,
+					World::LiftShaftKind::Enclosed); },
+					"explicitly enclosed over-wide Lift options");
+				requireNoThrow([&] { validator.validateLiftOptions("check", options,
+					World::LiftShaftKind::OpenPlatform); },
+					"open PlatformLift options capped by the Lift shaft rule");
+			}
+			// The same bound as a value, for the caller which carries the refusal
+			// in a plan instead of throwing it.
+			require(!PlacementValidator::liftShaftWidthDiagnostic(1)
+				&& !PlacementValidator::liftShaftWidthDiagnostic(core::LiftMaxShaftCellsWide),
+				"a supported shaft width reported a diagnostic");
+			require(PlacementValidator::liftShaftWidthDiagnostic(0) == refusal
+				&& PlacementValidator::liftShaftWidthDiagnostic(core::LiftMaxShaftCellsWide + 1) == refusal,
+				"an unsupported shaft width reported no diagnostic");
 		}
 
 		// ---------------------------------------------------------------

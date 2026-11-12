@@ -305,6 +305,17 @@ namespace core
 			bool initiallyBroken{ false };
 		};
 
+		// Which device a set of CreateLiftOptions is being checked for.  The two
+		// differ in one option rule: an enclosed Lift's landing door spans the
+		// shaft and its artwork is a pair of leaves, so its shaft is capped at
+		// core::LiftMaxShaftCellsWide, while an open PlatformLift has no landing
+		// door and is not capped (#1055, #1072).
+		enum class LiftShaftKind
+		{
+			Enclosed,
+			OpenPlatform
+		};
+
 		struct CreateLiftOptions
 		{
 			uint32_t cellsWide{ 1 };
@@ -1898,7 +1909,12 @@ namespace core
 
 		void validateSectorLadderOptions(std::string const& caller, CreateLadderOptions const& options) const;
 
-		void validateLiftOptions(std::string const& caller, CreateLiftOptions const& options) const;
+		// Every Lift creation path passes its options through here, the shaft width
+		// cap included.  `shaftKind` says whose width rule applies and defaults to
+		// the capped enclosed Lift, so a new Lift creation path gets the cap
+		// without having to remember to ask for it (#1072).
+		void validateLiftOptions(std::string const& caller, CreateLiftOptions const& options,
+			LiftShaftKind shaftKind = LiftShaftKind::Enclosed) const;
 
 		void validateShuttleOptions(std::string const& caller, CreateShuttleOptions const& options) const;
 

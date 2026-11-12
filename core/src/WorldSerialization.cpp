@@ -8,6 +8,7 @@
 #include "core/AgentGroup.h"
 #include "core/AgentTagRegistry.h"
 #include "core/SerializationException.h"
+#include "core/PlacementValidator.h"
 #include "core/Exceptions.h"
 #include "core/Transit.h"
 #include "core/LiftTransit.h"
@@ -4605,8 +4606,14 @@ namespace core
 		auto const transitLayer = lift->getLayerIndex();
 		auto const landingLayer = layerInFront(transitLayer);
 		plan.move = x != lift->getCellX() || y != lift->getCellY();
-		if (cellsWide < 1 || cellsWide > LiftMaxShaftCellsWide)
-		{ plan.diagnostic = std::string(LiftShaftWidthDiagnostic); return plan; }
+		// The plan carries the refusal instead of throwing it, so it asks the
+		// validator for the bound rather than restating it (#1072).  A shaft which
+		// already is the oversized width is left alone: deleting the Lift, or one
+		// of its stops, re-plans at the Lift's own width, and a World saved before
+		// the cap was written must still be editable (#1072).
+		if (auto const refusal = PlacementValidator::liftShaftWidthDiagnostic(cellsWide);
+			refusal && cellsWide != lift->getCellsWide())
+		{ plan.diagnostic = *refusal; return plan; }
 		if (levelsHigh == 0 || x + cellsWide > mCellsWide || y + levelsHigh > mLevelsHigh)
 		{ plan.diagnostic = "The Lift shaft is outside the World bounds"; return plan; }
 		if (!lift->getAgents().empty())
