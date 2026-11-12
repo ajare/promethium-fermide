@@ -1,8 +1,8 @@
 # Object atlas
 
 The Objects atlas the game ships is `resources/textures/objects-new.png`, a
-768x1280 RGBA sheet laid out on a uniform 128x320 authored grid: one cell to a
-World cell rather than a 64x64 square of screen pixels. The World cell's screen
+1664x1280 RGBA sheet laid out on a uniform 128x320 authored grid: one cell to
+a World cell rather than a 64x64 square of screen pixels. The World cell's screen
 size is a separate fact: the renderer stretches each resolved region into the
 World-unit rectangle it is drawn into, so the artwork magnifies with the cell
 instead of being re-cut (#1007). Unoccupied cell space is transparent. Small
@@ -120,29 +120,54 @@ What the format refuses, at load:
   nobody sized. The key is refused rather than quietly derived, because an author
   who wrote it meant to gain the capability and would not have gained it.
 
-The shipped object, agent and furniture sets declare no family yet. The
-capability lands alone, ahead of the Door leaf artwork that will use it, so the
-format change is proven before any artwork depends on it (#1053).
+The capability is not sitting unused. The shipped Objects sheet declares seven
+variant families, each with `variants: 3`: the ordinary pair `door-L0` and
+`door-R0` (#1056), the Lift landing's `door-lift-L0` and `door-lift-R0` and
+the Shuttle hatch `door-shuttle-L0` (#1057), and the tall Door's
+`door-tall-L0` and `door-tall-R0` (#1058). Seven bases and the twenty-one
+`-V1` .. `-V3` tiles they derive are twenty-eight of the atlas's forty-five
+named tiles, and they are the most heavily pinned tiles in it: `render`'s
+`objectArtworkNew/everyLeafFamilyCarriesThreeVariants` requires each base to
+state the count, each derived tile to exist as its own full-cell region rather
+than its base's pixels wearing a new name, and each to carry the generated
+`ImageSet` entry the install reads. The Agent and Furniture atlases are written
+in the same format and take the capability through the same code, so a family
+declared on either is derived and refused exactly as the leaf families here are.
+
+What #1053 said of itself is history, not present state. It landed the
+derivation with no committed sheet declaring a family, on purpose: the format
+change was proven before any picture depended on it, so the artwork could
+arrive afterwards without the format having to be argued back out. That is what
+made landing the capability first safe. It stopped being a description of the
+sheet the moment #1056 stacked the first leaf family under a base, and #1057
+and #1058 put twenty more family tiles on top of that.
 
 ## ObjectAtlas
 
 `resources/textures/objects-new.tileset.yaml` is the version 2 authored tileset
 behind the Objects atlas, laid out on the 128x320 World cell at
-768x1280. The Walkway, the Bulkhead Door, the Access panel, the Door, the three
-Window styles, the Booth Window's frame and shutter, the two Button states and
-the Marker are live in it, along with the three vehicles - the Lift car, the
-Platform lift and the Shuttle carriage - and the rest of the sheet
-drops in against the same image size. Since the #1013 terminus this is the only
-Objects atlas: the merged `objects.png` sheet and the old-family name it was
-installed under are both gone (#1024).
+1664x1280 - thirteen columns of four rows. The Walkway, the Bulkhead Door,
+the Access panel, the seven Door leaf families, the three Window styles, the
+Booth Window's frame and shutter, the two Button states and the Marker are
+live in it, along with the three vehicles - the Lift car, the Platform lift
+and the Shuttle carriage - and the rest of the sheet drops in against the same
+image size. Since the #1013 terminus this is the only Objects atlas: the merged
+`objects.png` sheet and the old-family name it was installed under are both
+gone (#1024).
 
-The set holds 18 tiles in the 24 cells of that 6x4 grid. The vehicles are what
-took the sheet from three rows to four. They arrived when the set held nineteen
-tiles, and cramming two into one cell would break the one promise the grid makes
-to whoever draws the real art: that a tile owns its whole 128 x 320 slot. The row
-has stayed since #1031 dropped the Booth Window's closed panel, which left one
-cell free: pulling the last tile up into it would move every other tile's pixels
-to buy nothing, and the image is sized for the art that has not landed yet.
+The set authors 24 tiles into 24 of the grid's 52 cells, and the seven leaf
+families derive 21 more beneath their bases, so the atlas installs 45 named
+tiles and seven cells of the sheet are still empty. The vehicles are what took
+the sheet from three rows to four. They arrived when the set held nineteen
+tiles, and cramming two into one cell would break the one promise the grid
+makes to whoever draws the real art: that a tile owns its whole 128 x 320
+slot. The row has stayed since #1031 dropped the Booth Window's closed panel,
+and the leaf families have since filled most of the space that was open - they
+grow down their own columns rather than along a row, which is why rows 1, 2
+and 3 run out to the last column while the seven bases are the only tiles in
+row 0 past column 5. Nothing is pulled up into a cell that stands empty:
+doing that would move every other tile's pixels to buy nothing, and the image
+is sized for the art that has not landed yet.
 
 The `ImageSet` entries the application manifest declares for `ObjectAtlas` are
 generated from the tileset, not authored beside it:
@@ -169,7 +194,11 @@ grid, and where the drawn size comes from - the core geometry constants the
 Objects contract (`requiredObjectTiles()`, `pf-render/src/ObjectTileset.cpp`)
 composes it from, or the authored reference extent where the domain fixes no
 geometry of its own. #1033 reconciled it against the #1013 spec, which carried
-three sizes that no code ever built.
+three sizes that no code ever built. What it lists is the 24 tiles the sheet
+authors; the 21 `-V1` .. `-V3` tiles the leaf families derive get no rows of
+their own because a variant inherits its base's content rectangle, drawn size
+and offset unchanged, which is the whole point of deriving them rather than
+authoring them (#1053).
 
 | Tile | Drawn size (World units) | Content px | Basis |
 |---|---|---|---|
@@ -192,8 +221,10 @@ sit in; what a tile declares is the extent it actually draws at, which is why a
 Button is 13 x 13 px inside a 128 x 320 cell and a Lift car is 115 x 176 rather
 than the 128 x 320 the shaft it runs in fills. A leaf is the exception on
 deliberate purpose: it is drawn at its whole cell and translated under the
-doorway clip, so the clip - not the declared extent - is what keeps it inside the
-opening, and one tile answers every width and each height class (#1056, #1058).
+doorway clip, so the clip - not the declared extent - is what keeps it inside
+the opening, and one leaf tile answers every width its class opens at. The
+height class picks a family of its own rather than making one panel answer for
+both (#1056, #1058).
 The #1013 spec first wrote the two
 vehicle entries as 128 x 320 because it was describing one cell of a transport's
 route rather than the vehicle; the renderer draws a car into the car's own live
@@ -208,9 +239,13 @@ the spec moved to the geometry and the sheet did not move at all.
 
 ### One Door tile serves all four opening styles
 
-A Door has one tile. The opening style decides which way the leaf crops, not which
-artwork is used, so a sliding leaf crops rather than squashing into the strip of
-aperture it still covers:
+The opening style decides which way the leaf crops and never which artwork is
+used: a Door wears one leaf tile per leaf whatever style it opens by, so a
+sliding leaf crops rather than squashing into the strip of aperture it still
+covers. Which family that leaf comes from is a separate question, answered by
+what the Door is rather than by how it opens - ownership first, then the
+height class (#1057, #1058) - and every family is drawn to the same full-cell
+contract, so what the four styles differ by is the crop and not the tile:
 
 | Style | What the leaf keeps |
 |---|---|
@@ -236,11 +271,16 @@ its tile: `u[0.2,1.0]` of `door-L0` for a 1-wide `OpenLeft` Door, mirrored to
 `u[0.0,0.8]` for `OpenRight`. Both bands still hold the `u = 0.5` symmetry axis
 the `OpenApart` split requires.
 
-The declared drawn size is the regular one-cell Door's own extent: `cellsWide -
-2 * CORE_DOOR_X_INSET` across a regular Door's `CORE_DOOR_HEIGHT`, which is 0.8 x
-0.5 World units. As with the Access panel, the object's own geometry is what the
-artwork is drawn into; the declared size is the reference the art is authored
-against, not a cap on what the object may be.
+What every leaf tile declares is one full cell: `drawn_size: [1.0, 1.0]` at a
+zero render offset, the same value for the ordinary pair, the Lift landings,
+the Shuttle hatch and the tall pair. The Door's own aperture - `cellsWide -
+2 * CORE_DOOR_X_INSET` across a regular Door's `CORE_DOOR_HEIGHT`, which is
+0.8 x 0.5 World units - is what the clip is cut to, not what the tile claims.
+That is the difference the leaf's move to a full cell made (#1056): the bare
+`door` tile this replaced declared that 0.8 x 0.5 aperture as its own drawn
+size and was cropped from its own edge to animate, so the extent the art
+claimed and the crop the animation applied were one fact and could not be
+moved apart.
 
 ### The Booth Window is a fixed frame with a shutter behind it
 
@@ -270,14 +310,23 @@ disabled grey and Broken red are wireframe and fallback facts, and letting them
 multiply into the art would wash out the difference between the two tiles the
 state is carried by.
 
-The Marker is the one tile in the set that takes a tint. Its icon is grayscale so
-the gold the renderer carries multiplies into it, and that gold is
-`core::SelectedAgentColour` - the same colour the Agent selection highlight
-resolves to - which lets a destination read as part of the Agent colour
-vocabulary rather than as a fixed decal. The icon's on-screen size is a
-screen-space fact (`MarkerIconSize`, a fixed pixel longest edge that does not
-follow the World cell), so the Marker's declared drawn size is the authored art's
-own reference extent rather than the destination it is drawn into.
+Four tiles in the set are authored tintable - the Walkway, the Bulkhead Door,
+the Access panel and the Marker - and the Marker is the one whose tint is a
+domain colour rather than the fill colour of the primitive the artwork
+replaced. Its icon is grayscale so the gold the renderer carries multiplies
+into it, and that gold is `core::SelectedAgentColour` - the same colour the
+Agent selection highlight resolves to - which lets a destination read as part
+of the Agent colour vocabulary rather than as a fixed decal. The other three
+carry over what they used to be filled with: the Walkway's grey, or the
+selection colour while it is selected; the Bulkhead Door's slab teal; the
+Access panel's slate. Tintability is what lets each of them go through the
+sprite path without going white; the Marker is the one where the tint is the
+point.
+
+The icon's on-screen size is a screen-space fact (`MarkerIconSize`, a fixed
+pixel longest edge that does not follow the World cell), so the Marker's
+declared drawn size is the authored art's own reference extent rather than the
+destination it is drawn into.
 
 ### The Bulkhead Door draws its own slab, not a cell
 
