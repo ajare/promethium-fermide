@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""The doorframe tiles the shipped Sector atlas authors (#1054).
+"""The doorframe tiles the shipped Sector atlas authors (#1054, #1073).
 
-A doorframe is the tile a cell wears when a Door stands in that wall. Its
-transparent hole is the opening the leaf animates inside, and the hole is
-the one part of the artwork that cannot be wrong by a fraction of a pixel
-in the wrong direction. The leaf is clipped to the aperture, so a hole
-authored *smaller* than the aperture costs at most a fraction of a pixel
-of moulding covered by the leaf; a hole authored *larger* leaves a ring of
-whatever lies behind the wall showing outside the leaf at every open
-percentage, which is unambiguously wrong.
+A doorframe is the moulding laid over the wall's own tile around the
+opening a Door stands in. Its transparent hole is the opening the leaf
+animates inside, and the hole is the one part of the artwork that cannot
+be wrong by a fraction of a pixel in the wrong direction. The leaf is
+clipped to the aperture, so a hole authored *smaller* than the aperture
+costs at most a fraction of a pixel of moulding covered by the leaf; a
+hole authored *larger* puts the moulding inside the doorway, which reads
+as an opening smaller than the hole it was cut for.
 
 So the rule is: round the hole down, inward on every edge, from the
 aperture it frames. This checks that the authored hole is exactly that,
@@ -16,6 +16,15 @@ that the committed placeholder sheet really has the hole where the tileset
 says, and that the frames are in the atlas's `overlays` map rather than
 among its surfaces - which is what keeps `hasSectorTileSurface()`
 answering "is this a Sector surface" and not "is this a tile".
+
+The frames are keyed by the opening and by nothing else. Six tiles cover
+every doorway in every wall type, because the frame lies *over* the wall's
+tile and the wall's look comes from that tile: what is left of a frame to
+draw once it is not the wall is the moulding, and the moulding does not
+know a Room from a Corridor from a Facade. The fifteen wall-keyed frames
+this replaced were three copies of artwork that could not tell the walls
+apart, and they are refused here by name so they cannot come back as
+though the wall still needed them.
 """
 
 from __future__ import annotations
@@ -35,43 +44,29 @@ from generate_sector_atlas_new import SPEC as SECTOR  # noqa: E402
 CELL_WIDTH = 128
 CELL_HEIGHT = 320
 
-# The fifteen frames a Room, a Corridor or a Facade wears, with the aperture
-# each one frames in World units: the horizontal span across the cell and the
-# height above the cell's floor line. A 2-wide opening spans two cells, and each
-# cell's own span is what its frame has to open onto - the left cell from
-# its 0.1 inset to its right edge, the right cell from its left edge to
-# its 0.9 inset. Together they make the 1.8-wide aperture.
-#
-# The Facade's six are the Room's six again: a Facade frames the same
-# openings a Room does and only the moulding around them is a different
-# wall's. Its tall pair is authored ahead of the tall Facade Door that will
-# wear it, which #1060 admits; unlike the Corridor's missing tall frames,
-# these are not artwork nobody can ever reach (#1059).
+# The six frames, with the aperture each one frames in World units: the
+# horizontal span across its cell and the height above the cell's floor
+# line. A 2-wide opening spans two cells, and each cell's own span is what
+# its frame has to open onto - the left cell from its 0.1 inset to its
+# right edge, the right cell from its left edge to its 0.9 inset. Together
+# they make the 1.8-wide aperture.
 APERTURES = {
-    "doorframe-room-1r-L0": (0.1, 0.9, 0.5),
-    "doorframe-room-2r-L0": (0.1, 1.0, 0.5),
-    "doorframe-room-2r-R0": (0.0, 0.9, 0.5),
-    "doorframe-room-1t-L0": (0.1, 0.9, 0.9),
-    "doorframe-room-2t-L0": (0.1, 1.0, 0.9),
-    "doorframe-room-2t-R0": (0.0, 0.9, 0.9),
-    "doorframe-corridor-1r-L0": (0.1, 0.9, 0.5),
-    "doorframe-corridor-2r-L0": (0.1, 1.0, 0.5),
-    "doorframe-corridor-2r-R0": (0.0, 0.9, 0.5),
-    "doorframe-facade-1r-L0": (0.1, 0.9, 0.5),
-    "doorframe-facade-2r-L0": (0.1, 1.0, 0.5),
-    "doorframe-facade-2r-R0": (0.0, 0.9, 0.5),
-    "doorframe-facade-1t-L0": (0.1, 0.9, 0.9),
-    "doorframe-facade-2t-L0": (0.1, 1.0, 0.9),
-    "doorframe-facade-2t-R0": (0.0, 0.9, 0.9),
+    "doorframe-1r-L0": (0.1, 0.9, 0.5),
+    "doorframe-2r-L0": (0.1, 1.0, 0.5),
+    "doorframe-2r-R0": (0.0, 0.9, 0.5),
+    "doorframe-1t-L0": (0.1, 0.9, 0.9),
+    "doorframe-2t-L0": (0.1, 1.0, 0.9),
+    "doorframe-2t-R0": (0.0, 0.9, 0.9),
 }
 
-# The tall frames a Corridor does not have, because a tall Door is refused
-# in a Corridor and a tile nobody can ever reach is artwork that reads as
-# unfinished.
+# The wall-keyed frames this replaced. They are refused rather than merely
+# absent: a frame that lies over a wall has no use for the wall in its
+# name, and one that came back would be three copies of a tile that cannot
+# tell the copies apart.
 FORBIDDEN = [
-    "doorframe-corridor-1t-L0",
-    "doorframe-corridor-2t-L0",
-    "doorframe-corridor-2t-R0",
+    f"doorframe-{wall}-{rest}"
+    for wall in ("room", "corridor", "facade")
+    for rest in ("1r-L0", "2r-L0", "2r-R0", "1t-L0", "2t-L0", "2t-R0")
 ]
 
 failures: list[str] = []
@@ -109,11 +104,12 @@ def main() -> int:
         return 1
 
     check(set(overlays) == set(APERTURES),
-          f"the authored overlays are {sorted(overlays)}, expected the fifteen "
-          f"Room, Corridor and Facade frames {sorted(APERTURES)}")
+          f"the authored overlays are {sorted(overlays)}, expected the six "
+          f"opening-keyed frames {sorted(APERTURES)}")
     for name in FORBIDDEN:
         check(name not in overlays,
-              f"{name} is authored, and no Door can ever be authored to wear it")
+              f"{name} is authored under a wall key; a frame laid over the "
+              "wall's own tile does not vary with the wall")
 
     # The frames are overlays, not surfaces: the map they are authored in
     # is what keeps `hasSectorTileSurface()` answering about Sector
@@ -129,7 +125,7 @@ def main() -> int:
             continue
         check("variants" not in sprite,
               f"{name} declares a variant family; a frame is derived from the "
-              "wall it frames and has no family of pictures to pick from")
+              "opening it frames and has no family of pictures to pick from")
         hole = sprite.get("hole")
         check(isinstance(hole, list) and len(hole) == 4,
               f"{name} declares no `hole` rectangle")

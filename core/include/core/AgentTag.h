@@ -15,7 +15,6 @@ namespace core
 {
 	enum class AgentPropertyType
 	{
-		Colour,
 		EscalatorWalkingChance,
 		WalkSpeedModifier,
 		HeightModifier,
@@ -49,7 +48,6 @@ namespace core
 	{
 		switch (type)
 		{
-		case AgentPropertyType::Colour: return { "Colour", std::nullopt };
 		case AgentPropertyType::EscalatorWalkingChance:
 			return { "Escalator walking chance", "Pathing" };
 		case AgentPropertyType::WalkSpeedModifier:
@@ -76,8 +74,9 @@ namespace core
 		return { {}, std::nullopt };
 	}
 
-	// The first hardcoded Agent property. It deliberately has no alpha channel:
-	// ordinary Agents are opaque, and selection replaces this colour entirely.
+	// An RGB triple with no alpha channel. It survives only as tag display
+	// data - the colour a tag's own chip is drawn in - and not as anything
+	// an Agent is drawn with: an Agent's sprite is its artwork, unmodulated.
 	struct AgentColour
 	{
 		uint8_t r{ 179 };
@@ -86,9 +85,6 @@ namespace core
 
 		bool operator==(AgentColour const& other) const = default;
 	};
-
-	inline constexpr AgentColour EditorDefaultAgentColour{};
-	inline constexpr AgentColour SelectedAgentColour{ 251, 188, 4 };
 
 	// The sixteen pastel Colours that intrinsic tag display Colours draw from.
 	// Draws need not be distinct; each draw is uniform and independent.
@@ -121,14 +117,6 @@ namespace core
 
 	PF_CORE_API bool agentEscalatorWalkingChanceIsValid(float value,
 		std::string* diagnostic = nullptr);
-
-	struct AgentColourProperty
-	{
-		AgentColour value{};
-		uint64_t revision{ 0 };
-
-		bool operator==(AgentColourProperty const& other) const = default;
-	};
 
 	struct AgentModifierRange
 	{
@@ -411,10 +399,9 @@ namespace core
 
 		std::string mName;
 		// The intrinsic display Colour used when rendering the tag itself (for
-		// example its Selection-panel chip). It is deliberately separate from
-		// the optional Agent Colour property below, which Agents inherit.
+		// example its Selection-panel chip). It is the only colour a tag
+		// carries, and it never reaches an Agent's picture.
 		AgentColour mDisplayColour{};
-		std::optional<AgentColourProperty> mColour;
 		std::optional<AgentEscalatorWalkingChanceProperty> mEscalatorWalkingChance;
 		void setEscalatorWalkingChance(AgentEscalatorWalkingChanceProperty property)
 		{ mEscalatorWalkingChance = property; }
@@ -450,8 +437,6 @@ namespace core
 
 		void setName(std::string name) { mName = std::move(name); }
 		void setDisplayColour(AgentColour colour) { mDisplayColour = colour; }
-		void setColour(AgentColourProperty colour) { mColour = colour; }
-		void removeColour() { mColour.reset(); }
 		void setWalkSpeedModifier(AgentWalkSpeedModifierProperty property)
 		{
 			mWalkSpeedModifier = property;
@@ -542,10 +527,6 @@ namespace core
 		AgentColour getDisplayColour() const { return mDisplayColour; }
 		AgentEscalatorWalkingChanceProperty const* getEscalatorWalkingChance() const
 		{ return mEscalatorWalkingChance ? &*mEscalatorWalkingChance : nullptr; }
-		AgentColourProperty const* getColour() const
-		{
-			return mColour ? &*mColour : nullptr;
-		}
 		AgentWalkSpeedModifierProperty const* getWalkSpeedModifier() const
 		{
 			return mWalkSpeedModifier ? &*mWalkSpeedModifier : nullptr;

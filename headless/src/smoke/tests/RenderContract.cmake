@@ -88,7 +88,7 @@ set(names
     sectorAtlasNew/aShortSectorCropsTheTopOfItsTileOntoItsFloorLine
     sectorAtlasNew/shuttleAndStaircaseNoLongerBorrow
     sectorAtlasNew/carriageAndStepsStillDrawOnTop
-    sectorAtlasNew/flatColourSectorsTakeNoTile
+    sectorAtlasNew/flatSurfaceSectorsDrawTheirOwnTiles
     sectorAtlasNew/loaderRefusesASetMissingASurface
     sectorAtlasNew/loaderRefusesABoundaryStripInTheNewSet
     sectorAtlasNew/loaderRefusesAnOverlayThatIsAlsoASurface
@@ -130,38 +130,26 @@ set(names
     sectorSurfaceVariants/aVariantOnADumbwaiterBorrowingTheLiftDrawsTheLiftBase
     sectorSurfaceVariants/aVariantChangesThePictureAndNotTheGeometry
     sectorSurfaceVariants/aVariantOnTheRowTheViewportBottomCutsStillDraws
-    doorframeCells/oneWideRoomDoorWearsItsFrame
-    doorframeCells/twoWideRoomDoorWearsItsFramePair
-    doorframeCells/tallRoomDoorWearsItsTallFrame
-    doorframeCells/corridorDoorsWearCorridorFrames
-    doorframeCells/theFrameKeepsTheFloorAnchoredCrop
-    doorframeCells/aClippedDoorCellIsNeverDrawn
-    doorframeCells/aVariantUnderADoorIsHiddenAndComesBack
-    doorframeCells/adjacentDoorsFrameTheirOwnCells
-    doorframeCells/aRemovedDoorRevertsWithNoResidue
+    doorframeCells/theDoorCellStillDrawsItsWallTile
+    doorframeCells/theFrameIsLaidOverTheDoorCells
+    doorframeCells/aTallDoorWearsItsTallFrame
+    doorframeCells/everyWallWearsTheSameFrame
+    doorframeCells/noWallKeyedFrameIsDrawn
+    doorframeCells/theFrameKeepsTheFloorAnchoredGrid
+    doorframeCells/theFrameIsDrawnLast
+    doorframeCells/theBackSectorIsClippedToTheWholeAperture
+    doorframeCells/aFrameTheAtlasDoesNotCarryDrawsNoFrameAndNoMagenta
+    doorframeCells/aVariantUnderADoorStillDraws
+    doorframeCells/aRemovedDoorLeavesNoFrame
     doorframeCells/theBackWallOfAThresholdTakesNoFrame
-    doorframeCells/aWallWithNoFrameAuthoredDrawsItsBase
-    doorframeCells/aFrameIsReachableWithoutBeingASurface
-    doorframeCells/aScaledRegularDoorWearsNoFrame
-    doorframeCells/aScaleOfOneStillWearsItsFrame
-    doorframeCells/aScaledDoorStillShowsTheVariantUnderIt
-    doorframeCells/aScaledDoorInACorridorWearsNoFrame
-    doorframeCells/aTallDoorIsUnaffectedByTheScaleGuard
-    doorframeCells/oneWideFacadeDoorWearsItsFrame
-    doorframeCells/twoWideFacadeDoorWearsItsFramePair
-    doorframeCells/theFlatFillStillCoversEveryCellThatIsNotADoorCell
-    doorframeCells/theFrameIsEmittedBeforeEveryAperture
-    doorframeCells/theFrameNeverReachesAnotherThresholdsAperture
-    doorframeCells/theTallFacadeFrameIsDerivedAndDrawn
-    doorframeCells/aFacadeWithNoFacadeFramesAuthoredDrawsItsFill
-    doorframeCells/theFrameFollowsTheFillThroughEveryStyle
-    doorframeCells/aScaledFacadeDoorDrawsNoFrameOverItsFill
-    doorframeCells/noShippedDoorWearsAFrameItsApertureDoesNotFill
-    doorframeCells/noShippedDoorsContestAFrameCell
-    doorframeCells/aSectorWithNoObjectsWalksNothingForFrames
-    doorframeCells/aSectorWhollyOutsideTheClipDerivesNoFrames
-    doorframeCells/aFacadeWhollyOutsideTheClipDerivesNoFrames
-    doorframeCells/everyDrawnPassDerivesItsFramesAnew
+    doorframeCells/adjacentDoorsFrameTheirOwnCells
+    doorframeCells/aScaledDoorWearsItsFrame
+    doorframeCells/theFacadeSurfaceStillCoversEveryCell
+    doorframeCells/theFrameIsDrawnRaw
+    doorframeCells/aWallWithNoDoorDrawsNoFrame
+    doorframeCells/theFrameFollowsTheWallThroughEveryStyle
+    doorframeCells/theFrameArrivesWithItsDoorAndGoesWithIt
+    doorframeCells/theFrameNameIsTheOpeningAndNothingElse
     sectorTilePreview/oneTileFramesTheRectItIsGiven
     sectorTilePreview/anyRectFramesOneTileAndNotACellGrid
     sectorTilePreview/itIsOneTileWhereTheWorldRepeatIsFour
@@ -174,8 +162,6 @@ set(names
     agentAtlasNew/twentyTilesAreRegistered
     agentAtlasNew/twoTypesNamingOneAppearanceShareTheirTiles
     agentAtlasNew/genericAppearanceIsTheFallbackForATypeWithNoArtwork
-    agentAtlasNew/tintFollowsTheAuthoredFlagNotTheName
-    agentAtlasNew/agentColourTagOverrideAndSelectionStillDriveTheTint
     agentAtlasNew/overWidePoseTilesResolveAcrossAdjacentCells
     agentAtlasNew/theShippedAndroidTypeWearsTheAndroidAppearance
     agentAtlasNew/everyShippedAgentTypeResolvesInEveryNewAgentAtlas
@@ -199,7 +185,7 @@ set(names
     objectArtworkNew/aFullyOpenDoorEmitsNoLeafGeometry
     objectArtworkNew/boothWindowShutterTranslatesBehindTheStationaryFrame
     objectArtworkNew/buttonStateIsLegibleAtTheDrawnSize
-    objectArtworkNew/markerStaysTintableAndFollowsSelection
+    objectArtworkNew/markerDrawsItsArtworkAndSelectionStillReads
     objectAtlasContract/shippedAtlasSatisfiesTheContract
     objectAtlasContract/coversEveryDrawnTile
     objectAtlasContract/everyRequiredTileIsNamedByADrawCall
@@ -263,8 +249,6 @@ set(names
     theSelectedLayerPaintsItselfWhole
     theOverlayOutlinesTheWholeLayerBehind
     layerDetailsDrawTheirSurfaceBeforeApertures
-    aClearWindowShowsItsBackgroundsOwnColour
-    aBackgroundFillsSolidAndIsOutlinedOnlyByTheOverlay
     aBackgroundBehindTheSelectionIsOutlinedWholeByTheOverlay
     adjacentBackgroundsMeetWithoutASeam
     aSelectedBackgroundStillTakesTheSelectionHighlight
@@ -313,14 +297,14 @@ set(names
     doorLeafPlan/anUnplannedStylePaintsNothingBeforeRefusing
     doorLeafPlan/aClosedDoorRevealsNothingOnEveryStyle
     doorLeafPlan/aPlannedStyleStillDrawsItsLeavesAndReveal
-    flatColourRuleNamesFacadeAndBackgroundOnly
-    solidPassFillsTheFacadeWithItsOwnColour
-    wireframePassOutlinesTheFacadeNeverFills
-    facadeFillIsUnchangedWhenLightsAreOff
-    aWindowIntoAFacadeShowsFlatColourObjectsAndAgents
+    aFacadeDrawsItsOwnTileAcrossItsArea
+    aBackgroundDrawsItsOwnTileAcrossItsArea
+    aFacadeIsOutlinedByTheWireframeOverlayAndFillsNothing
+    aFacadeDrawsTheSamePictureWithItsLightsOff
+    aWindowIntoAFacadeShowsObjectsAndAgents
     aWindowCannotLookHalfIntoAFacadeAndHalfIntoABackground
-    facadeFillPrecedesThresholdApertures
-    facadeFillCoversTheWholeFacadeSurface
+    facadeSurfacePrecedesThresholdApertures
+    facadeSurfaceCoversTheWholeFacadeSurface
     wireframePassOutlinesFacadeBeforeThresholds
     emptyCellsDoNotRevealDeeperLayers
     nestedWindowsKeepTheirScissors

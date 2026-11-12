@@ -261,20 +261,29 @@ namespace
 		// reveal draw at all, and what is asserted instead is that the leaves
 		// cover the doorway completely - which is why there is nothing to
 		// reveal.
+		// The back Sector is clipped to the whole doorway rather than to
+		// the strip the leaves have vacated: the leaves are drawn over it
+		// and cover what they cover, so the draw computes no strip at all
+		// (#1073). A closed Door draws no back Sector - its leaves stand
+		// across the whole doorway, so that draw would paint over itself -
+		// which is the same thing the empty reveal used to buy by
+		// construction, now asked for directly.
 		auto const expectedReveal = model.reveal.intersect(scene.aperture);
 		if (expectedReveal.empty())
 		{
+			require(!door_leaf::extentOf(drawList, kApertureFillColour).painted(),
+				"a closed Door drew the Sector behind a doorway its own leaves "
+				"already cover");
 			nearBox(door_leaf::project(model.covered()), apertureBox,
 				"a closed Door's leaves over its doorway");
 			return;
 		}
 
-		auto const expectedBox = door_leaf::project(expectedReveal);
 		auto const clip = door_leaf::clipCovering(drawList, kApertureFillColour);
-		near(clip.x, expectedBox.left, "the aperture clip's left edge");
-		near(clip.z, expectedBox.right, "the aperture clip's right edge");
-		near(clip.y, expectedBox.top, "the aperture clip's top edge");
-		near(clip.w, expectedBox.bottom, "the aperture clip's bottom edge");
+		near(clip.x, apertureBox.left, "the back Sector clip's left edge");
+		near(clip.z, apertureBox.right, "the back Sector clip's right edge");
+		near(clip.y, apertureBox.top, "the back Sector clip's top edge");
+		near(clip.w, apertureBox.bottom, "the back Sector clip's bottom edge");
 	}
 
 	// Fully open: both leaves have slid clean out of the doorway and paint

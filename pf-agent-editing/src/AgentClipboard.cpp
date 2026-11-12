@@ -656,7 +656,6 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 
 	payload.type = lookup.entity->getTypeId();
 	payload.resource = lookup.entity->getTypeResourceName();
-	payload.individualColour = lookup.entity->getIndividualColour();
 	payload.individualEscalatorWalkingChance = lookup.entity->getIndividualEscalatorWalkingChance();
 	payload.individualWalkSpeedModifier = lookup.entity->getIndividualWalkSpeedModifier();
 	payload.individualHeightModifier = lookup.entity->getIndividualHeightModifier();
@@ -778,11 +777,6 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 	// so a payload written before activation existed reads back activated
 	// (#118).
 	if (!payload.active) output << YAML::Key << "active" << YAML::Value << false;
-	if (payload.individualColour)
-		output << YAML::Key << "colour" << YAML::Value << YAML::BeginMap
-			<< YAML::Key << "r" << YAML::Value << unsigned(payload.individualColour->r)
-			<< YAML::Key << "g" << YAML::Value << unsigned(payload.individualColour->g)
-			<< YAML::Key << "b" << YAML::Value << unsigned(payload.individualColour->b) << YAML::EndMap;
 	if (payload.individualEscalatorWalkingChance)
 		output << YAML::Key << "escalatorWalkingChance" << YAML::Value << *payload.individualEscalatorWalkingChance;
 	if (payload.individualWalkSpeedModifier)
@@ -1014,15 +1008,6 @@ bool readAgentClipboardObject(YAML::Node const& object,
 
 	try
 	{
-		if (auto colour = object["colour"])
-		{
-			auto channel = [&](char const* name) {
-				auto value = colour[name].as<unsigned>();
-				if (value > 255) throw invalid_argument("Colour channel exceeds 255");
-				return static_cast<uint8_t>(value);
-			};
-			payload.individualColour = core::AgentColour{ channel("r"), channel("g"), channel("b") };
-		}
 		if (object["escalatorWalkingChance"])
 			payload.individualEscalatorWalkingChance = object["escalatorWalkingChance"].as<float>();
 		if (object["walkSpeedModifier"])
@@ -1675,7 +1660,7 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 	if (!clipboardBehaviourFitsWorld(*world, payload,
 		&behaviourConfiguration, diagnostic)) return false;
 	if ((!payload.agentTags.empty() || payload.behaviour
-		|| payload.authorizationWorldIdentity || payload.individualColour
+		|| payload.authorizationWorldIdentity
 		|| payload.individualEscalatorWalkingChance || payload.individualWalkSpeedModifier
 		|| payload.individualHeightModifier || payload.individualMobilityProfile
 		|| payload.individualStairSpeedModifier || payload.individualLadderSpeedModifier
@@ -1775,9 +1760,7 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 			return false;
 		}
 		string propertyDiagnostic;
-		if ((payload.individualColour && !world->setAgentIndividualColour(agentId,
-			payload.individualColour, &propertyDiagnostic))
-			|| (payload.individualEscalatorWalkingChance && !world->setAgentIndividualEscalatorWalkingChance(agentId,
+		if ((payload.individualEscalatorWalkingChance && !world->setAgentIndividualEscalatorWalkingChance(agentId,
 				payload.individualEscalatorWalkingChance, &propertyDiagnostic))
 			|| (payload.individualWalkSpeedModifier && !world->setAgentIndividualWalkSpeedModifier(agentId,
 				payload.individualWalkSpeedModifier, &propertyDiagnostic))

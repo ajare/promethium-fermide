@@ -71,9 +71,9 @@ namespace
 	int const kCellWidth = CORE_CELL_WIDTH_PIXELS;
 	int const kCellHeight = CORE_LEVEL_HEIGHT_PIXELS;
 
-	// A tint no production path picks by default, so a cell that ignored the
-	// caller's tint fails instead of looking right.
-	pf::render::PackedColourValue const kTint = packColour(214, 96, 32, 255);
+	// The colour a tile is drawn with when nothing is multiplied into it.
+	// Every image command the surface loop emits carries exactly this.
+	pf::render::PackedColourValue const kRaw = White;
 
 	// The tile standing for cell (column, level) of the synthetic sheet, and
 	// the variant of that same cell, named the way a recorded variant names
@@ -365,9 +365,9 @@ namespace
 		require(near(quad.clipBottom, clipBottom),
 			"The straddling row did not carry the clip that crops it: "
 				+ describe(quad));
-		require(quad.tint == kTint,
-			"The straddling row carried a tint other than the one asked for: "
-				+ describe(quad));
+		require(quad.tint == kRaw,
+			"The straddling row was drawn with a colour other than its raw "
+				"artwork: " + describe(quad));
 		// One artwork pixel per screen pixel, stated on the sample as well as
 		// on the rect: the emitted quad covers as many artwork rows as it
 		// covers screen pixels. Fold the crop into the sample and shrink the
@@ -408,7 +408,7 @@ namespace
 		WorldDrawList commands({ { -1000.0f, -1000.0f },
 			{ 1000.0f, clipBottom } });
 		require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
-				{ float(columns) * float(kCellWidth), floorLine }, kTint, 1.0f,
+				{ float(columns) * float(kCellWidth), floorLine }, 1.0f,
 				recorder.resolver()),
 			"A Sector surface with an atlas installed must draw");
 
@@ -464,7 +464,7 @@ namespace
 		WorldDrawList commands({ { -1000.0f, -1000.0f },
 			{ 1000.0f, clipBottom } });
 		require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
-				{ float(columns) * float(kCellWidth), floorLine }, kTint, 1.0f,
+				{ float(columns) * float(kCellWidth), floorLine }, 1.0f,
 				recorder.resolver()),
 			"A Sector surface with an atlas installed must draw");
 
@@ -511,7 +511,7 @@ namespace
 			WorldDrawList commands({ { -1000.0f, -1000.0f },
 				{ 1000.0f, clipBottom } });
 			require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
-					{ float(columns) * float(kCellWidth), floorLine }, kTint,
+					{ float(columns) * float(kCellWidth), floorLine },
 					1.0f, recorder.resolver()),
 				"A Sector surface with an atlas installed must draw");
 			auto const quads = quadsOf(commands, atlas);
@@ -565,7 +565,7 @@ namespace
 			WorldDrawList commands({ { -1000.0f, -1000.0f },
 				{ 1000.0f, clipBottom } });
 			require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
-					{ float(columns) * float(kCellWidth), floorLine }, kTint,
+					{ float(columns) * float(kCellWidth), floorLine },
 					1.0f, recorder.resolver()),
 				"A Sector surface with an atlas installed must draw");
 			auto const quads = quadsOf(commands, atlas);
@@ -607,7 +607,7 @@ namespace
 		WorldDrawList commands({ { -1000.0f, clipTop },
 			{ 1000.0f, clipBottom } });
 		require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
-				{ float(columns) * float(kCellWidth), floorLine }, kTint, 1.0f,
+				{ float(columns) * float(kCellWidth), floorLine }, 1.0f,
 				recorder.resolver()),
 			"A Sector surface with an atlas installed must draw");
 
@@ -696,7 +696,7 @@ namespace
 		WorldDrawList commands({ { -1000.0f, -1000.0f },
 			{ 1000.0f, clipBottom } });
 		require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
-				{ float(columns) * float(kCellWidth), floorLine }, kTint, 1.0f,
+				{ float(columns) * float(kCellWidth), floorLine }, 1.0f,
 				resolver),
 			"A Sector surface with an atlas installed must draw");
 

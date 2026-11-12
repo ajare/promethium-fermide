@@ -8,13 +8,9 @@
 // generic `agent` row - which is a row like any other, so the fallback is
 // drawn by the same path as the real appearances.
 //
-// Tinting is an authored fact. The rule that used to decide whether an
-// Agent tile took the Agent colour by matching its name against `agent`,
-// `human-*`, `robot-standing` and `cleaning-bot-standing` is deleted in
-// this slice, so `tintable` in the tileset is the only thing that says it.
-// The regression check here installs a tile named like the Human appearance
-// but authored untintable, and a tile named like no appearance at all but
-// authored tintable, and shows the flag wins in both directions.
+// Agent artwork is drawn as the sheet paints it. Nothing is multiplied
+// into an Agent sprite on the way to the screen: an Agent's look is its
+// tiles, and a look that has to differ is a different tile.
 //
 // The artwork is installed the way the render stack installs it - pixel
 // regions from the `ImageSet` the application manifest declares, render
@@ -420,11 +416,6 @@ namespace
 			+ std::to_string(authored.width) + "x"
 			+ std::to_string(authored.height));
 
-		// Every tile is grayscale art that takes the Agent colour.
-		for (auto const& [name, artwork] : authored.sprites)
-			require(artwork.tintable,
-				"'" + name + "' must be authored tintable; Agent art is grayscale");
-
 		// The manifest's generated entries agree with the authored tileset,
 		// so the runtime pixel contract cannot drift from what was authored.
 		auto const manifest = bundledManifest(context);
@@ -531,150 +522,6 @@ namespace
 				"A type with no artwork drew " + body.tile + " for the " + pose
 				+ " Pose instead of the generic appearance");
 		}
-	}
-
-	// ------------------------------------------------------------------
-	// The tint is authored. The name says nothing.
-	// ------------------------------------------------------------------
-
-	// The fixture the regression needs: one tile named like the Human
-	// appearance but authored untintable, and one named like no appearance
-	// at all but authored tintable. Under the name rule this slice deletes
-	// the first would tint and the second would not; the authored flags say
-	// the opposite of both, and the authored flags are what the renderer
-	// now reads.
-	std::string tintFixtureYaml()
-	{
-		return "version: 2\n"
-			"image: invented.png\n"
-			"size: [256, 320]\n"
-			"tile_size: [128, 320]\n"
-			"sprites:\n"
-			"  human-standing:\n"
-			"    cell: [0, 0]\n"
-			"    content: [0, 176, 52, 144]\n"
-			"    offset: [0.0, 0.0]\n"
-			"    drawn_size: [0.40625, 0.45]\n"
-			"    tintable: false\n"
-			"  security-bot-standing:\n"
-			"    cell: [1, 0]\n"
-			"    content: [0, 176, 52, 144]\n"
-			"    offset: [0.0, 0.0]\n"
-			"    drawn_size: [0.40625, 0.45]\n"
-			"    tintable: true\n";
-	}
-
-	void tintFollowsTheAuthoredFlagNotTheName(smoke::Context const& context)
-	{
-		using smoke::require;
-		auto const path = context.temporaryRoot() / "agent-tint.tileset.yaml";
-		std::ofstream out(path, std::ios::binary | std::ios::trunc);
-		out << tintFixtureYaml();
-		out.close();
-		require(bool(out), "Could not write the fixture tileset: " + path.string());
-
-		// Installed through the same seam the application uses, so the flag
-		// travels the same road from file to command that the real atlas's does.
-		auto const authored = ObjectTileset::load(path);
-		AtlasPixelRegions regions;
-		for (auto const& [name, artwork] : authored.sprites)
-			regions.emplace(name, AtlasPixelRegion{ artwork.region.x, artwork.region.y,
-				artwork.region.width, artwork.region.height });
-		ObjectTileset installed;
-		installed.width = authored.width;
-		installed.height = authored.height;
-		installed.sprites = installAtlasTiles(authored.sprites, regions,
-			authored.width, authored.height, "AgentTintFixture");
-		require(!installed.sprites.at("human-standing").tintable
-				&& installed.sprites.at("security-bot-standing").tintable,
-			"The install lost an authored tintable flag");
-		setAgentTileset(installed, static_cast<TextureId>(1));
-
-		auto fixture = makeFixture();
-		attachAppearance(context, *fixture.world, "UntintedHumanLookalike", "human");
-		attachAppearance(context, *fixture.world, "TintedNewLook", "security-bot");
-		auto const untinted = spawn(fixture.world, fixture.room,
-			"UntintedHumanLookalike", 2.5f);
-		auto const tinted = spawn(fixture.world, fixture.room, "TintedNewLook", 5.5f);
-		std::string diagnostic;
-		require(fixture.world->setAgentIndividualColour(tinted.id,
-			core::AgentColour{ 200, 120, 20 }, &diagnostic),
-			"Could not colour the tinted fixture Agent: " + diagnostic);
-
-		// Named like a tile the deleted rule tinted, authored untintable:
-		// it draws in the sheet's own colours and takes no tint.
-		auto const untintedBody = drawBody(*untinted.entity, installed);
-		require(untintedBody.drawn, "The untinted fixture Agent drew no body at all");
-		require(untintedBody.colour == White,
-			"A tile named 'human-standing' tinted against its authored flag");
-
-		// Named like nothing the deleted rule knew, authored tintable: it
-		// takes the resolved Agent colour just like any other Agent tile.
-		auto const tintedBody = drawBody(*tinted.entity, installed);
-		require(tintedBody.drawn, "The tinted fixture Agent drew no body at all");
-		require(tintedBody.colour == agentRenderColour(*tinted.entity, false)
-				&& tintedBody.colour == packColour(200, 120, 20),
-			"A tile named 'security-bot-standing' failed to tint to its authored flag");
-	}
-
-	// ------------------------------------------------------------------
-	// Agent colour, tag overrides and selection still drive the tint.
-	// ------------------------------------------------------------------
-	void agentColourTagOverrideAndSelectionStillDriveTheTint(
-		smoke::Context const& context)
-	{
-		using smoke::require;
-		auto const atlas = installNewAgentAtlas(context);
-
-		auto registry = core::AgentTagRegistry::create();
-		auto const amber = registry->addAgentTag("amber");
-		std::string diagnostic;
-		require(registry->addAgentTagColour(amber, &diagnostic), diagnostic);
-		require(registry->setAgentTagColour(amber, { 200, 120, 20 }, &diagnostic),
-			diagnostic);
-		auto fixture = makeFixture(registry);
-
-		auto const plain = spawn(fixture.world, fixture.room, "Human", 1.5f);
-		auto const tagged = spawn(fixture.world, fixture.room, "Human", 3.5f);
-		auto const individual = spawn(fixture.world, fixture.room, "Human", 5.5f);
-		require(fixture.world->assignAgentTag(tagged.id, amber, &diagnostic),
-			"Could not tag the fixture Agent: " + diagnostic);
-		require(fixture.world->setAgentIndividualColour(individual.id,
-			core::AgentColour{ 12, 34, 56 }, &diagnostic),
-			"Could not colour the fixture Agent: " + diagnostic);
-
-		// The Agent's own resolved colour reaches the sheet.
-		auto const plainBody = drawBody(*plain.entity, atlas);
-		require(plainBody.drawn && plainBody.tile == "human-standing",
-			"The plain Agent did not draw its Human tile");
-		require(plainBody.colour == agentRenderColour(*plain.entity, false),
-			"The Agent's resolved colour no longer drives the tint");
-
-		// A Colour tag overrides it, and the override reaches the sheet.
-		auto const taggedBody = drawBody(*tagged.entity, atlas);
-		require(taggedBody.colour == packColour(200, 120, 20)
-				&& taggedBody.colour == agentRenderColour(*tagged.entity, false),
-			"A Colour tag override no longer drives the Agent tint");
-
-		// An individual colour wins over the tag, as it always did.
-		auto const individualBody = drawBody(*individual.entity, atlas);
-		require(individualBody.colour == packColour(12, 34, 56)
-				&& individualBody.colour == agentRenderColour(*individual.entity, false),
-			"An individual Agent colour no longer drives the Agent tint");
-
-		// Selection gold overrides all of them.
-		struct SelectionScope
-		{
-			core::Agent* previous{ gSelectedAgent };
-			~SelectionScope() { gSelectedAgent = previous; }
-		} selection;
-		gSelectedAgent = tagged.entity;
-		auto const selectedBody = drawBody(*tagged.entity, atlas);
-		require(selectedBody.colour
-				== packColour(core::SelectedAgentColour.r, core::SelectedAgentColour.g,
-					core::SelectedAgentColour.b)
-				&& selectedBody.colour == agentRenderColour(*tagged.entity, true),
-			"The selection highlight no longer drives the Agent tint");
 	}
 
 	// ------------------------------------------------------------------
@@ -1068,10 +915,6 @@ void render_smoke::registerAgentAtlas(std::vector<smoke::Check>& checks)
 		isolated<twoTypesNamingOneAppearanceShareTheirTiles> });
 	checks.push_back({ "agentAtlasNew/genericAppearanceIsTheFallbackForATypeWithNoArtwork",
 		isolated<genericAppearanceIsTheFallbackForATypeWithNoArtwork> });
-	checks.push_back({ "agentAtlasNew/tintFollowsTheAuthoredFlagNotTheName",
-		isolated<tintFollowsTheAuthoredFlagNotTheName> });
-	checks.push_back({ "agentAtlasNew/agentColourTagOverrideAndSelectionStillDriveTheTint",
-		isolated<agentColourTagOverrideAndSelectionStillDriveTheTint> });
 	checks.push_back({ "agentAtlasNew/overWidePoseTilesResolveAcrossAdjacentCells",
 		isolated<overWidePoseTilesResolveAcrossAdjacentCells> });
 	checks.push_back({ "agentAtlasNew/theShippedAndroidTypeWearsTheAndroidAppearance",

@@ -21,8 +21,8 @@
 // which the install path never asks for - that is why the install path lives
 // outside `WorldRenderStack` rather than inside it.
 //
-// Assertions are on the installed value itself: the pixel region per tile, the
-// tintable flag, the render offset and the drawn size, and - for the four live
+// Assertions are on the installed value itself: the pixel region per tile,
+// the render offset and the drawn size, and - for the four live
 // viewport slots - what the renderer's own read surface reports back after the
 // install has run.
 
@@ -561,10 +561,6 @@ namespace
 					"authored tileset " + entry.tileset + ", so its render "
 					"semantics came from nowhere");
 				// AC: the installed render semantics are the authored ones.
-				require(artwork.tintable == author->second.tintable, who
-					+ "installed tintable=" + std::string(artwork.tintable
-						? "true" : "false") + " but " + entry.tileset + " authors "
-					+ (author->second.tintable ? "true" : "false"));
 				require(artwork.offset.x == author->second.offset.x
 					&& artwork.offset.y == author->second.offset.y, who
 					+ "installed at render offset " + std::to_string(artwork.offset.x)
@@ -925,8 +921,7 @@ namespace
 				"holds '" + tile + "' at " + regionsText(artwork->region)
 				+ " but ObjectAtlas declares " + regionsText(region));
 			auto const author = authoredObjects.at(tile);
-			require(artwork->tintable == author.tintable
-				&& artwork->offset.x == author.offset.x
+			require(artwork->offset.x == author.offset.x
 				&& artwork->offset.y == author.offset.y
 				&& artwork->drawnSize.x == author.drawnSize.x
 				&& artwork->drawnSize.y == author.drawnSize.y, "The Objects slot "

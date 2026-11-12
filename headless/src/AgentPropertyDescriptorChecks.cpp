@@ -79,16 +79,17 @@ int main()
 			&& ada->getEffectiveWalkSpeedModifier().value == 1.0f,
 			"clearing the override reveals the default");
 
-		// Colour: the same path, its own unchanged wording.
-		require(world.setAgentIndividualColour(agent, AgentColour{ 10, 20, 30 },
+		// Escalator walking chance: the same path, its own unchanged wording.
+		require(world.setAgentIndividualEscalatorWalkingChance(agent, 0.4f,
 			&diagnostic),
-			"setting the individual Colour");
-		require(!world.setAgentIndividualColour(agent, AgentColour{ 10, 20, 30 },
+			"setting the individual Escalator walking chance");
+		require(!world.setAgentIndividualEscalatorWalkingChance(agent, 0.4f,
 			&diagnostic)
-			&& diagnostic == "The individual Agent Colour is unchanged",
-			"the Colour unchanged refusal keeps its wording");
-		require(world.setAgentIndividualColour(agent, nullopt, &diagnostic),
-			"clearing the individual Colour");
+			&& diagnostic == "The individual Escalator walking chance is unchanged",
+			"the Escalator walking chance unchanged refusal keeps its wording");
+		require(world.setAgentIndividualEscalatorWalkingChance(agent, nullopt,
+			&diagnostic),
+			"clearing the individual Escalator walking chance");
 
 		// Escalator walking chance: validated by its own float validator.
 		require(!world.setAgentIndividualEscalatorWalkingChance(agent, 1.5f,

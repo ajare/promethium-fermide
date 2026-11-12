@@ -14,8 +14,9 @@
 // clipped to that centre so it can never paint over the frame it retracts
 // behind. A Button's two states are two tiles rather than one tile and two
 // tints, so the state is legible from the artwork alone at the size the
-// control actually occupies. A Marker stays tintable, which is what keeps
-// the selection gold it carries reaching the sheet instead of going white.
+// control actually occupies. A Marker draws the artwork its tile carries,
+// and selection is a highlight drawn around it rather than a colour
+// multiplied into it.
 //
 // Everything is asserted on the recorded WorldDrawList command vector, the
 // stable CPU seam ADR 0010 names. The atlas is installed the way the
@@ -109,39 +110,38 @@ namespace
 	float const kFrameInsetYRatio = 5.0f / 48.0f;
 
 	// The tiles this ticket lands, with the drawn size and content
-	// rectangle each is authored at and whether each takes a tint.
+	// rectangle each is authored at.
 	struct TileExpectation
 	{
 		char const* name;
 		float drawnWidth, drawnHeight;
 		int contentWidth, contentHeight;
-		bool tintable;
 	};
 
 	std::vector<TileExpectation> const kTiles{
 		// A Door leaf is a full World cell: the artwork fills the tile and
 		// the aperture clip, not the drawn size, bounds it (#1056).
-		{ "door-L0", 1.0f, 1.0f, 128, 320, false },
-		{ "door-R0", 1.0f, 1.0f, 128, 320, false },
+		{ "door-L0", 1.0f, 1.0f, 128, 320 },
+		{ "door-R0", 1.0f, 1.0f, 128, 320 },
 		// The tall Door's leaves are the same full-cell shape; what makes
 		// them a different family is the aperture they are clipped by, not
 		// the extent they are drawn at (#1058).
-		{ "door-tall-L0", 1.0f, 1.0f, 128, 320, false },
-		{ "door-tall-R0", 1.0f, 1.0f, 128, 320, false },
+		{ "door-tall-L0", 1.0f, 1.0f, 128, 320 },
+		{ "door-tall-R0", 1.0f, 1.0f, 128, 320 },
 		// The Lift landing and Shuttle hatch leaves are the same shape for
 		// the same reason - full cell, zero offset, clipped not scaled - and
 		// each carries three variants like the ordinary leaf (#1057).
-		{ "door-lift-L0", 1.0f, 1.0f, 128, 320, false },
-		{ "door-lift-R0", 1.0f, 1.0f, 128, 320, false },
-		{ "door-shuttle-L0", 1.0f, 1.0f, 128, 320, false },
-		{ "window-clear", 0.8f, 0.3f, 102, 96, false },
-		{ "window-frosted", 0.8f, 0.3f, 102, 96, false },
-		{ "window-tinted", 0.8f, 0.3f, 102, 96, false },
-		{ "booth-window-open", 0.8f, 0.3f, 102, 96, false },
-		{ "booth-window-shutter", 0.6461538f, 0.2375f, 83, 76, false },
-		{ "button-enabled", 0.1f, 0.04f, 13, 13, false },
-		{ "button-disabled", 0.1f, 0.04f, 13, 13, false },
-		{ "marker", 0.25f, 0.1375f, 32, 44, true },
+		{ "door-lift-L0", 1.0f, 1.0f, 128, 320 },
+		{ "door-lift-R0", 1.0f, 1.0f, 128, 320 },
+		{ "door-shuttle-L0", 1.0f, 1.0f, 128, 320 },
+		{ "window-clear", 0.8f, 0.3f, 102, 96 },
+		{ "window-frosted", 0.8f, 0.3f, 102, 96 },
+		{ "window-tinted", 0.8f, 0.3f, 102, 96 },
+		{ "booth-window-open", 0.8f, 0.3f, 102, 96 },
+		{ "booth-window-shutter", 0.6461538f, 0.2375f, 83, 76 },
+		{ "button-enabled", 0.1f, 0.04f, 13, 13 },
+		{ "button-disabled", 0.1f, 0.04f, 13, 13 },
+		{ "marker", 0.25f, 0.1375f, 32, 44 },
 	};
 
 	struct ScreenRect
@@ -629,10 +629,6 @@ namespace
 				+ std::to_string(art.region.height) + ", expected "
 				+ std::to_string(tile.contentWidth) + "x"
 				+ std::to_string(tile.contentHeight));
-			require(art.tintable == tile.tintable,
-				std::string("'") + tile.name + "' tintability is "
-				+ std::string(art.tintable ? "on" : "off") + ", expected "
-				+ (tile.tintable ? "on" : "off"));
 			// Every one of these draws from its own anchor with no render
 			// offset: the object's own geometry places it.
 			require(near(art.offset.x, 0.0f) && near(art.offset.y, 0.0f),
@@ -1175,9 +1171,9 @@ namespace
 	}
 
 	// ------------------------------------------------------------------
-	// The Marker stays tintable, and selection still reads.
+	// The Marker draws its own artwork, and selection still reads.
 	// ------------------------------------------------------------------
-	void markerStaysTintableAndFollowsSelection(smoke::Context const& context)
+	void markerDrawsItsArtworkAndSelectionStillReads(smoke::Context const& context)
 	{
 		using smoke::require;
 		auto const atlas = installNewObjectsAtlas(context);
@@ -1185,17 +1181,6 @@ namespace
 
 		auto world = std::make_shared<core::World>("Marker artwork",
 			kWorldCellsWide, kWorldLevelsHigh);
-		// A Colour tag whose override is nothing like the Marker's gold, so
-		// the two can be told apart: the tag moves the Agent and leaves the
-		// destination where selection puts it.
-		auto registry = core::AgentTagRegistry::create();
-		auto const amber = registry->addAgentTag("amber");
-		std::string diagnostic;
-		require(registry->addAgentTagColour(amber, &diagnostic),
-			"Could not add a Colour to the fixture tag: " + diagnostic);
-		require(registry->setAgentTagColour(amber, { 200, 120, 20 }, &diagnostic),
-			"Could not override the fixture tag's Colour: " + diagnostic);
-		world->attachAgentTagRegistry("marker.tags.yaml", std::move(registry));
 		auto const room = world->addRoom("Front", 0, 0, 0, kWorldCellsWide, 1);
 		auto const created = world->addSectorMarker(room, 0, 3.5f, "Goal");
 		world->finishBuild();
@@ -1203,33 +1188,7 @@ namespace
 			created.sector->getObject(created.index))->getMarker();
 		require(bool(marker), "The Marker fixture has no Marker");
 
-		auto const agentId = world->createAgent("Human", "Human", room, 0, 2.0f);
-		auto const agent = world->lookupAgent(agentId).entity;
-		require(agent != nullptr, "The Marker fixture has no Agent");
-		world->pauseSimulation();
-		auto const assigned = world->assignAgentTag(agentId, amber, &diagnostic);
-		require(assigned, "Could not tag the fixture Agent: " + diagnostic);
-
 		auto const& region = atlas.authored.sprites.at("marker").region;
-		// The gold the renderer carries is the Agent selection colour, which
-		// is what lets a destination read as part of the Agent colour
-		// vocabulary rather than as a fixed decal.
-		auto const gold = packColour(core::SelectedAgentColour.r,
-			core::SelectedAgentColour.g, core::SelectedAgentColour.b);
-		// The same seam the Agent body draws with. The Marker's gold is what
-		// that seam resolves to for a selected Agent, and not what it resolves
-		// to for this one's own tag override - which is the difference
-		// between following the Agent colour vocabulary and copying an Agent.
-		require(gold == agentRenderColour(*agent, true),
-			"The Marker's gold is no longer what the Agent colour seam resolves "
-			"to for a selection");
-		require(agentRenderColour(*agent, false)
-				== packColour(200, 120, 20),
-			"The fixture Agent's Colour tag override stopped driving its resolved "
-			"colour, so the comparison below proves nothing");
-		require(!(gold == agentRenderColour(*agent, false)),
-			"The Marker's gold matches this Agent's own resolved colour, so the "
-			"selection tie below is not a real one");
 
 		auto const draw = [&](bool selected)
 		{
@@ -1243,11 +1202,8 @@ namespace
 			auto const drawing = draw(false);
 			auto const art = tileQuad(drawing, region, atlas.width, atlas.height);
 			require(art.drawn, "The Marker drew no artwork");
-			require(art.colour == gold,
-				"The Marker's tint is no longer the Agent selection gold it "
-				"carries, so the tile stopped taking the tint");
-			require(!(art.colour == White),
-				"The Marker drew white: an untintable tile would wash the icon out");
+			require(art.colour == White,
+				"The Marker was drawn with a colour other than its own artwork");
 			// The icon came from the atlas, not from the glyph fallback.
 			require(!anyTextRun(drawing, pf::render::MarkerIconGlyph),
 				"The Marker fell back to drawing its glyph, so the tile was not "
@@ -1257,31 +1213,16 @@ namespace
 		{
 			auto const drawing = draw(true);
 			auto const art = tileQuad(drawing, region, atlas.width, atlas.height);
-			require(art.drawn && art.colour == gold,
-				"A selected Marker stopped drawing its tinted artwork");
-			// Selection still draws its own highlight around the icon, on top
-			// of the artwork rather than instead of it.
+			require(art.drawn && art.colour == White,
+				"A selected Marker stopped drawing its own artwork");
+			// Selection draws its own highlight around the icon, on top of
+			// the artwork rather than instead of it, and recolours nothing.
 			bool highlighted = false;
 			for (auto const& command : drawing.commands())
 				if (auto const* line = std::get_if<WorldDrawList::Line>(&command);
 					line && line->colour == kSelectionColour)
 					highlighted = true;
 			require(highlighted, "A selected Marker lost its selection highlight");
-		}
-
-		// Tintability is the authored fact that carries the gold. Flip it off
-		// the same tile and the icon goes white, which is how a regression in
-		// the authored flag would show up on screen.
-		{
-			auto untinted = atlas.authored;
-			untinted.sprites.at("marker").tintable = false;
-			installAtlas(untinted, atlas.regions, "ObjectAtlas");
-			auto const drawing = draw(false);
-			auto const art = tileQuad(drawing, region, atlas.width, atlas.height);
-			require(art.drawn, "The untintable Marker fixture drew no artwork");
-			require(art.colour == White,
-				"An untintable Marker still took the gold, so tintability is not "
-				"the authored flag doing the work");
 		}
 	}
 }
@@ -1300,6 +1241,6 @@ void render_smoke::registerObjectArtworkNew(std::vector<smoke::Check>& checks)
 		isolated<boothWindowShutterTranslatesBehindTheStationaryFrame> });
 	checks.push_back({ "objectArtworkNew/buttonStateIsLegibleAtTheDrawnSize",
 		isolated<buttonStateIsLegibleAtTheDrawnSize> });
-	checks.push_back({ "objectArtworkNew/markerStaysTintableAndFollowsSelection",
-		isolated<markerStaysTintableAndFollowsSelection> });
+	checks.push_back({ "objectArtworkNew/markerDrawsItsArtworkAndSelectionStillReads",
+		isolated<markerDrawsItsArtworkAndSelectionStillReads> });
 }

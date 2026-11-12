@@ -291,23 +291,41 @@ namespace
 			gUISettings.worldZoom = zoom;
 			WorldDrawList list(WorldDrawList::ClipRectangle{{-2000,-2000},{2000,2000}});
 			renderAgent(world.lookupAgent(botId).entity, &list);
-			require(list.commands().size() == 2, "CleaningBot did not draw its dedicated tile");
+			// The sprite is two triangles of raw artwork; selection lays a
+			// four-sided outline over it instead of multiplying a tint into
+			// the pixels.
+			require(list.commands().size() == 6,
+				"CleaningBot did not draw its dedicated tile and selection outline");
 			auto const& triangle = std::get<WorldDrawList::Triangle>(list.commands().front());
 			require(near(triangle.texcoords[0].x, (botRegion.x + .5f) / atlasWidth)
 				&& near(triangle.texcoords[0].y, (botRegion.y + .5f) / atlasHeight),
 				"CleaningBot drew another Agent's artwork");
 			Vec2 lo{FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX};
+			int spriteTriangles = 0, outlineLines = 0;
 			for (auto const& command : list.commands())
 			{
-				auto const& body = std::get<WorldDrawList::Triangle>(command);
-				require(body.colour == packColour(251, 188, 4, 255),
-					"Selected CleaningBot tile did not receive the yellow selection tint");
-				for (auto point : body.positions)
+				if (auto const* body = std::get_if<WorldDrawList::Triangle>(&command))
 				{
-					lo.x = std::min(lo.x, point.x); lo.y = std::min(lo.y, point.y);
-					hi.x = std::max(hi.x, point.x); hi.y = std::max(hi.y, point.y);
+					require(body->colour == White,
+						"Selected CleaningBot tile was drawn with a colour multiplied "
+						"into it");
+					++spriteTriangles;
+					for (auto point : body->positions)
+					{
+						lo.x = std::min(lo.x, point.x); lo.y = std::min(lo.y, point.y);
+						hi.x = std::max(hi.x, point.x); hi.y = std::max(hi.y, point.y);
+					}
+				}
+				else if (auto const* line = std::get_if<WorldDrawList::Line>(&command))
+				{
+					require(line->colour == packColour(255, 255, 0, 255),
+						"The CleaningBot selection outline is not drawn in the "
+						"selection colour");
+					++outlineLines;
 				}
 			}
+			require(spriteTriangles == 2 && outlineLines == 4,
+				"CleaningBot drew the wrong mix of sprite and selection outline");
 			require(near((hi.x - lo.x) / (hi.y - lo.y), 26.f / 24.f)
 				&& hi.x - lo.x <= .4f * CORE_CELL_WIDTH_PIXELS * zoom + .01f
 				&& hi.y - lo.y <= .15f * CORE_LEVEL_HEIGHT_PIXELS * zoom + .01f,

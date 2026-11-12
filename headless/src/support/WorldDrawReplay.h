@@ -69,10 +69,10 @@ inline void renderSector(std::shared_ptr<const core::Sector> sector, uint32_t la
 }
 
 inline bool drawSectorTileSurface(std::string const& kind, ImDrawList* drawList,
-	Vec2 minimum, Vec2 maximum, PackedColourValue tint)
+	Vec2 minimum, Vec2 maximum)
 {
 	WorldDrawList commands(headless::clipUnder(drawList));
-	auto const drawn = drawSectorTileSurface(kind, &commands, minimum, maximum, tint);
+	auto const drawn = drawSectorTileSurface(kind, &commands, minimum, maximum);
 	headless::replay(commands, drawList);
 	return drawn;
 }
@@ -87,10 +87,10 @@ inline bool drawSectorTileBoundary(char const* kind, ImDrawList* drawList,
 }
 
 inline bool drawObjectSprite(char const* name, ImDrawList* list, Vec2 a, Vec2 b,
-	PackedColourValue tint = White, Vec2 sourceMin = { 0, 0 }, Vec2 sourceMax = { 1, 1 })
+	Vec2 sourceMin = { 0, 0 }, Vec2 sourceMax = { 1, 1 })
 {
 	WorldDrawList commands(headless::clipUnder(list));
-	auto const drawn = drawObjectSprite(name, &commands, a, b, tint, sourceMin, sourceMax);
+	auto const drawn = drawObjectSprite(name, &commands, a, b, sourceMin, sourceMax);
 	headless::replay(commands, list);
 	return drawn;
 }

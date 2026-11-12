@@ -258,9 +258,6 @@ PF_ASSERT_UNREACHABLE(game::WorldRuntime&, setLevelName(0u, std::string{}),
 PF_ASSERT_UNREACHABLE(game::WorldRuntime&, setAgentActive(core::AgentId{}, true),
 	"an Agent activation is reachable from WorldRuntime (#966)")
 PF_ASSERT_UNREACHABLE(game::WorldRuntime&,
-	setAgentIndividualColour(core::AgentId{}, std::nullopt),
-	"an Agent property write is reachable from WorldRuntime (#966)")
-PF_ASSERT_UNREACHABLE(game::WorldRuntime&,
 	grantAgentAccessPermission(core::AgentId{}, core::AccessPermissionId{}),
 	"an access grant is reachable from WorldRuntime (#966)")
 PF_ASSERT_UNREACHABLE(game::WorldRuntime&, setMarkerActions(core::MarkerId{}, {}),

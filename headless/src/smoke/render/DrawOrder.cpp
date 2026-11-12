@@ -26,16 +26,16 @@
 //
 // The paint model below emits the same passes, in the same order, as
 // renderWorld() does, and drives them through the very policy helpers the
-// renderer calls - renderPasses, shouldClipTransitToApertures, transitApertures,
-// shouldRenderSectorAgents, shouldFillBackground and shouldOutlineBackground -
-// so a change to that policy shows up here rather than only on a screen.
+// renderer calls - renderPasses, shouldClipTransitToApertures, transitApertures
+// and shouldRenderSectorAgents - so a change to that policy shows up here
+// rather than only on a screen.
 //
-// The Background checks (#35) ride the same model with a two-Layer backdrop of
-// their own: a Background fills whenever its Layer is drawn solid, is outlined by
-// the wireframe overlay alone, and meets its same-colour neighbour with no border
-// drawn across the seam. The multi-Background aperture checks (#37) read the
-// very backgroundApertureRegions() the renderer composites from, asserting each
-// region's fill colour and clip bounds against the back Layer's cell grid.
+// A Background is drawn by the same rule as every other Sector: its own tile,
+// filled where the Layer is drawn solid and outlined by the wireframe overlay
+// alone. The multi-Background aperture checks (#37) read the very
+// backgroundApertureRegions() the renderer composites from, asserting each
+// region's clip bounds against the back Layer's cell grid - which Background
+// shows through which stretch, and nothing about what it looks like.
 
 #include <algorithm>
 #include <bit>
@@ -363,16 +363,6 @@ namespace
 							sector.strokes.push_back({ piece, true });
 						}
 					}
-				}
-				else if (isBackground)
-				{
-					// Mirrors renderSector(): filling and outlining are two separate
-					// questions for a Background, so a policy which drew a border
-					// over its own fill shows up here as the seam it really is.
-					if (shouldFillBackground(pass.style))
-						sector.strokes.push_back({ sector.footprint, true });
-					if (shouldOutlineBackground(pass.style))
-						sector.strokes.push_back({ sector.footprint, false });
 				}
 				else if (pass.style == LayerRenderStyle::Wireframe)
 				{
@@ -1022,7 +1012,7 @@ namespace
 		float const zoom = 2.f;
 		float const probeWide = 2.0f * CORE_CELL_WIDTH_PIXELS * zoom;
 		float const probeHigh = 0.75f * CORE_LEVEL_HEIGHT_PIXELS * zoom;
-		drawSectorTileSurface("corridor", &tiles, {0, 0}, {probeWide, probeHigh}, White, zoom);
+		drawSectorTileSurface("corridor", &tiles, {0, 0}, {probeWide, probeHigh}, zoom);
 		require(tiles.commands().size() == 4, "Station artwork must repeat once per World cell at zoom 2");
 		auto const& tile = std::get<WorldDrawList::Triangle>(tiles.commands().front());
 		float maxX{}, maxY{}, topUvY{ 1.f }, floorUvY{};
@@ -1042,7 +1032,7 @@ namespace
 		// are World extents, so they say so.
 		WorldDrawList fallback({{0, 0}, {1000, 1000}});
 		drawSectorTileSurface("room", &fallback, {0, 0},
-			{CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS}, White);
+			{CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS});
 		auto const& missing = std::get<WorldDrawList::Triangle>(fallback.commands().front());
 		require(missing.texture == WorldDrawList::Texture::None && missing.colour == packColour(255, 0, 255, 255),
 			"Missing surface must render opaque magenta");
@@ -1371,78 +1361,6 @@ namespace
 	}
 
 	//
-	// A clear Window's Aperture pass is handed the Background's own colour, not
-	// the generic back-layer tint: the glass shows what is actually behind it.
-	// The pass that receives that colour is the Aperture pass renderPasses()
-	// orders for the Layer directly behind the selection, and the colour follows
-	// the Background - re-colour it and the glass follows. A Window looking into
-	// anything other than a Background still takes the generic tint, so the
-	// arrangement that must not move is measured too.
-	//
-	void aClearWindowShowsItsBackgroundsOwnColour()
-	{
-		core::World world("Backdrop render order", 12, 2);
-		while (world.getLayerCount() < 2) world.addLayer();
-		world.addRoom("Front", 0, 0, 0, 12, 1);
-		auto const backdropIndex = world.addBackground(1, 0, 0, 6, 1, { 255, 128, 0 });
-		world.addRoom("Behind", 1, 0, 6, 6, 1);
-
-		auto const looking = world.addSectorWindow(0, 0, 1, 2, 1,
-			{ false, core::Window::State::Closed, core::Window::Style::Clear });
-		auto const tinted = world.addSectorWindow(0, 0, 7, 2, 1,
-			{ false, core::Window::State::Closed, core::Window::Style::Clear });
-		world.finishBuild();
-
-		require(looking.object != nullptr && tinted.object != nullptr,
-			"a clear Window was not created");
-		require(looking.object->getStyle() == core::Window::Style::Clear
-			&& tinted.object->getStyle() == core::Window::Style::Clear,
-			"a Window under test is not a clear Window");
-
-		// The Aperture pass for the Layer behind the selection is the pass that
-		// receives the fill colour; renderPasses() is the renderer's own order.
-		auto const passes = renderPasses(0, world.getLayerCount(), false);
-		bool hasAperturePass{ false };
-		for (auto const& pass : passes)
-		{
-			hasAperturePass = hasAperturePass
-				|| (pass.layer == 1 && pass.style == LayerRenderStyle::Aperture);
-		}
-		require(hasAperturePass,
-			"the Layer behind the selection is not drawn through apertures, so no fill colour is handed down");
-
-		// The Window over the backdrop really looks into the Background.
-		auto const back = looking.object->getBackSector();
-		require(back != nullptr && back->getType() == core::SectorType::Background,
-			"the Window over the backdrop does not look into a Background");
-		require(back->getIndex() == backdropIndex, "the Window looks into the wrong Background");
-
-		// The Aperture pass is handed the Background's own colour.
-		auto const fill = apertureFillColour(*back);
-		require(fill.has_value(), "a Background back Sector offers no aperture fill colour");
-		require(*fill == packColour(255, 128, 0),
-			"the aperture fill colour is not the Background's own colour");
-
-		// The glass follows the Background: re-colour it and the fill follows,
-		// which is the headless half of the hand-edited-YAML manual test.
-		auto const recolourable = std::make_shared<core::Background>(
-			"Backdrop", 1u, backdropIndex, 0u, 0u, 6u, 1u, core::BackgroundColour{ 255, 128, 0 });
-		require(apertureFillColour(*recolourable) == packColour(255, 128, 0),
-			"a freshly built Background does not offer its own colour");
-		recolourable->setColour({ 12, 34, 56 });
-		require(apertureFillColour(*recolourable) == packColour(12, 34, 56),
-			"the aperture fill colour did not follow the Background's recolour");
-
-		// The control: a clear Window looking into a Room carries no colour of
-		// its own, so the caller keeps the generic back-layer tint.
-		auto const tintedBack = tinted.object->getBackSector();
-		require(tintedBack != nullptr && tintedBack->getType() != core::SectorType::Background,
-			"the control Window is not looking into something other than a Background");
-		require(!apertureFillColour(*tintedBack).has_value(),
-			"a non-Background back Sector claims a fill colour of its own; the tint would be overridden");
-	}
-
-	//
 	// A two-Layer backdrop for the Background outline rules: one Room across the
 	// left of the front Layer with ground left empty on the right, and two
 	// adjacent same-colour Backgrounds spanning the Layer behind. They meet at
@@ -1465,35 +1383,6 @@ namespace
 		layout.rightIndex = world.addBackground(1, 0, 6, 6, 1, { 200, 60, 40 });
 		world.finishBuild();
 		return layout;
-	}
-
-	//
-	// Per LayerRenderStyle: a Background fills exactly when its Layer is drawn
-	// solid, is outlined by the wireframe overlay alone, and never does both in
-	// one pass. This is #35's narrowing of the umbrella's "no per-sector border"
-	// written down as one rule which the renderer and these checks read together.
-	//
-	void aBackgroundFillsSolidAndIsOutlinedOnlyByTheOverlay()
-	{
-		std::vector<LayerRenderStyle> const styles{
-			LayerRenderStyle::Hidden, LayerRenderStyle::Solid,
-			LayerRenderStyle::Wireframe, LayerRenderStyle::Aperture };
-
-		for (auto const style : styles)
-		{
-			require(shouldFillBackground(style) == isDrawnSolid(style),
-				"a Background does not fill exactly when its Layer is drawn solid");
-			require(shouldOutlineBackground(style) == (style == LayerRenderStyle::Wireframe),
-				"a Background is not outlined by the wireframe overlay alone");
-			// A border drawn over a Background's own fill is exactly the seam the
-			// Solid pass must not show between adjacent same-colour Backgrounds.
-			require(!(shouldFillBackground(style) && shouldOutlineBackground(style)),
-				"one pass both fills a Background and borders it");
-		}
-
-		require(!shouldFillBackground(LayerRenderStyle::Hidden)
-				&& !shouldOutlineBackground(LayerRenderStyle::Hidden),
-			"the Hidden style paints a Background at all");
 	}
 
 	//
@@ -1647,10 +1536,6 @@ namespace
 		// the imgui manual test of the ticket body, authored headlessly.
 		constexpr core::BackgroundColour kSky{ 96, 128, 160 };
 		constexpr core::BackgroundColour kCarPark{ 112, 112, 112 };
-		// The same two colours in the packed vocabulary the aperture-fill rule
-		// answers with (#998).
-		constexpr PackedColourValue kSkyFill = packColour(kSky.r, kSky.g, kSky.b);
-		constexpr PackedColourValue kCarParkFill = packColour(kCarPark.r, kCarPark.g, kCarPark.b);
 
 		core::World world("Multi-background aperture", 12, 2);
 		while (world.getLayerCount() < 2) world.addLayer();
@@ -1707,15 +1592,6 @@ namespace
 		auto const aperture = rectOf(wLo, wHi);
 		require(std::abs(rectOf(regions[0]).area() + rectOf(regions[1]).area() - aperture.area()) <= kAreaEpsilon,
 			"the composite does not cover the aperture - a gap stands behind the glass");
-
-		// Each region fills with its own Background's colour, not a shared tint:
-		// the #34 rule read once per region of the composite.
-		auto const skyFill = apertureFillColour(*regions[0].background);
-		auto const carFill = apertureFillColour(*regions[1].background);
-		require(skyFill.has_value() && *skyFill == kSkyFill,
-			"the sky region does not fill with the sky Background's own colour");
-		require(carFill.has_value() && *carFill == kCarParkFill,
-			"the car-park region does not fill with the car-park Background's own colour");
 
 		// The composite is world-space: the helper reads the cell grid, not the
 		// viewport, so scrolling can only ever move the seam with the
@@ -1864,8 +1740,6 @@ void render_smoke::registerDrawOrder(std::vector<smoke::Check>& checks)
 	checks.push_back({ "theSelectedLayerPaintsItselfWhole", isolated<[](smoke::Context const&) { theSelectedLayerPaintsItselfWhole(); }> });
 	checks.push_back({ "theOverlayOutlinesTheWholeLayerBehind", isolated<[](smoke::Context const&) { theOverlayOutlinesTheWholeLayerBehind(); }> });
 	checks.push_back({ "layerDetailsDrawTheirSurfaceBeforeApertures", isolated<[](smoke::Context const&) { layerDetailsDrawTheirSurfaceBeforeApertures(); }> });
-	checks.push_back({ "aClearWindowShowsItsBackgroundsOwnColour", isolated<[](smoke::Context const&) { aClearWindowShowsItsBackgroundsOwnColour(); }> });
-	checks.push_back({ "aBackgroundFillsSolidAndIsOutlinedOnlyByTheOverlay", isolated<[](smoke::Context const&) { aBackgroundFillsSolidAndIsOutlinedOnlyByTheOverlay(); }> });
 	checks.push_back({ "aBackgroundBehindTheSelectionIsOutlinedWholeByTheOverlay", isolated<[](smoke::Context const&) { aBackgroundBehindTheSelectionIsOutlinedWholeByTheOverlay(); }> });
 	checks.push_back({ "adjacentBackgroundsMeetWithoutASeam", isolated<[](smoke::Context const&) { adjacentBackgroundsMeetWithoutASeam(); }> });
 	checks.push_back({ "aSelectedBackgroundStillTakesTheSelectionHighlight", isolated<[](smoke::Context const&) { aSelectedBackgroundStillTakesTheSelectionHighlight(); }> });

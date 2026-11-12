@@ -1708,7 +1708,6 @@ namespace core
 			// Every remaining authored individual property and persisted sample
 			// travels too: a structural replay is neither Reset nor re-authoring, so
 			// losing one would silently revert the Agent to a neutral default (#328).
-			std::optional<AgentColour> individualColour;
 			std::optional<float> individualEscalatorWalkingChance;
 			std::optional<float> individualWalkSpeedModifier;
 			std::optional<float> individualHeightModifier;
@@ -3156,8 +3155,6 @@ namespace core
 		bool setAgentActive(AgentId agent, bool active,
 			std::string* diagnostic = nullptr);
 
-		bool setAgentIndividualColour(AgentId agent, std::optional<AgentColour> value,
-			std::string* diagnostic = nullptr);
 		bool setAgentIndividualEscalatorWalkingChance(AgentId agent,
 			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualWalkSpeedModifier(AgentId agent,

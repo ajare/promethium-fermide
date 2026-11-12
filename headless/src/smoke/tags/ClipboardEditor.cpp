@@ -94,9 +94,7 @@ namespace
 		fixture.stairSpeed = fixture.registry->addAgentTag("stairs");
 		fixture.ladderSpeed = fixture.registry->addAgentTag("ladders");
 		std::string diagnostic;
-		require(fixture.registry->addAgentTagColour(fixture.colour, &diagnostic),
-			diagnostic);
-		require(fixture.registry->setAgentTagColour(fixture.colour,
+		require(fixture.registry->setAgentTagDisplayColour(fixture.colour,
 			{ 12, 34, 56 }, &diagnostic), diagnostic);
 		require(fixture.registry->addAgentTagWalkSpeedModifier(
 			fixture.walkSpeed, &diagnostic), diagnostic);

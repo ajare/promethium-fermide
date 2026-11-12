@@ -53,13 +53,6 @@ namespace core
 		bool individual{ false };
 	};
 
-	struct EffectiveAgentColour
-	{
-		AgentColour value{ EditorDefaultAgentColour };
-		AgentTagId sourceTag{};
-		bool individual{ false };
-	};
-
 	enum class SampledAgentPropertyType
 	{
 		WalkSpeedModifier,
@@ -412,7 +405,6 @@ namespace core
 
 		// Individual Agent properties are authored directly on this Agent and
 		// override properties inherited from Agent tags.
-		std::optional<AgentColour> mIndividualColour;
 		std::optional<float> mIndividualEscalatorWalkingChance;
 		std::optional<float> mIndividualWalkSpeedModifier;
 		std::optional<float> mIndividualHeightModifier;
@@ -655,8 +647,6 @@ namespace core
 			mMaximumRoutePlanningTimeSample = sample;
 		}
 		void clearMaximumRoutePlanningTimeSample() { mMaximumRoutePlanningTimeSample.reset(); }
-		void setIndividualColour(std::optional<AgentColour> value)
-		{ mIndividualColour = value; modify(); }
 		void setIndividualEscalatorWalkingChance(std::optional<float> value)
 		{ mIndividualEscalatorWalkingChance = value; modify(); }
 		void setIndividualWalkSpeedModifier(std::optional<float> value)
@@ -821,8 +811,6 @@ namespace core
 		std::set<AgentTagId> const& getAgentTagIds() const { return mAgentTags; }
 		bool hasAgentTag(AgentTagId id) const { return mAgentTags.contains(id); }
 
-		std::optional<AgentColour> const& getIndividualColour() const
-		{ return mIndividualColour; }
 		std::optional<float> const& getIndividualEscalatorWalkingChance() const
 		{ return mIndividualEscalatorWalkingChance; }
 		std::optional<float> const& getIndividualWalkSpeedModifier() const
@@ -859,10 +847,6 @@ namespace core
 		{ return mIndividualRemoteBoothWindowShutters; }
 		std::optional<MobilityProfile> const& getIndividualMobilityProfile() const
 		{ return mIndividualMobilityProfile; }
-
-		// Resolves Colour from the individual property first, then assigned tags;
-		// an uncoloured Agent receives the editor default.
-		EffectiveAgentColour getEffectiveColour() const;
 
 		// Resolves an individual Walk speed value before the persisted tag sample.
 		// An Agent without either source exposes the neutral modifier.

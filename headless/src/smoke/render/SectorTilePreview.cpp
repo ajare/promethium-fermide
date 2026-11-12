@@ -207,7 +207,7 @@ namespace
 
 		auto repeated = recording();
 		require(drawSectorTileSurface("corridor", &repeated, { 0.0f, 0.0f },
-				{ right, floorLine }, White, 1.0f),
+				{ right, floorLine }, 1.0f),
 			"The surface repeat refused a tile the installed atlas carries");
 		require(framesOf(repeated, atlas).size() == 4,
 			"The surface repeat is no longer one tile per World cell, so the "
@@ -235,7 +235,7 @@ namespace
 		auto cropped = recording();
 		require(drawSectorTileSurface("corridor", &cropped,
 				{ 0.0f, 0.0f }, { float(CORE_CELL_WIDTH_PIXELS), shortHeight },
-				White, 1.0f),
+				1.0f),
 			"The surface repeat refused a tile the installed atlas carries");
 		auto const croppedFrames = framesOf(cropped, atlas);
 		require(croppedFrames.size() == 1,

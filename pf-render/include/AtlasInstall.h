@@ -36,8 +36,8 @@ namespace wp::application::resourcesystem
 // caller left that can drift away from the path under test.
 //
 // The two authorities this path keeps apart, in the words of `TileArtwork.h`:
-// the pixel region is the `ImageSet`'s, and the tintable flag, render offset
-// and drawn size are the authored tileset's. Neither is derived from the other.
+// the pixel region is the `ImageSet`'s, and the render offset and drawn
+// size are the authored tileset's. Neither is derived from the other.
 
 namespace pf::render
 {
@@ -213,8 +213,9 @@ namespace pf::render
 		// drawn region is taken from. The render semantics that go with each
 		// tile come from the authored tileset that the atlas-set registry
 		// names for this atlas, under the `tileset` option. Nothing here
-		// derives a tint from a tile's name or a drawn size from a domain
-		// object's geometry.
+		// derives a drawn size from a domain object's geometry, and nothing
+		// pairs a colour with a tile: what a tile looks like is the artwork
+		// the sheet carries.
 		//
 		// The pairing itself is done by `installAtlasTiles()`: it walks the
 		// `ImageSet`'s regions and takes only the render semantics from the

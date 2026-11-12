@@ -48,18 +48,6 @@ namespace core
 		static IndividualOverrideTable const table = []()
 		{
 			IndividualOverrideTable t;
-			t.colour = []()
-			{
-				IndividualOverrideDescriptor<AgentColour> d;
-				d.unchangedMessage = "The individual Agent Colour is unchanged";
-				d.read = [](Agent const& agent)
-					-> std::optional<AgentColour> const&
-					{ return agent.getIndividualColour(); };
-				d.apply = [](World&, AgentId, Agent& agent,
-					std::optional<AgentColour> const& value)
-					{ agent.setIndividualColour(value); };
-				return d;
-			}();
 			t.escalatorWalkingChance = []()
 			{
 				IndividualOverrideDescriptor<float> d;
@@ -287,12 +275,6 @@ namespace core
 		mWorld.modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
-	}
-
-	bool AgentProfileEditor::setColour(AgentId agent, optional<AgentColour> value,
-		string* diagnostic)
-	{
-		return setOverride(overrideTable().colour, agent, value, diagnostic);
 	}
 
 	bool AgentProfileEditor::setEscalatorWalkingChance(AgentId agent,

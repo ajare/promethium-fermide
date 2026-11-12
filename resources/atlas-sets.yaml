@@ -7,7 +7,7 @@
 # was rejected as a much wider blast radius than the atlas work.
 #
 # The tileset stays the single authority for what a tile means: its render
-# offset, its drawn size and whether it is tintable. This file only says
+# offset and its drawn size. This file only says
 # which tileset is asked about for which atlas, and in which authored
 # format that tileset is written. The install checks the declared format
 # against the slot it is installing, so a mismatch is reported rather than

@@ -508,8 +508,6 @@ namespace
 			"The Bulkhead Door content rectangle must be 26 x 224, saw "
 			+ std::to_string(slab->second.region.width) + " x "
 			+ std::to_string(slab->second.region.height));
-		require(slab->second.tintable,
-			"The Bulkhead Door tile must be tintable so the slab keeps its colour identity");
 
 		auto const panel = atlas.authored.sprites.find("access-panel");
 		require(panel != atlas.authored.sprites.end(),
@@ -523,8 +521,6 @@ namespace
 			"The Access panel content rectangle must be 64 x 80, saw "
 			+ std::to_string(panel->second.region.width) + " x "
 			+ std::to_string(panel->second.region.height));
-		require(panel->second.tintable,
-			"The Access panel tile must be tintable so the leaf keeps its colour identity");
 
 		// The generated ImageSet entries are generated from the tileset, so
 		// the manifest cannot drift from the art it claims to cut.
@@ -896,8 +892,7 @@ namespace
 				<< "    cell: [0, 0]\n"
 				<< "    content: [0, 0, 128, 8]\n"
 				<< "    offset: [0.0, 0.0]\n"
-				<< "    drawn_size: [1.0, 0.025]\n"
-				<< "    tintable: true\n";
+				<< "    drawn_size: [1.0, 0.025]\n";
 		}
 		bool refused = false;
 		try

@@ -1,10 +1,9 @@
 # Authored tileset for the AgentAtlas set (#1018).
 #
-# A version 2 tileset declares, per tile, the three render semantics a
-# version 1 file left the renderer to guess: the render offset it draws at,
-# the drawn size it draws at, and whether it is tintable. Offsets and sizes
-# are World units, not pixels - one World unit of authored art is one
-# authored tile.
+# A version 2 tileset declares, per tile, the two render semantics a
+# version 1 file left the renderer to guess: the render offset it draws at
+# and the drawn size it draws at. Offsets and sizes are World units, not
+# pixels - one World unit of authored art is one authored tile.
 #
 # The `ImageSet` entries the application manifest declares for this atlas
 # are generated from this file by `scripts/generate_agent_atlas_new.py`
@@ -52,16 +51,6 @@
 # is inset by exactly its overhang - 16px after Lying, 32px after Crawling -
 # so no two tiles' art ever overlaps. The last column is a one-cell-wide
 # tile, which is what keeps the widest tile inside the image.
-#
-# ## Why every tile is tintable
-#
-# Agent art is grayscale. The vertex tint is the resolved Agent colour -
-# the Agent's own colour, a Colour tag's override, or the selection gold -
-# and it multiplies into the sheet faithfully. `tintable: true` says that
-# out loud. It is the only place tintability is stated: nothing in the
-# renderer reads a tile's name to decide whether to tint it, which is what
-# let a new Agent type become tintable, or stop being tintable, by accident
-# of what it was called.
 
 version: 2
 image: agents-new.png
@@ -100,13 +89,11 @@ sprites:
     content: [0, 176, 52, 144]
     offset: [0.0, 0.0]
     drawn_size: [0.40625, 0.45]
-    tintable: true
   human-sitting:
     cell: [1, 0]
     content: [0, 234, 52, 86]
     offset: [0.0, 0.0]
     drawn_size: [0.40625, 0.26875]
-    tintable: true
   # 144px wide: it starts at its own cell's left edge and overhangs 16px
   # into the Crawling cell, which is authored with that gap.
   human-lying:
@@ -114,7 +101,6 @@ sprites:
     content: [0, 268, 144, 52]
     offset: [0.0, 0.0]
     drawn_size: [1.125, 0.1625]
-    tintable: true
   # Also over-wide, inset 16px to clear the Lying overhang; it in turn
   # overhangs 32px into the Crouching cell.
   human-crawling:
@@ -122,13 +108,11 @@ sprites:
     content: [16, 304, 144, 16]
     offset: [0.0, 0.0]
     drawn_size: [1.125, 0.05]
-    tintable: true
   human-crouching:
     cell: [4, 0]
     content: [32, 234, 52, 86]
     offset: [0.0, 0.0]
     drawn_size: [0.40625, 0.26875]
-    tintable: true
 
   # Row 1: the Android appearance.
   android-standing:
@@ -136,31 +120,26 @@ sprites:
     content: [0, 176, 52, 144]
     offset: [0.0, 0.0]
     drawn_size: [0.40625, 0.45]
-    tintable: true
   android-sitting:
     cell: [1, 1]
     content: [0, 234, 52, 86]
     offset: [0.0, 0.0]
     drawn_size: [0.40625, 0.26875]
-    tintable: true
   android-lying:
     cell: [2, 1]
     content: [0, 268, 144, 52]
     offset: [0.0, 0.0]
     drawn_size: [1.125, 0.1625]
-    tintable: true
   android-crawling:
     cell: [3, 1]
     content: [16, 304, 144, 16]
     offset: [0.0, 0.0]
     drawn_size: [1.125, 0.05]
-    tintable: true
   android-crouching:
     cell: [4, 1]
     content: [32, 234, 52, 86]
     offset: [0.0, 0.0]
     drawn_size: [0.40625, 0.26875]
-    tintable: true
 
   # Row 2: the Cleaning Bot appearance.
   cleaning-bot-standing:
@@ -168,31 +147,26 @@ sprites:
     content: [0, 176, 52, 144]
     offset: [0.0, 0.0]
     drawn_size: [0.40625, 0.45]
-    tintable: true
   cleaning-bot-sitting:
     cell: [1, 2]
     content: [0, 234, 52, 86]
     offset: [0.0, 0.0]
     drawn_size: [0.40625, 0.26875]
-    tintable: true
   cleaning-bot-lying:
     cell: [2, 2]
     content: [0, 268, 144, 52]
     offset: [0.0, 0.0]
     drawn_size: [1.125, 0.1625]
-    tintable: true
   cleaning-bot-crawling:
     cell: [3, 2]
     content: [16, 304, 144, 16]
     offset: [0.0, 0.0]
     drawn_size: [1.125, 0.05]
-    tintable: true
   cleaning-bot-crouching:
     cell: [4, 2]
     content: [32, 234, 52, 86]
     offset: [0.0, 0.0]
     drawn_size: [0.40625, 0.26875]
-    tintable: true
 
   # Row 3: the generic appearance, the fallback a type with no artwork names.
   agent-standing:
@@ -200,28 +174,23 @@ sprites:
     content: [0, 176, 52, 144]
     offset: [0.0, 0.0]
     drawn_size: [0.40625, 0.45]
-    tintable: true
   agent-sitting:
     cell: [1, 3]
     content: [0, 234, 52, 86]
     offset: [0.0, 0.0]
     drawn_size: [0.40625, 0.26875]
-    tintable: true
   agent-lying:
     cell: [2, 3]
     content: [0, 268, 144, 52]
     offset: [0.0, 0.0]
     drawn_size: [1.125, 0.1625]
-    tintable: true
   agent-crawling:
     cell: [3, 3]
     content: [16, 304, 144, 16]
     offset: [0.0, 0.0]
     drawn_size: [1.125, 0.05]
-    tintable: true
   agent-crouching:
     cell: [4, 3]
     content: [32, 234, 52, 86]
     offset: [0.0, 0.0]
     drawn_size: [0.40625, 0.26875]
-    tintable: true

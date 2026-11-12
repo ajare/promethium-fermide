@@ -17,18 +17,23 @@ therefore keeps the end of the tile it was drawn beside at one artwork pixel to
 one screen pixel, and drops the top of the tile that would have stood above its
 ceiling. Anchored on the top instead, every short Sector would lose its floor and
 keep its ceiling band down at floor level. Room interiors therefore support
-arbitrary height without intermediate floors. Backgrounds and Facades intentionally retain their authored
-opaque colours and take no tile at all - they are authored flat colour by domain
-definition, and the renderer fills them without asking the atlas for a surface.
-A Facade asks the atlas for one thing only, and it is an overlay rather than a
-surface: the doorframe over the cells a Door stands in (#1059).
+arbitrary height without intermediate floors. Backgrounds and Facades are tiled like every other Sector: each asks
+the atlas for its own surface - `background` and `facade` - and draws it raw
+across its area. Their authored colour is editor data, not paint; it no longer
+reaches the picture. Neither declares a variant family, so a Sector of either
+kind always resolves to that one tile.
+A Facade may ask the atlas for one further thing, and it is an overlay rather
+than a surface: the doorframe over the cells a Door stands in (#1059). The
+frame lies over the Facade's own tile rather than standing in for a surface the
+Facade never had, which is the same shape it takes on a Room or a
+Corridor (#1073).
 Vehicles, stair and ladder mechanisms, thresholds, other objects, Agents and editor
 overlays retain their existing rendering. Aperture clipping and render order are
 unchanged; wireframe mode remains primitive-based.
 
 The whole of that rule is pinned before the draw path changes. `smoke/render/SectorSurfaceDrawContract.cpp`
 (#1037) records the commands a no-variant Sector surface emits and asserts the
-tile region, destination rectangle and tint of every cell, the repeat count, the
+tile region and destination rectangle of every cell, the repeat count, the
 floor-line anchor, and the crop a partial top level takes. It is a contract, not a
 snapshot: the per-cell draw loop that Sector surface variants need (#1036) has to
 satisfy what that file states, so a decorative feature cannot quietly re-anchor
@@ -85,7 +90,6 @@ Each base sprite declares how many variants its type has:
     cell: [1, 0]
     variants: 3
     content: [0, 0, 128, 320]
-    tintable: true
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
 ```
@@ -93,7 +97,7 @@ Each base sprite declares how many variants its type has:
 That one number is the whole of what is authored about a family. The loader
 expands it into `-V1` .. `-VN`, each in the base's own column one row below the
 tile above it, and each inheriting the base's content rectangle, render offset,
-drawn size and tintable flag:
+drawn size:
 
 | Tile | Cell | Region |
 | --- | --- | --- |
@@ -308,8 +312,8 @@ What the loader refuses:
   as the two rules above - a repair would read as a clean load and hide the
   miscount.
 - **The field on a record that draws no tiled surface.** A Background and a
-  Facade are authored as flat colour and never ask the atlas for a tile, so
-  a variant recorded on one is decoration that could never show. A Door or
+  Facade draw their one tile and declare no variant family, so a variant
+  recorded on one names a row that was never authored. A Door or
   Marker record has no surface at all.
 
 What it does not refuse is a `variant` number the installed artwork has no
@@ -359,8 +363,8 @@ the variant block itself. `smoke/persistence/SectorSurfaceVariants.cpp`
 pins that along with the round trip and the refusals, and
 `smoke/render/SectorSurfaceVariants.cpp` pins what each cell draws - the
 variant tile where one is recorded and its own tile behind it, the base
-everywhere else, on the same rectangle, at the same crop and the same tint
-it had before any cell could be recorded.
+everywhere else, on the same rectangle and at the same crop it had before any
+cell could be recorded.
 
 Every one of the ten tiles fills its cell: `drawn_size: [1.0, 1.0]`, content
 128 x 320 at the authored grid's pixel size, `offset: [0.0, 0.0]`. That is the
@@ -418,10 +422,10 @@ changes the strip and nothing in the editor is touched between one count and the
 next. A swatch is never offered without the tile behind it, so there is no empty
 slot an author can pick, and a type that declares nothing shows its base alone.
 
-Background and Facade get no strip. They are Sector types authored as flat colour,
-they never ask the atlas for a tile, and a variant entry on a record that draws no
-tiled surface is refused at load, so a swatch under either would be a choice that
-could never be drawn.
+Background and Facade get no strip. Each draws its own tile, but declares no
+variant family, so there is exactly one artwork per type and no choice to
+present; a variant entry on either is refused at load as naming a row that was
+never authored.
 
 Each swatch is the atlas tile itself, framed into the swatch's box with its tile
 name over the artwork - which is what keeps the strip readable on a placeholder
@@ -465,36 +469,42 @@ is one undo step, and undoing restores the document exactly.
 
 ## The doorframe overlays
 
-A cell a Door stands in does not draw its wall's tile. It draws that wall's
-**doorframe** tile: the moulding around the opening, with the leaf
-animating inside it and the space behind showing through the hole. The
-frame is part of the wall rather than part of the Door, so it is keyed by
-the wall and lives in this atlas, while the leaf is keyed by the Door's
-function and lives in the Objects set (#1052).
+A cell a Door stands in draws its wall's own tile, exactly as every other
+cell of that wall does, and the **doorframe** tile goes over it: the
+moulding around the opening, with a transparent hole for the leaf to
+animate inside and the space behind to show through. The frame is part of
+the wall rather than part of the Door, so it lives in this atlas, while
+the leaf is keyed by the Door's function and lives in the Objects set
+(#1052, #1073).
 
 They are authored in a sibling `overlays` map rather than among the
 `sprites`:
 
 ```yaml
 overlays:
-  doorframe-room-1r-L0:
+  doorframe-1r-L0:
     cell: [10, 0]
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: true
     hole: [13, 160, 102, 160]
 ```
 
-The name is `doorframe-<wall>-<width><height>-<role>`: the wall is `room`,
-`corridor` or `facade`, the width is 1 or 2 cells, the height is
-`r`egular or `t`all, and the role is `L0` for the opening's left cell and
-`R0` for its right. A 1-wide opening has only an `L0`. Corridors get no
-tall frame, because a tall Door is refused in a Corridor and a tile
-nothing can ever reach is artwork that reads as unfinished. Fifteen tiles
-in all, in the three columns to the right of the surface strip - one band
-per wall, its regular frames above its tall ones - which is why the sheet
-is 1664 x 1600 rather than the 1280 x 1280 it was.
+The name is `doorframe-<width><height>-<role>`: the width is 1 or 2
+cells, the height is `r`egular or `t`all, and the role is `L0` for the
+opening's left cell and `R0` for its right. A 1-wide opening has only an
+`L0`. Six tiles in all, in the three columns to the right of the surface
+strip, which is why the sheet is 1664 x 1280 rather than the 1664 x 1600
+the framed walls used to need.
+
+The wall is not in the name, because the wall is not in the artwork. A
+frame that *replaced* the wall's tile had to carry the wall's look, and
+that is what made `doorframe-room-*`, `doorframe-corridor-*` and
+`doorframe-facade-*` three copies of six tiles drawn to differ in a way
+nothing could see. Lying over the wall's tile instead, the frame has
+nothing left to say about which wall it lies on, and the same six tiles
+frame a Room, a Corridor and a Facade alike. Dropping the wall from the
+key is most of why this rendering exists.
 
 The second map is not tidiness. `hasSectorTileSurface()` is asked "is this
 a Sector surface" by the borrow rule and by the editor's swatch strip, and
@@ -537,7 +547,7 @@ What the loader refuses:
 - **A `-Vn` name on an overlay.** The overlays derive nothing, and the
   `-Vn` shape is still the derivation's, because the derivation exists -
   in this same file's `sprites` map. An overlay authored as
-  `doorframe-room-1r-L0-V1` reads as a family nothing made, and the file
+  `doorframe-1r-L0-V1` reads as a family nothing made, and the file
   gives no signal that it is wrong; and if a real family is declared later
   whose derivation reaches that name, the collision surfaces as a complaint
   about the derivation rather than about the name the author wrote. The
@@ -577,97 +587,105 @@ each frame frames, checks the committed sheet is actually punched where
 the tileset says, and checks the frames are declared in the `ImageSet` the
 install pairs against.
 
-### What a door cell resolves to
+### What a Door draws, in order
 
-The resolver #1039 left open is where the frame arrives, and it answers
-from the live Door objects rather than from anything recorded:
+The frame is not a thing the Sector surface resolver answers. It is the last
+of four layers the Door itself puts down, and the order is the feature
+(#1073):
 
-- a cell of a Room or a Corridor that a Door covers, with that Door's
-  **front** side on this Sector, answers the frame for that Door's width
-  and height and the cell's role in the opening;
-- every other cell answers the variant it was recorded with, or the base,
-  exactly as before;
-- a frame the installed atlas does not carry is no frame at all, and the
-  cell falls back to its wall's tile rather than to the missing-art
-  colour. That is what makes the feature additive: a World drawn on the
-  version 1 family, or on any set with no frames authored, keeps drawing
-  what it drew before.
-- a Regular Door whose `heightScale` leaves its aperture smaller than the
-  hole its frame is cut at is answered the same way - no frame - for the
-  same reason and with the same fallback. The frame replaces the wall's
-  tile rather than lying over it, so the band between the top of the
-  scaled aperture and the top of the baked hole would draw nothing: the
-  viewport background straight through the wall (#1062). A scale of
-  exactly 1.0 is not a mismatch and still wears its frame, and a Tall
-  Door cannot carry a scale at all, so the tall frame is untouched. One
-  frame per standardised door height is the intended replacement and
-  brings the moulding back when it lands.
+1. **The wall's own tile**, drawn by the Sector surface pass across the
+   Door's cells as it is drawn across every other cell of that wall. A
+   Door keeps its wall. Nothing is traded for a frame.
+2. **The space behind**, drawn clipped to the whole doorway aperture.
+   Clipped to the aperture and not to the strip the leaves have vacated,
+   because the leaves are drawn after it and cover what they cover: a
+   closed Door paints its leaves over the back Sector, an opening Door
+   slides them off it, and the doorway is the one clip both want. It is
+   also the clip the recursion needs - a Door in the Sector behind is seen
+   through this one and carries its own aperture down the stack - and a
+   nested threshold clipped to its parent's vacated strip would go missing
+   wherever the parent's leaves happened to still lie.
+3. **The leaves**, drawn over the space behind under the same aperture
+   clip, so no leaf can paint over the wall its collision stops in however
+   far it has travelled.
+4. **The frame**, over the wall's tile and the leaf edges alike. Last, so
+   its moulding is what reads as the edge of the opening whatever the
+   leaves have done underneath it.
 
-Because the answer is computed from what is standing in the wall, nothing
-is consumed. A variant an author painted on a cell the Door later covers
-is outranked for as long as the Door is there and draws again when the
-Door is taken out - the entry underneath was never touched. A Door is a
-reversible placement, and so is taking it back.
+The frame is drawn through the Sector surface's own per-cell loop over the
+Door's cell span - the aperture widened back out by the inset it stands in
+from the cell's x edges, carried up to a whole cell, and trimmed to the
+wall it frames - so it takes the same floor-anchored grid, the same crop
+and the same culling as the tile beneath it. Only the picture a cell wears
+changes, never the geometry: the rule #1037 pinned for a Sector surface,
+arriving at a frame through the same door #1059 opened for the Facade's.
 
-The frame follows the wall's own family, not the surface the borrow rule
-settled on, for the same reason #1050 keeps a borrowing Sector off the
-borrowed family's variants: an Airlock beside a Corridor is still an
-Airlock, and has no frame of its own authored.
+The trim matters. A Door's cell is a whole cell and a wall is not - a Room
+is authored 0.9 of a cell tall - so an untrimmed frame would stand a
+tenth of a cell above the ceiling it is moulding.
+
+Because the frame is derived from the live Door rather than written over
+anything, nothing is consumed. A variant an author painted on a cell the
+Door stands in still draws, underneath, and the frame lands over it. A Door
+is a reversible placement, and so is taking it back.
 
 Only the front side of a threshold is framed. A Door is registered on both
 Sectors of the pair it joins, and the Sector behind is seen *through* the
-opening rather than framing it, so it keeps its own base tile. Rendering
-the back face of a threshold is out of the feature's way.
+opening rather than framing it, so it keeps its own base tile and wears no
+moulding.
 
-### The Facade's frame: over the flat fill, not through the resolver
+A frame the installed atlas does not carry is no frame at all: the cell
+resolves to no tile, draws nothing, and the wall's own tile - already
+down - is all there is to see. That is what makes the feature additive: a
+World drawn on the version 1 family, or on any set with no frames
+authored, keeps drawing what it drew before. It is also why a missing
+frame never reaches the missing-art magenta, which would be a hole punched
+in a wall that needed no art.
 
-A Facade takes no surface tile at all. Its surface is a flat fill emitted
-before the thresholds, so that nothing in the threshold path can paint
-over an aperture (ADR 0003, #49), and `sectorSurfaceKind()` answers null
-for it. There is no per-cell surface resolution here for a Facade's door
-cells to arrive through (#1059).
+### The frame draws as its own artwork
 
-The frame is emitted by the Facade's own flat-colour branch instead: the
-same per-cell tile loop, asked for the Facade's whole area, with a
-resolver that answers the frame name on the door cells and **no tile at
-all** everywhere else. A cell that resolves to the empty string draws
-nothing - deliberately not the missing-art case, which is a name asked
-for and not carried - and the fill the branch already emitted stays the
-whole of what shows on every cell that is not a door cell.
+The frame is a tile like any other and is drawn exactly as its pixels say.
+Nothing multiplies the wall's colour, the Layer's colour or the Sector's
+authored colour into it, so a frame cannot come out a different shade from
+one wall to the next for reasons nobody authored. What a frame looks like is
+settled by the frame's own art and by nothing else.
+
+### The Facade's surface
+
+A Facade draws the `facade` tile across its whole area, one tile per World
+cell, on the same terms as a wall does. It lays down in the Sector surface
+pass, before the thresholds, so nothing in the threshold path can paint
+over an aperture (ADR 0003, #49), and `sectorSurfaceKind()` answers
+`facade` for it. The colour a Facade is authored with is document data the
+editor shows; it is not what the Sector is drawn with.
+
+The frame used to be emitted by that flat-colour branch, because there was
+no per-cell surface resolution for a Facade's door cells to arrive
+through (#1059), and that is what made the Facade's frame a third copy of
+artwork whose only distinguishing fact was which wall it was on. It now
+arrives the same way a Room's does - from the Door, over the fill - and
+the Facade's branch emits no frame at all.
 
 The flat-fill rule is not bent by this. The fill is neither narrowed nor
 punched: it still covers the whole Facade, the door cells included, and
-the frame lands over it. What the rule was written for survives twice. The
-frame is emitted *before* the threshold pass, so every aperture - this
-Door's own and every other threshold's - is drawn over the frame rather
-than the frame over it; and the frame is drawn only on the cells the Door
+the frame lands over it. And the frame is drawn only on the cells the Door
 itself stands in, which placement refuses to share.
 
-The tint is the Facade's own colour rather than the Layer's. The frame is
-moulding on this wall, and this wall's colour is the Facade's.
-
-The Facade's tall frames were authored in #1059 ahead of the tall Facade
-Door that wears them, and #1060 admits that Door, so they reach the screen
-now. They were authored early because the alternative is worse - a Facade
-has no base tile to fall back to, so a tall Facade opening with no tall
-frame authored would show a doorway with no frame at all, which is the
-picture this whole feature exists to remove.
-
-`smoke/render/DoorframeCells.cpp` pins all of it: the 1-wide and 2-wide
-regular frames in a Room, the tall pair for a tall Door, the same three
-cases in a Corridor, the frame taking its row's floor-anchored crop and
-the same culling as the plain cell beside it, the painted variant hidden
-and coming back, two adjacent doors each framing their own cells without
-leaking, a removed Door reverting with no residue, the back wall taking no
-frame, and the fallback when no frame is authored. The Facade's side of
-it is pinned in the same file: the 1-wide and 2-wide frames over the flat
-fill, the fill still spanning the whole Facade with the frame landing over
-it, every frame emitted before anything clipped to an aperture, no frame
-reaching a neighbouring Door's aperture, the tall Facade frame derived
-and carried while the Door that would wear it is still refused, a Facade
-on an atlas with no Facade frames drawing its fill and no missing art, and
-the frame following the fill through the solid, aperture and wireframe
-passes.
+`smoke/render/DoorframeCells.cpp` pins all of it: the wall's own tile
+drawing on every cell of a framed wall including the door cells; the frame
+landing on the Door's cells with the `L0`/`R0` roles by position; the same
+six tile names drawing in a Room, a Corridor and a Facade alike, and no
+wall-keyed frame name drawing anywhere; the frame keeping the floor-anchored
+grid its wall tile is on; the frame drawn after the wall, after the space
+behind and after the leaves; the back Sector clipped to the whole aperture
+rather than to a vacated strip; a frame the atlas does not carry drawing
+nothing and no magenta; a painted variant still drawing under the frame; a
+removed Door leaving no frame; the back wall of a threshold taking none;
+adjacent doors each framing their own cells; a scaled Door wearing its
+frame with the wall under it so the mismatched hole shows wall rather than
+the viewport; the Facade's fill still spanning every cell with the frame
+over it; the frame wearing its wall's colour; and the frame following the
+wall through the solid pass while staying out of the wireframe pass.
 
 ## The version 1 draft set
 
@@ -712,7 +730,7 @@ because `Refused` answers only "does this map grow a family column" and says
 nothing about who owns the name shape. Reading one flag as both answers left the
 reservation switched off wherever the derivation was switched off, so the sector
 overlays - which derive nothing, in a file whose other map derives everything -
-loaded an overlay named `doorframe-room-1r-L0-V1` without complaint (#1069).
+loaded an overlay named `doorframe-1r-L0-V1` without complaint (#1069).
 The shape is reserved wherever a derivation exists anywhere in the format, so the
 overlays read with the reservation on and the version 1 object format, which
 derives nothing anywhere, reads with it off: no name is spoken for in that file,

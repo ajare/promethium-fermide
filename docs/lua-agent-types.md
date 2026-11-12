@@ -237,7 +237,7 @@ Unsupported poses have no envelope, default ratio or tile.
 Tile names are frozen for each lifetime, like height ratios; the renderer selects
 the current pose's tile as authored, with no pose-specific rotation, mirroring or
 squashing. Tile dimensions relative to the type's Standing tile determine artwork
-size; ordinary Height scaling, tint and Furniture offsets remain. Height ratios
+size; ordinary Height scaling and Furniture offsets remain. Height ratios
 are physical, not rendering transforms. Human has five dedicated `human-*`
 tiles, with lowered/horizontal stances baked into the atlas by
 `scripts/pack_human_pose_tiles.py`. Other types may share artwork, but must

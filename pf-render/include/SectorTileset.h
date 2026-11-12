@@ -76,7 +76,7 @@ struct SectorTileset
     // `boundary-` prefix here, because that is the name the install pairs
     // against the `ImageSet` (#1014). A version 1 sector tileset declares
     // regions only, so these are the format's own semantics: a surface
-    // repeats once per World unit and nothing in the set is tinted. A
+    // repeats once per World unit. A
     // version 2 set authors those semantics in the file, and leaves
     // `boundaries` empty because it draws no edge artwork (#1017).
     TileArtworkMap tiles;
@@ -161,7 +161,12 @@ bool sectorTileSurfaceIsInView(WorldDrawList const* drawList, Vec2 minimum,
     Vec2 maximum, float zoom = 1.0f);
 
 // The tileset helpers cross to the command stream on the shared drawing
-// types (#997), so a caller hands them pf::render::Vec2 and a packed colour.
+// types (#997), so a caller hands them pf::render::Vec2.
+//
+// No draw helper here takes a colour. A tile is drawn as its artwork paints
+// it: nothing is multiplied into the pixels on the way to the screen, so
+// every difference a picture has to make - a darker variant, a different
+// hue - is a different tile rather than the same tile drawn differently.
 //
 // Draws a Sector's surface as one tile per World cell: the area is cut
 // into the cells it covers and every cell is resolved, drawn and cropped on
@@ -188,13 +193,13 @@ bool sectorTileSurfaceIsInView(WorldDrawList const* drawList, Vec2 minimum,
 // drew the missing-tile magenta for that cell alone, and including when a
 // cell resolved to no tile at all and drew nothing (#1059).
 bool drawSectorTileSurfacePerCell(WorldDrawList* drawList, Vec2 minimum,
-    Vec2 maximum, PackedColourValue tint, float zoom,
+    Vec2 maximum, float zoom,
     SectorSurfaceTileResolver const& resolveTile);
 
 // The same per-cell loop with one name answered for every cell, which is
 // what a Sector with no per-cell artwork resolves to (#1039).
 bool drawSectorTileSurface(std::string const& kind, WorldDrawList* drawList,
-    Vec2 minimum, Vec2 maximum, PackedColourValue tint, float zoom = 1.0f);
+    Vec2 minimum, Vec2 maximum, float zoom = 1.0f);
 // Frames one whole tile into an arbitrary screen rect (#1041).
 //
 // This is the swatch draw, not the World draw. The surface path above cuts
@@ -213,7 +218,7 @@ bool drawSectorTileSurface(std::string const& kind, WorldDrawList* drawList,
 // colour that means broken. A rect with no area emits no command and still
 // counts as framed, because the tile was there.
 bool drawSectorTilePreview(std::string const& kind, WorldDrawList* drawList,
-    Vec2 minimum, Vec2 maximum, PackedColourValue tint = White);
+    Vec2 minimum, Vec2 maximum);
 bool drawSectorTileBoundary(char const* kind, WorldDrawList* drawList,
     Vec2 minimum, Vec2 maximum);
 

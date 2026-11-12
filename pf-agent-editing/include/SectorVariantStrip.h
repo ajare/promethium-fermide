@@ -125,5 +125,4 @@ private:
 // `sectorVariantSwatches` always has its tile; a caller that invents one
 // should not be surprised when it is not there.
 bool drawSectorVariantSwatch(SectorVariantSwatch const& swatch,
-	WorldDrawList* drawList, Vec2 minimum, Vec2 maximum,
-	PackedColourValue tint = White);
+	WorldDrawList* drawList, Vec2 minimum, Vec2 maximum);

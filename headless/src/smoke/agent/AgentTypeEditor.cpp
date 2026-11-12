@@ -1273,7 +1273,6 @@ namespace
 		auto authored = makeAgentClipboardPayload(*world, original, "Copy");
 		authored.active = false;
 		authored.group = "Researchers";
-		authored.individualColour = core::AgentColour{ 12, 34, 56 };
 		authored.individualEscalatorWalkingChance = 0.4f;
 		authored.individualWalkSpeedModifier = 1.2f;
 		authored.individualHeightModifier = 0.95f;
@@ -1476,7 +1475,10 @@ namespace
 			0, 1.f, refused, diagnostic) && !refused
 			&& captureDocumentSnapshot(fixture.world)->yaml == conflictBefore->yaml,
 			"Conflicting paste changed the World");
-		for (auto const* field : { "colour", "escalatorWalkingChance", "walkSpeedModifier", "heightModifier", "mobilityProfile" })
+		// `colour` is retired: it is no longer a clipboard field at all, so it
+		// is not in this list. A stale `colour` key on a payload is ignored
+		// rather than read, which is what the removal asks for.
+		for (auto const* field : { "escalatorWalkingChance", "walkSpeedModifier", "heightModifier", "mobilityProfile" })
 		{
 			auto object = YAML::Load("name: Invalid property\nflags: 0\n");
 			object[field] = YAML::Load("[-1, 999]");

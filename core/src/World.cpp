@@ -4589,12 +4589,6 @@ namespace core
 	// ownership of the Agent registry being edited (ADR 0001) and stays
 	// the facade (design pattern), forwarding every entry point below.
 
-	bool World::setAgentIndividualColour(AgentId agent, optional<AgentColour> value,
-		string* diagnostic)
-	{
-		return mAgentProfileEditor->setColour(agent, value, diagnostic);
-	}
-
 	bool World::setAgentIndividualEscalatorWalkingChance(AgentId agent,
 		optional<float> value, string* diagnostic)
 	{

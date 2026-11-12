@@ -18,127 +18,96 @@ sprites:
   door:
     cell: [0, 0]
     content: [6, 80, 52, 80]
-    tintable: false
   button-enabled:
     cell: [1, 0]
     content: [29, 112, 6, 16]
-    tintable: false
   button-disabled:
     cell: [2, 0]
     content: [29, 112, 6, 16]
-    tintable: false
   window-clear:
     cell: [3, 0]
     content: [6, 80, 52, 48]
-    tintable: false
   window-frosted:
     cell: [4, 0]
     content: [6, 80, 52, 48]
-    tintable: false
   window-tinted:
     cell: [0, 1]
     content: [6, 80, 52, 48]
-    tintable: false
   booth-window-open:
     cell: [4, 3]
     content: [6, 80, 52, 48]
-    tintable: false
   booth-window-shutter:
     cell: [4, 3]
     content: [11, 21, 42, 38]
-    tintable: false
   booth-window-closed:
     cell: [4, 3]
     content: [6, 16, 52, 48]
-    tintable: false
   agent:
     cell: [1, 1]
     content: [19, 88, 26, 72]
-    tintable: true
   human-standing:
     cell: [0, 5]
     content: [0, 88, 26, 72]
-    tintable: true
   human-sitting:
     cell: [0, 5]
     content: [32, 117, 26, 43]
-    tintable: true
   human-lying:
     cell: [1, 5]
     content: [0, 134, 72, 26]
-    tintable: true
   human-crouching:
     cell: [2, 5]
     content: [16, 117, 26, 43]
-    tintable: true
   human-crawling:
     cell: [3, 5]
     content: [0, 152, 72, 8]
-    tintable: true
   robot-standing:
     cell: [4, 5]
     content: [32, 88, 26, 72]
-    tintable: true
   cleaning-bot-standing:
     cell: [3, 5]
     content: [48, 112, 26, 24]
-    tintable: true
   marker:
     cell: [2, 1]
     content: [24, 122, 16, 22]
-    tintable: true
   platform-lift:
     cell: [3, 1]
     content: [0, 150, 64, 10]
-    tintable: false
   shuttle-car-left:
     cell: [0, 2]
     content: [0, 0, 64, 160]
-    tintable: false
   shuttle-car-middle:
     cell: [1, 2]
     content: [0, 0, 64, 160]
-    tintable: false
   shuttle-car-right:
     cell: [2, 2]
     content: [0, 0, 64, 160]
-    tintable: false
   shuttle-car-connector:
     cell: [3, 2]
     content: [0, 0, 64, 160]
-    tintable: false
   lift-car:
     cell: [4, 2]
     content: [0, 0, 64, 160]
-    tintable: false
   chair:
     cell: [4, 1]
     content: [0, 0, 64, 160]
-    tintable: false
   sofa-left:
     cell: [0, 3]
     content: [0, 0, 64, 160]
-    tintable: false
   sofa-right:
     cell: [1, 3]
     content: [0, 0, 64, 160]
-    tintable: false
   desk-left:
     cell: [2, 3]
     content: [0, 0, 64, 160]
-    tintable: false
   desk-right:
     cell: [3, 3]
     content: [0, 0, 64, 160]
-    tintable: false
   bed-left:
     cell: [0, 4]
     content: [0, 0, 64, 160]
-    tintable: false
   bed-right:
     cell: [1, 4]
     content: [0, 0, 64, 160]
-    tintable: false
   # Role-name aliases over the same Furniture art (#1029).
   #
   # The shipped Furniture catalogues now name their tiles by the role convention,
@@ -153,28 +122,21 @@ sprites:
   chair-L0:
     cell: [4, 1]
     content: [0, 0, 64, 160]
-    tintable: false
   sofa-L0:
     cell: [0, 3]
     content: [0, 0, 64, 160]
-    tintable: false
   sofa-R0:
     cell: [1, 3]
     content: [0, 0, 64, 160]
-    tintable: false
   desk-L0:
     cell: [2, 3]
     content: [0, 0, 64, 160]
-    tintable: false
   desk-R0:
     cell: [3, 3]
     content: [0, 0, 64, 160]
-    tintable: false
   bed-L0:
     cell: [0, 4]
     content: [0, 0, 64, 160]
-    tintable: false
   bed-R0:
     cell: [1, 4]
     content: [0, 0, 64, 160]
-    tintable: false

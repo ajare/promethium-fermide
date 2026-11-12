@@ -264,20 +264,29 @@ namespace
 		// reveal draw at all, and what is asserted instead is that the leaves
 		// cover the doorway completely - which is why there is nothing to
 		// reveal.
+		// The back Sector is clipped to the whole doorway rather than to
+		// the strip the leaves have vacated: the leaves are drawn over it
+		// and cover what they cover, so the draw computes no strip at all
+		// (#1073). A closed Door draws no back Sector - its leaves stand
+		// across the whole doorway, so that draw would paint over itself -
+		// which is the same thing the empty reveal used to buy by
+		// construction, now asked for directly.
 		auto const expectedReveal = model.reveal.intersect(scene.aperture);
 		if (expectedReveal.empty())
 		{
+			require(!door_leaf::extentOf(drawList, kApertureFillColour).painted(),
+				"a closed Door drew the Sector behind a doorway its own leaves "
+				"already cover");
 			nearBox(door_leaf::project(model.covered()), apertureBox,
 				"a closed Door's leaves over its doorway");
 			return;
 		}
 
-		auto const expectedBox = door_leaf::project(expectedReveal);
 		auto const clip = door_leaf::clipCovering(drawList, kApertureFillColour);
-		near(clip.x, expectedBox.left, "the aperture clip's left edge");
-		near(clip.z, expectedBox.right, "the aperture clip's right edge");
-		near(clip.y, expectedBox.top, "the aperture clip's top edge");
-		near(clip.w, expectedBox.bottom, "the aperture clip's bottom edge");
+		near(clip.x, apertureBox.left, "the back Sector clip's left edge");
+		near(clip.z, apertureBox.right, "the back Sector clip's right edge");
+		near(clip.y, apertureBox.top, "the back Sector clip's top edge");
+		near(clip.w, apertureBox.bottom, "the back Sector clip's bottom edge");
 	}
 
 	// Fully open: every leaf has slid clean out of the doorway and paints no
@@ -484,21 +493,25 @@ namespace
 		// overshot its jamb inverts in World units, and a projection that
 		// normalises it would show "nothing vacated" as a strip of back
 		// Sector painted over the frame.
-		auto const reveal = door_leaf::clipCovering(drawList, kApertureFillColour);
-		require(reveal.x >= apertureBox.left - kStallEpsilon
-				&& reveal.z <= apertureBox.right + kStallEpsilon,
-			"the vacated strip reaches outside the doorway, so the reveal is "
-			"not bounded by the aperture");
-		near(reveal.z, apertureBox.right, "the vacated strip's far edge");
-		near(reveal.x, apertureBox.right - vacatedPx,
-			"the vacated strip is not openPct of the aperture wide, which is "
-			"a stalled start, a short travel, or a visible edge that does not "
-			"move at a uniform speed", kStallEpsilon);
+		// The back Sector's clip is the whole doorway now, so it says
+		// nothing about where the leaf has got to (#1073): the vacated
+		// strip is not a clip any more, it is whatever the leaves have not
+		// painted over. What the strip is bounded by is the doorway the
+		// whole draw sits inside, and that is asserted here; the travel is
+		// read off the leaves themselves below, which is where it always
+		// actually was.
+		auto const clip = door_leaf::clipCovering(drawList, kApertureFillColour);
+		near(clip.x, apertureBox.left, "the back Sector clip's left edge");
+		near(clip.z, apertureBox.right, "the back Sector clip's right edge");
 
 		// What the leaves still cover inside the doorway, measured off the
 		// quads they painted and clipped to the aperture. This is the
 		// number a frozen leaf keeps at the full aperture width, which is
-		// exactly what the stall looked like.
+		// exactly what the stall looked like - and for an OpenLeft leaf it
+		// is the vacated strip too, read from the other end: the leaves'
+		// visible right edge is the near edge of what the leaf has uncover-
+		// ed, and it has to sit openPct of the doorway in from the right
+		// jamb.
 		auto const quads = door_leaf::filledRectsOf(drawList, kDoorLeafColour);
 		require(!quads.empty(),
 			"a barely-open Door painted no leaf at all, so there is nothing "
@@ -509,6 +522,12 @@ namespace
 		near(coveredPx, widthPx - vacatedPx,
 			"the leaves do not cover the complement of the reveal, so the "
 			"visible coverage is not what the travel promises", kStallEpsilon);
+		near(std::min(covered.maxX, apertureBox.right),
+			apertureBox.right - vacatedPx,
+			"the leaves' visible edge is not openPct of the aperture in from "
+			"the far jamb, which is a stalled start, a short travel, or a "
+			"visible edge that does not move at a uniform speed",
+			kStallEpsilon);
 	}
 
 	// The whole side-sliding travel. 0.02 is a fifth of the 11.1% a

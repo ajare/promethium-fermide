@@ -38,9 +38,9 @@ namespace core
 		// name out and an unnamed addFacade() call land on the same Sector.
 		static std::string defaultName();
 
-		// A muted sand colour, chosen to be distinct from the Background
-		// (96,128,160), the Fore (192,192,255) and Back (224,224,255)
-		// Location colours, and the lights-off tint.
+		// A muted sand colour. It is authored data the document carries and the
+		// editor shows; it is not what the Sector is drawn with, which is the
+		// `facade` tile from the installed atlas.
 		static BackgroundColour defaultColour();
 
 		Facade(std::string const& name, uint32_t layerIndex, uint32_t index,

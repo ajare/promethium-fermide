@@ -60,9 +60,9 @@ namespace
 	int const kCellWidth = CORE_CELL_WIDTH_PIXELS;
 	int const kCellHeight = CORE_LEVEL_HEIGHT_PIXELS;
 
-	// A tint no production path picks by default, so a cell that ignored the
-	// caller's tint fails instead of looking right.
-	pf::render::PackedColourValue const kTint = packColour(214, 96, 32, 255);
+	// The colour a tile is drawn with when nothing is multiplied into it.
+	// Every image command the surface loop emits carries exactly this.
+	pf::render::PackedColourValue const kRaw = White;
 
 	// The tile standing for cell (column, level) of the synthetic sheet.
 	std::string cellTile(int column, int level)
@@ -272,7 +272,7 @@ namespace
 		Vec2 const maximum{ float(columns) * kCellWidth,
 			float(levels) * kCellHeight };
 		require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
-				maximum, kTint, 1.0f, recorder.resolver()),
+				maximum, 1.0f, recorder.resolver()),
 			"A Sector surface with an atlas installed must draw");
 
 		// Asked: the whole grid, each cell once, nothing else. A loop that
@@ -319,14 +319,15 @@ namespace
 			require(quad.tile == cellTile(int(cell.first), int(cell.second)),
 				"The cell" + whereIs(cell) + " drew '" + quad.tile
 					+ "'; a cell must draw the tile it resolved to");
-			// A whole cell samples a whole tile and carries the caller's tint.
+			// A whole cell samples a whole tile and carries no colour of its
+			// own: the artwork is the picture.
 			require(near(quad.u0, 0.0f) && near(quad.u1, 1.0f)
 					&& near(quad.v0, 0.0f) && near(quad.v1, 1.0f),
 				"The cell" + whereIs(cell) + " did not sample its whole tile: "
 					+ describe(quad));
-			require(quad.tint == kTint,
-				"The cell" + whereIs(cell) + " carried a tint other than the one "
-					"asked for");
+			require(quad.tint == kRaw,
+				"The cell" + whereIs(cell) + " was drawn with a colour other "
+				"than its raw artwork");
 		}
 	}
 
@@ -350,14 +351,14 @@ namespace
 		WorldDrawList oneTile({ { -1000.0f, -1000.0f },
 			{ 1000.0f, 1000.0f } });
 		require(drawSectorTileSurfacePerCell(&oneTile, { 0.0f, 0.0f }, maximum,
-				kTint, 1.0f,
+				1.0f,
 				[](std::uint32_t, std::uint32_t) { return cellTile(0, 0); }),
 			"The one-tile draw must draw");
 		Recorder eachCell;
 		WorldDrawList perCell({ { -1000.0f, -1000.0f },
 			{ 1000.0f, 1000.0f } });
 		require(drawSectorTileSurfacePerCell(&perCell, { 0.0f, 0.0f }, maximum,
-				kTint, 1.0f, eachCell.resolver()),
+				1.0f, eachCell.resolver()),
 			"The per-cell draw must draw");
 
 		auto const same = quadsOf(oneTile, atlas);
@@ -446,7 +447,7 @@ namespace
 		WorldDrawList commands({ { clipLeft, clipTop },
 			{ maximum.x + 100.0f, maximum.y + 100.0f } });
 		require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
-				maximum, kTint, 1.0f, recorder.resolver()),
+				maximum, 1.0f, recorder.resolver()),
 			"A Sector surface with an atlas installed must draw");
 
 		// Column 0 is entirely left of the clip. Asking about it would be

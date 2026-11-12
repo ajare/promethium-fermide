@@ -71,7 +71,6 @@ namespace core
 	// rather than pretending to be two independent single-property rows.
 	struct IndividualOverrideTable
 	{
-		IndividualOverrideDescriptor<AgentColour> colour;
 		IndividualOverrideDescriptor<float> escalatorWalkingChance;
 		IndividualOverrideDescriptor<float> walkSpeedModifier;
 		IndividualOverrideDescriptor<float> heightModifier;

@@ -216,10 +216,10 @@ namespace
 		std::string diagnostic;
 		auto const retired = commitAgentTagAdd(fixture.registry, "retired", diagnostic);
 		require(static_cast<bool>(retired), diagnostic);
-		require(commitAgentTagColourAdd(fixture.registry, retired, diagnostic), diagnostic);
+		require(commitAgentTagDisplayColourEdit(fixture.registry, retired,
+			{ 99, 99, 99 }, diagnostic), diagnostic);
 		require(commitAgentTagDelete(fixture.registry, retired, diagnostic), diagnostic);
-		require(commitAgentTagColourAdd(fixture.registry, fixture.tag, diagnostic), diagnostic);
-		require(commitAgentTagColourEdit(fixture.registry, fixture.tag,
+		require(commitAgentTagDisplayColourEdit(fixture.registry, fixture.tag,
 			{ 12, 34, 56 }, diagnostic), diagnostic);
 		require(commitAgentTagWalkSpeedModifierEdit(fixture.registry, fixture.tag,
 			{ 1.1f, 1.1f }, diagnostic), diagnostic);

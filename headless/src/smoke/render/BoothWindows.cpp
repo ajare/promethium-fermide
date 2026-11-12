@@ -2,6 +2,7 @@
 #include "Render.h"
 #include "WorldDrawList.h"
 #include "ObjectTileset.h"
+#include "SectorTileset.h"
 #include "UISettings.h"
 #include "core/World.h"
 #include "core/Graph.h"
@@ -299,6 +300,23 @@ namespace
 		// literals; resizing a World cell must not.
 		require(shutterRegion.width==42 && shutterRegion.height==38, "Shutter is not a distinct inner tile");
 		setObjectTileset(std::move(tiles), static_cast<TextureId>(1));
+		// The Facade behind the booth draws a tile of its own family, so the
+		// backdrop the aperture reveals is artwork rather than a colour
+		// packed from the Facade's authored triple. `facade` is cut into its
+		// own column of a synthetic sheet so its UVs say which tile they
+		// came from and the Room's own surface cannot be mistaken for it.
+		int const kSurfaceCellWidth = CORE_CELL_WIDTH_PIXELS;
+		int const kSurfaceCellHeight = CORE_LEVEL_HEIGHT_PIXELS;
+		SectorTileset surfaces;
+		surfaces.family = SectorTilesetFamily::New;
+		surfaces.surfaces.emplace("room", SectorTileRegion{0, 0, kSurfaceCellWidth, kSurfaceCellHeight});
+		surfaces.surfaces.emplace("facade", SectorTileRegion{kSurfaceCellWidth, 0, kSurfaceCellWidth, kSurfaceCellHeight});
+		surfaces.width = 2 * kSurfaceCellWidth;
+		surfaces.height = kSurfaceCellHeight;
+		setSectorTileset(surfaces, static_cast<TextureId>(2));
+		auto const facadeRegion = surfaces.surfaces.at("facade");
+		float const sectorAtlasWidth = static_cast<float>(surfaces.width);
+		float const sectorAtlasHeight = static_cast<float>(surfaces.height);
 		auto near=[](float a,float b) { return std::abs(a-b)<0.001f; };
 		for (bool nestedBooth : {false,true})
 		{
@@ -335,7 +353,14 @@ namespace
 				{
 					++index;
 					auto triangle=std::get_if<WorldDrawList::Triangle>(&command); if (!triangle) continue;
-					if (triangle->colour==packColour(31,73,109,255))
+					bool const isFacadeTile=triangle->texture==WorldDrawList::Texture::SectorAtlas
+						&& std::all_of(std::begin(triangle->texcoords),std::end(triangle->texcoords),[&](auto uv) {
+							return uv.x >= facadeRegion.x/sectorAtlasWidth-0.00001f
+								&& uv.x <= (facadeRegion.x+facadeRegion.width)/sectorAtlasWidth+0.00001f
+								&& uv.y >= facadeRegion.y/sectorAtlasHeight-0.00001f
+								&& uv.y <= (facadeRegion.y+facadeRegion.height)/sectorAtlasHeight+0.00001f;
+						});
+					if (isFacadeTile)
 					{
 						backdrop=true; backdropIndex=index;
 						float const openingTop=innerBottom-height*(nestedBooth ? std::min(expected,backBooth->getProgress()) : expected);

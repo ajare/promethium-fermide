@@ -32,10 +32,10 @@ A named location that may occupy any layer.
 A location that may occupy any layer.
 
 **Facade**:
-A location whose perimeter walls are all open. It is occupiable, hosts every object type a Room hosts, owns walkable floor, and takes part in traversal exactly as a Room does; its only differences are that every wall end on every level is open, and that it is rendered as a solid opaque colour like a Background. The open perimeter is an intrinsic creation property, not an editable state: wall add/remove commands and Bulkhead Doors refuse a Facade.
+A location whose perimeter walls are all open. It is occupiable, hosts every object type a Room hosts, owns walkable floor, and takes part in traversal exactly as a Room does; its only differences are that every wall end on every level is open, and that it is rendered from its own opaque tile like a Background. The open perimeter is an intrinsic creation property, not an editable state: wall add/remove commands and Bulkhead Doors refuse a Facade.
 
 **Background**:
-A non-occupiable Sector that exists only to be seen through Windows and other apertures from the Layer in front. It carries one opaque colour, hosts no objects, owns no walkable floor, and takes no part in traversal. Where a Window looks into a sector, that sector is its Background - no separate domain noun is minted for it.
+A non-occupiable Sector that exists only to be seen through Windows and other apertures from the Layer in front. It is rendered from its own opaque tile, hosts no objects, owns no walkable floor, and takes no part in traversal. Where a Window looks into a sector, that sector is its Background - no separate domain noun is minted for it.
 
 **Transit**:
 A static sector that connects Locations through one or more Stops, such as a lift shaft, shuttle route, ladder, stairwell, or Airlock. Its landing Locations are on the Layer immediately in front, except for an Airlock or Chamber, which connects Locations on its own Layer; within a lift or shuttle Transit, an Agent may also occupy a specific Transport vehicle or Carriage.
@@ -537,7 +537,7 @@ _Avoid_: ImGui window, when referring specifically to rendered World content
 _Avoid_: World document, tile-set metadata
 
 **Image set**:
-A Willpower resource that names rectangular regions of one atlas image. Whether a region is tintable or repeated is a World-renderer semantic rather than a separate resource type.
+A Willpower resource that names rectangular regions of one atlas image. Whether a region is repeated is a World-renderer semantic rather than a separate resource type.
 _Avoid_: Tile set
 
 **Sector surface variant**:

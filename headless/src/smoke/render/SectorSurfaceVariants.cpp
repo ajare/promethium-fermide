@@ -84,8 +84,9 @@ namespace
 	int const kCellWidth = CORE_CELL_WIDTH_PIXELS;
 	int const kCellHeight = CORE_LEVEL_HEIGHT_PIXELS;
 
-	// A tint no production path picks by default, so a cell that ignored the
-	// caller's tint fails instead of looking right.
+	// The colour the pass is drawn with. It reaches the wireframe outline
+	// and the fill emitted when no atlas is installed; it never reaches a
+	// tile, which is why the quads this file reads back are all White.
 	pf::render::PackedColourValue const kTint = packColour(214, 96, 32, 255);
 
 	// The missing-art colour the surface loop fills a cell with when the tile
@@ -588,12 +589,12 @@ namespace
 				require(gotTile == want,
 					"The cell at " + cellName(column, level) + " drew '" + gotTile
 						+ "'; the rule says '" + want + "'");
-				// A textured cell carries the tint the caller asked for. A cell
-				// with no tile behind it is the missing-art fill, which is its own
-				// colour by design and not the caller's.
-				require(got.textured ? got.tint == kTint : got.tint == kMagenta,
+				// A textured cell carries no colour of its own: the artwork is
+				// the picture. A cell with no tile behind it is the missing-art
+				// fill, which is its own colour by design.
+				require(got.textured ? got.tint == White : got.tint == kMagenta,
 					"The cell at " + cellName(column, level) + " carried " + std::to_string(got.tint)
-						+ "; a textured cell carries the tint asked for and an "
+						+ "; a textured cell draws its raw artwork and an "
 						"untextured one carries the missing-art magenta");
 			}
 		}

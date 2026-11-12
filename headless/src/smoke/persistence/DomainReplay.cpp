@@ -182,8 +182,7 @@ namespace persistence
 
 		core::MobilityProfile mobility;
 		mobility.set(core::TraversalKind::Ladder, core::MobilityUse::CannotUse);
-		require(world.setAgentIndividualColour(agentId, core::AgentColour{ 12, 34, 56 }, &diagnostic)
-			&& world.setAgentIndividualEscalatorWalkingChance(agentId, 0.25f, &diagnostic)
+		require(world.setAgentIndividualEscalatorWalkingChance(agentId, 0.25f, &diagnostic)
 			&& world.setAgentIndividualWalkSpeedModifier(agentId, 1.15f, &diagnostic)
 			&& world.setAgentIndividualHeightModifier(agentId, 0.95f, &diagnostic)
 			&& world.setAgentIndividualStairSpeedModifier(agentId, 0.8f, &diagnostic)
@@ -227,7 +226,6 @@ namespace persistence
 
 		// Snapshot everything the replay must preserve; the persisted samples are
 		// deterministic draws, so they are compared against themselves across it.
-		auto const colourBefore = agent->getIndividualColour();
 		auto const escalatorChanceBefore = agent->getIndividualEscalatorWalkingChance();
 		auto const walkSpeedBefore = agent->getIndividualWalkSpeedModifier();
 		auto const heightBefore = agent->getIndividualHeightModifier();
@@ -273,8 +271,7 @@ namespace persistence
 			"Agent was dropped or moved by an unrelated Location edit");
 		auto const* kept = carried.entity;
 
-		require(kept->getIndividualColour() == colourBefore
-				&& kept->getIndividualEscalatorWalkingChance() == escalatorChanceBefore
+		require(kept->getIndividualEscalatorWalkingChance() == escalatorChanceBefore
 				&& kept->getIndividualWalkSpeedModifier() == walkSpeedBefore
 				&& kept->getIndividualHeightModifier() == heightBefore
 				&& kept->getIndividualStairSpeedModifier() == stairSpeedBefore

@@ -207,7 +207,7 @@ namespace core
 			for (auto const id : mAgentTags) serializer.writeUint64("", id.value);
 			serializer.endArray();
 		}
-		if (mIndividualColour || mIndividualEscalatorWalkingChance
+		if (mIndividualEscalatorWalkingChance
 			|| mIndividualWalkSpeedModifier || mIndividualHeightModifier
 			|| mIndividualStairSpeedModifier || mIndividualLadderSpeedModifier
 			|| mIndividualInteractionAversion || mIndividualEffortAversion || mIndividualWaitingAversion
@@ -229,14 +229,6 @@ namespace core
 				serializer.beginMap("");
 				serializer.writeString("type", type);
 			};
-			if (mIndividualColour)
-			{
-				beginProperty("colour");
-				serializer.writeUint8("r", mIndividualColour->r);
-				serializer.writeUint8("g", mIndividualColour->g);
-				serializer.writeUint8("b", mIndividualColour->b);
-				serializer.endMap();
-			}
 			auto writeFloatProperty = [&serializer, &beginProperty](char const* type, float value)
 			{
 				beginProperty(type);
@@ -453,7 +445,6 @@ namespace core
 			serializer.endArray();
 		}
 		mAgentTags = std::move(agentTags);
-		mIndividualColour.reset();
 		mIndividualEscalatorWalkingChance.reset();
 		mIndividualWalkSpeedModifier.reset();
 		mIndividualHeightModifier.reset();
@@ -481,14 +472,7 @@ namespace core
 			{
 				serializer.beginMap("");
 				auto const type = serializer.readString("type");
-				if (type == "colour")
-				{
-					if (mIndividualColour)
-						throw SerializationException("Serialized Agent contains more than one individual Colour");
-					mIndividualColour = AgentColour{ serializer.readUint8("r"),
-						serializer.readUint8("g"), serializer.readUint8("b") };
-				}
-				else if (type == "escalatorWalkingChance")
+				if (type == "escalatorWalkingChance")
 				{
 					if (mIndividualEscalatorWalkingChance)
 						throw SerializationException("Serialized Agent contains more than one individual Escalator walking chance");
@@ -935,31 +919,6 @@ namespace core
 						return { property->value, tag, property->revision, false };
 			}
 		return { mPhysicalBaseline.remoteBoothWindowShutters };
-	}
-
-	EffectiveAgentColour Agent::getEffectiveColour() const
-	{
-		EffectiveAgentColour effective;
-		if (mIndividualColour)
-		{
-			effective.value = *mIndividualColour;
-			effective.individual = true;
-			return effective;
-		}
-		if (!mWorld || !mWorld->hasAttachedAgentTagRegistry()) return effective;
-
-		auto const& registry = mWorld->getAgentTagRegistry();
-		for (auto const tag : mAgentTags)
-		{
-			auto const* definition = registry->lookupAgentTag(tag);
-			if (!definition) continue;
-			auto const* colour = definition->getColour();
-			if (!colour) continue;
-			effective.value = colour->value;
-			effective.sourceTag = tag;
-			break;
-		}
-		return effective;
 	}
 
 	EffectiveAgentWalkSpeedModifier Agent::getEffectiveWalkSpeedModifier() const

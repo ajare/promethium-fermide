@@ -475,12 +475,6 @@ namespace
 				+ std::to_string(art.region.height) + ", expected "
 				+ std::to_string(tile.contentWidth) + "x"
 				+ std::to_string(tile.contentHeight));
-			// None of the vehicles takes a tint. Their colour is the
-			// vehicle's own, and letting a Layer tint multiply into a
-			// carriage would make one train read in as many.
-			require(!art.tintable,
-				std::string("'") + tile.name
-				+ "' is a vehicle and must not take a Layer tint");
 			require(near(art.offset.x, 0.0f) && near(art.offset.y, 0.0f),
 				std::string("'") + tile.name
 				+ "' is drawn at the vehicle's own anchor and declares no offset");

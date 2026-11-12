@@ -74,11 +74,12 @@ void clearObjectTileset();
 void setAgentTileset(ObjectTileset tileset, TextureId texture);
 void clearAgentTileset();
 // The sprite helpers cross to the command stream on the shared drawing
-// types (#997): pf::render::Vec2 for the destination rectangle and a
-// packed colour for the tint.
+// types (#997): pf::render::Vec2 for the destination rectangle.
+//
+// None of them takes a colour. A sprite is drawn as its artwork paints it,
+// so a sprite that has to look different is a different sprite.
 std::optional<Vec2> agentSpriteSize(char const* name);
-bool drawAgentSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b,
-    PackedColourValue tint = White);
+bool drawAgentSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b);
 void setFurnitureTileset(ObjectTileset tileset, TextureId texture);
 void clearFurnitureTileset();
 std::optional<Vec2> furnitureSpriteSize(char const* name);
@@ -86,13 +87,13 @@ bool drawFurnitureSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b);
 bool hasObjectTileset();
 std::optional<Vec2> objectSpriteSize(char const* name);
 // The installed render semantics for one object tile: its render offset and
-// drawn size in World units, and whether it is tintable. Nullopt when no
-// object atlas is installed or the tile is not in it (#1014).
+// drawn size in World units. Nullopt when no object atlas is installed or
+// the tile is not in it (#1014).
 std::optional<TileArtwork> objectTileArtwork(std::string const& name);
 // Destination is the object's physical screen bounds, not its padded storage cell.
 // Source fractions allow moving door leaves to be cropped without squashing.
 bool drawObjectSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b,
-    PackedColourValue tint = White, Vec2 sourceMin = {0, 0}, Vec2 sourceMax = {1, 1});
+    Vec2 sourceMin = {0, 0}, Vec2 sourceMax = {1, 1});
 
 // No ImDrawList-taking form: see SectorTileset.h. The headless harness
 // records a command vector and replays it (#1000).

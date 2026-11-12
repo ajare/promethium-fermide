@@ -432,13 +432,6 @@ namespace core
 		{
 			auto const* source = mWorld.mAgentTagRegistry->lookupAgentTag(existing);
 			if (!source) continue;
-			if (assignedDefinition->getColour() && source->getColour())
-			{
-				return reject(format(
-					"Agent '{}' cannot be assigned to #{} because Colour is already inherited from #{}",
-					agentLookup.entity->getName(), assignedDefinition->getName(),
-					source->getName()));
-			}
 			if (assignedDefinition->getEscalatorWalkingChance() && source->getEscalatorWalkingChance())
 			{
 				return reject(format(
@@ -686,7 +679,6 @@ namespace core
 			return reject("This World has no attached Agent tag registry");
 
 		AgentTagId escalatorWalkingChanceSource{};
-		AgentTagId colourSource{};
 		AgentTagId objectUsageSource{}, objectUsageDistanceSource{};
 		AgentTagId permissionAdherenceSource{};
 		AgentTagId remoteAccessPanelsSource{};
@@ -701,13 +693,6 @@ namespace core
 			if (!definition)
 				return reject(format("Agent tag {} is not defined in the attached registry",
 					tag.value));
-			if (definition->getColour())
-			{
-				if (colourSource)
-					return reject(format("Colour is inherited from both #{} and #{}",
-						mWorld.mAgentTagRegistry->getAgentTagName(colourSource), definition->getName()));
-				colourSource = tag;
-			}
 			if (definition->getEscalatorWalkingChance())
 			{
 				if (escalatorWalkingChanceSource)
@@ -863,7 +848,6 @@ namespace core
 		{
 			if (!agent) continue;
 			AgentTagId escalatorWalkingChanceSource{};
-			AgentTagId colourSource{};
 			AgentTagId permissionAdherenceSource{};
 			AgentTagId remoteAccessPanelsSource{};
 			AgentTagId remoteBoothWindowShuttersSource{};
@@ -879,17 +863,6 @@ namespace core
 					return reject(format(
 						"Agent '{}' is assigned to Agent tag {}, which the attached registry does not define",
 						agent->getName(), tag.value));
-				}
-				if (definition->getColour())
-				{
-					if (colourSource)
-					{
-						return reject(format(
-							"Agent '{}' inherits Colour from both #{} and #{}",
-							agent->getName(), registry.getAgentTagName(colourSource),
-							definition->getName()));
-					}
-					colourSource = tag;
 				}
 				if (definition->getEscalatorWalkingChance())
 				{

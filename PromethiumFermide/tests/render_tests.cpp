@@ -68,6 +68,13 @@ std::pair<int, int> pngSize(std::filesystem::path const& path) {
 // a GPU - they read the command stream the tileset helpers record - so the
 // handle is a placeholder that only has to be non-zero.
 pf::render::TextureId const kInstalled{1};
+// The installed Sector sheet and the `background` tile cut from it, kept
+// so a check can say which tile a quad sampled. Nothing identifies a
+// Background by colour any more - it is artwork like every other surface -
+// so the tile is what a check reads.
+int gSectorAtlasWidth{0};
+int gSectorAtlasHeight{0};
+SectorTileRegion gBackgroundTile{};
 // The objects tileset goes in by value, not by move: the caller keeps it as
 // the reference copy the Furniture checks read back. Since #1024 the
 // Furniture checks read the Furniture sheet, so that is what `installAtlases`
@@ -104,12 +111,12 @@ ObjectTileset installAtlases(std::filesystem::path const& directory) {
     return ObjectTileset::load(
         (directory / entry["tileset"].as<std::string>()).string());
   };
-  // Tintability is an authored fact, never an inferred one. The tileset
-  // behind each atlas is the only source: the rule that used to derive it
-  // by matching a tile's name against `agent`, `human-*`, `robot-standing`
-  // and `cleaning-bot-standing` is deleted (#1018). A new Agent type can no
-  // longer become tintable by accident of what it is called, and a tile
-  // named without a hint can no longer fail to be.
+  // The pairing this test drives: every tile the manifest declares is looked
+  // up in the authored tileset behind the atlas, and nothing about a tile is
+  // inferred from what it is called. The rule that used to derive a tile's
+  // tintability by matching its name against `agent`, `human-*`,
+  // `robot-standing` and `cleaning-bot-standing` is gone with the concept
+  // it served (#1018).
   auto spritesFor = [&](std::string const& atlas) {
     auto const authored = authoredFor(atlas);
     auto const size = pngSize(
@@ -123,7 +130,7 @@ ObjectTileset installAtlases(std::filesystem::path const& directory) {
       require(found != authored.sprites.end(),
           "The authored " + atlas + " tileset defines no tile the atlas declares");
       tiles.sprites.emplace(name, ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(),
-          image["width"].as<int>(), image["height"].as<int>()}, found->second.tintable});
+          image["width"].as<int>(), image["height"].as<int>()}});
     }
     // The generated manifest and the authored tileset are the same list.
     // An authored tile the manifest never got is artwork nothing draws; a
@@ -139,12 +146,16 @@ ObjectTileset installAtlases(std::filesystem::path const& directory) {
   auto sectorsSize = pngSize(directory / resource("SectorAtlasImage")["location"].as<std::string>());
   SectorTileset sectors;
   sectors.width = sectorsSize.first; sectors.height = sectorsSize.second;
+  gSectorAtlasWidth = sectorsSize.first; gSectorAtlasHeight = sectorsSize.second;
   for (auto image : resource("SectorAtlas")["Definitions"]["Definition"]["Images"]["Image"]) {
     auto name = image["name"].as<std::string>();
     SectorTileRegion region{image["x"].as<int>(), image["y"].as<int>(),
                            image["width"].as<int>(), image["height"].as<int>()};
     if (name.starts_with("boundary-")) sectors.boundaries.emplace(name.substr(9), region);
-    else sectors.surfaces.emplace(name, region);
+    else {
+      if (name == "background") gBackgroundTile = region;
+      sectors.surfaces.emplace(name, region);
+    }
   }
 
   auto objects = spritesFor("ObjectAtlas");
@@ -885,25 +896,43 @@ void checkNestedApertures() {
   world->addBackground(2, 0, 0, 6, 1, {23, 67, 109});
   world->finishBuild(); world->pauseSimulation();
   auto hidden = app::drawWorld(*world, 1280, 720);
-  auto hasBackColour = [](WorldDrawList const& draws) {
+  // The Background's own tile, found by the UVs a quad sampled rather
+  // than by a colour the renderer used to pack from the Sector.
+  auto hasBackTile = [](WorldDrawList const& draws) {
+    auto const left = float(gBackgroundTile.x) / float(gSectorAtlasWidth);
+    auto const right = float(gBackgroundTile.x + gBackgroundTile.width) / float(gSectorAtlasWidth);
+    auto const top = float(gBackgroundTile.y) / float(gSectorAtlasHeight);
+    auto const bottom = float(gBackgroundTile.y + gBackgroundTile.height) / float(gSectorAtlasHeight);
     for (auto const& command : draws.commands())
       if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-          triangle && triangle->colour == packColour(23, 67, 109, 255)) return true;
+          triangle && triangle->texture == WorldDrawList::Texture::SectorAtlas)
+        for (auto uv : triangle->texcoords)
+          if (uv.x >= left && uv.x <= right && uv.y >= top && uv.y <= bottom) return true;
     return false;
   };
-  require(!hasBackColour(hidden), "Deeper Background must not leak through an opaque Room");
+  require(!hasBackTile(hidden), "Deeper Background must not leak through an opaque Room");
   world->addSectorWindow(0, 0, 1, 3, 1,
       {false, core::Window::State::Closed, core::Window::Style::Clear});
   world->addSectorWindow(1, 0, 2, 3, 1,
       {false, core::Window::State::Closed, core::Window::Style::Clear});
   world->finishBuild(); world->pauseSimulation();
   auto revealed = app::drawWorld(*world, 1280, 720);
-  require(hasBackColour(revealed), "Aligned clear Windows must reveal the deeper Background");
+  require(hasBackTile(revealed), "Aligned clear Windows must reveal the deeper Background");
   for (auto const& command : revealed.commands())
     if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-        triangle && triangle->colour == packColour(23, 67, 109, 255))
+        triangle && triangle->texture == WorldDrawList::Texture::SectorAtlas) {
+      auto const left = float(gBackgroundTile.x) / float(gSectorAtlasWidth);
+      auto const right = float(gBackgroundTile.x + gBackgroundTile.width) / float(gSectorAtlasWidth);
+      auto const top = float(gBackgroundTile.y) / float(gSectorAtlasHeight);
+      auto const bottom = float(gBackgroundTile.y + gBackgroundTile.height) / float(gSectorAtlasHeight);
+      auto const onBackground = std::any_of(std::begin(triangle->texcoords),
+          std::end(triangle->texcoords), [&](auto uv) {
+            return uv.x >= left && uv.x <= right && uv.y >= top && uv.y <= bottom;
+          });
+      if (!onBackground) continue;
       require(triangle->clip.maximum.x - triangle->clip.minimum.x < 3 * CORE_CELL_WIDTH_PIXELS,
               "Deeper Background must retain the intersection of both Window apertures");
+    }
   checkCanvas(revealed, 1280, 720);
 }
 }
@@ -948,7 +977,7 @@ void checkSectorTileScaling() {
   // screen pixel, and the top quarter of the tile never reaches the screen.
   float const probeWide = 2.0f * CORE_CELL_WIDTH_PIXELS * zoom;
   float const probeHigh = 0.75f * CORE_LEVEL_HEIGHT_PIXELS * zoom;
-  require(drawSectorTileSurface("corridor", &commands, {0, 0}, {probeWide, probeHigh}, pf::render::White, zoom),
+  require(drawSectorTileSurface("corridor", &commands, {0, 0}, {probeWide, probeHigh}, zoom),
       "Station corridor must render");
   require(textured(commands, WorldDrawList::Texture::SectorAtlas) == 4,
       "Two World cells must each render a tile at zoom 2 independent of source size");
@@ -967,7 +996,7 @@ void checkSectorTileScaling() {
       "Tile must fill 1x1 World units and crop the top of a partial-height cell");
   WorldDrawList missing({{0, 0}, {1000, 1000}});
   require(drawSectorTileSurface("room", &missing, {0, 0},
-      {CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS}, pf::render::White),
+      {CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS}),
       "Missing tile must emit fallback geometry");
   auto const& fallback = std::get<WorldDrawList::Triangle>(missing.commands().front());
   require(fallback.texture == WorldDrawList::Texture::None
@@ -978,7 +1007,7 @@ void checkSectorTileScaling() {
   setSectorTileset({}, kInstalled);
   WorldDrawList unavailable({{0, 0}, {1000, 1000}});
   require(drawSectorTileSurface("corridor", &unavailable, {0, 0},
-      {CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS}, pf::render::White),
+      {CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS}),
       "Unavailable ImageSet must emit fallback geometry");
   clearSectorTileset();
 }

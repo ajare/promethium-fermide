@@ -20,9 +20,9 @@ ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
 {
     auto root = YAML::LoadFile(path.string());
     int const version = root["version"].as<int>();
-    // Version 1 declares a region and a tintable flag per tile. Version 2
-    // adds the render offset and the drawn size, so a tile's visual extent
-    // is authored rather than inferred from whatever object draws it
+    // Version 1 declares a region per tile. Version 2 adds the render offset
+    // and the drawn size, so a tile's visual extent is authored rather than
+    // inferred from whatever object draws it
     // (#1014).
     if (version != 1 && version != 2)
         throw std::runtime_error("Unsupported object tileset version");
@@ -35,7 +35,7 @@ ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
     // A version 2 object sprite may declare a variant family, and the shared
     // grid derives it: `variants: N` yields `-V1` .. `-VN` in the base's own
     // column one row below the last, each inheriting the base's content
-    // rectangle, render offset, drawn size and tintable flag. That is the
+    // rectangle, render offset and drawn size. That is the
     // sector format's promise, kept here by the same code rather than by a
     // second copy that could drift from it (#1053).
     //
@@ -85,8 +85,6 @@ ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
             "window-tinted", "booth-window-open", "booth-window-closed", "agent", "marker", "platform-lift", "shuttle-car-left",
             "shuttle-car-middle", "shuttle-car-right", "shuttle-car-connector", "lift-car"})
             if (!result.sprites.count(name)) throw std::runtime_error("Missing object sprite: " + std::string(name));
-        if (!result.sprites.at("agent").tintable)
-            throw std::runtime_error("Agent sprite must support tinting");
     }
     return result;
 }
@@ -107,19 +105,16 @@ std::optional<Vec2> agentSpriteSize(char const* name)
         return std::nullopt;
     return Vec2{float(found->second.region.width), float(found->second.region.height)};
 }
-bool drawAgentSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b, PackedColourValue tint)
+bool drawAgentSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b)
 {
     if (!agentSpriteSize(name)) return false;
     auto const& sprite = agents.sprites.at(name);
     auto const& r = sprite.region;
     Vec2 uv0{(r.x + .5f) / agents.width, (r.y + .5f) / agents.height};
     Vec2 uv1{(r.x + r.width - .5f) / agents.width, (r.y + r.height - .5f) / agents.height};
-    // Whether the resolved Agent colour reaches the sheet at all is the tile's
-    // authored fact, exactly as it is for an Object sprite. The Agent's colour,
-    // its Colour tags and the selection gold are still resolved by the caller;
-    // `tintable` says whether this artwork takes a tint (#1018).
-    list->AddImage(WorldDrawList::Texture::AgentAtlas, a, b, uv0, uv1,
-        sprite.tintable ? tint : White);
+    // The Agent's own pixels are the picture. Nothing is multiplied into
+    // the sheet on the way to the screen.
+    list->AddImage(WorldDrawList::Texture::AgentAtlas, a, b, uv0, uv1, White);
     return true;
 }
 void setFurnitureTileset(ObjectTileset tileset, TextureId texture)
@@ -160,7 +155,7 @@ std::optional<TileArtwork> objectTileArtwork(std::string const& name)
     return sprite->second;
 }
 bool drawObjectSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b,
-    PackedColourValue tint, Vec2 sourceMin, Vec2 sourceMax)
+    Vec2 sourceMin, Vec2 sourceMax)
 {
     auto const found = active.sprites.find(name);
     if (!textureId || found == active.sprites.end()) return false;
@@ -174,7 +169,7 @@ bool drawObjectSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b,
             (r.y + 0.5f + fraction.y * (r.height - 1)) / active.height};
     };
     list->AddImage(WorldDrawList::Texture::ObjectAtlas, minimum, maximum,
-        uv(sourceMin), uv(sourceMax), sprite.tintable ? tint : White);
+        uv(sourceMin), uv(sourceMax), White);
     return true;
 }
 

@@ -63,8 +63,6 @@ namespace core
 		// the write and its side effects applied, and the World dirtied.
 		// Every refusal changes nothing.
 
-		bool setColour(AgentId agent, std::optional<AgentColour> value,
-			std::string* diagnostic = nullptr);
 		bool setEscalatorWalkingChance(AgentId agent, std::optional<float> value,
 			std::string* diagnostic = nullptr);
 		bool setWalkSpeedModifier(AgentId agent, std::optional<float> value,

@@ -70,7 +70,6 @@ def tileset_text(clause: str | None) -> str:
             f"    content: [0, 0, {TILE_WIDTH}, {TILE_HEIGHT}]",
             "    offset: [0.0, 0.0]",
             "    drawn_size: [1.0, 1.0]",
-            "    tintable: true",
         ]
     if clause is not None:
         lines.append(clause.rstrip("\n"))
@@ -84,7 +83,6 @@ POPULATED = "\n".join([
     f"    content: [0, 0, {TILE_WIDTH}, {TILE_HEIGHT}]",
     "    offset: [0.0, 0.0]",
     "    drawn_size: [1.0, 1.0]",
-    "    tintable: true",
 ])
 
 

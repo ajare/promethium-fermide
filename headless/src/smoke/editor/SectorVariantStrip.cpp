@@ -114,7 +114,7 @@ namespace
 		std::ostringstream yaml;
 		yaml << "version: 2\n"
 			<< "image: invented.png\n"
-			<< "size: [1280, " << ((variants + 1) * 320) << "]\n"
+			<< "size: [1536, " << ((variants + 1) * 320) << "]\n"
 			<< "tile_size: [128, 320]\n"
 			<< "sprites:\n";
 		int column = 0;
@@ -125,8 +125,18 @@ namespace
 				<< "    variants: " << (name == kind ? variants : 0) << "\n"
 				<< "    content: [0, 0, 128, 320]\n"
 				<< "    offset: [0.0, 0.0]\n"
-				<< "    drawn_size: [1.0, 1.0]\n"
-				<< "    tintable: true\n";
+				<< "    drawn_size: [1.0, 1.0]\n";
+		}
+		// The two flat surfaces ride along so the set conforms. They
+		// declare no family and own no paint tool: a Background or a
+		// Facade has one picture and nothing to pick.
+		for (auto const& name : { "background", "facade" })
+		{
+			yaml << "  " << name << ":\n"
+				<< "    cell: [" << column++ << ", 0]\n"
+				<< "    content: [0, 0, 128, 320]\n"
+				<< "    offset: [0.0, 0.0]\n"
+				<< "    drawn_size: [1.0, 1.0]\n";
 		}
 		auto const path = context.temporaryRoot() / (tag + ".tileset.yaml");
 		std::ofstream out(path, std::ios::binary | std::ios::trunc);

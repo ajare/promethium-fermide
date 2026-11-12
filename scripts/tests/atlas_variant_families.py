@@ -91,8 +91,7 @@ def overlay_sheet(name: str, base_variants=None) -> dict:
     fixture = sheet(4, {"door": base(column=0, row=0, variants=base_variants)})
     fixture["overlays"] = {
         name: {"cell": [1, 0], "content": [4, 8, 100, 200],
-               "offset": [0.0, -0.075], "drawn_size": [1.0, 0.075],
-               "tintable": True},
+               "offset": [0.0, -0.075], "drawn_size": [1.0, 0.075]},
     }
     return fixture
 
@@ -104,7 +103,6 @@ def base(column: int = 1, row: int = 0, variants=None) -> dict:
         "content": [4, 8, 100, 200],
         "offset": [0.0, -0.075],
         "drawn_size": [1.0, 0.075],
-        "tintable": True,
     }
     if variants is not None:
         sprite["variants"] = variants
@@ -120,8 +118,8 @@ for spec in (OBJECT, AGENT, FURNITURE, SECTOR):
           f"{spec.atlas} does not generate variant families")
 
 # A declared family expands downward through the base's own column, and each
-# step carries the base's content rectangle, render offset, drawn size and
-# tintable flag untouched. The count is the only thing the author stated.
+# step carries the base's content rectangle, render offset and drawn size
+# untouched. The count is the only thing the author stated.
 fixture = sheet(4, {"door": base(column=2, row=0, variants=3)})
 derived = atlas_new.derive_sprites(OBJECT, fixture)
 check(set(derived) == {"door", "door-V1", "door-V2", "door-V3"},
@@ -131,7 +129,7 @@ for step in (1, 2, 3):
     variant = derived[f"door-V{step}"]
     check(variant["cell"] == [2, step],
           f"door-V{step} left its base's column or its row: {variant['cell']}")
-    for field in ("content", "offset", "drawn_size", "tintable"):
+    for field in ("content", "offset", "drawn_size"):
         check(variant[field] == fixture["sprites"]["door"][field],
               f"door-V{step} did not inherit its base's `{field}`")
     # The key belongs on the base that stated the family. A derived tile

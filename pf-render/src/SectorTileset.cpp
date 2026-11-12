@@ -12,12 +12,13 @@ namespace {
 SectorTileset active;
 TextureId textureId{};
 
-// The ten surface-bearing Sector types. Each fills its own full-cell tile;
-// Background and Facade are authored flat colour by domain definition and
-// so are not in the set (#1017).
-constexpr std::array<char const*, 10> kSectorSurfaces{ "room", "corridor",
+// The twelve surface-bearing Sector types. Each fills its own full-cell
+// tile. Background and Facade are in the set on the same terms as every
+// other type: their surface is artwork the sheet carries, not a colour the
+// renderer mixes, so they ask for a tile like any wall does.
+constexpr std::array<char const*, 12> kSectorSurfaces{ "room", "corridor",
     "ladder", "lift", "shuttle", "stairwell", "staircase", "airlock",
-    "chamber", "dumbwaiter" };
+    "chamber", "dumbwaiter", "background", "facade" };
 
 // A version 2 sector tileset authors the same grid the object atlases use:
 // a cell in the artist's own layout, a content rectangle inside it, and
@@ -37,7 +38,7 @@ constexpr std::array<char const*, 10> kSectorSurfaces{ "room", "corridor",
 // A variant family is derived by the shared grid rather than here. Each base
 // sprite's `variants: N` yields `-V1` .. `-VN` in the base's own column,
 // one row below the last, each inheriting the base's content rectangle,
-// render offset, drawn size and tintable flag. The author states the count
+// render offset and drawn size. The author states the count
 // and the grid does the rest, so a variant's name and its position cannot
 // disagree with the family they belong to - and the object loader derives
 // the identical rule from the identical code rather than restating it
@@ -175,14 +176,16 @@ SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
 // artwork texel the whole tile would have had, which is what keeps a crop a
 // crop and not a squash.
 void image(WorldDrawList* list, SectorTileRegion const& r, Vec2 a, Vec2 b,
-    float u0, float u1, float v0, float v1, PackedColourValue tint)
+    float u0, float u1, float v0, float v1)
 {
     // Half-texel inset avoids sampling adjacent draft artwork with linear filtering.
     Vec2 uv0{(r.x + 0.5f + (r.width - 1) * u0) / active.width,
         (r.y + 0.5f + (r.height - 1) * v0) / active.height};
     Vec2 uv1{(r.x + 0.5f + (r.width - 1) * u1) / active.width,
         (r.y + 0.5f + (r.height - 1) * v1) / active.height};
-    list->AddImage(WorldDrawList::Texture::SectorAtlas, a, b, uv0, uv1, tint);
+    // White on every draw: the tile's own pixels are the picture, and no
+    // colour is multiplied into it on the way to the screen.
+    list->AddImage(WorldDrawList::Texture::SectorAtlas, a, b, uv0, uv1, White);
 }
 
 // How many whole World cells a span covers, counted from where it starts.
@@ -206,7 +209,7 @@ int cellsCovered(float span, float cell)
 // still fills its whole area with magenta, one cell at a time, which is
 // what it looked like when the whole area was filled at once.
 void drawSurfaceCell(WorldDrawList* list, std::string const& kind, Vec2 a,
-    Vec2 b, float u0, float u1, float v0, float v1, PackedColourValue tint)
+    Vec2 b, float u0, float u1, float v0, float v1)
 {
     // A resolved name is looked for among the surfaces first, then among
     // the overlays. The resolver owns which name it answers with and the
@@ -232,7 +235,7 @@ void drawSurfaceCell(WorldDrawList* list, std::string const& kind, Vec2 a,
         list->AddRectFilled(a, b, packColour(255, 0, 255, 255));
         return;
     }
-    image(list, *region, a, b, u0, u1, v0, v1, tint);
+    image(list, *region, a, b, u0, u1, v0, v1);
 }
 }
 
@@ -281,10 +284,10 @@ SectorTileset SectorTileset::load(std::filesystem::path const& path)
     read("surfaces", result.surfaces);
     read("boundaries", result.boundaries);
     for (auto const& [name, region] : result.surfaces)
-        result.tiles.emplace(name, TileArtwork{ region, false, { 0.0f, 0.0f }, { 1.0f, 1.0f } });
+        result.tiles.emplace(name, TileArtwork{ region, { 0.0f, 0.0f }, { 1.0f, 1.0f } });
     for (auto const& [name, region] : result.boundaries)
         result.tiles.emplace("boundary-" + name,
-            TileArtwork{ region, false, { 0.0f, 0.0f }, { 1.0f, 1.0f } });
+            TileArtwork{ region, { 0.0f, 0.0f }, { 1.0f, 1.0f } });
     for (auto name : {"corridor", "room", "ladder", "lift", "shuttle", "stairwell", "staircase"})
         if (!result.surfaces.count(name)) throw std::runtime_error("Missing sector surface: " + std::string(name));
     for (auto name : {"floor", "ceiling", "left", "right"})
@@ -351,7 +354,7 @@ bool sectorTileSurfaceIsInView(WorldDrawList const* list, Vec2 minimum,
 }
 
 bool drawSectorTileSurfacePerCell(WorldDrawList* list, Vec2 minimum,
-    Vec2 maximum, PackedColourValue tint, float zoom,
+    Vec2 maximum, float zoom,
     SectorSurfaceTileResolver const& resolveTile)
 {
     if (!textureId) return false;
@@ -430,25 +433,25 @@ bool drawSectorTileSurfacePerCell(WorldDrawList* list, Vec2 minimum,
             if (tile.empty()) continue;
             drawSurfaceCell(list, tile,
                 { x, rowTop }, { colRight, rowBottom }, 0.0f,
-                (colRight - x) / cellWidth, v0, 1.0f, tint);
+                (colRight - x) / cellWidth, v0, 1.0f);
         }
     }
     return true;
 }
 
 bool drawSectorTileSurface(std::string const& kind, WorldDrawList* list,
-    Vec2 minimum, Vec2 maximum, PackedColourValue tint, float zoom)
+    Vec2 minimum, Vec2 maximum, float zoom)
 {
     // The per-cell loop with one name answered for every cell (#1039). A
     // Sector with no per-cell artwork resolves to exactly this, and it is
     // what a caller asks for when it has one tile and no wish to say which
     // cell wears it.
-    return drawSectorTileSurfacePerCell(list, minimum, maximum, tint, zoom,
+    return drawSectorTileSurfacePerCell(list, minimum, maximum, zoom,
         [&](std::uint32_t, std::uint32_t) { return kind; });
 }
 
 bool drawSectorTilePreview(std::string const& kind, WorldDrawList* list,
-    Vec2 minimum, Vec2 maximum, PackedColourValue tint)
+    Vec2 minimum, Vec2 maximum)
 {
     // No atlas, or no tile under that name: nothing to frame, and the caller
     // is told so it can leave the swatch off rather than show an empty one.
@@ -472,7 +475,7 @@ bool drawSectorTilePreview(std::string const& kind, WorldDrawList* list,
     // World-space facts about how a Sector wears the tile and say nothing
     // about how a swatch frames it, so they are not consulted here.
     image(list, found->second, { left, top }, { right, bottom }, 0.0f, 1.0f,
-        0.0f, 1.0f, tint);
+        0.0f, 1.0f);
     return true;
 }
 
@@ -481,6 +484,6 @@ bool drawSectorTileBoundary(char const* kind, WorldDrawList* list, Vec2 a, Vec2 
     if (!textureId) return false;
     auto const found = active.boundaries.find(kind);
     if (found == active.boundaries.end() || active.width <= 0 || active.height <= 0) return false;
-    image(list, found->second, a, b, 0.0f, 1.0f, 0.0f, 1.0f, White);
+    image(list, found->second, a, b, 0.0f, 1.0f, 0.0f, 1.0f);
     return true;
 }

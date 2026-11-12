@@ -35,6 +35,7 @@
 #include "imgui/imgui.h"
 
 #include "Render.h"
+#include "SectorTileset.h"
 #include "UISettings.h"
 #include "core/World.h"
 #include "core/Defines.h"
@@ -144,6 +145,76 @@ namespace
 				result = triangle->colour;
 		}
 		return result;
+	}
+
+	// The topmost triangle painted over a point, respecting nested scissor
+	// rectangles. Nothing these checks read is a flat colour any more, so
+	// the answer is the triangle itself.
+	WorldDrawList::Triangle const* topAt(WorldDrawList const& draws, Vec2 point)
+	{
+		WorldDrawList::Triangle const* result = nullptr;
+		for (auto const& command : draws.commands())
+		{
+			auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+			if (!triangle) continue;
+			auto const& clip = triangle->clip;
+			if (point.x < clip.minimum.x || point.x >= clip.maximum.x
+				|| point.y < clip.minimum.y || point.y >= clip.maximum.y) continue;
+			auto cross = [point](Vec2 a, Vec2 b)
+				{ return (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x); };
+			auto const a = cross(triangle->positions[0], triangle->positions[1]);
+			auto const b = cross(triangle->positions[1], triangle->positions[2]);
+			auto const c = cross(triangle->positions[2], triangle->positions[0]);
+			if ((a >= 0 && b >= 0 && c >= 0) || (a <= 0 && b <= 0 && c <= 0))
+				result = triangle;
+		}
+		return result;
+	}
+
+	// A sheet with one full-cell tile per surface these nested-aperture
+	// scenes use, each in its own column, so a quad's tile is readable
+	// back out of the UVs it sampled. Which tile the aperture drew says
+	// which Layer it looked through to.
+	SectorTileset installNestedSurfaceAtlas()
+	{
+		SectorTileset atlas;
+		atlas.family = SectorTilesetFamily::New;
+		int column = 0;
+		for (auto const* name : { "room", "background", "facade" })
+			atlas.surfaces.emplace(name, SectorTileRegion{
+				column++ * CORE_CELL_WIDTH_PIXELS, 0,
+				CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS });
+		atlas.width = column * CORE_CELL_WIDTH_PIXELS;
+		atlas.height = CORE_LEVEL_HEIGHT_PIXELS;
+		setSectorTileset(atlas, static_cast<TextureId>(1));
+		require(sectorTilesetIsNewFamily(),
+			"The synthetic nested-aperture atlas is not the New family");
+		return atlas;
+	}
+
+	std::string tileOf(WorldDrawList::Triangle const* triangle,
+		SectorTileset const& atlas)
+	{
+		if (!triangle || triangle->texture != WorldDrawList::Texture::SectorAtlas)
+			return {};
+		float u0{ 1e9f }, u1{ -1e9f }, v0{ 1e9f }, v1{ -1e9f };
+		for (auto const& uv : triangle->texcoords)
+		{
+			u0 = std::min(u0, uv.x); u1 = std::max(u1, uv.x);
+			v0 = std::min(v0, uv.y); v1 = std::max(v1, uv.y);
+		}
+		auto const cu = (u0 + u1) * 0.5f;
+		auto const cv = (v0 + v1) * 0.5f;
+		for (auto const& [name, region] : atlas.surfaces)
+		{
+			auto const left = float(region.x) / float(atlas.width);
+			auto const right = float(region.x + region.width) / float(atlas.width);
+			auto const top = float(region.y) / float(atlas.height);
+			auto const bottom = float(region.y + region.height) / float(atlas.height);
+			if (cu >= left && cu < right && cv >= top && cv < bottom)
+				return name;
+		}
+		return {};
 	}
 
 	// How many vertices of the given colour fall inside the rectangle.
@@ -311,6 +382,7 @@ void nestedWindowsKeepTheirScissors()
 	auto middle = world->addSectorWindow(1, 0, 2, 3, 1,
 		{ false, core::Window::State::Closed, core::Window::Style::Clear });
 	world->finishBuild();
+	auto const atlas = installNestedSurfaceAtlas();
 	setViewport(0, 0, 6 * CORE_CELL_WIDTH_PIXELS, 2 * CORE_LEVEL_HEIGHT_PIXELS);
 	gUISettings.visibleLayer = 0;
 	gUISettings.renderGrid = false;
@@ -327,12 +399,31 @@ void nestedWindowsKeepTheirScissors()
 		return colourAt(draws, { x * CORE_CELL_WIDTH_PIXELS,
 			gUISettings.worldViewportHeight - y * CORE_LEVEL_HEIGHT_PIXELS });
 	};
-	require(sample((middleMin.x + frontMax.x) * 0.5f) == PackedColourValue(ImColor(23, 67, 109)),
+	// Through both aligned Windows the eye lands on the third Layer's own
+	// tile; through the front Window alone it lands on the middle Room's;
+	// past the front Window's edge it never leaves the front Room.
+	require(tileOf(topAt(draws, { (middleMin.x + frontMax.x) * 0.5f * CORE_CELL_WIDTH_PIXELS,
+			gUISettings.worldViewportHeight
+				- (frontMin.y + frontMax.y) * 0.5f * CORE_LEVEL_HEIGHT_PIXELS }), atlas)
+			== "background",
 		"Aligned Windows did not reveal the third Layer");
-	require(sample((frontMin.x + middleMin.x) * 0.5f) == PackedColourValue(ImColor(224, 224, 255)),
+
+	auto const throughFront = topAt(draws, { (frontMin.x + middleMin.x) * 0.5f * CORE_CELL_WIDTH_PIXELS,
+		gUISettings.worldViewportHeight
+			- (frontMin.y + frontMax.y) * 0.5f * CORE_LEVEL_HEIGHT_PIXELS });
+	require(tileOf(throughFront, atlas) == "room",
 		"Deeper Window escaped its own scissor into the middle Room");
-	require(sample((frontMax.x + middleMax.x) * 0.5f) == kForeLocationFill,
+	auto const pastFront = topAt(draws, { (frontMax.x + middleMax.x) * 0.5f * CORE_CELL_WIDTH_PIXELS,
+		gUISettings.worldViewportHeight
+			- (frontMin.y + frontMax.y) * 0.5f * CORE_LEVEL_HEIGHT_PIXELS });
+	require(tileOf(pastFront, atlas) == "room",
 		"Deeper Window escaped the front Window's scissor");
+	// Both are Rooms, so the tile cannot tell them apart - the scissor can.
+	// What the front Window reveals is clipped to the Window; the front
+	// Room's own surface is not.
+	require(throughFront->clip.maximum.x - throughFront->clip.minimum.x
+			< pastFront->clip.maximum.x - pastFront->clip.minimum.x,
+		"the front Window drew no scissor narrower than the front Room's own surface");
 }
 
 void nestedOpenDoorsRevealTheBackLayer()
@@ -346,6 +437,7 @@ void nestedOpenDoorsRevealTheBackLayer()
 	auto const front = world->addSectorDoor(0, 0, 2);
 	auto const middle = world->addSectorDoor(1, 0, 2);
 	world->finishBuild();
+	auto const atlas = installNestedSurfaceAtlas();
 	world->pauseSimulation();
 
 	for (auto const& created : { front, middle })
@@ -364,10 +456,10 @@ void nestedOpenDoorsRevealTheBackLayer()
 		{ gUISettings.worldViewportWidth, gUISettings.worldViewportHeight } });
 	renderWorld(world, &draws);
 
-	require(colourAt(draws, {
+	require(tileOf(topAt(draws, {
 		2.5f * CORE_CELL_WIDTH_PIXELS,
-		gUISettings.worldViewportHeight - 0.5f * CORE_LEVEL_HEIGHT_PIXELS })
-		== PackedColourValue(ImColor(23, 67, 109)),
+		gUISettings.worldViewportHeight - 0.5f * CORE_LEVEL_HEIGHT_PIXELS }), atlas)
+		== "facade",
 		"Aligned open Doors did not reveal the back Layer");
 }
 

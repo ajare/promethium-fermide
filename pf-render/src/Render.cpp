@@ -85,9 +85,6 @@ using pf::render::MarkerIconGlyph;
 
 PackedColourValue ForeLocationColour = packColour(192, 192, 255);
 PackedColourValue BackLocationColour = packColour(224, 224, 255);
-// The value lives in Render.h as LightsOffTint so the headless checks can read
-// the same colour the viewport paints with.
-PackedColourValue LightsOffColour = packColour(LightsOffTint.r, LightsOffTint.g, LightsOffTint.b);
 PackedColourValue LadderColour = packColour(128, 128, 192);
 PackedColourValue LiftColour = packColour(128, 128, 192);
 PackedColourValue ShuttleColour = packColour(128, 128, 192);
@@ -102,6 +99,12 @@ PackedColourValue SelectedColour = packColour(255, 255, 0);
 
 void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRenderStyle style, bool renderEdges, PackedColourValue colour, WorldDrawList* drawList);
 void renderSectorDepthContent(shared_ptr<const core::Sector> sector, WorldDrawList* drawList);
+
+// Laid over the cells one Door stands in, after its leaves. Defined with the
+// doorframe vocabulary further down this file and declared here because the
+// threshold pass is where the frame goes down (#1073).
+void renderDoorframe(std::shared_ptr<const core::Door> const& door,
+	WorldDrawList* drawList);
 
 void renderTransitThroughApertures(shared_ptr<const core::Sector> const& transit, uint32_t behindLayer,
 	std::vector<TransitAperture> const& apertures, WorldDrawList* drawList);
@@ -514,9 +517,8 @@ static_assert(!std::is_trivially_default_constructible_v<ScreenRect>,
 // a rect is normalised on the way in and projected on the way out.
 //
 // Defaulted to the zero rect for the same reason as ScreenRect, and for the
-// same consequence: `DoorLeafPlan::reveal` is what the back Sector clips
-// to, and a reveal no opening style arm wrote must clip nothing rather than
-// clip garbage (#1068).
+// same consequence: a rect no opening style arm wrote reads as empty rather
+// than as indeterminate memory, and an empty rect draws nothing (#1068).
 struct WorldRect
 {
 	float x0{0.0f};
@@ -556,10 +558,9 @@ struct WorldRect
 	}
 };
 
-// The same compile-time guard ScreenRect carries. `DoorLeafPlan::reveal` is
-// a WorldRect, so the opening style that never wrote it now hands the draw
-// an empty rect - which clips nothing - instead of four indeterminate
-// floats (#1068).
+// The same compile-time guard ScreenRect carries: the rects a plan holds are
+// WorldRects, so the style that never wrote one hands the draw an empty rect
+// - which draws nothing - instead of four indeterminate floats (#1068).
 static_assert(!std::is_trivially_default_constructible_v<WorldRect>,
 	"WorldRect members must carry a default initialiser: an unset rect has to "
 	"read as empty, not as indeterminate memory");
@@ -600,14 +601,19 @@ struct DoorLeaf
 };
 
 // What a Door's opening style contributes to the one draw: the leaves to
-// draw, the doorway they clip to, and the region of it they have vacated.
-// Everything else - the clip itself, the back Sector reveal, the wireframe
+// draw and the doorway they clip to. Everything else - the clip itself,
+// the back Sector drawn through it, the frame laid over it, the wireframe
 // pass - is shared (#1056).
+//
+// There is no vacated region here. The leaves used to go down first and the
+// back Sector was then clipped to whatever the leaves had left, which made
+// the reveal a fact the style had to state. The Sector behind is now drawn
+// across the whole aperture before the leaves, so the leaves cover what they
+// cover and no style has to say how much of the doorway that is (#1073).
 struct DoorLeafPlan
 {
 	WorldRect aperture;
 	std::vector<DoorLeaf> leaves;
-	WorldRect reveal;
 	// OpenApart draws each leaf's inner edge as a visible seam; the other
 	// styles have no inner edge to draw.
 	bool seamPerLeaf = false;
@@ -670,11 +676,6 @@ DoorLeafPlan planDoorLeaves(shared_ptr<const core::Door> const& door)
 		auto const travel = openPct * apertureHeight;
 		for (uint32_t i = 0; i < cellsWide; ++i)
 			cellLeaf(i, {0.0f, travel});
-
-		// What the leaf has left behind is the strip between the floor
-		// and the leaf's new bottom edge.
-		plan.reveal = WorldRect{apLeft, cellY0, apLeft + apertureWidth,
-			cellY0 + travel};
 		break;
 	}
 
@@ -714,13 +715,6 @@ DoorLeafPlan planDoorLeaves(shared_ptr<const core::Door> const& door)
 
 		for (uint32_t i = 0; i < cellsWide; ++i)
 			cellLeaf(i, {sign * travel, 0.0f});
-
-		if (sign < 0.0f)
-			plan.reveal = WorldRect{cellX0 + cellsWideF - travel, apBottom,
-				apLeft + apertureWidth, apBottom + apertureHeight};
-		else
-			plan.reveal = WorldRect{apLeft, apBottom, cellX0 + travel,
-				apBottom + apertureHeight};
 		break;
 	}
 
@@ -757,20 +751,17 @@ DoorLeafPlan planDoorLeaves(shared_ptr<const core::Door> const& door)
 					{travel, 0.0f}, true);
 			}
 		}
-
-		plan.reveal = WorldRect{centre - travel, apBottom, centre + travel,
-			apBottom + apertureHeight};
 		break;
 	}
 
 	default:
 		// A style with no arm here used to reach the draw with a `reveal`
 		// holding whatever the stack had in it, and clip the back Sector to
-		// that. The rect defaults to empty now, so the omission cannot paint
+		// that. The rects default to empty now, so the omission cannot paint
 		// garbage; this is the loud half, so a missing arm says so at the
-		// frame it lands on instead of drawing a Door with no leaves and no
-		// reveal. The style is reported by value, because this arm is only
-		// ever reached by a style this file does not name (#1068).
+		// frame it lands on instead of drawing a Door with no leaves. The
+		// style is reported by value, because this arm is only ever reached
+		// by a style this file does not name (#1068).
 		throw std::logic_error("Door opening style #"
 			+ std::to_string(static_cast<int>(door->getOpenStyle()))
 			+ " has no leaf plan in planDoorLeaves");
@@ -823,8 +814,52 @@ void renderDoorLeaves(shared_ptr<const core::Door> door, uint32_t layer,
 
 	if (style == LayerRenderStyle::Solid)
 	{
+		// The three things a Door puts over its wall, in the order they go
+		// down. The wall's own tile is already there - the Sector surface
+		// pass drew it across this Door's cells as it did across every other
+		// cell of that wall - and what the Door adds is the space behind,
+		// the leaves over it, and the frame over both (#1073).
 		drawList->AddDrawCmd();
 
+		// 1. The space behind, clipped to the doorway.
+		//
+		// Clipped to the whole aperture rather than to the strip the leaves
+		// have vacated, because the leaves are drawn after it and cover what
+		// they cover. That is the whole of the reason the reveal stops being
+		// a thing this draw computes: a closed Door paints its leaves over
+		// the back Sector, an opening Door slides them off it, and the
+		// doorway is the one clip both want. The aperture is also the clip
+		// the recursion needs - a Door in the Sector behind is seen through
+		// this one and carries its own aperture down the stack - and a
+		// nested threshold clipped to its parent's vacated strip would go
+		// missing wherever the parent's leaves happened to still lie.
+		//
+		// A Door is authored on the front Layer of its pair, so index 1 is
+		// the Sector on the Layer directly behind.
+		//
+		// Skipped while the Door is closed, which is not a change of order
+		// but a cull inside it: a closed Door's leaves stand across the
+		// whole doorway, so every pixel of that back-Sector draw is painted
+		// over before it reaches the screen. The old draw got the same saving
+		// for free by clipping the back Sector to the vacated strip, which
+		// was empty when nothing was vacated; the new order does not compute
+		// a strip, so the saving has to be asked for. It is worth asking:
+		// a closed Door is the common case, and without this every one of
+		// them would render the Sector behind it on every frame to put it
+		// under a leaf.
+		drawList->PushClipRect({aperture.x0, aperture.y0},
+			{aperture.x1, aperture.y1}, true);
+		auto const backSector = door->isClosed()
+			? nullptr : door->getBackSector();
+		if (backSector)
+		{
+			renderSector(backSector, core::layerBehind(layer),
+				LayerRenderStyle::Aperture, false, BackLocationColour, drawList);
+		}
+		drawList->PopClipRect();
+		drawList->AddDrawCmd();
+
+		// 2. The leaves, over the space behind and under the same clip.
 		// The clip is the doorway, so no leaf can paint over the wall its
 		// collision stops in, however far it has travelled.
 		drawList->PushClipRect({aperture.x0, aperture.y0},
@@ -859,7 +894,7 @@ void renderDoorLeaves(shared_ptr<const core::Door> door, uint32_t layer,
 				? (leaf.rightLeaf ? "door-tall-R0" : "door-tall-L0")
 				: (leaf.rightLeaf ? "door-R0" : "door-L0");
 			if (!drawObjectSprite(tile, drawList, {r.x0, r.y0}, {r.x1, r.y1},
-				White, Vec2{leaf.uv0.x, leaf.uv0.y},
+				Vec2{leaf.uv0.x, leaf.uv0.y},
 				Vec2{leaf.uv1.x, leaf.uv1.y}))
 				drawList->AddRectFilled({r.x0, r.y0}, {r.x1, r.y1}, doorColour);
 
@@ -878,33 +913,13 @@ void renderDoorLeaves(shared_ptr<const core::Door> door, uint32_t layer,
 		drawList->PopClipRect();
 		drawList->AddDrawCmd();
 
-		// The back Sector shows only through the region the leaves have
-		// vacated, and only inside the doorway. The emptiness test is on
-		// the World rect, before the projection, because projected()
-		// normalises: a reveal that has overshot its jamb is inverted in
-		// World units, and normalising it would turn "nothing vacated"
-		// into a strip of back Sector painted over the jamb, outside the
-		// doorway and over the frame. Testing the clipped World rect is
-		// what makes "bounded by the aperture" mean what it says.
-		auto const vacated = plan.reveal.clippedTo(plan.aperture);
-		if (!vacated.empty())
-		{
-			auto const reveal = vacated.projected();
-			drawList->PushClipRect({reveal.x0, reveal.y0},
-				{reveal.x1, reveal.y1}, true);
-
-			// A Door is authored on the front Layer of its pair, so index
-			// 1 is the Sector on the Layer directly behind.
-			auto backSector = door->getBackSector();
-			if (backSector)
-			{
-				renderSector(backSector, core::layerBehind(layer),
-					LayerRenderStyle::Aperture, false, BackLocationColour, drawList);
-			}
-
-			drawList->PopClipRect();
-		}
-
+		// 3. The frame, over the wall and the leaf edges alike. Last, so
+		// its moulding is what the eye reads as the edge of the opening
+		// whatever the leaves have done underneath it, and so a frame whose
+		// hole does not match its opening costs a band of wall inside the
+		// moulding rather than the see-through hole it was when the frame
+		// stood in for the wall (#1062, retired by #1073).
+		renderDoorframe(door, drawList);
 		drawList->AddDrawCmd();
 	}
 	else if (style == LayerRenderStyle::Wireframe)
@@ -944,7 +959,11 @@ static void renderBrokenWarning(Device const& device, WorldDrawList* drawList, b
 		Vec2(anchor.x + 1.0f, anchor.y - 4.0f), ink);
 }
 
-void renderDoor(shared_ptr<const core::Door> door, uint32_t layer, LayerRenderStyle style, bool selected, WorldDrawList* drawList)
+// One draw serves every opening. The leaves, the frame and the selection
+// outline are each drawn as their own artwork or their own primitive;
+// nothing in the pass multiplies a colour into a tile.
+void renderDoor(shared_ptr<const core::Door> door, uint32_t layer,
+	LayerRenderStyle style, bool selected, WorldDrawList* drawList)
 {
 	if (style == LayerRenderStyle::Hidden)
 	{
@@ -980,7 +999,7 @@ namespace
 // object is. Returns false when the tile is not installed or declares no
 // drawn size, so the caller keeps its primitive fallback (#1014).
 bool drawOffsetTile(char const* name, core::Vector2 worldAnchor,
-	PackedColourValue tint, WorldDrawList* drawList)
+	WorldDrawList* drawList)
 {
 	auto const artwork = objectTileArtwork(name);
 	if (!artwork || artwork->drawnSize.x <= 0.0f || artwork->drawnSize.y <= 0.0f)
@@ -992,7 +1011,7 @@ bool drawOffsetTile(char const* name, core::Vector2 worldAnchor,
 	transformPosition(to);
 	return drawObjectSprite(name, drawList,
 		{ min(from.x, to.x), min(from.y, to.y) },
-		{ max(from.x, to.x), max(from.y, to.y) }, tint);
+		{ max(from.x, to.x), max(from.y, to.y) });
 }
 
 // Draws the part of a tile's artwork a leaf has not yet retracted into its
@@ -1006,7 +1025,7 @@ bool drawOffsetTile(char const* name, core::Vector2 worldAnchor,
 // Returns false when the tile is not installed, so the caller keeps its
 // primitive fill.
 bool drawRetractedTile(char const* name, core::Vector2 fullMin,
-	core::Vector2 fullMax, float progress, PackedColourValue tint,
+	core::Vector2 fullMax, float progress,
 	WorldDrawList* drawList)
 {
 	if (!objectSpriteSize(name)) return false;
@@ -1017,7 +1036,7 @@ bool drawRetractedTile(char const* name, core::Vector2 fullMin,
 	transformPosition(to);
 	return drawObjectSprite(name, drawList,
 		{ min(from.x, to.x), min(from.y, to.y) },
-		{ max(from.x, to.x), max(from.y, to.y) }, tint,
+		{ max(from.x, to.x), max(from.y, to.y) },
 		{ 0.0f, fraction }, { 1.0f, 1.0f });
 }
 
@@ -1033,7 +1052,7 @@ bool drawRetractedTile(char const* name, core::Vector2 fullMin,
 // still down: the visible height is the declared extent less the live open
 // state, which is why a door half open shows exactly half open.
 bool drawBulkheadDoorSlab(shared_ptr<const core::BulkheadDoor> const& door,
-	PackedColourValue tint, WorldDrawList* drawList)
+	WorldDrawList* drawList)
 {
 	auto const artwork = objectTileArtwork("bulkhead-door");
 	if (!artwork || artwork->drawnSize.x <= 0.0f || artwork->drawnSize.y <= 0.0f)
@@ -1045,7 +1064,7 @@ bool drawBulkheadDoorSlab(shared_ptr<const core::BulkheadDoor> const& door,
 	core::Vector2 const extentMax{ extentMin.x + artwork->drawnSize.x,
 		extentMin.y + artwork->drawnSize.y };
 	return drawRetractedTile("bulkhead-door", extentMin, extentMax,
-		door->getOpenPercentage(), tint, drawList);
+		door->getOpenPercentage(), drawList);
 }
 }
 
@@ -1068,7 +1087,7 @@ void renderBulkheadDoor(shared_ptr<const core::BulkheadDoor> door, uint32_t /* l
 		drawList->AddRect({ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) },
 			{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) }, packColour(0, 0, 0));
 	}
-	else if (!drawBulkheadDoorSlab(door, doorColour, drawList))
+	else if (!drawBulkheadDoorSlab(door, drawList))
 	{
 		transformPosition(bounds0);
 		transformPosition(bounds1);
@@ -1151,9 +1170,9 @@ void renderWindowClear(shared_ptr<const core::Window> window, uint32_t layer, La
 				{ min(clip0.x, clip1.x), min(clip0.y, clip1.y) },
 				{ max(clip0.x, clip1.x), max(clip0.y, clip1.y) }, true);
 
-			// The Background fills with its own colour (apertureFillColour,
-			// #34); the region clip trims that fill to this stretch of the
-			// aperture.
+			// The Background behind the glass is drawn as its own artwork,
+			// clipped to this stretch of the aperture; the region clip trims
+			// the draw, and nothing tints it (#34).
 			renderSector(region.background, backLayer, LayerRenderStyle::Aperture, false,
 				BackLocationColour, drawList);
 
@@ -1163,14 +1182,11 @@ void renderWindowClear(shared_ptr<const core::Window> window, uint32_t layer, La
 	}
 	else if (backSector)
 	{
-		// The glass shows the Background's own colour, not the generic
-		// back-layer tint (#34). A back Sector that carries no colour of its
-		// own keeps the tint.
-		auto const ownColour = apertureFillColour(*backSector);
-		auto const apertureColour = ownColour.value_or(BackLocationColour);
-
+		// The back Sector is drawn the way a back Sector is always drawn:
+		// its own artwork, under this aperture's clip. It carries no colour
+		// of its own into the glass because it carries no colour at all.
 		renderSector(backSector, core::layerBehind(layer), LayerRenderStyle::Aperture, false,
-			apertureColour, drawList);
+			BackLocationColour, drawList);
 	}
 	else
 	{
@@ -1345,7 +1361,7 @@ void renderWalkway(shared_ptr<const core::Walkway> walkway, uint32_t /* layer */
 	transformPosition(bounds1);
 
 	auto colour = selected ? SelectedColour : packColour(64, 64, 64);
-	if (drawOffsetTile("walkway", anchor, colour, drawList)) return;
+	if (drawOffsetTile("walkway", anchor, drawList)) return;
 	drawList->AddLine({ bounds0.x, bounds0.y }, { bounds1.x, bounds0.y }, colour,
 		selected ? 3.0f : 2.0f);
 }
@@ -1374,8 +1390,10 @@ void renderMarker(shared_ptr<const core::Marker> marker, uint32_t /* layer */, L
 		drawList->AddRect({ topLeft.x - 3.0f, topLeft.y - 3.0f },
 			{ topLeft.x + size.x + 3.0f, topLeft.y + size.y + 3.0f },
 			SelectedColour, 2.0f, 0, 2.0f);
+	// The Marker's icon is its artwork. With no tile to draw it, the glyph
+	// itself is drawn as text, which is a vector run and may carry a colour.
 	if (!drawObjectSprite("marker", drawList, topLeft,
-		{topLeft.x + size.x, topLeft.y + size.y}, packColour(251, 188, 4)))
+		{topLeft.x + size.x, topLeft.y + size.y}))
 		drawList->AddText({ WorldFont::Icons, fontSize }, topLeft,
 			packColour(251, 188, 4), MarkerIconGlyph);
 }
@@ -1824,7 +1842,7 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 						// into the top edge with the live progress instead of being
 						// squashed into the strip left below it (#1019).
 						if (!drawRetractedTile("access-panel", authoredMin, authoredMax,
-							panel->getProgress(), packColour(78, 92, 110), drawList))
+							panel->getProgress(), drawList))
 							drawList->AddRectFilled({min.x, max.y}, {max.x, bottom}, packColour(78, 92, 110, 255));
 					}
 					if (panel->getProgress() > 0)
@@ -1929,13 +1947,6 @@ void renderThresholdsControlsAndAgentsAboveTransit(vector<shared_ptr<const core:
 }
 
 
-PackedColourValue agentRenderColour(core::Agent const& agent, bool selected)
-{
-	auto const colour = selected
-		? core::SelectedAgentColour : agent.getEffectiveColour().value;
-	return packColour(colour.r, colour.g, colour.b);
-}
-
 namespace
 {
 	void drawAgentDebugBadge(WorldDrawList* drawList, char const* symbol,
@@ -1967,7 +1978,6 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 	transformPosition(pos0);
 	transformPosition(pos1);
 
-	auto const colour = agentRenderColour(*agent, gSelectedAgent == agent);
 	float availableWidth = pos1.x - pos0.x;
 	auto const tileSize = agentSpriteSize(agent->getPoseImageTile().c_str());
 	auto const standingTileSize = agentSpriteSize(
@@ -1983,7 +1993,13 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 		Vec2 size{tileSize->x * scale, tileSize->y * scale};
 		Vec2 minimum{(pos0.x + pos1.x - size.x) * .5f, pos0.y - size.y};
 		drawAgentSprite(agent->getPoseImageTile().c_str(), drawList, minimum,
-			{minimum.x + size.x, minimum.y + size.y}, colour);
+			{minimum.x + size.x, minimum.y + size.y});
+		// Selection is an outline drawn over the sprite rather than a colour
+		// multiplied into it: the Agent's artwork is the same picture whether
+		// or not it is selected, and the outline is what says it is.
+		if (gSelectedAgent == agent)
+			drawList->AddRect(minimum, {minimum.x + size.x, minimum.y + size.y},
+				SelectedColour, 0.0f, 0, 2.0f);
 	}
 	else drawList->AddRectFilled({pos0.x, pos1.y}, {pos1.x, pos0.y}, packColour(255, 0, 255, 255));
 
@@ -2152,169 +2168,104 @@ std::string newFamilySurfaceOrBorrowed(char const* own, char const* borrowed)
 // short of the gap.
 constexpr std::uint32_t kMaxFramedDoorCellsWide = 2;
 
-// The frames one Sector's cells wear, keyed the way the surface resolver
-// is asked: column counted from the Sector's own left edge, level counted
-// up from its floor line.
-using DoorframeTiles = std::map<std::pair<std::uint32_t, std::uint32_t>, std::string>;
-
-namespace {
-// What the live doorframe derivation has walked (#1071). The derivation
-// is the only writer, and it writes only when it actually walks a Sector's
-// objects; the accessor hands out a copy so nothing reads this while it
-// moves. See `DoorframeDerivationStats` in the header for why the claim
-// these numbers settle needs numbers at all.
-DoorframeDerivationStats gDoorframeDerivations{};
-}
-
-DoorframeDerivationStats doorframeDerivationStats()
-{
-	return gDoorframeDerivations;
-}
-
-// The doorframe tile one cell of one opening in one wall wears (#1054, #1059).
+// The doorframe tile one cell of one opening wears (#1054, #1073).
 //
-// `doorframe-<wall>-<width><height>-<role>`, where the wall is the family the
-// wall belongs to - `room`, `corridor`, `facade` - the width is how many cells
-// the opening spans, the height is `r`egular or `t`all, and the role is `L0`
-// for the opening's left cell and `R0` for its right one. A 1-wide opening has
-// only an `L0`.
+// `doorframe-<width><height>-<role>`, where the width is how many cells
+// the opening spans, the height is `r`egular or `t`all, and the role is
+// `L0` for the opening's left cell and `R0` for its right one. A 1-wide
+// opening has only an `L0`.
 //
-// Stated as a function of the four facts rather than spelled out where each
-// frame is derived, so the name a wall's opening resolves to can be pinned
-// without a live Door standing in that wall to derive it from. That is what
-// lets the tall Facade frame be pinned today: a tall Door in a Facade is
-// refused at authoring until #1060 admits one, so no fixture can reach that
-// name through a draw, and the only thing worth pinning about it - that the
-// render path asks for the tall tile and the installed atlas carries it - is
-// this name and nothing else.
-std::string doorframeTileName(std::string const& wall, std::uint32_t cellsWide,
+// The wall is not in the name because the wall is not in the artwork. A
+// frame is laid over the wall's own tile rather than traded for it, so
+// what the frame has to say is settled by the opening it frames and by
+// nothing else: the same six tiles frame a Room, a Corridor and a Facade
+// alike. Keying a frame by its wall was what the frame *replacing* the
+// wall's tile needed - the frame had to carry the wall's look - and it
+// bought three copies of artwork that could not tell the walls apart.
+std::string doorframeTileName(std::uint32_t cellsWide,
 	core::Door::Height height, bool rightCell)
 {
-	return "doorframe-" + wall + "-" + std::to_string(cellsWide)
+	return "doorframe-" + std::to_string(cellsWide)
 		+ (height == core::Door::Height::Tall ? "t" : "r") + "-"
 		+ (rightCell ? "R0" : "L0");
 }
 
-// The doorframes the cells of one wall wear, keyed Sector-local (#1054).
+// The doorframe over the cells one Door stands in (#1073).
 //
-// A cell a Door stands in draws that wall's doorframe tile instead of the
-// wall's own tile. The frame is keyed by the wall, not by the Door, because
-// the frame is part of the wall: the same Door set into a Corridor wears a
-// Corridor frame, and the leaf that animates inside the frame is a
-// different tile from a different atlas and says what kind of threshold it
-// is.
+// The frame is the last thing a Door draws: over the wall's own tile,
+// which the Sector surface pass laid across these cells as it did across
+// every other cell of that wall, and over the leaves. Its hole is
+// transparent, so what shows through it is the leaf where the leaf still
+// is and the space behind where the leaf has gone; its moulding is
+// opaque, so it covers the wall around the opening and the leaf's edge
+// wherever the two overlap.
 //
-// Which wall a Sector is comes from `own`, the family name it belongs to -
-// not from the base tile the borrow rule settled on for the installed
-// sheet. A borrowing Sector has no frame of its own to wear, for the same
-// reason #1050 keeps it off the borrowed family's variants.
+// Drawn through the Sector surface's own per-cell loop over the Door's
+// cell span, so the frame takes the same floor-anchored grid, the same
+// crop and the same culling as the tile beneath it. Only the picture a
+// cell wears changes, never the geometry - the rule #1037 pinned for a
+// Sector surface, arriving at a frame through the same door #1059 opened
+// for the Facade's.
 //
-// Built once per Sector rather than per cell, so the per-cell answer stays
-// a lookup and the draw loop keeps the shape it had with a recorded
-// variant. A Sector with no objects in it does not walk at all (#1071),
-// and a Sector with objects but no Door in them builds an empty map and
-// answers every cell from the base or the variant, exactly as it did
-// before any cell could wear a frame.
-DoorframeTiles doorframeTilesForSector(std::string const& wall,
-	std::shared_ptr<const core::Sector> sector)
+// A frame the installed atlas does not carry is no frame at all: the cell
+// resolves to no tile, draws nothing, and the wall's own tile - already
+// down - is all there is to see. That is what lets a World drawn on an
+// atlas written before frames existed carry on drawing exactly what it
+// drew before.
+void renderDoorframe(std::shared_ptr<const core::Door> const& door,
+	WorldDrawList* drawList)
 {
-	DoorframeTiles frames;
-	// A Sector with no objects has no Door standing in its wall, and the
-	// walk below would visit nothing on the way to an empty map. The check
-	// is on what is placed rather than on the Sector type because that is
-	// what the frame is derived from: a Background hosts no objects and a
-	// Facade hosts everything a Room does, and both answer from this one
-	// rule (#1071).
-	if (wall.empty() || !sector || sector->getNumObjects() == 0) return frames;
-	++gDoorframeDerivations.sectorWalks;
-	for (std::uint32_t index = 0; index < sector->getNumObjects(); ++index) {
-		auto const object = sector->getObject(index);
-		++gDoorframeDerivations.objectsExamined;
-		if (!object || object->getObjectType() != core::SectorObjectType::Door)
-			continue;
-		auto const door = static_pointer_cast<const core::DoorSectorObject>(
-			object)->getDoor();
-		// A Door is registered on both Sectors of the pair it joins. Only
-		// the front wall wears the frame: the Sector behind is seen through
-		// the opening from the Layer in front, and framing its side of the
-		// same gap would draw a moulding nobody looks at and cover what the
-		// aperture reveals.
-		if (!door || door->getFrontSector() != sector) continue;
-		// A frame's hole is baked at its height class - 0.5 for a regular
-		// frame, 0.9 for a tall one. A scaled aperture is smaller than the
-		// hole it would stand in, and because the frame replaces the wall's
-		// tile rather than lying over it, the band between the top of the
-		// aperture and the top of the hole draws nothing: the viewport
-		// background straight through the wall (#1062). A Door whose
-		// aperture does not match the frame it would wear is answered as a
-		// wall with no frame authored for it, which is the same answer the
-		// missing-atlas case below gives - the cell falls back to its base
-		// or to the variant its author painted, and no new state is kept.
-		//
-		// The guard is on the mismatch, not on the key being present: a
-		// scale of exactly 1.0 leaves the aperture at the height the hole
-		// was baked at, and that Door wears its frame. A Tall Door never
-		// reaches here with a scale at all - `Door::setHeightScale` and the
-		// document loader both refuse one on a Tall Door - so the tall
-		// frame is untouched by this.
-		//
-		// One frame per standardised door height is the proper fix and
-		// replaces this guard when it lands; that work is out of #1052's
-		// scope, so until then a scaled Door simply draws no moulding.
-		auto const scale = door->getHeightScale();
-		if (scale && *scale != 1.0f) continue;
-		auto const cellsWide = door->getCellsWide();
-		if (cellsWide == 0 || cellsWide > kMaxFramedDoorCellsWide) continue;
-		// Signed, because a Door sitting left of, or below, the Sector's own
-		// anchor subtracts to a negative before anything compares it, and
-		// an unsigned wrap puts the frame on a cell nobody framed.
-		auto const left = static_cast<std::int64_t>(object->getCellX())
-			- static_cast<std::int64_t>(sector->getCellX0());
-		auto const bottom = static_cast<std::int64_t>(object->getCellY())
-			- static_cast<std::int64_t>(sector->getCellY0());
-		for (std::uint32_t cell = 0; cell < cellsWide; ++cell) {
-			if (left + static_cast<std::int64_t>(cell) < 0 || bottom < 0)
-				continue;
-			std::string const name = doorframeTileName(wall, cellsWide,
-				door->getHeight(), cell != 0);
-			// A frame the installed atlas does not carry is no frame at all.
-			// The cell falls back to its wall's tile - the base, or the
-			// variant its author painted - rather than to the missing-art
-			// colour, which is what lets a World drawn on an atlas written
-			// before doorframes existed carry on drawing exactly what it
-			// drew before. The same fallback is what a tall Door in a wall
-			// with no tall frame authored answers with, and a Corridor has
-			// none because a tall Door is refused in one.
-			if (!hasSectorTileOverlay(name)) continue;
-			// A contested frame cell is a broken invariant rather than a case
-			// to resolve. Placement refuses two objects in one front Layer
-			// cell - `PlacementValidator::validateSectorDoorPlacement` turns
-			// away a Door whose front cell already `hasObject()` - and keeps a
-			// Door's whole rectangle inside one Sector on each Layer of its
-			// pair, so no two Doors can stand in the same cell of the same
-			// wall. `emplace` keeps the first Door iterated and drops the
-			// second with nothing said, which reads as unfinished art rather
-			// than as a bug; the assert says it in a debug run instead, in
-			// front of whoever breaks the rule (#1070).
-			[[maybe_unused]] auto const inserted = frames.emplace(
-				std::make_pair(static_cast<std::uint32_t>(
-					left + static_cast<std::int64_t>(cell)),
-					static_cast<std::uint32_t>(bottom)), name);
-			assert(inserted.second);
-		}
-	}
-	return frames;
+	auto const cellsWide = door->getCellsWide();
+	if (cellsWide == 0 || cellsWide > kMaxFramedDoorCellsWide) return;
+
+	// The cell span the Door stands in: its aperture widened back out by
+	// the inset it stands in from the cell's x edges, and carried up to a
+	// whole cell. The same span the leaves are drawn at, because the same
+	// Door owns both.
+	core::Vector2 ap0, ap1;
+	door->getFullShape(ap0, ap1);
+	WorldRect const cells{
+		min(ap0.x, ap1.x) - CORE_DOOR_X_INSET,
+		min(ap0.y, ap1.y),
+		min(ap0.x, ap1.x) - CORE_DOOR_X_INSET + static_cast<float>(cellsWide),
+		min(ap0.y, ap1.y) + 1.0f};
+	// Trimmed to the wall it frames. A Door's cell is a whole cell and a
+	// wall is not: a Room is authored 0.9 of a cell tall, so an untrimmed
+	// frame would stand a tenth of a cell above the ceiling it is moulding
+	// and draw moulding over the viewport. The wall's own tile is cropped
+	// to its height by the same loop, so trimming here lands the frame on
+	// that tile at the same crop rather than above it.
+	auto const wall = door->getFrontSector();
+	if (!wall) return;
+	core::Vector2 wallLo{}, wallHi{};
+	wall->getBounds(wallLo, wallHi);
+	auto const area = cells.clippedTo(WorldRect{
+		min(wallLo.x, wallHi.x), min(wallLo.y, wallHi.y),
+		max(wallLo.x, wallHi.x), max(wallLo.y, wallHi.y) });
+	if (area.empty()) return;
+	auto const span = area.projected();
+
+	drawSectorTileSurfacePerCell(drawList, { span.x0, span.y0 },
+		{ span.x1, span.y1 }, gUISettings.worldZoom,
+		[door, cellsWide](std::uint32_t column, std::uint32_t) -> std::string
+		{
+			auto const name = doorframeTileName(cellsWide, door->getHeight(),
+				column != 0);
+			// Asked of the atlas rather than trusted. A name with no tile
+			// behind it answers the empty string, which the loop reads as
+			// "no tile asked for" and draws nothing - deliberately not
+			// the missing-art case, which is a name asked and not carried
+			// and answers in magenta over a wall that needed no art.
+			return hasSectorTileOverlay(name) ? name : std::string{};
+		});
 }
 
-// The tile one cell wears when no frame outranks it - the whole of the
-// resolver's answer with the frame question taken out of it (#1039, #1040,
-// #1050).
+// The tile one cell wears when nothing outranks it - the variant it was
+// recorded with, or the base (#1039, #1040, #1050).
 //
 // Stated as a function of the two names and the Sector rather than left
-// inline in the resolver, so the resolver can hand out two shapes - one
-// that looks for a frame first and one that does not - without the
-// variant rule existing twice and going out of sync behind the back of
-// whichever one nobody edited.
+// inline in the resolver, so the rule is one function with one answer
+// rather than one per caller.
 std::string sectorSurfaceVariantTile(std::string const& own,
 	std::string const& base, core::Sector const& sector,
 	std::uint32_t column, std::uint32_t level)
@@ -2358,74 +2309,30 @@ std::string sectorSurfaceVariantTile(std::string const& own,
 // the honest picture of that is the Sector's own base tile, not a hole.
 // The same rule is what makes a World repointed at the version 1 family -
 // which declares no families at all, and so carries no `-Vn` tile under any
-// name - draw base on every variant cell while keeping the entries, so
+// name - draw base on every variant cell while keeping its entries, so
 // repointing it back at a family that has them restores the picture with no
 // data touched (#1040).
 //
 // A base tile that is itself missing still draws magenta: falling back from
 // a variant to a base that is not there is not falling back to something,
 // and the missing-art case belongs to the draw, not to the resolution.
-
+//
+// No doorframe arrives through here. A framed cell used to be answered the
+// frame instead of the wall's tile, which is what made the frame have to
+// carry the wall's look and made a frame whose hole did not match its
+// opening a hole in the wall (#1062). The frame is drawn over the wall's
+// tile by the Door that owns it instead, so the resolver's answer is the
+// wall's tile on a door cell exactly as it is on every other cell, and a
+// Door is still a reversible placement for nothing was ever written over
+// the variant its author painted (#1073).
 SectorSurfaceTileResolver sectorSurfaceTileResolver(std::string ownTile,
-	std::string baseTile, std::shared_ptr<const core::Sector> sector,
-	DoorframeTiles frames)
+	std::string baseTile, std::shared_ptr<const core::Sector> sector)
 {
-	// Which of this wall's cells a Door stands in is settled once, off the
-	// live Door objects, by whoever asked for the resolver. Nothing about a
-	// frame is recorded: it is derived every frame from what is standing in
-	// the wall, which is what makes a Door a reversible placement. Take the
-	// Door out and the cell answers its base or the variant its author
-	// painted, because the entry underneath was never touched - the frame
-	// only ever outranked it for as long as the Door was there (#1054).
-	//
-	// The map arrives rather than being built here because the caller is the
-	// one who knows whether this surface is going to be drawn at all, which
-	// is the one reason not to derive it (#1071).
-	//
-	// A wall with nothing framing it is the other reason to say so here.
-	// When the map came back empty the resolver's answer is exactly the
-	// answer it gave before a cell could wear a frame at all, so handing
-	// back a resolver with no map in it is not a special case of the
-	// frame-aware one, it is the plain one - and it is measurably the
-	// cheaper of the two to build and to ask, which is worth something at
-	// the number of Sectors a Layer puts through this call every frame
-	// (#1071). The rule both shapes give is the same rule, above.
-	if (frames.empty())
-		return [own = std::move(ownTile), base = std::move(baseTile), sector](
-			std::uint32_t column, std::uint32_t level) -> std::string
-		{
-			return sectorSurfaceVariantTile(own, base, *sector, column, level);
-		};
-	return [own = std::move(ownTile), base = std::move(baseTile), sector,
-		frames = std::move(frames)](
+	return [own = std::move(ownTile), base = std::move(baseTile), sector](
 		std::uint32_t column, std::uint32_t level) -> std::string
 	{
-		auto const frame = frames.find(std::make_pair(column, level));
-		if (frame != frames.end()) return frame->second;
 		return sectorSurfaceVariantTile(own, base, *sector, column, level);
 	};
-}
-
-// The frames one surface pass is allowed to derive (#1071).
-//
-// Deriving the frame live is #1054's decision and stays. What comes out
-// here is the other half: deriving it only for a surface that is going to
-// be drawn. `renderSector` runs for every Sector of a Layer, again for
-// every back Sector a recursion reaches through an aperture, and again
-// for the wireframe overlay, and the walk that finds the Doors belongs to
-// the cells that would wear the frame rather than to the pass that merely
-// names a Sector. The cull the loop applies is the same one asked here,
-// through the loop's own predicate, so a Sector skipped for want of a
-// visible cell is skipped on exactly the condition the loop would have
-// stopped on.
-DoorframeTiles doorframesForSurfacePass(std::string const& wall,
-	std::shared_ptr<const core::Sector> sector, WorldDrawList* drawList,
-	Vec2 minimum, Vec2 maximum)
-{
-	if (!sectorTileSurfaceIsInView(drawList, minimum, maximum,
-			gUISettings.worldZoom))
-		return {};
-	return doorframeTilesForSector(wall, sector);
 }
 
 void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRenderStyle style, bool renderEdges, PackedColourValue colour, WorldDrawList* drawList)
@@ -2435,20 +2342,14 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		return;
 	}
 
-	// A Background is drawn with its own raw colour. The lights-off tint is
-	// bypassed: a Background has no lights to switch, and tinting it would
-	// silently override the colour the user picked and make the picker
-	// untrustworthy. A Facade follows the same rendering rule (ADR 0003):
-	// its user-picked colour is authoritative even though, unlike a
-	// Background, its lights-off state still means what it means for the
-	// agents and objects inside it.
+	// A Sector's surface is artwork the installed atlas carries. Every type
+	// asks for a tile of its own family and draws it exactly as the sheet
+	// paints it - Background and Facade included, which used to fill with a
+	// colour the renderer packed from the Sector's own authored triple. No
+	// colour is multiplied into a tile on the way to the screen, and a
+	// Sector's lights-off state changes no picture: a dark room is a dark
+	// tile, authored dark, if it is drawn dark at all.
 	auto const sectorType = sector->getType();
-	auto const ownColour = rendersAsFlatColour(sectorType);
-
-	if (!bypassesLightsOffTint(sectorType) && !sector->areLightsOn())
-	{
-		colour = LightsOffColour;
-	}
 
 	// Render sector area
 	core::Vector2 bounds0, bounds1;
@@ -2458,75 +2359,11 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	transformPosition(bounds0);
 	transformPosition(bounds1);
 
-	// The Sector's surface fill. A Sector that carries no colour of its own
-	// takes the Layer's. A flat-colour Sector fills with its own colour here,
-	// where the generic fill sits - before the BEHIND object pass - so a Door
-	// or Window authored on a Facade keeps its aperture instead of being
-	// painted over by the flat fill (#49). The wireframe overlay contributes
-	// the outline only, never a fill (ADR 0002).
-	if (ownColour)
-	{
-		auto const surface = flatSurfaceColour(*sector);
-		assert(surface.has_value());
-		auto const fill = *surface;
-
-		if (shouldFillBackground(style))
-			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, fill);
-		else if (shouldOutlineBackground(style))
-			drawList->AddRect({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, fill);
-
-		// A Door set into a Facade wears the Facade's doorframe (#1059).
-		//
-		// A Facade takes no surface tile at all, so the frame cannot arrive
-		// through the per-cell surface resolver the way the Room's and the
-		// Corridor's do. It arrives here instead - over the fill, before the
-		// thresholds - which is the same position the Room's frame draws
-		// from, because the frame is part of the wall and the wall's surface
-		// is emitted here. The flat-fill rule is not bent by it: the fill is
-		// neither narrowed nor punched, it still covers every cell of the
-		// Facade including the door cells, and the frame only ever lands on
-		// top of it where a Door stands.
-		//
-		// What that position buys is the whole of the safety the rule was
-		// written for. Every threshold - this Door's own aperture and every
-		// other threshold's - is drawn after the frame, so the frame can sit
-		// under an aperture and never over one. And it is drawn only on the
-		// cells the Door itself stands in, which placement refuses to share.
-		//
-		// The loop is the Sector surface's own, so the frame takes the same
-		// floor-anchored crop and the same culling as any other tile (#1037).
-		// It is asked for the Facade's whole area and answers only the door
-		// cells; every other cell answers no tile and draws nothing, leaving
-		// the fill as all there is to see there.
-		//
-		// The tint is the Facade's own colour rather than the Layer's: the
-		// frame is moulding on this wall, and this wall's colour is the
-		// Facade's, which is the colour the rest of the wall is drawn in.
-		// A frame the installed atlas does not carry is no frame at all, so
-		// a World drawn on an atlas written before Facades were framed keeps
-		// drawing exactly what it drew before.
-		if (sectorType == core::SectorType::Facade && shouldFillBackground(style))
-		{
-			// The Facade's frames are derived only if this fill is going to
-			// be given a cell to draw over (#1071); the empty-map early-out
-			// below is what keeps a door-less Facade out of the cell loop.
-			auto const frames = doorframesForSurfacePass("facade", sector,
-				drawList, { bounds0.x, bounds1.y }, { bounds1.x, bounds0.y });
-			// A Facade with no Door in it walks no cells at all. The loop is
-			// the surface loop, with the culling and the anchor it owns, and
-			// asking it to resolve an empty map over a wide Facade would be
-			// work for no picture.
-			if (!frames.empty())
-				drawSectorTileSurfacePerCell(drawList, { bounds0.x, bounds1.y },
-					{ bounds1.x, bounds0.y }, fill, gUISettings.worldZoom,
-					[&frames](std::uint32_t column, std::uint32_t level) -> std::string
-					{
-						auto const found = frames.find(std::make_pair(column, level));
-						return found == frames.end() ? std::string{} : found->second;
-					});
-		}
-	}
-	else if (style == LayerRenderStyle::Wireframe)
+	// The wireframe overlay contributes the outline only, never a fill
+	// (ADR 0002). `colour` reaches that outline, and the plain fill drawn
+	// when no atlas is installed at all - nothing else in this pass takes
+	// a colour.
+	if (style == LayerRenderStyle::Wireframe)
 	{
 		drawList->AddRect({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
 	}
@@ -2545,7 +2382,12 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		case core::SectorType::Location:
 		case core::SectorType::Ladder:
 		case core::SectorType::Lift:
-		case core::SectorType::Stairwell: kind = own; break;
+		case core::SectorType::Stairwell:
+		// A Background and a Facade own their tile outright. Neither
+		// borrows: there is no wall they could be mistaken for, and the
+		// tile they ask for is the picture their surface is.
+		case core::SectorType::Background:
+		case core::SectorType::Facade: kind = own; break;
 		case core::SectorType::Airlock:
 		case core::SectorType::Chamber: kind = sectorSurfaceOrBorrowed(own, "corridor"); break;
 		case core::SectorType::Dumbwaiter: kind = sectorSurfaceOrBorrowed(own, "lift"); break;
@@ -2576,16 +2418,10 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		// of them for its own question - the recorded variant is derived
 		// from `own`, never from `kind`, which is what stops a borrowing
 		// Sector wearing the borrowed family's variant (#1050).
-		// The frames this pass is allowed to derive, settled before the
-		// resolver is built so that a surface no cell of which will be drawn
-		// derives nothing at all (#1071).
 		auto const ownFamily = own ? std::string{ own } : std::string{};
-		auto frames = doorframesForSurfacePass(ownFamily, sector, drawList,
-			{ bounds0.x, bounds1.y }, { bounds1.x, bounds0.y });
 		if (!drawSectorTileSurfacePerCell(drawList, {bounds0.x, bounds1.y},
-			{bounds1.x, bounds0.y}, colour, gUISettings.worldZoom,
-			sectorSurfaceTileResolver(ownFamily, std::move(kind), sector,
-				std::move(frames))))
+			{bounds1.x, bounds0.y}, gUISettings.worldZoom,
+			sectorSurfaceTileResolver(ownFamily, std::move(kind), sector)))
 			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
 	}
 
@@ -2693,8 +2529,9 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		break;
 
 	// Background and Facade carry no geometry of their own: their surface is
-	// the flat fill emitted above, before the thresholds, so nothing here can
-	// paint over an aperture (#49).
+	// the tile their family's artwork carries, drawn by the surface pass
+	// above, before the thresholds, so nothing here can paint over an
+	// aperture (#49).
 	default:
 		break;
 	}
@@ -2759,12 +2596,14 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	}
 
 	// Render ceiling
-	// A Background has no floor, ceiling or walls - its colour is the whole
+	// A Background has no floor, ceiling or walls - its tile is the whole
 	// surface, and a per-sector black border would break the seamless surface
 	// adjacent Backgrounds are meant to form. A Facade skips them for the
-	// same flat-surface reason: its perimeter is open, so there are no walls
-	// to draw, and the flat colour carries its extent (ADR 0003).
-	if (renderEdges && !ownColour)
+	// same continuous-surface reason: its perimeter is open, so there are no
+	// walls to draw, and its tile carries its extent (ADR 0003).
+	auto const edgelessSurface = sectorType == core::SectorType::Background
+		|| sectorType == core::SectorType::Facade;
+	if (renderEdges && !edgelessSurface)
 	{
 		if (style == LayerRenderStyle::Wireframe || !drawSectorTileBoundary("ceiling", drawList,
 			{bounds0.x, bounds1.y}, {bounds1.x, bounds1.y + 2.0f}))
@@ -2845,7 +2684,8 @@ void renderLocationContentAboveTransit(shared_ptr<const core::Sector> const& loc
 	if (isDrawnSolid(style))
 	{
 		renderSectorObjects(location, layer, LayerRenderStyle::Solid,
-			RENDER_SECTOR_OBJECTS_BEHIND | RENDER_SECTOR_OBJECTS_INFRONT, drawList);
+			RENDER_SECTOR_OBJECTS_BEHIND | RENDER_SECTOR_OBJECTS_INFRONT,
+			drawList);
 	}
 	renderSectorDepthContent(location, drawList);
 	if (isDrawnSolid(style)) renderFurnitureMarkers(location, layer, LayerRenderStyle::Solid, drawList);

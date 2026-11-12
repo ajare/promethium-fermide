@@ -47,7 +47,7 @@ Windows; a missing fixture/product is never optional.
 
 - Normalize Windows TEMP to CMake paths before embedding it in generated CTest
   scripts. Native backslashes such as `C:\Users` must not become `\U` escapes.
-- Agent Colour backfill now writes under the invocation's atomically reserved
+- Tag display Colour backfill now writes under the invocation's atomically reserved
   Context root, not a timestamp-only directory outside the harness. Remove the
   unused Editor copy of that directory helper.
 - Explicitly check temporary-root cleanup before SUMMARY and return failure with

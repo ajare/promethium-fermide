@@ -140,27 +140,6 @@ inline bool isDrawnSolid(LayerRenderStyle style)
 }
 
 //
-// The tint a Sector takes when its lights are off.
-//
-// A flat-colour Sector bypasses this entirely (see bypassesLightsOffTint());
-// every other Sector wears it in place of its Layer's colour.
-//
-inline constexpr core::BackgroundColour LightsOffTint{ 48, 48, 48 };
-
-//
-// Whether a Sector is rendered as its own flat, opaque colour.
-//
-// A Background has always been drawn this way: its colour is its whole surface.
-// A Facade follows the same rendering rule (ADR 0003) - the user-authored
-// colour is the surface, the generic Layer fill is skipped so nothing paints
-// twice, and the lights-off tint never applies.
-//
-inline bool rendersAsFlatColour(core::SectorType type)
-{
-	return type == core::SectorType::Background || type == core::SectorType::Facade;
-}
-
-//
 // The surface family a Sector belongs to: the base tile name its type asks
 // the atlas for, or null where the type draws no tiled surface at all.
 //
@@ -172,9 +151,11 @@ inline bool rendersAsFlatColour(core::SectorType type)
 // my swatch belongs to", and the draw keeps its own rule for "which tile
 // goes here" on top of it.
 //
-// A Background and a Facade answer null for the same reason they render as
-// flat colour: they never ask the atlas for a tile, and a variant recorded
-// on one is refused outright (#1040).
+// A Background and a Facade ask for a tile of their own like every other
+// type does. Their surface is artwork the sheet carries, not a colour the
+// renderer mixes, so they are in the set on the same terms as a wall -
+// what they do not declare is a variant family, which is why a variant
+// recorded on one is still refused (#1040).
 //
 inline char const* sectorSurfaceKind(core::Sector const& sector)
 {
@@ -191,96 +172,44 @@ inline char const* sectorSurfaceKind(core::Sector const& sector)
 	case core::SectorType::Shuttle: return "shuttle";
 	case core::SectorType::Stairwell: return "stairwell";
 	case core::SectorType::Staircase: return "staircase";
-	case core::SectorType::Background:
-	case core::SectorType::Facade: return nullptr;
+	case core::SectorType::Background: return "background";
+	case core::SectorType::Facade: return "facade";
 	}
 	return nullptr;
 }
 
 //
-// The doorframe tile name for one cell of one opening in one wall
-// (#1054, #1059).
+// The doorframe tile name for one cell of one opening (#1054, #1073).
 //
-// `doorframe-<wall>-<width><height>-<role>`: the wall is the family the
-// wall belongs to - `room`, `corridor`, `facade` - the width is how many
-// cells the opening spans, the height is `r`egular or `t`all, and the role
-// is `L0` for the opening's left cell and `R0` for its right one. A
-// 1-wide opening has only an `L0`.
+// `doorframe-<width><height>-<role>`: the width is how many cells the
+// opening spans, the height is `r`egular or `t`all, and the role is `L0`
+// for the opening's left cell and `R0` for its right one. A 1-wide
+// opening has only an `L0`.
 //
-// This is the name the draw derives, stated as a function of the four
-// facts so it can be asked without a live Door to derive it from. The tall
-// Facade frame is why that matters: a tall Door in a Facade is refused at
-// authoring until #1060 admits one, so no fixture can put that tile on
-// screen, and the thing worth pinning about it is that the render path asks
-// for the tall tile and the installed atlas carries it.
+// The wall is not in the name, because the wall is not in the artwork. A
+// frame is moulding laid over the wall's own tile, so what it has to look
+// like is settled by the opening it frames and by nothing else: the same
+// six tiles frame a Room, a Corridor and a Facade alike. Keying the frame
+// by the wall was what the frame *replacing* the wall's tile needed, and
+// cost three copies of every frame for artwork that could not tell them
+// apart.
 //
 // Whether the installed atlas actually has the name is a separate question
 // - `hasSectorTileOverlay()` answers it - and a name with no tile behind it
 // draws no frame rather than the missing-art colour, which is what keeps a
 // World drawn on an older atlas drawing what it always drew.
 //
-std::string doorframeTileName(std::string const& wall, std::uint32_t cellsWide,
+std::string doorframeTileName(std::uint32_t cellsWide,
 	core::Door::Height height, bool rightCell);
-
-//
-// The flat surface colour a Sector carries of its own, if it carries one.
-//
-// The authored triple is packed here, once, into the shared colour the command
-// stream records with. The rule answers in the drawing vocabulary instead of
-// handing the producer a domain colour to convert at every call site (#998).
-//
-inline std::optional<PackedColourValue> flatSurfaceColour(core::Sector const& sector)
-{
-	if (sector.getType() == core::SectorType::Background)
-	{
-		auto const colour = static_cast<core::Background const&>(sector).getColour();
-		return packColour(colour.r, colour.g, colour.b);
-	}
-
-	if (sector.getType() == core::SectorType::Facade)
-	{
-		auto const colour = static_cast<core::Facade const&>(sector).getColour();
-		return packColour(colour.r, colour.g, colour.b);
-	}
-
-	return std::nullopt;
-}
-
-//
-// Whether the lights-off tint skips a Sector type.
-//
-// A flat-colour Sector's colour is user-authored; tinting it when the lights
-// are off would silently override the picker. A Background has no lights to
-// switch at all. A Facade does: its light switch keeps meaning exactly what it
-// meant for the agents and objects inside - only the fill refuses to follow it
-// (ADR 0003).
-//
-inline bool bypassesLightsOffTint(core::SectorType type)
-{
-	return rendersAsFlatColour(type);
-}
-
-//
-// The colour a clear Window's Aperture pass fills the Sector behind it with.
-//
-// A Background is seen in its own colour: the glass shows what is actually
-// behind it, so the pass is handed the Background's own colour rather than the
-// generic back-layer tint. A Facade behind glass does the same - it renders as
-// a solid colour exactly like a Background, so its user-authored colour is
-// what the glass shows. Any other back Sector carries no colour of its own and
-// yields std::nullopt, leaving the caller's generic tint in place. Where a
-// Window faces several Backgrounds at once, backgroundApertureRegions() below
-// answers this once per Background in the composite.
-//
-inline std::optional<PackedColourValue> apertureFillColour(core::Sector const& backSector)
-{
-	return flatSurfaceColour(backSector);
-}
 
 //
 // One piece of a multi-Background aperture composite: the Background the glass
 // shows through one stretch of the aperture, and the world-space (cell-unit)
 // rectangle that Background is clipped to while being drawn.
+//
+// The composite is about which Background shows where, which is a question the
+// cell grid answers and nothing else answers. What each one looks like is its
+// own artwork, drawn clipped to the region named here.
 //
 struct BackgroundApertureRegion
 {
@@ -382,43 +311,6 @@ inline std::vector<BackgroundApertureRegion> backgroundApertureRegions(
 	}
 
 	return regions;
-}
-
-//
-// Whether a Background is filled in this style.
-//
-// The selected Layer fills it with its own raw colour, and so does the view
-// through an aperture - the latter already clipped to the Window by the caller.
-//
-inline bool shouldFillBackground(LayerRenderStyle style)
-{
-	return isDrawnSolid(style);
-}
-
-//
-// Whether a Background contributes its outline in this style.
-//
-// This is the narrowing ticket #35 records. The umbrella spec (#27) said "no
-// per-sector border - the selection highlight is the only time an individual
-// Background's outline is drawn", which collides with ADR 0002: the wireframe
-// overlay exists to convey the shape of the Layer behind, so a Background that
-// contributed nothing there would leave no cue at all that the Layer behind has
-// extent whenever it is not behind an aperture.
-//
-// The rule keeps its shape and loses its blanket:
-//
-//   * the Solid pass still draws no border, so adjacent same-colour Backgrounds
-//     meet seamlessly;
-//   * the overlay keeps the outline;
-//   * selection is untouched - shouldHighlightSelectedSector() still fires for a
-//     selected Background.
-//
-// One pass never both fills and outlines a Background: a border drawn over its
-// own fill is exactly the seam the Solid pass must not show.
-//
-inline bool shouldOutlineBackground(LayerRenderStyle style)
-{
-	return style == LayerRenderStyle::Wireframe;
 }
 
 //
@@ -958,9 +850,8 @@ void renderGraph(std::shared_ptr<const core::Graph> graph,
 	bool markerTargetsOnly = false,
 	std::optional<core::Vector2> cursorWorldPosition = std::nullopt);
 
-// Ordinary Agents use their effective inherited Colour (or the editor
-// fallback); selection always wins with its fixed gold highlight.
-PackedColourValue agentRenderColour(core::Agent const& agent, bool selected);
+// Ordinary Agents draw the artwork their atlas carries. Selection is an
+// outline drawn over the sprite, not a colour multiplied into it.
 void renderAgent(core::Agent const* agent, WorldDrawList* drawList);
 // Draws the selected Agent's assigned Path as a viewport overlay when Agent
 // debug rendering is enabled. Only portions on the visible Layer are shown.
@@ -1024,6 +915,11 @@ void renderSectors(std::shared_ptr<const core::World> world, uint32_t layer,
 // them. Declared here so the headless draw-order check (#49) can exercise
 // the real renderSector() draw-call order rather than a model of it.
 //
+//
+// Draws one Door's leaves and frame. Both are drawn as the artwork they are:
+// the frame lies over the wall's own tile and takes its look from that tile,
+// not from a colour the pass carries.
+//
 void renderDoor(std::shared_ptr<const core::Door> door, uint32_t layer,
 	LayerRenderStyle style, bool selected, WorldDrawList* drawList);
 
@@ -1059,32 +955,6 @@ void renderShuttle(std::shared_ptr<const core::Shuttle> shuttle, uint32_t layer,
 
 void renderSector(std::shared_ptr<const core::Sector> sector, uint32_t layer,
 	LayerRenderStyle style, bool renderEdges, PackedColourValue colour, WorldDrawList* drawList);
-
-// What the live doorframe derivation has walked since the process started
-// (#1071).
-//
-// A doorframe is derived from the Doors standing in a wall rather than
-// recorded, so nothing can be read off a Sector to say whether its cells
-// wear one (#1054). That is the right design and it has a cost, and the
-// claim #1071 makes about that cost - that a Sector with no objects walks
-// nothing, and that a Sector no cell of which will be drawn walks nothing
-// either - is a claim about work not done, which no picture can show.
-// These counters are what it is checked against.
-//
-// `sectorWalks` counts the Sectors whose object list was actually walked,
-// and `objectsExamined` the objects that walk visited. A derivation that
-// early-outs counts in neither. The counters are cumulative rather than
-// resettable so a check snapshots and compares, the way the routing
-// workspace's allocation and build counters are read; nothing in
-// production reads them, and one increment per walked Sector is all they
-// cost.
-struct DoorframeDerivationStats
-{
-	std::uint64_t sectorWalks{ 0 };
-	std::uint64_t objectsExamined{ 0 };
-};
-
-DoorframeDerivationStats doorframeDerivationStats();
 
 // There is no ImDrawList-taking form of any of the passes above. Production
 // code records into a WorldDrawList and submits the vector to MPP; the CPU

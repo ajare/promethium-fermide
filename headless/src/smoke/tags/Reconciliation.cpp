@@ -130,8 +130,9 @@ namespace
 			newlyModified, { 0.75f, 0.75f }, &diagnostic), diagnostic);
 		require(registry->removeAgentTagHeightModifier(obsolete, &diagnostic), diagnostic);
 		require(registry->renameAgentTag(unrelated, "renamed", &diagnostic), diagnostic);
-		require(registry->addAgentTagColour(unrelated, &diagnostic), diagnostic);
-		require(registry->setAgentTagColour(
+		// A display Colour edit changes the tag but no Agent property, so it
+		// must not disturb any sample - the same non-event a rename is.
+		require(registry->setAgentTagDisplayColour(
 			unrelated, { 12, 34, 56 }, &diagnostic), diagnostic);
 		registry->saveTo((temporary.path / "station.tags.yaml").string());
 
@@ -167,7 +168,7 @@ namespace
 		require(reopenedCarol->getWalkSpeedModifierSample()
 			== std::optional<core::AgentPropertySample>{ unchangedCarolWalk }
 			&& registry->getAgentTagName(unrelated) == "renamed",
-			"A tag rename or Colour-only edit resampled an unrelated modifier");
+			"A tag rename or display-Colour-only edit resampled an unrelated modifier");
 
 		// Once the repaired World is saved, another open is stable and clean.
 		auto const repairedAliceWalk = *aliceWalk;

@@ -80,10 +80,10 @@ namespace
 
 	std::string const kTileset = "resources/textures/sectors-new.tileset.yaml";
 
-	// The tint every check here asks the renderer for. It is a colour no
-	// production path picks by default, so a surface that ignored the
-	// caller's tint - drawing white, or the Layer's colour, or the
-	// lights-off tint - fails instead of looking right.
+	// The colour every check here draws its pass with. It reaches the
+	// wireframe outline and the fill emitted when no atlas is installed.
+	// It never reaches a tile: nothing is multiplied into artwork on the way
+	// to the screen, which is why the quads this file reads back are White.
 	pf::render::PackedColourValue const kTint = packColour(214, 96, 32, 255);
 
 	std::string rectText(float left, float top, float right, float bottom)
@@ -656,10 +656,10 @@ namespace
 						+ std::to_string(want.column) + ", row "
 						+ std::to_string(want.row) + "; the grid says "
 						+ rectText(want.left, want.top, want.right, want.bottom));
-				require(cell.tint == kTint,
-					testCase.label + " carried a tint other than the one asked "
-						"for at column " + std::to_string(want.column) + ", row "
-						+ std::to_string(want.row));
+				require(cell.tint == White,
+					testCase.label + " was drawn with a colour other than its "
+						"raw artwork at column " + std::to_string(want.column)
+						+ ", row " + std::to_string(want.row));
 			}
 		}
 	}

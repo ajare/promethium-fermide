@@ -53,7 +53,6 @@ namespace core
 		bool nameIsUnique(std::string const& name, AgentTagId except = {}) const;
 		uint64_t allocatePropertyRevision();
 		bool escalatorWalkingChanceAdditionIsValid(AgentTagId id, std::string* diagnostic) const;
-		bool colourAdditionIsValid(AgentTagId id, std::string* diagnostic) const;
 		bool walkSpeedModifierAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
 		bool heightModifierAdditionIsValid(AgentTagId id,
@@ -121,7 +120,6 @@ namespace core
 		std::vector<AgentTagId> getAgentTagIdsAlphabetically() const;
 		AgentTag const* lookupAgentTag(AgentTagId id) const;
 		std::string const& getAgentTagName(AgentTagId id) const;
-		AgentColourProperty const* getAgentTagColour(AgentTagId id) const;
 		AgentWalkSpeedModifierProperty const* getAgentTagWalkSpeedModifier(
 			AgentTagId id) const;
 		AgentHeightModifierProperty const* getAgentTagHeightModifier(
@@ -185,21 +183,11 @@ namespace core
 
 		// The intrinsic display Colour used to render the tag itself (for example
 		// its Selection-panel chip). Every tag always has one, assigned at random
-		// from AgentTagColourPalette on creation and persisted with the tag. It is
-		// separate from the optional Agent Colour property below and never
-		// affects Agents.
+		// from AgentTagColourPalette on creation and persisted with the tag. It
+		// never affects how an Agent is drawn.
 		AgentColour getAgentTagDisplayColour(AgentTagId id) const;
 		bool setAgentTagDisplayColour(AgentTagId id, AgentColour colour,
 			std::string* diagnostic = nullptr);
-
-		// Colour is unique within a tag. Addition and assignment both preflight
-		// inherited-property conflicts across every loaded dependent World.
-		// Revisions are registry-wide, monotonic, persisted, and consumed only by
-		// an accepted addition or real value change.
-		bool addAgentTagColour(AgentTagId id, std::string* diagnostic = nullptr);
-		bool setAgentTagColour(AgentTagId id, AgentColour colour,
-			std::string* diagnostic = nullptr);
-		bool removeAgentTagColour(AgentTagId id, std::string* diagnostic = nullptr);
 
 		AgentEscalatorWalkingChanceProperty const* getAgentTagEscalatorWalkingChance(AgentTagId id) const;
 		bool addAgentTagEscalatorWalkingChance(AgentTagId id, std::string* diagnostic = nullptr);

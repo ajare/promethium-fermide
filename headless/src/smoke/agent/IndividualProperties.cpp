@@ -84,7 +84,6 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 			== "Pathing"
 		&& core::agentPropertyMetadata(core::AgentPropertyType::MobilityProfile).propertyNamespace
 			== "Pathing"
-		&& !core::agentPropertyMetadata(core::AgentPropertyType::Colour).propertyNamespace
 		&& core::agentPropertyMetadata(core::AgentPropertyType::EscalatorWalkingChance).propertyNamespace
 			== "Pathing"
 		&& !core::agentPropertyMetadata(core::AgentPropertyType::WalkSpeedModifier).propertyNamespace
@@ -94,8 +93,6 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 	auto registry = core::AgentTagRegistry::create();
 	auto const tag = registry->addAgentTag("tag-values");
 	std::string diagnostic;
-	require(registry->addAgentTagColour(tag, &diagnostic), diagnostic);
-	require(registry->setAgentTagColour(tag, { 10, 20, 30 }, &diagnostic), diagnostic);
 	require(registry->addAgentTagEscalatorWalkingChance(tag, &diagnostic), diagnostic);
 	require(registry->setAgentTagEscalatorWalkingChance(tag, 0.25f, &diagnostic), diagnostic);
 	require(registry->addAgentTagWalkSpeedModifier(tag, &diagnostic), diagnostic);
@@ -128,7 +125,7 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 		"Agent tag accepted an out-of-range Waiting aversion");
 	require(registry->setAgentTagWaitingAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const registryYaml = serialize(*registry);
-	require(registryYaml.find("version: 17") != std::string::npos
+	require(registryYaml.find("version: 18") != std::string::npos
 		&& registryYaml.find("type: ladderSpeedModifier") != std::string::npos
 		&& registryYaml.find("type: waitingAversion") != std::string::npos
 		&& registryYaml.find("min: 2.5") != std::string::npos,
@@ -142,7 +139,7 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 		"Agent tag accepted an out-of-range Crowd aversion");
 	require(registry->setAgentTagCrowdAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const crowdRegistryYaml = serialize(*registry);
-	require(crowdRegistryYaml.find("version: 17") != std::string::npos
+	require(crowdRegistryYaml.find("version: 18") != std::string::npos
 		&& crowdRegistryYaml.find("type: crowdAversion") != std::string::npos
 		&& crowdRegistryYaml.find("min: 2.5") != std::string::npos,
 		"The Agent tag Crowd aversion range was not persisted");
@@ -155,7 +152,7 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 		"Agent tag accepted an out-of-range Risk aversion");
 	require(registry->setAgentTagRiskAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const riskRegistryYaml = serialize(*registry);
-	require(riskRegistryYaml.find("version: 17") != std::string::npos
+	require(riskRegistryYaml.find("version: 18") != std::string::npos
 		&& riskRegistryYaml.find("type: riskAversion") != std::string::npos,
 		"The Agent tag Risk aversion range was not persisted");
 	require(registry->addAgentTagRouteFamiliarity(tag, &diagnostic), diagnostic);
@@ -167,7 +164,7 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 		"Agent tag accepted an out-of-range Route familiarity");
 	require(registry->setAgentTagRouteFamiliarity(tag, { 0.75f, 0.75f }, &diagnostic), diagnostic);
 	auto const familiarityRegistryYaml = serialize(*registry);
-	require(familiarityRegistryYaml.find("version: 17") != std::string::npos
+	require(familiarityRegistryYaml.find("version: 18") != std::string::npos
 		&& familiarityRegistryYaml.find("type: routeFamiliarity") != std::string::npos,
 		"The Agent tag Route familiarity range was not persisted");
 	require(registry->addAgentTagRoutePersistence(tag, &diagnostic), diagnostic);
@@ -194,11 +191,6 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 	world->pauseSimulation();
 	require(world->assignAgentTag(id, tag, &diagnostic), diagnostic);
 	auto* agent = world->lookupAgent(id).entity;
-	require(agent->getEffectiveColour().value == (core::AgentColour{ 10, 20, 30 })
-		&& !agent->getEffectiveColour().individual,
-		"The fixture did not inherit its tag Colour");
-
-	require(world->setAgentIndividualColour(id, core::AgentColour{ 100, 110, 120 }, &diagnostic), diagnostic);
 	require(world->setAgentIndividualEscalatorWalkingChance(id, 0.75f, &diagnostic), diagnostic);
 	require(world->setAgentIndividualWalkSpeedModifier(id, 1.1f, &diagnostic), diagnostic);
 	require(world->setAgentIndividualHeightModifier(id, 0.95f, &diagnostic), diagnostic);
@@ -251,9 +243,7 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 	directMobility.set(core::TraversalKind::Lift, core::MobilityUse::CannotUse);
 	require(world->setAgentIndividualMobilityProfile(id, directMobility, &diagnostic), diagnostic);
 
-	require(agent->getEffectiveColour().individual
-		&& agent->getEffectiveColour().value == (core::AgentColour{ 100, 110, 120 })
-		&& agent->getEffectiveEscalatorWalkingChance().individual
+	require(agent->getEffectiveEscalatorWalkingChance().individual
 		&& agent->getEffectiveEscalatorWalkingChance().value == 0.75f
 		&& agent->getEffectiveWalkSpeedModifier().individual
 		&& agent->getEffectiveWalkSpeedModifier().value == 1.1f
@@ -332,7 +322,6 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 		&& loadedAgent->getStairSpeedModifierSample()->value == 0.75f
 		&& loadedAgent->getLadderSpeedModifierSample()
 		&& loadedAgent->getLadderSpeedModifierSample()->value == 0.8f
-		&& loadedAgent->getEffectiveColour().individual
 		&& loadedAgent->getEffectiveStairSpeedModifier().individual
 		&& loadedAgent->getEffectiveStairSpeedModifier().value == 1.5f
 		&& loadedAgent->getEffectiveLadderSpeedModifier().individual
@@ -376,12 +365,6 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 		&& YAML::Dump(YAML::Load(serialize(*loaded))["agents"])
 			== YAML::Dump(YAML::Load(yaml)["agents"]),
 		"Human migration changed authored properties, tag assignments, or samples");
-
-	require(world->setAgentIndividualColour(id, std::nullopt, &diagnostic), diagnostic);
-	require(!agent->getEffectiveColour().individual
-		&& agent->getEffectiveColour().sourceTag == tag
-		&& agent->getEffectiveColour().value == (core::AgentColour{ 10, 20, 30 }),
-		"Removing an individual property did not reveal its inherited tag value");
 
 	require(world->resumeSimulation(), "The individual-property fixture did not resume");
 	require(!world->setAgentIndividualHeightModifier(id, 0.9f, &diagnostic)

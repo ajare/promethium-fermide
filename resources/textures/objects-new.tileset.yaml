@@ -1,10 +1,9 @@
 # Authored tileset for the ObjectAtlas set (#1014).
 #
-# A version 2 tileset declares, per tile, the three render semantics a
-# version 1 file left the renderer to guess: the render offset it draws at,
-# the drawn size it draws at, and whether it is tintable. Offsets and sizes
-# are World units, not pixels - one World unit of authored art is one
-# authored tile.
+# A version 2 tileset declares, per tile, the render semantics a version 1
+# file left the renderer to guess: the render offset it draws at and the
+# drawn size it draws at. Offsets and sizes are World units, not pixels -
+# one World unit of authored art is one authored tile.
 #
 # The `ImageSet` entries the application manifest declares for this atlas
 # are generated from this file by `scripts/generate_object_atlas_new.py`
@@ -71,7 +70,6 @@ sprites:
     content: [0, 0, 128, 24]
     offset: [0.0, -0.075]
     drawn_size: [1.0, 0.075]
-    tintable: true
 
   # A Bulkhead Door is a solid physical slab straddling the boundary
   # between two adjacent Locations. Its geometry puts it 0.1 into one cell
@@ -91,7 +89,6 @@ sprites:
     content: [0, 0, 26, 224]
     offset: [0.0, 0.0]
     drawn_size: [0.2, 0.7]
-    tintable: true
 
   # An Access panel is a cell-owned object drawn on the visible back
   # surface of a Room, Corridor or Facade. Its geometry - width, height
@@ -106,7 +103,6 @@ sprites:
     content: [0, 0, 64, 80]
     offset: [0.0, 0.0]
     drawn_size: [0.5, 0.25]
-    tintable: true
 
   # A Door leaf is a full-cell tile. The artwork fills the whole 128 x 320
   # cell, the renderer draws it at the cell rect, translates it by the
@@ -140,7 +136,6 @@ sprites:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
 
   # The right-hand leaf of a 2-wide Door: the right half of one joined
   # two-cell leaf. Same contract as door-L0.
@@ -150,7 +145,6 @@ sprites:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
 
   # The Lift landing's own leaves (#1057). A Lift landing Door draws
   # these rather than the ordinary pair because the Lift owns it, which is
@@ -170,7 +164,6 @@ sprites:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
 
   # The right-hand leaf of a two-cell-wide Lift landing: the two cells of
   # one joined landing leaf. A shaft is refused at build past two cells
@@ -181,7 +174,6 @@ sprites:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
 
   # The Shuttle hatch. One leaf, not a pair: a Shuttle landing Door is
   # authored one cell wide, so the hatch family has no right-hand leaf and
@@ -195,7 +187,6 @@ sprites:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
 
   # The tall Door's leaves (#1058). A tall ordinary Door opens 0.9 World
   # units against the regular Door's 0.5 (`CORE_DOOR_TALL_HEIGHT` against
@@ -220,7 +211,6 @@ sprites:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
 
   # The right-hand leaf of a two-cell-wide tall Door: the right half of
   # one joined two-cell tall leaf. Same contract as door-tall-L0.
@@ -230,14 +220,13 @@ sprites:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
 
-  # A Button's two states are two tiles, not one tile and two tints, so
-  # the state is legible from the artwork alone at the 12.8 x 12.8 px the
-  # control actually occupies. Both are untintable: the renderer's enabled
-  # green, disabled grey and Broken red are a wireframe and fallback fact,
-  # and letting them multiply into the art would wash out the difference
-  # between the two tiles the state is carried by.
+  # A Button's two states are two tiles, not one tile the renderer tints
+  # two ways, so the state is legible from the artwork alone at the
+  # 12.8 x 12.8 px the control actually occupies. The renderer's enabled
+  # green, disabled grey and Broken red are vector overlays and fallback
+  # marks drawn over or instead of the tile; nothing multiplies into the
+  # artwork itself.
   #
   # The drawn size is the Button's own shape - CORE_BUTTON_SIZE wide and
   # that divided by the cell's y:x render ratio tall.
@@ -246,14 +235,12 @@ sprites:
     content: [0, 0, 13, 13]
     offset: [0.0, 0.0]
     drawn_size: [0.1, 0.04]
-    tintable: false
 
   button-disabled:
     cell: [5, 0]
     content: [0, 0, 13, 13]
     offset: [0.0, 0.0]
     drawn_size: [0.1, 0.04]
-    tintable: false
 
   # The three Window styles are three tiles at the same size: a one-cell,
   # one-Level Window is `1 - 2 * CORE_WINDOW_X_INSET` wide by
@@ -267,21 +254,18 @@ sprites:
     content: [0, 0, 102, 96]
     offset: [0.0, 0.0]
     drawn_size: [0.8, 0.3]
-    tintable: false
 
   window-frosted:
     cell: [1, 1]
     content: [0, 0, 102, 96]
     offset: [0.0, 0.0]
     drawn_size: [0.8, 0.3]
-    tintable: false
 
   window-tinted:
     cell: [2, 1]
     content: [0, 0, 102, 96]
     offset: [0.0, 0.0]
     drawn_size: [0.8, 0.3]
-    tintable: false
 
   # A Booth Window is two tiles that compose rather than two states of
   # one. `booth-window-open` is the frame: opaque at its edges,
@@ -297,7 +281,6 @@ sprites:
     content: [0, 0, 102, 96]
     offset: [0.0, 0.0]
     drawn_size: [0.8, 0.3]
-    tintable: false
 
   # The shutter fills the frame's transparent centre, so its drawn size is
   # that centre, not the frame: 42/52 of the frame's 0.8 across and 38/48
@@ -309,15 +292,11 @@ sprites:
     content: [0, 0, 83, 76]
     offset: [0.0, 0.0]
     drawn_size: [0.6461538, 0.2375]
-    tintable: false
 
-  # The Marker is the one tile in this set that takes a tint. Its icon is
-  # grayscale so the gold the renderer carries multiplies into it, and
-  # that gold is `core::SelectedAgentColour` - the same colour the Agent
-  # selection highlight resolves to - which is what lets a destination
-  # read as part of the Agent colour vocabulary rather than as a fixed
-  # decal. Make this tile untintable and the icon goes white, which is how
-  # a tintability regression shows up here.
+  # The Marker draws as its artwork paints it. The gold the renderer used
+  # to multiply into it is gone with the concept: a Marker's icon is what
+  # the sheet says it is, and selection is an outline drawn around it
+  # rather than a colour replacing it.
   #
   # The icon's on-screen size is a screen-space fact (`MarkerIconSize`, a
   # fixed pixel longest edge that does not follow the World cell), so the
@@ -328,7 +307,6 @@ sprites:
     content: [0, 0, 32, 44]
     offset: [0.0, 0.0]
     drawn_size: [0.25, 0.1375]
-    tintable: true
 
   # The Lift car is the vehicle inside the shaft. Its own geometry is
   # `cellsWide - 2 * CORE_LIFT_CAR_BORDER` across `CORE_LIFT_CAR_HEIGHT`
@@ -343,7 +321,6 @@ sprites:
     content: [0, 0, 115, 176]
     offset: [0.0, 0.0]
     drawn_size: [0.9, 0.55]
-    tintable: false
 
   # The Platform lift is a slab, not a car: `cellsWide` across and 0.05
   # World units thick, with no car border because there is no car body to
@@ -356,7 +333,6 @@ sprites:
     content: [0, 0, 128, 16]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 0.05]
-    tintable: false
 
   # The Shuttle carriage is composed from three role tiles rather than
   # from art cut per width. A carriage's cells are all one cell wide and
@@ -371,21 +347,18 @@ sprites:
     content: [0, 0, 128, 176]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 0.55]
-    tintable: false
 
   shuttle-M0:
     cell: [4, 2]
     content: [0, 0, 128, 176]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 0.55]
-    tintable: false
 
   shuttle-R0:
     cell: [5, 2]
     content: [0, 0, 128, 176]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 0.55]
-    tintable: false
 
   # The connector between two carriages keeps a bare name and no role
   # suffix, because it is not drawn at a cell of a carriage. It is drawn
@@ -400,7 +373,6 @@ sprites:
     content: [0, 0, 128, 176]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 0.55]
-    tintable: false
 
   # No `force-bridge` tile, deliberately. A Force Bridge's span is
   # continuous and arbitrary - it can be any fraction of a cell wide, over

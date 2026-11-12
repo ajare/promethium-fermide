@@ -1,35 +1,39 @@
 #include "Checks.h"
 #include "ImGuiContext.h"
-// Facade flat-colour rendering, for ticket #46.
+// Facade and Background surface rendering.
 //
-// A Facade renders as a solid colour exactly like a Background (ADR 0003).
-// This check rides the same policy-driven model as the render-order checks:
-// it mirrors the surface-painting decisions renderSector() makes - generic
-// Layer fill, lights-off tint, and the Sector's own flat fill or outline -
-// by calling the very helpers the renderer calls, so a change to that policy
-// shows up here rather than only on a screen.
+// A Facade draws a tile of its own family and so does a Background, on the
+// same terms as a Room or a Corridor. Neither is filled with a colour the
+// renderer packs from the Sector's authored triple any more: their surface
+// is artwork the installed atlas carries, drawn exactly as the sheet
+// paints it. What the authored colour still *is* stays a domain question;
+// what it is no longer is paint.
 //
 // The properties pinned down:
 //
-//   * the Solid pass fills a Facade with the Facade's own colour, once; the
-//     generic Location fill is skipped, so nothing paints twice;
-//   * the wireframe overlay contributes the outline only, never a fill;
-//   * the Aperture pass fills through a Window, clipped to the Window's rect,
-//     in the Facade's own colour (ADR 0002);
-//   * the lights-off tint is bypassed: the user-authored colour is
-//     authoritative, as with a Background - while a Room's fill does follow
-//     its lights, proving the bypass is real and not a vacuous equality;
-//   * a Window looking into a Facade shows its flat colour, its objects,
-//     and its agents.
+//   * the Solid pass tiles a Facade with the `facade` tile across its
+//     whole area, and nothing else reaches that area;
+//   * a Background tiles with `background` the same way;
+//   * the wireframe overlay contributes the outline only, never a fill
+//     (ADR 0002);
+//   * a Sector's lights-off state changes no picture, because nothing is
+//     multiplied into a tile on the way to the screen;
+//   * a Window looking into a Facade still shows the Facade's objects and
+//     its agents;
+//   * a Window spanning a Facade and a Background is still refused at
+//     authoring, so the aperture never has to composite the two.
 
+#include <algorithm>
 #include <cstdint>
-#include <format>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "Render.h"
+#include "SectorTileset.h"
+#include "UISettings.h"
+#include "WorldDrawList.h"
 #include "core/Background.h"
 #include "core/World.h"
 #include "core/Defines.h"
@@ -39,6 +43,9 @@
 #include "core/Vector2.h"
 #include "core/Window.h"
 
+// The viewport the renderer reads, defined by the application.
+extern UISettings gUISettings;
+
 namespace
 {
 	void require(bool condition, char const* message)
@@ -46,98 +53,120 @@ namespace
 		if (!condition) throw std::runtime_error(message);
 	}
 
-	// A Facade colour that is neither the Background default, the Fore/Back
-	// Location colours, nor the lights-off tint, so "painted with the Facade's
-	// colour" can never be confused with any other fill source.
+	bool near(float a, float b) { return std::abs(a - b) < 0.01f; }
+
+	int const kCellWidth = CORE_CELL_WIDTH_PIXELS;
+	int const kCellHeight = CORE_LEVEL_HEIGHT_PIXELS;
+
+	// A Facade colour and a Background colour that differ from every Layer
+	// colour in the renderer, so a picture that still followed one of them
+	// could not be mistaken for the artwork.
 	core::BackgroundColour const kFacadeColour{ 210, 66, 138 };
+	core::BackgroundColour const kBackgroundColour{ 12, 200, 66 };
 
-	// The Layer colours the viewport passes down as the generic fill
-	// (ForeLocationColour / BackLocationColour in Render.cpp).
-	core::BackgroundColour const kForeLayerColour{ 192, 192, 255 };
-	core::BackgroundColour const kBackLayerColour{ 224, 224, 255 };
-
-	// The same colours in the shared drawing vocabulary the renderer records
-	// with. The model below answers in packed colours because renderSector()
-	// does: flatSurfaceColour() hands back a PackedColourValue, and the
-	// lights-off tint is packed from the shared LightsOffTint rather than a
-	// literal, so the comparison still names the rule it proves (#998).
-	PackedColourValue const kFacadeFill = packColour(kFacadeColour.r, kFacadeColour.g, kFacadeColour.b);
-	PackedColourValue const kForeLayerFill = packColour(kForeLayerColour.r, kForeLayerColour.g, kForeLayerColour.b);
-	PackedColourValue const kBackLayerFill = packColour(kBackLayerColour.r, kBackLayerColour.g, kBackLayerColour.b);
-	PackedColourValue const kLightsOffFill = packColour(LightsOffTint.r, LightsOffTint.g, LightsOffTint.b);
-
-	//
-	// One surface stroke renderSector() would emit: filled or outlined, in a
-	// definite colour.
-	//
-	struct Stroke
+	// One full-cell tile per flat surface, each in its own column of a
+	// one-row sheet, so no two tiles share a texel column and a quad's
+	// tile is readable back out of the UVs it sampled.
+	SectorTileset installFlatSurfaceAtlas()
 	{
-		bool filled{ false };
-		PackedColourValue colour{};
-	};
-
-	//
-	// Mirrors renderSector()'s surface decisions for one pass:
-	//
-	//   * the lights-off tint replaces the Layer colour unless the Sector
-	//     bypasses it (bypassesLightsOffTint, #46);
-	//   * the generic fill is skipped for a flat-colour Sector so its own
-	//     fill never paints twice (rendersAsFlatColour);
-	//   * a flat-colour Sector fills in the solid passes and outlines in
-	//     the wireframe overlay, never both in one pass.
-	//
-	std::vector<Stroke> modelSurfaceStrokes(core::Sector const& sector,
-		LayerRenderStyle style, PackedColourValue const& layerColour)
-	{
-		std::vector<Stroke> strokes;
-
-		if (style == LayerRenderStyle::Hidden)
-		{
-			return strokes;
-		}
-
-		auto colour = layerColour;
-		if (!bypassesLightsOffTint(sector.getType()) && !sector.areLightsOn())
-		{
-			colour = kLightsOffFill;
-		}
-
-		if (!rendersAsFlatColour(sector.getType()))
-		{
-			strokes.push_back({ style != LayerRenderStyle::Wireframe, colour });
-		}
-		else
-		{
-			auto const own = flatSurfaceColour(sector);
-			require(own.has_value(), "a flat-colour Sector carries no surface colour");
-			if (shouldFillBackground(style))
-			{
-				strokes.push_back({ true, *own });
-			}
-			else if (shouldOutlineBackground(style))
-			{
-				strokes.push_back({ false, *own });
-			}
-		}
-
-		return strokes;
+		SectorTileset atlas;
+		atlas.family = SectorTilesetFamily::New;
+		int column = 0;
+		for (auto const* name : { "room", "facade", "background" })
+			atlas.surfaces.emplace(name, SectorTileRegion{
+				column++ * kCellWidth, 0, kCellWidth, kCellHeight });
+		atlas.width = column * kCellWidth;
+		atlas.height = kCellHeight;
+		setSectorTileset(atlas, static_cast<TextureId>(1));
+		require(sectorTilesetIsNewFamily(),
+			"The synthetic flat-surface atlas did not come up as the New family");
+		return atlas;
 	}
 
-	std::string strokeCount(std::vector<Stroke> const& strokes)
+	void pinViewport()
 	{
-		return std::to_string(strokes.size());
+		gUISettings = UISettings{};
+		gUISettings.worldViewportX = 0.0f;
+		gUISettings.worldViewportY = 0.0f;
+		gUISettings.worldViewportWidth = 4096.0f;
+		gUISettings.worldViewportHeight = 4096.0f;
+		gUISettings.xOffset = 0.0f;
+		gUISettings.yOffset = 0.0f;
+		gUISettings.worldZoom = 1.0f;
 	}
 
-	// The single stroke a flat-colour Sector must produce in a given style,
-	// with the fill/outline polarity the ticket demands.
-	Stroke expectSingleStroke(std::vector<Stroke> const& strokes, bool filled,
-		std::string const& where)
+	WorldDrawList::ClipRectangle const kNoClip{ { -100000.0f, -100000.0f },
+		{ 100000.0f, 100000.0f } };
+
+	// The tile one UV centre falls on.
+	std::string tileAt(float centreU, float centreV, SectorTileset const& atlas)
 	{
-		require(strokes.size() == 1,
-			("expected exactly one surface stroke" + where + ", got " + strokeCount(strokes)).c_str());
-		require(strokes[0].filled == filled,
-			("the single surface stroke" + where + " has the wrong polarity").c_str());
-		return strokes[0];
+		for (auto const& [name, region] : atlas.surfaces)
+		{
+			auto const left = float(region.x) / float(atlas.width);
+			auto const right = float(region.x + region.width) / float(atlas.width);
+			auto const top = float(region.y) / float(atlas.height);
+			auto const bottom = float(region.y + region.height) / float(atlas.height);
+			if (centreU >= left && centreU < right && centreV >= top
+					&& centreV < bottom)
+				return name;
+		}
+		return {};
+	}
+
+	// The textured quads one pass emitted, as tile names.
+	std::vector<std::string> drawnTiles(WorldDrawList const& drawing,
+		SectorTileset const& atlas)
+	{
+		std::vector<std::string> tiles;
+		for (auto const& command : drawing.commands())
+		{
+			auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command);
+			if (!triangle || triangle->texture != WorldDrawList::Texture::SectorAtlas)
+				continue;
+			float u0{ 1e9f }, u1{ -1e9f }, v0{ 1e9f }, v1{ -1e9f };
+			for (auto const& uv : triangle->texcoords)
+			{
+				u0 = std::min(u0, uv.x); u1 = std::max(u1, uv.x);
+				v0 = std::min(v0, uv.y); v1 = std::max(v1, uv.y);
+			}
+			tiles.push_back(tileAt((u0 + u1) * 0.5f, (v0 + v1) * 0.5f, atlas));
+		}
+		return tiles;
+	}
+
+	int countTile(std::vector<std::string> const& tiles, std::string const& want)
+	{
+		return int(std::count(tiles.begin(), tiles.end(), want));
+	}
+
+	// Every textured quad the pass emitted, whatever atlas it sampled.
+	std::vector<WorldDrawList::Triangle> texturedQuads(
+		WorldDrawList const& drawing)
+	{
+		std::vector<WorldDrawList::Triangle> out;
+		for (auto const& command : drawing.commands())
+			if (auto const* t = std::get_if<WorldDrawList::Triangle>(&command);
+				t && t->texture != WorldDrawList::Texture::None)
+				out.push_back(*t);
+		return out;
+	}
+
+	int lineCount(WorldDrawList const& drawing)
+	{
+		int lines = 0;
+		for (auto const& command : drawing.commands())
+			if (std::holds_alternative<WorldDrawList::Line>(command)) ++lines;
+		return lines;
+	}
+
+	WorldDrawList renderFlat(std::shared_ptr<const core::Sector> const& sector,
+		LayerRenderStyle style)
+	{
+		WorldDrawList drawing{ kNoClip };
+		renderSector(sector, sector->getLayerIndex(), style, false,
+			packColour(192, 192, 255), &drawing);
+		return drawing;
 	}
 
 	//
@@ -185,157 +214,120 @@ namespace
 	};
 
 	//
-	// The rule itself: Facade and Background are the flat-colour types, and
-	// nothing else is - a Room must keep its Layer fill and its lights-off
-	// tint, or the bypass would swallow the whole Location world.
+	// The Facade's surface is its own tile, laid one per World cell across
+	// its whole area like any wall's, and drawn with no colour multiplied
+	// into it.
 	//
-	void flatColourRuleNamesFacadeAndBackgroundOnly()
+	void aFacadeDrawsItsOwnTileAcrossItsArea()
 	{
-		require(rendersAsFlatColour(core::SectorType::Facade),
-			"a Facade is not rendered as a flat colour");
-		require(rendersAsFlatColour(core::SectorType::Background),
-			"a Background is not rendered as a flat colour");
-		require(!rendersAsFlatColour(core::SectorType::Location),
-			"a plain Location claims the flat-colour rule");
-		require(!rendersAsFlatColour(core::SectorType::Ladder)
-			&& !rendersAsFlatColour(core::SectorType::Lift)
-			&& !rendersAsFlatColour(core::SectorType::Shuttle)
-			&& !rendersAsFlatColour(core::SectorType::Stairwell)
-			&& !rendersAsFlatColour(core::SectorType::Staircase),
-			"a Transit type claims the flat-colour rule");
+		auto const atlas = installFlatSurfaceAtlas();
+		pinViewport();
 
-		require(bypassesLightsOffTint(core::SectorType::Facade),
-			"a Facade does not bypass the lights-off tint");
-		require(bypassesLightsOffTint(core::SectorType::Background),
-			"a Background does not bypass the lights-off tint");
-		require(!bypassesLightsOffTint(core::SectorType::Location),
-			"a Location bypasses the lights-off tint; the tint would never reach a Room");
+		Frontage const f;
+		auto const drawing = renderFlat(f.facade, LayerRenderStyle::Solid);
+		auto const tiles = drawnTiles(drawing, atlas);
+
+		require(countTile(tiles, "facade") >= 2,
+			"a Facade four cells wide drew no `facade` tile across its area");
+		require(std::none_of(tiles.begin(), tiles.end(),
+				[](std::string const& tile) { return tile != "facade"; }),
+			"a Facade drew a tile that is not its own");
+		for (auto const& quad : texturedQuads(drawing))
+			require(quad.colour == White,
+				"a Facade tile was drawn with a colour other than its raw artwork");
 	}
 
 	//
-	// The Solid pass fills the Facade with its own colour - once. The generic
-	// Location fill is skipped, so the Facade's colour never paints over a
-	// Layer-coloured underlay, and no other colour source can appear inside
-	// its footprint.
+	// A Background is a surface like any other: it asks for `background`
+	// and draws what that tile shows.
 	//
-	void solidPassFillsTheFacadeWithItsOwnColour()
+	void aBackgroundDrawsItsOwnTileAcrossItsArea()
 	{
-		Frontage const f;
+		auto const atlas = installFlatSurfaceAtlas();
+		pinViewport();
 
-		auto const strokes = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Solid,
-			kForeLayerFill);
-		auto const stroke = expectSingleStroke(strokes, true, " for a Facade in the Solid pass");
+		core::World world("Background surface", 12, 1);
+		auto const index = world.addBackground(0, 0, 0, 4, 1, kBackgroundColour);
+		world.finishBuild();
+		auto const background = world.getSector(index);
+		require(background != nullptr
+				&& background->getType() == core::SectorType::Background,
+			"the fixture Sector is not a Background");
 
-		require(stroke.colour == kFacadeFill,
-			"the Solid pass does not fill a Facade with the Facade's own colour");
-		require(stroke.colour != kForeLayerFill,
-			"the Facade fill is the Layer colour, not its own");
-		require(stroke.colour != kLightsOffFill,
-			"the Facade fill is the lights-off tint");
-
-		// flatSurfaceColour is the single source the renderer reads.
-		auto const own = flatSurfaceColour(*f.facade);
-		require(own.has_value() && *own == kFacadeFill,
-			"flatSurfaceColour() does not report the Facade's colour");
-
-		// Re-colouring the Facade moves the fill with it: the colour is live,
-		// not a constant dressed up as one.
-		auto mutableFacade = std::const_pointer_cast<core::Facade>(f.facade);
-		mutableFacade->setColour(core::BackgroundColour{ 12, 200, 66 });
-		auto const recoloured = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Solid,
-			kForeLayerFill);
-		require(recoloured.size() == 1 && recoloured[0].filled
-				&& recoloured[0].colour == packColour(12, 200, 66),
-			"the Solid fill did not follow the Facade's recolour");
+		auto const drawing = renderFlat(background, LayerRenderStyle::Solid);
+		auto const tiles = drawnTiles(drawing, atlas);
+		require(countTile(tiles, "background") >= 2,
+			"a Background four cells wide drew no `background` tile across its area");
+		require(std::none_of(tiles.begin(), tiles.end(),
+				[](std::string const& tile) { return tile != "background"; }),
+			"a Background drew a tile that is not its own");
 	}
 
 	//
 	// The wireframe overlay contributes the outline only, never a fill
-	// (ADR 0002): the same rule the Background overlay obeys, and for the
-	// same reason - a fill from the Layer behind would bleed over the
+	// (ADR 0002): a fill from the Layer behind would bleed over the
 	// selection.
 	//
-	void wireframePassOutlinesTheFacadeNeverFills()
+	void aFacadeIsOutlinedByTheWireframeOverlayAndFillsNothing()
 	{
+		auto const atlas = installFlatSurfaceAtlas();
+		pinViewport();
+
 		Frontage const f;
-
-		auto const strokes = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Wireframe,
-			kBackLayerFill);
-		auto const stroke = expectSingleStroke(strokes, false,
-			" for a Facade in the wireframe overlay");
-		require(stroke.colour == kFacadeFill,
-			"the wireframe outline of a Facade is not drawn in the Facade's colour");
-
-		// The pass-level rule keeps its shape: one pass never both fills and
-		// outlines a flat-colour Sector.
-		require(!shouldFillBackground(LayerRenderStyle::Wireframe),
-			"the wireframe pass fills a flat-colour Sector");
-		require(shouldOutlineBackground(LayerRenderStyle::Wireframe),
-			"the wireframe pass does not outline a flat-colour Sector");
+		auto const drawing = renderFlat(f.facade, LayerRenderStyle::Wireframe);
+		require(texturedQuads(drawing).empty(),
+			"the wireframe overlay filled a Facade instead of outlining it");
+		require(lineCount(drawing) > 0,
+			"the wireframe overlay drew no outline for a Facade");
 
 		// Hidden paints nothing at all.
-		require(modelSurfaceStrokes(*f.facade, LayerRenderStyle::Hidden, kBackLayerFill).empty(),
+		require(renderFlat(f.facade, LayerRenderStyle::Hidden).commands().empty(),
 			"the Hidden style paints a Facade");
 	}
 
 	//
-	// The lights-off tint is bypassed: the user-authored colour is
-	// authoritative, as with a Background. The Room control proves the tint
-	// is live - the equality below is not vacuous.
+	// A Sector's lights-off state changes no picture. Nothing is
+	// multiplied into a tile, so the stream a Facade produces with its
+	// lights off is the stream it produced with them on - the same tiles,
+	// in the same order, with the same colours.
 	//
-	void facadeFillIsUnchangedWhenLightsAreOff()
+	void aFacadeDrawsTheSamePictureWithItsLightsOff()
 	{
+		auto const atlas = installFlatSurfaceAtlas();
+		pinViewport();
+
 		Frontage const f;
+		require(f.facade->areLightsOn(),
+			"a freshly built Facade starts with its lights off");
 
-		require(f.facade->areLightsOn(), "a freshly built Facade starts with its lights off");
-
-		auto const on = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Solid, kForeLayerFill);
+		auto const on = renderFlat(f.facade, LayerRenderStyle::Solid);
 		std::const_pointer_cast<core::Facade>(f.facade)->lightsOff();
 		require(!f.facade->areLightsOn(), "the Facade's lights did not go off");
-		auto const off = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Solid, kForeLayerFill);
+		auto const off = renderFlat(f.facade, LayerRenderStyle::Solid);
 
-		require(on.size() == off.size(),
-			"turning a Facade's lights off changed how many strokes it paints");
-		require(!off.empty() && off[0].filled && off[0].colour == kFacadeFill,
-			"a Facade with its lights off is not filled with its own colour");
-		require(off[0].colour != kLightsOffFill,
-			"the lights-off tint reached a Facade's fill");
-
-		// The same for the Aperture pass: the glass shows the authored colour
-		// with the lights off just as it does with them on.
-		auto const apertureOn = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Aperture,
-			kBackLayerFill);
-		auto const apertureOff = modelSurfaceStrokes(*f.facade, LayerRenderStyle::Aperture,
-			kBackLayerFill);
-		require(apertureOff.size() == 1 && apertureOff[0].filled
-				&& apertureOff[0].colour == apertureOn[0].colour && apertureOff[0].colour == kFacadeFill,
-			"the aperture fill changed when the Facade's lights went off");
-
-		// The control: a Room's fill does follow its lights, so the bypass
-		// above is a rule about Facades, not a renderer that never tints.
-		core::World control("Lights control", 12, 2);
-		while (control.getLayerCount() < 2) control.addLayer();
-		auto const roomIndex = control.addRoom("Lit Room", 0, 0, 0, 4, 1);
-		auto room = control.getSector(roomIndex);
-		require(room != nullptr && room->getType() == core::SectorType::Location,
-			"the control Sector is not a plain Location");
-		std::const_pointer_cast<core::Sector>(room)->lightsOff();
-		auto const roomOff = modelSurfaceStrokes(*room, LayerRenderStyle::Solid, kForeLayerFill);
-		require(roomOff.size() == 1 && roomOff[0].filled && roomOff[0].colour == kLightsOffFill,
-			"a Room with its lights off does not take the lights-off tint");
+		require(on.commands().size() == off.commands().size(),
+			"turning a Facade's lights off changed how much it draws");
+		auto const onTiles = drawnTiles(on, atlas);
+		auto const offTiles = drawnTiles(off, atlas);
+		require(onTiles == offTiles,
+			"a Facade with its lights off drew different tiles than with them on");
+		for (auto const& quad : texturedQuads(off))
+			require(quad.colour == White,
+				"a Facade with its lights off was drawn with a colour other than "
+				"its raw artwork");
 	}
 
 	//
-	// A Window looking into a Facade shows its flat colour, its objects,
-	// and its agents.
+	// A Window looking into a Facade still shows the Facade's objects and
+	// its agents. The Aperture pass tiles the Facade behind the glass and
+	// clips to the Window's rect (ADR 0002); what it shows is the same
+	// artwork the Solid pass would show.
 	//
-	// The fill arrives through the Aperture pass, clipped to the Window's
-	// rect (ADR 0002): the visible area is the intersection of the Window
-	// and the Facade, which for this layout is exactly the Window - the
-	// Facade's colour reaches the screen nowhere the glass does not cover.
-	//
-	void aWindowIntoAFacadeShowsFlatColourObjectsAndAgents()
+	void aWindowIntoAFacadeShowsObjectsAndAgents()
 	{
+		auto const atlas = installFlatSurfaceAtlas();
+		pinViewport();
+
 		Frontage f;
 
 		// The glass looks into the Facade.
@@ -344,30 +336,26 @@ namespace
 			"the Window's back Sector is not the Facade");
 		require(back->getIndex() == f.facadeIndex, "the Window looks into the wrong Sector");
 
-		// The Aperture pass is handed the Facade's own colour, not the
-		// generic back-layer tint (#34's rule, now covering the Facade).
-		auto const fill = apertureFillColour(*back);
-		require(fill.has_value(), "a Facade back Sector offers no aperture fill colour");
-		require(*fill == kFacadeFill, "the aperture fill is not the Facade's own colour");
+		// The Aperture pass tiles the Facade with its own artwork, and the
+		// glass shows that artwork rather than any colour the Sector carries.
+		auto const drawing = renderFlat(f.facade, LayerRenderStyle::Aperture);
+		auto const tiles = drawnTiles(drawing, atlas);
+		require(countTile(tiles, "facade") >= 2,
+			"the aperture pass drew no Facade tile behind the glass");
+		for (auto const& quad : texturedQuads(drawing))
+			require(quad.colour == White,
+				"the Facade behind the glass was drawn with a colour other than "
+				"its raw artwork");
 
-		// The glass follows the Facade: re-colour it and the fill follows.
-		auto mutableFacade = std::const_pointer_cast<core::Facade>(f.facade);
-		mutableFacade->setColour(core::BackgroundColour{ 30, 90, 210 });
-		require(apertureFillColour(*back) == packColour(30, 90, 210),
-			"the aperture fill did not follow the Facade's recolour");
-		mutableFacade->setColour(kFacadeColour);
-
-		// The fill is clipped to the Window: the Window's rect sits wholly
-		// inside the Facade, so the visible fill is exactly the Window's
-		// rect - no Facade colour reaches the screen outside the glass.
+		// The glass follows the Facade's geometry: the Window's rect sits
+		// wholly inside the Facade, so nothing of the Facade reaches the
+		// screen outside the glass.
 		core::Vector2 windowMin, windowMax, facadeMin, facadeMax;
 		f.window->getFullShape(windowMin, windowMax);
 		f.facade->getBounds(facadeMin, facadeMax);
 		require(windowMin.x >= facadeMin.x && windowMax.x <= facadeMax.x
 				&& windowMin.y >= facadeMin.y && windowMax.y <= facadeMax.y,
 			"the Window does not sit wholly inside the Facade it looks into");
-		require(apertureFillColour(*back) == kFacadeFill,
-			"the clipped aperture fill lost the Facade's colour");
 
 		// Objects inside the Facade reach the glass: the aperture pass draws
 		// a Sector's objects because it draws solid, and the Facade really
@@ -394,11 +382,11 @@ namespace
 			"the wireframe overlay renders agents inside a Facade");
 
 		// And with the Facade's lights off, the glass shows exactly the same
-		// flat colour - the light switch moves the agents' world, not the
-		// paint.
+		// picture - the light switch moves the agents' world, not the paint.
 		std::const_pointer_cast<core::Facade>(f.facade)->lightsOff();
-		require(apertureFillColour(*back) == kFacadeFill,
-			"the aperture fill changed when the Facade's lights went off");
+		auto const dark = renderFlat(f.facade, LayerRenderStyle::Aperture);
+		require(drawnTiles(dark, atlas) == tiles,
+			"the picture behind the glass changed when the Facade's lights went off");
 	}
 
 	//
@@ -427,10 +415,10 @@ namespace
 
 void render_smoke::registerFacades(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "flatColourRuleNamesFacadeAndBackgroundOnly", isolated<[](smoke::Context const&) { flatColourRuleNamesFacadeAndBackgroundOnly(); }> });
-	checks.push_back({ "solidPassFillsTheFacadeWithItsOwnColour", isolated<[](smoke::Context const&) { solidPassFillsTheFacadeWithItsOwnColour(); }> });
-	checks.push_back({ "wireframePassOutlinesTheFacadeNeverFills", isolated<[](smoke::Context const&) { wireframePassOutlinesTheFacadeNeverFills(); }> });
-	checks.push_back({ "facadeFillIsUnchangedWhenLightsAreOff", isolated<[](smoke::Context const&) { facadeFillIsUnchangedWhenLightsAreOff(); }> });
-	checks.push_back({ "aWindowIntoAFacadeShowsFlatColourObjectsAndAgents", isolated<[](smoke::Context const&) { aWindowIntoAFacadeShowsFlatColourObjectsAndAgents(); }> });
+	checks.push_back({ "aFacadeDrawsItsOwnTileAcrossItsArea", isolated<[](smoke::Context const&) { aFacadeDrawsItsOwnTileAcrossItsArea(); }> });
+	checks.push_back({ "aBackgroundDrawsItsOwnTileAcrossItsArea", isolated<[](smoke::Context const&) { aBackgroundDrawsItsOwnTileAcrossItsArea(); }> });
+	checks.push_back({ "aFacadeIsOutlinedByTheWireframeOverlayAndFillsNothing", isolated<[](smoke::Context const&) { aFacadeIsOutlinedByTheWireframeOverlayAndFillsNothing(); }> });
+	checks.push_back({ "aFacadeDrawsTheSamePictureWithItsLightsOff", isolated<[](smoke::Context const&) { aFacadeDrawsTheSamePictureWithItsLightsOff(); }> });
+	checks.push_back({ "aWindowIntoAFacadeShowsObjectsAndAgents", isolated<[](smoke::Context const&) { aWindowIntoAFacadeShowsObjectsAndAgents(); }> });
 	checks.push_back({ "aWindowCannotLookHalfIntoAFacadeAndHalfIntoABackground", isolated<[](smoke::Context const&) { aWindowCannotLookHalfIntoAFacadeAndHalfIntoABackground(); }> });
 }

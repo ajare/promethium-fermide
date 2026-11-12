@@ -1,10 +1,9 @@
 # Authored tileset for the Furniture atlas (#1016).
 #
-# A version 2 tileset declares, per tile, the three render semantics a
-# version 1 file left the renderer to guess: the render offset it draws at,
-# the drawn size it draws at, and whether it is tintable. Offsets and sizes
-# are World units, not pixels - one World unit of authored art is one
-# authored tile.
+# A version 2 tileset declares, per tile, the render semantics a version 1
+# file left the renderer to guess: the render offset it draws at and the
+# drawn size it draws at. Offsets and sizes are World units, not pixels -
+# one World unit of authored art is one authored tile.
 #
 # The `ImageSet` entries the application manifest declares for this atlas
 # are generated from this file by `scripts/generate_furniture_atlas_new.py`
@@ -53,62 +52,52 @@ sprites:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
   sofa-L0:
     cell: [1, 0]
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
   sofa-M0:
     cell: [2, 0]
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
   sofa-R0:
     cell: [3, 0]
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
   desk-L0:
     cell: [4, 0]
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
   # Row 1: the desk's remaining roles, then the bed's three.
   desk-M0:
     cell: [0, 1]
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
   desk-R0:
     cell: [1, 1]
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
   bed-L0:
     cell: [2, 1]
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
   bed-M0:
     cell: [3, 1]
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
   bed-R0:
     cell: [4, 1]
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false
   # Row 2: the bare chair cell.
   #
   # A piece that names no position - a single-cell chair, or a catalogue that
@@ -123,4 +112,3 @@ sprites:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: false

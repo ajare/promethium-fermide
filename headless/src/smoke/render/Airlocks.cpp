@@ -100,11 +100,11 @@ namespace
 			auto text = std::get_if<WorldDrawList::Text>(&command);
 			return text && text->value == "3.0 s";
 		}), "Renderer missing simulated seconds countdown");
-		auto colour = agentRenderColour(*agent, false);
-		require(std::any_of(occupied.commands().begin(), occupied.commands().end(), [&](auto const& command) {
+		// An Agent body is recognised by the atlas it sampled, not by a
+		// colour: every Agent draws its own artwork unmodulated.
+		require(std::any_of(occupied.commands().begin(), occupied.commands().end(), [](auto const& command) {
 			auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-			auto text = std::get_if<WorldDrawList::Text>(&command);
-			return (triangle && triangle->colour == colour) || (text && text->colour == colour);
+			return triangle && triangle->texture == WorldDrawList::Texture::AgentAtlas;
 		}), "Renderer missing chamber occupant");
 		// The normal Agent renderer draws each packed chamber occupant at its
 		// observed cell, without a separate Airlock-only rendering path.
@@ -118,7 +118,6 @@ namespace
 		{
 			auto passenger = world->createAgent("Packed occupant", 0, 0, 5.5f);
 			auto entity = world->lookupAgent(passenger).entity;
-			require(world->setAgentIndividualColour(passenger, core::AgentColour{ uint8_t(60 + member * 50), 80, 120 }), "Packed occupant colour refused");
 			auto route = world->getGraph()->calculatePath(entity, world->getGraph()->getVertexForObject(marker.sector->getObject(marker.index)));
 			require(bool(route), "Packed renderer route unavailable"); entity->setPath(route, true);
 			passengers.push_back(passenger);
@@ -145,17 +144,15 @@ namespace
 		for (auto passenger : passengers)
 		{
 			auto entity = world->lookupAgent(passenger).entity;
-			auto passengerColour = agentRenderColour(*entity, false);
 			bool visible = false;
 			for (auto const& command : batchDrawing.commands())
 			{
-				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command); triangle && triangle->colour == passengerColour)
+				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+					triangle && triangle->texture == WorldDrawList::Texture::AgentAtlas)
 				{
 					auto centre = (triangle->positions[0].x + triangle->positions[1].x + triangle->positions[2].x) / 3;
 					visible = visible || std::abs(centre - entity->getGlobalPosition().x * CORE_CELL_WIDTH_PIXELS) < CORE_CELL_WIDTH_PIXELS / 2;
 				}
-				if (auto text = std::get_if<WorldDrawList::Text>(&command); text && text->colour == passengerColour)
-					visible = visible || std::abs(text->position.x - entity->getGlobalPosition().x * CORE_CELL_WIDTH_PIXELS) < CORE_CELL_WIDTH_PIXELS / 2;
 			}
 			require(visible, "Renderer missing packed occupant at observed position");
 		}

@@ -112,8 +112,8 @@ namespace
 					for (auto const& command : drawing.commands())
 					{
 						if (auto body = std::get_if<WorldDrawList::Triangle>(&command))
-							if (body->texture == WorldDrawList::Texture::AgentAtlas
-								&& body->colour == agentRenderColour(*rendered->lookupAgent(id).entity, false)) agentDrawn = true;
+							if (body->texture == WorldDrawList::Texture::AgentAtlas)
+								agentDrawn = true;
 						if (auto line = std::get_if<WorldDrawList::Line>(&command))
 							if (line->colour == packColour(255, 0, 0, 128))
 							{

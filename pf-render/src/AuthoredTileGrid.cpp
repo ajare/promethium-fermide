@@ -99,9 +99,9 @@ bool isDerivedVariantName(std::string const& name)
 
 // Expands one declared family into the grid. Variant *n* is `<base>-Vn`, in
 // the base's own column and one authored tile height further down per step,
-// and it inherits the base's content rectangle, render offset, drawn size
-// and tintable flag: adding a variant is a picture decision and never a
-// re-declaration of geometry. The count was already established to fit the
+// and it inherits the base's content rectangle, render offset and drawn
+// size: adding a variant is a picture decision and never a re-declaration
+// of geometry. The count was already established to fit the
 // sheet, so every cell the family lands on exists.
 void deriveVariantFamily(DeclaredFamily const& family,
     std::string const& tileNoun, AuthoredTileGrid& grid)
@@ -200,7 +200,7 @@ AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
             throw std::runtime_error(tileNoun + " '" + name + "' uses a name the "
                 "variant derivation reserves; a family's variants are derived "
                 "from its base and are not authored beside it");
-        TileArtwork artwork{ r, v["tintable"].as<bool>(), { 0.0f, 0.0f }, { 0.0f, 0.0f } };
+        TileArtwork artwork{ r, { 0.0f, 0.0f }, { 0.0f, 0.0f } };
         if (declaresRenderSemantics)
         {
             artwork.offset = requirePair(v, name, tileNoun, "offset");

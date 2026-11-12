@@ -89,9 +89,9 @@ set(agent_checks
     activationSurvivesTopologyEdits
     inactiveAgentsAreRefusedInteractionRequests
     queuedInteractionsAreCancelledByDeactivation
-    colourIsUniqueRevisionedAndPersisted
+    agentColourChannelRoundTripThroughTheEditorBoundary
+    unknownPersistedAgentPropertyTypesAreRefused
     displayColourIsRandomAtCreationBackfilledAndPersisted
-    closedWorldConflictsAreRejectedWhenTheRegistryIsResolved
     walkSpeedRangesAreBoundedRevisionedAndPersisted
     walkSpeedIndependentAndFixedSamplesPersistAcrossLoadAndReset
     walkSpeedInheritedConflictsAreRefusedAtomically

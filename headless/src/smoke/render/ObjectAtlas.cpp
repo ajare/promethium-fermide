@@ -37,7 +37,6 @@ namespace
 		char const* name;
 		int column, row;
 		int x, y, width, height;
-		bool tintable;
 	};
 
 	// The invented atlas: 192 x 120 pixels laid out on a 32 x 40 authored grid,
@@ -49,26 +48,26 @@ namespace
 	std::vector<AuthoredSprite> completeSet()
 	{
 		return {
-			{"door", 0, 0, 2, 4, 28, 32, false},
-			{"button-enabled", 1, 0, 10, 14, 12, 12, false},
-			{"button-disabled", 2, 0, 10, 14, 12, 12, false},
-			{"window-clear", 3, 0, 2, 8, 28, 24, false},
-			{"window-frosted", 4, 0, 2, 8, 28, 24, false},
-			{"window-tinted", 5, 0, 2, 8, 28, 24, false},
-			{"booth-window-open", 0, 1, 2, 8, 28, 24, false},
-			{"booth-window-closed", 1, 1, 2, 8, 28, 24, false},
-			{"agent", 2, 1, 8, 6, 16, 28, true},
-			{"marker", 3, 1, 10, 10, 12, 12, true},
-			{"platform-lift", 4, 1, 1, 2, 30, 36, false},
-			{"shuttle-car-left", 5, 1, 0, 4, 32, 32, false},
-			{"shuttle-car-middle", 0, 2, 0, 4, 32, 32, false},
-			{"shuttle-car-right", 1, 2, 0, 4, 32, 32, false},
-			{"shuttle-car-connector", 2, 2, 4, 12, 24, 16, false},
-			{"lift-car", 3, 2, 1, 2, 30, 36, false},
+			{"door", 0, 0, 2, 4, 28, 32},
+			{"button-enabled", 1, 0, 10, 14, 12, 12},
+			{"button-disabled", 2, 0, 10, 14, 12, 12},
+			{"window-clear", 3, 0, 2, 8, 28, 24},
+			{"window-frosted", 4, 0, 2, 8, 28, 24},
+			{"window-tinted", 5, 0, 2, 8, 28, 24},
+			{"booth-window-open", 0, 1, 2, 8, 28, 24},
+			{"booth-window-closed", 1, 1, 2, 8, 28, 24},
+			{"agent", 2, 1, 8, 6, 16, 28},
+			{"marker", 3, 1, 10, 10, 12, 12},
+			{"platform-lift", 4, 1, 1, 2, 30, 36},
+			{"shuttle-car-left", 5, 1, 0, 4, 32, 32},
+			{"shuttle-car-middle", 0, 2, 0, 4, 32, 32},
+			{"shuttle-car-right", 1, 2, 0, 4, 32, 32},
+			{"shuttle-car-connector", 2, 2, 4, 12, 24, 16},
+			{"lift-car", 3, 2, 1, 2, 30, 36},
 			// Content may start in its own cell and run on into the neighbour,
 			// as the bundled atlas does with its wide Lying tile. The loader has
 			// never required a content rectangle to stay inside one cell.
-			{"human-lying", 4, 2, 0, 14, 40, 26, true},
+			{"human-lying", 4, 2, 0, 14, 40, 26},
 		};
 	}
 
@@ -86,8 +85,7 @@ namespace
 			yaml << "  " << sprite.name << ":\n"
 				<< "    cell: [" << sprite.column << ", " << sprite.row << "]\n"
 				<< "    content: [" << sprite.x << ", " << sprite.y << ", "
-				<< sprite.width << ", " << sprite.height << "]\n"
-				<< "    tintable: " << (sprite.tintable ? "true" : "false") << "\n";
+				<< sprite.width << ", " << sprite.height << "]\n";
 		auto const path = context.temporaryRoot() / (tag + ".tileset.yaml");
 		std::ofstream out(path, std::ios::binary | std::ios::trunc);
 		out << yaml.str();
@@ -121,7 +119,6 @@ namespace
 		std::string name;
 		int column{}, row{};
 		int x{}, y{}, width{}, height{};
-		bool tintable{};
 		bool hasOffset{ true };
 		bool hasDrawnSize{ true };
 		std::string offsetX{ "0" }, offsetY{ "0" };
@@ -141,7 +138,6 @@ namespace
 			<< sprite.width << ", " << sprite.height << "]\n";
 		if (!sprite.variants.empty())
 			out << "    variants: " << sprite.variants << "\n";
-		out << "    tintable: " << (sprite.tintable ? "true" : "false") << "\n";
 		if (sprite.hasOffset)
 			out << "    offset: [" << sprite.offsetX << ", " << sprite.offsetY << "]\n";
 		if (sprite.hasDrawnSize)
@@ -193,7 +189,6 @@ namespace
 		sprite.name = "slab";
 		sprite.column = 0; sprite.row = 0;
 		sprite.x = 0; sprite.y = 0; sprite.width = 32; sprite.height = 8;
-		sprite.tintable = true;
 		sprite.offsetX = "0"; sprite.offsetY = "-0.2";
 		sprite.drawnWidth = "1"; sprite.drawnHeight = "0.2";
 		return sprite;
@@ -243,8 +238,7 @@ namespace
 			if (withVariants && std::string(sprite.name) == "door")
 				yaml << "    variants: 2\n";
 			yaml << "    content: [" << sprite.x << ", " << sprite.y << ", "
-				<< sprite.width << ", " << sprite.height << "]\n"
-				<< "    tintable: " << (sprite.tintable ? "true" : "false") << "\n";
+				<< sprite.width << ", " << sprite.height << "]\n";
 		}
 		return yaml.str();
 	}
@@ -260,8 +254,7 @@ namespace
 		return v1SheetWithVariants(false)
 			+ "  door-V1:\n"
 			  "    cell: [5, 2]\n"
-			  "    content: [0, 0, 32, 40]\n"
-			  "    tintable: true\n";
+			  "    content: [0, 0, 32, 40]\n";
 	}
 
 	AuthoredSprite& find(std::vector<AuthoredSprite>& sprites, std::string const& name)
@@ -373,14 +366,12 @@ namespace
 	}
 
 	// A version 2 tileset authors the render semantics the renderer reads:
-	// the offset it draws at and the size it draws at, in World units, plus
-	// the tintable flag that was always meant to be the only source of
-	// tintability (#1014).
+	// the offset it draws at and the size it draws at, in World units
+	// (#1014).
 	void versionTwoSemanticsAreReadFromTheFile(smoke::Context const& context)
 	{
 		auto const tiles = loadV2Fixture(context, "v2-valid", { slab() });
 		auto const& sprite = tiles.sprites.at("slab");
-		require(sprite.tintable, "The tintable flag was not read from the file");
 		auto near = [](float a, float b) { return std::abs(a - b) < 0.0001f; };
 		require(near(sprite.offset.x, 0.0f) && near(sprite.offset.y, -0.2f),
 			"The render offset was not read from the file");
@@ -520,8 +511,6 @@ namespace
 					&& derived.drawnSize.x == parent.drawnSize.x
 					&& derived.drawnSize.y == parent.drawnSize.y,
 				variant + " did not inherit its base's render semantics");
-			require(derived.tintable == parent.tintable,
-				variant + " did not inherit its base's tintable flag");
 		}
 		// The count the author stated is kept with the base that stated it,
 		// so a caller can size a strip of leaves from the tileset rather

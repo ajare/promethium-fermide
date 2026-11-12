@@ -717,16 +717,17 @@ namespace
 			"The refusal for empty space does not say there is no Sector: "
 				+ empty.diagnostic);
 
-		// A Background: a Sector, but one that never asks the atlas for a
-		// tile, so a variant on it is artwork that could never show.
-		auto const flat = resolveSurfacePaint(fixture.documentWorld(),
+		// A Background: a Sector that draws a tile of its own like any
+		// wall, but one with no variant family to wear. The refusal names
+		// what the cell really is, which is the fact the author needs.
+		auto const background = resolveSurfacePaint(fixture.documentWorld(),
 			PaintTool::Room, swatches, 0, Fixture::backgroundX,
 			Fixture::backgroundY);
-		require(!flat.ok && !flat.diagnostic.empty(),
+		require(!background.ok && !background.diagnostic.empty(),
 			"A Background accepted a Room variant");
-		require(flat.diagnostic.find("flat") != std::string::npos,
-			"The refusal for a flat-coloured Sector does not say so: "
-				+ flat.diagnostic);
+		require(background.diagnostic.find("background") != std::string::npos,
+			"The refusal for a Background does not name what the cell is: "
+				+ background.diagnostic);
 
 		// Off the map entirely, and on a Layer that does not exist.
 		auto const offmap = resolveSurfacePaint(fixture.documentWorld(),

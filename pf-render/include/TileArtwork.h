@@ -11,11 +11,17 @@
 //
 //   * The pixel region is the runtime contract. It comes from the atlas's
 //     Willpower `ImageSet` resource, exactly as ADR 0010 requires.
-//   * The three render semantics - the tintable flag, the render offset and
-//     the drawn size - are authored per tile in the tileset definition that
-//     the `ImageSet` names. They are read from there. They are never derived
-//     from a tile's name, and the drawn size is never taken from the physical
-//     extent of whatever object the tile is drawn for.
+//   * The two render semantics - the render offset and the drawn size - are
+//     authored per tile in the tileset definition that the `ImageSet` names.
+//     They are read from there. They are never derived from a tile's name,
+//     and the drawn size is never taken from the physical extent of whatever
+//     object the tile is drawn for.
+//
+// What a tile looks like is settled by its pixels and nothing else. No colour
+// is multiplied into a tile on the way to the screen: the artwork the sheet
+// carries is the artwork that draws, so a picture that needs to be darker,
+// lighter or another hue is a different picture rather than the same one
+// drawn differently.
 //
 // That separation is what lets a Walkway keep a deliberately zero-height
 // physical shape - it must never obstruct pathing - while its artwork hangs
@@ -27,7 +33,6 @@ struct SectorTileRegion { int x, y, width, height; };
 struct TileArtwork
 {
     SectorTileRegion region{ 0, 0, 0, 0 };
-    bool tintable{ false };
     // Render offset in World units from the tile's anchor: +x right, +y up.
     pf::render::Vec2 offset{ 0.0f, 0.0f };
     // Drawn size in World units. An artwork's visual extent is its own and

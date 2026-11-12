@@ -3714,7 +3714,7 @@ namespace core
 				agent->mRoutePlanningRemainingTicks,
 				agent->mIndividualMinimumRoutePlanningTime, agent->mIndividualMaximumRoutePlanningTime,
 				agent->mMinimumRoutePlanningTimeSample, agent->mMaximumRoutePlanningTimeSample,
-				agent->mIndividualColour, agent->mIndividualEscalatorWalkingChance,
+				agent->mIndividualEscalatorWalkingChance,
 				agent->mIndividualWalkSpeedModifier, agent->mIndividualHeightModifier,
 				agent->mIndividualStairSpeedModifier, agent->mIndividualInteractionAversion,
 				agent->mIndividualEffortAversion, agent->mIndividualWaitingAversion,
@@ -3798,7 +3798,6 @@ namespace core
 			raw->mMaximumRoutePlanningTimeSample = saved.maximumRoutePlanningTimeSample;
 			// Every authored individual property comes back with the Agent: a
 			// structural replay is neither Reset nor re-authoring (#328).
-			raw->setIndividualColour(saved.individualColour);
 			raw->setIndividualEscalatorWalkingChance(saved.individualEscalatorWalkingChance);
 			raw->setIndividualWalkSpeedModifier(saved.individualWalkSpeedModifier);
 			raw->setIndividualHeightModifier(saved.individualHeightModifier);

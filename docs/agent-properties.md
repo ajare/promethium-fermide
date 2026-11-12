@@ -23,7 +23,7 @@ property, even if an individual override would hide the conflict. Adding a
 property to a tag also checks for conflicts among its assigned Agents.
 
 A property **namespace** is only an editor grouping, not part of its name or
-serialized key. Colour, Walk speed modifier, Height modifier, Object usage and Object usage distance are in the
+serialized key. Walk speed modifier, Height modifier, Object usage and Object usage distance are in the
 unlabelled group; all other properties are in **Pathing**.
 
 ### Values versus tag ranges
@@ -38,11 +38,11 @@ ordinary load and Reset do not repeatedly draw a new value. Assigning a tag or
 changing its range creates the relevant new samples. An individual override
 hides, rather than replaces, the underlying tag sample.
 
-Colour, Escalator walking chance, Object usage, Object usage distance,
+Escalator walking chance, Object usage, Object usage distance,
 Permission adherence, Remote Access panels, Remote BoothWindow shutters and Mobility profile are
 shared values on tags, not sampled ranges. A tag's intrinsic pastel **display
-Colour** colours its UI chip; it is separate from the optional Colour property
-that colours its Agents.
+Colour** colours its UI chip. It is the only Colour a tag carries: there is no
+Agent Colour property, and no Colour reaches the picture an Agent draws.
 
 ## Complete property catalogue
 
@@ -54,7 +54,6 @@ an editor widget when adding an override. Numeric values must be finite except a
 | --- | --- | --- | --- | --- |
 | Object usage | `objectUsage` | Arms, None or Remote control | Frozen script mode | Ability to operate objects, independent of Access permission and Mobility |
 | Object usage distance | `objectUsageDistance` | Concrete World-unit distance; finite and positive for effective Arms/Remote control | Frozen script distance | Physical arm length or maximum remote range; ignored under None |
-| Colour | `colour` | RGB bytes, each 0–255; no alpha | RGB (179, 77, 77), `#B34D4D` | Ordinary Agent rendering tint; no simulation effect |
 | Walk speed modifier | `walkSpeedModifier` | Number, 0.8–1.2 | 1 | Multiplies the Agent type's walking speed |
 | Height modifier | `heightModifier` | Number, 0.7–1 | 1 | Multiplies Standing height and derived pose heights; affects appearance and physical fit |
 | Escalator walking chance | `escalatorWalkingChance` | Probability, 0–1 | 0 | Chance of walking rather than standing on a moving Escalator |
@@ -169,11 +168,9 @@ See [BoothWindows](booth-windows.md) for centre geometry, side and ownership rul
 
 ## Appearance and physical movement
 
-### Colour
-
-The Colour property supplies an opaque RGB tint. Selection replaces the ordinary
-colour with the selection highlight, RGB (251, 188, 4). Changing Colour does not
-change physical capabilities, route choice or permissions.
+Agents have no Colour property. An Agent draws its sprite as the atlas paints
+it, with nothing multiplied in; selection is an outline drawn over that sprite
+rather than a colour replacing it.
 
 ### Walk speed modifier
 
@@ -325,10 +322,6 @@ Within a serialized Agent record, individual overrides use `individualProperties
 
 ```yaml
 individualProperties:
-  - type: colour
-    r: 80
-    g: 160
-    b: 220
   - type: walkSpeedModifier
     value: 1.1
   - type: minimumRoutePlanningTime
@@ -339,7 +332,7 @@ individualProperties:
     value: false
 ```
 
-All numeric overrides use `value`; Colour uses `r`/`g`/`b`; Mobility uses a
+All numeric overrides use `value`; Mobility uses a
 `uses` array with all nine `{ traversal, use }` entries. For example, its Platform
 lift entry is `{ traversal: platformLift, use: canUse }`. These serialized names
 are not the snake-case names used in Lua type scripts. Prefer the editor for authoring, especially for tag revisions

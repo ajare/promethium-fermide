@@ -96,10 +96,7 @@ set(editor_names
     agentTypesEditorCopiedFixturePreservesTypeIdentity
     agentTypesHistoryPreservesSurvivorsAndReconstructsDeletedAgents
     playerControlEditorWorkflow
-    agent/assignmentAndPropertyAdditionConflictsAreAtomic
-    agent/editorCommitsRevisionedColourAndUndoRedoExactly
-    agent/conflictingColourRedoIsRefusedAtomically
-    agent/effectiveInspectionAndRealRenderingUseInheritedFallbackAndGold
+    agent/agentsDrawRawArtworkAndSelectionIsAnOutline
     agent/walkSpeedRangeEditsResampleOnceAndRestoreExactSamples
     agent/walkSpeedSelectionReportsSampleAndSource
     agent/heightRangeEditsAreSingleExactTransactions

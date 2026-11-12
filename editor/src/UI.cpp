@@ -848,7 +848,7 @@ namespace
 	}
 
 	void drawPegman(WorldDrawList* drawList, ImVec2 feet, float maximumWidth,
-		float maximumHeight, ImU32 colour, core::AgentPhysicalBaseline const& baseline,
+		float maximumHeight, core::AgentPhysicalBaseline const& baseline,
 		float pixelScale = 0.f, float heightModifier = 1.f, core::Pose pose = core::Pose::Standing)
 	{
 		auto const& tile = baseline.poses.at(pose).imageTile;
@@ -862,7 +862,7 @@ namespace
 				: min(maximumWidth / standing->x, maximumHeight / standing->y);
 			auto width = size->x * scale, height = size->y * scale;
 			drawAgentSprite(tile.c_str(), drawList,
-				{feet.x - width * .5f, feet.y - height}, {feet.x + width * .5f, feet.y}, colour);
+				{feet.x - width * .5f, feet.y - height}, {feet.x + width * .5f, feet.y});
 		}
 		else drawList->AddRectFilled({feet.x - maximumWidth * .5f, feet.y - maximumHeight},
 			{feet.x + maximumWidth * .5f, feet.y}, IM_COL32(255, 0, 255, 255));
@@ -874,7 +874,7 @@ namespace
 		auto width = maximumSize * aspect;
 		if (drawObjectSprite("marker", drawList,
 			{ point.x - width * 0.5f, point.y - maximumSize },
-			{ point.x + width * 0.5f, point.y }, colour)) return;
+			{ point.x + width * 0.5f, point.y })) return;
 
 		ImFont* font = gAgentIconFont ? gAgentIconFont : ImGui::GetFont();
 		auto sourceSize = font->FontSize;
@@ -913,7 +913,7 @@ namespace
 		// the palette's Door icon became a font glyph and nothing said so.
 		// The left leaf is the tile to ask for: a full-cell leaf, and the
 		// icon's own aspect handling resizes whatever it is given (#1063).
-		if (!drawObjectSprite("door-L0", drawList, toVec2(minimum), toVec2(minimum + size), colour))
+		if (!drawObjectSprite("door-L0", drawList, toVec2(minimum), toVec2(minimum + size)))
 			drawObjectIcon(drawList, boundsMin, boundsMax, colour, ICON_FA_DOOR_OPED);
 	}
 
@@ -933,7 +933,7 @@ namespace
 		auto width = min(available.x, available.y * aspect);
 		auto size = ImVec2(width, width / aspect);
 		auto minimum = boundsMin + (boundsMax - boundsMin - size) * 0.5f;
-		if (!drawObjectSprite("window-clear", drawList, toVec2(minimum), toVec2(minimum + size), colour))
+		if (!drawObjectSprite("window-clear", drawList, toVec2(minimum), toVec2(minimum + size)))
 			drawObjectIcon(drawList, boundsMin, boundsMax, colour, ICON_FA_WINDOW_MAXIMIZE);
 	}
 
@@ -2117,7 +2117,7 @@ namespace
 			// the border both stay visible around a tile whose art is opaque.
 			drawSectorVariantSwatch(gPaint.swatches.swatches()[index], drawList,
 				toVec2(swatchMin + ImVec2(4.0f, 4.0f)),
-				toVec2(swatchMax - ImVec2(4.0f, 4.0f)), White);
+				toVec2(swatchMax - ImVec2(4.0f, 4.0f)));
 			drawList->AddRect(toVec2(swatchMin), toVec2(swatchMax),
 				picked || overSwatch ? yellow : borderColour, 3.0f);
 		}
@@ -2644,7 +2644,7 @@ namespace
 		auto const draftBaseline = world->registeredAgentTypeBaseline(gAgentTypeDraft.typeId,
 			gAgentTypeDraft.resourceName).value_or(core::bundledHumanBaseline());
 		drawPegman(drawList, { (agentMin.x + agentMax.x) * 0.5f, agentMax.y - 3.0f },
-			PaletteSlotSize - 8.0f, PaletteSlotSize - 8.0f, yellow, draftBaseline);
+			PaletteSlotSize - 8.0f, PaletteSlotSize - 8.0f, draftBaseline);
 		drawMarkerIcon(drawList, { (markerMin.x + markerMax.x) * 0.5f, markerMax.y - 5.0f },
 			PaletteSlotSize - 10.0f, yellow);
 		drawDoorIcon(drawList, doorMin, doorMax, yellow);
@@ -2747,7 +2747,7 @@ namespace
 				drawPegman(drawList, io.MousePos,
 					dimensions.x * CORE_CELL_WIDTH_PIXELS * previewScale,
 					dimensions.y * CORE_LEVEL_HEIGHT_PIXELS * previewScale,
-					colour, draftBaseline, previewScale);
+					draftBaseline, previewScale);
 			}
 			if (!target.diagnostic.empty()) ImGui::SetTooltip("%s", target.diagnostic.c_str());
 			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
@@ -2761,7 +2761,7 @@ namespace
 			drawPegman(drawList, worldToScreen({ globalX, gPegman.feetY }),
 				dimensions.x * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom,
 				dimensions.y * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom,
-				yellow, gPegman.pastedAgent.previewBaseline ? *gPegman.pastedAgent.previewBaseline : draftBaseline,
+				gPegman.pastedAgent.previewBaseline ? *gPegman.pastedAgent.previewBaseline : draftBaseline,
 				gUISettings.worldZoom, gPegman.pastedAgent.armed() && gPegman.pastedAgent.payload.heightModifierSample
 					? gPegman.pastedAgent.payload.heightModifierSample->value : 1.f);
 		}
@@ -10315,7 +10315,7 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 			drawPegman(drawList, worldToScreen(position),
 				gSelectedAgent->getWidth() * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom,
 				gSelectedAgent->getHeight() * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom,
-				IM_COL32(255, 255, 0, 255), gSelectedAgent->getPhysicalBaseline(),
+				gSelectedAgent->getPhysicalBaseline(),
 				gUISettings.worldZoom, gSelectedAgent->getEffectiveHeightModifier().value, gSelectedAgent->getPose());
 		}
 		else if (!preview.diagnostic.empty()) ImGui::SetTooltip("%s", preview.diagnostic.c_str());

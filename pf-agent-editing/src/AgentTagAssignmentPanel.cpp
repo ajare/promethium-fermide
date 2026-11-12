@@ -206,10 +206,6 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			target->getIndividualObjectUsageDistance().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualObjectUsageDistance(agent,
 				enabled ? optional<float>{ target->getObjectUsageDistance() } : nullopt, out); });
-		propertyCheckbox(propertyName(core::AgentPropertyType::Colour),
-			target->getIndividualColour().has_value(),
-			[&](bool enabled, string* out) { return world->setAgentIndividualColour(agent,
-				enabled ? optional<core::AgentColour>{ core::EditorDefaultAgentColour } : nullopt, out); });
 		propertyCheckbox(propertyName(core::AgentPropertyType::WalkSpeedModifier),
 			target->getIndividualWalkSpeedModifier().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualWalkSpeedModifier(
@@ -326,31 +322,6 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			string diagnostic;
 			commitIndividualPropertyEdit(world, [&](string* out)
 				{ return world->setAgentIndividualObjectUsageDistance(agent, nullopt, out); }, diagnostic);
-			warn(diagnostic);
-		}
-	}
-	if (target->getIndividualColour())
-	{
-		float rgb[3];
-		core::agentColourToFloats(*target->getIndividualColour(), rgb);
-		ImGui::SetNextItemWidth(PropertyWidgetWidth);
-		if (ImGui::ColorEdit3("Colour##individual", rgb,
-			ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_Uint8))
-		{
-			string diagnostic;
-			commitIndividualPropertyEdit(world, [&](string* out)
-			{
-				return world->setAgentIndividualColour(agent,
-					core::agentColourFromFloats(rgb), out);
-			}, diagnostic);
-			warn(diagnostic);
-		}
-		ImGui::SameLine();
-		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualColour"))
-		{
-			string diagnostic;
-			commitIndividualPropertyEdit(world, [&](string* out)
-				{ return world->setAgentIndividualColour(agent, nullopt, out); }, diagnostic);
 			warn(diagnostic);
 		}
 	}
@@ -783,31 +754,6 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 	{
 		ImGui::TextDisabled("The selected Agent is no longer available.");
 		return;
-	}
-
-	auto const effective = lookup.entity->getEffectiveColour();
-	if (effective.individual)
-	{
-		ImGui::Text("Colour: RGB (%u, %u, %u) (individual)",
-			static_cast<unsigned>(effective.value.r),
-			static_cast<unsigned>(effective.value.g),
-			static_cast<unsigned>(effective.value.b));
-	}
-	else if (effective.sourceTag && world->hasAttachedAgentTagRegistry())
-	{
-		auto const& registry = world->getAgentTagRegistry();
-		ImGui::Text("Colour: RGB (%u, %u, %u) from #%s",
-			static_cast<unsigned>(effective.value.r),
-			static_cast<unsigned>(effective.value.g),
-			static_cast<unsigned>(effective.value.b),
-			registry->getAgentTagName(effective.sourceTag).c_str());
-	}
-	else
-	{
-		ImGui::Text("Colour: RGB (%u, %u, %u) (editor default)",
-			static_cast<unsigned>(effective.value.r),
-			static_cast<unsigned>(effective.value.g),
-			static_cast<unsigned>(effective.value.b));
 	}
 
 	auto const walkSpeed = lookup.entity->getEffectiveWalkSpeedModifier();

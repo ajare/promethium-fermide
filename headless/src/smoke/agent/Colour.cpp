@@ -1,4 +1,11 @@
 // Migrated from AgentColourSmokeChecks.cpp (#286); core dependency tier.
+//
+// What is left of "colour" in the Agent tag domain is tag display data: the
+// pastel a tag's own chip is drawn in. The Agent Colour property that used
+// to sit beside it is gone - an Agent draws its sprite as the atlas paints
+// it, and no tag colour reaches that picture - so what these checks pin is
+// the display Colour's own lifecycle and the persisted property-type gate
+// that now refuses `colour` along with every other unknown type.
 
 #include <filesystem>
 #include <fstream>
@@ -27,8 +34,8 @@ namespace
 
 	bool isPastelPaletteColour(core::AgentColour const& colour)
 	{
-		for (auto const& candidate : core::AgentTagColourPalette)
-			if (candidate == colour) return true;
+		for (auto const& pastel : core::AgentTagColourPalette)
+			if (pastel == colour) return true;
 		return false;
 	}
 
@@ -38,16 +45,6 @@ namespace
 		core::SerializationWorkData work;
 		work.markSerializedUnmodified = false;
 		registry.serialize(*writer, work);
-		writer->serialize();
-		return writer->getSerializedString();
-	}
-
-	std::string serializeWorld(core::World const& world)
-	{
-		auto writer = core::YamlSerializer::toString();
-		core::SerializationWorkData work;
-		work.markSerializedUnmodified = false;
-		world.serialize(*writer, work);
 		writer->serialize();
 		return writer->getSerializedString();
 	}
@@ -62,20 +59,11 @@ namespace
 		return registry;
 	}
 
-	std::shared_ptr<core::World> deserializeWorld(std::string const& yaml)
+	// The editor boundary carries exactly three byte channels. Every possible
+	// byte survives the float working representation ColorEdit3 uses, which
+	// is what lets a display Colour be edited without drift.
+	void agentColourChannelRoundTripThroughTheEditorBoundary()
 	{
-		auto world = std::make_shared<core::World>("Loading", 1, 1);
-		auto reader = core::YamlSerializer::fromString(yaml);
-		reader->deserialize();
-		core::SerializationWorkData work;
-		require(world->deserialize(*reader, work), "The World did not deserialize");
-		return world;
-	}
-
-	void colourIsUniqueRevisionedAndPersisted()
-	{
-		// The editor boundary carries exactly three byte channels. Every possible
-		// byte survives the float working representation used by ColorEdit3.
 		for (int value = 0; value < 256; ++value)
 		{
 			auto const channel = static_cast<uint8_t>(value);
@@ -90,51 +78,22 @@ namespace
 			require(core::agentColourFromFloats(rgb).b == channel,
 				"An Agent Colour blue channel did not survive its editor round-trip");
 		}
+	}
 
+	// The persisted property set is closed: a type the format does not know
+	// is refused rather than skipped. The retired Agent Colour property now
+	// lands in that same refusal, which is what stops an older document's
+	// `colour` block from being quietly discarded as unrecognised noise.
+	void unknownPersistedAgentPropertyTypesAreRefused()
+	{
 		auto registry = core::AgentTagRegistry::create();
 		auto const tag = registry->addAgentTag("crew");
-		registry->markUnmodified();
 		std::string diagnostic;
+		require(registry->addAgentTagEscalatorWalkingChance(tag, &diagnostic), diagnostic);
+		require(registry->setAgentTagEscalatorWalkingChance(tag, 0.5f, &diagnostic),
+			diagnostic);
 
-		require(registry->addAgentTagColour(tag, &diagnostic),
-			"Default Colour addition failed: " + diagnostic);
-		auto const* added = registry->getAgentTagColour(tag);
-		require(added && added->value == core::EditorDefaultAgentColour
-			&& added->revision == 1 && registry->getNextPropertyRevision() == 2,
-			"Colour did not start at RGB (179, 77, 77) with revision 1");
-		auto const afterAdd = serializeRegistry(*registry);
-		require(!registry->addAgentTagColour(tag, &diagnostic)
-			&& diagnostic.find("already has Colour") != std::string::npos
-			&& serializeRegistry(*registry) == afterAdd,
-			"A tag accepted a second Colour or changed on refusal");
-
-		registry->markUnmodified();
-		require(!registry->setAgentTagColour(tag, core::EditorDefaultAgentColour, &diagnostic)
-			&& registry->getNextPropertyRevision() == 2 && !registry->isModified(),
-			"An unchanged Colour consumed a revision or dirtied the registry");
-		require(registry->setAgentTagColour(tag, { 12, 34, 56 }, &diagnostic),
-			"A real Colour edit failed: " + diagnostic);
-		auto const* edited = registry->getAgentTagColour(tag);
-		require(edited && edited->value == (core::AgentColour{ 12, 34, 56 })
-			&& edited->revision == 2 && registry->getNextPropertyRevision() == 3,
-			"A real Colour edit did not allocate exactly one new revision");
-
-		auto reopened = deserializeRegistry(serializeRegistry(*registry));
-		auto const* persisted = reopened->getAgentTagColour(tag);
-		require(persisted && *persisted == *edited
-			&& reopened->getNextPropertyRevision() == 3,
-			"Colour value, revision, or allocator did not survive persistence");
-		require(reopened->removeAgentTagColour(tag, &diagnostic)
-			&& reopened->getNextPropertyRevision() == 3,
-			"Removing Colour unexpectedly consumed a revision");
-		require(reopened->addAgentTagColour(tag, &diagnostic)
-			&& reopened->getAgentTagColour(tag)->revision == 3
-			&& reopened->getNextPropertyRevision() == 4,
-			"Removing and re-adding Colour reused an old revision");
-
-		// The persisted closed property set rejects both unknown types and a
-		// duplicate Colour, rather than silently choosing one.
-		auto unknown = YAML::Load(serializeRegistry(*reopened));
+		auto unknown = YAML::Load(serializeRegistry(*registry));
 		unknown["tags"][0]["properties"][0]["type"] = "future-property";
 		bool unknownRefused{ false };
 		try { (void)deserializeRegistry(YAML::Dump(unknown)); }
@@ -145,84 +104,17 @@ namespace
 		}
 		require(unknownRefused, "An unknown persisted Agent property type was accepted");
 
-		auto document = YAML::Load(serializeRegistry(*reopened));
-		YAML::Node duplicate(YAML::NodeType::Map);
-		duplicate["type"] = "colour";
-		duplicate["revision"] = 3;
-		duplicate["r"] = 179;
-		duplicate["g"] = 77;
-		duplicate["b"] = 77;
-		document["tags"][0]["properties"].push_back(duplicate);
-		bool duplicateRefused{ false };
-		try { (void)deserializeRegistry(YAML::Dump(document)); }
+		auto retired = YAML::Load(serializeRegistry(*registry));
+		retired["tags"][0]["properties"][0]["type"] = "colour";
+		bool retiredRefused{ false };
+		try { (void)deserializeRegistry(YAML::Dump(retired)); }
 		catch (std::exception const& error)
 		{
-			duplicateRefused = std::string(error.what()).find("more than one Colour")
+			retiredRefused = std::string(error.what()).find("Unsupported Agent property type 'colour'")
 				!= std::string::npos;
 		}
-		require(duplicateRefused, "Serialized duplicate Colour properties were accepted");
-	}
-
-	struct ColourFixture
-	{
-		std::shared_ptr<core::AgentTagRegistry> registry{ core::AgentTagRegistry::create() };
-		std::shared_ptr<core::World> world{
-			std::make_shared<core::World>("Colours", 8, 2) };
-		core::AgentTagId red{ registry->addAgentTag("red") };
-		core::AgentTagId blue{ registry->addAgentTag("blue") };
-		core::AgentTagId plain{ registry->addAgentTag("plain") };
-		core::AgentId coloured{};
-		core::AgentId fallback{};
-
-		ColourFixture()
-		{
-			std::string diagnostic;
-			require(registry->addAgentTagColour(red, &diagnostic), diagnostic);
-			require(registry->setAgentTagColour(red, { 12, 34, 56 }, &diagnostic), diagnostic);
-			world->attachAgentTagRegistry("colours.tags.yaml", registry);
-			auto const corridor = world->addCorridor(0, 0, 7);
-			world->finishBuild();
-			coloured = world->createAgent("Coloured", corridor, 0, 1.5f);
-			fallback = world->createAgent("Fallback", corridor, 0, 3.5f);
-			world->pauseSimulation();
-			require(world->assignAgentTag(coloured, red, &diagnostic), diagnostic);
-		}
-	};
-
-	void closedWorldConflictsAreRejectedWhenTheRegistryIsResolved()
-	{
-		auto registry = core::AgentTagRegistry::create();
-		auto const first = registry->addAgentTag("first");
-		auto const second = registry->addAgentTag("second");
-		std::string yaml;
-		{
-			auto world = std::make_shared<core::World>("Closed", 6, 2);
-			world->attachAgentTagRegistry("closed.tags.yaml", registry);
-			auto const corridor = world->addCorridor(0, 0, 5);
-			world->finishBuild();
-			auto const agent = world->createAgent("Conflict", corridor);
-			world->pauseSimulation();
-			std::string diagnostic;
-			require(world->assignAgentTag(agent, first, &diagnostic)
-				&& world->assignAgentTag(agent, second, &diagnostic), diagnostic);
-			yaml = serializeWorld(*world);
-		}
-
-		std::string diagnostic;
-		require(registry->addAgentTagColour(first, &diagnostic)
-			&& registry->addAgentTagColour(second, &diagnostic), diagnostic);
-		auto reopened = deserializeWorld(yaml);
-		bool refused{ false };
-		try { reopened->resolveAgentTagRegistry(registry); }
-		catch (std::exception const& error)
-		{
-			auto const text = std::string(error.what());
-			refused = text.find("Colour") != std::string::npos
-				&& text.find("#first") != std::string::npos
-				&& text.find("#second") != std::string::npos;
-		}
-		require(refused && !reopened->hasAttachedAgentTagRegistry(),
-			"A closed World with duplicate inherited Colour sources was attached");
+		require(retiredRefused,
+			"A retired `colour` property in an older document was accepted");
 	}
 
 	void displayColourIsRandomAtCreationBackfilledAndPersisted(smoke::Context const& context)
@@ -231,8 +123,6 @@ namespace
 		auto const created = registry->addAgentTag("created");
 		require(isPastelPaletteColour(registry->getAgentTagDisplayColour(created)),
 			"A new tag did not receive a random pastel display Colour");
-		require(!registry->getAgentTagColour(created),
-			"A new tag's display Colour leaked into the inherited Agent Colour property");
 
 		auto const directory = context.temporaryRoot() / "colour-backfill";
 		std::filesystem::create_directory(directory);
@@ -263,7 +153,7 @@ namespace
 
 void agent_smoke::registerColour(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "colourIsUniqueRevisionedAndPersisted", [](smoke::Context const&) { colourIsUniqueRevisionedAndPersisted(); } });
+	checks.push_back({ "agentColourChannelRoundTripThroughTheEditorBoundary", [](smoke::Context const&) { agentColourChannelRoundTripThroughTheEditorBoundary(); } });
+	checks.push_back({ "unknownPersistedAgentPropertyTypesAreRefused", [](smoke::Context const&) { unknownPersistedAgentPropertyTypesAreRefused(); } });
 	checks.push_back({ "displayColourIsRandomAtCreationBackfilledAndPersisted", [](smoke::Context const& context) { displayColourIsRandomAtCreationBackfilledAndPersisted(context); } });
-	checks.push_back({ "closedWorldConflictsAreRejectedWhenTheRegistryIsResolved", [](smoke::Context const&) { closedWorldConflictsAreRejectedWhenTheRegistryIsResolved(); } });
 }

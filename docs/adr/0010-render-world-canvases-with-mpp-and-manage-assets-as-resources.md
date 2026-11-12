@@ -15,11 +15,11 @@ classes, and there are no parallel atlas metadata caches.
 Ticket #1014 amends the two rejections below that concern atlas metadata:
 "Introduce project-specific tile-set resource classes" and "Keep atlas
 metadata and registry ownership in parallel global caches". Render semantics -
-a tile's tintable flag, its render offset and its drawn size - now live one
+a tile's render offset and its drawn size - now live one
 layer above the resource, in the authored tileset file that produces it,
 rather than being derived by the renderer from a tile's name or from a domain
-object's geometry. That is a genuine change to "tintability and repetition are
-rendering semantics rather than resource kinds": the semantics are still not a
+object's geometry. That is a genuine change to "repetition is a rendering
+semantic rather than a resource kind": the semantics are still not a
 resource kind, but they are no longer held nowhere at all. What the rejection
 was actually guarding against - duplicate authorities that can diverge - is
 prevented by generating the `ImageSet` entries from the authored tileset
@@ -30,8 +30,7 @@ declares that the other does not know.
 
 Ticket #1015 records what that one layer up holds and who owns it. The authored
 tileset is the single source of truth for a tile's render semantics: its render
-offset, its drawn size, and whether it is tintable. Nothing else is consulted for
-them at draw time. The `ImageSet` keeps exactly the role this decision gives it -
+offset and its drawn size. Nothing else is consulted for them at draw time. The `ImageSet` keeps exactly the role this decision gives it -
 the runtime pixel-region contract, the only source of a drawn region - and gains no
 render semantic of any kind; what changed is that it is generated rather than
 hand-maintained. `scripts/generate_object_atlas_new.py` and
@@ -40,9 +39,9 @@ from the tileset's authored grid, and the render smoke checks re-derive those
 regions from the same tileset and fail on any drift, so the manifest cannot claim a
 region the authored sheet does not have. Which tileset an atlas is asked about is
 itself authored in `resources/atlas-sets.yaml`, and the install refuses a tileset
-whose format does not match the slot it is filling. Tintability remains a rendering
-semantic and not a resource kind: no tintable resource class was introduced, and
-the flag is read from the tileset instead of being inferred from a tile's name.
+whose format does not match the slot it is filling. A tile's look is its artwork:
+the renderer multiplies no colour into a tile on the way to the screen, so there
+is no tintability to author, infer or resource-classify at all.
 
 Dear ImGui remains the editor's immediate-mode user-interface layer, but World canvases are rendered by Massive Poly Pusher (MPP) into an offscreen render texture that ImGui presents as an image. A CPU-side `WorldDrawList` records ordered canvas primitives independently of either rendering API. The MPP renderer consumes that stream using native triangle and line batches, MPP text, clipping, and Willpower-managed atlas textures. Thick lines and outlines remain native line primitives and use the supported OpenGL line-width range; they are not expanded into triangle geometry.
 
@@ -54,7 +53,7 @@ The shared renderer module, `pf-render`, owns the MPP render system, MPP resourc
 - **Expand thick lines and outlines into triangles.** Rejected because lines are a distinct primitive in the render plan and MPP supports native line batches. Platform line-width limits are handled by clamping to the graphics driver's advertised range.
 - **Introduce project-specific tile-set resource classes.** Rejected because Willpower `ImageSet` already provides named atlas rectangles and UV coordinates. Tintability and repetition are rendering semantics rather than resource kinds.
 - **Keep atlas metadata and registry ownership in parallel global caches.** Rejected because duplicate authorities permit the rendered or edited object to diverge from the resource-manager object.
-- **Carry the render semantics in the `ImageSet` resource itself.** Rejected (#1015) because `ImageSet::ImageDefinition` is a fixed `{x, y, width, height, u[2], v[2]}` in the vendored Willpower SDK - a pixel region plus the UVs derived from it at load. It has no field for a render offset in World units, no visual extent independent of the region it crops, and no tintable flag, and the paired `Image`'s `Option` list is closed the same way (`filtering`, `uv-style`, `colour-space`, `wrapping`, `mipmaps`), read by name in vendored code. Extending the vendored SDK was rejected as a much wider blast radius than the atlas work itself: it would change a shared library's resource schema, inherited by every `ImageSet` in every application built on that SDK, in order to carry semantics only this project's renderer reads. The authored tileset carries them instead, one layer up, where adding a field costs nothing outside this repo.
+- **Carry the render semantics in the `ImageSet` resource itself.** Rejected (#1015) because `ImageSet::ImageDefinition` is a fixed `{x, y, width, height, u[2], v[2]}` in the vendored Willpower SDK - a pixel region plus the UVs derived from it at load. It has no field for a render offset in World units, no visual extent independent of the region it crops, and the paired `Image`'s `Option` list is closed the same way (`filtering`, `uv-style`, `colour-space`, `wrapping`, `mipmaps`), read by name in vendored code. Extending the vendored SDK was rejected as a much wider blast radius than the atlas work itself: it would change a shared library's resource schema, inherited by every `ImageSet` in every application built on that SDK, in order to carry semantics only this project's renderer reads. The authored tileset carries them instead, one layer up, where adding a field costs nothing outside this repo.
 - **Move the whole editor UI to MPP.** Rejected because Dear ImGui remains appropriate for menus, panels, controls, docking, and presentation of the offscreen World texture.
 
 ## Consequences

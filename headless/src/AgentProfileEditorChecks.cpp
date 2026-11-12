@@ -45,7 +45,7 @@ int main()
 
 		// Unknown Agents are refused with the lookup diagnostic before
 		// anything else is judged.
-		require(!editor.setColour(AgentId{ 9999 }, AgentColour{}, &diagnostic)
+		require(!editor.setEscalatorWalkingChance(AgentId{ 9999 }, 0.5f, &diagnostic)
 				&& diagnostic == "Agent handle 9999 is invalid or has been removed",
 			"an unknown Agent is refused with the lookup diagnostic");
 		require(!editor.setObjectUsageOverrides(AgentId{ 9999 },
@@ -56,9 +56,9 @@ int main()
 		// The pause gate fires while the simulation runs, ahead of the
 		// unchanged check and any validation of the property itself.
 		require(!world.isSimulationPaused(), "the freshly built World simulates");
-		require(!editor.setColour(ada, AgentColour{}, &diagnostic)
+		require(!editor.setEscalatorWalkingChance(ada, 0.5f, &diagnostic)
 				&& diagnostic == "Pause the simulation before editing individual Agent properties",
-			"the colour setter refuses while running");
+			"the escalator-walking-chance setter refuses while running");
 		require(!editor.setObjectUsageOverrides(ada, ObjectUsage::Arms, -1.0f,
 				&diagnostic)
 				&& diagnostic == "Pause the simulation before editing individual Agent properties",
@@ -84,13 +84,13 @@ int main()
 
 		// The unchanged check reports the row's own message and changes
 		// nothing.
-		AgentColour teal{ 26, 153, 128 };
-		require(editor.setColour(ada, teal, &diagnostic)
-				&& adaEntity->getIndividualColour() == optional<AgentColour>{ teal },
-			"a colour override writes through");
-		require(!editor.setColour(ada, teal, &diagnostic)
-				&& diagnostic == "The individual Agent Colour is unchanged",
-			"an unchanged colour is refused with the row message");
+		require(editor.setEscalatorWalkingChance(ada, 0.4f, &diagnostic)
+				&& adaEntity->getIndividualEscalatorWalkingChance()
+					== optional<float>{ 0.4f },
+			"an escalator walking chance override writes through");
+		require(!editor.setEscalatorWalkingChance(ada, 0.4f, &diagnostic)
+				&& diagnostic == "The individual Escalator walking chance is unchanged",
+			"an unchanged escalator walking chance is refused with the row message");
 
 		// The Height modifier's preflight runs after the unchanged check:
 		// an out-of-range value is refused, a valid in-range value that
@@ -178,12 +178,13 @@ int main()
 
 		// The World facade forwards to the same editor: a facade write is
 		// visible through the editor's view of the Agent and vice versa.
-		AgentColour amber{ 230, 179, 51 };
-		require(world.setAgentIndividualColour(ada, amber, &diagnostic)
-				&& adaEntity->getIndividualColour() == optional<AgentColour>{ amber },
-			"the facade colour write is visible on the Agent");
-		require(!editor.setColour(ada, amber, &diagnostic)
-				&& diagnostic == "The individual Agent Colour is unchanged",
+		require(world.setAgentIndividualEscalatorWalkingChance(ada, 0.6f,
+				&diagnostic)
+				&& adaEntity->getIndividualEscalatorWalkingChance()
+					== optional<float>{ 0.6f },
+			"the facade escalator-walking-chance write is visible on the Agent");
+		require(!editor.setEscalatorWalkingChance(ada, 0.6f, &diagnostic)
+				&& diagnostic == "The individual Escalator walking chance is unchanged",
 			"the editor sees the facade write as unchanged");
 		require(world.setAgentIndividualWalkSpeedModifier(ada, 1.05f,
 				&diagnostic)

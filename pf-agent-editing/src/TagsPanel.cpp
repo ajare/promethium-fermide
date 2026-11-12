@@ -63,14 +63,6 @@ namespace
 		string diagnostic;
 	};
 
-	struct TagColourEdit
-	{
-		array<float, 3> rgb{};
-		uint64_t loadedRevision{ 0 };
-		bool pending{ false };
-		string diagnostic;
-	};
-
 	struct TagWalkSpeedEdit
 	{
 		core::AgentModifierRange range{};
@@ -151,7 +143,6 @@ namespace
 	map<string, DocumentHistory> gRegistryHistories;
 	map<uint64_t, TagNameEdit> gTagNameEdits;
 	map<uint64_t, TagDisplayColourEdit> gTagDisplayColourEdits;
-	map<uint64_t, TagColourEdit> gTagColourEdits;
 	map<uint64_t, TagWalkSpeedEdit> gTagWalkSpeedEdits;
 	map<uint64_t, TagEscalatorWalkingChanceEdit> gTagEscalatorWalkingChanceEdits;
 	map<uint64_t, TagHeightEdit> gTagHeightEdits;
@@ -423,67 +414,6 @@ namespace
 	void renderTagProperties(shared_ptr<core::AgentTagRegistry> const& registry,
 		core::AgentTagId id)
 	{
-		auto const* colour = registry->getAgentTagColour(id);
-		if (colour)
-		{
-			auto& edit = gTagColourEdits[id.value];
-			if (!edit.pending && edit.loadedRevision != colour->revision)
-			{
-				core::agentColourToFloats(colour->value, edit.rgb.data());
-				edit.loadedRevision = colour->revision;
-				edit.diagnostic.clear();
-			}
-
-			ImGui::SetNextItemWidth(256.0f);
-			if (ImGui::ColorEdit3("Colour", edit.rgb.data(),
-				ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_Uint8))
-				edit.pending = true;
-			auto const finished = ImGui::IsItemDeactivatedAfterEdit();
-			auto const cancelled = ImGui::IsItemDeactivated() && !finished;
-			if (edit.pending && finished)
-			{
-				string diagnostic;
-				if (!commitAgentTagColourEdit(registry, id,
-					core::agentColourFromFloats(edit.rgb.data()), diagnostic)
-					&& diagnostic != "The Agent Colour is unchanged")
-				{
-					edit.diagnostic = diagnostic;
-					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
-				}
-				else edit.diagnostic.clear();
-				edit.pending = false;
-				colour = registry->getAgentTagColour(id);
-				if (colour) edit.loadedRevision = colour->revision;
-			}
-			else if (edit.pending && cancelled)
-			{
-				core::agentColourToFloats(colour->value, edit.rgb.data());
-				edit.pending = false;
-				edit.diagnostic.clear();
-			}
-			ImGui::SameLine();
-			bool removed{ false };
-			if (ImGui::Button(ICON_FA_TIMES "##removeColour"))
-			{
-				string diagnostic;
-				if (!commitAgentTagColourRemove(registry, id, diagnostic))
-				{
-					edit.diagnostic = diagnostic;
-					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
-				}
-				else
-				{
-					gTagColourEdits.erase(id.value);
-					colour = nullptr;
-					removed = true;
-				}
-			}
-			if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove Colour");
-			if (!removed && !edit.diagnostic.empty())
-				ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s",
-					edit.diagnostic.c_str());
-		}
-
 		auto const* walkSpeed = registry->getAgentTagWalkSpeedModifier(id);
 		if (walkSpeed)
 		{
@@ -1220,7 +1150,6 @@ namespace
 	void renderTagAddPropertyDropdown(shared_ptr<core::AgentTagRegistry> const& registry,
 		core::AgentTagId id)
 	{
-		auto const* colour = registry->getAgentTagColour(id);
 		auto const* walkSpeed = registry->getAgentTagWalkSpeedModifier(id);
 		auto const* height = registry->getAgentTagHeightModifier(id);
 		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
@@ -1239,7 +1168,7 @@ namespace
 		auto const* remotePanels = registry->getAgentTagRemoteAccessPanels(id);
 		auto const* remoteShutters = registry->getAgentTagRemoteBoothWindowShutters(id);
 		auto const* mobility = registry->getAgentTagMobilityProfile(id);
-		auto const anyMissing = !colour || !walkSpeed || !height || !chance
+		auto const anyMissing = !walkSpeed || !height || !chance
 			|| !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting
 			|| !crowd || !risk || !familiarity || !persistence
 			|| !minimumPlanningTime || !maximumPlanningTime || !adherence || !remotePanels || !remoteShutters || !mobility
@@ -1248,14 +1177,6 @@ namespace
 		ImGui::SetNextItemWidth(256.0f);
 		if (ImGui::BeginCombo("##addAgentTagProperty", ICON_FA_PLUS " Add property"))
 		{
-			if (!colour && ImGui::Selectable(propertyName(core::AgentPropertyType::Colour)))
-			{
-				string diagnostic;
-				if (!commitAgentTagColourAdd(registry, id, diagnostic))
-					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
-				else gTagColourEdits.erase(id.value);
-				ImGui::CloseCurrentPopup();
-			}
 			if (!walkSpeed && ImGui::Selectable(propertyName(core::AgentPropertyType::WalkSpeedModifier)))
 			{
 				string diagnostic;
@@ -2127,66 +2048,6 @@ bool commitAgentTagDisplayColourEdit(
 		return false;
 	}
 	if (!registry->setAgentTagDisplayColour(id, colour, &diagnostic)) return false;
-	agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
-	return true;
-}
-
-bool commitAgentTagColourAdd(shared_ptr<core::AgentTagRegistry> const& registry,
-	core::AgentTagId id, string& diagnostic)
-{
-	diagnostic.clear();
-	if (!registry)
-	{
-		diagnostic = "There is no Agent tag registry in which to add Colour";
-		return false;
-	}
-	auto undo = captureRegistrySnapshot(registry);
-	if (!undo)
-	{
-		diagnostic = "Could not capture the Agent tag registry before adding Colour";
-		return false;
-	}
-	if (!registry->addAgentTagColour(id, &diagnostic)) return false;
-	agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
-	return true;
-}
-
-bool commitAgentTagColourEdit(shared_ptr<core::AgentTagRegistry> const& registry,
-	core::AgentTagId id, core::AgentColour colour, string& diagnostic)
-{
-	diagnostic.clear();
-	if (!registry)
-	{
-		diagnostic = "There is no Agent tag registry in which to edit Colour";
-		return false;
-	}
-	auto undo = captureRegistrySnapshot(registry);
-	if (!undo)
-	{
-		diagnostic = "Could not capture the Agent tag registry before editing Colour";
-		return false;
-	}
-	if (!registry->setAgentTagColour(id, colour, &diagnostic)) return false;
-	agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
-	return true;
-}
-
-bool commitAgentTagColourRemove(shared_ptr<core::AgentTagRegistry> const& registry,
-	core::AgentTagId id, string& diagnostic)
-{
-	diagnostic.clear();
-	if (!registry)
-	{
-		diagnostic = "There is no Agent tag registry from which to remove Colour";
-		return false;
-	}
-	auto undo = captureRegistrySnapshot(registry);
-	if (!undo)
-	{
-		diagnostic = "Could not capture the Agent tag registry before removing Colour";
-		return false;
-	}
-	if (!registry->removeAgentTagColour(id, &diagnostic)) return false;
 	agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
 	return true;
 }
@@ -3605,7 +3466,6 @@ void resetTagsPanelState()
 {
 	gTagNameEdits.clear();
 	gTagDisplayColourEdits.clear();
-	gTagColourEdits.clear();
 	gTagWalkSpeedEdits.clear();
 	gTagEscalatorWalkingChanceEdits.clear();
 	gTagHeightEdits.clear();

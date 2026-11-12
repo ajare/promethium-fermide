@@ -80,12 +80,13 @@ class AtlasSpec:
 ROW_SHADE_STEP = 40
 
 
-def slab_shades(row: int, tintable: bool) -> tuple[tuple[int, ...], tuple[int, ...]]:
+def slab_shades(row: int) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """The placeholder slab body and edge for one sheet row, one step darker
-    than the row above it. The hue is kept, so a tintable tile stays a
-    grayscale tile and a non-tintable one stays the blue-grey it was."""
-    body_base = (236, 236, 236) if tintable else (150, 160, 176)
-    edge_base = (198, 198, 198) if tintable else (110, 120, 138)
+    than the row above it. One palette for every tile: a tile's look is its
+    artwork, and the placeholder has no second colour for anything to
+    select."""
+    body_base = (150, 160, 176)
+    edge_base = (110, 120, 138)
     step = ROW_SHADE_STEP * row
     body = tuple(max(16, channel - step) for channel in body_base) + (255,)
     edge = tuple(max(8, channel - step) for channel in edge_base) + (255,)
@@ -119,8 +120,8 @@ def derive_sprites(spec: AtlasSpec, tileset: dict) -> dict:
     """Every sprite the sheet holds, with each declared variant family expanded.
 
     A base sprite's `-Vn` sits in the base's own column one row below the
-    tile above it, and inherits the base's content rectangle, render offset,
-    drawn size and tintable flag. The name and the cell both come from the
+    tile above it, and inherits the base's content rectangle, render offset
+    and drawn size. The name and the cell both come from the
     rule rather than from the file, so neither can be written wrong (#1038).
 
     A derived tile carries no `variants` key of its own: the key belongs on
@@ -329,8 +330,7 @@ def render_placeholder(spec: AtlasSpec, tileset: dict) -> Image.Image:
     draw = ImageDraw.Draw(sheet)
     for name, x, y, region_width, region_height in resolve_regions(spec, tileset):
         sprite = sprites[name]
-        tintable = sprite.get("tintable", False)
-        body, edge = slab_shades(sprite["cell"][1], tintable)
+        body, edge = slab_shades(sprite["cell"][1])
         draw.rectangle([x, y, x + region_width - 1, y + region_height - 1],
                        fill=body)
         draw.rectangle([x, y, x + region_width - 1, min(y + 1, y + region_height - 1)],

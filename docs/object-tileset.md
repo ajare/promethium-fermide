@@ -16,8 +16,8 @@ their semantics against it. Its `image` field names the sheet those rectangles
 were originally drawn against; nothing reads that field at runtime, because the
 install takes pixel regions from each theme's own `ImageSet` resource.
 
-`objects.tileset.yaml` records each sprite's cell, local content rectangle and
-whether its RGB can be tinted. The manifest's `tile_size` is the authored grid:
+`objects.tileset.yaml` records each sprite's cell and local content rectangle.
+The manifest's `tile_size` is the authored grid:
 how the artist laid the image out. The loader requires only that whole authored
 cells cover the image with no remainder; it never compares that grid with the
 World cell, because a World unit's screen size is a different fact and the
@@ -26,15 +26,15 @@ renderer stretches a resolved region into whatever destination it is drawn into
 inside its own authored cell, is refused. Content rectangles exclude alpha
 padding and may run from their own cell into a neighbour, as the wide Lying tile
 does. Alpha padding never changes collision, selection or visual sizes.
-The Agent and Marker sprites have grayscale RGB. Agents use the existing resolved
-Agent colour, including tag overrides and selection, as the vertex tint carried on
-the recorded command. Existing height scaling, horizontal centring and foot
-position are preserved.
+Every sprite draws as its artwork paints it. Nothing is multiplied into a tile on
+the way to the screen, so a sprite that has to look different is a different
+sprite. Existing height scaling, horizontal centring and foot position are
+preserved.
 
-## Render semantics: offset, drawn size, tintable
+## Render semantics: offset and drawn size
 
 A tileset file carries a `version`. Version 1 - what `objects.tileset.yaml` is -
-records a cell, a content rectangle and a `tintable` flag. Version 2 adds the two
+records a cell and a content rectangle. Version 2 adds the two
 facts a version 1 renderer had to guess, per tile:
 
 - `offset` - the render offset, in World units, from the tile's anchor. `+x` is
@@ -50,11 +50,6 @@ goes. A drawn size that is zero, negative, non-finite, or larger than the image 
 refused the same way. A version 1 file declares no render semantics, so the loader
 gives it the format's own identity: no offset, and a drawn size of whatever the
 content rectangle measures in World units over the authored grid.
-
-`tintable` is the only source of tintability. The C++ rule that used to derive it
-by matching a tile's name against `agent`, `human-*`, `robot-standing` and
-`cleaning-bot-standing` is gone: a new Agent type can no longer become tintable by
-accident, and a tile named without a hint can no longer fail to be.
 
 The offset and the drawn size belong to the artwork and never to the domain object.
 CONTEXT.md keeps that line - Support elevation is a physical fact and is explicitly
@@ -75,14 +70,12 @@ A version 2 object sprite may declare a variant family with one number:
     content: [0, 0, 128, 320]
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
-    tintable: true
 ```
 
 That count is the whole of what is authored about the family. The loader expands
 it into `-V1` .. `-VN`, each in the base's own column one row below the tile
 above it - `-V1` directly beneath the base, `-VN` N rows down - and each
-inheriting the base's content rectangle, render offset, drawn size and tintable
-flag (#1053). Adding a variant is a picture decision and never a re-declaration
+inheriting the base's content rectangle, render offset and drawn size (#1053). Adding a variant is a picture decision and never a re-declaration
 of geometry, so a variant cannot be given art that does not line up with the base
 it is a variant of, and no author writes a name or a cell that the rule could
 contradict. The base keeps its bare name and stays variant 0, so every tile name
@@ -305,27 +298,20 @@ the frame: 42/52 of the frame's 0.8 across and 38/48 of its 0.3 down, which is
 so the shutter can never paint over the frame it retracts behind, and any
 enclosing aperture clip intersects with it as it travels.
 
-### Buttons carry their state in the art, Markers carry theirs in the tint
+### Buttons carry their state in the art
 
-A Button's two states are two tiles rather than one tile and two tints, so the
-state is legible from the artwork alone at the 12.8 x 12.8 px the control
-actually occupies. Both are authored untintable: the renderer's enabled green,
-disabled grey and Broken red are wireframe and fallback facts, and letting them
-multiply into the art would wash out the difference between the two tiles the
-state is carried by.
+A Button's two states are two tiles rather than one tile the renderer tints two
+ways, so the state is legible from the artwork alone at the 12.8 x 12.8 px the
+control actually occupies. The renderer's enabled green, disabled grey and
+Broken red are vector overlays and fallback marks drawn over or instead of the
+tile; nothing multiplies into the artwork itself.
 
-Four tiles in the set are authored tintable - the Walkway, the Bulkhead Door,
-the Access panel and the Marker - and the Marker is the one whose tint is a
-domain colour rather than the fill colour of the primitive the artwork
-replaced. Its icon is grayscale so the gold the renderer carries multiplies
-into it, and that gold is `core::SelectedAgentColour` - the same colour the
-Agent selection highlight resolves to - which lets a destination read as part
-of the Agent colour vocabulary rather than as a fixed decal. The other three
-carry over what they used to be filled with: the Walkway's grey, or the
-selection colour while it is selected; the Bulkhead Door's slab teal; the
-Access panel's slate. Tintability is what lets each of them go through the
-sprite path without going white; the Marker is the one where the tint is the
-point.
+Every other tile in the set draws as its artwork paints it as well. What each
+used to be filled with - the Walkway's grey, the Bulkhead Door's slab teal,
+the Access panel's slate, the Marker's gold - is now whatever the tile's own
+pixels say. Selection is an outline drawn around the artwork rather than a
+colour replacing it, so a selected object shows the same picture as an
+unselected one with a frame laid over it.
 
 The icon's on-screen size is a screen-space fact (`MarkerIconSize`, a fixed
 pixel longest edge that does not follow the World cell), so the Marker's
@@ -550,14 +536,15 @@ overhang - 16px after Lying, 32px after Crawling - so no two tiles' art ever
 overlaps, and the last column is a one-cell-wide tile, which is what keeps the
 widest tile inside the image.
 
-Every tile is authored `tintable: true`. Agent art is grayscale, and the vertex
-tint is the resolved Agent colour - the Agent's own colour, a Colour tag's
-override, or the selection gold - which multiplies into it faithfully. The
-`render` smoke module's `agentAtlasNew/*` checks prove the twenty tiles
-registered as a full cross product, two types sharing one row, the generic row
-standing in for a type with no artwork, the Agent colour and its tag override and
-the selection highlight all still driving the tint, and the over-wide Lying and
-Crawling tiles resolving across adjacent cells rather than being cut back to one.
+An Agent's sprite is its artwork and nothing else. Nothing is multiplied into the
+sheet on the way to the screen: an Agent draws the same picture whatever colour
+its tags resolve to, and selection is an outline laid over the sprite rather
+than a colour replacing it. The `render` smoke module's `agentAtlasNew/*`
+checks prove the twenty tiles registered as a full cross product, two types
+sharing one row, the generic row standing in for a type with no artwork, every
+sprite drawn unmodulated whether or not it is selected, and the over-wide Lying
+and Crawling tiles resolving across adjacent cells rather than being cut back to
+one.
 
 ### Every appearance row is worn, or says why it is not
 
@@ -615,8 +602,9 @@ the registry, that every named tileset loads, and that it defines every tile
 the atlas declares, so the mapping cannot rot quietly.
 
 A tile the `ImageSet` declares that the tileset never authored is refused, as is a
-pixel region escaping the atlas image. Nothing in the install derives a tint from
-a name or a drawn size from a domain object's geometry.
+pixel region escaping the atlas image. Nothing in the install derives a drawn
+size from a domain object's geometry, and nothing derives a colour to multiply
+into a tile from anything at all.
 
 ### The Objects atlas is a World-level choice, and is checked at load
 
@@ -711,8 +699,8 @@ There is one object renderer. `pf-render` loads the definition, installs the atl
 as a Willpower `ImageSet` resource, and emits the sprite quads into the World
 command stream; the editor and the shipped game both draw from that same code and
 see the same result. Neither application keeps an object renderer of its own, and
-the renderer itself contains no ImGui code - the tint is a packed colour on the
-command, not an ImGui vertex type. See
+the renderer itself contains no ImGui code - a command carries a packed colour
+of its own, not an ImGui vertex type. See
 [ADR 0010](adr/0010-render-world-canvases-with-mpp-and-manage-assets-as-resources.md)
 and the `pf-render` module header for the boundary this sits behind.
 
@@ -741,7 +729,8 @@ Supported sprites:
 
 Bulkhead Doors, Access panels, ordinary Doors, Windows, Booth Windows, Buttons,
 Markers and the three vehicles render from `ObjectAtlas` when that set is
-installed, and keep their flat fills against a set that has no tile for them. Force
+installed, and fall back to a primitive fill against a set that has no tile for
+them. Force
 Bridges remain entirely primitive-rendered - see below. Other
 transport geometry and editor overlays are unchanged. Headless tests without a
 texture retain the primitive/font fallback.
@@ -753,12 +742,12 @@ texture is released before the context is destroyed.
 
 The original generated art is in `resources/textures/source/objects-generated.png`.
 Run `python3 scripts/pack_object_atlas.py` (requires Pillow) to reproduce the packed
-PNG and YAML. This crops the irregular generated sheet, normalizes cells, removes
-near-transparent noise and neutralizes tintable sprites. The generated art remains
-a draft; the packer makes its sizing and alpha layout deterministic.
+PNG and YAML. This crops the irregular generated sheet, normalizes cells and
+removes near-transparent noise. The generated art remains a draft; the packer
+makes its sizing and alpha layout deterministic.
 
 The `sector-tileset` CTest also checks object quads, inverted screen-Y bounds,
-Agent tint, door UV cropping, fully-open leaf suppression and cleanup.
+raw Agent artwork, door UV cropping, fully-open leaf suppression and cleanup.
 The `render` smoke module's `objectAtlas/*` checks prove the loader contract
 itself: an invented atlas on a 32x40 authored grid loads, resolves its regions
 in that grid's units and draws them, while a content rectangle escaping its

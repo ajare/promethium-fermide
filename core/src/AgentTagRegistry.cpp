@@ -104,7 +104,6 @@ namespace core
 			tag->setDisplayColour(sourceTag->getDisplayColour());
 			if (auto const* chance = sourceTag->getEscalatorWalkingChance())
 				tag->setEscalatorWalkingChance(*chance);
-			if (auto const* colour = sourceTag->getColour()) tag->setColour(*colour);
 			if (auto const* walkSpeed = sourceTag->getWalkSpeedModifier())
 				tag->setWalkSpeedModifier(*walkSpeed);
 			if (auto const* height = sourceTag->getHeightModifier())
@@ -165,7 +164,6 @@ namespace core
 				return (!left && !right) || (left && right && *left == *right);
 			};
 			if (!optionalPropertyMatches(tag->getEscalatorWalkingChance(), candidate->getEscalatorWalkingChance())
-				|| !optionalPropertyMatches(tag->getColour(), candidate->getColour())
 				|| !optionalPropertyMatches(tag->getWalkSpeedModifier(),
 					candidate->getWalkSpeedModifier())
 				|| !optionalPropertyMatches(tag->getHeightModifier(),
@@ -306,15 +304,6 @@ namespace core
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
-	}
-
-	AgentColourProperty const* AgentTagRegistry::getAgentTagColour(AgentTagId id) const
-	{
-		auto const* tag = mTags.find(id);
-		if (!tag)
-			throw std::out_of_range(std::format(
-				"Agent tag {} is not defined in this registry", id.value));
-		return tag->getColour();
 	}
 
 	AgentEscalatorWalkingChanceProperty const* AgentTagRegistry::getAgentTagEscalatorWalkingChance(AgentTagId id) const
@@ -648,42 +637,6 @@ namespace core
 				"This registry has issued every Agent property revision");
 		}
 		return mNextPropertyRevision++;
-	}
-
-	bool AgentTagRegistry::colourAdditionIsValid(AgentTagId id,
-		std::string* diagnostic) const
-	{
-		auto reject = [diagnostic](std::string reason)
-		{
-			if (diagnostic) *diagnostic = std::move(reason);
-			return false;
-		};
-		auto const* target = mTags.find(id);
-		if (!target)
-			return reject(std::format(
-				"Agent tag {} is not defined in this registry", id.value));
-
-		for (auto const* world : mLoadedWorlds)
-		{
-			if (!world) continue;
-			for (auto const& [agentId, agent] : world->mAgents.entries())
-			{
-				(void)agentId;
-				if (!agent || !agent->hasAgentTag(id)) continue;
-				for (auto const assigned : agent->getAgentTagIds())
-				{
-					if (assigned == id) continue;
-					auto const* source = mTags.find(assigned);
-					if (!source || !source->getColour()) continue;
-					return reject(std::format(
-						"Cannot add Colour to Agent tag #{}: Agent '{}' in World '{}' already inherits Colour from #{}",
-						target->getName(), agent->getName(), world->getName(),
-						source->getName()));
-				}
-			}
-		}
-		if (diagnostic) diagnostic->clear();
-		return true;
 	}
 
 	bool AgentTagRegistry::escalatorWalkingChanceAdditionIsValid(AgentTagId id,
@@ -1294,88 +1247,6 @@ namespace core
 		for (auto* world : mLoadedWorlds)
 			if (world) world->clearAgentTagAssignments(id);
 		mTags.remove(id);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
-	}
-
-	bool AgentTagRegistry::addAgentTagColour(AgentTagId id, std::string* diagnostic)
-	{
-		auto reject = [diagnostic](std::string reason)
-		{
-			if (diagnostic) *diagnostic = std::move(reason);
-			return false;
-		};
-		auto* tag = mTags.find(id);
-		if (!tag)
-			return reject(std::format(
-				"Agent tag {} is not defined in this registry", id.value));
-		if (tag->getColour())
-			return reject(std::format("Agent tag #{} already has Colour", tag->getName()));
-		if (!definitionEditsAreAllowed(diagnostic)) return false;
-		if (!colourAdditionIsValid(id, diagnostic)) return false;
-
-		try
-		{
-			tag->setColour({ EditorDefaultAgentColour, allocatePropertyRevision() });
-		}
-		catch (std::exception const& error)
-		{
-			return reject(error.what());
-		}
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
-	}
-
-	bool AgentTagRegistry::setAgentTagColour(AgentTagId id, AgentColour colour,
-		std::string* diagnostic)
-	{
-		auto reject = [diagnostic](std::string reason)
-		{
-			if (diagnostic) *diagnostic = std::move(reason);
-			return false;
-		};
-		auto* tag = mTags.find(id);
-		if (!tag)
-			return reject(std::format(
-				"Agent tag {} is not defined in this registry", id.value));
-		auto const* current = tag->getColour();
-		if (!current)
-			return reject(std::format("Agent tag #{} has no Colour", tag->getName()));
-		if (current->value == colour)
-			return reject("The Agent Colour is unchanged");
-		if (!definitionEditsAreAllowed(diagnostic)) return false;
-
-		try
-		{
-			tag->setColour({ colour, allocatePropertyRevision() });
-		}
-		catch (std::exception const& error)
-		{
-			return reject(error.what());
-		}
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
-	}
-
-	bool AgentTagRegistry::removeAgentTagColour(AgentTagId id,
-		std::string* diagnostic)
-	{
-		auto reject = [diagnostic](std::string reason)
-		{
-			if (diagnostic) *diagnostic = std::move(reason);
-			return false;
-		};
-		auto* tag = mTags.find(id);
-		if (!tag)
-			return reject(std::format(
-				"Agent tag {} is not defined in this registry", id.value));
-		if (!tag->getColour())
-			return reject(std::format("Agent tag #{} has no Colour", tag->getName()));
-		if (!definitionEditsAreAllowed(diagnostic)) return false;
-		tag->removeColour();
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
@@ -2646,7 +2517,12 @@ namespace core
 			throw SerializationException("Cannot serialize an Agent tag registry with an invalid UUID");
 		}
 		serializer.beginMap("agentTagRegistry");
-		serializer.writeUint32("version", 17);
+		// Version 18 drops the Agent Colour property. A document written by an
+		// older version that still carries a `colour` property is refused on
+		// load rather than silently stripped: the property no longer exists,
+		// and quietly discarding authored data is the failure this format's
+		// version gates exist to prevent.
+		serializer.writeUint32("version", 18);
 		serializer.writeString("uuid", mUuid);
 		serializer.writeUint64("nextAgentTagId", mTags.nextId());
 		serializer.writeUint64("nextPropertyRevision", mNextPropertyRevision);
@@ -2663,7 +2539,6 @@ namespace core
 			serializer.writeUint8("g", tag->getDisplayColour().g);
 			serializer.writeUint8("b", tag->getDisplayColour().b);
 			serializer.endMap();
-			auto const* colour = tag->getColour();
 			auto const* walkSpeed = tag->getWalkSpeedModifier();
 			auto const* height = tag->getHeightModifier();
 			auto const* stairSpeed = tag->getStairSpeedModifier();
@@ -2684,7 +2559,7 @@ namespace core
 			auto const* remotePanels = tag->getRemoteAccessPanels();
 			auto const* remoteShutters = tag->getRemoteBoothWindowShutters();
 			auto const* mobility = tag->getMobilityProfile();
-			if (colour || walkSpeed || height || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk || familiarity || persistence || minimumPlanningTime || maximumPlanningTime || chance || usage || distance || adherence || remotePanels || remoteShutters || mobility)
+			if (walkSpeed || height || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk || familiarity || persistence || minimumPlanningTime || maximumPlanningTime || chance || usage || distance || adherence || remotePanels || remoteShutters || mobility)
 			{
 				serializer.beginArray("properties");
 				if (chance)
@@ -2693,16 +2568,6 @@ namespace core
 					serializer.writeString("type", "escalatorWalkingChance");
 					serializer.writeUint64("revision", chance->revision);
 					serializer.writeFloat("value", chance->value);
-					serializer.endMap();
-				}
-				if (colour)
-				{
-					serializer.beginMap("");
-					serializer.writeString("type", "colour");
-					serializer.writeUint64("revision", colour->revision);
-					serializer.writeUint8("r", colour->value.r);
-					serializer.writeUint8("g", colour->value.g);
-					serializer.writeUint8("b", colour->value.b);
 					serializer.endMap();
 				}
 				auto writeModifier = [&serializer](char const* type,
@@ -2788,7 +2653,7 @@ namespace core
 	{
 		serializer.beginMap("agentTagRegistry");
 		auto const version = serializer.readUint32("version");
-		if (version < 1 || version > 17)
+		if (version < 1 || version > 18)
 		{
 			throw SerializationException("Unsupported Agent tag registry serialization version");
 		}
@@ -2832,7 +2697,6 @@ namespace core
 			else backfilledDisplayColour = true;
 			if (serializer.hasField("properties"))
 			{
-				bool hasColour{ false };
 				bool hasWalkSpeedModifier{ false };
 				bool hasHeightModifier{ false };
 				bool hasStairSpeedModifier{ false };
@@ -2855,7 +2719,7 @@ namespace core
 				{
 					serializer.beginMap("");
 					auto const type = serializer.readString("type");
-					if (type != "colour" && type != "walkSpeedModifier"
+					if (type != "walkSpeedModifier"
 						&& type != "heightModifier" && type != "escalatorWalkingChance"
 						&& !(version >= 2 && type == "mobilityProfile")
 						&& !(version >= 3 && type == "interactionAversion")
@@ -2877,9 +2741,6 @@ namespace core
 						throw SerializationException(std::format(
 							"Unsupported Agent property type '{}'", type));
 					}
-					if (type == "colour" && hasColour)
-						throw SerializationException(std::format(
-							"Serialized Agent tag #{} contains more than one Colour", name));
 					if (type == "walkSpeedModifier" && hasWalkSpeedModifier)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Walk speed modifier",
@@ -2945,14 +2806,6 @@ namespace core
 						if (tag->getEscalatorWalkingChance() || !agentEscalatorWalkingChanceIsValid(value))
 							throw SerializationException("Duplicate or invalid Escalator walking chance");
 						tag->setEscalatorWalkingChance({ value, revision });
-					}
-					else if (type == "colour")
-					{
-						AgentColour const colour{
-							serializer.readUint8("r"), serializer.readUint8("g"),
-							serializer.readUint8("b") };
-						tag->setColour({ colour, revision });
-						hasColour = true;
 					}
 					else if (type == "objectUsage")
 					{

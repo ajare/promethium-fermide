@@ -68,7 +68,7 @@ automatic_poses = {
   the stance; the renderer does not rotate, mirror or squash it based on Pose.
   Human uses dedicated `human-*` tiles with transforms baked into the atlas.
   Native tile dimensions relative to Standing determine visual size, with
-  ordinary Height scaling, tint, Furniture offsets and glyph fallback retained.
+  ordinary Height scaling, Furniture offsets and glyph fallback retained.
   Missing or invalid tile declarations are
   diagnosed; core does not resolve graphics resources. Existing v2 scripts must
   add this field to every supported pose.

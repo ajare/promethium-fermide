@@ -66,28 +66,38 @@ namespace
 
 	std::string const kTileset = "resources/textures/sectors-new.tileset.yaml";
 
-	// The ten surface-bearing Sector types, by the tile name each one asks
-	// the atlas for. Background and Facade are absent because they are
-	// authored flat colour and never look up a surface.
+	// The ten surface-bearing Sector types that carry a variant family, by
+	// the tile name each one asks the atlas for.
 	std::vector<std::string> const kSurfaces{ "room", "corridor", "ladder",
 		"lift", "shuttle", "stairwell", "staircase", "airlock", "chamber",
 		"dumbwaiter" };
 
-	// The doorframes a Room or a Corridor wears where a Door stands in it
-	// (#1054). Keyed by the wall, then the width and height of the
-	// opening, then the cell's role in it: `L0` is the opening's left cell
-	// and `R0` its right. A 1-wide opening has only a left cell.
+	// The two flat surfaces. They own a tile each on the same terms as
+	// every wall does, and declare no variant family: one picture apiece,
+	// and no second one for an author to pick.
+	std::vector<std::string> const kFlatSurfaces{ "background", "facade" };
+
+	// Every surface-bearing base a conforming set must carry: the ten that
+	// carry variant families plus the two flat surfaces that do not.
+	std::vector<std::string> allSurfaceBases()
+	{
+		auto bases = kSurfaces;
+		bases.insert(bases.end(), kFlatSurfaces.begin(), kFlatSurfaces.end());
+		return bases;
+	}
+
+	// The doorframes the set authors (#1054, #1073). Keyed by the opening
+	// and nothing else: the width and height of the doorway, then the
+	// cell's role in it - `L0` is the opening's left cell and `R0` its
+	// right. A 1-wide opening has only a left cell.
+	//
+	// No wall is in any of these names. A frame lies over the wall's own
+	// tile rather than standing in for it, so the wall is not a fact about
+	// the frame; the fifteen wall-keyed tiles this replaced were three
+	// copies of six tiles drawn to differ in a way nothing could see.
 	std::vector<std::string> const kDoorframes{
-		"doorframe-room-1r-L0", "doorframe-room-2r-L0", "doorframe-room-2r-R0",
-		"doorframe-room-1t-L0", "doorframe-room-2t-L0", "doorframe-room-2t-R0",
-		"doorframe-corridor-1r-L0", "doorframe-corridor-2r-L0",
-		"doorframe-corridor-2r-R0",
-		// The Facade's six (#1059), the Room's six in the Facade's own
-		// moulding. Its tall pair is authored ahead of the tall Facade Door
-		// that will wear it, which #1060 admits.
-		"doorframe-facade-1r-L0", "doorframe-facade-2r-L0",
-		"doorframe-facade-2r-R0", "doorframe-facade-1t-L0",
-		"doorframe-facade-2t-L0", "doorframe-facade-2t-R0" };
+		"doorframe-1r-L0", "doorframe-2r-L0", "doorframe-2r-R0",
+		"doorframe-1t-L0", "doorframe-2t-L0", "doorframe-2t-R0" };
 
 	// ------------------------------------------------------------------
 	// The atlas as the application holds it.
@@ -433,24 +443,25 @@ namespace
 	{
 		using smoke::require;
 		auto const authored = SectorTileset::load(context.fixture(kTileset));
-		// Ten base surfaces, each declaring a family of three, so the set
-		// holds forty tiles and not the ten it carried before families were
-		// derived.
-		require(authored.surfaces.size() == kSurfaces.size() * 4,
+		// Ten bases each declaring a family of three, plus the two flat
+		// surfaces standing alone with no family of their own.
+		require(authored.surfaces.size()
+				== kSurfaces.size() * 4 + kFlatSurfaces.size(),
 			"SectorAtlas authors " + std::to_string(authored.surfaces.size())
-			+ " surfaces; ten bases with three derived variants under each is forty");
-		for (auto const& name : kSurfaces)
+			+ " surfaces; ten bases with three derived variants under each "
+			"plus two flat surfaces is forty-two");
+		for (auto const& name : allSurfaceBases())
 			require(authored.surfaces.count(name),
 				"SectorAtlas registers no '" + name + "' surface");
-		// The ten bases form one row across the top of the sheet. That is
+		// The twelve bases form one row across the top of the sheet. That is
 		// what leaves every column below a base free to hold that base's
 		// family, and why the sheet grew down rather than sideways. The
-		// doorframe block stands to the right of the ten surface columns,
-		// so the sheet is thirteen columns wide, and five rows deep because
+		// doorframe block stands to the right of the twelve surface columns,
+		// so the sheet is fifteen columns wide, and five rows deep because
 		// each framed wall takes a row per height class (#1054, #1059).
-		require(authored.width == 1664 && authored.height == 1600,
-			"SectorAtlas is not the 1664x1600 sheet its set is sized for");
-		for (auto const& name : kSurfaces)
+		require(authored.width == 1920 && authored.height == 1280,
+			"SectorAtlas is not the 1920x1280 sheet its set is sized for");
+		for (auto const& name : allSurfaceBases())
 			require(authored.surfaces.at(name).y == 0,
 				"'" + name + "' is not in the base strip along the top of the sheet");
 		auto const sheet = pngSize(context.fixture("resources/textures/sectors-new.png"));
@@ -479,8 +490,8 @@ namespace
 		// a Sector is authored with (#1054).
 		require(authored.overlays.size() == kDoorframes.size(),
 			"SectorAtlas authors " + std::to_string(authored.overlays.size())
-			+ " overlays; the Room, Corridor and Facade doorframe block is "
-			+ std::to_string(kDoorframes.size()));
+			+ " overlays; the doorframe block is six, one per opening width, "
+			"height class and role");
 		for (auto const& name : kDoorframes)
 		{
 			require(authored.overlays.count(name),
@@ -492,14 +503,18 @@ namespace
 				+ "' is not in the tile map the install pairs against the "
 				"manifest");
 		}
-		// No tall Corridor frame: a tall Door is refused in a Corridor, so
-		// there is no opening for one to frame, and an authored tile nobody
-		// can ever reach is artwork that reads as unfinished.
-		require(authored.overlays.count("doorframe-corridor-1t-L0") == 0
-				&& authored.overlays.count("doorframe-corridor-2t-L0") == 0
-				&& authored.overlays.count("doorframe-corridor-2t-R0") == 0,
-			"SectorAtlas authors a tall Corridor doorframe, which no Door can "
-			"ever be authored to wear");
+		// No wall-keyed frame survives the change. A frame that carried its
+		// wall's appearance was what the frame *replacing* the wall's tile
+		// needed; lying over the tile instead, it has nothing left to say
+		// about the wall, and an authored name the render path never asks
+		// for reads as unfinished art.
+		for (auto const* wall : { "room", "corridor", "facade" })
+			for (auto const& [name, artwork] : authored.overlays)
+				require(name.find(std::string("doorframe-") + wall + "-")
+						== std::string::npos,
+					"SectorAtlas authors the wall-keyed doorframe '" + name
+						+ "'; the frame is keyed by its opening and not by its "
+						"wall");
 		// The manifest's generated entries agree with the authored tileset,
 		// so the runtime pixel contract cannot drift from what was authored.
 		auto const manifest = bundledManifest(context);
@@ -823,46 +838,50 @@ namespace
 	}
 
 	// ------------------------------------------------------------------
-	// Background and Facade: authored flat colour, no tile lookup.
+	// Background and Facade: each draws its own tile, as raw artwork.
 	// ------------------------------------------------------------------
-	void flatColourSectorsTakeNoTile(smoke::Context const& context)
+	void flatSurfaceSectorsDrawTheirOwnTiles(smoke::Context const& context)
 	{
 		using smoke::require;
 		auto const atlas = installNewSectorAtlas(context);
 
-		auto world = std::make_shared<core::World>("Flat colour sectors", 8, 2);
+		require(atlas.tiles.count("background") == 1,
+			"The installed atlas carries no `background` tile");
+		require(atlas.tiles.count("facade") == 1,
+			"The installed atlas carries no `facade` tile");
+
+		auto world = std::make_shared<core::World>("Flat surface sectors", 8, 2);
 		auto const backgroundIndex = world->addBackground(0, 0, 0, 2, 1);
 		auto const facadeIndex = world->addFacade("Facade", 0, 0, 4, 2, 1);
 		world->finishBuild();
 
-		for (auto index : { backgroundIndex, facadeIndex })
+		std::vector<std::pair<core::SectorType, std::string>> const probes{
+			{ core::SectorType::Background, "background" },
+			{ core::SectorType::Facade, "facade" } };
+		std::vector<uint32_t> const indices{ backgroundIndex, facadeIndex };
+
+		for (std::size_t i = 0; i < probes.size(); ++i)
 		{
-			auto const sector = world->getSector(index);
-			require(sector != nullptr, "No flat-colour Sector was built");
-			require(rendersAsFlatColour(sector->getType()),
-				std::string("A Sector that should render flat colour is a ")
-					+ std::to_string(int(sector->getType())));
+			auto const sector = world->getSector(indices[i]);
+			require(sector != nullptr && sector->getType() == probes[i].first,
+				"The fixture Sector is not the flat-surface type under test");
 			WorldDrawList commands({ { -100000.0f, -100000.0f },
 				{ 100000.0f, 100000.0f } });
 			renderSector(sector, 0, LayerRenderStyle::Solid, false, White,
 				&commands);
-			auto const fill = flatSurfaceColour(*sector);
-			require(fill.has_value(),
-				"A flat-colour Sector has no authored surface colour");
-			bool filledWithItsOwnColour = false;
+			int onItsOwnTile = 0;
 			for (auto const& command : commands.commands())
 			{
 				auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command);
-				if (!triangle) continue;
-				require(triangle->texture != WorldDrawList::Texture::SectorAtlas,
-					"A flat-colour Sector looked up a tile; it is authored as a "
-					"colour, not as artwork");
-				if (triangle->texture == WorldDrawList::Texture::None
-					&& triangle->colour == *fill)
-					filledWithItsOwnColour = true;
+				if (!triangle || triangle->texture != WorldDrawList::Texture::SectorAtlas)
+					continue;
+				++onItsOwnTile;
+				require(triangle->colour == White,
+					"A flat-surface tile was drawn with a colour other than its raw "
+					"artwork");
 			}
-			require(filledWithItsOwnColour,
-				"The flat-colour Sector did not fill with its authored colour");
+			require(onItsOwnTile > 0,
+				"The " + probes[i].second + " Sector drew no tile of its own");
 		}
 	}
 
@@ -880,7 +899,7 @@ namespace
 		std::ostringstream yaml;
 		yaml << "version: 2\n"
 			<< "image: invented.png\n"
-			<< "size: [640, 640]\n"
+			<< "size: [640, 960]\n"
 			<< "tile_size: [128, 320]\n"
 			<< "sprites:\n";
 		int column = 0, row = 0;
@@ -890,8 +909,7 @@ namespace
 				<< "    cell: [" << column << ", " << row << "]\n"
 				<< "    content: [0, 0, 128, 320]\n"
 				<< "    offset: " << offset << "\n"
-				<< "    drawn_size: " << drawnSize << "\n"
-				<< "    tintable: true\n";
+				<< "    drawn_size: " << drawnSize << "\n";
 			if (++column == 5) { column = 0; ++row; }
 		}
 		if (withBoundaries)
@@ -899,26 +917,25 @@ namespace
 		return yaml.str();
 	}
 
-	// The full ten-surface set with no `overlays` key at all - the shape
-	// every version 2 file written before the doorframe existed has, and
-	// one of the three spellings of "no overlays" #1066 is about.
+	// The full twelve-surface set with no `overlays` key at all - the
+	// shape every version 2 file written before the doorframe existed has,
+	// and one of the three spellings of "no overlays" #1066 is about.
 	std::string tenSurfaceTilesetYaml()
 	{
 		std::ostringstream yaml;
 		yaml << "version: 2\n"
 			<< "image: invented.png\n"
-			<< "size: [1280, 640]\n"
+			<< "size: [1536, 640]\n"
 			<< "tile_size: [128, 320]\n"
 			<< "sprites:\n";
 		int column = 0;
-		for (auto const& name : kSurfaces)
+		for (auto const& name : allSurfaceBases())
 		{
 			yaml << "  " << name << ":\n"
 				<< "    cell: [" << column++ << ", 0]\n"
 				<< "    content: [0, 0, 128, 320]\n"
 				<< "    offset: [0.0, 0.0]\n"
-				<< "    drawn_size: [1.0, 1.0]\n"
-				<< "    tintable: true\n";
+				<< "    drawn_size: [1.0, 1.0]\n";
 		}
 		return yaml.str();
 	}
@@ -936,7 +953,6 @@ namespace
 			  "    content: [0, 0, 128, 320]\n"
 			  "    offset: [0.0, 0.0]\n"
 			  "    drawn_size: [1.0, 1.0]\n"
-			  "    tintable: true\n"
 			+ extraKeys;
 	}
 
@@ -950,7 +966,7 @@ namespace
 		std::ostringstream yaml;
 		yaml << "version: 2\n"
 			<< "image: invented.png\n"
-			<< "size: [1280, " << (sheetRows * 320) << "]\n"
+			<< "size: [1536, " << (sheetRows * 320) << "]\n"
 			<< "tile_size: [128, 320]\n"
 			<< "sprites:\n";
 		int column = 0;
@@ -961,8 +977,17 @@ namespace
 				<< "    variants: " << variants << "\n"
 				<< "    content: [0, 0, 128, 320]\n"
 				<< "    offset: [0.0, 0.0]\n"
-				<< "    drawn_size: [1.0, 1.0]\n"
-				<< "    tintable: true\n";
+				<< "    drawn_size: [1.0, 1.0]\n";
+		}
+		// The flat surfaces ride along so the set conforms; they declare no
+		// family, so a refusal about the ten is never confounded by them.
+		for (auto const& name : kFlatSurfaces)
+		{
+			yaml << "  " << name << ":\n"
+				<< "    cell: [" << column++ << ", " << baseRow << "]\n"
+				<< "    content: [0, 0, 128, 320]\n"
+				<< "    offset: [0.0, 0.0]\n"
+				<< "    drawn_size: [1.0, 1.0]\n";
 		}
 		return yaml.str();
 	}
@@ -997,12 +1022,12 @@ namespace
 		return {};
 	}
 
-	// Every one of the ten surface-bearing types has to be present. A set
-	// missing one would leave that Sector with no surface to draw.
+	// Every one of the twelve surface-bearing types has to be present. A
+	// set missing one would leave that Sector with no surface to draw.
 	void loaderRefusesASetMissingASurface(smoke::Context const& context)
 	{
 		using smoke::require;
-		auto missing = kSurfaces;
+		auto missing = allSurfaceBases();
 		missing.erase(std::find(missing.begin(), missing.end(), "airlock"));
 		auto const refusal = loadRefusal(context, "missing-surface",
 			tilesetYaml(missing));
@@ -1018,7 +1043,7 @@ namespace
 	{
 		using smoke::require;
 		auto const refusal = loadRefusal(context, "declared-boundaries",
-			tilesetYaml(kSurfaces, "[1.0, 1.0]", "[0.0, 0.0]", true));
+			tilesetYaml(allSurfaceBases(), "[1.0, 1.0]", "[0.0, 0.0]", true));
 		require(!refusal.empty(),
 			"A version 2 sector tileset declaring boundary strips was accepted");
 		require(refusal.find("boundary") != std::string::npos
@@ -1131,17 +1156,17 @@ namespace
 			out << overlayTilesetYaml("doorframe-room-1r-L0");
 		}
 		auto const set = SectorTileset::load(path);
-		require(set.surfaces.size() == kSurfaces.size(),
+		require(set.surfaces.size() == allSurfaceBases().size(),
 			"The overlay set carries " + std::to_string(set.surfaces.size())
-			+ " surfaces; the ten bases were expected");
+			+ " surfaces; the twelve bases were expected");
 		require(set.overlays.size() == 1,
 			"The overlay set carries " + std::to_string(set.overlays.size())
 			+ " overlays; one was authored");
 		require(set.overlays.count("doorframe-room-1r-L0") == 1,
 			"The authored overlay is not in the overlay map");
-		require(set.tiles.size() == kSurfaces.size() + 1,
+		require(set.tiles.size() == allSurfaceBases().size() + 1,
 			"The tile map the install pairs against the manifest holds "
-			+ std::to_string(set.tiles.size()) + " tiles instead of the ten "
+			+ std::to_string(set.tiles.size()) + " tiles instead of the twelve "
 			"surfaces plus the overlay");
 		// And the shipped set still loads with its doorframe block intact.
 		auto const without = SectorTileset::load(
@@ -1181,18 +1206,18 @@ namespace
 			catch (std::exception const& error) { refusal = error.what(); }
 			require(refusal.empty(), "A set whose `overlays` is " + shape.tag
 				+ " was refused: " + refusal);
-			require(set.surfaces.size() == kSurfaces.size(),
+			require(set.surfaces.size() == allSurfaceBases().size(),
 				"A set whose `overlays` is " + shape.tag + " carries "
-				+ std::to_string(set.surfaces.size()) + " surfaces; the ten "
+				+ std::to_string(set.surfaces.size()) + " surfaces; the twelve "
 				"bases were expected");
 			require(set.overlays.empty(),
 				"A set whose `overlays` is " + shape.tag + " gained "
 				+ std::to_string(set.overlays.size()) + " overlays; the shape "
 				"authors none");
-			require(set.tiles.size() == kSurfaces.size(),
+			require(set.tiles.size() == allSurfaceBases().size(),
 				"A set whose `overlays` is " + shape.tag + " carries "
-				+ std::to_string(set.tiles.size()) + " tiles; the ten surfaces "
-				"and nothing else were expected");
+				+ std::to_string(set.tiles.size()) + " tiles; the twelve "
+				"surfaces and nothing else were expected");
 		}
 	}
 
@@ -1233,7 +1258,7 @@ namespace
 				&& set.overlays.count("doorframe-room-1r-L0") == 1,
 			"A populated `overlays` map read back as "
 			+ std::to_string(set.overlays.size()) + " overlays");
-		require(set.tiles.size() == kSurfaces.size() + 1,
+		require(set.tiles.size() == allSurfaceBases().size() + 1,
 			"A populated `overlays` map left the tile map at "
 			+ std::to_string(set.tiles.size()) + " tiles");
 	}
@@ -1244,7 +1269,7 @@ namespace
 	{
 		using smoke::require;
 		auto const refusal = loadRefusal(context, "drawn-two-cells",
-			tilesetYaml(kSurfaces, "[2.0, 1.0]"));
+			tilesetYaml(allSurfaceBases(), "[2.0, 1.0]"));
 		require(refusal.find("one full World cell") != std::string::npos,
 			"A surface drawn two cells wide was accepted: " + refusal);
 	}
@@ -1254,7 +1279,7 @@ namespace
 	{
 		using smoke::require;
 		auto const refusal = loadRefusal(context, "offset-off-cell",
-			tilesetYaml(kSurfaces, "[1.0, 1.0]", "[0.5, 0.0]"));
+			tilesetYaml(allSurfaceBases(), "[1.0, 1.0]", "[0.5, 0.0]"));
 		require(refusal.find("anchor") != std::string::npos,
 			"A surface offset off its cell's anchor was accepted: " + refusal);
 	}
@@ -1266,11 +1291,11 @@ namespace
 		using smoke::require;
 		auto const path = context.temporaryRoot() / "conforming.tileset.yaml";
 		std::ofstream out(path, std::ios::binary | std::ios::trunc);
-		out << tilesetYaml(kSurfaces);
+		out << tilesetYaml(allSurfaceBases());
 		out.close();
 		require(bool(out), "Could not write the fixture tileset: " + path.string());
 		auto const loaded = SectorTileset::load(path);
-		require(loaded.surfaces.size() == kSurfaces.size(),
+		require(loaded.surfaces.size() == allSurfaceBases().size(),
 			"A conforming set did not load all ten surfaces");
 		require(loaded.boundaries.empty(),
 			"A conforming version 2 set gained boundary regions");
@@ -1279,8 +1304,6 @@ namespace
 			require(near(artwork.drawnSize.x, 1.0f)
 				&& near(artwork.drawnSize.y, 1.0f),
 				"'" + name + "' lost its authored drawn size on load");
-			require(artwork.tintable,
-				"'" + name + "' lost its authored tintable flag on load");
 		}
 	}
 
@@ -1325,8 +1348,8 @@ namespace
 
 	// The same set with room to stand loads, and every derived tile lands
 	// where the rule puts it: its base's column, one authored tile height
-	// per step down, with the base's content, offset, drawn size and
-	// tintable flag carried through untouched.
+	// per step down, with the base's content, offset and drawn size
+	// carried through untouched.
 	void loaderDerivesEachVariantOfAFamilyThatFits(smoke::Context const& context)
 	{
 		using smoke::require;
@@ -1336,8 +1359,9 @@ namespace
 		out.close();
 		require(bool(out), "Could not write the fixture tileset: " + path.string());
 		auto const loaded = SectorTileset::load(path);
-		require(loaded.surfaces.size() == kSurfaces.size() * 4,
-			"A conforming family set did not load forty tiles");
+		require(loaded.surfaces.size()
+				== kSurfaces.size() * 4 + kFlatSurfaces.size(),
+			"A conforming family set did not load forty-two tiles");
 		for (auto const& name : kSurfaces)
 		{
 			auto const& base = loaded.tiles.at(name);
@@ -1360,8 +1384,6 @@ namespace
 						&& derived.drawnSize.x == base.drawnSize.x
 						&& derived.drawnSize.y == base.drawnSize.y,
 					variant + " did not inherit its base's render semantics");
-				require(derived.tintable == base.tintable,
-					variant + " did not inherit its base's tintable flag");
 			}
 		}
 	}
@@ -1378,8 +1400,7 @@ namespace
 			"    cell: [0, 1]\n"
 			"    content: [0, 0, 128, 320]\n"
 			"    offset: [0.0, 0.0]\n"
-			"    drawn_size: [1.0, 1.0]\n"
-			"    tintable: true\n";
+			"    drawn_size: [1.0, 1.0]\n";
 		auto const refusal = loadRefusal(context, "authored-beside-family", yaml);
 		require(refusal.find("corridor-V1") != std::string::npos
 				&& refusal.find("reserves") != std::string::npos,
@@ -1459,8 +1480,8 @@ void render_smoke::registerSectorAtlas(std::vector<smoke::Check>& checks)
 		isolated<shuttleAndStaircaseNoLongerBorrow> });
 	checks.push_back({ "sectorAtlasNew/carriageAndStepsStillDrawOnTop",
 		isolated<carriageAndStepsStillDrawOnTop> });
-	checks.push_back({ "sectorAtlasNew/flatColourSectorsTakeNoTile",
-		isolated<flatColourSectorsTakeNoTile> });
+	checks.push_back({ "sectorAtlasNew/flatSurfaceSectorsDrawTheirOwnTiles",
+		isolated<flatSurfaceSectorsDrawTheirOwnTiles> });
 	checks.push_back({ "sectorAtlasNew/loaderRefusesASetMissingASurface",
 		isolated<loaderRefusesASetMissingASurface> });
 	checks.push_back({ "sectorAtlasNew/loaderRefusesABoundaryStripInTheNewSet",

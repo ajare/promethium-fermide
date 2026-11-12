@@ -93,11 +93,11 @@ std::optional<int> SectorSwatchSelection::selectedVariant() const
 }
 
 bool drawSectorVariantSwatch(SectorVariantSwatch const& swatch,
-	WorldDrawList* drawList, Vec2 minimum, Vec2 maximum, PackedColourValue tint)
+	WorldDrawList* drawList, Vec2 minimum, Vec2 maximum)
 {
 	if (!drawList) return false;
 	auto const framed = drawSectorTilePreview(swatch.tileName, drawList, minimum,
-		maximum, tint);
+		maximum);
 	// The name goes over the artwork whatever else happened. A swatch whose
 	// art could not be framed still says what it was meant to show, which
 	// is the one thing a swatch has to do even when it has failed at the

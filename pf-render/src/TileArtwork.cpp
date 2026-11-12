@@ -24,7 +24,7 @@ TileArtworkMap installAtlasTiles(TileArtworkMap const& authored,
                 + "' pixel region is outside the atlas image");
         installed.emplace(name, TileArtwork{
             SectorTileRegion{ region.x, region.y, region.width, region.height },
-            artwork.tintable, artwork.offset, artwork.drawnSize });
+            artwork.offset, artwork.drawnSize });
     }
     return installed;
 }

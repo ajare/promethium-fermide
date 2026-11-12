@@ -36,6 +36,7 @@
 #include "imgui/imgui.h"
 
 #include "Render.h"
+#include "SectorTileset.h"
 #include "UISettings.h"
 #include "WorldDrawList.h"
 #include "core/AgentTagRegistry.h"
@@ -77,12 +78,12 @@ namespace
 			{ gUISettings.worldViewportWidth, gUISettings.worldViewportHeight } });
 	}
 
-	// Sample the painter-ordered command stream, respecting nested scissor
-	// rectangles. These scenes use opaque untextured fills and sample away from
-	// outlines and text.
-	PackedColourValue colourAt(WorldDrawList const& draws, Vec2 point)
+	// The topmost triangle painted over a point, respecting nested scissor
+	// rectangles. Nothing in these scenes is a flat colour any more, so the
+	// answer is the triangle itself and the caller reads what it says.
+	WorldDrawList::Triangle const* topAt(WorldDrawList const& draws, Vec2 point)
 	{
-		PackedColourValue result = 0;
+		WorldDrawList::Triangle const* result = nullptr;
 		for (auto const& command : draws.commands())
 		{
 			auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
@@ -96,9 +97,61 @@ namespace
 			auto const b = cross(triangle->positions[1], triangle->positions[2]);
 			auto const c = cross(triangle->positions[2], triangle->positions[0]);
 			if ((a >= 0 && b >= 0 && c >= 0) || (a <= 0 && b <= 0 && c <= 0))
-				result = triangle->colour;
+				result = triangle;
 		}
 		return result;
+	}
+
+	// A sheet with one full-cell tile per surface these scenes use, each in
+	// its own column, so a quad's tile is readable back out of the UVs it
+	// sampled. Which tile the aperture drew says which Layer it looked
+	// through to, which is what these checks are really asking.
+	SectorTileset installFlatSurfaceAtlas()
+	{
+		SectorTileset atlas;
+		atlas.family = SectorTilesetFamily::New;
+		int column = 0;
+		for (auto const* name : { "room", "background" })
+			atlas.surfaces.emplace(name, SectorTileRegion{
+				column++ * CORE_CELL_WIDTH_PIXELS, 0,
+				CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS });
+		atlas.width = column * CORE_CELL_WIDTH_PIXELS;
+		atlas.height = CORE_LEVEL_HEIGHT_PIXELS;
+		setSectorTileset(atlas, static_cast<TextureId>(1));
+		require(sectorTilesetIsNewFamily(),
+			"The synthetic lifetime atlas is not the New family");
+		return atlas;
+	}
+
+	std::string tileOf(WorldDrawList::Triangle const* triangle,
+		SectorTileset const& atlas)
+	{
+		if (!triangle || triangle->texture != WorldDrawList::Texture::SectorAtlas)
+			return {};
+		float u0{ 1e9f }, u1{ -1e9f }, v0{ 1e9f }, v1{ -1e9f };
+		for (auto const& uv : triangle->texcoords)
+		{
+			u0 = std::min(u0, uv.x); u1 = std::max(u1, uv.x);
+			v0 = std::min(v0, uv.y); v1 = std::max(v1, uv.y);
+		}
+		auto const cu = (u0 + u1) * 0.5f;
+		auto const cv = (v0 + v1) * 0.5f;
+		for (auto const& [name, region] : atlas.surfaces)
+		{
+			auto const left = float(region.x) / float(atlas.width);
+			auto const right = float(region.x + region.width) / float(atlas.width);
+			auto const top = float(region.y) / float(atlas.height);
+			auto const bottom = float(region.y + region.height) / float(atlas.height);
+			if (cu >= left && cu < right && cv >= top && cv < bottom)
+				return name;
+		}
+		return {};
+	}
+
+	bool showsTileAt(WorldDrawList const& draws, Vec2 point,
+		SectorTileset const& atlas, std::string const& want)
+	{
+		return tileOf(topAt(draws, point), atlas) == want;
 	}
 
 	// A front Room with a clear Window onto a Background one Layer behind. The
@@ -110,12 +163,16 @@ namespace
 		uint32_t frontRoom{};
 		std::shared_ptr<const core::Window> window;
 
-		ApertureScene(std::string name, core::BackgroundColour backgroundColour)
+		// `windowCell` is where the Window sits on the front Room. Two
+		// scenes with their Windows in different cells cannot be confused
+		// for one another once neither paints a colour of its own: what one
+		// reveals at a point, the other does not.
+		ApertureScene(std::string name, int windowCell)
 			: world(std::make_shared<core::World>(std::move(name), 6, 2))
 		{
 			frontRoom = world->addRoom("Front", 0, 0, 0, 6, 1);
-			world->addBackground(1, 0, 0, 6, 1, backgroundColour);
-			window = world->addSectorWindow(0, 0, 1, 3, 1,
+			world->addBackground(1, 0, 0, 6, 1, { 23, 67, 109 });
+			window = world->addSectorWindow(0, 0, windowCell, 3, 1,
 				{ false, core::Window::State::Closed, core::Window::Style::Clear }).object;
 			world->finishBuild();
 		}
@@ -199,24 +256,27 @@ void nestedApertureSeesTheRenderedWorld()
 	ImGuiGuard imgui;
 	setViewport();
 
-	ApertureScene scene("Render lifetime aperture", { 23, 67, 109 });
+	auto const atlas = installFlatSurfaceAtlas();
+	ApertureScene scene("Render lifetime aperture", 1);
 	auto draws = makeDraws();
 	renderWorld(scene.world, &draws);
 
-	require(colourAt(draws, scene.revealedPoint()) == PackedColourValue(ImColor(23, 67, 109)),
+	require(showsTileAt(draws, scene.revealedPoint(), atlas, "background"),
 		"the nested aperture pass did not receive the World renderWorld() installed (#199)");
 }
 
 // A nested scope publishes its own World for its own render and restores the
-// previous one afterwards. Both renders read the aperture pass back, so a
-// wrong or stale World changes which Background colour the Window reveals.
+// previous one afterwards. Both renders read the aperture pass back, and
+// the two scenes put their Windows in different cells, so a wrong or stale
+// World reveals the Background somewhere the rendered World does not.
 void nestedScopesRestoreThePreviousWorld()
 {
 	ImGuiGuard imgui;
 	setViewport();
 
-	ApertureScene outer("Render lifetime outer", { 23, 67, 109 });
-	ApertureScene inner("Render lifetime inner", { 151, 37, 83 });
+	auto const atlas = installFlatSurfaceAtlas();
+	ApertureScene outer("Render lifetime outer", 1);
+	ApertureScene inner("Render lifetime inner", 3);
 
 	{
 		RenderWorldScope outerScope(outer.world);
@@ -226,15 +286,17 @@ void nestedScopesRestoreThePreviousWorld()
 			auto innerDraws = makeDraws();
 			renderSector(inner.world->getSector(inner.frontRoom), 0,
 				LayerRenderStyle::Solid, false, ImColor(192, 192, 255), &innerDraws);
-			require(colourAt(innerDraws, inner.revealedPoint()) == PackedColourValue(ImColor(151, 37, 83)),
+			require(showsTileAt(innerDraws, inner.revealedPoint(), atlas, "background"),
 				"a nested RenderWorldScope did not publish its own World (#199)");
 		}
 
 		auto outerDraws = makeDraws();
 		renderSector(outer.world->getSector(outer.frontRoom), 0,
 			LayerRenderStyle::Solid, false, ImColor(192, 192, 255), &outerDraws);
-		require(colourAt(outerDraws, outer.revealedPoint()) == PackedColourValue(ImColor(23, 67, 109)),
+		require(showsTileAt(outerDraws, outer.revealedPoint(), atlas, "background"),
 			"a nested RenderWorldScope did not restore the previous World (#199)");
+		require(!showsTileAt(outerDraws, inner.revealedPoint(), atlas, "background"),
+			"the restored render still saw the inner World's Window");
 	}
 }
 

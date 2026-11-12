@@ -81,15 +81,6 @@ bool commitAgentTagRename(
 bool commitAgentTagDisplayColourEdit(
 	std::shared_ptr<core::AgentTagRegistry> const& registry,
 	core::AgentTagId id, core::AgentColour colour, std::string& diagnostic);
-bool commitAgentTagColourAdd(
-	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
-	std::string& diagnostic);
-bool commitAgentTagColourEdit(
-	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
-	core::AgentColour colour, std::string& diagnostic);
-bool commitAgentTagColourRemove(
-	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
-	std::string& diagnostic);
 bool commitAgentTagEscalatorWalkingChanceAdd(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	std::string& diagnostic);

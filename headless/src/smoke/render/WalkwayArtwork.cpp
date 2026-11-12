@@ -475,13 +475,11 @@ namespace
 				"Generated ImageSet entry for '" + name
 				+ "' drifted from the authored tileset");
 		}
-		// The Walkway tile is the one live entry, and it carries the three
+		// The Walkway tile is the one live entry, and it carries the two
 		// render semantics a version 1 tileset left the renderer to guess.
 		auto const walkway = atlas.authored.sprites.find("walkway");
 		require(walkway != atlas.authored.sprites.end(),
 			"The authored ObjectAtlas tileset has no walkway tile");
-		require(walkway->second.tintable,
-			"The Walkway tile must be tintable so selection shows through it");
 		require(near(walkway->second.offset.y, -kSlabWorldHeight)
 			&& near(walkway->second.offset.x, 0.0f),
 			"The Walkway tile's authored offset must hang below the floor line");
@@ -540,8 +538,7 @@ namespace
 			&& installed.region.height == region.height,
 			"The installed region did not come from the ImageSet");
 		// Semantics from the tileset, not derived from the name.
-		require(installed.tintable == atlas.authored.sprites.at("walkway").tintable
-			&& near(installed.offset.x, atlas.authored.sprites.at("walkway").offset.x)
+		require(near(installed.offset.x, atlas.authored.sprites.at("walkway").offset.x)
 			&& near(installed.offset.y, atlas.authored.sprites.at("walkway").offset.y)
 			&& near(installed.drawnSize.x, atlas.authored.sprites.at("walkway").drawnSize.x)
 			&& near(installed.drawnSize.y, atlas.authored.sprites.at("walkway").drawnSize.y),
