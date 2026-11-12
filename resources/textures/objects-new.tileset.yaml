@@ -110,11 +110,19 @@ sprites:
 
   # A Door leaf is a full-cell tile. The artwork fills the whole 128 x 320
   # cell, the renderer draws it at the cell rect, translates it by the
-  # opening animation and clips it to the doorway aperture. The clip is the
-  # doorway, so a leaf cannot paint outside it, and one tile serves both
-  # widths: a 1-wide Door sees L0 across u[0.1,0.9], a 2-wide Door sees
-  # the same L0 across u[0.1,1.0]. The clip selects the band, so the art
-  # never needs a width-specific variant.
+  # opening animation and clips it to the doorway aperture. The clip is
+  # the doorway, so a leaf cannot paint outside it, and the clip selects
+  # the band, so the art never needs a width-specific variant.
+  #
+  # Which band the closed Door sits on depends on the opening style, and
+  # one tile covers all of them. OpenUp and OpenApart leave the leaf on
+  # its cell: a 1-wide Door sees L0 across u[0.1,0.9], a 2-wide Door the
+  # same L0 across u[0.1,1.0]. A side-sliding leaf starts its travel one
+  # inset in from that, which is what buys a reveal that begins the
+  # instant the Door opens instead of a tenth of the travel later
+  # (#1061): a 1-wide OpenLeft Door sees u[0.2,1.0] and the matching
+  # OpenRight Door the mirror u[0.0,0.8]. Both bands still hold
+  # u = 0.5, which matters because of the constraint below.
   #
   # Every leaf tile declares the same drawn size and a zero render offset -
   # one contract value for the whole family rather than one per width and

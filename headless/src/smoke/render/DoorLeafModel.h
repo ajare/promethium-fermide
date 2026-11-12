@@ -8,22 +8,36 @@
 // The aperture is the Door's own shape: inset from the cell by
 // CORE_DOOR_X_INSET on each x side and standing on the cell floor. The
 // cell a leaf is drawn at is therefore the aperture widened back out by
-// that inset and carried up to a whole cell, which is what makes a
-// 1-wide Door see L0 across u[0.1,0.9] and a 2-wide Door see the same
-// L0 across u[0.1,1.0] - the clip selects the band, so one tile serves
-// both widths.
+// that inset and carried up to a whole cell, which is what lets the clip
+// select the band of the tile so one tile serves both widths.
 //
 // The travel distances are the ones the feature keeps: the aperture
 // height for OpenUp, the aperture width for OpenLeft and OpenRight, and
-// half the aperture width per leaf for OpenApart. A sideways leaf starts
-// its travel one inset outside the aperture, at the cell boundary, so
-// clearing the far jamb takes the aperture width plus that inset; the
-// inset is spent behind the near jamb with the clip over it.
+// half the aperture width per leaf for OpenApart.
+//
+// The side-sliding travel is derived here from the contract rather than
+// copied from the renderer (#1061, Option A). The contract pins the
+// leaf's trailing edge - the edge last to leave the doorway, and so the
+// edge the visible coverage is made of - on the far jamb at p = 0, so
+// the reveal begins the instant the Door moves and the leaf never reads
+// as frozen, and on the near jamb at p = 1, so a fully open Door leaves
+// nothing painted across either jamb. The leaf's own cell puts that edge
+// one inset outside the far jamb, so the animation vector starts at that
+// inset rather than at zero:
+//
+//   travel(p) = INSET + p x apertureWidth
+//
+// What that costs the closed leaf on its tile: a 1-wide OpenLeft Door
+// sees u[0.2,1.0] of L0 where the source crop saw u[0.1,0.9], and the
+// matching OpenRight Door sees the mirror u[0.0,0.8]. L0 is symmetric
+// about u = 0.5 for the 1-wide OpenApart split, so the two bands are
+// mirror images of each other and each still holds the symmetry axis.
 //
 // Everything here is in World units with y growing up. The checks project
 // to screen with their own transform helpers.
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include "core/Defines.h"
@@ -137,6 +151,44 @@ namespace door_leaf
 		return apertureLeft - CORE_DOOR_X_INSET;
 	}
 
+	// The direction a side-sliding style's leaves travel in: -1 for
+	// OpenLeft, +1 for OpenRight.
+	inline float sideSign(core::Door::OpenStyle style)
+	{
+		return style == core::Door::OpenStyle::OpenLeft ? -1.0f : 1.0f;
+	}
+
+	// Where the contract pins a side-sliding leaf's trailing edge - the
+	// edge last to leave the doorway, and so the edge the visible coverage
+	// is made of (#1061, Option A). At p = 0 it is on the far jamb, so
+	// the reveal begins the instant the Door moves; at p = 1 it is on the
+	// near jamb, so a fully open Door paints nothing across either jamb.
+	// Between the pins it moves at a uniform speed, which is what makes
+	// the visible travel exactly one aperture width.
+	inline float sideTrailingEdgePinned(float openPct, Rect const& aperture,
+		float sign)
+	{
+		auto const farJamb = sign < 0.0f ? aperture.x1 : aperture.x0;
+		return farJamb + sign * openPct * aperture.width();
+	}
+
+	// The animation vector that carries the leaf's own trailing edge onto
+	// its pin. The leaf's cell is the aperture widened back out by the
+	// inset, so that edge starts one inset outside the far jamb and the
+	// travel opens at that inset - which is the whole of #1061: spend the
+	// inset at the start instead and the visible edge stalls behind the
+	// far jamb for it, drop it altogether and the last inset is still
+	// painted across the far jamb at 100% open.
+	inline float sideTravel(float openPct, uint32_t cellsWide,
+		Rect const& aperture, float sign)
+	{
+		auto const cellTrailingEdge = sign < 0.0f
+			? cellLeft(aperture.x0) + static_cast<float>(cellsWide)
+			: cellLeft(aperture.x0);
+		return std::abs(sideTrailingEdgePinned(openPct, aperture, sign)
+			- cellTrailingEdge);
+	}
+
 	inline Plan plan(uint32_t cellsWide, Rect aperture,
 		core::Door::OpenStyle style, float openPct)
 	{
@@ -178,18 +230,27 @@ namespace door_leaf
 		case core::Door::OpenStyle::OpenLeft:
 		case core::Door::OpenStyle::OpenRight:
 		{
-			auto const travel = openPct * (aperture.width() + CORE_DOOR_X_INSET);
-			out.travelPerLeaf = aperture.width() + CORE_DOOR_X_INSET;
-			auto const sign = style == core::Door::OpenStyle::OpenLeft
-				? -1.0f : 1.0f;
+			auto const sign = sideSign(style);
+			// Derived from the pins, not read off the renderer: the travel
+			// is the distance from where the leaf's cell puts its trailing
+			// edge to where the contract pins that edge.
+			auto const travel = sideTravel(openPct, cellsWide, aperture, sign);
+			// What the visible edge covers between closed and fully open:
+			// one aperture width, however far outside the jamb the leaf had
+			// to start from.
+			out.travelPerLeaf = sideTravel(1.0f, cellsWide, aperture, sign)
+				- sideTravel(0.0f, cellsWide, aperture, sign);
 			for (uint32_t i = 0; i < cellsWide; ++i)
 				addCell(i, sign * travel, 0.0f);
 
 			if (sign < 0.0f)
-				out.reveal = {cellX0 + cellSpan - travel, aperture.y0,
-					aperture.x1, aperture.y1};
+				// What the leaf has vacated is the strip between its pinned
+				// trailing edge and the far jamb it came off.
+				out.reveal = {sideTrailingEdgePinned(openPct, aperture, sign),
+					aperture.y0, aperture.x1, aperture.y1};
 			else
-				out.reveal = {aperture.x0, aperture.y0, cellX0 + travel,
+				out.reveal = {aperture.x0, aperture.y0,
+					sideTrailingEdgePinned(openPct, aperture, sign),
 					aperture.y1};
 			break;
 		}

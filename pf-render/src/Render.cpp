@@ -653,17 +653,34 @@ DoorLeafPlan planDoorLeaves(shared_ptr<const core::Door> const& door)
 	case core::Door::OpenStyle::OpenLeft:
 	case core::Door::OpenStyle::OpenRight:
 	{
-		// The joined leaf slides sideways out of the doorway. Its inner
-		// edge starts at the cell boundary, one inset outside the
-		// aperture, so clearing the far jamb takes the aperture width
-		// plus that inset. The inset is spent entirely behind the near
-		// jamb with the clip over it, so the visible edge still travels
-		// exactly one aperture width - far jamb to near jamb - and the
-		// reveal completes at 100% open exactly as it did under the
-		// source crop. Travelling only the aperture width would leave the
-		// leaf's last inset painted across the far jamb of a Door that
-		// reads as fully open.
-		auto const travel = openPct * (apertureWidth + CORE_DOOR_X_INSET);
+		// The joined leaf slides sideways out of the doorway. Its
+		// trailing edge - the edge last to leave the doorway, and so the
+		// edge the visible coverage is made of - is what the animation
+		// is pinned by (#1061, Option A):
+		//
+		//   p = 0  on the far jamb, so the reveal begins the instant the
+		//          Door moves and the leaf never reads as frozen;
+		//   p = 1  on the near jamb, so a fully open Door leaves nothing
+		//          painted across either jamb.
+		//
+		// Between the pins it moves at a uniform speed, so the visible
+		// edge covers exactly one aperture width over the Door's
+		// open/close time, which is the travel #1052 states. The leaf's
+		// own cell puts its trailing edge one inset outside the far jamb,
+		// so that inset is the offset the journey starts from rather than
+		// extra distance. Dropping it would leave the leaf's last inset
+		// painted across the far jamb of a Door that reads as fully open;
+		// spending it at the start instead - travelling from the cell edge
+		// - would burn the first inset behind the far jamb, under the
+		// clip, and stall the visible edge for it.
+		//
+		// What the shift costs is where the closed leaf sits on its tile:
+		// a 1-wide OpenLeft Door sees u[0.2,1.0] of L0 where the source
+		// crop saw u[0.1,0.9], and the matching OpenRight Door sees the
+		// mirror u[0.0,0.8]. L0 is symmetric about u = 0.5 for the
+		// 1-wide OpenApart split, so the two bands are mirror images and
+		// each still holds the symmetry axis.
+		auto const travel = CORE_DOOR_X_INSET + openPct * apertureWidth;
 		auto const sign = door->getOpenStyle() == core::Door::OpenStyle::OpenLeft
 			? -1.0f : 1.0f;
 
@@ -731,9 +748,13 @@ DoorLeafPlan planDoorLeaves(shared_ptr<const core::Door> const& door)
 // is the doorway itself, so a leaf cannot paint outside it however far it
 // travels; the translation, and not a source crop taken from the leaf's
 // own edge, is what animates it. That is what lets one tile serve both
-// widths - a 1-wide Door sees L0 across u[0.1,0.9], a 2-wide Door sees
-// the same L0 across u[0.1,1.0] - and what lets a 2-wide Door read as one
-// joined two-cell leaf rather than one stretched tile.
+// widths - the clip picks the band, so a 2-wide Door reads as one joined
+// two-cell leaf rather than one stretched tile - and what lets the closed
+// leaf sit wherever its style wants on that band. The side-sliding styles
+// want it one inset further in than the aperture, which is what #1061
+// pays for a reveal that starts at p = 0: a 1-wide OpenLeft Door sees
+// u[0.2,1.0] of L0 where the source crop saw u[0.1,0.9], and the
+// matching OpenRight Door sees the mirror u[0.0,0.8].
 //
 // The style contributes only the leaves to draw and the region they
 // vacate; see planDoorLeaves.
@@ -818,11 +839,17 @@ void renderDoorLeaves(shared_ptr<const core::Door> door, uint32_t layer,
 		drawList->AddDrawCmd();
 
 		// The back Sector shows only through the region the leaves have
-		// vacated, which is bounded by the aperture: at 0% open nothing
-		// has been vacated and the reveal is empty.
-		auto const reveal = plan.reveal.clippedTo(plan.aperture).projected();
-		if (!reveal.empty())
+		// vacated, and only inside the doorway. The emptiness test is on
+		// the World rect, before the projection, because projected()
+		// normalises: a reveal that has overshot its jamb is inverted in
+		// World units, and normalising it would turn "nothing vacated"
+		// into a strip of back Sector painted over the jamb, outside the
+		// doorway and over the frame. Testing the clipped World rect is
+		// what makes "bounded by the aperture" mean what it says.
+		auto const vacated = plan.reveal.clippedTo(plan.aperture);
+		if (!vacated.empty())
 		{
+			auto const reveal = vacated.projected();
 			drawList->PushClipRect({reveal.x0, reveal.y0},
 				{reveal.x1, reveal.y1}, true);
 

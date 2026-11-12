@@ -181,6 +181,9 @@ namespace
 	}
 
 	constexpr float kEpsilon = 0.01f;
+	// The stall checks measure strips a couple of pixels wide off the back
+	// Sector's clip, so they get a looser tolerance than the box checks.
+	constexpr float kStallEpsilon = 0.25f;
 	// AddRect's anti-aliasing spreads the outline a hair beyond the exact rect,
 	// so the wireframe predictions get a slightly wider tolerance.
 	constexpr float kWireframeEpsilon = 1.5f;
@@ -372,6 +375,120 @@ namespace
 			"the fully-open wireframe pass filled the aperture");
 	}
 
+	// Drives the Door to an open percentage fine enough to stop inside
+	// the first few percent of its travel. The coarse quarter-cycle step
+	// the other checks use cannot: the stall #1061 is about swallowed a
+	// tenth of the travel, so a check that wants to catch the reveal
+	// already under way inside it needs thousandths of a cycle.
+	void driveToExact(DoorScene const& scene, float targetPct)
+	{
+		auto& door = *scene.door;
+		require(door.getOpenPercentage() <= 0.0f,
+			"The stall fixture should start from a closed Door");
+		door.open();
+		auto const step = door.getOpenCloseTime() / 1000.0f;
+		while (door.getOpenPercentage() < targetPct) door.update(step);
+		require(door.getOpenPercentage() <= targetPct + 0.001f,
+			"The stall fixture overshot " + std::to_string(targetPct)
+			+ " open, reaching " + std::to_string(door.getOpenPercentage()));
+	}
+
+	// One percentage of the travel, measured off the draw list in
+	// absolute pixels rather than against the model that predicted it.
+	//
+	// #1061: a side-sliding leaf's visible edge starts on the far jamb
+	// the instant the Door opens, moves at a uniform speed, and has
+	// covered exactly one aperture width by the time the Door is fully
+	// open. The stall the old travel produced was invisible to a check
+	// that only looked at closed and fully open, and the leaf quads say
+	// nothing either way because they are whole cells wherever they sit.
+	// What carries the animation is the strip the leaves have vacated,
+	// which the back Sector's fill clip carries, and what is left of the
+	// leaves inside the doorway. Those are the two numbers read here.
+	void checkVisibleEdgeAt(uint32_t cellsWide, float openPct)
+	{
+		ImGuiGuard imgui;
+		auto scene = buildOpenRightDoorScene(cellsWide);
+		driveToExact(scene, openPct);
+		auto const pct = scene.door->getOpenPercentage();
+		auto drawList = testDrawList();
+
+		renderPass(scene, LayerRenderStyle::Solid, drawList);
+
+		auto const apertureBox = door_leaf::project(scene.aperture);
+		auto const widthPx = apertureBox.width();
+		auto const vacatedPx = pct * widthPx;
+		require(vacatedPx > 1.0f,
+			"the fixture is so far closed that the vacated strip is below the "
+			"measurement floor, so this percentage proves nothing");
+
+		// The vacated strip runs forward from the far jamb: an OpenRight
+		// leaf slides away from the left-hand jamb, so that is the side
+		// that uncovers first, and it uncovers openPct of the doorway.
+		// Asked first whether the strip stays inside the doorway at all,
+		// because that says more than a mis-measured edge does: a reveal
+		// that has overshot its jamb inverts in World units, and a
+		// projection that normalises it would show "nothing vacated" as a
+		// strip of back Sector painted over the frame.
+		auto const reveal = door_leaf::clipCovering(drawList, kApertureFillColour);
+		require(reveal.z <= apertureBox.right + kStallEpsilon
+				&& reveal.x >= apertureBox.left - kStallEpsilon,
+			"the vacated strip reaches outside the doorway, so the reveal is "
+			"not bounded by the aperture");
+		near(reveal.x, apertureBox.left, "the vacated strip's far edge");
+		near(reveal.z, apertureBox.left + vacatedPx,
+			"the vacated strip is not openPct of the aperture wide, which is "
+			"a stalled start, a short travel, or a visible edge that does not "
+			"move at a uniform speed", kStallEpsilon);
+
+		// What the leaves still cover inside the doorway, measured off the
+		// quads they painted and clipped to the aperture. This is the
+		// number a frozen leaf keeps at the full aperture width, which is
+		// exactly what the stall looked like.
+		auto const quads = door_leaf::filledRectsOf(drawList, kDoorLeafColour);
+		require(!quads.empty(),
+			"a barely-open Door painted no leaf at all, so there is nothing "
+			"left covering the doorway");
+		auto const covered = door_leaf::unionOf(quads);
+		auto const coveredPx = std::min(covered.maxX, apertureBox.right)
+			- std::max(covered.minX, apertureBox.left);
+		near(coveredPx, widthPx - vacatedPx,
+			"the leaves do not cover the complement of the reveal, so the "
+			"visible coverage is not what the travel promises", kStallEpsilon);
+	}
+
+	// The whole side-sliding travel. 0.02 is a fifth of the 11.1% a
+	// 1-wide Door used to spend entirely behind the far jamb; 0.05 and
+	// 0.1 straddle what was left of that stall; the rest pin the uniform
+	// speed through the middle of the travel.
+	void checkVisibleEdgeStartsAtTheJamb(uint32_t cellsWide)
+	{
+		for (float const openPct : { 0.02f, 0.05f, 0.1f, 0.25f, 0.5f, 0.75f })
+			checkVisibleEdgeAt(cellsWide, openPct);
+	}
+
+	// Fully open, nothing of the leaf is left inside the doorway to paint
+	// across either jamb: no leaf fill reaches the doorway, and the strip
+	// the leaves have vacated is the whole of it.
+	void checkFullyOpenClearsBothJambs(uint32_t cellsWide)
+	{
+		ImGuiGuard imgui;
+		auto scene = buildOpenRightDoorScene(cellsWide);
+		driveTo(scene, 1.0f);
+		auto drawList = testDrawList();
+
+		renderPass(scene, LayerRenderStyle::Solid, drawList);
+
+		require(!door_leaf::extentOf(drawList, kDoorLeafColour).painted(),
+			"a fully open " + std::to_string(cellsWide)
+			+ "-wide OpenRight Door still painted leaf artwork across a jamb");
+
+		auto const apertureBox = door_leaf::project(scene.aperture);
+		auto const reveal = door_leaf::clipCovering(drawList, kApertureFillColour);
+		near(reveal.x, apertureBox.left, "the fully open reveal's left edge");
+		near(reveal.z, apertureBox.right, "the fully open reveal's right edge");
+	}
+
 	DoorScene buildBulkheadScene()
 	{
 		DoorScene scene;
@@ -437,4 +554,7 @@ void render_smoke::registerDoorOpenRight(std::vector<smoke::Check>& checks)
 	checks.push_back({ "doorOpenRightWireframePassHalfOpen", isolated<[](smoke::Context const&) { checkWireframePass(0.5f); }> });
 	checks.push_back({ "doorOpenRightFullyOpenSolidPass", isolated<[](smoke::Context const&) { checkFullyOpenSolidPass(); }> });
 	checks.push_back({ "doorOpenRightFullyOpenWireframePass", isolated<[](smoke::Context const&) { checkFullyOpenWireframePass(); }> });
+	checks.push_back({ "doorOpenRightVisibleEdgeStartsAtTheJambOneWide", isolated<[](smoke::Context const&) { checkVisibleEdgeStartsAtTheJamb(1u); }> });
+	checks.push_back({ "doorOpenRightVisibleEdgeStartsAtTheJambTwoWide", isolated<[](smoke::Context const&) { checkVisibleEdgeStartsAtTheJamb(2u); }> });
+	checks.push_back({ "doorOpenRightFullyOpenClearsBothJambsOneWide", isolated<[](smoke::Context const&) { checkFullyOpenClearsBothJambs(1u); }> });
 }

@@ -764,9 +764,12 @@ namespace
 		// each side, so a 1-wide Door's cell is a whole 128 x 320 cell.
 		float const cellWidthPx = apertureWidthPx
 			+ 2.0f * CORE_DOOR_X_INSET * kCellWidth;
-		// A sideways leaf travels the cell span less one inset: enough to
-		// clear the far jamb from a start at the cell boundary.
-		float const sideTravelPx = (kCellWidth - CORE_DOOR_X_INSET * kCellWidth);
+		// A sideways leaf's visible edge travels one aperture width. The
+		// inset the leaf's own cell starts outside the far jamb by is the
+		// offset it starts from, not extra distance - which is the whole
+		// of #1061: spending that inset at the start instead stalls the
+		// visible edge behind the far jamb for it.
+		float const sideTravelPx = apertureWidthPx;
 
 		// No squashing: the leaf draws at the same pixels-per-texture-unit
 		// the whole tile draws at, in both axes, however far it has slid.

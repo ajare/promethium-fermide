@@ -225,6 +225,17 @@ half open show exactly half open however long it took to get there. Fully open,
 nothing of the leaf is left and no geometry is emitted - on `OpenApart` that means
 both leaves, not one.
 
+A side-sliding leaf's visible edge is pinned at two points (#1061): on the far
+jamb at 0% open, so the reveal begins the instant the Door moves rather than a
+tenth of the travel later, and on the near jamb at 100%, so a fully open Door
+leaves nothing painted across either jamb. Between the pins it moves at a uniform
+speed, covering exactly one aperture width. The leaf's own cell puts its trailing
+edge one `CORE_DOOR_X_INSET` outside the far jamb, so the animation vector starts
+at that inset rather than at zero, and the closed leaf sits that inset further into
+its tile: `u[0.2,1.0]` of `door-L0` for a 1-wide `OpenLeft` Door, mirrored to
+`u[0.0,0.8]` for `OpenRight`. Both bands still hold the `u = 0.5` symmetry axis
+the `OpenApart` split requires.
+
 The declared drawn size is the regular one-cell Door's own extent: `cellsWide -
 2 * CORE_DOOR_X_INSET` across a regular Door's `CORE_DOOR_HEIGHT`, which is 0.8 x
 0.5 World units. As with the Access panel, the object's own geometry is what the

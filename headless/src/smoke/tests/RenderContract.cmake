@@ -275,6 +275,9 @@ set(names
     doorOpenLeftFullyOpenWireframePass
     doorOpenLeftPausedSimulationFreezesTheLeafMidTravel
     doorOpenLeftTwoLeafCellsJoinSeamlessly
+    doorOpenLeftVisibleEdgeStartsAtTheJambOneWide
+    doorOpenLeftVisibleEdgeStartsAtTheJambTwoWide
+    doorOpenLeftFullyOpenClearsBothJambsOneWide
     extensibles/warningPreservesPosition
     escalators/brokenWarningPreservesPosition
     lifts/brokenWarningPreservesPosition
@@ -288,6 +291,9 @@ set(names
     doorOpenRightWireframePassHalfOpen
     doorOpenRightFullyOpenSolidPass
     doorOpenRightFullyOpenWireframePass
+    doorOpenRightVisibleEdgeStartsAtTheJambOneWide
+    doorOpenRightVisibleEdgeStartsAtTheJambTwoWide
+    doorOpenRightFullyOpenClearsBothJambsOneWide
     flatColourRuleNamesFacadeAndBackgroundOnly
     solidPassFillsTheFacadeWithItsOwnColour
     wireframePassOutlinesTheFacadeNeverFills
