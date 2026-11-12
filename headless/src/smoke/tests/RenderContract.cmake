@@ -94,6 +94,9 @@ set(names
     sectorAtlasNew/loaderRefusesVariantsOnAnOverlay
     sectorAtlasNew/loaderRefusesAnOverlayWearingTheBoundaryPrefix
     sectorAtlasNew/loaderReadsOverlaysApartFromSurfaces
+    sectorAtlasNew/loaderReadsEveryEmptyShapeOfOverlaysAsNoOverlays
+    sectorAtlasNew/loaderRefusesAnOverlaysKeyThatIsNotAMap
+    sectorAtlasNew/loaderStillReadsAPopulatedOverlaysMap
     sectorAtlasNew/loaderRefusesASurfaceThatIsNotOneFullCell
     sectorAtlasNew/loaderRefusesASurfaceOffsetFromItsCell
     sectorAtlasNew/loaderAcceptsAConformingSet

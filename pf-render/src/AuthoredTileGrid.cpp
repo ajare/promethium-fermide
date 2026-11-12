@@ -150,8 +150,20 @@ AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
         grid.width % tw || grid.height % th)
         throw std::runtime_error("An authored tile grid must cover the atlas "
             "image with no remainder");
-    if (!root[spritesKey].IsMap())
+    auto const sprites = root[spritesKey];
+    // Two different files both fail this test, and saying "Missing" about
+    // the one where the author wrote the key is the wrong diagnosis. A key
+    // the file never wrote hands back a zombie node that throws on any type
+    // query, so presence is settled before the type is asked; both it and a
+    // key written with no body - a defined Null - are the file declaring no
+    // tiles of this kind, which is what `Missing` says. A scalar or a
+    // sequence was written as a thing the grid cannot read, and is refused
+    // as that (#1066).
+    if (!sprites || sprites.IsNull())
         throw std::runtime_error("Missing " + tileNoun + " definitions");
+    if (!sprites.IsMap())
+        throw std::runtime_error("`" + spritesKey + "` is not a map of "
+            + tileNoun + " definitions");
     int const rows = grid.height / th;
     // Families are derived in a second pass, after every authored sprite has
     // been read. Deriving inside this loop would let a base declared early
@@ -160,7 +172,7 @@ AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
     // duplicate-key complaint about the derivation rather than the plain
     // statement that the name is not the author's to write.
     std::vector<DeclaredFamily> families;
-    for (auto const& item : root[spritesKey]) {
+    for (auto const& item : sprites) {
         auto const v = item.second;
         if (!v["cell"].IsSequence() || v["cell"].size() != 2 ||
             !v["content"].IsSequence() || v["content"].size() != 4)

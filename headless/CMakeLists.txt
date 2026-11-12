@@ -266,6 +266,16 @@ if(BUILD_TESTING)
     set_tests_properties(doorframe-tile-contract PROPERTIES
         LABELS "harness;tools;validation-fast" TIMEOUT 60)
 
+    # The generator's `--check` against every shape of the sector tileset's
+    # `overlays` key, so it cannot declare a file good that the C++ loader
+    # then refuses - the disagreement #1066 was. The loader's half of the
+    # same table is `sectorAtlasNew/loaderReadsEveryEmptyShapeOfOverlaysAsNoOverlays`
+    # and `sectorAtlasNew/loaderRefusesAnOverlaysKeyThatIsNotAMap`.
+    add_test(NAME overlay-shape-contract COMMAND ${Python3_EXECUTABLE}
+        "${PF_REPO_ROOT}/scripts/tests/overlay_shapes.py")
+    set_tests_properties(overlay-shape-contract PROPERTIES
+        LABELS "harness;tools;validation-fast" TIMEOUT 60)
+
     pf_add_headless_tool(pf-compatibility-probe src/CompatibilityProbe.cpp)
     set_target_properties(pf-compatibility-probe PROPERTIES FOLDER "Tests/Harness")
     add_test(NAME headless-compatibility-contract COMMAND ${Python3_EXECUTABLE}

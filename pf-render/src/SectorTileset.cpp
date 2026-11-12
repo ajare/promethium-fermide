@@ -100,7 +100,27 @@ SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
     // overlays - every version 2 set written before the doorframe existed
     // reads this way, and draws its door cells as its wall's plain tile,
     // exactly as it always did.
-    if (root["overlays"].IsDefined())
+    //
+    // Guarded on the shape rather than on the key's presence alone, because
+    // in yaml-cpp "absent" and "written with no body" are two different
+    // node states that both mean no overlays: a missing key is a zombie node
+    // that `IsDefined()` reports as absent, and `overlays:` with no body is
+    // a *defined Null*. Guarding on `IsDefined()` alone therefore read the
+    // second - the map an author stubs before filling it in, or strips back
+    // during art iteration - as a file that declared overlays and then fell
+    // over the grid's own map check, while the generator read the identical
+    // file as no overlays at all and declared it clean. The refusal landed
+    // after `--check` had already passed, and read as though the author had
+    // never written the map (#1066).
+    //
+    // `IsDefined() && !IsNull()` covers both spellings the way the
+    // generator's `overlays is None` does, and leaves anything that is not a
+    // map - a scalar, a sequence - to fall through to the grid, which
+    // refuses it, so the two readers agree in both directions. `IsNull()`
+    // on its own is not usable here: it throws on the zombie an absent key
+    // hands back, which is the one shape the guard also has to swallow.
+    auto const overlays = root["overlays"];
+    if (overlays.IsDefined() && !overlays.IsNull())
     {
         auto const overlayGrid = loadAuthoredTileGrid(root, true,
             "sector overlay", AuthoredVariantFamilies::Refused, "overlays");

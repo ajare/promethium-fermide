@@ -72,6 +72,13 @@ struct AuthoredTileGrid
 // the same content rule and the same refusals - which is exactly why one
 // loader reads them both rather than a second one written beside it
 // (#1054).
+//
+// The key is required here: a defined Null at `spritesKey` is refused as
+// "missing", and anything that is neither a Null nor a map is refused as
+// the wrong shape. A caller that means the key to be optional - a version
+// 2 sector file may leave `overlays` out entirely, or stub it with no
+// entries - has to settle that shape question before calling, because the
+// grid has no notion of an optional map (#1066).
 AuthoredTileGrid loadAuthoredTileGrid(YAML::Node const& root,
     bool declaresRenderSemantics, std::string const& tileNoun,
     AuthoredVariantFamilies variantFamilies

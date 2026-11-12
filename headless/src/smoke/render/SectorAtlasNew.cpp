@@ -47,6 +47,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -898,12 +899,10 @@ namespace
 		return yaml.str();
 	}
 
-	// The full ten-surface set plus an `overlays` block holding one named
-	// tile, so a refusal about an overlay is confounded by nothing else.
-	// `extraKeys` is written into the overlay sprite itself, which is where
-	// a `variants` key would go if an author put one there.
-	std::string overlayTilesetYaml(std::string const& overlayName,
-		std::string const& extraKeys = {})
+	// The full ten-surface set with no `overlays` key at all - the shape
+	// every version 2 file written before the doorframe existed has, and
+	// one of the three spellings of "no overlays" #1066 is about.
+	std::string tenSurfaceTilesetYaml()
 	{
 		std::ostringstream yaml;
 		yaml << "version: 2\n"
@@ -921,15 +920,24 @@ namespace
 				<< "    drawn_size: [1.0, 1.0]\n"
 				<< "    tintable: true\n";
 		}
-		yaml << "overlays:\n"
-			<< "  " << overlayName << ":\n"
-			<< "    cell: [0, 1]\n"
-			<< "    content: [0, 0, 128, 320]\n"
-			<< "    offset: [0.0, 0.0]\n"
-			<< "    drawn_size: [1.0, 1.0]\n"
-			<< "    tintable: true\n";
-		if (!extraKeys.empty()) yaml << extraKeys;
 		return yaml.str();
+	}
+
+	// The full ten-surface set plus an `overlays` block holding one named
+	// tile, so a refusal about an overlay is confounded by nothing else.
+	// `extraKeys` is written into the overlay sprite itself, which is where
+	// a `variants` key would go if an author put one there.
+	std::string overlayTilesetYaml(std::string const& overlayName,
+		std::string const& extraKeys = {})
+	{
+		return tenSurfaceTilesetYaml()
+			+ "overlays:\n  " + overlayName + ":\n"
+			  "    cell: [0, 1]\n"
+			  "    content: [0, 0, 128, 320]\n"
+			  "    offset: [0.0, 0.0]\n"
+			  "    drawn_size: [1.0, 1.0]\n"
+			  "    tintable: true\n"
+			+ extraKeys;
 	}
 
 	// The full ten-surface set laid out across one row of a sheet deep
@@ -959,16 +967,25 @@ namespace
 		return yaml.str();
 	}
 
-	// Loads a generated tileset and hands back the refusal, or empty when
-	// the file was accepted.
-	std::string loadRefusal(smoke::Context const& context, std::string const& tag,
-		std::string const& yaml)
+	// Writes a generated tileset and hands back its path, so every loader
+	// seam below drives a real file rather than a node built in memory.
+	std::filesystem::path writeTileset(smoke::Context const& context,
+		std::string const& tag, std::string const& yaml)
 	{
 		auto const path = context.temporaryRoot() / (tag + ".tileset.yaml");
 		std::ofstream out(path, std::ios::binary | std::ios::trunc);
 		out << yaml;
 		out.close();
 		require(bool(out), "Could not write the fixture tileset: " + path.string());
+		return path;
+	}
+
+	// Loads a generated tileset and hands back the refusal, or empty when
+	// the file was accepted.
+	std::string loadRefusal(smoke::Context const& context, std::string const& tag,
+		std::string const& yaml)
+	{
+		auto const path = writeTileset(context, tag, yaml);
 		try
 		{
 			SectorTileset::load(path);
@@ -1082,12 +1099,99 @@ namespace
 			"The tile map the install pairs against the manifest holds "
 			+ std::to_string(set.tiles.size()) + " tiles instead of the ten "
 			"surfaces plus the overlay");
-		// And a set with no `overlays` map at all - every file written
-		// before the doorframe existed - still loads, with the map empty.
+		// And the shipped set still loads with its doorframe block intact.
 		auto const without = SectorTileset::load(
 			context.fixture(kTileset));
 		require(!without.overlays.empty(),
 			"The shipped set lost its doorframe block");
+	}
+
+	// The three spellings of "no overlays" all read as no overlays: the key
+	// absent, the key written with no body, and the key written as an empty
+	// map. In yaml-cpp the second is a *defined* Null rather than an
+	// undefined node, so guarding the second read on `IsDefined()` sent it
+	// into the grid's own map check and failed a file the generator had
+	// just declared clean - with a message saying the definitions were
+	// missing when the author had written the key (#1066).
+	//
+	// The generator's half of this table is driven by
+	// `scripts/tests/overlay_shapes.py`, which runs the real `--check`
+	// against the same shapes. The two lists together are the agreement: a
+	// shape added to either reader belongs in both.
+	void loaderReadsEveryEmptyShapeOfOverlaysAsNoOverlays(
+		smoke::Context const& context)
+	{
+		using smoke::require;
+		struct Spelling { std::string tag; std::string clause; };
+		for (auto const& shape : { Spelling{ "overlays-absent", "" },
+				Spelling{ "overlays-null", "overlays:\n" },
+				Spelling{ "overlays-empty-map", "overlays: {}\n" } })
+		{
+			SectorTileset set{};
+			std::string refusal;
+			try
+			{
+				set = SectorTileset::load(writeTileset(context, shape.tag,
+					tenSurfaceTilesetYaml() + shape.clause));
+			}
+			catch (std::exception const& error) { refusal = error.what(); }
+			require(refusal.empty(), "A set whose `overlays` is " + shape.tag
+				+ " was refused: " + refusal);
+			require(set.surfaces.size() == kSurfaces.size(),
+				"A set whose `overlays` is " + shape.tag + " carries "
+				+ std::to_string(set.surfaces.size()) + " surfaces; the ten "
+				"bases were expected");
+			require(set.overlays.empty(),
+				"A set whose `overlays` is " + shape.tag + " gained "
+				+ std::to_string(set.overlays.size()) + " overlays; the shape "
+				"authors none");
+			require(set.tiles.size() == kSurfaces.size(),
+				"A set whose `overlays` is " + shape.tag + " carries "
+				+ std::to_string(set.tiles.size()) + " tiles; the ten surfaces "
+				"and nothing else were expected");
+		}
+	}
+
+	// An `overlays` that is not a map is not a set of tile definitions,
+	// and both readers refuse it: the loader here, the generator in
+	// `overlay_sprites`. The refusal says the key is the wrong shape rather
+	// than that it is missing, because the author did write it (#1066).
+	void loaderRefusesAnOverlaysKeyThatIsNotAMap(smoke::Context const& context)
+	{
+		using smoke::require;
+		struct Spelling { std::string tag; std::string clause; };
+		for (auto const& shape : { Spelling{ "overlays-scalar",
+						  "overlays: 3\n" },
+				Spelling{ "overlays-empty-string", "overlays: \"\"\n" },
+				Spelling{ "overlays-sequence",
+						  "overlays: [doorframe-room-1r-L0]\n" } })
+		{
+			auto const refusal = loadRefusal(context, shape.tag,
+				tenSurfaceTilesetYaml() + shape.clause);
+			require(!refusal.empty(),
+				"A set whose `overlays` is " + shape.tag + " was accepted");
+			require(refusal.find("`overlays`") != std::string::npos
+					&& refusal.find("is not a map") != std::string::npos,
+				"The refusal for a " + shape.tag + " neither names the "
+				"`overlays` key nor says it is not a map: " + refusal);
+		}
+	}
+
+	// A populated `overlays` map is still read as populated: the empty and
+	// null shapes above must not have made the loader treat the key as
+	// decorative. One frame in, one frame out, on the same sheet.
+	void loaderStillReadsAPopulatedOverlaysMap(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto const set = SectorTileset::load(writeTileset(context,
+			"overlays-populated", overlayTilesetYaml("doorframe-room-1r-L0")));
+		require(set.overlays.size() == 1
+				&& set.overlays.count("doorframe-room-1r-L0") == 1,
+			"A populated `overlays` map read back as "
+			+ std::to_string(set.overlays.size()) + " overlays");
+		require(set.tiles.size() == kSurfaces.size() + 1,
+			"A populated `overlays` map left the tile map at "
+			+ std::to_string(set.tiles.size()) + " tiles");
 	}
 
 	// The repeat is per World cell, so a surface drawn at any other size
@@ -1326,6 +1430,13 @@ void render_smoke::registerSectorAtlas(std::vector<smoke::Check>& checks)
 		isolated<loaderRefusesAnOverlayWearingTheBoundaryPrefix> });
 	checks.push_back({ "sectorAtlasNew/loaderReadsOverlaysApartFromSurfaces",
 		isolated<loaderReadsOverlaysApartFromSurfaces> });
+	checks.push_back({
+		"sectorAtlasNew/loaderReadsEveryEmptyShapeOfOverlaysAsNoOverlays",
+		isolated<loaderReadsEveryEmptyShapeOfOverlaysAsNoOverlays> });
+	checks.push_back({ "sectorAtlasNew/loaderRefusesAnOverlaysKeyThatIsNotAMap",
+		isolated<loaderRefusesAnOverlaysKeyThatIsNotAMap> });
+	checks.push_back({ "sectorAtlasNew/loaderStillReadsAPopulatedOverlaysMap",
+		isolated<loaderStillReadsAPopulatedOverlaysMap> });
 	checks.push_back({ "sectorAtlasNew/loaderRefusesASurfaceThatIsNotOneFullCell",
 		isolated<loaderRefusesASurfaceThatIsNotOneFullCell> });
 	checks.push_back({ "sectorAtlasNew/loaderRefusesASurfaceOffsetFromItsCell",

@@ -507,6 +507,28 @@ is what lets the frame arrive through the loop #1037 pinned instead of
 through a second loop that would have to relearn the anchor, the crop and
 the culling.
 
+### The key is optional, and every empty spelling means the same thing
+
+`overlays` is the one map in this format a file may leave out. Absent, written
+with no body (`overlays:`), and written empty (`overlays: {}`) are three
+spellings of one file: no overlays, every door cell drawing its wall's plain
+tile. That is the same file every version 2 set written before the doorframe
+existed is, and it reads the same way.
+
+It did not used to. In yaml-cpp a key written with no body is a *defined
+Null*, not an undefined node, and the loader guarded the second read on
+`IsDefined()`. So `overlays:` - the map an author stubs before filling it
+in, or strips back during art iteration - passed the guard and failed the
+grid's own map check, while the generator read the identical file as no
+overlays and declared it clean. The author got a passing `--check` and then a
+load-time `Missing sector overlay definitions` for a map they had written
+(#1066).
+
+The guard is on the shape now, and the two readers agree in both directions:
+what one accepts the other accepts, and what one refuses the other refuses.
+A non-map - a scalar, a sequence, an empty quoted string - is refused by
+both, and says the key is the wrong shape rather than that it is missing.
+
 What the loader refuses:
 
 - **A name authored in both maps.** Which kind the draw found it in would
