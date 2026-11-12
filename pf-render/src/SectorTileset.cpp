@@ -338,6 +338,18 @@ int SectorTileset::variantCount(std::string const& kind) const
     return found == variantCounts.end() ? 0 : found->second;
 }
 
+bool sectorTileSurfaceIsInView(WorldDrawList const* list, Vec2 minimum,
+    Vec2 maximum, float zoom)
+{
+    float const cellWidth = CORE_CELL_WIDTH_PIXELS * zoom;
+    float const cellHeight = CORE_LEVEL_HEIGHT_PIXELS * zoom;
+    if (cellWidth <= 0 || cellHeight <= 0) return false;
+    auto const clipMin = list->GetClipRectMin();
+    auto const clipMax = list->GetClipRectMax();
+    return std::max(minimum.y, clipMin.y) < maximum.y
+        && std::min(maximum.x, clipMax.x) > minimum.x;
+}
+
 bool drawSectorTileSurfacePerCell(WorldDrawList* list, Vec2 minimum,
     Vec2 maximum, PackedColourValue tint, float zoom,
     SectorSurfaceTileResolver const& resolveTile)
@@ -355,14 +367,17 @@ bool drawSectorTileSurfacePerCell(WorldDrawList* list, Vec2 minimum,
     // top of the tile that would have stood above its ceiling. Anchoring on
     // the top instead cuts the floor off every short Sector and leaves the
     // tile's ceiling band sitting on the floor it is supposed to be above.
+    //
+    // Nothing wholly outside the clip is emitted, and the same question is
+    // asked here as the one a caller in front of this loop asks before it
+    // builds a per-cell answer it may never be asked for (#1071).
+    if (!sectorTileSurfaceIsInView(list, minimum, maximum, zoom)) return true;
     float const cellWidth = CORE_CELL_WIDTH_PIXELS * zoom;
     float const cellHeight = CORE_LEVEL_HEIGHT_PIXELS * zoom;
-    if (cellWidth <= 0 || cellHeight <= 0) return true;
     auto const clipMin = list->GetClipRectMin();
     auto const clipMax = list->GetClipRectMax();
     float const top = std::max(minimum.y, clipMin.y);
     float const right = std::min(maximum.x, clipMax.x);
-    if (top >= maximum.y || right <= minimum.x) return true;
     // The grid is counted from the area's own left edge and floor line, not
     // from the clip, and the resolver is asked in that frame. A Sector
     // scrolled half out of view therefore still resolves its own columns

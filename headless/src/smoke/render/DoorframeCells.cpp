@@ -1966,6 +1966,180 @@ namespace
 			+ std::to_string(sweptDoors) + " front Doors, so it proves nothing "
 			"about shipped frames going uncontested");
 	}
+
+
+
+	// ------------------------------------------------------------------
+	// What the derivation walks, and what it does not (#1071).
+	// ------------------------------------------------------------------
+	//
+	// A frame is derived from what stands in the wall, so the only way to
+	// know whether a Sector's cells wear one is to look. #1071 does not
+	// stop that look; it stops taking it when nothing is going to be drawn.
+	// The picture cannot tell the two apart - a Sector that looked and found
+	// no Door and a Sector that never looked both come out blank - so these
+	// checks read the derivation's own counters, which move only when the
+	// walk happens.
+
+	// A Sector with no objects has no Door standing in its wall, and the
+	// walk that finds the Doors would visit nothing on the way to an empty
+	// map. A Room with nothing placed in it is the common case a World is
+	// mostly made of; a Background hosts no objects by domain definition
+	// and is drawn flat besides. Neither is worth a walk every frame, and
+	// the walk is worth nothing even once.
+	void aSectorWithNoObjectsWalksNothingForFrames(smoke::Context const&)
+	{
+		installAtlas(true);
+		pinViewport();
+		auto world = std::make_shared<core::World>("No-object world", 16, 6);
+		while (world->getLayerCount() < 2) world->addLayer();
+		world->addRoom("Quiet", 0, 0, 0, 4, 1);
+		world->addBackground(1, 0, 0, 4, 1);
+		world->finishBuild();
+		world->pauseSimulation();
+
+		std::shared_ptr<const core::Sector> room;
+		std::shared_ptr<const core::Sector> ground;
+		for (uint32_t index = 0; index < world->getNumSectors(); ++index) {
+			auto const sector = world->getSector(index);
+			if (!sector) continue;
+			if (sector->getName() == "Quiet") room = sector;
+			if (sector->getLayerIndex() == 1) ground = sector;
+		}
+		require(room != nullptr && ground != nullptr,
+			"The no-object fixture lost a Sector");
+		require(room->getNumObjects() == 0, "The fixture Room carries "
+			+ std::to_string(room->getNumObjects()) + " objects, so it is not "
+			"the no-object Sector this check is about");
+		require(ground->getNumObjects() == 0, "The Background carries "
+			+ std::to_string(ground->getNumObjects()) + " objects, which a "
+			"Background does not host");
+
+		// Three draws, because the claim is about per-frame work. One draw
+		// that walks nothing is worth nothing if the next one walks.
+		auto const before = doorframeDerivationStats();
+		renderPass(room, 0, kNoClip);
+		renderPass(room, 0, kNoClip);
+		renderPass(ground, 1, kNoClip);
+		auto const after = doorframeDerivationStats();
+		require(after.sectorWalks == before.sectorWalks, "A Sector with no "
+			"objects walked " + std::to_string(after.sectorWalks
+				- before.sectorWalks)
+			+ " Sector list(s) for frames across three draws; a Sector with "
+			"nothing in it has no Door to find and should not be walked at all "
+			"(#1071)");
+		require(after.objectsExamined == before.objectsExamined, "A Sector "
+			"with no objects examined " + std::to_string(after.objectsExamined
+				- before.objectsExamined) + " object(s) for frames");
+	}
+
+	// The clip the Sector's own rect lies wholly to the right of.
+	WorldDrawList::ClipRectangle offscreenOf(core::Sector const& sector)
+	{
+		core::Vector2 low{}, high{};
+		sector.getBounds(low, high);
+		auto const a = toScreen(low);
+		auto const b = toScreen(high);
+		float const left = std::min(a.x, b.x);
+		return WorldDrawList::ClipRectangle{ { left - 256.0f, -100000.0f },
+			{ left - 1.0f, 100000.0f } };
+	}
+
+	// A Sector wholly outside the draw list's clip derives no frame map.
+	// The cull that hides it lives inside the surface loop, so the pass
+	// asks the loop's own predicate before it derives anything: a Sector
+	// the loop would not hand a single cell to is a Sector whose Doors
+	// nobody is looking at, and #1071 is the difference between deriving
+	// a frame for it and not.
+	void aSectorWhollyOutsideTheClipDerivesNoFrames(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		pinViewport();
+		auto scene = roomScene(4, 1, core::Door::Height::Regular, 2);
+		require(doorObjectIndex(*scene.front) != ~0u,
+			"The fixture front Sector carries no Door, so the control in "
+			"everyDrawnPassDerivesItsFramesAnew would prove nothing");
+
+		auto const clip = offscreenOf(*scene.front);
+		auto const before = doorframeDerivationStats();
+		auto const cells = recordFrontSurface(renderPass(scene.front,
+			scene.front->getLayerIndex(), clip), atlas, clip);
+		auto const after = doorframeDerivationStats();
+		require(cells.empty(), "A Sector wholly outside the clip drew "
+			+ std::to_string(cells.size()) + " surface cells, so the fixture "
+			"is not off screen after all");
+		require(after.sectorWalks == before.sectorWalks, "A Sector wholly "
+			"outside the clip walked " + std::to_string(after.sectorWalks
+				- before.sectorWalks)
+			+ " Sector list(s) for frames; nothing there is going to be drawn, "
+			"so nothing there should be derived (#1071)");
+		require(after.objectsExamined == before.objectsExamined, "A Sector "
+			"wholly outside the clip examined " + std::to_string(
+				after.objectsExamined - before.objectsExamined)
+			+ " object(s) for frames");
+	}
+
+	// The Facade frames itself through a separate derivation (#1059), so
+	// it takes the same cull before it builds its own map for the same
+	// reason. Its flat fill is emitted whether or not the clip reaches the
+	// Facade; the frame over it is not worth deriving when nothing lands on it.
+	void aFacadeWhollyOutsideTheClipDerivesNoFrames(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		pinViewport();
+		auto scene = facadeScene(4, 1, core::Door::Height::Regular, 2);
+		require(doorObjectIndex(*scene.front) != ~0u,
+			"The fixture Facade carries no Door, so the frame pass below has "
+			"nothing to skip");
+
+		auto const clip = offscreenOf(*scene.front);
+		auto const before = doorframeDerivationStats();
+		auto const pass = recordFacade(scene.front, atlas, clip);
+		auto const after = doorframeDerivationStats();
+		require(!pass.hasFrame, "A Facade wholly outside the clip drew a "
+			"doorframe over its fill");
+		require(after.sectorWalks == before.sectorWalks, "A Facade wholly "
+			"outside the clip walked " + std::to_string(after.sectorWalks
+				- before.sectorWalks)
+			+ " Sector list(s) for frames; its frame pass should not run at "
+			"all (#1071)");
+	}
+
+	// Nothing about a frame is cached between draws. The same Sector drawn
+	// twice in a row derives the same amount of framing work both times,
+	// which is the shape live derivation has: no memo, no revision, no
+	// entry that can go stale when a Door is added or taken away. The
+	// removal half of that promise is pinned by
+	// `aVariantUnderADoorIsHiddenAndComesBack` and
+	// `aRemovedDoorRevertsWithNoResidue`; this pins the half only the
+	// counters can see (#1071).
+	void everyDrawnPassDerivesItsFramesAnew(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		pinViewport();
+		auto scene = roomScene(4, 1, core::Door::Height::Regular, 2);
+
+		auto const before = doorframeDerivationStats();
+		renderPass(scene.front, scene.front->getLayerIndex(), kNoClip);
+		auto const first = doorframeDerivationStats();
+		renderPass(scene.front, scene.front->getLayerIndex(), kNoClip);
+		auto const second = doorframeDerivationStats();
+
+		auto const firstWalks = first.sectorWalks - before.sectorWalks;
+		auto const secondWalks = second.sectorWalks - first.sectorWalks;
+		require(firstWalks >= 1, "Drawing a Room with a Door standing in it "
+			"walked no Sector list at all, so the counters #1071 reads are "
+			"not counting the walk");
+		require(secondWalks == firstWalks, "Two identical draws of one Sector "
+			"walked " + std::to_string(firstWalks) + " and then "
+			+ std::to_string(secondWalks) + " Sector lists; a frame that does "
+			"not cost the same on both is not being derived live on both");
+		require(first.objectsExamined - before.objectsExamined
+				== second.objectsExamined - first.objectsExamined,
+			"Two identical draws of one Sector examined different numbers of "
+			"objects for frames, so the derivation is not the same live "
+			"derivation on both");
+	}
 }
 
 
@@ -2035,4 +2209,16 @@ void render_smoke::registerDoorframeCells(std::vector<smoke::Check>& checks)
 	checks.push_back({
 		"doorframeCells/noShippedDoorsContestAFrameCell",
 		isolated<noShippedDoorsContestAFrameCell> });
+	checks.push_back({
+		"doorframeCells/aSectorWithNoObjectsWalksNothingForFrames",
+		isolated<aSectorWithNoObjectsWalksNothingForFrames> });
+	checks.push_back({
+		"doorframeCells/aSectorWhollyOutsideTheClipDerivesNoFrames",
+		isolated<aSectorWhollyOutsideTheClipDerivesNoFrames> });
+	checks.push_back({
+		"doorframeCells/aFacadeWhollyOutsideTheClipDerivesNoFrames",
+		isolated<aFacadeWhollyOutsideTheClipDerivesNoFrames> });
+	checks.push_back({
+		"doorframeCells/everyDrawnPassDerivesItsFramesAnew",
+		isolated<everyDrawnPassDerivesItsFramesAnew> });
 }

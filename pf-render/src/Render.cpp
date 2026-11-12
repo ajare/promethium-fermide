@@ -2152,6 +2152,25 @@ std::string newFamilySurfaceOrBorrowed(char const* own, char const* borrowed)
 // short of the gap.
 constexpr std::uint32_t kMaxFramedDoorCellsWide = 2;
 
+// The frames one Sector's cells wear, keyed the way the surface resolver
+// is asked: column counted from the Sector's own left edge, level counted
+// up from its floor line.
+using DoorframeTiles = std::map<std::pair<std::uint32_t, std::uint32_t>, std::string>;
+
+namespace {
+// What the live doorframe derivation has walked (#1071). The derivation
+// is the only writer, and it writes only when it actually walks a Sector's
+// objects; the accessor hands out a copy so nothing reads this while it
+// moves. See `DoorframeDerivationStats` in the header for why the claim
+// these numbers settle needs numbers at all.
+DoorframeDerivationStats gDoorframeDerivations{};
+}
+
+DoorframeDerivationStats doorframeDerivationStats()
+{
+	return gDoorframeDerivations;
+}
+
 // The doorframe tile one cell of one opening in one wall wears (#1054, #1059).
 //
 // `doorframe-<wall>-<width><height>-<role>`, where the wall is the family the
@@ -2192,17 +2211,25 @@ std::string doorframeTileName(std::string const& wall, std::uint32_t cellsWide,
 //
 // Built once per Sector rather than per cell, so the per-cell answer stays
 // a lookup and the draw loop keeps the shape it had with a recorded
-// variant. A Sector with no Door in it builds an empty map and answers
-// every cell from the base or the variant, exactly as it did before any
-// cell could wear a frame.
-std::map<std::pair<std::uint32_t, std::uint32_t>, std::string>
-doorframeTilesForSector(std::string const& wall,
+// variant. A Sector with no objects in it does not walk at all (#1071),
+// and a Sector with objects but no Door in them builds an empty map and
+// answers every cell from the base or the variant, exactly as it did
+// before any cell could wear a frame.
+DoorframeTiles doorframeTilesForSector(std::string const& wall,
 	std::shared_ptr<const core::Sector> sector)
 {
-	std::map<std::pair<std::uint32_t, std::uint32_t>, std::string> frames;
-	if (wall.empty() || !sector) return frames;
+	DoorframeTiles frames;
+	// A Sector with no objects has no Door standing in its wall, and the
+	// walk below would visit nothing on the way to an empty map. The check
+	// is on what is placed rather than on the Sector type because that is
+	// what the frame is derived from: a Background hosts no objects and a
+	// Facade hosts everything a Room does, and both answer from this one
+	// rule (#1071).
+	if (wall.empty() || !sector || sector->getNumObjects() == 0) return frames;
+	++gDoorframeDerivations.sectorWalks;
 	for (std::uint32_t index = 0; index < sector->getNumObjects(); ++index) {
 		auto const object = sector->getObject(index);
+		++gDoorframeDerivations.objectsExamined;
 		if (!object || object->getObjectType() != core::SectorObjectType::Door)
 			continue;
 		auto const door = static_pointer_cast<const core::DoorSectorObject>(
@@ -2279,6 +2306,25 @@ doorframeTilesForSector(std::string const& wall,
 	return frames;
 }
 
+// The tile one cell wears when no frame outranks it - the whole of the
+// resolver's answer with the frame question taken out of it (#1039, #1040,
+// #1050).
+//
+// Stated as a function of the two names and the Sector rather than left
+// inline in the resolver, so the resolver can hand out two shapes - one
+// that looks for a frame first and one that does not - without the
+// variant rule existing twice and going out of sync behind the back of
+// whichever one nobody edited.
+std::string sectorSurfaceVariantTile(std::string const& own,
+	std::string const& base, core::Sector const& sector,
+	std::uint32_t column, std::uint32_t level)
+{
+	auto const variant = sector.surfaceVariantAt(column, level);
+	if (!variant) return base;
+	auto const tile = own + "-V" + std::to_string(*variant);
+	return hasSectorTileSurface(tile) ? tile : base;
+}
+
 // The resolver the Sector surface loop asks for one cell's tile (#1039).
 //
 // A cell answers the variant it was recorded as wearing, and the base tile
@@ -2319,28 +2365,67 @@ doorframeTilesForSector(std::string const& wall,
 // A base tile that is itself missing still draws magenta: falling back from
 // a variant to a base that is not there is not falling back to something,
 // and the missing-art case belongs to the draw, not to the resolution.
+
 SectorSurfaceTileResolver sectorSurfaceTileResolver(std::string ownTile,
-	std::string baseTile, std::shared_ptr<const core::Sector> sector)
+	std::string baseTile, std::shared_ptr<const core::Sector> sector,
+	DoorframeTiles frames)
 {
-	// Which of this wall's cells a Door stands in is settled here, once, off
-	// the live Door objects. Nothing about a frame is recorded: it is
-	// derived every frame from what is standing in the wall, which is what
-	// makes a Door a reversible placement. Take the Door out and the cell
-	// answers its base or the variant its author painted, because the
-	// entry underneath was never touched - the frame only ever outranked it
-	// for as long as the Door was there (#1054).
-	auto frames = doorframeTilesForSector(ownTile, sector);
+	// Which of this wall's cells a Door stands in is settled once, off the
+	// live Door objects, by whoever asked for the resolver. Nothing about a
+	// frame is recorded: it is derived every frame from what is standing in
+	// the wall, which is what makes a Door a reversible placement. Take the
+	// Door out and the cell answers its base or the variant its author
+	// painted, because the entry underneath was never touched - the frame
+	// only ever outranked it for as long as the Door was there (#1054).
+	//
+	// The map arrives rather than being built here because the caller is the
+	// one who knows whether this surface is going to be drawn at all, which
+	// is the one reason not to derive it (#1071).
+	//
+	// A wall with nothing framing it is the other reason to say so here.
+	// When the map came back empty the resolver's answer is exactly the
+	// answer it gave before a cell could wear a frame at all, so handing
+	// back a resolver with no map in it is not a special case of the
+	// frame-aware one, it is the plain one - and it is measurably the
+	// cheaper of the two to build and to ask, which is worth something at
+	// the number of Sectors a Layer puts through this call every frame
+	// (#1071). The rule both shapes give is the same rule, above.
+	if (frames.empty())
+		return [own = std::move(ownTile), base = std::move(baseTile), sector](
+			std::uint32_t column, std::uint32_t level) -> std::string
+		{
+			return sectorSurfaceVariantTile(own, base, *sector, column, level);
+		};
 	return [own = std::move(ownTile), base = std::move(baseTile), sector,
 		frames = std::move(frames)](
 		std::uint32_t column, std::uint32_t level) -> std::string
 	{
 		auto const frame = frames.find(std::make_pair(column, level));
 		if (frame != frames.end()) return frame->second;
-		auto const variant = sector->surfaceVariantAt(column, level);
-		if (!variant) return base;
-		auto const tile = own + "-V" + std::to_string(*variant);
-		return hasSectorTileSurface(tile) ? tile : base;
+		return sectorSurfaceVariantTile(own, base, *sector, column, level);
 	};
+}
+
+// The frames one surface pass is allowed to derive (#1071).
+//
+// Deriving the frame live is #1054's decision and stays. What comes out
+// here is the other half: deriving it only for a surface that is going to
+// be drawn. `renderSector` runs for every Sector of a Layer, again for
+// every back Sector a recursion reaches through an aperture, and again
+// for the wireframe overlay, and the walk that finds the Doors belongs to
+// the cells that would wear the frame rather than to the pass that merely
+// names a Sector. The cull the loop applies is the same one asked here,
+// through the loop's own predicate, so a Sector skipped for want of a
+// visible cell is skipped on exactly the condition the loop would have
+// stopped on.
+DoorframeTiles doorframesForSurfacePass(std::string const& wall,
+	std::shared_ptr<const core::Sector> sector, WorldDrawList* drawList,
+	Vec2 minimum, Vec2 maximum)
+{
+	if (!sectorTileSurfaceIsInView(drawList, minimum, maximum,
+			gUISettings.worldZoom))
+		return {};
+	return doorframeTilesForSector(wall, sector);
 }
 
 void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRenderStyle style, bool renderEdges, PackedColourValue colour, WorldDrawList* drawList)
@@ -2422,7 +2507,11 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		// drawing exactly what it drew before.
 		if (sectorType == core::SectorType::Facade && shouldFillBackground(style))
 		{
-			auto const frames = doorframeTilesForSector("facade", sector);
+			// The Facade's frames are derived only if this fill is going to
+			// be given a cell to draw over (#1071); the empty-map early-out
+			// below is what keeps a door-less Facade out of the cell loop.
+			auto const frames = doorframesForSurfacePass("facade", sector,
+				drawList, { bounds0.x, bounds1.y }, { bounds1.x, bounds0.y });
 			// A Facade with no Door in it walks no cells at all. The loop is
 			// the surface loop, with the culling and the anchor it owns, and
 			// asking it to resolve an empty map over a wide Facade would be
@@ -2487,10 +2576,16 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		// of them for its own question - the recorded variant is derived
 		// from `own`, never from `kind`, which is what stops a borrowing
 		// Sector wearing the borrowed family's variant (#1050).
+		// The frames this pass is allowed to derive, settled before the
+		// resolver is built so that a surface no cell of which will be drawn
+		// derives nothing at all (#1071).
+		auto const ownFamily = own ? std::string{ own } : std::string{};
+		auto frames = doorframesForSurfacePass(ownFamily, sector, drawList,
+			{ bounds0.x, bounds1.y }, { bounds1.x, bounds0.y });
 		if (!drawSectorTileSurfacePerCell(drawList, {bounds0.x, bounds1.y},
 			{bounds1.x, bounds0.y}, colour, gUISettings.worldZoom,
-			sectorSurfaceTileResolver(own ? std::string{ own } : std::string{},
-				std::move(kind), sector)))
+			sectorSurfaceTileResolver(ownFamily, std::move(kind), sector,
+				std::move(frames))))
 			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
 	}
 

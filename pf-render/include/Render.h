@@ -1060,6 +1060,32 @@ void renderShuttle(std::shared_ptr<const core::Shuttle> shuttle, uint32_t layer,
 void renderSector(std::shared_ptr<const core::Sector> sector, uint32_t layer,
 	LayerRenderStyle style, bool renderEdges, PackedColourValue colour, WorldDrawList* drawList);
 
+// What the live doorframe derivation has walked since the process started
+// (#1071).
+//
+// A doorframe is derived from the Doors standing in a wall rather than
+// recorded, so nothing can be read off a Sector to say whether its cells
+// wear one (#1054). That is the right design and it has a cost, and the
+// claim #1071 makes about that cost - that a Sector with no objects walks
+// nothing, and that a Sector no cell of which will be drawn walks nothing
+// either - is a claim about work not done, which no picture can show.
+// These counters are what it is checked against.
+//
+// `sectorWalks` counts the Sectors whose object list was actually walked,
+// and `objectsExamined` the objects that walk visited. A derivation that
+// early-outs counts in neither. The counters are cumulative rather than
+// resettable so a check snapshots and compares, the way the routing
+// workspace's allocation and build counters are read; nothing in
+// production reads them, and one increment per walked Sector is all they
+// cost.
+struct DoorframeDerivationStats
+{
+	std::uint64_t sectorWalks{ 0 };
+	std::uint64_t objectsExamined{ 0 };
+};
+
+DoorframeDerivationStats doorframeDerivationStats();
+
 // There is no ImDrawList-taking form of any of the passes above. Production
 // code records into a WorldDrawList and submits the vector to MPP; the CPU
 // checks that used to drive these passes against a live ImGui draw list do

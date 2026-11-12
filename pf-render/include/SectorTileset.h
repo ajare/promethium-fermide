@@ -140,6 +140,26 @@ int sectorSurfaceVariantCount(std::string const& kind);
 using SectorSurfaceTileResolver = std::function<std::string(
     std::uint32_t column, std::uint32_t level)>;
 
+// Whether any cell of a drawn area survives the per-cell surface loop's
+// cull (#1071).
+//
+// This is the loop's own early-out lifted out so a caller standing in front
+// of the loop can ask the same question before it builds anything the
+// loop may never be given a cell to use. `renderSector` derives a
+// Sector's doorframes before it calls the loop, and that walk is worth
+// skipping for a Sector no cell of which will be emitted - a Sector
+// scrolled out of view, or a back Sector a recursion reaches through an
+// aperture that does not open onto it.
+//
+// It is deliberately the loop's rule and not a tighter one, and the loop
+// calls this rather than keeping its own copy: the whole value of the
+// answer is that a caller may skip work only when the loop would not have
+// needed it, and two copies of the arithmetic is how that stops being true.
+// A true answer is not a promise that a cell is drawn, only that the clip
+// leaves something to draw.
+bool sectorTileSurfaceIsInView(WorldDrawList const* drawList, Vec2 minimum,
+    Vec2 maximum, float zoom = 1.0f);
+
 // The tileset helpers cross to the command stream on the shared drawing
 // types (#997), so a caller hands them pf::render::Vec2 and a packed colour.
 //

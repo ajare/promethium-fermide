@@ -158,6 +158,10 @@ set(names
     doorframeCells/aScaledFacadeDoorDrawsNoFrameOverItsFill
     doorframeCells/noShippedDoorWearsAFrameItsApertureDoesNotFill
     doorframeCells/noShippedDoorsContestAFrameCell
+    doorframeCells/aSectorWithNoObjectsWalksNothingForFrames
+    doorframeCells/aSectorWhollyOutsideTheClipDerivesNoFrames
+    doorframeCells/aFacadeWhollyOutsideTheClipDerivesNoFrames
+    doorframeCells/everyDrawnPassDerivesItsFramesAnew
     sectorTilePreview/oneTileFramesTheRectItIsGiven
     sectorTilePreview/anyRectFramesOneTileAndNotACellGrid
     sectorTilePreview/itIsOneTileWhereTheWorldRepeatIsFour
