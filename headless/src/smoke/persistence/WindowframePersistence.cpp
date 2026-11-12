@@ -1,5 +1,6 @@
 // A window-carrying World's document is the document it wrote before the
-// windowframe existed (#1075).
+// windowframe existed (#1075), and a wider window changes that no further
+// (#1076).
 //
 // A windowframe is not authored. It is derived at draw time from the live
 // Window standing in the wall, which means the feature adds nothing to
@@ -57,9 +58,13 @@ namespace persistence
 			return count;
 		}
 
-		// A two-Layer World with one 1x1 Window in the front wall - the
-		// smallest World that can carry a Window at all, since a Window
-		// joins a Layer pair and needs a space behind to look into.
+		// A two-Layer World with one 1x1 Window and one 2x1 Window in the
+		// front wall - the smallest World that can carry a Window at all,
+		// since a Window joins a Layer pair and needs a space behind to look
+		// into. The wide one is here because the wide row of the role grid
+		// is derived the same way and has the same claim to make: a wider
+		// opening adds nothing to the document either, not one field per
+		// extra cell (#1076).
 		std::shared_ptr<core::World> windowWorld()
 		{
 			auto world = std::make_shared<core::World>("Moulding "
@@ -68,14 +73,16 @@ namespace persistence
 			world->addRoom("Front", 0, 0, 0, 4, 1, CORE_ROOM_MAX_HEIGHT);
 			world->addRoom("Back", 1, 0, 0, 4, 1, CORE_ROOM_MAX_HEIGHT);
 			world->addSectorWindow(0, 0, 2, 1, 1);
+			world->addSectorWindow(0, 0, 0, 2, 1);
 			world->finishBuild();
 			world->pauseSimulation();
 			// The returned index is the object's slot and 0 is a valid
 			// answer, so the fixture is checked by what it made rather
-			// than by the number it handed back.
-			require(windowCount(*world) == 2u,
-				"The fixture World took no Window, so there is nothing here "
-				"to save and the check would prove nothing");
+			// than by the number it handed back. Two Windows, each
+			// registered on both Sectors of its pair.
+			require(windowCount(*world) == 4u,
+				"The fixture World took neither Window, so there is nothing "
+				"here to save and the check would prove nothing");
 			return world;
 		}
 
@@ -178,12 +185,12 @@ namespace persistence
 	{
 		auto const world = windowWorld();
 		// A Window registers on both Sectors of the pair it joins, so the
-		// fixture's one Window reads as two. Stated here so the round trip
-		// below is known to be comparing a World that has a Window in it
-		// rather than one that quietly lost its only one.
-		require(windowCount(*world) == 2u,
-			"The fixture's one Window does not register on both Sectors of "
-			"its pair, so the round trip has nothing to compare");
+		// fixture's two Windows read as four. Stated here so the round trip
+		// below is known to be comparing a World that has Windows in it
+		// rather than one that quietly lost them.
+		require(windowCount(*world) == 4u,
+			"The fixture's Windows do not register on both Sectors of their "
+			"pairs, so the round trip has nothing to compare");
 		for (bool binary : { false, true })
 		{
 			auto const first = serialize(*world, binary);

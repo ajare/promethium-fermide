@@ -99,18 +99,30 @@ namespace
 		"doorframe-1r-L0", "doorframe-2r-L0", "doorframe-2r-R0",
 		"doorframe-1t-L0", "doorframe-2t-L0", "doorframe-2t-R0" };
 
-	// The windowframes the set authors so far (#1075). Keyed by where the
-	// cell sits in the opening it frames - the vertical role first, so
-	// `BL` reads as "bottom-left" the way it is said - and by nothing
-	// else: not the glass style, not the Window's State, not the wall.
+	// The windowframes the set authors (#1075, wide row #1076). Keyed by
+	// where the cell sits in the opening it frames - the vertical role
+	// first, so `BL` reads as "bottom-left" the way it is said - and by
+	// nothing else: not the glass style, not the Window's State, not the
+	// wall.
 	//
-	// One of the fifteen is filled so far. `windowframe-SS` is the
+	// The single-level row is filled across. `windowframe-SS` is the
 	// single-column, single-level cell, which is the 1x1 Window that is
-	// eight of the ten windows every bundled document authors. The rest
-	// of the grid arrives with the wide, tall and corner work, and a cell
-	// asking for a tile the sheet does not carry draws no frame rather
-	// than a hole, so the block can be filled one tile at a time.
-	std::vector<std::string> const kWindowframes{ "windowframe-SS" };
+	// eight of the ten windows every bundled document authors, and
+	// `SL`/`SM`/`SR` are the wide single-level opening: a jamb at each
+	// end and no vertical moulding in the middle. The tall rows arrive
+	// with the tall and corner work, and a cell asking for a tile the sheet
+	// does not carry draws no frame rather than a hole, so the block can
+	// be filled one tile at a time.
+	std::vector<std::string> const kWindowframes{ "windowframe-SS",
+		"windowframe-SL", "windowframe-SM", "windowframe-SR" };
+
+	// The column each single-level frame holds in the block, which is the
+	// horizontal role read off the sheet rather than decoded from a name.
+	std::map<std::string, uint32_t> const kWindowframeColumns{
+		{ "windowframe-SS", 15 },
+		{ "windowframe-SL", 16 },
+		{ "windowframe-SM", 17 },
+		{ "windowframe-SR", 18 } };
 
 	// ------------------------------------------------------------------
 	// The atlas as the application holds it.
@@ -507,8 +519,8 @@ namespace
 				== kDoorframes.size() + kWindowframes.size(),
 			"SectorAtlas authors " + std::to_string(authored.overlays.size())
 			+ " overlays; the doorframe block is six, one per opening width, "
-			"height class and role, and the windowframe block carries "
-			"windowframe-SS on top of them");
+			"height class and role, and the windowframe block carries the "
+			"single-level row of the role grid on top of them");
 		for (auto const& name : kDoorframes)
 		{
 			require(authored.overlays.count(name),
@@ -521,10 +533,11 @@ namespace
 				"manifest");
 		}
 		// The windowframes are overlays on the same terms, and the block's
-		// place on the sheet is the role grid: column 15 is the single
-		// column, row 0 is the single level, so `windowframe-SS` lands at
-		// the block's top-left corner and the bottom-of-window tiles will
-		// carry the highest y when they arrive.
+		// place on the sheet is the role grid: the four columns from 15 are
+		// the horizontal role `S L M R` and row 0 is the single level, so
+		// each frame sits where its role says and an artist reads the grid
+		// off the sheet. The bottom-of-window tiles will carry the highest y
+		// when the tall work arrives.
 		for (auto const& name : kWindowframes)
 		{
 			require(authored.overlays.count(name),
@@ -535,12 +548,14 @@ namespace
 				"The windowframe '" + name
 				+ "' is not in the tile map the install pairs against the "
 				"manifest");
+			auto const want = kWindowframeColumns.at(name);
+			require(authored.overlays.at(name).x == static_cast<int>(want) * 128
+					&& authored.overlays.at(name).y == 0,
+				name + " is not in the windowframe block's cell for its role: "
+				"the block's columns are 15..18 for S/L/M/R and its "
+				"single-level row is 0, so it belongs at column "
+				+ std::to_string(want) + ", row 0");
 		}
-		require(authored.overlays.at("windowframe-SS").x == 15 * 128
-				&& authored.overlays.at("windowframe-SS").y == 0,
-			"windowframe-SS is not in the windowframe block's single-column, "
-			"single-level cell: the block's leftmost column is 15 and its "
-			"single-level row is 0");
 		// No wall-keyed frame survives the change. A frame that carried its
 		// wall's appearance was what the frame *replacing* the wall's tile
 		// needed; lying over the tile instead, it has nothing left to say

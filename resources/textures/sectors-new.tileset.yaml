@@ -144,14 +144,15 @@
 # two-column window's left cell. Forcing the shape would make one
 # convention mean two different things in two different files.
 #
-# The set carries one tile of that grid so far, `windowframe-SS`, the
-# single-column single-level cell: the 1x1 window, which is eight of the
-# ten windows every bundled document authors. The rest of the grid
-# arrives with the wide, tall and corner work that hangs off it; a cell
-# whose frame the installed atlas does not carry draws nothing, exactly
-# as it does for a missing doorframe, so the block can be filled one
-# tile at a time and no World ever draws a hole where a frame has not
-# been drawn yet.
+# The set carries the whole single-level row now: `windowframe-SS`, the
+# single-column cell of the 1x1 window, and the three tiles of the wide
+# single-level opening - `windowframe-SL`, `windowframe-SM` and
+# `windowframe-SR` - which is what makes a two- or three-cell window one
+# opening rather than two or three adjacent ones. The tall rows arrive
+# with the work that hangs off this; a cell whose frame the installed
+# atlas does not carry draws nothing, exactly as it does for a missing
+# doorframe, so the block can be filled one tile at a time and no World
+# ever draws a hole where a frame has not been drawn yet.
 #
 # The hole is rounded down from the glass rect the frame frames - the
 # same rule the doorframes use, for the same reason. A Window's glass is
@@ -160,6 +161,17 @@
 # big the span gets. On a 128 x 320 cell that rounds down to x 13, width
 # 102, y 160, height 96 - inset inward on every edge, so the moulding
 # never stands inside the pane.
+#
+# The inset belongs to the *ends of the span*, not to every cell, and
+# that is what the wide row says. A 2-wide span's glass runs from 0.1 of
+# a cell in at one end to 0.1 in at the other, so its left cell carries
+# the glass from its inset to its own right edge and its right cell
+# carries it from its own left edge to the inset: two holes that meet at
+# the seam between the cells rather than leaving a strip of moulding
+# across it. The middle cell of a 3-wide span has no inset at all and so
+# no vertical moulding - its hole is the full width of its cell, and the
+# glass reads as continuous across it. A jamb only goes down the outside
+# of each end, because that is the only place the wall stops.
 #
 # ## Doorframe overlays
 #
@@ -371,10 +383,10 @@ overlays:
   # are the horizontal role `S L M R`, rows top to bottom are
   # single-level, top cell, middle cell, bottom cell. A tile's place in
   # the block is the place its cell holds in the opening it frames, so an
-  # artist reads the grid off the sheet. Only the `S` column is filled so
-  # far; the other three columns are the grid's shape, waiting for the
-  # wide, tall and corner work, and a cell asking for a tile the sheet
-  # does not carry draws no frame rather than a hole.
+  # artist reads the grid off the sheet. The single-level row is filled
+  # across; the other three rows are the grid's shape, waiting for the
+  # tall work, and a cell asking for a tile the sheet does not carry draws
+  # no frame rather than a hole.
   windowframe-SS:
     # The block's single-column, single-level cell: the 1x1 Window.
     cell: [15, 0]
@@ -384,3 +396,39 @@ overlays:
     # The glass rect a 1x1 Window frames - u[0.1,0.9], v[0.2,0.5] above
     # the cell's floor line - rounded down inward on every edge.
     hole: [13, 160, 102, 96]
+  windowframe-SL:
+    # The block's left-column, single-level cell: the left cell of a wide
+    # single-level Window. The span's inset is at the span's ends, so this
+    # cell carries the glass from its own inset to its own right edge - no
+    # moulding on the seam side, which is what stops a 2-wide window
+    # reading as two windows.
+    cell: [16, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # u[0.1,1.0], v[0.2,0.5]: inset at the left, running to the cell's
+    # right edge.
+    hole: [13, 160, 115, 96]
+  windowframe-SM:
+    # The block's middle-column, single-level cell: the middle cell of a
+    # 3-wide single-level Window. Nothing is inset here - the span's glass
+    # runs straight through - so the hole is the full width of the cell
+    # and there is no vertical moulding in the middle at all.
+    cell: [17, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # u[0.0,1.0], v[0.2,0.5]: the whole cell width, moulding only above
+    # and below.
+    hole: [0, 160, 128, 96]
+  windowframe-SR:
+    # The block's right-column, single-level cell: the right cell of a
+    # wide single-level Window. The mirror of `windowframe-SL`: the glass
+    # runs from this cell's own left edge to the span's inset at its right.
+    cell: [18, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # u[0.0,0.9], v[0.2,0.5]: from the cell's left edge, inset at the
+    # right.
+    hole: [0, 160, 115, 96]

@@ -167,6 +167,12 @@ set(names
     windowframeCells/aWallWithNoWindowDrawsNoFrame
     windowframeCells/theFrameFollowsTheWallThroughEveryStyle
     windowframeCells/adjacentWindowsFrameTheirOwnCells
+    windowframeCells/aTwoWideWindowFramesItsTwoCellsAsOneOpening
+    windowframeCells/aThreeWideWindowFramesItsThreeCells
+    windowframeCells/theWideOpeningIsOneContinuousAperture
+    windowframeCells/twoWideWindowsFrameTheirOwnCells
+    windowframeCells/theWideFrameIsDrawnLastOnEveryCell
+    windowframeCells/everyWallFramesAWideOpeningTheSameWay
     windowframeCells/theFrameNameIsTheOpeningAndNothingElse
     sectorTilePreview/oneTileFramesTheRectItIsGiven
     sectorTilePreview/anyRectFramesOneTileAndNotACellGrid

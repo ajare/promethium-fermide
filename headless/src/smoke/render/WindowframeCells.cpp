@@ -1,10 +1,14 @@
-// A 1x1 Window wears a windowframe over its wall (#1075).
+// A 1x1 Window wears a windowframe over its wall (#1075), and a wide
+// Window frames its whole span as one opening (#1076).
 //
-// The tracer bullet for the windowframe series. Everything the wide, tall
-// and corner tickets hang off is pinned here, in the smallest complete
-// shape the feature can take: the atlas carries one frame, the renderer
-// derives it from the live Window rather than from anything painted, and
-// it lands over the wall's own tile without taking anything away.
+// The tracer bullet for the windowframe series pinned everything the wide,
+// tall and corner tickets hang off, in the smallest complete shape the
+// feature can take: the atlas carries the frame, the renderer derives it
+// from the live Window rather than from anything painted, and it lands
+// over the wall's own tile without taking anything away. The wide work
+// added here is the horizontal axis of the role grid: the frame a cell
+// wears now depends on where that cell sits in the opening's width, not
+// only on the opening existing.
 //
 // The four layers a Window puts down, in order:
 //
@@ -26,6 +30,12 @@
 //   * a frame the atlas does not carry is no frame at all, which is what
 //     lets the role grid be filled one tile at a time without any World
 //     drawing a hole where a frame has not been drawn yet;
+//   * a wide opening is framed as one opening: a jamb down the outside of
+//     each end, the middle cells wearing the middle tile whose hole is the
+//     full width of the cell, so the glass reads as continuous across the
+//     span and no moulding stands between the panes;
+//   * two Windows side by side each frame their own cells, and no frame of
+//     either one lies over the other's glass;
 //   * a BoothWindow wears none, because it *is* a 1x1 Window and already
 //     owns the frame its shutter's clip is cut from.
 //
@@ -86,10 +96,12 @@ namespace
 	WorldDrawList::ClipRectangle const kNoClip{ { -100000.0f, -100000.0f },
 		{ 100000.0f, 100000.0f } };
 
-	// The one frame the shipped set authors so far. The role grid it sits
-	// in has fifteen cells; this is the single-column, single-level one,
-	// and the rest arrive with the wide, tall and corner work.
-	std::vector<std::string> const kWindowframes{ "windowframe-SS" };
+	// The frames the shipped set authors: the whole single-level row of
+	// the role grid. The grid has fifteen cells; the single-level row is
+	// filled across, and the tall rows arrive with the work that hangs off
+	// it.
+	std::vector<std::string> const kWindowframes{ "windowframe-SS",
+		"windowframe-SL", "windowframe-SM", "windowframe-SR" };
 
 	// The Facade's own colour, distinct from the tint every other pass in
 	// this file is drawn with, so "the frame lies over the Facade's own
@@ -619,7 +631,8 @@ namespace
 	// prove it stays unfurnished.
 	Scene buildScene(std::string const& kind, uint32_t cellsWide,
 		uint32_t levelsHigh, uint32_t windowX, uint32_t windowLevel,
-		float frontTopLevelHeight, bool booth)
+		float frontTopLevelHeight, bool booth, uint32_t windowCellsWide = 1,
+		uint32_t windowLevelsHigh = 1)
 	{
 		auto world = std::make_shared<core::World>("Windowframe world", 16, 6);
 		while (world->getLayerCount() < 2) world->addLayer();
@@ -645,7 +658,8 @@ namespace
 				frontTopLevelHeight);
 		}
 		if (booth) world->addBoothWindow(0, windowLevel, windowX);
-		else world->addSectorWindow(0, windowLevel, windowX, 1, 1);
+		else world->addSectorWindow(0, windowLevel, windowX, windowCellsWide,
+			windowLevelsHigh);
 		world->finishBuild();
 		world->pauseSimulation();
 
@@ -665,6 +679,9 @@ namespace
 			"The front Sector carries no Window object");
 		require(scene.window != nullptr,
 			"The front Sector's Window could not be read back");
+		require(scene.window->getCellsWide() == windowCellsWide
+				&& scene.window->getLevelsHigh() == windowLevelsHigh,
+			"The fixture Window did not come back the size it was authored as");
 		return scene;
 	}
 
@@ -698,6 +715,54 @@ namespace
 			CORE_ROOM_MAX_HEIGHT, true);
 	}
 
+	// A Room two cells wider than the one Window set into it, so a check
+	// can see the cells either side of the span wearing no frame.
+	Scene wideRoomScene(uint32_t wide, uint32_t windowX = 1)
+	{
+		return buildScene("room", wide + 2, 1, windowX, 0,
+			CORE_ROOM_MAX_HEIGHT, false, wide, 1);
+	}
+
+	Scene wideCorridorScene(uint32_t wide, uint32_t windowX = 1)
+	{
+		return buildScene("corridor", wide + 2, 1, windowX, 0,
+			CORE_CORRIDOR_HEIGHT, false, wide, 1);
+	}
+
+	Scene wideFacadeScene(uint32_t wide, uint32_t windowX = 1)
+	{
+		return buildScene("facade", wide + 2, 1, windowX, 0,
+			CORE_ROOM_MAX_HEIGHT, false, wide, 1);
+	}
+
+	// A fixture carrying more than one Window, which `buildScene` cannot
+	// build because it resolves the front wall by asking the World which
+	// Sector fronts a Window and insists the answer is one. Here the front
+	// wall is named, and the Windows are placed by ordinal.
+	Scene multiWindowScene(uint32_t roomWide,
+		std::vector<std::pair<uint32_t, uint32_t>> const& spans)
+	{
+		auto world = std::make_shared<core::World>("Many window world", 16, 6);
+		while (world->getLayerCount() < 2) world->addLayer();
+		world->addRoom("Front", 0, 0, 0, roomWide, 1);
+		world->addRoom("Back", 1, 0, 0, roomWide, 1);
+		for (auto const& [x, wide] : spans)
+			world->addSectorWindow(0, 0, x, wide, 1);
+		world->finishBuild();
+		world->pauseSimulation();
+
+		Scene scene;
+		scene.world = world;
+		scene.frontName = "Front";
+		scene.frontLayer = 0;
+		scene.refresh();
+		require(scene.front->getCellsWide() == roomWide,
+			"The multi-window fixture lost its front Room");
+		require(scene.front->getNumObjects() >= spans.size(),
+			"The multi-window fixture did not place every Window");
+		return scene;
+	}
+
 	// The glass rect of the one Window a fixture carries, in screen units.
 	ScreenRect glassRect(core::Window const& window)
 	{
@@ -707,6 +772,251 @@ namespace
 		rect.include(toScreen(lo));
 		rect.include(toScreen(hi));
 		return rect;
+	}
+
+	// The glass rect of one of the Windows a multi-Window fixture carries.
+	ScreenRect glassRectOf(core::Sector const& sector, uint32_t ordinal)
+	{
+		auto const window = windowOf(sector, ordinal);
+		require(window != nullptr, "The fixture has no Window "
+			+ std::to_string(ordinal));
+		return glassRect(*window);
+	}
+
+	// The frame quads left to right, so "the next cell along" means the
+	// same thing in every check that walks the span.
+	std::vector<DrawnQuad> leftToRight(std::vector<DrawnQuad> const& quads)
+	{
+		auto out = quads;
+		std::sort(out.begin(), out.end(), [](auto const& a, auto const& b)
+		{
+			return a.rect.left < b.rect.left;
+		});
+		return out;
+	}
+
+	// A 2-wide single-level Window frames its two cells as one opening: a
+	// jamb down the outside of each end and nothing between them. The left
+	// cell wears `windowframe-SL` and the right cell `windowframe-SR`, and
+	// the two frame quads meet on the cell boundary rather than leaving a
+	// strip of anything between them or overlapping across it.
+	void aTwoWideWindowFramesItsTwoCellsAsOneOpening(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto scene = wideRoomScene(2);
+		require(scene.window->getCellsWide() == 2,
+			"The fixture Window is not two cells wide");
+		auto const pass = recordPass(scene.front, atlas);
+		auto const frames = gridOf(pass.frameCells(), *scene.front);
+		require(frames.size() == 2, "A 2-wide Window drew "
+			+ std::to_string(frames.size()) + " frame cells; a wide opening is "
+			"framed across its whole span, one tile per cell");
+		require(tileAt(frames, 1, 0) == "windowframe-SL",
+			"The left cell of a 2-wide Window wore " + tileAt(frames, 1, 0)
+				+ "; the span's left end takes the left jamb");
+		require(tileAt(frames, 2, 0) == "windowframe-SR",
+			"The right cell of a 2-wide Window wore " + tileAt(frames, 2, 0)
+				+ "; the span's right end takes the right jamb");
+		require(tileAt(frames, 0, 0) == "<nothing>"
+				&& tileAt(frames, 3, 0) == "<nothing>",
+			"A cell outside the span wore a frame: " + tileList(pass.frameCells()));
+
+		// Each frame quad stays inside its own cell, so nothing is drawn
+		// across the seam: the moulding of one cell stops where the next
+		// cell's begins, and the two holes join into one aperture.
+		for (auto const& frame : pass.frameCells())
+		{
+			auto const width = frame.rect.right - frame.rect.left;
+			require(near(width, CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom),
+				"A wide-span frame quad is not one cell wide, so it straddles "
+				"the seam between cells: " + frame.rect.str());
+		}
+		for (uint32_t column = 1; column + 1 < 3; ++column)
+		{
+			auto const here = frames.at({ column, 0 });
+			auto const next = frames.at({ column + 1, 0 });
+			require(near(here.rect.right, next.rect.left),
+				"Two cells of one wide span do not meet on the cell boundary: "
+				+ here.rect.str() + " and " + next.rect.str());
+		}
+	}
+
+	// A 3-wide single-level Window wears SL, SM and SR across its three
+	// cells. The middle cell wears the middle tile, whose hole is the full
+	// width of its cell - no vertical moulding in the middle, so the glass
+	// reads as continuous across the whole span.
+	void aThreeWideWindowFramesItsThreeCells(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto scene = wideRoomScene(3);
+		require(scene.window->getCellsWide() == 3,
+			"The fixture Window is not three cells wide");
+		auto const pass = recordPass(scene.front, atlas);
+		auto const frames = gridOf(pass.frameCells(), *scene.front);
+		require(frames.size() == 3, "A 3-wide Window drew "
+			+ std::to_string(frames.size()) + " frame cells");
+		require(tileAt(frames, 1, 0) == "windowframe-SL",
+			"The left cell of a 3-wide Window wore " + tileAt(frames, 1, 0));
+		require(tileAt(frames, 2, 0) == "windowframe-SM",
+			"The middle cell of a 3-wide Window wore " + tileAt(frames, 2, 0)
+				+ "; a cell that is neither end of the span takes the middle "
+				"tile, which has no vertical moulding in it");
+		require(tileAt(frames, 3, 0) == "windowframe-SR",
+			"The right cell of a 3-wide Window wore " + tileAt(frames, 3, 0));
+		require(tileAt(frames, 0, 0) == "<nothing>"
+				&& tileAt(frames, 4, 0) == "<nothing>",
+			"A cell outside the 3-wide span wore a frame: "
+				+ tileList(pass.frameCells()));
+	}
+
+	// The wide opening is one aperture. The glass runs straight through the
+	// cell boundary between the two cells - the inset is at the ends of the
+	// span, not at the ends of each cell - and the frames tile the span
+	// with nothing left over and nothing doubled up, which is what makes a
+	// 2-wide Window read as one window rather than as two touching.
+	void theWideOpeningIsOneContinuousAperture(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto scene = wideRoomScene(2);
+		auto const pass = recordPass(scene.front, atlas);
+		auto const frames = leftToRight(pass.frameCells());
+		require(frames.size() == 2, "Expected two frame cells to walk the span");
+
+		// The glass crosses the seam between the two cells rather than
+		// stopping short of it, so there is no wall, and no moulding, left
+		// standing in the middle of the opening.
+		auto const glass = glassRect(*scene.window);
+		auto const seam = frames[0].rect.right;
+		require(glass.left < seam - 0.01f && glass.right > seam + 0.01f,
+			"A 2-wide Window's glass does not cross the seam between its two "
+			"cells, so the opening is not continuous: glass " + glass.str()
+				+ ", seam " + std::to_string(seam));
+
+		// The frames cover the span from end to end with no gap and no
+		// overlap, so the joined holes are one aperture rather than two
+		// with something between them.
+		require(near(frames.front().rect.left, glass.left
+				- CORE_WINDOW_X_INSET * CORE_CELL_WIDTH_PIXELS
+					* gUISettings.worldZoom),
+			"The wide frame does not start at the span's left inset");
+		require(near(frames.back().rect.right, glass.right
+				+ CORE_WINDOW_X_INSET * CORE_CELL_WIDTH_PIXELS
+					* gUISettings.worldZoom),
+			"The wide frame does not end at the span's right inset");
+		auto covered = 0.0f;
+		for (auto const& frame : frames) covered += frame.rect.right - frame.rect.left;
+		require(near(covered, frames.back().rect.right - frames.front().rect.left),
+			"The wide span's frame quads overlap, so the span is doubled up "
+			"somewhere and cannot read as one opening");
+	}
+
+	// Two wide Windows side by side each frame their own cells. Neither
+	// frame reaches across into the other's opening: the seam between two
+	// abutting Windows is two jambs meeting, not one shared moulding, and
+	// no frame of one lies over the other's glass.
+	void twoWideWindowsFrameTheirOwnCells(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		// Cells 1-2 and 3-4, abutting with no bare cell between them, so
+		// "does one opening's frame leak into the other's" is asked at the
+		// tightest place it can be rather than across a gap.
+		auto scene = multiWindowScene(6, { { 1, 2 }, { 3, 2 } });
+		auto const pass = recordPass(scene.front, atlas);
+		auto const frames = gridOf(pass.frameCells(), *scene.front);
+		require(frames.size() == 4, "Two 2-wide Windows drew "
+			+ std::to_string(frames.size()) + " frame cells; each is its own "
+			"two-cell opening and each frames only its own cells");
+		require(tileAt(frames, 1, 0) == "windowframe-SL"
+				&& tileAt(frames, 2, 0) == "windowframe-SR",
+			"The first 2-wide Window did not frame its own pair: "
+				+ tileList(pass.frameCells()));
+		require(tileAt(frames, 3, 0) == "windowframe-SL"
+				&& tileAt(frames, 4, 0) == "windowframe-SR",
+			"The second 2-wide Window did not frame its own pair: "
+				+ tileList(pass.frameCells()));
+		require(tileAt(frames, 0, 0) == "<nothing>"
+				&& tileAt(frames, 5, 0) == "<nothing>",
+			"A cell belonging to no opening wore a frame: "
+				+ tileList(pass.frameCells()));
+
+		// And no frame of either Window lies over the other's glass: each
+		// of the four frames belongs to exactly one of the two openings.
+		for (auto const& frame : pass.frameCells())
+		{
+			size_t overlapped{};
+			for (uint32_t ordinal = 0; ordinal < 2; ++ordinal)
+				if (frame.rect.overlaps(glassRectOf(*scene.front, ordinal)))
+					++overlapped;
+			require(overlapped == 1, "A frame at " + frame.rect.str()
+				+ " lies over " + std::to_string(overlapped)
+				+ " Windows' glass; each frame belongs to exactly one opening");
+		}
+	}
+
+	// The frame still lies over the wall's own tile and is still drawn
+	// last, on every cell of the wider span rather than only on the first
+	// one. A wide opening must not lose the ordering anywhere across it.
+	void theWideFrameIsDrawnLastOnEveryCell(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		installObjectArt();
+		auto scene = wideRoomScene(3);
+		auto const pass = recordPass(scene.front, atlas);
+		auto const wall = gridOf(pass.wallCells(), *scene.front);
+		auto const frames = gridOf(pass.frameCells(), *scene.front);
+		require(pass.frameCells().size() == 3 && pass.wallCells().size() == 5,
+			"The 3-wide fixture's draw was missing a layer: wall "
+			+ std::to_string(pass.wallCells().size()) + ", frames "
+			+ std::to_string(pass.frameCells().size()));
+		auto const lastWall = *pass.lastIndexOf(pass.wallCells());
+		auto const lastBehind = *pass.lastIndexOf(pass.behindCells());
+		auto const lastGlass = *pass.lastIndexOf(pass.glass());
+		for (uint32_t column = 1; column <= 3; ++column)
+		{
+			require(frames.count({ column, 0 }) == 1,
+				"Column " + std::to_string(column) + " of the wide span drew no frame");
+			require(wall.count({ column, 0 }) == 1,
+				"Column " + std::to_string(column) + " of the wide span drew no wall tile");
+			auto const& over = frames.at({ column, 0 });
+			auto const& under = wall.at({ column, 0 });
+			require(over.index > lastWall,
+				"The frame on column " + std::to_string(column)
+					+ " was drawn before the wall tile it lies over");
+			require(over.index > lastBehind,
+				"The frame on column " + std::to_string(column)
+					+ " was drawn before the space behind");
+			require(over.index > lastGlass,
+				"The frame on column " + std::to_string(column)
+					+ " was drawn before the glass it covers the seam of");
+			require(near(over.rect.left, under.rect.left)
+					&& near(over.rect.right, under.rect.right),
+				"The frame on column " + std::to_string(column)
+					+ " is not on the cell its wall tile is: wall "
+					+ under.rect.str() + ", frame " + over.rect.str());
+			require(under.tile == "room",
+				"The wall under the wide span stopped drawing its own tile");
+		}
+	}
+
+	// The wide row does not vary with its wall either. The same 2-wide
+	// opening in a Room, a Corridor and a Facade draws the same two tiles,
+	// because the frame carries the moulding and the wall carries its own
+	// look, whatever wall that is.
+	void everyWallFramesAWideOpeningTheSameWay(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto const drawnRoom = tileList(recordPass(wideRoomScene(2).front, atlas)
+			.frameCells());
+		auto const drawnCorridor = tileList(
+			recordPass(wideCorridorScene(2).front, atlas).frameCells());
+		auto const drawnFacade = tileList(
+			recordPass(wideFacadeScene(2).front, atlas).frameCells());
+		require(drawnRoom == drawnCorridor && drawnCorridor == drawnFacade,
+			"A 2-wide opening drew a different frame per wall: Room "
+			+ drawnRoom + ", Corridor " + drawnCorridor + ", Facade "
+			+ drawnFacade);
+		require(drawnRoom == "windowframe-SL, windowframe-SR",
+			"A 2-wide opening did not draw the wide pair: " + drawnRoom);
 	}
 
 	// ------------------------------------------------------------------
@@ -1221,6 +1531,20 @@ namespace
 		require(!hasSectorTileSurface("windowframe-SS"),
 			"A windowframe answered the Sector-surface query; it is a tile of "
 			"the atlas but not a surface a Sector is authored with");
+		// The wide row is carried on the same terms as the single-column
+		// tile: an overlay the render path can ask for and the surface query
+		// never answers.
+		for (auto const* wide : { "windowframe-SL", "windowframe-SM",
+				"windowframe-SR" })
+		{
+			require(hasSectorTileOverlay(wide),
+				std::string{ wide }
+					+ " is named by the render path but the installed atlas does "
+					"not carry it");
+			require(!hasSectorTileSurface(wide),
+				std::string{ wide } + " answered the Sector-surface query; a "
+				"windowframe is never a Sector surface");
+		}
 	}
 }
 
@@ -1260,6 +1584,18 @@ void render_smoke::registerWindowframeCells(std::vector<smoke::Check>& checks)
 		isolated<theFrameFollowsTheWallThroughEveryStyle> });
 	checks.push_back({ "windowframeCells/adjacentWindowsFrameTheirOwnCells",
 		isolated<adjacentWindowsFrameTheirOwnCells> });
+	checks.push_back({ "windowframeCells/aTwoWideWindowFramesItsTwoCellsAsOneOpening",
+		isolated<aTwoWideWindowFramesItsTwoCellsAsOneOpening> });
+	checks.push_back({ "windowframeCells/aThreeWideWindowFramesItsThreeCells",
+		isolated<aThreeWideWindowFramesItsThreeCells> });
+	checks.push_back({ "windowframeCells/theWideOpeningIsOneContinuousAperture",
+		isolated<theWideOpeningIsOneContinuousAperture> });
+	checks.push_back({ "windowframeCells/twoWideWindowsFrameTheirOwnCells",
+		isolated<twoWideWindowsFrameTheirOwnCells> });
+	checks.push_back({ "windowframeCells/theWideFrameIsDrawnLastOnEveryCell",
+		isolated<theWideFrameIsDrawnLastOnEveryCell> });
+	checks.push_back({ "windowframeCells/everyWallFramesAWideOpeningTheSameWay",
+		isolated<everyWallFramesAWideOpeningTheSameWay> });
 	checks.push_back({ "windowframeCells/theFrameNameIsTheOpeningAndNothingElse",
 		isolated<theFrameNameIsTheOpeningAndNothingElse> });
 }

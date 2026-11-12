@@ -22,10 +22,20 @@ The frame is keyed by where its cell sits in the opening's span and by
 nothing else. The block on the sheet *is* the role grid: columns left to
 right are the horizontal role `S L M R`, rows top to bottom are
 single-level, top cell, middle cell, bottom cell, so an artist reads the
-grid off the sheet rather than learning a numbering. Only the
-single-column, single-level cell is filled so far - the 1x1 Window, which
-is eight of the ten windows every bundled document authors - and the
-rest of the grid arrives with the wide, tall and corner work.
+grid off the sheet rather than learning a numbering. The single-level row
+is filled across - the 1x1 Window and the wide single-level opening - and
+the tall rows arrive with the work that hangs off it.
+
+The wide row is where the horizontal roles earn their keep. A span's inset
+belongs to the *ends of the span*, not to every cell: a 2-wide Window's
+glass runs from 0.1 of a cell in at one end to 0.1 in at the other, so
+its left cell carries the glass from its own inset to its own right edge
+and its right cell carries it from its own left edge to the inset. The
+two holes meet at the seam between the cells instead of leaving a strip of
+moulding across it, which is what makes a wide window read as one opening
+rather than as two adjacent ones. The middle cell of a 3-wide span has no
+inset at all, so its hole is the full width of its cell and there is no
+vertical moulding in the middle.
 
 The Furniture role vocabulary cannot carry this shape, and the test keeps
 it from being tried anyway. That convention is `<piece>-<role><level>`,
@@ -41,6 +51,7 @@ refused here.
 
 from __future__ import annotations
 
+import math
 import pathlib
 import re
 import sys
@@ -71,13 +82,25 @@ BLOCK_FIRST_COLUMN = 15
 
 # The frames this set authors, with the glass rect each one frames in
 # World units: the horizontal span across its cell, and the span's bottom
-# and top measured up from its cell's floor line. A 1x1 Window is inset
-# 0.1 at each end of its span, stands 0.2 above the span's floor line
-# and is 0.3 of a level tall, and every one of those is constant per role
-# however big the span gets - which is what lets a fixed tile cover the
-# opening whatever the opening's total size turns out to be.
+# and top measured up from its cell's floor line. A Window is inset 0.1 at
+# each end of its *span*, stands 0.2 above the span's floor line and is
+# 0.3 of a level tall, and every one of those is constant per role however
+# big the span gets - which is what lets a fixed tile cover the opening
+# whatever the opening's total size turns out to be. The horizontal span
+# below is therefore the part of the span that falls inside the cell the
+# tile frames: inset at the span's ends, and running edge to edge wherever
+# the cell is not an end.
 GLASS_RECTS = {
+    # The 1x1 Window: inset on both of its edges, because both are ends.
     "windowframe-SS": (0.1, 0.9, 0.2, 0.5),
+    # The left cell of a wide span: inset at the span's left end, and the
+    # span carries on past the cell's right edge, so the glass does too.
+    "windowframe-SL": (0.1, 1.0, 0.2, 0.5),
+    # The middle cell of a 3-wide span: no inset anywhere inside it, so
+    # the glass runs the full cell width and no vertical moulding does.
+    "windowframe-SM": (0.0, 1.0, 0.2, 0.5),
+    # The right cell of a wide span: the mirror of the left.
+    "windowframe-SR": (0.0, 0.9, 0.2, 0.5),
 }
 
 # The exact hole each frame authors, restated independently of the
@@ -89,6 +112,9 @@ GLASS_RECTS = {
 # inside the aperture.
 EXPECTED_HOLES = {
     "windowframe-SS": (13, 160, 102, 96),
+    "windowframe-SL": (13, 160, 115, 96),
+    "windowframe-SM": (0, 160, 128, 96),
+    "windowframe-SR": (0, 160, 115, 96),
 }
 
 failures: list[str] = []
@@ -222,6 +248,49 @@ def main() -> int:
               f"{name}'s hole has no area, so the frame would be a solid "
               "slab over its own opening")
 
+    # The wide row frames *one* opening. The left cell's hole has to run
+    # to that cell's own right edge and the right cell's hole has to start
+    # at its own left edge, so laid side by side the two are one aperture
+    # with no strip of moulding across the middle; and the middle cell of a
+    # 3-wide span carries no vertical moulding at all. Checked as the
+    # joined rect too, against the glass rect of the whole 2- and 3-cell
+    # span, because a hole that stops short of the seam and a hole that
+    # overshoots it are both wrong in a way no single tile shows.
+    wide = {name: tuple(overlays[name]["hole"])
+            for name in ("windowframe-SL", "windowframe-SM", "windowframe-SR")
+            if name in overlays}
+    if len(wide) == 3:
+        left, middle, right = (wide["windowframe-SL"], wide["windowframe-SM"],
+                             wide["windowframe-SR"])
+        check(left[0] + left[2] == CELL_WIDTH,
+              "windowframe-SL's hole stops "
+              f"{CELL_WIDTH - (left[0] + left[2])}px short of its cell's right "
+              "edge, which puts a vertical moulding across the middle of a "
+              "wide window and makes it read as two")
+        check(right[0] == 0,
+              "windowframe-SR's hole starts "
+              f"{right[0]}px in from its cell's left edge, which puts a "
+              "vertical moulding across the middle of a wide window")
+        check(middle[0] == 0 and middle[0] + middle[2] == CELL_WIDTH,
+              "windowframe-SM's hole does not span its whole cell, so the "
+              "middle of a 3-wide window carries vertical moulding")
+        # Same band top and bottom, or the joined aperture is not a rect.
+        check(left[1] == middle[1] == right[1]
+                and left[3] == middle[3] == right[3],
+              "the wide row's holes are not the same vertical band, so the "
+              "joined aperture is not rectangular across the span")
+        # The joined holes, against the glass rect of the whole span: a
+        # 2-cell span is inset 0.1 at each end, a 3-cell span likewise.
+        for cells, parts in ((2, (left, right)), (3, (left, middle, right))):
+            joined = sum(part[2] for part in parts)
+            # The whole span's glass rect, u[0.1, cells - 0.1], rounded
+            # down inward on both ends.
+            want = int((cells - 0.1) * CELL_WIDTH) - math.ceil(0.1 * CELL_WIDTH)
+            check(joined == want,
+                  f"a {cells}-cell span's holes joined are {joined}px wide; "
+                  f"the span's glass rect u[0.1,{cells - 0.1}] rounds down "
+                  f"to {want}px")
+
     # Nobody tried to read the Furniture role convention into the block.
     # `<piece>-<role><level>` means the height level within a footprint;
     # this file's vertical role is end-versus-middle, and a digit-suffixed
@@ -251,11 +320,14 @@ def main() -> int:
             hx, hy, hw, hh = sprite["hole"]
             cell_x, cell_y = column * CELL_WIDTH, row * CELL_HEIGHT
             ox, oy = cell_x + hx, cell_y + hy
-            # The moulding just outside the opening, where the opening
-            # does not run to the cell's own edge. Every one of this
-            # block's holes is inset on all four sides, so all four
-            # neighbours here are this tile's own moulding rather than the
-            # next tile's art.
+            # The moulding just outside the opening, where the opening does
+            # not run to the cell's own edge. Where the hole *does* reach
+            # the cell edge - the seam side of every wide-row tile, and
+            # both sides of the middle column - there is no neighbour
+            # inside this cell to probe, and the pixel beyond belongs to the
+            # next tile's art rather than to this frame's moulding, so it
+            # is skipped. That the hole reaches the edge at all is pinned by
+            # the joined-span check above, not by probing here.
             for (px, py, expect_open) in (
                     (ox, oy, True),
                     (ox + hw - 1, oy + hh - 1, True),

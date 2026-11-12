@@ -707,6 +707,24 @@ overlays:
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
     hole: [13, 160, 102, 96]
+  windowframe-SL:
+    cell: [16, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [13, 160, 115, 96]
+  windowframe-SM:
+    cell: [17, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [0, 160, 128, 96]
+  windowframe-SR:
+    cell: [18, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [0, 160, 115, 96]
 ```
 
 ### The block is the role grid
@@ -717,7 +735,7 @@ decoding a numbering.
 
 |            | col 15 `S` | col 16 `L` | col 17 `M` | col 18 `R` |
 | ---------- | ---------- | ---------- | ---------- | ---------- |
-| row 0 `S`  | single column, single level | left cell, single level | middle column, single level | right cell, single level |
+| row 0 `S`  | inset on both edges | inset left, hole to the right edge | hole the full cell width | hole from the left edge, inset right |
 | row 1 `T`  | single column, top cell | left cell, top | middle column, top | right cell, top |
 | row 2 `M`  | single column, middle level | left cell, middle | *all glass, asks for nothing* | right cell, middle |
 | row 3 `B`  | single column, bottom cell | left cell, bottom | middle column, bottom | right cell, bottom |
@@ -735,15 +753,54 @@ span that is middle in both directions is all glass with no moulding on
 it, and the empty name the derivation gives there is the same answer a
 missing tile gives: nothing drawn, no frame, no magenta.
 
-Only `windowframe-SS` is filled so far. That is the 1x1 Window, which is
-eight of the ten windows every bundled document authors, and the block is
-built one tile at a time because a cell asking for a tile the sheet does
-not carry draws no frame rather than a hole.
+Only the single-level row is filled so far: `windowframe-SS` for the 1x1
+Window, which is eight of the ten windows every bundled document authors,
+and `windowframe-SL`/`SM`/`SR` for the wide single-level opening. The
+tall rows arrive with the work that hangs off this, and the block is built
+one tile at a time because a cell asking for a tile the sheet does not
+carry draws no frame rather than a hole.
 
 This is why the sheet is **2432 x 1280** - nineteen columns by four rows
 - rather than the 1920 x 1280 it was: twelve surface columns, three for
 the doorframe, and four fresh ones for the windowframe block to stand its
 `S`/`L`/`M`/`R` in.
+
+### The horizontal roles: one opening, not two
+
+The wide row is what the horizontal axis is for. A Window's 0.1 inset
+belongs to the **ends of the span**, not to every cell of it: a 2-wide
+Window's glass runs from 0.1 of a cell in at one end to 0.1 in at the
+other, and nothing is inset where one cell hands over to the next. Each
+tile of the row therefore frames the part of the span that falls inside
+its own cell:
+
+| Role | The glass in its cell | Hole on the 128px cell |
+| ---- | ------------------- | -------------------- |
+| `S` | inset at both edges, because both are ends | `x 13 .. 115` |
+| `L` | inset at the span's left end, running to the cell's right edge | `x 13 .. 128` |
+| `M` | running straight through, inset nowhere | `x 0 .. 128` |
+| `R` | from the cell's left edge, inset at the span's right end | `x 0 .. 115` |
+
+The left cell's hole runs to its own right edge and the right cell's hole
+starts at its own left edge, so the two meet on the cell boundary and
+make **one continuous aperture** with no seam across it. The middle cell
+of a 3-wide span has no inset anywhere inside it, so its hole is the full
+width of its cell and there is **no vertical moulding in the middle** -
+the glass reads as continuous across all three cells. A jamb goes down the
+outside of each end and nowhere else, because that is the only place the
+wall stops.
+
+Two Windows side by side each frame their own cells on the same rule: each
+opening has its own ends, so the seam between two Windows is two jambs
+meeting rather than one shared moulding, and no frame of either lies over
+the other's glass.
+
+The joined holes are checked against the joined span, not just tile by
+tile: a 2-cell span's glass rect is `u[0.1, 1.9]` and a 3-cell span's is
+`u[0.1, 2.9]`, each rounded down inward on both ends, and the sum of the
+cells' hole widths has to come to exactly that. A hole that stopped short
+of the seam and a hole that overshot it are both wrong in a way no single
+tile shows.
 
 ### Why the Furniture role vocabulary cannot carry this
 
@@ -790,6 +847,15 @@ that is 0.1 x 128 = 12.8 up to 13, 0.9 x 128 = 115.2 down to 115, and
 0.3 x 320 = 96 tall with its top at 160 - the `hole: [13, 160, 102,
 96]` above.
 
+The same rule gives the wide row its numbers, with the horizontal span
+read from the part of the opening that falls in that cell rather than
+from the cell's own edges: `SL` runs 13 to 128 because the span carries
+on past the cell's right edge, `SR` runs 0 to 115 because the span
+carried on up to the cell's left edge, and `SM` runs 0 to 128 because
+nothing is inset inside the middle of a span at all. The vertical band is
+the same 160..256 for every tile of the row, which is what makes the
+joined aperture rectangular across the span.
+
 `scripts/tests/windowframe_tiles.py` pins this twice over: once as the
 exact expected value computed from the glass rect, and once as an
 inequality that keeps the hole inside the rect whatever the rounding does,
@@ -797,8 +863,9 @@ so a change to the rounding helper cannot make both halves agree by
 moving together. It also checks the committed sheet is actually punched
 where the tileset says, that the frame is an overlay and not a surface,
 that it declares no variant family, that the block's cell matches the
-role the name states, and that the frame is declared in the `ImageSet`
-the install pairs against.
+role the name states, that the wide row's holes join into the one
+aperture the whole span calls for, and that every frame is declared in
+the `ImageSet` the install pairs against.
 
 ### What a Window draws, in order
 
@@ -819,6 +886,13 @@ opening it frames. It is keyed by the cell's role in the span and by
 nothing else: not the glass style, not the Window's State, not the wall.
 The same tile frames a Room, a Corridor and a Facade alike, and the
 Facade's flat fill still spans every cell with the frame laid over it.
+
+That ordering holds on **every** cell of a wider span, not just the first.
+A 3-wide Window puts its wall's tile down under all three cells, then the
+space behind, then the glass, then the three frame tiles - so the
+moulding reads as the edge of the opening at both ends of the span and
+the middle cell's glass is covered by the same pass that covers the
+end cells'.
 
 ### A BoothWindow wears none
 
