@@ -24,7 +24,8 @@ right are the horizontal role `S L M R`, rows top to bottom are
 single-level, top cell, middle cell, bottom cell, so an artist reads the
 grid off the sheet rather than learning a numbering. The single-level row
 is filled across - the 1x1 Window and the wide single-level opening - and
-the tall rows arrive with the work that hangs off it.
+the single-column column is filled down - the tall single-column opening
+with its head, its sill and its levels in between.
 
 The wide row is where the horizontal roles earn their keep. A span's inset
 belongs to the *ends of the span*, not to every cell: a 2-wide Window's
@@ -36,6 +37,22 @@ moulding across it, which is what makes a wide window read as one opening
 rather than as two adjacent ones. The middle cell of a 3-wide span has no
 inset at all, so its hole is the full width of its cell and there is no
 vertical moulding in the middle.
+
+The tall column says the same thing up the other axis, and it is checked
+the same two ways - tile by tile, and then joined. A Window's glass stands
+0.2 of a level above the *span's* floor line and grows 0.3 of a level for
+every level past the first, so its top sits 0.7 of a level below the
+span's top however tall the span gets. The bottom cell carries the glass
+from its own 0.2 up to its own top edge; the top cell carries it from its
+own bottom edge up to 0.3; every cell between carries the whole cell
+height. So the bottom cell's hole stops above the floor line exactly where
+the glass does - that 0.2 is the sill - and the top cell's hole reaches
+the cell's bottom edge where the glass runs down into it, and the holes
+join into one continuous aperture across the cell boundary. A `BS` hole
+that ran down to the floor would cut the sill out of the wall; a `TS` hole
+that stopped short of the cell's bottom edge would lay a transom of
+moulding across the glass; an `MS` hole that missed any of the cell would
+put a head or a sill in the middle of a span that has neither.
 
 The Furniture role vocabulary cannot carry this shape, and the test keeps
 it from being tried anyway. That convention is `<piece>-<role><level>`,
@@ -101,6 +118,19 @@ GLASS_RECTS = {
     "windowframe-SM": (0.0, 1.0, 0.2, 0.5),
     # The right cell of a wide span: the mirror of the left.
     "windowframe-SR": (0.0, 0.9, 0.2, 0.5),
+    # The top cell of a tall single-column span: the span's glass runs
+    # down past this cell's bottom edge, so nothing is inset at the seam
+    # below, and it stops 0.3 of a level up - the head moulding lies over
+    # the glass above that.
+    "windowframe-TS": (0.1, 0.9, 0.0, 0.3),
+    # A middle level of a tall single-column span: the glass runs straight
+    # through, inset nowhere inside the cell, so the hole is the whole cell
+    # height and no head or sill crosses the middle of the window.
+    "windowframe-MS": (0.1, 0.9, 0.0, 1.0),
+    # The bottom cell of a tall single-column span: the glass stands 0.2
+    # of a level above the span's floor line, and that 0.2 is the sill, so
+    # the hole stops there and carries on up to this cell's own top edge.
+    "windowframe-BS": (0.1, 0.9, 0.2, 1.0),
 }
 
 # The exact hole each frame authors, restated independently of the
@@ -115,6 +145,9 @@ EXPECTED_HOLES = {
     "windowframe-SL": (13, 160, 115, 96),
     "windowframe-SM": (0, 160, 128, 96),
     "windowframe-SR": (0, 160, 115, 96),
+    "windowframe-TS": (13, 224, 102, 96),
+    "windowframe-MS": (13, 0, 102, 320),
+    "windowframe-BS": (13, 0, 102, 256),
 }
 
 failures: list[str] = []
@@ -289,6 +322,72 @@ def main() -> int:
             check(joined == want,
                   f"a {cells}-cell span's holes joined are {joined}px wide; "
                   f"the span's glass rect u[0.1,{cells - 0.1}] rounds down "
+                  f"to {want}px")
+
+    # The tall column frames *one* opening up the vertical axis exactly as
+    # the wide row frames one across the horizontal. Each tile carries the
+    # part of the span's glass that falls inside its own cell, so laid one
+    # above the other the holes are a single aperture with no transom of
+    # moulding lying across the middle of the window. Checked at the edges
+    # of each tile and then as the joined rect of the whole 2- and 3-level
+    # span, because a hole that stopped short of the seam and one that
+    # overshot it are both wrong in a way no single tile shows.
+    tall = {name: tuple(overlays[name]["hole"])
+            for name in ("windowframe-BS", "windowframe-MS", "windowframe-TS")
+            if name in overlays}
+    if len(tall) == 3:
+        bottom, middle, top = (tall["windowframe-BS"], tall["windowframe-MS"],
+                              tall["windowframe-TS"])
+        # The bottom cell's hole stops above the cell's floor line where
+        # the glass does - the 0.2 that is the sill - and reaches the
+        # cell's own top edge, which is where the cell above takes over.
+        check(bottom[1] == 0,
+              "windowframe-BS's hole stops "
+              f"{bottom[1]}px below its cell's top edge, which puts a "
+              "transom of moulding across the join with the level above and "
+              "breaks the aperture in two")
+        check(bottom[1] + bottom[3] == CELL_HEIGHT - math.floor(0.2 * CELL_HEIGHT),
+              "windowframe-BS's hole does not stop 0.2 of a cell above the "
+              f"floor line: it ends at {bottom[1] + bottom[3]}px from the "
+              f"cell top, and the sill is the {CELL_HEIGHT}px cell's bottom "
+              "0.2, so the sill is either cut out of the wall or thicker "
+              "than the glass stands on")
+        # The top cell's hole reaches the cell's bottom edge - the seam -
+        # because the glass runs down into this cell from above the sill.
+        check(top[1] + top[3] == CELL_HEIGHT,
+              "windowframe-TS's hole stops "
+              f"{CELL_HEIGHT - (top[1] + top[3])}px short of its cell's "
+              "bottom edge, which lays a transom across the glass at the "
+              "join with the level below")
+        check(top[1] == CELL_HEIGHT - math.floor(0.3 * CELL_HEIGHT),
+              "windowframe-TS's hole does not reach 0.3 of a cell above its "
+              f"cell's floor line: it starts at {top[1]}px from the cell "
+              "top, and the span's glass tops out 0.3 of a level above the "
+              "top cell's floor wherever the span ends")
+        # The middle cell carries jambs only: no head, no sill, so its
+        # hole is the whole cell height and nothing crosses the join at
+        # either of its edges.
+        check(middle[1] == 0 and middle[1] + middle[3] == CELL_HEIGHT,
+              "windowframe-MS's hole does not fill its cell vertically, so a "
+              "middle level of a tall window carries a head or a sill "
+              "through the middle of the glass")
+        # Same horizontal band on all three, or the joined aperture is not
+        # a rect up the column.
+        check(bottom[0] == middle[0] == top[0]
+                and bottom[2] == middle[2] == top[2],
+              "the tall column's holes are not the same horizontal band, so "
+              "the joined aperture is not rectangular up the span")
+        # The joined holes against the glass rect of the whole span: a
+        # 2-level span's glass is v[0.2, 1.3] above the span's floor line,
+        # a 3-level span's is v[0.2, 2.3], each rounded down at both ends.
+        for levels, parts in ((2, (bottom, top)),
+                             (3, (bottom, middle, top))):
+            joined = sum(part[3] for part in parts)
+            want = (math.floor((levels - 0.7) * CELL_HEIGHT)
+                    - math.floor(0.2 * CELL_HEIGHT))
+            check(joined == want,
+                  f"a {levels}-level span's holes joined are {joined}px tall; "
+                  f"the span's glass rect v[0.2,{levels - 0.7}] rounds down "
                   f"to {want}px")
 
     # Nobody tried to read the Furniture role convention into the block.

@@ -148,7 +148,12 @@
 # single-column cell of the 1x1 window, and the three tiles of the wide
 # single-level opening - `windowframe-SL`, `windowframe-SM` and
 # `windowframe-SR` - which is what makes a two- or three-cell window one
-# opening rather than two or three adjacent ones. The tall rows arrive
+# opening rather than two or three adjacent ones. And it carries the
+# single-column column all the way down: `windowframe-BS`, `windowframe-MS`
+# and `windowframe-TS` frame the bottom, middle and top cell of a tall
+# single-column window, which is what makes a tall window read as tall
+# rather than as a stack of identical cells. The wide columns of those
+# tall rows - a span that is tall *and* wide, and so has corners - arrive
 # with the work that hangs off this; a cell whose frame the installed
 # atlas does not carry draws nothing, exactly as it does for a missing
 # doorframe, so the block can be filled one tile at a time and no World
@@ -172,6 +177,30 @@
 # no vertical moulding - its hole is the full width of its cell, and the
 # glass reads as continuous across it. A jamb only goes down the outside
 # of each end, because that is the only place the wall stops.
+#
+# The tall column says the same thing up the other axis. A Window's glass
+# stands 0.2 of a level above the *span's* floor line and is 0.3 of a
+# level taller for every level past the first, so its top sits 0.7 of a
+# level below the span's own top however tall the span gets. The inset is
+# at the ends of the span, not at the top of each cell: the bottom cell
+# carries the glass from its own 0.2 up to its own top edge, the top
+# cell carries it from its own bottom edge up to 0.3, and every cell in
+# between carries the whole cell height. The bottom cell's hole therefore
+# stops above the floor line exactly where the glass does - that 0.2 is
+# the sill - and the top cell's hole reaches the cell's bottom edge where
+# the glass runs down into it, so the two holes join into one continuous
+# aperture across the cell boundary instead of leaving a transom of
+# moulding lying across the middle of the opening. Read the other way, a
+# `BS` hole that ran down to the floor would cut the sill out of the
+# wall, and a `TS` hole that stopped short of the cell's bottom edge
+# would put a bar across the glass.
+#
+# Each of the three is still constant per role however big the span gets,
+# which is what lets one tile cover any tall window: `BS` is always 256px
+# of hole with 64px of sill under it, `MS` is always the whole 320px
+# cell, `TS` is always a 96px hole against the cell's bottom edge. The
+# number of cells stacked between them is the only thing that changes, and
+# that is the span's business and not the tile's.
 #
 # ## Doorframe overlays
 #
@@ -384,9 +413,10 @@ overlays:
   # single-level, top cell, middle cell, bottom cell. A tile's place in
   # the block is the place its cell holds in the opening it frames, so an
   # artist reads the grid off the sheet. The single-level row is filled
-  # across; the other three rows are the grid's shape, waiting for the
-  # tall work, and a cell asking for a tile the sheet does not carry draws
-  # no frame rather than a hole.
+  # across and the single-column column is filled down; the wide columns
+  # of the three tall rows are the grid's remaining shape, waiting for
+  # the corner work, and a cell asking for a tile the sheet does not carry
+  # draws no frame rather than a hole.
   windowframe-SS:
     # The block's single-column, single-level cell: the 1x1 Window.
     cell: [15, 0]
@@ -432,3 +462,43 @@ overlays:
     # u[0.0,0.9], v[0.2,0.5]: from the cell's left edge, inset at the
     # right.
     hole: [0, 160, 115, 96]
+  windowframe-TS:
+    # The block's single-column, top cell: the top cell of a tall
+    # single-column Window. The span's vertical inset is at the span's
+    # ends, so this cell carries the glass from its own bottom edge up to
+    # 0.3 of a level - the head moulding sits over the glass and nothing
+    # is inset at the seam below.
+    cell: [15, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # u[0.1,0.9], v[0.0,0.3]: inset at each end of the column, and from
+    # the cell's own bottom edge up to where the span's glass stops.
+    hole: [13, 224, 102, 96]
+  windowframe-MS:
+    # The block's single-column, middle cell: a level of a tall
+    # single-column Window that is neither end of the span. Nothing is
+    # inset vertically inside it - the glass runs straight through - so
+    # the hole is the whole height of the cell and there is no head and no
+    # sill across the middle of the window, only jambs down the sides.
+    cell: [15, 2]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # u[0.1,0.9], v[0.0,1.0]: the whole cell height, moulding only down
+    # the two sides.
+    hole: [13, 0, 102, 320]
+  windowframe-BS:
+    # The block's single-column, bottom cell: the bottom cell of a tall
+    # single-column Window. The mirror of `windowframe-TS` on the vertical
+    # axis - the glass stands 0.2 of a level above the span's floor line,
+    # and that 0.2 is the sill, so the hole stops there rather than
+    # running down to the floor, and carries on up to this cell's own top
+    # edge so it joins the cell above into one aperture.
+    cell: [15, 3]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # u[0.1,0.9], v[0.2,1.0]: inset at each end of the column, stopped
+    # 0.2 above the cell's floor line and running to the cell's top edge.
+    hole: [13, 0, 102, 256]

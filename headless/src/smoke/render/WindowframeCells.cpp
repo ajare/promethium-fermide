@@ -1,14 +1,16 @@
-// A 1x1 Window wears a windowframe over its wall (#1075), and a wide
-// Window frames its whole span as one opening (#1076).
+// A 1x1 Window wears a windowframe over its wall (#1075), a wide Window
+// frames its whole span as one opening (#1076), and a tall Window frames
+// its span with a head across the top and a sill along the bottom
+// (#1077).
 //
 // The tracer bullet for the windowframe series pinned everything the wide,
 // tall and corner tickets hang off, in the smallest complete shape the
 // feature can take: the atlas carries the frame, the renderer derives it
 // from the live Window rather than from anything painted, and it lands
 // over the wall's own tile without taking anything away. The wide work
-// added here is the horizontal axis of the role grid: the frame a cell
-// wears now depends on where that cell sits in the opening's width, not
-// only on the opening existing.
+// added the horizontal axis of the role grid; the tall work here adds the
+// vertical one. The frame a cell wears now depends on where that cell sits
+// in the opening's span on both axes, not only on the opening existing.
 //
 // The four layers a Window puts down, in order:
 //
@@ -34,6 +36,21 @@
 //     each end, the middle cells wearing the middle tile whose hole is the
 //     full width of the cell, so the glass reads as continuous across the
 //     span and no moulding stands between the panes;
+//   * a tall opening is framed as one opening too, up the other axis: a
+//     sill under the bottom cell, a head over the top one, and jambs only
+//     down every level in between, so a tall window reads as tall rather
+//     than as a stack of identical cells. The bottom cell's hole stops
+//     above the cell's floor line where the glass does and the top cell's
+//     hole reaches the cell's bottom edge where the glass runs down into
+//     it, so the holes join into one continuous aperture across the cell
+//     boundary;
+//   * a Window on a back Layer, seen through a clear Window in the Layer
+//     in front, wears its own frame. It arrives through the aperture
+//     recursion - the far wall is drawn under the near Window's clip, and
+//     the far Window that is part of that wall frames itself on the same
+//     rule a front-wall Window does - rather than being suppressed by the
+//     clip it arrives under, which is what keeps a nested aperture reading
+//     as a window rather than as a hole punched in the view;
 //   * two Windows side by side each frame their own cells, and no frame of
 //     either one lies over the other's glass;
 //   * a BoothWindow wears none, because it *is* a 1x1 Window and already
@@ -97,11 +114,13 @@ namespace
 		{ 100000.0f, 100000.0f } };
 
 	// The frames the shipped set authors: the whole single-level row of
-	// the role grid. The grid has fifteen cells; the single-level row is
-	// filled across, and the tall rows arrive with the work that hangs off
-	// it.
+	// the role grid, and the whole single-column column of it - the wide
+	// single-level opening and the tall single-column one. The grid has
+	// fifteen cells; the wide columns of the three tall rows are the
+	// corner work that hangs off this.
 	std::vector<std::string> const kWindowframes{ "windowframe-SS",
-		"windowframe-SL", "windowframe-SM", "windowframe-SR" };
+		"windowframe-SL", "windowframe-SM", "windowframe-SR",
+		"windowframe-TS", "windowframe-MS", "windowframe-BS" };
 
 	// The Facade's own colour, distinct from the tint every other pass in
 	// this file is drawn with, so "the frame lies over the Facade's own
@@ -352,6 +371,34 @@ namespace
 			return out;
 		}
 
+		// The frames that arrived *through* an aperture rather than under
+		// the Sector's own clip: a Window on a back Layer, seen through the
+		// clear Window in front, wearing its own moulding (#1077). Kept
+		// apart from `frameCells()` because the two are different facts - one
+		// is the wall this Sector frames, the other is a further wall framed
+		// somewhere down the recursion - and a check that conflated them
+		// could not tell a nested frame from a missing one.
+		std::vector<DrawnQuad> nestedFrameCells() const
+		{
+			std::vector<DrawnQuad> out;
+			for (auto const& q : quads)
+				if (!q.ownClip && q.texture == WorldDrawList::Texture::SectorAtlas
+						&& isWindowframeTile(q.tile))
+					out.push_back(q);
+			return out;
+		}
+
+		// The back Sector's own wall, with no frame of any nested opening
+		// mixed in, so an ordering check against "the wall behind the glass"
+		// is not comparing a frame against itself.
+		std::vector<DrawnQuad> farWallCells() const
+		{
+			std::vector<DrawnQuad> out;
+			for (auto const& q : behindCells())
+				if (!isWindowframeTile(q.tile)) out.push_back(q);
+			return out;
+		}
+
 		// The glass: an ObjectAtlas sprite drawn over the space behind.
 		// It is not a Sector tile, and it is drawn inside the aperture
 		// rather than under the Sector's own clip.
@@ -532,6 +579,39 @@ namespace
 				object)->getWindow();
 		}
 		return nullptr;
+	}
+
+	// The Window authored *on* a Sector - the one whose front Sector is
+	// this one - as distinct from the back registrations a Sector carries
+	// for every Window set into the wall in front of it. A back Layer's
+	// wall holds both, and only the one it was authored into frames itself.
+	std::shared_ptr<const core::Window> frontWindowOf(
+		std::shared_ptr<const core::Sector> const& sector)
+	{
+		if (!sector) return nullptr;
+		for (uint32_t index = 0; index < sector->getNumObjects(); ++index)
+		{
+			auto const object = sector->getObject(index);
+			if (!object || !isWindowObject(*object)) continue;
+			auto const window = std::static_pointer_cast<const core::WindowSectorObject>(
+				object)->getWindow();
+			if (window && window->getFrontSector() == sector) return window;
+		}
+		return nullptr;
+	}
+
+	// How many Window objects a Sector carries, of either kind. A back wall
+	// holds its own and the front wall's back registration, and a fixture
+	// that means to tell them apart has to carry both.
+	uint32_t windowObjectCount(core::Sector const& sector)
+	{
+		uint32_t seen{};
+		for (uint32_t index = 0; index < sector.getNumObjects(); ++index)
+		{
+			auto const object = sector.getObject(index);
+			if (object && isWindowObject(*object)) ++seen;
+		}
+		return seen;
 	}
 
 	// One fixture World and its front Location.
@@ -735,6 +815,27 @@ namespace
 			CORE_ROOM_MAX_HEIGHT, false, wide, 1);
 	}
 
+	// A Room `tall` levels high with a single-column Window of the same
+	// height set into it, so the window spans the whole height of the wall
+	// it is framed in and every level of the span is on screen at once.
+	Scene tallRoomScene(uint32_t tall, uint32_t windowX = 2)
+	{
+		return buildScene("room", 4, tall, windowX, 0,
+			CORE_ROOM_MAX_HEIGHT, false, 1, tall);
+	}
+
+	Scene tallCorridorScene(uint32_t tall, uint32_t windowX = 2)
+	{
+		return buildScene("corridor", 4, tall, windowX, 0,
+			CORE_CORRIDOR_HEIGHT, false, 1, tall);
+	}
+
+	Scene tallFacadeScene(uint32_t tall, uint32_t windowX = 2)
+	{
+		return buildScene("facade", 4, tall, windowX, 0,
+			CORE_ROOM_MAX_HEIGHT, false, 1, tall);
+	}
+
 	// A fixture carrying more than one Window, which `buildScene` cannot
 	// build because it resolves the front wall by asking the World which
 	// Sector fronts a Window and insists the answer is one. Here the front
@@ -763,6 +864,88 @@ namespace
 		return scene;
 	}
 
+	// A Window on a back Layer, seen through a clear Window in the Layer in
+	// front (#1077). Three Layers: the front wall the near Window is set
+	// into, the middle wall that carries its *own* Window, and a third
+	// behind that the back Window opens into, because a Window needs a Layer
+	// behind it and a Window on the back-most Layer cannot be authored at
+	// all.
+	//
+	// The near Window is three cells wide and the far one one cell, set at
+	// the near span's middle column. That is deliberate twice over: the far
+	// Window's jambs fall inside the near aperture rather than behind the
+	// near glass, so "the far frame arrives" is a claim about artwork with
+	// somewhere to be seen rather than about a quad the clip swallowed
+	// whole; and the column the far frame lands on is one the *near* Window
+	// also frames, wearing its own wide-middle tile there. Two different
+	// tiles on one column, one from each opening, is what lets a check name
+	// the far frame as the far Window's own rather than the near opening's
+	// moulding seen from behind.
+	struct NestedScene
+	{
+		std::shared_ptr<core::World> world;
+		std::shared_ptr<const core::Sector> front;
+		std::shared_ptr<const core::Sector> middle;
+		std::shared_ptr<const core::Window> nearWindow;
+		std::shared_ptr<const core::Window> farWindow;
+		// The column both openings frame: the near span's middle, and the
+		// cell the far Window was authored into.
+		uint32_t sharedColumn{ 2 };
+	};
+
+	NestedScene nestedWindowScene()
+	{
+		auto world = std::make_shared<core::World>("Nested window world", 16, 6);
+		while (world->getLayerCount() < 3) world->addLayer();
+		world->addRoom("Front", 0, 0, 0, 4, 1);
+		world->addRoom("Middle", 1, 0, 0, 4, 1);
+		world->addRoom("Far", 2, 0, 0, 4, 1);
+		// Near: Layer 0, cells 1 through 3. Far: Layer 1, cell 2 - authored
+		// on the middle wall, so that wall is its front Sector and it frames
+		// it.
+		world->addSectorWindow(0, 0, 1, 3, 1);
+		world->addSectorWindow(1, 0, 2, 1, 1);
+		world->finishBuild();
+		world->pauseSimulation();
+
+		NestedScene scene;
+		scene.world = world;
+		for (uint32_t index = 0; index < world->getNumSectors(); ++index)
+		{
+			auto const sector = world->getSector(index);
+			if (!sector) continue;
+			if (sector->getLayerIndex() == 0) scene.front = sector;
+			if (sector->getLayerIndex() == 1) scene.middle = sector;
+		}
+		require(scene.front != nullptr && scene.middle != nullptr,
+			"The nested fixture lost a Layer's wall");
+		scene.nearWindow = frontWindowOf(scene.front);
+		scene.farWindow = frontWindowOf(scene.middle);
+		require(scene.nearWindow != nullptr && scene.farWindow != nullptr,
+			"The nested fixture lost a Window");
+		require(scene.nearWindow->getCellsWide() == 3
+				&& scene.nearWindow->getLevelsHigh() == 1,
+			"The near Window is not the 3x1 opening the fixture was built for");
+		require(scene.farWindow->getCellsWide() == 1
+				&& scene.farWindow->getLevelsHigh() == 1,
+			"The far Window is not the 1x1 opening the fixture was built for");
+		// The far Window's own front Sector is the middle wall. If that were
+		// not so, the middle wall would be a back registration like any
+		// other and would frame nothing, and the check downstream would be
+		// reading an empty pass as a suppression.
+		require(scene.farWindow->getFrontSector() == scene.middle,
+			"The back Window is not authored on the middle Layer, so there is "
+			"no frame to look for down the aperture");
+		// And the middle wall does carry the near Window's back registration
+		// too, so the fixture really holds both kinds and the check tells
+		// them apart rather than finding only one kind present.
+		require(windowObjectCount(*scene.middle) == 2,
+			"The middle wall carries " + std::to_string(windowObjectCount(*scene.middle))
+				+ " Window objects; it needs both its own and the near Window's "
+			"back registration for this fixture to prove the two are told apart");
+		return scene;
+	}
+
 	// The glass rect of the one Window a fixture carries, in screen units.
 	ScreenRect glassRect(core::Window const& window)
 	{
@@ -771,6 +954,28 @@ namespace
 		ScreenRect rect;
 		rect.include(toScreen(lo));
 		rect.include(toScreen(hi));
+		return rect;
+	}
+
+	// The screen rect of one cell of a Sector, by its column and level in
+	// that Sector's own floor-anchored grid. Used to say *which* cell a
+	// frame landed on rather than only that a frame landed somewhere.
+	ScreenRect cellRect(core::Sector const& sector, uint32_t column,
+		uint32_t level)
+	{
+		core::Vector2 low{}, high{};
+		sector.getBounds(low, high);
+		auto const a = toScreen(low);
+		auto const b = toScreen(high);
+		auto const left = std::min(a.x, b.x);
+		auto const floorLine = std::max(a.y, b.y);
+		auto const cellWidth = CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom;
+		auto const cellHeight = CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
+		ScreenRect rect;
+		rect.include(pf::render::Vec2{ left + float(column) * cellWidth,
+			floorLine - float(level) * cellHeight });
+		rect.include(pf::render::Vec2{ left + float(column + 1) * cellWidth,
+			floorLine - float(level + 1) * cellHeight });
 		return rect;
 	}
 
@@ -1017,6 +1222,331 @@ namespace
 			+ drawnFacade);
 		require(drawnRoom == "windowframe-SL, windowframe-SR",
 			"A 2-wide opening did not draw the wide pair: " + drawnRoom);
+	}
+
+	// A 2-level single-column Window frames its two levels as one opening:
+	// a sill under the bottom cell and a head over the top one. The bottom
+	// cell wears `windowframe-BS` and the top cell `windowframe-TS`, and
+	// nothing outside the span wears either.
+	void aTwoLevelWindowFramesItsSpanWithAHeadAndASill(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto scene = tallRoomScene(2);
+		require(scene.window->getLevelsHigh() == 2,
+			"The fixture Window is not two levels high");
+		auto const pass = recordPass(scene.front, atlas);
+		auto const frames = gridOf(pass.frameCells(), *scene.front);
+		require(frames.size() == 2, "A 2-level Window drew "
+			+ std::to_string(frames.size()) + " frame cells; a tall opening is "
+			"framed up its whole span, one tile per level");
+		require(tileAt(frames, 2, 0) == "windowframe-BS",
+			"The bottom cell of a 2-level Window wore " + tileAt(frames, 2, 0)
+				+ "; the span's bottom end takes the sill tile");
+		require(tileAt(frames, 2, 1) == "windowframe-TS",
+			"The top cell of a 2-level Window wore " + tileAt(frames, 2, 1)
+				+ "; the span's top end takes the head tile");
+		require(tileAt(frames, 1, 0) == "<nothing>"
+				&& tileAt(frames, 3, 0) == "<nothing>"
+				&& tileAt(frames, 1, 1) == "<nothing>"
+				&& tileAt(frames, 3, 1) == "<nothing>",
+			"A cell outside the span wore a frame: " + tileList(pass.frameCells()));
+	}
+
+	// A 3-level single-column Window wears BS, MS and TS bottom to top. The
+	// middle cell takes the middle tile, which carries jambs only and no
+	// head or sill: a level that is neither end of the span has no end
+	// moulding in it, so the opening reads as one tall window rather than
+	// as a stack of identical cells.
+	void aThreeLevelWindowFramesItsThreeLevelsBottomToTop(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto scene = tallRoomScene(3);
+		require(scene.window->getLevelsHigh() == 3,
+			"The fixture Window is not three levels high");
+		auto const pass = recordPass(scene.front, atlas);
+		auto const frames = gridOf(pass.frameCells(), *scene.front);
+		require(frames.size() == 3, "A 3-level Window drew "
+			+ std::to_string(frames.size()) + " frame cells");
+		require(tileAt(frames, 2, 0) == "windowframe-BS",
+			"The bottom cell of a 3-level Window wore " + tileAt(frames, 2, 0));
+		require(tileAt(frames, 2, 1) == "windowframe-MS",
+			"The middle cell of a 3-level Window wore " + tileAt(frames, 2, 1)
+				+ "; a level that is neither end of the span takes the middle "
+				"tile, whose hole is the whole cell height - jambs only, no head "
+				"and no sill across the middle of the glass");
+		require(tileAt(frames, 2, 2) == "windowframe-TS",
+			"The top cell of a 3-level Window wore " + tileAt(frames, 2, 2));
+		require(tileAt(frames, 1, 0) == "<nothing>"
+				&& tileAt(frames, 3, 0) == "<nothing>"
+				&& tileAt(frames, 1, 1) == "<nothing>"
+				&& tileAt(frames, 3, 1) == "<nothing>"
+				&& tileAt(frames, 1, 2) == "<nothing>"
+				&& tileAt(frames, 3, 2) == "<nothing>",
+			"A cell outside the tall span wore a frame: "
+				+ tileList(pass.frameCells()));
+	}
+
+	// The tall opening is one aperture. The glass runs straight through the
+	// boundary between each pair of levels - the 0.2 stand-off belongs to
+	// the bottom of the span, not to the bottom of every cell - and the
+	// frame quads tile the span from the sill to the head with no gap and
+	// no overlap, so the joined holes are one opening rather than three
+	// with something lying across them.
+	void theTallOpeningIsOneContinuousAperture(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto scene = tallRoomScene(3);
+		auto const pass = recordPass(scene.front, atlas);
+		auto const frames = gridOf(pass.frameCells(), *scene.front);
+		require(frames.count({ 2, 0 }) == 1 && frames.count({ 2, 1 }) == 1
+				&& frames.count({ 2, 2 }) == 1,
+			"Expected three frame cells up the span, one per level, and the "
+			"fixture did not give them: " + tileList(pass.frameCells()));
+
+		core::Vector2 lo{}, hi{};
+		scene.front->getBounds(lo, hi);
+		auto const floorLine = std::max(toScreen(lo).y, toScreen(hi).y);
+		auto const cellHeight = CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
+		auto const glass = glassRect(*scene.window);
+
+		// The glass crosses every cell boundary inside the span, so there is
+		// no wall and no transom of moulding left standing in the middle of
+		// the opening.
+		for (uint32_t seam = 1; seam < 3; ++seam)
+		{
+			auto const y = floorLine - float(seam) * cellHeight;
+			require(glass.top < y - 0.01f && glass.bottom > y + 0.01f,
+				"A 3-level Window's glass does not cross the boundary between "
+				"level " + std::to_string(seam - 1) + " and level "
+					+ std::to_string(seam) + ", so the opening is not "
+					"continuous: glass " + glass.str());
+		}
+		// The bottom cell's hole stops above the cell's floor line exactly
+		// where the glass does, and the frame covers the whole cell down to
+		// the floor, so that 0.2 stand-off is the sill the frame carries
+		// rather than a gap the wall shows through.
+		require(near(floorLine - glass.bottom,
+				CORE_WINDOW_Y_OFFSET * cellHeight),
+			"The glass does not stand 0.2 of a level above the span's floor "
+			"line, so the sill the bottom frame cell carries is not the band "
+			"the glass stops above: " + std::to_string(floorLine - glass.bottom));
+		require(near(frames.at({ 2, 0 }).rect.bottom, floorLine),
+			"The bottom frame cell stops short of the wall's floor line, so the "
+			"sill it carries has no floor to sit on: "
+				+ frames.at({ 2, 0 }).rect.str());
+
+		// And the quads tile the span from floor to head with no gap and no
+		// overlap, so the joined holes are one aperture.
+		std::vector<DrawnQuad> column;
+		for (uint32_t level = 0; level < 3; ++level)
+			column.push_back(frames.at({ 2, level }));
+		float covered{};
+		for (auto const& frame : column)
+			covered += frame.rect.bottom - frame.rect.top;
+		// The column runs downward on the screen, so the span's height is the
+		// bottom cell's bottom edge to the head cell's top edge.
+		require(near(covered, column.front().rect.bottom - column.back().rect.top),
+			"The tall span's frame quads overlap, so the span is doubled up "
+			"somewhere and cannot read as one opening");
+		for (uint32_t level = 0; level + 1 < column.size(); ++level)
+			require(near(column[level].rect.top, column[level + 1].rect.bottom),
+				"Two levels of one tall span do not meet on the cell boundary, "
+				"which puts a bar across the glass at the join: "
+				+ column[level].rect.str() + " and "
+				+ column[level + 1].rect.str());
+	}
+
+	// The tall frame is trimmed at the ceiling too. A Room stands 0.9 of a
+	// cell on its top level while the cell is 1.0, so three whole cells of
+	// frame would end a tenth of a cell above the ceiling they are moulding.
+	// The head cell is cut back to the ceiling; the two levels under it are
+	// untouched, because only the top of the span meets the ceiling.
+	void theTallFrameIsTrimmedAtTheCeiling(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto scene = tallRoomScene(3, 2);
+		core::Vector2 lo{}, hi{};
+		scene.front->getBounds(lo, hi);
+		auto const ceiling = std::min(toScreen(lo).y, toScreen(hi).y);
+		auto const cellHeight = CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
+
+		auto const pass = recordPass(scene.front, atlas);
+		require(!pass.frameCells().empty(),
+			"The tall fixture drew no frame to trim");
+		for (auto const& frame : pass.frameCells())
+			require(frame.rect.top >= ceiling - 0.01f,
+				"A tall frame stood " + std::to_string(ceiling - frame.rect.top)
+					+ " pixels above the ceiling it is moulding at "
+					+ frame.rect.str());
+		auto const frames = gridOf(pass.frameCells(), *scene.front);
+		require(frames.count({ 2, 0 }) == 1 && frames.count({ 2, 1 }) == 1
+				&& frames.count({ 2, 2 }) == 1,
+			"The tall fixture did not frame three levels, so there is no head "
+			"cell to check the trim on: " + tileList(pass.frameCells()));
+		auto const& head = frames.at({ 2, 2 });
+		require(near(head.rect.top, ceiling),
+			"The head cell was not cut back to the ceiling: its top is at "
+				+ std::to_string(head.rect.top) + ", the ceiling is at "
+				+ std::to_string(ceiling));
+		require(head.rect.bottom - head.rect.top < cellHeight - 0.01f,
+			"The head cell is a whole cell tall, so the trim never touched it "
+			"and moulding stands above the ceiling");
+		// The two levels under the head keep their whole cells.
+		require(near(frames.at({ 2, 0 }).rect.bottom - frames.at({ 2, 0 }).rect.top,
+				cellHeight)
+				&& near(frames.at({ 2, 1 }).rect.bottom
+						- frames.at({ 2, 1 }).rect.top, cellHeight),
+			"A level below the head was trimmed as well; only the top of the "
+			"span meets the ceiling");
+		// And the wall tile it lies on is trimmed the same way, so the two
+		// land on the same crop rather than one above the other.
+		for (auto const& wall : pass.wallCells())
+			require(wall.rect.top >= ceiling - 0.01f,
+				"A wall tile stood above its own ceiling; the trim cannot be "
+				"compared against a wall that is not trimmed either");
+	}
+
+	// The tall row does not vary with its wall either. The same 3-level
+	// opening in a Room, a Corridor and a Facade draws the same three tiles,
+	// because the frame carries the moulding and the wall carries its own
+	// look, whatever wall that is.
+	void everyWallFramesATallOpeningTheSameWay(smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		auto const drawnRoom = tileList(recordPass(tallRoomScene(3).front, atlas)
+			.frameCells());
+		auto const drawnCorridor = tileList(
+			recordPass(tallCorridorScene(3).front, atlas).frameCells());
+		auto const drawnFacade = tileList(
+			recordPass(tallFacadeScene(3).front, atlas).frameCells());
+		require(drawnRoom == drawnCorridor && drawnCorridor == drawnFacade,
+			"A 3-level opening drew a different frame per wall: Room "
+			+ drawnRoom + ", Corridor " + drawnCorridor + ", Facade "
+			+ drawnFacade);
+		require(drawnRoom == "windowframe-BS, windowframe-MS, windowframe-TS",
+			"A 3-level opening did not draw the tall triple bottom to top: "
+			+ drawnRoom);
+	}
+
+	// A Window on a back Layer, seen through a clear Window in the Layer in
+	// front, wears its own frame. The frame arrives *through* the aperture
+	// recursion - the far wall is drawn under the near Window's clip, and
+	// the far Window that is part of that wall frames itself on the same
+	// rule a front-wall Window does - rather than being suppressed by the
+	// clip it arrives under. That is what keeps a nested aperture reading as
+	// a window rather than as a hole punched in the view.
+	//
+	// Asserted on the far window's cells specifically: the nested frame is
+	// the far Window's own one cell, wearing the tile the far Window's own
+	// span role calls for, at the far wall's grid position - not merely a
+	// quad that happened to draw somewhere down the recursion.
+	void aWindowOnABackLayerWearsItsOwnFrameThroughTheAperture(
+		smoke::Context const&)
+	{
+		auto atlas = installAtlas(true);
+		installObjectArt();
+		auto const scene = nestedWindowScene();
+		auto const pass = recordPass(scene.front, atlas);
+		auto const column = scene.sharedColumn;
+
+		// The near Window frames its own three cells under its own clip, so
+		// the nested frames below are not the near frames mislabelled.
+		auto const nearFrames = gridOf(pass.frameCells(), *scene.front);
+		require(nearFrames.size() == 3
+				&& tileAt(nearFrames, 1, 0) == "windowframe-SL"
+				&& tileAt(nearFrames, 2, 0) == "windowframe-SM"
+				&& tileAt(nearFrames, 3, 0) == "windowframe-SR",
+			"The near Window did not frame its own span: "
+				+ tileList(pass.frameCells()));
+
+		auto const farFrames = gridOf(pass.nestedFrameCells(), *scene.front);
+		require(farFrames.count({ column, 0 }) == 1
+				&& farFrames.size() == 1,
+			"The Window on the back Layer wore "
+				+ std::to_string(farFrames.size()) + " frame cells through the "
+				"aperture; a 1x1 far Window frames exactly its own one cell, and "
+				"nothing else should be framing down this aperture: "
+				+ tileList(pass.nestedFrameCells()));
+		require(tileAt(farFrames, column, 0) == "windowframe-SS",
+			"The far Window's cell wore " + tileAt(farFrames, column, 0)
+				+ "; a 1x1 Window frames itself as the block's single-column, "
+			"single-level cell whatever Layer it stands on");
+		// The column the far frame lands on is one the near opening also
+		// frames, and the two tiles disagree because the two openings are
+		// different sizes. That is what makes this the far Window's frame and
+		// not the near opening's moulding seen from behind: the tile came
+		// from the far Window's span, not the near one's.
+		require(tileAt(nearFrames, column, 0) == "windowframe-SM"
+				&& tileAt(farFrames, column, 0) != tileAt(nearFrames, column, 0),
+			"The near and far frames agree on the shared column, so the nested "
+			"tile is not distinguishable from the near opening's own: near "
+				+ tileAt(nearFrames, column, 0) + ", far "
+				+ tileAt(farFrames, column, 0));
+		// The far opening is one cell: nothing framed from down the aperture
+		// at the columns either side of it, which belong to the near opening
+		// alone.
+		require(tileAt(farFrames, column - 1, 0) == "<nothing>"
+				&& tileAt(farFrames, column + 1, 0) == "<nothing>",
+			"Something framed the near opening's end cells from down the "
+			"aperture: " + tileList(pass.nestedFrameCells()));
+
+		// The nested frame sits on the far wall's own cell: it spans that
+		// cell's full width, stops at that cell's floor line, and is cut
+		// back at the top to the near aperture it arrived through.
+		auto const& far = farFrames.at({ column, 0 });
+		auto const farCell = cellRect(*scene.middle, column, 0);
+		auto const nearGlass = glassRect(*scene.nearWindow);
+		require(near(far.rect.left, farCell.left)
+				&& near(far.rect.right, farCell.right),
+			"The nested frame does not span the far Window's own cell "
+			"horizontally: frame " + far.rect.str() + ", far cell "
+				+ farCell.str());
+		require(near(far.rect.bottom, farCell.bottom),
+			"The nested frame does not reach the far wall's floor line: frame "
+			+ far.rect.str() + ", far cell " + farCell.str());
+		require(near(far.rect.top, nearGlass.top) && far.rect.top > farCell.top,
+			"The nested frame was not cut back to the near aperture: frame top "
+				+ std::to_string(far.rect.top) + ", near glass top "
+				+ std::to_string(nearGlass.top) + ", far cell top "
+				+ std::to_string(farCell.top));
+		// And it is not the near opening's own frame quad at that column:
+		// the near frame keeps its whole cell, the nested one does not.
+		require(!far.rect.sameAs(nearFrames.at({ column, 0 }).rect),
+			"The nested frame has the near frame's rect, so the two cannot be "
+			"told apart: nested " + far.rect.str() + ", near "
+				+ nearFrames.at({ column, 0 }).rect.str());
+
+		// And it arrived through the aperture: it is drawn under the near
+		// Window's clip rather than under the Sector's own, which is the one
+		// way a back Layer's artwork reaches the screen at all.
+		require(!far.ownClip,
+			"The nested frame was drawn under the Sector's own clip, so it did "
+			"not come down the aperture recursion");
+		require(far.clip.left >= nearGlass.left - 0.01f
+				&& far.clip.right <= nearGlass.right + 0.01f
+				&& far.clip.top >= nearGlass.top - 0.01f
+				&& far.clip.bottom <= nearGlass.bottom + 0.01f,
+			"The nested frame was not clipped to the near Window's aperture: "
+			"frame clip " + far.clip.str() + ", near glass " + nearGlass.str());
+		// The far frame really does lie inside the near aperture rather than
+		// wholly behind the near glass, so there is a piece of its moulding
+		// to see and the check could not have passed on a quad the clip
+		// swallowed whole.
+		require(far.rect.right > nearGlass.left + 0.01f
+				&& far.rect.left < nearGlass.right - 0.01f,
+			"The far frame lies wholly outside the near aperture, so this "
+			"fixture proves nothing about a frame arriving through one");
+
+		// It lies over the far wall's own tile, the same way a front frame
+		// lies over its wall - the recursion did not put the moulding under
+		// the artwork it moulds.
+		auto const farWall = pass.farWallCells();
+		require(!farWall.empty(),
+			"The far wall drew no tile, so 'the frame lies over it' would be "
+			"an assertion about nothing");
+		require(*pass.firstIndexOf(pass.nestedFrameCells())
+				> *pass.lastIndexOf(farWall),
+			"The nested frame was drawn before the far wall tile it lies over");
 	}
 
 	// ------------------------------------------------------------------
@@ -1531,18 +2061,19 @@ namespace
 		require(!hasSectorTileSurface("windowframe-SS"),
 			"A windowframe answered the Sector-surface query; it is a tile of "
 			"the atlas but not a surface a Sector is authored with");
-		// The wide row is carried on the same terms as the single-column
-		// tile: an overlay the render path can ask for and the surface query
-		// never answers.
-		for (auto const* wide : { "windowframe-SL", "windowframe-SM",
-				"windowframe-SR" })
+		// The wide row and the tall column are carried on the same terms as
+		// the single-column tile: overlays the render path can ask for and
+		// the surface query never answers.
+		for (auto const* frame : { "windowframe-SL", "windowframe-SM",
+				"windowframe-SR", "windowframe-TS", "windowframe-MS",
+				"windowframe-BS" })
 		{
-			require(hasSectorTileOverlay(wide),
-				std::string{ wide }
+			require(hasSectorTileOverlay(frame),
+				std::string{ frame }
 					+ " is named by the render path but the installed atlas does "
 					"not carry it");
-			require(!hasSectorTileSurface(wide),
-				std::string{ wide } + " answered the Sector-surface query; a "
+			require(!hasSectorTileSurface(frame),
+				std::string{ frame } + " answered the Sector-surface query; a "
 				"windowframe is never a Sector surface");
 		}
 	}
@@ -1596,6 +2127,18 @@ void render_smoke::registerWindowframeCells(std::vector<smoke::Check>& checks)
 		isolated<theWideFrameIsDrawnLastOnEveryCell> });
 	checks.push_back({ "windowframeCells/everyWallFramesAWideOpeningTheSameWay",
 		isolated<everyWallFramesAWideOpeningTheSameWay> });
+	checks.push_back({ "windowframeCells/aTwoLevelWindowFramesItsSpanWithAHeadAndASill",
+		isolated<aTwoLevelWindowFramesItsSpanWithAHeadAndASill> });
+	checks.push_back({ "windowframeCells/aThreeLevelWindowFramesItsThreeLevelsBottomToTop",
+		isolated<aThreeLevelWindowFramesItsThreeLevelsBottomToTop> });
+	checks.push_back({ "windowframeCells/theTallOpeningIsOneContinuousAperture",
+		isolated<theTallOpeningIsOneContinuousAperture> });
+	checks.push_back({ "windowframeCells/theTallFrameIsTrimmedAtTheCeiling",
+		isolated<theTallFrameIsTrimmedAtTheCeiling> });
+	checks.push_back({ "windowframeCells/everyWallFramesATallOpeningTheSameWay",
+		isolated<everyWallFramesATallOpeningTheSameWay> });
+	checks.push_back({ "windowframeCells/aWindowOnABackLayerWearsItsOwnFrameThroughTheAperture",
+		isolated<aWindowOnABackLayerWearsItsOwnFrameThroughTheAperture> });
 	checks.push_back({ "windowframeCells/theFrameNameIsTheOpeningAndNothingElse",
 		isolated<theFrameNameIsTheOpeningAndNothingElse> });
 }

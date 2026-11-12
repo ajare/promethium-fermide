@@ -173,6 +173,12 @@ set(names
     windowframeCells/twoWideWindowsFrameTheirOwnCells
     windowframeCells/theWideFrameIsDrawnLastOnEveryCell
     windowframeCells/everyWallFramesAWideOpeningTheSameWay
+    windowframeCells/aTwoLevelWindowFramesItsSpanWithAHeadAndASill
+    windowframeCells/aThreeLevelWindowFramesItsThreeLevelsBottomToTop
+    windowframeCells/theTallOpeningIsOneContinuousAperture
+    windowframeCells/theTallFrameIsTrimmedAtTheCeiling
+    windowframeCells/everyWallFramesATallOpeningTheSameWay
+    windowframeCells/aWindowOnABackLayerWearsItsOwnFrameThroughTheAperture
     windowframeCells/theFrameNameIsTheOpeningAndNothingElse
     sectorTilePreview/oneTileFramesTheRectItIsGiven
     sectorTilePreview/anyRectFramesOneTileAndNotACellGrid

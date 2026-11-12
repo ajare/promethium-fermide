@@ -99,30 +99,46 @@ namespace
 		"doorframe-1r-L0", "doorframe-2r-L0", "doorframe-2r-R0",
 		"doorframe-1t-L0", "doorframe-2t-L0", "doorframe-2t-R0" };
 
-	// The windowframes the set authors (#1075, wide row #1076). Keyed by
-	// where the cell sits in the opening it frames - the vertical role
-	// first, so `BL` reads as "bottom-left" the way it is said - and by
-	// nothing else: not the glass style, not the Window's State, not the
-	// wall.
+	// The windowframes the set authors (#1075, wide row #1076, tall column
+	// #1077). Keyed by where the cell sits in the opening it frames - the
+	// vertical role first, so `BL` reads as "bottom-left" the way it is
+	// said - and by nothing else: not the glass style, not the Window's
+	// State, not the wall.
 	//
-	// The single-level row is filled across. `windowframe-SS` is the
-	// single-column, single-level cell, which is the 1x1 Window that is
-	// eight of the ten windows every bundled document authors, and
-	// `SL`/`SM`/`SR` are the wide single-level opening: a jamb at each
-	// end and no vertical moulding in the middle. The tall rows arrive
-	// with the tall and corner work, and a cell asking for a tile the sheet
-	// does not carry draws no frame rather than a hole, so the block can
-	// be filled one tile at a time.
+	// The single-level row is filled across and the single-column column is
+	// filled down. `windowframe-SS` is the single-column, single-level
+	// cell, which is the 1x1 Window that is eight of the ten windows every
+	// bundled document authors; `SL`/`SM`/`SR` are the wide single-level
+	// opening, a jamb at each end and no vertical moulding in the middle;
+	// and `BS`/`MS`/`TS` are the tall single-column opening, a sill under
+	// the bottom cell, jambs only down the middle and a head over the top.
+	// The wide columns of the three tall rows - an opening that is tall
+	// *and* wide, and so has corners - arrive with the corner work, and a
+	// cell asking for a tile the sheet does not carry draws no frame rather
+	// than a hole, so the block can be filled one tile at a time.
 	std::vector<std::string> const kWindowframes{ "windowframe-SS",
-		"windowframe-SL", "windowframe-SM", "windowframe-SR" };
+		"windowframe-SL", "windowframe-SM", "windowframe-SR",
+		"windowframe-TS", "windowframe-MS", "windowframe-BS" };
 
-	// The column each single-level frame holds in the block, which is the
-	// horizontal role read off the sheet rather than decoded from a name.
-	std::map<std::string, uint32_t> const kWindowframeColumns{
-		{ "windowframe-SS", 15 },
-		{ "windowframe-SL", 16 },
-		{ "windowframe-SM", 17 },
-		{ "windowframe-SR", 18 } };
+	// The sheet cell each frame holds, which is the pair of roles read off
+	// the block rather than decoded from a name: columns 15..18 are the
+	// horizontal role `S L M R`, rows 0..3 are the vertical role
+	// `S T M B` from the top of the sheet down, so the bottom-of-window
+	// tiles carry the highest y the way they sit lowest in the window.
+	struct BlockCell
+	{
+		uint32_t column{};
+		uint32_t row{};
+	};
+
+	std::map<std::string, BlockCell> const kWindowframeCells{
+		{ "windowframe-SS", { 15, 0 } },
+		{ "windowframe-SL", { 16, 0 } },
+		{ "windowframe-SM", { 17, 0 } },
+		{ "windowframe-SR", { 18, 0 } },
+		{ "windowframe-TS", { 15, 1 } },
+		{ "windowframe-MS", { 15, 2 } },
+		{ "windowframe-BS", { 15, 3 } } };
 
 	// ------------------------------------------------------------------
 	// The atlas as the application holds it.
@@ -520,7 +536,8 @@ namespace
 			"SectorAtlas authors " + std::to_string(authored.overlays.size())
 			+ " overlays; the doorframe block is six, one per opening width, "
 			"height class and role, and the windowframe block carries the "
-			"single-level row of the role grid on top of them");
+			"single-level row and the single-column column of the role grid "
+			"on top of them");
 		for (auto const& name : kDoorframes)
 		{
 			require(authored.overlays.count(name),
@@ -534,10 +551,11 @@ namespace
 		}
 		// The windowframes are overlays on the same terms, and the block's
 		// place on the sheet is the role grid: the four columns from 15 are
-		// the horizontal role `S L M R` and row 0 is the single level, so
-		// each frame sits where its role says and an artist reads the grid
-		// off the sheet. The bottom-of-window tiles will carry the highest y
-		// when the tall work arrives.
+		// the horizontal role `S L M R` and the four rows from 0 are the
+		// vertical role `S T M B`, so each frame sits where its pair of
+		// roles says and an artist reads the grid off the sheet. The
+		// bottom-of-window tiles carry the highest y, the way they sit
+		// lowest in the window.
 		for (auto const& name : kWindowframes)
 		{
 			require(authored.overlays.count(name),
@@ -548,13 +566,14 @@ namespace
 				"The windowframe '" + name
 				+ "' is not in the tile map the install pairs against the "
 				"manifest");
-			auto const want = kWindowframeColumns.at(name);
-			require(authored.overlays.at(name).x == static_cast<int>(want) * 128
-					&& authored.overlays.at(name).y == 0,
+			auto const want = kWindowframeCells.at(name);
+			require(authored.overlays.at(name).x == static_cast<int>(want.column) * 128
+					&& authored.overlays.at(name).y == static_cast<int>(want.row) * 320,
 				name + " is not in the windowframe block's cell for its role: "
-				"the block's columns are 15..18 for S/L/M/R and its "
-				"single-level row is 0, so it belongs at column "
-				+ std::to_string(want) + ", row 0");
+				"the block's columns are 15..18 for S/L/M/R and its rows are "
+				"0..3 for S/T/M/B from the top of the sheet down, so it "
+				"belongs at column " + std::to_string(want.column) + ", row "
+					+ std::to_string(want.row));
 		}
 		// No wall-keyed frame survives the change. A frame that carried its
 		// wall's appearance was what the frame *replacing* the wall's tile

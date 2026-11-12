@@ -725,6 +725,24 @@ overlays:
     offset: [0.0, 0.0]
     drawn_size: [1.0, 1.0]
     hole: [0, 160, 115, 96]
+  windowframe-TS:
+    cell: [15, 1]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [13, 224, 102, 96]
+  windowframe-MS:
+    cell: [15, 2]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [13, 0, 102, 320]
+  windowframe-BS:
+    cell: [15, 3]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [13, 0, 102, 256]
 ```
 
 ### The block is the role grid
@@ -753,12 +771,13 @@ span that is middle in both directions is all glass with no moulding on
 it, and the empty name the derivation gives there is the same answer a
 missing tile gives: nothing drawn, no frame, no magenta.
 
-Only the single-level row is filled so far: `windowframe-SS` for the 1x1
-Window, which is eight of the ten windows every bundled document authors,
-and `windowframe-SL`/`SM`/`SR` for the wide single-level opening. The
-tall rows arrive with the work that hangs off this, and the block is built
-one tile at a time because a cell asking for a tile the sheet does not
-carry draws no frame rather than a hole.
+Only the single-level row and the single-column column are filled: the
+whole wide single-level opening and the whole tall single-column one. The
+wide columns of the three tall rows - an opening that is tall *and* wide,
+and so has corners where a head meets a jamb - arrive with the corner work
+that hangs off this, and the block is built one tile at a time because a
+cell asking for a tile the sheet does not carry draws no frame rather than
+a hole.
 
 This is why the sheet is **2432 x 1280** - nineteen columns by four rows
 - rather than the 1920 x 1280 it was: twelve surface columns, three for
@@ -801,6 +820,54 @@ tile: a 2-cell span's glass rect is `u[0.1, 1.9]` and a 3-cell span's is
 cells' hole widths has to come to exactly that. A hole that stopped short
 of the seam and a hole that overshot it are both wrong in a way no single
 tile shows.
+
+### The vertical roles: a head, a sill, and jambs between
+
+The tall column is what the vertical axis is for, and it says the same
+thing the wide row says, turned through a right angle. A Window's glass
+stands **0.2 of a level above the span's floor line** and grows **0.3 of a
+level for every level past the first**, so its top sits 0.7 of a level
+below the span's own top however tall the span gets. The stand-off belongs
+to the **ends of the span**, not to the top of every cell:
+
+| Role | The glass in its cell | Hole on the 320px cell |
+| ---- | ------------------- | -------------------- |
+| `S` | inset 0.2 at the bottom, stopping 0.5 above the floor line | `y 160 .. 256` |
+| `B` | standing 0.2 above the floor line and carrying on past the cell's top edge | `y 0 .. 256` |
+| `M` | running straight through, inset nowhere inside the cell | `y 0 .. 320` |
+| `T` | from the cell's own bottom edge up to where the span's glass stops | `y 224 .. 320` |
+
+The bottom cell's hole **stops above the cell's floor line where the glass
+does** - that 0.2 is the sill - and carries on up to the cell's own top
+edge. The top cell's hole **reaches the cell's bottom edge** where the
+glass runs down into it, and stops 0.3 of a level up. The two therefore
+join into **one continuous aperture across the cell boundary**, with a
+sill under the whole opening and a head over it and nothing lying across
+the seam. A `BS` hole that ran down to the floor would cut the sill out of
+the wall; a `TS` hole that stopped short of the cell's bottom edge would
+lay a transom of moulding across the glass.
+
+A level that is neither end of the span wears `windowframe-MS`, whose hole
+is the **whole height of the cell**: jambs only, and **no head and no
+sill** through the middle of the window. That is the whole of what makes a
+tall window read as tall rather than as a stack of identical cells - each
+cell of the stack says something different about where it is.
+
+Each of the three is constant per role however big the span gets, which is
+what lets one tile cover any tall window: `BS` is always 256px of hole
+over 64px of sill, `MS` is always the whole 320px cell, `TS` is always a
+96px hole against the cell's bottom edge. The number of cells stacked
+between the ends is the only thing that changes, and that is the span's
+business and not the tile's.
+
+The joined holes are checked against the joined span the same way the wide
+row's are: a 2-level span's glass rect is `v[0.2, 1.3]` above the span's
+floor line and a 3-level span's is `v[0.2, 2.3]`, each rounded down at
+both ends, and the sum of the cells' hole heights has to come to exactly
+that - 352px and 672px. `BS` plus `TS` and `BS` plus `MS` plus `TS` are
+checked as columns and not only tile by tile, because a hole that stopped
+short of the seam and one that overshot it are both wrong in a way no
+single tile shows.
 
 ### Why the Furniture role vocabulary cannot carry this
 
@@ -856,6 +923,16 @@ nothing is inset inside the middle of a span at all. The vertical band is
 the same 160..256 for every tile of the row, which is what makes the
 joined aperture rectangular across the span.
 
+And it gives the tall column its numbers the same way, with the vertical
+span read from the part of the opening that falls in that cell rather than
+from the cell's own edges: `BS` runs 0 to 256 because the glass stands
+0.2 above the floor line and carries on past the cell's top edge, `TS`
+runs 224 to 320 because the glass reaches down to the cell's own bottom
+edge and stops 0.3 of a level up, and `MS` runs 0 to 320 because nothing
+is inset inside the middle of a span at all. The horizontal band is the
+same 13..115 for every tile of the column, which is what makes the joined
+aperture rectangular up the span.
+
 `scripts/tests/windowframe_tiles.py` pins this twice over: once as the
 exact expected value computed from the glass rect, and once as an
 inequality that keeps the hole inside the rect whatever the rounding does,
@@ -864,8 +941,9 @@ moving together. It also checks the committed sheet is actually punched
 where the tileset says, that the frame is an overlay and not a surface,
 that it declares no variant family, that the block's cell matches the
 role the name states, that the wide row's holes join into the one
-aperture the whole span calls for, and that every frame is declared in
-the `ImageSet` the install pairs against.
+aperture the whole span calls for, that the tall column's holes do the
+same up the other axis, and that every frame is declared in the `ImageSet`
+the install pairs against.
 
 ### What a Window draws, in order
 
@@ -910,6 +988,37 @@ successful exclusion.
 A Room standing 0.9 of a cell tall has a ceiling that cuts across the
 cell's top. The frame is trimmed to the front wall's bounds rather than
 drawn full-cell, so no moulding stands above the ceiling it is moulding.
+
+On a tall span the trim lands on the head cell alone. A three-level Room
+stands 2.9 cells - three levels at 1.0 with the top one at 0.9 - while
+three whole cells of frame would end at 3.0, so the head is cut back to
+the ceiling and the two levels under it keep their whole cells. The wall
+tile underneath is cut the same way by the same loop, so the frame lands
+on that tile at the same crop rather than above it.
+
+### A window seen through a window wears its own frame
+
+A Window on a back Layer, seen through a clear Window in the Layer in
+front, wears its own frame. The frame arrives *through* the aperture
+recursion rather than being suppressed by it: the far wall is drawn under
+the near Window's clip, the far Window that is part of that wall is
+rendered solid because it is authored on that wall, and the frame pass it
+goes through is the same one a front-wall Window goes through. That is what
+keeps a nested aperture reading as a window rather than as a hole punched
+in the view - a far opening with no moulding around it is indistinguishable
+from a gap in the artwork.
+
+The two are told apart by where the frame came from, and the check says so
+on the far window's cells rather than merely that something drew. The
+fixture puts a 3x1 near Window over a 1x1 far Window at the near span's
+middle column, so both openings frame the same grid column and their tiles
+disagree: the near opening wears `windowframe-SM` there because its span
+is three wide, and the far opening wears `windowframe-SS` because its span
+is one. The nested frame is one cell, at the far Window's own cell, with
+the tile the far Window's own span role calls for, drawn under the near
+aperture's clip and over the far wall's own tile. Nothing frames the near
+opening's end cells from down the aperture, because the far opening does
+not reach them.
 
 ### Persistence is untouched
 
