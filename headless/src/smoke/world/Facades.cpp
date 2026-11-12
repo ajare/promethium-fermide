@@ -21,13 +21,17 @@
 // exactly as it lands on a Room, its landing Vertex is a VertexType::Location,
 // and the whole menagerie round-trips through a canonical save/load; and from
 // #1060, a tall Door is admitted by a Facade front wall and still refused by
-// a Corridor, with the refusal naming both permitted walls.
+// a Corridor, with the refusal naming both permitted walls; and from #1065 the
+// rule reaches the wall behind as well, so a tall Door is refused whenever
+// either side of its Layer pair is a Corridor - at every admission site, on
+// every wall pairing, with one shared refusal.
 
 #include <array>
 #include <cstdint>
 #include <format>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -695,6 +699,190 @@ namespace
 				&& editDiagnostic.find("Facade") != std::string::npos,
 			("The Corridor height-edit refusal does not name both permitted walls: "
 				+ editDiagnostic).c_str());
+	}
+
+	// A tall Door needs a wall that can carry it on both sides of its Layer
+	// pair (#1065). #1060 wrote the reason the rule exists - a Room and a
+	// Facade both stand 0.9 high, which is the tall opening's own height,
+	// while a Corridor stands 0.7 and a 0.9 leaf would open through its
+	// ceiling - but asked only the front wall. The reason is a fact about the
+	// Corridor, so it holds whichever side of the pair the Corridor is on:
+	// a tall Door with a Room in front and a Corridor directly behind was
+	// admitted, and its leaf drew above the Corridor's ceiling line.
+	//
+	// Every wall pairing is built, not just described, because the gap this
+	// closes was invisible exactly because no fixture put a mismatched Layer
+	// behind a tall Door. All three admission sites are probed on each
+	// pairing and required to agree: the authoring query
+	// (canAddCorridorDoor), the authoring add (addSectorDoor) and the height
+	// edit (setSectorDoorHeight). They share one refusal sentence rather than
+	// restating it, so the wording is checked at each site.
+	//
+	// The regular Door is the control in every pairing: the same two walls
+	// take it through the query site, so a tall refusal below is the height
+	// and not the pairing being unbuildable.
+	void tallDoorsNeedACarryingWallOnBothSidesOfThePair()
+	{
+		enum class Wall { Room, Facade, Corridor };
+
+		auto const wallName = [](Wall wall) -> char const*
+		{
+			switch (wall)
+			{
+			case Wall::Room: return "Room";
+			case Wall::Facade: return "Facade";
+			case Wall::Corridor: return "Corridor";
+			}
+			return "Corridor";
+		};
+
+		auto const addWall = [](core::World& world, Wall wall, uint32_t layer) -> uint32_t
+		{
+			switch (wall)
+			{
+			case Wall::Room: return world.addRoom("Wall", layer, 0, 0, 4, 1);
+			case Wall::Facade: return world.addFacade(layer, 0, 0, 4, 1);
+			case Wall::Corridor: return world.addCorridor(layer, 0, 0, 4, 1);
+			}
+			throw std::runtime_error("Unknown wall kind");
+		};
+
+		// The Door standing in a cell of Layer 0, so a verdict can be checked
+		// against the Door actually authored rather than the answer that
+		// authorized it.
+		auto const doorAt = [](core::World const& world, uint32_t x)
+			-> std::shared_ptr<const core::Door>
+		{
+			auto const& cell = std::as_const(world).getLayer(0)->getCellDefinition(x, 0);
+			if (!cell.hasObject()) return nullptr;
+			auto const object = world.getSector(cell.sectorIndex)->getObject(cell.sectorObjectIndex);
+			auto const doorObject = std::dynamic_pointer_cast<const core::DoorSectorObject>(object);
+			return doorObject ? doorObject->getDoor() : nullptr;
+		};
+
+		// The one sentence every site must give. Pinned here rather than
+		// substring-matched per site, so a site that restates the rule in its
+		// own words - the way the three sites used to - shows up as a
+		// mismatch instead of passing three near-miss tests.
+		auto const expectSharedRefusal = [](std::string const& refusal, char const* site)
+		{
+			require(refusal.find("A tall Door needs a Room or Facade on both sides of its Layer pair")
+				!= std::string::npos,
+				(std::string("The ") + site + " refusal does not give the shared both-sides "
+					"sentence: " + refusal).c_str());
+			require(refusal.find("only available in a Room") == std::string::npos,
+				(std::string("The ") + site + " refusal still reads as the front-only rule: "
+					+ refusal).c_str());
+		};
+
+		core::World::CreateDoorOptions tall;
+		tall.width = 1;
+		tall.height = core::Door::Height::Tall;
+		core::World::CreateDoorOptions regular;
+		regular.width = 1;
+
+		for (auto const front : { Wall::Room, Wall::Facade, Wall::Corridor })
+		for (auto const back : { Wall::Room, Wall::Facade, Wall::Corridor })
+		{
+			auto const pairing = std::string(wallName(front)) + " in front of a " + wallName(back);
+			bool const expected = front != Wall::Corridor && back != Wall::Corridor;
+			auto const verdict = [](bool admitted)
+			{
+				return admitted ? std::string("admitted") : std::string("refused");
+			};
+			auto const answer = [](bool admitted)
+			{
+				return admitted ? std::string("admit") : std::string("refuse");
+			};
+
+			core::World world("Tall wall pairings", 8, 1);
+			world.addLayer();
+			auto const frontIndex = addWall(world, front, 0);
+			auto const backIndex = addWall(world, back, 1);
+			world.finishBuild();
+			world.pauseSimulation();
+
+			// Control: the pairing takes a regular Door, so a tall refusal is
+			// the height and not the walls being unable to hold a Door at all.
+			std::string regularDiagnostic;
+			require(world.canAddCorridorDoor(0, 0, 3, regular, &regularDiagnostic),
+				("A regular Door was refused between a " + pairing + ": "
+					+ regularDiagnostic).c_str());
+
+			// Site 1: the authoring query.
+			std::string queryDiagnostic;
+			bool const query = world.canAddCorridorDoor(0, 0, 1, tall, &queryDiagnostic);
+			require(query == expected,
+				("The authoring query " + verdict(query) + " a tall Door between a "
+					+ pairing + " (expected " + verdict(expected) + "): "
+					+ queryDiagnostic).c_str());
+
+			// Site 2: the authoring add, which answers by throwing.
+			std::shared_ptr<const core::Door> door;
+			std::string addRefusal;
+			try
+			{
+				auto const placed = world.addSectorDoor(0, 0, 1, tall);
+				door = std::static_pointer_cast<const core::DoorSectorObject>(
+					placed.door.sector->getObject(placed.door.index))->getDoor();
+			}
+			catch (std::exception const& error) { addRefusal = error.what(); }
+			bool const added = addRefusal.empty();
+			require(added == expected,
+				("addSectorDoor " + std::string(added ? "admitted" : "refused")
+					+ " a tall Door between a " + pairing + " (expected " + verdict(expected)
+					+ "): " + addRefusal).c_str());
+
+			// Site 3: the height edit, on a regular Door authored in the same
+			// pairing so the height is the only thing the edit changes.
+			require(world.addSectorDoor(0, 0, 2, regular).door.sector != nullptr,
+				("No regular Door to edit between a " + pairing).c_str());
+			std::string editDiagnostic;
+			bool const edited = world.setSectorDoorHeight(0, 0, 2, 1,
+				core::Door::Height::Tall, &editDiagnostic);
+			require(edited == expected,
+				("The height edit " + std::string(edited ? "admitted" : "refused")
+					+ " a tall Door between a " + pairing + " (expected " + verdict(expected)
+					+ "): " + editDiagnostic).c_str());
+
+			// One predicate at three sites: none of them may break ranks.
+			require(query == added && added == edited,
+				("The tall Door admission sites disagree between a " + pairing + ": query="
+					+ answer(query) + ", add=" + answer(added) + ", edit="
+					+ answer(edited)).c_str());
+
+			if (expected)
+			{
+				require(queryDiagnostic.empty(),
+					("An admitted tall Door query still carried a diagnostic between a "
+						+ pairing + ": " + queryDiagnostic).c_str());
+				require(door && door->getHeight() == core::Door::Height::Tall,
+					("The tall Door authored between a " + pairing
+						+ " did not carry the tall height").c_str());
+				require(door->getFrontSector() && door->getFrontSector()->getIndex() == frontIndex
+						&& door->getBackSector()
+						&& door->getBackSector()->getIndex() == backIndex,
+					("The tall Door authored between a " + pairing
+						+ " does not stand in the two walls it was authored against")
+						.c_str());
+				require(edited && doorAt(world, 2)
+						&& doorAt(world, 2)->getHeight() == core::Door::Height::Tall,
+					("The height edit between a " + pairing
+						+ " answered yes but left the Door at its old height").c_str());
+			}
+			else
+			{
+				expectSharedRefusal(queryDiagnostic, "authoring query");
+				expectSharedRefusal(addRefusal, "authoring add");
+				expectSharedRefusal(editDiagnostic, "height edit");
+				// The refused tall Door left nothing behind in the pairing.
+				require(!doorAt(world, 1),
+					("A refused tall Door was still authored between a " + pairing).c_str());
+				require(doorAt(world, 2)
+						&& doorAt(world, 2)->getHeight() == core::Door::Height::Regular,
+					("A refused height edit left the Door changed between a " + pairing).c_str());
+			}
+		}
 	}
 
 	// Wall edits refuse the Facade itself - its perimeter is not editable -
@@ -1766,6 +1954,7 @@ void runFacadeSmokeChecks()
 	bulkheadDoorsAreRefusedOnAFacade();
 	doorAcceptsAFacadeOnEitherSide();
 	tallDoorsAreAdmittedInAFacadeAndRefusedInACorridor();
+	tallDoorsNeedACarryingWallOnBothSidesOfThePair();
 	wallCommandsRefuseTheFacadeButNotTowardIt();
 	theFacadeRecordRoundTrips();
 	aHandAuthoredFacadeRecordLoads();

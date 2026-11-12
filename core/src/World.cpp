@@ -2489,14 +2489,19 @@ namespace core
 			return false;
 		}
 		auto const front = getSectorAtPosition(layerIndex, (float)x + 0.5f, (float)y + 0.5f);
-		auto const wall = dynamic_pointer_cast<const Location>(front);
-		// A tall opening needs a wall that stands tall enough to carry it. A
-		// Room and a Facade both do; a Corridor does not, and the refusal says
-		// so in the words the author reading it needs (#1060).
+		// A tall opening needs a wall that can carry it, on both sides of the
+		// pair it stands in: a 0.9 leaf will not fit inside a 0.7 Corridor, and
+		// that is a fact about the Corridor whichever side of the pair it is on
+		// (#1060, widened to the back side by #1065). The shared refusal names
+		// both sides so an author whose front wall is compliant is not left
+		// guessing which wall was refused.
+		auto const back = layerIndex + 1 < getLayerCount()
+			? getSectorAtPosition(layerIndex + 1, (float)x + 0.5f, (float)y + 0.5f)
+			: std::shared_ptr<const Sector>{};
 		if (height == Door::Height::Tall
-			&& (!wall || (!wall->isRoom() && wall->getType() != SectorType::Facade)))
+			&& (!Door::wallCarriesTallHeight(front) || !Door::wallCarriesTallHeight(back)))
 		{
-			if (diagnostic) *diagnostic = "A tall Door is only available in a Room or Facade";
+			if (diagnostic) *diagnostic = Door::TallDoorWallRefusal;
 			return false;
 		}
 		auto found = find_if(mConstructionRecords.rbegin(), mConstructionRecords.rend(),

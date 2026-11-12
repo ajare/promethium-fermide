@@ -76,6 +76,22 @@ namespace core
 		static float effectiveHeight(Height height, std::optional<float> scale = {});
 		std::optional<float> getHeightScale() const { return mHeightScale; }
 		bool setHeightScale(std::optional<float> scale);
+		// Whether one wall of a Door's Layer pair can carry a tall opening. A Room
+		// and a Facade both stand 0.9 high, which is the tall Door's own height,
+		// so either carries it; a Corridor stands 0.7, so a 0.9 leaf would open
+		// through its ceiling. That is a fact about the Corridor, and it holds
+		// whichever side of the pair the Corridor is on, so every tall Door
+		// admission site asks both walls (#1060, widened to the back wall by
+		// #1065). A null or non-Location Sector carries nothing.
+		static bool wallCarriesTallHeight(std::shared_ptr<const Sector> const& wall);
+		// The refusal every tall Door admission site gives, shared so the three
+		// sites cannot restate it differently. It names both sides because an
+		// author looking at a compliant front wall would otherwise be left
+		// guessing which wall the refusal means (#1065).
+		static constexpr char const* TallDoorWallRefusal
+		{
+			"A tall Door needs a Room or Facade on both sides of its Layer pair"
+		};
 		// Top clearance above the approach Floor; unrelated to arrival/lane tolerances.
 		static constexpr float ClearanceTolerance = PoseFitTolerance;
 		static constexpr float StandingClearanceTolerance = ClearanceTolerance;

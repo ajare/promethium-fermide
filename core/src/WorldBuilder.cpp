@@ -1238,9 +1238,15 @@ namespace core
 				auto fore = dynamic_pointer_cast<const Location>(sectors[0]);
 				auto back = dynamic_pointer_cast<const Location>(sectors[1]);
 				if (!fore) return reject("A Door must be placed in a Room, Corridor or Facade on the Layer where it is authored");
+				// A tall opening needs a wall that can carry it on both sides of
+				// the pair: a 0.9 leaf will not fit inside a 0.7 Corridor, and
+				// that is a fact about the Corridor whichever side of the pair it
+				// is on. The shared refusal names both sides so a compliant front
+				// wall leaves the author guessing nothing (#1060, widened by #1065).
 				if (options.height == Door::Height::Tall
-					&& !fore->isRoom() && fore->getType() != SectorType::Facade)
-					return reject("A tall Door is only available in a Room or Facade");
+					&& (!Door::wallCarriesTallHeight(sectors[0])
+						|| !Door::wallCarriesTallHeight(sectors[1])))
+					return reject(Door::TallDoorWallRefusal);
 				if (liftLanding)
 				{
 					if (sectors[1]->getType() != SectorType::Lift)

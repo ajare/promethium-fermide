@@ -4,6 +4,7 @@
 
 #include "core/Door.h"
 #include "core/BulkheadDoor.h"
+#include "core/Location.h"
 #include "core/Sector.h"
 #include "core/Agent.h"
 
@@ -51,6 +52,12 @@ namespace core
 	float Door::effectiveHeight(Height height, std::optional<float> scale)
 	{
 		return height == Height::Tall ? CORE_DOOR_TALL_HEIGHT : CORE_DOOR_HEIGHT * scale.value_or(1.0f);
+	}
+
+	bool Door::wallCarriesTallHeight(std::shared_ptr<const Sector> const& wall)
+	{
+		auto const location = std::dynamic_pointer_cast<const Location>(wall);
+		return location && (location->isRoom() || location->getType() == SectorType::Facade);
 	}
 
 	bool Door::setHeightScale(std::optional<float> scale)
