@@ -99,6 +99,19 @@ namespace
 		"doorframe-1r-L0", "doorframe-2r-L0", "doorframe-2r-R0",
 		"doorframe-1t-L0", "doorframe-2t-L0", "doorframe-2t-R0" };
 
+	// The windowframes the set authors so far (#1075). Keyed by where the
+	// cell sits in the opening it frames - the vertical role first, so
+	// `BL` reads as "bottom-left" the way it is said - and by nothing
+	// else: not the glass style, not the Window's State, not the wall.
+	//
+	// One of the fifteen is filled so far. `windowframe-SS` is the
+	// single-column, single-level cell, which is the 1x1 Window that is
+	// eight of the ten windows every bundled document authors. The rest
+	// of the grid arrives with the wide, tall and corner work, and a cell
+	// asking for a tile the sheet does not carry draws no frame rather
+	// than a hole, so the block can be filled one tile at a time.
+	std::vector<std::string> const kWindowframes{ "windowframe-SS" };
+
 	// ------------------------------------------------------------------
 	// The atlas as the application holds it.
 	// ------------------------------------------------------------------
@@ -456,11 +469,13 @@ namespace
 		// The twelve bases form one row across the top of the sheet. That is
 		// what leaves every column below a base free to hold that base's
 		// family, and why the sheet grew down rather than sideways. The
-		// doorframe block stands to the right of the twelve surface columns,
-		// so the sheet is fifteen columns wide, and five rows deep because
-		// each framed wall takes a row per height class (#1054, #1059).
-		require(authored.width == 1920 && authored.height == 1280,
-			"SectorAtlas is not the 1920x1280 sheet its set is sized for");
+		// doorframe block stands to the right of the twelve surface columns
+		// and the windowframe block to the right of that, so the sheet is
+		// nineteen columns wide, and four rows deep because each base
+		// carries three variant rows and neither frame needs a row per
+		// height class or wall (#1054, #1059, #1075).
+		require(authored.width == 2432 && authored.height == 1280,
+			"SectorAtlas is not the 2432x1280 sheet its set is sized for");
 		for (auto const& name : allSurfaceBases())
 			require(authored.surfaces.at(name).y == 0,
 				"'" + name + "' is not in the base strip along the top of the sheet");
@@ -488,10 +503,12 @@ namespace
 		// The doorframes are in the set, and in the overlays map rather than
 		// the surfaces map: a frame is a tile of this atlas and not a surface
 		// a Sector is authored with (#1054).
-		require(authored.overlays.size() == kDoorframes.size(),
+		require(authored.overlays.size()
+				== kDoorframes.size() + kWindowframes.size(),
 			"SectorAtlas authors " + std::to_string(authored.overlays.size())
 			+ " overlays; the doorframe block is six, one per opening width, "
-			"height class and role");
+			"height class and role, and the windowframe block carries "
+			"windowframe-SS on top of them");
 		for (auto const& name : kDoorframes)
 		{
 			require(authored.overlays.count(name),
@@ -503,6 +520,27 @@ namespace
 				+ "' is not in the tile map the install pairs against the "
 				"manifest");
 		}
+		// The windowframes are overlays on the same terms, and the block's
+		// place on the sheet is the role grid: column 15 is the single
+		// column, row 0 is the single level, so `windowframe-SS` lands at
+		// the block's top-left corner and the bottom-of-window tiles will
+		// carry the highest y when they arrive.
+		for (auto const& name : kWindowframes)
+		{
+			require(authored.overlays.count(name),
+				"SectorAtlas authors no windowframe '" + name + "'");
+			require(authored.surfaces.count(name) == 0,
+				"The windowframe '" + name + "' is authored as a Sector surface");
+			require(authored.tiles.count(name),
+				"The windowframe '" + name
+				+ "' is not in the tile map the install pairs against the "
+				"manifest");
+		}
+		require(authored.overlays.at("windowframe-SS").x == 15 * 128
+				&& authored.overlays.at("windowframe-SS").y == 0,
+			"windowframe-SS is not in the windowframe block's single-column, "
+			"single-level cell: the block's leftmost column is 15 and its "
+			"single-level row is 0");
 		// No wall-keyed frame survives the change. A frame that carried its
 		// wall's appearance was what the frame *replacing* the wall's tile
 		// needed; lying over the tile instead, it has nothing left to say
@@ -515,6 +553,15 @@ namespace
 					"SectorAtlas authors the wall-keyed doorframe '" + name
 						+ "'; the frame is keyed by its opening and not by its "
 						"wall");
+		// The same refusal for the windowframe, so the wall cannot come
+		// back under the new name either.
+		for (auto const* wall : { "room", "corridor", "facade" })
+			for (auto const& [name, artwork] : authored.overlays)
+				require(name.find(std::string("windowframe-") + wall + "-")
+						== std::string::npos,
+					"SectorAtlas authors the wall-keyed windowframe '" + name
+						+ "'; a frame laid over the wall's own tile does not "
+						"vary with the wall");
 		// The manifest's generated entries agree with the authored tileset,
 		// so the runtime pixel contract cannot drift from what was authored.
 		auto const manifest = bundledManifest(context);

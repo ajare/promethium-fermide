@@ -581,6 +581,7 @@ pf_add_smoke_module(pf-smoke-persistence
         persistence/DoorDocuments.cpp
         persistence/RoomHeightScaleDocuments.cpp
         persistence/SectorSurfaceVariants.cpp
+        persistence/WindowframePersistence.cpp
         persistence/BrokenDoors.cpp
         persistence/BrokenExtensibles.cpp
         persistence/BrokenEscalators.cpp
@@ -610,6 +611,7 @@ pf_add_smoke_module(pf-smoke-render
         render/SectorSurfaceBottomClip.cpp
         render/SectorSurfaceVariants.cpp
         render/DoorframeCells.cpp
+        render/WindowframeCells.cpp
         render/SectorTilePreview.cpp
         render/SerializationRendering.cpp
         render/AgentPoses.cpp

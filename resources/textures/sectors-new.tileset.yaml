@@ -95,11 +95,71 @@
 # variant rows descending beneath each of the ten that declare a family.
 # The Background and the Facade stand at the end of the strip with no
 # variant rows of their own. The doorframe block (#1054,
-# #1073) stands to the right of that strip, so the sheet is 1920 x 1280:
-# fifteen columns of the same 128 x 320 grid, the last three of them
-# overlays. Four rows deep - the base strip and its three variant rows -
-# because the frames no longer need a row per wall: six of them, two rows
-# in the three overlay columns, and the two cells below them stay empty.
+# #1073) and the windowframe block (#1075) stand to the right of that
+# strip, so the sheet is 2432 x 1280: nineteen columns of the same 128 x
+# 320 grid, the last seven of them overlays. Four rows deep - the base
+# strip and its three variant rows - because neither frame needs a row per
+# wall: six doorframes, two rows in the three doorframe columns, and the
+# two cells below them stay empty, and the windowframes take the four
+# fresh columns as the role grid itself, described below.
+#
+# ## Windowframe overlays
+#
+# A windowframe is the moulding laid **over** the wall's own tile around
+# the opening a Window stands in, with a transparent hole for the glass
+# and the space behind to show through. It is derived from the live
+# Window and never painted, and it is drawn last - over the wall's tile,
+# over the space behind and over the glass - so the moulding is what
+# reads as the edge of the opening (#1075).
+#
+# The frame is keyed by one thing only: where its cell sits in the
+# opening's span. That is two axes, each with a small fixed set of
+# answers, and the grid closes at fifteen tiles:
+#
+#     windowframe-<vertical role><horizontal role>
+#
+# | | `S` single column | `L` leftmost | `M` middle column | `R` rightmost |
+# | --- | --- | --- | --- | --- |
+# | **`S` single level** | hole band | left jamb + band | left edge band | right jamb + band |
+# | **`T` top of a taller span** | head + jambs | head + left jamb | head only | head + right jamb |
+# | **`M` middle level** | jambs only | left jamb | *no tile asked for* | right jamb |
+# | **`B` bottom of a taller span** | sill + jambs | sill + left jamb | sill only | sill + right jamb |
+#
+# The block on the sheet *is* that grid. Columns left to right are the
+# horizontal role `S L M R`; rows top to bottom are single-level, top
+# cell, middle cell, bottom cell, so the bottom-of-window tiles carry the
+# highest y and sit lowest on the sheet the way they sit lowest in the
+# window. The all-middle cell of the block is left empty because no tile
+# is asked for there: the middle of a span that is middle in both
+# directions is all glass with no moulding at all.
+#
+# The Furniture role vocabulary cannot carry this, and that is deliberate.
+# That convention is `<piece>-<role><level>`, where the trailing digit is
+# the height level *within the footprint*. A windowframe's vertical role
+# is end-versus-middle, not a level index: the bottom cell of a one-level
+# window needs a hole band and the bottom cell of a three-level window
+# needs a hole running to the cell top, and both are level 0. And
+# `L`/`M`/`R` has no "inset on both sides" case - a one-column window's
+# cell is inset on both of its edges, which is different art from a
+# two-column window's left cell. Forcing the shape would make one
+# convention mean two different things in two different files.
+#
+# The set carries one tile of that grid so far, `windowframe-SS`, the
+# single-column single-level cell: the 1x1 window, which is eight of the
+# ten windows every bundled document authors. The rest of the grid
+# arrives with the wide, tall and corner work that hangs off it; a cell
+# whose frame the installed atlas does not carry draws nothing, exactly
+# as it does for a missing doorframe, so the block can be filled one
+# tile at a time and no World ever draws a hole where a frame has not
+# been drawn yet.
+#
+# The hole is rounded down from the glass rect the frame frames - the
+# same rule the doorframes use, for the same reason. A Window's glass is
+# inset 0.1 at each end of its span, stands 0.2 above the span's floor
+# line and is 0.3 of a level tall, all of it constant per role however
+# big the span gets. On a 128 x 320 cell that rounds down to x 13, width
+# 102, y 160, height 96 - inset inward on every edge, so the moulding
+# never stands inside the pane.
 #
 # ## Doorframe overlays
 #
@@ -173,7 +233,7 @@
 # draws on screen.
 version: 2
 image: sectors-new.png
-size: [1920, 1280]
+size: [2432, 1280]
 tile_size: [128, 320]
 sprites:
   # One row across the top: the two Locations, the three vertical transits,
@@ -305,3 +365,22 @@ overlays:
     drawn_size: [1.0, 1.0]
     # The right cell of a 1.8 x 0.9 aperture: u[0.0,0.9].
     hole: [0, 32, 115, 288]
+
+  # The windowframe block, in the four fresh columns to the right of the
+  # doorframes, laid out as the role grid itself: columns left to right
+  # are the horizontal role `S L M R`, rows top to bottom are
+  # single-level, top cell, middle cell, bottom cell. A tile's place in
+  # the block is the place its cell holds in the opening it frames, so an
+  # artist reads the grid off the sheet. Only the `S` column is filled so
+  # far; the other three columns are the grid's shape, waiting for the
+  # wide, tall and corner work, and a cell asking for a tile the sheet
+  # does not carry draws no frame rather than a hole.
+  windowframe-SS:
+    # The block's single-column, single-level cell: the 1x1 Window.
+    cell: [15, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    # The glass rect a 1x1 Window frames - u[0.1,0.9], v[0.2,0.5] above
+    # the cell's floor line - rounded down inward on every edge.
+    hole: [13, 160, 102, 96]

@@ -203,6 +203,32 @@ std::string doorframeTileName(std::uint32_t cellsWide,
 	core::Door::Height height, bool rightCell);
 
 //
+// The windowframe tile name for one cell of one opening (#1075).
+//
+// `windowframe-<vertical role><horizontal role>`, vertical first so that
+// `BL` reads as "bottom-left" the way it is said. Each role says where
+// the cell sits in the opening's span: `S` single, then `L`/`M`/`R`
+// across and `B`/`M`/`T` up, with the all-middle cell asking for no tile
+// at all because a span that is middle in both directions is all glass
+// with no moulding on it.
+//
+// The Furniture role vocabulary cannot carry this. Its
+// `<piece>-<role><level>` shape means the height level within the
+// footprint, and this axis is end-versus-middle rather than a level - the
+// bottom cell of a one-level window and the bottom cell of a three-level
+// window are both level 0 and want different art - while `L`/`M`/`R` has
+// no spelling for the one-column cell that is inset on both of its
+// edges.
+//
+// As with the doorframe, whether the installed atlas actually carries the
+// name is a separate question that `hasSectorTileOverlay()` answers, and
+// a name with no tile behind it draws no frame rather than the
+// missing-art colour.
+//
+std::string windowframeTileName(std::uint32_t cellsWide,
+	std::uint32_t levelsHigh, std::uint32_t column, std::uint32_t level);
+
+//
 // One piece of a multi-Background aperture composite: the Background the glass
 // shows through one stretch of the aperture, and the world-space (cell-unit)
 // rectangle that Background is clipped to while being drawn.

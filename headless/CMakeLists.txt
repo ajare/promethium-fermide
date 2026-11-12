@@ -266,6 +266,16 @@ if(BUILD_TESTING)
     set_tests_properties(doorframe-tile-contract PROPERTIES
         LABELS "harness;tools;validation-fast" TIMEOUT 60)
 
+    # The windowframe tiles the shipped Sector atlas authors: each frame's
+    # transparent hole rounded down inside the glass rect it frames, the
+    # committed sheet punched where the tileset says, the block laid out
+    # as the role grid rather than a numbering, and the frames kept in the
+    # overlay map rather than among the surfaces (#1075).
+    add_test(NAME windowframe-tile-contract COMMAND ${Python3_EXECUTABLE}
+        "${PF_REPO_ROOT}/scripts/tests/windowframe_tiles.py")
+    set_tests_properties(windowframe-tile-contract PROPERTIES
+        LABELS "harness;tools;validation-fast" TIMEOUT 60)
+
     # The generator's `--check` against every shape of the sector tileset's
     # `overlays` key, so it cannot declare a file good that the C++ loader
     # then refuses - the disagreement #1066 was. The loader's half of the

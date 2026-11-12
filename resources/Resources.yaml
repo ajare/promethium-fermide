@@ -89,6 +89,7 @@ Resources:
               - { name: "stairwell-V1", x: "640", y: "320", width: "128", height: "320" }
               - { name: "stairwell-V2", x: "640", y: "640", width: "128", height: "320" }
               - { name: "stairwell-V3", x: "640", y: "960", width: "128", height: "320" }
+              - { name: "windowframe-SS", x: "1920", y: "0", width: "128", height: "320" }
               # END GENERATED
     # The Agent atlas, sized for the 128x320 World cell (#1018). Its
     # render semantics are authored in

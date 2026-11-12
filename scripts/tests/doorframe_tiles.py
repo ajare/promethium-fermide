@@ -103,8 +103,16 @@ def main() -> int:
               "doorframes")
         return 1
 
-    check(set(overlays) == set(APERTURES),
-          f"the authored overlays are {sorted(overlays)}, expected the six "
+    # Filtered by prefix rather than read whole. The `overlays` map is one
+    # map shared by every frame family in this format, and the windowframe
+    # block arrives in it too (#1075); a check that demanded the map hold
+    # nothing but doorframes would make every later family a failure of
+    # this one. What is pinned is that the *doorframe* family is exactly
+    # the six opening-keyed tiles and carries no strays.
+    frames = {name: artwork for name, artwork in overlays.items()
+              if name.startswith("doorframe-")}
+    check(set(frames) == set(APERTURES),
+          f"the authored doorframes are {sorted(frames)}, expected the six "
           f"opening-keyed frames {sorted(APERTURES)}")
     for name in FORBIDDEN:
         check(name not in overlays,

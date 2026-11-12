@@ -106,6 +106,12 @@ void renderSectorDepthContent(shared_ptr<const core::Sector> sector, WorldDrawLi
 void renderDoorframe(std::shared_ptr<const core::Door> const& door,
 	WorldDrawList* drawList);
 
+// Laid over the cells one Window stands in, after its glass. Defined with
+// the windowframe vocabulary further down this file and declared here
+// because the threshold pass is where the frame goes down (#1075).
+void renderWindowframe(std::shared_ptr<const core::Window> const& window,
+	WorldDrawList* drawList);
+
 void renderTransitThroughApertures(shared_ptr<const core::Sector> const& transit, uint32_t behindLayer,
 	std::vector<TransitAperture> const& apertures, WorldDrawList* drawList);
 
@@ -1283,6 +1289,18 @@ void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRe
 		drawObjectSprite(sprite, drawList, {from.x, from.y}, {to.x, to.y});
 	}
 
+	// The frame, over the glass and over the wall alike. Last, so its
+	// moulding is what reads as the edge of the opening whatever the
+	// glass underneath it is doing (#1075). The BoothWindow is refused
+	// inside the frame pass rather than here, so that no caller reaching
+	// the frame by another route can put a second moulding on a hatch
+	// that already owns one.
+	if (isDrawnSolid(style))
+	{
+		renderWindowframe(window, drawList);
+		drawList->AddDrawCmd();
+	}
+
 	if (selected)
 	{
 		core::Vector2 bounds0, bounds1;
@@ -2256,6 +2274,132 @@ void renderDoorframe(std::shared_ptr<const core::Door> const& door,
 			// "no tile asked for" and draws nothing - deliberately not
 			// the missing-art case, which is a name asked and not carried
 			// and answers in magenta over a wall that needed no art.
+			return hasSectorTileOverlay(name) ? name : std::string{};
+		});
+}
+
+// The windowframe tile one cell of one opening wears (#1075).
+//
+// `windowframe-<vertical role><horizontal role>`, vertical first so that
+// `BL` reads as "bottom-left" the way it is said. The two roles say
+// where the cell sits in the opening's span and say nothing else: not the
+// glass style, not the Window's State, not the wall it is set into. Each
+// of those would be a new axis multiplying fifteen tiles by something,
+// and none of them is in the artwork.
+//
+// The Furniture role vocabulary - `<piece>-<role><level>` - cannot carry
+// this, and that is deliberate rather than an oversight. Its trailing
+// digit is the height level *within the footprint*, and a windowframe's
+// vertical role is end-versus-middle, not a level index: the bottom cell
+// of a one-level window needs a hole band and the bottom cell of a
+// three-level window needs a hole running to the cell top, and both are
+// level 0. And `L`/`M`/`R` has no "inset on both sides" case, which is
+// exactly what a one-column window's cell is - different art from a
+// two-column window's left cell, and not a thing the piece-role shape can
+// name. Forcing the shape would make one convention mean two different
+// things in two different files.
+//
+// The all-middle cell - middle in both directions - is all glass with no
+// moulding at all, so it asks for no tile rather than wearing a
+// transparent one. The empty string is the same answer a missing tile
+// gives, and for the same reason: there is nothing there to draw.
+std::string windowframeTileName(std::uint32_t cellsWide,
+	std::uint32_t levelsHigh, std::uint32_t column, std::uint32_t level)
+{
+	auto const horizontal = cellsWide == 1 ? 'S'
+		: column == 0 ? 'L'
+		: column + 1 == cellsWide ? 'R' : 'M';
+	auto const vertical = levelsHigh == 1 ? 'S'
+		: level + 1 == levelsHigh ? 'T'
+		: level == 0 ? 'B' : 'M';
+	if (vertical == 'M' && horizontal == 'M') return {};
+	return std::string{ "windowframe-" } + vertical + horizontal;
+}
+
+// The windowframe over the cells one Window stands in (#1075).
+//
+// The frame is the last thing a Window draws: over the wall's own tile,
+// which the Sector surface pass laid across these cells as it did across
+// every other cell of that wall, and over the glass. Its hole is
+// transparent, so what shows through it is the glass and, past the glass,
+// the space behind; its moulding is opaque, so it covers the seam where
+// the two meet and the edge of the pane wherever the two overlap.
+//
+// Drawn through the Sector surface's own per-cell loop over the Window's
+// cell span, so the frame takes the same floor-anchored grid, the same
+// crop and the same culling as the tile beneath it. Only the picture a
+// cell wears changes, never the geometry - the rule #1037 pinned for a
+// Sector surface, arriving at a frame through the same door #1059 opened
+// for the Facade's and #1073 opened for the doorframe.
+//
+// A frame the installed atlas does not carry is no frame at all: the cell
+// resolves to no tile, draws nothing, and the wall's own tile - already
+// down - is all there is to see. That is what lets the role grid be
+// filled one tile at a time: a World asking for a `windowframe-BL` that
+// has not been drawn yet keeps drawing the wall it drew before rather
+// than punching a hole in it.
+void renderWindowframe(std::shared_ptr<const core::Window> const& window,
+	WorldDrawList* drawList)
+{
+	// A BoothWindow wears no windowframe. It *is* a 1x1 Window - a
+	// subclass, constructed as one cell by one level - so a derivation
+	// from the opening that did not gate on it would land a second
+	// moulding over every service hatch. The frame it already owns is not
+	// interchangeable with this one either: the shutter's clip is derived
+	// from that frame's inner rect, and the whole closed-versus-open read
+	// depends on the shutter and the frame staying in lockstep. Migrating
+	// the hatch into the windowframe system is its own decision with the
+	// shutter's clip inside it; until that decision is made this condition
+	// is what keeps the two frames from meeting, and it is named so that
+	// whoever is tempted to unify them later finds the reason here rather
+	// than having to rediscover it from a doubled moulding.
+	if (window->isBoothWindow()) return;
+
+	auto const cellsWide = window->getCellsWide();
+	auto const levelsHigh = window->getLevelsHigh();
+	if (cellsWide == 0 || levelsHigh == 0) return;
+
+	// The cell span the Window stands in: its glass rect widened back out
+	// by the inset it stands in from the cell's x edges and stood down
+	// from the glass's own offset onto the span's floor line. The same
+	// span the glass is drawn across, with the inset taken back and the
+	// offset given back, because the frame moulds the whole cell rather
+	// than the pane.
+	core::Vector2 glass0, glass1;
+	window->getFullShape(glass0, glass1);
+	auto const glassX = min(glass0.x, glass1.x);
+	auto const glassY = min(glass0.y, glass1.y);
+	WorldRect const cells{
+		glassX - CORE_WINDOW_X_INSET,
+		glassY - CORE_WINDOW_Y_OFFSET,
+		glassX - CORE_WINDOW_X_INSET + static_cast<float>(cellsWide),
+		glassY - CORE_WINDOW_Y_OFFSET + static_cast<float>(levelsHigh) };
+	// Trimmed to the wall it frames. A Window's cell is a whole cell and a
+	// wall is not: a Room is authored 0.9 of a cell tall, so an untrimmed
+	// frame would stand a tenth of a cell of moulding above the ceiling it
+	// is moulding. The wall's own tile is cropped to its height by the
+	// same loop, so trimming here lands the frame on that tile at the same
+	// crop rather than above it.
+	auto const wall = window->getFrontSector();
+	if (!wall) return;
+	core::Vector2 wallLo{}, wallHi{};
+	wall->getBounds(wallLo, wallHi);
+	auto const area = cells.clippedTo(WorldRect{
+		min(wallLo.x, wallHi.x), min(wallLo.y, wallHi.y),
+		max(wallLo.x, wallHi.x), max(wallLo.y, wallHi.y) });
+	if (area.empty()) return;
+	auto const span = area.projected();
+
+	drawSectorTileSurfacePerCell(drawList, { span.x0, span.y0 },
+		{ span.x1, span.y1 }, gUISettings.worldZoom,
+		[cellsWide, levelsHigh](std::uint32_t column, std::uint32_t level) -> std::string
+		{
+			auto const name = windowframeTileName(cellsWide, levelsHigh, column,
+				level);
+			// Asked of the atlas rather than trusted, exactly as the
+			// doorframe asks. A name with no tile behind it - and the
+			// all-middle cell's empty name - answers the empty string, which
+			// the loop reads as "no tile asked for" and draws nothing.
 			return hasSectorTileOverlay(name) ? name : std::string{};
 		});
 }

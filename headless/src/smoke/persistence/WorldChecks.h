@@ -8,6 +8,12 @@ namespace persistence
 	void dumbwaiters(smoke::Context const&);
 	void accessPanels(smoke::Context const&);
 	void boothWindows(smoke::Context const&);
+	// The windowframe adds nothing to the document (#1075): the frame is
+	// derived at draw time, so a window-carrying World saves the bytes it
+	// saved before the feature existed.
+	void aWindowDocumentCarriesNoWindowframe(smoke::Context const&);
+	void aWindowWorldRoundTripsIdentically(smoke::Context const&);
+	void theWindowSurvivesWithItsOwnGeometry(smoke::Context const&);
 	void airlocks(smoke::Context const&);
 	void securityScanners(smoke::Context const&);
 	void restorationPreservesStatePathsAndLifetimes(smoke::Context const&);

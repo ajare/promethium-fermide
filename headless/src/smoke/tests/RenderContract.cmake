@@ -150,6 +150,24 @@ set(names
     doorframeCells/theFrameFollowsTheWallThroughEveryStyle
     doorframeCells/theFrameArrivesWithItsDoorAndGoesWithIt
     doorframeCells/theFrameNameIsTheOpeningAndNothingElse
+    windowframeCells/theWindowCellStillDrawsItsWallTile
+    windowframeCells/theFrameIsLaidOverTheWindowCell
+    windowframeCells/theFrameIsDrawnLast
+    windowframeCells/theFrameKeepsTheFloorAnchoredGrid
+    windowframeCells/theFrameStaysPinnedToTheWallAsTheCanvasScrolls
+    windowframeCells/theFrameIsTrimmedAtTheCeiling
+    windowframeCells/aVariantUnderAWindowStillDraws
+    windowframeCells/aRemovedWindowLeavesNoFrame
+    windowframeCells/theBackSectorOfTheLayerPairWearsNoFrame
+    windowframeCells/everyWallWearsTheSameFrame
+    windowframeCells/theFacadeSurfaceStillCoversEveryCell
+    windowframeCells/theFrameIsDrawnRaw
+    windowframeCells/aBoothWindowWearsNoWindowframe
+    windowframeCells/aFrameTheAtlasDoesNotCarryDrawsNoFrameAndNoMagenta
+    windowframeCells/aWallWithNoWindowDrawsNoFrame
+    windowframeCells/theFrameFollowsTheWallThroughEveryStyle
+    windowframeCells/adjacentWindowsFrameTheirOwnCells
+    windowframeCells/theFrameNameIsTheOpeningAndNothingElse
     sectorTilePreview/oneTileFramesTheRectItIsGiven
     sectorTilePreview/anyRectFramesOneTileAndNotACellGrid
     sectorTilePreview/itIsOneTileWhereTheWorldRepeatIsFour

@@ -23,7 +23,8 @@ across its area. Their authored colour is editor data, not paint; it no longer
 reaches the picture. Neither declares a variant family, so a Sector of either
 kind always resolves to that one tile.
 A Facade may ask the atlas for one further thing, and it is an overlay rather
-than a surface: the doorframe over the cells a Door stands in (#1059). The
+than a surface: the doorframe over the cells a Door stands in (#1059), and
+the windowframe over the cells a Window stands in (#1075). The
 frame lies over the Facade's own tile rather than standing in for a surface the
 Facade never had, which is the same shape it takes on a Room or a
 Corridor (#1073).
@@ -494,8 +495,9 @@ The name is `doorframe-<width><height>-<role>`: the width is 1 or 2
 cells, the height is `r`egular or `t`all, and the role is `L0` for the
 opening's left cell and `R0` for its right. A 1-wide opening has only an
 `L0`. Six tiles in all, in the three columns to the right of the surface
-strip, which is why the sheet is 1664 x 1280 rather than the 1664 x 1600
-the framed walls used to need.
+strip - columns 12, 13 and 14. The windowframe block stands in the four
+columns after that, which is why the sheet is 2432 x 1280 rather than the
+1664 x 1600 the framed walls used to need.
 
 The wall is not in the name, because the wall is not in the artwork. A
 frame that *replaced* the wall's tile had to carry the wall's look, and
@@ -686,6 +688,165 @@ frame with the wall under it so the mismatched hole shows wall rather than
 the viewport; the Facade's fill still spanning every cell with the frame
 over it; the frame wearing its wall's colour; and the frame following the
 wall through the solid pass while staying out of the wireframe pass.
+
+## The windowframe overlays
+
+A cell a Window stands in draws its wall's own tile, exactly as every
+other cell of that wall does, and the **windowframe** tile goes over it:
+the moulding around the opening, with a transparent hole for the glass
+and, past the glass, the space behind. Like the doorframe it is part of
+the wall rather than part of the Window, and it arrives through the same
+per-cell surface loop rather than through a second loop that would have to
+relearn the anchor, the crop and the culling (#1075).
+
+```yaml
+overlays:
+  windowframe-SS:
+    cell: [15, 0]
+    content: [0, 0, 128, 320]
+    offset: [0.0, 0.0]
+    drawn_size: [1.0, 1.0]
+    hole: [13, 160, 102, 96]
+```
+
+### The block is the role grid
+
+The windowframe block is four columns by four rows, and the grid *is* the
+legend: an artist reads the role off where a tile sits rather than
+decoding a numbering.
+
+|            | col 15 `S` | col 16 `L` | col 17 `M` | col 18 `R` |
+| ---------- | ---------- | ---------- | ---------- | ---------- |
+| row 0 `S`  | single column, single level | left cell, single level | middle column, single level | right cell, single level |
+| row 1 `T`  | single column, top cell | left cell, top | middle column, top | right cell, top |
+| row 2 `M`  | single column, middle level | left cell, middle | *all glass, asks for nothing* | right cell, middle |
+| row 3 `B`  | single column, bottom cell | left cell, bottom | middle column, bottom | right cell, bottom |
+
+The name is `windowframe-<vertical><horizontal>`, with the vertical role
+first so `BL` reads as "bottom-left" the way it is said. The horizontal
+role is `S` single, `L` left, `M` middle, `R` right; the vertical role
+is `S` single level, `T` top, `M` middle, `B` bottom. Rows run top to
+bottom as single-level, top, middle, bottom, so the bottom-of-window
+tiles carry the highest y and sit lowest on the sheet, the way they sit
+lowest in the window.
+
+The all-middle cell - middle in both directions - asks for no tile. A
+span that is middle in both directions is all glass with no moulding on
+it, and the empty name the derivation gives there is the same answer a
+missing tile gives: nothing drawn, no frame, no magenta.
+
+Only `windowframe-SS` is filled so far. That is the 1x1 Window, which is
+eight of the ten windows every bundled document authors, and the block is
+built one tile at a time because a cell asking for a tile the sheet does
+not carry draws no frame rather than a hole.
+
+This is why the sheet is **2432 x 1280** - nineteen columns by four rows
+- rather than the 1920 x 1280 it was: twelve surface columns, three for
+the doorframe, and four fresh ones for the windowframe block to stand its
+`S`/`L`/`M`/`R` in.
+
+### Why the Furniture role vocabulary cannot carry this
+
+Furniture names its pieces `<piece>-<role><level>`, and the trailing digit
+is the *height level within the footprint* - which storey of a stacked
+chair or table the tile belongs to. That shape cannot hold a windowframe,
+for two reasons that have nothing to do with taste.
+
+A windowframe's vertical role is **end-versus-middle**, not a level. The
+bottom cell of a one-level window and the bottom cell of a three-level
+window are both level 0 and want different art: the first is moulded top
+and bottom, the second has a sill and no head. A `0` in that position
+would mean "level 0" to a Furniture reader and "the bottom of the span"
+to a frame reader, and the two readings disagree on the same document.
+
+And `L`/`M`/`R` has no spelling for the one-column cell, which is inset
+on *both* of its edges. It is neither a left cell nor a right cell nor a
+middle column; it is a single column, and it needs its own letter. That
+is what `S` is for, on both axes.
+
+So the frame keeps its own two-role vocabulary in this file rather than
+borrowing one whose digit means something else.
+`scripts/tests/windowframe_tiles.py` refuses a trailing level digit on a
+windowframe name, so the borrowing cannot be reintroduced by someone
+reading the convention across from `furniture-chair-<role><level>`.
+
+### The hole, rounded down from the glass rect
+
+The windowframe's hole is the glass the frame frames, and it is the one
+part of the artwork that cannot be wrong by a fraction of a pixel in the
+wrong direction. The glass is drawn to the glass rect: a 1x1 Window is
+inset 0.1 at each end of its span, stands 0.2 above the span's floor
+line and is 0.3 of a level tall. A hole authored *smaller* than that
+rect costs at most a fraction of a pixel of moulding covered by glass. A
+hole authored *larger* puts the moulding inside the pane, which reads as
+a window smaller than the hole it was cut for and leaves a ring of
+unglazed aperture showing outside the glass.
+
+So the hole is rounded **down**, inward on every edge: the left edge
+rounds up, the right edge rounds down, and the height rounds down with
+the top edge held at the rect's top, so the shortfall comes off the
+bottom of the pane rather than opening a gap at the head. For the 1x1
+that is 0.1 x 128 = 12.8 up to 13, 0.9 x 128 = 115.2 down to 115, and
+0.3 x 320 = 96 tall with its top at 160 - the `hole: [13, 160, 102,
+96]` above.
+
+`scripts/tests/windowframe_tiles.py` pins this twice over: once as the
+exact expected value computed from the glass rect, and once as an
+inequality that keeps the hole inside the rect whatever the rounding does,
+so a change to the rounding helper cannot make both halves agree by
+moving together. It also checks the committed sheet is actually punched
+where the tileset says, that the frame is an overlay and not a surface,
+that it declares no variant family, that the block's cell matches the
+role the name states, and that the frame is declared in the `ImageSet`
+the install pairs against.
+
+### What a Window draws, in order
+
+1. **The wall's own tile**, drawn by the Sector surface pass across the
+   Window's cells as it is drawn across every other cell of that wall.
+   A Window keeps its wall.
+2. **The space behind**, drawn clipped to the aperture the Window
+   pushes.
+3. **The glass**, drawn from the Objects atlas in the Window's glass
+   style.
+4. **The frame**, last, over the wall's tile, over the space behind and
+   over the glass - so the moulding is what reads as the edge of the
+   opening rather than the edge of whatever was drawn before it.
+
+The frame is derived from the live Window rather than from anything
+painted, which is what keeps it from drifting out of step with the
+opening it frames. It is keyed by the cell's role in the span and by
+nothing else: not the glass style, not the Window's State, not the wall.
+The same tile frames a Room, a Corridor and a Facade alike, and the
+Facade's flat fill still spans every cell with the frame laid over it.
+
+### A BoothWindow wears none
+
+A BoothWindow *is* a 1x1 Window. A derivation keyed only on "this cell
+holds a Window" would frame every service hatch with the domestic
+moulding, on top of the hatch's own frame and shutter. The exclusion is
+gated on the ordinary Window kind alone, and
+`smoke/render/WindowframeCells.cpp` carries it as a named check with
+that reason beside it, together with the assertion that the hatch itself
+still drew - so the check cannot pass by reading an empty pass as a
+successful exclusion.
+
+### The frame is trimmed at the ceiling
+
+A Room standing 0.9 of a cell tall has a ceiling that cuts across the
+cell's top. The frame is trimmed to the front wall's bounds rather than
+drawn full-cell, so no moulding stands above the ceiling it is moulding.
+
+### Persistence is untouched
+
+A windowframe is not authored, so there is nothing to save. A
+window-carrying World's document names no frame in either format, and
+saves, reloads and saves again to the same bytes - which is what lets a
+World saved by a build wearing frames reload in a build that has never
+heard of them, with nothing to migrate.
+`smoke/persistence/WindowframePersistence.cpp` pins the absence, the
+byte-identical round trip in YAML and binary, and that the Window's own
+glass rect comes back where it was, since the frame is derived from it.
 
 ## The version 1 draft set
 

@@ -42,6 +42,7 @@ namespace render_smoke
 	void registerSectorSurfaceBottomClip(std::vector<smoke::Check>& checks);
 	void registerSectorSurfaceVariants(std::vector<smoke::Check>& checks);
 	void registerDoorframeCells(std::vector<smoke::Check>& checks);
+	void registerWindowframeCells(std::vector<smoke::Check>& checks);
 	void registerSectorTilePreview(std::vector<smoke::Check>& checks);
 	void registerAgentAtlas(std::vector<smoke::Check>& checks);
 	void registerWalkwayArtwork(std::vector<smoke::Check>& checks);
