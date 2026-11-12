@@ -1884,6 +1884,88 @@ namespace
 			"unscaled Door at all, so its scaled result proves nothing about "
 			"frames being available");
 	}
+
+	// The assert beside the frame `emplace` (#1070) rests on a placement
+	// rule rather than on anything the frame map settles for itself, and an
+	// assert is silent in a Release build. Sweep the bundled Worlds and
+	// require the rule the assert names holds over the data that ships: no
+	// two Doors with the same front Sector stand in the same cell.
+	//
+	// The key space here is the frame map's own - Sector-local column and
+	// level - so a collision found here is exactly the collision the map
+	// would refuse. Were one cell claimed twice, the map would keep whichever
+	// Door the Sector's object list reached first and drop the other's frame,
+	// and the wall would draw one opening where two were authored.
+	//
+	// The swept Door count is the control: a sweep over Worlds with no front
+	// Doors in them would pass by finding nothing that could contest.
+	void noShippedDoorsContestAFrameCell(smoke::Context const& context)
+	{
+		auto const docs = shippedWorldDocuments(context);
+		require(docs.size() >= 4, "The bundled World sweep found only "
+			+ std::to_string(docs.size()) + " World documents, so it cannot "
+			"claim to cover the shipped Doors");
+
+		uint32_t sweptDoors{ 0 };
+		for (auto const& doc : docs)
+		{
+			std::shared_ptr<core::World> loaded;
+			try
+			{
+				loaded.reset(core::loadWorldDocument(doc).release());
+			}
+			catch (std::exception const& error)
+			{
+				require(false, "Bundled World document " + doc.filename().string()
+					+ " did not load: " + error.what());
+			}
+			require(bool(loaded), "Bundled World document " + doc.filename().string()
+				+ " loaded nothing");
+			std::string const document = doc.filename().string();
+			for (uint32_t layer = 0; layer < loaded->getLevelsHigh(); ++layer)
+			{
+				for (auto const& sector : loaded->getSectors(layer))
+				{
+					if (!sector) continue;
+					std::map<std::pair<std::int64_t, std::int64_t>, std::string>
+						claimed;
+					for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
+					{
+						auto const object = std::dynamic_pointer_cast<
+							const core::DoorSectorObject>(sector->getObject(i));
+						if (!object) continue;
+						auto const door = object->getDoor();
+						// Only a wall's own front Doors reach the frame map. The
+						// Sector behind a threshold wears no frame, so its copy
+						// of the same Door is not a claim on a cell there.
+						if (!door || door->getFrontSector() != sector) continue;
+						++sweptDoors;
+						std::string const here = document + ", " + sector->getName()
+							+ ", Door at " + std::to_string(object->getCellX())
+							+ "," + std::to_string(object->getCellY());
+						for (uint32_t offset = 0; offset < door->getCellsWide();
+								++offset)
+						{
+							auto const key = std::make_pair(
+								static_cast<std::int64_t>(object->getCellX()) + offset
+									- static_cast<std::int64_t>(sector->getCellX0()),
+								static_cast<std::int64_t>(object->getCellY())
+									- static_cast<std::int64_t>(sector->getCellY0()));
+							auto const found = claimed.emplace(key, here);
+							require(found.second, here + " stands in a cell that "
+								+ found.first->second + " already claims. Two Doors in "
+								"one cell of one wall would leave the frame map keeping "
+								"whichever it iterated first and dropping the other "
+								"with no diagnostic (#1070)");
+						}
+					}
+				}
+			}
+		}
+		require(sweptDoors >= 8, "The bundled World sweep found only "
+			+ std::to_string(sweptDoors) + " front Doors, so it proves nothing "
+			"about shipped frames going uncontested");
+	}
 }
 
 
@@ -1950,4 +2032,7 @@ void render_smoke::registerDoorframeCells(std::vector<smoke::Check>& checks)
 	checks.push_back({
 		"doorframeCells/noShippedDoorWearsAFrameItsApertureDoesNotFill",
 		isolated<noShippedDoorWearsAFrameItsApertureDoesNotFill> });
+	checks.push_back({
+		"doorframeCells/noShippedDoorsContestAFrameCell",
+		isolated<noShippedDoorsContestAFrameCell> });
 }

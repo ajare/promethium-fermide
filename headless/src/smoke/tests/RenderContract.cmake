@@ -157,6 +157,7 @@ set(names
     doorframeCells/theFrameFollowsTheFillThroughEveryStyle
     doorframeCells/aScaledFacadeDoorDrawsNoFrameOverItsFill
     doorframeCells/noShippedDoorWearsAFrameItsApertureDoesNotFill
+    doorframeCells/noShippedDoorsContestAFrameCell
     sectorTilePreview/oneTileFramesTheRectItIsGiven
     sectorTilePreview/anyRectFramesOneTileAndNotACellGrid
     sectorTilePreview/itIsOneTileWhereTheWorldRepeatIsFour

@@ -2259,9 +2259,21 @@ doorframeTilesForSector(std::string const& wall,
 			// with no tall frame authored answers with, and a Corridor has
 			// none because a tall Door is refused in one.
 			if (!hasSectorTileOverlay(name)) continue;
-			frames.emplace(std::make_pair(static_cast<std::uint32_t>(
-				left + static_cast<std::int64_t>(cell)),
-				static_cast<std::uint32_t>(bottom)), name);
+			// A contested frame cell is a broken invariant rather than a case
+			// to resolve. Placement refuses two objects in one front Layer
+			// cell - `PlacementValidator::validateSectorDoorPlacement` turns
+			// away a Door whose front cell already `hasObject()` - and keeps a
+			// Door's whole rectangle inside one Sector on each Layer of its
+			// pair, so no two Doors can stand in the same cell of the same
+			// wall. `emplace` keeps the first Door iterated and drops the
+			// second with nothing said, which reads as unfinished art rather
+			// than as a bug; the assert says it in a debug run instead, in
+			// front of whoever breaks the rule (#1070).
+			[[maybe_unused]] auto const inserted = frames.emplace(
+				std::make_pair(static_cast<std::uint32_t>(
+					left + static_cast<std::int64_t>(cell)),
+					static_cast<std::uint32_t>(bottom)), name);
+			assert(inserted.second);
 		}
 	}
 	return frames;
