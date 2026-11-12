@@ -195,6 +195,9 @@ set(names
     objectAtlasContract/everyRequiredTileIsNamedByADrawCall
     objectAtlasContract/everyTileNameAskedIsCarried
     objectAtlasContract/scannedSourcesCoverEveryTileNamingSource
+    objectAtlasContract/doorPaletteIconNamesACarriedRequiredTile
+    objectAtlasContract/doorPaletteIconFallsBackToTheGlyphOnAMiss
+    objectAtlasContract/doorPaletteIconTileResolvesOnlyWhenTheAtlasCarriesIt
     objectAtlasContract/expectedExtentsFollowTheDomainGeometry
     objectAtlasContract/aMissingRequiredTileIsRefused
     objectAtlasContract/aMismatchedDrawnSizeIsRefused

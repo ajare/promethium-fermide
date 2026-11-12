@@ -617,6 +617,16 @@ fallback - exempt from the version 2 contract, because the renderer only reaches
 it when a version 1 set is installed - is still required to be a name the
 version 1 set actually carries.
 
+The editor's palette reads the same contract from its own side. Its Door slot
+draws a tile rather than a glyph, so the render smoke module reads the icon's
+own draw call and requires the tile it names to be one the shipped atlas
+carries and one `requiredObjectTiles()` covers, and requires the icon to keep
+its font-glyph fallback guarded on the sprite call's answer (#1063). That
+fallback is what the custom version 1 theme sets draw for the slot, since
+neither carries a door leaf, which is why the guard is pinned as well as the
+tile: an icon that stopped testing the call would leave an empty slot under
+those themes instead of the glyph it drew before the tile existed at all.
+
 A set that fails is not installed at all. At stack construction the failure
 throws, so the game refuses to start on an atlas that cannot carry its geometry;
 at a live selection in the editor it lands in the slot's diagnostic and the slot

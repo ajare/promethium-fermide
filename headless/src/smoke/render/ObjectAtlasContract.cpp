@@ -39,6 +39,7 @@
 #include <sstream>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace
@@ -69,6 +70,10 @@ namespace
 		"pf-render/src/Render.cpp",
 		"editor/src/UI.cpp",
 	};
+
+	// The editor's palette lives here, and its Door slot is the one Objects
+	// tile consumer outside the renderer (#1063).
+	std::string const kEditorPaletteSource{ "editor/src/UI.cpp" };
 
 	// The calls that take an Objects tile name and put it on the screen.
 	// `drawPart` is the Shuttle carriage's own wrapper: it names the tile
@@ -422,6 +427,137 @@ namespace
 		return opens;
 	}
 
+	// The matching `)` of the call whose `(` is at `open`, stepping over
+	// string literals so a paren inside one is not structure.
+	std::size_t callClose(std::string const& code, std::size_t open)
+	{
+		std::size_t depth = 0;
+		for (std::size_t i = open; i < code.size(); ++i)
+		{
+			auto const c = code[i];
+			if (c == '"') { i = literalEnd(code, i) - 1; continue; }
+			if (c == '(') ++depth;
+			else if (c == ')')
+			{
+				if (depth == 1) return i;
+				if (depth > 0) --depth;
+			}
+		}
+		return std::string::npos;
+	}
+
+	// The last non-space character before `at`, or npos when everything
+	// before it is space. Used to read what sits immediately in front of a
+	// call, which is where a guard lives.
+	std::size_t previousNonSpace(std::string const& code, std::size_t at)
+	{
+		while (at > 0)
+		{
+			--at;
+			if (!isSpace(code[at])) return at;
+		}
+		return std::string::npos;
+	}
+
+	// The index at which the callee name of the call whose `(` is at `open`
+	// begins: the identifier run immediately before the paren.
+	std::size_t calleeStart(std::string const& code, std::size_t open)
+	{
+		std::size_t at = open;
+		while (at > 0 && isIdentChar(code[at - 1])) --at;
+		return at;
+	}
+
+	// The character in front of a call's callee, stepping over any `::`
+	// qualifier so `ns::drawObjectSprite(` reads the same as the bare call.
+	// A guard sits in front of the callee rather than in front of the paren,
+	// so this is where a reader looking back for one starts.
+	std::size_t beforeCallee(std::string const& code, std::size_t open)
+	{
+		auto cursor = calleeStart(code, open);
+		for (;;)
+		{
+			auto const c = previousNonSpace(code, cursor);
+			if (c == std::string::npos) return std::string::npos;
+			if (code[c] != ':' || c < 1 || code[c - 1] != ':') return c;
+			auto const qualifier = calleeStart(code, c - 1);
+			if (qualifier == c - 1) return c;
+			cursor = qualifier;
+		}
+	}
+
+	// The [start, end) span between the outermost braces of the function
+	// defined as `void <name>(`. A declaration of the same shape - the
+	// signature closing on a `;` rather than opening a body - is stepped
+	// over, so only a definition answers. A file that defines none reads as
+	// no span, and every caller turns that into a failure naming the
+	// function, so a rename retires none of these checks quietly.
+	std::pair<std::size_t, std::size_t> functionBody(ScannedSource const& source,
+		std::string const& name)
+	{
+		auto const signature = "void " + name + "(";
+		for (std::size_t at = source.code.find(signature);
+			at != std::string::npos;
+			at = source.code.find(signature, at + 1))
+		{
+			// The signature's own `(` is the last character of it, so the
+			// parameter list closes where that call's parenthesis does - nested
+			// parens and literals inside a default argument and all.
+			auto const params = callClose(source.code, at + signature.size() - 1);
+			if (params == std::string::npos) break;
+			auto const opener = source.code.find_first_not_of(" \t\r\n", params + 1);
+			if (opener == std::string::npos || source.code[opener] != '{') continue;
+			std::size_t depth = 0;
+			for (std::size_t i = opener; i < source.code.size(); ++i)
+			{
+				auto const c = source.code[i];
+				if (c == '"') { i = literalEnd(source.code, i) - 1; continue; }
+				if (c == '{') ++depth;
+				else if (c == '}')
+				{
+					--depth;
+					if (depth == 0) return { opener + 1, i };
+				}
+			}
+			break;
+		}
+		return { std::string::npos, std::string::npos };
+	}
+
+	// The one sprite draw call inside a span, reported by its `(`. None or
+	// several is reported rather than guessed at: the shape of the call site
+	// is what the checks below are about, so a shape that moved is a
+	// finding, not something to average over.
+	std::size_t onlySpriteCall(ScannedSource const& source,
+		std::pair<std::size_t, std::size_t> const& span, std::string const& what)
+	{
+		std::vector<std::size_t> calls;
+		for (auto const open : drawCallOpens(source))
+			if (open >= span.first && open < span.second) calls.push_back(open);
+		require(calls.size() == 1,
+			what + " makes " + std::to_string(calls.size())
+			+ " sprite draw calls inside itself; this check reads exactly one");
+		return calls.front();
+	}
+
+	// The tile the editor's palette Door icon draws, read out of the icon's
+	// own draw call rather than from a constant the icon could stop using.
+	// Returns the literal use, so the caller can name the line it came from.
+	LiteralUse doorPaletteIconTile(smoke::Context const& context)
+	{
+		auto const source = scanSource(context, kEditorPaletteSource);
+		auto const body = functionBody(source, "drawDoorIcon");
+		require(body.first != std::string::npos,
+			kEditorPaletteSource + " no longer defines drawDoorIcon, so the "
+			"palette's Door slot is drawn by code this check does not read");
+		auto const open = onlySpriteCall(source, body, "The palette's Door icon");
+		auto const asked = namesAskedBy(source, open);
+		require(asked.size() == 1,
+			"The palette's Door icon's sprite call does not name exactly one "
+			"tile, so there is no single tile to hold the slot's artwork to");
+		return asked.front();
+	}
+
 	// The tiles this ticket's contract is about, in the order the renderer
 	// names them. Kept here as a list rather than derived so a tile dropped
 	// from the contract shows up as a missing name rather than as nothing.
@@ -654,6 +790,135 @@ namespace
 			"file to kTileNamingSources:" + joined);
 	}
 
+	// The editor's palette Door slot draws a tile the shipped atlas carries
+	// and one the Objects contract covers. #1063 is what the gap cost: the
+	// bare `door` tile the icon asked for was deleted by #1056, the sprite
+	// call returned false exactly as designed, and the slot became a font
+	// glyph with the suite green. The reverse check above refuses a drawn
+	// name the installed atlas does not carry; this pins the icon's own
+	// shape - one tile named, that tile required - so the slot cannot drift
+	// onto an artwork name nobody sized, and reports it as the palette's
+	// Door icon rather than as a line number in a nine-thousand-line file.
+	void doorPaletteIconNamesACarriedRequiredTile(smoke::Context const& context)
+	{
+		auto const icon = doorPaletteIconTile(context);
+		auto const where = kEditorPaletteSource + ":" + std::to_string(icon.line);
+
+		auto const atlas = ObjectTileset::load(context.fixture(kNewObjectsTileset));
+		require(atlas.sprites.count(icon.text) != 0,
+			"The palette's Door icon asks the Objects slot for '" + icon.text
+			+ "' (" + where + ") and the shipped Objects atlas does not carry it, "
+			"so the slot draws its font fallback rather than tile artwork (#1063)");
+
+		bool required = false;
+		for (auto const& expected : requiredObjectTiles())
+			if (icon.text == expected.tileName) required = true;
+		require(required,
+			"The palette's Door icon draws '" + icon.text + "' (" + where
+			+ "), which is not in requiredObjectTiles(), so no atlas contract "
+			"covers the tile the slot is drawn from and an atlas could be "
+			"selected that carries it at an extent nothing checked");
+	}
+
+	// The icon keeps its font-glyph fallback, and keeps it where a miss
+	// reaches it: the sprite call tested for failure, and the glyph drawn
+	// as the very next statement. That fallback is what the custom version
+	// 1 theme sets draw for this slot - neither carries a door leaf - so an
+	// icon that lost it would draw an empty slot under those themes instead
+	// of the glyph it drew before the tile existed at all (#1063).
+	void doorPaletteIconFallsBackToTheGlyphOnAMiss(smoke::Context const& context)
+	{
+		auto const source = scanSource(context, kEditorPaletteSource);
+		auto const body = functionBody(source, "drawDoorIcon");
+		require(body.first != std::string::npos,
+			kEditorPaletteSource + " no longer defines drawDoorIcon, so the "
+			"palette's Door slot is drawn by code this check does not read");
+		auto const open = onlySpriteCall(source, body, "The palette's Door icon");
+
+		auto const bang = beforeCallee(source.code, open);
+		require(bang != std::string::npos && source.code[bang] == '!',
+			"The palette's Door icon does not test its sprite call's answer, so a "
+			"set with no door tile leaves the slot blank instead of falling back "
+			"to the glyph (#1063)");
+		auto const guard = previousNonSpace(source.code, bang);
+		require(guard != std::string::npos && source.code[guard] == '(',
+			"The palette's Door icon's test of its sprite call is not an `if`, so "
+			"a miss is routed nowhere (#1063)");
+
+		auto const guardClose = callClose(source.code, guard);
+		require(guardClose != std::string::npos && guardClose < body.second,
+			"The palette's Door icon's guard does not close inside its own body, so "
+			"its fallback cannot be read (#1063)");
+		std::string const fallbackCall{ "drawObjectIcon" };
+		// The statement the guard routes a miss to is the one the guard's own
+		// parenthesis closes over. Reading past the sprite call instead would
+		// land on the guard's closing paren and call it a statement.
+		auto const next = source.code.find_first_not_of(" \t\r\n", guardClose + 1);
+		require(next != std::string::npos && next < body.second,
+			"The palette's Door icon's guard has no statement to route a miss to, "
+			"so a set with no door tile leaves the slot blank (#1063)");
+		// A braced body around the fallback says the same thing with two more
+		// characters, so read past it rather than failing on the shape.
+		auto const statement = source.code[next] == '{'
+			? source.code.find_first_not_of(" \t\r\n", next + 1) : next;
+		require(statement != std::string::npos && statement < body.second
+				&& source.code.compare(statement, fallbackCall.size(), fallbackCall) == 0,
+			"The statement after the palette's Door icon's sprite call is not a "
+			"drawObjectIcon fallback, so a miss draws nothing at all (#1063)");
+		auto const fallbackArgs = callArgumentSpans(source.code,
+			statement + fallbackCall.size());
+		require(!fallbackArgs.empty(),
+			"The palette's Door icon's fallback call takes no arguments to read (#1063)");
+		auto const last = trimmed(source.code.substr(fallbackArgs.back().first,
+			fallbackArgs.back().second - fallbackArgs.back().first));
+		require(last == "ICON_FA_DOOR_OPED",
+			"The palette's Door icon's fallback names '" + last + "' rather than "
+			"the door glyph, so the slot's fallback picture is not the door it "
+			"fell back to before the tile existed (#1063)");
+	}
+
+	// The mechanism the icon's guard tests, run against real atlases rather
+	// than read off the source: the tile the icon names resolves to Object
+	// Atlas geometry while the shipped set is installed, and stops resolving
+	// the moment a set without it is. That second state is the one the
+	// custom version 1 theme sets leave this slot in, and the check above
+	// is what makes it draw the glyph rather than nothing (#1063).
+	void doorPaletteIconTileResolvesOnlyWhenTheAtlasCarriesIt(smoke::Context const& context)
+	{
+		auto const icon = doorPaletteIconTile(context);
+		auto const shipped = ObjectTileset::load(context.fixture(kNewObjectsTileset));
+		setObjectTileset(shipped, static_cast<TextureId>(1));
+		WorldDrawList drawn(WorldDrawList::ClipRectangle{{-1000, -1000}, {1000, 1000}});
+		require(drawObjectSprite(icon.text.c_str(), &drawn, {10.0f, 10.0f},
+			{62.0f, 90.0f}),
+			"The sprite call refused '" + icon.text + "' from the shipped Objects "
+			"atlas, so the palette's Door slot takes its font fallback under the "
+			"very set the icon names (#1063)");
+		std::size_t quads = 0;
+		for (auto const& command : drawn.commands())
+			if (auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command);
+				triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+				++quads;
+		require(quads == 2,
+			"The palette's Door icon's tile drew " + std::to_string(quads)
+			+ " Object Atlas triangles rather than one quad, so the slot is not "
+			"drawing tile artwork (#1063)");
+
+		auto without = shipped;
+		without.sprites.erase(icon.text);
+		require(without.sprites.count(icon.text) == 0,
+			"Erasing '" + icon.text + "' left it in the set, so this check would "
+			"not be testing a miss (#1063)");
+		setObjectTileset(std::move(without), static_cast<TextureId>(1));
+		WorldDrawList missing(WorldDrawList::ClipRectangle{{-1000, -1000}, {1000, 1000}});
+		require(!drawObjectSprite(icon.text.c_str(), &missing, {10.0f, 10.0f},
+			{62.0f, 90.0f}),
+			"The sprite call reported a tile drawn from a set the tile was "
+			"erased from, so the palette's Door icon would never reach its "
+			"fallback (#1063)");
+		clearObjectTileset();
+	}
+
 	// Each expectation is composed from the domain's own constants rather
 	// than remembered numbers, so a change to the geometry moves the
 	// contract with it. These are the ones a wrong value would put artwork
@@ -830,6 +1095,12 @@ void render_smoke::registerObjectAtlasContract(std::vector<smoke::Check>& checks
 		isolated<everyTileNameAskedOfTheAtlasIsCarried> });
 	checks.push_back({ "objectAtlasContract/scannedSourcesCoverEveryTileNamingSource",
 		isolated<theScannedSourcesCoverEveryTileNamingSource> });
+	checks.push_back({ "objectAtlasContract/doorPaletteIconNamesACarriedRequiredTile",
+		isolated<doorPaletteIconNamesACarriedRequiredTile> });
+	checks.push_back({ "objectAtlasContract/doorPaletteIconFallsBackToTheGlyphOnAMiss",
+		isolated<doorPaletteIconFallsBackToTheGlyphOnAMiss> });
+	checks.push_back({ "objectAtlasContract/doorPaletteIconTileResolvesOnlyWhenTheAtlasCarriesIt",
+		isolated<doorPaletteIconTileResolvesOnlyWhenTheAtlasCarriesIt> });
 	checks.push_back({ "objectAtlasContract/expectedExtentsFollowTheDomainGeometry",
 		isolated<theExpectedExtentsFollowTheDomainGeometry> });
 	checks.push_back({ "objectAtlasContract/aMissingRequiredTileIsRefused",
