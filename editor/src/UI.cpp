@@ -908,7 +908,12 @@ namespace
 		auto height = min(available.y, available.x / aspect);
 		auto size = ImVec2(height * aspect, height);
 		auto minimum = boundsMin + (boundsMax - boundsMin - size) * 0.5f;
-		if (!drawObjectSprite("door", drawList, toVec2(minimum), toVec2(minimum + size), colour))
+		// The bare `door` tile became a leaf family in #1056 and this call
+		// went on asking for the old name. The fallback below caught it, so
+		// the palette's Door icon became a font glyph and nothing said so.
+		// The left leaf is the tile to ask for: a full-cell leaf, and the
+		// icon's own aspect handling resizes whatever it is given (#1063).
+		if (!drawObjectSprite("door-L0", drawList, toVec2(minimum), toVec2(minimum + size), colour))
 			drawObjectIcon(drawList, boundsMin, boundsMax, colour, ICON_FA_DOOR_OPED);
 	}
 

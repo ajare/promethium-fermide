@@ -222,14 +222,16 @@ namespace
 
 std::vector<ObjectTileExpectation> const& requiredObjectTiles()
 {
-    // The list mirrors the names Render.cpp asks the Objects slot for, and
-    // nothing else. A tile added to the renderer without being added here
-    // goes unchecked; a tile kept here that the renderer never names refuses
-    // an atlas over artwork nothing draws, which is the shape
+    // The list mirrors the names the drawing code asks the Objects slot
+    // for, and nothing else. A tile added to a draw call without being
+    // added here goes unchecked; a tile kept here that no draw call names
+    // refuses an atlas over artwork nothing draws, which is the shape
     // `booth-window-closed` had before #1031 dropped it. The render smoke
-    // module reads the renderer's source and requires every entry here to
-    // be named by a draw call, so the review the two lists used to need is
-    // a check rather than a habit.
+    // module reads every source that names a tile to a draw call - the
+    // renderer and the editor - and requires every entry here to be named
+    // by one, and every name those calls ask for to be a tile the installed
+    // atlas carries, so the review the two lists used to need is a check
+    // rather than a habit (#1064).
     static std::vector<ObjectTileExpectation> const tiles{
         // A Door leaf is a full World cell. The renderer draws it at the
         // cell rect and clips it to the doorway aperture, so the tile's

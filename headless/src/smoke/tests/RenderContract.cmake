@@ -193,6 +193,8 @@ set(names
     objectAtlasContract/shippedAtlasSatisfiesTheContract
     objectAtlasContract/coversEveryDrawnTile
     objectAtlasContract/everyRequiredTileIsNamedByADrawCall
+    objectAtlasContract/everyTileNameAskedIsCarried
+    objectAtlasContract/scannedSourcesCoverEveryTileNamingSource
     objectAtlasContract/expectedExtentsFollowTheDomainGeometry
     objectAtlasContract/aMissingRequiredTileIsRefused
     objectAtlasContract/aMismatchedDrawnSizeIsRefused

@@ -595,13 +595,27 @@ checked against a contract before it is installed
   line, so the offset is the only thing hanging its slab on the floor.
 
 The contract is held in both directions. `requiredObjectTiles()` is the list it
-is written against, and the render smoke module reads `pf-render/src/Render.cpp`
-and requires every entry in that list to be named by a draw call - directly, as
+is written against, and the render smoke module reads every source that names an
+Objects tile to a draw call - `pf-render/src/Render.cpp` and `editor/src/UI.cpp`
+- and requires every entry in that list to be named by a draw call: directly, as
 an argument to one, or as the arm of the conditional that picks the name for one.
 A tile named only in a comment does not count, which is the point: that is exactly
 how `booth-window-closed` read as used while nothing drew it (#1031). Without
 that check the list can only ever grow, because adding a requirement costs the
 person adding it nothing and dropping one takes someone who happens to notice.
+
+The other direction reads the same sources the other way round: every tile name
+literal a draw call asks the slot for must be a tile the installed atlas carries,
+and a name that does not resolve fails with its file and line (#1064). This is
+the direction that matters most precisely because `drawObjectSprite` returning
+false is a designed fallback - the caller keeps its primitive fill, the editor
+keeps its font glyph, and the picture degrades quietly. A tile deleted from a
+sheet therefore leaves every call site behind unseen unless something asks. Two
+things keep the widened scan honest: a source that names tiles without being in
+the scanned list fails its own check, and the version 1 arm of a role-or-legacy
+fallback - exempt from the version 2 contract, because the renderer only reaches
+it when a version 1 set is installed - is still required to be a name the
+version 1 set actually carries.
 
 A set that fails is not installed at all. At stack construction the failure
 throws, so the game refuses to start on an atlas that cannot carry its geometry;
