@@ -199,6 +199,16 @@ namespace core
 		return false;
 	}
 
+	bool BinarySerializer::fieldIsArray(std::string const& name) const
+	{
+		requireDeserializing("inspect fields");
+		Node const* current = mContainers.empty() ? mRoot.get() : mContainers.back();
+		if (current->type != Map) return false;
+		for (auto const& field : current->fields)
+			if (field.first == name) return field.second->type == Array;
+		return false;
+	}
+
 	void BinarySerializer::writeScalar(std::string const& name, uint8_t type, uint64_t bits)
 	{
 		if (mContainers.empty())

@@ -804,7 +804,14 @@ namespace core
 		// rather than the base (#1040). A pre-70 document carries no such field
 		// on any record, so it loads as no variants recorded and draws the base
 		// everywhere, which is exactly what it drew before the feature existed.
-		serializer.writeUint32("version", 70);
+		// Version 71 replaces the legacy `layerNames` array with the Layer table:
+		// a `layers` array of named-field records, each carrying the Layer's name
+		// and its optional Layer Image set (#1085). The declared Layer count moves
+		// to `layerCount`, which frees the `layers` name for the table. A record
+		// with no `sectorImageSet` field inherits the World's sector Image set, and
+		// the legacy `layerNames` reader stays, so a pre-71 document - which names
+		// no per-Layer sheet anywhere - loads with every Layer inheriting.
+		serializer.writeUint32("version", 71);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("objectImageSet", mObjectImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
@@ -847,13 +854,22 @@ namespace core
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
 		serializer.writeUint32("levelsHigh", mLevelsHigh);
-		serializer.writeUint32("layers", getLayerCount());
+		// The Layer table: one named-field record per Layer.  A Layer that inherits
+		// writes no `sectorImageSet` field at all, so the inherit state is the
+		// absence of a field rather than a sentinel string a reader has to remember.
+		serializer.writeUint32("layerCount", getLayerCount());
 
 		serializer.beginArray("levelNames");
 		for (auto const& name : mLevelNames) serializer.writeString("", name);
 		serializer.endArray();
-		serializer.beginArray("layerNames");
-		for (auto const& name : mLayerNames) serializer.writeString("", name);
+		serializer.beginArray("layers");
+		for (auto const& layer : mLayerInfos)
+		{
+			serializer.beginMap("");
+			serializer.writeString("name", layer.name);
+			if (layer.sectorImageSet) serializer.writeString("sectorImageSet", *layer.sectorImageSet);
+			serializer.endMap();
+		}
 		serializer.endArray();
 
 		if (mAgentTagRegistryReference)
@@ -1730,7 +1746,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 70)
+		if (version < 1 || version > 71)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1879,7 +1895,68 @@ namespace core
 				std::move(resourceName), std::move(expectedBehaviourUuid) };
 		}
 
-		auto const layerCount = serializer.readUint32("layers", true, 2);
+		// The Layer table is read before the loading World is touched.  Version 71
+		// writes it as the `layers` array and declares the Layer count in
+		// `layerCount`; below 71 the count sat in `layers` itself and the names in
+		// the legacy `layerNames` array.  A document that carries the table is read
+		// as the table whatever version it claims: the array is self-describing, and
+		// letting a lowered version label turn it back into a scalar count would
+		// silently drop every Layer past the second.
+		bool const carriesLayerTable = serializer.hasField("layers")
+			&& serializer.fieldIsArray("layers");
+		vector<LayerInfo> layerInfos;
+		if (carriesLayerTable)
+		{
+			// Each Layer reads back into its own record, not into a map keyed by
+			// name: the Layer's position is its identity, and a name is editable.
+			serializer.beginArray("layers");
+			while (serializer.nextArrayItem())
+			{
+				if (layerInfos.size() >= CORE_MAX_LAYERS)
+				{
+					throw SerializationException(format("The layers array holds more than the {} Layer limit", CORE_MAX_LAYERS));
+				}
+				serializer.beginMap("");
+				LayerInfo info;
+				info.name = serializer.readString("name", true,
+					defaultLayerName(static_cast<uint32_t>(layerInfos.size())));
+				// An absent `sectorImageSet` is the inherit state, not an empty name.
+				if (serializer.hasField("sectorImageSet"))
+				{
+					info.sectorImageSet = serializer.readString("sectorImageSet");
+				}
+				serializer.endMap();
+				layerInfos.push_back(std::move(info));
+			}
+			serializer.endArray();
+		}
+
+		uint32_t layerCount = 2;
+		if (carriesLayerTable)
+		{
+			layerCount = static_cast<uint32_t>(layerInfos.size());
+			// Version 71 declares the count beside the table and the two must agree:
+			// a document that says one thing in `layerCount` and another in the
+			// table contradicts itself, and which Layer list wins would otherwise
+			// come down to read order.
+			if (version >= 71)
+			{
+				if (!serializer.hasField("layerCount"))
+				{
+					throw SerializationException("The layers array requires a layerCount of the same length");
+				}
+				auto const declared = serializer.readUint32("layerCount");
+				if (declared != layerCount)
+				{
+					throw SerializationException(format(
+						"The layers array holds {} Layers but layerCount declares {}", layerCount, declared));
+				}
+			}
+		}
+		else
+		{
+			layerCount = serializer.readUint32(version >= 71 ? "layerCount" : "layers", true, 2);
+		}
 		if (layerCount < 2 || layerCount > CORE_MAX_LAYERS)
 		{
 			throw SerializationException(format("World layer count {} is out of range", layerCount));
@@ -1922,27 +1999,32 @@ namespace core
 			serializer.endArray();
 			if (index != levelsHigh) throw SerializationException("Too few Level names");
 		}
-		vector<string> layerNames(layerCount);
-		for (uint32_t i = 0; i < layerCount; ++i)
+		if (!carriesLayerTable)
 		{
-			layerNames[i] = defaultLayerName(i);
-		}
-		if (serializer.hasField("layerNames"))
-		{
-			serializer.beginArray("layerNames");
-			uint32_t index = 0;
-			while (serializer.nextArrayItem())
+			layerInfos.assign(layerCount, LayerInfo{});
+			for (uint32_t i = 0; i < layerCount; ++i)
 			{
-				if (index >= layerCount)
-				{
-					throw SerializationException("layerNames array is longer than the layer count");
-				}
-				layerNames[index++] = serializer.readString("");
+				layerInfos[i].name = defaultLayerName(i);
 			}
-			serializer.endArray();
-			if (index != layerCount)
+			// The legacy Layer-name array.  It carries no binding, so every Layer it
+			// names keeps the inherit state it was default-filled with.
+			if (serializer.hasField("layerNames"))
 			{
-				throw SerializationException("layerNames array is shorter than the layer count");
+				serializer.beginArray("layerNames");
+				uint32_t index = 0;
+				while (serializer.nextArrayItem())
+				{
+					if (index >= layerCount)
+					{
+						throw SerializationException("layerNames array is longer than the layer count");
+					}
+					layerInfos[index++].name = serializer.readString("");
+				}
+				serializer.endArray();
+				if (index != layerCount)
+				{
+					throw SerializationException("layerNames array is shorter than the layer count");
+				}
 			}
 		}
 
@@ -2522,7 +2604,7 @@ namespace core
 
 		layerResizeRollback.active = false;
 		mLevelNames = std::move(levelNames);
-		mLayerNames = std::move(layerNames);
+		mLayerInfos = std::move(layerInfos);
 		resetForDeserialization(std::move(name), cellsWide, levelsHigh);
 		mRandomSeed = randomSeed;
 		mNextMarkerId = nextMarkerId;
@@ -3204,8 +3286,11 @@ namespace core
 		auto candidate = std::make_unique<World>(mName, mCellsWide, mLevelsHigh);
 		while (candidate->getLayerCount() < getLayerCount())
 			candidate->addLayer();
-		for (uint32_t layer = 2; layer < getLayerCount(); ++layer)
-			candidate->setLayerName(layer, mLayerNames[layer]);
+		// The whole Layer table travels, binding included: a candidate replaying
+		// without the Layer Image sets would be a candidate wearing a different
+		// World from the one being validated.  Copied wholesale rather than field by
+		// field so no Layer is left behind at either end of the range.
+		candidate->mLayerInfos = mLayerInfos;
 		candidate->mFurnitureCatalogue = mFurnitureCatalogue;
 		candidate->mFurnitureCatalogueResourceName = mFurnitureCatalogueResourceName;
 		candidate->mSectorImageSetResourceName = mSectorImageSetResourceName;
@@ -4440,7 +4525,7 @@ namespace core
 			return plan;
 		}
 
-		plan.layerName = mLayerNames[layerIndex];
+		plan.layerName = mLayerInfos[layerIndex].name;
 
 		LayerDeleteImpact impact;
 		vector<ConstructionRecord> records;
@@ -4489,7 +4574,7 @@ namespace core
 		if (plan.transitsRemoved > 0)
 		{
 			auto const targets = layerIndex + 1 < plan.layerCountBefore
-				? format("{} and {}", plan.layerName, mLayerNames[layerIndex + 1])
+				? format("{} and {}", plan.layerName, mLayerInfos[layerIndex + 1].name)
 				: plan.layerName;
 			plan.consequences.push_back(format("Delete {} Transit{} on {}",
 				plan.transitsRemoved, plan.transitsRemoved == 1 ? "" : "s", targets));
@@ -4518,7 +4603,7 @@ namespace core
 				plan.consequences.push_back(format(
 					"Delete Window at {},{} on {} which looks into {}",
 					windowObject->getCellX(), windowObject->getCellY(),
-					mLayerNames[layerIndex - 1], plan.layerName));
+					mLayerInfos[layerIndex - 1].name, plan.layerName));
 			}
 		}
 		if (plan.agentsRemoved > 0)
@@ -4526,7 +4611,7 @@ namespace core
 				plan.agentsRemoved, plan.agentsRemoved == 1 ? "" : "s"));
 		for (uint32_t layer = layerIndex + 1; layer < plan.layerCountBefore; ++layer)
 			plan.consequences.push_back(format("{} moves from Layer {} to Layer {}",
-				mLayerNames[layer], layer, layer - 1));
+				mLayerInfos[layer].name, layer, layer - 1));
 		if (plan.consequences.empty())
 			plan.consequences.push_back(format("{} is removed; nothing was on it",
 				plan.layerName));
@@ -4571,7 +4656,9 @@ namespace core
 		// Compact the Layer storage before the reset so the surviving Layers are
 		// recreated at their new depth.
 		mLayers.erase(mLayers.begin() + plan.layerIndex);
-		mLayerNames.erase(mLayerNames.begin() + plan.layerIndex);
+		// The deleted Layer takes its name and its Layer Image set with it in the one
+		// erase, so no binding shifts onto the Layers behind.
+		mLayerInfos.erase(mLayerInfos.begin() + plan.layerIndex);
 
 		resetForDeserialization(mName, mCellsWide, mLevelsHigh, true);
 		mDeserializingConstruction = true;
@@ -8791,8 +8878,8 @@ namespace core
 			plan.x, plan.y, plan.cellsWide, plan.levelsHigh))
 		{
 			auto const front = windowObject->getWindow()->getFrontLayer();
-			auto const frontName = front < mLayerNames.size()
-				? mLayerNames[front] : string("the Layer in front");
+			auto const frontName = front < mLayerInfos.size()
+				? mLayerInfos[front].name : string("the Layer in front");
 			plan.consequences.push_back(format(
 				"Delete Window at {},{} on {} looking into this Background",
 				windowObject->getCellX(), windowObject->getCellY(), frontName));

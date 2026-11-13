@@ -408,6 +408,15 @@ namespace game
 	void setAgentImageSetResourceName(std::string name);
 	void setFurnitureImageSetResourceName(std::string name);
 
+	// Binds one Layer's Layer Image set, beside the four World-wide atlas
+	// selections above and under the same rule: binding is an authoring act, so it
+	// is here; reading a binding is a fact about the document, so it is on
+	// `WorldRuntime`.  `nullopt` clears the Layer back to inheriting the World's
+	// sector Image set; a name binds the Layer to that Image set, and an empty
+	// name binds it to a name that resolves to nothing.
+	void setLayerSectorImageSet(std::uint32_t layerIndex,
+		std::optional<std::string> sectorImageSet);
+
 	// --- In-place property edits -------------------------------------
 	// These change one authored property of something that already exists, so
 	// there is no plan to make and no cascade to run: the World patches the

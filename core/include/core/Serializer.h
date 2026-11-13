@@ -27,6 +27,14 @@ namespace core
 			return true;
 		}
 
+		// Whether the named field is present and reads as an array.  A reader that
+		// meets one field name under two shapes uses this to pick the branch it is
+		// actually looking at rather than guess from the version label.
+		virtual bool fieldIsArray(std::string const&) const
+		{
+			return false;
+		}
+
 		virtual void writeBool(std::string const& name, bool value);
 		virtual void writeUint8(std::string const& name, uint8_t value) = 0;
 		virtual void writeUint16(std::string const& name, uint16_t value) = 0;

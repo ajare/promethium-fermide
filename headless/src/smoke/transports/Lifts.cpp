@@ -873,13 +873,15 @@ namespace
 	char const* preCapWideShaftMap()
 	{
 		static std::string const yaml = R"YAML(
-version: 70
+version: 71
 name: Pre-cap Wide Shaft
 randomSeed: 0
 cellsWide: 12
 levelsHigh: 6
-layers: 2
-layerNames: [Corridors, Lifts]
+layerCount: 2
+layers:
+  - {name: Corridors}
+  - {name: Lifts}
 construction:
   - {type: corridor, layer: 0, y: 0, x: 0, cellsWide: 12, levelsHigh: 1}
   - {type: corridor, layer: 0, y: 1, x: 0, cellsWide: 12, levelsHigh: 1}

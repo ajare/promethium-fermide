@@ -127,7 +127,8 @@ namespace core
 		, mCellsWide(cellsWide)
 		, mLevelsHigh(levelsHigh)
 		, mLayers(2)
-		, mLayerNames{ defaultLayerName(0), defaultLayerName(1) }
+		, mLayerInfos{ LayerInfo{ defaultLayerName(0), std::nullopt },
+			LayerInfo{ defaultLayerName(1), std::nullopt } }
 		, mSimulationCoordinator(*this)
 		, mPlacementValidator(std::make_unique<PlacementValidator>(*this))
 	, mAgentGroupRegistry(std::make_unique<AgentGroupRegistry>(*this))
@@ -1531,14 +1532,29 @@ namespace core
 	string const& World::getLayerName(uint32_t layerIndex) const
 	{
 		validateLayer("World::getLayerName", layerIndex);
-		return mLayerNames[layerIndex];
+		return mLayerInfos[layerIndex].name;
 	}
 
 	void World::setLayerName(uint32_t layerIndex, std::string name)
 	{
 		invalidateSimulationSnapshot();
 		validateLayer("World::setLayerName", layerIndex);
-		mLayerNames[layerIndex] = std::move(name);
+		mLayerInfos[layerIndex].name = std::move(name);
+		modify();
+	}
+
+	optional<string> const& World::layerSectorImageSet(uint32_t layerIndex) const
+	{
+		validateLayer("World::layerSectorImageSet", layerIndex);
+		return mLayerInfos[layerIndex].sectorImageSet;
+	}
+
+	void World::setLayerSectorImageSet(uint32_t layerIndex, optional<string> sectorImageSet)
+	{
+		validateLayer("World::setLayerSectorImageSet", layerIndex);
+		if (sectorImageSet == mLayerInfos[layerIndex].sectorImageSet) return;
+		invalidateSimulationSnapshot();
+		mLayerInfos[layerIndex].sectorImageSet = std::move(sectorImageSet);
 		modify();
 	}
 
@@ -1568,7 +1584,9 @@ namespace core
 		}
 
 		mLayers.push_back(make_shared<Layer>(this, mCellsWide, mLevelsHigh, layerIndex));
-		mLayerNames.push_back(defaultLayerName(layerIndex));
+		// A new Layer starts unbound: it inherits the World's sector Image set
+		// rather than copying the binding of the Layer it was added behind.
+		mLayerInfos.push_back(LayerInfo{ defaultLayerName(layerIndex), std::nullopt });
 		modify();
 
 		return layerIndex;

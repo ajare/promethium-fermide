@@ -950,6 +950,11 @@ void WorldAuthoring::setFurnitureImageSetResourceName(std::string name)
 {
 	world().setFurnitureImageSetResourceName(std::move(name));
 }
+void WorldAuthoring::setLayerSectorImageSet(std::uint32_t layerIndex,
+	std::optional<std::string> sectorImageSet)
+{
+	world().setLayerSectorImageSet(layerIndex, std::move(sectorImageSet));
+}
 
 // --- In-place property edits ---
 bool WorldAuthoring::setRoomHeightScale(uint32_t sectorIndex,

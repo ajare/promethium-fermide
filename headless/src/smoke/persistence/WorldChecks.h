@@ -29,6 +29,13 @@ namespace persistence
 	void agentRestoreRejectsBackgroundAndUnreachableDestination(smoke::Context const&);
 	void worldLayerNamesRoundTrip(smoke::Context const&);
 	void addedLayersAppendToTheBackAndRoundTrip(smoke::Context const&);
+	// Layer Image set: the per-Layer Sector artwork binding, on the document.
+	void layerImageSetsRoundTripThroughBothFormats(smoke::Context const&);
+	void aLayerWithNoSectorImageSetFieldOnTheWireInherits(smoke::Context const&);
+	void aLegacyLayerNameOnlyDocumentLoadsEveryLayerInheriting(smoke::Context const&);
+	void aLayerTableThatDisagreesWithTheLayerCountIsRefused(smoke::Context const&);
+	void addingAndDeletingALayerKeepsEachBindingWithItsLayer(smoke::Context const&);
+	void anEmptyLayerImageSetNameIsNotTheInheritState(smoke::Context const&);
 	void layerCountIsCappedAtCoreMaxLayers(smoke::Context const&);
 	void oversizedWorldDimensionsAreRefusedBeforeCellAccess(smoke::Context const&);
 	void levelsHaveNamesLimitsAndCascadingDeletion(smoke::Context const&);

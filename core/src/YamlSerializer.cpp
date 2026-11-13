@@ -111,6 +111,13 @@ namespace core
 		return node.IsMap() && node[name].IsMap();
 	}
 
+	bool YamlSerializer::fieldIsArray(std::string const& name) const
+	{
+		requireDeserializing("inspect fields");
+		auto const node = mNodeStack.empty() ? mLoadedData : mNodeStack.top();
+		return node.IsMap() && node[name].IsSequence();
+	}
+
 	void YamlSerializer::writeBool(std::string const& name, bool value) { write(name, value); }
 	void YamlSerializer::writeUint8(std::string const& name, uint8_t value) { write(name, value); }
 	void YamlSerializer::writeUint16(std::string const& name, uint16_t value) { write(name, value); }

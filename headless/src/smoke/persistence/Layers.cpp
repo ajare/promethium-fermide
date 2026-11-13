@@ -24,12 +24,76 @@
 #include "core/Staircase.h"
 #include "core/StaircaseTransit.h"
 #include "core/YamlSerializer.h"
+#include "core/BinarySerializer.h"
+#include <yaml-cpp/yaml.h>
 
 #include "WorldChecks.h"
 
 namespace persistence
 {
 	using smoke::require;
+
+	namespace
+	{
+		// One World saved into one format, read back into a World of the reader's
+		// own.  Both formats carry the Layer table, so a binding has to survive
+		// each of them rather than only the one a check happened to write.
+		std::string writeWorld(core::World const& world, bool binary)
+		{
+			core::SerializationWorkData work;
+			if (binary)
+			{
+				auto writer = core::BinarySerializer::toString();
+				world.serialize(*writer, work);
+				writer->serialize();
+				return writer->getSerializedString();
+			}
+			auto writer = core::YamlSerializer::toString();
+			world.serialize(*writer, work);
+			writer->serialize();
+			return writer->getSerializedString();
+		}
+
+		std::unique_ptr<core::World> loadWorld(std::string const& document, bool binary,
+			std::string const& label)
+		{
+			std::unique_ptr<core::Serializer> reader = binary
+				? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(document))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(document));
+			reader->deserialize();
+			auto world = std::make_unique<core::World>("placeholder", 1, 1);
+			core::SerializationWorkData work;
+			if (!world->deserialize(*reader, work))
+				throw std::runtime_error("Layer document failed to load: " + label);
+			return world;
+		}
+
+		// A Layer's binding spelled for an assertion: the sheet name, or the word
+		// inherit when the Layer carries no binding at all.
+		std::string bindingText(core::World const& world, uint32_t layer)
+		{
+			auto const bound = world.layerSectorImageSet(layer);
+			return bound ? *bound : std::string("<inherit>");
+		}
+
+		// Fills a three-Layer World with every binding slot exercised: the front
+		// Layer inherits, the middle wears one sheet, the back Layer wears another
+		// and carries a name of its own.  Every check that needs a bound World
+		// builds the same one, so a difference in what it reads back is a
+		// difference in the load and not in the sample.
+		void bindLayerSamples(core::World& world)
+		{
+			world.addLayer();
+			world.addCorridor(0, 0, 8);
+			world.addRoom("Middle room", 1, 0, 0, 8, 1);
+			world.addRoom("Back room", 2, 0, 0, 8, 1);
+			world.setLayerName(1, "Service");
+			world.setLayerName(2, "Shell");
+			world.setLayerSectorImageSet(1, std::string("SectorAtlasMiddle"));
+			world.setLayerSectorImageSet(2, std::string("SectorAtlasShell"));
+			world.finishBuild();
+		}
+	}
 
 	void worldLayerNamesRoundTrip(smoke::Context const&)
 	{
@@ -44,9 +108,9 @@ namespace persistence
 		original.serialize(*writer, workData);
 		writer->serialize();
 		auto const yaml = writer->getSerializedString();
-		require(yaml.find("layerNames:") != std::string::npos
-			&& yaml.find("- Front") != std::string::npos
-			&& yaml.find("- Rear") != std::string::npos,
+		require(yaml.find("layers:") != std::string::npos
+			&& yaml.find("name: Front") != std::string::npos
+			&& yaml.find("name: Rear") != std::string::npos,
 			"Custom layer names were not serialized");
 
 		core::World loaded("placeholder", 1, 1);
@@ -82,8 +146,8 @@ namespace persistence
 		original.serialize(*writer, workData);
 		writer->serialize();
 		auto const yaml = writer->getSerializedString();
-		require(yaml.find("layers: 3") != std::string::npos
-			&& yaml.find("- Sub-basement") != std::string::npos,
+		require(yaml.find("layerCount: 3") != std::string::npos
+			&& yaml.find("- name: Sub-basement") != std::string::npos,
 			"The added layer was not serialized");
 
 		core::World loaded("placeholder", 1, 1);
@@ -98,6 +162,182 @@ namespace persistence
 		core::World const& loadedRef = loaded;
 		require(loadedRef.getLayer(2) && loadedRef.getLayer(2)->getZ() == 2,
 			"The added layer was not created at the expected depth");
+	}
+
+	// A Layer Image set is a document fact.  Bind two Layers to two sheets, leave
+	// the third inheriting, and both document formats hand back exactly that.
+	void layerImageSetsRoundTripThroughBothFormats(smoke::Context const&)
+	{
+		for (bool binary : { false, true })
+		{
+			std::string const label = binary ? "binary" : "YAML";
+			core::World original("Layer image sets", 8, 3);
+			bindLayerSamples(original);
+			auto const document = writeWorld(original, binary);
+
+			if (!binary)
+			{
+				require(document.find("SectorAtlasMiddle") != std::string::npos
+					&& document.find("SectorAtlasShell") != std::string::npos,
+					"The Layer Image set bindings were not written into the YAML document");
+				// Inherit is the absence of the field, never a spelled-out value.
+				require(document.find("inherit") == std::string::npos,
+					"The inherit state was written as a value instead of as no field");
+			}
+
+			auto const loaded = loadWorld(document, binary, label);
+			require(loaded->getLayerCount() == 3,
+				"The Layer count did not round-trip through " + label);
+			require(!loaded->layerSectorImageSet(0).has_value(),
+				"An unbound Layer came back bound to something through " + label);
+			require(bindingText(*loaded, 1) == "SectorAtlasMiddle",
+				"The middle Layer's binding did not round-trip through " + label);
+			require(bindingText(*loaded, 2) == "SectorAtlasShell",
+				"The back Layer's binding did not round-trip through " + label);
+			require(loaded->getLayerName(1) == "Service" && loaded->getLayerName(2) == "Shell",
+				"Layer names did not travel with their bindings through " + label);
+		}
+	}
+
+	// A record that carries no `sectorImageSet` field is a Layer that inherits.
+	// Stripping the field from a written binding has to read back as inherit and
+	// not as the sheet it was written with, and not as an empty name either.
+	void aLayerWithNoSectorImageSetFieldOnTheWireInherits(smoke::Context const&)
+	{
+		core::World original("Absent binding", 8, 3);
+		bindLayerSamples(original);
+		auto document = YAML::Load(writeWorld(original, false));
+		require(document["layers"][1]["sectorImageSet"].as<std::string>() == "SectorAtlasMiddle",
+			"The sample document does not carry the binding this check strips");
+		document["layers"][1].remove("sectorImageSet");
+
+		auto const loaded = loadWorld(YAML::Dump(document), false, "absent-field");
+		require(!loaded->layerSectorImageSet(1).has_value(),
+			"A Layer whose sectorImageSet field was absent read as anything but inherit");
+		require(loaded->getLayerName(1) == "Service",
+			"Stripping one Layer's binding disturbed its name");
+		require(loaded->layerSectorImageSet(2) == std::optional<std::string>("SectorAtlasShell"),
+			"Stripping one Layer's binding disturbed the Layer behind it");
+	}
+
+	// A document written before the Layer table existed carries the Layer names in
+	// the legacy `layerNames` array and says nothing about any Layer's artwork.
+	// It loads with every Layer inheriting, which is what lets a pre-change World
+	// draw exactly what it drew before.
+	void aLegacyLayerNameOnlyDocumentLoadsEveryLayerInheriting(smoke::Context const&)
+	{
+		core::World original("Legacy layer names", 8, 3);
+		bindLayerSamples(original);
+		auto document = YAML::Load(writeWorld(original, false));
+		// Rewritten into the shape a pre-71 writer produced, so every other field
+		// the reader requires is a real one: the count in `layers`, the names in
+		// `layerNames`, and no Layer Image set anywhere on the wire.
+		document["version"] = 70;
+		document.remove("layers");
+		document.remove("layerCount");
+		document["layers"] = 3;
+		document["layerNames"] = YAML::Node(YAML::NodeType::Sequence);
+		for (auto const* name : { "Front", "Service", "Shell" })
+			document["layerNames"].push_back(name);
+		require(!document["layerCount"].IsDefined() && !document["layers"].IsSequence(),
+			"The rewritten document still carries the Layer table");
+
+		auto const loaded = loadWorld(YAML::Dump(document), false, "legacy layer names");
+		require(loaded->getLayerCount() == 3, "The legacy Layer count was not read");
+		require(loaded->getLayerName(0) == "Front" && loaded->getLayerName(1) == "Service"
+			&& loaded->getLayerName(2) == "Shell", "The legacy Layer names were not read");
+		for (uint32_t layer = 0; layer < 3; ++layer)
+			require(!loaded->layerSectorImageSet(layer).has_value(),
+				"A Layer named by the legacy array did not read as inheriting");
+	}
+
+	// The table and the declared Layer count are two statements about the same
+	// thing, and a document that makes them disagree is refused rather than
+	// resolved by read order.  The refusal leaves the loading World alone.
+	void aLayerTableThatDisagreesWithTheLayerCountIsRefused(smoke::Context const&)
+	{
+		core::World original("Count mismatch", 8, 3);
+		bindLayerSamples(original);
+		auto const document = YAML::Load(writeWorld(original, false));
+		require(document["layers"].size() == 3 && document["layerCount"].as<uint32_t>() == 3,
+			"The sample document is not the three-Layer table this check bends");
+
+		for (uint32_t declared : { 2u, 4u })
+		{
+			auto bent = YAML::Clone(document);
+			bent["layerCount"] = declared;
+			core::World target("Untouched", 4, 2);
+			core::SerializationWorkData work;
+			auto reader = core::YamlSerializer::fromString(YAML::Dump(bent));
+			reader->deserialize();
+			bool refused = false;
+			try { (void)target.deserialize(*reader, work); }
+			catch (core::SerializationException const&) { refused = true; }
+			require(refused, "A layers array that disagreed with layerCount was accepted");
+			require(target.getLayerCount() == 2 && target.getLayerName(0) == "Layer 0"
+				&& !target.layerSectorImageSet(0).has_value(),
+				"A refused Layer table still changed the World being loaded into");
+		}
+	}
+
+	// Adding a Layer gives it inherit; deleting one takes its name and its binding
+	// away together, so nothing shifts onto the Layers behind.
+	void addingAndDeletingALayerKeepsEachBindingWithItsLayer(smoke::Context const&)
+	{
+		core::World world("Binding compaction", 8, 3);
+		bindLayerSamples(world);
+		require(!world.layerSectorImageSet(0).has_value(),
+			"The front Layer of the sample is not inheriting");
+
+		// A Layer added to the back starts unbound rather than copying the sheet of
+		// the Layer it was added behind.
+		auto const added = world.addLayer();
+		require(added == 3 && world.getLayerCount() == 4,
+			"addLayer() did not append a Layer");
+		require(!world.layerSectorImageSet(3).has_value(),
+			"A newly added Layer did not start inheriting");
+		world.setLayerSectorImageSet(3, std::string("SectorAtlasShell"));
+
+		world.pauseSimulation();
+		auto const plan = world.planDeleteLayer(1);
+		require(plan.valid, ("Deleting the middle Layer was refused: " + plan.diagnostic).c_str());
+		require(world.applyDeleteLayer(plan), "The Layer deletion was not applied");
+
+		require(world.getLayerCount() == 3, "The Layers were not compacted");
+		require(!world.layerSectorImageSet(0).has_value(),
+			"Deleting another Layer changed the front Layer's inherit state");
+		require(world.getLayerName(1) == "Shell" && bindingText(world, 1) == "SectorAtlasShell",
+			"A Layer's name and binding did not compact forward together");
+		require(world.getLayerName(2) == "Layer 3" && bindingText(world, 2) == "SectorAtlasShell",
+			"The added Layer did not keep its own binding through the compaction");
+		require(std::string(bindingText(world, 0)) != "SectorAtlasMiddle",
+			"The deleted Layer's binding shifted onto the Layer behind");
+	}
+
+	// An empty name is a binding to a name that resolves to nothing.  It is not
+	// the inherit state, and clearing a binding back to inherit is a separate act
+	// from naming it away.
+	void anEmptyLayerImageSetNameIsNotTheInheritState(smoke::Context const&)
+	{
+		core::World world("Empty binding", 4, 2);
+		world.addCorridor(0, 0, 4);
+		world.finishBuild();
+		world.setLayerSectorImageSet(0, std::string(""));
+		require(world.layerSectorImageSet(0).has_value()
+			&& world.layerSectorImageSet(0)->empty(),
+			"An empty Layer Image set name did not read as a bound empty name");
+
+		auto const loaded = loadWorld(writeWorld(world, false), false, "empty binding");
+		require(loaded->layerSectorImageSet(0).has_value()
+			&& loaded->layerSectorImageSet(0)->empty(),
+			"An empty Layer Image set name read back as inherit");
+
+		world.setLayerSectorImageSet(0, std::nullopt);
+		require(!world.layerSectorImageSet(0).has_value(),
+			"Clearing a binding to nullopt did not return the Layer to inherit");
+		auto const cleared = loadWorld(writeWorld(world, false), false, "cleared binding");
+		require(!cleared->layerSectorImageSet(0).has_value(),
+			"A cleared binding did not round-trip as inherit");
 	}
 
 	void layerCountIsCappedAtCoreMaxLayers(smoke::Context const&)

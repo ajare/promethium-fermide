@@ -343,6 +343,10 @@ std::string const& WorldRuntime::getLayerName(std::uint32_t layerIndex) const
 {
 	return world().getLayerName(layerIndex);
 }
+std::optional<std::string> const& WorldRuntime::layerSectorImageSet(std::uint32_t layerIndex) const
+{
+	return world().layerSectorImageSet(layerIndex);
+}
 std::string const& WorldRuntime::getLevelName(std::uint32_t level) const
 {
 	return world().getLevelName(level);

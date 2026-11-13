@@ -165,6 +165,49 @@ void registerGameAuthoringResourceBinding(std::vector<smoke::Check>& checks)
 				"re-setting an unchanged image set name dirtied the document");
 		} });
 
+	// The Layer Image set sits beside the four World-wide atlas selections under
+	// the same split: the handle binds it, the runtime reads it, and the inherit
+	// state stays readable as inherit rather than as the World's own sheet.
+	checks.push_back({ "layerImageSetIsWrittenByAuthoringAndReadByTheRuntime", [](smoke::Context const&)
+		{
+			auto fixture = bindingFixture("Layer image set binding");
+			auto& authoring = *fixture.authoring;
+			auto& runtime = *fixture.runtime;
+			require(runtime.getLayerCount() == 2
+				&& !runtime.layerSectorImageSet(0).has_value()
+				&& !runtime.layerSectorImageSet(1).has_value(),
+				"a fresh World does not read every Layer as inheriting");
+
+			authoring.setLayerSectorImageSet(1, std::string("SectorAtlasLayer1"));
+			require(runtime.layerSectorImageSet(1) == std::optional<std::string>("SectorAtlasLayer1"),
+				"the runtime does not report the Layer Image set the handle bound");
+			require(!runtime.layerSectorImageSet(0).has_value(),
+				"binding one Layer changed another Layer's binding");
+			require(runtime.sectorImageSetResourceName() == "SectorAtlas",
+				"binding a Layer rewrote the World's own sector Image set");
+
+			// An empty name is a binding to a name that resolves to nothing, not a
+			// way back to inherit; only nullopt clears the binding.
+			authoring.setLayerSectorImageSet(1, std::string(""));
+			require(runtime.layerSectorImageSet(1) == std::optional<std::string>(""),
+				"an empty Layer Image set name read as inherit instead of a bound empty name");
+			authoring.setLayerSectorImageSet(1, std::nullopt);
+			require(!runtime.layerSectorImageSet(1).has_value(),
+				"clearing a Layer Image set through the handle did not return the Layer to inherit");
+
+			// Re-binding what is already bound changes nothing, dirtied included.
+			authoring.world().markSaved();
+			authoring.setLayerSectorImageSet(0, std::nullopt);
+			require(!authoring.world().isModified(),
+				"re-setting an unchanged Layer Image set dirtied the document");
+
+			// A Layer the World does not have is refused, not silently absorbed.
+			bool refused = false;
+			try { authoring.setLayerSectorImageSet(runtime.getLayerCount(), std::string("Whatever")); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "binding a Layer Image set outside the World's Layers was accepted");
+		} });
+
 	checks.push_back({ "actionRegistrySelectAndClearGoThroughTheHandle", [](smoke::Context const& context)
 		{
 			auto fixture = bindingFixture("Action registry binding");

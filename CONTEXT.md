@@ -540,6 +540,10 @@ _Avoid_: World document, tile-set metadata
 A Willpower resource that names rectangular regions of one atlas image. Whether a region is repeated is a World-renderer semantic rather than a separate resource type.
 _Avoid_: Tile set
 
+**Layer Image set**:
+The Image set a Layer's Sectors draw their surfaces from. The binding is optional: a Layer with no binding inherits the World's sector Image set, so a World written before the binding existed draws exactly what it drew before. The binding belongs to the Layer rather than to the pass that happens to be drawing it, so deleting the Layer takes the binding with it instead of shifting it onto the Layers behind. Artwork only: it changes no traversal, capacity, pathing or simulation state. An empty Image set name is a binding to a name that resolves to nothing, not the inherit state.
+_Avoid_: theme, skin, layer atlas
+
 **Sector surface variant**:
 One cell of a Sector's surface wearing a variant of its type's tile rather than that type's base. Recorded Sector-local - a column counted from the Sector's own left edge and a level counted up from its floor line - and carried on the Sector's construction record as well as on the live Sector, so the rebuild every structural edit performs replays the entries rather than losing them. The local key is re-derived on a resize so the artwork stays on the World cell it was painted on; a pure move leaves it unchanged because the artwork rides along with the Sector. Artwork only: a variant changes which tile a cell draws and nothing about traversal, capacity or simulation state.
 _Avoid_: per-cell texture, decoration

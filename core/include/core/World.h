@@ -634,6 +634,23 @@ namespace core
 
 	public:
 
+		// What the World keeps about one Layer: its name, and the Layer Image set its
+		// Sectors draw their surfaces from.  The two travel together on purpose, so
+		// that adding a Layer, renaming it and deleting it each act on one record
+		// rather than on two index-aligned lists that can drift apart.
+		//
+		// `sectorImageSet` holding nothing (nullopt) is the inherit state: the Layer
+		// draws the World's sector Image set, exactly as every Layer did before the
+		// binding existed.  An empty *name* is deliberately not the inherit state -
+		// an empty atlas name already means "names nothing, draws magenta" in the
+		// World's atlas-selection family, and one value answering two different
+		// questions is how a clear becomes an accident.
+		struct LayerInfo
+		{
+			std::string name;
+			std::optional<std::string> sectorImageSet;
+		};
+
 		static CreateDoorOptions ManualDoor1Options, RemoteControlledDoor1Options, UnavailableDoor1Options;
 
 		static CreateDoorOptions ManualDoor2Options, RemoteControlledDoor2Options, UnavailableDoor2Options;
@@ -655,7 +672,8 @@ namespace core
 		uint32_t mCellsWide, mLevelsHigh;
 
 		std::vector<std::shared_ptr<Layer>> mLayers;
-		std::vector<std::string> mLayerNames;
+		// One LayerInfo per Layer, index-aligned with mLayers.
+		std::vector<LayerInfo> mLayerInfos;
 		std::vector<std::string> mLevelNames;
 
 		std::vector<std::shared_ptr<Sector>> mSectors;
@@ -2356,6 +2374,15 @@ namespace core
 
 		std::string const& getLayerName(uint32_t layerIndex) const;
 		void setLayerName(uint32_t layerIndex, std::string name);
+
+		// The Layer Image set bound to one Layer.  nullopt reads as inherit: the
+		// Layer draws the World's sector Image set.  Setting nullopt clears the
+		// binding back to inherit; setting a name binds the Layer to that Image set,
+		// and an empty name binds it to a name that resolves to nothing.  The
+		// binding is artwork-only: it changes no traversal, capacity or simulation
+		// state.
+		std::optional<std::string> const& layerSectorImageSet(uint32_t layerIndex) const;
+		void setLayerSectorImageSet(uint32_t layerIndex, std::optional<std::string> sectorImageSet);
 
 		// Appends a new back-most Layer with the default name and returns its index.
 		// Throws if the World already has CORE_MAX_LAYERS layers.

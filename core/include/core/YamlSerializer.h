@@ -92,6 +92,7 @@ namespace core
 		std::string getSerializedString() const;
 		bool hasField(std::string const& name) const override;
 		bool fieldIsMap(std::string const& name) const override;
+	bool fieldIsArray(std::string const& name) const override;
 
 		void writeBool(std::string const& name, bool value) override;
 		void writeUint8(std::string const& name, uint8_t value) override;

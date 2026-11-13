@@ -335,6 +335,9 @@ namespace game
 		std::uint32_t getLevelsHigh() const;
 		std::uint32_t getLayerCount() const;
 		std::string const& getLayerName(std::uint32_t layerIndex) const;
+		// The Layer Image set bound to one Layer, read as a fact about the document.
+		// nullopt reads as inherit: the Layer draws the World's sector Image set.
+		std::optional<std::string> const& layerSectorImageSet(std::uint32_t layerIndex) const;
 		std::string const& getLevelName(std::uint32_t level) const;
 		std::uint32_t getNumSectors() const;
 		std::shared_ptr<const core::Layer> getLayer(std::uint32_t layerIndex) const;

@@ -58,6 +58,7 @@ PF_REQUIRE_CONST_READ(getCellsWide(), std::uint32_t)
 PF_REQUIRE_CONST_READ(getLevelsHigh(), std::uint32_t)
 PF_REQUIRE_CONST_READ(getLayerCount(), std::uint32_t)
 PF_REQUIRE_CONST_READ(getLayerName(::std::declval<std::uint32_t>()), std::string const&)
+PF_REQUIRE_CONST_READ(layerSectorImageSet(::std::declval<std::uint32_t>()), std::optional<std::string> const&)
 PF_REQUIRE_CONST_READ(getLevelName(::std::declval<std::uint32_t>()), std::string const&)
 PF_REQUIRE_CONST_READ(getNumSectors(), std::uint32_t)
 PF_REQUIRE_CONST_READ(getLayer(::std::declval<std::uint32_t>()), std::shared_ptr<const core::Layer>)
@@ -412,6 +413,7 @@ namespace
 		(void)surface.getLevelsHigh();
 		(void)surface.getLayerCount();
 		(void)surface.getLayerName(0);
+		(void)surface.layerSectorImageSet(0);
 		(void)surface.getLevelName(0);
 		(void)surface.getNumSectors();
 		(void)surface.getLayer(0);
@@ -545,6 +547,7 @@ void registerGameRuntimeReadSurface(std::vector<smoke::Check>& checks)
 			PF_SAME_READ(getLevelsHigh());
 			PF_SAME_READ(getLayerCount());
 			PF_SAME_OBJECT(getLayerName(0));
+			PF_SAME_OBJECT(layerSectorImageSet(0));
 			PF_SAME_OBJECT(getLevelName(0));
 			PF_SAME_READ(getNumSectors());
 			PF_SAME_READ(getLayer(0));

@@ -47,6 +47,7 @@ namespace core
 		std::string getSerializedString() const;
 		bool hasField(std::string const& name) const override;
 		bool fieldIsMap(std::string const& name) const override;
+	bool fieldIsArray(std::string const& name) const override;
 
 		void writeUint8(std::string const& name, uint8_t value) override;
 		void writeUint16(std::string const& name, uint16_t value) override;

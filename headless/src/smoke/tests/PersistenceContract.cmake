@@ -45,6 +45,12 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords accessPanels/roundTri
     agentRestoreRejectsBackgroundAndUnreachableDestination
     worldLayerNamesRoundTrip
     addedLayersAppendToTheBackAndRoundTrip
+    layerImageSetsRoundTripThroughBothFormats
+    aLayerWithNoSectorImageSetFieldOnTheWireInherits
+    aLegacyLayerNameOnlyDocumentLoadsEveryLayerInheriting
+    aLayerTableThatDisagreesWithTheLayerCountIsRefused
+    addingAndDeletingALayerKeepsEachBindingWithItsLayer
+    anEmptyLayerImageSetNameIsNotTheInheritState
     layerCountIsCappedAtCoreMaxLayers
     oversizedWorldDimensionsAreRefusedBeforeCellAccess
     levelsHaveNamesLimitsAndCascadingDeletion
