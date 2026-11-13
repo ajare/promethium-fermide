@@ -29,6 +29,11 @@
 //   - the pick is one undo step, and redo puts it back;
 //   - the pick moves that Layer's binding and nothing else: not the other
 //     Layers', not the four World-wide atlas selections;
+//   - a pick of the set the World itself selects is not an override: the
+//     Layer draws the same sheet every unbound Layer draws, so the Artwork
+//     panel leaves it out of its line while the row still shows the name
+//     (#1098), and the same binding starts being named the moment the
+//     World moves to a different set;
 //   - clearing the pick restores inherit through the same seam, and the
 //     Artwork panel's override line goes quiet again.
 //
@@ -250,6 +255,79 @@ namespace editor_smoke
 							+ ". The set above is what every other Layer draws.",
 					"the Artwork panel's override line does not name both overriding "
 					"Layers in order: " + editor::layerSectorOverrideSummary(*world));
+			} });
+
+		// A Layer bound to the very set the World already selects draws the
+		// identical sheet to every unbound Layer, so the Artwork panel does
+		// not name it as one of "their own" (#1098). The binding is not
+		// erased by that - the Layers table row still shows the bound name
+		// rather than the inherit label, which is where the author set it and
+		// where it stays visible - and the same binding becomes a real
+		// divergence the moment the World moves off it, which is when the
+		// sentence starts being true again. Both directions are pinned here
+		// because the filter has to follow the picture, not the presence of a
+		// binding: a Layer left out that draws differently would be the same
+		// lie in the other direction.
+		checks.push_back({ "layer-image-set/aBindingToTheWorldsOwnSetIsNotAnOverride",
+			[](smoke::Context const&)
+			{
+				State state;
+				CloseOnExit const closer;
+				auto const world = editor::openNewWorld("Same-as-World Sector binding", 8, 2);
+				require(world != nullptr, "the editor opened no World");
+				auto const document = editor::currentDocument();
+				require(document != nullptr, "the editor opened no document");
+				require(world->getLayerCount() >= 2,
+					"a fresh World came with fewer than two Layers");
+				require(world->sectorImageSetResourceName() == "SectorAtlas",
+					"a fresh World does not select the canonical Sector set: "
+						+ world->sectorImageSetResourceName());
+
+				// Bound to the World's own set: a real binding, no difference
+				// on screen, so the panel's line stays empty.
+				pick(*document, 0, world->sectorImageSetResourceName());
+				require(world->layerSectorImageSet(0)
+						== std::optional<std::string>("SectorAtlas"),
+					"the pick of the World's own Sector set did not reach the World");
+				// The row's own state is untouched by the panel leaving the Layer
+				// out: the Layers table still reads a bound name there rather than
+				// the inherit state, which is where the author sees what they set.
+				require(world->layerSectorImageSet(0).has_value(),
+					"a Layer bound to the World's own Sector set stopped reading as a "
+					"binding in the Layers table");
+				require(editor::layerSectorOverrideSummary(*world).empty(),
+					"the Artwork panel called a Layer wearing the World's own Sector "
+					"sheet one of their own: "
+					+ editor::layerSectorOverrideSummary(*world));
+
+				// A second Layer on a genuinely different sheet is still named,
+				// and it is named alone: the same-as-World Layer does not ride in
+				// with it.
+				pick(*document, 1, std::string("SectorAtlasLayer1"));
+				require(editor::layerSectorOverrideSummary(*world)
+						== "Layers with their own Sector sheet: "
+							+ world->getLayerName(1)
+							+ ". The set above is what every other Layer draws.",
+					"the Artwork panel's override line does not name the one Layer "
+					"drawing a different sheet, alone: "
+					+ editor::layerSectorOverrideSummary(*world));
+
+				// Move the World onto the set Layer 1 bound, and the two swap
+				// places without either binding being touched: Layer 1 now draws
+				// the World's sheet and drops out, Layer 0's untouched binding now
+				// differs and is named.
+				auto const before = document->authoring().captureSnapshot();
+				document->authoring().setSectorImageSetResourceName("SectorAtlasLayer1");
+				document->authoring().commitEdit(before);
+				require(world->sectorImageSetResourceName() == "SectorAtlasLayer1",
+					"the World's own Sector set did not move");
+				require(editor::layerSectorOverrideSummary(*world)
+						== "Layers with their own Sector sheet: "
+							+ world->getLayerName(0)
+							+ ". The set above is what every other Layer draws.",
+					"moving the World off a bound set did not swap which Layers the "
+					"panel calls overrides: "
+					+ editor::layerSectorOverrideSummary(*world));
 			} });
 
 		// Clearing is the same seam with nothing in it, and it restores

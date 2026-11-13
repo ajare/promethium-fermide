@@ -295,6 +295,7 @@ set(editor_names
     layer-image-set/aPickReachesTheWorldThePanelBindsTo
     layer-image-set/onePickIsOneUndoStepAndRedoes
     layer-image-set/aPickMovesNoOtherLayerAndNoWorldAtlas
+    layer-image-set/aBindingToTheWorldsOwnSetIsNotAnOverride
     layer-image-set/clearingRestoresInherit
     history/independentHistoriesDoNotLeakCommandsOrState
     isolation/normalAndExceptionalExit

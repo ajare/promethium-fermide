@@ -37,21 +37,34 @@ namespace editor
 		return "Inherit (" + worldSectorImageSet + ")";
 	}
 
-	// The Layers that bind a Sector Image set of their own, named in Layer
-	// order.
+	// The Layers that draw a Sector Image set other than the World's, named
+	// in Layer order.
 	//
 	// Empty when every Layer inherits, which is the case the Artwork panel
 	// stays quiet about: with nothing overriding, the Sector combo answers
 	// "what does this World draw" by itself, and a line saying so would be
 	// noise. Non-empty is the case where the combo no longer answers that on
 	// its own, which is exactly when the panel has to say why.
+	//
+	// A Layer bound to the very set the World itself selects is not listed
+	// (#1098). It is a real binding, but it draws the identical sheet to
+	// every unbound Layer, so naming it here would tell the author the
+	// picture differs when the picture is the same. This sentence is about
+	// the picture: it exists to explain why the combo above no longer
+	// answers for the whole World, and a Layer wearing the World's own sheet
+	// gives it nothing to explain. What the author set is not hidden either -
+	// the Layers table row shows the bound set name rather than the inherit
+	// label - and the moment the World moves to a different set the binding
+	// becomes a real divergence and shows up here by itself.
 	inline std::string layerSectorOverrideSummary(core::World const& world)
 	{
+		auto const& worldSet = world.sectorImageSetResourceName();
 		std::string names;
 		for (std::uint32_t layer = 0; layer < world.getLayerCount(); ++layer)
 		{
 			auto const& binding = world.layerSectorImageSet(layer);
 			if (!binding || binding->empty()) continue;
+			if (*binding == worldSet) continue;
 			if (!names.empty()) names += ", ";
 			names += world.getLayerName(layer);
 		}
