@@ -1,8 +1,16 @@
+#include <algorithm>
 #include <array>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include <applib/StateTransitionData.h>
 #include <willpower/application/StateExceptions.h>
@@ -33,6 +41,12 @@ void require(bool condition, char const* message) {
   if (!condition) throw std::runtime_error(message);
 }
 
+// The overload a message that names what it checked needs: "the sheet was
+// not loaded" tells you less than "sheet X was not loaded".
+void require(bool condition, std::string const& message) {
+  if (!condition) throw std::runtime_error(message);
+}
+
 // The PNG each headless stand-in decodes, kept in step with the `Image`
 // entries in Resources.yaml. A name with no entry here is a bundle change
 // this test has not caught up with, so it is reported rather than quietly
@@ -40,6 +54,7 @@ void require(bool condition, char const* message) {
 std::string headlessAtlasLocation(std::string const& name) {
   static std::map<std::string, std::string> const locations{
       {"SectorAtlasImage", "textures/sectors-new.png"},
+      {"SectorAtlasImageLayer1", "textures/sectors-new-layer1.png"},
       {"ObjectAtlasImage", "textures/objects-new.png"},
       {"AgentAtlasImage", "textures/agents-new.png"},
       {"FurnitureAtlasImage", "textures/furniture-new.png"},
@@ -971,6 +986,205 @@ void checkSelectedSectorAtlases(wp::application::resourcesystem::ResourceManager
   }
 }
 
+// #1092 - a World names more than one Sector sheet: its own, plus a binding
+// per Layer. The shipped game's atlas load step takes up every distinct one
+// of them, and the unload walks the same list backwards and gives each one
+// back exactly once.
+void checkLayerSectorSheets(wp::application::resourcesystem::ResourceManager& manager) {
+  using namespace wp::application::resourcesystem;
+
+  auto const heldCount = [](pf::application::MapResources const& resources,
+                           std::string const& name) {
+    auto const names = resources.getAtlasNames();
+    return std::count(names.begin(), names.end(), name);
+  };
+  auto const sheetUp = [&](std::string const& name) {
+    auto set = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource(name));
+    return set && manager.isResourceLoaded(set) && manager.isResourceLoaded(set->getImage());
+  };
+  auto const sheetDown = [&](std::string const& name) {
+    auto set = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource(name));
+    return set && !manager.isResourceLoaded(set) && !manager.isResourceCreated(set);
+  };
+  // A binding is an authoring act, so it goes through the authoring surface
+  // the same way the four World-wide selections do (#970).
+  auto const bind = [](pf::application::Map& map, std::uint32_t layer,
+                      std::optional<std::string> sheet) {
+    game::WorldAuthoring authoring(*map.getRuntime());
+    authoring.setLayerSectorImageSet(layer, std::move(sheet));
+  };
+  // The game's own log, read back once the logger has closed and flushed:
+  // a refusal the log does not carry is a refusal nobody heard about.
+  auto const readLog = [](std::filesystem::path const& path) {
+    std::ifstream file(path);
+    require(bool(file), "Could not read back the game's log at " + path.string());
+    std::stringstream body;
+    body << file.rdbuf();
+    return body.str();
+  };
+  auto const logPath = std::filesystem::temp_directory_path();
+  // A recoverable refusal must not come out of the load step as an
+  // exception, and the World has to be standing when it returns.
+  auto const loadedWithoutRefusal = [&](pf::application::MapResources& resources) {
+    bool refused{false};
+    try {
+      resources.loadAtlases();
+    } catch (std::exception const&) {
+      refused = true;
+    }
+    return !refused && resources.getMap() != nullptr
+        && resources.getMap()->getRuntime() != nullptr;
+  };
+  auto const join = [](std::vector<std::string> const& names) {
+    std::string text;
+    for (auto const& name : names) {
+      if (!text.empty()) text += ", ";
+      text += name;
+    }
+    return text;
+  };
+
+  // The World's own sheet leads and the Layer's own sheet follows, and both
+  // come back down.
+  {
+    pf::application::MapResources resources(manager);
+    resources.load();
+    bind(*resources.getMap(), 1, std::string("SectorAtlasLayer1"));
+    resources.loadAtlases();
+    require(heldCount(resources, "SectorAtlas") == 1,
+        "Map loading lost the World's own Sector sheet (#1092)");
+    require(heldCount(resources, "SectorAtlasLayer1") == 1,
+        "Map loading did not take up a Layer's own Sector sheet (#1092)");
+    require(sheetUp("SectorAtlasLayer1"),
+        "A Layer's Sector sheet was named but never loaded (#1092)");
+    // The whole list, in the order it was taken up: the World's own sheet
+    // first, the Layer's override beside it, then the viewport atlases.
+    auto const held = resources.getAtlasNames();
+    require(held == std::vector<std::string>{"SectorAtlas", "SectorAtlasLayer1", "ObjectAtlas",
+            "AgentAtlas", "FurnitureAtlas"},
+        "Map loading took up the wrong sheets: " + join(held) + " (#1092)");
+    resources.unload();
+    // Unload symmetry for the Sector family: every Sector sheet this guard
+    // took up is down again, the World's own sheet with the Layer's. The
+    // viewport atlases are not probed here because catalogues hold
+    // FurnitureAtlas up on their own account - that is the other-holders
+    // case, and it gets its own block below rather than a filter here.
+    require(sheetDown("SectorAtlas"),
+        "MapUnload left the World's own Sector sheet standing (#1092)");
+    require(sheetDown("SectorAtlasLayer1"),
+        "MapUnload left a Layer's Sector sheet standing (#1092)");
+  }
+
+  // Two Layers bound to one sheet take it up once. The count is the whole
+  // point: a sheet taken up twice is a sheet that never comes back down.
+  {
+    pf::application::MapResources resources(manager);
+    resources.load();
+    bind(*resources.getMap(), 0, std::string("SectorAtlasLayer1"));
+    bind(*resources.getMap(), 1, std::string("SectorAtlasLayer1"));
+    resources.loadAtlases();
+    require(heldCount(resources, "SectorAtlasLayer1") == 1,
+        "Two Layers naming one Sector sheet took it up more than once (#1092)");
+    require(sheetUp("SectorAtlasLayer1"),
+        "Two Layers naming one Sector sheet left it unloaded (#1092)");
+    resources.unload();
+    require(sheetDown("SectorAtlasLayer1"),
+        "MapUnload left a shared Sector sheet standing (#1092)");
+  }
+
+  // A Layer bound to the World's own sheet asks for nothing extra: that
+  // name is already on the list.
+  {
+    pf::application::MapResources resources(manager);
+    resources.load();
+    bind(*resources.getMap(), 1, std::string("SectorAtlas"));
+    resources.loadAtlases();
+    require(heldCount(resources, "SectorAtlas") == 1,
+        "A Layer naming the World's own Sector sheet took it up twice (#1092)");
+    resources.unload();
+  }
+
+  // A Layer may name a sheet that is also a World-wide slot. The name is
+  // taken up once, and the stricter of the two rules wins: naming the
+  // Objects atlas from a Layer does not make it optional.
+  {
+    pf::application::MapResources resources(manager);
+    resources.load();
+    bind(*resources.getMap(), 1, std::string("ObjectAtlas"));
+    resources.loadAtlases();
+    require(heldCount(resources, "ObjectAtlas") == 1,
+        "A Layer naming the Objects atlas took it up twice (#1092)");
+    require(sheetUp("ObjectAtlas"),
+        "The Objects atlas went missing when a Layer named it first (#1092)");
+    resources.unload();
+  }
+
+  // A binding that names nothing at all is recoverable. The World loads,
+  // the sheet is not held, and the game says which sheet it could not get.
+  {
+    auto const path = logPath / "pf-layer-sector-missing.log";
+    std::size_t held{1};
+    bool loaded{false};
+    {
+      wp::Logger logger;
+      require(logger.open(path.string()), "Could not open the game's log at " + path.string());
+      pf::application::MapResources resources(manager, &logger);
+      resources.load();
+      bind(*resources.getMap(), 1, std::string("NoSuchSectorSheet"));
+      loaded = loadedWithoutRefusal(resources);
+      held = heldCount(resources, "NoSuchSectorSheet");
+      resources.unload();
+    }
+    require(loaded, "A missing per-Layer Sector sheet refused the World (#1092)");
+    require(held == 0, "A Sector sheet that does not exist was held (#1092)");
+    auto const body = readLog(path);
+    require(body.find("NoSuchSectorSheet") != std::string::npos,
+        "The game's log does not name the Sector sheet it could not load: " + body);
+  }
+
+  // A binding that names something which is not a Sector sheet at all -
+  // here, a World - is the same recoverable answer, and says so differently.
+  {
+    auto const path = logPath / "pf-layer-sector-wrong-type.log";
+    std::size_t held{1};
+    bool loaded{false};
+    {
+      wp::Logger logger;
+      require(logger.open(path.string()), "Could not open the game's log at " + path.string());
+      pf::application::MapResources resources(manager, &logger);
+      resources.load();
+      bind(*resources.getMap(), 1, std::string("Citadel"));
+      loaded = loadedWithoutRefusal(resources);
+      held = heldCount(resources, "Citadel");
+      resources.unload();
+    }
+    require(loaded, "A Sector sheet of the wrong kind refused the World (#1092)");
+    require(held == 0, "A resource that is not an Image set was held as a Sector sheet (#1092)");
+    auto const body = readLog(path);
+    require(body.find("Citadel") != std::string::npos
+        && body.find("not an Image set") != std::string::npos,
+        "The game's log does not say the Sector sheet was the wrong kind: " + body);
+  }
+
+  // Unload releases its own acquisition and no more. A sheet another
+  // consumer still holds stays up after this guard comes down.
+  {
+    pf::application::MapResources resources(manager);
+    resources.load();
+    bind(*resources.getMap(), 1, std::string("SectorAtlasLayer1"));
+    resources.loadAtlases();
+    auto other = manager.acquireResource("SectorAtlasLayer1");
+    manager.createResource(other);
+    manager.loadResource(other);
+    resources.unload();
+    require(manager.isResourceLoaded(other),
+        "MapUnload took down a Sector sheet another holder still held (#1092)");
+    manager.releaseResource(other);
+    require(!manager.isResourceLoaded(other),
+        "The last holder of a Sector sheet did not bring it down (#1092)");
+  }
+}
+
 int main(int argc, char** argv) {
   try {
     require(argc == 2, "Expected the repository resource directory");
@@ -1001,8 +1215,8 @@ int main(int argc, char** argv) {
       // `declareResource` on a null one and take the process with it. The
       // stand-ins decode the real PNGs and stop at the upload boundary,
       // which is the point: this drives the resource graph, not a GPU.
-      for (auto name : {"SectorAtlasImage", "ObjectAtlasImage", "AgentAtlasImage",
-                       "FurnitureAtlasImage", "StationAtlasImage",
+      for (auto name : {"SectorAtlasImage", "SectorAtlasImageLayer1", "ObjectAtlasImage",
+                       "AgentAtlasImage", "FurnitureAtlasImage", "StationAtlasImage",
                        "StationFurnitureAtlasImage", "DoctorFemale1AtlasImage"})
         manager.addResource(std::make_shared<HeadlessAtlasImage>(name, manager, failAtlas, location));
       std::array<wp::application::StateFactory*, 6> factories{};
@@ -1018,6 +1232,7 @@ int main(int argc, char** argv) {
       checkFlow(factories, manager); // Recreate destroyed data with the same manager.
       checkFlow(factories, manager, true);
       checkSelectedSectorAtlases(manager);
+      checkLayerSectorSheets(manager);
       dllOnExit();
       require(!dllGetNextStateFactory(), "No factory after exit");
       dllOnExit();
