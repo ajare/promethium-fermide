@@ -1,6 +1,8 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -23,9 +25,11 @@ namespace pf::application::render {
 // into the target the host has bound; `destroy` releases the canvas while
 // the OpenGL context that created it is still current.
 //
-// Selecting is one step of `render`, over one table (`worldAtlasSlots`),
-// because the World owns the artwork choice and the game owns nothing but
-// handing all four of it over every frame (#1026).
+// Selecting is one step of `render`, over one table (`worldAtlasSlots`)
+// for the four World-wide atlases and one pass over the Layers for the
+// Sector sheets they bind (#1026, #1094), because the World owns the
+// artwork choice and the game owns nothing but handing all of it over
+// every frame.
 //
 // The game keeps no renderer of its own behind these calls: no command
 // stream class, no sector or object tilesets, no MPP consumer. The host's
@@ -84,6 +88,69 @@ struct WorldAtlasSelection
 // its object geometry visible instead of misaligned (#1022).
 std::vector<WorldAtlasSelection> applyWorldAtlasSelections(core::World const& world);
 
+// The entry a Layer's own Sector sheet is taken up through: it names the
+// sheet, installs it beside the World's own, and answers with the install
+// diagnostic - empty when the sheet is installed and resolves, and
+// otherwise the reason it is not.
+//
+// The shipped game drives the live render stack's own entry
+// (`installWorldLayerSectorImageSet`), which is the same entry the
+// editor's Layers table drives (#1091). It is a parameter rather than a
+// direct call for one reason: the render stack cannot exist without a
+// live OpenGL context, while the install it runs is GPU-free by design
+// (#1087). Taking the entry as an argument is what lets a CPU-only check
+// drive the game's own sync over the real install path instead of
+// re-implementing the sync beside it and proving nothing (#1094).
+using LayerSectorSheetInstall = std::function<std::string(std::string const&)>;
+
+// One Layer Sector sheet as the game's artwork sync took it up: the Layer
+// that asked for it, the sheet it is bound to, and what the install
+// answered.
+struct WorldLayerSectorSheet
+{
+	std::uint32_t layer{};
+	std::string name;
+	std::string diagnostic;
+
+	bool accepted() const { return diagnostic.empty(); }
+};
+
+// Takes up every distinct Sector sheet the Layers bind to, through
+// `install`, and answers with one entry per sheet taken up.
+//
+// A Layer with no binding asks for nothing: it inherits the World's
+// sector sheet, which the Sector slot already installed, and an empty
+// binding name asks for nothing either. A Layer bound to the World's own
+// set asks for nothing as well - that sheet is already in the registry
+// under that name, and putting it through the alongside path a second
+// time would replace the Sector slot's own entry behind the slot's back.
+// Two Layers bound to one sheet take it up once, and the entry names the
+// first of them.
+//
+// The install is cached per distinct name inside the renderer, so a
+// frame that changed nothing costs the lookups below and no disk read.
+std::vector<WorldLayerSectorSheet> applyWorldLayerSectorSheets(
+	core::World const& world, LayerSectorSheetInstall const& install);
+
+// Everything one frame's artwork sync answered.
+struct WorldArtworkSync
+{
+	std::vector<WorldAtlasSelection> selections;
+	std::vector<WorldLayerSectorSheet> layerSheets;
+};
+
+// The game's whole per-frame artwork sync, as one call: the four
+// World-wide atlas selections, then every distinct Layer Sector binding.
+//
+// The order is the contract. A Layer binding is skipped when it names the
+// World's own set, and the renderer makes the same skip against the
+// Sector slot's current name; both only read correctly once the World's
+// selection has gone through and that sheet is actually installed. Run
+// the Layer half first and a Layer bound to the World's own set would be
+// installed alongside a sheet that is not yet the drawn one (#1094).
+WorldArtworkSync syncWorldArtwork(core::World const& world,
+	LayerSectorSheetInstall const& install);
+
 // The game's report for a set of slot answers: every diagnostic the
 // renderer handed back, joined into the one message the game writes.
 // Empty when every slot was accepted. Each diagnostic already names its
@@ -128,8 +195,9 @@ bool worldCanvasActive();
 // readable through `worldCanvasViewport()`.
 WorldDrawList drawWorld(core::World const& world, float width, float height);
 
-// Records and submits in one call, selecting the World's four atlases
-// first. Does nothing without a live canvas.
+// Records and submits in one call, syncing the World's artwork first -
+// the four World-wide atlases and every distinct Layer Sector binding.
+// Does nothing without a live canvas.
 void renderWorldCanvas(core::World const& world, float width, float height);
 
 // The viewport the last record or render pass used, so a caller drawing an

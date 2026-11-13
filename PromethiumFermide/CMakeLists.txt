@@ -118,7 +118,13 @@ if(BUILD_TESTING)
     # 64 bits, but a different mangled name, so the tileset setters would
     # not resolve without this ordering.
     target_include_directories(pf_application_render_tests PRIVATE ${PF_REPO_ROOT}/pf-imgui-cpu/include render ${PF_REPO_ROOT}/pf-render/include ${PF_REPO_ROOT}/pf-agent-resources/include ${PF_REPO_ROOT}/launcher/include)
-    target_link_libraries(pf_application_render_tests PRIVATE PromethiumFermide)
+    # The per-Layer Sector binding fixture is an authoring act, so it goes
+    # in through the authoring seam - the same privileged route the
+    # application tests take (#970, #1094). The World under test is still
+    # the one the game's own WorldRuntime owns and the game's own load path
+    # loaded; only the way the fixture gets in is privileged.
+    target_link_libraries(pf_application_render_tests PRIVATE PromethiumFermide
+        pf-game-authoring)
     add_dependencies(pf_application_render_tests pf-application-assets)
     pf_apply_headless_verification_policy(pf_application_render_tests)
     willpower_deploy_runtime_dlls(pf_application_render_tests)

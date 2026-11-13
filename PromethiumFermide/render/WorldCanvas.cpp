@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -200,6 +202,45 @@ std::vector<WorldAtlasSelection> applyWorldAtlasSelections(core::World const& wo
 	return selections;
 }
 
+std::vector<WorldLayerSectorSheet> applyWorldLayerSectorSheets(
+	core::World const& world, LayerSectorSheetInstall const& install)
+{
+	std::vector<WorldLayerSectorSheet> sheets;
+	std::set<std::string> takenUp;
+	for (std::uint32_t layer = 0; layer < world.getLayerCount(); ++layer)
+	{
+		auto const& binding = world.layerSectorImageSet(layer);
+		// No binding is the inherit state, and an empty name asks for
+		// nothing either: neither is taken up, and the Layer draws the
+		// World's own sheet the Sector slot has already installed.
+		if (!binding || binding->empty()) continue;
+		// The World's own set is already in the registry under that name,
+		// installed by the Sector slot as the sheet that draws. Putting it
+		// through the alongside path again would replace that entry with a
+		// copy of itself while the slot still believes it owns it.
+		if (*binding == world.sectorImageSetResourceName()) continue;
+		// Two Layers bound to one sheet take it up once. The renderer
+		// caches per name so a second call would cost nothing, but the
+		// sheet is one thing and this list says what the game took up.
+		if (takenUp.insert(*binding).second)
+			sheets.push_back({layer, *binding, install(*binding)});
+	}
+	return sheets;
+}
+
+WorldArtworkSync syncWorldArtwork(core::World const& world,
+	LayerSectorSheetInstall const& install)
+{
+	WorldArtworkSync sync;
+	// The World's own sheet goes through first. Both halves of this sync
+	// skip a Layer bound to the World's own set, and the renderer makes
+	// its skip against the Sector slot's current name - neither of which
+	// reads right before that sheet is installed and drawn (#1094).
+	sync.selections = applyWorldAtlasSelections(world);
+	sync.layerSheets = applyWorldLayerSectorSheets(world, install);
+	return sync;
+}
+
 void createWorldCanvas(WorldRenderStackHost const& host, wp::Logger* report)
 {
 	gAtlasReport = report;
@@ -261,7 +302,21 @@ void renderWorldCanvas(core::World const& world, float width, float height)
 	// game came to draw the old Objects sheet while the World asked for
 	// the new one, and the Objects slot is the one whose refusal
 	// decides whether a Door's artwork sits inside its collision (#1026).
-	reportAtlasSelections(applyWorldAtlasSelections(world));
+	//
+	// The four slots are the World's own artwork. A Layer bound to its own
+	// Sector sheet is a fifth thing the frame has to take up, and until it
+	// did the shipped game drew the World's sheet everywhere no matter what
+	// the Layers bound: the binding resolved through a registry nothing
+	// on the game side had ever put the Layer's sheet into (#1094). The
+	// install is cached per distinct name in the renderer, so this costs
+	// the Layer walk and no disk read on a frame that changed nothing. A
+	// Layer sheet the install refuses is not reported here: the game has no
+	// artwork panel to show it in, and the load step already said so when
+	// it could not take the sheet up at all. What the canvas does with a
+	// sheet that resolved at load but paired badly is paint magenta, which
+	// is the same visible answer every other refused atlas gets.
+	auto const sync = syncWorldArtwork(world, &installWorldLayerSectorImageSet);
+	reportAtlasSelections(sync.selections);
 	auto const commands = drawWorld(world, width, height);
 	if (commands.commands().empty()) return;
 	renderWorldCommandsToHostTarget(commands, { 0.0f, 0.0f },

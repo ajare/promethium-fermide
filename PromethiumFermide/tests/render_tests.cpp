@@ -2,8 +2,11 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <yaml-cpp/yaml.h>
@@ -12,6 +15,7 @@
 #include <stdexcept>
 #include <core/World.h>
 #include <game/WorldRuntime.h>
+#include <game/WorldAuthoring.h>
 #include <core/Agent.h>
 #include "../../headless/src/smoke/support/AgentPoseTestAccess.h"
 #include "../../headless/src/support/SectorDrawSheet.h"
@@ -35,6 +39,7 @@
 #include "WorldCanvas.h"
 #include "Render.h"
 #include "WorldDrawList.h"
+#include "AtlasInstall.h"
 #include "SectorTileset.h"
 #include "ObjectTileset.h"
 
@@ -638,6 +643,276 @@ void checkStagedMap(std::filesystem::path const& directory) {
   require(!map->getRuntime(), "Drawing must not retain the World after MapUnload");
 }
 
+// #1094 - a Layer bound to its own Sector sheet draws that sheet in the
+// shipped game, not the World's.
+//
+// The whole chain runs here: the game's own atlas load (`MapResources`
+// scan / load / loadAtlases) takes the bound sheet up off the manifest,
+// the game's per-frame artwork sync installs it beside the World's own,
+// and the game's render pass records the World. The sheet identity is
+// then read off the recorded triangles, which is the only place a
+// per-Layer binding can be seen to have taken effect. A sheet that is
+// loaded and never installed draws the World's art - which is exactly
+// what the shipped game did with every check in the tree still green,
+// because every check that saw the Layer's sheet had installed it itself.
+//
+// The install handed to the sync is the renderer's own
+// `AtlasInstaller::installSectorSheet` - the very call
+// `WorldRenderStack::installLayerSectorImageSet` makes. The stack is the
+// one link in the chain that cannot exist without a live OpenGL context;
+// the install it runs is GPU-free by design (#1087), so the check
+// supplies that one piece of plumbing and the game's own sync decides
+// which sheets to take up and drives the install. Nothing in this check
+// installs a Layer's sheet of its own - it says which install the game
+// should be calling, and reads back which sheets the game actually asked
+// that install for.
+void checkLayerSectorSheetDrawing(std::filesystem::path const& directory) {
+  using namespace wp::application::resourcesystem;
+  wp::Logger logger;
+  mpp::Logger renderLogger;
+  mpp::ResourceManager renderResources(nullptr, &renderLogger);
+  ResourceManager manager(nullptr, &renderResources, nullptr, &logger);
+  registerApplicationResourceTypes(manager);
+  manager.addResourceLocationFactory("Directory",
+      [&logger](std::string const& path, std::string const& definition) -> ResourceLocation* {
+        return new DirectoryResourceLocation(&logger, path, definition);
+      });
+  manager.addResourceLocation("Directory", directory.string(), "Resources.yaml");
+
+  // Every name that has gone through the install the game was handed,
+  // since this was last cleared. "The game asked for this sheet" and "the
+  // game did not ask for that one" are both facts this check can read.
+  std::vector<std::string> installed;
+  pf::render::AtlasInstaller installer;
+  auto const install = [&](std::string const& name) {
+    installed.push_back(name);
+    std::string diagnostic;
+    try {
+      installer.installSectorSheet(name, manager.getResource(name), diagnostic);
+    } catch (std::exception const& error) {
+      diagnostic = error.what();
+    }
+    return diagnostic;
+  };
+
+  // The Sector triangles of one recorded frame, counted by the sheet each
+  // one says it was drawn from. That identity is what the renderer put on
+  // the command (#1089); read no further than the command itself, it says
+  // which sheet the pixels came from, which is the whole question.
+  auto const sectorSheets = [](WorldDrawList const& draws) {
+    std::map<std::string, int> bySheet;
+    for (auto const& command : draws.commands())
+      if (auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command); triangle
+          && triangle->texture == WorldDrawList::Texture::SectorAtlas)
+        ++bySheet[triangle->sectorSheet];
+    return bySheet;
+  };
+  auto const namesText = [](std::vector<std::string> const& names) {
+    std::string text;
+    for (auto const& name : names) {
+      if (!text.empty()) text += ", ";
+      text += name;
+    }
+    return text.empty() ? std::string("<none>") : text;
+  };
+  auto const sheetsText = [](std::map<std::string, int> const& bySheet) {
+    std::string text;
+    for (auto const& [sheet, count] : bySheet) {
+      if (!text.empty()) text += ", ";
+      text += sheet + " x" + std::to_string(count);
+    }
+    return text.empty() ? std::string("<none>") : text;
+  };
+  auto const askedFor = [](std::vector<std::string> const& names, std::string const& sheet) {
+    return static_cast<std::size_t>(std::count(names.begin(), names.end(), sheet));
+  };
+  auto const of = [](std::map<std::string, int> const& bySheet, std::string const& sheet) {
+    auto const found = bySheet.find(sheet);
+    return found == bySheet.end() ? 0 : found->second;
+  };
+  auto const total = [](std::map<std::string, int> const& bySheet) {
+    int cells{};
+    for (auto const& [sheet, count] : bySheet) cells += count;
+    return cells;
+  };
+
+  // The game's own load path, with the shipped manifest behind it.
+  pf::application::MapResources resources(manager);
+  resources.scan();
+  resources.load();
+  auto* map = resources.getMap();
+  require(map != nullptr && map->getRuntime() != nullptr,
+      "The game's own load path produced no World to draw (#1094)");
+  auto const& world = map->getRuntime()->world();
+  require(world.getLayerCount() >= 2,
+      "The shipped World has " + std::to_string(world.getLayerCount())
+          + " Layer(s); telling a bound Layer from an unbound one needs two (#1094)");
+  auto const worldSheet = world.sectorImageSetResourceName();
+  auto const layerSheet = std::string("SectorAtlasLayer1");
+  std::uint32_t const front{0};
+  std::uint32_t const back{1};
+  // A binding is an authoring act, so it goes in through the authoring
+  // seam the Layers table uses rather than onto the World by hand (#970).
+  auto const bind = [&](std::uint32_t layer, std::optional<std::string> sheet) {
+    game::WorldAuthoring authoring(*map->getRuntime());
+    authoring.setLayerSectorImageSet(layer, std::move(sheet));
+  };
+
+  // One frame the way the game's render pass runs it: sync the artwork,
+  // then record the World and count its Sector triangles by sheet.
+  struct Frame {
+    std::map<std::string, int> bySheet;
+    app::WorldArtworkSync sync;
+    std::vector<std::string> asked;
+  };
+  auto const frame = [&](char const* tag) {
+    installed.clear();
+    auto const sync = app::syncWorldArtwork(world, install);
+    Frame shot{sectorSheets(app::drawWorld(world, 1280, 720)), sync, installed};
+    require(total(shot.bySheet) > 0,
+        std::string("The shipped World drew no Sector artwork in the '") + tag
+            + "' pass, so nothing here can tell one sheet from another (#1094)");
+    return shot;
+  };
+
+  // The game takes its own sheets up off the manifest first.
+  resources.loadAtlases();
+
+  // The World's own sheet, installed the way the render stack installs it
+  // at start-up (#1002). Both sheets this check compares then come from
+  // the same install path, so anything they draw differently is something
+  // the binding did and nothing else.
+  std::string worldInstall;
+  installer.installSectorSlot(worldSheet, manager.getResource(worldSheet), worldInstall);
+  require(worldInstall.empty(),
+      "The World's own Sector sheet was refused by the install the game drives: " + worldInstall
+          + " (#1094)");
+
+  // ---- Nothing bound: every Sector wears the World's own sheet. ----------
+  auto const inherited = frame("inherit");
+  require(inherited.sync.layerSheets.empty() && inherited.asked.empty(),
+      "A World with no Layer bound took up a Layer Sector sheet: " + namesText(inherited.asked)
+          + " (#1094)");
+  require(inherited.bySheet.size() == 1 && of(inherited.bySheet, worldSheet) > 0,
+      "With no Layer bound, the game did not draw every Sector from the World's own '" + worldSheet
+          + "' sheet: " + sheetsText(inherited.bySheet) + " (#1094)");
+  auto const cells = total(inherited.bySheet);
+
+  // ---- The front Layer bound to its own sheet. ---------------------------
+  bind(front, layerSheet);
+  // The game's own atlas load takes the newly-bound sheet up off the
+  // manifest; the game's own artwork sync is what installs it beside the
+  // World's. Only the second step can fail the way this check is about: a
+  // sheet loaded and never installed draws the World's art.
+  resources.loadAtlases();
+  auto const frontBound = frame("front Layer bound");
+  require(askedFor(frontBound.asked, layerSheet) == 1,
+      "The game asked for the bound Layer sheet "
+          + std::to_string(askedFor(frontBound.asked, layerSheet))
+          + " time(s) through its own artwork sync, expected exactly once: "
+          + namesText(frontBound.asked) + " (#1094)");
+  require(askedFor(frontBound.asked, worldSheet) == 0,
+      "The game put the World's own sheet '" + worldSheet
+          + "' through the Layer alongside path, which replaces the Sector slot's own entry (#1094)");
+  require(frontBound.sync.layerSheets.size() == 1 && frontBound.sync.layerSheets[0].layer == front
+          && frontBound.sync.layerSheets[0].name == layerSheet
+          && frontBound.sync.layerSheets[0].accepted(),
+      "The Layer sheet the game took up is Layer "
+          + (frontBound.sync.layerSheets.empty()
+                 ? std::string("<none>")
+                 : std::to_string(frontBound.sync.layerSheets[0].layer) + " '"
+                       + frontBound.sync.layerSheets[0].name + "': "
+                       + frontBound.sync.layerSheets[0].diagnostic)
+          + " (#1094)");
+  auto const frontCells = of(frontBound.bySheet, layerSheet);
+  require(frontCells > 0,
+      "A Layer bound to its own Sector sheet drew no triangle from it; the game drew "
+          + sheetsText(frontBound.bySheet) + " (#1094)");
+  require(of(frontBound.bySheet, worldSheet) == cells - frontCells,
+      "Binding the front Layer left " + std::to_string(of(frontBound.bySheet, worldSheet))
+          + " of " + std::to_string(cells) + " Sector triangles on the World's sheet and moved "
+          + std::to_string(frontCells) + " onto the Layer's; the game drew "
+          + sheetsText(frontBound.bySheet) + " (#1094)");
+  require(total(frontBound.bySheet) == cells,
+      "Binding the Layer's own sheet changed how many Sector triangles are drawn ("
+          + std::to_string(total(frontBound.bySheet)) + " against " + std::to_string(cells)
+          + "); a binding is artwork only and moves no geometry (#1094)");
+
+  // ---- The back Layer bound instead: only its own triangles move. --------
+  bind(front, std::nullopt);
+  bind(back, layerSheet);
+  resources.loadAtlases();
+  auto const backBound = frame("back Layer bound");
+  auto const backCells = of(backBound.bySheet, layerSheet);
+  require(backCells > 0,
+      "A back Layer bound to its own Sector sheet drew no triangle from it, seen through the "
+          "apertures in front of it; the game drew " + sheetsText(backBound.bySheet) + " (#1094)");
+  require(total(backBound.bySheet) == cells,
+      "Binding the back Layer changed how many Sector triangles are drawn; a binding is artwork "
+          "only and moves no geometry (#1094)");
+  // Every Sector triangle belongs to exactly one Layer, so the front's
+  // share and the back's share are the whole canvas between them. Each
+  // binding moved its own Layer's triangles and no one else's.
+  require(frontCells + backCells == cells,
+      "Binding the front Layer moved " + std::to_string(frontCells) + " Sector triangles and "
+          "binding the back Layer moved " + std::to_string(backCells) + ", which is not the "
+          + std::to_string(cells) + " the canvas draws; one of the two bindings reached past its "
+          "own Layer (#1094)");
+
+  // ---- A Layer bound to the World's own set is not installed again. -----
+  bind(back, std::nullopt);
+  bind(front, worldSheet);
+  auto const asWorld = frame("bound to the World's own set");
+  require(asWorld.sync.layerSheets.empty() && asWorld.asked.empty(),
+      "A Layer bound to the World's own set was taken up through the Layer alongside path: "
+          + namesText(asWorld.asked) + ", which replaces the sheet the Sector slot owns (#1094)");
+  require(asWorld.bySheet == inherited.bySheet,
+      "A Layer bound to the World's own set did not draw what an unbound Layer draws: "
+          + sheetsText(asWorld.bySheet) + " against " + sheetsText(inherited.bySheet) + " (#1094)");
+
+  // ---- Two Layers bound to one sheet take it up once. ------------------
+  bind(front, layerSheet);
+  bind(back, layerSheet);
+  auto const shared = frame("two Layers, one sheet");
+  require(shared.asked.size() == 1 && shared.asked[0] == layerSheet,
+      "Two Layers bound to one Sector sheet took it up " + std::to_string(shared.asked.size())
+          + " time(s): " + namesText(shared.asked) + " (#1094)");
+  require(shared.sync.layerSheets.size() == 1 && shared.sync.layerSheets[0].layer == front
+          && shared.sync.layerSheets[0].accepted(),
+      "The shared Layer sheet was not reported as taken up once by the front Layer (#1094)");
+  require(of(shared.bySheet, worldSheet) == 0
+          && of(shared.bySheet, layerSheet) == cells,
+      "Two Layers bound to one sheet did not draw the whole canvas from it: "
+          + sheetsText(shared.bySheet) + " against " + std::to_string(cells)
+          + " Sector triangles (#1094)");
+
+  // ---- An empty binding name asks the game for nothing. ----------------
+  bind(front, std::string());
+  bind(back, std::nullopt);
+  auto const empty = frame("empty binding name");
+  require(empty.asked.empty() && empty.sync.layerSheets.empty(),
+      "An empty Layer binding name was taken up as a Sector sheet: " + namesText(empty.asked)
+          + " (#1094)");
+  require(empty.bySheet == inherited.bySheet,
+      "An empty Layer binding name changed what the Layer draws: " + sheetsText(empty.bySheet)
+          + " against " + sheetsText(inherited.bySheet) + " (#1094)");
+
+  // ---- Unbinding hands the Layer back to the World's sheet. --------------
+  bind(front, std::nullopt);
+  auto const cleared = frame("unbound again");
+  require(cleared.sync.layerSheets.empty() && cleared.asked.empty(),
+      "An unbound Layer still asked for a Sector sheet: " + namesText(cleared.asked) + " (#1094)");
+  require(cleared.bySheet == inherited.bySheet,
+      "Unbinding the Layer did not restore the World's own sheet: " + sheetsText(cleared.bySheet)
+          + " against " + sheetsText(inherited.bySheet) + " (#1094)");
+
+  resources.unload();
+  // This check put the real, installed World Sector sheet on the draw path;
+  // the checks that follow read the fixture the module installed for them,
+  // so put that back (#1094).
+  installAtlases(directory);
+}
+
 // The text the game could never draw before: a Sector's capacity readout and
 // a Marker's identification. Both are World text the shared producer emits
 // and the game's injected MPP-backed metrics make measurable (#1002).
@@ -1105,6 +1380,7 @@ int main(int argc, char** argv) {
     checkFurnitureCatalogueReload(directory);
     checkAtlasReload(directory);
     checkStagedMap(directory);
+    checkLayerSectorSheetDrawing(directory);
     checkCanvasAtlasSelection();
     checkAtlasSelectionWithoutRenderStack();
     checkCanvasAtlasReport();
