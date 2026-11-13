@@ -6,6 +6,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "DrawTypes.h"
 #include "ObjectTileset.h"
@@ -15,6 +16,7 @@
 namespace wp::application::resourcesystem
 {
 	class Resource;
+	class ResourceManager;
 }
 
 // The shared renderer's atlas install path (#1014, driven against the shipped
@@ -260,6 +262,16 @@ namespace pf::render
 		// How many sheets the registry holds.
 		std::size_t size() const { return mSheets.size(); }
 
+		// Every name the registry holds a sheet under, in key order.
+		//
+		// This is the list a reload walks (#1093). The registry is the
+		// authority on which Sector sheets are installed - the World's own,
+		// every Layer's, and any sheet a recorded batch bound itself to all
+		// arrive here - so anything that means to refresh *every* installed
+		// sheet has to ask the registry rather than some caller's own list of
+		// what it happened to take up.
+		std::vector<std::string> names() const;
+
 		// Drops every sheet, and the drawn selection with it.
 		void clear();
 
@@ -390,6 +402,15 @@ namespace pf::render
 		// instead of throwing through the UI.
 		void installAll(ViewportAtlasSlots& slots, bool objectsAreMandatory);
 
+		// Drops the cached atlas-set registry so the next install through
+		// this installer reads the file again (#1093).
+		//
+		// The read counts are kept. They record what this installer has read
+		// from disk, and a reload that re-parses the registry has to show up
+		// in them - a count that went back to zero with the cache would hide
+		// the one thing the reload is claiming.
+		void forgetRegistry() { mRegistry.reset(); }
+
 		// Everything this installer has read from disk. The seam #1035's
 		// checks are asserted through.
 		AtlasInstallReads const& reads() const { return mReads; }
@@ -413,4 +434,75 @@ namespace pf::render
 		std::shared_ptr<AtlasSetRegistry const> mRegistry;
 		AtlasInstallReads mReads;
 	};
+
+	// What one pass over the installed Sector sheets came back with (#1093).
+	//
+	// Every sheet the walk reached gets an entry under the name the registry
+	// keys it by, whether it came back or not. The names are the point: a
+	// person who just repainted one sheet has to be told which sheet the
+	// reload could not read, and a failure that names nothing cannot be
+	// told apart from a reload that never looked.
+	struct SectorSheetReload
+	{
+		struct Sheet
+		{
+			std::string name;
+			// Empty means the sheet was re-read and re-installed. Anything
+			// else is the reason it was not.
+			std::string diagnostic;
+		};
+
+		std::vector<Sheet> sheets;
+
+		// True when every sheet the walk reached came back.
+		bool clean() const;
+
+		// Every failure, one per line, in the order the sheets were walked.
+		std::string diagnostic() const;
+
+		// The entry recorded for one sheet, or nullptr when the walk never
+		// reached that name. A caller that did not reach a sheet changed
+		// nothing about it, and reads nothing back here to change its own
+		// record by.
+		Sheet const* find(std::string const& name) const;
+	};
+
+	// Re-reads every Sector sheet the keyed registry holds, off disk, and
+	// puts each one back through the install path under the name it is
+	// keyed by (#1093).
+	//
+	// The registry is walked rather than any caller's own list of sheets,
+	// because the registry is what says which sheets are installed. The
+	// World's own sheet, every Layer's sheet, and any sheet a recorded
+	// Sector batch bound itself to are all in it; a reload that refreshed
+	// only the sheet the Sector slot happens to carry would leave every
+	// other one serving the pixels it was first read with.
+	//
+	// Each sheet goes back through the resource manager's refresh - unload,
+	// destroy, create, load - and the destroy is the load-bearing step: a
+	// create on a resource still flagged as created returns early, so
+	// without it `parseData` never runs again and the texture is rebuilt
+	// from the pixels decoded at startup. The sheet's `Image` is refreshed
+	// with its `ImageSet` and before it, because the `Image` is the
+	// resource that holds the decoded file; refreshing only the set would
+	// re-read the definitions and leave the pixels exactly as they were.
+	//
+	// The atlas-set registry is re-parsed before the first sheet is
+	// re-installed, so a registry edited outside the application since the
+	// installer last read it is what the next frame installs from.
+	//
+	// The drawn sheet keeps the drawn role. The sheet the registry was
+	// drawing goes back in through the install that draws and every other
+	// sheet goes back in alongside it: a reload changes what each sheet is
+	// made of, not which sheet is on screen.
+	//
+	// One sheet's failure is that sheet's own. It is caught, named in the
+	// result, and the walk goes on to the next sheet. A sheet that failed
+	// is left exactly as it stood - nothing it holds is replaced on the way
+	// past - so the sheets that came back keep serving and the one that did
+	// not is reported rather than silently half-reloaded.
+	SectorSheetReload reloadSectorSheets(
+		wp::application::resourcesystem::ResourceManager& manager,
+		AtlasInstaller& installer);
+
 }

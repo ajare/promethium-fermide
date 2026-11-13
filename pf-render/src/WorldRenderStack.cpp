@@ -541,8 +541,18 @@ namespace
 				[this] { installObjectSlotArtwork(); });
 		}
 
-		// Reloads the four selected atlases from disk, definitions and images
-		// both.
+		// Reloads the artwork this stack draws from, off disk, definitions
+		// and images both.
+		//
+		// The Sector sheets are walked out of the keyed registry rather than
+		// out of this stack's own maps (#1093). The registry is what says
+		// which Sector sheets are installed - the World's own, every Layer's,
+		// and any sheet a recorded Sector batch bound itself to - while
+		// `mSectorSheets` records only what this stack took up and `mAtlases`
+		// only the one sheet the Sector slot carries. A reload that stopped
+		// at either of those left the rest serving the pixels they were first
+		// read with, which is exactly what the per-Layer bindings (#1091)
+		// made visible and this has to keep up with.
 		//
 		// This is a refresh, not a teardown, and the shared `Image` is why it
 		// has to be. The Objects, Agent and Furniture slots all reference
@@ -553,7 +563,10 @@ namespace
 		// refuses it. A refresh says something different - the resource is
 		// going back to the state it is already in, only read again - so the
 		// ref-count has nothing to object to, and every holder keeps the same
-		// resource object it had before.
+		// resource object it had before. The refresh still goes unload, destroy,
+		// create, load, and the destroy is the load-bearing step: a create on a
+		// resource still flagged as created returns early, so without it the
+		// file is never read again.
 		//
 		// Both halves get refreshed. The `Image` is the resource that holds the
 		// decoded PNG, so refreshing only the `ImageSet` would re-read the
@@ -565,38 +578,58 @@ namespace
 		// already holding it draw the new sheet without being torn down and
 		// rebuilt - which is just as well, since that churn was never what a
 		// reload needed.
+		//
+		// One sheet's failure is that sheet's own. The walk names it and moves
+		// on; the sheets that came back keep serving, and the slot that failed
+		// keeps its diagnostic so the panel still reports it and it keeps
+		// painting magenta until it is fixed.
 		std::string reloadImageSets()
 		{
-			// The registry is re-read rather than reused.
-			mAtlasInstaller = {};
-			// Every Layer sheet this stack took up drops its install cache, so the
-			// next sync installs it again from what is on disk now rather than
-			// answering from the diagnostic it left the first time (#1091).
-			mLayerSheetDiagnostics.clear();
 			std::vector<std::string> failures;
-			// Three of the four slots share one `Image`, so the same resource
-			// turns up in this pass several times. Once is enough.
-			std::set<resources::Resource*> refreshed;
 
-			// Every Layer sheet this stack took up goes back through the same
-			// refresh as the four slots, so a Layer's own sheet is re-read
-			// from disk and not left on the pixels it was first taken up
-			// with (#1091). The install itself happens on the next sync, once
-			// the cache above has been dropped.
-			for (auto& sheet : mSectorSheets)
+			// A Sector slot that came up empty - a start-up that could not
+			// take the set up - has no resource behind the name the walk is
+			// about to re-read. Take it up here the way a start-up would, so a
+			// reload can fix what the start-up could not.
+			if (!mAtlases.sector)
 			{
-				auto const imageSet = std::dynamic_pointer_cast<
-					resources::ImageSetResource>(sheet.second);
-				if (imageSet)
+				mAtlases.sectorDiagnostic.clear();
+				try { mAtlases.sector = requireImageSet(mAtlases.sectorName); }
+				catch (std::exception const& error)
 				{
-					auto const pixels = imageSet->getImage();
-					if (pixels && refreshed.insert(pixels.get()).second)
-						mResources->refreshResource(pixels);
+					mAtlases.sectorDiagnostic = error.what();
 				}
-				if (refreshed.insert(sheet.second.get()).second)
-					mResources->refreshResource(sheet.second);
 			}
 
+			// Every installed Sector sheet, keyed name by keyed name. The walk
+			// re-parses the atlas-set registry on its way in, so every install
+			// below - these sheets here and the three object-shaped slots after
+			// them - reads that registry off disk rather than the copy this
+			// stack has been installing from.
+			auto const sector = pf::render::reloadSectorSheets(*mResources,
+				mAtlasInstaller);
+			for (auto const& sheet : sector.sheets)
+			{
+				if (sheet.diagnostic.empty()) continue;
+				failures.push_back(sheet.diagnostic);
+			}
+			// The slot's own diagnostic follows the sheet the slot carries, so
+			// the Artwork panel keeps reporting it and the slot keeps painting
+			// magenta if that is the sheet that failed. A sheet the walk never
+			// reached is a sheet nothing was changed for, and there is nothing
+			// here to write over the slot's record of it.
+			if (auto const* sheet = sector.find(mAtlases.sectorName))
+				mAtlases.sectorDiagnostic = sheet->diagnostic;
+			// Every Layer sheet drops its cached install answer, so the next
+			// sync asks for the sheet again and gets the answer this reload
+			// produced rather than the one it left the first time (#1091).
+			mLayerSheetDiagnostics.clear();
+
+			// The three object-shaped slots. They are not Sector sheets and so
+			// are not in that registry: each is one sheet, held by the slot that
+			// draws it. Three of them share one `Image`, so the same resource
+			// turns up in this pass several times. Once is enough.
+			std::set<resources::Resource*> refreshed;
 			struct ReloadableSlot
 			{
 				char const* label;
@@ -606,9 +639,6 @@ namespace
 				void (WorldRenderStack::*install)();
 			};
 			std::vector<ReloadableSlot> const slots{
-				{ "Sector", &mAtlases.sectorName, &mAtlases.sector,
-					&mAtlases.sectorDiagnostic,
-					&WorldRenderStack::installSectorSlotArtwork },
 				{ "Objects", &mAtlases.objectName, &mAtlases.objects,
 					&mAtlases.objectDiagnostic,
 					&WorldRenderStack::installObjectSlotArtwork },

@@ -5817,12 +5817,13 @@ void renderDocumentToolbar(editor::DocumentPtr& document)
 	ImGui::SameLine();
 	imgui::ToggleButton("Agent Debug", "Agent debug", &gUISettings.renderAgentDebug);
 
-	// Reloads the artwork the open World has selected, definitions and images
-	// both: the four atlas `ImageSet`s and their PNGs come back off disk, and
-	// so do the authored tilesets and the atlas-set registry that pair them.
-	// It is a toolbar action rather than a panel one because the person who
-	// just repainted a sheet or edited a tileset wants it one click from
-	// anywhere, without reopening the World panel to find it.
+	// Reloads the artwork the open World draws from, definitions and images
+	// both: every installed Sector sheet - the World's own and every Layer's -
+	// plus the Objects, Agent and Furniture atlases, and the authored tilesets
+	// and the atlas-set registry that pair them. It is a toolbar action rather
+	// than a panel one because the person who just repainted a sheet or edited
+	// a tileset wants it one click from anywhere, without reopening the World
+	// panel to find it.
 	ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
 	ImGui::BeginDisabled(world == nullptr);
 	if (ImGui::Button(ICON_FA_SYNC "##ReloadArtwork"))
@@ -5831,8 +5832,8 @@ void renderDocumentToolbar(editor::DocumentPtr& document)
 		if (!diagnostic.empty()) reportEditorError("Artwork", diagnostic);
 	}
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Reload the selected artwork from disk - the four atlas "
-			"definitions and their images");
+		ImGui::SetTooltip("Reload every installed Sector sheet and the other "
+			"atlases from disk - their definitions, tilesets and images");
 	ImGui::EndDisabled();
 
 	ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);

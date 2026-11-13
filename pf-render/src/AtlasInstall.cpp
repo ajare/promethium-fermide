@@ -16,6 +16,7 @@
 #include <willpower/application/resourcesystem/ImageResource.h>
 #include <willpower/application/resourcesystem/ImageSetResource.h>
 #include <willpower/application/resourcesystem/Resource.h>
+#include <willpower/application/resourcesystem/ResourceManager.h>
 #include <yaml-cpp/yaml.h>
 
 #include "ObjectTileset.h"
@@ -277,6 +278,14 @@ namespace pf::render
 		mDrawingName.clear();
 	}
 
+	std::vector<std::string> SectorSheetRegistry::names() const
+	{
+		std::vector<std::string> names;
+		names.reserve(mSheets.size());
+		for (auto const& [name, sheet] : mSheets) names.push_back(name);
+		return names;
+	}
+
 	SectorSheetRegistry& sectorSheetRegistry()
 	{
 		// Made on first use rather than at static initialisation. Every
@@ -284,6 +293,110 @@ namespace pf::render
 		// function-local makes what order it is built in a non-question.
 		static SectorSheetRegistry registry;
 		return registry;
+	}
+
+	// ------------------------------------------------------------------
+	// The reload: every installed Sector sheet read again from disk (#1093).
+	// ------------------------------------------------------------------
+
+	bool SectorSheetReload::clean() const
+	{
+		for (auto const& sheet : sheets)
+			if (!sheet.diagnostic.empty()) return false;
+		return true;
+	}
+
+	std::string SectorSheetReload::diagnostic() const
+	{
+		std::string joined;
+		for (auto const& sheet : sheets)
+		{
+			if (sheet.diagnostic.empty()) continue;
+			if (!joined.empty()) joined += "\n";
+			joined += sheet.diagnostic;
+		}
+		return joined;
+	}
+
+	SectorSheetReload::Sheet const* SectorSheetReload::find(
+		std::string const& name) const
+	{
+		for (auto const& sheet : sheets)
+			if (sheet.name == name) return &sheet;
+		return nullptr;
+	}
+
+	SectorSheetReload reloadSectorSheets(resources::ResourceManager& manager,
+		AtlasInstaller& installer)
+	{
+		SectorSheetReload result;
+		auto& registry = sectorSheetRegistry();
+		// The names are snapshotted before anything is written. The walk
+		// replaces the entry it is working on, and walking the live map
+		// while doing that is how an iterator-invalidation story starts.
+		auto const names = registry.names();
+		// Read before the walk, not per sheet: which sheet draws is a fact
+		// about the registry as it was when the reload started, and the walk
+		// is about to write to that registry.
+		auto const drawn = registry.drawingName();
+		// The atlas-set registry goes first. Every install below asks it
+		// which authored tileset to pair with the sheet, and a cached answer
+		// is exactly what a reload is not supposed to give (#1093).
+		installer.forgetRegistry();
+		// Two sheets cut from one `Image` are common enough - and a second
+		// decode of the same file for the same reload buys nothing - so each
+		// image is refreshed once. The pointer identifies the resource; the
+		// manager holds one instance per name, so it is a stable identity.
+		std::set<resources::Resource*> refreshed;
+
+		for (auto const& name : names)
+		{
+			resources::ResourcePtr resource;
+			std::string failure;
+			try
+			{
+				resource = manager.getResource(name);
+				auto const imageSet = std::dynamic_pointer_cast<
+					resources::ImageSetResource>(resource);
+				if (!imageSet)
+					throw std::runtime_error(name + " is not an ImageSet resource, "
+						"so the sheet installed under it has no artwork to re-read");
+				auto const pixels = imageSet->getImage();
+				if (!pixels)
+					throw std::runtime_error(name + " has no Image resource to "
+						"re-read its sheet's pixels from");
+				// The `Image` goes first: it is the resource holding the
+				// decoded file, and the set is re-read over a sheet that is
+				// already current.
+				if (refreshed.insert(pixels.get()).second)
+					manager.refreshResource(pixels);
+				manager.refreshResource(resource);
+			}
+			catch (std::exception const& error)
+			{
+				// Named with the sheet, so the caller's report says which one
+				// and the walk carries on to the next.
+				failure = name + ": " + error.what();
+			}
+
+			if (failure.empty())
+			{
+				// Re-pair the sheet from what was just re-read and put it back
+				// under the same key. The sheet the registry was drawing goes
+				// back through the install that draws; every other sheet goes
+				// back in alongside it, so the reload changes no sheet's place
+				// on screen (#1091).
+				std::string diagnostic;
+				if (name == drawn)
+					installer.installSectorSlot(name, resource, diagnostic);
+				else
+					installer.installSectorSheet(name, resource, diagnostic);
+				if (!diagnostic.empty())
+					failure = name + ": " + diagnostic;
+			}
+			result.sheets.push_back({ name, failure });
+		}
+		return result;
 	}
 
 	// ------------------------------------------------------------------

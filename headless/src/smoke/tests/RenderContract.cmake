@@ -281,6 +281,9 @@ set(names
     layerImageSet/aBindingThatNamesNoInstalledSheetDrawsTheWorldsSheet
     layerImageSet/theWireframeOverlayDrawsNoTiles
     layerImageSet/theLocationPlanCanvasKeepsTheWorldsSectorSheet
+    artworkReload/aChangedSecondSheetIsPickedUp
+    artworkReload/theAtlasSetRegistryIsReparsed
+    artworkReload/everyFailedSheetIsNamedAndTheOthersKeepServing
     vehicleArtworkNew/vehicleTilesAreRegistered
     vehicleArtworkNew/carriageComposesAtTwoThreeAndFourCellsWide
     vehicleArtworkNew/connectorSitsAtTheSeamNotACellPosition

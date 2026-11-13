@@ -189,22 +189,35 @@ std::string selectWorldFurnitureImageSet(std::string const& name);
 // Layers table shows on the combo (#1091).
 std::string installWorldLayerSectorImageSet(std::string const& name);
 
-// Reloads the four currently-selected viewport atlases from disk, the
-// definitions and the images both. Each slot's `ImageSet` and its paired
-// `Image` are released, destroyed, and taken back through create and load.
-// The destroy is the load-bearing step: Willpower's `unload` leaves the
-// resource flagged as created, and `_createResource` returns early on a
-// created resource, so without it `parseData` never runs again and the
-// texture is rebuilt from the pixels decoded at startup. With it, the PNG is
-// read afresh. Each slot's authored tileset is read again and re-paired with
-// the pixel regions the `ImageSet` declares, and the atlas-set registry is
-// re-parsed as well, rather than served from the cache the stack has been
-// installing from, so a definition edited outside the editor since it
-// started is what the next frame draws.
+// Reloads the artwork the stack draws from, off disk, the definitions and
+// the images both.
 //
-// Returns a diagnostic naming every slot that failed to reload, one per
-// line; empty means all four came back. A slot that fails keeps its own
-// diagnostic too, so the Artwork panel still reports it and the slot draws
-// magenta until it is fixed. With no render stack there is nothing to
-// reload, and that is reported rather than answered with an empty string.
+// Every distinct installed Sector sheet goes back through it, not just the
+// one the Sector slot carries: the walk is over the keyed install registry
+// (#1087), which is what says which sheets exist - the World's own, every
+// Layer's, and any sheet a recorded Sector batch bound itself to. Each
+// sheet's `ImageSet` and its paired `Image` go back through the resource
+// manager's refresh - unload, destroy, create, load - and the destroy is the
+// load-bearing step: Willpower's `unload` leaves the resource flagged as
+// created, and `_createResource` returns early on a created resource, so
+// without it `parseData` never runs again and the texture is rebuilt from
+// the pixels decoded at startup. With it, the PNG is read afresh. Each
+// sheet's authored tileset is read again and re-paired with the pixel
+// regions the `ImageSet` declares, and the atlas-set registry is re-parsed
+// as well, rather than served from the cache the stack has been installing
+// from, so a definition edited outside the editor since it started is what
+// the next frame draws. The sheet that was being drawn keeps being drawn:
+// a reload changes what every sheet is made of, not which sheet is on
+// screen.
+//
+// The Objects, Agent and Furniture slots are reloaded with them, on the
+// same refresh path.
+//
+// Returns a diagnostic naming every sheet and slot that failed to reload,
+// one per line; empty means everything came back. A sheet that failed keeps
+// its own diagnostic too, so the Artwork panel still reports it and it
+// draws magenta until it is fixed, and the sheets that came back keep
+// serving - one bad file does not stop the reload. With no render stack
+// there is nothing to reload, and that is reported rather than answered
+// with an empty string.
 std::string reloadWorldArtwork();

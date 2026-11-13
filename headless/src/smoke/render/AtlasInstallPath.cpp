@@ -272,6 +272,16 @@ namespace
 			return resource;
 		}
 
+		// The manager itself, for the checks that drive the resource manager
+		// rather than only what it hands out: a reload is a refresh, and the
+		// seam under test takes the manager and the installer, not a resource
+		// the check happens to be holding (#1093).
+		resources::ResourceManager& manager() const { return *mManager; }
+
+		// The staged directory, so a check can change a staged file the way
+		// an artist repainting a sheet changes the file the manifest names.
+		std::filesystem::path const& directory() const { return mDirectory; }
+
 		~ResourceManagerOver()
 		{
 			// A check that threw part-way through still has to hand back what
@@ -440,6 +450,13 @@ namespace
 		{
 			return mResources->load(name);
 		}
+
+		resources::ResourceManager& manager() const { return mResources->manager(); }
+
+		// The staged directory. A reload check has to reach into it and change
+		// a staged image file, because the thing being proven is that the
+		// file on disk is what the next reload reads (#1093).
+		std::filesystem::path const& directory() const { return mDirectory; }
 
 	private:
 		std::filesystem::path mDirectory;
@@ -2955,6 +2972,225 @@ namespace
 		require(sheets.drawnName() == "SectorAtlas", "The World's own sheet "
 			"moved while only Layer bindings were being changed");
 	}
+
+	// ------------------------------------------------------------------
+	// The reload: every installed Sector sheet read again from disk (#1093).
+	//
+	// This is the ticket that makes the reload walk the keyed registry
+	// rather than stop at the one sheet the Sector slot carries. Everything
+	// below drives the same seam the editor's Reload Artwork button drives -
+	// the reload sits in the GPU-free install path for exactly this reason -
+	// against a real resource manager over staged copies of the shipped
+	// sheets, and changes those staged files between the install and the
+	// reload the way an artist changes a sheet between saves.
+	//
+	// What is pinned, in the order the checks run:
+	//
+	//   - a changed second sheet is picked up: the sheet installs from the
+	//     file as it is now and not from what the first install decoded,
+	//     while the World's own sheet - untouched on disk - keeps what it
+	//     had, and the sheet on screen does not move;
+	//   - the atlas-set registry is re-parsed as part of the reload rather
+	//     than served from the cache the installer has been pairing from,
+	//     and the second sheet's authored tileset is read again with it;
+	//   - a sheet whose file no longer reads is named in the diagnostic,
+	//     and the sheets walked before it and after it keep serving.
+	// ------------------------------------------------------------------
+
+	// Installs the World's own sheet on the draw path and the named sheets
+	// beside it, the way a Layer binding installs, and requires every
+	// install to have been accepted. A reload check that started from a
+	// refused install would be reporting on nothing.
+	void installWorldAndAlongsideSheets(pf::render::AtlasInstaller& installer,
+		StagedAtlasDirectory const& staged,
+		std::vector<std::string> const& alongside)
+	{
+		std::string diagnostic;
+		installer.installSectorSlot("SectorAtlas", staged.load("SectorAtlas"),
+			diagnostic);
+		require(diagnostic.empty(), "The World's own Sector sheet was refused: "
+			+ diagnostic);
+		for (auto const& name : alongside)
+		{
+			diagnostic.clear();
+			installer.installSectorSheet(name, staged.load(name), diagnostic);
+			require(diagnostic.empty(), "The Sector sheet '" + name + "' was "
+				"refused by the install that puts it beside the World's: "
+				+ diagnostic);
+		}
+	}
+
+	// How many of the walked sheets came back with a failure against them.
+	std::size_t reloadFailures(pf::render::SectorSheetReload const& reload)
+	{
+		std::size_t failures{};
+		for (auto const& sheet : reload.sheets)
+			if (!sheet.diagnostic.empty()) ++failures;
+		return failures;
+	}
+
+	void reloadPicksUpAChangedSecondSheet(smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		StagedAtlasDirectory staged{ context, "reload-second-sheet",
+			{ "SectorAtlas", "StationAtlas" } };
+		pf::render::AtlasInstaller installer;
+		installWorldAndAlongsideSheets(installer, staged, { "StationAtlas" });
+		auto& registry = pf::render::sectorSheetRegistry();
+		require(registry.size() == 2, "Two Sector sheets were installed and the "
+			"registry holds " + std::to_string(registry.size()) + " before the "
+			"reload, so there is no second sheet here for a reload to pick up");
+
+		auto const* before = registry.find("StationAtlas");
+		auto const* worldBefore = registry.find("SectorAtlas");
+		require(before != nullptr && before->installed(), "The second Sector "
+			"sheet is not installed, so this check would prove nothing about a "
+			"reload");
+		require(worldBefore != nullptr && worldBefore->installed(), "The World's "
+			"own Sector sheet is not installed");
+		auto const replacement = staged.directory() / "textures/sectors-new.png";
+		auto const replacementWidth = pngSize(replacement).first;
+		require(before->tileset.width != replacementWidth,
+			"The staged second sheet already installs at the width of the image "
+			"this check copies over it, so a reload that read nothing at all "
+			"would still pass");
+		auto const worldWidth = worldBefore->tileset.width;
+
+		// The second sheet's file changes on disk: a different picture at a
+		// different size, copied over the staged Station image at the very
+		// path the staged manifest names for it. That is what an artist
+		// repainting a Layer's sheet does, and it is the whole story the
+		// Reload Artwork button exists for.
+		std::filesystem::copy_file(replacement,
+			staged.directory() / "textures/station-128x320.png",
+			std::filesystem::copy_options::overwrite_existing);
+
+		auto const reload = pf::render::reloadSectorSheets(staged.manager(),
+			installer);
+		require(reload.clean(), "Reloading the installed Sector sheets after a "
+			"changed second sheet reported: " + reload.diagnostic());
+		// The walk went over the registry rather than over the sheet the
+		// World's slot carries: both installed sheets are in the result.
+		require(reload.sheets.size() == 2, "The reload walked "
+			+ std::to_string(reload.sheets.size()) + " sheet(s) out of a "
+			"registry holding 2, so it did not walk the registry (#1093)");
+
+		auto const* after = registry.find("StationAtlas");
+		require(after != nullptr && after->installed(), "The second Sector sheet "
+			"is not installed after a reload that reported it clean");
+		require(after->tileset.width == replacementWidth, "The second Sector "
+			"sheet still installs " + std::to_string(after->tileset.width)
+			+ " wide after a reload whose image file had become a "
+			+ std::to_string(replacementWidth) + "-wide sheet; the reload served "
+			"the pixels decoded at the first install instead of reading the "
+			"changed file (#1093)");
+		// The World's own sheet was untouched on disk and is exactly what it
+		// was, still the sheet the draw path reaches.
+		auto const* world = registry.find("SectorAtlas");
+		require(world != nullptr && world->installed()
+			&& world->tileset.width == worldWidth,
+			"The World's own Sector sheet changed size across a reload that "
+			"changed only the second sheet's file, so the reload put something "
+			"other than what it read into a sheet nobody touched");
+		require(registry.drawingName() == "SectorAtlas", "The reload moved the "
+			"drawn sheet to '" + registry.drawingName() + "'; a reload changes "
+			"what every sheet is made of, not which one is on screen");
+	}
+
+	void reloadReparsesTheAtlasSetRegistry(smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		StagedAtlasDirectory staged{ context, "reload-registry",
+			{ "SectorAtlas", "StationAtlas" } };
+		pf::render::AtlasInstaller installer;
+		installWorldAndAlongsideSheets(installer, staged, { "StationAtlas" });
+		auto const parsesBefore = installer.reads().registryParses;
+		require(parsesBefore == 1, "The two installs parsed the atlas-set "
+			"registry " + std::to_string(parsesBefore) + " time(s); #1035 says "
+			"one parse per installer, and this check needs that baseline in "
+			"order to notice the reload parsing it again");
+		auto const stationBefore = installer.reads().tilesetLoadsByAtlas.count(
+			"StationAtlas") ? installer.reads().tilesetLoadsByAtlas.at(
+				"StationAtlas") : 0;
+
+		auto const reload = pf::render::reloadSectorSheets(staged.manager(),
+			installer);
+		require(reload.clean(), "Reloading the installed Sector sheets "
+			"reported: " + reload.diagnostic());
+		require(installer.reads().registryParses > parsesBefore, "The reload "
+			"installed every sheet from the atlas-set registry parsed before it "
+			"ran - " + std::to_string(installer.reads().registryParses)
+			+ " parse(s) in all - so a registry edited since the stack started "
+			"would still be served from that first read (#1093)");
+		auto const stationAfter = installer.reads().tilesetLoadsByAtlas.count(
+			"StationAtlas") ? installer.reads().tilesetLoadsByAtlas.at(
+				"StationAtlas") : 0;
+		require(stationAfter > stationBefore, "The reload re-installed the second "
+			"sheet without re-reading its authored tileset (" + std::to_string(
+				stationAfter) + " read(s) since this installer was made, against "
+			+ std::to_string(stationBefore) + " before the reload), so the "
+			"tileset that sheet draws from is still the one read at the first "
+			"install");
+	}
+
+	void reloadNamesEveryFailedSheetAndLeavesTheOthersServing(
+		smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		StagedAtlasDirectory staged{ context, "reload-failure",
+			{ "SectorAtlas", "SectorAtlasLayer1", "StationAtlas" } };
+		pf::render::AtlasInstaller installer;
+		installWorldAndAlongsideSheets(installer, staged,
+			{ "SectorAtlasLayer1", "StationAtlas" });
+		auto& registry = pf::render::sectorSheetRegistry();
+		require(registry.size() == 3, "Three Sector sheets were installed and "
+			"the registry holds " + std::to_string(registry.size())
+			+ " before the reload");
+		// The Layer-1 sheet's file goes to something no decoder will take.
+		// Its key sorts between the World's sheet and the Station sheet, so
+		// the walk has to carry on past the failure to reach the last one -
+		// which is the claim this check is really about.
+		{
+			std::ofstream out(staged.directory()
+				/ "textures/sectors-new-layer1.png", std::ios::binary);
+			out << "not a PNG, and not anything a decoder will take";
+		}
+
+		auto const reload = pf::render::reloadSectorSheets(staged.manager(),
+			installer);
+		require(!reload.clean(), "A Sector sheet whose image file no longer "
+			"decodes came back clean from the reload, so nothing was said about "
+			"a sheet that could not be read (#1093)");
+		auto const* failed = reload.find("SectorAtlasLayer1");
+		require(failed != nullptr, "The reload result names no Layer-1 sheet, so "
+			"the walk never reached the sheet whose file was broken");
+		require(failed->diagnostic.find("SectorAtlasLayer1")
+			!= std::string::npos, "The reload diagnostic does not name the "
+			"sheet it failed on: '" + failed->diagnostic + "'");
+		require(reloadFailures(reload) == 1, "Breaking one of three installed "
+			"Sector sheets produced " + std::to_string(reloadFailures(reload))
+			+ " failures; the reload is supposed to name the sheet that failed "
+			"and leave the others alone");
+		// The sheets that came back are still installed, still resolvable as
+		// themselves, and the sheet on screen never moved.
+		require(registry.size() == 3, "The reload left "
+			+ std::to_string(registry.size()) + " sheet(s) in a registry that "
+			"held 3; one bad file took sheets down with it");
+		require(registry.drawingName() == "SectorAtlas", "The reload moved the "
+			"drawn sheet to '" + registry.drawingName() + "' while handling a "
+			"failure that was not its own");
+		auto const* world = registry.find("SectorAtlas");
+		auto const* station = registry.find("StationAtlas");
+		require(world != nullptr && world->installed()
+			&& world->tileset.family == SectorTilesetFamily::New,
+			"The World's own Sector sheet stopped resolving as the New-family "
+			"sheet it was installed as, so a failure on another sheet took it "
+			"down with it");
+		require(station != nullptr && station->installed()
+			&& station->tileset.family == SectorTilesetFamily::Old,
+			"The sheet walked after the failure is not installed, so the reload "
+			"stopped at the first bad file instead of leaving the others serving");
+	}
 }
 
 void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
@@ -3013,4 +3249,10 @@ void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
 		isolated<theWireframeOverlayDrawsNoTiles> });
 	checks.push_back({ "layerImageSet/theLocationPlanCanvasKeepsTheWorldsSectorSheet",
 		isolated<theLocationPlanCanvasKeepsTheWorldsSectorSheet> });
+	checks.push_back({ "artworkReload/aChangedSecondSheetIsPickedUp",
+		isolated<reloadPicksUpAChangedSecondSheet> });
+	checks.push_back({ "artworkReload/theAtlasSetRegistryIsReparsed",
+		isolated<reloadReparsesTheAtlasSetRegistry> });
+	checks.push_back({ "artworkReload/everyFailedSheetIsNamedAndTheOthersKeepServing",
+		isolated<reloadNamesEveryFailedSheetAndLeavesTheOthersServing> });
 }
