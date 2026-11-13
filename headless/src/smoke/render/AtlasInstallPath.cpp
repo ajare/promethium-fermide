@@ -34,6 +34,7 @@
 #include "ObjectTileset.h"
 #include "Render.h"
 #include "SectorDrawSheet.h"
+#include "SectorSheetHoldings.h"
 #include "SectorTileset.h"
 #include "TileArtwork.h"
 #include "UISettings.h"
@@ -3526,6 +3527,269 @@ namespace
 			"the pairing refusals before it instead of carrying on to the sheets "
 			"after them (#1095)");
 	}
+
+	// ------------------------------------------------------------------
+	// #1097 - the Sector sheet holdings release what nothing binds.
+	//
+	// `WorldRenderStack` holds every Sector sheet it took up beyond the one
+	// its Sector slot carries - one per Layer binding (#1091), plus any sheet
+	// a recorded Sector batch bound itself to (#1089). Until #1097 the only
+	// thing that let any of them go was the stack's destructor, so a Layer
+	// that was unbound left its sheet held. The holding half of that moved
+	// into `pf::render::SectorSheetHoldings`, which needs no GL context,
+	// and that is what these checks drive: the same acquire and the same
+	// release the stack runs, against a real resource manager over the
+	// shipped manifest.
+	//
+	// The half that cannot be driven here is the batch drop - a batch is a
+	// GPU object, and the stack is the only place one exists. What the checks
+	// below pin is the release contract the stack relies on when it drops
+	// the binding batches and calls `release()` with the answer: what comes
+	// down, what stays up, and that one held sheet means exactly one
+	// reference handed back.
+	// ------------------------------------------------------------------
+
+	// The staged atlas pair every check below works from: the World's own
+	// Sector sheet and the Layer-1 sheet the Layers table binds. Each check
+	// stages it under its own tag, so no check reads a directory another one
+	// had still to write.
+	struct StagedSheets
+	{
+		StagedAtlasDirectory staged;
+		StagedSheets(smoke::Context const& context, std::string const& tag)
+			: staged(context, tag, { "SectorAtlas", "SectorAtlasLayer1" })
+		{
+		}
+
+		resources::ResourceManager& manager() const { return staged.manager(); }
+	};
+
+	// A resource the check acquired by hand, handed back on the way out so a
+	// throw part-way through a check cannot leave a second holder standing on
+	// the manager.
+	struct ExtraHolder
+	{
+		~ExtraHolder()
+		{
+			if (!resource) return;
+			try { manager->releaseResource(resource); }
+			catch (std::exception const&) {}
+			resource.reset();
+		}
+
+		resources::ResourceManager* manager{};
+		resources::ResourcePtr resource;
+	};
+
+	// Whether a sheet this stack took up has come back down. "Down" is
+	// unloaded: the manager has given up the loaded state, which for an
+	// `Image` means the decoded sheet and its MPP texture go with it.
+	// Willpower keeps a released resource *created* until something destroys
+	// it, and destroying is the manager's and the Map guard's business
+	// (#1092), not the holdings' - the render stack releases and lets its
+	// own teardown take the GPU objects down.
+	bool isDown(resources::ResourceManager& manager,
+		resources::ResourcePtr const& resource)
+	{
+		return resource && !manager.isResourceLoaded(resource);
+	}
+
+	std::string heldText(std::vector<std::string> const& names)
+	{
+		std::string text;
+		for (auto const& name : names)
+		{
+			if (!text.empty()) text += ", ";
+			text += name;
+		}
+		return text.empty() ? std::string("<none>") : text;
+	}
+
+	// An unbound sheet is named by `unbound`, is still up until `release`
+	// is called with that answer, and is down once it has been.
+	void anUnboundSheetIsReleasedAndComesDown(smoke::Context const& context)
+	{
+		StagedSheets sheets(context, "holdings-release");
+		auto& manager = sheets.manager();
+		pf::render::SectorSheetHoldings holdings;
+
+		auto const held = holdings.hold(manager, "SectorAtlasLayer1");
+		require(held != nullptr, "Holding the Layer-1 Sector sheet produced no "
+			"resource, so there was nothing here for the release to give back");
+		require(manager.isResourceLoaded(held) && manager.isResourceCreated(held),
+			"The held Layer-1 Sector sheet is not loaded and created, so it was "
+			"never actually taken up and coming down would prove nothing (#1097)");
+		require(holdings.holds("SectorAtlasLayer1") && holdings.size() == 1,
+			"The holdings do not report the sheet they took up: "
+			+ heldText(holdings.names()));
+
+		// The question is asked, not acted on. A caller that has to put its
+		// GPU bindings down first would have nothing to put down if asking
+		// were the same as releasing.
+		auto const going = holdings.unbound({});
+		require(going == std::vector<std::string>{ "SectorAtlasLayer1" },
+			"An unbound sheet was not named as releasable: " + heldText(going));
+		require(manager.isResourceLoaded(held), "Asking which sheets are unbound "
+			"released one with it; the answer has to arrive before the release so "
+			"the caller can drop the batches binding it (#1097)");
+
+		require(holdings.release(manager, going) == 1,
+			"Releasing one unbound sheet gave back "
+			+ std::to_string(holdings.size()) + " reference(s), not one");
+		require(!holdings.holds("SectorAtlasLayer1") && holdings.empty(),
+			"The holdings still report a sheet that was released: "
+			+ heldText(holdings.names()));
+		require(isDown(manager, held), "The released Layer-1 Sector sheet is still "
+			"loaded or created, so the release handed back no reference the "
+			"manager counted (#1097)");
+	}
+
+	// A sheet a Layer still binds is not releasable, and releasing the rest
+	// leaves it exactly where it was.
+	void aStillBoundSheetIsKeptAndOnlyTheUnboundOneGoes(smoke::Context const& context)
+	{
+		StagedSheets sheets(context, "holdings-still-bound");
+		auto& manager = sheets.manager();
+		pf::render::SectorSheetHoldings holdings;
+
+		auto const worldSheet = holdings.hold(manager, "SectorAtlas");
+		auto const layerSheet = holdings.hold(manager, "SectorAtlasLayer1");
+		require(worldSheet != nullptr && layerSheet != nullptr && holdings.size() == 2,
+			"Two Sector sheets were not both taken up: " + heldText(holdings.names()));
+
+		// The World's own sheet is still bound; the Layer's is not.
+		auto const going = holdings.unbound({ "SectorAtlas" });
+		require(going == std::vector<std::string>{ "SectorAtlasLayer1" },
+			"Unbinding one of two held sheets named " + heldText(going)
+			+ "; a still-bound sheet was offered up for release, or the unbound "
+			"one was left out (#1097)");
+
+		require(holdings.release(manager, going) == 1,
+			"Releasing one of two held sheets did not give back exactly one");
+		require(holdings.names() == std::vector<std::string>{ "SectorAtlas" },
+			"The holdings are " + heldText(holdings.names())
+			+ " after releasing the unbound sheet; the still-bound one went with it, "
+			"or the unbound one stayed");
+		require(manager.isResourceLoaded(worldSheet),
+			"The still-bound Sector sheet came down with the unbound one, so a "
+			"release that names one sheet took down a sheet somebody still binds "
+			"(#1097)");
+		require(isDown(manager, layerSheet),
+			"The unbound Layer-1 Sector sheet is still standing after its release, "
+			"which is the gap #1097 closes");
+	}
+
+	// The release gives back this holder's reference and no more: a sheet
+	// somebody else also holds stays up, and comes down when that holder
+	// lets go. The same unload symmetry the Map load guard keeps (#1092).
+	void aSecondHolderKeepsTheSheetUpWhenThisOneLetsGo(
+		smoke::Context const& context)
+	{
+		StagedSheets sheets(context, "holdings-second-holder");
+		auto& manager = sheets.manager();
+		pf::render::SectorSheetHoldings holdings;
+		ExtraHolder other{&manager, manager.acquireResource("SectorAtlasLayer1")};
+		require(other.resource != nullptr, "The manager acquired no Layer-1 Sector "
+			"sheet for the second holder");
+		manager.createResource(other.resource);
+		manager.loadResource(other.resource);
+
+		auto const held = holdings.hold(manager, "SectorAtlasLayer1");
+		require(held != nullptr && manager.isResourceLoaded(held),
+			"The Layer-1 Sector sheet was not taken up for the holdings");
+
+		require(holdings.release(manager, { "SectorAtlasLayer1" }) == 1,
+			"Releasing the held Layer-1 sheet reported nothing released");
+		require(manager.isResourceLoaded(other.resource),
+			"Releasing the sheet took it down under a holder that still holds it, "
+			"which is the one thing a Sector sheet release must never do (#1097)");
+
+		auto const extra = other.resource;
+		other.resource.reset();
+		manager.releaseResource(extra);
+		require(isDown(manager, held), "The last holder of the Layer-1 Sector "
+			"sheet did not bring it down, so the holdings' release was not the "
+			"balanced half of its acquire (#1097)");
+	}
+
+	// Asking for a name already held takes no second reference: the sheet
+	// comes down on one release, which is the only way a held sheet can be
+	// given back at all.
+	void holdingTheSameNameTwiceTakesOneReferenceAndComesDownOnce(
+		smoke::Context const& context)
+	{
+		StagedSheets sheets(context, "holdings-held-twice");
+		auto& manager = sheets.manager();
+		pf::render::SectorSheetHoldings holdings;
+
+		auto const first = holdings.hold(manager, "SectorAtlasLayer1");
+		auto const second = holdings.hold(manager, "SectorAtlasLayer1");
+		require(first == second, "Holding the same sheet twice returned two "
+			"different resources");
+		require(holdings.size() == 1, "Holding the same sheet twice left "
+			+ std::to_string(holdings.size()) + " held sheets; a sheet held twice "
+			"by one stack is a sheet that never comes down (#1091)");
+
+		require(holdings.releaseAll(manager) == 1,
+			"Releasing a sheet held twice needed more than one release to give it "
+			"back, so the second ask put a reference on the manager that nothing "
+			"could return (#1097)");
+		require(isDown(manager, first), "The Layer-1 Sector sheet is still standing "
+			"after the one release that should have been enough for it");
+	}
+
+	// A name that is not an Image set is refused, and the refusal leaves
+	// nothing held under it - the acquisition goes back before the throw.
+	void aResourceOfTheWrongKindIsRefusedAndLeavesNothingHeld(
+		smoke::Context const& context)
+	{
+		StagedSheets sheets(context, "holdings-wrong-kind");
+		auto& manager = sheets.manager();
+		pf::render::SectorSheetHoldings holdings;
+
+		// `SectorAtlasImage` is staged here and is a real shipped resource -
+		// the `Image` the Sector sheet cuts its regions from. It is exactly
+		// the wrong kind to hold as a Sector sheet.
+		std::string refusal;
+		try
+		{
+			holdings.hold(manager, "SectorAtlasImage");
+			require(false, "Holding an `Image` as a Sector sheet was accepted");
+		}
+		catch (std::exception const& error) { refusal = error.what(); }
+		require(refusal.find("not an ImageSet") != std::string::npos,
+			"The refusal of a wrong-kind Sector sheet does not say what was wrong "
+			"with it: " + refusal);
+		require(holdings.empty(), "A refused Sector sheet is held anyway: "
+			+ heldText(holdings.names()));
+		auto const image = manager.getResource("SectorAtlasImage");
+		require(isDown(manager, image), "The wrong-kind resource was left loaded "
+			"or created by the refusal that should have handed its acquisition "
+			"back before throwing (#1097)");
+	}
+
+	// `releaseAll` brings every held sheet down, which is what the render
+	// stack's destructor calls on the way to the manager that handed them
+	// out.
+	void releaseAllBringsEveryHeldSheetDown(smoke::Context const& context)
+	{
+		StagedSheets sheets(context, "holdings-release-all");
+		auto& manager = sheets.manager();
+		pf::render::SectorSheetHoldings holdings;
+
+		auto const worldSheet = holdings.hold(manager, "SectorAtlas");
+		auto const layerSheet = holdings.hold(manager, "SectorAtlasLayer1");
+		require(holdings.size() == 2, "Two Sector sheets were not both taken up: "
+			+ heldText(holdings.names()));
+		require(holdings.releaseAll(manager) == 2,
+			"Releasing two held sheets gave back something other than two");
+		require(holdings.empty(), "Held sheets survived `releaseAll`: "
+			+ heldText(holdings.names()));
+		require(isDown(manager, worldSheet) && isDown(manager, layerSheet),
+			"A held Sector sheet survived `releaseAll` still loaded or created, so "
+			"the stack's teardown would leave artwork standing after the stack that "
+			"took it up was gone (#1097)");
+	}
 }
 
 void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
@@ -3594,4 +3858,16 @@ void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
 		isolated<reloadNamesEveryFailedSheetAndLeavesTheOthersServing> });
 	checks.push_back({ "artworkReload/aRefusedTilesetPairingLeavesTheDrawnSheetServing",
 		isolated<reloadLeavesTheDrawnSheetServingWhenTheTilesetPairingRefuses> });
+	checks.push_back({ "sheetHoldings/anUnboundSheetIsReleasedAndComesDown",
+		isolated<anUnboundSheetIsReleasedAndComesDown> });
+	checks.push_back({ "sheetHoldings/aStillBoundSheetIsKeptAndOnlyTheUnboundOneGoes",
+		isolated<aStillBoundSheetIsKeptAndOnlyTheUnboundOneGoes> });
+	checks.push_back({ "sheetHoldings/aSecondHolderKeepsTheSheetUpWhenThisOneLetsGo",
+		isolated<aSecondHolderKeepsTheSheetUpWhenThisOneLetsGo> });
+	checks.push_back({ "sheetHoldings/holdingTheSameNameTwiceTakesOneReferenceAndComesDownOnce",
+		isolated<holdingTheSameNameTwiceTakesOneReferenceAndComesDownOnce> });
+	checks.push_back({ "sheetHoldings/aResourceOfTheWrongKindIsRefusedAndLeavesNothingHeld",
+		isolated<aResourceOfTheWrongKindIsRefusedAndLeavesNothingHeld> });
+	checks.push_back({ "sheetHoldings/releaseAllBringsEveryHeldSheetDown",
+		isolated<releaseAllBringsEveryHeldSheetDown> });
 }

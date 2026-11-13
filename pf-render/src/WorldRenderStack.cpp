@@ -40,6 +40,7 @@
 #include "core/WorldDocument.h"
 #include "AtlasInstall.h"
 #include "ObjectTileset.h"
+#include "SectorSheetHoldings.h"
 #include "SectorTileset.h"
 #include "WorldDrawList.h"
 #include "WorldDrawSegments.h"
@@ -310,15 +311,16 @@ namespace
 			}
 			for (auto& target : mTargets) target.reset();
 			mFontAtlas.reset();
+			// Every Sector sheet this stack took up for a Layer binding or a
+			// recorded batch goes here, on the way to the manager that handed
+			// them out (#1089, #1097).
+			mSectorSheets.releaseAll(*mResources);
 			// The acquisitions this stack made are released either way: that is
 			// balanced against the acquire, not against who owns the manager.
 			if (mAtlases.sector) mResources->releaseResource(mAtlases.sector);
 			if (mAtlases.objects) mResources->releaseResource(mAtlases.objects);
 			if (mAtlases.furniture) mResources->releaseResource(mAtlases.furniture);
 			if (mAtlases.agent) mResources->releaseResource(mAtlases.agent);
-			for (auto& sheet : mSectorSheets)
-				mResources->releaseResource(sheet.second);
-			mSectorSheets.clear();
 			clearSectorTileset();
 			clearObjectTileset();
 			clearAgentTileset();
@@ -513,10 +515,8 @@ namespace
 				// it is taken up, because acquiring a sheet this stack already
 				// holds would put a second reference on it for nothing and have
 				// nowhere to give the first one back.
-				auto held = mSectorSheets.find(name);
-				if (held == mSectorSheets.end())
-					held = mSectorSheets.emplace(name, requireImageSet(name)).first;
-				mAtlasInstaller.installSectorSheet(name, held->second, diagnostic);
+				auto const held = mSectorSheets.hold(*mResources, name);
+				mAtlasInstaller.installSectorSheet(name, held, diagnostic);
 			}
 			catch (std::exception const& error)
 			{
@@ -532,6 +532,53 @@ namespace
 			}
 			mLayerSheetDiagnostics.emplace(name, diagnostic);
 			return diagnostic;
+		}
+
+		// Brings down every Sector sheet this stack took up that no Layer
+		// binds any more (#1097).
+		//
+		// `stillBound` is the set of sheet names a Layer still binds - the
+		// names the caller just installed, which is everything the frame
+		// ahead draws with. Anything held besides those is artwork nothing
+		// points at, and holding it until the stack died was the gap this
+		// closes.
+		//
+		// The order is the whole of the safety argument. A batch owns the
+		// texture its triangles came from, so releasing a sheet under a slot
+		// that still binds it is the one thing that must not happen; the
+		// slots that bind a released sheet are therefore dropped before the
+		// release, in this call. A dropped slot is not lost - the next frame
+		// rebuilds whatever it needs through `prepareSlots`, which treats a
+		// slot with no renderers as one to create - so what this costs is one
+		// batch rebuild per sheet that came down, and nothing at all on a
+		// frame where nothing was unbound.
+		//
+		// The caller is responsible for asking at a point where no frame is
+		// mid-draw. Both hosts do: the editor and the game call this from
+		// their per-frame artwork sync, which runs before anything is
+		// recorded or submitted, with the previous frame already presented.
+		//
+		// A sheet another consumer also holds stays up. This gives back the
+		// reference this stack took and no more, which is the same unload
+		// symmetry the Map load guard keeps (#1092).
+		std::size_t releaseUnboundSectorSheets(std::set<std::string> const& stillBound)
+		{
+			auto const going = mSectorSheets.unbound(stillBound);
+			if (going.empty()) return 0;
+			for (auto& slot : mSlots)
+			{
+				if (slot.sectorSheet.empty()) continue;
+				if (std::find(going.begin(), going.end(), slot.sectorSheet)
+					== going.end())
+					continue;
+				remove(slot);
+			}
+			// Each Layer sheet's cached install answer goes with the sheet.
+			// The answer describes an install this stack no longer holds, and
+			// leaving it behind would have a later re-bind report the old
+			// install instead of running a new one (#1091).
+			for (auto const& name : going) mLayerSheetDiagnostics.erase(name);
+			return mSectorSheets.release(*mResources, going);
 		}
 
 		std::string selectAgentImageSet(std::string const& name)
@@ -804,24 +851,12 @@ namespace
 
 		// A mandatory viewport atlas. Anything that is not a loadable ImageSet
 		// fails the whole startup rather than leaving a canvas half-drawn.
+		// The take-up itself is the shared one the Sector sheet holdings run
+		// too, so the two cannot drift apart on how a refusal is cleaned up
+		// (#1097).
 		resources::ResourcePtr requireImageSet(std::string const& name)
 		{
-			auto resource = mResources->acquireResource(name);
-			if (!std::dynamic_pointer_cast<resources::ImageSetResource>(resource)) {
-				mResources->releaseResource(resource);
-				throw std::runtime_error(name + " is not an ImageSet resource");
-			}
-			try
-			{
-				mResources->createResource(resource);
-				mResources->loadResource(resource);
-			}
-			catch (...)
-			{
-				mResources->releaseResource(resource);
-				throw;
-			}
-			return resource;
+			return pf::render::loadImageSet(*mResources, name);
 		}
 
 		// A host-bound atlas the host can live without. A failure leaves the set
@@ -934,20 +969,23 @@ namespace
 		{
 			if (identity.empty() || identity == mAtlases.sectorName)
 				return imageSetTexture(mAtlases.sector);
-			auto const held = mSectorSheets.find(identity);
-			if (held != mSectorSheets.end()) return imageSetTexture(held->second);
+			if (auto const held = mSectorSheets.find(identity))
+				return imageSetTexture(held);
 			auto const fallback = imageSetTexture(mAtlases.sector);
 			if (!pf::render::sectorSheetRegistry().find(identity)) return fallback;
 			try
 			{
-				auto resource = requireImageSet(identity);
-				auto const pixels = imageSetTexture(resource);
+				auto const pixels = imageSetTexture(
+					mSectorSheets.hold(*mResources, identity));
 				if (!pixels)
 				{
-					mResources->releaseResource(resource);
+					// Held and useless. A sheet with no pixels behind it is
+					// worse than no sheet at all, because the resolve would
+					// keep answering with it every frame from here on; the
+					// reference goes straight back and the World's sheet draws.
+					mSectorSheets.release(*mResources, { identity });
 					return fallback;
 				}
-				mSectorSheets.emplace(identity, std::move(resource));
 				return pixels;
 			}
 			catch (std::exception const&) { return fallback; }
@@ -1095,9 +1133,16 @@ namespace
 		// Every Sector sheet beyond the one the Sector slot carries that this
 		// stack has taken up in order to bind a batch to it (#1089), held
 		// under the name it was installed as. The batch owns its texture, so
-		// the acquisition outlives every frame that drew with it and is
-		// released with the stack.
-		std::map<std::string, resources::ResourcePtr> mSectorSheets;
+		// the acquisition outlives every frame that drew with it.
+		//
+		// It is no longer held until the stack dies. `releaseUnboundSectorSheets`
+		// brings down every sheet no Layer binds, dropping the slots that bind
+		// it in the same call so nothing is ever released under a live batch
+		// (#1097). What is left held between those calls is bounded either
+		// way by the distinct Image set names the application ships - single
+		// digits - so this closes a correctness gap rather than stopping a
+		// leak.
+		pf::render::SectorSheetHoldings mSectorSheets;
 		// Each Sector sheet taken up for a Layer binding, against the install
 		// diagnostic that sheet left behind (#1091). Kept apart from the
 		// resources because the question the Layers table asks is about the
@@ -1211,6 +1256,30 @@ std::string installWorldLayerSectorImageSet(std::string const& name)
 {
 	if (!gStack) return kNoRenderStack;
 	return gStack->installLayerSectorImageSet(name);
+}
+
+// Brings down every Layer Sector sheet the live stack took up that
+// `stillBound` does not name, and returns how many came down (#1097).
+//
+// `stillBound` is the set of sheet names a Layer still binds - the names
+// the caller has just installed. A name held by the stack and missing from
+// that set is artwork nothing points at, and it used to sit there until the
+// stack was destroyed even after the Layer that asked for it was unbound.
+//
+// The batches binding a released sheet are dropped in the same call, so no
+// sheet is ever released while a live batch still binds its texture. The
+// caller is responsible for asking at a point where no frame is mid-draw;
+// both hosts ask from their per-frame artwork sync, before anything is
+// recorded or submitted.
+//
+// With no render stack there is nothing held and nothing to release, which
+// reads back as zero - the same zero a frame that unbound nothing gives.
+// Unlike the atlas selections above, an empty answer here is not a claim
+// that something succeeded, so a missing stack needs no separate report.
+std::size_t releaseUnboundWorldLayerSectorSheets(std::set<std::string> const& stillBound)
+{
+	if (!gStack) return 0;
+	return gStack->releaseUnboundSectorSheets(stillBound);
 }
 
 // Installs the World's selected Objects atlas (#1022). Returns the

@@ -317,6 +317,18 @@ void renderWorldCanvas(core::World const& world, float width, float height)
 	// is the same visible answer every other refused atlas gets.
 	auto const sync = syncWorldArtwork(world, &installWorldLayerSectorImageSet);
 	reportAtlasSelections(sync.selections);
+	// A Layer that stopped binding its sheet takes the sheet down with it
+	// (#1097). The names the sync just installed are the ones still bound;
+	// every sheet this stack holds under any other name is artwork nothing
+	// points at, and until here it sat held until the stack was destroyed.
+	//
+	// This is the quiescent point the release needs: nothing of this frame
+	// has been recorded or submitted yet, and the previous frame is already
+	// presented. The render stack drops the batches binding a released sheet
+	// as it releases it, so nothing is ever let go of under a live batch.
+	std::set<std::string> stillBound;
+	for (auto const& sheet : sync.layerSheets) stillBound.insert(sheet.name);
+	releaseUnboundWorldLayerSectorSheets(stillBound);
 	auto const commands = drawWorld(world, width, height);
 	if (commands.commands().empty()) return;
 	renderWorldCommandsToHostTarget(commands, { 0.0f, 0.0f },

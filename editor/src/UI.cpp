@@ -8513,15 +8513,29 @@ namespace
 	void syncLayerSectorSheets(core::World const& world)
 	{
 		std::map<uint32_t, std::string> diagnostics;
+		std::set<std::string> stillBound;
 		for (uint32_t layer = 0; layer < world.getLayerCount(); ++layer)
 		{
 			auto const& binding = world.layerSectorImageSet(layer);
 			if (!binding || binding->empty()) continue;
 			if (*binding == world.sectorImageSetResourceName()) continue;
+			stillBound.insert(*binding);
 			auto const diagnostic = installWorldLayerSectorImageSet(*binding);
 			if (!diagnostic.empty()) diagnostics.emplace(layer, diagnostic);
 		}
 		gLayerSectorDiagnostics = std::move(diagnostics);
+		// And the ones that came off come down (#1097). Every sheet this stack
+		// took up under a name no Layer binds any more is artwork nothing
+		// points at; until here it stayed held until the render stack was
+		// destroyed, so a long session that cycled the Layers table through
+		// the manifest's Image sets held all of them.
+		//
+		// This is the quiescent point the release needs: the sync runs at the
+		// top of the frame, before the canvas records or submits anything, and
+		// the previous frame has already been presented. The stack drops the
+		// batches binding a released sheet as it releases it, so nothing is
+		// ever let go of under a live batch.
+		releaseUnboundWorldLayerSectorSheets(stillBound);
 	}
 }
 
@@ -10515,6 +10529,12 @@ void renderUI(editor::DocumentPtr& document, shared_ptr<core::Agent> pathingAgen
 	if (!world)
 	{
 		gLocationPlan.close();
+		// No World is open, so no Layer binds anything, so every Layer Sector
+		// sheet the render stack took up is unbound and comes down (#1097).
+		// This is the document-close and document-switch boundary: the frame
+		// loop keeps running with no document, and the sheets the closed World
+		// had bound do not stay held beside it.
+		releaseUnboundWorldLayerSectorSheets({});
 		ImGui::Begin("World");
 		ImGui::TextDisabled("No World is open.");
 		ImGui::TextUnformatted("Choose File > New or File > Open to begin.");

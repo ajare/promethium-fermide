@@ -60,6 +60,7 @@ add_library(pf-render STATIC
     src/WorldRenderStack.cpp
     src/WorldDrawSegments.cpp
     src/AtlasInstall.cpp
+    src/SectorSheetHoldings.cpp
     src/SectorTileset.cpp
     src/ObjectTileset.cpp
     src/TileArtwork.cpp

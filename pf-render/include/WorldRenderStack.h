@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <set>
 #include <string>
 
 #include <mpp/Scene.h>
@@ -195,6 +196,40 @@ std::string selectWorldFurnitureImageSet(std::string const& name);
 // and fix is visible on the canvas rather than looking like a Layer that
 // binds nothing (#1096).
 std::string installWorldLayerSectorImageSet(std::string const& name);
+
+// Brings down every Layer Sector sheet the render stack took up that no
+// Layer binds any more, and returns how many came down (#1097).
+//
+// `stillBound` is the set of sheet names a Layer still binds - the names
+// the caller has just installed through the entry above. Every sheet the
+// stack holds under a name missing from that set is artwork nothing points
+// at. Until this existed the stack carried all of them until it was
+// destroyed: unbinding a Layer never released the sheet it had been using,
+// so a long editor session that cycled the Layers table through the
+// manifest's Image sets held every one of them.
+//
+// The held set was always bounded - by the number of distinct Image set
+// names the application ships, which is single digits - so this is a
+// correctness gap being closed rather than a leak being stopped. What
+// changes is that the stack no longer holds what nothing points at.
+//
+// The batches binding a released sheet are dropped in the same call, so no
+// sheet is released while a live batch still binds its texture; the next
+// frame rebuilds whatever it needs. The caller must ask at a point where no
+// frame is mid-draw - both hosts ask from their per-frame artwork sync,
+// which runs before anything is recorded or submitted and after the
+// previous frame has been presented.
+//
+// A sheet another consumer also holds stays up: this gives back the
+// reference the render stack took and no more, the same unload symmetry the
+// Map load guard keeps (#1092).
+//
+// Returns the number of sheets released. Zero means either that nothing was
+// unbound or that there is no render stack to release from; unlike the four
+// atlas selections above, an empty answer here makes no claim that
+// something succeeded, so no diagnostic is needed.
+std::size_t releaseUnboundWorldLayerSectorSheets(
+	std::set<std::string> const& stillBound);
 
 // Reloads the artwork the stack draws from, off disk, the definitions and
 // the images both.

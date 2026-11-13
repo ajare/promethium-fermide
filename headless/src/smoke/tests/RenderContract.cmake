@@ -286,6 +286,12 @@ set(names
     artworkReload/theAtlasSetRegistryIsReparsed
     artworkReload/everyFailedSheetIsNamedAndTheOthersKeepServing
     artworkReload/aRefusedTilesetPairingLeavesTheDrawnSheetServing
+    sheetHoldings/anUnboundSheetIsReleasedAndComesDown
+    sheetHoldings/aStillBoundSheetIsKeptAndOnlyTheUnboundOneGoes
+    sheetHoldings/aSecondHolderKeepsTheSheetUpWhenThisOneLetsGo
+    sheetHoldings/holdingTheSameNameTwiceTakesOneReferenceAndComesDownOnce
+    sheetHoldings/aResourceOfTheWrongKindIsRefusedAndLeavesNothingHeld
+    sheetHoldings/releaseAllBringsEveryHeldSheetDown
     vehicleArtworkNew/vehicleTilesAreRegistered
     vehicleArtworkNew/carriageComposesAtTwoThreeAndFourCellsWide
     vehicleArtworkNew/connectorSitsAtTheSeamNotACellPosition
