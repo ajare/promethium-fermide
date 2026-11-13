@@ -228,6 +228,22 @@ namespace pf::render
 		void install(std::string const& name, SectorTileset tileset,
 			TextureId texture);
 
+		// Installs `tileset` under `name` and leaves the drawn sheet where it
+		// already is.
+		//
+		// This is what a per-Layer Sector binding needs (#1091). The Layer's
+		// own sheet has to be resolvable by name so the per-Layer resolution
+		// can reach it for that Layer and that Layer alone (#1090), while the
+		// sheet every unbound Layer falls back to stays exactly where the
+		// World's selection put it. Putting a Layer's sheet in through
+		// `install()` would take the drawn role and repaint every unbound
+		// Layer with it, which is the one outcome a per-Layer binding must
+		// never have. A refused sheet is held empty here exactly as
+		// `install()` holds it: the reason is the caller's diagnostic, and
+		// the empty sheet is what that Layer then draws magenta for.
+		void installAlongside(std::string const& name, SectorTileset tileset,
+			TextureId texture);
+
 		// The sheet installed under `name`, or nullptr when none is. This is
 		// the lookup a caller asks without a render context: the answer is
 		// the sheet the install put there, with the name it put it under.
@@ -346,6 +362,17 @@ namespace pf::render
 		void installSectorSlot(std::string const& setName, AtlasResource const& set,
 			std::string& diagnostic);
 
+		// Installs one sector-shaped atlas under `setName` without taking the
+		// drawn sheet from whoever holds it.
+		//
+		// The same pairing `installSectorSlot` does, through the same
+		// `installAtlasArtwork` call, against the same registry - the only
+		// difference is which half of the registry it writes. A Layer bound to
+		// `setName` draws this sheet; the World's own sheet keeps drawing for
+		// every Layer that binds nothing (#1091).
+		void installSectorSheet(std::string const& setName, AtlasResource const& set,
+			std::string& diagnostic);
+
 		// Installs the four viewport atlases as the tilesets the producers
 		// read, which is what a stack does at start-up. A selection change is
 		// not this: it installs one slot.
@@ -368,6 +395,19 @@ namespace pf::render
 		AtlasInstallReads const& reads() const { return mReads; }
 
 	private:
+		// The sector-shaped half of the install, shared by the two ways a
+		// Sector sheet goes into the registry (#1091).
+		//
+		// Building it apart from installing it is the point: a Layer's sheet
+		// and the World's sheet must be paired from the artwork the same way,
+		// or the same atlas would look different depending on which slot put
+		// it on screen. Only the registry write differs.
+		//
+		// Throws whatever `installAtlasArtwork` throws; the callers catch it
+		// into their diagnostic.
+		SectorTileset buildSectorTileset(std::string const& setName,
+			AtlasResource const& set);
+
 		// The registry, parsed on first use and shared by every install this
 		// installer makes.
 		std::shared_ptr<AtlasSetRegistry const> mRegistry;

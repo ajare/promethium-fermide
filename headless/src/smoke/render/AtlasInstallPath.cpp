@@ -1674,6 +1674,63 @@ namespace
 	}
 
 	// ------------------------------------------------------------------
+	// AC (#1091): a Layer's Sector sheet installs beside the World's sheet
+	// without taking the drawn sheet with it.
+	//
+	// This is the half the Layers table depends on and the half a keyed
+	// registry makes easy to get wrong: putting a second sheet in has to
+	// make that sheet resolvable, and must not decide what every Layer that
+	// binds nothing draws. Both claims are checked against the same two
+	// shipped sheets, because the only version worth having is the one that
+	// runs the install the application runs.
+	// ------------------------------------------------------------------
+	void aLayerSheetInstalledAlongsideNeverTakesTheDrawnSheet(smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		StagedAtlasDirectory staged{ context, "alongside-sector-sheet",
+			{ "SectorAtlas", "StationAtlas" } };
+		pf::render::AtlasInstaller installer;
+		auto& registry = pf::render::sectorSheetRegistry();
+
+		std::string worldDiagnostic;
+		installer.installSectorSlot("SectorAtlas", staged.load("SectorAtlas"),
+			worldDiagnostic);
+		require(worldDiagnostic.empty(), "The World's Sector sheet failed to "
+			"install: " + worldDiagnostic);
+
+		std::string layerDiagnostic;
+		installer.installSectorSheet("StationAtlas", staged.load("StationAtlas"),
+			layerDiagnostic);
+		require(layerDiagnostic.empty(), "A Layer's Sector sheet was refused: "
+			+ layerDiagnostic);
+
+		// The Layer's sheet resolves under the name it was asked for, and
+		// resolves to what that install put there. That is the whole of what
+		// the per-Layer resolution (#1090) asks of the registry.
+		auto const* layer = registry.find("StationAtlas");
+		require(layer != nullptr, "A Layer's Sector sheet installed without being "
+			"resolvable under its own name, so a Layer bound to it would draw "
+			"the World's sheet instead of its own");
+		require(layer->name == "StationAtlas"
+				&& layer->tileset.family == SectorTilesetFamily::Old,
+			"The sheet resolved under 'StationAtlas' is not the sheet the Layer "
+			"install put there");
+		// And the drawn sheet is still the World's. The Layers table cannot
+		// make this claim for itself: a Layer taking a sheet of its own has
+		// to leave every Layer that binds nothing drawing what the World
+		// chose, which is the one outcome a per-Layer binding must never
+		// have (#1091).
+		require(registry.drawingName() == "SectorAtlas", "A Layer's Sector sheet "
+			"took the drawn sheet with it - the registry is drawing '"
+			+ registry.drawingName() + "' - which would repaint every Layer that "
+			"binds nothing");
+		require(registry.drawing() == registry.find("SectorAtlas"), "The drawn "
+			"sheet is not the World's sheet after a Layer sheet went in beside "
+			"it, so the World's own selection stopped being what unbound Layers "
+			"draw");
+	}
+
+	// ------------------------------------------------------------------
 	// AC (#1087): the World's selected Sector sheet installs under its own
 	// name and is the sheet the draw path uses.
 	//
@@ -2930,6 +2987,8 @@ void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
 		isolated<everyShippedFurnitureTileResolvesInTheInstalledFurnitureAtlas> });
 	checks.push_back({ "atlasInstall/installedSectorSheetsAreKeyedByAtlasName",
 		isolated<installedSectorSheetsAreKeyedByAtlasName> });
+	checks.push_back({ "atlasInstall/aLayerSheetInstalledAlongsideNeverTakesTheDrawnSheet",
+		isolated<aLayerSheetInstalledAlongsideNeverTakesTheDrawnSheet> });
 	checks.push_back({ "atlasInstall/theDrawPathDrawsTheSheetInstalledLast",
 		isolated<theDrawPathDrawsTheSheetInstalledLast> });
 	checks.push_back({ "atlasInstall/aDrawHelperDrawsTheSheetItIsHanded",

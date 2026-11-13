@@ -291,6 +291,11 @@ set(editor_names
     surfacePaintDrag/resolvingARunChangesNothing
     world-artwork/newDefaultsShowOnAFreshWorld
     world-artwork/repointedAtlasMovesItsOwnSlotOnly
+    layer-image-set/aFreshLayerReadsAsInheritAndIsSaidTo
+    layer-image-set/aPickReachesTheWorldThePanelBindsTo
+    layer-image-set/onePickIsOneUndoStepAndRedoes
+    layer-image-set/aPickMovesNoOtherLayerAndNoWorldAtlas
+    layer-image-set/clearingRestoresInherit
     history/independentHistoriesDoNotLeakCommandsOrState
     isolation/normalAndExceptionalExit
     scaled-doors/clipboard-history

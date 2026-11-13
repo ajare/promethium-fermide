@@ -246,6 +246,19 @@ namespace pf::render
 		mDrawingName = name;
 	}
 
+	void SectorSheetRegistry::installAlongside(std::string const& name,
+		SectorTileset tileset, TextureId texture)
+	{
+		InstalledSectorSheet sheet;
+		sheet.name = name;
+		sheet.tileset = std::move(tileset);
+		sheet.texture = texture;
+		// Replaced whole, exactly as `install()` replaces it. What this one
+		// does not do is touch `mDrawingName`: the sheet goes in under its key
+		// and stays out of the drawn role it would otherwise take.
+		mSheets[name] = std::move(sheet);
+	}
+
 	InstalledSectorSheet const* SectorSheetRegistry::find(
 		std::string const& name) const
 	{
@@ -340,43 +353,56 @@ namespace pf::render
 		if (mandatory && !error.empty()) throw std::runtime_error(error);
 	}
 
+	// The sector-shaped half of the install, shared by the two ways a Sector
+	// sheet goes into the registry (#1091).
+	//
+	// Building it apart from installing it is the point: a Layer's sheet and
+	// the World's sheet must be paired from the artwork the same way, or the
+	// same atlas would look different depending on which slot put it on
+	// screen. Only the registry write differs.
+	//
+	// Throws whatever `installAtlasArtwork` throws; the callers catch it
+	// into their diagnostic.
+	SectorTileset AtlasInstaller::buildSectorTileset(std::string const& setName,
+		AtlasResource const& set)
+	{
+		SectorTileset tiles;
+		auto const atlas = installAtlasArtwork(setName, set,
+			AtlasAuthoredFormat::SectorTiles);
+		tiles.width = atlas.width;
+		tiles.height = atlas.height;
+		// The family travels with the artwork, because the Shuttle and the
+		// Staircase choose their surface from it and from nothing else (#1027).
+		tiles.family = atlas.family;
+		// So do the variant counts, because the per-type count is a fact
+		// about the authored set and not something the installed region map
+		// can be asked (#1038).
+		tiles.variantCounts = std::move(atlas.variantCounts);
+		for (auto const& [name, artwork] : atlas.tiles)
+		{
+			// The manifest carries a sector atlas's boundary tiles under a
+			// `boundary-` prefix; the tileset keeps them in its own map under
+			// the bare name.
+			if (name.rfind("boundary-", 0) == 0)
+				tiles.boundaries.emplace(name.substr(9), artwork.region);
+			// A doorframe is a tile of this atlas but not a Sector surface,
+			// and the query that answers "is this a Sector surface" is asked
+			// about every name this loop could put anywhere. The authored file
+			// said which names are frames; routing them apart is the whole of
+			// what that statement was for (#1054).
+			else if (atlas.overlayNames.count(name) > 0)
+				tiles.overlays.emplace(name, artwork.region);
+			else tiles.surfaces.emplace(name, artwork.region);
+		}
+		return tiles;
+	}
+
 	void AtlasInstaller::installSectorSlot(std::string const& setName,
 		AtlasResource const& set, std::string& diagnostic)
 	{
 		SectorTileset tiles;
 		std::string error;
-		try
-		{
-			auto const atlas = installAtlasArtwork(setName, set,
-				AtlasAuthoredFormat::SectorTiles);
-			tiles.width = atlas.width;
-			tiles.height = atlas.height;
-			// The family travels with the artwork, because the Shuttle and
-			// the Staircase choose their surface from it and from nothing
-			// else (#1027).
-			tiles.family = atlas.family;
-			// So do the variant counts, because the per-type count is a fact
-			// about the authored set and not something the installed region
-			// map can be asked (#1038).
-			tiles.variantCounts = std::move(atlas.variantCounts);
-			for (auto const& [name, artwork] : atlas.tiles)
-			{
-				// The manifest carries a sector atlas's boundary tiles
-				// under a `boundary-` prefix; the tileset keeps them in
-				// its own map under the bare name.
-				if (name.rfind("boundary-", 0) == 0)
-					tiles.boundaries.emplace(name.substr(9), artwork.region);
-				// A doorframe is a tile of this atlas but not a Sector
-				// surface, and the query that answers "is this a Sector
-				// surface" is asked about every name this loop could put
-				// anywhere. The authored file said which names are frames;
-				// routing them apart is the whole of what that statement
-				// was for (#1054).
-				else if (atlas.overlayNames.count(name) > 0)
-					tiles.overlays.emplace(name, artwork.region);
-				else tiles.surfaces.emplace(name, artwork.region);
-			}
-		}
+		try { tiles = buildSectorTileset(setName, set); }
 		catch (std::exception const& exception) { error = exception.what(); }
 		// The sheet goes into the keyed registry under the name it was asked
 		// to install as, and becomes the sheet the draw path draws. A refused
@@ -384,6 +410,21 @@ namespace pf::render
 		// diagnostic below, and the empty sheet is what the canvas then
 		// paints magenta for (#1087).
 		sectorSheetRegistry().install(setName, std::move(tiles),
+			kInstalledAtlasTexture);
+		if (!error.empty() && diagnostic.empty()) diagnostic = error;
+	}
+
+	void AtlasInstaller::installSectorSheet(std::string const& setName,
+		AtlasResource const& set, std::string& diagnostic)
+	{
+		SectorTileset tiles;
+		std::string error;
+		try { tiles = buildSectorTileset(setName, set); }
+		catch (std::exception const& exception) { error = exception.what(); }
+		// Same keyed write, without the drawn role. A Layer bound to this
+		// name resolves here; every Layer that binds nothing keeps drawing the
+		// sheet the World's selection is drawing (#1091).
+		sectorSheetRegistry().installAlongside(setName, std::move(tiles),
 			kInstalledAtlasTexture);
 		if (!error.empty() && diagnostic.empty()) diagnostic = error;
 	}

@@ -168,6 +168,27 @@ std::string selectWorldObjectImageSet(std::string const& name);
 std::string selectWorldAgentImageSet(std::string const& name);
 std::string selectWorldFurnitureImageSet(std::string const& name);
 
+// Installs one Layer's own Sector sheet under `name`, beside the sheet the
+// Sector slot carries, without changing which sheet the draw path draws.
+//
+// This is what makes a Layer binding visible (#1091). The per-Layer
+// resolution added in #1090 already asks the install registry for the name
+// a Layer binds; what it could not do is put a sheet there, because every
+// install entry point above takes the drawn sheet with it. A Layer bound to
+// `name` draws this sheet; every Layer that binds nothing keeps drawing the
+// World's selected sheet, exactly as it did before this was called.
+//
+// The install is done once per distinct name and the answer is kept, so a
+// caller may ask for the same sheet every frame and pay for a lookup. A
+// reload drops the kept answers, so the next ask installs from disk again.
+//
+// The answer has the same shape as the four selections above: empty means
+// the sheet is installed and resolves, and anything else is the reason it
+// is not - a set that is not an ImageSet, one whose tileset cannot be
+// paired, or there being no render stack at all. That reason is what the
+// Layers table shows on the combo (#1091).
+std::string installWorldLayerSectorImageSet(std::string const& name);
+
 // Reloads the four currently-selected viewport atlases from disk, the
 // definitions and the images both. Each slot's `ImageSet` and its paired
 // `Image` are released, destroyed, and taken back through create and load.

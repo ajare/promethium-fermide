@@ -268,6 +268,7 @@ set(names
     atlasInstall/everyShippedAgentPoseTileResolvesInTheInstalledAgentAtlas
     atlasInstall/everyShippedFurnitureTileResolvesInTheInstalledFurnitureAtlas
     atlasInstall/installedSectorSheetsAreKeyedByAtlasName
+    atlasInstall/aLayerSheetInstalledAlongsideNeverTakesTheDrawnSheet
     atlasInstall/theDrawPathDrawsTheSheetInstalledLast
     atlasInstall/aDrawHelperDrawsTheSheetItIsHanded
     atlasInstall/aRefusedSectorSheetInstallReplacesItsEntryAndReports

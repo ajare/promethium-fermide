@@ -472,6 +472,48 @@ namespace
 				[this] { installSectorSlotArtwork(); });
 		}
 
+		// Takes up one Layer's own Sector sheet: acquires the named Image set
+		// and installs it in the keyed registry under its own name, leaving
+		// the drawn sheet where the World's selection put it (#1091).
+		//
+		// The install is done once per distinct name and the result is kept,
+		// so a caller may ask for the same sheet every frame and pay for the
+		// lookup only. The answer is the sheet's install diagnostic: empty
+		// when the sheet is installed and resolves, and otherwise the reason
+		// it is not, which is what the Layers table shows on the combo.
+		//
+		// A name that is the Sector slot's own is answered with that slot's
+		// diagnostic rather than installed a second time: the sheet is
+		// already in the registry under that name, and installing it again
+		// through the alongside path would replace the slot's entry with a
+		// copy of itself while the slot still believes it owns it.
+		std::string installLayerSectorImageSet(std::string const& name)
+		{
+			if (name.empty()) return "No Image set is named for the Layer";
+			if (name == mAtlases.sectorName) return mAtlases.sectorDiagnostic;
+			auto const taken = mLayerSheetDiagnostics.find(name);
+			if (taken != mLayerSheetDiagnostics.end()) return taken->second;
+
+			std::string diagnostic;
+			try
+			{
+				// The acquisition is held in the same map the batch-binding
+				// path holds a named sheet in (#1089), because it is the same
+				// thing: a Sector sheet this stack drew with and cannot let go
+				// of while a frame still points at its texture. Looked up before
+				// it is taken up, because acquiring a sheet this stack already
+				// holds would put a second reference on it for nothing and have
+				// nowhere to give the first one back.
+				auto held = mSectorSheets.find(name);
+				if (held == mSectorSheets.end())
+					held = mSectorSheets.emplace(name, requireImageSet(name)).first;
+				mAtlasInstaller.installSectorSheet(name, held->second, diagnostic);
+			}
+			catch (std::exception const& error) { diagnostic = error.what(); }
+			mLayerSheetDiagnostics.emplace(name, diagnostic);
+			return diagnostic;
+		}
+
 		std::string selectAgentImageSet(std::string const& name)
 		{
 			return selectImageSet(mAtlases.agentName, mAtlases.agent,
@@ -527,6 +569,33 @@ namespace
 		{
 			// The registry is re-read rather than reused.
 			mAtlasInstaller = {};
+			// Every Layer sheet this stack took up drops its install cache, so the
+			// next sync installs it again from what is on disk now rather than
+			// answering from the diagnostic it left the first time (#1091).
+			mLayerSheetDiagnostics.clear();
+			std::vector<std::string> failures;
+			// Three of the four slots share one `Image`, so the same resource
+			// turns up in this pass several times. Once is enough.
+			std::set<resources::Resource*> refreshed;
+
+			// Every Layer sheet this stack took up goes back through the same
+			// refresh as the four slots, so a Layer's own sheet is re-read
+			// from disk and not left on the pixels it was first taken up
+			// with (#1091). The install itself happens on the next sync, once
+			// the cache above has been dropped.
+			for (auto& sheet : mSectorSheets)
+			{
+				auto const imageSet = std::dynamic_pointer_cast<
+					resources::ImageSetResource>(sheet.second);
+				if (imageSet)
+				{
+					auto const pixels = imageSet->getImage();
+					if (pixels && refreshed.insert(pixels.get()).second)
+						mResources->refreshResource(pixels);
+				}
+				if (refreshed.insert(sheet.second.get()).second)
+					mResources->refreshResource(sheet.second);
+			}
 
 			struct ReloadableSlot
 			{
@@ -549,11 +618,6 @@ namespace
 				{ "Furniture", &mAtlases.furnitureName, &mAtlases.furniture,
 					&mAtlases.furnitureDiagnostic,
 					&WorldRenderStack::installFurnitureSlotArtwork } };
-
-			std::vector<std::string> failures;
-			// Three of the four slots share one `Image`, so the same resource
-			// turns up in this pass several times. Once is enough.
-			std::set<resources::Resource*> refreshed;
 
 			for (auto const& slot : slots)
 			{
@@ -980,6 +1044,12 @@ namespace
 		// the acquisition outlives every frame that drew with it and is
 		// released with the stack.
 		std::map<std::string, resources::ResourcePtr> mSectorSheets;
+		// Each Sector sheet taken up for a Layer binding, against the install
+		// diagnostic that sheet left behind (#1091). Kept apart from the
+		// resources because the question the Layers table asks is about the
+		// install, and because an empty diagnostic is a result worth caching
+		// exactly as much as a refusal is.
+		std::map<std::string, std::string> mLayerSheetDiagnostics;
 		mpp::ScenePtr mScene;
 		// Both images are composited later by the caller, so neither canvas may
 		// overwrite the other's offscreen texture during the same frame.
@@ -1077,6 +1147,16 @@ std::string selectWorldFurnitureImageSet(std::string const& name)
 {
 	if (!gStack) return kNoRenderStack;
 	return gStack->selectFurnitureImageSet(name);
+}
+
+// Takes up one Layer's Sector sheet through the live stack. A missing stack
+// is reported the same way the four selections report it: an empty answer
+// here would read as "installed" to a panel showing the diagnostic, which
+// is the mistake #1034 was about.
+std::string installWorldLayerSectorImageSet(std::string const& name)
+{
+	if (!gStack) return kNoRenderStack;
+	return gStack->installLayerSectorImageSet(name);
 }
 
 // Installs the World's selected Objects atlas (#1022). Returns the

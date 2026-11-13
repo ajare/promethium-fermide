@@ -48,6 +48,7 @@
 #include "BoothWindowEditor.h"
 #include "AccessPanelEditor.h"
 #include "EditorDocument.h"
+#include "LayerSectorImageSet.h"
 #include "PreviewControls.h"
 
 #if defined(_WIN32)
@@ -139,6 +140,21 @@ struct ViewPanState
 };
 
 static ViewPanState gViewPan;
+
+// Each Layer's Sector sheet install diagnostic, keyed by Layer index, as of
+// the frame that last synced them (#1091).
+//
+// The Layers table shows this on the row's Image set combo rather than as a
+// printed line, because the row is where the binding is made and the
+// failure belongs to the binding: a Layer whose sheet will not install still
+// gets a row, and a wall of printed failures between rows would push the
+// table apart every time somebody typed a name that does not resolve.
+//
+// Keyed by Layer index rather than by name because the diagnostic is asked
+// per row. A Layer that binds nothing, and one whose sheet installed, is
+// simply absent: an empty diagnostic means "nothing to say", which is the
+// same convention the four artwork slots keep (#1034).
+static std::map<uint32_t, std::string> gLayerSectorDiagnostics;
 
 void setSelectionMode(UISettings::SelectionMode mode);
 
@@ -8453,6 +8469,61 @@ void addBackLayer(editor::DocumentPtr const& document)
 }
 
 
+namespace
+{
+	// Commits one Layer's Sector binding as one undo step.
+	//
+	// The snapshot is taken before the write and committed after it, the
+	// same pair every other panel edit uses, so a pick is one step that
+	// undoes and redoes on its own. The write goes through the authoring
+	// seam rather than onto the World directly, which is what keeps the
+	// binding out of the other Layers' hands: the seam writes one Layer's
+	// field and no other (#1091).
+	void bindLayerSectorImageSet(editor::DocumentPtr const& document,
+		uint32_t layer, std::optional<std::string> imageSet)
+	{
+		auto const world = document ? document->world() : nullptr;
+		if (!world) return;
+		auto const before = captureDocumentSnapshot(world);
+		try
+		{
+			document->authoring().setLayerSectorImageSet(layer, std::move(imageSet));
+			commitDocumentEdit(std::move(before));
+		}
+		catch (core::Exception const& error) { reportEditorError("Layers", error.getMessage()); }
+		catch (std::exception const& error) { reportEditorError("Layers", error.what()); }
+	}
+
+	// Takes up every distinct Sector sheet the Layers bind to, once per
+	// frame, and keeps each sheet's install diagnostic for the row that
+	// asked (#1091).
+	//
+	// This runs in the frame's artwork sync rather than from the Layers
+	// panel, because the viewport has to be right whether or not that panel
+	// is open and because an undo changes a binding with no panel in the
+	// loop at all. The install itself is cached in the render stack per
+	// name, so a frame that changed nothing costs the map rebuild below
+	// and nothing else.
+	//
+	// A Layer bound to the World's own set is skipped: that sheet is
+	// already installed under that name by the Sector slot, and installing
+	// it again through the alongside path would replace the slot's registry
+	// entry behind the slot's back.
+	void syncLayerSectorSheets(core::World const& world)
+	{
+		std::map<uint32_t, std::string> diagnostics;
+		for (uint32_t layer = 0; layer < world.getLayerCount(); ++layer)
+		{
+			auto const& binding = world.layerSectorImageSet(layer);
+			if (!binding || binding->empty()) continue;
+			if (*binding == world.sectorImageSetResourceName()) continue;
+			auto const diagnostic = installWorldLayerSectorImageSet(*binding);
+			if (!diagnostic.empty()) diagnostics.emplace(layer, diagnostic);
+		}
+		gLayerSectorDiagnostics = std::move(diagnostics);
+	}
+}
+
 void renderLayersPanel(editor::DocumentPtr const& document)
 {
 	auto const world = document ? document->world() : nullptr;
@@ -8471,11 +8542,16 @@ void renderLayersPanel(editor::DocumentPtr const& document)
 		ImGuiTableFlags_BordersV |
 		ImGuiTableFlags_RowBg;
 
-	if (ImGui::BeginTable("Layers", 3, flags))
+	// Four columns, with the Layer's Sector sheet between the name and the
+	// delete, and a header row so the sheet column says what it holds the
+	// same way the Levels table says what its columns hold (#1091).
+	if (ImGui::BeginTable("Layers", 4, flags))
 	{
 		ImGui::TableSetupColumn("View", ImGuiTableColumnFlags_WidthFixed, 40.0f);
 		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableSetupColumn("ImageSet", ImGuiTableColumnFlags_WidthFixed, 220.0f);
 		ImGui::TableSetupColumn("Delete", ImGuiTableColumnFlags_WidthFixed, 40.0f);
+		ImGui::TableHeadersRow();
 
 		for (uint32_t layer = 0; layer < layerCount; ++layer)
 		{
@@ -8530,9 +8606,42 @@ void renderLayersPanel(editor::DocumentPtr const& document)
 			ImGui::TableSetColumnIndex(1);
 			renderLayerNameEditor(document, layer);
 
+			// The Layer's own Sector sheet, or the World's when it binds
+			// nothing. The leading entry is the inherit choice rather than a
+			// blank, so the row always says what the Layer draws and picking
+			// that entry again is how the binding comes off (#1091).
+			ImGui::TableSetColumnIndex(2);
+			auto const& bound = world->layerSectorImageSet(layer);
+			auto const inheritLabel = editor::layerSectorInheritLabel(
+				world->sectorImageSetResourceName());
+			auto const preview = bound && !bound->empty() ? *bound : inheritLabel;
+			ImGui::SetNextItemWidth(-1.0f);
+			bool const comboOpen = ImGui::BeginCombo("##LayerSectorImageSet",
+				preview.c_str());
+			if (comboOpen)
+			{
+				if (ImGui::Selectable(inheritLabel.c_str(), !bound || bound->empty()))
+					bindLayerSectorImageSet(document, layer, std::nullopt);
+				for (auto const& name : applicationResourceNames("ImageSet"))
+					if (ImGui::Selectable(name.c_str(), bound && *bound == name))
+						bindLayerSectorImageSet(document, layer, name);
+				ImGui::EndCombo();
+			}
+			// The install failure belongs to this binding, so it is said here on
+			// hover rather than printed as a line between rows (#1091). It waits
+			// for the combo to close: a tooltip laid across the list somebody is
+			// choosing from is worse than no tooltip at all.
+			auto const diagnostic = gLayerSectorDiagnostics.find(layer);
+			if (!comboOpen && diagnostic != gLayerSectorDiagnostics.end()
+				&& ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+			{
+				ImGui::SetTooltip("%s Layer's Sector sheet did not install: %s",
+					world->getLayerName(layer).c_str(), diagnostic->second.c_str());
+			}
+
 			// A World keeps at least two Layers, so deletion is only offered while
 			// it has more than two.
-			ImGui::TableSetColumnIndex(2);
+			ImGui::TableSetColumnIndex(3);
 			bool const canDelete = layerCount > 2;
 			ImGui::BeginDisabled(!canDelete);
 			if (ImGui::Button(ICON_FA_TRASH, ImVec2(ImGui::GetFrameHeight(), 0.0f)))
@@ -8745,6 +8854,13 @@ void renderWorldPanel(editor::DocumentPtr const& document)
 		}
 		auto const sectorDiagnostic = selectWorldSectorImageSet(sectorSelected);
 		renderAtlasSelectionReport("Sector", sectorDiagnostic);
+		// A Layer with a Sector sheet of its own is worth saying here, because
+		// the combo above no longer answers "what does this World's Sector
+		// look like" on its own - and worth saying as a disabled line rather
+		// than anything interactive, because the World's own pick is still
+		// what this combo is choosing (#1091).
+		if (auto const overrides = editor::layerSectorOverrideSummary(*world); !overrides.empty())
+			ImGui::TextDisabled("%s", overrides.c_str());
 
 		// Choosing here is what the World persists, and the render stack refuses
 		// a set that cannot carry the object geometry - the diagnostic below
@@ -10409,6 +10525,10 @@ void renderUI(editor::DocumentPtr& document, shared_ptr<core::Agent> pathingAgen
 	selectWorldObjectImageSet(world->objectImageSetResourceName());
 	selectWorldAgentImageSet(world->agentImageSetResourceName());
 	selectWorldFurnitureImageSet(world->furnitureImageSetResourceName());
+	// The Layer bindings take up their sheets beside the World's, so a Layer
+	// bound to its own set draws it and every Layer that binds nothing keeps
+	// drawing what the four selections above just installed (#1091).
+	syncLayerSectorSheets(*world);
 	auto const graph = world->getGraph();
 	renderStatusBar(world);
 	renderControlsWindow(document, graph, pathingAgent);
