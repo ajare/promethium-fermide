@@ -166,7 +166,7 @@ namespace
 		return sets;
 	}
 
-	// The eleven `ImageSet`s the shipped manifest registers, in name order.
+	// Every `ImageSet` the shipped manifest registers, in name order.
 	std::vector<std::string> registeredImageSets(
 		std::map<std::string, ManifestEntry> const& entries)
 	{
@@ -487,14 +487,17 @@ namespace
 		auto const registry = atlasSetRegistry(context);
 		auto const atlases = registeredImageSets(entries);
 
-		// AC: all seven registered `ImageSet`s, themed sheets included. The
-		// count is asserted rather than assumed so an eighth atlas is noticed
-		// the day it is registered and paired here.
-		require(atlases.size() == 7, "The shipped manifest registers "
+		// AC: all eight registered `ImageSet`s - the four viewport atlases,
+		// the three themed sheets, and the Layer-1 Sector copy (#1086). The
+		// count is asserted rather than assumed so a ninth atlas is noticed
+		// the day it is registered and paired here, and so a sheet dropping out
+		// of the manifest fails here rather than going untested.
+		require(atlases.size() == 8, "The shipped manifest registers "
 			+ std::to_string(atlases.size()) + " `ImageSet`s; the install path is "
 			"being asserted against " + std::to_string(atlases.size())
 			+ ", and every atlas outside this set installs untested. The bundle "
-			"ships the four viewport atlases and the three themed sheets.");
+			"ships the four viewport atlases, the three themed sheets and the "
+			"Layer-1 Sector copy.");
 		// AC: every registered atlas is covered by the atlas-set registry.
 		for (auto const& name : atlases)
 			require(registry.count(name), "The shipped manifest registers the "
@@ -579,7 +582,7 @@ namespace
 			}
 		}
 		require(tilesChecked > 100, "Only " + std::to_string(tilesChecked)
-			+ " tiles were paired across the eleven registered atlases; the "
+			+ " tiles were paired across the registered atlases; the "
 			"bundle declares far more, so the sweep is stopping short");
 	}
 

@@ -29,6 +29,16 @@ sets:
   SectorAtlas:
     kind: sector
     tileset: textures/sectors-new.tileset.yaml
+  # The Layer-1 Sector sheet (#1086) reuses the Sector tileset unchanged. It
+  # is a copy of that sheet, and render semantics - render offset, drawn
+  # size - are the same for both, so a second tileset file saying the same
+  # thing would be two files to keep in step for no gain. Only the pixels
+  # differ, and those live in the PNG the `Image` resource names. Splitting a
+  # Layer-1 tileset out is a later, local move if Layer 1 ever wants
+  # semantics the Sector sheet does not have.
+  SectorAtlasLayer1:
+    kind: sector
+    tileset: textures/sectors-new.tileset.yaml
   ObjectAtlas:
     kind: object
     tileset: textures/objects-new.tileset.yaml
