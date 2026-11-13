@@ -1202,6 +1202,73 @@ heard of them, with nothing to migrate.
 byte-identical round trip in YAML and binary, and that the Window's own
 glass rect comes back where it was, since the frame is derived from it.
 
+## The Layer Image set
+
+A Layer may bind its own Image set, and then its Sectors draw their surfaces
+from that sheet while every other Layer keeps the World's - in the same
+frame, with no second pass and no per-pass swap of what is installed (#1090).
+
+The resolution happens once per Sector, in `renderSector`, and is asked of
+the Sector's own Layer index rather than of the pass that happens to be
+drawing it. The handle it returns is then handed down to everything the
+Sector draws - the per-cell surface loop, the boundary strips - exactly as
+it has been since the helpers started taking the sheet instead of reading it
+out of file state (#1088). A Door's and a Window's frame resolve the same
+way, off the Sector the threshold is authored on, because a frame is Sector
+artwork laid on the wall it frames: a frame that asked the install instead
+would come out wearing the World's moulding on a wall that does not.
+
+**Inherit follows the World's pick.** A Layer with no binding draws the
+sheet the install registry is drawing. That is the World's sector Image set
+as installed: selecting a sheet installs it and makes it the drawn one, so
+asking the drawn sheet keeps one authority over what is on screen rather
+than adding a second - the World's name - that can disagree with what was
+actually installed.
+
+**Override beats the World's pick.** A Layer bound at a sheet the registry
+resolves draws that sheet whatever the World selects, and clearing the
+binding returns it to following the World. The two are independent facts:
+moving the World's pick moves every inheriting Layer and no bound one, and
+binding a Layer moves that Layer alone.
+
+**A binding that resolves to nothing draws the World's sheet.** A Layer
+bound at a name no install ever put in the registry falls back rather than
+drawing nothing or throwing through a pass that has other Layers to draw.
+That is the same recoverable answer a recorded triangle naming an
+unresolvable sheet gets where its batch binds its texture (#1089), and it
+is the same shape the shipped-game load takes: a bad artwork choice is
+reported where it is made and drawn past. A sheet that *is* installed but
+was refused empty still draws the missing-art magenta, which is the
+`#1087` rule and unchanged here.
+
+**The aperture recursion needs no binding arithmetic.** A back Sector seen
+through a Window or an open Door is drawn by the front Sector's pass, under
+a clip the threshold pushed, and resolves its own Layer's sheet because the
+answer is a property of the Sector rather than of the pass that reached it.
+That is the whole reason the resolution is keyed on `getLayerIndex()` and
+not on the `layer` argument the recursion carries: the two are not the same
+thing, and only one of them says which Layer the artwork belongs to. A back
+Layer therefore never wears the front Layer's sheet through an opening,
+which is the failure the feature exists to remove.
+
+**What does not honour it.** The next-Layer wireframe overlay contributes
+the outline only and never a fill (ADR 0002), so a binding on the Layer it
+outlines has no tile there to change. The LocationPlan canvas draws a
+Location's furniture grid from the Furniture atlas and no Sector surface at
+all, so a Layer binding has no route into it and the plan keeps the World's
+sheet. The editor's variant swatch strip is a World-level tool and frames
+its swatches off the World's sheet for the same reason.
+
+`smoke/render/AtlasInstallPath.cpp` carries the checks: two Layers wearing
+two sheets in one recorded frame, the back Layer reached through an
+aperture; the same with the *front* Layer bound, which is the hard
+direction - the front wall and the frames set into it carry the front
+Layer's sheet and the Sector behind them must still come back on the World's;
+a seven-step precedence walk that moves exactly one of the binding and the
+World's pick at a time; the unresolvable-name fallback; the wireframe
+overlay drawing no tiles on either Layer while still drawing its outlines;
+and the LocationPlan canvas emitting no Sector-family triangle at all.
+
 ## The version 1 draft set
 
 `resources/textures/sectors.tileset.yaml` is the version 1 format: explicit

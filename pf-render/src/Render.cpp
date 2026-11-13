@@ -116,18 +116,55 @@ void renderDoorframe(std::shared_ptr<const core::Door> const& door,
 void renderWindowframe(std::shared_ptr<const core::Window> const& window,
 	pf::render::InstalledSectorSheet const* sheet, WorldDrawList* drawList);
 
-// The Sector sheet a pass draws from: the sheet the install registry is
-// drawing (#1087). Every Sector draw helper below is handed this handle
-// rather than going to the registry for itself, so no draw path can ask a
-// tile question of a sheet it is not drawing (#1088).
+// The Sector sheet one Sector draws from: its own Layer's Layer Image set
+// when that Layer binds one and the install registry resolves the name
+// (#1090).
 //
-// This is the one place a Sector pass decides which sheet it draws. A
-// later slice resolves that from the Sector's own Layer Image set; every
-// helper under here keeps taking the handle it was handed, so the answer
-// changes at this one call and nowhere else.
-pf::render::InstalledSectorSheet const* sectorDrawSheet()
+// A Layer that binds nothing draws the World's sector Image set, which is
+// the sheet the install path is drawing. The World's selection installs its
+// sheet and makes it the drawn one, so the drawn sheet *is* the World's
+// sheet as installed; asking the drawn sheet rather than the World's name
+// keeps one authority over what is on screen instead of adding a second one
+// that can disagree with what was actually installed.
+//
+// A binding naming a sheet nothing installed also draws the World's sheet.
+// That is the same recoverable answer a recorded triangle naming an
+// unresolvable sheet gets where its batch binds its texture (#1089): a bad
+// artwork choice is something to draw past, not a reason to stop drawing.
+//
+// The index asked of the World is the Sector's own Layer index and not the
+// pass's. A back Sector reached through an aperture is reached with the
+// front pass's `layer` value on some paths and with its own on others, and
+// the binding is a fact about the Sector's Layer rather than about the pass.
+// Resolving it off the Sector is what lets the aperture recursion carry no
+// binding arithmetic of its own: every Sector answers for itself no matter
+// which pass reached it.
+pf::render::InstalledSectorSheet const* sectorDrawSheetFor(uint32_t layerIndex)
 {
-	return pf::render::sectorSheetRegistry().drawing();
+	auto const& registry = pf::render::sectorSheetRegistry();
+	if (gRenderWorld && layerIndex < gRenderWorld->getLayerCount())
+	{
+		auto const& binding = gRenderWorld->layerSectorImageSet(layerIndex);
+		if (binding)
+		{
+			if (auto const* sheet = registry.find(*binding)) return sheet;
+		}
+	}
+	return registry.drawing();
+}
+
+// The sheet a threshold's frame is laid against: the sheet of the Layer the
+// threshold is authored on, which is the wall it frames. A Door and a
+// Window are both authored on the front Layer of the pair they join, so
+// their front Sector is the Layer whose sheet moulds them. A threshold seen
+// through another threshold is drawn by its own Sector's pass and resolves
+// its own Layer the same way, which is why the frame of a back wall's
+// window wears the back Layer's sheet and not the front Layer's.
+pf::render::InstalledSectorSheet const* sectorDrawSheetFor(
+	std::shared_ptr<const core::Sector> const& owner)
+{
+	return owner ? sectorDrawSheetFor(owner->getLayerIndex())
+		: pf::render::sectorSheetRegistry().drawing();
 }
 
 void renderTransitThroughApertures(shared_ptr<const core::Sector> const& transit, uint32_t behindLayer,
@@ -943,7 +980,8 @@ void renderDoorLeaves(shared_ptr<const core::Door> door, uint32_t layer,
 		// hole does not match its opening costs a band of wall inside the
 		// moulding rather than the see-through hole it was when the frame
 		// stood in for the wall (#1062, retired by #1073).
-		renderDoorframe(door, sectorDrawSheet(), drawList);
+		renderDoorframe(door, sectorDrawSheetFor(door->getFrontSector()),
+			drawList);
 		drawList->AddDrawCmd();
 	}
 	else if (style == LayerRenderStyle::Wireframe)
@@ -1485,7 +1523,8 @@ void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRe
 	// that already owns one.
 	if (isDrawnSolid(style))
 	{
-		renderWindowframe(window, sectorDrawSheet(), drawList);
+		renderWindowframe(window, sectorDrawSheetFor(window->getFrontSector()),
+			drawList);
 		drawList->AddDrawCmd();
 	}
 
@@ -2681,10 +2720,13 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	}
 
 	// The sheet every Sector tile in this pass is drawn from, resolved once
-	// for the pass and handed to every draw helper below - the surface loop,
-	// the boundary strips - so the whole Sector draws off one sheet and no
-	// helper goes looking for it (#1088).
-	auto const sheet = sectorDrawSheet();
+	// for this Sector off its own Layer and handed to every draw helper
+	// below - the surface loop, the boundary strips - so the whole Sector
+	// draws off one sheet and no helper goes looking for it (#1088). The
+	// Layer it is resolved from is the Sector's own and not the pass's,
+	// which is what makes a back Sector reached through an aperture wear
+	// its own Layer's sheet rather than the front Layer's (#1090).
+	auto const sheet = sectorDrawSheetFor(sector->getLayerIndex());
 
 	// A Sector's surface is artwork the installed atlas carries. Every type
 	// asks for a tile of its own family and draws it exactly as the sheet

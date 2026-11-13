@@ -29,16 +29,26 @@
 #include "Checks.h"
 
 #include "AtlasInstall.h"
+#include "DrawTypes.h"
+#include "LocationPlan.h"
 #include "ObjectTileset.h"
+#include "Render.h"
 #include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "TileArtwork.h"
+#include "UISettings.h"
 #include "WorldDrawSegments.h"
 #include "WorldRenderSlotAllocator.h"
 
 #include "core/Agent.h"
 #include "core/Defines.h"
+#include "core/Door.h"
+#include "core/DoorSectorObject.h"
 #include "core/Furniture.h"
+#include "core/Sector.h"
+#include "core/SectorObjectType.h"
+#include "core/Window.h"
+#include "core/WindowSectorObject.h"
 #include "core/World.h"
 #include "WorldDrawList.h"
 
@@ -53,16 +63,20 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
+
+extern UISettings gUISettings;
 
 namespace
 {
@@ -2247,6 +2261,643 @@ namespace
 			"sheet's second batch should have been added, and the reversal should "
 			"have added none");
 	}
+	// ------------------------------------------------------------------
+	// #1090: a Sector renders from its own Layer's Image set.
+	//
+	// #1087 put the sheets in a keyed, GPU-free registry, #1088 made every
+	// draw helper take the handle it was handed, and #1089 put the sheet on
+	// the recorded triangle. What was missing was the draw path asking which
+	// sheet a Sector wants. It asks the Sector's own Layer, once per Sector,
+	// and hands the handle down - which is why the aperture recursion needs
+	// no arithmetic of its own: a back Sector answers for itself the same
+	// way a front one does, no matter which pass reached it.
+	//
+	// Everything below drives the real render pass over a real World with
+	// the real install behind it and reads the recorded command stream back.
+	// No render stack and no OpenGL context anywhere in the process: the
+	// sheet a triangle carries resolves through the install registry
+	// (#1087), which is the seam this feature was built to be assertable at.
+	// ------------------------------------------------------------------
+
+	// Sector sheets installed through the install the application runs, for
+	// the Layer Image set checks. Three are staged because the precedence
+	// checks need three distinct answers in play at once: the World's own
+	// sheet, the sheet a Layer binds, and a third sheet the World's pick can
+	// move to while that Layer keeps its own.
+	class InstalledSectorSheets
+	{
+	public:
+		explicit InstalledSectorSheets(smoke::Context const& context,
+			std::string const& tag)
+			: mStaged(context, tag, { "SectorAtlas", "SectorAtlasLayer1",
+				"StationAtlas" })
+		{
+			// The Layer-1 sheet first and the World's default last, so the
+			// sheet the draw path reaches is the World's own and a Layer's
+			// binding is the only thing that can move a Layer off it.
+			install("SectorAtlasLayer1");
+			install("SectorAtlas");
+		}
+
+		// Installs one shipped sheet and makes it the sheet the draw path
+		// draws, which is what selecting another sector Image set for the
+		// World does.
+		void install(std::string const& name)
+		{
+			std::string diagnostic;
+			mInstaller.installSectorSlot(name, mStaged.load(name), diagnostic);
+			require(diagnostic.empty(), "Staging the shipped " + name
+				+ " Sector sheet was refused: " + diagnostic);
+			require(pf::render::sectorSheetRegistry().drawingName() == name,
+				"Installing " + name + " left the draw path on '"
+					+ pf::render::sectorSheetRegistry().drawingName()
+					+ "', so the install did not make it the sheet that draws");
+		}
+
+		pf::render::InstalledSectorSheet const* find(std::string const& name) const
+		{
+			return pf::render::sectorSheetRegistry().find(name);
+		}
+
+		std::string drawnName() const
+		{
+			return pf::render::sectorSheetRegistry().drawingName();
+		}
+
+	private:
+		StagedAtlasDirectory mStaged;
+		pf::render::AtlasInstaller mInstaller;
+	};
+
+	// A two-Layer World whose front wall carries one Window and one Door,
+	// both looking into the Layer behind. Those are the two recursions the
+	// binding has to survive: in each case the back Sector is drawn by the
+	// front Sector's pass, under a clip the threshold pushed, and must still
+	// wear its own Layer's sheet rather than the front Layer's.
+	struct LayerSheetScene
+	{
+		std::shared_ptr<core::World> world;
+		std::shared_ptr<const core::Sector> front;
+		std::shared_ptr<const core::Sector> back;
+		std::shared_ptr<core::Door> door;
+		std::shared_ptr<const core::Window> window;
+	};
+
+	std::shared_ptr<const core::Sector> onlySectorOnLayer(core::World const& world,
+		uint32_t layer)
+	{
+		std::shared_ptr<const core::Sector> found;
+		int count{};
+		for (uint32_t index = 0; index < world.getNumSectors(); ++index)
+		{
+			auto const sector = world.getSector(index);
+			if (sector && sector->getLayerIndex() == layer)
+			{
+				found = sector;
+				++count;
+			}
+		}
+		require(count == 1, "Layer " + std::to_string(layer) + " holds "
+			+ std::to_string(count) + " Sectors; the fixture puts exactly one "
+			"wall on each Layer so a recorded pass over it has one answer");
+		return found;
+	}
+
+	// The threshold authored *on* a Sector, as opposed to the one the Sector
+	// only carries as the back registration of a threshold written on the
+	// Layer in front of it. Which side a threshold was authored on is the
+	// threshold's fact to state, so it is asked rather than guessed.
+	std::shared_ptr<core::Door> doorAuthoredOn(
+		std::shared_ptr<const core::Sector> const& sector)
+	{
+		for (uint32_t index = 0; index < sector->getNumObjects(); ++index)
+		{
+			auto const object = sector->getObject(index);
+			if (!object || object->getObjectType() != core::SectorObjectType::Door)
+				continue;
+			auto const door = std::static_pointer_cast<core::DoorSectorObject>(
+				object)->getDoor();
+			if (door && door->getFrontSector() == sector) return door;
+		}
+		return nullptr;
+	}
+
+	std::shared_ptr<const core::Window> windowAuthoredOn(
+		std::shared_ptr<const core::Sector> const& sector)
+	{
+		for (uint32_t index = 0; index < sector->getNumObjects(); ++index)
+		{
+			auto const object = sector->getObject(index);
+			if (!object || object->getObjectType()
+					!= core::SectorObjectType::Window) continue;
+			auto const window = std::static_pointer_cast<
+				core::WindowSectorObject>(object)->getWindow();
+			if (window && window->getFrontSector() == sector) return window;
+		}
+		return nullptr;
+	}
+
+	// Builds the fixture. `wallKind` says what each Layer carries: `room` is
+	// the ordinary case, and `corridor` is what the precedence check needs,
+	// because the third sheet the World's pick can move to - the shipped
+	// Station theme - is an `ImageSet` that declares one region only,
+	// `corridor`. A Room drawn from that sheet answers the missing-tile
+	// magenta, which is no Sector-family triangle at all, and there would
+	// be nothing left to read a sheet off.
+	LayerSheetScene layerSheetScene(std::string const& wallKind = "room")
+	{
+		auto world = std::make_shared<core::World>("Layer image set world", 16,
+			6);
+		while (world->getLayerCount() < 2) world->addLayer();
+		if (wallKind == "corridor")
+		{
+			world->addCorridor(0, 0, 0, 4, 1);
+			world->addCorridor(1, 0, 0, 4, 1);
+		}
+		else
+		{
+			require(wallKind == "room", "The fixture was asked for a wall kind "
+				"of '" + wallKind + "', which it knows how to build as neither");
+			world->addRoom("Front", 0, 0, 0, 4, 1);
+			world->addRoom("Back", 1, 0, 0, 4, 1);
+		}
+		// One Window at column 1 and one Door at column 3 of the front wall,
+		// each with the back wall directly behind it.
+		world->addSectorWindow(0, 0, 1, 1, 1);
+		world->addSectorDoor(0, 0, 3);
+		world->finishBuild();
+		world->pauseSimulation();
+
+		LayerSheetScene scene;
+		scene.world = world;
+		scene.front = onlySectorOnLayer(*world, 0);
+		scene.back = onlySectorOnLayer(*world, 1);
+		require(scene.front != nullptr && scene.back != nullptr,
+			"The Layer Image set fixture lost a Layer's wall, so there is no "
+			"front pass to record and nothing behind it to see through an "
+			"aperture");
+		scene.window = windowAuthoredOn(scene.front);
+		scene.door = doorAuthoredOn(scene.front);
+		require(scene.window != nullptr && scene.door != nullptr,
+			"The fixture's front wall lost the Window or the Door, so one of the "
+			"two aperture recursions this feature has to survive is not being "
+			"exercised");
+		require(scene.window->getBackSector() == scene.back
+				&& scene.door->getBackSector() == scene.back,
+			"Neither threshold looks into the Layer the fixture put behind it, so "
+			"the recursion would draw some other Sector and the sheet read back "
+			"would not be Layer 1's");
+		return scene;
+	}
+
+	// Drives a Door to an exact open fraction through its own timing, so the
+	// renderer reads a real device state. A closed Door culls the space
+	// behind it - its leaves cover the whole doorway - so a check that wants
+	// to see through one has to open it first.
+	void driveTo(std::shared_ptr<core::Door> const& door, float fraction)
+	{
+		door->close();
+		while (!door->isClosed()) door->update(door->getOpenCloseTime());
+		if (fraction <= 0.0f) return;
+		door->open();
+		door->update(door->getOpenCloseTime() * fraction);
+		require(door->getOpenPercentage() >= fraction,
+			"The Door fixture could not be driven to " + std::to_string(fraction)
+				+ " open, reached " + std::to_string(door->getOpenPercentage()));
+	}
+
+	// The clip every pass here is recorded under: wide enough that nothing is
+	// culled, so a missing draw means the pass did not draw and nothing else.
+	// Anything drawn under a *narrower* clip came down a threshold's aperture
+	// rather than out of the Sector's own pass, which is the one distinction
+	// that separates the two Layers in a recorded frame.
+	WorldDrawList::ClipRectangle wideClip()
+	{
+		return { { -100000.0f, -100000.0f }, { 100000.0f, 100000.0f } };
+	}
+
+	// Records one Sector through the real pass with the World published, the
+	// way renderWorld() publishes it. The scope is what lets the pass read
+	// the Layer bindings off the World being drawn.
+	WorldDrawList recordSectorPass(std::shared_ptr<const core::World> const& world,
+		std::shared_ptr<const core::Sector> const& sector, uint32_t layer,
+		LayerRenderStyle style)
+	{
+		WorldDrawList commands{ wideClip() };
+		RenderWorldScope scope(world);
+		renderSector(sector, layer, style, false, packColour(214, 96, 32, 255),
+			&commands);
+		return commands;
+	}
+
+	// One Sector-family triangle read back out of a recorded frame, with the
+	// two facts every check below sorts on: which sheet it says it came from,
+	// and whether it was drawn under the recorder's own clip or under one a
+	// threshold pushed.
+	struct DrawnSectorTile
+	{
+		std::string sheet;
+		bool ownClip{ true };
+	};
+
+	bool sameClip(WorldDrawList::ClipRectangle const& left,
+		WorldDrawList::ClipRectangle const& right)
+	{
+		return left.minimum.x == right.minimum.x
+			&& left.minimum.y == right.minimum.y
+			&& left.maximum.x == right.maximum.x
+			&& left.maximum.y == right.maximum.y;
+	}
+
+	std::vector<DrawnSectorTile> drawnSectorTiles(WorldDrawList const& commands)
+	{
+		auto const outer = wideClip();
+		std::vector<DrawnSectorTile> out;
+		for (auto const& command : commands.commands())
+		{
+			if (auto const* triangle = std::get_if<WorldDrawList::Triangle>(
+				&command))
+			{
+				if (triangle->texture == WorldDrawList::Texture::SectorAtlas)
+					out.push_back({ triangle->sectorSheet,
+						sameClip(triangle->clip, outer) });
+			}
+		}
+		return out;
+	}
+
+	std::vector<DrawnSectorTile> underClip(
+		std::vector<DrawnSectorTile> const& tiles, bool ownClip)
+	{
+		std::vector<DrawnSectorTile> out;
+		for (auto const& tile : tiles)
+			if (tile.ownClip == ownClip) out.push_back(tile);
+		return out;
+	}
+
+	std::string sheetText(std::vector<DrawnSectorTile> const& tiles)
+	{
+		std::string out;
+		for (auto const& tile : tiles)
+		{
+			if (!out.empty()) out += ", ";
+			out += tile.sheet.empty() ? std::string("<none>") : tile.sheet;
+		}
+		return out.empty() ? std::string("<nothing>") : out;
+	}
+
+	// The distinct sheets a set of tiles carries, in first-drawn order.
+	std::vector<std::string> distinctSheets(
+		std::vector<DrawnSectorTile> const& tiles)
+	{
+		std::vector<std::string> out;
+		for (auto const& tile : tiles)
+			if (std::find(out.begin(), out.end(), tile.sheet) == out.end())
+				out.push_back(tile.sheet);
+		return out;
+	}
+
+	// The one sheet a Sector's own surface drew, asserted to be exactly one.
+	// A Sector resolves its sheet once per Sector, so more than one answer
+	// across its own cells is the pass disagreeing with itself. `step` names
+	// which arrangement of bindings and World pick the read was taken under,
+	// because the precedence check below takes seven of them and a failure
+	// that does not say which is a failure that has to be found by hand.
+	std::string ownSurfaceSheet(std::string const& step,
+		std::shared_ptr<const core::World> const& world,
+		std::shared_ptr<const core::Sector> const& sector, uint32_t layer)
+	{
+		auto const tiles = underClip(drawnSectorTiles(recordSectorPass(world,
+			sector, layer, LayerRenderStyle::Solid)), true);
+		require(!tiles.empty(), step + ": the Layer-" + std::to_string(layer)
+			+ " Sector drew no Sector-family tile under its own clip, so there "
+			"is no sheet to read back");
+		auto const distinct = distinctSheets(tiles);
+		require(distinct.size() == 1, step + ": one Sector's own surface drew "
+			+ std::to_string(distinct.size()) + " different sheets ('"
+			+ sheetText(tiles) + "'); the binding is resolved once per Sector, so "
+			"every cell of one Sector draws off one sheet");
+		return distinct.front();
+	}
+
+	// ------------------------------------------------------------------
+	// AC: a Layer with a binding draws its own sheet and a Layer without one
+	// draws the World's, in the same frame, with the back Layer reached
+	// through an aperture.
+	//
+	// The two Layers are told apart by their clip as well as by their sheet:
+	// the front wall's own tiles are drawn under the clip the recorder opened
+	// and the back Sector's under one the Window pushed, so "these are the
+	// two Layers" is a statement about where each draw came from rather than
+	// only about which string it carries.
+	// ------------------------------------------------------------------
+	void aBoundLayerAndAnInheritingLayerDrawDifferentSheetsInOneFrame(
+		smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		InstalledSectorSheets sheets{ context, "layer-sheet-one-frame" };
+		auto const scene = layerSheetScene();
+		require(scene.world->layerSectorImageSet(0) == std::nullopt
+				&& scene.world->layerSectorImageSet(1) == std::nullopt,
+			"A fresh World did not start with every Layer inheriting, so the "
+			"baseline below is not the unbound state");
+		require(sheets.drawnName() == "SectorAtlas", "This check needs the "
+			"World's own sheet on the draw path, and the draw path is on '"
+			+ sheets.drawnName() + "'");
+
+		scene.world->setLayerSectorImageSet(1, "SectorAtlasLayer1");
+
+		auto const tiles = drawnSectorTiles(recordSectorPass(scene.world,
+			scene.front, 0, LayerRenderStyle::Solid));
+		auto const own = underClip(tiles, true);
+		auto const through = underClip(tiles, false);
+		require(!own.empty(), "The front Sector drew no Sector-family tile at "
+			"all, so there is nothing in this frame to read a sheet off");
+		require(!through.empty(), "Nothing was drawn through an aperture, so this "
+			"frame holds one Layer and cannot show two wearing two sheets");
+
+		for (auto const& tile : own)
+			require(tile.sheet == "SectorAtlas", "A tile of the front Layer - "
+				"which binds nothing - carries '" + tile.sheet + "'; an "
+				"inheriting Layer draws the World's sector Image set, which is the "
+				"sheet the install is drawing");
+		for (auto const& tile : through)
+			require(tile.sheet == "SectorAtlasLayer1", "A Sector reached through "
+				"an aperture carries '" + tile.sheet + "'; it is on Layer 1, "
+				"which binds SectorAtlasLayer1, and the recursion carries no "
+				"binding arithmetic that could have made it wear anything else");
+
+		// Two identities, and they are two installed sheets rather than one
+		// name spelled two ways.
+		require(distinctSheets(tiles).size() == 2, "One frame carried "
+			+ std::to_string(distinctSheets(tiles).size()) + " distinct Sector "
+			"sheet identities where two Layers wearing two sheets was asked for: "
+			+ sheetText(tiles));
+		require(sheets.find("SectorAtlas") != nullptr
+				&& sheets.find("SectorAtlasLayer1") != nullptr
+				&& sheets.find("SectorAtlas") != sheets.find("SectorAtlasLayer1"),
+			"The two identities in the frame do not resolve to two distinct "
+			"installed sheets, so a batch bound to one of them would not know "
+			"which pixels it was binding");
+	}
+
+	// ------------------------------------------------------------------
+	// AC: a back Sector seen through a Window or a Door wears its own
+	// Layer's sheet, never the front Layer's.
+	//
+	// The front Layer is the one bound here, which is what makes this the
+	// hard direction: every tile of the front wall and of the frames set
+	// into it carries the front Layer's own sheet, and the back Sector -
+	// drawn by that same pass, from inside the threshold draw - has to come
+	// back on the World's sheet rather than picking up the front Layer's.
+	// A pass that resolved the sheet once per pass rather than once per
+	// Sector could not produce this picture, and a frame pass that still
+	// asked the install rather than the threshold's own Sector would come
+	// back with the World's sheet on the front wall.
+	// ------------------------------------------------------------------
+	void aBackSectorThroughAnApertureNeverWearsTheFrontLayersSheet(
+		smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		InstalledSectorSheets sheets{ context, "layer-sheet-aperture" };
+		auto const scene = layerSheetScene();
+		scene.world->setLayerSectorImageSet(0, "SectorAtlasLayer1");
+		require(scene.world->layerSectorImageSet(1) == std::nullopt,
+			"Layer 1 was expected to be left unbound for this check");
+
+		// The Door is driven open. A closed Door culls the space behind it,
+		// so a closed fixture would silently exercise the Window alone and the
+		// Door half of the AC would go untested.
+		driveTo(scene.door, 0.5f);
+
+		auto const tiles = drawnSectorTiles(recordSectorPass(scene.world,
+			scene.front, 0, LayerRenderStyle::Solid));
+		auto const own = underClip(tiles, true);
+		auto const through = underClip(tiles, false);
+		require(own.size() >= 8, "The front wall drew only "
+			+ std::to_string(own.size()) + " Sector tiles; a four-cell wall plus "
+			"the Window and Door frames over it is more than this, so the frame "
+			"passes may not have run");
+		require(through.size() >= 4, "Only " + std::to_string(through.size())
+			+ " tiles came down an aperture; the back wall behind an open Window "
+			"and an open Door is more than one quad, so the recursion may not "
+			"have run at all");
+
+		for (auto const& tile : own)
+			require(tile.sheet == "SectorAtlasLayer1", "A tile of the bound front "
+				"Layer carries '" + tile.sheet + "'; Layer 0 binds "
+				"SectorAtlasLayer1, and that includes the frames set into that "
+				"wall, which are Sector artwork too");
+		for (auto const& tile : through)
+			require(tile.sheet == "SectorAtlas", "A Sector reached through an "
+				"aperture carries '" + tile.sheet + "'; it is on Layer 1, which "
+				"binds nothing and follows the World's pick - the front Layer's "
+				"sheet must not bleed into what is seen through an opening");
+		require(distinctSheets(tiles).size() == 2, "The front Layer's sheet and "
+			"the back Layer's sheet are not two identities in one frame: "
+			+ sheetText(tiles));
+		// The through draw really is clipped by the threshold rather than by
+		// the recorder, which is the only thing that says it came down the
+		// recursion instead of being a second pass over the front wall.
+		for (auto const& tile : through)
+			require(!tile.ownClip, "A back-Layer tile was drawn under the "
+				"recorder's own clip, so it did not come down a threshold "
+				"aperture and this frame proves nothing about the recursion");
+		require(sheets.find("SectorAtlas") != sheets.find("SectorAtlasLayer1"),
+			"The two sheets installed for this check are one sheet");
+	}
+
+	// ------------------------------------------------------------------
+	// AC: override beats the World pick and inherit follows it, asserted
+	// directly rather than inferred from one arrangement.
+	//
+	// Each step moves exactly one thing - a binding, or the World's pick -
+	// and both Layers are read after every move, so a rule that followed the
+	// install order rather than the binding cannot hide in any one of them.
+	// ------------------------------------------------------------------
+	void overrideBeatsTheWorldPickAndInheritFollowsIt(
+		smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		InstalledSectorSheets sheets{ context, "layer-sheet-precedence" };
+		auto const scene = layerSheetScene("corridor");
+		require(sheets.drawnName() == "SectorAtlas", "This check starts from the "
+			"World picking its own sheet, and the draw path is on '"
+			+ sheets.drawnName() + "'");
+
+		// Nothing bound: both Layers follow the World.
+		require(ownSurfaceSheet("both Layers inheriting", scene.world,
+			scene.front, 0) == "SectorAtlas",
+			"An unbound Layer 0 did not draw the World's sector Image set");
+		require(ownSurfaceSheet("both Layers inheriting", scene.world,
+			scene.back, 1) == "SectorAtlas",
+			"An unbound Layer 1 did not draw the World's sector Image set");
+
+		// Bind one Layer: it moves off the World's pick and its neighbour,
+		// which still inherits, does not move with it.
+		scene.world->setLayerSectorImageSet(1, "SectorAtlasLayer1");
+		require(ownSurfaceSheet("Layer 1 bound at SectorAtlasLayer1", scene.world,
+			scene.back, 1) == "SectorAtlasLayer1",
+			"A bound Layer did not draw its own sheet");
+		require(ownSurfaceSheet("Layer 1 bound at SectorAtlasLayer1", scene.world,
+			scene.front, 0) == "SectorAtlas",
+			"Binding one Layer moved the sheet of a Layer that binds nothing, so "
+			"the binding is not per Layer");
+
+		// Move the World's pick. The inheriting Layer follows it; the
+		// overriding Layer does not.
+		sheets.install("StationAtlas");
+		require(ownSurfaceSheet("the World picking StationAtlas", scene.world,
+			scene.front, 0) == "StationAtlas",
+			"Inherit does not follow the World pick: after the World moved to "
+			"StationAtlas an unbound Layer still drew otherwise");
+		require(ownSurfaceSheet("the World picking StationAtlas", scene.world,
+			scene.back, 1) == "SectorAtlasLayer1",
+			"Override does not beat the World pick: a Layer bound to "
+			"SectorAtlasLayer1 moved off it when the World picked StationAtlas");
+
+		// Clearing the binding puts the Layer back under the World's pick.
+		scene.world->setLayerSectorImageSet(1, std::nullopt);
+		require(ownSurfaceSheet("the binding cleared back to inherit", scene.world,
+			scene.back, 1) == "StationAtlas",
+			"A cleared binding did not return the Layer to the World's pick, so "
+			"the clear is not the inherit state");
+
+		// And an override is the sheet named, not the sheet installed first
+		// or last: binding the Layer at the World's own sheet draws that
+		// sheet, and binding it at a third sheet moves it off the World's
+		// pick again while the World has not moved at all.
+		scene.world->setLayerSectorImageSet(1, "StationAtlas");
+		require(ownSurfaceSheet("Layer 1 bound at the World's own pick", scene.world,
+			scene.back, 1) == "StationAtlas",
+			"A Layer bound at the sheet the World itself picks did not draw it");
+		scene.world->setLayerSectorImageSet(1, "SectorAtlas");
+		require(ownSurfaceSheet("Layer 1 bound at a third sheet", scene.world,
+			scene.back, 1) == "SectorAtlas",
+			"A Layer bound at a sheet other than the World's pick did not follow "
+			"its own binding, so the answer is coming from somewhere other than "
+			"the Layer's Layer Image set");
+		require(sheets.drawnName() == "StationAtlas", "The World's pick moved "
+			"while only a binding was being changed, so the two are not the "
+			"independent facts the feature says they are");
+	}
+
+	// ------------------------------------------------------------------
+	// AC: a binding naming a sheet nothing installed draws the World's sheet.
+	//
+	// The same recoverable answer a recorded triangle naming an unresolvable
+	// sheet gets where its batch binds its texture (#1089). A bad artwork
+	// choice is reported where it is made and drawn past; it is not a reason
+	// for a Layer to draw nothing, and it is not a reason to throw through a
+	// render pass that has other Layers to draw.
+	// ------------------------------------------------------------------
+	void aBindingThatNamesNoInstalledSheetDrawsTheWorldsSheet(
+		smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		InstalledSectorSheets sheets{ context, "layer-sheet-unresolvable" };
+		auto const scene = layerSheetScene();
+		require(sheets.find("SectorAtlasLayer2") == nullptr, "The name this "
+			"check calls unresolvable is installed after all, so the fallback "
+			"below would not be testing a missing sheet");
+
+		scene.world->setLayerSectorImageSet(1, "SectorAtlasLayer2");
+		auto const drawn = ownSurfaceSheet("Layer 1 bound at a name nothing "
+			"installed", scene.world, scene.back, 1);
+		require(drawn == "SectorAtlas", "A Layer bound at a sheet nothing "
+			"installed drew '" + drawn + "'; it should fall back to the World's "
+			"sheet, which is what every Sector drew before a Layer could bind "
+			"one, rather than drawing nothing or drawing the name it could not "
+			"resolve");
+		require(sheets.find(drawn) == pf::render::sectorSheetRegistry().drawing(),
+			"The fallback sheet is not the sheet the install is drawing, so the "
+			"unresolvable binding landed on a third thing");
+	}
+
+	// ------------------------------------------------------------------
+	// AC: the next-Layer wireframe overlay draws no tiles and is unaffected.
+	//
+	// The overlay is a drafting aid, not a second artwork surface: it
+	// outlines the Layer behind and fills nothing. A binding on the Layer it
+	// outlines therefore has nothing to change, and the check says so by
+	// finding no Sector-family triangle at all - while still finding the
+	// outlines, so an empty pass cannot be read as a successful exclusion.
+	// ------------------------------------------------------------------
+	void theWireframeOverlayDrawsNoTiles(smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		InstalledSectorSheets sheets{ context, "layer-sheet-wireframe" };
+		auto const scene = layerSheetScene();
+		scene.world->setLayerSectorImageSet(0, "SectorAtlasLayer1");
+		scene.world->setLayerSectorImageSet(1, "SectorAtlasLayer1");
+
+		for (uint32_t layer = 0; layer < 2; ++layer)
+		{
+			auto const tiles = drawnSectorTiles(recordSectorPass(scene.world,
+				layer == 0 ? scene.front : scene.back, layer,
+				LayerRenderStyle::Wireframe));
+			require(tiles.empty(), "The wireframe pass drew "
+				+ std::to_string(tiles.size()) + " Sector-family tile(s) on Layer "
+				+ std::to_string(layer) + ": " + sheetText(tiles) + "; the "
+				"overlay contributes the outline only and never a fill (ADR 0002), "
+				"so a Layer Image set has no tile for it to draw");
+		}
+
+		// The overlay still outlined. Without this the check above would pass
+		// on a pass that drew nothing at all.
+		WorldDrawList overlay{ wideClip() };
+		{
+			RenderWorldScope scope(scene.world);
+			renderSectors(scene.world, 1, LayerRenderStyle::Wireframe, &overlay);
+		}
+		std::size_t lines{};
+		for (auto const& command : overlay.commands())
+			if (std::holds_alternative<WorldDrawList::Line>(command)) ++lines;
+		require(lines > 0, "The wireframe overlay emitted no lines at all, so "
+			"'it drew no tiles' would be a statement about an empty pass");
+		require(drawnSectorTiles(overlay).empty(), "The whole-Layer wireframe "
+			"overlay drew Sector-family tiles over a bound Layer");
+	}
+
+	// ------------------------------------------------------------------
+	// AC: the LocationPlan canvas keeps the World's sector sheet.
+	//
+	// The plan is a World-level tool: it draws a Location's furniture grid
+	// from the Furniture atlas and never a Sector surface, so a Layer binding
+	// has no route into it. Asserted as the absence of any Sector-family
+	// triangle in the plan's own stream, with the plan still having drawn
+	// its grid so the absence is the rule and not an empty render.
+	// ------------------------------------------------------------------
+	void theLocationPlanCanvasKeepsTheWorldsSectorSheet(
+		smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		InstalledSectorSheets sheets{ context, "location-plan-sheet" };
+		auto const scene = layerSheetScene();
+		// Both Layers bound, so a Sector sheet reaching the plan could only
+		// have come from a Layer binding rather than from the World.
+		scene.world->setLayerSectorImageSet(0, "SectorAtlasLayer1");
+		scene.world->setLayerSectorImageSet(1, "SectorAtlasLayer1");
+
+		WorldDrawList plan{ wideClip() };
+		{
+			RenderWorldScope scope(scene.world);
+			renderLocationPlanGrid(plan, *scene.front, { 0.0f, 0.0f },
+				{ 800.0f, 400.0f }, 5, scene.world.get(), 0);
+		}
+		require(plan.commands().size() > 10, "The LocationPlan grid drew "
+			+ std::to_string(plan.commands().size()) + " commands; it draws a "
+			"frame, a background and a row of depth labels, so nothing drawing "
+			"at all would make the check below vacuous");
+		auto const tiles = drawnSectorTiles(plan);
+		require(tiles.empty(), "The LocationPlan canvas emitted "
+			+ std::to_string(tiles.size()) + " Sector-family tile(s) ('"
+			+ sheetText(tiles) + "') while Layers were bound; the plan is a "
+			"World-level tool and keeps the World's sector sheet, which means it "
+			"draws no per-Layer Sector artwork at all");
+		require(sheets.drawnName() == "SectorAtlas", "The World's own sheet "
+			"moved while only Layer bindings were being changed");
+	}
 }
 
 void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
@@ -2291,4 +2942,16 @@ void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
 		isolated<twoSheetsInOneStreamBecomeTwoBatches> });
 	checks.push_back({ "atlasInstall/eachSheetKeepsItsOwnBatchWhenTheOrderMoves",
 		isolated<eachSheetKeepsItsOwnBatchWhenTheOrderMoves> });
+	checks.push_back({ "layerImageSet/aBoundLayerAndAnInheritingLayerDrawDifferentSheetsInOneFrame",
+		isolated<aBoundLayerAndAnInheritingLayerDrawDifferentSheetsInOneFrame> });
+	checks.push_back({ "layerImageSet/aBackSectorThroughAnApertureNeverWearsTheFrontLayersSheet",
+		isolated<aBackSectorThroughAnApertureNeverWearsTheFrontLayersSheet> });
+	checks.push_back({ "layerImageSet/overrideBeatsTheWorldPickAndInheritFollowsIt",
+		isolated<overrideBeatsTheWorldPickAndInheritFollowsIt> });
+	checks.push_back({ "layerImageSet/aBindingThatNamesNoInstalledSheetDrawsTheWorldsSheet",
+		isolated<aBindingThatNamesNoInstalledSheetDrawsTheWorldsSheet> });
+	checks.push_back({ "layerImageSet/theWireframeOverlayDrawsNoTiles",
+		isolated<theWireframeOverlayDrawsNoTiles> });
+	checks.push_back({ "layerImageSet/theLocationPlanCanvasKeepsTheWorldsSectorSheet",
+		isolated<theLocationPlanCanvasKeepsTheWorldsSectorSheet> });
 }

@@ -274,6 +274,12 @@ set(names
     atlasInstall/aSectorTriangleCarriesTheSheetItWasDrawnFrom
     atlasInstall/twoSheetsInOneStreamBecomeTwoBatches
     atlasInstall/eachSheetKeepsItsOwnBatchWhenTheOrderMoves
+    layerImageSet/aBoundLayerAndAnInheritingLayerDrawDifferentSheetsInOneFrame
+    layerImageSet/aBackSectorThroughAnApertureNeverWearsTheFrontLayersSheet
+    layerImageSet/overrideBeatsTheWorldPickAndInheritFollowsIt
+    layerImageSet/aBindingThatNamesNoInstalledSheetDrawsTheWorldsSheet
+    layerImageSet/theWireframeOverlayDrawsNoTiles
+    layerImageSet/theLocationPlanCanvasKeepsTheWorldsSectorSheet
     vehicleArtworkNew/vehicleTilesAreRegistered
     vehicleArtworkNew/carriageComposesAtTwoThreeAndFourCellsWide
     vehicleArtworkNew/connectorSitsAtTheSeamNotACellPosition
