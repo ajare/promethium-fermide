@@ -1,5 +1,6 @@
 #include "Checks.h"
 #include "Render.h"
+#include "SectorOwnClip.h"
 #include "WorldDrawList.h"
 #include "ObjectTileset.h"
 #include "SectorTileset.h"
@@ -36,6 +37,11 @@ namespace
 	float const kCanvasWidth = 1200.0f;
 	float const kCanvasHeight = 5.0f * CORE_LEVEL_HEIGHT_PIXELS;
 
+	// The clip every canvas here is drawn under, named so a check can ask what
+	// a Sector's own box comes to inside it.
+	WorldDrawList::ClipRectangle const canvasClip{ { 0.0f, 0.0f },
+		{ kCanvasWidth, kCanvasHeight } };
+
 	void dumbwaiterPresentation(smoke::Context const&)
 	{
 		using smoke::require;
@@ -66,8 +72,23 @@ namespace
 								&& triangle->clip.maximum.y - triangle->clip.minimum.y
 									<= landingInner.height + 0.001f,
 								"Car escaped owned aperture clipping");
-							else require(triangle->clip.maximum.x - triangle->clip.minimum.x > CORE_CELL_WIDTH_PIXELS,
-								"Selected shaft car incorrectly aperture-clipped");
+							else
+							{
+								// On its own Layer the car carries the shaft's own
+								// box - the clip `renderSector` puts on every draw
+								// of a Sector, its left and right extents, its floor
+								// and its ceiling at the height the type defines -
+								// and not a landing aperture. The shaft is one cell
+								// wide and two Levels tall, so the car drawn inside
+								// it reaches the screen whole.
+								auto const shaft = headless::sectorOwnClip(
+									*world->lookupDumbwaiter(id), canvasClip);
+								require(triangle->clip.minimum.x == shaft.minimum.x
+									&& triangle->clip.minimum.y == shaft.minimum.y
+									&& triangle->clip.maximum.x == shaft.maximum.x
+									&& triangle->clip.maximum.y == shaft.maximum.y,
+									"Selected shaft car not clipped to the shaft's own box");
+							}
 						}
 						if (triangle->colour == packColour(80, 200, 120, 255) || triangle->colour == packColour(200, 160, 80, 255))
 						{

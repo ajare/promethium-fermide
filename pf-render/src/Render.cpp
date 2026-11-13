@@ -2750,6 +2750,32 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	transformPosition(bounds0);
 	transformPosition(bounds1);
 
+	// Everything the Sector draws from the Push below to the Pop at the end of
+	// this function is trimmed vertically to the Sector's own height: its
+	// floor line, and its ceiling at the height its type defines.
+	// `getBounds()` carries that span - a Location's Area is built as
+	// cellsWide x ((levelsHigh - 1) + topLevelHeight) - so a Corridor at
+	// (1,1) three cells wide clips from the cell-pixel floor at 320 up to
+	// 320 + 320 * 0.7 = 544, and no per-type height table is needed here.
+	//
+	// Only the Y extents are clipped. The X span is inherited from the clip
+	// already in force - the whole canvas in the app, where the outer clip is
+	// the viewport - because a Sector's left and right edges are not where its
+	// contents stop: a door button mounted on a Sector boundary is centred on
+	// the boundary line and overhangs it by half its width, and clipping the X
+	// extents cut that overhang and left the button three-sided.
+	//
+	// Inherited rather than read off `worldViewportWidth`, which is zero for
+	// any caller that has not docked a viewport - and a zero-wide clip culls
+	// the whole Sector rather than leaving it unconstrained.
+	Vec2 const clipMin{ drawList->GetClipRectMin().x, min(bounds0.y, bounds1.y) };
+	Vec2 const clipMax{ drawList->GetClipRectMax().x, max(bounds0.y, bounds1.y) };
+
+	// Boundary overlays are drawn outside the clip. Both sit exactly on the
+	// box, so a clip sharing the box would trim the outer half of every stroke
+	// and the Sector would read thinner than it is: the wireframe outline here,
+	// and the selection highlight at the end.
+	//
 	// The wireframe overlay contributes the outline only, never a fill
 	// (ADR 0002). `colour` reaches that outline, and the plain fill drawn
 	// when no atlas is installed at all - nothing else in this pass takes
@@ -2758,7 +2784,16 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	{
 		drawList->AddRect({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
 	}
-	else
+
+	// Intersected, never replaced. `renderSector` is already called from inside
+	// a Door or Window aperture clip and from the viewport clip, and a back
+	// Sector seen through a one-cell aperture must not widen the clip back out
+	// to its own footprint and fill over the Layer in front of it. The Barrier
+	// flushes the batch first so nothing already recorded keeps the new clip.
+	drawList->AddDrawCmd();
+	drawList->PushClipRect(clipMin, clipMax, true);
+
+	if (style != LayerRenderStyle::Wireframe)
 	{
 		std::string kind;
 		// The family name comes from the one place that says which family a
@@ -3058,10 +3093,18 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		}
 	}
 
-	// Selection is an editor overlay. Emit it last so sector-specific fills,
-	// passengers, objects, floors, and walls cannot paint over the yellow border.
-	// The rule is type-agnostic: a selected Background takes the highlight exactly
-	// as a Location does (#35).
+	// The Sector's own clip ends with its content. The Barrier below flushes the
+	// batch so nothing recorded inside the clip is replayed under the wider clip
+	// this Pop restores.
+	drawList->PopClipRect();
+	drawList->AddDrawCmd();
+
+	// Selection is an editor overlay, and it sits outside the clip above on
+	// purpose: it is drawn exactly on the Sector box, so a clip sharing that box
+	// would trim the outer half of its 3px stroke. Emit it last so
+	// sector-specific fills, passengers, objects, floors, and walls cannot
+	// paint over the yellow border. The rule is type-agnostic: a selected
+	// Background takes the highlight exactly as a Location does (#35).
 	if (sector == gSelectedSector && shouldHighlightSelectedSector(style,
 		sector->getLayerIndex(), layer,
 		gUISettings.selectionMode == UISettings::SelectionMode::Sector))

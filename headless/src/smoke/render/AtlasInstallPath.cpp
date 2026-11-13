@@ -34,6 +34,7 @@
 #include "ObjectTileset.h"
 #include "Render.h"
 #include "SectorDrawSheet.h"
+#include "SectorOwnClip.h"
 #include "SectorSheetHoldings.h"
 #include "SectorTileset.h"
 #include "TileArtwork.h"
@@ -2567,8 +2568,10 @@ namespace
 
 	// One Sector-family triangle read back out of a recorded frame, with the
 	// two facts every check below sorts on: which sheet it says it came from,
-	// and whether it was drawn under the recorder's own clip or under one a
-	// threshold pushed.
+	// and whether it was drawn under the Sector's own clip or under one a
+	// threshold pushed. `own` is the Sector whose pass was recorded - the
+	// clip its own drawing carries is its `getBounds()` box, narrowed by the
+	// wide clip this recorder opens with.
 	struct DrawnSectorTile
 	{
 		std::string sheet;
@@ -2584,9 +2587,10 @@ namespace
 			&& left.maximum.y == right.maximum.y;
 	}
 
-	std::vector<DrawnSectorTile> drawnSectorTiles(WorldDrawList const& commands)
+	std::vector<DrawnSectorTile> drawnSectorTiles(WorldDrawList const& commands,
+		core::Sector const& own)
 	{
-		auto const outer = wideClip();
+		auto const outer = headless::sectorOwnClip(own, wideClip());
 		std::vector<DrawnSectorTile> out;
 		for (auto const& command : commands.commands())
 		{
@@ -2611,14 +2615,15 @@ namespace
 	}
 
 	// The missing-art magenta one recorded pass laid down, split the same
-	// way `drawnSectorTiles` splits its tiles: drawn under the recorder's
-	// own clip, or under one a threshold pushed. A cell whose sheet holds no
+	// way `drawnSectorTiles` splits its tiles: drawn under the Sector's own
+	// clip, or under one a threshold pushed. A cell whose sheet holds no
 	// such tile is filled with this colour and carries no sheet at all, so
 	// it never appears among the Sector-family triangles and has to be
 	// counted on its own (#1096).
-	std::size_t magentaCells(WorldDrawList const& commands, bool ownClip)
+	std::size_t magentaCells(WorldDrawList const& commands, core::Sector const& own,
+		bool ownClip)
 	{
-		auto const outer = wideClip();
+		auto const outer = headless::sectorOwnClip(own, wideClip());
 		auto const magenta = packColour(255, 0, 255, 255);
 		std::size_t out{};
 		for (auto const& command : commands.commands())
@@ -2668,7 +2673,7 @@ namespace
 		std::shared_ptr<const core::Sector> const& sector, uint32_t layer)
 	{
 		auto const tiles = underClip(drawnSectorTiles(recordSectorPass(world,
-			sector, layer, LayerRenderStyle::Solid)), true);
+			sector, layer, LayerRenderStyle::Solid), *sector), true);
 		require(!tiles.empty(), step + ": the Layer-" + std::to_string(layer)
 			+ " Sector drew no Sector-family tile under its own clip, so there "
 			"is no sheet to read back");
@@ -2708,7 +2713,7 @@ namespace
 		scene.world->setLayerSectorImageSet(1, "SectorAtlasLayer1");
 
 		auto const tiles = drawnSectorTiles(recordSectorPass(scene.world,
-			scene.front, 0, LayerRenderStyle::Solid));
+			scene.front, 0, LayerRenderStyle::Solid), *scene.front);
 		auto const own = underClip(tiles, true);
 		auto const through = underClip(tiles, false);
 		require(!own.empty(), "The front Sector drew no Sector-family tile at "
@@ -2771,7 +2776,7 @@ namespace
 		driveTo(scene.door, 0.5f);
 
 		auto const tiles = drawnSectorTiles(recordSectorPass(scene.world,
-			scene.front, 0, LayerRenderStyle::Solid));
+			scene.front, 0, LayerRenderStyle::Solid), *scene.front);
 		auto const own = underClip(tiles, true);
 		auto const through = underClip(tiles, false);
 		require(own.size() >= 8, "The front wall drew only "
@@ -2949,8 +2954,8 @@ namespace
 			+ sheets.drawnName() + "'");
 		auto const before = recordSectorPass(scene.world, scene.front, 0,
 			LayerRenderStyle::Solid);
-		require(magentaCells(before, false) == 0, "The back Layer drew "
-			+ std::to_string(magentaCells(before, false))
+		require(magentaCells(before, *scene.front, false) == 0, "The back Layer drew "
+			+ std::to_string(magentaCells(before, *scene.front, false))
 			+ " missing-art magenta triangle(s) with nothing broken, so the count "
 			"taken after the binding would say nothing about it (#1096)");
 
@@ -2981,7 +2986,7 @@ namespace
 		scene.world->setLayerSectorImageSet(1, "SectorAtlasLayerBroken");
 		auto const after = recordSectorPass(scene.world, scene.front, 0,
 			LayerRenderStyle::Solid);
-		auto const tiles = drawnSectorTiles(after);
+		auto const tiles = drawnSectorTiles(after, *scene.front);
 		require(!underClip(tiles, true).empty(), "The front Sector drew no "
 			"Sector-family tile at all, so this frame holds nothing to compare "
 			"the broken Layer against");
@@ -2995,11 +3000,11 @@ namespace
 			+ " Sector-family tile(s) ('" + sheetText(underClip(tiles, false))
 			+ "') through the aperture; the sheet installed under that name has no "
 			"tiles, so nothing should have reached the stream as Sector artwork (#1096)");
-		require(magentaCells(after, false) > 0, "The Layer bound at the broken "
+		require(magentaCells(after, *scene.front, false) > 0, "The Layer bound at the broken "
 			"name drew no missing-art magenta through the aperture, so the broken "
 			"binding is still invisible to the author (#1096)");
-		require(magentaCells(after, true) == 0, "The front Layer - which binds "
-			"nothing - picked up " + std::to_string(magentaCells(after, true))
+		require(magentaCells(after, *scene.front, true) == 0, "The front Layer - which binds "
+			"nothing - picked up " + std::to_string(magentaCells(after, *scene.front, true))
 			+ " missing-art magenta triangle(s) from the Layer behind it, so the "
 			"empty sheet reached past its own Layer (#1096)");
 	}
@@ -3023,9 +3028,9 @@ namespace
 
 		for (uint32_t layer = 0; layer < 2; ++layer)
 		{
+			auto const drawn = layer == 0 ? scene.front : scene.back;
 			auto const tiles = drawnSectorTiles(recordSectorPass(scene.world,
-				layer == 0 ? scene.front : scene.back, layer,
-				LayerRenderStyle::Wireframe));
+				drawn, layer, LayerRenderStyle::Wireframe), *drawn);
 			require(tiles.empty(), "The wireframe pass drew "
 				+ std::to_string(tiles.size()) + " Sector-family tile(s) on Layer "
 				+ std::to_string(layer) + ": " + sheetText(tiles) + "; the "
@@ -3045,7 +3050,7 @@ namespace
 			if (std::holds_alternative<WorldDrawList::Line>(command)) ++lines;
 		require(lines > 0, "The wireframe overlay emitted no lines at all, so "
 			"'it drew no tiles' would be a statement about an empty pass");
-		require(drawnSectorTiles(overlay).empty(), "The whole-Layer wireframe "
+		require(drawnSectorTiles(overlay, *scene.front).empty(), "The whole-Layer wireframe "
 			"overlay drew Sector-family tiles over a bound Layer");
 	}
 
@@ -3079,7 +3084,7 @@ namespace
 			+ std::to_string(plan.commands().size()) + " commands; it draws a "
 			"frame, a background and a row of depth labels, so nothing drawing "
 			"at all would make the check below vacuous");
-		auto const tiles = drawnSectorTiles(plan);
+		auto const tiles = drawnSectorTiles(plan, *scene.front);
 		require(tiles.empty(), "The LocationPlan canvas emitted "
 			+ std::to_string(tiles.size()) + " Sector-family tile(s) ('"
 			+ sheetText(tiles) + "') while Layers were bound; the plan is a "

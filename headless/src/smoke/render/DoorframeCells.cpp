@@ -44,6 +44,7 @@
 #include "DrawTypes.h"
 #include "Render.h"
 #include "SectorDrawSheet.h"
+#include "SectorOwnClip.h"
 #include "SectorTileset.h"
 #include "TileArtwork.h"
 #include "UISettings.h"
@@ -384,12 +385,21 @@ namespace
 	{
 		auto const commands = renderPass(sector, sector->getLayerIndex(), clip,
 			style);
+		// "Own clip" is the Sector's own box, not the rect the recorder opened
+		// with. `renderSector` clips everything it draws to
+		// `Sector::getBounds()` - left and right extents, floor, and ceiling at
+		// the height the Sector's type defines - intersected with the clip
+		// already in force. That box is what separates the Sector's own surface
+		// and frames from the space a Door aperture shows behind it: the
+		// aperture clip is narrower than the box, so a quad drawn under it is
+		// not one of the Sector's own.
+		auto const own = headless::sectorOwnClip(*sector, clip);
 		auto const underOuterClip = [&](WorldDrawList::ClipRectangle const& c)
 		{
-			return near(c.minimum.x, clip.minimum.x)
-				&& near(c.minimum.y, clip.minimum.y)
-				&& near(c.maximum.x, clip.maximum.x)
-				&& near(c.maximum.y, clip.maximum.y);
+			return near(c.minimum.x, own.minimum.x)
+				&& near(c.minimum.y, own.minimum.y)
+				&& near(c.maximum.x, own.maximum.x)
+				&& near(c.maximum.y, own.maximum.y);
 		};
 
 		std::vector<WorldDrawList::Triangle const*> triangles;
