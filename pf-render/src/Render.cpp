@@ -38,6 +38,7 @@
 #include "Render.h"
 #include "AgentPathForRendering.h"
 #include "SectorTileset.h"
+#include "AtlasInstall.h"
 #include "ObjectTileset.h"
 #include "WorldDrawList.h"
 #include "UISettings.h"
@@ -102,15 +103,32 @@ void renderSectorDepthContent(shared_ptr<const core::Sector> sector, WorldDrawLi
 
 // Laid over the cells one Door stands in, after its leaves. Defined with the
 // doorframe vocabulary further down this file and declared here because the
-// threshold pass is where the frame goes down (#1073).
+// threshold pass is where the frame goes down (#1073). The frame is Sector
+// artwork, so the pass hands it the sheet it frames against rather than
+// letting it ask the install which sheet that is (#1088).
 void renderDoorframe(std::shared_ptr<const core::Door> const& door,
-	WorldDrawList* drawList);
+	pf::render::InstalledSectorSheet const* sheet, WorldDrawList* drawList);
 
 // Laid over the cells one Window stands in, after its glass. Defined with
 // the windowframe vocabulary further down this file and declared here
-// because the threshold pass is where the frame goes down (#1075).
+// because the threshold pass is where the frame goes down (#1075), and
+// handed the drawn sheet for the same reason the doorframe is (#1088).
 void renderWindowframe(std::shared_ptr<const core::Window> const& window,
-	WorldDrawList* drawList);
+	pf::render::InstalledSectorSheet const* sheet, WorldDrawList* drawList);
+
+// The Sector sheet a pass draws from: the sheet the install registry is
+// drawing (#1087). Every Sector draw helper below is handed this handle
+// rather than going to the registry for itself, so no draw path can ask a
+// tile question of a sheet it is not drawing (#1088).
+//
+// This is the one place a Sector pass decides which sheet it draws. A
+// later slice resolves that from the Sector's own Layer Image set; every
+// helper under here keeps taking the handle it was handed, so the answer
+// changes at this one call and nowhere else.
+pf::render::InstalledSectorSheet const* sectorDrawSheet()
+{
+	return pf::render::sectorSheetRegistry().drawing();
+}
 
 void renderTransitThroughApertures(shared_ptr<const core::Sector> const& transit, uint32_t behindLayer,
 	std::vector<TransitAperture> const& apertures, WorldDrawList* drawList);
@@ -925,7 +943,7 @@ void renderDoorLeaves(shared_ptr<const core::Door> door, uint32_t layer,
 		// hole does not match its opening costs a band of wall inside the
 		// moulding rather than the see-through hole it was when the frame
 		// stood in for the wall (#1062, retired by #1073).
-		renderDoorframe(door, drawList);
+		renderDoorframe(door, sectorDrawSheet(), drawList);
 		drawList->AddDrawCmd();
 	}
 	else if (style == LayerRenderStyle::Wireframe)
@@ -1467,7 +1485,7 @@ void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRe
 	// that already owns one.
 	if (isDrawnSolid(style))
 	{
-		renderWindowframe(window, drawList);
+		renderWindowframe(window, sectorDrawSheet(), drawList);
 		drawList->AddDrawCmd();
 	}
 
@@ -2326,9 +2344,11 @@ void renderSectorDepthContent(shared_ptr<const core::Sector> sector, WorldDrawLi
 // declared. The old sheet declares `shuttle` and `staircase` as dormant
 // regions - cut out of the draft, never drawn - so those two ask the
 // family instead, below (#1027).
-std::string sectorSurfaceOrBorrowed(char const* own, char const* borrowed)
+std::string sectorSurfaceOrBorrowed(pf::render::InstalledSectorSheet const* sheet,
+	char const* own, char const* borrowed)
 {
-	return hasSectorTileSurface(own) ? std::string{ own } : std::string{ borrowed };
+	return hasSectorTileSurface(sheet, own) ? std::string{ own }
+		: std::string{ borrowed };
 }
 
 // The surface of a Sector type whose own tile is a New-family thing: the
@@ -2343,9 +2363,10 @@ std::string sectorSurfaceOrBorrowed(char const* own, char const* borrowed)
 // presence of the name. The name has been in the old sheet since the day
 // it was written, so a repoint keyed on presence alone reads those dormant
 // regions as own art and repaints every World on `SectorAtlas` (#1027).
-std::string newFamilySurfaceOrBorrowed(char const* own, char const* borrowed)
+std::string newFamilySurfaceOrBorrowed(pf::render::InstalledSectorSheet const* sheet,
+	char const* own, char const* borrowed)
 {
-	return sectorTilesetIsNewFamily() && hasSectorTileSurface(own)
+	return sectorTilesetIsNewFamily(sheet) && hasSectorTileSurface(sheet, own)
 		? std::string{ own }
 		: std::string{ borrowed };
 }
@@ -2401,7 +2422,7 @@ std::string doorframeTileName(std::uint32_t cellsWide,
 // atlas written before frames existed carry on drawing exactly what it
 // drew before.
 void renderDoorframe(std::shared_ptr<const core::Door> const& door,
-	WorldDrawList* drawList)
+	pf::render::InstalledSectorSheet const* sheet, WorldDrawList* drawList)
 {
 	auto const cellsWide = door->getCellsWide();
 	if (cellsWide == 0 || cellsWide > kMaxFramedDoorCellsWide) return;
@@ -2433,18 +2454,18 @@ void renderDoorframe(std::shared_ptr<const core::Door> const& door,
 	if (area.empty()) return;
 	auto const span = area.projected();
 
-	drawSectorTileSurfacePerCell(drawList, { span.x0, span.y0 },
+	drawSectorTileSurfacePerCell(sheet, drawList, { span.x0, span.y0 },
 		{ span.x1, span.y1 }, gUISettings.worldZoom,
-		[door, cellsWide](std::uint32_t column, std::uint32_t) -> std::string
+		[sheet, door, cellsWide](std::uint32_t column, std::uint32_t) -> std::string
 		{
 			auto const name = doorframeTileName(cellsWide, door->getHeight(),
 				column != 0);
-			// Asked of the atlas rather than trusted. A name with no tile
-			// behind it answers the empty string, which the loop reads as
-			// "no tile asked for" and draws nothing - deliberately not
-			// the missing-art case, which is a name asked and not carried
-			// and answers in magenta over a wall that needed no art.
-			return hasSectorTileOverlay(name) ? name : std::string{};
+			// Asked of the sheet being drawn rather than trusted. A name with
+			// no tile behind it answers the empty string, which the loop reads
+			// as "no tile asked for" and draws nothing - deliberately not the
+			// missing-art case, which is a name asked and not carried and
+			// answers in magenta over a wall that needed no art.
+			return hasSectorTileOverlay(sheet, name) ? name : std::string{};
 		});
 }
 
@@ -2509,7 +2530,7 @@ std::string windowframeTileName(std::uint32_t cellsWide,
 // has not been drawn yet keeps drawing the wall it drew before rather
 // than punching a hole in it.
 void renderWindowframe(std::shared_ptr<const core::Window> const& window,
-	WorldDrawList* drawList)
+	pf::render::InstalledSectorSheet const* sheet, WorldDrawList* drawList)
 {
 	// A BoothWindow wears no windowframe. It *is* a 1x1 Window - a
 	// subclass, constructed as one cell by one level - so a derivation
@@ -2560,17 +2581,17 @@ void renderWindowframe(std::shared_ptr<const core::Window> const& window,
 	if (area.empty()) return;
 	auto const span = area.projected();
 
-	drawSectorTileSurfacePerCell(drawList, { span.x0, span.y0 },
+	drawSectorTileSurfacePerCell(sheet, drawList, { span.x0, span.y0 },
 		{ span.x1, span.y1 }, gUISettings.worldZoom,
-		[cellsWide, levelsHigh](std::uint32_t column, std::uint32_t level) -> std::string
+		[sheet, cellsWide, levelsHigh](std::uint32_t column, std::uint32_t level) -> std::string
 		{
 			auto const name = windowframeTileName(cellsWide, levelsHigh, column,
 				level);
-			// Asked of the atlas rather than trusted, exactly as the
-			// doorframe asks. A name with no tile behind it - and the
+			// Asked of the sheet being drawn rather than trusted, exactly as
+			// the doorframe asks. A name with no tile behind it - and the
 			// all-middle cell's empty name - answers the empty string, which
 			// the loop reads as "no tile asked for" and draws nothing.
-			return hasSectorTileOverlay(name) ? name : std::string{};
+			return hasSectorTileOverlay(sheet, name) ? name : std::string{};
 		});
 }
 
@@ -2580,14 +2601,15 @@ void renderWindowframe(std::shared_ptr<const core::Window> const& window,
 // Stated as a function of the two names and the Sector rather than left
 // inline in the resolver, so the rule is one function with one answer
 // rather than one per caller.
-std::string sectorSurfaceVariantTile(std::string const& own,
+std::string sectorSurfaceVariantTile(pf::render::InstalledSectorSheet const* sheet,
+	std::string const& own,
 	std::string const& base, core::Sector const& sector,
 	std::uint32_t column, std::uint32_t level)
 {
 	auto const variant = sector.surfaceVariantAt(column, level);
 	if (!variant) return base;
 	auto const tile = own + "-V" + std::to_string(*variant);
-	return hasSectorTileSurface(tile) ? tile : base;
+	return hasSectorTileSurface(sheet, tile) ? tile : base;
 }
 
 // The resolver the Sector surface loop asks for one cell's tile (#1039).
@@ -2639,13 +2661,15 @@ std::string sectorSurfaceVariantTile(std::string const& own,
 // wall's tile on a door cell exactly as it is on every other cell, and a
 // Door is still a reversible placement for nothing was ever written over
 // the variant its author painted (#1073).
-SectorSurfaceTileResolver sectorSurfaceTileResolver(std::string ownTile,
+SectorSurfaceTileResolver sectorSurfaceTileResolver(
+	pf::render::InstalledSectorSheet const* sheet,
+	std::string ownTile,
 	std::string baseTile, std::shared_ptr<const core::Sector> sector)
 {
-	return [own = std::move(ownTile), base = std::move(baseTile), sector](
+	return [sheet, own = std::move(ownTile), base = std::move(baseTile), sector](
 		std::uint32_t column, std::uint32_t level) -> std::string
 	{
-		return sectorSurfaceVariantTile(own, base, *sector, column, level);
+		return sectorSurfaceVariantTile(sheet, own, base, *sector, column, level);
 	};
 }
 
@@ -2655,6 +2679,12 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	{
 		return;
 	}
+
+	// The sheet every Sector tile in this pass is drawn from, resolved once
+	// for the pass and handed to every draw helper below - the surface loop,
+	// the boundary strips - so the whole Sector draws off one sheet and no
+	// helper goes looking for it (#1088).
+	auto const sheet = sectorDrawSheet();
 
 	// A Sector's surface is artwork the installed atlas carries. Every type
 	// asks for a tile of its own family and draws it exactly as the sheet
@@ -2703,21 +2733,21 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		case core::SectorType::Background:
 		case core::SectorType::Facade: kind = own; break;
 		case core::SectorType::Airlock:
-		case core::SectorType::Chamber: kind = sectorSurfaceOrBorrowed(own, "corridor"); break;
-		case core::SectorType::Dumbwaiter: kind = sectorSurfaceOrBorrowed(own, "lift"); break;
+		case core::SectorType::Chamber: kind = sectorSurfaceOrBorrowed(sheet, own, "corridor"); break;
+		case core::SectorType::Dumbwaiter: kind = sectorSurfaceOrBorrowed(sheet, own, "lift"); break;
 		// The Shuttle's rail corridor is static architecture and wears its
 		// own tile in the new family; carriage images are rendered separately
 		// at the Shuttle's current position, on top of it (#1017). On the
 		// old family it still borrows the Lift's shaft, as it always did
 		// while the `shuttle` region sat undrawn (#1027).
-		case core::SectorType::Shuttle: kind = newFamilySurfaceOrBorrowed(own, "lift"); break;
+		case core::SectorType::Shuttle: kind = newFamilySurfaceOrBorrowed(sheet, own, "lift"); break;
 		// Staircase steps are procedural and render on top of their Sector
 		// surface, which in the new family is the Staircase's own art rather
 		// than a borrowed Stairwell shaft tile (#1017). On the old family it
 		// is still the plain shaft: the same rule the deleted comment stated,
 		// kept where it belongs - on the family that has no Staircase art of
 		// its own (#1027).
-		case core::SectorType::Staircase: kind = newFamilySurfaceOrBorrowed(own, "stairwell"); break;
+		case core::SectorType::Staircase: kind = newFamilySurfaceOrBorrowed(sheet, own, "stairwell"); break;
 		default: break;
 		}
 		// One tile per World cell (#1039). The loop that lays the cells out
@@ -2733,9 +2763,10 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		// from `own`, never from `kind`, which is what stops a borrowing
 		// Sector wearing the borrowed family's variant (#1050).
 		auto const ownFamily = own ? std::string{ own } : std::string{};
-		if (!drawSectorTileSurfacePerCell(drawList, {bounds0.x, bounds1.y},
+		if (!drawSectorTileSurfacePerCell(sheet, drawList,
+			{bounds0.x, bounds1.y},
 			{bounds1.x, bounds0.y}, gUISettings.worldZoom,
-			sectorSurfaceTileResolver(ownFamily, std::move(kind), sector)))
+			sectorSurfaceTileResolver(sheet, ownFamily, std::move(kind), sector)))
 			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
 	}
 
@@ -2919,12 +2950,14 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		|| sectorType == core::SectorType::Facade;
 	if (renderEdges && !edgelessSurface)
 	{
-		if (style == LayerRenderStyle::Wireframe || !drawSectorTileBoundary("ceiling", drawList,
+		if (style == LayerRenderStyle::Wireframe || !drawSectorTileBoundary(sheet,
+			"ceiling", drawList,
 			{bounds0.x, bounds1.y}, {bounds1.x, bounds1.y + 2.0f}))
 			drawList->AddLine({ bounds0.x, bounds1.y }, { bounds1.x, bounds1.y }, packColour(0, 0, 0), 2.0f);
 
 		// Render floor
-		if (style == LayerRenderStyle::Wireframe || !drawSectorTileBoundary("floor", drawList,
+		if (style == LayerRenderStyle::Wireframe || !drawSectorTileBoundary(sheet,
+			"floor", drawList,
 			{bounds0.x, bounds0.y - 2.0f}, {bounds1.x, bounds0.y}))
 			drawList->AddLine({ bounds0.x, bounds0.y }, { bounds1.x, bounds0.y }, packColour(0, 0, 0), 2.0f);
 
@@ -2967,6 +3000,7 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 
 					float const left = side == CORE_SIDE_LEFT ? from.x : from.x - 2.0f;
 					if (style == LayerRenderStyle::Wireframe || !drawSectorTileBoundary(
+						sheet,
 						side == CORE_SIDE_LEFT ? "left" : "right", drawList,
 						{left, std::min(from.y, to.y)}, {left + 2.0f, std::max(from.y, to.y)}))
 						drawList->AddLine({ from.x, from.y }, { to.x, to.y }, packColour(0, 0, 0), 2.0f);

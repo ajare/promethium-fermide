@@ -269,6 +269,7 @@ set(names
     atlasInstall/everyShippedFurnitureTileResolvesInTheInstalledFurnitureAtlas
     atlasInstall/installedSectorSheetsAreKeyedByAtlasName
     atlasInstall/theDrawPathDrawsTheSheetInstalledLast
+    atlasInstall/aDrawHelperDrawsTheSheetItIsHanded
     atlasInstall/aRefusedSectorSheetInstallReplacesItsEntryAndReports
     vehicleArtworkNew/vehicleTilesAreRegistered
     vehicleArtworkNew/carriageComposesAtTwoThreeAndFourCellsWide

@@ -49,6 +49,7 @@
 
 #include "DrawTypes.h"
 #include "Render.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "TileArtwork.h"
 #include "UISettings.h"
@@ -131,7 +132,7 @@ namespace
 		require(atlas.surfaces.size() == names.size(),
 			"The synthetic variant atlas dropped a duplicate tile name");
 		setSectorTileset(atlas, static_cast<TextureId>(1));
-		require(sectorTilesetIsNewFamily()
+		require(sectorTilesetIsNewFamily(drawingSectorSheet())
 				== (family == SectorTilesetFamily::New),
 			"The synthetic atlas did not come up in the family it was built as");
 		return atlas;
@@ -663,7 +664,7 @@ namespace
 		auto const atlas = installVariantAtlas();
 		require(!atlas.surfaces.count("room-V3"),
 			"The test atlas was supposed to leave -V3 out");
-		require(!hasSectorTileSurface("room-V3"),
+		require(!hasSectorTileSurface(drawingSectorSheet(), "room-V3"),
 			"The installed atlas reports carrying a tile it was not built with");
 		auto const entries = std::vector<core::SectorSurfaceVariant>{ { 1, 0, 3 } };
 		auto const fixture = authoredRoom(3, 1, entries);
@@ -691,7 +692,7 @@ namespace
 		pinViewport();
 		// `-V1` and nothing else: no base tile at all behind this World.
 		auto const atlas = installAtlas(SectorTilesetFamily::New, { "room-V1" });
-		require(!hasSectorTileSurface("room"),
+		require(!hasSectorTileSurface(drawingSectorSheet(), "room"),
 			"The test atlas was supposed to leave the base tile out");
 		auto const entries = std::vector<core::SectorSurfaceVariant>{
 			{ 0, 0, 1 }, { 1, 1, 3 } };
@@ -739,7 +740,7 @@ namespace
 			entries);
 
 		auto const oldAtlas = installOldFamilyAtlas();
-		require(!hasSectorTileSurface("room-V1"),
+		require(!hasSectorTileSurface(drawingSectorSheet(), "room-V1"),
 			"The version 1 family atlas was supposed to carry no variant tiles");
 		auto const onOldFamily = loadDocument(document);
 		std::shared_ptr<const core::Sector> oldSector;
@@ -876,13 +877,13 @@ namespace
 	{
 		pinViewport();
 		auto const atlas = installBorrowingAtlas();
-		require(!hasSectorTileSurface("airlock"),
+		require(!hasSectorTileSurface(drawingSectorSheet(), "airlock"),
 			"The test atlas was supposed to leave the Airlock's own tile out");
-		require(!hasSectorTileSurface("airlock-V2"),
+		require(!hasSectorTileSurface(drawingSectorSheet(), "airlock-V2"),
 			"The test atlas reported carrying a tile it was not built with");
 		// The tile the leak wore is on the sheet and reachable. If this is
 		// ever false, the check below has quietly stopped testing anything.
-		require(hasSectorTileSurface("corridor-V2"),
+		require(hasSectorTileSurface(drawingSectorSheet(), "corridor-V2"),
 			"The test atlas was supposed to carry the borrowed family's variant");
 
 		auto const entries = std::vector<core::SectorSurfaceVariant>{ { 0, 0, 2 } };
@@ -923,7 +924,7 @@ namespace
 	{
 		pinViewport();
 		auto const atlas = installBorrowingAtlas();
-		require(hasSectorTileSurface("corridor-V2"),
+		require(hasSectorTileSurface(drawingSectorSheet(), "corridor-V2"),
 			"The control needs the very tile the borrowing case refused");
 		auto const entries = std::vector<core::SectorSurfaceVariant>{ { 1, 0, 2 } };
 		auto const fixture = authoredCorridor(entries);
@@ -954,9 +955,9 @@ namespace
 		pinViewport();
 		auto const atlas = installAtlas(SectorTilesetFamily::New,
 			{ "room", "lift", "lift-V1", "lift-V2" });
-		require(!hasSectorTileSurface("dumbwaiter"),
+		require(!hasSectorTileSurface(drawingSectorSheet(), "dumbwaiter"),
 			"The test atlas was supposed to leave the Dumbwaiter's own tile out");
-		require(hasSectorTileSurface("lift-V2"),
+		require(hasSectorTileSurface(drawingSectorSheet(), "lift-V2"),
 			"The test atlas was supposed to carry the borrowed family's variant");
 		auto const entries = std::vector<core::SectorSurfaceVariant>{ { 0, 0, 2 } };
 		auto const fixture = authoredDumbwaiter(entries);

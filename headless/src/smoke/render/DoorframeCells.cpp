@@ -43,6 +43,7 @@
 
 #include "DrawTypes.h"
 #include "Render.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "TileArtwork.h"
 #include "UISettings.h"
@@ -135,7 +136,7 @@ namespace
 		atlas.width = column * kCellWidth;
 		atlas.height = kCellHeight;
 		setSectorTileset(atlas, static_cast<TextureId>(1));
-		require(sectorTilesetIsNewFamily(),
+		require(sectorTilesetIsNewFamily(drawingSectorSheet()),
 			"The synthetic doorframe atlas did not come up as the New family");
 		return atlas;
 	}
@@ -1232,10 +1233,10 @@ namespace
 		require(doorframeTileName(2, core::Door::Height::Tall, true)
 				== "doorframe-2t-R0", "2-wide tall right");
 		for (auto const& name : kFrames)
-			require(hasSectorTileOverlay(name), name
+			require(hasSectorTileOverlay(drawingSectorSheet(), name), name
 				+ " is named by the render path but the installed atlas does "
 				"not carry it");
-		require(!hasSectorTileSurface("doorframe-1r-L0"),
+		require(!hasSectorTileSurface(drawingSectorSheet(), "doorframe-1r-L0"),
 			"A doorframe answered the Sector-surface query; it is a tile of "
 			"the atlas but not a surface a Sector is authored with");
 	}

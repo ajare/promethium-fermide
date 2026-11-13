@@ -50,8 +50,23 @@ that seam: every cell of the grid resolved exactly once in the Sector-local fram
 column counted from the drawn area's left edge, level from its floor line - each
 cell drawing the tile it resolved to on the rectangle its own World cell occupies,
 a different tile changing the picture and never the geometry, and a cell the clip
-hides entirely never resolved at all. `drawSectorTileSurface(kind, ...)` remains as
+hides entirely never resolved at all. `drawSectorTileSurface(sheet, kind, ...)` remains as
 the same loop with one name answered for every cell.
+
+Every one of these helpers draws from the installed-sheet handle its caller
+hands it (#1088). Surface presence, overlay presence, family and variant
+count, the per-cell loop, the single-name loop, the in-view early-out, the
+swatch preview and the boundary strips all take the sheet as their first
+argument, and the uv that divides a region by the sheet's width and height
+divides it by the handed sheet's dimensions. Nothing in the draw path reads
+an installed tileset out of file state: a pass says which sheet it draws,
+and a helper cannot ask a tile question of any other one. `renderSector`
+resolves the sheet once for the pass and hands it down to the surface loop,
+the doorframe over a Door's cells, the windowframe over a Window's and the
+ceiling, floor and wall strips; the editor's swatch strip resolves it once
+for the strip. Which sheet that is - today the registry's current one - is
+therefore decided at one call per pass, which is where a later slice puts a
+per-Layer resolution without anything underneath it changing again.
 
 Counting rows up from the floor line is what keeps the anchor out of reach of
 the viewport, and it makes the first row worth emitting a subtraction. That

@@ -1,6 +1,7 @@
 #include "SectorVariantStrip.h"
 
 #include "PaletteLayout.h"
+#include "AtlasInstall.h"
 #include "SectorTileset.h"
 
 #include <algorithm>
@@ -17,16 +18,22 @@ std::vector<SectorVariantSwatch> sectorVariantSwatches(std::string const& kind)
 {
 	std::vector<SectorVariantSwatch> strip;
 	if (kind.empty()) return strip;
+	// The strip is a World-level tool: it shows what the World's own Sector
+	// sheet declares, not what some Layer behind it happens to wear. The
+	// handle is resolved once here and handed to every query below, so the
+	// whole strip asks its questions of one sheet rather than each of them
+	// going to the install for itself (#1088).
+	auto const sheet = pf::render::sectorSheetRegistry().drawing();
 	// A kind with no tile of its own has nothing to show, and a strip that
 	// starts with a hole is a hole the author can pick. The base is asked
 	// for by name rather than assumed present, because the installed atlas
 	// is the only thing that knows what it has.
-	if (!hasSectorTileSurface(kind)) return strip;
+	if (!hasSectorTileSurface(sheet, kind)) return strip;
 	// The count is the tileset's own, read through the installed-atlas
 	// query. It is the number the strip is sized from, which is what makes
 	// the strip follow the tileset: a type that declares two variants gets
 	// three swatches, and nothing here has to be told.
-	auto const declared = sectorSurfaceVariantCount(kind);
+	auto const declared = sectorSurfaceVariantCount(sheet, kind);
 	strip.reserve(static_cast<std::size_t>(std::max(declared, 0)) + 1u);
 	strip.push_back({ 0, kind });
 	for (int variant = 1; variant <= declared; ++variant)
@@ -96,8 +103,12 @@ bool drawSectorVariantSwatch(SectorVariantSwatch const& swatch,
 	WorldDrawList* drawList, Vec2 minimum, Vec2 maximum)
 {
 	if (!drawList) return false;
-	auto const framed = drawSectorTilePreview(swatch.tileName, drawList, minimum,
-		maximum);
+	// The swatch frames a tile off the World's own Sector sheet, the same
+	// sheet the strip was built from: the picture an author is offered is
+	// the picture the strip counted, and both come off one handle (#1088).
+	auto const sheet = pf::render::sectorSheetRegistry().drawing();
+	auto const framed = drawSectorTilePreview(sheet, swatch.tileName, drawList,
+		minimum, maximum);
 	// The name goes over the artwork whatever else happened. A swatch whose
 	// art could not be framed still says what it was meant to show, which
 	// is the one thing a swatch has to do even when it has failed at the

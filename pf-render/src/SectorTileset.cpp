@@ -10,19 +10,19 @@
 #include <utility>
 
 namespace {
-// The sheet the draw path draws: the entry the install registry is drawing,
-// or nullptr when there is nothing installed to draw from.
+// Whether the handle a caller passed names a sheet there is anything to
+// draw from: a sheet, with pixels behind it. A null handle is no sheet at
+// all, and a sheet installed behind an empty handle has no pixels to draw,
+// so it answers every question the way no sheet does - which is what
+// makes a missing atlas draw magenta instead of drawing nothing (#1003).
 //
-// The registry holds every installed Sector sheet under its own name; the
-// one drawn is the one the last install put there (#1087). A sheet
-// installed behind an empty handle is no sheet at all: the handle is what
-// separates "a sheet is installed" from "nothing is", and a sheet with
-// nothing behind it has no pixels to draw, so it answers every question
-// the way an empty registry does.
-pf::render::InstalledSectorSheet const* drawingSheet()
+// This is the whole of what these helpers used to reach for in file state,
+// reduced to a predicate on the argument in front of it. Which sheet a draw
+// path draws is the caller's answer, and no helper here goes looking for it
+// (#1088).
+bool sheetHasArtwork(pf::render::InstalledSectorSheet const* sheet)
 {
-    auto const sheet = pf::render::sectorSheetRegistry().drawing();
-    return sheet != nullptr && sheet->installed() ? sheet : nullptr;
+    return sheet != nullptr && sheet->installed();
 }
 
 // The twelve surface-bearing Sector types. Each fills its own full-cell
@@ -188,15 +188,21 @@ SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
 // 0..1 on both axes; a crop is a sub-range drawn at the same pixels per
 // artwork texel the whole tile would have had, which is what keeps a crop a
 // crop and not a squash.
-void image(WorldDrawList* list, SectorTileset const& sheet,
+void image(WorldDrawList* list, SectorTileset const& tileset,
     SectorTileRegion const& r, Vec2 a, Vec2 b,
     float u0, float u1, float v0, float v1)
 {
-    // Half-texel inset avoids sampling adjacent draft artwork with linear filtering.
-    Vec2 uv0{(r.x + 0.5f + (r.width - 1) * u0) / sheet.width,
-        (r.y + 0.5f + (r.height - 1) * v0) / sheet.height};
-    Vec2 uv1{(r.x + 0.5f + (r.width - 1) * u1) / sheet.width,
-        (r.y + 0.5f + (r.height - 1) * v1) / sheet.height};
+    // Half-texel inset avoids sampling adjacent draft artwork with linear
+    // filtering. The divisor is the width and height of the sheet this
+    // region was taken out of, which is the sheet the caller handed the
+    // draw: a region's fractions are only meaningful against the sheet
+    // they were cut from, so dividing them by some other sheet's size is
+    // how a tile would sample across the middle of a picture it has
+    // nothing to do with (#1088).
+    Vec2 uv0{(r.x + 0.5f + (r.width - 1) * u0) / tileset.width,
+        (r.y + 0.5f + (r.height - 1) * v0) / tileset.height};
+    Vec2 uv1{(r.x + 0.5f + (r.width - 1) * u1) / tileset.width,
+        (r.y + 0.5f + (r.height - 1) * v1) / tileset.height};
     // White on every draw: the tile's own pixels are the picture, and no
     // colour is multiplied into it on the way to the screen.
     list->AddImage(WorldDrawList::Texture::SectorAtlas, a, b, uv0, uv1, White);
@@ -222,7 +228,7 @@ int cellsCovered(float span, float cell)
 // wrong answer looks like. A Sector whose base tile is genuinely absent
 // still fills its whole area with magenta, one cell at a time, which is
 // what it looked like when the whole area was filled at once.
-void drawSurfaceCell(WorldDrawList* list, SectorTileset const& sheet,
+void drawSurfaceCell(WorldDrawList* list, SectorTileset const& tileset,
     std::string const& kind, Vec2 a,
     Vec2 b, float u0, float u1, float v0, float v1)
 {
@@ -240,17 +246,17 @@ void drawSurfaceCell(WorldDrawList* list, SectorTileset const& sheet,
     // undefined behaviour and one of the few ways this function could be
     // wrong without any test being able to see it.
     SectorTileRegion const* region = nullptr;
-    if (auto const surface = sheet.surfaces.find(kind);
-        surface != sheet.surfaces.end())
+    if (auto const surface = tileset.surfaces.find(kind);
+        surface != tileset.surfaces.end())
         region = &surface->second;
-    else if (auto const overlay = sheet.overlays.find(kind);
-        overlay != sheet.overlays.end())
+    else if (auto const overlay = tileset.overlays.find(kind);
+        overlay != tileset.overlays.end())
         region = &overlay->second;
-    if (!region || sheet.width <= 0 || sheet.height <= 0) {
+    if (!region || tileset.width <= 0 || tileset.height <= 0) {
         list->AddRectFilled(a, b, packColour(255, 0, 255, 255));
         return;
     }
-    image(list, sheet, *region, a, b, u0, u1, v0, v1);
+    image(list, tileset, *region, a, b, u0, u1, v0, v1);
 }
 }
 
@@ -321,40 +327,41 @@ void setSectorTileset(SectorTileset tileset, TextureId texture)
 }
 void clearSectorTileset() { pf::render::sectorSheetRegistry().clear(); }
 
-bool hasSectorTileSurface(std::string const& kind)
+bool hasSectorTileSurface(pf::render::InstalledSectorSheet const* sheet,
+    std::string const& kind)
 {
-    auto const sheet = drawingSheet();
-    return sheet != nullptr && sheet->tileset.surfaces.count(kind) > 0;
+    return sheetHasArtwork(sheet) && sheet->tileset.surfaces.count(kind) > 0;
 }
 
-bool hasSectorTileOverlay(std::string const& name)
+bool hasSectorTileOverlay(pf::render::InstalledSectorSheet const* sheet,
+    std::string const& name)
 {
-    // Guarded on the install the same way the surface query is: with no
-    // atlas behind the handle there is no frame to draw, and a caller that
+    // Guarded on the sheet the same way the surface query is: with no
+    // pixels behind the handle there is no frame to draw, and a caller that
     // asks gets the answer that makes it fall back rather than the answer
     // that makes it draw magenta.
-    auto const sheet = drawingSheet();
-    return sheet != nullptr && sheet->tileset.overlays.count(name) > 0;
+    return sheetHasArtwork(sheet) && sheet->tileset.overlays.count(name) > 0;
 }
 
-bool sectorTilesetIsNewFamily()
+bool sectorTilesetIsNewFamily(pf::render::InstalledSectorSheet const* sheet)
 {
-    // An uninstalled atlas is not the new family. `clearSectorTileset()`
-    // drops every installed sheet, so the family drops with it and nothing
-    // survives a teardown as a stale promise that own art is available.
-    auto const sheet = drawingSheet();
-    return sheet != nullptr && sheet->tileset.family == SectorTilesetFamily::New;
+    // A sheet with nothing installed behind it is not the new family. The
+    // handle decides which sheet the question was even asked of, so a
+    // teardown that drops the installed sheets cannot leave a stale promise
+    // that own art is available standing under some other sheet's name.
+    return sheetHasArtwork(sheet)
+        && sheet->tileset.family == SectorTilesetFamily::New;
 }
 
-int sectorSurfaceVariantCount(std::string const& kind)
+int sectorSurfaceVariantCount(pf::render::InstalledSectorSheet const* sheet,
+    std::string const& kind)
 {
-    // Guarded on the install the same way the surface lookup is: with no
+    // Guarded on the sheet the same way the surface lookup is: with no
     // atlas behind the handle there is no declared count to report. The
     // version 1 family declares no families either, and its loader leaves
     // the map empty, so both answer 0 for the same reason - no author ever
     // stated a count.
-    auto const sheet = drawingSheet();
-    if (!sheet) return 0;
+    if (!sheetHasArtwork(sheet)) return 0;
     return sheet->tileset.variantCount(kind);
 }
 
@@ -364,9 +371,15 @@ int SectorTileset::variantCount(std::string const& kind) const
     return found == variantCounts.end() ? 0 : found->second;
 }
 
-bool sectorTileSurfaceIsInView(WorldDrawList const* list, Vec2 minimum,
+bool sectorTileSurfaceIsInView(pf::render::InstalledSectorSheet const* sheet,
+    WorldDrawList const* list, Vec2 minimum,
     Vec2 maximum, float zoom)
 {
+    // Nothing is in view when the handle names no sheet: the loop this
+    // early-out belongs to emits no cell without one, so a caller that
+    // skips its work on this answer is skipping work the loop would never
+    // have been given either (#1088).
+    if (!sheetHasArtwork(sheet)) return false;
     float const cellWidth = CORE_CELL_WIDTH_PIXELS * zoom;
     float const cellHeight = CORE_LEVEL_HEIGHT_PIXELS * zoom;
     if (cellWidth <= 0 || cellHeight <= 0) return false;
@@ -376,12 +389,12 @@ bool sectorTileSurfaceIsInView(WorldDrawList const* list, Vec2 minimum,
         && std::min(maximum.x, clipMax.x) > minimum.x;
 }
 
-bool drawSectorTileSurfacePerCell(WorldDrawList* list, Vec2 minimum,
+bool drawSectorTileSurfacePerCell(pf::render::InstalledSectorSheet const* sheet,
+    WorldDrawList* list, Vec2 minimum,
     Vec2 maximum, float zoom,
     SectorSurfaceTileResolver const& resolveTile)
 {
-    auto const sheet = drawingSheet();
-    if (!sheet) return false;
+    if (!sheetHasArtwork(sheet)) return false;
     // One tile per 1x1 world unit, magnified to the World cell's screen size
     // at the current zoom (the two cell sizes below). Partial levels are
     // cropped, never stretched to a Sector's height.
@@ -398,7 +411,8 @@ bool drawSectorTileSurfacePerCell(WorldDrawList* list, Vec2 minimum,
     // Nothing wholly outside the clip is emitted, and the same question is
     // asked here as the one a caller in front of this loop asks before it
     // builds a per-cell answer it may never be asked for (#1071).
-    if (!sectorTileSurfaceIsInView(list, minimum, maximum, zoom)) return true;
+    if (!sectorTileSurfaceIsInView(sheet, list, minimum, maximum, zoom))
+        return true;
     float const cellWidth = CORE_CELL_WIDTH_PIXELS * zoom;
     float const cellHeight = CORE_LEVEL_HEIGHT_PIXELS * zoom;
     auto const clipMin = list->GetClipRectMin();
@@ -463,24 +477,27 @@ bool drawSectorTileSurfacePerCell(WorldDrawList* list, Vec2 minimum,
     return true;
 }
 
-bool drawSectorTileSurface(std::string const& kind, WorldDrawList* list,
+bool drawSectorTileSurface(pf::render::InstalledSectorSheet const* sheet,
+    std::string const& kind, WorldDrawList* list,
     Vec2 minimum, Vec2 maximum, float zoom)
 {
     // The per-cell loop with one name answered for every cell (#1039). A
     // Sector with no per-cell artwork resolves to exactly this, and it is
     // what a caller asks for when it has one tile and no wish to say which
-    // cell wears it.
-    return drawSectorTileSurfacePerCell(list, minimum, maximum, zoom,
+    // cell wears it. The sheet the name is looked up in is the one the
+    // caller handed over, which is the same sheet the pixels come from.
+    return drawSectorTileSurfacePerCell(sheet, list, minimum, maximum, zoom,
         [&](std::uint32_t, std::uint32_t) { return kind; });
 }
 
-bool drawSectorTilePreview(std::string const& kind, WorldDrawList* list,
+bool drawSectorTilePreview(pf::render::InstalledSectorSheet const* sheet,
+    std::string const& kind, WorldDrawList* list,
     Vec2 minimum, Vec2 maximum)
 {
-    // No atlas, or no tile under that name: nothing to frame, and the caller
-    // is told so it can leave the swatch off rather than show an empty one.
-    auto const sheet = drawingSheet();
-    if (!sheet || !list) return false;
+    // No sheet behind the handle, or no tile under that name: nothing to
+    // frame, and the caller is told so it can leave the swatch off rather
+    // than show an empty one.
+    if (!sheetHasArtwork(sheet) || !list) return false;
     auto const& tileset = sheet->tileset;
     auto const found = tileset.surfaces.find(kind);
     if (found == tileset.surfaces.end() || tileset.width <= 0
@@ -506,10 +523,10 @@ bool drawSectorTilePreview(std::string const& kind, WorldDrawList* list,
     return true;
 }
 
-bool drawSectorTileBoundary(char const* kind, WorldDrawList* list, Vec2 a, Vec2 b)
+bool drawSectorTileBoundary(pf::render::InstalledSectorSheet const* sheet,
+    char const* kind, WorldDrawList* list, Vec2 a, Vec2 b)
 {
-    auto const sheet = drawingSheet();
-    if (!sheet) return false;
+    if (!sheetHasArtwork(sheet)) return false;
     auto const& tileset = sheet->tileset;
     auto const found = tileset.boundaries.find(kind);
     if (found == tileset.boundaries.end() || tileset.width <= 0

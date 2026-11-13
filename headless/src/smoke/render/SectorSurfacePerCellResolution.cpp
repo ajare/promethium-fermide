@@ -37,6 +37,7 @@
 #include "Checks.h"
 
 #include "DrawTypes.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "TileArtwork.h"
 #include "WorldDrawList.h"
@@ -89,7 +90,7 @@ namespace
 		require(atlas.surfaces.size() == size_t(columns) * size_t(levels),
 			"The synthetic per-cell atlas did not carry one tile per cell");
 		setSectorTileset(atlas, static_cast<TextureId>(1));
-		require(sectorTilesetIsNewFamily(),
+		require(sectorTilesetIsNewFamily(drawingSectorSheet()),
 			"The synthetic per-cell atlas did not come up as the New family");
 		return atlas;
 	}
@@ -271,7 +272,7 @@ namespace
 			{ 1000.0f, 1000.0f } });
 		Vec2 const maximum{ float(columns) * kCellWidth,
 			float(levels) * kCellHeight };
-		require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
+		require(drawSectorTileSurfacePerCell(drawingSectorSheet(), &commands, { 0.0f, 0.0f },
 				maximum, 1.0f, recorder.resolver()),
 			"A Sector surface with an atlas installed must draw");
 
@@ -350,14 +351,14 @@ namespace
 
 		WorldDrawList oneTile({ { -1000.0f, -1000.0f },
 			{ 1000.0f, 1000.0f } });
-		require(drawSectorTileSurfacePerCell(&oneTile, { 0.0f, 0.0f }, maximum,
+		require(drawSectorTileSurfacePerCell(drawingSectorSheet(), &oneTile, { 0.0f, 0.0f }, maximum,
 				1.0f,
 				[](std::uint32_t, std::uint32_t) { return cellTile(0, 0); }),
 			"The one-tile draw must draw");
 		Recorder eachCell;
 		WorldDrawList perCell({ { -1000.0f, -1000.0f },
 			{ 1000.0f, 1000.0f } });
-		require(drawSectorTileSurfacePerCell(&perCell, { 0.0f, 0.0f }, maximum,
+		require(drawSectorTileSurfacePerCell(drawingSectorSheet(), &perCell, { 0.0f, 0.0f }, maximum,
 				1.0f, eachCell.resolver()),
 			"The per-cell draw must draw");
 
@@ -446,7 +447,7 @@ namespace
 		Recorder recorder;
 		WorldDrawList commands({ { clipLeft, clipTop },
 			{ maximum.x + 100.0f, maximum.y + 100.0f } });
-		require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
+		require(drawSectorTileSurfacePerCell(drawingSectorSheet(), &commands, { 0.0f, 0.0f },
 				maximum, 1.0f, recorder.resolver()),
 			"A Sector surface with an atlas installed must draw");
 

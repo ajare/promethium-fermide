@@ -30,6 +30,7 @@
 
 #include "AtlasInstall.h"
 #include "ObjectTileset.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "TileArtwork.h"
 
@@ -37,6 +38,7 @@
 #include "core/Defines.h"
 #include "core/Furniture.h"
 #include "core/World.h"
+#include "WorldDrawList.h"
 
 #include <mpp/Logger.h>
 #include <mpp/ResourceManager.h>
@@ -48,6 +50,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -56,6 +59,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -744,7 +748,7 @@ namespace
 		require(slots.sectorDiagnostic.find("tile-nobody-authored")
 			!= std::string::npos, "The Sector diagnostic does not carry the "
 			"refusal: " + slots.sectorDiagnostic);
-		require(!hasSectorTileSurface("room"), "The refused Sector atlas still "
+		require(!hasSectorTileSurface(drawingSectorSheet(), "room"), "The refused Sector atlas still "
 			"installed its other surfaces, so the refusal did not stop the install");
 	}
 
@@ -870,7 +874,7 @@ namespace
 
 		// The Sector slot: the family came through with the artwork, and every
 		// surface the new sheet authors resolves.
-		require(sectorTilesetIsNewFamily(), "The installed Sector atlas did not "
+		require(sectorTilesetIsNewFamily(drawingSectorSheet()), "The installed Sector atlas did not "
 			"come up as the New family, so the Shuttle and Staircase would fall "
 			"back to borrowed art (#1027)");
 		// Every tile the SectorAtlas manifest declares is installed, and each
@@ -887,15 +891,15 @@ namespace
 		{
 			if (authoredSector.overlays.count(tile) == 0)
 			{
-				require(hasSectorTileSurface(tile), "The installed Sector atlas "
+				require(hasSectorTileSurface(drawingSectorSheet(), tile), "The installed Sector atlas "
 					"has no '" + tile + "' surface, though SectorAtlas declares "
 					"it at " + regionsText(region));
 				continue;
 			}
-			require(hasSectorTileOverlay(tile), "The installed Sector atlas has "
+			require(hasSectorTileOverlay(drawingSectorSheet(), tile), "The installed Sector atlas has "
 				"no '" + tile + "' doorframe, though SectorAtlas declares it at "
 				+ regionsText(region));
-			require(!hasSectorTileSurface(tile), "The installed Sector atlas "
+			require(!hasSectorTileSurface(drawingSectorSheet(), tile), "The installed Sector atlas "
 				"answers 'is this a Sector surface' yes for the doorframe tile "
 				+ tile + "; a frame is not a surface a Sector is authored with");
 			++framesInstalled;
@@ -995,7 +999,7 @@ namespace
 		require(slots.furnitureDiagnostic.find("not an installed ImageSet")
 			!= std::string::npos, "An empty Furniture slot reported: '"
 			+ slots.furnitureDiagnostic + "'");
-		require(!hasSectorTileSurface("room"), "An empty Sector slot still "
+		require(!hasSectorTileSurface(drawingSectorSheet(), "room"), "An empty Sector slot still "
 			"resolves a surface, so a failed load would draw stale art");
 		require(!agentSpriteSize("human-standing").has_value(), "An empty Agent "
 			"slot still resolves a sprite");
@@ -1305,7 +1309,7 @@ namespace
 				"tileset was read " + std::to_string(tilesetLoadsFor(afterSector,
 					name)) + " time(s) by a selection that changed the Sector "
 				"slot (#1035)");
-		require(hasSectorTileSurface("corridor"), "The Sector slot does not "
+		require(hasSectorTileSurface(drawingSectorSheet(), "corridor"), "The Sector slot does not "
 			"resolve the themed sheet's `corridor` surface after being switched "
 			"to it, so the selection reported without installing");
 	}
@@ -1534,6 +1538,42 @@ namespace
 			"tileset but only " + std::to_string(gaps)
 			+ " of them are shipped pieces, so a record has gone stale");
 	}
+
+	// The middle of the part of a sheet a recorded draw samples, in that
+	// sheet's own pixels: the recorded uv multiplied back by the sheet's
+	// width and height. In pixels rather than as a fraction, so a check can
+	// name the region it expected instead of restating the renderer's
+	// half-texel inset against a sheet size it does not own.
+	std::pair<float, float> sampledCentre(WorldDrawList const& commands,
+		pf::render::InstalledSectorSheet const& sheet)
+	{
+		float left = 1e9f, right = -1e9f, top = 1e9f, bottom = -1e9f;
+		int triangles = 0;
+		for (auto const& command : commands.commands())
+		{
+			auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command);
+			if (triangle == nullptr
+				|| triangle->texture != WorldDrawList::Texture::SectorAtlas)
+				continue;
+			++triangles;
+			for (int corner = 0; corner < 3; ++corner)
+			{
+				left = std::min(left, triangle->texcoords[corner].x
+					* float(sheet.tileset.width));
+				right = std::max(right, triangle->texcoords[corner].x
+					* float(sheet.tileset.width));
+				top = std::min(top, triangle->texcoords[corner].y
+					* float(sheet.tileset.height));
+				bottom = std::max(bottom, triangle->texcoords[corner].y
+					* float(sheet.tileset.height));
+			}
+		}
+		require(triangles == 2, "One World cell drew " + std::to_string(triangles)
+			+ " SectorAtlas triangles where the two one framed tile makes, so what "
+			"was sampled back is not one tile's");
+		return { (left + right) / 2.0f, (top + bottom) / 2.0f };
+	}
+
 	// ------------------------------------------------------------------
 	// AC (#1087): installed Sector sheets are held keyed by atlas name, on
 	// the install side of the renderer, and resolve there with no render
@@ -1646,7 +1686,7 @@ namespace
 		require(registry.drawing() == registry.find("SectorAtlas"), "The sheet "
 			"the draw path resolves is not the sheet held under the name it is "
 			"drawing, so the draw path is not reading the keyed entry");
-		require(sectorTilesetIsNewFamily(), "The draw path does not report the "
+		require(sectorTilesetIsNewFamily(drawingSectorSheet()), "The draw path does not report the "
 			"New family it just installed, so the installed sheet is not the one "
 			"being drawn");
 
@@ -1658,7 +1698,7 @@ namespace
 		require(registry.drawingName() == "StationAtlas", "The draw path still "
 			"draws '" + registry.drawingName() + "' after a selection that named "
 			"'StationAtlas'");
-		require(!sectorTilesetIsNewFamily(), "The draw path still reports the New "
+		require(!sectorTilesetIsNewFamily(drawingSectorSheet()), "The draw path still reports the New "
 			"family after the Old-family Station sheet was selected, so the "
 			"selection did not move what gets drawn");
 		// The sheet that stopped being drawn is still held, and still answers
@@ -1686,8 +1726,118 @@ namespace
 		require(registry.drawingName() == "SectorAtlas", "The draw path draws "
 			"'" + registry.drawingName() + "' after the SectorAtlas was selected "
 			"back");
-		require(sectorTilesetIsNewFamily(), "The draw path does not report the "
+		require(sectorTilesetIsNewFamily(drawingSectorSheet()), "The draw path does not report the "
 			"New family after the SectorAtlas was selected back");
+	}
+
+	// ------------------------------------------------------------------
+	// AC (#1088): a Sector draw helper draws the sheet it was handed, not
+	// the sheet the install happens to be drawing.
+	//
+	// Two sheets are installed and one is drawn, exactly as #1087 left it.
+	// Pinned here is the other half of the same arrangement: every helper
+	// answers off the handle it was given while a different sheet is on the
+	// draw path. The family and the variant count answer two different ways
+	// of two handles at the one moment - which is the thing a single drawn
+	// sheet could never manage - and the pixels a cell samples come from the
+	// handed sheet's own region divided by that sheet's own dimensions,
+	// which is the one piece of arithmetic a helper cannot get right for
+	// two sheets at once if it reads the sheet size from anywhere but its
+	// argument.
+	// ------------------------------------------------------------------
+	void aDrawHelperDrawsTheSheetItIsHanded(smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		StagedAtlasDirectory staged{ context, "handed-sector-sheet",
+			{ "SectorAtlas", "StationAtlas" } };
+		pf::render::AtlasInstaller installer;
+		std::string diagnostic;
+		installer.installSectorSlot("SectorAtlas", staged.load("SectorAtlas"),
+			diagnostic);
+		require(diagnostic.empty(), "Staging the shipped SectorAtlas was "
+			"refused: " + diagnostic);
+		installer.installSectorSlot("StationAtlas", staged.load("StationAtlas"),
+			diagnostic);
+		require(diagnostic.empty(), "Staging the shipped StationAtlas was "
+			"refused: " + diagnostic);
+		// The StationAtlas is what the draw path reaches. Every assertion
+		// below is made against the other sheet's handle, so none of them
+		// can pass by reading the drawn sheet through the back door.
+		auto& registry = pf::render::sectorSheetRegistry();
+		require(registry.drawingName() == "StationAtlas", "This check needs the "
+			"StationAtlas on the draw path and the SectorAtlas handed in; the "
+			"registry is drawing '" + registry.drawingName() + "'");
+		auto const* sector = registry.find("SectorAtlas");
+		require(sector != nullptr, "The SectorAtlas handle resolved to nothing "
+			"after an install that named it");
+		require(sector != registry.drawing(), "The handle drawn from here is the "
+			"sheet on the draw path, so the two are not distinguishable");
+		auto const* drawn = drawingSectorSheet();
+		require(drawn != nullptr && drawn->name == "StationAtlas", "The handle "
+			"the draw path resolves is not the StationAtlas, so the comparisons "
+			"below are not the pair this check is built from");
+
+		// The family answers its argument. Both of these hold at the same
+		// moment of two different sheets, which is what a drawn-sheet query
+		// could not do.
+		require(sectorTilesetIsNewFamily(sector), "The New-family sheet answers "
+			"the family question as the Old family when it is handed in as "
+			"itself, so the query read the drawn sheet rather than its argument");
+		require(!sectorTilesetIsNewFamily(drawn), "The Old-family sheet on the "
+			"draw path reports the New family, which is not what it was "
+			"installed as");
+		// So does the variant count: the New sheet declares three Corridor
+		// variants, the Old one declares no families at all.
+		require(sectorSurfaceVariantCount(sector, "corridor") == 3,
+			"The New-family sheet reports "
+			+ std::to_string(sectorSurfaceVariantCount(sector, "corridor"))
+			+ " Corridor variants when handed in, so the count came from some "
+			"other sheet");
+		require(sectorSurfaceVariantCount(drawn, "corridor") == 0,
+			"The Old-family sheet reports "
+			+ std::to_string(sectorSurfaceVariantCount(drawn, "corridor"))
+			+ " Corridor variants, which is more than a set with no declared "
+			"families has");
+
+		// The two sheets must disagree about where the same name sits, or the
+		// sample read back below says nothing about which sheet it came from.
+		auto const& handed = sector->tileset.surfaces.at("corridor");
+		auto const& drawnRegion = drawn->tileset.surfaces.at("corridor");
+		require(handed.x != drawnRegion.x || handed.y != drawnRegion.y,
+			"The two staged sheets hold the same 'corridor' region, so nothing "
+			"here can tell one sheet's pixels from the other's");
+
+		// One World cell of `corridor`, drawn from the sheet that is not on
+		// the draw path, samples that sheet's own region at that sheet's own
+		// dimensions.
+		WorldDrawList commands{ WorldDrawList::ClipRectangle{ { 0.0f, 0.0f },
+			{ 4096.0f, 4096.0f } } };
+		require(drawSectorTileSurface(sector, "corridor", &commands,
+				{ 0.0f, 0.0f }, { float(CORE_CELL_WIDTH_PIXELS),
+					float(CORE_LEVEL_HEIGHT_PIXELS) }, 1.0f),
+			"The per-cell loop refused a tile the sheet it was handed carries");
+		auto const centre = sampledCentre(commands, *sector);
+		auto const close = [](float a, float b)
+		{
+			return std::abs(a - b) < 1.0f;
+		};
+		require(close(centre.first,
+				float(handed.x) + float(handed.width) / 2.0f)
+				&& close(centre.second,
+					float(handed.y) + float(handed.height) / 2.0f),
+			"A cell drawn from the SectorAtlas sampled the middle of "
+			+ std::to_string(int(centre.first)) + ","
+			+ std::to_string(int(centre.second)) + " on that sheet rather than "
+			"its own 'corridor' at " + std::to_string(handed.x) + ","
+			+ std::to_string(handed.y) + ", so the uv was divided by some other "
+			"sheet's width and height");
+		// And it is not the drawn sheet's cell: same name, different pixels.
+		require(!close(centre.first,
+				float(drawnRegion.x) + float(drawnRegion.width) / 2.0f)
+				|| !close(centre.second,
+					float(drawnRegion.y) + float(drawnRegion.height) / 2.0f),
+			"The cell handed the SectorAtlas sampled the drawn sheet's "
+			"'corridor' region, so the handle did not decide the pixels");
 	}
 
 	// ------------------------------------------------------------------
@@ -1723,7 +1873,7 @@ namespace
 		}
 		require(diagnostic.empty(), "The starting install of the shipped "
 			"SectorAtlas was refused: " + diagnostic);
-		require(hasSectorTileSurface("corridor"), "The starting install left the "
+		require(hasSectorTileSurface(drawingSectorSheet(), "corridor"), "The starting install left the "
 			"draw path with no Sector surface to draw, so there is nothing here "
 			"for a later refusal to replace");
 
@@ -1759,7 +1909,7 @@ namespace
 			+ std::to_string(sheet->tileset.surfaces.size()) + " surface tile(s) "
 			"under 'SectorAtlas', so the artwork the accepted install put there "
 			"is still being drawn behind a sheet that was refused");
-		require(!hasSectorTileSurface("corridor"), "The draw path still resolves "
+		require(!hasSectorTileSurface(drawingSectorSheet(), "corridor"), "The draw path still resolves "
 			"'corridor' after the selection it refused, so the refusal did not "
 			"replace what gets drawn");
 	}
@@ -1797,6 +1947,8 @@ void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
 		isolated<installedSectorSheetsAreKeyedByAtlasName> });
 	checks.push_back({ "atlasInstall/theDrawPathDrawsTheSheetInstalledLast",
 		isolated<theDrawPathDrawsTheSheetInstalledLast> });
+	checks.push_back({ "atlasInstall/aDrawHelperDrawsTheSheetItIsHanded",
+		isolated<aDrawHelperDrawsTheSheetItIsHanded> });
 	checks.push_back({ "atlasInstall/aRefusedSectorSheetInstallReplacesItsEntryAndReports",
 		isolated<aRefusedSectorSheetInstallReplacesItsEntryAndReports> });
 }

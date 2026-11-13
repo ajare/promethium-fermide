@@ -7,6 +7,7 @@
 
 #include "ObjectTileset.h"
 #include "Render.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "WorldDrawList.h"
 
@@ -68,11 +69,17 @@ inline void renderSector(std::shared_ptr<const core::Sector> sector, uint32_t la
 	headless::replay(commands, drawList);
 }
 
+// The two Sector tile passes, recorded under the draw list's own clip and
+// replayed into it. The sheet drawn is the one the install registry is
+// drawing, which is the handle the production pass is handed (#1088); a
+// check that wants some other sheet drives the `WorldDrawList`-taking form
+// with the handle it holds rather than this one.
 inline bool drawSectorTileSurface(std::string const& kind, ImDrawList* drawList,
 	Vec2 minimum, Vec2 maximum)
 {
 	WorldDrawList commands(headless::clipUnder(drawList));
-	auto const drawn = drawSectorTileSurface(kind, &commands, minimum, maximum);
+	auto const drawn = drawSectorTileSurface(drawingSectorSheet(), kind,
+		&commands, minimum, maximum);
 	headless::replay(commands, drawList);
 	return drawn;
 }
@@ -81,7 +88,8 @@ inline bool drawSectorTileBoundary(char const* kind, ImDrawList* drawList,
 	Vec2 minimum, Vec2 maximum)
 {
 	WorldDrawList commands(headless::clipUnder(drawList));
-	auto const drawn = drawSectorTileBoundary(kind, &commands, minimum, maximum);
+	auto const drawn = drawSectorTileBoundary(drawingSectorSheet(), kind,
+		&commands, minimum, maximum);
 	headless::replay(commands, drawList);
 	return drawn;
 }

@@ -52,6 +52,7 @@
 #include "DocumentEdit.h"
 #include "EditorDocument.h"
 #include "PaintTool.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "SectorVariantStrip.h"
 #include "SurfacePaint.h"
@@ -90,7 +91,7 @@ namespace
 		require(atlas.family == SectorTilesetFamily::New,
 			"The authored new set did not install as the New family");
 		setSectorTileset(atlas, static_cast<TextureId>(1));
-		require(sectorSurfaceVariantCount("room") == 3,
+		require(sectorSurfaceVariantCount(drawingSectorSheet(), "room") == 3,
 			"The installed atlas does not report the family the file declared");
 		return atlas;
 	}

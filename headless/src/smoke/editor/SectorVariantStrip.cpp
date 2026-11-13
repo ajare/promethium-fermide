@@ -37,6 +37,7 @@
 
 #include "PaletteLayout.h"
 #include "PaintTool.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "SectorVariantStrip.h"
 #include "WorldDrawList.h"
@@ -98,7 +99,7 @@ namespace
 		require(atlas.family == SectorTilesetFamily::New,
 			"The authored new set did not install as the New family");
 		setSectorTileset(atlas, static_cast<TextureId>(1));
-		require(sectorSurfaceVariantCount("corridor") == 3,
+		require(sectorSurfaceVariantCount(drawingSectorSheet(), "corridor") == 3,
 			"The installed atlas does not report the family the file declared");
 		return atlas;
 	}
@@ -191,7 +192,7 @@ namespace
 		for (auto const& [tool, kind] : tools)
 		{
 			auto const strip = sectorVariantSwatches(tool);
-			auto const declared = sectorSurfaceVariantCount(kind);
+			auto const declared = sectorSurfaceVariantCount(drawingSectorSheet(), kind);
 			require(strip.size() == static_cast<std::size_t>(declared) + 1u,
 				kind + "'s strip holds " + std::to_string(strip.size())
 					+ " swatches for a family of " + std::to_string(declared));
@@ -248,7 +249,7 @@ namespace
 		for (auto const& [tool, kind] : surfaceTools())
 		{
 			for (auto const& swatch : sectorVariantSwatches(tool))
-				require(hasSectorTileSurface(swatch.tileName),
+				require(hasSectorTileSurface(drawingSectorSheet(), swatch.tileName),
 					kind + "'s swatch '" + swatch.tileName
 						+ "' has no tile in the installed atlas");
 		}
@@ -256,7 +257,7 @@ namespace
 		// where the swatch names are derived rather than read off the file.
 		installSetDeclaring(context, "three-variants-checked", "lift", 3);
 		for (auto const& swatch : sectorVariantSwatches(PaintTool::Lift))
-			require(hasSectorTileSurface(swatch.tileName),
+			require(hasSectorTileSurface(drawingSectorSheet(), swatch.tileName),
 				"A derived swatch '" + swatch.tileName
 					+ "' was offered with no tile behind it");
 	}
@@ -289,7 +290,7 @@ namespace
 				require(swatch.tileName.rfind("doorframe-", 0) != 0,
 					kind + "'s swatch strip offers '" + swatch.tileName
 					+ "', which is named as a doorframe");
-				require(hasSectorTileSurface(swatch.tileName),
+				require(hasSectorTileSurface(drawingSectorSheet(), swatch.tileName),
 					kind + "'s swatch '" + swatch.tileName
 						+ " is not a Sector surface, so the strip is offering a "
 						+ "tile the surface query does not know");
@@ -298,7 +299,7 @@ namespace
 		// And the frames the atlas does carry are reachable only through the
 		// overlay query, never the surface one the strip reads.
 		for (auto const& entry : atlas.overlays)
-			require(!hasSectorTileSurface(entry.first),
+			require(!hasSectorTileSurface(drawingSectorSheet(), entry.first),
 				"The doorframe '" + entry.first
 					+ "' answers the Sector-surface query yes, so a strip built "
 					+ "from that query could offer it");

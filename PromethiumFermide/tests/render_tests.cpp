@@ -14,6 +14,7 @@
 #include <game/WorldRuntime.h>
 #include <core/Agent.h>
 #include "../../headless/src/smoke/support/AgentPoseTestAccess.h"
+#include "../../headless/src/support/SectorDrawSheet.h"
 #include <core/Window.h>
 #include "PlayerTransportSelectorDrawing.h"
 #include <willpower/application/resourcesystem/ResourceManager.h>
@@ -977,7 +978,7 @@ void checkSectorTileScaling() {
   // screen pixel, and the top quarter of the tile never reaches the screen.
   float const probeWide = 2.0f * CORE_CELL_WIDTH_PIXELS * zoom;
   float const probeHigh = 0.75f * CORE_LEVEL_HEIGHT_PIXELS * zoom;
-  require(drawSectorTileSurface("corridor", &commands, {0, 0}, {probeWide, probeHigh}, zoom),
+  require(drawSectorTileSurface(drawingSectorSheet(), "corridor", &commands, {0, 0}, {probeWide, probeHigh}, zoom),
       "Station corridor must render");
   require(textured(commands, WorldDrawList::Texture::SectorAtlas) == 4,
       "Two World cells must each render a tile at zoom 2 independent of source size");
@@ -995,18 +996,18 @@ void checkSectorTileScaling() {
       && topUvY > .24f && topUvY < .26f && floorUvY > .99f,
       "Tile must fill 1x1 World units and crop the top of a partial-height cell");
   WorldDrawList missing({{0, 0}, {1000, 1000}});
-  require(drawSectorTileSurface("room", &missing, {0, 0},
+  require(drawSectorTileSurface(drawingSectorSheet(), "room", &missing, {0, 0},
       {CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS}),
       "Missing tile must emit fallback geometry");
   auto const& fallback = std::get<WorldDrawList::Triangle>(missing.commands().front());
   require(fallback.texture == WorldDrawList::Texture::None
       && fallback.colour == packColour(255, 0, 255), "Missing tile must be opaque magenta");
   // One World cell wide; the 2 is a plain line's pixel height, not a World unit.
-  require(!drawSectorTileBoundary("floor", &missing, {0, 0}, {CORE_CELL_WIDTH_PIXELS, 2}),
+  require(!drawSectorTileBoundary(drawingSectorSheet(), "floor", &missing, {0, 0}, {CORE_CELL_WIDTH_PIXELS, 2}),
       "Missing boundary must request plain-line fallback");
   setSectorTileset({}, kInstalled);
   WorldDrawList unavailable({{0, 0}, {1000, 1000}});
-  require(drawSectorTileSurface("corridor", &unavailable, {0, 0},
+  require(drawSectorTileSurface(drawingSectorSheet(), "corridor", &unavailable, {0, 0},
       {CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS}),
       "Unavailable ImageSet must emit fallback geometry");
   clearSectorTileset();

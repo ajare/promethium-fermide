@@ -27,6 +27,7 @@
 #include "Checks.h"
 
 #include "DrawTypes.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "TileArtwork.h"
 #include "WorldDrawList.h"
@@ -61,7 +62,7 @@ namespace
 		require(atlas.variantCount("corridor") == 3,
 			"The authored set declares no family of three for the Corridor");
 		setSectorTileset(atlas, static_cast<TextureId>(1));
-		require(sectorSurfaceVariantCount("corridor") == 3,
+		require(sectorSurfaceVariantCount(drawingSectorSheet(), "corridor") == 3,
 			"The installed atlas does not report the family the file declared");
 		return atlas;
 	}
@@ -164,7 +165,7 @@ namespace
 	{
 		auto const atlas = installAuthoredAtlas(context);
 		auto commands = recording();
-		require(drawSectorTilePreview("corridor", &commands, { 37.0f, 11.0f },
+		require(drawSectorTilePreview(drawingSectorSheet(), "corridor", &commands, { 37.0f, 11.0f },
 				{ 165.0f, 73.0f }),
 			"The preview refused a tile the installed atlas carries");
 		requireFramesWholeTile(commands, atlas, "corridor", 37.0f, 11.0f,
@@ -187,7 +188,7 @@ namespace
 		for (auto const& box : boxes)
 		{
 			auto commands = recording();
-			require(drawSectorTilePreview("room", &commands,
+			require(drawSectorTilePreview(drawingSectorSheet(), "room", &commands,
 					{ box.left, box.top }, { box.right, box.bottom }),
 				"The preview refused a tile the installed atlas carries");
 			requireFramesWholeTile(commands, atlas, "room", box.left, box.top,
@@ -206,7 +207,7 @@ namespace
 		auto const floorLine = float(CORE_LEVEL_HEIGHT_PIXELS);
 
 		auto repeated = recording();
-		require(drawSectorTileSurface("corridor", &repeated, { 0.0f, 0.0f },
+		require(drawSectorTileSurface(drawingSectorSheet(), "corridor", &repeated, { 0.0f, 0.0f },
 				{ right, floorLine }, 1.0f),
 			"The surface repeat refused a tile the installed atlas carries");
 		require(framesOf(repeated, atlas).size() == 4,
@@ -214,7 +215,7 @@ namespace
 			"comparison below says nothing");
 
 		auto previewed = recording();
-		require(drawSectorTilePreview("corridor", &previewed, { 0.0f, 0.0f },
+		require(drawSectorTilePreview(drawingSectorSheet(), "corridor", &previewed, { 0.0f, 0.0f },
 				{ right, floorLine }),
 			"The preview refused a tile the installed atlas carries");
 		require(framesOf(previewed, atlas).size() == 1,
@@ -233,7 +234,7 @@ namespace
 		auto const shortHeight = float(CORE_LEVEL_HEIGHT_PIXELS) * 0.5f;
 
 		auto cropped = recording();
-		require(drawSectorTileSurface("corridor", &cropped,
+		require(drawSectorTileSurface(drawingSectorSheet(), "corridor", &cropped,
 				{ 0.0f, 0.0f }, { float(CORE_CELL_WIDTH_PIXELS), shortHeight },
 				1.0f),
 			"The surface repeat refused a tile the installed atlas carries");
@@ -249,7 +250,7 @@ namespace
 			"so the contrast below says nothing");
 
 		auto framed = recording();
-		require(drawSectorTilePreview("corridor", &framed, { 0.0f, 0.0f },
+		require(drawSectorTilePreview(drawingSectorSheet(), "corridor", &framed, { 0.0f, 0.0f },
 				{ float(CORE_CELL_WIDTH_PIXELS), shortHeight }),
 			"The preview refused a tile the installed atlas carries");
 		requireFramesWholeTile(framed, atlas, "corridor", 0.0f, 0.0f,
@@ -271,7 +272,7 @@ namespace
 		{
 			auto const tile = "corridor-V" + std::to_string(variant);
 			auto commands = recording();
-			require(drawSectorTilePreview(tile, &commands, { 4.0f, 4.0f },
+			require(drawSectorTilePreview(drawingSectorSheet(), tile, &commands, { 4.0f, 4.0f },
 					{ 132.0f, 40.0f }),
 				tile + " was refused although the family derived it");
 			requireFramesWholeTile(commands, atlas, tile, 4.0f, 4.0f, 132.0f,
@@ -297,7 +298,7 @@ namespace
 	{
 		clearSectorTileset();
 		auto commands = recording();
-		require(!drawSectorTilePreview("corridor", &commands, { 0.0f, 0.0f },
+		require(!drawSectorTilePreview(drawingSectorSheet(), "corridor", &commands, { 0.0f, 0.0f },
 				{ 128.0f, 36.0f }),
 			"The preview claimed to frame a tile with no atlas installed");
 		require(commands.commands().empty(),
@@ -312,7 +313,7 @@ namespace
 	{
 		installAuthoredAtlas(context);
 		auto commands = recording();
-		require(!drawSectorTilePreview("corridor-V9", &commands,
+		require(!drawSectorTilePreview(drawingSectorSheet(), "corridor-V9", &commands,
 				{ 0.0f, 0.0f }, { 128.0f, 36.0f }),
 			"The preview framed a variant the family never derived");
 		require(commands.commands().empty(),
@@ -327,7 +328,7 @@ namespace
 	{
 		installAuthoredAtlas(context);
 		auto commands = recording();
-		require(drawSectorTilePreview("corridor", &commands, { 20.0f, 30.0f },
+		require(drawSectorTilePreview(drawingSectorSheet(), "corridor", &commands, { 20.0f, 30.0f },
 				{ 20.0f, 90.0f }),
 			"A zero-width rect over a tile that exists was refused outright");
 		require(commands.commands().empty(),
@@ -342,7 +343,7 @@ namespace
 	{
 		auto const atlas = installAuthoredAtlas(context);
 		auto commands = recording();
-		require(drawSectorTilePreview("lift", &commands, { 200.0f, 80.0f },
+		require(drawSectorTilePreview(drawingSectorSheet(), "lift", &commands, { 200.0f, 80.0f },
 				{ 60.0f, 20.0f }),
 			"The preview refused a rect whose corners were handed over swapped");
 		requireFramesWholeTile(commands, atlas, "lift", 60.0f, 20.0f, 200.0f,

@@ -36,6 +36,7 @@
 #include "imgui/imgui.h"
 
 #include "Render.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "UISettings.h"
 #include "WorldDrawList.h"
@@ -118,7 +119,7 @@ namespace
 		atlas.width = column * CORE_CELL_WIDTH_PIXELS;
 		atlas.height = CORE_LEVEL_HEIGHT_PIXELS;
 		setSectorTileset(atlas, static_cast<TextureId>(1));
-		require(sectorTilesetIsNewFamily(),
+		require(sectorTilesetIsNewFamily(drawingSectorSheet()),
 			"The synthetic lifetime atlas is not the New family");
 		return atlas;
 	}

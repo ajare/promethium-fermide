@@ -48,6 +48,7 @@
 #include "Checks.h"
 
 #include "DrawTypes.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "TileArtwork.h"
 #include "WorldDrawList.h"
@@ -118,7 +119,7 @@ namespace
 			"The synthetic atlas did not carry one tile per cell"
 				+ std::string(variants ? " and one variant per cell" : ""));
 		setSectorTileset(atlas, static_cast<TextureId>(1));
-		require(sectorTilesetIsNewFamily(),
+		require(sectorTilesetIsNewFamily(drawingSectorSheet()),
 			"The synthetic atlas did not come up as the New family");
 		return atlas;
 	}
@@ -407,7 +408,7 @@ namespace
 		Recorder recorder;
 		WorldDrawList commands({ { -1000.0f, -1000.0f },
 			{ 1000.0f, clipBottom } });
-		require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
+		require(drawSectorTileSurfacePerCell(drawingSectorSheet(), &commands, { 0.0f, 0.0f },
 				{ float(columns) * float(kCellWidth), floorLine }, 1.0f,
 				recorder.resolver()),
 			"A Sector surface with an atlas installed must draw");
@@ -463,7 +464,7 @@ namespace
 		Recorder recorder;
 		WorldDrawList commands({ { -1000.0f, -1000.0f },
 			{ 1000.0f, clipBottom } });
-		require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
+		require(drawSectorTileSurfacePerCell(drawingSectorSheet(), &commands, { 0.0f, 0.0f },
 				{ float(columns) * float(kCellWidth), floorLine }, 1.0f,
 				recorder.resolver()),
 			"A Sector surface with an atlas installed must draw");
@@ -510,7 +511,7 @@ namespace
 			Recorder recorder;
 			WorldDrawList commands({ { -1000.0f, -1000.0f },
 				{ 1000.0f, clipBottom } });
-			require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
+			require(drawSectorTileSurfacePerCell(drawingSectorSheet(), &commands, { 0.0f, 0.0f },
 					{ float(columns) * float(kCellWidth), floorLine },
 					1.0f, recorder.resolver()),
 				"A Sector surface with an atlas installed must draw");
@@ -564,7 +565,7 @@ namespace
 			Recorder recorder;
 			WorldDrawList commands({ { -1000.0f, -1000.0f },
 				{ 1000.0f, clipBottom } });
-			require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
+			require(drawSectorTileSurfacePerCell(drawingSectorSheet(), &commands, { 0.0f, 0.0f },
 					{ float(columns) * float(kCellWidth), floorLine },
 					1.0f, recorder.resolver()),
 				"A Sector surface with an atlas installed must draw");
@@ -606,7 +607,7 @@ namespace
 		Recorder recorder;
 		WorldDrawList commands({ { -1000.0f, clipTop },
 			{ 1000.0f, clipBottom } });
-		require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
+		require(drawSectorTileSurfacePerCell(drawingSectorSheet(), &commands, { 0.0f, 0.0f },
 				{ float(columns) * float(kCellWidth), floorLine }, 1.0f,
 				recorder.resolver()),
 			"A Sector surface with an atlas installed must draw");
@@ -678,7 +679,7 @@ namespace
 		using smoke::require;
 		int const columns = 2, levels = 4;
 		auto const atlas = installCellAtlas(columns, levels, true);
-		require(hasSectorTileSurface(cellVariantTile(0, 0)),
+		require(hasSectorTileSurface(drawingSectorSheet(), cellVariantTile(0, 0)),
 			"The test atlas was supposed to carry a variant for the straddling "
 			"cell");
 		float const floorLine = float(levels) * float(kCellHeight);
@@ -695,7 +696,7 @@ namespace
 		};
 		WorldDrawList commands({ { -1000.0f, -1000.0f },
 			{ 1000.0f, clipBottom } });
-		require(drawSectorTileSurfacePerCell(&commands, { 0.0f, 0.0f },
+		require(drawSectorTileSurfacePerCell(drawingSectorSheet(), &commands, { 0.0f, 0.0f },
 				{ float(columns) * float(kCellWidth), floorLine }, 1.0f,
 				resolver),
 			"A Sector surface with an atlas installed must draw");

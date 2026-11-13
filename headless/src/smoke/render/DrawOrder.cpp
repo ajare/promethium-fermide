@@ -51,6 +51,7 @@
 
 #include "ObjectTileset.h"
 #include "Render.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "core/Background.h"
 #include "core/World.h"
@@ -1012,7 +1013,7 @@ namespace
 		float const zoom = 2.f;
 		float const probeWide = 2.0f * CORE_CELL_WIDTH_PIXELS * zoom;
 		float const probeHigh = 0.75f * CORE_LEVEL_HEIGHT_PIXELS * zoom;
-		drawSectorTileSurface("corridor", &tiles, {0, 0}, {probeWide, probeHigh}, zoom);
+		drawSectorTileSurface(drawingSectorSheet(), "corridor", &tiles, {0, 0}, {probeWide, probeHigh}, zoom);
 		require(tiles.commands().size() == 4, "Station artwork must repeat once per World cell at zoom 2");
 		auto const& tile = std::get<WorldDrawList::Triangle>(tiles.commands().front());
 		float maxX{}, maxY{}, topUvY{ 1.f }, floorUvY{};
@@ -1031,13 +1032,13 @@ namespace
 		// asserted against - only the emitted texture and colour are - but both
 		// are World extents, so they say so.
 		WorldDrawList fallback({{0, 0}, {1000, 1000}});
-		drawSectorTileSurface("room", &fallback, {0, 0},
+		drawSectorTileSurface(drawingSectorSheet(), "room", &fallback, {0, 0},
 			{CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS});
 		auto const& missing = std::get<WorldDrawList::Triangle>(fallback.commands().front());
 		require(missing.texture == WorldDrawList::Texture::None && missing.colour == packColour(255, 0, 255, 255),
 			"Missing surface must render opaque magenta");
 		// One World cell wide; the 2 is a plain line's pixel thickness, not a World unit.
-		require(!drawSectorTileBoundary("floor", &fallback, {0, 0}, {CORE_CELL_WIDTH_PIXELS, 2}),
+		require(!drawSectorTileBoundary(drawingSectorSheet(), "floor", &fallback, {0, 0}, {CORE_CELL_WIDTH_PIXELS, 2}),
 			"Missing boundary must use the plain-line fallback");
 		clearSectorTileset();
 		core::World world("Staircase own surface", 12, 3);

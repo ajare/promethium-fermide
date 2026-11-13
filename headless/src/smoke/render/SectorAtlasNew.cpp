@@ -35,6 +35,7 @@
 #include "DumbwaiterFixture.h"
 #include "ObjectTileset.h"
 #include "Render.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "TileArtwork.h"
 #include "WorldDrawList.h"
@@ -295,7 +296,7 @@ namespace
 			else installed.surfaces.emplace(name, artwork.region);
 		}
 		setSectorTileset(installed, static_cast<TextureId>(1));
-		require(sectorTilesetIsNewFamily(),
+		require(sectorTilesetIsNewFamily(drawingSectorSheet()),
 			"The installed new Sector atlas did not come up as the New family");
 		return installed;
 	}
@@ -662,7 +663,7 @@ namespace
 		auto const atlas = installNewSectorAtlas(context);
 		require(atlas.boundaries.empty(),
 			"The installed SectorAtlas carries boundary regions");
-		require(hasSectorTileSurface("room"),
+		require(hasSectorTileSurface(drawingSectorSheet(), "room"),
 			"The installed atlas answers a lookup for a surface it authors");
 		// The four strips the old set drew. Each lookup misses, which is the
 		// renderer's cue to draw its primitive line: the ceiling and floor
@@ -671,7 +672,7 @@ namespace
 		for (auto const* edge : { "floor", "ceiling", "left", "right" })
 		{
 			WorldDrawList commands({ { 0, 0 }, { 1000, 1000 } });
-			require(!drawSectorTileBoundary(edge, &commands, { 0, 0 },
+			require(!drawSectorTileBoundary(drawingSectorSheet(), edge, &commands, { 0, 0 },
 					{ CORE_CELL_WIDTH_PIXELS, CORE_LEVEL_HEIGHT_PIXELS }),
 				std::string("The new set answered a lookup for the '") + edge
 					+ "' boundary strip, so the primitive line fallback was never reached");
@@ -1423,9 +1424,9 @@ namespace
 		require(atlas.variantCount("nope") == 0,
 			"An unknown kind reported a family");
 		// The same number reaches a caller that never held the set.
-		require(sectorSurfaceVariantCount("corridor") == 3,
+		require(sectorSurfaceVariantCount(drawingSectorSheet(), "corridor") == 3,
 			"The installed-atlas query does not report the declared count");
-		require(sectorSurfaceVariantCount("corridor-V1") == 0,
+		require(sectorSurfaceVariantCount(drawingSectorSheet(), "corridor-V1") == 0,
 			"The installed-atlas query reports a count for a derived tile");
 	}
 

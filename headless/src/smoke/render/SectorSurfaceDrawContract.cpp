@@ -46,6 +46,7 @@
 
 #include "DrawTypes.h"
 #include "Render.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "TileArtwork.h"
 #include "UISettings.h"
@@ -180,7 +181,7 @@ namespace
 		require(!installed.surfaces.empty(),
 			"The installed SectorAtlas carries no surface tiles");
 		setSectorTileset(installed, static_cast<TextureId>(1));
-		require(sectorTilesetIsNewFamily(),
+		require(sectorTilesetIsNewFamily(drawingSectorSheet()),
 			"The installed new Sector atlas did not come up as the New family");
 		return installed;
 	}

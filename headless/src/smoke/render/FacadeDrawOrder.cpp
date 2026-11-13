@@ -35,6 +35,7 @@
 #include "imgui/imgui.h"
 
 #include "Render.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "UISettings.h"
 #include "WorldDrawList.h"
@@ -72,7 +73,7 @@ namespace
 		atlas.width = column * kCellWidth;
 		atlas.height = kCellHeight;
 		setSectorTileset(atlas, static_cast<TextureId>(1));
-		require(sectorTilesetIsNewFamily(),
+		require(sectorTilesetIsNewFamily(drawingSectorSheet()),
 			"The synthetic Facade draw-order atlas is not the New family");
 		return atlas;
 	}

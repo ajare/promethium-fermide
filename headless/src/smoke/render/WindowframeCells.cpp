@@ -86,6 +86,7 @@
 #include "DrawTypes.h"
 #include "Render.h"
 #include "ObjectTileset.h"
+#include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "TileArtwork.h"
 #include "UISettings.h"
@@ -212,7 +213,7 @@ namespace
 		atlas.height = kCellHeight;
 		pinViewport();
 		setSectorTileset(atlas, static_cast<TextureId>(1));
-		require(sectorTilesetIsNewFamily(),
+		require(sectorTilesetIsNewFamily(drawingSectorSheet()),
 			"The synthetic windowframe atlas did not come up as the New family");
 		return atlas;
 	}
@@ -1984,10 +1985,10 @@ namespace
 		// and for a name the atlas does not carry, it gives the same empty
 		// string and the atlas answers neither.
 		require(windowframeTileName(3, 3, 1, 1).empty()
-				&& !hasSectorTileOverlay(windowframeTileName(3, 3, 1, 1)),
+				&& !hasSectorTileOverlay(drawingSectorSheet(), windowframeTileName(3, 3, 1, 1)),
 			"The all-middle cell's empty name resolved to a tile the loop "
 			"could have drawn");
-		require(!hasSectorTileOverlay("windowframe-ZZ"),
+		require(!hasSectorTileOverlay(drawingSectorSheet(), "windowframe-ZZ"),
 			"A name the atlas does not carry resolved as though it did");
 	}
 
@@ -2792,10 +2793,10 @@ namespace
 									+ name);
 					}
 
-		require(hasSectorTileOverlay("windowframe-SS"),
+		require(hasSectorTileOverlay(drawingSectorSheet(), "windowframe-SS"),
 			"windowframe-SS is named by the render path but the installed "
 			"atlas does not carry it");
-		require(!hasSectorTileSurface("windowframe-SS"),
+		require(!hasSectorTileSurface(drawingSectorSheet(), "windowframe-SS"),
 			"A windowframe answered the Sector-surface query; it is a tile of "
 			"the atlas but not a surface a Sector is authored with");
 		// The whole role grid is carried on the same terms as the
@@ -2810,11 +2811,11 @@ namespace
 				"windowframe-MR", "windowframe-BL", "windowframe-BM",
 				"windowframe-BR" })
 		{
-			require(hasSectorTileOverlay(frame),
+			require(hasSectorTileOverlay(drawingSectorSheet(), frame),
 				std::string{ frame }
 					+ " is named by the render path but the installed atlas does "
 					"not carry it");
-			require(!hasSectorTileSurface(frame),
+			require(!hasSectorTileSurface(drawingSectorSheet(), frame),
 				std::string{ frame } + " answered the Sector-surface query; a "
 				"windowframe is never a Sector surface");
 		}
@@ -2847,7 +2848,7 @@ namespace
 								+ std::to_string(high) + " asked for '" + name
 								+ "', which is not one of the fifteen tiles the "
 								"role grid closes at");
-						require(hasSectorTileOverlay(name),
+						require(hasSectorTileOverlay(drawingSectorSheet(), name),
 							"A span asked for '" + name
 								+ "' and the installed atlas does not carry it");
 					}

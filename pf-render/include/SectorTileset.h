@@ -13,6 +13,18 @@
 // magenta instead of drawing nothing (#1003).
 using pf::render::TextureId;
 
+// The installed Sector sheet, defined on the install side of the renderer
+// by `AtlasInstall.h` (#1087). Named here rather than included: every draw
+// helper below draws from the sheet its caller hands it, and has no reason
+// to know what installed it. A caller that needs the sheet's contents -
+// its name, its tileset, the handle behind it - includes `AtlasInstall.h`;
+// a caller that only passes the handle along sees this declaration and
+// nothing more (#1088).
+namespace pf::render
+{
+	struct InstalledSectorSheet;
+}
+
 // Which artwork family a sector tileset belongs to, taken from the file's
 // own `version`. The two are the same fact stated twice: the version says
 // which format the file is written in, the family says what that format
@@ -93,18 +105,30 @@ void setSectorTileset(SectorTileset tileset, TextureId texture);
 // teardown a check hands the process back with; it is not a way to set one
 // sheet aside while another keeps drawing.
 void clearSectorTileset();
-// Whether the installed atlas carries a surface tile under this name. A
-// caller that has a type-specific tile and a borrowed one asks this before
-// drawing, so an atlas that predates the specific tile keeps drawing the
-// borrowed art instead of the missing-tile magenta (#1017).
+// Whether the sheet a caller holds carries a surface tile under this
+// name. A caller that has a type-specific tile and a borrowed one asks
+// this before drawing, so an atlas that predates the specific tile keeps
+// drawing the borrowed art instead of the missing-tile magenta (#1017).
+//
+// The sheet is the one the caller names rather than the one some other code
+// last installed, because "does this sheet carry the name" is a question
+// that only means something of a sheet the asker is looking at. A draw
+// path that asks it of a sheet it is not drawing is how a Sector ends up
+// wearing artwork off another sheet entirely, which is what the handle is
+// here to make unrepresentable (#1088).
+//
+// A null handle is no sheet installed, and a sheet installed behind an
+// empty handle has no pixels behind it; both answer false, which is the
+// caller's cue to fall back rather than to draw magenta.
 //
 // This answers "is the name there", not "does this family want the tile
 // drawn". For a surface the old family declared and never drew - the
 // Shuttle's and the Staircase's - it is the wrong question, and the
 // caller asks the family below instead (#1027).
-bool hasSectorTileSurface(std::string const& kind);
-// Whether the installed atlas carries a doorframe (overlay) tile under
-// this name (#1054).
+bool hasSectorTileSurface(pf::render::InstalledSectorSheet const* sheet,
+    std::string const& kind);
+// Whether the sheet a caller holds carries a doorframe (overlay) tile
+// under this name (#1054).
 //
 // A separate query rather than a wider one, because the two questions are
 // asked for different reasons and neither wants the other's answer. A
@@ -113,18 +137,20 @@ bool hasSectorTileSurface(std::string const& kind);
 // this one. Answering both from one map would make "is this a Sector
 // surface" true of a doorframe, and the borrow rule and the swatch strip
 // both read that query looking for walls.
-bool hasSectorTileOverlay(std::string const& name);
-// Whether the installed sector atlas is the New family: a version 2
-// authored set, in which every surface-bearing Sector type wears its own
-// tile. False when no atlas is installed, which is the safe answer: with
-// nothing installed there is no own art to wear.
-bool sectorTilesetIsNewFamily();
-// How many surface variants the installed atlas declares for one Sector
-// type (#1038), which is what an editor sizes a swatch strip from rather
-// than assuming a number. 0 when no atlas is installed, when the installed
-// set is the version 1 family - which declares no families at all - or when
-// the named type declares none.
-int sectorSurfaceVariantCount(std::string const& kind);
+bool hasSectorTileOverlay(pf::render::InstalledSectorSheet const* sheet,
+    std::string const& name);
+// Whether the sheet a caller holds is the New family: a version 2 authored
+// set, in which every surface-bearing Sector type wears its own tile.
+// False when the handle is null or holds nothing installed, which is the
+// safe answer: with no sheet there is no own art to wear.
+bool sectorTilesetIsNewFamily(pf::render::InstalledSectorSheet const* sheet);
+// How many surface variants the sheet a caller holds declares for one
+// Sector type (#1038), which is what an editor sizes a swatch strip from
+// rather than assuming a number. 0 when the handle is null or holds
+// nothing installed, when the sheet is the version 1 family - which
+// declares no families at all - or when the named type declares none.
+int sectorSurfaceVariantCount(pf::render::InstalledSectorSheet const* sheet,
+    std::string const& kind);
 // Which tile one cell of a Sector surface wears (#1039). `column` counts
 // World cells from the drawn area's left edge and `level` from its floor
 // line, so for a Sector's own area both are Sector-local: column 0 is the
@@ -165,9 +191,12 @@ using SectorSurfaceTileResolver = std::function<std::string(
 // answer is that a caller may skip work only when the loop would not have
 // needed it, and two copies of the arithmetic is how that stops being true.
 // A true answer is not a promise that a cell is drawn, only that the clip
-// leaves something to draw.
-bool sectorTileSurfaceIsInView(WorldDrawList const* drawList, Vec2 minimum,
-    Vec2 maximum, float zoom = 1.0f);
+// leaves something to draw - and nothing is in view when the handle names
+// no sheet, because there is then no sheet for a cell to be drawn from
+// (#1088).
+bool sectorTileSurfaceIsInView(pf::render::InstalledSectorSheet const* sheet,
+    WorldDrawList const* drawList, Vec2 minimum, Vec2 maximum,
+    float zoom = 1.0f);
 
 // The tileset helpers cross to the command stream on the shared drawing
 // types (#997), so a caller hands them pf::render::Vec2.
@@ -196,19 +225,26 @@ bool sectorTileSurfaceIsInView(WorldDrawList const* drawList, Vec2 minimum,
 // row of a Sector whose floor line sits below the clip's bottom edge - the
 // row that is nearly all on screen and was skipped entirely until #1048.
 //
-// Returns false when no atlas is installed, which is the caller's cue to
-// fall back to a plain fill. Returns true when the surface was drawn,
-// including when a cell resolved to a name the atlas does not carry and
-// drew the missing-tile magenta for that cell alone, and including when a
-// cell resolved to no tile at all and drew nothing (#1059).
-bool drawSectorTileSurfacePerCell(WorldDrawList* drawList, Vec2 minimum,
-    Vec2 maximum, float zoom,
+// The sheet drawn is the one handed in, and every tile question the loop
+// asks - which name a cell wears, whether the sheet carries it - is asked
+// of that sheet and of no other (#1088).
+//
+// Returns false when the handle names no installed sheet, which is the
+// caller's cue to fall back to a plain fill. Returns true when the
+// surface was drawn, including when a cell resolved to a name the sheet
+// does not carry and drew the missing-tile magenta for that cell alone,
+// and including when a cell resolved to no tile at all and drew nothing
+// (#1059).
+bool drawSectorTileSurfacePerCell(pf::render::InstalledSectorSheet const* sheet,
+    WorldDrawList* drawList, Vec2 minimum, Vec2 maximum, float zoom,
     SectorSurfaceTileResolver const& resolveTile);
 
 // The same per-cell loop with one name answered for every cell, which is
-// what a Sector with no per-cell artwork resolves to (#1039).
-bool drawSectorTileSurface(std::string const& kind, WorldDrawList* drawList,
-    Vec2 minimum, Vec2 maximum, float zoom = 1.0f);
+// what a Sector with no per-cell artwork resolves to (#1039). The sheet
+// the name is drawn from is the one the caller holds (#1088).
+bool drawSectorTileSurface(pf::render::InstalledSectorSheet const* sheet,
+    std::string const& kind, WorldDrawList* drawList, Vec2 minimum,
+    Vec2 maximum, float zoom = 1.0f);
 // Frames one whole tile into an arbitrary screen rect (#1041).
 //
 // This is the swatch draw, not the World draw. The surface path above cuts
@@ -220,16 +256,20 @@ bool drawSectorTileSurface(std::string const& kind, WorldDrawList* drawList,
 // cannot come out as a partial repeat of its own tile, and no zoom or floor
 // line has any say in what it shows.
 //
-// Returns false when no atlas is installed or the named tile is not in it.
-// Unlike the per-cell surface path it draws no missing-art magenta for such
-// a tile: a swatch is a choice offered to an author, and a choice with no
-// artwork behind it should not be offered at all rather than drawn in the
-// colour that means broken. A rect with no area emits no command and still
-// counts as framed, because the tile was there.
-bool drawSectorTilePreview(std::string const& kind, WorldDrawList* drawList,
-    Vec2 minimum, Vec2 maximum);
-bool drawSectorTileBoundary(char const* kind, WorldDrawList* drawList,
-    Vec2 minimum, Vec2 maximum);
+// Returns false when the handle names no installed sheet or the named tile
+// is not in it. Unlike the per-cell surface path it draws no missing-art
+// magenta for such a tile: a swatch is a choice offered to an author, and
+// a choice with no artwork behind it should not be offered at all rather
+// than drawn in the colour that means broken. A rect with no area emits no
+// command and still counts as framed, because the tile was there.
+bool drawSectorTilePreview(pf::render::InstalledSectorSheet const* sheet,
+    std::string const& kind, WorldDrawList* drawList, Vec2 minimum,
+    Vec2 maximum);
+// One boundary strip of the sheet the caller holds (#1088). Returns false
+// when the handle names no installed sheet, when the sheet carries no
+// strip under that name, or when it has no dimensions to divide by.
+bool drawSectorTileBoundary(pf::render::InstalledSectorSheet const* sheet,
+    char const* kind, WorldDrawList* drawList, Vec2 minimum, Vec2 maximum);
 
 // No ImDrawList-taking form: a check that wants these on a live ImGui draw
 // list records a command vector and replays it from the headless harness
