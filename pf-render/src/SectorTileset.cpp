@@ -1,4 +1,5 @@
 #include "SectorTileset.h"
+#include "AtlasInstall.h"
 #include "AuthoredTileGrid.h"
 #include "core/Defines.h"
 #include <yaml-cpp/yaml.h>
@@ -9,8 +10,20 @@
 #include <utility>
 
 namespace {
-SectorTileset active;
-TextureId textureId{};
+// The sheet the draw path draws: the entry the install registry is drawing,
+// or nullptr when there is nothing installed to draw from.
+//
+// The registry holds every installed Sector sheet under its own name; the
+// one drawn is the one the last install put there (#1087). A sheet
+// installed behind an empty handle is no sheet at all: the handle is what
+// separates "a sheet is installed" from "nothing is", and a sheet with
+// nothing behind it has no pixels to draw, so it answers every question
+// the way an empty registry does.
+pf::render::InstalledSectorSheet const* drawingSheet()
+{
+    auto const sheet = pf::render::sectorSheetRegistry().drawing();
+    return sheet != nullptr && sheet->installed() ? sheet : nullptr;
+}
 
 // The twelve surface-bearing Sector types. Each fills its own full-cell
 // tile. Background and Facade are in the set on the same terms as every
@@ -175,14 +188,15 @@ SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
 // 0..1 on both axes; a crop is a sub-range drawn at the same pixels per
 // artwork texel the whole tile would have had, which is what keeps a crop a
 // crop and not a squash.
-void image(WorldDrawList* list, SectorTileRegion const& r, Vec2 a, Vec2 b,
+void image(WorldDrawList* list, SectorTileset const& sheet,
+    SectorTileRegion const& r, Vec2 a, Vec2 b,
     float u0, float u1, float v0, float v1)
 {
     // Half-texel inset avoids sampling adjacent draft artwork with linear filtering.
-    Vec2 uv0{(r.x + 0.5f + (r.width - 1) * u0) / active.width,
-        (r.y + 0.5f + (r.height - 1) * v0) / active.height};
-    Vec2 uv1{(r.x + 0.5f + (r.width - 1) * u1) / active.width,
-        (r.y + 0.5f + (r.height - 1) * v1) / active.height};
+    Vec2 uv0{(r.x + 0.5f + (r.width - 1) * u0) / sheet.width,
+        (r.y + 0.5f + (r.height - 1) * v0) / sheet.height};
+    Vec2 uv1{(r.x + 0.5f + (r.width - 1) * u1) / sheet.width,
+        (r.y + 0.5f + (r.height - 1) * v1) / sheet.height};
     // White on every draw: the tile's own pixels are the picture, and no
     // colour is multiplied into it on the way to the screen.
     list->AddImage(WorldDrawList::Texture::SectorAtlas, a, b, uv0, uv1, White);
@@ -208,7 +222,8 @@ int cellsCovered(float span, float cell)
 // wrong answer looks like. A Sector whose base tile is genuinely absent
 // still fills its whole area with magenta, one cell at a time, which is
 // what it looked like when the whole area was filled at once.
-void drawSurfaceCell(WorldDrawList* list, std::string const& kind, Vec2 a,
+void drawSurfaceCell(WorldDrawList* list, SectorTileset const& sheet,
+    std::string const& kind, Vec2 a,
     Vec2 b, float u0, float u1, float v0, float v1)
 {
     // A resolved name is looked for among the surfaces first, then among
@@ -225,17 +240,17 @@ void drawSurfaceCell(WorldDrawList* list, std::string const& kind, Vec2 a,
     // undefined behaviour and one of the few ways this function could be
     // wrong without any test being able to see it.
     SectorTileRegion const* region = nullptr;
-    if (auto const surface = active.surfaces.find(kind);
-        surface != active.surfaces.end())
+    if (auto const surface = sheet.surfaces.find(kind);
+        surface != sheet.surfaces.end())
         region = &surface->second;
-    else if (auto const overlay = active.overlays.find(kind);
-        overlay != active.overlays.end())
+    else if (auto const overlay = sheet.overlays.find(kind);
+        overlay != sheet.overlays.end())
         region = &overlay->second;
-    if (!region || active.width <= 0 || active.height <= 0) {
+    if (!region || sheet.width <= 0 || sheet.height <= 0) {
         list->AddRectFilled(a, b, packColour(255, 0, 255, 255));
         return;
     }
-    image(list, *region, a, b, u0, u1, v0, v1);
+    image(list, sheet, *region, a, b, u0, u1, v0, v1);
 }
 }
 
@@ -297,14 +312,19 @@ SectorTileset SectorTileset::load(std::filesystem::path const& path)
 
 void setSectorTileset(SectorTileset tileset, TextureId texture)
 {
-    active = std::move(tileset);
-    textureId = texture;
+    // The nameless install: the default Sector sheet, installed under the
+    // default name and made the sheet the draw path draws. Every caller of
+    // this is standing in for the World's own Sector artwork; the install
+    // the application runs names its sheet explicitly (#1087).
+    pf::render::sectorSheetRegistry().install(
+        pf::render::kDefaultSectorAtlasName, std::move(tileset), texture);
 }
-void clearSectorTileset() { textureId = {}; active = {}; }
+void clearSectorTileset() { pf::render::sectorSheetRegistry().clear(); }
 
 bool hasSectorTileSurface(std::string const& kind)
 {
-    return bool(textureId) && active.surfaces.count(kind) > 0;
+    auto const sheet = drawingSheet();
+    return sheet != nullptr && sheet->tileset.surfaces.count(kind) > 0;
 }
 
 bool hasSectorTileOverlay(std::string const& name)
@@ -313,15 +333,17 @@ bool hasSectorTileOverlay(std::string const& name)
     // atlas behind the handle there is no frame to draw, and a caller that
     // asks gets the answer that makes it fall back rather than the answer
     // that makes it draw magenta.
-    return bool(textureId) && active.overlays.count(name) > 0;
+    auto const sheet = drawingSheet();
+    return sheet != nullptr && sheet->tileset.overlays.count(name) > 0;
 }
 
 bool sectorTilesetIsNewFamily()
 {
     // An uninstalled atlas is not the new family. `clearSectorTileset()`
-    // resets `active`, so the family resets with it and nothing survives a
-    // teardown as a stale promise that own art is available.
-    return bool(textureId) && active.family == SectorTilesetFamily::New;
+    // drops every installed sheet, so the family drops with it and nothing
+    // survives a teardown as a stale promise that own art is available.
+    auto const sheet = drawingSheet();
+    return sheet != nullptr && sheet->tileset.family == SectorTilesetFamily::New;
 }
 
 int sectorSurfaceVariantCount(std::string const& kind)
@@ -331,8 +353,9 @@ int sectorSurfaceVariantCount(std::string const& kind)
     // version 1 family declares no families either, and its loader leaves
     // the map empty, so both answer 0 for the same reason - no author ever
     // stated a count.
-    if (!textureId) return 0;
-    return active.variantCount(kind);
+    auto const sheet = drawingSheet();
+    if (!sheet) return 0;
+    return sheet->tileset.variantCount(kind);
 }
 
 int SectorTileset::variantCount(std::string const& kind) const
@@ -357,7 +380,8 @@ bool drawSectorTileSurfacePerCell(WorldDrawList* list, Vec2 minimum,
     Vec2 maximum, float zoom,
     SectorSurfaceTileResolver const& resolveTile)
 {
-    if (!textureId) return false;
+    auto const sheet = drawingSheet();
+    if (!sheet) return false;
     // One tile per 1x1 world unit, magnified to the World cell's screen size
     // at the current zoom (the two cell sizes below). Partial levels are
     // cropped, never stretched to a Sector's height.
@@ -431,7 +455,7 @@ bool drawSectorTileSurfacePerCell(WorldDrawList* list, Vec2 minimum,
             // today answers empty - its base is always a name - so nothing
             // that reaches the screen now changes.
             if (tile.empty()) continue;
-            drawSurfaceCell(list, tile,
+            drawSurfaceCell(list, sheet->tileset, tile,
                 { x, rowTop }, { colRight, rowBottom }, 0.0f,
                 (colRight - x) / cellWidth, v0, 1.0f);
         }
@@ -455,9 +479,12 @@ bool drawSectorTilePreview(std::string const& kind, WorldDrawList* list,
 {
     // No atlas, or no tile under that name: nothing to frame, and the caller
     // is told so it can leave the swatch off rather than show an empty one.
-    if (!textureId || !list) return false;
-    auto const found = active.surfaces.find(kind);
-    if (found == active.surfaces.end() || active.width <= 0 || active.height <= 0)
+    auto const sheet = drawingSheet();
+    if (!sheet || !list) return false;
+    auto const& tileset = sheet->tileset;
+    auto const found = tileset.surfaces.find(kind);
+    if (found == tileset.surfaces.end() || tileset.width <= 0
+        || tileset.height <= 0)
         return false;
     // The rect may be handed over either way round; frame the tile inside
     // whichever corners it actually spans.
@@ -474,16 +501,19 @@ bool drawSectorTilePreview(std::string const& kind, WorldDrawList* list,
     // rect's bottom-right. The authored render offset and drawn size are
     // World-space facts about how a Sector wears the tile and say nothing
     // about how a swatch frames it, so they are not consulted here.
-    image(list, found->second, { left, top }, { right, bottom }, 0.0f, 1.0f,
-        0.0f, 1.0f);
+    image(list, tileset, found->second, { left, top }, { right, bottom }, 0.0f,
+        1.0f, 0.0f, 1.0f);
     return true;
 }
 
 bool drawSectorTileBoundary(char const* kind, WorldDrawList* list, Vec2 a, Vec2 b)
 {
-    if (!textureId) return false;
-    auto const found = active.boundaries.find(kind);
-    if (found == active.boundaries.end() || active.width <= 0 || active.height <= 0) return false;
-    image(list, found->second, a, b, 0.0f, 1.0f, 0.0f, 1.0f);
+    auto const sheet = drawingSheet();
+    if (!sheet) return false;
+    auto const& tileset = sheet->tileset;
+    auto const found = tileset.boundaries.find(kind);
+    if (found == tileset.boundaries.end() || tileset.width <= 0
+        || tileset.height <= 0) return false;
+    image(list, tileset, found->second, a, b, 0.0f, 1.0f, 0.0f, 1.0f);
     return true;
 }

@@ -267,6 +267,9 @@ set(names
     atlasInstall/selectingOneAtlasReReadsOnlyItsOwnTileset
     atlasInstall/everyShippedAgentPoseTileResolvesInTheInstalledAgentAtlas
     atlasInstall/everyShippedFurnitureTileResolvesInTheInstalledFurnitureAtlas
+    atlasInstall/installedSectorSheetsAreKeyedByAtlasName
+    atlasInstall/theDrawPathDrawsTheSheetInstalledLast
+    atlasInstall/aRefusedSectorSheetInstallReplacesItsEntryAndReports
     vehicleArtworkNew/vehicleTilesAreRegistered
     vehicleArtworkNew/carriageComposesAtTwoThreeAndFourCellsWide
     vehicleArtworkNew/connectorSitsAtTheSeamNotACellPosition

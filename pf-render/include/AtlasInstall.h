@@ -83,6 +83,13 @@ namespace pf::render
 		std::set<std::string> overlayNames;
 	};
 
+	// The atlas name the viewport's Sector slot carries when nothing has
+	// selected another, and the name the default Sector sheet installs
+	// under (#1087). Named once so the slot's default and the nameless
+	// install cannot come to mean two different names, which would leave
+	// the draw path looking for a sheet nothing ever installed.
+	inline constexpr char const* kDefaultSectorAtlasName{ "SectorAtlas" };
+
 	// The four viewport atlas slots as the shared renderer holds them: which
 	// resource each slot is named for, what is loaded behind it, and the
 	// diagnostic its last install produced.
@@ -92,7 +99,7 @@ namespace pf::render
 	// magenta.
 	struct ViewportAtlasSlots
 	{
-		std::string sectorName{ "SectorAtlas" };
+		std::string sectorName{ kDefaultSectorAtlasName };
 		std::string objectName{ "ObjectAtlas" };
 		std::string agentName{ "AgentAtlas" };
 		std::string furnitureName{ "FurnitureAtlas" };
@@ -167,6 +174,94 @@ namespace pf::render
 		std::filesystem::path mPath;
 		std::map<std::string, Entry> mEntries;
 	};
+
+	// One Sector sheet as the install path holds it: the atlas name it was
+	// installed under, the tileset the install paired out of the atlas's
+	// `ImageSet` and its authored tileset, and the draw handle its pixels
+	// sit behind.
+	//
+	// The name travels with the sheet rather than living only as the key it
+	// was found under. A holder of the sheet can then say which sheet it
+	// holds, which is what a later slice needs in order to put an identity
+	// on a recorded draw command and resolve that back to the sheet the
+	// pixels came from (#1087).
+	struct InstalledSectorSheet
+	{
+		std::string name;
+		SectorTileset tileset;
+		// The handle the sheet's pixels sit behind. The shared renderer
+		// never dereferences it: it only separates "a sheet is installed"
+		// from "nothing is", which is what makes a missing atlas draw
+		// magenta rather than drawing nothing (#1003).
+		TextureId texture{};
+		// Whether anything at all sits behind the handle.
+		bool installed() const { return bool(texture); }
+	};
+
+	// The installed Sector sheets, keyed by atlas name (#1087).
+	//
+	// More than one sheet is held at a time; one is drawn. The drawn sheet is
+	// the last one installed, which is what keeps the World's selected Sector
+	// sheet the only one on screen: the selection installs it, and the draw
+	// path reaches nothing else until something further is installed. A later
+	// slice resolves a sheet per draw rather than by install order; what this
+	// type owns is that the sheets are keyed by name, that they are held
+	// where no graphics context is needed to read them back, and that
+	// installing one makes it the sheet that draws.
+	//
+	// A refused sheet is held too, empty. The refusal itself lives in the
+	// diagnostic the install left behind; the empty entry is what makes the
+	// canvas draw magenta for that sheet rather than draw nothing, and it is
+	// what makes re-selecting the same bad name replace the entry rather
+	// than leave the good one standing under it.
+	//
+	// A pointer this returns is not a handle. It stays address-valid until the
+	// registry is cleared - re-installing a name replaces the sheet behind
+	// that key in place rather than moving it - so a caller that wants to
+	// hold one sheet across an install copies it instead of holding the
+	// pointer.
+	class SectorSheetRegistry
+	{
+	public:
+		// Installs `tileset` under `name`, replacing whatever sheet was held
+		// under that name, and makes it the sheet the draw path draws.
+		void install(std::string const& name, SectorTileset tileset,
+			TextureId texture);
+
+		// The sheet installed under `name`, or nullptr when none is. This is
+		// the lookup a caller asks without a render context: the answer is
+		// the sheet the install put there, with the name it put it under.
+		InstalledSectorSheet const* find(std::string const& name) const;
+
+		// The sheet the draw path draws, or nullptr when nothing is
+		// installed.
+		InstalledSectorSheet const* drawing() const;
+
+		// The name of the sheet the draw path draws; empty when nothing is
+		// installed.
+		std::string const& drawingName() const { return mDrawingName; }
+
+		// How many sheets the registry holds.
+		std::size_t size() const { return mSheets.size(); }
+
+		// Drops every sheet, and the drawn selection with it.
+		void clear();
+
+	private:
+		std::map<std::string, InstalledSectorSheet> mSheets;
+		std::string mDrawingName;
+	};
+
+	// The process-wide registry the install path writes and the draw path
+	// reads.
+	//
+	// This is the GPU-free half of the renderer's Sector artwork. A sheet
+	// installed here, and the name it was installed under, are resolvable
+	// with no render stack, no OpenGL context and no MPP resource in the
+	// process, which is what lets a headless check drive the real install
+	// path and then ask which Sector sheets are installed, which one each
+	// name resolves to, and which one the draw path would draw.
+	SectorSheetRegistry& sectorSheetRegistry();
 
 	// What one `AtlasInstaller` has read from disk since it was made (#1035).
 	//

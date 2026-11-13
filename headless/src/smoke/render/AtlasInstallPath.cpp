@@ -1534,6 +1534,235 @@ namespace
 			"tileset but only " + std::to_string(gaps)
 			+ " of them are shipped pieces, so a record has gone stale");
 	}
+	// ------------------------------------------------------------------
+	// AC (#1087): installed Sector sheets are held keyed by atlas name, on
+	// the install side of the renderer, and resolve there with no render
+	// context.
+	//
+	// Two Sector sheets are installed through the same install the
+	// application runs, and both stay held afterwards. They are chosen
+	// because they disagree about the one fact the renderer reads off a
+	// sheet before it draws anything - which artwork family it is - and
+	// about where the same tile name sits on the sheet. A registry that kept
+	// one installed sheet could answer one of the two names wrongly; only
+	// resolving by name gets both right.
+	//
+	// Nothing below makes a render stack, an OpenGL context or an MPP
+	// resource. The install runs against a real resource manager over the
+	// shipped manifest, and the registry is read back through the same
+	// header the draw path reads it through.
+	// ------------------------------------------------------------------
+	void installedSectorSheetsAreKeyedByAtlasName(smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		// The default Sector sheet, a version 2 authored set in the New
+		// family, and the Station theme, a version 1 set in the Old family.
+		// Both ship, both install, and neither is a copy of the other.
+		StagedAtlasDirectory staged{ context, "keyed-sector-sheets",
+			{ "SectorAtlas", "StationAtlas" } };
+		pf::render::AtlasInstaller installer;
+		std::string sectorDiagnostic;
+		installer.installSectorSlot("SectorAtlas", staged.load("SectorAtlas"),
+			sectorDiagnostic);
+		require(sectorDiagnostic.empty(), "Installing the shipped SectorAtlas "
+			"into the keyed registry was refused: " + sectorDiagnostic);
+		std::string stationDiagnostic;
+		installer.installSectorSlot("StationAtlas", staged.load("StationAtlas"),
+			stationDiagnostic);
+		require(stationDiagnostic.empty(), "Installing the shipped StationAtlas "
+			"into the keyed registry was refused: " + stationDiagnostic);
+
+		auto& registry = pf::render::sectorSheetRegistry();
+		require(registry.size() == 2, "Two Sector sheets were installed and the "
+			"registry holds " + std::to_string(registry.size()) + "; the second "
+			"install displaced the first instead of keying beside it, which is "
+			"what a single installed sheet does (#1087)");
+		auto const* sector = registry.find("SectorAtlas");
+		auto const* station = registry.find("StationAtlas");
+		require(sector != nullptr, "The registry resolves no Sector sheet under "
+			"'SectorAtlas' after an install that named it");
+		require(station != nullptr, "The registry resolves no Sector sheet under "
+			"'StationAtlas' after an install that named it");
+		// The identity travels with the sheet: whoever resolves a name is
+		// told which sheet it resolved without asking it a second time.
+		require(sector->name == "SectorAtlas", "The sheet resolved under "
+			"'SectorAtlas' names itself '" + sector->name + "', so the identity a "
+			"holder reads back is not the key it was resolved by");
+		require(station->name == "StationAtlas", "The sheet resolved under "
+			"'StationAtlas' names itself '" + station->name + "'");
+		// The two sheets disagree about the family, so one installed sheet
+		// could not answer both of these correctly.
+		require(sector->tileset.family == SectorTilesetFamily::New, "The sheet "
+			"under 'SectorAtlas' is not the New family its version 2 authored "
+			"tileset puts it in, so the registry is not holding what was "
+			"installed under that name");
+		require(station->tileset.family == SectorTilesetFamily::Old, "The sheet "
+			"under 'StationAtlas' is not the Old family its version 1 authored "
+			"tileset puts it in");
+		// And each holds its own pixels: the same tile name sits somewhere
+		// else on each sheet, because they are different artwork.
+		auto const sectorCorridor = sector->tileset.surfaces.find("corridor");
+		auto const stationCorridor = station->tileset.surfaces.find("corridor");
+		require(sectorCorridor != sector->tileset.surfaces.end()
+			&& stationCorridor != station->tileset.surfaces.end(),
+			"'corridor' is missing from one of the two installed Sector sheets, "
+			"so the two sheets are not the pair this check needs");
+		require(sectorCorridor->second.x != stationCorridor->second.x
+			|| sectorCorridor->second.y != stationCorridor->second.y, "The two "
+			"installed Sector sheets hold the same 'corridor' region, so nothing "
+			"here can tell one sheet's pixels from the other's");
+		// A name nothing installed resolves to nothing, rather than to the
+		// sheet that happens to be drawn.
+		require(registry.find("SectorAtlasLayer2") == nullptr, "The registry "
+			"resolved a Sector sheet under a name no install ever used");
+	}
+
+	// ------------------------------------------------------------------
+	// AC (#1087): the World's selected Sector sheet installs under its own
+	// name and is the sheet the draw path uses.
+	//
+	// The registry holds both sheets the whole time. What moves with each
+	// install is which one the draw path reaches, and the family is what
+	// makes the two distinguishable from the draw side: the draw path
+	// reports the sheet that was installed last while the registry still
+	// resolves the other one as itself.
+	// ------------------------------------------------------------------
+	void theDrawPathDrawsTheSheetInstalledLast(smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		StagedAtlasDirectory staged{ context, "drawn-sector-sheet",
+			{ "SectorAtlas", "StationAtlas" } };
+		pf::render::AtlasInstaller installer;
+		auto& registry = pf::render::sectorSheetRegistry();
+
+		std::string diagnostic;
+		installer.installSectorSlot("SectorAtlas", staged.load("SectorAtlas"),
+			diagnostic);
+		require(diagnostic.empty(), "The starting install of the shipped "
+			"SectorAtlas was refused: " + diagnostic);
+		require(registry.drawingName() == "SectorAtlas", "The registry is "
+			"drawing '" + registry.drawingName() + "' after an install that named "
+			"'SectorAtlas'");
+		require(registry.drawing() == registry.find("SectorAtlas"), "The sheet "
+			"the draw path resolves is not the sheet held under the name it is "
+			"drawing, so the draw path is not reading the keyed entry");
+		require(sectorTilesetIsNewFamily(), "The draw path does not report the "
+			"New family it just installed, so the installed sheet is not the one "
+			"being drawn");
+
+		diagnostic.clear();
+		installer.installSectorSlot("StationAtlas", staged.load("StationAtlas"),
+			diagnostic);
+		require(diagnostic.empty(), "Selecting the shipped StationAtlas was "
+			"refused: " + diagnostic);
+		require(registry.drawingName() == "StationAtlas", "The draw path still "
+			"draws '" + registry.drawingName() + "' after a selection that named "
+			"'StationAtlas'");
+		require(!sectorTilesetIsNewFamily(), "The draw path still reports the New "
+			"family after the Old-family Station sheet was selected, so the "
+			"selection did not move what gets drawn");
+		// The sheet that stopped being drawn is still held, and still answers
+		// for itself while it is not being drawn.
+		auto const* sector = registry.find("SectorAtlas");
+		require(sector != nullptr && sector->tileset.family
+			== SectorTilesetFamily::New, "The sheet that stopped being drawn "
+			"dropped out of the registry or lost its family, so a later resolve of "
+			"its name has nothing to resolve to");
+		require(registry.size() == 2, "The registry holds "
+			+ std::to_string(registry.size()) + " sheets where two were installed");
+
+		// Selecting the first sheet again replaces the entry under its own
+		// name and moves the draw path back, with no third sheet behind
+		// either key.
+		diagnostic.clear();
+		installer.installSectorSlot("SectorAtlas", staged.load("SectorAtlas"),
+			diagnostic);
+		require(diagnostic.empty(), "Selecting the SectorAtlas back was refused: "
+			+ diagnostic);
+		require(registry.size() == 2, "Selecting a name the registry already "
+			"holds grew it to " + std::to_string(registry.size()) + "; a "
+			"selection replaces the entry under its own name rather than adding "
+			"a second one");
+		require(registry.drawingName() == "SectorAtlas", "The draw path draws "
+			"'" + registry.drawingName() + "' after the SectorAtlas was selected "
+			"back");
+		require(sectorTilesetIsNewFamily(), "The draw path does not report the "
+			"New family after the SectorAtlas was selected back");
+	}
+
+	// ------------------------------------------------------------------
+	// AC (#1087): selecting a Sector sheet the install refuses replaces the
+	// entry under its name and reports through the existing diagnostic
+	// shape, where empty means accepted.
+	//
+	// The refused sheet is the shipped SectorAtlas with one manifest tile
+	// its authored tileset never defines - the same drift the refusal checks
+	// above use - installed over a registry that already holds a good sheet
+	// under that name. That is what lets this see whether a refusal left
+	// the good artwork standing behind the bad name and reporting nothing.
+	// ------------------------------------------------------------------
+	void aRefusedSectorSheetInstallReplacesItsEntryAndReports(
+		smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		std::string diagnostic;
+		// The two staged directories never stand in this process at once.
+		// Willpower keeps its resource-definition factories in a
+		// process-wide map, so a second live resource manager over a second
+		// staged manifest collides with the first the moment it registers.
+		// Each stage builds its manager, installs from it, and takes it down
+		// before the next one starts; the install copies everything the
+		// registry ends up holding, so nothing downstream still needs the
+		// manager that produced it.
+		{
+			StagedAtlasDirectory good{ context, "refused-selection-start",
+				{ "SectorAtlas" } };
+			pf::render::AtlasInstaller installer;
+			installer.installSectorSlot("SectorAtlas", good.load("SectorAtlas"),
+				diagnostic);
+		}
+		require(diagnostic.empty(), "The starting install of the shipped "
+			"SectorAtlas was refused: " + diagnostic);
+		require(hasSectorTileSurface("corridor"), "The starting install left the "
+			"draw path with no Sector surface to draw, so there is nothing here "
+			"for a later refusal to replace");
+
+		{
+			StagedAtlasDirectory drifted{ context, "refused-selection-drift",
+				{ "SectorAtlas" }, "SectorAtlas", [](YAML::Node regions)
+				{
+					auto added = YAML::Node(YAML::NodeType::Map);
+					added["name"] = "tile-nobody-authored";
+					added["x"] = "0";
+					added["y"] = "0";
+					added["width"] = "16";
+					added["height"] = "16";
+					regions.push_back(added);
+				} };
+			diagnostic.clear();
+			pf::render::AtlasInstaller installer;
+			installer.installSectorSlot("SectorAtlas",
+				drifted.load("SectorAtlas"), diagnostic);
+		}
+		require(!diagnostic.empty(), "Selecting a Sector sheet the install "
+			"refuses reported an empty diagnostic, so the accepted shape and the "
+			"refused shape are not the same shape");
+		require(diagnostic.find("tile-nobody-authored") != std::string::npos,
+			"The refusal does not name the tile it refused: " + diagnostic);
+		auto const* sheet = pf::render::sectorSheetRegistry().find("SectorAtlas");
+		require(sheet != nullptr, "The refused selection left no entry at all "
+			"under 'SectorAtlas', so the name does not resolve to the sheet that "
+			"was refused");
+		require(sheet->name == "SectorAtlas", "The entry the refused selection "
+			"left names itself '" + sheet->name + "'");
+		require(sheet->tileset.surfaces.empty(), "The refused selection left "
+			+ std::to_string(sheet->tileset.surfaces.size()) + " surface tile(s) "
+			"under 'SectorAtlas', so the artwork the accepted install put there "
+			"is still being drawn behind a sheet that was refused");
+		require(!hasSectorTileSurface("corridor"), "The draw path still resolves "
+			"'corridor' after the selection it refused, so the refusal did not "
+			"replace what gets drawn");
+	}
 }
 
 void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
@@ -1564,4 +1793,10 @@ void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
 		isolated<everyShippedAgentPoseTileResolvesInTheInstalledAgentAtlas> });
 	checks.push_back({ "atlasInstall/everyShippedFurnitureTileResolvesInTheInstalledFurnitureAtlas",
 		isolated<everyShippedFurnitureTileResolvesInTheInstalledFurnitureAtlas> });
+	checks.push_back({ "atlasInstall/installedSectorSheetsAreKeyedByAtlasName",
+		isolated<installedSectorSheetsAreKeyedByAtlasName> });
+	checks.push_back({ "atlasInstall/theDrawPathDrawsTheSheetInstalledLast",
+		isolated<theDrawPathDrawsTheSheetInstalledLast> });
+	checks.push_back({ "atlasInstall/aRefusedSectorSheetInstallReplacesItsEntryAndReports",
+		isolated<aRefusedSectorSheetInstallReplacesItsEntryAndReports> });
 }

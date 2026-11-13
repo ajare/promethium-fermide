@@ -227,6 +227,53 @@ namespace pf::render
 	}
 
 	// ------------------------------------------------------------------
+	// The installed Sector sheets, keyed by atlas name (#1087).
+	// ------------------------------------------------------------------
+
+	void SectorSheetRegistry::install(std::string const& name,
+		SectorTileset tileset, TextureId texture)
+	{
+		InstalledSectorSheet sheet;
+		sheet.name = name;
+		sheet.tileset = std::move(tileset);
+		sheet.texture = texture;
+		// Replaced whole, never merged into what was there. A region left over
+		// from the sheet this one displaces would draw as artwork nobody
+		// installed, which is the one thing a keyed install cannot leave
+		// behind: the key says which sheet is being drawn, so everything the
+		// key resolves to has to have come from this install.
+		mSheets[name] = std::move(sheet);
+		mDrawingName = name;
+	}
+
+	InstalledSectorSheet const* SectorSheetRegistry::find(
+		std::string const& name) const
+	{
+		auto const sheet = mSheets.find(name);
+		return sheet == mSheets.end() ? nullptr : &sheet->second;
+	}
+
+	InstalledSectorSheet const* SectorSheetRegistry::drawing() const
+	{
+		return find(mDrawingName);
+	}
+
+	void SectorSheetRegistry::clear()
+	{
+		mSheets.clear();
+		mDrawingName.clear();
+	}
+
+	SectorSheetRegistry& sectorSheetRegistry()
+	{
+		// Made on first use rather than at static initialisation. Every
+		// translation unit that draws a Sector tile reaches this, and a
+		// function-local makes what order it is built in a non-question.
+		static SectorSheetRegistry registry;
+		return registry;
+	}
+
+	// ------------------------------------------------------------------
 	// The install path, with its registry cached (#1035).
 	// ------------------------------------------------------------------
 
@@ -331,7 +378,13 @@ namespace pf::render
 			}
 		}
 		catch (std::exception const& exception) { error = exception.what(); }
-		setSectorTileset(std::move(tiles), kInstalledAtlasTexture);
+		// The sheet goes into the keyed registry under the name it was asked
+		// to install as, and becomes the sheet the draw path draws. A refused
+		// install gets stored the same way, empty: the reason is the
+		// diagnostic below, and the empty sheet is what the canvas then
+		// paints magenta for (#1087).
+		sectorSheetRegistry().install(setName, std::move(tiles),
+			kInstalledAtlasTexture);
 		if (!error.empty() && diagnostic.empty()) diagnostic = error;
 	}
 

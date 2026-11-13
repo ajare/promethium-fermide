@@ -82,7 +82,16 @@ struct SectorTileset
     TileArtworkMap tiles;
     static SectorTileset load(std::filesystem::path const& path);
 };
+// Installs `tileset` as the default Sector sheet, under the default atlas
+// name, and makes it the sheet the draw path draws (#1087). The nameless
+// form of the install: the application's own Sector install names its sheet
+// and goes through `AtlasInstaller::installSectorSlot()`, which keys the
+// same registry by that name. Use this where a caller is standing in for
+// the World's Sector artwork and has no sheet name of its own.
 void setSectorTileset(SectorTileset tileset, TextureId texture);
+// Drops every installed Sector sheet, drawn one included. This is the
+// teardown a check hands the process back with; it is not a way to set one
+// sheet aside while another keeps drawing.
 void clearSectorTileset();
 // Whether the installed atlas carries a surface tile under this name. A
 // caller that has a type-specific tile and a borrowed one asks this before
