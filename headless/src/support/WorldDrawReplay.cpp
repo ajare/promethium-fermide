@@ -50,6 +50,11 @@ namespace
 		WorldDrawList::Triangle const& second)
 	{
 		if (first.colour != second.colour || first.texture != second.texture) return false;
+		// The same family off two different sheets is not one quad: the two
+		// triangles would have been recorded by two `AddSectorImage()` calls
+		// and belong to two batches, and rejoining them here would let a check
+		// read one rectangle where two sheets were drawn (#1089).
+		if (first.sectorSheet != second.sectorSheet) return false;
 		if (!samePoint(first.clip.minimum, second.clip.minimum)
 			|| !samePoint(first.clip.maximum, second.clip.maximum)) return false;
 

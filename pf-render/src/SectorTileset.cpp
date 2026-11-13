@@ -188,10 +188,19 @@ SectorTileset loadVersion2SectorTileset(std::filesystem::path const& path,
 // 0..1 on both axes; a crop is a sub-range drawn at the same pixels per
 // artwork texel the whole tile would have had, which is what keeps a crop a
 // crop and not a squash.
-void image(WorldDrawList* list, SectorTileset const& tileset,
+//
+// The sheet is the argument rather than the tileset because the recording
+// needs both: the region's fractions are divided by the sheet's own size,
+// and the triangle has to say which sheet it came from so the batch that
+// draws it binds that sheet's texture and not the one installed last
+// (#1089). Taking the sheet whole is what makes it impossible to divide a
+// region by one sheet's dimensions and record another sheet's name beside
+// the result.
+void image(WorldDrawList* list, pf::render::InstalledSectorSheet const& sheet,
     SectorTileRegion const& r, Vec2 a, Vec2 b,
     float u0, float u1, float v0, float v1)
 {
+    auto const& tileset = sheet.tileset;
     // Half-texel inset avoids sampling adjacent draft artwork with linear
     // filtering. The divisor is the width and height of the sheet this
     // region was taken out of, which is the sheet the caller handed the
@@ -205,7 +214,7 @@ void image(WorldDrawList* list, SectorTileset const& tileset,
         (r.y + 0.5f + (r.height - 1) * v1) / tileset.height};
     // White on every draw: the tile's own pixels are the picture, and no
     // colour is multiplied into it on the way to the screen.
-    list->AddImage(WorldDrawList::Texture::SectorAtlas, a, b, uv0, uv1, White);
+    list->AddSectorImage(sheet.name, a, b, uv0, uv1, White);
 }
 
 // How many whole World cells a span covers, counted from where it starts.
@@ -228,10 +237,12 @@ int cellsCovered(float span, float cell)
 // wrong answer looks like. A Sector whose base tile is genuinely absent
 // still fills its whole area with magenta, one cell at a time, which is
 // what it looked like when the whole area was filled at once.
-void drawSurfaceCell(WorldDrawList* list, SectorTileset const& tileset,
+void drawSurfaceCell(WorldDrawList* list,
+    pf::render::InstalledSectorSheet const& sheet,
     std::string const& kind, Vec2 a,
     Vec2 b, float u0, float u1, float v0, float v1)
 {
+    auto const& tileset = sheet.tileset;
     // A resolved name is looked for among the surfaces first, then among
     // the overlays. The resolver owns which name it answers with and the
     // overlay map is how it says "this cell wears a doorframe"; the two
@@ -256,7 +267,7 @@ void drawSurfaceCell(WorldDrawList* list, SectorTileset const& tileset,
         list->AddRectFilled(a, b, packColour(255, 0, 255, 255));
         return;
     }
-    image(list, tileset, *region, a, b, u0, u1, v0, v1);
+    image(list, sheet, *region, a, b, u0, u1, v0, v1);
 }
 }
 
@@ -469,7 +480,7 @@ bool drawSectorTileSurfacePerCell(pf::render::InstalledSectorSheet const* sheet,
             // today answers empty - its base is always a name - so nothing
             // that reaches the screen now changes.
             if (tile.empty()) continue;
-            drawSurfaceCell(list, sheet->tileset, tile,
+            drawSurfaceCell(list, *sheet, tile,
                 { x, rowTop }, { colRight, rowBottom }, 0.0f,
                 (colRight - x) / cellWidth, v0, 1.0f);
         }
@@ -518,7 +529,7 @@ bool drawSectorTilePreview(pf::render::InstalledSectorSheet const* sheet,
     // rect's bottom-right. The authored render offset and drawn size are
     // World-space facts about how a Sector wears the tile and say nothing
     // about how a swatch frames it, so they are not consulted here.
-    image(list, tileset, found->second, { left, top }, { right, bottom }, 0.0f,
+    image(list, *sheet, found->second, { left, top }, { right, bottom }, 0.0f,
         1.0f, 0.0f, 1.0f);
     return true;
 }
@@ -531,6 +542,6 @@ bool drawSectorTileBoundary(pf::render::InstalledSectorSheet const* sheet,
     auto const found = tileset.boundaries.find(kind);
     if (found == tileset.boundaries.end() || tileset.width <= 0
         || tileset.height <= 0) return false;
-    image(list, tileset, found->second, a, b, 0.0f, 1.0f, 0.0f, 1.0f);
+    image(list, *sheet, found->second, a, b, 0.0f, 1.0f, 0.0f, 1.0f);
     return true;
 }

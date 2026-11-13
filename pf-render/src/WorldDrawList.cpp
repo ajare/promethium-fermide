@@ -83,7 +83,8 @@ void WorldDrawList::AddRect(Vec2 minimum, Vec2 maximum, PackedColourValue colour
 }
 
 void WorldDrawList::addTriangle(Vec2 a, Vec2 b, Vec2 c,
-	Vec2 uvA, Vec2 uvB, Vec2 uvC, PackedColourValue colour, Texture texture)
+	Vec2 uvA, Vec2 uvB, Vec2 uvC, PackedColourValue colour, Texture texture,
+	std::string const& sectorSheet)
 {
 	Triangle triangle;
 	triangle.positions[0] = a;
@@ -94,6 +95,7 @@ void WorldDrawList::addTriangle(Vec2 a, Vec2 b, Vec2 c,
 	triangle.texcoords[2] = uvC;
 	triangle.colour = colour;
 	triangle.texture = texture;
+	triangle.sectorSheet = sectorSheet;
 	triangle.clip = currentClip();
 	mCommands.push_back(triangle);
 }
@@ -183,14 +185,28 @@ void WorldDrawList::AddText(FontRef font, Vec2 position, PackedColourValue colou
 void WorldDrawList::AddImage(Texture texture, Vec2 minimum, Vec2 maximum,
 	Vec2 uvMinimum, Vec2 uvMaximum, PackedColourValue colour)
 {
+	addImageQuad(minimum, maximum, uvMinimum, uvMaximum, colour, texture, {});
+}
+
+void WorldDrawList::AddSectorImage(std::string const& sheet, Vec2 minimum,
+	Vec2 maximum, Vec2 uvMinimum, Vec2 uvMaximum, PackedColourValue colour)
+{
+	addImageQuad(minimum, maximum, uvMinimum, uvMaximum, colour,
+		Texture::SectorAtlas, sheet);
+}
+
+void WorldDrawList::addImageQuad(Vec2 minimum, Vec2 maximum, Vec2 uvMinimum,
+	Vec2 uvMaximum, PackedColourValue colour, Texture texture,
+	std::string const& sectorSheet)
+{
 	Vec2 const topRight{ maximum.x, minimum.y };
 	Vec2 const bottomLeft{ minimum.x, maximum.y };
 	Vec2 const uvTopRight{ uvMaximum.x, uvMinimum.y };
 	Vec2 const uvBottomLeft{ uvMinimum.x, uvMaximum.y };
 	addTriangle(minimum, topRight, maximum, uvMinimum, uvTopRight, uvMaximum,
-		colour, texture);
+		colour, texture, sectorSheet);
 	addTriangle(minimum, maximum, bottomLeft, uvMinimum, uvMaximum, uvBottomLeft,
-		colour, texture);
+		colour, texture, sectorSheet);
 }
 
 size_t WorldDrawList::geometryBookmark() const

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <set>
@@ -41,6 +42,7 @@
 #include "ObjectTileset.h"
 #include "SectorTileset.h"
 #include "WorldDrawList.h"
+#include "WorldDrawSegments.h"
 
 namespace resources = wp::application::resourcesystem;
 namespace
@@ -52,16 +54,9 @@ namespace
 	using pf::render::BlueShift;
 	using pf::render::AlphaShift;
 
-	bool same(Vec2 left, Vec2 right)
-	{
-		return left.x == right.x && left.y == right.y;
-	}
-
-	bool same(WorldDrawList::ClipRectangle const& left,
-		WorldDrawList::ClipRectangle const& right)
-	{
-		return same(left.minimum, right.minimum) && same(left.maximum, right.maximum);
-	}
+	// The `same()` helpers that used to sit here went with the segment
+	// builder to `WorldDrawSegments.cpp`, which is the only place the
+	// equality of two recorded clips is asked (#1089).
 
 	mpp::Colour colour(PackedColourValue value)
 	{
@@ -189,16 +184,10 @@ namespace
 		Vec2 mOrigin{};
 	};
 
-	struct Segment
-	{
-		enum class Kind { Triangles, Lines, Text } kind{};
-		WorldDrawList::Texture texture{ WorldDrawList::Texture::None };
-		float lineWidth{ 1.0f };
-		WorldDrawList::ClipRectangle clip{};
-		std::vector<WorldDrawList::Triangle> triangles;
-		std::vector<WorldDrawList::Line> lines;
-		std::vector<WorldDrawList::Text> texts;
-	};
+	// One run of the stream that draws as one batch. The type lives in
+	// `WorldDrawSegments.h` with the split and the slot plan that go with it
+	// (#1089); this class keeps the GPU objects a segment becomes.
+	using Segment = pf::render::DrawSegment;
 
 	class WorldRenderStack
 	{
@@ -206,6 +195,12 @@ namespace
 		{
 			Segment::Kind kind{};
 			WorldDrawList::Texture texture{ WorldDrawList::Texture::None };
+			// The Sector sheet this batch binds, for a Sector batch; empty
+			// for every other kind. Recorded at creation, because the batch
+			// is created against the sheet its first segment came from and
+			// the allocator only ever hands this slot segments that name the
+			// same sheet (#1089).
+			std::string sectorSheet{};
 			std::shared_ptr<TriangleProvider> triangles;
 			std::shared_ptr<LineProvider> lines;
 			std::shared_ptr<mpp::helper::TriangleBatch2DRenderer<Float, Float, Byte>> triangleRenderer;
@@ -321,6 +316,9 @@ namespace
 			if (mAtlases.objects) mResources->releaseResource(mAtlases.objects);
 			if (mAtlases.furniture) mResources->releaseResource(mAtlases.furniture);
 			if (mAtlases.agent) mResources->releaseResource(mAtlases.agent);
+			for (auto& sheet : mSectorSheets)
+				mResources->releaseResource(sheet.second);
+			mSectorSheets.clear();
 			clearSectorTileset();
 			clearObjectTileset();
 			clearAgentTileset();
@@ -351,7 +349,7 @@ namespace
 			auto const height = static_cast<std::size_t>(std::max(1.0f, std::ceil(size.y)));
 			auto& target = mTargets[static_cast<std::size_t>(canvas)];
 			ensureTarget(target, width, height, canvas);
-			auto segments = buildSegments(commandList);
+			auto segments = pf::render::buildDrawSegments(commandList);
 			prepareSlots(segments, origin);
 
 			mRenderSystem->pushRenderTarget(target);
@@ -410,7 +408,7 @@ namespace
 		{
 			auto const width = static_cast<int>(std::max(1.0f, std::ceil(size.x)));
 			auto const height = static_cast<int>(std::max(1.0f, std::ceil(size.y)));
-			auto segments = buildSegments(commandList);
+			auto segments = pf::render::buildDrawSegments(commandList);
 			prepareSlots(segments, origin);
 
 			mRenderSystem->pushProjectionMatrix();
@@ -747,7 +745,8 @@ namespace
 		}
 
 
-		mpp::ResourcePtr texture(WorldDrawList::Texture textureKind)
+		mpp::ResourcePtr texture(WorldDrawList::Texture textureKind,
+			std::string const& sectorSheet)
 		{
 			if (textureKind == WorldDrawList::Texture::None) return {};
 			if (textureKind == WorldDrawList::Texture::FontAtlas)
@@ -770,107 +769,93 @@ namespace
 				}
 				return std::static_pointer_cast<mpp::RenderTexture>(mFontAtlas);
 			}
+			// A Sector batch binds the sheet its triangles came from, not the
+			// sheet the Sector slot happens to hold (#1089). Every other family
+			// has one sheet, so its slot is its texture.
+			if (textureKind == WorldDrawList::Texture::SectorAtlas)
+				return sectorSheetTexture(sectorSheet);
 			auto set = std::dynamic_pointer_cast<resources::ImageSetResource>(
-				textureKind == WorldDrawList::Texture::SectorAtlas ? mAtlases.sector
-					: textureKind == WorldDrawList::Texture::AgentAtlas ? mAtlases.agent
+				textureKind == WorldDrawList::Texture::AgentAtlas ? mAtlases.agent
 					: textureKind == WorldDrawList::Texture::FurnitureAtlas ? mAtlases.furniture : mAtlases.objects);
 			return set->getImage()->getMppResource();
 		}
 
-		static std::vector<Segment> buildSegments(WorldDrawList const& commandList)
+		// The pixels one `ImageSet` is drawn from, or nothing when there is
+		// no set or no image behind it.
+		static mpp::ResourcePtr imageSetTexture(
+			resources::ResourcePtr const& set)
 		{
-			std::vector<Segment> result;
-			for (auto const& command : commandList.commands())
+			auto const imageSet = std::dynamic_pointer_cast<
+				resources::ImageSetResource>(set);
+			if (!imageSet || !imageSet->getImage()) return {};
+			return imageSet->getImage()->getMppResource();
+		}
+
+		// The GPU texture one recorded Sector sheet's pixels sit behind
+		// (#1089).
+		//
+		// The sheet the World's Sector slot carries is already acquired,
+		// created and loaded by this stack, so it needs no second
+		// acquisition: that is the sheet every Sector triangle drew with
+		// before a triangle knew which sheet it came from, and it stays the
+		// answer when the triangle names it.
+		//
+		// Any other sheet is taken up here under the name the install keyed
+		// it by, and held by this stack for as long as the batches that bind
+		// it stand. The batch owns its texture, so the texture cannot go away
+		// underneath something still drawing with it.
+		//
+		// A name that resolves to no installed sheet, or to a sheet whose
+		// atlas this stack cannot take up, falls back to the World's selected
+		// sheet. That is what every Sector triangle bound before this
+		// existed, and a sheet with no pixels behind it is a recoverable
+		// artwork fault - the same one a bad atlas selection reports through
+		// its slot diagnostic - rather than a reason to hand a batch no
+		// texture at all.
+		mpp::ResourcePtr sectorSheetTexture(std::string const& identity)
+		{
+			if (identity.empty() || identity == mAtlases.sectorName)
+				return imageSetTexture(mAtlases.sector);
+			auto const held = mSectorSheets.find(identity);
+			if (held != mSectorSheets.end()) return imageSetTexture(held->second);
+			auto const fallback = imageSetTexture(mAtlases.sector);
+			if (!pf::render::sectorSheetRegistry().find(identity)) return fallback;
+			try
 			{
-				if (std::holds_alternative<WorldDrawList::Barrier>(command))
+				auto resource = requireImageSet(identity);
+				auto const pixels = imageSetTexture(resource);
+				if (!pixels)
 				{
-					if (!result.empty()) result.push_back({});
-					continue;
+					mResources->releaseResource(resource);
+					return fallback;
 				}
-				if (auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command))
-				{
-					bool const append = !result.empty()
-						&& result.back().kind == Segment::Kind::Triangles
-						&& result.back().texture == triangle->texture
-						&& same(result.back().clip, triangle->clip);
-					if (!append)
-					{
-						Segment segment;
-						segment.kind = Segment::Kind::Triangles;
-						segment.texture = triangle->texture;
-						segment.clip = triangle->clip;
-						result.push_back(std::move(segment));
-					}
-					result.back().triangles.push_back(*triangle);
-				}
-				else if (auto const* line = std::get_if<WorldDrawList::Line>(&command))
-				{
-					bool const append = !result.empty()
-						&& result.back().kind == Segment::Kind::Lines
-						&& result.back().lineWidth == line->thickness
-						&& same(result.back().clip, line->clip);
-					if (!append)
-					{
-						Segment segment;
-						segment.kind = Segment::Kind::Lines;
-						segment.lineWidth = line->thickness;
-						segment.clip = line->clip;
-						result.push_back(std::move(segment));
-					}
-					result.back().lines.push_back(*line);
-				}
-				else if (auto const* text = std::get_if<WorldDrawList::Text>(&command))
-				{
-					bool const append = !result.empty()
-						&& result.back().kind == Segment::Kind::Text
-						&& same(result.back().clip, text->clip);
-					if (!append)
-					{
-						Segment segment;
-						segment.kind = Segment::Kind::Text;
-						segment.clip = text->clip;
-						result.push_back(std::move(segment));
-					}
-					result.back().texts.push_back(*text);
-				}
+				mSectorSheets.emplace(identity, std::move(resource));
+				return pixels;
 			}
-			std::erase_if(result, [](Segment const& segment)
-				{ return segment.triangles.empty() && segment.lines.empty()
-					&& segment.texts.empty(); });
-			return result;
+			catch (std::exception const&) { return fallback; }
 		}
 
 		void prepareSlots(std::vector<Segment> const& segments, Vec2 origin)
 		{
-			mSlotAllocator.beginFrame();
-			mSegmentSlots.resize(segments.size());
+			// The frame plan - which retained batch each segment draws
+			// through - is the same function a CPU-only check drives (#1089).
+			// It opens the frame on the allocator as it goes, so the frame
+			// boundary cannot be forgotten here.
+			mSegmentSlots = pf::render::planDrawSlots(segments, mSlotAllocator);
 			for (auto& slot : mSlots)
 				if (slot.sceneModel) slot.sceneModel->setVisible(false);
 			for (std::size_t index = 0; index < segments.size(); ++index)
 			{
 				auto const& segment = segments[index];
 				if (segment.kind == Segment::Kind::Text) continue;
-				using Kind = WorldRenderSlotAllocator::Kind;
-				auto kind = Kind::SolidTriangles;
-				if (segment.kind == Segment::Kind::Lines) kind = Kind::Lines;
-				else if (segment.texture == WorldDrawList::Texture::SectorAtlas)
-					kind = Kind::SectorTriangles;
-				else if (segment.texture == WorldDrawList::Texture::ObjectAtlas)
-					kind = Kind::ObjectTriangles;
-				else if (segment.texture == WorldDrawList::Texture::AgentAtlas)
-					kind = Kind::AgentTriangles;
-				else if (segment.texture == WorldDrawList::Texture::FurnitureAtlas)
-					kind = Kind::FurnitureTriangles;
-				else if (segment.texture == WorldDrawList::Texture::FontAtlas)
-					kind = Kind::FontTriangles;
-				auto const slotIndex = mSlotAllocator.acquire(kind);
-				mSegmentSlots[index] = slotIndex;
+				auto const slotIndex = mSegmentSlots[index];
 				if (slotIndex >= mSlots.size()) mSlots.emplace_back();
 				auto& slot = mSlots[slotIndex];
 				if (!slot.triangleRenderer && !slot.lineRenderer)
 				{
 					slot.kind = segment.kind;
 					slot.texture = segment.texture;
+					slot.sectorSheet = segment.sectorSheet;
 					create(slot, slotIndex);
 				}
 				if (slot.triangles)
@@ -898,7 +883,8 @@ namespace
 					false, false, false, false, false);
 				slot.triangleRenderer = std::make_shared<
 					mpp::helper::TriangleBatch2DRenderer<Float, Float, Byte>>(
-						name, options, slot.triangles, texture(slot.texture),
+						name, options, slot.triangles,
+						texture(slot.texture, slot.sectorSheet),
 						mRenderSystem, mRenderResources);
 				slot.triangleRenderer->create();
 				slot.sceneModel = mScene->add2dBatch(
@@ -988,6 +974,12 @@ namespace
 		// with it: the atlas-set registry is parsed once here rather than once
 		// per atlas per install (#1035).
 		pf::render::AtlasInstaller mAtlasInstaller;
+		// Every Sector sheet beyond the one the Sector slot carries that this
+		// stack has taken up in order to bind a batch to it (#1089), held
+		// under the name it was installed as. The batch owns its texture, so
+		// the acquisition outlives every frame that drew with it and is
+		// released with the stack.
+		std::map<std::string, resources::ResourcePtr> mSectorSheets;
 		mpp::ScenePtr mScene;
 		// Both images are composited later by the caller, so neither canvas may
 		// overwrite the other's offscreen texture during the same frame.

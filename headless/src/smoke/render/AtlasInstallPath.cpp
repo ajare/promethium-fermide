@@ -33,6 +33,8 @@
 #include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "TileArtwork.h"
+#include "WorldDrawSegments.h"
+#include "WorldRenderSlotAllocator.h"
 
 #include "core/Agent.h"
 #include "core/Defines.h"
@@ -1913,6 +1915,338 @@ namespace
 			"'corridor' after the selection it refused, so the refusal did not "
 			"replace what gets drawn");
 	}
+
+	// ------------------------------------------------------------------
+	// The two Sector sheets this ticket installs side by side: the World's
+	// default and the Layer-1 sheet that ships beside it (#1086). They are
+	// the pair every check below needs, because a sheet identity that has
+	// only one sheet to choose between is not testable - it cannot be
+	// wrong.
+	//
+	// Both are installed through the install the application runs, and the
+	// check then draws from one of them while the draw path is on the other,
+	// so no assertion can pass by reading the drawn sheet through the back
+	// door.
+	// ------------------------------------------------------------------
+	class TwoInstalledSheets
+	{
+	public:
+		TwoInstalledSheets(smoke::Context const& context, std::string const& tag)
+			: mStaged(context, tag, { "SectorAtlas", "SectorAtlasLayer1" })
+		{
+			std::string diagnostic;
+			mInstaller.installSectorSlot("SectorAtlas",
+				mStaged.load("SectorAtlas"), diagnostic);
+			require(diagnostic.empty(), "Staging the shipped SectorAtlas beside "
+				"the Layer-1 sheet was refused: " + diagnostic);
+			diagnostic.clear();
+			mInstaller.installSectorSlot("SectorAtlasLayer1",
+				mStaged.load("SectorAtlasLayer1"), diagnostic);
+			require(diagnostic.empty(), "Staging the shipped SectorAtlasLayer1 "
+				"beside the default sheet was refused: " + diagnostic);
+			// The Layer-1 sheet was installed last, so it is the sheet the
+			// draw path reaches and the default is the one that has to be
+			// named from here on. If that ever stops being true the checks
+			// below would be comparing a sheet with itself.
+			require(pf::render::sectorSheetRegistry().drawingName()
+				== "SectorAtlasLayer1", "The Layer-1 sheet was installed last "
+				"and the registry is drawing '"
+				+ pf::render::sectorSheetRegistry().drawingName()
+				+ "', so this fixture is not the pair it claims to be");
+			mDefault = pf::render::sectorSheetRegistry().find("SectorAtlas");
+			mLayer = pf::render::sectorSheetRegistry().find("SectorAtlasLayer1");
+			require(mDefault != nullptr && mLayer != nullptr
+				&& mDefault != mLayer, "Two Sector sheets were installed and the "
+				"registry does not resolve two distinct entries under their "
+				"names, so there is nothing here for an identity to choose "
+				"between");
+			require(mDefault->installed() && mLayer->installed(), "One of the "
+				"two installed Sector sheets has nothing behind its handle, so "
+				"the draw below would emit no triangles to read an identity off");
+		}
+
+		pf::render::InstalledSectorSheet const* defaultSheet() const
+		{
+			return mDefault;
+		}
+
+		pf::render::InstalledSectorSheet const* layerSheet() const
+		{
+			return mLayer;
+		}
+
+	private:
+		StagedAtlasDirectory mStaged;
+		pf::render::AtlasInstaller mInstaller;
+		pf::render::InstalledSectorSheet const* mDefault{};
+		pf::render::InstalledSectorSheet const* mLayer{};
+	};
+
+	// The clip every sheet check draws under: wide enough that no cell is
+	// culled, so a missing triangle means the sheet did not draw and nothing
+	// else.
+	WorldDrawList::ClipRectangle sheetCheckClip()
+	{
+		return { { 0.0f, 0.0f }, { 4096.0f, 4096.0f } };
+	}
+
+	// One World cell of `corridor`, drawn from the sheet handed in. Every
+	// check that compares two sheets draws this same rect, so the geometry
+	// that comes back is the same geometry and the only fact that can tell
+	// the two runs apart is the sheet.
+	void drawOneCorridorCell(pf::render::InstalledSectorSheet const* sheet,
+		WorldDrawList* commands)
+	{
+		require(drawSectorTileSurface(sheet, "corridor", commands,
+				{ 0.0f, 0.0f }, { float(CORE_CELL_WIDTH_PIXELS),
+					float(CORE_LEVEL_HEIGHT_PIXELS) }, 1.0f),
+			"The per-cell surface loop refused a 'corridor' cell from a sheet "
+			"that carries it, so the stream this check reads was never written");
+	}
+
+	std::vector<WorldDrawList::Triangle const*> sectorTrianglesOf(
+		WorldDrawList const& commands)
+	{
+		std::vector<WorldDrawList::Triangle const*> triangles;
+		for (auto const& command : commands.commands())
+			if (auto const* triangle = std::get_if<WorldDrawList::Triangle>(
+				&command))
+				if (triangle->texture == WorldDrawList::Texture::SectorAtlas)
+					triangles.push_back(triangle);
+		return triangles;
+	}
+
+	// Two triangle runs that differ in nothing but the sheet they carry.
+	// Stated as a precondition rather than assumed: if the two draws did not
+	// agree on geometry and uv, a split could be blamed on the sheet when
+	// it was really caused by something else, and the check would pass
+	// without proving anything about the identity.
+	bool geometryMatches(WorldDrawList::Triangle const& left,
+		WorldDrawList::Triangle const& right)
+	{
+		for (int corner = 0; corner < 3; ++corner)
+			if (left.positions[corner].x != right.positions[corner].x
+				|| left.positions[corner].y != right.positions[corner].y
+				|| left.texcoords[corner].x != right.texcoords[corner].x
+				|| left.texcoords[corner].y != right.texcoords[corner].y)
+				return false;
+		return left.clip.minimum.x == right.clip.minimum.x
+			&& left.clip.minimum.y == right.clip.minimum.y
+			&& left.clip.maximum.x == right.clip.maximum.x
+			&& left.clip.maximum.y == right.clip.maximum.y;
+	}
+
+	// ------------------------------------------------------------------
+	// AC (#1089): a recorded Sector triangle keeps the Sector atlas as its
+	// family and gains a sheet identity that resolves to an installed sheet
+	// with no graphics context.
+	//
+	// The triangle is recorded by the real per-cell loop handed the real
+	// installed sheet and read back through the command seam the renderer
+	// exposes. Nothing in this process makes a render stack, an OpenGL
+	// context or an MPP resource: the identity resolves through the same
+	// GPU-free registry the install wrote (#1087), which is the whole point
+	// of putting it on the command rather than on the pass.
+	// ------------------------------------------------------------------
+	void aSectorTriangleCarriesTheSheetItWasDrawnFrom(
+		smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		TwoInstalledSheets sheets{ context, "triangle-sheet-identity" };
+		// Drawn from the default sheet while the draw path is on the Layer-1
+		// one, so the identity that comes back cannot be the drawn sheet's
+		// name picked up off the registry by a helper that ignored its
+		// argument.
+		WorldDrawList commands{ sheetCheckClip() };
+		drawOneCorridorCell(sheets.defaultSheet(), &commands);
+		auto const triangles = sectorTrianglesOf(commands);
+		require(!triangles.empty(), "Drawing a 'corridor' cell recorded no "
+			"Sector-family triangle at all, so there is no recorded command to "
+			"read a sheet identity off");
+
+		for (auto const* triangle : triangles)
+		{
+			// The family is untouched: every existing assertion that a
+			// Sector surface triangle's texture is the Sector atlas still
+			// reads this field and still means the same thing (#1089).
+			require(triangle->texture == WorldDrawList::Texture::SectorAtlas,
+				"A Sector surface triangle came back with a texture family other "
+				"than the Sector atlas, so the family the existing assertions "
+				"read has moved");
+			require(triangle->sectorSheet == "SectorAtlas",
+				"A triangle drawn from the default Sector sheet carries the "
+				"sheet identity '" + triangle->sectorSheet + "', so the "
+				"recording did not take the sheet it was handed");
+			// The identity resolves here, with no render context: the answer
+			// is the sheet the install put under that name, and it is the
+			// sheet this triangle was drawn from.
+			auto const* resolved = pf::render::sectorSheetRegistry()
+				.find(triangle->sectorSheet);
+			require(resolved != nullptr, "The sheet identity '"
+				+ triangle->sectorSheet + "' resolves to no installed sheet, so "
+				"the identity on the command is not a key into what was "
+				"installed");
+			require(resolved == sheets.defaultSheet(), "The identity on the "
+				"triangle resolves to a different sheet than the one it was "
+				"drawn from, so resolving it would bind the wrong texture at "
+				"batch creation");
+			require(resolved->installed(), "The resolved sheet has no pixels "
+				"behind its handle, so a batch bound to it would bind nothing");
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// AC (#1089): two installed Sector sheets in one recorded stream
+	// become two batches with distinct, resolvable identities, and the
+	// sheet is the only thing that could have caused the split.
+	//
+	// The control is drawn first: one sheet, one rect, one segment. Then
+	// the same rect drawn from each of the two sheets into one stream. Same
+	// clip, same geometry, same uv - the sheet is the only difference, so
+	// a stream that still came back as one segment would be one batch
+	// binding whichever texture it was created against, which is the exact
+	// failure this ticket exists to remove.
+	// ------------------------------------------------------------------
+	void twoSheetsInOneStreamBecomeTwoBatches(smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		TwoInstalledSheets sheets{ context, "two-sheets-two-batches" };
+
+		WorldDrawList oneSheet{ sheetCheckClip() };
+		drawOneCorridorCell(sheets.defaultSheet(), &oneSheet);
+		auto const control = pf::render::buildDrawSegments(oneSheet);
+		require(control.size() == 1, "One sheet drawn as one cell came back as "
+			+ std::to_string(control.size()) + " segments, so the control is "
+			"not one batch and the two-sheet case below proves nothing");
+		require(!control[0].triangles.empty(), "The control sheet drew no "
+			"triangles into its segment");
+
+		WorldDrawList twoSheets{ sheetCheckClip() };
+		drawOneCorridorCell(sheets.defaultSheet(), &twoSheets);
+		drawOneCorridorCell(sheets.layerSheet(), &twoSheets);
+		auto const segments = pf::render::buildDrawSegments(twoSheets);
+		require(segments.size() == 2, "Two Sector sheets drawn into one stream "
+			"came back as " + std::to_string(segments.size()) + " segment(s), so "
+			"adjacent triangles from different sheets merged into one batch and "
+			"one of them will be drawn with the other's texture (#1089)");
+		require(segments[0].triangles.size() == control[0].triangles.size()
+			&& segments[1].triangles.size() == control[0].triangles.size(),
+			"The two-sheet stream did not draw the same number of triangles per "
+			"sheet as the control, so the split below is not the sheet's doing");
+		for (std::size_t corner = 0; corner < control[0].triangles.size();
+			++corner)
+			require(geometryMatches(control[0].triangles[corner],
+					segments[1].triangles[corner]),
+				"The Layer-1 draw produced different geometry or uv from the "
+				"default draw, so this stream does not isolate the sheet as the "
+				"only reason the two segments are separate");
+
+		// Both keep the Sector family, and each carries its own sheet.
+		require(segments[0].texture == WorldDrawList::Texture::SectorAtlas
+			&& segments[1].texture == WorldDrawList::Texture::SectorAtlas,
+			"A Sector segment lost the Sector family, so the family is no "
+			"longer what says which atlas kind a triangle is");
+		require(segments[0].sectorSheet == "SectorAtlas"
+			&& segments[1].sectorSheet == "SectorAtlasLayer1",
+			"The two segments carry '" + segments[0].sectorSheet + "' and '"
+			+ segments[1].sectorSheet + "', which are not the two sheets that "
+			"were drawn");
+		// The identities are distinct and each resolves to the sheet it was
+		// drawn from, which is what a batch needs in order to bind the right
+		// texture rather than the last one installed.
+		auto& registry = pf::render::sectorSheetRegistry();
+		require(segments[0].sectorSheet != segments[1].sectorSheet,
+			"Two different sheets recorded the same identity, so a batch could "
+			"not tell them apart even by resolving it");
+		require(registry.find(segments[0].sectorSheet) == sheets.defaultSheet()
+			&& registry.find(segments[1].sectorSheet) == sheets.layerSheet(),
+			"One of the two recorded identities resolves to a sheet other than "
+			"the one its triangles were drawn from");
+
+		// The frame plan puts the two segments in two batches.
+		WorldRenderSlotAllocator allocator;
+		auto const plan = pf::render::planDrawSlots(segments, allocator);
+		require(plan.size() == segments.size(), "The frame plan does not have "
+			"one entry per segment, so it cannot be walked in stream order and "
+			"draw order would not be preserved");
+		require(plan[0] != plan[1], "Both Sector sheets were planned into batch "
+			+ std::to_string(plan[0]) + ", which is one batch binding one "
+			"texture for two sheets (#1089)");
+		require(allocator.size() == 2, "Two sheets in one frame made "
+			+ std::to_string(allocator.size()) + " batches; the plan is not "
+			"one batch per sheet");
+	}
+
+	// ------------------------------------------------------------------
+	// AC (#1089): a batch belongs to the sheet it binds, not to where that
+	// sheet happened to appear in the stream.
+	//
+	// Three frames through one allocator: the two sheets in one order, the
+	// same two in the other order, then one sheet repeated after the
+	// other's segment. The batch each sheet starts with never moves, the
+	// reversal makes no new batch, and the repeat takes a further batch of
+	// its own sheet rather than the other sheet's. That is what keeps a
+	// frame whose visibility changed - a Layer scrolled behind another -
+	// from drawing one Layer through the other Layer's batch.
+	// ------------------------------------------------------------------
+	void eachSheetKeepsItsOwnBatchWhenTheOrderMoves(
+		smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		TwoInstalledSheets sheets{ context, "sheet-batch-order" };
+
+		WorldDrawList first{ sheetCheckClip() };
+		drawOneCorridorCell(sheets.defaultSheet(), &first);
+		drawOneCorridorCell(sheets.layerSheet(), &first);
+		WorldDrawList reversed{ sheetCheckClip() };
+		drawOneCorridorCell(sheets.layerSheet(), &reversed);
+		drawOneCorridorCell(sheets.defaultSheet(), &reversed);
+		WorldDrawList interleaved{ sheetCheckClip() };
+		drawOneCorridorCell(sheets.defaultSheet(), &interleaved);
+		drawOneCorridorCell(sheets.layerSheet(), &interleaved);
+		drawOneCorridorCell(sheets.defaultSheet(), &interleaved);
+
+		WorldRenderSlotAllocator allocator;
+		auto const forward = pf::render::planDrawSlots(
+			pf::render::buildDrawSegments(first), allocator);
+		require(forward.size() == 2 && forward[0] != forward[1],
+			"The first frame did not put the two sheets in two batches");
+		auto const defaultBatch = forward[0];
+		auto const layerBatch = forward[1];
+
+		auto const swapped = pf::render::planDrawSlots(
+			pf::render::buildDrawSegments(reversed), allocator);
+		require(swapped.size() == 2, "The reversed frame planned "
+			+ std::to_string(swapped.size()) + " segments where two sheets were "
+			"drawn");
+		require(swapped[0] == layerBatch, "With the two sheets swapped, the "
+			"Layer-1 segment landed in batch " + std::to_string(swapped[0])
+			+ " instead of the batch " + std::to_string(layerBatch)
+			+ " its own sheet was given, so the batch was keyed by stream "
+			"position and would bind the other sheet's texture");
+		require(swapped[1] == defaultBatch, "With the two sheets swapped, the "
+			"default segment landed in batch " + std::to_string(swapped[1])
+			+ " instead of batch " + std::to_string(defaultBatch));
+
+		auto const third = pf::render::planDrawSlots(
+			pf::render::buildDrawSegments(interleaved), allocator);
+		require(third.size() == 3, "The interleaved frame planned "
+			+ std::to_string(third.size()) + " segments where three cells were "
+			"drawn");
+		require(third[0] == defaultBatch && third[1] == layerBatch,
+			"Adding a segment after the two sheets moved either sheet off the "
+			"batch its own sheet was given, so a sheet's batch depended on what "
+			"came after it in the stream");
+		require(third[2] != defaultBatch && third[2] != layerBatch,
+			"The repeated default segment was planned into a batch already bound "
+			"to another sheet, which would draw it with the wrong texture; a "
+			"repeat of one sheet later in the same frame takes a further batch of "
+			"its own sheet");
+		require(allocator.size() == 3, "Three frames of two sheets made "
+			+ std::to_string(allocator.size()) + " batches; only the repeated "
+			"sheet's second batch should have been added, and the reversal should "
+			"have added none");
+	}
 }
 
 void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
@@ -1951,4 +2285,10 @@ void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
 		isolated<aDrawHelperDrawsTheSheetItIsHanded> });
 	checks.push_back({ "atlasInstall/aRefusedSectorSheetInstallReplacesItsEntryAndReports",
 		isolated<aRefusedSectorSheetInstallReplacesItsEntryAndReports> });
+	checks.push_back({ "atlasInstall/aSectorTriangleCarriesTheSheetItWasDrawnFrom",
+		isolated<aSectorTriangleCarriesTheSheetItWasDrawnFrom> });
+	checks.push_back({ "atlasInstall/twoSheetsInOneStreamBecomeTwoBatches",
+		isolated<twoSheetsInOneStreamBecomeTwoBatches> });
+	checks.push_back({ "atlasInstall/eachSheetKeepsItsOwnBatchWhenTheOrderMoves",
+		isolated<eachSheetKeepsItsOwnBatchWhenTheOrderMoves> });
 }

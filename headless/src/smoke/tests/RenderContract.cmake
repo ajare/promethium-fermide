@@ -271,6 +271,9 @@ set(names
     atlasInstall/theDrawPathDrawsTheSheetInstalledLast
     atlasInstall/aDrawHelperDrawsTheSheetItIsHanded
     atlasInstall/aRefusedSectorSheetInstallReplacesItsEntryAndReports
+    atlasInstall/aSectorTriangleCarriesTheSheetItWasDrawnFrom
+    atlasInstall/twoSheetsInOneStreamBecomeTwoBatches
+    atlasInstall/eachSheetKeepsItsOwnBatchWhenTheOrderMoves
     vehicleArtworkNew/vehicleTilesAreRegistered
     vehicleArtworkNew/carriageComposesAtTwoThreeAndFourCellsWide
     vehicleArtworkNew/connectorSitsAtTheSeamNotACellPosition

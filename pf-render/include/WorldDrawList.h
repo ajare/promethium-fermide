@@ -72,7 +72,27 @@ public:
 		Vec2 positions[3];
 		Vec2 texcoords[3];
 		PackedColourValue colour{};
+		// The texture family this triangle belongs to. For a Sector tile
+		// this stays `SectorAtlas`: the family says which atlas *kind* the
+		// triangle is, and says nothing about which sheet of it it came
+		// from (#1089).
 		Texture texture{ Texture::None };
+		// The Sector sheet this triangle's pixels came from, as the atlas
+		// name the install keyed the sheet under (#1089).
+		//
+		// The family and the sheet are two answers and the renderer needs
+		// both: the family picks the pipeline, the sheet picks the texture
+		// the batch binds. Carrying the sheet here is what lets a batch be
+		// created against the sheet the triangle was drawn from rather than
+		// against whichever sheet was installed last, and it resolves to
+		// the installed sheet through `pf::render::sectorSheetRegistry()`
+		// with no render context in the process - the same GPU-free resolve
+		// the install side writes it into (#1087).
+		//
+		// Empty means no sheet was named, which is what every non-Sector
+		// triangle records: no other family has two sheets to choose
+		// between, so the family alone still says everything.
+		std::string sectorSheet{};
 		ClipRectangle clip;
 	};
 
@@ -116,6 +136,16 @@ public:
 		Vec4 const* fineClipRect = nullptr);
 	void AddImage(Texture texture, Vec2 minimum, Vec2 maximum,
 		Vec2 uvMinimum, Vec2 uvMaximum, PackedColourValue colour = White);
+	// The Sector form of the same recording: the same two triangles, under
+	// the same UVs, carrying the sheet their pixels came from (#1089).
+	//
+	// A separate entry point rather than an optional argument on
+	// `AddImage()`, because a Sector triangle recorded without its sheet is
+	// the one mistake this is here to prevent: it would keep its family,
+	// keep its geometry, draw, and bind the wrong texture. The name is the
+	// place the sheet has to be said.
+	void AddSectorImage(std::string const& sheet, Vec2 minimum, Vec2 maximum,
+		Vec2 uvMinimum, Vec2 uvMaximum, PackedColourValue colour = White);
 	void AddDrawCmd();
 
 	// Transform only geometry appended since the bookmark, retaining UVs and
@@ -137,7 +167,11 @@ public:
 private:
 	ClipRectangle currentClip() const;
 	void addTriangle(Vec2 a, Vec2 b, Vec2 c, Vec2 uvA, Vec2 uvB,
-		Vec2 uvC, PackedColourValue colour, Texture texture);
+		Vec2 uvC, PackedColourValue colour, Texture texture,
+		std::string const& sectorSheet = {});
+	void addImageQuad(Vec2 minimum, Vec2 maximum, Vec2 uvMinimum,
+		Vec2 uvMaximum, PackedColourValue colour, Texture texture,
+		std::string const& sectorSheet);
 
 	std::vector<ClipRectangle> mClipStack;
 	std::vector<Command> mCommands;

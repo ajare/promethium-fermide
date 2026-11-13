@@ -58,6 +58,7 @@ add_library(pf-render STATIC
     src/FontMetrics.cpp
     src/WorldDrawList.cpp
     src/WorldRenderStack.cpp
+    src/WorldDrawSegments.cpp
     src/AtlasInstall.cpp
     src/SectorTileset.cpp
     src/ObjectTileset.cpp

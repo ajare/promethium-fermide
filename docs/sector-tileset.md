@@ -68,6 +68,49 @@ for the strip. Which sheet that is - today the registry's current one - is
 therefore decided at one call per pass, which is where a later slice puts a
 per-Layer resolution without anything underneath it changing again.
 
+### The sheet travels with the triangle
+
+A pass knowing which sheet it drew is not enough, because the pass ends and
+the batch goes on drawing. A recorded Sector triangle keeps
+`Texture::SectorAtlas` as its **family** and carries beside it the
+**sheet identity**: the atlas name the install keyed the sheet under
+(#1089). The two answers do different jobs. The family says which atlas
+*kind* a triangle is, which pipeline draws it and what every existing
+assertion about a Sector triangle's texture has always meant - and those
+assertions still read that field and still mean the same thing. The sheet
+says which pixels, and it resolves through the GPU-free install registry
+(#1087) to the installed sheet, with no render stack, no OpenGL context
+and no MPP resource in the process.
+
+Recording it is why `AddSectorImage()` exists beside `AddImage()`. A
+Sector triangle recorded without its sheet is the one mistake the identity
+is here to prevent: it would keep its family, keep its geometry, draw, and
+bind whatever texture the batch happened to have been created against. The
+sheet is a required argument of the Sector form rather than an optional one
+on the shared form, so there is no way to record one and forget the other.
+
+What the identity buys arrives at the batch. A batch binds one texture, so
+the segment builder treats the sheet as part of what ends a run: two
+adjacent triangles off two sheets are two segments, and the slot allocator
+keys a retained batch by pipeline *and* texture rather than by pipeline
+alone. Two sheets in one frame are therefore two batches, each bound to
+its own sheet, and a batch belongs to the sheet it binds rather than to
+where that sheet happened to appear in the stream - a frame that puts the
+same two sheets in the other order finds each back in its own batch and
+makes no new one. Draw order is untouched by any of it: the frame plan is
+indexed by segment, so the renderer submits in the order the stream was
+recorded however the batches are pooled.
+
+The split is observable with no GPU in sight. Two shipped sheets - the
+default and the Layer-1 sheet (#1086) - are installed through the install
+the application runs, one cell is drawn from each into one stream under one
+clip at one rect, and the segments that come back differ in nothing but
+their identity. The control is drawn beside it: one sheet, one rect, one
+segment, so the split cannot be blamed on the two draws being two draws.
+Each identity then resolves to the sheet it was drawn from, and the two
+resolutions are two different sheets, which is what a batch needs in order
+to bind the right texture rather than the last one installed.
+
 Counting rows up from the floor line is what keeps the anchor out of reach of
 the viewport, and it makes the first row worth emitting a subtraction. That
 subtraction rounded up until #1048, which rounded past the row straddling the
