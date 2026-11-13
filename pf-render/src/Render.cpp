@@ -127,10 +127,15 @@ void renderWindowframe(std::shared_ptr<const core::Window> const& window,
 // keeps one authority over what is on screen instead of adding a second one
 // that can disagree with what was actually installed.
 //
-// A binding naming a sheet nothing installed also draws the World's sheet.
-// That is the same recoverable answer a recorded triangle naming an
-// unresolvable sheet gets where its batch binds its texture (#1089): a bad
-// artwork choice is something to draw past, not a reason to stop drawing.
+// A binding naming a sheet nothing installed at all also draws the World's
+// sheet. That is the fallback for a name this process was never told about
+// - the same recoverable answer a recorded triangle naming an unresolvable
+// sheet gets where its batch binds its texture (#1089), where a bad
+// artwork choice is something to draw past rather than a reason to stop
+// drawing. It is not what a broken *authored* binding gets: the install
+// side puts an empty sheet under such a name (#1096), so the resolve stops
+// here and that Layer paints the missing-art magenta instead of quietly
+// wearing the rest of the World's picture.
 //
 // The index asked of the World is the Sector's own Layer index and not the
 // pass's. A back Sector reached through an aperture is reached with the

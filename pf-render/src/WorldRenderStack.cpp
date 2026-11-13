@@ -487,6 +487,15 @@ namespace
 		// already in the registry under that name, and installing it again
 		// through the alongside path would replace the slot's entry with a
 		// copy of itself while the slot still believes it owns it.
+		//
+		// A name that resolves to nothing still gets a sheet - the empty one.
+		// The refusal alone is not enough here. An authored binding is
+		// something the author can go and fix, and if the name is simply
+		// absent from the registry the draw resolve falls through to the
+		// World's sheet, so the broken Layer quietly wears the rest of the
+		// World's artwork and nothing on screen says the binding is wrong.
+		// The empty sheet makes that Layer paint magenta, which is what the
+		// spec asks a missing or wrong-kind per-Layer sheet to do (#1096).
 		std::string installLayerSectorImageSet(std::string const& name)
 		{
 			if (name.empty()) return "No Image set is named for the Layer";
@@ -509,7 +518,18 @@ namespace
 					held = mSectorSheets.emplace(name, requireImageSet(name)).first;
 				mAtlasInstaller.installSectorSheet(name, held->second, diagnostic);
 			}
-			catch (std::exception const& error) { diagnostic = error.what(); }
+			catch (std::exception const& error)
+			{
+				diagnostic = error.what();
+				// The throw means nothing was installed under this name above,
+				// so the registry would answer a resolve for it with nothing
+				// and the Layer would draw the World's sheet. Give the name a
+				// presence instead: the empty sheet resolves, and every cell of
+				// the Layer asks it for a tile it does not have and paints the
+				// missing-art magenta. The World still loads and plays; only
+				// this Layer's picture changes (#1096).
+				mAtlasInstaller.installEmptySectorSheet(name);
+			}
 			mLayerSheetDiagnostics.emplace(name, diagnostic);
 			return diagnostic;
 		}

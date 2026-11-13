@@ -187,6 +187,13 @@ std::string selectWorldFurnitureImageSet(std::string const& name);
 // is not - a set that is not an ImageSet, one whose tileset cannot be
 // paired, or there being no render stack at all. That reason is what the
 // Layers table shows on the combo (#1091).
+//
+// A refused name still leaves a sheet installed under itself. Every failure
+// shape - the name missing, the name naming something that is not an Image
+// set, a set whose tileset will not pair - puts a sheet in the registry and
+// paints that Layer the missing-art magenta, so a binding the author can go
+// and fix is visible on the canvas rather than looking like a Layer that
+// binds nothing (#1096).
 std::string installWorldLayerSectorImageSet(std::string const& name);
 
 // Reloads the artwork the stack draws from, off disk, the definitions and

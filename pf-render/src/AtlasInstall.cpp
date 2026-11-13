@@ -550,6 +550,18 @@ namespace pf::render
 		if (!error.empty() && diagnostic.empty()) diagnostic = error;
 	}
 
+	void AtlasInstaller::installEmptySectorSheet(std::string const& setName)
+	{
+		// The same keyed write `installSectorSheet` makes when its pairing is
+		// refused, made directly for the caller that never got as far as a
+		// pairing. The handle is the placeholder every install passes: the
+		// sheet says something is installed here and it has no tiles, which is
+		// what makes the draw helpers paint the missing-art magenta for every
+		// cell rather than draw nothing at all (#1087).
+		sectorSheetRegistry().installAlongside(setName, SectorTileset{},
+			kInstalledAtlasTexture);
+	}
+
 	bool AtlasInstaller::reloadSectorSlot(std::string const& setName,
 		AtlasResource const& set, std::string& diagnostic)
 	{

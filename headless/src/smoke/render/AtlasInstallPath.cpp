@@ -2609,6 +2609,31 @@ namespace
 		return out;
 	}
 
+	// The missing-art magenta one recorded pass laid down, split the same
+	// way `drawnSectorTiles` splits its tiles: drawn under the recorder's
+	// own clip, or under one a threshold pushed. A cell whose sheet holds no
+	// such tile is filled with this colour and carries no sheet at all, so
+	// it never appears among the Sector-family triangles and has to be
+	// counted on its own (#1096).
+	std::size_t magentaCells(WorldDrawList const& commands, bool ownClip)
+	{
+		auto const outer = wideClip();
+		auto const magenta = packColour(255, 0, 255, 255);
+		std::size_t out{};
+		for (auto const& command : commands.commands())
+		{
+			if (auto const* triangle = std::get_if<WorldDrawList::Triangle>(
+				&command))
+			{
+				if (triangle->texture == WorldDrawList::Texture::None
+					&& triangle->colour == magenta
+					&& sameClip(triangle->clip, outer) == ownClip)
+					++out;
+			}
+		}
+		return out;
+	}
+
 	std::string sheetText(std::vector<DrawnSectorTile> const& tiles)
 	{
 		std::string out;
@@ -2857,13 +2882,21 @@ namespace
 	}
 
 	// ------------------------------------------------------------------
-	// AC: a binding naming a sheet nothing installed draws the World's sheet.
+	// AC: a binding naming a sheet nothing ever installed in this process
+	// draws the World's sheet.
 	//
-	// The same recoverable answer a recorded triangle naming an unresolvable
-	// sheet gets where its batch binds its texture (#1089). A bad artwork
-	// choice is reported where it is made and drawn past; it is not a reason
-	// for a Layer to draw nothing, and it is not a reason to throw through a
-	// render pass that has other Layers to draw.
+	// This is the raw resolve fallback, and it is what a *recorded* triangle
+	// naming an unresolvable sheet gets where its batch binds its texture
+	// (#1089): a bad artwork choice is something to draw past, not a reason
+	// to stop drawing. It is deliberately not what a broken *authored*
+	// binding gets in the shipped game - the install side puts an empty
+	// sheet under such a name so the Layer paints magenta instead of
+	// quietly wearing the World's picture, which is what
+	// `aBrokenLayerBindingDrawsMagentaAndNotTheWorldsSheet` below covers
+	// (#1096). What this check pins is that a name with no entry at all -
+	// nothing installed it, so nothing could have refused - still draws
+	// rather than throwing through a render pass that has other Layers to
+	// draw.
 	// ------------------------------------------------------------------
 	void aBindingThatNamesNoInstalledSheetDrawsTheWorldsSheet(
 		smoke::Context const& context)
@@ -2886,6 +2919,88 @@ namespace
 		require(sheets.find(drawn) == pf::render::sectorSheetRegistry().drawing(),
 			"The fallback sheet is not the sheet the install is drawing, so the "
 			"unresolvable binding landed on a third thing");
+	}
+
+	// ------------------------------------------------------------------
+	// AC (#1096): a Layer whose binding resolved to nothing paints magenta,
+	// and the Layer beside it does not.
+	//
+	// The install is what turns a broken binding into a visible one: an
+	// empty sheet goes in under the name, so the draw resolve stops there
+	// instead of falling through to the sheet the World is drawing. Read
+	// through the real Sector pass rather than off the registry, because
+	// what the author sees is what the draw helpers make of the sheet, not
+	// whether a key exists under a name.
+	//
+	// The front Layer keeps drawing the World's sheet in the same frame, and
+	// keeps its own clip while doing it. That is the half that could go
+	// wrong: an empty sheet arriving beside the drawn one must not take the
+	// drawn role, and must not reach past the Layer that binds it.
+	// ------------------------------------------------------------------
+	void aBrokenLayerBindingDrawsMagentaAndNotTheWorldsSheet(
+		smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		InstalledSectorSheets sheets{ context, "layer-sheet-magenta" };
+		auto const scene = layerSheetScene();
+		require(sheets.drawnName() == "SectorAtlas", "This check needs the "
+			"World's own sheet on the draw path, and the draw path is on '"
+			+ sheets.drawnName() + "'");
+		auto const before = recordSectorPass(scene.world, scene.front, 0,
+			LayerRenderStyle::Solid);
+		require(magentaCells(before, false) == 0, "The back Layer drew "
+			+ std::to_string(magentaCells(before, false))
+			+ " missing-art magenta triangle(s) with nothing broken, so the count "
+			"taken after the binding would say nothing about it (#1096)");
+
+		pf::render::AtlasInstaller installer;
+		installer.installEmptySectorSheet("SectorAtlasLayerBroken");
+		auto const* broken = pf::render::sectorSheetRegistry().find(
+			"SectorAtlasLayerBroken");
+		require(broken != nullptr, "installing an empty Sector sheet left no "
+			"entry under the name, so a Layer bound to it would still resolve "
+			"past it to the World's sheet (#1096)");
+		require(broken->name == "SectorAtlasLayerBroken", "The sheet resolved "
+			"under the broken name calls itself '" + broken->name + "', so the "
+			"identity a holder reads back is not the key it was installed under");
+		require(broken->installed(), "The empty sheet carries no draw handle, so "
+			"every draw helper answers it the way it answers no sheet at all and "
+			"the Layer draws nothing rather than the missing-art magenta (#1096)");
+		require(broken->tileset.surfaces.empty()
+				&& broken->tileset.overlays.empty()
+				&& broken->tileset.boundaries.empty()
+				&& broken->tileset.width <= 0 && broken->tileset.height <= 0,
+			"The sheet installed as empty carries artwork, so a Layer bound at a "
+			"name that resolved to nothing would draw something instead of the "
+			"missing-art magenta (#1096)");
+		require(sheets.drawnName() == "SectorAtlas", "The empty Sector sheet "
+			"took the drawn role - the draw path is on '" + sheets.drawnName()
+			+ "' - which would repaint every Layer that binds nothing (#1096)");
+
+		scene.world->setLayerSectorImageSet(1, "SectorAtlasLayerBroken");
+		auto const after = recordSectorPass(scene.world, scene.front, 0,
+			LayerRenderStyle::Solid);
+		auto const tiles = drawnSectorTiles(after);
+		require(!underClip(tiles, true).empty(), "The front Sector drew no "
+			"Sector-family tile at all, so this frame holds nothing to compare "
+			"the broken Layer against");
+		for (auto const& tile : underClip(tiles, true))
+			require(tile.sheet == "SectorAtlas", "A tile of the front Layer - "
+				"which binds nothing - carries '" + tile.sheet + "'; the empty "
+				"sheet installed for the Layer behind it reached past its own "
+				"binding into the Layer in front (#1096)");
+		require(underClip(tiles, false).empty(), "The Layer bound at the broken "
+			"name drew " + std::to_string(underClip(tiles, false).size())
+			+ " Sector-family tile(s) ('" + sheetText(underClip(tiles, false))
+			+ "') through the aperture; the sheet installed under that name has no "
+			"tiles, so nothing should have reached the stream as Sector artwork (#1096)");
+		require(magentaCells(after, false) > 0, "The Layer bound at the broken "
+			"name drew no missing-art magenta through the aperture, so the broken "
+			"binding is still invisible to the author (#1096)");
+		require(magentaCells(after, true) == 0, "The front Layer - which binds "
+			"nothing - picked up " + std::to_string(magentaCells(after, true))
+			+ " missing-art magenta triangle(s) from the Layer behind it, so the "
+			"empty sheet reached past its own Layer (#1096)");
 	}
 
 	// ------------------------------------------------------------------
@@ -3465,6 +3580,8 @@ void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
 		isolated<overrideBeatsTheWorldPickAndInheritFollowsIt> });
 	checks.push_back({ "layerImageSet/aBindingThatNamesNoInstalledSheetDrawsTheWorldsSheet",
 		isolated<aBindingThatNamesNoInstalledSheetDrawsTheWorldsSheet> });
+	checks.push_back({ "layerImageSet/aBrokenLayerBindingDrawsMagentaAndNotTheWorldsSheet",
+		isolated<aBrokenLayerBindingDrawsMagentaAndNotTheWorldsSheet> });
 	checks.push_back({ "layerImageSet/theWireframeOverlayDrawsNoTiles",
 		isolated<theWireframeOverlayDrawsNoTiles> });
 	checks.push_back({ "layerImageSet/theLocationPlanCanvasKeepsTheWorldsSectorSheet",

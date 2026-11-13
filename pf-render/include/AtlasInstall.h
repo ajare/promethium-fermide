@@ -385,6 +385,26 @@ namespace pf::render
 		void installSectorSheet(std::string const& setName, AtlasResource const& set,
 			std::string& diagnostic);
 
+		// Installs an empty Sector sheet under `setName`, beside the sheet the
+		// draw path draws (#1096).
+		//
+		// This is what a Layer binding that never reached a pairing leaves
+		// behind. The name resolved to no resource at all, or to one that is
+		// not an Image set, so there was nothing to pair and no install ran.
+		// With nothing under that name the draw resolve falls through to the
+		// sheet the World is drawing, which makes a broken binding look
+		// exactly like a Layer that binds nothing - and a binding is
+		// something the author can go and fix, so it has to be visible.
+		// Putting the empty sheet under the name stops the resolve there:
+		// every cell of that Layer asks for a tile the sheet does not carry
+		// and paints the missing-art magenta, which is the same picture the
+		// other failure shape - a sheet whose tileset cannot be paired -
+		// already gives.
+		//
+		// The drawn sheet is untouched. This is the alongside write, so no
+		// Layer that binds nothing changes picture.
+		void installEmptySectorSheet(std::string const& setName);
+
 		// Re-pairs one Sector sheet and writes it into the registry only when
 		// the pairing came back (#1095).
 		//

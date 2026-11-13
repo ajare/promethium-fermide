@@ -279,6 +279,7 @@ set(names
     layerImageSet/aBackSectorThroughAnApertureNeverWearsTheFrontLayersSheet
     layerImageSet/overrideBeatsTheWorldPickAndInheritFollowsIt
     layerImageSet/aBindingThatNamesNoInstalledSheetDrawsTheWorldsSheet
+    layerImageSet/aBrokenLayerBindingDrawsMagentaAndNotTheWorldsSheet
     layerImageSet/theWireframeOverlayDrawsNoTiles
     layerImageSet/theLocationPlanCanvasKeepsTheWorldsSectorSheet
     artworkReload/aChangedSecondSheetIsPickedUp

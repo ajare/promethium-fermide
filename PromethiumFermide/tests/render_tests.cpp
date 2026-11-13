@@ -684,14 +684,25 @@ void checkLayerSectorSheetDrawing(std::filesystem::path const& directory) {
   // game did not ask for that one" are both facts this check can read.
   std::vector<std::string> installed;
   pf::render::AtlasInstaller installer;
+  // The two-step the render stack's own `installLayerSectorImageSet` runs:
+  // resolve the name, then put a sheet in under it whatever the resolve
+  // left behind. A name that resolved to nothing - absent from the
+  // manifest, or a resource that is not an Image set - gets the empty
+  // sheet rather than no sheet at all, because the draw resolve only falls
+  // through to the World's picture when the name is missing from the
+  // registry, and a binding the author can go and fix has to show for
+  // itself (#1096).
   auto const install = [&](std::string const& name) {
     installed.push_back(name);
+    ResourcePtr resource;
     std::string diagnostic;
     try {
-      installer.installSectorSheet(name, manager.getResource(name), diagnostic);
+      resource = manager.getResource(name);
     } catch (std::exception const& error) {
       diagnostic = error.what();
     }
+    if (resource) installer.installSectorSheet(name, resource, diagnostic);
+    else installer.installEmptySectorSheet(name);
     return diagnostic;
   };
 
@@ -735,6 +746,20 @@ void checkLayerSectorSheetDrawing(std::filesystem::path const& directory) {
     for (auto const& [sheet, count] : bySheet) cells += count;
     return cells;
   };
+  // The missing-art magenta one recorded frame carries. A cell whose sheet
+  // holds no such tile is filled with it and carries no sheet at all, so
+  // it never shows up among the Sector-family triangles and has to be
+  // counted on its own (#1096).
+  auto const magentaCells = [](WorldDrawList const& draws) {
+    auto const magenta = packColour(255, 0, 255, 255);
+    int cells{};
+    for (auto const& command : draws.commands())
+      if (auto const* triangle = std::get_if<WorldDrawList::Triangle>(&command); triangle
+          && triangle->texture == WorldDrawList::Texture::None
+          && triangle->colour == magenta)
+        ++cells;
+    return cells;
+  };
 
   // The game's own load path, with the shipped manifest behind it.
   pf::application::MapResources resources(manager);
@@ -764,11 +789,13 @@ void checkLayerSectorSheetDrawing(std::filesystem::path const& directory) {
     std::map<std::string, int> bySheet;
     app::WorldArtworkSync sync;
     std::vector<std::string> asked;
+    int magenta{};
   };
   auto const frame = [&](char const* tag) {
     installed.clear();
     auto const sync = app::syncWorldArtwork(world, install);
-    Frame shot{sectorSheets(app::drawWorld(world, 1280, 720)), sync, installed};
+    auto const draws = app::drawWorld(world, 1280, 720);
+    Frame shot{sectorSheets(draws), sync, installed, magentaCells(draws)};
     require(total(shot.bySheet) > 0,
         std::string("The shipped World drew no Sector artwork in the '") + tag
             + "' pass, so nothing here can tell one sheet from another (#1094)");
@@ -905,6 +932,138 @@ void checkLayerSectorSheetDrawing(std::filesystem::path const& directory) {
   require(cleared.bySheet == inherited.bySheet,
       "Unbinding the Layer did not restore the World's own sheet: " + sheetsText(cleared.bySheet)
           + " against " + sheetsText(inherited.bySheet) + " (#1094)");
+
+  // ---- A binding that resolves to nothing paints magenta (#1096). -------
+  //
+  // The back Layer is the one broken here so the front Layer keeps drawing
+  // the World's sheet in the same frame: the empty sheet goes in beside the
+  // drawn one and must not reach past its own Layer. The back Layer's own
+  // Sector triangles are pure surface - the frames are authored on the
+  // front wall and wear the front Layer's sheet - so the magenta that
+  // replaces them is counted against the same `backCells` this check
+  // already measured for that Layer.
+  auto const magentaOver = [](Frame const& shot, Frame const& baseline) {
+    return shot.magenta - baseline.magenta;
+  };
+  require(inherited.magenta == 0,
+      "The shipped World drew " + std::to_string(inherited.magenta)
+          + " missing-art magenta triangle(s) with every Layer unbound, so a magenta count "
+            "here would not say anything about a broken binding (#1096)");
+
+  // Shape one: the name is in no manifest at all.
+  bind(back, std::string("NoSuchSectorSheet"));
+
+  bool refusedLoad{false};
+  try {
+    resources.loadAtlases();
+  } catch (std::exception const&) {
+    refusedLoad = true;
+  }
+  require(!refusedLoad,
+      "A Layer bound to a name that does not exist refused the World's atlas load (#1096)");
+  auto const missing = frame("back Layer bound to a name that does not exist");
+  require(askedFor(missing.asked, "NoSuchSectorSheet") == 1,
+      "A Layer bound to a name that does not exist was taken up "
+          + std::to_string(askedFor(missing.asked, "NoSuchSectorSheet"))
+          + " time(s) through the game's own artwork sync, expected exactly once: "
+          + namesText(missing.asked) + " (#1096)");
+  require(missing.sync.layerSheets.size() == 1 && missing.sync.layerSheets[0].layer == back
+          && missing.sync.layerSheets[0].name == "NoSuchSectorSheet"
+          && !missing.sync.layerSheets[0].accepted(),
+      "A Layer bound to a name that does not exist was not reported as refused: "
+          + (missing.sync.layerSheets.empty()
+                 ? std::string("<none>")
+                 : std::to_string(missing.sync.layerSheets[0].layer) + " '"
+                       + missing.sync.layerSheets[0].name + "' -> '"
+                       + missing.sync.layerSheets[0].diagnostic + "' (#1096)"));
+  // Nothing draws the broken name: the sheet installed under it has no
+  // tiles to draw, which is the point of it.
+  require(of(missing.bySheet, "NoSuchSectorSheet") == 0,
+      "A Sector sheet installed empty still drew " + std::to_string(of(missing.bySheet, "NoSuchSectorSheet"))
+          + " Sector-family triangle(s) (#1096)");
+  // The Layer does not fall through to the World's sheet: its whole share
+  // of the canvas left it, and the front Layer's share stayed on it.
+  require(of(missing.bySheet, worldSheet) == cells - backCells,
+      "A Layer bound to a name that does not exist left " + std::to_string(of(missing.bySheet, worldSheet))
+          + " Sector triangles on the World's '" + worldSheet + "' sheet of " + std::to_string(cells)
+          + ", where the front Layer's " + std::to_string(cells - backCells)
+          + " alone belong; the broken Layer drew " + sheetsText(missing.bySheet) + " (#1096)");
+  // And it paints magenta for exactly the cells it took off the World's
+  // sheet, seen through the render resolve rather than read off the
+  // install's own bookkeeping.
+  require(magentaOver(missing, inherited) == backCells,
+      "A Layer bound to a name that does not exist painted " + std::to_string(magentaOver(missing, inherited))
+          + " missing-art magenta triangle(s) against the " + std::to_string(backCells)
+          + " that Layer draws; the author is not getting the visual signal the binding is "
+            "broken (#1096)");
+
+  // Shape two: the name resolves, but to something that is not an Image
+  // set. Same class of bad binding, and the same picture on screen.
+  //
+  // `Citadel` is a shipped World document - a resource the manifest really
+  // registers, so the resolve really does come back with something, and
+  // really does come back with the wrong kind of something. Guarded here so
+  // a manifest edit that renames it fails with this sentence rather than
+  // with a wrong-kind refusal that never arrived.
+  ResourcePtr wrongKindResource;
+  try {
+    wrongKindResource = manager.getResource("Citadel");
+  } catch (std::exception const&) {
+  }
+  require(wrongKindResource
+          && !std::dynamic_pointer_cast<ImageSetResource>(wrongKindResource),
+      "'Citadel' is no longer a registered resource that is not an Image set, so this "
+          "check no longer exercises the wrong-kind Layer binding shape (#1096)");
+  bind(back, std::string("Citadel"));
+  refusedLoad = false;
+  try {
+    resources.loadAtlases();
+  } catch (std::exception const&) {
+    refusedLoad = true;
+  }
+  require(!refusedLoad,
+      "A Layer bound to a resource that is not an Image set refused the World's atlas load (#1096)");
+  auto const wrongKind = frame("back Layer bound to a resource that is not an Image set");
+  require(askedFor(wrongKind.asked, "Citadel") == 1,
+      "A Layer bound to a resource that is not an Image set was taken up "
+          + std::to_string(askedFor(wrongKind.asked, "Citadel"))
+          + " time(s) through the game's own artwork sync, expected exactly once: "
+          + namesText(wrongKind.asked) + " (#1096)");
+  require(wrongKind.sync.layerSheets.size() == 1 && wrongKind.sync.layerSheets[0].layer == back
+          && wrongKind.sync.layerSheets[0].name == "Citadel"
+          && !wrongKind.sync.layerSheets[0].accepted(),
+      "A Layer bound to a resource that is not an Image set was not reported as refused: "
+          + (wrongKind.sync.layerSheets.empty()
+                 ? std::string("<none>")
+                 : std::to_string(wrongKind.sync.layerSheets[0].layer) + " '"
+                       + wrongKind.sync.layerSheets[0].name + "' -> '"
+                       + wrongKind.sync.layerSheets[0].diagnostic + "' (#1096)"));
+  require(of(wrongKind.bySheet, "Citadel") == 0
+          && of(wrongKind.bySheet, worldSheet) == cells - backCells,
+      "A Layer bound to a resource that is not an Image set did not come off the World's sheet: "
+          + sheetsText(wrongKind.bySheet) + " against " + std::to_string(cells - backCells)
+          + " front-Layer triangles (#1096)");
+  require(magentaOver(wrongKind, inherited) == backCells,
+      "A Layer bound to a resource that is not an Image set painted "
+          + std::to_string(magentaOver(wrongKind, inherited))
+          + " missing-art magenta triangle(s) against the " + std::to_string(backCells)
+          + " that Layer draws (#1096)");
+
+  // The two shapes agree. Same class of bad binding, one picture.
+  require(wrongKind.bySheet == missing.bySheet
+          && wrongKind.magenta == missing.magenta,
+      "The two failure shapes disagree on screen - a name that does not exist drew "
+          + sheetsText(missing.bySheet) + " with " + std::to_string(missing.magenta)
+          + " magenta, a name naming the wrong kind drew " + sheetsText(wrongKind.bySheet)
+          + " with " + std::to_string(wrongKind.magenta) + " (#1096)");
+
+  // ---- Unbinding hands the Layer back to the World's sheet. --------------
+  bind(back, std::nullopt);
+  auto const restored = frame("broken binding cleared");
+  require(restored.magenta == 0 && restored.bySheet == inherited.bySheet,
+      "Clearing a broken Layer binding did not restore what the Layer drew before: "
+          + sheetsText(restored.bySheet) + " with " + std::to_string(restored.magenta)
+          + " magenta against " + sheetsText(inherited.bySheet) + " (#1096)");
 
   resources.unload();
   // This check put the real, installed World Sector sheet on the draw path;
