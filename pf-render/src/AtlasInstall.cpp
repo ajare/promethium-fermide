@@ -383,14 +383,22 @@ namespace pf::render
 			{
 				// Re-pair the sheet from what was just re-read and put it back
 				// under the same key. The sheet the registry was drawing goes
-				// back through the install that draws; every other sheet goes
+				// back through the write that draws; every other sheet goes
 				// back in alongside it, so the reload changes no sheet's place
 				// on screen (#1091).
+				//
+				// The reload shape of the write, not the install shape. The
+				// refresh above can succeed and the pairing still be refused -
+				// the authored tileset drifted and the `ImageSet` did not - and
+				// a refused pairing here leaves the sheet exactly as it stood
+				// rather than replacing it with the empty sheet a refused
+				// *selection* stores (#1095).
 				std::string diagnostic;
-				if (name == drawn)
-					installer.installSectorSlot(name, resource, diagnostic);
-				else
-					installer.installSectorSheet(name, resource, diagnostic);
+				auto const written = name == drawn
+					? installer.reloadSectorSlot(name, resource, diagnostic)
+					: installer.reloadSectorSheet(name, resource, diagnostic);
+				if (!written && diagnostic.empty())
+					diagnostic = "the sheet was not re-installed";
 				if (!diagnostic.empty())
 					failure = name + ": " + diagnostic;
 			}
@@ -540,6 +548,46 @@ namespace pf::render
 		sectorSheetRegistry().installAlongside(setName, std::move(tiles),
 			kInstalledAtlasTexture);
 		if (!error.empty() && diagnostic.empty()) diagnostic = error;
+	}
+
+	bool AtlasInstaller::reloadSectorSlot(std::string const& setName,
+		AtlasResource const& set, std::string& diagnostic)
+	{
+		try
+		{
+			// Built before it is written. The build is the argument, so a build
+			// that throws never reaches the registry write at all: the sheet the
+			// key already holds stays where it is, drawn role and all (#1095).
+			sectorSheetRegistry().install(setName,
+				buildSectorTileset(setName, set), kInstalledAtlasTexture);
+			return true;
+		}
+		catch (std::exception const& exception)
+		{
+			if (diagnostic.empty()) diagnostic = exception.what();
+			// A refusal that said nothing is still a refusal. Guarding the
+			// return value rather than the text is what keeps "nothing was
+			// written" from ever reading as a clean reload.
+			if (diagnostic.empty()) diagnostic = "the sheet could not be rebuilt";
+			return false;
+		}
+	}
+
+	bool AtlasInstaller::reloadSectorSheet(std::string const& setName,
+		AtlasResource const& set, std::string& diagnostic)
+	{
+		try
+		{
+			sectorSheetRegistry().installAlongside(setName,
+				buildSectorTileset(setName, set), kInstalledAtlasTexture);
+			return true;
+		}
+		catch (std::exception const& exception)
+		{
+			if (diagnostic.empty()) diagnostic = exception.what();
+			if (diagnostic.empty()) diagnostic = "the sheet could not be rebuilt";
+			return false;
+		}
 	}
 
 	void AtlasInstaller::installAll(ViewportAtlasSlots& slots,

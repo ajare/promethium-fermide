@@ -284,6 +284,7 @@ set(names
     artworkReload/aChangedSecondSheetIsPickedUp
     artworkReload/theAtlasSetRegistryIsReparsed
     artworkReload/everyFailedSheetIsNamedAndTheOthersKeepServing
+    artworkReload/aRefusedTilesetPairingLeavesTheDrawnSheetServing
     vehicleArtworkNew/vehicleTilesAreRegistered
     vehicleArtworkNew/carriageComposesAtTwoThreeAndFourCellsWide
     vehicleArtworkNew/connectorSitsAtTheSeamNotACellPosition

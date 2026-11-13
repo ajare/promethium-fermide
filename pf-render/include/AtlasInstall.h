@@ -385,6 +385,35 @@ namespace pf::render
 		void installSectorSheet(std::string const& setName, AtlasResource const& set,
 			std::string& diagnostic);
 
+		// Re-pairs one Sector sheet and writes it into the registry only when
+		// the pairing came back (#1095).
+		//
+		// The reload shape of the write, as distinct from the install shape.
+		// `installSectorSlot` deliberately stores an empty sheet when the
+		// pairing is refused, because that refusal answers a question somebody
+		// just asked - "draw this sheet" - and the answer an operator needs is
+		// magenta rather than the art the previous selection left behind
+		// (#1087). A reload asks nothing. The sheet it is re-reading is the
+		// one already on screen, and when the authored tileset behind it no
+		// longer pairs, replacing it with nothing turns a reportable failure
+		// into a blanked canvas. So the tileset is built first here and the
+		// registry is written only once it has come back whole: a sheet whose
+		// reload was refused keeps every surface it had and keeps the drawn
+		// role it had, and the refusal is what the caller reports.
+		//
+		// Returns whether the sheet was written. The refusal text is left in
+		// `diagnostic` either way, so the caller reports the same reason it
+		// would have reported had the write gone in.
+		bool reloadSectorSlot(std::string const& setName, AtlasResource const& set,
+			std::string& diagnostic);
+
+		// The reload shape of `installSectorSheet`: builds first, writes the
+		// sheet alongside the drawn one only when the pairing came back, and
+		// leaves the sheet already held under that name untouched when it did
+		// not (#1095).
+		bool reloadSectorSheet(std::string const& setName, AtlasResource const& set,
+			std::string& diagnostic);
+
 		// Installs the four viewport atlases as the tilesets the producers
 		// read, which is what a stack does at start-up. A selection change is
 		// not this: it installs one slot.
@@ -497,10 +526,21 @@ namespace pf::render
 	// made of, not which sheet is on screen.
 	//
 	// One sheet's failure is that sheet's own. It is caught, named in the
-	// result, and the walk goes on to the next sheet. A sheet that failed
-	// is left exactly as it stood - nothing it holds is replaced on the way
-	// past - so the sheets that came back keep serving and the one that did
-	// not is reported rather than silently half-reloaded.
+	// result, and the walk goes on to the next sheet.
+	//
+	// A sheet that failed is left exactly as it stood, and that is a promise
+	// made to each of the two shapes a failure here can take (#1095). The
+	// refresh can fail - the file no longer decodes, the `Image` is gone -
+	// and no install is attempted, so nothing of the sheet is touched. The
+	// refresh can succeed and the pairing of the re-read `ImageSet` with the
+	// authored tileset can then be refused, and the tileset that was built is
+	// thrown away rather than written: the sheet keeps every surface it had
+	// and keeps the drawn role it had, and the refusal is what the result
+	// reports. A reload never stores the empty sheet a refused *selection*
+	// stores. That empty sheet is the answer to "the operator picked a sheet
+	// we cannot read", and a reload picks nothing - there is no choice to
+	// paint magenta for, only a sheet that was drawing and could not be read
+	// again (#1087).
 	SectorSheetReload reloadSectorSheets(
 		wp::application::resourcesystem::ResourceManager& manager,
 		AtlasInstaller& installer);

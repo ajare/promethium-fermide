@@ -2994,7 +2994,12 @@ namespace
 	//     than served from the cache the installer has been pairing from,
 	//     and the second sheet's authored tileset is read again with it;
 	//   - a sheet whose file no longer reads is named in the diagnostic,
-	//     and the sheets walked before it and after it keep serving.
+	//     and the sheets walked before it and after it keep serving;
+	//   - a sheet whose authored tileset no longer pairs with its re-read
+	//     `ImageSet` - the refresh succeeds, the install refuses - leaves
+	//     the drawn sheet holding every surface it held, keeps its drawn
+	//     role, is named in the result, and the walk carries on to the
+	//     sheets after it (#1095).
 	// ------------------------------------------------------------------
 
 	// Installs the World's own sheet on the draw path and the named sheets
@@ -3191,6 +3196,221 @@ namespace
 			"The sheet walked after the failure is not installed, so the reload "
 			"stopped at the first bad file instead of leaving the others serving");
 	}
+
+	// Takes one authored tile out of a staged tileset file and leaves every
+	// other tile in that file as it was. The `ImageSet` still declares the
+	// region, so what the install then finds is a sheet whose pixel regions
+	// outnumber what the tileset authored - the pairing refusal, made by
+	// editing the tileset and nothing but the tileset (#1095).
+	void removeAuthoredTile(std::filesystem::path const& tileset,
+		std::string const& mapKey, std::string const& tileName)
+	{
+		auto document = YAML::LoadFile(tileset.string());
+		require(document.IsMap() && document[mapKey]
+			&& document[mapKey][tileName], "The staged tileset '"
+			+ tileset.string() + "' authors no '" + tileName + "' under `"
+			+ mapKey + "`, so this check has nothing to take away from it");
+		document[mapKey].remove(tileName);
+		std::ofstream out(tileset, std::ios::binary | std::ios::trunc);
+		require(bool(out), "Could not rewrite the staged tileset '"
+			+ tileset.string() + "'");
+		out << YAML::Dump(document);
+	}
+
+	// Which of the atlases the atlas-set registry pairs from the authored
+	// tileset file `tileset`. `SectorAtlas` and `SectorAtlasLayer1` share
+	// one tileset (#1086), so corrupting that file is not a one-sheet
+	// event; the expected failure set is read off the registry rather than
+	// hardcoded, so the checks below keep saying the right thing the day
+	// Layer 1 gets a tileset of its own.
+	std::set<std::string> atlasesPairingFrom(
+		std::map<std::string, RegistryEntry> const& registry,
+		std::string const& tileset)
+	{
+		std::set<std::string> names;
+		for (auto const& [name, entry] : registry)
+			if (entry.tileset == tileset) names.insert(name);
+		return names;
+	}
+
+	// ------------------------------------------------------------------
+	// AC: a reload whose tileset pairing refuses leaves the drawn sheet
+	// serving exactly what it had, still reports the failure, and still
+	// carries on to the sheets after it (#1095).
+	//
+	// The check above breaks a PNG, and a PNG that no longer decodes fails
+	// at the refresh step: no install is attempted at all, so the sheet is
+	// left alone for a reason that has nothing to do with the install path.
+	// This one leaves every image file intact and takes one authored tile
+	// out of the tileset behind the sheet the draw path is drawing. The
+	// refresh succeeds, the `ImageSet` comes back with all of its regions,
+	// and the pairing is what refuses - the shape that used to write a
+	// default-constructed empty sheet over a working one and blank the
+	// World's Sector artwork while reporting the very failure that should
+	// have kept it off the canvas.
+	// ------------------------------------------------------------------
+	void reloadLeavesTheDrawnSheetServingWhenTheTilesetPairingRefuses(
+		smoke::Context const& context)
+	{
+		ClearInstalledTilesets guard;
+		StagedAtlasDirectory staged{ context, "reload-pairing-refusal",
+			{ "SectorAtlas", "SectorAtlasLayer1", "StationAtlas" } };
+		pf::render::AtlasInstaller installer;
+		installWorldAndAlongsideSheets(installer, staged,
+			{ "SectorAtlasLayer1", "StationAtlas" });
+		auto& registry = pf::render::sectorSheetRegistry();
+
+		// The sheet this check is about is the one on screen, and it is
+		// drawing real artwork before the reload - otherwise there would be
+		// nothing here for a refused reload either to keep or to destroy.
+		require(registry.drawingName() == "SectorAtlas", "This check is about the "
+			"sheet the draw path draws, and the World's own sheet is not what is "
+			"drawing before the reload");
+		auto const* drawnBefore = registry.find("SectorAtlas");
+		require(drawnBefore != nullptr && drawnBefore->installed()
+			&& !drawnBefore->tileset.surfaces.empty(), "The drawn Sector sheet "
+			"installs no surfaces, so there is nothing here for a failed reload "
+			"either to keep or to destroy");
+		auto const surfacesBefore = drawnBefore->tileset.surfaces.size();
+		auto const boundariesBefore = drawnBefore->tileset.boundaries.size();
+		auto const overlaysBefore = drawnBefore->tileset.overlays.size();
+		auto const widthBefore = drawnBefore->tileset.width;
+		auto const familyBefore = drawnBefore->tileset.family;
+		// The Layer-1 sheet pairs from the same file, so its reload is refused
+		// too. It goes back through the alongside write rather than the drawn
+		// one, and is checked below on the same terms.
+		auto const* layerBefore = registry.find("SectorAtlasLayer1");
+		require(layerBefore != nullptr && layerBefore->installed()
+			&& !layerBefore->tileset.surfaces.empty(), "The Layer-1 Sector sheet "
+			"installs no surfaces, so this check would prove nothing about the "
+			"sheet that reloads alongside the drawn one");
+		auto const layerSurfacesBefore = layerBefore->tileset.surfaces.size();
+
+		// The tileset behind the drawn sheet loses a tile its `ImageSet`
+		// still declares. Nothing else on disk changes, so the refresh half
+		// of the reload succeeds and the refusal lands inside the pairing.
+		auto const entries = atlasSetRegistry(context);
+		auto const corruptedTileset = entries.at("SectorAtlas").tileset;
+		removeAuthoredTile(staged.directory() / corruptedTileset, "overlays",
+			"doorframe-1r-L0");
+		auto const expectedFailures = atlasesPairingFrom(entries, corruptedTileset);
+		require(expectedFailures.count("SectorAtlas"), "The atlas-set registry does "
+			"not pair the drawn sheet from the tileset this check corrupted, so "
+			"the drawn sheet would never see the failure being made");
+
+		// One sheet the walk reaches after the failures changes for real, so
+		// "the walk carried on" is proven by something arriving rather than
+		// by nothing being reported.
+		auto const replacement = staged.directory() / "textures/sectors-new.png";
+		auto const replacementWidth = pngSize(replacement).first;
+		auto const* stationBefore = registry.find("StationAtlas");
+		require(stationBefore != nullptr && stationBefore->installed()
+			&& stationBefore->tileset.width != replacementWidth,
+			"The staged Station sheet already installs at the width of the image "
+			"this check copies over it, so a walk that stopped at the refusals "
+			"would still pass the check below");
+		std::filesystem::copy_file(replacement,
+			staged.directory() / "textures/station-128x320.png",
+			std::filesystem::copy_options::overwrite_existing);
+
+		auto const reload = pf::render::reloadSectorSheets(staged.manager(),
+			installer);
+		require(!reload.clean(), "A Sector sheet whose authored tileset no longer "
+			"pairs with its re-read `ImageSet` came back clean from the reload, so "
+			"the install-refusal shape went unreported (#1095)");
+		require(reload.sheets.size() == 3, "The reload walked "
+			+ std::to_string(reload.sheets.size()) + " sheet(s) out of a registry "
+			"holding 3, so it did not walk the registry");
+
+		// Every sheet the walk reached is accounted for: the ones pairing
+		// from the corrupted file failed and named themselves, and every
+		// other sheet came back.
+		for (auto const& sheet : reload.sheets)
+		{
+			auto const expected = expectedFailures.count(sheet.name) > 0;
+			require(expected == !sheet.diagnostic.empty(), "The reload reported '"
+				+ sheet.name + "' as " + (sheet.diagnostic.empty()
+					? std::string("clean") : "failed: " + sheet.diagnostic)
+				+ "; only the atlases the registry pairs from the corrupted tileset "
+				"are expected to fail, and this sheet "
+				+ std::string(expected ? "is" : "is not") + " one of them");
+			if (expected)
+				require(sheet.diagnostic.find(sheet.name) != std::string::npos,
+					"The reload failure for '" + sheet.name + "' does not name the "
+					"sheet it failed on: '" + sheet.diagnostic + "'");
+		}
+		// The refusal says which tile it could not pair, which is the thing
+		// somebody staring at a sheet that stopped matching its tileset
+		// needs to be told.
+		auto const* failed = reload.find("SectorAtlas");
+		require(failed != nullptr, "The reload result names no drawn sheet, so the "
+			"walk never reached the sheet whose tileset was corrupted");
+		require(failed->diagnostic.find("doorframe-1r-L0") != std::string::npos,
+			"The drawn sheet's reload failure does not name the tile the pairing "
+			"refused: '" + failed->diagnostic + "'");
+
+		// The drawn sheet is the sheet it was. Not one surface replaced.
+		auto const* drawn = registry.find("SectorAtlas");
+		require(drawn != nullptr && drawn->installed(), "The refused reload left no "
+			"installed sheet under the drawn name, so the draw path has nothing to "
+			"draw (#1095)");
+		require(drawn->name == "SectorAtlas", "The sheet under the drawn name now "
+			"calls itself '" + drawn->name + "'");
+		require(drawn->tileset.surfaces.size() == surfacesBefore
+			&& drawn->tileset.boundaries.size() == boundariesBefore
+			&& drawn->tileset.overlays.size() == overlaysBefore,
+			"The refused reload left the drawn sheet with "
+			+ std::to_string(drawn->tileset.surfaces.size()) + " surface(s), "
+			+ std::to_string(drawn->tileset.boundaries.size())
+			+ " boundary tile(s) and "
+			+ std::to_string(drawn->tileset.overlays.size())
+			+ " overlay(s), against the " + std::to_string(surfacesBefore) + "/"
+			+ std::to_string(boundariesBefore) + "/" + std::to_string(overlaysBefore)
+			+ " it held before; the pairing refusal replaced the sheet that was "
+			"drawing (#1095)");
+		require(drawn->tileset.width == widthBefore
+			&& drawn->tileset.family == familyBefore,
+			"The drawn sheet changed its own dimensions or family across a reload "
+			"that refused to re-pair it");
+		require(hasSectorTileSurface(drawingSectorSheet(), "corridor"), "The draw "
+			"path no longer resolves 'corridor' on the sheet it draws, so a reload "
+			"that was only supposed to report a failure took the World's Sector "
+			"artwork down anyway (#1095)");
+		require(registry.drawingName() == "SectorAtlas", "The refused reload moved "
+			"the drawn sheet to '" + registry.drawingName() + "'; a reload that "
+			"could not re-pair a sheet leaves the drawn role exactly where it was");
+		require(registry.size() == 3, "The reload left "
+			+ std::to_string(registry.size()) + " sheet(s) in a registry that held "
+			"3; a pairing refusal took sheets down with it");
+		// The same holds for a sheet that is not the drawn one. The Layer-1
+		// sheet pairs from the same corrupted file, its reload was refused
+		// too, and it keeps what it had instead of being emptied - while
+		// staying out of the drawn role it never held.
+		auto const* layer = registry.find("SectorAtlasLayer1");
+		require(layer != nullptr && layer->installed()
+			&& layer->tileset.surfaces.size() == layerSurfacesBefore,
+			"The refused reload left the Layer-1 sheet with "
+			+ std::to_string(layer ? layer->tileset.surfaces.size() : 0)
+			+ " surface(s) against the " + std::to_string(layerSurfacesBefore)
+			+ " it held, so the alongside write clobbered a sheet its own "
+			"pairing refused (#1095)");
+		require(registry.drawingName() != "SectorAtlasLayer1", "The refused reload "
+			"of a sheet that reloads alongside the drawn one took the drawn role "
+			"for itself");
+
+		// And the walk did carry on: the sheet reached after the refusals
+		// re-read its changed file off disk.
+		auto const* station = registry.find("StationAtlas");
+		require(station != nullptr && station->installed(), "The Station sheet is "
+			"not installed after the reload, so the walk did not survive the "
+			"pairing refusals ahead of it");
+		require(station->tileset.width == replacementWidth, "The Station sheet "
+			"still installs " + std::to_string(station->tileset.width)
+			+ " wide after a reload whose image file had become a "
+			+ std::to_string(replacementWidth) + "-wide one; the walk stopped at "
+			"the pairing refusals before it instead of carrying on to the sheets "
+			"after them (#1095)");
+	}
 }
 
 void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
@@ -3255,4 +3475,6 @@ void render_smoke::registerAtlasInstallPath(std::vector<smoke::Check>& checks)
 		isolated<reloadReparsesTheAtlasSetRegistry> });
 	checks.push_back({ "artworkReload/everyFailedSheetIsNamedAndTheOthersKeepServing",
 		isolated<reloadNamesEveryFailedSheetAndLeavesTheOthersServing> });
+	checks.push_back({ "artworkReload/aRefusedTilesetPairingLeavesTheDrawnSheetServing",
+		isolated<reloadLeavesTheDrawnSheetServingWhenTheTilesetPairingRefuses> });
 }

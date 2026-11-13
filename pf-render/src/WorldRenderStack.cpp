@@ -580,9 +580,13 @@ namespace
 		// reload needed.
 		//
 		// One sheet's failure is that sheet's own. The walk names it and moves
-		// on; the sheets that came back keep serving, and the slot that failed
-		// keeps its diagnostic so the panel still reports it and it keeps
-		// painting magenta until it is fixed.
+		// on, and a sheet that failed is not replaced on the way past. The
+		// slot keeps the diagnostic, so the panel still reports the sheet
+		// that could not be re-read, and that sheet keeps the artwork it had
+		// rather than being swapped for the empty one a refused *selection*
+		// stores - which is what would blank what had been drawing (#1095).
+		// A sheet that was never installed at all still paints magenta; that
+		// is the shape the empty sheet is for, and a reload does not create it.
 		std::string reloadImageSets()
 		{
 			std::vector<std::string> failures;
