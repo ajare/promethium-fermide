@@ -66,6 +66,12 @@ void reportAtlasSelections(std::vector<WorldAtlasSelection> const& selections)
 // The game's camera, into the viewport the producer reads. Fitted to the
 // World's Layer-0 content when there is no Player to follow; centred on the
 // Player, at the Player's own Layer, when there is one.
+//
+// Only the follow branch carries a floor lift, and the asymmetry is
+// deliberate (#1106, #1114): the follow branch centres on a point of the
+// lifted picture, so it has to lift with it, while the fitted branch frames
+// the one Layer that is never lifted. See the note in the fitted branch for
+// why that is a decision rather than an omission.
 void applyCamera(core::World const& world, float width, float height)
 {
 	gUISettings = UISettings{};
@@ -100,6 +106,30 @@ void applyCamera(core::World const& world, float width, float height)
 			(maximum.x - minimum.x) * CORE_CELL_WIDTH_PIXELS);
 		float const contentHeight = std::max(1.0f,
 			(maximum.y - minimum.y) * CORE_LEVEL_HEIGHT_PIXELS);
+		// No lift term here, and none is missing (#1114).
+		//
+		// This fit is to Layer 0's authored bounds, and Layer 0 is the Layer
+		// this branch draws whole: `visibleLayer` is left at its default of
+		// 0, and `renderWorld` fills the canvas with that one Layer, taking
+		// deeper Layers in only through apertures measured in the Layer in
+		// front of them. Layer 0 is also the one Layer the staircase never
+		// lifts - the front Layer draws at zero by the accumulation rule -
+		// so the mapping this fit produces carries exactly the lift the
+		// picture it frames carries, which is none.
+		//
+		// Putting the staircase here would be wrong rather than merely
+		// unnecessary: it would slide the frame off the Layer being drawn
+		// whole and towards Layers that are only ever seen through holes in
+		// it. Where a lifted back Layer has moved out from under such a hole
+		// the void shows through, and that is #1102's rule doing what it
+		// says, not a camera framing the wrong thing.
+		//
+		// So recorded, for the case this branch exists for: a World with
+		// depth set and no player-controlled Agent renders here, and renders
+		// as designed - Layer 0 as authored, framed whole. Widening the fit
+		// to the lifted whole-World picture is not a thing a World with no
+		// Player to follow was ever asked for, and the follow branch below is
+		// the game's real camera.
 		gUISettings.worldZoom = std::max(0.001f, std::min({ 1.0f,
 			width * 0.9f / contentWidth, height * 0.9f / contentHeight }));
 		gUISettings.xOffset = (width - contentWidth * gUISettings.worldZoom) * 0.5f

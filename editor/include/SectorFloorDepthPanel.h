@@ -64,21 +64,24 @@ namespace editor
 {
 	// The band a floor depth may be authored inside: one Level either way.
 	//
-	// An alias for the band the core owns, taken from there rather than restated,
-	// so the input's tooltip, the range test and the core write - and the load
-	// that clamps a hand-edited value into the same band (#1111) - cannot be
-	// four places that each named 320 and drifted apart. The check still pins
-	// the editor's number to the Level height, because a band that quietly
+	// An alias for the band the core owns, taken from there rather than
+	// restated, so the input's tooltip and the core write - and the load that
+	// clamps a hand-edited value into the same band (#1111) - cannot be
+	// three places that each named 320 and drifted apart. The check pins the
+	// editor's number to the Level height, because a band that quietly
 	// stopped being one Level is worth a failing check.
+	//
+	// What this is is what the editor *says* the band is. It is not a gate,
+	// and there is deliberately no `floorDepthIsInBand` beside it (#1114).
+	// Whether a depth can be committed is the core write's answer -
+	// `World::canSetSectorFloorDepth` - and the row reports that refusal
+	// rather than pre-empting it. A helper here was a second gate the panel
+	// never went through: the author's input travelled to the seam whatever it
+	// answered, so a check pinning it proved nothing about the path a typed
+	// number takes, and routing the panel through one would have answered the
+	// author with the panel's wording instead of the core's, which names the
+	// Sector the refusal is about.
 	inline constexpr std::int32_t kFloorDepthBandPx = core::World::kFloorDepthBandPx;
-
-	// Whether a depth can be committed at all. The input refuses anything
-	// outside the band, and the core write refuses it too - this is the
-	// question the panel asks before it offers to write.
-	inline bool floorDepthIsInBand(std::int32_t depthPx)
-	{
-		return depthPx >= -kFloorDepthBandPx && depthPx <= kFloorDepthBandPx;
-	}
 
 	// A depth with its sign always spelled: "+24 px", "0 px", "-12 px".
 	//

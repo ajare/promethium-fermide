@@ -81,10 +81,27 @@ namespace pf::render
 			return {toWorldX(screen.x), toWorldY(screen.y)};
 		}
 
-		// The same mapping with a floor lift added (#1101). Returns a copy
-		// rather than mutating, so a caller can carry the unlifted mapping
-		// beside the lifted one - the Sector's own clip is cut from the
-		// unlifted picture while its tiles draw by the lifted one.
+		// The same mapping with its floor lift set to this many screen pixels
+		// (#1101). It sets the term rather than adding to it: a mapping
+		// carries one lift, which is the lift of the one Layer whose picture
+		// the caller is drawing.
+		//
+		// Returns a copy rather than mutating so a caller can hold the
+		// unlifted mapping beside the lifted one and say which of the two
+		// each of its draws goes through. Two that matter: the grid stays on
+		// the unlifted picture while a lifted Layer's Sectors draw by the
+		// lifted one (#1105), and the slack that widens the editor's World
+		// clip is measured from the unlifted picture to where each Layer's
+		// lift carries it (#1109).
+		//
+		// What this is not is a split between a Sector's tiles and its clip.
+		// The two travel together: `renderSector` installs its own Layer's
+		// lift before it transforms its own bounds, so a shifted Sector's
+		// clip frames the tiles it was framing instead of cutting their top
+		// off (#1102). The one thing drawn inside a lifted Sector that stays
+		// where it was authored is an aperture, and it stays there by being
+		// measured in the Layer in front and never re-transformed on the way
+		// down - not by being cut from an unlifted mapping.
 		[[nodiscard]] constexpr WorldToScreen withFloorLift(float liftPx) const
 		{
 			auto lifted = *this;

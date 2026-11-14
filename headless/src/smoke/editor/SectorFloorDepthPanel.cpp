@@ -30,8 +30,11 @@
 //     explains that there was nothing to pin;
 //   * Reset deletes the entry rather than writing zero: the Sector stops
 //     carrying a field, and the row reads as following again;
-//   * the band. One Level either way, the same band the core write refuses
-//     outside, so the input cannot offer what the seam would reject;
+//   * the band. One Level either way, with the seam as the only gate on
+//     it: the number the panel states and the number the write refuses
+//     outside are pinned to be one number, so the input cannot offer what
+//     the seam would reject. #1114 retired the editor's own band helper,
+//     which no path through the panel ever consulted;
 //   * the effective readout adds the Layer's accumulated offset to the
 //     Sector's own depth and shows both halves beside the sum;
 //   * the Layers table's column shows each Layer's accumulated pixels,
@@ -414,11 +417,14 @@ namespace editor_smoke
 				+ editor::sectorFloorDepthStateText(*stair.world, *front));
 	}
 
-	// The band: one Level either way, and the same number the core write
-	// refuses outside. The input is allowed to offer exactly what the seam
-	// will accept, and nothing more; a band that drifted apart from the
-	// core's would either refuse values the author could have written or,
-	// worse, offer values the save would then reject.
+	// The band: one Level either way, and the seam is the only gate on it.
+	// The panel states the band in its tooltip and writes whatever the author
+	// typed; `World::canSetSectorFloorDepth` is the thing standing between
+	// that number and the World (#1114). What has to be true, then, is that
+	// the number the panel states and the number the write refuses outside
+	// are one number - a band that drifted apart would either refuse values
+	// the author could have written or, worse, offer values the save would
+	// then reject.
 	void theInputRefusesAValueOutsideOneLevelEitherWay(smoke::Context const&)
 	{
 		State state;
@@ -432,28 +438,19 @@ namespace editor_smoke
 			"one Level is " + std::to_string(editor::kFloorDepthBandPx)
 				+ " px, not the 320 the ticket names");
 
-		require(editor::floorDepthIsInBand(320), "+320 is inside the band");
-		require(editor::floorDepthIsInBand(-320), "-320 is inside the band");
-		require(editor::floorDepthIsInBand(0), "0 is inside the band");
-		require(!editor::floorDepthIsInBand(321),
-			"321 read as inside the band, so the input would offer past one Level");
-		require(!editor::floorDepthIsInBand(-321),
-			"-321 read as inside the band");
-		require(!editor::floorDepthIsInBand(5000),
-			"a mistyped 5000 read as inside the band");
-
-		// The seam agrees, which is what makes the panel's refusal the real
-		// one rather than a courtesy.
+		// The seam, at both edges and one pixel past each.
 		require(stair.world->canSetSectorFloorDepth(front->getIndex(), 320),
-			"the seam refused +320, which the panel offers");
+			"the seam refused +320, which the panel's tooltip offers");
 		require(stair.world->canSetSectorFloorDepth(front->getIndex(), -320),
-			"the seam refused -320, which the panel offers");
+			"the seam refused -320, which the panel's tooltip offers");
 		std::string diagnostic;
 		require(!stair.world->canSetSectorFloorDepth(front->getIndex(), 321,
 			&diagnostic), "the seam accepted 321, one pixel past the band");
 		require(!diagnostic.empty(), "the refusal carried no reason to show the author");
 		require(!stair.world->canSetSectorFloorDepth(front->getIndex(), -321,
 			&diagnostic), "the seam accepted -321, one pixel past the band");
+		require(!stair.world->canSetSectorFloorDepth(front->getIndex(), 5000,
+			&diagnostic), "the seam accepted a mistyped 5000");
 
 		// And the refusal is what the row would report: a refused write is
 		// not accepted, changes nothing, and says why.
