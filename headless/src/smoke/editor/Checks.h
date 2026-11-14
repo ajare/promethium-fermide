@@ -24,6 +24,9 @@ namespace editor_smoke
 	void registerSurfacePaintDrag(std::vector<smoke::Check>& checks);
 	void registerWorldArtworkPanel(std::vector<smoke::Check>& checks);
 	void registerLayerSectorImageSet(std::vector<smoke::Check>& checks);
+	// The Sector selection panel's floor depth row and the Layers table's
+	// read-only floor offset column (#1104).
+	void registerSectorFloorDepthPanel(std::vector<smoke::Check>& checks);
 	void registerHistory(std::vector<smoke::Check>& checks);
 	void registerEscalators(std::vector<smoke::Check>& checks);
 	void registerIsolation(std::vector<smoke::Check>& checks);

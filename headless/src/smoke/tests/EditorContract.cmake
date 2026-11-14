@@ -297,6 +297,16 @@ set(editor_names
     layer-image-set/aPickMovesNoOtherLayerAndNoWorldAtlas
     layer-image-set/aBindingToTheWorldsOwnSetIsNotAnOverride
     layer-image-set/clearingRestoresInherit
+    floorDepthPanel/followWordingCoversEverySectorType
+    floorDepthPanel/aSectorWithNoOverrideReadsAsFollowingItsType
+    floorDepthPanel/breakingAwaySurvivesALaterTypeChange
+    floorDepthPanel/resetDeletesTheOverrideRatherThanWritingZero
+    floorDepthPanel/theInputRefusesAValueOutsideOneLevelEitherWay
+    floorDepthPanel/theEffectiveReadoutAddsTheLayerOffsetToTheOwnDepth
+    floorDepthPanel/theLayersTableShowsEachLayersAccumulatedPixels
+    floorDepthPanel/breakAwayEditAndResetAreEachOneUndoStep
+    floorDepthPanel/aRefusedOrNoOpRowWriteIsNotAnUndoStep
+    floorDepthPanel/theRowReadsTheSameForTheTypesThatTakeTheirOwnPanels
     history/independentHistoriesDoNotLeakCommandsOrState
     isolation/normalAndExceptionalExit
     scaled-doors/clipboard-history

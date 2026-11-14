@@ -49,6 +49,7 @@
 #include "AccessPanelEditor.h"
 #include "EditorDocument.h"
 #include "LayerSectorImageSet.h"
+#include "SectorFloorDepthPanel.h"
 #include "PreviewControls.h"
 
 #if defined(_WIN32)
@@ -7620,6 +7621,136 @@ void renderLocationWallEditor(editor::DocumentPtr const& document,
 }
 
 
+// The "Floor depth" row in the Sector selection panel (#1104).
+//
+// Every Sector type gets the row, including the two that go on to draw
+// their own panels: a Background still draws at some height, and a Facade
+// still lifts the Layers behind it, so the question is asked of every
+// Sector and answered the same way. The call sits ahead of those branches
+// rather than inside each of them, which is what makes "for every Sector
+// type" a fact about where the row is drawn instead of a promise repeated
+// eleven times.
+//
+// The row reads the World every frame and keeps no number of its own, the
+// way the type table does (#1103). An undo, a redo, a load or the type
+// table's own edit changes the World, and the next frame shows it with
+// nothing here to invalidate. A refused value therefore snaps the row back
+// rather than leaving a typed number on screen having written nothing.
+//
+// The control changes with the state rather than offering everything all the
+// time, because the two states mean different things and an always-available
+// Reset on a Sector that has nothing to reset is a button that lies:
+//
+//   * following - the only act offered is to break away, and breaking away
+//     writes the value currently being followed as the Sector's own. The
+//     picture does not move when the author takes the wheel, and the break
+//     is one undo step, which is what makes the edit that follows a second
+//     step rather than the same step twice. Where the type sits at zero there
+//     is nothing to write - a zero is stored as nothing at all - so the
+//     button is disabled and says so instead of sitting there doing
+//     nothing;
+//   * overridden - a signed input over the Sector's own value with Reset
+//     beside it. Each committed edit is one undo step. Typing zero is the
+//     same act as Reset, because zero is not stored and the Sector goes
+//     back to following, which is why the tooltip says it rather than
+//     letting the author discover it by accident;
+//   * always - the effective readout. It is not an input and never was:
+//     the author should not have to add up the Layers in front of them to
+//     find out where the thing they selected actually draws.
+void renderSectorFloorDepthRow(editor::DocumentPtr const& document,
+	shared_ptr<const core::Sector> const& sector)
+{
+	auto const world = document ? document->world() : nullptr;
+	if (!world || !sector) return;
+
+	bool const overridden = sector->hasFloorDepthOverride();
+	auto const type = sector->getType();
+	auto const typeName = core::getSectorTypeString(type);
+	auto const typeDepth = world->sectorTypeFloorDepth(type);
+
+	ImGui::SeparatorText("Floor depth");
+
+	ImGui::AlignTextToFramePadding();
+	auto const stateText = editor::sectorFloorDepthStateText(*world, *sector);
+	ImGui::TextUnformatted(stateText.c_str());
+	ImGui::SameLine();
+
+	if (!overridden)
+	{
+		// Nothing to pin at zero. The sparse storage keeps no entry for a
+		// depth of zero, so a break-away here would write nothing and leave
+		// the row reading exactly as it read before the click. Saying so is
+		// worth more than a button that appears to do nothing.
+		bool const nothingToPin = typeDepth == 0;
+		ImGui::BeginDisabled(nothingToPin);
+		if (ImGui::SmallButton("Break away"))
+		{
+			auto undo = captureDocumentSnapshot(world);
+			std::string diagnostic;
+			auto const write = document->authoring().setSectorFloorDepth(
+				sector->getIndex(), typeDepth, &diagnostic);
+			if (!write.accepted) reportEditorError("Floor depth", diagnostic);
+			else if (write.changed) commitDocumentEdit(std::move(undo));
+		}
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		{
+			if (nothingToPin)
+				ImGui::SetTooltip("A depth of 0 is not recorded, so there is nothing to "
+					"break away with while %ss sit at 0 px. This Sector already draws where "
+					"its type puts it.", typeName.c_str());
+			else
+				ImGui::SetTooltip("Take this Sector off its type. It keeps the %s it is "
+					"following as its own depth, and later changes to %ss will not move it.",
+					editor::floorDepthPxText(typeDepth).c_str(), typeName.c_str());
+		}
+	}
+	else
+	{
+		int depth = sector->getFloorDepth();
+		ImGui::SetNextItemWidth(120.0f);
+		if (ImGui::InputInt("##sectorFloorDepth", &depth, 1, 8))
+		{
+			auto undo = captureDocumentSnapshot(world);
+			std::string diagnostic;
+			auto const write = document->authoring().setSectorFloorDepth(
+				sector->getIndex(), depth, &diagnostic);
+			if (!write.accepted) reportEditorError("Floor depth", diagnostic);
+			else if (write.changed) commitDocumentEdit(std::move(undo));
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Signed pixels at 1x zoom, between %d and %d. Zero is not "
+				"recorded, so typing 0 puts this Sector back to following %ss.",
+				-editor::kFloorDepthBandPx, editor::kFloorDepthBandPx, typeName.c_str());
+
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Reset"))
+		{
+			// Deletes the entry rather than writing zero, which is the whole
+			// point of Reset: the Sector goes back to following, and follows
+			// wherever its type goes from there.
+			auto undo = captureDocumentSnapshot(world);
+			std::string diagnostic;
+			auto const write = document->authoring().clearSectorFloorDepth(
+				sector->getIndex(), &diagnostic);
+			if (!write.accepted) reportEditorError("Floor depth", diagnostic);
+			else if (write.changed) commitDocumentEdit(std::move(undo));
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Delete this Sector's own depth so it follows %ss again "
+				"(currently %s).", typeName.c_str(),
+				editor::floorDepthPxText(typeDepth).c_str());
+	}
+
+	// The effective readout on its own line, under the row it belongs to: it
+	// is not a control and should not crowd the one that is.
+	auto const effectiveText = editor::sectorFloorDepthEffectiveText(*world, *sector);
+	ImGui::TextUnformatted(effectiveText.c_str());
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Where this Sector draws: the offset its Layer has accumulated "
+			"from the Layers in front, plus the depth this Sector carries.");
+}
+
 void renderSelectedObjectPanel(editor::DocumentPtr const& document)
 {
 	auto const world = document ? document->world() : nullptr;
@@ -7641,6 +7772,10 @@ void renderSelectedObjectPanel(editor::DocumentPtr const& document)
 	if (gSelectedSector)
 	{
 		gLocationPlan.renderSelectionAction(world, gSelectedSector, gSelectedWorldLevel);
+		// Drawn ahead of the type-specific branches below so the row really does
+		// appear for every Sector type, including the two that return early into
+		// their own panels (#1104).
+		renderSectorFloorDepthRow(document, gSelectedSector);
 		// A Background is not a place an agent can be, so it gets its own minimal
 		// panel rather than the generic Sector readout with its "Agents:" line.
 		if (gSelectedSector->getType() == core::SectorType::Background)
@@ -8602,13 +8737,22 @@ void renderLayersPanel(editor::DocumentPtr const& document)
 		ImGuiTableFlags_BordersV |
 		ImGuiTableFlags_RowBg;
 
-	// Four columns, with the Layer's Sector sheet between the name and the
-	// delete, and a header row so the sheet column says what it holds the
+	// Five columns, with the Layer's Sector sheet between its floor offset
+	// and the delete, and a header row so every column says what it holds the
 	// same way the Levels table says what its columns hold (#1091).
-	if (ImGui::BeginTable("Layers", 4, flags))
+	//
+	// The "Floor offset" column is read-only and sits right beside the Layer
+	// name, which is where the whole staircase becomes visible at once: the
+	// author reads the accumulated pixels down the column instead of adding
+	// up the depths of every Layer in front of the one they are looking at
+	// (#1104). It is read-only because it is not an input to anything - it
+	// is what the Layers in front add up to, and the only way to change it
+	// is to change a depth somewhere ahead of it.
+	if (ImGui::BeginTable("Layers", 5, flags))
 	{
 		ImGui::TableSetupColumn("View", ImGuiTableColumnFlags_WidthFixed, 40.0f);
 		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableSetupColumn("Floor offset", ImGuiTableColumnFlags_WidthFixed, 110.0f);
 		ImGui::TableSetupColumn("ImageSet", ImGuiTableColumnFlags_WidthFixed, 220.0f);
 		ImGui::TableSetupColumn("Delete", ImGuiTableColumnFlags_WidthFixed, 40.0f);
 		ImGui::TableHeadersRow();
@@ -8666,11 +8810,22 @@ void renderLayersPanel(editor::DocumentPtr const& document)
 			ImGui::TableSetColumnIndex(1);
 			renderLayerNameEditor(document, layer);
 
+			// Where this Layer draws, accumulated from every Layer in front of
+			// it. Read-only, and read from the same query the renderer lifts by,
+			// so the number in the row is the number the picture is drawn with.
+			ImGui::TableSetColumnIndex(2);
+			auto const floorOffsetText = editor::layerFloorOffsetText(*world, layer);
+			ImGui::TextUnformatted(floorOffsetText.c_str());
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+				ImGui::SetTooltip("Read-only: what the Layers in front of %s add up to. "
+					"Change a floor depth ahead of here to move this.",
+					world->getLayerName(layer).c_str());
+
 			// The Layer's own Sector sheet, or the World's when it binds
 			// nothing. The leading entry is the inherit choice rather than a
 			// blank, so the row always says what the Layer draws and picking
 			// that entry again is how the binding comes off (#1091).
-			ImGui::TableSetColumnIndex(2);
+			ImGui::TableSetColumnIndex(3);
 			auto const& bound = world->layerSectorImageSet(layer);
 			auto const inheritLabel = editor::layerSectorInheritLabel(
 				world->sectorImageSetResourceName());
@@ -8701,7 +8856,7 @@ void renderLayersPanel(editor::DocumentPtr const& document)
 
 			// A World keeps at least two Layers, so deletion is only offered while
 			// it has more than two.
-			ImGui::TableSetColumnIndex(3);
+			ImGui::TableSetColumnIndex(4);
 			bool const canDelete = layerCount > 2;
 			ImGui::BeginDisabled(!canDelete);
 			if (ImGui::Button(ICON_FA_TRASH, ImVec2(ImGui::GetFrameHeight(), 0.0f)))

@@ -730,6 +730,7 @@ pf_add_smoke_module(pf-smoke-editor
         editor/History.cpp
         editor/WorldArtworkPanel.cpp
         editor/LayerSectorImageSet.cpp
+        editor/SectorFloorDepthPanel.cpp
     LIBRARIES pf-agent-editing pf-agent-resources pf-headless-render-support
     LABELS editor
     TIMEOUT 60
