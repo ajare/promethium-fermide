@@ -618,6 +618,7 @@ pf_add_smoke_module(pf-smoke-render
         render/SectorSurfaceVariants.cpp
         render/FloorDepthLift.cpp
         render/FloorDepthAttached.cpp
+        render/FloorDepthPicking.cpp
         render/DoorframeCells.cpp
         render/WindowframeCells.cpp
         render/SectorTilePreview.cpp

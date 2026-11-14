@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "DrawTypes.h"
 #include "UISettings.h"
 #include "core/Defines.h"
@@ -90,6 +92,16 @@ namespace pf::render
 			return lifted;
 		}
 	};
+
+	// A floor depth is stored in the World as a count of document-space
+	// pixels at 1x zoom; this mapping's `floorLiftPx` is a count of screen
+	// pixels at this mapping's zoom. One statement of the crossing between
+	// the two, so the drawer that adds the lift and the picker that takes it
+	// off again cannot each scale it a different way (#1101, #1105).
+	[[nodiscard]] constexpr float floorLiftScreenPx(int32_t documentPx, float zoom)
+	{
+		return static_cast<float>(documentPx) * zoom;
+	}
 
 	// The mapping the viewport describes at a zoom given outright rather than
 	// read from the settings, for a caller that pins its own zoom and states

@@ -60,5 +60,6 @@ int main(int argc, char** argv)
 	render_smoke::registerScaledDoors(checks);
 	render_smoke::registerFloorDepthLift(checks);
 	render_smoke::registerFloorDepthAttached(checks);
+	render_smoke::registerFloorDepthPicking(checks);
 	return smoke::main("render", checks, argc, argv);
 }

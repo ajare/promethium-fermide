@@ -88,3 +88,8 @@ namespace render_smoke { void registerFloorDepthLift(std::vector<smoke::Check>& 
 // A shifted Sector keeps its whole self attached: thresholds, apertures,
 // transit geometry, controls and nested recursion (#1102).
 namespace render_smoke { void registerFloorDepthAttached(std::vector<smoke::Check>& checks); }
+
+// The editor stays aimed at what it draws: the cursor inverts through the
+// same Layer lift the renderer adds, while world-space content - the grid
+// and the player transport selector - does not move (#1105).
+namespace render_smoke { void registerFloorDepthPicking(std::vector<smoke::Check>& checks); }

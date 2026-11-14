@@ -181,8 +181,9 @@ static float layerFloorLiftPx(uint32_t layerIndex)
 	}
 	// The World stores document-space pixels at 1x zoom; the lift is applied
 	// in screen space, so it scales with the zoom here rather than at every
-	// drawer.
-	return static_cast<float>(offsetPx) * gUISettings.worldZoom;
+	// drawer. The crossing is the shared one, because the picker inverts the
+	// same lift and the two cannot scale it differently (#1105).
+	return pf::render::floorLiftScreenPx(offsetPx, gUISettings.worldZoom);
 }
 
 // Text is measured and tessellated through the font metrics the application

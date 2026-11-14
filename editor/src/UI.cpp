@@ -564,26 +564,67 @@ namespace
 		return point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y;
 	}
 
+	// The mapping the picture on the canvas is drawn by, held for the frame
+	// in progress (#1105).
+	//
+	// A Sector's floor depth lifts the Layers behind it, and the renderer
+	// adds that lift on the way out. Every editor conversion between the
+	// screen and that picture has to take the same number off on the way
+	// in, or the cursor lands on the Layer that used to be there: a Room
+	// selected behind the author's hand rather than under it, a drag that
+	// writes coordinates offset by the very shift the author is looking
+	// at, a variant painted onto the cell the picture says and the World
+	// says nothing of.
+	//
+	// It is one ambient value rather than an argument threaded through the
+	// seventy-odd call sites that convert a point, for the same reason the
+	// renderer carries its own lift as one: the lift is a property of the
+	// picture being looked at, not of any one of those conversions. It is
+	// recomputed from the World at every entry point that reads or draws
+	// that picture, so a depth edit, a Layer change or a zoom never leaves
+	// the cursor aimed by a stale mapping.
+	pf::render::WorldToScreen gViewMapping{};
+
+	// The mapping with no floor lift in it: what a World with no depth
+	// recorded draws by, and what the editor aims with when no World is
+	// open at all.
+	pf::render::WorldToScreen unliftedViewMapping()
+	{
+		return pf::render::worldToScreen(gUISettings);
+	}
+
+	// Re-aims the editor at the picture of the World now on screen.
+	void refreshViewMapping(shared_ptr<const core::World> const& world)
+	{
+		if (!world)
+		{
+			gViewMapping = unliftedViewMapping();
+			return;
+		}
+		gViewMapping = pf::render::worldToScreenForLayer(gUISettings, *world,
+			pf::render::viewLayerFor(*world, gUISettings.visibleLayer),
+			gUISettings.worldZoom);
+	}
+
 	core::Vector2 screenToWorld(ImVec2 position)
 	{
-		auto const cellWidth = CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom;
-		auto const levelHeight = CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
-		return {
-			(position.x - gUISettings.worldViewportX - gUISettings.xOffset) / cellWidth,
-			(gUISettings.worldViewportY + gUISettings.worldViewportHeight - position.y
-				- gUISettings.yOffset) / levelHeight
-		};
+		return gViewMapping.toWorld({ position.x, position.y });
 	}
 
 	ImVec2 worldToScreen(core::Vector2 position)
 	{
-		return {
-			gUISettings.worldViewportX + gUISettings.xOffset
-				+ position.x * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom,
-			gUISettings.worldViewportY + gUISettings.worldViewportHeight
-				- gUISettings.yOffset
-				- position.y * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom
-		};
+		return { gViewMapping.toScreenX(position.x), gViewMapping.toScreenY(position.y) };
+	}
+
+	// The World's own declared extent, in screen pixels, with no floor lift
+	// in it (#1105). The extent is world-space rather than Sector-space:
+	// the grid and the player transport selector are drawn inside this box
+	// without moving when a Layer shifts, so the box holds the unshifted
+	// World and not the shifted picture of one Layer.
+	ImVec2 worldBoundsToScreen(core::Vector2 position)
+	{
+		auto const mapping = unliftedViewMapping();
+		return { mapping.toScreenX(position.x), mapping.toScreenY(position.y) };
 	}
 
 	ImVec2 worldDragMousePosition()
@@ -5387,6 +5428,10 @@ void handleWorldInteraction(editor::DocumentPtr const& document,
 {
 	auto const world = document ? document->world() : nullptr;
 	if (!world) return;
+	// Every pick below converts the cursor through the lifted mapping, so
+	// the mapping is re-aimed at the World and Layer being clicked before
+	// any of them runs (#1105).
+	refreshViewMapping(world);
 	if (!gPegmanConsumesLeftMouse
 		&& mouseStatus.state[MouseButtonStatus::Left] == MouseButtonStatus::State::Clicked)
 	{
@@ -5973,7 +6018,7 @@ void renderStatusBar(shared_ptr<const core::World> const& world)
 			ImGui::SetNextItemWidth(128);
 
 			auto const cursor = ImGui::GetMousePos();
-			auto mousePos = worldPositionAtCursor(core::Vector2{ cursor.x, cursor.y });
+			auto mousePos = screenToWorld(cursor);
 			string mouseData = format("{:.1f}, {:.1f}", mousePos.x, mousePos.y);
 
 			ImGui::TextUnformatted(mouseData.c_str());
@@ -10306,6 +10351,11 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 {
 	auto const world = document ? document->world() : nullptr;
 	if (!world) return;
+	// Re-aimed here as well as at the top of the frame: the panels drawn
+	// earlier in the frame can change the visible Layer or the zoom, and the
+	// picture and the hover tests below must both read the mapping for the
+	// Layer actually being drawn this frame (#1105).
+	refreshViewMapping(world);
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 	ImGui::Begin("World", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 	ImGui::PopStyleVar();
@@ -10452,7 +10502,7 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 	if (gWorldHovered)
 	{
 		auto const cursor = ImGui::GetMousePos();
-		auto mousePos = worldPositionAtCursor(core::Vector2{ cursor.x, cursor.y });
+		auto mousePos = screenToWorld(cursor);
 		gLastWorldCursor = mousePos;
 		// Hit-test in reverse visual order. Graph vertices are rendered over agents,
 		// agents over sector objects, and sector objects over their owning sector.
@@ -10519,18 +10569,23 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 	auto* drawList = &commandList;
 	drawList->PushClipRect(toVec2(canvasPos), toVec2(canvasPos + canvasSize), true);
 
-	// Keep world geometry and editor overlays inside the dimensions declared by
-	// the world. The canvas can be larger than the world when docked or resized.
-	auto worldTopLeft = worldToScreen({ 0.0f, (float)world->getLevelsHigh() });
-	auto worldBottomRight = worldToScreen({ (float)world->getCellsWide(), 0.0f });
+	// Keep world geometry and editor overlays inside the dimensions declared
+	// by the world. The canvas can be larger than the world when docked or
+	// resized. The declared dimensions are world-space, so this box is the
+	// unlifted one: a Layer shifting does not move the World it sits in, and
+	// the grid drawn to those dimensions stays inside it unchanged (#1105).
+	auto worldTopLeft = worldBoundsToScreen({ 0.0f, (float)world->getLevelsHigh() });
+	auto worldBottomRight = worldBoundsToScreen({ (float)world->getCellsWide(), 0.0f });
 	drawList->PushClipRect(toVec2(worldTopLeft), toVec2(worldBottomRight), true);
 	renderWorld(world, drawList);
 	// The editor owns the pointer, so it converts the cursor and hands the
 	// World point to the graph pass instead of letting the renderer go and
-	// find it (#1000).
+	// find it (#1000). The conversion is the lifted one, so the graph pass
+	// is told where the cursor sits in the picture the author is looking at
+	// rather than where it sat before the Layer moved (#1105).
 	auto const graphCursor = ImGui::GetMousePos();
 	renderGraph(graph, world, drawList, gSelectingAgentPathDestination,
-		worldPositionAtCursor(core::Vector2{ graphCursor.x, graphCursor.y }));
+		screenToWorld(graphCursor));
 	renderSelectedAgentPath(world.get(), drawList);
 	drawSectorEditOverlay(drawList);
 	if (gAgentMove.dragging)
@@ -10604,6 +10659,10 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 void renderUI(editor::DocumentPtr& document, shared_ptr<core::Agent> pathingAgent)
 {
 	auto const world = document ? document->world() : nullptr;
+	// The whole frame is aimed at this World's picture, panels included, so
+	// the lift it carries is settled before anything converts a point
+	// (#1105).
+	refreshViewMapping(world);
 	ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
 
 	renderMenu(document);

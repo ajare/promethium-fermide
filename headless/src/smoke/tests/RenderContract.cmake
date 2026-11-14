@@ -423,7 +423,7 @@ set(names
     floorDepth/theSectorOwnClipMovesWithTheShiftedSector
     floorDepth/theSelectionHighlightMovesWithTheSelectedSector
     floorDepth/theWireframeBehindOverlayShiftsWithItsOwnLayer
-    floorDepthAttached/aDoorRecordsAtTheShiftedPosition
+        floorDepthAttached/aDoorRecordsAtTheShiftedPosition
     floorDepthAttached/windowsRecordAtTheShiftedPosition
     floorDepthAttached/aBoothWindowRecordsAtTheShiftedPosition
     floorDepthAttached/transitGeometryRecordsAtTheShiftedPosition
@@ -432,6 +432,14 @@ set(names
     floorDepthAttached/theApertureStaysWhereItWasAuthored
     floorDepthAttached/aShiftedBackLayerRecordsNothingInsideAnApertureItClears
     floorDepthAttached/nestedAperturesDrawEachSectorAtItsOwnLayerOffset
+    floorDepthPicking/theCursorLandsOnTheSectorTheShiftedPictureShows
+    floorDepthPicking/theUnliftedMappingLandsOffTheShiftedSector
+    floorDepthPicking/aFlatWorldPicksExactlyWhereItPickedBefore
+    floorDepthPicking/thePickIsZoomInvariant
+    floorDepthPicking/theLiftBelongsToTheViewedLayer
+    floorDepthPicking/theViewLayerIsClampedIntoTheWorld
+    floorDepthPicking/theGridDoesNotMoveWithTheLayer
+    floorDepthPicking/thePlayerTransportSelectorDoesNotMoveWithTheLayer
 )
 if(DEFINED LANE)
     set(lane_binary "${RENDER}")
