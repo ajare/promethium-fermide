@@ -38,6 +38,7 @@
 #include "SectorDrawSheet.h"
 #include "SectorTileset.h"
 #include "UISettings.h"
+#include "WorldToScreen.h"
 #include "core/World.h"
 #include "core/Defines.h"
 #include "core/DoorSectorObject.h"
@@ -108,19 +109,13 @@ namespace
 		core::Vector2 b0, b1;
 		world.getSector(sectorIndex)->getBounds(b0, b1);
 
-		auto const tx = [](float x)
-		{
-			return x * CORE_CELL_WIDTH_PIXELS + gUISettings.worldViewportX + gUISettings.xOffset;
-		};
-		auto const ty = [](float y)
-		{
-			return gUISettings.worldViewportY + gUISettings.worldViewportHeight
-				- y * CORE_LEVEL_HEIGHT_PIXELS - gUISettings.yOffset;
-		};
+		auto const mapping = pf::render::worldToScreen(gUISettings);
 
 		return {
-			std::min(tx(b0.x), tx(b1.x)), std::min(ty(b0.y), ty(b1.y)),
-			std::max(tx(b0.x), tx(b1.x)), std::max(ty(b0.y), ty(b1.y))
+			std::min(mapping.toScreenX(b0.x), mapping.toScreenX(b1.x)),
+			std::min(mapping.toScreenY(b0.y), mapping.toScreenY(b1.y)),
+			std::max(mapping.toScreenX(b0.x), mapping.toScreenX(b1.x)),
+			std::max(mapping.toScreenY(b0.y), mapping.toScreenY(b1.y))
 		};
 	}
 
@@ -356,10 +351,8 @@ void emptyCellsDoNotRevealDeeperLayers()
 
 		auto sample = [&](float x, float y)
 		{
-			return colourAt(draws, {
-				x * CORE_CELL_WIDTH_PIXELS * zoom + gUISettings.xOffset,
-				gUISettings.worldViewportHeight
-					- y * CORE_LEVEL_HEIGHT_PIXELS * zoom - gUISettings.yOffset });
+			return colourAt(draws, pf::render::worldToScreen(gUISettings)
+				.toScreen({x, y}));
 		};
 		require(sample(0.37f, 0.43f) == kForeLocationFill,
 			"The selected Layer's Room was not rendered");
@@ -394,29 +387,30 @@ void nestedWindowsKeepTheirScissors()
 	core::Vector2 frontMin, frontMax, middleMin, middleMax;
 	front.object->getFullShape(frontMin, frontMax);
 	middle.object->getFullShape(middleMin, middleMax);
+	// Every sample point below is a World point put on screen by the render
+	// module's shared mapping, not by arithmetic restated here (#1100).
+	auto const mapping = pf::render::worldToScreen(gUISettings);
+	auto const screenOf = [&mapping](float worldX, float worldY)
+	{
+		return mapping.toScreen({worldX, worldY});
+	};
+	auto const midY = (frontMin.y + frontMax.y) * 0.5f;
 	auto sample = [&](float x)
 	{
-		auto const y = (frontMin.y + frontMax.y) * 0.5f;
-		return colourAt(draws, { x * CORE_CELL_WIDTH_PIXELS,
-			gUISettings.worldViewportHeight - y * CORE_LEVEL_HEIGHT_PIXELS });
+		return colourAt(draws, screenOf(x, midY));
 	};
 	// Through both aligned Windows the eye lands on the third Layer's own
 	// tile; through the front Window alone it lands on the middle Room's;
 	// past the front Window's edge it never leaves the front Room.
-	require(tileOf(topAt(draws, { (middleMin.x + frontMax.x) * 0.5f * CORE_CELL_WIDTH_PIXELS,
-			gUISettings.worldViewportHeight
-				- (frontMin.y + frontMax.y) * 0.5f * CORE_LEVEL_HEIGHT_PIXELS }), atlas)
+	require(tileOf(topAt(draws, screenOf((middleMin.x + frontMax.x) * 0.5f, midY)), atlas)
 			== "background",
 		"Aligned Windows did not reveal the third Layer");
 
-	auto const throughFront = topAt(draws, { (frontMin.x + middleMin.x) * 0.5f * CORE_CELL_WIDTH_PIXELS,
-		gUISettings.worldViewportHeight
-			- (frontMin.y + frontMax.y) * 0.5f * CORE_LEVEL_HEIGHT_PIXELS });
+	auto const throughFront = topAt(draws,
+		screenOf((frontMin.x + middleMin.x) * 0.5f, midY));
 	require(tileOf(throughFront, atlas) == "room",
 		"Deeper Window escaped its own scissor into the middle Room");
-	auto const pastFront = topAt(draws, { (frontMax.x + middleMax.x) * 0.5f * CORE_CELL_WIDTH_PIXELS,
-		gUISettings.worldViewportHeight
-			- (frontMin.y + frontMax.y) * 0.5f * CORE_LEVEL_HEIGHT_PIXELS });
+	auto const pastFront = topAt(draws, screenOf((frontMax.x + middleMax.x) * 0.5f, midY));
 	require(tileOf(pastFront, atlas) == "room",
 		"Deeper Window escaped the front Window's scissor");
 	// Both are Rooms, so the tile cannot tell them apart - the scissor can.
@@ -457,9 +451,8 @@ void nestedOpenDoorsRevealTheBackLayer()
 		{ gUISettings.worldViewportWidth, gUISettings.worldViewportHeight } });
 	renderWorld(world, &draws);
 
-	require(tileOf(topAt(draws, {
-		2.5f * CORE_CELL_WIDTH_PIXELS,
-		gUISettings.worldViewportHeight - 0.5f * CORE_LEVEL_HEIGHT_PIXELS }), atlas)
+	require(tileOf(topAt(draws,
+		pf::render::worldToScreen(gUISettings).toScreen({2.5f, 0.5f})), atlas)
 		== "facade",
 		"Aligned open Doors did not reveal the back Layer");
 }

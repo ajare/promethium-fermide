@@ -23,6 +23,7 @@
 #include "DrawTypes.h"
 #include "DoorLeafModel.h"
 #include "UISettings.h"
+#include "WorldToScreen.h"
 
 using pf::render::PackedColourValue;
 
@@ -30,19 +31,18 @@ extern UISettings gUISettings;
 
 namespace door_leaf
 {
-	// The same transforms transformPosition() applies, recomputed against
-	// the current viewport settings so the checks can predict screen
-	// coordinates.
+	// The projection the checks predict screen coordinates with, taken from
+	// the render module's shared mapping rather than restated here, so it is
+	// the transform transformPosition() actually applies (#1100). The Door
+	// leaf checks pin the zoom, which the mapping reads like everything else.
 	inline float toScreenX(float worldX)
 	{
-		return worldX * CORE_CELL_WIDTH_PIXELS + gUISettings.worldViewportX
-			+ gUISettings.xOffset;
+		return pf::render::worldToScreen(gUISettings).toScreenX(worldX);
 	}
 
 	inline float toScreenY(float worldY)
 	{
-		return gUISettings.worldViewportY + gUISettings.worldViewportHeight
-			- worldY * CORE_LEVEL_HEIGHT_PIXELS - gUISettings.yOffset;
+		return pf::render::worldToScreen(gUISettings).toScreenY(worldY);
 	}
 
 	// A rectangle in screen pixels.

@@ -22,6 +22,7 @@
 #include "ObjectTileset.h"
 #include "Render.h"
 #include "UISettings.h"
+#include "WorldToScreen.h"
 
 #include "core/World.h"
 #include "core/Button.h"
@@ -308,7 +309,8 @@ namespace
 					++triangles;
 					for (auto const& p : triangle->positions) { minX = std::min(minX, p.x); maxX = std::max(maxX, p.x); }
 				}
-			require(triangles == 2 && std::abs((minX + maxX) * 0.5f - (4.0f * CORE_CELL_WIDTH_PIXELS + gUISettings.worldViewportX + gUISettings.xOffset)) < 0.001f,
+			require(triangles == 2 && std::abs((minX + maxX) * 0.5f
+					- pf::render::worldToScreen(gUISettings).toScreenX(4.0f)) < 0.001f,
 				"Production rendering did not centre wide Door fallback on its host boundary");
 		}
 
@@ -405,7 +407,7 @@ namespace
 			for (uint32_t rank = 0; rank < count; ++rank)
 			{
 				auto centre = buttons[rank]->getPosition() + buttons[rank]->getSize() * 0.5f;
-				float screenY = gUISettings.worldViewportHeight - centre.y * CORE_LEVEL_HEIGHT_PIXELS;
+				float screenY = pf::render::worldToScreen(gUISettings).toScreenY(centre.y);
 				int triangles = 0, lines = 0;
 				for (auto const& command : drawList.commands())
 				{

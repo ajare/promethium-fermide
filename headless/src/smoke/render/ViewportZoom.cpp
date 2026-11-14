@@ -9,6 +9,7 @@
 #include "Render.h"
 #include "UISettings.h"
 #include "WorldViewportZoom.h"
+#include "WorldToScreen.h"
 #include "core/World.h"
 
 extern UISettings gUISettings;
@@ -51,12 +52,14 @@ void viewportZoom()
 		{
 			gUISettings.xOffset = pan;
 			gUISettings.yOffset = pan * 2;
+			// The screen point the cursor would hold over that World point,
+			// put there by the render module's shared mapping and read back
+			// through its inverse - the round trip the canvas makes, on one
+			// definition of the mapping rather than two (#1100).
 			auto mouseAt = [&](float x, float y) {
-				core::Vector2 const screen{
-					gUISettings.worldViewportX + pan + x * CORE_CELL_WIDTH_PIXELS * zoom,
-					gUISettings.worldViewportY + gUISettings.worldViewportHeight
-						- gUISettings.yOffset - y * CORE_LEVEL_HEIGHT_PIXELS * zoom };
-				return worldPositionAtCursor(screen);
+				auto const screen = pf::render::worldToScreen(gUISettings)
+					.toScreen({x, y});
+				return worldPositionAtCursor({screen.x, screen.y});
 			};
 			for (auto const& [id, y] : { std::pair{ room, 0.5f }, std::pair{ corridor, 2.5f } })
 			{

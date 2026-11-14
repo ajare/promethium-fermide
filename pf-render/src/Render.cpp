@@ -42,6 +42,7 @@
 #include "ObjectTileset.h"
 #include "WorldDrawList.h"
 #include "UISettings.h"
+#include "WorldToScreen.h"
 
 
 extern UISettings gUISettings;
@@ -177,14 +178,15 @@ void renderTransitThroughApertures(shared_ptr<const core::Sector> const& transit
 
 void renderStaircase(shared_ptr<const core::Staircase> staircase, WorldDrawList* drawList);
 
+// The renderer's own step onto the shared mapping (#1100). Every World point
+// this file puts on screen comes through here, so the mapping itself lives in
+// WorldToScreen.h and nowhere else.
 void transformPosition(core::Vector2& p)
 {
-	p.x *= CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom;
-	p.y *= CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
-	p.y = gUISettings.worldViewportY + gUISettings.worldViewportHeight - p.y;
+	auto const screen = pf::render::worldToScreen(gUISettings).toScreen({p.x, p.y});
 
-	p.x += gUISettings.worldViewportX + gUISettings.xOffset;
-	p.y -= gUISettings.yOffset;
+	p.x = screen.x;
+	p.y = screen.y;
 }
 
 

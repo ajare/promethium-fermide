@@ -51,6 +51,7 @@
 #include "TileArtwork.h"
 #include "UISettings.h"
 #include "WorldDrawList.h"
+#include "WorldToScreen.h"
 
 #include "core/Defines.h"
 #include "core/Sector.h"
@@ -206,18 +207,16 @@ namespace
 		gUISettings.worldZoom = 1.0f;
 	}
 
-	// The World-to-screen transform, mirroring `transformPosition` in
-	// Render.cpp: x scales by the cell width, y by the Level height and
-	// flips, and the viewport and pan offsets are added. Stated here so the
-	// contract can name absolute screen rectangles; the settings above are
-	// pinned, so this is exact rather than approximate.
+	// The World-to-screen transform, taken from the render module's shared
+	// definition rather than mirrored from Render.cpp here. The contract
+	// names absolute screen rectangles at a zoom of its own choosing, so it
+	// asks the shared mapping for that zoom instead of restating the
+	// arithmetic; the settings above are pinned, so what it gets is exact
+	// rather than approximate (#1100).
 	pf::render::Vec2 toScreen(core::Vector2 const& point, float const zoom)
 	{
-		return { point.x * CORE_CELL_WIDTH_PIXELS * zoom
-				+ gUISettings.worldViewportX + gUISettings.xOffset,
-			gUISettings.worldViewportY + gUISettings.worldViewportHeight
-				- point.y * CORE_LEVEL_HEIGHT_PIXELS * zoom
-				- gUISettings.yOffset };
+		return pf::render::worldToScreenAt(gUISettings, zoom)
+			.toScreen({point.x, point.y});
 	}
 
 	// The Sector's own area on screen, in the orientation the renderer

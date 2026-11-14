@@ -54,6 +54,7 @@
 #include "TileArtwork.h"
 #include "UISettings.h"
 #include "WorldDrawList.h"
+#include "WorldToScreen.h"
 
 #include "core/Defines.h"
 #include "core/Sector.h"
@@ -537,18 +538,14 @@ namespace
 				+ " by " + std::to_string(levelsHigh));
 
 		// The Room's own screen area, from its World bounds at the pinned
-		// viewport: x scales by the cell width, y by the Level height and
-		// flips, and the viewport offsets are added.
+		// viewport, put through the render module's shared mapping rather than
+		// a restatement of it here (#1100).
 		core::Vector2 low{}, high{};
 		sector->getBounds(low, high);
-		auto const toScreen = [](core::Vector2 const& point)
+		auto const mapping = pf::render::worldToScreen(gUISettings);
+		auto const toScreen = [&mapping](core::Vector2 const& point)
 		{
-			return pf::render::Vec2{
-				point.x * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom
-					+ gUISettings.worldViewportX + gUISettings.xOffset,
-				gUISettings.worldViewportY + gUISettings.worldViewportHeight
-					- point.y * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom
-					- gUISettings.yOffset };
+			return mapping.toScreen({point.x, point.y});
 		};
 		auto const a = toScreen(low);
 		auto const b = toScreen(high);
@@ -976,18 +973,14 @@ namespace
 
 	// The screen y of a Sector's floor line at the pinned viewport. World y
 	// runs up and screen y runs down, so the floor - the low end of the
-	// Sector's World bounds - is the larger screen y.
+	// Sector's World bounds - is the larger screen y. The flip itself is the
+	// render module's mapping, not a restatement of it (#1100).
 	float screenFloorLine(core::Sector const& sector)
 	{
 		core::Vector2 low{}, high{};
 		sector.getBounds(low, high);
-		auto const toScreenY = [](float worldY)
-		{
-			return gUISettings.worldViewportY + gUISettings.worldViewportHeight
-				- worldY * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom
-				- gUISettings.yOffset;
-		};
-		return std::max(toScreenY(low.y), toScreenY(high.y));
+		auto const mapping = pf::render::worldToScreen(gUISettings);
+		return std::max(mapping.toScreenY(low.y), mapping.toScreenY(high.y));
 	}
 
 	// The viewport's bottom edge cutting through a row does not take the

@@ -52,6 +52,7 @@
 #include "core/Sector.h"
 #include "core/SectorEnd.h"
 #include "UISettings.h"
+#include "WorldToScreen.h"
 
 extern UISettings gUISettings;
 
@@ -86,16 +87,18 @@ namespace
 		[[nodiscard]] bool horizontal() const { return std::abs(y1 - y0) < 0.5f; }
 	};
 
+	// The mapping back to World units, read off the render module's shared
+	// definition rather than restated here, so it inverts the very transform
+	// the renderer applied (#1100). The viewport this file pins is unzoomed,
+	// so the shared mapping's scale is the plain cell and Level size.
 	float toWorldX(float screenX)
 	{
-		return (screenX - gUISettings.worldViewportX - gUISettings.xOffset)
-			/ CORE_CELL_WIDTH_PIXELS;
+		return pf::render::worldToScreen(gUISettings).toWorldX(screenX);
 	}
 
 	float toWorldY(float screenY)
 	{
-		return (gUISettings.worldViewportY + gUISettings.worldViewportHeight
-			- gUISettings.yOffset - screenY) / CORE_LEVEL_HEIGHT_PIXELS;
+		return pf::render::worldToScreen(gUISettings).toWorldY(screenY);
 	}
 
 	// AddLine's thick stroke emits the four corners of the stroked rectangle.

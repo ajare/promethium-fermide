@@ -50,6 +50,7 @@
 #include "SurfacePaint.h"
 #include "UISettings.h"
 #include "WorldDrawList.h"
+#include "WorldToScreen.h"
 
 #include "core/Defines.h"
 #include "core/Sector.h"
@@ -347,9 +348,10 @@ namespace
 		renderSector(sector, layer, LayerRenderStyle::Solid, false, White,
 			&commands);
 
-		auto const cellWidth = float(CORE_CELL_WIDTH_PIXELS);
-		auto const levelHeight = float(CORE_LEVEL_HEIGHT_PIXELS);
-		auto const viewportHeight = gUISettings.worldViewportHeight;
+		// The way back from a drawn quad's screen rect to the World cell it
+		// covers is the shared mapping run in reverse, not arithmetic
+		// restated here (#1100).
+		auto const mapping = pf::render::worldToScreen(gUISettings);
 
 		std::map<std::pair<uint32_t, uint32_t>, std::string> drawn;
 		for (auto const& command : commands.commands())
@@ -367,9 +369,9 @@ namespace
 				bottom = std::max(bottom, point.y);
 			}
 			auto const key = std::make_pair(
-				uint32_t((left + right) * 0.5f / cellWidth),
+				uint32_t(mapping.toWorldX((left + right) * 0.5f)),
 				// Screen y runs down from the viewport top; World y runs up.
-				uint32_t((viewportHeight - (top + bottom) * 0.5f) / levelHeight));
+				uint32_t(mapping.toWorldY((top + bottom) * 0.5f)));
 			auto const tile = tileSampled(*triangle, atlas);
 			auto const placed = drawn.emplace(key, tile);
 			require(placed.second || placed.first->second == tile,

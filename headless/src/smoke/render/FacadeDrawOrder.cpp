@@ -39,6 +39,7 @@
 #include "SectorTileset.h"
 #include "UISettings.h"
 #include "WorldDrawList.h"
+#include "WorldToScreen.h"
 #include "core/World.h"
 #include "core/Defines.h"
 #include "core/Facade.h"
@@ -251,16 +252,11 @@ void facadeSurfaceCoversTheWholeFacadeSurface()
 		core::Vector2 b0, b1;
 		sector->getBounds(b0, b1);
 
-		// The same transform transformPosition() applies, recomputed here.
-		auto const tx = [](float x)
-		{
-			return x * CORE_CELL_WIDTH_PIXELS + gUISettings.worldViewportX + gUISettings.xOffset;
-		};
-		auto const ty = [](float y)
-		{
-			return gUISettings.worldViewportY + gUISettings.worldViewportHeight
-				- y * CORE_LEVEL_HEIGHT_PIXELS - gUISettings.yOffset;
-		};
+		// The transform transformPosition() applies, read off the render
+		// module's shared mapping rather than recomputed here (#1100).
+		auto const mapping = pf::render::worldToScreen(gUISettings);
+		auto const tx = [&mapping](float x) { return mapping.toScreenX(x); };
+		auto const ty = [&mapping](float y) { return mapping.toScreenY(y); };
 
 		float minX = FLT_MAX, maxX = -FLT_MAX, minY = FLT_MAX, maxY = -FLT_MAX;
 		int tiles = 0;

@@ -4,6 +4,7 @@
 
 #include "WorldDrawList.h"
 #include "UISettings.h"
+#include "WorldToScreen.h"
 #include "core/Defines.h"
 #include "core/Sector.h"
 
@@ -24,20 +25,15 @@ extern UISettings gUISettings;
 // boundary strips carry it; anything that came down an aperture carries that
 // narrower clip and is not one of them.
 //
-// The transform is stated here rather than borrowed because the renderer's
-// `transformPosition` is private to Render.cpp. It is the same mapping every
-// headless screen-space helper uses: cell width and Level height in pixels,
-// scaled by the zoom, flipped about the viewport, offset by the scroll.
+// The mapping is not restated here. It is the render module's `WorldToScreen`,
+// the same definition the renderer's own `transformPosition` goes through,
+// so a headless helper can no longer predict a screen position the renderer
+// disagrees with (#1100).
 namespace headless
 {
 	inline pf::render::Vec2 sectorPointToScreen(core::Vector2 const& point)
 	{
-		return pf::render::Vec2{
-			point.x * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom
-				+ gUISettings.worldViewportX + gUISettings.xOffset,
-			gUISettings.worldViewportY + gUISettings.worldViewportHeight
-				- point.y * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom
-				- gUISettings.yOffset };
+		return pf::render::worldToScreen(gUISettings).toScreen({point.x, point.y});
 	}
 
 	// The Sector's own box on screen, before any outer clip.

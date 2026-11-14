@@ -40,6 +40,7 @@
 #include "SectorTileset.h"
 #include "UISettings.h"
 #include "WorldDrawList.h"
+#include "WorldToScreen.h"
 #include "core/AgentTagRegistry.h"
 #include "core/Background.h"
 #include "core/Defines.h"
@@ -178,15 +179,17 @@ namespace
 			world->finishBuild();
 		}
 
-		// The screen point the Window reveals the Background through.
+		// The screen point the Window reveals the Background through, put
+		// there by the render module's shared mapping rather than by the
+		// arithmetic restated here (#1100).
 		Vec2 revealedPoint() const
 		{
 			require(window != nullptr, "the aperture fixture has no Window");
 			core::Vector2 windowMin, windowMax;
 			window->getFullShape(windowMin, windowMax);
-			return { (windowMin.x + windowMax.x) * 0.5f * CORE_CELL_WIDTH_PIXELS,
-				gUISettings.worldViewportHeight
-					- (windowMin.y + windowMax.y) * 0.5f * CORE_LEVEL_HEIGHT_PIXELS };
+			return pf::render::worldToScreen(gUISettings).toScreen(
+				{(windowMin.x + windowMax.x) * 0.5f,
+					(windowMin.y + windowMax.y) * 0.5f});
 		}
 	};
 }

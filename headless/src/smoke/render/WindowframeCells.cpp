@@ -92,6 +92,7 @@
 #include "TileArtwork.h"
 #include "UISettings.h"
 #include "WorldDrawList.h"
+#include "WorldToScreen.h"
 
 #include "core/Background.h"
 #include "core/Defines.h"
@@ -174,17 +175,13 @@ namespace
 	}
 
 	// The World-to-screen mapping the viewport applies at the zoom pinned
-	// above, stated once so the check that reads a cell grid and the check
-	// that reads a Window's glass rect cannot disagree about where a World
-	// point lands.
+	// above, read off the render module's shared definition rather than
+	// restated here, so the check that reads a cell grid and the check that
+	// reads a Window's glass rect cannot disagree about where a World point
+	// lands - and neither can they disagree with the renderer (#1100).
 	pf::render::Vec2 toScreen(core::Vector2 const& point)
 	{
-		return pf::render::Vec2{
-			point.x * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom
-				+ gUISettings.worldViewportX + gUISettings.xOffset,
-			gUISettings.worldViewportY + gUISettings.worldViewportHeight
-				- point.y * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom
-				- gUISettings.yOffset };
+		return pf::render::worldToScreen(gUISettings).toScreen({point.x, point.y});
 	}
 
 	// ------------------------------------------------------------------
