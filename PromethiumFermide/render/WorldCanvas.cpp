@@ -20,6 +20,7 @@
 
 #include "MppFontMetrics.h"
 #include "Render.h"
+#include "WorldViewportZoom.h"
 
 // The viewport the shared producer reads. `UISettings` is the shared
 // renderer's own viewport and display-option struct - the same one the
@@ -113,10 +114,26 @@ void applyCamera(core::World const& world, float width, float height)
 		auto const* agent = player.entity;
 		auto centre = agent->getGlobalPosition();
 		centre.y += agent->getHeight() * 0.5f;
-		gUISettings.visibleLayer = static_cast<int>(agent->getSector()->getLayerIndex());
+		auto const viewLayer = agent->getSector()->getLayerIndex();
+		gUISettings.visibleLayer = static_cast<int>(viewLayer);
 		gUISettings.worldZoom = 1.0f;
+		// The renderer lifts everything on the Layer the player stands on by
+		// that Layer's accumulated floor offset on the way out (#1101). The
+		// camera follows a point of that lifted picture, so it has to carry
+		// the same lift into its own centring: leave it out and the Player
+		// draws one offset off the canvas centre, and a Layer lifted by a
+		// Level puts the Agent the whole game is watching off the top of the
+		// window (#1106).
+		//
+		// The lift is read through the shared query the editor's cursor
+		// inverts (#1105), at the zoom this branch pins, so the game cannot
+		// scale the number differently from the picture the author aimed at.
+		// With every floor depth zero the term is zero and the centring is the
+		// arithmetic it always was.
 		gUISettings.xOffset = width * 0.5f - centre.x * CORE_CELL_WIDTH_PIXELS;
-		gUISettings.yOffset = height * 0.5f - centre.y * CORE_LEVEL_HEIGHT_PIXELS;
+		gUISettings.yOffset = height * 0.5f - centre.y * CORE_LEVEL_HEIGHT_PIXELS
+			- pf::render::layerFloorLiftPx(world, viewLayer,
+				gUISettings.worldZoom);
 	}
 }
 

@@ -42,6 +42,16 @@ namespace pf::application::render {
 // What it produces is fed to the same producer the editor's World canvas
 // uses, which is what makes the two canvases the same canvas.
 //
+// Because the producer lifts the Layers behind a deep Sector on the way
+// out (#1101), the follow camera carries the offset of the Layer the
+// Player stands on into its own centring. Without that the Player draws
+// one offset off the centre of the view and a Layer lifted by a Level puts
+// the Agent the whole game is watching off the top of the window; with it,
+// the Player's own Layer reads as the frame it is and the depth shows
+// where it belongs - in what is seen past it (#1106). The fitted camera
+// needs no such term: it fits Layer 0, and Layer 0 is the one Layer nothing
+// is ever in front of.
+//
 
 // One viewport atlas slot, as the game hands it to the shared renderer:
 // the slot's name for reporting, the World's selection for it, and the

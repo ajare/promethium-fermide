@@ -16,7 +16,9 @@ camera is used.
 - Release the key to stop walking. Holding both keys stops walking; moving
   Escalator steps still carry the Agent.
 - Pause, reset, suspension, and leaving Play clear transient movement input.
-- The camera centres on the controlled Agent at normal zoom and shows its Layer.
+- The camera centres on the controlled Agent at normal zoom and shows its Layer. It carries that Layer's accumulated
+  floor-depth offset in its own centring, so the Agent stays centred as it changes Layers and the shifted Layer is
+  not drawn off the top of the window (#1106).
 - In Locations, Left/Right movement stays on the current Layer and Level. Usable open boundaries
   and standalone Bulkhead Doors whose moving leaf clears the current pose's body permit entry into adjacent Locations,
   subject to pose fit and existing passage restrictions.
@@ -345,7 +347,8 @@ wrong-way walking, riding on release, fixed Ladder entry/climbing/reversal,
 vertical-key cancellation, automatic dismounting, arm-length Button interaction,
 repeat suppression, extension-then-climbing, manual Lift entry and Shift/Space
 selector controls; `pf_application_render` covers selector windowing/colours, camera following, Layer selection,
-resize and the no-Player fallback.
+resize, the no-Player fallback, and the follow camera carrying the floor-depth offset of the Layer the Player is on
+while a fitted no-Player camera draws a deep World exactly as it draws a flat one (#1106).
 
 `agent-playerControlPoses` additionally checks custom pose speed ratios, artwork,
 body dimensions, mounted posture changes on every climbing surface, wider

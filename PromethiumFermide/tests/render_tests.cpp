@@ -39,6 +39,7 @@
 #include "WorldCanvas.h"
 #include "Render.h"
 #include "WorldDrawList.h"
+#include "WorldViewportZoom.h"
 #include "AtlasInstall.h"
 #include "SectorTileset.h"
 #include "ObjectTileset.h"
@@ -1206,6 +1207,225 @@ void checkPlayerCamera() {
           "No Player must restore Layer-0 camera rather than reveal a back-Layer Agent");
 }
 
+// What one pass of the game's camera recorded: the viewport it settled on
+// and the Player artwork that came out of it. The viewport is read back
+// through the mapping the editor draws that Layer by (#1105), so "the
+// same screen positions the editor shows" is a statement about one
+// mapping rather than about two pictures somebody has to eyeball (#1106).
+struct GameCameraReading
+{
+  UISettings view{};
+  float drawnTopY{ 1e9f };
+  float drawnBottomY{ -1e9f };
+  unsigned drawnPieces{ 0 };
+};
+
+GameCameraReading readGameCamera(core::World const& world, float width, float height) {
+  auto const draws = app::drawWorld(world, width, height);
+  GameCameraReading reading{};
+  for (auto const& command : draws.commands())
+    if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command); triangle
+        && triangle->texture == WorldDrawList::Texture::AgentAtlas) {
+      ++reading.drawnPieces;
+      for (auto const& position : triangle->positions) {
+        reading.drawnTopY = std::min(reading.drawnTopY, position.y);
+        reading.drawnBottomY = std::max(reading.drawnBottomY, position.y);
+      }
+    }
+  reading.view = app::worldCanvasViewport();
+  return reading;
+}
+
+// The mapping one Layer's picture is drawn by, assembled from the shared
+// pieces the renderer states: the viewport's own mapping at this zoom
+// (#1100) lifted by the World's own staircase for that Layer (#1101),
+// scaled by the one statement of the document-pixels-to-screen-pixels
+// crossing (#1105). Composed here rather than called through
+// `worldToScreenForLayer` because that helper lives in a translation unit
+// the shipped game's shared object only carries while its own camera needs
+// it, and a check that fails to link says nothing about the picture.
+pf::render::WorldToScreen layerMapping(UISettings const& view,
+    core::World const& world, uint32_t layer) {
+  return pf::render::worldToScreenAt(view, view.worldZoom).withFloorLift(
+      pf::render::floorLiftScreenPx(world.layerFloorOffsetPx(layer),
+          view.worldZoom));
+}
+
+// The camera-follow contract, stated against the mapping the editor draws
+// by: the Player's body centre is the canvas centre, the feet the game
+// recorded sit on the feet the editor's mapping of that Layer answers,
+// and the whole body is inside the canvas rather than hung off its top.
+void requirePlayerCentred(core::World const& world, GameCameraReading const& reading,
+    core::Agent const& player, float width, float height, std::string const& where) {
+  require(reading.drawnPieces > 0, "the Player's pose artwork must reach the game canvas" + where);
+  auto const position = player.getGlobalPosition();
+  auto const mapping = layerMapping(reading.view, world,
+      static_cast<uint32_t>(reading.view.visibleLayer));
+  require(std::abs(mapping.toScreenX(position.x) - width * 0.5f) < 0.001f
+      && std::abs(mapping.toScreenY(position.y + player.getHeight() * 0.5f)
+          - height * 0.5f) < 0.001f,
+      "the camera must keep the Player's own Layer centred on the canvas" + where
+          + ": centre lands at " + std::to_string(mapping.toScreenX(position.x)) + ","
+          + std::to_string(mapping.toScreenY(position.y + player.getHeight() * 0.5f))
+          + " against " + std::to_string(width * 0.5f) + "," + std::to_string(height * 0.5f));
+  require(std::abs(reading.drawnBottomY - mapping.toScreenY(position.y)) < 0.001f,
+      "the Player the game recorded must sit where the editor's Layer mapping puts its feet" + where
+          + ": " + std::to_string(reading.drawnBottomY) + " against "
+          + std::to_string(mapping.toScreenY(position.y)));
+  require(reading.drawnTopY >= 0.0f && reading.drawnBottomY <= height,
+      "the shifted Player must be drawn whole inside the canvas" + where + ": top "
+          + std::to_string(reading.drawnTopY) + " against a canvas "
+          + std::to_string(height) + " tall");
+}
+
+// The shipped game draws the same depth the author saw, and its camera
+// carries the offset of the Layer the Player is on as the Player changes
+// Layers (#1106).
+void checkPlayerCameraFloorDepth() {
+  float const width = 640.0f;
+  float const height = 360.0f;
+  auto world = std::make_shared<core::World>("Follow Player at depth", 40, 3);
+  while (world->getLayerCount() < 3) world->addLayer();
+  auto const front = world->addRoom("Front", 0, 0, 0, 20, 1);
+  auto const middle = world->addRoom("Middle", 1, 0, 0, 20, 1);
+  auto const back = world->addRoom("Back", 2, 0, 0, 20, 1);
+  world->finishBuild();
+  world->pauseSimulation();
+  std::string diagnostic{};
+  require(world->setSectorFloorDepth(front, 48, &diagnostic).accepted,
+      "the depth fixture must accept its front depth: " + diagnostic);
+  require(world->setSectorFloorDepth(middle, 24, &diagnostic).accepted,
+      "the depth fixture must accept its middle depth: " + diagnostic);
+  require(world->layerFloorOffsetPx(0) == 0 && world->layerFloorOffsetPx(1) == 48
+      && world->layerFloorOffsetPx(2) == 72,
+      "the staircase the camera has to carry is 0, 48, 72");
+
+  // One Agent per Layer, all at the same World position. The controlled one
+  // moves between them, which drives the same per-frame read of the
+  // Player's own Sector that a Door or Stairwell crossing drives: the
+  // camera asks the World where the Player is every frame and takes that
+  // Layer's offset with it.
+  std::array<core::AgentId, 3> player{};
+  std::array<uint32_t, 3> const layers{ front, middle, back };
+  for (std::size_t i = 0; i < layers.size(); ++i)
+    player[i] = world->createAgent("Layer Agent", layers[i], 0, 10.f);
+  core::AgentId controlled{};
+  bool following{ false };
+  auto const follow = [&](std::size_t i) {
+    if (following) world->clearAgentBehaviourAssignment(controlled);
+    require(world->setAgentBehaviourAssignment(player[i],
+        core::PlayerControlledBehaviour, 1, {}), "the camera fixture must take the Player");
+    controlled = player[i];
+    following = true;
+    auto const reading = readGameCamera(*world, width, height);
+    require(reading.view.visibleLayer == static_cast<int>(i),
+        "the camera must show the Layer the Player is on, not the one it left");
+    requirePlayerCentred(*world, reading, *world->lookupAgent(player[i]).entity,
+        width, height, " with the Player on Layer " + std::to_string(i));
+    return reading;
+  };
+  auto const frontView = follow(0);
+  auto const middleView = follow(1);
+  auto const backView = follow(2);
+  // The camera moved by exactly the Layer offsets it is following. A camera
+  // that ignored the lift would leave all three identical, and a camera
+  // that applied the Sector's own depth rather than the Layer's
+  // accumulated offset would be 24 off by the third Layer.
+  require(middleView.view.yOffset == frontView.view.yOffset - 48.0f
+      && backView.view.yOffset == frontView.view.yOffset - 72.0f,
+      "the camera must follow each Layer's accumulated offset: "
+          + std::to_string(frontView.view.yOffset) + ", "
+          + std::to_string(middleView.view.yOffset) + ", "
+          + std::to_string(backView.view.yOffset));
+  require(middleView.view.xOffset == frontView.view.xOffset
+      && backView.view.xOffset == frontView.view.xOffset,
+      "floor depth shifts the picture vertically and leaves the horizontal centring alone");
+  // The game's pass is the editor's pass: same World, same viewport, one
+  // command stream.
+  requireSameCanvasAsEditor(world, 1280.0f, 720.0f, "a World with floor depth");
+}
+
+// One Level of depth on a canvas barely two Levels tall: the whole point
+// of carrying the lift in the centring is that the Player the game is
+// watching does not get hung off the top of the window.
+void checkPlayerCameraDeepLayerStaysOnScreen() {
+  float const width = 640.0f;
+  float const height = 2.0f * CORE_LEVEL_HEIGHT_PIXELS;
+  auto world = std::make_shared<core::World>("Deep Layer camera", 20, 2);
+  auto const front = world->addRoom("Front", 0, 0, 0, 20, 1);
+  auto const deep = world->addRoom("Deep", 1, 0, 0, 20, 1);
+  world->finishBuild();
+  world->pauseSimulation();
+  std::string diagnostic{};
+  require(world->setSectorFloorDepth(front, CORE_LEVEL_HEIGHT_PIXELS, &diagnostic).accepted,
+      "the depth fixture must accept one Level of depth: " + diagnostic);
+  require(world->layerFloorOffsetPx(1) == CORE_LEVEL_HEIGHT_PIXELS,
+      "the Layer behind a one-Level floor sits a whole Level up");
+  auto const id = world->createAgent("Deep player", deep, 0, 10.f);
+  require(world->setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}),
+      "the depth camera fixture must take the Player");
+  auto const reading = readGameCamera(*world, width, height);
+  requirePlayerCentred(*world, reading, *world->lookupAgent(id).entity, width, height,
+      " with the Player a Level behind a deep floor");
+  // Non-vacuity: centring the unlifted position on this canvas leaves the
+  // body centre exactly on the top edge with a whole Level of lift, so the
+  // check above is testing the camera's pull-back rather than a fixture
+  // too loose to notice the difference.
+  require(height * 0.5f - CORE_LEVEL_HEIGHT_PIXELS <= 0.0f,
+      "the deep fixture must be tight enough that the unlifted centring runs off the top");
+}
+
+// A World with every floor depth at zero renders in the game exactly as
+// it rendered before the lift term existed - the centring is the same
+// arithmetic, not the same picture to within a tolerance.
+void checkPlayerCameraFlatWorldUnchanged() {
+  float const width = 640.0f;
+  float const height = 360.0f;
+  auto world = std::make_shared<core::World>("Flat camera", 20, 2);
+  world->addRoom("Front", 0, 0, 0, 20, 1);
+  auto const back = world->addRoom("Back", 1, 0, 0, 20, 1);
+  world->finishBuild();
+  world->pauseSimulation();
+  auto const id = world->createAgent("Flat player", back, 0, 10.f);
+  require(world->setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}),
+      "the flat camera fixture must take the Player");
+  auto const reading = readGameCamera(*world, width, height);
+  auto& player = *world->lookupAgent(id).entity;
+  requirePlayerCentred(*world, reading, player, width, height, " in a flat World");
+  auto const centreY = player.getGlobalPosition().y + player.getHeight() * 0.5f;
+  require(reading.view.yOffset == height * 0.5f - centreY * CORE_LEVEL_HEIGHT_PIXELS,
+      "a flat World must centre by exactly the expression the camera used before floor depth: "
+          + std::to_string(reading.view.yOffset));
+  require(reading.view.xOffset == width * 0.5f
+      - player.getGlobalPosition().x * CORE_CELL_WIDTH_PIXELS,
+      "a flat World must keep its horizontal centring exactly: "
+          + std::to_string(reading.view.xOffset));
+  // The no-Player camera fits the World's Layer-0 content, and Layer 0 is
+  // the one Layer nothing ever lifts: two Worlds with the same Layer-0
+  // geometry, one of them lifted a whole Level behind its front Sector,
+  // draw byte for byte the same fitted picture. Neither carries a Player,
+  // so both take the fitted branch and nothing but the depth differs.
+  auto fitted = [](int32_t depth) {
+    auto fittedWorld = std::make_shared<core::World>("Fitted camera", 20, 2);
+    auto const front = fittedWorld->addRoom("Front", 0, 0, 0, 20, 1);
+    fittedWorld->addRoom("Back", 1, 0, 0, 20, 1);
+    fittedWorld->finishBuild();
+    fittedWorld->pauseSimulation();
+    std::string diagnostic{};
+    if (depth != 0 && !fittedWorld->setSectorFloorDepth(front, depth, &diagnostic).accepted)
+      throw std::runtime_error("the fitted fixture refused its depth: " + diagnostic);
+    return fittedWorld;
+  };
+  auto const flat = fitted(0);
+  auto const deep = fitted(CORE_LEVEL_HEIGHT_PIXELS);
+  require(deep->layerFloorOffsetPx(1) == CORE_LEVEL_HEIGHT_PIXELS,
+      "the fitted deep fixture really is lifted: "
+          + std::to_string(deep->layerFloorOffsetPx(1)));
+  require(signature(app::drawWorld(*flat, width, height))
+      == signature(app::drawWorld(*deep, width, height)),
+      "the fitted no-Player camera must draw a deep World exactly as it draws the flat one");
+}
+
 void checkStairwellDoorwayOutlines() {
   auto world = std::make_shared<core::World>("Stairwell exits", 8, 2);
   auto bottom = world->addRoom("Bottom", 0, 0, 0, 8, 1);
@@ -1547,6 +1767,9 @@ int main(int argc, char** argv) {
     checkAgentPoses();
     checkAgentsAndMarkers();
     checkPlayerCamera();
+    checkPlayerCameraFloorDepth();
+    checkPlayerCameraDeepLayerStaysOnScreen();
+    checkPlayerCameraFlatWorldUnchanged();
     checkPlayerSelectorDrawing();
     checkStairwellDoorwayOutlines();
     checkFurniture(directory, atlas);
