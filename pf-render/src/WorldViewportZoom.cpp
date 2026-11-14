@@ -43,6 +43,25 @@ namespace pf::render
 		return floorLiftScreenPx(world.layerFloorOffsetPx(layerIndex), zoom);
 	}
 
+	FloorLiftSlack worldFloorLiftSlack(core::World const& world, float zoom)
+	{
+		// The union of the declared box and the box every Layer's lift moves
+		// it to (#1109), reduced to its two vertical edges: the deepest
+		// positive lift says how far above the top the picture reaches, the
+		// deepest negative lift how far below the bottom it is pushed.
+		// Both start at zero, so a Layer that lifts neither way - and a
+		// World with no depth at all - contributes nothing, and the slack
+		// is the empty one that widens nothing.
+		FloorLiftSlack slack;
+		for (uint32_t layer = 0; layer < world.getLayerCount(); ++layer)
+		{
+			auto const lift = layerFloorLiftPx(world, layer, zoom);
+			slack.up = (std::max)(slack.up, lift);
+			slack.down = (std::max)(slack.down, -lift);
+		}
+		return slack;
+	}
+
 	WorldToScreen worldToScreenForLayer(UISettings const& settings,
 		core::World const& world, uint32_t layerIndex, float zoom)
 	{

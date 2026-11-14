@@ -39,6 +39,27 @@ namespace pf::render
 	[[nodiscard]] float layerFloorLiftPx(core::World const& world,
 		uint32_t layerIndex, float zoom);
 
+	// How far the whole World picture reaches past the World's own declared
+	// box, in screen pixels at a given zoom (#1109). The picture is the
+	// union of the unlifted World box and that box moved by every Layer's
+	// floor lift: `up` is how far above the declared top the deepest
+	// positive lift reaches, `down` how far below the declared bottom the
+	// deepest negative lift pushes. Both are zero or positive, and a
+	// World with no depth anywhere answers {0, 0} - the same box the
+	// World always drew.
+	struct FloorLiftSlack
+	{
+		float up{};
+		float down{};
+	};
+
+	// The slack of that union over every Layer in the World. Asked of the
+	// World rather than of the pass in progress, so a caller sizing a clip
+	// or a scrollbar reads the same staircase the drawer is about to
+	// install. Layers that lift neither way contribute nothing.
+	[[nodiscard]] FloorLiftSlack worldFloorLiftSlack(core::World const& world,
+		float zoom);
+
 	// The mapping one Layer's picture is drawn by: the viewport's mapping
 	// at this zoom, lifted by that Layer's floor offset (#1105).
 	//
@@ -61,6 +82,7 @@ struct WorldViewportLayout
 	Vec2 canvasSize{};
 	Vec2 worldSize{};
 	Vec2 scrollMaximum{};
+	Vec2 scrollMinimum{};
 	bool horizontalScrollbar{ false };
 	bool verticalScrollbar{ false };
 };
@@ -70,9 +92,20 @@ struct WorldViewportLayout
 // multiplier, so values above one make the World larger on screen. The
 // sizes cross on the shared drawing vocabulary, not on ImGui's ImVec2: the
 // layout maths is the renderer's, whatever surface asks for it (#1003).
+//
+// `liftUp` and `liftDown` are the floor lift slack of #1109 in screen
+// pixels at this zoom: how far the drawn picture reaches above and below
+// the declared World box. The scrollbar decision is taken against the
+// picture rather than the bare box, or shifted content would sit cut off
+// with no bar to reach it. The range then grows at both ends rather than
+// shifting: scrollY = 0 keeps meaning "the unlifted World bottom at the
+// canvas bottom", so adding a depth never jumps the view. The lifted top
+// is reached by scrolling up to worldSize.y + liftUp - canvasSize.y, and
+// the pushed-down bottom by scrolling below zero to -liftDown. With both
+// slacks at zero every term here is the arithmetic it always was.
 inline WorldViewportLayout worldViewportLayout(Vec2 availableSize,
 	Vec2 unscaledWorldSize, float zoom, float horizontalScrollbarSpace,
-	float verticalScrollbarSpace)
+	float verticalScrollbarSpace, float liftUp = 0.0f, float liftDown = 0.0f)
 {
 	WorldViewportLayout result;
 	result.canvasSize = {
@@ -84,10 +117,16 @@ inline WorldViewportLayout worldViewportLayout(Vec2 availableSize,
 		unscaledWorldSize.y * zoom
 	};
 
+	float const pictureHeight = result.worldSize.y + liftUp + liftDown;
+
 	result.horizontalScrollbar = result.worldSize.x > result.canvasSize.x;
-	result.verticalScrollbar = result.worldSize.y > result.canvasSize.y;
+	// A picture pushed down past the box needs the bar even when it would
+	// otherwise fit, because at the resting scroll position the pushed
+	// part sits below the canvas and nothing else can bring it back.
+	result.verticalScrollbar = pictureHeight > result.canvasSize.y
+		|| liftDown > 0.0f;
 	if (result.horizontalScrollbar
-		&& result.worldSize.y > result.canvasSize.y - horizontalScrollbarSpace)
+		&& pictureHeight > result.canvasSize.y - horizontalScrollbarSpace)
 		result.verticalScrollbar = true;
 	if (result.verticalScrollbar
 		&& result.worldSize.x > result.canvasSize.x - verticalScrollbarSpace)
@@ -101,7 +140,8 @@ inline WorldViewportLayout worldViewportLayout(Vec2 availableSize,
 			result.canvasSize.x - verticalScrollbarSpace, 1.0f);
 	result.scrollMaximum = {
 		(std::max)(result.worldSize.x - result.canvasSize.x, 0.0f),
-		(std::max)(result.worldSize.y - result.canvasSize.y, 0.0f)
+		(std::max)(result.worldSize.y + liftUp - result.canvasSize.y, 0.0f)
 	};
+	result.scrollMinimum = { 0.0f, -liftDown };
 	return result;
 }

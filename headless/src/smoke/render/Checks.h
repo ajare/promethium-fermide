@@ -93,3 +93,9 @@ namespace render_smoke { void registerFloorDepthAttached(std::vector<smoke::Chec
 // same Layer lift the renderer adds, while world-space content - the grid
 // and the player transport selector - does not move (#1105).
 namespace render_smoke { void registerFloorDepthPicking(std::vector<smoke::Check>& checks); }
+
+// The editor's World clip and scroll range follow the lifted picture: the
+// union of the declared box and that box moved by every Layer's floor
+// lift, so shifted content is neither cut at the unlifted edge nor
+// stranded past the bar's reach (#1109).
+namespace render_smoke { void registerFloorDepthWorldClip(std::vector<smoke::Check>& checks); }

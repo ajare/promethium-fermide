@@ -10522,10 +10522,17 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 	float const horizontalScrollbarSpace = scrollbarThickness + style.ItemSpacing.y;
 	float const verticalScrollbarSpace = scrollbarThickness + style.ItemSpacing.x;
 	auto const availableRegion = ImGui::GetContentRegionAvail();
+	// The picture this canvas shows is the World's declared box widened by
+	// every Layer's floor lift (#1109). The scroll range below and the
+	// clip further down are both sized to that union, so a shifted Layer
+	// is neither cut at the unlifted edge nor stranded past the bar's
+	// reach. A World with no depth anywhere widens by nothing.
+	auto const slack = pf::render::worldFloorLiftSlack(*world, gUISettings.worldZoom);
 	auto const layout = worldViewportLayout({ availableRegion.x, availableRegion.y },
 		{ (float)world->getCellsWide() * (float)CORE_CELL_WIDTH_PIXELS,
 			(float)world->getLevelsHigh() * (float)CORE_LEVEL_HEIGHT_PIXELS },
-		gUISettings.worldZoom, horizontalScrollbarSpace, verticalScrollbarSpace);
+		gUISettings.worldZoom, horizontalScrollbarSpace, verticalScrollbarSpace,
+		slack.up, slack.down);
 	// The layout is resolved on the shared renderer's drawing types; the thing
 	// it sizes is an ImGui widget, so it crosses back here (#1003).
 	ImVec2 const canvasSize{ layout.canvasSize.x, layout.canvasSize.y };
@@ -10533,6 +10540,10 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 	bool const showVerticalScrollbar = layout.verticalScrollbar;
 	float const horizontalScrollMax = layout.scrollMaximum.x;
 	float const verticalScrollMax = layout.scrollMaximum.y;
+	// Negative when a negative depth has pushed part of the picture below
+	// the declared bottom: the bar reaches below its resting position to
+	// bring the pushed part back (#1109).
+	float const verticalScrollMin = layout.scrollMinimum.y;
 
 	gUISettings.worldViewportX = canvasPos.x;
 	gUISettings.worldViewportY = canvasPos.y;
@@ -10561,9 +10572,11 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 	// when the button goes down, so the click never reaches the world or the
 	// palette underneath it. The world is grabbed rather than pushed: dragging
 	// right reveals what lies to the left. An axis with nowhere to go simply
-	// does not move.
+	// does not move - and with a floor lift pushing part of the picture below
+	// its resting position, the vertical axis has somewhere to go below zero
+	// even when the maximum never leaves it (#1109).
 	auto const& io = ImGui::GetIO();
-	bool const canPan = horizontalScrollMax > 0.0f || verticalScrollMax > 0.0f;
+	bool const canPan = horizontalScrollMax > 0.0f || verticalScrollMax > verticalScrollMin;
 	bool const panGesture = io.KeyShift
 		&& (io.MouseDown[ImGuiMouseButton_Middle]
 			|| (io.KeyAlt && io.MouseDown[ImGuiMouseButton_Left]));
@@ -10582,7 +10595,7 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 		{
 			auto const drag = io.MousePos - gViewPan.pressPosition;
 			scrollX = clamp(gViewPan.scrollAtPress.x - drag.x, 0.0f, horizontalScrollMax);
-			scrollY = clamp(gViewPan.scrollAtPress.y - drag.y, 0.0f, verticalScrollMax);
+			scrollY = clamp(gViewPan.scrollAtPress.y - drag.y, verticalScrollMin, verticalScrollMax);
 		}
 	}
 
@@ -10599,7 +10612,7 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 			io.DeltaTime);
 		auto const previousScroll = ImVec2(scrollX, scrollY);
 		scrollX = clamp(scrollX + requested.x, 0.0f, horizontalScrollMax);
-		scrollY = clamp(scrollY + requested.y, 0.0f, verticalScrollMax);
+		scrollY = clamp(scrollY + requested.y, verticalScrollMin, verticalScrollMax);
 		auto const applied = ImVec2(scrollX - previousScroll.x,
 			scrollY - previousScroll.y);
 		if (gAgentMove.dragging)
@@ -10621,10 +10634,10 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 
 	if (showVerticalScrollbar)
 	{
-		scrollY = clamp(scrollY, 0.0f, verticalScrollMax);
+		scrollY = clamp(scrollY, verticalScrollMin, verticalScrollMax);
 		ImGui::SameLine();
 		ImGui::VSliderFloat("##WorldVerticalScroll",
-			{ scrollbarThickness, canvasSize.y }, &scrollY, 0.0f, verticalScrollMax, "",
+			{ scrollbarThickness, canvasSize.y }, &scrollY, verticalScrollMin, verticalScrollMax, "",
 			ImGuiSliderFlags_NoInput);
 		gUISettings.yOffset = -scrollY;
 	}
@@ -10724,13 +10737,22 @@ void renderWorldWindow(editor::DocumentPtr const& document, shared_ptr<const cor
 	auto* drawList = &commandList;
 	drawList->PushClipRect(toVec2(canvasPos), toVec2(canvasPos + canvasSize), true);
 
-	// Keep world geometry and editor overlays inside the dimensions declared
-	// by the world. The canvas can be larger than the world when docked or
-	// resized. The declared dimensions are world-space, so this box is the
-	// unlifted one: a Layer shifting does not move the World it sits in, and
-	// the grid drawn to those dimensions stays inside it unchanged (#1105).
+	// Keep world geometry and editor overlays inside the World's declared
+	// box widened by the floor lift slack (#1109). The declared box on its
+	// own is the unlifted one, and a Layer shifted by a deep Sector draws
+	// outside it: clipped to the bare box, the lifted top comes off on a
+	// straight horizontal line that has nothing to do with the Rooms it
+	// cuts. Widening to the union of the declared box and that box moved
+	// by every Layer's lift lets the whole picture through while still
+	// bounding it. The grid and the player selector draw at the declared
+	// extent with no lift, and a clip trims rather than moves, so they
+	// stay exactly where #1105 left them. The canvas clip pushed above
+	// this one keeps the widened picture off the surrounding panels no
+	// matter how far the slack reaches.
 	auto worldTopLeft = worldBoundsToScreen({ 0.0f, (float)world->getLevelsHigh() });
 	auto worldBottomRight = worldBoundsToScreen({ (float)world->getCellsWide(), 0.0f });
+	worldTopLeft.y -= slack.up;
+	worldBottomRight.y += slack.down;
 	drawList->PushClipRect(toVec2(worldTopLeft), toVec2(worldBottomRight), true);
 	renderWorld(world, drawList);
 	// The editor owns the pointer, so it converts the cursor and hands the

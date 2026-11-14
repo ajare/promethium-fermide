@@ -446,6 +446,13 @@ set(names
     floorDepthPicking/theViewLayerIsClampedIntoTheWorld
     floorDepthPicking/theGridDoesNotMoveWithTheLayer
     floorDepthPicking/thePlayerTransportSelectorDoesNotMoveWithTheLayer
+    floorDepthClip/liftedContentAtTheWorldTopSurvivesTheWidenedClip
+    floorDepthClip/pushedContentAtTheWorldBottomSurvivesTheWidenedClip
+    floorDepthClip/theGridStaysAtTheUnliftedExtentUnderTheWidenedClip
+    floorDepthClip/theScrollRangeReachesTheShiftedPicture
+    floorDepthClip/aPushedPictureThatFitsStillGetsABar
+    floorDepthClip/aFlatWorldKeepsTheOldScrollArithmetic
+    floorDepthClip/theSlackIsZeroForAFlatWorldAndScalesWithZoom
 )
 if(DEFINED LANE)
     set(lane_binary "${RENDER}")
