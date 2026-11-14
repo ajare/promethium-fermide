@@ -548,6 +548,10 @@ _Avoid_: theme, skin, layer atlas
 One cell of a Sector's surface wearing a variant of its type's tile rather than that type's base. Recorded Sector-local - a column counted from the Sector's own left edge and a level counted up from its floor line - and carried on the Sector's construction record as well as on the live Sector, so the rebuild every structural edit performs replays the entries rather than losing them. The local key is re-derived on a resize so the artwork stays on the World cell it was painted on; a pure move leaves it unchanged because the artwork rides along with the Sector. Artwork only: a variant changes which tile a cell draws and nothing about traversal, capacity or simulation state.
 _Avoid_: per-cell texture, decoration
 
+**Floor depth**:
+A signed count of pixels at 1x zoom saying how deep a Sector's floor runs into the screen, authored per Sector type and overridable on one Sector. A Layer draws at the accumulated depth of the Layers in front of it: the front Layer draws at zero and each Layer behind draws offset by the deepest floor depth in every Layer ahead of it, so a Sector's own depth never moves itself - it moves everything behind it. Artwork only: floor depth changes where a Sector's picture lands and nothing about traversal, capacity, pathing or simulation state, and the Sector's own World coordinates are untouched.
+_Avoid_: Local depth (a non-negative within-Layer front-to-back preference used to break ties between equally costly routes, not a screen offset), Layer (the depth plane itself, which is numbered rather than measured in pixels), depth as a physical distance, perspective (which suggests scaling or projection; floor depth is one vertical shift)
+
 ## Station systems
 
 **Station systems**:
