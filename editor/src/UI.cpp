@@ -7736,7 +7736,16 @@ void renderSectorFloorDepthRow(editor::DocumentPtr const& document,
 
 	// The effective readout on its own line, under the row it belongs to: it
 	// is not a control and should not crowd the one that is.
-	auto const effectiveText = editor::sectorFloorDepthEffectiveText(*world, *sector);
+	//
+	// The staircase is built here, below the widgets rather than above them.
+	// Those widgets write: a Break away or an edited depth changes the very
+	// staircase this readout reports, and the author expects the number to
+	// move in the same frame they moved it. What this row avoids is building
+	// it per Layer the way the Layers table used to (#1113); building it any
+	// earlier would be a readout lagging a frame behind the input under it.
+	auto const floorOffsets = world->layerFloorOffsets();
+	auto const effectiveText = editor::sectorFloorDepthEffectiveText(*world,
+		floorOffsets, *sector);
 	ImGui::TextUnformatted(effectiveText.c_str());
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Where this Sector draws: the offset its Layer has accumulated "
@@ -8718,6 +8727,17 @@ void renderLayersPanel(editor::DocumentPtr const& document)
 
 	auto const layerCount = world->getLayerCount();
 
+	// The whole staircase of Layer offsets, built once for the table.
+	//
+	// Asked here rather than per row because of what the answer costs: the
+	// World produces it by walking every Sector in itself, so asking it one
+	// Layer at a time was a full walk per row - Layers x Sectors for one
+	// table, every frame the node stayed open, which is tens of milliseconds
+	// at a large World (#1113). The rows index into this array, and it is
+	// the same staircase the draw pass lifts by, so the number in the row is
+	// still the number the picture is drawn with.
+	auto const floorOffsets = world->layerFloorOffsets();
+
 	// Loads, undos, and layer edits can all change the layer count from under us.
 	gUISettings.visibleLayer = std::clamp(gUISettings.visibleLayer, 0,
 		static_cast<int>(layerCount) - 1);
@@ -8803,10 +8823,12 @@ void renderLayersPanel(editor::DocumentPtr const& document)
 			renderLayerNameEditor(document, layer);
 
 			// Where this Layer draws, accumulated from every Layer in front of
-			// it. Read-only, and read from the same query the renderer lifts by,
-			// so the number in the row is the number the picture is drawn with.
+			// it. Read-only, and read out of the same staircase the renderer
+			// lifts by, so the number in the row is the number the picture is
+			// drawn with.
 			ImGui::TableSetColumnIndex(2);
-			auto const floorOffsetText = editor::layerFloorOffsetText(*world, layer);
+			auto const floorOffsetText = editor::layerFloorOffsetText(floorOffsets,
+				layer);
 			ImGui::TextUnformatted(floorOffsetText.c_str());
 			if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
 				ImGui::SetTooltip("Read-only: what the Layers in front of %s add up to. "

@@ -306,6 +306,8 @@ set(editor_names
     floorDepthPanel/theInputRefusesAValueOutsideOneLevelEitherWay
     floorDepthPanel/theEffectiveReadoutAddsTheLayerOffsetToTheOwnDepth
     floorDepthPanel/theLayersTableShowsEachLayersAccumulatedPixels
+    floorDepthPanel/theEditorNeverAsksTheWorldForOneLayerOffset
+    floorDepthPanel/thePanelsBuildTheStaircaseOncePerFrame
     floorDepthPanel/breakAwayEditAndResetAreEachOneUndoStep
     floorDepthPanel/aRefusedOrNoOpRowWriteIsNotAnUndoStep
     floorDepthPanel/theRowReadsTheSameForTheTypesThatTakeTheirOwnPanels

@@ -44,6 +44,16 @@
 // or the save/load round trip. Those are pinned at the World tier (#1101),
 // the authoring tier (#1103) and the persistence tier (#1103); this tier
 // reads their answers and says nothing about how they were arrived at.
+//
+// Two of the checks below read the editor's own source rather than any
+// World. They pin the *call shape* of the panels - that the Layers table
+// builds the staircase of Layer offsets once per frame instead of once per
+// row, and that the Sector selection row builds its one readout's
+// staircase below the widgets that write it (#1113). Those are facts about
+// how the panels are written, and the panels live in the editor executable
+// no check may link, so the source is the only place left to hold them. A
+// per-row build is invisible in every other observable: the numbers are
+// identical either way, and only the frame time knows the difference.
 
 #include "Checks.h"
 #include "State.h"
@@ -58,6 +68,8 @@
 #include "game/WorldAuthoring.h"
 
 #include <cstdint>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <set>
 #include <string>
@@ -170,6 +182,86 @@ namespace
 			&diagnostic);
 		if (write.accepted && write.changed) authoring.commitEdit(before);
 		return write;
+	}
+
+	// The editor's own source, read as text.
+	//
+	// Reading the panel's source is the only way to pin its call shape: the
+	// widgets live in the editor executable, which no check may link, so
+	// nothing this process can run will ever call `renderLayersPanel`. What
+	// the check can do is hold the source to the shape that makes the panel
+	// cheap, which is a fact about the source and not about any state a
+	// running editor would have to be driven into.
+	std::string readEditorSource(smoke::Context const& context)
+	{
+		std::ifstream input(context.fixture("editor/src/UI.cpp"), std::ios::binary);
+		require(input.is_open(), "the check could not read the editor's UI source");
+		return std::string{std::istreambuf_iterator<char>(input),
+			std::istreambuf_iterator<char>{}};
+	}
+
+	// The source with its `//` comments taken out.
+	//
+	// The shape being pinned is a fact about the code, not about the prose
+	// written around it, and prose is exactly where a future editor would
+	// record "do not reach for layerFloorOffsetPx here" - which a raw text
+	// search would report as a violation of the very thing it was written
+	// to explain. Only line comments are stripped: this file carries no block
+	// comments but for unused-parameter markers, and writing a mini lexer for
+	// a case the file does not have would be its own fragility.
+	std::string codeOnly(std::string const& source)
+	{
+		std::string out;
+		out.reserve(source.size());
+		std::size_t line = 0;
+		while (line < source.size())
+		{
+			auto const end = source.find('\n', line);
+			auto const length = end == std::string::npos ? source.size() - line
+				: end - line;
+			auto const text = source.substr(line, length);
+			auto const comment = text.find("//");
+			out += comment == std::string::npos ? text : text.substr(0, comment);
+			if (end == std::string::npos) break;
+			out += '\n';
+			line = end + 1;
+		}
+		return out;
+	}
+
+	// The body of one top-level function, braces matched from the signature.
+	//
+	// Matched rather than sliced by line numbers because line numbers move
+	// with every unrelated edit, and a check that fails on a reformat is
+	// noise rather than a signal. The functions this is pointed at hold no
+	// brace inside a string or comment, which is what makes a plain count of
+	// them a sound read.
+	std::string functionBody(std::string const& source, std::string const& signature)
+	{
+		auto const start = source.find(signature);
+		require(start != std::string::npos,
+			"no function starting \"" + signature + "\" in the editor source");
+		auto const open = source.find('{', start);
+		require(open != std::string::npos, "no opening brace after \"" + signature
+			+ "\" in the editor source");
+		int depth = 0;
+		for (std::size_t i = open; i < source.size(); ++i)
+		{
+			if (source[i] == '{') ++depth;
+			else if (source[i] == '}' && --depth == 0)
+				return source.substr(open, i - open + 1);
+		}
+		require(false, "unbalanced braces in \"" + signature + "\"");
+		return {};
+	}
+
+	std::size_t countOccurrences(std::string const& haystack, std::string const& needle)
+	{
+		std::size_t count = 0;
+		for (auto at = haystack.find(needle); at != std::string::npos;
+			at = haystack.find(needle, at + needle.size()))
+			++count;
+		return count;
 	}
 }
 
@@ -384,39 +476,44 @@ namespace editor_smoke
 		writeTypeThroughTable(*stair.document, core::SectorType::Location, 24);
 		writeThroughRow(*stair.document, sectorOn(*stair.world, 1, "Behind")->getIndex(), 12);
 
+		// The staircase the row is handed. The panel builds one of these per
+		// frame and reads every Layer's share out of it, which is what the
+		// readout costs here and nothing more (#1113).
+		auto const offsets = stair.world->layerFloorOffsets();
+
 		// Layer 1 has drawn 24px off, from the front Layer's Rooms. Its own
 		// Room carries 12 of its own, so it draws 36 off, and the readout
 		// says both halves.
 		auto const behind = sectorOn(*stair.world, 1, "Behind");
 		require(stair.world->layerFloorOffsetPx(1) == 24,
 			"the Layer behind the front Rooms does not draw 24px off");
-		require(editor::sectorFloorDepthEffectiveText(*stair.world, *behind)
+		require(editor::sectorFloorDepthEffectiveText(*stair.world, offsets, *behind)
 				== "Effective +36 px (Layer +24 px + own +12 px)",
 			"the effective readout does not add the two halves: "
-				+ editor::sectorFloorDepthEffectiveText(*stair.world, *behind));
+				+ editor::sectorFloorDepthEffectiveText(*stair.world, offsets, *behind));
 
 		// The front Layer's own Room: no Layer offset in front of it, so the
 		// readout is its own depth over a zero Layer.
 		auto const front = sectorOn(*stair.world, 0, "Front");
-		require(editor::sectorFloorDepthEffectiveText(*stair.world, *front)
+		require(editor::sectorFloorDepthEffectiveText(*stair.world, offsets, *front)
 				== "Effective +24 px (Layer +0 px + own +24 px)",
 			"the front Sector's readout is wrong: "
-				+ editor::sectorFloorDepthEffectiveText(*stair.world, *front));
+				+ editor::sectorFloorDepthEffectiveText(*stair.world, offsets, *front));
 
 		// A Sector that follows a type with a depth of its own counts that
 		// depth into the sum, and one that carries none reads its Layer's
 		// offset over a zero of its own rather than going quiet.
 		auto const deep = sectorOn(*stair.world, 2, "Deep");
-		require(editor::sectorFloorDepthEffectiveText(*stair.world, *deep)
+		require(editor::sectorFloorDepthEffectiveText(*stair.world, offsets, *deep)
 				== "Effective +60 px (Layer +36 px + own +24 px)",
 			"a following Sector did not count its type's depth into the readout: "
-				+ editor::sectorFloorDepthEffectiveText(*stair.world, *deep));
+				+ editor::sectorFloorDepthEffectiveText(*stair.world, offsets, *deep));
 		auto const screen = sectorOn(*stair.world, 2, "Screen");
-		require(editor::sectorFloorDepthEffectiveText(*stair.world, *screen)
+		require(editor::sectorFloorDepthEffectiveText(*stair.world, offsets, *screen)
 				== "Effective +36 px (Layer +36 px + own +0 px)",
 			"a Sector with no depth of its own should read its Layer's offset "
 				"over zero: "
-				+ editor::sectorFloorDepthEffectiveText(*stair.world, *screen));
+				+ editor::sectorFloorDepthEffectiveText(*stair.world, offsets, *screen));
 	}
 
 	// The Layers table's read-only column: each Layer's accumulated pixels,
@@ -431,29 +528,45 @@ namespace editor_smoke
 		writeTypeThroughTable(*stair.document, core::SectorType::Location, 24);
 		writeThroughRow(*stair.document, sectorOn(*stair.world, 1, "Behind")->getIndex(), 12);
 
+		// The one staircase the table's rows are read out of, exactly as the
+		// panel builds it once per frame (#1113).
+		auto const offsets = stair.world->layerFloorOffsets();
+
 		// Front Layer: nothing in front of it, so +0. Layer 1: the front
 		// Layer's deepest floor, 24. Layer 2: that plus Layer 1's deepest,
 		// which is the overridden 12 rather than the 24 its Rooms follow.
-		require(editor::layerFloorOffsetText(*stair.world, 0) == "+0 px",
-			"the front Layer's cell: " + editor::layerFloorOffsetText(*stair.world, 0));
-		require(editor::layerFloorOffsetText(*stair.world, 1) == "+24 px",
-			"the second Layer's cell: " + editor::layerFloorOffsetText(*stair.world, 1));
-		require(editor::layerFloorOffsetText(*stair.world, 2) == "+36 px",
-			"the third Layer's cell: " + editor::layerFloorOffsetText(*stair.world, 2));
+		require(editor::layerFloorOffsetText(offsets, 0) == "+0 px",
+			"the front Layer's cell: " + editor::layerFloorOffsetText(offsets, 0));
+		require(editor::layerFloorOffsetText(offsets, 1) == "+24 px",
+			"the second Layer's cell: " + editor::layerFloorOffsetText(offsets, 1));
+		require(editor::layerFloorOffsetText(offsets, 2) == "+36 px",
+			"the third Layer's cell: " + editor::layerFloorOffsetText(offsets, 2));
 
-		// The cell is the renderer's number, not a copy of it.
+		// The cell is the renderer's number, not a copy of it. The cell reads
+		// the hoisted array and this reads the World's own per-Layer answer,
+		// so the two are checked against each other rather than both being
+		// the same call wearing different names.
 		for (std::uint32_t layer = 0; layer < stair.world->getLayerCount(); ++layer)
-			require(editor::layerFloorOffsetText(*stair.world, layer)
+			require(editor::layerFloorOffsetText(offsets, layer)
 					== editor::floorDepthPxText(stair.world->layerFloorOffsetPx(layer)),
 				"Layer " + std::to_string(layer) + "'s cell is not the offset the "
 					"renderer lifts by");
 
+		// A Layer past the end of the staircase is a Layer nothing has
+		// lifted, and reads zero rather than running off the end of the array.
+		require(editor::layerFloorOffsetText(offsets, static_cast<std::uint32_t>(
+			stair.world->getLayerCount())) == "+0 px",
+			"a Layer past the end of the staircase did not read as unlifted: "
+				+ editor::layerFloorOffsetText(offsets, static_cast<std::uint32_t>(
+					stair.world->getLayerCount())));
+
 		// A negative depth pushes the staircase down and the column says so
 		// with a minus rather than swallowing it at zero.
 		writeTypeThroughTable(*stair.document, core::SectorType::Location, -16);
-		require(editor::layerFloorOffsetText(*stair.world, 1) == "-16 px",
+		auto const pushed = stair.world->layerFloorOffsets();
+		require(editor::layerFloorOffsetText(pushed, 1) == "-16 px",
 			"a negative depth did not reach the column: "
-				+ editor::layerFloorOffsetText(*stair.world, 1));
+				+ editor::layerFloorOffsetText(pushed, 1));
 	}
 
 	// Break-away, edit and reset are each one undo step, and one step only.
@@ -778,6 +891,67 @@ namespace editor_smoke
 		require(!authoring.canRedo(), "the row acts left more than three redo steps");
 	}
 
+	// The editor never asks the World for one Layer's floor offset (#1113).
+	//
+	// `World::layerFloorOffsetPx` answers a question about one Layer by
+	// building the whole staircase, which is a walk over every Sector in the
+	// World. Nothing at the call site says so, and the Layers table paid for
+	// that silence once per row - Layers x Sectors of walking for one panel,
+	// every frame the node stayed open. The editor reads Layer offsets out of
+	// a staircase it builds once per frame now, so this pins the per-Layer
+	// query out of the editor outright rather than trusting that nobody
+	// reaches for the cheap-looking one again.
+	void theEditorNeverAsksTheWorldForOneLayerOffset(smoke::Context const& context)
+	{
+		auto const source = codeOnly(readEditorSource(context));
+		require(source.find("layerFloorOffsetPx") == std::string::npos,
+			"the editor asks the World for one Layer's floor offset; that query "
+			"rebuilds the whole staircase - a walk over every Sector in the World - "
+			"so it must not be called where a frame asks many times (#1113)");
+	}
+
+	// Each panel that draws floor offsets builds the staircase once, and in
+	// the place that keeps the numbers it shows current (#1113).
+	//
+	// Two shapes are being pinned, and they pull in opposite directions. The
+	// Layers table wants the build as high as it will go - above the row loop,
+	// so the walk happens once for the whole table instead of once per row.
+	// The Sector selection row wants its build as low as it will go - below
+	// the Break away button and the depth input, both of which change the
+	// staircase the readout reports, so a build above them would show the
+	// author the number from before the edit they just made.
+	void thePanelsBuildTheStaircaseOncePerFrame(smoke::Context const& context)
+	{
+		auto const source = codeOnly(readEditorSource(context));
+
+		auto const table = functionBody(source, "void renderLayersPanel(");
+		auto const tableBuilds = countOccurrences(table, "layerFloorOffsets()");
+		require(tableBuilds == 1, "the Layers panel builds the staircase "
+			+ std::to_string(tableBuilds) + " times; one build per frame is the "
+			"whole of #1113, and more than one is the cost coming back");
+		auto const rowLoop = table.find("for (uint32_t layer");
+		require(rowLoop != std::string::npos, "the Layers panel's row loop was not "
+			"found, so the check cannot say whether the staircase is built above it");
+		require(table.find("layerFloorOffsets()") < rowLoop,
+			"the Layers panel builds the staircase inside its row loop, which puts "
+			"the Layers x Sectors cost of #1113 back");
+		require(countOccurrences(table, "layerFloorOffsetText(floorOffsets") == 1,
+			"the Layers panel's offset cell does not read the hoisted staircase, so "
+			"it is asking for the offset somewhere else");
+
+		auto const row = functionBody(source, "void renderSectorFloorDepthRow(");
+		auto const rowBuilds = countOccurrences(row, "layerFloorOffsets()");
+		require(rowBuilds == 1, "the Sector floor depth row builds the staircase "
+			+ std::to_string(rowBuilds) + " times; it has one readout to fill");
+		auto const input = row.find("##sectorFloorDepth");
+		require(input != std::string::npos, "the Sector floor depth row's input was "
+			"not found, so the check cannot say what the readout must sit below");
+		require(row.find("layerFloorOffsets()") > input,
+			"the effective readout's staircase is built above the depth input that "
+			"writes it, so an edit made this frame would be reported at its old "
+			"value");
+	}
+
 	void registerSectorFloorDepthPanel(std::vector<smoke::Check>& checks)
 	{
 		checks.push_back({ "floorDepthPanel/followWordingCoversEverySectorType",
@@ -798,6 +972,10 @@ namespace editor_smoke
 			theEffectiveReadoutAddsTheLayerOffsetToTheOwnDepth });
 		checks.push_back({ "floorDepthPanel/theLayersTableShowsEachLayersAccumulatedPixels",
 			theLayersTableShowsEachLayersAccumulatedPixels });
+		checks.push_back({ "floorDepthPanel/theEditorNeverAsksTheWorldForOneLayerOffset",
+			theEditorNeverAsksTheWorldForOneLayerOffset });
+		checks.push_back({ "floorDepthPanel/thePanelsBuildTheStaircaseOncePerFrame",
+			thePanelsBuildTheStaircaseOncePerFrame });
 		checks.push_back({ "floorDepthPanel/breakAwayEditAndResetAreEachOneUndoStep",
 			breakAwayEditAndResetAreEachOneUndoStep });
 		checks.push_back({ "floorDepthPanel/aRefusedOrNoOpRowWriteIsNotAnUndoStep",

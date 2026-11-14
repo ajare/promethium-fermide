@@ -41,9 +41,19 @@
 // The sign is always spelled. A depth reads the same way in every sentence
 // it appears in, and "+24" against "-12" makes the direction of the lift
 // readable at a glance instead of something to work out from context.
+//
+// Sentences that need a Layer's accumulated offset take the staircase as an
+// argument rather than asking the World for it. That is a cost decision, not
+// a style one: `World::layerFloorOffsets` answers only by walking every
+// Sector in the World, so a helper that asked on the caller's behalf was
+// harmless once and ruinous in a loop - one whole walk per table row, which
+// at a large World is tens of milliseconds for one panel (#1113). The
+// caller builds the staircase once for the panel and hands it down; what
+// the header does with it is an index and nothing more.
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "core/Defines.h"
 #include "core/Sector.h"
@@ -139,22 +149,45 @@ namespace editor
 		return floorDepthFollowText(type, world.sectorTypeFloorDepth(type));
 	}
 
+	// One Layer's share of a staircase that has already been built.
+	//
+	// A Layer past the end answers zero, which is the answer
+	// `World::layerFloorOffsetPx` gives for the same question: a staircase
+	// shorter than the question asked is a Layer nothing has lifted, not a
+	// miscount to report.
+	inline std::int32_t layerFloorOffsetAt(
+		std::vector<std::int32_t> const& layerOffsets, std::uint32_t layerIndex)
+	{
+		return layerIndex < layerOffsets.size() ? layerOffsets[layerIndex] : 0;
+	}
+
 	// The effective readout for one live Sector, read off the World's own
 	// two answers: where its Layer draws, and how deep the Sector is.
+	//
+	// The staircase is passed in rather than asked for here so that no
+	// sentence in this header hides a walk over the World behind a call that
+	// looks as cheap as the ones above it (#1113). The other half of the
+	// sum - the Sector's own effective depth - is a field read and a map
+	// lookup, so the walk was the whole of what this used to cost.
 	inline std::string sectorFloorDepthEffectiveText(core::World const& world,
-		core::Sector const& sector)
+		std::vector<std::int32_t> const& layerOffsets, core::Sector const& sector)
 	{
 		return floorDepthEffectiveText(
-			world.layerFloorOffsetPx(sector.getLayerIndex()),
+			layerFloorOffsetAt(layerOffsets, sector.getLayerIndex()),
 			world.effectiveFloorDepth(sector.getIndex()));
 	}
 
 	// The Layers table's read-only "Floor offset" cell: that Layer's
 	// accumulated pixels, in the same signed wording every other depth
 	// sentence uses.
-	inline std::string layerFloorOffsetText(core::World const& world,
-		std::uint32_t layerIndex)
+	//
+	// Reads the frame's staircase rather than the World because this cell is
+	// drawn once per Layer: asked of the World it was a walk over every
+	// Sector in the World, once per row, every frame the table was open
+	// (#1113).
+	inline std::string layerFloorOffsetText(
+		std::vector<std::int32_t> const& layerOffsets, std::uint32_t layerIndex)
 	{
-		return floorDepthPxText(world.layerFloorOffsetPx(layerIndex));
+		return floorDepthPxText(layerFloorOffsetAt(layerOffsets, layerIndex));
 	}
 }
