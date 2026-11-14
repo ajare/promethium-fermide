@@ -920,9 +920,11 @@ private:
 
 //
 // The Sectors of one Layer that the current viewport sees: culled from the
-// visible world origin (-xOffset, -yOffset) over the viewport's size. Every
-// render pass culls through here so the passes cannot disagree (#58). Declared
-// here so the headless viewport-culling check can exercise the real bounds.
+// visible world origin (-xOffset, -yOffset) over the viewport's size, widened
+// by the lift this Layer draws at so a Layer shifted into view is not culled
+// out from under its own picture (#1108). Every render pass culls through
+// here so the passes cannot disagree (#58). Declared here so the headless
+// viewport-culling check can exercise the real bounds.
 //
 std::vector<std::shared_ptr<const core::Sector>> viewportSectors(
 	std::shared_ptr<const core::World> const& world, uint32_t layer);

@@ -3419,14 +3419,44 @@ void renderTransitThroughApertures(shared_ptr<const core::Sector> const& transit
 // viewport's own width and height. Passing a hard-coded Y origin here is what
 // made high levels vanish when scrolled into view.
 //
+// The floor lift belongs in this query too (#1108). The lift is a term of the
+// same mapping the cull inverts - the Layer draws at
+// `screenY = flipY - worldY * levelHeight * zoom - yOffset - lift` - so the
+// World band the viewport actually sees sits `lift / (levelHeight * zoom)`
+// Levels lower than the band the viewport alone describes. Ask without the
+// term and a Layer lifted up into the bottom of the viewport is culled: the
+// shifted Rooms are plainly on screen and nothing is drawn for them.
+//
+// Widened rather than shifted. What is asked for is the union of the viewport's
+// own band and the band this Layer's lift moves it to, so the slack that was
+// already there at the top edge - a Room draws above its top cell by its
+// `topLevelHeight` - is kept while the lifted content is picked up. Shifting
+// buys the bottom edge by giving up the top one, and a negative lift (a floor
+// pushed down) would then miss at the top instead of the bottom. The extra
+// rows are a superset of what is visible and the viewport's own scissor
+// trims them, so no extra pixel reaches the picture.
+//
+// The lift is read for the Layer whose Sectors are being fetched, not for
+// whichever Layer the pass happens to be drawing over. The Solid and Wireframe
+// passes ask for their own Layer; the aperture pass asks for the front Layer's
+// Sectors and must cull by the front Layer's lift, because those Sectors are
+// the holes and the holes are measured in the front Layer's frame (#1102).
+//
 std::vector<std::shared_ptr<const core::Sector>> viewportSectors(
 	std::shared_ptr<const core::World> const& world, uint32_t layer)
 {
 	auto const inverseZoom = 1.0f / gUISettings.worldZoom;
+	// `layerFloorLiftPx` answers in screen pixels at this zoom; the bounds
+	// query works in document pixels at 1x, so the lift crosses back on the
+	// same factor the rest of the band does. With no depth anywhere in the
+	// World this is zero, and the band is the arithmetic it always was -
+	// added, not reordered, so a flat World culls identically to before.
+	auto const lift = layerFloorLiftPx(layer) * inverseZoom;
 	return world->getSectorsInBounds(layer,
-		-gUISettings.xOffset * inverseZoom, -gUISettings.yOffset * inverseZoom,
+		-gUISettings.xOffset * inverseZoom,
+		-gUISettings.yOffset * inverseZoom - std::max(lift, 0.0f),
 		gUISettings.worldViewportWidth * inverseZoom,
-		gUISettings.worldViewportHeight * inverseZoom);
+		gUISettings.worldViewportHeight * inverseZoom + std::abs(lift));
 }
 
 

@@ -393,6 +393,12 @@ set(names
     verticalOffsetTracksTheVisibleOrigin
     fullyScrolledTopLevelIsVisible
     renderPassPaintsScrolledInSectorOnly
+    liftedSectorAtTheViewportBottomIsDrawn
+    theGameFollowCameraKeepsLiftedSectorsInView
+    aPushedDownLayerIsNotMissedAtTheTopEdge
+    theLiftedBandKeepsEverySectorTheFlatBandFetched
+    aFlatWorldCullsTheBandItAlwaysCulled
+    theAperturePassCullsByTheFrontLayersLift
     theMiddleOfTheCanvasDoesNotScroll
     approachingEachBorderScrollsInTheExpectedDirection
     scrollingAcceleratesTowardTheBorderAndStaysBoundedOutside
