@@ -13,5 +13,6 @@ int main(int argc, char** argv)
 	registerGameAuthoringResourceBinding(checks);
 	registerGameAuthoringPersistence(checks);
 	registerGameAuthoringBoundary(checks);
+	registerGameAuthoringFloorDepth(checks);
 	return smoke::main("game-authoring", checks, argc, argv);
 }

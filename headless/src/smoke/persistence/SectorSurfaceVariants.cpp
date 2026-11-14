@@ -429,7 +429,7 @@ namespace persistence
 		plain.finishBuild();
 		plain.pauseSimulation();
 		auto document = YAML::Load(serialize(plain));
-		require(document["version"].as<uint32_t>() == 71,
+		require(document["version"].as<uint32_t>() == 72,
 			"The current writer is not the version this check is bumping from");
 		document["version"] = 69;
 		auto const loaded = load(YAML::Dump(document));

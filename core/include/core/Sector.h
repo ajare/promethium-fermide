@@ -70,6 +70,19 @@ namespace core
 		// variant recorded holds an empty list and draws what it always drew.
 		std::vector<SectorSurfaceVariant> mSurfaceVariants;
 
+		// How deep this Sector's floor runs into the screen, as a signed count
+		// of pixels at 1x zoom (#1101). Artwork only: nothing here is read by
+		// traversal, capacity or any simulation state. It is not a position
+		// either - the Sector's own World coordinates stay exactly where they
+		// were authored - because a Sector's depth never moves itself, it
+		// moves every Layer behind it.
+		//
+		// Sparse. A Sector that lifts nothing holds nothing rather than a
+		// zero, which is what lets a World written before this feature load
+		// as all zero with no migration, and keeps a Sector lifted back to
+		// zero saved the way it was saved before it was ever lifted.
+		std::optional<int32_t> mFloorDepth;
+
 		std::vector<std::shared_ptr<SectorObject>> mObjects;
 
 		std::set<Agent*> mAgents;
@@ -121,6 +134,13 @@ namespace core
 		// record, and the live list is a projection of it that a rebuild
 		// re-derives rather than something to be edited in place (#1040).
 		void setSurfaceVariants(std::vector<SectorSurfaceVariant> entries);
+
+		// Replaces this Sector's floor depth from its own construction
+		// record. World-only, for the same reason `setSurfaceVariants` is:
+		// the depth is authored on the record, and the live value is a
+		// projection of it that a rebuild re-derives rather than something
+		// to be edited in place (#1101).
+		void setFloorDepth(std::optional<int32_t> depth);
 
 		void setEndType(uint32_t levelIndex, int side, SectorEndType type);
 
@@ -195,6 +215,11 @@ namespace core
 		// than a sentinel a caller has to remember the meaning of.
 		[[nodiscard]] std::optional<uint32_t> surfaceVariantAt(uint32_t column,
 			uint32_t level) const;
+
+		// The depth this Sector's floor was authored as, in signed pixels at
+		// 1x zoom. A Sector with no recorded depth answers 0, and 0 lifts
+		// nothing: the same picture the World drew before this field existed.
+		[[nodiscard]] int32_t getFloorDepth() const;
 
 		[[nodiscard]] SectorEndType getEndType(uint32_t levelIndex, int side) const;
 

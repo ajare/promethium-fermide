@@ -1466,6 +1466,16 @@ namespace core
 			// first resize. Empty is the ordinary case, and an empty list writes no
 			// field at all.
 			std::vector<SectorSurfaceVariant> surfaceVariants{};
+
+			// How deep the Sector this record creates lifts the Layers behind
+			// it, as a signed count of pixels at 1x zoom (#1101). Sparse in
+			// the same way the variant entries above are: a Sector that lifts
+			// nothing records no field at all, so a World written before floor
+			// depth existed saves and loads with nothing new and draws exactly
+			// what it drew before. A depth of zero is not written either, for
+			// the same reason - zero lifts nothing, which is what no field
+			// already means.
+			std::optional<int32_t> floorDepth{};
 		};
 
 		bool validateAccessPanel(uint32_t sectorIndex, uint32_t levelOffset, uint32_t cellX,
@@ -1572,6 +1582,16 @@ namespace core
 		// came back empty with entries to place is a broken wiring rather than a
 		// thing to dereference.
 		static void applySurfaceVariants(std::shared_ptr<Sector> const& sector,
+			ConstructionRecord const& record);
+
+		// Puts a creating record's floor depth on the Sector that record just
+		// built (#1101), by the same replay that put its geometry there and
+		// for the same reason `applySurfaceVariants` is called: a depth held
+		// only on the live Sector would evaporate on the first structural
+		// edit, which tears the World down and replays the records. Every
+		// Sector-creating type carries a depth, including Background and
+		// Facade, so this is not restricted the way variants are.
+		static void applyFloorDepth(std::shared_ptr<Sector> const& sector,
 			ConstructionRecord const& record);
 
 		// Re-keys the variant entries onto the local columns and levels that name
@@ -3087,6 +3107,72 @@ namespace core
 			std::string* diagnostic = nullptr) const;
 		SurfaceVariantWrite setSectorSurfaceVariant(uint32_t sectorIndex,
 			uint32_t column, uint32_t level, std::optional<uint32_t> variant,
+			std::string* diagnostic = nullptr);
+
+		// --- Sector floor depth ---
+		//
+		// The answer a floor depth write gives back, in the same two halves
+		// `SurfaceVariantWrite` keeps apart: whether the request was legal, and
+		// whether taking it left the World holding anything different. A depth
+		// asked for that the Sector already carries is legal and changes
+		// nothing, and a caller that owns the undo step has to be able to tell
+		// that from a write worth walking back.
+		struct FloorDepthWrite
+		{
+			bool accepted{ false };
+			bool changed{ false };
+		};
+
+		// How deep one Sector's floor was authored, in signed pixels at 1x
+		// zoom, resolving the sparse storage: a Sector with no recorded depth
+		// answers 0 (#1101). This is the fact about the World rather than
+		// about the object, which is what the panel and the renderer ask
+		// through the World rather than reaching for the Sector.
+		[[nodiscard]] int32_t effectiveFloorDepth(uint32_t sectorIndex) const;
+
+		// Where a Layer draws, accumulated from the Layers in front of it:
+		// `offset(L) = offset(L-1) + max(depth of the Sectors in Layer L-1)`,
+		// with Layer 0 at 0 (#1101). The maximum is taken over every Sector
+		// in the Layer in front, so there is exactly one offset per Layer and
+		// the shift is uniform across the whole screen. Overlap-based
+		// derivation was rejected: it seams where two adjacent back Sectors
+		// disagree and slides a back Room when an unrelated Room across the
+		// map is edited. The maximum is over the Sectors that exist and is
+		// not clamped at zero - a Layer whose Sectors are all negative
+		// contributes that negative and pushes the Layers behind it down,
+		// which is the whole reason a depth is signed. A Layer with no
+		// Sectors contributes nothing, so the accumulation needs no
+		// fallback rule. A Sector's own depth never moves itself; it moves
+		// everything behind it.
+		[[nodiscard]] int32_t layerFloorOffsetPx(uint32_t layerIndex) const;
+
+		// The whole staircase at once, index-aligned with the Layers and built
+		// in one pass over the Sectors. The world draw pass takes this once
+		// per frame rather than asking per Sector, and takes it fresh rather
+		// than caching it on the World: an invalidation cache would have to be
+		// invalidated from every write, undo, redo, load and rebuild, and one
+		// missed path leaves the picture disagreeing with the panel the author
+		// trusts. The array is at most CORE_MAX_LAYERS entries and the walk is
+		// over Sectors the renderer is about to visit anyway.
+		[[nodiscard]] std::vector<int32_t> layerFloorOffsets() const;
+
+		// Records a floor depth on one live Sector, or clears it back to no
+		// depth (#1101). Both halves are written - the live Sector, which is
+		// what draws this frame, and the record that created it, which is what
+		// saves and what the next rebuild replays - exactly as the surface
+		// variant seam does. Clearing is the same write as setting zero: a
+		// Sector with no field and a Sector at zero depth are one thing, and
+		// both save with no field.
+		//
+		// The value is refused outside the band one Level either way. A depth
+		// is a perspective cue, not a way of moving a Layer off the screen;
+		// refusing a mistyped 5000 at the seam is what keeps the author from
+		// having to find the one Sector that flung the picture away.
+		bool canSetSectorFloorDepth(uint32_t sectorIndex, int32_t depth,
+			std::string* diagnostic = nullptr) const;
+		FloorDepthWrite setSectorFloorDepth(uint32_t sectorIndex, int32_t depth,
+			std::string* diagnostic = nullptr);
+		FloorDepthWrite clearSectorFloorDepth(uint32_t sectorIndex,
 			std::string* diagnostic = nullptr);
 
 		// The `const` view answers with a `const Agent` (#974), matching

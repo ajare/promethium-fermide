@@ -678,6 +678,39 @@ core::SurfaceVariantWrite WorldAuthoring::setSectorSurfaceVariant(
 		diagnostic);
 }
 
+bool WorldAuthoring::canSetSectorFloorDepth(uint32_t sectorIndex, int32_t depth,
+	std::string* diagnostic) const
+{
+	return document().canSetSectorFloorDepth(sectorIndex, depth, diagnostic);
+}
+
+core::World::FloorDepthWrite WorldAuthoring::setSectorFloorDepth(
+	uint32_t sectorIndex, int32_t depth, std::string* diagnostic)
+{
+	return world().setSectorFloorDepth(sectorIndex, depth, diagnostic);
+}
+
+core::World::FloorDepthWrite WorldAuthoring::clearSectorFloorDepth(
+	uint32_t sectorIndex, std::string* diagnostic)
+{
+	return world().clearSectorFloorDepth(sectorIndex, diagnostic);
+}
+
+int32_t WorldAuthoring::effectiveFloorDepth(uint32_t sectorIndex) const
+{
+	return document().effectiveFloorDepth(sectorIndex);
+}
+
+int32_t WorldAuthoring::layerFloorOffsetPx(uint32_t layerIndex) const
+{
+	return document().layerFloorOffsetPx(layerIndex);
+}
+
+std::vector<int32_t> WorldAuthoring::layerFloorOffsets() const
+{
+	return document().layerFloorOffsets();
+}
+
 // --- Agents ---
 bool WorldAuthoring::canPlaceAgentInLocation(uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets, std::string* diagnostic) const
 {

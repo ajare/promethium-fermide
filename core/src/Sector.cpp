@@ -135,6 +135,19 @@ namespace core
 		mSurfaceVariants = std::move(entries);
 	}
 
+	int32_t Sector::getFloorDepth() const
+	{
+		// The absence and a recorded zero are the same answer to this question:
+		// both lift nothing. The distinction they keep is about the document -
+		// whether a field was written - and is not this reader's business.
+		return mFloorDepth.value_or(0);
+	}
+
+	void Sector::setFloorDepth(std::optional<int32_t> depth)
+	{
+		mFloorDepth = depth;
+	}
+
 	SectorEndType Sector::getEndType(uint32_t levelIndex, int side) const
 	{
 		assert(levelIndex < getLevelsHigh());

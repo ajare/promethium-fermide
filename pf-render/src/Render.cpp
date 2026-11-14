@@ -75,6 +75,109 @@ RenderWorldScope::~RenderWorldScope()
 	gRenderWorld = std::move(mPrevious);
 }
 
+//
+// The floor lift currently in force, in screen pixels (#1101).
+//
+// A Sector whose floor runs deep lifts the Layers behind it. The lift is
+// carried here as one ambient number that the renderer's own step onto the
+// shared mapping reads, rather than as an argument threaded through the
+// twenty-odd draw helpers between `renderSector` and the pixels, because
+// the lift is a property of the picture being drawn and not of any one of
+// those helpers. A scope installs it and puts back what was there on every
+// exit, so no path leaves a lift set that the next draw inherits by
+// accident.
+//
+// The scope is deliberately narrow in this slice: only the tile surface is
+// drawn inside it. Thresholds, transit geometry, objects, Agents, the
+// Sector's own clip and the selection highlight all still draw by the
+// unlifted mapping, which is the intermediate state the ticket names - the
+// surface moves first, and the rest follows behind it together rather than
+// half of one thing moving and half of another.
+//
+static float gFloorLiftPx{ 0.0f };
+
+// The per-Layer floor offsets for the frame in progress, index-aligned with
+// the World's Layers, installed once by `renderWorld` (#1101).
+//
+// Installed once per frame and read per Sector, rather than asked per
+// Sector, because the staircase is one walk over the Sectors and asking it
+// per Sector would walk the whole World once for every Sector drawn. Held
+// as an ambient rather than cached on the World, because a cache on the
+// World would need invalidating from the authoring seam, from undo, from
+// redo, from load and from rebuild, and one missed path leaves the picture
+// disagreeing with the panel the author reads the number off. This is
+// recomputed from the World every frame and cannot be stale for longer than
+// a frame, which is the whole of the guarantee wanted.
+//
+// Absent rather than empty when no frame is in progress: a caller driving
+// `renderSector` directly has installed no staircase, and falls back to
+// asking the World on the spot instead of drawing everything at zero lift
+// because nobody told it otherwise.
+//
+static std::optional<std::vector<int32_t>> gLayerFloorOffsets;
+
+namespace
+{
+	// Installs a floor lift for the draws inside the scope and puts back the
+	// previous one on every exit.
+	class FloorLiftScope
+	{
+	public:
+		explicit FloorLiftScope(float liftPx)
+			: mPrevious(gFloorLiftPx)
+		{
+			gFloorLiftPx = liftPx;
+		}
+		FloorLiftScope(FloorLiftScope const&) = delete;
+		FloorLiftScope& operator=(FloorLiftScope const&) = delete;
+		~FloorLiftScope() { gFloorLiftPx = mPrevious; }
+	private:
+		float mPrevious{};
+	};
+
+	// Installs the frame's staircase of Layer offsets and puts back whatever
+	// was installed before, so a nested render inside a render restores
+	// rather than clobbering.
+	class LayerFloorOffsetScope
+	{
+	public:
+		explicit LayerFloorOffsetScope(std::vector<int32_t> offsets)
+			: mPrevious(std::move(gLayerFloorOffsets))
+		{
+			gLayerFloorOffsets = std::move(offsets);
+		}
+		LayerFloorOffsetScope(LayerFloorOffsetScope const&) = delete;
+		LayerFloorOffsetScope& operator=(LayerFloorOffsetScope const&) = delete;
+		~LayerFloorOffsetScope() { gLayerFloorOffsets = std::move(mPrevious); }
+	private:
+		std::optional<std::vector<int32_t>> mPrevious;
+	};
+}
+
+// How far the Layer draws, in screen pixels at the current zoom (#1101).
+//
+// Reads the staircase this frame installed. With no staircase installed - a
+// caller driving the Sector-level passes directly rather than through
+// `renderWorld` - asks the World the same question outright, so a headless
+// check that never opened a frame still gets the lift rather than a flat
+// picture it did not ask for.
+static float layerFloorLiftPx(uint32_t layerIndex)
+{
+	int32_t offsetPx{ 0 };
+	if (gLayerFloorOffsets)
+	{
+		if (layerIndex < gLayerFloorOffsets->size()) offsetPx = (*gLayerFloorOffsets)[layerIndex];
+	}
+	else if (gRenderWorld)
+	{
+		offsetPx = gRenderWorld->layerFloorOffsetPx(layerIndex);
+	}
+	// The World stores document-space pixels at 1x zoom; the lift is applied
+	// in screen space, so it scales with the zoom here rather than at every
+	// drawer.
+	return static_cast<float>(offsetPx) * gUISettings.worldZoom;
+}
+
 // Text is measured and tessellated through the font metrics the application
 // installed (#999). The producer names a face and a size; it never names a
 // font, never asks ImGui which font is current, and holds no icon-font global.
@@ -183,7 +286,9 @@ void renderStaircase(shared_ptr<const core::Staircase> staircase, WorldDrawList*
 // WorldToScreen.h and nowhere else.
 void transformPosition(core::Vector2& p)
 {
-	auto const screen = pf::render::worldToScreen(gUISettings).toScreen({p.x, p.y});
+	auto const screen = pf::render::worldToScreen(gUISettings)
+		.withFloorLift(gFloorLiftPx)
+		.toScreen({p.x, p.y});
 
 	p.x = screen.x;
 	p.y = screen.y;
@@ -2770,6 +2875,13 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	// Inherited rather than read off `worldViewportWidth`, which is zero for
 	// any caller that has not docked a viewport - and a zero-wide clip culls
 	// the whole Sector rather than leaving it unconstrained.
+	// The clip in force before this Sector's own footprint goes on it: the
+	// viewport, and any aperture clip the pass was already inside. Held on
+	// to because the lifted tile surface has to swap the Sector's footprint
+	// out and put its own in, while still being held by everything that
+	// was holding the Sector before it (#1101).
+	Vec2 const inheritedMin{ drawList->GetClipRectMin() };
+	Vec2 const inheritedMax{ drawList->GetClipRectMax() };
 	Vec2 const clipMin{ drawList->GetClipRectMin().x, min(bounds0.y, bounds1.y) };
 	Vec2 const clipMax{ drawList->GetClipRectMax().x, max(bounds0.y, bounds1.y) };
 
@@ -2847,11 +2959,45 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		// from `own`, never from `kind`, which is what stops a borrowing
 		// Sector wearing the borrowed family's variant (#1050).
 		auto const ownFamily = own ? std::string{ own } : std::string{};
+		// The tile surface is the one thing this slice lifts (#1101). The
+		// bounds are taken from the Sector again in World space and put
+		// through the mapping with the lift installed, rather than nudged
+		// after the fact, so the mapping stays the only place the picture is
+		// computed and the lifted surface lands exactly where the mapping
+		// says rather than where an arithmetic correction hoped.
+		//
+		// The clip the surface draws inside travels with it. Left on the
+		// unlifted footprint, the lift would crop the top off the surface it
+		// had just moved and leave a strip of nothing where that surface's
+		// floor used to be - which is not the surface having moved, and is
+		// not a picture an author would read as a floor running deep. Only
+		// this Sector's own footprint is swapped out: the viewport, and any
+		// aperture clip the pass came in with, hold the lifted surface just
+		// as tightly as they held it unlifted.
+		//
+		// Everything drawn after the Pop below - thresholds, transit
+		// geometry, objects, Agents, the selection highlight - is still
+		// clipped by the unlifted footprint pushed above and still draws at
+		// the unlifted mapping, which is the whole of what this slice
+		// leaves for the next one.
+		core::Vector2 surface0, surface1;
+		sector->getBounds(surface0, surface1);
+		FloorLiftScope const lift{ layerFloorLiftPx(sector->getLayerIndex()) };
+		transformPosition(surface0);
+		transformPosition(surface1);
+		Vec2 const surfaceClipMin{ clipMin.x,
+			max(inheritedMin.y, min(surface0.y, surface1.y)) };
+		Vec2 const surfaceClipMax{ clipMax.x,
+			min(inheritedMax.y, max(surface0.y, surface1.y)) };
+		drawList->AddDrawCmd();
+		drawList->PushClipRect(surfaceClipMin, surfaceClipMax, false);
 		if (!drawSectorTileSurfacePerCell(sheet, drawList,
-			{bounds0.x, bounds1.y},
-			{bounds1.x, bounds0.y}, gUISettings.worldZoom,
+			{surface0.x, surface1.y},
+			{surface1.x, surface0.y}, gUISettings.worldZoom,
 			sectorSurfaceTileResolver(sheet, ownFamily, std::move(kind), sector)))
-			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
+			drawList->AddRectFilled({ surface0.x, surface1.y },
+				{ surface1.x, surface0.y }, colour);
+		drawList->PopClipRect();
 	}
 
 	// Thresholds are normally drawn before the sector-specific geometry so their
@@ -3276,6 +3422,13 @@ void renderWorld(shared_ptr<const core::World> world, WorldDrawList* drawList)
 	// reachable by the Sector-level passes.
 	RenderWorldScope renderWorldScope(world);
 	if (!drawList) return;
+
+	// The staircase of Layer offsets for this frame, computed from the World
+	// now and read by every Sector this pass draws (#1101). Once per frame
+	// rather than once per Sector, and recomputed rather than cached: the
+	// frame always draws what the World says right now, with no invalidation
+	// to get wrong.
+	LayerFloorOffsetScope const floorOffsets{ world->layerFloorOffsets() };
 
 	auto const layerCount = world->getLayerCount();
 	auto const viewLayer = static_cast<uint32_t>(clamp(gUISettings.visibleLayer, 0,

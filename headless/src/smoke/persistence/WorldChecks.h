@@ -71,6 +71,16 @@ namespace persistence
 	void doorHeightPersistsAndIsLimitedToRooms(smoke::Context const&);
 	void roomHeightScaleRoundTrips(smoke::Context const&);
 	void sectorSurfaceVariantsRoundTrip(smoke::Context const&);
+	// A Sector floor depth saved, loaded, and surviving the rebuild (#1101).
+	void floorDepthRoundTrips(smoke::Context const&);
+	void aNegativeFloorDepthRoundTripsUnchanged(smoke::Context const&);
+	void theBandRoundTripsAtItsExtremes(smoke::Context const&);
+	void aWorldWithNoDepthsWritesNoField(smoke::Context const&);
+	void aDocumentWrittenBeforeFloorDepthExistedLoadsAsNoDepth(smoke::Context const&);
+	void aFloorDepthFieldBelowTheSchemaVersionThatDefinesItIsRefused(smoke::Context const&);
+	void theDepthSurvivesTheRebuildAStructuralEditPerforms(smoke::Context const&);
+	void everySectorCreatingRecordTypeCarriesItsFloorDepth(smoke::Context const&);
+	void aDepthChangesNothingElseInTheDocument(smoke::Context const&);
 	void aWorldThatNeverUsedVariantsWritesNoField(smoke::Context const&);
 	void aDocumentWrittenBeforeVariantsExistedLoadsAsNoVariants(smoke::Context const&);
 	void aVariantFieldBelowTheSchemaVersionThatDefinesItIsRefused(smoke::Context const&);

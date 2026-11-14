@@ -81,3 +81,6 @@ namespace render_smoke
 namespace render_smoke { void registerFurniture(std::vector<smoke::Check>& checks); }
 
 namespace render_smoke { void registerScaledDoors(std::vector<smoke::Check>& checks); }
+
+// A Sector's floor depth lifts the tile surface of the Layers behind it (#1101).
+namespace render_smoke { void registerFloorDepthLift(std::vector<smoke::Check>& checks); }

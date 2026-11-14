@@ -19,10 +19,12 @@ namespace pf::render
 	// the mapping is never stated a second time and cannot drift away from
 	// the picture it describes.
 	//
-	// It is the mapping only. It carries no term for what a Sector is, how
-	// deep it sits, or anything else that may one day shift the picture:
-	// such a term joins the mapping here, in the one expression, and every
-	// user of it picks the change up in the same build.
+	// It is the mapping only. It knows nothing about Sectors, Layers or what
+	// any of them means; the one term it carries for a shift that is not the
+	// viewport's own - the floor lift - is a count of screen pixels and is
+	// derived elsewhere. Every user of the mapping picks up that term in the
+	// same build, which is the point of it being here rather than in the
+	// handful of call sites that happen to draw something affected.
 	struct WorldToScreen
 	{
 		// Pixels per World unit of x, and per Level of y, at this mapping's zoom.
@@ -34,6 +36,15 @@ namespace pf::render
 		float flipY{};
 		// The vertical scroll, taken off the flipped y.
 		float scrollY{};
+		// How far the whole picture is lifted, in screen pixels at this zoom
+		// (#1101). Positive is up the screen: a Layer behind a Sector whose
+		// floor runs deep draws higher than it would have, and the lift is
+		// already scaled by the zoom here rather than being a World-space
+		// number each drawer has to remember to scale. Zero leaves both
+		// directions of the mapping exactly as they were before the term
+		// existed, which is what lets a flat World record the same command
+		// stream it recorded before.
+		float floorLiftPx{};
 
 		[[nodiscard]] constexpr float toScreenX(float worldX) const
 		{
@@ -42,7 +53,7 @@ namespace pf::render
 
 		[[nodiscard]] constexpr float toScreenY(float worldY) const
 		{
-			return flipY - worldY * levelHeight - scrollY;
+			return flipY - worldY * levelHeight - scrollY - floorLiftPx;
 		}
 
 		[[nodiscard]] constexpr Vec2 toScreen(Vec2 const& world) const
@@ -58,7 +69,7 @@ namespace pf::render
 
 		[[nodiscard]] constexpr float toWorldY(float screenY) const
 		{
-			return (flipY - screenY - scrollY) / levelHeight;
+			return (flipY - screenY - scrollY - floorLiftPx) / levelHeight;
 		}
 
 		// core::Vector2 is not a literal type, so the point-shaped inverse is the
@@ -66,6 +77,17 @@ namespace pf::render
 		[[nodiscard]] core::Vector2 toWorld(Vec2 const& screen) const
 		{
 			return {toWorldX(screen.x), toWorldY(screen.y)};
+		}
+
+		// The same mapping with a floor lift added (#1101). Returns a copy
+		// rather than mutating, so a caller can carry the unlifted mapping
+		// beside the lifted one - the Sector's own clip is cut from the
+		// unlifted picture while its tiles draw by the lifted one.
+		[[nodiscard]] constexpr WorldToScreen withFloorLift(float liftPx) const
+		{
+			auto lifted = *this;
+			lifted.floorLiftPx = liftPx;
+			return lifted;
 		}
 	};
 

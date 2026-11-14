@@ -144,6 +144,15 @@ namespace
 		{ "stairwellEditsUseTheStairwellsOwnLayer", persistence::stairwellEditsUseTheStairwellsOwnLayer },
 		{ "staircaseEditsReturnTheStaircaseOwnLayer", persistence::staircaseEditsReturnTheStaircaseOwnLayer },
 		{ "restorationPreservesStatePathsAndLifetimes", persistence::restorationPreservesStatePathsAndLifetimes },
+		{ "floorDepth/roundTripsThroughBothFormats", persistence::floorDepthRoundTrips },
+		{ "floorDepth/aNegativeFloorDepthRoundTripsUnchanged", persistence::aNegativeFloorDepthRoundTripsUnchanged },
+		{ "floorDepth/theBandRoundTripsAtItsExtremes", persistence::theBandRoundTripsAtItsExtremes },
+		{ "floorDepth/aWorldWithNoDepthsWritesNoField", persistence::aWorldWithNoDepthsWritesNoField },
+		{ "floorDepth/aDocumentWrittenBeforeFloorDepthExistedLoadsAsNoDepth", persistence::aDocumentWrittenBeforeFloorDepthExistedLoadsAsNoDepth },
+		{ "floorDepth/aFloorDepthFieldBelowTheSchemaVersionThatDefinesItIsRefused", persistence::aFloorDepthFieldBelowTheSchemaVersionThatDefinesItIsRefused },
+		{ "floorDepth/theDepthSurvivesTheRebuildAStructuralEditPerforms", persistence::theDepthSurvivesTheRebuildAStructuralEditPerforms },
+		{ "floorDepth/everySectorCreatingRecordTypeCarriesItsFloorDepth", persistence::everySectorCreatingRecordTypeCarriesItsFloorDepth },
+		{ "floorDepth/aDepthChangesNothingElseInTheDocument", persistence::aDepthChangesNothingElseInTheDocument },
 	};
 }
 

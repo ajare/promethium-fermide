@@ -92,6 +92,18 @@ set(checks
     horizontalTransitVariantCarry/wideningAHorizontalTransitDropsNothing
     horizontalTransitVariantCarry/aChamberWidthChangeIsARelocationAndLosesWhatTheOldCellsHeld
     horizontalTransitVariantCarry/aDumbwaiterMoveCarriesItsEntriesUnchanged
+    floorDepth/aWorldWithNoDepthsAnywhereIsFlat
+    floorDepth/anIndexOutsideTheWorldAnswersZero
+    floorDepth/oneDepthLiftsEveryLayerBehindIt
+    floorDepth/depthsAccumulateBackwards
+    floorDepth/theDeepestFloorInFrontWinsNotTheSum
+    floorDepth/aShallowerSectorBehindADeeperOneDoesNotLowerTheLift
+    floorDepth/negativeDepthsPushTheLayersBehindDown
+    floorDepth/opposingDepthsCancelAndCross
+    floorDepth/anEmptyLayerContributesNothing
+    floorDepth/theSingleStepAndTheWholeStaircaseAgree
+    floorDepth/theStaircaseFollowsTheWorldWithNoInvalidation
+    floorDepth/clearingAndSettingZeroAreTheSameWrite
 )
 string(JOIN "\n" listed ${checks})
 string(APPEND listed "\n")

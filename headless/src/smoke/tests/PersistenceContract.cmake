@@ -130,6 +130,15 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords accessPanels/roundTri
     stairwellEditsUseTheStairwellsOwnLayer
     staircaseEditsReturnTheStaircaseOwnLayer
     restorationPreservesStatePathsAndLifetimes
+    floorDepth/roundTripsThroughBothFormats
+    floorDepth/aNegativeFloorDepthRoundTripsUnchanged
+    floorDepth/theBandRoundTripsAtItsExtremes
+    floorDepth/aWorldWithNoDepthsWritesNoField
+    floorDepth/aDocumentWrittenBeforeFloorDepthExistedLoadsAsNoDepth
+    floorDepth/aFloorDepthFieldBelowTheSchemaVersionThatDefinesItIsRefused
+    floorDepth/theDepthSurvivesTheRebuildAStructuralEditPerforms
+    floorDepth/everySectorCreatingRecordTypeCarriesItsFloorDepth
+    floorDepth/aDepthChangesNothingElseInTheDocument
 )
 if(DEFINED LANE)
     set(lane_binary "${PERSISTENCE}")

@@ -310,6 +310,23 @@ namespace game
 	bool canSetSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column, uint32_t level, std::optional<uint32_t> variant, std::string* diagnostic = nullptr) const;
 	core::SurfaceVariantWrite setSectorSurfaceVariant(uint32_t sectorIndex, uint32_t column, uint32_t level, std::optional<uint32_t> variant, std::string* diagnostic = nullptr);
 
+	// The authoring half of "this Sector's floor runs this deep" (#1101).
+	// Same split as every other seam here: the preflight is a read the hover
+	// affordance can ask, the edit is not, and the edit answers with both
+	// halves of what happened so the caller owns the undo step and can tell
+	// a write worth recording from one that changed nothing. Clearing is the
+	// same write as setting zero.
+	bool canSetSectorFloorDepth(uint32_t sectorIndex, int32_t depth, std::string* diagnostic = nullptr) const;
+	core::World::FloorDepthWrite setSectorFloorDepth(uint32_t sectorIndex, int32_t depth, std::string* diagnostic = nullptr);
+	core::World::FloorDepthWrite clearSectorFloorDepth(uint32_t sectorIndex, std::string* diagnostic = nullptr);
+
+	// What the World says about floor depth: how deep one Sector's floor was
+	// authored, and how far a Layer draws as a result. Reads, so they go
+	// through the document rather than the editable World.
+	int32_t effectiveFloorDepth(uint32_t sectorIndex) const;
+	int32_t layerFloorOffsetPx(uint32_t layerIndex) const;
+	std::vector<int32_t> layerFloorOffsets() const;
+
 	// --- Agents ---
 	bool canPlaceAgentInLocation(uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets, std::string* diagnostic = nullptr) const;
 	core::AgentId createAgent(std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset);

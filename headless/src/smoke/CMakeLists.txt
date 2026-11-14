@@ -165,6 +165,7 @@ pf_add_smoke_module(pf-smoke-game-authoring
         game-authoring/ResourceBinding.cpp
         game-authoring/Persistence.cpp
         game-authoring/Boundary.cpp
+        game-authoring/FloorDepth.cpp
     LIBRARIES pf-game-authoring
     LABELS "core;game-authoring"
     TIMEOUT 30
@@ -547,6 +548,7 @@ pf_add_smoke_module(pf-smoke-world
         world/TransitSurfaceVariants.cpp
         world/HorizontalTransitSurfaceVariants.cpp
         world/LayerDeletion.cpp
+        world/FloorDepth.cpp
     LIBRARIES promethium-fermide-core
     LABELS core
     TIMEOUT 30
@@ -581,6 +583,7 @@ pf_add_smoke_module(pf-smoke-persistence
         persistence/DoorDocuments.cpp
         persistence/RoomHeightScaleDocuments.cpp
         persistence/SectorSurfaceVariants.cpp
+        persistence/FloorDepth.cpp
         persistence/WindowframePersistence.cpp
         persistence/BrokenDoors.cpp
         persistence/BrokenExtensibles.cpp
@@ -610,6 +613,7 @@ pf_add_smoke_module(pf-smoke-render
         render/SectorSurfacePerCellResolution.cpp
         render/SectorSurfaceBottomClip.cpp
         render/SectorSurfaceVariants.cpp
+        render/FloorDepthLift.cpp
         render/DoorframeCells.cpp
         render/WindowframeCells.cpp
         render/SectorTilePreview.cpp

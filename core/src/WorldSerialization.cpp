@@ -717,6 +717,15 @@ namespace core
 			}
 			serializer.endArray();
 		}
+		// The Sector's floor depth (#1101), last for the same reason the
+		// variant entries are: a Sector that never had one saves exactly as it
+		// did before the field existed - no empty field, no reordered key,
+		// nothing for an older reader to trip over. Sparse in both
+		// directions: no depth writes nothing, and a depth of zero writes
+		// nothing either, because zero lifts nothing and that is what no field
+		// already says.
+		if (record.floorDepth && *record.floorDepth != 0)
+			serializer.writeInt32("floorDepth", *record.floorDepth);
 	}
 
 	void World::serializeImpl(Serializer& serializer, SerializationWorkData& workData) const
@@ -811,7 +820,12 @@ namespace core
 		// with no `sectorImageSet` field inherits the World's sector Image set, and
 		// the legacy `layerNames` reader stays, so a pre-71 document - which names
 		// no per-Layer sheet anywhere - loads with every Layer inheriting.
-		serializer.writeUint32("version", 71);
+		// Version 72 lets a Sector's construction record carry a floor depth:
+		// a signed count of pixels at 1x zoom saying how far that Sector lifts
+		// the Layers behind it (#1101). A pre-72 document carries no such field
+		// on any record, so it loads as no depth recorded, which lifts nothing,
+		// which is exactly the flat picture it drew before the feature existed.
+		serializer.writeUint32("version", 72);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("objectImageSet", mObjectImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
@@ -1714,6 +1728,16 @@ namespace core
 			}
 			serializer.endArray();
 		}
+		// The Sector's floor depth (#1101). An absent field reads as no depth
+		// rather than as a zero written into an optional, which is what lets
+		// every World written before this feature existed load as all zero and
+		// draw exactly what it drew before with no migration pass.
+		if (serializer.hasField("floorDepth"))
+		{
+			if (version < 72) throw SerializationException(
+				"Sector floor depth requires World schema version 72 or later");
+			record.floorDepth = serializer.readInt32("floorDepth");
+		}
 		return record;
 	}
 
@@ -1746,7 +1770,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 71)
+		if (version < 1 || version > 72)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -3332,6 +3356,7 @@ namespace core
 			for (auto id : record.locationPermissionRequirement) location.mPermissionRequirement.set(id - 1);
 			if (record.roomHeightScale) location.setHeightScale(record.roomHeightScale);
 			applySurfaceVariants(mSectors[index], record);
+			applyFloorDepth(mSectors[index], record);
 			break;
 		}
 		case ConstructionType::Ladder:
@@ -3340,17 +3365,32 @@ namespace core
 			for (size_t endpoint = 0; endpoint < 2; ++endpoint)
 				for (auto permission : record.controlPermissionRequirements[endpoint])
 					options.controlPermissionRequirements[endpoint].push_back(AccessPermissionId{ permission });
-			applySurfaceVariants(addLadder(transitLayer(record), record.a, record.b, options).ladder.sector,
-				record);
+			// The created Sector is held once and handed to both applies. It
+			// used to be called inside each apply's argument, which would now
+			// build the Ladder twice.
+			{
+				auto const created = addLadder(transitLayer(record), record.a, record.b,
+					options).ladder.sector;
+				applySurfaceVariants(created, record);
+				applyFloorDepth(created, record);
+			}
 			break;
 		}
 		case ConstructionType::Stairwell:
-			applySurfaceVariants(mSectors[addStairwell(transitLayer(record), record.a, record.b,
-				{ record.c, record.i, record.d, record.e }).sectorIndex], record);
+			{
+				auto const created = mSectors[addStairwell(transitLayer(record), record.a,
+					record.b, { record.c, record.i, record.d, record.e }).sectorIndex];
+				applySurfaceVariants(created, record);
+				applyFloorDepth(created, record);
+			}
 			break;
 		case ConstructionType::Staircase:
-			applySurfaceVariants(mSectors[addStaircase(transitLayer(record), record.a, record.b,
-				{ record.c, record.i, record.x, record.initiallyBroken })], record);
+			{
+				auto const created = mSectors[addStaircase(transitLayer(record), record.a,
+					record.b, { record.c, record.i, record.x, record.initiallyBroken })];
+				applySurfaceVariants(created, record);
+				applyFloorDepth(created, record);
+			}
 			break;
 		case ConstructionType::Lift:
 		{
@@ -3362,8 +3402,11 @@ namespace core
 				for (auto permission : requirement)
 					options.landingControlPermissionRequirements.back().push_back(AccessPermissionId{ permission });
 			}
-			applySurfaceVariants(addLift(transitLayer(record), record.a, record.b, options).lift.sector,
-				record);
+			{
+				auto const created = addLift(transitLayer(record), record.a, record.b, options).lift.sector;
+				applySurfaceVariants(created, record);
+				applyFloorDepth(created, record);
+			}
 			break;
 		}
 		case ConstructionType::Chamber:
@@ -3379,6 +3422,7 @@ namespace core
 				|| (chamber->getPreviousEnd(1) == SectorEndType::None) != record.q)
 				throw SerializationException("Invalid Security scanner wall restoration");
 			applySurfaceVariants(mSectors[index], record);
+			applyFloorDepth(mSectors[index], record);
 			break;
 		}
 		case ConstructionType::Airlock:
@@ -3394,6 +3438,7 @@ namespace core
 					point->mPermissionRequirement.set(permission - 1);
 			}
 			applySurfaceVariants(mSectors[index], record);
+			applyFloorDepth(mSectors[index], record);
 			break;
 		}
 		case ConstructionType::Shuttle:
@@ -3406,8 +3451,12 @@ namespace core
 				for (auto permission : requirement)
 					options.landingControlPermissionRequirements.back().push_back(AccessPermissionId{ permission });
 			}
-			applySurfaceVariants(addShuttle(transitLayer(record), record.a, record.b, record.c,
-				options).shuttle.sector, record);
+			{
+				auto const created = addShuttle(transitLayer(record), record.a, record.b, record.c,
+					options).shuttle.sector;
+				applySurfaceVariants(created, record);
+				applyFloorDepth(created, record);
+			}
 			break;
 		}
 		case ConstructionType::Door:
@@ -3445,6 +3494,7 @@ namespace core
 					point->mPermissionRequirement.set(permission - 1);
 			}
 			applySurfaceVariants(mSectors[unit->getIndex()], record);
+			applyFloorDepth(mSectors[unit->getIndex()], record);
 			break;
 		}
 		case ConstructionType::BoothWindow:
@@ -3576,15 +3626,21 @@ namespace core
 			else _getSector(record.a)->addSectorObject(nullptr);
 			break;
 		case ConstructionType::Background:
-			addBackground(record.layer == ~0u ? 0u : record.layer, record.a, record.b,
-				record.c, record.d, unpackBackgroundColour(record.f));
+			{
+				auto const created = addBackground(record.layer == ~0u ? 0u : record.layer, record.a,
+					record.b, record.c, record.d, unpackBackgroundColour(record.f));
+				applyFloorDepth(mSectors[created], record);
+			}
 			break;
 		case ConstructionType::Facade:
 			// A record with no name at all - an empty string as well as a missing
 			// field - replays as the generic Facade rather than a nameless Sector.
-			addFacade(record.name.empty() ? Facade::defaultName() : record.name,
-				record.layer == ~0u ? 0u : record.layer, record.a, record.b,
-				record.c, record.d, record.x, unpackBackgroundColour(record.f));
+			{
+				auto const created = addFacade(record.name.empty() ? Facade::defaultName() : record.name,
+					record.layer == ~0u ? 0u : record.layer, record.a, record.b,
+					record.c, record.d, record.x, unpackBackgroundColour(record.f));
+				applyFloorDepth(mSectors[created], record);
+			}
 			break;
 		}
 		++mConstructionReplayIndex;

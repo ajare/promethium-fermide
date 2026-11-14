@@ -413,6 +413,14 @@ set(names
     staircasesConnectAdjacentCorridorsAndRoundTripRendering
     laddersCanBeValidatedEditedAndDeletedRendering
     scaled-doors/commands
+    floorDepth/aDepthOf48LiftsTheLayerBehindBy48Pixels
+    floorDepth/theLayerCarryingTheDepthDoesNotMove
+    floorDepth/aFlatWorldRecordsTheStreamItRecordedBefore
+    floorDepth/theLiftScalesWithZoom
+    floorDepth/renderWorldInstallsTheStaircaseForTheFrame
+    floorDepth/theLiftIsRecomputedPerFrameNotCached
+    floorDepth/aNegativeDepthPushesTheLayerBehindDown
+    floorDepth/onlyTheTileSurfaceMovesInThisSlice
 )
 if(DEFINED LANE)
     set(lane_binary "${RENDER}")

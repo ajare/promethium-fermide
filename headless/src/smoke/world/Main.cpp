@@ -51,5 +51,6 @@ int main(int argc, char** argv)
 	registerSectorSurfaceVariants(checks);
 	registerTransitSurfaceVariants(checks);
 	registerHorizontalTransitSurfaceVariants(checks);
+	registerFloorDepth(checks);
 	return smoke::main("world", checks, argc, argv);
 }
