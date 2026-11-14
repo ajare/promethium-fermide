@@ -1493,9 +1493,11 @@ namespace core
 			// the same way the variant entries above are: a Sector that lifts
 			// nothing records no field at all, so a World written before floor
 			// depth existed saves and loads with nothing new and draws exactly
-			// what it drew before. A depth of zero is not written either, for
-			// the same reason - zero lifts nothing, which is what no field
-			// already means.
+			// what it drew before. Since #1112 the field holds zero when it is
+			// present: presence is the override and the value is the depth, so
+			// a Sector can be pinned to the unlifted position while its type
+			// default lifts. Absence still means follow; zero no longer means
+			// absence.
 			std::optional<int32_t> floorDepth{};
 		};
 
@@ -3230,13 +3232,20 @@ namespace core
 		// over Sectors the renderer is about to visit anyway.
 		[[nodiscard]] std::vector<int32_t> layerFloorOffsets() const;
 
-		// Records a floor depth on one live Sector, or clears it back to no
-		// depth (#1101). Both halves are written - the live Sector, which is
+		// Records a floor depth on one live Sector, or clears the override
+		// away (#1101). Both halves are written - the live Sector, which is
 		// what draws this frame, and the record that created it, which is what
 		// saves and what the next rebuild replays - exactly as the surface
-		// variant seam does. Clearing is the same write as setting zero: a
-		// Sector with no field and a Sector at zero depth are one thing, and
-		// both save with no field.
+		// variant seam does.
+		//
+		// Setting and clearing are two writes, not one (#1112). The presence
+		// of the field is the override and the value it carries is the depth,
+		// so a Sector pinned to zero - held at the unlifted position while its
+		// type default lifts - is a state the author asks for and the World
+		// keeps. Only clearing removes the field, and only that puts the
+		// Sector back to following its type. Before this, zero was stored as
+		// nothing, which made the pin unrepresentable and left the editor no
+		// override to offer over a type that sat at zero.
 		//
 		// The value is refused outside the band one Level either way. A depth
 		// is a perspective cue, not a way of moving a Layer off the screen;

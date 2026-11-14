@@ -314,8 +314,10 @@ namespace game
 	// Same split as every other seam here: the preflight is a read the hover
 	// affordance can ask, the edit is not, and the edit answers with both
 	// halves of what happened so the caller owns the undo step and can tell
-	// a write worth recording from one that changed nothing. Clearing is the
-	// same write as setting zero.
+	// a write worth recording from one that changed nothing. Clearing deletes
+	// the override rather than writing zero: a Sector pinned to zero and a
+	// Sector following its type are two different answers (#1112), and only
+	// the clear reaches the second one.
 	bool canSetSectorFloorDepth(uint32_t sectorIndex, int32_t depth, std::string* diagnostic = nullptr) const;
 	core::World::FloorDepthWrite setSectorFloorDepth(uint32_t sectorIndex, int32_t depth, std::string* diagnostic = nullptr);
 	core::World::FloorDepthWrite clearSectorFloorDepth(uint32_t sectorIndex, std::string* diagnostic = nullptr);

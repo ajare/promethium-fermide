@@ -12,6 +12,11 @@
 //   * absence is zero. A Sector with no recorded field answers 0 and lifts
 //     nothing, which is what lets every World written before the field
 //     existed keep drawing exactly as it drew;
+//   * presence is the override, and since #1112 the value carried by that
+//     presence is the depth - zero included. A zero override pins the
+//     Sector to the unlifted position while its type default lifts, which
+//     is a state the author asks for and which the old collapse of zero
+//     into absence could not express at all;
 //   * Layer 0 never moves. The depth a Sector carries is a lift it hands
 //     backwards and never to itself, which is why the offset of a Layer is
 //     the sum of the Layers *in front* and not of its own;
@@ -333,27 +338,59 @@ namespace
 			  "Sector's own depth is the invalidation bug this avoids");
 	}
 
-	// Clearing is the same write as setting zero, down to the stored shape:
-	// after either one, the Sector answers zero and the Layer behind stops
-	// being lifted.
-	void clearingAndSettingZeroAreTheSameWrite(smoke::Context const&)
+	// Setting zero and clearing are not the same write, and since #1112 that
+	// distinction is the feature rather than a wart. A zero override is a
+	// real state - the Sector is pinned to the unlifted position, which is
+	// what an author asks for when the type default lifts and this one Room
+	// should not - while clearing deletes the override and puts the Sector
+	// back to following. Collapsed into one state, as they were before, a
+	// Sector could never be held still under a lifting type, and the
+	// editor's Break away had nothing to write over a type at zero.
+	void settingZeroPinsAndClearingDeletesTheOverride(smoke::Context const&)
 	{
-		auto const world = layeredWorld("Clear equals zero", { 0, 1 });
+		auto const world = layeredWorld("Zero pins, clearing deletes", { 0, 1 });
 		auto const front = firstOn(world, 0);
 		require(world->setSectorFloorDepth(front, 48).changed, "depth refused");
+
+		// The pin. Zero arrives as a value like any other: the override is
+		// present, and it is the zero that answers, not an absence.
 		require(world->setSectorFloorDepth(front, 0).changed,
 			"Setting zero over 48 was not seen as a change");
+		require(world->hasFloorDepthOverride(front),
+			"Setting zero left the Sector with no override; a zero is a real "
+			"override since #1112, not a way of writing nothing");
 		require(world->effectiveFloorDepth(front) == 0,
-			"Setting zero left the Sector answering "
-				+ std::to_string(world->effectiveFloorDepth(front)));
+			"The pinned Sector answers " + std::to_string(world->effectiveFloorDepth(front))
+				+ " rather than the zero it was pinned with");
 		require(world->layerFloorOffsetPx(1) == 0,
 			"The Layer behind still draws " + std::to_string(world->layerFloorOffsetPx(1))
-				+ "px off after the depth was set to zero");
-		// And neither of them changes anything a second time.
-		require(!world->setSectorFloorDepth(front, 0).changed,
-			"Setting zero again was reported as a change");
-		require(!world->clearSectorFloorDepth(front).changed,
-			"Clearing an already-clear Sector was reported as a change");
+				+ "px off after the Sector in front was pinned to zero");
+
+		// Re-stating the pin changes nothing: the write is compared against
+		// what is already there, so the author cannot dirty the document by
+		// typing the number the row already shows.
+		auto const again = world->setSectorFloorDepth(front, 0);
+		require(again.accepted && !again.changed,
+			"Setting the zero the Sector already pins was reported as a change");
+
+		// The deletion. This is the half that used to be the same write as
+		// the pin, and the half that has to be different for following to
+		// mean anything.
+		require(world->clearSectorFloorDepth(front).changed,
+			"Clearing the zero pin was not seen as a change; deleting an "
+			"override is a write of its own since #1112");
+		require(!world->hasFloorDepthOverride(front),
+			"Clearing left the Sector still carrying an override");
+		require(world->effectiveFloorDepth(front) == 0,
+			"A Sector with no override answers "
+				+ std::to_string(world->effectiveFloorDepth(front))
+				+ "; with nothing in front and no type lifting, absence still reads zero");
+
+		// And clearing an already-clear Sector is legal, changes nothing,
+		// and leaves no second deletion to undo.
+		auto const cleared = world->clearSectorFloorDepth(front);
+		require(cleared.accepted && !cleared.changed,
+			"Clearing a Sector with nothing to delete was reported as a change");
 	}
 }
 
@@ -381,6 +418,6 @@ void registerFloorDepth(std::vector<smoke::Check>& checks)
 		theSingleStepAndTheWholeStaircaseAgree });
 	checks.push_back({ "floorDepth/theStaircaseFollowsTheWorldWithNoInvalidation",
 		theStaircaseFollowsTheWorldWithNoInvalidation });
-	checks.push_back({ "floorDepth/clearingAndSettingZeroAreTheSameWrite",
-		clearingAndSettingZeroAreTheSameWrite });
+	checks.push_back({ "floorDepth/settingZeroPinsAndClearingDeletesTheOverride",
+		settingZeroPinsAndClearingDeletesTheOverride });
 }

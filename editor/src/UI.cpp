@@ -7645,15 +7645,16 @@ void renderLocationWallEditor(editor::DocumentPtr const& document,
 //     writes the value currently being followed as the Sector's own. The
 //     picture does not move when the author takes the wheel, and the break
 //     is one undo step, which is what makes the edit that follows a second
-//     step rather than the same step twice. Where the type sits at zero there
-//     is nothing to write - a zero is stored as nothing at all - so the
-//     button is disabled and says so instead of sitting there doing
-//     nothing;
+//     step rather than the same step twice. The break is offered whatever
+//     the type carries, zero included: since #1112 a zero override is a
+//     real state, so an author can take a Sector off a type that sits at
+//     zero and give it a depth of its own without touching the type;
 //   * overridden - a signed input over the Sector's own value with Reset
-//     beside it. Each committed edit is one undo step. Typing zero is the
-//     same act as Reset, because zero is not stored and the Sector goes
-//     back to following, which is why the tooltip says it rather than
-//     letting the author discover it by accident;
+//     beside it. Each committed edit is one undo step. Typing zero pins
+//     the Sector to the unlifted position even while its type lifts - a
+//     real state, not a reset in disguise - which is why Reset is a
+//     separate act that deletes the override rather than a number the
+//     input can reach;
 //   * always - the effective readout. It is not an input and never was:
 //     the author should not have to add up the Layers in front of them to
 //     find out where the thing they selected actually draws.
@@ -7677,12 +7678,10 @@ void renderSectorFloorDepthRow(editor::DocumentPtr const& document,
 
 	if (!overridden)
 	{
-		// Nothing to pin at zero. The sparse storage keeps no entry for a
-		// depth of zero, so a break-away here would write nothing and leave
-		// the row reading exactly as it read before the click. Saying so is
-		// worth more than a button that appears to do nothing.
-		bool const nothingToPin = typeDepth == 0;
-		ImGui::BeginDisabled(nothingToPin);
+		// The break is offered whatever the type carries. A zero override
+		// is a real state since #1112 - the presence of the field is the
+		// override - so breaking away from a type at zero writes a real
+		// override, and the edit that follows has an override to edit.
 		if (ImGui::SmallButton("Break away"))
 		{
 			auto undo = captureDocumentSnapshot(world);
@@ -7692,18 +7691,10 @@ void renderSectorFloorDepthRow(editor::DocumentPtr const& document,
 			if (!write.accepted) reportEditorError("Floor depth", diagnostic);
 			else if (write.changed) commitDocumentEdit(std::move(undo));
 		}
-		ImGui::EndDisabled();
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-		{
-			if (nothingToPin)
-				ImGui::SetTooltip("A depth of 0 is not recorded, so there is nothing to "
-					"break away with while %ss sit at 0 px. This Sector already draws where "
-					"its type puts it.", typeName.c_str());
-			else
-				ImGui::SetTooltip("Take this Sector off its type. It keeps the %s it is "
-					"following as its own depth, and later changes to %ss will not move it.",
-					editor::floorDepthPxText(typeDepth).c_str(), typeName.c_str());
-		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Take this Sector off its type. It keeps the %s it is "
+				"following as its own depth, and later changes to %ss will not move it.",
+				editor::floorDepthPxText(typeDepth).c_str(), typeName.c_str());
 	}
 	else
 	{
@@ -7719,8 +7710,9 @@ void renderSectorFloorDepthRow(editor::DocumentPtr const& document,
 			else if (write.changed) commitDocumentEdit(std::move(undo));
 		}
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Signed pixels at 1x zoom, between %d and %d. Zero is not "
-				"recorded, so typing 0 puts this Sector back to following %ss.",
+			ImGui::SetTooltip("Signed pixels at 1x zoom, between %d and %d. Typing "
+				"0 pins this Sector to the unlifted position even while %ss lift; "
+				"Reset is what puts it back to following.",
 				-editor::kFloorDepthBandPx, editor::kFloorDepthBandPx, typeName.c_str());
 
 		ImGui::SameLine();

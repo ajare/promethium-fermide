@@ -13,11 +13,13 @@
 //     negative one. A field that survives YAML and not binary is a field
 //     half the saves in the game lose, and a negative that comes back as
 //     its absolute value is the classic way a signed field goes wrong;
-//   * sparseness. A World nobody lifted writes no `floorDepth` field at
-//     all, and neither does a Sector lifted and then lifted back to zero.
-//     Zero lifts nothing, which is exactly what no field already says, so
-//     writing a zero would invent a third state that means the absence
-//     without being it;
+//   * sparseness, and where #1112 put the boundary. A World nobody lifted
+//     writes no `floorDepth` field at all, and that is what keeps every
+//     World written before the feature existed byte-for-byte what it was.
+//     A Sector pinned to zero does write its zero: the presence of the
+//     field is the override and the value is the depth, so the zero is a
+//     fact the document must carry rather than a third way of saying the
+//     absence. Clearing is what removes the field;
 //   * the version guard, in both directions. A document written before the
 //     field existed - schema 71, no field - loads as no depth recorded and
 //     draws the flat picture it drew before, with no migration pass. A
@@ -204,8 +206,12 @@ namespace persistence
 		}
 	}
 
-	// A World nobody lifted writes no `floorDepth` field at all, and
-	// neither does a Sector lifted and then lifted back to zero.
+	// A World nobody lifted writes no `floorDepth` field at all. A Sector
+	// pinned to zero does write one, and that is the #1112 change: the zero
+	// is not the absence wearing a different face, it is a fact the
+	// document has to carry - this Sector stays unlifted even while its
+	// type lifts - and a reader that never sees it cannot put the pin back.
+	// Only clearing removes the field.
 	void aWorldWithNoDepthsWritesNoField(smoke::Context const&)
 	{
 		core::World plain("Plain depth world", 16, 8);
@@ -216,20 +222,36 @@ namespace persistence
 		require(countField(plain, "floorDepth") == 0,
 			"A World with no recorded floor depth wrote a floorDepth field");
 
-		// Lifted, then lifted back to zero: the document is as sparse as it
-		// was before the lift was ever authored.
-		auto const cleared = twoLayerWorld("Cleared depth world");
-		require(cleared->setSectorFloorDepth(firstOn(*cleared, 0), 48).changed,
+		// Lifted, then pinned to zero: the field stays, now carrying the
+		// zero, because the pin is a thing the author said.
+		auto const pinned = twoLayerWorld("Pinned depth world");
+		require(pinned->setSectorFloorDepth(firstOn(*pinned, 0), 48).changed,
 			"the fixture's depth write was refused");
-		require(countField(*cleared, "floorDepth") == 1,
+		require(countField(*pinned, "floorDepth") == 1,
 			"A Sector at 48 did not write its floorDepth field");
-		require(cleared->setSectorFloorDepth(firstOn(*cleared, 0), 0).changed,
+		require(pinned->setSectorFloorDepth(firstOn(*pinned, 0), 0).changed,
 			"Setting zero over 48 was not seen as a change");
-		require(countField(*cleared, "floorDepth") == 0,
-			"A Sector lifted back to zero still writes a floorDepth field; zero "
-			  "lifts nothing, which is what no field already says");
-		require(countField(*load(serialize(*cleared)), "floorDepth") == 0,
-			"A zero-depth document re-saved itself with a field");
+		require(countField(*pinned, "floorDepth") == 1,
+			"A Sector pinned to zero wrote no floorDepth field; the zero is the "
+			"pin, and a document that drops it cannot restore it (#1112)");
+
+		// And the pin comes back off the document rather than being inferred.
+		auto const reloaded = load(serialize(*pinned));
+		require(reloaded->hasFloorDepthOverride(firstOn(*reloaded, 0)),
+			"A zero override came back from the document as no override at all");
+		require(reloaded->effectiveFloorDepth(firstOn(*reloaded, 0)) == 0,
+			"A pinned Sector came back answering "
+				+ std::to_string(reloaded->effectiveFloorDepth(firstOn(*reloaded, 0))));
+		require(countField(*reloaded, "floorDepth") == 1,
+			"A zero-pinned document re-saved itself with the field lost, which "
+			"silently un-pins the Sector on the next save");
+
+		// Clearing is the only thing that takes the field back off.
+		auto const clearWrite = pinned->clearSectorFloorDepth(firstOn(*pinned, 0));
+		require(clearWrite.accepted && clearWrite.changed,
+			"clearing the pin was not an accepted write that changed anything");
+		require(countField(*pinned, "floorDepth") == 0,
+			"Clearing the override left the floorDepth field in the document");
 	}
 
 	// A document written before this feature existed - schema 71, no field
@@ -240,7 +262,7 @@ namespace persistence
 	{
 		auto const world = twoLayerWorld("Pre-depth world");
 		auto document = YAML::Load(serialize(*world));
-		require(document["version"].as<uint32_t>() == 73,
+		require(document["version"].as<uint32_t>() == 74,
 			"The current writer is not the version this check is bumping from");
 		document["version"] = 71;
 		require(YAML::Dump(document).find("floorDepth") == std::string::npos,
@@ -279,6 +301,103 @@ namespace persistence
 			"A schema 71 document carrying a floorDepth field was accepted");
 	}
 
+	// The ticket's own case on the document (#1112). The author lifts a
+	// whole Sector type and holds one Room back down inside it: the type
+	// says 24, this Sector says 0, and the document has to carry both
+	// opinions so a reload puts them both back. A writer that dropped the
+	// zero as "the same as nothing" would hand the reloaded World a Sector
+	// with no override, and the type default would lift it 24px - the
+	// author's pin silently released on the save.
+	void aZeroOverrideAgainstALiftedTypeRoundTrips(smoke::Context const&)
+	{
+		auto const world = twoLayerWorld("Pinned against a lifted type");
+		require(world->setSectorTypeFloorDepth(core::SectorType::Location, 24).changed,
+			"the fixture's type default was refused");
+		auto const pin = world->setSectorFloorDepth(firstOn(*world, 0), 0);
+		require(pin.accepted && pin.changed,
+			"pinning the front Sector to zero was not an accepted write that "
+			"changed anything");
+
+		// In force before any save: the pin wins over the type, and the
+		// Layer behind draws nothing from a Sector that lifts nothing.
+		require(world->effectiveFloorDepth(firstOn(*world, 0)) == 0,
+			"A Sector pinned to zero over a type at 24 answers "
+				+ std::to_string(world->effectiveFloorDepth(firstOn(*world, 0))));
+		require(world->layerFloorOffsetPx(1) == 0,
+			"Layer 1 draws " + std::to_string(world->layerFloorOffsetPx(1))
+				+ "px off; the pinned front Sector lifts nothing, whatever its "
+				  "type says");
+		require(world->effectiveFloorDepth(firstOn(*world, 1)) == 24,
+			"A Sector left following the type answers "
+				+ std::to_string(world->effectiveFloorDepth(firstOn(*world, 1)))
+				+ " rather than the type's 24");
+
+		// Both wire formats, and the pin comes back as a pin rather than as
+		// the absence the type would fill.
+		for (bool const binary : { false, true })
+		{
+			auto const reloaded = binary
+				? loadBinary(serializeBinary(*world))
+				: load(serialize(*world));
+			char const* const kind = binary ? "binary" : "YAML";
+			require(reloaded->hasFloorDepthOverride(firstOn(*reloaded, 0)),
+				std::string("A zero override came back from ") + kind
+					+ " as no override, which puts the Sector back on a type that "
+					  "lifts it (#1112)");
+			require(reloaded->effectiveFloorDepth(firstOn(*reloaded, 0)) == 0,
+				std::string("The pinned Sector came back from ") + kind
+					+ " answering "
+					+ std::to_string(reloaded->effectiveFloorDepth(firstOn(*reloaded, 0))));
+			require(reloaded->layerFloorOffsetPx(1) == 0,
+				std::string("Layer 1 draws ")
+					+ std::to_string(reloaded->layerFloorOffsetPx(1))
+					+ "px off after a " + kind
+					+ " reload of a World whose front Sector is pinned to zero");
+			// The type default is untouched by the pin and still carries the
+			// Sector that never overrode it.
+			require(reloaded->sectorTypeFloorDepth(core::SectorType::Location) == 24,
+				std::string("The type default came back from ") + kind + " as "
+					+ std::to_string(reloaded->sectorTypeFloorDepth(
+						core::SectorType::Location)));
+			require(reloaded->effectiveFloorDepth(firstOn(*reloaded, 1)) == 24,
+				std::string("A Sector following the lifted type came back from ")
+					+ kind + " answering "
+					+ std::to_string(reloaded->effectiveFloorDepth(
+						firstOn(*reloaded, 1))));
+		}
+	}
+
+	// A document claiming to predate #1112 while carrying a zero depth did
+	// not come from this writer: the pre-74 writer never emitted a zero,
+	// because it stored zero as nothing. Reading one anyway would be
+	// guessing at what the bytes mean, and the guess would be the one the
+	// version bump exists to prevent.
+	void aZeroDepthFieldBelowVersion74IsRefused(smoke::Context const&)
+	{
+		auto const world = twoLayerWorld("Zero below the version that allows it");
+		auto const pin = world->setSectorFloorDepth(firstOn(*world, 0), 0);
+		require(pin.accepted && pin.changed,
+			"pinning the front Sector to zero was not an accepted write that "
+			"changed anything, so the fixture has no zero field to test with");
+		auto document = YAML::Load(serialize(*world));
+		require(document["construction"] && YAML::Dump(document).find("floorDepth: 0")
+				!= std::string::npos,
+			"The fixture document carries no zero floorDepth field to test with");
+		document["version"] = 73;
+		require(refused([&] { (void)load(YAML::Dump(document)); }),
+			"A schema 73 document carrying a zero floorDepth was accepted; the "
+			  "pre-74 writer never emitted one, so this document is not what it "
+			  "claims to be (#1112)");
+
+		// The same document at its own version loads, which is what makes the
+		// refusal about the version and not about the field.
+		auto const allowed = YAML::Load(serialize(*world));
+		require(allowed["version"].as<uint32_t>() >= 74,
+			"The current writer is below the version that carries a zero depth");
+		require(!refused([&] { (void)load(YAML::Dump(allowed)); }),
+			"The same zero override was refused at its own schema version");
+	}
+
 	// The depth rides the construction record, so the rebuild every
 	// structural edit performs replays it onto the Sector the record just
 	// created. This is the case a live-object-only implementation loses:
@@ -306,6 +425,57 @@ namespace persistence
 		auto const reloaded = load(serialize(*world));
 		require(reloaded->effectiveFloorDepth(firstOn(*reloaded, 0)) == 48,
 			"The depth was lost across the rebuild-and-save cycle");
+	}
+
+	// The zero pin survives the rebuild every structural edit performs,
+	// which is the case a live-object-only implementation loses twice over:
+	// a Sector whose zero was only ever set on the live object comes back
+	// from the replay with no override, and the type default lifts it. The
+	// author pins a Room, moves a wall somewhere else, and the Room jumps.
+	void aZeroOverrideSurvivesTheRebuildAStructuralEditPerforms(
+		smoke::Context const&)
+	{
+		auto const world = twoLayerWorld("Zero pin rebuild");
+		require(world->setSectorTypeFloorDepth(core::SectorType::Location, 24).changed,
+			"the fixture's type default was refused");
+		auto const front = firstOn(*world, 0);
+		auto const pin = world->setSectorFloorDepth(front, 0);
+		require(pin.accepted && pin.changed,
+			"pinning the front Sector to zero was not an accepted write that "
+			"changed anything");
+		require(world->layerFloorOffsetPx(1) == 0,
+			"the pin is not in force before the edit");
+
+		// A structural edit somewhere else entirely: the whole World is torn
+		// down and replayed from the records.
+		world->addRoom("Elsewhere", 1, 6, 12, 2, 2);
+		require(world->hasFloorDepthOverride(firstOn(*world, 0)),
+			"The rebuild replayed the front Sector without its zero override, so "
+			  "the type default has it again (#1112)");
+		require(world->effectiveFloorDepth(firstOn(*world, 0)) == 0,
+			"After the rebuild the pinned Sector answers "
+				+ std::to_string(world->effectiveFloorDepth(firstOn(*world, 0)))
+				+ " rather than the zero it was pinned with");
+		require(world->layerFloorOffsetPx(1) == 0,
+			"Layer 1 draws " + std::to_string(world->layerFloorOffsetPx(1))
+				+ "px off after the rebuild; the pin released across it");
+		require(world->effectiveFloorDepth(firstOn(*world, 1)) == 24,
+			"The Sector that follows the type answers "
+				+ std::to_string(world->effectiveFloorDepth(firstOn(*world, 1)))
+				+ " after the rebuild");
+
+		// And the save that follows the rebuild still carries the pin, rather
+		// than the flattened answer the replay would have written had the
+		// override been lost on the way.
+		auto const reloaded = load(serialize(*world));
+		require(reloaded->hasFloorDepthOverride(firstOn(*reloaded, 0)),
+			"The zero pin was lost across the rebuild-and-save cycle");
+		require(reloaded->effectiveFloorDepth(firstOn(*reloaded, 0)) == 0,
+			"The rebuilt-and-reloaded Sector answers "
+				+ std::to_string(reloaded->effectiveFloorDepth(firstOn(*reloaded, 0))));
+		require(reloaded->layerFloorOffsetPx(1) == 0,
+			"Layer 1 draws " + std::to_string(reloaded->layerFloorOffsetPx(1))
+				+ "px off after the rebuild-and-save cycle");
 	}
 
 	// Every Sector-creating record type carries its floor depth. Surface

@@ -103,7 +103,7 @@ set(checks
     floorDepth/anEmptyLayerContributesNothing
     floorDepth/theSingleStepAndTheWholeStaircaseAgree
     floorDepth/theStaircaseFollowsTheWorldWithNoInvalidation
-    floorDepth/clearingAndSettingZeroAreTheSameWrite
+    floorDepth/settingZeroPinsAndClearingDeletesTheOverride
     floorDepthType/aTypeNobodySetHasNoOpinion
     floorDepthType/theTableCoversEverySectorType
     floorDepthType/aTypeDefaultMovesEverySectorFollowingIt

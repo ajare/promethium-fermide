@@ -873,7 +873,7 @@ namespace
 	char const* preCapWideShaftMap()
 	{
 		static std::string const yaml = R"YAML(
-version: 73
+version: 74
 name: Pre-cap Wide Shaft
 randomSeed: 0
 cellsWide: 12

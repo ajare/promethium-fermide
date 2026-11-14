@@ -720,11 +720,12 @@ namespace core
 		// The Sector's floor depth (#1101), last for the same reason the
 		// variant entries are: a Sector that never had one saves exactly as it
 		// did before the field existed - no empty field, no reordered key,
-		// nothing for an older reader to trip over. Sparse in both
-		// directions: no depth writes nothing, and a depth of zero writes
-		// nothing either, because zero lifts nothing and that is what no field
-		// already says.
-		if (record.floorDepth && *record.floorDepth != 0)
+		// nothing for an older reader to trip over. Since #1112 a recorded
+		// depth writes whatever it holds, zero included: presence is the
+		// override and the value is the depth, so a Sector pinned to the
+		// unlifted position while its type lifts carries that fact on the
+		// record. Only a Sector with no override writes nothing.
+		if (record.floorDepth)
 			serializer.writeInt32("floorDepth", *record.floorDepth);
 	}
 
@@ -831,7 +832,13 @@ namespace core
 		// that type at once. A pre-73 document carries no such array, so it
 		// loads with no type holding an opinion, every Sector reading zero, and
 		// the flat picture it drew before unchanged.
-		serializer.writeUint32("version", 73);
+		// Version 74 lets a recorded floor depth hold zero: the presence of
+		// the field is the override and the value is the depth, so a Sector
+		// can be pinned to the unlifted position while its type default
+		// lifts (#1112). A pre-74 writer never emitted a zero depth, so a
+		// document claiming an older version while carrying one did not come
+		// from this writer, and the reader refuses it rather than guessing.
+		serializer.writeUint32("version", 74);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("objectImageSet", mObjectImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
@@ -1755,15 +1762,22 @@ namespace core
 			}
 			serializer.endArray();
 		}
-		// The Sector's floor depth (#1101). An absent field reads as no depth
-		// rather than as a zero written into an optional, which is what lets
-		// every World written before this feature existed load as all zero and
-		// draw exactly what it drew before with no migration pass.
+		// The Sector's floor depth (#1101). An absent field reads as no
+		// override rather than as a zero written into an optional, which is
+		// what lets every World written before this feature existed load as
+		// all follow and draw exactly what it drew before with no migration
+		// pass. Since #1112 a present zero reads as a real override pinned
+		// to the unlifted position; a pre-74 document never carried one, so
+		// one that claims to predates this writer's own output and is
+		// refused rather than guessed at.
 		if (serializer.hasField("floorDepth"))
 		{
 			if (version < 72) throw SerializationException(
 				"Sector floor depth requires World schema version 72 or later");
-			record.floorDepth = serializer.readInt32("floorDepth");
+			auto const depth = serializer.readInt32("floorDepth");
+			if (version < 74 && depth == 0) throw SerializationException(
+				"A zero Sector floor depth requires World schema version 74 or later");
+			record.floorDepth = depth;
 		}
 		return record;
 	}
@@ -1797,7 +1811,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 73)
+		if (version < 1 || version > 74)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}

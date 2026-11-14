@@ -76,9 +76,12 @@ namespace persistence
 	void aNegativeFloorDepthRoundTripsUnchanged(smoke::Context const&);
 	void theBandRoundTripsAtItsExtremes(smoke::Context const&);
 	void aWorldWithNoDepthsWritesNoField(smoke::Context const&);
+	void aZeroOverrideAgainstALiftedTypeRoundTrips(smoke::Context const&);
+	void aZeroDepthFieldBelowVersion74IsRefused(smoke::Context const&);
 	void aDocumentWrittenBeforeFloorDepthExistedLoadsAsNoDepth(smoke::Context const&);
 	void aFloorDepthFieldBelowTheSchemaVersionThatDefinesItIsRefused(smoke::Context const&);
 	void theDepthSurvivesTheRebuildAStructuralEditPerforms(smoke::Context const&);
+	void aZeroOverrideSurvivesTheRebuildAStructuralEditPerforms(smoke::Context const&);
 	void everySectorCreatingRecordTypeCarriesItsFloorDepth(smoke::Context const&);
 	void aDepthChangesNothingElseInTheDocument(smoke::Context const&);
 	// The per-Sector-type floor depth map saved, loaded, and surviving the

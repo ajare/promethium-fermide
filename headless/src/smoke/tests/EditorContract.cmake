@@ -300,6 +300,8 @@ set(editor_names
     floorDepthPanel/followWordingCoversEverySectorType
     floorDepthPanel/aSectorWithNoOverrideReadsAsFollowingItsType
     floorDepthPanel/breakingAwaySurvivesALaterTypeChange
+    floorDepthPanel/breakingAwayFromAZeroTypeDefaultIsARealOverride
+    floorDepthPanel/theZeroBreakAwayEditAndResetAreEachOneUndoStep
     floorDepthPanel/resetDeletesTheOverrideRatherThanWritingZero
     floorDepthPanel/theInputRefusesAValueOutsideOneLevelEitherWay
     floorDepthPanel/theEffectiveReadoutAddsTheLayerOffsetToTheOwnDepth

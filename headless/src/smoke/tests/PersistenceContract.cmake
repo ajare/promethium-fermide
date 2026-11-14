@@ -134,9 +134,12 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords accessPanels/roundTri
     floorDepth/aNegativeFloorDepthRoundTripsUnchanged
     floorDepth/theBandRoundTripsAtItsExtremes
     floorDepth/aWorldWithNoDepthsWritesNoField
+    floorDepth/aZeroOverrideAgainstALiftedTypeRoundTrips
+    floorDepth/aZeroDepthFieldBelowVersion74IsRefused
     floorDepth/aDocumentWrittenBeforeFloorDepthExistedLoadsAsNoDepth
     floorDepth/aFloorDepthFieldBelowTheSchemaVersionThatDefinesItIsRefused
     floorDepth/theDepthSurvivesTheRebuildAStructuralEditPerforms
+    floorDepth/aZeroOverrideSurvivesTheRebuildAStructuralEditPerforms
     floorDepth/everySectorCreatingRecordTypeCarriesItsFloorDepth
     floorDepth/aDepthChangesNothingElseInTheDocument
     floorDepthType/roundTripsThroughBothFormats

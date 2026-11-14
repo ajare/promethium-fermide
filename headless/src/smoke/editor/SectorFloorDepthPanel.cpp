@@ -22,6 +22,12 @@
 //     longer taking and the Sector's own. A later change to the type moves
 //     the type half of that sentence and leaves the Sector's own half
 //     alone, which is what an override means;
+//   * the break is offered whatever the type carries, zero included. Since
+//     #1112 a zero override is a real state - presence is the override and
+//     the value is the depth - so taking a Sector off a type that sits at
+//     zero writes a field, the row changes its sentence, and the input has
+//     an override to edit. The row no longer disables the button and
+//     explains that there was nothing to pin;
 //   * Reset deletes the entry rather than writing zero: the Sector stops
 //     carrying a field, and the row reads as following again;
 //   * the band. One Level either way, the same band the core write refuses
@@ -621,6 +627,157 @@ namespace editor_smoke
 				+ editor::sectorFloorDepthStateText(*world, *facade));
 	}
 
+	// Breaking away from a type that sits at zero is a real override, which
+	// is the whole point of #1112. Before it the row disabled Break away
+	// over a type at zero, because a zero was stored as nothing and the
+	// click would have written no field and changed no sentence - a button
+	// that appears to do nothing. Now the click writes a real zero, the row
+	// reads as overriding, and the author can give this Sector its own
+	// depth without moving the type for every other Sector of it.
+	void breakingAwayFromAZeroTypeDefaultIsARealOverride(smoke::Context const&)
+	{
+		State state;
+		CloseOnExit const closer;
+		auto const stair = layeredWorld("Break away from zero");
+		require(stair.world->sectorTypeFloorDepth(core::SectorType::Location) == 0,
+			"the fixture's Location type is not at zero, so this check is not "
+				"testing the case #1112 is about");
+		auto const front = sectorOn(*stair.world, 0, "Front");
+
+		// The break itself, over a type with nothing to copy.
+		auto const broke = writeThroughRow(*stair.document, front->getIndex(), 0);
+		require(broke.accepted && broke.changed,
+			"breaking away from a type at zero was not an accepted write that "
+			"changed anything; this is the click #1112 exists to make real");
+		require(stair.world->hasFloorDepthOverride(front->getIndex()),
+			"the zero break-away left the Sector with no override, so it is "
+				"still following the type rather than pinned off it");
+		require(editor::sectorFloorDepthStateText(*stair.world, *front)
+				== "Overriding Location (+0 px) with own +0 px",
+			"a Sector that has just broken away from a type at zero does not read "
+				"as overriding: "
+				+ editor::sectorFloorDepthStateText(*stair.world, *front));
+		require(stair.world->effectiveFloorDepth(front->getIndex()) == 0,
+			"the pinned Sector answers "
+				+ std::to_string(stair.world->effectiveFloorDepth(front->getIndex()))
+				+ " rather than zero");
+
+		// The override is editable, which is what the break was for: with no
+		// override there was nothing for the input to be showing.
+		require(writeThroughRow(*stair.document, front->getIndex(), 16).changed,
+			"editing the zero override to +16 was not a change");
+		require(stair.world->effectiveFloorDepth(front->getIndex()) == 16,
+			"the edited override answers "
+				+ std::to_string(stair.world->effectiveFloorDepth(front->getIndex()))
+				+ " rather than the 16 it was edited to");
+
+		// The type moves under it and the override holds. This is the half
+		// the old storage could not express at all: a Sector pinned at zero
+		// over a lifting type was the same state as a Sector following it.
+		writeTypeThroughTable(*stair.document, core::SectorType::Location, 24);
+		require(stair.world->effectiveFloorDepth(front->getIndex()) == 16,
+			"the type default moved an overridden Sector to "
+				+ std::to_string(stair.world->effectiveFloorDepth(front->getIndex())));
+		require(editor::sectorFloorDepthStateText(*stair.world, *front)
+				== "Overriding Location (+24 px) with own +16 px",
+			"the row did not keep the override distinct from the moved type: "
+				+ editor::sectorFloorDepthStateText(*stair.world, *front));
+
+		// Reset is still the way back, and it is a deletion rather than a
+		// zero: the Sector goes onto the lifted type, not onto the pin.
+		require(resetThroughRow(*stair.document, front->getIndex()).changed,
+			"resetting the override was not seen as a change");
+		require(!stair.world->hasFloorDepthOverride(front->getIndex()),
+			"reset left the Sector carrying an override");
+		require(stair.world->effectiveFloorDepth(front->getIndex()) == 24,
+			"after reset the Sector answers "
+				+ std::to_string(stair.world->effectiveFloorDepth(front->getIndex()))
+				+ " rather than its type's 24");
+		require(editor::sectorFloorDepthStateText(*stair.world, *front)
+				== "Following Location at +24 px",
+			"the row did not go back to reading as following: "
+				+ editor::sectorFloorDepthStateText(*stair.world, *front));
+	}
+
+	// The zero break-away, the edit and the reset are three acts and three
+	// undo steps, with no phantom between them. The zero is the case that
+	// used to be indistinguishable from following, so an undo through it had
+	// nowhere honest to land; now each step lands on a state the row can
+	// name, and the fourth undo is the document underneath rather than a
+	// second stage of the reset.
+	void theZeroBreakAwayEditAndResetAreEachOneUndoStep(smoke::Context const&)
+	{
+		State state;
+		CloseOnExit const closer;
+		auto const stair = layeredWorld("Zero undo steps");
+		auto& authoring = stair.document->authoring();
+		require(stair.world->sectorTypeFloorDepth(core::SectorType::Location) == 0,
+			"the fixture's Location type is not at zero");
+		auto const frontIndex = sectorOn(*stair.world, 0, "Front")->getIndex();
+
+		// 1. Break away from the type at zero.
+		auto const broke = writeThroughRow(*stair.document, frontIndex, 0);
+		require(broke.accepted && broke.changed,
+			"the zero break-away was not an accepted write that changed "
+			"anything, so it was no undo step");
+		// 2. Edit the override.
+		require(writeThroughRow(*stair.document, frontIndex, 12).changed,
+			"the override edit was not a step");
+		// 3. Reset.
+		require(resetThroughRow(*stair.document, frontIndex).changed,
+			"reset was not a step");
+		require(!authoring.hasFloorDepthOverride(frontIndex),
+			"reset left the override in place");
+
+		// Undo 1: back to the +12 override.
+		require(authoring.undo(), "undo refused the reset");
+		require(authoring.hasFloorDepthOverride(frontIndex),
+			"undoing the reset did not put the override back");
+		require(stair.world->effectiveFloorDepth(frontIndex) == 12,
+			"undoing the reset restored "
+				+ std::to_string(stair.world->effectiveFloorDepth(frontIndex))
+				+ " rather than the +12 that was reset");
+
+		// Undo 2: back to the zero override - a state with a field behind
+		// it, not the same state as following.
+		require(authoring.undo(), "undo refused the override edit");
+		require(authoring.hasFloorDepthOverride(frontIndex),
+			"undoing the edit dropped the zero override the break-away made; a "
+			  "zero is a real override since #1112");
+		require(stair.world->effectiveFloorDepth(frontIndex) == 0,
+			"undoing the edit restored "
+				+ std::to_string(stair.world->effectiveFloorDepth(frontIndex))
+				+ " rather than the zero the break-away pinned");
+
+		// Undo 3: back to following, with no field carried.
+		require(authoring.undo(), "undo refused the break-away");
+		require(!authoring.hasFloorDepthOverride(frontIndex),
+			"undoing the break-away left the Sector off its type");
+		require(stair.world->effectiveFloorDepth(frontIndex) == 0,
+			"a Sector following a type at zero answers "
+				+ std::to_string(stair.world->effectiveFloorDepth(frontIndex)));
+
+		// Three acts, three steps: nothing else was pushed.
+		require(!authoring.canUndo(), "the three row acts left more than three "
+			"undo steps behind them");
+
+		// Redo puts each act back, in order.
+		require(authoring.redo(), "redo refused the break-away");
+		require(authoring.hasFloorDepthOverride(frontIndex),
+			"redoing the break-away did not restore the zero override");
+		require(stair.world->effectiveFloorDepth(frontIndex) == 0,
+			"redoing the break-away restored the wrong depth");
+		require(authoring.redo(), "redo refused the override edit");
+		require(stair.world->effectiveFloorDepth(frontIndex) == 12,
+			"redoing the edit restored "
+				+ std::to_string(stair.world->effectiveFloorDepth(frontIndex))
+				+ " rather than the +12");
+		require(authoring.redo(), "redo refused the reset");
+		require(!authoring.hasFloorDepthOverride(frontIndex),
+			"redoing the reset did not delete the override again");
+		require(!authoring.canRedo(), "the row acts left more than three redo steps");
+	}
+
 	void registerSectorFloorDepthPanel(std::vector<smoke::Check>& checks)
 	{
 		checks.push_back({ "floorDepthPanel/followWordingCoversEverySectorType",
@@ -629,6 +786,10 @@ namespace editor_smoke
 			aSectorWithNoOverrideReadsAsFollowingItsType });
 		checks.push_back({ "floorDepthPanel/breakingAwaySurvivesALaterTypeChange",
 			breakingAwaySurvivesALaterTypeChange });
+		checks.push_back({ "floorDepthPanel/breakingAwayFromAZeroTypeDefaultIsARealOverride",
+			breakingAwayFromAZeroTypeDefaultIsARealOverride });
+		checks.push_back({ "floorDepthPanel/theZeroBreakAwayEditAndResetAreEachOneUndoStep",
+			theZeroBreakAwayEditAndResetAreEachOneUndoStep });
 		checks.push_back({ "floorDepthPanel/resetDeletesTheOverrideRatherThanWritingZero",
 			resetDeletesTheOverrideRatherThanWritingZero });
 		checks.push_back({ "floorDepthPanel/theInputRefusesAValueOutsideOneLevelEitherWay",

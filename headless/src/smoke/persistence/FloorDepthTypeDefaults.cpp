@@ -334,8 +334,8 @@ namespace persistence
 		require(world->setSectorTypeFloorDepth(core::SectorType::Location, 24).changed,
 			"type default refused in fixture");
 		auto const yaml = serialize(*world);
-		require(yaml.find("version: 73") != std::string::npos,
-			"The writer did not emit schema 73, the version the type map needs");
+		require(yaml.find("version: 74") != std::string::npos,
+			"The writer did not emit schema 74, the version the type map needs");
 		require(yaml.find("sectorTypeFloorDepths") != std::string::npos,
 			"The type map was not written at all");
 

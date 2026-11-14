@@ -204,12 +204,15 @@ namespace core
 			findCreatingRecord(sectorIndex) - mConstructionRecords.data())];
 		auto& sector = mSectors[sectorIndex];
 
-		// Zero is stored as nothing at all. A Sector lifted back to zero and
-		// a Sector that was never lifted are the same thing and save the same
-		// way, with no field; a stored zero would be a third state that
-		// means the absence without being it, and every reader would have to
-		// know the difference.
-		auto const stored = depth == 0 ? optional<int32_t>{} : optional<int32_t>{ depth };
+		// The override is the presence of the value, and since #1112 zero is
+		// a value like any other. A Sector pinned to zero while its type
+		// lifts is a real state the author asked for - "draw unlifted here
+		// even though my type lifts" - and collapsing zero to nothing made
+		// it unrepresentable, which is what disabled the editor's Break
+		// away over a type at zero. What stays absent is the override
+		// itself: `clearSectorFloorDepth` removes the field, and only that
+		// puts the Sector back to following.
+		auto const stored = optional<int32_t>{ depth };
 
 		// Compared against both halves of what the write touches, the way
 		// the variant write does. Either one differing is a change worth the
@@ -232,10 +235,37 @@ namespace core
 	World::FloorDepthWrite World::clearSectorFloorDepth(uint32_t sectorIndex,
 		string* diagnostic)
 	{
-		// Clearing is the same write as setting zero, and goes through it
-		// rather than around it so the two can never disagree about what
-		// "no depth" is stored as.
-		return setSectorFloorDepth(sectorIndex, 0, diagnostic);
+		// Clearing deletes the override rather than writing zero (#1112).
+		// It used to go through `setSectorFloorDepth(_, 0)` because the two
+		// were one state; now that a zero override is expressible - a
+		// Sector pinned to the unlifted position while its type lifts -
+		// only removing the field puts the Sector back to following. The
+		// same refusals apply, asked through the same door with a zero that
+		// is trivially inside the band.
+		string reason;
+		if (!canSetSectorFloorDepth(sectorIndex, 0, &reason))
+		{
+			if (diagnostic) *diagnostic = reason;
+			return { false, false };
+		}
+
+		auto& record = mConstructionRecords[static_cast<size_t>(
+			findCreatingRecord(sectorIndex) - mConstructionRecords.data())];
+		auto& sector = mSectors[sectorIndex];
+
+		if (!record.floorDepth && !sector->mFloorDepth)
+		{
+			// Legal, and nothing to write: no `modify()`, and the document
+			// stays as clean as it was.
+			if (diagnostic) diagnostic->clear();
+			return { true, false };
+		}
+
+		record.floorDepth.reset();
+		sector->setFloorDepth(optional<int32_t>{});
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return { true, true };
 	}
 
 	bool World::canSetSectorTypeFloorDepth(SectorType type, int32_t depth,
@@ -269,10 +299,17 @@ namespace core
 			return { false, false };
 		}
 
-		// Zero is stored as nothing at all, exactly as the per-Sector write
-		// does it. A type cleared back to zero and a type never set are one
-		// thing and save the same way, with no entry; a stored zero would be a
-		// third state meaning the absence without being it.
+		// A type set back to zero loses its entry rather than storing the zero.
+		// This is the collapse #1112 removed from the per-Sector write, and it
+		// stays here because the two cases are not alike: what a type is asked
+		// is "what do the Sectors following you answer", and a type with no
+		// entry already answers zero for all of them. A stored zero would say
+		// nothing no entry does not already say, and would cost the table the
+		// ability to tell "nobody set this type" from "someone set it to 0" -
+		// which is the one distinction the table's unset rows are drawn to
+		// show. The Sector's zero was different: there the absence meant
+		// *follow*, so collapsing zero into it destroyed the state of holding
+		// still while the type lifts.
 		if (depth == 0)
 		{
 			auto const removed = mSectorTypeFloorDepths.erase(type);
@@ -305,10 +342,13 @@ namespace core
 	World::FloorDepthWrite World::clearSectorTypeFloorDepth(SectorType type,
 		string* diagnostic)
 	{
-		// Same write as setting zero, through the same door, for the same
-		// reason `clearSectorFloorDepth` goes through `setSectorFloorDepth`:
-		// two implementations of "no opinion" is two chances to disagree
-		// about what gets saved.
+		// Same write as setting a type to zero, through the same door: two
+		// implementations of "no opinion" is two chances to disagree about
+		// what gets saved. Note this is *not* the per-Sector pair, where
+		// setting zero and clearing are two different states and clearing is
+		// the only one that ends the override (#1112). For a type the two are
+		// genuinely one, because a type with no entry answers zero for every
+		// Sector following it.
 		return setSectorTypeFloorDepth(type, 0, diagnostic);
 	}
 
@@ -318,6 +358,9 @@ namespace core
 		// A record with no depth leaves the Sector it built with no depth,
 		// which is what a Sector built from a document written before this
 		// field existed ends up with: nothing to apply, nothing to lift.
+		// A record carrying zero applies the zero override as written
+		// (#1112): the Sector is pinned to the unlifted position, which
+		// is not the same state as carrying nothing while its type lifts.
 		if (!sector || !record.floorDepth) return;
 		sector->setFloorDepth(record.floorDepth);
 	}
