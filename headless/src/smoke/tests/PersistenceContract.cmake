@@ -142,6 +142,10 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords accessPanels/roundTri
     floorDepth/aZeroOverrideSurvivesTheRebuildAStructuralEditPerforms
     floorDepth/everySectorCreatingRecordTypeCarriesItsFloorDepth
     floorDepth/aDepthChangesNothingElseInTheDocument
+    floorDepth/aHandEditedDepthOutsideTheBandLoadsClampedToIt
+    floorDepth/anInBandDepthLoadsExactlyAsTyped
+    floorDepth/aClampedWorldSavesBackInsideTheBand
+    floorDepth/aHandEditedZeroSectorDepthIsAValueThatSaves
     floorDepthType/roundTripsThroughBothFormats
     floorDepthType/aNegativeTypeDefaultRoundTrips
     floorDepthType/everyTypeRoundTripsTogether
@@ -151,6 +155,10 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords accessPanels/roundTri
     floorDepthType/theVersionGuardHoldsBothWays
     floorDepthType/aMalformedTypeMapIsRefused
     floorDepthType/aTypeDefaultChangesNothingElseInTheDocument
+    floorDepthType/aHandEditedTypeDefaultOutsideTheBandLoadsClampedToIt
+    floorDepthType/anInBandTypeDefaultLoadsExactlyAsTyped
+    floorDepthType/aClampedTypeDefaultSavesBackInsideTheBand
+    floorDepthType/aStoredZeroTypeEntryIsRefusedWhereDeletingItSaysTheSameThing
 )
 if(DEFINED LANE)
     set(lane_binary "${PERSISTENCE}")

@@ -3146,6 +3146,40 @@ namespace core
 			bool changed{ false };
 		};
 
+		// The band a floor depth may be authored inside: one Level either way
+		// (#1101). Stated once here so the write that refuses outside it, the
+		// load that clamps a hand-edited value into it (#1111) and the editor
+		// input that will not commit outside it all read the same number, and a
+		// change to the Level height moves the band with it rather than leaving
+		// three copies of 320 to drift.
+		static constexpr int32_t kFloorDepthBandPx = CORE_LEVEL_HEIGHT_PIXELS;
+
+		// The clamp a load applies to a depth outside the band (#1111).
+		//
+		// Clamped rather than refused, because one mistyped number must not cost
+		// the author the whole World: the rest of the document is readable, and
+		// the nearest value the author could legitimately have typed is what
+		// they get. Refusing would throw away a World over a digit.
+		//
+		// Clamped rather than drawn as typed, because a depth outside the band
+		// is a picture no author can read: it flings every Layer behind the
+		// Sector carrying it off the screen, which is the exact failure the
+		// band exists to prevent, and the draw pass is the worst place to
+		// discover it. The parent spec's rule, put here so neither read site
+		// invents its own.
+		//
+		// Silent, with no diagnostic carried out of the load. The serialization
+		// layer has no warning channel - every other complaint it makes is a
+		// throw, and throwing is the wrong weight here - and the author is told
+		// regardless: the panel reports the clamped number rather than the one
+		// that was typed, so what reads back is visibly not what was written.
+		static constexpr int32_t clampFloorDepth(int32_t depth)
+		{
+			return depth < -kFloorDepthBandPx ? -kFloorDepthBandPx
+				: depth > kFloorDepthBandPx ? kFloorDepthBandPx
+				: depth;
+		}
+
 		// How deep one Sector's floor was authored, in signed pixels at 1x
 		// zoom, resolving the sparse storage: a Sector with no recorded depth
 		// answers 0 (#1101). This is the fact about the World rather than

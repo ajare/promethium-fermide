@@ -84,6 +84,13 @@ namespace persistence
 	void aZeroOverrideSurvivesTheRebuildAStructuralEditPerforms(smoke::Context const&);
 	void everySectorCreatingRecordTypeCarriesItsFloorDepth(smoke::Context const&);
 	void aDepthChangesNothingElseInTheDocument(smoke::Context const&);
+	// The band on the way in: a hand-edited depth outside it is clamped on
+	// load rather than drawn as typed, and the clamped World saves back out
+	// inside the band (#1111).
+	void aHandEditedDepthOutsideTheBandLoadsClampedToIt(smoke::Context const&);
+	void anInBandDepthLoadsExactlyAsTyped(smoke::Context const&);
+	void aClampedWorldSavesBackInsideTheBand(smoke::Context const&);
+	void aHandEditedZeroSectorDepthIsAValueThatSaves(smoke::Context const&);
 	// The per-Sector-type floor depth map saved, loaded, and surviving the
 	// rebuild (#1103).
 	void typeDefaultRoundTrips(smoke::Context const&);
@@ -95,6 +102,13 @@ namespace persistence
 	void theVersionGuardHoldsBothWays(smoke::Context const&);
 	void aMalformedTypeMapIsRefused(smoke::Context const&);
 	void aTypeDefaultChangesNothingElseInTheDocument(smoke::Context const&);
+	// The same band on the type map, and the zero this map refuses where a
+	// Sector keeps it (#1111).
+	void aHandEditedTypeDefaultOutsideTheBandLoadsClampedToIt(smoke::Context const&);
+	void anInBandTypeDefaultLoadsExactlyAsTyped(smoke::Context const&);
+	void aClampedTypeDefaultSavesBackInsideTheBand(smoke::Context const&);
+	void aStoredZeroTypeEntryIsRefusedWhereDeletingItSaysTheSameThing(
+		smoke::Context const&);
 	void aWorldThatNeverUsedVariantsWritesNoField(smoke::Context const&);
 	void aDocumentWrittenBeforeVariantsExistedLoadsAsNoVariants(smoke::Context const&);
 	void aVariantFieldBelowTheSchemaVersionThatDefinesItIsRefused(smoke::Context const&);

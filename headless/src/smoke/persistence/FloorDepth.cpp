@@ -37,6 +37,15 @@
 // What may not change is everything else. A depth is render state, and the
 // document says so: same Sectors, same ends, same capacity, same
 // construction in every other field.
+//
+// Added by #1111, the band on the way in. Every check above authors its
+// depth through the World, which refuses anything outside one Level either
+// way, so none of them can say what happens when a file arrives carrying a
+// number no author could have typed. Hand-edited documents do, and the load
+// is the last place that still has a choice about what those bytes mean:
+// clamped into the band rather than drawn as typed, and clamped on the
+// record so the save that follows carries the clamped number rather than
+// the mistake forward.
 
 #include "WorldChecks.h"
 
@@ -49,8 +58,11 @@
 #include <yaml-cpp/yaml.h>
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace persistence
 {
@@ -133,6 +145,38 @@ namespace persistence
 					at = yaml.find(field, at + field.size()))
 				++found;
 			return found;
+		}
+
+		// The fixture's document with its one Sector `floorDepth` field
+		// rewritten to a hand-typed value (#1111). Hand-edited rather than
+		// authored, because a value outside the band is a thing the writer
+		// cannot produce: the only way to get one in front of the loader is to
+		// type it into the file the way an author correcting their World would.
+		//
+		// The probe is const on purpose. A non-const subscript on a yaml-cpp
+		// map creates the key it was asked for, so the obvious
+		// `if (record["floorDepth"])` written through a mutable handle would
+		// leave an empty `floorDepth:` on every record it looked at - a
+		// fixture that fails by growing fields rather than by saying anything.
+		std::string withHandEditedSectorDepth(core::World const& world,
+			int32_t depth)
+		{
+			YAML::Node doc = YAML::Load(serialize(world));
+			std::vector<std::size_t> found;
+			if (const YAML::Node records = doc["construction"])
+			{
+				for (std::size_t i = 0; i < records.size(); ++i)
+				{
+					const YAML::Node record = records[i];
+					if (record && record["floorDepth"])
+						found.push_back(i);
+				}
+			}
+			require(found.size() == 1, "The fixture document carried "
+				+ std::to_string(found.size())
+				+ " floorDepth fields; the case needs exactly one to hand-edit");
+			doc["construction"][found[0]]["floorDepth"] = depth;
+			return YAML::Dump(doc);
 		}
 	}
 
@@ -575,5 +619,172 @@ namespace persistence
 					+ " top-level field(s) to the document; the lift belongs on "
 					  "the Sector's construction record and nowhere else");
 		}
+	}
+
+	// A hand-edited depth outside the band loads clamped into it (#1111).
+	//
+	// The write path refuses anything outside one Level either way, so a
+	// document carrying 5000 was typed into the file by hand, and the load is
+	// the last place that still has a choice about what the number means.
+	// Letting it through draws a World whose back Layers are off screen - the
+	// exact failure the band exists to prevent, discovered by an author who
+	// cannot see what they are editing. Refusing the document is the other
+	// wrong answer: one mistyped digit would cost the author their whole
+	// World, and the file is otherwise readable. So the load takes the nearest
+	// value the author could legitimately have typed and says nothing, which
+	// is also a report - the panel shows 320 where they typed 5000.
+	void aHandEditedDepthOutsideTheBandLoadsClampedToIt(smoke::Context const&)
+	{
+		auto const world = twoLayerWorld("Hand-edited out of band");
+		require(world->setSectorFloorDepth(firstOn(*world, 0), 48).changed,
+			"the fixture's depth write was refused");
+
+		struct Typed { int32_t typed; int32_t expected; char const* why; };
+		Typed const cases[] = {
+			{ 5000, CORE_LEVEL_HEIGHT_PIXELS, "the ticket's own case" },
+			{ -5000, -CORE_LEVEL_HEIGHT_PIXELS, "the same digit on the other side" },
+			{ CORE_LEVEL_HEIGHT_PIXELS + 1, CORE_LEVEL_HEIGHT_PIXELS,
+				"one past the band edge, where an off-by-one clamp lands wrong" },
+			{ -(CORE_LEVEL_HEIGHT_PIXELS + 1), -CORE_LEVEL_HEIGHT_PIXELS,
+				"one past the band edge going down" },
+			{ std::numeric_limits<int32_t>::max(), CORE_LEVEL_HEIGHT_PIXELS,
+				"a value that would overflow anything that doubled it" },
+			{ std::numeric_limits<int32_t>::min(), -CORE_LEVEL_HEIGHT_PIXELS,
+				"the other end of the int, which must not come back positive" },
+		};
+		for (auto const& item : cases)
+		{
+			auto const loaded = load(withHandEditedSectorDepth(*world, item.typed));
+			auto const index = firstOn(*loaded, 0);
+			require(loaded->hasFloorDepthOverride(index),
+				"A hand-edited " + std::to_string(item.typed) + " (" + item.why
+					+ ") loaded as no override at all; the clamp is a value, not a "
+					"clear");
+			require(loaded->effectiveFloorDepth(index) == item.expected,
+				"A hand-edited " + std::to_string(item.typed) + " loaded as "
+					+ std::to_string(loaded->effectiveFloorDepth(index))
+					+ "; the band is +/-" + std::to_string(CORE_LEVEL_HEIGHT_PIXELS)
+					+ " and the load is the place that enforces it (#1111)");
+			require(loaded->layerFloorOffsetPx(1) == item.expected,
+				"The Layer behind draws " + std::to_string(loaded->layerFloorOffsetPx(1))
+					+ "px off from a hand-edited " + std::to_string(item.typed)
+					+ ", so the unclamped number reached the picture");
+		}
+	}
+
+	// In-band values load exactly as typed, at both extremes and everywhere
+	// between. The clamp has to be the identity inside the band: a clamp
+	// written a pixel short, or applied to the wrong side of zero, shows up
+	// here as a World that draws its own authored depth wrong rather than as
+	// something only hand-edited files can get wrong.
+	void anInBandDepthLoadsExactlyAsTyped(smoke::Context const&)
+	{
+		auto const world = twoLayerWorld("In band, unchanged");
+		require(world->setSectorFloorDepth(firstOn(*world, 0), 48).changed,
+			"the fixture's depth write was refused");
+
+		for (int32_t const depth : { CORE_LEVEL_HEIGHT_PIXELS,
+				CORE_LEVEL_HEIGHT_PIXELS - 1, 48, 1, 0, -1,
+				-(CORE_LEVEL_HEIGHT_PIXELS - 1), -CORE_LEVEL_HEIGHT_PIXELS })
+		{
+			auto const loaded = load(withHandEditedSectorDepth(*world, depth));
+			auto const index = firstOn(*loaded, 0);
+			require(loaded->effectiveFloorDepth(index) == depth,
+				"An in-band depth of " + std::to_string(depth) + " loaded as "
+					+ std::to_string(loaded->effectiveFloorDepth(index))
+					+ "; the clamp moved a value that was never outside the band");
+			require(loaded->hasFloorDepthOverride(index),
+				"An in-band depth of " + std::to_string(depth)
+					+ " loaded as no override");
+		}
+	}
+
+	// A clamped World saves back out inside the band (#1111). The clamp is
+	// applied to the record rather than at draw time, so the file that goes
+	// back out carries the band edge and not the mistyped number: the World
+	// stops carrying the mistake forward the first time it is opened. This is
+	// also the statement that the two halves agree on where the band is - the
+	// value the load produced is one the write would accept, so no number can
+	// live in the gap between a clamp that clamps to one place and a refusal
+	// that refuses at another.
+	void aClampedWorldSavesBackInsideTheBand(smoke::Context const&)
+	{
+		auto const world = twoLayerWorld("Clamped resave");
+		require(world->setSectorFloorDepth(firstOn(*world, 0), 48).changed,
+			"the fixture's depth write was refused");
+		auto const loaded = load(withHandEditedSectorDepth(*world, 5000));
+		auto const index = firstOn(*loaded, 0);
+		require(loaded->effectiveFloorDepth(index) == CORE_LEVEL_HEIGHT_PIXELS,
+			"the load did not clamp in this fixture, so the case proves nothing");
+
+		auto const resaved = serialize(*loaded);
+		require(resaved.find("floorDepth: 5000") == std::string::npos,
+			"A clamped depth saved the mistyped value straight back out, so the "
+				"clamp never reached the record it was written to");
+		require(resaved.find("floorDepth: " + std::to_string(CORE_LEVEL_HEIGHT_PIXELS))
+				!= std::string::npos,
+			"The clamped World did not save the band edge it loaded");
+
+		std::string diagnostic;
+		require(loaded->canSetSectorFloorDepth(index,
+				loaded->effectiveFloorDepth(index), &diagnostic),
+			"The value the load produced is one the write refuses, so the load "
+				"and the write disagree about where the band sits: " + diagnostic);
+
+		// And it holds through a second round trip rather than creeping.
+		auto const again = load(resaved);
+		require(again->effectiveFloorDepth(firstOn(*again, 0))
+				== CORE_LEVEL_HEIGHT_PIXELS,
+			"A clamped depth moved again on the second load: "
+				+ std::to_string(again->effectiveFloorDepth(firstOn(*again, 0))));
+	}
+
+	// The stored-zero half of what #1111 asked to settle, pinned so it cannot
+	// drift back to the state the ticket found. The complaint was never that
+	// the two paths answer zero differently - they do, and must, because what
+	// an absence means in each is different. It was that the per-Sector path
+	// took a zero in, reported it as an override, and then dropped it on the
+	// next save because the sparse writer skipped zero: a state the reader
+	// accepts and the writer throws away, so the author's file changed under
+	// them without any act of theirs. #1112 made the Sector's zero a value
+	// that is written, read and reported as the pin it is, and this is the
+	// persistence-tier statement of that. The type-map half - where a stored
+	// zero is refused because the absence already says it - is pinned in
+	// `FloorDepthTypeDefaults.cpp`.
+	void aHandEditedZeroSectorDepthIsAValueThatSaves(smoke::Context const&)
+	{
+		auto const world = twoLayerWorld("Hand-edited zero");
+		require(world->setSectorTypeFloorDepth(core::SectorType::Location, 24).changed,
+			"the fixture's type default was refused");
+		require(world->setSectorFloorDepth(firstOn(*world, 0), 48).changed,
+			"the fixture's depth write was refused");
+
+		auto const loaded = load(withHandEditedSectorDepth(*world, 0));
+		auto const index = firstOn(*loaded, 0);
+		require(loaded->hasFloorDepthOverride(index),
+			"A hand-edited zero loaded as no override, which puts the Sector back "
+				"on the type that lifts it (#1112)");
+		require(loaded->effectiveFloorDepth(index) == 0,
+			"A hand-edited zero loaded as " + std::to_string(
+				loaded->effectiveFloorDepth(index)));
+		require(loaded->layerFloorOffsetPx(1) == 0,
+			"The Layer behind still draws " + std::to_string(loaded->layerFloorOffsetPx(1))
+				+ "px off from a Sector pinned to zero");
+
+		// The half the ticket actually found broken: the save back out. A zero
+		// that loads and then vanishes is the accept-then-lose pair.
+		require(countField(*loaded, "floorDepth") == 1,
+			"The loaded zero was dropped on the way back out, which is the "
+				"accept-then-lose half of the #1111 inconsistency");
+		require(serialize(*loaded).find("floorDepth: 0") != std::string::npos,
+			"The re-saved document does not carry the zero that was loaded");
+
+		// And the Sector's zero is not the type's: the type keeps the number
+		// the author gave it, and the Sector that never overrode still follows.
+		require(loaded->sectorTypeFloorDepth(core::SectorType::Location) == 24,
+			"A Sector's zero reached up and changed the type it belongs to");
+		require(loaded->effectiveFloorDepth(firstOn(*loaded, 1)) == 24,
+			"The Sector left following the type stopped following it: "
+				+ std::to_string(loaded->effectiveFloorDepth(firstOn(*loaded, 1))));
 	}
 }

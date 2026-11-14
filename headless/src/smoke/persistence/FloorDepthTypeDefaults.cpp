@@ -41,6 +41,13 @@
 // What may not change is everything else. A type default is render state, and
 // the document says so: same Sectors, same ends, same capacity, same
 // construction in every other field.
+//
+// Added by #1111, the band on the way in. The type map is where a mistyped
+// number does the most damage, because it moves every Sector following the
+// type rather than one, so the clamp the per-Sector field gets on load it
+// gets here too - and the zero this map refuses is the same zero a Sector
+// now keeps, which is a difference of meaning rather than of policy and is
+// pinned as such below.
 
 #include "WorldChecks.h"
 
@@ -55,6 +62,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -431,5 +439,172 @@ namespace persistence
 			"A type default changed the Layer count");
 		require(a->getName() == b->getName(),
 			"A type default changed the World name");
+	}
+
+	// A hand-edited type default outside the band loads clamped into it
+	// (#1111), the same rule the per-Sector field follows and for the same
+	// reason with one more on top: a type default moves every Sector following
+	// the type, so a hand-typed 9000 here flings more of the picture off
+	// screen than one mistyped Sector can. The band is the same number the
+	// write refuses outside, read off the World rather than restated, so the
+	// clamp and the refusal cannot sit at different heights.
+	void aHandEditedTypeDefaultOutsideTheBandLoadsClampedToIt(smoke::Context const&)
+	{
+		auto const world = twoLayerWorld("Hand-edited type out of band");
+		require(world->setSectorTypeFloorDepth(core::SectorType::Location, 24).changed,
+			"type default refused in fixture");
+		auto const roomType = core::getSectorTypeString(core::SectorType::Location);
+
+		struct Typed { int32_t typed; int32_t expected; char const* why; };
+		Typed const cases[] = {
+			{ 9000, CORE_LEVEL_HEIGHT_PIXELS, "the ticket's own case" },
+			{ -9000, -CORE_LEVEL_HEIGHT_PIXELS, "the same number on the other side" },
+			{ CORE_LEVEL_HEIGHT_PIXELS + 1, CORE_LEVEL_HEIGHT_PIXELS,
+				"one past the band edge, where an off-by-one clamp lands wrong" },
+			{ -(CORE_LEVEL_HEIGHT_PIXELS + 1), -CORE_LEVEL_HEIGHT_PIXELS,
+				"one past the band edge going down" },
+			{ std::numeric_limits<int32_t>::max(), CORE_LEVEL_HEIGHT_PIXELS,
+				"a value that would overflow anything that doubled it" },
+			{ std::numeric_limits<int32_t>::min(), -CORE_LEVEL_HEIGHT_PIXELS,
+				"the other end of the int, which must not come back positive" },
+		};
+		for (auto const& item : cases)
+		{
+			auto const loaded = load(withEntries(*world, { { roomType, item.typed } }));
+			require(loaded->hasSectorTypeFloorDepth(core::SectorType::Location),
+				"A hand-edited type default of " + std::to_string(item.typed)
+					+ " (" + item.why + ") loaded as no entry at all; the clamp is a "
+						"value, not a clear");
+			require(loaded->sectorTypeFloorDepth(core::SectorType::Location)
+					== item.expected,
+				"A hand-edited type default of " + std::to_string(item.typed) + " ("
+					+ item.why + ") loaded as "
+					+ std::to_string(loaded->sectorTypeFloorDepth(
+						core::SectorType::Location))
+					+ "; the band is +/-" + std::to_string(CORE_LEVEL_HEIGHT_PIXELS)
+					+ " and the load is the place that enforces it (#1111)");
+			require(loaded->effectiveFloorDepth(
+						sectorOfType(*loaded, core::SectorType::Location))
+					== item.expected,
+				"A Sector following the clamped type answers "
+					+ std::to_string(loaded->effectiveFloorDepth(
+						sectorOfType(*loaded, core::SectorType::Location)))
+					+ " rather than the clamped " + std::to_string(item.expected));
+		}
+	}
+
+	// In-band type defaults load exactly as typed, at both extremes and
+	// everywhere between. The clamp is the identity inside the band, and a
+	// clamp written a pixel short would show up here as a scheme the author
+	// typed and then lost a little of on the save.
+	void anInBandTypeDefaultLoadsExactlyAsTyped(smoke::Context const&)
+	{
+		auto const world = twoLayerWorld("In band, unchanged");
+		auto const roomType = core::getSectorTypeString(core::SectorType::Location);
+		for (int32_t const depth : { CORE_LEVEL_HEIGHT_PIXELS,
+				CORE_LEVEL_HEIGHT_PIXELS - 1, 24, 1, -1,
+				-(CORE_LEVEL_HEIGHT_PIXELS - 1), -CORE_LEVEL_HEIGHT_PIXELS })
+		{
+			auto const loaded = load(withEntries(*world, { { roomType, depth } }));
+			require(loaded->sectorTypeFloorDepth(core::SectorType::Location) == depth,
+				"An in-band type default of " + std::to_string(depth) + " loaded as "
+					+ std::to_string(loaded->sectorTypeFloorDepth(
+						core::SectorType::Location))
+					+ "; the clamp moved a value that was never outside the band");
+		}
+	}
+
+	// A clamped type default saves back out inside the band (#1111), and the
+	// value the load produced is one the write would accept. That second half
+	// is the point: the clamp and the refusal are two code paths at two ends of
+	// the document, and if they ever sat at different heights there would be
+	// numbers the load hands over that the write then refuses - a World that
+	// cannot be re-saved as it was loaded.
+	void aClampedTypeDefaultSavesBackInsideTheBand(smoke::Context const&)
+	{
+		auto const world = twoLayerWorld("Clamped type resave");
+		auto const roomType = core::getSectorTypeString(core::SectorType::Location);
+		auto const loaded = load(withEntries(*world, { { roomType, 9000 } }));
+		require(loaded->sectorTypeFloorDepth(core::SectorType::Location)
+				== CORE_LEVEL_HEIGHT_PIXELS,
+			"the load did not clamp in this fixture, so the case proves nothing");
+
+		auto const resaved = serialize(*loaded);
+		require(resaved.find("depth: 9000") == std::string::npos,
+			"A clamped type default saved the mistyped value straight back out, so "
+				"the clamp never reached the map it was written to");
+		require(resaved.find("depth: " + std::to_string(CORE_LEVEL_HEIGHT_PIXELS))
+				!= std::string::npos,
+			"The clamped type map did not save the band edge it loaded");
+
+		std::string diagnostic;
+		require(loaded->canSetSectorTypeFloorDepth(core::SectorType::Location,
+				loaded->sectorTypeFloorDepth(core::SectorType::Location), &diagnostic),
+			"The value the load produced is one the write refuses, so the load and "
+				"the write disagree about where the band sits: " + diagnostic);
+
+		auto const again = load(resaved);
+		require(again->sectorTypeFloorDepth(core::SectorType::Location)
+				== CORE_LEVEL_HEIGHT_PIXELS,
+			"A clamped type default moved again on the second load: "
+				+ std::to_string(again->sectorTypeFloorDepth(
+					core::SectorType::Location)));
+	}
+
+	// The stored-zero half of what #1111 asked to settle, pinned beside the
+	// refusal that carries it. A zero type entry is refused, and the refusal is
+	// not fussiness: a type with no entry already answers 0 for every Sector
+	// following it, so the row would carry no fact the absence does not, and
+	// would cost the table the one distinction its unset rows are drawn to
+	// show - "nobody set this" against "someone set it to 0". Deleting the
+	// entry reaches the same answer, which is exactly what it does not do for a
+	// Sector, where the absence means *follow* and a zero means *hold still*
+	// (#1112, pinned on the Sector side in `FloorDepth.cpp`). The two paths
+	// are therefore not inconsistent: each stores the zero where its own
+	// absence cannot say it, and refuses it where the absence already has.
+	void aStoredZeroTypeEntryIsRefusedWhereDeletingItSaysTheSameThing(
+		smoke::Context const&)
+	{
+		auto const world = twoLayerWorld("Zero entry coherence");
+		require(world->setSectorTypeFloorDepth(core::SectorType::Location, 24).changed,
+			"type default refused in fixture");
+		auto const roomType = core::getSectorTypeString(core::SectorType::Location);
+
+		require(refused([&] {
+				load(withEntries(*world, { { roomType, 0 } })); }),
+			"A zero type entry loaded; the writer never produces one, so the map "
+				"would hold a state it cannot write back out (#1111)");
+
+		auto const deleted = load(withEntries(*world, {}));
+		require(!deleted->hasSectorTypeFloorDepth(core::SectorType::Location),
+			"A map with the row deleted still reports an entry");
+		require(deleted->sectorTypeFloorDepth(core::SectorType::Location) == 0,
+			"A deleted row answers " + std::to_string(
+				deleted->sectorTypeFloorDepth(core::SectorType::Location))
+				+ " rather than the zero the refused row would have answered");
+		require(deleted->effectiveFloorDepth(
+					sectorOfType(*deleted, core::SectorType::Location)) == 0,
+			"A Sector following a deleted row does not answer zero");
+		require(deleted->layerFloorOffsetPx(1) == 0,
+			"The Layer behind draws " + std::to_string(deleted->layerFloorOffsetPx(1))
+				+ "px off with no type opinions recorded");
+
+		// The Sector side of the pair, against this same World: here the zero
+		// is a value, because deleting the override does not say the same
+		// thing - it puts the Sector back on the type that lifts it.
+		auto const room = sectorOfType(*world, core::SectorType::Location);
+		auto const pinned = world->setSectorFloorDepth(room, 0);
+		require(pinned.accepted && pinned.changed,
+			"pinning the Sector to zero was not an accepted write that changed "
+			"anything, so the pair cannot be shown");
+		require(world->effectiveFloorDepth(room) == 0,
+			"The pinned Sector answers " + std::to_string(world->effectiveFloorDepth(room))
+				+ " while its type sits at 24");
+		require(world->sectorTypeFloorDepth(core::SectorType::Location) == 24,
+			"The Sector's zero reached up and changed its type");
+		require(!deleted->hasFloorDepthOverride(
+					sectorOfType(*deleted, core::SectorType::Location)),
+			"The World with no override reports one, so the two states the Sector "
+				"can hold are not the two the type map can");
 	}
 }

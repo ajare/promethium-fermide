@@ -70,7 +70,11 @@ namespace core
 		// Layer off the screen, and a mistyped 5000 would fling every Layer
 		// behind the Sector that carried it out of sight and leave the author
 		// hunting for the one Sector responsible.
-		constexpr int32_t kMaxFloorDepth = CORE_LEVEL_HEIGHT_PIXELS;
+		//
+		// An alias rather than a statement of its own: the band lives on the
+		// World, which is also where the load clamps a hand-edited value into
+		// it (#1111). Two numbers for one band is two numbers that can disagree.
+		constexpr int32_t kMaxFloorDepth = World::kFloorDepthBandPx;
 	}
 
 	int32_t World::effectiveFloorDepth(uint32_t sectorIndex) const

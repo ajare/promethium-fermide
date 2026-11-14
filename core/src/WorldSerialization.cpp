@@ -1770,6 +1770,17 @@ namespace core
 		// to the unlifted position; a pre-74 document never carried one, so
 		// one that claims to predates this writer's own output and is
 		// refused rather than guessed at.
+		//
+		// A value outside the band is clamped into it on the way in (#1111).
+		// The write path refuses out-of-band depths, so a document carrying
+		// one was edited by hand, and the load is the last place that still
+		// has a choice about what the number means: let it through and the
+		// renderer draws a World whose back Layers are off screen, which is
+		// the failure the band was invented to stop. Clamping here is also
+		// what makes the save honest - the record carries the clamped value,
+		// so the file that goes back out is inside the band and the replay
+		// onto a rebuilt Sector applies what was loaded rather than what was
+		// typed.
 		if (serializer.hasField("floorDepth"))
 		{
 			if (version < 72) throw SerializationException(
@@ -1777,7 +1788,7 @@ namespace core
 			auto const depth = serializer.readInt32("floorDepth");
 			if (version < 74 && depth == 0) throw SerializationException(
 				"A zero Sector floor depth requires World schema version 74 or later");
-			record.floorDepth = depth;
+			record.floorDepth = clampFloorDepth(depth);
 		}
 		return record;
 	}
@@ -2129,7 +2140,14 @@ namespace core
 				if (sectorTypeFloorDepths.count(*type) != 0) throw SerializationException(format(
 					"Sector type {} carries more than one floor depth",
 					getSectorTypeString(*type)));
-				sectorTypeFloorDepths[*type] = depth;
+				// Clamped to the same band the per-Sector field is (#1111), and
+				// for the same reason with one more on top: a type default moves
+				// every Sector following the type, so a hand-typed 9000 here
+				// flings more of the picture off screen than one mistyped
+				// Sector can. The clamp is applied to the value stored in the
+				// map, so the World that saves again writes the clamped number
+				// and not the one that came in.
+				sectorTypeFloorDepths[*type] = clampFloorDepth(depth);
 			}
 			serializer.endArray();
 		}

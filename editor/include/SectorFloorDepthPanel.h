@@ -54,12 +54,13 @@ namespace editor
 {
 	// The band a floor depth may be authored inside: one Level either way.
 	//
-	// Stated here as the editor's own constant so the input's tooltip and the
-	// range test read off one number rather than each naming
-	// `CORE_LEVEL_HEIGHT_PIXELS` themselves. It is the same band the core
-	// write refuses outside; the check pins the two together so a change to
-	// one cannot leave the other behind.
-	inline constexpr std::int32_t kFloorDepthBandPx = CORE_LEVEL_HEIGHT_PIXELS;
+	// An alias for the band the core owns, taken from there rather than restated,
+	// so the input's tooltip, the range test and the core write - and the load
+	// that clamps a hand-edited value into the same band (#1111) - cannot be
+	// four places that each named 320 and drifted apart. The check still pins
+	// the editor's number to the Level height, because a band that quietly
+	// stopped being one Level is worth a failing check.
+	inline constexpr std::int32_t kFloorDepthBandPx = core::World::kFloorDepthBandPx;
 
 	// Whether a depth can be committed at all. The input refuses anything
 	// outside the band, and the core write refuses it too - this is the
