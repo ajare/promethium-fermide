@@ -871,6 +871,15 @@ std::shared_ptr<const core::Vertex> markerPathTargetAtPosition(core::World const
 // caller that owns the cursor converts it and hands it in (#1000). A pass
 // with no cursor has nothing to highlight, which is what a caller drawing
 // with no pointer over the canvas passes.
+//
+// This pass draws a Layer's whole Graph from outside `renderSector`, so it
+// follows the rule stated at the top of Render.cpp (#1102, #1110): install
+// the lift of the Layer being drawn before transforming anything it draws.
+// It installs the viewed Layer's floor lift off the World it was handed,
+// not off the frame in progress, because this pass runs after `renderWorld`
+// has returned and unwound both the staircase and the published World - a
+// caller that left the lift to whatever was ambient here would draw the
+// overlay at zero over Sectors that are not at zero.
 void renderGraph(std::shared_ptr<const core::Graph> graph,
 	std::shared_ptr<const core::World> world, WorldDrawList* drawList,
 	bool markerTargetsOnly = false,

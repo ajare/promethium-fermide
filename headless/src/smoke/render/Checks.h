@@ -99,3 +99,9 @@ namespace render_smoke { void registerFloorDepthPicking(std::vector<smoke::Check
 // lift, so shifted content is neither cut at the unlifted edge nor
 // stranded past the bar's reach (#1109).
 namespace render_smoke { void registerFloorDepthWorldClip(std::vector<smoke::Check>& checks); }
+
+// The graph overlay lifts with the Sectors it describes: vertices, edges
+// and mount triangles all ride the viewed Layer's lift, read off the World
+// handed in rather than off a render frame that has already unwound by the
+// time the editor draws the overlay (#1110).
+namespace render_smoke { void registerFloorDepthGraphOverlay(std::vector<smoke::Check>& checks); }

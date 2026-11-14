@@ -453,6 +453,13 @@ set(names
     floorDepthClip/aPushedPictureThatFitsStillGetsABar
     floorDepthClip/aFlatWorldKeepsTheOldScrollArithmetic
     floorDepthClip/theSlackIsZeroForAFlatWorldAndScalesWithZoom
+    floorDepthGraph/theWholeOverlayLiftsWithTheLayer
+    floorDepthGraph/mountTrianglesLiftWithTheirVertices
+    floorDepthGraph/theOverlayLiftsAfterTheRenderPassHasUnwound
+    floorDepthGraph/aFlatWorldDrawsTheOverlayExactlyAsBefore
+    floorDepthGraph/theOverlayLiftScalesWithZoom
+    floorDepthGraph/aPushedLayerPushesTheOverlayDown
+    floorDepthGraph/theFrontLayerOverlayIsNeverLifted
 )
 if(DEFINED LANE)
     set(lane_binary "${RENDER}")

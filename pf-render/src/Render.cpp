@@ -43,6 +43,7 @@
 #include "WorldDrawList.h"
 #include "UISettings.h"
 #include "WorldToScreen.h"
+#include "WorldViewportZoom.h"
 
 
 extern UISettings gUISettings;
@@ -511,6 +512,24 @@ void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::Wor
 	shared_ptr<core::Path> path = gSelectedAgent ? gSelectedAgent->getPath() : nullptr;
 
 	auto layer = (uint32_t)gUISettings.visibleLayer;
+
+	// The graph is a picture of the Layer being viewed, so it rides that
+	// Layer's lift (#1110). This pass is driven from outside `renderWorld` -
+	// the editor calls it as its own statement after the World has returned -
+	// so nothing ambient is installed here and, left alone, every vertex, edge
+	// and mount triangle draws at lift zero while the Sectors they mark have
+	// moved off that number.
+	//
+	// The lift is asked of the World handed in rather than of this file's
+	// `layerFloorLiftPx`, which looks identical and answers nothing here.
+	// That helper reads the staircase `renderWorld` installs and otherwise
+	// falls back to the published render World; the editor publishes one
+	// only for the span of `renderWorld` itself, so at this point both are
+	// gone and the fallback says zero for a Layer that is anything but flat.
+	// Asking the World passed in is the same question the picker inverts
+	// (#1105) and cannot be answered by whichever frame last ran.
+	FloorLiftScope const lift{
+		pf::render::layerFloorLiftPx(*world, layer, gUISettings.worldZoom) };
 
 	auto const& vertices = graph->getVertices();
 	auto const& edges = graph->getEdges();
