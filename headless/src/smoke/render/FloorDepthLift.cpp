@@ -28,13 +28,18 @@
 //     Two renders with a depth change between them, and no invalidation
 //     call anywhere, must show the second one moved. A cache with a
 //     forgotten invalidation is a lift that sticks;
-//   * the Sector's own clip stays with its unlifted footprint. This slice
-//     moves the tile surface and nothing else - thresholds, transit
-//     geometry, objects, Agents, the selection highlight all still draw
-//     where they drew. A surface lifted out of a clip that moved with it
-//     would be the whole feature arriving a slice early and untested;
+//   * the box a Sector draws itself inside travels with the Sector. The
+//     clip, the selection highlight and the wireframe-behind overlay are
+//     the three things a lift that stopped at the tiles would leave
+//     behind, and each one left behind is a visible break: a Sector with
+//     its top cropped off, a highlight round an empty box, an x-ray of
+//     where a Layer used to be (#1102);
 //   * a negative depth pushes the Layers behind down rather than up, and
 //     the push is the same magnitude.
+//
+// The thresholds, transit geometry, objects and apertures that also have
+// to travel with a shifted Sector are checked next door, in
+// `FloorDepthAttached.cpp`.
 //
 // The atlas is a synthetic sheet with one full-cell tile per surface name,
 // installed the way the render stack installs it, so the quads measured
@@ -66,6 +71,10 @@
 // The renderer's live viewport settings, shared with every other check in
 // the module.
 extern UISettings gUISettings;
+
+// The editor's selection, which is what the highlight measured below is
+// drawn from.
+extern std::shared_ptr<const core::Sector> gSelectedSector;
 
 namespace
 {
@@ -224,11 +233,44 @@ namespace
 		return boxOf(quads);
 	}
 
-	// The top edge of the wireframe outline the same Sector draws. The
-	// outline is a boundary overlay drawn outside the surface clip, so it
-	// shows what the Sector's own footprint is on screen without any tile
-	// surface in the way.
-	float wireframeOutlineTop(std::shared_ptr<core::World> const& world,
+	// The bounding box one draw pass put on screen, over a set of Lines.
+	struct LineBox
+	{
+		float left{};
+		float right{};
+		float top{};
+		float bottom{};
+		int lines{};
+	};
+
+	LineBox boxOf(std::vector<WorldDrawList::Line const*> const& lines)
+	{
+		LineBox box;
+		box.left = box.top = 1e30f;
+		box.right = box.bottom = -1e30f;
+		for (auto const* line : lines)
+		{
+			box.left = std::min({ box.left, line->from.x, line->to.x });
+			box.right = std::max({ box.right, line->from.x, line->to.x });
+			box.top = std::min({ box.top, line->from.y, line->to.y });
+			box.bottom = std::max({ box.bottom, line->from.y, line->to.y });
+			++box.lines;
+		}
+		return box;
+	}
+
+	std::string describe(LineBox const& box)
+	{
+		return "x " + std::to_string(box.left) + ".." + std::to_string(box.right)
+			+ ", y " + std::to_string(box.top) + ".." + std::to_string(box.bottom)
+			+ ", lines " + std::to_string(box.lines);
+	}
+
+	// The selection highlight a Sector draws when it is the selected one: a
+	// 3px SelectedColour rect on the Sector box, emitted outside the
+	// Sector's own clip and so travelling on its own account rather than
+	// riding the clip along.
+	LineBox selectionHighlightBox(std::shared_ptr<core::World> const& world,
 		uint32_t const sectorIndex)
 	{
 		RenderWorldScope scope{ world };
@@ -236,20 +278,49 @@ namespace
 			{ 100000.0f, 100000.0f } });
 		auto const sector = world->getSector(sectorIndex);
 		require(sector != nullptr, "The fixture Sector could not be found");
-		renderSector(sector, sector->getLayerIndex(), LayerRenderStyle::Wireframe,
+		gSelectedSector = sector;
+		gUISettings.selectionMode = UISettings::SelectionMode::Sector;
+		renderSector(sector, sector->getLayerIndex(), LayerRenderStyle::Solid,
 			true, kTint, &commands);
+		gSelectedSector.reset();
 
-		float top = 1e30f;
-		int lines = 0;
+		std::vector<WorldDrawList::Line const*> highlight;
 		for (auto const& command : commands.commands())
 		{
 			auto const* line = std::get_if<WorldDrawList::Line>(&command);
-			if (!line) continue;
-			top = std::min({ top, line->from.y, line->to.y });
-			++lines;
+			if (line && line->colour == packColour(255, 255, 0)
+				&& line->thickness >= 2.5f)
+				highlight.push_back(line);
 		}
-		require(lines > 0, "The wireframe pass drew no outline to measure");
-		return top;
+		require(highlight.size() == 4,
+			"The selected Sector drew " + std::to_string(highlight.size())
+				+ " SelectedColour strokes rather than the four sides of one box, "
+				"so there is no highlight here to measure");
+		return boxOf(highlight);
+	}
+
+	// The wireframe-behind overlay: the outlines `renderWorld` lays over
+	// the selection for the Layer directly behind it. Picked out by the
+	// Back-Layer tint the overlay passes down - the Solid Layer's own edge
+	// strokes are black and are not part of this measurement.
+	LineBox wireframeBehindBox(std::shared_ptr<core::World> const& world)
+	{
+		gUISettings.visibleLayer = 0;
+		gUISettings.renderNextLayerWireframe = true;
+		WorldDrawList commands({ { -100000.0f, -100000.0f },
+			{ 100000.0f, 100000.0f } });
+		renderWorld(world, &commands);
+
+		auto const overlay = PackedColourValue(ImColor(224, 224, 255));
+		std::vector<WorldDrawList::Line const*> outlines;
+		for (auto const& command : commands.commands())
+		{
+			auto const* line = std::get_if<WorldDrawList::Line>(&command);
+			if (line && line->colour == overlay) outlines.push_back(line);
+		}
+		require(!outlines.empty(),
+			"The wireframe-behind overlay contributed no outlines to measure");
+		return boxOf(outlines);
 	}
 
 	// Two Layers, one Room on each at the same footprint, no Doors between
@@ -457,48 +528,115 @@ namespace
 				+ "; a negative depth must push down by 40 screen pixels");
 	}
 
-	// This slice moves the tile surface and nothing else.
+	// The clip a Sector cuts its own drawing to travels with the Sector.
 	//
-	// Two halves, and both matter. The surface's own clip travels with it,
-	// because a lift that left the clip behind would crop the top off what
-	// it had just moved rather than move it. And everything that is not the
-	// tile surface stays exactly where it was: the wireframe outline of the
-	// same Sector, drawn outside the surface clip by the same pass, still
-	// lands on the unlifted footprint. Thresholds, transit geometry,
-	// objects, Agents and the selection highlight are all still on the
-	// unlifted mapping, which is the declared intermediate state this
-	// slice stops at.
-	void checkOnlyTileSurfaceMoves(smoke::Context const&)
+	// Measured on the surface triangles themselves rather than predicted,
+	// because the failure this guards against is the one a partial lift
+	// makes visible: the tiles moved 48 pixels up inside a clip still cut
+	// to the old footprint, so the top 48 pixels of the Sector vanish and
+	// the frame is drawn round nothing. A lift that crops the thing it
+	// moved has not moved it.
+	void checkTheSectorOwnClipMovesWithTheShiftedSector(smoke::Context const&)
 	{
 		installFlatAtlas();
 		pinViewport();
-		auto const fixture = layeredRooms("Only the surface moves");
-
-		auto const flat = recordSurface(fixture.world, fixture.behind);
-		require(fixture.world->setSectorFloorDepth(fixture.front, 48).changed,
-			"the fixture's depth write was refused");
-		auto const lifted = recordSurface(fixture.world, fixture.behind);
+		auto const fixture = layeredRooms("The clip travels with the Sector");
 		auto const expected = expectedUnlifted(*fixture.world->getSector(
 			fixture.behind));
 
-		// The surface's clip moved with the surface, so nothing was cropped:
-		// the clip is the lifted footprint, not the one the Sector keeps.
-		require(near(lifted.clipTop, expected.top - 48.0f)
-				&& near(lifted.clipBottom, expected.bottom - 48.0f),
-			"The lifted surface was clipped to " + std::to_string(lifted.clipTop)
-				+ ".." + std::to_string(lifted.clipBottom) + " rather than its own "
-				"lifted footprint of " + std::to_string(expected.top - 48.0f) + ".."
-				+ std::to_string(expected.bottom - 48.0f) + "; a lift that crops the "
-				"surface it moved has not moved it");
+		require(fixture.world->setSectorFloorDepth(fixture.front, 48).changed,
+			"the fixture's depth write was refused");
+		auto const shifted = recordSurface(fixture.world, fixture.behind);
 
-		// The wireframe outline is the same pass drawing something that is
-		// not the tile surface. It stays where it was.
-		float const outlineTop = wireframeOutlineTop(fixture.world, fixture.behind);
-		require(outlineTop == expected.top,
-			"The wireframe outline moved with the lift: it sits at "
-				+ std::to_string(outlineTop) + " where the unlifted footprint gives "
-				+ std::to_string(expected.top)
-				+ "; only the tile surface moves in this slice");
+		require(near(shifted.clipTop, expected.top - 48.0f)
+				&& near(shifted.clipBottom, expected.bottom - 48.0f),
+			"The shifted Sector clipped its drawing to "
+				+ std::to_string(shifted.clipTop) + ".."
+				+ std::to_string(shifted.clipBottom) + " where its shifted "
+				"footprint runs " + std::to_string(expected.top - 48.0f) + ".."
+				+ std::to_string(expected.bottom - 48.0f) + "; the clip bounds "
+				"the Sector's drawing at the place the Sector now occupies, not "
+				"at the place it was authored");
+		require(near(shifted.top, expected.top - 48.0f)
+				&& near(shifted.bottom, expected.bottom - 48.0f),
+			"The shifted tiles were cropped by their own clip: the surface spans "
+				+ describe(shifted) + " against a shifted footprint of "
+				+ std::to_string(expected.top - 48.0f) + ".."
+				+ std::to_string(expected.bottom - 48.0f));
+	}
+
+	// The selection highlight moves with the selected Sector.
+	//
+	// The highlight sits outside the Sector's own clip, drawn exactly on the
+	// Sector box, so it does not ride the clip along: it has to be drawn
+	// off the same lifted box the tiles are. A highlight left on the
+	// authored box points at empty ground and says the Sector is somewhere
+	// it has already been moved away from.
+	void checkTheSelectionHighlightMovesWithTheSelectedSector(
+		smoke::Context const&)
+	{
+		installFlatAtlas();
+		pinViewport();
+		auto const fixture = layeredRooms("The highlight follows its Sector");
+		auto const expected = expectedUnlifted(*fixture.world->getSector(
+			fixture.behind));
+
+		require(fixture.world->setSectorFloorDepth(fixture.front, 48).changed,
+			"the fixture's depth write was refused");
+		auto const highlight = selectionHighlightBox(fixture.world, fixture.behind);
+
+		require(near(highlight.top, expected.top - 48.0f)
+				&& near(highlight.bottom, expected.bottom - 48.0f)
+				&& near(highlight.left, expected.left)
+				&& near(highlight.right, expected.right),
+			"The selection highlight sat at " + describe(highlight)
+				+ " while the Sector it selects shifted to y "
+				+ std::to_string(expected.top - 48.0f) + ".."
+				+ std::to_string(expected.bottom - 48.0f) + "; the highlight "
+				"marks the Sector where the Sector is drawn");
+	}
+
+	// The wireframe-behind overlay shifts with its own Layer's offset.
+	//
+	// The overlay x-rays the Layer directly behind the selection, so it
+	// x-rays that Layer as it now stands. Measured through `renderWorld`
+	// with the overlay switched on rather than by a direct Wireframe call,
+	// because the overlay is the pass the ticket names and the one a reader
+	// would most expect to have been left out: it runs at the top of the
+	// frame, outside every Sector's own lift scope.
+	void checkTheWireframeBehindOverlayShiftsWithItsOwnLayer(
+		smoke::Context const&)
+	{
+		installFlatAtlas();
+		pinViewport();
+		auto const fixture = layeredRooms("The overlay x-rays the shifted Layer");
+		auto const expected = expectedUnlifted(*fixture.world->getSector(
+			fixture.behind));
+
+		// Flat first: the overlay needs a known box to be moved off, and
+		// that box has to be the Layer's own footprint and not something
+		// this check has made up.
+		gUISettings.visibleLayer = 0;
+		gUISettings.renderNextLayerWireframe = true;
+		auto const flat = wireframeBehindBox(fixture.world);
+		require(near(flat.top, expected.top) && near(flat.bottom, expected.bottom),
+			"The flat overlay outlined the Layer behind at " + describe(flat)
+				+ " where that Layer's footprint is y "
+				+ std::to_string(expected.top) + ".."
+				+ std::to_string(expected.bottom) + "; the baseline this check "
+				"moves off is not the overlay's box");
+
+		require(fixture.world->setSectorFloorDepth(fixture.front, 48).changed,
+			"the fixture's depth write was refused");
+		auto const shifted = wireframeBehindBox(fixture.world);
+
+		require(near(shifted.top, flat.top - 48.0f)
+				&& near(shifted.bottom, flat.bottom - 48.0f),
+			"The wireframe-behind overlay outlined the Layer behind at "
+				+ describe(shifted) + " where that Layer now draws at y "
+				+ std::to_string(flat.top - 48.0f) + ".."
+				+ std::to_string(flat.bottom - 48.0f) + "; an x-ray of where a "
+				"Layer used to be is not an x-ray of that Layer");
 	}
 }
 
@@ -518,6 +656,10 @@ void render_smoke::registerFloorDepthLift(std::vector<smoke::Check>& checks)
 		isolated<checkLiftRecomputedPerFrame> });
 	checks.push_back({ "floorDepth/aNegativeDepthPushesTheLayerBehindDown",
 		isolated<checkNegativeDepthPushesDown> });
-	checks.push_back({ "floorDepth/onlyTheTileSurfaceMovesInThisSlice",
-		isolated<checkOnlyTileSurfaceMoves> });
+	checks.push_back({ "floorDepth/theSectorOwnClipMovesWithTheShiftedSector",
+		isolated<checkTheSectorOwnClipMovesWithTheShiftedSector> });
+	checks.push_back({ "floorDepth/theSelectionHighlightMovesWithTheSelectedSector",
+		isolated<checkTheSelectionHighlightMovesWithTheSelectedSector> });
+	checks.push_back({ "floorDepth/theWireframeBehindOverlayShiftsWithItsOwnLayer",
+		isolated<checkTheWireframeBehindOverlayShiftsWithItsOwnLayer> });
 }

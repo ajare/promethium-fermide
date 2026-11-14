@@ -84,3 +84,7 @@ namespace render_smoke { void registerScaledDoors(std::vector<smoke::Check>& che
 
 // A Sector's floor depth lifts the tile surface of the Layers behind it (#1101).
 namespace render_smoke { void registerFloorDepthLift(std::vector<smoke::Check>& checks); }
+
+// A shifted Sector keeps its whole self attached: thresholds, apertures,
+// transit geometry, controls and nested recursion (#1102).
+namespace render_smoke { void registerFloorDepthAttached(std::vector<smoke::Check>& checks); }

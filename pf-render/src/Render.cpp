@@ -76,7 +76,7 @@ RenderWorldScope::~RenderWorldScope()
 }
 
 //
-// The floor lift currently in force, in screen pixels (#1101).
+// The floor lift currently in force, in screen pixels (#1101, #1102).
 //
 // A Sector whose floor runs deep lifts the Layers behind it. The lift is
 // carried here as one ambient number that the renderer's own step onto the
@@ -87,12 +87,19 @@ RenderWorldScope::~RenderWorldScope()
 // exit, so no path leaves a lift set that the next draw inherits by
 // accident.
 //
-// The scope is deliberately narrow in this slice: only the tile surface is
-// drawn inside it. Thresholds, transit geometry, objects, Agents, the
-// Sector's own clip and the selection highlight all still draw by the
-// unlifted mapping, which is the intermediate state the ticket names - the
-// surface moves first, and the rest follows behind it together rather than
-// half of one thing moving and half of another.
+// The scope is the whole Sector (#1102). Its tiles, its thresholds, its
+// transit geometry, its objects and Furniture, the Agents standing on its
+// floor, its own floor-and-ceiling clip and its selection highlight all
+// draw by the lifted mapping, so a shifted Sector stays one thing. The
+// one thing inside the scope that must not move is the aperture, and it is
+// not moved: a hole in the front wall is measured off the front Sector's
+// own geometry while the front Sector's lift is in force, and the clip it
+// produces is a screen-space rect that nothing re-projects afterwards.
+//
+// Because the lift is ambient, the rule for every drawer that works on a
+// Sector from outside `renderSector` is the same one: install that
+// Sector's Layer lift before transforming anything it draws. The helpers
+// that do are named at their own definitions.
 //
 static float gFloorLiftPx{ 0.0f };
 
@@ -389,6 +396,12 @@ void renderSelectedQueues(shared_ptr<const core::World> const& world, int layer,
 			&& sector->getLayerIndex() != (uint32_t)layer)) continue;
 		auto start = lane.origin;
 		auto end = lane.origin + lane.direction * lane.extent;
+		// A queue lane is floor geometry in the Sector it was laid in, so it
+		// lifts with that Sector (#1102). Asked per lane rather than for the
+		// viewed Layer as a whole, because a Ladder's two lanes are its
+		// lower and upper ends and need not share a Layer - or a lift.
+		FloorLiftScope const laneLift{
+			layerFloorLiftPx(sector->getLayerIndex()) };
 		transformPosition(start);
 		transformPosition(end);
 		drawList->AddLine({ start.x, start.y }, { end.x, end.y }, laneColour, 3.0f);
@@ -423,6 +436,10 @@ void renderSelectedQueues(shared_ptr<const core::World> const& world, int layer,
 		if (!entity) continue;
 		auto point = agent->globalPosition
 			+ core::Vector2{ entity->getWidth() * 0.5f, entity->getHeight() * 0.5f };
+		// The rank marker sits on the waiting Agent, which stands on its
+		// Sector's lifted floor (#1102).
+		FloorLiftScope const markerLift{
+			layerFloorLiftPx(sector->getLayerIndex()) };
 		transformPosition(point);
 		drawList->AddCircle({ point.x, point.y }, slotRadius + 3.0f, occupiedColour, 0, 3.0f);
 		auto label = string("Q") + to_string(rank + 1);
@@ -1760,6 +1777,11 @@ void renderFurnitureMarkers(shared_ptr<const core::Sector> const& sector, uint32
 	LayerRenderStyle style, WorldDrawList* drawList)
 {
 	if (!gRenderWorld || style != LayerRenderStyle::Solid) return;
+	// A Marker is part of the Sector that owns it, so it draws at that
+	// Sector's Layer lift (#1102). Asked off the Sector rather than the
+	// `layer` the pass was handed, because the two are not the same thing
+	// once a back Sector is reached through an aperture.
+	FloorLiftScope const lift{ layerFloorLiftPx(sector->getLayerIndex()) };
 	for (uint32_t index = 0; index < sector->getNumObjects(); ++index)
 		if (auto object = std::dynamic_pointer_cast<const core::MarkerSectorObject>(sector->getObject(index));
 			object && gRenderWorld->isFurnitureMarker(object->getMarker()->getId()))
@@ -2254,6 +2276,13 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 void renderThresholdsControlsAndAgentsAboveTransit(vector<shared_ptr<const core::Sector>> const& sectors,
 	uint32_t layer, WorldDrawList* drawList)
 {
+	// Everything restored here belongs to the Layer named, and that Layer
+	// may well be lifted (#1102). This pass runs at the top of
+	// `renderWorld` rather than inside a Sector, so it installs the lift
+	// for the Layer it is restoring instead of drawing the front Layer's
+	// Doors, controls and Agents at the flat height while the Layer they
+	// were drawn at has moved.
+	FloorLiftScope const lift{ layerFloorLiftPx(layer) };
 	for (auto const& sector : sectors)
 	{
 		for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
@@ -2413,6 +2442,10 @@ void renderSelectedAgentPath(core::World const* world, WorldDrawList* drawList)
 	if (!path || path->nodes.empty()) return;
 
 	auto const visibleLayer = static_cast<uint32_t>(max(gUISettings.visibleLayer, 0));
+	// The path is drawn from the selected Agent along vertices filtered to the
+	// visible Layer, so it rides that Layer's lift and stays glued to the
+	// Agent it starts at (#1102).
+	FloorLiftScope const lift{ layerFloorLiftPx(visibleLayer) };
 	auto const outlineColour = packColour(32, 32, 32, 220);
 	auto const pathColour = packColour(255, 196, 0, 240);
 
@@ -2458,6 +2491,14 @@ void renderSelectedAgentPath(core::World const* world, WorldDrawList* drawList)
 
 void renderSectorDepthContent(shared_ptr<const core::Sector> sector, WorldDrawList* drawList)
 {
+	// Furniture and the Agents standing on the Sector's floor are part of
+	// the Sector, so they draw at the Sector's own Layer lift (#1102).
+	// Asked off the Sector itself rather than off whatever lift happens to
+	// be ambient, because this helper is reached from passes that never
+	// went through `renderSector` - the above-transit restoration, the
+	// fore-content redraw, the Staircase aperture arm - and an Agent left
+	// on the unlifted mapping sinks through the floor it is standing on.
+	FloorLiftScope const lift{ layerFloorLiftPx(sector->getLayerIndex()) };
 	// One ordered content pass, under the caller's existing Layer/aperture clip.
 	struct Content { int depth; core::FurnitureInstance const* furniture; core::Agent const* agent; };
 	vector<Content> content;
@@ -2831,6 +2872,32 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		return;
 	}
 
+	// The whole Sector draws under its own Layer's floor lift (#1102).
+	//
+	// Installed here, at the top of the one pass that owns the Sector,
+	// rather than at each drawer. A shifted Sector is one thing: a lift
+	// applied to its tiles alone sinks the Agents standing on that floor
+	// through it, slides transit cars out of their shafts and leaves the
+	// Sector's own clip cutting the top off the tiles it was framing -
+	// which is what the previous slice left, and was only ever the
+	// intermediate state it declared.
+	//
+	// The scope is the Sector's own Layer and not the pass's, which is what
+	// makes nested aperture recursion draw each deeper Sector under that
+	// Sector's own Layer offset for free: the recursion calls this same
+	// function, and this function is what says whose picture is being
+	// drawn. Nothing on the way down has to know it recursed.
+	//
+	// The aperture is the one thing inside this scope that must stay where
+	// it was authored, and it needs no exemption. A hole in the front wall
+	// is measured off the front Sector's own geometry while the front
+	// Sector's lift is in force, and the clip it produces is a screen-space
+	// rect that nothing re-transforms on the way down. Installing the back
+	// Sector's lift changes only where the back Sector draws under that
+	// clip; where the shifted Layer no longer covers the hole, the void
+	// shows through exactly as the canvas was cleared to it.
+	FloorLiftScope const lift{ layerFloorLiftPx(sector->getLayerIndex()) };
+
 	// The sheet every Sector tile in this pass is drawn from, resolved once
 	// for this Sector off its own Layer and handed to every draw helper
 	// below - the surface loop, the boundary strips - so the whole Sector
@@ -2875,13 +2942,13 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	// Inherited rather than read off `worldViewportWidth`, which is zero for
 	// any caller that has not docked a viewport - and a zero-wide clip culls
 	// the whole Sector rather than leaving it unconstrained.
-	// The clip in force before this Sector's own footprint goes on it: the
-	// viewport, and any aperture clip the pass was already inside. Held on
-	// to because the lifted tile surface has to swap the Sector's footprint
-	// out and put its own in, while still being held by everything that
-	// was holding the Sector before it (#1101).
-	Vec2 const inheritedMin{ drawList->GetClipRectMin() };
-	Vec2 const inheritedMax{ drawList->GetClipRectMax() };
+	//
+	// `bounds0`/`bounds1` already carry this Sector's floor lift, so the
+	// clip cut from them travels with the Sector (#1102). That is the whole
+	// of what "still bounds its shifted drawing" needs: the clip is the
+	// same expression it was when the Sector was flat, evaluated on the
+	// lifted footprint, and it hugs the shifted tiles as tightly as it
+	// hugged them unshifted.
 	Vec2 const clipMin{ drawList->GetClipRectMin().x, min(bounds0.y, bounds1.y) };
 	Vec2 const clipMax{ drawList->GetClipRectMax().x, max(bounds0.y, bounds1.y) };
 
@@ -2959,45 +3026,17 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		// from `own`, never from `kind`, which is what stops a borrowing
 		// Sector wearing the borrowed family's variant (#1050).
 		auto const ownFamily = own ? std::string{ own } : std::string{};
-		// The tile surface is the one thing this slice lifts (#1101). The
-		// bounds are taken from the Sector again in World space and put
-		// through the mapping with the lift installed, rather than nudged
-		// after the fact, so the mapping stays the only place the picture is
-		// computed and the lifted surface lands exactly where the mapping
-		// says rather than where an arithmetic correction hoped.
-		//
-		// The clip the surface draws inside travels with it. Left on the
-		// unlifted footprint, the lift would crop the top off the surface it
-		// had just moved and leave a strip of nothing where that surface's
-		// floor used to be - which is not the surface having moved, and is
-		// not a picture an author would read as a floor running deep. Only
-		// this Sector's own footprint is swapped out: the viewport, and any
-		// aperture clip the pass came in with, hold the lifted surface just
-		// as tightly as they held it unlifted.
-		//
-		// Everything drawn after the Pop below - thresholds, transit
-		// geometry, objects, Agents, the selection highlight - is still
-		// clipped by the unlifted footprint pushed above and still draws at
-		// the unlifted mapping, which is the whole of what this slice
-		// leaves for the next one.
-		core::Vector2 surface0, surface1;
-		sector->getBounds(surface0, surface1);
-		FloorLiftScope const lift{ layerFloorLiftPx(sector->getLayerIndex()) };
-		transformPosition(surface0);
-		transformPosition(surface1);
-		Vec2 const surfaceClipMin{ clipMin.x,
-			max(inheritedMin.y, min(surface0.y, surface1.y)) };
-		Vec2 const surfaceClipMax{ clipMax.x,
-			min(inheritedMax.y, max(surface0.y, surface1.y)) };
-		drawList->AddDrawCmd();
-		drawList->PushClipRect(surfaceClipMin, surfaceClipMax, false);
+		// The surface draws off the same lifted bounds as everything else in
+		// this pass. It needed no special handling once the lift covered the
+		// whole Sector: the previous slice carried a lift of its own here,
+		// with its own swapped-in clip, because it was the only thing that
+		// moved (#1101). Both are gone, and the surface is back to reading
+		// the Sector's footprint like every other drawer of it.
 		if (!drawSectorTileSurfacePerCell(sheet, drawList,
-			{surface0.x, surface1.y},
-			{surface1.x, surface0.y}, gUISettings.worldZoom,
+			{bounds0.x, bounds1.y},
+			{bounds1.x, bounds0.y}, gUISettings.worldZoom,
 			sectorSurfaceTileResolver(sheet, ownFamily, std::move(kind), sector)))
-			drawList->AddRectFilled({ surface0.x, surface1.y },
-				{ surface1.x, surface0.y }, colour);
-		drawList->PopClipRect();
+			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
 	}
 
 	// Thresholds are normally drawn before the sector-specific geometry so their
@@ -3267,6 +3306,10 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 void renderLocationContentAboveTransit(shared_ptr<const core::Sector> const& location,
 	uint32_t layer, LayerRenderStyle style, WorldDrawList* drawList)
 {
+	// The fore Layer's own content, drawn through an aperture that was cut
+	// in that Layer's frame. It draws at that Layer's lift (#1102); the
+	// `layer` handed in is the Location's own.
+	FloorLiftScope const lift{ layerFloorLiftPx(layer) };
 	if (isDrawnSolid(style))
 	{
 		renderSectorObjects(location, layer, LayerRenderStyle::Solid,
@@ -3295,6 +3338,11 @@ void renderTransitInAperture(shared_ptr<const core::Sector> const& transit, uint
 	// through an aperture.
 	if (transit->getType() == core::SectorType::Staircase)
 	{
+		// A Staircase draws itself as a polyline rather than through
+		// `renderSector`, so it does not pick the back Layer's lift up on
+		// its own. It belongs to that Layer, so the lift is put on for it
+		// here (#1102); every other Transit gets it from the Sector pass.
+		FloorLiftScope const lift{ layerFloorLiftPx(behindLayer) };
 		renderStaircase(
 			static_pointer_cast<const core::StaircaseTransit>(transit)->getStaircase(), drawList);
 		renderSectorDepthContent(transit, drawList);
@@ -3329,6 +3377,20 @@ void renderTransitThroughApertures(shared_ptr<const core::Sector> const& transit
 
 	for (auto const& aperture : apertures)
 	{
+		// The aperture is a hole in the front Layer's wall and is measured
+		// in the front Layer's frame (#1102). This pass runs at the top of
+		// `renderWorld`, where no Sector's lift is installed, so the front
+		// Layer's is put on for the transform of the aperture rect. Set it
+		// any other way and the hole moves by whatever the back Layer's
+		// depth happens to be - a hole in a wall that the Layer behind it
+		// gets to position.
+		//
+		// The Transit drawn inside is unaffected: `renderSector` installs
+		// the back Layer's own lift over this one for the duration of its
+		// body and restores this one on the way out, which is what lets the
+		// shifted Layer slide out from under a hole that stays put.
+		FloorLiftScope const apertureLift{
+			layerFloorLiftPx(core::layerInFront(behindLayer)) };
 		auto bounds0 = aperture.min;
 		auto bounds1 = aperture.max;
 		transformPosition(bounds0);

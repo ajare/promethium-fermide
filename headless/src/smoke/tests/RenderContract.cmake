@@ -420,7 +420,18 @@ set(names
     floorDepth/renderWorldInstallsTheStaircaseForTheFrame
     floorDepth/theLiftIsRecomputedPerFrameNotCached
     floorDepth/aNegativeDepthPushesTheLayerBehindDown
-    floorDepth/onlyTheTileSurfaceMovesInThisSlice
+    floorDepth/theSectorOwnClipMovesWithTheShiftedSector
+    floorDepth/theSelectionHighlightMovesWithTheSelectedSector
+    floorDepth/theWireframeBehindOverlayShiftsWithItsOwnLayer
+    floorDepthAttached/aDoorRecordsAtTheShiftedPosition
+    floorDepthAttached/windowsRecordAtTheShiftedPosition
+    floorDepthAttached/aBoothWindowRecordsAtTheShiftedPosition
+    floorDepthAttached/transitGeometryRecordsAtTheShiftedPosition
+    floorDepthAttached/aPhysicalControlRecordsAtTheShiftedPosition
+    floorDepthAttached/furnitureRecordsAtTheShiftedPosition
+    floorDepthAttached/theApertureStaysWhereItWasAuthored
+    floorDepthAttached/aShiftedBackLayerRecordsNothingInsideAnApertureItClears
+    floorDepthAttached/nestedAperturesDrawEachSectorAtItsOwnLayerOffset
 )
 if(DEFINED LANE)
     set(lane_binary "${RENDER}")
