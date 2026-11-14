@@ -153,6 +153,15 @@ namespace
 		{ "floorDepth/theDepthSurvivesTheRebuildAStructuralEditPerforms", persistence::theDepthSurvivesTheRebuildAStructuralEditPerforms },
 		{ "floorDepth/everySectorCreatingRecordTypeCarriesItsFloorDepth", persistence::everySectorCreatingRecordTypeCarriesItsFloorDepth },
 		{ "floorDepth/aDepthChangesNothingElseInTheDocument", persistence::aDepthChangesNothingElseInTheDocument },
+		{ "floorDepthType/roundTripsThroughBothFormats", persistence::typeDefaultRoundTrips },
+		{ "floorDepthType/aNegativeTypeDefaultRoundTrips", persistence::aNegativeTypeDefaultRoundTrips },
+		{ "floorDepthType/everyTypeRoundTripsTogether", persistence::everyTypeRoundTripsTogether },
+		{ "floorDepthType/anEmptyTypeMapWritesNoField", persistence::anEmptyTypeMapWritesNoField },
+		{ "floorDepthType/aClearedTypeRoundTripsAsNoEntry", persistence::aClearedTypeRoundTripsAsNoEntry },
+		{ "floorDepthType/aPartiallyClearedMapRoundTrips", persistence::aPartiallyClearedMapRoundTrips },
+		{ "floorDepthType/theVersionGuardHoldsBothWays", persistence::theVersionGuardHoldsBothWays },
+		{ "floorDepthType/aMalformedTypeMapIsRefused", persistence::aMalformedTypeMapIsRefused },
+		{ "floorDepthType/aTypeDefaultChangesNothingElseInTheDocument", persistence::aTypeDefaultChangesNothingElseInTheDocument },
 	};
 }
 

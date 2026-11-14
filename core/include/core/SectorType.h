@@ -1,6 +1,8 @@
 #pragma once
 
+#include <optional>
 #include <string>
+#include <vector>
 #include "core/Platform.h"
 
 
@@ -23,6 +25,23 @@ namespace core
 	};
 
 	PF_CORE_API std::string getSectorTypeString(SectorType type);
+
+	// Every Sector type, in the order the enum declares them.
+	//
+	// A per-type table - the author's floor depth scheme, for one - walks this
+	// instead of spelling the eleven names out again, so a type added to the
+	// enum arrives in the table rather than having to be remembered there. The
+	// list is built once, in declaration order, which makes the table's row
+	// order stable across runs and platforms rather than whatever a container
+	// happened to iterate.
+	PF_CORE_API std::vector<SectorType> const& allSectorTypes();
+
+	// The Sector type a written name names, or nothing where no type answers to
+	// it. The inverse of `getSectorTypeString`, and deliberately total: a
+	// document naming a type this build does not have is data to refuse or
+	// ignore, not a switch case to crash on. Names are matched exactly, so the
+	// wire form is the same string the writer produced and nothing else.
+	PF_CORE_API std::optional<SectorType> sectorTypeFromString(std::string const& name);
 
 	// A Facade is a Location in every traversal respect: whatever may sit next to
 	// a Location and share a walkable boundary with it must accept a Facade too,

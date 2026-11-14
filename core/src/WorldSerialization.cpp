@@ -825,7 +825,13 @@ namespace core
 		// the Layers behind it (#1101). A pre-72 document carries no such field
 		// on any record, so it loads as no depth recorded, which lifts nothing,
 		// which is exactly the flat picture it drew before the feature existed.
-		serializer.writeUint32("version", 72);
+		// Version 73 adds the author's floor depth scheme: a sparse per-Sector
+		// type default map on the World (#1103). A Sector with no override of
+		// its own follows its type, so one number here moves every Sector of
+		// that type at once. A pre-73 document carries no such array, so it
+		// loads with no type holding an opinion, every Sector reading zero, and
+		// the flat picture it drew before unchanged.
+		serializer.writeUint32("version", 73);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("objectImageSet", mObjectImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
@@ -885,6 +891,27 @@ namespace core
 			serializer.endMap();
 		}
 		serializer.endArray();
+
+		// The author's floor depth scheme: the per-type defaults (#1103),
+		// written after the Layer table and before the construction records for
+		// the same reason the per-Sector depth is written last on each record - a
+		// World whose author never touched the type table saves exactly as it
+		// saved before the table existed, with no empty array and no reordered
+		// key for an older reader to trip over. Sparse in both directions: a
+		// type at zero writes no entry, because zero lifts nothing and that is
+		// what no entry already says.
+		if (!mSectorTypeFloorDepths.empty())
+		{
+			serializer.beginArray("sectorTypeFloorDepths");
+			for (auto const& [type, depth] : mSectorTypeFloorDepths)
+			{
+				serializer.beginMap("");
+				serializer.writeString("type", getSectorTypeString(type));
+				serializer.writeInt32("depth", depth);
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 
 		if (mAgentTagRegistryReference)
 		{
@@ -1770,7 +1797,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 72)
+		if (version < 1 || version > 73)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2050,6 +2077,47 @@ namespace core
 					throw SerializationException("layerNames array is shorter than the layer count");
 				}
 			}
+		}
+
+		// The author's floor depth scheme: the per-type defaults (#1103), read
+		// before the construction records because that is the order the writer
+		// puts them in, and read into a local rather than straight onto `this`
+		// because a load assigns its members only once the whole document has
+		// been accepted. Absent reads as an empty map - no type has an opinion,
+		// every Sector follows zero - which is the picture a World written before
+		// the table existed drew and draws again with no migration pass.
+		map<SectorType, int32_t> sectorTypeFloorDepths;
+		if (serializer.hasField("sectorTypeFloorDepths"))
+		{
+			if (version < 73) throw SerializationException(
+				"Sector type floor depth requires World schema version 73 or later");
+			serializer.beginArray("sectorTypeFloorDepths");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				auto const typeName = serializer.readString("type");
+				auto const depth = serializer.readInt32("depth");
+				serializer.endMap();
+				auto const type = sectorTypeFromString(typeName);
+				// A name no Sector type answers to is a miscount in the document,
+				// not a thing to guess at: carrying it would mean a default that
+				// governs nothing silently, and dropping it silently would lose the
+				// author's number without saying so.
+				if (!type) throw SerializationException(format(
+					"'{}' is not a Sector type, so it cannot carry a floor depth", typeName));
+				// A zero entry would be a stored absence: the writer never emits
+				// one, so seeing one means the document was edited by hand into a
+				// state this World cannot be in. Refused rather than normalised, so
+				// the loader's sparseness rule stays a rule.
+				if (depth == 0) throw SerializationException(format(
+					"A {} floor depth of 0 is stored as no entry at all, so a 0 entry "
+					"is not a state this World can write", getSectorTypeString(*type)));
+				if (sectorTypeFloorDepths.count(*type) != 0) throw SerializationException(format(
+					"Sector type {} carries more than one floor depth",
+					getSectorTypeString(*type)));
+				sectorTypeFloorDepths[*type] = depth;
+			}
+			serializer.endArray();
 		}
 
 		std::vector<ConstructionRecord> records;
@@ -2629,6 +2697,12 @@ namespace core
 		layerResizeRollback.active = false;
 		mLevelNames = std::move(levelNames);
 		mLayerInfos = std::move(layerInfos);
+		// The type defaults are World state, not a projection of anything, so a
+		// load that read none must leave none behind rather than keeping whatever
+		// the previous document had. Assigned unconditionally for that reason:
+		// an `if (found)` here would let a cleared table survive a save that
+		// cleared it.
+		mSectorTypeFloorDepths = std::move(sectorTypeFloorDepths);
 		resetForDeserialization(std::move(name), cellsWide, levelsHigh);
 		mRandomSeed = randomSeed;
 		mNextMarkerId = nextMarkerId;

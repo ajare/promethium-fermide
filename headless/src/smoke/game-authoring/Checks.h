@@ -15,3 +15,6 @@ void registerGameAuthoringBoundary(std::vector<smoke::Check>& checks);
 
 // A Sector floor depth authored through the seam and taken back in one step (#1101).
 void registerGameAuthoringFloorDepth(std::vector<smoke::Check>& checks);
+
+// The per-Sector-type floor depth scheme authored through the seam (#1103).
+void registerFloorDepthTypeDefaultsAuthoring(std::vector<smoke::Check>& checks);

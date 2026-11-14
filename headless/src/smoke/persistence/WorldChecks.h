@@ -81,6 +81,17 @@ namespace persistence
 	void theDepthSurvivesTheRebuildAStructuralEditPerforms(smoke::Context const&);
 	void everySectorCreatingRecordTypeCarriesItsFloorDepth(smoke::Context const&);
 	void aDepthChangesNothingElseInTheDocument(smoke::Context const&);
+	// The per-Sector-type floor depth map saved, loaded, and surviving the
+	// rebuild (#1103).
+	void typeDefaultRoundTrips(smoke::Context const&);
+	void aNegativeTypeDefaultRoundTrips(smoke::Context const&);
+	void everyTypeRoundTripsTogether(smoke::Context const&);
+	void anEmptyTypeMapWritesNoField(smoke::Context const&);
+	void aClearedTypeRoundTripsAsNoEntry(smoke::Context const&);
+	void aPartiallyClearedMapRoundTrips(smoke::Context const&);
+	void theVersionGuardHoldsBothWays(smoke::Context const&);
+	void aMalformedTypeMapIsRefused(smoke::Context const&);
+	void aTypeDefaultChangesNothingElseInTheDocument(smoke::Context const&);
 	void aWorldThatNeverUsedVariantsWritesNoField(smoke::Context const&);
 	void aDocumentWrittenBeforeVariantsExistedLoadsAsNoVariants(smoke::Context const&);
 	void aVariantFieldBelowTheSchemaVersionThatDefinesItIsRefused(smoke::Context const&);

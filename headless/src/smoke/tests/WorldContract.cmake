@@ -104,6 +104,21 @@ set(checks
     floorDepth/theSingleStepAndTheWholeStaircaseAgree
     floorDepth/theStaircaseFollowsTheWorldWithNoInvalidation
     floorDepth/clearingAndSettingZeroAreTheSameWrite
+    floorDepthType/aTypeNobodySetHasNoOpinion
+    floorDepthType/theTableCoversEverySectorType
+    floorDepthType/aTypeDefaultMovesEverySectorFollowingIt
+    floorDepthType/twoTypeDefaultsReadSideBySide
+    floorDepthType/theStaircaseFollowsTheTypeMap
+    floorDepthType/theDeepestEffectiveFloorStillWins
+    floorDepthType/anOverriddenSectorStaysPutWhenItsTypeMoves
+    floorDepthType/clearingOneOverridePutsThatSectorOnItsType
+    floorDepthType/theStaircaseUsesTheOverrideNotTheType
+    floorDepthType/settingATypeToZeroRemovesItsEntry
+    floorDepthType/clearingATypeIsSettingATypeZero
+    floorDepthType/reaskingForTheSameTypeDepthChangesNothing
+    floorDepthType/aTypeDefaultOutsideTheBandIsRefused
+    floorDepthType/aRefusedTypeWriteLeavesTheSchemeAsItWas
+    floorDepthType/everyTypeTakesItsOwnDepth
 )
 string(JOIN "\n" listed ${checks})
 string(APPEND listed "\n")

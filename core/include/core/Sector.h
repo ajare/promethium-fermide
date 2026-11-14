@@ -221,6 +221,16 @@ namespace core
 		// nothing: the same picture the World drew before this field existed.
 		[[nodiscard]] int32_t getFloorDepth() const;
 
+		// Whether this Sector carries a depth of its own at all, as opposed to
+		// answering zero because none was recorded. `getFloorDepth` cannot say
+		// this: it folds the absence and a recorded zero into one answer, and
+		// both are correct answers to "how deep is it". The question "is it
+		// following its type" is a different question, and it is the one a
+		// per-type default has to be able to ask (#1103) - a Sector that has
+		// overridden its type stays put when the type moves, and only the
+		// presence of the field knows which Sector that is.
+		[[nodiscard]] bool hasFloorDepthOverride() const { return mFloorDepth.has_value(); }
+
 		[[nodiscard]] SectorEndType getEndType(uint32_t levelIndex, int side) const;
 
 		[[nodiscard]] virtual std::string getDescription() const = 0;

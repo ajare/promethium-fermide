@@ -678,6 +678,27 @@ namespace core
 
 		std::vector<std::shared_ptr<Sector>> mSectors;
 
+		// The author's floor depth scheme: a default depth per Sector type
+		// (#1103), held sparsely so a type with no entry has no opinion and
+		// reads as zero. Only non-zero entries are kept, for the same reason a
+		// Sector's own depth is sparse - zero lifts nothing, which is what the
+		// absence of an entry already says - and so a World whose author never
+		// touched the type table saves exactly as it saved before the table
+		// existed.
+		//
+		// Keyed by the type rather than by anything per-Sector because that is
+		// the whole point of the feature: one number moves every Sector
+		// following that type. A Sector that has overridden its type is not
+		// in this map's business at all, and stays where its own field put it.
+		//
+		// Not a side table of Sector indices, which is the trap the parent spec
+		// calls out: Sector indices are not stable across structural edits, so
+		// a per-Sector mapping here would have to join every remap and would
+		// hand one Room's depth to whichever Room followed it in the vector.
+		// The per-Sector half of the story lives on the Sector and its record,
+		// where it travels with the thing it belongs to.
+		std::map<SectorType, int32_t> mSectorTypeFloorDepths{};
+
 
 		std::shared_ptr<Graph> mGraph;
 
@@ -3128,7 +3149,60 @@ namespace core
 		// answers 0 (#1101). This is the fact about the World rather than
 		// about the object, which is what the panel and the renderer ask
 		// through the World rather than reaching for the Sector.
+		//
+		// Since #1103 the resolution has a second step: a Sector with no
+		// override of its own takes its type's default. A Sector that carries
+		// a depth answers its own and is not moved by anything the type table
+		// does; a Sector that carries none answers whatever its type currently
+		// says, which is what makes the type table a control rather than a
+		// starting suggestion.
 		[[nodiscard]] int32_t effectiveFloorDepth(uint32_t sectorIndex) const;
+
+		// Whether one Sector follows its type or overrides it (#1103). The
+		// answer is the presence of the Sector's own field, which is the only
+		// thing that can tell "following Rooms at 24" from "Rooms that happen
+		// to be at 24 by themselves" - a distinction a dense field destroys
+		// on the first write.
+		[[nodiscard]] bool hasFloorDepthOverride(uint32_t sectorIndex) const;
+
+		// --- Sector type floor depth ---
+		//
+		// The author's scheme: one default depth per Sector type, so "all
+		// Rooms sit 24px deep, all Corridors sit 8px deep" is two numbers
+		// rather than one per Room (#1103).
+		//
+		// The read answers 0 for a type with no entry. Absence is not an error
+		// and not a third state: it is the ordinary case, and it means the
+		// same thing a Sector's own absent field means - no opinion, no lift.
+		[[nodiscard]] int32_t sectorTypeFloorDepth(SectorType type) const;
+
+		// Whether the author has recorded an opinion about this type at all.
+		// The table shows this to leave a type nobody set looking unset rather
+		// than painted with a zero that was never typed.
+		[[nodiscard]] bool hasSectorTypeFloorDepth(SectorType type) const;
+
+		// Records a default depth for one Sector type, or clears it back to
+		// no opinion. Same two halves `setSectorFloorDepth` answers with, and
+		// the same band: one Level either way, because a type default moves
+		// every Sector following it and a mistyped 5000 in the table flings
+		// more of the picture off screen than one mistyped Sector can.
+		//
+		// Setting a type back to zero removes its entry rather than storing a
+		// zero, so a type cleared is saved the way it was saved before it was
+		// ever set. Setting a type that already carries the value is accepted
+		// and changes nothing, and is therefore not an undo step.
+		//
+		// The write dirties the document but touches no Sector object: the
+		// Sectors following the type are not rewritten, they are read through
+		// the type every time anything asks their effective depth. That is what
+		// makes one write here move every following Sector at once without
+		// touching any of them, and what keeps an overridden Sector still put.
+		bool canSetSectorTypeFloorDepth(SectorType type, int32_t depth,
+			std::string* diagnostic = nullptr) const;
+		FloorDepthWrite setSectorTypeFloorDepth(SectorType type, int32_t depth,
+			std::string* diagnostic = nullptr);
+		FloorDepthWrite clearSectorTypeFloorDepth(SectorType type,
+			std::string* diagnostic = nullptr);
 
 		// Where a Layer draws, accumulated from the Layers in front of it:
 		// `offset(L) = offset(L-1) + max(depth of the Sectors in Layer L-1)`,

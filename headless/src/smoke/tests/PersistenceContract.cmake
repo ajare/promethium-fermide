@@ -139,6 +139,15 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords accessPanels/roundTri
     floorDepth/theDepthSurvivesTheRebuildAStructuralEditPerforms
     floorDepth/everySectorCreatingRecordTypeCarriesItsFloorDepth
     floorDepth/aDepthChangesNothingElseInTheDocument
+    floorDepthType/roundTripsThroughBothFormats
+    floorDepthType/aNegativeTypeDefaultRoundTrips
+    floorDepthType/everyTypeRoundTripsTogether
+    floorDepthType/anEmptyTypeMapWritesNoField
+    floorDepthType/aClearedTypeRoundTripsAsNoEntry
+    floorDepthType/aPartiallyClearedMapRoundTrips
+    floorDepthType/theVersionGuardHoldsBothWays
+    floorDepthType/aMalformedTypeMapIsRefused
+    floorDepthType/aTypeDefaultChangesNothingElseInTheDocument
 )
 if(DEFINED LANE)
     set(lane_binary "${PERSISTENCE}")

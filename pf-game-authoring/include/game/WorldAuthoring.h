@@ -327,6 +327,35 @@ namespace game
 	int32_t layerFloorOffsetPx(uint32_t layerIndex) const;
 	std::vector<int32_t> layerFloorOffsets() const;
 
+	// --- Sector type floor depth ---
+	//
+	// The author's scheme: one default depth per Sector type (#1103), so
+	// "every Room sits 24px deep" is one number rather than one per Room.
+	// Same split as the per-Sector seam above - the preflight is a read the
+	// hover affordance can ask, the edit is not, and the edit answers with
+	// both halves so the caller owns the undo step and can tell a write worth
+	// recording from one that changed nothing.
+	//
+	// Setting a type back to zero removes its entry rather than storing a
+	// zero, so a type cleared saves the way it saved before it was ever set.
+	bool canSetSectorTypeFloorDepth(core::SectorType type, int32_t depth,
+		std::string* diagnostic = nullptr) const;
+	core::World::FloorDepthWrite setSectorTypeFloorDepth(core::SectorType type,
+		int32_t depth, std::string* diagnostic = nullptr);
+	core::World::FloorDepthWrite clearSectorTypeFloorDepth(core::SectorType type,
+		std::string* diagnostic = nullptr);
+
+	// The default one type currently carries, 0 where the author has recorded
+	// no opinion about it, and whether an entry exists at all. Reads, so they
+	// go through the document.
+	int32_t sectorTypeFloorDepth(core::SectorType type) const;
+	bool hasSectorTypeFloorDepth(core::SectorType type) const;
+
+	// Whether one Sector follows its type or overrides it (#1103). A read,
+	// and the only question that distinguishes a Sector sitting at its type's
+	// number from one sitting there on its own.
+	bool hasFloorDepthOverride(uint32_t sectorIndex) const;
+
 	// --- Agents ---
 	bool canPlaceAgentInLocation(uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets, std::string* diagnostic = nullptr) const;
 	core::AgentId createAgent(std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset);

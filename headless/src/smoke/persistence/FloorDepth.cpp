@@ -240,7 +240,7 @@ namespace persistence
 	{
 		auto const world = twoLayerWorld("Pre-depth world");
 		auto document = YAML::Load(serialize(*world));
-		require(document["version"].as<uint32_t>() == 72,
+		require(document["version"].as<uint32_t>() == 73,
 			"The current writer is not the version this check is bumping from");
 		document["version"] = 71;
 		require(YAML::Dump(document).find("floorDepth") == std::string::npos,

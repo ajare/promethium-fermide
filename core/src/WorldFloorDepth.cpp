@@ -11,7 +11,15 @@
 //
 //   * the resolution of the sparse storage - a Sector with no recorded
 //     depth lifts nothing, and answers zero rather than making every reader
-//     remember what an absent field means;
+//     remember what an absent field means. Since #1103 the resolution has a
+//     middle step: a Sector with no override of its own takes the default
+//     recorded for its type, and only where the type has none either does the
+//     answer come back zero;
+//   * the type defaults themselves (#1103) - the author's scheme, one signed
+//     number per Sector type, held sparsely on the World so a type nobody set
+//     has no opinion. This file is the only place that map is read or written,
+//     which is what keeps the panel, the renderer and the shipped game from
+//     each growing their own copy of the scheme;
 //   * the accumulation rule - `offset(L) = offset(L-1) + max(depth of the
 //     Sectors in Layer L-1)`, Layer 0 at zero. One statement of it, so the
 //     renderer, the editor and the shipped game cannot each grow their own
@@ -19,7 +27,10 @@
 //   * the write - both halves at once, the live Sector that draws this frame
 //     and the record that saves and replays, because a depth held only on
 //     the live object evaporates on the first structural edit and one held
-//     only on the record draws nothing until such an edit happens.
+//     only on the record draws nothing until such an edit happens. The type
+//     map is the exception that proves the rule: it is World state rather
+//     than a projection of Sector state, so it has no second half to keep in
+//     step and nothing about it can evaporate on a rebuild.
 //
 // The accumulation takes its maximum over every Sector in the Layer in
 // front, which gives exactly one offset per Layer and a uniform shift
@@ -65,7 +76,34 @@ namespace core
 	int32_t World::effectiveFloorDepth(uint32_t sectorIndex) const
 	{
 		if (sectorIndex >= mSectors.size()) return 0;
-		return mSectors[sectorIndex]->getFloorDepth();
+		auto const& sector = mSectors[sectorIndex];
+		// Two steps, in this order, and the order is the feature. The Sector's
+		// own field wins when it has one - that is what an override means, and
+		// it is what keeps an overridden Sector still while its type is moved
+		// under it. Only where the Sector has no opinion of its own does the
+		// type get asked, and only where the type has none either does the
+		// answer come back zero (#1103).
+		if (sector->hasFloorDepthOverride()) return sector->getFloorDepth();
+		return sectorTypeFloorDepth(sector->getType());
+	}
+
+	bool World::hasFloorDepthOverride(uint32_t sectorIndex) const
+	{
+		if (sectorIndex >= mSectors.size()) return false;
+		return mSectors[sectorIndex]->hasFloorDepthOverride();
+	}
+
+	int32_t World::sectorTypeFloorDepth(SectorType type) const
+	{
+		auto const found = mSectorTypeFloorDepths.find(type);
+		// No entry is the ordinary case, not a miscount: a type nobody set has
+		// no opinion, and no opinion lifts nothing.
+		return found == mSectorTypeFloorDepths.end() ? 0 : found->second;
+	}
+
+	bool World::hasSectorTypeFloorDepth(SectorType type) const
+	{
+		return mSectorTypeFloorDepths.count(type) != 0;
 	}
 
 	vector<int32_t> World::layerFloorOffsets() const
@@ -81,11 +119,16 @@ namespace core
 		// nothing, which is the whole of what an empty Layer means to this
 		// rule and why no fallback is needed.
 		vector<optional<int32_t>> deepest(layerCount);
-		for (auto const& sector : mSectors)
+		for (uint32_t index = 0; index < mSectors.size(); ++index)
 		{
+			auto const& sector = mSectors[index];
 			auto const layer = sector->getLayerIndex();
 			if (layer >= layerCount) continue;
-			auto const depth = sector->getFloorDepth();
+			// The effective depth, not the Sector's own field: a Sector with no
+			// override contributes its type's default, which is what makes a
+			// type-table edit show up in the staircase without the table having
+			// to walk the Sectors it governs (#1103).
+			auto const depth = effectiveFloorDepth(index);
 			if (!deepest[layer] || depth > *deepest[layer])
 				deepest[layer] = depth;
 		}
@@ -193,6 +236,80 @@ namespace core
 		// rather than around it so the two can never disagree about what
 		// "no depth" is stored as.
 		return setSectorFloorDepth(sectorIndex, 0, diagnostic);
+	}
+
+	bool World::canSetSectorTypeFloorDepth(SectorType type, int32_t depth,
+		string* diagnostic) const
+	{
+		auto reject = [&](string text)
+			{ if (diagnostic) *diagnostic = std::move(text); return false; };
+
+		// The same band the per-Sector write enforces, stated once and reused
+		// rather than restated with its own constant: a type default is the same
+		// kind of number wearing a wider hat, and a type is exactly where a
+		// mistyped value does the most damage, because it moves every Sector
+		// following that type rather than one.
+		if (depth > kMaxFloorDepth || depth < -kMaxFloorDepth)
+			return reject(to_string(depth) + " px is outside the floor depth band of "
+				+ to_string(kMaxFloorDepth) + " px either way, so a "
+				+ getSectorTypeString(type) + " default would lift the Layers behind "
+				+ "every " + getSectorTypeString(type) + " off the screen");
+
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	World::FloorDepthWrite World::setSectorTypeFloorDepth(SectorType type,
+		int32_t depth, string* diagnostic)
+	{
+		string reason;
+		if (!canSetSectorTypeFloorDepth(type, depth, &reason))
+		{
+			if (diagnostic) *diagnostic = reason;
+			return { false, false };
+		}
+
+		// Zero is stored as nothing at all, exactly as the per-Sector write
+		// does it. A type cleared back to zero and a type never set are one
+		// thing and save the same way, with no entry; a stored zero would be a
+		// third state meaning the absence without being it.
+		if (depth == 0)
+		{
+			auto const removed = mSectorTypeFloorDepths.erase(type);
+			if (removed == 0)
+			{
+				// Legal, and nothing to write: no `modify()`, and the document
+				// stays as clean as it was.
+				if (diagnostic) diagnostic->clear();
+				return { true, false };
+			}
+			modify();
+			if (diagnostic) diagnostic->clear();
+			return { true, true };
+		}
+
+		auto const existing = mSectorTypeFloorDepths.find(type);
+		if (existing != mSectorTypeFloorDepths.end() && existing->second == depth)
+		{
+			// Already carries it. Accepted, changed nothing, no undo step.
+			if (diagnostic) diagnostic->clear();
+			return { true, false };
+		}
+
+		mSectorTypeFloorDepths[type] = depth;
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return { true, true };
+	}
+
+	World::FloorDepthWrite World::clearSectorTypeFloorDepth(SectorType type,
+		string* diagnostic)
+	{
+		// Same write as setting zero, through the same door, for the same
+		// reason `clearSectorFloorDepth` goes through `setSectorFloorDepth`:
+		// two implementations of "no opinion" is two chances to disagree
+		// about what gets saved.
+		return setSectorTypeFloorDepth(type, 0, diagnostic);
 	}
 
 	void World::applyFloorDepth(shared_ptr<Sector> const& sector,

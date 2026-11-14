@@ -14,5 +14,6 @@ int main(int argc, char** argv)
 	registerGameAuthoringPersistence(checks);
 	registerGameAuthoringBoundary(checks);
 	registerGameAuthoringFloorDepth(checks);
+	registerFloorDepthTypeDefaultsAuthoring(checks);
 	return smoke::main("game-authoring", checks, argc, argv);
 }

@@ -8793,6 +8793,88 @@ void renderLevelsPanel(editor::DocumentPtr const& document)
 	}
 }
 
+// The author's floor depth scheme: one signed depth per Sector type (#1103).
+//
+// Eleven rows, one per type, each with a signed pixel input. The table is the
+// whole scheme in one place, which is the point - the author reads the depth
+// of their World here rather than walking Sectors to find out what it is.
+//
+// The rows read from the World every frame rather than holding their own
+// numbers. That is what makes the table a control instead of a scratchpad:
+// an undo, a redo, a load or another panel's edit changes the World, and the
+// next frame shows it with nothing here to invalidate. A local copy of the
+// map would be a second scheme that could disagree with the first.
+//
+// A refused value snaps the row back to what the World carries rather than
+// leaving the typed number on screen having written nothing, which is the
+// same reason: the row shows the World, and the World said no.
+void renderSectorTypeFloorDepthPanel(editor::DocumentPtr const& document)
+{
+	auto const world = document ? document->world() : nullptr;
+	if (!world) return;
+
+	ImGui::TextWrapped("How deep each Sector type's floor runs into the screen, in pixels at 1x zoom. "
+		"A Sector with no override of its own follows its type, and every Layer behind a Sector draws "
+		"by the deepest floor in front of it.");
+
+	ImGuiTableFlags const flags =
+		ImGuiTableFlags_SizingStretchProp |
+		ImGuiTableFlags_Resizable |
+		ImGuiTableFlags_BordersOuter |
+		ImGuiTableFlags_BordersV |
+		ImGuiTableFlags_RowBg;
+
+	if (ImGui::BeginTable("Sector floor depths", 2, flags))
+	{
+		ImGui::TableSetupColumn("Sector type", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableSetupColumn("Floor depth (px)", ImGuiTableColumnFlags_WidthFixed, 160.0f);
+		ImGui::TableHeadersRow();
+
+		for (auto const type : core::allSectorTypes())
+		{
+			// The type's own name is the row's identity: stable across every
+			// edit, and unique because the type list is a set. Held in a local
+			// so the string outlives both the PushID and the label rather than
+			// being a temporary whose lifetime the reader has to reason about.
+			auto const name = core::getSectorTypeString(type);
+			ImGui::PushID(name.c_str());
+			ImGui::TableNextRow();
+
+			ImGui::TableSetColumnIndex(0);
+			ImGui::TextUnformatted(name.c_str());
+
+			ImGui::TableSetColumnIndex(1);
+			// Re-read from the World every frame. The input writes through to
+			// the World and never keeps a value of its own.
+			int depth = world->sectorTypeFloorDepth(type);
+			ImGui::SetNextItemWidth(-1.0f);
+			if (ImGui::InputInt("##floorDepth", &depth, 1, 8))
+			{
+				// Snapshot first, write second, commit only if the write was both
+				// accepted and effective. A snapshot taken after the edit would
+				// record the new value as the thing to restore, which is not an
+				// undo at all; a snapshot committed for a write that changed
+				// nothing leaves the author an undo that undoes nothing and shifts
+				// every later step by one.
+				auto undo = captureDocumentSnapshot(world);
+				std::string diagnostic;
+				auto const write = document->authoring().setSectorTypeFloorDepth(
+					type, depth, &diagnostic);
+				if (!write.accepted)
+					reportEditorError("Sector floor depth", diagnostic);
+				else if (write.changed)
+					commitDocumentEdit(std::move(undo));
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Signed pixels at 1x zoom, between %d and %d. "
+					"Zero means this type has no opinion and lifts nothing.",
+					-CORE_LEVEL_HEIGHT_PIXELS, CORE_LEVEL_HEIGHT_PIXELS);
+			ImGui::PopID();
+		}
+		ImGui::EndTable();
+	}
+}
+
 namespace
 {
 	// Every artwork slot reports its selection the same way: the renderer's own
@@ -9287,6 +9369,10 @@ void renderControlsWindow(editor::DocumentPtr const& document, shared_ptr<const 
 		renderLayersPanel(document);
 	if (ImGui::CollapsingHeader("Levels", ImGuiTreeNodeFlags_DefaultOpen))
 		renderLevelsPanel(document);
+	// The Sectors header sits directly under Levels so the two tables that
+	// describe the World's shape read together (#1103).
+	if (ImGui::CollapsingHeader("Sectors", ImGuiTreeNodeFlags_DefaultOpen))
+		renderSectorTypeFloorDepthPanel(document);
 	if (ImGui::CollapsingHeader("World", ImGuiTreeNodeFlags_DefaultOpen))
 		renderWorldPanel(document);
 	if (ImGui::CollapsingHeader("Path finding"))

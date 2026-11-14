@@ -40,5 +40,8 @@ void registerHorizontalTransitSurfaceVariants(std::vector<smoke::Check>& checks)
 // A Sector's floor depth and the staircase of Layer offsets it makes (#1101).
 void registerFloorDepth(std::vector<smoke::Check>& checks);
 
+// The author's per-Sector-type floor depth scheme behind the Sectors table (#1103).
+void registerFloorDepthTypeDefaults(std::vector<smoke::Check>& checks);
+
 void registerScaledDoors(std::vector<smoke::Check>& checks);
 void registerRoomHeightScale(std::vector<smoke::Check>& checks);

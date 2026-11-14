@@ -711,6 +711,39 @@ std::vector<int32_t> WorldAuthoring::layerFloorOffsets() const
 	return document().layerFloorOffsets();
 }
 
+bool WorldAuthoring::canSetSectorTypeFloorDepth(core::SectorType type,
+	int32_t depth, std::string* diagnostic) const
+{
+	return document().canSetSectorTypeFloorDepth(type, depth, diagnostic);
+}
+
+core::World::FloorDepthWrite WorldAuthoring::setSectorTypeFloorDepth(
+	core::SectorType type, int32_t depth, std::string* diagnostic)
+{
+	return world().setSectorTypeFloorDepth(type, depth, diagnostic);
+}
+
+core::World::FloorDepthWrite WorldAuthoring::clearSectorTypeFloorDepth(
+	core::SectorType type, std::string* diagnostic)
+{
+	return world().clearSectorTypeFloorDepth(type, diagnostic);
+}
+
+int32_t WorldAuthoring::sectorTypeFloorDepth(core::SectorType type) const
+{
+	return document().sectorTypeFloorDepth(type);
+}
+
+bool WorldAuthoring::hasSectorTypeFloorDepth(core::SectorType type) const
+{
+	return document().hasSectorTypeFloorDepth(type);
+}
+
+bool WorldAuthoring::hasFloorDepthOverride(uint32_t sectorIndex) const
+{
+	return document().hasFloorDepthOverride(sectorIndex);
+}
+
 // --- Agents ---
 bool WorldAuthoring::canPlaceAgentInLocation(uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets, std::string* diagnostic) const
 {
