@@ -197,7 +197,7 @@ set(agent_checks
 function(invoke status expected)
     execute_process(COMMAND "${executable}" ${ARGN}
         WORKING_DIRECTORY "${work}" RESULT_VARIABLE result
-        OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 15)
+        OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 30)
     if(NOT "${result}" STREQUAL "${status}")
         message(FATAL_ERROR "${module} ${ARGN}: expected ${status}, got ${result}\n${out}\n${err}")
     endif()

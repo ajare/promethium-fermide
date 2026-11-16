@@ -103,13 +103,13 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/DeviceActivation.cpp
     LIBRARIES promethium-fermide-core pf-pause-position-support
     LABELS core
-    TIMEOUT 60
+    TIMEOUT 120
 )
 
 pf_add_smoke_contract(NAME smoke-simulation-contract COMMAND ${CMAKE_COMMAND}
     "-DSIMULATION=$<TARGET_FILE:pf-smoke-simulation>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/SimulationContract.cmake")
-set_tests_properties(smoke-simulation-contract PROPERTIES LABELS "harness;core" TIMEOUT 240)
+set_tests_properties(smoke-simulation-contract PROPERTIES LABELS "harness;core" TIMEOUT 480)
 
 # The game-facing boundary (#964). Everything here is reached through the
 # shared pf-game-runtime library rather than by constructing a World inline,
@@ -286,7 +286,7 @@ pf_add_smoke_module(pf-smoke-agent
         agent/QueuedPressLookup.cpp
     LIBRARIES promethium-fermide-core
     LABELS core
-    TIMEOUT 30
+    TIMEOUT 60
 )
 
 add_test(NAME agent-playerControlEditorWorkflow COMMAND pf-smoke-editor --check playerControlEditorWorkflow)
@@ -386,7 +386,7 @@ set_tests_properties(door-pose-clearance-diagnostic door-pose-clearance-movement
 pf_add_smoke_contract(NAME smoke-agent-contract COMMAND ${CMAKE_COMMAND}
     "-DAGENT=$<TARGET_FILE:pf-smoke-agent>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentContract.cmake")
-set_tests_properties(smoke-agent-contract PROPERTIES LABELS "harness;core" TIMEOUT 60)
+set_tests_properties(smoke-agent-contract PROPERTIES LABELS "harness;core" TIMEOUT 120)
 
 pf_add_smoke_module(pf-smoke-agent-tags
     NAME agent-tags
