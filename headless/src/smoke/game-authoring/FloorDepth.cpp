@@ -79,6 +79,40 @@ namespace
 		return sectors.front()->getIndex();
 	}
 
+	// The same pair of handles over a World with a Room and a Corridor in
+	// front, so the corridor rung can be authored, undone and re-read through
+	// the seam the editor actually holds (#1115).
+	struct CorridorHandles
+	{
+		std::unique_ptr<game::WorldRuntime> runtime;
+		std::unique_ptr<game::WorldAuthoring> authoring;
+		uint32_t room;
+		uint32_t corridor;
+	};
+
+	CorridorHandles corridorHandles(std::string const& name)
+	{
+		auto world = std::make_unique<core::World>(name, 24, 10);
+		while (world->getLayerCount() < 2) world->addLayer();
+		auto const room = world->addRoom("Front", 0, 2, 2, 3, 2);
+		auto const corridor = world->addCorridor(0, 2, 8, 3, 1);
+		world->addRoom("Behind", 1, 2, 2, 3, 2);
+		auto runtime = std::make_unique<game::WorldRuntime>(std::move(world));
+		auto authoring = std::make_unique<game::WorldAuthoring>(*runtime);
+		// Re-read across the ownership transfer rather than trusted, the same
+		// way the fixture above does, and pin the identity the rung resolves on
+		// so a broken premise fails here rather than quietly emptying every
+		// check built on this handle.
+		require(authoring->world().getSector(corridor)->getIndex() == corridor,
+			"the Corridor's index changed crossing into the runtime");
+		require(!authoring->world().getSector(corridor)->isRoom(),
+			"the Sector built by addCorridor reports itself as a Room, so the rung "
+			"resolves nothing through this handle");
+		require(authoring->world().getSector(room)->isRoom(),
+			"the Sector built by addRoom does not report itself as a Room");
+		return CorridorHandles{ std::move(runtime), std::move(authoring), room, corridor };
+	}
+
 	// ------------------------------------------------------------------
 	// One write, one step.
 	// ------------------------------------------------------------------
@@ -327,6 +361,142 @@ namespace
 		require(!authoring.canUndo(),
 			"a refused write reached the undo stack");
 	}
+
+	// ------------------------------------------------------------------
+	// The corridor rung through the seam (#1115).
+	// ------------------------------------------------------------------
+
+	// The rung is authored, undone and redone through the handle in one step,
+	// and the picture follows it back. A rung that undoes when set on the
+	// World but not when set through the handle is broken where it matters.
+	void aCorridorDepthWriteIsOneUndoStep(smoke::Context const&)
+	{
+		auto fixture = corridorHandles("Corridor rung set");
+		auto& authoring = *fixture.authoring;
+
+		auto const before = authoring.captureSnapshot();
+		require(before.has_value(), "the document could not be captured");
+		require(authoring.setSectorTypeFloorDepth(core::SectorType::Location, 24).changed,
+			"the fixture's type default was refused");
+		authoring.commitEdit(before);
+
+		auto const rungBefore = authoring.captureSnapshot();
+		auto const write = authoring.setCorridorFloorDepth(8, nullptr);
+		require(write.accepted, "a corridor depth of 8 inside the band was refused");
+		require(write.changed, "setting the rung on a World with none was not a change");
+		authoring.commitEdit(rungBefore);
+
+		require(authoring.corridorFloorDepth() == 8 && authoring.hasCorridorFloorDepth(),
+			"the rung was not authored through the handle");
+		require(authoring.effectiveFloorDepth(fixture.corridor) == 8,
+			"the Corridor answers " + std::to_string(
+				authoring.effectiveFloorDepth(fixture.corridor))
+				+ " through the handle with the rung at 8");
+		require(authoring.effectiveFloorDepth(fixture.room) == 24,
+			"the Room answers " + std::to_string(authoring.effectiveFloorDepth(fixture.room))
+				+ "; the rung came through the handle and moved the Room with it");
+		require(authoring.canUndo(), "a committed rung write is not undoable");
+
+		require(authoring.undo(), "undo refused the rung write");
+		require(!authoring.hasCorridorFloorDepth(),
+			"undo left a rung on the World; one undo must take a rung write all the "
+				"way back to none, not to zero, which is a different answer (#1115)");
+		require(authoring.effectiveFloorDepth(fixture.corridor) == 24,
+			"the Corridor answers " + std::to_string(
+				authoring.effectiveFloorDepth(fixture.corridor))
+				+ " after the undo; with the rung gone it follows Location at 24");
+
+		require(authoring.redo(), "redo refused the undone rung write");
+		require(authoring.corridorFloorDepth() == 8,
+			"redo restored " + std::to_string(authoring.corridorFloorDepth())
+				+ " rather than the 8 that was authored");
+		require(authoring.effectiveFloorDepth(fixture.corridor) == 8,
+			"the Corridor does not answer 8 after the redo");
+	}
+
+	// Clearing the rung is a write like any other, and one undo puts back the
+	// cleared value rather than the zero the clear is not.
+	void clearingTheCorridorDepthIsOneUndoStep(smoke::Context const&)
+	{
+		auto fixture = corridorHandles("Corridor rung cleared");
+		auto& authoring = *fixture.authoring;
+
+		authoring.commitEdit(authoring.captureSnapshot());
+		require(authoring.setCorridorFloorDepth(50).changed, "rung refused");
+		authoring.commitEdit(authoring.captureSnapshot());
+
+		auto const before = authoring.captureSnapshot();
+		auto const cleared = authoring.clearCorridorFloorDepth();
+		require(cleared.accepted && cleared.changed,
+			"clearing a rung at 50 was not seen as a change");
+		authoring.commitEdit(before);
+		require(!authoring.hasCorridorFloorDepth(), "the clear left the rung set");
+
+		require(authoring.undo(), "undo refused the clear");
+		require(authoring.corridorFloorDepth() == 50,
+			"undo restored " + std::to_string(authoring.corridorFloorDepth())
+				+ "; undoing a clear must put back the 50 that was cleared, not a "
+				  "zero, which would hold every Corridor still instead");
+		require(authoring.effectiveFloorDepth(fixture.corridor) == 50,
+			"the Corridor does not answer 50 with the cleared rung restored");
+
+		require(authoring.redo(), "redo refused the undone clear");
+		require(!authoring.hasCorridorFloorDepth(), "redo did not re-clear the rung");
+	}
+
+	// A rung value outside the band is refused through the handle, leaves
+	// nothing on the undo stack, and leaves the World with no rung.
+	void aRefusedCorridorDepthLeavesNoTrace(smoke::Context const&)
+	{
+		auto fixture = corridorHandles("Corridor rung out of band");
+		auto& authoring = *fixture.authoring;
+		int32_t const band = CORE_LEVEL_HEIGHT_PIXELS;
+
+		require(authoring.canSetCorridorFloorDepth(band),
+			"a rung of exactly one Level either way should be inside the band");
+		require(authoring.canSetCorridorFloorDepth(-band),
+			"a rung of exactly one Level the other way should be inside the band");
+		require(!authoring.canSetCorridorFloorDepth(band + 1),
+			"a rung past one Level was accepted");
+
+		std::string diagnostic;
+		auto const write = authoring.setCorridorFloorDepth(band + 1, &diagnostic);
+		require(!write.accepted, "setCorridorFloorDepth accepted an out-of-band value");
+		require(!write.changed, "a refused rung write reported a change");
+		require(diagnostic.find("Corridor") != std::string::npos,
+			"the refusal does not say which depth it refused: " + diagnostic);
+		require(!authoring.hasCorridorFloorDepth(),
+			"a refused rung write left a rung on the World");
+		require(!authoring.canUndo(),
+			"a refused rung write put something on the undo stack, which would "
+				"shift every later step by one");
+	}
+
+	// Repainting the rung the World already carries is accepted and changes
+	// nothing - including the zero, which is a value here and so is not a way
+	// of writing nothing.
+	void rewritingTheSameCorridorDepthIsNotAStep(smoke::Context const&)
+	{
+		auto fixture = corridorHandles("Same rung twice");
+		auto& authoring = *fixture.authoring;
+
+		authoring.commitEdit(authoring.captureSnapshot());
+		require(authoring.setCorridorFloorDepth(0).changed,
+			"setting a zero rung over none was not seen as a change; a zero rung is "
+				"a value, not an absence (#1115)");
+		authoring.commitEdit(authoring.captureSnapshot());
+		authoring.markSaved();
+		require(!authoring.isModified(), "markSaved left the handle modified");
+
+		auto const write = authoring.setCorridorFloorDepth(0);
+		require(write.accepted, "rewriting the same rung was refused");
+		require(!write.changed, "rewriting the zero the rung already carries was "
+			"reported as a change");
+		require(!authoring.isModified(),
+			"a rung write that authored nothing marked the document modified");
+		require(authoring.hasCorridorFloorDepth(),
+			"the no-op write dropped the zero rung");
+	}
 }
 
 void registerGameAuthoringFloorDepth(std::vector<smoke::Check>& checks)
@@ -349,4 +519,12 @@ void registerGameAuthoringFloorDepth(std::vector<smoke::Check>& checks)
 		clearingAnUnsetDepthIsNotAStep });
 	checks.push_back({ "floorDepth/anIndexOutsideTheWorldIsRefused",
 		anIndexOutsideTheWorldIsRefused });
+	checks.push_back({ "floorDepth/aCorridorDepthWriteIsOneUndoStep",
+		aCorridorDepthWriteIsOneUndoStep });
+	checks.push_back({ "floorDepth/clearingTheCorridorDepthIsOneUndoStep",
+		clearingTheCorridorDepthIsOneUndoStep });
+	checks.push_back({ "floorDepth/aRefusedCorridorDepthLeavesNoTrace",
+		aRefusedCorridorDepthLeavesNoTrace });
+	checks.push_back({ "floorDepth/rewritingTheSameCorridorDepthIsNotAStep",
+		rewritingTheSameCorridorDepthIsNotAStep });
 }

@@ -14,7 +14,10 @@
 //     remember what an absent field means. Since #1103 the resolution has a
 //     middle step: a Sector with no override of its own takes the default
 //     recorded for its type, and only where the type has none either does the
-//     answer come back zero;
+//     answer come back zero. Since #1115 there is a rung above that one for
+//     Corridors alone, because Room and Corridor are one key in the type
+//     table and an author who wants them at different depths has nowhere to
+//     say so without it;
 //   * the type defaults themselves (#1103) - the author's scheme, one signed
 //     number per Sector type, held sparsely on the World so a type nobody set
 //     has no opinion. This file is the only place that map is read or written,
@@ -75,19 +78,42 @@ namespace core
 		// World, which is also where the load clamps a hand-edited value into
 		// it (#1111). Two numbers for one band is two numbers that can disagree.
 		constexpr int32_t kMaxFloorDepth = World::kFloorDepthBandPx;
+
+		// Whether one Sector is a Corridor, read off the virtual the World
+		// already has rather than off a cast to `Location` (#1115).
+		//
+		// `Location::isRoom()` is `type == Location && !isCorridor()`, so a
+		// Sector of `Location` type that is not a room is a corridor and
+		// nothing else. The type test is not redundant with it: a Facade is
+		// not a room either, and a Background, a Lift and everything else on
+		// the enum are not rooms either, and none of them is a corridor. The
+		// two tests together are what keeps the corridor rung from catching
+		// every Sector in the World that happens not to be a Room.
+		bool isCorridorSector(Sector const& sector)
+		{
+			return sector.getType() == SectorType::Location && !sector.isRoom();
+		}
 	}
 
 	int32_t World::effectiveFloorDepth(uint32_t sectorIndex) const
 	{
 		if (sectorIndex >= mSectors.size()) return 0;
 		auto const& sector = mSectors[sectorIndex];
-		// Two steps, in this order, and the order is the feature. The Sector's
-		// own field wins when it has one - that is what an override means, and
-		// it is what keeps an overridden Sector still while its type is moved
-		// under it. Only where the Sector has no opinion of its own does the
-		// type get asked, and only where the type has none either does the
-		// answer come back zero (#1103).
+		// Three steps, in this order, and the order is the feature. The
+		// Sector's own field wins when it has one - that is what an override
+		// means, and it is what keeps an overridden Sector still while its
+		// type is moved under it. Only where the Sector has no opinion of its
+		// own does the corridor rung get asked, and only of a Corridor, and
+		// only where the rung is unset does the answer come down to the type
+		// (#1103, #1115).
 		if (sector->hasFloorDepthOverride()) return sector->getFloorDepth();
+		// The corridor rung sits above the type rung rather than below it on
+		// purpose: the type rung is where a Corridor has always landed, at
+		// whatever the author set for `Location`, so the corridor value has to
+		// be consulted first for it to mean anything. A Room walks straight
+		// past it to the type, which is the half of #1115 the type table
+		// could not deliver.
+		if (mCorridorFloorDepth && isCorridorSector(*sector)) return *mCorridorFloorDepth;
 		return sectorTypeFloorDepth(sector->getType());
 	}
 
@@ -108,6 +134,22 @@ namespace core
 	bool World::hasSectorTypeFloorDepth(SectorType type) const
 	{
 		return mSectorTypeFloorDepths.count(type) != 0;
+	}
+
+	int32_t World::corridorFloorDepth() const
+	{
+		// No rung is the ordinary case, not a miscount, and it answers the way
+		// an unset type answers: nothing to lift, and the Corridor falls
+		// through to `Location` when its effective depth is resolved. The 0
+		// here is the read of an absent rung, not a stored value - the stored
+		// zero is a different state and `hasCorridorFloorDepth` is what tells
+		// them apart (#1115).
+		return mCorridorFloorDepth.value_or(0);
+	}
+
+	bool World::hasCorridorFloorDepth() const
+	{
+		return mCorridorFloorDepth.has_value();
 	}
 
 	vector<int32_t> World::layerFloorOffsets() const
@@ -354,6 +396,76 @@ namespace core
 		// genuinely one, because a type with no entry answers zero for every
 		// Sector following it.
 		return setSectorTypeFloorDepth(type, 0, diagnostic);
+	}
+
+	bool World::canSetCorridorFloorDepth(int32_t depth, string* diagnostic) const
+	{
+		auto reject = [&](string text)
+			{ if (diagnostic) *diagnostic = std::move(text); return false; };
+
+		// The same band every other floor depth write enforces, asked of the
+		// one number that moves every Corridor in the World. The refusal says
+		// Corridor rather than a Sector name because the author is not looking
+		// at one Sector when this fires - they are setting a rung under
+		// everything.
+		if (depth > kMaxFloorDepth || depth < -kMaxFloorDepth)
+			return reject(to_string(depth) + " px is outside the floor depth band of "
+				+ to_string(kMaxFloorDepth) + " px either way, so the Corridor floor "
+				"depth would lift the Layers behind every Corridor off the screen");
+
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	World::FloorDepthWrite World::setCorridorFloorDepth(int32_t depth,
+		string* diagnostic)
+	{
+		string reason;
+		if (!canSetCorridorFloorDepth(depth, &reason))
+		{
+			if (diagnostic) *diagnostic = reason;
+			return { false, false };
+		}
+
+		// Zero is stored, not erased. The type map above collapses a zero to
+		// no entry because an absent type already answers zero for everything
+		// following it; the corridor rung cannot do that, because an absent
+		// rung does not answer zero, it answers *follow Location*. A World
+		// with Rooms at 24 and Corridors pinned at 0 is a World the author
+		// asked for, and it is inexpressible the moment zero is folded into
+		// absence (ADR 0024, applied one rung up).
+		if (mCorridorFloorDepth && *mCorridorFloorDepth == depth)
+		{
+			// Already carries it. Accepted, changed nothing, no undo step.
+			if (diagnostic) diagnostic->clear();
+			return { true, false };
+		}
+
+		mCorridorFloorDepth = depth;
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return { true, true };
+	}
+
+	World::FloorDepthWrite World::clearCorridorFloorDepth(string* diagnostic)
+	{
+		// Deleting the rung, which is not the same write as setting it to
+		// zero and cannot be routed through it the way the type pair can: a
+		// cleared rung puts every Corridor back on `Location`, while a zero
+		// rung holds every Corridor at the unlifted position whatever the
+		// type says. Two answers, so two writes.
+		if (!mCorridorFloorDepth)
+		{
+			// Legal, and nothing to write: no `modify()`, and the document
+			// stays as clean as it was.
+			if (diagnostic) diagnostic->clear();
+			return { true, false };
+		}
+
+		mCorridorFloorDepth.reset();
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return { true, true };
 	}
 
 	void World::applyFloorDepth(shared_ptr<Sector> const& sector,

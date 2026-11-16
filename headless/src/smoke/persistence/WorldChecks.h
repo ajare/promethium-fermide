@@ -91,6 +91,20 @@ namespace persistence
 	void anInBandDepthLoadsExactlyAsTyped(smoke::Context const&);
 	void aClampedWorldSavesBackInsideTheBand(smoke::Context const&);
 	void aHandEditedZeroSectorDepthIsAValueThatSaves(smoke::Context const&);
+	// The corridor rung on the wire: the one optional World depth that every
+	// Corridor takes and no Room does, its zero stored rather than dropped, and
+	// a document written before it existed loading with every Corridor still
+	// following `Location` (#1115).
+	void theCorridorDepthRoundTripsInBothWireFormats(smoke::Context const&);
+	void aZeroCorridorDepthIsStoredAndComesBackAsZero(smoke::Context const&);
+	void aWorldWithNoCorridorDepthWritesNoCorridorField(smoke::Context const&);
+	void aDocumentWrittenBeforeTheCorridorRungLoadsCorridorsOnTheirType(
+		smoke::Context const&);
+	void aCorridorDepthFieldBelowVersion75IsRefused(smoke::Context const&);
+	void aHandEditedCorridorDepthOutsideTheBandIsClampedOnTheWayIn(
+		smoke::Context const&);
+	void theCorridorDepthSurvivesTheRebuildAStructuralEditPerforms(
+		smoke::Context const&);
 	// The per-Sector-type floor depth map saved, loaded, and surviving the
 	// rebuild (#1103).
 	void typeDefaultRoundTrips(smoke::Context const&);

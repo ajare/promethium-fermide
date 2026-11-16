@@ -744,6 +744,39 @@ bool WorldAuthoring::hasFloorDepthOverride(uint32_t sectorIndex) const
 	return document().hasFloorDepthOverride(sectorIndex);
 }
 
+// --- Corridor floor depth ---
+//
+// The rung between a Sector's own override and the `Location` type default,
+// taken only by Corridors (#1115). Writes go to the editable World, reads
+// to the document, exactly as every other floor depth seam here does.
+bool WorldAuthoring::canSetCorridorFloorDepth(int32_t depth,
+	std::string* diagnostic) const
+{
+	return document().canSetCorridorFloorDepth(depth, diagnostic);
+}
+
+core::World::FloorDepthWrite WorldAuthoring::setCorridorFloorDepth(int32_t depth,
+	std::string* diagnostic)
+{
+	return world().setCorridorFloorDepth(depth, diagnostic);
+}
+
+core::World::FloorDepthWrite WorldAuthoring::clearCorridorFloorDepth(
+	std::string* diagnostic)
+{
+	return world().clearCorridorFloorDepth(diagnostic);
+}
+
+int32_t WorldAuthoring::corridorFloorDepth() const
+{
+	return document().corridorFloorDepth();
+}
+
+bool WorldAuthoring::hasCorridorFloorDepth() const
+{
+	return document().hasCorridorFloorDepth();
+}
+
 // --- Agents ---
 bool WorldAuthoring::canPlaceAgentInLocation(uint32_t sectorId, std::set<core::AccessPermissionId> const& grants, std::set<core::PermissionSetId> const& sets, std::string* diagnostic) const
 {

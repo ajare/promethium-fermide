@@ -353,6 +353,28 @@ namespace game
 	int32_t sectorTypeFloorDepth(core::SectorType type) const;
 	bool hasSectorTypeFloorDepth(core::SectorType type) const;
 
+	// --- Corridor floor depth ---
+	//
+	// The rung the type table cannot reach (#1115): one optional depth every
+	// Corridor takes and no Room does, because Room and Corridor are one key -
+	// `SectorType::Location` - in the table above. Same split as every other
+	// floor depth seam here: the preflight is a read the hover affordance can
+	// ask, the edit is not, and the edit answers with both halves so the
+	// caller owns the undo step.
+	//
+	// Unlike a type row, setting this to zero stores the zero rather than
+	// erasing it: absence means *Corridors follow Location*, zero means
+	// *Corridors hold at the unlifted position while Rooms lift*, and only
+	// the clear reaches the first of those again.
+	bool canSetCorridorFloorDepth(int32_t depth,
+		std::string* diagnostic = nullptr) const;
+	core::World::FloorDepthWrite setCorridorFloorDepth(int32_t depth,
+		std::string* diagnostic = nullptr);
+	core::World::FloorDepthWrite clearCorridorFloorDepth(
+		std::string* diagnostic = nullptr);
+	int32_t corridorFloorDepth() const;
+	bool hasCorridorFloorDepth() const;
+
 	// Whether one Sector follows its type or overrides it (#1103). A read,
 	// and the only question that distinguishes a Sector sitting at its type's
 	// number from one sitting there on its own.

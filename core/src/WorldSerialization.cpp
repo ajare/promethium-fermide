@@ -838,7 +838,13 @@ namespace core
 		// lifts (#1112). A pre-74 writer never emitted a zero depth, so a
 		// document claiming an older version while carrying one did not come
 		// from this writer, and the reader refuses it rather than guessing.
-		serializer.writeUint32("version", 74);
+		// Version 75 adds the Corridor floor depth: one optional rung that
+		// every Corridor takes and no Room does (#1115), because Room and
+		// Corridor are one key in the version-73 type map. A pre-75 document
+		// carries no such field, so it loads with no rung, every Corridor
+		// following `Location` exactly as it always did, and no migration
+		// pass.
+		serializer.writeUint32("version", 75);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("objectImageSet", mObjectImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
@@ -919,6 +925,21 @@ namespace core
 			}
 			serializer.endArray();
 		}
+
+		// The Corridor floor depth (#1115), written beside the type map for
+		// the same reason that map is written where it is: a World whose author
+		// never set one saves exactly as it saved before the rung existed, with
+		// no empty field and no reordered key for an older reader to trip over.
+		//
+		// Sparse in the direction of absence only, not in the direction of
+		// zero. The type map above drops a zero because an absent type row
+		// already answers zero for everything following it; this field cannot,
+		// because an absent rung answers *follow Location* rather than *lift
+		// nothing*. A stored zero is the only way to say "Corridors hold at the
+		// unlifted position while Rooms lift", which is ADR 0024's rule read
+		// one rung up: presence is the value, zero included.
+		if (mCorridorFloorDepth)
+			serializer.writeInt32("corridorFloorDepth", *mCorridorFloorDepth);
 
 		if (mAgentTagRegistryReference)
 		{
@@ -1822,7 +1843,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 74)
+		if (version < 1 || version > 75)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2150,6 +2171,34 @@ namespace core
 				sectorTypeFloorDepths[*type] = clampFloorDepth(depth);
 			}
 			serializer.endArray();
+		}
+
+		// The Corridor floor depth (#1115), read beside the type map because
+		// that is the order the writer puts them in, and read into a local for
+		// the same reason: a load assigns its members only once the whole
+		// document has been accepted. Absent reads as no rung, which is what a
+		// World written before the field existed had, and every Corridor in it
+		// goes on following `Location` exactly as it always did - no migration
+		// pass, because there is nothing to migrate from.
+		//
+		// A present zero is read as the zero it is, not as an absence. The
+		// type map refuses a stored zero because its absence already says it;
+		// this field's absence says something else entirely, so the zero is the
+		// only way the document can mean *hold Corridors unlifted while Rooms
+		// lift* (ADR 0024).
+		std::optional<int32_t> corridorFloorDepth;
+		if (serializer.hasField("corridorFloorDepth"))
+		{
+			if (version < 75) throw SerializationException(
+				"Corridor floor depth requires World schema version 75 or later");
+			// Clamped to the same band every other floor depth read applies
+			// (#1111), with the same reason one rung wider: this one number
+			// moves every Corridor in the World, so a hand-typed 9000 here
+			// flings more of the picture off screen than one mistyped Sector
+			// can, and the clamp lands on the value the World then saves back
+			// out rather than being re-litigated on every load.
+			corridorFloorDepth = clampFloorDepth(
+				serializer.readInt32("corridorFloorDepth"));
 		}
 
 		std::vector<ConstructionRecord> records;
@@ -2735,6 +2784,11 @@ namespace core
 		// an `if (found)` here would let a cleared table survive a save that
 		// cleared it.
 		mSectorTypeFloorDepths = std::move(sectorTypeFloorDepths);
+		// Same unconditional assignment and for the same reason: the corridor
+		// rung is World state, not a projection of Sector state, so a document
+		// that carries no rung has to leave the World carrying none rather than
+		// keeping whatever the previous document had (#1115).
+		mCorridorFloorDepth = corridorFloorDepth;
 		resetForDeserialization(std::move(name), cellsWide, levelsHigh);
 		mRandomSeed = randomSeed;
 		mNextMarkerId = nextMarkerId;

@@ -20,6 +20,13 @@
 //   * Layer 0 never moves. The depth a Sector carries is a lift it hands
 //     backwards and never to itself, which is why the offset of a Layer is
 //     the sum of the Layers *in front* and not of its own;
+//   * the corridor rung, added by #1115 and consulted for Corridors only:
+//     Room and Corridor are one key in the type table, so a single optional
+//     World value is where the split lives. A Corridor with no rung falls
+//     through to `Location` exactly as it always did, a Corridor with its own
+//     override never reaches the rung, and a rung of zero is a value rather
+//     than an absence because absence here means *follow Location*, not *lift
+//     nothing*;
 //   * the contribution of a Layer is the maximum depth in it, not the sum.
 //     Two Rooms side by side in front, one at 48 and one at 20, lift the
 //     Layer behind by 48. Summing would lift it by 68 and make the picture
@@ -85,6 +92,42 @@ namespace
 	int32_t depthOf(WorldPtr const& world, uint32_t layer)
 	{
 		return world->effectiveFloorDepth(firstOn(world, layer));
+	}
+
+	// A two-Layer World with one Room and one Corridor on the front Layer and
+	// one Room behind, so the corridor rung has something it can move, something
+	// it must not move, and something to lift (#1115).
+	//
+	// The two identity assertions are the premise the whole rung rests on, and
+	// they are pinned rather than assumed: corridor identity is read from
+	// `Sector::isRoom()`, which is already virtual and already means "a
+	// Location that is neither a Corridor nor a Facade". Were that ever to stop
+	// holding, every check below would resolve nothing and go quietly green
+	// instead of failing, which is the worst way for a fixture to be wrong.
+	struct FrontPair
+	{
+		WorldPtr world;
+		uint32_t room;
+		uint32_t corridor;
+	};
+
+	FrontPair roomAndCorridorInFront(std::string const& name)
+	{
+		auto world = std::make_shared<core::World>(name, 40, 12);
+		while (world->getLayerCount() < 2) world->addLayer();
+		auto const room = world->addRoom("Room", 0, 2, 1, 3, 2);
+		auto const corridor = world->addCorridor(0, 2, 8, 3, 1);
+		world->addRoom("Behind", 1, 2, 1, 3, 2);
+		world->finishBuild();
+		require(!world->getSector(corridor)->isRoom(),
+			"The Sector built by addCorridor reports itself as a Room, so the "
+			"corridor rung resolves nothing and every check built on this fixture "
+			"is vacuous");
+		require(world->getSector(corridor)->getType() == core::SectorType::Location,
+			"A Corridor is not of Location type, so the rung's type test is wrong");
+		require(world->getSector(room)->isRoom(),
+			"The Sector built by addRoom does not report itself as a Room");
+		return FrontPair{ std::move(world), room, corridor };
 	}
 
 	// ------------------------------------------------------------------
@@ -392,6 +435,310 @@ namespace
 		require(cleared.accepted && !cleared.changed,
 			"Clearing a Sector with nothing to delete was reported as a change");
 	}
+
+	// ------------------------------------------------------------------
+	// The corridor rung (#1115).
+	// ------------------------------------------------------------------
+
+	// The criterion the whole rung exists for: Room and Corridor are one key in
+	// the type table, so "Rooms at 24, Corridors at 8" was unreachable. One
+	// corridor number and one type number reach it, and neither leaks into the
+	// other.
+	void aCorridorDepthMovesCorridorsAndLeavesRoomsOnTheirType(smoke::Context const&)
+	{
+		auto const fixture = roomAndCorridorInFront("Corridors at 8, Rooms at 24");
+		auto const& world = fixture.world;
+		require(world->setSectorTypeFloorDepth(core::SectorType::Location, 24).changed,
+			"Setting the Location type default to 24 was refused");
+		require(world->setCorridorFloorDepth(8).changed,
+			"Setting the corridor floor depth to 8 was refused");
+
+		require(world->effectiveFloorDepth(fixture.corridor) == 8,
+			"The Corridor answers " + std::to_string(world->effectiveFloorDepth(fixture.corridor))
+				+ "; a Corridor with no override of its own takes the corridor rung, "
+				  "not the Location type its type table row puts it at");
+		require(world->effectiveFloorDepth(fixture.room) == 24,
+			"The Room answers " + std::to_string(world->effectiveFloorDepth(fixture.room))
+				+ "; the corridor rung is consulted for Corridors only, and a Room "
+				  "goes straight past it to its type");
+		require(world->corridorFloorDepth() == 8 && world->hasCorridorFloorDepth(),
+			"The corridor rung does not read back the depth it was given");
+		require(world->sectorTypeFloorDepth(core::SectorType::Location) == 24,
+			"Setting the corridor depth reached into the Location type and moved it");
+	}
+
+	// No corridor rung, and the Corridor follows `Location` exactly as it did
+	// before this field existed. This is the half that keeps every World written
+	// before #1115 drawing the picture it drew, and it is checked with the type
+	// both set and unset so the fall-through is visible at both ends of the
+	// type's range.
+	void aCorridorWithNoCorridorDepthFollowsTheLocationTypeDefault(smoke::Context const&)
+	{
+		auto const fixture = roomAndCorridorInFront("No corridor rung");
+		auto const& world = fixture.world;
+		require(!world->hasCorridorFloorDepth(),
+			"A World nobody set a corridor depth on reports a corridor rung");
+		require(world->corridorFloorDepth() == 0,
+			"An unset corridor rung answers " + std::to_string(world->corridorFloorDepth())
+				+ "; absence must read as no opinion, which lifts nothing");
+
+		// The type unset: today's flat picture, Corridor and Room both at zero.
+		require(world->effectiveFloorDepth(fixture.corridor) == 0,
+			"A Corridor with no rung and no type default answers "
+				+ std::to_string(world->effectiveFloorDepth(fixture.corridor))
+				+ "; with nothing above it the answer is zero, as it was before the "
+				  "rung existed");
+		require(world->effectiveFloorDepth(fixture.room) == 0,
+			"A Room with no type default answers a depth it was never given");
+
+		// The type set: the Corridor follows it, because with no rung there is
+		// nothing between the Sector and its type.
+		require(world->setSectorTypeFloorDepth(core::SectorType::Location, 24).changed,
+			"Location default refused in fixture");
+		require(world->effectiveFloorDepth(fixture.corridor) == 24,
+			"A Corridor with no corridor rung answers "
+				+ std::to_string(world->effectiveFloorDepth(fixture.corridor))
+				+ "; with no rung it falls through to the Location type default, "
+				  "which is exactly what it did before #1115");
+		require(world->effectiveFloorDepth(fixture.room) == 24,
+			"The Room did not follow its type");
+		require(world->layerFloorOffsetPx(1) == 24,
+			"The Layer behind draws " + std::to_string(world->layerFloorOffsetPx(1))
+				+ "px off with the front Layer at its type's 24 and no rung set");
+	}
+
+	// The rung is a rung and not a paint: it reaches every Corridor in the World
+	// in one write, and reaches nothing that is not a Corridor - including the
+	// Facade, which is not a room either and must still not take it.
+	void theCorridorRungReachesEveryCorridorAndNoOtherType(smoke::Context const&)
+	{
+		auto world = std::make_shared<core::World>("Rung reach", 60, 12);
+		while (world->getLayerCount() < 2) world->addLayer();
+		auto const near = world->addCorridor(0, 2, 1, 3, 1);
+		auto const far = world->addCorridor(0, 2, 8, 3, 1);
+		auto const room = world->addRoom("Room", 0, 2, 15, 3, 2);
+		auto const facade = world->addFacade("Facade", 0, 2, 21, 3, 2);
+		auto const background = world->addBackground(0, 2, 27, 3, 2);
+		world->finishBuild();
+
+		require(!world->getSector(near)->isRoom() && !world->getSector(far)->isRoom(),
+			"A built Corridor reports itself as a Room, so the fixture is vacuous");
+		require(!world->getSector(facade)->isRoom(),
+			"A Facade reports itself as a Room; the fixture relies on it not being "
+			"one, which is what makes the rung's type test matter");
+
+		require(world->setCorridorFloorDepth(-12).changed,
+			"Setting the corridor depth to -12 was refused");
+		for (auto const corridor : { near, far })
+			require(world->effectiveFloorDepth(corridor) == -12,
+				"Corridor " + std::to_string(corridor) + " answers "
+					+ std::to_string(world->effectiveFloorDepth(corridor))
+					+ "; one rung write moves every Corridor, the same way one type "
+					  "write moves every Sector following that type");
+		require(world->effectiveFloorDepth(room) == 0,
+			"A Room picked up the corridor rung; the rung is for Corridors");
+		require(world->effectiveFloorDepth(facade) == 0,
+			"A Facade took the corridor rung because it is not a room either; the "
+				"rung is for Corridors, which are Locations, and a Facade is its "
+				"own Sector type");
+		require(world->effectiveFloorDepth(background) == 0,
+			"A Background took the corridor rung");
+	}
+
+	// A per-Sector override beats the corridor rung, which is what an override
+	// means at any rung below it. The overridden Corridor stays where its own
+	// field put it while the rung moves every other Corridor under it.
+	void aSectorOverrideBeatsTheCorridorDepth(smoke::Context const&)
+	{
+		auto const fixture = roomAndCorridorInFront("Override over the rung");
+		auto const& world = fixture.world;
+		require(world->setCorridorFloorDepth(8).changed, "rung refused");
+		require(world->setSectorFloorDepth(fixture.corridor, 40).changed,
+			"Setting the Corridor's own depth over the rung was refused");
+
+		require(world->effectiveFloorDepth(fixture.corridor) == 40,
+			"An overridden Corridor answers "
+				+ std::to_string(world->effectiveFloorDepth(fixture.corridor))
+				+ " with the rung at 8; the Sector's own field is the top of the "
+				  "ladder and the rung sits below it");
+		require(world->hasFloorDepthOverride(fixture.corridor),
+			"An overridden Corridor does not report its override");
+
+		// Moving the rung under the overridden Corridor leaves it exactly where
+		// its own field put it - the same property #1103 pins against the type,
+		// asked of the rung instead.
+		require(world->setCorridorFloorDepth(-30).changed, "rung move refused");
+		require(world->effectiveFloorDepth(fixture.corridor) == 40,
+			"The Corridor moved when its rung moved under it; an override that "
+			"follows the rung is not an override");
+		require(world->effectiveFloorDepth(fixture.room) == 0,
+			"The Room followed the corridor rung");
+	}
+
+	// The staircase accumulates from the corridor depth where the deepest floor
+	// in a Layer is a Corridor: the rung is an effective depth like any other
+	// once resolved, and the single sum #1101 established does not know or care
+	// which rung it came from.
+	void theStaircaseAccumulatesFromTheCorridorDepth(smoke::Context const&)
+	{
+		auto const fixture = roomAndCorridorInFront("Corridor lifts the Layer behind");
+		auto const& world = fixture.world;
+		require(world->setCorridorFloorDepth(50).changed, "rung refused");
+		// The Room is left on the unset Location type, so the Corridor at 50 is
+		// unambiguously the deepest floor in Layer 0 and the lift can only have
+		// come from the rung.
+		require(world->effectiveFloorDepth(fixture.room) == 0,
+			"The Room is not at zero in this fixture, so the lift below proves "
+			"nothing about the corridor depth being what produced it");
+
+		require(world->layerFloorOffsetPx(0) == 0,
+			"Layer 0 moved under its own corridor rung; a depth is a lift handed "
+			"backwards and never to its own Layer");
+		require(world->layerFloorOffsetPx(1) == 50,
+			"Layer 1 draws " + std::to_string(world->layerFloorOffsetPx(1))
+				+ "px off with the deepest front floor a Corridor at its rung's 50; "
+				  "the staircase takes the corridor depth the same way it takes a "
+				  "Sector's own or a type's");
+	}
+
+	// The maximum rule is unchanged by the new rung: a Corridor on the rung is
+	// deepest only when it actually is. A Room deeper than the rung still lifts
+	// the Layer behind by its own amount, and a Corridor shallower than the Room
+	// in front of it never cancels the deeper lift.
+	void aCorridorOnTheRungDoesNotOutrankADeeperRoom(smoke::Context const&)
+	{
+		auto const fixture = roomAndCorridorInFront("Deeper room wins over the rung");
+		auto const& world = fixture.world;
+		require(world->setCorridorFloorDepth(8).changed, "rung refused");
+		require(world->setSectorFloorDepth(fixture.room, 40).changed, "room depth refused");
+		require(world->effectiveFloorDepth(fixture.corridor) == 8,
+			"The Corridor did not take the rung in this fixture");
+
+		require(world->layerFloorOffsetPx(1) == 40,
+			"Layer 1 draws " + std::to_string(world->layerFloorOffsetPx(1))
+				+ "px off with a Room at 40 and a Corridor on the rung at 8 in "
+				  "front; the contribution of a Layer is its deepest floor, and the "
+				  "rung does not make a Corridor count for more than it is");
+	}
+
+	// The rung's zero is a value, not an absence, and it is the only way to say
+	// "Corridors hold at the unlifted position while Rooms lift". Absence here
+	// means *follow Location*, so unlike the type map - where a zero row is
+	// refused because an absent row already answers zero - the rung keeps its
+	// zero. This is ADR 0024's rule read one rung up.
+	void aZeroCorridorDepthHoldsCorridorsStillWhileRoomsLift(smoke::Context const&)
+	{
+		auto const fixture = roomAndCorridorInFront("Zero rung");
+		auto const& world = fixture.world;
+		require(world->setSectorTypeFloorDepth(core::SectorType::Location, 24).changed,
+			"Location default refused");
+		require(world->setCorridorFloorDepth(0).changed,
+			"Setting the corridor depth to 0 over an unset rung was not seen as a "
+			"change; a zero rung is a value, not a way of writing nothing");
+		require(world->hasCorridorFloorDepth(),
+			"A zero corridor depth left the World with no rung; the zero would then "
+			"be indistinguishable from following Location, which is a different "
+			"answer and the state ADR 0024 refused to collapse");
+		require(world->corridorFloorDepth() == 0,
+			"The zero rung does not read back as zero");
+		require(world->effectiveFloorDepth(fixture.corridor) == 0,
+			"The Corridor answers " + std::to_string(world->effectiveFloorDepth(fixture.corridor))
+				+ " on a zero rung with its type at 24; the rung is what holds it still");
+		require(world->effectiveFloorDepth(fixture.room) == 24,
+			"The zero rung pulled the Room off its type");
+		require(world->layerFloorOffsetPx(1) == 24,
+			"Layer 1 draws " + std::to_string(world->layerFloorOffsetPx(1))
+				+ "px off; the Room at 24 is still the deepest floor in front, so "
+				  "the held-still Corridor contributes nothing and the Room carries "
+				  "the lift");
+
+		// Re-stating the zero the rung already carries changes nothing.
+		auto const again = world->setCorridorFloorDepth(0);
+		require(again.accepted && !again.changed,
+			"Re-setting the zero the rung already carries was reported as a change");
+	}
+
+	// Clearing the rung is a write of its own and not the same write as setting
+	// it to zero: the zero holds Corridors still, the clear puts them back on
+	// `Location`. Routing one through the other - as the type pair does - would
+	// lose one of the two answers.
+	void clearingTheCorridorRungPutsCorridorsBackOnTheirType(smoke::Context const&)
+	{
+		auto const fixture = roomAndCorridorInFront("Cleared rung");
+		auto const& world = fixture.world;
+		require(world->setSectorTypeFloorDepth(core::SectorType::Location, 24).changed,
+			"Location default refused");
+		require(world->setCorridorFloorDepth(8).changed, "rung refused");
+		require(world->effectiveFloorDepth(fixture.corridor) == 8, "rung not in force");
+
+		require(world->clearCorridorFloorDepth().changed,
+			"Clearing a set corridor rung was not seen as a change");
+		require(!world->hasCorridorFloorDepth(),
+			"A cleared rung still reports itself as set");
+		require(world->effectiveFloorDepth(fixture.corridor) == 24,
+			"A Corridor whose rung was cleared answers "
+				+ std::to_string(world->effectiveFloorDepth(fixture.corridor))
+				+ "; with the rung gone it falls through to the Location type at 24, "
+				  "which is not where a zero rung left it");
+		require(world->sectorTypeFloorDepth(core::SectorType::Location) == 24,
+			"Clearing the rung moved the Location type");
+
+		// And clearing an already-clear rung is legal, changes nothing, and
+		// leaves no second deletion to undo.
+		auto const quiet = world->clearCorridorFloorDepth();
+		require(quiet.accepted && !quiet.changed,
+			"Clearing a rung that was never set was reported as a change");
+	}
+
+	// The same one-Level band every other floor depth write enforces, refused
+	// rather than clamped, and named as the Corridor's band in the refusal
+	// because the author is setting a rung under every Corridor and "out of
+	// range" without a subject sends them looking for a Sector.
+	void aCorridorDepthOutsideTheBandIsRefused(smoke::Context const&)
+	{
+		auto const fixture = roomAndCorridorInFront("Out-of-band rung");
+		auto const& world = fixture.world;
+		std::string diagnostic;
+		require(!world->canSetCorridorFloorDepth(CORE_LEVEL_HEIGHT_PIXELS + 1, &diagnostic),
+			"A corridor depth one pixel above the band was accepted");
+		require(diagnostic.find("Corridor") != std::string::npos,
+			"The refusal does not say which depth it is refusing: '" + diagnostic + "'");
+		require(!world->canSetCorridorFloorDepth(-CORE_LEVEL_HEIGHT_PIXELS - 1, &diagnostic),
+			"A corridor depth one pixel below the band was accepted");
+
+		auto const write = world->setCorridorFloorDepth(9999, &diagnostic);
+		require(!write.accepted, "A corridor depth far outside the band was accepted");
+		require(!write.changed, "A refused corridor write reported a change");
+		require(!world->hasCorridorFloorDepth(),
+			"A refused corridor write left a rung on the World");
+		require(world->effectiveFloorDepth(fixture.corridor) == 0,
+			"The refused write reached the Corridor anyway");
+
+		// The edges themselves are inside the band, both sides.
+		require(world->canSetCorridorFloorDepth(CORE_LEVEL_HEIGHT_PIXELS, &diagnostic),
+			"The top of the band was refused: " + diagnostic);
+		require(world->canSetCorridorFloorDepth(-CORE_LEVEL_HEIGHT_PIXELS, &diagnostic),
+			"The bottom of the band was refused: " + diagnostic);
+		require(world->setCorridorFloorDepth(-CORE_LEVEL_HEIGHT_PIXELS).changed,
+			"An edge-of-band corridor depth was not written");
+		require(world->effectiveFloorDepth(fixture.corridor) == -CORE_LEVEL_HEIGHT_PIXELS,
+			"The edge-of-band corridor depth did not reach the Corridor");
+	}
+
+	// Re-asking for the depth the rung already carries is legal and changes
+	// nothing, which is what keeps a repeat keystroke from becoming an undo step.
+	void reaskingForTheSameCorridorDepthChangesNothing(smoke::Context const&)
+	{
+		auto const fixture = roomAndCorridorInFront("Same rung value");
+		auto const& world = fixture.world;
+		require(world->setCorridorFloorDepth(33).changed, "rung refused");
+		auto const again = world->setCorridorFloorDepth(33);
+		require(again.accepted, "Re-asking for the same corridor depth was refused");
+		require(!again.changed, "Re-asking for the corridor depth already carried "
+			"was reported as a change");
+		require(world->corridorFloorDepth() == 33,
+			"The rung moved while being asked for the value it already had");
+	}
 }
 
 void registerFloorDepth(std::vector<smoke::Check>& checks)
@@ -420,4 +767,24 @@ void registerFloorDepth(std::vector<smoke::Check>& checks)
 		theStaircaseFollowsTheWorldWithNoInvalidation });
 	checks.push_back({ "floorDepth/settingZeroPinsAndClearingDeletesTheOverride",
 		settingZeroPinsAndClearingDeletesTheOverride });
+	checks.push_back({ "floorDepth/aCorridorDepthMovesCorridorsAndLeavesRoomsOnTheirType",
+		aCorridorDepthMovesCorridorsAndLeavesRoomsOnTheirType });
+	checks.push_back({ "floorDepth/aCorridorWithNoCorridorDepthFollowsTheLocationTypeDefault",
+		aCorridorWithNoCorridorDepthFollowsTheLocationTypeDefault });
+	checks.push_back({ "floorDepth/theCorridorRungReachesEveryCorridorAndNoOtherType",
+		theCorridorRungReachesEveryCorridorAndNoOtherType });
+	checks.push_back({ "floorDepth/aSectorOverrideBeatsTheCorridorDepth",
+		aSectorOverrideBeatsTheCorridorDepth });
+	checks.push_back({ "floorDepth/theStaircaseAccumulatesFromTheCorridorDepth",
+		theStaircaseAccumulatesFromTheCorridorDepth });
+	checks.push_back({ "floorDepth/aCorridorOnTheRungDoesNotOutrankADeeperRoom",
+		aCorridorOnTheRungDoesNotOutrankADeeperRoom });
+	checks.push_back({ "floorDepth/aZeroCorridorDepthHoldsCorridorsStillWhileRoomsLift",
+		aZeroCorridorDepthHoldsCorridorsStillWhileRoomsLift });
+	checks.push_back({ "floorDepth/clearingTheCorridorRungPutsCorridorsBackOnTheirType",
+		clearingTheCorridorRungPutsCorridorsBackOnTheirType });
+	checks.push_back({ "floorDepth/aCorridorDepthOutsideTheBandIsRefused",
+		aCorridorDepthOutsideTheBandIsRefused });
+	checks.push_back({ "floorDepth/reaskingForTheSameCorridorDepthChangesNothing",
+		reaskingForTheSameCorridorDepthChangesNothing });
 }

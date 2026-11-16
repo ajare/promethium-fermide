@@ -104,6 +104,16 @@ set(checks
     floorDepth/theSingleStepAndTheWholeStaircaseAgree
     floorDepth/theStaircaseFollowsTheWorldWithNoInvalidation
     floorDepth/settingZeroPinsAndClearingDeletesTheOverride
+    floorDepth/aCorridorDepthMovesCorridorsAndLeavesRoomsOnTheirType
+    floorDepth/aCorridorWithNoCorridorDepthFollowsTheLocationTypeDefault
+    floorDepth/theCorridorRungReachesEveryCorridorAndNoOtherType
+    floorDepth/aSectorOverrideBeatsTheCorridorDepth
+    floorDepth/theStaircaseAccumulatesFromTheCorridorDepth
+    floorDepth/aCorridorOnTheRungDoesNotOutrankADeeperRoom
+    floorDepth/aZeroCorridorDepthHoldsCorridorsStillWhileRoomsLift
+    floorDepth/clearingTheCorridorRungPutsCorridorsBackOnTheirType
+    floorDepth/aCorridorDepthOutsideTheBandIsRefused
+    floorDepth/reaskingForTheSameCorridorDepthChangesNothing
     floorDepthType/aTypeNobodySetHasNoOpinion
     floorDepthType/theTableCoversEverySectorType
     floorDepthType/aTypeDefaultMovesEverySectorFollowingIt

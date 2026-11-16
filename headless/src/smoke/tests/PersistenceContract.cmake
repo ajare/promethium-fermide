@@ -146,6 +146,13 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords accessPanels/roundTri
     floorDepth/anInBandDepthLoadsExactlyAsTyped
     floorDepth/aClampedWorldSavesBackInsideTheBand
     floorDepth/aHandEditedZeroSectorDepthIsAValueThatSaves
+    floorDepth/theCorridorDepthRoundTripsInBothWireFormats
+    floorDepth/aZeroCorridorDepthIsStoredAndComesBackAsZero
+    floorDepth/aWorldWithNoCorridorDepthWritesNoCorridorField
+    floorDepth/aDocumentWrittenBeforeTheCorridorRungLoadsCorridorsOnTheirType
+    floorDepth/aCorridorDepthFieldBelowVersion75IsRefused
+    floorDepth/aHandEditedCorridorDepthOutsideTheBandIsClampedOnTheWayIn
+    floorDepth/theCorridorDepthSurvivesTheRebuildAStructuralEditPerforms
     floorDepthType/roundTripsThroughBothFormats
     floorDepthType/aNegativeTypeDefaultRoundTrips
     floorDepthType/everyTypeRoundTripsTogether

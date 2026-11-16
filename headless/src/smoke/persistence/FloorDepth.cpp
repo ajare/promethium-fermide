@@ -178,6 +178,47 @@ namespace persistence
 			doc["construction"][found[0]]["floorDepth"] = depth;
 			return YAML::Dump(doc);
 		}
+
+		// A two-Layer World with a Room and a Corridor in front and a Room
+		// behind, so the corridor rung has something to carry, something to
+		// leave alone, and a Layer to lift (#1115).
+		struct FrontPair
+		{
+			WorldPtr world;
+			uint32_t room;
+			uint32_t corridor;
+		};
+
+		FrontPair roomAndCorridorInFront(std::string const& name)
+		{
+			auto world = std::make_shared<core::World>(name, 24, 10);
+			while (world->getLayerCount() < 2) world->addLayer();
+			auto const room = world->addRoom("Front", 0, 2, 2, 3, 2);
+			auto const corridor = world->addCorridor(0, 2, 8, 3, 1);
+			world->addRoom("Behind", 1, 2, 2, 3, 2);
+			// The premise the rung rests on, pinned rather than assumed: were
+			// corridor identity unreadable from `isRoom()`, every check built on
+			// this fixture would resolve nothing and pass quietly.
+			require(!world->getSector(corridor)->isRoom(),
+				"The Sector built by addCorridor reports itself as a Room, so the "
+					"corridor rung resolves nothing in this fixture");
+			require(world->getSector(room)->isRoom(),
+				"The Sector built by addRoom does not report itself as a Room");
+			return FrontPair{ std::move(world), room, corridor };
+		}
+
+		// The fixture's document with the top-level `corridorFloorDepth` field
+		// hand-typed (#1115), for the cases the writer cannot produce on its
+		// own. Written through a mutable handle on purpose: this is the field
+		// being added, so creating it is the point rather than the accident the
+		// Sector-level probe above has to avoid.
+		std::string withHandEditedCorridorDepth(core::World const& world,
+			int32_t depth)
+		{
+			YAML::Node doc = YAML::Load(serialize(world));
+			doc["corridorFloorDepth"] = depth;
+			return YAML::Dump(doc);
+		}
 	}
 
 	// A positive depth comes back out of both wire formats exactly as it
@@ -306,7 +347,7 @@ namespace persistence
 	{
 		auto const world = twoLayerWorld("Pre-depth world");
 		auto document = YAML::Load(serialize(*world));
-		require(document["version"].as<uint32_t>() == 74,
+		require(document["version"].as<uint32_t>() == 75,
 			"The current writer is not the version this check is bumping from");
 		document["version"] = 71;
 		require(YAML::Dump(document).find("floorDepth") == std::string::npos,
@@ -786,5 +827,260 @@ namespace persistence
 		require(loaded->effectiveFloorDepth(firstOn(*loaded, 1)) == 24,
 			"The Sector left following the type stopped following it: "
 				+ std::to_string(loaded->effectiveFloorDepth(firstOn(*loaded, 1))));
+	}
+
+	// ------------------------------------------------------------------
+	// The corridor rung on the wire (#1115).
+	// ------------------------------------------------------------------
+
+	// The rung round-trips in both wire formats, and the Layer behind still
+	// draws by it afterwards. A field that survives YAML and not binary is a
+	// field half the saves in the game lose.
+	void theCorridorDepthRoundTripsInBothWireFormats(smoke::Context const&)
+	{
+		for (int32_t const depth : { 8, -30 })
+		{
+			auto const fixture = roomAndCorridorInFront("Corridor rung round trip");
+			require(fixture.world->setSectorTypeFloorDepth(core::SectorType::Location, 24)
+					.changed, "the fixture's type default was refused");
+			require(fixture.world->setCorridorFloorDepth(depth).changed,
+				"the rung write was refused in the fixture");
+			require(fixture.world->layerFloorOffsetPx(1) == 24,
+				"the fixture's Layer does not draw by the Room's type before the save");
+
+			auto const yaml = load(serialize(*fixture.world));
+			require(yaml->hasCorridorFloorDepth() && yaml->corridorFloorDepth() == depth,
+				"A corridor depth of " + std::to_string(depth) + " came back from YAML as "
+					+ (yaml->hasCorridorFloorDepth()
+						? std::to_string(yaml->corridorFloorDepth()) : std::string("no rung")));
+			require(yaml->effectiveFloorDepth(fixture.corridor) == depth,
+				"The reloaded Corridor answers "
+					+ std::to_string(yaml->effectiveFloorDepth(fixture.corridor))
+					+ " rather than the " + std::to_string(depth) + " it was saved with");
+			require(yaml->effectiveFloorDepth(fixture.room) == 24,
+				"The reloaded Room answers "
+					+ std::to_string(yaml->effectiveFloorDepth(fixture.room))
+					+ "; the rung came back and moved the Room with it");
+
+			auto const binary = loadBinary(serializeBinary(*fixture.world));
+			require(binary->hasCorridorFloorDepth() && binary->corridorFloorDepth() == depth,
+				"A corridor depth of " + std::to_string(depth) + " came back from binary as "
+					+ (binary->hasCorridorFloorDepth()
+						? std::to_string(binary->corridorFloorDepth())
+						: std::string("no rung")));
+			require(binary->effectiveFloorDepth(fixture.corridor) == depth,
+				"The binary reload lost the Corridor's rung");
+			require(binary->effectiveFloorDepth(fixture.room) == 24,
+				"The binary reload moved the Room off its type");
+		}
+	}
+
+	// The rung's zero is stored, and comes back as the zero rather than as an
+	// absence. This is the one place the rung and the type map part company: a
+	// stored zero in the type map is refused because an absent row already
+	// answers zero, while an absent rung here answers *follow Location*, which
+	// is a different answer from holding Corridors still. A writer that dropped
+	// the zero would silently turn one answer into the other on the save.
+	void aZeroCorridorDepthIsStoredAndComesBackAsZero(smoke::Context const&)
+	{
+		auto const fixture = roomAndCorridorInFront("Zero rung round trip");
+		require(fixture.world->setSectorTypeFloorDepth(core::SectorType::Location, 24)
+				.changed, "the fixture's type default was refused");
+		require(fixture.world->setCorridorFloorDepth(0).changed,
+			"the fixture's zero rung was not seen as a change");
+
+		for (bool binaryInput : { false, true })
+		{
+			auto const where = binaryInput ? std::string("binary") : std::string("YAML");
+			auto const reloaded = binaryInput
+				? loadBinary(serializeBinary(*fixture.world))
+				: load(serialize(*fixture.world));
+			require(reloaded->hasCorridorFloorDepth(),
+				"A zero corridor rung loaded out of " + where + " as no rung at all, "
+					"which silently turns 'Corridors hold still' into 'Corridors "
+					"follow Location' (#1115, ADR 0024)");
+			require(reloaded->corridorFloorDepth() == 0,
+				"The zero rung came back from " + where + " as "
+					+ std::to_string(reloaded->corridorFloorDepth()));
+			require(reloaded->effectiveFloorDepth(fixture.corridor) == 0,
+				"The reloaded Corridor answers "
+					+ std::to_string(reloaded->effectiveFloorDepth(fixture.corridor))
+					+ " with a zero rung and a type at 24; the rung is what holds it");
+			require(reloaded->effectiveFloorDepth(fixture.room) == 24,
+				"The reloaded Room answers "
+					+ std::to_string(reloaded->effectiveFloorDepth(fixture.room))
+					+ "; the zero rung is for Corridors and did not reach it");
+			require(reloaded->layerFloorOffsetPx(1) == 24,
+				"Layer 1 draws " + std::to_string(reloaded->layerFloorOffsetPx(1))
+					+ "px off after the reload; the Room at 24 should still carry the "
+					"lift while the held-still Corridor contributes nothing");
+		}
+
+		// And the save back out still carries the zero, rather than the field
+		// vanishing on the second trip the way the #1111 inconsistency did.
+		auto const roundTwice = load(serialize(*load(serialize(*fixture.world))));
+		require(roundTwice->hasCorridorFloorDepth()
+				&& roundTwice->effectiveFloorDepth(fixture.corridor) == 0,
+			"A second save-and-load dropped the zero corridor rung");
+	}
+
+	// Sparseness in the direction of absence: a World nobody set a corridor
+	// rung on writes no `corridorFloorDepth` field at all, which is what keeps
+	// every World written before the rung existed byte-for-byte what it was.
+	void aWorldWithNoCorridorDepthWritesNoCorridorField(smoke::Context const&)
+	{
+		auto const fixture = roomAndCorridorInFront("No rung written");
+		require(fixture.world->setSectorTypeFloorDepth(core::SectorType::Location, 24)
+				.changed, "the fixture's type default was refused");
+		require(!fixture.world->hasCorridorFloorDepth(),
+			"the fixture already carries a rung, so the sparseness claim is empty");
+
+		auto const yaml = serialize(*fixture.world);
+		require(yaml.find("corridorFloorDepth") == std::string::npos,
+			"A World with no corridor rung set wrote a corridorFloorDepth field");
+		// The type map is still there, which is what makes the absence above a
+		// statement about the rung rather than about the whole document.
+		require(yaml.find("sectorTypeFloorDepths") != std::string::npos,
+			"the fixture lost its type map, so the absence below proves nothing");
+
+		// Clearing a rung that was set removes the field again, which is the
+		// only way back to the pre-rung document.
+		require(fixture.world->setCorridorFloorDepth(8).changed, "rung refused");
+		require(serialize(*fixture.world).find("corridorFloorDepth")
+				!= std::string::npos,
+			"a set rung wrote no field, so the clear below has nothing to remove");
+		require(fixture.world->clearCorridorFloorDepth().changed, "clear refused");
+		require(serialize(*fixture.world).find("corridorFloorDepth") == std::string::npos,
+			"Clearing the rung left the field in the document");
+	}
+
+	// A document written before the rung existed - schema 74, no field - loads
+	// unchanged, with every Corridor following `Location` exactly as it did.
+	// No migration pass, because there is nothing to migrate from: the absence
+	// is the pre-existing state, not a hole to fill.
+	void aDocumentWrittenBeforeTheCorridorRungLoadsCorridorsOnTheirType(
+		smoke::Context const&)
+	{
+		auto const fixture = roomAndCorridorInFront("Pre-rung document");
+		require(fixture.world->setSectorTypeFloorDepth(core::SectorType::Location, 24)
+				.changed, "the fixture's type default was refused");
+		auto document = YAML::Load(serialize(*fixture.world));
+		require(document["version"].as<uint32_t>() == 75,
+			"the current writer is not the version this check is bumping from");
+		require(YAML::Dump(document).find("corridorFloorDepth") == std::string::npos,
+			"the fixture document carries a corridor field, so bumping its version "
+				"down would not be testing a pre-rung document");
+		document["version"] = 74;
+
+		auto const loaded = load(YAML::Dump(document));
+		require(!loaded->hasCorridorFloorDepth(),
+			"A pre-rung document loaded with a corridor rung it never carried");
+		require(loaded->effectiveFloorDepth(fixture.corridor) == 24,
+			"A Corridor in a pre-rung document answers "
+				+ std::to_string(loaded->effectiveFloorDepth(fixture.corridor))
+				+ "; with no rung it follows Location at 24, which is what it did "
+				  "before #1115 existed");
+		require(loaded->effectiveFloorDepth(fixture.room) == 24,
+			"The Room in the pre-rung document stopped following its type");
+		require(loaded->layerFloorOffsetPx(1) == 24,
+			"The staircase changed for a World that never asked for it to change");
+	}
+
+	// A document claiming to predate the rung while carrying the field did not
+	// come from this writer: the pre-75 writer never emitted a corridor depth,
+	// so reading one anyway is guessing at what the bytes mean - and guessing
+	// is what the version bump exists to prevent.
+	void aCorridorDepthFieldBelowVersion75IsRefused(smoke::Context const&)
+	{
+		auto const fixture = roomAndCorridorInFront("Rung below its version");
+		require(fixture.world->setCorridorFloorDepth(8).changed, "rung refused");
+		auto document = YAML::Load(serialize(*fixture.world));
+		require(document["corridorFloorDepth"].IsDefined(),
+			"the fixture document carries no corridor field to test with");
+		document["version"] = 74;
+		require(refused([&] { (void)load(YAML::Dump(document)); }),
+			"A schema 74 document carrying a corridorFloorDepth field was accepted; "
+				"the pre-75 writer never emitted one, so this document is not what "
+				"it claims to be (#1115)");
+
+		// The same document at its own version loads, which is what makes the
+		// refusal about the version and not about the field.
+		auto const allowed = load(serialize(*fixture.world));
+		require(allowed->effectiveFloorDepth(fixture.corridor) == 8,
+			"The same rung was refused at its own schema version");
+	}
+
+	// The band applies on the way in, clamped rather than refused, for the one
+	// number that moves every Corridor in the World. A hand-typed 9000 flings
+	// more of the picture off screen than one mistyped Sector can, and the
+	// clamp lands on the value the World then saves back out rather than being
+	// re-litigated on every load.
+	void aHandEditedCorridorDepthOutsideTheBandIsClampedOnTheWayIn(
+		smoke::Context const&)
+	{
+		for (int32_t const typed : { 9000, -9000 })
+		{
+			auto const fixture = roomAndCorridorInFront("Hand-edited rung");
+			require(fixture.world->setSectorTypeFloorDepth(core::SectorType::Location, 24)
+					.changed, "the fixture's type default was refused");
+			auto const loaded = load(withHandEditedCorridorDepth(*fixture.world, typed));
+			int32_t const expected = typed > 0 ? CORE_LEVEL_HEIGHT_PIXELS
+				: -CORE_LEVEL_HEIGHT_PIXELS;
+			require(loaded->hasCorridorFloorDepth(),
+				"A hand-edited corridor depth loaded as no rung");
+			require(loaded->corridorFloorDepth() == expected,
+				"A hand-typed corridor depth of " + std::to_string(typed) + " loaded as "
+					+ std::to_string(loaded->corridorFloorDepth()) + "; the band is "
+					"one Level either way, and the clamp is what keeps the picture on "
+					"screen (#1111 read one rung up)");
+			require(loaded->effectiveFloorDepth(fixture.corridor) == expected,
+				"The clamped rung did not reach the Corridor");
+			require(loaded->effectiveFloorDepth(fixture.room) == 24,
+				"The clamped rung moved the Room off its type");
+			// Clamped on the way in means the save that follows carries the
+			// clamped number rather than the mistake forward.
+			require(serialize(*loaded).find("corridorFloorDepth: "
+					+ std::to_string(expected)) != std::string::npos,
+				"The re-save carried the unclamped value forward instead of the "
+					"clamp it was loaded with");
+		}
+	}
+
+	// The rung is World state rather than a construction record, so the rebuild
+	// every structural edit performs has to leave it where the author put it
+	// while replaying the Sectors underneath it. A rung held only on the live
+	// Corridor objects would survive the save and be lost the first time the
+	// author moved a wall.
+	void theCorridorDepthSurvivesTheRebuildAStructuralEditPerforms(
+		smoke::Context const&)
+	{
+		auto const fixture = roomAndCorridorInFront("Rung rebuild");
+		require(fixture.world->setSectorTypeFloorDepth(core::SectorType::Location, 24)
+				.changed, "the fixture's type default was refused");
+		require(fixture.world->setCorridorFloorDepth(50).changed, "rung refused");
+		require(fixture.world->layerFloorOffsetPx(1) == 50,
+			"the rung is not in force before the edit");
+
+		// A structural edit somewhere else entirely: the whole World is torn
+		// down and replayed from the records.
+		fixture.world->addRoom("Elsewhere", 1, 6, 12, 2, 2);
+		require(fixture.world->hasCorridorFloorDepth()
+				&& fixture.world->corridorFloorDepth() == 50,
+			"The rebuild dropped the corridor rung: it answers "
+				+ (fixture.world->hasCorridorFloorDepth()
+					? std::to_string(fixture.world->corridorFloorDepth())
+					: std::string("no rung")));
+		require(fixture.world->effectiveFloorDepth(fixture.corridor) == 50,
+			"After the rebuild the Corridor answers "
+				+ std::to_string(fixture.world->effectiveFloorDepth(fixture.corridor))
+				+ " rather than the 50 its rung carries");
+		require(fixture.world->layerFloorOffsetPx(1) == 50,
+			"Layer 1 draws " + std::to_string(fixture.world->layerFloorOffsetPx(1))
+				+ "px off after the rebuild; the rung released across it");
+
+		auto const reloaded = load(serialize(*fixture.world));
+		require(reloaded->corridorFloorDepth() == 50
+				&& reloaded->effectiveFloorDepth(fixture.corridor) == 50,
+			"The rung was lost across the rebuild-and-save cycle");
 	}
 }

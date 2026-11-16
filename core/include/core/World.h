@@ -699,6 +699,24 @@ namespace core
 		// where it travels with the thing it belongs to.
 		std::map<SectorType, int32_t> mSectorTypeFloorDepths{};
 
+		// The Corridor rung of the floor depth ladder (#1115): one optional
+		// depth that every Corridor takes and no Room does.
+		//
+		// It is not another row in the type map above, because Room and
+		// Corridor are the same key there - `SectorType::Location` - and adding
+		// a "Corridor" key would invent a Sector type the World does not have.
+		// It is not a per-Sector fan-out either, which is the trap that same
+		// spec calls out: one number here moves every Corridor without
+		// rewriting any of them, exactly as a type row does.
+		//
+		// Sparse, but not sparse in the same way as the type map. Absence here
+		// means *Corridors follow Location*, not *Corridors lift nothing*, so
+		// a stored zero is the only way to say "Corridors hold at the
+		// unlifted position while Rooms lift". That is the state ADR 0024
+		// made expressible per Sector, on the corridor rung: presence is the
+		// value, zero included, and only `clearCorridorFloorDepth` puts a
+		// Corridor back to following its type.
+		std::optional<int32_t> mCorridorFloorDepth{};
 
 		std::shared_ptr<Graph> mGraph;
 
@@ -3192,6 +3210,15 @@ namespace core
 		// does; a Sector that carries none answers whatever its type currently
 		// says, which is what makes the type table a control rather than a
 		// starting suggestion.
+		//
+		// Since #1115 the ladder has a rung between those two, taken only by
+		// Corridors: a Sector with no override that is a Corridor takes the
+		// World's corridor floor depth where one is set, and only where none
+		// is set does it fall through to the `Location` type default its type
+		// has always answered. Rooms never take that rung, which is the whole
+		// reason it exists: Room and Corridor are one key in the type table,
+		// and an author who wants one depth for each needs somewhere the split
+		// can live.
 		[[nodiscard]] int32_t effectiveFloorDepth(uint32_t sectorIndex) const;
 
 		// Whether one Sector follows its type or overrides it (#1103). The
@@ -3239,6 +3266,44 @@ namespace core
 			std::string* diagnostic = nullptr);
 		FloorDepthWrite clearSectorTypeFloorDepth(SectorType type,
 			std::string* diagnostic = nullptr);
+
+		// --- Corridor floor depth ---
+		//
+		// The rung the type table cannot reach: one optional depth that every
+		// Corridor takes and no Room does (#1115). "All Rooms sit 24px deep,
+		// all Corridors sit 8px deep" was one row short, because Room and
+		// Corridor are both `SectorType::Location`, and this is where the
+		// missing half lives.
+		//
+		// The read answers 0 where no corridor depth is set, which is not a
+		// third state: it is the same answer a Corridor gives when it follows
+		// an unset `Location` type, and it is what lets a World written before
+		// the field exist keep drawing exactly as it drew.
+		//
+		// Corridor identity is read from `Sector::isRoom()`, which is already
+		// virtual and already means "a Location that is neither a Corridor nor
+		// a Facade". A Sector of `Location` type that is not a room is a
+		// corridor and nothing else, so the resolve path needs no new virtual
+		// and no cast to `Location`.
+		[[nodiscard]] int32_t corridorFloorDepth() const;
+		[[nodiscard]] bool hasCorridorFloorDepth() const;
+
+		// Records the corridor floor depth, or clears the rung away so every
+		// Corridor follows `Location` again. Same two halves every floor depth
+		// write answers with, and the same one-Level band: this number moves
+		// every Corridor in the World, so a mistyped 5000 here flings as much
+		// of the picture away as a mistyped type row does.
+		//
+		// Unlike the type row, setting it to zero stores the zero rather than
+		// erasing it. Absence means *follow Location*; zero means *hold at the
+		// unlifted position while Rooms lift*, and those are different answers
+		// (ADR 0024's reasoning, one rung up). Only clearing removes the
+		// field, and only that puts Corridors back to following.
+		bool canSetCorridorFloorDepth(int32_t depth,
+			std::string* diagnostic = nullptr) const;
+		FloorDepthWrite setCorridorFloorDepth(int32_t depth,
+			std::string* diagnostic = nullptr);
+		FloorDepthWrite clearCorridorFloorDepth(std::string* diagnostic = nullptr);
 
 		// Where a Layer draws, accumulated from the Layers in front of it:
 		// `offset(L) = offset(L-1) + max(depth of the Sectors in Layer L-1)`,
