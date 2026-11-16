@@ -13,7 +13,20 @@
 // What is pinned, in the order the author meets it:
 //
 //   * the follow wording covers every one of the eleven Sector types and
-//     names the type it is following, so no type arrives without a row;
+//     names the thing it is following, so no type arrives without a row;
+//   * the one resolver that answers "what does this Sector follow" agrees
+//     with what the World itself resolves, for every Sector in the World,
+//     including the Corridors the resolver exists for (#1116);
+//   * the Controls table draws Room and Corridor in place of the single
+//     Location row, the Room row writes the `Location` type default, the
+//     Corridor row writes the corridor rung, and the Corridor row shows the
+//     `Location` default when the rung is unset rather than a bare zero
+//     (#1116);
+//   * a selected Corridor's follow text names the corridor default rather
+//     than "Location" once the author has given Corridors a depth of their
+//     own, breaking away seeds the override from the corridor default, and
+//     Reset returns the Corridor to that default - or to `Location` when
+//     the rung is unset - never to a bare zero (#1116);
 //   * a Sector with no override reads as following its type, and says the
 //     value that type currently carries - not the value it carried when the
 //     author last looked;
@@ -74,6 +87,7 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -187,6 +201,80 @@ namespace
 		return write;
 	}
 
+	// The write the table's Corridor row performs. A different write rather
+	// than a type row with a different key: setting the rung stores a zero
+	// where a type row erases one, which is the difference between "Corridors
+	// hold at the unlifted line" and "Corridors follow Location" (#1115).
+	core::World::FloorDepthWrite writeCorridorThroughTable(
+		editor::EditorDocument& document, std::int32_t depth)
+	{
+		auto& authoring = document.authoring();
+		auto const before = authoring.captureSnapshot();
+		require(before.has_value(), "the document could not be captured");
+		std::string diagnostic;
+		auto const write = authoring.setCorridorFloorDepth(depth, &diagnostic);
+		if (write.accepted && write.changed) authoring.commitEdit(before);
+		return write;
+	}
+
+	core::World::FloorDepthWrite clearCorridorThroughTable(
+		editor::EditorDocument& document)
+	{
+		auto& authoring = document.authoring();
+		auto const before = authoring.captureSnapshot();
+		require(before.has_value(), "the document could not be captured");
+		std::string diagnostic;
+		auto const write = authoring.clearCorridorFloorDepth(&diagnostic);
+		if (write.accepted && write.changed) authoring.commitEdit(before);
+		return write;
+	}
+
+	// A Room and a Corridor side by side on the front Layer, with a Room
+	// behind, so the corridor rung has something it moves, something it must
+	// not move, and something to lift (#1116).
+	//
+	// The two identity assertions are the premise the whole split rests on,
+	// and they are pinned rather than assumed. Corridor identity is read from
+	// `Sector::isRoom()`, which is already virtual and already means "a
+	// Location that is neither a Corridor nor a Facade". Were that ever to
+	// stop holding, every check built on this fixture would resolve nothing
+	// and go quietly green instead of failing, which is the worst way for a
+	// fixture to be wrong.
+	struct RoomAndCorridor
+	{
+		std::shared_ptr<core::World> world;
+		std::shared_ptr<editor::EditorDocument> document;
+		std::uint32_t room;
+		std::uint32_t corridor;
+	};
+
+	RoomAndCorridor roomAndCorridorInFront(std::string const& name)
+	{
+		auto const world = openWorld(name, 2);
+		auto const room = world->addRoom("Room", 0, 2, 1, 3, 2);
+		auto const corridor = world->addCorridor(0, 2, 8, 3, 1);
+		world->addRoom("Behind", 1, 2, 1, 3, 2);
+		require(!world->getSector(corridor)->isRoom(),
+			"The Sector built by addCorridor reports itself as a Room, so the "
+			"corridor rung resolves nothing and every check built on this "
+			"fixture is vacuous");
+		require(world->getSector(corridor)->getType() == core::SectorType::Location,
+			"A Corridor is not of Location type, so the resolver's type test is "
+			"wrong and every Corridor check here is reading a Room");
+		require(world->getSector(room)->isRoom(),
+			"The Sector built by addRoom does not report itself as a Room");
+		return RoomAndCorridor{ world, editor::currentDocument(), room, corridor };
+	}
+
+	// The table's row carrying this label, if it has one.
+	std::optional<editor::FloorDepthRow> rowNamed(
+		std::vector<editor::FloorDepthRow> const& rows, std::string const& label)
+	{
+		for (auto const& row : rows)
+			if (row.label == label) return row;
+		return std::nullopt;
+	}
+
 	// The editor's own source, read as text.
 	//
 	// Reading the panel's source is the only way to pin its call shape: the
@@ -270,18 +358,26 @@ namespace
 
 namespace editor_smoke
 {
-	// The follow wording covers every Sector type, and names the type it is
-	// following with the very string the Controls window's type table shows
-	// down its left column. A type that arrived in the enum without arriving
-	// in this wording would be a Sector the author cannot read; walking
-	// `allSectorTypes()` rather than spelling eleven names is what makes
-	// that impossible to overlook.
+	// The follow wording covers every Sector type, and names the thing the
+	// Sector is following with the very string the Controls window's type
+	// table shows down its left column. A type that arrived in the enum
+	// without arriving in this wording would be a Sector the author cannot
+	// read; walking `allSectorTypes()` rather than spelling eleven names is
+	// what makes that impossible to overlook.
+	//
+	// The wording is checked against the resolver's own answer rather than
+	// against the type directly, because the type stopped being the whole
+	// answer when a second rung appeared underneath one of them. What this
+	// pins is that every type arrives with a name, that the resolver hands
+	// that name back for a Sector standing on its type default, and that the
+	// sentence says the name it was handed, sign and all.
 	void followWordingCoversEverySectorType(smoke::Context const&)
 	{
 		auto const& types = core::allSectorTypes();
 		require(types.size() == 11, "the type list holds " + std::to_string(types.size())
 			+ " Sector types; the panel's row is written for eleven");
 
+		core::World const world{"Follow wording", 24, 8};
 		std::set<std::string> names;
 		for (auto const type : types)
 		{
@@ -290,19 +386,29 @@ namespace editor_smoke
 			require(names.insert(name).second, "two Sector types answer with the name "
 				+ name + ", so the row could not tell them apart");
 
-			require(editor::floorDepthFollowText(type, 24) == "Following " + name
-					+ " at +24 px",
-				"the follow wording for " + name + " does not name the type and the "
-					"followed value: " + editor::floorDepthFollowText(type, 24));
-			require(editor::floorDepthFollowText(type, -18) == "Following " + name
-					+ " at -18 px",
+			// A Sector that is not a Corridor follows its own type, so the
+			// resolver's label is the type's own string. What a Corridor answers
+			// is a different question with two answers, and is pinned by its own
+			// checks below rather than being folded into this walk.
+			auto const followed = editor::resolveFloorDepthFollow(world, type,
+				false);
+			require(followed.label == name, "the resolver named what a " + name
+				+ " follows something other than its own type: " + followed.label);
+
+			require(editor::floorDepthFollowText(followed.label, 24) == "Following "
+					+ name + " at +24 px",
+				"the follow wording for " + name + " does not name what is followed "
+					"and the followed value: "
+					+ editor::floorDepthFollowText(followed.label, 24));
+			require(editor::floorDepthFollowText(followed.label, -18) == "Following "
+					+ name + " at -18 px",
 				"the follow wording for " + name + " loses the sign of a negative "
-					"depth: " + editor::floorDepthFollowText(type, -18));
-			require(editor::floorDepthOverrideText(type, 12, 24) == "Overriding "
-					+ name + " (+24 px) with own +12 px",
-				"the override wording for " + name + " does not name both the type "
-					"value left behind and the Sector's own: "
-					+ editor::floorDepthOverrideText(type, 12, 24));
+					"depth: " + editor::floorDepthFollowText(followed.label, -18));
+			require(editor::floorDepthOverrideText(followed.label, 12, 24)
+					== "Overriding " + name + " (+24 px) with own +12 px",
+				"the override wording for " + name + " does not name both the value "
+					"left behind and the Sector's own: "
+					+ editor::floorDepthOverrideText(followed.label, 12, 24));
 		}
 	}
 
@@ -949,10 +1055,341 @@ namespace editor_smoke
 			"value");
 	}
 
+	// The resolver and the World answer the same question the same way.
+	//
+	// The resolver is the editor's own read, written beside the widgets, and
+	// `World::effectiveFloorDepth` is the read the renderer uses. Two
+	// independent implementations of "what does this Sector follow" that
+	// disagreed would put a number on the author's screen that the picture
+	// does not have - and the corridor rung, where the two tiers must agree
+	// through a corridor test each of them wrote for itself, is exactly where
+	// that would show up. Walking every Sector rather than the two the fixture
+	// was built for means a type nobody thought of is still covered.
+	void theResolverAgreesWithWhatTheWorldResolves(smoke::Context const&)
+	{
+		State state;
+		CloseOnExit const closer;
+		auto const fixture = roomAndCorridorInFront("Resolver agrees");
+		writeTypeThroughTable(*fixture.document, core::SectorType::Location, 24);
+		writeCorridorThroughTable(*fixture.document, 8);
+
+		for (std::uint32_t layer = 0; layer < fixture.world->getLayerCount();
+			++layer)
+		{
+			for (auto const& sector : fixture.world->getSectors(layer))
+			{
+				require(sector != nullptr, "a Layer answered with no Sector");
+				// An overridden Sector follows nothing, so there is no pair
+				// here to compare; the override itself is pinned by its own
+				// checks.
+				if (sector->hasFloorDepthOverride()) continue;
+				auto const followed = editor::resolveFloorDepthFollow(
+					*fixture.world, *sector);
+				auto const resolved = fixture.world->effectiveFloorDepth(
+					sector->getIndex());
+				require(followed.depthPx == resolved, "the resolver says Layer "
+					+ std::to_string(layer) + "'s " + sector->getDescription()
+					+ " follows " + std::to_string(followed.depthPx)
+					+ " px while the World resolves " + std::to_string(resolved)
+					+ " px for it");
+			}
+		}
+
+		// And the label tells the same story the value does: the Corridor is
+		// on the rung and says "Corridor", the Room is on its type and says
+		// "Location". A label that named the wrong rung would still print a
+		// correct number, which is the failure the author would only find by
+		// going looking for a row that was not the one they set.
+		require(editor::resolveFloorDepthFollow(*fixture.world,
+				*fixture.world->getSector(fixture.corridor)).label == "Corridor",
+			"a Corridor with the rung set is not read as following the corridor "
+			"default");
+		require(editor::resolveFloorDepthFollow(*fixture.world,
+				*fixture.world->getSector(fixture.room)).label == "Location",
+			"a Room is not read as following the Location type default");
+	}
+
+	// The table draws Room and Corridor in place of the single Location row,
+	// and every other type keeps the row it had under the name it had.
+	void theTableSplitsLocationIntoRoomAndCorridorRows(smoke::Context const&)
+	{
+		State state;
+		CloseOnExit const closer;
+		auto const fixture = roomAndCorridorInFront("Split rows");
+
+		auto const rows = editor::floorDepthSchemeRows(*fixture.world);
+		require(rows.size() == core::allSectorTypes().size() + 1, "the floor "
+			"depth table draws " + std::to_string(rows.size()) + " rows; taking "
+			"the one Location row out and putting a Room row and a Corridor row "
+			"in its place leaves one more row than there are Sector types");
+
+		require(!rowNamed(rows, "Location").has_value(), "the table still draws "
+			"a Location row, which is the row the author is not thinking of when "
+			"they set how deep their Rooms run");
+
+		auto const room = rowNamed(rows, "Room");
+		require(room.has_value(), "the table draws no Room row");
+		require(room->type == core::SectorType::Location, "the Room row does not "
+			"write the Location type default, which is the only place the value "
+			"a Room follows can live");
+		require(!room->corridor, "the Room row writes the corridor rung rather "
+			"than the Location type default, so setting how deep Rooms run would "
+			"move Corridors instead");
+
+		auto const corridor = rowNamed(rows, "Corridor");
+		require(corridor.has_value(), "the table draws no Corridor row");
+		require(corridor->type == core::SectorType::Location, "the Corridor row "
+			"is not keyed to the Location type, which is the type a Corridor has");
+		require(corridor->corridor, "the Corridor row does not write the corridor "
+			"rung, so the author has no way to give Corridors a depth of their "
+			"own at all");
+
+		// Every type the split did not touch keeps exactly the row it had,
+		// under the very string the type table shows beside it.
+		for (auto const type : core::allSectorTypes())
+		{
+			if (type == core::SectorType::Location) continue;
+			auto const name = core::getSectorTypeString(type);
+			auto const row = rowNamed(rows, name);
+			require(row.has_value(), "the split left no row for " + name);
+			require(row->type == type && !row->corridor, "the row named for "
+				+ name + " does not write that type's own default");
+		}
+	}
+
+	// The Corridor row shows its unset state as following the Location
+	// default rather than as a bare zero.
+	//
+	// This is the one place the two states a rung set to zero and a rung not
+	// set at all can be told apart on screen, and the number alone cannot
+	// tell them: with Location at +24 a following Corridor draws at +24 and
+	// a Corridor pinned at its own +24 draws at +24, but a Corridor with no
+	// rung shown as "0" would be a lie either way.
+	void theCorridorRowShowsWhatCorridorsActuallyDo(smoke::Context const&)
+	{
+		State state;
+		CloseOnExit const closer;
+		auto const fixture = roomAndCorridorInFront("Corridor row unset");
+		writeTypeThroughTable(*fixture.document, core::SectorType::Location, 24);
+		require(!fixture.world->hasCorridorFloorDepth(), "the fixture already "
+			"carries a corridor rung, so this is not the unset state the check "
+			"is about");
+
+		auto const unset = editor::floorDepthSchemeRows(*fixture.world);
+		require(rowNamed(unset, "Corridor")->shownDepthPx == 24, "the Corridor "
+			"row shows " + std::to_string(rowNamed(unset, "Corridor")->shownDepthPx)
+			+ " px with no rung set; a bare zero in that seat reads as "
+			"'Corridors are pinned at the unlifted line', which is the opposite "
+			"of what they are doing");
+
+		// And the row says which of the two the author is looking at, since
+		// the number cannot.
+		require(editor::corridorFloorDepthRowHint(false, 24)
+				== "No corridor depth set: Corridors follow the Location default "
+				   "(+24 px). Typing a value here gives Corridors a depth of "
+				   "their own, so they can hold while Rooms lift.",
+			"the Corridor row's unset hint does not say Corridors are following: "
+			+ editor::corridorFloorDepthRowHint(false, 24));
+
+		// A rung set to zero is not the unset state, and the row stops
+		// claiming otherwise. This is ADR 0024 one tier up: the zero is a
+		// value, and the row must not read it back as an absence.
+		writeCorridorThroughTable(*fixture.document, 0);
+		require(fixture.world->hasCorridorFloorDepth(), "a corridor rung set to "
+			"zero was not stored, so 'Corridors hold' is indistinguishable from "
+			"'Corridors follow Location'");
+		auto const pinned = editor::floorDepthSchemeRows(*fixture.world);
+		require(rowNamed(pinned, "Corridor")->shownDepthPx == 0, "the Corridor "
+			"row does not show the zero the author pinned it at");
+		require(editor::corridorFloorDepthRowHint(true, 24)
+				!= editor::corridorFloorDepthRowHint(false, 24), "the Corridor "
+			"row says the same thing about a pinned zero as about following "
+			"Location, so the author cannot tell the two states apart");
+	}
+
+	// A selected Corridor's follow text names the corridor default, not
+	// "Location", once the author has given Corridors a depth of their own.
+	void aSelectedCorridorNamesTheCorridorDefaultNotLocation(
+		smoke::Context const&)
+	{
+		State state;
+		CloseOnExit const closer;
+		auto const fixture = roomAndCorridorInFront("Corridor follow text");
+		writeTypeThroughTable(*fixture.document, core::SectorType::Location, 24);
+
+		// Before the rung exists there is no corridor default to name, and
+		// the honest sentence is the one about Location.
+		require(editor::sectorFloorDepthStateText(*fixture.world,
+				*fixture.world->getSector(fixture.corridor))
+				== "Following Location at +24 px",
+			"a Corridor with no rung does not read as following the Location "
+			"default: " + editor::sectorFloorDepthStateText(*fixture.world,
+				*fixture.world->getSector(fixture.corridor)));
+
+		// The rung arrives. The Corridor's sentence changes and the Room's
+		// does not: the two still share a type and no longer share an answer,
+		// which is exactly why neither could be derived from the type.
+		writeCorridorThroughTable(*fixture.document, 8);
+		require(editor::sectorFloorDepthStateText(*fixture.world,
+				*fixture.world->getSector(fixture.corridor))
+				== "Following Corridor at +8 px",
+			"a Corridor with a depth of its own still reads as following "
+			"Location: " + editor::sectorFloorDepthStateText(*fixture.world,
+				*fixture.world->getSector(fixture.corridor)));
+		require(editor::sectorFloorDepthStateText(*fixture.world,
+				*fixture.world->getSector(fixture.room))
+				== "Following Location at +24 px",
+			"giving Corridors their own depth moved the Room's sentence along "
+			"with them: " + editor::sectorFloorDepthStateText(*fixture.world,
+				*fixture.world->getSector(fixture.room)));
+
+		// The rung moves, and the Corridor reads the move straight off it.
+		writeCorridorThroughTable(*fixture.document, -11);
+		require(editor::sectorFloorDepthStateText(*fixture.world,
+				*fixture.world->getSector(fixture.corridor))
+				== "Following Corridor at -11 px",
+			"the Corridor did not pick up the moved rung: "
+			+ editor::sectorFloorDepthStateText(*fixture.world,
+				*fixture.world->getSector(fixture.corridor)));
+	}
+
+	// Break away on a Corridor seeds the override from the corridor default,
+	// and Reset returns the Corridor to that default - or to `Location` when
+	// the rung is unset - never to a bare zero.
+	void breakAwayAndResetOnACorridorLandOnTheCorridorRung(smoke::Context const&)
+	{
+		State state;
+		CloseOnExit const closer;
+		auto const fixture = roomAndCorridorInFront("Corridor break and reset");
+		writeTypeThroughTable(*fixture.document, core::SectorType::Location, 24);
+		writeCorridorThroughTable(*fixture.document, 8);
+
+		// The seed is what the Corridor is following, which is the rung and
+		// not the Room's 24. Seeding from the type would fling the Corridor
+		// sixteen pixels forward the instant the author took the wheel.
+		auto const seed = editor::resolveFloorDepthFollow(*fixture.world,
+			*fixture.world->getSector(fixture.corridor));
+		require(seed.depthPx == 8, "breaking away would seed the override from "
+			+ std::to_string(seed.depthPx) + " px rather than the corridor "
+			"default of +8 px");
+		require(writeThroughRow(*fixture.document, fixture.corridor,
+				seed.depthPx).changed,
+			"the Corridor break-away was not a write that changed anything");
+		require(fixture.world->effectiveFloorDepth(fixture.corridor) == 8,
+			"the broken-away Corridor answers " + std::to_string(
+				fixture.world->effectiveFloorDepth(fixture.corridor))
+				+ " px rather than the +8 it was seeded with");
+		require(editor::sectorFloorDepthStateText(*fixture.world,
+				*fixture.world->getSector(fixture.corridor))
+				== "Overriding Corridor (+8 px) with own +8 px",
+			"a broken-away Corridor does not read as overriding the corridor "
+			"default: " + editor::sectorFloorDepthStateText(*fixture.world,
+				*fixture.world->getSector(fixture.corridor)));
+
+		// The override is the author's own now, and the rung moves under it
+		// without touching it.
+		require(writeThroughRow(*fixture.document, fixture.corridor, -6).changed,
+			"editing the Corridor's override was not a change");
+		writeCorridorThroughTable(*fixture.document, 14);
+		require(fixture.world->effectiveFloorDepth(fixture.corridor) == -6,
+			"the moved rung dragged an overridden Corridor to " + std::to_string(
+				fixture.world->effectiveFloorDepth(fixture.corridor)) + " px");
+
+		// Reset lands on the rung - not on zero, and not on the Room's value.
+		require(resetThroughRow(*fixture.document, fixture.corridor).changed,
+			"resetting the Corridor was not seen as a change");
+		require(!fixture.world->hasFloorDepthOverride(fixture.corridor),
+			"reset left the Corridor carrying an override");
+		require(fixture.world->effectiveFloorDepth(fixture.corridor) == 14,
+			"reset returned the Corridor to " + std::to_string(
+				fixture.world->effectiveFloorDepth(fixture.corridor))
+				+ " px rather than the corridor default of +14 px");
+		require(editor::sectorFloorDepthStateText(*fixture.world,
+				*fixture.world->getSector(fixture.corridor))
+				== "Following Corridor at +14 px",
+			"after reset the Corridor does not read as following its default: "
+			+ editor::sectorFloorDepthStateText(*fixture.world,
+				*fixture.world->getSector(fixture.corridor)));
+
+		// With the rung cleared, reset returns the Corridor to Location, and
+		// still not to a bare zero.
+		clearCorridorThroughTable(*fixture.document);
+		require(!fixture.world->hasCorridorFloorDepth(), "the rung was not "
+			"cleared, so this is not the unset half of the criterion");
+		require(writeThroughRow(*fixture.document, fixture.corridor, -3).changed,
+			"the second Corridor break-away was not a change");
+		require(resetThroughRow(*fixture.document, fixture.corridor).changed,
+			"resetting the Corridor off the cleared rung was not a change");
+		require(fixture.world->effectiveFloorDepth(fixture.corridor) == 24,
+			"a Corridor reset with no rung answers " + std::to_string(
+				fixture.world->effectiveFloorDepth(fixture.corridor))
+				+ " px rather than the Location default of +24 px");
+		require(editor::sectorFloorDepthStateText(*fixture.world,
+				*fixture.world->getSector(fixture.corridor))
+				== "Following Location at +24 px",
+			"a Corridor reset with no rung does not read as following Location: "
+			+ editor::sectorFloorDepthStateText(*fixture.world,
+				*fixture.world->getSector(fixture.corridor)));
+	}
+
+	// Changing the Room row moves every Room that is following; changing the
+	// Corridor row moves every Corridor that is following and no Room at all.
+	void theRoomRowMovesEveryRoomAndTheCorridorRowEveryCorridor(
+		smoke::Context const&)
+	{
+		State state;
+		CloseOnExit const closer;
+		auto const fixture = roomAndCorridorInFront("Rows move their own");
+
+		writeTypeThroughTable(*fixture.document, core::SectorType::Location, 24);
+		require(fixture.world->effectiveFloorDepth(fixture.room) == 24,
+			"the Room row did not move the Room that was following it");
+		require(fixture.world->effectiveFloorDepth(fixture.corridor) == 24,
+			"with no rung set a Corridor follows the Location default, so the "
+			"Room row has to move it too");
+
+		// The Corridor row moves Corridors and leaves Rooms where they are.
+		writeCorridorThroughTable(*fixture.document, 8);
+		require(fixture.world->effectiveFloorDepth(fixture.corridor) == 8,
+			"the Corridor row did not move the Corridor that was following it");
+		require(fixture.world->effectiveFloorDepth(fixture.room) == 24,
+			"the Corridor row moved a Room to " + std::to_string(
+				fixture.world->effectiveFloorDepth(fixture.room))
+				+ " px; the rung is not the Room's row");
+
+		// The Room row moves on and the rung holds.
+		writeTypeThroughTable(*fixture.document, core::SectorType::Location, 40);
+		require(fixture.world->effectiveFloorDepth(fixture.room) == 40,
+			"the Room row did not move the Room that was following it");
+		require(fixture.world->effectiveFloorDepth(fixture.corridor) == 8,
+			"the Room row moved a Corridor off its rung to " + std::to_string(
+				fixture.world->effectiveFloorDepth(fixture.corridor)) + " px");
+
+		// Clearing the rung puts the Corridor back on the Location default,
+		// which is the state the World was in before the rung existed at all.
+		clearCorridorThroughTable(*fixture.document);
+		require(fixture.world->effectiveFloorDepth(fixture.corridor) == 40,
+			"a Corridor back off the rung answers " + std::to_string(
+				fixture.world->effectiveFloorDepth(fixture.corridor))
+				+ " px rather than the Location default of +40 px");
+	}
+
 	void registerSectorFloorDepthPanel(std::vector<smoke::Check>& checks)
 	{
 		checks.push_back({ "floorDepthPanel/followWordingCoversEverySectorType",
 			followWordingCoversEverySectorType });
+		checks.push_back({ "floorDepthPanel/theResolverAgreesWithWhatTheWorldResolves",
+			theResolverAgreesWithWhatTheWorldResolves });
+		checks.push_back({ "floorDepthPanel/theTableSplitsLocationIntoRoomAndCorridorRows",
+			theTableSplitsLocationIntoRoomAndCorridorRows });
+		checks.push_back({ "floorDepthPanel/theCorridorRowShowsWhatCorridorsActuallyDo",
+			theCorridorRowShowsWhatCorridorsActuallyDo });
+		checks.push_back({ "floorDepthPanel/aSelectedCorridorNamesTheCorridorDefaultNotLocation",
+			aSelectedCorridorNamesTheCorridorDefaultNotLocation });
+		checks.push_back({ "floorDepthPanel/breakAwayAndResetOnACorridorLandOnTheCorridorRung",
+			breakAwayAndResetOnACorridorLandOnTheCorridorRung });
+		checks.push_back({ "floorDepthPanel/theRoomRowMovesEveryRoomAndTheCorridorRowEveryCorridor",
+			theRoomRowMovesEveryRoomAndTheCorridorRowEveryCorridor });
 		checks.push_back({ "floorDepthPanel/aSectorWithNoOverrideReadsAsFollowingItsType",
 			aSectorWithNoOverrideReadsAsFollowingItsType });
 		checks.push_back({ "floorDepthPanel/breakingAwaySurvivesALaterTypeChange",

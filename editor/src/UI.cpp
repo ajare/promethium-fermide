@@ -7665,9 +7665,13 @@ void renderSectorFloorDepthRow(editor::DocumentPtr const& document,
 	if (!world || !sector) return;
 
 	bool const overridden = sector->hasFloorDepthOverride();
-	auto const type = sector->getType();
-	auto const typeName = core::getSectorTypeString(type);
-	auto const typeDepth = world->sectorTypeFloorDepth(type);
+	// The one resolver, so the label and the value this row speaks of are the
+	// same pair every other place speaks of. The row no longer derives them
+	// from the Sector's type, which is what made it lie about a Corridor: a
+	// Corridor is of `Location` type, so a type-derived read answered the
+	// Room's number for it and called it "Location" whatever the author had
+	// set for Corridors (#1116).
+	auto const followed = editor::resolveFloorDepthFollow(*world, *sector);
 
 	ImGui::SeparatorText("Floor depth");
 
@@ -7687,14 +7691,16 @@ void renderSectorFloorDepthRow(editor::DocumentPtr const& document,
 			auto undo = captureDocumentSnapshot(world);
 			std::string diagnostic;
 			auto const write = document->authoring().setSectorFloorDepth(
-				sector->getIndex(), typeDepth, &diagnostic);
+				sector->getIndex(), followed.depthPx, &diagnostic);
 			if (!write.accepted) reportEditorError("Floor depth", diagnostic);
 			else if (write.changed) commitDocumentEdit(std::move(undo));
 		}
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Take this Sector off its type. It keeps the %s it is "
-				"following as its own depth, and later changes to %ss will not move it.",
-				editor::floorDepthPxText(typeDepth).c_str(), typeName.c_str());
+			ImGui::SetTooltip("Take this Sector off what it follows. It keeps the %s "
+				"it is following as its own depth, and later changes to %ss will not "
+				"move it.",
+				editor::floorDepthPxText(followed.depthPx).c_str(),
+				followed.label.c_str());
 	}
 	else
 	{
@@ -7713,7 +7719,8 @@ void renderSectorFloorDepthRow(editor::DocumentPtr const& document,
 			ImGui::SetTooltip("Signed pixels at 1x zoom, between %d and %d. Typing "
 				"0 pins this Sector to the unlifted position even while %ss lift; "
 				"Reset is what puts it back to following.",
-				-editor::kFloorDepthBandPx, editor::kFloorDepthBandPx, typeName.c_str());
+				-editor::kFloorDepthBandPx, editor::kFloorDepthBandPx,
+				followed.label.c_str());
 
 		ImGui::SameLine();
 		if (ImGui::SmallButton("Reset"))
@@ -7730,8 +7737,8 @@ void renderSectorFloorDepthRow(editor::DocumentPtr const& document,
 		}
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Delete this Sector's own depth so it follows %ss again "
-				"(currently %s).", typeName.c_str(),
-				editor::floorDepthPxText(typeDepth).c_str());
+				"(currently %s).", followed.label.c_str(),
+				editor::floorDepthPxText(followed.depthPx).c_str());
 	}
 
 	// The effective readout on its own line, under the row it belongs to: it
@@ -9007,11 +9014,15 @@ void renderLevelsPanel(editor::DocumentPtr const& document)
 	}
 }
 
-// The author's floor depth scheme: one signed depth per Sector type (#1103).
+// The author's floor depth scheme: one signed depth per rung the author can
+// set (#1103, #1116).
 //
-// Eleven rows, one per type, each with a signed pixel input. The table is the
-// whole scheme in one place, which is the point - the author reads the depth
-// of their World here rather than walking Sectors to find out what it is.
+// The rows come from `editor::floorDepthSchemeRows`, which is where the
+// `Location` type is split into the two rows the author thinks in: Room and
+// Corridor. Everything below the row list is the same for every row, so the
+// split costs one entry in a list rather than a branch in the drawing code,
+// and the check that reads the row list sees the same twelve rows the author
+// does.
 //
 // The rows read from the World every frame rather than holding their own
 // numbers. That is what makes the table a control instead of a scratchpad:
@@ -9044,23 +9055,24 @@ void renderSectorTypeFloorDepthPanel(editor::DocumentPtr const& document)
 		ImGui::TableSetupColumn("Floor depth (px)", ImGuiTableColumnFlags_WidthFixed, 160.0f);
 		ImGui::TableHeadersRow();
 
-		for (auto const type : core::allSectorTypes())
+		for (auto const& row : editor::floorDepthSchemeRows(*world))
 		{
-			// The type's own name is the row's identity: stable across every
-			// edit, and unique because the type list is a set. Held in a local
-			// so the string outlives both the PushID and the label rather than
-			// being a temporary whose lifetime the reader has to reason about.
-			auto const name = core::getSectorTypeString(type);
-			ImGui::PushID(name.c_str());
+			// The row's own name is its identity: stable across every edit, and
+			// unique because the row list is built from a set of types with the
+			// one split that has two distinct names. Held in the row rather than
+			// derived here, so the string outlives both the PushID and the label
+			// instead of being a temporary whose lifetime the reader has to
+			// reason about.
+			ImGui::PushID(row.label.c_str());
 			ImGui::TableNextRow();
 
 			ImGui::TableSetColumnIndex(0);
-			ImGui::TextUnformatted(name.c_str());
+			ImGui::TextUnformatted(row.label.c_str());
 
 			ImGui::TableSetColumnIndex(1);
 			// Re-read from the World every frame. The input writes through to
 			// the World and never keeps a value of its own.
-			int depth = world->sectorTypeFloorDepth(type);
+			int depth = row.shownDepthPx;
 			ImGui::SetNextItemWidth(-1.0f);
 			if (ImGui::InputInt("##floorDepth", &depth, 1, 8))
 			{
@@ -9072,17 +9084,54 @@ void renderSectorTypeFloorDepthPanel(editor::DocumentPtr const& document)
 				// every later step by one.
 				auto undo = captureDocumentSnapshot(world);
 				std::string diagnostic;
-				auto const write = document->authoring().setSectorTypeFloorDepth(
-					type, depth, &diagnostic);
+				// The corridor rung is a different write, not a type row with a
+				// different key: setting it stores a zero instead of erasing it,
+				// which is the whole difference between "Corridors hold" and
+				// "Corridors follow Location" (#1115).
+				auto const write = row.corridor
+					? document->authoring().setCorridorFloorDepth(depth, &diagnostic)
+					: document->authoring().setSectorTypeFloorDepth(row.type, depth,
+						&diagnostic);
 				if (!write.accepted)
 					reportEditorError("Sector floor depth", diagnostic);
 				else if (write.changed)
 					commitDocumentEdit(std::move(undo));
 			}
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Signed pixels at 1x zoom, between %d and %d. "
-					"Zero means this type has no opinion and lifts nothing.",
-					-CORE_LEVEL_HEIGHT_PIXELS, CORE_LEVEL_HEIGHT_PIXELS);
+			{
+				if (row.corridor && !world->hasCorridorFloorDepth())
+				{
+					ImGui::SetTooltip("%s", editor::corridorFloorDepthRowHint(false,
+						world->sectorTypeFloorDepth(core::SectorType::Location))
+						.c_str());
+				}
+				else if (row.corridor)
+				{
+					ImGui::SetTooltip("Signed pixels at 1x zoom, between %d and %d. %s",
+						-CORE_LEVEL_HEIGHT_PIXELS, CORE_LEVEL_HEIGHT_PIXELS,
+						editor::corridorFloorDepthRowHint(true,
+							world->sectorTypeFloorDepth(core::SectorType::Location))
+							.c_str());
+				}
+				else if (row.type == core::SectorType::Location)
+				{
+					// The Room row is the `Location` type default under the name
+					// the author uses for it, and says so, because the selection
+					// panel names this value "Location" and this is the only row
+					// that can write it.
+					ImGui::SetTooltip("Signed pixels at 1x zoom, between %d and %d. "
+						"This is the Location type default: every Room follows it, and "
+						"so does every Corridor with no corridor depth of its own. Zero "
+						"means no opinion and lifts nothing.",
+						-CORE_LEVEL_HEIGHT_PIXELS, CORE_LEVEL_HEIGHT_PIXELS);
+				}
+				else
+				{
+					ImGui::SetTooltip("Signed pixels at 1x zoom, between %d and %d. "
+						"Zero means this type has no opinion and lifts nothing.",
+						-CORE_LEVEL_HEIGHT_PIXELS, CORE_LEVEL_HEIGHT_PIXELS);
+				}
+			}
 			ImGui::PopID();
 		}
 		ImGui::EndTable();

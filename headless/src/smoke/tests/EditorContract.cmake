@@ -298,6 +298,12 @@ set(editor_names
     layer-image-set/aBindingToTheWorldsOwnSetIsNotAnOverride
     layer-image-set/clearingRestoresInherit
     floorDepthPanel/followWordingCoversEverySectorType
+    floorDepthPanel/theResolverAgreesWithWhatTheWorldResolves
+    floorDepthPanel/theTableSplitsLocationIntoRoomAndCorridorRows
+    floorDepthPanel/theCorridorRowShowsWhatCorridorsActuallyDo
+    floorDepthPanel/aSelectedCorridorNamesTheCorridorDefaultNotLocation
+    floorDepthPanel/breakAwayAndResetOnACorridorLandOnTheCorridorRung
+    floorDepthPanel/theRoomRowMovesEveryRoomAndTheCorridorRowEveryCorridor
     floorDepthPanel/aSectorWithNoOverrideReadsAsFollowingItsType
     floorDepthPanel/breakingAwaySurvivesALaterTypeChange
     floorDepthPanel/breakingAwayFromAZeroTypeDefaultIsARealOverride
